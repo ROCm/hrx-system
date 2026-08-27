@@ -145,7 +145,7 @@ static iree_status_t iree_profile_summary_process_device_records(
     const iree_hal_profile_file_record_t* record) {
   iree_profile_typed_record_iterator_t iterator;
   iree_profile_typed_record_iterator_initialize(
-      record, sizeof(iree_hal_profile_device_record_t), &iterator);
+      record, IREE_HAL_PROFILE_DEVICE_RECORD_MIN_LENGTH, &iterator);
   iree_status_t status = iree_ok_status();
   while (iree_status_is_ok(status)) {
     iree_profile_typed_record_t typed_record;
@@ -154,15 +154,49 @@ static iree_status_t iree_profile_summary_process_device_records(
                                                      &has_record);
     if (!iree_status_is_ok(status) || !has_record) break;
 
-    iree_hal_profile_device_record_t device_record;
-    memcpy(&device_record, typed_record.contents.data, sizeof(device_record));
+    iree_hal_profile_device_record_t device_record =
+        iree_hal_profile_device_record_default();
+    memcpy(&device_record, typed_record.contents.data,
+           iree_min(typed_record.contents.data_length, sizeof(device_record)));
+    const bool has_timestamp_frequency = iree_all_bits_set(
+        device_record.flags, IREE_HAL_PROFILE_DEVICE_FLAG_TIMESTAMP_FREQUENCY);
+    if (has_timestamp_frequency &&
+        typed_record.record_length < sizeof(device_record)) {
+      status = iree_make_status(
+          IREE_STATUS_DATA_LOSS,
+          "profile device record advertises timestamp frequency without "
+          "carrying the field");
+    } else if (has_timestamp_frequency &&
+               device_record.timestamp_frequency_hz == 0) {
+      status = iree_make_status(
+          IREE_STATUS_DATA_LOSS,
+          "profile device record advertises a zero timestamp frequency");
+    }
 
     iree_profile_device_summary_t* device = NULL;
-    status = iree_profile_summary_get_device(
-        summary, device_record.physical_device_ordinal, &device);
+    if (iree_status_is_ok(status)) {
+      status = iree_profile_summary_get_device(
+          summary, device_record.physical_device_ordinal, &device);
+    }
+    if (iree_status_is_ok(status) && has_timestamp_frequency &&
+        iree_all_bits_set(device->metadata_flags,
+                          IREE_HAL_PROFILE_DEVICE_FLAG_TIMESTAMP_FREQUENCY) &&
+        device->timestamp_frequency_hz !=
+            device_record.timestamp_frequency_hz) {
+      status = iree_make_status(
+          IREE_STATUS_DATA_LOSS,
+          "profile device %u reports conflicting timestamp frequencies: "
+          "%" PRIu64 " and %" PRIu64,
+          device_record.physical_device_ordinal, device->timestamp_frequency_hz,
+          device_record.timestamp_frequency_hz);
+    }
     if (iree_status_is_ok(status)) {
       ++device->device_record_count;
       device->queue_count = device_record.queue_count;
+      device->metadata_flags |= device_record.flags;
+      if (has_timestamp_frequency) {
+        device->timestamp_frequency_hz = device_record.timestamp_frequency_hz;
+      }
     }
   }
   return status;
@@ -859,20 +893,19 @@ iree_status_t iree_profile_summary_process_record(
   return iree_profile_summary_process_chunk_record(summary, record);
 }
 
-static bool iree_profile_device_summary_try_fit_clock_exact(
-    const iree_profile_device_summary_t* device,
-    iree_profile_model_clock_fit_t* out_clock_fit) {
+static iree_profile_model_device_t iree_profile_device_summary_as_model_device(
+    const iree_profile_device_summary_t* device) {
   iree_profile_model_device_t model_device;
   memset(&model_device, 0, sizeof(model_device));
   model_device.physical_device_ordinal = device->physical_device_ordinal;
+  model_device.metadata_flags = device->metadata_flags;
+  model_device.timestamp_frequency_hz = device->timestamp_frequency_hz;
   model_device.clock_sample_count = device->clock_sample_count;
   model_device.invalid_clock_alignment_sample_count =
       device->invalid_clock_alignment_sample_count;
   model_device.first_clock_sample = device->first_clock_sample;
   model_device.last_clock_sample = device->last_clock_sample;
-  return iree_profile_model_device_try_fit_clock_exact(
-      &model_device, IREE_PROFILE_MODEL_CLOCK_TIME_DOMAIN_HOST_CPU_TIMESTAMP_NS,
-      out_clock_fit);
+  return model_device;
 }
 
 static bool iree_profile_device_summary_clock_covers_dispatches(
@@ -901,6 +934,10 @@ static bool iree_profile_device_summary_clock_covers_dispatches(
 typedef struct iree_profile_summary_device_timing_t {
   // True when the device has an exact device-tick to host-time fit.
   bool has_clock_fit;
+  // True when elapsed device ticks can be converted to nanoseconds.
+  bool has_duration_scale;
+  // Provenance of the elapsed-duration scale.
+  iree_profile_model_duration_scale_source_t duration_scale_source;
   // True when valid dispatch ticks are covered by the clock sample range.
   bool clock_covers_dispatches;
   // True when min/max/total dispatch ticks were converted to nanoseconds.
@@ -909,9 +946,9 @@ typedef struct iree_profile_summary_device_timing_t {
   uint64_t valid_dispatch_count;
   // Average dispatch duration in raw device ticks.
   double average_dispatch_ticks;
-  // Nanoseconds per device tick when |has_clock_fit| is true.
+  // Nanoseconds per device tick when |has_duration_scale| is true.
   double ns_per_tick;
-  // Device tick frequency in hertz when |has_clock_fit| is true.
+  // Device tick frequency in hertz when |has_duration_scale| is true.
   double tick_frequency_hz;
   // Minimum valid dispatch duration in nanoseconds when |has_dispatch_ns| is
   // true.
@@ -937,27 +974,36 @@ iree_profile_summary_calculate_device_timing(
   timing.clock_covers_dispatches =
       iree_profile_device_summary_clock_covers_dispatches(device);
 
+  const iree_profile_model_device_t model_device =
+      iree_profile_device_summary_as_model_device(device);
   iree_profile_model_clock_fit_t clock_fit;
-  timing.has_clock_fit =
-      iree_profile_device_summary_try_fit_clock_exact(device, &clock_fit);
+  timing.has_clock_fit = iree_profile_model_device_try_fit_clock_exact(
+      &model_device, IREE_PROFILE_MODEL_CLOCK_TIME_DOMAIN_HOST_CPU_TIMESTAMP_NS,
+      &clock_fit);
+  iree_profile_model_duration_scale_t duration_scale;
+  timing.has_duration_scale =
+      iree_profile_model_device_try_resolve_duration_scale(&model_device,
+                                                           &duration_scale);
+  timing.duration_scale_source = duration_scale.source;
   timing.ns_per_tick =
-      timing.has_clock_fit
-          ? iree_profile_model_clock_fit_ns_per_tick(&clock_fit)
+      timing.has_duration_scale
+          ? iree_profile_model_duration_scale_ns_per_tick(&duration_scale)
           : 0.0;
   timing.tick_frequency_hz =
-      timing.has_clock_fit
-          ? iree_profile_model_clock_fit_tick_frequency_hz(&clock_fit)
+      timing.has_duration_scale
+          ? iree_profile_model_duration_scale_tick_frequency_hz(&duration_scale)
           : 0.0;
-  timing.has_dispatch_ns =
-      timing.has_clock_fit && timing.valid_dispatch_count != 0 &&
-      iree_profile_model_clock_fit_scale_ticks_to_ns(
-          &clock_fit, device->minimum_dispatch_ticks,
-          &timing.minimum_dispatch_ns) &&
-      iree_profile_model_clock_fit_scale_ticks_to_ns(
-          &clock_fit, device->maximum_dispatch_ticks,
-          &timing.maximum_dispatch_ns) &&
-      iree_profile_model_clock_fit_scale_ticks_to_ns(
-          &clock_fit, device->total_dispatch_ticks, &timing.total_dispatch_ns);
+  timing.has_dispatch_ns = timing.has_duration_scale &&
+                           timing.valid_dispatch_count != 0 &&
+                           iree_profile_model_duration_scale_ticks_to_ns(
+                               &duration_scale, device->minimum_dispatch_ticks,
+                               &timing.minimum_dispatch_ns) &&
+                           iree_profile_model_duration_scale_ticks_to_ns(
+                               &duration_scale, device->maximum_dispatch_ticks,
+                               &timing.maximum_dispatch_ns) &&
+                           iree_profile_model_duration_scale_ticks_to_ns(
+                               &duration_scale, device->total_dispatch_ticks,
+                               &timing.total_dispatch_ns);
   return timing;
 }
 
@@ -1113,14 +1159,22 @@ static void iree_profile_print_summary_text_device_clock(
   if (device->invalid_clock_alignment_sample_count != 0) {
     fprintf(file,
             "    warning: device clock samples are not aligned with profiled "
-            "event ticks; raw device events are retained, but host timeline "
-            "correlation is disabled\n");
+            "event ticks; host timeline correlation is disabled\n");
+  }
+  if (timing->has_duration_scale) {
+    fprintf(file,
+            "    duration_scale: source=%s ns_per_tick=%.9f "
+            "tick_frequency_hz=%.3f\n",
+            iree_profile_model_duration_scale_source_name(
+                timing->duration_scale_source),
+            timing->ns_per_tick, timing->tick_frequency_hz);
+  } else {
+    fprintf(file, "    duration_scale: unavailable\n");
   }
   if (timing->has_clock_fit) {
     fprintf(file,
-            "    clock_fit: ns_per_tick=%.9f tick_frequency_hz=%.3f"
-            " device_delta_ticks=%" PRIu64 " host_delta_ns=%" PRIu64 "\n",
-            timing->ns_per_tick, timing->tick_frequency_hz,
+            "    clock_fit: device_delta_ticks=%" PRIu64
+            " host_delta_ns=%" PRIu64 "\n",
             device->last_clock_sample.device_tick -
                 device->first_clock_sample.device_tick,
             device->last_clock_sample.host_cpu_timestamp_ns -
@@ -1152,7 +1206,7 @@ static void iree_profile_print_summary_text_device_dispatches(
           " total=%" PRIu64 "\n",
           device->minimum_dispatch_ticks, timing->average_dispatch_ticks,
           device->maximum_dispatch_ticks, device->total_dispatch_ticks);
-  if (!timing->has_clock_fit) {
+  if (!timing->has_duration_scale) {
     return;
   }
   if (timing->has_dispatch_ns) {
@@ -1360,6 +1414,8 @@ static void iree_profile_print_summary_jsonl_device(
       ",\"clock_samples\":%" PRIu64
       ",\"invalid_clock_alignment_samples\":%" PRIu64
       ",\"clock_fit_available\":%s"
+      ",\"duration_scale_available\":%s"
+      ",\"duration_scale_source\":\"%s\""
       ",\"ns_per_tick\":%.9f,\"tick_frequency_hz\":%.3f"
       ",\"min_clock_uncertainty_ns\":%" PRId64
       ",\"max_clock_uncertainty_ns\":%" PRId64 ",\"dispatches\":%" PRIu64
@@ -1379,8 +1435,11 @@ static void iree_profile_print_summary_jsonl_device(
       device->physical_device_ordinal, device->device_record_count,
       device->queue_record_count, device->queue_count,
       device->clock_sample_count, device->invalid_clock_alignment_sample_count,
-      timing.has_clock_fit ? "true" : "false", timing.ns_per_tick,
-      timing.tick_frequency_hz,
+      timing.has_clock_fit ? "true" : "false",
+      timing.has_duration_scale ? "true" : "false",
+      iree_profile_model_duration_scale_source_name(
+          timing.duration_scale_source),
+      timing.ns_per_tick, timing.tick_frequency_hz,
       iree_profile_summary_minimum_clock_uncertainty_ns(device),
       device->maximum_clock_uncertainty_ns, device->dispatch_event_count,
       timing.valid_dispatch_count, device->invalid_dispatch_event_count,

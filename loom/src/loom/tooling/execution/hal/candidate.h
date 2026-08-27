@@ -36,12 +36,14 @@ typedef struct loom_run_hal_candidate_t {
   loom_run_hal_artifact_t artifact;
 } loom_run_hal_candidate_t;
 
-// Selects a HAL device target through |provider| and emits |run_module| to a
-// HAL artifact candidate. The module must already contain the prepared
-// target-low entries intended for the artifact.
+// Selects a HAL device target satisfying |target_requirement| through
+// |provider| and emits |run_module| to a HAL artifact candidate. NULL
+// represents target-independent code. The module must already contain the
+// prepared target-low entries intended for the artifact.
 iree_status_t loom_run_hal_candidate_compile(
     const loom_run_hal_artifact_provider_t* provider,
     const loom_run_hal_runtime_t* runtime, loom_run_module_t* run_module,
+    const loom_target_facts_t* target_requirement,
     const loom_run_candidate_compile_options_t* options,
     iree_allocator_t allocator, loom_run_hal_candidate_t* out_candidate);
 

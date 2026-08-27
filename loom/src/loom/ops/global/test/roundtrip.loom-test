@@ -31,12 +31,37 @@ global.variable @enabled : i1 = false
 // ====
 
 // Read-only artifact payload.
-global.rodata @loom_sanitizer_sites = bytes("4c53495401000000"), align 8
+global.rodata.def @loom_sanitizer_sites = align(8) bytes("4c53495401000000")
 
 // ====
 
 // Empty read-only artifact payload with natural alignment.
-global.rodata @empty_rodata = bytes("")
+global.rodata.def @empty_rodata = bytes("")
+
+// ====
+
+// Read-only artifact payload supplied by a later link input.
+global.rodata.decl @external_rodata
+
+// ====
+
+// Read-only data definitions materialize as complete buffer roots.
+global.rodata.def @message = align(8) bytes("6c6f6f6d")
+
+func.def @load_rodata_definition() -> (buffer) {
+  %message = global.load @message : buffer
+  func.return %message : buffer
+}
+
+// ====
+
+// External read-only data uses the same buffer materialization contract.
+global.rodata.decl @external_message
+
+func.def @load_rodata_declaration() -> (buffer) {
+  %message = global.load @external_message : buffer
+  func.return %message : buffer
+}
 
 // ====
 
@@ -81,15 +106,15 @@ func.def @load_equal_dims() {
 // ====
 
 // Constant with static encoding.
-global.constant @q_weights : tile<[%m]x[%k]xi8, #q8_0<block=32>>
+global.constant @q_weights : tile<[%m]x[%k]xi8, #encoding.i8<payload_elements=32>>
 
 // ====
 
 // Load from encoded global — encoding is static, dims are co-results.
-global.constant @qw : tile<[%m]x[%k]xi8, #q8_0<block=32>>
+global.constant @qw : tile<[%m]x[%k]xi8, #encoding.i8<payload_elements=32>>
 
 func.def @load_encoded() {
-  %tile, %m, %k = global.load @qw : tile<[%m]x[%k]xi8, #q8_0<block=32>>
+  %tile, %m, %k = global.load @qw : tile<[%m]x[%k]xi8, #encoding.i8<payload_elements=32>>
   func.return
 }
 
@@ -140,10 +165,10 @@ func.def @load_static_dims_encoding() {
 // ====
 
 // Store to global with static encoding.
-global.variable @q_state : tile<[%n]xi8, #q8_0<block=32>>
+global.variable @q_state : tile<[%n]xi8, #encoding.i8<payload_elements=32>>
 
-func.def @store_encoded(%n: index, %tile: tile<[%n]xi8, #q8_0<block=32>>) {
-  global.store %tile, @q_state : tile<[%n]xi8, #q8_0<block=32>>
+func.def @store_encoded(%n: index, %tile: tile<[%n]xi8, #encoding.i8<payload_elements=32>>) {
+  global.store %tile, @q_state : tile<[%n]xi8, #encoding.i8<payload_elements=32>>
   func.return
 }
 

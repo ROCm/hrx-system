@@ -22,7 +22,7 @@ from loom.assembly import (
     Clause,
     FormatElement,
     IndexList,
-    OpRef,
+    KeyRef,
     OptionalGroup,
     Ref,
     Refs,
@@ -43,6 +43,7 @@ from loom.dsl import (
     PURE,
     SCALAR,
     SYMBOL_DEFINE,
+    TENSOR,
     TERMINATOR,
     UNKNOWN_EFFECTS,
     AttrDef,
@@ -58,6 +59,7 @@ from loom.dsl import (
     Result,
     SameType,
     SymbolDefinition,
+    SymbolDefinitionFlag,
     SymbolReference,
 )
 
@@ -110,6 +112,8 @@ _CASE_SYMBOL_DEF = SymbolDefinition(
     name="check case",
     interfaces=["record"],
     bytecode_kind="LOOM_SYMBOL_RECORD",
+    visibility="visibility",
+    flags=[SymbolDefinitionFlag.TEST_ONLY],
 )
 
 
@@ -160,7 +164,7 @@ check_requires = Op(
     ],
     traits=_CASE_BODY_TRAITS,
     format=[
-        OpRef("provider"),
+        KeyRef("provider"),
         AttrDict("attrs"),
     ],
     examples=['check.requires<target.feature> {feature = "amdgpu.gfx11"}'],
@@ -177,7 +181,7 @@ check_skip_if = Op(
     ],
     traits=_CASE_BODY_TRAITS,
     format=[
-        OpRef("provider"),
+        KeyRef("provider"),
         AttrDict("attrs"),
         OptionalGroup([Clause("reason", Attr("reason"))], anchor="reason"),
     ],
@@ -293,11 +297,12 @@ check_literal = Op(
 check_generate_iota = Op(
     "check.generate.iota",
     group=check_ops,
-    doc="Generates a deterministic iota-shaped value.",
+    doc="Generates a deterministic, optionally periodic iota-shaped value.",
     results=[Result("result", ANY)],
     attrs=[
         AttrDef("offset", "any"),
         AttrDef("step", "any"),
+        AttrDef("period", "i64", optional=True),
     ],
     constraints=[
         LiteralMatchesElementType("offset", "result"),
@@ -307,11 +312,13 @@ check_generate_iota = Op(
     format=[
         Clause("offset", Attr("offset")),
         Clause("step", Attr("step")),
+        OptionalGroup([Clause("period", Attr("period"))], anchor="period"),
         COLON,
         TypeOf("result"),
     ],
     examples=[
         "%lhs = check.generate.iota offset(0) step(1) : tensor<[%m]x[%n]xi32>",
+        "%routes = check.generate.iota offset(0) step(1) period(128) : tensor<[%tokens]x8xi32>",
     ],
 )
 
@@ -400,6 +407,38 @@ check_file_write_npy = Op(
 
 
 # ============================================================================
+# Value projections
+# ============================================================================
+
+check_tensor_view = Op(
+    "check.tensor.view",
+    group=check_ops,
+    doc=("Forms a dense typed alias over a byte subspan of a tensor materialized by another check value source. The view shares storage with its source."),
+    operands=[Operand("source", TENSOR)],
+    results=[Result("result", TENSOR)],
+    attrs=[
+        AttrDef(
+            "byte_offset",
+            "i64",
+            doc=("Non-negative static byte offset from the beginning of the source tensor."),
+        ),
+    ],
+    traits=[PURE, HasAncestor("check.case")],
+    format=[
+        Ref("source"),
+        Clause("offset", Attr("byte_offset")),
+        COLON,
+        TypeOf("source"),
+        ARROW,
+        TypeOf("result"),
+    ],
+    examples=[
+        "%payload = check.tensor.view %packed offset(16) : tensor<144xi8> -> tensor<32xi32>",
+    ],
+)
+
+
+# ============================================================================
 # Oracles
 # ============================================================================
 
@@ -420,7 +459,7 @@ check_oracle_call = Op(
     results=[Result("results", ANY, variadic=True)],
     traits=_CASE_BODY_TRAITS,
     format=[
-        OpRef("provider"),
+        KeyRef("provider"),
         OptionalGroup([AttrDict("attrs")], anchor="attrs"),
         Clause("callee", SymbolRef("callee")),
         Clause("inputs", Refs("inputs")),
@@ -542,7 +581,7 @@ check_expect = Op(
     constraints=[SameType("actual", "expected")],
     traits=_CASE_BODY_TRAITS,
     format=[
-        OpRef("provider"),
+        KeyRef("provider"),
         *_EXPECT_VALUE_CLAUSES,
         OptionalGroup([AttrDict("attrs")], anchor="attrs"),
         COLON,
@@ -563,7 +602,7 @@ check_expect_event = Op(
     ],
     traits=_CASE_BODY_TRAITS,
     format=[
-        OpRef("provider"),
+        KeyRef("provider"),
         AttrDict("attrs"),
     ],
     examples=[
@@ -596,6 +635,7 @@ check_benchmark = Op(
         name="check benchmark",
         interfaces=["record"],
         bytecode_kind="LOOM_SYMBOL_RECORD",
+        flags=[SymbolDefinitionFlag.TEST_ONLY],
     ),
     format=[
         TemplateParam("case_ref"),
@@ -630,4 +670,6 @@ ALL_CHECK_OPS = (
     check_expect,
     check_expect_event,
     check_benchmark,
+    # Append new operations to preserve existing bytecode op ordinals.
+    check_tensor_view,
 )

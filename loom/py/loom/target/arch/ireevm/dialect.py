@@ -54,10 +54,13 @@ from loom.dsl import (
     RetainedResult,
     SameType,
     SymbolDefinition,
+    SymbolDefinitionFlag,
     SymbolReference,
+    TargetFactSpecialization,
     TargetLikeInterface,
     TypeDef,
     TypeParam,
+    TypeSemantic,
     Writes,
 )
 
@@ -82,6 +85,7 @@ ireevm_ref_type = TypeDef(
     name="ireevm.ref",
     params=[TypeParam("object", ANY)],
     format=[TypeOf("object")],
+    semantic=TypeSemantic.MANAGED_REFERENCE,
     doc="IREE VM reference-counted object reference.",
 )
 
@@ -169,6 +173,7 @@ ireevm_target = Op(
             symbol="symbol",
             selector="kind",
             bundle_table="loom_ireevm_target_bundles",
+            fact_specialization=TargetFactSpecialization.STRUCTURAL,
         )
     ],
     symbol_def=SymbolDefinition(
@@ -204,12 +209,13 @@ ireevm_import_decl = Op(
     symbol_def=SymbolDefinition(
         field="callee",
         name="function",
-        interfaces=["func_like"],
+        interfaces=["func_like", "callable"],
         bytecode_kind="LOOM_SYMBOL_FUNC_DECL",
         fact_domain="loom_func_symbol_fact_domain",
+        flags=[SymbolDefinitionFlag.DECLARATION],
     ),
     results=[Result("results", ANY, variadic=True)],
-    interfaces=[FuncLikeInterface(**_IMPORT_DECL_FUNC_LIKE, args_as_operands=True)],
+    interfaces=[FuncLikeInterface(**_IMPORT_DECL_FUNC_LIKE, args="args")],
     verify="loom_ireevm_import_decl_verify",
     format=[
         *_IMPORT_DECL_MODIFIER_FORMAT,

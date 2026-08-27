@@ -17,6 +17,11 @@ extern "C" {
 
 // Parses a .safetensors file and merges its contained resources into |index|.
 //
+// Each tensor entry retains its safetensors JSON object as opaque parameter
+// metadata. Consumers that understand safetensors may inspect fields such as
+// `dtype` and `shape`; consumers that do not may preserve or ignore the bytes.
+// The metadata is copied into |index| and remains valid for its lifetime.
+//
 // Documentation: https://github.com/huggingface/safetensors
 // This is a very basic archive file with some issues (no alignment, etc) but
 // at least doesn't require Python pickle decoding (just JSON). The major reason

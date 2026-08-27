@@ -58,9 +58,8 @@ static const char kSourceText[] =
     "  %zero_index = index.constant 0 : index\n"
     "  %value = scalar.constant 42 : i32\n"
     "  %global = buffer.assume.memory_space<global> %output : buffer\n"
-    "  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, "
-    "#dense>\n"
-    "  view.store %value, %view[%zero_index] : i32, view<1xi32, #dense>\n"
+    "  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32>\n"
+    "  view.store %value, %view[%zero_index] : i32, view<1xi32>\n"
     "  kernel.return\n"
     "}\n";
 
@@ -294,8 +293,11 @@ typedef struct emit_amdgpu_hsa_state_t {
   // HSA-reported ISA target id for the selected GPU agent.
   char isa_name[1024];
 
-  // Loom AMDGPU processor derived from `isa_name`.
-  loomc_string_view_t processor;
+  // Structured Loom AMDHSA target derived from HSA agent facts.
+  loomc_amdgpu_target_identity_t target_identity;
+
+  // Physical ASIC revision observed from the selected HSA GPU agent.
+  uint32_t physical_asic_revision;
 
   // Queue used for one raw AQL dispatch.
   hsa_queue_t* queue;
@@ -333,11 +335,8 @@ typedef struct emit_amdgpu_hsa_state_t {
   // Mutable module compiled and emitted by this invocation.
   loomc_module_t* module;
 
-  // Live HSA-derived AMDGPU processor target profile.
+  // Live HSA-derived AMDGPU target profile.
   loomc_target_profile_t* target_profile;
-
-  // Invocation-ready target selection derived from the profile.
-  loomc_target_selection_t* target_selection;
 
   // Immutable prepared compiler handle.
   loomc_compiler_t* compiler;
@@ -775,7 +774,6 @@ static void emit_amdgpu_hsa_state_deinitialize(emit_amdgpu_hsa_state_t* state) {
   loomc_result_release(state->result);
   loomc_pass_program_release(state->pass_program);
   loomc_compiler_release(state->compiler);
-  loomc_target_selection_release(state->target_selection);
   loomc_target_profile_release(state->target_profile);
   loomc_module_release(state->module);
   loomc_source_release(state->source);
@@ -985,6 +983,12 @@ static loomc_status_t discover_hsa_target(emit_amdgpu_hsa_state_t* state) {
   state->gpu_agent = agent_search.gpu_agent;
   snprintf(state->gpu_agent_name, sizeof(state->gpu_agent_name), "%s",
            agent_search.gpu_agent_name);
+  EMIT_AMDGPU_HSA_CALL_STATUS(
+      hsa_status, &state->api, hsa_agent_get_info, state->gpu_agent,
+      (hsa_agent_info_t)HSA_AMD_AGENT_INFO_ASIC_REVISION,
+      &state->physical_asic_revision);
+  LOOMC_RETURN_IF_ERROR(hsa_status_to_loomc_status(
+      &state->api, hsa_status, "hsa_agent_get_info(ASIC_REVISION)"));
 
   emit_amdgpu_hsa_isa_search_t isa_search = {
       .api = &state->api,
@@ -1003,8 +1007,9 @@ static loomc_status_t discover_hsa_target(emit_amdgpu_hsa_state_t* state) {
   }
   snprintf(state->isa_name, sizeof(state->isa_name), "%s", isa_search.isa_name);
 
-  loomc_status_t parse_status = loomc_amdgpu_processor_from_hsa_isa_name(
-      loomc_make_cstring_view(state->isa_name), &state->processor);
+  loomc_status_t parse_status = loomc_amdgpu_target_identity_from_hsa_isa_name(
+      loomc_make_cstring_view(state->isa_name), state->physical_asic_revision,
+      &state->target_identity);
   if (!loomc_status_is_ok(parse_status)) {
     emit_amdgpu_hsa_state_skip_from_loomc_status(
         state, "Loom does not support the HSA-reported AMDGPU ISA",
@@ -1067,41 +1072,32 @@ static loomc_status_t create_workspace_and_source(
                              &state->source);
 }
 
-static loomc_status_t create_target_profile_and_selection(
-    emit_amdgpu_hsa_state_t* state) {
+static loomc_status_t create_target_profile(emit_amdgpu_hsa_state_t* state) {
   loomc_amdgpu_profile_options_t profile_options = {
       .type = LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
       .structure_size = sizeof(profile_options),
       .identifier = loomc_make_cstring_view("hsa-current-amdgpu"),
-      .processor = state->processor,
+      .identity = state->target_identity,
   };
   loomc_status_t status = loomc_target_profile_create_amdgpu(
       state->target_environment, &profile_options, loomc_allocator_system(),
       &state->target_profile);
   if (!loomc_status_is_ok(status)) {
     emit_amdgpu_hsa_state_skip_from_loomc_status(
-        state, "Loom cannot emit HSACO for the HSA-selected AMDGPU processor",
+        state, "Loom cannot emit HSACO for the HSA-selected AMDGPU target",
         status);
     return loomc_ok_status();
   }
-  return loomc_target_selection_create_from_profile(state->target_profile,
-                                                    loomc_allocator_system(),
-                                                    &state->target_selection);
+  return loomc_ok_status();
 }
 
 static loomc_status_t create_compiler_and_target_pipeline(
     emit_amdgpu_hsa_state_t* state) {
   loomc_status_t status = loomc_compiler_create(
       state->context, NULL, loomc_allocator_system(), &state->compiler);
-  loomc_target_selection_options_t target_options = {
-      .type = LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      .structure_size = sizeof(target_options),
-      .target_selection = state->target_selection,
-  };
   loomc_target_pipeline_options_t pipeline_options = {
       .type = LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
       .structure_size = sizeof(pipeline_options),
-      .next = &target_options,
       .identifier = loomc_make_cstring_view("hsa-amdgpu-prepared-low"),
       .kind = LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
       .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
@@ -1129,7 +1125,7 @@ static loomc_status_t create_compiler_resources(
     status = create_workspace_and_source(state);
   }
   if (loomc_status_is_ok(status)) {
-    status = create_target_profile_and_selection(state);
+    status = create_target_profile(state);
   }
   if (loomc_status_is_ok(status) && !state->skipped) {
     status = create_compiler_and_target_pipeline(state);
@@ -1153,13 +1149,21 @@ static loomc_status_t deserialize_source(emit_amdgpu_hsa_state_t* state) {
 
 static loomc_status_t compile_module_to_prepared_low(
     emit_amdgpu_hsa_state_t* state) {
-  printf("hsa cpu_agent=%s gpu_agent=%s isa=%s processor=%.*s\n",
-         state->cpu_agent_name, state->gpu_agent_name, state->isa_name,
-         (int)state->processor.size, state->processor.data);
-  loomc_target_selection_options_t target_options = {
-      .type = LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
+  printf(
+      "hsa cpu_agent=%s gpu_agent=%s isa=%s target=%.*s "
+      "physical_asic_revision=%" PRIu32 "\n",
+      state->cpu_agent_name, state->gpu_agent_name, state->isa_name,
+      (int)state->target_identity.target.size,
+      state->target_identity.target.data, state->physical_asic_revision);
+  const loomc_target_specialization_t specialization = {
+      .function_symbol = loomc_make_cstring_view("targetless_store_i32"),
+      .target_profile = state->target_profile,
+  };
+  loomc_target_specialization_options_t target_options = {
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
       .structure_size = sizeof(target_options),
-      .target_selection = state->target_selection,
+      .specializations = &specialization,
+      .specialization_count = 1,
   };
   loomc_compile_options_t compile_options = {
       .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
@@ -1180,15 +1184,9 @@ static loomc_status_t compile_module_to_prepared_low(
 }
 
 static loomc_status_t emit_amdgpu_artifact(emit_amdgpu_hsa_state_t* state) {
-  loomc_target_selection_options_t target_options = {
-      .type = LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      .structure_size = sizeof(target_options),
-      .target_selection = state->target_selection,
-  };
   loomc_amdgpu_emit_options_t amdgpu_options = {
       .type = LOOMC_STRUCTURE_TYPE_AMDGPU_EMIT_OPTIONS,
       .structure_size = sizeof(amdgpu_options),
-      .next = &target_options,
   };
   loomc_emit_options_t emit_options = {
       .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
@@ -1382,7 +1380,7 @@ static hsa_status_t emit_amdgpu_hsa_find_memory_pool(hsa_amd_memory_pool_t pool,
       return HSA_STATUS_SUCCESS;
     }
   }
-  hsa_amd_memory_pool_global_flag_t global_flags = 0;
+  uint32_t global_flags = 0;
   EMIT_AMDGPU_HSA_CALL_STATUS(status, search->api, hsa_amd_memory_pool_get_info,
                               pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS,
                               &global_flags);
@@ -1525,6 +1523,22 @@ static uint16_t make_kernel_dispatch_header(void) {
                  << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE));
 }
 
+// Publishes a fully populated AQL kernel dispatch packet. The command
+// processor treats a valid header as the packet publication event, so the
+// header and setup fields must be committed together after all packet and
+// kernarg writes are visible.
+static void publish_kernel_dispatch_packet(hsa_kernel_dispatch_packet_t* packet,
+                                           uint16_t header, uint16_t setup) {
+  const uint32_t header_setup = (uint32_t)header | ((uint32_t)setup << 16);
+#if defined(_WIN32)
+  volatile uint32_t* full_header = &packet->full_header;
+  MemoryBarrier();
+  *full_header = header_setup;
+#else
+  __atomic_store_n(&packet->full_header, header_setup, __ATOMIC_RELEASE);
+#endif  // defined(_WIN32)
+}
+
 static loomc_status_t submit_and_wait(emit_amdgpu_hsa_state_t* state) {
   emit_amdgpu_hsa_api_t* api = &state->api;
   uint64_t write_index = 0;
@@ -1543,7 +1557,7 @@ static loomc_status_t submit_and_wait(emit_amdgpu_hsa_state_t* state) {
   hsa_kernel_dispatch_packet_t* packet =
       &packets[write_index & (state->queue->size - 1)];
   memset(packet, 0, sizeof(*packet));
-  packet->setup = 1u << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS;
+  const uint16_t setup = 1u << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS;
   packet->workgroup_size_x = 1;
   packet->workgroup_size_y = 1;
   packet->workgroup_size_z = 1;
@@ -1557,7 +1571,7 @@ static loomc_status_t submit_and_wait(emit_amdgpu_hsa_state_t* state) {
   packet->completion_signal = state->completion_signal;
 
   const uint16_t header = make_kernel_dispatch_header();
-  __atomic_store_n(&packet->header, header, __ATOMIC_RELEASE);
+  publish_kernel_dispatch_packet(packet, header, setup);
   EMIT_AMDGPU_HSA_CALL_VOID(api, hsa_queue_store_write_index_screlease,
                             state->queue, write_index + 1);
   EMIT_AMDGPU_HSA_CALL_VOID(api, hsa_signal_store_screlease,

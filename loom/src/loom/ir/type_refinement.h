@@ -47,9 +47,9 @@ iree_status_t loom_type_refine_with_candidate(
     iree_arena_allocator_t* arena, loom_type_t* out_type,
     loom_type_refinement_result_t* out_result);
 
-// Refines only the element/role byte of compatible scalar, shaped, group, and
-// encoding types. Unknown encoding roles may narrow to concrete roles; concrete
-// scalar element types and group scopes must already match.
+// Refines only the element/role byte of compatible scalar, shaped, and encoding
+// types. Unknown encoding roles may narrow to concrete roles; concrete scalar
+// element types must already match.
 iree_status_t loom_type_refine_element_with_candidate(
     loom_type_t current_type, loom_type_t candidate_type,
     iree_arena_allocator_t* arena, loom_type_t* out_type,

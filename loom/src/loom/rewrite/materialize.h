@@ -15,6 +15,7 @@
 #define LOOM_REWRITE_MATERIALIZE_H_
 
 #include "iree/base/api.h"
+#include "loom/analysis/availability.h"
 #include "loom/ops/op_defs.h"
 #include "loom/rewrite/remap.h"
 
@@ -47,7 +48,9 @@ typedef struct loom_ir_move_block_options_t {
 // |remap|. Source result values are mapped to their cloned target result values
 // before result types are remapped, so co-result dynamic type references are
 // preserved. Bodyless func-like signature operands are cloned as fresh value
-// definitions, not resolved as ordinary operand uses.
+// definitions, not resolved as ordinary operand uses. Representation-scoped
+// identity ordinals are copied verbatim; the caller must preserve the enclosing
+// representation contract across the clone boundary.
 iree_status_t loom_ir_clone_op(loom_builder_t* builder,
                                const loom_op_t* source_op,
                                loom_ir_remap_t* remap,
@@ -59,6 +62,8 @@ iree_status_t loom_ir_clone_block_ops(
     loom_ir_remap_t* remap, const loom_ir_clone_block_options_t* options);
 
 // Clones |source_region| and returns a new target-module-owned region.
+// Successor edges are projected through the parallel region block ordinals;
+// the clone does not retain source-to-target block mappings in |remap|.
 iree_status_t loom_ir_clone_region(loom_builder_t* builder,
                                    const loom_region_t* source_region,
                                    loom_ir_remap_t* remap,
@@ -89,9 +94,13 @@ iree_status_t loom_ir_remap_op_references(loom_rewriter_t* rewriter,
 // The source block must be distinct from |before_op|'s parent block. Moving an
 // entire block into itself is ambiguous because preserving order is either a
 // no-op or a rotation depending on which prefix the caller intended.
+// |availability| must cover |before_op|'s enclosing CFG region tree and remain
+// valid across the move. Callers own analysis construction so one immutable CFG
+// snapshot can serve a complete batch of topology-preserving moves.
 iree_status_t loom_ir_move_block_ops_before(
-    loom_rewriter_t* rewriter, loom_block_t* source_block, loom_op_t* before_op,
-    loom_ir_remap_t* remap, const loom_ir_move_block_options_t* options);
+    loom_rewriter_t* rewriter, const loom_availability_analysis_t* availability,
+    loom_block_t* source_block, loom_op_t* before_op, loom_ir_remap_t* remap,
+    const loom_ir_move_block_options_t* options);
 
 #ifdef __cplusplus
 }

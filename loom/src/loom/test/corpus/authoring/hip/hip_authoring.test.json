@@ -31,22 +31,6 @@
       ]
     },
     {
-      "name": "plans q8 block unroll recipe",
-      "run": {
-        "tool": "iree-benchmark-loom",
-        "args": [
-          "{srcdir}/q8_block_unroll.loom",
-          "--dry-run"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "bench_q8_block_unroll_wg64",
-          "case_q8_block_unroll_wg64"
-        ]
-      }
-    },
-    {
       "name": "unrolls q8 hip-shaped dynamic lower bound loop",
       "run": {
         "tool": "loom-opt",
@@ -84,22 +68,6 @@
       ]
     },
     {
-      "name": "plans q8 load width recipe",
-      "run": {
-        "tool": "iree-benchmark-loom",
-        "args": [
-          "{srcdir}/q8_load_width.loom",
-          "--dry-run"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "bench_q8_load_widths",
-          "case_q8_load_widths"
-        ]
-      }
-    },
-    {
       "name": "preserves explicit q8 vector load width recipe",
       "run": {
         "tool": "loom-opt",
@@ -113,30 +81,12 @@
         {
           "path": "{tmp}/q8_load_width.loom",
           "contains": [
-            "vector.load %input_words[0] : view<4xi32, #dense> -> vector<1xi32>",
-            "vector.load %input_words[0] : view<4xi32, #dense> -> vector<4xi32>",
-            "vector.store %wide, %vector_words[0] : vector<4xi32>, view<4xi32, #dense>"
+            "vector.load %input_words[0] : view<4xi32> -> vector<1xi32>",
+            "vector.load %input_words[0] : view<4xi32> -> vector<4xi32>",
+            "vector.store %wide, %vector_words[0] : vector<4xi32>, view<4xi32>"
           ]
         }
       ]
-    },
-    {
-      "name": "plans q8 q4 signedness recipe",
-      "run": {
-        "tool": "iree-benchmark-loom",
-        "args": [
-          "{srcdir}/q8_q4_signedness.loom",
-          "--dry-run"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "bench_q8_q4_signedness",
-          "case_q8_q4_signedness",
-          "bench_q8_mixed_dot4_signedness",
-          "case_q8_mixed_dot4_signedness"
-        ]
-      }
     },
     {
       "name": "preserves q8 q4 signedness source shape",
@@ -161,22 +111,6 @@
       ]
     },
     {
-      "name": "plans shared memory tile recipe",
-      "run": {
-        "tool": "iree-benchmark-loom",
-        "args": [
-          "{srcdir}/shared_memory_tile.loom",
-          "--dry-run"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "bench_shared_memory_tile_reverse",
-          "case_shared_memory_tile_reverse"
-        ]
-      }
-    },
-    {
       "name": "preserves shared memory tile source shape",
       "run": {
         "tool": "loom-opt",
@@ -190,10 +124,10 @@
         {
           "path": "{tmp}/shared_memory_tile.loom",
           "contains": [
-            "buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup}",
-            "vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<64xi32, #dense>",
-            "kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}",
-            "vector.load %scratch_view[%reverse_lane] : view<64xi32, #dense> -> vector<1xi32>"
+            "buffer.alloca<workgroup> align(16) %scratch_bytes : buffer",
+            "vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<64xi32>",
+            "kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)",
+            "vector.load %scratch_view[%reverse_lane] : view<64xi32> -> vector<1xi32>"
           ]
         }
       ]
@@ -216,8 +150,8 @@
         "contains": {
           "unordered": [
             "\"target_key\":\"gfx11-generic\"",
-            "\"executable_format\":\"amdgcn-amd-amdhsa--gfx11-generic\"",
-            "\"status\":\"OK\"",
+            "\"artifact_format\":\"elf\"",
+            "\"status\":{\"code\":0,\"name\":\"OK\"}",
             "\"local_memory_bytes\":256",
             "\"local_memory_count\":2",
             "\"barrier_count\":1"
@@ -240,28 +174,6 @@
       ]
     },
     {
-      "name": "plans shared memory wave tile recipe",
-      "run": {
-        "tool": "iree-benchmark-loom",
-        "args": [
-          "{srcdir}/shared_memory_wave_tile.loom",
-          "--dry-run"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "bench_shared_memory_wave_i32_roundtrip",
-          "case_shared_memory_wave_i32_roundtrip",
-          "bench_shared_memory_wave_i32_roundtrip_static_offset",
-          "case_shared_memory_wave_i32_roundtrip_static_offset",
-          "bench_shared_memory_wave_i32_partial_lane_roundtrip",
-          "case_shared_memory_wave_i32_partial_lane_roundtrip",
-          "bench_shared_memory_cross_wave_i32_roundtrip_two_regions",
-          "case_shared_memory_cross_wave_i32_roundtrip_two_regions"
-        ]
-      }
-    },
-    {
       "name": "preserves shared memory wave tile source shape",
       "run": {
         "tool": "loom-opt",
@@ -275,18 +187,18 @@
         {
           "path": "{tmp}/shared_memory_wave_tile.loom",
           "contains": [
-            "view.store %value, %scratch_view[%lane] : i32, view<32xi32, #dense>",
-            "kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}",
-            "view.load %scratch_view[%lane] : view<32xi32, #dense> -> i32",
-            "view.store %value, %scratch_view[%scratch_index] : i32, view<40xi32, #dense>",
-            "view.load %scratch_view[%scratch_index] : view<40xi32, #dense> -> i32",
+            "view.store %value, %scratch_view[%lane] : i32, view<32xi32>",
+            "kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)",
+            "view.load %scratch_view[%lane] : view<32xi32> -> i32",
+            "view.store %value, %scratch_view[%scratch_index] : i32, view<40xi32>",
+            "view.load %scratch_view[%scratch_index] : view<40xi32> -> i32",
             "%result = scf.if %is_active_lane -> (i32)",
             "scf.yield %roundtrip : i32",
             "scf.yield %value : i32",
-            "vector.store %word0, %scratch_view[%lane] : vector<1xi32>, view<256xi32, #dense>",
-            "vector.store %word1, %scratch_view[%second_region_index] : vector<1xi32>, view<256xi32, #dense>",
-            "vector.load %scratch_view[%lane] : view<256xi32, #dense> -> vector<1xi32>",
-            "vector.load %scratch_view[%second_region_index] : view<256xi32, #dense> -> vector<1xi32>"
+            "vector.store %word0, %scratch_view[%lane] : vector<1xi32>, view<256xi32>",
+            "vector.store %word1, %scratch_view[%second_region_index] : vector<1xi32>, view<256xi32>",
+            "vector.load %scratch_view[%lane] : view<256xi32> -> vector<1xi32>",
+            "vector.load %scratch_view[%second_region_index] : view<256xi32> -> vector<1xi32>"
           ]
         }
       ]
@@ -309,8 +221,8 @@
         "contains": {
           "unordered": [
             "\"target_key\":\"gfx11-generic\"",
-            "\"executable_format\":\"amdgcn-amd-amdhsa--gfx11-generic\"",
-            "\"status\":\"OK\"",
+            "\"artifact_format\":\"elf\"",
+            "\"status\":{\"code\":0,\"name\":\"OK\"}",
             "\"function\":\"shared_memory_wave_i32_roundtrip\"",
             "\"function\":\"shared_memory_wave_i32_roundtrip_static_offset\"",
             "\"function\":\"shared_memory_wave_i32_partial_lane_roundtrip\"",
@@ -338,28 +250,6 @@
       ]
     },
     {
-      "name": "plans wave64 reductions recipe",
-      "run": {
-        "tool": "iree-benchmark-loom",
-        "args": [
-          "{srcdir}/wave64_reductions.loom",
-          "--dry-run"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "bench_wave64_workgroup_reduce_sub_wave",
-          "case_wave64_workgroup_reduce_sub_wave",
-          "bench_wave64_workgroup_reduce_full_wave",
-          "case_wave64_workgroup_reduce_full_wave",
-          "bench_wave64_workgroup_reduce_cross_wave",
-          "case_wave64_workgroup_reduce_cross_wave",
-          "bench_wave64_workgroup_reduce_sparse_loop_accumulation",
-          "case_wave64_workgroup_reduce_sparse_loop_accumulation"
-        ]
-      }
-    },
-    {
       "name": "preserves wave64 reductions source shape",
       "run": {
         "tool": "loom-opt",
@@ -373,11 +263,11 @@
         {
           "path": "{tmp}/wave64_reductions.loom",
           "contains": [
-            "amdgpu.target<gfx1100> @gfx1100_wave64 {subgroup_size = 64}",
-            "kernel.def target(@gfx1100_wave64) @wave64_workgroup_reduce_sub_wave",
-            "kernel.def target(@gfx1100_wave64) @wave64_workgroup_reduce_full_wave",
-            "kernel.def target(@gfx1100_wave64) @wave64_workgroup_reduce_cross_wave",
-            "kernel.def target(@gfx1100_wave64) @wave64_workgroup_reduce_sparse_loop_accumulation",
+            "amdgpu.target<gfx11-generic> @gfx11_wave64 {subgroup_size = 64}",
+            "kernel.def target(@gfx11_wave64) @wave64_workgroup_reduce_sub_wave",
+            "kernel.def target(@gfx11_wave64) @wave64_workgroup_reduce_full_wave",
+            "kernel.def target(@gfx11_wave64) @wave64_workgroup_reduce_cross_wave",
+            "kernel.def target(@gfx11_wave64) @wave64_workgroup_reduce_sparse_loop_accumulation",
             "kernel.workgroup.reduce<addf>"
           ]
         }
@@ -390,7 +280,7 @@
         "args": [
           "{srcdir}/wave64_reductions.loom",
           "--backend=amdgpu-hal",
-          "--target=gfx1100",
+          "--target=gfx1151",
           "--output={tmp}/wave64_reductions.vmfb",
           "--emit-target-artifact={tmp}/wave64_reductions.hsaco",
           "--artifact-manifest=summary",
@@ -400,9 +290,9 @@
       "stderr": {
         "contains": {
           "unordered": [
-            "\"target_key\":\"gfx1100\"",
-            "\"executable_format\":\"amdgcn-amd-amdhsa--gfx1100\"",
-            "\"status\":\"OK\"",
+            "\"target_key\":\"gfx1151\"",
+            "\"artifact_format\":\"elf\"",
+            "\"status\":{\"code\":0,\"name\":\"OK\"}",
             "\"function\":\"wave64_workgroup_reduce_sub_wave\"",
             "\"function\":\"wave64_workgroup_reduce_full_wave\"",
             "\"function\":\"wave64_workgroup_reduce_cross_wave\"",
@@ -423,25 +313,14 @@
         },
         {
           "path": "{tmp}/wave64_reductions.hsaco.manifest.json",
-          "non_empty": true
+          "contains": [
+            "\"family\":\"amdgpu\"",
+            "\"selector\":\"gfx1151\"",
+            "\"processor\":\"gfx1151\"",
+            "\"code_object_target\":\"amdgcn-amd-amdhsa--gfx1151\""
+          ]
         }
       ]
-    },
-    {
-      "name": "plans shared memory transpose recipe",
-      "run": {
-        "tool": "iree-benchmark-loom",
-        "args": [
-          "{srcdir}/shared_memory_transpose.loom",
-          "--dry-run"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "bench_shared_memory_tile_double_transpose",
-          "case_shared_memory_tile_double_transpose"
-        ]
-      }
     },
     {
       "name": "preserves shared memory transpose source shape",
@@ -459,10 +338,10 @@
           "contains": [
             "kernel.workitem.id<y>",
             "kernel.workitem.id<x>",
-            "buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup}",
-            "vector.load %scratch_a_view[%column, %row] : view<8x8xi32, #dense> -> vector<1xi32>",
-            "vector.store %transposed, %scratch_b_view[%row, %column] : vector<1xi32>, view<8x8xi32, #dense>",
-            "vector.load %scratch_b_view[%column, %row] : view<8x8xi32, #dense> -> vector<1xi32>"
+            "buffer.alloca<workgroup> align(16) %scratch_bytes : buffer",
+            "vector.load %scratch_a_view[%column, %row] : view<8x8xi32> -> vector<1xi32>",
+            "vector.store %transposed, %scratch_b_view[%row, %column] : vector<1xi32>, view<8x8xi32>",
+            "vector.load %scratch_b_view[%column, %row] : view<8x8xi32> -> vector<1xi32>"
           ]
         }
       ]
@@ -485,8 +364,8 @@
         "contains": {
           "unordered": [
             "\"target_key\":\"gfx11-generic\"",
-            "\"executable_format\":\"amdgcn-amd-amdhsa--gfx11-generic\"",
-            "\"status\":\"OK\"",
+            "\"artifact_format\":\"elf\"",
+            "\"status\":{\"code\":0,\"name\":\"OK\"}",
             "\"local_memory_bytes\":512",
             "\"local_memory_count\":4",
             "\"barrier_count\":2"
@@ -509,22 +388,6 @@
       ]
     },
     {
-      "name": "plans shared memory vector tile recipe",
-      "run": {
-        "tool": "iree-benchmark-loom",
-        "args": [
-          "{srcdir}/shared_memory_vector_tile.loom",
-          "--dry-run"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "bench_shared_memory_vector_tile_roundtrip",
-          "case_shared_memory_vector_tile_roundtrip"
-        ]
-      }
-    },
-    {
       "name": "preserves shared memory vector tile source shape",
       "run": {
         "tool": "loom-opt",
@@ -538,12 +401,12 @@
         {
           "path": "{tmp}/shared_memory_vector_tile.loom",
           "contains": [
-            "buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup}",
-            "vector.load %input_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>",
-            "vector.store %loaded, %scratch_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>",
-            "kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}",
-            "vector.load %scratch_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>",
-            "vector.store %roundtrip, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>"
+            "buffer.alloca<workgroup> align(16) %scratch_bytes : buffer",
+            "vector.load %input_view[%lane, 0] : view<64x4xi32> -> vector<4xi32>",
+            "vector.store %loaded, %scratch_view[%lane, 0] : vector<4xi32>, view<64x4xi32>",
+            "kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)",
+            "vector.load %scratch_view[%lane, 0] : view<64x4xi32> -> vector<4xi32>",
+            "vector.store %roundtrip, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32>"
           ]
         }
       ]
@@ -566,8 +429,8 @@
         "contains": {
           "unordered": [
             "\"target_key\":\"gfx11-generic\"",
-            "\"executable_format\":\"amdgcn-amd-amdhsa--gfx11-generic\"",
-            "\"status\":\"OK\"",
+            "\"artifact_format\":\"elf\"",
+            "\"status\":{\"code\":0,\"name\":\"OK\"}",
             "\"local_memory_bytes\":1024",
             "\"local_memory_count\":2",
             "\"barrier_count\":1"
@@ -588,22 +451,6 @@
           "non_empty": true
         }
       ]
-    },
-    {
-      "name": "plans packed field contracts recipe",
-      "run": {
-        "tool": "iree-benchmark-loom",
-        "args": [
-          "{srcdir}/packed_field_contracts.loom",
-          "--dry-run"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "bench_packed_field_contracts",
-          "case_packed_field_contracts"
-        ]
-      }
     },
     {
       "name": "preserves packed field contract source shape",
@@ -660,57 +507,236 @@
       ]
     },
     {
-      "name": "plans target provider selection recipe",
+      "name": "specializes targetless recipe for generic subgroup 32",
       "run": {
-        "tool": "iree-benchmark-loom",
+        "tool": "loom-compile",
         "args": [
           "{srcdir}/target_provider_selection.loom",
-          "--dry-run"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "bench_target_provider_selection",
-          "case_target_provider_selection"
-        ]
-      }
-    },
-    {
-      "name": "selects target-specific provider recipe",
-      "run": {
-        "tool": "loom-opt",
-        "args": [
-          "{srcdir}/target_provider_selection.loom",
-          "--pass=select-templates,inline-callables",
-          "--pass-report=json",
-          "--output={tmp}/target_provider_selected.loom"
+          "--backend=amdgpu-hal",
+          "--target=gfx11-generic",
+          "--output={tmp}/target_provider_gfx11_generic.vmfb",
+          "--emit-target-artifact={tmp}/target_provider_gfx11_generic.hsaco",
+          "--compile-report=summary",
+          "--dump-ir-after=select-templates",
+          "--dump-ir-format=jsonl",
+          "--dump-ir-output={tmp}/target_provider_gfx11_generic_trace.jsonl"
         ]
       },
       "stderr": {
         "contains": [
-          "\"pass\":\"select-templates\"",
-          "\"category\":\"template-selection\"",
-          "\"outcome\":\"selected\"",
-          "\"contract\":\"hip.recipe.scale_i32\"",
-          "\"target\":\"gfx1100\"",
-          "\"selected_provider\":\"scale_i32_gfx1100\"",
-          "\"provider_count\":3",
-          "\"target_applicable_count\":2",
-          "\"best_exact_count\":1"
+          "\"status\":{\"code\":0,\"name\":\"OK\"}",
+          "\"target_key\":\"gfx11-generic\"",
+          "\"subgroup_size\":32"
         ]
       },
       "files": [
         {
-          "path": "{tmp}/target_provider_selected.loom",
+          "path": "{tmp}/target_provider_gfx11_generic.vmfb",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/target_provider_gfx11_generic.hsaco",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/target_provider_gfx11_generic_trace.jsonl",
           "contains": [
-            "func.def public target(@gfx1100) @selects_gfx1100_provider",
-            "scalar.muli"
+            "\"pass\":\"select-templates\"",
+            "amdgpu.target<gfx11-generic> @__loom_sealed_target_0_0",
+            "kernel.def retain target(@__loom_sealed_target_0_0)",
+            "%subgroup_size = index.constant 32 : index",
+            "func.call inline @scale_i32_subgroup_32",
+            "scalar.addi %value, %value : i32"
           ],
           "not_contains": [
-            "func.apply",
-            "scale_i32_gfx1200",
+            "template.apply",
+            "%subgroup_size = target.subgroup.size",
+            "scale_i32_subgroup_64",
             "scale_i32_fallback"
           ]
+        }
+      ]
+    },
+    {
+      "name": "specializes same targetless recipe for generic subgroup 64",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/target_provider_selection.loom",
+          "--backend=amdgpu-hal",
+          "--target=gfx9-4-generic",
+          "--output={tmp}/target_provider_gfx9_4_generic.vmfb",
+          "--emit-target-artifact={tmp}/target_provider_gfx9_4_generic.hsaco",
+          "--compile-report=summary",
+          "--dump-ir-after=select-templates",
+          "--dump-ir-format=jsonl",
+          "--dump-ir-output={tmp}/target_provider_gfx9_4_generic_trace.jsonl"
+        ]
+      },
+      "stderr": {
+        "contains": [
+          "\"status\":{\"code\":0,\"name\":\"OK\"}",
+          "\"target_key\":\"gfx9-4-generic\"",
+          "\"subgroup_size\":64"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/target_provider_gfx9_4_generic.vmfb",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/target_provider_gfx9_4_generic.hsaco",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/target_provider_gfx9_4_generic_trace.jsonl",
+          "contains": [
+            "\"pass\":\"select-templates\"",
+            "amdgpu.target<gfx9-4-generic> @__loom_sealed_target_0_0",
+            "kernel.def retain target(@__loom_sealed_target_0_0)",
+            "%subgroup_size = index.constant 64 : index",
+            "func.call inline @scale_i32_subgroup_64",
+            "scalar.muli %value, %scale_factor : i32"
+          ],
+          "not_contains": [
+            "template.apply",
+            "%subgroup_size = target.subgroup.size",
+            "scale_i32_subgroup_32",
+            "scale_i32_fallback"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "seals specialized gfx1151 target into pass traces",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/target_provider_selection.loom",
+          "--backend=amdgpu-hal",
+          "--target=gfx1151",
+          "--output={tmp}/target_provider_gfx1151.vmfb",
+          "--emit-target-artifact={tmp}/target_provider_gfx1151.hsaco",
+          "--compile-report=summary",
+          "--dump-ir-after=select-templates",
+          "--dump-ir-format=jsonl",
+          "--dump-ir-output={tmp}/target_provider_gfx1151_trace.jsonl"
+        ]
+      },
+      "stderr": {
+        "contains": [
+          "\"status\":{\"code\":0,\"name\":\"OK\"}",
+          "\"target_key\":\"gfx1151\"",
+          "\"subgroup_size\":32"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/target_provider_gfx1151.vmfb",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/target_provider_gfx1151.hsaco",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/target_provider_gfx1151_trace.jsonl",
+          "contains": [
+            "\"pass\":\"select-templates\"",
+            "amdgpu.target<gfx1151> @__loom_sealed_target_0_0",
+            "kernel.def retain target(@__loom_sealed_target_0_0)",
+            "%subgroup_size = index.constant 32 : index",
+            "func.call inline @scale_i32_subgroup_32"
+          ],
+          "not_contains": [
+            "amdgpu.target<gfx11-generic>",
+            "template.apply",
+            "%subgroup_size = target.subgroup.size",
+            "scale_i32_subgroup_64",
+            "scale_i32_fallback"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "compiles targetless math template after specialization",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/template_math_legalization.loom",
+          "--backend=amdgpu-hal",
+          "--target=gfx11-generic",
+          "--output={tmp}/template_math_legalization.vmfb",
+          "--emit-target-artifact={tmp}/template_math_legalization.hsaco",
+          "--artifact-manifest=summary",
+          "--compile-report=summary"
+        ]
+      },
+      "stderr": {
+        "contains": {
+          "unordered": [
+            "\"target_key\":\"gfx11-generic\"",
+            "\"artifact_format\":\"elf\"",
+            "\"status\":{\"code\":0,\"name\":\"OK\"}",
+            "\"function\":\"template_math_legalization\""
+          ]
+        }
+      },
+      "files": [
+        {
+          "path": "{tmp}/template_math_legalization.vmfb",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/template_math_legalization.hsaco",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/template_math_legalization.hsaco.manifest.json",
+          "non_empty": true
+        }
+      ]
+    },
+    {
+      "name": "compiles gfx1250 cluster b128 multicast recipe",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/cluster_b128_multicast.loom",
+          "--backend=amdgpu-hal",
+          "--target=gfx1250",
+          "--output={tmp}/cluster_b128_multicast.vmfb",
+          "--emit-target-artifact={tmp}/cluster_b128_multicast.hsaco",
+          "--artifact-manifest=summary",
+          "--compile-report=summary"
+        ]
+      },
+      "stderr": {
+        "contains": {
+          "unordered": [
+            "\"target_key\":\"gfx1250\"",
+            "\"artifact_format\":\"elf\"",
+            "\"status\":{\"code\":0,\"name\":\"OK\"}",
+            "\"cluster_size\":{\"x\":1,\"y\":2,\"z\":1,\"flat\":2}",
+            "\"local_memory_bytes\":512",
+            "\"explicit_action_count\":1",
+            "\"barrier_count\":0"
+          ]
+        }
+      },
+      "files": [
+        {
+          "path": "{tmp}/cluster_b128_multicast.vmfb",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/cluster_b128_multicast.hsaco",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/cluster_b128_multicast.hsaco.manifest.json",
+          "non_empty": true
         }
       ]
     },

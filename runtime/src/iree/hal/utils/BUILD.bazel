@@ -72,6 +72,18 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_test(
+    name = "deferred_command_buffer_test",
+    srcs = ["deferred_command_buffer_test.cc"],
+    deps = [
+        ":deferred_command_buffer",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_runtime_cc_library(
     name = "device_spec_builder",
     srcs = ["device_spec_builder.c"],
@@ -133,17 +145,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/io:file_handle",
-    ],
-)
-
-iree_runtime_cc_library(
-    name = "file_transfer",
-    srcs = ["file_transfer.c"],
-    hdrs = ["file_transfer.h"],
-    deps = [
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal",
-        "//runtime/src/iree/hal",
     ],
 )
 
@@ -246,6 +247,7 @@ iree_runtime_cc_library(
     hdrs = ["statistics_sink.h"],
     deps = [
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/hal",
     ],
 )

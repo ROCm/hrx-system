@@ -1650,47 +1650,48 @@ static iree_status_t loom_testbench_write_expectation_failure_json(
     const loom_testbench_expectation_report_t* report,
     const loom_testbench_expectation_failure_t* failure,
     loom_output_stream_t* stream) {
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, "\"index\":%" PRIhsz, failure->expectation_index));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ",\"kind\":"));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_cstring(
-      stream, loom_testbench_expectation_kind_name(failure->kind)));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("index"), failure->expectation_index));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("kind"),
+      iree_make_cstring_view(
+          loom_testbench_expectation_kind_name(failure->kind))));
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"actual_value_id\":"));
+      loom_json_object_begin_field(&object, IREE_SV("actual_value_id")));
   IREE_RETURN_IF_ERROR(loom_testbench_write_expectation_value_id_json(
       failure->actual_value_id, stream));
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"expected_value_id\":"));
+      loom_json_object_begin_field(&object, IREE_SV("expected_value_id")));
   IREE_RETURN_IF_ERROR(loom_testbench_write_expectation_value_id_json(
       failure->expected_value_id, stream));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"detail\":"));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
-      stream, loom_testbench_expectation_failure_detail(report, failure)));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "}"));
-  return iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("detail"),
+      loom_testbench_expectation_failure_detail(report, failure)));
+  return loom_json_object_end(&object);
 }
 
 iree_status_t loom_testbench_expectation_report_write_json(
     const loom_testbench_expectation_report_t* report,
     loom_output_stream_t* stream) {
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, "\"expectation_count\":%" PRIhsz, report->expectation_count));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, ",\"passed_count\":%" PRIhsz, report->passed_count));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, ",\"failure_count\":%" PRIhsz, report->failure_count));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("expectation_count"), report->expectation_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("passed_count"), report->passed_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("failure_count"), report->failure_count));
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"failures\":["));
+      loom_json_object_begin_field(&object, IREE_SV("failures")));
+  loom_json_array_writer_t failures;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &failures));
   for (iree_host_size_t i = 0; i < report->failure_count; ++i) {
-    if (i != 0) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-    }
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&failures));
     IREE_RETURN_IF_ERROR(loom_testbench_write_expectation_failure_json(
         report, &report->failures[i], stream));
   }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "]}"));
-  return iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&failures));
+  return loom_json_object_end(&object);
 }

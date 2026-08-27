@@ -106,22 +106,15 @@ static RelayContext* CreateRelayContext(const ProactorFactory& factory,
     return nullptr;
   }
 
-  // Initial poll to ensure the relay is armed before we start signaling.
-  iree_host_size_t initial_completed = 0;
-  status = iree_async_proactor_poll(ctx->proactor, iree_make_timeout_ms(10),
-                                    &initial_completed);
-  if (!iree_status_is_ok(status) && !iree_status_is_deadline_exceeded(status)) {
+  if (!PollOneProgressEvent(ctx->proactor)) {
     state.SkipWithError("Initial poll failed");
-    iree_status_ignore(status);
-    iree_async_proactor_unregister_relay(ctx->proactor, ctx->relay);
+    WaitForRelayUnregistration(ctx->proactor, ctx->relay);
     iree_async_notification_release(ctx->sink);
     iree_async_notification_release(ctx->source);
     iree_async_proactor_release(ctx->proactor);
     delete ctx;
     return nullptr;
   }
-  iree_status_ignore(status);
-
   return ctx;
 }
 
@@ -129,7 +122,7 @@ static void DestroyRelayContext(RelayContext* ctx) {
   if (!ctx) return;
 
   // Cleanup resources.
-  iree_async_proactor_unregister_relay(ctx->proactor, ctx->relay);
+  WaitForRelayUnregistration(ctx->proactor, ctx->relay);
   iree_async_notification_release(ctx->sink);
   iree_async_notification_release(ctx->source);
   iree_async_proactor_release(ctx->proactor);
@@ -160,15 +153,13 @@ static void BM_Throughput(::benchmark::State& state,
     // Poll until the sink notification epoch advances.
     while (iree_async_notification_query_epoch(ctx->sink) == observed) {
       iree_status_t status = iree_async_proactor_poll(
-          ctx->proactor, iree_make_timeout_ms(100), nullptr);
-      if (!iree_status_is_ok(status) &&
-          !iree_status_is_deadline_exceeded(status)) {
-        iree_status_ignore(status);
+          ctx->proactor, iree_infinite_timeout(), nullptr);
+      if (!iree_status_is_ok(status)) {
+        iree_status_free(status);
         state.SkipWithError("Poll failed during benchmark");
         DestroyRelayContext(ctx);
         return;
       }
-      iree_status_ignore(status);
     }
   }
 
@@ -194,15 +185,13 @@ static void BM_Latency(::benchmark::State& state,
     // Poll until the sink notification epoch advances.
     while (iree_async_notification_query_epoch(ctx->sink) == observed) {
       iree_status_t status = iree_async_proactor_poll(
-          ctx->proactor, iree_make_timeout_ms(100), nullptr);
-      if (!iree_status_is_ok(status) &&
-          !iree_status_is_deadline_exceeded(status)) {
-        iree_status_ignore(status);
+          ctx->proactor, iree_infinite_timeout(), nullptr);
+      if (!iree_status_is_ok(status)) {
+        iree_status_free(status);
         state.SkipWithError("Poll failed during benchmark");
         DestroyRelayContext(ctx);
         return;
       }
-      iree_status_ignore(status);
     }
 
     auto end = std::chrono::high_resolution_clock::now();
@@ -298,6 +287,12 @@ static ScalabilityContext* CreateScalabilityContext(
     ctx->channels.push_back(std::move(channel_result).value());
   }
 
+  if (!PollOneProgressEvent(ctx->proactor)) {
+    state.SkipWithError("Failed to arm relay channels");
+    DestroyScalabilityContext(ctx);
+    return nullptr;
+  }
+
   return ctx;
 }
 
@@ -307,7 +302,7 @@ static void DestroyScalabilityContext(ScalabilityContext* ctx) {
   // Cleanup resources.
   for (auto& channel : ctx->channels) {
     if (channel->relay) {
-      iree_async_proactor_unregister_relay(ctx->proactor, channel->relay);
+      WaitForRelayUnregistration(ctx->proactor, channel->relay);
     }
     iree_async_notification_release(channel->sink);
     iree_async_notification_release(channel->source);
@@ -345,15 +340,13 @@ static void BM_Scalability(::benchmark::State& state,
     size_t completed = 0;
     while (completed < channel_count) {
       iree_status_t status = iree_async_proactor_poll(
-          ctx->proactor, iree_make_timeout_ms(100), nullptr);
-      if (!iree_status_is_ok(status) &&
-          !iree_status_is_deadline_exceeded(status)) {
-        iree_status_ignore(status);
+          ctx->proactor, iree_infinite_timeout(), nullptr);
+      if (!iree_status_is_ok(status)) {
+        iree_status_free(status);
         state.SkipWithError("Poll failed during scalability benchmark");
         DestroyScalabilityContext(ctx);
         return;
       }
-      iree_status_ignore(status);
 
       // Count completed channels.
       completed = 0;

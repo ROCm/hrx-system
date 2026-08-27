@@ -33,10 +33,15 @@ uint16_t loom_spirv_ptr_workgroup_reg_class_id(
 uint16_t loom_spirv_ptr_workgroup_array_reg_class_id(
     loom_spirv_scalar_type_t scalar_type);
 
-// Maps non-payload SPIR-V register classes to exact semantic value types.
-//
-// `spirv.id` intentionally has no row here: callers must use ABI metadata or
-// descriptor packet rows to recover its payload type.
+// Maps a structural SPIR-V Low register type to its exact semantic value type.
+// Typed `spirv.id` values consume their public register payload; carrier-only
+// classes consume target-owned class semantics. Returns false for untyped IDs,
+// typed non-ID carriers, and unsupported register classes.
+bool loom_spirv_value_type_from_low_register_type(
+    loom_type_t type, loom_spirv_value_type_t* out_value_type);
+
+// Maps carrier-only SPIR-V register classes to exact semantic value types.
+// `spirv.id` intentionally has no row because its meaning is structural.
 bool loom_spirv_value_type_from_reg_class_id(
     uint16_t reg_class_id, loom_spirv_value_type_t* out_value_type);
 

@@ -46,6 +46,7 @@ loom_generated_cc_library(
   ARGS
     "--dialect=scalar"
   DEPS
+    iree::base::internal
     loom::error::emitter
     loom::error::error_defs
     loom::ir
@@ -53,7 +54,7 @@ loom_generated_cc_library(
     loom::ops::combining
     loom::ops::op_defs
     loom::rewrite::rewriter
-    loom::util::math
+    loom::util::predicate_facts
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

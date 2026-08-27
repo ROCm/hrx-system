@@ -1,0 +1,47 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx9-4-generic> @target
+func.def target(@target) @bf16_mfma(%lhs_data: vector<4xbf16>, %rhs_data: vector<4xbf16>, %init_data: vector<4xf32>) -> (vector<4xf32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<4xbf16>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<4xbf16>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<4xbf16>, vector<4xbf16>, vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+low.func.def target<amdgpu.gfx9_4.generic.core>(@target) abi(hal_kernel) @bf16_mfma(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
+  %15 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %result = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %15
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx9-4-generic> @target
+func.def target(@target) @f64_mfma_constants() -> (vector<4xf64>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 4 : index
+  %operand_elements = vector.constant 1.0 : vector<1xf64>
+  %accumulator_elements = vector.constant 0.0 : vector<4xf64>
+  %lhs = vector.fragment<lhs> %operand_elements shape [%m, %k] : vector<1xf64>
+  %rhs = vector.fragment<rhs> %operand_elements shape [%k, %n] : vector<1xf64>
+  %init = vector.fragment<init> %accumulator_elements shape [%m, %n] : vector<4xf64>
+  %result = vector.mma %lhs, %rhs, %init : vector<1xf64>, vector<1xf64>, vector<4xf64>
+  func.return %result : vector<4xf64>
+}
+
+// ----
+low.func.def target<amdgpu.gfx9_4.generic.core>(@target) abi(hal_kernel) @f64_mfma_constants() -> (reg<amdgpu.vgpr x8>) asm {
+  %11 = v_mov_b32 0
+  %12 = v_mov_b32 1072693248
+  %rhs = concat(%11, %12) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %init = concat(%11, %11, %11, %11, %11, %11, %11, %11) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  %23 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %result = v_mfma_f64_16x16x4_f64 %rhs, %rhs, %23
+  return %result
+}

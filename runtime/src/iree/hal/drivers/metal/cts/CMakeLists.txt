@@ -22,24 +22,7 @@ iree_cc_library(
   PUBLIC
 )
 
-iree_hal_cts_testdata(
-  FORMAT_NAME
-    metal_spirv
-  TARGET_DEVICE
-    "metal"
-  IDENTIFIER
-    "iree_cts_testdata_metal_spirv"
-  BACKEND_NAME
-    "metal"
-  FORMAT_STRING
-    [=["MTLE"]=]
-  TESTDATA_DIR
-    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/testdata"
-)
-
-iree_hal_cts_test_suite(
-  BACKENDS_LIB
+iree_runtime_hal_cts_test_suite(
+  BACKENDS
     ::backends
-  TESTDATA_LIBS
-    ::testdata_metal_spirv_lib
 )

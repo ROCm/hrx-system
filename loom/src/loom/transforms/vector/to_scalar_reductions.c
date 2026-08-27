@@ -119,8 +119,8 @@ static iree_status_t loom_vector_to_scalar_combine_accumulator_term_tree(
     const loom_value_id_t* terms, uint16_t begin_ordinal, uint16_t end_ordinal,
     loom_value_id_t* out_result) {
   if (end_ordinal <= begin_ordinal) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "invalid empty accumulator term range");
+    IREE_ASSERT_UNREACHABLE("invalid empty accumulator term range");
+    IREE_BUILTIN_UNREACHABLE();
   }
   if (end_ordinal - begin_ordinal == 1) {
     *out_result = terms[begin_ordinal];
@@ -191,8 +191,8 @@ static iree_status_t loom_vector_to_scalar_build_static_reduction_tree(
     loom_vector_to_scalar_accumulator_state_t* state, uint16_t begin_ordinal,
     uint16_t end_ordinal, int64_t* indices, loom_value_id_t* out_result) {
   if (end_ordinal <= begin_ordinal) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "invalid empty reduction term range");
+    IREE_ASSERT_UNREACHABLE("invalid empty reduction term range");
+    IREE_BUILTIN_UNREACHABLE();
   }
   if (end_ordinal - begin_ordinal == 1) {
     loom_vector_to_scalar_indices_from_ordinal(state->lane_state.vector_type,
@@ -311,10 +311,9 @@ static iree_status_t loom_vector_to_scalar_accumulator_loop_axis(
   loom_op_t* loop = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_for_build(
       &state->lane_state.rewriter->builder, /*build_flags=*/0, lower_bound,
-      upper_bound, step, &current_accumulator, 1,
-      &state->lane_state.result_scalar_type, 1, NULL, 0, LOOM_VALUE_ID_INVALID,
-      /*unroll_policy=*/0, /*unroll_schedule=*/0, state->lane_state.location,
-      &loop));
+      upper_bound, step, &current_accumulator, 1, NULL, 0,
+      LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0, /*unroll_schedule=*/0,
+      state->lane_state.location, &loop));
   loom_vector_to_scalar_record_loop_created(&state->lane_state);
 
   loom_builder_ip_t saved = loom_builder_enter_region(
@@ -401,9 +400,7 @@ static bool loom_vector_to_scalar_try_configure_product_fmaf_forest(
 
   accumulator_state->fused_product_lhs = loom_vector_mulf_lhs(input_op);
   accumulator_state->fused_product_rhs = loom_vector_mulf_rhs(input_op);
-  accumulator_state->product_flags =
-      loom_vector_to_scalar_project_instance_flags(
-          LOOM_VECTOR_TO_SCALAR_INSTANCE_FLAG_MODE_FAST_MATH, product_flags);
+  accumulator_state->product_flags = product_flags;
   accumulator_state->fmaf_flags =
       accumulator_state->product_flags & accumulator_state->instance_flags;
   accumulator_state->use_product_fmaf_forest = true;
@@ -425,12 +422,9 @@ iree_status_t loom_vector_to_scalar_lower_reduce(
       .input = loom_vector_reduce_input(state->op),
       .init = loom_vector_reduce_init(state->op),
       .scalar_kind = scalar_kind,
-      .instance_flags =
-          loom_combining_kind_accepts_float(reduce_kind)
-              ? loom_vector_to_scalar_project_instance_flags(
-                    LOOM_VECTOR_TO_SCALAR_INSTANCE_FLAG_MODE_FAST_MATH,
-                    state->op->instance_flags)
-              : 0,
+      .instance_flags = loom_combining_kind_accepts_float(reduce_kind)
+                            ? state->op->instance_flags
+                            : 0,
   };
   loom_vector_to_scalar_try_configure_product_fmaf_forest(
       state, reduce_kind, reduce_flags, &accumulator_state);
@@ -550,10 +544,9 @@ static iree_status_t loom_vector_to_scalar_reduce_axes_axis(
   loom_op_t* loop = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_for_build(
       &state->lane_state.rewriter->builder, /*build_flags=*/0, lower_bound,
-      upper_bound, step, &current_accumulator, 1,
-      &state->lane_state.result_scalar_type, 1, NULL, 0, LOOM_VALUE_ID_INVALID,
-      /*unroll_policy=*/0, /*unroll_schedule=*/0, state->lane_state.location,
-      &loop));
+      upper_bound, step, &current_accumulator, 1, NULL, 0,
+      LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0, /*unroll_schedule=*/0,
+      state->lane_state.location, &loop));
   loom_vector_to_scalar_record_loop_created(&state->lane_state);
 
   loom_builder_ip_t saved = loom_builder_enter_region(
@@ -621,8 +614,8 @@ loom_vector_to_scalar_reduce_axes_build_static_reduction_tree(
     uint16_t end_ordinal, loom_vector_to_scalar_index_term_t* reduced_terms,
     loom_value_id_t* out_result) {
   if (end_ordinal <= begin_ordinal) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "invalid empty reduce-axes term range");
+    IREE_ASSERT_UNREACHABLE("invalid empty reduce-axes term range");
+    IREE_BUILTIN_UNREACHABLE();
   }
   if (end_ordinal - begin_ordinal == 1) {
     loom_vector_to_scalar_reduce_axes_terms_from_ordinal(state, begin_ordinal,
@@ -763,9 +756,9 @@ static iree_status_t loom_vector_to_scalar_reduce_axes_result_loop_axis(
   loom_op_t* loop = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_for_build(
       &state->lane_state.rewriter->builder, /*build_flags=*/0, lower_bound,
-      upper_bound, step, &current_aggregate, 1, &state->result_type, 1, NULL, 0,
-      LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0, /*unroll_schedule=*/0,
-      state->lane_state.location, &loop));
+      upper_bound, step, &current_aggregate, 1, NULL, 0, LOOM_VALUE_ID_INVALID,
+      /*unroll_policy=*/0, /*unroll_schedule=*/0, state->lane_state.location,
+      &loop));
   loom_vector_to_scalar_record_loop_created(&state->lane_state);
 
   loom_builder_ip_t saved = loom_builder_enter_region(
@@ -835,12 +828,9 @@ iree_status_t loom_vector_to_scalar_lower_reduce_axes(
       .result_type = result_type,
       .axes = loom_vector_reduce_axes_axes(state->op),
       .scalar_kind = scalar_kind,
-      .instance_flags =
-          loom_combining_kind_accepts_float(reduce_kind)
-              ? loom_vector_to_scalar_project_instance_flags(
-                    LOOM_VECTOR_TO_SCALAR_INSTANCE_FLAG_MODE_FAST_MATH,
-                    state->op->instance_flags)
-              : 0,
+      .instance_flags = loom_combining_kind_accepts_float(reduce_kind)
+                            ? state->op->instance_flags
+                            : 0,
   };
   if (loom_type_is_scalar(result_type)) {
     loom_vector_to_scalar_index_list_t index_list = {0};
@@ -862,9 +852,7 @@ iree_status_t loom_vector_to_scalar_lower_dotf(
       .input = loom_vector_dotf_lhs(state->op),
       .rhs = loom_vector_dotf_rhs(state->op),
       .init = loom_vector_dotf_init(state->op),
-      .instance_flags = loom_vector_to_scalar_project_instance_flags(
-          LOOM_VECTOR_TO_SCALAR_INSTANCE_FLAG_MODE_FAST_MATH,
-          state->op->instance_flags),
+      .instance_flags = state->op->instance_flags,
       .use_fmaf = true,
   };
   return loom_vector_to_scalar_lower_accumulator(&accumulator_state,

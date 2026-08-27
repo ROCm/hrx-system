@@ -6,18 +6,17 @@
 
 #include "loom/codegen/low/allocation/live_range.h"
 
-#include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
-#include "iree/testing/status_matchers.h"
 
 namespace loom {
 namespace {
 
+constexpr loom_liveness_analysis_t kEmptyLiveness = {};
+
 loom_low_allocation_assignment_t Assignment(
     loom_value_id_t value_id, uint16_t descriptor_reg_class_id,
     uint32_t start_point, uint32_t end_point, uint32_t location_base,
-    uint32_t location_count, uint32_t unit_count,
-    uint32_t unit_end_point_start) {
+    uint32_t location_count, uint32_t unit_count, uint32_t unit_point_start) {
   loom_low_allocation_assignment_t assignment = {};
   assignment.value_id = value_id;
   assignment.descriptor_reg_class_id = descriptor_reg_class_id;
@@ -27,7 +26,7 @@ loom_low_allocation_assignment_t Assignment(
   assignment.location_base = location_base;
   assignment.location_count = location_count;
   assignment.unit_count = unit_count;
-  assignment.unit_end_point_start = unit_end_point_start;
+  assignment.unit_point_start = unit_point_start;
   return assignment;
 }
 
@@ -50,7 +49,7 @@ TEST(LowAllocationLiveRangeTest, ReadsPerUnitEndPoints) {
   const loom_low_allocation_assignment_t assignment = Assignment(
       /*value_id=*/1, /*descriptor_reg_class_id=*/0, /*start_point=*/2,
       /*end_point=*/5, /*location_base=*/0, /*location_count=*/2,
-      /*unit_count=*/2, /*unit_end_point_start=*/0);
+      /*unit_count=*/2, /*unit_point_start=*/0);
 
   EXPECT_EQ(loom_low_allocation_live_range_assignment_unit_end_point(
                 unit_end_points, IREE_ARRAYSIZE(unit_end_points), &assignment,
@@ -73,14 +72,14 @@ TEST(LowAllocationLiveRangeTest, ZeroUnitAssignmentsUseWholeAssignmentEnd) {
   const loom_low_allocation_assignment_t assignment = Assignment(
       /*value_id=*/1, /*descriptor_reg_class_id=*/0, /*start_point=*/2,
       /*end_point=*/5, /*location_base=*/0, /*location_count=*/1,
-      /*unit_count=*/0, /*unit_end_point_start=*/0);
+      /*unit_count=*/0, /*unit_point_start=*/0);
 
   EXPECT_EQ(loom_low_allocation_live_range_assignment_unit_end_point(
-                nullptr, /*unit_end_point_count=*/0, &assignment,
+                nullptr, /*unit_point_count=*/0, &assignment,
                 /*unit_offset=*/0),
             5u);
   EXPECT_EQ(loom_low_allocation_live_range_assignment_max_unit_end_point(
-                nullptr, /*unit_end_point_count=*/0, &assignment),
+                nullptr, /*unit_point_count=*/0, &assignment),
             5u);
 }
 
@@ -176,252 +175,6 @@ TEST(LowAllocationLiveRangeTest, ChecksBlockObservableOverlap) {
       /*rhs_end_point=*/9));
 }
 
-TEST(LowAllocationLiveRangeTest, MapsOperationProgramPoints) {
-  loom_block_t block = {};
-  loom_op_t first_op = {};
-  loom_op_t second_op = {};
-  block.first_op = &first_op;
-  block.last_op = &second_op;
-  block.op_count = 2;
-  first_op.parent_block = &block;
-  first_op.next_op = &second_op;
-  second_op.parent_block = &block;
-  second_op.prev_op = &first_op;
-
-  const loom_liveness_block_info_t blocks[] = {
-      {
-          /*.block=*/&block,
-          /*.start_point=*/10,
-          /*.end_point=*/12,
-          /*.live_in_values=*/nullptr,
-          /*.live_in_count=*/0,
-          /*.live_out_values=*/nullptr,
-          /*.live_out_count=*/0,
-      },
-  };
-  loom_liveness_analysis_t liveness = Liveness(blocks, IREE_ARRAYSIZE(blocks));
-
-  uint32_t program_point = UINT32_MAX;
-  IREE_ASSERT_OK(loom_low_allocation_live_range_op_program_point(
-      &liveness, &first_op, &program_point));
-  EXPECT_EQ(program_point, 10u);
-  IREE_ASSERT_OK(loom_low_allocation_live_range_op_program_point(
-      &liveness, &second_op, &program_point));
-  EXPECT_EQ(program_point, 11u);
-}
-
-TEST(LowAllocationLiveRangeTest, MapsExplicitOperationProgramPoints) {
-  loom_region_t region = {};
-  loom_block_t block = {};
-  loom_op_t first_op = {};
-  loom_op_t second_op = {};
-  region.block_count = 1;
-  region.blocks = region.inline_blocks;
-  region.inline_blocks[0] = &block;
-  block.parent_region = &region;
-  block.region_index = 0;
-  block.first_op = &first_op;
-  block.last_op = &second_op;
-  block.op_count = 2;
-  first_op.parent_block = &block;
-  first_op.next_op = &second_op;
-  second_op.parent_block = &block;
-  second_op.prev_op = &first_op;
-
-  const loom_liveness_block_info_t blocks[] = {
-      {
-          /*.block=*/&block,
-          /*.start_point=*/20,
-          /*.end_point=*/22,
-          /*.live_in_values=*/nullptr,
-          /*.live_in_count=*/0,
-          /*.live_out_values=*/nullptr,
-          /*.live_out_count=*/0,
-      },
-  };
-  loom_liveness_analysis_t liveness = Liveness(blocks, IREE_ARRAYSIZE(blocks));
-  const loom_op_t* ordered_ops[] = {&second_op, &first_op};
-  const loom_liveness_block_order_t block_orders[] = {
-      {
-          /*.block=*/&block,
-          /*.ops=*/ordered_ops,
-          /*.op_count=*/IREE_ARRAYSIZE(ordered_ops),
-      },
-  };
-  const loom_liveness_order_t order = {
-      /*.blocks=*/block_orders,
-      /*.block_count=*/IREE_ARRAYSIZE(block_orders),
-  };
-
-  uint32_t program_point = UINT32_MAX;
-  IREE_ASSERT_OK(loom_low_allocation_live_range_ordered_op_program_point(
-      &liveness, &region, order, &second_op, &program_point));
-  EXPECT_EQ(program_point, 20u);
-  IREE_ASSERT_OK(loom_low_allocation_live_range_ordered_op_program_point(
-      &liveness, &region, order, &first_op, &program_point));
-  EXPECT_EQ(program_point, 21u);
-}
-
-TEST(LowAllocationLiveRangeTest, IndexesExplicitOperationProgramPoints) {
-  iree_arena_block_pool_t block_pool;
-  iree_arena_block_pool_initialize(/*block_size=*/4096, iree_allocator_system(),
-                                   &block_pool);
-  iree_arena_allocator_t arena;
-  iree_arena_initialize(&block_pool, &arena);
-
-  loom_region_t region = {};
-  loom_block_t block = {};
-  loom_op_t first_op = {};
-  loom_op_t second_op = {};
-  loom_op_t missing_op = {};
-  region.block_count = 1;
-  region.blocks = region.inline_blocks;
-  region.inline_blocks[0] = &block;
-  block.parent_region = &region;
-  block.region_index = 0;
-  block.first_op = &first_op;
-  block.last_op = &second_op;
-  block.op_count = 2;
-  first_op.parent_block = &block;
-  first_op.next_op = &second_op;
-  second_op.parent_block = &block;
-  second_op.prev_op = &first_op;
-
-  const loom_liveness_block_info_t blocks[] = {
-      {
-          /*.block=*/&block,
-          /*.start_point=*/20,
-          /*.end_point=*/22,
-          /*.live_in_values=*/nullptr,
-          /*.live_in_count=*/0,
-          /*.live_out_values=*/nullptr,
-          /*.live_out_count=*/0,
-      },
-  };
-  loom_liveness_analysis_t liveness = Liveness(blocks, IREE_ARRAYSIZE(blocks));
-  liveness.region = &region;
-  const loom_op_t* ordered_ops[] = {&second_op, &first_op};
-  const loom_liveness_block_order_t block_orders[] = {
-      {
-          /*.block=*/&block,
-          /*.ops=*/ordered_ops,
-          /*.op_count=*/IREE_ARRAYSIZE(ordered_ops),
-      },
-  };
-  const loom_liveness_order_t order = {
-      /*.blocks=*/block_orders,
-      /*.block_count=*/IREE_ARRAYSIZE(block_orders),
-  };
-
-  loom_low_allocation_op_point_index_t index = {};
-  IREE_ASSERT_OK(loom_low_allocation_op_point_index_initialize(&liveness, order,
-                                                               &arena, &index));
-
-  uint32_t program_point = UINT32_MAX;
-  IREE_ASSERT_OK(loom_low_allocation_op_point_index_lookup(&index, &second_op,
-                                                           &program_point));
-  EXPECT_EQ(program_point, 20u);
-  IREE_ASSERT_OK(loom_low_allocation_op_point_index_lookup(&index, &first_op,
-                                                           &program_point));
-  EXPECT_EQ(program_point, 21u);
-  EXPECT_FALSE(loom_low_allocation_op_point_index_try_lookup(
-      &index, &missing_op, &program_point));
-  EXPECT_EQ(program_point, UINT32_MAX);
-
-  iree_arena_deinitialize(&arena);
-  iree_arena_block_pool_deinitialize(&block_pool);
-}
-
-TEST(LowAllocationLiveRangeTest, IndexesNestedOperationProgramPoints) {
-  iree_arena_block_pool_t block_pool;
-  iree_arena_block_pool_initialize(/*block_size=*/4096, iree_allocator_system(),
-                                   &block_pool);
-  iree_arena_allocator_t arena;
-  iree_arena_initialize(&block_pool, &arena);
-
-  loom_region_t root_region = {};
-  loom_block_t root_block = {};
-  loom_op_t first_op = {};
-  struct {
-    loom_op_t op;
-    loom_region_t* regions[1];
-  } parent_op = {};
-  loom_region_t child_region = {};
-  loom_block_t child_block = {};
-  loom_op_t child_op = {};
-
-  root_region.block_count = 1;
-  root_region.blocks = root_region.inline_blocks;
-  root_region.inline_blocks[0] = &root_block;
-  root_block.parent_region = &root_region;
-  root_block.region_index = 0;
-  root_block.first_op = &first_op;
-  root_block.last_op = &parent_op.op;
-  root_block.op_count = 2;
-  first_op.parent_block = &root_block;
-  first_op.next_op = &parent_op.op;
-  parent_op.op.parent_block = &root_block;
-  parent_op.op.prev_op = &first_op;
-  parent_op.op.region_count = 1;
-  parent_op.regions[0] = &child_region;
-
-  child_region.block_count = 1;
-  child_region.blocks = child_region.inline_blocks;
-  child_region.inline_blocks[0] = &child_block;
-  child_block.parent_region = &child_region;
-  child_block.region_index = 0;
-  child_block.first_op = &child_op;
-  child_block.last_op = &child_op;
-  child_block.op_count = 1;
-  child_op.parent_op = &parent_op.op;
-  child_op.parent_block = &child_block;
-
-  const loom_liveness_block_info_t blocks[] = {
-      {
-          /*.block=*/&root_block,
-          /*.start_point=*/20,
-          /*.end_point=*/24,
-          /*.live_in_values=*/nullptr,
-          /*.live_in_count=*/0,
-          /*.live_out_values=*/nullptr,
-          /*.live_out_count=*/0,
-      },
-  };
-  loom_liveness_analysis_t liveness = Liveness(blocks, IREE_ARRAYSIZE(blocks));
-  liveness.region = &root_region;
-  liveness.flags = LOOM_LIVENESS_ANALYSIS_FLAG_REGION_TREE;
-  const loom_op_t* ordered_ops[] = {&parent_op.op, &first_op};
-  const loom_liveness_block_order_t block_orders[] = {
-      {
-          /*.block=*/&root_block,
-          /*.ops=*/ordered_ops,
-          /*.op_count=*/IREE_ARRAYSIZE(ordered_ops),
-      },
-  };
-  const loom_liveness_order_t order = {
-      /*.blocks=*/block_orders,
-      /*.block_count=*/IREE_ARRAYSIZE(block_orders),
-  };
-
-  loom_low_allocation_op_point_index_t index = {};
-  IREE_ASSERT_OK(loom_low_allocation_op_point_index_initialize(&liveness, order,
-                                                               &arena, &index));
-
-  uint32_t program_point = UINT32_MAX;
-  IREE_ASSERT_OK(loom_low_allocation_op_point_index_lookup(
-      &index, &parent_op.op, &program_point));
-  EXPECT_EQ(program_point, 20u);
-  IREE_ASSERT_OK(loom_low_allocation_op_point_index_lookup(&index, &child_op,
-                                                           &program_point));
-  EXPECT_EQ(program_point, 21u);
-  IREE_ASSERT_OK(loom_low_allocation_op_point_index_lookup(&index, &first_op,
-                                                           &program_point));
-  EXPECT_EQ(program_point, 23u);
-
-  iree_arena_deinitialize(&arena);
-  iree_arena_block_pool_deinitialize(&block_pool);
-}
-
 TEST(LowAllocationLiveRangeTest, ChecksAssignmentConflicts) {
   const loom_low_reg_class_t reg_classes[] = {
       RegClass(/*alias_set_id=*/1),
@@ -431,26 +184,62 @@ TEST(LowAllocationLiveRangeTest, ChecksAssignmentConflicts) {
   descriptor_set.reg_classes = reg_classes;
   descriptor_set.reg_class_count = IREE_ARRAYSIZE(reg_classes);
 
-  const uint32_t unit_end_points[] = {10, 10, 10, 10};
+  uint32_t unit_end_points[] = {10, 10, 10, 10};
   const loom_low_allocation_assignment_t lhs = Assignment(
       /*value_id=*/1, /*descriptor_reg_class_id=*/0, /*start_point=*/0,
       /*end_point=*/10, /*location_base=*/4, /*location_count=*/2,
-      /*unit_count=*/2, /*unit_end_point_start=*/0);
+      /*unit_count=*/2, /*unit_point_start=*/0);
   const loom_low_allocation_assignment_t rhs = Assignment(
       /*value_id=*/2, /*descriptor_reg_class_id=*/1, /*start_point=*/5,
       /*end_point=*/10, /*location_base=*/5, /*location_count=*/2,
-      /*unit_count=*/2, /*unit_end_point_start=*/2);
+      /*unit_count=*/2, /*unit_point_start=*/2);
   const loom_low_allocation_assignment_t disjoint_location = Assignment(
       /*value_id=*/2, /*descriptor_reg_class_id=*/1, /*start_point=*/5,
       /*end_point=*/10, /*location_base=*/6, /*location_count=*/2,
-      /*unit_count=*/2, /*unit_end_point_start=*/2);
+      /*unit_count=*/2, /*unit_point_start=*/2);
 
   EXPECT_TRUE(loom_low_allocation_live_range_assignments_conflict(
-      &descriptor_set, unit_end_points, IREE_ARRAYSIZE(unit_end_points), &lhs,
-      &rhs));
+      &descriptor_set, &kEmptyLiveness, /*unit_start_points=*/nullptr,
+      unit_end_points, IREE_ARRAYSIZE(unit_end_points), &lhs, &rhs));
   EXPECT_FALSE(loom_low_allocation_live_range_assignments_conflict(
-      &descriptor_set, unit_end_points, IREE_ARRAYSIZE(unit_end_points), &lhs,
+      &descriptor_set, &kEmptyLiveness, /*unit_start_points=*/nullptr,
+      unit_end_points, IREE_ARRAYSIZE(unit_end_points), &lhs,
       &disjoint_location));
+}
+
+TEST(LowAllocationLiveRangeTest, RefinesAssignmentConflictsByUnitStart) {
+  const loom_low_reg_class_t reg_classes[] = {
+      RegClass(/*alias_set_id=*/1),
+  };
+  loom_low_descriptor_set_t descriptor_set = {};
+  descriptor_set.reg_classes = reg_classes;
+  descriptor_set.reg_class_count = IREE_ARRAYSIZE(reg_classes);
+
+  uint32_t unit_end_points[] = {10, 10, 5, 6};
+  uint32_t unit_start_points[] = {0, 5, 2, 2};
+  loom_low_allocation_assignment_t reservation = Assignment(
+      /*value_id=*/1, /*descriptor_reg_class_id=*/0, /*start_point=*/0,
+      /*end_point=*/10, /*location_base=*/4, /*location_count=*/2,
+      /*unit_count=*/2, /*unit_point_start=*/0);
+  reservation.flags = LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REFINED_UNIT_STARTS;
+  const loom_low_allocation_assignment_t ends_at_second_unit_start = Assignment(
+      /*value_id=*/2, /*descriptor_reg_class_id=*/0, /*start_point=*/2,
+      /*end_point=*/5, /*location_base=*/5, /*location_count=*/1,
+      /*unit_count=*/1, /*unit_point_start=*/2);
+  const loom_low_allocation_assignment_t overlaps_second_unit_start =
+      Assignment(
+          /*value_id=*/3, /*descriptor_reg_class_id=*/0, /*start_point=*/2,
+          /*end_point=*/6, /*location_base=*/5, /*location_count=*/1,
+          /*unit_count=*/1, /*unit_point_start=*/3);
+
+  EXPECT_FALSE(loom_low_allocation_live_range_assignments_conflict(
+      &descriptor_set, &kEmptyLiveness, unit_start_points, unit_end_points,
+      IREE_ARRAYSIZE(unit_end_points), &reservation,
+      &ends_at_second_unit_start));
+  EXPECT_TRUE(loom_low_allocation_live_range_assignments_conflict(
+      &descriptor_set, &kEmptyLiveness, unit_start_points, unit_end_points,
+      IREE_ARRAYSIZE(unit_end_points), &reservation,
+      &overlaps_second_unit_start));
 }
 
 TEST(LowAllocationLiveRangeTest, AssignmentConflictsRejectDisjointLifetime) {
@@ -465,15 +254,14 @@ TEST(LowAllocationLiveRangeTest, AssignmentConflictsRejectDisjointLifetime) {
   const loom_low_allocation_assignment_t lhs = Assignment(
       /*value_id=*/1, /*descriptor_reg_class_id=*/0, /*start_point=*/0,
       /*end_point=*/5, /*location_base=*/4, /*location_count=*/2,
-      /*unit_count=*/2, /*unit_end_point_start=*/0);
+      /*unit_count=*/2, /*unit_point_start=*/0);
   const loom_low_allocation_assignment_t rhs = Assignment(
       /*value_id=*/2, /*descriptor_reg_class_id=*/1, /*start_point=*/5,
       /*end_point=*/10, /*location_base=*/4, /*location_count=*/2,
-      /*unit_count=*/2, /*unit_end_point_start=*/2);
-
+      /*unit_count=*/2, /*unit_point_start=*/2);
   EXPECT_FALSE(loom_low_allocation_live_range_assignments_conflict(
-      &descriptor_set, /*unit_end_points=*/nullptr,
-      /*unit_end_point_count=*/0, &lhs, &rhs));
+      &descriptor_set, &kEmptyLiveness, /*unit_start_points=*/nullptr,
+      /*unit_end_points=*/nullptr, /*unit_point_count=*/0, &lhs, &rhs));
 }
 
 TEST(LowAllocationLiveRangeTest, AssignmentConflictsUsePhysicalStorageOverlap) {
@@ -503,19 +291,19 @@ TEST(LowAllocationLiveRangeTest, AssignmentConflictsUsePhysicalStorageOverlap) {
       /*lhs_end_point=*/100, /*rhs_value_id=*/2, /*rhs_start_point=*/40,
       /*rhs_end_point=*/80));
 
-  const uint32_t unit_end_points[] = {100, 100, 80, 80};
+  uint32_t unit_end_points[] = {100, 100, 80, 80};
   const loom_low_allocation_assignment_t lhs = Assignment(
       /*value_id=*/1, /*descriptor_reg_class_id=*/0, /*start_point=*/0,
       /*end_point=*/100, /*location_base=*/4, /*location_count=*/2,
-      /*unit_count=*/2, /*unit_end_point_start=*/0);
+      /*unit_count=*/2, /*unit_point_start=*/0);
   const loom_low_allocation_assignment_t rhs = Assignment(
       /*value_id=*/2, /*descriptor_reg_class_id=*/1, /*start_point=*/40,
       /*end_point=*/80, /*location_base=*/4, /*location_count=*/2,
-      /*unit_count=*/2, /*unit_end_point_start=*/2);
+      /*unit_count=*/2, /*unit_point_start=*/2);
 
   EXPECT_TRUE(loom_low_allocation_live_range_assignments_conflict(
-      &descriptor_set, unit_end_points, IREE_ARRAYSIZE(unit_end_points), &lhs,
-      &rhs));
+      &descriptor_set, &kEmptyLiveness, /*unit_start_points=*/nullptr,
+      unit_end_points, IREE_ARRAYSIZE(unit_end_points), &lhs, &rhs));
 }
 
 }  // namespace

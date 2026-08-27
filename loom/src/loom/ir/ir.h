@@ -45,7 +45,7 @@
 //
 // Table-owned entities use integer IDs; ownership/backreference edges use
 // stable arena pointers:
-//   value_id   -> index into module->values.entries[]
+//   value_id   -> index into the module value table
 //   symbol_id  -> index into module->symbols.entries[]
 //   string_id  -> index into module->strings.entries[]
 //   type_id    -> index into module->types.entries[] (for interned types)
@@ -96,6 +96,7 @@
 #include "loom/ir/location.h"
 #include "loom/ir/types.h"
 #include "loom/util/bstring.h"
+#include "loom/util/segmented_storage.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -581,6 +582,9 @@ typedef enum loom_dialect_id_e {
   LOOM_DIALECT_SPIRV = 0x1B,
   LOOM_DIALECT_CONFIG = 0x1C,
   LOOM_DIALECT_SANITIZER = 0x1D,
+  LOOM_DIALECT_COMMAND = 0x1E,
+  // 0x1F was the removed module dialect and remains reserved.
+  LOOM_DIALECT_TEMPLATE = 0x20,
   LOOM_DIALECT_RESERVED = 0xFF,
 } loom_dialect_id_t;
 #define LOOM_OP_KIND_UNKNOWN ((loom_op_kind_t)0)
@@ -592,7 +596,7 @@ typedef enum loom_dialect_id_e {
 
 // Maximum number of built-in dialects. Dialect IDs must be less than
 // this value. Matches the size of the dialect vtable registry array.
-#define LOOM_DIALECT_BUILTIN_COUNT_ 30
+#define LOOM_DIALECT_BUILTIN_COUNT_ 33
 
 // Extracts the dialect ID (high byte) from an op kind.
 static inline uint8_t loom_op_dialect_id(loom_op_kind_t kind) {
@@ -616,13 +620,22 @@ enum loom_op_flag_bits_e {
   // overwritten on the next driver invocation.
   LOOM_OP_FLAG_ON_WORKLIST = 1u << 1,
 
-  // The operation's direct effects have been added to the transitive counters
-  // on its containing region and ancestor regions. Nested operations carry
-  // their own counted flags. Set when an op is finalized or use-def data is
-  // recomputed, and cleared when the op is erased.
-  LOOM_OP_FLAG_EFFECTS_COUNTED = 1u << 2,
+  // The operation's direct semantic summaries have been recorded. This covers
+  // transitive region-effect counters and module-wide semantic inventories.
+  // Nested operations carry their own counted flags. Set when an op is
+  // finalized or use-def data is recomputed, and cleared when the op is
+  // erased.
+  LOOM_OP_FLAG_SUMMARIES_COUNTED = 1u << 2,
+
+  // At least one empty source line preceded the operation. Text printers
+  // canonicalize any authored run to exactly one empty line. This is
+  // non-semantic source presentation preserved across exact cloning.
+  LOOM_OP_FLAG_LEADING_BLANK_LINE = 1u << 3,
 };
 typedef uint8_t loom_op_flags_t;
+
+#define LOOM_OP_SOURCE_PRESENTATION_FLAG_MASK \
+  ((loom_op_flags_t)LOOM_OP_FLAG_LEADING_BLANK_LINE)
 
 // Generic semantic trait bitfield. Op vtables carry construction defaults and
 // op instances carry the effective trait word consumed by pass hot paths.
@@ -635,9 +648,10 @@ enum loom_trait_bits_e {
   LOOM_TRAIT_CONSTANT_LIKE = 1u << 5,
   // Op applies independently to each vector lane.
   LOOM_TRAIT_ELEMENTWISE = 1u << 6,
-  // Op does not need to observe a whole same-typed vector as one value; vector
-  // operands/results may be split into smaller vectors and cloned per chunk
-  // without changing the operation's semantics.
+  // Op does not need to observe a whole vector as one value; vector operands
+  // and its result have the same lane shape and may be split into matching
+  // lane intervals and cloned per interval without changing semantics. Element
+  // types may differ between operands and the result.
   LOOM_TRAIT_DECOMPOSABLE = 1u << 7,
   // Op defines a named symbol (function, global) rather than producing
   // SSA values. The printer omits the LHS result list (%name =) for
@@ -708,31 +722,69 @@ enum loom_trait_bits_e {
   // hot-path guard before asking a dialect-owned helper for exact source/result
   // ranges.
   LOOM_TRAIT_STORAGE_RELATION = 1u << 23,
+  // Op orders memory accesses without directly reading or writing a resource.
+  // Generic effect queries treat fences as read/write barriers so existing
+  // transforms preserve their ordering. Exact memory analyses may distinguish
+  // the ordering effect from storage-root interference.
+  LOOM_TRAIT_MEMORY_FENCE = 1u << 24,
+  // Op contributes compiler facts or scheduling metadata but has no runtime
+  // representation once it reaches target-low emission. This does not imply a
+  // source-order boundary or preservation policy. HINT already carries this
+  // property; this trait permits value-carrying fact identities to declare it.
+  LOOM_TRAIT_COMPILE_TIME_ONLY = 1u << 25,
+  // Op is valid only as a direct child of the module body. Module-owned
+  // operations use this independently from SYMBOL_DEFINE and do not enter the
+  // module symbol table.
+  LOOM_TRAIT_MODULE_SCOPE = 1u << 26,
+  // Op represents an explicit command-program effect such as dispatch or
+  // schedule composition. The op independently declares its exact or unknown
+  // effects; this trait classifies those effects instead of replacing them.
+  LOOM_TRAIT_COMMAND_EFFECT = 1u << 27,
+  // Op materializes a poison value. Poison represents an invalid observation
+  // sentinel that propagates through ordinary pure computation until erased
+  // or rejected at an observation boundary.
+  LOOM_TRAIT_POISON = 1u << 28,
 };
 typedef uint32_t loom_trait_flags_t;
 
-// Returns true if the trait flags indicate the op may write to memory
-// or has unknown effects. Works on raw bitfields to avoid redundant
+// Returns true if the trait flags indicate the op may write to memory, order
+// memory, or has unknown effects. Works on raw bitfields to avoid redundant
 // vtable lookups when the vtable is already resolved.
 static inline bool loom_traits_may_write(loom_trait_flags_t traits) {
-  return (traits & (LOOM_TRAIT_WRITES_MEMORY | LOOM_TRAIT_UNKNOWN_EFFECTS)) !=
-         0;
+  return (traits & (LOOM_TRAIT_WRITES_MEMORY | LOOM_TRAIT_UNKNOWN_EFFECTS |
+                    LOOM_TRAIT_MEMORY_FENCE)) != 0;
 }
 
 // Returns true if the trait flags indicate the op may observe memory or
 // external state in a way that prevents pure/deterministic reasoning.
 // NON_DETERMINISTIC is counted with read-like effects because CSE and purity
 // checks must treat it as an observation even when it does not read memory.
+// MEMORY_FENCE is counted so generic transforms preserve memory ordering.
 static inline bool loom_traits_may_read(loom_trait_flags_t traits) {
   return (traits & (LOOM_TRAIT_READS_MEMORY | LOOM_TRAIT_UNKNOWN_EFFECTS |
-                    LOOM_TRAIT_NON_DETERMINISTIC)) != 0;
+                    LOOM_TRAIT_NON_DETERMINISTIC | LOOM_TRAIT_MEMORY_FENCE)) !=
+         0;
 }
 
 // Returns true if the trait flags indicate the op may produce different
-// results for identical inputs, writes memory, or has unknown effects.
+// results for identical inputs, write memory, order memory, or have unknown
+// effects.
 static inline bool loom_traits_has_side_effects(loom_trait_flags_t traits) {
   return (traits & (LOOM_TRAIT_WRITES_MEMORY | LOOM_TRAIT_UNKNOWN_EFFECTS |
-                    LOOM_TRAIT_NON_DETERMINISTIC)) != 0;
+                    LOOM_TRAIT_NON_DETERMINISTIC | LOOM_TRAIT_MEMORY_FENCE)) !=
+         0;
+}
+
+// Returns true when the op carries an explicit memory ordering effect.
+static inline bool loom_traits_order_memory(loom_trait_flags_t traits) {
+  return (traits & LOOM_TRAIT_MEMORY_FENCE) != 0;
+}
+
+// Returns true when target-low emission must omit the op.
+static inline bool loom_traits_are_compile_time_only(
+    loom_trait_flags_t traits) {
+  return iree_any_bit_set(traits,
+                          LOOM_TRAIT_HINT | LOOM_TRAIT_COMPILE_TIME_ONLY);
 }
 
 // Returns true if the trait flags indicate the op's regions cannot
@@ -760,6 +812,11 @@ static inline bool loom_traits_are_safe_to_speculate(
 // execution site. This is independent of ordinary memory effects.
 static inline bool loom_traits_are_convergent(loom_trait_flags_t traits) {
   return (traits & LOOM_TRAIT_CONVERGENT) != 0;
+}
+
+// Returns true when the op materializes a poison value.
+static inline bool loom_traits_are_poison(loom_trait_flags_t traits) {
+  return (traits & LOOM_TRAIT_POISON) != 0;
 }
 
 // Returns true when result types carry op-owned SSA references that local
@@ -805,6 +862,12 @@ enum loom_op_vtable_flag_bits_e {
   // The op kind has generated constraints or type-transfer hooks that can
   // narrow dynamic type properties during table-driven type propagation.
   LOOM_OP_VTABLE_TYPE_PROPAGATION_CANDIDATE = 1u << 5,
+  // The op kind's assembly format contains an operand dictionary requiring
+  // structural verification against its keyed operand segment.
+  LOOM_OP_VTABLE_HAS_OPERAND_DICT = 1u << 6,
+  // The attr-only module-scope op is canonically projected by its generated
+  // string key instead of physical module-body order.
+  LOOM_OP_VTABLE_KEYED_MODULE_RECORD = 1u << 7,
 };
 typedef uint8_t loom_op_vtable_flags_t;
 
@@ -863,6 +926,37 @@ typedef iree_status_t (*loom_type_transfer_fn_t)(
     loom_type_transfer_context_t* context, const loom_module_t* module,
     loom_op_t* op);
 
+// Branch-edge truth values accepted by a condition-refinement descriptor.
+typedef uint8_t loom_condition_refinement_truth_flags_t;
+
+enum loom_condition_refinement_truth_flag_bits_e {
+  LOOM_CONDITION_REFINEMENT_TRUTH_TRUE = 1u << 0,
+  LOOM_CONDITION_REFINEMENT_TRUTH_FALSE = 1u << 1,
+};
+
+// Materializes a dialect-owned edge-local fact identity for |source|. The
+// rewriter insertion point is already positioned at the beginning of the
+// selected control-flow region. The callback returns the refined SSA value;
+// generic canonicalization rewrites only region-local uses to that value.
+typedef iree_status_t (*loom_condition_refinement_materialize_fn_t)(
+    loom_rewriter_t* rewriter, const loom_op_t* condition_op,
+    loom_value_id_t source, bool assumed_truth,
+    loom_value_id_t* out_refined_value);
+
+// Sparse dialect-owned description of an operand refinement implied by one
+// boolean query operation.
+typedef struct loom_condition_refinement_descriptor_t {
+  // Callback that materializes the fact identity.
+  loom_condition_refinement_materialize_fn_t materialize;
+  // Required non-variadic source operand ordinal on the condition op.
+  uint8_t source_operand_index;
+  // Truth edges on which materialization is valid.
+  loom_condition_refinement_truth_flags_t truth_flags;
+} loom_condition_refinement_descriptor_t;
+
+static_assert(sizeof(loom_condition_refinement_descriptor_t) == 16,
+              "condition refinement descriptors must remain compact");
+
 //===----------------------------------------------------------------------===//
 // FuncLike interface vtable
 //===----------------------------------------------------------------------===//
@@ -881,6 +975,15 @@ typedef iree_status_t (*loom_type_transfer_fn_t)(
 // CallLike interface vtable
 //===----------------------------------------------------------------------===//
 
+// Required callable-boundary policy shared by CallLike and FuncLike
+// implementations. Unspecified policy leaves the edge to the active pass.
+typedef enum loom_inline_policy_e {
+  LOOM_INLINE_POLICY_UNSPECIFIED = 0,
+  LOOM_INLINE_POLICY_INLINE = 1,
+  LOOM_INLINE_POLICY_NOINLINE = 2,
+  LOOM_INLINE_POLICY_COUNT_,
+} loom_inline_policy_t;
+
 typedef uint8_t loom_call_like_kind_t;
 
 enum loom_call_like_kind_e {
@@ -892,11 +995,15 @@ enum loom_call_like_kind_e {
   LOOM_CALL_LIKE_KIND_LOW_INTERNAL = 2,
   // Explicit semantic-to-target-low invocation of a selected low function.
   LOOM_CALL_LIKE_KIND_LOW_INVOKE = 3,
+  // Command-program materialization with specialization and binding operands.
+  LOOM_CALL_LIKE_KIND_COMMAND_PROGRAM = 4,
+  // Exact compile-time template implementation call.
+  LOOM_CALL_LIKE_KIND_TEMPLATE = 5,
 };
 
-// Interface descriptor for direct symbol call-like ops. The operand and result
-// offsets identify trailing call argument/result slices, so generic analyses
-// can read call edges without knowing dialect-specific op names.
+// Interface descriptor for direct symbol call-like ops. The operand field and
+// result offset identify trailing call argument/result slices, so generic
+// analyses can read call edges without knowing dialect-specific op names.
 typedef struct loom_call_like_vtable_t {
   // Index of the symbol ref attr that names the direct callee.
   uint8_t callee_attr_index;
@@ -912,14 +1019,19 @@ typedef struct loom_call_like_vtable_t {
   // absent.
   uint8_t inline_policy_attr_index;
 
-  // Operand offset where call arguments begin.
-  uint8_t operand_offset;
+  // Operand field where call arguments begin. All later operand fields are
+  // also part of the call argument slice.
+  uint8_t operand_field_index;
 
   // Result offset where call results begin.
   uint8_t result_offset;
 
   // Semantic class used by analyses to opt into the call shapes they own.
   loom_call_like_kind_t kind;
+
+  // Number of operand segments stored on segmented call ops. Zero when
+  // |operand_field_index| is a flat fixed or trailing variadic field.
+  uint8_t operand_segment_count;
 } loom_call_like_vtable_t;
 
 // Fat reference to a direct call-like op. 16 bytes, passed by value.
@@ -937,6 +1049,14 @@ typedef struct loom_call_like_t {
 //
 // Generated by c_tables.py from FuncLikeInterface declarations in the
 // Python DSL. One instance per implementing op kind.
+typedef uint32_t loom_func_like_flags_t;
+
+enum loom_func_like_flag_bits_e {
+  // The operation defines an executable kernel entry with an implicit artifact
+  // export and kernel ABI.
+  LOOM_FUNC_LIKE_FLAG_KERNEL_ENTRY = 1u << 0,
+};
+
 typedef struct loom_func_like_vtable_t {
   // Index of the symbol ref attr that names this function.
   uint8_t callee_attr_index;
@@ -951,6 +1071,11 @@ typedef struct loom_func_like_vtable_t {
 
   // Index of the optional target record attr. LOOM_ATTR_INDEX_NONE if absent.
   uint8_t target_attr_index;
+
+  // Index of the optional string key naming the intrinsic contract under which
+  // the function signature and body are represented. LOOM_ATTR_INDEX_NONE
+  // means the op does not expose an intrinsic representation contract.
+  uint8_t repr_contract_attr_index;
 
   // Index of the optional target ABI enum attr. LOOM_ATTR_INDEX_NONE if absent.
   uint8_t abi_attr_index;
@@ -990,23 +1115,39 @@ typedef struct loom_func_like_vtable_t {
   // Index of the predicate list attr. LOOM_ATTR_INDEX_NONE if absent.
   uint8_t predicates_attr_index;
 
+  // Index of the provider proof-requirement array attr. LOOM_ATTR_INDEX_NONE
+  // if absent.
+  uint8_t requires_attr_index;
+
+  // Index of the optional i64 attr counting leading arguments that participate
+  // in staged specialization. LOOM_ATTR_INDEX_NONE means there is no leading
+  // staged group.
+  uint8_t specialization_count_attr_index;
+
   // Body region index. LOOM_REGION_INDEX_NONE for bodyless ops
-  // (func.decl, func.ukernel) that only declare a signature.
+  // (func.decl, template.ukernel) that only declare a signature.
   uint8_t body_region_index;
 
-  // Index of the implements string attr (for template/ukernel dispatch).
-  // LOOM_ATTR_INDEX_NONE for def/decl.
-  uint8_t implements_attr_index;
+  // Index of the template-family symbol attr on implementation providers.
+  // LOOM_ATTR_INDEX_NONE for non-provider function-like operations.
+  uint8_t template_family_attr_index;
 
   // Index of the priority i64 attr (for template/ukernel dispatch).
   // LOOM_ATTR_INDEX_NONE for def/decl.
   uint8_t priority_attr_index;
 
-  // When true, function arguments are stored as the op's operands
-  // rather than as block arguments of the body region. Used for ops
-  // that declare a signature without providing a body — the parser
-  // stores FUNC_ARGS as operands when no REGION follows.
-  bool args_as_operands;
+  // Operand field containing the signature arguments for a bodyless
+  // declaration. LOOM_OPERAND_INDEX_NONE when arguments are entry block
+  // values in |body_region_index|.
+  uint8_t args_operand_field_index;
+
+  // Number of operand segments stored on bodyless declarations using
+  // segmented operands. Zero when |args_operand_field_index| is a flat
+  // trailing operand field or when arguments are body entry block values.
+  uint8_t args_operand_segment_count;
+
+  // Semantic roles intrinsic to the operation kind.
+  loom_func_like_flags_t flags;
 } loom_func_like_vtable_t;
 
 // Fat reference to a function-like op: pairs the op with its interface
@@ -1059,7 +1200,9 @@ typedef struct loom_target_like_t {
 // loop-invariant sinking, trip count analysis, loop transformation
 // passes) operate on any iterating op without knowing its specific
 // kind. All ops implementing this interface represent iteration over
-// a body region with optional loop-carried state.
+// a single-block body region. A variadic iter_args field, matching variadic
+// results, and the body terminator form one verified loop-carried state cycle.
+// Exactly one of a counted range or condition region controls iteration.
 //
 // Generated by c_tables.py from LoopLikeInterface declarations in
 // the Python DSL. One instance per implementing op kind.
@@ -1143,13 +1286,47 @@ typedef struct loom_region_branch_t {
 // MemoryAccess interface vtable
 //===----------------------------------------------------------------------===//
 
+typedef enum loom_memory_access_operation_kind_e {
+  LOOM_MEMORY_ACCESS_OPERATION_LOAD = 0,
+  LOOM_MEMORY_ACCESS_OPERATION_STORE = 1,
+  LOOM_MEMORY_ACCESS_OPERATION_PREFETCH = 2,
+  LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_REDUCE = 3,
+  LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_RMW = 4,
+  LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_CMPXCHG = 5,
+  LOOM_MEMORY_ACCESS_OPERATION_COUNT_ = 6,
+} loom_memory_access_operation_kind_t;
+
+// Returns true when the operation family carries written value operands such as
+// store values, atomic contributions, or compare-exchange pairs.
+static inline bool loom_memory_access_operation_kind_has_payload_operands(
+    loom_memory_access_operation_kind_t kind) {
+  return kind == LOOM_MEMORY_ACCESS_OPERATION_STORE ||
+         kind == LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_REDUCE ||
+         kind == LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_RMW ||
+         kind == LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_CMPXCHG;
+}
+
+// Returns true when the operation family performs an atomic memory update.
+static inline bool loom_memory_access_operation_kind_is_atomic(
+    loom_memory_access_operation_kind_t kind) {
+  return kind == LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_REDUCE ||
+         kind == LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_RMW ||
+         kind == LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_CMPXCHG;
+}
+
 // Interface descriptor for ops that access memory through a view-like operand.
 // Every field is an operand or attr index resolved from MemoryAccessInterface
 // declarations in the Python DSL. LOOM_*_INDEX_NONE marks roles that are not
 // part of a particular op shape.
 typedef struct loom_memory_access_vtable_t {
+  // Memory operation family represented by this op shape.
+  uint8_t operation_kind;
+
   // Index of the view or memory-object operand being accessed.
   uint8_t view_operand_index;
+
+  // Index of the physical byte-offset operand, or NONE for logical accesses.
+  uint8_t byte_offset_operand_index;
 
   // Index of the written value or atomic update contribution operand.
   uint8_t value_operand_index;
@@ -1169,8 +1346,8 @@ typedef struct loom_memory_access_vtable_t {
   // Index of the per-lane offsets operand.
   uint8_t offsets_operand_index;
 
-  // Operand offset of the variadic dynamic logical-origin index slice.
-  uint8_t indices_operand_offset;
+  // Operand field index of the dynamic logical-origin index slice.
+  uint8_t indices_operand_field_index;
 
   // Index of the static logical-origin indices attr.
   uint8_t static_indices_attr_index;
@@ -1202,8 +1379,9 @@ typedef struct loom_memory_access_t {
   // Operation implementing the MemoryAccess interface.
   const loom_op_t* op;
 
-  // Interface vtable for |op|.
-  const loom_memory_access_vtable_t* vtable;
+  // Operation vtable for |op|. The memory-access vtable hangs from this while
+  // segmented operand helpers use the same vtable to resolve field spans.
+  const loom_op_vtable_t* op_vtable;
 } loom_memory_access_t;
 
 //===----------------------------------------------------------------------===//
@@ -1262,8 +1440,8 @@ struct loom_op_vtable_t {
   uint8_t operand_descriptor_count;
   // Structural control-flow semantics declared by the op kind.
   loom_op_control_flow_flags_t control_flow_flags;
-  // Reserved for future compact control-flow metadata. Always zero.
-  uint8_t control_flow_reserved;
+  // Bitmask of semantic operand roles present on this op kind.
+  uint8_t operand_role_mask;
   // Selector operand index for multi-successor terminators. Valid only when
   // control_flow_flags has LOOM_OP_CONTROL_FLOW_HAS_SUCCESSOR_SELECTOR.
   uint16_t successor_selector_operand_index;
@@ -1286,7 +1464,10 @@ struct loom_op_vtable_t {
   const loom_bstring_t* instance_flags_case_names;
   uint16_t format_element_count;
   uint8_t instance_flags_case_count;
-  // 5 bytes padding to 128.
+  // String attribute that identifies a keyed module record. Valid when
+  // LOOM_OP_VTABLE_KEYED_MODULE_RECORD is set.
+  uint8_t module_record_key_attr_index;
+  // 4 bytes padding to 128.
 
   // --- Cache line 3: interface and placement pointers (128-191) ---
   //
@@ -1320,6 +1501,14 @@ static inline uint8_t loom_op_vtable_operand_descriptor_count(
   const uint8_t variadic_count =
       (vtable->vtable_flags & LOOM_OP_VTABLE_VARIADIC_OPERANDS) ? 1 : 0;
   return (uint8_t)(vtable->fixed_operand_count + variadic_count);
+}
+
+// Returns true when the op is attr-only module metadata with a generated
+// canonical key.
+static inline bool loom_op_vtable_is_keyed_module_record(
+    const loom_op_vtable_t* vtable) {
+  return vtable && iree_any_bit_set(vtable->vtable_flags,
+                                    LOOM_OP_VTABLE_KEYED_MODULE_RECORD);
 }
 
 // Returns the full dotted name as a string view (e.g., "test.addi").
@@ -1378,7 +1567,7 @@ typedef struct loom_op_t {
   uint8_t successor_count;
   // Number of attributes in trailing storage.
   uint8_t attribute_count;
-  // Per-op lifecycle/worklist flags.
+  // Per-op lifecycle, worklist, and source-presentation flags.
   loom_op_flags_t flags;
   // Per-op-instance flags: fast-math flags for float ops, overflow
   // flags for integer ops. Declared via the Flags format element in
@@ -1518,6 +1707,17 @@ static inline const uint16_t* loom_op_const_operand_segment_counts(
 // Sentinel region_index value for blocks not attached to a region.
 #define LOOM_BLOCK_REGION_INDEX_INVALID UINT16_MAX
 
+enum loom_block_flag_bits_e {
+  // At least one empty source line preceded the explicit block label. Text
+  // printers canonicalize any authored run to exactly one empty line. This is
+  // non-semantic source presentation preserved across exact cloning.
+  LOOM_BLOCK_FLAG_LEADING_BLANK_LINE = 1u << 0,
+};
+typedef uint16_t loom_block_flags_t;
+
+#define LOOM_BLOCK_SOURCE_PRESENTATION_FLAG_MASK \
+  ((loom_block_flags_t)LOOM_BLOCK_FLAG_LEADING_BLANK_LINE)
+
 // A basic block: a linear sequence of operations with optional
 // block arguments.
 //
@@ -1534,7 +1734,7 @@ typedef struct loom_block_t {
   // Number of live operations linked into this block.
   uint32_t op_count;
   // Per-block instance flags.
-  uint16_t flags;
+  loom_block_flags_t flags;
   // Position in parent_region->blocks, or LOOM_BLOCK_REGION_INDEX_INVALID.
   uint16_t region_index;
   // Block argument value IDs.
@@ -1602,6 +1802,18 @@ enum loom_region_instance_flag_bits_e {
 };
 typedef uint16_t loom_region_instance_flags_t;
 
+// Source presentation recorded for a region. These flags do not affect
+// program semantics or structural analyses. Values are serialized directly
+// and are therefore bytecode-stable.
+enum loom_region_source_flag_bits_e {
+  // The region was introduced by an explicit `asm` marker in source text.
+  LOOM_REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM = 1u << 0,
+};
+typedef uint16_t loom_region_source_flags_t;
+
+#define LOOM_REGION_SOURCE_FLAG_MASK \
+  ((loom_region_source_flags_t)LOOM_REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM)
+
 // A region: an ordered list of blocks. Used for function bodies,
 // loop bodies (scf.for), conditional branches (scf.if then/else).
 // Regions nest: a region's block contains ops that may have their
@@ -1619,8 +1831,8 @@ typedef struct loom_region_t {
   uint16_t block_capacity;
   // Per-region structural flags.
   loom_region_instance_flags_t flags;
-  // Reserved for future flags while keeping effect counters aligned.
-  uint16_t reserved;
+  // Non-semantic source presentation retained across exact round trips.
+  loom_region_source_flags_t source_flags;
   // Transitive count of read-like effects in all live ops nested in this
   // region. READS_MEMORY, NON_DETERMINISTIC, and UNKNOWN_EFFECTS contribute.
   uint32_t read_effect_count;
@@ -1760,19 +1972,18 @@ typedef enum loom_symbol_kind_e {
   LOOM_SYMBOL_NONE = 0,
   LOOM_SYMBOL_FUNC_DEF = 1,
   LOOM_SYMBOL_FUNC_DECL = 2,
-  LOOM_SYMBOL_FUNC_TEMPLATE = 3,
-  LOOM_SYMBOL_FUNC_UKERNEL = 4,
+  LOOM_SYMBOL_TEMPLATE_DECL = 3,
+  LOOM_SYMBOL_TEMPLATE_DEF = 4,
+  LOOM_SYMBOL_TEMPLATE_UKERNEL = 5,
   // Sentinel: first non-function-like symbol kind.
-  LOOM_SYMBOL_FUNC_COUNT_ = 5,
-  LOOM_SYMBOL_GLOBAL = 5,
-  LOOM_SYMBOL_EXECUTABLE = 6,
-  LOOM_SYMBOL_RECORD = 7,
+  LOOM_SYMBOL_FUNC_COUNT_ = 6,
+  LOOM_SYMBOL_GLOBAL = 6,
+  LOOM_SYMBOL_EXECUTABLE = 7,
+  LOOM_SYMBOL_RECORD = 8,
   LOOM_SYMBOL_COUNT_,
 } loom_symbol_kind_e;
 
-// Returns true if the symbol kind is a function-like (def, decl,
-// template, or ukernel). Function-like symbols carry a defining_op
-// pointer to the op that implements them.
+// Returns true if the symbol kind carries a function-like signature.
 static inline bool loom_symbol_kind_is_function_like(loom_symbol_kind_t kind) {
   return kind >= LOOM_SYMBOL_FUNC_DEF && kind < LOOM_SYMBOL_FUNC_COUNT_;
 }
@@ -1826,14 +2037,128 @@ typedef struct loom_string_table_t {
   iree_string_view_t* entries;
 } loom_string_table_t;
 
-// Value table. Cache-line-aligned entries for fast iteration.
-// All values (op results and block arguments) in a module live here.
+// Index into the module's type-use record table.
+typedef uint32_t loom_type_use_id_t;
+#define LOOM_TYPE_USE_ID_INVALID ((loom_type_use_id_t)UINT32_MAX)
+
+// Per-value heads for the type-use adjacency lists.
+typedef struct loom_value_type_use_heads_t {
+  // First record whose referenced_value_id is this value.
+  loom_type_use_id_t first_incoming_use_id;
+  // First record whose user_value_id is this value.
+  loom_type_use_id_t first_outgoing_use_id;
+} loom_value_type_use_heads_t;
+
+// Number of module values stored in each stable value segment.
+#define LOOM_VALUE_SEGMENT_CAPACITY 256u
+
+// Shift mapping a value ID to its value-segment index.
+#define LOOM_VALUE_SEGMENT_SHIFT 8u
+
+// Mask mapping a value ID to its row within a value segment.
+#define LOOM_VALUE_SEGMENT_MASK (LOOM_VALUE_SEGMENT_CAPACITY - 1u)
+
+static_assert((1u << LOOM_VALUE_SEGMENT_SHIFT) == LOOM_VALUE_SEGMENT_CAPACITY,
+              "value segment capacity must match its index shift");
+
+// Stable storage for one range of module value IDs.
+//
+// Semantic values, reusable u32 scratch, and type-use adjacency heads share
+// one segment because they have the same value-ID lifetime and cardinality.
+// The structure-of-arrays layout keeps hot value iteration contiguous while
+// fitting the complete segment in a 32 KiB compiler workspace block.
+typedef iree_alignas(64) struct loom_value_segment_t {
+  // Cache-line-aligned semantic value rows.
+  loom_value_t values[LOOM_VALUE_SEGMENT_CAPACITY];
+  // Reusable compiler scratch indexed by the same value rows.
+  uint32_t u32_scratch[LOOM_VALUE_SEGMENT_CAPACITY];
+  // Type-use adjacency heads indexed by the same value rows.
+  loom_value_type_use_heads_t type_use_heads[LOOM_VALUE_SEGMENT_CAPACITY];
+} loom_value_segment_t;
+
+static_assert(sizeof(loom_value_segment_t) == 19456,
+              "value segment must fit in one workspace block");
+
+// Value table. All values live in stable, cache-line-aligned segments and are
+// accessed by dense module value ID.
 typedef struct loom_value_table_t {
+  // Number of defined module values.
   iree_host_size_t count;
-  iree_host_size_t capacity;
-  // 64-byte aligned value entries.
-  loom_value_t* entries;
+  // Stable arena-backed value-segment directory.
+  loom_segmented_storage_t segments;
 } loom_value_table_t;
+
+// Returns the number of value rows allocated across all stable segments.
+static inline iree_host_size_t loom_value_table_capacity(
+    const loom_value_table_t* table) {
+  return (iree_host_size_t)table->segments.segment_count *
+         LOOM_VALUE_SEGMENT_CAPACITY;
+}
+
+// Returns the mutable segment containing |value_id|.
+static inline loom_value_segment_t* loom_value_table_segment_for_id(
+    loom_value_table_t* table, loom_value_id_t value_id) {
+  IREE_ASSERT(value_id < table->count);
+  return (loom_value_segment_t*)loom_segmented_storage_segment(
+      &table->segments, value_id >> LOOM_VALUE_SEGMENT_SHIFT);
+}
+
+// Returns the const segment containing |value_id|.
+static inline const loom_value_segment_t* loom_value_table_const_segment_for_id(
+    const loom_value_table_t* table, loom_value_id_t value_id) {
+  IREE_ASSERT(value_id < table->count);
+  return (const loom_value_segment_t*)loom_segmented_storage_const_segment(
+      &table->segments, value_id >> LOOM_VALUE_SEGMENT_SHIFT);
+}
+
+// Returns the mutable semantic value row for |value_id|.
+static inline loom_value_t* loom_value_table_value(loom_value_table_t* table,
+                                                   loom_value_id_t value_id) {
+  loom_value_segment_t* segment =
+      loom_value_table_segment_for_id(table, value_id);
+  return &segment->values[value_id & LOOM_VALUE_SEGMENT_MASK];
+}
+
+// Returns the const semantic value row for |value_id|.
+static inline const loom_value_t* loom_value_table_const_value(
+    const loom_value_table_t* table, loom_value_id_t value_id) {
+  const loom_value_segment_t* segment =
+      loom_value_table_const_segment_for_id(table, value_id);
+  return &segment->values[value_id & LOOM_VALUE_SEGMENT_MASK];
+}
+
+// Returns the mutable u32 scratch row for |value_id|.
+static inline uint32_t* loom_value_table_u32_scratch(loom_value_table_t* table,
+                                                     loom_value_id_t value_id) {
+  loom_value_segment_t* segment =
+      loom_value_table_segment_for_id(table, value_id);
+  return &segment->u32_scratch[value_id & LOOM_VALUE_SEGMENT_MASK];
+}
+
+// Returns the const u32 scratch row for |value_id|.
+static inline const uint32_t* loom_value_table_const_u32_scratch(
+    const loom_value_table_t* table, loom_value_id_t value_id) {
+  const loom_value_segment_t* segment =
+      loom_value_table_const_segment_for_id(table, value_id);
+  return &segment->u32_scratch[value_id & LOOM_VALUE_SEGMENT_MASK];
+}
+
+// Returns the mutable type-use adjacency heads for |value_id|.
+static inline loom_value_type_use_heads_t* loom_value_table_type_use_heads(
+    loom_value_table_t* table, loom_value_id_t value_id) {
+  loom_value_segment_t* segment =
+      loom_value_table_segment_for_id(table, value_id);
+  return &segment->type_use_heads[value_id & LOOM_VALUE_SEGMENT_MASK];
+}
+
+// Returns the const type-use adjacency heads for |value_id|.
+static inline const loom_value_type_use_heads_t*
+loom_value_table_const_type_use_heads(const loom_value_table_t* table,
+                                      loom_value_id_t value_id) {
+  const loom_value_segment_t* segment =
+      loom_value_table_const_segment_for_id(table, value_id);
+  return &segment->type_use_heads[value_id & LOOM_VALUE_SEGMENT_MASK];
+}
 
 // Active state for module value-id indexed u32 scratch storage.
 typedef enum loom_value_u32_scratch_state_e {
@@ -1852,16 +2177,14 @@ typedef enum loom_value_u32_scratch_state_e {
 
 // Compiler scratch mapping module value IDs to one active u32 payload.
 //
-// The entries mirror the value table capacity and are reused by phase frames
-// that need value-id keyed scratch. The table does not describe semantic IR
-// state: value IDs remain the durable identity, while payloads are transient
-// facts assigned by the active frame. Only one typed frame may acquire the
-// table at a time.
+// Scratch rows share the stable value segments and are reused by phase frames
+// that need value-id keyed storage. They do not describe semantic IR state:
+// value IDs remain the durable identity, while payloads are transient facts
+// assigned by the active frame. Only one typed frame may acquire the rows at a
+// time.
 typedef struct loom_value_u32_scratch_t {
-  // Dense value_id -> typed u32 payload entries.
-  uint32_t* values_by_value_id;
-  // Number of entries allocated in values_by_value_id.
-  iree_host_size_t capacity;
+  // Value table whose segments own the u32 payload rows.
+  loom_value_table_t* value_table;
   // Active ownership and payload interpretation state.
   loom_value_u32_scratch_state_t state;
 } loom_value_u32_scratch_t;
@@ -1884,19 +2207,9 @@ typedef struct loom_type_table_t {
   iree_host_size_t count;
   iree_host_size_t capacity;
   loom_type_t* entries;
+  // Structural hashes parallel to entries.
+  uint32_t* hashes;
 } loom_type_table_t;
-
-// Index into the module's type-use record table.
-typedef uint32_t loom_type_use_id_t;
-#define LOOM_TYPE_USE_ID_INVALID ((loom_type_use_id_t)UINT32_MAX)
-
-// Per-value heads for the type-use adjacency lists.
-typedef struct loom_value_type_use_heads_t {
-  // First record whose referenced_value_id is this value.
-  loom_type_use_id_t first_incoming_use_id;
-  // First record whose user_value_id is this value.
-  loom_type_use_id_t first_outgoing_use_id;
-} loom_value_type_use_heads_t;
 
 // A reference from one SSA value's type to another SSA value.
 //
@@ -1918,12 +2231,10 @@ typedef struct loom_type_use_t {
   loom_type_use_id_t previous_outgoing_use_id;
 } loom_type_use_t;
 
-// Dense side metadata for SSA references embedded in value types.
+// Side metadata for SSA references embedded in value types.
 typedef struct loom_type_use_table_t {
-  // Number of per-value head entries allocated in value_heads.
-  iree_host_size_t value_capacity;
-  // Dense per-value incoming/outgoing list heads, indexed by value ID.
-  loom_value_type_use_heads_t* value_heads;
+  // Value table whose segments own the per-value adjacency heads.
+  loom_value_table_t* value_table;
   // Number of record slots ever allocated from records.
   iree_host_size_t record_count;
   // Number of record slots allocated in records.
@@ -1942,11 +2253,12 @@ typedef struct loom_type_use_table_t {
 typedef enum loom_comment_owner_kind_e {
   LOOM_COMMENT_OWNER_OP = 0,
   LOOM_COMMENT_OWNER_BLOCK = 1,
+  LOOM_COMMENT_OWNER_MODULE = 2,
 } loom_comment_owner_kind_t;
 
-// Leading comments attached to one operation or block label.
+// Source comments attached to the file, an operation, or a block label.
 typedef struct loom_comment_attachment_t {
-  // Operation or block pointer that owns the leading comments.
+  // IR object pointer that owns the source comments.
   const void* owner;
   // Kind tag describing the pointer stored in owner.
   loom_comment_owner_kind_t owner_kind;
@@ -1954,7 +2266,7 @@ typedef struct loom_comment_attachment_t {
   uint16_t reserved;
   // Number of line comments stored in comments.
   uint16_t comment_count;
-  // Module-arena-owned post-// comment payloads in source order.
+  // Module-owned comment payloads without // or its separator space.
   iree_string_view_t* comments;
 } loom_comment_attachment_t;
 
@@ -1968,7 +2280,7 @@ typedef struct loom_comment_table_t {
   loom_comment_attachment_t* entries;
 } loom_comment_table_t;
 
-// Open-addressing hash table for deduplicating strings and types during
+// Open-addressing hash table for deduplicating module-owned values during
 // construction. Arena-allocated, freed when the module is destroyed.
 // Lazy-initialized: capacity 0 means uninitialized, first use allocates.
 typedef struct loom_intern_table_t {
@@ -2023,8 +2335,8 @@ typedef struct loom_module_t {
   // Allocator used to allocate and free the module struct itself.
   iree_allocator_t allocator;
 
-  // Arena backing all IR storage. Bump-pointer allocation during
-  // construction. O(1) destruction. Grows in large blocks (~64KB).
+  // Arena backing all IR storage. Bump-pointer allocation during construction
+  // and O(1) destruction through reusable workspace blocks.
   iree_arena_allocator_t arena;
 
   // Interned strings (SSA names, function names, attribute keys).
@@ -2037,8 +2349,7 @@ typedef struct loom_module_t {
   // by the encoding_id field in loom_type_t (0 = no encoding).
   loom_encoding_table_t encodings;
 
-  // All SSA values (op results and block arguments).
-  // 64-byte aligned for cache-line access.
+  // All SSA values in stable, cache-line-aligned segments.
   loom_value_table_t values;
 
   // Reusable compiler scratch indexed by value ID.
@@ -2060,7 +2371,7 @@ typedef struct loom_module_t {
   // reference LOOM_LOCATION_UNKNOWN (0).
   loom_location_table_t locations;
 
-  // Source comments attached to operations and explicit block labels.
+  // Source comments attached to this file, operations, and block labels.
   loom_comment_table_t comments;
 
   // Module body: a region with a single entry block. All top-level symbol ops
@@ -2068,11 +2379,54 @@ typedef struct loom_module_t {
   // loom_module_allocate().
   loom_region_t* body;
 
-  // Intern hash tables for deduplicating strings and types during
+  // Intern hash tables for deduplicating strings, types, and encodings during
   // construction. Arena-allocated, lazy-initialized on first use.
   loom_intern_table_t string_intern;
   loom_intern_table_t type_intern;
+  loom_intern_table_t encoding_intern;
+
+  // One-based IDs of the two most-recent exact type candidates, newest first.
+  // Zero denotes an empty slot and keeps zero-initialized modules inert.
+  uint32_t recent_exact_type_ordinals[2];
+
+  // One-based IDs of the two most-recent typed-register types, newest first.
+  // Zero denotes an empty slot and keeps zero-initialized modules inert.
+  uint32_t recent_register_type_ordinals[2];
+
+  // Number of live poison-materializing operations in the module.
+  uint32_t poison_op_count;
 } loom_module_t;
+
+// Returns true when the module contains any live poison materializer.
+static inline bool loom_module_has_poison(const loom_module_t* module) {
+  return module && module->poison_op_count != 0;
+}
+
+// Returns a pointer to a value by ID.
+static inline loom_value_t* loom_module_value(const loom_module_t* module,
+                                              loom_value_id_t value_id) {
+  return loom_value_table_value((loom_value_table_t*)&module->values, value_id);
+}
+
+// Returns the type of a value by ID.
+static inline loom_type_t loom_module_value_type(const loom_module_t* module,
+                                                 loom_value_id_t value_id) {
+  return loom_module_value(module, value_id)->type;
+}
+
+// Returns the optional SSA display name for |value_id|, or an empty string view
+// when the value is anonymous or invalid.
+static inline iree_string_view_t loom_module_value_name(
+    const loom_module_t* module, loom_value_id_t value_id) {
+  if (module == NULL || value_id >= module->values.count) {
+    return iree_string_view_empty();
+  }
+  const loom_string_id_t name_id = loom_module_value(module, value_id)->name_id;
+  if (name_id == LOOM_STRING_ID_INVALID || name_id >= module->strings.count) {
+    return iree_string_view_empty();
+  }
+  return module->strings.entries[name_id];
+}
 
 //===----------------------------------------------------------------------===//
 // Enumeration macros

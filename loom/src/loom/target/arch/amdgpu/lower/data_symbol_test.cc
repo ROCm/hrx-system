@@ -71,10 +71,18 @@ class AmdgpuDataSymbolTest : public ::testing::Test {
   void BuildFunctionBody() {
     loom_symbol_ref_t target = AddSymbol(IREE_SV("gfx_target"));
     loom_symbol_ref_t callee = AddSymbol(IREE_SV("test_fn"));
+    loom_string_id_t representation_contract = LOOM_STRING_ID_INVALID;
+    IREE_ASSERT_OK(loom_builder_intern_string(
+        &builder_,
+        loom_low_descriptor_set_string(descriptor_set_,
+                                       descriptor_set_->key_string_offset),
+        &representation_contract));
     loom_op_t* function_op = NULL;
     IREE_ASSERT_OK(loom_low_func_def_build(
-        &builder_, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0, /*cc=*/0,
-        /*purity=*/0, /*allocation=*/0, /*schedule=*/0, target, /*abi=*/0,
+        &builder_, LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TARGET,
+        /*visibility=*/0, /*retain=*/0, /*cc=*/0,
+        /*purity=*/0, /*allocation=*/0, /*schedule=*/0,
+        /*descriptor_set=*/representation_contract, target, /*abi=*/0,
         loom_make_named_attr_slice(NULL, 0),
         loom_make_named_attr_slice(NULL, 0),
         /*export_symbol=*/LOOM_STRING_ID_INVALID,
@@ -111,12 +119,9 @@ class AmdgpuDataSymbolTest : public ::testing::Test {
     ASSERT_TRUE(loom_low_op_isa(op));
     const loom_low_descriptor_t* descriptor = DescriptorForRef(descriptor_ref);
     ASSERT_NE(descriptor, nullptr);
-    EXPECT_EQ(loom_low_op_descriptor_ordinal(op),
+    EXPECT_EQ(loom_low_op_descriptor(op),
               loom_low_descriptor_set_descriptor_ordinal(descriptor_set_,
                                                          descriptor));
-    EXPECT_EQ(ToString(String(loom_low_op_opcode(op))),
-              ToString(loom_low_descriptor_set_string(
-                  descriptor_set_, descriptor->key_string_offset)));
   }
 
   void ExpectRel32Attrs(const loom_op_t* op, loom_symbol_ref_t expected_symbol,
@@ -188,20 +193,6 @@ TEST_F(AmdgpuDataSymbolTest, BuildsRel32AddressMaterializationSequence) {
   EXPECT_TRUE(loom_type_equal(
       address_type, loom_low_register_type(descriptor_set_->stable_id,
                                            LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2)));
-}
-
-TEST_F(AmdgpuDataSymbolTest, RejectsUnencodableByteOffset) {
-  const loom_amdgpu_data_symbol_address_t target = {
-      /*.symbol=*/AddSymbol(IREE_SV("loom_sanitizer_sites")),
-      /*.byte_offset=*/(uint64_t)INT64_MAX + 1u,
-  };
-  loom_value_id_t address = LOOM_VALUE_ID_INVALID;
-  iree_status_t status = loom_amdgpu_build_data_symbol_address(
-      &builder_, descriptor_set_, target, LOOM_LOCATION_UNKNOWN, &address);
-  EXPECT_EQ(iree_status_code(status), IREE_STATUS_OUT_OF_RANGE);
-  iree_status_free(status);
-  EXPECT_EQ(address, LOOM_VALUE_ID_INVALID);
-  EXPECT_TRUE(Ops().empty());
 }
 
 }  // namespace

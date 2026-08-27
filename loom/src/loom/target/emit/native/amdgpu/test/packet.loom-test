@@ -2,7 +2,7 @@
 
 amdgpu.target<gfx1100> @gfx11_target
 
-low.func.def target(@gfx11_target) @gfx11_packet_json(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %out: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_packet_json(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %out: reg<amdgpu.sgpr x2>) asm {
   %sum = v_add_u32 %lhs, %rhs
   global_store_b32_saddr %lhs, %sum, %out {offset = 0}
   return

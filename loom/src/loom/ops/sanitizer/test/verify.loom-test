@@ -122,7 +122,7 @@ func.def @race_access_nonatomic_rejects_ordering(%layout: encoding<layout>, %vie
 
 func.def @race_sync_rejects_relaxed_ordering() {
   // ERROR@+1: STRUCTURE/014 "ordering" "0" "acquire, release, acq_rel, or seq_cst ordering"
-  sanitizer.race.sync<workgroup> {ordering = relaxed, scope = workgroup}
+  sanitizer.race.sync<workgroup> scope(workgroup) ordering(relaxed)
   func.return
 }
 
@@ -184,8 +184,8 @@ func.def @op_float_predicate_rejects_integer(%x: index) {
 
 // ====
 
-func.def @layout_missing_result_layout(%m: index, %layout: encoding<layout>, %view: view<[%m]xf32, %layout>) -> (view<16xf32>) {
-  // ERROR@+1: ENCODING/001 "result type layout" "view type"
+// Layout assertions may refine a dynamic source layout to native dense.
+func.def @layout_native_dense_result(%m: index, %layout: encoding<layout>, %view: view<[%m]xf32, %layout>) -> (view<16xf32>) {
   %checked = sanitizer.assert.layout %view : view<[%m]xf32, %layout> -> view<16xf32>
   func.return %checked : view<16xf32>
 }

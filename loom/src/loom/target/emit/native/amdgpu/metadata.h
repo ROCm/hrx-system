@@ -17,6 +17,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/string_builder.h"
+#include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/types.h"
 
 #ifdef __cplusplus
@@ -76,6 +77,13 @@ typedef struct loom_amdgpu_metadata_kernel_t {
   loom_target_workgroup_size_t required_workgroup_size;
   // True when |required_workgroup_size| should be emitted.
   bool has_required_workgroup_size;
+  // Required nontrivial workgroup-cluster size, when
+  // |has_workgroup_cluster_size| is true.
+  loom_target_workgroup_cluster_size_t workgroup_cluster_size;
+  // True when |workgroup_cluster_size| should be emitted as `.cluster_dims`.
+  bool has_workgroup_cluster_size;
+  // Target-required AMDHSA kernel metadata extensions.
+  loom_amdgpu_metadata_string_property_set_t target_extensions;
   // Argument records in kernarg offset order.
   const loom_amdgpu_metadata_argument_t* arguments;
   // Number of records in |arguments|.
@@ -83,7 +91,8 @@ typedef struct loom_amdgpu_metadata_kernel_t {
 } loom_amdgpu_metadata_kernel_t;
 
 typedef struct loom_amdgpu_code_object_metadata_t {
-  // Full target ID string, such as `amdgcn-amd-amdhsa--gfx1100`.
+  // Full target ID string, such as
+  // `amdgcn-amd-amdhsa--gfx11-generic`.
   iree_string_view_t target;
   // Kernel records in this code object.
   const loom_amdgpu_metadata_kernel_t* kernels;
@@ -97,6 +106,10 @@ iree_status_t loom_amdgpu_metadata_append_assembly(
     iree_string_builder_t* builder);
 
 // Appends the MessagePack payload for the AMDGPU ELF metadata note.
+//
+// Map keys use the same lexicographic order produced by the ROCr loader. This
+// preserves string virtual addresses when ROCr canonicalizes the metadata into
+// the loaded code-object allocation.
 //
 // The returned bytes are not a complete ELF note. Direct object emitters must
 // wrap the payload in an `AMDGPU` note with type NT_AMDGPU_METADATA.

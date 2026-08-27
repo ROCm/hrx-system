@@ -238,9 +238,8 @@ TEST(ExecutableXclbinTest, ParsesXadxXclbinDefinitions) {
       },
       &executable_data));
 
-  iree_hal_executable_params_t params;
-  iree_hal_executable_params_initialize(&params);
-  params.executable_format = IREE_SV("amdxdna-xclbin-fb");
+  iree_hal_executable_load_params_t params;
+  iree_hal_executable_load_params_initialize(&params);
   params.executable_data =
       iree_make_const_byte_span(executable_data.data(), executable_data.size());
 
@@ -282,9 +281,8 @@ TEST(ExecutableXclbinTest, LinuxCapsDoNotSelectPartialElfContext) {
         {{{10, 11}, {}, {0, 0, 4}}}}},
       &executable_data));
 
-  iree_hal_executable_params_t params;
-  iree_hal_executable_params_initialize(&params);
-  params.executable_format = IREE_SV("amdxdna-xclbin-fb");
+  iree_hal_executable_load_params_t params;
+  iree_hal_executable_load_params_initialize(&params);
   params.executable_data =
       iree_make_const_byte_span(executable_data.data(), executable_data.size());
 
@@ -352,9 +350,8 @@ static void ExpectInvalidXadxExecutable(
     const std::vector<TestXadxEntryPointDef>& entry_points) {
   std::vector<uint8_t> executable_data;
   IREE_ASSERT_OK(MakeXadxExecutable(xclbins, entry_points, &executable_data));
-  iree_hal_executable_params_t params;
-  iree_hal_executable_params_initialize(&params);
-  params.executable_format = IREE_SV("amdxdna-xclbin-fb");
+  iree_hal_executable_load_params_t params;
+  iree_hal_executable_load_params_initialize(&params);
   params.executable_data =
       iree_make_const_byte_span(executable_data.data(), executable_data.size());
   iree_hal_executable_t* base_executable = nullptr;

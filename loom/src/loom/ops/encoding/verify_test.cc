@@ -29,27 +29,6 @@ using ::loom::testing::ExpectTypeParam;
 using ::loom::testing::FindDiagnostic;
 using ::loom::testing::GetStringParam;
 
-static const loom_named_attr_t* FindDynamicParamName(
-    const loom_module_t* module,
-    const loom_encoding_define_param_view_t* params, iree_string_view_t name) {
-  for (iree_host_size_t i = 0; i < params->dynamic_names.count; ++i) {
-    const loom_named_attr_t* entry = &params->dynamic_names.entries[i];
-    iree_string_view_t entry_name = module->strings.entries[entry->name_id];
-    if (iree_string_view_equal(entry_name, name)) return entry;
-  }
-  return nullptr;
-}
-
-static bool DynamicParamValue(const loom_encoding_define_param_view_t* params,
-                              const loom_named_attr_t* name_entry,
-                              loom_value_id_t* out_value) {
-  if (!name_entry || name_entry->value.kind != LOOM_ATTR_I64) return false;
-  int64_t ordinal = name_entry->value.i64;
-  if (ordinal < 0 || ordinal >= params->dynamic_values.count) return false;
-  *out_value = params->dynamic_values.values[ordinal];
-  return true;
-}
-
 static iree_status_t EmitEncodingParamError(iree_diagnostic_emitter_t emitter,
                                             const loom_op_t* op,
                                             const loom_error_def_t* error,
@@ -60,6 +39,7 @@ static iree_status_t EmitEncodingParamError(iree_diagnostic_emitter_t emitter,
       loom_param_string(param_name),
   };
   loom_diagnostic_emission_t emission = {
+      /*.module=*/nullptr,
       /*.op=*/op,
       /*.error=*/error,
       /*.params=*/diagnostic_params,
@@ -68,67 +48,37 @@ static iree_status_t EmitEncodingParamError(iree_diagnostic_emitter_t emitter,
   return iree_diagnostic_emit(emitter, &emission);
 }
 
-static iree_status_t EmitEncodingParamTypeError(
-    iree_diagnostic_emitter_t emitter, const loom_op_t* op,
-    iree_string_view_t encoding_name, iree_string_view_t param_name,
-    loom_type_t actual_type, iree_string_view_t expected_type) {
-  loom_diagnostic_param_t diagnostic_params[] = {
-      loom_param_string(encoding_name),
-      loom_param_string(param_name),
-      loom_param_type(actual_type),
-      loom_param_string(expected_type),
-  };
-  loom_diagnostic_emission_t emission = {
-      /*.op=*/op,
-      /*.error=*/loom_error_def_lookup(LOOM_ERROR_DOMAIN_ENCODING, 9),
-      /*.params=*/diagnostic_params,
-      /*.param_count=*/IREE_ARRAYSIZE(diagnostic_params),
-  };
-  return iree_diagnostic_emit(emitter, &emission);
-}
-
 static iree_status_t VerifyRequiresLayoutDefine(
     const loom_module_t* module, const loom_op_t* op,
-    const loom_encoding_define_param_view_t* params,
+    const loom_encoding_define_resolved_params_t* params,
     iree_diagnostic_emitter_t emitter) {
-  iree_string_view_t encoding_name = IREE_SV("requires_layout");
-  iree_string_view_t layout_name = IREE_SV("layout");
-
-  for (iree_host_size_t i = 0; i < params->dynamic_names.count; ++i) {
-    const loom_named_attr_t* entry = &params->dynamic_names.entries[i];
-    iree_string_view_t param_name = module->strings.entries[entry->name_id];
-    if (!iree_string_view_equal(param_name, layout_name)) {
-      return EmitEncodingParamError(
-          emitter, op, loom_error_def_lookup(LOOM_ERROR_DOMAIN_ENCODING, 8),
-          encoding_name, param_name);
-    }
-  }
-
-  const loom_named_attr_t* layout_entry =
-      FindDynamicParamName(module, params, layout_name);
-  if (!layout_entry) {
+  if (!loom_encoding_define_has_dynamic_parameter(params, 0)) {
     return EmitEncodingParamError(
         emitter, op, loom_error_def_lookup(LOOM_ERROR_DOMAIN_ENCODING, 7),
-        encoding_name, layout_name);
-  }
-
-  loom_value_id_t layout_value = LOOM_VALUE_ID_INVALID;
-  if (!DynamicParamValue(params, layout_entry, &layout_value)) {
-    return iree_ok_status();
-  }
-
-  loom_type_t actual_type = loom_module_value_type(module, layout_value);
-  if (!loom_type_is_encoding(actual_type)) {
-    return EmitEncodingParamTypeError(emitter, op, encoding_name, layout_name,
-                                      actual_type, IREE_SV("encoding"));
+        IREE_SV("requires_layout"), IREE_SV("layout"));
   }
   return iree_ok_status();
 }
 
+static const loom_encoding_dynamic_parameter_descriptor_t
+    kRequiresLayoutDynamicParameters[] = {{
+        /*.name=*/LOOM_BSTRING_REF(6, "layout"),
+        /*.type_constraint=*/LOOM_TYPE_CONSTRAINT_ANY_ENCODING,
+    }};
+static const loom_encoding_family_descriptor_t kRequiresLayoutDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(15, "requires_layout"),
+    /*.role=*/LOOM_ENCODING_ROLE_UNKNOWN,
+    /*.family_flags=*/{},
+    /*.parameter_count=*/{},
+    /*.parameter_descriptors=*/{},
+    /*.dynamic_parameter_count=*/
+    IREE_ARRAYSIZE(kRequiresLayoutDynamicParameters),
+    /*.dynamic_parameter_descriptors=*/kRequiresLayoutDynamicParameters,
+};
 static const loom_encoding_vtable_t kRequiresLayoutEncodingVtable = {
-    /*.name=*/IREE_SV("requires_layout"),
-    /*.role=*/{},
-    /*.verify=*/{},
+    /*.descriptor=*/&kRequiresLayoutDescriptor,
+    /*.is_static_valid=*/{},
+    /*.diagnose_static=*/{},
     /*.verify_define=*/VerifyRequiresLayoutDefine,
 };
 
@@ -172,12 +122,17 @@ class EncodingVerifyTest : public ::testing::Test {
                                    &module));
     ASSERT_TRUE(parse_capture.diagnostics.empty());
 
+    VerifyModule(module, capture, result);
+    loom_module_free(module);
+  }
+
+  void VerifyModule(loom_module_t* module, DiagnosticCapture* capture,
+                    loom_verify_result_t* result) {
     capture->Reset();
     loom_verify_options_t verify_options = {};
     verify_options.sink = capture->sink();
     verify_options.max_errors = 100;
     IREE_ASSERT_OK(loom_verify_module(module, &verify_options, result));
-    loom_module_free(module);
   }
 
   iree_arena_block_pool_t block_pool_;
@@ -247,6 +202,52 @@ TEST_F(EncodingVerifyTest, CustomVerifierRejectsUnknownParam) {
               LOOM_EMITTER_VERIFIER);
   EXPECT_EQ(GetStringParam(*diagnostic, 0), "requires_layout");
   EXPECT_EQ(GetStringParam(*diagnostic, 1), "bogus");
+}
+
+TEST_F(EncodingVerifyTest, UnusedMalformedStaticEncodingIsDiagnosed) {
+  loom_module_t* module = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      nullptr, iree_allocator_system(),
+                                      &module));
+  loom_string_id_t encoding_name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_string(
+      module, IREE_SV("encoding.layout.strided"), &encoding_name_id));
+  loom_string_id_t parameter_name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("strides"),
+                                           &parameter_name_id));
+  loom_string_id_t value_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module, IREE_SV("thirty_two"), &value_id));
+  loom_named_attr_t parameter = {
+      /*.name_id=*/parameter_name_id,
+      /*.reserved=*/{},
+      /*.value=*/loom_attr_string(value_id),
+  };
+  loom_encoding_t encoding = {
+      /*.name_id=*/encoding_name_id,
+      /*.alias_id=*/LOOM_STRING_ID_INVALID,
+      /*.attribute_count=*/1,
+      /*.family=*/{},
+      /*.attributes=*/&parameter,
+  };
+  uint16_t encoding_id = 0;
+  IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &encoding_id));
+
+  DiagnosticCapture capture;
+  loom_verify_result_t result;
+  VerifyModule(module, &capture, &result);
+
+  ASSERT_EQ(result.error_count, 1u);
+  const auto* diagnostic = FindDiagnostic(
+      capture, loom_error_def_lookup(LOOM_ERROR_DOMAIN_ENCODING, 10));
+  ASSERT_NE(diagnostic, nullptr);
+  ExpectError(*diagnostic,
+              loom_error_def_lookup(LOOM_ERROR_DOMAIN_ENCODING, 10),
+              LOOM_EMITTER_VERIFIER);
+  EXPECT_EQ(GetStringParam(*diagnostic, 0), "encoding.layout.strided");
+  EXPECT_EQ(GetStringParam(*diagnostic, 1), "strides");
+  EXPECT_EQ(GetStringParam(*diagnostic, 3), "integer array");
+  loom_module_free(module);
 }
 
 }  // namespace

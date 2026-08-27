@@ -54,7 +54,7 @@
 /// if (!loomc_result_succeeded(result)) {
 ///   // Inspect result diagnostics; profile is NULL on profile failure.
 /// } else {
-///   // Use profile for target selection/refinement.
+///   // Use profile for per-function specialization or further refinement.
 ///   loomc_target_profile_release(profile);
 /// }
 /// loomc_result_release(result);

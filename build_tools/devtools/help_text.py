@@ -30,6 +30,8 @@ ROOT_COMMAND_EPILOG = """Common build-system commands:
   python dev.py bazel compile-commands
   python dev.py bazel clang-tidy
   python dev.py importers setup tilelang
+  python dev.py docs build
+  python dev.py docs serve
 
   python dev.py cmake configure
   python dev.py cmake build
@@ -90,6 +92,20 @@ still giving Bazel, CMake, and CI one deterministic package surface. Select a
 ready environment for build-system commands with `--importer-env <name>`.
 Importer docs live under loom/py/loom/importers/.""",
         )
+    if command == "docs":
+        return CommandHelp(
+            description="Build or serve the Loom programming guide.",
+            epilog="""Examples:
+  python dev.py setup --docs
+  python dev.py docs build
+  python dev.py docs build --site-dir build/loom-docs-preview
+  python dev.py docs serve
+  python dev.py docs serve --address 127.0.0.1:8080
+
+The documentation toolchain is an optional, hash-locked part of the managed
+repository environment. Install it with `python dev.py setup --docs` before
+building or serving the guide.""",
+        )
     return CommandHelp(description=f"Run {command}.")
 
 
@@ -124,8 +140,11 @@ installed and this checkout should not get a local tool environment.""",
 This writes ignored lefthook-local.yml with the selected build system/profile
 and then runs lefthook install. Re-run this command with a different --profile
 to change the default profile used by Git commits. The installed hook uses
-commit scope: staged files plus files changed by HEAD, so amended commits
-validate the commit being replaced.""",
+the staged index as its validation and mutation boundary. A fix that changes
+the index stops the attempt before tests and prints the review/retry action.
+Explicit `precommit --amend` provides read-only amended-candidate validation.
+Tool output streams while the hook runs so long builds and tests remain visibly
+active.""",
         )
     if command == "configure":
         if lane == "bazel":
@@ -209,7 +228,7 @@ CMake.""",
 locked importer site-packages path through Bazel test_env.""",
             )
         return CommandHelp(
-            description="Run CTest in the configured CMake build tree.",
+            description="Build and run selected CTests in the configured CMake tree.",
             arguments="CTest options.",
             epilog="""Examples:
   python dev.py cmake test
@@ -218,7 +237,9 @@ locked importer site-packages path through Bazel test_env.""",
   python dev.py cmake test --importer-env tilelang -R tilelang
   python dev.py cmake test --importer-env mlir -R mlir
 
-CTest runs in the selected CMake build tree with --output-on-failure.
+CTest first enumerates the exact selection, builds the concrete CMake roots
+declared by those tests, and then runs the same selection with
+`--output-on-failure`. Source-only selections skip the build.
 `--importer-env <name>` runs CTest with the locked importer site-packages path
 on PYTHONPATH.""",
         )
@@ -252,6 +273,16 @@ cquery evaluates select(), platform constraints, and configured target state."""
   python dev.py bazel info
   python dev.py bazel info execution_root
   python dev.py bazel info bazel-bin""",
+        )
+    if command == "shutdown" and lane == "bazel":
+        return CommandHelp(
+            description="Stop the Bazel server for this checkout.",
+            arguments="Native bazel shutdown options.",
+            epilog="""Examples:
+  python dev.py bazel shutdown
+
+Use this after changing host policies or startup options that Bazel and its
+child processes may have cached.""",
         )
     if command == "compile-commands":
         if lane == "bazel":
@@ -362,23 +393,28 @@ Use `python dev.py {lane} precommit` for local changes only.""",
             epilog=f"""Examples:
   python dev.py {lane} precommit
   python dev.py {lane} precommit --profile {default_profile}
-  python dev.py {lane} precommit --commit
+  python dev.py {lane} precommit --amend
   python dev.py {lane} precommit --base origin/main
   python dev.py {lane} precommit --staged
   python dev.py {lane} precommit README.md CONTRIBUTING.md
   python dev.py {lane} precommit --verbose
 
 With no input option, precommit checks staged, unstaged, and untracked files.
-`--commit` checks the Git hook scope: staged files plus files changed by HEAD.
+`--staged` checks the current index candidate. `--commit` is a compatibility
+alias with the same staged-only meaning. `--amend` non-mutatingly checks the
+exact amended candidate by comparing the index with HEAD's first parent.
 `--base` checks branch changes from the merge base with the given ref through
 HEAD, plus local staged, unstaged, and untracked files.
 Explicit paths check only those files for narrow manual runs.
 The default profile is {default_profile}. Use --profile to select default,
 paranoid, or ci for this run.
-Commit-scope, staged-file, and explicit-path runs with profiles that run tests,
-currently paranoid and ci, apply mechanical fixups before running the same
-profile in non-mutating check mode. Broader local-change runs and the profile
-named default are check-only.
+Staged-file and explicit-path runs with profiles that run tests, currently
+paranoid and ci, apply bounded mechanical fixups first. If a fixer changes the
+index, that attempt stops before tests and names every changed staged path. The
+retry runs non-mutating hygiene, tests, and static analysis against the repaired
+candidate. Candidate files with unstaged hunks stop at the index boundary so a
+whole-file formatter cannot absorb those hunks. Broader local-change runs,
+explicit amend validation, and the profile named default are check-only.
 
 {lane_scope}""",
         )
@@ -410,9 +446,11 @@ Presubmit stays non-mutating.""",
   python dev.py bazel run --config=asan //runtime/src/iree/base:allocator_test
   python dev.py bazel run -p //runtime/src/tools:iree-run-module
 
-This builds first, resolves the configured executable path with cquery, then
-execs the binary from the current directory. The Bazel server lock is not held
-while the binary runs.""",
+This asks Bazel to write its canonical target launcher, then hands off to it
+after Bazel releases the server lock. The target observes the caller's current
+directory while Bazel's configured environment and argument ordering are
+retained. Graph-declared runfile paths are made absolute before the directory
+changes.""",
         )
     if command == "try" and lane == "bazel":
         return CommandHelp(
@@ -589,6 +627,8 @@ maps to `cmake --build ... --target TARGET`.
 
 ```bash
 iree-cmake-configure
+iree-cmake-configure --fresh
+iree-cmake-configure --fresh -GNinja
 iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON
 iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=package
 iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF
@@ -609,7 +649,10 @@ executable and does not build implicitly. `iree-cmake-try` builds temporary
 C/C++ snippets against the configured tree. `iree-cmake-fuzz` builds and execs
 a configured libFuzzer target. `python dev.py cmake compile-commands` prints
 the configured compile database path for clang tooling. `python dev.py cmake
-clang-tidy` runs IREE clang-tidy checks against that compile database."""
+clang-tidy` runs IREE clang-tidy checks against that compile database.
+`iree-cmake-test` asks CTest for the exact selected records, builds their
+declared CMake roots, and runs the same selection; no separate matching build
+target is required."""
 
 
 def bazel_command_agent_markdown(command: str) -> str:
@@ -753,9 +796,10 @@ through Bazel, applies them outside Bazel, then re-runs the normal check."""
         return """## iree-bazel-run
 
 Use `iree-bazel-run` instead of raw `bazel run` when executing repository
-binaries. It builds the target, resolves the configured executable with cquery,
-then execs the binary from the current directory. The Bazel server lock is not
-held while the program runs, and signals/PID-based tools see the final process.
+binaries. It asks Bazel to write the configured target launcher, resolves
+graph-declared runfile paths in target arguments and environment bindings, then
+execs the binary from the current directory. The Bazel server lock is not held
+while the program runs, and signals/PID-based tools see the final process.
 
 ```bash
 iree-bazel-run //runtime/src/iree/base:allocator_benchmark
@@ -864,7 +908,10 @@ iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF
 
 The first configure uses `build/cmake` unless `--cmake-build-dir` or
 `IREE_CMAKE_BUILD_DIR` selects another tree. The selected tree is recorded for
-later CMake wrappers."""
+later CMake wrappers. `--fresh` preserves the configured generator unless `-G`
+selects another one. Switching generators removes the complete build tree first
+so nested CMake and FetchContent subbuilds cannot retain mixed generator state.
+Recursive cleanup is limited to build trees owned by this checkout."""
 
     if command == "build":
         return """## iree-cmake-build
@@ -885,7 +932,7 @@ concrete generator targets."""
     if command == "test":
         return """## iree-cmake-test
 
-Run CTest in the configured CMake build tree.
+Build and run selected CTests in the configured CMake build tree.
 
 ```bash
 iree-cmake-test
@@ -893,7 +940,9 @@ iree-cmake-test -R hrx
 iree-cmake-test --rerun-failed
 ```
 
-CTest options are forwarded unchanged."""
+CTest options are forwarded unchanged to selection and execution. The wrapper
+uses CTest's JSON model to build the concrete roots declared by the selected
+records before execution. Source-only selections perform no build."""
 
     if command == "run":
         return """## iree-cmake-run

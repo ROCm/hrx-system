@@ -11,18 +11,45 @@ iree_add_all_subdirs()
 
 iree_py_library(
   NAME
-    encoding_tables
-  MAIN
-    "amdgpu_encoding_tables.py"
+    encoding_tables_module
   SRCS
     "__init__.py"
     "amdgpu_encoding_tables.py"
   DEPS
     loom::py::loom::gen::support::support
+    loom::py::loom::gen::target::arch::amdgpu::target_table_family
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amdgpu::descriptors
     loom::py::loom::target::arch::amdgpu::isa_xml
     loom::py::loom::target::arch::amdgpu::target_info
+)
+
+iree_py_library(
+  NAME
+    encoding_tables
+  MAIN_MODULE
+    "loom.gen.target.arch.amdgpu.encoding.amdgpu_encoding_tables"
+  DEPS
+    loom::py::loom::gen::target::arch::amdgpu::encoding::encoding_tables_module
+)
+
+iree_py_test(
+  NAME
+    encoding_tables_test
+  MAIN
+    "../../../../../tools/pytest_style_runner.py"
+  SRCS
+    "amdgpu_encoding_tables_test.py"
+    "../../../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.gen.target.arch.amdgpu.encoding.amdgpu_encoding_tables_test"
+  DEPS
+    loom::py::loom::gen::target::arch::amdgpu::encoding::encoding_tables_module
+    loom::py::loom::target::low_descriptors
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -9,7 +9,7 @@ func.def target(@target) @i32_uniform_vector_reduce(%value0: i32, %value1: i32, 
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i32_uniform_vector_reduce(%value0: reg<amdgpu.sgpr>, %value1: reg<amdgpu.sgpr>, %value2: reg<amdgpu.sgpr>, %value3: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @i32_uniform_vector_reduce(%value0: reg<amdgpu.sgpr>, %value1: reg<amdgpu.sgpr>, %value2: reg<amdgpu.sgpr>, %value3: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
   %13 = v_mov_b32_copy %value0
   %14 = v_mov_b32_copy %value1
   %15 = v_mov_b32_copy %value2

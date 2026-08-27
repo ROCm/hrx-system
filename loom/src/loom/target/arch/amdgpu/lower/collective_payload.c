@@ -8,6 +8,7 @@
 
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/legality.h"
+#include "loom/target/arch/amdgpu/lower/sync.h"
 #include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 
@@ -135,13 +136,9 @@ iree_status_t loom_amdgpu_collective_payload_register(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     uint32_t register_count, loom_value_id_t low_value, uint32_t register_index,
     loom_type_t lane_type, loom_value_id_t* out_register) {
-  *out_register = LOOM_VALUE_ID_INVALID;
-  if (register_count == 1) {
-    *out_register = low_value;
-    return iree_ok_status();
-  }
-  return loom_amdgpu_emit_low_slice(context, source_op, low_value,
-                                    register_index, lane_type, out_register);
+  return loom_amdgpu_extract_low_register_unit(context, source_op, low_value,
+                                               register_count, register_index,
+                                               lane_type, out_register);
 }
 
 iree_status_t loom_amdgpu_collective_bind_payload_result(
@@ -166,10 +163,6 @@ iree_status_t loom_amdgpu_collective_resolve_cross_wave_descriptors(
           .out_descriptor = &out_descriptors->lds_write_descriptor,
       },
       {
-          .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_BARRIER,
-          .out_descriptor = &out_descriptors->barrier_descriptor,
-      },
-      {
           .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_AND_SAVEEXEC_B64,
           .out_descriptor = &out_descriptors->saveexec_descriptor,
       },
@@ -178,8 +171,24 @@ iree_status_t loom_amdgpu_collective_resolve_cross_wave_descriptors(
           .out_descriptor = &out_descriptors->restore_exec_descriptor,
       },
   };
-  return loom_amdgpu_resolve_descriptor_refs_if_present(
-      context, resolutions, IREE_ARRAYSIZE(resolutions), out_present);
+  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_refs_if_present(
+      context, resolutions, IREE_ARRAYSIZE(resolutions), out_present));
+  if (!*out_present) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_amdgpu_select_workgroup_barrier_plan(
+      context, &out_descriptors->barrier));
+  *out_present = out_descriptors->barrier.kind !=
+                 LOOM_AMDGPU_KERNEL_BARRIER_LOWERING_KIND_NONE;
+  return iree_ok_status();
+}
+
+iree_status_t loom_amdgpu_collective_emit_cross_wave_barrier(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_workgroup_collective_cross_wave_descriptors_t*
+        descriptors) {
+  return loom_amdgpu_lower_workgroup_barrier_plan(context, source_op,
+                                                  &descriptors->barrier);
 }
 
 iree_status_t loom_amdgpu_collective_verify_cross_wave_descriptor_requirements(
@@ -195,10 +204,6 @@ iree_status_t loom_amdgpu_collective_verify_cross_wave_descriptor_requirements(
               .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_DS_WRITE_B32,
           },
           {
-              .constraint_key = IREE_SVL("descriptor.s_barrier"),
-              .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_BARRIER,
-          },
-          {
               .constraint_key = IREE_SVL("descriptor.s_and_saveexec_b64"),
               .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_AND_SAVEEXEC_B64,
           },
@@ -207,6 +212,12 @@ iree_status_t loom_amdgpu_collective_verify_cross_wave_descriptor_requirements(
               .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B64_EXEC,
           },
       };
-  return loom_amdgpu_low_legality_verify_descriptor_requirements(
-      context, op, requirements, IREE_ARRAYSIZE(requirements));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_low_legality_verify_descriptor_requirements(
+      context, op, requirements, IREE_ARRAYSIZE(requirements)));
+  if (!loom_amdgpu_workgroup_barrier_lowering_available(
+          loom_target_low_legality_descriptor_set(context))) {
+    return loom_amdgpu_low_legality_reject(
+        context, op, IREE_SV("descriptor.workgroup_barrier"));
+  }
+  return iree_ok_status();
 }

@@ -50,7 +50,8 @@ struct Elf64Header {
 static_assert(sizeof(Elf64Header) == 64, "ELF64 header must be 64 bytes");
 
 std::vector<uint8_t> MakeMinimalAmdgpuElf(uint32_t machine = 0x041,
-                                          uint32_t generic_version = 0) {
+                                          uint32_t generic_version = 0,
+                                          uint32_t feature_flags = 0) {
   Elf64Header header = {};
   header.magic[0] = 0x7f;
   header.magic[1] = 'E';
@@ -64,7 +65,7 @@ std::vector<uint8_t> MakeMinimalAmdgpuElf(uint32_t machine = 0x041,
   header.machine = 224;
   header.version = 1;
   header.shoff = sizeof(Elf64Header);
-  header.flags = machine | (generic_version << 24);
+  header.flags = machine | (generic_version << 24) | feature_flags;
   std::vector<uint8_t> elf(sizeof(header), 0);
   memcpy(elf.data(), &header, sizeof(header));
   return elf;
@@ -119,6 +120,19 @@ std::string TripleString(const iree_hal_streaming_fat_binary_elf_t& match) {
   return std::string(match.triple.data, match.triple.size);
 }
 
+iree_hal_executable_target_t MakeExecutableTarget(
+    iree_string_view_t target_key, iree_hal_executable_target_kind_t kind,
+    uint32_t priority) {
+  return {
+      /*.family=*/IREE_SV("amdgpu"),
+      /*.target_key=*/target_key,
+      /*.kind=*/kind,
+      /*.priority=*/priority,
+      /*.physical_device_affinity=*/1,
+      /*.flags=*/IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+  };
+}
+
 TEST(FatBinaryTest, SelectsExactTargetBeforeGeneric) {
   const auto generic_elf = MakeMinimalGenericAmdgpuElf(/*machine=*/0x054);
   const auto exact_elf = MakeMinimalAmdgpuElf(/*machine=*/0x041);
@@ -127,9 +141,15 @@ TEST(FatBinaryTest, SelectsExactTargetBeforeGeneric) {
       {"hipv4-amdgcn-amd-amdhsa--gfx1100", exact_elf},
   });
 
+  const iree_hal_executable_target_t executable_targets[] = {
+      MakeExecutableTarget(IREE_SV("gfx1100:sramecc-:xnack-"),
+                           IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT, 100),
+      MakeExecutableTarget(IREE_SV("gfx11-generic"),
+                           IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC, 50),
+  };
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.value=*/IREE_SV("gfx1100:sramecc-:xnack-")},
-      {/*.value=*/IREE_SV("gfx11-generic")},
+      {/*.executable_target=*/&executable_targets[0]},
+      {/*.executable_target=*/&executable_targets[1]},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   IREE_EXPECT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
@@ -139,7 +159,8 @@ TEST(FatBinaryTest, SelectsExactTargetBeforeGeneric) {
   EXPECT_EQ(extract.match_count, 1);
   EXPECT_EQ(TripleString(extract.matches[0]),
             "hipv4-amdgcn-amd-amdhsa--gfx1100");
-  EXPECT_STREQ(extract.matches[0].executable_format, "gfx1100");
+  EXPECT_EQ(extract.matches[0].executable_target, &executable_targets[0]);
+  EXPECT_STREQ(extract.matches[0].code_object_target_key, "gfx1100");
   iree_hal_streaming_fat_binary_extract_reset(&extract);
 }
 
@@ -148,9 +169,15 @@ TEST(FatBinaryTest, FallsBackToGenericTarget) {
   std::vector<uint8_t> bundle =
       MakeBundle({{"hipv4-amdgcn-amd-amdhsa--gfx11-generic", elf}});
 
+  const iree_hal_executable_target_t executable_targets[] = {
+      MakeExecutableTarget(IREE_SV("gfx1100:sramecc-:xnack-"),
+                           IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT, 100),
+      MakeExecutableTarget(IREE_SV("gfx11-generic"),
+                           IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC, 50),
+  };
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.value=*/IREE_SV("gfx1100:sramecc-:xnack-")},
-      {/*.value=*/IREE_SV("gfx11-generic")},
+      {/*.executable_target=*/&executable_targets[0]},
+      {/*.executable_target=*/&executable_targets[1]},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   IREE_EXPECT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
@@ -160,7 +187,8 @@ TEST(FatBinaryTest, FallsBackToGenericTarget) {
   EXPECT_EQ(extract.match_count, 1);
   EXPECT_EQ(TripleString(extract.matches[0]),
             "hipv4-amdgcn-amd-amdhsa--gfx11-generic");
-  EXPECT_STREQ(extract.matches[0].executable_format, "gfx11-generic");
+  EXPECT_EQ(extract.matches[0].executable_target, &executable_targets[1]);
+  EXPECT_STREQ(extract.matches[0].code_object_target_key, "gfx11-generic");
   iree_hal_streaming_fat_binary_extract_reset(&extract);
 }
 
@@ -168,9 +196,15 @@ TEST(FatBinaryTest, MatchesBareGenericTarget) {
   const auto elf = MakeMinimalGenericAmdgpuElf(/*machine=*/0x054);
   std::vector<uint8_t> bundle = MakeBundle({{"gfx11-generic", elf}});
 
+  const iree_hal_executable_target_t executable_targets[] = {
+      MakeExecutableTarget(IREE_SV("gfx1100"),
+                           IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT, 100),
+      MakeExecutableTarget(IREE_SV("gfx11-generic"),
+                           IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC, 50),
+  };
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.value=*/IREE_SV("gfx1100")},
-      {/*.value=*/IREE_SV("gfx11-generic")},
+      {/*.executable_target=*/&executable_targets[0]},
+      {/*.executable_target=*/&executable_targets[1]},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   IREE_EXPECT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
@@ -179,18 +213,25 @@ TEST(FatBinaryTest, MatchesBareGenericTarget) {
 
   EXPECT_EQ(extract.match_count, 1);
   EXPECT_EQ(TripleString(extract.matches[0]), "gfx11-generic");
-  EXPECT_STREQ(extract.matches[0].executable_format, "gfx11-generic");
+  EXPECT_EQ(extract.matches[0].executable_target, &executable_targets[1]);
+  EXPECT_STREQ(extract.matches[0].code_object_target_key, "gfx11-generic");
   iree_hal_streaming_fat_binary_extract_reset(&extract);
 }
 
 TEST(FatBinaryTest, ReportsMissingRankedTargets) {
-  const auto elf = MakeMinimalAmdgpuElf();
+  const auto elf = MakeMinimalAmdgpuElf(/*machine=*/0x04c);
   std::vector<uint8_t> bundle =
       MakeBundle({{"hipv4-amdgcn-amd-amdhsa--gfx942", elf}});
 
+  const iree_hal_executable_target_t executable_targets[] = {
+      MakeExecutableTarget(IREE_SV("gfx1100"),
+                           IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT, 100),
+      MakeExecutableTarget(IREE_SV("gfx11-generic"),
+                           IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC, 50),
+  };
   const iree_hal_streaming_fat_binary_target_t targets[] = {
-      {/*.value=*/IREE_SV("gfx1100")},
-      {/*.value=*/IREE_SV("gfx11-generic")},
+      {/*.executable_target=*/&executable_targets[0]},
+      {/*.executable_target=*/&executable_targets[1]},
   };
   iree_hal_streaming_fat_binary_extract_t extract = {};
   EXPECT_THAT(
@@ -198,6 +239,62 @@ TEST(FatBinaryTest, ReportsMissingRankedTargets) {
           iree_make_const_byte_span(bundle.data(), bundle.size()),
           IREE_ARRAYSIZE(targets), targets, iree_allocator_system(), &extract)),
       StatusIs(iree::StatusCode::kNotFound));
+  iree_hal_streaming_fat_binary_extract_reset(&extract);
+}
+
+TEST(FatBinaryTest, SelectsRawElfWithCompatibleFeatures) {
+  constexpr uint32_t kSrameccOn = 0xC00;
+  constexpr uint32_t kXnackOff = 0x200;
+  const auto elf = MakeMinimalAmdgpuElf(
+      /*machine=*/0x04c, /*generic_version=*/0, kSrameccOn | kXnackOff);
+  const iree_hal_executable_target_t executable_target =
+      MakeExecutableTarget(IREE_SV("gfx942:sramecc+:xnack-"),
+                           IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT, 100);
+  const iree_hal_streaming_fat_binary_target_t target = {
+      /*.executable_target=*/&executable_target,
+  };
+
+  iree_hal_streaming_fat_binary_extract_t extract = {};
+  IREE_EXPECT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
+      iree_make_const_byte_span(elf.data(), elf.size()), 1, &target,
+      iree_allocator_system(), &extract));
+
+  ASSERT_EQ(extract.match_count, 1);
+  EXPECT_EQ(extract.matches[0].executable_target, &executable_target);
+  EXPECT_STREQ(extract.matches[0].code_object_target_key,
+               "gfx942:sramecc+:xnack-");
+  iree_hal_streaming_fat_binary_extract_reset(&extract);
+}
+
+TEST(FatBinaryTest, FiltersIncompatibleConcatenatedElfFeatures) {
+  constexpr uint32_t kSrameccOn = 0xC00;
+  constexpr uint32_t kXnackOff = 0x200;
+  constexpr uint32_t kXnackOn = 0x300;
+  const auto xnack_on_elf = MakeMinimalAmdgpuElf(
+      /*machine=*/0x04c, /*generic_version=*/0, kSrameccOn | kXnackOn);
+  const auto xnack_off_elf = MakeMinimalAmdgpuElf(
+      /*machine=*/0x04c, /*generic_version=*/0, kSrameccOn | kXnackOff);
+  std::vector<uint8_t> concatenated = xnack_on_elf;
+  concatenated.insert(concatenated.end(), xnack_off_elf.begin(),
+                      xnack_off_elf.end());
+
+  const iree_hal_executable_target_t executable_target =
+      MakeExecutableTarget(IREE_SV("gfx942:sramecc+:xnack-"),
+                           IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT, 100);
+  const iree_hal_streaming_fat_binary_target_t target = {
+      /*.executable_target=*/&executable_target,
+  };
+  iree_hal_streaming_fat_binary_extract_t extract = {};
+  IREE_EXPECT_OK(iree_hal_streaming_fat_binary_extract_for_targets(
+      iree_make_const_byte_span(concatenated.data(), concatenated.size()), 1,
+      &target, iree_allocator_system(), &extract));
+
+  ASSERT_EQ(extract.match_count, 1);
+  EXPECT_EQ(extract.matches[0].data.data,
+            concatenated.data() + xnack_on_elf.size());
+  EXPECT_EQ(extract.matches[0].executable_target, &executable_target);
+  EXPECT_STREQ(extract.matches[0].code_object_target_key,
+               "gfx942:sramecc+:xnack-");
   iree_hal_streaming_fat_binary_extract_reset(&extract);
 }
 

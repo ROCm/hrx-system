@@ -19,181 +19,155 @@ constexpr loom_matrix_fragment_coordinate_flags_t kColumnReduction =
 constexpr loom_matrix_fragment_coordinate_flags_t kRowColumn =
     LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
     LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN;
+constexpr loom_matrix_fragment_coordinate_flags_t kBlockRowColumn =
+    LOOM_MATRIX_FRAGMENT_COORDINATE_BLOCK |
+    LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
+    LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN;
+
+static const loom_matrix_fragment_coordinate_projection_term_t kLhsTerms[] = {
+    {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT,
+     LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW, 1, 16, 1},
+    {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE,
+     LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_REDUCTION, 1, 0, 1},
+    {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW,
+     LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT, 1, 0, 1},
+    {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_REDUCTION,
+     LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE, 1, 0, 1},
+};
+static const loom_matrix_fragment_coordinate_projection_plan_t kLhsPlan = {
+    /*.terms=*/kLhsTerms,
+    /*.forward_term_count=*/2,
+    /*.inverse_term_count=*/2,
+};
+
+static const loom_matrix_fragment_coordinate_projection_term_t kRhsTerms[] = {
+    {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT,
+     LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN, 1, 16, 1},
+    {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE,
+     LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_REDUCTION, 1, 0, 1},
+    {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN,
+     LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT, 1, 0, 1},
+    {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_REDUCTION,
+     LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE, 1, 0, 1},
+};
+static const loom_matrix_fragment_coordinate_projection_plan_t kRhsPlan = {
+    /*.terms=*/kRhsTerms,
+    /*.forward_term_count=*/2,
+    /*.inverse_term_count=*/2,
+};
+
+static const loom_matrix_fragment_coordinate_projection_term_t kResultTerms[] =
+    {
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW, 16, 0, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW, 1, 0, 2},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN, 1, 16, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT, 1, 2, 16},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT, 1, 0, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE, 2, 0, 1},
+};
+static const loom_matrix_fragment_coordinate_projection_plan_t kResultPlan = {
+    /*.terms=*/kResultTerms,
+    /*.forward_term_count=*/3,
+    /*.inverse_term_count=*/3,
+};
+
+static const loom_matrix_fragment_coordinate_projection_term_t
+    kBlockedResultTerms[] = {
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_BLOCK, 4, 0, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW, 16, 4, 4},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW, 1, 4, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN, 1, 16, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT, 4, 0, 16},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT, 1, 0, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_BLOCK,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE, 1, 0, 4},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE, 1, 4, 1},
+};
+static const loom_matrix_fragment_coordinate_projection_plan_t
+    kBlockedResultPlan = {
+        /*.terms=*/kBlockedResultTerms,
+        /*.forward_term_count=*/4,
+        /*.inverse_term_count=*/4,
+};
 
 loom_matrix_fragment_role_layout_t RoleLayout(
-    loom_contract_operand_role_t role, loom_matrix_fragment_map_kind_t map_kind,
-    uint16_t register_count, uint16_t elements_per_register,
-    loom_matrix_fragment_coordinate_flags_t coordinate_flags) {
+    loom_contract_operand_role_t role, uint16_t register_count,
+    uint16_t element_bit_count, uint16_t payload_element_count,
+    uint16_t coordinate_element_count, uint16_t coordinate_element_offset,
+    uint16_t coordinate_element_stride,
+    loom_matrix_fragment_coordinate_flags_t coordinate_flags,
+    loom_matrix_fragment_coordinate_flags_t packed_element_coordinate_flag,
+    const loom_matrix_fragment_coordinate_projection_plan_t* projection) {
   return (loom_matrix_fragment_role_layout_t){
       /*.role=*/role,
-      /*.map_kind=*/map_kind,
       /*.register_count=*/register_count,
-      /*.elements_per_register=*/elements_per_register,
-      /*.element_bit_count=*/16,
+      /*.element_bit_count=*/element_bit_count,
+      /*.payload_element_count=*/payload_element_count,
+      /*.coordinate_element_count=*/coordinate_element_count,
+      /*.coordinate_element_offset=*/coordinate_element_offset,
+      /*.coordinate_element_stride=*/coordinate_element_stride,
+      /*.flags=*/0,
       /*.coordinate_flags=*/coordinate_flags,
+      /*.packed_element_coordinate_flag=*/packed_element_coordinate_flag,
+      /*.reduction_group=*/{},
+      /*.coordinate_projection_plan=*/projection,
   };
 }
 
-loom_matrix_fragment_layout_t RdnaLayout() {
+loom_matrix_fragment_layout_t TestLayout() {
   return (loom_matrix_fragment_layout_t){
       /*.kind=*/1,
-      /*.name=*/IREE_SV("test.rdna"),
+      /*.name=*/IREE_SV("test.projection"),
       /*.wave_size=*/32,
-      /*.tile_shape=*/
-      {
-          /*.result_row_count=*/16,
-          /*.result_column_count=*/16,
-          /*.reduction_count=*/16,
-      },
+      /*.tile_shape=*/{1, 16, 16, 16},
       /*.lhs=*/
-      RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_LHS,
-                 LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_PACKED_REDUCTION, 8, 2,
-                 kRowReduction),
+      RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_LHS, 8, 16, 16, 16, 0, 1,
+                 kRowReduction, LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
+                 &kLhsPlan),
       /*.rhs=*/
-      RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_RHS,
-                 LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_PACKED_REDUCTION, 8,
-                 2, kColumnReduction),
+      RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_RHS, 8, 16, 16, 16, 0, 1,
+                 kColumnReduction, LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
+                 &kRhsPlan),
       /*.accumulator=*/
-      RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
-                 LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN, 8, 1,
-                 kRowColumn),
+      RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 8, 32, 8, 8, 0, 1,
+                 kRowColumn, 0, &kResultPlan),
       /*.result=*/
-      RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-                 LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN, 8, 1,
-                 kRowColumn),
+      RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_RESULT, 8, 32, 8, 8, 0, 1,
+                 kRowColumn, 0, &kResultPlan),
   };
 }
 
-loom_matrix_fragment_layout_t RdnaWave64InterleavedLayout() {
-  loom_matrix_fragment_layout_t layout = RdnaLayout();
-  layout.kind = 5;
-  layout.name = IREE_SV("test.rdna.wave64.interleaved");
-  layout.wave_size = 64;
-  layout.accumulator =
-      RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
-                 LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN, 4, 1,
-                 kRowColumn);
-  layout.result =
-      RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-                 LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN, 4, 1,
-                 kRowColumn);
-  return layout;
-}
-
-loom_matrix_fragment_layout_t RdnaLowSubwordLayout() {
-  loom_matrix_fragment_layout_t layout = RdnaLayout();
+loom_matrix_fragment_layout_t BlockedLayout() {
+  loom_matrix_fragment_layout_t layout = TestLayout();
   layout.kind = 2;
-  layout.name = IREE_SV("test.rdna.low_subword");
-  layout.accumulator = RoleLayout(
-      LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
-      LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN_LOW_SUBWORD, 8,
-      2, kRowColumn);
-  layout.result = RoleLayout(
-      LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-      LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN_LOW_SUBWORD, 8,
-      2, kRowColumn);
+  layout.name = IREE_SV("test.blocked.projection");
+  layout.wave_size = 64;
+  layout.tile_shape = {4, 16, 16, 16};
+  layout.result = RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_RESULT, 16, 32, 16, 16,
+                             0, 1, kBlockRowColumn, 0, &kBlockedResultPlan);
   return layout;
-}
-
-loom_matrix_fragment_layout_t CdnaLayout() {
-  return (loom_matrix_fragment_layout_t){
-      /*.kind=*/2,
-      /*.name=*/IREE_SV("test.cdna"),
-      /*.wave_size=*/64,
-      /*.tile_shape=*/
-      {
-          /*.result_row_count=*/16,
-          /*.result_column_count=*/16,
-          /*.reduction_count=*/16,
-      },
-      /*.lhs=*/
-      RoleLayout(
-          LOOM_CONTRACT_OPERAND_ROLE_LHS,
-          LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_LANE_GROUP_PACKED_REDUCTION, 2,
-          2, kRowReduction),
-      /*.rhs=*/
-      RoleLayout(
-          LOOM_CONTRACT_OPERAND_ROLE_RHS,
-          LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_LANE_GROUP_PACKED_REDUCTION,
-          2, 2, kColumnReduction),
-      /*.accumulator=*/
-      RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
-                 LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN, 4, 1,
-                 kRowColumn),
-      /*.result=*/
-      RoleLayout(LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-                 LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN, 4, 1,
-                 kRowColumn),
-  };
-}
-
-loom_matrix_fragment_layout_t LaneGroupLowSubwordLayout() {
-  loom_matrix_fragment_layout_t layout = CdnaLayout();
-  layout.kind = 3;
-  layout.name = IREE_SV("test.lane_group.low_subword");
-  layout.accumulator = RoleLayout(
-      LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN_LOW_SUBWORD, 4, 2,
-      kRowColumn);
-  layout.result = RoleLayout(
-      LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN_LOW_SUBWORD, 4, 2,
-      kRowColumn);
-  return layout;
-}
-
-loom_matrix_fragment_layout_t LaneGroupPackedRowLayout() {
-  loom_matrix_fragment_layout_t layout = CdnaLayout();
-  layout.kind = 4;
-  layout.name = IREE_SV("test.lane_group.packed_row");
-  layout.wave_size = 32;
-  layout.lhs = RoleLayout(
-      LOOM_CONTRACT_OPERAND_ROLE_LHS,
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_LANE_GROUP_PACKED_REDUCTION, 4, 2,
-      kRowReduction);
-  layout.rhs = RoleLayout(
-      LOOM_CONTRACT_OPERAND_ROLE_RHS,
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_LANE_GROUP_PACKED_REDUCTION, 4,
-      2, kColumnReduction);
-  layout.accumulator = RoleLayout(
-      LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_PACKED_ROW_COLUMN, 4, 2, kRowColumn);
-  layout.result = RoleLayout(
-      LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_PACKED_ROW_COLUMN, 4, 2, kRowColumn);
-  return layout;
-}
-
-void ExpectCoordinate(const loom_matrix_fragment_layout_t* layout,
-                      loom_contract_operand_role_t role, uint16_t lane,
-                      uint16_t register_index, uint16_t element_index,
-                      loom_matrix_fragment_coordinate_flags_t coordinate_flags,
-                      uint16_t row, uint16_t column, uint16_t reduction) {
-  loom_matrix_fragment_coordinate_t coordinate = {};
-  ASSERT_TRUE(loom_matrix_fragment_coordinate(
-      layout, role, lane, register_index, element_index, &coordinate));
-  EXPECT_EQ(coordinate.coordinate_flags, coordinate_flags);
-  EXPECT_EQ(coordinate.row, row);
-  EXPECT_EQ(coordinate.column, column);
-  EXPECT_EQ(coordinate.reduction, reduction);
 }
 
 loom_matrix_fragment_coordinate_t RowReduction(uint16_t row,
                                                uint16_t reduction) {
   return (loom_matrix_fragment_coordinate_t){
       /*.coordinate_flags=*/kRowReduction,
+      /*.block=*/0,
       /*.row=*/row,
-      /*.column=*/{},
-      /*.reduction=*/reduction,
-  };
-}
-
-loom_matrix_fragment_coordinate_t ColumnReduction(uint16_t column,
-                                                  uint16_t reduction) {
-  return (loom_matrix_fragment_coordinate_t){
-      /*.coordinate_flags=*/kColumnReduction,
-      /*.row=*/{},
-      /*.column=*/column,
+      /*.column=*/0,
       /*.reduction=*/reduction,
   };
 }
@@ -201,43 +175,73 @@ loom_matrix_fragment_coordinate_t ColumnReduction(uint16_t column,
 loom_matrix_fragment_coordinate_t RowColumn(uint16_t row, uint16_t column) {
   return (loom_matrix_fragment_coordinate_t){
       /*.coordinate_flags=*/kRowColumn,
+      /*.block=*/0,
       /*.row=*/row,
       /*.column=*/column,
+      /*.reduction=*/0,
   };
+}
+
+void ExpectCoordinate(const loom_matrix_fragment_layout_t* layout,
+                      loom_contract_operand_role_t role, uint16_t participant,
+                      uint16_t payload_element, uint16_t block, uint16_t row,
+                      uint16_t column, uint16_t reduction) {
+  loom_matrix_fragment_coordinate_t coordinate = {};
+  ASSERT_TRUE(loom_matrix_fragment_coordinate(layout, role, participant,
+                                              payload_element, &coordinate));
+  EXPECT_EQ(coordinate.block, block);
+  EXPECT_EQ(coordinate.row, row);
+  EXPECT_EQ(coordinate.column, column);
+  EXPECT_EQ(coordinate.reduction, reduction);
 }
 
 void ExpectPhysicalElement(const loom_matrix_fragment_layout_t* layout,
                            loom_contract_operand_role_t role,
                            loom_matrix_fragment_coordinate_t coordinate,
-                           uint16_t occurrence_index, uint16_t lane,
-                           uint16_t register_index, uint16_t element_index) {
+                           uint16_t occurrence, uint16_t participant,
+                           uint16_t payload_element) {
   loom_matrix_fragment_physical_element_t element = {};
-  ASSERT_TRUE(loom_matrix_fragment_physical_element(
-      layout, role, coordinate, occurrence_index, &element));
-  EXPECT_EQ(element.lane, lane);
-  EXPECT_EQ(element.register_index, register_index);
-  EXPECT_EQ(element.element_index, element_index);
+  ASSERT_TRUE(loom_matrix_fragment_physical_element(layout, role, coordinate,
+                                                    occurrence, &element));
+  EXPECT_EQ(element.lane, participant);
+  EXPECT_EQ(element.payload_element_index, payload_element);
 }
 
-void ExpectPhysicalElementCount(const loom_matrix_fragment_layout_t* layout,
-                                loom_contract_operand_role_t role,
-                                loom_matrix_fragment_coordinate_t coordinate,
-                                uint16_t count) {
-  uint16_t actual_count = 0;
-  ASSERT_TRUE(loom_matrix_fragment_physical_element_count(
-      layout, role, coordinate, &actual_count));
-  EXPECT_EQ(actual_count, count);
+TEST(MatrixFragmentLayoutTest, AppliesCoordinateTerms) {
+  const loom_matrix_fragment_coordinate_projection_term_t terms[] = {
+      {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE,
+       LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW, 1, 2, 1},
+      {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE,
+       LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN, 2, 3, 1},
+  };
+  uint32_t source_terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT] = {};
+  source_terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE] = 5;
+  uint32_t result_terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT];
+  loom_matrix_fragment_apply_coordinate_projection(terms, IREE_ARRAYSIZE(terms),
+                                                   source_terms, result_terms);
+  EXPECT_EQ(result_terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW], 1);
+  EXPECT_EQ(result_terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN], 2);
+}
+
+TEST(MatrixFragmentLayoutTest, MapsAxesToCoordinateDimensions) {
+  for (int axis = 0; axis < LOOM_MATRIX_FRAGMENT_AXIS_COUNT; ++axis) {
+    const auto axis_value = (loom_matrix_fragment_axis_t)axis;
+    EXPECT_EQ(loom_matrix_fragment_coordinate_dimension_axis(
+                  loom_matrix_fragment_axis_coordinate_dimension(axis_value)),
+              axis_value);
+  }
+  EXPECT_EQ(loom_matrix_fragment_coordinate_dimension_axis(
+                LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT),
+            LOOM_MATRIX_FRAGMENT_AXIS_COUNT);
 }
 
 TEST(MatrixFragmentLayoutTest, FindsRoleLayouts) {
-  loom_matrix_fragment_layout_t layout = RdnaLayout();
+  loom_matrix_fragment_layout_t layout = TestLayout();
   const loom_matrix_fragment_role_layout_t* lhs =
       loom_matrix_fragment_role_layout(&layout, LOOM_CONTRACT_OPERAND_ROLE_LHS);
   ASSERT_NE(lhs, nullptr);
   EXPECT_EQ(lhs->role, LOOM_CONTRACT_OPERAND_ROLE_LHS);
-  EXPECT_EQ(lhs->map_kind,
-            LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_PACKED_REDUCTION);
-  EXPECT_EQ(lhs->coordinate_flags, kRowReduction);
+  EXPECT_EQ(lhs->coordinate_projection_plan, &kLhsPlan);
   EXPECT_EQ(loom_matrix_fragment_role_layout(
                 &layout, LOOM_CONTRACT_OPERAND_ROLE_UNKNOWN),
             nullptr);
@@ -246,208 +250,98 @@ TEST(MatrixFragmentLayoutTest, FindsRoleLayouts) {
       nullptr);
 }
 
-TEST(MatrixFragmentLayoutTest, MapsLaneModPackedReductionCoordinates) {
-  loom_matrix_fragment_layout_t layout = RdnaLayout();
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 0, 0, 0,
-                   kRowReduction, 0, 0, 0);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 15, 0, 1,
-                   kRowReduction, 15, 0, 1);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 16, 7, 1,
-                   kRowReduction, 0, 0, 15);
-
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_RHS, 0, 0, 0,
-                   kColumnReduction, 0, 0, 0);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_RHS, 15, 0, 1,
-                   kColumnReduction, 0, 15, 1);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_RHS, 31, 7, 1,
-                   kColumnReduction, 0, 15, 15);
-}
-
-TEST(MatrixFragmentLayoutTest, MapsRegisterInterleavedRowColumnCoordinates) {
-  loom_matrix_fragment_layout_t layout = RdnaLayout();
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 0, 0, 0,
-                   kRowColumn, 0, 0, 0);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 15, 0, 0,
-                   kRowColumn, 0, 15, 0);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 16, 0, 0,
-                   kRowColumn, 1, 0, 0);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 31, 7, 0,
-                   kRowColumn, 15, 15, 0);
-}
-
-TEST(MatrixFragmentLayoutTest,
-     MapsWave64RegisterInterleavedRowColumnCoordinates) {
-  loom_matrix_fragment_layout_t layout = RdnaWave64InterleavedLayout();
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 0, 0, 0,
-                   kRowColumn, 0, 0, 0);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 15, 1, 0,
-                   kRowColumn, 4, 15, 0);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 16, 0, 0,
-                   kRowColumn, 1, 0, 0);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 63, 3, 0,
-                   kRowColumn, 15, 15, 0);
-}
-
-TEST(MatrixFragmentLayoutTest, MapsRegisterInterleavedLowSubwordCoordinates) {
-  loom_matrix_fragment_layout_t layout = RdnaLowSubwordLayout();
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 0, 0, 0,
-                   kRowColumn, 0, 0, 0);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 15, 0, 0,
-                   kRowColumn, 0, 15, 0);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 16, 0, 0,
-                   kRowColumn, 1, 0, 0);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 31, 7, 0,
-                   kRowColumn, 15, 15, 0);
-
+TEST(MatrixFragmentLayoutTest, RejectsMetadataDependentLogicalCoordinates) {
+  loom_matrix_fragment_layout_t layout = TestLayout();
+  layout.lhs.reduction_group = {
+      /*.storage_element_count=*/2,
+      /*.logical_element_count=*/4,
+  };
   loom_matrix_fragment_coordinate_t coordinate = {};
   EXPECT_FALSE(loom_matrix_fragment_coordinate(
-      &layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 31, 7, 1, &coordinate));
-  ExpectPhysicalElementCount(&layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-                             RowColumn(15, 15), 1);
-  ExpectPhysicalElement(&layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-                        RowColumn(15, 15), 0, 31, 7, 0);
+      &layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 0, 0, &coordinate));
 }
 
-TEST(MatrixFragmentLayoutTest, MapsLaneGroupPackedReductionCoordinates) {
-  loom_matrix_fragment_layout_t layout = CdnaLayout();
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 0, 0, 0,
-                   kRowReduction, 0, 0, 0);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 15, 1, 1,
-                   kRowReduction, 15, 0, 3);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 16, 0, 0,
-                   kRowReduction, 0, 0, 4);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 63, 1, 1,
-                   kRowReduction, 15, 0, 15);
-
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_RHS, 0, 0, 0,
-                   kColumnReduction, 0, 0, 0);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_RHS, 15, 1, 1,
-                   kColumnReduction, 0, 15, 3);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_RHS, 16, 0, 0,
-                   kColumnReduction, 0, 0, 4);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_RHS, 63, 1, 1,
-                   kColumnReduction, 0, 15, 15);
+TEST(MatrixFragmentLayoutTest, MapsReplicatedInputCoordinates) {
+  loom_matrix_fragment_layout_t layout = TestLayout();
+  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 0, 0, 0, 0, 0, 0);
+  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 15, 15, 0, 15, 0,
+                   15);
+  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 16, 15, 0, 0, 0,
+                   15);
+  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_RHS, 31, 15, 0, 0, 15,
+                   15);
 }
 
-TEST(MatrixFragmentLayoutTest, MapsLaneGroupRegisterRowColumnCoordinates) {
-  loom_matrix_fragment_layout_t layout = CdnaLayout();
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 0, 0, 0,
-                   kRowColumn, 0, 0, 0);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 15, 3, 0,
-                   kRowColumn, 3, 15, 0);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 16, 0, 0,
-                   kRowColumn, 4, 0, 0);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 63, 3, 0,
-                   kRowColumn, 15, 15, 0);
+TEST(MatrixFragmentLayoutTest, MapsInterleavedResultCoordinates) {
+  loom_matrix_fragment_layout_t layout = TestLayout();
+  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 0, 0, 0, 0, 0,
+                   0);
+  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 15, 3, 0, 6, 15,
+                   0);
+  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 16, 0, 0, 1, 0,
+                   0);
+  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 31, 7, 0, 15, 15,
+                   0);
 }
 
-TEST(MatrixFragmentLayoutTest, MapsLaneGroupLowSubwordCoordinates) {
-  loom_matrix_fragment_layout_t layout = LaneGroupLowSubwordLayout();
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 0, 0, 0,
-                   kRowColumn, 0, 0, 0);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 15, 3, 0,
-                   kRowColumn, 3, 15, 0);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 16, 0, 0,
-                   kRowColumn, 4, 0, 0);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 63, 3, 0,
-                   kRowColumn, 15, 15, 0);
+TEST(MatrixFragmentLayoutTest, MapsIndependentBlockedCoordinates) {
+  loom_matrix_fragment_layout_t layout = BlockedLayout();
+  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 0, 0, 0, 0, 0,
+                   0);
+  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 0, 4, 1, 0, 0,
+                   0);
+  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 63, 15, 3, 15,
+                   15, 0);
+}
 
+TEST(MatrixFragmentLayoutTest, RejectsPaddingPayloadElements) {
+  loom_matrix_fragment_layout_t layout = TestLayout();
+  layout.result.payload_element_count = 16;
+  layout.result.coordinate_element_stride = 2;
+  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 31, 14, 0, 15,
+                   15, 0);
   loom_matrix_fragment_coordinate_t coordinate = {};
   EXPECT_FALSE(loom_matrix_fragment_coordinate(
-      &layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 63, 3, 1, &coordinate));
-  ExpectPhysicalElementCount(&layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-                             RowColumn(15, 15), 1);
-  ExpectPhysicalElement(&layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-                        RowColumn(15, 15), 0, 63, 3, 0);
-}
-
-TEST(MatrixFragmentLayoutTest, MapsLaneGroupPackedRowCoordinates) {
-  loom_matrix_fragment_layout_t layout = LaneGroupPackedRowLayout();
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 0, 0, 0,
-                   kRowColumn, 0, 0, 0);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 0, 0, 1,
-                   kRowColumn, 1, 0, 0);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 15, 3, 1,
-                   kRowColumn, 7, 15, 0);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 16, 0, 0,
-                   kRowColumn, 8, 0, 0);
-  ExpectCoordinate(&layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 31, 3, 1,
-                   kRowColumn, 15, 15, 0);
-
-  ExpectPhysicalElementCount(&layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-                             RowColumn(15, 15), 1);
-  ExpectPhysicalElement(&layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-                        RowColumn(15, 15), 0, 31, 3, 1);
+      &layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 31, 15, &coordinate));
 }
 
 TEST(MatrixFragmentLayoutTest, RejectsOutOfRangeElements) {
-  loom_matrix_fragment_layout_t layout = RdnaLayout();
+  loom_matrix_fragment_layout_t layout = TestLayout();
   loom_matrix_fragment_coordinate_t coordinate = {};
   EXPECT_FALSE(loom_matrix_fragment_coordinate(
-      &layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 32, 0, 0, &coordinate));
+      &layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 32, 0, &coordinate));
   EXPECT_FALSE(loom_matrix_fragment_coordinate(
-      &layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 0, 8, 0, &coordinate));
+      &layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 0, 16, &coordinate));
   EXPECT_FALSE(loom_matrix_fragment_coordinate(
-      &layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 0, 0, 2, &coordinate));
+      &layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 0, 8, &coordinate));
   EXPECT_FALSE(loom_matrix_fragment_coordinate(
-      &layout, LOOM_CONTRACT_OPERAND_ROLE_UNKNOWN, 0, 0, 0, &coordinate));
+      &layout, LOOM_CONTRACT_OPERAND_ROLE_UNKNOWN, 0, 0, &coordinate));
 }
 
-TEST(MatrixFragmentLayoutTest, RejectsInvalidLayouts) {
-  loom_matrix_fragment_layout_t layout = RdnaLayout();
-  loom_matrix_fragment_coordinate_t coordinate = {};
-
-  layout.tile_shape.reduction_count = 15;
-  EXPECT_FALSE(loom_matrix_fragment_coordinate(
-      &layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 16, 7, 1, &coordinate));
-
-  layout = RdnaLayout();
-  layout.tile_shape.result_row_count = 0;
-  EXPECT_FALSE(loom_matrix_fragment_coordinate(
-      &layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 0, 0, 0, &coordinate));
-
-  layout = RdnaLayout();
-  layout.lhs.map_kind = LOOM_MATRIX_FRAGMENT_MAP_UNKNOWN;
-  EXPECT_FALSE(loom_matrix_fragment_coordinate(
-      &layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, 0, 0, 0, &coordinate));
-}
-
-TEST(MatrixFragmentLayoutTest, FindsReplicatedRdnaPhysicalElements) {
-  loom_matrix_fragment_layout_t layout = RdnaLayout();
-  ExpectPhysicalElementCount(&layout, LOOM_CONTRACT_OPERAND_ROLE_LHS,
-                             RowReduction(0, 0), 2);
+TEST(MatrixFragmentLayoutTest, FindsReplicatedPhysicalElements) {
+  loom_matrix_fragment_layout_t layout = TestLayout();
+  uint16_t count = 0;
+  ASSERT_TRUE(loom_matrix_fragment_physical_element_count(
+      &layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, RowReduction(0, 0), &count));
+  EXPECT_EQ(count, 2);
   ExpectPhysicalElement(&layout, LOOM_CONTRACT_OPERAND_ROLE_LHS,
-                        RowReduction(0, 0), 0, 0, 0, 0);
+                        RowReduction(0, 0), 0, 0, 0);
   ExpectPhysicalElement(&layout, LOOM_CONTRACT_OPERAND_ROLE_LHS,
-                        RowReduction(0, 0), 1, 16, 0, 0);
-  ExpectPhysicalElementCount(&layout, LOOM_CONTRACT_OPERAND_ROLE_RHS,
-                             ColumnReduction(15, 15), 2);
-  ExpectPhysicalElement(&layout, LOOM_CONTRACT_OPERAND_ROLE_RHS,
-                        ColumnReduction(15, 15), 0, 15, 7, 1);
-  ExpectPhysicalElement(&layout, LOOM_CONTRACT_OPERAND_ROLE_RHS,
-                        ColumnReduction(15, 15), 1, 31, 7, 1);
+                        RowReduction(0, 0), 1, 16, 0);
 }
 
-TEST(MatrixFragmentLayoutTest, FindsUniqueResultPhysicalElements) {
-  loom_matrix_fragment_layout_t rdna_layout = RdnaLayout();
-  ExpectPhysicalElementCount(&rdna_layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-                             RowColumn(15, 15), 1);
-  ExpectPhysicalElement(&rdna_layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-                        RowColumn(15, 15), 0, 31, 7, 0);
-
-  loom_matrix_fragment_layout_t cdna_layout = CdnaLayout();
-  ExpectPhysicalElementCount(&cdna_layout, LOOM_CONTRACT_OPERAND_ROLE_LHS,
-                             RowReduction(0, 4), 1);
-  ExpectPhysicalElement(&cdna_layout, LOOM_CONTRACT_OPERAND_ROLE_LHS,
-                        RowReduction(0, 4), 0, 16, 0, 0);
-  ExpectPhysicalElementCount(
-      &cdna_layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, RowColumn(4, 0), 1);
-  ExpectPhysicalElement(&cdna_layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
-                        RowColumn(4, 0), 0, 16, 0, 0);
+TEST(MatrixFragmentLayoutTest, FindsUniquePhysicalElements) {
+  loom_matrix_fragment_layout_t layout = TestLayout();
+  uint16_t count = 0;
+  ASSERT_TRUE(loom_matrix_fragment_physical_element_count(
+      &layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, RowColumn(15, 15), &count));
+  EXPECT_EQ(count, 1);
+  ExpectPhysicalElement(&layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT,
+                        RowColumn(15, 15), 0, 31, 7);
 }
 
 TEST(MatrixFragmentLayoutTest, RejectsMissingPhysicalElements) {
-  loom_matrix_fragment_layout_t layout = RdnaLayout();
+  loom_matrix_fragment_layout_t layout = TestLayout();
   uint16_t count = 0;
   EXPECT_FALSE(loom_matrix_fragment_physical_element_count(
       &layout, LOOM_CONTRACT_OPERAND_ROLE_LHS, RowColumn(0, 0), &count));

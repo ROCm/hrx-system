@@ -6,21 +6,22 @@
 
 """Global dialect op definitions.
 
-Four ops for module-level state:
+Six ops for module-level state:
 
 Top-level (module-level symbols):
-  global.constant  — Immutable global (weights, parameters, constants).
-  global.variable  — Mutable global (KV cache, running state).
-  global.rodata    — Read-only executable data payload.
+  global.constant     — Immutable global (weights, parameters, constants).
+  global.variable     — Mutable global (KV cache, running state).
+  global.rodata.def   — Read-only executable data payload.
+  global.rodata.decl  — Externally supplied read-only executable data.
 
 Body ops (inside function/template bodies):
   global.load      — Load value + dynamic dims/encoding from global.
   global.store     — Store value + dynamic dims/encoding to global.
 
-Global definitions are module-private today. `global.rodata` is executable
+Global definitions are module-private today. `global.rodata.def` is executable
 data, not a value global: it gives target emitters named bytes they can place
-in read-only artifact sections without making the payload loadable through
-`global.load`.
+in read-only artifact sections. Loading one materializes the complete payload
+as an opaque read-only `buffer` root.
 """
 
 from loom.assembly import (
@@ -28,6 +29,7 @@ from loom.assembly import (
     COMMA,
     EQUALS,
     Attr,
+    Clause,
     OptionalGroup,
     PredicateList,
     Ref,
@@ -47,6 +49,7 @@ from loom.dsl import (
     Operand,
     Result,
     SymbolDefinition,
+    SymbolDefinitionFlag,
     SymbolReference,
 )
 
@@ -73,7 +76,7 @@ global_constant = Op(
         "structural constraints. Predicates constrain dynamic dimensions and "
         "are propagated to every load site as value facts. Non-scalar or "
         "computed initialization is modeled by global.store in initializer "
-        "functions; resource-backed artifact payloads belong in global.rodata "
+        "functions; resource-backed artifact payloads belong in global.rodata.def "
         "instead of overloading inline attrs."
     ),
     traits=[SYMBOL_DEFINE],
@@ -167,11 +170,11 @@ global_variable = Op(
 )
 
 # ============================================================================
-# global.rodata — read-only executable data payload
+# global.rodata.def — read-only executable data payload
 # ============================================================================
 
 global_rodata = Op(
-    "global.rodata",
+    "global.rodata.def",
     group=global_ops,
     doc=(
         "Read-only executable data payload. This defines a named artifact "
@@ -184,7 +187,7 @@ global_rodata = Op(
     symbol_def=SymbolDefinition(
         field="symbol",
         name="rodata",
-        interfaces=["record"],
+        interfaces=["rodata", "record"],
         bytecode_kind="LOOM_SYMBOL_RECORD",
     ),
     attrs=[
@@ -195,13 +198,35 @@ global_rodata = Op(
     format=[
         SymbolRef("symbol"),
         EQUALS,
+        OptionalGroup([Clause("align", Attr("alignment"))], anchor="alignment"),
         Attr("contents"),
-        OptionalGroup([COMMA, kw("align"), Attr("alignment")], anchor="alignment"),
     ],
-    verify="loom_global_rodata_verify",
+    verify="loom_global_rodata_def_verify",
     examples=[
-        'global.rodata @loom_sanitizer_sites = bytes("4c53495401000000"), align 8',
+        'global.rodata.def @loom_sanitizer_sites = align(8) bytes("4c53495401000000")',
+        'global.rodata.def @empty = bytes("")',
     ],
+)
+
+# ============================================================================
+# global.rodata.decl — externally supplied read-only executable data
+# ============================================================================
+
+global_rodata_decl = Op(
+    "global.rodata.decl",
+    group=global_ops,
+    doc=("Declare a read-only executable data symbol whose payload is supplied by artifact emission or linking. The declaration carries symbol identity without inventing placeholder contents."),
+    traits=[SYMBOL_DEFINE],
+    symbol_def=SymbolDefinition(
+        field="symbol",
+        name="rodata",
+        interfaces=["rodata", "record"],
+        bytecode_kind="LOOM_SYMBOL_RECORD",
+        flags=[SymbolDefinitionFlag.DECLARATION],
+    ),
+    attrs=[AttrDef("symbol", "symbol")],
+    format=[SymbolRef("symbol")],
+    examples=["global.rodata.decl @iree_asan_config"],
 )
 
 # ============================================================================
@@ -211,12 +236,20 @@ global_rodata = Op(
 global_load = Op(
     "global.load",
     group=global_ops,
-    doc=("Load a value from a global. Dynamic dims and encodings in the type annotation reference co-results by name. Predicates on the global definition are propagated as value facts."),
+    doc=(
+        "Load a value global or materialize a read-only data symbol. Value-global "
+        "dynamic dims and encodings in the type annotation reference co-results "
+        "by name, and predicates on the definition are propagated as value facts. "
+        "A read-only data symbol requires one `buffer` result representing the "
+        "complete payload with constant-memory provenance. Definitions provide "
+        "exact byte-extent and authored alignment facts; declarations remain "
+        "conservative until linking supplies their definition."
+    ),
     attrs=[
         AttrDef(
             "global",
             "symbol",
-            symbol_ref=SymbolReference("global", ["global"]),
+            symbol_ref=SymbolReference("global or read-only data", ["global", "rodata"]),
         ),
     ],
     # Variadic results: the loaded value + any dim/encoding co-results.
@@ -235,6 +268,7 @@ global_load = Op(
         "%tile, %m, %k = global.load @weights : tile<[%m]x[%k]xf32>",
         "%tile = global.load @bias : tile<[%m]xf32>",
         "%cache, %s, %d = global.load @kv_cache : tile<[%s]x[%s]x[%d]xf32>",
+        "%message = global.load @message : buffer",
     ],
 )
 
@@ -286,4 +320,5 @@ ALL_GLOBAL_OPS: tuple[Op, ...] = (
     global_rodata,
     global_load,
     global_store,
+    global_rodata_decl,
 )

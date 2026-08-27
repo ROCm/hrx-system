@@ -24,6 +24,10 @@ typedef struct iree_hal_replay_pending_record_t {
   iree_hal_replay_file_record_metadata_t metadata;
 } iree_hal_replay_pending_record_t;
 
+// Returns the immutable options captured by |recorder| at creation.
+const iree_hal_replay_recorder_options_t* iree_hal_replay_recorder_options(
+    const iree_hal_replay_recorder_t* recorder);
+
 // Records |status_code| as the recorder's terminal failure.
 void iree_hal_replay_recorder_fail(iree_hal_replay_recorder_t* recorder,
                                    iree_status_code_t status_code);
@@ -39,6 +43,16 @@ iree_status_t iree_hal_replay_recorder_record_object(
     const iree_const_byte_span_t* iovecs,
     iree_hal_replay_object_id_t* out_object_id);
 
+// Allocates and encodes the timepoints in |semaphore_list|.
+//
+// The caller owns the returned storage and must free it with |host_allocator|.
+iree_status_t iree_hal_replay_recorder_allocate_semaphore_payloads(
+    iree_hal_replay_recorder_t* recorder,
+    const iree_hal_semaphore_list_t semaphore_list,
+    iree_allocator_t host_allocator,
+    iree_hal_replay_semaphore_timepoint_payload_t** out_payloads,
+    iree_host_size_t* out_payloads_size);
+
 iree_status_t iree_hal_replay_recorder_begin_operation(
     iree_hal_replay_recorder_t* recorder, iree_hal_replay_object_id_t device_id,
     iree_hal_replay_object_id_t object_id,
@@ -47,6 +61,16 @@ iree_status_t iree_hal_replay_recorder_begin_operation(
     iree_hal_replay_operation_code_t operation_code,
     iree_hal_replay_payload_type_t payload_type,
     iree_hal_replay_pending_record_t* out_pending_record);
+
+// Registers |semaphore| while |pending_record| owns the recorder mutex.
+//
+// The recorder retains |semaphore| on success and releases it with the
+// recorder. Registration must complete before ending |pending_record| so a
+// successfully recorded semaphore object is always available to later
+// operation records.
+iree_status_t iree_hal_replay_recorder_register_semaphore(
+    iree_hal_replay_pending_record_t* pending_record,
+    iree_hal_semaphore_t* semaphore, iree_hal_replay_object_id_t semaphore_id);
 
 // Marks |pending_record| as a captured operation that cannot be replayed.
 void iree_hal_replay_recorder_mark_unsupported(

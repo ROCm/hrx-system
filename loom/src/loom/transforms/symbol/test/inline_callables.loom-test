@@ -20,6 +20,86 @@ func.def public @entry(%arg: i32) -> (i32) {
 
 // RUN: pass inline-callables
 
+func.def inline @lane_id() -> (index) {
+  %lane = kernel.subgroup.lane.id : index
+  func.return %lane : index
+}
+
+kernel.def @inlines_into_required_ancestor() {
+  %unit_extent = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit_extent, %unit_extent, %unit_extent) workgroup_size(%workgroup_size, %unit_extent, %unit_extent) : index
+} launch() {
+  %lane = func.call @lane_id() : () -> (index)
+  kernel.return
+}
+
+// ----
+kernel.def @inlines_into_required_ancestor() {
+  %unit_extent = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit_extent, %unit_extent, %unit_extent) workgroup_size(%workgroup_size, %unit_extent, %unit_extent) : index
+} launch() {
+  %lane = kernel.subgroup.lane.id : index
+  kernel.return
+}
+
+// ====
+
+// RUN: pass inline-callables,canonicalize
+
+target.generic<reference> @wave32 {subgroup_size = 32}
+target.generic<reference> @wave64 {subgroup_size = 64}
+
+func.def inline @current_subgroup_size() -> (index) {
+  %size = target.subgroup.size : index
+  func.return %size : index
+}
+
+func.def target(@wave32) @caller_wave32() -> (index) {
+  %size = func.call @current_subgroup_size() : () -> (index)
+  func.return %size : index
+}
+
+func.def target(@wave64) @caller_wave64() -> (index) {
+  %size = func.call @current_subgroup_size() : () -> (index)
+  func.return %size : index
+}
+
+// ----
+target.generic<reference> @wave32 {subgroup_size = 32}
+
+target.generic<reference> @wave64 {subgroup_size = 64}
+
+func.def target(@wave32) @caller_wave32() -> (index) {
+  %size = index.constant 32 : index
+  func.return %size : index
+}
+
+func.def target(@wave64) @caller_wave64() -> (index) {
+  %size = index.constant 64 : index
+  func.return %size : index
+}
+
+// ====
+
+// RUN: pass inline-callables
+
+func.def inline @misplaced_lane_id() -> (index) {
+  // ERROR@+1: STRUCTURE/029 "kernel.subgroup.lane.id" "required" "kernel.def" "func.def"
+  %lane = kernel.subgroup.lane.id : index
+  func.return %lane : index
+}
+
+func.def @rejects_illegal_final_inline_placement() {
+  %lane = func.call @misplaced_lane_id() : () -> (index)
+  func.return
+}
+
+// ====
+
+// RUN: pass inline-callables
+
 func.def @double(%value: i32) -> (i32) {
   %doubled = test.addi %value, %value : i32
   func.return %doubled : i32
@@ -124,6 +204,31 @@ func.def public @entry_b(%arg: i32) -> (i32) {
 
 // ====
 
+// RUN: pass inline-callables
+
+func.def public inline @public_double(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.def public @public_caller(%arg: i32) -> (i32) {
+  %result = func.call @public_double(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+func.def public inline @public_double(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  func.return %doubled : i32
+}
+
+func.def public @public_caller(%arg: i32) -> (i32) {
+  %doubled = test.addi %arg, %arg : i32
+  func.return %doubled : i32
+}
+
+// ====
+
 // RUN: with-locations pass inline-callables
 
 func.def inline @sanitizer_site_source(%value: i32) -> (i32) {
@@ -146,20 +251,68 @@ func.def public @preserves_sanitizer_site_location(%arg: i32) -> (i32) {
 
 // RUN: pass inline-callables
 
-func.template<test.addi> hot inline @double_template(%value: i32) -> (i32) {
+template.decl @test.addi(%value: i32) -> (i32)
+
+template.def<@test.addi> hot @double_template(%value: i32) -> (i32) {
   %doubled = test.addi %value, %value : i32
-  func.return %doubled : i32
+  template.return %doubled : i32
 }
 
 func.def public @entry(%arg: i32) -> (i32) {
-  %result = func.call @double_template(%arg) : (i32) -> (i32)
+  %result = template.call @double_template(%arg) : (i32) -> (i32)
   func.return %result : i32
 }
 
 // ----
+template.decl @test.addi(%value: i32) -> (i32)
+
 func.def public @entry(%arg: i32) -> (i32) {
   %doubled = test.addi %arg, %arg : i32
   func.return %doubled : i32
+}
+
+// ====
+
+// RUN: pass inline-callables
+
+template.decl @test.addi(%value: i32) -> (i32)
+
+template.def<@test.addi> @double_template(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  template.return %doubled : i32
+}
+
+func.def inline @apply_double(%value: i32) -> (i32) {
+  %result = template.apply<@test.addi>(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def public @exact_entry(%arg: i32) -> (i32) {
+  %result = template.call @double_template(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def public @abstract_entry(%arg: i32) -> (i32) {
+  %result = func.call @apply_double(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+template.decl @test.addi(%value: i32) -> (i32)
+
+template.def<@test.addi> @double_template(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  template.return %doubled : i32
+}
+
+func.def public @exact_entry(%arg: i32) -> (i32) {
+  %doubled = test.addi %arg, %arg : i32
+  func.return %doubled : i32
+}
+
+func.def public @abstract_entry(%arg: i32) -> (i32) {
+  %result = template.apply<@test.addi>(%arg) : (i32) -> (i32)
+  func.return %result : i32
 }
 
 // ====

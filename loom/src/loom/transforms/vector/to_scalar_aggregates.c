@@ -78,9 +78,8 @@ static iree_status_t loom_vector_to_scalar_aggregate_loop_axis(
   loom_op_t* loop = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_for_build(
       &state->rewriter->builder, /*build_flags=*/0, lower_bound, upper_bound,
-      step, &current_aggregate, 1, &state->vector_type, 1, NULL, 0,
-      LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0, /*unroll_schedule=*/0,
-      state->location, &loop));
+      step, &current_aggregate, 1, NULL, 0, LOOM_VALUE_ID_INVALID,
+      /*unroll_policy=*/0, /*unroll_schedule=*/0, state->location, &loop));
   loom_vector_to_scalar_record_loop_created(state);
 
   loom_builder_ip_t saved = loom_builder_enter_region(
@@ -125,10 +124,10 @@ static iree_status_t loom_vector_to_scalar_aggregate_loop_axis(
 
 static iree_status_t loom_vector_to_scalar_dynamic_seed(
     loom_vector_to_scalar_state_t* state, loom_value_id_t* out_seed) {
-  if (state->descriptor->seed_operand_index != UINT8_MAX &&
-      state->descriptor->seed_operand_index < state->op->operand_count) {
-    loom_value_id_t seed = loom_op_const_operands(
-        state->op)[state->descriptor->seed_operand_index];
+  if (state->descriptor.seed_operand_index != UINT8_MAX &&
+      state->descriptor.seed_operand_index < state->op->operand_count) {
+    loom_value_id_t seed =
+        loom_op_const_operands(state->op)[state->descriptor.seed_operand_index];
     loom_type_t seed_type =
         loom_module_value_type(state->rewriter->module, seed);
     if (loom_type_equal(seed_type, state->vector_type)) {
@@ -213,9 +212,8 @@ static iree_status_t loom_vector_to_scalar_splat_loop_axis(
   loom_op_t* loop = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_for_build(
       &state->rewriter->builder, /*build_flags=*/0, lower_bound, upper_bound,
-      step, &current_aggregate, 1, &state->vector_type, 1, NULL, 0,
-      LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0, /*unroll_schedule=*/0,
-      state->location, &loop));
+      step, &current_aggregate, 1, NULL, 0, LOOM_VALUE_ID_INVALID,
+      /*unroll_policy=*/0, /*unroll_schedule=*/0, state->location, &loop));
   loom_vector_to_scalar_record_loop_created(state);
 
   loom_builder_ip_t saved = loom_builder_enter_region(

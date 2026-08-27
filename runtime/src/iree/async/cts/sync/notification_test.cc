@@ -19,14 +19,13 @@
 #include "iree/async/notification.h"
 
 #include <atomic>
+#include <future>
 #include <thread>
 #include <vector>
 
 #include "iree/async/cts/util/registry.h"
 #include "iree/async/cts/util/test_base.h"
 #include "iree/async/operations/scheduling.h"
-#include "iree/base/threading/notification.h"
-#include "iree/base/threading/thread.h"
 
 namespace iree::async::cts {
 
@@ -121,29 +120,28 @@ TEST_P(NotificationTest, SignalIfObservedExplicitObservationAdvancesEpoch) {
 
 // Synchronous wait with signal from another thread.
 //
-// Epoch-based notifications coalesce signals that arrive before the waiter
-// captures the epoch (via the internal prepare_wait). There is no way to
-// observe from outside when prepare_wait has executed, so a single signal
-// is not guaranteed to wake the worker. Signal continuously until the waiter
-// completes — if a signal coalesces, the next one lands after prepare_wait.
+// The waiter publishes readiness only after beginning an observation scope, so
+// the signal cannot race ahead of its epoch token.
 TEST_P(NotificationTest, SyncWaitCrossThread) {
   iree_async_notification_t* notification = nullptr;
   IREE_ASSERT_OK(iree_async_notification_create(
       proactor_, IREE_ASYNC_NOTIFICATION_FLAG_NONE, &notification));
 
   std::atomic<bool> wait_completed{false};
+  std::promise<void> waiter_ready_promise;
+  auto waiter_ready = waiter_ready_promise.get_future();
 
   std::thread waiter([&]() {
-    bool result =
-        iree_async_notification_wait(notification, iree_make_timeout_ms(5000));
+    uint32_t wait_token = iree_async_notification_begin_observe(notification);
+    waiter_ready_promise.set_value();
+    bool result = iree_async_notification_wait_for_token(
+        notification, wait_token, iree_infinite_timeout());
+    iree_async_notification_end_observe(notification);
     wait_completed.store(result, std::memory_order_release);
   });
 
-  // Signal continuously until the waiter completes.
-  while (!wait_completed.load(std::memory_order_acquire)) {
-    iree_async_notification_signal(notification, 1);
-    iree_thread_yield();
-  }
+  waiter_ready.wait();
+  iree_async_notification_signal(notification, 1);
 
   waiter.join();
 
@@ -179,54 +177,57 @@ TEST_P(NotificationTest, MultipleSignalsWhileWaiting) {
       proactor_, IREE_ASYNC_NOTIFICATION_FLAG_NONE, &notification));
 
   std::atomic<bool> wait_completed{false};
+  std::promise<void> waiter_ready_promise;
+  auto waiter_ready = waiter_ready_promise.get_future();
 
   std::thread waiter([&]() {
-    iree_async_notification_wait(notification, iree_make_timeout_ms(5000));
-    wait_completed.store(true, std::memory_order_release);
+    uint32_t wait_token = iree_async_notification_begin_observe(notification);
+    waiter_ready_promise.set_value();
+    bool result = iree_async_notification_wait_for_token(
+        notification, wait_token, iree_infinite_timeout());
+    iree_async_notification_end_observe(notification);
+    wait_completed.store(result, std::memory_order_release);
   });
 
-  // Signal continuously until the waiter completes. Multiple signals coalesce
-  // into one epoch advance per wait — the waiter wakes exactly once.
-  while (!wait_completed.load(std::memory_order_acquire)) {
-    iree_async_notification_signal(notification, 1);
-    iree_thread_yield();
-  }
+  waiter_ready.wait();
+  iree_async_notification_signal(notification, 1);
+  iree_async_notification_signal(notification, 1);
+  iree_async_notification_signal(notification, 1);
 
   waiter.join();
+  EXPECT_TRUE(wait_completed.load(std::memory_order_acquire));
 
-  // Epoch advanced by more than 1 (multiple signals), but the waiter only
-  // woke once from a single wait() call.
-  EXPECT_GE(iree_async_notification_query_epoch(notification), 1u);
+  // The epoch advanced once per signal, but one wait returned only once.
+  EXPECT_EQ(iree_async_notification_query_epoch(notification), 3u);
 
   iree_async_notification_release(notification);
 }
 
 // Repeated wait/signal cycles work correctly.
 //
-// Epoch-based notifications coalesce signals that arrive before the waiter
-// captures the epoch (via the internal prepare_wait). There is no way to
-// observe from outside when prepare_wait has executed, so a single signal
-// is not guaranteed to wake the worker. Instead, the main thread signals
-// continuously until the worker acknowledges each cycle. This makes progress
-// unconditional: if a signal coalesces, the next one lands after prepare_wait.
+// Each cycle publishes readiness after capturing its wait token, allowing one
+// signal to complete exactly one wait without scheduler-dependent retries.
 TEST_P(NotificationTest, RepeatedWaitSignalCycles) {
   iree_async_notification_t* notification = nullptr;
   IREE_ASSERT_OK(iree_async_notification_create(
       proactor_, IREE_ASYNC_NOTIFICATION_FLAG_NONE, &notification));
 
   std::atomic<int> cycles_completed{0};
-  std::atomic<int> worker_cycle{0};
   constexpr int kCycles = 3;
+  std::promise<void> cycle_ready_promises[kCycles];
+  std::future<void> cycle_ready_futures[kCycles];
+  for (int i = 0; i < kCycles; ++i) {
+    cycle_ready_futures[i] = cycle_ready_promises[i].get_future();
+  }
 
   // Worker thread waits for signals in a loop.
   std::thread worker([&]() {
     for (int i = 0; i < kCycles; ++i) {
-      // Publish which cycle we are about to wait on. The main thread uses
-      // this to avoid racing ahead to cycle N+1 before we start cycle N.
-      worker_cycle.store(i + 1, std::memory_order_release);
-
-      bool result = iree_async_notification_wait(notification,
-                                                 iree_make_timeout_ms(5000));
+      uint32_t wait_token = iree_async_notification_begin_observe(notification);
+      cycle_ready_promises[i].set_value();
+      bool result = iree_async_notification_wait_for_token(
+          notification, wait_token, iree_infinite_timeout());
+      iree_async_notification_end_observe(notification);
       if (result) {
         cycles_completed.fetch_add(1, std::memory_order_acq_rel);
       }
@@ -234,15 +235,8 @@ TEST_P(NotificationTest, RepeatedWaitSignalCycles) {
   });
 
   for (int i = 0; i < kCycles; ++i) {
-    // Wait for the worker to begin this cycle.
-    while (worker_cycle.load(std::memory_order_acquire) < i + 1) {
-      iree_thread_yield();
-    }
-    // Signal continuously until the worker completes this cycle.
-    while (cycles_completed.load(std::memory_order_acquire) < i + 1) {
-      iree_async_notification_signal(notification, 1);
-      iree_thread_yield();
-    }
+    cycle_ready_futures[i].wait();
+    iree_async_notification_signal(notification, 1);
   }
 
   worker.join();
@@ -253,30 +247,45 @@ TEST_P(NotificationTest, RepeatedWaitSignalCycles) {
 }
 
 // Multiple waiters all wake when signaled.
-TEST_P(NotificationTest, MultipleWaitersPartialWake) {
+TEST_P(NotificationTest, SingleWakeMakesProgressWithMultipleWaiters) {
   iree_async_notification_t* notification = nullptr;
   IREE_ASSERT_OK(iree_async_notification_create(
       proactor_, IREE_ASYNC_NOTIFICATION_FLAG_NONE, &notification));
 
   std::atomic<int> waiters_woken{0};
   constexpr int kNumWaiters = 3;
+  std::promise<void> waiter_ready_promises[kNumWaiters];
+  std::future<void> waiter_ready_futures[kNumWaiters];
+  std::promise<void> first_waiter_woken_promise;
+  auto first_waiter_woken = first_waiter_woken_promise.get_future();
 
   std::vector<std::thread> waiters;
   for (int i = 0; i < kNumWaiters; ++i) {
-    waiters.emplace_back([&]() {
-      bool result = iree_async_notification_wait(notification,
-                                                 iree_make_timeout_ms(5000));
+    waiter_ready_futures[i] = waiter_ready_promises[i].get_future();
+    waiters.emplace_back([&, i]() {
+      uint32_t wait_token = iree_async_notification_begin_observe(notification);
+      waiter_ready_promises[i].set_value();
+      bool result = iree_async_notification_wait_for_token(
+          notification, wait_token, iree_infinite_timeout());
+      iree_async_notification_end_observe(notification);
       if (result) {
-        waiters_woken.fetch_add(1, std::memory_order_acq_rel);
+        int old_count = waiters_woken.fetch_add(1, std::memory_order_acq_rel);
+        if (old_count == 0) first_waiter_woken_promise.set_value();
       }
     });
   }
 
-  // Signal continuously until all waiters complete.
-  while (waiters_woken.load(std::memory_order_acquire) < kNumWaiters) {
-    iree_async_notification_signal(notification, INT32_MAX);
-    iree_thread_yield();
-  }
+  for (auto& waiter_ready : waiter_ready_futures) waiter_ready.wait();
+
+  // A single platform wake guarantees progress. More than one observer may
+  // complete if it captured the old epoch but had not entered its kernel wait
+  // before the signal advanced the epoch.
+  iree_async_notification_signal(notification, 1);
+  first_waiter_woken.wait();
+  EXPECT_GE(waiters_woken.load(std::memory_order_acquire), 1);
+
+  // Release any observers that did reach the platform wait.
+  iree_async_notification_signal(notification, INT32_MAX);
 
   for (auto& t : waiters) {
     t.join();
@@ -295,23 +304,26 @@ TEST_P(NotificationTest, BroadcastWake) {
 
   std::atomic<int> waiters_woken{0};
   constexpr int kNumWaiters = 3;
+  std::promise<void> waiter_ready_promises[kNumWaiters];
+  std::future<void> waiter_ready_futures[kNumWaiters];
 
   std::vector<std::thread> waiters;
   for (int i = 0; i < kNumWaiters; ++i) {
-    waiters.emplace_back([&]() {
-      bool result = iree_async_notification_wait(notification,
-                                                 iree_make_timeout_ms(5000));
+    waiter_ready_futures[i] = waiter_ready_promises[i].get_future();
+    waiters.emplace_back([&, i]() {
+      uint32_t wait_token = iree_async_notification_begin_observe(notification);
+      waiter_ready_promises[i].set_value();
+      bool result = iree_async_notification_wait_for_token(
+          notification, wait_token, iree_infinite_timeout());
+      iree_async_notification_end_observe(notification);
       if (result) {
         waiters_woken.fetch_add(1, std::memory_order_acq_rel);
       }
     });
   }
 
-  // Signal continuously until all waiters wake.
-  while (waiters_woken.load(std::memory_order_acquire) < kNumWaiters) {
-    iree_async_notification_signal(notification, INT32_MAX);
-    iree_thread_yield();
-  }
+  for (auto& waiter_ready : waiter_ready_futures) waiter_ready.wait();
+  iree_async_notification_signal(notification, INT32_MAX);
 
   for (auto& t : waiters) {
     t.join();
@@ -335,13 +347,17 @@ TEST_P(NotificationTest, AsyncWait) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait_op.base));
 
+  // Complete the backend registration before signaling from another thread.
+  iree_async_proactor_wake(proactor_);
+  PollOneProgressEvent();
+  EXPECT_EQ(tracker.call_count, 0);
+
   // Signal the notification from another thread.
   std::thread signaler(
       [notification]() { iree_async_notification_signal(notification, 1); });
 
   // Poll until the wait completes.
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   signaler.join();
 
@@ -400,8 +416,7 @@ TEST_P(NotificationTest, AsyncWaitWithCallerWaitToken) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait_op.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -416,29 +431,30 @@ TEST_P(NotificationTest, AsyncSignal) {
       proactor_, IREE_ASYNC_NOTIFICATION_FLAG_NONE, &notification));
 
   std::atomic<bool> waiter_completed{false};
+  std::promise<void> waiter_ready_promise;
+  auto waiter_ready = waiter_ready_promise.get_future();
 
   // Background thread waits synchronously.
   std::thread waiter([&]() {
-    bool result =
-        iree_async_notification_wait(notification, iree_make_timeout_ms(5000));
+    uint32_t wait_token = iree_async_notification_begin_observe(notification);
+    waiter_ready_promise.set_value();
+    bool result = iree_async_notification_wait_for_token(
+        notification, wait_token, iree_infinite_timeout());
+    iree_async_notification_end_observe(notification);
     waiter_completed.store(result, std::memory_order_release);
   });
 
-  // Submit async signal operations continuously until the waiter completes.
-  // Each signal op is polled to completion before submitting the next.
-  while (!waiter_completed.load(std::memory_order_acquire)) {
-    CompletionTracker tracker;
-    iree_async_notification_signal_operation_t signal_op;
-    InitNotificationSignalOp(&signal_op, notification, 1,
-                             CompletionTracker::Callback, &tracker);
+  waiter_ready.wait();
+  CompletionTracker tracker;
+  iree_async_notification_signal_operation_t signal_op;
+  InitNotificationSignalOp(&signal_op, notification, 1,
+                           CompletionTracker::Callback, &tracker);
 
-    IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &signal_op.base));
+  IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &signal_op.base));
 
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/1);
 
-    IREE_EXPECT_OK(tracker.ConsumeStatus());
-  }
+  IREE_EXPECT_OK(tracker.ConsumeStatus());
 
   waiter.join();
 
@@ -492,13 +508,17 @@ TEST_P(NotificationTest, ChainedWaitNop) {
   iree_async_operation_list_t list = {ops, 2};
   IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
 
+  // Complete the backend wait registration before signaling.
+  iree_async_proactor_wake(proactor_);
+  PollOneProgressEvent();
+  EXPECT_TRUE(tracker.order.empty());
+
   // Signal the notification from another thread.
   std::thread signaler(
       [notification]() { iree_async_notification_signal(notification, 1); });
 
   // Poll until both complete.
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   signaler.join();
 
@@ -509,9 +529,7 @@ TEST_P(NotificationTest, ChainedWaitNop) {
   iree_async_notification_release(notification);
 }
 
-// Round-trip: async wait completes, callback wakes main thread.
-// Uses iree_notification_t (base threading primitive) for callback -> main
-// communication since the sync wait API captures epoch at call time.
+// Round-trip: a cross-thread signal completes an async wait callback.
 TEST_P(NotificationTest, RoundTrip) {
   iree_async_notification_t* async_notification = nullptr;
   IREE_ASSERT_OK(iree_async_notification_create(
@@ -537,37 +555,22 @@ TEST_P(NotificationTest, RoundTrip) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &wait_op.base));
 
+  // Complete the backend wait registration before releasing the signaler.
+  iree_async_proactor_wake(proactor_);
+  PollOneProgressEvent();
+  EXPECT_FALSE(context.callback_fired);
+
   // Background thread signals the async notification.
-  iree_notification_t ready;
-  iree_notification_initialize(&ready);
+  std::thread signaler(
+      [&]() { iree_async_notification_signal(async_notification, 1); });
 
-  std::thread signaler([&]() {
-    iree_notification_await(
-        &ready, [](void*) { return true; }, nullptr, iree_infinite_timeout());
-    iree_async_notification_signal(async_notification, 1);
-  });
-
-  // Signal the background thread to proceed.
-  iree_notification_post(&ready, 1);
-
-  // Main thread polls the proactor until the callback fires.
-  // The callback posts to main_wakeup, which we can check with try_wait.
-  while (!context.callback_fired) {
-    iree_host_size_t completed = 0;
-    iree_status_t status = iree_async_proactor_poll(
-        proactor_, iree_make_timeout_ms(100), &completed);
-    if (!iree_status_is_deadline_exceeded(status)) {
-      IREE_ASSERT_OK(status);
-    } else {
-      iree_status_ignore(status);
-    }
-  }
+  PollUntilCondition([&] { return context.callback_fired; },
+                     "notification round trip");
 
   signaler.join();
 
   EXPECT_TRUE(context.callback_fired);
 
-  iree_notification_deinitialize(&ready);
   iree_async_notification_release(async_notification);
 }
 

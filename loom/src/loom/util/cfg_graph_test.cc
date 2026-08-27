@@ -80,26 +80,45 @@ class CfgGraphTest : public ::testing::Test {
   }
 
   loom_value_id_t BuildCondition() {
+    return BuildConstant(1, loom_type_scalar(LOOM_SCALAR_TYPE_I1));
+  }
+
+  loom_value_id_t BuildConstant(int64_t value, loom_type_t type) {
     loom_op_t* condition_op = nullptr;
-    IREE_CHECK_OK(loom_test_constant_build(
-        &builder_, loom_attr_i64(1), loom_type_scalar(LOOM_SCALAR_TYPE_I1),
-        LOOM_LOCATION_UNKNOWN, &condition_op));
+    IREE_CHECK_OK(loom_test_constant_build(&builder_, loom_attr_i64(value),
+                                           type, LOOM_LOCATION_UNKNOWN,
+                                           &condition_op));
     return loom_test_constant_result(condition_op);
   }
 
-  void BuildBranch(loom_block_t* dest) {
-    loom_op_t* branch_op = nullptr;
-    IREE_ASSERT_OK(loom_cfg_br_build(&builder_, dest, nullptr, 0,
-                                     LOOM_LOCATION_UNKNOWN, &branch_op));
+  loom_value_id_t AddBlockArg(loom_block_t* block, loom_type_t type) {
+    loom_value_id_t arg = LOOM_VALUE_ID_INVALID;
+    IREE_CHECK_OK(loom_module_define_value(module_, type, &arg));
+    IREE_CHECK_OK(loom_block_add_arg(module_, block, arg));
+    return arg;
   }
 
-  void BuildConditionalBranch(loom_block_t* true_dest,
-                              loom_block_t* false_dest) {
+  loom_op_t* BuildBranch(loom_block_t* dest) {
+    return BuildBranchWithArgs(dest, nullptr, 0);
+  }
+
+  loom_op_t* BuildBranchWithArgs(loom_block_t* dest,
+                                 const loom_value_id_t* args,
+                                 iree_host_size_t arg_count) {
+    loom_op_t* branch_op = nullptr;
+    IREE_CHECK_OK(loom_cfg_br_build(&builder_, dest, args, arg_count,
+                                    LOOM_LOCATION_UNKNOWN, &branch_op));
+    return branch_op;
+  }
+
+  loom_op_t* BuildConditionalBranch(loom_block_t* true_dest,
+                                    loom_block_t* false_dest) {
     loom_value_id_t condition = BuildCondition();
     loom_op_t* branch_op = nullptr;
-    IREE_ASSERT_OK(loom_cfg_cond_br_build(&builder_, condition, true_dest,
-                                          false_dest, LOOM_LOCATION_UNKNOWN,
-                                          &branch_op));
+    IREE_CHECK_OK(loom_cfg_cond_br_build(&builder_, condition, true_dest,
+                                         false_dest, LOOM_LOCATION_UNKNOWN,
+                                         &branch_op));
+    return branch_op;
   }
 
   void BuildGraph(loom_cfg_graph_t* out_graph) {
@@ -135,6 +154,7 @@ TEST_F(CfgGraphTest, BuildsSuccessorsAndPredecessorsForDiamond) {
   EXPECT_FALSE(graph.malformed);
   EXPECT_EQ(graph.block_count, 4u);
   EXPECT_EQ(graph.edge_count, 4u);
+  EXPECT_EQ(graph.backward_edge_count, 0u);
 
   loom_cfg_block_index_span_t entry_successors =
       loom_cfg_graph_successors(&graph, 0);
@@ -206,6 +226,42 @@ TEST_F(CfgGraphTest, SuccessorBeforeBlockEndMarksGraphMalformed) {
 
   EXPECT_TRUE(graph.malformed);
   EXPECT_EQ(graph.edge_count, 1u);
+}
+
+TEST_F(CfgGraphTest, TerminatorPayloadForSuccessorUsesSingleSuccessorOperands) {
+  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_block_t* entry = loom_region_entry_block(body_);
+  loom_block_t* target = AppendBlock();
+  AddBlockArg(target, i32);
+
+  SetBlock(entry);
+  loom_value_id_t payload = BuildConstant(42, i32);
+  loom_op_t* branch_op = BuildBranchWithArgs(target, &payload, 1);
+
+  const loom_value_id_t* args = nullptr;
+  uint16_t arg_count = 0;
+  EXPECT_TRUE(loom_cfg_terminator_payload_for_successor(branch_op, target,
+                                                        &args, &arg_count));
+  ASSERT_EQ(arg_count, 1u);
+  EXPECT_EQ(args[0], payload);
+}
+
+TEST_F(CfgGraphTest,
+       TerminatorPayloadForSuccessorRejectsMultiSuccessorTerminators) {
+  loom_block_t* entry = loom_region_entry_block(body_);
+  loom_block_t* then_block = AppendBlock();
+  loom_block_t* else_block = AppendBlock();
+
+  SetBlock(entry);
+  loom_op_t* branch_op = BuildConditionalBranch(then_block, else_block);
+
+  loom_value_id_t sentinel = 123;
+  const loom_value_id_t* args = &sentinel;
+  uint16_t arg_count = 1;
+  EXPECT_FALSE(loom_cfg_terminator_payload_for_successor(branch_op, then_block,
+                                                         &args, &arg_count));
+  EXPECT_EQ(args, nullptr);
+  EXPECT_EQ(arg_count, 0u);
 }
 
 }  // namespace

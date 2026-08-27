@@ -7,33 +7,10 @@
 #include "loom/link/symbol_policy.h"
 
 #include "loom/ir/context.h"
-#include "loom/ops/config/ops.h"
 #include "loom/ops/op_defs.h"
 
-static bool loom_link_symbol_has_visibility_attr(const loom_module_t* module,
-                                                 const loom_symbol_t* symbol) {
-  if (!symbol || !symbol->defining_op) return false;
-  const loom_op_vtable_t* vtable = loom_op_vtable(module, symbol->defining_op);
-  if (!vtable || !vtable->attr_descriptors) return false;
-  const loom_attribute_t* attrs = loom_op_const_attrs(symbol->defining_op);
-  for (uint8_t i = 0; i < vtable->attribute_count; ++i) {
-    const loom_attr_descriptor_t* descriptor = &vtable->attr_descriptors[i];
-    if (!iree_string_view_equal(loom_attr_descriptor_name(descriptor),
-                                IREE_SV("visibility"))) {
-      continue;
-    }
-    if (descriptor->attr_kind != LOOM_ATTR_ENUM ||
-        i >= symbol->defining_op->attribute_count) {
-      return false;
-    }
-    return loom_attr_as_enum(attrs[i]) != 0;
-  }
-  return false;
-}
-
 bool loom_link_symbol_is_declaration(const loom_symbol_t* symbol) {
-  return symbol->kind == LOOM_SYMBOL_FUNC_DECL ||
-         (symbol->defining_op && loom_config_decl_isa(symbol->defining_op));
+  return symbol && loom_symbol_definition_is_declaration(symbol->definition);
 }
 
 bool loom_link_symbol_is_concrete_definition(const loom_symbol_t* symbol) {
@@ -44,9 +21,6 @@ bool loom_link_symbol_has_global_identity(const loom_module_t* module,
                                           const loom_symbol_t* symbol) {
   if (!symbol) return false;
   if (iree_any_bit_set(symbol->flags, LOOM_SYMBOL_FLAG_PUBLIC)) {
-    return true;
-  }
-  if (loom_link_symbol_has_visibility_attr(module, symbol)) {
     return true;
   }
   if (!symbol->defining_op) {
@@ -66,4 +40,36 @@ bool loom_link_symbol_has_global_identity(const loom_module_t* module,
   return loom_func_like_import_module(func) != LOOM_STRING_ID_INVALID ||
          loom_func_like_import_symbol(func) != LOOM_STRING_ID_INVALID ||
          loom_func_like_export_symbol(func) != LOOM_STRING_ID_INVALID;
+}
+
+void loom_link_symbol_internalize(loom_module_t* module, loom_op_t* op) {
+  const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
+  const loom_symbol_definition_descriptor_t* definition = vtable->symbol_def;
+  const uint8_t visibility_attr_index =
+      loom_symbol_definition_visibility_attr_index(definition);
+  const uint8_t retain_attr_index =
+      definition->retain_attr_index_plus_one
+          ? definition->retain_attr_index_plus_one - 1
+          : LOOM_ATTR_INDEX_NONE;
+
+  if (visibility_attr_index != LOOM_ATTR_INDEX_NONE) {
+    loom_op_attrs(op)[visibility_attr_index] = loom_attr_absent();
+  }
+  if (retain_attr_index != LOOM_ATTR_INDEX_NONE) {
+    loom_op_attrs(op)[retain_attr_index] = loom_attr_absent();
+  }
+  const loom_func_like_t function = loom_func_like_cast(module, op);
+  if (loom_func_like_isa(function)) {
+    const uint8_t export_attr_indices[] = {
+        function.vtable->export_symbol_attr_index,
+        function.vtable->export_attrs_attr_index,
+        function.vtable->export_linkage_attr_index,
+    };
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(export_attr_indices); ++i) {
+      if (export_attr_indices[i] != LOOM_ATTR_INDEX_NONE) {
+        loom_op_attrs(op)[export_attr_indices[i]] = loom_attr_absent();
+      }
+    }
+  }
+  loom_module_link_symbol_defining_op(module, op, vtable);
 }

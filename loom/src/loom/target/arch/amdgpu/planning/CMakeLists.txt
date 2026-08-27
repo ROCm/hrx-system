@@ -6,23 +6,6 @@
 #                                                                              #
 # To disable autogeneration for this file entirely, delete this header.        #
 ################################################################################
-if(LOOM_TARGET_ARCH_AMDGPU)
-
-set(_LOOM_AMDGPU_ISA_XML_SOURCE_DIR
-  "${PROJECT_BINARY_DIR}/_deps/amdgpu_isa_xml-src"
-)
-loom_low_descriptor_data_archive(
-  NAME
-    loom_amdgpu_isa_xml
-  SOURCE_DIR
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}"
-  URLS
-    "https://gpuopen.com/download/AMD_GPU_MR_ISA_XML_2026_03_05.zip"
-  SHA256
-    "1f17587abc9d0d355cf6f65bdba7496838b4e8313922769199689615c434965c"
-)
-
-endif()
 
 iree_add_all_subdirs()
 
@@ -38,16 +21,37 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::codegen::low::allocation
-    loom::codegen::low::builder
     loom::codegen::low::descriptors
-    loom::codegen::low::frame
+    loom::codegen::low::packet
     loom::codegen::low::schedule
     loom::ir
     loom::ops::low
-    loom::ops::op_defs
     loom::target::arch::amdgpu::encoding
     loom::target::arch::amdgpu::refs::target_refs
   PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_test(
+  NAME
+    address_state_test
+  SRCS
+    "address_state_test.cc"
+  DEPS
+    ::address_state
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::allocation
+    loom::codegen::low::descriptors
+    loom::codegen::low::schedule
+    loom::ir
+    loom::target::arch::amdgpu::descriptors::low_registry
+    loom::target::arch::amdgpu::encoding
+    loom::target::arch::amdgpu::refs::target_refs
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
 )
 endif()
 
@@ -61,10 +65,7 @@ loom_cc_library(
     "descriptor_semantics.c"
   DEPS
     iree::base
-    iree::base::internal::arena
-    loom::codegen::low::descriptors
     loom::codegen::low::schedule
-    loom::target::arch::amdgpu::encoding
     loom::target::arch::amdgpu::refs::target_refs
   PUBLIC
 )
@@ -103,6 +104,55 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
+    matrix_coexecution
+  HDRS
+    "matrix_coexecution.h"
+  TEXTUAL_HDRS
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/matrix_coexecution_source_layouts.inl"
+  SRCS
+    "matrix_coexecution.c"
+  DEPS
+    ::descriptor_semantics
+    ::structural_packet
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::allocation
+    loom::codegen::low::packet
+    loom::codegen::low::schedule
+    loom::ir
+    loom::target::arch::amdgpu::matrix::types
+    loom::target::arch::amdgpu::refs::target_refs
+    loom::target::arch::amdgpu::target_info
+    loom::target::arch::amdgpu::target_info_defs
+    loom::util::cfg_graph
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
+    structural_packet
+  HDRS
+    "structural_packet.h"
+  SRCS
+    "structural_packet.c"
+  DEPS
+    iree::base
+    loom::codegen::low::allocation
+    loom::codegen::low::allocation::move_topology
+    loom::codegen::low::packet
+    loom::codegen::low::schedule
+    loom::ir
+    loom::ops::low
+    loom::target::arch::amdgpu::refs::target_refs
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
     wait_states
   HDRS
     "wait_states.h"
@@ -110,11 +160,13 @@ loom_cc_library(
     "wait_states.c"
   DEPS
     ::descriptor_semantics
+    ::matrix_coexecution
     ::matrix_wait_states
+    ::structural_packet
+    ::vopd_plan
     iree::base
     iree::base::internal::arena
     loom::codegen::low::allocation
-    loom::codegen::low::move_sequence
     loom::codegen::low::packet
     loom::codegen::low::packet_hazard_plan
     loom::codegen::low::packet_hazard_plan_json
@@ -125,10 +177,62 @@ loom_cc_library(
     loom::target::arch::amdgpu::encoding
     loom::target::arch::amdgpu::matrix::contract
     loom::target::arch::amdgpu::refs::target_refs
-    loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::util::json
     loom::util::stream
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
+    wait_counters
+  HDRS
+    "wait_counters.h"
+  DEPS
+    iree::base
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
+    wait_frontier
+  HDRS
+    "wait_frontier.h"
+  SRCS
+    "wait_frontier.c"
+  DEPS
+    ::wait_counters
+    iree::base
+    iree::base::internal
+    iree::base::internal::arena
+    loom::codegen::low::allocation::table
+    loom::codegen::low::memory_access
+    loom::codegen::low::schedule
+    loom::target::arch::amdgpu::refs::target_refs
+    loom::util::cfg_graph
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
+    wait_loop
+  HDRS
+    "wait_loop.h"
+  SRCS
+    "wait_loop.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::schedule
+    loom::ops::low
+    loom::util::cfg_graph
+    loom::util::cfg_loop
   PUBLIC
 )
 endif()
@@ -142,12 +246,18 @@ loom_cc_library(
   SRCS
     "wait_plan.c"
   DEPS
-    ::descriptor_semantics
+    ::structural_packet
+    ::wait_counters
+    ::wait_frontier
+    ::wait_loop
+    ::wait_packet_tables
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::codegen::low::allocation
+    loom::codegen::low::allocation::storage
+    loom::codegen::low::allocation::storage_lease
     loom::codegen::low::descriptors
-    loom::codegen::low::move_sequence
     loom::codegen::low::packet
     loom::codegen::low::packet_hazard_plan
     loom::codegen::low::packet_hazard_plan_json
@@ -157,85 +267,30 @@ loom_cc_library(
     loom::ops::low
     loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_id
+    loom::util::segmented_storage
   PUBLIC
 )
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
+loom_cc_library(
   NAME
-    wait_packet_descriptor_ranges_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::planning::wait_packet_tables
-  OUTPUT
-    "wait_packet_descriptor_ranges.inl"
-  OUTPUT_FLAG
-    "--descriptor-ranges"
-  ARGS
-    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-  INPUTS
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "loom_amdgpu_isa_xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    wait_packet_descriptors_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::planning::wait_packet_tables
-  OUTPUT
-    "wait_packet_descriptors.inl"
-  OUTPUT_FLAG
-    "--descriptor-rows"
-  ARGS
-    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-  INPUTS
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "loom_amdgpu_isa_xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    wait_packet_immediates_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::planning::wait_packet_tables
-  OUTPUT
-    "wait_packet_immediates.inl"
-  OUTPUT_FLAG
-    "--immediate-rows"
-  ARGS
-    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-  INPUTS
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "loom_amdgpu_isa_xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+    wait_packet_tables
+  HDRS
+    "wait_packet_data.h"
+    "wait_packet_tables.h"
+  SRCS
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/descriptors/wait_packet_data.c"
+    "wait_packet_tables.c"
+  DEPS
+    ::wait_counters
+    iree::base
+    loom::codegen::low::descriptors
+    loom::ir
+    loom::ops::low
+    loom::target::arch::amdgpu::refs::target_refs
+    loom::target::arch::amdgpu::target_info_defs
+  PUBLIC
 )
 endif()
 
@@ -245,13 +300,10 @@ loom_cc_library(
     wait_packets
   HDRS
     "wait_packets.h"
-  TEXTUAL_HDRS
-    "wait_packet_descriptor_ranges.inl"
-    "wait_packet_descriptors.inl"
-    "wait_packet_immediates.inl"
   SRCS
     "wait_packets.c"
   DEPS
+    ::wait_packet_tables
     ::wait_plan
     iree::base
     iree::base::internal
@@ -259,9 +311,7 @@ loom_cc_library(
     loom::codegen::low::descriptors
     loom::codegen::low::function
     loom::ir
-    loom::ops::low
     loom::target::arch::amdgpu::refs::target_refs
-    loom::target::arch::amdgpu::target_info
     loom::util::json
     loom::util::stream
   PUBLIC
@@ -291,43 +341,34 @@ loom_cc_library(
   NAME
     vopd_plan
   HDRS
+    "vopd_component.h"
+    "vopd_data.h"
     "vopd_plan.h"
   SRCS
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/descriptors/vopd_data.c"
     "vopd_plan.c"
   DEPS
+    ::address_state
+    ::descriptor_semantics
+    ::matrix_coexecution
+    ::structural_packet
     ::wait_packets
-    ::wait_states
     iree::base
     iree::base::internal::arena
     loom::codegen::low::allocation
     loom::codegen::low::diagnostics
-    loom::codegen::low::move_sequence
     loom::codegen::low::packet
-    loom::codegen::low::packet_hazard_plan
+    loom::codegen::low::placement_pair
     loom::codegen::low::schedule
     loom::ir
     loom::ops::low
     loom::target::arch::amdgpu::encoding
     loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_info
+    loom::target::arch::amdgpu::target_info_defs
     loom::util::json
     loom::util::stream
   PUBLIC
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_cc_test(
-  NAME
-    vopd_plan_test
-  SRCS
-    "vopd_plan_test.cc"
-  DEPS
-    ::vopd_plan
-    iree::testing::gtest
-    iree::testing::gtest_main
-  LABELS
-    "iree-build-requirement=loom.target.arch.amdgpu"
 )
 endif()
 
@@ -340,6 +381,8 @@ loom_cc_library(
   SRCS
     "packet_plan.c"
   DEPS
+    ::address_state
+    ::matrix_coexecution
     ::vopd_plan
     ::wait_packets
     ::wait_plan
@@ -347,8 +390,8 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::codegen::low::allocation
-    loom::codegen::low::packet
     loom::codegen::low::schedule
+    loom::target::arch::amdgpu::target_id
   PUBLIC
 )
 endif()
@@ -369,42 +412,20 @@ loom_cc_library(
 )
 endif()
 
-if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA3_CORE AND LOOM_TARGET_ARCH_AMDGPU)
-loom_cc_test(
-  NAME
-    storage_lease_test
-  SRCS
-    "storage_lease_test.cc"
-  DEPS
-    ::storage_lease
-    ::wait_plan
-    iree::base::internal::arena
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::codegen::low::descriptors
-    loom::codegen::low::storage_lease
-    loom::target::arch::amdgpu::descriptors::low_registry
-    loom::target::arch::amdgpu::refs::target_refs
-  LABELS
-    "iree-build-requirement=loom.target.arch.amdgpu"
-)
-endif()
-
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_cc_library(
+loom_cc_library(
   NAME
     occupancy_model
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::planning::occupancy_tables
-  SOURCE
-    "occupancy_model_tables.c"
-  SRCS
-    "occupancy_model.c"
   HDRS
     "occupancy_model.h"
+  SRCS
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/occupancy_model_tables.c"
+    "occupancy_model.c"
   DEPS
     iree::base
     loom::target::arch::amdgpu::target_info
+    loom::target::residency
+  PUBLIC
 )
 endif()
 
@@ -422,16 +443,34 @@ loom_cc_library(
     iree::base::internal::arena
     loom::codegen::low::allocation
     loom::codegen::low::diagnostics
-    loom::codegen::low::schedule
     loom::error::error_defs
     loom::ir
+    loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info_defs
     loom::target::launch
+    loom::target::residency
     loom::target::types
     loom::util::json
     loom::util::stream
   PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_test(
+  NAME
+    occupancy_test
+  SRCS
+    "occupancy_test.cc"
+  DEPS
+    ::occupancy
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::target::arch::amdgpu::target_info
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
 )
 endif()
 

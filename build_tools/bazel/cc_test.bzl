@@ -6,13 +6,35 @@
 
 """Shared C/C++ Bazel test macros for IREE repositories."""
 
-load("@rules_cc//cc:cc_test.bzl", "cc_test")
+# rules_cc currently exposes only its macro publicly. Rule inheritance needs
+# the underlying rule object so ctx.super() can preserve its full behavior.
+# buildifier: disable=bzl-visibility
+load(
+    "@rules_cc//cc/private/rules_impl:cc_test.bzl",
+    rules_cc_test = "cc_test",
+)
 load(
     "//build_tools/sanitizer:suppressions.bzl",
     "iree_sanitizer_suppression_data",
     "iree_sanitizer_suppression_env",
 )
 load(":cc_attrs.bzl", "cc_attrs")
+load(
+    ":cc_execution.bzl",
+    "cc_execution_attrs",
+    "cc_execution_impl",
+    "cc_execution_initializer",
+)
+
+# This is a rules_cc test rule extension, not a wrapper target. ctx.super()
+# preserves the parent rule's compilation, coverage, launcher, platform, and
+# test providers before the shared implementation conditionally adds runfiles.
+cc_test = rule(
+    implementation = cc_execution_impl,
+    attrs = cc_execution_attrs,
+    initializer = cc_execution_initializer,
+    parent = rules_cc_test,
+)
 
 def _iree_cc_test_impl(
         name,
@@ -77,7 +99,7 @@ iree_cc_test = macro(
     `resource_group:<name>` tag that CI and other generators can inspect.
     """,
     implementation = _iree_cc_test_impl,
-    inherit_attrs = "common",
+    inherit_attrs = cc_test,
     attrs = cc_attrs.merge_dicts(
         cc_attrs.compilation,
         cc_attrs.dependency,
@@ -87,6 +109,8 @@ iree_cc_test = macro(
             "args": attr.string_list(
                 doc = "Command-line arguments passed to the test binary.",
             ),
+            "dynamic_library_data": None,
+            "dynamic_library_deps": None,
             "env": attr.string_dict(
                 configurable = False,
                 doc = "Environment variables passed to the test binary.",

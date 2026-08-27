@@ -50,7 +50,7 @@ The file is evaluated as a module and can have the following customizations:
 
 * DEFAULT_ROOT_DIRS: A list of root directory names that should be recursively
   processed (relative to the repository root) when invoked without arguments.
-* REPO_MAP: Mapping of canonical Bazel repo name (i.e. "@iree") to what it
+* REPO_MAP: Mapping of canonical Bazel repo name (i.e. "@hrx") to what it
   is known as locally (most commonly the empty string). This is used in global
   target rules to make sure that they work either in the defining or referencing
   repository.
@@ -332,6 +332,7 @@ def convert_directory(directory_path, write_files, print_generated_content, verb
         + ["#" * 80]
     )
 
+    old_content = ""
     old_lines = []
     possible_preserved_header_lines = []
     preserved_footer_lines = ["\n" + PRESERVE_BELOW_TAG + "\n"]
@@ -341,8 +342,10 @@ def convert_directory(directory_path, write_files, print_generated_content, verb
     found_preserve_above_tag = False
     if os.path.isfile(cmakelists_file_path):
         found_autogeneration_tag = False
-        with open(cmakelists_file_path) as f:
-            old_lines = f.readlines()
+        with open(cmakelists_file_path, encoding="utf-8", newline="") as f:
+            old_content = f.read()
+        normalized_old_content = old_content.replace("\r\n", "\n").replace("\r", "\n")
+        old_lines = normalized_old_content.splitlines(keepends=True)
 
         for line in old_lines:
             if not found_preserve_above_tag:
@@ -401,13 +404,18 @@ def convert_directory(directory_path, write_files, print_generated_content, verb
     if print_generated_content:
         print(converted_content, end="")
 
-    if converted_content == "".join(old_lines):
+    if converted_content == old_content:
         if verbosity >= 2:
             log(f"{rel_cmakelists_file_path} required no update", indent=2)
         return Status.NOOP
 
     if write_files:
-        with open(cmakelists_file_path, "wt") as cmakelists_file:
+        with open(
+            cmakelists_file_path,
+            "wt",
+            encoding="utf-8",
+            newline="\n",
+        ) as cmakelists_file:
             cmakelists_file.write(converted_content)
 
     if verbosity >= 1:

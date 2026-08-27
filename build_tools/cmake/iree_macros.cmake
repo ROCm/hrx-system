@@ -100,6 +100,161 @@ endif()
 if(NOT TARGET iree_generated_compile_inputs)
   add_custom_target(iree_generated_compile_inputs)
 endif()
+set_property(GLOBAL PROPERTY IREE_TARGET_DEPENDENCIES "")
+
+# Records a build dependency to resolve after all repository targets have been
+# declared. CMake subdirectory traversal does not encode the Bazel package
+# dependency graph, so producers and consumers may be declared in either order.
+#
+# Parameters:
+#   TARGET: CMake target that should receive the dependency.
+#   DEPENDENCY: CMake target required before TARGET is complete.
+function(iree_register_target_dependency)
+  cmake_parse_arguments(
+    _RULE
+    ""
+    "TARGET;DEPENDENCY"
+    ""
+    ${ARGN}
+  )
+
+  if(NOT _RULE_TARGET OR NOT _RULE_DEPENDENCY)
+    message(FATAL_ERROR
+      "iree_register_target_dependency requires TARGET and DEPENDENCY")
+  endif()
+
+  set_property(GLOBAL APPEND PROPERTY IREE_TARGET_DEPENDENCIES
+    "${_RULE_TARGET}|${_RULE_DEPENDENCY}")
+endfunction()
+
+function(_iree_resolve_target OUTPUT_TARGET_NAME TARGET_NAME)
+  set(_TARGET_NAME "${TARGET_NAME}")
+  if(TARGET "${_TARGET_NAME}")
+    get_target_property(_ALIASED_TARGET "${_TARGET_NAME}" ALIASED_TARGET)
+    if(_ALIASED_TARGET)
+      set(_TARGET_NAME "${_ALIASED_TARGET}")
+    endif()
+  elseif("${_TARGET_NAME}" MATCHES "::")
+    string(REPLACE "::" "_" _CANDIDATE_TARGET_NAME "${_TARGET_NAME}")
+    if(TARGET "${_CANDIDATE_TARGET_NAME}")
+      set(_TARGET_NAME "${_CANDIDATE_TARGET_NAME}")
+    endif()
+  endif()
+
+  if(NOT TARGET "${_TARGET_NAME}")
+    set(_TARGET_NAME "")
+  endif()
+  set(${OUTPUT_TARGET_NAME} "${_TARGET_NAME}" PARENT_SCOPE)
+endfunction()
+
+function(iree_finalize_target_dependencies)
+  get_property(_TARGET_DEPENDENCIES GLOBAL PROPERTY IREE_TARGET_DEPENDENCIES)
+  list(REMOVE_DUPLICATES _TARGET_DEPENDENCIES)
+  foreach(_ENTRY IN LISTS _TARGET_DEPENDENCIES)
+    if(NOT _ENTRY MATCHES "^([^|]+)[|](.+)$")
+      message(FATAL_ERROR
+        "IREE target dependency entry is malformed: ${_ENTRY}")
+    endif()
+    set(_UNRESOLVED_TARGET_NAME "${CMAKE_MATCH_1}")
+    set(_UNRESOLVED_DEPENDENCY_TARGET_NAME "${CMAKE_MATCH_2}")
+    _iree_resolve_target(_TARGET_NAME "${_UNRESOLVED_TARGET_NAME}")
+    if(NOT _TARGET_NAME)
+      message(FATAL_ERROR
+        "IREE target dependency consumer does not exist: "
+        "${_UNRESOLVED_TARGET_NAME}")
+    endif()
+    _iree_resolve_target(
+      _DEPENDENCY_TARGET_NAME
+      "${_UNRESOLVED_DEPENDENCY_TARGET_NAME}"
+    )
+    if(NOT _DEPENDENCY_TARGET_NAME)
+      message(FATAL_ERROR
+        "IREE target ${_UNRESOLVED_TARGET_NAME} depends on missing target: "
+        "${_UNRESOLVED_DEPENDENCY_TARGET_NAME}")
+    endif()
+    get_target_property(_DEPENDENCY_IMPORTED
+      "${_DEPENDENCY_TARGET_NAME}"
+      IMPORTED)
+    if(NOT _DEPENDENCY_IMPORTED)
+      add_dependencies("${_TARGET_NAME}" "${_DEPENDENCY_TARGET_NAME}")
+    endif()
+  endforeach()
+endfunction()
+
+# Connects a generated output to a target that consumes it.
+#
+# Producers and consumers may be declared in either order because CMake
+# subdirectory traversal does not encode the Bazel package dependency graph.
+function(iree_generated_output_add_consumer INPUT_PATH CONSUMER_TARGET)
+  if(NOT TARGET "${CONSUMER_TARGET}")
+    message(FATAL_ERROR
+      "Generated output consumer ${CONSUMER_TARGET} was not found")
+  endif()
+  if("${INPUT_PATH}" MATCHES "^\\$<")
+    return()
+  endif()
+  if(NOT IS_ABSOLUTE "${INPUT_PATH}" AND
+     EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${INPUT_PATH}")
+    return()
+  endif()
+
+  get_filename_component(_INPUT_PATH "${INPUT_PATH}" ABSOLUTE
+    BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+  cmake_path(NORMAL_PATH _INPUT_PATH)
+  string(FIND "${_INPUT_PATH}/" "${IREE_BINARY_DIR}/" _BINARY_PATH_INDEX)
+  if(NOT _BINARY_PATH_INDEX EQUAL 0 AND EXISTS "${_INPUT_PATH}")
+    return()
+  endif()
+
+  string(SHA256 _INPUT_KEY "${_INPUT_PATH}")
+  get_property(_PRODUCER_TARGET GLOBAL
+    PROPERTY "IREE_GENERATED_OUTPUT_PRODUCER_${_INPUT_KEY}")
+  if(_PRODUCER_TARGET)
+    if(NOT "${_PRODUCER_TARGET}" STREQUAL "${CONSUMER_TARGET}")
+      add_dependencies("${CONSUMER_TARGET}" "${_PRODUCER_TARGET}")
+    endif()
+  else()
+    set_property(GLOBAL APPEND
+      PROPERTY "IREE_GENERATED_OUTPUT_CONSUMERS_${_INPUT_KEY}"
+      "${CONSUMER_TARGET}")
+  endif()
+endfunction()
+
+# Registers the paths a target generates for cross-target dependency edges.
+function(iree_register_generated_output_producer TARGET_NAME)
+  cmake_parse_arguments(_RULE "" "" "OUTPUTS" ${ARGN})
+  if(NOT TARGET "${TARGET_NAME}")
+    message(FATAL_ERROR
+      "Generated output producer ${TARGET_NAME} was not found")
+  endif()
+  foreach(_OUTPUT IN LISTS _RULE_OUTPUTS)
+    get_filename_component(_OUTPUT_PATH "${_OUTPUT}" ABSOLUTE
+      BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+    cmake_path(NORMAL_PATH _OUTPUT_PATH)
+    string(SHA256 _OUTPUT_KEY "${_OUTPUT_PATH}")
+    get_property(_EXISTING_PRODUCER_TARGET GLOBAL
+      PROPERTY "IREE_GENERATED_OUTPUT_PRODUCER_${_OUTPUT_KEY}")
+    if(_EXISTING_PRODUCER_TARGET AND
+       NOT "${_EXISTING_PRODUCER_TARGET}" STREQUAL "${TARGET_NAME}")
+      message(FATAL_ERROR
+        "Generated output ${_OUTPUT_PATH} has multiple producers: "
+        "${_EXISTING_PRODUCER_TARGET} and ${TARGET_NAME}")
+    endif()
+    set_property(GLOBAL
+      PROPERTY "IREE_GENERATED_OUTPUT_PRODUCER_${_OUTPUT_KEY}"
+      "${TARGET_NAME}")
+
+    get_property(_CONSUMER_TARGETS GLOBAL
+      PROPERTY "IREE_GENERATED_OUTPUT_CONSUMERS_${_OUTPUT_KEY}")
+    foreach(_CONSUMER_TARGET IN LISTS _CONSUMER_TARGETS)
+      if(NOT "${TARGET_NAME}" STREQUAL "${_CONSUMER_TARGET}")
+        add_dependencies("${_CONSUMER_TARGET}" "${TARGET_NAME}")
+      endif()
+    endforeach()
+    set_property(GLOBAL
+      PROPERTY "IREE_GENERATED_OUTPUT_CONSUMERS_${_OUTPUT_KEY}" "")
+  endforeach()
+endfunction()
 
 # Registers a target that materializes generated C/C++ compile inputs.
 #
@@ -108,11 +263,15 @@ endif()
 # sources therefore need a stable aggregate target that prepares the filesystem
 # view before external analysis starts.
 function(iree_register_generated_compile_input TARGET_NAME)
+  cmake_parse_arguments(_RULE "" "" "OUTPUTS" ${ARGN})
   if(NOT TARGET "${TARGET_NAME}")
     message(FATAL_ERROR
       "Generated compile input target ${TARGET_NAME} was not found")
   endif()
   add_dependencies(iree_generated_compile_inputs "${TARGET_NAME}")
+  iree_register_generated_output_producer("${TARGET_NAME}"
+    OUTPUTS ${_RULE_OUTPUTS}
+  )
 endfunction()
 
 # iree_to_bool
@@ -379,8 +538,8 @@ function(iree_select_compiler_opts OPTS)
     endif()
   elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     if(MSVC)
-      list(APPEND _OPTS ${_IREE_SELECTS_CLANG_CL})
       list(APPEND _OPTS ${_IREE_SELECTS_MSVC_OR_CLANG_CL})
+      list(APPEND _OPTS ${_IREE_SELECTS_CLANG_CL})
     else()
       list(APPEND _OPTS ${_IREE_SELECTS_CLANG})
       if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 10)
@@ -411,69 +570,109 @@ endfunction()
 # NAME: name of the target to add data dependencies to
 # DATA: List of targets and/or files in the source tree (relative to the
 # project root).
+# OUT_FILE_DATA: Optional output variable receiving file-shaped DATA entries.
+# OUT_TARGET_DATA: Optional output variable receiving target-shaped DATA
+#     entries as CMake target names.
 function(iree_add_data_dependencies)
   cmake_parse_arguments(
     _RULE
     ""
-    "NAME"
+    "NAME;OUT_FILE_DATA;OUT_TARGET_DATA"
     "DATA"
     ${ARGN}
   )
 
   if(NOT _RULE_DATA)
+    if(_RULE_OUT_FILE_DATA)
+      set(${_RULE_OUT_FILE_DATA} "" PARENT_SCOPE)
+    endif()
+    if(_RULE_OUT_TARGET_DATA)
+      set(${_RULE_OUT_TARGET_DATA} "" PARENT_SCOPE)
+    endif()
     return()
   endif()
 
+  set(_FILE_DATA)
+  set(_TARGET_DATA)
   foreach(_DATA_LABEL ${_RULE_DATA})
     set(_DATA_TARGET_NAME "${_DATA_LABEL}")
     if(_DATA_TARGET_NAME MATCHES "^::")
       iree_package_ns(_DATA_PACKAGE_NS)
       string(REGEX REPLACE "^::" "${_DATA_PACKAGE_NS}::"
              _DATA_TARGET_NAME "${_DATA_TARGET_NAME}")
-      string(REPLACE "::" "_" _DATA_TARGET_NAME "${_DATA_TARGET_NAME}")
     endif()
 
-    if(TARGET ${_DATA_TARGET_NAME})
-      add_dependencies(${_RULE_NAME} ${_DATA_TARGET_NAME})
-    else()
-      # Some Bazel data edges refer to generated files in the current package
-      # rather than source-tree files. The CMake custom commands that produce
-      # those files typically expose a package-prefixed target named after the
-      # output stem (for example, data `foo.so` produced by target
-      # `iree_package_foo`). If such a target exists in this directory, depend
-      # on it and leave the file in its generated location.
-      get_filename_component(_DATA_STEM "${_DATA_LABEL}" NAME_WE)
-      get_property(_DATA_DIR_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
-      set(_DATA_GENERATED_TARGET)
-      foreach(_DATA_DIR_TARGET ${_DATA_DIR_TARGETS})
-        if(_DATA_DIR_TARGET MATCHES "_${_DATA_STEM}$")
-          set(_DATA_GENERATED_TARGET ${_DATA_DIR_TARGET})
-          break()
-        endif()
-      endforeach()
-      if(_DATA_GENERATED_TARGET)
-        add_dependencies(${_RULE_NAME} ${_DATA_GENERATED_TARGET})
-        continue()
-      endif()
-
-      # Not a target, assume to be a file instead.
-      set(_FILE_PATH ${_DATA_LABEL})
-
-      # Create a target which copies the data file into the build directory.
-      # If this file is included in multiple rules, only create the target once.
-      string(REPLACE "::" "_" _DATA_TARGET ${_DATA_LABEL})
-      string(REPLACE "/" "_" _DATA_TARGET ${_DATA_TARGET})
-      if(NOT TARGET ${_DATA_TARGET})
-        set(_INPUT_PATH "${PROJECT_SOURCE_DIR}/${_FILE_PATH}")
-        set(_OUTPUT_PATH "${PROJECT_BINARY_DIR}/${_FILE_PATH}")
-        add_custom_target(${_DATA_TARGET}
-          COMMAND ${CMAKE_COMMAND} -E copy ${_INPUT_PATH} ${_OUTPUT_PATH}
-        )
-      endif()
-
-      add_dependencies(${_RULE_NAME} ${_DATA_TARGET})
+    if(TARGET "${_DATA_TARGET_NAME}" OR
+       "${_DATA_TARGET_NAME}" MATCHES "::")
+      list(APPEND _TARGET_DATA "${_DATA_TARGET_NAME}")
+      iree_register_target_dependency(
+        TARGET "${_RULE_NAME}"
+        DEPENDENCY "${_DATA_TARGET_NAME}"
+      )
+      continue()
     endif()
+
+    if(IS_ABSOLUTE "${_DATA_LABEL}")
+      list(APPEND _FILE_DATA "${_DATA_LABEL}")
+      iree_generated_output_add_consumer(
+        "${_DATA_LABEL}"
+        "${_RULE_NAME}"
+      )
+      continue()
+    endif()
+
+    # Some Bazel data edges refer to generated files in the current package
+    # rather than source-tree files. The CMake custom commands that produce
+    # those files typically expose a package-prefixed target named after the
+    # output stem (for example, data `foo.so` produced by target
+    # `iree_package_foo`). If such a target exists in this directory, depend
+    # on it and leave the file in its generated location.
+    get_filename_component(_DATA_STEM "${_DATA_LABEL}" NAME_WE)
+    get_property(_DATA_DIR_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+    set(_DATA_GENERATED_TARGET)
+    foreach(_DATA_DIR_TARGET ${_DATA_DIR_TARGETS})
+      if(_DATA_DIR_TARGET MATCHES "_${_DATA_STEM}$")
+        set(_DATA_GENERATED_TARGET ${_DATA_DIR_TARGET})
+        break()
+      endif()
+    endforeach()
+    if(_DATA_GENERATED_TARGET)
+      list(APPEND _FILE_DATA "${_DATA_LABEL}")
+      iree_register_target_dependency(
+        TARGET "${_RULE_NAME}"
+        DEPENDENCY "${_DATA_GENERATED_TARGET}"
+      )
+      continue()
+    endif()
+
+    # Not a target, assume to be a file instead.
+    list(APPEND _FILE_DATA "${_DATA_LABEL}")
+    set(_FILE_PATH ${_DATA_LABEL})
+
+    # Create a target which copies the data file into the build directory.
+    # If this file is included in multiple rules, only create the target once.
+    string(REPLACE "::" "_" _DATA_TARGET ${_DATA_LABEL})
+    string(REPLACE "/" "_" _DATA_TARGET ${_DATA_TARGET})
+    if(NOT TARGET ${_DATA_TARGET})
+      set(_INPUT_PATH "${PROJECT_SOURCE_DIR}/${_FILE_PATH}")
+      set(_OUTPUT_PATH "${PROJECT_BINARY_DIR}/${_FILE_PATH}")
+      add_custom_target(${_DATA_TARGET}
+        COMMAND ${CMAKE_COMMAND} -E copy ${_INPUT_PATH} ${_OUTPUT_PATH}
+      )
+    endif()
+
+    iree_register_target_dependency(
+      TARGET "${_RULE_NAME}"
+      DEPENDENCY "${_DATA_TARGET}"
+    )
   endforeach()
+
+  if(_RULE_OUT_FILE_DATA)
+    set(${_RULE_OUT_FILE_DATA} "${_FILE_DATA}" PARENT_SCOPE)
+  endif()
+  if(_RULE_OUT_TARGET_DATA)
+    set(${_RULE_OUT_TARGET_DATA} "${_TARGET_DATA}" PARENT_SCOPE)
+  endif()
 endfunction()
 
 #-------------------------------------------------------------------------------
@@ -572,9 +771,10 @@ endfunction()
 
 # iree_symlink_tool
 #
-# Adds a command to TARGET which symlinks a tool from elsewhere
+# Adds a command to TARGET which aliases a tool from elsewhere
 # (FROM_TOOL_TARGET_NAME) to a local file name (TO_EXE_NAME) in the current
-# binary directory.
+# binary directory. Windows uses an unprivileged hard link with a copy fallback
+# while other hosts use a symbolic link.
 #
 # Parameters:
 #   TARGET: Local target to which to add the symlink command (i.e. an
@@ -598,6 +798,20 @@ function(iree_symlink_tool)
   set(_FROM_TOOL_TARGET ${_RULE_FROM_TOOL_TARGET})
   set(_TO_TOOL_PATH "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_TO_EXE_NAME}${CMAKE_EXECUTABLE_SUFFIX}")
   get_filename_component(_TO_TOOL_DIR "${_TO_TOOL_PATH}" DIRECTORY)
+  if(WIN32)
+    set(_TO_TOOL_MATERIALIZATION_COMMAND
+      ${CMAKE_COMMAND}
+      "-DIREE_SOURCE_FILE=$<TARGET_FILE:${_FROM_TOOL_TARGET}>"
+      "-DIREE_DESTINATION_FILE=${_TO_TOOL_PATH}"
+      -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/iree_materialize_files.cmake"
+    )
+  else()
+    set(_TO_TOOL_MATERIALIZATION_COMMAND
+      ${CMAKE_COMMAND} -E create_symlink
+      "$<TARGET_FILE:${_FROM_TOOL_TARGET}>"
+      "${_TO_TOOL_PATH}"
+    )
+  endif()
 
   add_custom_command(
     TARGET "${_TARGET}"
@@ -607,9 +821,8 @@ function(iree_symlink_tool)
     COMMAND
       ${CMAKE_COMMAND} -E make_directory "${_TO_TOOL_DIR}"
     COMMAND
-      ${CMAKE_COMMAND} -E create_symlink
-        "$<TARGET_FILE:${_FROM_TOOL_TARGET}>"
-        "${_TO_TOOL_PATH}"
+      ${_TO_TOOL_MATERIALIZATION_COMMAND}
+    VERBATIM
   )
 endfunction()
 

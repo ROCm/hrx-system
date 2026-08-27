@@ -17,12 +17,11 @@
 #include "iree/base/internal/arena.h"
 #include "iree/base/internal/math.h"
 #include "iree/hal/drivers/local_task/block_command_buffer.h"
-#include "iree/hal/drivers/local_task/task_event.h"
 #include "iree/hal/drivers/local_task/task_queue.h"
 #include "iree/hal/drivers/local_task/task_semaphore.h"
+#include "iree/hal/local/atomic.h"
 #include "iree/hal/local/device_spec_builder.h"
 #include "iree/hal/local/executable_environment.h"
-#include "iree/hal/local/local_executable_cache.h"
 #include "iree/hal/local/profile.h"
 #include "iree/hal/local/transient_buffer.h"
 #include "iree/hal/memory/cpu_slab_provider.h"
@@ -231,15 +230,6 @@ static iree_status_t iree_hal_task_device_select_alloca_pool(
     return iree_ok_status();
   }
 
-  // Local-task CPU memory is semantically device-visible, but its shared slab
-  // provider reports the physical host properties used by all backing pools.
-  // Route with the physical bits while keeping the original params for the
-  // eventual buffer wrapper.
-  params.type &= ~IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  params.type &= ~IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
-  if (params.type == IREE_HAL_MEMORY_TYPE_NONE) {
-    params.type = IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
-  }
   *out_pool = iree_hal_pool_set_select(&device->default_pool_set, params,
                                        allocation_size);
   if (!*out_pool) {
@@ -345,6 +335,8 @@ iree_status_t iree_hal_task_device_create(
         .queue_count = queue_count,
         .default_queue_worker_count =
             iree_task_executor_worker_count(queue_executors[0]),
+        .atomic_capabilities = iree_hal_local_atomic_capabilities(
+            IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL),
         .loader_count = loader_count,
         .loaders = loaders,
     };
@@ -610,30 +602,36 @@ static iree_status_t iree_hal_task_device_create_command_buffer(
       device->host_allocator, out_command_buffer);
 }
 
-static iree_status_t iree_hal_task_device_create_event(
+static iree_status_t iree_hal_task_device_load_executable(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_event_flags_t flags, iree_hal_event_t** out_event) {
-  return iree_hal_task_event_create(queue_affinity, flags,
-                                    iree_hal_device_host_allocator(base_device),
-                                    out_event);
-}
-
-static iree_status_t iree_hal_task_device_create_executable_cache(
-    iree_hal_device_t* base_device, iree_string_view_t identifier,
-    iree_hal_executable_cache_t** out_executable_cache) {
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
+    iree_hal_executable_t** out_executable) {
   iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
-
-  // Sum up the total worker count across all queues so that the loaders can
-  // preallocate worker-specific storage.
-  iree_host_size_t total_worker_count = 0;
-  for (iree_host_size_t i = 0; i < device->queue_count; ++i) {
-    total_worker_count +=
-        iree_task_executor_worker_count(device->queues[i].executor);
+  const iree_hal_device_identity_spec_t* identity =
+      iree_hal_device_spec_identity(device->device_spec);
+  IREE_ASSERT_EQ(identity->physical_device_count, 1);
+  const iree_hal_physical_device_affinity_t physical_device_affinity =
+      identity->physical_devices[0].physical_device_affinity;
+  if (!iree_all_bits_set(target->physical_device_affinity,
+                         physical_device_affinity)) {
+    return iree_make_status(
+        IREE_STATUS_INCOMPATIBLE,
+        "local executable target `%.*s:%.*s` affinity 0x%016" PRIx64
+        " does not cover physical-device affinity 0x%016" PRIx64,
+        (int)target->family.size, target->family.data,
+        (int)target->target_key.size, target->target_key.data,
+        target->physical_device_affinity, physical_device_affinity);
   }
 
-  return iree_hal_local_executable_cache_create(
-      identifier, total_worker_count, device->loader_count, device->loaders,
-      iree_hal_device_host_allocator(base_device), out_executable_cache);
+  iree_host_size_t worker_capacity = 0;
+  for (iree_host_size_t i = 0; i < device->queue_count; ++i) {
+    worker_capacity +=
+        iree_task_executor_worker_count(device->queues[i].executor);
+  }
+  return iree_hal_executable_loader_select_and_load(
+      device->loader_count, device->loaders, target, load_params,
+      worker_capacity, out_executable);
 }
 
 // Returns the proactor for the given queue affinity. If the affinity specifies
@@ -718,9 +716,8 @@ static iree_status_t iree_hal_task_device_prepare_alloca_wrapper(
                             "unsupported alloca flags: 0x%" PRIx64, flags);
   }
 
-  // Local CPU slab providers report physical host properties while the local
-  // HAL device exposes those bytes as device-local. Normalize through the
-  // device allocator before creating the transient wrapper.
+  // Normalize allocation hints and usage through the device allocator before
+  // creating the transient wrapper.
   const iree_hal_buffer_compatibility_t compatibility =
       iree_hal_allocator_query_buffer_compatibility(
           iree_hal_device_allocator(base_device), *params, allocation_size,
@@ -873,19 +870,12 @@ static iree_status_t iree_hal_task_device_queue_read(
     iree_hal_file_t* source_file, uint64_t source_offset,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, iree_hal_read_flags_t flags) {
-  IREE_RETURN_IF_ERROR(
-      iree_hal_file_validate_access(source_file, IREE_HAL_MEMORY_ACCESS_READ));
-
-  // Zero-length: degenerate to barrier (just forward wait→signal).
-  if (length == 0) {
-    return iree_hal_device_queue_barrier(
-        base_device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
-        IREE_HAL_EXECUTE_FLAG_NONE);
-  }
+  (void)flags;
 
   // Memory file fast path: route to queue_copy via the storage buffer.
   iree_hal_buffer_t* storage_buffer = iree_hal_file_storage_buffer(source_file);
   if (storage_buffer) {
+    IREE_ASSERT(source_offset <= IREE_DEVICE_SIZE_MAX);
     return iree_hal_device_queue_copy(
         base_device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
         storage_buffer, (iree_device_size_t)source_offset, target_buffer,
@@ -899,15 +889,6 @@ static iree_status_t iree_hal_task_device_queue_read(
         IREE_STATUS_INVALID_ARGUMENT,
         "file has no storage buffer, no async handle, and does not support "
         "synchronous I/O; cannot perform read");
-  }
-
-  // Validate range against file length. Skip for non-seekable fds (length 0).
-  uint64_t file_length = iree_hal_file_length(source_file);
-  if (file_length > 0 && source_offset + length > file_length) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "read range [%" PRIu64 ", %" PRIu64 ") exceeds file length %" PRIu64,
-        source_offset, source_offset + (uint64_t)length, file_length);
   }
 
   iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
@@ -925,19 +906,12 @@ static iree_status_t iree_hal_task_device_queue_write(
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     iree_hal_file_t* target_file, uint64_t target_offset,
     iree_device_size_t length, iree_hal_write_flags_t flags) {
-  IREE_RETURN_IF_ERROR(
-      iree_hal_file_validate_access(target_file, IREE_HAL_MEMORY_ACCESS_WRITE));
-
-  // Zero-length: degenerate to barrier.
-  if (length == 0) {
-    return iree_hal_device_queue_barrier(
-        base_device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
-        IREE_HAL_EXECUTE_FLAG_NONE);
-  }
+  (void)flags;
 
   // Memory file fast path: route to queue_copy via the storage buffer.
   iree_hal_buffer_t* storage_buffer = iree_hal_file_storage_buffer(target_file);
   if (storage_buffer) {
+    IREE_ASSERT(target_offset <= IREE_DEVICE_SIZE_MAX);
     return iree_hal_device_queue_copy(
         base_device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
         source_buffer, source_offset, storage_buffer,
@@ -1000,6 +974,72 @@ static iree_status_t iree_hal_task_device_queue_execute(
   };
   return iree_hal_task_queue_submit_commands(&device->queues[queue_index], 1,
                                              &batch);
+}
+
+static iree_status_t iree_hal_task_device_check_atomic_width(
+    iree_hal_atomic_width_t width) {
+  if (IREE_UNLIKELY(!iree_hal_local_atomic_width_is_lock_free(width))) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "local-task devices do not support lock-based "
+                            "%u-bit atomic operations",
+                            width);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_task_device_queue_atomic_wait(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_wait_params_t params) {
+  IREE_RETURN_IF_ERROR(iree_hal_task_device_check_atomic_width(params.width));
+  iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
+  const iree_host_size_t queue_index = iree_hal_task_device_select_queue(
+      device, IREE_HAL_COMMAND_CATEGORY_ATOMIC, queue_affinity);
+  return iree_hal_task_queue_submit_atomic_wait(
+      &device->queues[queue_index], target_buffer, target_offset, params,
+      wait_semaphore_list, signal_semaphore_list);
+}
+
+static iree_status_t iree_hal_task_device_queue_atomic_store(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_store_params_t params) {
+  IREE_RETURN_IF_ERROR(iree_hal_task_device_check_atomic_width(params.width));
+  iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
+  const iree_host_size_t queue_index = iree_hal_task_device_select_queue(
+      device, IREE_HAL_COMMAND_CATEGORY_ATOMIC, queue_affinity);
+  return iree_hal_task_queue_submit_atomic_store(
+      &device->queues[queue_index], target_buffer, target_offset, params,
+      wait_semaphore_list, signal_semaphore_list);
+}
+
+static iree_status_t iree_hal_task_device_queue_atomic_rmw(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_rmw_params_t params) {
+  IREE_RETURN_IF_ERROR(iree_hal_task_device_check_atomic_width(params.width));
+  iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
+  const iree_host_size_t queue_index = iree_hal_task_device_select_queue(
+      device, IREE_HAL_COMMAND_CATEGORY_ATOMIC, queue_affinity);
+  return iree_hal_task_queue_submit_atomic_rmw(
+      &device->queues[queue_index], target_buffer, target_offset, params,
+      wait_semaphore_list, signal_semaphore_list);
+}
+
+static iree_status_t iree_hal_task_device_queue_timestamp(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_timestamp_flags_t flags) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "local-task device-side timestamps not implemented");
 }
 
 static iree_status_t iree_hal_task_device_queue_flush(
@@ -1205,8 +1245,7 @@ static const iree_hal_device_vtable_t iree_hal_task_device_vtable = {
     .assign_topology_info = iree_hal_task_device_assign_topology_info,
     .create_channel = iree_hal_task_device_create_channel,
     .create_command_buffer = iree_hal_task_device_create_command_buffer,
-    .create_event = iree_hal_task_device_create_event,
-    .create_executable_cache = iree_hal_task_device_create_executable_cache,
+    .load_executable = iree_hal_task_device_load_executable,
     .import_file = iree_hal_task_device_import_file,
     .create_semaphore = iree_hal_task_device_create_semaphore,
     .query_semaphore_compatibility =
@@ -1222,6 +1261,10 @@ static const iree_hal_device_vtable_t iree_hal_task_device_vtable = {
     .queue_host_call = iree_hal_task_device_queue_host_call,
     .queue_dispatch = iree_hal_task_device_queue_dispatch,
     .queue_execute = iree_hal_task_device_queue_execute,
+    .queue_atomic_wait = iree_hal_task_device_queue_atomic_wait,
+    .queue_atomic_store = iree_hal_task_device_queue_atomic_store,
+    .queue_atomic_rmw = iree_hal_task_device_queue_atomic_rmw,
+    .queue_timestamp = iree_hal_task_device_queue_timestamp,
     .queue_flush = iree_hal_task_device_queue_flush,
     .profiling_begin = iree_hal_task_device_profiling_begin,
     .profiling_flush = iree_hal_task_device_profiling_flush,

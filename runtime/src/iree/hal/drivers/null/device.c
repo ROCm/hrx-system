@@ -13,13 +13,9 @@
 #include "iree/hal/drivers/null/api.h"
 #include "iree/hal/drivers/null/channel.h"
 #include "iree/hal/drivers/null/command_buffer.h"
-#include "iree/hal/drivers/null/event.h"
 #include "iree/hal/drivers/null/executable.h"
-#include "iree/hal/drivers/null/executable_cache.h"
 #include "iree/hal/drivers/null/semaphore.h"
 #include "iree/hal/utils/device_spec_builder.h"
-#include "iree/hal/utils/file_registry.h"
-#include "iree/hal/utils/file_transfer.h"
 #include "iree/hal/utils/queue_emulation.h"
 #include "iree/hal/utils/queue_host_call_emulation.h"
 
@@ -135,6 +131,10 @@ iree_status_t iree_hal_null_device_create(
   iree_status_t status =
       iree_async_proactor_pool_get(device->proactor_pool, 0, &device->proactor);
   if (iree_status_is_ok(status)) {
+    // The null driver has no executable implementation and intentionally
+    // advertises no executable targets. A real driver should use
+    // iree_hal_device_spec_builder_t to capture physical device facts and add
+    // one row for each native artifact target it can load.
     status = iree_hal_device_spec_create_minimal(
         identifier, identifier, IREE_SV("null"), IREE_SV("null"),
         host_allocator, &device->device_spec);
@@ -336,45 +336,32 @@ static iree_status_t iree_hal_null_device_create_command_buffer(
       out_command_buffer);
 }
 
-static iree_status_t iree_hal_null_device_create_event(
+static iree_status_t iree_hal_null_device_load_executable(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_event_flags_t flags, iree_hal_event_t** out_event) {
-  iree_hal_null_device_t* device = iree_hal_null_device_cast(base_device);
-
-  // TODO(null): pass any additional resources required to create the event.
-  // The implementation could pool events here.
-  (void)device;
-
-  return iree_hal_null_event_create(queue_affinity, flags,
-                                    iree_hal_device_host_allocator(base_device),
-                                    out_event);
-}
-
-static iree_status_t iree_hal_null_device_create_executable_cache(
-    iree_hal_device_t* base_device, iree_string_view_t identifier,
-    iree_hal_executable_cache_t** out_executable_cache) {
-  iree_hal_null_device_t* device = iree_hal_null_device_cast(base_device);
-
-  // TODO(null): pass any additional resources required during executable
-  // creation or cache management.
-  (void)device;
-
-  return iree_hal_null_executable_cache_create(
-      identifier, iree_hal_device_host_allocator(base_device),
-      out_executable_cache);
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
+    iree_hal_executable_t** out_executable) {
+  // No public load reaches this stub because the null device spec advertises no
+  // executable targets. A real driver resolves |queue_affinity| to its physical
+  // devices here, verifies that |target->physical_device_affinity| covers them,
+  // and passes the selected native resources to executable construction.
+  return iree_hal_null_executable_create(
+      target, load_params, iree_hal_device_host_allocator(base_device),
+      out_executable);
 }
 
 static iree_status_t iree_hal_null_device_import_file(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     iree_hal_memory_access_t access, iree_io_file_handle_t* handle,
     iree_hal_external_file_flags_t flags, iree_hal_file_t** out_file) {
-  // TODO(null): if the implementation supports native file operations
-  // definitely prefer that. The emulated file I/O present here as a default is
-  // inefficient. The queue affinity specifies which queues may access the file
-  // via read and write queue operations.
-  return iree_hal_file_from_handle(
-      /*device_allocator=*/NULL, queue_affinity, access, handle,
-      /*proactor=*/NULL, iree_hal_device_host_allocator(base_device), out_file);
+  (void)base_device;
+  (void)queue_affinity;
+  (void)access;
+  (void)handle;
+  (void)flags;
+  (void)out_file;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "null file import not implemented");
 }
 
 static iree_status_t iree_hal_null_device_create_semaphore(
@@ -513,19 +500,18 @@ static iree_status_t iree_hal_null_device_queue_read(
     iree_hal_file_t* source_file, uint64_t source_offset,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, iree_hal_read_flags_t flags) {
-  // TODO(null): if native support for file operations are available then
-  // definitely prefer those over the emulated implementation provided here by
-  // default. The implementation performs allocations, creates semaphores, and
-  // submits command buffers with host-device blocking behavior.
-
-  iree_hal_file_transfer_options_t options = {
-      .chunk_count = IREE_HAL_FILE_TRANSFER_CHUNK_COUNT_DEFAULT,
-      .chunk_size = IREE_HAL_FILE_TRANSFER_CHUNK_SIZE_DEFAULT,
-  };
-  return iree_hal_device_queue_read_streaming(
-      base_device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
-      source_file, source_offset, target_buffer, target_offset, length, flags,
-      options);
+  (void)base_device;
+  (void)queue_affinity;
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)source_file;
+  (void)source_offset;
+  (void)target_buffer;
+  (void)target_offset;
+  (void)length;
+  (void)flags;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "null native file queue reads not implemented");
 }
 
 static iree_status_t iree_hal_null_device_queue_write(
@@ -535,19 +521,18 @@ static iree_status_t iree_hal_null_device_queue_write(
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     iree_hal_file_t* target_file, uint64_t target_offset,
     iree_device_size_t length, iree_hal_write_flags_t flags) {
-  // TODO(null): if native support for file operations are available then
-  // definitely prefer those over the emulated implementation provided here by
-  // default. The implementation performs allocations, creates semaphores, and
-  // submits command buffers with host-device blocking behavior.
-
-  iree_hal_file_transfer_options_t options = {
-      .chunk_count = IREE_HAL_FILE_TRANSFER_CHUNK_COUNT_DEFAULT,
-      .chunk_size = IREE_HAL_FILE_TRANSFER_CHUNK_SIZE_DEFAULT,
-  };
-  return iree_hal_device_queue_write_streaming(
-      base_device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
-      source_buffer, source_offset, target_file, target_offset, length, flags,
-      options);
+  (void)base_device;
+  (void)queue_affinity;
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)source_buffer;
+  (void)source_offset;
+  (void)target_file;
+  (void)target_offset;
+  (void)length;
+  (void)flags;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "null native file queue writes not implemented");
 }
 
 static iree_status_t iree_hal_null_device_queue_host_call(
@@ -612,6 +597,47 @@ static iree_status_t iree_hal_null_device_queue_execute(
                                           "queue execute not implemented");
 
   return status;
+}
+
+static iree_status_t iree_hal_null_device_queue_atomic_wait(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_wait_params_t params) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "null devices do not support atomic waits");
+}
+
+static iree_status_t iree_hal_null_device_queue_atomic_store(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_store_params_t params) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "null devices do not support atomic stores");
+}
+
+static iree_status_t iree_hal_null_device_queue_atomic_rmw(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_rmw_params_t params) {
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "null devices do not support atomic read-modify-write");
+}
+
+static iree_status_t iree_hal_null_device_queue_timestamp(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_timestamp_flags_t flags) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "queue timestamp not implemented");
 }
 
 static iree_status_t iree_hal_null_device_queue_flush(
@@ -703,8 +729,7 @@ static const iree_hal_device_vtable_t iree_hal_null_device_vtable = {
     .assign_topology_info = iree_hal_null_device_assign_topology_info,
     .create_channel = iree_hal_null_device_create_channel,
     .create_command_buffer = iree_hal_null_device_create_command_buffer,
-    .create_event = iree_hal_null_device_create_event,
-    .create_executable_cache = iree_hal_null_device_create_executable_cache,
+    .load_executable = iree_hal_null_device_load_executable,
     .import_file = iree_hal_null_device_import_file,
     .create_semaphore = iree_hal_null_device_create_semaphore,
     .query_semaphore_compatibility =
@@ -720,6 +745,10 @@ static const iree_hal_device_vtable_t iree_hal_null_device_vtable = {
     .queue_host_call = iree_hal_null_device_queue_host_call,
     .queue_dispatch = iree_hal_null_device_queue_dispatch,
     .queue_execute = iree_hal_null_device_queue_execute,
+    .queue_atomic_wait = iree_hal_null_device_queue_atomic_wait,
+    .queue_atomic_store = iree_hal_null_device_queue_atomic_store,
+    .queue_atomic_rmw = iree_hal_null_device_queue_atomic_rmw,
+    .queue_timestamp = iree_hal_null_device_queue_timestamp,
     .queue_flush = iree_hal_null_device_queue_flush,
     .profiling_begin = iree_hal_null_device_profiling_begin,
     .profiling_flush = iree_hal_null_device_profiling_flush,

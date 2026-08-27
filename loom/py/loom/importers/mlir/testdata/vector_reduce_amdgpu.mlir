@@ -51,10 +51,10 @@ kernel.def target(@rocm_hsaco_fb) export("vector_reduce_amdgpu") @vector_reduce_
   %c4 = index.constant 4 : index
   %zero = scalar.constant 0.0 : f32
   %c0_bytes = index.cast %c0 : index to offset
-  %input = buffer.view %binding0[%c0_bytes] : buffer -> view<4xf32, #dense>
+  %input = buffer.view %binding0[%c0_bytes] : buffer -> view<4xf32>
   %c0_bytes_2 = index.cast %c0 : index to offset
-  %output = buffer.view %binding1[%c0_bytes_2] : buffer -> view<4xf32, #dense>
-  %vec = vector.load %input[%c0] : view<4xf32, #dense> -> vector<4xf32>
+  %output = buffer.view %binding1[%c0_bytes_2] : buffer -> view<4xf32>
+  %vec = vector.load %input[%c0] : view<4xf32> -> vector<4xf32>
   %sum = vector.reduce<addf> %vec, %zero : vector<4xf32>, f32
   %loop_sum = scf.for %i = [%c0 to %c4 step %c1](%acc = %sum : f32) -> (f32) {
     %masked = index.andi %i, %c1 : index
@@ -63,7 +63,7 @@ kernel.def target(@rocm_hsaco_fb) export("vector_reduce_amdgpu") @vector_reduce_
     scf.yield %next : f32
   }
   %broadcast = vector.splat %loop_sum : vector<4xf32>
-  vector.store %broadcast, %output[%c0] : vector<4xf32>, view<4xf32, #dense>
+  vector.store %broadcast, %output[%c0] : vector<4xf32>, view<4xf32>
   kernel.return
 }
 
@@ -103,7 +103,7 @@ kernel.def target(@rocm_hsaco_fb) export("barrier_smoke") @barrier_smoke() {
 } launch(%binding0: buffer) {
   %c0 = index.constant 0 : index
   %c0_bytes = index.cast %c0 : index to offset
-  %input = buffer.view %binding0[%c0_bytes] : buffer -> view<4xf32, #dense>
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  %input = buffer.view %binding0[%c0_bytes] : buffer -> view<4xf32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   kernel.return
 }

@@ -117,6 +117,19 @@ def run_requirement(id: str, label: str, cmake_label: str, skip_contract: str):
     )
 
 
+def _starlark_label(value: str) -> str:
+    """Represents a Bazel Label by its canonical spelling under CMake."""
+    return value
+
+
+def _requirement_defs_env() -> dict:
+    return {
+        "Label": _starlark_label,
+        "build_requirement": build_requirement,
+        "run_requirement": run_requirement,
+    }
+
+
 def package_policy(
     packages,
     build_requirements=None,
@@ -163,10 +176,7 @@ def strip_load_statements(source: str) -> str:
 def load_project_policy(repo_root: str, project: str) -> ProjectRequirementPolicy:
     repo_root_path = Path(repo_root)
     requirements_dir = repo_root_path / project / "requirements"
-    env = {
-        "build_requirement": build_requirement,
-        "run_requirement": run_requirement,
-    }
+    env = _requirement_defs_env()
     _exec_bzl(requirements_dir / "defs.bzl", env, repo_root_path)
     env["package_policy"] = package_policy
     _exec_bzl(requirements_dir / "package_policy.bzl", env, repo_root_path)
@@ -260,10 +270,7 @@ def _requirements_defs_path(repo_root: Path, label: str) -> Path | None:
 
 @lru_cache(maxsize=None)
 def _load_requirement_defs(repo_root: str, path: str) -> dict:
-    env = {
-        "build_requirement": build_requirement,
-        "run_requirement": run_requirement,
-    }
+    env = _requirement_defs_env()
     _exec_bzl(Path(path), env, Path(repo_root))
     return env
 

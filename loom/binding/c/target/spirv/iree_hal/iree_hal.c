@@ -86,11 +86,6 @@ static loomc_status_t loomc_spirv_iree_hal_validate_options(
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "SPIR-V IREE HAL options require a device");
   }
-  if (options->executable_cache == NULL) {
-    return loomc_make_status(
-        LOOMC_STATUS_INVALID_ARGUMENT,
-        "SPIR-V IREE HAL options require an executable cache");
-  }
   return loomc_ok_status();
 }
 
@@ -250,12 +245,31 @@ static loomc_status_t loomc_spirv_iree_hal_query_facts(
     const loomc_spirv_iree_hal_profile_options_t* options,
     loomc_spirv_iree_hal_profile_facts_t* out_facts, loomc_result_t* result) {
   *out_facts = (loomc_spirv_iree_hal_profile_facts_t){0};
-  if (!iree_hal_executable_cache_can_prepare_format(
-          options->executable_cache,
-          IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_OPTIMIZATION,
-          IREE_SV("vulkan-spirv-bda"))) {
+  const iree_hal_device_spec_t* device_spec =
+      iree_hal_device_spec(options->device);
+  if (device_spec == NULL) {
     return loomc_spirv_iree_hal_fail_cstring(
-        result, "IREE HAL executable cache cannot prepare vulkan-spirv-bda");
+        result, "IREE HAL device does not expose immutable device facts");
+  }
+  const iree_hal_executable_target_selection_t target_selection = {
+      .family = IREE_SV("spirv"),
+      .target_key = IREE_SV("vulkan1.3+bda"),
+      .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC,
+      .physical_device_affinity = options->physical_device_affinity,
+  };
+  const iree_hal_executable_target_selection_result_t target_result =
+      iree_hal_device_spec_select_executable_target(device_spec,
+                                                    &target_selection);
+  if (target_result.outcome ==
+      IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
+    return loomc_spirv_iree_hal_fail_cstring(
+        result,
+        "IREE HAL device does not support the vulkan1.3+bda SPIR-V target");
+  } else if (target_result.outcome ==
+             IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS) {
+    return loomc_spirv_iree_hal_fail_cstring(
+        result,
+        "IREE HAL device reports ambiguous vulkan1.3+bda SPIR-V targets");
   }
 
   const iree_hal_device_dispatch_spec_t* dispatch = NULL;
@@ -528,7 +542,7 @@ static loomc_status_t loomc_spirv_iree_hal_provider_create_profile(
       /*.next=*/options->next,
       /*.identifier=*/options->identifier,
       /*.device=*/options->device,
-      /*.executable_cache=*/options->executable_cache,
+      /*.physical_device_affinity=*/options->physical_device_affinity,
   };
   return loomc_target_profile_create_spirv_iree_hal(
       target_environment, &spirv_options, allocator, out_profile, out_result);

@@ -40,7 +40,8 @@ enum {
   LOOM_OP_CHECK_EXPECT = LOOM_OP_KIND(LOOM_DIALECT_CHECK, 18),
   LOOM_OP_CHECK_EXPECT_EVENT = LOOM_OP_KIND(LOOM_DIALECT_CHECK, 19),
   LOOM_OP_CHECK_BENCHMARK = LOOM_OP_KIND(LOOM_DIALECT_CHECK, 20),
-  LOOM_OP_CHECK_COUNT_ = 21,
+  LOOM_OP_CHECK_TENSOR_VIEW = LOOM_OP_KIND(LOOM_DIALECT_CHECK, 21),
+  LOOM_OP_CHECK_COUNT_ = 22,
 };
 
 // Check symbol visibility. Absent (0) means private.
@@ -207,16 +208,23 @@ iree_status_t loom_check_literal_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 
-// LOOM_OP_CHECK_GENERATE_IOTA: Generates a deterministic iota-shaped value.
+// LOOM_OP_CHECK_GENERATE_IOTA: Generates a deterministic, optionally periodic iota-shaped value.
 // %lhs = check.generate.iota offset(0) step(1) : tensor<[%m]x[%n]xi32>
 LOOM_DEFINE_ISA(loom_check_generate_iota_isa, LOOM_OP_CHECK_GENERATE_IOTA)
 LOOM_DEFINE_RESULT(loom_check_generate_iota_result, 0)
 LOOM_DEFINE_ATTR_ANY(loom_check_generate_iota_offset, 0)
 LOOM_DEFINE_ATTR_ANY(loom_check_generate_iota_step, 1)
+LOOM_DEFINE_ATTR_I64(loom_check_generate_iota_period, 2)
+enum loom_check_generate_iota_build_flag_bits_e {
+  LOOM_CHECK_GENERATE_IOTA_BUILD_FLAG_HAS_PERIOD = 1u << 0,
+};
+typedef uint32_t loom_check_generate_iota_build_flags_t;
 iree_status_t loom_check_generate_iota_build(
     loom_builder_t* builder,
+    loom_check_generate_iota_build_flags_t build_flags,
     loom_attribute_t offset,
     loom_attribute_t step,
+    loom_optional int64_t period,
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
@@ -288,8 +296,13 @@ LOOM_DEFINE_VARIADIC_RESULTS(loom_check_oracle_call_results, 0)
 LOOM_DEFINE_ATTR_STRING(loom_check_oracle_call_provider, 0)
 LOOM_DEFINE_ATTR_DICT(loom_check_oracle_call_attrs, 1)
 LOOM_DEFINE_ATTR_SYMBOL(loom_check_oracle_call_callee, 2)
+enum loom_check_oracle_call_build_flag_bits_e {
+  LOOM_CHECK_ORACLE_CALL_BUILD_FLAG_HAS_ATTRS = 1u << 0,
+};
+typedef uint32_t loom_check_oracle_call_build_flags_t;
 iree_status_t loom_check_oracle_call_build(
     loom_builder_t* builder,
+    loom_check_oracle_call_build_flags_t build_flags,
     loom_string_id_t provider,
     loom_optional loom_named_attr_slice_t attrs,
     loom_symbol_ref_t callee,
@@ -367,8 +380,13 @@ LOOM_DEFINE_OPERAND(loom_check_expect_actual, 0)
 LOOM_DEFINE_OPERAND(loom_check_expect_expected, 1)
 LOOM_DEFINE_ATTR_STRING(loom_check_expect_provider, 0)
 LOOM_DEFINE_ATTR_DICT(loom_check_expect_attrs, 1)
+enum loom_check_expect_build_flag_bits_e {
+  LOOM_CHECK_EXPECT_BUILD_FLAG_HAS_ATTRS = 1u << 0,
+};
+typedef uint32_t loom_check_expect_build_flags_t;
 iree_status_t loom_check_expect_build(
     loom_builder_t* builder,
+    loom_check_expect_build_flags_t build_flags,
     loom_string_id_t provider,
     loom_value_id_t actual,
     loom_value_id_t expected,
@@ -381,8 +399,13 @@ iree_status_t loom_check_expect_build(
 LOOM_DEFINE_ISA(loom_check_expect_event_isa, LOOM_OP_CHECK_EXPECT_EVENT)
 LOOM_DEFINE_ATTR_STRING(loom_check_expect_event_provider, 0)
 LOOM_DEFINE_ATTR_DICT(loom_check_expect_event_attrs, 1)
+enum loom_check_expect_event_build_flag_bits_e {
+  LOOM_CHECK_EXPECT_EVENT_BUILD_FLAG_HAS_ATTRS = 1u << 0,
+};
+typedef uint32_t loom_check_expect_event_build_flags_t;
 iree_status_t loom_check_expect_event_build(
     loom_builder_t* builder,
+    loom_check_expect_event_build_flags_t build_flags,
     loom_string_id_t provider,
     loom_optional loom_named_attr_slice_t attrs,
     loom_location_id_t location,
@@ -396,6 +419,7 @@ LOOM_DEFINE_ATTR_SYMBOL(loom_check_benchmark_case_ref, 1)
 LOOM_DEFINE_ATTR_DICT(loom_check_benchmark_attrs, 2)
 enum loom_check_benchmark_build_flag_bits_e {
   LOOM_CHECK_BENCHMARK_BUILD_FLAG_HAS_BENCHMARK = 1u << 0,
+  LOOM_CHECK_BENCHMARK_BUILD_FLAG_HAS_ATTRS = 1u << 1,
 };
 typedef uint32_t loom_check_benchmark_build_flags_t;
 iree_status_t loom_check_benchmark_build(
@@ -404,6 +428,20 @@ iree_status_t loom_check_benchmark_build(
     loom_symbol_ref_t case_ref,
     loom_optional loom_symbol_ref_t benchmark,
     loom_optional loom_named_attr_slice_t attrs,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_CHECK_TENSOR_VIEW: Forms a dense typed alias over a byte subspan of a tensor materialized by another check value source. The view shares storage with its source.
+// %payload = check.tensor.view %packed offset(16) : tensor<144xi8> -> tensor<32xi32>
+LOOM_DEFINE_ISA(loom_check_tensor_view_isa, LOOM_OP_CHECK_TENSOR_VIEW)
+LOOM_DEFINE_OPERAND(loom_check_tensor_view_source, 0)
+LOOM_DEFINE_RESULT(loom_check_tensor_view_result, 0)
+LOOM_DEFINE_ATTR_I64(loom_check_tensor_view_byte_offset, 0)
+iree_status_t loom_check_tensor_view_build(
+    loom_builder_t* builder,
+    loom_value_id_t source,
+    int64_t byte_offset,
+    loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
 

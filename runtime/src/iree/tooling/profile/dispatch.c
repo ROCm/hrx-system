@@ -776,6 +776,10 @@ static iree_status_t iree_profile_dispatch_process_event_records(
   const bool has_clock_fit = iree_profile_model_device_try_fit_clock_exact(
       device, IREE_PROFILE_MODEL_CLOCK_TIME_DOMAIN_HOST_CPU_TIMESTAMP_NS,
       &clock_fit);
+  iree_profile_model_duration_scale_t duration_scale;
+  const bool has_duration_scale =
+      iree_profile_model_device_try_resolve_duration_scale(device,
+                                                           &duration_scale);
 
   iree_profile_typed_record_iterator_t iterator;
   iree_profile_typed_record_iterator_initialize(
@@ -821,8 +825,9 @@ static iree_status_t iree_profile_dispatch_process_event_records(
             .file_record = record,
             .event = &event,
             .key = key,
-            .clock_fit = &clock_fit,
             .has_clock_fit = has_clock_fit,
+            .duration_scale = duration_scale,
+            .has_duration_scale = has_duration_scale,
         };
         status = event_callback.fn(event_callback.user_data, &event_row);
       }

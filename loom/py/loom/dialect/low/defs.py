@@ -26,11 +26,13 @@ from loom.assembly import (
     RPAREN,
     Attr,
     AttrDict,
+    BindingList,
     BlockArgs,
     BlockRef,
-    DescriptorRef,
+    Clause,
     FormatElement,
     FuncArgs,
+    KeyRef,
     OptionalGroup,
     PredicateList,
     Ref,
@@ -39,6 +41,7 @@ from loom.assembly import (
     ResultType,
     ResultTypeList,
     Scope,
+    ScopedEnumRef,
     StableKeyRef,
     SymbolRef,
     TemplateParam,
@@ -51,9 +54,13 @@ from loom.dialect.func.defs import CallingConv, Purity, Retain, Visibility
 from loom.dialect.target.defs import ExportAbiKind, ExportLinkage
 from loom.dsl import (
     ANY,
+    ATTR_TYPE_BOOL,
     ATTR_TYPE_ENUM,
     ATTR_TYPE_I64,
     ATTR_TYPE_TYPE,
+    COMPILE_TIME_ONLY,
+    FACT_IDENTITY,
+    HINT,
     ISOLATED_FROM_ABOVE,
     PURE,
     REGISTER,
@@ -63,16 +70,22 @@ from loom.dsl import (
     TERMINATOR,
     UNKNOWN_EFFECTS,
     AttrDef,
+    BlockArgCount,
+    BlockArgsMatchTypes,
     BlockArgsSatisfy,
     CallLikeInterface,
     CallLikeKind,
+    ConditionForwardedCountMatchesBlockArgs,
+    ConditionForwardedTypesMatchBlockArgs,
     Dialect,
     EnumCase,
     EnumDef,
     FuncLikeInterface,
+    HasParent,
     ImplicitTerminator,
     IterArgsMatchResults,
     LoopLikeInterface,
+    MovedResult,
     NoAncestor,
     Op,
     Operand,
@@ -85,7 +98,9 @@ from loom.dsl import (
     SameType,
     Successor,
     SymbolDefinition,
+    SymbolDefinitionFlag,
     SymbolReference,
+    VariadicValuesMatch,
     YieldCountMatchesResults,
     YieldTypesMatchResults,
 )
@@ -126,6 +141,11 @@ LowResourceImportKind = EnumDef(
             "hal_binding",
             4,
             doc="IREE HAL dispatch binding payload materialized as a register value.",
+        ),
+        EnumCase(
+            "command_input",
+            5,
+            doc="Command-program materialization input selected by result register class and dense index.",
         ),
     ],
     doc="Target-provided ABI resource imported into a low function body.",
@@ -203,7 +223,13 @@ _FUNC_COMMON_ATTRS = [
     AttrDef(
         "target",
         "symbol",
+        optional=True,
         symbol_ref=SymbolReference("target", ["target"]),
+    ),
+    AttrDef(
+        "descriptor_set",
+        "string",
+        doc="Canonical descriptor-set key governing the low representation.",
     ),
     AttrDef(
         "abi",
@@ -230,7 +256,13 @@ _KERNEL_COMMON_ATTRS = [
     AttrDef(
         "target",
         "symbol",
+        optional=True,
         symbol_ref=SymbolReference("target", ["target"]),
+    ),
+    AttrDef(
+        "descriptor_set",
+        "string",
+        doc="Canonical descriptor-set key governing the low representation.",
     ),
     AttrDef("abi_layout", "dict", optional=True),
     AttrDef("export_symbol", "string", optional=True),
@@ -238,6 +270,12 @@ _KERNEL_COMMON_ATTRS = [
     AttrDef("workgroup_size_x", ATTR_TYPE_I64, optional=True),
     AttrDef("workgroup_size_y", ATTR_TYPE_I64, optional=True),
     AttrDef("workgroup_size_z", ATTR_TYPE_I64, optional=True),
+    AttrDef("workgroup_count_x", ATTR_TYPE_I64, optional=True),
+    AttrDef("workgroup_count_y", ATTR_TYPE_I64, optional=True),
+    AttrDef("workgroup_count_z", ATTR_TYPE_I64, optional=True),
+    AttrDef("workgroup_cluster_size_x", ATTR_TYPE_I64, optional=True),
+    AttrDef("workgroup_cluster_size_y", ATTR_TYPE_I64, optional=True),
+    AttrDef("workgroup_cluster_size_z", ATTR_TYPE_I64, optional=True),
     AttrDef("allocation", "enum", enum_def=LowAllocationMode, optional=True),
     AttrDef("schedule", "enum", enum_def=LowScheduleMode, optional=True),
     AttrDef("predicates", "predicate_list", optional=True),
@@ -276,13 +314,13 @@ _LOW_EXACTNESS_FORMAT: list[FormatElement] = [
     ),
 ]
 
-_FUNC_TARGET_FORMAT: list[FormatElement] = [
+_LOW_TARGET_FORMAT: list[FormatElement] = [
     kw("target"),
-    GLUE,
-    LPAREN,
-    SymbolRef("target"),
-    GLUE,
-    RPAREN,
+    KeyRef("descriptor_set"),
+    OptionalGroup(
+        [GLUE, LPAREN, SymbolRef("target"), GLUE, RPAREN],
+        anchor="target",
+    ),
 ]
 
 _FUNC_ABI_FORMAT: list[FormatElement] = [
@@ -351,6 +389,42 @@ _KERNEL_WORKGROUP_SIZE_FORMAT: list[FormatElement] = [
     ),
 ]
 
+_KERNEL_WORKGROUP_COUNT_FORMAT: list[FormatElement] = [
+    OptionalGroup(
+        [
+            kw("workgroup_count"),
+            GLUE,
+            LPAREN,
+            Attr("workgroup_count_x"),
+            COMMA,
+            Attr("workgroup_count_y"),
+            COMMA,
+            Attr("workgroup_count_z"),
+            GLUE,
+            RPAREN,
+        ],
+        anchor="workgroup_count_x",
+    ),
+]
+
+_KERNEL_WORKGROUP_CLUSTER_SIZE_FORMAT: list[FormatElement] = [
+    OptionalGroup(
+        [
+            kw("cluster_size"),
+            GLUE,
+            LPAREN,
+            Attr("workgroup_cluster_size_x"),
+            COMMA,
+            Attr("workgroup_cluster_size_y"),
+            COMMA,
+            Attr("workgroup_cluster_size_z"),
+            GLUE,
+            RPAREN,
+        ],
+        anchor="workgroup_cluster_size_x",
+    ),
+]
+
 _FUNC_IMPORT_FORMAT: list[FormatElement] = [
     OptionalGroup(
         [
@@ -400,6 +474,7 @@ _KERNEL_SIGNATURE_FORMAT: list[FormatElement] = [
 _FUNC_LIKE_COMMON: dict[str, Any] = dict(
     callee="callee",
     target="target",
+    repr_contract="descriptor_set",
     abi="abi",
     abi_attrs="abi_attrs",
     export_symbol="export_symbol",
@@ -413,6 +488,7 @@ _FUNC_LIKE_COMMON: dict[str, Any] = dict(
 _KERNEL_FUNC_LIKE_COMMON: dict[str, Any] = dict(
     callee="callee",
     target="target",
+    repr_contract="descriptor_set",
     export_symbol="export_symbol",
     export_linkage="export_linkage",
     predicates="predicates",
@@ -432,7 +508,7 @@ low_func_def = Op(
     symbol_def=SymbolDefinition(
         field="callee",
         name="function",
-        interfaces=["func_like"],
+        interfaces=["func_like", "callable"],
         bytecode_kind="LOOM_SYMBOL_FUNC_DEF",
         fact_domain="loom_func_symbol_fact_domain",
         retain="retain",
@@ -448,7 +524,7 @@ low_func_def = Op(
     ],
     format=[
         *_FUNC_MODIFIER_FORMAT,
-        *_FUNC_TARGET_FORMAT,
+        *_LOW_TARGET_FORMAT,
         *_FUNC_ABI_FORMAT,
         *_KERNEL_ABI_LAYOUT_FORMAT,
         *_FUNC_EXPORT_FORMAT,
@@ -456,8 +532,9 @@ low_func_def = Op(
         Region("body", syntax="low.asm.optional"),
     ],
     examples=[
-        "low.func.def target(@gfx1100) @add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>) {\n  %sum = low.op<amdgpu.v_add_u32>(%lhs, %rhs) : (reg<amdgpu.vgpr x1>, reg<amdgpu.vgpr x1>) -> reg<amdgpu.vgpr x1>\n  low.return %sum : reg<amdgpu.vgpr x1>\n}",
-        "low.func.def allocation(fixed) schedule(locked) target(@gfx1100) @agent_authored(%lhs: reg<amdgpu.vgpr x1>) {\n  low.return\n}",
+        "low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic) @add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>) {\n  %sum = low.op<amdgpu.v_add_u32>(%lhs, %rhs) : (reg<amdgpu.vgpr x1>, reg<amdgpu.vgpr x1>) -> reg<amdgpu.vgpr x1>\n  low.return %sum : reg<amdgpu.vgpr x1>\n}",
+        "low.func.def target<amdgpu.rdna3_5.core> @invocation_bound() {\n  low.return\n}",
+        "low.func.def allocation(fixed) schedule(locked) target<amdgpu.gfx11.generic.core>(@gfx11_generic) @agent_authored(%lhs: reg<amdgpu.vgpr x1>) {\n  low.return\n}",
     ],
 )
 
@@ -475,7 +552,7 @@ low_kernel_def = Op(
     symbol_def=SymbolDefinition(
         field="callee",
         name="function",
-        interfaces=["func_like"],
+        interfaces=["func_like", "kernel_entry"],
         bytecode_kind="LOOM_SYMBOL_FUNC_DEF",
         fact_domain="loom_func_symbol_fact_domain",
         retain="retain",
@@ -488,15 +565,17 @@ low_kernel_def = Op(
     ],
     format=[
         *_LOW_EXACTNESS_FORMAT,
-        *_FUNC_TARGET_FORMAT,
+        *_LOW_TARGET_FORMAT,
         *_KERNEL_ABI_LAYOUT_FORMAT,
         *_KERNEL_EXPORT_FORMAT,
         *_KERNEL_WORKGROUP_SIZE_FORMAT,
+        *_KERNEL_WORKGROUP_COUNT_FORMAT,
+        *_KERNEL_WORKGROUP_CLUSTER_SIZE_FORMAT,
         *_KERNEL_SIGNATURE_FORMAT,
         Region("body", syntax="low.asm.optional"),
     ],
     examples=[
-        'low.kernel.def target(@gfx1100) export("matmul") workgroup_size(16, 4, 1) @matmul(%lhs: reg<amdgpu.sgpr x4>, %rhs: reg<amdgpu.sgpr x4>, %out: reg<amdgpu.sgpr x4>) {\n  low.return\n}',
+        'low.kernel.def target<amdgpu.gfx11.generic.core>(@gfx11_generic) export("matmul") workgroup_size(16, 4, 1) @matmul(%lhs: reg<amdgpu.sgpr x4>, %rhs: reg<amdgpu.sgpr x4>, %out: reg<amdgpu.sgpr x4>) {\n  low.return\n}',
     ],
 )
 
@@ -515,26 +594,27 @@ low_func_decl = Op(
     symbol_def=SymbolDefinition(
         field="callee",
         name="function",
-        interfaces=["func_like"],
+        interfaces=["func_like", "callable"],
         bytecode_kind="LOOM_SYMBOL_FUNC_DECL",
         fact_domain="loom_func_symbol_fact_domain",
         retain="retain",
+        flags=[SymbolDefinitionFlag.DECLARATION],
     ),
     results=[Result("results", REGISTER, variadic=True)],
-    interfaces=[FuncLikeInterface(**_FUNC_LIKE_COMMON, args_as_operands=True)],
+    interfaces=[FuncLikeInterface(**_FUNC_LIKE_COMMON, args="args")],
     verify="loom_low_func_decl_verify",
     format=[
         *_FUNC_MODIFIER_FORMAT,
         *_FUNC_IMPORT_FORMAT,
-        *_FUNC_TARGET_FORMAT,
+        *_LOW_TARGET_FORMAT,
         *_FUNC_ABI_FORMAT,
         *_KERNEL_ABI_LAYOUT_FORMAT,
         *_FUNC_EXPORT_FORMAT,
         *_FUNC_SIGNATURE_FORMAT,
     ],
     examples=[
-        "low.func.decl target(@gfx1100) @extern_add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>)",
-        'low.func.decl allocation(fixed) schedule(locked) import(rocasm, "mfma_16x16_seq") target(@gfx1100) @mfma_rocasm(%acc: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>)',
+        "low.func.decl target<amdgpu.gfx11.generic.core>(@gfx11_generic) @extern_add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>)",
+        'low.func.decl allocation(fixed) schedule(locked) import(rocasm, "mfma_16x16_seq") target<amdgpu.gfx11.generic.core>(@gfx11_generic) @mfma_rocasm(%acc: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>)',
     ],
 )
 
@@ -574,7 +654,7 @@ low_func_call = Op(
         AttrDef(
             "callee",
             "symbol",
-            symbol_ref=SymbolReference("function", ["func_like"]),
+            symbol_ref=SymbolReference("function", ["callable"]),
         ),
         AttrDef("purity", "enum", enum_def=Purity, optional=True),
     ],
@@ -687,7 +767,7 @@ low_scf_yield = Op(
     phase=OpPhase.EXECUTABLE,
     doc="Forward register values from a low structured-control region.",
     operands=[Operand("values", REGISTER, variadic=True)],
-    traits=[TERMINATOR],
+    traits=[TERMINATOR, STORAGE_RELATION],
     format=[
         OptionalGroup(
             [Refs("values"), COLON, TypesOf("values")],
@@ -697,6 +777,52 @@ low_scf_yield = Op(
     examples=[
         "low.scf.yield",
         "low.scf.yield %value : reg<amdgpu.vgpr x1>",
+    ],
+)
+
+# ============================================================================
+# low.scf.condition — low while-loop condition terminator
+# ============================================================================
+
+low_scf_condition = Op(
+    "low.scf.condition",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Terminate a low.scf.while condition region with a register predicate "
+        "and loop-carried register values. Forwarded values enter the body when "
+        "the predicate is true and become the loop results when it is false."
+    ),
+    operands=[
+        Operand(
+            "condition",
+            REGISTER,
+            doc="Register predicate controlling whether the loop body executes.",
+        ),
+        Operand(
+            "forwarded",
+            REGISTER,
+            variadic=True,
+            doc="Register values forwarded to the body or loop results.",
+        ),
+    ],
+    traits=[TERMINATOR, STORAGE_RELATION, HasParent("low.scf.while")],
+    format=[
+        Ref("condition"),
+        OptionalGroup(
+            [COMMA, Refs("forwarded")],
+            anchor="forwarded",
+        ),
+        COLON,
+        TypeOf("condition"),
+        OptionalGroup(
+            [COMMA, TypesOf("forwarded")],
+            anchor="forwarded",
+        ),
+    ],
+    examples=[
+        "low.scf.condition %keep_going : reg<spirv.id : i1>",
+        "low.scf.condition %keep_going, %next : reg<spirv.id : i1>, reg<spirv.id : i32>",
     ],
 )
 
@@ -823,7 +949,7 @@ low_scf_for = Op(
         YieldCountMatchesResults("body", "results"),
         YieldTypesMatchResults("body", "results"),
     ],
-    traits=[ImplicitTerminator("low.scf.yield")],
+    traits=[ImplicitTerminator("low.scf.yield"), STORAGE_RELATION],
     format=[
         LBRACKET,
         Ref("lower_bound"),
@@ -859,6 +985,82 @@ low_scf_for = Op(
 )
 
 # ============================================================================
+# low.scf.while — low condition-controlled structured loop
+# ============================================================================
+
+low_scf_while = Op(
+    "low.scf.while",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Condition-controlled target-low loop with explicit condition and body regions and loop-carried register state."),
+    verify="loom_low_scf_while_verify",
+    operands=[
+        Operand(
+            "iter_args",
+            REGISTER,
+            variadic=True,
+            doc="Initial loop-carried register values.",
+        )
+    ],
+    results=[Result("results", REGISTER, variadic=True)],
+    regions=[
+        RegionDef(
+            "before",
+            doc=("Runs before each condition check. Terminated by low.scf.condition."),
+            single_block=True,
+            terminator="low.scf.condition",
+        ),
+        RegionDef(
+            "after",
+            doc="Runs while the condition is true. Terminated by low.scf.yield.",
+            single_block=True,
+            terminator="low.scf.yield",
+            arg_source="iter_args",
+        ),
+    ],
+    interfaces=[
+        LoopLikeInterface(
+            body="after",
+            condition_region="before",
+            iter_args="iter_args",
+        ),
+    ],
+    constraints=[
+        IterArgsMatchResults("iter_args", "results"),
+        BlockArgCount("before", "iter_args"),
+        BlockArgsMatchTypes("before", "iter_args"),
+        BlockArgCount("after", "iter_args"),
+        BlockArgsMatchTypes("after", "iter_args"),
+        ConditionForwardedCountMatchesBlockArgs("before", "after", "iter_args"),
+        ConditionForwardedTypesMatchBlockArgs("before", "after", "iter_args"),
+        YieldCountMatchesResults("after", "results"),
+        YieldTypesMatchResults("after", "results"),
+    ],
+    traits=[STORAGE_RELATION],
+    format=[
+        OptionalGroup(
+            [BindingList("iter_args")],
+            anchor="iter_args",
+        ),
+        OptionalGroup(
+            [ARROW, ResultTypeList("results")],
+            anchor="results",
+        ),
+        Region("before", syntax="low.asm.optional"),
+        kw("do"),
+        OptionalGroup(
+            [BlockArgs("after")],
+            anchor="iter_args",
+        ),
+        Region("after", syntax="low.asm.optional"),
+    ],
+    examples=[
+        "low.scf.while {\n  low.scf.condition %condition : reg<spirv.id : i1>\n} do {\n  low.scf.yield\n}",
+        "%result = low.scf.while(%before = %initial : reg<spirv.id : i32>) -> (reg<spirv.id : i32>) {\n  low.scf.condition %keep_going, %before : reg<spirv.id : i1>, reg<spirv.id : i32>\n} do(%body: reg<spirv.id : i32>) {\n  low.scf.yield %body : reg<spirv.id : i32>\n}",
+    ],
+)
+
+# ============================================================================
 # low.op — descriptor-backed target instruction
 # ============================================================================
 
@@ -869,20 +1071,29 @@ low_op = Op(
     doc="Descriptor-backed target instruction over virtual registers.",
     operands=[Operand("operands", REGISTER, variadic=True)],
     attrs=[
-        AttrDef("opcode", "string"),
-        AttrDef("descriptor_ordinal", "i64"),
+        AttrDef("descriptor", "scoped_enum"),
         AttrDef("attrs", "dict", optional=True),
+        AttrDef(
+            "memory_access",
+            "i64_array",
+            optional=True,
+            doc=("Versioned source-derived memory access summary retained for final scheduling."),
+        ),
     ],
     results=[Result("results", REGISTER, variadic=True)],
     traits=[UNKNOWN_EFFECTS],
-    verify="loom_low_op_verify",
+    generate_c_builder=False,
     format=[
-        DescriptorRef("opcode", "descriptor_ordinal"),
+        ScopedEnumRef("descriptor"),
         GLUE,
         LPAREN,
         Refs("operands"),
         RPAREN,
         AttrDict("attrs"),
+        OptionalGroup(
+            [Clause("memory_access", Attr("memory_access"))],
+            anchor="memory_access",
+        ),
         COLON,
         LPAREN,
         TypesOf("operands"),
@@ -908,22 +1119,48 @@ low_const = Op(
     phase=OpPhase.EXECUTABLE,
     doc="Descriptor-backed constant or immediate materialization into a register.",
     attrs=[
-        AttrDef("opcode", "string"),
-        AttrDef("descriptor_ordinal", "i64"),
+        AttrDef("descriptor", "scoped_enum"),
         AttrDef("attrs", "dict", optional=True),
     ],
     results=[Result("result", REGISTER)],
     traits=[PURE],
-    verify="loom_low_const_verify",
     facts="loom_low_const_facts",
+    generate_c_builder=False,
     format=[
-        DescriptorRef("opcode", "descriptor_ordinal"),
+        ScopedEnumRef("descriptor"),
         AttrDict("attrs"),
         COLON,
         ResultType("result"),
     ],
     examples=[
         "%c0 = low.const<amdgpu.s_mov_b32> {imm = 0} : reg<amdgpu.sgpr x1>",
+    ],
+)
+
+# ============================================================================
+# low.assume — predicate-constrained register identity
+# ============================================================================
+
+low_assume = Op(
+    "low.assume",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Identity with predicate constraints on target-low register results. Each result aliases the corresponding operand's exact physical storage and emits no target instruction."),
+    operands=[Operand("values", REGISTER, variadic=True)],
+    results=[Result("results", REGISTER, variadic=True)],
+    attrs=[AttrDef("predicates", "predicate_list")],
+    constraints=[VariadicValuesMatch("values", "results")],
+    traits=[PURE, FACT_IDENTITY, STORAGE_RELATION, COMPILE_TIME_ONLY],
+    facts="loom_low_assume_facts",
+    format=[
+        Refs("values"),
+        PredicateList("predicates"),
+        COLON,
+        TypesOf("results"),
+    ],
+    examples=[
+        "%step2 = low.assume %step [eq(%step, 3)] : reg<amdgpu.sgpr>",
+        "%i2, %n2 = low.assume %i, %n [lt(%i, %n)] : reg<amdgpu.sgpr>, reg<amdgpu.sgpr>",
     ],
 )
 
@@ -937,6 +1174,15 @@ low_copy = Op(
     phase=OpPhase.EXECUTABLE,
     doc=("Explicit virtual-register copy used by lowering and allocation. Each copy produces a fresh virtual-register identity."),
     operands=[Operand("source", REGISTER)],
+    attrs=[
+        AttrDef(
+            "detached",
+            ATTR_TYPE_BOOL,
+            default=False,
+            elide_default=True,
+            doc="Prefer physical storage disjoint from the copy source.",
+        ),
+    ],
     results=[Result("result", REGISTER, allocates=True)],
     constraints=[
         SameRegisterClass("source", "result"),
@@ -946,6 +1192,7 @@ low_copy = Op(
     facts="loom_low_copy_facts",
     format=[
         Ref("source"),
+        AttrDict(),
         COLON,
         TypeOf("source"),
         ARROW,
@@ -953,6 +1200,46 @@ low_copy = Op(
     ],
     examples=[
         "%copy = low.copy %value : reg<amdgpu.vgpr x1> -> reg<amdgpu.vgpr x1>",
+    ],
+)
+
+# ============================================================================
+# low.move — ownership-preserving virtual-register transfer
+# ============================================================================
+
+low_move = Op(
+    "low.move",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Transfer a virtual-register value and its exact ownership state to a fresh virtual-register identity. The source is invalid after the move."),
+    operands=[Operand("source", REGISTER)],
+    attrs=[
+        AttrDef(
+            "detached",
+            ATTR_TYPE_BOOL,
+            default=False,
+            elide_default=True,
+            doc="Require physical storage disjoint from the move source.",
+        ),
+    ],
+    results=[Result("result", REGISTER, allocates=True)],
+    constraints=[
+        SameRegisterClass("source", "result"),
+    ],
+    traits=[STORAGE_RELATION],
+    ownership_effects=[MovedResult("result", "source")],
+    verify="loom_low_move_verify",
+    facts="loom_low_move_facts",
+    format=[
+        Ref("source"),
+        AttrDict(),
+        COLON,
+        TypeOf("source"),
+        ARROW,
+        ResultType("result"),
+    ],
+    examples=[
+        "%moved = low.move %value : reg<cmd.binding> -> reg<cmd.binding>",
     ],
 )
 
@@ -1009,6 +1296,7 @@ low_concat = Op(
         SameRegisterClass("sources", "result"),
         RegisterUnitsSumTo("sources", "result"),
     ],
+    verify="loom_low_concat_verify",
     facts="loom_low_concat_facts",
     format=[
         GLUE,
@@ -1258,6 +1546,7 @@ low_resource = Op(
         "%binding = low.resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>",
         "%dynamic = low.resource<hal_binding> extent(%extent) {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>",
         "%swizzled = low.resource<hal_binding> {index = 1, source_type = hal.buffer, cache_swizzle_stride = 64} : reg<amdgpu.sgpr x2>",
+        "%fixed = low.resource<command_input> {index = 0, source_type = buffer} : reg<cmd.buffer>",
     ],
 )
 
@@ -1275,7 +1564,7 @@ low_invoke = Op(
         AttrDef(
             "callee",
             "symbol",
-            symbol_ref=SymbolReference("function", ["func_like"]),
+            symbol_ref=SymbolReference("function", ["callable"]),
         ),
         AttrDef("purity", "enum", enum_def=Purity, optional=True),
     ],
@@ -1319,6 +1608,20 @@ low_invoke = Op(
     ],
 )
 
+# ============================================================================
+# low.schedule.fence — compile-time scheduling boundary
+# ============================================================================
+
+low_schedule_fence = Op(
+    "low.schedule.fence",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Compiler hint separating independently reorderable low source ranges. The fence has no runtime effect and emits no target instruction."),
+    traits=[HINT],
+    format=[],
+    examples=["low.schedule.fence"],
+)
+
 ALL_LOW_OPS: tuple[Op, ...] = (
     low_func_def,
     low_kernel_def,
@@ -1328,6 +1631,7 @@ ALL_LOW_OPS: tuple[Op, ...] = (
     low_op,
     low_const,
     low_copy,
+    low_move,
     low_slice,
     low_concat,
     low_invoke,
@@ -1341,6 +1645,10 @@ ALL_LOW_OPS: tuple[Op, ...] = (
     low_resource,
     low_live_in,
     low_scf_yield,
+    low_scf_condition,
     low_scf_if,
     low_scf_for,
+    low_scf_while,
+    low_schedule_fence,
+    low_assume,
 )

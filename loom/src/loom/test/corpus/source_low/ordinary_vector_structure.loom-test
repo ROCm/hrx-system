@@ -1,0 +1,46 @@
+// RUN: roundtrip
+
+kernel.def @ordinary_vector_structure_i32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base_byte_offset = index.constant 0 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%base_byte_offset] : buffer -> view<4xi32>
+  %output_view = buffer.view %output_aligned[%base_byte_offset] : buffer -> view<4xi32>
+  %a = view.load %input_view[0] : view<4xi32> -> i32
+  %b = view.load %input_view[1] : view<4xi32> -> i32
+  %c = view.load %input_view[2] : view<4xi32> -> i32
+  %d = view.load %input_view[3] : view<4xi32> -> i32
+  %condition = scalar.cmpi sgt, %a, %b : i32
+  %singleton_from = vector.from_elements %b : vector<1xi32>
+  %singleton_splat = vector.splat %a : vector<1xi32>
+  %singleton_constant = vector.constant 10 : vector<1xi32>
+  %singleton_selected = scf.select %condition, %singleton_splat, %singleton_from : vector<1xi32>
+  %singleton_inserted = vector.insert %a into %singleton_selected[0] : i32, vector<1xi32>
+  %singleton_value = vector.extract %singleton_inserted[0] : vector<1xi32> -> i32
+  %singleton_constant_value = vector.extract %singleton_constant[0] : vector<1xi32> -> i32
+  %from = vector.from_elements %a, %b, %c, %d : vector<4xi32>
+  %constant = vector.constant 10 : vector<4xi32>
+  %splat = vector.splat %singleton_value : vector<4xi32>
+  %candidate = scf.select %condition, %from, %constant : vector<4xi32>
+  %selected = scf.if %condition -> (vector<4xi32>) {
+    view.store %a, %output_view[0] : i32, view<4xi32>
+    scf.yield %candidate : vector<4xi32>
+  } else {
+    view.store %b, %output_view[0] : i32, view<4xi32>
+    scf.yield %splat : vector<4xi32>
+  }
+  %inserted = vector.insert %singleton_constant_value into %selected[2] : i32, vector<4xi32>
+  %final = scf.select %condition, %selected, %inserted : vector<4xi32>
+  %result0 = vector.extract %final[0] : vector<4xi32> -> i32
+  %result1 = vector.extract %final[1] : vector<4xi32> -> i32
+  %result2 = vector.extract %final[2] : vector<4xi32> -> i32
+  %result3 = vector.extract %final[3] : vector<4xi32> -> i32
+  view.store %result0, %output_view[0] : i32, view<4xi32>
+  view.store %result1, %output_view[1] : i32, view<4xi32>
+  view.store %result2, %output_view[2] : i32, view<4xi32>
+  view.store %result3, %output_view[3] : i32, view<4xi32>
+  kernel.return
+}

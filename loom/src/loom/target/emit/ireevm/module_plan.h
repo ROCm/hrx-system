@@ -17,7 +17,9 @@
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/symbol_facts.h"
 #include "loom/error/emitter.h"
+#include "loom/ir/function_version.h"
 #include "loom/ir/ir.h"
+#include "loom/target/facts.h"
 #include "loom/target/types.h"
 
 #ifdef __cplusplus
@@ -62,8 +64,8 @@ typedef struct loom_ireevm_module_plan_function_t {
   iree_string_view_t symbol_name;
   // VM calling convention string derived from the low signature.
   iree_string_view_t calling_convention;
-  // Resolved target bundle for this function.
-  loom_target_bundle_storage_t bundle_storage;
+  // Immutable function target facts borrowed for the plan lifetime.
+  const loom_target_facts_t* target_facts;
 } loom_ireevm_module_plan_function_t;
 
 typedef struct loom_ireevm_module_plan_export_t {
@@ -98,11 +100,13 @@ typedef struct loom_ireevm_module_plan_t {
 
 // Builds the VM module plan for all compatible low.func.def and VM
 // low.func.decl symbols in |module|. All arrays and calling-convention strings
-// are allocated from |arena|. Returns status for infrastructure failures.
-// Invalid target contracts emit diagnostics, set |out_valid| to false, and
-// return OK.
+// are allocated from |arena|. |function_versions| and their function target
+// facts are borrowed for the plan lifetime. Returns status for infrastructure
+// failures. Invalid target contracts emit diagnostics, set |out_valid| to
+// false, and return OK.
 iree_status_t loom_ireevm_module_plan_build(
     const loom_module_t* module, loom_symbol_fact_table_t* fact_table,
+    const loom_function_version_list_t* function_versions,
     iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
     bool* out_valid, loom_ireevm_module_plan_t* out_plan);
 

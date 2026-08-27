@@ -33,7 +33,9 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/availability.h"
+#include "loom/analysis/movement.h"
 #include "loom/ir/ir.h"
+#include "loom/ir/local_value_domain.h"
 #include "loom/ops/op_defs.h"
 
 #ifdef __cplusplus
@@ -58,17 +60,75 @@ typedef struct loom_motion_analysis_t {
   const loom_module_t* module;
   // Scratch arena used for temporary traversal stacks.
   iree_arena_allocator_t* arena;
+  // Function facts used for counted-loop and symbolic memory proofs.
+  loom_value_fact_table_t* fact_table;
+  // Active function-local value domain backing movement analysis.
+  const loom_local_value_domain_t* value_domain;
   // Value, type, and attribute capture availability queries.
   loom_availability_analysis_t availability;
+  // Lazily populated source memory movement analysis.
+  loom_movement_analysis_t movement;
+  // True when movement owns initialized analysis storage.
+  bool movement_initialized;
+  // True when the movement table has analyzed the local region tree.
+  bool movement_analyzed;
   // Reusable stack for subtree region walks.
   loom_motion_region_stack_t region_stack;
 } loom_motion_analysis_t;
 
-// Initializes shared motion analysis state. The caller owns |arena| and must
-// keep it live for the analysis object's lifetime.
+// Initializes shared motion analysis state. |fact_table| and |value_domain| may
+// both be NULL for effect-free relocation clients. Memory-aware loop placement
+// requires both. The caller owns all borrowed state and must keep it live for
+// the analysis object's lifetime.
 iree_status_t loom_motion_analysis_initialize(
-    const loom_module_t* module, iree_arena_allocator_t* arena,
-    loom_motion_analysis_t* out_analysis);
+    const loom_module_t* module, loom_value_fact_table_t* fact_table,
+    const loom_local_value_domain_t* value_domain,
+    iree_arena_allocator_t* arena, loom_motion_analysis_t* out_analysis);
+
+//===----------------------------------------------------------------------===//
+// Loop hoist evaluation
+//===----------------------------------------------------------------------===//
+
+typedef uint32_t loom_motion_loop_hoist_rejection_flags_t;
+
+#define LOOM_MOTION_LOOP_HOIST_REJECTION_INVALID_REQUEST ((uint32_t)1u << 0)
+#define LOOM_MOTION_LOOP_HOIST_REJECTION_CANDIDATE_SEMANTICS ((uint32_t)1u << 1)
+#define LOOM_MOTION_LOOP_HOIST_REJECTION_CAPTURE_UNAVAILABLE ((uint32_t)1u << 2)
+#define LOOM_MOTION_LOOP_HOIST_REJECTION_PREDICATE_CROSSING ((uint32_t)1u << 3)
+#define LOOM_MOTION_LOOP_HOIST_REJECTION_LOOP_MAY_NOT_EXECUTE \
+  ((uint32_t)1u << 4)
+#define LOOM_MOTION_LOOP_HOIST_REJECTION_MOVEMENT_UNAVAILABLE \
+  ((uint32_t)1u << 5)
+#define LOOM_MOTION_LOOP_HOIST_REJECTION_UNKNOWN_INTERFERENCE \
+  ((uint32_t)1u << 6)
+#define LOOM_MOTION_LOOP_HOIST_REJECTION_OVERLAPPING_WRITE ((uint32_t)1u << 7)
+#define LOOM_MOTION_LOOP_HOIST_REJECTION_ORDERING_INTERFERENCE \
+  ((uint32_t)1u << 8)
+
+// Stable legality result consumed by LICM and the placement planner.
+typedef struct loom_motion_loop_hoist_result_t {
+  // Bitset of loom_motion_loop_hoist_rejection_flags_t values. Zero means the
+  // motion is legal.
+  loom_motion_loop_hoist_rejection_flags_t rejection_bits;
+  // Movement classifier details when MOVEMENT_UNAVAILABLE is set.
+  loom_movement_rejection_flags_t movement_rejection_bits;
+  // First operation proving the rejection, or NULL when no op applies.
+  const loom_op_t* blocking_op;
+} loom_motion_loop_hoist_result_t;
+
+static inline bool loom_motion_loop_hoist_result_is_legal(
+    const loom_motion_loop_hoist_result_t* result) {
+  return result && result->rejection_bits == 0;
+}
+
+// Evaluates moving |candidate_op| immediately before |loop.op|. Effect-free
+// subtrees must be safe to speculate because the loop may execute zero times.
+// Ordinary unmasked view/vector loads may instead use a proven-nonempty loop
+// contract when every write in the loop is proven disjoint from the loaded byte
+// region. Loads nested under another predicate remain in place.
+iree_status_t loom_motion_subtree_evaluate_hoist_before_loop(
+    loom_motion_analysis_t* analysis, loom_loop_like_t loop,
+    const loom_op_t* candidate_op, loom_motion_loop_hoist_result_t* out_result);
 
 //===----------------------------------------------------------------------===//
 // Local classification
@@ -91,11 +151,32 @@ bool loom_motion_op_can_erase(const loom_module_t* module, const loom_op_t* op);
 bool loom_motion_op_can_relocate_effect_free(const loom_module_t* module,
                                              const loom_op_t* op);
 
+// Returns true if |op| may be rebuilt independently while preserving or
+// narrowing its original dynamic execution predicate. This requires pure,
+// deterministic, identity-free semantics and rejects retained regions,
+// terminators, hints, poison boundaries, and convergence. It does not require
+// SAFE_TO_SPECULATE because rematerialization must not introduce execution on
+// an additional control path.
+bool loom_motion_op_can_rematerialize_effect_free(const loom_module_t* module,
+                                                  const loom_op_t* op);
+
 // Returns true if |op| may be executed on additional control paths. This
 // requires SAFE_TO_SPECULATE and rejects any region side effects, convergence,
 // or hints.
 bool loom_motion_op_can_speculate(const loom_module_t* module,
                                   const loom_op_t* op);
+
+// Returns true when |op| is an ordinary unmasked view or vector load with no
+// write, ordering, convergence, identity, or nondeterministic semantics.
+bool loom_motion_op_is_ordinary_load(const loom_module_t* module,
+                                     const loom_op_t* op);
+
+// Returns true when sinking an ordinary load across |op| preserves source
+// ordering. This is a deliberately alias-independent predicate: any write,
+// fence, unknown effect, nested region, convergence, or retained semantic
+// boundary blocks motion.
+bool loom_motion_read_can_cross_op(const loom_module_t* module,
+                                   const loom_op_t* op);
 
 //===----------------------------------------------------------------------===//
 // Subtree motion

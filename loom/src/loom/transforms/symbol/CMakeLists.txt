@@ -13,30 +13,60 @@ loom_cc_library(
   NAME
     template_selection
   HDRS
+    "template_applicability.h"
     "template_selection.h"
   SRCS
+    "template_applicability.c"
     "template_selection.c"
   DEPS
     ::symbol_pruning
     iree::base
     iree::base::internal::arena
-    loom::analysis::func_provider_catalog
-    loom::analysis::symbol_dependencies
+    loom::analysis::condition_facts
     loom::analysis::symbol_facts
     loom::analysis::symbol_liveness
+    loom::analysis::symbol_references
+    loom::analysis::template_provider_catalog
     loom::error::error_defs
     loom::ir
     loom::ir::facts
     loom::ops::func
     loom::ops::op_defs
+    loom::ops::scf
+    loom::ops::target
+    loom::ops::template
     loom::pass::pipeline
     loom::pass::registry
     loom::pass::report
     loom::pass::types
     loom::pass::value_facts
     loom::rewrite::rewriter
-    loom::target::selection
+    loom::target::condition
+    loom::target::facts
+    loom::target::function_version
+    loom::target::pass_environment
+    loom::util::bstring
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    template_selection_query_test
+  SRCS
+    "template_selection_query_test.cc"
+  DEPS
+    ::template_selection
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::analysis::symbol_facts
+    loom::analysis::template_provider_catalog
+    loom::format::text::parser
+    loom::format::text::printer
+    loom::ir
+    loom::ops::func
+    loom::ops::template
+    loom::testing::module_ptr
 )
 
 loom_cc_library(
@@ -48,8 +78,9 @@ loom_cc_library(
     "inline_callables.c"
   DEPS
     iree::base
+    loom::analysis::availability
     loom::analysis::scc
-    loom::analysis::symbol_dependencies
+    loom::analysis::symbol_references
     loom::error::error_defs
     loom::ir
     loom::ops::func
@@ -57,7 +88,7 @@ loom_cc_library(
     loom::pass::types
     loom::rewrite::callable
     loom::rewrite::rewriter
-    loom::target::selection
+    loom::target::pass_environment
   PUBLIC
 )
 
@@ -119,11 +150,11 @@ loom_cc_library(
   DEPS
     ::symbol_pruning
     iree::base
-    loom::analysis::symbol_dependencies
     loom::analysis::symbol_liveness
+    loom::analysis::symbol_references
     loom::ir
     loom::pass::types
-    loom::target::selection
+    loom::target::pass_environment
   PUBLIC
 )
 
@@ -151,6 +182,7 @@ loom_cc_test(
     loom::ops::test
     loom::target::test::descriptors
     loom::testing::module_ptr
+    loom::verify
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

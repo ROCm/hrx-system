@@ -82,6 +82,24 @@ _IGNORE_GLOBAL_WRITE_MEMORY = AmdgpuImplicitOperandOverlay(
     ignore_reason="modeled-by-global-write-effect",
 )
 
+
+def test_descriptor_overlay_rejects_partial_immediate_field_map() -> None:
+    with pytest.raises(
+        AmdgpuDescriptorOverlayError,
+        match="maps 1 immediate encoding fields for 2 immediates",
+    ):
+        AmdgpuDescriptorOverlay(
+            descriptor_key="amdgpu.test.partial_immediate_fields",
+            instruction_name="V_ADD_NC_U32",
+            encoding_name="VOP2_INST_LITERAL",
+            semantic_tag="test.partial_immediate_fields",
+            schedule_class="amdgpu.valu",
+            operands=(),
+            immediate_fields=("SRC0",),
+            immediates=(_U32_IMMEDIATE, _U32_IMMEDIATE),
+        )
+
+
 _BUFFER_ATOMIC_XML = SAMPLE_XML.replace(
     "    </Instructions>",
     """
@@ -146,6 +164,18 @@ _BUFFER_ATOMIC_XML = SAMPLE_XML.replace(
         </FunctionalGroup>
       </Instruction>
     </Instructions>""",
+)
+
+_FIELDLESS_EXPLICIT_SCC_XML = SAMPLE_XML.replace(
+    '<Operand Input="false" Output="true" IsImplicit="true" '
+    'IsBinaryMicrocodeRequired="true" Order="4">\n'
+    "                <DataFormatName>FMT_NUM_B1</DataFormatName>\n"
+    "                <OperandType>OPR_SSRC_SPECIAL_SCC</OperandType>",
+    '<Operand Input="false" Output="true" IsImplicit="false" '
+    'IsBinaryMicrocodeRequired="true" Order="4">\n'
+    "                <DataFormatName>FMT_NUM_B1</DataFormatName>\n"
+    "                <OperandType>OPR_SSRC_SPECIAL_SCC</OperandType>",
+    1,
 )
 
 
@@ -712,6 +742,7 @@ def test_materialize_rejects_repeated_overlay_xml_field() -> None:
             AmdgpuOperandOverlay("VSRC1", _operand("rhs", _VGPR_ALT)),
         ),
         immediate_fields=("LITERAL",),
+        immediates=(_U32_IMMEDIATE,),
     )
 
     with pytest.raises(
@@ -915,7 +946,39 @@ def test_materialize_rejects_uncovered_implicit_xml_operand() -> None:
 
     with pytest.raises(
         AmdgpuDescriptorOverlayError,
-        match="does not cover implicit XML operand\\(s\\): "
+        match="does not cover architectural XML operand\\(s\\): "
+        "order=4,type=OPR_SSRC_SPECIAL_SCC",
+    ):
+        materialize_amdgpu_descriptor_overlay(spec, overlay)
+
+
+def test_materialize_covers_fieldless_explicit_xml_operand() -> None:
+    spec = parse_amdgpu_isa_xml_text(
+        _FIELDLESS_EXPLICIT_SCC_XML, source_name="sample.xml"
+    )
+    overlay = _s_add_u32_overlay(
+        "amdgpu.s_add_u32.fieldless_scc",
+        implicit_operands=(_IGNORE_SCC_OUTPUT,),
+    )
+
+    descriptor = materialize_amdgpu_descriptor_overlay(spec, overlay)
+
+    assert tuple(operand.field_name for operand in descriptor.operands) == (
+        "dst",
+        "lhs",
+        "rhs",
+    )
+
+
+def test_materialize_rejects_uncovered_fieldless_explicit_xml_operand() -> None:
+    spec = parse_amdgpu_isa_xml_text(
+        _FIELDLESS_EXPLICIT_SCC_XML, source_name="sample.xml"
+    )
+    overlay = _s_add_u32_overlay("amdgpu.incomplete_fieldless_scc")
+
+    with pytest.raises(
+        AmdgpuDescriptorOverlayError,
+        match="does not cover architectural XML operand\\(s\\): "
         "order=4,type=OPR_SSRC_SPECIAL_SCC",
     ):
         materialize_amdgpu_descriptor_overlay(spec, overlay)
@@ -935,7 +998,7 @@ def test_materialize_rejects_implicit_decision_without_xml_operand() -> None:
 
     with pytest.raises(
         AmdgpuDescriptorOverlayError,
-        match=r"has implicit operand decision\(s\).*has no implicit operands",
+        match=r"has implicit operand decision\(s\).*has no architectural operands",
     ):
         materialize_amdgpu_descriptor_overlay(spec, overlay)
 
@@ -954,7 +1017,7 @@ def test_materialize_rejects_missing_implicit_xml_operand_reference() -> None:
 
     with pytest.raises(
         AmdgpuDescriptorOverlayError,
-        match="references missing implicit XML operand 'type=OPR_MISSING'",
+        match="references missing architectural XML operand 'type=OPR_MISSING'",
     ):
         materialize_amdgpu_descriptor_overlay(spec, overlay)
 
@@ -974,7 +1037,7 @@ def test_materialize_rejects_implicit_ignore_without_reason() -> None:
 
     with pytest.raises(
         AmdgpuDescriptorOverlayError,
-        match=r"ignores implicit XML operand .* without a named reason",
+        match=r"ignores architectural XML operand .* without a named reason",
     ):
         materialize_amdgpu_descriptor_overlay(spec, overlay)
 
@@ -988,7 +1051,7 @@ def test_materialize_rejects_repeated_implicit_xml_operand_decision() -> None:
 
     with pytest.raises(
         AmdgpuDescriptorOverlayError,
-        match="repeats implicit XML operand order=4,type=OPR_SSRC_SPECIAL_SCC",
+        match="repeats architectural XML operand order=4,type=OPR_SSRC_SPECIAL_SCC",
     ):
         materialize_amdgpu_descriptor_overlay(spec, overlay)
 
@@ -1071,7 +1134,7 @@ def test_materialize_rejects_implicit_xml_output_as_packet_operand() -> None:
 
     with pytest.raises(
         AmdgpuDescriptorOverlayError,
-        match=r"maps output-only implicit XML operand .* to packet operand",
+        match=r"maps output-only architectural XML operand .* to packet operand",
     ):
         materialize_amdgpu_descriptor_overlay(spec, overlay)
 

@@ -1,7 +1,7 @@
 // RUN: verify
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @vop3_inline_source_shift(%value: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @vop3_inline_source_shift(%value: reg<amdgpu.sgpr>) asm {
   %shifted = v_lshlrev_b32_vop3_imm %value, 64
   return
 }
@@ -9,7 +9,7 @@ low.func.def target(@gfx11_target) @vop3_inline_source_shift(%value: reg<amdgpu.
 // ====
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @vop3_bfe_offset_width_inline(%value: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @vop3_bfe_offset_width_inline(%value: reg<amdgpu.vgpr>) asm {
   %signed = v_bfe_i32_offset_width_inline %value {offset = 8, width = 8}
   %unsigned = v_bfe_u32_offset_width_inline %value {offset = 4, width = 4}
   return
@@ -18,7 +18,7 @@ low.func.def target(@gfx11_target) @vop3_bfe_offset_width_inline(%value: reg<amd
 // ====
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @vop3_perm_b32_selector_literal(%low: reg<amdgpu.vgpr>, %high: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @vop3_perm_b32_selector_literal(%low: reg<amdgpu.vgpr>, %high: reg<amdgpu.vgpr>) asm {
   %packed = v_perm_b32_src2_lit %low, %high, 84148480
   return
 }
@@ -26,7 +26,23 @@ low.func.def target(@gfx11_target) @vop3_perm_b32_selector_literal(%low: reg<amd
 // ====
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @vop3_cmp_f32_inline_sources(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @vop3_perm_b32_zero_source_selector_literal(%value: reg<amdgpu.vgpr>) asm {
+  %packed = v_perm_b32_src1_zero_src2_lit %value, 84148480
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @vop3p_pk_mad_u16_source_literal(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>) asm {
+  %packed = v_pk_mad_u16_src2_lit %a, %b, 1006648320
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @vop3_cmp_f32_inline_sources(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
   %below = v_cmp_lt_f32_src1_inline %lhs {rhs = 1065353216}
   %above = v_cmp_gt_f32_src0_inline %rhs {lhs = 3212836864}
   return %below, %above
@@ -35,7 +51,7 @@ low.func.def target(@gfx11_target) @vop3_cmp_f32_inline_sources(%lhs: reg<amdgpu
 // ====
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @sop2_bfe_literal_control(%value: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @sop2_bfe_literal_control(%value: reg<amdgpu.sgpr>) asm {
   %signed = s_bfe_i32_lit %value, 2056
   %unsigned = s_bfe_u32_lit %value, 1028
   return
@@ -44,7 +60,7 @@ low.func.def target(@gfx11_target) @sop2_bfe_literal_control(%value: reg<amdgpu.
 // ====
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @vop3p_fma_mix_f16_lanes(%addr: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @vop3p_fma_mix_f16_lanes(%addr: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm {
   %low = ds_load_u16_d16 %addr
   %low_result = v_fma_mix_f32_f16lo_f32_f32 %low, %b, %c
   %high = ds_load_u16_d16_hi %low, %addr {offset = 2}
@@ -57,7 +73,7 @@ low.func.def target(@gfx11_target) @vop3p_fma_mix_f16_lanes(%addr: reg<amdgpu.vg
 // ====
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @vop3p_fma_mix_half_result_lanes(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @vop3p_fma_mix_half_result_lanes(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm {
   %low_result = v_fma_mixlo_f16_f32_f32_f32 %acc, %a, %b, %c
   %high_result = v_fma_mixhi_f16_f16lo_f32_f32 %low_result, %a, %b, %c
   %mixed_result = v_fma_mixlo_f16_f16lo_f32_f16hi %high_result, %a, %b, %a
@@ -69,7 +85,7 @@ low.func.def target(@gfx11_target) @vop3p_fma_mix_half_result_lanes(%acc: reg<am
 // ====
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @vop2_fmamk_literal_multiply_slot(%a: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @vop2_fmamk_literal_multiply_slot(%a: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm {
   %result = v_fmamk_f32 %a, %c, 1065353216
   return
 }
@@ -77,7 +93,7 @@ low.func.def target(@gfx11_target) @vop2_fmamk_literal_multiply_slot(%a: reg<amd
 // ====
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @rdna3_vop2_dpp_f32_forms(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @rdna3_vop2_dpp_f32_forms(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
   %sum = v_add_f32_dpp16 %lhs, %rhs {dpp_ctrl = 177}
   %max = v_max_f32_dpp16 %sum, %rhs {dpp_ctrl = 78}
   return
@@ -86,7 +102,7 @@ low.func.def target(@gfx11_target) @rdna3_vop2_dpp_f32_forms(%lhs: reg<amdgpu.vg
 // ====
 
 amdgpu.target<gfx942> @gfx942_target
-low.func.def target(@gfx942_target) @cdna3_vop2_dpp_f32_forms(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @cdna3_vop2_dpp_f32_forms(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
   %sum = v_add_f32_dpp %lhs, %rhs {dpp_ctrl = 177}
   %max = v_max_f32_dpp %sum, %rhs {dpp_ctrl = 78}
   return
@@ -95,7 +111,25 @@ low.func.def target(@gfx942_target) @cdna3_vop2_dpp_f32_forms(%lhs: reg<amdgpu.v
 // ====
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @rdna_scalar_f16_fma_forms(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @rdna3_reserved_dpp16_control(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
+  // ERROR@+1: AMDGPU/044 {function_name="rdna3_reserved_dpp16_control", descriptor_name="amdgpu.v_add_f32.dpp16", descriptor_set_name="amdgpu.rdna3.core", immediate_name="dpp_ctrl", immediate_value="256", constraint_key="dpp.control.encoding", reason_key="reserved_encoding"}
+  %sum = v_add_f32_dpp16 %lhs, %rhs {dpp_ctrl = 256}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @gfx942_target
+low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @cdna3_reserved_legacy_dpp_control(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
+  // ERROR@+1: AMDGPU/044 {function_name="cdna3_reserved_legacy_dpp_control", descriptor_name="amdgpu.v_add_f32.dpp", descriptor_set_name="amdgpu.cdna3.core", immediate_name="dpp_ctrl", immediate_value="324", constraint_key="dpp.control.encoding", reason_key="reserved_encoding"}
+  %sum = v_add_f32_dpp %lhs, %rhs {dpp_ctrl = 324}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @rdna_scalar_f16_fma_forms(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm {
   %fma = v_fma_f16 %a, %b, %c
   %fmac = v_fmac_f16 %acc, %a, %b
   %fmaak = v_fmaak_f16 %a, %b, 15360
@@ -106,7 +140,7 @@ low.func.def target(@gfx11_target) @rdna_scalar_f16_fma_forms(%acc: reg<amdgpu.v
 // ====
 
 amdgpu.target<gfx1150> @gfx1150_target
-low.func.def target(@gfx1150_target) @rdna35_scalar_domain_fma_forms(%acc32: reg<amdgpu.sgpr>, %a32: reg<amdgpu.sgpr>, %b32: reg<amdgpu.sgpr>, %acc16: reg<amdgpu.sgpr>, %a16: reg<amdgpu.sgpr>, %b16: reg<amdgpu.sgpr>) asm<amdgpu.rdna3_5.core> {
+low.func.def target<amdgpu.rdna3_5.core>(@gfx1150_target) @rdna35_scalar_domain_fma_forms(%acc32: reg<amdgpu.sgpr>, %a32: reg<amdgpu.sgpr>, %b32: reg<amdgpu.sgpr>, %acc16: reg<amdgpu.sgpr>, %a16: reg<amdgpu.sgpr>, %b16: reg<amdgpu.sgpr>) asm {
   %fmaak = s_fmaak_f32 %a32, %b32, 1065353216
   %fmamk = s_fmamk_f32 %a32, %b32, 1065353216
   %fmac32 = s_fmac_f32 %acc32, %a32, %b32
@@ -117,7 +151,7 @@ low.func.def target(@gfx1150_target) @rdna35_scalar_domain_fma_forms(%acc32: reg
 // ====
 
 amdgpu.target<gfx1200> @gfx1200_target
-low.func.def target(@gfx1200_target) @rdna4_scalar_domain_fma_forms(%acc32: reg<amdgpu.sgpr>, %a32: reg<amdgpu.sgpr>, %b32: reg<amdgpu.sgpr>, %acc16: reg<amdgpu.sgpr>, %a16: reg<amdgpu.sgpr>, %b16: reg<amdgpu.sgpr>) asm<amdgpu.rdna4.core> {
+low.func.def target<amdgpu.rdna4.core>(@gfx1200_target) @rdna4_scalar_domain_fma_forms(%acc32: reg<amdgpu.sgpr>, %a32: reg<amdgpu.sgpr>, %b32: reg<amdgpu.sgpr>, %acc16: reg<amdgpu.sgpr>, %a16: reg<amdgpu.sgpr>, %b16: reg<amdgpu.sgpr>) asm {
   %fmaak = s_fmaak_f32 %a32, %b32, 1065353216
   %fmamk = s_fmamk_f32 %a32, %b32, 1065353216
   %fmac32 = s_fmac_f32 %acc32, %a32, %b32
@@ -128,7 +162,7 @@ low.func.def target(@gfx1200_target) @rdna4_scalar_domain_fma_forms(%acc32: reg<
 // ====
 
 amdgpu.target<gfx1250> @gfx1250_target
-low.func.def target(@gfx1250_target) @gfx1250_scalar_domain_fma_forms(%acc32: reg<amdgpu.sgpr>, %a32: reg<amdgpu.sgpr>, %b32: reg<amdgpu.sgpr>, %acc16: reg<amdgpu.sgpr>, %a16: reg<amdgpu.sgpr>, %b16: reg<amdgpu.sgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_scalar_domain_fma_forms(%acc32: reg<amdgpu.sgpr>, %a32: reg<amdgpu.sgpr>, %b32: reg<amdgpu.sgpr>, %acc16: reg<amdgpu.sgpr>, %a16: reg<amdgpu.sgpr>, %b16: reg<amdgpu.sgpr>) asm {
   %fmaak = s_fmaak_f32 %a32, %b32, 1065353216
   %fmamk = s_fmamk_f32 %a32, %b32, 1065353216
   %fmac32 = s_fmac_f32 %acc32, %a32, %b32
@@ -138,8 +172,35 @@ low.func.def target(@gfx1250_target) @gfx1250_scalar_domain_fma_forms(%acc32: re
 
 // ====
 
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @rdna3_wait_counter_out_of_range() asm {
+  // ERROR@+1: STRUCTURE/014 {attr_name="vmcnt", actual_value="64", expected_constraint="0..63"}
+  s_waitcnt {lgkmcnt = 0, vmcnt = 64}
+  return
+}
+
+// ====
+
 amdgpu.target<gfx942> @gfx942_target
-low.func.def target(@gfx942_target) @cdna_scalar_f16_mad_forms(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @cdna3_wait_counter_out_of_range() asm {
+  // ERROR@+1: STRUCTURE/014 {attr_name="vmcnt", actual_value="64", expected_constraint="0..63"}
+  s_waitcnt {lgkmcnt = 0, vmcnt = 64}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1200> @gfx1200_target
+low.func.def target<amdgpu.rdna4.core>(@gfx1200_target) @rdna4_wait_counter_out_of_range() asm {
+  // ERROR@+1: STRUCTURE/014 {attr_name="dscnt", actual_value="64", expected_constraint="0..63"}
+  s_wait_dscnt {dscnt = 64}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @gfx942_target
+low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @cdna_scalar_f16_mad_forms(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm {
   %mad = v_mad_f16 %a, %b, %c
   %mac = v_mac_f16 %acc, %a, %b
   %madak = v_madak_f16 %a, %b, 15360
@@ -151,7 +212,7 @@ low.func.def target(@gfx942_target) @cdna_scalar_f16_mad_forms(%acc: reg<amdgpu.
 // ====
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @rdna_scalar_f64_fma_form(%a: reg<amdgpu.vgpr x2>, %b: reg<amdgpu.vgpr x2>, %c: reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @rdna_scalar_f64_fma_form(%a: reg<amdgpu.vgpr x2>, %b: reg<amdgpu.vgpr x2>, %c: reg<amdgpu.vgpr x2>) asm {
   %fma = v_fma_f64 %a, %b, %c
   return
 }
@@ -159,7 +220,7 @@ low.func.def target(@gfx11_target) @rdna_scalar_f64_fma_form(%a: reg<amdgpu.vgpr
 // ====
 
 amdgpu.target<gfx942> @gfx942_target
-low.func.def target(@gfx942_target) @cdna_scalar_f64_fma_forms(%acc: reg<amdgpu.vgpr x2>, %a: reg<amdgpu.vgpr x2>, %b: reg<amdgpu.vgpr x2>, %c: reg<amdgpu.vgpr x2>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @cdna_scalar_f64_fma_forms(%acc: reg<amdgpu.vgpr x2>, %a: reg<amdgpu.vgpr x2>, %b: reg<amdgpu.vgpr x2>, %c: reg<amdgpu.vgpr x2>) asm {
   %fma = v_fma_f64 %a, %b, %c
   %fmac = v_fmac_f64 %acc, %a, %b
   return
@@ -168,7 +229,7 @@ low.func.def target(@gfx942_target) @cdna_scalar_f64_fma_forms(%acc: reg<amdgpu.
 // ====
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @vop3p_packed_fma_mad_forms(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @vop3p_packed_fma_mad_forms(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm {
   %fmac = v_pk_fmac_f16 %acc, %a, %b
   %fma = v_pk_fma_f16 %a, %b, %c
   %mad_i = v_pk_mad_i16 %a, %b, %c
@@ -179,7 +240,7 @@ low.func.def target(@gfx11_target) @vop3p_packed_fma_mad_forms(%acc: reg<amdgpu.
 // ====
 
 amdgpu.target<gfx942> @gfx942_target
-low.func.def target(@gfx942_target) @vop3p_packed_fma_f32_form(%a: reg<amdgpu.vgpr x2>, %b: reg<amdgpu.vgpr x2>, %c: reg<amdgpu.vgpr x2>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @vop3p_packed_fma_f32_form(%a: reg<amdgpu.vgpr x2>, %b: reg<amdgpu.vgpr x2>, %c: reg<amdgpu.vgpr x2>) asm {
   %result = v_pk_fma_f32 %a, %b, %c
   return
 }
@@ -187,7 +248,7 @@ low.func.def target(@gfx942_target) @vop3p_packed_fma_f32_form(%a: reg<amdgpu.vg
 // ====
 
 amdgpu.target<gfx942> @gfx942_target
-low.func.def target(@gfx942_target) @vop3p_mad_mix_half_result_lanes(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @vop3p_mad_mix_half_result_lanes(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm {
   %low_result = v_mad_mixlo_f16_f32_f32_f32 %acc, %a, %b, %c
   %high_result = v_mad_mixhi_f16_f16lo_f32_f32 %low_result, %a, %b, %c
   %f32_result = v_mad_mix_f32_f16lo_f32_f16hi %a, %b, %high_result
@@ -197,7 +258,7 @@ low.func.def target(@gfx942_target) @vop3p_mad_mix_half_result_lanes(%acc: reg<a
 // ====
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @sop2_inline_source_shift(%value: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @sop2_inline_source_shift(%value: reg<amdgpu.sgpr>) asm {
   %shifted = s_lshl_b32_rhs_inline %value, 64
   return
 }
@@ -205,7 +266,7 @@ low.func.def target(@gfx11_target) @sop2_inline_source_shift(%value: reg<amdgpu.
 // ====
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @global_vaddr_named_offset(%addr: reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @global_vaddr_named_offset(%addr: reg<amdgpu.vgpr x2>) asm {
   %loaded = global_load_b128_vaddr %addr {offset = 16}
   global_store_b128_vaddr %addr, %loaded {offset = 32}
   return
@@ -214,7 +275,7 @@ low.func.def target(@gfx11_target) @global_vaddr_named_offset(%addr: reg<amdgpu.
 // ====
 
 amdgpu.target<gfx942> @gfx942_target
-low.func.def target(@gfx942_target) @cdna_flat_load_u8_spells_m0(%addr: reg<amdgpu.vgpr x2>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@gfx942_target) @cdna_flat_load_u8_spells_m0(%addr: reg<amdgpu.vgpr x2>) asm {
   %m0 = s_mov_b32_m0_imm 0
   %loaded = flat_load_ubyte %addr, %m0 {sc0 = 1, sc1 = 1} : reg<amdgpu.vgpr>
   return
@@ -223,7 +284,7 @@ low.func.def target(@gfx942_target) @cdna_flat_load_u8_spells_m0(%addr: reg<amdg
 // ====
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @vop3_inline_source_shift_out_of_range(%value: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @vop3_inline_source_shift_out_of_range(%value: reg<amdgpu.sgpr>) asm {
   // ERROR@+1: STRUCTURE/014 {attr_name="imm32", actual_value="65", expected_constraint="0..64"}
   %shifted = v_lshlrev_b32_vop3_imm %value, 65
   return
@@ -232,7 +293,7 @@ low.func.def target(@gfx11_target) @vop3_inline_source_shift_out_of_range(%value
 // ====
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @vop3_bfe_offset_out_of_range(%value: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @vop3_bfe_offset_out_of_range(%value: reg<amdgpu.vgpr>) asm {
   // ERROR@+1: STRUCTURE/014 {attr_name="offset", actual_value="32", expected_constraint="0..31"}
   %extracted = v_bfe_i32_offset_width_inline %value {offset = 32, width = 8}
   return
@@ -241,7 +302,7 @@ low.func.def target(@gfx11_target) @vop3_bfe_offset_out_of_range(%value: reg<amd
 // ====
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @vop3_bfe_width_out_of_range(%value: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @vop3_bfe_width_out_of_range(%value: reg<amdgpu.vgpr>) asm {
   // ERROR@+1: STRUCTURE/014 {attr_name="width", actual_value="33", expected_constraint="0..32"}
   %extracted = v_bfe_i32_offset_width_inline %value {offset = 8, width = 33}
   return
@@ -250,7 +311,7 @@ low.func.def target(@gfx11_target) @vop3_bfe_width_out_of_range(%value: reg<amdg
 // ====
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @sop2_inline_source_shift_out_of_range(%value: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @sop2_inline_source_shift_out_of_range(%value: reg<amdgpu.sgpr>) asm {
   // ERROR@+1: STRUCTURE/014 {attr_name="imm32", actual_value="65", expected_constraint="0..64"}
   %shifted = s_lshl_b32_rhs_inline %value, 65
   return
@@ -259,7 +320,7 @@ low.func.def target(@gfx11_target) @sop2_inline_source_shift_out_of_range(%value
 // ====
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @dpp_control_out_of_range(%value: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @dpp_control_out_of_range(%value: reg<amdgpu.vgpr>) asm {
   // ERROR@+1: STRUCTURE/014 {attr_name="dpp_ctrl", actual_value="512", expected_constraint="0..511"}
   %shifted = v_mov_b32_dpp16 %value {dpp_ctrl = 512}
   return
@@ -268,7 +329,7 @@ low.func.def target(@gfx11_target) @dpp_control_out_of_range(%value: reg<amdgpu.
 // ====
 
 amdgpu.target<gfx950> @gfx950_target
-low.func.def target(@gfx950_target) @sdwa_selector_out_of_range(%value: reg<amdgpu.vgpr>) asm<amdgpu.cdna4.core> {
+low.func.def target<amdgpu.cdna4.core>(@gfx950_target) @sdwa_selector_out_of_range(%value: reg<amdgpu.vgpr>) asm {
   // ERROR@+1: STRUCTURE/014 {attr_name="dst_sel", actual_value="7", expected_constraint="0..6"}
   %selected = v_mov_b32_sdwa %value {dst_sel = 7, dst_unused = 0, src0_sel = 0, src0_sext = 0}
   return
@@ -277,10 +338,17 @@ low.func.def target(@gfx950_target) @sdwa_selector_out_of_range(%value: reg<amdg
 // ====
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @dx9_zero_fma_alias_rejected(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) {
-  // ERROR@+1: AMDGPU/031 {descriptor_name="amdgpu.v_fma_dx9_zero_f32", descriptor_set_name="amdgpu.rdna3.core", alias_mnemonic="v_fma_dx9_zero_f32", alias_semantics="dx9_zero", replacement_descriptor_name="amdgpu.v_fma_f32", replacement_mnemonic="v_fma_f32", decision_key="rejected", reason_key="compatibility_zero_semantics"}
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @dx9_zero_fma_alias_rejected(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) {
+  // ERROR@+1: AMDGPU/032 {descriptor_set_name="amdgpu.rdna3.core", alias_mnemonic="v_fma_dx9_zero_f32", alias_semantics="dx9_zero", replacement_descriptor_name="amdgpu.v_fma_f32", replacement_mnemonic="v_fma_f32", decision_key="rejected", reason_key="compatibility_zero_semantics"}
   %fma = low.op<amdgpu.v_fma_dx9_zero_f32>(%a, %b, %c) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  // ERROR@+1: AMDGPU/031 {descriptor_name="amdgpu.v_fmac_dx9_zero_f32", descriptor_set_name="amdgpu.rdna3.core", alias_mnemonic="v_fmac_dx9_zero_f32", alias_semantics="dx9_zero", replacement_descriptor_name="amdgpu.v_fmac_f32", replacement_mnemonic="v_fmac_f32", decision_key="rejected", reason_key="compatibility_zero_semantics"}
+  low.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @dx9_zero_fmac_alias_rejected(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>) {
+  // ERROR@+1: AMDGPU/032 {descriptor_set_name="amdgpu.rdna3.core", alias_mnemonic="v_fmac_dx9_zero_f32", alias_semantics="dx9_zero", replacement_descriptor_name="amdgpu.v_fmac_f32", replacement_mnemonic="v_fmac_f32", decision_key="rejected", reason_key="compatibility_zero_semantics"}
   %fmac = low.op<amdgpu.v_fmac_dx9_zero_f32>(%acc, %a, %b) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> %acc as reg<amdgpu.vgpr>
   low.return
 }
@@ -288,7 +356,16 @@ low.func.def target(@gfx11_target) @dx9_zero_fma_alias_rejected(%acc: reg<amdgpu
 // ====
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @dx9_zero_fma_asm_alias_rejected(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @dx9_zero_mul_alias_rejected(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>) {
+  // ERROR@+1: AMDGPU/032 {descriptor_set_name="amdgpu.rdna3.core", alias_mnemonic="v_mul_dx9_zero_f32", alias_semantics="dx9_zero", replacement_descriptor_name="amdgpu.v_mul_f32", replacement_mnemonic="v_mul_f32", decision_key="rejected", reason_key="compatibility_zero_semantics"}
+  %product = low.op<amdgpu.v_mul_dx9_zero_f32>(%a, %b) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @dx9_zero_fma_asm_alias_rejected(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) asm {
   // ERROR@+1: AMDGPU/032 {descriptor_set_name="amdgpu.rdna3.core", alias_mnemonic="v_fma_dx9_zero_f32", alias_semantics="dx9_zero", replacement_descriptor_name="amdgpu.v_fma_f32", replacement_mnemonic="v_fma_f32", decision_key="rejected", reason_key="compatibility_zero_semantics"}
   %fma = v_fma_dx9_zero_f32 %a, %b, %c
   return
@@ -297,8 +374,17 @@ low.func.def target(@gfx11_target) @dx9_zero_fma_asm_alias_rejected(%acc: reg<am
 // ====
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @dx9_zero_fmac_asm_alias_rejected(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @dx9_zero_fmac_asm_alias_rejected(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>) asm {
   // ERROR@+1: AMDGPU/032 {descriptor_set_name="amdgpu.rdna3.core", alias_mnemonic="v_fmac_dx9_zero_f32", alias_semantics="dx9_zero", replacement_descriptor_name="amdgpu.v_fmac_f32", replacement_mnemonic="v_fmac_f32", decision_key="rejected", reason_key="compatibility_zero_semantics"}
   %fmac = v_fmac_dx9_zero_f32 %acc, %a, %b
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @dx9_zero_mul_asm_alias_rejected(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>) asm {
+  // ERROR@+1: AMDGPU/032 {descriptor_set_name="amdgpu.rdna3.core", alias_mnemonic="v_mul_dx9_zero_f32", alias_semantics="dx9_zero", replacement_descriptor_name="amdgpu.v_mul_f32", replacement_mnemonic="v_mul_f32", decision_key="rejected", reason_key="compatibility_zero_semantics"}
+  %product = v_mul_dx9_zero_f32 %a, %b
   return
 }

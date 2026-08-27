@@ -26,6 +26,35 @@ func.def target(@test_target) @rejects_mma_without_target_legalization(%lhs_data
 }
 
 // ====
+// RUN: pass source-to-low
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @rejects_unresolved_compile_time_query(%schema: encoding<schema>) -> (i1) {
+  // ERROR@+1: TARGET/070 {op_name="encoding.matches"}
+  %matches = encoding.matches<element_format = u4> %schema : encoding<schema>
+  func.return %matches : i1
+}
+
+// ====
+// RUN: pass dce,canonicalize,source-to-low
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @removes_dead_compile_time_query() {
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
+  %unused = encoding.matches<element_format = u4> %schema : encoding<schema>
+  func.return
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) abi(object_function) @removes_dead_compile_time_query() {
+  low.return
+}
+
+// ====
 // RUN: pass target-legalize{mode=final}
 
 test.target<low_core> @test_target
@@ -74,6 +103,18 @@ func.def target(@test_target) @rejects_assume_range_contradicting_exact_facts() 
   // ERROR@+1: TARGET/059 {predicate_name="range", value_name="exact", required_min="128", required_max="255", known_min="64", known_max="64"}
   %assumed = index.assume %exact [range(%exact, 128, 255)] : index
   func.return %assumed : index
+}
+
+// ====
+// RUN: pass target-legalize
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @rejects_low_assume_range_contradicting_exact_facts() -> (reg<test.i32>) {
+  %exact = low.const<test.const.i32> {i32_value = 64} : reg<test.i32>
+  // ERROR@+1: TARGET/059 {predicate_name="range", value_name="exact", required_min="128", required_max="255", known_min="64", known_max="64"}
+  %assumed = low.assume %exact [range(%exact, 128, 255)] : reg<test.i32>
+  low.return %assumed : reg<test.i32>
 }
 
 // ====

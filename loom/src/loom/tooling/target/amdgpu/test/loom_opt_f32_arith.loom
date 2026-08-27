@@ -1,0 +1,18 @@
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @f32_arith() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<64xf32>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf32>
+  %lhs = vector.load %lhs_view[%tid] : view<64xf32> -> vector<1xf32>
+  %rhs = vector.load %rhs_view[%tid] : view<64xf32> -> vector<1xf32>
+  %sum = vector.addf %lhs, %rhs : vector<1xf32>
+  vector.store %sum, %output_view[%tid] : vector<1xf32>, view<64xf32>
+  kernel.return
+}

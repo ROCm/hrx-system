@@ -1,0 +1,105 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+
+func.def target(@target) @f16_result_to_rhs_packed_b16(
+    %values: vector<16xf16>) -> (vector<16xf16>) {
+  %c16 = index.constant 16 : index
+  %result = vector.fragment<result> %values shape [%c16, %c16] : vector<16xf16>
+  %rhs = vector.fragment.repack<rhs> %result shape [%c16, %c16] : vector<16xf16> -> vector<16xf16>
+  func.return %rhs : vector<16xf16>
+}
+
+func.def target(@target) @bf16_result_to_rhs_packed_b16(
+    %values: vector<16xbf16>) -> (vector<16xbf16>) {
+  %c16 = index.constant 16 : index
+  %result = vector.fragment<result> %values shape [%c16, %c16] : vector<16xbf16>
+  %rhs = vector.fragment.repack<rhs> %result shape [%c16, %c16] : vector<16xbf16> -> vector<16xbf16>
+  func.return %rhs : vector<16xbf16>
+}
+
+// ----
+low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @f16_result_to_rhs_packed_b16(%result: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm {
+  %12 = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %13 = slice %result[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %14 = slice %result[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %15 = slice %result[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %16 = slice %result[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %17 = slice %result[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %18 = slice %result[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %19 = slice %result[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %20 = s_mov_b32_vcc_imm 4294901760
+  %21 = v_mov_b32 84148480
+  %22 = v_cndmask_b32_src0_lit_vcc %21, %20, 16778500
+  %23 = ds_swizzle_b32 %12 {offset = 16415}
+  %24 = ds_swizzle_b32 %13 {offset = 16415}
+  %25 = ds_swizzle_b32 %14 {offset = 16415}
+  %26 = ds_swizzle_b32 %15 {offset = 16415}
+  %27 = ds_swizzle_b32 %16 {offset = 16415}
+  %28 = ds_swizzle_b32 %17 {offset = 16415}
+  %29 = ds_swizzle_b32 %18 {offset = 16415}
+  %30 = ds_swizzle_b32 %19 {offset = 16415}
+  %31 = v_perm_b32 %12, %23, %22
+  %32 = v_perm_b32 %13, %24, %22
+  %33 = v_perm_b32 %14, %25, %22
+  %34 = v_perm_b32 %15, %26, %22
+  %35 = v_perm_b32 %16, %27, %22
+  %36 = v_perm_b32 %17, %28, %22
+  %37 = v_perm_b32 %18, %29, %22
+  %38 = v_perm_b32 %19, %30, %22
+  %rhs = concat(%31, %32, %33, %34, %35, %36, %37, %38) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  return %rhs
+}
+
+low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @bf16_result_to_rhs_packed_b16(%result: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm {
+  %42 = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %43 = slice %result[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %44 = slice %result[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %45 = slice %result[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %46 = slice %result[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %47 = slice %result[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %48 = slice %result[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %49 = slice %result[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %50 = s_mov_b32_vcc_imm 4294901760
+  %51 = v_mov_b32 84148480
+  %52 = v_cndmask_b32_src0_lit_vcc %51, %50, 16778500
+  %53 = ds_swizzle_b32 %42 {offset = 16415}
+  %54 = ds_swizzle_b32 %43 {offset = 16415}
+  %55 = ds_swizzle_b32 %44 {offset = 16415}
+  %56 = ds_swizzle_b32 %45 {offset = 16415}
+  %57 = ds_swizzle_b32 %46 {offset = 16415}
+  %58 = ds_swizzle_b32 %47 {offset = 16415}
+  %59 = ds_swizzle_b32 %48 {offset = 16415}
+  %60 = ds_swizzle_b32 %49 {offset = 16415}
+  %61 = v_perm_b32 %42, %53, %52
+  %62 = v_perm_b32 %43, %54, %52
+  %63 = v_perm_b32 %44, %55, %52
+  %64 = v_perm_b32 %45, %56, %52
+  %65 = v_perm_b32 %46, %57, %52
+  %66 = v_perm_b32 %47, %58, %52
+  %67 = v_perm_b32 %48, %59, %52
+  %68 = v_perm_b32 %49, %60, %52
+  %rhs = concat(%61, %62, %63, %64, %65, %66, %67, %68) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  return %rhs
+}
+
+// ====
+
+// RUN: pass-report source-to-low,low-dce
+
+amdgpu.target<gfx1100> @target
+
+func.def target(@target) @report_result_to_rhs_packed_b16(
+    %values: vector<16xf16>) -> (vector<16xf16>) {
+  %c16 = index.constant 16 : index
+  %result = vector.fragment<result> %values shape [%c16, %c16] : vector<16xf16>
+  %rhs = vector.fragment.repack<rhs> %result shape [%c16, %c16] : vector<16xf16> -> vector<16xf16>
+  func.return %rhs : vector<16xf16>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=2 emitted_ops=28 rows=2
+COMPILE-REPORT: source_low[0] function=report_result_to_rhs_packed_b16 source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_result_to_rhs_packed_b16 source_op=vector.fragment.repack selection=plan plan_key=amdgpu.fragment_repack.strategy.result_to_rhs_packed_b16_xor_permute emitted_ops=28
+COMPILE-REPORT: source_low_native[1] function=report_result_to_rhs_packed_b16 source_op=vector.fragment.repack native_contraction={tile:1x16x16x16,participants:32,lhs:{evidence:exact,bits:16,registers:8,payload:16,positions:512,coordinates:256,owners:2},rhs:{evidence:exact,bits:16,registers:8,payload:16,positions:512,coordinates:256,owners:2},accumulator:{evidence:exact,bits:16,registers:8,payload:16,positions:256,coordinates:256,owners:1},result:{evidence:exact,bits:16,registers:8,payload:16,positions:256,coordinates:256,owners:1}} native_transition={result:f16->rhs:f16,positions:512,participant_changes:256,local_position_changes:480,replication:2,source_owner:[participant+=(participant/1%16)*1,participant+=(position/1%2)*16,position+=(position/2)*1]}

@@ -16,14 +16,17 @@ PASSTHROUGH_INCLUDES = [
     "..",
 ]
 
+_LINUX_COMPATIBILITY = ["@platforms//os:linux"]
+
 hrx_cc_shared_library(
     name = "hip_intercept",
     srcs = ["hip_intercept.c"],
     hdrs = ["hip_function_table.h"],
     includes = PASSTHROUGH_INCLUDES,
+    target_compatible_with = _LINUX_COMPATIBILITY,
     deps = [
-        "//build_tools:dl",
-        "//build_tools:pthreads",
+        "//build_tools/bazel:dl",
+        "//build_tools/bazel:pthreads",
     ],
 )
 
@@ -32,7 +35,8 @@ hrx_cc_shared_library(
     srcs = ["hip_logging.c"],
     hdrs = ["hip_function_table.h"],
     includes = PASSTHROUGH_INCLUDES,
-    deps = ["//build_tools:pthreads"],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = ["//build_tools/bazel:pthreads"],
 )
 
 hrx_cc_shared_library(
@@ -40,6 +44,7 @@ hrx_cc_shared_library(
     srcs = ["interceptors/passthrough_interceptor.c"],
     hdrs = ["hip_function_table.h"],
     includes = PASSTHROUGH_INCLUDES,
+    target_compatible_with = _LINUX_COMPATIBILITY,
 )
 
 hrx_cc_shared_library(
@@ -47,5 +52,6 @@ hrx_cc_shared_library(
     srcs = ["hip_buffer_tracer.c"],
     hdrs = ["hip_function_table.h"],
     includes = PASSTHROUGH_INCLUDES,
-    deps = ["//build_tools:pthreads"],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = ["//build_tools/bazel:pthreads"],
 )

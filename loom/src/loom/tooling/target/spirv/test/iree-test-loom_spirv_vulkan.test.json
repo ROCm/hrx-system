@@ -1,0 +1,339 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "runs dynamic spirv vulkan workgroup samples",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../execution/hal/testdata/dynamic_workgroup_hal_actual.loom",
+          "--case=@dynamic_workgroup_hal_actual_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"sample_count\":2",
+          "\"failed_sample_count\":0",
+          "\"case\":\"dynamic_workgroup_hal_actual_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
+      "name": "runs spirv vulkan bulk buffer operations",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../execution/hal/testdata/buffer_bulk_hal_actual.loom",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            "\"case\":\"buffer_copy_bytes_case\"",
+            "\"case\":\"buffer_fill_bytes_case\"",
+            "\"case\":\"buffer_compare_bytes_case\"",
+            "\"case\":\"buffer_zero_length_ranges_case\"",
+            "\"failed_sample_count\":0"
+          ]
+        }
+      }
+    },
+    {
+      "name": "runs spirv vulkan scalar case",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/spirv_vulkan_hal_actual.loom",
+          "--case=@double_i32_at_byte_offset_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case\":\"double_i32_at_byte_offset_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
+      "name": "runs spirv vulkan native vector structure",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/spirv_vulkan_hal_actual.loom",
+          "--case=@ordinary_vector_structure_i32_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case\":\"ordinary_vector_structure_i32_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
+      "name": "runs ordered spirv vulkan A/B/A dispatch sequence",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/spirv_vulkan_hal_actual.loom",
+          "--case=@ordered_dispatch_aba_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case\":\"ordered_dispatch_aba_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
+      "name": "runs explicit serial spirv vulkan dispatch epochs",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../execution/hal/testdata/launch_schedule_hal_actual.loom",
+          "--case=@launch_schedule_serial_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case\":\"launch_schedule_serial_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
+      "name": "runs concurrent spirv vulkan dispatch epoch",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../execution/hal/testdata/launch_schedule_hal_actual.loom",
+          "--case=@launch_schedule_concurrent_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case\":\"launch_schedule_concurrent_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
+      "name": "runs spirv vulkan scalar addressing matrix",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/spirv_vulkan_hal_actual.loom",
+          "--case=@scalar_addressing_i32_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case\":\"scalar_addressing_i32_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
+      "name": "runs spirv vulkan workgroup addressing matrix",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/spirv_vulkan_hal_actual.loom",
+          "--case=@workgroup_addressing_i32_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case\":\"workgroup_addressing_i32_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
+      "name": "runs spirv vulkan i32 and Boolean truth tables",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/spirv_vulkan_integer_hal_actual.loom",
+          "--case=@integer_i32_truth_table_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case\":\"integer_i32_truth_table_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
+      "name": "runs spirv vulkan index numeric truth tables",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/spirv_vulkan_integer_hal_actual.loom",
+          "--case=@index_numeric_truth_table_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          {
+            "regex": "\"case\":\"index_numeric_truth_table_case\".*(\"passed\":true|\"code\":\"requirement_not_satisfied\",\"provider_code\":\"feature_disabled\")"
+          }
+        ]
+      }
+    },
+    {
+      "name": "runs spirv vulkan i8 truth tables when available",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/spirv_vulkan_integer_hal_actual.loom",
+          "--case=@integer_i8_truth_table_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          {
+            "regex": "\"case\":\"integer_i8_truth_table_case\".*(\"passed\":true|\"code\":\"requirement_not_satisfied\",\"provider_code\":\"feature_disabled\")"
+          }
+        ]
+      }
+    },
+    {
+      "name": "runs spirv vulkan i16 truth tables when available",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/spirv_vulkan_integer_hal_actual.loom",
+          "--case=@integer_i16_truth_table_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          {
+            "regex": "\"case\":\"integer_i16_truth_table_case\".*(\"passed\":true|\"code\":\"requirement_not_satisfied\",\"provider_code\":\"feature_disabled\")"
+          }
+        ]
+      }
+    },
+    {
+      "name": "runs spirv vulkan i64 truth tables when available",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/spirv_vulkan_integer_hal_actual.loom",
+          "--case=@integer_i64_truth_table_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          {
+            "regex": "\"case\":\"integer_i64_truth_table_case\".*(\"passed\":true|\"code\":\"requirement_not_satisfied\",\"provider_code\":\"feature_disabled\")"
+          }
+        ]
+      }
+    },
+    {
+      "name": "runs spirv vulkan cooperative f16 case",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/spirv_vulkan_coop_hal_actual.loom",
+          "--case=@dense_projection_tiled_f16_128_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case\":\"dense_projection_tiled_f16_128_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
+      "name": "runs spirv vulkan cooperative u8 case",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/spirv_vulkan_coop_u8_hal_actual.loom",
+          "--case=@dense_projection_tiled_u8_128_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          {
+            "regex": "\"case\":\"dense_projection_tiled_u8_128_case\".*(\"passed\":true|\"code\":\"requirement_not_satisfied\",\"provider_code\":\"cooperative_matrix_row_unavailable\")"
+          }
+        ]
+      }
+    },
+    {
+      "name": "runs spirv vulkan quantized case",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/spirv_vulkan_quantized_hal_actual.loom",
+          "--case=@quantized_projection_u8_scalar_128_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case\":\"quantized_projection_u8_scalar_128_case\"",
+          "\"passed\":true"
+        ]
+      }
+    }
+  ]
+}

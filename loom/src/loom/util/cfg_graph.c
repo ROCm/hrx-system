@@ -154,12 +154,33 @@ static void loom_cfg_graph_write_edges(
               predecessor_write_positions[target_index]++;
           graph->predecessor_indices[predecessor_position] = block_index;
           graph->predecessor_edge_indices[predecessor_position] = edge_index;
+          if (target_index <= block_index) {
+            ++graph->backward_edge_count;
+          }
           ++edge_index;
         }
       }
       op = op->next_op;
     }
   }
+}
+
+bool loom_cfg_terminator_payload_for_successor(const loom_op_t* terminator,
+                                               const loom_block_t* successor,
+                                               const loom_value_id_t** out_args,
+                                               uint16_t* out_arg_count) {
+  IREE_ASSERT_ARGUMENT(out_args);
+  IREE_ASSERT_ARGUMENT(out_arg_count);
+  *out_args = NULL;
+  *out_arg_count = 0;
+  if (!terminator || !successor || terminator->successor_count != 1 ||
+      loom_op_const_successors(terminator)[0] != successor ||
+      terminator->operand_count != successor->arg_count) {
+    return false;
+  }
+  *out_args = loom_op_const_operands(terminator);
+  *out_arg_count = terminator->operand_count;
+  return true;
 }
 
 static iree_status_t loom_cfg_graph_mark_reachable(

@@ -104,11 +104,46 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    alignment_test
+  SRCS
+    "alignment_test.cc"
+  DEPS
+    ::core_headers
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
     bitfield_test
   SRCS
     "bitfield_test.cc"
   DEPS
     ::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_library(
+  NAME
+    cpu_data
+  HDRS
+    "cpu_data.h"
+  SRCS
+    "cpu_data.c"
+  DEPS
+    ::base
+    iree::schemas::cpu_data
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    cpu_data_test
+  SRCS
+    "cpu_data_test.cc"
+  DEPS
+    ::cpu_data
     iree::testing::gtest
     iree::testing::gtest_main
 )

@@ -240,8 +240,9 @@ def test_candidate_range_validation_rejects_uint16_overflow() -> None:
 
 
 def test_memory_generator_emits_data_fragments_only() -> None:
-    candidate_rows = amdgpu_memory_candidates._emit_candidate_rows()
-    candidate_ranges = amdgpu_memory_candidates._emit_candidate_ranges()
+    candidates = amdgpu_memory_candidates._ordered_candidates(amdgpu_memory_candidates.amdgpu_memory_descriptor_candidates())
+    candidate_rows = amdgpu_memory_candidates._emit_candidate_rows(candidates)
+    candidate_ranges = amdgpu_memory_candidates._emit_candidate_ranges(candidates)
 
     for source in (candidate_rows, candidate_ranges):
         assert "typedef " not in source
@@ -294,6 +295,34 @@ def test_memory_generator_preserves_same_key_fallback_order() -> None:
         "amdgpu.buffer_load_b64",
         "amdgpu.buffer_load_dwordx2",
     ]
+
+
+def test_memory_generator_distinguishes_unsigned_byte_loads() -> None:
+    candidates = amdgpu_memory_candidates.amdgpu_memory_descriptor_candidates()
+    load = amdgpu_memory_candidates.AmdgpuMemoryOperationKind.LOAD
+    vgpr = amdgpu_memory_candidates.AmdgpuMemoryPayloadRegisterClass.VGPR
+    unsigned = amdgpu_memory_candidates.AmdgpuMemoryPayloadFormat.UNSIGNED_8BIT_INTEGER
+
+    unsigned_loads = {
+        candidate.domain: candidate.descriptor_key
+        for candidate in candidates
+        if (
+            candidate.operation_kind,
+            candidate.packet_byte_count,
+            candidate.payload_register_class,
+            candidate.payload_format,
+            candidate.payload_register_count,
+        )
+        == (load, 1, vgpr, unsigned, 1)
+    }
+
+    assert unsigned_loads == {
+        amdgpu_memory_candidates.AmdgpuMemoryDescriptorDomain.BUFFER_RESOURCE: ("amdgpu.buffer_load_u8"),
+        amdgpu_memory_candidates.AmdgpuMemoryDescriptorDomain.GLOBAL_SADDR: ("amdgpu.global_load_u8_saddr"),
+        amdgpu_memory_candidates.AmdgpuMemoryDescriptorDomain.GLOBAL_FLAT: ("amdgpu.global_load_u8"),
+        amdgpu_memory_candidates.AmdgpuMemoryDescriptorDomain.LDS: ("amdgpu.ds_read_u8"),
+        amdgpu_memory_candidates.AmdgpuMemoryDescriptorDomain.SCRATCH: ("amdgpu.scratch_load_u8_vaddr"),
+    }
 
 
 def test_memory_generator_covers_96_bit_source_memory_packets() -> None:

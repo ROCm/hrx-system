@@ -15,6 +15,7 @@
 #define LOOM_TARGET_LLVM_TOOL_H_
 
 #include "iree/base/api.h"
+#include "loom/target/tool/process.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -34,23 +35,6 @@ typedef struct loom_llvm_toolchain_t {
   iree_string_view_t root_path;
 } loom_llvm_toolchain_t;
 
-typedef struct loom_llvm_tool_output_t {
-  // Captured bytes allocated from the caller allocator, or NULL when empty.
-  char* data;
-  // Number of bytes in |data|, excluding the trailing NUL terminator.
-  iree_host_size_t length;
-} loom_llvm_tool_output_t;
-
-typedef struct loom_llvm_tool_result_t {
-  // Process exit code. Values are platform exit codes, including signal-derived
-  // POSIX codes when a process does not exit normally.
-  int exit_code;
-  // Captured stdout bytes.
-  loom_llvm_tool_output_t stdout_text;
-  // Captured stderr bytes.
-  loom_llvm_tool_output_t stderr_text;
-} loom_llvm_tool_result_t;
-
 // Initializes |out_toolchain| from LOOM_LLVM_TOOLCHAIN_ROOT, falling back to
 // PATH lookup when the environment variable is absent.
 void loom_llvm_toolchain_initialize_from_environment(
@@ -69,20 +53,12 @@ iree_status_t loom_llvm_tool_run(const loom_llvm_toolchain_t* toolchain,
                                  const iree_string_view_t* arguments,
                                  iree_host_size_t argument_count,
                                  iree_allocator_t allocator,
-                                 loom_llvm_tool_result_t* out_result);
-
-bool loom_llvm_tool_result_succeeded(const loom_llvm_tool_result_t* result);
-
-void loom_llvm_tool_result_deinitialize(loom_llvm_tool_result_t* result,
-                                        iree_allocator_t allocator);
-
-void loom_llvm_tool_output_deinitialize(loom_llvm_tool_output_t* output,
-                                        iree_allocator_t allocator);
+                                 loom_tool_process_result_t* out_result);
 
 // Runs `<tool> --version` and returns captured stdout in |out_version_text|.
 iree_status_t loom_llvm_tool_query_version(
     const loom_llvm_toolchain_t* toolchain, loom_llvm_tool_kind_t tool_kind,
-    iree_allocator_t allocator, loom_llvm_tool_output_t* out_version_text);
+    iree_allocator_t allocator, loom_tool_output_t* out_version_text);
 
 // Runs `llvm-as <input_path> -o <output_path>`.
 iree_status_t loom_llvm_tool_assemble_ir_text_file(
@@ -92,13 +68,13 @@ iree_status_t loom_llvm_tool_assemble_ir_text_file(
 // Runs `llvm-dis <input_path> -o -` and returns textual LLVM IR.
 iree_status_t loom_llvm_tool_disassemble_bitcode_file(
     const loom_llvm_toolchain_t* toolchain, iree_string_view_t input_path,
-    iree_allocator_t allocator, loom_llvm_tool_output_t* out_text);
+    iree_allocator_t allocator, loom_tool_output_t* out_text);
 
 // Writes |bitcode| to a temporary file, runs `llvm-dis <temp> -o -`, and
 // returns textual LLVM IR.
 iree_status_t loom_llvm_tool_disassemble_bitcode(
     const loom_llvm_toolchain_t* toolchain, iree_const_byte_span_t bitcode,
-    iree_allocator_t allocator, loom_llvm_tool_output_t* out_text);
+    iree_allocator_t allocator, loom_tool_output_t* out_text);
 
 // Runs `opt -passes=verify <input_path> -disable-output`.
 iree_status_t loom_llvm_tool_verify_bitcode_file(
@@ -108,7 +84,7 @@ iree_status_t loom_llvm_tool_verify_bitcode_file(
 // Runs `llc <input_path> -filetype=obj -o <output_path>`.
 //
 // |extra_arguments| are appended after the standard arguments and may include
-// target-specific flags such as `-mcpu=gfx1100`.
+// target-specific flags such as `-mcpu=gfx11-generic`.
 iree_status_t loom_llvm_tool_compile_object_file(
     const loom_llvm_toolchain_t* toolchain, iree_string_view_t input_path,
     iree_string_view_t output_path, const iree_string_view_t* extra_arguments,
@@ -127,12 +103,12 @@ iree_status_t loom_llvm_tool_compile_assembly_file(
 // returns the produced object bytes.
 //
 // |extra_arguments| are appended after the standard arguments and may include
-// target-specific flags such as `-mcpu=gfx1100`.
+// target-specific flags such as `-mcpu=gfx11-generic`.
 iree_status_t loom_llvm_tool_compile_object(
     const loom_llvm_toolchain_t* toolchain, iree_const_byte_span_t bitcode,
     const iree_string_view_t* extra_arguments,
     iree_host_size_t extra_argument_count, iree_allocator_t allocator,
-    loom_llvm_tool_output_t* out_object);
+    loom_tool_output_t* out_object);
 
 // Writes |bitcode| to a temporary file, runs `llc <temp> -filetype=asm`, and
 // returns the produced assembly text.
@@ -143,13 +119,13 @@ iree_status_t loom_llvm_tool_compile_assembly(
     const loom_llvm_toolchain_t* toolchain, iree_const_byte_span_t bitcode,
     const iree_string_view_t* extra_arguments,
     iree_host_size_t extra_argument_count, iree_allocator_t allocator,
-    loom_llvm_tool_output_t* out_assembly);
+    loom_tool_output_t* out_assembly);
 
 // Runs `llvm-mc <input_path> -filetype=obj -o <output_path>`.
 //
 // |extra_arguments| are appended after the standard arguments and must provide
 // the target selection required by the native assembly, such as
-// `--triple=amdgcn-amd-amdhsa` and `--mcpu=gfx1100`.
+// `--triple=amdgcn-amd-amdhsa` and `--mcpu=gfx11-generic`.
 iree_status_t loom_llvm_tool_assemble_native_object_file(
     const loom_llvm_toolchain_t* toolchain, iree_string_view_t input_path,
     iree_string_view_t output_path, const iree_string_view_t* extra_arguments,
@@ -161,18 +137,18 @@ iree_status_t loom_llvm_tool_assemble_native_object(
     const loom_llvm_toolchain_t* toolchain, iree_string_view_t assembly,
     const iree_string_view_t* extra_arguments,
     iree_host_size_t extra_argument_count, iree_allocator_t allocator,
-    loom_llvm_tool_output_t* out_object);
+    loom_tool_output_t* out_object);
 
 // Runs `llvm-objdump <extra_arguments> <input_path>` and returns stdout text.
 //
 // |extra_arguments| are inserted before the input path and may include
 // disassembly flags such as `--disassemble` and target-specific flags such as
-// `--mcpu=gfx1100`.
+// `--mcpu=gfx11-generic`.
 iree_status_t loom_llvm_tool_disassemble_object_file(
     const loom_llvm_toolchain_t* toolchain, iree_string_view_t input_path,
     const iree_string_view_t* extra_arguments,
     iree_host_size_t extra_argument_count, iree_allocator_t allocator,
-    loom_llvm_tool_output_t* out_text);
+    loom_tool_output_t* out_text);
 
 // Writes |object| to a temporary file, runs `llvm-objdump`, and returns stdout
 // text.
@@ -180,7 +156,7 @@ iree_status_t loom_llvm_tool_disassemble_object(
     const loom_llvm_toolchain_t* toolchain, iree_const_byte_span_t object,
     const iree_string_view_t* extra_arguments,
     iree_host_size_t extra_argument_count, iree_allocator_t allocator,
-    loom_llvm_tool_output_t* out_text);
+    loom_tool_output_t* out_text);
 
 #ifdef __cplusplus
 }

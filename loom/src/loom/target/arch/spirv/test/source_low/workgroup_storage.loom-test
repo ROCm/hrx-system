@@ -3,25 +3,58 @@
 spirv.target<vulkan1_3> @target
 
 func.def target(@target) @spirv_workgroup_storage_i32_roundtrip(%value: i32, %index: index) -> (i32) {
+  %bounded_index = index.assume %index [range(%index, 0, 3)] : index
   %bytes = index.constant 16 : offset
   %scale = index.constant 4 : index
-  %byte_index = index.mul %index, %scale : index
+  %byte_index = index.mul %bounded_index, %scale : index
   %byte_offset = index.cast %byte_index : index to offset
-  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%byte_offset] : buffer -> view<1xi32, #dense>
-  view.store %value, %scratch_view[0] : i32, view<1xi32, #dense>
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-  %loaded = view.load %scratch_view[0] : view<1xi32, #dense> -> i32
+  %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%byte_offset] : buffer -> view<1xi32>
+  view.store %value, %scratch_view[0] : i32, view<1xi32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %loaded = view.load %scratch_view[0] : view<1xi32> -> i32
   func.return %loaded : i32
 }
 
 // ----
-low.func.def target(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [23]}) @spirv_workgroup_storage_i32_roundtrip(%value: reg<spirv.id>, %index: reg<spirv.id>) -> (reg<spirv.id>) asm<spirv.logical.core> {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_workgroup_storage_i32_roundtrip(%value: reg<spirv.id : i32>, %bounded_index: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
   %scratch = storage {byte_alignment = 4, byte_length = 16} : low.storage<workgroup>
-  %20 = storage_address %scratch : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
-  %scratch_view = OpAccessChain.workgroup.i32.element_index %20, %index
-  OpStore.workgroup.i32 %scratch_view, %value
+  %scratch_view = storage_address %scratch : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  %18 = OpAccessChain.workgroup.i32.element_index %scratch_view, %bounded_index
+  OpStore.workgroup.i32 %18, %value
   OpControlBarrier.workgroup.workgroup.acq_rel
-  %loaded = OpLoad.workgroup.i32 %scratch_view
+  %19 = OpAccessChain.workgroup.i32.element_index %scratch_view, %bounded_index
+  %loaded = OpLoad.workgroup.i32 %19
+  return %loaded
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+// A bounded dynamic logical extent reserves its maximum static Workgroup
+// storage while remaining available to source-level control flow.
+func.def target(@target) @spirv_bounded_dynamic_workgroup_storage(%value: i32, %byte_length0: offset) -> (i32) {
+  %byte_length = index.assume %byte_length0 [range(%byte_length0, 4, 8192)] : offset
+  %scratch_base = index.constant 0 : offset
+  %scratch = buffer.alloca<workgroup> align(4) %byte_length : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<1xi32>
+  view.store %value, %scratch_view[0] : i32, view<1xi32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %loaded = view.load %scratch_view[0] : view<1xi32> -> i32
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_bounded_dynamic_workgroup_storage(%value: reg<spirv.id : i32>, %byte_length: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
+  %scratch = storage {byte_alignment = 4, byte_length = 8192} : low.storage<workgroup>
+  %scratch_view = storage_address %scratch : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  %13 = OpConstant.i32 0 : reg<spirv.id : index>
+  %14 = OpAccessChain.workgroup.i32.element_index %scratch_view, %13
+  OpStore.workgroup.i32 %14, %value
+  OpControlBarrier.workgroup.workgroup.acq_rel
+  %15 = OpConstant.i32 0 : reg<spirv.id : index>
+  %16 = OpAccessChain.workgroup.i32.element_index %scratch_view, %15
+  %loaded = OpLoad.workgroup.i32 %16
   return %loaded
 }

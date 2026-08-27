@@ -15,8 +15,6 @@ iree_add_all_subdirs()
 iree_py_library(
   NAME
     package
-  SRCS
-    "__init__.py"
   IMPORTS
     ".."
   DEPS
@@ -35,11 +33,14 @@ iree_py_library(
     "builder_model.py"
     "builders.py"
     "builtin_types.py"
+    "constraint_validation.py"
     "diagnostics.py"
     "dsl.py"
     "errors.py"
     "fields.py"
     "ir.py"
+    "location_tag.py"
+    "scalar_type.py"
     "stable_id.py"
     "verify.py"
   IMPORTS
@@ -49,26 +50,61 @@ iree_py_library(
 iree_py_test(
   NAME
     core_test
+  MAIN
+    "tools/pytest_style_runner.py"
   SRCS
+    "assembly_test.py"
+    "builder_test.py"
+    "builders_test.py"
+    "constraint_validation_test.py"
+    "diagnostics_test.py"
+    "dsl_test.py"
+    "fields_test.py"
+    "ir_test.py"
+    "location_tag_test.py"
+    "projected_region_test.py"
+    "verify_test.py"
     "tools/pytest_style_runner.py"
   ARGS
     "loom.assembly_test"
     "loom.builder_test"
     "loom.builders_test"
+    "loom.constraint_validation_test"
     "loom.diagnostics_test"
     "loom.dsl_test"
     "loom.fields_test"
     "loom.ir_test"
+    "loom.location_tag_test"
     "loom.projected_region_test"
     "loom.verify_test"
   DEPS
     loom::py::loom::package
+    loom::py::loom::dialect::func::func
     loom::py::loom::dialect::test::test
     loom::py::loom::format::bytecode::bytecode
     loom::py::loom::format::text::text
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+)
+
+iree_py_test(
+  NAME
+    package_import_test
+  MAIN
+    "tools/pytest_style_runner.py"
+  SRCS
+    "package_import_test.py"
+    "tools/pytest_style_runner.py"
+  ARGS
+    "loom.package_import_test"
+  DEPS
+    loom::py::loom::package
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

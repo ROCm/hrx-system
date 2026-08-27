@@ -16,6 +16,22 @@ package(
 )
 
 loom_cc_library(
+    name = "bank_service",
+    testonly = True,
+    srcs = ["bank_service.c"],
+    hdrs = ["bank_service.h"],
+    target_compatible_with = select({
+        "//loom/config/emit:amdgpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/src/loom/target/reporting:report",
+        "//loom/src/loom/tools/loom-check:execute",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "occupancy",
     testonly = True,
     srcs = ["occupancy.c"],
@@ -47,6 +63,7 @@ loom_cc_library(
         "//loom/src/loom/tools/loom-check:__pkg__",
     ],
     deps = [
+        ":bank_service",
         ":occupancy",
         "//loom/src/loom/target/arch/amdgpu:provider",
         "//loom/src/loom/target/emit/native/amdgpu:loom_check",

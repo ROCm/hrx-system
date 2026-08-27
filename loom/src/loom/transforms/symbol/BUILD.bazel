@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_benchmark", "loom_cc_library", "loom_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -14,28 +14,61 @@ package(
 
 loom_cc_library(
     name = "template_selection",
-    srcs = ["template_selection.c"],
-    hdrs = ["template_selection.h"],
+    srcs = [
+        "template_applicability.c",
+        "template_selection.c",
+    ],
+    hdrs = [
+        "template_applicability.h",
+        "template_selection.h",
+    ],
     deps = [
         ":symbol_pruning",
-        "//loom/src/loom/analysis:func_provider_catalog",
-        "//loom/src/loom/analysis:symbol_dependencies",
+        "//loom/src/loom/analysis:condition_facts",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/analysis:symbol_liveness",
+        "//loom/src/loom/analysis:symbol_references",
+        "//loom/src/loom/analysis:template_provider_catalog",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/template",
         "//loom/src/loom/pass:pipeline",
         "//loom/src/loom/pass:registry",
         "//loom/src/loom/pass:report",
         "//loom/src/loom/pass:types",
         "//loom/src/loom/pass:value_facts",
         "//loom/src/loom/rewrite:rewriter",
-        "//loom/src/loom/target:selection",
+        "//loom/src/loom/target:condition",
+        "//loom/src/loom/target:facts",
+        "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target:pass_environment",
+        "//loom/src/loom/util:bstring",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "template_selection_query_test",
+    srcs = ["template_selection_query_test.cc"],
+    deps = [
+        ":template_selection",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/analysis:template_provider_catalog",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/format/text:printer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/template",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -44,8 +77,9 @@ loom_cc_library(
     srcs = ["inline_callables.c"],
     hdrs = ["inline_callables.h"],
     deps = [
+        "//loom/src/loom/analysis:availability",
         "//loom/src/loom/analysis:scc",
-        "//loom/src/loom/analysis:symbol_dependencies",
+        "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
@@ -53,7 +87,7 @@ loom_cc_library(
         "//loom/src/loom/pass:types",
         "//loom/src/loom/rewrite:callable",
         "//loom/src/loom/rewrite:rewriter",
-        "//loom/src/loom/target:selection",
+        "//loom/src/loom/target:pass_environment",
         "//runtime/src/iree/base",
     ],
 )
@@ -106,11 +140,11 @@ loom_cc_library(
     hdrs = ["symbol_dce.h"],
     deps = [
         ":symbol_pruning",
-        "//loom/src/loom/analysis:symbol_dependencies",
         "//loom/src/loom/analysis:symbol_liveness",
+        "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/ir",
         "//loom/src/loom/pass:types",
-        "//loom/src/loom/target:selection",
+        "//loom/src/loom/target:pass_environment",
         "//runtime/src/iree/base",
     ],
 )
@@ -133,6 +167,7 @@ loom_cc_test(
         "//loom/src/loom/ops/test",
         "//loom/src/loom/target/test:descriptors",
         "//loom/src/loom/testing:module_ptr",
+        "//loom/src/loom/verify",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:stream",
         "//runtime/src/iree/testing:gtest",

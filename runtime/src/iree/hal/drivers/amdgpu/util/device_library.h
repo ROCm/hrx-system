@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVERS_AMDGPU_UTIL_DEVICE_LIBRARY_H_
 
 #include "iree/base/api.h"
+#include "iree/hal/drivers/amdgpu/util/agent_target.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 #include "iree/hal/drivers/amdgpu/util/loaded_code_object.h"
 
@@ -30,6 +31,8 @@ typedef struct iree_hal_amdgpu_device_library_t {
   const iree_hal_amdgpu_libhsa_t* libhsa;
   // Loaded and frozen executable for all GPU devices.
   hsa_executable_t executable;
+  // Code-object reader retained until |executable| has been destroyed.
+  hsa_code_object_reader_t code_object_reader;
 } iree_hal_amdgpu_device_library_t;
 
 // Initializes |out_library| by loading the builtin device library for all of
@@ -39,7 +42,9 @@ typedef struct iree_hal_amdgpu_device_library_t {
 // the cache.
 iree_status_t iree_hal_amdgpu_device_library_initialize(
     const iree_hal_amdgpu_libhsa_t* libhsa,
-    const iree_hal_amdgpu_topology_t* topology, iree_allocator_t host_allocator,
+    const iree_hal_amdgpu_topology_t* topology,
+    const iree_hal_amdgpu_agent_target_t* gpu_agent_targets,
+    iree_allocator_t host_allocator,
     iree_hal_amdgpu_device_library_t* out_library);
 
 // Deinitializes |library| and releases underlying executable resources.

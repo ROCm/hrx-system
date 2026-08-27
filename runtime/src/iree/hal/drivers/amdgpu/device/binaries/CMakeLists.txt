@@ -6,34 +6,6 @@
 
 # Builtin AMDGPU device binaries embedded into the runtime.
 
-set(IREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE
-    "prebuilt"
-    CACHE STRING
-    "AMDGPU device binary producer: prebuilt or source.")
-set_property(CACHE IREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE
-             PROPERTY STRINGS prebuilt source)
-
-set(IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN
-    "auto"
-    CACHE STRING
-    "AMDGPU source-build toolchain: auto, rocm, llvm-tools, or llvm-project.")
-set_property(CACHE IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN
-             PROPERTY STRINGS auto rocm llvm-tools llvm-project)
-set(IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH "" CACHE PATH
-    "ROCm/TheRock root used for AMDGPU device binary source builds.")
-set(IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_TOOLS_DIR "" CACHE PATH
-    "Directory containing clang, llvm-link, lld, and llvm-objcopy for AMDGPU device binary source builds.")
-set(IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_BINARY "" CACHE FILEPATH
-    "clang/amdclang executable for AMDGPU device binary source builds.")
-set(IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_LINK_BINARY "" CACHE FILEPATH
-    "llvm-link executable for AMDGPU device binary source builds.")
-set(IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLD_BINARY "" CACHE FILEPATH
-    "lld executable for AMDGPU device binary source builds.")
-set(IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_OBJCOPY_BINARY "" CACHE FILEPATH
-    "llvm-objcopy executable for AMDGPU device binary source builds.")
-set(IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_RESOURCE_INCLUDE "" CACHE PATH
-    "Clang resource include directory for AMDGPU device binary source builds.")
-
 include(selectors)
 
 if(NOT IREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE STREQUAL "prebuilt" AND
@@ -93,13 +65,16 @@ function(_iree_hal_amdgpu_read_device_bitcode_sources out_var)
   set(${out_var} "${_source_paths}" PARENT_SCOPE)
 endfunction()
 
-function(_iree_hal_amdgpu_append_generator_flag out_args flag value)
-  if(NOT "${value}" STREQUAL "")
-    set(${out_args} ${${out_args}} "${flag}" "${value}" PARENT_SCOPE)
+function(_iree_hal_amdgpu_source_generator_args out_args device_binary_targets_arg)
+  if(NOT IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_AVAILABLE)
+    message(FATAL_ERROR
+      "AMDGPU builtin device binary source mode requires the configured "
+      "AMDGPU device toolchain")
   endif()
-endfunction()
-
-function(_iree_hal_amdgpu_source_generator_args out_args targets_arg)
+  if(NOT Python3_EXECUTABLE)
+    message(FATAL_ERROR
+      "AMDGPU builtin device binary source mode requires Python 3")
+  endif()
   set(_args
     "${Python3_EXECUTABLE}"
     "${IREE_SOURCE_DIR}/build_tools/scripts/amdgpu_device_binaries.py"
@@ -109,65 +84,19 @@ function(_iree_hal_amdgpu_source_generator_args out_args targets_arg)
     "${IREE_BINARY_DIR}"
     "--output-dir"
     "${CMAKE_CURRENT_BINARY_DIR}"
-    "--targets"
-    "${targets_arg}"
+    "--device-binary-targets"
+    "${device_binary_targets_arg}"
+    "--clang"
+    "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_CLANG_BINARY}"
+    "--llvm-link"
+    "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_LLVM_LINK_BINARY}"
+    "--lld"
+    "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_LLD_BINARY}"
+    "--llvm-objcopy"
+    "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_LLVM_OBJCOPY_BINARY}"
+    "--clang-resource-include"
+    "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_CLANG_RESOURCE_INCLUDE}"
   )
-
-  _iree_hal_amdgpu_append_generator_flag(
-    _args "--rocm-path" "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH}")
-  _iree_hal_amdgpu_append_generator_flag(
-    _args "--tool-dir" "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_TOOLS_DIR}")
-  _iree_hal_amdgpu_append_generator_flag(
-    _args "--tool-dir" "${IREE_HOST_BIN_DIR}")
-  _iree_hal_amdgpu_append_generator_flag(
-    _args "--clang" "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_BINARY}")
-  _iree_hal_amdgpu_append_generator_flag(
-    _args "--llvm-link" "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_LINK_BINARY}")
-  _iree_hal_amdgpu_append_generator_flag(
-    _args "--lld" "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLD_BINARY}")
-  _iree_hal_amdgpu_append_generator_flag(
-    _args "--llvm-objcopy" "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_OBJCOPY_BINARY}")
-  _iree_hal_amdgpu_append_generator_flag(
-    _args "--clang-resource-include"
-    "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_RESOURCE_INCLUDE}")
-
-  if(IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN STREQUAL "llvm-project")
-    foreach(_var
-        IREE_CLANG_BINARY
-        IREE_LLVM_LINK_BINARY
-        IREE_LLD_BINARY
-        IREE_LLVM_OBJCOPY_BINARY
-        IREE_CLANG_BUILTIN_HEADERS_PATH)
-      if("${${_var}}" STREQUAL "")
-        message(FATAL_ERROR
-          "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=llvm-project requires ${_var} to be "
-          "configured by the containing build.")
-      endif()
-    endforeach()
-    if("${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_BINARY}" STREQUAL "")
-      list(APPEND _args "--clang" "${IREE_CLANG_BINARY}")
-    endif()
-    if("${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_LINK_BINARY}" STREQUAL "")
-      list(APPEND _args "--llvm-link" "${IREE_LLVM_LINK_BINARY}")
-    endif()
-    if("${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLD_BINARY}" STREQUAL "")
-      list(APPEND _args "--lld" "${IREE_LLD_BINARY}")
-    endif()
-    if("${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_OBJCOPY_BINARY}" STREQUAL "")
-      list(APPEND _args "--llvm-objcopy" "${IREE_LLVM_OBJCOPY_BINARY}")
-    endif()
-    if("${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_RESOURCE_INCLUDE}" STREQUAL "")
-      list(APPEND _args
-        "--clang-resource-include" "${IREE_CLANG_BUILTIN_HEADERS_PATH}")
-    endif()
-  elseif(NOT IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN STREQUAL "auto" AND
-         NOT IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN STREQUAL "rocm" AND
-         NOT IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN STREQUAL "llvm-tools")
-    message(FATAL_ERROR
-      "Unknown IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN='${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN}'. "
-      "Expected auto, rocm, llvm-tools, or llvm-project.")
-  endif()
-
   set(${out_args} "${_args}" PARENT_SCOPE)
 endfunction()
 
@@ -204,7 +133,7 @@ set(_BITCODE_HDRS
 
 iree_amdgpu_expand_target_selectors(
   _DEVICE_BINARY_TARGETS
-  "${IREE_AMDGPU_TARGET_EXPANSION_CODE_OBJECT}"
+  "${IREE_AMDGPU_TARGET_EXPANSION_DEVICE_BINARY}"
   ${IREE_HAL_AMDGPU_TARGETS}
 )
 

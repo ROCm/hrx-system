@@ -22,6 +22,7 @@ from loom.target.arch.x86.packed_dot_data import (
     NUMERIC_U8,
     NUMERIC_U16,
     PackedDotDescriptor,
+    packed_dot_native_layout,
 )
 from loom.target.low_descriptors import (
     AsmForm,
@@ -82,10 +83,12 @@ _SCHEDULE_MASK = "x86.mask"
 _SCHEDULE_MEMORY_LOAD_GPR32 = "x86.memory.load.gpr32"
 _SCHEDULE_MEMORY_LOAD_GPR64 = "x86.memory.load.gpr64"
 _SCHEDULE_MEMORY_LOAD_XMM = "x86.memory.load.128"
+_SCHEDULE_MEMORY_LOAD_YMM = "x86.memory.load.256"
 _SCHEDULE_MEMORY_LOAD_ZMM = "x86.memory.load"
 _SCHEDULE_MEMORY_STORE_GPR32 = "x86.memory.store.gpr32"
 _SCHEDULE_MEMORY_STORE_GPR64 = "x86.memory.store.gpr64"
 _SCHEDULE_MEMORY_STORE_XMM = "x86.memory.store.128"
+_SCHEDULE_MEMORY_STORE_YMM = "x86.memory.store.256"
 _SCHEDULE_MEMORY_STORE_ZMM = "x86.memory.store"
 _SCHEDULE_CONTROL = "x86.control"
 
@@ -167,6 +170,8 @@ def _memory_load_schedule_class(vector_bit_width: int) -> str:
     match vector_bit_width:
         case 128:
             return _SCHEDULE_MEMORY_LOAD_XMM
+        case 256:
+            return _SCHEDULE_MEMORY_LOAD_YMM
         case 512:
             return _SCHEDULE_MEMORY_LOAD_ZMM
         case _:
@@ -177,6 +182,8 @@ def _memory_store_schedule_class(vector_bit_width: int) -> str:
     match vector_bit_width:
         case 128:
             return _SCHEDULE_MEMORY_STORE_XMM
+        case 256:
+            return _SCHEDULE_MEMORY_STORE_YMM
         case 512:
             return _SCHEDULE_MEMORY_STORE_ZMM
         case _:
@@ -361,20 +368,6 @@ _TARGET_BLOCK_IMMEDIATE = Immediate(
     unsigned_max=(2**32) - 1,
 )
 
-_LOAD_EFFECT = Effect(
-    EffectKind.READ,
-    memory_space=MemorySpace.GENERIC,
-    flags=(EffectFlag.DEPENDENCY,),
-    width_bits=512,
-)
-
-_STORE_EFFECT = Effect(
-    EffectKind.WRITE,
-    memory_space=MemorySpace.GENERIC,
-    flags=(EffectFlag.DEPENDENCY,),
-    width_bits=512,
-)
-
 
 def _load_effect(width_bits: int) -> Effect:
     return Effect(
@@ -391,6 +384,116 @@ def _store_effect(width_bits: int) -> Effect:
         memory_space=MemorySpace.GENERIC,
         flags=(EffectFlag.DEPENDENCY,),
         width_bits=width_bits,
+    )
+
+
+def _vector_memory_descriptors(
+    *,
+    key_prefix: str,
+    vector_bit_width: int,
+    native_assembly_mnemonic: str | None = None,
+) -> tuple[Descriptor, ...]:
+    register_suffix = {
+        128: "xmm",
+        256: "ymm",
+        512: "zmm",
+    }.get(vector_bit_width)
+    if register_suffix is None:
+        raise ValueError(f"unsupported x86 memory vector width {vector_bit_width}")
+    lane_count = vector_bit_width // 32
+    static_load_key = f"{key_prefix}.vmovdqu32.load.{register_suffix}"
+    indexed_load_key = f"{key_prefix}.vmovdqu32.load.indexed.{register_suffix}"
+    static_store_key = f"{key_prefix}.vmovdqu32.store.{register_suffix}"
+    indexed_store_key = f"{key_prefix}.vmovdqu32.store.indexed.{register_suffix}"
+    return (
+        Descriptor(
+            key=static_load_key,
+            mnemonic="vmovdqu32",
+            semantic_tag=f"memory.load.i32x{lane_count}",
+            operands=(
+                _vector_result(vector_bit_width),
+                _gpr64_resource("base"),
+            ),
+            immediates=(_DISP32_IMMEDIATE,),
+            asm_forms=_asm(
+                mnemonic=_vector_asm_mnemonic("vmovdqu32.load", vector_bit_width),
+                native_assembly_mnemonic=native_assembly_mnemonic,
+                results=("dst",),
+                operands=("base",),
+                immediates=("disp32",),
+                named_immediates=True,
+            ),
+            effects=(_load_effect(vector_bit_width),),
+            schedule_class=_memory_load_schedule_class(vector_bit_width),
+            flags=(DescriptorFlag.SIDE_EFFECTING,),
+        ),
+        Descriptor(
+            key=indexed_load_key,
+            mnemonic="vmovdqu32",
+            semantic_tag=f"memory.load.indexed.i32x{lane_count}",
+            operands=(
+                _vector_result(vector_bit_width),
+                _gpr64_resource("base"),
+                _gpr64_resource("index"),
+            ),
+            immediates=(_DISP32_IMMEDIATE, _ADDRESS_SCALE_IMMEDIATE),
+            asm_forms=_asm(
+                mnemonic=_vector_asm_mnemonic(
+                    "vmovdqu32.load.indexed", vector_bit_width
+                ),
+                native_assembly_mnemonic=native_assembly_mnemonic,
+                results=("dst",),
+                operands=("base", "index"),
+                immediates=("disp32", "scale"),
+                named_immediates=True,
+            ),
+            effects=(_load_effect(vector_bit_width),),
+            schedule_class=_memory_load_schedule_class(vector_bit_width),
+            flags=(DescriptorFlag.SIDE_EFFECTING,),
+        ),
+        Descriptor(
+            key=static_store_key,
+            mnemonic="vmovdqu32",
+            semantic_tag=f"memory.store.i32x{lane_count}",
+            operands=(
+                _vector_operand(vector_bit_width, "value"),
+                _gpr64_resource("base"),
+            ),
+            immediates=(_DISP32_IMMEDIATE,),
+            asm_forms=_asm(
+                mnemonic=_vector_asm_mnemonic("vmovdqu32.store", vector_bit_width),
+                native_assembly_mnemonic=native_assembly_mnemonic,
+                operands=("value", "base"),
+                immediates=("disp32",),
+                named_immediates=True,
+            ),
+            effects=(_store_effect(vector_bit_width),),
+            schedule_class=_memory_store_schedule_class(vector_bit_width),
+            flags=(DescriptorFlag.SIDE_EFFECTING,),
+        ),
+        Descriptor(
+            key=indexed_store_key,
+            mnemonic="vmovdqu32",
+            semantic_tag=f"memory.store.indexed.i32x{lane_count}",
+            operands=(
+                _vector_operand(vector_bit_width, "value"),
+                _gpr64_resource("base"),
+                _gpr64_resource("index"),
+            ),
+            immediates=(_DISP32_IMMEDIATE, _ADDRESS_SCALE_IMMEDIATE),
+            asm_forms=_asm(
+                mnemonic=_vector_asm_mnemonic(
+                    "vmovdqu32.store.indexed", vector_bit_width
+                ),
+                native_assembly_mnemonic=native_assembly_mnemonic,
+                operands=("value", "base", "index"),
+                immediates=("disp32", "scale"),
+                named_immediates=True,
+            ),
+            effects=(_store_effect(vector_bit_width),),
+            schedule_class=_memory_store_schedule_class(vector_bit_width),
+            flags=(DescriptorFlag.SIDE_EFFECTING,),
+        ),
     )
 
 
@@ -497,10 +600,10 @@ def _packed_dot_semantic_tag(descriptor: PackedDotDescriptor) -> str:
     lhs_tag = _PACKED_DOT_NUMERIC_TAGS[descriptor.lhs_numeric_type]
     rhs_tag = _PACKED_DOT_NUMERIC_TAGS[descriptor.rhs_numeric_type]
     result_tag = _PACKED_DOT_NUMERIC_TAGS[descriptor.result_numeric_type]
+    result_element_count = packed_dot_native_layout(descriptor).shape.block_count
     saturating_suffix = ".sat" if descriptor.flags & CONTRACT_FLAG_SATURATING else ""
     return (
-        f"dot.{lhs_tag}{rhs_tag}.{result_tag}x"
-        f"{descriptor.result_lane_count}{saturating_suffix}"
+        f"dot.{lhs_tag}{rhs_tag}.{result_tag}x{result_element_count}{saturating_suffix}"
     )
 
 

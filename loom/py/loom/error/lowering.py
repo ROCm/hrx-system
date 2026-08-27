@@ -319,6 +319,85 @@ ERR_LOWERING_036 = ErrorDef(
     ),
 )
 
+# ERR_LOWERING_037: Write overlaps a pending async source.
+ERR_LOWERING_037 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=37,
+    severity=Severity.ERROR,
+    summary="Write overlaps a pending async source.",
+    message=(
+        "{phase_name} found {op_name} writing a view that may overlap a "
+        "pending async source before wait"
+    ),
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("phase_name", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Wait the pending async group before the write or prove the written "
+        "view is disjoint from every pending source"
+    ),
+)
+
+# ERR_LOWERING_038: Kernel async group does not commit the current transfers.
+ERR_LOWERING_038 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=38,
+    severity=Severity.ERROR,
+    summary="Kernel async group does not commit the current transfers.",
+    message=(
+        "{phase_name} requires {op_name} to commit the exact uncommitted "
+        "transfer token sequence in program order"
+    ),
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("phase_name", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Commit every transfer token since the previous group exactly once "
+        "and in source program order"
+    ),
+)
+
+# ERR_LOWERING_039: Kernel async transfer leaves a block before group commit.
+ERR_LOWERING_039 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=39,
+    severity=Severity.ERROR,
+    summary="Kernel async transfer leaves a block before group commit.",
+    message=(
+        "{phase_name} requires {op_name} to be committed to a local async "
+        "group before leaving its block"
+    ),
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("phase_name", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Commit the transfer token to the next kernel.async.group in the same "
+        "straight-line block"
+    ),
+)
+
+# ERR_LOWERING_040: Kernel async transfer token escapes the local stream.
+ERR_LOWERING_040 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=40,
+    severity=Severity.ERROR,
+    summary="Kernel async transfer token escapes the local stream.",
+    message=(
+        "{phase_name} requires the token produced by {op_name} to have exactly "
+        "one local kernel.async.group use"
+    ),
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("phase_name", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Use the transfer token exactly once in the next local kernel.async.group"
+    ),
+)
+
 # ERR_LOWERING_043: Boundary fact refinement did not converge.
 ERR_LOWERING_043 = ErrorDef(
     domain=ErrorDomain.LOWERING,
@@ -357,14 +436,14 @@ ERR_LOWERING_044 = ErrorDef(
     ),
 )
 
-# ERR_LOWERING_045: Func apply selection failed.
+# ERR_LOWERING_045: Template application resolution failed.
 ERR_LOWERING_045 = ErrorDef(
     domain=ErrorDomain.LOWERING,
     code=45,
     severity=Severity.ERROR,
-    summary="Func apply selection failed.",
+    summary="Template application resolution failed.",
     message=(
-        "{phase_name} cannot select an implementation for {op_name}"
+        "{phase_name} cannot resolve {op_name} against template family "
         "<{contract_key}>: {failure_code}"
     ),
     params=(
@@ -374,9 +453,9 @@ ERR_LOWERING_045 = ErrorDef(
         ErrorParam("failure_code", ParamKind.STRING),
     ),
     fix_hint=(
-        "Add a matching func.template provider, make provider predicates "
-        "resolvable before final selection, or call a specific implementation "
-        "with func.call inline"
+        "Add a matching template.def provider, make target, caller context, "
+        "and value predicates resolvable before final selection, or correct "
+        "the constraints on an exact template.call"
     ),
 )
 
@@ -399,6 +478,183 @@ ERR_LOWERING_046 = ErrorDef(
     ),
 )
 
+# ERR_LOWERING_047: Vector bank scalarization contract failed.
+ERR_LOWERING_047 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=47,
+    severity=Severity.ERROR,
+    summary="Vector bank scalarization contract failed.",
+    message=(
+        "{phase_name} cannot scalarize carried slot {slot} of {op_name}: {reason}"
+    ),
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("phase_name", ParamKind.STRING),
+        ErrorParam("slot", ParamKind.U32),
+        ErrorParam("reason", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Address the bank only through one static leading-index prefix and "
+        "keep the aggregate inside its scf.for recurrence"
+    ),
+)
+
+# ERR_LOWERING_048: Template application target condition is unresolved.
+ERR_LOWERING_048 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=48,
+    severity=Severity.ERROR,
+    summary="Template application target condition is unresolved.",
+    message=(
+        "{phase_name} cannot select an implementation for {op_name}"
+        "<{contract_key}> because @{constraint_owner_name} has unresolved condition "
+        "#{condition_name}"
+    ),
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("phase_name", ParamKind.STRING),
+        ErrorParam("contract_key", ParamKind.STRING),
+        ErrorParam("constraint_owner_name", ParamKind.STRING),
+        ErrorParam("condition_name", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Supply target facts that decide the condition, add a provider whose "
+        "applicability is proven, or correct the constraints on an exact "
+        "template.call"
+    ),
+)
+
+# ERR_LOWERING_049: Command-program composition is recursive.
+ERR_LOWERING_049 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=49,
+    severity=Severity.ERROR,
+    summary="Command-program composition is recursive.",
+    message=(
+        "command-program preparation cannot flatten recursive composition "
+        "through @{program_name}"
+    ),
+    params=(ErrorParam("program_name", ParamKind.STRING),),
+    fix_hint=(
+        "Make command.program.launch dependencies acyclic before materializing "
+        "the command program"
+    ),
+)
+
+# ERR_LOWERING_050: Command program launch has no launch configuration.
+ERR_LOWERING_050 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=50,
+    severity=Severity.ERROR,
+    summary="Command program launch has no launch configuration.",
+    message=(
+        "command-program preparation cannot configure the kernel declaration "
+        "@{kernel_name}"
+    ),
+    params=(ErrorParam("kernel_name", ParamKind.STRING),),
+    fix_hint=(
+        "Link the kernel configuration facet for this declaration before "
+        "preparing the command program"
+    ),
+)
+
+# ERR_LOWERING_051: Command dispatch count is not statically representable.
+ERR_LOWERING_051 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=51,
+    severity=Severity.ERROR,
+    summary="Command dispatch workgroup count is not statically representable.",
+    message=(
+        "command-program preparation requires workgroup-count dimension "
+        "{dimension} of @{kernel_name} to be {requirement}"
+    ),
+    params=(
+        ErrorParam("kernel_name", ParamKind.STRING),
+        ErrorParam("dimension", ParamKind.U32),
+        ErrorParam("requirement", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Specialize each direct count to an exact unsigned 32-bit value or "
+        "provide a dense view<3xi32> for indirect dispatch"
+    ),
+)
+
+# ERR_LOWERING_052: Command dispatch argument is not statically representable.
+ERR_LOWERING_052 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=52,
+    severity=Severity.ERROR,
+    summary="Command dispatch argument is not statically representable.",
+    message=(
+        "command-program preparation cannot encode argument {argument_index} "
+        "of @{kernel_name} with type {actual_type}; it requires {requirement}"
+    ),
+    params=(
+        ErrorParam("kernel_name", ParamKind.STRING),
+        ErrorParam("argument_index", ParamKind.U32),
+        ErrorParam("actual_type", ParamKind.TYPE),
+        ErrorParam("requirement", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Pass buffer or view ranges, or specialize scalar ABI arguments to "
+        "exact values before preparing the command program"
+    ),
+)
+
+# ERR_LOWERING_053: Command-produced dispatch counts have no preceding wave.
+ERR_LOWERING_053 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=53,
+    severity=Severity.ERROR,
+    summary="Command-produced dispatch workgroup counts need an earlier wave.",
+    message=(
+        "command-program preparation cannot dispatch @{kernel_name} from "
+        "dynamic workgroup counts without a preceding execution wave"
+    ),
+    params=(ErrorParam("kernel_name", ParamKind.STRING),),
+    fix_hint=(
+        "Place the count-producing command in an earlier serial execution "
+        "wave so an execution barrier precedes the indirect dispatch"
+    ),
+)
+
+# ERR_LOWERING_054: Indirect dispatch count storage cannot be placed.
+ERR_LOWERING_054 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=54,
+    severity=Severity.ERROR,
+    summary="Indirect dispatch workgroup-count storage cannot be placed.",
+    message=(
+        "command-program preparation cannot place the workgroup-count view "
+        "for @{kernel_name}; it requires {requirement}"
+    ),
+    params=(
+        ErrorParam("kernel_name", ParamKind.STRING),
+        ErrorParam("requirement", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Use an exactly placed dense view<3xi32> rooted in a program buffer "
+        "binding, immutable parameter root, or command buffer.alloca"
+    ),
+)
+
+# ERR_LOWERING_055: Command dispatch workgroup-size override is unsupported.
+ERR_LOWERING_055 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=55,
+    severity=Severity.ERROR,
+    summary="Command dispatch workgroup-size override is unsupported.",
+    message=(
+        "portable command-program lowering cannot carry the dispatch-time "
+        "workgroup size for @{kernel_name}"
+    ),
+    params=(ErrorParam("kernel_name", ParamKind.STRING),),
+    fix_hint=(
+        "Use the executable entry default or a command target that supports "
+        "dispatch-time workgroup sizes"
+    ),
+)
+
 ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_022,
     ERR_LOWERING_023,
@@ -415,8 +671,21 @@ ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_034,
     ERR_LOWERING_035,
     ERR_LOWERING_036,
+    ERR_LOWERING_037,
+    ERR_LOWERING_038,
+    ERR_LOWERING_039,
+    ERR_LOWERING_040,
     ERR_LOWERING_043,
     ERR_LOWERING_044,
     ERR_LOWERING_045,
     ERR_LOWERING_046,
+    ERR_LOWERING_047,
+    ERR_LOWERING_048,
+    ERR_LOWERING_049,
+    ERR_LOWERING_050,
+    ERR_LOWERING_051,
+    ERR_LOWERING_052,
+    ERR_LOWERING_053,
+    ERR_LOWERING_054,
+    ERR_LOWERING_055,
 )

@@ -11,13 +11,59 @@ iree_add_all_subdirs()
 
 iree_py_library(
   NAME
-    config_tables
-  MAIN
-    "amdgpu_config_tables.py"
+    package_init
   SRCS
     "__init__.py"
+)
+
+iree_py_library(
+  NAME
+    target_table_family
+  SRCS
+    "amdgpu_target_table_family.py"
+  DEPS
+    loom::py::loom::gen::target::arch::amdgpu::package_init
+    loom::py::loom::target::arch::amdgpu::descriptors
+    loom::py::loom::target::arch::amdgpu::target_info
+)
+
+iree_py_library(
+  NAME
+    target_table_outputs
+  SRCS
+    "amdgpu_target_table_outputs.py"
+  DEPS
+    loom::py::loom::gen::target::arch::amdgpu::package_init
+    loom::py::loom::gen::target::arch::amdgpu::target_table_family
+    loom::py::loom::gen::support::support
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::descriptors_module
+    loom::py::loom::gen::target::arch::amdgpu::encoding::encoding_tables_module
+    loom::py::loom::target::low_descriptors
+    loom::py::loom::target::arch::amdgpu::isa_xml
+)
+
+iree_py_library(
+  NAME
+    target_tables
+  MAIN
+    "amdgpu_target_tables.py"
+  SRCS
+    "amdgpu_target_tables.py"
+  DEPS
+    loom::py::loom::gen::target::arch::amdgpu::package_init
+    loom::py::loom::gen::target::arch::amdgpu::target_table_family
+    loom::py::loom::gen::target::arch::amdgpu::target_table_outputs
+    loom::py::loom::target::arch::amdgpu::descriptors
+    loom::py::loom::target::arch::amdgpu::isa_xml
+)
+
+iree_py_library(
+  NAME
+    config_tables
+  SRCS
     "amdgpu_config_tables.py"
   DEPS
+    loom::py::loom::gen::target::arch::amdgpu::package_init
     loom::py::loom::gen::support::support
     loom::py::loom::target::arch::amdgpu::encoding_info
     loom::py::loom::target::arch::amdgpu::target_info
@@ -26,7 +72,10 @@ iree_py_library(
 iree_py_test(
   NAME
     config_tables_test
+  MAIN
+    "../../../../tools/pytest_style_runner.py"
   SRCS
+    "amdgpu_config_tables_test.py"
     "../../../../tools/pytest_style_runner.py"
   ARGS
     "loom.gen.target.arch.amdgpu.amdgpu_config_tables_test"
@@ -35,19 +84,17 @@ iree_py_test(
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 iree_py_library(
   NAME
     low_aliases
-  MAIN
-    "amdgpu_low_aliases.py"
   SRCS
-    "__init__.py"
     "amdgpu_low_aliases.py"
   DEPS
+    loom::py::loom::gen::target::arch::amdgpu::package_init
     loom::py::loom::gen::support::support
-    loom::py::loom::target::arch::amdgpu::descriptors
     loom::py::loom::target::arch::amdgpu::low_aliases
 )
 
@@ -57,19 +104,26 @@ iree_py_library(
   MAIN
     "amdgpu_target_info.py"
   SRCS
-    "__init__.py"
     "amdgpu_target_info.py"
   DEPS
+    loom::py::loom::gen::target::arch::amdgpu::config_tables
+    loom::py::loom::gen::target::arch::amdgpu::low_aliases
+    loom::py::loom::gen::target::arch::amdgpu::package_init
     loom::py::loom::gen::support::support
+    loom::py::loom::gen::target::arch::amdgpu::planning::occupancy_tables
+    loom::py::loom::gen::target::arch::amdgpu::records::target_records
     loom::py::loom::target::low_descriptors
-    loom::py::loom::target::arch::amdgpu::isa_xml
+    loom::py::loom::target::arch::amdgpu::descriptors
     loom::py::loom::target::arch::amdgpu::target_info
 )
 
 iree_py_test(
   NAME
     target_info_test
+  MAIN
+    "../../../../tools/pytest_style_runner.py"
   SRCS
+    "amdgpu_target_info_test.py"
     "../../../../tools/pytest_style_runner.py"
   ARGS
     "loom.gen.target.arch.amdgpu.amdgpu_target_info_test"
@@ -79,6 +133,7 @@ iree_py_test(
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -19,6 +19,7 @@ loom_cc_library(
   DEPS
     iree::base
     loom::codegen::low::descriptors
+    loom::codegen::low::launch_config_program
     loom::codegen::low::lower
     loom::codegen::low::lower::source_selection
     loom::codegen::low::pipeline::pass_environment
@@ -28,8 +29,8 @@ loom_cc_library(
     loom::pass::types
     loom::pass::value_facts
     loom::sanitizer::options
-    loom::target::compile_report_low
     loom::target::low_legality
+    loom::target::reporting::low
   PUBLIC
 )
 
@@ -51,6 +52,7 @@ loom_cc_library(
     loom::ir
     loom::ops::index
     loom::ops::kernel
+    loom::ops::low
     loom::ops::op_defs
     loom::ops::scalar
     loom::pass::pipeline
@@ -58,12 +60,14 @@ loom_cc_library(
     loom::pass::types
     loom::pass::value_facts
     loom::rewrite::greedy
-    loom::target::compile_report
     loom::target::legalization
     loom::target::low_descriptor_registry
     loom::target::low_legality
+    loom::target::reporting::report
+    loom::transforms::buffer::target_legalization
     loom::transforms::scalar::target_legalization
     loom::transforms::vector::target_legalization
+    loom::transforms::view::target_legalization
     loom::util::walk
   PUBLIC
 )
@@ -78,9 +82,12 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::analysis::symbol_facts
     loom::codegen::low::lower
     loom::codegen::low::lower::source_selection
     loom::codegen::low::pipeline::pass_environment
+    loom::codegen::low::transforms::allocation
+    loom::codegen::low::transforms::dce
     loom::error::error_defs
     loom::format::text::parser
     loom::ir
@@ -89,10 +96,14 @@ loom_cc_test(
     loom::ops::pass
     loom::ops::scalar
     loom::ops::target
+    loom::ops::template
     loom::ops::test
     loom::pass::registry
     loom::pass::tooling
     loom::pass::value_facts
+    loom::target::facts_builder
+    loom::target::function_contract
+    loom::target::function_version
     loom::target::test::contracts::core_lower_rules
     loom::target::test::low_registry
     loom::target::test::lower

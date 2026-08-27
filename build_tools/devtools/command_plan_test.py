@@ -9,12 +9,14 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
+from build_tools.devtools import command_plan
 from build_tools.devtools.command_plan import (
     CommandPlan,
     CommandStep,
@@ -94,17 +96,90 @@ class CommandPlanTest(unittest.TestCase):
         self.assertIn("dev.py: loud command", output.getvalue())
         self.assertIn(sys.executable, output.getvalue())
 
+    def test_windows_command_step_resolves_executable_from_child_path(self):
+        child_path = "C:/source/.venv/Scripts;C:/Windows/System32"
+        resolved_executable = "C:/source/.venv/Scripts/lefthook.exe"
+        step = CommandStep(
+            ["lefthook", "version"],
+            cwd=Path.cwd(),
+            env={"PATH": child_path},
+        )
+        completed_process = subprocess.CompletedProcess(step.argv, 0)
+
+        with (
+            mock.patch.object(command_plan, "is_windows", return_value=True),
+            mock.patch.object(
+                command_plan.shutil,
+                "which",
+                return_value=resolved_executable,
+            ) as mock_which,
+            mock.patch.object(
+                subprocess, "run", return_value=completed_process
+            ) as mock_run,
+        ):
+            self.assertEqual(step.run(), 0)
+
+        mock_which.assert_called_once_with("lefthook", path=child_path)
+        mock_run.assert_called_once_with(
+            [resolved_executable, "version"],
+            cwd=step.cwd,
+            env=step.env,
+        )
+
     def test_exec_command_step_replaces_current_process(self):
         step = ExecCommandStep(["tool", "arg"], cwd=Path.cwd(), env={"PATH": "test"})
 
-        with mock.patch.object(os, "chdir") as mock_chdir:
-            with mock.patch.object(
+        with (
+            mock.patch.object(command_plan, "is_windows", return_value=False),
+            mock.patch.object(os, "chdir") as mock_chdir,
+            mock.patch.object(
                 os, "execvpe", side_effect=OSError("missing")
-            ) as mock_exec:
-                self.assertEqual(step.run(), 127)
+            ) as mock_exec,
+        ):
+            self.assertEqual(step.run(), 127)
 
         mock_chdir.assert_called_once_with(Path.cwd())
         mock_exec.assert_called_once_with("tool", ["tool", "arg"], {"PATH": "test"})
+
+    def test_exec_command_step_waits_for_child_on_windows(self):
+        step = ExecCommandStep(["tool", "arg"], cwd=Path.cwd(), env={"PATH": "test"})
+        completed_process = subprocess.CompletedProcess(step.argv, 7)
+
+        with (
+            mock.patch.object(command_plan, "is_windows", return_value=True),
+            mock.patch.object(
+                subprocess, "run", return_value=completed_process
+            ) as mock_run,
+            mock.patch.object(os, "execvpe") as mock_exec,
+        ):
+            self.assertEqual(step.run(), 7)
+
+        mock_run.assert_called_once_with(step.argv, cwd=step.cwd, env=step.env)
+        mock_exec.assert_not_called()
+
+    def test_windows_exec_command_step_propagates_real_child_status(self):
+        step = ExecCommandStep(
+            [sys.executable, "-c", "raise SystemExit(7)"], cwd=Path.cwd()
+        )
+
+        with mock.patch.object(command_plan, "is_windows", return_value=True):
+            self.assertEqual(step.run(), 7)
+
+    def test_command_step_description_uses_windows_cmd_syntax(self):
+        original_path = os.environ.get("PATH", "")
+        step = CommandStep(
+            ["python.exe", "dev.py", "bazel", "setup"],
+            cwd=Path("C:/source tree"),
+            env={"PATH": "C:/source tree/.venv/Scripts" + os.pathsep + original_path},
+        )
+
+        with mock.patch.object(command_plan, "is_windows", return_value=True):
+            description = step.describe()
+
+        self.assertIn('set "PATH=C:/source tree/.venv/Scripts;%PATH%"', description)
+        expected_cwd = subprocess.list2cmdline([str(step.cwd)])
+        self.assertIn(f"cd /d {expected_cwd} &&", description)
+        self.assertNotIn("$PATH", description)
 
     def test_optional_check_step_warns_without_failing(self):
         plan = CommandPlan(
@@ -122,6 +197,17 @@ class CommandPlanTest(unittest.TestCase):
             self.assertEqual(plan.run(), 0)
 
         self.assertIn("warning", output.getvalue())
+
+    def test_required_check_step_reports_missing_command(self):
+        step = command_plan.CheckCommandStep(
+            ["definitely-not-an-iree-tool"], cwd=Path.cwd()
+        )
+        error = io.StringIO()
+
+        with contextlib.redirect_stderr(error):
+            self.assertEqual(step.run(), 127)
+
+        self.assertIn("failed to run", error.getvalue())
 
     def test_optional_check_step_reports_hint(self):
         plan = CommandPlan(

@@ -23,6 +23,19 @@ class HrxBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             return values.unconditional
         return values
 
+    def _normalize_label(self, source):
+        path = super()._normalize_label(source)
+        project_prefix = "${PROJECT_SOURCE_DIR}/"
+        if not path.startswith(project_prefix):
+            return path
+
+        # libhrx is a nested CMake project, so PROJECT_SOURCE_DIR names the
+        # libhrx subtree rather than the repository root used by Bazel labels.
+        repo_path = path[len(project_prefix) :]
+        if repo_path.startswith("libhrx/"):
+            return "${LIBHRX_SOURCE_DIR}/" + repo_path[len("libhrx/") :]
+        return "${IREE_ROOT_DIR}/" + repo_path
+
     def hrx_cc_library(self, deps=[], **kwargs):
         self.cc_library(
             deps=deps + ["//runtime/src:defines", "//libhrx:defines"],
@@ -55,11 +68,6 @@ class HrxBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
 
     def hrx_cc_shared_library(self, deps=[], **kwargs):
         kwargs["copts"] = self._drop_selects(kwargs.get("copts"))
-        kwargs["hdrs"] = [
-            hdr
-            for hdr in (kwargs.get("hdrs") or [])
-            if hdr != "//libhrx/src:iree_hal_compat.h"
-        ]
         self.cc_library(
             deps=deps + ["//runtime/src:defines", "//libhrx:defines"],
             shared=True,
@@ -181,9 +189,6 @@ PROJECT_CONFIG = bazel_to_cmake_config.ProjectConfig(
     target_mappings={
         "//build_tools/amdgpu:target_map_h": [],
         "//libhrx:defines": ["libhrx_defs"],
-        "//libhrx/src/libhrx:hrx_static": [
-            "libhrx::src::libhrx::hrx",
-        ],
     },
     convert_unmatched_target=convert_unmatched_target,
 )

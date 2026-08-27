@@ -80,22 +80,22 @@ def _topk_gate_input(tilelang: Any, T: Any, *, target: str) -> TileLangImportInp
 
 # ====
 @tilelang_case(
-    name="tilekernels_topk_gate_gfx1100",
+    name="tilekernels_topk_gate_gfx11_generic",
     category="kernel",
     tags=("tilekernels", "moe", "topk", "amdgpu"),
 )
-def tilekernels_topk_gate_gfx1100(
+def tilekernels_topk_gate_gfx11_generic(
     tilelang: Any,
     T: Any,
 ) -> TileLangImportInput:
-    return _topk_gate_input(tilelang, T, target="hip -mcpu=gfx1100")
+    return _topk_gate_input(tilelang, T, target="hip -mcpu=gfx11-generic")
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("topk_gate_kernel") @topk_gate_kernel(%num_tokens: i32) {
+kernel.def target(@hip_mcpu_gfx11_generic) export("topk_gate_kernel") @topk_gate_kernel(%num_tokens: i32) {
   %num_tokens_idx = index.cast %num_tokens : i32 to index
   %c1 = index.constant 1 : index
   %c32 = index.constant 32 : index
@@ -113,23 +113,23 @@ kernel.def target(@hip_mcpu_gfx1100) export("topk_gate_kernel") @topk_gate_kerne
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %scores_fragment_bytes = index.constant 128 : offset
-  %scores_fragment_buffer = buffer.alloca %scores_fragment_bytes {base_alignment = 4, memory_space = private} : buffer
+  %scores_fragment_buffer = buffer.alloca<private> align(4) %scores_fragment_bytes : buffer
   %scores_fragment = buffer.view %scores_fragment_buffer[%c0_bytes] : buffer -> view<32xf32, %layout>
   %f32_zero = scalar.constant 0.0 : f32
   %scores_fragment_state = vector.splat %f32_zero : vector<32xf32>
   %amax_fragment_bytes = index.constant 4 : offset
-  %amax_fragment_buffer = buffer.alloca %amax_fragment_bytes {base_alignment = 4, memory_space = private} : buffer
+  %amax_fragment_buffer = buffer.alloca<private> align(4) %amax_fragment_bytes : buffer
   %amax_fragment = buffer.view %amax_fragment_buffer[%c0_bytes] : buffer -> view<1xf32, %layout>
   %amax_fragment_state = vector.splat %f32_zero : vector<1xf32>
-  %idx_fragment_buffer = buffer.alloca %scores_fragment_bytes {base_alignment = 4, memory_space = private} : buffer
+  %idx_fragment_buffer = buffer.alloca<private> align(4) %scores_fragment_bytes : buffer
   %idx_fragment = buffer.view %idx_fragment_buffer[%c0_bytes] : buffer -> view<32xi32, %layout>
   %i32_zero = scalar.constant 0 : i32
   %idx_fragment_state = vector.splat %i32_zero : vector<32xi32>
-  %idx_reducer_buffer = buffer.alloca %amax_fragment_bytes {base_alignment = 4, memory_space = private} : buffer
+  %idx_reducer_buffer = buffer.alloca<private> align(4) %amax_fragment_bytes : buffer
   %idx_reducer = buffer.view %idx_reducer_buffer[%c0_bytes] : buffer -> view<1xi32, %layout>
   %idx_reducer_state = vector.splat %i32_zero : vector<1xi32>
   %topk_idx_shared_bytes = index.constant 8 : offset
-  %topk_idx_shared_buffer = buffer.alloca %topk_idx_shared_bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %topk_idx_shared_buffer = buffer.alloca<workgroup> align(4) %topk_idx_shared_bytes : buffer
   %topk_idx_shared = buffer.view %topk_idx_shared_buffer[%c0_bytes] : buffer -> view<2xi32, %layout>
   %c0 = index.constant 0 : index
   %c32 = index.constant 32 : index
@@ -202,7 +202,7 @@ kernel.def target(@hip_mcpu_gfx1100) export("topk_gate_kernel") @topk_gate_kerne
     }
     scf.yield %scores_fragment_state_next_3, %idx_reducer_state_next_3 : vector<32xf32>, vector<1xi32>
   }
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %i0_active = index.cmp slt, %tx, %c2 : index
   scf.if %i0_active {
     %copy = view.load %topk_idx_shared[%tx] : view<2xi32, %layout> -> i32

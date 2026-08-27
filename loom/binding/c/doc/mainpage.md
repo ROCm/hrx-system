@@ -1,8 +1,8 @@
 # Loom C API
 
 The `loomc` library is the public C ABI for embedding the Loom compiler in
-native language drivers, JITs, autotuners, packaging tools, and runtime
-executable caches. The API is shaped around in-memory sources, reusable
+native language drivers, JITs, autotuners, packaging tools, and caller-owned
+artifact caches. The API is shaped around in-memory sources, reusable
 compiler/linker/index handles, caller-owned workspaces, structured diagnostics,
 and in-memory artifacts.
 

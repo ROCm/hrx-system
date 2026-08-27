@@ -16,9 +16,26 @@ loom_cc_library(
     "process.h"
   SRCS
     "process.c"
+    "process_darwin.c"
+    "process_linux.c"
+    "process_platform.h"
+    "process_posix.c"
+    "process_posix.h"
+    "process_stub.c"
+    "process_win32.c"
   DEPS
     iree::base
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    process_test
+  SRCS
+    "process_test.cc"
+  DEPS
+    ::process
+    iree::testing::gtest
 )
 
 loom_cc_library(
@@ -29,6 +46,7 @@ loom_cc_library(
   SRCS
     "llvm.c"
   DEPS
+    ::process
     iree::base
     iree::base::internal::path
     iree::io::file_handle

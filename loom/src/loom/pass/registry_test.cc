@@ -92,7 +92,7 @@ TEST(PassRegistryStorageTest, MergesSortedRegistries) {
   IREE_ASSERT_OK(
       loom_pass_registry_lookup(registry, IREE_SV("beta"), &descriptor));
   ASSERT_NE(descriptor, nullptr);
-  EXPECT_EQ(descriptor->info, BetaPassInfo);
+  EXPECT_EQ(descriptor->info, &BetaPassInfo);
 }
 
 TEST(PassRegistryStorageTest, RejectsDuplicateKeys) {

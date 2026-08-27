@@ -52,6 +52,93 @@ func.def @assume_refines_address_facts(%n: index, %base: offset) -> (i64, i64) {
 
 // ====
 
+// Value-valued assumptions combine the incoming intervals of both aliases.
+// This lets a bounded workload constrain a derived coordinate without
+// repeating the workload's literal range on the coordinate.
+func.def @assume_relational_value_bounds(%lhs0: index, %rhs0: index) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) {
+  %lhs = index.assume %lhs0 [range(%lhs0, 32, 4096)] : index
+  %rhs = index.assume %rhs0 [range(%rhs0, 1, 2048)] : index
+  %eq_lhs, %eq_rhs = index.assume %lhs, %rhs [eq(%lhs, %rhs)] : index, index
+  %lt_lhs, %lt_rhs = index.assume %lhs, %rhs [lt(%lhs, %rhs)] : index, index
+  %le_lhs, %le_rhs = index.assume %lhs, %rhs [le(%lhs, %rhs)] : index, index
+  %gt_rhs, %gt_lhs = index.assume %rhs, %lhs [gt(%rhs, %lhs)] : index, index
+  %ge_rhs, %ge_lhs = index.assume %rhs, %lhs [ge(%rhs, %lhs)] : index, index
+  %eq_lhs_lo = test.fact_range_lo %eq_lhs : index -> i64
+  %eq_lhs_hi = test.fact_range_hi %eq_lhs : index -> i64
+  %lt_lhs_hi = test.fact_range_hi %lt_lhs : index -> i64
+  %lt_rhs_lo = test.fact_range_lo %lt_rhs : index -> i64
+  %le_lhs_hi = test.fact_range_hi %le_lhs : index -> i64
+  %le_rhs_lo = test.fact_range_lo %le_rhs : index -> i64
+  %gt_rhs_lo = test.fact_range_lo %gt_rhs : index -> i64
+  %gt_lhs_hi = test.fact_range_hi %gt_lhs : index -> i64
+  %ge_rhs_lo = test.fact_range_lo %ge_rhs : index -> i64
+  %ge_lhs_hi = test.fact_range_hi %ge_lhs : index -> i64
+  func.return %eq_lhs_lo, %eq_lhs_hi, %lt_lhs_hi, %lt_rhs_lo, %le_lhs_hi, %le_rhs_lo, %gt_rhs_lo, %gt_lhs_hi, %ge_rhs_lo, %ge_lhs_hi : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64
+}
+// ----
+func.def @assume_relational_value_bounds(%lhs0: index, %rhs0: index) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) {
+  %eq_lhs_lo = scalar.constant 32 : i64
+  %eq_lhs_hi = scalar.constant 2048 : i64
+  %lt_lhs_hi = scalar.constant 2047 : i64
+  %lt_rhs_lo = scalar.constant 33 : i64
+  %le_lhs_hi = scalar.constant 2048 : i64
+  %le_rhs_lo = scalar.constant 32 : i64
+  %gt_rhs_lo = scalar.constant 33 : i64
+  %gt_lhs_hi = scalar.constant 2047 : i64
+  %ge_rhs_lo = scalar.constant 32 : i64
+  %ge_lhs_hi = scalar.constant 2048 : i64
+  func.return %eq_lhs_lo, %eq_lhs_hi, %lt_lhs_hi, %lt_rhs_lo, %le_lhs_hi, %le_rhs_lo, %gt_rhs_lo, %gt_lhs_hi, %ge_rhs_lo, %ge_lhs_hi : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64
+}
+
+// ====
+
+// Relational assumptions can consume facts from values that are referenced by
+// the predicate but do not receive checked aliases. External facts are
+// read-only regardless of which side of the relation they occupy.
+func.def @assume_relational_external_bounds(%value: index, %upper0: index, %lower0: index) -> (i64, i64, i64, i64) {
+  %upper = index.assume %upper0 [range(%upper0, 32, 4096)] : index
+  %lower = index.assume %lower0 [range(%lower0, -128, -32)] : index
+  %below = index.assume %value [lt(%value, %upper)] : index
+  %above = index.assume %value [lt(%lower, %value)] : index
+  %below_hi = test.fact_range_hi %below : index -> i64
+  %above_lo = test.fact_range_lo %above : index -> i64
+  %upper_hi = test.fact_range_hi %upper : index -> i64
+  %lower_lo = test.fact_range_lo %lower : index -> i64
+  func.return %below_hi, %above_lo, %upper_hi, %lower_lo : i64, i64, i64, i64
+}
+// ----
+func.def @assume_relational_external_bounds(%value: index, %upper0: index, %lower0: index) -> (i64, i64, i64, i64) {
+  %below_hi = scalar.constant 4095 : i64
+  %above_lo = scalar.constant -127 : i64
+  %upper_hi = scalar.constant 4096 : i64
+  %lower_lo = scalar.constant -128 : i64
+  func.return %below_hi, %above_lo, %upper_hi, %lower_lo : i64, i64, i64, i64
+}
+
+// ====
+
+// An external launch-capacity bound survives multiplication and unsigned
+// quotient transfer without repeating its literal range on the coordinate.
+func.def @assume_external_bound_through_quotient(%coordinate0: index, %capacity0: index) -> (i64, i64) {
+  %c2 = index.constant 2 : index
+  %capacity = index.assume %capacity0 [range(%capacity0, 1, 65535)] : index
+  %workgroup_capacity = index.mul %capacity, %c2 : index
+  %coordinate_nonnegative = index.assume %coordinate0 [ge(%coordinate0, 0)] : index
+  %coordinate = index.assume %coordinate_nonnegative [lt(%coordinate_nonnegative, %workgroup_capacity)] : index
+  %tile = index.div %coordinate, %c2 : index
+  %tile_lo = test.fact_range_lo %tile : index -> i64
+  %tile_hi = test.fact_range_hi %tile : index -> i64
+  func.return %tile_lo, %tile_hi : i64, i64
+}
+// ----
+func.def @assume_external_bound_through_quotient(%coordinate0: index, %capacity0: index) -> (i64, i64) {
+  %tile_lo = scalar.constant 0 : i64
+  %tile_hi = scalar.constant 65534 : i64
+  func.return %tile_lo, %tile_hi : i64, i64
+}
+
+// ====
+
 // SSA values referenced as dynamic shape extents are non-negative by type
 // semantics. This applies to ordinary block arguments with shaped types.
 func.def @block_arg_shape_extent_non_negative(%n: index, %tile: tile<[%n]xf32>) -> (i1) {
@@ -330,8 +417,8 @@ func.def @cast_i32_to_offset_uses_unsigned_domain(%raw: i32) -> (i64, i64, i1) {
 // Exact negative integer payloads become their unsigned bit pattern when cast
 // into offset.
 func.def @cast_negative_i32_to_offset_zero_extends() -> (i64, i64) {
-  %negative_one = scalar.constant -1 : i32
-  %offset = index.cast %negative_one : i32 to offset
+  %cn1 = scalar.constant -1 : i32
+  %offset = index.cast %cn1 : i32 to offset
   %lo = test.fact_range_lo %offset : offset -> i64
   %hi = test.fact_range_hi %offset : offset -> i64
   func.return %lo, %hi : i64, i64
@@ -389,8 +476,8 @@ func.def @cast_index_to_i8_uses_result_domain(%raw: index) -> (i64, i64) {
 // index.add removes a fact-proven zero operand without requiring the other
 // operand to be constant.
 func.def @add_zero_identity(%x: index) -> (index) {
-  %zero = index.constant 0 : index
-  %r = index.add %x, %zero : index
+  %c0 = index.constant 0 : index
+  %r = index.add %x, %c0 : index
   func.return %r : index
 }
 // ----
@@ -402,10 +489,10 @@ func.def @add_zero_identity(%x: index) -> (index) {
 
 // index.mul removes one and annihilates with zero.
 func.def @mul_identities(%x: index) -> (index, index) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %same = index.mul %x, %one : index
-  %zeroed = index.mul %x, %zero : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %same = index.mul %x, %c1 : index
+  %zeroed = index.mul %x, %c0 : index
   func.return %same, %zeroed : index, index
 }
 // ----
@@ -416,15 +503,17 @@ func.def @mul_identities(%x: index) -> (index, index) {
 
 // ====
 
-func.def @mul_power_of_two_becomes_shift(%x: index) -> (index) {
+// A power-of-two multiply remains width-neutral until target facts prove that
+// its shift amount is in range.
+func.def @mul_power_of_two_waits_for_target_width(%x: index) -> (index) {
   %c8 = index.constant 8 : index
   %scaled = index.mul %x, %c8 : index
   func.return %scaled : index
 }
 // ----
-func.def @mul_power_of_two_becomes_shift(%x: index) -> (index) {
-  %4 = index.constant 3 : index
-  %scaled = index.shli %x, %4 : index
+func.def @mul_power_of_two_waits_for_target_width(%x: index) -> (index) {
+  %c8 = index.constant 8 : index
+  %scaled = index.mul %x, %c8 : index
   func.return %scaled : index
 }
 
@@ -433,8 +522,8 @@ func.def @mul_power_of_two_becomes_shift(%x: index) -> (index) {
 // index.madd simplifies the common address form a*1 + c to add, keeping the
 // addend first because it is usually the base address.
 func.def @madd_identity_multiplier(%a: index, %c: index) -> (index) {
-  %one = index.constant 1 : index
-  %r = index.madd %a, %one, %c : index
+  %c1 = index.constant 1 : index
+  %r = index.madd %a, %c1, %c : index
   func.return %r : index
 }
 // ----
@@ -462,16 +551,19 @@ func.def @add_mul_canonicalizes_to_madd(%i: index, %j: index) -> (index) {
 
 // ====
 
-func.def @add_shift_canonicalizes_to_madd(%i: index, %j: index) -> (index) {
+// A shift-derived scale remains explicit until the target width establishes
+// that the source shift is valid.
+func.def @add_shift_waits_for_target_width(%i: index, %j: index) -> (index) {
   %shift = index.constant 2 : index
   %scaled = index.shli %i, %shift : index
   %r = index.add %scaled, %j : index
   func.return %r : index
 }
 // ----
-func.def @add_shift_canonicalizes_to_madd(%i: index, %j: index) -> (index) {
-  %6 = index.constant 4 : index
-  %r = index.madd %i, %6, %j : index
+func.def @add_shift_waits_for_target_width(%i: index, %j: index) -> (index) {
+  %shift = index.constant 2 : index
+  %scaled = index.shli %i, %shift : index
+  %r = index.add %scaled, %j : index
   func.return %r : index
 }
 
@@ -533,8 +625,8 @@ func.def @add_scaled_div_rem_reconstruction(%lane: index) -> (index) {
 // ----
 func.def @add_scaled_div_rem_reconstruction(%lane: index) -> (index) {
   %bounded = index.assume %lane [range(%lane, 0, 1024)] : index
-  %12 = index.constant 3 : index
-  %linear = index.shli %bounded, %12 : index
+  %c8 = index.constant 8 : index
+  %linear = index.mul %bounded, %c8 : index
   func.return %linear : index
 }
 
@@ -558,8 +650,8 @@ func.def @add_scaled_shift_mask_reconstruction(%lane: index) -> (index) {
 // ----
 func.def @add_scaled_shift_mask_reconstruction(%lane: index) -> (index) {
   %bounded = index.assume %lane [range(%lane, 0, 1024)] : index
-  %13 = index.constant 3 : index
-  %linear = index.shli %bounded, %13 : index
+  %c8 = index.constant 8 : index
+  %linear = index.mul %bounded, %c8 : index
   func.return %linear : index
 }
 
@@ -584,8 +676,8 @@ func.def @madd_scaled_shift_mask_reconstruction_with_assumes(%lane: index) -> (i
 // ----
 func.def @madd_scaled_shift_mask_reconstruction_with_assumes(%lane: index) -> (index) {
   %bounded = index.assume %lane [range(%lane, 0, 1024)] : index
-  %14 = index.constant 3 : index
-  %linear = index.shli %bounded, %14 : index
+  %c8 = index.constant 8 : index
+  %linear = index.mul %bounded, %c8 : index
   func.return %linear : index
 }
 
@@ -607,13 +699,100 @@ func.def @add_scaled_div_rem_maybe_negative_preserved(%lane: index) -> (index) {
 // ----
 func.def @add_scaled_div_rem_maybe_negative_preserved(%lane: index) -> (index) {
   %c2 = index.constant 2 : index
+  %c8 = index.constant 8 : index
   %c16 = index.constant 16 : index
   %quotient = index.div %lane, %c2 : index
   %remainder = index.rem %lane, %c2 : index
-  %11 = index.constant 3 : index
-  %remainder_scaled = index.shli %remainder, %11 : index
+  %remainder_scaled = index.mul %remainder, %c8 : index
   %linear = index.madd %quotient, %c16, %remainder_scaled : index
   func.return %linear : index
+}
+
+// ====
+
+// Subtracting the floor-aligned multiple from a non-negative coordinate is its
+// remainder instead of an independent-operand subtraction.
+func.def @sub_floor_multiple_is_remainder(%n: index) -> (index) {
+  %bounded = index.assume %n [range(%n, 0, 32768)] : index
+  %c64 = index.constant 64 : index
+  %quotient = index.div %bounded, %c64 : index
+  %aligned = index.mul %quotient, %c64 : index
+  %tail = index.sub %bounded, %aligned : index
+  func.return %tail : index
+}
+// ----
+func.def @sub_floor_multiple_is_remainder(%n: index) -> (index) {
+  %bounded = index.assume %n [range(%n, 0, 32768)] : index
+  %8 = index.constant 63 : index
+  %tail = index.andi %bounded, %8 : index
+  func.return %tail : index
+}
+
+// ====
+
+// The same floor multiple may already be in strength-reduced shift form when
+// subtraction canonicalizes.
+func.def @sub_shifted_floor_multiple_is_remainder(%n: index) -> (index) {
+  %bounded = index.assume %n [range(%n, 0, 32768)] : index
+  %c6 = index.constant 6 : index
+  %quotient = index.shrui %bounded, %c6 : index
+  %aligned = index.shli %quotient, %c6 : index
+  %tail = index.sub %bounded, %aligned : index
+  func.return %tail : index
+}
+// ----
+func.def @sub_shifted_floor_multiple_is_remainder(%n: index) -> (index) {
+  %bounded = index.assume %n [range(%n, 0, 32768)] : index
+  %9 = index.constant 63 : index
+  %tail = index.andi %bounded, %9 : index
+  func.return %tail : index
+}
+
+// ====
+
+// The normalized remainder carries the exact tail range consumed by dynamic
+// allocations and vector memory-footprint verification.
+func.def @rem_tail_has_exact_facts(%n: index) -> (i64, i64) {
+  %bounded = index.assume %n [range(%n, 0, 32768)] : index
+  %c64 = index.constant 64 : index
+  %tail = index.rem %bounded, %c64 : index
+  %tail_lo = test.fact_range_lo %tail : index -> i64
+  %tail_hi = test.fact_range_hi %tail : index -> i64
+  func.return %tail_lo, %tail_hi : i64, i64
+}
+// ----
+func.def @rem_tail_has_exact_facts(%n: index) -> (i64, i64) {
+  %tail_lo = scalar.constant 0 : i64
+  %tail_hi = scalar.constant 63 : i64
+  func.return %tail_lo, %tail_hi : i64, i64
+}
+
+// ====
+
+// Relational assumptions refine subtraction even when independent operand
+// intervals overlap. This preserves loop-body facts such as iv < upper.
+func.def @sub_relational_assume_facts(%upper: index, %iv: index) -> (i64, i64, i64, i64, i64) {
+  %bounded_upper = index.assume %upper [range(%upper, 1, 32768)] : index
+  %strict_iv = index.assume %iv [range(%iv, 0, 32767), lt(%iv, %bounded_upper)] : index
+  %positive = index.sub %bounded_upper, %strict_iv : index
+  %negative = index.sub %strict_iv, %bounded_upper : index
+  %not_after = index.assume %iv [range(%iv, 0, 32768), le(%iv, %bounded_upper)] : index
+  %nonnegative = index.sub %bounded_upper, %not_after : index
+  %positive_lo = test.fact_range_lo %positive : index -> i64
+  %positive_hi = test.fact_range_hi %positive : index -> i64
+  %negative_lo = test.fact_range_lo %negative : index -> i64
+  %negative_hi = test.fact_range_hi %negative : index -> i64
+  %nonnegative_lo = test.fact_range_lo %nonnegative : index -> i64
+  func.return %positive_lo, %positive_hi, %negative_lo, %negative_hi, %nonnegative_lo : i64, i64, i64, i64, i64
+}
+// ----
+func.def @sub_relational_assume_facts(%upper: index, %iv: index) -> (i64, i64, i64, i64, i64) {
+  %positive_lo = scalar.constant 1 : i64
+  %positive_hi = scalar.constant 32768 : i64
+  %negative_lo = scalar.constant -32768 : i64
+  %negative_hi = scalar.constant -1 : i64
+  %nonnegative_lo = scalar.constant 0 : i64
+  func.return %positive_lo, %positive_hi, %negative_lo, %negative_hi, %nonnegative_lo : i64, i64, i64, i64, i64
 }
 
 // ====
@@ -631,8 +810,8 @@ func.def @div_scaled_coordinate(%i: index) -> (index) {
 // ----
 func.def @div_scaled_coordinate(%i: index) -> (index) {
   %i2 = index.assume %i [range(%i, 0, 1024)] : index
-  %8 = index.constant 3 : index
-  %q = index.shli %i2, %8 : index
+  %c8 = index.constant 8 : index
+  %q = index.mul %i2, %c8 : index
   func.return %q : index
 }
 
@@ -650,9 +829,9 @@ func.def @div_scaled_unknown_range_is_preserved(%i: index) -> (index) {
 
 // ----
 func.def @div_scaled_unknown_range_is_preserved(%i: index) -> (index) {
+  %c64 = index.constant 64 : index
   %c8 = index.constant 8 : index
-  %6 = index.constant 6 : index
-  %scaled = index.shli %i, %6 : index
+  %scaled = index.mul %i, %c64 : index
   %q = index.div %scaled, %c8 : index
   func.return %q : index
 }
@@ -731,9 +910,9 @@ func.def @rem_divisible_coordinate(%x: index) -> (index) {
 // Zero modulo any fact-proven positive divisor is zero, even when the divisor
 // itself is dynamic.
 func.def @rem_zero_dynamic_positive_divisor(%d: index) -> (index) {
-  %zero = index.constant 0 : index
+  %c0 = index.constant 0 : index
   %d2 = index.assume %d [range(%d, 1, 64)] : index
-  %r = index.rem %zero, %d2 : index
+  %r = index.rem %c0, %d2 : index
   func.return %r : index
 }
 // ----
@@ -771,6 +950,84 @@ func.def @rem_power_of_two_nonnegative(%x: index) -> (index) {
   %x2 = index.assume %x [range(%x, 0, 1024)] : index
   %5 = index.constant 127 : index
   %r = index.andi %x2, %5 : index
+  func.return %r : index
+}
+
+// ====
+
+// A non-negative coordinate already inside the divisor range is its own
+// remainder.
+func.def @rem_bounded_below_divisor(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 31)] : index
+  %c32 = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %offset = index.add %x2, %c32 : index
+  %r = index.rem %offset, %c64 : index
+  func.return %r : index
+}
+// ----
+func.def @rem_bounded_below_divisor(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 31)] : index
+  %c32 = index.constant 32 : index
+  %offset = index.add %x2, %c32 : index
+  func.return %offset : index
+}
+
+// ====
+
+// Exact radix multiples do not affect a bounded coordinate's remainder.
+func.def @rem_strips_radix_aligned_offset(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 31)] : index
+  %c960 = index.constant 960 : index
+  %c64 = index.constant 64 : index
+  %offset = index.add %x2, %c960 : index
+  %r = index.rem %offset, %c64 : index
+  func.return %r : index
+}
+// ----
+func.def @rem_strips_radix_aligned_offset(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 31)] : index
+  func.return %x2 : index
+}
+
+// ====
+
+// A large exact offset reduces to its in-radix residue when the dynamic range
+// proves that the reduced expression cannot wrap.
+func.def @rem_reduces_offset_residue(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 31)] : index
+  %c992 = index.constant 992 : index
+  %c64 = index.constant 64 : index
+  %offset = index.add %x2, %c992 : index
+  %r = index.rem %offset, %c64 : index
+  func.return %r : index
+}
+// ----
+func.def @rem_reduces_offset_residue(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 31)] : index
+  %7 = index.constant 32 : index
+  %r = index.add %x2, %7 : index
+  func.return %r : index
+}
+
+// ====
+
+// Reduction is conservative when the dynamic range can cross the radix.
+func.def @rem_offset_residue_wrap_is_preserved(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 32)] : index
+  %c992 = index.constant 992 : index
+  %c64 = index.constant 64 : index
+  %offset = index.add %x2, %c992 : index
+  %r = index.rem %offset, %c64 : index
+  func.return %r : index
+}
+// ----
+func.def @rem_offset_residue_wrap_is_preserved(%x: index) -> (index) {
+  %x2 = index.assume %x [range(%x, 0, 32)] : index
+  %c992 = index.constant 992 : index
+  %offset = index.add %x2, %c992 : index
+  %7 = index.constant 63 : index
+  %r = index.andi %offset, %7 : index
   func.return %r : index
 }
 
@@ -857,13 +1114,13 @@ func.def @minmax_identities() -> (index, index, index, index) {
 func.def @bitwise_facts(%x: index) -> (i64, i64, i1, i64, i64) {
   %mask_aligned = index.constant -4 : index
   %mask_small = index.constant 15 : index
-  %one = index.constant 1 : index
+  %c1 = index.constant 1 : index
   %shift4 = index.constant 4 : index
   %shift3 = index.constant 3 : index
   %aligned = index.assume %x [range(%x, 0, 4096), mul(%x, 64)] : index
   %and_aligned = index.andi %x, %mask_aligned : index
   %and_small = index.andi %x, %mask_small : index
-  %or_one = index.ori %x, %one : index
+  %or_one = index.ori %x, %c1 : index
   %shifted_left = index.shli %x, %shift4 : index
   %shifted_right = index.shrui %aligned, %shift3 : index
   %and_div = test.fact_divisor %and_aligned : index -> i64
@@ -885,28 +1142,31 @@ func.def @bitwise_facts(%x: index) -> (i64, i64, i1, i64, i64) {
 
 // ====
 
-// Bit counts use index's 64-bit value width.
-func.def @bit_count_facts() -> (index, index, index) {
-  %one = index.constant 1 : index
-  %zero = index.constant 0 : index
-  %ones = index.constant -1 : index
-  %clz = index.ctlzi %one : index
-  %ctz = index.cttzi %zero : index
-  %pop = index.ctpopi %ones : index
+// Bit counts remain symbolic when no target has established index width.
+func.def @bit_count_facts_require_target_width() -> (index, index, index) {
+  %c1 = index.constant 1 : index
+  %c0 = index.constant 0 : index
+  %all_bits_set = index.constant -1 : index
+  %clz = index.ctlzi %c1 : index
+  %ctz = index.cttzi %c0 : index
+  %pop = index.ctpopi %all_bits_set : index
   func.return %clz, %ctz, %pop : index, index, index
 }
 // ----
-func.def @bit_count_facts() -> (index, index, index) {
-  %clz = index.constant 63 : index
-  %ctz = index.constant 64 : index
-  %pop = index.constant 64 : index
+func.def @bit_count_facts_require_target_width() -> (index, index, index) {
+  %c1 = index.constant 1 : index
+  %c0 = index.constant 0 : index
+  %all_bits_set = index.constant -1 : index
+  %clz = index.ctlzi %c1 : index
+  %ctz = index.cttzi %c0 : index
+  %pop = index.ctpopi %all_bits_set : index
   func.return %clz, %ctz, %pop : index, index, index
 }
 
 // ====
 
-// Exact bitwise and rotate facts fold to index constants.
-func.def @bitwise_exact_folds() -> (index, index, index, index) {
+// Width-independent bitwise facts fold while rotate remains target-sensitive.
+func.def @bitwise_exact_folds_preserve_target_rotate() -> (index, index, index, index) {
   %a = index.constant 255 : index
   %b = index.constant 15 : index
   %v = index.constant 1 : index
@@ -918,35 +1178,37 @@ func.def @bitwise_exact_folds() -> (index, index, index, index) {
   func.return %and, %or, %xor, %rot : index, index, index, index
 }
 // ----
-func.def @bitwise_exact_folds() -> (index, index, index, index) {
+func.def @bitwise_exact_folds_preserve_target_rotate() -> (index, index, index, index) {
+  %v = index.constant 1 : index
+  %amount = index.constant 8 : index
   %and = index.constant 15 : index
   %or = index.constant 255 : index
   %xor = index.constant 240 : index
-  %rot = index.constant 256 : index
+  %rot = index.rotli %v, %amount : index
   func.return %and, %or, %xor, %rot : index, index, index, index
 }
 
 // ====
 
 func.def @bitwise_identities(%x: index) -> (index, index, index, index, index, index, index, index) {
-  %zero = index.constant 0 : index
-  %ones = index.constant -1 : index
+  %c0 = index.constant 0 : index
+  %all_bits_set = index.constant -1 : index
   %and_self = index.andi %x, %x : index
-  %and_zero = index.andi %x, %zero : index
-  %and_ones = index.andi %x, %ones : index
+  %and_zero = index.andi %x, %c0 : index
+  %and_ones = index.andi %x, %all_bits_set : index
   %or_self = index.ori %x, %x : index
-  %or_zero = index.ori %x, %zero : index
-  %or_ones = index.ori %x, %ones : index
-  %xor_zero = index.xori %x, %zero : index
+  %or_zero = index.ori %x, %c0 : index
+  %or_ones = index.ori %x, %all_bits_set : index
+  %xor_zero = index.xori %x, %c0 : index
   %xor_self = index.xori %x, %x : index
   func.return %and_self, %and_zero, %and_ones, %or_self, %or_zero, %or_ones, %xor_zero, %xor_self : index, index, index, index, index, index, index, index
 }
 // ----
 func.def @bitwise_identities(%x: index) -> (index, index, index, index, index, index, index, index) {
-  %ones = index.constant -1 : index
+  %all_bits_set = index.constant -1 : index
   %and_zero = index.constant 0 : index
   %xor_self = index.constant 0 : index
-  func.return %x, %and_zero, %x, %x, %x, %ones, %x, %xor_self : index, index, index, index, index, index, index, index
+  func.return %x, %and_zero, %x, %x, %x, %all_bits_set, %x, %xor_self : index, index, index, index, index, index, index, index
 }
 
 // ====
@@ -966,10 +1228,10 @@ func.def @xori_cancels_nested_operand(%x: index, %y: index) -> (index, index) {
 // ====
 
 func.def @xori_cancels_duplicate_exact_constants(%x: index) -> (index) {
-  %c1 = index.constant 7 : index
-  %c2 = index.constant 7 : index
-  %nested = index.xori %x, %c1 : index
-  %r = index.xori %nested, %c2 : index
+  %lhs_constant = index.constant 7 : index
+  %rhs_constant = index.constant 7 : index
+  %nested = index.xori %x, %lhs_constant : index
+  %r = index.xori %nested, %rhs_constant : index
   func.return %r : index
 }
 // ----
@@ -979,27 +1241,29 @@ func.def @xori_cancels_duplicate_exact_constants(%x: index) -> (index) {
 
 // ====
 
-func.def @shift_identities_and_reassociation(%x: index) -> (index, index, index, index, index, index) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %shl_zero_amount = index.shli %x, %zero : index
-  %shrsi_zero_amount = index.shrsi %x, %zero : index
-  %shrui_zero_amount = index.shrui %x, %zero : index
-  %shl_zero_value = index.shli %zero, %one : index
-  %inner_shl = index.shli %x, %one : index
-  %reassoc_shl = index.shli %inner_shl, %two : index
-  %inner_shr = index.shrui %x, %one : index
-  %reassoc_shr = index.shrui %inner_shr, %two : index
+func.def @shift_identities_without_target_reassociation(%x: index) -> (index, index, index, index, index, index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %shl_zero_amount = index.shli %x, %c0 : index
+  %shrsi_zero_amount = index.shrsi %x, %c0 : index
+  %shrui_zero_amount = index.shrui %x, %c0 : index
+  %shl_zero_value = index.shli %c0, %c1 : index
+  %inner_shl = index.shli %x, %c1 : index
+  %reassoc_shl = index.shli %inner_shl, %c2 : index
+  %inner_shr = index.shrui %x, %c1 : index
+  %reassoc_shr = index.shrui %inner_shr, %c2 : index
   func.return %shl_zero_amount, %shrsi_zero_amount, %shrui_zero_amount, %shl_zero_value, %reassoc_shl, %reassoc_shr : index, index, index, index, index, index
 }
 // ----
-func.def @shift_identities_and_reassociation(%x: index) -> (index, index, index, index, index, index) {
+func.def @shift_identities_without_target_reassociation(%x: index) -> (index, index, index, index, index, index) {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
   %shl_zero_value = index.constant 0 : index
-  %20 = index.constant 3 : index
-  %reassoc_shl = index.shli %x, %20 : index
-  %18 = index.constant 3 : index
-  %reassoc_shr = index.shrui %x, %18 : index
+  %inner_shl = index.shli %x, %c1 : index
+  %reassoc_shl = index.shli %inner_shl, %c2 : index
+  %inner_shr = index.shrui %x, %c1 : index
+  %reassoc_shr = index.shrui %inner_shr, %c2 : index
   func.return %x, %x, %x, %shl_zero_value, %reassoc_shl, %reassoc_shr : index, index, index, index, index, index
 }
 
@@ -1019,18 +1283,18 @@ func.def @shrsi_non_negative_becomes_shrui(%x: index, %amount: index) -> (index)
 
 // ====
 
-func.def @rotate_identities_and_direction(%x: index) -> (index, index, index) {
-  %zero = index.constant 0 : index
-  %eight = index.constant 8 : index
-  %rotl_zero = index.rotli %x, %zero : index
-  %rotr_zero = index.rotri %x, %zero : index
-  %rotr = index.rotri %x, %eight : index
+func.def @rotate_identities_without_target_direction_change(%x: index) -> (index, index, index) {
+  %c0 = index.constant 0 : index
+  %c8 = index.constant 8 : index
+  %rotl_zero = index.rotli %x, %c0 : index
+  %rotr_zero = index.rotri %x, %c0 : index
+  %rotr = index.rotri %x, %c8 : index
   func.return %rotl_zero, %rotr_zero, %rotr : index, index, index
 }
 // ----
-func.def @rotate_identities_and_direction(%x: index) -> (index, index, index) {
-  %9 = index.constant 56 : index
-  %rotr = index.rotli %x, %9 : index
+func.def @rotate_identities_without_target_direction_change(%x: index) -> (index, index, index) {
+  %c8 = index.constant 8 : index
+  %rotr = index.rotri %x, %c8 : index
   func.return %x, %x, %rotr : index, index, index
 }
 
@@ -1228,4 +1492,200 @@ func.def @select_identities(%x: index, %y: index) -> (index, index) {
 // ----
 func.def @select_identities(%x: index, %y: index) -> (index, index) {
   func.return %y, %x : index, index
+}
+
+// ====
+
+// Target-scoped canonicalization uses the effective index width for bit
+// counts, rotates, power-of-two scales, and shift reassociation.
+test.target<quirky> @target32
+test.target<low_core> @target64
+func.def target(@target32) @target_width_32(%x: index) -> (index, index, index, index) {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c8 = index.constant 8 : index
+  %count = index.ctlzi %c1 : index
+  %rotate = index.rotri %x, %c8 : index
+  %multiply = index.mul %x, %c8 : index
+  %inner_shift = index.shli %x, %c1 : index
+  %outer_shift = index.shli %inner_shift, %c2 : index
+  func.return %count, %rotate, %multiply, %outer_shift : index, index, index, index
+}
+func.def target(@target64) @target_width_64(%x: index) -> (index, index, index, index) {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c8 = index.constant 8 : index
+  %count = index.ctlzi %c1 : index
+  %rotate = index.rotri %x, %c8 : index
+  %multiply = index.mul %x, %c8 : index
+  %inner_shift = index.shli %x, %c1 : index
+  %outer_shift = index.shli %inner_shift, %c2 : index
+  func.return %count, %rotate, %multiply, %outer_shift : index, index, index, index
+}
+
+// ----
+test.target<quirky> @target32
+
+test.target<low_core> @target64
+
+func.def target(@target32) @target_width_32(%x: index) -> (index, index, index, index) {
+  %count = index.constant 31 : index
+  %30 = index.constant 24 : index
+  %rotate = index.rotli %x, %30 : index
+  %28 = index.constant 3 : index
+  %multiply = index.shli %x, %28 : index
+  %26 = index.constant 3 : index
+  %outer_shift = index.shli %x, %26 : index
+  func.return %count, %rotate, %multiply, %outer_shift : index, index, index, index
+}
+
+func.def target(@target64) @target_width_64(%x: index) -> (index, index, index, index) {
+  %count = index.constant 63 : index
+  %37 = index.constant 56 : index
+  %rotate = index.rotli %x, %37 : index
+  %35 = index.constant 3 : index
+  %multiply = index.shli %x, %35 : index
+  %33 = index.constant 3 : index
+  %outer_shift = index.shli %x, %33 : index
+  func.return %count, %rotate, %multiply, %outer_shift : index, index, index, index
+}
+
+// ====
+
+// Source facts can retain the full U32 coordinate envelope even when the
+// selected target carries index in signed 32-bit values. Signed comparison,
+// min/max, and arithmetic-shift rewrites must wait until those facts fit the
+// selected carrier. Unsigned comparison and division retain the full-U32 view;
+// the same mathematical facts fit every signed operation on a 64-bit target.
+test.target<quirky> @target32
+test.target<low_core> @target64
+func.def target(@target32) @target_carrier_range_proofs_32(%x: index, %y: index) -> (i1, i1, index, index, index, i64, i64) {
+  %high = index.assume %x [range(%x, 2147483648, 2147483663)] : index
+  %low = index.assume %y [range(%y, 0, 15)] : index
+  %c8 = index.constant 8 : index
+  %c1 = index.constant 1 : index
+  %comparison = index.cmp slt, %high, %low : index
+  %unsigned_comparison = index.cmp ugt, %high, %low : index
+  %minimum = index.min %high, %low : index
+  %quotient = index.div %high, %c8 : index
+  %shifted = index.shrsi %high, %c1 : index
+  %minimum_lo = test.fact_range_lo %minimum : index -> i64
+  %minimum_hi = test.fact_range_hi %minimum : index -> i64
+  func.return %comparison, %unsigned_comparison, %minimum, %quotient, %shifted, %minimum_lo, %minimum_hi : i1, i1, index, index, index, i64, i64
+}
+func.def target(@target64) @target_carrier_range_proofs_64(%x: index, %y: index) -> (i1, i1, index, index, index, i64, i64) {
+  %high = index.assume %x [range(%x, 2147483648, 2147483663)] : index
+  %low = index.assume %y [range(%y, 0, 15)] : index
+  %c8 = index.constant 8 : index
+  %c1 = index.constant 1 : index
+  %comparison = index.cmp slt, %high, %low : index
+  %unsigned_comparison = index.cmp ugt, %high, %low : index
+  %minimum = index.min %high, %low : index
+  %quotient = index.div %high, %c8 : index
+  %shifted = index.shrsi %high, %c1 : index
+  %minimum_lo = test.fact_range_lo %minimum : index -> i64
+  %minimum_hi = test.fact_range_hi %minimum : index -> i64
+  func.return %comparison, %unsigned_comparison, %minimum, %quotient, %shifted, %minimum_lo, %minimum_hi : i1, i1, index, index, index, i64, i64
+}
+
+// ----
+test.target<quirky> @target32
+
+test.target<low_core> @target64
+
+func.def target(@target32) @target_carrier_range_proofs_32(%x: index, %y: index) -> (i1, i1, index, index, index, i64, i64) {
+  %high = index.assume %x [range(%x, 2147483648, 2147483663)] : index
+  %low = index.assume %y [range(%y, 0, 15)] : index
+  %c1 = index.constant 1 : index
+  %comparison = index.cmp slt, %high, %low : index
+  %unsigned_comparison = scalar.constant true : i1
+  %minimum = index.min %high, %low : index
+  %42 = index.constant 3 : index
+  %quotient = index.shrui %high, %42 : index
+  %shifted = index.shrsi %high, %c1 : index
+  %minimum_lo = scalar.constant -2147483648 : i64
+  %minimum_hi = scalar.constant 2147483647 : i64
+  func.return %comparison, %unsigned_comparison, %minimum, %quotient, %shifted, %minimum_lo, %minimum_hi : i1, i1, index, index, index, i64, i64
+}
+
+func.def target(@target64) @target_carrier_range_proofs_64(%x: index, %y: index) -> (i1, i1, index, index, index, i64, i64) {
+  %high = index.assume %x [range(%x, 2147483648, 2147483663)] : index
+  %low = index.assume %y [range(%y, 0, 15)] : index
+  %c1 = index.constant 1 : index
+  %comparison = scalar.constant false : i1
+  %unsigned_comparison = scalar.constant true : i1
+  %48 = index.constant 3 : index
+  %quotient = index.shrui %high, %48 : index
+  %shifted = index.shrui %high, %c1 : index
+  %minimum_lo = scalar.constant 0 : i64
+  %minimum_hi = scalar.constant 15 : i64
+  func.return %comparison, %unsigned_comparison, %low, %quotient, %shifted, %minimum_lo, %minimum_hi : i1, i1, index, index, index, i64, i64
+}
+
+// ====
+
+// Equality needs a common carrier view: -1 and UINT32_MAX are distinct in the
+// source fact envelope but alias the same 32-bit payload. Symbolic signed
+// relations likewise remain target-width constrained when direct interval
+// facts are inconclusive.
+test.target<quirky> @target32
+test.target<low_core> @target64
+func.def target(@target32) @target_carrier_equality_32() -> (i1) {
+  %cn1 = index.constant -1 : index
+  %unsigned_max = index.constant 4294967295 : index
+  %comparison = index.cmp eq, %cn1, %unsigned_max : index
+  func.return %comparison : i1
+}
+func.def target(@target64) @target_carrier_equality_64() -> (i1) {
+  %cn1 = index.constant -1 : index
+  %unsigned_max = index.constant 4294967295 : index
+  %comparison = index.cmp eq, %cn1, %unsigned_max : index
+  func.return %comparison : i1
+}
+func.def target(@target32) @target_carrier_symbolic_compare_32(%x: index) -> (i1) {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %lhs = index.add %x, %c1 : index
+  %rhs = index.add %x, %c2 : index
+  %comparison = index.cmp slt, %lhs, %rhs : index
+  func.return %comparison : i1
+}
+func.def target(@target64) @target_carrier_symbolic_compare_64(%x: index) -> (i1) {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %lhs = index.add %x, %c1 : index
+  %rhs = index.add %x, %c2 : index
+  %comparison = index.cmp slt, %lhs, %rhs : index
+  func.return %comparison : i1
+}
+
+// ----
+test.target<quirky> @target32
+
+test.target<low_core> @target64
+
+func.def target(@target32) @target_carrier_equality_32() -> (i1) {
+  %cn1 = index.constant -1 : index
+  %unsigned_max = index.constant 4294967295 : index
+  %comparison = index.cmp eq, %cn1, %unsigned_max : index
+  func.return %comparison : i1
+}
+
+func.def target(@target64) @target_carrier_equality_64() -> (i1) {
+  %comparison = scalar.constant false : i1
+  func.return %comparison : i1
+}
+
+func.def target(@target32) @target_carrier_symbolic_compare_32(%x: index) -> (i1) {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %lhs = index.add %x, %c1 : index
+  %rhs = index.add %x, %c2 : index
+  %comparison = index.cmp slt, %lhs, %rhs : index
+  func.return %comparison : i1
+}
+
+func.def target(@target64) @target_carrier_symbolic_compare_64(%x: index) -> (i1) {
+  %comparison = scalar.constant true : i1
+  func.return %comparison : i1
 }

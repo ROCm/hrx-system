@@ -126,7 +126,7 @@ static iree_status_t iree_hal_amdgpu_staging_pool_resolve_access_agents(
       .physical_device_count = topology->gpu_agent_count,
       .queue_count_per_physical_device = topology->gpu_agent_queue_count,
   };
-  return iree_hal_amdgpu_access_agent_list_resolve(
+  return iree_hal_amdgpu_access_agent_list_resolve_memory_agents(
       topology, domain, queue_affinity_mask, out_agent_list);
 }
 
@@ -429,8 +429,10 @@ iree_status_t iree_hal_amdgpu_staging_pool_initialize(
     };
     status = iree_hal_amdgpu_buffer_create(
         libhsa, placement,
-        IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+        IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
+            IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
         IREE_HAL_MEMORY_ACCESS_ALL, IREE_HAL_BUFFER_USAGE_TRANSFER,
+        IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE,
         (iree_device_size_t)total_size, (iree_device_size_t)total_size,
         host_ptr,
         (iree_hal_buffer_release_callback_t){

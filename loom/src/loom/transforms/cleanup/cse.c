@@ -9,13 +9,17 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "loom/analysis/ownership.h"
 #include "loom/codegen/low/function.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ir/structural_hash.h"
 #include "loom/ops/op_defs.h"
-#include "loom/target/selection.h"
+#include "loom/target/function_version.h"
+#include "loom/target/pass_environment.h"
+#include "loom/util/cfg_graph.h"
 #include "loom/util/dominance.h"
 
 #define LOOM_CSE_STATISTICS(V, statistics_type)                        \
@@ -40,17 +44,6 @@ const loom_pass_info_t* loom_cse_pass_info(void) {
 // Op hashing and equality
 //===----------------------------------------------------------------------===//
 
-// FNV-1a hash over a byte range, folded into a running hash.
-static uint32_t loom_cse_hash_bytes(const void* data, iree_host_size_t length,
-                                    uint32_t hash) {
-  const uint8_t* bytes = (const uint8_t*)data;
-  for (iree_host_size_t i = 0; i < length; ++i) {
-    hash ^= bytes[i];
-    hash *= 16777619u;
-  }
-  return hash;
-}
-
 // Computes a content-aware hash for an op based on its kind, operands,
 // result types, attributes, and instance flags. Uses loom_attribute_hash
 // for each attribute so pointer-valued attribute kinds (I64_ARRAY,
@@ -60,36 +53,40 @@ static uint32_t loom_cse_hash_bytes(const void* data, iree_host_size_t length,
 // different result types from the same operands.
 static uint32_t loom_cse_hash_op(const loom_module_t* module,
                                  const loom_op_t* op) {
-  uint32_t hash = 2166136261u;
-  hash = loom_cse_hash_bytes(&op->kind, sizeof(op->kind), hash);
+  uint32_t hash = loom_structural_hash_initialize();
+  hash = loom_structural_hash_mix_u16(hash, op->kind);
+  hash = loom_structural_hash_mix_u16(hash, op->operand_count);
   const loom_value_id_t* operands = loom_op_operands((loom_op_t*)op);
-  hash = loom_cse_hash_bytes(
-      operands, (iree_host_size_t)op->operand_count * sizeof(loom_value_id_t),
-      hash);
+  for (uint16_t i = 0; i < op->operand_count; ++i) {
+    hash = loom_structural_hash_mix_u32(hash, operands[i]);
+  }
   const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
   uint8_t operand_segment_count = loom_op_vtable_operand_segment_count(vtable);
+  hash = loom_structural_hash_mix_u8(hash, operand_segment_count);
   if (operand_segment_count > 0) {
-    hash = loom_cse_hash_bytes(
-        loom_op_const_operand_segment_counts(op),
-        (iree_host_size_t)operand_segment_count * sizeof(uint16_t), hash);
+    const uint16_t* segment_counts = loom_op_const_operand_segment_counts(op);
+    for (uint8_t i = 0; i < operand_segment_count; ++i) {
+      hash = loom_structural_hash_mix_u16(hash, segment_counts[i]);
+    }
   }
   const loom_value_id_t* results = loom_op_results((loom_op_t*)op);
+  hash = loom_structural_hash_mix_u16(hash, op->result_count);
   for (uint16_t i = 0; i < op->result_count; ++i) {
     if (results[i] != LOOM_VALUE_ID_INVALID) {
       loom_type_t type = loom_module_value_type(module, results[i]);
-      hash = loom_cse_hash_bytes(&type, sizeof(type), hash);
+      hash = loom_structural_hash_mix_u32(hash, loom_type_hash(type));
     }
   }
+  hash = loom_structural_hash_mix_u8(hash, op->attribute_count);
   if (op->attribute_count > 0) {
     const loom_attribute_t* attrs = loom_op_attrs((loom_op_t*)op);
     for (uint8_t i = 0; i < op->attribute_count; ++i) {
       uint32_t attribute_hash = loom_attribute_hash(&attrs[i]);
-      hash = loom_cse_hash_bytes(&attribute_hash, sizeof(attribute_hash), hash);
+      hash = loom_structural_hash_mix_u32(hash, attribute_hash);
     }
   }
-  hash = loom_cse_hash_bytes(&op->instance_flags, sizeof(op->instance_flags),
-                             hash);
-  return hash;
+  hash = loom_structural_hash_mix_u8(hash, op->instance_flags);
+  return loom_structural_hash_finalize(hash);
 }
 
 // Structural equality: two ops are CSE-equivalent if they have the
@@ -209,24 +206,20 @@ static loom_cse_low_state_t loom_cse_low_descriptor_state(
   return state;
 }
 
-static iree_status_t loom_cse_resolve_low_packet_state(
-    const loom_module_t* module, const loom_low_resolved_target_t* target,
-    const loom_op_t* op, loom_cse_low_state_t* out_state) {
-  *out_state = (loom_cse_low_state_t){0};
+static loom_cse_low_state_t loom_cse_low_packet_state(
+    const loom_low_resolved_target_t* target, const loom_op_t* op) {
   if (!target || !target->descriptor_set) {
-    return iree_ok_status();
+    return (loom_cse_low_state_t){0};
   }
 
-  loom_low_resolved_descriptor_packet_t packet = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_low_resolve_descriptor_packet(module, target, op, &packet));
-  if (packet.kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE || !packet.descriptor) {
-    return iree_ok_status();
+  loom_low_descriptor_packet_t packet = {0};
+  loom_low_descriptor_packet_initialize(target->descriptor_set, op, &packet);
+  if (packet.kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
+    return (loom_cse_low_state_t){0};
   }
 
-  *out_state =
-      loom_cse_low_descriptor_state(target->descriptor_set, packet.descriptor);
-  return iree_ok_status();
+  return loom_cse_low_descriptor_state(target->descriptor_set,
+                                       packet.descriptor);
 }
 
 //===----------------------------------------------------------------------===//
@@ -248,7 +241,7 @@ static iree_status_t loom_cse_resolve_low_packet_state(
 typedef struct loom_cse_entry_t {
   // NULL = empty, TOMBSTONE = deleted, else = live.
   loom_op_t* op;
-  // FNV-1a hash of the op's identity.
+  // Structural hash of the op's identity.
   uint32_t hash;
   // Trait flags at insert time.
   loom_trait_flags_t traits;
@@ -421,8 +414,9 @@ static void loom_cse_table_invalidate_all(loom_cse_table_t* table) {
 // Multi-block regions use the computed CFG dominator tree even if no cleanup
 // pass has stamped the region flag yet. Every reachable block scope is parented
 // by its immediate dominator scope. That makes producers from any dominating
-// block visible to dominated descendants without speculating work across
-// control-flow predicates.
+// block visible to dominated descendants. Mutable-state expressions only walk
+// through straight-line block edges; joins and loop headers may observe state
+// changed along another incoming path or a prior loop iteration.
 //
 // Arena allocation: all scopes and tables are allocated from a
 // dedicated scope arena that is reset between top-level blocks.
@@ -430,31 +424,41 @@ static void loom_cse_table_invalidate_all(loom_cse_table_t* table) {
 // the sum of all subtrees across the function.
 
 typedef struct loom_cse_scope_t {
+  // CSE candidates defined in this block.
   loom_cse_table_t table;
+  // Whether mutable-state candidates must not be reused from parent scopes.
+  bool blocks_stateful_parent_lookup;
+  // Dominating scope whose candidates may be visible in this block.
   struct loom_cse_scope_t* parent;
 } loom_cse_scope_t;
 
 // Allocates a new scope with a hash table sized for |block|.
 static iree_status_t loom_cse_scope_allocate(iree_arena_allocator_t* arena,
                                              loom_cse_scope_t* parent,
+                                             bool blocks_stateful_parent_lookup,
                                              const loom_block_t* block,
                                              loom_cse_scope_t** out_scope) {
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate(arena, sizeof(loom_cse_scope_t), (void**)out_scope));
   (*out_scope)->parent = parent;
+  (*out_scope)->blocks_stateful_parent_lookup = blocks_stateful_parent_lookup;
   iree_host_size_t capacity = iree_host_size_next_power_of_two(
       iree_max((iree_host_size_t)block->op_count * 2, 16));
   return loom_cse_table_initialize(arena, capacity, block->op_count,
                                    &(*out_scope)->table);
 }
 
-// Walks the scope chain looking for an equivalent op.
+// Walks the scope chain looking for an equivalent op. Stateful expressions may
+// only cross block boundaries known to execute in a straight line. Pure
+// expressions remain reusable anywhere their definition dominates.
 static loom_op_t* loom_cse_scope_lookup(const loom_cse_scope_t* scope,
                                         const loom_module_t* module,
-                                        const loom_op_t* op, uint32_t hash) {
+                                        const loom_op_t* op, uint32_t hash,
+                                        bool is_stateful) {
   for (const loom_cse_scope_t* s = scope; s; s = s->parent) {
     loom_op_t* found = loom_cse_table_find(&s->table, module, op, hash);
     if (found) return found;
+    if (is_stateful && s->blocks_stateful_parent_lookup) break;
   }
   return NULL;
 }
@@ -559,6 +563,30 @@ static loom_cse_scope_t* loom_cse_cfg_scope_parent_for_block(
              : parent_scope;
 }
 
+// Returns true when mutable state observed in a dominating scope may have
+// changed before a later dynamic execution of |block|. A single edge from the
+// immediate dominator is the only inter-block path that is unconditionally
+// straight-line. The region entry is also straight-line when it has no CFG
+// predecessors; entry from its containing op is represented by |parent_scope|.
+static bool loom_cse_cfg_block_blocks_stateful_parent_lookup(
+    const loom_cfg_graph_t* cfg_graph, const loom_dominance_info_t* dominance,
+    const loom_region_t* region, uint16_t block_index) {
+  if (cfg_graph->malformed) return true;
+  const loom_cfg_block_info_t* block_info = &cfg_graph->blocks[block_index];
+  if (block_index == 0 && block_info->predecessor_count == 0) return false;
+  if (block_info->predecessor_count != 1) return true;
+
+  const loom_block_t* immediate_dominator =
+      loom_dominance_immediate_dominator_block(dominance, block_info->block);
+  uint16_t immediate_dominator_index = 0;
+  if (!loom_region_try_block_index(region, immediate_dominator,
+                                   &immediate_dominator_index)) {
+    return true;
+  }
+  return cfg_graph->predecessor_indices[block_info->predecessor_start] !=
+         immediate_dominator_index;
+}
+
 static iree_status_t loom_cse_compute_cfg_block_order(
     iree_arena_allocator_t* arena, const loom_dominance_info_t* dominance,
     loom_region_t* region, uint16_t** out_order) {
@@ -627,11 +655,18 @@ static iree_status_t loom_cse_push_cfg_region_block_frames(
   memset(block_scopes, 0,
          (iree_host_size_t)region->block_count * sizeof(*block_scopes));
 
+  loom_cfg_graph_t cfg_graph = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_cfg_graph_build(dominance->module, region, scope_arena, &cfg_graph));
+
   for (uint16_t block_index = 0; block_index < region->block_count;
        ++block_index) {
     loom_block_t* block = loom_region_block(region, block_index);
     IREE_RETURN_IF_ERROR(loom_cse_scope_allocate(
-        scope_arena, /*parent=*/NULL, block, &block_scopes[block_index]));
+        scope_arena, /*parent=*/NULL,
+        loom_cse_cfg_block_blocks_stateful_parent_lookup(&cfg_graph, dominance,
+                                                         region, block_index),
+        block, &block_scopes[block_index]));
   }
   for (uint16_t block_index = 0; block_index < region->block_count;
        ++block_index) {
@@ -671,8 +706,9 @@ static iree_status_t loom_cse_push_region_block_frames(
   if (region->block_count == 1) {
     loom_block_t* entry_block = loom_region_entry_block(region);
     loom_cse_scope_t* child_scope = NULL;
-    IREE_RETURN_IF_ERROR(loom_cse_scope_allocate(scope_arena, parent_scope,
-                                                 entry_block, &child_scope));
+    IREE_RETURN_IF_ERROR(loom_cse_scope_allocate(
+        scope_arena, parent_scope, /*blocks_stateful_parent_lookup=*/false,
+        entry_block, &child_scope));
     loom_cse_stack_push(stack, entry_block, child_scope);
     return iree_ok_status();
   }
@@ -710,12 +746,40 @@ static inline bool loom_cse_prevents_cse(loom_trait_flags_t traits) {
                     LOOM_TRAIT_CONVERGENT)) != 0;
 }
 
-static bool loom_cse_use_consumes_operand(const loom_use_t use) {
+static bool loom_cse_result_transfers_operand_ownership(
+    const loom_module_t* module, const loom_op_t* op, uint16_t result_index,
+    uint16_t* out_operand_index) {
+  loom_ownership_result_effect_t effect = {0};
+  if (!loom_ownership_result_effect_at(module, op, result_index, &effect) ||
+      (effect.effect != LOOM_RESULT_OWNERSHIP_TIED &&
+       effect.effect != LOOM_RESULT_OWNERSHIP_MOVED)) {
+    return false;
+  }
+  *out_operand_index = effect.source_operand_index;
+  return true;
+}
+
+static bool loom_cse_op_transfers_operand_ownership(const loom_module_t* module,
+                                                    const loom_op_t* op) {
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    uint16_t operand_index = 0;
+    if (loom_cse_result_transfers_operand_ownership(module, op, i,
+                                                    &operand_index)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool loom_cse_use_consumes_operand(const loom_module_t* module,
+                                          const loom_use_t use) {
   const loom_op_t* user_op = loom_use_user_op(use);
   const uint16_t operand_index = loom_use_operand_index(use);
-  const loom_tied_result_t* tied_results = loom_op_tied_results(user_op);
-  for (uint16_t i = 0; i < user_op->tied_result_count; ++i) {
-    if (tied_results[i].operand_index == operand_index) {
+  for (uint16_t i = 0; i < user_op->result_count; ++i) {
+    uint16_t source_operand_index = 0;
+    if (loom_cse_result_transfers_operand_ownership(module, user_op, i,
+                                                    &source_operand_index) &&
+        source_operand_index == operand_index) {
       return true;
     }
   }
@@ -733,7 +797,7 @@ static bool loom_cse_result_is_consumed(const loom_module_t* module,
     const loom_value_t* value = loom_module_value(module, result);
     const loom_use_t* use = NULL;
     loom_value_for_each_use(value, use) {
-      if (loom_cse_use_consumes_operand(*use)) {
+      if (loom_cse_use_consumes_operand(module, *use)) {
         return true;
       }
     }
@@ -758,23 +822,19 @@ iree_status_t loom_cse_run(loom_pass_t* pass, loom_module_t* module,
     const loom_low_descriptor_registry_t* descriptor_registry =
         loom_low_pass_capability_descriptor_registry(low_capability);
     if (descriptor_registry) {
-      const loom_target_pass_capability_t* target_capability =
-          loom_target_pass_capability_from_pass(pass);
+      loom_symbol_fact_table_t symbol_facts = {0};
+      loom_symbol_fact_table_initialize(&symbol_facts, pass->arena);
       IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-          module, function.op, descriptor_registry,
-          loom_target_pass_capability_target_selection(target_capability),
-          pass->diagnostic_emitter, &low_target));
+          module, &symbol_facts, function.op,
+          loom_target_function_version_target_facts(pass->function_version),
+          descriptor_registry, pass->diagnostic_emitter, &low_target));
       if (low_target.descriptor_set) {
         low_target_ptr = &low_target;
       }
     }
   }
 
-  loom_dominance_info_t dominance = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_dominance_info_initialize(module, pass->arena, &dominance));
-
-  // Scope arena: holds all scope structs and hash table arrays.
+  // Scope arena: holds dominance, scope structs, and hash table arrays.
   // Reset between root regions to bound peak memory to the largest single
   // function-like region. Shares the pass arena's block pool.
   iree_arena_allocator_t scope_arena;
@@ -792,6 +852,13 @@ iree_status_t loom_cse_run(loom_pass_t* pass, loom_module_t* module,
     if (!region) continue;
 
     iree_arena_reset(&scope_arena);
+    loom_dominance_info_t dominance = {0};
+    status = loom_dominance_info_initialize_region(module, region, &scope_arena,
+                                                   &dominance);
+    if (!iree_status_is_ok(status)) {
+      break;
+    }
+
     stack.count = 0;
     status = loom_cse_push_region_block_frames(&stack, pass->arena,
                                                &scope_arena, &dominance, region,
@@ -820,10 +887,8 @@ iree_status_t loom_cse_run(loom_pass_t* pass, loom_module_t* module,
       }
 
       loom_trait_flags_t traits = loom_op_effective_traits(module, op);
-      loom_cse_low_state_t low_state = {0};
-      status = loom_cse_resolve_low_packet_state(module, low_target_ptr, op,
-                                                 &low_state);
-      if (!iree_status_is_ok(status)) break;
+      const loom_cse_low_state_t low_state =
+          loom_cse_low_packet_state(low_target_ptr, op);
       const uint64_t state_write_bits = low_state.writes;
       if (state_write_bits != 0) {
         loom_cse_scope_invalidate_state_dependencies(frame->scope,
@@ -861,7 +926,7 @@ iree_status_t loom_cse_run(loom_pass_t* pass, loom_module_t* module,
       if (op->result_count == 0) {
         continue;
       }
-      if (op->tied_result_count != 0) {
+      if (loom_cse_op_transfers_operand_ownership(module, op)) {
         continue;
       }
       if (loom_cse_result_is_consumed(module, op)) {
@@ -880,8 +945,10 @@ iree_status_t loom_cse_run(loom_pass_t* pass, loom_module_t* module,
 
       // Look up the scope chain for an equivalent op.
       uint32_t hash = loom_cse_hash_op(module, op);
+      const bool is_stateful = !iree_any_bit_set(traits, LOOM_TRAIT_PURE) ||
+                               low_state.dependencies != 0;
       loom_op_t* existing =
-          loom_cse_scope_lookup(frame->scope, module, op, hash);
+          loom_cse_scope_lookup(frame->scope, module, op, hash, is_stateful);
       if (existing) {
         // Replace all uses and erase.
         loom_value_id_t* op_results = loom_op_results(op);

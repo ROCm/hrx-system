@@ -7,62 +7,27 @@
 #include <iterator>
 #include <string>
 
-#include "build_tools/amdgpu/target_map.h"
 #include "hrx_test_fixture.hpp"
-#include "libhrx/cts/amdgpu_executable_test_kernels.h"
+#include "libhrx/cts/core/amdgpu_executable_test_data.hpp"
 
 namespace {
+
+// Kernels defined by libhrx/cts/tests/executable/executable_kernels.c, the
+// source compiled into the HSACO this test loads. Nothing else in that source
+// becomes an export, so these names are the loaded executable's whole export
+// table.
+constexpr const char* kFixtureKernelNames[] = {
+    "hrx_noop",
+    "hrx_store_output",
+    "hrx_transform_nested_pointers",
+    "hrx_spin_dependent_chain",
+};
 
 std::string gpu_architecture(hrx_device_t device) {
   std::array<char, 64> arch = {};
   REQUIRE_OK(hrx().device_get_property(device, HRX_DEVICE_PROPERTY_ARCHITECTURE,
                                        arch.data(), arch.size()));
   return std::string(arch.data());
-}
-
-std::string base_gpu_target(std::string arch) {
-  const size_t feature_pos = arch.find(':');
-  if (feature_pos != std::string::npos) {
-    arch.resize(feature_pos);
-  }
-  return arch;
-}
-
-struct HsacoImage {
-  const iree_file_toc_t* file = nullptr;
-  std::string executable_format;
-};
-
-const iree_file_toc_t* find_hsaco_for_target(const std::string& target) {
-  char fragment[64] = {};
-  if (!iree_amdgpu_target_label_fragment(target.c_str(), fragment,
-                                         sizeof(fragment))) {
-    return nullptr;
-  }
-  const std::string filename =
-      std::string("hrx_cts_executable_kernel_") + fragment + ".so";
-  const iree_file_toc_t* toc = hrx_cts_amdgpu_executable_test_kernels_create();
-  for (size_t i = 0; i < hrx_cts_amdgpu_executable_test_kernels_size(); ++i) {
-    if (filename == toc[i].name) {
-      return &toc[i];
-    }
-  }
-  return nullptr;
-}
-
-HsacoImage find_hsaco(const std::string& arch) {
-  if (const iree_file_toc_t* file = find_hsaco_for_target(arch)) {
-    return HsacoImage{file, arch};
-  }
-  const char* code_object_target =
-      iree_amdgpu_code_object_target_for_exact(arch.c_str());
-  if (code_object_target && arch != code_object_target) {
-    if (const iree_file_toc_t* file =
-            find_hsaco_for_target(code_object_target)) {
-      return HsacoImage{file, code_object_target};
-    }
-  }
-  return {};
 }
 
 }  // namespace
@@ -73,22 +38,23 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch") {
     return;
   }
 
-  std::string arch = base_gpu_target(gpu_architecture(device_));
+  std::string arch = gpu_architecture(device_);
   if (arch.empty() || arch == "unknown") {
     SUCCEED("Skipping native executable CTS: unknown GPU architecture");
     return;
   }
 
-  HsacoImage hsaco = find_hsaco(arch);
+  hrx_cts::AmdgpuExecutableTestImage hsaco =
+      hrx_cts::FindAmdgpuExecutableTestImage(arch);
   if (!hsaco.file) {
     SUCCEED("Skipping native executable CTS: no build-time HSACO test asset");
     return;
   }
 
   hrx_executable_t executable = nullptr;
-  REQUIRE_OK(
-      hrx().executable_load_data(device_, hsaco.file->data, hsaco.file->size,
-                                 hsaco.executable_format.c_str(), &executable));
+  REQUIRE_OK(hrx().executable_load_data(device_, hsaco.file->data,
+                                        hsaco.file->size, "amdgpu",
+                                        hsaco.target_key.c_str(), &executable));
   REQUIRE(executable != nullptr);
 
   hrx().executable_retain(executable);
@@ -96,7 +62,21 @@ TEST_CASE_METHOD(HrxTestFixture, "executable_load_lookup_dispatch") {
 
   size_t export_count = 0;
   REQUIRE_OK(hrx().executable_export_count(executable, &export_count));
-  REQUIRE(export_count == 2);
+  REQUIRE(export_count == std::size(kFixtureKernelNames));
+
+  // A count says nothing about which kernels it counted. Resolving every
+  // fixture name to an ordinal of its own pairs with it to say the export table
+  // is exactly this set.
+  std::array<bool, std::size(kFixtureKernelNames)> ordinal_seen = {};
+  for (const char* kernel_name : kFixtureKernelNames) {
+    INFO("kernel " << kernel_name);
+    uint32_t ordinal = UINT32_MAX;
+    REQUIRE_OK(hrx().executable_lookup_export_by_name(executable, kernel_name,
+                                                      &ordinal));
+    REQUIRE(ordinal < export_count);
+    REQUIRE(!ordinal_seen[ordinal]);
+    ordinal_seen[ordinal] = true;
+  }
 
   uint32_t noop_ordinal = UINT32_MAX;
   REQUIRE_OK(hrx().executable_lookup_export_by_name(executable, "hrx_noop",

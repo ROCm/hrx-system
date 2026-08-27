@@ -45,6 +45,7 @@ iree_cc_library(
   DEPS
     ::common
     ::reader
+    iree::base::internal
   PUBLIC
 )
 
@@ -351,6 +352,7 @@ iree_cc_binary(
     "test_fixture_generator.c"
   DEPS
     iree::base
+    iree::base::tooling::flags
     iree::hal
     iree::hal::utils::profile_file
     iree::io::file_handle
@@ -374,6 +376,9 @@ iree_local_py_test(
   ARGS
     "--fixture-generator=$<TARGET_FILE:iree_tooling_profile_test_fixture_generator>"
     "--iree-profile=$<TARGET_FILE:iree::tools::iree-profile>"
+  DEPS
+    iree_tooling_profile_test_fixture_generator
+    iree::tools::iree-profile
   LABELS
     "noriscv"
   PACKAGE_DIRS

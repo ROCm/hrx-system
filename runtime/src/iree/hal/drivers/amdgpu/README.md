@@ -103,7 +103,7 @@ HIP or the legacy ROCm HAL driver. The major runtime objects are:
 * a driver that discovers HSA agents and creates logical devices;
 * one logical device spanning one or more physical GPU devices;
 * one physical-device object per HSA GPU agent, including queues, memory pools,
-  executable caches, profiling state, and device metrics;
+  profiling state, and device metrics;
 * host queues that translate HAL queue operations into AQL packet streams;
 * replayable command buffers that store backend command records and emit AQL
   packets at submission time; and
@@ -190,9 +190,12 @@ having ROCm tools available.
 
 The `IREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE` CMake variable controls the
 producer. `prebuilt` is the default. `source` rebuilds the code objects from the
-device C sources and requires an AMDGPU-capable clang plus `llvm-link`, `lld`,
-and `llvm-objcopy`. Source mode can use an in-tree LLVM build, an out-of-tree
-host tools build, or a ROCm/TheRock SDK. Important CMake knobs are
+device C sources and requires an AMDGPU-capable clang plus `llvm-ar`,
+`llvm-link`, `lld`, and `llvm-objcopy`. These device tools are selected
+independently from the C and C++ host compilers, so an MSVC host build can use
+the clang shipped in a ROCm/TheRock SDK. Source mode can use an explicitly
+composed installed LLVM tool set or a ROCm/TheRock SDK. Important CMake knobs
+are
 `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN`,
 `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH`,
 `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_TOOLS_DIR`, and the per-tool overrides
@@ -223,8 +226,9 @@ iree-bazel-build --//runtime/src/iree/hal/drivers/amdgpu:targets=igpu-all //runt
 
 By default Bazel uses the checked-in prebuilt blobs. Developers editing the HAL
 device kernels can opt into live source rebuilds with
-`--config=amdgpu_device_binaries_source_rocm` or
-`--config=amdgpu_device_binaries_source_llvm_project`.
+`--//runtime/src/iree/hal/drivers/amdgpu/device/binaries:build_mode=source`
+and select the producer with
+`--repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm` or `llvm-project`.
 
 See
 [`build_tools/amdgpu/README.md`](../../../../../../build_tools/amdgpu/README.md)

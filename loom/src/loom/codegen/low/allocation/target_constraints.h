@@ -144,7 +144,8 @@ typedef struct loom_low_allocation_target_constraints_t {
   loom_low_allocation_resolved_reserved_range_t* reserved_ranges;
   // Number of entries in |reserved_ranges|.
   iree_host_size_t reserved_range_count;
-  // Maximum assigned location end indexed by descriptor register class ID.
+  // Maximum allocated value or move-scratch location end indexed by
+  // descriptor register class ID.
   uint32_t* max_assigned_location_end_by_reg_class;
 } loom_low_allocation_target_constraints_t;
 
@@ -219,10 +220,20 @@ loom_low_allocation_target_constraints_fixed_value_for_value(
     const loom_low_allocation_target_constraints_t* constraints,
     loom_value_id_t value_id);
 
-// Records |assignment|'s concrete location in the per-class search bounds.
-void loom_low_allocation_target_constraints_record_assignment_location_end(
+// Includes a concrete target-visible location in the per-class physical
+// extent. Fixed architectural register windows do not contribute.
+void loom_low_allocation_target_constraints_record_location_extent(
     loom_low_allocation_target_constraints_t* constraints,
-    const loom_low_allocation_assignment_t* assignment);
+    uint16_t descriptor_reg_class_id,
+    loom_low_allocation_location_kind_t location_kind, uint32_t location_base,
+    uint32_t location_count);
+
+// Rebuilds the per-class assignment bounds from |assignments| after their
+// concrete locations change.
+void loom_low_allocation_target_constraints_rebuild_assignment_location_ends(
+    loom_low_allocation_target_constraints_t* constraints,
+    const loom_low_allocation_assignment_t* assignments,
+    iree_host_size_t assignment_count);
 
 // Returns the exclusive upper search bound implied by assigned, fixed, and
 // reserved storage for |reg_class_id| and |location_kind|.

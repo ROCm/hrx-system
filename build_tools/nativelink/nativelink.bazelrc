@@ -1,0 +1,16 @@
+# Copyright 2026 The IREE Authors
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+# Opt-in local NativeLink cache and execution. The server configuration binds
+# this endpoint to loopback; selecting it for another server requires TLS and a
+# deliberate remote trust policy.
+build:nativelink --remote_cache=grpc://127.0.0.1:50051
+build:nativelink --remote_executor=grpc://127.0.0.1:50051
+build:nativelink --remote_default_exec_properties=cpu_count=1
+build:nativelink --remote_local_fallback=false
+build:nativelink --remote_download_outputs=toplevel
+
+# A separately configured Bazel disk cache would duplicate reads and writes on
+# the same machine and obscure which cache served an action. This only disables
+# the disk cache while --config=nativelink is selected; it deletes nothing.
+build:nativelink --disk_cache=

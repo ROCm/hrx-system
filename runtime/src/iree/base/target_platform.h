@@ -57,6 +57,7 @@
 // IREE_PLATFORM_WASI
 // IREE_PLATFORM_WEB
 // IREE_PLATFORM_WINDOWS
+// IREE_PLATFORM_EXECUTABLE_SUFFIX (".exe" on Windows, empty elsewhere)
 
 //==============================================================================
 // IREE_ARCH_*
@@ -346,5 +347,12 @@ enum iree_arch_enum_e {
 #endif  // all platforms
 
 #endif  // !IREE_PLATFORM_GENERIC
+
+// Host executable filename suffix used when resolving platform tools.
+#if defined(IREE_PLATFORM_WINDOWS)
+#define IREE_PLATFORM_EXECUTABLE_SUFFIX ".exe"
+#else
+#define IREE_PLATFORM_EXECUTABLE_SUFFIX ""
+#endif  // IREE_PLATFORM_WINDOWS
 
 #endif  // IREE_BASE_TARGET_PLATFORM_H_

@@ -7,8 +7,8 @@
 // Vulkan HAL device facts used to select SPIR-V target bundles.
 //
 // This package is the target-specific runtime edge for Vulkan/SPIR-V: it
-// converts the active HAL device and executable-cache capabilities into compact
-// target facts. It does not run kernels, own invocation, perform correctness
+// converts the active HAL device capabilities into compact target facts. It
+// does not run kernels, own invocation, perform correctness
 // checks, or emit target binaries.
 
 #ifndef LOOM_TOOLING_EXECUTION_HAL_SPIRV_VULKAN_PROFILE_H_
@@ -34,7 +34,7 @@ enum {
 };
 
 typedef enum loom_spirv_vulkan_hal_profile_flag_bits_e {
-  // The HAL executable cache accepts raw Vulkan BDA SPIR-V modules.
+  // The HAL device accepts raw Vulkan BDA SPIR-V modules.
   LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_RAW_BDA_EXECUTABLE = 1u << 0,
   // The logical device exposes buffer device addresses.
   LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_BUFFER_DEVICE_ADDRESS = 1u << 1,
@@ -74,7 +74,7 @@ typedef enum loom_spirv_vulkan_hal_profile_flag_bits_e {
 
 typedef uint32_t loom_spirv_vulkan_hal_profile_flags_t;
 
-// Device facts queried from a Vulkan HAL device and executable cache.
+// Device facts queried from a Vulkan HAL device.
 typedef struct loom_spirv_vulkan_hal_profile_facts_t {
   // Vulkan API version reported by the selected logical device.
   uint32_t api_version;
@@ -92,17 +92,18 @@ typedef struct loom_spirv_vulkan_hal_profile_facts_t {
 } loom_spirv_vulkan_hal_profile_facts_t;
 
 typedef struct loom_spirv_vulkan_hal_target_profile_storage_t {
-  // SPIR-V profile payload passed opaquely through core compiler target_data.
-  // This must remain the first field so provider deinitialization can recover
-  // the owning storage from loom_run_hal_device_target_t.data.
+  // Structured SPIR-V target profile. This remains first so the owning storage
+  // can be recovered from its target-neutral base pointer.
   loom_spirv_target_profile_t profile;
+  // Target-neutral bundle projected by profile.
+  loom_target_bundle_storage_t target_bundle_storage;
   // Cooperative property storage owned by this target profile.
   loom_spirv_cooperative_property_storage_t cooperative_properties;
 } loom_spirv_vulkan_hal_target_profile_storage_t;
 
-// Queries Vulkan/SPIR-V profile facts from |device| and |executable_cache|.
+// Queries Vulkan/SPIR-V profile facts from |device|.
 iree_status_t loom_spirv_vulkan_hal_profile_query(
-    iree_hal_device_t* device, iree_hal_executable_cache_t* executable_cache,
+    iree_hal_device_t* device,
     loom_spirv_vulkan_hal_profile_facts_t* out_facts);
 
 // Queries active Vulkan cooperative matrix rows into caller-owned storage.

@@ -3,5 +3,40 @@
 # Licensed under the Apache License v2.0 with LLVM Exceptions.
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+# bazel-to-cmake: skip
+
+load(":loom_toolchain.bzl", "loom_tools_toolchains")
 
 package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "defs.bzl",
+    "loom_binary.bzl",
+    "loom_library.bzl",
+    "loom_linking.bzl",
+    "loom_module.bzl",
+    "loom_target_profile.bzl",
+    "loom_toolchain.bzl",
+])
+
+toolchain_type(name = "benchmark_toolchain_type")
+
+toolchain_type(name = "compile_toolchain_type")
+
+toolchain_type(name = "format_toolchain_type")
+
+toolchain_type(name = "lint_toolchain_type")
+
+toolchain_type(name = "link_toolchain_type")
+
+toolchain_type(name = "test_toolchain_type")
+
+loom_tools_toolchains(
+    name = "source_tools",
+    benchmark_tool = "//loom/src/loom/tools/iree-benchmark-loom",
+    compile_tool = "//loom/src/loom/tools/loom-compile",
+    format_tool = "//loom/src/loom/tools/loom-format",
+    link_tool = "//loom/src/loom/tools/loom-link",
+    lint_tool = "//loom/py/loom/tools:loom-lint",
+    test_tool = "//loom/src/loom/tools/iree-test-loom",
+)

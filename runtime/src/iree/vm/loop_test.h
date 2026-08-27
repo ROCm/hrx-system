@@ -187,7 +187,7 @@ TEST_F(LoopTest, CallFailureAborts) {
   // Enqueue a wait that will never complete - if it runs it means we didn't
   // correctly abort it.
   IREE_ASSERT_OK(iree_vm_loop_wait_until(
-      loop, iree_make_timeout_ms(1 * 60 * 1000),
+      loop, iree_infinite_timeout(),
       +[](void* user_data_ptr, iree_vm_loop_t loop, iree_status_t status) {
         IREE_TRACE_SCOPE();
         IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED, status);
@@ -228,7 +228,7 @@ TEST_F(LoopTest, CallFailureAbortsNested) {
         // didn't correctly abort it. We are enqueuing it reentrantly as a user
         // would before we encounter the error below.
         IREE_EXPECT_OK(iree_vm_loop_wait_until(
-            loop, iree_make_timeout_ms(1 * 60 * 1000),
+            loop, iree_infinite_timeout(),
             +[](void* user_data_ptr, iree_vm_loop_t loop,
                 iree_status_t status) {
               IREE_TRACE_SCOPE();
@@ -459,7 +459,7 @@ TEST_F(LoopTest, WaitOneSignaled) {
     bool did_wait_callback = false;
   } user_data;
   IREE_ASSERT_OK(iree_vm_loop_wait_one(
-      loop, wait_source, iree_make_timeout_ms(10),
+      loop, wait_source, iree_infinite_timeout(),
       +[](void* user_data_ptr, iree_vm_loop_t loop, iree_status_t status) {
         IREE_TRACE_SCOPE();
         IREE_EXPECT_OK(status);
@@ -486,7 +486,7 @@ TEST_F(LoopTest, WaitOneBlocking) {
     bool did_wait_callback = false;
   } user_data;
   IREE_ASSERT_OK(iree_vm_loop_wait_one(
-      loop, wait_source, iree_make_timeout_ms(2000),
+      loop, wait_source, iree_infinite_timeout(),
       +[](void* user_data_ptr, iree_vm_loop_t loop, iree_status_t status) {
         IREE_TRACE_SCOPE();
         IREE_EXPECT_OK(status);
@@ -576,8 +576,7 @@ TEST_F(LoopTest, WaitAnySignaled) {
     bool did_wait_callback = false;
   } user_data;
   IREE_ASSERT_OK(iree_vm_loop_wait_any(
-      loop, IREE_ARRAYSIZE(wait_sources), wait_sources,
-      iree_make_timeout_ms(10),
+      loop, IREE_ARRAYSIZE(wait_sources), wait_sources, iree_infinite_timeout(),
       +[](void* user_data_ptr, iree_vm_loop_t loop, iree_status_t status) {
         IREE_TRACE_SCOPE();
         IREE_EXPECT_OK(status);
@@ -605,8 +604,7 @@ TEST_F(LoopTest, WaitAnyBlocking) {
     bool did_wait_callback = false;
   } user_data;
   IREE_ASSERT_OK(iree_vm_loop_wait_any(
-      loop, IREE_ARRAYSIZE(wait_sources), wait_sources,
-      iree_make_timeout_ms(2000),
+      loop, IREE_ARRAYSIZE(wait_sources), wait_sources, iree_infinite_timeout(),
       +[](void* user_data_ptr, iree_vm_loop_t loop, iree_status_t status) {
         IREE_TRACE_SCOPE();
         IREE_EXPECT_OK(status);
@@ -696,8 +694,7 @@ TEST_F(LoopTest, WaitAllSignaled) {
     bool did_wait_callback = false;
   } user_data;
   IREE_ASSERT_OK(iree_vm_loop_wait_all(
-      loop, IREE_ARRAYSIZE(wait_sources), wait_sources,
-      iree_make_timeout_ms(10),
+      loop, IREE_ARRAYSIZE(wait_sources), wait_sources, iree_infinite_timeout(),
       +[](void* user_data_ptr, iree_vm_loop_t loop, iree_status_t status) {
         IREE_TRACE_SCOPE();
         IREE_EXPECT_OK(status);
@@ -725,8 +722,7 @@ TEST_F(LoopTest, WaitAllBlocking) {
     bool did_wait_callback = false;
   } user_data;
   IREE_ASSERT_OK(iree_vm_loop_wait_all(
-      loop, IREE_ARRAYSIZE(wait_sources), wait_sources,
-      iree_make_timeout_ms(2000),
+      loop, IREE_ARRAYSIZE(wait_sources), wait_sources, iree_infinite_timeout(),
       +[](void* user_data_ptr, iree_vm_loop_t loop, iree_status_t status) {
         IREE_TRACE_SCOPE();
         IREE_EXPECT_OK(status);

@@ -54,20 +54,12 @@ typedef struct iree_hal_cuda_kernel_params_t {
   IREE_TRACE(iree_hal_cuda_kernel_debug_info_t debug_info;)
 } iree_hal_cuda_kernel_params_t;
 
-// Infers the format of the executable and calculates its total size.
-// If executable_data.data_length is 0 attempts to infer size from the data.
-// Returns the canonical format string and total size of the executable data.
-iree_status_t iree_hal_cuda_native_executable_infer_format(
-    iree_const_byte_span_t executable_data,
-    iree_host_size_t executable_format_capacity, char* executable_format,
-    iree_host_size_t* out_inferred_size);
-
 // Creates an IREE executable from a CUDA PTX module. The module may contain
 // several kernels that can be extracted along with the associated block size.
 iree_status_t iree_hal_cuda_native_executable_create(
     iree_hal_device_t* device, const iree_hal_cuda_dynamic_symbols_t* symbols,
     CUdevice cu_device, CUcontext cu_context,
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_load_params_t* load_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable);
 
 // Returns the kernel launch information for the given |entry_point| in the

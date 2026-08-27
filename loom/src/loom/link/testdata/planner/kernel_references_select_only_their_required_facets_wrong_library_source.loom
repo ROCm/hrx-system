@@ -1,0 +1,3 @@
+func.def @configured(%count: index) {
+  func.return
+}

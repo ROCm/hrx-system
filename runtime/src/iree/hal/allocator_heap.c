@@ -12,6 +12,10 @@
 #include "iree/hal/buffer_heap_impl.h"
 #include "iree/hal/resource.h"
 
+static const iree_hal_memory_type_t iree_hal_heap_allocator_memory_type =
+    IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+    IREE_HAL_MEMORY_TYPE_HOST_COHERENT | IREE_HAL_MEMORY_TYPE_HOST_CACHED;
+
 typedef struct iree_hal_heap_allocator_t {
   iree_hal_resource_t resource;
   iree_allocator_t host_allocator;
@@ -111,9 +115,7 @@ static iree_status_t iree_hal_heap_allocator_query_memory_heaps(
     return iree_status_from_code(IREE_STATUS_OUT_OF_RANGE);
   }
   heaps[0] = (iree_hal_allocator_memory_heap_t){
-      .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
-              IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
-              IREE_HAL_MEMORY_TYPE_HOST_COHERENT,
+      .type = iree_hal_heap_allocator_memory_type,
       .allowed_usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
                        IREE_HAL_BUFFER_USAGE_DISPATCH |
                        IREE_HAL_BUFFER_USAGE_SHARING_EXPORT |
@@ -125,6 +127,8 @@ static iree_status_t iree_hal_heap_allocator_query_memory_heaps(
                        IREE_HAL_BUFFER_USAGE_MAPPING_OPTIONAL |
                        IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_RANDOM |
                        IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_SEQUENTIAL_WRITE,
+      .atomic_operations = iree_hal_atomic_operation_capabilities_for_host(
+          IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL),
       .max_allocation_size = ~(iree_device_size_t)0,
       .min_alignment = IREE_HAL_HEAP_BUFFER_ALIGNMENT,
   };
@@ -136,6 +140,15 @@ iree_hal_heap_allocator_query_buffer_compatibility(
     iree_hal_allocator_t* IREE_RESTRICT base_allocator,
     iree_hal_buffer_params_t* IREE_RESTRICT params,
     iree_device_size_t* IREE_RESTRICT allocation_size) {
+  if (iree_any_bit_set(params->type, IREE_HAL_MEMORY_TYPE_DEVICE_UNCACHED)) {
+    return IREE_HAL_BUFFER_COMPATIBILITY_NONE;
+  }
+  const iree_hal_memory_type_t required_type =
+      params->type & ~IREE_HAL_MEMORY_TYPE_OPTIMAL;
+  if (!iree_all_bits_set(iree_hal_heap_allocator_memory_type, required_type)) {
+    return IREE_HAL_BUFFER_COMPATIBILITY_NONE;
+  }
+
   // All buffers can be allocated on the heap and all heap-accessible buffers
   // can be imported/exported.
   iree_hal_buffer_compatibility_t compatibility =
@@ -157,11 +170,8 @@ iree_hal_heap_allocator_query_buffer_compatibility(
     }
   }
 
-  // Always ensure we are host-visible.
-  params->type |= IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
-
-  // We are now optimal.
-  params->type &= ~IREE_HAL_MEMORY_TYPE_OPTIMAL;
+  // Heap memory is coherent cached UMA for CPU devices.
+  params->type = iree_hal_heap_allocator_memory_type;
 
   // Host currently uses mapping to copy buffers, which is done a lot.
   // We could probably remove this mutation by preventing copies in those cases.

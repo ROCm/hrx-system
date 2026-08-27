@@ -34,15 +34,13 @@ static iree_status_t loom_json_render_param_value(
             IREE_STATUS_INVALID_ARGUMENT,
             "string list param has count > 0 but values NULL");
       }
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '['));
+      loom_json_array_writer_t array;
+      IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &array));
       for (iree_host_size_t i = 0; i < param->string_list.count; ++i) {
-        if (i > 0) {
-          IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-        }
-        IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
-            stream, param->string_list.values[i]));
+        IREE_RETURN_IF_ERROR(loom_json_array_write_string_element(
+            &array, param->string_list.values[i]));
       }
-      return loom_output_stream_write_char(stream, ']');
+      return loom_json_array_end(&array);
     case LOOM_PARAM_BOOL:
       return loom_output_stream_write_cstring(
           stream, param->boolean ? "true" : "false");
@@ -102,16 +100,18 @@ static iree_status_t loom_json_render_field_ref(
     loom_output_stream_t* stream, loom_diagnostic_field_ref_t field_ref) {
   const char* kind_name = loom_json_diagnostic_field_kind_name(field_ref.kind);
   if (!kind_name) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "invalid diagnostic field ref kind %d",
-                            (int)field_ref.kind);
+    IREE_ASSERT_UNREACHABLE("invalid diagnostic field ref kind");
+    IREE_BUILTIN_UNREACHABLE();
   }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{\"kind\":"));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_cstring(stream, kind_name));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, ",\"index\":%" PRIu16 ",\"occurrence\":%" PRIu16 "}",
-      field_ref.index, field_ref.occurrence));
-  return iree_ok_status();
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("kind"), iree_make_cstring_view(kind_name)));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("index"), field_ref.index));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("occurrence"), field_ref.occurrence));
+  return loom_json_object_end(&object);
 }
 
 // Returns true if the range carries any location metadata worth serializing.
@@ -144,7 +144,7 @@ static iree_host_size_t loom_json_find_line_end(iree_string_view_t source,
 }
 
 static iree_status_t loom_json_render_source_excerpt(
-    loom_output_stream_t* stream, const loom_source_range_t* range) {
+    const loom_source_range_t* range, loom_json_object_writer_t* object) {
   iree_host_size_t position = iree_min(range->start, range->source.size);
   iree_host_size_t line_start =
       loom_json_find_line_start(range->source, position);
@@ -173,101 +173,104 @@ static iree_status_t loom_json_render_source_excerpt(
   bool truncated_suffix = excerpt_end < line_end;
 
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"excerpt\":{"));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream,
-      "\"start_byte\":%zu,\"end_byte\":%zu,"
-      "\"truncated_prefix\":%s,\"truncated_suffix\":%s",
-      (size_t)excerpt_start, (size_t)excerpt_end,
-      truncated_prefix ? "true" : "false",
-      truncated_suffix ? "true" : "false"));
+      loom_json_object_begin_field(object, IREE_SV("excerpt")));
+  loom_json_object_writer_t excerpt;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(object->stream, &excerpt));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &excerpt, IREE_SV("start_byte"), excerpt_start));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &excerpt, IREE_SV("end_byte"), excerpt_end));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
+      &excerpt, IREE_SV("truncated_prefix"), truncated_prefix));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
+      &excerpt, IREE_SV("truncated_suffix"), truncated_suffix));
   if (range->source.size > 0) {
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, ",\"text\":"));
-    IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
-        stream, iree_make_string_view(range->source.data + excerpt_start,
-                                      excerpt_end - excerpt_start)));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &excerpt, IREE_SV("text"),
+        iree_make_string_view(range->source.data + excerpt_start,
+                              excerpt_end - excerpt_start)));
   }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '}'));
-  return iree_ok_status();
+  return loom_json_object_end(&excerpt);
 }
 
 // Renders one named source range object when the range has location metadata.
 static iree_status_t loom_json_render_source_range(
-    loom_output_stream_t* stream, const char* field_name,
+    loom_json_object_writer_t* object, iree_string_view_t field_name,
     const loom_source_range_t* range) {
   if (!loom_json_source_range_has_metadata(range)) return iree_ok_status();
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_cstring(stream, field_name));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ":{"));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, "\"provenance\":"));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_cstring(
-      stream, loom_source_provenance_name(range->provenance)));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"filename\":"));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(stream, range->filename));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream,
-      ",\"start_line\":%" PRIu32 ",\"start_column\":%" PRIu32
-      ",\"end_line\":%" PRIu32 ",\"end_column\":%" PRIu32
-      ",\"start_byte\":%zu,\"end_byte\":%zu",
-      range->start_line, range->start_column, range->end_line,
-      range->end_column, (size_t)range->start, (size_t)range->end));
-  IREE_RETURN_IF_ERROR(loom_json_render_source_excerpt(stream, range));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '}'));
-  return iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(object, field_name));
+  loom_json_object_writer_t range_object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(object->stream, &range_object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &range_object, IREE_SV("provenance"),
+      iree_make_cstring_view(loom_source_provenance_name(range->provenance))));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &range_object, IREE_SV("filename"), range->filename));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &range_object, IREE_SV("start_line"), range->start_line));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &range_object, IREE_SV("start_column"), range->start_column));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &range_object, IREE_SV("end_line"), range->end_line));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &range_object, IREE_SV("end_column"), range->end_column));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &range_object, IREE_SV("start_byte"), range->start));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &range_object, IREE_SV("end_byte"), range->end));
+  IREE_RETURN_IF_ERROR(loom_json_render_source_excerpt(range, &range_object));
+  return loom_json_object_end(&range_object);
 }
 
 // Renders per-token highlight byte ranges when present. Primary diagnostic
 // highlights include a param name when the highlight references a structured
 // param; related-location highlights may omit that linkage.
 static iree_status_t loom_json_render_highlights(
-    loom_output_stream_t* stream, const char* field_name,
+    loom_json_object_writer_t* object, iree_string_view_t field_name,
     const loom_highlight_range_t* highlights, iree_host_size_t highlight_count,
     const loom_error_def_t* error, iree_host_size_t param_count) {
   if (!highlights || highlight_count == 0) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_cstring(stream, field_name));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ":["));
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(object, field_name));
+  loom_json_array_writer_t array;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(object->stream, &array));
   for (iree_host_size_t highlight_index = 0; highlight_index < highlight_count;
        ++highlight_index) {
     const loom_highlight_range_t* highlight = &highlights[highlight_index];
-    if (highlight_index > 0) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-    }
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-        stream, "{\"start_byte\":%zu,\"end_byte\":%zu",
-        (size_t)highlight->start, (size_t)highlight->end));
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&array));
+    loom_json_object_writer_t highlight_object;
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin(object->stream, &highlight_object));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+        &highlight_object, IREE_SV("start_byte"), highlight->start));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+        &highlight_object, IREE_SV("end_byte"), highlight->end));
     if (loom_diagnostic_field_ref_is_set(highlight->field_ref)) {
       IREE_RETURN_IF_ERROR(
-          loom_output_stream_write_cstring(stream, ",\"field\":"));
+          loom_json_object_begin_field(&highlight_object, IREE_SV("field")));
       IREE_RETURN_IF_ERROR(
-          loom_json_render_field_ref(stream, highlight->field_ref));
+          loom_json_render_field_ref(object->stream, highlight->field_ref));
       if (error && error->param_defs) {
         if (highlight->param_index >= param_count ||
             highlight->param_index >= error->param_count) {
-          return iree_make_status(
-              IREE_STATUS_INTERNAL,
-              "diagnostic highlight %zu references invalid param index %zu",
-              (size_t)highlight_index, (size_t)highlight->param_index);
+          IREE_ASSERT_UNREACHABLE(
+              "diagnostic highlight references invalid param index");
+          IREE_BUILTIN_UNREACHABLE();
         }
-        IREE_RETURN_IF_ERROR(
-            loom_output_stream_write_cstring(stream, ",\"param\":"));
-        IREE_RETURN_IF_ERROR(loom_json_write_escaped_cstring(
-            stream, error->param_defs[highlight->param_index].name));
+        IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+            &highlight_object, IREE_SV("param"),
+            iree_make_cstring_view(
+                error->param_defs[highlight->param_index].name)));
       }
     }
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '}'));
+    IREE_RETURN_IF_ERROR(loom_json_object_end(&highlight_object));
   }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "]"));
-  return iree_ok_status();
+  return loom_json_array_end(&array);
 }
 
 static iree_status_t loom_json_render_related_locations(
-    loom_output_stream_t* stream, const loom_diagnostic_t* diagnostic) {
+    loom_json_object_writer_t* object, const loom_diagnostic_t* diagnostic) {
   if (diagnostic->related_location_count == 0 &&
       diagnostic->related_location_omitted_count == 0) {
     return iree_ok_status();
@@ -281,47 +284,50 @@ static iree_status_t loom_json_render_related_locations(
 
   if (diagnostic->related_location_count > 0) {
     IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, ",\"related_locations\":["));
+        loom_json_object_begin_field(object, IREE_SV("related_locations")));
+    loom_json_array_writer_t related_locations;
+    IREE_RETURN_IF_ERROR(
+        loom_json_array_begin(object->stream, &related_locations));
     for (iree_host_size_t i = 0; i < diagnostic->related_location_count; ++i) {
       const loom_diagnostic_related_location_t* related =
           &diagnostic->related_locations[i];
-      if (i > 0) {
-        IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-      }
+      IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&related_locations));
+      loom_json_object_writer_t related_object;
       IREE_RETURN_IF_ERROR(
-          loom_output_stream_write_cstring(stream, "{\"label\":"));
-      IREE_RETURN_IF_ERROR(
-          loom_json_write_escaped_string(stream, related->label));
+          loom_json_object_begin(object->stream, &related_object));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+          &related_object, IREE_SV("label"), related->label));
       IREE_RETURN_IF_ERROR(loom_json_render_source_range(
-          stream, "source_location", &related->source_location));
-      IREE_RETURN_IF_ERROR(
-          loom_json_render_highlights(stream, "highlights", related->highlights,
-                                      related->highlight_count, NULL, 0));
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '}'));
+          &related_object, IREE_SV("source_location"),
+          &related->source_location));
+      IREE_RETURN_IF_ERROR(loom_json_render_highlights(
+          &related_object, IREE_SV("highlights"), related->highlights,
+          related->highlight_count, NULL, 0));
+      IREE_RETURN_IF_ERROR(loom_json_object_end(&related_object));
     }
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "]"));
+    IREE_RETURN_IF_ERROR(loom_json_array_end(&related_locations));
   }
   if (diagnostic->related_location_omitted_count > 0) {
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-        stream, ",\"related_location_omitted_count\":%" PRIhsz,
+    IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+        object, IREE_SV("related_location_omitted_count"),
         diagnostic->related_location_omitted_count));
   }
   return iree_ok_status();
 }
 
 static iree_status_t loom_json_render_highlight_omissions(
-    loom_output_stream_t* stream, const loom_diagnostic_t* diagnostic) {
+    loom_json_object_writer_t* object, const loom_diagnostic_t* diagnostic) {
   if (diagnostic->highlight_omitted_count == 0) {
     return iree_ok_status();
   }
-  return loom_output_stream_write_format(
-      stream, ",\"highlight_omitted_count\":%" PRIhsz,
+  return loom_json_object_write_host_size_field(
+      object, IREE_SV("highlight_omitted_count"),
       diagnostic->highlight_omitted_count);
 }
 
 // Renders structured field refs attached to params.
 static iree_status_t loom_json_render_param_fields(
-    loom_output_stream_t* stream, const loom_error_def_t* error,
+    loom_json_object_writer_t* object, const loom_error_def_t* error,
     const loom_diagnostic_param_t* params, iree_host_size_t param_count) {
   if (!error || !error->param_defs || !params || param_count == 0) {
     return iree_ok_status();
@@ -336,81 +342,73 @@ static iree_status_t loom_json_render_param_fields(
   if (!has_field_refs) return iree_ok_status();
 
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"param_fields\":{"));
-  bool first = true;
+      loom_json_object_begin_field(object, IREE_SV("param_fields")));
+  loom_json_object_writer_t param_fields;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(object->stream, &param_fields));
   for (iree_host_size_t i = 0; i < param_count; ++i) {
     if (!loom_diagnostic_field_ref_is_set(params[i].field_ref)) continue;
-    if (!first) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-    }
-    first = false;
+    IREE_RETURN_IF_ERROR(loom_json_object_begin_field(
+        &param_fields, iree_make_cstring_view(error->param_defs[i].name)));
     IREE_RETURN_IF_ERROR(
-        loom_json_write_escaped_cstring(stream, error->param_defs[i].name));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, ':'));
-    IREE_RETURN_IF_ERROR(
-        loom_json_render_field_ref(stream, params[i].field_ref));
+        loom_json_render_field_ref(object->stream, params[i].field_ref));
   }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "}"));
-  return iree_ok_status();
+  return loom_json_object_end(&param_fields);
 }
 
 iree_status_t loom_diagnostic_json_write_object(
     loom_output_stream_t* stream, const loom_diagnostic_t* diagnostic,
     loom_type_formatter_t type_formatter) {
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
 
   // Severity (always present).
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, "\"severity\":"));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_cstring(
-      stream, loom_diagnostic_severity_name(diagnostic->severity)));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("severity"),
+      iree_make_cstring_view(
+          loom_diagnostic_severity_name(diagnostic->severity))));
 
   const loom_error_def_t* error = diagnostic->error;
 
   // Stable symbolic error ID.
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"error_id\":"));
-  IREE_RETURN_IF_ERROR(
-      loom_json_write_escaped_cstring(stream, error->error_id));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("error_id"), iree_make_cstring_view(error->error_id)));
 
   // Domain.
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"domain\":"));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_cstring(
-      stream, loom_error_domain_name(error->domain)));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("domain"),
+      iree_make_cstring_view(loom_error_domain_name(error->domain))));
 
   // Code.
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, ",\"code\":%" PRIu16, error->code));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("code"), error->code));
 
   // One-line summary.
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"summary\":"));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_cstring(stream, error->summary));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("summary"), iree_make_cstring_view(error->summary)));
 
   // Emitter.
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"emitter\":"));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_cstring(
-      stream, loom_emitter_name(diagnostic->emitter)));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("emitter"),
+      iree_make_cstring_view(loom_emitter_name(diagnostic->emitter))));
 
   // Source locations and highlight byte ranges when present.
-  IREE_RETURN_IF_ERROR(
-      loom_json_render_source_range(stream, "origin", &diagnostic->origin));
+  IREE_RETURN_IF_ERROR(loom_json_render_source_range(&object, IREE_SV("origin"),
+                                                     &diagnostic->origin));
   IREE_RETURN_IF_ERROR(loom_json_render_source_range(
-      stream, "source_location", &diagnostic->source_location));
+      &object, IREE_SV("source_location"), &diagnostic->source_location));
   IREE_RETURN_IF_ERROR(loom_json_render_highlights(
-      stream, "highlights", diagnostic->highlights, diagnostic->highlight_count,
-      diagnostic->error, diagnostic->param_count));
+      &object, IREE_SV("highlights"), diagnostic->highlights,
+      diagnostic->highlight_count, diagnostic->error, diagnostic->param_count));
   IREE_RETURN_IF_ERROR(
-      loom_json_render_highlight_omissions(stream, diagnostic));
-  IREE_RETURN_IF_ERROR(loom_json_render_related_locations(stream, diagnostic));
+      loom_json_render_highlight_omissions(&object, diagnostic));
+  IREE_RETURN_IF_ERROR(loom_json_render_related_locations(&object, diagnostic));
 
   // Message: rendered from the error def's template and params, streamed
   // through the JSON-escaping adapter directly to the output. Zero allocs.
   {
     IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, ",\"message\":\""));
+        loom_json_object_begin_field(&object, IREE_SV("message")));
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '"'));
     loom_json_escape_stream_t escape_data;
     loom_output_stream_t escape_stream;
     loom_json_escape_stream_init(stream, &escape_data, &escape_stream);
@@ -423,7 +421,8 @@ iree_status_t loom_diagnostic_json_write_object(
   // Fix hint (when present).
   if (error->fix_hint_template) {
     IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, ",\"fix_hint\":\""));
+        loom_json_object_begin_field(&object, IREE_SV("fix_hint")));
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '"'));
     loom_json_escape_stream_t escape_data;
     loom_output_stream_t escape_stream;
     loom_json_escape_stream_init(stream, &escape_data, &escape_stream);
@@ -442,36 +441,29 @@ iree_status_t loom_diagnostic_json_write_object(
           : 0;
   if (emit_param_count > 0) {
     IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, ",\"params\":{"));
+        loom_json_object_begin_field(&object, IREE_SV("params")));
+    loom_json_object_writer_t params;
+    IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &params));
     for (iree_host_size_t i = 0; i < emit_param_count; ++i) {
-      if (i > 0) {
-        IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-      }
       // Validate that the runtime param kind matches the schema.
       if (diagnostic->params[i].kind != error->param_defs[i].kind) {
-        return iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "diagnostic param %zu kind mismatch: runtime %d vs schema %d",
-            (size_t)i, (int)diagnostic->params[i].kind,
-            (int)error->param_defs[i].kind);
+        IREE_ASSERT_UNREACHABLE("diagnostic param kind does not match schema");
+        IREE_BUILTIN_UNREACHABLE();
       }
       // Param name.
-      IREE_RETURN_IF_ERROR(
-          loom_json_write_escaped_cstring(stream, error->param_defs[i].name));
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ":"));
+      IREE_RETURN_IF_ERROR(loom_json_object_begin_field(
+          &params, iree_make_cstring_view(error->param_defs[i].name)));
       // Param value.
       IREE_RETURN_IF_ERROR(loom_json_render_param_value(
           &diagnostic->params[i], type_formatter, stream));
     }
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "}"));
+    IREE_RETURN_IF_ERROR(loom_json_object_end(&params));
   }
   IREE_RETURN_IF_ERROR(loom_json_render_param_fields(
-      stream, error, diagnostic->params, emit_param_count));
+      &object, error, diagnostic->params, emit_param_count));
 
   // Close object.
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "}"));
-
-  return iree_ok_status();
+  return loom_json_object_end(&object);
 }
 
 iree_status_t loom_diagnostic_json_sink(void* user_data,

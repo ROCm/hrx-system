@@ -12,19 +12,31 @@ from collections.abc import Sequence
 from typing import Any
 
 from loom.dsl import (
+    ATTR_TYPE_BOOL,
     ATTR_TYPE_ENUM,
+    ATTR_TYPE_F64,
     ATTR_TYPE_FLAGS,
+    ATTR_TYPE_I64,
+    ATTR_TYPE_PREDICATE_LIST,
+    AttrDef,
+    ConditionRefinementTruth,
     ContractFamily,
     EffectKind,
+    EncodingFamilyDef,
     EnumDef,
+    FuncLikeInterface,
     Op,
     OperandOwnershipEffect,
+    ParameterizedAttrDef,
     ResultOwnershipEffect,
     TargetLikeInterface,
     TypeConstraint,
 )
 from loom.fields import FieldKind, compute_layout
 from loom.gen.ops import c_format, c_interfaces, c_queries, c_symbols, c_traits
+from loom.gen.ops.c_enum_attrs import (
+    collect_encoding_auxiliary_key_enum as _collect_encoding_auxiliary_key_enum,
+)
 from loom.gen.ops.c_enum_attrs import collect_shared_enums as _collect_shared_enums
 from loom.gen.ops.c_enum_attrs import enum_names_array_name as _enum_names_array_name
 from loom.gen.ops.c_enums import (
@@ -33,6 +45,8 @@ from loom.gen.ops.c_enums import (
     FIELD_CATEGORY_MAP,
     LOOM_FIELD_REF_MAX_INDEX,
     OPERAND_OWNERSHIP_EFFECT_MAP,
+    OPERAND_ROLE_MAP,
+    OPERAND_ROLE_MASK_MAP,
     OWNERSHIP_CARRIER_MAP,
     RESULT_OWNERSHIP_EFFECT_MAP,
     TYPE_CONSTRAINT_MAP,
@@ -40,11 +54,28 @@ from loom.gen.ops.c_enums import (
 from loom.gen.ops.c_enums import error_ref_literal as _error_ref_literal
 from loom.gen.ops.c_names import COPYRIGHT
 from loom.gen.ops.c_names import c_dialect_enum as _c_dialect_enum
+from loom.gen.ops.c_names import c_encoding_enum_prefix as _c_encoding_enum_prefix
+from loom.gen.ops.c_names import (
+    c_encoding_family_descriptor_name as _c_encoding_family_descriptor_name,
+)
+from loom.gen.ops.c_names import (
+    c_encoding_family_prefix as _c_encoding_family_prefix,
+)
+from loom.gen.ops.c_names import (
+    c_parameterized_attr_enum_name as _c_parameterized_attr_enum_name,
+)
+from loom.gen.ops.c_names import (
+    c_parameterized_attr_prefix as _c_parameterized_attr_prefix,
+)
 from loom.gen.ops.c_names import c_prefix as _c_prefix
+from loom.gen.ops.c_names import (
+    validate_encoding_family_c_names as _validate_encoding_family_c_names,
+)
 from loom.gen.support import c_arrays
 from loom.gen.support.c import c_identifier as _c_identifier
 from loom.gen.support.c import c_string_literal as _c_string_literal
 from loom.gen.support.generated_file import line_comment_header
+from loom.stable_id import stable_id_from_string as _stable_id_from_string
 
 
 def _contract_family_mask(contracts: Sequence[ContractFamily]) -> str:
@@ -69,16 +100,60 @@ def _op_phase_c_name(op: Op) -> str:
     return phase.c_name
 
 
-def _op_semantics_row(op: Op) -> list[str]:
+def _op_semantics_row(op: Op, condition_refinement_index: int = 0) -> list[str]:
     """Returns a sparse initializer row for one op semantic metadata row."""
     contract_families = _contract_family_mask(op.contracts)
     row = [f".phase = {_op_phase_c_name(op)},"]
+    if condition_refinement_index:
+        row.append(f".condition_refinement_index = {condition_refinement_index},")
     if contract_families != "0":
         row.append(f".contract_families = {contract_families},")
     return row
 
 
-def _emit_dialect_table_accessors(lines: list[str], dialect_name: str) -> None:
+def _condition_refinement_truth_flags(truth: ConditionRefinementTruth) -> str:
+    """Returns the C truth-edge flags for one refinement declaration."""
+    if truth is ConditionRefinementTruth.TRUE:
+        return "LOOM_CONDITION_REFINEMENT_TRUTH_TRUE"
+    if truth is ConditionRefinementTruth.FALSE:
+        return "LOOM_CONDITION_REFINEMENT_TRUTH_FALSE"
+    return "LOOM_CONDITION_REFINEMENT_TRUTH_TRUE | LOOM_CONDITION_REFINEMENT_TRUTH_FALSE"
+
+
+def _emit_condition_refinement_table(lines: list[str], dialect_name: str, ops: Sequence[Op]) -> dict[str, int]:
+    """Emits a sparse condition-refinement table and returns one-based indexes."""
+    refinement_ops = [op for op in ops if op.condition_refinement is not None]
+    if not refinement_ops:
+        return {}
+    rows: list[list[str]] = []
+    indexes: dict[str, int] = {}
+    for descriptor_index, op in enumerate(refinement_ops, start=1):
+        refinement = op.condition_refinement
+        assert refinement is not None
+        source_operand_index = next(i for i, operand in enumerate(op.operands) if operand.name == refinement.source)
+        indexes[op.name] = descriptor_index
+        rows.append(
+            [
+                f".materialize = {refinement.materialize},",
+                f".source_operand_index = {source_operand_index},",
+                f".truth_flags = {_condition_refinement_truth_flags(refinement.truth)},",
+            ]
+        )
+    c_arrays.append_struct_array(
+        lines,
+        "loom_condition_refinement_descriptor_t",
+        f"loom_{dialect_name}_condition_refinement_array",
+        rows,
+    )
+    return indexes
+
+
+def _emit_dialect_table_accessors(
+    lines: list[str],
+    dialect_name: str,
+    parameterized_attrs: Sequence[ParameterizedAttrDef] = (),
+    has_condition_refinements: bool = False,
+) -> None:
     """Emits dialect-specific wrappers around shared table helper algorithms."""
 
     vtable_array_name = f"loom_{dialect_name}_vtable_array"
@@ -90,6 +165,20 @@ def _emit_dialect_table_accessors(lines: list[str], dialect_name: str) -> None:
     lines.append("      out_count);")
     lines.append("}")
     lines.append("")
+    if has_condition_refinements:
+        lines.append(f"const loom_condition_refinement_descriptor_t* loom_{dialect_name}_dialect_condition_refinements(")
+        lines.append("    iree_host_size_t* out_count) {")
+        lines.append(f"  *out_count = IREE_ARRAYSIZE(loom_{dialect_name}_condition_refinement_array);")
+        lines.append(f"  return loom_{dialect_name}_condition_refinement_array;")
+        lines.append("}")
+        lines.append("")
+    if parameterized_attrs:
+        lines.append(f"const loom_parameterized_attr_descriptor_t* loom_{dialect_name}_dialect_parameterized_attrs(")
+        lines.append("    iree_host_size_t* out_count) {")
+        lines.append(f"  *out_count = IREE_ARRAYSIZE(loom_{dialect_name}_parameterized_attr_array);")
+        lines.append(f"  return loom_{dialect_name}_parameterized_attr_array;")
+        lines.append("}")
+        lines.append("")
     lines.append(f"const loom_op_semantics_t* loom_{dialect_name}_dialect_op_semantics(")
     lines.append("    iree_host_size_t* out_count) {")
     lines.append("  return loom_dialect_semantics_array(")
@@ -106,32 +195,66 @@ def _emit_dialect_table_accessors(lines: list[str], dialect_name: str) -> None:
     lines.append("")
 
 
-# Maps Python symbol interface names to C interface flag constants.
-SYMBOL_INTERFACE_MAP: dict[str, str] = {
-    "func_like": "LOOM_SYMBOL_INTERFACE_FUNC_LIKE",
-    "global": "LOOM_SYMBOL_INTERFACE_GLOBAL",
-    "executable": "LOOM_SYMBOL_INTERFACE_EXECUTABLE",
-    "record": "LOOM_SYMBOL_INTERFACE_RECORD",
-    "target": "LOOM_SYMBOL_INTERFACE_TARGET",
-    "config": "LOOM_SYMBOL_INTERFACE_CONFIG",
-}
-
-
-def _symbol_interface_flags(interfaces: Sequence[str]) -> str:
-    flags = [SYMBOL_INTERFACE_MAP[interface] for interface in interfaces]
-    return " | ".join(flags) if flags else "0"
-
-
 def _symbol_retain_attr_index(op: Op) -> int | None:
     """Returns the optional retain marker attribute index for a symbol op."""
 
     if op.symbol_def is None or op.symbol_def.retain is None:
         return None
     retain_attr_index = c_queries.resolve_attr_index(op, op.symbol_def.retain, "symbol_def.retain")
-    retain_attr = op.attrs[retain_attr_index]
+    retain_attr = c_queries.non_flags_attrs(op)[retain_attr_index]
     if retain_attr.attr_type != ATTR_TYPE_ENUM:
         raise ValueError(f"Op {op.name!r}: symbol_def.retain {op.symbol_def.retain!r} must name an enum attr")
     return retain_attr_index
+
+
+def _symbol_visibility_attr_index(op: Op) -> int | None:
+    """Returns the generic visibility attribute index for a symbol op."""
+
+    if op.symbol_def is None:
+        return None
+    visibility = op.symbol_def.visibility
+    if visibility is None:
+        func_like = c_queries.find_interface(op, FuncLikeInterface)
+        visibility = func_like.visibility if func_like is not None else None
+    if visibility is None:
+        return None
+    visibility_attr_index = c_queries.resolve_attr_index(op, visibility, "symbol visibility")
+    visibility_attr = c_queries.non_flags_attrs(op)[visibility_attr_index]
+    if visibility_attr.attr_type != ATTR_TYPE_ENUM:
+        raise ValueError(f"Op {op.name!r}: symbol visibility {visibility!r} must name an enum attr")
+    return visibility_attr_index
+
+
+def _symbol_value_contract_indices(
+    op: Op,
+) -> tuple[int, int | None, int | None] | None:
+    """Resolves a generated typed-value symbol contract."""
+
+    if op.symbol_def is None or op.symbol_def.value_contract is None:
+        return None
+    contract = op.symbol_def.value_contract
+    result_index = c_queries.resolve_result_index(op, contract.result, "symbol_def.value_contract")
+    if op.results[result_index].variadic:
+        raise ValueError(f"Op {op.name!r}: symbol value contract result {contract.result!r} must not be variadic")
+    value_attr_index = c_queries.resolve_attr_index(op, contract.value, "symbol_def.value_contract") if contract.value is not None else None
+    predicates_attr_index = c_queries.resolve_attr_index(op, contract.predicates, "symbol_def.value_contract") if contract.predicates is not None else None
+    if predicates_attr_index is not None:
+        attr_def = c_queries.non_flags_attrs(op)[predicates_attr_index]
+        if attr_def.attr_type != ATTR_TYPE_PREDICATE_LIST:
+            raise ValueError(f"Op {op.name!r}: symbol value contract predicates {contract.predicates!r} must name a predicate_list attr")
+    return result_index, value_attr_index, predicates_attr_index
+
+
+def _symbol_kernel_contract_indices(op: Op) -> tuple[int | None, int | None]:
+    """Resolves a generated kernel workload-signature contract."""
+    if op.symbol_def is None or op.symbol_def.kernel_contract is None:
+        return None, None
+    contract = op.symbol_def.kernel_contract
+    region_index = c_queries.resolve_region_index(op, contract.workload_region, "symbol_def.kernel_contract") if contract.workload_region is not None else None
+    operand_index = c_queries.resolve_operand_index(op, contract.workload_operands, "symbol_def.kernel_contract") if contract.workload_operands is not None else None
+    if operand_index is not None and not op.operands[operand_index].variadic:
+        raise ValueError(f"Op {op.name!r}: kernel workload signature operand {contract.workload_operands!r} must be variadic")
+    return region_index, operand_index
 
 
 def _symbol_kind(op: Op) -> str:
@@ -180,6 +303,359 @@ def _emit_table_string_macros(lines: list[str], _dialect_name: str) -> None:
     lines.append("")
 
 
+def _emit_enum_case_names(lines: list[str], array_name: str, enum_def: EnumDef) -> None:
+    cases_by_value = sorted(enum_def.cases, key=lambda case: case.value)
+    max_value = max(case.value for case in cases_by_value)
+    value_to_name = {case.value: case.keyword for case in cases_by_value}
+    c_arrays.append_value_array(
+        lines,
+        "loom_bstring_t",
+        array_name,
+        [_bstring_expr(name) if (name := value_to_name.get(value)) is not None else "NULL" for value in range(max_value + 1)],
+        trailing_blank=False,
+    )
+
+
+def _emit_parameterized_attr_tables(
+    lines: list[str],
+    dialect_name: str,
+    parameterized_attrs: Sequence[ParameterizedAttrDef],
+    shared_enum_names: dict[int, str] | None = None,
+) -> None:
+    """Emits dialect-owned parameter schemas and family descriptors."""
+
+    for attr_def in parameterized_attrs:
+        prefix = _c_parameterized_attr_prefix(attr_def)
+        _emit_attr_descriptor_table(lines, prefix, attr_def.parameters, shared_enum_names)
+
+    if parameterized_attrs:
+        lines.append(f"static const loom_parameterized_attr_descriptor_t loom_{dialect_name}_parameterized_attr_array[] = {{")
+        for attr_def in parameterized_attrs:
+            prefix = _c_parameterized_attr_prefix(attr_def)
+            lines.append("    {")
+            lines.append(f"        .name = {_bstring_expr(attr_def.name)},")
+            lines.append(f"        .kind = {_c_parameterized_attr_enum_name(attr_def)},")
+            if attr_def.parameters:
+                lines.append(f"        .parameter_count = IREE_ARRAYSIZE({prefix}_parameter_desc),")
+            primary_parameter_index = attr_def.primary_parameter_index
+            if primary_parameter_index is None:
+                lines.append("        .primary_parameter_index = LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER,")
+            else:
+                lines.append(f"        .primary_parameter_index = {primary_parameter_index},")
+            if attr_def.parameters:
+                lines.append(f"        .parameter_descriptors = {prefix}_parameter_desc,")
+            if attr_def.target_condition is not None:
+                condition = c_symbols.normalize_c_symbol_reference(attr_def.target_condition)
+                lines.append(f"        .target_condition = &{condition},")
+            lines.append("    },")
+        lines.append("};")
+        lines.append("")
+
+
+def _emit_attr_descriptor_table(
+    lines: list[str],
+    prefix: str,
+    parameters: Sequence[AttrDef],
+    shared_enum_names: dict[int, str] | None = None,
+) -> str | None:
+    """Emits one shared named-attribute descriptor table."""
+
+    if not parameters:
+        return None
+    for parameter in parameters:
+        if parameter.attr_type in ("enum", "enum_array", "signed_enum_set"):
+            assert parameter.enum_def is not None
+            if shared_enum_names is None or id(parameter.enum_def) not in shared_enum_names:
+                _emit_enum_case_names(
+                    lines,
+                    f"{prefix}_{parameter.name}_enum_names",
+                    parameter.enum_def,
+                )
+        if parameter.symbol_ref is not None:
+            c_symbols.append_symbol_reference_descriptor(
+                lines,
+                f"{prefix}_{parameter.name}_symbol_ref",
+                parameter.symbol_ref,
+                _bstring_expr(parameter.symbol_ref.name),
+            )
+
+    table_name = f"{prefix}_parameter_desc"
+    lines.append(f"static const loom_attr_descriptor_t {table_name}[] = {{")
+    for parameter in parameters:
+        attr_kind = ATTR_KIND_MAP[parameter.attr_type]
+        flags_parts = []
+        if parameter.optional:
+            flags_parts.append("LOOM_ATTR_OPTIONAL")
+        if parameter.elide_default:
+            flags_parts.append("LOOM_ATTR_ELIDE_DEFAULT")
+        if parameter.open_enum:
+            flags_parts.append("LOOM_ATTR_OPEN_ENUM")
+        if parameter.bare_identifier:
+            flags_parts.append("LOOM_ATTR_BARE_IDENTIFIER")
+        lines.append("    {")
+        lines.append(f"        .name = {_bstring_expr(parameter.name)},")
+        lines.append(f"        .attr_kind = {attr_kind},")
+        if flags_parts:
+            lines.append(f"        .flags = {' | '.join(flags_parts)},")
+        if parameter.attr_type in ("enum", "enum_array", "signed_enum_set"):
+            enum_names = shared_enum_names[id(parameter.enum_def)] if shared_enum_names is not None and id(parameter.enum_def) in shared_enum_names else f"{prefix}_{parameter.name}_enum_names"
+            lines.append(f"        .enum_max_value = (uint8_t)(IREE_ARRAYSIZE({enum_names}) - 1),")
+            lines.append(f"        .enum_case_names = {enum_names},")
+        if parameter.symbol_ref is not None:
+            lines.append(f"        .reference.symbol_ref = &{prefix}_{parameter.name}_symbol_ref,")
+        if parameter.attr_type in ("parameterized", "parameterized_array"):
+            expected_family = _c_parameterized_attr_enum_name(parameter.parameterized_attr) if parameter.parameterized_attr is not None else "LOOM_PARAMETERIZED_ATTR_KIND_ANY"
+            lines.append(f"        .reference.parameterized_attr_kind = {expected_family},")
+        lines.append("    },")
+    lines.append("};")
+    return table_name
+
+
+def _emit_encoding_enum_case_names(
+    lines: list[str],
+    encoding_families: Sequence[EncodingFamilyDef],
+) -> dict[int, str]:
+    """Emits and returns enum name tables shared by encoding schemas."""
+    shared_enum_names: dict[int, str] = {}
+    for family in encoding_families:
+        for parameter in family.parameters:
+            enum_def = parameter.enum_def
+            if parameter.attr_type not in ("enum", "enum_array", "signed_enum_set") or enum_def is None:
+                continue
+            enum_id = id(enum_def)
+            if enum_id in shared_enum_names:
+                continue
+            array_name = f"{_c_encoding_enum_prefix(family.group.name, enum_def)}_names"
+            _emit_enum_case_names(lines, array_name, enum_def)
+            shared_enum_names[enum_id] = array_name
+    return shared_enum_names
+
+
+def _emit_encoding_auxiliary_key_descriptors(
+    lines: list[str],
+    dialect_name: str,
+    encoding_families: Sequence[EncodingFamilyDef],
+) -> None:
+    """Emits the shared auxiliary-key vocabulary for encoding families."""
+    enum_def = _collect_encoding_auxiliary_key_enum(encoding_families)
+    if enum_def is None:
+        return
+
+    c_prefix = _c_encoding_enum_prefix(dialect_name, enum_def)
+    cases_by_value = {case.value: case for case in enum_def.cases}
+    descriptor_count = max(cases_by_value) + 1
+    descriptor_count_expression = f"{c_prefix.upper()}_COUNT_" if enum_def.c_type is None else str(descriptor_count)
+    lines.append(f"const loom_encoding_auxiliary_key_descriptor_t {c_prefix}_descriptors[{descriptor_count_expression}] = {{")
+    for value in range(descriptor_count):
+        case = cases_by_value.get(value)
+        if case is None:
+            lines.append("    {0},")
+            continue
+        stable_id = _stable_id_from_string(case.keyword)
+        lines.append("    {")
+        lines.append(f"        .name = {_bstring_expr(case.keyword)},")
+        lines.append(f"        .stable_id = UINT64_C(0x{stable_id:016x}),")
+        lines.append("    },")
+    lines.append("};")
+    lines.append("")
+
+
+def _emit_encoding_family_fixed_metadata(lines: list[str], family: EncodingFamilyDef, prefix: str) -> str | None:
+    """Emits family-wide constant encoding metadata when present."""
+    summary = family.fixed_operand_summary
+    record = family.fixed_record
+    if summary is None and record is None and not family.required_auxiliary_keys:
+        return None
+
+    table_name = f"{prefix}_fixed_metadata"
+    lines.append(f"static const loom_encoding_family_fixed_metadata_t {table_name} = {{")
+    if summary is not None:
+        lines.append("    .operand_summary = {")
+        for field_name in (
+            "element_format",
+            "scale_format",
+            "secondary_scale_format",
+        ):
+            value = getattr(summary, field_name)
+            if value:
+                lines.append(f"        .{field_name} = UINT64_C(0x{value:x}),")
+        for field_name in (
+            "payload_packing",
+            "scale_topology",
+            "affine_policy",
+            "rounding_policy",
+            "codebook_policy",
+            "sparsity_policy",
+        ):
+            value = getattr(summary, field_name)
+            if value:
+                lines.append(f"        .{field_name} = UINT32_C(0x{value:x}),")
+        if summary.zero_scale_fallback:
+            lines.append("        .flags = UINT32_C(0x1),")
+        if summary.sparsity_group_nonzero_element_count or summary.sparsity_group_element_count:
+            lines.append("        .sparsity_group = {")
+            if summary.sparsity_group_nonzero_element_count:
+                lines.append(f"            .nonzero_element_count = {summary.sparsity_group_nonzero_element_count},")
+            if summary.sparsity_group_element_count:
+                lines.append(f"            .element_count = {summary.sparsity_group_element_count},")
+            lines.append("        },")
+        if summary.payload_register_count:
+            lines.append(f"        .payload_register_count = {summary.payload_register_count},")
+        if summary.payload_element_count:
+            lines.append(f"        .payload_element_count = {summary.payload_element_count},")
+        if summary.scale_group_element_count or summary.scale_group_shape:
+            lines.append("        .scale_group = {")
+            if summary.scale_group_element_count:
+                lines.append(f"            .element_count = {summary.scale_group_element_count},")
+            if summary.scale_group_shape:
+                shape = ", ".join(str(value) for value in summary.scale_group_shape)
+                lines.append(f"            .shape = {{{shape}}},")
+            lines.append("        },")
+        if summary.scale_operand_count:
+            lines.append(f"        .scale_operand_count = {summary.scale_operand_count},")
+        lines.append("    },")
+    if family.required_auxiliary_keys:
+        required_key_bits = sum(1 << key.value for key in family.required_auxiliary_keys)
+        lines.append(f"    .required_auxiliary_keys = UINT64_C(0x{required_key_bits:x}),")
+    if record is not None:
+        lines.append("    .record = {")
+        lines.append(f"        .logical_element_count = {record.logical_element_count},")
+        lines.append(f"        .storage_byte_count = {record.storage_byte_count},")
+        lines.append(f"        .required_alignment = {record.required_alignment},")
+        lines.append("    },")
+    lines.append("};")
+    lines.append("")
+    return table_name
+
+
+def _c_encoding_alias_value(parameter: AttrDef, value: Any) -> str:
+    """Returns a static module-independent loom_attribute_t initializer."""
+
+    if parameter.attr_type == ATTR_TYPE_I64:
+        literal = f"INT64_C({value})" if value >= 0 else f"-INT64_C({-value})"
+        return f"{{.kind = LOOM_ATTR_I64, .i64 = {literal}}}"
+    if parameter.attr_type == ATTR_TYPE_F64:
+        return f"{{.kind = LOOM_ATTR_F64, .f64 = {float(value)!r}}}"
+    if parameter.attr_type == ATTR_TYPE_BOOL:
+        return f"{{.kind = LOOM_ATTR_BOOL, .raw = {1 if value else 0}}}"
+    if parameter.attr_type == ATTR_TYPE_ENUM:
+        assert parameter.enum_def is not None
+        return f"{{.kind = LOOM_ATTR_ENUM, .raw = {parameter.enum_def.case(value).value}}}"
+    raise AssertionError(f"unsupported encoding alias parameter kind {parameter.attr_type!r}")
+
+
+def _emit_encoding_family_aliases(lines: list[str], family: EncodingFamilyDef, prefix: str) -> str | None:
+    """Emits canonical spelling rows for one structural encoding family."""
+
+    if not family.aliases:
+        return None
+    parameters_by_name = {parameter.name: parameter for parameter in family.parameters}
+    parameter_indexes = {parameter.name: index for index, parameter in enumerate(family.parameters)}
+    alias_parameter_tables: list[str] = []
+    for alias_index, alias in enumerate(family.aliases):
+        table_name = f"{prefix}_alias_{alias_index}_parameters"
+        alias_parameter_tables.append(table_name)
+        lines.append(f"static const loom_encoding_alias_parameter_t {table_name}[] = {{")
+        fixed_parameter_names = {parameter_name for parameter_name, _ in alias.fixed_parameters}
+        for parameter_name, value in alias.parameters:
+            parameter = parameters_by_name[parameter_name]
+            lines.append("    {")
+            lines.append(f"        .parameter_index = {parameter_indexes[parameter_name]},")
+            if parameter_name in fixed_parameter_names:
+                lines.append("        .flags = LOOM_ENCODING_ALIAS_PARAMETER_FIXED,")
+            lines.append(f"        .value = {_c_encoding_alias_value(parameter, value)},")
+            lines.append("    },")
+        lines.append("};")
+        lines.append("")
+
+    table_name = f"{prefix}_aliases"
+    lines.append(f"static const loom_encoding_alias_descriptor_t {table_name}[] = {{")
+    for alias, parameter_table in zip(family.aliases, alias_parameter_tables, strict=True):
+        lines.append("    {")
+        lines.append(f"        .name = {_bstring_expr(alias.name)},")
+        lines.append(f"        .parameter_count = IREE_ARRAYSIZE({parameter_table}),")
+        lines.append(f"        .parameters = {parameter_table},")
+        lines.append("    },")
+    lines.append("};")
+    lines.append("")
+    return table_name
+
+
+def _emit_encoding_family_alias_discriminator(lines: list[str], family: EncodingFamilyDef, prefix: str) -> tuple[int, str] | None:
+    """Emits the direct enum-value-to-alias lookup for one family."""
+
+    discriminator = family.alias_discriminator
+    if discriminator is None:
+        return None
+    assert discriminator.enum_def is not None
+    parameter_index = family.parameters.index(discriminator)
+    value_count = max(case.value for case in discriminator.enum_def.cases) + 1
+    alias_ordinals = [0] * value_count
+    for alias_index, alias in enumerate(family.aliases):
+        discriminator_keyword = dict(alias.fixed_parameters)[discriminator.name]
+        discriminator_value = discriminator.enum_def.case(discriminator_keyword).value
+        alias_ordinals[discriminator_value] = alias_index + 1
+
+    table_name = f"{prefix}_alias_ordinals"
+    lines.append(f"static const uint8_t {table_name}[{value_count}] = {{")
+    for value_index, alias_ordinal in enumerate(alias_ordinals):
+        if alias_ordinal != 0:
+            lines.append(f"    [{value_index}] = {alias_ordinal},")
+    lines.append("};")
+    lines.append("")
+    return parameter_index, table_name
+
+
+def _emit_encoding_family_tables(
+    lines: list[str],
+    encoding_families: Sequence[EncodingFamilyDef],
+    shared_enum_names: dict[int, str],
+) -> None:
+    """Emits generated encoding-family descriptors."""
+
+    _validate_encoding_family_c_names(encoding_families)
+
+    for family in encoding_families:
+        prefix = _c_encoding_family_prefix(family)
+        parameter_table = _emit_attr_descriptor_table(lines, prefix, family.parameters, shared_enum_names)
+        alias_table = _emit_encoding_family_aliases(lines, family, prefix)
+        alias_discriminator = _emit_encoding_family_alias_discriminator(lines, family, prefix)
+        fixed_metadata = _emit_encoding_family_fixed_metadata(lines, family, prefix)
+        dynamic_parameter_table = None
+        if family.dynamic_parameters:
+            dynamic_parameter_table = f"{prefix}_dynamic_parameter_desc"
+            lines.append(f"static const loom_encoding_dynamic_parameter_descriptor_t {dynamic_parameter_table}[] = {{")
+            for parameter in family.dynamic_parameters:
+                lines.append("    {")
+                lines.append(f"        .name = {_bstring_expr(parameter.name)},")
+                lines.append(f"        .type_constraint = {TYPE_CONSTRAINT_MAP[parameter.type_constraint]},")
+                lines.append("    },")
+            lines.append("};")
+            lines.append("")
+        lines.append(f"const loom_encoding_family_descriptor_t {_c_encoding_family_descriptor_name(family)} = {{")
+        lines.append(f"    .name = {_bstring_expr(family.name)},")
+        lines.append(f"    .role = {family.role.c_name},")
+        if family.implicit_shaped_attachment:
+            lines.append("    .family_flags = LOOM_ENCODING_FAMILY_IMPLICIT_SHAPED_ATTACHMENT,")
+        if parameter_table is not None:
+            lines.append(f"    .parameter_count = IREE_ARRAYSIZE({parameter_table}),")
+            lines.append(f"    .parameter_descriptors = {parameter_table},")
+        if alias_table is not None:
+            lines.append(f"    .alias_count = IREE_ARRAYSIZE({alias_table}),")
+            lines.append(f"    .aliases = {alias_table},")
+        if alias_discriminator is not None:
+            parameter_index, ordinal_table = alias_discriminator
+            lines.append(f"    .alias_discriminator_parameter_index = {parameter_index},")
+            lines.append(f"    .alias_ordinals_by_discriminator = {ordinal_table},")
+        if dynamic_parameter_table is not None:
+            lines.append(f"    .dynamic_parameter_count = IREE_ARRAYSIZE({dynamic_parameter_table}),")
+            lines.append(f"    .dynamic_parameter_descriptors = {dynamic_parameter_table},")
+        if fixed_metadata is not None:
+            lines.append(f"    .fixed_metadata = &{fixed_metadata},")
+        lines.append("};")
+        lines.append("")
+
+
 # ============================================================================
 # tables.c generation
 # ============================================================================
@@ -189,6 +665,8 @@ def generate_tables_c(
     dialect_name: str,
     dialect_id: int,
     ops: Sequence[Op],
+    parameterized_attrs: Sequence[ParameterizedAttrDef] = (),
+    encoding_families: Sequence[EncodingFamilyDef] = (),
     *,
     include_path: str | None = None,
     emit_registration: bool = True,
@@ -212,7 +690,7 @@ def generate_tables_c(
         lines.append("")
         lines.append("#include <stddef.h>")
         lines.append("")
-        lines.append('#include "loom/target/types.h"')
+        lines.append('#include "loom/ops/target/facts.h"')
     lines.append('#include "loom/error/error_defs.h"')
     lines.append("")
     if not private_header:
@@ -221,18 +699,6 @@ def generate_tables_c(
     # Canonicalize functions are declared in ops.h (not here) so there
     # are no extern declarations in .c files.
     shared_enums = _collect_shared_enums(dialect_name, ops)
-
-    def _emit_enum_case_names(lines: list[str], array_name: str, enum_def: EnumDef) -> None:
-        cases_by_value = sorted(enum_def.cases, key=lambda c: c.value)
-        max_value = max(c.value for c in cases_by_value)
-        value_to_name: dict[int, str] = {c.value: c.keyword for c in cases_by_value}
-        c_arrays.append_value_array(
-            lines,
-            "loom_bstring_t",
-            array_name,
-            [_bstring_expr(name) if (name := value_to_name.get(v)) is not None else "NULL" for v in range(max_value + 1)],
-            trailing_blank=False,
-        )
 
     # Symbol definition descriptors may refer to fact domains outside this
     # generated translation unit.
@@ -247,6 +713,14 @@ def generate_tables_c(
     target_like_bundle_table_symbols = c_interfaces.target_like_bundle_table_symbols(ops)
     if target_like_bundle_table_symbols:
         lines.extend(f"extern const loom_target_bundle_table_t {symbol};" for symbol in target_like_bundle_table_symbols)
+        lines.append("")
+    target_like_fact_type_symbols = c_interfaces.target_like_fact_type_symbols(ops)
+    if target_like_fact_type_symbols:
+        lines.extend(f"extern const loom_target_fact_type_t {symbol};" for symbol in target_like_fact_type_symbols)
+        lines.append("")
+    target_like_fact_projector_symbols = c_interfaces.target_like_fact_projector_symbols(ops)
+    if target_like_fact_projector_symbols:
+        lines.extend(f"extern const loom_target_fact_projector_t {symbol};" for symbol in target_like_fact_projector_symbols)
         lines.append("")
 
     emitted_enum_case_name_arrays: set[str] = set()
@@ -267,11 +741,7 @@ def generate_tables_c(
             lines.append("};")
 
         # Operand descriptors.
-        func_args_are_operands = c_queries.func_args_are_operands(op)
-        explicit_func_args_operand = c_queries.explicit_func_args_operand(op)
-        synthesize_func_args_operand = func_args_are_operands and explicit_func_args_operand is None
-        if op.operands or synthesize_func_args_operand:
-            func_args_name = c_queries.func_args_field_name(op) if synthesize_func_args_operand else ""
+        if op.operands:
             effect_map = {effect.operand: effect.kind for effect in op.effects}
             ownership_operand_map = {effect.operand: effect for effect in op.ownership_effects if isinstance(effect, OperandOwnershipEffect)}
             lines.append(f"static const loom_operand_descriptor_t {prefix}_operand_desc[] = {{")
@@ -295,12 +765,11 @@ def generate_tables_c(
                 else:
                     ownership_effect_name = OPERAND_OWNERSHIP_EFFECT_MAP[ownership_effect.kind]
                     ownership_carrier_name = OWNERSHIP_CARRIER_MAP[ownership_effect.carrier]
-                if ownership_effect is None:
+                role_name = OPERAND_ROLE_MAP[operand.role]
+                if ownership_effect is None and role_name == "LOOM_OPERAND_ROLE_NONE":
                     lines.append(f"    {{{_bstring_expr(operand.name)}, {type_constraint}, {flags}}},")
                 else:
-                    lines.append(f"    {{{_bstring_expr(operand.name)}, {type_constraint}, {flags}, {ownership_effect_name}, {ownership_carrier_name}}},")
-            if synthesize_func_args_operand:
-                lines.append(f"    {{{_bstring_expr(func_args_name)}, LOOM_TYPE_CONSTRAINT_ANY, LOOM_OPERAND_VARIADIC}},")
+                    lines.append(f"    {{{_bstring_expr(operand.name)}, {type_constraint}, {flags}, {ownership_effect_name}, {ownership_carrier_name}, {role_name}}},")
             lines.append("};")
 
         # Result descriptors.
@@ -333,7 +802,7 @@ def generate_tables_c(
         # a dialect-level shared enum, or a per-op enum typedef, but all three
         # still need one parser/printer keyword table per C symbol name.
         for attr_def in op.attrs:
-            if attr_def.attr_type == "enum" and attr_def.enum_def:
+            if attr_def.attr_type in ("enum", "enum_array", "signed_enum_set") and attr_def.enum_def:
                 array_name = _enum_names_array_name(op, attr_def, shared_enums)
                 if array_name in emitted_enum_case_name_arrays:
                     continue
@@ -359,9 +828,13 @@ def generate_tables_c(
         for attr_def in non_flags:
             if attr_def.symbol_ref is None:
                 continue
-            flags = _symbol_interface_flags(attr_def.symbol_ref.interfaces)
             descriptor_name = f"{prefix}_{attr_def.name}_symbol_ref"
-            lines.append(f"static const loom_symbol_reference_descriptor_t {descriptor_name} = {{{_bstring_expr(attr_def.symbol_ref.name)}, {flags}}};")
+            c_symbols.append_symbol_reference_descriptor(
+                lines,
+                descriptor_name,
+                attr_def.symbol_ref,
+                _bstring_expr(attr_def.symbol_ref.name),
+            )
 
         # Attribute descriptors.
         if non_flags:
@@ -378,14 +851,26 @@ def generate_tables_c(
                 if attr_def.open_enum:
                     flag_names.append("LOOM_ATTR_OPEN_ENUM")
                 flags = " | ".join(flag_names) if flag_names else "0"
-                if attr_def.attr_type == "enum" and attr_def.enum_def:
+                if attr_def.attr_type in ("enum", "enum_array", "signed_enum_set") and attr_def.enum_def:
                     enum_names = _enum_names_array_name(op, attr_def, shared_enums)
-                    enum_case_count = f"IREE_ARRAYSIZE({enum_names})"
+                    enum_max_value = f"(uint8_t)(IREE_ARRAYSIZE({enum_names}) - 1)"
                 else:
                     enum_names = "NULL"
-                    enum_case_count = "0"
-                symbol_ref = f"&{prefix}_{attr_def.name}_symbol_ref" if attr_def.symbol_ref is not None else "NULL"
-                lines.append(f"    {{{_bstring_expr(attr_def.name)}, {attr_kind}, {flags}, {enum_case_count}, {enum_names}, {symbol_ref}}},")
+                    enum_max_value = "0"
+                lines.append("    {")
+                lines.append(f"        .name = {_bstring_expr(attr_def.name)},")
+                lines.append(f"        .attr_kind = {attr_kind},")
+                if flags != "0":
+                    lines.append(f"        .flags = {flags},")
+                if enum_names != "NULL":
+                    lines.append(f"        .enum_max_value = {enum_max_value},")
+                    lines.append(f"        .enum_case_names = {enum_names},")
+                if attr_def.symbol_ref is not None:
+                    lines.append(f"        .reference.symbol_ref = &{prefix}_{attr_def.name}_symbol_ref,")
+                if attr_def.attr_type in ("parameterized", "parameterized_array"):
+                    expected_family = _c_parameterized_attr_enum_name(attr_def.parameterized_attr) if attr_def.parameterized_attr is not None else "LOOM_PARAMETERIZED_ATTR_KIND_ANY"
+                    lines.append(f"        .reference.parameterized_attr_kind = {expected_family},")
+                lines.append("    },")
             lines.append("};")
 
         # Region descriptors.
@@ -406,6 +891,16 @@ def generate_tables_c(
                     if buffer_arg_memory_space != "global":
                         raise ValueError(f"Op '{op.name}' region '{region_def.name}' has unsupported buffer_arg_memory_space '{buffer_arg_memory_space}'")
                     region_flags.append("LOOM_REGION_GLOBAL_BUFFER_ARGS")
+                arg_uniform_scope = region_def.arg_uniform_scope
+                if arg_uniform_scope is not None:
+                    if arg_uniform_scope == "workgroup":
+                        region_flags.append("LOOM_REGION_WORKGROUP_UNIFORM_ARGS")
+                    elif arg_uniform_scope == "cluster":
+                        region_flags.append("LOOM_REGION_CLUSTER_UNIFORM_ARGS")
+                    else:
+                        raise ValueError(f"Op '{op.name}' region '{region_def.name}' has unsupported arg_uniform_scope '{arg_uniform_scope}'")
+                if region_def.command_effects_only:
+                    region_flags.append("LOOM_REGION_COMMAND_EFFECTS_ONLY")
                 flags = " | ".join(region_flags) if region_flags else "0"
                 terminator = c_traits.region_terminator_kind(op, region_def, ops_by_name)
                 lines.append(f"    {{{terminator}, {implicit_terminator}, {flags}}},")
@@ -458,19 +953,43 @@ def generate_tables_c(
         # Symbol definition descriptor.
         if op.symbol_def is not None:
             attr_index = c_queries.resolve_attr_index(op, op.symbol_def.field, "symbol_def")
+            visibility_attr_index = _symbol_visibility_attr_index(op)
             retain_attr_index = _symbol_retain_attr_index(op)
-            flags = _symbol_interface_flags(op.symbol_def.interfaces)
+            value_contract_indices = _symbol_value_contract_indices(op)
+            kernel_contract_indices = _symbol_kernel_contract_indices(op)
+            flags = c_symbols.symbol_interface_flags(op.symbol_def.interfaces)
             fact_domain = c_symbols.symbol_fact_domain_symbol(op)
             lines.append(f"static const loom_symbol_definition_descriptor_t {prefix}_symbol_def = {{")
             lines.append(f"    .name = {_bstring_expr(op.symbol_def.name)},")
             if attr_index != 0:
                 lines.append(f"    .name_attr_index = {attr_index},")
+            if visibility_attr_index is not None:
+                lines.append(f"    .visibility_attr_index_plus_one = {visibility_attr_index + 1},")
             if retain_attr_index is not None:
                 lines.append(f"    .retain_attr_index_plus_one = {retain_attr_index + 1},")
+            definition_flags: list[str] = []
+            if op.symbol_def.is_declaration:
+                definition_flags.append("LOOM_SYMBOL_DEFINITION_FLAG_DECLARATION")
+            if op.symbol_def.is_test_only:
+                definition_flags.append("LOOM_SYMBOL_DEFINITION_FLAG_TEST_ONLY")
+            if definition_flags:
+                lines.append(f"    .flags = {' | '.join(definition_flags)},")
+            if value_contract_indices is not None:
+                result_index, value_attr_index, predicates_attr_index = value_contract_indices
+                lines.append(f"    .value_contract_result_index_plus_one = {result_index + 1},")
+                if value_attr_index is not None:
+                    lines.append(f"    .value_contract_value_attr_index_plus_one = {value_attr_index + 1},")
+                if predicates_attr_index is not None:
+                    lines.append(f"    .value_contract_predicates_attr_index_plus_one = {predicates_attr_index + 1},")
             if flags != "0":
                 lines.append(f"    .interfaces = {flags},")
             if op.symbol_def.bytecode_kind != "LOOM_SYMBOL_NONE":
                 lines.append(f"    .bytecode_kind = {op.symbol_def.bytecode_kind},")
+            kernel_region_index, kernel_operand_index = kernel_contract_indices
+            if kernel_region_index is not None:
+                lines.append(f"    .kernel_workload_region_index_plus_one = {kernel_region_index + 1},")
+            if kernel_operand_index is not None:
+                lines.append(f"    .kernel_workload_operand_field_index_plus_one = {kernel_operand_index + 1},")
             if fact_domain:
                 lines.append(f"    .fact_domain = &{fact_domain},")
             lines.append("};")
@@ -515,7 +1034,7 @@ def generate_tables_c(
         vtable_flag_bits: list[str] = []
         if layout.segmented_operands:
             vtable_flag_bits.append("LOOM_OP_VTABLE_SEGMENTED_OPERANDS")
-        elif layout.variadic_operand or c_queries.func_args_are_operands(op):
+        elif layout.variadic_operand:
             vtable_flag_bits.append("LOOM_OP_VTABLE_VARIADIC_OPERANDS")
         if layout.variadic_result:
             vtable_flag_bits.append("LOOM_OP_VTABLE_VARIADIC_RESULTS")
@@ -525,6 +1044,10 @@ def generate_tables_c(
             vtable_flag_bits.append("LOOM_OP_VTABLE_HAS_INSTANCE_FLAGS")
         if c_queries.op_has_type_propagation_candidate(op, layout):
             vtable_flag_bits.append("LOOM_OP_VTABLE_TYPE_PROPAGATION_CANDIDATE")
+        if any(kind == "LOOM_FORMAT_KIND_OPERAND_DICT" for kind, _, _ in elements):
+            vtable_flag_bits.append("LOOM_OP_VTABLE_HAS_OPERAND_DICT")
+        if op.keyed_module_record_attr is not None:
+            vtable_flag_bits.append("LOOM_OP_VTABLE_KEYED_MODULE_RECORD")
         vtable_flags_str = " | ".join(vtable_flag_bits) if vtable_flag_bits else "0"
 
         sym_kind = _symbol_kind(op)
@@ -538,15 +1061,13 @@ def generate_tables_c(
         has_placement = any(trait.name in ("HasParent", "HasAncestor", "NoAncestor") for trait in op.traits)
         placement_ptr = f"&{prefix}_placement" if has_placement else "NULL"
         attr_desc_ptr = f"{prefix}_attr_desc" if non_flags else "NULL"
-        operand_desc_ptr = f"{prefix}_operand_desc" if op.operands or c_queries.func_args_are_operands(op) else "NULL"
+        operand_desc_ptr = f"{prefix}_operand_desc" if op.operands else "NULL"
         operand_descriptor_count = len(op.operands)
-        if c_queries.func_args_are_operands(op) and c_queries.explicit_func_args_operand(op) is None:
-            operand_descriptor_count += 1
         successor_selector_operand_index = c_queries.resolve_successor_selector_operand_index(op)
         implied_operand_descriptor_count = layout.fixed_operand_count
         if layout.segmented_operands:
             implied_operand_descriptor_count = -1
-        elif layout.variadic_operand or c_queries.func_args_are_operands(op):
+        elif layout.variadic_operand:
             implied_operand_descriptor_count += 1
         result_desc_ptr = f"{prefix}_result_desc" if op.results else "NULL"
         region_desc_ptr = f"{prefix}_region_desc" if op.regions else "NULL"
@@ -570,6 +1091,9 @@ def generate_tables_c(
             lines.append(f"    .operand_descriptor_count = IREE_ARRAYSIZE({operand_desc_ptr}),")
         append_nonzero("fixed_result_count", layout.fixed_result_count)
         append_nonzero("vtable_flags", vtable_flags_str)
+        operand_role_mask_parts = [OPERAND_ROLE_MASK_MAP[operand.role] for operand in op.operands if operand.role in OPERAND_ROLE_MASK_MAP]
+        if operand_role_mask_parts:
+            lines.append(f"    .operand_role_mask = {' | '.join(sorted(set(operand_role_mask_parts)))},")
         if successor_selector_operand_index is not None:
             lines.append("    .control_flow_flags = LOOM_OP_CONTROL_FLOW_HAS_SUCCESSOR_SELECTOR,")
             lines.append(f"    .successor_selector_operand_index = {successor_selector_operand_index},")
@@ -598,6 +1122,13 @@ def generate_tables_c(
         if has_flags:
             lines.append(f"    .instance_flags_case_names = {prefix}_instance_flags_names,")
             lines.append(f"    .instance_flags_case_count = IREE_ARRAYSIZE({prefix}_instance_flags_names),")
+        if op.keyed_module_record_attr is not None:
+            key_attr_index = c_queries.resolve_attr_index(
+                op,
+                op.keyed_module_record_attr,
+                "KeyedModuleRecord",
+            )
+            lines.append(f"    .module_record_key_attr_index = {key_attr_index},")
         for spec in c_interfaces.INTERFACES:
             interface_ptr = interface_ptrs[spec.vtable_field]
             if interface_ptr != "NULL":
@@ -609,6 +1140,13 @@ def generate_tables_c(
 
         lines.append("};")
         lines.append("")
+
+    # Parameterized attribute families share the ordinary attribute schema but
+    # retain a distinct dialect-owned outer identity.
+    encoding_enum_names = _emit_encoding_enum_case_names(lines, encoding_families)
+    _emit_encoding_auxiliary_key_descriptors(lines, dialect_name, encoding_families)
+    _emit_parameterized_attr_tables(lines, dialect_name, parameterized_attrs, encoding_enum_names)
+    _emit_encoding_family_tables(lines, encoding_families, encoding_enum_names)
 
     lines.append("#undef _OP_NAME")
     lines.append("#undef _BSTRING")
@@ -624,13 +1162,19 @@ def generate_tables_c(
         f"loom_{dialect_name}_vtable_array",
         [f"&{_c_prefix(op)}_vtable" for op in ops],
     )
+    condition_refinement_indexes = _emit_condition_refinement_table(lines, dialect_name, ops)
     c_arrays.append_struct_array(
         lines,
         "loom_op_semantics_t",
         f"loom_{dialect_name}_semantics_array",
-        [_op_semantics_row(op) for op in ops],
+        [_op_semantics_row(op, condition_refinement_indexes.get(op.name, 0)) for op in ops],
     )
-    _emit_dialect_table_accessors(lines, dialect_name)
+    _emit_dialect_table_accessors(
+        lines,
+        dialect_name,
+        parameterized_attrs,
+        has_condition_refinements=bool(condition_refinement_indexes),
+    )
 
     return "\n".join(lines)
 
@@ -669,6 +1213,8 @@ def generate_tables_aggregator_c(
     dialect_name: str,
     dialect_id: int,
     ops: Sequence[Op],
+    parameterized_attrs: Sequence[ParameterizedAttrDef] = (),
+    encoding_families: Sequence[EncodingFamilyDef] = (),
     *,
     include_path: str | None = None,
 ) -> str:
@@ -683,19 +1229,30 @@ def generate_tables_aggregator_c(
     lines.append(f'#include "{include_path}/tables.h"')
     lines.append("")
 
+    encoding_enum_names = _emit_encoding_enum_case_names(lines, encoding_families)
+    _emit_encoding_auxiliary_key_descriptors(lines, dialect_name, encoding_families)
+    _emit_parameterized_attr_tables(lines, dialect_name, parameterized_attrs, encoding_enum_names)
+    _emit_encoding_family_tables(lines, encoding_families, encoding_enum_names)
+
     c_arrays.append_value_array(
         lines,
         "loom_op_vtable_t* const",
         f"loom_{dialect_name}_vtable_array",
         [f"&{_c_prefix(op)}_vtable" for op in ops],
     )
+    condition_refinement_indexes = _emit_condition_refinement_table(lines, dialect_name, ops)
     c_arrays.append_struct_array(
         lines,
         "loom_op_semantics_t",
         f"loom_{dialect_name}_semantics_array",
-        [_op_semantics_row(op) for op in ops],
+        [_op_semantics_row(op, condition_refinement_indexes.get(op.name, 0)) for op in ops],
     )
-    _emit_dialect_table_accessors(lines, dialect_name)
+    _emit_dialect_table_accessors(
+        lines,
+        dialect_name,
+        parameterized_attrs,
+        has_condition_refinements=bool(condition_refinement_indexes),
+    )
 
     return "\n".join(lines)
 
@@ -704,6 +1261,8 @@ def generate_sharded_tables_c(
     dialect_name: str,
     dialect_id: int,
     category_groups: Sequence[tuple[Any, Sequence[Op]]],
+    parameterized_attrs: Sequence[ParameterizedAttrDef] = (),
+    encoding_families: Sequence[EncodingFamilyDef] = (),
     *,
     include_path: str | None = None,
 ) -> dict[str, str]:
@@ -726,6 +1285,13 @@ def generate_sharded_tables_c(
             export_vtables=True,
             private_header=True,
         )
-    table_files["tables.c"] = generate_tables_aggregator_c(dialect_name, dialect_id, all_ops, include_path=include_path)
+    table_files["tables.c"] = generate_tables_aggregator_c(
+        dialect_name,
+        dialect_id,
+        all_ops,
+        parameterized_attrs,
+        encoding_families,
+        include_path=include_path,
+    )
     table_files["tables.h"] = generate_tables_h(dialect_name, all_ops, include_path=include_path)
     return table_files

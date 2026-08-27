@@ -59,7 +59,7 @@ HRX_API void hrx_runtime_version(int* major, int* minor, int* patch);
 //===----------------------------------------------------------------------===//
 // Status
 //
-// Values match iree_status_code_t. Verified by _Static_assert in
+// Values match iree_status_code_t. Verified by static_assert in
 // implementation.
 //===----------------------------------------------------------------------===//
 
@@ -171,7 +171,7 @@ typedef struct hrx_graph_node_s* hrx_graph_node_t;
 //===----------------------------------------------------------------------===//
 // Enums and flags
 //
-// All values match their IREE counterparts. Verified by _Static_assert
+// All values match their IREE counterparts. Verified by static_assert
 // in the implementation. Bitfield types use typedef + #define.
 //===----------------------------------------------------------------------===//
 
@@ -199,7 +199,7 @@ typedef uint32_t hrx_memory_type_t;
 #define HRX_MEMORY_TYPE_HOST_VISIBLE 0x00000002u
 #define HRX_MEMORY_TYPE_HOST_COHERENT 0x00000004u
 #define HRX_MEMORY_TYPE_HOST_CACHED 0x00000008u
-#define HRX_MEMORY_TYPE_HOST_LOCAL 0x00000046u
+#define HRX_MEMORY_TYPE_HOST_LOCAL 0x00000042u
 #define HRX_MEMORY_TYPE_DEVICE_VISIBLE 0x00000010u
 #define HRX_MEMORY_TYPE_DEVICE_LOCAL 0x00000030u
 
@@ -217,9 +217,9 @@ typedef uint32_t hrx_buffer_usage_t;
 #define HRX_BUFFER_USAGE_TRANSFER_SOURCE 0x00000001u
 #define HRX_BUFFER_USAGE_TRANSFER_TARGET 0x00000002u
 #define HRX_BUFFER_USAGE_TRANSFER 0x00000003u
-#define HRX_BUFFER_USAGE_DISPATCH_STORAGE_READ 0x00000400u
-#define HRX_BUFFER_USAGE_DISPATCH_STORAGE_WRITE 0x00000800u
-#define HRX_BUFFER_USAGE_DISPATCH_STORAGE 0x00000C00u
+#define HRX_BUFFER_USAGE_STORAGE_READ 0x00000400u
+#define HRX_BUFFER_USAGE_STORAGE_WRITE 0x00000800u
+#define HRX_BUFFER_USAGE_STORAGE 0x00000C00u
 #define HRX_BUFFER_USAGE_MAPPING_SCOPED 0x01000000u
 #define HRX_BUFFER_USAGE_MAPPING_PERSISTENT 0x02000000u
 #define HRX_BUFFER_USAGE_DEFAULT 0x00000C03u
@@ -305,6 +305,7 @@ typedef struct hrx_executable_export_info_t {
 
 #define HRX_DEVICE_EVENT_ABI_VERSION_0 0u
 #define HRX_DEVICE_ASAN_REPORT_ABI_VERSION_0 0u
+#define HRX_DEVICE_PRINTF_EVENT_ABI_VERSION_0 0u
 
 typedef uint32_t hrx_device_event_type_t;
 enum hrx_device_event_type_bits_t {
@@ -373,6 +374,37 @@ typedef struct hrx_device_event_t {
   // Optional backend-native payload for advanced tools.
   hrx_const_byte_span_t implementation_payload;
 } hrx_device_event_t;
+
+// Device printf stream classification.
+typedef uint32_t hrx_device_printf_stream_t;
+enum hrx_device_printf_stream_bits_t {
+  HRX_DEVICE_PRINTF_STREAM_DEFAULT = 0u,
+  HRX_DEVICE_PRINTF_STREAM_STDOUT = 1u,
+  HRX_DEVICE_PRINTF_STREAM_STDERR = 2u,
+};
+
+typedef uint32_t hrx_device_printf_flags_t;
+enum hrx_device_printf_flag_bits_t {
+  HRX_DEVICE_PRINTF_FLAG_NONE = 0u,
+};
+
+// Device printf payload.
+typedef struct hrx_device_printf_event_t {
+  // Size of this record in bytes.
+  uint32_t record_length;
+  // ABI version of this printf payload.
+  uint32_t abi_version;
+  // Stream hint for the output.
+  hrx_device_printf_stream_t stream;
+  // Printf event flags.
+  hrx_device_printf_flags_t flags;
+  // Format string identifier, or 0 when |text| is already formatted.
+  uint64_t format_id;
+  // Borrowed already-formatted text when available.
+  hrx_string_view_t text;
+  // Borrowed encoded arguments when available.
+  hrx_const_byte_span_t arguments;
+} hrx_device_printf_event_t;
 
 typedef uint32_t hrx_device_asan_access_kind_t;
 enum hrx_device_asan_access_kind_bits_t {
@@ -731,18 +763,21 @@ HRX_API hrx_status_t hrx_stream_execution_barrier(hrx_stream_t stream);
 // Load native executable packages and inspect export metadata for direct
 // dispatch. Kernel tensor/storage arguments should be passed as bindings;
 // scalars, strides, and sizes should be packed into the constants block.
-// Callers must pass the exact HAL executable format for the package.
+// Callers pass the executable artifact target family and key. The runtime
+// selects a compatible advertised device target using family-owned rules.
 //===----------------------------------------------------------------------===//
 
 HRX_API hrx_status_t hrx_executable_load_data(hrx_device_t device,
                                               const void* executable_data,
                                               size_t executable_data_size,
-                                              const char* executable_format,
+                                              const char* target_family,
+                                              const char* target_key,
                                               hrx_executable_t* executable);
 
 HRX_API hrx_status_t hrx_executable_load_file(hrx_device_t device,
                                               const char* path,
-                                              const char* executable_format,
+                                              const char* target_family,
+                                              const char* target_key,
                                               hrx_executable_t* executable);
 
 HRX_API void hrx_executable_retain(hrx_executable_t executable);
@@ -998,9 +1033,14 @@ typedef enum hrx_mem_pool_attr_t {
 } hrx_mem_pool_attr_t;
 
 typedef struct hrx_mem_pool_props_t {
+  // Platform allocation-handle types requested when the pool was created.
   uint32_t alloc_handle_type;
+  // Platform location type for the pool's backing storage.
   uint32_t location_type;
+  // Platform device ordinal for the pool's backing storage.
   int location_id;
+  // Maximum live reservation bytes, or zero when the pool is unbounded.
+  size_t max_size;
 } hrx_mem_pool_props_t;
 
 HRX_API hrx_status_t hrx_mem_pool_create(hrx_device_t device,
@@ -1016,6 +1056,21 @@ HRX_API hrx_status_t hrx_mem_pool_set_attribute(hrx_mem_pool_t pool,
                                                 uint64_t value);
 HRX_API hrx_status_t hrx_mem_pool_trim(hrx_mem_pool_t pool,
                                        size_t min_bytes_to_keep);
+
+// Trims unused backing storage toward the pool's configured release threshold.
+// This is intended for stream-ordered free completion paths.
+HRX_API hrx_status_t hrx_mem_pool_release_unused(hrx_mem_pool_t pool);
+
+// Records a logical allocation backed by |pool|. Logical usage is distinct
+// from physical TLSF reservations, which can remain retained for later
+// stream-ordered reuse.
+HRX_API void hrx_mem_pool_record_logical_allocation(hrx_mem_pool_t pool,
+                                                    size_t size);
+
+// Records retirement of a logical allocation backed by |pool|. The physical
+// reservation remains owned by its buffer until that buffer is released or
+// reused.
+HRX_API void hrx_mem_pool_record_logical_free(hrx_mem_pool_t pool, size_t size);
 
 // Allocates a buffer from |pool| using the same parameter contract as
 // hrx_allocator_allocate_buffer. The returned buffer owns the allocation and
@@ -1049,18 +1104,43 @@ typedef struct hrx_graph_kernel_node_attrs_t {
   uint32_t flags;
 } hrx_graph_kernel_node_attrs_t;
 
-typedef struct hrx_graph_memcpy_node_attrs_t {
+// Raw device-pointer buffer copy. Recording resolves the pointers through the
+// device allocation table and incurs pointer accounting overhead. Prefer
+// hrx_graph_add_copy_buffer_node() when buffer handles are available.
+typedef struct hrx_graph_copy_ptr_node_attrs_t {
   void* dst;
   const void* src;
   size_t size;
   uint32_t kind;
-} hrx_graph_memcpy_node_attrs_t;
+} hrx_graph_copy_ptr_node_attrs_t;
 
-typedef struct hrx_graph_memset_node_attrs_t {
+// Raw device-pointer buffer fill. Recording resolves the pointer through the
+// device allocation table and incurs pointer accounting overhead. Prefer
+// hrx_graph_add_fill_buffer_node() when a buffer handle is available.
+typedef struct hrx_graph_fill_ptr_node_attrs_t {
   void* dst;
   uint32_t value;
   size_t count;
-} hrx_graph_memset_node_attrs_t;
+} hrx_graph_fill_ptr_node_attrs_t;
+
+// Native handle-based buffer copy. Source and destination lengths must be
+// equal and nonzero. Recording uses the buffer handles directly without raw
+// pointer accounting overhead. The ranges are retained by the instantiated
+// graph through the underlying command buffer resources.
+typedef struct hrx_graph_copy_buffer_node_attrs_t {
+  hrx_buffer_ref_t src;
+  hrx_buffer_ref_t dst;
+} hrx_graph_copy_buffer_node_attrs_t;
+
+// Native handle-based buffer fill. |pattern_size| must be 1, 2, or 4 and the
+// destination offset and length must be integral multiples of it. Pattern
+// bytes are copied into the graph node during recording. Recording uses the
+// buffer handle directly without raw pointer accounting overhead.
+typedef struct hrx_graph_fill_buffer_node_attrs_t {
+  hrx_buffer_ref_t dst;
+  uint32_t pattern;
+  size_t pattern_size;
+} hrx_graph_fill_buffer_node_attrs_t;
 
 typedef struct hrx_graph_host_call_node_attrs_t {
   hrx_host_call_fn_t fn;
@@ -1079,12 +1159,20 @@ HRX_API hrx_status_t hrx_graph_add_empty_node(hrx_graph_t graph,
 HRX_API hrx_status_t hrx_graph_add_kernel_node(
     hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
     const hrx_graph_kernel_node_attrs_t* attrs, hrx_graph_node_t* out_node);
-HRX_API hrx_status_t hrx_graph_add_memcpy_node(
+HRX_API hrx_status_t hrx_graph_add_copy_ptr_node(
     hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
-    const hrx_graph_memcpy_node_attrs_t* attrs, hrx_graph_node_t* out_node);
-HRX_API hrx_status_t hrx_graph_add_memset_node(
+    const hrx_graph_copy_ptr_node_attrs_t* attrs, hrx_graph_node_t* out_node);
+HRX_API hrx_status_t hrx_graph_add_fill_ptr_node(
     hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
-    const hrx_graph_memset_node_attrs_t* attrs, hrx_graph_node_t* out_node);
+    const hrx_graph_fill_ptr_node_attrs_t* attrs, hrx_graph_node_t* out_node);
+HRX_API hrx_status_t hrx_graph_add_copy_buffer_node(
+    hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
+    const hrx_graph_copy_buffer_node_attrs_t* attrs,
+    hrx_graph_node_t* out_node);
+HRX_API hrx_status_t hrx_graph_add_fill_buffer_node(
+    hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
+    const hrx_graph_fill_buffer_node_attrs_t* attrs,
+    hrx_graph_node_t* out_node);
 HRX_API hrx_status_t hrx_graph_add_host_call_node(
     hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
     const hrx_graph_host_call_node_attrs_t* attrs, hrx_graph_node_t* out_node);

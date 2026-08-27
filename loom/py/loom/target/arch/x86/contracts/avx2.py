@@ -14,7 +14,9 @@ from loom.dialect.buffer import ALL_BUFFER_OPS
 from loom.dialect.index import ALL_INDEX_OPS
 from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
+from loom.dialect.scalar import conversion as scalar_conversion
 from loom.dialect.scalar import math as scalar_math
+from loom.dialect.scf import ALL_SCF_OPS
 from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
 from loom.dialect.view import ALL_VIEW_OPS
@@ -56,9 +58,13 @@ from loom.target.low_descriptors import Descriptor
 _DescriptorLookup = Callable[[str], Descriptor]
 
 _I32 = Scalar("i32")
+_I64 = Scalar("i64")
 _F32 = Scalar("f32")
+_F64 = Scalar("f64")
 _V4I32 = Vector("i32", lanes=4)
 _V4F32 = Vector("f32", lanes=4)
+_V8I32 = Vector("i32", lanes=8)
+_V8F32 = Vector("f32", lanes=8)
 
 _DISP32_MIN = -(2**31)
 _DISP32_MAX = (2**31) - 1
@@ -123,6 +129,31 @@ def _binary_rule(
                     "lhs": ValueRef.operand("lhs"),
                     "rhs": ValueRef.operand("rhs"),
                 },
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _conversion_rule(
+    source_op: Op,
+    source_type: TypePattern,
+    result_type: TypePattern,
+    descriptor_key: str,
+    descriptor_lookup: _DescriptorLookup,
+) -> DescriptorRule:
+    descriptor = descriptor_lookup(descriptor_key)
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("input", source_type),
+            Guard.value_type("result", result_type),
+        ),
+        emit=(
+            _op_emit(
+                descriptor=descriptor,
+                operands={"input": ValueRef.operand("input")},
                 results={"dst": ValueRef.result("result")},
             ),
         ),
@@ -296,7 +327,9 @@ def _source_memory_constraint(
     dynamic: bool,
     dynamic_byte_stride_factor: int = 1,
     materialize_byte_offset: bool = False,
+    preserve_source_index: bool = False,
 ) -> SourceMemoryConstraint:
+    accepts_any_dynamic_terms = materialize_byte_offset or preserve_source_index
     return SourceMemoryConstraint(
         operation=operation,
         root_kind=SourceMemoryRootKind.BLOCK_ARGUMENT,
@@ -306,19 +339,24 @@ def _source_memory_constraint(
         vector_lane_byte_stride=4,
         static_byte_offset_minimum=_DISP32_MIN,
         static_byte_offset_maximum=_DISP32_MAX,
-        dynamic_term_count=1 if dynamic else 0,
+        dynamic_term_count=(
+            None if dynamic and accepts_any_dynamic_terms else 1 if dynamic else 0
+        ),
+        dynamic_term_count_minimum=(1 if dynamic and accepts_any_dynamic_terms else 0),
+        dynamic_view_base_term_count=None if materialize_byte_offset else 0,
         dynamic_index_source=(
             SourceMemoryDynamicIndexSource.VALUE
-            if dynamic
+            if dynamic and not accepts_any_dynamic_terms
             else SourceMemoryDynamicIndexSource.NONE
         ),
         dynamic_byte_stride=(
-            None
-            if dynamic and materialize_byte_offset
+            0
+            if dynamic and accepts_any_dynamic_terms
             else 4 * dynamic_byte_stride_factor
         )
         if dynamic
         else 0,
+        preserve_source_index=preserve_source_index,
         diagnostic=_SOURCE_MEMORY_DIAGNOSTIC,
     )
 
@@ -327,13 +365,18 @@ def _memory_immediates(
     dynamic: bool,
     *,
     materialize_byte_offset: bool = False,
+    preserve_source_index: bool = False,
 ) -> dict[str, SourceMemoryProject | int]:
     immediates: dict[str, SourceMemoryProject | int] = {
         "disp32": SourceMemoryProject.static_byte_offset()
     }
     if dynamic:
         immediates["scale"] = (
-            1 if materialize_byte_offset else SourceMemoryProject.dynamic_byte_stride()
+            1
+            if materialize_byte_offset
+            else 4
+            if preserve_source_index
+            else SourceMemoryProject.dynamic_byte_stride()
         )
     return immediates
 
@@ -347,6 +390,7 @@ def _vector_load_rule(
     descriptor_lookup: _DescriptorLookup,
     dynamic_byte_stride_factor: int = 1,
     materialize_byte_offset: bool = False,
+    preserve_source_index: bool = False,
 ) -> DescriptorRule:
     descriptor = descriptor_lookup(descriptor_key)
     operands = {"base": ValueRef.operand("view")}
@@ -355,14 +399,17 @@ def _vector_load_rule(
             operands["index"] = ValueRef.source_memory_dynamic_byte_offset()
         elif dynamic_byte_stride_factor != 1:
             operands["index"] = ValueRef.temporary("factored_index")
-        else:
+        elif preserve_source_index:
             operands["index"] = ValueRef.operand("indices")
+        else:
+            operands["index"] = ValueRef.source_memory_dynamic_term()
     source_memory = _source_memory_constraint(
         SourceMemoryOperation.LOAD,
         lanes=lanes,
         dynamic=dynamic,
         dynamic_byte_stride_factor=dynamic_byte_stride_factor,
         materialize_byte_offset=materialize_byte_offset,
+        preserve_source_index=preserve_source_index,
     )
     memory_emit = _op_emit(
         descriptor=descriptor,
@@ -374,6 +421,7 @@ def _vector_load_rule(
             else _memory_immediates(
                 dynamic,
                 materialize_byte_offset=materialize_byte_offset,
+                preserve_source_index=preserve_source_index,
             )
         ),
         source_memory=source_memory,
@@ -399,7 +447,11 @@ def _vector_load_rule(
         source_op=vector.vector_load,
         descriptor=descriptor,
         guards=(
-            Guard.operand_segment_count("indices", 1 if dynamic else 0),
+            *(
+                ()
+                if materialize_byte_offset
+                else (Guard.operand_segment_count("indices", 1 if dynamic else 0),)
+            ),
             Guard.value_type("result", result_type),
         ),
         emit=emit,
@@ -415,6 +467,7 @@ def _vector_store_rule(
     descriptor_lookup: _DescriptorLookup,
     dynamic_byte_stride_factor: int = 1,
     materialize_byte_offset: bool = False,
+    preserve_source_index: bool = False,
 ) -> DescriptorRule:
     descriptor = descriptor_lookup(descriptor_key)
     operands = {
@@ -426,14 +479,17 @@ def _vector_store_rule(
             operands["index"] = ValueRef.source_memory_dynamic_byte_offset()
         elif dynamic_byte_stride_factor != 1:
             operands["index"] = ValueRef.temporary("factored_index")
-        else:
+        elif preserve_source_index:
             operands["index"] = ValueRef.operand("indices")
+        else:
+            operands["index"] = ValueRef.source_memory_dynamic_term()
     source_memory = _source_memory_constraint(
         SourceMemoryOperation.STORE,
         lanes=lanes,
         dynamic=dynamic,
         dynamic_byte_stride_factor=dynamic_byte_stride_factor,
         materialize_byte_offset=materialize_byte_offset,
+        preserve_source_index=preserve_source_index,
     )
     memory_emit = _op_emit(
         descriptor=descriptor,
@@ -444,6 +500,7 @@ def _vector_store_rule(
             else _memory_immediates(
                 dynamic,
                 materialize_byte_offset=materialize_byte_offset,
+                preserve_source_index=preserve_source_index,
             )
         ),
         source_memory=source_memory,
@@ -469,7 +526,11 @@ def _vector_store_rule(
         source_op=vector.vector_store,
         descriptor=descriptor,
         guards=(
-            Guard.operand_segment_count("indices", 1 if dynamic else 0),
+            *(
+                ()
+                if materialize_byte_offset
+                else (Guard.operand_segment_count("indices", 1 if dynamic else 0),)
+            ),
             Guard.value_type("value", value_type),
         ),
         emit=emit,
@@ -480,23 +541,27 @@ def _memory_descriptor_key(
     operation: str,
     *,
     dynamic: bool,
+    register_suffix: str,
 ) -> str:
     indexed = ".indexed" if dynamic else ""
-    return f"x86.avx2.vmovdqu32.{operation}{indexed}.xmm"
+    return f"x86.avx2.vmovdqu32.{operation}{indexed}.{register_suffix}"
 
 
 def _memory_rules(
     descriptor_lookup: _DescriptorLookup,
 ) -> tuple[DescriptorRule, ...]:
     rules: list[DescriptorRule] = []
-    for value_type, lanes in (
-        (_V4I32, 4),
-        (_V4F32, 4),
+    for value_type, lanes, register_suffix in (
+        (_V4I32, 4, "xmm"),
+        (_V4F32, 4, "xmm"),
+        (_V8I32, 8, "ymm"),
+        (_V8F32, 8, "ymm"),
     ):
         for dynamic in (False, True):
             descriptor_key = _memory_descriptor_key(
                 "load",
                 dynamic=dynamic,
+                register_suffix=register_suffix,
             )
             rules.append(
                 _vector_load_rule(
@@ -526,12 +591,23 @@ def _memory_rules(
                         dynamic=True,
                         descriptor_key=descriptor_key,
                         descriptor_lookup=descriptor_lookup,
+                        preserve_source_index=True,
+                    )
+                )
+                rules.append(
+                    _vector_load_rule(
+                        value_type,
+                        lanes=lanes,
+                        dynamic=True,
+                        descriptor_key=descriptor_key,
+                        descriptor_lookup=descriptor_lookup,
                         materialize_byte_offset=True,
                     )
                 )
             descriptor_key = _memory_descriptor_key(
                 "store",
                 dynamic=dynamic,
+                register_suffix=register_suffix,
             )
             rules.append(
                 _vector_store_rule(
@@ -553,6 +629,16 @@ def _memory_rules(
                         dynamic_byte_stride_factor=dynamic_byte_stride_factor,
                     )
                     for dynamic_byte_stride_factor in (2, 4, 8)
+                )
+                rules.append(
+                    _vector_store_rule(
+                        value_type,
+                        lanes=lanes,
+                        dynamic=True,
+                        descriptor_key=descriptor_key,
+                        descriptor_lookup=descriptor_lookup,
+                        preserve_source_index=True,
+                    )
                 )
                 rules.append(
                     _vector_store_rule(
@@ -649,6 +735,34 @@ def x86_avx2_core_cases(
 ) -> Sequence[ContractCase]:
     return (
         *x86_scalar_core_cases(descriptor_lookup),
+        _conversion_rule(
+            scalar_conversion.scalar_bitcast,
+            _F32,
+            _I32,
+            "x86.avx2.vmovd.gpr32.xmm",
+            descriptor_lookup,
+        ),
+        _conversion_rule(
+            scalar_conversion.scalar_bitcast,
+            _I32,
+            _F32,
+            "x86.avx2.vmovd.xmm.gpr32",
+            descriptor_lookup,
+        ),
+        _conversion_rule(
+            scalar_conversion.scalar_bitcast,
+            _F64,
+            _I64,
+            "x86.avx2.vmovq.gpr64.xmm",
+            descriptor_lookup,
+        ),
+        _conversion_rule(
+            scalar_conversion.scalar_bitcast,
+            _I64,
+            _F64,
+            "x86.avx2.vmovq.xmm.gpr64",
+            descriptor_lookup,
+        ),
         _binary_rule(
             scalar_arithmetic.scalar_addf,
             _F32,
@@ -744,6 +858,7 @@ X86_AVX2_CONTRACT_DIALECT_OPS = {
     "buffer": ALL_BUFFER_OPS,
     "index": ALL_INDEX_OPS,
     "scalar": ALL_SCALAR_OPS,
+    "scf": ALL_SCF_OPS,
     "vector": ALL_VECTOR_OPS,
     "view": ALL_VIEW_OPS,
 }

@@ -421,7 +421,7 @@ func.def @table_quantize(%values: vector<32xf32>, %thresholds: vector<15xf32>) -
 // Encoded numeric boundaries keep compact schema facts separate from the
 // per-record data used to interpret a particular payload.
 func.def @schema_decode_storage_payload(%payload: vector<4xi32>, %scale: vector<1xf16>) -> (vector<32xf32>) {
-  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
   %values = vector.decode %payload using %schema {scale = %scale : vector<1xf16>} : vector<4xi32>, encoding<schema> -> vector<32xf32>
   func.return %values : vector<32xf32>
 }
@@ -450,44 +450,58 @@ func.def @schema_decode_static_payload(%payload: vector<4xi32>, %schema: encodin
 // matrix role, dynamic row/column shape, and optional encoded interpretation
 // operands that target selection consumes later.
 func.def @matrix_fragments(%lhs: vector<6xi32>, %rhs: vector<6xi32>, %acc: vector<8xf32>, %m: index, %n: index, %k: index, %scale: vector<1xf16>) {
-  %schema = encoding.define #matrix_operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   %lhs_fragment = vector.fragment<lhs> %lhs shape [%m, %k] using {scale = %scale : vector<1xf16>, schema = %schema : encoding<schema>} : vector<6xi32>
   %rhs_fragment = vector.fragment<rhs> %rhs shape [%k, %n] using {scale = %scale : vector<1xf16>, schema = %schema : encoding<schema>} where [mul(%k, 32)] : vector<6xi32>
   %init_fragment = vector.fragment<init> %acc shape [%m, %n] : vector<8xf32>
   %result_fragment = vector.fragment<result> %acc shape [%m, %n] where [mul(%n, 16)] : vector<8xf32>
+  %lhs_repacked = vector.fragment.repack<lhs> %result_fragment shape [%m, %n] : vector<8xf32> -> vector<16xbf16>
   %result = vector.mma %lhs_fragment, %rhs_fragment, %init_fragment : vector<6xi32>, vector<6xi32>, vector<8xf32>
-  test.use %lhs_fragment, %rhs_fragment, %init_fragment, %result_fragment, %result : vector<6xi32>, vector<6xi32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  test.use %lhs_fragment, %rhs_fragment, %init_fragment, %result_fragment, %lhs_repacked, %result : vector<6xi32>, vector<6xi32>, vector<8xf32>, vector<8xf32>, vector<16xbf16>, vector<8xf32>
   func.return
 }
 
 // ====
 
-// Numeric transforms are explicit register transforms described by SSA
-// encodings. The descriptor carries its input and output last-axis extents so
-// target matching does not infer transform domains from loose metadata.
-func.def @numeric_transform_hadamard(%v: vector<128xf32>, %signs: vector<128xi1>) -> (vector<128xf32>) {
-  %xf = encoding.define #numeric_transform<family="hadamard_sign", input_elems=128, normalization="orthonormal", output_elems=128> {signs = %signs : vector<128xi1>} : encoding<transform>
+// A leading block extent describes independent native matrices carried by one
+// physical fragment payload. The named block dimension keeps row/column guard
+// fields stable while making the rank-3 contract explicit to authors.
+func.def @blocked_matrix_fragments(%lhs: vector<2xf16>, %rhs: vector<2xf16>, %acc: vector<16xf32>, %blocks: index, %m: index, %n: index, %k: index) {
+  %lhs_fragment = vector.fragment<lhs> %lhs shape [blocks(%blocks), %m, %k] : vector<2xf16>
+  %rhs_fragment = vector.fragment<rhs> %rhs shape [blocks(%blocks), %k, %n] : vector<2xf16>
+  %init_fragment = vector.fragment<init> %acc shape [blocks(%blocks), %m, %n] : vector<16xf32>
+  %result_fragment = vector.fragment<result> %acc shape [blocks(%blocks), %m, %n] : vector<16xf32>
+  %lhs_repacked = vector.fragment.repack<lhs> %result_fragment shape [blocks(%blocks), %m, %n] : vector<16xf32> -> vector<2xf16>
+  %result = vector.mma %lhs_fragment, %rhs_fragment, %init_fragment : vector<2xf16>, vector<2xf16>, vector<16xf32>
+  test.use %lhs_repacked, %result : vector<2xf16>, vector<16xf32>
+  func.return
+}
+
+// ====
+
+// Hadamard transforms apply independently to invocation-local vector lanes.
+func.def @transform_hadamard(%v: vector<128xf32>) -> (vector<128xf32>) {
+  %xf = encoding.define #transform.hadamard : encoding<transform>
   %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
   func.return %r : vector<128xf32>
 }
 
 // ====
 
-// JL-style descriptors can change only the last vector axis; leading axes stay
-// tied to the source so batched sketches remain structurally obvious.
-func.def @numeric_transform_jl(%v: vector<4x128xf32>, %matrix: vector<64x128xf32>) -> (vector<4x64xf32>) {
-  %jl = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %matrix : vector<64x128xf32>} : encoding<transform>
-  %sketch = vector.transform %v, %jl : vector<4x128xf32>, encoding<transform> -> vector<4x64xf32>
-  func.return %sketch : vector<4x64xf32>
+// Leading axes are independent transform batches and orthonormal scaling is a
+// typed descriptor choice.
+func.def @transform_hadamard_orthonormal(%v: vector<4x128xf32>) -> (vector<4x128xf32>) {
+  %xf = encoding.define #transform.hadamard<normalization=orthonormal> : encoding<transform>
+  %r = vector.transform %v, %xf : vector<4x128xf32>, encoding<transform> -> vector<4x128xf32>
+  func.return %r : vector<4x128xf32>
 }
 
 // ====
 
-// Dynamic transform extents use the same SSA values as the source/result type
-// dimensions, preserving the use-def link instead of relying on an attribute
-// side channel.
-func.def @numeric_transform_dynamic(%n: index, %v: vector<[%n]xf32>) -> (vector<[%n]xf32>) {
-  %xf = encoding.define #numeric_transform<family="hadamard", normalization="none"> {input_elems = %n : index, output_elems = %n : index} : encoding<transform>
+// Dynamic vectors retain their shape relation without duplicating extents in
+// the transform descriptor.
+func.def @transform_hadamard_dynamic(%n: index, %v: vector<[%n]xf32>) -> (vector<[%n]xf32>) {
+  %xf = encoding.define #transform.hadamard : encoding<transform>
   %r = vector.transform %v, %xf : vector<[%n]xf32>, encoding<transform> -> vector<[%n]xf32>
   func.return %r : vector<[%n]xf32>
 }
@@ -508,16 +522,32 @@ func.def @memory(%buffer: buffer, %offset: offset, %row: index, %col: index, %m:
 // Fragment memory ops materialize physical matrix payloads from logical views.
 // The payload shape is target-contract-shaped, not an ordinary vector footprint
 // over the trailing view axes.
-func.def @fragment_memory(%buffer: buffer, %offset: offset, %row: index, %col: index, %m: index, %n: index, %k: index) {
+func.def @fragment_memory(%buffer: buffer, %offset: offset, %row: index, %col: index, %m: index, %n: index, %k: index, %metadata: vector<1xi32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %a = buffer.view %buffer[%offset] : buffer -> view<[%m]x[%k]xf16, %layout>
   %b = buffer.view %buffer[%offset] : buffer -> view<[%k]x[%n]xf16, %layout>
   %c = buffer.view %buffer[%offset] : buffer -> view<[%m]x[%n]xf32, %layout>
   %lhs = vector.fragment.load<lhs> %a[%row, 0] shape [%m, %k] {cache_scope = device} : view<[%m]x[%k]xf16, %layout> -> vector<16xf16>
-  %rhs = vector.fragment.load<rhs> %b[0, %col] shape [%k, %n] : view<[%k]x[%n]xf16, %layout> -> vector<16xf16>
+  %rhs = vector.fragment.load<rhs> %b[0, %col] shape [%k, %n] using {sparsity = %metadata : vector<1xi32>} : view<[%k]x[%n]xf16, %layout> -> vector<16xf16>
   %init = vector.fragment.load<init> %c[%row, %col] shape [%m, %n] : view<[%m]x[%n]xf32, %layout> -> vector<8xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf32>
   vector.fragment.store<result> %result, %c[%row, %col] shape [%m, %n] {cache_scope = system} : vector<8xf32>, view<[%m]x[%n]xf32, %layout>
+  func.return
+}
+
+// ====
+
+// Blocked fragment memory uses full-rank origins and keeps the independent
+// block extent on loads and stores instead of flattening it into rows.
+func.def @blocked_fragment_memory(%buffer: buffer, %offset: offset, %block: index, %row: index, %col: index, %blocks: index, %m: index, %n: index, %k: index) {
+  %a = buffer.view %buffer[%offset] : buffer -> view<[%blocks]x[%m]x[%k]xf16>
+  %b = buffer.view %buffer[%offset] : buffer -> view<[%blocks]x[%k]x[%n]xf16>
+  %c = buffer.view %buffer[%offset] : buffer -> view<[%blocks]x[%m]x[%n]xf32>
+  %lhs = vector.fragment.load<lhs> %a[%block, %row, 0] shape [blocks(%blocks), %m, %k] : view<[%blocks]x[%m]x[%k]xf16> -> vector<2xf16>
+  %rhs = vector.fragment.load<rhs> %b[%block, 0, %col] shape [blocks(%blocks), %k, %n] : view<[%blocks]x[%k]x[%n]xf16> -> vector<2xf16>
+  %init = vector.fragment.load<init> %c[%block, %row, %col] shape [blocks(%blocks), %m, %n] : view<[%blocks]x[%m]x[%n]xf32> -> vector<16xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<2xf16>, vector<2xf16>, vector<16xf32>
+  vector.fragment.store<result> %result, %c[%block, %row, %col] shape [blocks(%blocks), %m, %n] : vector<16xf32>, view<[%blocks]x[%m]x[%n]xf32>
   func.return
 }
 
@@ -585,6 +615,7 @@ func.def @atomic_memory(%buffer: buffer, %offset: offset, %row: index, %col: ind
   %oldi = vector.atomic.rmw<xchgi> %iv, %iview[%row, %col][%offsets] {ordering = acq_rel, scope = system} : vector<4xi32>, view<[%m]x[%n]xi32, %layout>, vector<4xindex>
   %masked = vector.atomic.rmw.mask<addf> %fv, %fview[%row, %col][%i32_offsets], %mask, %oldf {ordering = seq_cst, scope = device} : vector<4xf32>, view<[%m]x[%n]xf32, %layout>, vector<4xi32>, vector<4xi1>, vector<4xf32>
   %cmp = vector.atomic.cmpxchg %iv, %iv, %iview[%row, %col][%offsets] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : vector<4xi32>, view<[%m]x[%n]xi32, %layout>, vector<4xindex> -> vector<4xi32>
-  test.use %oldi, %masked, %cmp : vector<4xi32>, vector<4xf32>, vector<4xi32>
+  %cmpf = vector.atomic.cmpxchg %fv, %fv, %fview[%row, %col][%offsets] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : vector<4xf32>, view<[%m]x[%n]xf32, %layout>, vector<4xindex> -> vector<4xf32>
+  test.use %oldi, %masked, %cmp, %cmpf : vector<4xi32>, vector<4xf32>, vector<4xi32>, vector<4xf32>
   func.return
 }

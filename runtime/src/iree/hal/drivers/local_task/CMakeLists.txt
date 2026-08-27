@@ -54,6 +54,7 @@ iree_cc_library(
     iree::base::internal::arena
     iree::hal
     iree::hal::local
+    iree::hal::local::atomic
     iree::hal::local::executable_library
     iree::hal::local::executable_loader
     iree::hal::local::transient_buffer
@@ -86,6 +87,7 @@ iree_cc_library(
   DEPS
     iree::async
     iree::base
+    iree::hal
     iree::hal::local::executable_library
   PUBLIC
 )
@@ -115,6 +117,7 @@ iree_cc_library(
     iree::base::internal::cpu
     iree::base::threading
     iree::base::threading::thread
+    iree::hal::local::atomic
     iree::hal::local::executable_loader
     iree::hal::local::profile
     iree::task
@@ -128,6 +131,7 @@ iree_cc_test(
     "block_processor_test.cc"
   DEPS
     ::block_builder
+    ::block_command_ops
     ::block_isa
     ::block_processor
     iree::base::internal::arena
@@ -143,13 +147,11 @@ iree_cc_library(
   HDRS
     "task_device.h"
     "task_driver.h"
-    "task_event.h"
     "task_queue.h"
     "task_semaphore.h"
   SRCS
     "task_device.c"
     "task_driver.c"
-    "task_event.c"
     "task_queue.c"
     "task_semaphore.c"
   DEPS
@@ -168,6 +170,7 @@ iree_cc_library(
     iree::base::threading::thread
     iree::hal
     iree::hal::local
+    iree::hal::local::atomic
     iree::hal::local::device_spec_builder
     iree::hal::local::executable_environment
     iree::hal::local::executable_library

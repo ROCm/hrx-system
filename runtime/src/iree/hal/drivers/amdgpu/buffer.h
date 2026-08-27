@@ -12,6 +12,7 @@
 #include "iree/base/internal/atomics.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/api.h"
+#include "iree/hal/drivers/amdgpu/atomic_memory.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 
 #ifdef __cplusplus
@@ -81,9 +82,10 @@ iree_status_t iree_hal_amdgpu_buffer_create(
     const iree_hal_amdgpu_libhsa_t* libhsa,
     iree_hal_buffer_placement_t placement, iree_hal_memory_type_t memory_type,
     iree_hal_memory_access_t allowed_access,
-    iree_hal_buffer_usage_t allowed_usage, iree_device_size_t allocation_size,
-    iree_device_size_t byte_length, void* host_ptr,
-    iree_hal_buffer_release_callback_t release_callback,
+    iree_hal_buffer_usage_t allowed_usage,
+    iree_hal_amdgpu_atomic_memory_cell_flags_t atomic_memory_cells,
+    iree_device_size_t allocation_size, iree_device_size_t byte_length,
+    void* host_ptr, iree_hal_buffer_release_callback_t release_callback,
     iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer);
 
 // Wraps an HSA memory pool allocation in a pooled iree_hal_buffer_t wrapper.
@@ -96,9 +98,10 @@ iree_status_t iree_hal_amdgpu_buffer_create_pooled(
     const iree_hal_amdgpu_libhsa_t* libhsa,
     iree_hal_buffer_placement_t placement, iree_hal_memory_type_t memory_type,
     iree_hal_memory_access_t allowed_access,
-    iree_hal_buffer_usage_t allowed_usage, iree_device_size_t allocation_size,
-    iree_device_size_t byte_length, void* host_ptr,
-    iree_hal_buffer_release_callback_t release_callback,
+    iree_hal_buffer_usage_t allowed_usage,
+    iree_hal_amdgpu_atomic_memory_cell_flags_t atomic_memory_cells,
+    iree_device_size_t allocation_size, iree_device_size_t byte_length,
+    void* host_ptr, iree_hal_buffer_release_callback_t release_callback,
     iree_hal_amdgpu_buffer_pool_t* pool, iree_allocator_t host_allocator,
     iree_hal_buffer_t** out_buffer);
 
@@ -121,6 +124,28 @@ void iree_hal_amdgpu_buffer_set_profile_allocation(
 // binding addresses. |buffer| must be the allocated buffer (not a subspan);
 // callers should use iree_hal_buffer_allocated_buffer() to unwrap first.
 void* iree_hal_amdgpu_buffer_device_pointer(iree_hal_buffer_t* buffer);
+
+// Returns the immutable atomic memory cells supported by |buffer|.
+//
+// Transient buffers resolve to their materialized backing buffer. Other buffer
+// implementations and unmaterialized transient buffers support no cells.
+iree_hal_amdgpu_atomic_memory_cell_flags_t
+iree_hal_amdgpu_buffer_atomic_memory_cells(iree_hal_buffer_t* buffer);
+
+// Returns true if |buffer| is a direct AMDGPU buffer using exactly
+// |release_callback| to release its backing storage.
+bool iree_hal_amdgpu_buffer_uses_release_callback(
+    iree_hal_buffer_t* buffer,
+    iree_hal_buffer_release_callback_t release_callback);
+
+// Disarms callback-owned storage that has already been released externally.
+//
+// |buffer| must be a direct AMDGPU buffer using exactly |release_callback|.
+// The backing pointer and callback are cleared so destroying the remaining
+// buffer wrapper performs no storage operation.
+void iree_hal_amdgpu_buffer_disarm_storage(
+    iree_hal_buffer_t* buffer,
+    iree_hal_buffer_release_callback_t release_callback);
 
 #ifdef __cplusplus
 }  // extern "C"

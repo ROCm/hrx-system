@@ -117,12 +117,22 @@ static iree_string_view_t loom_low_allocation_placement_cause_name(
       return IREE_SV("tied-result");
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY:
       return IREE_SV("low.copy");
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_MOVE:
+      return IREE_SV("low.move");
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_SLICE:
       return IREE_SV("low.slice");
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT:
       return IREE_SV("low.concat");
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH:
       return IREE_SV("low.br");
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_LOOP_ENTRY:
+      return IREE_SV("low.scf loop entry");
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD:
+      return IREE_SV("low.scf.yield");
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_CONDITION:
+      return IREE_SV("low.scf.condition");
+    case LOOM_LOW_PLACEMENT_CAUSE_SCHEDULE_PAIR_AFFINITY:
+      return IREE_SV("schedule-pair-affinity");
     default:
       return IREE_SV("unknown");
   }
@@ -137,6 +147,10 @@ static iree_string_view_t loom_low_allocation_placement_relation_kind_name(
       return IREE_SV("subrange");
     case LOOM_LOW_PLACEMENT_RELATION_CONTIGUOUS_PART:
       return IREE_SV("contiguous-part");
+    case LOOM_LOW_PLACEMENT_RELATION_DIFFERENT_MASKED_LOCATION:
+      return IREE_SV("different-masked-location");
+    case LOOM_LOW_PLACEMENT_RELATION_DISJOINT_STORAGE:
+      return IREE_SV("disjoint-storage");
     default:
       return IREE_SV("unknown");
   }
@@ -180,6 +194,30 @@ static iree_string_view_t loom_low_allocation_placement_decision_reason_key(
           result_assignment, relation->result_unit_offset,
           relation->unit_count)) {
     return IREE_SV("relation-exceeds-assignment");
+  }
+  if (relation->kind == LOOM_LOW_PLACEMENT_RELATION_DIFFERENT_MASKED_LOCATION) {
+    if (!loom_low_allocation_storage_assignment_classes_share(
+            table->target.descriptor_set, result_assignment,
+            source_assignment)) {
+      return IREE_SV("storage-classes-differ");
+    }
+    *out_accepted = loom_low_allocation_storage_placement_relation_satisfied(
+        table->target.descriptor_set, relation, result_assignment,
+        source_assignment);
+    return *out_accepted ? IREE_SV("assigned-masked-locations-differ")
+                         : IREE_SV("assigned-masked-locations-match");
+  }
+  if (relation->kind == LOOM_LOW_PLACEMENT_RELATION_DISJOINT_STORAGE) {
+    *out_accepted = loom_low_allocation_storage_placement_relation_satisfied(
+        table->target.descriptor_set, relation, result_assignment,
+        source_assignment);
+    if (!loom_low_allocation_storage_assignment_classes_share(
+            table->target.descriptor_set, result_assignment,
+            source_assignment)) {
+      return IREE_SV("storage-classes-disjoint");
+    }
+    return *out_accepted ? IREE_SV("assigned-locations-disjoint")
+                         : IREE_SV("assigned-locations-overlap");
   }
   if (loom_low_allocation_storage_assignment_subranges_equal(
           table->target.descriptor_set, result_assignment,

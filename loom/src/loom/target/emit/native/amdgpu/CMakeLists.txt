@@ -17,7 +17,40 @@ loom_cc_library(
     "register_class.h"
   DEPS
     loom::codegen::low::descriptors
+    loom::target::arch::amdgpu::refs::target_refs
   PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+loom_cc_library(
+  NAME
+    branch_layout
+  HDRS
+    "branch_layout.h"
+  SRCS
+    "branch_layout.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+loom_cc_test(
+  NAME
+    branch_layout_test
+  SRCS
+    "branch_layout_test.cc"
+  DEPS
+    ::branch_layout
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
 )
 endif()
 
@@ -30,13 +63,13 @@ loom_cc_library(
   SRCS
     "assembly.c"
   DEPS
+    ::branch_layout
     ::register_class
     ::storage_layout
     iree::base
     iree::base::internal::arena
     loom::codegen::low::allocation
     loom::codegen::low::descriptors
-    loom::codegen::low::move_sequence
     loom::codegen::low::packet
     loom::codegen::low::schedule
     loom::ir
@@ -61,15 +94,17 @@ loom_cc_library(
   DEPS
     ::assembly
     ::encoding
+    ::hal_kernel_library
     ::spill_lowering
     iree::base
+    iree::base::core_headers
+    iree::io::byte_sequence
     loom::codegen::low::allocation_json
     loom::codegen::low::frame
     loom::codegen::low::packet_json
     loom::codegen::low::target_binding
     loom::ir
     loom::ops::low
-    loom::target::arch::amdgpu::planning::address_state
     loom::target::arch::amdgpu::planning::descriptor_semantics
     loom::target::arch::amdgpu::planning::occupancy
     loom::target::arch::amdgpu::planning::packet_plan
@@ -88,10 +123,16 @@ loom_check_test_suite(
   SRCS
     "test/allocation_json.loom-test"
     "test/assembly.loom-test"
+    "test/assembly_allocation.loom-test"
+    "test/assembly_cluster.loom-test"
     "test/assembly_q8.loom-test"
+    "test/assembly_vopd_profiles.loom-test"
     "test/assembly_wmma.loom-test"
+    "test/gfx1201_native.loom-test"
+    "test/hal_kernel_library.loom-test"
     "test/packet.loom-test"
     "test/packet_json.loom-test"
+    "test/spill_lowering.loom-test"
     "test/vopd_plan.loom-test"
     "test/wait_plan.loom-test"
     "test/wait_states.loom-test"
@@ -108,6 +149,7 @@ loom_cc_library(
     "metadata.c"
   DEPS
     iree::base
+    loom::target::arch::amdgpu::target_info
     loom::target::types
   PUBLIC
 )
@@ -156,6 +198,7 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::codegen::low::storage_layout
     loom::ir
     loom::ops::low
   LABELS
@@ -183,35 +226,12 @@ loom_cc_library(
     loom::error::emitter
     loom::ir
     loom::ops::low
+    loom::ops::type_registry
     loom::rewrite::rewriter
     loom::target::arch::amdgpu::error_defs
     loom::target::arch::amdgpu::refs::target_refs
     loom::target::registers
   PUBLIC
-)
-endif()
-
-if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_CORE AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_cc_test(
-  NAME
-    spill_lowering_test
-  SRCS
-    "spill_lowering_test.cc"
-  DEPS
-    ::spill_lowering
-    iree::base::internal::arena
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::codegen::low::builder
-    loom::ir
-    loom::ops::low
-    loom::target::arch::amdgpu::descriptors::low_registry
-    loom::target::arch::amdgpu::error_defs
-    loom::target::arch::amdgpu::refs::target_refs
-    loom::testing::diagnostic_matchers
-  LABELS
-    "iree-build-requirement=loom.target.arch.amdgpu"
-    "iree-build-requirement=loom.emit.amdgpu"
 )
 endif()
 
@@ -236,6 +256,7 @@ loom_cc_library(
   SRCS
     "encoding.c"
   DEPS
+    ::branch_layout
     ::register_class
     ::storage_layout
     ::text_fixup
@@ -243,7 +264,6 @@ loom_cc_library(
     iree::base::internal::arena
     loom::codegen::low::allocation
     loom::codegen::low::descriptors
-    loom::codegen::low::move_sequence
     loom::codegen::low::packet
     loom::codegen::low::schedule
     loom::ir
@@ -252,34 +272,58 @@ loom_cc_library(
     loom::target::arch::amdgpu::planning::packet_plan
     loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_info
-    loom::target::emit::native::fragment
   PUBLIC
 )
 endif()
 
-if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_CORE AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_cc_test(
+iree_c_embed_data(
   NAME
-    encoding_test
+    packet_plan_attention_bf16
   SRCS
-    "encoding_test.cc"
+    "packet_plan_attention_bf16.loom"
+  C_FILE_OUTPUT
+    "packet_plan_attention_bf16.c"
+  H_FILE_OUTPUT
+    "packet_plan_attention_bf16.h"
+  IDENTIFIER
+    "packet_plan_attention_bf16"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX125X_CORE AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+loom_cc_benchmark(
+  NAME
+    packet_plan_benchmark
+  SRCS
+    "packet_plan_benchmark.cc"
   DEPS
-    ::encoding
+    ::packet_plan_attention_bf16
+    iree::base
     iree::base::internal::arena
-    iree::testing::gtest
-    iree::testing::gtest_main
+    iree::testing::benchmark_main
     loom::codegen::low::frame
     loom::codegen::low::function
+    loom::codegen::low::target_binding
     loom::codegen::low::text_asm
     loom::codegen::low::verify
     loom::error::diagnostic
     loom::format::text::parser
     loom::ir
     loom::ops::low
-    loom::target::arch::amdgpu::descriptors::low_registry
-    loom::target::arch::amdgpu::ops
+    loom::ops::op_registry
+    loom::target::arch::amdgpu::hal::kernel_abi
+    loom::target::arch::amdgpu::planning::descriptor_semantics
+    loom::target::arch::amdgpu::planning::occupancy
     loom::target::arch::amdgpu::planning::packet_plan
+    loom::target::arch::amdgpu::planning::storage_lease
+    loom::target::arch::amdgpu::planning::vopd_plan
+    loom::target::arch::amdgpu::provider
     loom::target::low_descriptor_registry
+    loom::target::provider
+    loom::tooling::compile::pipeline
+  TESTONLY
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -296,6 +340,7 @@ loom_cc_library(
     "kernel_record.c"
   DEPS
     ::descriptor
+    ::kernel_entry
     ::metadata
     ::preflight
     ::storage_layout
@@ -307,7 +352,9 @@ loom_cc_library(
     loom::codegen::low::schedule
     loom::ir
     loom::ops::low
+    loom::target::arch::amdgpu::facts
     loom::target::arch::amdgpu::hal::kernel_abi
+    loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::target::launch
@@ -332,9 +379,9 @@ loom_cc_library(
     loom::codegen::low::storage_layout
     loom::error::emitter
     loom::error::error_defs
+    loom::ops::type_registry
     loom::target::arch::amdgpu::error_defs
     loom::target::arch::amdgpu::refs::target_refs
-    loom::target::emit::native::fragment
   PUBLIC
 )
 endif()
@@ -352,14 +399,37 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::codegen::low::descriptors
     loom::codegen::low::diagnostics
+    loom::codegen::low::storage_layout
     loom::ir
     loom::ops::low
     loom::target::arch::amdgpu::descriptors::low_registry
     loom::target::arch::amdgpu::error_defs
+    loom::target::arch::amdgpu::facts
+    loom::target::arch::amdgpu::records::target_records
+    loom::target::arch::amdgpu::refs::target_refs
+    loom::target::arch::amdgpu::target_info_defs
+    loom::target::facts_builder
     loom::testing::diagnostic_matchers
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+loom_cc_library(
+  NAME
+    kernel_entry
+  HDRS
+    "kernel_entry.h"
+  SRCS
+    "kernel_entry.c"
+  DEPS
+    ::text_fixup
+    iree::base
+    iree::base::internal::arena
+    loom::target::arch::amdgpu::target_info_defs
+  PUBLIC
 )
 endif()
 
@@ -373,6 +443,7 @@ loom_cc_library(
     "kernel_assembly.c"
   DEPS
     ::assembly
+    ::kernel_entry
     ::kernel_record
     ::metadata
     iree::base
@@ -380,6 +451,23 @@ loom_cc_library(
     loom::codegen::low::schedule
     loom::target::arch::amdgpu::hal::kernel_abi
   PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+loom_cc_test(
+  NAME
+    kernel_entry_test
+  SRCS
+    "kernel_entry_test.cc"
+  DEPS
+    ::kernel_entry
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
 )
 endif()
 
@@ -394,6 +482,7 @@ loom_cc_library(
   DEPS
     ::encoding
     ::hsaco
+    ::kernel_entry
     ::kernel_record
     iree::base
     iree::base::internal::arena
@@ -403,6 +492,33 @@ loom_cc_library(
     loom::target::arch::amdgpu::hal::kernel_abi
     loom::target::arch::amdgpu::planning::occupancy
     loom::target::arch::amdgpu::planning::packet_plan
+    loom::target::residency
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+loom_cc_library(
+  NAME
+    kernel_emission
+  HDRS
+    "kernel_emission.h"
+  SRCS
+    "kernel_emission.c"
+  DEPS
+    ::kernel_assembly
+    ::kernel_hsaco
+    ::preflight
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::frame
+    loom::ir
+    loom::target::arch::amdgpu::hal::kernel_abi
+    loom::target::arch::amdgpu::planning::packet_plan
+    loom::target::arch::amdgpu::planning::wait_counters
+    loom::target::arch::amdgpu::refs::target_refs
+    loom::target::reporting::low
+    loom::target::reporting::report
   PUBLIC
 )
 endif()
@@ -468,42 +584,43 @@ loom_cc_library(
   SRCS
     "hal_kernel_library.c"
   DEPS
-    ::kernel_assembly
+    ::kernel_emission
     ::kernel_hsaco
     ::preflight
     ::runtime_globals
     ::spill_lowering
     iree::base
     iree::base::internal::arena
+    iree::io::byte_sequence
     iree::io::stream
     loom::analysis::symbol_facts
     loom::codegen::low::allocation_materialization
+    loom::codegen::low::diagnostics
     loom::codegen::low::frame
+    loom::codegen::low::storage_layout
+    loom::codegen::low::target_binding
     loom::codegen::low::verify
     loom::error::diagnostic
     loom::error::error_defs
     loom::ir
-    loom::ops::func_symbol_facts
     loom::ops::global
     loom::ops::low
-    loom::ops::target
-    loom::target::arch::amdgpu::error_defs
+    loom::target::arch::amdgpu::facts
     loom::target::arch::amdgpu::hal::kernel_abi
-    loom::target::arch::amdgpu::ops
-    loom::target::arch::amdgpu::planning::address_state
+    loom::target::arch::amdgpu::matrix::contract
     loom::target::arch::amdgpu::planning::descriptor_semantics
     loom::target::arch::amdgpu::planning::occupancy
-    loom::target::arch::amdgpu::planning::packet_plan
     loom::target::arch::amdgpu::planning::storage_lease
     loom::target::arch::amdgpu::planning::vopd_plan
     loom::target::arch::amdgpu::provider
+    loom::target::arch::amdgpu::refs::target_refs
+    loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
-    loom::target::artifact_manifest_collect
-    loom::target::compile_report
-    loom::target::compile_report_low
     loom::target::entry_selection
-    loom::target::function_contract
     loom::target::provider
+    loom::target::reporting::artifact_manifest_collect
+    loom::target::reporting::low
+    loom::target::reporting::report
     loom::target::types
     loom::verify
   PUBLIC
@@ -521,21 +638,32 @@ loom_cc_test(
     ::runtime_globals
     iree::base
     iree::base::internal::arena
+    iree::io::byte_sequence
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::analysis::symbol_facts
     loom::codegen::low::text_asm
     loom::error::error_defs
     loom::format::text::parser
     loom::ir
+    loom::ops::func_symbol_facts
     loom::ops::op_registry
     loom::ops::sanitizer
+    loom::ops::target
     loom::sanitizer::site_table
     loom::target::arch::amdgpu::descriptors::low_registry
-    loom::target::arch::amdgpu::error_defs
+    loom::target::arch::amdgpu::matrix::contract
+    loom::target::arch::amdgpu::planning::wait_counters
+    loom::target::arch::amdgpu::profile
     loom::target::arch::amdgpu::provider
     loom::target::arch::amdgpu::records::target_records
+    loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::target::emit::native::elf
+    loom::target::facts_builder
+    loom::target::function_contract
+    loom::target::function_version
+    loom::target::profile
     loom::testing::diagnostic_matchers
     loom::tooling::compile::pipeline
   LABELS
@@ -595,9 +723,12 @@ loom_cc_test(
     ::metadata
     iree::base
     iree::base::internal::arena
+    iree::hal::executable::amdgpu::code_object_target
     iree::io::stream
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::target::arch::amdgpu::profile
+    loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::target::emit::native::elf
   LABELS
@@ -652,15 +783,17 @@ loom_cc_test(
     loom::format::text::parser
     loom::ir
     loom::ops::low
-    loom::target::arch::amdgpu::descriptors::low_registry
     loom::target::arch::amdgpu::hal::binding_materialization
     loom::target::arch::amdgpu::hal::kernel_abi
-    loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::planning::packet_plan
     loom::target::arch::amdgpu::planning::storage_lease
-    loom::target::arch::amdgpu::records::target_records
+    loom::target::arch::amdgpu::profile
+    loom::target::arch::amdgpu::provider
+    loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
+    loom::target::function_version
     loom::target::low_descriptor_registry
+    loom::target::specialization
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "nodocker"

@@ -33,6 +33,13 @@ static iree_hal_profile_file_record_t MakeDispatchEventsChunk(
   return chunk;
 }
 
+static iree_hal_profile_file_record_t MakeDevicesChunk(
+    const std::vector<uint8_t>& payload) {
+  iree_hal_profile_file_record_t chunk = MakeChunk(payload);
+  chunk.content_type = IREE_HAL_PROFILE_CONTENT_TYPE_DEVICES;
+  return chunk;
+}
+
 static iree_hal_profile_file_record_t MakeHostExecutionEventsChunk(
     const std::vector<uint8_t>& payload) {
   iree_hal_profile_file_record_t chunk = MakeChunk(payload);
@@ -115,6 +122,29 @@ TEST(ProfileSummaryTest, RejectsMalformedHostExecutionEventRecord) {
   EXPECT_EQ(0u, summary.invalid_host_execution_event_record_count);
   EXPECT_EQ(0u, summary.total_host_execution_duration_ns);
 
+  iree_profile_summary_deinitialize(&summary);
+}
+
+TEST(ProfileSummaryTest, AcceptsOriginalDeviceRecordPrefix) {
+  iree_hal_profile_device_record_t device_record =
+      iree_hal_profile_device_record_default();
+  device_record.record_length = IREE_HAL_PROFILE_DEVICE_RECORD_MIN_LENGTH;
+  device_record.physical_device_ordinal = 3;
+  device_record.queue_count = 1;
+  std::vector<uint8_t> payload(IREE_HAL_PROFILE_DEVICE_RECORD_MIN_LENGTH);
+  memcpy(payload.data(), &device_record, payload.size());
+  iree_hal_profile_file_record_t device_chunk = MakeDevicesChunk(payload);
+
+  iree_profile_summary_t summary;
+  iree_profile_summary_initialize(iree_allocator_system(), &summary);
+  IREE_ASSERT_OK(iree_profile_summary_process_record(&summary, &device_chunk));
+  ASSERT_EQ(1u, summary.device_count);
+  EXPECT_EQ(3u, summary.devices[0].physical_device_ordinal);
+  EXPECT_EQ(1u, summary.devices[0].queue_count);
+  EXPECT_FALSE(
+      iree_any_bit_set(summary.devices[0].metadata_flags,
+                       IREE_HAL_PROFILE_DEVICE_FLAG_TIMESTAMP_FREQUENCY));
+  EXPECT_EQ(0u, summary.devices[0].timestamp_frequency_hz);
   iree_profile_summary_deinitialize(&summary);
 }
 

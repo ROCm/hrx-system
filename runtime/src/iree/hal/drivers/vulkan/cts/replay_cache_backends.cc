@@ -59,8 +59,9 @@ static bool vulkan_replay_cache_registered_ =
     (CtsRegistry::RegisterBackend({
          "vulkan_replay_cache",
          {"vulkan_replay_cache", CreateVulkanReplayCacheDeviceWithCache,
-          /*executable_format=*/nullptr,
-          /*executable_data=*/nullptr, RecordingMode::kDirect,
+          /*executable_target_family=*/nullptr,
+          /*executable_target_key=*/nullptr,
+          /*executable_data=*/nullptr, RecordingMode::kIndirect,
           /*unsupported_tests=*/{},
           /*expected_failures=*/{}},
          {"async_queue", "file_io", "vulkan", "vulkan_replay_cache"},

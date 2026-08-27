@@ -58,8 +58,17 @@ class TypePattern:
         )
 
     @classmethod
-    def view(cls, element: ScalarElementPattern) -> Self:
-        return cls(kind="view", elements=_normalize_elements(element))
+    def view(
+        cls,
+        element: ScalarElementPattern,
+        *,
+        dims: Sequence[int] | None = None,
+    ) -> Self:
+        return cls(
+            kind="view",
+            elements=_normalize_elements(element),
+            dims=() if dims is None else tuple(dims),
+        )
 
     def __post_init__(self) -> None:
         elements = tuple(self.elements)
@@ -97,13 +106,15 @@ class TypePattern:
         if self.kind == "view":
             if (
                 self.lanes is not None
-                or dims
                 or self.minimum_lanes is not None
                 or self.maximum_lanes is not None
                 or self.minimum_static_elements is not None
                 or self.maximum_static_elements is not None
             ):
-                raise ValueError("view type patterns cannot constrain shape")
+                raise ValueError(
+                    "view type patterns support only exact dimension constraints"
+                )
+            _validate_static_dims(dims, "view")
             return
         has_static_element_range = (
             self.minimum_static_elements is not None
@@ -120,13 +131,7 @@ class TypePattern:
                     "vector type pattern cannot mix exact dims with other "
                     "shape constraints"
                 )
-            if len(dims) > 2:
-                raise ValueError(
-                    "generated vector type patterns support at most two dims"
-                )
-            for dim in dims:
-                if dim < 0:
-                    raise ValueError("vector static dims must be non-negative")
+            _validate_static_dims(dims, "vector")
             return
         if self.lanes is not None:
             if (
@@ -206,16 +211,28 @@ def Vector(
     )
 
 
-def View(element: ScalarElementPattern) -> TypePattern:
+def View(
+    element: ScalarElementPattern,
+    *,
+    dims: Sequence[int] | None = None,
+) -> TypePattern:
     """Returns a view type pattern."""
 
-    return TypePattern.view(element)
+    return TypePattern.view(element, dims=dims)
 
 
 def _normalize_elements(element: ScalarElementPattern) -> tuple[str, ...]:
     if isinstance(element, str):
         return (element,)
     return tuple(element)
+
+
+def _validate_static_dims(dims: tuple[int, ...], kind: str) -> None:
+    if len(dims) > 2:
+        raise ValueError(f"generated {kind} type patterns support at most two dims")
+    for dim in dims:
+        if dim < 0:
+            raise ValueError(f"{kind} static dims must be non-negative")
 
 
 def _validate_count_bound(value: CTypeExpression, subject: str) -> None:

@@ -11,6 +11,15 @@
 
 namespace {
 
+static iree_status_t RejectProactorCreation(
+    iree_async_proactor_options_t options, iree_allocator_t allocator,
+    iree_async_proactor_t** out_proactor) {
+  (void)options;
+  (void)allocator;
+  *out_proactor = nullptr;
+  return iree_make_status(IREE_STATUS_ABORTED, "selected creator invoked");
+}
+
 class ProactorPoolTest : public ::testing::Test {
  protected:
   iree_async_proactor_pool_options_t default_options() {
@@ -56,6 +65,21 @@ TEST_F(ProactorPoolTest, CreateAndReleaseWithoutGet) {
       &pool));
   ASSERT_NE(pool, nullptr);
   EXPECT_EQ(iree_async_proactor_pool_count(pool), 1u);
+  iree_async_proactor_pool_release(pool);
+}
+
+TEST_F(ProactorPoolTest, SelectedCreatorIsLazyAndPropagatesFailure) {
+  iree_async_proactor_pool_options_t options = default_options();
+  options.proactor_create = RejectProactorCreation;
+  iree_async_proactor_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(iree_async_proactor_pool_create(
+      1, /*node_ids=*/nullptr, options, iree_allocator_system(), &pool));
+
+  iree_async_proactor_t* proactor = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
+                        iree_async_proactor_pool_get(pool, 0, &proactor));
+  EXPECT_EQ(proactor, nullptr);
+
   iree_async_proactor_pool_release(pool);
 }
 

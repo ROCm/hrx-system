@@ -29,7 +29,10 @@ static uint32_t iree_hal_amdgpu_asan_shadow_fill_pattern(uint8_t value) {
          ((uint32_t)value << 8) | (uint32_t)value;
 }
 
-static iree_status_t iree_hal_amdgpu_asan_write_shadow_bytes(
+// Writes bytes contained within one physical shadow slab. Shadow slabs occupy
+// contiguous virtual addresses but may be backed by independent HSA VMM
+// allocations, so an HSA memory operation must never cross a slab boundary.
+static iree_status_t iree_hal_amdgpu_asan_write_shadow_slab_bytes(
     iree_hal_amdgpu_asan_state_t* state, uint64_t shadow_address,
     iree_device_size_t length, uint8_t value) {
   if (length == 0) return iree_ok_status();
@@ -70,7 +73,25 @@ static iree_status_t iree_hal_amdgpu_asan_write_shadow_bytes(
   return iree_ok_status();
 }
 
-static void iree_hal_amdgpu_asan_write_shadow_bytes_raw(
+static iree_status_t iree_hal_amdgpu_asan_write_shadow_bytes(
+    iree_hal_amdgpu_asan_state_t* state, uint64_t shadow_address,
+    iree_device_size_t length, uint8_t value) {
+  const uint64_t shadow_base =
+      (uint64_t)(uintptr_t)state->shadow_map.reservation_base_ptr;
+  while (length > 0) {
+    const iree_device_size_t slab_offset =
+        (shadow_address - shadow_base) % state->shadow_map.slab_size;
+    const iree_device_size_t slab_length =
+        iree_min(length, state->shadow_map.slab_size - slab_offset);
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_asan_write_shadow_slab_bytes(
+        state, shadow_address, slab_length, value));
+    shadow_address += slab_length;
+    length -= slab_length;
+  }
+  return iree_ok_status();
+}
+
+static void iree_hal_amdgpu_asan_write_shadow_slab_bytes_raw(
     iree_hal_amdgpu_asan_state_t* state, uint64_t shadow_address,
     iree_device_size_t length, uint8_t value) {
   if (length == 0) return;
@@ -102,6 +123,23 @@ static void iree_hal_amdgpu_asan_write_shadow_bytes_raw(
     iree_hal_amdgpu_hsa_cleanup_assert_success(iree_hsa_memory_copy_raw(
         state->libhsa, (void*)(uintptr_t)shadow_address, fill_bytes,
         (size_t)length));
+  }
+}
+
+static void iree_hal_amdgpu_asan_write_shadow_bytes_raw(
+    iree_hal_amdgpu_asan_state_t* state, uint64_t shadow_address,
+    iree_device_size_t length, uint8_t value) {
+  const uint64_t shadow_base =
+      (uint64_t)(uintptr_t)state->shadow_map.reservation_base_ptr;
+  while (length > 0) {
+    const iree_device_size_t slab_offset =
+        (shadow_address - shadow_base) % state->shadow_map.slab_size;
+    const iree_device_size_t slab_length =
+        iree_min(length, state->shadow_map.slab_size - slab_offset);
+    iree_hal_amdgpu_asan_write_shadow_slab_bytes_raw(state, shadow_address,
+                                                     slab_length, value);
+    shadow_address += slab_length;
+    length -= slab_length;
   }
 }
 

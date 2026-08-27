@@ -18,6 +18,7 @@ from loom.gen.ops.c_metadata_tables import (
 from loom.gen.ops.c_names import c_dialect_include_path as _c_dialect_include_path
 from loom.gen.ops.c_ops_header import generate_ops_h
 from loom.gen.ops.model import DialectGeneration
+from loom.gen.ops.type_registry import generate_dialect_type_registry
 
 __all__ = [
     "generate_dialect_contents",
@@ -38,6 +39,8 @@ def generate_dialect_contents(generation: DialectGeneration) -> dict[str, str]:
             dialect.name,
             dialect.dialect_id,
             generation.table_shards,
+            generation.parameterized_attrs,
+            generation.encoding_families,
             include_path=include_path,
         )
         if generation.table_shards is not None
@@ -46,16 +49,31 @@ def generate_dialect_contents(generation: DialectGeneration) -> dict[str, str]:
                 dialect.name,
                 dialect.dialect_id,
                 generation.ops,
+                generation.parameterized_attrs,
+                generation.encoding_families,
                 include_path=include_path,
             )
         }
     )
-    return {
-        "ops.h": generate_ops_h(dialect.name, dialect.dialect_id, generation.ops),
+    contents = {
+        "ops.h": generate_ops_h(
+            dialect.name,
+            dialect.dialect_id,
+            generation.ops,
+            generation.parameterized_attrs,
+            generation.encoding_families,
+        ),
         "builders.c": c_builders.generate_builders_c(
             dialect.name,
             generation.ops,
+            generation.parameterized_attrs,
+            encoding_families=generation.encoding_families,
             include_path=include_path,
         ),
         **table_files,
     }
+    if generation.types:
+        types_header, types_source = generate_dialect_type_registry(dialect, generation.types)
+        contents["types.h"] = types_header
+        contents["types.c"] = types_source
+    return contents

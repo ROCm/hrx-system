@@ -16,6 +16,7 @@ loom_generated_cc_library(
     loom::py::loom::gen::ops::c_tables_index_generator
   SRCS
     "canonicalize.c"
+    "carrier.c"
     "compare.c"
     "facts.c"
     "verify.c"
@@ -26,11 +27,13 @@ loom_generated_cc_library(
     "builders.c"
     "tables.c"
   HDRS
+    "carrier.h"
     "compare.h"
     "ops.h"
   ARGS
     "--dialect=index"
   DEPS
+    iree::base::internal
     loom::error::emitter
     loom::error::error_defs
     loom::ir
@@ -38,7 +41,22 @@ loom_generated_cc_library(
     loom::ops::op_defs
     loom::ops::scalar
     loom::rewrite::rewriter
-    loom::util::math
+    loom::target::facts
+    loom::util::fact_table
+    loom::util::predicate_facts
+)
+
+loom_cc_test(
+  NAME
+    carrier_test
+  SRCS
+    "carrier_test.cc"
+  DEPS
+    ::index
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::target::facts
+    loom::util::fact_table
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

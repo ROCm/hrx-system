@@ -605,6 +605,7 @@ static bool loom_refine_boundaries_call_kind_participates(
       return true;
     case LOOM_CALL_LIKE_KIND_LOW_INTERNAL:
     case LOOM_CALL_LIKE_KIND_LOW_INVOKE:
+    case LOOM_CALL_LIKE_KIND_COMMAND_PROGRAM:
     case LOOM_CALL_LIKE_KIND_NONE:
     default:
       return false;
@@ -840,7 +841,7 @@ static iree_status_t loom_refine_boundaries_build_graph(
     info->argument_ids =
         loom_func_like_arg_ids(function, &info->argument_count);
     info->result_count = function.op->result_count;
-    info->is_internal = loom_func_like_visibility(function) == 0;
+    info->is_internal = loom_func_like_is_module_internal(function);
     IREE_RETURN_IF_ERROR(loom_refine_boundaries_collect_argument_projections(
         module, info, arena));
     if (info->result_count > 0) {
@@ -2137,10 +2138,8 @@ static iree_status_t loom_refine_boundaries_create_specialization_group(
 static void loom_refine_boundaries_retarget_call(loom_module_t* module,
                                                  loom_op_t* call_op,
                                                  loom_symbol_ref_t callee) {
-  loom_trait_flags_t old_traits = call_op->traits;
-  loom_op_attrs(call_op)[0] = loom_attr_symbol(callee);
-  loom_op_refresh_effective_traits(module, call_op);
-  loom_module_update_op_direct_effects(call_op, old_traits, call_op->traits);
+  loom_call_like_set_callee(module, loom_call_like_cast(module, call_op),
+                            callee);
 }
 
 static iree_status_t loom_refine_boundaries_create_specializations(
@@ -2848,7 +2847,8 @@ iree_status_t loom_refine_boundaries_run_with_options(
   uint32_t max_iterations = options && options->max_iterations > 0
                                 ? options->max_iterations
                                 : LOOM_REFINE_BOUNDARIES_DEFAULT_MAX_ITERATIONS;
-  const iree_host_size_t boundary_fact_value_capacity = module->values.capacity;
+  const iree_host_size_t boundary_fact_value_capacity =
+      loom_value_table_capacity(&module->values);
 
   iree_arena_allocator_t facts_arena_a;
   iree_arena_allocator_t facts_arena_b;

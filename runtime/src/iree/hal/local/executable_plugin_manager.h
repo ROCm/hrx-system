@@ -28,14 +28,17 @@ typedef iree_status_t (*iree_hal_executable_plugin_resolve_thunk_t)(
 
 // Interface for executable import plugins that provides a virtual destructor.
 typedef struct iree_hal_executable_plugin_t {
+  // Retain/release counter.
   iree_atomic_ref_count_t ref_count;
+  // Implementation vtable.
   const iree_hal_executable_plugin_vtable_t* vtable;
-  union {
-    const iree_hal_executable_plugin_header_t** header;
-    const iree_hal_executable_plugin_v0_t* v0;
-  } library;
+  // Queried v0 plugin interface.
+  const iree_hal_executable_plugin_v0_t* library;
+  // Plugin-defined instance state.
   void* self;
+  // Plugin name used for tracing and diagnostics.
   iree_string_view_t identifier;
+  // Optional thunk used to bridge calls into the plugin ABI.
   iree_hal_executable_plugin_resolve_thunk_t resolve_thunk;
 } iree_hal_executable_plugin_t;
 
@@ -50,7 +53,7 @@ typedef struct iree_hal_executable_plugin_t {
 // |host_allocator| is passed to the plugin to service plugin allocations.
 iree_status_t iree_hal_executable_plugin_initialize(
     const void* vtable, iree_hal_executable_plugin_features_t required_features,
-    const iree_hal_executable_plugin_header_t** header_ptr,
+    const iree_hal_executable_plugin_header_t* const* query_result,
     iree_host_size_t param_count, const iree_string_pair_t* params,
     iree_hal_executable_plugin_resolve_thunk_t resolve_thunk,
     iree_allocator_t host_allocator,

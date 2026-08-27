@@ -42,35 +42,37 @@ def _ds_read_overlay(
         immediates=(_ds_offset_immediate(),),
         fixed_encoding_fields=_ds_fixed_fields_without_offset1(fixed_encoding_fields),
         effects=(_workgroup_memory_effect(EffectKind.READ, width_bits),),
-        constraints=_EARLY_CLOBBER_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     )
 
 
-def _ds_read_u16_overlay(
+def _ds_read_narrow_overlay(
     *,
+    width_bits: int,
     encoding_name: str = "ENC_DS",
     fixed_encoding_fields: tuple[tuple[str, AmdgpuFixedEncodingValue], ...] = (
         ("OFFSET1", 0),
         ("GDS", 0),
     ),
 ) -> AmdgpuDescriptorOverlay:
+    suffix = f"u{width_bits}"
     return AmdgpuDescriptorOverlay(
-        descriptor_key="amdgpu.ds_read_u16",
-        instruction_name="DS_READ_U16",
-        mnemonic="ds_read_u16",
+        descriptor_key=f"amdgpu.ds_read_{suffix}",
+        instruction_name=f"DS_READ_{suffix.upper()}",
+        mnemonic=f"ds_read_{suffix}",
         encoding_name=encoding_name,
-        semantic_tag="memory.workgroup.load.u16",
+        semantic_tag=f"memory.workgroup.load.{suffix}",
         schedule_class=_SCHEDULE_LDS_LOAD,
         operands=(
             AmdgpuOperandOverlay("VDST", _vgpr_result()),
             AmdgpuOperandOverlay("ADDR", _vgpr_operand("addr")),
         ),
-        implicit_operands=(_ignore_workgroup_memory(width_bits=16, is_input=True),),
+        implicit_operands=(
+            _ignore_workgroup_memory(width_bits=width_bits, is_input=True),
+        ),
         immediates=(_ds_offset_immediate(),),
         fixed_encoding_fields=_ds_fixed_fields_without_offset1(fixed_encoding_fields),
-        effects=(_workgroup_memory_effect(EffectKind.READ, 16),),
-        constraints=_EARLY_CLOBBER_RESULT_CONSTRAINTS,
+        effects=(_workgroup_memory_effect(EffectKind.READ, width_bits),),
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     )
 
@@ -111,7 +113,6 @@ def _ds_load_u16_d16_overlays(
                 named_immediates=True,
             ),
             effects=(_workgroup_memory_effect(EffectKind.READ, 16),),
-            constraints=_EARLY_CLOBBER_RESULT_CONSTRAINTS,
             flags=(DescriptorFlag.SIDE_EFFECTING,),
         ),
         AmdgpuDescriptorOverlay(
@@ -133,7 +134,10 @@ def _ds_load_u16_d16_overlays(
                         "src",
                         OperandRole.OPERAND,
                         _VGPR_ALT,
-                        flags=(OperandFlag.IMPLICIT,),
+                        flags=(
+                            OperandFlag.IMPLICIT,
+                            OperandFlag.STORAGE_CONTINUATION,
+                        ),
                         register_part=_REG_PART_VGPR_LOW16,
                     ),
                     role_exception_reason=(
@@ -156,41 +160,51 @@ def _ds_load_u16_d16_overlays(
                 named_immediates=True,
             ),
             effects=(_workgroup_memory_effect(EffectKind.READ, 16),),
-            constraints=(
-                Constraint(ConstraintKind.TIED, 0, 1),
-                *_EARLY_CLOBBER_RESULT_CONSTRAINTS,
-            ),
+            constraints=(Constraint(ConstraintKind.TIED, 0, 1),),
             flags=(DescriptorFlag.SIDE_EFFECTING,),
         ),
     )
 
 
-def _ds_write_b16_overlay(
+def _ds_write_narrow_overlay(
     *,
+    width_bits: int,
     encoding_name: str = "ENC_DS",
     fixed_encoding_fields: tuple[tuple[str, AmdgpuFixedEncodingValue], ...] = (
         ("OFFSET1", 0),
         ("GDS", 0),
     ),
 ) -> AmdgpuDescriptorOverlay:
+    suffix = f"b{width_bits}"
+    if width_bits == 8:
+        value_operand = _vgpr_operand("value")
+        value_size_exception_reason = "byte-store-reads-low-8-bits-of-b32-source"
+    elif width_bits == 16:
+        value_operand = _vgpr_operand("value", register_part=_REG_PART_VGPR_LOW16)
+        value_size_exception_reason = None
+    else:
+        raise ValueError(f"unsupported narrow DS store width {width_bits}")
     return AmdgpuDescriptorOverlay(
-        descriptor_key="amdgpu.ds_write_b16",
-        instruction_name="DS_WRITE_B16",
-        mnemonic="ds_write_b16",
+        descriptor_key=f"amdgpu.ds_write_{suffix}",
+        instruction_name=f"DS_WRITE_{suffix.upper()}",
+        mnemonic=f"ds_write_{suffix}",
         encoding_name=encoding_name,
-        semantic_tag="memory.workgroup.store.u16.low",
+        semantic_tag=f"memory.workgroup.store.u{width_bits}.low",
         schedule_class=_SCHEDULE_LDS_STORE,
         operands=(
             AmdgpuOperandOverlay("ADDR", _vgpr_operand("addr")),
             AmdgpuOperandOverlay(
                 "DATA0",
-                _vgpr_operand("value", register_part=_REG_PART_VGPR_LOW16),
+                value_operand,
+                size_exception_reason=value_size_exception_reason,
             ),
         ),
-        implicit_operands=(_ignore_workgroup_memory(width_bits=16, is_input=False),),
+        implicit_operands=(
+            _ignore_workgroup_memory(width_bits=width_bits, is_input=False),
+        ),
         immediates=(_ds_offset_immediate(),),
         fixed_encoding_fields=_ds_fixed_fields_without_offset1(fixed_encoding_fields),
-        effects=(_workgroup_memory_effect(EffectKind.WRITE, 16),),
+        effects=(_workgroup_memory_effect(EffectKind.WRITE, width_bits),),
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     )
 
@@ -265,7 +279,6 @@ def _ds_read2_overlay(
         ),
         fixed_encoding_fields=fixed_encoding_fields,
         effects=(_workgroup_memory_effect(EffectKind.READ, element_width_bits * 2),),
-        constraints=_EARLY_CLOBBER_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     )
 
@@ -791,7 +804,6 @@ def _ds_transpose_read_overlay(
         immediates=(_ds_crosslane_offset_immediate(),),
         fixed_encoding_fields=fixed_encoding_fields,
         effects=(_workgroup_memory_effect(EffectKind.READ, width_bits),),
-        constraints=_EARLY_CLOBBER_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     )
 
@@ -849,9 +861,13 @@ def _ds_memory_overlays(
         fixed_encoding_fields
     )
     return (
-        _ds_read_u16_overlay(
-            encoding_name=encoding_name,
-            fixed_encoding_fields=fixed_encoding_fields,
+        *(
+            _ds_read_narrow_overlay(
+                width_bits=width_bits,
+                encoding_name=encoding_name,
+                fixed_encoding_fields=fixed_encoding_fields,
+            )
+            for width_bits in (8, 16)
         ),
         *(
             _ds_read_overlay(
@@ -862,9 +878,13 @@ def _ds_memory_overlays(
             )
             for width_bits, units in widths
         ),
-        _ds_write_b16_overlay(
-            encoding_name=encoding_name,
-            fixed_encoding_fields=fixed_encoding_fields,
+        *(
+            _ds_write_narrow_overlay(
+                width_bits=width_bits,
+                encoding_name=encoding_name,
+                fixed_encoding_fields=fixed_encoding_fields,
+            )
+            for width_bits in (8, 16)
         ),
         *(
             _ds_write_overlay(
@@ -949,14 +969,14 @@ __all__ = (
     "_ds_read2_overlay",
     "_ds_read_addtid_b32_overlay",
     "_ds_read_overlay",
-    "_ds_read_u16_overlay",
+    "_ds_read_narrow_overlay",
     "_ds_stride64_read2_overlay",
     "_ds_stride64_write2_overlay",
     "_ds_swizzle_b32_overlay",
     "_ds_transpose_read_overlay",
     "_ds_write2_overlay",
     "_ds_write_addtid_b32_overlay",
-    "_ds_write_b16_overlay",
+    "_ds_write_narrow_overlay",
     "_ds_write_overlay",
     "_gfx950_ds_transpose_read_overlays",
 )

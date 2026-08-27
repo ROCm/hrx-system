@@ -82,6 +82,7 @@ iree_status_t loom_pass_ir_build_pipeline(
 }
 
 iree_status_t loom_pass_ir_build_run(loom_builder_t* builder,
+                                     loom_pass_run_build_flags_t build_flags,
                                      iree_string_view_t key,
                                      loom_named_attr_slice_t options,
                                      loom_op_t** out_run_op) {
@@ -89,8 +90,8 @@ iree_status_t loom_pass_ir_build_run(loom_builder_t* builder,
   loom_string_id_t key_id = LOOM_STRING_ID_INVALID;
   IREE_RETURN_IF_ERROR(
       loom_module_intern_string(builder->module, key, &key_id));
-  return loom_pass_run_build(builder, key_id, options, LOOM_LOCATION_UNKNOWN,
-                             out_run_op);
+  return loom_pass_run_build(builder, build_flags, key_id, options,
+                             LOOM_LOCATION_UNKNOWN, out_run_op);
 }
 
 iree_status_t loom_pass_ir_begin_for(loom_builder_t* builder,
@@ -120,34 +121,35 @@ iree_status_t loom_pass_ir_build_for(loom_builder_t* builder,
   return status;
 }
 
-iree_status_t loom_pass_ir_begin_where(loom_builder_t* builder,
-                                       iree_string_view_t predicate,
-                                       loom_named_attr_slice_t attrs,
-                                       loom_pass_ir_scope_t* out_scope) {
+iree_status_t loom_pass_ir_begin_where(
+    loom_builder_t* builder, loom_pass_where_build_flags_t build_flags,
+    iree_string_view_t predicate, loom_named_attr_slice_t attrs,
+    loom_pass_ir_scope_t* out_scope) {
   *out_scope = (loom_pass_ir_scope_t){0};
   loom_string_id_t predicate_id = LOOM_STRING_ID_INVALID;
   IREE_RETURN_IF_ERROR(
       loom_module_intern_string(builder->module, predicate, &predicate_id));
   loom_op_t* where_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_pass_where_build(builder, predicate_id, attrs,
-                                             LOOM_LOCATION_UNKNOWN, &where_op));
+  IREE_RETURN_IF_ERROR(loom_pass_where_build(builder, build_flags, predicate_id,
+                                             attrs, LOOM_LOCATION_UNKNOWN,
+                                             &where_op));
   return loom_pass_ir_enter_scope(builder, where_op,
                                   loom_pass_where_body(where_op), out_scope);
 }
 
-iree_status_t loom_pass_ir_build_where(loom_builder_t* builder,
-                                       iree_string_view_t predicate,
-                                       loom_named_attr_slice_t attrs,
-                                       loom_pass_ir_body_build_fn_t build_body,
-                                       void* user_data,
-                                       loom_op_t** out_where_op) {
+iree_status_t loom_pass_ir_build_where(
+    loom_builder_t* builder, loom_pass_where_build_flags_t build_flags,
+    iree_string_view_t predicate, loom_named_attr_slice_t attrs,
+    loom_pass_ir_body_build_fn_t build_body, void* user_data,
+    loom_op_t** out_where_op) {
   *out_where_op = NULL;
   loom_string_id_t predicate_id = LOOM_STRING_ID_INVALID;
   IREE_RETURN_IF_ERROR(
       loom_module_intern_string(builder->module, predicate, &predicate_id));
   loom_op_t* where_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_pass_where_build(builder, predicate_id, attrs,
-                                             LOOM_LOCATION_UNKNOWN, &where_op));
+  IREE_RETURN_IF_ERROR(loom_pass_where_build(builder, build_flags, predicate_id,
+                                             attrs, LOOM_LOCATION_UNKNOWN,
+                                             &where_op));
   iree_status_t status = loom_pass_ir_build_scope(
       builder, where_op, loom_pass_where_body(where_op), build_body, user_data);
   if (iree_status_is_ok(status)) {
@@ -184,6 +186,33 @@ iree_status_t loom_pass_ir_build_repeat(
       user_data);
   if (iree_status_is_ok(status)) {
     *out_repeat_op = repeat_op;
+  }
+  return status;
+}
+
+iree_status_t loom_pass_ir_begin_if_changed(loom_builder_t* builder,
+                                            loom_pass_ir_scope_t* out_scope) {
+  *out_scope = (loom_pass_ir_scope_t){0};
+  loom_op_t* if_changed_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_pass_if_changed_build(
+      builder, LOOM_LOCATION_UNKNOWN, &if_changed_op));
+  return loom_pass_ir_enter_scope(builder, if_changed_op,
+                                  loom_pass_if_changed_body(if_changed_op),
+                                  out_scope);
+}
+
+iree_status_t loom_pass_ir_build_if_changed(
+    loom_builder_t* builder, loom_pass_ir_body_build_fn_t build_body,
+    void* user_data, loom_op_t** out_if_changed_op) {
+  *out_if_changed_op = NULL;
+  loom_op_t* if_changed_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_pass_if_changed_build(
+      builder, LOOM_LOCATION_UNKNOWN, &if_changed_op));
+  iree_status_t status = loom_pass_ir_build_scope(
+      builder, if_changed_op, loom_pass_if_changed_body(if_changed_op),
+      build_body, user_data);
+  if (iree_status_is_ok(status)) {
+    *out_if_changed_op = if_changed_op;
   }
   return status;
 }

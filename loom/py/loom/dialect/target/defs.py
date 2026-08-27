@@ -4,17 +4,21 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Target planning dialect op definitions.
+"""Authored target witnesses and contextual target-query definitions.
 
-The target dialect owns durable module records that select and freeze code
-generation facts before backend-specific lowering.
+Target records preserve only the constraints written in the program.
+Compilation projects immutable facts for each function version without
+expanding or rewriting those records; contextual query ops read that active
+fact scope and remain dynamic when no value is established.
 """
 
-from loom.assembly import AttrDict, SymbolRef, TemplateParam
+from loom.assembly import COLON, AttrDict, ResultType, SymbolRef, TemplateParam
 from loom.dsl import (
     ATTR_TYPE_ENUM,
     ATTR_TYPE_I64,
     ATTR_TYPE_STRING,
+    INDEX,
+    PURE,
     SYMBOL_DEFINE,
     AttrDef,
     Dialect,
@@ -22,7 +26,11 @@ from loom.dsl import (
     EnumDef,
     Op,
     OpPhase,
+    ParameterizedAttrDef,
+    Result,
     SymbolDefinition,
+    SymbolDefinitionFlag,
+    TargetFactSpecialization,
     TargetLikeInterface,
 )
 
@@ -33,8 +41,23 @@ from loom.dsl import (
 target_ops = Dialect(
     "target",
     dialect_id=0x13,
-    doc="Target planning records.",
+    doc="Authored target witnesses and contextual target queries.",
     default_phase=OpPhase.MODULE_METADATA,
+)
+
+# ============================================================================
+# Static target fact clauses
+# ============================================================================
+
+target_subgroup_size_attr = ParameterizedAttrDef(
+    "target.subgroup.size",
+    group=target_ops,
+    parameters=[
+        AttrDef("size", ATTR_TYPE_I64, doc="Required fixed subgroup size."),
+    ],
+    primary_parameter="size",
+    target_condition="loom_target_subgroup_size_condition",
+    doc="Requires the active function-version facts to establish this subgroup size.",
 )
 
 # ============================================================================
@@ -87,6 +110,11 @@ ExportAbiKind = EnumDef(
         EnumCase("vm_module_function", 3, doc="IREE VM module function ABI."),
         EnumCase("shader_entry_point", 4, doc="Graphics shader entry point ABI."),
         EnumCase("wasm_function", 5, doc="WebAssembly module function ABI."),
+        EnumCase(
+            "command_program",
+            6,
+            doc="Reusable command-program materialization ABI.",
+        ),
     ],
     doc="Callable or package ABI used by an export plan.",
     c_type="loom_target_abi_kind_t",
@@ -139,6 +167,12 @@ TARGET_COMMON_OVERRIDE_ATTRS = [
     AttrDef("max_workgroup_size_y", ATTR_TYPE_I64, optional=True),
     AttrDef("max_workgroup_size_z", ATTR_TYPE_I64, optional=True),
     AttrDef("max_flat_workgroup_size", ATTR_TYPE_I64, optional=True),
+    AttrDef(
+        "max_workgroup_storage_bytes",
+        ATTR_TYPE_I64,
+        optional=True,
+        doc="Maximum function-local workgroup storage in bytes.",
+    ),
     AttrDef("subgroup_size", ATTR_TYPE_I64, optional=True),
     AttrDef("max_grid_size_x", ATTR_TYPE_I64, optional=True),
     AttrDef("max_grid_size_y", ATTR_TYPE_I64, optional=True),
@@ -169,7 +203,6 @@ TARGET_COMMON_OVERRIDE_ATTRS = [
         open_enum=True,
         optional=True,
     ),
-    AttrDef("hal_buffer_resource_flags", ATTR_TYPE_I64, optional=True),
     AttrDef("contract_set_key", ATTR_TYPE_STRING, optional=True),
     AttrDef("contract_feature_bits", ATTR_TYPE_I64, optional=True),
 ]
@@ -181,6 +214,24 @@ def target_record_attrs(kind_enum: EnumDef) -> list[AttrDef]:
         AttrDef("kind", ATTR_TYPE_ENUM, enum_def=kind_enum),
         *TARGET_COMMON_OVERRIDE_ATTRS,
     ]
+
+
+# ============================================================================
+# Contextual target queries
+# ============================================================================
+
+target_subgroup_size = Op(
+    "target.subgroup.size",
+    group=target_ops,
+    builder_name="subgroup_size",
+    phase=OpPhase.EXECUTABLE,
+    doc="Read the selected subgroup size of the current function version.",
+    results=[Result("result", INDEX, doc="Selected subgroup size.")],
+    traits=[PURE],
+    facts="loom_target_subgroup_size_facts",
+    format=[COLON, ResultType("result")],
+    examples=["%size = target.subgroup.size : index"],
+)
 
 
 # ============================================================================
@@ -197,6 +248,7 @@ target_generic = Op(
             symbol="symbol",
             selector="kind",
             bundle_table="loom_target_generic_target_bundles",
+            fact_specialization=TargetFactSpecialization.STRUCTURAL,
         )
     ],
     symbol_def=SymbolDefinition(
@@ -219,7 +271,34 @@ target_generic = Op(
 )
 
 # ============================================================================
+# target.decl
+# ============================================================================
+
+target_decl = Op(
+    "target.decl",
+    group=target_ops,
+    doc=("Declares a target-record contract whose definition may be provided by linking. The declaration remains valid in partially specialized IR and a linked definition must satisfy its contract."),
+    traits=[SYMBOL_DEFINE],
+    symbol_def=SymbolDefinition(
+        field="symbol",
+        name="target",
+        interfaces=["target", "record"],
+        bytecode_kind="LOOM_SYMBOL_RECORD",
+        flags=[SymbolDefinitionFlag.DECLARATION],
+    ),
+    attrs=[AttrDef("symbol", "symbol")],
+    format=[SymbolRef("symbol")],
+    examples=["target.decl @external_target"],
+)
+
+# ============================================================================
 # All ops
 # ============================================================================
 
-ALL_TARGET_OPS: tuple[Op, ...] = (target_generic,)
+ALL_TARGET_OPS: tuple[Op, ...] = (
+    target_generic,
+    target_decl,
+    target_subgroup_size,
+)
+
+ALL_TARGET_PARAMETERIZED_ATTRS = (target_subgroup_size_attr,)

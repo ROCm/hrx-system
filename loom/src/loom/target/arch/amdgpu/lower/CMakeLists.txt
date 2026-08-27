@@ -35,54 +35,17 @@ loom_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
+loom_generated_file_family(
   NAME
-    memory_descriptor_candidate_ranges_gen
+    fp8_tables_gen
   GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::lower::candidates::memory_candidates
-  OUTPUT
-    "memory_descriptor_candidate_ranges.inl"
-  OUTPUT_FLAG
-    "--candidate-ranges"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    memory_descriptor_candidates_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::lower::candidates::memory_candidates
-  OUTPUT
-    "memory_descriptor_candidates.inl"
-  OUTPUT_FLAG
-    "--candidate-rows"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    memory_cache_policy_encoding_rows_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::target_info
-  OUTPUT
-    "memory_cache_policy_encoding_rows.inl"
-  OUTPUT_FLAG
-    "--cache-policy-encoding-rows"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_textual_header(
-  NAME
-    memory_cache_policy_temporal_th_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::target_info
-  OUTPUT
-    "memory_cache_policy_temporal_th.inl"
-  OUTPUT_FLAG
-    "--cache-policy-temporal-th"
+    loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
+  OUTPUTS
+    "encoding/fp8_tables.c"
+    "encoding/fp8_table_counts.h"
+  OUTPUT_FLAGS
+    "--source"
+    "--counts-header"
 )
 endif()
 
@@ -96,6 +59,7 @@ loom_cc_library(
     "async.h"
     "bitpack.h"
     "buffer.h"
+    "cluster_preamble.h"
     "collective_combine.h"
     "collective_payload.h"
     "constants.h"
@@ -105,14 +69,32 @@ loom_cc_library(
     "descriptor_ref.h"
     "dot.h"
     "emit.h"
+    "encoding/float16.h"
+    "encoding/fp4.h"
+    "encoding/fp8.h"
+    "encoding/fp8_encode.h"
+    "encoding/fp8_table_counts.h"
+    "encoding/fp8_tables.h"
+    "encoding/fp8_vector_conversion.h"
+    "encoding/vector_conversion.h"
     "feedback.h"
     "legality.h"
     "lower.h"
     "mask.h"
     "matrix.h"
     "matrix_fragment.h"
+    "matrix_fragment_memory_access.h"
+    "matrix_fragment_memory_address.h"
+    "matrix_fragment_memory_emit.h"
+    "matrix_fragment_memory_narrow.h"
+    "matrix_fragment_memory_packet.h"
+    "matrix_fragment_memory_plan.h"
+    "matrix_fragment_repack.h"
+    "matrix_fragment_repack_packed_b16.h"
+    "matrix_fragment_state.h"
     "memory.h"
-    "memory_bank_conflict.h"
+    "memory_bank_service.h"
+    "memory_subgroup_access.h"
     "plan.h"
     "preamble.h"
     "sanitizer.h"
@@ -128,13 +110,22 @@ loom_cc_library(
     "table.h"
     "topology.h"
     "types.h"
-    "values.h"
+    "value/bit_count.h"
+    "value/integer64.h"
+    "value/scalar_conversion.h"
+    "value/storage.h"
+    "value/vector_construct.h"
+    "value/vector_conversion.h"
+    "value/vector_transform.h"
     "workgroup.h"
   TEXTUAL_HDRS
-    "memory_cache_policy_encoding_rows.inl"
-    "memory_cache_policy_temporal_th.inl"
-    "memory_descriptor_candidate_ranges.inl"
-    "memory_descriptor_candidates.inl"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/lower/candidates/memory_descriptor_candidate_ranges.inl"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/lower/candidates/memory_descriptor_candidates.inl"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/matrix/matrix_fragment_repack_result_to_lhs_projections.inl"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/matrix/matrix_fragment_repack_result_to_rhs_projections.inl"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/memory_cache_policy_encoding_rows.inl"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/memory_cache_policy_temporal_th.inl"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/target_records_tables.inl"
     "registry_tables.inl"
   SRCS
     "abi.c"
@@ -143,27 +134,51 @@ loom_cc_library(
     "atomic.c"
     "bitpack.c"
     "buffer.c"
+    "cluster_preamble.c"
     "collective_combine.c"
     "collective_payload.c"
     "collective_reduce.c"
     "collective_scan.c"
+    "constants.c"
     "control.c"
     "control_packet.c"
     "data_symbol.c"
     "descriptor_ref.c"
     "dot.c"
     "emit_support.c"
+    "encoding/float16.c"
+    "encoding/fp4.c"
+    "encoding/fp8.c"
+    "encoding/fp8_descriptors.c"
+    "encoding/fp8_encode.c"
+    "encoding/fp8_lane.c"
+    "encoding/fp8_packed.c"
+    "encoding/fp8_plan.c"
+    "encoding/fp8_tables.c"
+    "encoding/fp8_vector_conversion.c"
+    "encoding/vector_conversion.c"
     "feedback.c"
-    "lds_layout.c"
+    "legality.c"
     "mask.c"
+    "materializers.c"
     "matrix.c"
     "matrix_fragment.c"
+    "matrix_fragment_memory_access.c"
+    "matrix_fragment_memory_address.c"
+    "matrix_fragment_memory_emit.c"
+    "matrix_fragment_memory_narrow.c"
+    "matrix_fragment_memory_packet.c"
+    "matrix_fragment_memory_plan.c"
+    "matrix_fragment_repack.c"
+    "matrix_fragment_repack_packed_b16.c"
+    "matrix_fragment_state.c"
     "memory.c"
-    "memory_bank_conflict.c"
+    "memory_bank_service.c"
     "memory_cache.c"
     "memory_diagnostics.c"
     "memory_emit.c"
     "memory_legality.c"
+    "memory_subgroup_access.c"
     "preamble.c"
     "prefetch.c"
     "registry.c"
@@ -173,22 +188,37 @@ loom_cc_library(
     "sanitizer_race_report.c"
     "sanitizer_report.c"
     "signal.c"
+    "source_alloca_layout.c"
+    "source_type_mapping.c"
+    "source_value_analysis.c"
+    "source_value_analysis.h"
+    "source_value_i1.c"
+    "source_value_vgpr.c"
     "structural.c"
     "subgroup_broadcast.c"
     "subgroup_crosslane.c"
     "subgroup_mask.c"
     "subgroup_shuffle.c"
-    "support.c"
     "sync.c"
     "system_memory.c"
     "table.c"
-    "values.c"
+    "types.c"
+    "value/bit_count.c"
+    "value/integer64.c"
+    "value/integer64_emit.c"
+    "value/scalar_conversion.c"
+    "value/storage.c"
+    "value/vector_construct.c"
+    "value/vector_conversion.c"
+    "value/vector_transform.c"
   DEPS
     ::kinds
     ::materializers
     iree::base
+    iree::base::internal
     loom::analysis::condition_facts
     loom::analysis::contract_vector
+    loom::analysis::control_uniformity
     loom::analysis::symbolic_expr
     loom::analysis::view_regions
     loom::codegen::low::builder
@@ -220,25 +250,28 @@ loom_cc_library(
     loom::target::arch::amdgpu::abi::feedback
     loom::target::arch::amdgpu::abi::signal
     loom::target::arch::amdgpu::abi::tsan
+    loom::target::arch::amdgpu::analysis::lds_bank_service
     loom::target::arch::amdgpu::contracts
+    loom::target::arch::amdgpu::encoding::encoding_defs
     loom::target::arch::amdgpu::error_defs
+    loom::target::arch::amdgpu::facts
     loom::target::arch::amdgpu::hal::kernel_abi
-    loom::target::arch::amdgpu::lower::candidates::arithmetic_candidates
-    loom::target::arch::amdgpu::lower::candidates::async_gather_candidates
-    loom::target::arch::amdgpu::lower::candidates::atomic_candidates
-    loom::target::arch::amdgpu::lower::candidates::compare_candidates
+    loom::target::arch::amdgpu::lower::candidates::candidate_tables
     loom::target::arch::amdgpu::matrix::contract
     loom::target::arch::amdgpu::matrix::projection
+    loom::target::arch::amdgpu::planning::wait_counters
     loom::target::arch::amdgpu::planning::wait_packets
     loom::target::arch::amdgpu::planning::wait_plan
+    loom::target::arch::amdgpu::records::target_records_tables
     loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::target::arch::amdgpu::target_info_defs
     loom::target::low_legality
     loom::target::registers
+    loom::util::cfg_graph
     loom::util::fact_table
-    loom::util::math
+    loom::util::numeric_format
   PUBLIC
 )
 endif()

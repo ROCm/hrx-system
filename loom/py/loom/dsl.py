@@ -38,13 +38,18 @@ Quick reference — declaring an op:
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import math
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum, unique
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
-from loom.assembly import FormatElement
+from loom import constraint_validation
+from loom.assembly import FormatElement, OptionalGroup
 from loom.errors import ErrorDef
+
+if TYPE_CHECKING:
+    from loom.assembly import FuncArgs
 
 __all__ = [
     # Type constraints.
@@ -58,6 +63,7 @@ __all__ = [
     "VIEW",
     "BUFFER",
     "INTEGER",
+    "BYTE_PATTERN_SCALAR",
     "INDEX_OR_NON_I1_INTEGER_SCALAR",
     "INTEGER_ELEMENT",
     "INDEX_OR_NON_I1_INTEGER_ELEMENT",
@@ -73,7 +79,6 @@ __all__ = [
     "OFFSET",
     "ADDRESS",
     "ANY",
-    "GROUP",
     "ANY_ENCODING",
     "ENCODING_LAYOUT",
     "ENCODING_SCHEMA",
@@ -83,9 +88,11 @@ __all__ = [
     "REGISTER",
     "STORAGE",
     "I1",
+    "I32",
     # Type constraint helpers.
     "type_constraint_name",
     # Field descriptors.
+    "OperandRole",
     "Operand",
     "Result",
     "TiedResult",
@@ -97,19 +104,28 @@ __all__ = [
     "ATTR_TYPE_STRING",
     "ATTR_TYPE_BOOL",
     "ATTR_TYPE_ENUM",
+    "ATTR_TYPE_ENUM_ARRAY",
+    "ATTR_TYPE_SIGNED_ENUM_SET",
+    "ATTR_TYPE_SCOPED_ENUM",
     "ATTR_TYPE_TYPE",
     "ATTR_TYPE_I64_ARRAY",
     "ATTR_TYPE_BYTES",
     "ATTR_TYPE_ENCODING",
     "ATTR_TYPE_ANY",
     "ATTR_TYPE_SYMBOL",
+    "ATTR_TYPE_SYMBOL_ARRAY",
+    "ATTR_TYPE_SYMBOL_SET",
     "ATTR_TYPE_FLAGS",
     "ATTR_TYPE_PREDICATE_LIST",
     "ATTR_TYPE_DICT",
+    "ATTR_TYPE_PARAMETERIZED",
+    "ATTR_TYPE_PARAMETERIZED_ARRAY",
     "RegionDef",
     # Symbol support.
     "SymbolDefinition",
+    "SymbolDefinitionFlag",
     "SymbolReference",
+    "SymbolValueContract",
     # Enum support.
     "EnumCase",
     "EnumDef",
@@ -121,23 +137,31 @@ __all__ = [
     "INVOLUTION",
     "TERMINATOR",
     "CONSTANT_LIKE",
+    "POISON",
     "ELEMENTWISE",
     "DECOMPOSABLE",
     "SYMBOL_DEFINE",
+    "MODULE_SCOPE",
+    "KeyedModuleRecord",
     "ISOLATED_FROM_ABOVE",
     "NON_DETERMINISTIC",
     "UNKNOWN_EFFECTS",
+    "MEMORY_FENCE",
     "CONVERGENT",
     "HINT",
+    "COMPILE_TIME_ONLY",
     "SAFE_TO_SPECULATE",
     "REFINABLE_RESULT_TYPE_REFS",
     "POISON_BOUNDARY",
     "FACT_IDENTITY",
     "DISTRIBUTION_TRANSFER",
+    "STORAGE_RELATION",
     "VALUE_ALIAS",
     # Semantic phase/contract metadata.
     "OpPhase",
     "ContractFamily",
+    "ConditionRefinement",
+    "ConditionRefinementTruth",
     "TypeSemantic",
     "OpCategory",
     # Trait constructors.
@@ -170,6 +194,7 @@ __all__ = [
     "BorrowedResult",
     "RetainedResult",
     "AliasResult",
+    "MovedResult",
     # Constraints.
     "Constraint",
     "SameType",
@@ -181,6 +206,8 @@ __all__ = [
     "RanksMatch",
     "HasIntegerElement",
     "HasFloatElement",
+    "HasBitwiseScalar",
+    "HasBitwiseElement",
     "HasIndexOrNonI1IntegerScalar",
     "HasIndexOrNonI1IntegerElement",
     "HasI1Element",
@@ -209,6 +236,8 @@ __all__ = [
     "BlockArgsSatisfy",
     "BlockArgsMatchTypes",
     "BlockArgsMatchElementTypes",
+    "ConditionForwardedCountMatchesBlockArgs",
+    "ConditionForwardedTypesMatchBlockArgs",
     "YieldCountMatchesResults",
     "YieldTypesMatchResults",
     "YieldElementTypesMatchResults",
@@ -219,6 +248,12 @@ __all__ = [
     "RegisterUnitsSumTo",
     # Op group.
     "Dialect",
+    "EncodingAliasDef",
+    "EncodingOperandSummaryDef",
+    "EncodingFamilyDef",
+    "EncodingFamilyRole",
+    "EncodingRecordDef",
+    "ParameterizedAttrDef",
     # Legacy text-format migration declarations.
     "LegacyFieldDefault",
     "LegacyFieldMapping",
@@ -227,9 +262,12 @@ __all__ = [
     "CallLikeInterface",
     "CallLikeKind",
     "FuncLikeInterface",
+    "InlinePolicy",
     "LoopLikeInterface",
     "MemoryAccessInterface",
+    "MemoryAccessOperationKind",
     "RegionBranchInterface",
+    "TargetFactSpecialization",
     "TargetLikeInterface",
     # Op declaration.
     "Op",
@@ -271,9 +309,12 @@ class TypeConstraint(Enum):
       BUFFER   → BufferType
       INTEGER  → ScalarType with kind in {I1, I8, I16, I32, I64}
       FLOAT    → ScalarType with kind in {F8*, F16, BF16, F32, F64}
+      BITWISE_SCALAR → ScalarType index, non-i1 integer, or floating-point
+      BYTE_PATTERN_SCALAR → 8/16/32/64-bit integer or floating-point scalar
       INDEX_OR_NON_I1_INTEGER_SCALAR → ScalarType index or non-i1 integer
       INTEGER_ELEMENT → ShapedType with integer element type
       FLOAT_ELEMENT   → ShapedType with float element type
+      BITWISE_ELEMENT → ShapedType with index, non-i1 integer, or float element
       INDEX_OR_NON_I1_INTEGER_ELEMENT → ShapedType index or non-i1 integer element
       I1_ELEMENT      → ShapedType with element type i1
       I8_ELEMENT      → ShapedType with element type i8
@@ -285,7 +326,6 @@ class TypeConstraint(Enum):
       OFFSET   → ScalarType with kind=OFFSET
       ADDRESS  → ScalarType with kind in {INDEX, OFFSET}
       ANY      → any type
-      GROUP    → GroupType
       ANY_ENCODING → any EncodingType
       ENCODING_LAYOUT → EncodingType with role=layout
       ENCODING_SCHEMA → EncodingType with role=schema
@@ -294,6 +334,8 @@ class TypeConstraint(Enum):
       POOL     → PoolType
       REGISTER → RegisterType
       STORAGE  → StorageType
+      I1       → ScalarType with kind=I1
+      I32      → ScalarType with kind=I32
 
     Element-qualified constraints are shaped-only: tile, tensor, vector,
     and view types can satisfy them, while scalar values continue to use
@@ -313,9 +355,12 @@ class TypeConstraint(Enum):
     BUFFER = "buffer"
     INTEGER = "integer"
     FLOAT = "float"
+    BITWISE_SCALAR = "bitwise_scalar"
+    BYTE_PATTERN_SCALAR = "byte_pattern_scalar"
     INDEX_OR_NON_I1_INTEGER_SCALAR = "index_or_non_i1_integer_scalar"
     INTEGER_ELEMENT = "integer_element"
     FLOAT_ELEMENT = "float_element"
+    BITWISE_ELEMENT = "bitwise_element"
     INDEX_OR_NON_I1_INTEGER_ELEMENT = "index_or_non_i1_integer_element"
     I1_ELEMENT = "i1_element"
     I8_ELEMENT = "i8_element"
@@ -327,7 +372,6 @@ class TypeConstraint(Enum):
     OFFSET = "offset"
     ADDRESS = "address"
     ANY = "any"
-    GROUP = "group"
     ANY_ENCODING = "encoding"
     ENCODING_LAYOUT = "encoding<layout>"
     ENCODING_SCHEMA = "encoding<schema>"
@@ -337,6 +381,7 @@ class TypeConstraint(Enum):
     REGISTER = "register"
     STORAGE = "storage"
     I1 = "i1"
+    I32 = "i32"
 
 
 # Singletons for use in op declarations.
@@ -350,9 +395,12 @@ VIEW = TypeConstraint.VIEW
 BUFFER = TypeConstraint.BUFFER
 INTEGER = TypeConstraint.INTEGER
 FLOAT = TypeConstraint.FLOAT
+BITWISE_SCALAR = TypeConstraint.BITWISE_SCALAR
+BYTE_PATTERN_SCALAR = TypeConstraint.BYTE_PATTERN_SCALAR
 INDEX_OR_NON_I1_INTEGER_SCALAR = TypeConstraint.INDEX_OR_NON_I1_INTEGER_SCALAR
 INTEGER_ELEMENT = TypeConstraint.INTEGER_ELEMENT
 FLOAT_ELEMENT = TypeConstraint.FLOAT_ELEMENT
+BITWISE_ELEMENT = TypeConstraint.BITWISE_ELEMENT
 INDEX_OR_NON_I1_INTEGER_ELEMENT = TypeConstraint.INDEX_OR_NON_I1_INTEGER_ELEMENT
 I1_ELEMENT = TypeConstraint.I1_ELEMENT
 I8_ELEMENT = TypeConstraint.I8_ELEMENT
@@ -364,7 +412,6 @@ INDEX = TypeConstraint.INDEX
 OFFSET = TypeConstraint.OFFSET
 ADDRESS = TypeConstraint.ADDRESS
 ANY = TypeConstraint.ANY
-GROUP = TypeConstraint.GROUP
 ANY_ENCODING = TypeConstraint.ANY_ENCODING
 ENCODING_LAYOUT = TypeConstraint.ENCODING_LAYOUT
 ENCODING_SCHEMA = TypeConstraint.ENCODING_SCHEMA
@@ -374,6 +421,7 @@ POOL = TypeConstraint.POOL
 REGISTER = TypeConstraint.REGISTER
 STORAGE = TypeConstraint.STORAGE
 I1 = TypeConstraint.I1
+I32 = TypeConstraint.I32
 
 
 def type_constraint_name(constraint: TypeConstraint) -> str:
@@ -386,6 +434,19 @@ def type_constraint_name(constraint: TypeConstraint) -> str:
 # ============================================================================
 
 
+@unique
+class OperandRole(Enum):
+    """Semantic role of an operand field independent of its display name."""
+
+    NONE = "none"
+    CONTROL_CONDITION = "control_condition"
+    SELECT_CONDITION = "select_condition"
+    SELECT_PAYLOAD = "select_payload"
+    BROADCAST_SOURCE = "broadcast_source"
+    COMPOSITE_ELEMENT = "composite_element"
+    FLOAT_EXTENSION_SOURCE = "float_extension_source"
+
+
 @dataclass(frozen=True, slots=True)
 class Operand:
     """An SSA value operand (input to the op at runtime).
@@ -395,6 +456,7 @@ class Operand:
     doc: Human-readable description.
     variadic: If True, this is zero-or-more values (list[Value]).
     optional: If True, this operand may be absent.
+    role: Semantic role consumed by generic analyses.
     """
 
     name: str
@@ -402,6 +464,7 @@ class Operand:
     doc: str = ""
     variadic: bool = False
     optional: bool = False
+    role: OperandRole = OperandRole.NONE
 
 
 @dataclass(frozen=True, slots=True)
@@ -473,15 +536,22 @@ ATTR_TYPE_F64 = "f64"
 ATTR_TYPE_STRING = "string"
 ATTR_TYPE_BOOL = "bool"
 ATTR_TYPE_ENUM = "enum"
+ATTR_TYPE_ENUM_ARRAY = "enum_array"
+ATTR_TYPE_SIGNED_ENUM_SET = "signed_enum_set"
+ATTR_TYPE_SCOPED_ENUM = "scoped_enum"
 ATTR_TYPE_TYPE = "type"
 ATTR_TYPE_I64_ARRAY = "i64_array"
 ATTR_TYPE_BYTES = "bytes"
 ATTR_TYPE_ENCODING = "encoding"
 ATTR_TYPE_ANY = "any"
 ATTR_TYPE_SYMBOL = "symbol"
+ATTR_TYPE_SYMBOL_ARRAY = "symbol_array"
+ATTR_TYPE_SYMBOL_SET = "symbol_set"
 ATTR_TYPE_FLAGS = "flags"
 ATTR_TYPE_PREDICATE_LIST = "predicate_list"
 ATTR_TYPE_DICT = "dict"  # Named attribute dictionary.
+ATTR_TYPE_PARAMETERIZED = "parameterized"
+ATTR_TYPE_PARAMETERIZED_ARRAY = "parameterized_array"
 
 _VALID_ATTR_TYPES = frozenset(
     {
@@ -490,15 +560,22 @@ _VALID_ATTR_TYPES = frozenset(
         ATTR_TYPE_STRING,
         ATTR_TYPE_BOOL,
         ATTR_TYPE_ENUM,
+        ATTR_TYPE_ENUM_ARRAY,
+        ATTR_TYPE_SIGNED_ENUM_SET,
+        ATTR_TYPE_SCOPED_ENUM,
         ATTR_TYPE_TYPE,
         ATTR_TYPE_I64_ARRAY,
         ATTR_TYPE_BYTES,
         ATTR_TYPE_ENCODING,
         ATTR_TYPE_ANY,
         ATTR_TYPE_SYMBOL,
+        ATTR_TYPE_SYMBOL_ARRAY,
+        ATTR_TYPE_SYMBOL_SET,
         ATTR_TYPE_FLAGS,
         ATTR_TYPE_PREDICATE_LIST,
         ATTR_TYPE_DICT,
+        ATTR_TYPE_PARAMETERIZED,
+        ATTR_TYPE_PARAMETERIZED_ARRAY,
     }
 )
 
@@ -506,13 +583,28 @@ _VALID_ATTR_TYPES = frozenset(
 _VALID_SYMBOL_INTERFACES = frozenset(
     {
         "func_like",
+        "callable",
+        "template_family",
+        "template_provider",
         "global",
         "executable",
         "record",
+        "rodata",
         "target",
         "config",
+        "kernel",
+        "kernel_entry",
+        "command_program",
     }
 )
+
+
+@unique
+class SymbolReferenceRole(Enum):
+    """Compile-time graph role of a symbol reference occurrence."""
+
+    DEPENDENCY = "dependency"
+    AVAILABILITY = "availability"
 
 
 @dataclass(frozen=True, slots=True)
@@ -522,21 +614,25 @@ class SymbolReference:
     name: Human-readable expected symbol class used in diagnostics.
     interfaces: Generated symbol-definition interfaces accepted by the attr.
         These are structural contracts, not op names or bytecode wire kinds.
+        An empty tuple accepts any symbol without imposing an additional
+        interface constraint.
+    role: Whether the reference contributes a dependency edge or only records
+        where an otherwise non-live symbol may be found during compilation.
     """
 
     name: str
     interfaces: tuple[str, ...]
+    role: SymbolReferenceRole
 
     def __init__(
         self,
         name: str,
         interfaces: list[str] | tuple[str, ...],
+        role: SymbolReferenceRole = SymbolReferenceRole.DEPENDENCY,
     ) -> None:
         frozen_interfaces = tuple(interfaces)
         if not name:
             raise ValueError("SymbolReference: name must be non-empty")
-        if not frozen_interfaces:
-            raise ValueError("SymbolReference: interfaces must be non-empty")
         for interface in frozen_interfaces:
             if interface not in _VALID_SYMBOL_INTERFACES:
                 raise ValueError(
@@ -544,8 +640,73 @@ class SymbolReference:
                     f"'{interface}', must be one of "
                     f"{sorted(_VALID_SYMBOL_INTERFACES)}"
                 )
+        if not isinstance(role, SymbolReferenceRole):
+            raise ValueError(
+                f"SymbolReference: role must be a SymbolReferenceRole, got {role!r}"
+            )
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "interfaces", frozen_interfaces)
+        object.__setattr__(self, "role", role)
+
+
+@unique
+class SymbolDefinitionFlag(Enum):
+    """Generic roles carried by a symbol-defining operation."""
+
+    DECLARATION = "declaration"
+    TEST_ONLY = "test_only"
+
+
+@dataclass(frozen=True, slots=True)
+class SymbolValueContract:
+    """Declares the typed-value contract carried by a symbol definition.
+
+    result: Result field whose type is part of the symbol contract.
+    value: Optional attribute containing an exact definition value.
+    predicates: Optional predicate-list attribute constraining a partial value.
+
+    The generated indices let generic link code compare and merge typed symbol
+    contracts without switching on the concrete defining operation.
+    """
+
+    result: str
+    value: str | None = None
+    predicates: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.result:
+            raise ValueError("SymbolValueContract: result must be non-empty")
+        if self.value is not None and not self.value:
+            raise ValueError("SymbolValueContract: value must be non-empty")
+        if self.predicates is not None and not self.predicates:
+            raise ValueError("SymbolValueContract: predicates must be non-empty")
+
+
+@dataclass(frozen=True, slots=True)
+class SymbolKernelContract:
+    """Declares where a kernel symbol stores its workload signature.
+
+    Definitions carry the signature as entry arguments of a configuration
+    region. Declarations carry it as one segmented operand field. Exactly one
+    representation is present on every symbol implementing the structural
+    kernel interface. The launch ABI remains the ordinary FuncLike signature.
+    """
+
+    workload_region: str | None = None
+    workload_operands: str | None = None
+
+    def __post_init__(self) -> None:
+        if (self.workload_region is None) == (self.workload_operands is None):
+            raise ValueError(
+                "SymbolKernelContract: exactly one of workload_region or "
+                "workload_operands must be present"
+            )
+        if self.workload_region == "":
+            raise ValueError("SymbolKernelContract: workload_region must be non-empty")
+        if self.workload_operands == "":
+            raise ValueError(
+                "SymbolKernelContract: workload_operands must be non-empty"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -560,8 +721,16 @@ class SymbolDefinition:
         leave this as LOOM_SYMBOL_NONE while still participating in IR symbol
         lookup and verification.
     fact_domain: Optional C symbol for the dialect-owned symbol fact domain.
+    visibility: Optional enum attribute carrying generic public/private symbol
+        visibility. FuncLike symbols inherit the visibility field declared by
+        their FuncLike interface when this is absent.
     retain: Optional enum attribute that marks symbols which ordinary symbol
         DCE must preserve even when unreachable.
+    flags: Generic roles that affect symbol processing independent of the
+        defining dialect.
+    value_contract: Optional typed-value contract described by generated field
+        indices.
+    kernel_contract: Optional kernel workload-signature storage contract.
     """
 
     field: str
@@ -569,7 +738,11 @@ class SymbolDefinition:
     interfaces: tuple[str, ...]
     bytecode_kind: str = "LOOM_SYMBOL_NONE"
     fact_domain: str | None = None
+    visibility: str | None = None
     retain: str | None = None
+    flags: tuple[SymbolDefinitionFlag, ...] = ()
+    value_contract: SymbolValueContract | None = None
+    kernel_contract: SymbolKernelContract | None = None
 
     def __init__(
         self,
@@ -579,13 +752,20 @@ class SymbolDefinition:
         interfaces: list[str] | tuple[str, ...],
         bytecode_kind: str = "LOOM_SYMBOL_NONE",
         fact_domain: str | None = None,
+        visibility: str | None = None,
         retain: str | None = None,
+        flags: list[SymbolDefinitionFlag] | tuple[SymbolDefinitionFlag, ...] = (),
+        value_contract: SymbolValueContract | None = None,
+        kernel_contract: SymbolKernelContract | None = None,
     ) -> None:
         frozen_interfaces = tuple(interfaces)
+        frozen_flags = tuple(flags)
         if not field:
             raise ValueError("SymbolDefinition: field must be non-empty")
         if not name:
             raise ValueError("SymbolDefinition: name must be non-empty")
+        if visibility is not None and not visibility:
+            raise ValueError("SymbolDefinition: visibility must be non-empty")
         if retain is not None and not retain:
             raise ValueError("SymbolDefinition: retain must be non-empty")
         if not frozen_interfaces:
@@ -597,12 +777,65 @@ class SymbolDefinition:
                     f"'{interface}', must be one of "
                     f"{sorted(_VALID_SYMBOL_INTERFACES)}"
                 )
+        if len(frozen_flags) != len(set(frozen_flags)):
+            raise ValueError(f"SymbolDefinition '{name}': flags must be unique")
+        for flag in frozen_flags:
+            if not isinstance(flag, SymbolDefinitionFlag):
+                raise ValueError(
+                    f"SymbolDefinition '{name}': invalid flag {flag!r}, "
+                    "must be a SymbolDefinitionFlag"
+                )
+        implements_kernel = "kernel" in frozen_interfaces
+        if implements_kernel != (kernel_contract is not None):
+            raise ValueError(
+                f"SymbolDefinition '{name}': the kernel interface and "
+                "kernel_contract must be declared together"
+            )
+        if implements_kernel and "func_like" not in frozen_interfaces:
+            raise ValueError(
+                f"SymbolDefinition '{name}': the kernel interface requires "
+                "the func_like interface for its launch ABI"
+            )
+        if "kernel_entry" in frozen_interfaces and "func_like" not in frozen_interfaces:
+            raise ValueError(
+                f"SymbolDefinition '{name}': the kernel_entry interface requires "
+                "the func_like interface for its device ABI"
+            )
+        if "callable" in frozen_interfaces and "func_like" not in frozen_interfaces:
+            raise ValueError(
+                f"SymbolDefinition '{name}': the callable interface requires "
+                "the func_like interface for its call ABI"
+            )
+        if (
+            "command_program" in frozen_interfaces
+            and "func_like" not in frozen_interfaces
+        ):
+            raise ValueError(
+                f"SymbolDefinition '{name}': the command_program interface "
+                "requires the func_like interface for its launch ABI"
+            )
         object.__setattr__(self, "field", field)
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "interfaces", frozen_interfaces)
         object.__setattr__(self, "bytecode_kind", bytecode_kind)
         object.__setattr__(self, "fact_domain", fact_domain)
+        object.__setattr__(self, "visibility", visibility)
         object.__setattr__(self, "retain", retain)
+        object.__setattr__(self, "flags", frozen_flags)
+        object.__setattr__(self, "value_contract", value_contract)
+        object.__setattr__(self, "kernel_contract", kernel_contract)
+
+    @property
+    def is_declaration(self) -> bool:
+        """Returns whether another definition may satisfy this declaration."""
+
+        return SymbolDefinitionFlag.DECLARATION in self.flags
+
+    @property
+    def is_test_only(self) -> bool:
+        """Returns whether the symbol exists only for tests or benchmarks."""
+
+        return SymbolDefinitionFlag.TEST_ONLY in self.flags
 
 
 @dataclass(frozen=True, slots=True)
@@ -611,13 +844,17 @@ class AttrDef:
 
     name: Attribute name (key in the attribute dictionary or
           positional in the format spec).
-    attr_type: The kind of attribute value. Must be one of the
-        ATTR_TYPE_* constants: "i64", "f64", "string", "bool",
-        "enum", "type", "i64_array", "bytes", "encoding", "any".
+    attr_type: The kind of attribute value. Must be one of the ATTR_TYPE_*
+        constants. Scoped enums use a stable key at format boundaries and a
+        dense ordinal interpreted by the enclosing representation contract in
+        C IR. Parameterized attribute arrays and ordinary symbol arrays
+        preserve order and repeated elements. Symbol sets are ordered by exact
+        symbol-name bytes and contain no duplicates. All three collection kinds
+        are valid only in descriptor-backed fields.
     doc: Human-readable description.
     default: Default value (None = required, not optional).
-    enum_def: For enum attrs, the EnumDef describing valid values.
-        Required when attr_type is "enum".
+    enum_def: For enum and enum-array attrs, the EnumDef describing valid
+        values. Required for both kinds.
     optional: If True, this attribute may be absent.
     elide_default: If True, inline AttrDict text printing omits this
         zero/false scalar attribute when its value equals default, and parsing
@@ -625,6 +862,13 @@ class AttrDef:
         dictionary.
     open_enum: If True, generic verification preserves future raw enum
         ordinals and leaves selected/supported-case policy to the op verifier.
+    bare_identifier: If True, string values use bare identifier spelling in
+        descriptor-aware text formats instead of quoted string spelling.
+    parameterized_attr: Optional exact family constraint for parameterized
+        attributes or every element of a parameterized attribute array. None
+        leaves the family open.
+    symbol_ref: Target interface and graph-role contract for a symbol or every
+        element of a symbol array or symbol set.
     """
 
     name: str
@@ -636,6 +880,8 @@ class AttrDef:
     elide_default: bool = False
     symbol_ref: SymbolReference | None = None
     open_enum: bool = False
+    parameterized_attr: ParameterizedAttrDef | None = None
+    bare_identifier: bool = False
 
     def __post_init__(self) -> None:
         if self.attr_type not in _VALID_ATTR_TYPES:
@@ -643,21 +889,63 @@ class AttrDef:
                 f"AttrDef '{self.name}': invalid attr_type "
                 f"'{self.attr_type}', must be one of {sorted(_VALID_ATTR_TYPES)}"
             )
-        if self.attr_type == ATTR_TYPE_ENUM and self.enum_def is None:
+        if (
+            self.attr_type
+            in (ATTR_TYPE_ENUM, ATTR_TYPE_ENUM_ARRAY, ATTR_TYPE_SIGNED_ENUM_SET)
+            and self.enum_def is None
+        ):
             raise ValueError(
-                f"AttrDef '{self.name}': attr_type='enum' requires enum_def"
+                f"AttrDef '{self.name}': {self.attr_type!r} requires enum_def"
             )
         if self.attr_type == ATTR_TYPE_FLAGS and self.enum_def is None:
             raise ValueError(
                 f"AttrDef '{self.name}': attr_type='flags' requires enum_def"
             )
-        if self.open_enum and self.attr_type != ATTR_TYPE_ENUM:
+        if self.open_enum and self.attr_type not in (
+            ATTR_TYPE_ENUM,
+            ATTR_TYPE_ENUM_ARRAY,
+        ):
             raise ValueError(
-                f"AttrDef '{self.name}': open_enum requires attr_type='enum'"
+                f"AttrDef '{self.name}': open_enum requires an enum attribute"
             )
-        if self.symbol_ref is not None and self.attr_type != ATTR_TYPE_SYMBOL:
+        if self.attr_type == ATTR_TYPE_SCOPED_ENUM:
+            if self.optional:
+                raise ValueError(
+                    f"AttrDef '{self.name}': scoped_enum attributes are required"
+                )
+            if self.default is not None:
+                raise ValueError(
+                    f"AttrDef '{self.name}': scoped_enum attributes cannot "
+                    "have defaults"
+                )
+        if self.symbol_ref is not None and self.attr_type not in (
+            ATTR_TYPE_SYMBOL,
+            ATTR_TYPE_SYMBOL_ARRAY,
+            ATTR_TYPE_SYMBOL_SET,
+        ):
             raise ValueError(
-                f"AttrDef '{self.name}': symbol_ref requires attr_type='symbol'"
+                f"AttrDef '{self.name}': symbol_ref requires "
+                "attr_type='symbol', 'symbol_array', or 'symbol_set'"
+            )
+        if (
+            self.attr_type
+            in (
+                ATTR_TYPE_SYMBOL_ARRAY,
+                ATTR_TYPE_SYMBOL_SET,
+            )
+            and self.symbol_ref is None
+        ):
+            raise ValueError(
+                f"AttrDef '{self.name}': attr_type='{self.attr_type}' requires "
+                "symbol_ref"
+            )
+        if self.parameterized_attr is not None and self.attr_type not in (
+            ATTR_TYPE_PARAMETERIZED,
+            ATTR_TYPE_PARAMETERIZED_ARRAY,
+        ):
+            raise ValueError(
+                f"AttrDef '{self.name}': parameterized_attr requires "
+                "attr_type='parameterized' or 'parameterized_array'"
             )
         if self.elide_default:
             if self.default is None:
@@ -694,6 +982,10 @@ class AttrDef:
                     f"AttrDef '{self.name}': elide_default currently supports "
                     "only i64 and bool attrs"
                 )
+        if self.bare_identifier and self.attr_type != ATTR_TYPE_STRING:
+            raise ValueError(
+                f"AttrDef '{self.name}': bare_identifier requires attr_type='string'"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -720,6 +1012,14 @@ class RegionDef:
     buffer_arg_memory_space: Optional target-independent memory-space fact to
         seed for buffer entry block arguments in this region. This refines
         region boundary facts without parameterizing the buffer type itself.
+    arg_uniform_scope: Optional execution scope (currently "workgroup" or
+        "cluster") over which scalar entry block arguments are identical.
+        This is a region boundary contract rather than a property inferred
+        from argument types.
+    command_effects_only: If True, every directly observable effect executed
+        in this region or a nested region must be carried by an operation with
+        the CommandEffect trait. Pure computation and identity-producing
+        operations remain valid.
     """
 
     name: str
@@ -731,6 +1031,8 @@ class RegionDef:
     implicit_args: tuple[tuple[str, str], ...] = ()
     arg_source: str | None = None
     buffer_arg_memory_space: str | None = None
+    arg_uniform_scope: str | None = None
+    command_effects_only: bool = False
 
 
 # ============================================================================
@@ -782,8 +1084,12 @@ class EnumDef:
         c_const_prefix: str | None = None,
         c_include: str | None = None,
     ) -> None:
+        if not name:
+            raise ValueError("EnumDef: name must be non-empty")
         object.__setattr__(self, "name", name)
         frozen_cases = tuple(cases)
+        if not frozen_cases:
+            raise ValueError(f"EnumDef '{name}': cases must be non-empty")
         object.__setattr__(self, "cases", frozen_cases)
         object.__setattr__(self, "doc", doc)
         object.__setattr__(self, "c_type", c_type)
@@ -799,6 +1105,13 @@ class EnumDef:
         seen_keywords: set[str] = set()
         seen_values: set[int] = set()
         for case in frozen_cases:
+            if not case.keyword:
+                raise ValueError(f"EnumDef '{name}': case keyword must be non-empty")
+            if type(case.value) is not int or not 0 <= case.value <= 0xFF:
+                raise ValueError(
+                    f"EnumDef '{name}': case '{case.keyword}' value must be "
+                    f"an integer in [0, 255], got {case.value!r}"
+                )
             if case.keyword in seen_keywords:
                 raise ValueError(
                     f"EnumDef '{name}': duplicate keyword '{case.keyword}'"
@@ -807,12 +1120,18 @@ class EnumDef:
                 raise ValueError(f"EnumDef '{name}': duplicate value {case.value}")
             seen_keywords.add(case.keyword)
             seen_values.add(case.value)
-            seen_values.add(case.value)
 
     @property
     def keywords(self) -> tuple[str, ...]:
         """All valid keyword strings."""
         return tuple(c.keyword for c in self.cases)
+
+    def case(self, keyword: str) -> EnumCase:
+        """Returns the case with the given textual keyword."""
+        for case in self.cases:
+            if case.keyword == keyword:
+                return case
+        raise ValueError(f"EnumDef '{self.name}': unknown keyword '{keyword}'")
 
 
 # ============================================================================
@@ -853,9 +1172,14 @@ IDEMPOTENT = Trait("Idempotent")
 INVOLUTION = Trait("Involution")
 TERMINATOR = Trait("Terminator")
 CONSTANT_LIKE = Trait("ConstantLike")
+POISON = Trait("Poison")
 ELEMENTWISE = Trait("Elementwise")
 DECOMPOSABLE = Trait("Decomposable")
 SYMBOL_DEFINE = Trait("SymbolDefine")
+# Op is valid only as a direct child of the module body. Module-owned operations
+# use this independently from SymbolDefine so they do not enter the symbol table
+# or pretend to own a symbol identity.
+MODULE_SCOPE = Trait("ModuleScope")
 # Op's regions cannot reference values from the enclosing scope.
 # Values enter the region only through block arguments. Passes must
 # not substitute inner values with outer definitions.
@@ -867,6 +1191,15 @@ NON_DETERMINISTIC = Trait("NonDeterministic")
 # Effects depend on runtime state (e.g., func.call depends on the callee).
 # Passes treat this conservatively as both READS_MEMORY and WRITES_MEMORY.
 UNKNOWN_EFFECTS = Trait("UnknownEffects")
+# Op represents an explicit command-program effect such as dispatch or schedule
+# composition. The op must independently declare its exact or unknown effects;
+# this trait classifies those effects instead of replacing them.
+COMMAND_EFFECT = Trait("CommandEffect")
+# Op orders memory accesses without directly reading or writing a resource.
+# Fences are observable side effects but do not alias every memory operand;
+# analyses preserve their ordering contract independently from footprint
+# interference.
+MEMORY_FENCE = Trait("MemoryFence")
 # Execution depends on the dynamic set of participating invocations. This is
 # independent of memory effects: a convergent op may still be pure, read/write
 # memory, or have unknown effects, but generic optimizers must not erase,
@@ -881,6 +1214,11 @@ UNIQUE_IDENTITY = Trait("UniqueIdentity")
 # Compiler hint with no semantic memory effects. Hint ops are preserved by
 # canonicalization/DCE and removed only by an explicit hint-stripping pass.
 HINT = Trait("Hint")
+# Op contributes compiler facts or scheduling metadata but has no runtime
+# representation once it reaches target-low emission. This trait does not
+# itself preserve the op or impose source ordering. HINT already carries this
+# property; this trait permits value-carrying fact identities to declare it.
+COMPILE_TIME_ONLY = Trait("CompileTimeOnly")
 # Op execution may be moved to a program point where it executes more often
 # than in the source IR. This is stronger than Pure: the op must not trap,
 # allocate a distinct identity, read runtime state, write memory, or rely on
@@ -929,6 +1267,7 @@ class OpPhase(Enum):
     EXECUTABLE = "LOOM_OP_PHASE_EXECUTABLE"
     SOURCE_STRUCTURE = "LOOM_OP_PHASE_SOURCE_STRUCTURE"
     MODULE_METADATA = "LOOM_OP_PHASE_MODULE_METADATA"
+    COMPILE_TIME_QUERY = "LOOM_OP_PHASE_COMPILE_TIME_QUERY"
 
     @property
     def c_name(self) -> str:
@@ -991,6 +1330,30 @@ class ContractFamily(Enum):
         self.diagnostic_name = diagnostic_name
 
 
+@unique
+class ConditionRefinementTruth(Enum):
+    """Control-flow edges on which an op can refine one of its operands."""
+
+    TRUE = "true"
+    FALSE = "false"
+    BOTH = "both"
+
+
+@dataclass(frozen=True, slots=True)
+class ConditionRefinement:
+    """Dialect-owned operand refinement implied by a boolean result.
+
+    Generated metadata names the source operand by ordinal and points at a
+    dialect callback that materializes its edge-local fact identity. Generic
+    control-flow transforms invoke the callback only when the source is used on
+    an edge whose truth value is listed here.
+    """
+
+    source: str
+    truth: ConditionRefinementTruth
+    materialize: str
+
+
 def _validate_metadata_key(kind: str, key: str) -> None:
     if not key:
         raise ValueError(f"{kind} key must not be empty")
@@ -1027,6 +1390,7 @@ class TypeSemantic(Enum):
     ORDINARY = "LOOM_TYPE_SEMANTIC_ORDINARY"
     CONTROL_TOKEN = "LOOM_TYPE_SEMANTIC_CONTROL_TOKEN"
     TARGET_CONTRACT_VALUE = "LOOM_TYPE_SEMANTIC_TARGET_CONTRACT_VALUE"
+    MANAGED_REFERENCE = "LOOM_TYPE_SEMANTIC_MANAGED_REFERENCE"
 
     @property
     def c_name(self) -> str:
@@ -1111,6 +1475,7 @@ class ResultOwnershipEffectKind(Enum):
     BORROWED = "borrowed"
     RETAINED = "retained"
     ALIAS = "alias"
+    MOVED = "moved"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1133,7 +1498,7 @@ class ResultOwnershipEffect:
 
     result: Name of the result field.
     kind: Ownership action applied to each value in the field.
-    source: Operand field used by aliasing result effects.
+    source: Operand field used by aliasing and moved result effects.
     """
 
     result: str
@@ -1203,6 +1568,11 @@ def AliasResult(result: str, source: str) -> ResultOwnershipEffect:
     return ResultOwnershipEffect(result, ResultOwnershipEffectKind.ALIAS, source)
 
 
+def MovedResult(result: str, source: str) -> ResultOwnershipEffect:
+    """Result receives the exact ownership state of a consumed operand."""
+    return ResultOwnershipEffect(result, ResultOwnershipEffectKind.MOVED, source)
+
+
 # Type constraints that represent mutable resources (as opposed to
 # pure SSA values). Effects may only reference operands with one of
 # these constraints.
@@ -1212,7 +1582,6 @@ _RESOURCE_TYPE_CONSTRAINTS = frozenset(
         TypeConstraint.BUFFER,
         TypeConstraint.VIEW,
         TypeConstraint.TENSOR,
-        TypeConstraint.GROUP,
         TypeConstraint.ANY,
     }
 )
@@ -1222,6 +1591,12 @@ _RESOURCE_TYPE_CONSTRAINTS = frozenset(
 def AllTypesMatch(*fields: str) -> Trait:
     """All named fields must have identical types."""
     return Trait("AllTypesMatch", *fields)
+
+
+def KeyedModuleRecord(key_attr: str) -> Trait:
+    """Declares attr-only module metadata canonically ordered by one key."""
+
+    return Trait("KeyedModuleRecord", key_attr)
 
 
 def HasAncestor(op_name: str) -> Trait:
@@ -1264,7 +1639,8 @@ class Constraint:
       name: Identifier for code generation and diagnostics.
       args: Field names this constraint references.
       error: Structured error definition emitted on failure.
-      validate: Optional Python predicate for the oracle/validator.
+      validate: Python predicate for the oracle/validator. A missing predicate
+        is an invalid non-verifiable constraint and fails when checked.
       data: Optional small payload interpreted by the named constraint.
 
     Constraints are defined as module-level constructor functions
@@ -1295,7 +1671,9 @@ class Constraint:
     def check(self, fields: dict[str, Any]) -> tuple[bool, str]:
         """Run the validation predicate. Returns (ok, message)."""
         if self.validate is None:
-            return (True, "")
+            raise ValueError(
+                f"Constraint '{self.name}' has no Python validation predicate"
+            )
         return self.validate(fields)
 
     def __repr__(self) -> str:
@@ -1527,16 +1905,16 @@ def SameElementType(*fields: str) -> Constraint:
 def SameEncoding(*fields: str) -> Constraint:
     """All named fields must have the same encoding.
 
-    Encodings are a type-system concept not present in numpy arrays.
-    The Python validator is a no-op; the C verifier checks encoding
-    attributes on the actual types.
+    Scalars and unencoded shaped types carry the same absent encoding.
     """
+
     from loom.error.encoding import ERR_ENCODING_001
 
     return Constraint(
         "SameEncoding",
         fields,
         error=ERR_ENCODING_001,
+        validate=constraint_validation.same_encoding(fields),
     )
 
 
@@ -1663,6 +2041,22 @@ def _type_satisfies_field_constraint(
             ScalarTypeKind.I32,
             ScalarTypeKind.I64,
         }
+    if constraint == BITWISE_SCALAR:
+        if not isinstance(value_type, ScalarType):
+            return False
+        scalar_kind = value_type.kind
+        return scalar_kind == ScalarTypeKind.INDEX or scalar_kind in {
+            ScalarTypeKind.I8,
+            ScalarTypeKind.I16,
+            ScalarTypeKind.I32,
+            ScalarTypeKind.I64,
+            ScalarTypeKind.F8E4M3,
+            ScalarTypeKind.F8E5M2,
+            ScalarTypeKind.F16,
+            ScalarTypeKind.BF16,
+            ScalarTypeKind.F32,
+            ScalarTypeKind.F64,
+        }
     if not isinstance(value_type, ShapedType):
         return False
     element_kind = value_type.element_type.kind
@@ -1673,6 +2067,19 @@ def _type_satisfies_field_constraint(
             ScalarTypeKind.I16,
             ScalarTypeKind.I32,
             ScalarTypeKind.I64,
+        }
+    if constraint == BITWISE_ELEMENT:
+        return element_kind == ScalarTypeKind.INDEX or element_kind in {
+            ScalarTypeKind.I8,
+            ScalarTypeKind.I16,
+            ScalarTypeKind.I32,
+            ScalarTypeKind.I64,
+            ScalarTypeKind.F8E4M3,
+            ScalarTypeKind.F8E5M2,
+            ScalarTypeKind.F16,
+            ScalarTypeKind.BF16,
+            ScalarTypeKind.F32,
+            ScalarTypeKind.F64,
         }
     if constraint == INTEGER_ELEMENT:
         return element_kind in {
@@ -1748,6 +2155,18 @@ def HasFloatElement(field: str) -> Constraint:
     """A shaped field must have a floating-point element type."""
 
     return _has_element_constraint(field, FLOAT_ELEMENT)
+
+
+def HasBitwiseScalar(field: str) -> Constraint:
+    """A field must have a scalar type with a non-i1 bitwise payload."""
+
+    return _has_field_constraint(field, BITWISE_SCALAR)
+
+
+def HasBitwiseElement(field: str) -> Constraint:
+    """A shaped field must have an element type with a non-i1 bitwise payload."""
+
+    return _has_element_constraint(field, BITWISE_ELEMENT)
 
 
 def HasIndexOrNonI1IntegerScalar(field: str) -> Constraint:
@@ -2367,22 +2786,25 @@ def LastAxisGroupedBy(source: str, result: str, group_size: int) -> Constraint:
     )
 
 
-# --- Region constraints (structural, no-op in Python validator) ---
+# --- Region constraints ---
 
 
 def BlockArgCount(region: str, inputs: str) -> Constraint:
     """Region block must have one argument per input or reference-region arg."""
+
     from loom.error.structure import ERR_STRUCTURE_007
 
     return Constraint(
         "BlockArgCount",
         (region, inputs),
         error=ERR_STRUCTURE_007,
+        validate=constraint_validation.block_arg_count(region, inputs),
     )
 
 
 def BlockArgsSatisfy(region: str, constraint: TypeConstraint) -> Constraint:
     """Each region entry block argument must satisfy a type constraint."""
+
     from loom.error.type import ERR_TYPE_014
 
     return Constraint(
@@ -2390,50 +2812,97 @@ def BlockArgsSatisfy(region: str, constraint: TypeConstraint) -> Constraint:
         (region,),
         error=ERR_TYPE_014,
         data=constraint,
+        validate=constraint_validation.block_args_satisfy(
+            region, constraint, _type_satisfies_field_constraint
+        ),
     )
 
 
 def BlockArgsMatchTypes(region: str, inputs: str) -> Constraint:
     """Each block argument type must match its input or reference-region type."""
+
     from loom.error.type import ERR_TYPE_013
 
     return Constraint(
         "BlockArgsMatchTypes",
         (region, inputs),
         error=ERR_TYPE_013,
+        validate=constraint_validation.block_args_match(region, inputs),
     )
 
 
 def BlockArgsMatchElementTypes(region: str, inputs: str) -> Constraint:
     """Each block argument type must match its input element type."""
+
     from loom.error.type import ERR_TYPE_008
 
     return Constraint(
         "BlockArgsMatchElementTypes",
         (region, inputs),
         error=ERR_TYPE_008,
+        validate=constraint_validation.block_args_match(
+            region, inputs, element_types=True
+        ),
+    )
+
+
+def ConditionForwardedCountMatchesBlockArgs(
+    condition_region: str, target_region: str, target_inputs: str
+) -> Constraint:
+    """Condition-forwarded value count must match valid target block args."""
+
+    from loom.error.structure import ERR_STRUCTURE_013
+
+    return Constraint(
+        "ConditionForwardedCountMatchesBlockArgs",
+        (condition_region, target_region, target_inputs),
+        error=ERR_STRUCTURE_013,
+        validate=constraint_validation.condition_forwarded_count(
+            condition_region, target_region, target_inputs
+        ),
+    )
+
+
+def ConditionForwardedTypesMatchBlockArgs(
+    condition_region: str, target_region: str, target_inputs: str
+) -> Constraint:
+    """Condition-forwarded value types must match valid target block args."""
+
+    from loom.error.type import ERR_TYPE_001
+
+    return Constraint(
+        "ConditionForwardedTypesMatchBlockArgs",
+        (condition_region, target_region, target_inputs),
+        error=ERR_TYPE_001,
+        validate=constraint_validation.condition_forwarded_types(
+            condition_region, target_region, target_inputs
+        ),
     )
 
 
 def YieldCountMatchesResults(region: str, results: str) -> Constraint:
     """Region terminator must yield the same number of values as results."""
+
     from loom.error.structure import ERR_STRUCTURE_008
 
     return Constraint(
         "YieldCountMatchesResults",
         (region, results),
         error=ERR_STRUCTURE_008,
+        validate=constraint_validation.yield_count(region, results),
     )
 
 
 def YieldTypesMatchResults(region: str, results: str) -> Constraint:
     """Yielded value types must match result types."""
+
     from loom.error.type import ERR_TYPE_009
 
     return Constraint(
         "YieldTypesMatchResults",
         (region, results),
         error=ERR_TYPE_009,
+        validate=constraint_validation.yield_types(region, results),
     )
 
 
@@ -2445,23 +2914,27 @@ def YieldElementTypesMatchResults(region: str, results: str) -> Constraint:
     This constraint checks that the element types match, not the full
     types.
     """
+
     from loom.error.type import ERR_TYPE_009
 
     return Constraint(
         "YieldElementTypesMatchResults",
         (region, results),
         error=ERR_TYPE_009,
+        validate=constraint_validation.yield_types(region, results, element_types=True),
     )
 
 
 def VariadicValuesMatch(lhs: str, rhs: str) -> Constraint:
     """Two variadic value fields must agree on count and per-position type."""
+
     from loom.error.structure import ERR_STRUCTURE_013
 
     return Constraint(
         "VariadicValuesMatch",
         (lhs, rhs),
         error=ERR_STRUCTURE_013,
+        validate=constraint_validation.variadic_values_match(lhs, rhs),
     )
 
 
@@ -2480,12 +2953,14 @@ def IterArgsMatchResults(iter_args: str, results: str) -> Constraint:
     A count mismatch produces a single ERR_STRUCTURE_013; per-position
     type mismatches each produce an ERR_TYPE_001.
     """
+
     from loom.error.structure import ERR_STRUCTURE_013
 
     return Constraint(
         "IterArgsMatchResults",
         (iter_args, results),
         error=ERR_STRUCTURE_013,
+        validate=constraint_validation.variadic_values_match(iter_args, results),
     )
 
 
@@ -2586,6 +3061,652 @@ class Dialect:
         object.__setattr__(self, "register_by_default", register_by_default)
 
 
+_DESCRIPTOR_PARAMETER_TYPES = frozenset(
+    {
+        ATTR_TYPE_I64,
+        ATTR_TYPE_F64,
+        ATTR_TYPE_STRING,
+        ATTR_TYPE_BOOL,
+        ATTR_TYPE_ENUM,
+        ATTR_TYPE_ENUM_ARRAY,
+        ATTR_TYPE_SIGNED_ENUM_SET,
+        ATTR_TYPE_TYPE,
+        ATTR_TYPE_I64_ARRAY,
+        ATTR_TYPE_BYTES,
+        ATTR_TYPE_ENCODING,
+        ATTR_TYPE_SYMBOL,
+        ATTR_TYPE_SYMBOL_ARRAY,
+        ATTR_TYPE_DICT,
+        ATTR_TYPE_PARAMETERIZED,
+        ATTR_TYPE_PARAMETERIZED_ARRAY,
+    }
+)
+
+
+def _is_ascii_identifier(value: str) -> bool:
+    """Returns whether |value| is a bare Loom identifier."""
+
+    if not value:
+        return False
+    first_character = value[0]
+    if not (
+        first_character == "_"
+        or (first_character.isascii() and first_character.isalpha())
+    ):
+        return False
+    return all(
+        character.isascii() and (character.isalnum() or character == "_")
+        for character in value[1:]
+    )
+
+
+def _is_ascii_qualified_identifier(value: str) -> bool:
+    """Returns whether |value| is a dot-qualified Loom identifier."""
+
+    return all(_is_ascii_identifier(part) for part in value.split("."))
+
+
+def _validate_descriptor_parameters(
+    owner: str, parameters: tuple[AttrDef, ...]
+) -> None:
+    """Validates one descriptor-backed parameter schema."""
+
+    if len(parameters) > 0xFF:
+        raise ValueError(
+            f"{owner}: {len(parameters)} parameters exceed the uint8_t slot limit"
+        )
+    optional_parameter_count = sum(parameter.optional for parameter in parameters)
+    if optional_parameter_count > 64:
+        raise ValueError(
+            f"{owner}: {optional_parameter_count} optional parameters exceed "
+            "the uint64_t C builder flag limit"
+        )
+
+    seen_names: set[str] = set()
+    for parameter in parameters:
+        if not _is_ascii_identifier(parameter.name):
+            raise ValueError(
+                f"{owner}: parameter '{parameter.name}' must be a bare ASCII identifier"
+            )
+        if parameter.name in seen_names:
+            raise ValueError(f"{owner}: duplicate parameter '{parameter.name}'")
+        seen_names.add(parameter.name)
+        if parameter.attr_type not in _DESCRIPTOR_PARAMETER_TYPES:
+            raise ValueError(
+                f"{owner}: parameter '{parameter.name}' has unsupported kind "
+                f"'{parameter.attr_type}'"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class ParameterizedAttrDef:
+    """Declares one namespaced family of descriptor-backed attributes.
+
+    The family name is stable public IR. Dense family ordinals and parameter
+    slot positions are generated implementation details and never serialize.
+    Parameters use AttrDef so operation fields, parameterized attributes, and
+    generic parameterized types share one value schema. A family may designate
+    one required parameter as its compact primary value; the parameter remains
+    named everywhere except canonical text assembly, where it prints
+    positionally. A family used as a static target-applicability clause may
+    name its typed C condition descriptor.
+    """
+
+    name: str
+    group: Dialect
+    parameters: tuple[AttrDef, ...] = ()
+    primary_parameter_index: int | None = None
+    target_condition: str | None = None
+    doc: str = ""
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        group: Dialect,
+        parameters: list[AttrDef] | tuple[AttrDef, ...] = (),
+        primary_parameter: str | None = None,
+        target_condition: str | None = None,
+        doc: str = "",
+    ) -> None:
+        name_parts = name.split(".")
+        if len(name_parts) < 2 or name_parts[0] != group.name:
+            raise ValueError(
+                f"ParameterizedAttrDef '{name}': family name must begin with "
+                f"the owning dialect namespace '{group.name}.'"
+            )
+        if not _is_ascii_qualified_identifier(name):
+            raise ValueError(
+                f"ParameterizedAttrDef '{name}': family name must be a dotted "
+                "ASCII identifier"
+            )
+
+        frozen_parameters = tuple(parameters)
+        _validate_descriptor_parameters(
+            f"ParameterizedAttrDef '{name}'", frozen_parameters
+        )
+        primary_parameter_index = None
+        if primary_parameter is not None:
+            primary_parameter_index = next(
+                (
+                    index
+                    for index, parameter in enumerate(frozen_parameters)
+                    if parameter.name == primary_parameter
+                ),
+                None,
+            )
+            if primary_parameter_index is None:
+                raise ValueError(
+                    f"ParameterizedAttrDef '{name}': primary parameter "
+                    f"'{primary_parameter}' is not declared"
+                )
+            if frozen_parameters[primary_parameter_index].optional:
+                raise ValueError(
+                    f"ParameterizedAttrDef '{name}': primary parameter "
+                    f"'{primary_parameter}' must be required"
+                )
+        if target_condition is not None and not _is_ascii_identifier(target_condition):
+            raise ValueError(
+                f"ParameterizedAttrDef '{name}': target condition "
+                f"'{target_condition}' must be a C symbol name"
+            )
+
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "group", group)
+        object.__setattr__(self, "parameters", frozen_parameters)
+        object.__setattr__(self, "primary_parameter_index", primary_parameter_index)
+        object.__setattr__(self, "target_condition", target_condition)
+        object.__setattr__(self, "doc", doc)
+
+    @property
+    def primary_parameter(self) -> AttrDef | None:
+        """Returns the descriptor-declared compact positional parameter."""
+
+        if self.primary_parameter_index is None:
+            return None
+        return self.parameters[self.primary_parameter_index]
+
+    def __call__(self, **parameters: Any) -> Any:
+        """Constructs one immutable value of this family."""
+
+        from loom.ir import ParameterizedAttr
+
+        return ParameterizedAttr(self, parameters)
+
+
+@unique
+class EncodingFamilyRole(Enum):
+    """Semantic role of a registered static encoding family."""
+
+    UNKNOWN = "LOOM_ENCODING_ROLE_UNKNOWN"
+    ADDRESS_LAYOUT = "LOOM_ENCODING_ROLE_ADDRESS_LAYOUT"
+    STORAGE_SCHEMA = "LOOM_ENCODING_ROLE_STORAGE_SCHEMA"
+    PHYSICAL_STORAGE = "LOOM_ENCODING_ROLE_PHYSICAL_STORAGE"
+    NUMERIC_TRANSFORM = "LOOM_ENCODING_ROLE_NUMERIC_TRANSFORM"
+
+    @property
+    def c_name(self) -> str:
+        return str(self.value)
+
+
+@dataclass(frozen=True, slots=True)
+class EncodingRecordDef:
+    """Exact physical geometry for one fixed encoding record."""
+
+    logical_element_count: int
+    storage_byte_count: int
+    required_alignment: int = 1
+
+    def __post_init__(self) -> None:
+        for field_name, value in (
+            ("logical_element_count", self.logical_element_count),
+            ("storage_byte_count", self.storage_byte_count),
+            ("required_alignment", self.required_alignment),
+        ):
+            if type(value) is not int or not 1 <= value <= 0xFFFF:
+                raise ValueError(
+                    f"EncodingRecordDef: {field_name} must be an integer in "
+                    f"[1, 65535], got {value!r}"
+                )
+        if self.required_alignment & (self.required_alignment - 1):
+            raise ValueError(
+                "EncodingRecordDef: required_alignment must be a power of two"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class EncodingOperandSummaryDef:
+    """Constant target-independent facts for one encoded operand schema."""
+
+    element_format: int = 0
+    scale_format: int = 0
+    secondary_scale_format: int = 0
+    payload_packing: int = 0
+    scale_topology: int = 0
+    affine_policy: int = 0
+    rounding_policy: int = 0
+    codebook_policy: int = 0
+    sparsity_policy: int = 0
+    zero_scale_fallback: bool = False
+    sparsity_group_nonzero_element_count: int = 0
+    sparsity_group_element_count: int = 0
+    payload_register_count: int = 0
+    payload_element_count: int = 0
+    scale_group_element_count: int = 0
+    scale_group_shape: tuple[int, ...] = ()
+    scale_operand_count: int = 0
+
+    def __post_init__(self) -> None:
+        scale_group_shape = tuple(self.scale_group_shape)
+        object.__setattr__(self, "scale_group_shape", scale_group_shape)
+        for field_name in (
+            "element_format",
+            "scale_format",
+            "secondary_scale_format",
+        ):
+            value = getattr(self, field_name)
+            if type(value) is not int or not 0 <= value <= 0xFFFFFFFFFFFFFFFF:
+                raise ValueError(
+                    f"EncodingOperandSummaryDef: {field_name} must be an "
+                    f"unsigned 64-bit integer, got {value!r}"
+                )
+        for field_name in (
+            "payload_packing",
+            "scale_topology",
+            "affine_policy",
+            "rounding_policy",
+            "codebook_policy",
+            "sparsity_policy",
+        ):
+            value = getattr(self, field_name)
+            if type(value) is not int or not 0 <= value <= 0xFFFFFFFF:
+                raise ValueError(
+                    f"EncodingOperandSummaryDef: {field_name} must be an "
+                    f"unsigned 32-bit integer, got {value!r}"
+                )
+        if type(self.zero_scale_fallback) is not bool:
+            raise ValueError(
+                "EncodingOperandSummaryDef: zero_scale_fallback must be a bool"
+            )
+        for field_name in (
+            "sparsity_group_nonzero_element_count",
+            "sparsity_group_element_count",
+            "payload_register_count",
+            "payload_element_count",
+            "scale_group_element_count",
+            "scale_operand_count",
+        ):
+            value = getattr(self, field_name)
+            if type(value) is not int or not 0 <= value <= 0xFFFF:
+                raise ValueError(
+                    f"EncodingOperandSummaryDef: {field_name} must be an "
+                    f"integer in [0, 65535], got {value!r}"
+                )
+        if len(scale_group_shape) > 4:
+            raise ValueError(
+                "EncodingOperandSummaryDef: scale_group_shape rank exceeds 4"
+            )
+        for extent in scale_group_shape:
+            if type(extent) is not int or not 1 <= extent <= 0xFFFF:
+                raise ValueError(
+                    "EncodingOperandSummaryDef: scale_group_shape extents "
+                    f"must be integers in [1, 65535], got {extent!r}"
+                )
+        if scale_group_shape:
+            shape_element_count = math.prod(scale_group_shape)
+            if shape_element_count > 0xFFFF:
+                raise ValueError(
+                    "EncodingOperandSummaryDef: scale_group_shape product exceeds 65535"
+                )
+            if self.scale_group_element_count not in (0, shape_element_count):
+                raise ValueError(
+                    "EncodingOperandSummaryDef: scale_group_element_count "
+                    "must equal the scale_group_shape product"
+                )
+            object.__setattr__(self, "scale_group_element_count", shape_element_count)
+
+
+@dataclass(frozen=True, slots=True)
+class EncodingAliasDef:
+    """Declares one canonical name for a parameterized encoding schema.
+
+    Aliases are source spellings for a structural family instance, not
+    independent encoding families. Fixed parameters establish identity and
+    cannot be restated. Default parameters are expanded before module interning
+    and may be overridden explicitly. Other family parameters remain available
+    normally.
+    """
+
+    name: str
+    fixed_parameters: tuple[tuple[str, Any], ...]
+    default_parameters: tuple[tuple[str, Any], ...]
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        fixed_parameters: Mapping[str, Any],
+        default_parameters: Mapping[str, Any] | None = None,
+    ) -> None:
+        if not _is_ascii_qualified_identifier(name):
+            raise ValueError(
+                f"EncodingAliasDef '{name}': alias name must be a dotted "
+                "ASCII identifier"
+            )
+        lexical_fixed_parameters = tuple(
+            sorted(
+                (parameter_name, _freeze_encoding_alias_parameter(value))
+                for parameter_name, value in fixed_parameters.items()
+            )
+        )
+        lexical_default_parameters = tuple(
+            sorted(
+                (parameter_name, _freeze_encoding_alias_parameter(value))
+                for parameter_name, value in (default_parameters or {}).items()
+            )
+        )
+        parameter_count = len(lexical_fixed_parameters) + len(
+            lexical_default_parameters
+        )
+        if parameter_count > 0xFF:
+            raise ValueError(
+                f"EncodingAliasDef '{name}': {parameter_count} "
+                "parameters exceed the uint8_t slot limit"
+            )
+        fixed_names = {name for name, _ in lexical_fixed_parameters}
+        default_names = {name for name, _ in lexical_default_parameters}
+        duplicate_names = fixed_names & default_names
+        if duplicate_names:
+            duplicate_name = min(duplicate_names)
+            raise ValueError(
+                f"EncodingAliasDef '{name}': parameter '{duplicate_name}' is "
+                "both fixed and defaulted"
+            )
+        for parameter_name in fixed_names | default_names:
+            if not _is_ascii_identifier(parameter_name):
+                raise ValueError(
+                    f"EncodingAliasDef '{name}': parameter '{parameter_name}' "
+                    "must be a bare ASCII identifier"
+                )
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "fixed_parameters", lexical_fixed_parameters)
+        object.__setattr__(self, "default_parameters", lexical_default_parameters)
+
+    @property
+    def parameters(self) -> tuple[tuple[str, Any], ...]:
+        """Returns every contributed parameter in lexical order."""
+
+        return tuple(sorted((*self.fixed_parameters, *self.default_parameters)))
+
+
+def _freeze_encoding_alias_parameter(value: Any) -> Any:
+    if isinstance(value, list | tuple):
+        return tuple(_freeze_encoding_alias_parameter(item) for item in value)
+    return value
+
+
+def _validate_encoding_alias_parameter(
+    family_name: str,
+    alias_name: str,
+    descriptor: AttrDef,
+    value: Any,
+) -> None:
+    """Validates one process-lifetime alias literal against its descriptor."""
+
+    valid = False
+    match descriptor.attr_type:
+        case "i64":
+            valid = type(value) is int and -(1 << 63) <= value < (1 << 63)
+        case "f64":
+            valid = type(value) in (int, float) and math.isfinite(float(value))
+        case "bool":
+            valid = type(value) is bool
+        case "enum":
+            valid = (
+                type(value) is str
+                and descriptor.enum_def is not None
+                and value in descriptor.enum_def.keywords
+            )
+    if not valid:
+        raise ValueError(
+            f"EncodingFamilyDef '{family_name}': alias '{alias_name}' value "
+            f"{value!r} does not satisfy {descriptor.attr_type} parameter "
+            f"'{descriptor.name}'"
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class EncodingFamilyDef:
+    """Declares one registered encoding family.
+
+    Family names are stable public IR. Static parameters remain sparse named
+    attributes in the IR and wire format. Dynamic parameters name ordinary SSA
+    operands accepted by encoding.define. Lexical descriptor ordinals are
+    generated implementation metadata used after parsing.
+    """
+
+    name: str
+    group: Dialect
+    role: EncodingFamilyRole
+    parameters: tuple[AttrDef, ...] = ()
+    aliases: tuple[EncodingAliasDef, ...] = ()
+    alias_discriminator: AttrDef | None = None
+    dynamic_parameters: tuple[Operand, ...] = ()
+    fixed_record: EncodingRecordDef | None = None
+    fixed_operand_summary: EncodingOperandSummaryDef | None = None
+    auxiliary_key_enum: EnumDef | None = None
+    required_auxiliary_keys: tuple[EnumCase, ...] = ()
+    implicit_shaped_attachment: bool = False
+    doc: str = ""
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        group: Dialect,
+        role: EncodingFamilyRole,
+        parameters: list[AttrDef] | tuple[AttrDef, ...] = (),
+        aliases: list[EncodingAliasDef] | tuple[EncodingAliasDef, ...] = (),
+        dynamic_parameters: list[Operand] | tuple[Operand, ...] = (),
+        fixed_record: EncodingRecordDef | None = None,
+        fixed_operand_summary: EncodingOperandSummaryDef | None = None,
+        auxiliary_key_enum: EnumDef | None = None,
+        required_auxiliary_keys: list[EnumCase] | tuple[EnumCase, ...] = (),
+        implicit_shaped_attachment: bool = False,
+        doc: str = "",
+    ) -> None:
+        if not _is_ascii_qualified_identifier(name):
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': family name must be a dotted "
+                "ASCII identifier"
+            )
+        if not isinstance(role, EncodingFamilyRole):
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': role must be an EncodingFamilyRole"
+            )
+        if type(implicit_shaped_attachment) is not bool:
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': implicit_shaped_attachment must be a bool"
+            )
+        if implicit_shaped_attachment:
+            if role is not EncodingFamilyRole.ADDRESS_LAYOUT:
+                raise ValueError(
+                    f"EncodingFamilyDef '{name}': an implicit shaped attachment "
+                    "must have the ADDRESS_LAYOUT role"
+                )
+            if parameters or dynamic_parameters:
+                raise ValueError(
+                    f"EncodingFamilyDef '{name}': an implicit shaped attachment "
+                    "cannot have static or dynamic parameters"
+                )
+        if fixed_record is not None and not isinstance(fixed_record, EncodingRecordDef):
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': fixed_record must be an EncodingRecordDef"
+            )
+        if fixed_operand_summary is not None and not isinstance(
+            fixed_operand_summary, EncodingOperandSummaryDef
+        ):
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': fixed_operand_summary must be an "
+                "EncodingOperandSummaryDef"
+            )
+        frozen_required_auxiliary_keys = tuple(required_auxiliary_keys)
+        if (
+            fixed_record is not None
+            or fixed_operand_summary is not None
+            or auxiliary_key_enum is not None
+            or frozen_required_auxiliary_keys
+        ) and role is not EncodingFamilyRole.STORAGE_SCHEMA:
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': fixed storage metadata requires "
+                "the STORAGE_SCHEMA role"
+            )
+
+        if auxiliary_key_enum is not None and not isinstance(
+            auxiliary_key_enum, EnumDef
+        ):
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': auxiliary_key_enum must be an EnumDef"
+            )
+        if frozen_required_auxiliary_keys and auxiliary_key_enum is None:
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': required auxiliary keys need an "
+                "auxiliary key enum"
+            )
+        if auxiliary_key_enum is not None:
+            if max(case.value for case in auxiliary_key_enum.cases) >= 64:
+                raise ValueError(
+                    f"EncodingFamilyDef '{name}': auxiliary key ordinals must "
+                    "fit in one uint64_t bitset"
+                )
+            for key in frozen_required_auxiliary_keys:
+                if not any(key is case for case in auxiliary_key_enum.cases):
+                    raise ValueError(
+                        f"EncodingFamilyDef '{name}': required auxiliary key "
+                        f"'{key.keyword}' is not in {auxiliary_key_enum.name}"
+                    )
+        if len(set(frozen_required_auxiliary_keys)) != len(
+            frozen_required_auxiliary_keys
+        ):
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': duplicate required auxiliary key"
+            )
+
+        lexical_parameters = tuple(sorted(parameters, key=lambda value: value.name))
+        _validate_descriptor_parameters(
+            f"EncodingFamilyDef '{name}'", lexical_parameters
+        )
+        descriptors_by_name = {
+            parameter.name: parameter for parameter in lexical_parameters
+        }
+        frozen_aliases = tuple(aliases)
+        if len(frozen_aliases) > 0xFF:
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': {len(frozen_aliases)} aliases "
+                "exceed the uint8_t ordinal limit"
+            )
+        seen_alias_names: set[str] = set()
+        for alias in frozen_aliases:
+            if not isinstance(alias, EncodingAliasDef):
+                raise ValueError(
+                    f"EncodingFamilyDef '{name}': alias {alias!r} must be an "
+                    "EncodingAliasDef"
+                )
+            if alias.name == name:
+                raise ValueError(
+                    f"EncodingFamilyDef '{name}': alias repeats the family name"
+                )
+            if alias.name in seen_alias_names:
+                raise ValueError(
+                    f"EncodingFamilyDef '{name}': duplicate alias '{alias.name}'"
+                )
+            seen_alias_names.add(alias.name)
+            for parameter_name, parameter_value in alias.parameters:
+                descriptor = descriptors_by_name.get(parameter_name)
+                if descriptor is None:
+                    raise ValueError(
+                        f"EncodingFamilyDef '{name}': alias '{alias.name}' "
+                        f"references unknown parameter '{parameter_name}'"
+                    )
+                _validate_encoding_alias_parameter(
+                    name, alias.name, descriptor, parameter_value
+                )
+        frozen_aliases = tuple(sorted(frozen_aliases, key=lambda alias: alias.name))
+        alias_discriminator = None
+        if frozen_aliases:
+            common_fixed_names = {
+                parameter_name
+                for parameter_name, _ in frozen_aliases[0].fixed_parameters
+            }
+            for alias in frozen_aliases[1:]:
+                common_fixed_names &= {
+                    parameter_name for parameter_name, _ in alias.fixed_parameters
+                }
+            for descriptor in lexical_parameters:
+                if (
+                    descriptor.name not in common_fixed_names
+                    or descriptor.attr_type != ATTR_TYPE_ENUM
+                ):
+                    continue
+                discriminator_values = {
+                    dict(alias.fixed_parameters)[descriptor.name]
+                    for alias in frozen_aliases
+                }
+                if len(discriminator_values) == len(frozen_aliases):
+                    alias_discriminator = descriptor
+                    break
+            if alias_discriminator is None:
+                raise ValueError(
+                    f"EncodingFamilyDef '{name}': canonical aliases require "
+                    "one shared enum fixed parameter with a unique value per alias"
+                )
+        lexical_dynamic_parameters = tuple(
+            sorted(dynamic_parameters, key=lambda value: value.name)
+        )
+        if len(lexical_dynamic_parameters) > 0xFF:
+            raise ValueError(
+                f"EncodingFamilyDef '{name}': {len(lexical_dynamic_parameters)} "
+                "dynamic parameters exceed the uint8_t slot limit"
+            )
+        seen_dynamic_names: set[str] = set()
+        for parameter in lexical_dynamic_parameters:
+            if not _is_ascii_identifier(parameter.name):
+                raise ValueError(
+                    f"EncodingFamilyDef '{name}': dynamic parameter "
+                    f"'{parameter.name}' must be a bare ASCII identifier"
+                )
+            if parameter.name in seen_dynamic_names:
+                raise ValueError(
+                    f"EncodingFamilyDef '{name}': duplicate dynamic parameter "
+                    f"'{parameter.name}'"
+                )
+            seen_dynamic_names.add(parameter.name)
+            if parameter.variadic or parameter.optional:
+                raise ValueError(
+                    f"EncodingFamilyDef '{name}': dynamic parameter "
+                    f"'{parameter.name}' cannot be variadic or optional; "
+                    "family semantics determine presence"
+                )
+
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "group", group)
+        object.__setattr__(self, "role", role)
+        object.__setattr__(self, "parameters", lexical_parameters)
+        object.__setattr__(self, "aliases", frozen_aliases)
+        object.__setattr__(self, "alias_discriminator", alias_discriminator)
+        object.__setattr__(self, "dynamic_parameters", lexical_dynamic_parameters)
+        object.__setattr__(self, "fixed_record", fixed_record)
+        object.__setattr__(self, "fixed_operand_summary", fixed_operand_summary)
+        object.__setattr__(self, "auxiliary_key_enum", auxiliary_key_enum)
+        object.__setattr__(
+            self, "required_auxiliary_keys", frozen_required_auxiliary_keys
+        )
+        object.__setattr__(
+            self, "implicit_shaped_attachment", implicit_shaped_attachment
+        )
+        object.__setattr__(self, "doc", doc)
+
+
 # ============================================================================
 # Type declarations
 # ============================================================================
@@ -2631,7 +3752,9 @@ class ScalarParam:
 class EncodingParam:
     """Encoding parameter for shaped types.
 
-    Represents the optional encoding suffix in tile<256xi8, #q8_0<block=32>>.
+    Represents the optional encoding suffix in
+    tile<256xi8, #encoding.operand<element_format=i8, payload_elements=32,
+    payload_packing=dense_lanes>>.
     """
 
     name: str
@@ -2639,8 +3762,94 @@ class EncodingParam:
     doc: str = ""
 
 
-# Union of type parameter kinds.
-type TypeParamDef = TypeParam | ShapeParam | ScalarParam | EncodingParam
+# Union of type parameter kinds. AttrDef parameters use the shared tagged-value
+# schema and are consumed by Param format elements.
+type TypeParamDef = TypeParam | ShapeParam | ScalarParam | EncodingParam | AttrDef
+
+
+_COMPACT_SHAPE_IR_KINDS = frozenset(("pool", "tile", "tensor", "vector", "view"))
+
+
+def _validate_compact_shape_format(
+    name: str,
+    ir_kind: str,
+    params: tuple[TypeParamDef, ...],
+    format_elements: tuple[FormatElement, ...],
+) -> None:
+    """Validates the direct compact shape grammars implemented by the IR."""
+    compact_params = (ShapeParam, ScalarParam, EncodingParam)
+    has_compact_params = any(isinstance(param, compact_params) for param in params)
+    if ir_kind not in _COMPACT_SHAPE_IR_KINDS and not has_compact_params:
+        return
+
+    from loom.assembly import COMMA, EncodingOf, ScalarOf, ShapeOf, kw
+
+    if ir_kind == "pool":
+        if len(params) != 1 or not isinstance(params[0], ShapeParam):
+            raise ValueError(
+                f"TypeDef '{name}': pool representation requires one shape parameter"
+            )
+        expected_format: tuple[FormatElement, ...] = (ShapeOf(params[0].name),)
+    elif ir_kind == "vector":
+        if (
+            len(params) == 3
+            and isinstance(params[0], ShapeParam)
+            and isinstance(params[1], ScalarParam)
+            and isinstance(params[2], EncodingParam)
+        ):
+            raise ValueError(
+                f"TypeDef '{name}': vector representation cannot carry an encoding"
+            )
+        if (
+            len(params) != 2
+            or not isinstance(params[0], ShapeParam)
+            or not isinstance(params[1], ScalarParam)
+        ):
+            raise ValueError(
+                f"TypeDef '{name}': vector representation requires shape and scalar "
+                "parameters"
+            )
+        expected_format = (
+            ShapeOf(params[0].name),
+            kw("x"),
+            ScalarOf(params[1].name),
+        )
+    elif ir_kind in ("tile", "tensor", "view"):
+        if (
+            len(params) != 3
+            or not isinstance(params[0], ShapeParam)
+            or not isinstance(params[1], ScalarParam)
+            or not isinstance(params[2], EncodingParam)
+        ):
+            raise ValueError(
+                f"TypeDef '{name}': shaped representation requires shape, scalar, "
+                "and encoding parameters"
+            )
+        encoding_param = cast(EncodingParam, params[2])
+        if not encoding_param.optional:
+            raise ValueError(
+                f"TypeDef '{name}': compact shape encodings must be optional"
+            )
+        expected_format = (
+            ShapeOf(params[0].name),
+            kw("x"),
+            ScalarOf(params[1].name),
+            OptionalGroup(
+                [COMMA, EncodingOf(encoding_param.name)],
+                anchor=encoding_param.name,
+            ),
+        )
+    else:
+        raise ValueError(
+            f"TypeDef '{name}': compact shape parameters are unsupported for "
+            f"IR kind '{ir_kind}'"
+        )
+
+    if format_elements != expected_format:
+        raise ValueError(
+            f"TypeDef '{name}': assembly format does not match its compact shape "
+            "representation"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -2672,6 +3881,14 @@ class TypeDef:
                 format=[TypeOf("object")])
         # Prints: vm.ref<hal.buffer>
 
+        # Descriptor-backed parameters with positional and keyed text:
+        TypeDef(name="test.matrix",
+                params=[AttrDef("element_type", ATTR_TYPE_TYPE),
+                        AttrDef("rows", ATTR_TYPE_I64)],
+                format=[Param("element_type"), COMMA,
+                        kw("rows"), EQUALS, Param("rows")])
+        # Prints: test.matrix<bf16, rows = 16>
+
         # Shaped type with dims, element, encoding:
         TypeDef(name="tile",
                 params=[ShapeParam("dims"), ScalarParam("element_type"),
@@ -2679,7 +3896,7 @@ class TypeDef:
                 format=[ShapeOf("dims"), kw("x"), ScalarOf("element_type"),
                         OptionalGroup([COMMA, EncodingOf("encoding")],
                                       anchor="encoding")])
-        # Prints: tile<4x4xf32, #q8_0>
+        # Prints: tile<4x4xf32, #test.schema>
     """
 
     name: str
@@ -2687,6 +3904,7 @@ class TypeDef:
     params: tuple[TypeParamDef, ...] = ()
     format: tuple[FormatElement, ...] = ()
     ir_kind: str = "dialect"  # "tile", "tensor", "vector", "view", etc.
+    python_type: type[Any] | None = None
     fact_domain: str | None = None
     semantic: TypeSemantic = TypeSemantic.ORDINARY
     contracts: tuple[ContractFamily, ...] = ()
@@ -2699,15 +3917,107 @@ class TypeDef:
         params: list[TypeParamDef] | tuple[TypeParamDef, ...] = (),
         format: list[FormatElement] | tuple[FormatElement, ...] = (),
         ir_kind: str = "dialect",
+        python_type: type[Any] | None = None,
         fact_domain: str | None = None,
         semantic: TypeSemantic = TypeSemantic.ORDINARY,
         contracts: list[ContractFamily] | tuple[ContractFamily, ...] = (),
     ) -> None:
+        frozen_params = tuple(params)
+        frozen_format = tuple(format)
+        attribute_parameters = tuple(
+            parameter for parameter in frozen_params if isinstance(parameter, AttrDef)
+        )
+        if attribute_parameters and len(attribute_parameters) != len(frozen_params):
+            raise ValueError(
+                f"TypeDef '{name}': descriptor-backed AttrDef parameters cannot "
+                "be mixed with representation-specific type parameters"
+            )
+        _validate_compact_shape_format(name, ir_kind, frozen_params, frozen_format)
+        if attribute_parameters:
+            _validate_descriptor_parameters(f"TypeDef '{name}'", attribute_parameters)
+        uses_inline_enum_parameter = bool(attribute_parameters) and ir_kind != "dialect"
+        if uses_inline_enum_parameter:
+            if len(attribute_parameters) != 1:
+                raise ValueError(
+                    f"TypeDef '{name}': compact descriptor-backed types require "
+                    "exactly one parameter"
+                )
+            parameter = attribute_parameters[0]
+            if parameter.attr_type != ATTR_TYPE_ENUM:
+                raise ValueError(
+                    f"TypeDef '{name}': compact descriptor-backed parameter "
+                    "must be an enum"
+                )
+            if python_type is None:
+                raise ValueError(
+                    f"TypeDef '{name}': compact descriptor-backed types require "
+                    "a Python value type"
+                )
+            if parameter.optional:
+                assert parameter.enum_def is not None
+                if parameter.open_enum:
+                    raise ValueError(
+                        f"TypeDef '{name}': optional compact enum parameter "
+                        "cannot be open"
+                    )
+                if any(case.value == 0 for case in parameter.enum_def.cases):
+                    raise ValueError(
+                        f"TypeDef '{name}': optional compact enum parameter "
+                        "reserves value zero for absence"
+                    )
+        elif python_type is not None:
+            raise ValueError(
+                f"TypeDef '{name}': Python value types are only supported for "
+                "compact descriptor-backed types"
+            )
+        parameter_names = [parameter.name for parameter in frozen_params]
+        if len(set(parameter_names)) != len(parameter_names):
+            raise ValueError(f"TypeDef '{name}': duplicate parameter name")
+        unknown_format_fields = _collect_format_fields(frozen_format) - set(
+            parameter_names
+        )
+        if unknown_format_fields:
+            raise ValueError(
+                f"TypeDef '{name}': format references unknown parameter(s): "
+                f"{', '.join(sorted(unknown_format_fields))}"
+            )
+        parameter_by_name = {parameter.name: parameter for parameter in frozen_params}
+        parameter_format_fields = _collect_parameter_format_field_sequence(
+            frozen_format
+        )
+        for field in parameter_format_fields:
+            if not isinstance(parameter_by_name[field], AttrDef):
+                raise ValueError(
+                    f"TypeDef '{name}': Param('{field}') requires an AttrDef parameter"
+                )
+        if attribute_parameters:
+            if len(set(parameter_format_fields)) != len(parameter_format_fields):
+                raise ValueError(
+                    f"TypeDef '{name}': each descriptor-backed parameter must "
+                    "appear exactly once in the assembly format"
+                )
+            omitted_parameters = set(parameter_names) - set(parameter_format_fields)
+            if omitted_parameters:
+                raise ValueError(
+                    f"TypeDef '{name}': assembly format omits descriptor-backed "
+                    f"parameter(s): {', '.join(sorted(omitted_parameters))}"
+                )
+            omits_empty_parameter_list = bool(frozen_format) and all(
+                isinstance(element, OptionalGroup) for element in frozen_format
+            )
+            if omits_empty_parameter_list and any(
+                not parameter.optional for parameter in attribute_parameters
+            ):
+                raise ValueError(
+                    f"TypeDef '{name}': an omitted empty parameter list requires "
+                    "every parameter to be optional"
+                )
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "doc", doc)
-        object.__setattr__(self, "params", tuple(params))
-        object.__setattr__(self, "format", tuple(format))
+        object.__setattr__(self, "params", frozen_params)
+        object.__setattr__(self, "format", frozen_format)
         object.__setattr__(self, "ir_kind", ir_kind)
+        object.__setattr__(self, "python_type", python_type)
         object.__setattr__(self, "fact_domain", fact_domain)
         object.__setattr__(self, "semantic", semantic)
         object.__setattr__(self, "contracts", tuple(contracts))
@@ -2724,6 +4034,96 @@ class TypeDef:
     def is_parameterized(self) -> bool:
         """True if this type has angle-bracket syntax."""
         return len(self.format) > 0
+
+    @property
+    def uses_attribute_parameters(self) -> bool:
+        """True when this type uses descriptor-backed parameter metadata."""
+
+        return bool(self.params) and isinstance(self.params[0], AttrDef)
+
+    @property
+    def uses_inline_enum_parameter(self) -> bool:
+        """True when the sole enum parameter is stored in the type header."""
+
+        return self.uses_attribute_parameters and self.ir_kind != "dialect"
+
+    @property
+    def uses_compact_shape_format(self) -> bool:
+        """True when the type uses the direct compact shape representation."""
+
+        return self.ir_kind in _COMPACT_SHAPE_IR_KINDS
+
+    @property
+    def omits_empty_parameter_list(self) -> bool:
+        """True when absent optional parameters print without angle brackets."""
+
+        return (
+            self.uses_attribute_parameters
+            and bool(self.format)
+            and all(isinstance(element, OptionalGroup) for element in self.format)
+        )
+
+    def __call__(self, **parameters: Any) -> Any:
+        """Constructs one immutable descriptor-backed value of this type."""
+
+        if not self.uses_attribute_parameters:
+            raise TypeError(
+                f"TypeDef '{self.name}' does not use descriptor-backed parameters"
+            )
+        if self.uses_inline_enum_parameter:
+            assert self.python_type is not None
+            parameter = self.params[0]
+            assert isinstance(parameter, AttrDef)
+            unknown_names = sorted(set(parameters) - {parameter.name})
+            if unknown_names:
+                raise TypeError(
+                    f"{self.name}: unknown parameter(s): {', '.join(unknown_names)}"
+                )
+            if parameter.name not in parameters:
+                if not parameter.optional:
+                    raise TypeError(
+                        f"{self.name}: missing required parameter '{parameter.name}'"
+                    )
+                return self.python_type()
+
+            assert parameter.enum_def is not None
+            value = parameters[parameter.name]
+            value_by_keyword = {
+                case.keyword: case.value for case in parameter.enum_def.cases
+            }
+            if isinstance(value, str):
+                if value not in value_by_keyword:
+                    raise ValueError(
+                        f"{self.name}: parameter '{parameter.name}' has unknown "
+                        f"enum keyword {value!r}"
+                    )
+                value = value_by_keyword[value]
+            elif isinstance(value, int) and not isinstance(value, bool):
+                value = int(value)
+                if not 0 <= value <= 0xFF:
+                    raise ValueError(
+                        f"{self.name}: parameter '{parameter.name}' enum value "
+                        f"{value} is outside the byte domain"
+                    )
+                if (
+                    not parameter.open_enum
+                    and value not in value_by_keyword.values()
+                    and not (parameter.optional and value == 0)
+                ):
+                    raise ValueError(
+                        f"{self.name}: parameter '{parameter.name}' has "
+                        f"undeclared enum value {value}"
+                    )
+            else:
+                raise TypeError(
+                    f"{self.name}: parameter '{parameter.name}' must be an enum "
+                    f"keyword or byte value, got {value!r}"
+                )
+            return self.python_type(**{parameter.name: value})
+
+        from loom.ir import ParameterizedType
+
+        return ParameterizedType(self, parameters)
 
     def param(self, name: str) -> TypeParamDef | None:
         """Find a parameter by name."""
@@ -2747,23 +4147,25 @@ _IMPLICIT_FORMAT_FIELDS = frozenset({"iv", "args", "predicates"})
 def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
     """Recursively collect all field names referenced by format elements."""
     from loom.assembly import (
+        AlignedRefs,
         Attr,
         AttrDict,
+        AttrParams,
         AttrTable,
         BindingList,
         BlockArgs,
         BlockRef,
         Clause,
-        DescriptorRef,
         EncodingOf,
         Flags,
         FuncArgs,
         Glue,
         IndexList,
+        KeyRef,
         Keyword,
         OperandDict,
-        OpRef,
         OptionalGroup,
+        Param,
         PredicateList,
         Ref,
         Refs,
@@ -2772,6 +4174,7 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
         ResultTypeList,
         ScalarOf,
         Scope,
+        ScopedEnumRef,
         ShapeOf,
         StableKeyRef,
         SymbolRef,
@@ -2787,20 +4190,22 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
         match elem:
             case Ref(field=f) | Refs(field=f) | TypedRefs(field=f) | BlockRef(field=f):
                 fields.add(f)
+            case AlignedRefs(refs=refs, alignments=alignments):
+                fields.add(refs)
+                fields.add(alignments)
             case (
                 Attr(field=f)
                 | SymbolRef(field=f)
                 | Flags(field=f)
-                | OpRef(field=f)
+                | KeyRef(field=f)
+                | ScopedEnumRef(field=f)
                 | TemplateParam(field=f)
+                | AttrParams(field=f)
             ):
                 fields.add(f)
             case TemplateParamFlags(param=param, flags=flags):
                 fields.add(param)
                 fields.add(flags)
-            case DescriptorRef(key=key, ordinal=ordinal):
-                fields.add(key)
-                fields.add(ordinal)
             case StableKeyRef(key=key, stable_id=stable_id):
                 fields.add(key)
                 fields.add(stable_id)
@@ -2810,8 +4215,14 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
                 fields.add(f)
             case Region(field=f):
                 fields.add(f)
-            case BindingList(field=f) | BlockArgs(region=f) | FuncArgs(field=f):
+            case BindingList(field=f) | BlockArgs(region=f):
                 fields.add(f)
+            case FuncArgs(field=f, start_attr=start_attr, end_attr=end_attr):
+                fields.add(f)
+                if start_attr is not None:
+                    fields.add(start_attr)
+                if end_attr is not None:
+                    fields.add(end_attr)
             case PredicateList(field=f):
                 fields.add(f)
             case IndexList(dynamic=d, static=s):
@@ -2829,11 +4240,39 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
                 fields |= _collect_format_fields(inner)
             case Scope(elements=inner):
                 fields |= _collect_format_fields(inner)
-            case ShapeOf(field=f) | ScalarOf(field=f) | EncodingOf(field=f):
+            case (
+                ShapeOf(field=f)
+                | ScalarOf(field=f)
+                | EncodingOf(field=f)
+                | Param(field=f)
+            ):
                 fields.add(f)
             case Keyword() | AttrDict() | Glue():
                 pass
     return fields
+
+
+def _collect_parameter_format_field_sequence(
+    elements: tuple[FormatElement, ...],
+) -> tuple[str, ...]:
+    """Collects Param fields in assembly order, retaining duplicates."""
+
+    from loom.assembly import Clause, OptionalGroup, Param, Scope
+
+    fields: list[str] = []
+    for element in elements:
+        match element:
+            case Param(field=field):
+                fields.append(field)
+            case (
+                Clause(elements=nested)
+                | OptionalGroup(elements=nested)
+                | Scope(elements=nested)
+            ):
+                fields.extend(_collect_parameter_format_field_sequence(nested))
+            case _:
+                pass
+    return tuple(fields)
 
 
 def _collect_func_args_fields(elements: tuple[FormatElement, ...]) -> set[str]:
@@ -2854,6 +4293,95 @@ def _collect_func_args_fields(elements: tuple[FormatElement, ...]) -> set[str]:
             case _:
                 pass
     return fields
+
+
+def _collect_func_args_elements(
+    elements: tuple[FormatElement, ...],
+) -> tuple[FuncArgs, ...]:
+    """Collects FuncArgs elements in assembly order."""
+    from loom.assembly import Clause, FuncArgs, OptionalGroup, Scope
+
+    func_args: list[FuncArgs] = []
+    for element in elements:
+        match element:
+            case FuncArgs():
+                func_args.append(element)
+            case (
+                Clause(elements=nested)
+                | OptionalGroup(elements=nested)
+                | Scope(elements=nested)
+            ):
+                func_args.extend(_collect_func_args_elements(nested))
+            case _:
+                pass
+    return tuple(func_args)
+
+
+def _validate_func_args_partitions(
+    op_name: str,
+    format_elements: tuple[FormatElement, ...],
+    attrs: tuple[AttrDef, ...],
+) -> None:
+    """Validates contiguous function argument partitions."""
+    func_args = _collect_func_args_elements(format_elements)
+    if not any(
+        element.start_attr is not None or element.end_attr is not None
+        for element in func_args
+    ):
+        return
+
+    effective_groups = [element.group or element.field for element in func_args]
+    if any(not group for group in effective_groups) or len(
+        set(effective_groups)
+    ) != len(effective_groups):
+        raise ValueError(
+            f"Op '{op_name}': projected FuncArgs groups require distinct "
+            "non-empty group names"
+        )
+
+    groups_by_field: dict[str, list[FuncArgs]] = {}
+    for element in func_args:
+        groups_by_field.setdefault(element.field, []).append(element)
+    for field, field_groups in groups_by_field.items():
+        if not any(
+            element.start_attr is not None or element.end_attr is not None
+            for element in field_groups
+        ):
+            continue
+        previous_end: str | None = None
+        for index, element in enumerate(field_groups):
+            group = element.group or field
+            if element.start_attr != previous_end:
+                expected = (
+                    repr(previous_end) if previous_end is not None else "no start attr"
+                )
+                raise ValueError(
+                    f"Op '{op_name}': FuncArgs group '{group}' must use "
+                    f"{expected} as its start boundary"
+                )
+            if index + 1 < len(field_groups) and element.end_attr is None:
+                raise ValueError(
+                    f"Op '{op_name}': FuncArgs group '{group}' requires an "
+                    "end boundary before the next group"
+                )
+            previous_end = element.end_attr
+        if previous_end is not None:
+            raise ValueError(
+                f"Op '{op_name}': the final projected FuncArgs group for "
+                f"field '{field}' must extend to the end of the function "
+                "signature"
+            )
+
+    attrs_by_name = {attr.name: attr for attr in attrs}
+    for element in func_args:
+        if element.end_attr is None:
+            continue
+        attr = attrs_by_name.get(element.end_attr)
+        if attr is None or attr.attr_type != ATTR_TYPE_I64 or attr.optional:
+            raise ValueError(
+                f"Op '{op_name}': FuncArgs boundary '{element.end_attr}' must "
+                "name a required i64 attribute"
+            )
 
 
 def _validate_no_nested_scope(
@@ -2913,6 +4441,67 @@ def _validate_format_fields(
             f"Op '{op_name}': format references undeclared fields: "
             f"{sorted(unknown)}. Declared: {sorted(declared)}"
         )
+
+
+def _validate_scoped_enum_fields(
+    op_name: str,
+    format_elements: tuple[FormatElement, ...],
+    attrs: tuple[AttrDef, ...],
+) -> None:
+    """Validates required representation-scoped enum syntax."""
+    from loom.assembly import ScopedEnumRef
+
+    scoped_attrs = [attr for attr in attrs if attr.attr_type == ATTR_TYPE_SCOPED_ENUM]
+    if len(scoped_attrs) > 1:
+        raise ValueError(
+            f"Op '{op_name}': at most one scoped_enum attr may define its "
+            "representation-scoped identity"
+        )
+    direct_refs = [
+        element.field
+        for element in format_elements
+        if isinstance(element, ScopedEnumRef)
+    ]
+    attrs_by_name = {attr.name: attr for attr in attrs}
+    for field in direct_refs:
+        attr = attrs_by_name.get(field)
+        if attr is None or attr.attr_type != ATTR_TYPE_SCOPED_ENUM:
+            raise ValueError(
+                f"Op '{op_name}': ScopedEnumRef field '{field}' must name a "
+                "scoped_enum attr"
+            )
+    for attr in scoped_attrs:
+        ref_count = direct_refs.count(attr.name)
+        if ref_count != 1:
+            raise ValueError(
+                f"Op '{op_name}': scoped_enum attr '{attr.name}' requires "
+                "exactly one top-level ScopedEnumRef"
+            )
+
+
+def _validate_attr_params_fields(
+    op_name: str,
+    format_elements: tuple[FormatElement, ...],
+    attrs: tuple[AttrDef, ...],
+) -> None:
+    """Validates known-family parameterized attribute payload syntax."""
+    from loom.assembly import AttrParams, Clause, OptionalGroup, Scope
+
+    attrs_by_name = {attr.name: attr for attr in attrs}
+    for element in format_elements:
+        if isinstance(element, AttrParams):
+            attr = attrs_by_name.get(element.field)
+            if (
+                attr is None
+                or attr.attr_type != ATTR_TYPE_PARAMETERIZED
+                or attr.parameterized_attr is None
+            ):
+                raise ValueError(
+                    f"Op '{op_name}': AttrParams field '{element.field}' must "
+                    "name a parameterized attr constrained to one exact family"
+                )
+        elif isinstance(element, Clause | OptionalGroup | Scope):
+            _validate_attr_params_fields(op_name, element.elements, attrs)
 
 
 def _validate_legacy_formats(
@@ -3084,6 +4673,11 @@ def _validate_effects(
             f"A hint is not a semantic memory effect; attach policy to the "
             f"real memory op instead."
         )
+    if "CompileTimeOnly" in trait_names:
+        raise ValueError(
+            f"Op '{op_name}': declares both COMPILE_TIME_ONLY and explicit "
+            f"effects. A compile-time-only op has no runtime memory effect."
+        )
     if "SafeToSpeculate" in trait_names:
         raise ValueError(
             f"Op '{op_name}': declares both SAFE_TO_SPECULATE and explicit "
@@ -3133,6 +4727,7 @@ def _validate_ownership_effects(
     result_map = {r.name: r for r in results}
     operand_effects: set[str] = set()
     result_effects: set[str] = set()
+    moved_sources: set[str] = set()
 
     for effect in ownership_effects:
         if isinstance(effect, OperandOwnershipEffect):
@@ -3162,15 +4757,18 @@ def _validate_ownership_effects(
                 f"'{effect.result}' which is not declared. "
                 f"Declared results: {sorted(result_map.keys())}"
             )
-        if effect.kind == ResultOwnershipEffectKind.ALIAS:
+        if effect.kind in (
+            ResultOwnershipEffectKind.ALIAS,
+            ResultOwnershipEffectKind.MOVED,
+        ):
             if effect.source is None:
                 raise ValueError(
-                    f"Op '{op_name}': alias result ownership effect for "
+                    f"Op '{op_name}': {effect.kind.value} result ownership effect for "
                     f"'{effect.result}' must name a source operand."
                 )
             if effect.source not in operand_map:
                 raise ValueError(
-                    f"Op '{op_name}': alias result ownership effect for "
+                    f"Op '{op_name}': {effect.kind.value} result ownership effect for "
                     f"'{effect.result}' references operand '{effect.source}' "
                     f"which is not declared. Declared operands: "
                     f"{sorted(operand_map.keys())}"
@@ -3179,15 +4777,30 @@ def _validate_ownership_effects(
             result = result_map[effect.result]
             if source_operand.variadic or result.variadic:
                 raise ValueError(
-                    f"Op '{op_name}': alias result ownership effect for "
+                    f"Op '{op_name}': {effect.kind.value} result ownership effect for "
                     f"'{effect.result}' must use fixed operand/result fields."
                 )
+            if effect.kind == ResultOwnershipEffectKind.MOVED:
+                if effect.source in moved_sources:
+                    raise ValueError(
+                        f"Op '{op_name}': operand '{effect.source}' may source "
+                        f"only one moved result ownership effect."
+                    )
+                moved_sources.add(effect.source)
         elif effect.source is not None:
             raise ValueError(
                 f"Op '{op_name}': ownership effect for result "
                 f"'{effect.result}' may not name a source operand unless it "
-                f"is an alias effect."
+                f"is an alias or moved effect."
             )
+
+    conflicting_sources = moved_sources & operand_effects
+    if conflicting_sources:
+        source = sorted(conflicting_sources)[0]
+        raise ValueError(
+            f"Op '{op_name}': moved result source operand '{source}' may not "
+            f"also declare an operand ownership effect."
+        )
 
 
 def _validate_no_effect_conflicts(
@@ -3196,6 +4809,33 @@ def _validate_no_effect_conflicts(
 ) -> None:
     """Validate trait-only ops for effect-related conflicts."""
     trait_names = {t.name for t in traits}
+    if "CommandEffect" in trait_names and not trait_names.intersection(
+        {"UnknownEffects", "MemoryFence", "NonDeterministic", "Convergent"}
+    ):
+        raise ValueError(
+            f"Op '{op_name}': COMMAND_EFFECT requires explicit or unknown "
+            "observable effects. The trait classifies effects but does not "
+            "declare them."
+        )
+    if "CompileTimeOnly" in trait_names:
+        if "Hint" in trait_names:
+            raise ValueError(
+                f"Op '{op_name}': COMPILE_TIME_ONLY is redundant with HINT. "
+                "Hints are always omitted from runtime emission."
+            )
+        runtime_traits = {
+            "UnknownEffects",
+            "MemoryFence",
+            "NonDeterministic",
+            "Convergent",
+            "UniqueIdentity",
+        }
+        conflicting_traits = sorted(trait_names & runtime_traits)
+        if conflicting_traits:
+            raise ValueError(
+                f"Op '{op_name}': COMPILE_TIME_ONLY conflicts with runtime "
+                f"trait {conflicting_traits[0]}."
+            )
     if "Pure" in trait_names and "NonDeterministic" in trait_names:
         raise ValueError(
             f"Op '{op_name}': declares both PURE and NON_DETERMINISTIC. "
@@ -3205,6 +4845,11 @@ def _validate_no_effect_conflicts(
         raise ValueError(
             f"Op '{op_name}': declares both PURE and UNKNOWN_EFFECTS. "
             f"A pure op has no effects."
+        )
+    if "Pure" in trait_names and "MemoryFence" in trait_names:
+        raise ValueError(
+            f"Op '{op_name}': declares both PURE and MEMORY_FENCE. "
+            f"A memory fence is an observable ordering effect."
         )
     if "Pure" in trait_names and "UniqueIdentity" in trait_names:
         raise ValueError(
@@ -3221,6 +4866,11 @@ def _validate_no_effect_conflicts(
         raise ValueError(
             f"Op '{op_name}': declares both HINT and UNKNOWN_EFFECTS. "
             f"Hints are not semantic effects."
+        )
+    if "Hint" in trait_names and "MemoryFence" in trait_names:
+        raise ValueError(
+            f"Op '{op_name}': declares both HINT and MEMORY_FENCE. "
+            f"A memory fence is semantic, not a compiler hint."
         )
     if "Hint" in trait_names and "NonDeterministic" in trait_names:
         raise ValueError(
@@ -3243,6 +4893,11 @@ def _validate_no_effect_conflicts(
             f"Op '{op_name}': declares both SAFE_TO_SPECULATE and UNKNOWN_EFFECTS. "
             f"Unknown effects cannot be executed on additional control paths."
         )
+    if "SafeToSpeculate" in trait_names and "MemoryFence" in trait_names:
+        raise ValueError(
+            f"Op '{op_name}': declares both SAFE_TO_SPECULATE and MEMORY_FENCE. "
+            f"Speculation must not add memory-ordering effects."
+        )
     if "SafeToSpeculate" in trait_names and "NonDeterministic" in trait_names:
         raise ValueError(
             f"Op '{op_name}': declares both SAFE_TO_SPECULATE and NON_DETERMINISTIC. "
@@ -3264,6 +4919,7 @@ def _validate_trait_field_contracts(
     op_name: str,
     operands: tuple[Operand, ...],
     results: tuple[Result | TiedResult, ...],
+    regions: tuple[RegionDef, ...],
     traits: tuple[Trait, ...],
 ) -> None:
     """Validate trait contracts that depend on declared operand/result shape."""
@@ -3272,6 +4928,33 @@ def _validate_trait_field_contracts(
         raise ValueError(
             f"Op '{op_name}': VALUE_ALIAS requires at least one operand "
             "and exactly one result"
+        )
+    if "ConstantLike" in trait_names:
+        if "Pure" not in trait_names:
+            raise ValueError(f"Op '{op_name}': CONSTANT_LIKE requires PURE semantics")
+        if operands or regions or len(results) != 1 or results[0].variadic:
+            raise ValueError(
+                f"Op '{op_name}': CONSTANT_LIKE requires no operands or regions "
+                "and exactly one result"
+            )
+    if "Poison" in trait_names:
+        if "Pure" not in trait_names:
+            raise ValueError(f"Op '{op_name}': POISON requires PURE semantics")
+        if "ConstantLike" in trait_names:
+            raise ValueError(f"Op '{op_name}': POISON cannot also be CONSTANT_LIKE")
+        if operands or regions or len(results) != 1 or results[0].variadic:
+            raise ValueError(
+                f"Op '{op_name}': POISON requires no operands or regions "
+                "and exactly one result"
+            )
+    if (
+        "CompileTimeOnly" in trait_names
+        and results
+        and ("FactIdentity" not in trait_names or "StorageRelation" not in trait_names)
+    ):
+        raise ValueError(
+            f"Op '{op_name}': result-producing COMPILE_TIME_ONLY ops "
+            "require FACT_IDENTITY and STORAGE_RELATION"
         )
 
 
@@ -3289,22 +4972,36 @@ class CallLikeKind(Enum):
     LOW_INTERNAL = "low_internal"
     # Explicit semantic-to-target-low invocation of an already selected low function.
     LOW_INVOKE = "low_invoke"
+    # Command-program invocation edge. Its operands are staged specialization
+    # values followed by issue-time buffer bindings.
+    COMMAND_PROGRAM = "command_program"
+    # Exact compile-time template implementation call.
+    TEMPLATE = "template"
+
+
+class InlinePolicy(Enum):
+    """Required callable-boundary policy."""
+
+    UNSPECIFIED = 0
+    INLINE = 1
+    NOINLINE = 2
 
 
 class CallLikeInterface(NamedTuple):
     """Interface for direct symbol call-like ops.
 
     The named operand/result fields are trailing slices containing call
-    arguments and call results. The generator resolves their starting offsets
-    and emits a loom_call_like_vtable_t in .rodata.
+    arguments and call results. A result field of None denotes an operation
+    with no results. The generator resolves the slice starting offsets and
+    emits a loom_call_like_vtable_t in .rodata.
     """
 
     # Symbol ref attr naming the direct callee.
     callee: str
     # Variadic operand field holding call arguments.
     operands: str
-    # Variadic result field holding call results.
-    results: str
+    # Variadic result field holding call results, or None for no-result calls.
+    results: str | None
     # Optional purity enum attr. None if not applicable.
     purity: str | None = None
     # Optional temperature enum attr. None if not applicable.
@@ -3331,6 +5028,10 @@ class FuncLikeInterface(NamedTuple):
     import_symbol: str | None = None
     # Optional symbol ref attr naming the resolved target record.
     target: str | None = None
+    # Optional string attr naming the intrinsic contract under which the
+    # function signature and body are represented. None means the op does not
+    # expose an intrinsic representation contract.
+    repr_contract: str | None = None
     # Optional ABI enum attr for concrete target-bound functions.
     abi: str | None = None
     # Optional ABI payload dictionary attr.
@@ -3353,20 +5054,37 @@ class FuncLikeInterface(NamedTuple):
     inline_policy: str | None = None
     # Predicate list attr for where-clause constraints. None if absent.
     predicates: str | None = None
+    # Parameterized attribute array naming provider proof requirements.
+    # None for function kinds that are not implementation providers.
+    requires: str | None = None
+    # Optional i64 attr containing the number of leading arguments that
+    # participate in staged specialization. Remaining arguments form the
+    # issue-time binding ABI. None means there is no leading staged group.
+    specialization_count: str | None = None
     # Region name for the function body. None for bodyless ops that
     # only declare a signature without providing an implementation.
     body: str | None = None
-    # String attr naming the abstract op this function implements
-    # (for template/ukernel dispatch). None for def/decl.
-    implements: str | None = None
+    # Symbol attr naming the template family implemented by this function.
+    # None for function kinds that are not template providers.
+    template_family: str | None = None
     # I64 attr for dispatch priority among competing implementations.
     # None for def/decl.
     priority: str | None = None
-    # When True, function arguments are stored as the op's operands
-    # rather than as block arguments of the body region. Used for
-    # ops that have a signature but no body (the parser stores parsed
-    # FUNC_ARGS as operands when no REGION follows).
-    args_as_operands: bool = False
+    # Variadic operand field storing signature arguments for bodyless
+    # declarations. None means arguments are entry block values in body. An
+    # operand-backed signature owns every op operand; kernel declarations may
+    # divide those definitions between this ABI field and their workload field.
+    args: str | None = None
+
+
+@unique
+class TargetFactSpecialization(Enum):
+    """Specialization relation for generated common target facts."""
+
+    # Only the same projected fact object satisfies specialization.
+    EXACT = "exact"
+    # Distinct facts satisfy compatible common snapshots and configuration.
+    STRUCTURAL = "structural"
 
 
 class TargetLikeInterface(NamedTuple):
@@ -3374,9 +5092,9 @@ class TargetLikeInterface(NamedTuple):
 
     The symbol field names the defining symbol attr. The selector field names
     the typed attr selecting the generated target row, such as a processor or
-    generic target kind. The extensions field names an optional dict
-    attr carrying target-specific extension data. Descriptor names a C-side
-    projection descriptor owned by the target family.
+    generic target kind. The extensions field names an optional dict attr
+    carrying target-specific extension data. Generated descriptor metadata
+    binds the target op to its fact type and optional family fact projector.
     """
 
     # Symbol attr that names the target record.
@@ -3391,16 +5109,34 @@ class TargetLikeInterface(NamedTuple):
     # present, the C generator emits the TargetLike descriptor and projection
     # table instead of requiring hand-authored descriptor metadata.
     bundle_table: str | None = None
+    # Optional C symbol for a family-owned target fact type. When absent, the C
+    # generator emits a common fact type private to this op whose identity is
+    # defined by selector equality.
+    fact_type: str | None = None
+    # Optional C symbol for the target-op adapter that projects family-owned
+    # attributes into the typed fact extension.
+    fact_projector: str | None = None
+    # Specialization relation used by a generated common fact type.
+    # Family-owned fact types carry their relation in the named descriptor.
+    fact_specialization: TargetFactSpecialization = TargetFactSpecialization.EXACT
 
 
 class LoopLikeInterface(NamedTuple):
     """Interface for loop-like ops that iterate a body region.
 
-    Each field is the name of a region, an implicit block argument,
-    or an operand on the op (or None where applicable). The generator
-    resolves names to indices and emits a loom_loop_like_vtable_t in
-    .rodata. Used by LICM, loop-invariant sinking, trip count
-    analysis, and loop transformation passes.
+    The variadic iter_args operand is the complete loop-carried state domain.
+    Implementing ops have one matching variadic result field and a required
+    single-block body whose carried block arguments follow any induction
+    variable. IterArgsMatchResults, YieldCountMatchesResults, and
+    YieldTypesMatchResults constraints verify the complete state cycle.
+
+    Each field is the name of a region, an implicit block argument, or an
+    operand on the op (or None where applicable). Exactly one control form is
+    present: either lower_bound, upper_bound, and step with an induction
+    variable, or a separate condition_region without an induction variable.
+    The generator resolves names to indices, validates the contract, and emits
+    a loom_loop_like_vtable_t in .rodata. Used by LICM, loop-invariant sinking,
+    trip count analysis, fact propagation, and loop transformation passes.
     """
 
     # Region name for the primary loop body. For scf.for this is the
@@ -3454,6 +5190,18 @@ class RegionBranchInterface(NamedTuple):
 _DEFAULT_INTERFACE_FIELD = object()
 
 
+@unique
+class MemoryAccessOperationKind(Enum):
+    """Operation family represented by a MemoryAccess op shape."""
+
+    LOAD = "load"
+    STORE = "store"
+    PREFETCH = "prefetch"
+    ATOMIC_REDUCE = "atomic_reduce"
+    ATOMIC_RMW = "atomic_rmw"
+    ATOMIC_CMPXCHG = "atomic_cmpxchg"
+
+
 @dataclass(frozen=True, slots=True, init=False)
 class MemoryAccessInterface:
     """Interface for ops that access memory through a view-like operand.
@@ -3469,6 +5217,8 @@ class MemoryAccessInterface:
 
     # Operand naming the accessed view or memory object.
     view: str | None
+    # Operand naming a physical byte offset into the memory object.
+    byte_offset: str | None = None
     # Operand naming the value written or atomic update contribution.
     value: str | None = None
     # Operand naming the expected compare-exchange value.
@@ -3499,6 +5249,8 @@ class MemoryAccessInterface:
     atomic_failure_ordering: str | None = None
     # Atomic synchronization scope attr.
     atomic_scope: str | None = None
+    # Operation family represented by this op shape.
+    operation_kind: MemoryAccessOperationKind | None = None
     # Fields explicitly supplied by the op declaration author.
     _explicit_fields: frozenset[str] = frozenset()
 
@@ -3506,6 +5258,7 @@ class MemoryAccessInterface:
         self,
         *,
         view: str | None | object = _DEFAULT_INTERFACE_FIELD,
+        byte_offset: str | None | object = _DEFAULT_INTERFACE_FIELD,
         value: str | None | object = _DEFAULT_INTERFACE_FIELD,
         expected: str | None | object = _DEFAULT_INTERFACE_FIELD,
         replacement: str | None | object = _DEFAULT_INTERFACE_FIELD,
@@ -3521,6 +5274,7 @@ class MemoryAccessInterface:
         atomic_success_ordering: str | None | object = _DEFAULT_INTERFACE_FIELD,
         atomic_failure_ordering: str | None | object = _DEFAULT_INTERFACE_FIELD,
         atomic_scope: str | None | object = _DEFAULT_INTERFACE_FIELD,
+        operation_kind: MemoryAccessOperationKind | None = None,
     ) -> None:
         explicit_fields: set[str] = set()
 
@@ -3540,6 +5294,11 @@ class MemoryAccessInterface:
             )
 
         object.__setattr__(self, "view", _resolve("view", view, "view"))
+        object.__setattr__(
+            self,
+            "byte_offset",
+            _resolve("byte_offset", byte_offset, "byte_offset"),
+        )
         object.__setattr__(self, "value", _resolve("value", value, "value"))
         object.__setattr__(self, "expected", _resolve("expected", expected, "expected"))
         object.__setattr__(
@@ -3603,6 +5362,14 @@ class MemoryAccessInterface:
             "atomic_scope",
             _resolve("atomic_scope", atomic_scope, "scope"),
         )
+        if operation_kind is not None and not isinstance(
+            operation_kind, MemoryAccessOperationKind
+        ):
+            raise TypeError(
+                "MemoryAccessInterface field 'operation_kind': expected "
+                f"MemoryAccessOperationKind or None, got {operation_kind!r}"
+            )
+        object.__setattr__(self, "operation_kind", operation_kind)
         object.__setattr__(self, "_explicit_fields", frozenset(explicit_fields))
 
 
@@ -3667,6 +5434,96 @@ class LegacyFormat:
         object.__setattr__(self, "rewrite_hook", rewrite_hook)
 
 
+def _validate_condition_refinement(
+    op_name: str,
+    refinement: ConditionRefinement | None,
+    operands: tuple[Operand, ...],
+    results: tuple[Result | TiedResult, ...],
+) -> None:
+    if refinement is None:
+        return
+    source_operand = next(
+        (operand for operand in operands if operand.name == refinement.source),
+        None,
+    )
+    if source_operand is None:
+        raise ValueError(
+            f"Op '{op_name}': condition refinement source "
+            f"'{refinement.source}' does not name an operand"
+        )
+    if source_operand.variadic or source_operand.optional:
+        raise ValueError(
+            f"Op '{op_name}': condition refinement source "
+            f"'{refinement.source}' must be a required non-variadic operand"
+        )
+    if (
+        len(results) != 1
+        or not isinstance(results[0], Result)
+        or results[0].type_constraint is not I1
+        or results[0].variadic
+    ):
+        raise ValueError(
+            f"Op '{op_name}': condition refinement requires exactly one "
+            "non-variadic i1 result"
+        )
+    if not refinement.materialize:
+        raise ValueError(
+            f"Op '{op_name}': condition refinement materializer must be non-empty"
+        )
+
+
+def _validate_keyed_module_record(
+    op_name: str,
+    operands: tuple[Operand, ...],
+    results: tuple[Result | TiedResult, ...],
+    attrs: tuple[AttrDef, ...],
+    successors: tuple[Successor, ...],
+    regions: tuple[RegionDef, ...],
+    traits: tuple[Trait, ...],
+    effects: tuple[Effect, ...],
+    ownership_effects: tuple[OperandOwnershipEffect | ResultOwnershipEffect, ...],
+) -> None:
+    record_traits = [trait for trait in traits if trait.name == "KeyedModuleRecord"]
+    if not record_traits:
+        return
+    if len(record_traits) != 1 or len(record_traits[0].args) != 1:
+        raise ValueError(
+            f"Op '{op_name}': KeyedModuleRecord requires exactly one key attr"
+        )
+    if not any(trait.name == "ModuleScope" for trait in traits):
+        raise ValueError(
+            f"Op '{op_name}': KeyedModuleRecord requires the ModuleScope trait"
+        )
+    unsupported_traits = sorted(
+        trait.name
+        for trait in traits
+        if trait.name not in ("KeyedModuleRecord", "ModuleScope", "Pure")
+    )
+    if unsupported_traits:
+        raise ValueError(
+            f"Op '{op_name}': KeyedModuleRecord cannot carry semantic traits "
+            f"{unsupported_traits}"
+        )
+    if operands or results or successors or regions or effects or ownership_effects:
+        raise ValueError(f"Op '{op_name}': KeyedModuleRecord must be attr-only")
+    key_attr_name = record_traits[0].args[0]
+    key_attr = next((attr for attr in attrs if attr.name == key_attr_name), None)
+    if key_attr is None:
+        raise ValueError(
+            f"Op '{op_name}': KeyedModuleRecord key attr "
+            f"'{key_attr_name}' is not declared"
+        )
+    if (
+        key_attr.attr_type != ATTR_TYPE_STRING
+        or key_attr.optional
+        or key_attr.default is not None
+    ):
+        raise ValueError(
+            f"Op '{op_name}': KeyedModuleRecord key attr "
+            f"'{key_attr_name}' must be a required string"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class Op:
     """A complete operation declaration.
@@ -3721,8 +5578,10 @@ class Op:
     )
     facts: str = ""  # C function name for fact inference, or "".
     type_transfer: str = ""  # C function name for semantic type transfer, or "".
+    condition_refinement: ConditionRefinement | None = None
     verify: str = ""  # C function name for op-specific verification, or "".
     builder_name: str | None = None  # Python builder method override, or None.
+    generate_c_builder: bool = True  # False when construction requires domain context.
     phase: OpPhase | None = None
     contracts: tuple[ContractFamily, ...] = ()
     category: OpCategory | None = None
@@ -3755,8 +5614,10 @@ class Op:
         effective_traits: str = "",
         facts: str = "",
         type_transfer: str = "",
+        condition_refinement: ConditionRefinement | None = None,
         verify: str = "",
         builder_name: str | None = None,
+        generate_c_builder: bool = True,
         phase: OpPhase | None = None,
         contracts: list[ContractFamily] | tuple[ContractFamily, ...] = (),
         category: OpCategory | None = None,
@@ -3793,10 +5654,15 @@ class Op:
         object.__setattr__(self, "effective_traits", effective_traits)
         object.__setattr__(self, "facts", facts)
         object.__setattr__(self, "type_transfer", type_transfer)
+        object.__setattr__(self, "condition_refinement", condition_refinement)
         object.__setattr__(self, "verify", verify)
         object.__setattr__(self, "builder_name", builder_name)
+        object.__setattr__(self, "generate_c_builder", generate_c_builder)
         object.__setattr__(self, "phase", phase)
         object.__setattr__(self, "contracts", tuple(contracts))
+        _validate_condition_refinement(
+            name, condition_refinement, frozen_operands, frozen_results
+        )
         if (
             category is not None
             and group is not None
@@ -3848,6 +5714,83 @@ class Op:
                         f"Op '{name}': symbol_def retain '{symbol_def.retain}' "
                         "must be an enum attr"
                     )
+        func_like = next(
+            (
+                interface
+                for interface in interfaces
+                if isinstance(interface, FuncLikeInterface)
+            ),
+            None,
+        )
+        func_args_fields = _collect_func_args_fields(frozen_format)
+        if func_args_fields and func_like is None:
+            raise ValueError(
+                f"Op '{name}': FuncArgs format elements require a "
+                "FuncLikeInterface implementation"
+            )
+        kernel_contract = symbol_def.kernel_contract if symbol_def is not None else None
+        if func_like is not None and func_like.args is not None and func_args_fields:
+            expected_func_args_fields = {func_like.args}
+            if kernel_contract is not None and kernel_contract.workload_operands:
+                expected_func_args_fields.add(kernel_contract.workload_operands)
+            if func_args_fields != expected_func_args_fields:
+                raise ValueError(
+                    f"Op '{name}': FuncArgs format fields must match the "
+                    "declared function and kernel signature operands"
+                )
+        if kernel_contract is not None and func_like is None:
+            raise ValueError(
+                f"Op '{name}': a kernel contract requires a "
+                "FuncLikeInterface implementation"
+            )
+        if func_like is not None and (func_like.body is None) == (
+            func_like.args is None
+        ):
+            raise ValueError(
+                f"Op '{name}': FuncLikeInterface must declare exactly one "
+                "signature representation with body or args"
+            )
+        if func_like is not None and not func_args_fields:
+            raise ValueError(
+                f"Op '{name}': FuncLikeInterface requires an explicit "
+                "FuncArgs format field"
+            )
+        if (
+            func_like is not None
+            and func_like.body is not None
+            and len(func_args_fields) != 1
+        ):
+            raise ValueError(
+                f"Op '{name}': body-backed FuncLikeInterface requires exactly "
+                "one FuncArgs format field"
+            )
+        if kernel_contract is not None and func_like is not None:
+            if (
+                kernel_contract.workload_operands is not None
+                and kernel_contract.workload_operands == func_like.args
+            ):
+                raise ValueError(
+                    f"Op '{name}': kernel workload and launch ABI signatures "
+                    "must use distinct operand fields"
+                )
+            if (
+                kernel_contract.workload_region is not None
+                and kernel_contract.workload_region == func_like.body
+            ):
+                raise ValueError(
+                    f"Op '{name}': kernel workload and launch ABI signatures "
+                    "must use distinct regions"
+                )
+        if func_like is not None and func_like.args is not None:
+            signature_operand_names = {func_like.args}
+            if kernel_contract is not None and kernel_contract.workload_operands:
+                signature_operand_names.add(kernel_contract.workload_operands)
+            operand_names = {operand.name for operand in frozen_operands}
+            if signature_operand_names != operand_names:
+                raise ValueError(
+                    f"Op '{name}': operand-backed FuncLike signatures must "
+                    "own every operand field"
+                )
         if successor_selector is not None:
             if len(frozen_successors) < 2:
                 raise ValueError(
@@ -3885,8 +5828,26 @@ class Op:
                 tuple(traits),
             )
         _validate_trait_field_contracts(
-            name, frozen_operands, frozen_results, tuple(traits)
+            name,
+            frozen_operands,
+            frozen_results,
+            frozen_regions,
+            tuple(traits),
         )
+        _validate_keyed_module_record(
+            name,
+            frozen_operands,
+            frozen_results,
+            frozen_attrs,
+            frozen_successors,
+            frozen_regions,
+            tuple(traits),
+            frozen_effects,
+            frozen_ownership_effects,
+        )
+        _validate_scoped_enum_fields(name, frozen_format, frozen_attrs)
+        _validate_attr_params_fields(name, frozen_format, frozen_attrs)
+        _validate_func_args_partitions(name, frozen_format, frozen_attrs)
         # Validate that format elements reference declared fields.
         if frozen_format:
             _validate_format_fields(
@@ -3961,6 +5922,15 @@ class Op:
         return any(t.name == trait_name for t in self.traits)
 
     @property
+    def keyed_module_record_attr(self) -> str | None:
+        """Returns the canonical module-record key attr, when declared."""
+
+        for trait in self.traits:
+            if trait.name == "KeyedModuleRecord":
+                return trait.args[0]
+        return None
+
+    @property
     def effective_phase(self) -> OpPhase | None:
         """Returns the op semantic phase after applying its dialect default."""
         if self.phase is not None:
@@ -3984,7 +5954,8 @@ class Op:
 
         An op is pure if it explicitly declares traits=[PURE], or if it
         has no effects, no ownership effects, no ALLOCATES results, and no HINT,
-        NON_DETERMINISTIC, UNKNOWN_EFFECTS, or UNIQUE_IDENTITY traits.
+        NON_DETERMINISTIC, UNKNOWN_EFFECTS, MEMORY_FENCE, or UNIQUE_IDENTITY
+        traits.
         """
         if self.has_trait("Pure"):
             return True
@@ -3998,7 +5969,11 @@ class Op:
             return False
         if self.has_trait("Hint"):
             return False
-        if self.has_trait("NonDeterministic") or self.has_trait("UnknownEffects"):
+        if (
+            self.has_trait("NonDeterministic")
+            or self.has_trait("UnknownEffects")
+            or self.has_trait("MemoryFence")
+        ):
             return False
         return True
 
@@ -4135,6 +6110,7 @@ def cast_op(
     from_constraint: TypeConstraint,
     to_constraint: TypeConstraint,
     doc: str,
+    input_role: OperandRole = OperandRole.NONE,
     traits: list[Trait] | None = None,
     **kwargs: Any,
 ) -> Op:
@@ -4152,7 +6128,7 @@ def cast_op(
         name=name,
         group=group,
         doc=doc,
-        operands=[Operand("input", from_constraint)],
+        operands=[Operand("input", from_constraint, role=input_role)],
         results=[Result("result", to_constraint)],
         traits=op_traits,
         format=[

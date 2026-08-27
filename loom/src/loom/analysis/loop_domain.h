@@ -37,6 +37,18 @@ typedef struct loom_loop_domain_t {
 bool loom_loop_domain_equal(const loom_value_fact_table_t* fact_table,
                             loom_loop_domain_t lhs, loom_loop_domain_t rhs);
 
+// Returns true when every value admitted by the domain facts produces zero
+// iterations. The proof requires a positive integer step and lower_bound >=
+// upper_bound for the complete fact ranges.
+bool loom_loop_domain_proven_empty(const loom_value_fact_table_t* fact_table,
+                                   loom_loop_domain_t domain);
+
+// Returns true when every value admitted by the domain facts produces at least
+// one iteration. The proof requires a positive integer step and lower_bound <
+// upper_bound for the complete fact ranges.
+bool loom_loop_domain_proven_nonempty(const loom_value_fact_table_t* fact_table,
+                                      loom_loop_domain_t domain);
+
 #ifdef __cplusplus
 }
 #endif

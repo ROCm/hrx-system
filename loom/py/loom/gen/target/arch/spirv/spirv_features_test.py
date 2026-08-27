@@ -14,10 +14,8 @@ from dataclasses import replace
 from loom.gen.target.arch.spirv.spirv_features import generate_tables
 from loom.target.arch.spirv.features import (
     FEATURE_ATOMS,
-    FEATURE_PROFILES,
     FeatureAtom,
     FeatureProfile,
-    parse_isa_symbols,
     validate_feature_catalog,
 )
 
@@ -86,20 +84,3 @@ def test_validation_rejects_duplicate_atom_rows() -> None:
 
     with _raises_value_error(r"extensions repeats 'SPV_KHR_vulkan_memory_model'"):
         validate_feature_catalog(atoms=bad_atoms, profiles=())
-
-
-def test_validation_rejects_unknown_isa_symbol() -> None:
-    bad_atoms = (
-        replace(
-            FEATURE_ATOMS[0],
-            capabilities=("LOOM_SPIRV_CAPABILITY_DOES_NOT_EXIST",),
-        ),
-        *FEATURE_ATOMS[1:],
-    )
-
-    with _raises_value_error(r"unknown SPIR-V ISA symbol"):
-        validate_feature_catalog(
-            atoms=bad_atoms,
-            profiles=FEATURE_PROFILES,
-            isa_symbols=parse_isa_symbols(""),
-        )

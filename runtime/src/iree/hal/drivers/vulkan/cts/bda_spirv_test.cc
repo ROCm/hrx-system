@@ -141,8 +141,11 @@ class BdaSpirvTest : public CtsTestBase<> {
     CtsTestBase::SetUp();
     if (HasFatalFailure() || IsSkipped()) return;
 
-    IREE_ASSERT_OK(iree_hal_executable_cache_create(
-        device_, iree_make_cstring_view("default"), &executable_cache_));
+    const iree_hal_executable_target_selection_result_t target_result =
+        SelectExecutableTarget(IREE_SV("spirv"), IREE_SV("vulkan1.3+bda"));
+    ASSERT_EQ(IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED,
+              target_result.outcome);
+    executable_target_ = target_result.target;
 
     IREE_ASSERT_OK(
         PrepareBdaExecutable(BdaSpirvFixture(kBdaSpirvAdd7), &executable_));
@@ -151,31 +154,21 @@ class BdaSpirvTest : public CtsTestBase<> {
   void TearDown() override {
     iree_hal_executable_release(executable_);
     executable_ = nullptr;
-    iree_hal_executable_cache_release(executable_cache_);
-    executable_cache_ = nullptr;
+    executable_target_ = nullptr;
     CtsTestBase::TearDown();
   }
 
-  iree_status_t PrepareBdaExecutable(
-      iree_const_byte_span_t executable_data,
-      iree_hal_executable_caching_mode_t caching_mode,
-      iree_hal_executable_t** out_executable) {
-    *out_executable = nullptr;
-    iree_hal_executable_params_t executable_params;
-    iree_hal_executable_params_initialize(&executable_params);
-    executable_params.caching_mode = caching_mode;
-    executable_params.executable_format =
-        iree_make_cstring_view("vulkan-spirv-bda");
-    executable_params.executable_data = executable_data;
-    return iree_hal_executable_cache_prepare_executable(
-        executable_cache_, &executable_params, out_executable);
+  iree_status_t PrepareBdaExecutable(iree_const_byte_span_t executable_data,
+                                     iree_hal_executable_load_flags_t flags,
+                                     iree_hal_executable_t** out_executable) {
+    return LoadExecutable(executable_target_, flags, executable_data,
+                          out_executable);
   }
 
   iree_status_t PrepareBdaExecutable(iree_const_byte_span_t executable_data,
                                      iree_hal_executable_t** out_executable) {
     return PrepareBdaExecutable(
-        executable_data, IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA,
-        out_executable);
+        executable_data, IREE_HAL_EXECUTABLE_LOAD_FLAG_NONE, out_executable);
   }
 
   void CreateInputOutputBuffers(Ref<iree_hal_buffer_t>* input_buffer,
@@ -312,7 +305,7 @@ class BdaSpirvTest : public CtsTestBase<> {
         execute_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
   }
 
-  iree_hal_executable_cache_t* executable_cache_ = nullptr;
+  const iree_hal_executable_target_t* executable_target_ = nullptr;
   iree_hal_executable_t* executable_ = nullptr;
 };
 
@@ -320,8 +313,7 @@ static iree_hal_buffer_params_t SparseDispatchBufferParams() {
   iree_hal_buffer_params_t params = {0};
   params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE |
                 IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  params.usage =
-      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE;
   return params;
 }
 
@@ -428,9 +420,7 @@ TEST_P(BdaSpirvTest, QueueDispatchExecutesUnverifiedBdaNoop) {
   Ref<iree_hal_executable_t> executable;
   IREE_ASSERT_OK(PrepareBdaExecutable(
       BdaSpirvFixture(kBdaSpirvNoopWithoutPushConstantRoot),
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA |
-          IREE_HAL_EXECUTABLE_CACHING_MODE_DISABLE_VERIFICATION,
-      executable.out()));
+      IREE_HAL_EXECUTABLE_LOAD_FLAG_DISABLE_VERIFICATION, executable.out()));
 
   iree_hal_buffer_ref_list_t bindings = iree_hal_buffer_ref_list_empty();
   SemaphoreList dispatch_signal(device_, {0}, {1});

@@ -52,6 +52,18 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
+    iree_adapter_test
+  SRCS
+    "iree_adapter_test.cc"
+  DEPS
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::binding::c::loomc
+)
+
+loom_cc_test(
+  NAME
     artifact_test
   SRCS
     "artifact_test.cc"
@@ -108,6 +120,34 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
+    link_dependency_test
+  SRCS
+    "link_dependency_test.cc"
+  DEPS
+    ::test_util
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::binding::c::loomc
+    loom::binding::c::test::testdata::link_dependency
+)
+
+loom_cc_test(
+  NAME
+    link_provider_roots_test
+  SRCS
+    "link_provider_roots_test.cc"
+  DEPS
+    ::test_util
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::binding::c::loomc
+    loom::link::testdata::provider_roots
+)
+
+loom_cc_test(
+  NAME
     link_test
   SRCS
     "link_test.cc"
@@ -120,13 +160,16 @@ loom_cc_test(
     iree::testing::gtest_main
     iree::testing::temp_file
     loom::binding::c::loomc
+    loom::binding::c::test::testdata::link_target_specialization
     loom::format::bytecode::writer
     loom::format::text::parser
     loom::format::text::printer
     loom::ir
     loom::ops::op_registry
     loom::ops::test
+    loom::target::profile
     loom::target::provider
+    loom::target::test::target_record_table
     loom::target::types
     loom::verify
 )
@@ -205,7 +248,6 @@ loom_cc_test(
     loom::binding::c::loomc
 )
 
-if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
 loom_cc_test(
   NAME
     target_test
@@ -213,12 +255,19 @@ loom_cc_test(
     "target_test.cc"
   DEPS
     ::test_util
+    iree::base
+    iree::io::byte_sequence
     iree::testing::gtest
     iree::testing::gtest_main
+    iree::testing::temp_file
     loom::binding::c::loomc
-    loom::binding::c::target::spirv
+    loom::ops::op_defs
+    loom::ops::test
+    loom::target::function_version
+    loom::target::profile
+    loom::target::provider
+    loom::target::test::target_record_table
 )
-endif()
 
 loom_cc_test(
   NAME

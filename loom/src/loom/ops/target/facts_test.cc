@@ -92,6 +92,24 @@ class TargetFactsTest : public ::testing::Test {
   loom_symbol_fact_table_t fact_table_;
 };
 
+TEST(TargetFactRelationTest, DistinctFactsRequireFamilyIdentityRelation) {
+  static const loom_target_fact_type_t kFactType = {
+      /*.name=*/IREE_SVL("no-identity"),
+      /*.storage_size=*/sizeof(loom_target_facts_t),
+  };
+  const loom_target_facts_t lhs = {
+      /*.fact_type=*/&kFactType,
+      /*.selector=*/7,
+  };
+  const loom_target_facts_t rhs = {
+      /*.fact_type=*/&kFactType,
+      /*.selector=*/7,
+  };
+
+  EXPECT_TRUE(loom_target_facts_satisfy_identity_requirement(&lhs, &lhs));
+  EXPECT_FALSE(loom_target_facts_satisfy_identity_requirement(&lhs, &rhs));
+}
+
 TEST_F(TargetFactsTest, ProjectsLaunchBoundsFromGenericTargetRecord) {
   ModulePtr module = ParseModule(R"(
 target.generic<reference> @gpu {
@@ -99,6 +117,7 @@ target.generic<reference> @gpu {
   max_workgroup_size_y = 8,
   max_workgroup_size_z = 4,
   max_flat_workgroup_size = 1024,
+  max_workgroup_storage_bytes = 65536,
   subgroup_size = 32,
   max_grid_size_x = 4096,
   max_grid_size_y = 2048,
@@ -109,15 +128,76 @@ target.generic<reference> @gpu {
 
   const loom_target_symbol_facts_t* facts =
       LookupTarget(module.get(), IREE_SV("gpu"));
-  EXPECT_EQ(facts->storage.snapshot.max_workgroup_size.x, 256u);
-  EXPECT_EQ(facts->storage.snapshot.max_workgroup_size.y, 8u);
-  EXPECT_EQ(facts->storage.snapshot.max_workgroup_size.z, 4u);
-  EXPECT_EQ(facts->storage.snapshot.max_flat_workgroup_size, 1024u);
-  EXPECT_EQ(facts->storage.snapshot.subgroup_size, 32u);
-  EXPECT_EQ(facts->storage.snapshot.max_grid_size.x, 4096u);
-  EXPECT_EQ(facts->storage.snapshot.max_grid_size.y, 2048u);
-  EXPECT_EQ(facts->storage.snapshot.max_grid_size.z, 1024u);
-  EXPECT_EQ(facts->storage.snapshot.max_flat_grid_size, 8589934592ull);
+  ASSERT_NE(facts->projection, nullptr);
+  EXPECT_TRUE(iree_string_view_equal(facts->projection->fact_type->name,
+                                     IREE_SV("target")));
+  EXPECT_TRUE(loom_target_facts_field_is_explicit(
+      facts->projection, LOOM_TARGET_FACT_FIELD_SUBGROUP_SIZE));
+  EXPECT_FALSE(loom_target_facts_field_is_explicit(
+      facts->projection, LOOM_TARGET_FACT_FIELD_CODEGEN_FORMAT));
+  const loom_target_bundle_storage_t& storage = facts->projection->storage;
+  EXPECT_EQ(storage.snapshot.max_workgroup_size.x, 256u);
+  EXPECT_EQ(storage.snapshot.max_workgroup_size.y, 8u);
+  EXPECT_EQ(storage.snapshot.max_workgroup_size.z, 4u);
+  EXPECT_EQ(storage.snapshot.max_flat_workgroup_size, 1024u);
+  EXPECT_EQ(storage.snapshot.max_workgroup_storage_bytes, 65536u);
+  EXPECT_EQ(storage.snapshot.subgroup_size, 32u);
+  EXPECT_EQ(storage.snapshot.max_grid_size.x, 4096u);
+  EXPECT_EQ(storage.snapshot.max_grid_size.y, 2048u);
+  EXPECT_EQ(storage.snapshot.max_grid_size.z, 1024u);
+  EXPECT_EQ(storage.snapshot.max_flat_grid_size, 8589934592ull);
+}
+
+TEST_F(TargetFactsTest,
+       GeneratedTargetSeparatesSelectorIdentityFromStructuralSpecialization) {
+  ModulePtr module = ParseModule(R"(
+target.generic<reference> @effective {
+  max_workgroup_size_x = 256
+}
+target.generic<reference> @equivalent {
+  max_workgroup_size_x = 256
+}
+target.generic<reference> @smaller_requirement {
+  max_workgroup_size_x = 128
+}
+)");
+
+  const loom_target_facts_t* effective =
+      LookupTarget(module.get(), IREE_SV("effective"))->projection;
+  const loom_target_facts_t* equivalent =
+      LookupTarget(module.get(), IREE_SV("equivalent"))->projection;
+  const loom_target_facts_t* smaller_requirement =
+      LookupTarget(module.get(), IREE_SV("smaller_requirement"))->projection;
+
+  EXPECT_NE(effective, equivalent);
+  EXPECT_TRUE(loom_target_facts_satisfy_specialization_requirement(effective,
+                                                                   equivalent));
+  EXPECT_TRUE(loom_target_facts_satisfy_specialization_requirement(
+      effective, smaller_requirement));
+  EXPECT_FALSE(loom_target_facts_satisfy_specialization_requirement(
+      smaller_requirement, effective));
+
+  EXPECT_TRUE(
+      loom_target_facts_satisfy_identity_requirement(effective, effective));
+  EXPECT_TRUE(
+      loom_target_facts_satisfy_identity_requirement(effective, equivalent));
+  EXPECT_TRUE(loom_target_facts_satisfy_identity_requirement(
+      smaller_requirement, effective));
+}
+
+TEST_F(TargetFactsTest, InvalidSelectorProducesNoFacts) {
+  ModulePtr module = ParseModule(R"(
+target.generic<reference> @gpu
+)");
+  const loom_symbol_id_t symbol_id = FindSymbol(module.get(), IREE_SV("gpu"));
+  loom_op_t* target_op = module->symbols.entries[symbol_id].defining_op;
+  loom_op_attrs(target_op)[loom_target_generic_kind_ATTR_INDEX] =
+      loom_attr_enum(UINT8_MAX);
+
+  const loom_symbol_facts_base_t* facts = nullptr;
+  IREE_ASSERT_OK(loom_symbol_fact_table_lookup(&fact_table_, module.get(),
+                                               symbol_id, &facts));
+  EXPECT_EQ(facts, nullptr);
 }
 
 }  // namespace

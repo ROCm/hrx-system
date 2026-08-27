@@ -6,7 +6,20 @@
 
 #include "iree/hal/drivers/amdgpu/util/device_library_target.h"
 
-#include "iree/hal/drivers/amdgpu/util/target_id.h"
+typedef struct iree_hal_amdgpu_device_library_target_variant_t {
+  // Embedded device-library artifact suffix.
+  iree_string_view_t artifact;
+  // Canonical target selecting the artifact.
+  iree_string_view_t target;
+} iree_hal_amdgpu_device_library_target_variant_t;
+
+static const iree_hal_amdgpu_device_library_target_variant_t
+    iree_hal_amdgpu_device_library_target_variants[] = {
+#define IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT(artifact, target) \
+  {IREE_SVL(artifact), IREE_SVL(target)},
+#include "iree/hal/drivers/amdgpu/util/device_library_target_map.inl"
+#undef IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT
+};
 
 bool iree_hal_amdgpu_device_library_target_matches_file_arch(
     iree_string_view_t file_arch, iree_string_view_t target) {
@@ -53,47 +66,77 @@ iree_hal_amdgpu_device_library_target_append_unique_candidate(
 }
 
 static iree_status_t
-iree_hal_amdgpu_device_library_target_append_target_id_candidate(
-    const iree_hal_amdgpu_target_id_t* target_id,
+iree_hal_amdgpu_device_library_target_append_identity_candidate(
+    const iree_hal_amdgpu_target_identity_t* identity,
     iree_hal_amdgpu_device_library_target_candidate_list_t* candidates) {
-  char target_id_buffer[64] = {0};
-  iree_host_size_t target_id_length = 0;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_target_id_format(target_id, sizeof(target_id_buffer),
-                                       target_id_buffer, &target_id_length));
+  char artifact_key_buffer[64] = {0};
+  iree_host_size_t artifact_key_length = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_identity_format_artifact_key(
+      identity, sizeof(artifact_key_buffer), artifact_key_buffer,
+      &artifact_key_length));
   return iree_hal_amdgpu_device_library_target_append_unique_candidate(
-      iree_make_string_view(target_id_buffer, target_id_length), candidates);
+      iree_make_string_view(artifact_key_buffer, artifact_key_length),
+      candidates);
 }
 
-iree_status_t iree_hal_amdgpu_device_library_target_candidates_from_isa(
-    iree_string_view_t isa_name,
+static iree_string_view_t
+iree_hal_amdgpu_device_library_target_lookup_variant_for_physical_target(
+    const iree_hal_amdgpu_target_identity_t* physical_identity) {
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(iree_hal_amdgpu_device_library_target_variants);
+       ++i) {
+    const iree_hal_amdgpu_device_library_target_variant_t* variant =
+        &iree_hal_amdgpu_device_library_target_variants[i];
+    if (iree_string_view_equal(variant->target, physical_identity->target)) {
+      return variant->artifact;
+    }
+  }
+  return iree_string_view_empty();
+}
+
+iree_status_t iree_hal_amdgpu_device_library_target_candidates_from_agent_isa(
+    const iree_hal_amdgpu_target_identity_t* physical_identity,
+    const iree_hal_amdgpu_target_identity_t* isa_identity,
     iree_hal_amdgpu_device_library_target_candidate_list_t* out_candidates) {
+  IREE_ASSERT_ARGUMENT(physical_identity);
+  IREE_ASSERT_ARGUMENT(isa_identity);
   IREE_ASSERT_ARGUMENT(out_candidates);
   memset(out_candidates, 0, sizeof(*out_candidates));
 
-  iree_hal_amdgpu_target_id_t agent_target_id;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_target_id_parse_hsa_isa_name(isa_name, &agent_target_id));
+  // A target-overlay artifact suppresses every fallback ISA for its physical
+  // target. Otherwise a lower-priority generic ISA could reintroduce the
+  // incompatible family artifact this variant exists to replace.
+  const iree_string_view_t variant_artifact =
+      iree_hal_amdgpu_device_library_target_lookup_variant_for_physical_target(
+          physical_identity);
+  if (!iree_string_view_is_empty(variant_artifact)) {
+    if (iree_hal_amdgpu_target_identity_equal(physical_identity,
+                                              isa_identity)) {
+      return iree_hal_amdgpu_device_library_target_append_unique_candidate(
+          variant_artifact, out_candidates);
+    }
+    return iree_ok_status();
+  }
 
   // Try the most specific runtime binary names first. Direct arch names beat
   // code-object target fallbacks because a concrete code object is preferable
   // to a family-generic code object when both are bundled into the runtime.
   IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_device_library_target_append_target_id_candidate(
-          &agent_target_id, out_candidates));
+      iree_hal_amdgpu_device_library_target_append_identity_candidate(
+          isa_identity, out_candidates));
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_device_library_target_append_unique_candidate(
-          agent_target_id.processor, out_candidates));
-  if (agent_target_id.kind == IREE_HAL_AMDGPU_TARGET_KIND_EXACT) {
-    iree_hal_amdgpu_target_id_t code_object_target_id;
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_lookup_code_object_target(
-        &agent_target_id, &code_object_target_id));
+          isa_identity->processor, out_candidates));
+  if (isa_identity->kind == IREE_HAL_AMDGPU_TARGET_KIND_EXACT) {
+    iree_hal_amdgpu_target_identity_t code_object_identity;
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_identity_project_code_object(
+        isa_identity, &code_object_identity));
     IREE_RETURN_IF_ERROR(
-        iree_hal_amdgpu_device_library_target_append_target_id_candidate(
-            &code_object_target_id, out_candidates));
+        iree_hal_amdgpu_device_library_target_append_identity_candidate(
+            &code_object_identity, out_candidates));
     IREE_RETURN_IF_ERROR(
         iree_hal_amdgpu_device_library_target_append_unique_candidate(
-            code_object_target_id.processor, out_candidates));
+            code_object_identity.processor, out_candidates));
   }
   return iree_ok_status();
 }

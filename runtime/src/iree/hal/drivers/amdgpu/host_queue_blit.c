@@ -11,6 +11,7 @@
 #include "iree/base/alignment.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/device/blit.h"
+#include "iree/hal/drivers/amdgpu/host_queue_policy.h"
 #include "iree/hal/drivers/amdgpu/host_queue_profile.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_emitter.h"
 
@@ -214,6 +215,8 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_pm4_write_data(
     return iree_make_status(IREE_STATUS_INTERNAL,
                             "PM4 WRITE_DATA payload does not fit IB slot");
   }
+  submission.minimum_release_scope =
+      iree_hal_amdgpu_host_queue_buffer_release_scope(target_buffer);
   uint64_t submission_epoch = 0;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_finish_pm4_ib_submission(
       queue, resolution, signal_semaphore_list, operation_resources,
@@ -292,6 +295,10 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_pm4_copy_data(
     return iree_make_status(IREE_STATUS_INTERNAL,
                             "PM4 COPY_DATA payload does not fit IB slot");
   }
+  submission.minimum_acquire_scope =
+      iree_hal_amdgpu_host_queue_buffer_acquire_scope(source_buffer);
+  submission.minimum_release_scope =
+      iree_hal_amdgpu_host_queue_buffer_release_scope(target_buffer);
   uint64_t submission_epoch = 0;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_finish_pm4_ib_submission(
       queue, resolution, signal_semaphore_list, operation_resources,
@@ -384,10 +391,10 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_fill(
           IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_FILL, length);
   iree_status_t status = iree_hal_amdgpu_host_queue_submit_dispatch_packet(
       queue, resolution, signal_semaphore_list, &dispatch_packet, &kernargs,
-      sizeof(kernargs), operation_resources,
+      IREE_HAL_AMDGPU_DEVICE_BUFFER_FILL_KERNARG_SIZE, operation_resources,
       IREE_ARRAYSIZE(operation_resources), IREE_HSA_FENCE_SCOPE_NONE,
-      IREE_HSA_FENCE_SCOPE_NONE, &profile_event_info, submission_flags,
-      out_ready, &submission_id);
+      iree_hal_amdgpu_host_queue_buffer_release_scope(target_buffer),
+      &profile_event_info, submission_flags, out_ready, &submission_id);
   if (iree_status_is_ok(status) && *out_ready) {
     iree_hal_amdgpu_host_queue_record_submitted_blit_profile_event(
         queue, resolution, signal_semaphore_list, submission_id,
@@ -566,10 +573,11 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_copy(
           profile_event_type, length);
   iree_status_t status = iree_hal_amdgpu_host_queue_submit_dispatch_packet(
       queue, resolution, signal_semaphore_list, &dispatch_packet, &kernargs,
-      sizeof(kernargs), operation_resources,
-      IREE_ARRAYSIZE(operation_resources), IREE_HSA_FENCE_SCOPE_NONE,
-      IREE_HSA_FENCE_SCOPE_NONE, &profile_event_info, submission_flags,
-      out_ready, &submission_id);
+      IREE_HAL_AMDGPU_DEVICE_BUFFER_COPY_KERNARG_SIZE, operation_resources,
+      IREE_ARRAYSIZE(operation_resources),
+      iree_hal_amdgpu_host_queue_buffer_acquire_scope(source_buffer),
+      iree_hal_amdgpu_host_queue_buffer_release_scope(target_buffer),
+      &profile_event_info, submission_flags, out_ready, &submission_id);
   if (iree_status_is_ok(status) && *out_ready) {
     iree_hal_amdgpu_host_queue_record_submitted_blit_profile_event(
         queue, resolution, signal_semaphore_list, submission_id,
@@ -647,14 +655,19 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_copy_with_action(
       &profile_event_info, out_ready, &submission));
   if (!*out_ready) return iree_ok_status();
 
-  memcpy(submission.kernel.kernargs.blocks->data, &kernargs, sizeof(kernargs));
+  memcpy(submission.kernel.kernargs.blocks->data, &kernargs,
+         IREE_HAL_AMDGPU_DEVICE_BUFFER_COPY_KERNARG_SIZE);
   submission.dispatch_setup =
       iree_hal_amdgpu_host_queue_write_dispatch_packet_body(
           &submission.dispatch_slot->dispatch, &dispatch_packet,
           submission.kernel.kernargs.blocks->data,
           submission.dispatch_completion_signal);
-  submission.minimum_acquire_scope = minimum_acquire_scope;
-  submission.minimum_release_scope = minimum_release_scope;
+  submission.minimum_acquire_scope = iree_hal_amdgpu_host_queue_max_fence_scope(
+      minimum_acquire_scope,
+      iree_hal_amdgpu_host_queue_buffer_acquire_scope(source_buffer));
+  submission.minimum_release_scope = iree_hal_amdgpu_host_queue_max_fence_scope(
+      minimum_release_scope,
+      iree_hal_amdgpu_host_queue_buffer_release_scope(target_buffer));
   submission.kernel.pre_signal_action = pre_signal_action;
   const uint64_t submission_id =
       iree_hal_amdgpu_host_queue_finish_dispatch_submission(
@@ -678,7 +691,7 @@ iree_status_t iree_hal_amdgpu_host_queue_prepare_update_copy(
     uint8_t** out_target_device_ptr) {
   *out_source_bytes = NULL;
   *out_source_length = 0;
-  *out_target_device_ptr = NULL;
+  if (out_target_device_ptr) *out_target_device_ptr = NULL;
 
   if (IREE_UNLIKELY(!source_buffer)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -720,21 +733,24 @@ iree_status_t iree_hal_amdgpu_host_queue_prepare_update_copy(
   }
   (void)source_end;
 
-  iree_hal_buffer_t* allocated_target_buffer =
-      iree_hal_buffer_allocated_buffer(target_buffer);
-  uint8_t* target_device_ptr =
-      (uint8_t*)iree_hal_amdgpu_buffer_device_pointer(allocated_target_buffer);
-  if (IREE_UNLIKELY(!target_device_ptr)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "target buffer must be backed by an AMDGPU allocation");
+  if (out_target_device_ptr) {
+    iree_hal_buffer_t* allocated_target_buffer =
+        iree_hal_buffer_allocated_buffer(target_buffer);
+    uint8_t* target_device_ptr =
+        (uint8_t*)iree_hal_amdgpu_buffer_device_pointer(
+            allocated_target_buffer);
+    if (IREE_UNLIKELY(!target_device_ptr)) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "target buffer does not yet have an AMDGPU backing allocation");
+    }
+    target_device_ptr +=
+        iree_hal_buffer_byte_offset(target_buffer) + target_offset;
+    *out_target_device_ptr = target_device_ptr;
   }
-  target_device_ptr +=
-      iree_hal_buffer_byte_offset(target_buffer) + target_offset;
 
   *out_source_bytes = (const uint8_t*)source_buffer + source_offset;
   *out_source_length = source_length;
-  *out_target_device_ptr = target_device_ptr;
   return iree_ok_status();
 }
 
@@ -834,7 +850,8 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_update(
 
   uint8_t* staged_source_bytes =
       (uint8_t*)submission.kernel.kernargs.blocks + source_payload_offset;
-  memcpy(submission.kernel.kernargs.blocks->data, &kernargs, sizeof(kernargs));
+  memcpy(submission.kernel.kernargs.blocks->data, &kernargs,
+         IREE_HAL_AMDGPU_DEVICE_BUFFER_COPY_KERNARG_SIZE);
   ((iree_hal_amdgpu_device_buffer_copy_kernargs_t*)
        submission.kernel.kernargs.blocks->data)
       ->source_ptr = staged_source_bytes;
@@ -844,6 +861,8 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_update(
           &submission.dispatch_slot->dispatch, &dispatch_packet,
           submission.kernel.kernargs.blocks->data,
           submission.dispatch_completion_signal);
+  submission.minimum_release_scope =
+      iree_hal_amdgpu_host_queue_buffer_release_scope(target_buffer);
 
   iree_hal_resource_t* operation_resources[1] = {
       (iree_hal_resource_t*)target_buffer,

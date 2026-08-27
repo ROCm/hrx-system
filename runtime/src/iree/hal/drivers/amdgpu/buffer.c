@@ -53,6 +53,9 @@ struct iree_hal_amdgpu_buffer_t {
   // Physical device ordinal used for profiling allocation/free events.
   uint32_t profile_physical_device_ordinal;
 
+  // Immutable width and scope cells supported by the backing allocation.
+  iree_hal_amdgpu_atomic_memory_cell_flags_t atomic_memory_cells;
+
   // Byte alignment used for profiling allocation/free events.
   iree_device_size_t profile_alignment;
 };
@@ -236,13 +239,54 @@ void* iree_hal_amdgpu_buffer_device_pointer(iree_hal_buffer_t* base_buffer) {
   return ((iree_hal_amdgpu_buffer_t*)base_buffer)->host_ptr;
 }
 
+iree_hal_amdgpu_atomic_memory_cell_flags_t
+iree_hal_amdgpu_buffer_atomic_memory_cells(iree_hal_buffer_t* base_buffer) {
+  if (!iree_hal_resource_is((const iree_hal_resource_t*)base_buffer,
+                            &iree_hal_amdgpu_buffer_vtable)) {
+    if (iree_hal_amdgpu_transient_buffer_isa(base_buffer)) {
+      iree_hal_buffer_t* backing_buffer =
+          iree_hal_amdgpu_transient_buffer_backing_buffer(base_buffer);
+      if (!backing_buffer) {
+        return IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE;
+      }
+      return iree_hal_amdgpu_buffer_atomic_memory_cells(backing_buffer);
+    }
+    return IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE;
+  }
+  return ((iree_hal_amdgpu_buffer_t*)base_buffer)->atomic_memory_cells;
+}
+
+bool iree_hal_amdgpu_buffer_uses_release_callback(
+    iree_hal_buffer_t* base_buffer,
+    iree_hal_buffer_release_callback_t release_callback) {
+  if (!iree_hal_resource_is((const iree_hal_resource_t*)base_buffer,
+                            &iree_hal_amdgpu_buffer_vtable)) {
+    return false;
+  }
+  const iree_hal_amdgpu_buffer_t* buffer =
+      (const iree_hal_amdgpu_buffer_t*)base_buffer;
+  return buffer->release_callback.fn == release_callback.fn &&
+         buffer->release_callback.user_data == release_callback.user_data;
+}
+
+void iree_hal_amdgpu_buffer_disarm_storage(
+    iree_hal_buffer_t* base_buffer,
+    iree_hal_buffer_release_callback_t release_callback) {
+  IREE_ASSERT(iree_hal_amdgpu_buffer_uses_release_callback(base_buffer,
+                                                           release_callback));
+  iree_hal_amdgpu_buffer_t* buffer = iree_hal_amdgpu_buffer_cast(base_buffer);
+  buffer->host_ptr = NULL;
+  buffer->release_callback = iree_hal_buffer_release_callback_null();
+}
+
 static void iree_hal_amdgpu_buffer_initialize(
     const iree_hal_amdgpu_libhsa_t* libhsa,
     iree_hal_buffer_placement_t placement, iree_hal_memory_type_t memory_type,
     iree_hal_memory_access_t allowed_access,
-    iree_hal_buffer_usage_t allowed_usage, iree_device_size_t allocation_size,
-    iree_device_size_t byte_length, void* host_ptr,
-    iree_hal_buffer_release_callback_t release_callback,
+    iree_hal_buffer_usage_t allowed_usage,
+    iree_hal_amdgpu_atomic_memory_cell_flags_t atomic_memory_cells,
+    iree_device_size_t allocation_size, iree_device_size_t byte_length,
+    void* host_ptr, iree_hal_buffer_release_callback_t release_callback,
     iree_hal_amdgpu_buffer_pool_t* pool, iree_allocator_t host_allocator,
     iree_hal_amdgpu_buffer_t* out_buffer) {
   iree_hal_buffer_initialize(placement, &out_buffer->base, allocation_size,
@@ -259,6 +303,7 @@ static void iree_hal_amdgpu_buffer_initialize(
   out_buffer->profile_session_id = 0;
   out_buffer->profile_pool_id = 0;
   out_buffer->profile_physical_device_ordinal = UINT32_MAX;
+  out_buffer->atomic_memory_cells = atomic_memory_cells;
   out_buffer->profile_alignment = 0;
 }
 
@@ -266,9 +311,10 @@ iree_status_t iree_hal_amdgpu_buffer_create(
     const iree_hal_amdgpu_libhsa_t* libhsa,
     iree_hal_buffer_placement_t placement, iree_hal_memory_type_t memory_type,
     iree_hal_memory_access_t allowed_access,
-    iree_hal_buffer_usage_t allowed_usage, iree_device_size_t allocation_size,
-    iree_device_size_t byte_length, void* host_ptr,
-    iree_hal_buffer_release_callback_t release_callback,
+    iree_hal_buffer_usage_t allowed_usage,
+    iree_hal_amdgpu_atomic_memory_cell_flags_t atomic_memory_cells,
+    iree_device_size_t allocation_size, iree_device_size_t byte_length,
+    void* host_ptr, iree_hal_buffer_release_callback_t release_callback,
     iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer) {
   IREE_ASSERT_ARGUMENT(out_buffer);
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -280,8 +326,8 @@ iree_status_t iree_hal_amdgpu_buffer_create(
       iree_allocator_malloc(host_allocator, sizeof(*buffer), (void**)&buffer));
   iree_hal_amdgpu_buffer_initialize(
       libhsa, placement, memory_type, allowed_access, allowed_usage,
-      allocation_size, byte_length, host_ptr, release_callback, /*pool=*/NULL,
-      host_allocator, buffer);
+      atomic_memory_cells, allocation_size, byte_length, host_ptr,
+      release_callback, /*pool=*/NULL, host_allocator, buffer);
 
   *out_buffer = &buffer->base;
   IREE_TRACE_ZONE_END(z0);
@@ -292,9 +338,10 @@ iree_status_t iree_hal_amdgpu_buffer_create_pooled(
     const iree_hal_amdgpu_libhsa_t* libhsa,
     iree_hal_buffer_placement_t placement, iree_hal_memory_type_t memory_type,
     iree_hal_memory_access_t allowed_access,
-    iree_hal_buffer_usage_t allowed_usage, iree_device_size_t allocation_size,
-    iree_device_size_t byte_length, void* host_ptr,
-    iree_hal_buffer_release_callback_t release_callback,
+    iree_hal_buffer_usage_t allowed_usage,
+    iree_hal_amdgpu_atomic_memory_cell_flags_t atomic_memory_cells,
+    iree_device_size_t allocation_size, iree_device_size_t byte_length,
+    void* host_ptr, iree_hal_buffer_release_callback_t release_callback,
     iree_hal_amdgpu_buffer_pool_t* pool, iree_allocator_t host_allocator,
     iree_hal_buffer_t** out_buffer) {
   IREE_ASSERT_ARGUMENT(pool);
@@ -307,8 +354,8 @@ iree_status_t iree_hal_amdgpu_buffer_create_pooled(
       z0, iree_hal_amdgpu_buffer_pool_acquire(pool, &buffer));
   iree_hal_amdgpu_buffer_initialize(
       libhsa, placement, memory_type, allowed_access, allowed_usage,
-      allocation_size, byte_length, host_ptr, release_callback, pool,
-      host_allocator, buffer);
+      atomic_memory_cells, allocation_size, byte_length, host_ptr,
+      release_callback, pool, host_allocator, buffer);
 
   *out_buffer = &buffer->base;
   IREE_TRACE_ZONE_END(z0);
@@ -364,6 +411,7 @@ static void iree_hal_amdgpu_buffer_destroy(iree_hal_buffer_t* base_buffer) {
   buffer->profile_session_id = 0;
   buffer->profile_pool_id = 0;
   buffer->profile_physical_device_ordinal = UINT32_MAX;
+  buffer->atomic_memory_cells = IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE;
   buffer->profile_alignment = 0;
   if (pool) {
     iree_hal_amdgpu_buffer_pool_release(pool, buffer);

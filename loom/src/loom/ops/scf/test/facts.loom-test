@@ -6,8 +6,8 @@ func.def @for_iv_static_bounds() -> (i64, i64, i64) {
   %lo = index.constant 4 : index
   %hi = index.constant 12 : index
   %step = index.constant 2 : index
-  %zero = scalar.constant 0 : i64
-  %iv_lo, %iv_hi, %iv_div = scf.for %iv = [%lo to %hi step %step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_div = %zero : i64) -> (i64, i64, i64) {
+  %c0 = scalar.constant 0 : i64
+  %iv_lo, %iv_hi, %iv_div = scf.for %iv = [%lo to %hi step %step](%carry_lo = %c0 : i64, %carry_hi = %c0 : i64, %carry_div = %c0 : i64) -> (i64, i64, i64) {
     %fact_lo = test.fact_range_lo %iv : index -> i64
     %fact_hi = test.fact_range_hi %iv : index -> i64
     %fact_div = test.fact_divisor %iv : index -> i64
@@ -21,8 +21,8 @@ func.def @for_iv_static_bounds() -> (i64, i64, i64) {
   %lo = index.constant 4 : index
   %hi = index.constant 12 : index
   %step = index.constant 2 : index
-  %zero = scalar.constant 0 : i64
-  %iv_lo, %iv_hi, %iv_div = scf.for %iv = [%lo to %hi step %step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_div = %zero : i64) -> (i64, i64, i64) {
+  %c0 = scalar.constant 0 : i64
+  %iv_lo, %iv_hi, %iv_div = scf.for %iv = [%lo to %hi step %step](%carry_lo = %c0 : i64, %carry_hi = %c0 : i64, %carry_div = %c0 : i64) -> (i64, i64, i64) {
     %fact_lo = scalar.constant 4 : i64
     %fact_hi = scalar.constant 10 : i64
     %fact_div = scalar.constant 2 : i64
@@ -39,9 +39,9 @@ func.def @for_iv_assumed_upper_bound(%n: index) -> (i64, i64, i64, i1) {
   %lo = index.constant 0 : index
   %n2 = index.assume %n [range(%n, 16, 64)] : index
   %step = index.constant 4 : index
-  %zero = scalar.constant 0 : i64
+  %c0 = scalar.constant 0 : i64
   %false = scalar.constant false : i1
-  %iv_lo, %iv_hi, %iv_div, %iv_non_negative = scf.for %iv = [%lo to %n2 step %step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_div = %zero : i64, %carry_non_negative = %false : i1) -> (i64, i64, i64, i1) {
+  %iv_lo, %iv_hi, %iv_div, %iv_non_negative = scf.for %iv = [%lo to %n2 step %step](%carry_lo = %c0 : i64, %carry_hi = %c0 : i64, %carry_div = %c0 : i64, %carry_non_negative = %false : i1) -> (i64, i64, i64, i1) {
     %fact_lo = test.fact_range_lo %iv : index -> i64
     %fact_hi = test.fact_range_hi %iv : index -> i64
     %fact_div = test.fact_divisor %iv : index -> i64
@@ -56,9 +56,9 @@ func.def @for_iv_assumed_upper_bound(%n: index) -> (i64, i64, i64, i1) {
   %lo = index.constant 0 : index
   %n2 = index.assume %n [range(%n, 16, 64)] : index
   %step = index.constant 4 : index
-  %zero = scalar.constant 0 : i64
+  %c0 = scalar.constant 0 : i64
   %false = scalar.constant false : i1
-  %iv_lo, %iv_hi, %iv_div, %iv_non_negative = scf.for %iv = [%lo to %n2 step %step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_div = %zero : i64, %carry_non_negative = %false : i1) -> (i64, i64, i64, i1) {
+  %iv_lo, %iv_hi, %iv_div, %iv_non_negative = scf.for %iv = [%lo to %n2 step %step](%carry_lo = %c0 : i64, %carry_hi = %c0 : i64, %carry_div = %c0 : i64, %carry_non_negative = %false : i1) -> (i64, i64, i64, i1) {
     %fact_lo = scalar.constant 0 : i64
     %fact_hi = scalar.constant 60 : i64
     %fact_div = scalar.constant 4 : i64
@@ -79,9 +79,9 @@ func.def @for_iv_matvec_lane_address_range(%lane0: index) -> (i64, i64, i1) {
   %block_step = index.constant 4 : index
   %lanes_per_group = index.constant 16 : index
   %block_stride = index.constant 105 : index
-  %zero = scalar.constant 0 : i64
+  %c0 = scalar.constant 0 : i64
   %false = scalar.constant false : i1
-  %linear_lo, %linear_hi, %linear_non_negative = scf.for %block_base = [%block_begin to %block_end step %block_step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_non_negative = %false : i1) -> (i64, i64, i1) {
+  %linear_lo, %linear_hi, %linear_non_negative = scf.for %block_base = [%block_begin to %block_end step %block_step](%carry_lo = %c0 : i64, %carry_hi = %c0 : i64, %carry_non_negative = %false : i1) -> (i64, i64, i1) {
     %lane_group = index.div %lane, %lanes_per_group : index
     %lane_offset = index.rem %lane, %lanes_per_group : index
     %block = index.add %block_base, %lane_group : index
@@ -100,9 +100,9 @@ func.def @for_iv_matvec_lane_address_range(%lane0: index) -> (i64, i64, i1) {
   %block_begin = index.constant 0 : index
   %block_end = index.constant 12 : index
   %block_step = index.constant 4 : index
-  %zero = scalar.constant 0 : i64
+  %c0 = scalar.constant 0 : i64
   %false = scalar.constant false : i1
-  %linear_lo, %linear_hi, %linear_non_negative = scf.for %block_base = [%block_begin to %block_end step %block_step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_non_negative = %false : i1) -> (i64, i64, i1) {
+  %linear_lo, %linear_hi, %linear_non_negative = scf.for %block_base = [%block_begin to %block_end step %block_step](%carry_lo = %c0 : i64, %carry_hi = %c0 : i64, %carry_non_negative = %false : i1) -> (i64, i64, i1) {
     %fact_lo = scalar.constant 0 : i64
     %fact_hi = scalar.constant 1170 : i64
     %fact_non_negative = scalar.constant true : i1
@@ -119,8 +119,8 @@ func.def @for_iv_projection_pair_origins() -> (i64, i64, i64) {
   %start = index.constant 0 : index
   %limit = index.constant 3584 : index
   %step = index.constant 2 : index
-  %zero = scalar.constant 0 : i64
-  %iv_lo, %iv_hi, %iv_div = scf.for %origin = [%start to %limit step %step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_div = %zero : i64) -> (i64, i64, i64) {
+  %c0 = scalar.constant 0 : i64
+  %iv_lo, %iv_hi, %iv_div = scf.for %origin = [%start to %limit step %step](%carry_lo = %c0 : i64, %carry_hi = %c0 : i64, %carry_div = %c0 : i64) -> (i64, i64, i64) {
     %fact_lo = test.fact_range_lo %origin : index -> i64
     %fact_hi = test.fact_range_hi %origin : index -> i64
     %fact_div = test.fact_divisor %origin : index -> i64
@@ -134,8 +134,8 @@ func.def @for_iv_projection_pair_origins() -> (i64, i64, i64) {
   %start = index.constant 0 : index
   %limit = index.constant 3584 : index
   %step = index.constant 2 : index
-  %zero = scalar.constant 0 : i64
-  %iv_lo, %iv_hi, %iv_div = scf.for %origin = [%start to %limit step %step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_div = %zero : i64) -> (i64, i64, i64) {
+  %c0 = scalar.constant 0 : i64
+  %iv_lo, %iv_hi, %iv_div = scf.for %origin = [%start to %limit step %step](%carry_lo = %c0 : i64, %carry_hi = %c0 : i64, %carry_div = %c0 : i64) -> (i64, i64, i64) {
     %fact_lo = scalar.constant 0 : i64
     %fact_hi = scalar.constant 3582 : i64
     %fact_div = scalar.constant 2 : i64
@@ -152,8 +152,8 @@ func.def @for_iv_single_trip_exact() -> (i64, i64, i64) {
   %lo = index.constant 8 : index
   %hi = index.constant 12 : index
   %step = index.constant 4 : index
-  %zero = scalar.constant 0 : i64
-  %iv_lo, %iv_hi, %iv_div = scf.for %iv = [%lo to %hi step %step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_div = %zero : i64) -> (i64, i64, i64) {
+  %c0 = scalar.constant 0 : i64
+  %iv_lo, %iv_hi, %iv_div = scf.for %iv = [%lo to %hi step %step](%carry_lo = %c0 : i64, %carry_hi = %c0 : i64, %carry_div = %c0 : i64) -> (i64, i64, i64) {
     %fact_lo = test.fact_range_lo %iv : index -> i64
     %fact_hi = test.fact_range_hi %iv : index -> i64
     %fact_div = test.fact_divisor %iv : index -> i64
@@ -178,12 +178,12 @@ func.def @for_iv_feeds_index_consumers() -> (index, i1) {
   %lo = index.constant 8 : index
   %hi = index.constant 12 : index
   %step = index.constant 4 : index
-  %zero = index.constant 0 : index
+  %c0 = index.constant 0 : index
   %false = scalar.constant false : i1
-  %sum, %is_before_limit = scf.for %iv = [%lo to %hi step %step](%carry_sum = %zero : index, %carry_cmp = %false : i1) -> (index, i1) {
-    %two = index.constant 2 : index
+  %sum, %is_before_limit = scf.for %iv = [%lo to %hi step %step](%carry_sum = %c0 : index, %carry_cmp = %false : i1) -> (index, i1) {
+    %c2 = index.constant 2 : index
     %limit = index.constant 12 : index
-    %plus = index.add %iv, %two : index
+    %plus = index.add %iv, %c2 : index
     %cmp = index.cmp slt, %iv, %limit : index
     scf.yield %plus, %cmp : index, i1
   }
@@ -204,8 +204,8 @@ func.def @for_iv_feeds_index_consumers() -> (index, i1) {
 func.def @for_iv_unknown_step_is_unknown(%step: index) -> (i64, i64, i64) {
   %lo = index.constant 0 : index
   %hi = index.constant 16 : index
-  %zero = scalar.constant 0 : i64
-  %iv_lo, %iv_hi, %iv_div = scf.for %iv = [%lo to %hi step %step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_div = %zero : i64) -> (i64, i64, i64) {
+  %c0 = scalar.constant 0 : i64
+  %iv_lo, %iv_hi, %iv_div = scf.for %iv = [%lo to %hi step %step](%carry_lo = %c0 : i64, %carry_hi = %c0 : i64, %carry_div = %c0 : i64) -> (i64, i64, i64) {
     %fact_lo = test.fact_range_lo %iv : index -> i64
     %fact_hi = test.fact_range_hi %iv : index -> i64
     %fact_div = test.fact_divisor %iv : index -> i64
@@ -218,8 +218,8 @@ func.def @for_iv_unknown_step_is_unknown(%step: index) -> (i64, i64, i64) {
 func.def @for_iv_unknown_step_is_unknown(%step: index) -> (i64, i64, i64) {
   %lo = index.constant 0 : index
   %hi = index.constant 16 : index
-  %zero = scalar.constant 0 : i64
-  %iv_lo, %iv_hi, %iv_div = scf.for %iv = [%lo to %hi step %step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_div = %zero : i64) -> (i64, i64, i64) {
+  %c0 = scalar.constant 0 : i64
+  %iv_lo, %iv_hi, %iv_div = scf.for %iv = [%lo to %hi step %step](%carry_lo = %c0 : i64, %carry_hi = %c0 : i64, %carry_div = %c0 : i64) -> (i64, i64, i64) {
     %fact_lo = scalar.constant -9223372036854775808 : i64
     %fact_hi = scalar.constant 9223372036854775807 : i64
     %fact_div = scalar.constant 1 : i64
@@ -236,9 +236,9 @@ func.def @for_iter_arg_facts_reach_body(%n: index) -> (i64) {
   %lo = index.constant 0 : index
   %n2 = index.assume %n [range(%n, 1, 4)] : index
   %step = index.constant 1 : index
-  %seven = scalar.constant 7 : i64
-  %zero = scalar.constant 0 : i64
-  %forwarded, %observed = scf.for %iv = [%lo to %n2 step %step](%acc = %seven : i64, %prev = %zero : i64) -> (i64, i64) {
+  %c7 = scalar.constant 7 : i64
+  %c0 = scalar.constant 0 : i64
+  %forwarded, %observed = scf.for %iv = [%lo to %n2 step %step](%acc = %c7 : i64, %prev = %c0 : i64) -> (i64, i64) {
     %body_lo = test.fact_range_lo %acc : i64 -> i64
     scf.yield %acc, %body_lo : i64, i64
   }
@@ -250,8 +250,8 @@ func.def @for_iter_arg_facts_reach_body(%n: index) -> (i64) {
   %lo = index.constant 0 : index
   %n2 = index.assume %n [range(%n, 1, 4)] : index
   %step = index.constant 1 : index
-  %zero = scalar.constant 0 : i64
-  %observed = scf.for %iv = [%lo to %n2 step %step](%prev = %zero : i64) -> (i64) {
+  %c0 = scalar.constant 0 : i64
+  %observed = scf.for %iv = [%lo to %n2 step %step](%prev = %c0 : i64) -> (i64) {
     %body_lo = scalar.constant 7 : i64
     scf.yield %body_lo : i64
   }
@@ -266,8 +266,8 @@ func.def @for_may_zero_result_uses_loop_summary(%n: index) -> (i64) {
   %lo = index.constant 0 : index
   %n2 = index.assume %n [range(%n, 0, 4)] : index
   %step = index.constant 1 : index
-  %seven = scalar.constant 7 : i64
-  %observed = scf.for %iv = [%lo to %n2 step %step](%acc = %seven : i64) -> (i64) {
+  %c7 = scalar.constant 7 : i64
+  %observed = scf.for %iv = [%lo to %n2 step %step](%acc = %c7 : i64) -> (i64) {
     %body_lo = test.fact_range_lo %acc : i64 -> i64
     scf.yield %body_lo : i64
   }
@@ -289,10 +289,10 @@ func.def @for_zero_trip_result_is_init() -> (i64) {
   %lo = index.constant 8 : index
   %hi = index.constant 4 : index
   %step = index.constant 1 : index
-  %seven = scalar.constant 7 : i64
-  %forty_two = scalar.constant 42 : i64
-  %observed = scf.for %iv = [%lo to %hi step %step](%acc = %seven : i64) -> (i64) {
-    scf.yield %forty_two : i64
+  %c7 = scalar.constant 7 : i64
+  %c42 = scalar.constant 42 : i64
+  %observed = scf.for %iv = [%lo to %hi step %step](%acc = %c7 : i64) -> (i64) {
+    scf.yield %c42 : i64
   }
   %result_lo = test.fact_range_lo %observed : i64 -> i64
   func.return %result_lo : i64
@@ -312,10 +312,10 @@ func.def @for_arithmetic_carried_widens_to_unknown(%n: index) -> (i64, i64) {
   %lo = index.constant 0 : index
   %n2 = index.assume %n [range(%n, 0, 4)] : index
   %step = index.constant 1 : index
-  %zero = scalar.constant 0 : i64
-  %one = scalar.constant 1 : i64
-  %observed = scf.for %iv = [%lo to %n2 step %step](%acc = %zero : i64) -> (i64) {
-    %next = scalar.addi %acc, %one : i64
+  %c0 = scalar.constant 0 : i64
+  %c1 = scalar.constant 1 : i64
+  %observed = scf.for %iv = [%lo to %n2 step %step](%acc = %c0 : i64) -> (i64) {
+    %next = scalar.addi %acc, %c1 : i64
     scf.yield %next : i64
   }
   %result_lo = test.fact_range_lo %observed : i64 -> i64
@@ -335,8 +335,8 @@ func.def @for_arithmetic_carried_widens_to_unknown(%n: index) -> (i64, i64) {
 // The same loop-like summary path handles condition-region loops. The carried
 // value is forwarded unchanged through both the false exit and true body paths.
 func.def @while_unchanged_carried_result(%keep_going: i1) -> (i64) {
-  %nine = scalar.constant 9 : i64
-  %result = scf.while(%before = %nine : i64) -> (i64) {
+  %c9 = scalar.constant 9 : i64
+  %result = scf.while(%before = %c9 : i64) -> (i64) {
     scf.condition %keep_going, %before : i1, i64
   } do(%body: i64) {
     scf.yield %body : i64
@@ -353,6 +353,229 @@ func.def @while_unchanged_carried_result(%keep_going: i1) -> (i64) {
 
 // ====
 
+// RegionBranch results meet the corresponding yielded facts after analyzing
+// every branch body. Side effects keep the conditional structured so this
+// exercises the branch summary instead of select canonicalization.
+func.def @if_result_meets_yielded_facts(%condition: i1) -> (i64, i64, i64) {
+  %c4 = scalar.constant 4 : i64
+  %c12 = scalar.constant 12 : i64
+  %result = scf.if %condition -> (i64) {
+    test.use %c4 : i64
+    scf.yield %c4 : i64
+  } else {
+    test.use %c12 : i64
+    scf.yield %c12 : i64
+  }
+  %result_lo = test.fact_range_lo %result : i64 -> i64
+  %result_hi = test.fact_range_hi %result : i64 -> i64
+  %result_div = test.fact_divisor %result : i64 -> i64
+  func.return %result_lo, %result_hi, %result_div : i64, i64, i64
+}
+
+// ----
+func.def @if_result_meets_yielded_facts(%condition: i1) -> (i64, i64, i64) {
+  %c4 = scalar.constant 4 : i64
+  %c12 = scalar.constant 12 : i64
+  scf.if %condition {
+    test.use %c4 : i64
+  } else {
+    test.use %c12 : i64
+  }
+  %result_lo = scalar.constant 4 : i64
+  %result_hi = scalar.constant 12 : i64
+  %result_div = scalar.constant 4 : i64
+  func.return %result_lo, %result_hi, %result_div : i64, i64, i64
+}
+
+// ====
+
+// The same generic RegionBranch summary covers every case and the default of a
+// multi-way switch.
+func.def @switch_result_meets_all_regions(%variant: index) -> (i64, i64, i64) {
+  %c8 = scalar.constant 8 : i64
+  %c12 = scalar.constant 12 : i64
+  %c20 = scalar.constant 20 : i64
+  %result = scf.switch %variant -> (i64) {
+    case 0 {
+      test.use %c8 : i64
+      scf.yield %c8 : i64
+    }
+    case 1 {
+      test.use %c12 : i64
+      scf.yield %c12 : i64
+    }
+    default {
+      test.use %c20 : i64
+      scf.yield %c20 : i64
+    }
+  }
+  %result_lo = test.fact_range_lo %result : i64 -> i64
+  %result_hi = test.fact_range_hi %result : i64 -> i64
+  %result_div = test.fact_divisor %result : i64 -> i64
+  func.return %result_lo, %result_hi, %result_div : i64, i64, i64
+}
+
+// ----
+func.def @switch_result_meets_all_regions(%variant: index) -> (i64, i64, i64) {
+  %c8 = scalar.constant 8 : i64
+  %c12 = scalar.constant 12 : i64
+  %c20 = scalar.constant 20 : i64
+  %result = scf.switch %variant -> (i64) {
+    case 0 {
+      test.use %c8 : i64
+      scf.yield %c8 : i64
+    }
+    case 1 {
+      test.use %c12 : i64
+      scf.yield %c12 : i64
+    }
+    default {
+      test.use %c20 : i64
+      scf.yield %c20 : i64
+    }
+  }
+  %result_lo = scalar.constant 8 : i64
+  %result_hi = scalar.constant 20 : i64
+  %result_div = scalar.constant 4 : i64
+  func.return %result_lo, %result_hi, %result_div : i64, i64, i64
+}
+
+// ====
+
+// A lane-local branch selector makes a non-exact merge of different SSA
+// values lane-varying even when each incoming value is uniform.
+kernel.def @if_lane_predicate_different_values_is_varying() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%lhs: i32, %rhs: i32) {
+  %lane = kernel.subgroup.lane.id : index
+  %c0 = index.constant 0 : index
+  %condition = index.cmp eq, %lane, %c0 : index
+  %selected = scf.if %condition -> (i32) {
+    test.use %lhs : i32
+    scf.yield %lhs : i32
+  } else {
+    test.use %rhs : i32
+    scf.yield %rhs : i32
+  }
+  %selected_is_varying = test.fact_lane_varying %selected : i32 -> i1
+  %selected_is_uniform = test.fact_subgroup_uniform %selected : i32 -> i1
+  test.use %selected_is_varying, %selected_is_uniform : i1, i1
+  kernel.return
+}
+
+// ----
+kernel.def @if_lane_predicate_different_values_is_varying() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%lhs: i32, %rhs: i32) {
+  %lane = kernel.subgroup.lane.id : index
+  %c0 = index.constant 0 : index
+  %condition = index.cmp eq, %lane, %c0 : index
+  scf.if %condition {
+    test.use %lhs : i32
+  } else {
+    test.use %rhs : i32
+  }
+  %selected_is_varying = scalar.constant true : i1
+  %selected_is_uniform = scalar.constant false : i1
+  test.use %selected_is_varying, %selected_is_uniform : i1, i1
+  kernel.return
+}
+
+// ====
+
+// A lane-local selector does not make a result varying when every region
+// yields the same SSA value.
+kernel.def @if_lane_predicate_same_value_stays_uniform() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%value: i32) {
+  %lane = kernel.subgroup.lane.id : index
+  %c0 = index.constant 0 : index
+  %condition = index.cmp eq, %lane, %c0 : index
+  %selected = scf.if %condition -> (i32) {
+    test.use %value : i32
+    scf.yield %value : i32
+  } else {
+    test.use %value : i32
+    scf.yield %value : i32
+  }
+  %selected_is_varying = test.fact_lane_varying %selected : i32 -> i1
+  %selected_is_uniform = test.fact_subgroup_uniform %selected : i32 -> i1
+  test.use %selected_is_varying, %selected_is_uniform : i1, i1
+  kernel.return
+}
+
+// ----
+kernel.def @if_lane_predicate_same_value_stays_uniform() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%value: i32) {
+  %lane = kernel.subgroup.lane.id : index
+  %c0 = index.constant 0 : index
+  %condition = index.cmp eq, %lane, %c0 : index
+  scf.if %condition {
+    test.use %value : i32
+  } else {
+    test.use %value : i32
+  }
+  %selected_is_varying = scalar.constant false : i1
+  %selected_is_uniform = scalar.constant true : i1
+  test.use %selected_is_varying, %selected_is_uniform : i1, i1
+  kernel.return
+}
+
+// ====
+
+// Boolean branch results retain the stronger lane-predicate classification.
+kernel.def @if_lane_predicate_boolean_result_is_predicate() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%lhs: i1, %rhs: i1) {
+  %lane = kernel.subgroup.lane.id : index
+  %c0 = index.constant 0 : index
+  %condition = index.cmp eq, %lane, %c0 : index
+  %selected = scf.if %condition -> (i1) {
+    test.use %lhs : i1
+    scf.yield %lhs : i1
+  } else {
+    test.use %rhs : i1
+    scf.yield %rhs : i1
+  }
+  %selected_is_predicate = test.fact_lane_predicate %selected : i1 -> i1
+  %selected_is_uniform = test.fact_subgroup_uniform %selected : i1 -> i1
+  test.use %selected_is_predicate, %selected_is_uniform : i1, i1
+  kernel.return
+}
+
+// ----
+kernel.def @if_lane_predicate_boolean_result_is_predicate() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%lhs: i1, %rhs: i1) {
+  %lane = kernel.subgroup.lane.id : index
+  %c0 = index.constant 0 : index
+  %condition = index.cmp eq, %lane, %c0 : index
+  scf.if %condition {
+    test.use %lhs : i1
+  } else {
+    test.use %rhs : i1
+  }
+  %selected_is_predicate = scalar.constant true : i1
+  %selected_is_uniform = scalar.constant false : i1
+  test.use %selected_is_predicate, %selected_is_uniform : i1, i1
+  kernel.return
+}
+
+// ====
+
 // Selecting between different uniform values with a lane-local predicate
 // produces lane-varying data, not a uniform unknown.
 kernel.def @select_lane_predicate_different_values_is_varying() {
@@ -361,11 +584,11 @@ kernel.def @select_lane_predicate_different_values_is_varying() {
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch(%lhs: i32, %rhs: i32) {
   %lane = kernel.subgroup.lane.id : index
-  %zero = index.constant 0 : index
-  %condition = index.cmp eq, %lane, %zero : index
+  %c0 = index.constant 0 : index
+  %condition = index.cmp eq, %lane, %c0 : index
   %selected = scf.select %condition, %lhs, %rhs : i32
   %selected_is_varying = test.fact_lane_varying %selected : i32 -> i1
-  %selected_is_uniform = test.fact_uniform %selected : i32 -> i1
+  %selected_is_uniform = test.fact_subgroup_uniform %selected : i32 -> i1
   test.use %selected_is_varying, %selected_is_uniform : i1, i1
   kernel.return
 }
@@ -391,11 +614,11 @@ kernel.def @select_lane_predicate_boolean_result_is_predicate() {
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch(%lhs: i1, %rhs: i1) {
   %lane = kernel.subgroup.lane.id : index
-  %zero = index.constant 0 : index
-  %condition = index.cmp eq, %lane, %zero : index
+  %c0 = index.constant 0 : index
+  %condition = index.cmp eq, %lane, %c0 : index
   %selected = scf.select %condition, %lhs, %rhs : i1
   %selected_is_predicate = test.fact_lane_predicate %selected : i1 -> i1
-  %selected_is_uniform = test.fact_uniform %selected : i1 -> i1
+  %selected_is_uniform = test.fact_subgroup_uniform %selected : i1 -> i1
   test.use %selected_is_predicate, %selected_is_uniform : i1, i1
   kernel.return
 }
@@ -496,4 +719,42 @@ func.def @lookup_facts_prune_by_divisor(%variant: index) -> (i64, i64) {
   %fact_lo = scalar.constant 10 : i64
   %fact_hi = scalar.constant 30 : i64
   func.return %fact_lo, %fact_hi : i64, i64
+}
+
+// ====
+
+// Strip-mining the same loop by four leaves exactly four base iterations for
+// every lane. Equal endpoint trip counts therefore constrain the base IV to
+// 1660 rather than the interval-only upper bound of 2044.
+func.def @for_iv_ranged_lower_constant_trip_count(%lane0: index) -> (i64, i64, i64) {
+  %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
+  %c4 = index.constant 4 : index
+  %lane_channel = index.mul %lane, %c4 : index
+  %limit = index.constant 2048 : index
+  %step = index.constant 512 : index
+  %c0 = scalar.constant 0 : i64
+  %iv_lo, %iv_hi, %iv_div = scf.for %channel = [%lane_channel to %limit step %step](%carry_lo = %c0 : i64, %carry_hi = %c0 : i64, %carry_div = %c0 : i64) -> (i64, i64, i64) {
+    %fact_lo = test.fact_range_lo %channel : index -> i64
+    %fact_hi = test.fact_range_hi %channel : index -> i64
+    %fact_div = test.fact_divisor %channel : index -> i64
+    scf.yield %fact_lo, %fact_hi, %fact_div : i64, i64, i64
+  }
+  func.return %iv_lo, %iv_hi, %iv_div : i64, i64, i64
+}
+
+// ----
+func.def @for_iv_ranged_lower_constant_trip_count(%lane0: index) -> (i64, i64, i64) {
+  %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
+  %c4 = index.constant 4 : index
+  %lane_channel = index.mul %lane, %c4 : index
+  %limit = index.constant 2048 : index
+  %step = index.constant 512 : index
+  %c0 = scalar.constant 0 : i64
+  %iv_lo, %iv_hi, %iv_div = scf.for %channel = [%lane_channel to %limit step %step](%carry_lo = %c0 : i64, %carry_hi = %c0 : i64, %carry_div = %c0 : i64) -> (i64, i64, i64) {
+    %fact_lo = scalar.constant 0 : i64
+    %fact_hi = scalar.constant 1660 : i64
+    %fact_div = scalar.constant 4 : i64
+    scf.yield %fact_lo, %fact_hi, %fact_div : i64, i64, i64
+  }
+  func.return %iv_lo, %iv_hi, %iv_div : i64, i64, i64
 }

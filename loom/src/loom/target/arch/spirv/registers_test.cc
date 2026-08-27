@@ -12,6 +12,7 @@
 #include "loom/codegen/low/descriptors.h"
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
 #include "loom/target/arch/spirv/records/target_records.h"
+#include "loom/target/registers.h"
 
 namespace {
 
@@ -136,6 +137,187 @@ TEST(SpirvRegistersTest, TypedWorkgroupPointersCarryScalarValueTypes) {
                                                       &value_type));
   EXPECT_EQ(value_type.value_class, LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP);
   EXPECT_EQ(value_type.scalar_type, LOOM_SPIRV_SCALAR_TYPE_S32);
+}
+
+TEST(SpirvRegistersTest, StructuralIdPayloadsCoverCanonicalScalarTypes) {
+  struct ScalarCase {
+    loom_scalar_type_t source_type;
+    loom_spirv_value_class_t value_class;
+    loom_spirv_scalar_type_t scalar_type;
+  };
+  static constexpr ScalarCase kCases[] = {
+      {LOOM_SCALAR_TYPE_I1, LOOM_SPIRV_VALUE_CLASS_BOOL,
+       LOOM_SPIRV_SCALAR_TYPE_UNKNOWN},
+      {LOOM_SCALAR_TYPE_I8, LOOM_SPIRV_VALUE_CLASS_SCALAR,
+       LOOM_SPIRV_SCALAR_TYPE_S8},
+      {LOOM_SCALAR_TYPE_F8E4M3, LOOM_SPIRV_VALUE_CLASS_SCALAR,
+       LOOM_SPIRV_SCALAR_TYPE_S8},
+      {LOOM_SCALAR_TYPE_F8E5M2, LOOM_SPIRV_VALUE_CLASS_SCALAR,
+       LOOM_SPIRV_SCALAR_TYPE_S8},
+      {LOOM_SCALAR_TYPE_I16, LOOM_SPIRV_VALUE_CLASS_SCALAR,
+       LOOM_SPIRV_SCALAR_TYPE_S16},
+      {LOOM_SCALAR_TYPE_I32, LOOM_SPIRV_VALUE_CLASS_SCALAR,
+       LOOM_SPIRV_SCALAR_TYPE_S32},
+      {LOOM_SCALAR_TYPE_INDEX, LOOM_SPIRV_VALUE_CLASS_SCALAR,
+       LOOM_SPIRV_SCALAR_TYPE_S32},
+      {LOOM_SCALAR_TYPE_I64, LOOM_SPIRV_VALUE_CLASS_SCALAR,
+       LOOM_SPIRV_SCALAR_TYPE_S64},
+      {LOOM_SCALAR_TYPE_F16, LOOM_SPIRV_VALUE_CLASS_SCALAR,
+       LOOM_SPIRV_SCALAR_TYPE_F16},
+      {LOOM_SCALAR_TYPE_BF16, LOOM_SPIRV_VALUE_CLASS_SCALAR,
+       LOOM_SPIRV_SCALAR_TYPE_BF16},
+      {LOOM_SCALAR_TYPE_F32, LOOM_SPIRV_VALUE_CLASS_SCALAR,
+       LOOM_SPIRV_SCALAR_TYPE_F32},
+      {LOOM_SCALAR_TYPE_F64, LOOM_SPIRV_VALUE_CLASS_SCALAR,
+       LOOM_SPIRV_SCALAR_TYPE_F64},
+  };
+
+  for (const ScalarCase& test_case : kCases) {
+    const loom_register_type_data_t register_data = {
+        /*.carrier_payload0=*/SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID,
+        /*.carrier_payload1=*/
+        loom_low_register_type_pack_payload1(SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID,
+                                             /*unit_count=*/1),
+        /*.value_type=*/loom_type_scalar(test_case.source_type),
+    };
+    const loom_type_t register_type =
+        loom_type_register_payload_with_value_type(&register_data);
+    loom_spirv_value_type_t value_type = {};
+    ASSERT_TRUE(loom_spirv_value_type_from_low_register_type(register_type,
+                                                             &value_type));
+    EXPECT_EQ(value_type.value_class, test_case.value_class);
+    EXPECT_EQ(value_type.scalar_type, test_case.scalar_type);
+  }
+}
+
+TEST(SpirvRegistersTest,
+     StructuralIdPayloadsCoverCanonicalOrdinaryVectorTypes) {
+  struct VectorComponentCase {
+    loom_scalar_type_t source_type;
+    loom_spirv_value_class_t value_class;
+    loom_spirv_scalar_type_t scalar_type;
+  };
+  static constexpr VectorComponentCase kCases[] = {
+      {LOOM_SCALAR_TYPE_I1, LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR,
+       LOOM_SPIRV_SCALAR_TYPE_UNKNOWN},
+      {LOOM_SCALAR_TYPE_I8, LOOM_SPIRV_VALUE_CLASS_VECTOR,
+       LOOM_SPIRV_SCALAR_TYPE_S8},
+      {LOOM_SCALAR_TYPE_I16, LOOM_SPIRV_VALUE_CLASS_VECTOR,
+       LOOM_SPIRV_SCALAR_TYPE_S16},
+      {LOOM_SCALAR_TYPE_I32, LOOM_SPIRV_VALUE_CLASS_VECTOR,
+       LOOM_SPIRV_SCALAR_TYPE_S32},
+      {LOOM_SCALAR_TYPE_INDEX, LOOM_SPIRV_VALUE_CLASS_VECTOR,
+       LOOM_SPIRV_SCALAR_TYPE_S32},
+      {LOOM_SCALAR_TYPE_I64, LOOM_SPIRV_VALUE_CLASS_VECTOR,
+       LOOM_SPIRV_SCALAR_TYPE_S64},
+      {LOOM_SCALAR_TYPE_OFFSET, LOOM_SPIRV_VALUE_CLASS_VECTOR,
+       LOOM_SPIRV_SCALAR_TYPE_U64},
+      {LOOM_SCALAR_TYPE_F16, LOOM_SPIRV_VALUE_CLASS_VECTOR,
+       LOOM_SPIRV_SCALAR_TYPE_F16},
+      {LOOM_SCALAR_TYPE_BF16, LOOM_SPIRV_VALUE_CLASS_VECTOR,
+       LOOM_SPIRV_SCALAR_TYPE_BF16},
+      {LOOM_SCALAR_TYPE_F32, LOOM_SPIRV_VALUE_CLASS_VECTOR,
+       LOOM_SPIRV_SCALAR_TYPE_F32},
+      {LOOM_SCALAR_TYPE_F64, LOOM_SPIRV_VALUE_CLASS_VECTOR,
+       LOOM_SPIRV_SCALAR_TYPE_F64},
+  };
+  static constexpr uint16_t kLaneCounts[] = {2, 3, 4};
+
+  for (const VectorComponentCase& test_case : kCases) {
+    for (uint16_t lane_count : kLaneCounts) {
+      const loom_type_t source_value_type = loom_type_shaped_1d(
+          LOOM_TYPE_VECTOR, test_case.source_type,
+          loom_dim_pack_static(lane_count), /*encoding_id=*/0);
+      const loom_register_type_data_t register_data = {
+          /*.carrier_payload0=*/SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID,
+          /*.carrier_payload1=*/
+          loom_low_register_type_pack_payload1(
+              SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID, /*unit_count=*/1),
+          /*.value_type=*/source_value_type,
+      };
+      const loom_type_t register_type =
+          loom_type_register_payload_with_value_type(&register_data);
+      loom_spirv_value_type_t value_type = {};
+      ASSERT_TRUE(loom_spirv_value_type_from_low_register_type(register_type,
+                                                               &value_type));
+      EXPECT_EQ(value_type.value_class, test_case.value_class);
+      EXPECT_EQ(value_type.scalar_type, test_case.scalar_type);
+      EXPECT_EQ(value_type.vector.lane_count, lane_count);
+    }
+  }
+}
+
+TEST(SpirvRegistersTest, StructuralMappingRejectsNonNativeVectorTypes) {
+  const loom_type_t unsupported_types[] = {
+      loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I32,
+                          loom_dim_pack_static(1), /*encoding_id=*/0),
+      loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I32,
+                          loom_dim_pack_static(5), /*encoding_id=*/0),
+      loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I32,
+                          loom_dim_pack_dynamic(1), /*encoding_id=*/0),
+      loom_type_shaped_2d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I32,
+                          loom_dim_pack_static(2), loom_dim_pack_static(2),
+                          /*encoding_id=*/0),
+      loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F8E4M3,
+                          loom_dim_pack_static(4), /*encoding_id=*/0),
+      loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F8E5M2,
+                          loom_dim_pack_static(4), /*encoding_id=*/0),
+  };
+
+  for (loom_type_t type : unsupported_types) {
+    loom_spirv_value_type_t value_type = {};
+    EXPECT_FALSE(loom_spirv_value_type_from_loom_type(type, &value_type));
+  }
+}
+
+TEST(SpirvRegistersTest, StructuralMappingRejectsAmbiguousRegisterTypes) {
+  const loom_type_t untyped_id = loom_low_register_type(
+      SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID, SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID,
+      /*unit_count=*/1);
+  loom_spirv_value_type_t value_type = {};
+  EXPECT_FALSE(
+      loom_spirv_value_type_from_low_register_type(untyped_id, &value_type));
+
+  const loom_register_type_data_t typed_offset_data = {
+      /*.carrier_payload0=*/SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID,
+      /*.carrier_payload1=*/
+      loom_low_register_type_pack_payload1(
+          SPIRV_LOGICAL_CORE_REG_CLASS_ID_OFFSET64, /*unit_count=*/1),
+      /*.value_type=*/loom_type_scalar(LOOM_SCALAR_TYPE_I64),
+  };
+  const loom_type_t typed_offset =
+      loom_type_register_payload_with_value_type(&typed_offset_data);
+  EXPECT_FALSE(
+      loom_spirv_value_type_from_low_register_type(typed_offset, &value_type));
+
+  static constexpr loom_scalar_type_t kUnsupportedPayloads[] = {
+      LOOM_SCALAR_TYPE_OFFSET,
+  };
+  for (loom_scalar_type_t scalar_type : kUnsupportedPayloads) {
+    const loom_register_type_data_t register_data = {
+        /*.carrier_payload0=*/SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID,
+        /*.carrier_payload1=*/
+        loom_low_register_type_pack_payload1(SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID,
+                                             /*unit_count=*/1),
+        /*.value_type=*/loom_type_scalar(scalar_type),
+    };
+    const loom_type_t register_type =
+        loom_type_register_payload_with_value_type(&register_data);
+    EXPECT_FALSE(loom_spirv_value_type_from_low_register_type(register_type,
+                                                              &value_type));
+  }
+
+  const loom_register_type_data_t foreign_id_data = {
+      /*.carrier_payload0=*/SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID + 1,
+      /*.carrier_payload1=*/
+      loom_low_register_type_pack_payload1(SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID,
+                                           /*unit_count=*/1),
+      /*.value_type=*/loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+  };
+  const loom_type_t foreign_id =
+      loom_type_register_payload_with_value_type(&foreign_id_data);
+  EXPECT_FALSE(
+      loom_spirv_value_type_from_low_register_type(foreign_id, &value_type));
 }
 
 TEST(SpirvRegistersTest, VulkanTargetUsesBufferDeviceAddressWidths) {

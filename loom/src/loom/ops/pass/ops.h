@@ -28,7 +28,8 @@ enum {
   LOOM_OP_PASS_FAIL = LOOM_OP_KIND(LOOM_DIALECT_PASS, 6),
   LOOM_OP_PASS_HALT = LOOM_OP_KIND(LOOM_DIALECT_PASS, 7),
   LOOM_OP_PASS_YIELD = LOOM_OP_KIND(LOOM_DIALECT_PASS, 8),
-  LOOM_OP_PASS_COUNT_ = 9,
+  LOOM_OP_PASS_IF_CHANGED = LOOM_OP_KIND(LOOM_DIALECT_PASS, 9),
+  LOOM_OP_PASS_COUNT_ = 10,
 };
 
 // Pass pipeline execution anchor.
@@ -81,8 +82,13 @@ LOOM_DEFINE_ISA(loom_pass_where_isa, LOOM_OP_PASS_WHERE)
 LOOM_DEFINE_ATTR_STRING(loom_pass_where_predicate, 0)
 LOOM_DEFINE_ATTR_DICT(loom_pass_where_attrs, 1)
 LOOM_DEFINE_REGION(loom_pass_where_body, 0)
+enum loom_pass_where_build_flag_bits_e {
+  LOOM_PASS_WHERE_BUILD_FLAG_HAS_ATTRS = 1u << 0,
+};
+typedef uint32_t loom_pass_where_build_flags_t;
 iree_status_t loom_pass_where_build(
     loom_builder_t* builder,
+    loom_pass_where_build_flags_t build_flags,
     loom_string_id_t predicate,
     loom_optional loom_named_attr_slice_t attrs,
     loom_location_id_t location,
@@ -126,8 +132,13 @@ iree_status_t loom_pass_call_build(
 LOOM_DEFINE_ISA(loom_pass_run_isa, LOOM_OP_PASS_RUN)
 LOOM_DEFINE_ATTR_STRING(loom_pass_run_key, 0)
 LOOM_DEFINE_ATTR_DICT(loom_pass_run_options, 1)
+enum loom_pass_run_build_flag_bits_e {
+  LOOM_PASS_RUN_BUILD_FLAG_HAS_OPTIONS = 1u << 0,
+};
+typedef uint32_t loom_pass_run_build_flags_t;
 iree_status_t loom_pass_run_build(
     loom_builder_t* builder,
+    loom_pass_run_build_flags_t build_flags,
     loom_string_id_t key,
     loom_optional loom_named_attr_slice_t options,
     loom_location_id_t location,
@@ -157,6 +168,18 @@ iree_status_t loom_pass_halt_build(
 // pass.yield
 LOOM_DEFINE_ISA(loom_pass_yield_isa, LOOM_OP_PASS_YIELD)
 iree_status_t loom_pass_yield_build(
+    loom_builder_t* builder,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_PASS_IF_CHANGED: Execute a nested pipeline body when the immediately preceding sibling statement changed the current anchor.
+// pass.if_changed pipeline {
+//   canonicalize
+//   cse
+// }
+LOOM_DEFINE_ISA(loom_pass_if_changed_isa, LOOM_OP_PASS_IF_CHANGED)
+LOOM_DEFINE_REGION(loom_pass_if_changed_body, 0)
+iree_status_t loom_pass_if_changed_build(
     loom_builder_t* builder,
     loom_location_id_t location,
     loom_op_t** out_op);

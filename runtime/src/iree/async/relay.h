@@ -175,15 +175,18 @@ typedef uint32_t iree_async_relay_flags_t;
 // Relay error callback
 //===----------------------------------------------------------------------===//
 
-// Callback invoked when a persistent relay fails to re-arm its source.
+// Callback invoked when a relay terminally faults.
 //
-// This can happen if the underlying syscall fails (ENOMEM, EBADF on source fd,
-// etc.). After this callback fires, the relay transitions to a faulted state
-// and will no longer monitor the source. The relay should be unregistered.
+// This can happen when a sink transfer fails or a persistent relay cannot
+// re-arm its source. Source monitoring has stopped before the callback fires.
+// A persistent relay retains its caller-visible handle and must be terminally
+// unregistered after the callback returns. A one-shot relay is destroyed after
+// the callback returns as part of its normal auto-cleanup contract.
 //
 // The callback is invoked from within poll() on the proactor's thread.
-// The callback takes ownership of |status| and must consume it (e.g., log it,
-// convert it, or call iree_status_ignore()).
+// Unregistration must be deferred until poll() returns.
+// The callback takes ownership of |status| and must propagate it, report it,
+// or release it with iree_status_free().
 typedef void(IREE_API_PTR* iree_async_relay_error_fn_t)(
     void* user_data, iree_async_relay_t* relay, iree_status_t status);
 
@@ -200,6 +203,29 @@ iree_async_relay_error_callback_none(void) {
   return callback;
 }
 
+// Callback invoked after a relay has been fully unregistered.
+//
+// The relay and any backend operations referencing it have been destroyed
+// before this callback fires. Source and sink resources not owned by the relay
+// may be released from the callback. The callback may fire synchronously from
+// iree_async_proactor_unregister_relay().
+typedef void(IREE_API_PTR* iree_async_relay_unregistered_fn_t)(void* user_data);
+
+// Completion callback for terminal relay unregistration.
+typedef struct iree_async_relay_unregistered_callback_t {
+  // Function invoked after the relay has been destroyed.
+  iree_async_relay_unregistered_fn_t fn;
+  // Opaque value passed to |fn|.
+  void* user_data;
+} iree_async_relay_unregistered_callback_t;
+
+// Returns an empty unregistration callback.
+static inline iree_async_relay_unregistered_callback_t
+iree_async_relay_unregistered_callback_none(void) {
+  iree_async_relay_unregistered_callback_t callback = {NULL, NULL};
+  return callback;
+}
+
 //===----------------------------------------------------------------------===//
 // Relay struct
 //===----------------------------------------------------------------------===//
@@ -209,15 +235,17 @@ iree_async_relay_error_callback_none(void) {
 // Doubly-linked into the proactor's relay list for O(1) removal.
 // Platform-specific fields are in the |platform| union.
 struct iree_async_relay_t {
-  // Intrusive doubly-linked list links.
+  // Next relay in the owning proactor's intrusive list.
   struct iree_async_relay_t* next;
+  // Previous relay in the owning proactor's intrusive list.
   struct iree_async_relay_t* prev;
 
   // Owning proactor.
   iree_async_proactor_t* proactor;
 
-  // Source and sink specifications (copied from registration).
+  // Source specification copied from registration.
   iree_async_relay_source_t source;
+  // Sink specification copied from registration.
   iree_async_relay_sink_t sink;
 
   // Flags from registration.
@@ -225,6 +253,9 @@ struct iree_async_relay_t {
 
   // Error callback for re-arm failures (may be NULL).
   iree_async_relay_error_callback_t error_callback;
+
+  // Callback fired after terminal unregistration completes.
+  iree_async_relay_unregistered_callback_t unregistered_callback;
 
   // For notification source: the epoch we're waiting on.
   // Updated on registration and after each fire.
@@ -236,8 +267,8 @@ struct iree_async_relay_t {
   union {
     struct {
       // Lifecycle state (iree_async_io_uring_relay_state_t values).
-      // io_uring needs ACTIVE/ZOMBIE/PENDING_REARM/FAULTED because
-      // POLL_REMOVE and ASYNC_CANCEL are asynchronous.
+      // io_uring tracks asynchronous cancellation, re-arm, and terminal
+      // kernel-reference ownership explicitly.
       uint32_t state;
       // Stable buffer for async eventfd WRITE SQE.
       // Must remain valid while the SQE is in flight.
@@ -248,12 +279,16 @@ struct iree_async_relay_t {
       // Non-NULL when this relay has a NOTIFICATION source and is linked
       // into the source notification's relay_list.
       struct iree_async_relay_t* notification_relay_next;
+      // True after source monitoring ended due to a relay fault.
+      bool is_terminal;
     } posix;
     struct {
       // Per-notification relay chain linkage (poll thread only).
       // Same pattern as POSIX — singly-linked through the source
       // notification's relay_list.
       struct iree_async_relay_t* notification_relay_next;
+      // True after source monitoring ended due to a relay fault.
+      bool is_terminal;
     } iocp;
   } platform;
 };

@@ -47,6 +47,25 @@ typedef struct RetireCallbackState {
   int callback_count;
 } RetireCallbackState;
 
+typedef struct ReleaseOrderResource {
+  // HAL resource header used by the reclaim entry.
+  iree_hal_resource_t resource;
+  // Semaphore that must remain unpublished when this resource is destroyed.
+  iree_async_semaphore_t* semaphore;
+  // Number of times the destroy callback has run.
+  int destroy_count;
+} ReleaseOrderResource;
+
+static void DestroyReleaseOrderResource(iree_hal_resource_t* base_resource) {
+  auto* resource = reinterpret_cast<ReleaseOrderResource*>(base_resource);
+  EXPECT_EQ(iree_async_semaphore_query(resource->semaphore), 0u);
+  ++resource->destroy_count;
+}
+
+static const iree_hal_resource_vtable_t kReleaseOrderResourceVTable = {
+    /*.destroy=*/DestroyReleaseOrderResource,
+};
+
 static void VerifySemaphoreNotVisibleBeforePreSignalAction(
     iree_hal_amdgpu_reclaim_entry_t* entry, void* user_data,
     const iree_status_t status) {
@@ -153,8 +172,11 @@ struct NotificationRingTest : public ::testing::Test {
                                     target_value);
   }
 
-  // Empty frontier for drain calls (no accumulated causal context).
-  static constexpr iree_async_frontier_t kEmptyFrontier = {0};
+  // Returns an empty frontier for drain calls with no causal context.
+  static const iree_async_frontier_t* EmptyFrontier() {
+    static constexpr iree_async_frontier_header_t kEmptyFrontierHeader = {0};
+    return iree_async_fixed_frontier_as_const_frontier(&kEmptyFrontierHeader);
+  }
 
   static const iree_async_frontier_t* InitializeMaxFrontier(
       MaxFrontierStorage* storage) {
@@ -221,7 +243,7 @@ TEST_F(NotificationRingTest, DrainEmpty) {
   uint64_t kernarg_position = 0;
   EXPECT_EQ(
       iree_hal_amdgpu_notification_ring_drain(
-          ring.get(), &kEmptyFrontier, nullptr, nullptr, &kernarg_position),
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
       0u);
   EXPECT_EQ(kernarg_position, 0u);
 }
@@ -240,7 +262,7 @@ TEST_F(NotificationRingTest, SingleNotification) {
   uint64_t kernarg_position = 0;
   EXPECT_EQ(
       iree_hal_amdgpu_notification_ring_drain(
-          ring.get(), &kEmptyFrontier, nullptr, nullptr, &kernarg_position),
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
       0u);
   EXPECT_EQ(iree_async_semaphore_query(semaphore), 0u);
 
@@ -250,14 +272,14 @@ TEST_F(NotificationRingTest, SingleNotification) {
   // Drain signals the semaphore.
   EXPECT_EQ(
       iree_hal_amdgpu_notification_ring_drain(
-          ring.get(), &kEmptyFrontier, nullptr, nullptr, &kernarg_position),
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
       1u);
   EXPECT_EQ(iree_async_semaphore_query(semaphore), 1u);
 
   // Draining again is a no-op.
   EXPECT_EQ(
       iree_hal_amdgpu_notification_ring_drain(
-          ring.get(), &kEmptyFrontier, nullptr, nullptr, &kernarg_position),
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
       0u);
 
   iree_async_semaphore_release(semaphore);
@@ -274,7 +296,7 @@ TEST_F(NotificationRingTest, MultiplePerEpochAndSparseEpochs) {
   uint64_t epoch1 = iree_hal_amdgpu_notification_ring_advance_epoch(ring.get());
   PushNotification(ring.get(), epoch1, semaphore_a, 1);
   iree_hal_amdgpu_notification_ring_push_frontier_snapshot(ring.get(), epoch1,
-                                                           &kEmptyFrontier);
+                                                           EmptyFrontier());
   PushNotification(ring.get(), epoch1, semaphore_b, 5);
 
   // Epoch 2: no notification (non-signaling submission).
@@ -286,7 +308,7 @@ TEST_F(NotificationRingTest, MultiplePerEpochAndSparseEpochs) {
   uint64_t epoch3 = iree_hal_amdgpu_notification_ring_advance_epoch(ring.get());
   EXPECT_EQ(epoch3, 3u);
   iree_hal_amdgpu_notification_ring_push_frontier_snapshot(ring.get(), epoch1,
-                                                           &kEmptyFrontier);
+                                                           EmptyFrontier());
   PushNotification(ring.get(), epoch3, semaphore_a, 10);
 
   // Complete epoch 1 only. Drain should coalesce the A and B entries at
@@ -295,7 +317,7 @@ TEST_F(NotificationRingTest, MultiplePerEpochAndSparseEpochs) {
   uint64_t kernarg_position = 0;
   EXPECT_EQ(
       iree_hal_amdgpu_notification_ring_drain(
-          ring.get(), &kEmptyFrontier, nullptr, nullptr, &kernarg_position),
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
       2u);
   EXPECT_EQ(iree_async_semaphore_query(semaphore_a), 1u);
   EXPECT_EQ(iree_async_semaphore_query(semaphore_b), 5u);
@@ -304,7 +326,7 @@ TEST_F(NotificationRingTest, MultiplePerEpochAndSparseEpochs) {
   SimulateCompletions(ring.get(), 3);
   EXPECT_EQ(
       iree_hal_amdgpu_notification_ring_drain(
-          ring.get(), &kEmptyFrontier, nullptr, nullptr, &kernarg_position),
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
       1u);
   EXPECT_EQ(iree_async_semaphore_query(semaphore_a), 10u);
 
@@ -349,7 +371,7 @@ TEST_F(NotificationRingTest, OmittedSnapshotDoesNotConsumeNextSnapshot) {
   uint64_t kernarg_position = 0;
   EXPECT_EQ(
       iree_hal_amdgpu_notification_ring_drain(
-          ring.get(), &kEmptyFrontier, nullptr, nullptr, &kernarg_position),
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
       2u);
 
   iree_async_single_frontier_t queried_frontier;
@@ -369,7 +391,7 @@ TEST_F(NotificationRingTest, OmittedSnapshotDoesNotConsumeNextSnapshot) {
   SimulateCompletions(ring.get(), 3);
   EXPECT_EQ(
       iree_hal_amdgpu_notification_ring_drain(
-          ring.get(), &kEmptyFrontier, nullptr, nullptr, &kernarg_position),
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
       1u);
 
   iree_async_semaphore_release(final_semaphore);
@@ -390,7 +412,7 @@ TEST_F(NotificationRingTest, LateSnapshotForAlreadyDrainedSpanIsDiscarded) {
   uint64_t kernarg_position = 0;
   EXPECT_EQ(
       iree_hal_amdgpu_notification_ring_drain(
-          ring.get(), &kEmptyFrontier, nullptr, nullptr, &kernarg_position),
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
       1u);
 
   iree_async_single_frontier_t stale_frontier_storage;
@@ -410,7 +432,7 @@ TEST_F(NotificationRingTest, LateSnapshotForAlreadyDrainedSpanIsDiscarded) {
   SimulateCompletions(ring.get(), 2);
   EXPECT_EQ(
       iree_hal_amdgpu_notification_ring_drain(
-          ring.get(), &kEmptyFrontier, nullptr, nullptr, &kernarg_position),
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
       1u);
 
   iree_host_size_t frontier_write = (iree_host_size_t)iree_atomic_load(
@@ -441,7 +463,7 @@ TEST_F(NotificationRingTest, CoalescingSameSemaphore) {
   uint64_t kernarg_position = 0;
   EXPECT_EQ(
       iree_hal_amdgpu_notification_ring_drain(
-          ring.get(), &kEmptyFrontier, nullptr, nullptr, &kernarg_position),
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
       1u);
   EXPECT_EQ(iree_async_semaphore_query(semaphore), 1u);
 
@@ -450,7 +472,7 @@ TEST_F(NotificationRingTest, CoalescingSameSemaphore) {
   SimulateCompletions(ring.get(), 3);
   EXPECT_EQ(
       iree_hal_amdgpu_notification_ring_drain(
-          ring.get(), &kEmptyFrontier, nullptr, nullptr, &kernarg_position),
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
       2u);
   // Coalesced: signaled directly to 3, skipping 2.
   EXPECT_EQ(iree_async_semaphore_query(semaphore), 3u);
@@ -477,7 +499,7 @@ TEST_F(NotificationRingTest, RingWrapAround) {
     // All same semaphore — coalesced into 1 signal per round.
     EXPECT_EQ(
         iree_hal_amdgpu_notification_ring_drain(
-            ring.get(), &kEmptyFrontier, nullptr, nullptr, &kernarg_position),
+            ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
         capacity);
   }
 
@@ -510,7 +532,7 @@ TEST_F(NotificationRingTest, ReserveReturnsResourceExhaustedWhenFull) {
   uint64_t kernarg_position = 0;
   EXPECT_EQ(
       iree_hal_amdgpu_notification_ring_drain(
-          ring.get(), &kEmptyFrontier, nullptr, nullptr, &kernarg_position),
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
       1u);
 
   IREE_EXPECT_OK(iree_hal_amdgpu_notification_ring_reserve(
@@ -554,7 +576,7 @@ TEST_F(NotificationRingTest, FrontierSnapshotWrapAround) {
   SimulateCompletions(ring.get(), 2);
   EXPECT_EQ(
       iree_hal_amdgpu_notification_ring_drain(
-          ring.get(), &kEmptyFrontier, nullptr, nullptr, &kernarg_position),
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
       2u);
 
   SimulateCompletions(ring.get(), 4);
@@ -568,13 +590,13 @@ TEST_F(NotificationRingTest, FrontierSnapshotWrapAround) {
   }
   EXPECT_EQ(
       iree_hal_amdgpu_notification_ring_drain(
-          ring.get(), &kEmptyFrontier, nullptr, nullptr, &kernarg_position),
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
       2u);
 
   SimulateCompletions(ring.get(), 6);
   EXPECT_EQ(
       iree_hal_amdgpu_notification_ring_drain(
-          ring.get(), &kEmptyFrontier, nullptr, nullptr, &kernarg_position),
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
       2u);
 
   for (size_t i = 6; i < semaphores.size(); ++i) {
@@ -594,7 +616,7 @@ TEST_F(NotificationRingTest, FrontierSnapshotWrapAround) {
   SimulateCompletions(ring.get(), semaphores.size());
   EXPECT_EQ(
       iree_hal_amdgpu_notification_ring_drain(
-          ring.get(), &kEmptyFrontier, nullptr, nullptr, &kernarg_position),
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
       4u);
 
   MaxFrontierStorage queried_storage;
@@ -646,7 +668,7 @@ TEST_F(NotificationRingTest, KernargPositionReporting) {
   uint64_t kernarg_position = 0;
   EXPECT_EQ(
       iree_hal_amdgpu_notification_ring_drain(
-          ring.get(), &kEmptyFrontier, nullptr, nullptr, &kernarg_position),
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
       1u);
   EXPECT_EQ(kernarg_position, 64u);
 
@@ -654,7 +676,7 @@ TEST_F(NotificationRingTest, KernargPositionReporting) {
   SimulateCompletions(ring.get(), 3);
   EXPECT_EQ(
       iree_hal_amdgpu_notification_ring_drain(
-          ring.get(), &kEmptyFrontier, nullptr, nullptr, &kernarg_position),
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
       2u);
   EXPECT_EQ(kernarg_position, 192u);
 
@@ -678,7 +700,7 @@ TEST_F(NotificationRingTest, QueueOwnedReclaimPositionReporting) {
   iree_hal_amdgpu_reclaim_positions_t reclaim_positions = {0};
   EXPECT_EQ(
       iree_hal_amdgpu_notification_ring_drain_reclaim_positions(
-          ring.get(), &kEmptyFrontier, nullptr, nullptr, &reclaim_positions),
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &reclaim_positions),
       0u);
   EXPECT_EQ(reclaim_positions.kernarg_write_position, 192u);
   EXPECT_EQ(reclaim_positions.queue_upload_write_position, 256u);
@@ -700,7 +722,7 @@ TEST_F(NotificationRingTest, KernargPositionReportingForZeroSignalEpochs) {
   uint64_t kernarg_position = 0;
   EXPECT_EQ(
       iree_hal_amdgpu_notification_ring_drain(
-          ring.get(), &kEmptyFrontier, nullptr, nullptr, &kernarg_position),
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
       0u);
   EXPECT_EQ(kernarg_position, 64u);
 
@@ -708,7 +730,7 @@ TEST_F(NotificationRingTest, KernargPositionReportingForZeroSignalEpochs) {
   SimulateCompletions(ring.get(), 2);
   EXPECT_EQ(
       iree_hal_amdgpu_notification_ring_drain(
-          ring.get(), &kEmptyFrontier, nullptr, nullptr, &kernarg_position),
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
       0u);
   EXPECT_EQ(kernarg_position, 192u);
 }
@@ -734,9 +756,44 @@ TEST_F(NotificationRingTest, PreSignalActionRunsBeforeSemaphorePublication) {
   uint64_t kernarg_position = 0;
   EXPECT_EQ(
       iree_hal_amdgpu_notification_ring_drain(
-          ring.get(), &kEmptyFrontier, nullptr, nullptr, &kernarg_position),
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
       1u);
   EXPECT_EQ(action_state.callback_count, 1);
+  EXPECT_EQ(iree_async_semaphore_query(semaphore), 1u);
+
+  iree_async_semaphore_release(semaphore);
+}
+
+TEST_F(NotificationRingTest,
+       OperationResourcesReleaseBeforeSemaphorePublication) {
+  IREE_ASSERT_OK_AND_ASSIGN(auto ring, InitializeRing());
+  iree_async_semaphore_t* semaphore = CreateSemaphore();
+
+  iree_hal_amdgpu_reclaim_entry_t* reclaim_entry =
+      ReclaimEntryForNextEpoch(ring.get());
+  iree_hal_resource_t** resources = nullptr;
+  IREE_ASSERT_OK(iree_hal_amdgpu_reclaim_entry_prepare(
+      reclaim_entry, &block_pool, /*count=*/2, &resources));
+  iree_async_semaphore_retain(semaphore);
+  resources[0] = reinterpret_cast<iree_hal_resource_t*>(semaphore);
+  ReleaseOrderResource operation_resource = {};
+  iree_hal_resource_initialize(&kReleaseOrderResourceVTable,
+                               &operation_resource.resource);
+  operation_resource.semaphore = semaphore;
+  resources[1] = &operation_resource.resource;
+  reclaim_entry->signal_semaphore_count = 1;
+  reclaim_entry->count = 2;
+
+  uint64_t epoch = iree_hal_amdgpu_notification_ring_advance_epoch(ring.get());
+  PushNotification(ring.get(), epoch, semaphore, 1);
+  SimulateCompletions(ring.get(), 1);
+
+  uint64_t kernarg_position = 0;
+  EXPECT_EQ(
+      iree_hal_amdgpu_notification_ring_drain(
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
+      1u);
+  EXPECT_EQ(operation_resource.destroy_count, 1);
   EXPECT_EQ(iree_async_semaphore_query(semaphore), 1u);
 
   iree_async_semaphore_release(semaphore);
@@ -763,7 +820,7 @@ TEST_F(NotificationRingTest, RetireCallbackRunsBeforeSemaphorePublication) {
   SimulateCompletions(ring.get(), 1);
   uint64_t kernarg_position = 0;
   EXPECT_EQ(iree_hal_amdgpu_notification_ring_drain(
-                ring.get(), &kEmptyFrontier,
+                ring.get(), EmptyFrontier(),
                 VerifySemaphoreNotVisibleBeforeRetireCallback, &callback_state,
                 &kernarg_position),
             1u);
@@ -792,8 +849,21 @@ TEST_F(NotificationRingTest, FailAllRetireCallbackRunsBeforeSemaphoreFailure) {
   };
 
   iree_hal_amdgpu_reclaim_entry_t* reclaim_entry =
-      ReclaimEntryForNextEpoch(ring.get(), /*kernarg_write_position=*/64,
-                               /*queue_upload_write_position=*/256);
+      ReclaimEntryForNextEpoch(ring.get());
+  iree_hal_resource_t** resources = nullptr;
+  IREE_ASSERT_OK(iree_hal_amdgpu_reclaim_entry_prepare(
+      reclaim_entry, &block_pool, /*count=*/2, &resources));
+  reclaim_entry->kernarg_write_position = 64;
+  reclaim_entry->queue_upload_write_position = 256;
+  iree_async_semaphore_retain(semaphore);
+  resources[0] = reinterpret_cast<iree_hal_resource_t*>(semaphore);
+  ReleaseOrderResource operation_resource = {};
+  iree_hal_resource_initialize(&kReleaseOrderResourceVTable,
+                               &operation_resource.resource);
+  operation_resource.semaphore = semaphore;
+  resources[1] = &operation_resource.resource;
+  reclaim_entry->signal_semaphore_count = 1;
+  reclaim_entry->count = 2;
   reclaim_entry->pre_signal_action = {
       /*.fn=*/VerifySemaphoreNotVisibleBeforeFailedPreSignalAction,
       /*.user_data=*/&action_state,
@@ -819,6 +889,7 @@ TEST_F(NotificationRingTest, FailAllRetireCallbackRunsBeforeSemaphoreFailure) {
   EXPECT_EQ(callback_state.flags, IREE_HAL_AMDGPU_RECLAIM_RETIRE_FLAG_FAILED);
   EXPECT_EQ(reclaim_positions.kernarg_write_position, 64u);
   EXPECT_EQ(reclaim_positions.queue_upload_write_position, 256u);
+  EXPECT_EQ(operation_resource.destroy_count, 1);
 
   iree_async_semaphore_release(semaphore);
 }
@@ -854,7 +925,7 @@ TEST_F(NotificationRingTest, SignalFailureFailsSemaphore) {
   // non-monotonic test intent.
   iree_async_semaphore_t* semaphore2 = CreateSemaphore();
   iree_hal_amdgpu_notification_ring_push_frontier_snapshot(ring.get(), epoch1,
-                                                           &kEmptyFrontier);
+                                                           EmptyFrontier());
   ReclaimEntryForNextEpoch(ring.get(), 128);
   uint64_t epoch2 = iree_hal_amdgpu_notification_ring_advance_epoch(ring.get());
   PushNotification(ring.get(), epoch2, semaphore2, 3);
@@ -866,7 +937,7 @@ TEST_F(NotificationRingTest, SignalFailureFailsSemaphore) {
   uint64_t kernarg_position = 0;
   EXPECT_EQ(
       iree_hal_amdgpu_notification_ring_drain(
-          ring.get(), &kEmptyFrontier, nullptr, nullptr, &kernarg_position),
+          ring.get(), EmptyFrontier(), nullptr, nullptr, &kernarg_position),
       2u);
 
   // Semaphore got signaled to 5, semaphore2 got signaled to 3.

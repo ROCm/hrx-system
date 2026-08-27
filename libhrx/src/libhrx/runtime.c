@@ -44,63 +44,87 @@ static hrx_gpu_state_t g_gpu = {0};
 static hrx_cpu_state_t g_cpu = {0};
 static hrx_device_event_sink_t g_device_event_sink = {0};
 
-_Static_assert(HRX_DEVICE_EVENT_ABI_VERSION_0 ==
-                   IREE_HAL_DEVICE_EVENT_ABI_VERSION_0,
-               "device event ABI version mismatch");
-_Static_assert((uint32_t)HRX_DEVICE_EVENT_TYPE_DRIVER_FAILURE ==
-                   (uint32_t)IREE_HAL_DEVICE_EVENT_TYPE_DRIVER_FAILURE,
-               "device event type mismatch");
-_Static_assert((uint32_t)HRX_DEVICE_EVENT_TYPE_ASAN_REPORT ==
-                   (uint32_t)IREE_HAL_DEVICE_EVENT_TYPE_ASAN_REPORT,
-               "device event type mismatch");
-_Static_assert((uint32_t)HRX_DEVICE_EVENT_TYPE_UBSAN_REPORT ==
-                   (uint32_t)IREE_HAL_DEVICE_EVENT_TYPE_UBSAN_REPORT,
-               "device event type mismatch");
-_Static_assert((uint32_t)HRX_DEVICE_EVENT_TYPE_PRINTF ==
-                   (uint32_t)IREE_HAL_DEVICE_EVENT_TYPE_PRINTF,
-               "device event type mismatch");
-_Static_assert((uint32_t)HRX_DEVICE_EVENT_TYPE_HOST_CALL ==
-                   (uint32_t)IREE_HAL_DEVICE_EVENT_TYPE_HOST_CALL,
-               "device event type mismatch");
-_Static_assert((uint32_t)HRX_DEVICE_EVENT_TYPE_USER ==
-                   (uint32_t)IREE_HAL_DEVICE_EVENT_TYPE_USER,
-               "device event type mismatch");
-_Static_assert((uint32_t)HRX_DEVICE_EVENT_SEVERITY_TRACE ==
-                   (uint32_t)IREE_HAL_DEVICE_EVENT_SEVERITY_TRACE,
-               "device event severity mismatch");
-_Static_assert((uint32_t)HRX_DEVICE_EVENT_SEVERITY_INFO ==
-                   (uint32_t)IREE_HAL_DEVICE_EVENT_SEVERITY_INFO,
-               "device event severity mismatch");
-_Static_assert((uint32_t)HRX_DEVICE_EVENT_SEVERITY_WARNING ==
-                   (uint32_t)IREE_HAL_DEVICE_EVENT_SEVERITY_WARNING,
-               "device event severity mismatch");
-_Static_assert((uint32_t)HRX_DEVICE_EVENT_SEVERITY_ERROR ==
-                   (uint32_t)IREE_HAL_DEVICE_EVENT_SEVERITY_ERROR,
-               "device event severity mismatch");
-_Static_assert((uint32_t)HRX_DEVICE_EVENT_SEVERITY_FATAL ==
-                   (uint32_t)IREE_HAL_DEVICE_EVENT_SEVERITY_FATAL,
-               "device event severity mismatch");
-_Static_assert(HRX_DEVICE_ASAN_REPORT_ABI_VERSION_0 ==
-                   IREE_HAL_DEVICE_ASAN_REPORT_ABI_VERSION_0,
-               "ASAN report ABI version mismatch");
-_Static_assert((uint32_t)HRX_DEVICE_ASAN_ACCESS_KIND_UNKNOWN ==
-                   (uint32_t)IREE_HAL_DEVICE_ASAN_ACCESS_KIND_UNKNOWN,
-               "ASAN access kind mismatch");
-_Static_assert((uint32_t)HRX_DEVICE_ASAN_ACCESS_KIND_READ ==
-                   (uint32_t)IREE_HAL_DEVICE_ASAN_ACCESS_KIND_READ,
-               "ASAN access kind mismatch");
-_Static_assert((uint32_t)HRX_DEVICE_ASAN_ACCESS_KIND_WRITE ==
-                   (uint32_t)IREE_HAL_DEVICE_ASAN_ACCESS_KIND_WRITE,
-               "ASAN access kind mismatch");
-_Static_assert((uint32_t)HRX_DEVICE_ASAN_ACCESS_KIND_ATOMIC ==
-                   (uint32_t)IREE_HAL_DEVICE_ASAN_ACCESS_KIND_ATOMIC,
-               "ASAN access kind mismatch");
-_Static_assert(sizeof(hrx_device_asan_report_t) ==
-                   sizeof(iree_hal_device_asan_report_t),
-               "ASAN report layout mismatch");
-_Static_assert(offsetof(hrx_device_asan_report_t, source_dispatch_ptr) ==
-                   offsetof(iree_hal_device_asan_report_t, source_dispatch_ptr),
-               "ASAN report layout mismatch");
+static_assert(HRX_DEVICE_EVENT_ABI_VERSION_0 ==
+                  IREE_HAL_DEVICE_EVENT_ABI_VERSION_0,
+              "device event ABI version mismatch");
+static_assert((uint32_t)HRX_DEVICE_EVENT_TYPE_DRIVER_FAILURE ==
+                  (uint32_t)IREE_HAL_DEVICE_EVENT_TYPE_DRIVER_FAILURE,
+              "device event type mismatch");
+static_assert((uint32_t)HRX_DEVICE_EVENT_TYPE_ASAN_REPORT ==
+                  (uint32_t)IREE_HAL_DEVICE_EVENT_TYPE_ASAN_REPORT,
+              "device event type mismatch");
+static_assert((uint32_t)HRX_DEVICE_EVENT_TYPE_UBSAN_REPORT ==
+                  (uint32_t)IREE_HAL_DEVICE_EVENT_TYPE_UBSAN_REPORT,
+              "device event type mismatch");
+static_assert((uint32_t)HRX_DEVICE_EVENT_TYPE_PRINTF ==
+                  (uint32_t)IREE_HAL_DEVICE_EVENT_TYPE_PRINTF,
+              "device event type mismatch");
+static_assert((uint32_t)HRX_DEVICE_EVENT_TYPE_HOST_CALL ==
+                  (uint32_t)IREE_HAL_DEVICE_EVENT_TYPE_HOST_CALL,
+              "device event type mismatch");
+static_assert((uint32_t)HRX_DEVICE_EVENT_TYPE_USER ==
+                  (uint32_t)IREE_HAL_DEVICE_EVENT_TYPE_USER,
+              "device event type mismatch");
+static_assert((uint32_t)HRX_DEVICE_EVENT_SEVERITY_TRACE ==
+                  (uint32_t)IREE_HAL_DEVICE_EVENT_SEVERITY_TRACE,
+              "device event severity mismatch");
+static_assert((uint32_t)HRX_DEVICE_EVENT_SEVERITY_INFO ==
+                  (uint32_t)IREE_HAL_DEVICE_EVENT_SEVERITY_INFO,
+              "device event severity mismatch");
+static_assert((uint32_t)HRX_DEVICE_EVENT_SEVERITY_WARNING ==
+                  (uint32_t)IREE_HAL_DEVICE_EVENT_SEVERITY_WARNING,
+              "device event severity mismatch");
+static_assert((uint32_t)HRX_DEVICE_EVENT_SEVERITY_ERROR ==
+                  (uint32_t)IREE_HAL_DEVICE_EVENT_SEVERITY_ERROR,
+              "device event severity mismatch");
+static_assert((uint32_t)HRX_DEVICE_EVENT_SEVERITY_FATAL ==
+                  (uint32_t)IREE_HAL_DEVICE_EVENT_SEVERITY_FATAL,
+              "device event severity mismatch");
+static_assert(HRX_DEVICE_PRINTF_EVENT_ABI_VERSION_0 ==
+                  IREE_HAL_DEVICE_PRINTF_EVENT_ABI_VERSION_0,
+              "printf event ABI version mismatch");
+static_assert((uint32_t)HRX_DEVICE_PRINTF_STREAM_DEFAULT ==
+                  (uint32_t)IREE_HAL_DEVICE_PRINTF_STREAM_DEFAULT,
+              "printf stream mismatch");
+static_assert((uint32_t)HRX_DEVICE_PRINTF_STREAM_STDOUT ==
+                  (uint32_t)IREE_HAL_DEVICE_PRINTF_STREAM_STDOUT,
+              "printf stream mismatch");
+static_assert((uint32_t)HRX_DEVICE_PRINTF_STREAM_STDERR ==
+                  (uint32_t)IREE_HAL_DEVICE_PRINTF_STREAM_STDERR,
+              "printf stream mismatch");
+static_assert((uint32_t)HRX_DEVICE_PRINTF_FLAG_NONE ==
+                  (uint32_t)IREE_HAL_DEVICE_PRINTF_FLAG_NONE,
+              "printf flags mismatch");
+static_assert(sizeof(hrx_device_printf_event_t) ==
+                  sizeof(iree_hal_device_printf_event_t),
+              "printf event layout mismatch");
+static_assert(offsetof(hrx_device_printf_event_t, text) ==
+                  offsetof(iree_hal_device_printf_event_t, text),
+              "printf event layout mismatch");
+static_assert(offsetof(hrx_device_printf_event_t, arguments) ==
+                  offsetof(iree_hal_device_printf_event_t, arguments),
+              "printf event layout mismatch");
+static_assert(HRX_DEVICE_ASAN_REPORT_ABI_VERSION_0 ==
+                  IREE_HAL_DEVICE_ASAN_REPORT_ABI_VERSION_0,
+              "ASAN report ABI version mismatch");
+static_assert((uint32_t)HRX_DEVICE_ASAN_ACCESS_KIND_UNKNOWN ==
+                  (uint32_t)IREE_HAL_DEVICE_ASAN_ACCESS_KIND_UNKNOWN,
+              "ASAN access kind mismatch");
+static_assert((uint32_t)HRX_DEVICE_ASAN_ACCESS_KIND_READ ==
+                  (uint32_t)IREE_HAL_DEVICE_ASAN_ACCESS_KIND_READ,
+              "ASAN access kind mismatch");
+static_assert((uint32_t)HRX_DEVICE_ASAN_ACCESS_KIND_WRITE ==
+                  (uint32_t)IREE_HAL_DEVICE_ASAN_ACCESS_KIND_WRITE,
+              "ASAN access kind mismatch");
+static_assert((uint32_t)HRX_DEVICE_ASAN_ACCESS_KIND_ATOMIC ==
+                  (uint32_t)IREE_HAL_DEVICE_ASAN_ACCESS_KIND_ATOMIC,
+              "ASAN access kind mismatch");
+static_assert(sizeof(hrx_device_asan_report_t) ==
+                  sizeof(iree_hal_device_asan_report_t),
+              "ASAN report layout mismatch");
+static_assert(offsetof(hrx_device_asan_report_t, source_dispatch_ptr) ==
+                  offsetof(iree_hal_device_asan_report_t, source_dispatch_ptr),
+              "ASAN report layout mismatch");
 
 hrx_shared_state_t* hrx_get_shared_state(void) { return &g_shared; }
 hrx_gpu_state_t* hrx_get_gpu_state(void) { return &g_gpu; }
@@ -157,6 +181,15 @@ static iree_hal_device_event_sink_t hrx_hal_device_event_sink(void) {
   sink.fn = hrx_hal_device_event_sink_thunk;
   sink.user_data = &g_device_event_sink;
   return sink;
+}
+
+bool hrx_runtime_try_get_hal_device_event_sink(
+    iree_hal_device_event_sink_t* out_sink) {
+  IREE_ASSERT_ARGUMENT(out_sink);
+  memset(out_sink, 0, sizeof(*out_sink));
+  if (!g_device_event_sink.fn) return false;
+  *out_sink = hrx_hal_device_event_sink();
+  return true;
 }
 
 hrx_status_t hrx_runtime_set_device_event_sink(hrx_device_event_sink_t sink) {
@@ -246,40 +279,36 @@ static iree_status_t hrx_set_amdgpu_architecture_from_hal(
     iree_hal_device_t* hal_device, hrx_device_s* dev) {
   const iree_hal_device_spec_t* device_spec = iree_hal_device_spec(hal_device);
   iree_hal_executable_target_selection_t selection = {
-      .policy = IREE_HAL_EXECUTABLE_TARGET_SELECTION_POLICY_EXACT_DEVICE,
       .family = IREE_SV("amdgpu"),
+      .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
   };
-  const iree_hal_executable_target_t* target = NULL;
   const iree_hal_executable_target_selection_result_t result =
-      iree_hal_device_spec_select_executable_target(device_spec, &selection,
-                                                    &target);
-  if (result == IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_NO_MATCH) {
+      iree_hal_device_spec_select_executable_target(device_spec, &selection);
+  if (result.outcome == IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "AMDGPU HAL device spec does not report an exact executable target");
-  } else if (result == IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_AMBIGUOUS) {
+  } else if (result.outcome ==
+             IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "AMDGPU HAL device spec reports ambiguous exact executable targets");
   }
 
-  iree_string_view_t architecture = target->loader_target;
-  if (iree_string_view_is_empty(architecture)) {
-    architecture = target->processor;
-  }
-  if (iree_string_view_is_empty(architecture)) {
+  const iree_string_view_t target_key = result.target->target_key;
+  if (iree_string_view_is_empty(target_key)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU HAL device spec exact target has no architecture string");
+        "AMDGPU HAL device spec exact target has an empty target key");
   }
-  if (architecture.size >= sizeof(dev->architecture)) {
+  if (target_key.size >= sizeof(dev->architecture)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU architecture string length %" PRIhsz
+                            "AMDGPU target key length %" PRIhsz
                             " exceeds HRX storage capacity",
-                            architecture.size);
+                            target_key.size);
   }
-  memcpy(dev->architecture, architecture.data, architecture.size);
-  dev->architecture[architecture.size] = 0;
+  memcpy(dev->architecture, target_key.data, target_key.size);
+  dev->architecture[target_key.size] = 0;
   return iree_ok_status();
 }
 #endif  // HRX_HAS_IREE_AMDGPU_DRIVER
@@ -772,7 +801,9 @@ hrx_status_t hrx_cpu_device_get(int index, hrx_device_t* device) {
 // GPU accelerator
 //===----------------------------------------------------------------------===//
 
-hrx_status_t hrx_gpu_initialize(uint32_t flags) {
+hrx_status_t hrx_gpu_initialize_with_device_extensions(
+    uint32_t flags,
+    const iree_hal_device_create_params_extension_t* device_extensions) {
   (void)flags;
   if (g_gpu.initialized) {
     return hrx_make_status(HRX_STATUS_ALREADY_EXISTS,
@@ -864,6 +895,7 @@ hrx_status_t hrx_gpu_initialize(uint32_t flags) {
 
   iree_hal_device_create_params_t create_params =
       iree_hal_device_create_params_default();
+  create_params.next = device_extensions;
   create_params.proactor_pool = g_shared.proactor_pool;
   create_params.event_sink = hrx_hal_device_event_sink();
   create_params.runtime_features = runtime_features;
@@ -968,6 +1000,11 @@ hrx_status_t hrx_gpu_initialize(uint32_t flags) {
   g_gpu.initialized = true;
   return hrx_ok_status();
 #endif  // HRX_HAS_ACCELERATOR_DRIVER
+}
+
+hrx_status_t hrx_gpu_initialize(uint32_t flags) {
+  return hrx_gpu_initialize_with_device_extensions(flags,
+                                                   /*device_extensions=*/NULL);
 }
 
 hrx_status_t hrx_gpu_shutdown(void) {

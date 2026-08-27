@@ -14,6 +14,7 @@
 #define LOOM_REWRITE_CALLABLE_H_
 
 #include "iree/base/api.h"
+#include "loom/analysis/availability.h"
 #include "loom/ops/op_defs.h"
 #include "loom/rewrite/remap.h"
 #include "loom/rewrite/rewriter.h"
@@ -30,10 +31,10 @@ iree_status_t loom_callable_resolve_direct_callee(const loom_module_t* module,
 // Inlines |callee| at |call_op| using clone materialization.
 //
 // The callee must be a same-module function-like op with a single-block body
-// ending in func.return. Function entry block arguments are bound to call
-// operands, body ops are cloned before the call, func.return operands become
-// the call result replacements, and the original call-like op is erased through
-// the rewriter.
+// ending in the terminator declared by its body region. Function entry block
+// arguments are bound to call operands, body ops are cloned before the call,
+// terminator operands become the call result replacements, and the original
+// call-like op is erased through the rewriter.
 iree_status_t loom_callable_inline_call(loom_rewriter_t* rewriter,
                                         loom_op_t* call_op,
                                         loom_func_like_t callee);
@@ -44,27 +45,29 @@ iree_status_t loom_callable_inline_direct_call(loom_rewriter_t* rewriter,
 
 // Inlines |callee| at |call_op| using same-module move materialization.
 //
-// This consumes the callee definition. The callee must be private, the selected
-// call must be the only live symbol reference to the callee outside of the
-// callee's own defining attribute, and the callee body must satisfy the same
-// single-block func.return shape as clone inlining. On success body ops are
-// moved before the call, call results are replaced by remapped func.return
+// This consumes the callee definition. The caller must have an exact immutable
+// reference plan proving that the callee is private and that the selected call
+// will be the final live reference outside of the callee's own defining
+// attribute. This helper does not rediscover that global ownership by scanning
+// the module. |availability| must cover the caller region and remain valid
+// across the topology-preserving body move. The callee body must satisfy the
+// same single-block terminator shape as clone inlining. On success body ops are
+// moved before the call, call results are replaced by remapped terminator
 // operands, the call is erased, and the consumed callee op is erased.
-iree_status_t loom_callable_inline_consuming_call(loom_rewriter_t* rewriter,
-                                                  loom_op_t* call_op,
-                                                  loom_func_like_t callee);
+iree_status_t loom_callable_inline_consuming_call(
+    loom_rewriter_t* rewriter, const loom_availability_analysis_t* availability,
+    loom_op_t* call_op, loom_func_like_t callee);
 
-// Resolves |call_op|'s direct callee and then consuming-inlines it.
-iree_status_t loom_callable_inline_consuming_direct_call(
-    loom_rewriter_t* rewriter, loom_op_t* call_op);
-
-// Options for importing one function-like definition across modules.
-typedef struct loom_callable_import_options_t {
-  // Optional policy for non-callee symbol references in the imported body.
-  // The imported callee's own defining symbol is handled by the import helper.
-  // If NULL, any other symbol reference in the source definition is rejected.
-  loom_ir_remap_symbol_callback_t external_symbol_remap;
-} loom_callable_import_options_t;
+// Clones one same-module function-like definition as |target_ref|.
+//
+// |target_ref| must name an existing symbol without a defining op. The cloned
+// function's defining symbol and recursive self-references are rewritten to
+// |target_ref| while references to every other same-module symbol are
+// preserved.
+iree_status_t loom_callable_clone_definition(
+    loom_builder_t* builder, loom_func_like_t source,
+    loom_symbol_ref_t target_ref, loom_func_like_t* out_cloned,
+    iree_arena_allocator_t* scratch_arena);
 
 // Result handles produced by callable outlining.
 typedef struct loom_callable_outline_result_t {
@@ -73,18 +76,6 @@ typedef struct loom_callable_outline_result_t {
   // Call op inserted at the original range position.
   loom_op_t* call_op;
 } loom_callable_outline_result_t;
-
-// Clones |source| from |source_module| into |builder|'s target module.
-//
-// The source callee symbol is recreated in the target module with the same name
-// and bound to the cloned function-like op. Target name collisions are rejected
-// instead of renamed implicitly. References to other source symbols require an
-// explicit external symbol remap policy in |options|; without one, the import
-// fails before mutating the target module.
-iree_status_t loom_callable_import_definition(
-    loom_builder_t* builder, const loom_module_t* source_module,
-    loom_func_like_t source, const loom_callable_import_options_t* options,
-    loom_func_like_t* out_imported, iree_arena_allocator_t* scratch_arena);
 
 // Outlines a contiguous same-block op range into a new private func.def.
 //
@@ -99,6 +90,8 @@ iree_status_t loom_callable_import_definition(
 // and type-use lists. The replacement func.call returns every selected value
 // needed outside the range, including values needed only by dynamic result
 // types, so erasing the original range leaves no dangling SSA or type refs.
+// Ranges inside representation-bound functions are rejected because the
+// generic func.def created by this helper cannot preserve their contract.
 iree_status_t loom_callable_outline_range(
     loom_rewriter_t* rewriter, loom_op_t* first_op, loom_op_t* after_last_op,
     loom_symbol_ref_t outlined_ref, loom_callable_outline_result_t* out_result);

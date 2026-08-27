@@ -10,6 +10,7 @@ from collections.abc import Callable
 from dataclasses import replace
 
 from loom.dialect.scalar import ALL_SCALAR_OPS
+from loom.dialect.scalar import analysis as scalar_analysis
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scalar import bitwise as scalar_bitwise
 from loom.dialect.scalar import conversion as scalar_conversion
@@ -19,6 +20,7 @@ from loom.dsl import Op
 from loom.target.contracts import (
     LOWER_EMIT_FLAG_RESULT_DESCRIPTOR_TYPE,
     LOWER_RULE_FLAG_CONTRACT_ONLY,
+    LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS,
     AttrProject,
     ContractFragment,
     DescriptorEmitForm,
@@ -27,11 +29,18 @@ from loom.target.contracts import (
     DirectDescriptorCase,
     EmitDescriptorOp,
     Guard,
+    GuardDiagnostic,
     GuardKind,
     LowerAttrCopyKind,
     LowerEmitKind,
+    OrdinalValueAliasRule,
     RecipeRule,
     Scalar,
+    SourceMemoryAddressBase,
+    SourceMemoryAddressCoordinateType,
+    SourceMemoryAddressLayout,
+    SourceMemoryAddressMaterializer,
+    SourceMemoryByteOffsetMaterializer,
     SourceMemoryConstraint,
     SourceMemoryDynamicIndexSource,
     SourceMemoryOperation,
@@ -52,10 +61,14 @@ from loom.target.low_descriptors import EnumDomain, EnumValue, Immediate, Immedi
 from loom.target.test.descriptors import (
     TEST_LOW_ADD_F32_DESCRIPTOR,
     TEST_LOW_ADD_I32_DESCRIPTOR,
+    TEST_LOW_AMBIGUOUS_DESCRIPTOR,
     TEST_LOW_CONST_I32_DESCRIPTOR,
     TEST_LOW_CORE_DESCRIPTOR_SET,
     TEST_LOW_FROM_ELEMENTS_V4I32_DESCRIPTOR,
     TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,
+    TEST_LOW_LOAD_V4I32_DESCRIPTOR,
+    TEST_LOW_MUL_I32_DESCRIPTOR,
+    TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
 )
 
 
@@ -86,6 +99,119 @@ def _expect_value_error(callable_obj: Callable[[], object], message: str) -> Non
         error = exc
     assert error is not None
     assert message in str(error)
+
+
+def _source_index_rule(
+    *,
+    preserve: bool,
+    use_original_index: bool,
+    additional_preserve: bool | None = None,
+) -> ContractFragment:
+    result_type = Vector("i32", lanes=4)
+    index = (
+        ValueRef.operand("indices")
+        if use_original_index
+        else ValueRef.source_memory_dynamic_term()
+    )
+
+    def source_memory(preserve_source_index: bool) -> SourceMemoryConstraint:
+        return SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=4,
+            vector_lane_byte_stride=4,
+            static_byte_offset_minimum=0,
+            static_byte_offset_maximum=128,
+            dynamic_term_count=1,
+            dynamic_view_base_term_count=0,
+            dynamic_index_source=SourceMemoryDynamicIndexSource.VALUE,
+            dynamic_byte_stride=4,
+            preserve_source_index=preserve_source_index,
+        )
+
+    emits = []
+    if additional_preserve is not None:
+        emits.append(
+            EmitDescriptorOp(
+                descriptor=TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,
+                operands={"address": ValueRef.operand("view"), "index": index},
+                results={"dst": ValueRef.temporary("additional_result")},
+                result_types={"dst": result_type},
+                source_memory=source_memory(additional_preserve),
+            )
+        )
+    emits.append(
+        EmitDescriptorOp(
+            descriptor=TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,
+            operands={"address": ValueRef.operand("view"), "index": index},
+            results={"dst": ValueRef.result("result")},
+            source_memory=source_memory(preserve),
+        )
+    )
+    return ContractFragment(
+        name="test.source-index",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            DescriptorRule(
+                source_op=vector.vector_load,
+                descriptor=TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,
+                guards=(
+                    Guard.operand_segment_count("indices", 1),
+                    Guard.value_type("result", result_type),
+                ),
+                emit=tuple(emits),
+            )
+        ],
+    )
+
+
+def _source_memory_address_rule(
+    *,
+    materializer: SourceMemoryAddressMaterializer | None,
+) -> ContractFragment:
+    return ContractFragment(
+        name="test.source-memory-address",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            DescriptorRule(
+                source_op=vector.vector_load,
+                descriptor=TEST_LOW_LOAD_V4I32_DESCRIPTOR,
+                guards=(Guard.value_type("result", Vector("i32", lanes=4)),),
+                emit=(
+                    EmitDescriptorOp(
+                        descriptor=TEST_LOW_LOAD_V4I32_DESCRIPTOR,
+                        operands={"address": ValueRef.source_memory_address()},
+                        results={"dst": ValueRef.result("result")},
+                        source_memory=SourceMemoryConstraint(
+                            operation=SourceMemoryOperation.LOAD,
+                            memory_spaces=("global",),
+                            element_byte_count=4,
+                            vector_lane_count=4,
+                            vector_lane_byte_stride=4,
+                            static_byte_offset_minimum=0,
+                            static_byte_offset_maximum=(2**31) - 1,
+                            dynamic_term_count=None,
+                            dynamic_term_count_minimum=0,
+                        ),
+                        source_memory_address_materializer=materializer,
+                    ),
+                ),
+            )
+        ],
+    )
+
+
+def _i32_source_memory_address_materializer() -> SourceMemoryAddressMaterializer:
+    return SourceMemoryAddressMaterializer(
+        const_coordinate=TEST_LOW_CONST_I32_DESCRIPTOR,
+        add_coordinate=TEST_LOW_ADD_I32_DESCRIPTOR,
+        mul_coordinate=TEST_LOW_MUL_I32_DESCRIPTOR,
+        index_to_coordinate_input=TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
+        index_to_coordinate=TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
+        address=TEST_LOW_ADD_I32_DESCRIPTOR,
+        const_coordinate_immediate="i32_value",
+    )
 
 
 def _binary_rule(
@@ -344,6 +470,30 @@ def test_compile_lower_rule_set_compiles_value_alias_cases() -> None:
     assert compiled.spans[0].source_op is vector.vector_fragment
 
 
+def test_compile_lower_rule_set_compiles_ordinal_value_alias_cases() -> None:
+    table = ContractFragment(
+        name="test.ordinal_alias",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            OrdinalValueAliasRule(
+                source_op=scalar_analysis.scalar_assume,
+                source=ValueRef.operand("values"),
+                result=ValueRef.result("results"),
+            )
+        ],
+    )
+
+    compiled = compile_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
+
+    assert compiled.authored_case_indices == (0,)
+    assert len(compiled.rules) == 1
+    assert compiled.rules[0].source_op is scalar_analysis.scalar_assume
+    assert compiled.rules[0].flags == LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS
+    assert compiled.rules[0].alias_ref_count == 1
+    assert compiled.value_refs[0].kind == SourceValueKind.OPERAND
+    assert compiled.value_refs[1].kind == SourceValueKind.RESULT
+
+
 def test_compile_lower_rule_set_compiles_value_elide_cases() -> None:
     table = ContractFragment(
         name="test.elide",
@@ -458,7 +608,8 @@ def test_compile_lower_rule_set_offsets_variadic_operand_elements() -> None:
     value_refs = compiled.value_refs[
         emit.operand_ref_start : emit.operand_ref_start + emit.operand_ref_count
     ]
-    assert tuple(value_ref.index for value_ref in value_refs) == (0, 1, 2, 3)
+    assert tuple(value_ref.index for value_ref in value_refs) == (0, 0, 0, 0)
+    assert tuple(value_ref.element_index for value_ref in value_refs) == (0, 1, 2, 3)
 
 
 def test_compile_lower_rule_set_compiles_source_memory_dynamic_term_operand() -> None:
@@ -491,6 +642,7 @@ def test_compile_lower_rule_set_compiles_source_memory_dynamic_term_operand() ->
                             static_byte_offset_minimum=-(2**63),
                             static_byte_offset_maximum=(2**63) - 1,
                             dynamic_term_count=1,
+                            dynamic_view_base_term_count=0,
                             dynamic_index_source=SourceMemoryDynamicIndexSource.VALUE,
                             dynamic_byte_stride=None,
                         ),
@@ -513,6 +665,333 @@ def test_compile_lower_rule_set_compiles_source_memory_dynamic_term_operand() ->
     assert tuple(value_ref.index for value_ref in value_refs) == (0, 0)
     source_memory = compiled.source_memories[emit.source_memory_ordinal - 1]
     assert source_memory.constraint is table.cases[0].emit[0].source_memory
+    assert source_memory.constraint.dynamic_view_base_term_count == 0
+
+
+def test_compile_lower_rule_set_compiles_preserved_source_index() -> None:
+    table = _source_index_rule(preserve=True, use_original_index=True)
+
+    compiled = compile_lower_rule_set(table, dialect_ops={"vector": ALL_VECTOR_OPS})
+
+    source_memory = compiled.source_memories[0]
+    assert source_memory.constraint.preserve_source_index
+
+
+def test_compile_lower_rule_set_requires_source_index_preservation() -> None:
+    _expect_value_error(
+        lambda: compile_lower_rule_set(
+            _source_index_rule(
+                preserve=False,
+                use_original_index=True,
+            ),
+            dialect_ops={"vector": ALL_VECTOR_OPS},
+        ),
+        "vector.load: source-memory rules that consume the original "
+        "'indices' operand must preserve the source index",
+    )
+
+
+def test_compile_lower_rule_set_rejects_unused_source_index_preservation() -> None:
+    _expect_value_error(
+        lambda: compile_lower_rule_set(
+            _source_index_rule(
+                preserve=True,
+                use_original_index=False,
+            ),
+            dialect_ops={"vector": ALL_VECTOR_OPS},
+        ),
+        "vector.load: source-index preservation requires the original "
+        "'indices' operand",
+    )
+
+
+def test_compile_lower_rule_set_rejects_any_unused_source_index_preservation() -> None:
+    _expect_value_error(
+        lambda: compile_lower_rule_set(
+            _source_index_rule(
+                preserve=False,
+                use_original_index=False,
+                additional_preserve=True,
+            ),
+            dialect_ops={"vector": ALL_VECTOR_OPS},
+        ),
+        "vector.load: source-index preservation requires the original "
+        "'indices' operand",
+    )
+
+
+def test_source_memory_constraint_rejects_static_source_index_preservation() -> None:
+    _expect_value_error(
+        lambda: SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=1,
+            vector_lane_byte_stride=4,
+            static_byte_offset=0,
+            preserve_source_index=True,
+        ),
+        "source-index preservation requires dynamic source memory",
+    )
+
+
+def test_source_memory_constraint_rejects_dynamic_view_base_preservation() -> None:
+    _expect_value_error(
+        lambda: SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=1,
+            vector_lane_byte_stride=4,
+            static_byte_offset=0,
+            dynamic_term_count=1,
+            dynamic_index_source=SourceMemoryDynamicIndexSource.VALUE,
+            dynamic_byte_stride=4,
+            preserve_source_index=True,
+        ),
+        "source-index preservation requires zero dynamic view-base terms",
+    )
+
+
+def test_source_memory_constraint_rejects_unknown_address_layout() -> None:
+    _expect_value_error(
+        lambda: SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            address_layout="compact",
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=1,
+            vector_lane_byte_stride=4,
+            static_byte_offset=0,
+        ),
+        "source memory address layout must be a SourceMemoryAddressLayout",
+    )
+
+
+def test_source_memory_constraint_rejects_unused_address_layout_diagnostic() -> None:
+    diagnostic = GuardDiagnostic(
+        subject_role="value",
+        subject_name="view",
+        constraint_key="layout.compact_row_major",
+    )
+    _expect_value_error(
+        lambda: SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            address_layout=SourceMemoryAddressLayout.ANY,
+            address_layout_diagnostic=diagnostic,
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=1,
+            vector_lane_byte_stride=4,
+            static_byte_offset=0,
+        ),
+        "unconstrained source memory cannot have an address-layout diagnostic",
+    )
+
+
+def test_compile_lower_rule_set_compiles_complete_source_memory_address() -> None:
+    materializer = _i32_source_memory_address_materializer()
+
+    compiled = compile_lower_rule_set(
+        _source_memory_address_rule(materializer=materializer),
+        dialect_ops={"vector": ALL_VECTOR_OPS},
+    )
+
+    emit = compiled.emits[0]
+    value_refs = compiled.value_refs[
+        emit.operand_ref_start : emit.operand_ref_start + emit.operand_ref_count
+    ]
+    assert tuple(value_ref.kind for value_ref in value_refs) == (
+        SourceValueKind.SOURCE_MEMORY_ADDRESS,
+    )
+    source_memory = compiled.source_memories[emit.source_memory_ordinal - 1]
+    assert source_memory.address_materializer is materializer
+
+
+def test_complete_address_compiles_element_coordinate_policy() -> None:
+    materializer = replace(
+        _i32_source_memory_address_materializer(),
+        base=SourceMemoryAddressBase.BASE_VIEW,
+        coordinate_type=SourceMemoryAddressCoordinateType.INDEX,
+        coordinate_unit_byte_count=4,
+        coordinate_minimum=0,
+        coordinate_maximum=(2**31) - 1,
+        index_to_coordinate_input=None,
+        index_to_coordinate=None,
+    )
+
+    compiled = compile_lower_rule_set(
+        _source_memory_address_rule(materializer=materializer),
+        dialect_ops={"vector": ALL_VECTOR_OPS},
+    )
+
+    source_memory = compiled.source_memories[0]
+    assert source_memory.address_materializer is materializer
+    assert materializer.base == SourceMemoryAddressBase.BASE_VIEW
+    assert materializer.coordinate_type == SourceMemoryAddressCoordinateType.INDEX
+    assert materializer.coordinate_unit_byte_count == 4
+    assert materializer.coordinate_minimum == 0
+    assert materializer.coordinate_maximum == (2**31) - 1
+
+
+def test_complete_address_rejects_invalid_coordinate_policy() -> None:
+    materializer = _i32_source_memory_address_materializer()
+
+    _expect_value_error(
+        lambda: replace(materializer, coordinate_unit_byte_count=0),
+        "coordinate unit byte count must fit in a positive u32",
+    )
+    _expect_value_error(
+        lambda: replace(
+            materializer,
+            coordinate_minimum=1,
+            coordinate_maximum=0,
+        ),
+        "coordinate range is empty",
+    )
+    _expect_value_error(
+        lambda: replace(materializer, coordinate_unit_byte_count=4),
+        "offset-coordinate source-memory addresses use byte units",
+    )
+    _expect_value_error(
+        lambda: replace(
+            materializer,
+            coordinate_type=SourceMemoryAddressCoordinateType.INDEX,
+            index_to_coordinate=None,
+        ),
+        "index-coordinate source-memory addresses use the mapped index carrier",
+    )
+    _expect_value_error(
+        lambda: replace(
+            materializer,
+            index_to_coordinate_input=None,
+            index_to_coordinate=None,
+        ),
+        "offset-coordinate source-memory addresses need an index conversion",
+    )
+
+
+def test_compile_lower_rule_set_requires_complete_address_materializer() -> None:
+    _expect_value_error(
+        lambda: compile_lower_rule_set(
+            _source_memory_address_rule(materializer=None),
+            dialect_ops={"vector": ALL_VECTOR_OPS},
+        ),
+        "operand 'address' needs a source-memory address materializer",
+    )
+
+
+def test_complete_address_rejects_non_unary_index_conversion() -> None:
+    materializer = replace(
+        _i32_source_memory_address_materializer(),
+        index_to_coordinate=TEST_LOW_ADD_I32_DESCRIPTOR,
+    )
+
+    _expect_value_error(
+        lambda: compile_lower_rule_set(
+            _source_memory_address_rule(materializer=materializer),
+            dialect_ops={"vector": ALL_VECTOR_OPS},
+        ),
+        "source-memory address-coordinate index conversion descriptor "
+        "'test.add.i32' "
+        "must declare exactly 1 packet inputs",
+    )
+
+
+def test_complete_address_rejects_mixed_arithmetic_carriers() -> None:
+    materializer = replace(
+        _i32_source_memory_address_materializer(),
+        add_coordinate=TEST_LOW_ADD_F32_DESCRIPTOR,
+    )
+
+    _expect_value_error(
+        lambda: compile_lower_rule_set(
+            _source_memory_address_rule(materializer=materializer),
+            dialect_ops={"vector": ALL_VECTOR_OPS},
+        ),
+        "source-memory address-coordinate add descriptor 'test.add.f32' "
+        "result does not use the materializer carrier",
+    )
+
+
+def test_source_memory_address_value_rejects_source_field() -> None:
+    _expect_value_error(
+        lambda: ValueRef(
+            kind=SourceValueKind.SOURCE_MEMORY_ADDRESS,
+            field="view",
+        ).validate(vector.vector_load, "test value"),
+        "source-memory address must not name a source field",
+    )
+
+
+def test_source_memory_address_value_rejects_element() -> None:
+    _expect_value_error(
+        lambda: ValueRef(
+            kind=SourceValueKind.SOURCE_MEMORY_ADDRESS,
+            field="",
+            element=1,
+        ).validate(vector.vector_load, "test value"),
+        "source-memory address must not select an element",
+    )
+
+
+def test_compile_lower_rule_set_compiles_any_positive_dynamic_byte_offset() -> None:
+    table = ContractFragment(
+        name="test.source-memory-byte-offset",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            DescriptorRule(
+                source_op=vector.vector_load,
+                descriptor=TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,
+                guards=(Guard.value_type("result", Vector("i32", lanes=4)),),
+                emit=(
+                    EmitDescriptorOp(
+                        descriptor=TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,
+                        operands={
+                            "address": ValueRef.operand("view"),
+                            "index": ValueRef.source_memory_dynamic_byte_offset(),
+                        },
+                        results={"dst": ValueRef.result("result")},
+                        source_memory=SourceMemoryConstraint(
+                            operation=SourceMemoryOperation.LOAD,
+                            memory_spaces=("unknown", "global"),
+                            element_byte_count=4,
+                            vector_lane_count=4,
+                            vector_lane_byte_stride=4,
+                            static_byte_offset_minimum=-(2**63),
+                            static_byte_offset_maximum=(2**63) - 1,
+                            dynamic_term_count=None,
+                            dynamic_term_count_minimum=1,
+                        ),
+                        source_memory_byte_offset_materializer=(
+                            SourceMemoryByteOffsetMaterializer(
+                                const_i64=TEST_LOW_CONST_I32_DESCRIPTOR,
+                                add_i64=TEST_LOW_ADD_I32_DESCRIPTOR,
+                                mul_i64=TEST_LOW_MUL_I32_DESCRIPTOR,
+                                shl_i64=None,
+                                const_i64_immediate="i32_value",
+                            )
+                        ),
+                    ),
+                ),
+            )
+        ],
+    )
+
+    compiled = compile_lower_rule_set(table, dialect_ops={"vector": ALL_VECTOR_OPS})
+
+    emit = compiled.emits[0]
+    value_refs = compiled.value_refs[
+        emit.operand_ref_start : emit.operand_ref_start + emit.operand_ref_count
+    ]
+    assert tuple(value_ref.kind for value_ref in value_refs) == (
+        SourceValueKind.OPERAND,
+        SourceValueKind.SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET,
+    )
+    source_memory = compiled.source_memories[emit.source_memory_ordinal - 1]
+    assert source_memory.constraint.dynamic_term_count is None
+    assert source_memory.constraint.dynamic_term_count_minimum == 1
+    assert source_memory.constraint.dynamic_view_base_term_count is None
 
 
 def test_compile_lower_rule_set_compiles_source_memory_static_offset_projects() -> None:
@@ -632,6 +1111,82 @@ def test_compile_lower_rule_set_compiles_const_immediate_emit() -> None:
     assert len(compiled.attr_copies) == 1
     assert compiled.attr_copies[0].kind == LowerAttrCopyKind.I64_LITERAL
     assert compiled.attr_copies[0].literal_i64 == 0
+
+
+def test_compile_lower_rule_set_keeps_operandless_op_emit() -> None:
+    table = ContractFragment(
+        name="test.operandless-op",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            DescriptorRule(
+                source_op=scalar_conversion.scalar_constant,
+                descriptor=TEST_LOW_AMBIGUOUS_DESCRIPTOR,
+                guards=(Guard.value_type("result", Scalar("i32")),),
+                emit=(
+                    EmitDescriptorOp(
+                        descriptor=TEST_LOW_AMBIGUOUS_DESCRIPTOR,
+                        results={"dst": ValueRef.result("result")},
+                    ),
+                ),
+            )
+        ],
+    )
+
+    compiled = compile_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
+
+    assert len(compiled.emits) == 1
+    assert compiled.emits[0].kind == LowerEmitKind.DESCRIPTOR_OP
+
+
+def test_contract_rejects_op_form_for_const_descriptor() -> None:
+    _expect_value_error(
+        lambda: ContractFragment(
+            name="test.op-form-for-const",
+            descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+            cases=[
+                DescriptorRule(
+                    source_op=scalar_conversion.scalar_constant,
+                    descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+                    guards=(Guard.value_type("result", Scalar("i32")),),
+                    emit=(
+                        EmitDescriptorOp(
+                            descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+                            results={"dst": ValueRef.result("result")},
+                            immediates={"i32_value": 0},
+                            form=DescriptorEmitForm.OP,
+                        ),
+                    ),
+                )
+            ],
+        ),
+        "scalar.constant: descriptor 'test.const.i32' uses low.const but the "
+        "contract requests a low.op emission form",
+    )
+
+
+def test_contract_rejects_const_form_for_op_descriptor() -> None:
+    _expect_value_error(
+        lambda: ContractFragment(
+            name="test.const-form-for-op",
+            descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+            cases=[
+                DescriptorRule(
+                    source_op=scalar_conversion.scalar_constant,
+                    descriptor=TEST_LOW_AMBIGUOUS_DESCRIPTOR,
+                    guards=(Guard.value_type("result", Scalar("i32")),),
+                    emit=(
+                        EmitDescriptorOp(
+                            descriptor=TEST_LOW_AMBIGUOUS_DESCRIPTOR,
+                            results={"dst": ValueRef.result("result")},
+                            form=DescriptorEmitForm.CONST,
+                        ),
+                    ),
+                )
+            ],
+        ),
+        "scalar.constant: descriptor 'test.ambiguous' uses low.op but the "
+        "contract requests low.const",
+    )
 
 
 def test_compile_lower_rule_set_compiles_consecutive_i64_attr_pack() -> None:
@@ -940,7 +1495,7 @@ def test_compile_lower_rule_set_projects_source_instance_flags() -> None:
     assert compiled.attr_copies[0].kind == LowerAttrCopyKind.SOURCE_OP_INSTANCE_FLAGS
 
 
-def test_compile_lower_rule_set_compiles_f64_equals_guard() -> None:
+def test_compile_lower_rule_set_compiles_float_equals_guard() -> None:
     table = ContractFragment(
         name="test.f64-equals",
         descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
@@ -949,7 +1504,7 @@ def test_compile_lower_rule_set_compiles_f64_equals_guard() -> None:
                 source_op=scalar_arithmetic.scalar_mulf,
                 descriptor=TEST_LOW_ADD_F32_DESCRIPTOR,
                 guards=(
-                    Guard.value_f64_equals("lhs", 1.0),
+                    Guard.value_float_equals("lhs", 1.0),
                     Guard.value_type("lhs", Scalar("f32")),
                     Guard.value_type("rhs", Scalar("f32")),
                     Guard.value_type("result", Scalar("f32")),
@@ -971,7 +1526,7 @@ def test_compile_lower_rule_set_compiles_f64_equals_guard() -> None:
     compiled = compile_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
 
     assert compiled.rules[0].guard_count == 4
-    assert compiled.guards[0].kind == GuardKind.VALUE_F64_EQUALS
+    assert compiled.guards[0].kind == GuardKind.VALUE_FLOAT_EQUALS
     assert compiled.guards[0].value_ref_index == 0
     assert compiled.guards[0].u64 == 0x3FF0000000000000
 
@@ -1010,6 +1565,35 @@ def test_compile_lower_rule_set_compiles_storage_element_format_guard() -> None:
     assert compiled.guards[0].kind == GuardKind.VALUE_STORAGE_ELEMENT_FORMAT
     assert compiled.guards[0].value_ref_index == 0
     assert compiled.guards[0].u64_c_expression == "LOOM_VALUE_FACT_NUMERIC_FORMAT_U8"
+
+
+def test_compile_lower_rule_set_compiles_value_memory_space_guard() -> None:
+    table = ContractFragment(
+        name="test.value-memory-space",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            RecipeRule(
+                source_op=vector.vector_fragment_load,
+                guards=(
+                    Guard.value_memory_space(
+                        "view",
+                        ("unknown", "generic", "global", "descriptor"),
+                    ),
+                ),
+            )
+        ],
+    )
+
+    compiled = compile_lower_rule_set(table, dialect_ops={"vector": ALL_VECTOR_OPS})
+
+    assert compiled.guards[0].kind == GuardKind.VALUE_MEMORY_SPACE
+    assert compiled.guards[0].value_ref_index == 0
+    assert compiled.guards[0].memory_spaces == (
+        "unknown",
+        "generic",
+        "global",
+        "descriptor",
+    )
 
 
 def test_compile_lower_rule_set_compiles_packed_integer_storage_guards() -> None:

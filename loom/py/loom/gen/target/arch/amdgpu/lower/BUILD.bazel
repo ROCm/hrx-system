@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:python.bzl", "iree_py_library")
+load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_library", "iree_py_test")
 
 package(
     default_visibility = ["//loom/py/loom/gen:__subpackages__"],
@@ -14,4 +14,36 @@ package(
 iree_py_library(
     name = "package",
     srcs = ["__init__.py"],
+)
+
+iree_py_binary(
+    name = "narrow_float_tables",
+    srcs = [
+        "__init__.py",
+        "amdgpu_narrow_float_tables.py",
+    ],
+    main = "amdgpu_narrow_float_tables.py",
+    visibility = [
+        "//loom/py/loom/gen:__subpackages__",
+        "//loom/src/loom/target/arch/amdgpu:__pkg__",
+        "//loom/src/loom/target/arch/amdgpu:__subpackages__",
+    ],
+    deps = [
+        "//loom/py/loom:core",
+        "//loom/py/loom/dialect/encoding",
+        "//loom/py/loom/gen/support",
+        "//loom/py/loom/gen/target/arch/amdgpu/lower/candidates:validation",
+        "//loom/py/loom/target/arch/amdgpu:descriptors",
+    ],
+)
+
+iree_py_test(
+    name = "narrow_float_tables_test",
+    srcs = [
+        "amdgpu_narrow_float_tables_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.gen.target.arch.amdgpu.lower.amdgpu_narrow_float_tables_test"],
+    main = "pytest_style_runner.py",
+    deps = [":narrow_float_tables"],
 )

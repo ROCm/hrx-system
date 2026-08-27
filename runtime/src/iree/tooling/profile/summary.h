@@ -32,6 +32,10 @@ typedef struct iree_profile_device_summary_t {
   uint32_t queue_count;
   // Number of queue metadata records seen for this physical device.
   uint32_t queue_record_count;
+  // Device metadata flags observed for this physical device.
+  iree_hal_profile_device_flags_t metadata_flags;
+  // Authoritative device timestamp rate advertised by device metadata.
+  uint64_t timestamp_frequency_hz;
   // Number of clock-correlation samples seen for this physical device.
   uint64_t clock_sample_count;
   // Number of clock samples that report invalid device event tick alignment.

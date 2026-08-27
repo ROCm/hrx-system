@@ -20,9 +20,9 @@ kernel.def @q8_load_widths() {
   // typed i32 view. The byte-to-word reinterpretation lives here, not in a
   // hidden backend coalescer.
   %input_noalias, %scalar_output_noalias, %vector_output_noalias = buffer.assume.noalias %input, %scalar_output, %vector_output : buffer, buffer, buffer
-  %input_words = buffer.view %input_noalias[%base] : buffer -> view<4xi32, #dense>
-  %scalar_words = buffer.view %scalar_output_noalias[%base] : buffer -> view<4xi32, #dense>
-  %vector_words = buffer.view %vector_output_noalias[%base] : buffer -> view<4xi32, #dense>
+  %input_words = buffer.view %input_noalias[%base] : buffer -> view<4xi32>
+  %scalar_words = buffer.view %scalar_output_noalias[%base] : buffer -> view<4xi32>
+  %vector_words = buffer.view %vector_output_noalias[%base] : buffer -> view<4xi32>
 
   // HIP concept:
   //   uint32_t w0 = p[0];
@@ -31,14 +31,14 @@ kernel.def @q8_load_widths() {
   //   uint32_t w3 = p[3];
   // Loom spelling: each `vector<1xi32>` load is one scalar memory operation.
   // This path is correct, but it does not ask Loom to fuse the four loads.
-  %w0 = vector.load %input_words[0] : view<4xi32, #dense> -> vector<1xi32>
-  %w1 = vector.load %input_words[1] : view<4xi32, #dense> -> vector<1xi32>
-  %w2 = vector.load %input_words[2] : view<4xi32, #dense> -> vector<1xi32>
-  %w3 = vector.load %input_words[3] : view<4xi32, #dense> -> vector<1xi32>
-  vector.store %w0, %scalar_words[0] : vector<1xi32>, view<4xi32, #dense>
-  vector.store %w1, %scalar_words[1] : vector<1xi32>, view<4xi32, #dense>
-  vector.store %w2, %scalar_words[2] : vector<1xi32>, view<4xi32, #dense>
-  vector.store %w3, %scalar_words[3] : vector<1xi32>, view<4xi32, #dense>
+  %w0 = vector.load %input_words[0] : view<4xi32> -> vector<1xi32>
+  %w1 = vector.load %input_words[1] : view<4xi32> -> vector<1xi32>
+  %w2 = vector.load %input_words[2] : view<4xi32> -> vector<1xi32>
+  %w3 = vector.load %input_words[3] : view<4xi32> -> vector<1xi32>
+  vector.store %w0, %scalar_words[0] : vector<1xi32>, view<4xi32>
+  vector.store %w1, %scalar_words[1] : vector<1xi32>, view<4xi32>
+  vector.store %w2, %scalar_words[2] : vector<1xi32>, view<4xi32>
+  vector.store %w3, %scalar_words[3] : vector<1xi32>, view<4xi32>
 
   // HIP concept:
   //   uint4 words = *reinterpret_cast<const uint4 *>(p);
@@ -46,8 +46,8 @@ kernel.def @q8_load_widths() {
   // Loom spelling: a single `vector.load` names the four-lane memory operation
   // directly. Later target selection can choose the exact instruction form, but
   // it should not have to infer that the author wanted a wide source load.
-  %wide = vector.load %input_words[0] : view<4xi32, #dense> -> vector<4xi32>
-  vector.store %wide, %vector_words[0] : vector<4xi32>, view<4xi32, #dense>
+  %wide = vector.load %input_words[0] : view<4xi32> -> vector<4xi32>
+  vector.store %wide, %vector_words[0] : vector<4xi32>, view<4xi32>
 
   kernel.return
 }
@@ -60,7 +60,7 @@ check.case @case_q8_load_widths {
   %scalar_output = check.generate.fill value(0) : tensor<4xi32>
   %vector_output = check.generate.fill value(0) : tensor<4xi32>
   %expected = check.generate.iota offset(1) step(1) : tensor<4xi32>
-  func.call @q8_load_widths(%input, %scalar_output, %vector_output) : (tensor<4xi32>, tensor<4xi32>, tensor<4xi32>)
+  kernel.launch @q8_load_widths(%input, %scalar_output, %vector_output) : (tensor<4xi32>, tensor<4xi32>, tensor<4xi32>)
   check.expect.equal actual(%scalar_output) expected(%expected) : tensor<4xi32>
   check.expect.equal actual(%vector_output) expected(%expected) : tensor<4xi32>
   check.return

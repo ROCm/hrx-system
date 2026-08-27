@@ -1,0 +1,28 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx11-generic> @target
+
+// Function contracts follow direct arguments through target ABI lowering. The
+// buffer argument becomes a resource while the surrounding scalar arguments
+// remain in the low signature, and the contract supplies the vector footprint
+// proof without an identity index.assume in the body.
+kernel.def target(@target) @function_predicates_follow_direct_abi() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%token_count: index, %storage: buffer, %capacity: index) where [range(%token_count, 4, 2048), le(%token_count, %capacity), range(%capacity, 4, 4096)] {
+  %c0 = index.constant 0 : index
+  %base = index.constant 0 : offset
+  %storage_view = buffer.view %storage[%base] : buffer -> view<[%token_count]xi32>
+  %value = vector.load %storage_view[%c0] : view<[%token_count]xi32> -> vector<4xi32>
+  vector.store %value, %storage_view[%c0] : vector<4xi32>, view<[%token_count]xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @function_predicates_follow_direct_abi(%token_count: reg<amdgpu.sgpr>, %capacity: reg<amdgpu.sgpr>) where [range(%token_count, 4, 2048), le(%token_count, %capacity), range(%capacity, 4, 4096)] asm {
+  %storage_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %11 = v_mov_b32 0
+  %value = global_load_b128_saddr %11, %storage_view
+  global_store_b128_saddr %11, %value, %storage_view
+  return
+}

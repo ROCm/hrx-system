@@ -59,6 +59,27 @@ typedef struct loom_verify_tied_table_t {
   iree_host_size_t operand_value_capacity;
 } loom_verify_tied_table_t;
 
+// Module-wide canonical type facts gathered before the op walk.
+typedef struct loom_verify_type_summary_t {
+  // True when every canonical type satisfies representation invariants.
+  bool all_well_formed;
+
+  // True when any canonical type may carry an SSA value reference.
+  bool may_reference_values;
+} loom_verify_type_summary_t;
+
+// State inherited while recursively verifying one region tree.
+typedef struct loom_verify_region_scope_t {
+  // Region currently being verified.
+  const loom_region_t* current;
+
+  // Reusable consumed-value query for current.
+  loom_consumption_region_query_t* consumption_query;
+
+  // True when observable effects must be explicit command effects.
+  bool command_effects_only;
+} loom_verify_region_scope_t;
+
 typedef struct loom_verify_state_t {
   // Module being verified.
   const loom_module_t* module;
@@ -78,6 +99,28 @@ typedef struct loom_verify_state_t {
   // First non-OK status returned by the diagnostic sink.
   iree_status_t diagnostic_status;
 
+  // Facts derived from the module's canonical type table.
+  loom_verify_type_summary_t type_summary;
+
+  // Malformed static encoding diagnostics needed by this verification run.
+  struct {
+    // Bitset recording encoding records diagnosed at an authored use site.
+    uint64_t* diagnosed_bits;
+
+    // Number of allocated words in diagnosed_bits.
+    iree_host_size_t word_count;
+  } static_encodings;
+
+  // Module symbols named by top-level availability metadata. An unresolved
+  // dependency is valid when its symbol is available from an external source.
+  struct {
+    // Dense bitset indexed by module symbol ID.
+    uint64_t* bits;
+
+    // Number of allocated words in bits.
+    iree_host_size_t word_count;
+  } available_symbols;
+
   // Scratch arena for all verification-time allocations.
   iree_arena_allocator_t arena;
 
@@ -90,17 +133,14 @@ typedef struct loom_verify_state_t {
   // Bitset indexed by value_id; a set bit means the value was consumed.
   uint64_t* consumed_bits;
 
-  // First op that consumed each value_id through a tied result.
+  // First op that consumed each value_id through an ownership transfer.
   const loom_op_t** consuming_ops;
 
   // Reusable per-op scratch for tied-result uniqueness checks.
   loom_verify_tied_table_t tied_table;
 
-  // Region currently being verified while walking nested IR.
-  const loom_region_t* current_region;
-
-  // Reusable consumed-value query for current_region.
-  loom_consumption_region_query_t* current_consumption_query;
+  // State inherited through the current nested region traversal.
+  loom_verify_region_scope_t region_scope;
 
   // Stack of value IDs defined during the current scoped walk.
   uint32_t* defined_stack;
@@ -172,11 +212,8 @@ iree_string_view_t loom_verify_symbol_name(const loom_verify_state_t* state,
 iree_string_view_t loom_verify_symbol_definition_name(
     const loom_symbol_t* symbol);
 
-bool loom_verify_func_args_are_operands(const loom_op_vtable_t* vtable);
+bool loom_verify_func_args_use_operand_field(const loom_op_vtable_t* vtable);
 bool loom_verify_has_func_signature_scope(const loom_op_vtable_t* vtable);
-const loom_value_id_t* loom_verify_func_signature_arg_ids(
-    const loom_op_t* op, const loom_op_vtable_t* vtable,
-    uint16_t* out_arg_count);
 
 loom_type_t loom_verify_value_type(const loom_verify_state_t* state,
                                    loom_value_id_t value_id);

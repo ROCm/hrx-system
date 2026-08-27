@@ -75,79 +75,6 @@
       }
     },
     {
-      "name": "runs shared source-low compile pipeline",
-      "run": {
-        "tool": "loom-opt",
-        "args": [
-          "--pipeline=source-low"
-        ],
-        "stdin": {
-          "text": "amdgpu.target<gfx1100> @target\nkernel.def target(@target) @f32_arith() {\n  %c1 = index.constant 1 : index\n  %c64 = index.constant 64 : index\n  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index\n} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {\n  %tid = kernel.workitem.id<x> : index\n  %zero = index.constant 0 : offset\n  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64xf32, #dense>\n  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64xf32, #dense>\n  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>\n  %lhs = vector.load %lhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>\n  %rhs = vector.load %rhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>\n  %sum = vector.addf %lhs, %rhs : vector<1xf32>\n  vector.store %sum, %output_view[%tid] : vector<1xf32>, view<64xf32, #dense>\n  kernel.return\n}\n"
-        }
-      },
-      "stdout": {
-        "contains": [
-          "low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_arith()",
-          "reg<amdgpu.sgpr x2>",
-          "low.op<amdgpu.v_add_f32>"
-        ],
-        "not_contains": [
-          "\nkernel.def target(@target) @f32_arith"
-        ]
-      }
-    },
-    {
-      "name": "dumps shared source-low stage as JSONL",
-      "run": {
-        "tool": "loom-opt",
-        "args": [
-          "--pipeline=source-low",
-          "--dump-ir-after=source-to-low",
-          "--dump-ir-format=jsonl",
-          "--dump-ir-output=stderr",
-          "--output={tmp}/source-low.loom"
-        ],
-        "stdin": {
-          "text": "amdgpu.target<gfx1100> @target\nkernel.def target(@target) @f32_arith() {\n  %c1 = index.constant 1 : index\n  %c64 = index.constant 64 : index\n  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index\n} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {\n  %tid = kernel.workitem.id<x> : index\n  %zero = index.constant 0 : offset\n  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64xf32, #dense>\n  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64xf32, #dense>\n  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>\n  %lhs = vector.load %lhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>\n  %rhs = vector.load %rhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>\n  %sum = vector.addf %lhs, %rhs : vector<1xf32>\n  vector.store %sum, %output_view[%tid] : vector<1xf32>, view<64xf32, #dense>\n  kernel.return\n}\n"
-        }
-      },
-      "stderr": {
-        "contains": [
-          "\"tool\":\"loom-opt\"",
-          "\"stage\":\"source-low\"",
-          "\"pipeline\":\"__loom_opt_source_low\"",
-          "\"pass\":\"source-to-low\"",
-          "\"point\":\"after\""
-        ]
-      },
-      "files": [
-        {
-          "path": "{tmp}/source-low.loom",
-          "non_empty": true
-        }
-      ]
-    },
-    {
-      "name": "runs default prepared-low compile pipeline",
-      "run": {
-        "tool": "loom-opt",
-        "args": [
-          "--pipeline=default"
-        ],
-        "stdin": {
-          "text": "amdgpu.target<gfx1100> @target\nkernel.def target(@target) @f32_arith() {\n  %c1 = index.constant 1 : index\n  %c64 = index.constant 64 : index\n  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index\n} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {\n  %tid = kernel.workitem.id<x> : index\n  %zero = index.constant 0 : offset\n  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64xf32, #dense>\n  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64xf32, #dense>\n  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>\n  %lhs = vector.load %lhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>\n  %rhs = vector.load %rhs_view[%tid] : view<64xf32, #dense> -> vector<1xf32>\n  %sum = vector.addf %lhs, %rhs : vector<1xf32>\n  vector.store %sum, %output_view[%tid] : vector<1xf32>, view<64xf32, #dense>\n  kernel.return\n}\n"
-        }
-      },
-      "stdout": {
-        "contains": [
-          "low.kernel.def target(@target) abi_layout({",
-          "uses_kernarg_segment_ptr = true",
-          "low.live_in<amdgpu.kernarg_segment_ptr>",
-          "low.op<amdgpu.s_load_dwordx4_offset_only>"
-        ]
-      }
-    },
-    {
       "name": "dumps selected pass IR as JSONL",
       "run": {
         "tool": "loom-opt",
@@ -254,12 +181,13 @@
           "--output={tmp}/selected.loom"
         ],
         "stdin": {
-          "text": "func.template<demo.report> priority(10) @aligned(%m: index) -> (index) where [mul(%m, 16)] {\n  func.return %m : index\n}\n\nfunc.template<demo.report> priority(1) @fallback(%m: index) -> (index) {\n  func.return %m : index\n}\n\nfunc.def public @entry() -> (index) {\n  %n = index.constant 15 : index\n  %result = func.apply<demo.report>(%n) : (index) -> (index)\n  func.return %result : index\n}\n"
+          "text": "template.decl @demo.report(%m: index) -> (index)\n\ntemplate.def<@demo.report> priority(10) @aligned(%m: index) -> (index) where [mul(%m, 16)] {\n  template.return %m : index\n}\n\ntemplate.def<@demo.report> priority(1) @fallback(%m: index) -> (index) {\n  template.return %m : index\n}\n\nfunc.def public @entry() -> (index) {\n  %n = index.constant 15 : index\n  %result = template.apply<@demo.report>(%n) : (index) -> (index)\n  func.return %result : index\n}\n"
         }
       },
       "stderr": {
         "contains": [
           "\"pass\":\"select-templates\"",
+          "\"status\":{\"code\":0,\"name\":\"OK\"}",
           "\"apply-sites\":1",
           "\"selected-sites\":1",
           "\"fallback-selected-sites\":1",
@@ -272,15 +200,96 @@
           "\"selected_priority\":1",
           "\"highest_provider_priority\":10",
           "\"provider_count\":2",
-          "\"target_applicable_count\":2",
+          "\"target_identity_match_count\":2",
+          "\"target_identity_unresolved_count\":0",
           "\"possible_count\":1",
-          "\"best_exact_count\":1"
+          "\"best_match_count\":1"
         ]
       },
       "files": [
         {
           "path": "{tmp}/selected.loom",
           "contains": ["func.call inline @fallback"]
+        }
+      ]
+    },
+    {
+      "name": "reports unresolved target condition behind final fallback",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=select-templates{mode=final}",
+          "--pass-report=json",
+          "--output={tmp}/target-condition-fallback.loom"
+        ],
+        "stdin": {
+          "text": "template.decl @demo.target_condition_report(%value: i32) -> (i32)\n\ntemplate.def<@demo.target_condition_report> requires [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {\n  template.return %value : i32\n}\n\ntemplate.def<@demo.target_condition_report> priority(1) @fallback(%value: i32) -> (i32) {\n  template.return %value : i32\n}\n\nfunc.def public @entry(%arg: i32) -> (i32) {\n  %result = template.apply<@demo.target_condition_report>(%arg) : (i32) -> (i32)\n  func.return %result : i32\n}\n"
+        }
+      },
+      "stderr": {
+        "contains": [
+          "\"pass\":\"select-templates\"",
+          "\"status\":{\"code\":0,\"name\":\"OK\"}",
+          "\"selected-sites\":1",
+          "\"fallback-selected-sites\":1",
+          "\"category\":\"template-selection\"",
+          "\"outcome\":\"fallback_selected\"",
+          "\"selected_provider\":\"fallback\"",
+          "\"selected_priority\":1",
+          "\"unresolved_provider\":\"wave64\"",
+          "\"unresolved_priority\":10",
+          "\"unresolved_reason\":\"target_condition\"",
+          "\"unresolved_condition\":\"target.subgroup.size\"",
+          "\"highest_provider_priority\":10",
+          "\"provider_count\":2",
+          "\"target_identity_match_count\":2",
+          "\"target_identity_unresolved_count\":0",
+          "\"possible_count\":2",
+          "\"best_match_count\":1"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/target-condition-fallback.loom",
+          "contains": ["func.call inline @fallback"],
+          "not_contains": ["@wave64"]
+        }
+      ]
+    },
+    {
+      "name": "reports unresolved target identity behind final fallback",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=select-templates{mode=final}",
+          "--pass-report=json",
+          "--output={tmp}/target-identity-fallback.loom"
+        ],
+        "stdin": {
+          "text": "test.target<low_core> @low_core\n\ntemplate.decl @demo.target_identity_report(%value: i32) -> (i32)\n\ntemplate.def<@demo.target_identity_report> target(@low_core) priority(10) @targeted(%value: i32) -> (i32) {\n  template.return %value : i32\n}\n\ntemplate.def<@demo.target_identity_report> priority(1) @fallback(%value: i32) -> (i32) {\n  template.return %value : i32\n}\n\nfunc.def public @entry(%arg: i32) -> (i32) {\n  %result = template.apply<@demo.target_identity_report>(%arg) : (i32) -> (i32)\n  func.return %result : i32\n}\n"
+        }
+      },
+      "stderr": {
+        "contains": [
+          "\"pass\":\"select-templates\"",
+          "\"status\":{\"code\":0,\"name\":\"OK\"}",
+          "\"category\":\"template-selection\"",
+          "\"outcome\":\"fallback_selected\"",
+          "\"selected_provider\":\"fallback\"",
+          "\"unresolved_provider\":\"targeted\"",
+          "\"unresolved_reason\":\"target_identity\"",
+          "\"provider_count\":2",
+          "\"target_identity_match_count\":1",
+          "\"target_identity_unresolved_count\":1",
+          "\"possible_count\":2",
+          "\"best_match_count\":1"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/target-identity-fallback.loom",
+          "contains": ["func.call inline @fallback"],
+          "not_contains": ["@targeted"]
         }
       ]
     },
@@ -557,56 +566,6 @@
       ]
     },
     {
-      "name": "prints full target register types in text diagnostics",
-      "run": {
-        "tool": "loom-opt",
-        "args": [
-          "--output={tmp}/unused.loom"
-        ],
-        "stdin": {
-          "text": "amdgpu.target<gfx1100> @target\n\nlow.func.def target(@target) @bad_return(%predicate: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) {\n  low.return %predicate : reg<amdgpu.sgpr x2>\n}\n"
-        }
-      },
-      "exit": {
-        "nonzero": true
-      },
-      "stderr": {
-        "contains": [
-          "yielded value has type reg<amdgpu.sgpr x2>",
-          "but expected reg<amdgpu.sgpr>"
-        ],
-        "not_contains": [
-          "reg<...>"
-        ]
-      }
-    },
-    {
-      "name": "prints full target register types in json diagnostics",
-      "run": {
-        "tool": "loom-opt",
-        "args": [
-          "--diagnostic-format=json",
-          "--output={tmp}/unused.loom"
-        ],
-        "stdin": {
-          "text": "amdgpu.target<gfx1100> @target\n\nlow.func.def target(@target) @bad_return_json(%predicate: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) {\n  low.return %predicate : reg<amdgpu.sgpr x2>\n}\n"
-        }
-      },
-      "exit": {
-        "nonzero": true
-      },
-      "stderr": {
-        "contains": [
-          "\"message\":\"yielded value has type reg<amdgpu.sgpr x2>",
-          "\"yield_type\":\"reg<amdgpu.sgpr x2>\"",
-          "\"expected_type\":\"reg<amdgpu.sgpr>\""
-        ],
-        "not_contains": [
-          "reg<...>"
-        ]
-      }
-    },
-    {
       "name": "materializes config values",
       "run": {
         "tool": "loom-opt",
@@ -671,11 +630,17 @@
       "files": [
         {
           "path": "{tmp}/pass.repro",
-          "non_empty": true
+          "contains": [
+            "\"status\": {\"code\":",
+            "\"name\":"
+          ]
         },
         {
           "path": "{tmp}/failed-pass-trace.jsonl",
-          "non_empty": true
+          "contains": [
+            "\"status\":{\"code\":",
+            "\"name\":"
+          ]
         }
       ]
     }

@@ -238,18 +238,24 @@ int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
 
   iree_io_parameter_archive_builder_t builder;
-  iree_io_parameter_archive_builder_initialize(host_allocator, &builder);
+  iree_status_t status =
+      iree_io_parameter_archive_builder_initialize(host_allocator, &builder);
 
   // Declare parameters based on flags, populating the builder with the metadata
   // for each parameter without yet writing any data.
-  iree_status_t status = iree_tooling_declare_parameters(&builder);
+  if (iree_status_is_ok(status)) {
+    status = iree_tooling_declare_parameters(&builder);
+  }
 
   // Open a file of sufficient size (now that we know it) for writing.
   iree_io_physical_offset_t target_file_offset = 0;
   iree_io_physical_offset_t archive_offset = iree_align_uint64(
       target_file_offset, IREE_IO_PARAMETER_ARCHIVE_HEADER_ALIGNMENT);
-  iree_io_physical_size_t archive_length =
-      iree_io_parameter_archive_builder_total_size(&builder);
+  iree_io_physical_size_t archive_length = 0;
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_io_parameter_archive_builder_total_size(&builder, &archive_length);
+  }
   iree_io_file_handle_t* target_file_handle = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_tooling_open_output_parameter_file(

@@ -18,6 +18,7 @@ loom_cc_library(
     "linearize_view_accesses.c"
   DEPS
     iree::base
+    iree::base::internal
     loom::ir
     loom::ir::facts
     loom::ops::buffer
@@ -30,8 +31,27 @@ loom_cc_library(
     loom::pass::value_facts
     loom::rewrite::rewriter
     loom::util::fact_table
-    loom::util::math
     loom::util::walk
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    target_legalization
+  HDRS
+    "target_legalization.h"
+  SRCS
+    "target_legalization.c"
+  DEPS
+    iree::base
+    loom::ir
+    loom::ops::atomic
+    loom::ops::op_defs
+    loom::ops::scalar
+    loom::ops::scf
+    loom::ops::view
+    loom::rewrite::rewriter
+    loom::target::legalization
   PUBLIC
 )
 

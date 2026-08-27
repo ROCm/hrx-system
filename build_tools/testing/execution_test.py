@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -24,12 +25,92 @@ class ExecutionUnitTest(unittest.TestCase):
             tool_path = Path(directory) / "tool"
             substituter = execution._Substituter(
                 {"tmp": directory},
-                {"fixture": tool_path},
+                {"fixture": execution.ToolCommand(executable=str(tool_path))},
             )
             self.assertEqual(
                 substituter.substitute("{tmp}/file {json: true} {tool:fixture}"),
                 f"{directory}/file {{json: true}} {tool_path}",
             )
+
+    def test_substitution_rejects_multi_argument_tool_command(self):
+        substituter = execution._Substituter(
+            {},
+            {
+                "fixture": execution.ToolCommand(
+                    executable=sys.executable,
+                    arguments=("/path/to/fixture.py",),
+                )
+            },
+        )
+        with self.assertRaisesRegex(execution.SchemaError, "multi-argument command"):
+            substituter.substitute("{tool:fixture}")
+
+    def test_runner_launches_tool_command_prefix(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest_path = Path(directory) / "manifest.json"
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "cases": [
+                            {
+                                "name": "command prefix",
+                                "run": {
+                                    "tool": "fixture",
+                                    "args": ["manifest argument"],
+                                },
+                                "stdout": {"contains": ["manifest argument"]},
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            runner = execution.ExecutionRunner(
+                tools={
+                    "fixture": execution.ToolCommand(
+                        executable=sys.executable,
+                        arguments=(
+                            "-c",
+                            "import sys; print(sys.argv[1])",
+                        ),
+                    )
+                }
+            )
+
+            self.assertEqual(
+                runner.run_manifest(manifest_path), execution.RunSummary(case_count=1)
+            )
+
+    def test_parse_tool_bindings_appends_fixed_arguments(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / "fixture"
+            executable.touch()
+
+            tools = execution.parse_tool_bindings(
+                [f"fixture={executable}"],
+                ["fixture=first", "fixture=second=value"],
+            )
+
+            self.assertEqual(
+                tools["fixture"],
+                execution.ToolCommand(
+                    executable=str(executable),
+                    arguments=("first", "second=value"),
+                ),
+            )
+
+    def test_write_text_preserves_utf8_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "fixture.txt"
+            text = "héllo\nworld\n"
+            runner = execution.ExecutionRunner(tools={})
+
+            runner._run_write_step(
+                "fixture case", "write fixture", {"path": str(path), "text": text}
+            )
+
+            self.assertEqual(path.read_bytes(), text.encode("utf-8"))
 
     def test_contains_ordering(self):
         runner = execution.ExecutionRunner(tools={})

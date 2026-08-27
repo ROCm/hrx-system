@@ -10,19 +10,29 @@ import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+import loom.dsl as dsl
 import loom.ir as ir
 from loom.assembly import (
     COLON,
+    COMMA,
     EQUALS,
     Attr,
     BlockRef,
     Clause,
+    EncodingOf,
+    FuncArgs,
     IndexList,
     Keyword,
+    OptionalGroup,
+    Param,
     Ref,
     Region,
     ResultType,
+    ScalarOf,
     Scope,
+    ScopedEnumRef,
+    ShapeOf,
+    SymbolRef,
     TypeOf,
     kw,
 )
@@ -30,9 +40,16 @@ from loom.dsl import (
     ADDRESS,
     ANY,
     ANY_ENCODING,
+    ATTR_TYPE_PARAMETERIZED,
+    ATTR_TYPE_SYMBOL,
+    ATTR_TYPE_SYMBOL_ARRAY,
+    ATTR_TYPE_SYMBOL_SET,
     BUFFER,
     BY_REFERENCE,
+    BYTE_PATTERN_SCALAR,
+    COMMAND_EFFECT,
     COMMUTATIVE,
+    COMPILE_TIME_ONLY,
     CONSTANT_LIKE,
     CONVERGENT,
     DECOMPOSABLE,
@@ -41,6 +58,7 @@ from loom.dsl import (
     ENCODING_SCHEMA,
     ENCODING_STORAGE,
     ENCODING_TRANSFORM,
+    FACT_IDENTITY,
     FLOAT,
     FLOAT_ELEMENT,
     HINT,
@@ -51,14 +69,19 @@ from loom.dsl import (
     INTEGER,
     INTEGER_ELEMENT,
     INVOLUTION,
+    MEMORY_FENCE,
+    MODULE_SCOPE,
     NON_DETERMINISTIC,
     OFFSET,
+    POISON,
     POOL,
     PURE,
     REFINABLE_RESULT_TYPE_REFS,
     REGISTER,
     SAFE_TO_SPECULATE,
     STORAGE,
+    STORAGE_RELATION,
+    SYMBOL_DEFINE,
     TENSOR,
     TERMINATOR,
     TILE,
@@ -84,12 +107,21 @@ from loom.dsl import (
     ElementWidthAtLeastAttr,
     ElementWidthGreaterThan,
     ElementWidthLessThan,
+    EncodingAliasDef,
+    EncodingFamilyDef,
+    EncodingFamilyRole,
+    EncodingOperandSummaryDef,
+    EncodingParam,
+    EncodingRecordDef,
     EnumCase,
     EnumDef,
     FreshResult,
+    FuncLikeInterface,
     HasAllStaticRankOneVector,
     HasAllStaticVector,
     HasAncestor,
+    HasBitwiseElement,
+    HasBitwiseScalar,
     HasF16OrBf16Element,
     HasF32Element,
     HasFloatElement,
@@ -103,12 +135,14 @@ from loom.dsl import (
     HasRankOneVector,
     HasRegister,
     ImplicitTerminator,
+    KeyedModuleRecord,
     LastAxisGroupedBy,
     LegacyFieldDefault,
     LegacyFieldMapping,
     LegacyFormat,
     LiteralMatchesElementType,
     MemoryAccessInterface,
+    MovedResult,
     NoAncestor,
     OffsetCountMatchesRank,
     Op,
@@ -117,6 +151,7 @@ from loom.dsl import (
     OperandOwnershipEffect,
     OpPhase,
     PackedPayloadBitCountMatchesStorage,
+    ParameterizedAttrDef,
     PositiveBitWidthAttr,
     RanksMatch,
     Reads,
@@ -128,7 +163,14 @@ from loom.dsl import (
     SameKind,
     SameShape,
     SameType,
+    ScalarParam,
+    ShapeParam,
     Successor,
+    SymbolDefinition,
+    SymbolKernelContract,
+    SymbolReference,
+    SymbolReferenceRole,
+    TargetFactSpecialization,
     TargetLikeInterface,
     TotalBitCountEqual,
     TypeConstraint,
@@ -216,6 +258,8 @@ class TestTypeConstraints:
         assert OFFSET == TypeConstraint.OFFSET
         assert ADDRESS == TypeConstraint.ADDRESS
         assert BUFFER == TypeConstraint.BUFFER
+        assert BYTE_PATTERN_SCALAR == TypeConstraint.BYTE_PATTERN_SCALAR
+        assert dsl.I32 == TypeConstraint.I32
         assert STORAGE == TypeConstraint.STORAGE
         assert ANY_ENCODING == TypeConstraint.ANY_ENCODING
         assert ENCODING_LAYOUT == TypeConstraint.ENCODING_LAYOUT
@@ -236,6 +280,8 @@ class TestTypeConstraints:
         assert OFFSET.value == "offset"
         assert ADDRESS.value == "address"
         assert STORAGE.value == "storage"
+        assert BYTE_PATTERN_SCALAR.value == "byte_pattern_scalar"
+        assert dsl.I32.value == "i32"
 
     def test_element_family_constraints_are_shaped_specific(self) -> None:
         element_family_constraints = {
@@ -327,11 +373,468 @@ class TestAttrDef:
         with _raises(ValueError, match="requires enum_def"):
             AttrDef("pred", "enum")  # Missing enum_def!
 
+        with _raises(ValueError, match="requires enum_def"):
+            AttrDef("modes", "enum_array")
+
+        with _raises(ValueError, match="requires enum_def"):
+            AttrDef("features", "signed_enum_set")
+
     def test_all_valid_attr_types(self) -> None:
         """All documented attr_type values are accepted."""
-        for attr_type in ["i64", "f64", "string", "bool", "type", "i64_array", "any"]:
+        for attr_type in [
+            "i64",
+            "f64",
+            "string",
+            "bool",
+            "type",
+            "i64_array",
+            "any",
+            "scoped_enum",
+        ]:
             AttrDef("test", attr_type)  # Should not raise.
         AttrDef("test", "enum", enum_def=_cmpi_preds)  # enum needs enum_def.
+        AttrDef("test", "enum_array", enum_def=_cmpi_preds)
+        AttrDef("test", "signed_enum_set", enum_def=_cmpi_preds)
+        AttrDef(
+            "test",
+            ATTR_TYPE_SYMBOL_ARRAY,
+            symbol_ref=SymbolReference("record", ["record"]),
+        )
+        AttrDef(
+            "test",
+            ATTR_TYPE_SYMBOL_SET,
+            symbol_ref=SymbolReference("record", ["record"]),
+        )
+
+    def test_symbol_array_requires_reference_contract(self) -> None:
+        with _raises(ValueError, match="symbol_array.*requires symbol_ref"):
+            AttrDef("providers", ATTR_TYPE_SYMBOL_ARRAY)
+
+    def test_symbol_set_requires_reference_contract(self) -> None:
+        with _raises(ValueError, match="symbol_set.*requires symbol_ref"):
+            AttrDef("providers", ATTR_TYPE_SYMBOL_SET)
+
+    def test_symbol_set_cannot_be_a_parameter(self) -> None:
+        with _raises(ValueError, match="unsupported kind 'symbol_set'"):
+            ParameterizedAttrDef(
+                "test.providers",
+                group=Dialect("test"),
+                parameters=[
+                    AttrDef(
+                        "providers",
+                        ATTR_TYPE_SYMBOL_SET,
+                        symbol_ref=SymbolReference("record", ["record"]),
+                    )
+                ],
+            )
+
+    def test_symbol_reference_contract_requires_symbol_kind(self) -> None:
+        with _raises(ValueError, match="symbol_ref requires"):
+            AttrDef(
+                "providers",
+                "i64_array",
+                symbol_ref=SymbolReference("record", ["record"]),
+            )
+
+    def test_open_enum_array(self) -> None:
+        attr = AttrDef("modes", "enum_array", enum_def=_cmpi_preds, open_enum=True)
+        assert attr.open_enum
+
+    def test_signed_enum_set_rejects_open_domain(self) -> None:
+        with _raises(ValueError, match="open_enum requires an enum attribute"):
+            AttrDef(
+                "features",
+                "signed_enum_set",
+                enum_def=_cmpi_preds,
+                open_enum=True,
+            )
+
+    def test_scoped_enum_is_never_optional_or_defaulted(self) -> None:
+        with _raises(ValueError, match="scoped_enum attributes are required"):
+            AttrDef("descriptor", "scoped_enum", optional=True)
+        with _raises(ValueError, match="scoped_enum attributes cannot have defaults"):
+            AttrDef("descriptor", "scoped_enum", default=0)
+
+    def test_bare_identifier_requires_string(self) -> None:
+        assert AttrDef("mode", "string", bare_identifier=True).bare_identifier
+        with _raises(ValueError, match="bare_identifier requires"):
+            AttrDef("mode", "i64", bare_identifier=True)
+
+
+class TestParameterizedAttrDef:
+    def test_declares_namespaced_typed_parameters(self) -> None:
+        tile = ParameterizedAttrDef(
+            "test.tile",
+            group=Dialect("test"),
+            parameters=[AttrDef("width", "i64")],
+        )
+
+        assert tile.name == "test.tile"
+        assert tile.parameters == (AttrDef("width", "i64"),)
+        assert tile.primary_parameter is None
+
+    def test_declares_required_primary_parameter_by_stable_name(self) -> None:
+        compact = ParameterizedAttrDef(
+            "test.compact",
+            group=Dialect("test"),
+            parameters=[
+                AttrDef("label", "string", optional=True),
+                AttrDef("value", "i64"),
+            ],
+            primary_parameter="value",
+        )
+
+        assert compact.primary_parameter_index == 1
+        assert compact.primary_parameter == AttrDef("value", "i64")
+
+    def test_declares_typed_target_condition_descriptor(self) -> None:
+        condition = ParameterizedAttrDef(
+            "target.subgroup.size",
+            group=Dialect("target"),
+            parameters=[AttrDef("size", "i64")],
+            primary_parameter="size",
+            target_condition="loom_target_subgroup_size_condition",
+        )
+
+        assert condition.target_condition == "loom_target_subgroup_size_condition"
+
+    def test_rejects_invalid_target_condition_symbol(self) -> None:
+        with _raises(ValueError, match="must be a C symbol name"):
+            ParameterizedAttrDef(
+                "target.subgroup.size",
+                group=Dialect("target"),
+                target_condition="target.subgroup.size",
+            )
+
+    def test_rejects_missing_or_optional_primary_parameter(self) -> None:
+        with _raises(ValueError, match="primary parameter 'missing' is not declared"):
+            ParameterizedAttrDef(
+                "test.compact",
+                group=Dialect("test"),
+                parameters=[AttrDef("value", "i64")],
+                primary_parameter="missing",
+            )
+        with _raises(ValueError, match="primary parameter 'value' must be required"):
+            ParameterizedAttrDef(
+                "test.compact",
+                group=Dialect("test"),
+                parameters=[AttrDef("value", "i64", optional=True)],
+                primary_parameter="value",
+            )
+
+    def test_rejects_wrong_namespace(self) -> None:
+        with _raises(ValueError, match="must begin with the owning dialect"):
+            ParameterizedAttrDef("other.tile", group=Dialect("test"))
+
+    def test_rejects_duplicate_parameters(self) -> None:
+        with _raises(ValueError, match="duplicate parameter 'width'"):
+            ParameterizedAttrDef(
+                "test.tile",
+                group=Dialect("test"),
+                parameters=[AttrDef("width", "i64"), AttrDef("width", "i64")],
+            )
+
+    def test_rejects_enclosing_operation_parameter_kinds(self) -> None:
+        with _raises(ValueError, match="unsupported kind 'scoped_enum'"):
+            ParameterizedAttrDef(
+                "test.tile",
+                group=Dialect("test"),
+                parameters=[AttrDef("scope", "scoped_enum")],
+            )
+
+    def test_nested_parameter_allows_open_family(self) -> None:
+        options = ParameterizedAttrDef(
+            "test.options",
+            group=Dialect("test"),
+            parameters=[AttrDef("value", ATTR_TYPE_PARAMETERIZED)],
+        )
+
+        assert options.parameters[0].parameterized_attr is None
+
+    def test_nested_parameter_retains_exact_family(self) -> None:
+        dialect = Dialect("test")
+        tile = ParameterizedAttrDef("test.tile", group=dialect)
+        options = ParameterizedAttrDef(
+            "test.options",
+            group=dialect,
+            parameters=[
+                AttrDef(
+                    "tile",
+                    ATTR_TYPE_PARAMETERIZED,
+                    optional=True,
+                    parameterized_attr=tile,
+                )
+            ],
+        )
+
+        assert options.parameters[0].parameterized_attr is tile
+
+
+class TestEncodingFamilyDef:
+    def test_declares_implicit_shaped_attachment(self) -> None:
+        family = EncodingFamilyDef(
+            "encoding.layout.dense",
+            group=Dialect("encoding"),
+            role=EncodingFamilyRole.ADDRESS_LAYOUT,
+            implicit_shaped_attachment=True,
+        )
+
+        assert family.implicit_shaped_attachment
+
+    def test_rejects_parameterized_implicit_shaped_attachment(self) -> None:
+        with _raises(ValueError, match="cannot have static or dynamic parameters"):
+            EncodingFamilyDef(
+                "encoding.layout.parameterized",
+                group=Dialect("encoding"),
+                role=EncodingFamilyRole.ADDRESS_LAYOUT,
+                parameters=[AttrDef("value", "i64")],
+                implicit_shaped_attachment=True,
+            )
+
+    def test_rejects_non_layout_implicit_shaped_attachment(self) -> None:
+        with _raises(ValueError, match="must have the ADDRESS_LAYOUT role"):
+            EncodingFamilyDef(
+                "encoding.schema.dense",
+                group=Dialect("encoding"),
+                role=EncodingFamilyRole.STORAGE_SCHEMA,
+                implicit_shaped_attachment=True,
+            )
+
+    def test_declares_canonical_alias_with_typed_fixed_parameters(self) -> None:
+        numeric_format = EnumDef(
+            "NumericFormat", [EnumCase("f16", 0), EnumCase("bf16", 1)]
+        )
+        family = EncodingFamilyDef(
+            "encoding.operand",
+            group=Dialect("encoding"),
+            role=EncodingFamilyRole.STORAGE_SCHEMA,
+            parameters=[
+                AttrDef("payload_elements", "i64"),
+                AttrDef("element_format", "enum", enum_def=numeric_format),
+            ],
+            aliases=[
+                EncodingAliasDef(
+                    "encoding.f16",
+                    fixed_parameters={"element_format": "f16"},
+                    default_parameters={"payload_elements": 1},
+                )
+            ],
+        )
+
+        assert family.aliases[0].fixed_parameters == (("element_format", "f16"),)
+        assert family.aliases[0].default_parameters == (("payload_elements", 1),)
+        assert family.alias_discriminator is not None
+        assert family.alias_discriminator.name == "element_format"
+
+    def test_rejects_alias_that_fixes_unknown_parameter(self) -> None:
+        with _raises(ValueError, match="references unknown parameter 'missing'"):
+            EncodingFamilyDef(
+                "encoding.operand",
+                group=Dialect("encoding"),
+                role=EncodingFamilyRole.STORAGE_SCHEMA,
+                aliases=[
+                    EncodingAliasDef("encoding.f16", fixed_parameters={"missing": 1})
+                ],
+            )
+
+    def test_rejects_aliases_without_one_direct_enum_discriminator(self) -> None:
+        numeric_format = EnumDef(
+            "NumericFormat", [EnumCase("f16", 0), EnumCase("bf16", 1)]
+        )
+        with _raises(ValueError, match="require one shared enum fixed parameter"):
+            EncodingFamilyDef(
+                "encoding.operand",
+                group=Dialect("encoding"),
+                role=EncodingFamilyRole.STORAGE_SCHEMA,
+                parameters=[
+                    AttrDef("element_format", "enum", enum_def=numeric_format),
+                    AttrDef("payload_elements", "i64"),
+                ],
+                aliases=[
+                    EncodingAliasDef(
+                        "encoding.f16",
+                        fixed_parameters={"element_format": "f16"},
+                    ),
+                    EncodingAliasDef(
+                        "encoding.f16_scalar",
+                        fixed_parameters={
+                            "element_format": "f16",
+                            "payload_elements": 1,
+                        },
+                    ),
+                ],
+            )
+
+    def test_rejects_more_than_uint8_alias_ordinals(self) -> None:
+        numeric_format = EnumDef(
+            "NumericFormat",
+            [EnumCase(f"f{value}", value) for value in range(256)],
+        )
+        with _raises(ValueError, match="256 aliases exceed the uint8_t ordinal limit"):
+            EncodingFamilyDef(
+                "encoding.operand",
+                group=Dialect("encoding"),
+                role=EncodingFamilyRole.STORAGE_SCHEMA,
+                parameters=[
+                    AttrDef("element_format", "enum", enum_def=numeric_format),
+                ],
+                aliases=[
+                    EncodingAliasDef(
+                        f"encoding.f{value}",
+                        fixed_parameters={"element_format": f"f{value}"},
+                    )
+                    for value in range(256)
+                ],
+            )
+
+    def test_declares_lexically_indexed_sparse_parameters(self) -> None:
+        family = EncodingFamilyDef(
+            "operand",
+            group=Dialect("encoding"),
+            role=EncodingFamilyRole.STORAGE_SCHEMA,
+            parameters=[
+                AttrDef("rounding", "string", optional=True),
+                AttrDef("payload_elements", "i64"),
+            ],
+        )
+
+        assert family.name == "operand"
+        assert family.role is EncodingFamilyRole.STORAGE_SCHEMA
+        assert tuple(parameter.name for parameter in family.parameters) == (
+            "payload_elements",
+            "rounding",
+        )
+
+    def test_declares_lexically_indexed_dynamic_parameters(self) -> None:
+        family = EncodingFamilyDef(
+            "storage",
+            group=Dialect("encoding"),
+            role=EncodingFamilyRole.PHYSICAL_STORAGE,
+            dynamic_parameters=[
+                Operand("schema", TypeConstraint.ENCODING_SCHEMA),
+                Operand("layout", TypeConstraint.ENCODING_LAYOUT),
+            ],
+        )
+
+        assert tuple(parameter.name for parameter in family.dynamic_parameters) == (
+            "layout",
+            "schema",
+        )
+
+    def test_rejects_duplicate_dynamic_parameters_after_sorting(self) -> None:
+        with _raises(ValueError, match="duplicate dynamic parameter 'value'"):
+            EncodingFamilyDef(
+                "schema",
+                group=Dialect("encoding"),
+                role=EncodingFamilyRole.STORAGE_SCHEMA,
+                dynamic_parameters=[
+                    Operand("value", TypeConstraint.INDEX),
+                    Operand("value", TypeConstraint.INDEX),
+                ],
+            )
+
+    def test_accepts_qualified_family_name(self) -> None:
+        family = EncodingFamilyDef(
+            "ggml.q4_k",
+            group=Dialect("encoding"),
+            role=EncodingFamilyRole.STORAGE_SCHEMA,
+        )
+
+        assert family.name == "ggml.q4_k"
+
+    def test_rejects_invalid_qualified_family_name(self) -> None:
+        with _raises(ValueError, match="dotted ASCII identifier"):
+            EncodingFamilyDef(
+                "ggml..q4_k",
+                group=Dialect("encoding"),
+                role=EncodingFamilyRole.STORAGE_SCHEMA,
+            )
+
+    def test_rejects_duplicate_parameters_after_sorting(self) -> None:
+        with _raises(ValueError, match="duplicate parameter 'mode'"):
+            EncodingFamilyDef(
+                "schema",
+                group=Dialect("encoding"),
+                role=EncodingFamilyRole.STORAGE_SCHEMA,
+                parameters=[
+                    AttrDef("mode", "string"),
+                    AttrDef("mode", "string"),
+                ],
+            )
+
+    def test_declares_fixed_storage_metadata(self) -> None:
+        auxiliary_keys = EnumDef(
+            "AuxiliaryKey",
+            [EnumCase("scale", 0), EnumCase("minimum", 1)],
+        )
+        family = EncodingFamilyDef(
+            "ggml.q4_k",
+            group=Dialect("encoding"),
+            role=EncodingFamilyRole.STORAGE_SCHEMA,
+            fixed_record=EncodingRecordDef(
+                logical_element_count=256,
+                storage_byte_count=144,
+                required_alignment=16,
+            ),
+            fixed_operand_summary=EncodingOperandSummaryDef(
+                payload_packing=4,
+                payload_element_count=256,
+                scale_group_shape=(16, 16),
+            ),
+            auxiliary_key_enum=auxiliary_keys,
+            required_auxiliary_keys=[auxiliary_keys.case("scale")],
+        )
+
+        assert family.fixed_record is not None
+        assert family.fixed_record.storage_byte_count == 144
+        assert family.fixed_operand_summary is not None
+        assert family.fixed_operand_summary.scale_group_element_count == 256
+        assert family.required_auxiliary_keys == (auxiliary_keys.case("scale"),)
+
+    def test_rejects_fixed_metadata_on_non_storage_family(self) -> None:
+        with _raises(ValueError, match="requires the STORAGE_SCHEMA role"):
+            EncodingFamilyDef(
+                "dense",
+                group=Dialect("encoding"),
+                role=EncodingFamilyRole.ADDRESS_LAYOUT,
+                fixed_record=EncodingRecordDef(1, 1),
+            )
+
+    def test_rejects_auxiliary_key_from_another_enum(self) -> None:
+        expected_keys = EnumDef("ExpectedKey", [EnumCase("scale", 0)])
+        other_keys = EnumDef("OtherKey", [EnumCase("scale", 0)])
+        with _raises(ValueError, match="is not in ExpectedKey"):
+            EncodingFamilyDef(
+                "schema",
+                group=Dialect("encoding"),
+                role=EncodingFamilyRole.STORAGE_SCHEMA,
+                auxiliary_key_enum=expected_keys,
+                required_auxiliary_keys=[other_keys.case("scale")],
+            )
+
+
+class TestEncodingRecordDef:
+    def test_rejects_non_power_of_two_alignment(self) -> None:
+        with _raises(ValueError, match="must be a power of two"):
+            EncodingRecordDef(16, 8, required_alignment=3)
+
+
+class TestEncodingOperandSummaryDef:
+    def test_canonicalizes_scale_group_element_count(self) -> None:
+        summary = EncodingOperandSummaryDef(scale_group_shape=(4, 8))
+
+        assert summary.scale_group_element_count == 32
+
+    def test_rejects_inconsistent_scale_group_element_count(self) -> None:
+        with _raises(ValueError, match="must equal the scale_group_shape product"):
+            EncodingOperandSummaryDef(
+                scale_group_element_count=16,
+                scale_group_shape=(4, 8),
+            )
+
+    def test_rejects_out_of_range_fact_bits(self) -> None:
+        with _raises(ValueError, match="unsigned 32-bit integer"):
+            EncodingOperandSummaryDef(payload_packing=1 << 32)
 
 
 class TestEnumDef:
@@ -346,6 +849,31 @@ class TestEnumDef:
     def test_accepts_list(self) -> None:
         e = EnumDef("Test", [EnumCase("a", 0)])
         assert isinstance(e.cases, tuple)
+
+    def test_empty_name_rejected(self) -> None:
+        with _raises(ValueError, match="name must be non-empty"):
+            EnumDef("", [EnumCase("a", 0)])
+
+    def test_empty_cases_rejected(self) -> None:
+        with _raises(ValueError, match="cases must be non-empty"):
+            EnumDef("Bad", [])
+
+    def test_empty_keyword_rejected(self) -> None:
+        with _raises(ValueError, match="case keyword must be non-empty"):
+            EnumDef("Bad", [EnumCase("", 0)])
+
+    def test_value_domain_rejected(self) -> None:
+        for value in [False, -1, 256, "1"]:
+            with _raises(ValueError, match=r"integer in \[0, 255\]"):
+                EnumDef("Bad", [EnumCase("a", value)])  # type: ignore[arg-type]
+
+    def test_full_byte_domain_accepted(self) -> None:
+        e = EnumDef(
+            "Byte",
+            [EnumCase(f"v{i}", i) for i in range(256)],
+        )
+        assert len(e.cases) == 256
+        assert e.cases[-1].value == 255
 
     def test_duplicate_keyword_rejected(self) -> None:
         with _raises(ValueError, match="duplicate keyword 'eq'"):
@@ -479,11 +1007,11 @@ class TestInterfaces:
         interface = CallLikeInterface(
             callee="callee",
             operands="operands",
-            results="results",
+            results=None,
         )
         assert interface.callee == "callee"
         assert interface.operands == "operands"
-        assert interface.results == "results"
+        assert interface.results is None
         assert interface.purity is None
         assert interface.kind == CallLikeKind.SEMANTIC
 
@@ -499,11 +1027,15 @@ class TestInterfaces:
         assert interface.selector == "kind"
         assert interface.extensions is None
         assert interface.descriptor is None
+        assert interface.fact_type is None
+        assert interface.fact_projector is None
+        assert interface.fact_specialization == TargetFactSpecialization.EXACT
 
     def test_memory_access_interface_uses_soft_field_defaults(self) -> None:
         interface = MemoryAccessInterface()
 
         assert interface.view == "view"
+        assert interface.byte_offset == "byte_offset"
         assert interface.value == "value"
         assert interface.indices == "indices"
         assert interface.static_indices == "static_indices"
@@ -578,9 +1110,6 @@ class TestConstraints:
         c = SameEncoding("a", "b")
         assert c.error is not None
         assert c.error.error_id == "ERR_ENCODING_001"
-        # No validate function — C-only check.
-        ok, _msg = c.check({})
-        assert ok
 
     def test_same_shape(self) -> None:
         c = SameShape("a", "b")
@@ -665,6 +1194,23 @@ class TestConstraints:
         assert not HasIndexOrNonI1IntegerElement("x").check(
             {"x": FakeValue(vector_type(F32))}
         )[0]
+
+    def test_bitwise_constraints_accept_integer_and_float_payloads(self) -> None:
+        class FakeValue:
+            def __init__(self, value_type: object):
+                self.type = value_type
+
+        def vector_type(element_type: ScalarType) -> ShapedType:
+            return ShapedType(TypeKind.VECTOR, element_type, (StaticDim(4),))
+
+        assert HasBitwiseScalar("x").check({"x": FakeValue(ir.INDEX)})[0]
+        assert HasBitwiseScalar("x").check({"x": FakeValue(I32)})[0]
+        assert HasBitwiseScalar("x").check({"x": FakeValue(F32)})[0]
+        assert not HasBitwiseScalar("x").check({"x": FakeValue(ir.I1)})[0]
+        assert not HasBitwiseScalar("x").check({"x": FakeValue(ir.OFFSET)})[0]
+        assert HasBitwiseElement("x").check({"x": FakeValue(vector_type(I8))})[0]
+        assert HasBitwiseElement("x").check({"x": FakeValue(vector_type(F32))})[0]
+        assert not HasBitwiseElement("x").check({"x": FakeValue(vector_type(ir.I1))})[0]
 
     def test_vector_shape_constraints_validate_vector_shape(self) -> None:
         class FakeValue:
@@ -1366,6 +1912,214 @@ class TestTypeDef:
         assert type_def.semantic == TypeSemantic.CONTROL_TOKEN
         assert type_def.contracts == (ContractFamily.KERNEL_ASYNC,)
 
+    def test_managed_reference_semantic_is_explicit(self) -> None:
+        type_def = TypeDef(
+            "test.ref",
+            semantic=TypeSemantic.MANAGED_REFERENCE,
+        )
+
+        assert type_def.semantic == TypeSemantic.MANAGED_REFERENCE
+
+    def test_descriptor_parameters_support_positional_and_keyed_formats(self) -> None:
+        type_def = TypeDef(
+            "test.matrix",
+            params=[AttrDef("element_type", "type"), AttrDef("rows", "i64")],
+            format=[
+                Param("element_type"),
+                COMMA,
+                kw("rows"),
+                EQUALS,
+                Param("rows"),
+            ],
+        )
+
+        assert type_def.param("rows") == AttrDef("rows", "i64")
+        assert type_def.uses_attribute_parameters
+
+    def test_descriptor_parameters_reject_mixed_storage_schemas(self) -> None:
+        from loom.dsl import TypeParam
+
+        with _raises(ValueError, match="cannot be mixed"):
+            TypeDef(
+                "test.wrapper",
+                params=[TypeParam("value"), AttrDef("mode", "i64")],
+                format=[TypeOf("value"), COMMA, Param("mode")],
+            )
+
+    def test_compact_shape_format_must_match_representation(self) -> None:
+        type_def = TypeDef(
+            "test.vector",
+            ir_kind="vector",
+            params=[ShapeParam("dims"), ScalarParam("element_type")],
+            format=[ShapeOf("dims"), kw("x"), ScalarOf("element_type")],
+        )
+        assert type_def.uses_compact_shape_format
+
+        with _raises(ValueError, match="does not match its compact shape"):
+            TypeDef(
+                "test.vector",
+                ir_kind="vector",
+                params=[ShapeParam("dims"), ScalarParam("element_type")],
+                format=[ScalarOf("element_type"), kw("x"), ShapeOf("dims")],
+            )
+
+        with _raises(ValueError, match="requires shape and scalar parameters"):
+            TypeDef("test.vector", ir_kind="vector")
+
+    def test_vector_compact_shape_format_rejects_encoding(self) -> None:
+        with _raises(ValueError, match="vector representation cannot carry"):
+            TypeDef(
+                "test.vector",
+                ir_kind="vector",
+                params=[
+                    ShapeParam("dims"),
+                    ScalarParam("element_type"),
+                    EncodingParam("encoding"),
+                ],
+                format=[
+                    ShapeOf("dims"),
+                    kw("x"),
+                    ScalarOf("element_type"),
+                    OptionalGroup([COMMA, EncodingOf("encoding")], anchor="encoding"),
+                ],
+            )
+
+    def test_descriptor_parameters_share_family_schema_validation(self) -> None:
+        with _raises(ValueError, match="must be a bare ASCII identifier"):
+            TypeDef(
+                "test.wrapper",
+                params=[AttrDef("not-valid", "i64")],
+                format=[Param("not-valid")],
+            )
+
+        open_wrapper = TypeDef(
+            "test.wrapper",
+            params=[AttrDef("value", ATTR_TYPE_PARAMETERIZED)],
+            format=[Param("value")],
+        )
+        assert open_wrapper.params[0].parameterized_attr is None
+
+        with _raises(ValueError, match="unsupported kind 'scoped_enum'"):
+            TypeDef(
+                "test.wrapper",
+                params=[AttrDef("scope", "scoped_enum")],
+                format=[Param("scope")],
+            )
+
+    def test_descriptor_parameters_require_exactly_one_format_reference(self) -> None:
+        with _raises(ValueError, match="must appear exactly once"):
+            TypeDef(
+                "test.wrapper",
+                params=[AttrDef("value", "type")],
+                format=[Param("value"), COMMA, Param("value")],
+            )
+
+    def test_compact_enum_parameter_constructs_registered_python_type(self) -> None:
+        class CompactValue:
+            def __init__(self, mode: int = 0) -> None:
+                self.mode = mode
+
+        mode = EnumDef(
+            "Mode",
+            [EnumCase("fast", 1), EnumCase("precise", 2)],
+        )
+        type_def = TypeDef(
+            "test.compact",
+            ir_kind="encoding",
+            python_type=CompactValue,
+            params=[AttrDef("mode", "enum", enum_def=mode, optional=True)],
+            format=[OptionalGroup([Param("mode")], anchor="mode")],
+        )
+
+        assert type_def.uses_inline_enum_parameter
+        assert type_def.omits_empty_parameter_list
+        assert type_def().mode == 0
+        assert type_def(mode="precise").mode == 2
+        assert type_def(mode=1).mode == 1
+
+    def test_compact_enum_parameter_rejects_ambiguous_absence(self) -> None:
+        class CompactValue:
+            pass
+
+        mode = EnumDef(
+            "Mode",
+            [EnumCase("unknown", 0), EnumCase("fast", 1)],
+        )
+        with _raises(ValueError, match="reserves value zero for absence"):
+            TypeDef(
+                "test.compact",
+                ir_kind="encoding",
+                python_type=CompactValue,
+                params=[AttrDef("mode", "enum", enum_def=mode, optional=True)],
+                format=[OptionalGroup([Param("mode")], anchor="mode")],
+            )
+
+    def test_compact_enum_parameter_requires_closed_single_enum(self) -> None:
+        class CompactValue:
+            pass
+
+        mode = EnumDef("Mode", [EnumCase("fast", 1)])
+        with _raises(ValueError, match="exactly one parameter"):
+            TypeDef(
+                "test.compact",
+                ir_kind="encoding",
+                python_type=CompactValue,
+                params=[
+                    AttrDef("mode", "enum", enum_def=mode),
+                    AttrDef("other", "enum", enum_def=mode),
+                ],
+                format=[Param("mode"), COMMA, Param("other")],
+            )
+        with _raises(ValueError, match="must be an enum"):
+            TypeDef(
+                "test.compact",
+                ir_kind="encoding",
+                python_type=CompactValue,
+                params=[AttrDef("mode", "i64")],
+                format=[Param("mode")],
+            )
+        with _raises(ValueError, match="cannot be open"):
+            TypeDef(
+                "test.compact",
+                ir_kind="encoding",
+                python_type=CompactValue,
+                params=[
+                    AttrDef(
+                        "mode",
+                        "enum",
+                        enum_def=mode,
+                        optional=True,
+                        open_enum=True,
+                    )
+                ],
+                format=[OptionalGroup([Param("mode")], anchor="mode")],
+            )
+
+        with _raises(ValueError, match="assembly format omits"):
+            TypeDef(
+                "test.wrapper",
+                params=[AttrDef("value", "type")],
+                format=[kw("empty")],
+            )
+
+    def test_param_format_requires_descriptor_parameter(self) -> None:
+        from loom.dsl import TypeParam
+
+        with _raises(ValueError, match="requires an AttrDef parameter"):
+            TypeDef(
+                "test.wrapper",
+                params=[TypeParam("value")],
+                format=[Param("value")],
+            )
+
+    def test_format_rejects_unknown_parameter(self) -> None:
+        with _raises(ValueError, match="format references unknown parameter"):
+            TypeDef(
+                "test.wrapper",
+                params=[AttrDef("value", "type")],
+                format=[Param("missing")],
+            )
+
 
 # ============================================================================
 # Op declaration
@@ -1677,6 +2431,35 @@ class TestOp:
         assert op.has_trait("Pure")
         assert not op.has_trait("Idempotent")
 
+    def test_keyed_module_record_contract(self) -> None:
+        op = Op(
+            "module.record",
+            attrs=[AttrDef("key", "string"), AttrDef("payload", "i64")],
+            traits=[MODULE_SCOPE, KeyedModuleRecord("key")],
+        )
+        assert op.keyed_module_record_attr == "key"
+
+    def test_keyed_module_record_requires_attr_only_module_metadata(self) -> None:
+        with _raises(ValueError, match="requires the ModuleScope trait"):
+            Op(
+                "test.record",
+                attrs=[AttrDef("key", "string")],
+                traits=[KeyedModuleRecord("key")],
+            )
+        with _raises(ValueError, match="key attr 'key' must be a required string"):
+            Op(
+                "module.record",
+                attrs=[AttrDef("key", "string", optional=True)],
+                traits=[MODULE_SCOPE, KeyedModuleRecord("key")],
+            )
+        with _raises(ValueError, match="must be attr-only"):
+            Op(
+                "module.record",
+                operands=[Operand("input", ANY)],
+                attrs=[AttrDef("key", "string")],
+                traits=[MODULE_SCOPE, KeyedModuleRecord("key")],
+            )
+
     def test_no_traits(self) -> None:
         op = Op("test.op")
         # An op with no effects, no traits, and no allocating results
@@ -1861,6 +2644,80 @@ class TestEffects:
         op = Op("test.call", traits=[UNKNOWN_EFFECTS])
         assert not op.is_pure
 
+    def test_command_effect_classifies_unknown_effects(self) -> None:
+        op = Op("test.command", traits=[UNKNOWN_EFFECTS, COMMAND_EFFECT])
+        assert not op.is_pure
+
+    def test_command_effect_requires_observable_effects(self) -> None:
+        with _raises(ValueError, match="COMMAND_EFFECT requires"):
+            Op("test.bad", traits=[COMMAND_EFFECT])
+
+    def test_constant_like_requires_pure_source_shape(self) -> None:
+        with _raises(ValueError, match="CONSTANT_LIKE requires PURE"):
+            Op(
+                "test.bad",
+                results=[Result("result", INTEGER)],
+                traits=[CONSTANT_LIKE],
+            )
+        with _raises(ValueError, match="no operands or regions.*one result"):
+            Op(
+                "test.bad",
+                operands=[Operand("input", INTEGER)],
+                results=[Result("result", INTEGER)],
+                traits=[PURE, CONSTANT_LIKE],
+            )
+        with _raises(ValueError, match="no operands or regions.*one result"):
+            Op(
+                "test.bad",
+                results=[Result("result", INTEGER)],
+                regions=[RegionDef("body")],
+                traits=[PURE, CONSTANT_LIKE],
+            )
+        with _raises(ValueError, match="no operands or regions.*one result"):
+            Op("test.bad", traits=[PURE, CONSTANT_LIKE])
+        with _raises(ValueError, match="no operands or regions.*one result"):
+            Op(
+                "test.bad",
+                results=[Result("results", INTEGER, variadic=True)],
+                traits=[PURE, CONSTANT_LIKE],
+            )
+
+    def test_poison_requires_pure_source_shape(self) -> None:
+        with _raises(ValueError, match="POISON requires PURE"):
+            Op(
+                "test.bad",
+                results=[Result("result", INTEGER)],
+                traits=[POISON],
+            )
+        with _raises(ValueError, match="cannot also be CONSTANT_LIKE"):
+            Op(
+                "test.bad",
+                results=[Result("result", INTEGER)],
+                traits=[PURE, CONSTANT_LIKE, POISON],
+            )
+        with _raises(ValueError, match="no operands or regions.*one result"):
+            Op(
+                "test.bad",
+                operands=[Operand("input", INTEGER)],
+                results=[Result("result", INTEGER)],
+                traits=[PURE, POISON],
+            )
+        with _raises(ValueError, match="no operands or regions.*one result"):
+            Op(
+                "test.bad",
+                results=[Result("result", INTEGER)],
+                regions=[RegionDef("body")],
+                traits=[PURE, POISON],
+            )
+        with _raises(ValueError, match="no operands or regions.*one result"):
+            Op("test.bad", traits=[PURE, POISON])
+        with _raises(ValueError, match="no operands or regions.*one result"):
+            Op(
+                "test.bad",
+                results=[Result("results", INTEGER, variadic=True)],
+                traits=[PURE, POISON],
+            )
+
     def test_allocating_result(self) -> None:
         op = Op(
             "test.alloc",
@@ -1906,9 +2763,63 @@ class TestEffects:
         with _raises(ValueError, match="HINT.*CONVERGENT"):
             Op("test.bad", traits=[HINT, CONVERGENT])
 
+    def test_compile_time_only_can_refine_values(self) -> None:
+        op = Op(
+            "test.assume",
+            operands=[Operand("value", ANY)],
+            results=[Result("result", ANY)],
+            traits=[PURE, FACT_IDENTITY, STORAGE_RELATION, COMPILE_TIME_ONLY],
+        )
+        assert op.is_pure
+
+    def test_compile_time_only_is_redundant_with_hint(self) -> None:
+        with _raises(ValueError, match="COMPILE_TIME_ONLY.*redundant.*HINT"):
+            Op("test.hint", traits=[HINT, COMPILE_TIME_ONLY])
+
+    def test_compile_time_only_with_runtime_trait_raises(self) -> None:
+        with _raises(ValueError, match="COMPILE_TIME_ONLY.*Convergent"):
+            Op("test.bad", traits=[COMPILE_TIME_ONLY, CONVERGENT])
+
+    def test_compile_time_only_result_requires_identity_storage(self) -> None:
+        with _raises(
+            ValueError,
+            match="COMPILE_TIME_ONLY.*FACT_IDENTITY.*STORAGE_RELATION",
+        ):
+            Op(
+                "test.bad",
+                operands=[Operand("value", ANY)],
+                results=[Result("result", ANY)],
+                traits=[PURE, COMPILE_TIME_ONLY],
+            )
+
+    def test_compile_time_only_with_explicit_effects_raises(self) -> None:
+        with _raises(ValueError, match="COMPILE_TIME_ONLY.*explicit effects"):
+            Op(
+                "test.bad",
+                operands=[Operand("pool", POOL)],
+                traits=[COMPILE_TIME_ONLY],
+                effects=[Reads("pool")],
+            )
+
     def test_convergent_can_be_pure(self) -> None:
         op = Op("test.convergent", traits=[PURE, CONVERGENT])
         assert op.is_pure
+
+    def test_memory_fence_can_be_convergent(self) -> None:
+        op = Op("test.barrier", traits=[MEMORY_FENCE, CONVERGENT])
+        assert not op.is_pure
+
+    def test_memory_fence_conflicts_with_pure(self) -> None:
+        with _raises(ValueError, match="PURE.*MEMORY_FENCE"):
+            Op("test.bad", traits=[PURE, MEMORY_FENCE])
+
+    def test_memory_fence_conflicts_with_hint(self) -> None:
+        with _raises(ValueError, match="HINT.*MEMORY_FENCE"):
+            Op("test.bad", traits=[HINT, MEMORY_FENCE])
+
+    def test_memory_fence_conflicts_with_safe_to_speculate(self) -> None:
+        with _raises(ValueError, match="SAFE_TO_SPECULATE.*MEMORY_FENCE"):
+            Op("test.bad", traits=[SAFE_TO_SPECULATE, MEMORY_FENCE])
 
     def test_safe_to_speculate_conflicts_with_hint(self) -> None:
         with _raises(ValueError, match="SAFE_TO_SPECULATE.*HINT"):
@@ -1950,6 +2861,51 @@ class TestOwnershipEffects:
         result_effect = op.ownership_effects[0]
         assert isinstance(result_effect, ResultOwnershipEffect)
         assert result_effect.result == "result"
+
+    def test_moved_result_ownership_effect(self) -> None:
+        op = Op(
+            "test.resource.move",
+            operands=[Operand("source", POOL)],
+            results=[Result("result", POOL)],
+            ownership_effects=[MovedResult("result", "source")],
+        )
+        result_effect = op.ownership_effects[0]
+        assert isinstance(result_effect, ResultOwnershipEffect)
+        assert result_effect.result == "result"
+        assert result_effect.source == "source"
+
+    def test_moved_result_ownership_effect_requires_fixed_fields(self) -> None:
+        with _raises(ValueError, match="fixed operand/result"):
+            Op(
+                "test.resource.move_many",
+                operands=[Operand("sources", POOL, variadic=True)],
+                results=[Result("results", POOL, variadic=True)],
+                ownership_effects=[MovedResult("results", "sources")],
+            )
+
+    def test_moved_result_source_may_only_move_once(self) -> None:
+        with _raises(ValueError, match="only one moved result"):
+            Op(
+                "test.resource.move_twice",
+                operands=[Operand("source", POOL)],
+                results=[Result("lhs", POOL), Result("rhs", POOL)],
+                ownership_effects=[
+                    MovedResult("lhs", "source"),
+                    MovedResult("rhs", "source"),
+                ],
+            )
+
+    def test_moved_result_source_cannot_have_operand_effect(self) -> None:
+        with _raises(ValueError, match="may not also declare"):
+            Op(
+                "test.resource.bad_move",
+                operands=[Operand("source", POOL)],
+                results=[Result("result", POOL)],
+                ownership_effects=[
+                    Consume("source"),
+                    MovedResult("result", "source"),
+                ],
+            )
 
     def test_alias_result_ownership_effect_requires_fixed_fields(self) -> None:
         with _raises(ValueError, match="fixed operand/result"):
@@ -2142,3 +3098,305 @@ class TestComparisonOp:
         # COLON TypeOf(lhs)
         assert len(op.format) == 7
         assert isinstance(op.format[0], Attr)
+
+
+class TestScopedEnumOp:
+    def test_scoped_enum_requires_one_top_level_reference(self) -> None:
+        with _raises(ValueError, match="exactly one top-level ScopedEnumRef"):
+            Op("test.packet", attrs=[AttrDef("descriptor", "scoped_enum")])
+        op = Op(
+            "test.packet",
+            attrs=[AttrDef("descriptor", "scoped_enum")],
+            format=[ScopedEnumRef("descriptor")],
+        )
+        assert op.attr("descriptor") is not None
+
+    def test_op_has_at_most_one_scoped_enum_identity(self) -> None:
+        with _raises(ValueError, match="at most one scoped_enum attr"):
+            Op(
+                "test.packet",
+                attrs=[
+                    AttrDef("first", "scoped_enum"),
+                    AttrDef("second", "scoped_enum"),
+                ],
+                format=[ScopedEnumRef("first"), ScopedEnumRef("second")],
+            )
+
+    def test_scoped_enum_reference_requires_scoped_enum_attr(self) -> None:
+        with _raises(ValueError, match="must name a scoped_enum attr"):
+            Op(
+                "test.packet",
+                attrs=[AttrDef("descriptor", "string")],
+                format=[ScopedEnumRef("descriptor")],
+            )
+
+
+class TestSymbolReference:
+    def test_defaults_to_dependency_role(self) -> None:
+        reference = SymbolReference("function", ["callable"])
+        assert reference.interfaces == ("callable",)
+        assert reference.role is SymbolReferenceRole.DEPENDENCY
+
+    def test_accepts_availability_role(self) -> None:
+        reference = SymbolReference(
+            "record", ["record"], role=SymbolReferenceRole.AVAILABILITY
+        )
+        assert reference.role is SymbolReferenceRole.AVAILABILITY
+
+    def test_accepts_unconstrained_symbol_interface(self) -> None:
+        reference = SymbolReference("symbol", [], role=SymbolReferenceRole.AVAILABILITY)
+        assert reference.interfaces == ()
+
+    def test_rejects_untyped_role(self) -> None:
+        with _raises(ValueError, match="role must be a SymbolReferenceRole"):
+            SymbolReference("record", ["record"], role="availability")  # type: ignore[arg-type]
+
+
+class TestSymbolKernelContract:
+    def test_callable_interface_requires_func_like_interface(self) -> None:
+        with _raises(ValueError, match="requires the func_like interface"):
+            SymbolDefinition(
+                field="callee",
+                name="function",
+                interfaces=["callable"],
+            )
+
+    def test_func_like_requires_one_signature_representation(self) -> None:
+        for func_like in (
+            FuncLikeInterface(callee="callee"),
+            FuncLikeInterface(callee="callee", body="body", args="args"),
+        ):
+            with _raises(ValueError, match="exactly one signature representation"):
+                Op(
+                    "test.function",
+                    traits=[SYMBOL_DEFINE],
+                    attrs=[AttrDef("callee", ATTR_TYPE_SYMBOL)],
+                    symbol_def=SymbolDefinition(
+                        field="callee",
+                        name="function",
+                        interfaces=["func_like"],
+                    ),
+                    interfaces=[func_like],
+                )
+
+    def test_func_like_requires_explicit_func_args_format(self) -> None:
+        with _raises(ValueError, match="requires an explicit FuncArgs"):
+            Op(
+                "test.function",
+                traits=[SYMBOL_DEFINE],
+                attrs=[AttrDef("callee", ATTR_TYPE_SYMBOL)],
+                symbol_def=SymbolDefinition(
+                    field="callee",
+                    name="function",
+                    interfaces=["func_like", "callable"],
+                ),
+                regions=[RegionDef("body")],
+                interfaces=[FuncLikeInterface(callee="callee", body="body")],
+                format=[SymbolRef("callee"), Region("body")],
+            )
+
+    def test_body_signature_may_have_contiguous_argument_groups(self) -> None:
+        op = Op(
+            "test.partitioned_function",
+            traits=[SYMBOL_DEFINE],
+            attrs=[
+                AttrDef("callee", ATTR_TYPE_SYMBOL),
+                AttrDef("specialization_count", "i64"),
+            ],
+            symbol_def=SymbolDefinition(
+                field="callee",
+                name="function",
+                interfaces=["func_like", "callable"],
+            ),
+            regions=[RegionDef("body")],
+            interfaces=[FuncLikeInterface(callee="callee", body="body")],
+            format=[
+                SymbolRef("callee"),
+                FuncArgs(
+                    "args",
+                    group="specializations",
+                    end_attr="specialization_count",
+                ),
+                FuncArgs(
+                    "args",
+                    group="arguments",
+                    start_attr="specialization_count",
+                ),
+                Region("body"),
+            ],
+        )
+
+        assert op.attr("specialization_count") is not None
+
+    def test_body_signature_partition_requires_matching_boundaries(self) -> None:
+        with _raises(ValueError, match="must use 'specialization_count'"):
+            Op(
+                "test.partitioned_function",
+                traits=[SYMBOL_DEFINE],
+                attrs=[
+                    AttrDef("callee", ATTR_TYPE_SYMBOL),
+                    AttrDef("specialization_count", "i64"),
+                    AttrDef("wrong_count", "i64"),
+                ],
+                symbol_def=SymbolDefinition(
+                    field="callee",
+                    name="function",
+                    interfaces=["func_like", "callable"],
+                ),
+                regions=[RegionDef("body")],
+                interfaces=[FuncLikeInterface(callee="callee", body="body")],
+                format=[
+                    SymbolRef("callee"),
+                    FuncArgs(
+                        "args",
+                        group="specializations",
+                        end_attr="specialization_count",
+                    ),
+                    FuncArgs(
+                        "args",
+                        group="arguments",
+                        start_attr="wrong_count",
+                    ),
+                    Region("body"),
+                ],
+            )
+
+    def test_body_signature_partition_requires_i64_boundary(self) -> None:
+        with _raises(ValueError, match="must name a required i64 attribute"):
+            Op(
+                "test.partitioned_function",
+                traits=[SYMBOL_DEFINE],
+                attrs=[
+                    AttrDef("callee", ATTR_TYPE_SYMBOL),
+                    AttrDef("specialization_count", "string"),
+                ],
+                symbol_def=SymbolDefinition(
+                    field="callee",
+                    name="function",
+                    interfaces=["func_like", "callable"],
+                ),
+                regions=[RegionDef("body")],
+                interfaces=[FuncLikeInterface(callee="callee", body="body")],
+                format=[
+                    SymbolRef("callee"),
+                    FuncArgs(
+                        "args",
+                        group="specializations",
+                        end_attr="specialization_count",
+                    ),
+                    FuncArgs(
+                        "args",
+                        group="arguments",
+                        start_attr="specialization_count",
+                    ),
+                    Region("body"),
+                ],
+            )
+
+    def test_requires_exactly_one_workload_signature_storage(self) -> None:
+        with _raises(ValueError, match="exactly one"):
+            SymbolKernelContract()
+        with _raises(ValueError, match="exactly one"):
+            SymbolKernelContract(workload_region="config", workload_operands="args")
+
+    def test_kernel_interface_requires_contract(self) -> None:
+        with _raises(ValueError, match="must be declared together"):
+            SymbolDefinition(
+                field="callee",
+                name="kernel",
+                interfaces=["func_like", "kernel"],
+            )
+
+    def test_kernel_contract_requires_kernel_interface(self) -> None:
+        with _raises(ValueError, match="must be declared together"):
+            SymbolDefinition(
+                field="callee",
+                name="function",
+                interfaces=["func_like"],
+                kernel_contract=SymbolKernelContract(workload_region="config"),
+            )
+
+    def test_kernel_interface_requires_launch_abi(self) -> None:
+        with _raises(ValueError, match="requires the func_like interface"):
+            SymbolDefinition(
+                field="callee",
+                name="kernel",
+                interfaces=["kernel"],
+                kernel_contract=SymbolKernelContract(workload_region="config"),
+            )
+
+    def test_kernel_entry_interface_requires_device_abi(self) -> None:
+        with _raises(ValueError, match="requires the func_like interface"):
+            SymbolDefinition(
+                field="callee",
+                name="kernel entry",
+                interfaces=["kernel_entry"],
+            )
+
+    def test_operand_backed_signature_owns_every_operand(self) -> None:
+        with _raises(ValueError, match="must own every operand field"):
+            Op(
+                "test.decl",
+                traits=[SYMBOL_DEFINE],
+                operands=[
+                    Operand("args", ANY, variadic=True),
+                    Operand("ordinary_use", ANY),
+                ],
+                attrs=[AttrDef("callee", ATTR_TYPE_SYMBOL)],
+                symbol_def=SymbolDefinition(
+                    field="callee",
+                    name="function",
+                    interfaces=["func_like"],
+                ),
+                interfaces=[FuncLikeInterface(callee="callee", args="args")],
+                format=[FuncArgs("args")],
+            )
+
+    def test_kernel_contract_requires_func_like_implementation(self) -> None:
+        with _raises(ValueError, match="requires a FuncLikeInterface"):
+            Op(
+                "test.kernel",
+                traits=[SYMBOL_DEFINE],
+                attrs=[AttrDef("callee", ATTR_TYPE_SYMBOL)],
+                symbol_def=SymbolDefinition(
+                    field="callee",
+                    name="kernel",
+                    interfaces=["func_like", "kernel"],
+                    kernel_contract=SymbolKernelContract(workload_region="config"),
+                ),
+                regions=[RegionDef("config")],
+            )
+
+    def test_kernel_signatures_require_distinct_operand_fields(self) -> None:
+        with _raises(ValueError, match="distinct operand fields"):
+            Op(
+                "test.kernel_decl",
+                traits=[SYMBOL_DEFINE],
+                operands=[Operand("args", ANY, variadic=True)],
+                attrs=[AttrDef("callee", ATTR_TYPE_SYMBOL)],
+                symbol_def=SymbolDefinition(
+                    field="callee",
+                    name="kernel",
+                    interfaces=["func_like", "kernel"],
+                    kernel_contract=SymbolKernelContract(workload_operands="args"),
+                ),
+                interfaces=[FuncLikeInterface(callee="callee", args="args")],
+                format=[FuncArgs("args")],
+            )
+
+    def test_kernel_signatures_require_distinct_regions(self) -> None:
+        with _raises(ValueError, match="distinct regions"):
+            Op(
+                "test.kernel",
+                traits=[SYMBOL_DEFINE],
+                attrs=[AttrDef("callee", ATTR_TYPE_SYMBOL)],
+                symbol_def=SymbolDefinition(
+                    field="callee",
+                    name="kernel",
+                    interfaces=["func_like", "kernel"],
+                    kernel_contract=SymbolKernelContract(workload_region="body"),
+                ),
+                interfaces=[FuncLikeInterface(callee="callee", body="body")],
+                regions=[RegionDef("body")],
+                format=[FuncArgs("args")],
+            )

@@ -16,6 +16,7 @@ iree_py_library(
     "__init__.py"
     "descriptors.py"
   DEPS
+    loom::py::loom::core
     loom::py::loom::target::low_descriptors
 )
 

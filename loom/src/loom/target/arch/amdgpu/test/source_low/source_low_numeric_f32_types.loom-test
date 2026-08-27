@@ -1,5 +1,5 @@
 // RUN: pass source-to-low,low-dce
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 func.def target(@target) @f32_exact_scalar_div(%lhs: f32, %rhs: f32) -> (f32) {
   %quotient = scalar.divf %lhs, %rhs : f32
@@ -7,9 +7,9 @@ func.def target(@target) @f32_exact_scalar_div(%lhs: f32, %rhs: f32) -> (f32) {
 }
 
 // ----
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
-low.func.def target(@target) abi(hal_kernel) @f32_exact_scalar_div(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_exact_scalar_div(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
   %7, %8 = low.op<amdgpu.v_div_scale_f32>(%rhs, %rhs, %lhs) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>, reg<amdgpu.vcc>
   %9 = low.op<amdgpu.v_rcp_f32>(%7) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
   %10 = low.op<amdgpu.v_xor_b32.lit>(%7) {imm32 = 2147483648} : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>

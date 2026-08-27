@@ -158,7 +158,8 @@ static iree_status_t iree_hal_amdgpu_global_table_benchmark_create_heap_buffer(
       /*.user_data=*/storage,
   };
   iree_status_t status = iree_hal_heap_buffer_wrap(
-      iree_hal_buffer_placement_undefined(), IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+      iree_hal_buffer_placement_undefined(),
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_COHERENT,
       IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
       IREE_HAL_BUFFER_USAGE_DEFAULT, 64, iree_make_byte_span(storage, 64),
       release_callback, iree_allocator_system(), out_buffer);

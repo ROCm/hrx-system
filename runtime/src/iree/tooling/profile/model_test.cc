@@ -32,6 +32,13 @@ static iree_hal_profile_file_record_t MakeCommandBuffersChunk(
   return chunk;
 }
 
+static iree_hal_profile_file_record_t MakeDevicesChunk(
+    const std::vector<uint8_t>& payload) {
+  iree_hal_profile_file_record_t chunk = MakeChunk(payload);
+  chunk.content_type = IREE_HAL_PROFILE_CONTENT_TYPE_DEVICES;
+  return chunk;
+}
+
 static iree_hal_profile_file_record_t MakeExecutablesChunk(
     const std::vector<uint8_t>& payload) {
   iree_hal_profile_file_record_t chunk = MakeChunk(payload);
@@ -245,6 +252,79 @@ TEST(ProfileClockFitTest, RejectsInvalidDeviceTickAlignment) {
   EXPECT_FALSE(iree_profile_model_device_try_fit_clock_exact(
       &device, IREE_PROFILE_MODEL_CLOCK_TIME_DOMAIN_HOST_CPU_TIMESTAMP_NS,
       &fit));
+}
+
+TEST(ProfileDurationScaleTest, UsesMetadataWithoutHostClockFit) {
+  iree_profile_model_device_t device;
+  memset(&device, 0, sizeof(device));
+  device.metadata_flags = IREE_HAL_PROFILE_DEVICE_FLAG_TIMESTAMP_FREQUENCY;
+  device.timestamp_frequency_hz = 100000000;
+  device.clock_sample_count = 2;
+  device.invalid_clock_alignment_sample_count = 2;
+  device.first_clock_sample = MakeClockSample(1, 1000, 5000);
+  device.last_clock_sample = MakeClockSample(2, 2000, 15000);
+  device.first_clock_sample.flags |=
+      IREE_HAL_PROFILE_CLOCK_CORRELATION_FLAG_DEVICE_TICK_UNALIGNED;
+  device.last_clock_sample.flags |=
+      IREE_HAL_PROFILE_CLOCK_CORRELATION_FLAG_DEVICE_TICK_UNALIGNED;
+
+  iree_profile_model_clock_fit_t clock_fit;
+  EXPECT_FALSE(iree_profile_model_device_try_fit_clock_exact(
+      &device, IREE_PROFILE_MODEL_CLOCK_TIME_DOMAIN_HOST_CPU_TIMESTAMP_NS,
+      &clock_fit));
+
+  iree_profile_model_duration_scale_t duration_scale;
+  ASSERT_TRUE(iree_profile_model_device_try_resolve_duration_scale(
+      &device, &duration_scale));
+  EXPECT_EQ(IREE_PROFILE_MODEL_DURATION_SCALE_SOURCE_DEVICE_METADATA,
+            duration_scale.source);
+  EXPECT_EQ(100000000u, duration_scale.device_tick_span);
+  EXPECT_EQ(1000000000u, duration_scale.time_span_ns);
+  int64_t duration_ns = 0;
+  EXPECT_TRUE(iree_profile_model_duration_scale_ticks_to_ns(&duration_scale,
+                                                            123, &duration_ns));
+  EXPECT_EQ(1230, duration_ns);
+}
+
+TEST(ProfileDurationScaleTest, UsesClockCorrelationForOlderProfiles) {
+  iree_profile_model_device_t device;
+  memset(&device, 0, sizeof(device));
+  device.clock_sample_count = 2;
+  device.first_clock_sample = MakeClockSample(1, 1000, 5000);
+  device.last_clock_sample = MakeClockSample(2, 2000, 15000);
+
+  iree_profile_model_duration_scale_t duration_scale;
+  ASSERT_TRUE(iree_profile_model_device_try_resolve_duration_scale(
+      &device, &duration_scale));
+  EXPECT_EQ(IREE_PROFILE_MODEL_DURATION_SCALE_SOURCE_CLOCK_CORRELATION,
+            duration_scale.source);
+  int64_t duration_ns = 0;
+  EXPECT_TRUE(iree_profile_model_duration_scale_ticks_to_ns(&duration_scale,
+                                                            123, &duration_ns));
+  EXPECT_EQ(1230, duration_ns);
+}
+
+TEST(ProfileModelTest, AcceptsOriginalDeviceRecordPrefix) {
+  iree_hal_profile_device_record_t device_record =
+      iree_hal_profile_device_record_default();
+  device_record.record_length = IREE_HAL_PROFILE_DEVICE_RECORD_MIN_LENGTH;
+  device_record.physical_device_ordinal = 3;
+  device_record.queue_count = 1;
+  std::vector<uint8_t> payload(IREE_HAL_PROFILE_DEVICE_RECORD_MIN_LENGTH);
+  memcpy(payload.data(), &device_record, payload.size());
+  iree_hal_profile_file_record_t device_chunk = MakeDevicesChunk(payload);
+
+  iree_profile_model_t model;
+  iree_profile_model_initialize(iree_allocator_system(), &model);
+  IREE_ASSERT_OK(
+      iree_profile_model_process_metadata_record(&model, &device_chunk));
+  const iree_profile_model_device_t* device =
+      iree_profile_model_find_device(&model, 3);
+  ASSERT_NE(device, nullptr);
+  EXPECT_FALSE(
+      iree_any_bit_set(device->metadata_flags,
+                       IREE_HAL_PROFILE_DEVICE_FLAG_TIMESTAMP_FREQUENCY));
+  iree_profile_model_deinitialize(&model);
 }
 
 TEST(ProfileModelTest, AcceptsLinearCommandOperationsWithoutBlockStructure) {

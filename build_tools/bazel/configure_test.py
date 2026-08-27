@@ -10,7 +10,7 @@ import importlib.util
 import sys
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest import mock
 
 CONFIGURE_BAZEL_PATH = Path(__file__).with_name("configure.py")
@@ -38,6 +38,75 @@ class ConfigureBazelTest(unittest.TestCase):
         (rocm_root / "include").mkdir(parents=True)
         return rocm_root
 
+    def assert_rocm_path(self, config: str, rocm_root: Path) -> None:
+        self.assertIn(
+            self.configure_bazel.bazelrc_line(
+                "common",
+                "--repo_env=IREE_ROCM_PATH="
+                + self.configure_bazel.as_bazel_path(rocm_root),
+            ),
+            config,
+        )
+
+    def test_bazel_paths_use_forward_slashes_on_windows(self):
+        path = PureWindowsPath(r"C:\home\runner\rocm-root")
+
+        self.assertEqual(
+            self.configure_bazel.as_bazel_path(path),
+            "C:/home/runner/rocm-root",
+        )
+
+    def test_non_windows_host_does_not_probe_windows_capabilities(self):
+        long_paths_reader = mock.Mock(return_value=False)
+        symbolic_link_probe = mock.Mock(return_value=False)
+
+        self.configure_bazel.require_windows_bazel_host(
+            platform_name="linux",
+            long_paths_reader=long_paths_reader,
+            symbolic_link_probe=symbolic_link_probe,
+        )
+
+        long_paths_reader.assert_not_called()
+        symbolic_link_probe.assert_not_called()
+
+    def test_windows_host_accepts_required_capabilities(self):
+        self.configure_bazel.require_windows_bazel_host(
+            platform_name="win32",
+            long_paths_reader=lambda: True,
+            symbolic_link_probe=lambda: True,
+        )
+
+    def test_windows_host_reports_exact_long_path_setup(self):
+        with self.assertRaisesRegex(
+            SystemExit, "Open PowerShell as Administrator"
+        ) as context:
+            self.configure_bazel.require_windows_bazel_host(
+                platform_name="win32",
+                long_paths_reader=lambda: False,
+                symbolic_link_probe=lambda: False,
+            )
+
+        message = str(context.exception)
+        self.assertIn("LongPathsEnabled", message)
+        self.assertIn("-Value 1", message)
+        self.assertIn("Symbolic-link creation", message)
+        self.assertIn("base image", message)
+        self.assertIn("python dev.py bazel shutdown", message)
+
+    def test_windows_host_reports_missing_symbolic_link_capability(self):
+        with self.assertRaisesRegex(SystemExit, "Symbolic-link creation") as context:
+            self.configure_bazel.require_windows_bazel_host(
+                platform_name="win32",
+                long_paths_reader=lambda: True,
+                symbolic_link_probe=lambda: False,
+            )
+
+        message = str(context.exception)
+        self.assertIn("Developer Mode", message)
+        self.assertIn("Create symbolic links", message)
+        self.assertIn("base image", message)
+        self.assertNotIn("LongPathsEnabled", message)
+
     def test_portable_project_options_configure_amdgpu(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             rocm_root = self.make_rocm_root(temporary_directory)
@@ -56,7 +125,7 @@ class ConfigureBazelTest(unittest.TestCase):
         )
         self.assertIn("common --repo_env=IREE_DEPENDENCY_MODE=pinned", config)
         self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm", config)
-        self.assertIn(f"common --repo_env=IREE_ROCM_PATH={rocm_root}", config)
+        self.assert_rocm_path(config, rocm_root)
         self.assertNotIn("--deleted_packages", config)
 
     def test_native_bazel_options_configure_amdgpu(self):
@@ -78,7 +147,7 @@ class ConfigureBazelTest(unittest.TestCase):
         self.assertIn("common --repo_env=IREE_DEPENDENCY_MODE=pinned", config)
         self.assertIn("common --repo_env=IREE_ROCM_DEPENDENCY_MODE=package", config)
         self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm", config)
-        self.assertIn(f"common --repo_env=IREE_ROCM_PATH={rocm_root}", config)
+        self.assert_rocm_path(config, rocm_root)
         self.assertNotIn("--deleted_packages", config)
 
     def test_rocm_dependency_mode_overrides_rocm_path_default(self):
@@ -97,7 +166,7 @@ class ConfigureBazelTest(unittest.TestCase):
         self.assertIn("common --repo_env=IREE_DEPENDENCY_MODE=pinned", config)
         self.assertIn("common --repo_env=IREE_ROCM_DEPENDENCY_MODE=pinned", config)
         self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm", config)
-        self.assertIn(f"common --repo_env=IREE_ROCM_PATH={rocm_root}", config)
+        self.assert_rocm_path(config, rocm_root)
 
     def test_portable_project_options_configure_hip(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -116,7 +185,7 @@ class ConfigureBazelTest(unittest.TestCase):
             config,
         )
         self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none", config)
-        self.assertIn(f"common --repo_env=IREE_ROCM_PATH={rocm_root}", config)
+        self.assert_rocm_path(config, rocm_root)
         self.assertNotIn("--deleted_packages", config)
 
     def test_portable_project_options_configure_amdgpu_and_hip(self):
@@ -137,7 +206,7 @@ class ConfigureBazelTest(unittest.TestCase):
             config,
         )
         self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm", config)
-        self.assertIn(f"common --repo_env=IREE_ROCM_PATH={rocm_root}", config)
+        self.assert_rocm_path(config, rocm_root)
         self.assertNotIn("--deleted_packages", config)
 
     def test_native_bazel_options_configure_hip(self):
@@ -157,7 +226,7 @@ class ConfigureBazelTest(unittest.TestCase):
             config,
         )
         self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none", config)
-        self.assertIn(f"common --repo_env=IREE_ROCM_PATH={rocm_root}", config)
+        self.assert_rocm_path(config, rocm_root)
         self.assertNotIn("--deleted_packages", config)
 
     def test_portable_project_options_configure_webgpu(self):
@@ -184,6 +253,17 @@ class ConfigureBazelTest(unittest.TestCase):
         self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none", config)
         self.assertNotIn("IREE_ROCM_PATH", config)
 
+    def test_portable_project_options_configure_amdxdna(self):
+        args = self.configure_bazel.parse_arguments(["-DIREE_HAL_DRIVER_AMDXDNA=ON"])
+        config = self.configure_bazel.generate_config(args)
+
+        self.assertIn(
+            "build --//runtime/config/hal:drivers=local-sync,local-task,null,amdxdna",
+            config,
+        )
+        self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none", config)
+        self.assertNotIn("IREE_ROCM_PATH", config)
+
     def test_environment_rocm_path_configures_amdgpu(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             rocm_root = self.make_rocm_root(temporary_directory)
@@ -197,7 +277,7 @@ class ConfigureBazelTest(unittest.TestCase):
                 config = self.configure_bazel.generate_config(args)
 
         self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm", config)
-        self.assertIn(f"common --repo_env=IREE_ROCM_PATH={rocm_root}", config)
+        self.assert_rocm_path(config, rocm_root)
 
     def test_environment_rocm_path_configures_hip(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -212,7 +292,7 @@ class ConfigureBazelTest(unittest.TestCase):
                 config = self.configure_bazel.generate_config(args)
 
         self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none", config)
-        self.assertIn(f"common --repo_env=IREE_ROCM_PATH={rocm_root}", config)
+        self.assert_rocm_path(config, rocm_root)
 
     def test_pinned_rocm_driver_without_rocm_path_uses_no_device_toolchain(self):
         for driver_define in (

@@ -183,12 +183,13 @@ iree_status_t loom_rewriter_build_constant(loom_rewriter_t* rewriter,
                                            loom_location_id_t location,
                                            loom_value_id_t* out_value_id);
 
-// Attempts to fold a side-effect-free op to constants using its vtable fact
-// inference function. Gathers operand facts, updates stored facts in the table,
-// and materializes constants via the rewriter's materialize_constant callback
-// when all results produce exact facts. Replaces the original op via
-// RAUW+erase. Sets |*out_folded| to true if the op was erased, false otherwise.
-// No-op if analysis is not enabled or the op has no inference function.
+// Recomputes an op's inferred or structured-region result facts, then attempts
+// to fold a side-effect-free op with vtable fact inference to constants.
+// Materializes constants via the rewriter's materialize_constant callback when
+// every result is exact and replaces the original op via RAUW+erase. Sets
+// |*out_folded| to true if the op was erased, false otherwise. No-op if
+// analysis is not enabled or the op has no fact inference or region summary
+// interface.
 iree_status_t loom_rewriter_try_fold(loom_rewriter_t* rewriter, loom_op_t* op,
                                      bool* out_folded);
 

@@ -77,22 +77,22 @@ def _expand_to_fused_input(
 
 
 @tilelang_case(
-    name="tilekernels_expand_to_fused_gfx1100",
+    name="tilekernels_expand_to_fused_gfx11_generic",
     category="kernel",
     tags=("tilekernels", "moe", "expand", "amdgpu"),
 )
-def tilekernels_expand_to_fused_gfx1100(
+def tilekernels_expand_to_fused_gfx11_generic(
     tilelang: Any,
     T: Any,
 ) -> TileLangImportInput:
-    return _expand_to_fused_input(tilelang, T, target="hip -mcpu=gfx1100")
+    return _expand_to_fused_input(tilelang, T, target="hip -mcpu=gfx11-generic")
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("expand_to_fused_kernel") @expand_to_fused_kernel(%num_tokens: i32, %num_expanded_tokens: i32) {
+kernel.def target(@hip_mcpu_gfx11_generic) export("expand_to_fused_kernel") @expand_to_fused_kernel(%num_tokens: i32, %num_expanded_tokens: i32) {
   %num_tokens_idx = index.cast %num_tokens : i32 to index
   %num_expanded_tokens_idx = index.cast %num_expanded_tokens : i32 to index
   %max = index.max %num_tokens_idx, %num_expanded_tokens_idx : index
@@ -117,10 +117,10 @@ kernel.def target(@hip_mcpu_gfx1100) export("expand_to_fused_kernel") @expand_to
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %pos_local_bytes = index.constant 8 : offset
-  %pos_local_buffer = buffer.alloca %pos_local_bytes {base_alignment = 4, memory_space = private} : buffer
+  %pos_local_buffer = buffer.alloca<private> align(4) %pos_local_bytes : buffer
   %pos_local = buffer.view %pos_local_buffer[%c0_bytes] : buffer -> view<2xi32, %layout>
   %x_fragment_bytes = index.constant 256 : offset
-  %x_fragment_buffer = buffer.alloca %x_fragment_bytes {base_alignment = 2, memory_space = private} : buffer
+  %x_fragment_buffer = buffer.alloca<private> align(2) %x_fragment_bytes : buffer
   %x_fragment = buffer.view %x_fragment_buffer[%c0_bytes] : buffer -> view<128xf16, %layout>
   %f16_zero = scalar.constant 0.0 : f16
   %x_fragment_state = vector.splat %f16_zero : vector<128xf16>

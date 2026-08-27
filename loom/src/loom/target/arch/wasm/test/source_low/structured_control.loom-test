@@ -4,18 +4,18 @@ wasm.target<simd128> @target
 
 func.def target(@target) @if_without_results(%control: i32, %limit: i32, %lhs: vector<4xi32>, %rhs: vector<4xi32>, %output: buffer) {
   %cond = scalar.cmpi ult, %control, %limit : i32
-  %zero = index.constant 0 : offset
-  %output_view = buffer.view %output[%zero] : buffer -> view<4xi32, #dense>
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<4xi32>
   scf.if %cond {
     %sum = vector.addi %lhs, %rhs : vector<4xi32>
-    vector.store %sum, %output_view[0] : vector<4xi32>, view<4xi32, #dense>
+    vector.store %sum, %output_view[0] : vector<4xi32>, view<4xi32>
     scf.yield
   }
   func.return
 }
 
 // ----
-low.func.def target(@target) abi(wasm_function) @if_without_results(%control: reg<wasm.i32>, %limit: reg<wasm.i32>, %lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>, %output_view: reg<wasm.i32>) asm<wasm.core.simd128> {
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @if_without_results(%control: reg<wasm.i32>, %limit: reg<wasm.i32>, %lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>, %output_view: reg<wasm.i32>) asm {
   %cond = i32.lt_u %control, %limit
   low.scf.if %cond {
     %sum = i32x4.add %lhs, %rhs
@@ -41,7 +41,7 @@ func.def target(@target) @if_with_results(%control: i32, %limit: i32, %lhs: vect
 }
 
 // ----
-low.func.def target(@target) abi(wasm_function) @if_with_results(%control: reg<wasm.i32>, %limit: reg<wasm.i32>, %lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>, %fallback: reg<wasm.v128>) -> (reg<wasm.v128>) asm<wasm.core.simd128> {
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @if_with_results(%control: reg<wasm.i32>, %limit: reg<wasm.i32>, %lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>, %fallback: reg<wasm.v128>) -> (reg<wasm.v128>) asm {
   %cond = i32.lt_u %control, %limit
   %result = low.scf.if %cond -> (reg<wasm.v128>) {
     %then = i32x4.add %lhs, %rhs
@@ -58,18 +58,18 @@ low.func.def target(@target) abi(wasm_function) @if_with_results(%control: reg<w
 wasm.target<simd128> @target
 
 func.def target(@target) @for_without_iter_args(%lo: index, %hi: index, %step: index, %lhs: vector<4xi32>, %rhs: vector<4xi32>, %output: buffer) {
-  %zero = index.constant 0 : offset
-  %output_view = buffer.view %output[%zero] : buffer -> view<4xi32, #dense>
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<4xi32>
   scf.for %iv = [%lo to %hi step %step] {
     %sum = vector.addi %lhs, %rhs : vector<4xi32>
-    vector.store %sum, %output_view[0] : vector<4xi32>, view<4xi32, #dense>
+    vector.store %sum, %output_view[0] : vector<4xi32>, view<4xi32>
     scf.yield
   }
   func.return
 }
 
 // ----
-low.func.def target(@target) abi(wasm_function) @for_without_iter_args(%lo: reg<wasm.i32>, %hi: reg<wasm.i32>, %step: reg<wasm.i32>, %lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>, %output_view: reg<wasm.i32>) asm<wasm.core.simd128> {
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @for_without_iter_args(%lo: reg<wasm.i32>, %hi: reg<wasm.i32>, %step: reg<wasm.i32>, %lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>, %output_view: reg<wasm.i32>) asm {
   low.scf.for [%lo to %hi step %step] do(%iv: reg<wasm.i32>) {
     %sum = i32x4.add %lhs, %rhs
     v128.store %output_view, %sum
@@ -90,7 +90,7 @@ func.def target(@target) @for_with_iter_args(%lo: index, %hi: index, %step: inde
 }
 
 // ----
-low.func.def target(@target) abi(wasm_function) @for_with_iter_args(%lo: reg<wasm.i32>, %hi: reg<wasm.i32>, %step: reg<wasm.i32>, %unroll: reg<wasm.i32>, %seed: reg<wasm.v128>, %bias: reg<wasm.v128>) -> (reg<wasm.v128>) asm<wasm.core.simd128> {
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @for_with_iter_args(%lo: reg<wasm.i32>, %hi: reg<wasm.i32>, %step: reg<wasm.i32>, %unroll: reg<wasm.i32>, %seed: reg<wasm.v128>, %bias: reg<wasm.v128>) -> (reg<wasm.v128>) asm {
   %result = low.scf.for [%lo to %hi step %step] iter_args(%seed: reg<wasm.v128>) -> (reg<wasm.v128>) unroll(%unroll) do(%iv: reg<wasm.i32>, %acc: reg<wasm.v128>) {
     %next = f32x4.add %acc, %bias
     low.scf.yield %next : reg<wasm.v128>
@@ -117,7 +117,7 @@ func.def target(@target) @nested_if_inside_for(%lo: index, %hi: index, %step: in
 }
 
 // ----
-low.func.def target(@target) abi(wasm_function) @nested_if_inside_for(%lo: reg<wasm.i32>, %hi: reg<wasm.i32>, %step: reg<wasm.i32>, %seed: reg<wasm.v128>, %bias: reg<wasm.v128>) -> (reg<wasm.v128>) asm<wasm.core.simd128> {
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @nested_if_inside_for(%lo: reg<wasm.i32>, %hi: reg<wasm.i32>, %step: reg<wasm.i32>, %seed: reg<wasm.v128>, %bias: reg<wasm.v128>) -> (reg<wasm.v128>) asm {
   %cond = i32.lt_u %lo, %hi
   %result = low.scf.for [%lo to %hi step %step] iter_args(%seed: reg<wasm.v128>) -> (reg<wasm.v128>) do(%iv: reg<wasm.i32>, %acc: reg<wasm.v128>) {
     %next = low.scf.if %cond -> (reg<wasm.v128>) {
@@ -133,11 +133,38 @@ low.func.def target(@target) abi(wasm_function) @nested_if_inside_for(%lo: reg<w
 
 // ====
 
+wasm.target<simd128> @target
+
+func.def target(@target) @while_with_iter_arg(%limit: i32, %step: i32, %seed: i32) -> (i32) {
+  %result = scf.while(%before = %seed : i32) -> (i32) {
+    %keep_going = scalar.cmpi ult, %before, %limit : i32
+    scf.condition %keep_going, %before : i1, i32
+  } do(%body: i32) {
+    %next = scalar.addi %body, %step : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @while_with_iter_arg(%limit: reg<wasm.i32>, %step: reg<wasm.i32>, %seed: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %result = low.scf.while(%before = %seed : reg<wasm.i32>) -> (reg<wasm.i32>) {
+    %keep_going = i32.lt_u %before, %limit
+    low.scf.condition %keep_going, %before : reg<wasm.i32>, reg<wasm.i32>
+  } do(%body: reg<wasm.i32>) {
+    %next = i32.add %body, %step
+    low.scf.yield %next : reg<wasm.i32>
+  }
+  return %result
+}
+
+// ====
+
 // RUN: verify
 
 wasm.target<simd128> @target
 
-low.func.def target(@target) @scf_if_condition_requires_i32(%condition: reg<wasm.v128>) asm<wasm.core.simd128> {
+low.func.def target<wasm.core.simd128>(@target) @scf_if_condition_requires_i32(%condition: reg<wasm.v128>) asm {
   // ERROR@+1: TARGET/035 {target_key="target", export_name="scf_if_condition_requires_i32", config_key="target", function_name="scf_if_condition_requires_i32", op_name="low.scf.if", actual_type="reg<wasm.v128>", type_constraint="reg<wasm.i32>"}
   low.scf.if %condition {
   }
@@ -150,7 +177,23 @@ low.func.def target(@target) @scf_if_condition_requires_i32(%condition: reg<wasm
 
 wasm.target<simd128> @target
 
-low.func.def target(@target) @scf_for_counter_requires_i32(%lo: reg<wasm.v128>, %hi: reg<wasm.v128>, %step: reg<wasm.v128>) asm<wasm.core.simd128> {
+low.func.def target<wasm.core.simd128>(@target) @scf_while_condition_requires_i32(%condition: reg<wasm.v128>) asm {
+  low.scf.while {
+    // ERROR@+1: TARGET/035 {target_key="target", export_name="scf_while_condition_requires_i32", config_key="target", function_name="scf_while_condition_requires_i32", op_name="low.scf.condition", actual_type="reg<wasm.v128>", type_constraint="reg<wasm.i32>"}
+    low.scf.condition %condition : reg<wasm.v128>
+  } do {
+    low.scf.yield
+  }
+  return
+}
+
+// ====
+
+// RUN: verify
+
+wasm.target<simd128> @target
+
+low.func.def target<wasm.core.simd128>(@target) @scf_for_counter_requires_i32(%lo: reg<wasm.v128>, %hi: reg<wasm.v128>, %step: reg<wasm.v128>) asm {
   // ERROR@+1: TARGET/031 {target_key="target", export_name="scf_for_counter_requires_i32", config_key="target", function_name="scf_for_counter_requires_i32", op_name="low.scf.for", actual_type="reg<wasm.v128>", type_constraint="reg<wasm.i32>"}
   low.scf.for [%lo to %hi step %step] do(%iv: reg<wasm.v128>) {
   }
@@ -173,4 +216,21 @@ func.def target(@target) @rejects_unsupported_structured_region_op(%selector: in
     }
   }
   func.return %result : vector<4xi32>
+}
+
+// ====
+
+// RUN: emit source-low output=low
+
+wasm.target<simd128> @target
+
+func.def target(@target) @scalar_i32_select(%condition: i1, %true_value: i32, %false_value: i32) -> (i32) {
+  %result = scf.select %condition, %true_value, %false_value : i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @scalar_i32_select(%condition: reg<wasm.i32>, %true_value: reg<wasm.i32>, %false_value: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %result = i32.select %true_value, %false_value, %condition
+  return %result
 }

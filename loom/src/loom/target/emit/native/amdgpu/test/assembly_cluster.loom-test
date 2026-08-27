@@ -1,0 +1,929 @@
+// RUN: emit amdgpu-kernel-assembly
+
+amdgpu.target<gfx1250> @target
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @cluster_identity_abi() asm {
+  %packed_local = live_in<amdgpu.cluster_workgroup_info> : reg<amdgpu.sgpr>
+  %packed_cluster_yz = live_in<amdgpu.cluster_id_yz> : reg<amdgpu.sgpr>
+  %cluster_x = live_in<amdgpu.cluster_id_x> : reg<amdgpu.sgpr>
+  %local_x = s_and_b32_rhs_inline %packed_local, 15
+  %workgroup_x = s_lshl1_add_u32 %cluster_x, %local_x
+  %cluster_y = s_and_b32_lit %packed_cluster_yz, 65535
+  %local_y = s_bfe_u32_lit %packed_local, 262148
+  %workgroup_y = s_lshl1_add_u32 %cluster_y, %local_y
+  %cluster_z = s_lshr_b32_rhs_inline %packed_cluster_yz, 16
+  %local_z = s_bfe_u32_lit %packed_local, 262152
+  %workgroup_z = s_lshl1_add_u32 %cluster_z, %local_z
+  %flat_local = s_getreg_b32_cluster_workgroup_flat_id
+  %sum0 = s_add_u32 %workgroup_x, %workgroup_y
+  %sum1 = s_add_u32 %sum0, %workgroup_z
+  %sum = s_add_u32 %sum1, %flat_local
+  return
+}
+
+// ----
+.text
+.amdgcn_target "amdgcn-amd-amdhsa--gfx1250"
+.amdhsa_code_object_version 6
+
+.protected cluster_identity_abi
+.globl cluster_identity_abi
+.p2align 8
+.type cluster_identity_abi,@function
+cluster_identity_abi:
+  global_prefetch_b8 v0, s[0:1] scope:SCOPE_SE
+  v_nop
+  s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), 1
+  s_and_b32 s0, ttmp6, 15
+  s_lshl1_add_u32 s0, ttmp9, s0
+  s_and_b32 s1, 65535, ttmp7
+  s_bfe_u32 s2, 262148, ttmp6
+  s_lshl1_add_u32 s1, s1, s2
+  s_lshr_b32 s2, ttmp7, 16
+  s_bfe_u32 s3, 262152, ttmp6
+  s_lshl1_add_u32 s2, s2, s3
+  s_add_u32 s0, s0, s1
+  s_add_u32 s0, s0, s2
+  s_getreg_b32 s1, hwreg(HW_REG_IB_STS2, 21, 4)
+  s_add_u32 s0, s0, s1
+  s_endpgm
+.Lfunc_end0:
+.size cluster_identity_abi, .Lfunc_end0-cluster_identity_abi
+
+.rodata
+.p2align 6
+.amdhsa_kernel cluster_identity_abi
+  .amdhsa_group_segment_fixed_size 0
+  .amdhsa_private_segment_fixed_size 0
+  .amdhsa_kernarg_size 0
+  .amdhsa_user_sgpr_count 0
+  .amdhsa_user_sgpr_dispatch_ptr 0
+  .amdhsa_user_sgpr_queue_ptr 0
+  .amdhsa_user_sgpr_kernarg_segment_ptr 0
+  .amdhsa_user_sgpr_dispatch_id 0
+  .amdhsa_user_sgpr_private_segment_size 0
+  .amdhsa_wavefront_size32 1
+  .amdhsa_uses_dynamic_stack 0
+  .amdhsa_enable_private_segment 0
+  .amdhsa_system_sgpr_workgroup_id_x 1
+  .amdhsa_system_sgpr_workgroup_id_y 1
+  .amdhsa_system_sgpr_workgroup_id_z 1
+  .amdhsa_system_sgpr_workgroup_info 0
+  .amdhsa_system_vgpr_workitem_id 0
+  .amdhsa_next_free_vgpr 1
+  .amdhsa_next_free_sgpr 4
+  .amdhsa_reserve_vcc 0
+  .amdhsa_float_round_mode_32 0
+  .amdhsa_float_round_mode_16_64 0
+  .amdhsa_float_denorm_mode_32 3
+  .amdhsa_float_denorm_mode_16_64 3
+  .amdhsa_fp16_overflow 0
+  .amdhsa_memory_ordered 1
+  .amdhsa_forward_progress 1
+  .amdhsa_inst_pref_size 0
+  .amdhsa_round_robin_scheduling 0
+  .amdhsa_named_barrier_count 0
+  .amdhsa_exception_fp_ieee_invalid_op 0
+  .amdhsa_exception_fp_denorm_src 0
+  .amdhsa_exception_fp_ieee_div_zero 0
+  .amdhsa_exception_fp_ieee_overflow 0
+  .amdhsa_exception_fp_ieee_underflow 0
+  .amdhsa_exception_fp_ieee_inexact 0
+  .amdhsa_exception_int_div_zero 0
+.end_amdhsa_kernel
+
+.amdgpu_metadata
+  amdhsa.version:
+    - 1
+    - 2
+  amdhsa.target: 'amdgcn-amd-amdhsa--gfx1250'
+  amdhsa.kernels:
+    - .name: 'cluster_identity_abi'
+      .symbol: 'cluster_identity_abi.kd'
+      .kernarg_segment_size: 0
+      .group_segment_fixed_size: 0
+      .private_segment_fixed_size: 0
+      .kernarg_segment_align: 8
+      .wavefront_size: 32
+      .sgpr_count: 4
+      .vgpr_count: 1
+      .max_flat_workgroup_size: 64
+      .reqd_workgroup_size:
+        - 64
+        - 1
+        - 1
+      .cluster_dims:
+        - 2
+        - 2
+        - 2
+      .gfx1250_revision: B0
+      .args: []
+.end_amdgpu_metadata
+
+// ====
+// RUN: emit amdgpu-native @cluster_native_encoding waits=none strategy=source fixed=%lds:physical_register:0:1 fixed=%addr:physical_register:1:1 fixed=%saddr:physical_register:4:2
+
+amdgpu.target<gfx1250> @target
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @cluster_native_encoding(%lds: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>) asm {
+  %m0 = s_mov_b32_m0_imm 3
+  cluster_load_async_to_lds_b8 %lds, %addr, %saddr, %m0
+  cluster_load_async_to_lds_b32 %lds, %addr, %saddr, %m0 {offset = 1, scope = 1}
+  cluster_load_async_to_lds_b64 %lds, %addr, %saddr, %m0 {offset = -1, nv = 1, scope = 2, th = 2}
+  cluster_load_async_to_lds_b128 %lds, %addr, %saddr, %m0 {scope = 3, th = 3}
+  s_wait_asynccnt {asynccnt = 0}
+  return
+}
+
+// ----
+
+// ====
+
+// RUN: emit amdgpu-kernel-assembly
+
+amdgpu.target<gfx1250> @target
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @cluster_local_x_only() asm {
+  %packed = live_in<amdgpu.cluster_workgroup_info.x> : reg<amdgpu.sgpr>
+  %local_x = s_and_b32_rhs_inline %packed, 15
+  return
+}
+
+// ----
+.text
+.amdgcn_target "amdgcn-amd-amdhsa--gfx1250"
+.amdhsa_code_object_version 6
+
+.protected cluster_local_x_only
+.globl cluster_local_x_only
+.p2align 8
+.type cluster_local_x_only,@function
+cluster_local_x_only:
+  global_prefetch_b8 v0, s[0:1] scope:SCOPE_SE
+  v_nop
+  s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), 1
+  s_and_b32 s0, ttmp6, 15
+  s_endpgm
+.Lfunc_end0:
+.size cluster_local_x_only, .Lfunc_end0-cluster_local_x_only
+
+.rodata
+.p2align 6
+.amdhsa_kernel cluster_local_x_only
+  .amdhsa_group_segment_fixed_size 0
+  .amdhsa_private_segment_fixed_size 0
+  .amdhsa_kernarg_size 0
+  .amdhsa_user_sgpr_count 0
+  .amdhsa_user_sgpr_dispatch_ptr 0
+  .amdhsa_user_sgpr_queue_ptr 0
+  .amdhsa_user_sgpr_kernarg_segment_ptr 0
+  .amdhsa_user_sgpr_dispatch_id 0
+  .amdhsa_user_sgpr_private_segment_size 0
+  .amdhsa_wavefront_size32 1
+  .amdhsa_uses_dynamic_stack 0
+  .amdhsa_enable_private_segment 0
+  .amdhsa_system_sgpr_workgroup_id_x 1
+  .amdhsa_system_sgpr_workgroup_id_y 0
+  .amdhsa_system_sgpr_workgroup_id_z 0
+  .amdhsa_system_sgpr_workgroup_info 0
+  .amdhsa_system_vgpr_workitem_id 0
+  .amdhsa_next_free_vgpr 1
+  .amdhsa_next_free_sgpr 2
+  .amdhsa_reserve_vcc 0
+  .amdhsa_float_round_mode_32 0
+  .amdhsa_float_round_mode_16_64 0
+  .amdhsa_float_denorm_mode_32 3
+  .amdhsa_float_denorm_mode_16_64 3
+  .amdhsa_fp16_overflow 0
+  .amdhsa_memory_ordered 1
+  .amdhsa_forward_progress 1
+  .amdhsa_inst_pref_size 0
+  .amdhsa_round_robin_scheduling 0
+  .amdhsa_named_barrier_count 0
+  .amdhsa_exception_fp_ieee_invalid_op 0
+  .amdhsa_exception_fp_denorm_src 0
+  .amdhsa_exception_fp_ieee_div_zero 0
+  .amdhsa_exception_fp_ieee_overflow 0
+  .amdhsa_exception_fp_ieee_underflow 0
+  .amdhsa_exception_fp_ieee_inexact 0
+  .amdhsa_exception_int_div_zero 0
+.end_amdhsa_kernel
+
+.amdgpu_metadata
+  amdhsa.version:
+    - 1
+    - 2
+  amdhsa.target: 'amdgcn-amd-amdhsa--gfx1250'
+  amdhsa.kernels:
+    - .name: 'cluster_local_x_only'
+      .symbol: 'cluster_local_x_only.kd'
+      .kernarg_segment_size: 0
+      .group_segment_fixed_size: 0
+      .private_segment_fixed_size: 0
+      .kernarg_segment_align: 8
+      .wavefront_size: 32
+      .sgpr_count: 2
+      .vgpr_count: 1
+      .max_flat_workgroup_size: 64
+      .reqd_workgroup_size:
+        - 64
+        - 1
+        - 1
+      .cluster_dims:
+        - 2
+        - 2
+        - 2
+      .gfx1250_revision: B0
+      .args: []
+.end_amdgpu_metadata
+
+// ====
+
+// RUN: emit amdgpu-kernel-assembly
+
+amdgpu.target<gfx1250> @target
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @cluster_local_y_only() asm {
+  %packed = live_in<amdgpu.cluster_workgroup_info.xy> : reg<amdgpu.sgpr>
+  %local_y = s_bfe_u32_lit %packed, 262148
+  return
+}
+
+// ----
+.text
+.amdgcn_target "amdgcn-amd-amdhsa--gfx1250"
+.amdhsa_code_object_version 6
+
+.protected cluster_local_y_only
+.globl cluster_local_y_only
+.p2align 8
+.type cluster_local_y_only,@function
+cluster_local_y_only:
+  global_prefetch_b8 v0, s[0:1] scope:SCOPE_SE
+  v_nop
+  s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), 1
+  s_bfe_u32 s0, 262148, ttmp6
+  s_endpgm
+.Lfunc_end0:
+.size cluster_local_y_only, .Lfunc_end0-cluster_local_y_only
+
+.rodata
+.p2align 6
+.amdhsa_kernel cluster_local_y_only
+  .amdhsa_group_segment_fixed_size 0
+  .amdhsa_private_segment_fixed_size 0
+  .amdhsa_kernarg_size 0
+  .amdhsa_user_sgpr_count 0
+  .amdhsa_user_sgpr_dispatch_ptr 0
+  .amdhsa_user_sgpr_queue_ptr 0
+  .amdhsa_user_sgpr_kernarg_segment_ptr 0
+  .amdhsa_user_sgpr_dispatch_id 0
+  .amdhsa_user_sgpr_private_segment_size 0
+  .amdhsa_wavefront_size32 1
+  .amdhsa_uses_dynamic_stack 0
+  .amdhsa_enable_private_segment 0
+  .amdhsa_system_sgpr_workgroup_id_x 1
+  .amdhsa_system_sgpr_workgroup_id_y 1
+  .amdhsa_system_sgpr_workgroup_id_z 0
+  .amdhsa_system_sgpr_workgroup_info 0
+  .amdhsa_system_vgpr_workitem_id 0
+  .amdhsa_next_free_vgpr 1
+  .amdhsa_next_free_sgpr 2
+  .amdhsa_reserve_vcc 0
+  .amdhsa_float_round_mode_32 0
+  .amdhsa_float_round_mode_16_64 0
+  .amdhsa_float_denorm_mode_32 3
+  .amdhsa_float_denorm_mode_16_64 3
+  .amdhsa_fp16_overflow 0
+  .amdhsa_memory_ordered 1
+  .amdhsa_forward_progress 1
+  .amdhsa_inst_pref_size 0
+  .amdhsa_round_robin_scheduling 0
+  .amdhsa_named_barrier_count 0
+  .amdhsa_exception_fp_ieee_invalid_op 0
+  .amdhsa_exception_fp_denorm_src 0
+  .amdhsa_exception_fp_ieee_div_zero 0
+  .amdhsa_exception_fp_ieee_overflow 0
+  .amdhsa_exception_fp_ieee_underflow 0
+  .amdhsa_exception_fp_ieee_inexact 0
+  .amdhsa_exception_int_div_zero 0
+.end_amdhsa_kernel
+
+.amdgpu_metadata
+  amdhsa.version:
+    - 1
+    - 2
+  amdhsa.target: 'amdgcn-amd-amdhsa--gfx1250'
+  amdhsa.kernels:
+    - .name: 'cluster_local_y_only'
+      .symbol: 'cluster_local_y_only.kd'
+      .kernarg_segment_size: 0
+      .group_segment_fixed_size: 0
+      .private_segment_fixed_size: 0
+      .kernarg_segment_align: 8
+      .wavefront_size: 32
+      .sgpr_count: 2
+      .vgpr_count: 1
+      .max_flat_workgroup_size: 64
+      .reqd_workgroup_size:
+        - 64
+        - 1
+        - 1
+      .cluster_dims:
+        - 2
+        - 2
+        - 2
+      .gfx1250_revision: B0
+      .args: []
+.end_amdgpu_metadata
+
+// ====
+
+// RUN: emit amdgpu-kernel-assembly
+
+amdgpu.target<gfx1250> @target
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @cluster_local_z_only() asm {
+  %packed = live_in<amdgpu.cluster_workgroup_info.xz> : reg<amdgpu.sgpr>
+  %local_z = s_bfe_u32_lit %packed, 262152
+  return
+}
+
+// ----
+.text
+.amdgcn_target "amdgcn-amd-amdhsa--gfx1250"
+.amdhsa_code_object_version 6
+
+.protected cluster_local_z_only
+.globl cluster_local_z_only
+.p2align 8
+.type cluster_local_z_only,@function
+cluster_local_z_only:
+  global_prefetch_b8 v0, s[0:1] scope:SCOPE_SE
+  v_nop
+  s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), 1
+  s_bfe_u32 s0, 262152, ttmp6
+  s_endpgm
+.Lfunc_end0:
+.size cluster_local_z_only, .Lfunc_end0-cluster_local_z_only
+
+.rodata
+.p2align 6
+.amdhsa_kernel cluster_local_z_only
+  .amdhsa_group_segment_fixed_size 0
+  .amdhsa_private_segment_fixed_size 0
+  .amdhsa_kernarg_size 0
+  .amdhsa_user_sgpr_count 0
+  .amdhsa_user_sgpr_dispatch_ptr 0
+  .amdhsa_user_sgpr_queue_ptr 0
+  .amdhsa_user_sgpr_kernarg_segment_ptr 0
+  .amdhsa_user_sgpr_dispatch_id 0
+  .amdhsa_user_sgpr_private_segment_size 0
+  .amdhsa_wavefront_size32 1
+  .amdhsa_uses_dynamic_stack 0
+  .amdhsa_enable_private_segment 0
+  .amdhsa_system_sgpr_workgroup_id_x 1
+  .amdhsa_system_sgpr_workgroup_id_y 0
+  .amdhsa_system_sgpr_workgroup_id_z 1
+  .amdhsa_system_sgpr_workgroup_info 0
+  .amdhsa_system_vgpr_workitem_id 0
+  .amdhsa_next_free_vgpr 1
+  .amdhsa_next_free_sgpr 2
+  .amdhsa_reserve_vcc 0
+  .amdhsa_float_round_mode_32 0
+  .amdhsa_float_round_mode_16_64 0
+  .amdhsa_float_denorm_mode_32 3
+  .amdhsa_float_denorm_mode_16_64 3
+  .amdhsa_fp16_overflow 0
+  .amdhsa_memory_ordered 1
+  .amdhsa_forward_progress 1
+  .amdhsa_inst_pref_size 0
+  .amdhsa_round_robin_scheduling 0
+  .amdhsa_named_barrier_count 0
+  .amdhsa_exception_fp_ieee_invalid_op 0
+  .amdhsa_exception_fp_denorm_src 0
+  .amdhsa_exception_fp_ieee_div_zero 0
+  .amdhsa_exception_fp_ieee_overflow 0
+  .amdhsa_exception_fp_ieee_underflow 0
+  .amdhsa_exception_fp_ieee_inexact 0
+  .amdhsa_exception_int_div_zero 0
+.end_amdhsa_kernel
+
+.amdgpu_metadata
+  amdhsa.version:
+    - 1
+    - 2
+  amdhsa.target: 'amdgcn-amd-amdhsa--gfx1250'
+  amdhsa.kernels:
+    - .name: 'cluster_local_z_only'
+      .symbol: 'cluster_local_z_only.kd'
+      .kernarg_segment_size: 0
+      .group_segment_fixed_size: 0
+      .private_segment_fixed_size: 0
+      .kernarg_segment_align: 8
+      .wavefront_size: 32
+      .sgpr_count: 2
+      .vgpr_count: 1
+      .max_flat_workgroup_size: 64
+      .reqd_workgroup_size:
+        - 64
+        - 1
+        - 1
+      .cluster_dims:
+        - 2
+        - 2
+        - 2
+      .gfx1250_revision: B0
+      .args: []
+.end_amdgpu_metadata
+
+// ====
+
+// RUN: emit amdgpu-kernel-assembly
+
+amdgpu.target<gfx1250> @target
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @empty_cluster() asm {
+  return
+}
+
+// ----
+.text
+.amdgcn_target "amdgcn-amd-amdhsa--gfx1250"
+.amdhsa_code_object_version 6
+
+.protected empty_cluster
+.globl empty_cluster
+.p2align 8
+.type empty_cluster,@function
+empty_cluster:
+  global_prefetch_b8 v0, s[0:1] scope:SCOPE_SE
+  v_nop
+  s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), 1
+  s_endpgm
+.Lfunc_end0:
+.size empty_cluster, .Lfunc_end0-empty_cluster
+
+.rodata
+.p2align 6
+.amdhsa_kernel empty_cluster
+  .amdhsa_group_segment_fixed_size 0
+  .amdhsa_private_segment_fixed_size 0
+  .amdhsa_kernarg_size 0
+  .amdhsa_user_sgpr_count 0
+  .amdhsa_user_sgpr_dispatch_ptr 0
+  .amdhsa_user_sgpr_queue_ptr 0
+  .amdhsa_user_sgpr_kernarg_segment_ptr 0
+  .amdhsa_user_sgpr_dispatch_id 0
+  .amdhsa_user_sgpr_private_segment_size 0
+  .amdhsa_wavefront_size32 1
+  .amdhsa_uses_dynamic_stack 0
+  .amdhsa_enable_private_segment 0
+  .amdhsa_system_sgpr_workgroup_id_x 1
+  .amdhsa_system_sgpr_workgroup_id_y 0
+  .amdhsa_system_sgpr_workgroup_id_z 0
+  .amdhsa_system_sgpr_workgroup_info 0
+  .amdhsa_system_vgpr_workitem_id 0
+  .amdhsa_next_free_vgpr 1
+  .amdhsa_next_free_sgpr 2
+  .amdhsa_reserve_vcc 0
+  .amdhsa_float_round_mode_32 0
+  .amdhsa_float_round_mode_16_64 0
+  .amdhsa_float_denorm_mode_32 3
+  .amdhsa_float_denorm_mode_16_64 3
+  .amdhsa_fp16_overflow 0
+  .amdhsa_memory_ordered 1
+  .amdhsa_forward_progress 1
+  .amdhsa_inst_pref_size 0
+  .amdhsa_round_robin_scheduling 0
+  .amdhsa_named_barrier_count 0
+  .amdhsa_exception_fp_ieee_invalid_op 0
+  .amdhsa_exception_fp_denorm_src 0
+  .amdhsa_exception_fp_ieee_div_zero 0
+  .amdhsa_exception_fp_ieee_overflow 0
+  .amdhsa_exception_fp_ieee_underflow 0
+  .amdhsa_exception_fp_ieee_inexact 0
+  .amdhsa_exception_int_div_zero 0
+.end_amdhsa_kernel
+
+.amdgpu_metadata
+  amdhsa.version:
+    - 1
+    - 2
+  amdhsa.target: 'amdgcn-amd-amdhsa--gfx1250'
+  amdhsa.kernels:
+    - .name: 'empty_cluster'
+      .symbol: 'empty_cluster.kd'
+      .kernarg_segment_size: 0
+      .group_segment_fixed_size: 0
+      .private_segment_fixed_size: 0
+      .kernarg_segment_align: 8
+      .wavefront_size: 32
+      .sgpr_count: 2
+      .vgpr_count: 1
+      .max_flat_workgroup_size: 64
+      .reqd_workgroup_size:
+        - 64
+        - 1
+        - 1
+      .cluster_dims:
+        - 2
+        - 2
+        - 2
+      .gfx1250_revision: B0
+      .args: []
+.end_amdgpu_metadata
+
+// ====
+
+// RUN: emit amdgpu-kernel-assembly
+
+amdgpu.target<gfx1250> @target
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @flat_cluster_workgroup_id() asm {
+  %flat_id = s_getreg_b32_cluster_workgroup_flat_id
+  return
+}
+
+// ----
+.text
+.amdgcn_target "amdgcn-amd-amdhsa--gfx1250"
+.amdhsa_code_object_version 6
+
+.protected flat_cluster_workgroup_id
+.globl flat_cluster_workgroup_id
+.p2align 8
+.type flat_cluster_workgroup_id,@function
+flat_cluster_workgroup_id:
+  global_prefetch_b8 v0, s[0:1] scope:SCOPE_SE
+  v_nop
+  s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), 1
+  s_getreg_b32 s0, hwreg(HW_REG_IB_STS2, 21, 4)
+  s_endpgm
+.Lfunc_end0:
+.size flat_cluster_workgroup_id, .Lfunc_end0-flat_cluster_workgroup_id
+
+.rodata
+.p2align 6
+.amdhsa_kernel flat_cluster_workgroup_id
+  .amdhsa_group_segment_fixed_size 0
+  .amdhsa_private_segment_fixed_size 0
+  .amdhsa_kernarg_size 0
+  .amdhsa_user_sgpr_count 0
+  .amdhsa_user_sgpr_dispatch_ptr 0
+  .amdhsa_user_sgpr_queue_ptr 0
+  .amdhsa_user_sgpr_kernarg_segment_ptr 0
+  .amdhsa_user_sgpr_dispatch_id 0
+  .amdhsa_user_sgpr_private_segment_size 0
+  .amdhsa_wavefront_size32 1
+  .amdhsa_uses_dynamic_stack 0
+  .amdhsa_enable_private_segment 0
+  .amdhsa_system_sgpr_workgroup_id_x 1
+  .amdhsa_system_sgpr_workgroup_id_y 1
+  .amdhsa_system_sgpr_workgroup_id_z 1
+  .amdhsa_system_sgpr_workgroup_info 0
+  .amdhsa_system_vgpr_workitem_id 0
+  .amdhsa_next_free_vgpr 1
+  .amdhsa_next_free_sgpr 2
+  .amdhsa_reserve_vcc 0
+  .amdhsa_float_round_mode_32 0
+  .amdhsa_float_round_mode_16_64 0
+  .amdhsa_float_denorm_mode_32 3
+  .amdhsa_float_denorm_mode_16_64 3
+  .amdhsa_fp16_overflow 0
+  .amdhsa_memory_ordered 1
+  .amdhsa_forward_progress 1
+  .amdhsa_inst_pref_size 0
+  .amdhsa_round_robin_scheduling 0
+  .amdhsa_named_barrier_count 0
+  .amdhsa_exception_fp_ieee_invalid_op 0
+  .amdhsa_exception_fp_denorm_src 0
+  .amdhsa_exception_fp_ieee_div_zero 0
+  .amdhsa_exception_fp_ieee_overflow 0
+  .amdhsa_exception_fp_ieee_underflow 0
+  .amdhsa_exception_fp_ieee_inexact 0
+  .amdhsa_exception_int_div_zero 0
+.end_amdhsa_kernel
+
+.amdgpu_metadata
+  amdhsa.version:
+    - 1
+    - 2
+  amdhsa.target: 'amdgcn-amd-amdhsa--gfx1250'
+  amdhsa.kernels:
+    - .name: 'flat_cluster_workgroup_id'
+      .symbol: 'flat_cluster_workgroup_id.kd'
+      .kernarg_segment_size: 0
+      .group_segment_fixed_size: 0
+      .private_segment_fixed_size: 0
+      .kernarg_segment_align: 8
+      .wavefront_size: 32
+      .sgpr_count: 2
+      .vgpr_count: 1
+      .max_flat_workgroup_size: 64
+      .reqd_workgroup_size:
+        - 64
+        - 1
+        - 1
+      .cluster_dims:
+        - 2
+        - 2
+        - 2
+      .gfx1250_revision: B0
+      .args: []
+.end_amdgpu_metadata
+
+// ====
+
+// RUN: emit amdgpu-kernel-assembly
+
+amdgpu.target<gfx1250> @target
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 3, 2) @overlapping_cluster_y_z() asm {
+  %packed_y = live_in<amdgpu.cluster_id_y> : reg<amdgpu.sgpr>
+  // ERROR@+1: AMDGPU/045 {source_name="amdgpu.cluster_id_z", conflicting_source_name="amdgpu.cluster_id_y", fixed_location="115"}
+  %packed_z = live_in<amdgpu.cluster_id_z> : reg<amdgpu.sgpr>
+  %y = s_and_b32_lit %packed_y, 65535
+  %z = s_lshr_b32_rhs_inline %packed_z, 16
+  %value = s_add_u32 %y, %z
+  return
+}
+
+// ====
+
+// RUN: emit amdgpu-kernel-assembly
+
+amdgpu.target<gfx1250> @target
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) workgroup_count(4, 1, 1) @ordinary_workgroup_x() asm {
+  %workgroup_x = live_in<amdgpu.cluster_id_x> : reg<amdgpu.sgpr>
+  %one = s_mov_b32 1
+  %value = s_add_u32 %workgroup_x, %one
+  return
+}
+
+// ----
+.text
+.amdgcn_target "amdgcn-amd-amdhsa--gfx1250"
+.amdhsa_code_object_version 6
+
+.protected ordinary_workgroup_x
+.globl ordinary_workgroup_x
+.p2align 8
+.type ordinary_workgroup_x,@function
+ordinary_workgroup_x:
+  global_prefetch_b8 v0, s[0:1] scope:SCOPE_SE
+  v_nop
+  s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), 1
+  s_mov_b32 s0, 1
+  s_add_u32 s0, ttmp9, s0
+  s_endpgm
+.Lfunc_end0:
+.size ordinary_workgroup_x, .Lfunc_end0-ordinary_workgroup_x
+
+.rodata
+.p2align 6
+.amdhsa_kernel ordinary_workgroup_x
+  .amdhsa_group_segment_fixed_size 0
+  .amdhsa_private_segment_fixed_size 0
+  .amdhsa_kernarg_size 0
+  .amdhsa_user_sgpr_count 0
+  .amdhsa_user_sgpr_dispatch_ptr 0
+  .amdhsa_user_sgpr_queue_ptr 0
+  .amdhsa_user_sgpr_kernarg_segment_ptr 0
+  .amdhsa_user_sgpr_dispatch_id 0
+  .amdhsa_user_sgpr_private_segment_size 0
+  .amdhsa_wavefront_size32 1
+  .amdhsa_uses_dynamic_stack 0
+  .amdhsa_enable_private_segment 0
+  .amdhsa_system_sgpr_workgroup_id_x 1
+  .amdhsa_system_sgpr_workgroup_id_y 0
+  .amdhsa_system_sgpr_workgroup_id_z 0
+  .amdhsa_system_sgpr_workgroup_info 0
+  .amdhsa_system_vgpr_workitem_id 0
+  .amdhsa_next_free_vgpr 1
+  .amdhsa_next_free_sgpr 2
+  .amdhsa_reserve_vcc 0
+  .amdhsa_float_round_mode_32 0
+  .amdhsa_float_round_mode_16_64 0
+  .amdhsa_float_denorm_mode_32 3
+  .amdhsa_float_denorm_mode_16_64 3
+  .amdhsa_fp16_overflow 0
+  .amdhsa_memory_ordered 1
+  .amdhsa_forward_progress 1
+  .amdhsa_inst_pref_size 0
+  .amdhsa_round_robin_scheduling 0
+  .amdhsa_named_barrier_count 0
+  .amdhsa_exception_fp_ieee_invalid_op 0
+  .amdhsa_exception_fp_denorm_src 0
+  .amdhsa_exception_fp_ieee_div_zero 0
+  .amdhsa_exception_fp_ieee_overflow 0
+  .amdhsa_exception_fp_ieee_underflow 0
+  .amdhsa_exception_fp_ieee_inexact 0
+  .amdhsa_exception_int_div_zero 0
+.end_amdhsa_kernel
+
+.amdgpu_metadata
+  amdhsa.version:
+    - 1
+    - 2
+  amdhsa.target: 'amdgcn-amd-amdhsa--gfx1250'
+  amdhsa.kernels:
+    - .name: 'ordinary_workgroup_x'
+      .symbol: 'ordinary_workgroup_x.kd'
+      .kernarg_segment_size: 0
+      .group_segment_fixed_size: 0
+      .private_segment_fixed_size: 0
+      .kernarg_segment_align: 8
+      .wavefront_size: 32
+      .sgpr_count: 2
+      .vgpr_count: 1
+      .max_flat_workgroup_size: 64
+      .reqd_workgroup_size:
+        - 64
+        - 1
+        - 1
+      .gfx1250_revision: B0
+      .args: []
+.end_amdgpu_metadata
+
+// ====
+
+// RUN: emit amdgpu-kernel-assembly
+
+amdgpu.target<gfx1250> @target
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 3, 1) @ordinary_workgroup_y() asm {
+  %packed_y = live_in<amdgpu.cluster_id_y> : reg<amdgpu.sgpr>
+  %value = s_and_b32_lit %packed_y, 65535
+  return
+}
+
+// ----
+.text
+.amdgcn_target "amdgcn-amd-amdhsa--gfx1250"
+.amdhsa_code_object_version 6
+
+.protected ordinary_workgroup_y
+.globl ordinary_workgroup_y
+.p2align 8
+.type ordinary_workgroup_y,@function
+ordinary_workgroup_y:
+  global_prefetch_b8 v0, s[0:1] scope:SCOPE_SE
+  v_nop
+  s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), 1
+  s_and_b32 s0, 65535, ttmp7
+  s_endpgm
+.Lfunc_end0:
+.size ordinary_workgroup_y, .Lfunc_end0-ordinary_workgroup_y
+
+.rodata
+.p2align 6
+.amdhsa_kernel ordinary_workgroup_y
+  .amdhsa_group_segment_fixed_size 0
+  .amdhsa_private_segment_fixed_size 0
+  .amdhsa_kernarg_size 0
+  .amdhsa_user_sgpr_count 0
+  .amdhsa_user_sgpr_dispatch_ptr 0
+  .amdhsa_user_sgpr_queue_ptr 0
+  .amdhsa_user_sgpr_kernarg_segment_ptr 0
+  .amdhsa_user_sgpr_dispatch_id 0
+  .amdhsa_user_sgpr_private_segment_size 0
+  .amdhsa_wavefront_size32 1
+  .amdhsa_uses_dynamic_stack 0
+  .amdhsa_enable_private_segment 0
+  .amdhsa_system_sgpr_workgroup_id_x 1
+  .amdhsa_system_sgpr_workgroup_id_y 1
+  .amdhsa_system_sgpr_workgroup_id_z 0
+  .amdhsa_system_sgpr_workgroup_info 0
+  .amdhsa_system_vgpr_workitem_id 0
+  .amdhsa_next_free_vgpr 1
+  .amdhsa_next_free_sgpr 2
+  .amdhsa_reserve_vcc 0
+  .amdhsa_float_round_mode_32 0
+  .amdhsa_float_round_mode_16_64 0
+  .amdhsa_float_denorm_mode_32 3
+  .amdhsa_float_denorm_mode_16_64 3
+  .amdhsa_fp16_overflow 0
+  .amdhsa_memory_ordered 1
+  .amdhsa_forward_progress 1
+  .amdhsa_inst_pref_size 0
+  .amdhsa_round_robin_scheduling 0
+  .amdhsa_named_barrier_count 0
+  .amdhsa_exception_fp_ieee_invalid_op 0
+  .amdhsa_exception_fp_denorm_src 0
+  .amdhsa_exception_fp_ieee_div_zero 0
+  .amdhsa_exception_fp_ieee_overflow 0
+  .amdhsa_exception_fp_ieee_underflow 0
+  .amdhsa_exception_fp_ieee_inexact 0
+  .amdhsa_exception_int_div_zero 0
+.end_amdhsa_kernel
+
+.amdgpu_metadata
+  amdhsa.version:
+    - 1
+    - 2
+  amdhsa.target: 'amdgcn-amd-amdhsa--gfx1250'
+  amdhsa.kernels:
+    - .name: 'ordinary_workgroup_y'
+      .symbol: 'ordinary_workgroup_y.kd'
+      .kernarg_segment_size: 0
+      .group_segment_fixed_size: 0
+      .private_segment_fixed_size: 0
+      .kernarg_segment_align: 8
+      .wavefront_size: 32
+      .sgpr_count: 2
+      .vgpr_count: 1
+      .max_flat_workgroup_size: 64
+      .reqd_workgroup_size:
+        - 64
+        - 1
+        - 1
+      .gfx1250_revision: B0
+      .args: []
+.end_amdgpu_metadata
+
+// ====
+
+// RUN: emit amdgpu-kernel-assembly
+
+amdgpu.target<gfx1250-a0> @target
+low.kernel.def target<amdgpu.rdna4.gfx1250_a0.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 2) @ordinary_workgroup_z() asm {
+  %packed_z = live_in<amdgpu.cluster_id_z> : reg<amdgpu.sgpr>
+  %value = s_lshr_b32_rhs_inline %packed_z, 16
+  return
+}
+
+// ----
+.text
+.amdgcn_target "amdgcn-amd-amdhsa--gfx1250"
+.amdhsa_code_object_version 6
+
+.protected ordinary_workgroup_z
+.globl ordinary_workgroup_z
+.p2align 8
+.type ordinary_workgroup_z,@function
+ordinary_workgroup_z:
+  global_prefetch_b8 v0, s[0:1] scope:SCOPE_SE
+  v_nop
+  s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), 1
+  s_lshr_b32 s0, ttmp7, 16
+  s_endpgm
+.Lfunc_end0:
+.size ordinary_workgroup_z, .Lfunc_end0-ordinary_workgroup_z
+
+.rodata
+.p2align 6
+.amdhsa_kernel ordinary_workgroup_z
+  .amdhsa_group_segment_fixed_size 0
+  .amdhsa_private_segment_fixed_size 0
+  .amdhsa_kernarg_size 0
+  .amdhsa_user_sgpr_count 0
+  .amdhsa_user_sgpr_dispatch_ptr 0
+  .amdhsa_user_sgpr_queue_ptr 0
+  .amdhsa_user_sgpr_kernarg_segment_ptr 0
+  .amdhsa_user_sgpr_dispatch_id 0
+  .amdhsa_user_sgpr_private_segment_size 0
+  .amdhsa_wavefront_size32 1
+  .amdhsa_uses_dynamic_stack 0
+  .amdhsa_enable_private_segment 0
+  .amdhsa_system_sgpr_workgroup_id_x 1
+  .amdhsa_system_sgpr_workgroup_id_y 0
+  .amdhsa_system_sgpr_workgroup_id_z 1
+  .amdhsa_system_sgpr_workgroup_info 0
+  .amdhsa_system_vgpr_workitem_id 0
+  .amdhsa_next_free_vgpr 1
+  .amdhsa_next_free_sgpr 2
+  .amdhsa_reserve_vcc 0
+  .amdhsa_float_round_mode_32 0
+  .amdhsa_float_round_mode_16_64 0
+  .amdhsa_float_denorm_mode_32 3
+  .amdhsa_float_denorm_mode_16_64 3
+  .amdhsa_fp16_overflow 0
+  .amdhsa_memory_ordered 1
+  .amdhsa_forward_progress 1
+  .amdhsa_inst_pref_size 0
+  .amdhsa_round_robin_scheduling 0
+  .amdhsa_named_barrier_count 0
+  .amdhsa_exception_fp_ieee_invalid_op 0
+  .amdhsa_exception_fp_denorm_src 0
+  .amdhsa_exception_fp_ieee_div_zero 0
+  .amdhsa_exception_fp_ieee_overflow 0
+  .amdhsa_exception_fp_ieee_underflow 0
+  .amdhsa_exception_fp_ieee_inexact 0
+  .amdhsa_exception_int_div_zero 0
+.end_amdhsa_kernel
+
+.amdgpu_metadata
+  amdhsa.version:
+    - 1
+    - 2
+  amdhsa.target: 'amdgcn-amd-amdhsa--gfx1250'
+  amdhsa.kernels:
+    - .name: 'ordinary_workgroup_z'
+      .symbol: 'ordinary_workgroup_z.kd'
+      .kernarg_segment_size: 0
+      .group_segment_fixed_size: 0
+      .private_segment_fixed_size: 0
+      .kernarg_segment_align: 8
+      .wavefront_size: 32
+      .sgpr_count: 2
+      .vgpr_count: 1
+      .max_flat_workgroup_size: 64
+      .reqd_workgroup_size:
+        - 64
+        - 1
+        - 1
+      .gfx1250_revision: A0
+      .args: []
+.end_amdgpu_metadata

@@ -17,6 +17,16 @@ extern "C" {
 typedef struct iree_io_parameter_index_t iree_io_parameter_index_t;
 typedef struct iree_io_scope_map_t iree_io_scope_map_t;
 
+// Appends parameters from |path| to |index|.
+//
+// Supported paths are ordinary parameter files and Hugging Face safetensors
+// index manifests named `*.safetensors.index.json`. Manifest paths are expanded
+// relative to their containing directory and each referenced shard file is
+// parsed into the same index.
+iree_status_t iree_tooling_append_parameter_file_to_index(
+    iree_string_view_t path, iree_io_parameter_index_t* index,
+    iree_allocator_t host_allocator);
+
 // Populates |scope_map| with parameter indices as specified by flags.
 iree_status_t iree_tooling_build_parameter_indices_from_flags(
     iree_io_scope_map_t* scope_map);

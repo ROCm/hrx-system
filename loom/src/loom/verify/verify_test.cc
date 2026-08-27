@@ -13,6 +13,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/text_asm.h"
 #include "loom/error/diagnostic.h"
 #include "loom/error/error_defs.h"
 #include "loom/error/json_sink.h"
@@ -21,7 +22,10 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/template/ops.h"
 #include "loom/ops/test/ops.h"
+#include "loom/ops/test/registry.h"
+#include "loom/target/low_descriptor_registry_core_test.h"
 #include "loom/testing/diagnostic_matchers.h"
 #include "loom/util/stream.h"
 
@@ -84,16 +88,21 @@ using ::loom::testing::GetStringParam;
 
 // Registers test dialect vtables on the context.
 static void RegisterTestDialect(loom_context_t* context) {
-  iree_host_size_t count = 0;
-  const loom_op_vtable_t* const* vtables = loom_test_dialect_vtables(&count);
-  IREE_ASSERT_OK(loom_context_register_dialect(context, LOOM_DIALECT_TEST,
-                                               vtables, (uint16_t)count));
+  IREE_ASSERT_OK(loom_test_dialect_register(context));
 }
 
 static void RegisterLowDialect(loom_context_t* context) {
   iree_host_size_t count = 0;
   const loom_op_vtable_t* const* vtables = loom_low_dialect_vtables(&count);
   IREE_ASSERT_OK(loom_context_register_dialect(context, LOOM_DIALECT_LOW,
+                                               vtables, (uint16_t)count));
+}
+
+static void RegisterTemplateDialect(loom_context_t* context) {
+  iree_host_size_t count = 0;
+  const loom_op_vtable_t* const* vtables =
+      loom_template_dialect_vtables(&count);
+  IREE_ASSERT_OK(loom_context_register_dialect(context, LOOM_DIALECT_TEMPLATE,
                                                vtables, (uint16_t)count));
 }
 
@@ -115,7 +124,9 @@ class VerifyTest : public ::testing::Test {
     loom_context_initialize(iree_allocator_system(), &context_);
     RegisterTestDialect(&context_);
     RegisterLowDialect(&context_);
+    RegisterTemplateDialect(&context_);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
+    loom_target_core_test_low_descriptor_registry_initialize(&low_registry_);
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("verify_test"),
                                         &block_pool_, NULL,
                                         iree_allocator_system(), &module_));
@@ -161,7 +172,7 @@ class VerifyTest : public ::testing::Test {
         &builder_, 0, 0, 0, callee, arg_types, arg_count, nullptr, 0, nullptr,
         0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &func_op));
     loom_region_t* body = loom_test_func_body(func_op);
-    loom_builder_set_block(&builder_, loom_region_entry_block(body));
+    (void)loom_builder_enter_region(&builder_, func_op, body);
     for (iree_host_size_t i = 0; i < arg_count; ++i) {
       out_args[i] = loom_region_entry_arg_id(body, (uint16_t)i);
     }
@@ -200,6 +211,8 @@ class VerifyTest : public ::testing::Test {
     loom_text_parse_options_t parse_options = {};
     parse_options.diagnostic_sink = parse_capture.sink();
     parse_options.max_errors = 20;
+    loom_low_descriptor_text_asm_environment_initialize(
+        &low_registry_.registry, &parse_options.low_asm_environment);
     loom_module_t* parsed_module = nullptr;
     IREE_EXPECT_OK(loom_text_parse(
         iree_make_cstring_view(source), iree_make_cstring_view(filename),
@@ -314,6 +327,7 @@ class VerifyTest : public ::testing::Test {
 
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_;
+  loom_target_low_descriptor_registry_t low_registry_ = {};
   loom_module_t* module_ = nullptr;
   loom_builder_t builder_;
   DiagnosticCollector collector_;
@@ -325,9 +339,35 @@ static loom_trait_flags_t BadHintPureEffectiveTraits(const loom_op_t* op) {
   return LOOM_TRAIT_HINT | LOOM_TRAIT_PURE;
 }
 
-static void ExpectBadTraitDiagnostic(const loom_op_vtable_t* bad_vtable,
-                                     const char* op_name, const char* trait_a,
-                                     const char* trait_b) {
+TEST(VerifyTraitConsistencyTest, RejectsEffectiveIncompatibleHintTraits) {
+  static const uint8_t kBadHintName[] = {
+      8, 3, 'b', 'a', 'd', '.', 'h', 'i', 'n', 't', '\0',
+  };
+  static const loom_op_vtable_t kBadHintVtable = {
+      /*.traits=*/LOOM_TRAIT_HINT,
+      /*.fixed_operand_count=*/{},
+      /*.fixed_result_count=*/{},
+      /*.attribute_count=*/{},
+      /*.region_count=*/{},
+      /*.vtable_flags=*/{},
+      /*.symbol_kind=*/{},
+      /*.constraint_count=*/{},
+      /*.operand_descriptor_count=*/{},
+      /*.control_flow_flags=*/{},
+      /*.control_flow_reserved=*/{},
+      /*.successor_selector_operand_index=*/{},
+      /*.canonicalize=*/{},
+      /*.infer_facts=*/{},
+      /*.effective_traits=*/BadHintPureEffectiveTraits,
+      /*.attr_descriptors=*/{},
+      /*.operand_descriptors=*/{},
+      /*.type_transfer=*/{},
+      /*.result_descriptors=*/{},
+      /*.region_descriptors=*/{},
+      /*.constraints=*/{},
+      /*.verify=*/{},
+      /*.name=*/kBadHintName,
+  };
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
 
@@ -336,7 +376,7 @@ static void ExpectBadTraitDiagnostic(const loom_op_vtable_t* bad_vtable,
   RegisterTestDialect(&context);
 
   const loom_op_vtable_t* const kBadDialectVtables[] = {
-      bad_vtable,
+      &kBadHintVtable,
   };
   constexpr uint8_t kBadDialectId = LOOM_DIALECT_BUILTIN_COUNT_ - 1;
   IREE_ASSERT_OK(
@@ -386,143 +426,13 @@ static void ExpectBadTraitDiagnostic(const loom_op_vtable_t* bad_vtable,
       capture, loom_error_def_lookup(LOOM_ERROR_DOMAIN_STRUCTURE, 16));
   ASSERT_NE(entry, nullptr)
       << "Expected STRUCTURE/016 incompatible-traits error";
-  EXPECT_EQ(GetStringParam(*entry, 0), op_name);
-  EXPECT_EQ(GetStringParam(*entry, 1), trait_a);
-  EXPECT_EQ(GetStringParam(*entry, 2), trait_b);
+  EXPECT_EQ(GetStringParam(*entry, 0), "bad.hint");
+  EXPECT_EQ(GetStringParam(*entry, 1), "HINT");
+  EXPECT_EQ(GetStringParam(*entry, 2), "PURE");
 
   loom_module_free(module);
   loom_context_deinitialize(&context);
   iree_arena_block_pool_deinitialize(&block_pool);
-}
-
-TEST(VerifyTraitConsistencyTest, RejectsDeclaredIncompatibleHintTraits) {
-  static const uint8_t kBadHintName[] = {
-      8, 3, 'b', 'a', 'd', '.', 'h', 'i', 'n', 't', '\0',
-  };
-  static const loom_op_vtable_t kBadHintVtable = {
-      /*.traits=*/LOOM_TRAIT_HINT | LOOM_TRAIT_PURE,
-      /*.fixed_operand_count=*/{},
-      /*.fixed_result_count=*/{},
-      /*.attribute_count=*/{},
-      /*.region_count=*/{},
-      /*.vtable_flags=*/{},
-      /*.symbol_kind=*/{},
-      /*.constraint_count=*/{},
-      /*.operand_descriptor_count=*/{},
-      /*.control_flow_flags=*/{},
-      /*.control_flow_reserved=*/{},
-      /*.successor_selector_operand_index=*/{},
-      /*.canonicalize=*/{},
-      /*.infer_facts=*/{},
-      /*.effective_traits=*/{},
-      /*.attr_descriptors=*/{},
-      /*.operand_descriptors=*/{},
-      /*.type_transfer=*/{},
-      /*.result_descriptors=*/{},
-      /*.region_descriptors=*/{},
-      /*.constraints=*/{},
-      /*.verify=*/{},
-      /*.name=*/kBadHintName,
-  };
-  ExpectBadTraitDiagnostic(&kBadHintVtable, "bad.hint", "HINT", "PURE");
-}
-
-TEST(VerifyTraitConsistencyTest, RejectsEffectiveIncompatibleHintTraits) {
-  static const uint8_t kBadHintName[] = {
-      8, 3, 'b', 'a', 'd', '.', 'h', 'i', 'n', 't', '\0',
-  };
-  static const loom_op_vtable_t kBadHintVtable = {
-      /*.traits=*/LOOM_TRAIT_HINT,
-      /*.fixed_operand_count=*/{},
-      /*.fixed_result_count=*/{},
-      /*.attribute_count=*/{},
-      /*.region_count=*/{},
-      /*.vtable_flags=*/{},
-      /*.symbol_kind=*/{},
-      /*.constraint_count=*/{},
-      /*.operand_descriptor_count=*/{},
-      /*.control_flow_flags=*/{},
-      /*.control_flow_reserved=*/{},
-      /*.successor_selector_operand_index=*/{},
-      /*.canonicalize=*/{},
-      /*.infer_facts=*/{},
-      /*.effective_traits=*/BadHintPureEffectiveTraits,
-      /*.attr_descriptors=*/{},
-      /*.operand_descriptors=*/{},
-      /*.type_transfer=*/{},
-      /*.result_descriptors=*/{},
-      /*.region_descriptors=*/{},
-      /*.constraints=*/{},
-      /*.verify=*/{},
-      /*.name=*/kBadHintName,
-  };
-  ExpectBadTraitDiagnostic(&kBadHintVtable, "bad.hint", "HINT", "PURE");
-}
-
-TEST(VerifyTraitConsistencyTest, RejectsDeclaredIncompatibleSpeculationTraits) {
-  static const uint8_t kBadSpecName[] = {
-      8, 3, 'b', 'a', 'd', '.', 's', 'p', 'e', 'c', '\0',
-  };
-  static const loom_op_vtable_t kBadSpecVtable = {
-      /*.traits=*/LOOM_TRAIT_SAFE_TO_SPECULATE | LOOM_TRAIT_UNKNOWN_EFFECTS,
-      /*.fixed_operand_count=*/{},
-      /*.fixed_result_count=*/{},
-      /*.attribute_count=*/{},
-      /*.region_count=*/{},
-      /*.vtable_flags=*/{},
-      /*.symbol_kind=*/{},
-      /*.constraint_count=*/{},
-      /*.operand_descriptor_count=*/{},
-      /*.control_flow_flags=*/{},
-      /*.control_flow_reserved=*/{},
-      /*.successor_selector_operand_index=*/{},
-      /*.canonicalize=*/{},
-      /*.infer_facts=*/{},
-      /*.effective_traits=*/{},
-      /*.attr_descriptors=*/{},
-      /*.operand_descriptors=*/{},
-      /*.type_transfer=*/{},
-      /*.result_descriptors=*/{},
-      /*.region_descriptors=*/{},
-      /*.constraints=*/{},
-      /*.verify=*/{},
-      /*.name=*/kBadSpecName,
-  };
-  ExpectBadTraitDiagnostic(&kBadSpecVtable, "bad.spec", "SAFE_TO_SPECULATE",
-                           "UNKNOWN_EFFECTS");
-}
-
-TEST(VerifyTraitConsistencyTest, RejectsDeclaredSpeculatableConvergentTraits) {
-  static const uint8_t kBadConvergentName[] = {
-      8, 3, 'b', 'a', 'd', '.', 'c', 'o', 'n', 'v', '\0',
-  };
-  static const loom_op_vtable_t kBadConvergentVtable = {
-      /*.traits=*/LOOM_TRAIT_SAFE_TO_SPECULATE | LOOM_TRAIT_CONVERGENT,
-      /*.fixed_operand_count=*/{},
-      /*.fixed_result_count=*/{},
-      /*.attribute_count=*/{},
-      /*.region_count=*/{},
-      /*.vtable_flags=*/{},
-      /*.symbol_kind=*/{},
-      /*.constraint_count=*/{},
-      /*.operand_descriptor_count=*/{},
-      /*.control_flow_flags=*/{},
-      /*.control_flow_reserved=*/{},
-      /*.successor_selector_operand_index=*/{},
-      /*.canonicalize=*/{},
-      /*.infer_facts=*/{},
-      /*.effective_traits=*/{},
-      /*.attr_descriptors=*/{},
-      /*.operand_descriptors=*/{},
-      /*.type_transfer=*/{},
-      /*.result_descriptors=*/{},
-      /*.region_descriptors=*/{},
-      /*.constraints=*/{},
-      /*.verify=*/{},
-      /*.name=*/kBadConvergentName,
-  };
-  ExpectBadTraitDiagnostic(&kBadConvergentVtable, "bad.conv",
-                           "SAFE_TO_SPECULATE", "CONVERGENT");
 }
 
 //===----------------------------------------------------------------------===//
@@ -548,6 +458,151 @@ TEST_F(VerifyTest, ValidAddiPasses) {
   TerminateFunc();
   auto result = Verify();
   EXPECT_EQ(result.error_count, 0u);
+}
+
+TEST_F(VerifyTest, ScopedEnumsRequireExplicitAttributeDescriptors) {
+  loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  EnterTestFunc(nullptr, 0, nullptr);
+
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_scoped_enum(0),
+                                          i32_type, LOOM_LOCATION_UNKNOWN,
+                                          &op));
+
+  TerminateFunc();
+  DiagnosticCapture capture;
+  auto result = VerifyStructured(&capture);
+  EXPECT_GT(result.error_count, 0u);
+  const CapturedDiagnostic* entry =
+      FindDiagnostic(capture, loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 5));
+  ASSERT_NE(entry, nullptr) << "Expected TYPE/005 attribute-kind diagnostic";
+  EXPECT_EQ(GetStringParam(*entry, 0), "value");
+  ExpectU32Param(*entry, 1, LOOM_ATTR_SCOPED_ENUM);
+  ExpectU32Param(*entry, 2, LOOM_ATTR_ANY);
+}
+
+TEST_F(VerifyTest, EnumArraysRequireExplicitAttributeDescriptors) {
+  EnterTestFunc(nullptr, 0, nullptr);
+
+  const uint8_t values[] = {
+      LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_LOW,
+  };
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(
+      &builder_, loom_attr_enum_array(values, (uint16_t)IREE_ARRAYSIZE(values)),
+      loom_type_scalar(LOOM_SCALAR_TYPE_I32), LOOM_LOCATION_UNKNOWN, &op));
+
+  TerminateFunc();
+  DiagnosticCapture capture;
+  auto result = VerifyStructured(&capture);
+  EXPECT_GT(result.error_count, 0u);
+  const CapturedDiagnostic* entry =
+      FindDiagnostic(capture, loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 5));
+  ASSERT_NE(entry, nullptr) << "Expected TYPE/005 attribute-kind diagnostic";
+  EXPECT_EQ(GetStringParam(*entry, 0), "value");
+  ExpectU32Param(*entry, 1, LOOM_ATTR_ENUM_ARRAY);
+  ExpectU32Param(*entry, 2, LOOM_ATTR_ANY);
+}
+
+TEST_F(VerifyTest, SymbolArraysRequireExplicitAttributeDescriptors) {
+  EnterTestFunc(nullptr, 0, nullptr);
+
+  loom_symbol_ref_t refs[] = {{0, 0}};
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(
+      &builder_, loom_attr_symbol_array(refs, (uint16_t)IREE_ARRAYSIZE(refs)),
+      loom_type_scalar(LOOM_SCALAR_TYPE_I32), LOOM_LOCATION_UNKNOWN, &op));
+
+  TerminateFunc();
+  DiagnosticCapture capture;
+  auto result = VerifyStructured(&capture);
+  EXPECT_GT(result.error_count, 0u);
+  const CapturedDiagnostic* entry =
+      FindDiagnostic(capture, loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 5));
+  ASSERT_NE(entry, nullptr) << "Expected TYPE/005 attribute-kind diagnostic";
+  EXPECT_EQ(GetStringParam(*entry, 0), "value");
+  ExpectU32Param(*entry, 1, LOOM_ATTR_SYMBOL_ARRAY);
+  ExpectU32Param(*entry, 2, LOOM_ATTR_ANY);
+}
+
+TEST_F(VerifyTest, ParameterizedAttrArraysRequireExplicitAttributeDescriptors) {
+  EnterTestFunc(nullptr, 0, nullptr);
+
+  loom_attribute_t tile = loom_attr_absent();
+  IREE_ASSERT_OK(loom_test_tile_attr_make(module_, 8, &tile));
+  loom_attribute_t values[] = {tile};
+  loom_attribute_t array = loom_attr_absent();
+  IREE_ASSERT_OK(loom_module_make_parameterized_attr_array(
+      module_,
+      loom_make_parameterized_attr_array(values, IREE_ARRAYSIZE(values)),
+      &array));
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(
+      &builder_, array, loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+      LOOM_LOCATION_UNKNOWN, &op));
+
+  TerminateFunc();
+  DiagnosticCapture capture;
+  auto result = VerifyStructured(&capture);
+  EXPECT_GT(result.error_count, 0u);
+  const CapturedDiagnostic* entry =
+      FindDiagnostic(capture, loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 5));
+  ASSERT_NE(entry, nullptr) << "Expected TYPE/005 attribute-kind diagnostic";
+  EXPECT_EQ(GetStringParam(*entry, 0), "value");
+  ExpectU32Param(*entry, 1, LOOM_ATTR_PARAMETERIZED_ARRAY);
+  ExpectU32Param(*entry, 2, LOOM_ATTR_ANY);
+}
+
+TEST_F(VerifyTest, EnumArraysPreserveValuesAndPresentEmpty) {
+  EnterTestFunc(nullptr, 0, nullptr);
+  uint8_t required_values[] = {
+      LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_LOW,
+      LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_HIGH,
+      LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_LOW,
+  };
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_test_enum_array_attrs_build(
+      &builder_, LOOM_TEST_ENUM_ARRAY_ATTRS_BUILD_FLAG_HAS_OPTIONAL_VALUES,
+      loom_make_enum_array(required_values, IREE_ARRAYSIZE(required_values)),
+      loom_enum_array_empty(), loom_named_attr_slice_empty(),
+      LOOM_LOCATION_UNKNOWN, &op));
+  required_values[0] = 0;
+
+  loom_enum_array_t required = loom_test_enum_array_attrs_required_values(op);
+  EXPECT_EQ(required.count, 3u);
+  EXPECT_EQ(required.values[0], LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_LOW);
+  EXPECT_EQ(required.values[1],
+            LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_HIGH);
+  EXPECT_EQ(required.values[2], LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_LOW);
+  EXPECT_FALSE(loom_attr_is_absent(loom_op_attrs(op)[1]));
+  EXPECT_EQ(loom_op_attrs(op)[1].kind, LOOM_ATTR_ENUM_ARRAY);
+  EXPECT_EQ(loom_test_enum_array_attrs_optional_values(op).count, 0u);
+
+  TerminateFunc();
+  auto result = Verify();
+  EXPECT_EQ(result.error_count, 0u);
+}
+
+TEST_F(VerifyTest, ClosedEnumArrayRejectsUndeclaredValues) {
+  EnterTestFunc(nullptr, 0, nullptr);
+  const uint8_t required_values[] = {42};
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_test_enum_array_attrs_build(
+      &builder_, /*build_flags=*/0,
+      loom_make_enum_array(required_values, IREE_ARRAYSIZE(required_values)),
+      loom_enum_array_empty(), loom_named_attr_slice_empty(),
+      LOOM_LOCATION_UNKNOWN, &op));
+
+  TerminateFunc();
+  DiagnosticCapture capture;
+  auto result = VerifyStructured(&capture);
+  EXPECT_GT(result.error_count, 0u);
+  const CapturedDiagnostic* entry = FindDiagnostic(
+      capture, loom_error_def_lookup(LOOM_ERROR_DOMAIN_STRUCTURE, 10));
+  ASSERT_NE(entry, nullptr)
+      << "Expected STRUCTURE/010 undeclared-enum diagnostic";
+  EXPECT_EQ(GetStringParam(*entry, 0), "required_values");
+  ExpectU32Param(*entry, 1, 42u);
 }
 
 TEST_F(VerifyTest, RejectsPredicateArityMismatch) {
@@ -590,7 +645,7 @@ TEST_F(VerifyTest, LoopBodyMissingMaterializedTerminatorFails) {
 
   loom_op_t* loop_op = nullptr;
   IREE_ASSERT_OK(loom_test_loop_build(&builder_, args[0], args[1], args[2],
-                                      nullptr, 0, nullptr, 0, nullptr, 0,
+                                      nullptr, 0, nullptr, 0,
                                       LOOM_LOCATION_UNKNOWN, &loop_op));
   ASSERT_NE(loop_op, nullptr);
   loom_region_t* body = loom_test_loop_body(loop_op);
@@ -607,6 +662,60 @@ TEST_F(VerifyTest, LoopBodyMissingMaterializedTerminatorFails) {
       << "Expected STRUCTURE/005 missing-terminator diagnostic";
   EXPECT_EQ(GetStringParam(*entry, 0), "test.loop");
   ExpectU32Param(*entry, 1, 0);
+}
+
+TEST_F(VerifyTest, WrongRegionTerminatorKindFails) {
+  EnterTestFunc(nullptr, 0, nullptr);
+  loom_op_t* terminator_op = nullptr;
+  IREE_ASSERT_OK(loom_test_implicit_yield_build(
+      &builder_, LOOM_LOCATION_UNKNOWN, &terminator_op));
+
+  DiagnosticCapture structured;
+  auto result = VerifyStructured(&structured);
+  EXPECT_GT(result.error_count, 0u);
+  const CapturedDiagnostic* entry = FindDiagnostic(
+      structured, loom_error_def_lookup(LOOM_ERROR_DOMAIN_STRUCTURE, 18));
+  ASSERT_NE(entry, nullptr)
+      << "Expected STRUCTURE/018 wrong-terminator diagnostic";
+  EXPECT_EQ(GetStringParam(*entry, 0), "test.func");
+  ExpectU32Param(*entry, 1, 0);
+  EXPECT_EQ(GetStringParam(*entry, 2), "test.yield");
+  EXPECT_EQ(GetStringParam(*entry, 3), "test.implicit_yield");
+}
+
+TEST_F(VerifyTest, SingleBlockRegionRejectsAdditionalBlock) {
+  loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_type_t arg_types[] = {index_type, index_type, index_type};
+  loom_value_id_t args[3];
+  EnterTestFunc(arg_types, IREE_ARRAYSIZE(arg_types), args);
+
+  loom_op_t* loop_op = nullptr;
+  IREE_ASSERT_OK(loom_test_loop_build(&builder_, args[0], args[1], args[2],
+                                      nullptr, 0, nullptr, 0,
+                                      LOOM_LOCATION_UNKNOWN, &loop_op));
+  loom_region_t* body = loom_test_loop_body(loop_op);
+  loom_builder_ip_t saved = loom_builder_enter_region(&builder_, loop_op, body);
+  loom_op_t* yield_op = nullptr;
+  IREE_ASSERT_OK(loom_test_yield_build(&builder_, nullptr, 0,
+                                       LOOM_LOCATION_UNKNOWN, &yield_op));
+  loom_block_t* additional_block = nullptr;
+  IREE_ASSERT_OK(loom_region_append_block(module_, body, &additional_block));
+  loom_builder_set_block(&builder_, additional_block);
+  IREE_ASSERT_OK(loom_test_yield_build(&builder_, nullptr, 0,
+                                       LOOM_LOCATION_UNKNOWN, &yield_op));
+  loom_builder_restore(&builder_, saved);
+  TerminateFunc();
+
+  DiagnosticCapture structured;
+  auto result = VerifyStructured(&structured);
+  EXPECT_GT(result.error_count, 0u);
+  const CapturedDiagnostic* entry = FindDiagnostic(
+      structured, loom_error_def_lookup(LOOM_ERROR_DOMAIN_STRUCTURE, 6));
+  ASSERT_NE(entry, nullptr)
+      << "Expected STRUCTURE/006 single-block-region diagnostic";
+  EXPECT_EQ(GetStringParam(*entry, 0), "test.loop");
+  ExpectU32Param(*entry, 1, 0);
+  ExpectU32Param(*entry, 2, 2);
 }
 
 TEST_F(VerifyTest, WrongOperandCountDetected) {
@@ -987,7 +1096,7 @@ TEST_F(VerifyTest, LowFuncHasRegisterBlockArgConstraint) {
 TEST_F(VerifyTest, LowFuncRejectsNonRegisterBlockArg) {
   const char kSource[] =
       "test.target<low_core> @gfx1100\n"
-      "low.func.def target(@gfx1100) @bad(%input: i32) {\n"
+      "low.func.def target<test.low.core>(@gfx1100) @bad(%input: i32) {\n"
       "  low.return\n"
       "}\n";
   loom_module_t* parsed_module =
@@ -1966,6 +2075,201 @@ TEST_F(VerifyTest, RejectsNonLocalSymbolRef) {
   ASSERT_NE(entry, nullptr) << "Expected SYMBOL/004 non-local symbol ref error";
   ExpectU32Param(*entry, 0, 1);
   ExpectFieldRefParam(*entry, 0, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, 0);
+}
+
+TEST_F(VerifyTest, RejectsEveryUnresolvedSymbolArrayElement) {
+  EnterTestFunc(nullptr, 0, nullptr);
+  loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_builder_intern_string(&builder_, IREE_SV("missing"), &name_id));
+  uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
+  loom_symbol_ref_t ref = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+  loom_symbol_ref_t dependencies[] = {ref, ref};
+
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_test_symbol_array_attrs_build(
+      &builder_, 0,
+      loom_make_symbol_ref_array(dependencies, IREE_ARRAYSIZE(dependencies)),
+      loom_symbol_ref_array_empty(), LOOM_LOCATION_UNKNOWN, &op));
+  TerminateFunc();
+
+  DiagnosticCapture structured;
+  auto result = VerifyStructured(&structured);
+  EXPECT_EQ(result.error_count, 2u);
+  ASSERT_EQ(structured.diagnostics.size(), 2u);
+  for (const CapturedDiagnostic& diagnostic : structured.diagnostics) {
+    ExpectError(diagnostic, loom_error_def_lookup(LOOM_ERROR_DOMAIN_SYMBOL, 2),
+                LOOM_EMITTER_VERIFIER);
+    EXPECT_EQ(GetStringParam(diagnostic, 0), "missing");
+    ExpectFieldRefParam(diagnostic, 0, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, 0);
+  }
+}
+
+TEST_F(VerifyTest, AcceptsUnresolvedAvailabilitySymbolArrayElement) {
+  EnterTestFunc(nullptr, 0, nullptr);
+  loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_builder_intern_string(&builder_, IREE_SV("provider"), &name_id));
+  uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
+  loom_symbol_ref_t available[] = {{/*.module_id=*/0,
+                                    /*.symbol_id=*/symbol_id}};
+
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_test_symbol_array_attrs_build(
+      &builder_, LOOM_TEST_SYMBOL_ARRAY_ATTRS_BUILD_FLAG_HAS_AVAILABLE,
+      loom_symbol_ref_array_empty(),
+      loom_make_symbol_ref_array(available, IREE_ARRAYSIZE(available)),
+      LOOM_LOCATION_UNKNOWN, &op));
+  TerminateFunc();
+
+  auto result = Verify();
+  EXPECT_EQ(result.error_count, 0u)
+      << (collector_.errors.empty() ? "" : collector_.errors[0]);
+}
+
+TEST_F(VerifyTest, AcceptsUnconstrainedAvailabilitySymbolTarget) {
+  EnterTestFunc(nullptr, 0, nullptr);
+  loom_symbol_ref_t available[] = {{/*.module_id=*/0,
+                                    /*.symbol_id=*/0}};
+
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_test_symbol_array_attrs_build(
+      &builder_, LOOM_TEST_SYMBOL_ARRAY_ATTRS_BUILD_FLAG_HAS_AVAILABLE,
+      loom_symbol_ref_array_empty(),
+      loom_make_symbol_ref_array(available, IREE_ARRAYSIZE(available)),
+      LOOM_LOCATION_UNKNOWN, &op));
+  TerminateFunc();
+
+  auto result = Verify();
+  EXPECT_EQ(result.error_count, 0u)
+      << (collector_.errors.empty() ? "" : collector_.errors[0]);
+}
+
+TEST_F(VerifyTest, AcceptsModuleScopeOperationAtTopLevel) {
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(
+      loom_test_module_metadata_build(&builder_, LOOM_LOCATION_UNKNOWN, &op));
+
+  auto result = Verify();
+  EXPECT_EQ(result.error_count, 0u)
+      << (collector_.errors.empty() ? "" : collector_.errors[0]);
+}
+
+TEST_F(VerifyTest, RejectsNestedModuleScopeOperation) {
+  EnterTestFunc(nullptr, 0, nullptr);
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(
+      loom_test_module_metadata_build(&builder_, LOOM_LOCATION_UNKNOWN, &op));
+  TerminateFunc();
+
+  DiagnosticCapture capture;
+  auto result = VerifyStructured(&capture);
+  EXPECT_EQ(result.error_count, 1u);
+  const CapturedDiagnostic* entry = FindDiagnostic(
+      capture, loom_error_def_lookup(LOOM_ERROR_DOMAIN_STRUCTURE, 49));
+  ASSERT_NE(entry, nullptr);
+  EXPECT_EQ(GetStringParam(*entry, 0), "test.module_metadata");
+}
+
+TEST_F(VerifyTest, AcceptsSymbolsNestedInParameterizedValues) {
+  const char* source =
+      "test.record @target\n"
+      "test.func @main("
+      "%arg: test.matrix<bf16, scope = subgroup, rows = 16, target = "
+      "@target>) {\n"
+      "  test.parameterized_attr "
+      "#test.options<mode = fast, target = @target>\n"
+      "  test.yield\n"
+      "}\n";
+  loom_module_t* parsed_module =
+      ParseSourceModule(source, "parameterized_symbols.loom");
+  ASSERT_NE(parsed_module, nullptr);
+
+  DiagnosticCapture capture;
+  auto result = VerifyParsedSourceModuleStructured(
+      parsed_module, source, "parameterized_symbols.loom", &capture);
+  EXPECT_EQ(result.error_count, 0u);
+  EXPECT_TRUE(capture.diagnostics.empty());
+
+  loom_module_free(parsed_module);
+}
+
+TEST_F(VerifyTest, RejectsWrongSymbolKindInParameterizedAttribute) {
+  const char* source =
+      "test.func @main() {\n"
+      "  test.parameterized_attr "
+      "#test.options<mode = fast, target = @main>\n"
+      "  test.yield\n"
+      "}\n";
+  loom_module_t* parsed_module =
+      ParseSourceModule(source, "parameterized_attr_symbol.loom");
+  ASSERT_NE(parsed_module, nullptr);
+
+  DiagnosticCapture capture;
+  auto result = VerifyParsedSourceModuleStructured(
+      parsed_module, source, "parameterized_attr_symbol.loom", &capture);
+  EXPECT_EQ(result.error_count, 1u);
+  const CapturedDiagnostic* entry = FindDiagnostic(
+      capture, loom_error_def_lookup(LOOM_ERROR_DOMAIN_SYMBOL, 3));
+  ASSERT_NE(entry, nullptr);
+  EXPECT_EQ(GetStringParam(*entry, 0), "main");
+  EXPECT_EQ(GetStringParam(*entry, 2), "record");
+  ExpectFieldRefParam(*entry, 0, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, 0);
+
+  loom_module_free(parsed_module);
+}
+
+TEST_F(VerifyTest, RejectsWrongSymbolKindInSymbolArray) {
+  const char* source =
+      "test.func @main() {\n"
+      "  test.symbol_array_attrs [@main, @main]\n"
+      "  test.yield\n"
+      "}\n";
+  loom_module_t* parsed_module =
+      ParseSourceModule(source, "symbol_array_kind.loom");
+  ASSERT_NE(parsed_module, nullptr);
+
+  DiagnosticCapture capture;
+  auto result = VerifyParsedSourceModuleStructured(
+      parsed_module, source, "symbol_array_kind.loom", &capture);
+  EXPECT_EQ(result.error_count, 2u);
+  ASSERT_EQ(capture.diagnostics.size(), 2u);
+  for (const CapturedDiagnostic& diagnostic : capture.diagnostics) {
+    ExpectError(diagnostic, loom_error_def_lookup(LOOM_ERROR_DOMAIN_SYMBOL, 3),
+                LOOM_EMITTER_VERIFIER);
+    EXPECT_EQ(GetStringParam(diagnostic, 0), "main");
+    EXPECT_EQ(GetStringParam(diagnostic, 2), "record");
+    ExpectFieldRefParam(diagnostic, 0, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, 0);
+  }
+
+  loom_module_free(parsed_module);
+}
+
+TEST_F(VerifyTest, RejectsWrongSymbolKindInParameterizedType) {
+  const char* source =
+      "test.func @main("
+      "%arg: test.matrix<bf16, scope = subgroup, rows = 16, target = "
+      "@main>) {\n"
+      "  test.yield\n"
+      "}\n";
+  loom_module_t* parsed_module =
+      ParseSourceModule(source, "parameterized_type_symbol.loom");
+  ASSERT_NE(parsed_module, nullptr);
+
+  DiagnosticCapture capture;
+  auto result = VerifyParsedSourceModuleStructured(
+      parsed_module, source, "parameterized_type_symbol.loom", &capture);
+  EXPECT_EQ(result.error_count, 1u);
+  const CapturedDiagnostic* entry = FindDiagnostic(
+      capture, loom_error_def_lookup(LOOM_ERROR_DOMAIN_SYMBOL, 3));
+  ASSERT_NE(entry, nullptr);
+  EXPECT_EQ(GetStringParam(*entry, 0), "main");
+  EXPECT_EQ(GetStringParam(*entry, 2), "record");
+  ExpectNoFieldRefParam(*entry, 0);
+
+  loom_module_free(parsed_module);
 }
 
 TEST_F(VerifyTest, RejectsDuplicateSymbolDefinition) {

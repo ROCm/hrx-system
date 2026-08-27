@@ -61,6 +61,17 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "iree_adapter_test",
+    srcs = ["iree_adapter_test.cc"],
+    deps = [
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "artifact_test",
     srcs = ["artifact_test.cc"],
     deps = [
@@ -113,19 +124,48 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "link_dependency_test",
+    srcs = ["link_dependency_test.cc"],
+    deps = [
+        ":test_util",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/test/testdata:link_dependency",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "link_provider_roots_test",
+    srcs = ["link_provider_roots_test.cc"],
+    deps = [
+        ":test_util",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/link/testdata:provider_roots",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "link_test",
     srcs = ["link_test.cc"],
     deps = [
         ":test_util",
         "//loom/binding/c:loomc",
+        "//loom/binding/c/test/testdata:link_target_specialization",
         "//loom/src/loom/format/bytecode:writer",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/format/text:printer",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_registry",
         "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:profile",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target:types",
+        "//loom/src/loom/target/test:target_record_table",
         "//loom/src/loom/verify",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -207,13 +247,20 @@ loom_cc_test(
 loom_cc_test(
     name = "target_test",
     srcs = ["target_test.cc"],
-    target_compatible_with = LOOMC_TARGET_SPIRV_COMPATIBLE_WITH,
     deps = [
         ":test_util",
         "//loom/binding/c:loomc",
-        "//loom/binding/c/target/spirv",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target:profile",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/test:target_record_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/io:byte_sequence",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
     ],
 )
 

@@ -52,15 +52,15 @@ func.def @stronger_dominated_assertion_survives(%n: index) -> (index) {
 // Exact float facts prove matching float assertions, so no runtime boundary is
 // needed.
 func.def @proven_exact_float_assertion_folds() -> (f32) {
-  %two = scalar.constant 2.0 : f32
-  %checked = sanitizer.assert.value %two [finite(%two)] : f32
+  %c2 = scalar.constant 2.0 : f32
+  %checked = sanitizer.assert.value %c2 [finite(%c2)] : f32
   func.return %checked : f32
 }
 
 // ----
 func.def @proven_exact_float_assertion_folds() -> (f32) {
-  %two = scalar.constant 2.0 : f32
-  func.return %two : f32
+  %c2 = scalar.constant 2.0 : f32
+  func.return %c2 : f32
 }
 
 // ====

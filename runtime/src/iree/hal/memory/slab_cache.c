@@ -554,12 +554,11 @@ static void iree_hal_slab_cache_query_stats(
 
 static void iree_hal_slab_cache_query_properties(
     const iree_hal_slab_provider_t* base_provider,
-    iree_hal_memory_type_t* out_memory_type,
-    iree_hal_buffer_usage_t* out_supported_usage) {
+    iree_hal_slab_provider_properties_t* out_properties) {
   const iree_hal_slab_cache_t* cache =
       (const iree_hal_slab_cache_t*)base_provider;
   iree_hal_slab_provider_query_properties(cache->inner_provider,
-                                          out_memory_type, out_supported_usage);
+                                          out_properties);
 }
 
 //===----------------------------------------------------------------------===//

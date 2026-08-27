@@ -16,18 +16,24 @@ package(
 )
 
 loom_cc_library(
+    name = "binding_descriptor",
+    hdrs = ["binding_descriptor.h"],
+    visibility = [
+        "//loom/src/loom/target/emit/llvmir/amdgpu:__pkg__",
+    ],
+)
+
+loom_cc_library(
     name = "kernel_abi",
     srcs = ["kernel_abi.c"],
-    hdrs = [
-        "binding_descriptor.h",
-        "kernel_abi.h",
-    ],
+    hdrs = ["kernel_abi.h"],
     visibility = [
         "//loom/src/loom/target/arch/amdgpu:__pkg__",
         "//loom/src/loom/target/arch/amdgpu/lower:__pkg__",
         "//loom/src/loom/target/emit/native/amdgpu:__pkg__",
     ],
     deps = [
+        ":binding_descriptor",
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low:function",
         "//loom/src/loom/codegen/low:target_binding",
@@ -53,6 +59,7 @@ loom_cc_library(
         "//loom/src/loom/target/emit/native/amdgpu:__pkg__",
     ],
     deps = [
+        ":binding_descriptor",
         ":kernel_abi",
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low:builder",
@@ -62,6 +69,7 @@ loom_cc_library(
         "//loom/src/loom/ops/low",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/amdgpu:buffer_resource",
         "//loom/src/loom/target/arch/amdgpu:target_info",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//runtime/src/iree/base",
@@ -85,7 +93,8 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/pass:types",
-        "//loom/src/loom/target/arch/amdgpu/ops",
+        "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target/arch/amdgpu:facts",
         "//runtime/src/iree/base",
     ],
 )

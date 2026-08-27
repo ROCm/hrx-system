@@ -1,0 +1,3 @@
+check.case public @callee {
+  check.return
+}

@@ -11,47 +11,20 @@
 #include "loom/error/error_catalog.h"
 #include "loom/ir/module.h"
 #include "loom/ops/target/facts.h"
+#include "loom/target/facts_builder.h"
 #include "loom/target/launch.h"
 
 bool loom_target_function_contract_bundles_compatible(
-    const loom_target_bundle_t* module_bundle,
-    const loom_target_bundle_t* selected_bundle) {
-  IREE_ASSERT_ARGUMENT(module_bundle);
-  IREE_ASSERT_ARGUMENT(selected_bundle);
-  return module_bundle->snapshot->codegen_format ==
-             selected_bundle->snapshot->codegen_format &&
-         module_bundle->snapshot->artifact_format ==
-             selected_bundle->snapshot->artifact_format &&
-         iree_string_view_equal(module_bundle->config->contract_set_key,
-                                selected_bundle->config->contract_set_key);
-}
-
-void loom_target_function_contract_apply_compatible_selection(
-    const loom_target_bundle_t* selected_bundle,
-    loom_target_bundle_storage_t* bundle_storage) {
-  IREE_ASSERT_ARGUMENT(selected_bundle);
-  IREE_ASSERT_ARGUMENT(bundle_storage);
-  const iree_string_view_t authored_bundle_name = bundle_storage->bundle.name;
-  const iree_string_view_t authored_snapshot_name =
-      bundle_storage->snapshot.name;
-  const iree_string_view_t authored_config_name = bundle_storage->config.name;
-  const iree_string_view_t authored_contract_set_key =
-      bundle_storage->config.contract_set_key;
-  const uint32_t authored_subgroup_size =
-      bundle_storage->snapshot.subgroup_size;
-  bundle_storage->snapshot = *selected_bundle->snapshot;
-  bundle_storage->snapshot.name = authored_snapshot_name;
-  if (authored_subgroup_size != 0) {
-    bundle_storage->snapshot.subgroup_size = authored_subgroup_size;
-  }
-  bundle_storage->config.contract_feature_bits =
-      selected_bundle->config->contract_feature_bits;
-  bundle_storage->config.name = authored_config_name;
-  bundle_storage->config.contract_set_key = authored_contract_set_key;
-  bundle_storage->bundle.name = authored_bundle_name;
-  bundle_storage->bundle.snapshot = &bundle_storage->snapshot;
-  bundle_storage->bundle.export_plan = &bundle_storage->export_plan;
-  bundle_storage->bundle.config = &bundle_storage->config;
+    const loom_target_bundle_t* effective_bundle,
+    const loom_target_bundle_t* requirement_bundle) {
+  IREE_ASSERT_ARGUMENT(effective_bundle);
+  IREE_ASSERT_ARGUMENT(requirement_bundle);
+  return effective_bundle->snapshot->codegen_format ==
+             requirement_bundle->snapshot->codegen_format &&
+         effective_bundle->snapshot->artifact_format ==
+             requirement_bundle->snapshot->artifact_format &&
+         iree_string_view_equal(effective_bundle->config->contract_set_key,
+                                requirement_bundle->config->contract_set_key);
 }
 
 static iree_string_view_t loom_target_function_contract_string_from_id(
@@ -364,21 +337,34 @@ iree_status_t loom_target_function_contract_resolve(
     const loom_module_t* module, loom_symbol_fact_table_t* fact_table,
     const loom_func_symbol_facts_t* func_facts,
     iree_diagnostic_emitter_t diagnostic_emitter, bool* out_valid,
+    const loom_target_facts_t** out_target_facts,
     loom_target_bundle_storage_t* out_bundle_storage) {
+  if (out_target_facts != NULL) {
+    *out_target_facts = NULL;
+  }
   const loom_target_symbol_facts_t* target = NULL;
   IREE_RETURN_IF_ERROR(loom_target_function_contract_lookup_target(
       module, fact_table, func_facts, diagnostic_emitter, out_valid, &target));
   if (!*out_valid) {
     return iree_ok_status();
   }
+  if (out_target_facts != NULL) {
+    *out_target_facts = target->projection;
+  }
   return loom_target_function_contract_resolve_from_bundle(
-      module, func_facts, target->name, &target->storage.bundle,
+      module, func_facts, target->name, &target->projection->storage.bundle,
       diagnostic_emitter, out_valid, out_bundle_storage);
 }
 
-iree_status_t loom_target_function_contract_resolve_from_bundle(
+typedef enum loom_target_function_contract_scope_e {
+  LOOM_TARGET_FUNCTION_CONTRACT_SCOPE_ARTIFACT = 0,
+  LOOM_TARGET_FUNCTION_CONTRACT_SCOPE_MODULE_INTERNAL = 1,
+} loom_target_function_contract_scope_t;
+
+static iree_status_t loom_target_function_contract_resolve_scoped_bundle(
     const loom_module_t* module, const loom_func_symbol_facts_t* func_facts,
     iree_string_view_t target_name, const loom_target_bundle_t* base_bundle,
+    loom_target_function_contract_scope_t scope,
     iree_diagnostic_emitter_t diagnostic_emitter, bool* out_valid,
     loom_target_bundle_storage_t* out_bundle_storage) {
   memset(out_bundle_storage, 0, sizeof(*out_bundle_storage));
@@ -393,10 +379,24 @@ iree_status_t loom_target_function_contract_resolve_from_bundle(
   loom_target_bundle_storage_rebind(out_bundle_storage);
   out_bundle_storage->export_plan.name = func_facts->name;
   out_bundle_storage->export_plan.export_symbol = iree_string_view_empty();
-  if (func_facts->has_abi) {
+  if (scope == LOOM_TARGET_FUNCTION_CONTRACT_SCOPE_MODULE_INTERNAL) {
+    const loom_target_hal_kernel_abi_t default_hal_kernel =
+        out_bundle_storage->export_plan.hal_kernel;
+    out_bundle_storage->export_plan.abi_kind = LOOM_TARGET_ABI_UNKNOWN;
+    out_bundle_storage->export_plan.linkage = LOOM_TARGET_LINKAGE_DEFAULT;
+    out_bundle_storage->export_plan.hal_kernel =
+        (loom_target_hal_kernel_abi_t){0};
+    if (func_facts->has_abi) {
+      out_bundle_storage->export_plan.abi_kind = func_facts->abi_kind;
+      if (func_facts->abi_kind == LOOM_TARGET_ABI_HAL_KERNEL) {
+        out_bundle_storage->export_plan.hal_kernel = default_hal_kernel;
+      }
+    }
+  } else if (func_facts->has_abi) {
     out_bundle_storage->export_plan.abi_kind = func_facts->abi_kind;
   }
-  if (out_bundle_storage->export_plan.abi_kind == LOOM_TARGET_ABI_UNKNOWN) {
+  if (scope == LOOM_TARGET_FUNCTION_CONTRACT_SCOPE_ARTIFACT &&
+      out_bundle_storage->export_plan.abi_kind == LOOM_TARGET_ABI_UNKNOWN) {
     return loom_target_function_contract_reject_constraint(
         diagnostic_emitter, func_facts, target_name, IREE_SV("abi.concrete"),
         out_valid);
@@ -424,5 +424,123 @@ iree_status_t loom_target_function_contract_resolve_from_bundle(
     out_bundle_storage->export_plan.linkage = func_facts->export_linkage;
   }
   *out_valid = true;
+  return iree_ok_status();
+}
+
+iree_status_t loom_target_function_contract_resolve_from_bundle(
+    const loom_module_t* module, const loom_func_symbol_facts_t* func_facts,
+    iree_string_view_t target_name, const loom_target_bundle_t* base_bundle,
+    iree_diagnostic_emitter_t diagnostic_emitter, bool* out_valid,
+    loom_target_bundle_storage_t* out_bundle_storage) {
+  return loom_target_function_contract_resolve_scoped_bundle(
+      module, func_facts, target_name, base_bundle,
+      LOOM_TARGET_FUNCTION_CONTRACT_SCOPE_ARTIFACT, diagnostic_emitter,
+      out_valid, out_bundle_storage);
+}
+
+static void loom_target_function_contract_record_explicit_fields(
+    const loom_func_symbol_facts_t* func_facts,
+    loom_target_facts_t* function_target_facts) {
+  if (func_facts->has_abi) {
+    loom_target_fact_field_set_insert(&function_target_facts->explicit_fields,
+                                      LOOM_TARGET_FACT_FIELD_ABI);
+  }
+  if (!iree_string_view_is_empty(func_facts->export_symbol)) {
+    loom_target_fact_field_set_insert(&function_target_facts->explicit_fields,
+                                      LOOM_TARGET_FACT_FIELD_EXPORT_SYMBOL);
+  }
+  if (func_facts->has_export_linkage) {
+    loom_target_fact_field_set_insert(&function_target_facts->explicit_fields,
+                                      LOOM_TARGET_FACT_FIELD_LINKAGE);
+  }
+}
+
+static iree_status_t loom_target_function_contract_refine_scoped_facts(
+    const loom_module_t* module, const loom_func_symbol_facts_t* func_facts,
+    iree_string_view_t target_name, const loom_target_facts_t* base_facts,
+    loom_target_function_contract_scope_t scope,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    bool* out_valid, const loom_target_facts_t** out_facts) {
+  *out_valid = false;
+  *out_facts = NULL;
+
+  loom_target_bundle_storage_t bundle_storage = {0};
+  IREE_RETURN_IF_ERROR(loom_target_function_contract_resolve_scoped_bundle(
+      module, func_facts, target_name, &base_facts->storage.bundle, scope,
+      diagnostic_emitter, out_valid, &bundle_storage));
+  if (!*out_valid) {
+    return iree_ok_status();
+  }
+
+  loom_target_facts_t* function_target_facts = NULL;
+  IREE_RETURN_IF_ERROR(loom_target_facts_builder_clone(base_facts, arena,
+                                                       &function_target_facts));
+  loom_target_facts_builder_replace_bundle(&bundle_storage.bundle,
+                                           function_target_facts);
+  loom_target_function_contract_record_explicit_fields(func_facts,
+                                                       function_target_facts);
+  *out_facts = function_target_facts;
+  return iree_ok_status();
+}
+
+iree_status_t loom_target_function_contract_refine_facts(
+    const loom_module_t* module, const loom_func_symbol_facts_t* func_facts,
+    iree_string_view_t target_name, const loom_target_facts_t* base_facts,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    bool* out_valid, const loom_target_facts_t** out_facts) {
+  return loom_target_function_contract_refine_scoped_facts(
+      module, func_facts, target_name, base_facts,
+      LOOM_TARGET_FUNCTION_CONTRACT_SCOPE_ARTIFACT, diagnostic_emitter, arena,
+      out_valid, out_facts);
+}
+
+iree_status_t loom_target_function_contract_refine_internal_facts(
+    const loom_module_t* module, const loom_func_symbol_facts_t* func_facts,
+    iree_string_view_t target_name, const loom_target_facts_t* base_facts,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    bool* out_valid, const loom_target_facts_t** out_facts) {
+  return loom_target_function_contract_refine_scoped_facts(
+      module, func_facts, target_name, base_facts,
+      LOOM_TARGET_FUNCTION_CONTRACT_SCOPE_MODULE_INTERNAL, diagnostic_emitter,
+      arena, out_valid, out_facts);
+}
+
+iree_status_t loom_target_function_contract_resolve_facts(
+    const loom_module_t* module, loom_symbol_fact_table_t* fact_table,
+    const loom_func_symbol_facts_t* func_facts,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    bool* out_valid, const loom_target_facts_t** out_facts) {
+  *out_valid = false;
+  *out_facts = NULL;
+
+  const loom_target_symbol_facts_t* target = NULL;
+  IREE_RETURN_IF_ERROR(loom_target_function_contract_lookup_target(
+      module, fact_table, func_facts, diagnostic_emitter, out_valid, &target));
+  if (!*out_valid) {
+    return iree_ok_status();
+  }
+  return loom_target_function_contract_refine_facts(
+      module, func_facts, target->name, target->projection, diagnostic_emitter,
+      arena, out_valid, out_facts);
+}
+
+iree_status_t loom_target_function_contract_refine_hal_workgroup_size(
+    const loom_func_symbol_facts_t* func_facts, iree_string_view_t target_name,
+    const loom_target_workgroup_size_t* required_workgroup_size,
+    const loom_target_facts_t* base_facts,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    bool* out_valid, const loom_target_facts_t** out_facts) {
+  *out_valid = false;
+  *out_facts = NULL;
+
+  loom_target_facts_t* function_target_facts = NULL;
+  IREE_RETURN_IF_ERROR(loom_target_facts_builder_clone(base_facts, arena,
+                                                       &function_target_facts));
+  IREE_RETURN_IF_ERROR(loom_target_function_contract_apply_hal_workgroup_size(
+      func_facts, target_name, required_workgroup_size, diagnostic_emitter,
+      &function_target_facts->storage, out_valid));
+  if (*out_valid) {
+    *out_facts = function_target_facts;
+  }
   return iree_ok_status();
 }

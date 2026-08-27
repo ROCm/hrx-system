@@ -34,7 +34,7 @@ python dev.py bazel run //loom/src/loom/tools/loom-opt:loom-opt -- \
 | --- | --- | --- |
 | `#pragma unroll`, `pragma-unroll`, `loop-expansion`, `for`, `q8`, `WG64` | `scf.for ... unroll`, `unroll-scf-for`, range-fact trip count inference | `q8_block_unroll.loom` |
 | `blockIdx`, `threadIdx`, `lane`, `warp`, `wavefront` | `kernel.launch.config`, `kernel.workgroup.id`, `kernel.workitem.id`, `kernel.subgroup.*` | `q8_block_unroll.loom` |
-| `threadIdx`, `lane_id`, `warp lane`, `wavefront lane`, `SGPR`, `VGPR`, `EXEC`, `scalarized`, `lane-varying`, `uniform`, `dot operand` | value distribution facts, `test.fact_uniform`, `test.fact_lane_varying`, `test.fact_lane_predicate` | `lane_distribution.loom` |
+| `threadIdx`, `lane_id`, `warp lane`, `wavefront lane`, `SGPR`, `VGPR`, `EXEC`, `scalarized`, `lane-varying`, `uniform`, `dot operand` | value distribution facts, `test.fact_subgroup_uniform`, `test.fact_workgroup_uniform`, `test.fact_lane_varying`, `test.fact_lane_predicate` | `lane_distribution.loom` |
 | `__global__`, `restrict`, pointer casts, address arithmetic | kernel ABI `buffer`, `buffer.assume.noalias`, `buffer.view`, `index`/`offset` math | `q8_block_unroll.loom` |
 | `global_load_b32`, packed bytes, `q8`, bitfield, unpack | `vector.load`, `vector.bitunpacks<8>`, `scalar.extf`, `vector.dotf` | `q8_block_unroll.loom` |
 | `global_load_b32`, `global_load_b128`, `uint4`, adjacent scalar loads, coalescing | `vector.load -> vector<1xi32>` versus `vector.load -> vector<4xi32>` | `q8_load_width.loom` |
@@ -44,7 +44,9 @@ python dev.py bazel run //loom/src/loom/tools/loom-opt:loom-opt -- \
 | `q8`, `q4`, `u8`, `s8`, `u4`, `s4`, `v_dot4_i32_iu8`, `dp4a` | `vector.bitunpacku`, `vector.bitunpacks`, `vector.dot4i<u8s8>` | `q8_q4_signedness.loom` |
 | `q2`, `q3`, `q4`, `q5`, `q6`, split high bits, lookup tables, offset-binary, packed-dot repack | `vector.bitunpacku`, `vector.bitfield.extractu`, `vector.bitfield.insert`, `vector.table.lookup`, `vector.dot8i4` | `packed_field_contracts.loom` |
 | dynamic lower-bound unroll, missing facts | structured diagnostic, exact/range facts | `q8_hip_shaped_unroll_unresolved.loom` |
-| `#if __gfx*__`, template, macro, arch-specialization, fallback | `func.apply`, `func.template`, `target(@...)`, `priority(...)` | `target_provider_selection.loom` |
+| wave size, template, specialization, fallback | targetless `template.apply`, typed `template.def ... requires`, `#target.subgroup.size` | `target_provider_selection.loom` |
+| targetless template device function, `expf`, target math policy, inline | invocation specialization, then authoring expansion and math legalization | `template_math_legalization.loom` |
+| `__cluster_dims__`, cluster multicast, async-to-LDS, `s_wait_asynccnt`, b128 | static `cluster_size`, `kernel.async.cluster.gather`, async groups and waits | `cluster_b128_multicast.loom` |
 
 ## Lane Distribution
 
@@ -215,14 +217,14 @@ uint4 wide = *reinterpret_cast<const uint4 *>(words);
 Loom spelling:
 
 ```loom
-%input_words = buffer.view %input_noalias[%base] : buffer -> view<4xi32, #dense>
+%input_words = buffer.view %input_noalias[%base] : buffer -> view<4xi32>
 
-%w0 = vector.load %input_words[0] : view<4xi32, #dense> -> vector<1xi32>
-%w1 = vector.load %input_words[1] : view<4xi32, #dense> -> vector<1xi32>
-%w2 = vector.load %input_words[2] : view<4xi32, #dense> -> vector<1xi32>
-%w3 = vector.load %input_words[3] : view<4xi32, #dense> -> vector<1xi32>
+%w0 = vector.load %input_words[0] : view<4xi32> -> vector<1xi32>
+%w1 = vector.load %input_words[1] : view<4xi32> -> vector<1xi32>
+%w2 = vector.load %input_words[2] : view<4xi32> -> vector<1xi32>
+%w3 = vector.load %input_words[3] : view<4xi32> -> vector<1xi32>
 
-%wide = vector.load %input_words[0] : view<4xi32, #dense> -> vector<4xi32>
+%wide = vector.load %input_words[0] : view<4xi32> -> vector<4xi32>
 ```
 
 The scalar path and vector path are both correct source shapes. They are not
@@ -250,8 +252,8 @@ rg 'vector.load .*vector<(1|4)xi32>' /tmp/q8-load-width.loom
 Expected signal:
 
 ```loom
-%w0 = vector.load %input_words[0] : view<4xi32, #dense> -> vector<1xi32>
-%wide = vector.load %input_words[0] : view<4xi32, #dense> -> vector<4xi32>
+%w0 = vector.load %input_words[0] : view<4xi32> -> vector<1xi32>
+%wide = vector.load %input_words[0] : view<4xi32> -> vector<4xi32>
 ```
 
 ## Shared Memory Tile
@@ -272,14 +274,14 @@ output[lane] = scratch[63 - lane];
 Loom spelling:
 
 ```loom
-%scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
-%scratch_view = buffer.view %scratch[%base] : buffer -> view<64xi32, #dense>
+%scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
+%scratch_view = buffer.view %scratch[%base] : buffer -> view<64xi32>
 
-%loaded = vector.load %input_view[%lane] : view<64xi32, #dense> -> vector<1xi32>
-vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<64xi32, #dense>
-kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-%reversed = vector.load %scratch_view[%reverse_lane] : view<64xi32, #dense> -> vector<1xi32>
-vector.store %reversed, %output_view[%lane] : vector<1xi32>, view<64xi32, #dense>
+%loaded = vector.load %input_view[%lane] : view<64xi32> -> vector<1xi32>
+vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<64xi32>
+kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+%reversed = vector.load %scratch_view[%reverse_lane] : view<64xi32> -> vector<1xi32>
+vector.store %reversed, %output_view[%lane] : vector<1xi32>, view<64xi32>
 ```
 
 The contract is the memory space and synchronization relationship.
@@ -293,7 +295,7 @@ on cross-lane LDS traffic, not private register roundtripping.
 Proof command:
 
 ```bash
-iree-benchmark-loom shared_memory_tile.loom --dry-run
+iree-test-loom shared_memory_tile.loom --device=amdgpu
 ```
 
 Target compile evidence:
@@ -315,14 +317,14 @@ Useful queries:
 jq '{status, target_key, local:.entries.rows[0].local_memory_bytes, lds_ops:.static_instruction_mix.local_memory_count, barriers:.static_instruction_mix.barrier_count}' \
   /tmp/shared-memory-tile.compile-report.json
 
-llvm-objdump -d --mcpu=gfx1100 /tmp/shared-memory-tile.hsaco | rg 'ds_(read|write)|s_barrier'
+llvm-objdump -d --mcpu=gfx11-generic /tmp/shared-memory-tile.hsaco | rg 'ds_(read|write)|s_barrier'
 ```
 
-Expected signal: the dry run lists `case_shared_memory_tile_reverse` and
-`bench_shared_memory_tile_reverse`; the compile report records
-`local_memory_bytes` as `256` for the 64-element i32 tile, two local memory
-instructions, and one barrier. On AMDGPU targets, object disassembly should
-show LDS read/write instructions and a workgroup barrier.
+Expected signal: `case_shared_memory_tile_reverse` passes.
+
+For the 64-element i32 tile, the compile report records `local_memory_bytes` as
+`256`, two local memory instructions, and one barrier. On AMDGPU targets, object
+disassembly should show LDS read/write instructions and a workgroup barrier.
 
 ## Shared Memory Transpose
 
@@ -349,15 +351,15 @@ Loom spelling:
 ```loom
 %row = kernel.workitem.id<y> : index
 %column = kernel.workitem.id<x> : index
-%scratch_a = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
-%scratch_b = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+%scratch_a = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
+%scratch_b = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
 
-vector.store %loaded, %scratch_a_view[%row, %column] : vector<1xi32>, view<8x8xi32, #dense>
-kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-%transposed = vector.load %scratch_a_view[%column, %row] : view<8x8xi32, #dense> -> vector<1xi32>
-vector.store %transposed, %scratch_b_view[%row, %column] : vector<1xi32>, view<8x8xi32, #dense>
-kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-%roundtrip = vector.load %scratch_b_view[%column, %row] : view<8x8xi32, #dense> -> vector<1xi32>
+vector.store %loaded, %scratch_a_view[%row, %column] : vector<1xi32>, view<8x8xi32>
+kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+%transposed = vector.load %scratch_a_view[%column, %row] : view<8x8xi32> -> vector<1xi32>
+vector.store %transposed, %scratch_b_view[%row, %column] : vector<1xi32>, view<8x8xi32>
+kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+%roundtrip = vector.load %scratch_b_view[%column, %row] : view<8x8xi32> -> vector<1xi32>
 ```
 
 This recipe is a stronger LDS smoke test than a one-dimensional lane exchange:
@@ -368,7 +370,7 @@ transposing through LDS twice must reproduce the original row-major iota.
 Proof command:
 
 ```bash
-iree-benchmark-loom shared_memory_transpose.loom --dry-run
+iree-test-loom shared_memory_transpose.loom --device=amdgpu
 ```
 
 Target compile evidence:
@@ -390,15 +392,15 @@ Useful queries:
 jq '{status, target_key, local:.entries.rows[0].local_memory_bytes, lds_ops:.static_instruction_mix.local_memory_count, barriers:.static_instruction_mix.barrier_count}' \
   /tmp/shared-memory-transpose.compile-report.json
 
-llvm-objdump -d --mcpu=gfx1100 /tmp/shared-memory-transpose.hsaco | rg 'ds_(read|store)|s_barrier'
+llvm-objdump -d --mcpu=gfx11-generic /tmp/shared-memory-transpose.hsaco | rg 'ds_(read|store)|s_barrier'
 ```
 
-Expected signal: the dry run lists
-`case_shared_memory_tile_double_transpose` and
-`bench_shared_memory_tile_double_transpose`; the compile report records
-`local_memory_bytes` as `512` for the two 8x8 i32 tiles, four local memory
-instructions, and two barriers. AMDGPU object disassembly should show two LDS
-stores, two LDS reads, and two workgroup barriers.
+Expected signal: `case_shared_memory_tile_double_transpose` passes.
+
+For the two 8x8 i32 tiles, the compile report records `local_memory_bytes` as
+`512`, four local memory instructions, and two barriers. AMDGPU object
+disassembly should show two LDS stores, two LDS reads, and two workgroup
+barriers.
 
 ## Shared Memory Vector Tile
 
@@ -419,14 +421,14 @@ reinterpret_cast<int4 *>(output)[lane] = scratch[lane];
 Loom spelling:
 
 ```loom
-%scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
-%scratch_view = buffer.view %scratch[%base] : buffer -> view<64x4xi32, #dense>
+%scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
+%scratch_view = buffer.view %scratch[%base] : buffer -> view<64x4xi32>
 
-%loaded = vector.load %input_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
-vector.store %loaded, %scratch_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
-kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-%roundtrip = vector.load %scratch_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
-vector.store %roundtrip, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
+%loaded = vector.load %input_view[%lane, 0] : view<64x4xi32> -> vector<4xi32>
+vector.store %loaded, %scratch_view[%lane, 0] : vector<4xi32>, view<64x4xi32>
+kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+%roundtrip = vector.load %scratch_view[%lane, 0] : view<64x4xi32> -> vector<4xi32>
+vector.store %roundtrip, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32>
 ```
 
 This recipe covers the wide-row shared-memory path that HIP code often spells
@@ -438,7 +440,7 @@ target supports it.
 Proof command:
 
 ```bash
-iree-benchmark-loom shared_memory_vector_tile.loom --dry-run
+iree-test-loom shared_memory_vector_tile.loom --device=amdgpu
 ```
 
 Target compile evidence:
@@ -460,15 +462,15 @@ Useful queries:
 jq '{status, target_key, local:.entries.rows[0].local_memory_bytes, lds_ops:.static_instruction_mix.local_memory_count, barriers:.static_instruction_mix.barrier_count}' \
   /tmp/shared-memory-vector-tile.compile-report.json
 
-llvm-objdump -d --mcpu=gfx1100 /tmp/shared-memory-vector-tile.hsaco | rg 'global_(load|store)_b128|ds_(store|load)_b128|s_barrier'
+llvm-objdump -d --mcpu=gfx11-generic /tmp/shared-memory-vector-tile.hsaco | rg 'global_(load|store)_b128|ds_(store|load)_b128|s_barrier'
 ```
 
-Expected signal: the dry run lists `case_shared_memory_vector_tile_roundtrip`
-and `bench_shared_memory_vector_tile_roundtrip`; the compile report records
-`local_memory_bytes` as `1024` for the 64 row by 4 i32 tile, two local memory
-instructions, and one barrier. AMDGPU object disassembly should show a
-`global_load_b128`, `ds_store_b128`, `s_barrier`, `ds_load_b128`, and
-`global_store_b128`.
+Expected signal: `case_shared_memory_vector_tile_roundtrip` passes.
+
+For the 64 row by 4 i32 tile, the compile report records `local_memory_bytes` as
+`1024`, two local memory instructions, and one barrier. AMDGPU object
+disassembly should show `global_load_b128`, `ds_store_b128`, `s_barrier`,
+`ds_load_b128`, and `global_store_b128`.
 
 ## Shared Memory Bank Feedback
 
@@ -513,7 +515,7 @@ acc = __builtin_amdgcn_sdot4(/* unsigned lhs, signed rhs */);
 Loom spelling:
 
 ```loom
-%q8_word = vector.load %q8_words[0] : view<1xi32, #dense> -> vector<1xi32>
+%q8_word = vector.load %q8_words[0] : view<1xi32> -> vector<1xi32>
 %q8_unsigned = vector.bitunpacku<8> %q8_word : vector<1xi32> -> vector<4xi32>
 %q8_signed = vector.bitunpacks<8> %q8_word : vector<1xi32> -> vector<4xi32>
 
@@ -627,7 +629,6 @@ native instruction.
 Proof command:
 
 ```bash
-iree-benchmark-loom packed_field_contracts.loom --dry-run
 loom-opt packed_field_contracts.loom --output=/tmp/packed-field-contracts.loom
 ```
 
@@ -648,73 +649,186 @@ vector.table.lookup %grid[%codes]
 vector.dot8i4<s4u4>
 ```
 
-## Target Provider Selection
+## Target-Fact Provider Selection
 
-Tags: `HIP template`, `CUDA template`, `macro`, `#if __gfx1100__`,
-`arch-specialization`, `gfx1100`, `gfx1200`, `fallback`, `func.apply`,
-`func.template`, `target(@...)`, `priority`.
+Tags: `HIP template`, `CUDA template`, wave size, subgroup size,
+specialization, fallback, targetless, `template.apply`, `template.def`, `requires`,
+`where`, `#target.subgroup.size`, `priority`.
 
 HIP habit:
 
 ```c++
-#if __gfx1100__
-  return scale_i32_gfx1100(value);
-#elif __gfx1200__
-  return scale_i32_gfx1200(value);
-#else
+template <int WarpSize>
+int scale_i32(int value) {
+  if constexpr (WarpSize == 64) return scale_i32_wave64(value);
+  if constexpr (WarpSize == 32) return scale_i32_wave32(value);
   return scale_i32_fallback(value);
-#endif
+}
 ```
 
 Loom spelling:
 
 ```loom
-amdgpu.target<gfx1100> @gfx1100
-amdgpu.target<gfx1200> @gfx1200
+template.def<@hip.recipe.scale_i32> requires [#target.subgroup.size<64>] priority(20) @scale_i32_subgroup_64(%value: i32) -> (i32) { ... }
+template.def<@hip.recipe.scale_i32> requires [#target.subgroup.size<32>] priority(20) @scale_i32_subgroup_32(%value: i32) -> (i32) { ... }
+template.def<@hip.recipe.scale_i32> priority(1) @scale_i32_fallback(%value: i32) -> (i32) { ... }
 
-func.template<hip.recipe.scale_i32> target(@gfx1100) priority(20) @scale_i32_gfx1100(%value: i32) -> (i32) { ... }
-func.template<hip.recipe.scale_i32> target(@gfx1200) priority(20) @scale_i32_gfx1200(%value: i32) -> (i32) { ... }
-func.template<hip.recipe.scale_i32> priority(1) @scale_i32_fallback(%value: i32) -> (i32) { ... }
-
-func.def public target(@gfx1100) @selects_gfx1100_provider(%value: i32) -> (i32) {
-  %scaled = func.apply<hip.recipe.scale_i32>(%value) : (i32) -> (i32)
-  func.return %scaled : i32
+kernel.def @selects_subgroup_provider() {
+  %c1 = index.constant 1 : index
+  %subgroup_size = target.subgroup.size : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%subgroup_size, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer) {
+  ...
+  %scaled = template.apply<@hip.recipe.scale_i32>(%value) : (i32) -> (i32)
+  ...
+  kernel.return
 }
 ```
 
-`func.apply<contract>` is the call-site demand. `func.template<contract>` rows
-are providers. `target(@...)` filters applicability, and `priority(...)` orders
-providers after signature, target, and predicate filtering. A targetless
-provider is the generic fallback.
+`template.apply<@contract>` is the call-site demand. `template.def<@contract>` rows
+are providers. `requires [...]` states typed facts that the application site
+must prove, while `where [...]` constrains the provider's formal SSA values.
+Both are conjunctive, and `priority(...)` orders providers whose applicability
+is proven. Nothing in this source names AMDGPU or SPIR-V: subgroup size is the
+complete applicability requirement, so the kernel and all three providers
+remain targetless. A live JIT supplies facts from its device; offline
+compilation supplies the same structured profile with `--target`.
+`target.subgroup.size` reads the selected fact as SSA for launch arithmetic;
+the paired `#target.subgroup.size<...>` spelling constrains static provider
+applicability. Both consume the same function-version context.
+`target(@...)` belongs only on a provider whose implementation actually
+requires that target identity.
 
-Proof command:
+Compile the same source for generic wave32 and wave64 target profiles:
 
 ```bash
-loom-opt target_provider_selection.loom \
-  --pass=select-templates,inline-callables \
-  --pass-report=json \
-  --output=/tmp/target-provider-selected.loom \
-  2>/tmp/template-selection-report.json
+loom-compile target_provider_selection.loom \
+  --backend=amdgpu-hal \
+  --target=gfx11-generic \
+  --output=/tmp/target-provider-gfx11-generic.vmfb \
+  --emit-target-artifact=/tmp/target-provider-gfx11-generic.hsaco \
+  --dump-ir-after=select-templates \
+  --dump-ir-format=jsonl \
+  --dump-ir-output=/tmp/target-provider-gfx11-generic-trace.jsonl
+
+loom-compile target_provider_selection.loom \
+  --backend=amdgpu-hal \
+  --target=gfx9-4-generic \
+  --output=/tmp/target-provider-gfx9-4-generic.vmfb \
+  --emit-target-artifact=/tmp/target-provider-gfx9-4-generic.hsaco \
+  --dump-ir-after=select-templates \
+  --dump-ir-format=jsonl \
+  --dump-ir-output=/tmp/target-provider-gfx9-4-generic-trace.jsonl
 ```
 
 Useful query:
 
 ```bash
-jq '.invocations[]
-  | select(.pass == "select-templates")
-  | .details[]
-  | select(.category == "template-selection")
-  | {outcome, contract, target, selected_provider, provider_count, target_applicable_count, best_exact_count}' /tmp/template-selection-report.json
+jq -r 'select(.pass == "select-templates" and .changed) | .ir' \
+  /tmp/target-provider-gfx11-generic-trace.jsonl \
+  /tmp/target-provider-gfx9-4-generic-trace.jsonl
 ```
 
 Expected signal:
 
-```json
-{"outcome":"selected","contract":"hip.recipe.scale_i32","target":"gfx1100","selected_provider":"scale_i32_gfx1100","provider_count":3,"target_applicable_count":2,"best_exact_count":1}
+```loom
+%subgroup_size = index.constant 32 : index
+func.call inline @scale_i32_subgroup_32
+%subgroup_size = index.constant 64 : index
+func.call inline @scale_i32_subgroup_64
 ```
 
-The transformed file should contain the selected gfx1100 implementation body,
-not `func.apply`, `@scale_i32_gfx1200`, or `@scale_i32_fallback`.
+Each trace folds the same query and retains exactly one applicable provider
+before inlining. The emitted artifacts prove that normalized fact selection
+and launch arithmetic compose with the full target pipeline, rather than only
+a synthetic selection pass.
+
+## Workgroup-Cluster B128 Multicast
+
+Tags: `__cluster_dims__`, `workgroup cluster`, `cluster multicast`,
+`async-to-LDS`, `global_load_lds`, `b128`, `s_wait_asynccnt`, `LDS`,
+`recipient-owned LDS`.
+
+HIP habit:
+
+```c++
+// Both workgroups in a 1x2x1 cluster execute the same collective transfer.
+// Hardware may coalesce the matching requests and writes each recipient's LDS.
+cluster_memcpy_async_multicast(destination, source, 16, /*participants=*/0x3);
+cluster_async_wait();
+__syncthreads();
+```
+
+Loom spelling:
+
+```loom
+kernel.launch.config workgroups(%one, %two, %one)
+    workgroup_size(%thirty_two, %one, %one)
+    cluster_size(%one, %two, %one) : index
+
+%copy = kernel.async.cluster.gather %source to %destination using %participants
+    {cache_scope = device, cache_temporal = regular}
+    : view<16xi8> to view<16xi8>, i32 -> kernel.async.token
+%group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+```
+
+Every selected workgroup participates in the collective operation. The mask
+names recipient workgroups; it does not elect one workgroup to issue on behalf
+of the others. Each lane names the same logical 16-byte source and the
+lane-corresponding destination in its workgroup-owned LDS. The async wait drains
+the target's cluster-transfer counter before the ordinary workgroup barrier
+makes the populated LDS visible to consumers.
+
+`cluster_b128_multicast.loom` uses a nonuniform iota rather than a constant
+payload. Both recipients independently read their own LDS allocation and check
+all four words transferred for every lane. That shape catches wrong cluster
+identity, wrong recipient remapping, missing destination offsets, truncated
+b128 transfers, and accidental validation of only one participant.
+
+Proof command:
+
+```bash
+loom-compile cluster_b128_multicast.loom \
+  --backend=amdgpu-hal \
+  --target=gfx1250 \
+  --output=/tmp/cluster-b128-multicast.vmfb \
+  --emit-target-artifact=/tmp/cluster-b128-multicast.hsaco \
+  --artifact-manifest=summary \
+  --emit-artifact-manifest=/tmp/cluster-b128-multicast.manifest.json \
+  --compile-report=summary \
+  --compile-report-output=/tmp/cluster-b128-multicast.compile-report.json
+```
+
+Useful queries:
+
+```bash
+llvm-objdump --disassemble --mcpu=gfx1250 \
+  /tmp/cluster-b128-multicast.hsaco
+
+jq '{target_key, workload, local_memory_bytes,
+     explicit_action_count: .wait_plan.explicit_action_count,
+     barrier_count: .static_instruction_mix.barrier_count}' \
+  /tmp/cluster-b128-multicast.compile-report.json
+```
+
+Expected target signal:
+
+```text
+cluster_load_async_to_lds_b128 ... scope:SCOPE_DEV
+s_wait_asynccnt 0
+s_barrier_signal
+s_barrier_wait
+ds_load_b128
+```
+
+The compile report and final disassembly prove the selected launch shape,
+transfer width, wait domain, barrier placement, and resource viability. Running
+the check case through a compatible simulator additionally proves the modeled
+recipient and data semantics. Neither is a bandwidth claim: request coalescing,
+latency hiding, and the physical multicast ratio require counters and timing on
+the target GPU.
 
 ## First Translation Questions
 
@@ -760,10 +874,13 @@ Use Loom fast-math flags on arithmetic when contraction/reassociation is part
 of the intended target shape. Then inspect compile reports and target listings
 instead of assuming an operation selected the same instruction as HIP C++.
 
-Tags: `template`, `macro`, `gfx1100`, `gfx1200`, `arch-specialization`.
+Tags: `template`, wave size, subgroup size, targetless specialization.
 
-Use `func.apply<contract>` at call sites and `func.template<contract>`
-providers for implementations. Target-specific providers use `target(@...)`
-and priority; generic fallbacks stay correct for targets without a specialized
-provider. `target_provider_selection.loom` shows the source-level selection
-proof. The authoring/linking corpus shows the full library and bytecode flow.
+Use `template.apply<@contract>` at call sites and `template.def<@contract>`
+providers for implementations. Normalized requirements such as subgroup size
+use typed `requires` clauses without naming a backend or target. Keep a correct
+lower-priority fallback for profiles that cannot prove a specialization, and
+reserve `target(@...)` for implementations that truly require one target
+identity. `target_provider_selection.loom` compiles the same targetless kernel
+for wave32 and wave64 profiles. The authoring/linking corpus shows the full
+library and bytecode flow.

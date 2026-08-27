@@ -116,5 +116,9 @@ add_custom_command(OUTPUT proactor_test_runner_data.stamp
 add_custom_target(proactor_test_runner_data
     DEPENDS proactor_test_runner_data.stamp
 )
+iree_register_generated_compile_input(proactor_test_runner_data
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/proactor_test_runner_data.stamp"
+)
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

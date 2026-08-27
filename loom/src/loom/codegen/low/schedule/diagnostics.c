@@ -45,19 +45,6 @@ static iree_status_t loom_low_schedule_emit_with_related(
   return iree_diagnostic_emit(state->options->emitter, &emission);
 }
 
-iree_status_t loom_low_schedule_emit_missing_descriptor(
-    loom_low_schedule_build_state_t* state, const loom_op_t* op,
-    iree_string_view_t opcode) {
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(
-          loom_low_diagnostic_function_name(state->module, state->function_op)),
-      loom_param_string(opcode),
-      loom_param_string(state->target.descriptor_set_key),
-  };
-  return loom_low_schedule_emit(state, op, LOOM_ERR_TARGET_045, params,
-                                IREE_ARRAYSIZE(params));
-}
-
 static iree_string_view_t loom_low_schedule_dependency_kind_name(
     loom_low_schedule_dependency_kind_t kind) {
   switch (kind) {
@@ -65,10 +52,6 @@ static iree_string_view_t loom_low_schedule_dependency_kind_name(
       return IREE_SV("ssa");
     case LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT:
       return IREE_SV("effect");
-    case LOOM_LOW_SCHEDULE_DEPENDENCY_CONTROL:
-      return IREE_SV("control");
-    case LOOM_LOW_SCHEDULE_DEPENDENCY_ANCHOR:
-      return IREE_SV("anchor");
     case LOOM_LOW_SCHEDULE_DEPENDENCY_STATE:
       return IREE_SV("state");
     case LOOM_LOW_SCHEDULE_DEPENDENCY_STORAGE:
@@ -238,19 +221,21 @@ static bool loom_low_schedule_interval_contains_point(
 
 static bool loom_low_schedule_first_pressure_cliff_for_reg_class(
     const loom_low_schedule_build_state_t* state, uint16_t reg_class_id,
-    const loom_low_schedule_pressure_cliff_t** out_cliff) {
+    const loom_target_residency_cliff_t** out_cliff) {
   *out_cliff = NULL;
-  if (state->pressure_cliff_ranges == NULL ||
+  if (state->pressure_cliffs == NULL ||
+      state->pressure_cliffs->cliff_count == 0 ||
       reg_class_id == LOOM_LOW_REG_CLASS_NONE ||
       reg_class_id >= state->target.descriptor_set->reg_class_count) {
     return false;
   }
-  const loom_low_schedule_pressure_cliff_range_t range =
-      state->pressure_cliff_ranges[reg_class_id];
+  const loom_target_residency_cliff_range_t range =
+      loom_target_residency_direct_resource_cliff_range(state->pressure_cliffs,
+                                                        reg_class_id);
   if (range.count == 0) {
     return false;
   }
-  *out_cliff = &state->options->pressure_cliffs.values[range.start];
+  *out_cliff = &state->pressure_cliffs->cliffs[range.start];
   return true;
 }
 
@@ -271,7 +256,19 @@ static iree_status_t loom_low_schedule_pressure_budget_for_class(
   const uint16_t reg_class_id = value_class.register_class_id;
   const loom_low_reg_class_t* reg_class =
       &state->target.descriptor_set->reg_classes[reg_class_id];
-  const loom_low_schedule_pressure_cliff_t* first_cliff = NULL;
+  if (state->pressure_limits.by_reg_class != NULL) {
+    const uint32_t limit_units =
+        reg_class->alias_set_id != 0
+            ? state->pressure_limits.alias_sets[reg_class->alias_set_id]
+                  .live_unit_limit
+            : state->pressure_limits.by_reg_class[reg_class_id];
+    if (limit_units != UINT32_MAX) {
+      *out_budget = limit_units;
+      *out_has_budget = true;
+      return iree_ok_status();
+    }
+  }
+  const loom_target_residency_cliff_t* first_cliff = NULL;
   if (loom_low_schedule_first_pressure_cliff_for_reg_class(state, reg_class_id,
                                                            &first_cliff)) {
     *out_budget = first_cliff->cliff_units;
@@ -417,6 +414,7 @@ static iree_status_t loom_low_schedule_emit_candidate_decision(
       loom_param_string(loom_low_diagnostic_block_name(state->module, block)),
       loom_param_u32(decision->scheduled_ordinal),
       loom_param_u32(decision->ready_candidate_count),
+      loom_param_u32(decision->scored_candidate_count),
       loom_param_string(chosen_label),
       loom_param_string(rejected_label),
       loom_param_u32(decision->chosen_dependency_latency_cycles),
@@ -429,7 +427,7 @@ static iree_status_t loom_low_schedule_emit_candidate_decision(
       loom_param_u32(decision->chosen_resource_stall_cycles),
       loom_param_u32(decision->chosen_hazard_stall_cycles),
       loom_param_u32(decision->chosen_effective_stall_cycles),
-      loom_param_u32(decision->chosen_pressure_cliff_reg_class_id),
+      loom_param_string(decision->chosen_pressure_cliff_source),
       loom_param_u32(decision->chosen_pressure_cliff_units),
       loom_param_u32(decision->chosen_pressure_cliff_penalty),
       loom_param_u32(decision->chosen_units_until_pressure_cliff),
@@ -443,7 +441,7 @@ static iree_status_t loom_low_schedule_emit_candidate_decision(
       loom_param_u32(decision->rejected_resource_stall_cycles),
       loom_param_u32(decision->rejected_hazard_stall_cycles),
       loom_param_u32(decision->rejected_effective_stall_cycles),
-      loom_param_u32(decision->rejected_pressure_cliff_reg_class_id),
+      loom_param_string(decision->rejected_pressure_cliff_source),
       loom_param_u32(decision->rejected_pressure_cliff_units),
       loom_param_u32(decision->rejected_pressure_cliff_penalty),
       loom_param_u32(decision->rejected_units_until_pressure_cliff),

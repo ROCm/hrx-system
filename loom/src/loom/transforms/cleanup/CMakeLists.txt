@@ -18,6 +18,7 @@ loom_cc_library(
     "canonicalize.c"
   DEPS
     iree::base
+    iree::base::internal
     loom::analysis::condition_facts
     loom::analysis::symbolic_expr
     loom::ir
@@ -37,8 +38,8 @@ loom_cc_library(
     loom::rewrite::greedy
     loom::rewrite::rewriter
     loom::rewrite::type_propagation
+    loom::target::pass_environment
     loom::util::fact_table
-    loom::util::math
     loom::util::walk
   PUBLIC
 )
@@ -60,6 +61,8 @@ loom_cc_test(
     loom::ops::vector
     loom::pass::types
     loom::pass::value_facts
+    loom::target::facts
+    loom::target::types
 )
 
 loom_cc_library(
@@ -71,13 +74,16 @@ loom_cc_library(
     "cse.c"
   DEPS
     iree::base
+    loom::analysis::ownership
     loom::codegen::low::function
     loom::codegen::low::pipeline::pass_environment
     loom::codegen::low::target_binding
     loom::ir
     loom::ops::op_defs
     loom::pass::types
-    loom::target::selection
+    loom::target::function_version
+    loom::target::pass_environment
+    loom::util::cfg_graph
     loom::util::dominance
   PUBLIC
 )

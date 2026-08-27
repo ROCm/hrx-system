@@ -4,7 +4,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
+from loom.builder import TiedResultSpec, ValueRef
 from loom.builders import DialectBuilder
+from loom.ir import Type
 
 class TargetBuilder(DialectBuilder):
     def generic(
@@ -21,6 +25,7 @@ class TargetBuilder(DialectBuilder):
         max_workgroup_size_y: int | None = ...,
         max_workgroup_size_z: int | None = ...,
         max_flat_workgroup_size: int | None = ...,
+        max_workgroup_storage_bytes: int | None = ...,
         subgroup_size: int | None = ...,
         max_grid_size_x: int | None = ...,
         max_grid_size_y: int | None = ...,
@@ -39,8 +44,22 @@ class TargetBuilder(DialectBuilder):
         abi: str | None = ...,
         export_symbol: str | None = ...,
         linkage: str | None = ...,
-        hal_buffer_resource_flags: int | None = ...,
         contract_set_key: str | None = ...,
         contract_feature_bits: int | None = ...,
         location_id: int | None = ...,
     ) -> None: ...
+    def decl(
+        self,
+        *,
+        symbol: str,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def subgroup_size(
+        self,
+        *,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...

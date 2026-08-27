@@ -29,6 +29,7 @@ from loom.dsl import (
     Dialect,
     Op,
     Operand,
+    OperandRole,
     OpPhase,
     Successor,
 )
@@ -77,7 +78,14 @@ cfg_cond_br = Op(
     "cfg.cond_br",
     group=cfg_ops,
     doc="Conditional branch to one of two successor blocks based on an i1 condition.",
-    operands=[Operand("condition", I1, doc="Scalar i1 branch condition.")],
+    operands=[
+        Operand(
+            "condition",
+            I1,
+            doc="Scalar i1 branch condition.",
+            role=OperandRole.CONTROL_CONDITION,
+        ),
+    ],
     successors=[
         Successor("true_dest", doc="Destination block when the condition is true."),
         Successor("false_dest", doc="Destination block when the condition is false."),

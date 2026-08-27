@@ -28,9 +28,11 @@ constexpr uint64_t kCopyBlockUnalignedX16KernelObject = 0xC161u;
 static iree_hal_amdgpu_device_kernel_args_t MakeKernelArgs(
     uint64_t kernel_object, uint16_t setup, uint16_t workgroup_size_x,
     uint32_t private_segment_size, uint32_t group_segment_size) {
+  static_assert(IREE_HAL_AMDGPU_DEVICE_BUFFER_FILL_KERNARG_SIZE ==
+                IREE_HAL_AMDGPU_DEVICE_BUFFER_COPY_KERNARG_SIZE);
   iree_hal_amdgpu_device_kernel_args_t kernel_args = {};
   kernel_args.kernel_object = kernel_object;
-  kernel_args.kernarg_size = 24;
+  kernel_args.kernarg_size = IREE_HAL_AMDGPU_DEVICE_BUFFER_FILL_KERNARG_SIZE;
   kernel_args.kernarg_alignment = 8;
   kernel_args.setup = setup;
   kernel_args.workgroup_size[0] = workgroup_size_x;
@@ -100,6 +102,52 @@ TEST(BlitTest, TransferContextInitializeSaturatesLargeComputeUnitCount) {
   EXPECT_EQ(context.max_workgroup_count, UINT32_MAX);
 }
 
+TEST(BlitTest, FillPlanUsesGuaranteedTargetAlignment) {
+  const iree_hal_amdgpu_device_kernels_t kernels = MakeKernels();
+  const iree_hal_amdgpu_device_buffer_transfer_context_t context =
+      MakeContext(&kernels);
+
+  iree_hal_amdgpu_device_buffer_fill_plan_t aligned_plan = {};
+  ASSERT_TRUE(iree_hal_amdgpu_device_buffer_fill_plan(
+      &context, /*target_alignment=*/16, /*length=*/512,
+      /*pattern=*/0xABu, /*pattern_length=*/1, &aligned_plan));
+  EXPECT_EQ(aligned_plan.kernel,
+            IREE_HAL_AMDGPU_DEVICE_BUFFER_TRANSFER_KERNEL_FILL_BLOCK_X16);
+  EXPECT_EQ(aligned_plan.element_length, 32u);
+
+  iree_hal_amdgpu_device_buffer_fill_plan_t indirect_plan = {};
+  ASSERT_TRUE(iree_hal_amdgpu_device_buffer_fill_plan(
+      &context, /*target_alignment=*/1, /*length=*/512,
+      /*pattern=*/0xABu, /*pattern_length=*/1, &indirect_plan));
+  EXPECT_EQ(
+      indirect_plan.kernel,
+      IREE_HAL_AMDGPU_DEVICE_BUFFER_TRANSFER_KERNEL_FILL_BLOCK_UNALIGNED_X16);
+  EXPECT_EQ(indirect_plan.element_length, 512u);
+}
+
+TEST(BlitTest, CopyPlanUsesGuaranteedOperandAlignment) {
+  const iree_hal_amdgpu_device_kernels_t kernels = MakeKernels();
+  const iree_hal_amdgpu_device_buffer_transfer_context_t context =
+      MakeContext(&kernels);
+
+  iree_hal_amdgpu_device_buffer_copy_plan_t aligned_plan = {};
+  ASSERT_TRUE(iree_hal_amdgpu_device_buffer_copy_plan(
+      &context, /*source_alignment=*/16, /*target_alignment=*/16,
+      /*length=*/512, &aligned_plan));
+  EXPECT_EQ(aligned_plan.kernel,
+            IREE_HAL_AMDGPU_DEVICE_BUFFER_TRANSFER_KERNEL_COPY_BLOCK_X16);
+  EXPECT_EQ(aligned_plan.element_length, 32u);
+
+  iree_hal_amdgpu_device_buffer_copy_plan_t indirect_plan = {};
+  ASSERT_TRUE(iree_hal_amdgpu_device_buffer_copy_plan(
+      &context, /*source_alignment=*/16, /*target_alignment=*/1,
+      /*length=*/512, &indirect_plan));
+  EXPECT_EQ(
+      indirect_plan.kernel,
+      IREE_HAL_AMDGPU_DEVICE_BUFFER_TRANSFER_KERNEL_COPY_BLOCK_UNALIGNED_X16);
+  EXPECT_EQ(indirect_plan.element_length, 512u);
+}
+
 TEST(BlitTest, FillEmplaceSelectsBlockFillForAlignedTransfer) {
   const iree_hal_amdgpu_device_kernels_t kernels = MakeKernels();
   const iree_hal_amdgpu_device_buffer_transfer_context_t context =
@@ -128,6 +176,9 @@ TEST(BlitTest, FillEmplaceSelectsBlockFillForAlignedTransfer) {
   EXPECT_EQ(kernargs.target_ptr, (void*)0x2000);
   EXPECT_EQ(kernargs.element_length, 32u);
   EXPECT_EQ(kernargs.pattern, 0xABABABABABABABABull);
+  EXPECT_EQ(kernargs.grid_size_x, packet.grid_size[0]);
+  EXPECT_EQ(kernargs.grid_size_y, packet.grid_size[1]);
+  EXPECT_EQ(kernargs.workgroup_size_x, packet.workgroup_size[0]);
 }
 
 TEST(BlitTest, FillEmplaceUsesNoopDispatchForZeroLengthTransfer) {
@@ -391,6 +442,9 @@ TEST(BlitTest, CopyEmplaceSelectsBlockCopyForAlignedTransfer) {
   EXPECT_EQ(kernargs.source_ptr, (const void*)0x4000);
   EXPECT_EQ(kernargs.target_ptr, (void*)0x8000);
   EXPECT_EQ(kernargs.element_length, 16u);
+  EXPECT_EQ(kernargs.grid_size_x, packet.grid_size[0]);
+  EXPECT_EQ(kernargs.grid_size_y, packet.grid_size[1]);
+  EXPECT_EQ(kernargs.workgroup_size_x, packet.workgroup_size[0]);
 }
 
 TEST(BlitTest, CopyEmplaceSelectsBlockX8ForQwordAlignedTransfer) {

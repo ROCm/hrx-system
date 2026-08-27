@@ -1,75 +1,222 @@
 // RUN: emit source-low output=low
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @single_wave_barrier() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %threads = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @single_wave_barrier() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @single_wave_barrier() asm {
   s_waitcnt {lgkmcnt = 0}
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
-kernel.def target(@target) @multi_wave_barrier() {
-  %one = index.constant 1 : index
+kernel.def target(@target) @single_wave64_barrier() {
+  %unit = index.constant 1 : index
   %threads = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @multi_wave_barrier() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @single_wave64_barrier() asm {
+  s_waitcnt {lgkmcnt = 0}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @multi_wave_barrier() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch() {
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @multi_wave_barrier() asm {
   s_barrier
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @unknown_workgroup_size_barrier(%threads: index) {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch() {
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_count(1, 1, 1) @unknown_workgroup_size_barrier() asm {
+  s_barrier
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @single_wave_global_barrier() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch() {
+  kernel.barrier<global> scope(workgroup) ordering(acq_rel)
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @single_wave_global_barrier() asm {
+  s_waitcnt {vmcnt = 0}
+  s_waitcnt_vscnt {vscnt = 0}
+  s_barrier
+  s_waitcnt {vmcnt = 0}
+  buffer_gl1_inv
+  buffer_gl0_inv
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @global_release_barrier() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch() {
+  kernel.barrier<global> scope(workgroup) ordering(release)
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @global_release_barrier() asm {
+  s_waitcnt {vmcnt = 0}
+  s_waitcnt_vscnt {vscnt = 0}
+  s_barrier
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @global_acquire_barrier() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch() {
+  kernel.barrier<global> scope(workgroup) ordering(acquire)
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @global_acquire_barrier() asm {
+  s_barrier
+  s_waitcnt {vmcnt = 0}
+  buffer_gl1_inv
+  buffer_gl0_inv
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @global_acq_rel_barrier() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch() {
+  kernel.barrier<global> scope(workgroup) ordering(acq_rel)
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @global_acq_rel_barrier() asm {
+  s_waitcnt {vmcnt = 0}
+  s_waitcnt_vscnt {vscnt = 0}
+  s_barrier
+  s_waitcnt {vmcnt = 0}
+  buffer_gl1_inv
+  buffer_gl0_inv
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @multi_wave_subgroup_barrier() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %threads = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
+  kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @multi_wave_subgroup_barrier() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @multi_wave_subgroup_barrier() asm {
   s_waitcnt {lgkmcnt = 0}
   return
 }
 
 // ====
 
-amdgpu.target<gfx1200> @target {processor = "gfx1201"}
+amdgpu.target<gfx12-generic> @target
 
-kernel.def target(@target) @multi_wave_barrier_gfx1201() {
-  %one = index.constant 1 : index
-  %threads = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+kernel.def target(@target) @single_wave_barrier_gfx12() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @multi_wave_barrier_gfx1201() asm<amdgpu.rdna4.core> {
+low.kernel.def target<amdgpu.gfx12.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @single_wave_barrier_gfx12() asm {
+  s_wait_dscnt {dscnt = 0}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx12-generic> @target
+
+kernel.def target(@target) @multi_wave_barrier_gfx12() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch() {
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx12.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @multi_wave_barrier_gfx12() asm {
   s_barrier_signal_all
   s_barrier_wait_all
   return
@@ -77,38 +224,81 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @multi_wave_barrier_gfx1
 
 // ====
 
-amdgpu.target<gfx1200> @target {processor = "gfx1201"}
+amdgpu.target<gfx12-generic> @target
 
-kernel.def target(@target) @multi_wave_subgroup_barrier_gfx1201() {
-  %one = index.constant 1 : index
+kernel.def target(@target) @global_acq_rel_barrier_gfx12() {
+  %unit = index.constant 1 : index
   %threads = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
+  kernel.barrier<global> scope(workgroup) ordering(acq_rel)
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @multi_wave_subgroup_barrier_gfx1201() asm<amdgpu.rdna4.core> {
+low.kernel.def target<amdgpu.gfx12.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @global_acq_rel_barrier_gfx12() asm {
+  global_wb {scope = 2}
+  s_wait_storecnt {storecnt = 0}
+  s_barrier_signal_all
+  s_barrier_wait_all
+  s_wait_loadcnt {loadcnt = 0}
+  global_inv {scope = 2}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx12-generic> @target
+
+kernel.def target(@target) @multi_wave_subgroup_barrier_gfx12() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch() {
+  kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx12.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @multi_wave_subgroup_barrier_gfx12() asm {
   s_wait_dscnt {dscnt = 0}
   return
 }
 
 // ====
 
-amdgpu.target<gfx1250> @target
+amdgpu.target<gfx12-5-generic> @target
 
-kernel.def target(@target) @multi_wave_barrier_gfx1250() {
-  %one = index.constant 1 : index
-  %threads = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+kernel.def target(@target) @single_wave_barrier_gfx12_5() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @multi_wave_barrier_gfx1250() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target<amdgpu.gfx12_5.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @single_wave_barrier_gfx12_5() asm {
+  s_wait_dscnt {dscnt = 0}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx12-5-generic> @target
+
+kernel.def target(@target) @multi_wave_barrier_gfx12_5() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch() {
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx12_5.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @multi_wave_barrier_gfx12_5() asm {
   s_barrier_signal_all
   s_barrier_wait_all
   return
@@ -116,38 +306,141 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @multi_wave_barrier_gfx1
 
 // ====
 
-amdgpu.target<gfx1250> @target
+amdgpu.target<gfx12-5-generic> @target
 
-kernel.def target(@target) @multi_wave_subgroup_barrier_gfx1250() {
-  %one = index.constant 1 : index
+kernel.def target(@target) @multi_wave_subgroup_barrier_gfx12_5() {
+  %unit = index.constant 1 : index
   %threads = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
+  kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @multi_wave_subgroup_barrier_gfx1250() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target<amdgpu.gfx12_5.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @multi_wave_subgroup_barrier_gfx12_5() asm {
   s_wait_dscnt {dscnt = 0}
   return
 }
 
 // ====
 
-amdgpu.target<gfx942> @target
+amdgpu.target<gfx9-4-generic> @target
 
-kernel.def target(@target) @multi_wave_subgroup_barrier_gfx942() {
-  %one = index.constant 1 : index
+kernel.def target(@target) @single_wave_barrier_gfx9_4() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch() {
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx9_4.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @single_wave_barrier_gfx9_4() asm {
+  s_waitcnt {lgkmcnt = 0}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx9-4-generic> @target
+
+kernel.def target(@target) @global_acq_rel_barrier_gfx9_4() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch() {
+  kernel.barrier<global> scope(workgroup) ordering(acq_rel)
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx9_4.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @global_acq_rel_barrier_gfx9_4() asm {
+  buffer_wbl2 {sc0 = 1, sc1 = 1}
+  s_barrier
+  s_waitcnt {vmcnt = 0}
+  buffer_inv {sc0 = 1, sc1 = 1}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx9-4-generic> @target
+
+kernel.def target(@target) @multi_wave_subgroup_barrier_gfx9_4() {
+  %unit = index.constant 1 : index
   %threads = index.constant 128 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
+  kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(128, 1, 1) @multi_wave_subgroup_barrier_gfx942() asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.gfx9_4.generic.core>(@target) workgroup_size(128, 1, 1) workgroup_count(1, 1, 1) @multi_wave_subgroup_barrier_gfx9_4() asm {
   s_waitcnt {lgkmcnt = 0}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx950> @target
+
+kernel.def target(@target) @global_acq_rel_barrier_gfx950() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch() {
+  kernel.barrier<global> scope(workgroup) ordering(acq_rel)
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @global_acq_rel_barrier_gfx950() asm {
+  buffer_wbl2 {sc0 = 1, sc1 = 1}
+  s_barrier
+  s_waitcnt {vmcnt = 0}
+  buffer_inv {sc0 = 1, sc1 = 1}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
+// A read-only control value loaded from a uniform global address is uniform
+// across the workgroup and may guard a convergent barrier.
+kernel.def target(@target) @uniform_global_load_controls_barrier() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%control: buffer) {
+  %control_index = index.constant 0 : index
+  %control_base = index.constant 0 : offset
+  %barrier_control = scalar.constant 0 : i32
+  %control_view = buffer.view %control[%control_base] : buffer -> view<1xi32>
+  %control_value = view.load %control_view[%control_index] : view<1xi32> -> i32
+  %is_zero = scalar.cmpi eq, %control_value, %barrier_control : i32
+  scf.if %is_zero {
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    scf.yield
+  }
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_global_load_controls_barrier() asm {
+  %control_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %10 = v_mov_b32 0
+  %control_value = global_load_b32_saddr %10, %control_view
+  %is_zero = v_cmp_eq_i32_src1_inline %control_value {rhs = 0}
+  %13, %14 = s_and_saveexec_b64 %is_zero
+  low.cond_br %14, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+^_bb1:
+  s_waitcnt {lgkmcnt = 0}
+  low.br ^_bb2
+^_bb2:
+  s_mov_b64_exec %13
   return
 }

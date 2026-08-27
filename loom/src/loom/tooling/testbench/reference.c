@@ -589,15 +589,20 @@ static iree_status_t loom_testbench_reference_validate_matmul_shape(
     iree_string_view_t oracle_name,
     const loom_testbench_reference_rank2_view_t* lhs,
     const loom_testbench_reference_rank2_view_t* rhs,
-    const loom_testbench_reference_rank2_view_t* init) {
-  if (lhs->columns != rhs->rows || lhs->rows != init->rows ||
-      rhs->columns != init->columns) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "%.*s shape mismatch: lhs[%" PRIhsz ", %" PRIhsz "], rhs[%" PRIhsz
-        ", %" PRIhsz "], init[%" PRIhsz ", %" PRIhsz "]",
-        (int)oracle_name.size, oracle_name.data, lhs->rows, lhs->columns,
-        rhs->rows, rhs->columns, init->rows, init->columns);
+    const loom_testbench_reference_rank2_view_t* init, bool rhs_transposed) {
+  const iree_host_size_t rhs_reduction_size =
+      rhs_transposed ? rhs->columns : rhs->rows;
+  const iree_host_size_t rhs_result_columns =
+      rhs_transposed ? rhs->rows : rhs->columns;
+  if (lhs->columns != rhs_reduction_size || lhs->rows != init->rows ||
+      rhs_result_columns != init->columns) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "%.*s shape mismatch: lhs[%" PRIhsz ", %" PRIhsz
+                            "], rhs[%" PRIhsz ", %" PRIhsz "], init[%" PRIhsz
+                            ", %" PRIhsz "], rhs_transposed=%s",
+                            (int)oracle_name.size, oracle_name.data, lhs->rows,
+                            lhs->columns, rhs->rows, rhs->columns, init->rows,
+                            init->columns, rhs_transposed ? "true" : "false");
   }
   return iree_ok_status();
 }
@@ -669,12 +674,13 @@ static iree_status_t loom_testbench_reference_default_matmul_contract(
 
 static iree_status_t loom_testbench_reference_explicit_matmul_contract(
     const loom_testbench_invocation_plan_t* invocation,
+    iree_host_size_t non_numeric_attr_count,
     loom_testbench_reference_matmul_contract_t* out_contract) {
-  if (invocation->attrs.count != 4) {
+  if (invocation->attrs.count != 4 + non_numeric_attr_count) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "reference matmul contract requires exactly lhs, rhs, accumulator, and "
-        "result attrs");
+        "result numeric attrs");
   }
   IREE_RETURN_IF_ERROR(loom_testbench_reference_read_numeric_contract_attr(
       invocation->module, invocation->attrs, IREE_SV("lhs"),
@@ -743,6 +749,7 @@ static iree_status_t loom_testbench_reference_derive_matmul_contract(
     iree_hal_element_type_t lhs_element_type,
     iree_hal_element_type_t rhs_element_type,
     iree_hal_element_type_t init_element_type,
+    iree_host_size_t non_numeric_attr_count,
     loom_testbench_reference_matmul_contract_t* out_contract) {
   loom_testbench_reference_numeric_kind_t lhs =
       LOOM_TESTBENCH_REFERENCE_NUMERIC_NONE;
@@ -760,12 +767,12 @@ static iree_status_t loom_testbench_reference_derive_matmul_contract(
                             "%.*s has unsupported buffer element type",
                             (int)oracle_name.size, oracle_name.data);
   }
-  if (invocation->attrs.count == 0) {
+  if (invocation->attrs.count == non_numeric_attr_count) {
     IREE_RETURN_IF_ERROR(loom_testbench_reference_default_matmul_contract(
         oracle_name, lhs, rhs, init, out_contract));
   } else {
     IREE_RETURN_IF_ERROR(loom_testbench_reference_explicit_matmul_contract(
-        invocation, out_contract));
+        invocation, non_numeric_attr_count, out_contract));
     out_contract->init = init;
   }
   IREE_RETURN_IF_ERROR(
@@ -777,6 +784,26 @@ static iree_status_t loom_testbench_reference_derive_matmul_contract(
       oracle_name, IREE_SV("rhs"), out_contract->rhs, rhs_element_type));
   return loom_testbench_reference_validate_contract_storage(
       oracle_name, IREE_SV("init"), out_contract->init, init_element_type);
+}
+
+static iree_status_t loom_testbench_reference_read_rhs_transposed(
+    const loom_testbench_invocation_plan_t* invocation,
+    bool* out_rhs_transposed, iree_host_size_t* out_attr_count) {
+  *out_rhs_transposed = false;
+  *out_attr_count = 0;
+  const loom_named_attr_t* attr = loom_testbench_reference_find_attr(
+      invocation->module, invocation->attrs, IREE_SV("rhs_transposed"));
+  if (attr == NULL) {
+    return iree_ok_status();
+  }
+  if (attr->value.kind != LOOM_ATTR_BOOL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "reference.matmul rhs_transposed attr must be a boolean");
+  }
+  *out_rhs_transposed = loom_attr_as_bool(attr->value);
+  *out_attr_count = 1;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_testbench_reference_map_view_read(
@@ -834,7 +861,7 @@ static iree_status_t loom_testbench_reference_compute_matmul(
     const loom_testbench_reference_rank2_view_t* rhs,
     const loom_testbench_reference_rank2_view_t* init,
     const loom_testbench_reference_matmul_contract_t* contract,
-    uint8_t* result) {
+    bool rhs_transposed, uint8_t* result) {
   iree_hal_buffer_mapping_t lhs_mapping = {0};
   iree_hal_buffer_mapping_t rhs_mapping = {0};
   iree_hal_buffer_mapping_t init_mapping = {0};
@@ -855,8 +882,11 @@ static iree_status_t loom_testbench_reference_compute_matmul(
     init_mapped = true;
     const bool floating_domain =
         loom_testbench_reference_numeric_kind_is_float(contract->accumulator);
+    const iree_host_size_t result_column_count =
+        rhs_transposed ? rhs->rows : rhs->columns;
     for (iree_host_size_t row = 0; row < lhs->rows; ++row) {
-      for (iree_host_size_t column = 0; column < rhs->columns; ++column) {
+      for (iree_host_size_t column = 0; column < result_column_count;
+           ++column) {
         const iree_host_size_t init_offset = row * init->columns + column;
         double floating_accumulator = 0.0;
         int64_t integer_accumulator = 0;
@@ -880,7 +910,9 @@ static iree_status_t loom_testbench_reference_compute_matmul(
         }
         for (iree_host_size_t k = 0; k < lhs->columns; ++k) {
           const iree_host_size_t lhs_offset = row * lhs->columns + k;
-          const iree_host_size_t rhs_offset = k * rhs->columns + column;
+          const iree_host_size_t rhs_offset = rhs_transposed
+                                                  ? column * rhs->columns + k
+                                                  : k * rhs->columns + column;
           if (floating_domain) {
             const double lhs_value =
                 loom_testbench_reference_load_numeric_element_as_float_at(
@@ -909,7 +941,7 @@ static iree_status_t loom_testbench_reference_compute_matmul(
         }
         status = loom_testbench_reference_store_accumulator(
             contract, floating_accumulator, integer_accumulator, result,
-            row * rhs->columns + column);
+            row * result_column_count + column);
         if (!iree_status_is_ok(status)) {
           break;
         }
@@ -1156,11 +1188,13 @@ static iree_status_t loom_testbench_reference_tiled_matmul_element_count(
 
 static iree_status_t loom_testbench_reference_matmul_invoke(
     void* user_data, const loom_testbench_invocation_plan_t* invocation,
+    iree_host_size_t workload_count, const loom_testbench_value_t* workloads,
     iree_host_size_t input_count, const loom_testbench_value_t* inputs,
     iree_host_size_t result_count, loom_testbench_value_t* out_results) {
+  (void)workloads;
   const loom_testbench_reference_matmul_oracle_options_t* options =
       (const loom_testbench_reference_matmul_oracle_options_t*)user_data;
-  if (input_count != 3 || result_count != 1) {
+  if (workload_count != 0 || input_count != 3 || result_count != 1) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "reference.matmul expects 3 inputs and 1 result");
   }
@@ -1189,15 +1223,21 @@ static iree_status_t loom_testbench_reference_matmul_invoke(
   loom_testbench_reference_rank2_view_t init = {0};
   IREE_RETURN_IF_ERROR(
       loom_testbench_reference_rank2_view_initialize(init_view, &init));
+  bool rhs_transposed = false;
+  iree_host_size_t non_numeric_attr_count = 0;
+  IREE_RETURN_IF_ERROR(loom_testbench_reference_read_rhs_transposed(
+      invocation, &rhs_transposed, &non_numeric_attr_count));
   IREE_RETURN_IF_ERROR(loom_testbench_reference_validate_matmul_shape(
-      IREE_SV("reference.matmul"), &lhs, &rhs, &init));
+      IREE_SV("reference.matmul"), &lhs, &rhs, &init, rhs_transposed));
   loom_testbench_reference_matmul_contract_t contract = {0};
   IREE_RETURN_IF_ERROR(loom_testbench_reference_derive_matmul_contract(
       IREE_SV("reference.matmul"), invocation, lhs.element_type,
-      rhs.element_type, init.element_type, &contract));
+      rhs.element_type, init.element_type, non_numeric_attr_count, &contract));
 
   iree_host_size_t result_count_checked = 0;
-  if (!iree_host_size_checked_mul(lhs.rows, rhs.columns,
+  const iree_host_size_t result_column_count =
+      rhs_transposed ? rhs.rows : rhs.columns;
+  if (!iree_host_size_checked_mul(lhs.rows, result_column_count,
                                   &result_count_checked)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "reference.matmul result element count overflow");
@@ -1220,11 +1260,11 @@ static iree_status_t loom_testbench_reference_matmul_invoke(
       host_allocator, result_byte_count, sizeof(*result_values),
       (void**)&result_values));
   iree_status_t status = loom_testbench_reference_compute_matmul(
-      &lhs, &rhs, &init, &contract, result_values);
+      &lhs, &rhs, &init, &contract, rhs_transposed, result_values);
   iree_hal_buffer_view_t* result_view = NULL;
   if (iree_status_is_ok(status)) {
     status = loom_testbench_reference_allocate_matmul_result(
-        options, lhs.rows, rhs.columns,
+        options, lhs.rows, result_column_count,
         loom_testbench_reference_numeric_kind_hal_element_type(contract.result),
         result_values, result_byte_count, &result_view);
   }
@@ -1242,11 +1282,13 @@ static iree_status_t loom_testbench_reference_matmul_invoke(
 
 static iree_status_t loom_testbench_reference_tiled_matmul_invoke(
     void* user_data, const loom_testbench_invocation_plan_t* invocation,
+    iree_host_size_t workload_count, const loom_testbench_value_t* workloads,
     iree_host_size_t input_count, const loom_testbench_value_t* inputs,
     iree_host_size_t result_count, loom_testbench_value_t* out_results) {
+  (void)workloads;
   const loom_testbench_reference_matmul_oracle_options_t* options =
       (const loom_testbench_reference_matmul_oracle_options_t*)user_data;
-  if (input_count != 3 || result_count != 1) {
+  if (workload_count != 0 || input_count != 3 || result_count != 1) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "reference.tiled_matmul expects 3 inputs and 1 result");
@@ -1281,7 +1323,8 @@ static iree_status_t loom_testbench_reference_tiled_matmul_invoke(
   loom_testbench_reference_matmul_contract_t contract = {0};
   IREE_RETURN_IF_ERROR(loom_testbench_reference_derive_matmul_contract(
       IREE_SV("reference.tiled_matmul"), invocation, lhs.element_type,
-      rhs.element_type, init.element_type, &contract));
+      rhs.element_type, init.element_type, /*non_numeric_attr_count=*/0,
+      &contract));
 
   iree_host_size_t result_count_checked = 0;
   IREE_RETURN_IF_ERROR(loom_testbench_reference_tiled_matmul_element_count(
@@ -1333,9 +1376,9 @@ void loom_testbench_reference_matmul_oracle_provider_initialize(
   IREE_ASSERT_ARGUMENT(out_provider);
   *out_provider = (loom_testbench_oracle_provider_t){
       .name = IREE_SV("reference.matmul"),
-      .invoke =
+      .provider =
           {
-              .fn = loom_testbench_reference_matmul_invoke,
+              .invoke = loom_testbench_reference_matmul_invoke,
               .user_data = (void*)options,
           },
   };
@@ -1348,9 +1391,9 @@ void loom_testbench_reference_tiled_matmul_oracle_provider_initialize(
   IREE_ASSERT_ARGUMENT(out_provider);
   *out_provider = (loom_testbench_oracle_provider_t){
       .name = IREE_SV("reference.tiled_matmul"),
-      .invoke =
+      .provider =
           {
-              .fn = loom_testbench_reference_tiled_matmul_invoke,
+              .invoke = loom_testbench_reference_tiled_matmul_invoke,
               .user_data = (void*)options,
           },
   };

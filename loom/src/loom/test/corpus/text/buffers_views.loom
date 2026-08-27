@@ -10,10 +10,10 @@ func.def @views(%buffer: buffer, %offset: offset, %row_stride: index, %row: inde
 }
 
 func.def @scratch(%bytes: offset) {
-  %zero = index.constant 0 : offset
+  %base = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
-  %view = buffer.view %scratch[%zero] : buffer -> view<16xi32, %layout>
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<16xi32, %layout>
   test.use %view : view<16xi32, %layout>
   func.return
 }

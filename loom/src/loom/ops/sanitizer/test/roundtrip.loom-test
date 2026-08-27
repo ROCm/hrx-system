@@ -51,6 +51,6 @@ func.def @race_access_roundtrip(%layout: encoding<layout>, %view: view<64xi32, %
 // ====
 
 func.def @race_sync_roundtrip() {
-  sanitizer.race.sync<workgroup> {ordering = acq_rel, scope = workgroup}
+  sanitizer.race.sync<workgroup> scope(workgroup) ordering(acq_rel)
   func.return
 }

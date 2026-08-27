@@ -9,6 +9,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cache
+
+from loom.target.native_contraction_layout import (
+    ROLE_ACCUMULATOR,
+    ROLE_LHS,
+    ROLE_RESULT,
+    ROLE_RHS,
+    ExactContractionLayout,
+    ExactContractionRoleLayout,
+    contiguous_element_layout,
+    grouped_dot_contraction_layout,
+)
+from loom.target.native_layout_facts import (
+    NativeContractionFacts,
+    NativeContractionRoleFacts,
+    exact_native_contraction_role_facts,
+)
 
 FEATURE_AVX512_VNNI = 1 << 0
 FEATURE_AVX512_VL = 1 << 1
@@ -36,6 +53,17 @@ NUMERIC_BF16 = "LOOM_X86_PACKED_DOT_NUMERIC_BF16"
 NUMERIC_I32 = "LOOM_X86_PACKED_DOT_NUMERIC_I32"
 NUMERIC_F32 = "LOOM_X86_PACKED_DOT_NUMERIC_F32"
 
+_NUMERIC_TYPE_BIT_COUNTS = {
+    NUMERIC_I8: 8,
+    NUMERIC_U8: 8,
+    NUMERIC_I16: 16,
+    NUMERIC_U16: 16,
+    NUMERIC_F16: 16,
+    NUMERIC_BF16: 16,
+    NUMERIC_I32: 32,
+    NUMERIC_F32: 32,
+}
+
 LLVM_SOURCE_ABI_PAYLOAD = "LOOM_X86_PACKED_DOT_LLVM_SOURCE_ABI_PAYLOAD"
 LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR = (
     "LOOM_X86_PACKED_DOT_LLVM_SOURCE_ABI_ACCUMULATOR_VECTOR"
@@ -52,9 +80,6 @@ class PackedDotDescriptor:
     required_feature_bits: int
     flags: int
     vector_bit_width: int
-    input_lane_count: int
-    result_lane_count: int
-    reduction_group_size: int
     lhs_numeric_type: str
     rhs_numeric_type: str
     accumulator_numeric_type: str
@@ -70,9 +95,6 @@ def pd(
     required_feature_bits: int,
     flags: int,
     vector_bit_width: int,
-    input_lane_count: int,
-    result_lane_count: int,
-    reduction_group_size: int,
     lhs_numeric_type: str,
     rhs_numeric_type: str,
     accumulator_numeric_type: str,
@@ -87,13 +109,101 @@ def pd(
         required_feature_bits=required_feature_bits,
         flags=flags,
         vector_bit_width=vector_bit_width,
-        input_lane_count=input_lane_count,
-        result_lane_count=result_lane_count,
-        reduction_group_size=reduction_group_size,
         lhs_numeric_type=lhs_numeric_type,
         rhs_numeric_type=rhs_numeric_type,
         accumulator_numeric_type=accumulator_numeric_type,
         result_numeric_type=result_numeric_type,
+    )
+
+
+@cache
+def packed_dot_native_layout(
+    descriptor: PackedDotDescriptor,
+) -> ExactContractionLayout:
+    """Returns the exact native contraction layout of an x86 packed dot."""
+
+    lhs_bit_count = _NUMERIC_TYPE_BIT_COUNTS[descriptor.lhs_numeric_type]
+    rhs_bit_count = _NUMERIC_TYPE_BIT_COUNTS[descriptor.rhs_numeric_type]
+    accumulator_bit_count = _NUMERIC_TYPE_BIT_COUNTS[
+        descriptor.accumulator_numeric_type
+    ]
+    result_bit_count = _NUMERIC_TYPE_BIT_COUNTS[descriptor.result_numeric_type]
+    if lhs_bit_count != rhs_bit_count:
+        raise ValueError(
+            f"x86 packed-dot descriptor '{descriptor.key}' has differently "
+            "sized source elements"
+        )
+    if accumulator_bit_count != result_bit_count:
+        raise ValueError(
+            f"x86 packed-dot descriptor '{descriptor.key}' has differently "
+            "sized accumulator and result elements"
+        )
+    if (
+        descriptor.vector_bit_width % lhs_bit_count != 0
+        or descriptor.vector_bit_width % result_bit_count != 0
+        or result_bit_count % lhs_bit_count != 0
+    ):
+        raise ValueError(
+            f"x86 packed-dot descriptor '{descriptor.key}' cannot factor its "
+            "vector and numeric widths into a contraction"
+        )
+
+    element_layouts = {
+        role: contiguous_element_layout(
+            key=f"{descriptor.key}.{role}",
+            element_count=descriptor.vector_bit_width // atom_bit_width,
+            atom_bit_width=atom_bit_width,
+            physical_dimension_name="value",
+        )
+        for role, atom_bit_width in (
+            (ROLE_LHS, lhs_bit_count),
+            (ROLE_RHS, rhs_bit_count),
+            (ROLE_ACCUMULATOR, accumulator_bit_count),
+            (ROLE_RESULT, result_bit_count),
+        )
+    }
+    return grouped_dot_contraction_layout(
+        group_size=result_bit_count // lhs_bit_count,
+        lhs=element_layouts[ROLE_LHS],
+        rhs=element_layouts[ROLE_RHS],
+        accumulator=element_layouts[ROLE_ACCUMULATOR],
+        result=element_layouts[ROLE_RESULT],
+    )
+
+
+@cache
+def packed_dot_native_contraction_facts(
+    descriptor: PackedDotDescriptor,
+) -> NativeContractionFacts:
+    """Summarizes one x86 packed dot for shipping compiler consumers."""
+
+    layout = packed_dot_native_layout(descriptor)
+    element_bit_counts = {
+        ROLE_LHS: _NUMERIC_TYPE_BIT_COUNTS[descriptor.lhs_numeric_type],
+        ROLE_RHS: _NUMERIC_TYPE_BIT_COUNTS[descriptor.rhs_numeric_type],
+        ROLE_ACCUMULATOR: _NUMERIC_TYPE_BIT_COUNTS[descriptor.accumulator_numeric_type],
+        ROLE_RESULT: _NUMERIC_TYPE_BIT_COUNTS[descriptor.result_numeric_type],
+    }
+
+    def role_facts(
+        role_layout: ExactContractionRoleLayout,
+    ) -> NativeContractionRoleFacts:
+        element_bit_count = element_bit_counts[role_layout.role]
+        return exact_native_contraction_role_facts(
+            role_layout.role,
+            role_layout.coordinate_map,
+            element_bit_count=element_bit_count,
+            register_count=1,
+            payload_element_count=descriptor.vector_bit_width // element_bit_count,
+        )
+
+    return NativeContractionFacts(
+        shape=layout.shape,
+        participant_count=1,
+        lhs=role_facts(layout.lhs),
+        rhs=role_facts(layout.rhs),
+        accumulator=role_facts(layout.accumulator),
+        result=role_facts(layout.result),
     )
 
 
@@ -107,9 +217,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX512_VNNI | FEATURE_AVX512_VL,
         0,
         128,
-        16,
-        4,
-        4,
         NUMERIC_U8,
         NUMERIC_I8,
         NUMERIC_I32,
@@ -124,9 +231,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX512_VNNI | FEATURE_AVX512_VL,
         0,
         256,
-        32,
-        8,
-        4,
         NUMERIC_U8,
         NUMERIC_I8,
         NUMERIC_I32,
@@ -141,9 +245,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX512_VNNI,
         0,
         512,
-        64,
-        16,
-        4,
         NUMERIC_U8,
         NUMERIC_I8,
         NUMERIC_I32,
@@ -158,9 +259,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX512_VNNI | FEATURE_AVX512_VL,
         CONTRACT_FLAG_SATURATING,
         128,
-        16,
-        4,
-        4,
         NUMERIC_U8,
         NUMERIC_I8,
         NUMERIC_I32,
@@ -175,9 +273,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX512_VNNI | FEATURE_AVX512_VL,
         CONTRACT_FLAG_SATURATING,
         256,
-        32,
-        8,
-        4,
         NUMERIC_U8,
         NUMERIC_I8,
         NUMERIC_I32,
@@ -192,9 +287,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX512_VNNI,
         CONTRACT_FLAG_SATURATING,
         512,
-        64,
-        16,
-        4,
         NUMERIC_U8,
         NUMERIC_I8,
         NUMERIC_I32,
@@ -209,9 +301,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX512_VNNI | FEATURE_AVX512_VL,
         0,
         128,
-        8,
-        4,
-        2,
         NUMERIC_I16,
         NUMERIC_I16,
         NUMERIC_I32,
@@ -226,9 +315,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX512_VNNI | FEATURE_AVX512_VL,
         0,
         256,
-        16,
-        8,
-        2,
         NUMERIC_I16,
         NUMERIC_I16,
         NUMERIC_I32,
@@ -243,9 +329,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX512_VNNI,
         0,
         512,
-        32,
-        16,
-        2,
         NUMERIC_I16,
         NUMERIC_I16,
         NUMERIC_I32,
@@ -260,9 +343,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX512_VNNI | FEATURE_AVX512_VL,
         CONTRACT_FLAG_SATURATING,
         128,
-        8,
-        4,
-        2,
         NUMERIC_I16,
         NUMERIC_I16,
         NUMERIC_I32,
@@ -277,9 +357,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX512_VNNI | FEATURE_AVX512_VL,
         CONTRACT_FLAG_SATURATING,
         256,
-        16,
-        8,
-        2,
         NUMERIC_I16,
         NUMERIC_I16,
         NUMERIC_I32,
@@ -294,9 +371,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX512_VNNI,
         CONTRACT_FLAG_SATURATING,
         512,
-        32,
-        16,
-        2,
         NUMERIC_I16,
         NUMERIC_I16,
         NUMERIC_I32,
@@ -311,9 +385,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI,
         0,
         128,
-        16,
-        4,
-        4,
         NUMERIC_U8,
         NUMERIC_I8,
         NUMERIC_I32,
@@ -328,9 +399,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI,
         0,
         256,
-        32,
-        8,
-        4,
         NUMERIC_U8,
         NUMERIC_I8,
         NUMERIC_I32,
@@ -345,9 +413,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI,
         CONTRACT_FLAG_SATURATING,
         128,
-        16,
-        4,
-        4,
         NUMERIC_U8,
         NUMERIC_I8,
         NUMERIC_I32,
@@ -362,9 +427,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI,
         CONTRACT_FLAG_SATURATING,
         256,
-        32,
-        8,
-        4,
         NUMERIC_U8,
         NUMERIC_I8,
         NUMERIC_I32,
@@ -379,9 +441,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI,
         0,
         128,
-        8,
-        4,
-        2,
         NUMERIC_I16,
         NUMERIC_I16,
         NUMERIC_I32,
@@ -396,9 +455,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI,
         0,
         256,
-        16,
-        8,
-        2,
         NUMERIC_I16,
         NUMERIC_I16,
         NUMERIC_I32,
@@ -413,9 +469,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI,
         CONTRACT_FLAG_SATURATING,
         128,
-        8,
-        4,
-        2,
         NUMERIC_I16,
         NUMERIC_I16,
         NUMERIC_I32,
@@ -430,9 +483,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI,
         CONTRACT_FLAG_SATURATING,
         256,
-        16,
-        8,
-        2,
         NUMERIC_I16,
         NUMERIC_I16,
         NUMERIC_I32,
@@ -447,9 +497,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI_INT8,
         0,
         128,
-        16,
-        4,
-        4,
         NUMERIC_I8,
         NUMERIC_I8,
         NUMERIC_I32,
@@ -464,9 +511,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI_INT8,
         0,
         256,
-        32,
-        8,
-        4,
         NUMERIC_I8,
         NUMERIC_I8,
         NUMERIC_I32,
@@ -481,9 +525,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI_INT8,
         CONTRACT_FLAG_SATURATING,
         128,
-        16,
-        4,
-        4,
         NUMERIC_I8,
         NUMERIC_I8,
         NUMERIC_I32,
@@ -498,9 +539,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI_INT8,
         CONTRACT_FLAG_SATURATING,
         256,
-        32,
-        8,
-        4,
         NUMERIC_I8,
         NUMERIC_I8,
         NUMERIC_I32,
@@ -515,9 +553,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI_INT8,
         0,
         128,
-        16,
-        4,
-        4,
         NUMERIC_I8,
         NUMERIC_U8,
         NUMERIC_I32,
@@ -532,9 +567,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI_INT8,
         0,
         256,
-        32,
-        8,
-        4,
         NUMERIC_I8,
         NUMERIC_U8,
         NUMERIC_I32,
@@ -549,9 +581,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI_INT8,
         CONTRACT_FLAG_SATURATING,
         128,
-        16,
-        4,
-        4,
         NUMERIC_I8,
         NUMERIC_U8,
         NUMERIC_I32,
@@ -566,9 +595,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI_INT8,
         CONTRACT_FLAG_SATURATING,
         256,
-        32,
-        8,
-        4,
         NUMERIC_I8,
         NUMERIC_U8,
         NUMERIC_I32,
@@ -583,9 +609,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI_INT8,
         0,
         128,
-        16,
-        4,
-        4,
         NUMERIC_U8,
         NUMERIC_U8,
         NUMERIC_I32,
@@ -600,9 +623,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI_INT8,
         0,
         256,
-        32,
-        8,
-        4,
         NUMERIC_U8,
         NUMERIC_U8,
         NUMERIC_I32,
@@ -617,9 +637,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI_INT8,
         CONTRACT_FLAG_SATURATING,
         128,
-        16,
-        4,
-        4,
         NUMERIC_U8,
         NUMERIC_U8,
         NUMERIC_I32,
@@ -634,9 +651,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI_INT8,
         CONTRACT_FLAG_SATURATING,
         256,
-        32,
-        8,
-        4,
         NUMERIC_U8,
         NUMERIC_U8,
         NUMERIC_I32,
@@ -651,9 +665,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI_INT16,
         0,
         128,
-        8,
-        4,
-        2,
         NUMERIC_I16,
         NUMERIC_U16,
         NUMERIC_I32,
@@ -668,9 +679,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI_INT16,
         0,
         256,
-        16,
-        8,
-        2,
         NUMERIC_I16,
         NUMERIC_U16,
         NUMERIC_I32,
@@ -685,9 +693,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI_INT16,
         0,
         128,
-        8,
-        4,
-        2,
         NUMERIC_U16,
         NUMERIC_I16,
         NUMERIC_I32,
@@ -702,9 +707,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI_INT16,
         0,
         256,
-        16,
-        8,
-        2,
         NUMERIC_U16,
         NUMERIC_I16,
         NUMERIC_I32,
@@ -719,9 +721,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI_INT16,
         0,
         128,
-        8,
-        4,
-        2,
         NUMERIC_U16,
         NUMERIC_U16,
         NUMERIC_I32,
@@ -736,9 +735,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX_VNNI_INT16,
         0,
         256,
-        16,
-        8,
-        2,
         NUMERIC_U16,
         NUMERIC_U16,
         NUMERIC_I32,
@@ -753,9 +749,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX10_2,
         0,
         512,
-        64,
-        16,
-        4,
         NUMERIC_I8,
         NUMERIC_I8,
         NUMERIC_I32,
@@ -770,9 +763,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX10_2,
         0,
         512,
-        64,
-        16,
-        4,
         NUMERIC_I8,
         NUMERIC_U8,
         NUMERIC_I32,
@@ -787,9 +777,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX10_2,
         0,
         512,
-        64,
-        16,
-        4,
         NUMERIC_U8,
         NUMERIC_U8,
         NUMERIC_I32,
@@ -804,9 +791,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX10_2,
         CONTRACT_FLAG_SATURATING,
         512,
-        64,
-        16,
-        4,
         NUMERIC_I8,
         NUMERIC_I8,
         NUMERIC_I32,
@@ -821,9 +805,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX10_2,
         CONTRACT_FLAG_SATURATING,
         512,
-        64,
-        16,
-        4,
         NUMERIC_I8,
         NUMERIC_U8,
         NUMERIC_I32,
@@ -838,9 +819,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX10_2,
         CONTRACT_FLAG_SATURATING,
         512,
-        64,
-        16,
-        4,
         NUMERIC_U8,
         NUMERIC_U8,
         NUMERIC_I32,
@@ -855,9 +833,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX10_2,
         0,
         512,
-        32,
-        16,
-        2,
         NUMERIC_I16,
         NUMERIC_U16,
         NUMERIC_I32,
@@ -872,9 +847,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX10_2,
         0,
         512,
-        32,
-        16,
-        2,
         NUMERIC_U16,
         NUMERIC_I16,
         NUMERIC_I32,
@@ -889,9 +861,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX10_2,
         0,
         512,
-        32,
-        16,
-        2,
         NUMERIC_U16,
         NUMERIC_U16,
         NUMERIC_I32,
@@ -906,9 +875,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX10_2,
         0,
         128,
-        8,
-        4,
-        2,
         NUMERIC_F16,
         NUMERIC_F16,
         NUMERIC_F32,
@@ -923,9 +889,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX10_2,
         0,
         256,
-        16,
-        8,
-        2,
         NUMERIC_F16,
         NUMERIC_F16,
         NUMERIC_F32,
@@ -940,9 +903,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX10_2,
         0,
         512,
-        32,
-        16,
-        2,
         NUMERIC_F16,
         NUMERIC_F16,
         NUMERIC_F32,
@@ -957,9 +917,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX512_BF16 | FEATURE_AVX512_VL,
         0,
         128,
-        8,
-        4,
-        2,
         NUMERIC_BF16,
         NUMERIC_BF16,
         NUMERIC_F32,
@@ -974,9 +931,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX512_BF16 | FEATURE_AVX512_VL,
         0,
         256,
-        16,
-        8,
-        2,
         NUMERIC_BF16,
         NUMERIC_BF16,
         NUMERIC_F32,
@@ -991,9 +945,6 @@ X86_PACKED_DOT_DESCRIPTORS = (
         FEATURE_AVX512_BF16,
         0,
         512,
-        32,
-        16,
-        2,
         NUMERIC_BF16,
         NUMERIC_BF16,
         NUMERIC_F32,

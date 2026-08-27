@@ -1,0 +1,11 @@
+test.record @config_dependency
+
+test.record @implementation_dependency
+
+test.split_func @split_root() {
+  test.symbol_array_attrs [@config_dependency] using []
+  test.yield
+} launch {
+  test.symbol_array_attrs [@implementation_dependency] using []
+  test.yield
+}

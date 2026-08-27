@@ -12,7 +12,7 @@
 
 #include "iree/base/internal/dynamic_library.h"
 #include "iree/hal/api.h"
-#include "iree/hal/local/executable_format.h"
+#include "iree/hal/local/executable_data.h"
 #include "iree/hal/local/executable_library.h"
 #include "iree/hal/local/executable_library_util.h"
 #include "iree/hal/local/executable_plugin_manager.h"
@@ -84,19 +84,15 @@ typedef struct iree_hal_system_executable_t {
   // Name used for the file field in tracy and debuggers.
   iree_string_view_t identifier;
 
-  // Queried metadata from the library.
-  union {
-    const iree_hal_executable_library_header_t** header;
-    const iree_hal_executable_library_v0_t* v0;
-  } library;
+  // Queried v0 library metadata.
+  const iree_hal_executable_library_v0_t* library;
 } iree_hal_system_executable_t;
 
 static const iree_hal_local_executable_vtable_t
     iree_hal_system_executable_vtable;
 
 // Loads the executable and optional debug database from the given
-// |executable_data| in memory. The memory must remain live for the lifetime
-// of the executable.
+// |executable_data| in memory. The data is borrowed only for this call.
 static iree_status_t iree_hal_system_executable_load(
     iree_hal_system_executable_t* executable,
     iree_const_byte_span_t executable_data, iree_allocator_t host_allocator) {
@@ -145,17 +141,13 @@ static iree_status_t iree_hal_system_executable_query_library(
       (void**)&query_fn));
 
   // Query for a compatible version of the library.
-  executable->library.header =
+  const iree_hal_executable_library_header_t* const* query_result =
       query_fn(IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST,
                &executable->base.environment);
-  if (!executable->library.header) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "executable does not support this version of the runtime (%08X)",
-        IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST);
-  }
+  IREE_RETURN_IF_ERROR(iree_hal_executable_library_validate_query_result(
+      query_result, &executable->library));
   const iree_hal_executable_library_header_t* header =
-      *executable->library.header;
+      executable->library->header;
 
   // Ensure that if the library is built for a particular sanitizer that we also
   // were compiled with that sanitizer enabled.
@@ -199,10 +191,10 @@ static iree_status_t iree_hal_system_executable_query_library(
   }
 
   executable->identifier = iree_make_cstring_view(header->name);
-  executable->base.dispatch_attrs = executable->library.v0->exports.attrs;
-  executable->base.dispatch_ptrs = executable->library.v0->exports.ptrs;
-  executable->base.export_count = executable->library.v0->exports.count;
-  executable->base.export_names = executable->library.v0->exports.names;
+  executable->base.dispatch_attrs = executable->library->exports.attrs;
+  executable->base.dispatch_ptrs = executable->library->exports.ptrs;
+  executable->base.export_count = executable->library->exports.count;
+  executable->base.export_names = executable->library->exports.names;
   return iree_ok_status();
 }
 
@@ -213,7 +205,7 @@ static int iree_hal_system_executable_import_thunk_v0(
 }
 
 static iree_status_t iree_hal_system_executable_create(
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_load_params_t* executable_params,
     const iree_hal_executable_import_provider_t import_provider,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
   IREE_ASSERT_ARGUMENT(executable_params);
@@ -262,19 +254,19 @@ static iree_status_t iree_hal_system_executable_create(
   if (iree_status_is_ok(status)) {
     status = iree_hal_executable_library_initialize_imports(
         &executable->base.environment, import_provider,
-        &executable->library.v0->imports,
+        &executable->library->imports,
         iree_hal_system_executable_import_thunk_v0, host_allocator);
   }
 
   // Verify that the library matches the executable params.
   if (iree_status_is_ok(status)) {
     status = iree_hal_executable_library_verify(executable_params,
-                                                executable->library.v0);
+                                                executable->library);
   }
 
   // Publish the executable sources with the tracing infrastructure.
   if (iree_status_is_ok(status)) {
-    iree_hal_executable_library_publish_source_files(executable->library.v0);
+    iree_hal_executable_library_publish_source_files(executable->library);
   }
 
   if (iree_status_is_ok(status)) {
@@ -312,7 +304,7 @@ static iree_status_t iree_hal_system_executable_issue_call(
     uint32_t worker_id) {
   iree_hal_system_executable_t* executable =
       (iree_hal_system_executable_t*)base_executable;
-  const iree_hal_executable_library_v0_t* library = executable->library.v0;
+  const iree_hal_executable_library_v0_t* library = executable->library;
 
   if (IREE_UNLIKELY(ordinal >= library->exports.count)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -340,7 +332,7 @@ static iree_host_size_t iree_hal_system_executable_export_count(
     iree_hal_executable_t* base_executable) {
   iree_hal_system_executable_t* executable =
       (iree_hal_system_executable_t*)base_executable;
-  return iree_hal_executable_library_export_count(executable->library.v0);
+  return iree_hal_executable_library_export_count(executable->library);
 }
 
 static iree_status_t iree_hal_system_executable_export_info(
@@ -349,7 +341,7 @@ static iree_status_t iree_hal_system_executable_export_info(
     iree_hal_executable_function_info_t* out_info) {
   iree_hal_system_executable_t* executable =
       (iree_hal_system_executable_t*)base_executable;
-  return iree_hal_executable_library_export_info(executable->library.v0,
+  return iree_hal_executable_library_export_info(executable->library,
                                                  export_ordinal, out_info);
 }
 
@@ -360,7 +352,7 @@ static iree_status_t iree_hal_system_executable_export_parameters(
   iree_hal_system_executable_t* executable =
       (iree_hal_system_executable_t*)base_executable;
   return iree_hal_executable_library_export_parameters(
-      executable->library.v0, export_ordinal, capacity, out_parameters);
+      executable->library, export_ordinal, capacity, out_parameters);
 }
 
 static iree_status_t iree_hal_system_executable_lookup_export_by_name(
@@ -369,7 +361,7 @@ static iree_status_t iree_hal_system_executable_lookup_export_by_name(
   iree_hal_system_executable_t* executable =
       (iree_hal_system_executable_t*)base_executable;
   return iree_hal_executable_library_lookup_export_by_name(
-      executable->library.v0, name, out_export_ordinal);
+      executable->library, name, out_export_ordinal);
 }
 
 static iree_status_t iree_hal_system_executable_try_lookup_global_by_name(
@@ -475,59 +467,39 @@ static void iree_hal_system_library_loader_destroy(
   IREE_TRACE_ZONE_END(z0);
 }
 
-#if defined(IREE_PLATFORM_APPLE)
-#define IREE_PLATFORM_DYLIB_TYPE "dylib"
-#elif defined(IREE_PLATFORM_WINDOWS)
-#define IREE_PLATFORM_DYLIB_TYPE "dll"
-#elif defined(IREE_PLATFORM_WASM)
-#define IREE_PLATFORM_DYLIB_TYPE "wasm"
-#else
-#define IREE_PLATFORM_DYLIB_TYPE "elf"
-#endif  // IREE_PLATFORM_*
-
-static iree_status_t iree_hal_system_library_loader_infer_format(
+static bool iree_hal_system_library_loader_query_target_support(
     iree_hal_executable_loader_t* base_executable_loader,
-    iree_hal_executable_caching_mode_t caching_mode,
-    iree_const_byte_span_t executable_data,
-    iree_host_size_t executable_format_capacity, char* executable_format,
-    iree_host_size_t* out_inferred_size) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-  iree_status_t status = iree_hal_executable_infer_system_format(
-      executable_data, executable_format_capacity, executable_format,
-      out_inferred_size);
-  IREE_TRACE_ZONE_END(z0);
-  return status;
-}
-
-static bool iree_hal_system_library_loader_query_support(
-    iree_hal_executable_loader_t* base_executable_loader,
-    iree_hal_executable_caching_mode_t caching_mode,
-    iree_string_view_t executable_format) {
-  return iree_string_view_starts_with(
-      executable_format,
-      iree_make_cstring_view("system-" IREE_PLATFORM_DYLIB_TYPE "-" IREE_ARCH));
+    const iree_hal_executable_target_t* target) {
+  return iree_string_view_equal(target->family, IREE_SV("cpu"));
 }
 
 static void iree_hal_system_library_loader_query_spec(
     iree_hal_executable_loader_t* base_executable_loader,
     iree_hal_device_executable_spec_t* out_executable_spec) {
-  static const iree_hal_executable_format_spec_t executable_formats[] = {
-      {
-          .format = IREE_SVL("system-" IREE_PLATFORM_DYLIB_TYPE "-" IREE_ARCH),
-          .caching_modes = IREE_HAL_EXECUTABLE_CACHING_MODE_NONE,
-          .flags = IREE_HAL_EXECUTABLE_FORMAT_SPEC_FLAG_NONE,
-      },
-  };
-  *out_executable_spec = (iree_hal_device_executable_spec_t){
-      .format_count = IREE_ARRAYSIZE(executable_formats),
-      .formats = executable_formats,
-      .flags = IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
-  };
+  *out_executable_spec = (iree_hal_device_executable_spec_t){0};
 }
 
-static iree_status_t iree_hal_system_library_loader_try_load(
+static bool iree_hal_system_library_loader_claims_executable(
     iree_hal_executable_loader_t* base_executable_loader,
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params) {
+  if (!iree_hal_local_executable_data_is_system_library(
+          load_params->executable_data)) {
+    return false;
+  }
+  if (!iree_hal_local_executable_data_is_elf(load_params->executable_data)) {
+    return true;
+  }
+  return iree_any_bit_set(load_params->flags,
+                          IREE_HAL_EXECUTABLE_LOAD_FLAG_ENABLE_DEBUGGING) ||
+         iree_hal_local_elf_data_requires_system_loader(
+             load_params->executable_data);
+}
+
+static iree_status_t iree_hal_system_library_loader_load(
+    iree_hal_executable_loader_t* base_executable_loader,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* executable_params,
     iree_host_size_t worker_capacity, iree_hal_executable_t** out_executable) {
   iree_hal_system_library_loader_t* executable_loader =
       (iree_hal_system_library_loader_t*)base_executable_loader;
@@ -546,8 +518,9 @@ static iree_status_t iree_hal_system_library_loader_try_load(
 static const iree_hal_executable_loader_vtable_t
     iree_hal_system_library_loader_vtable = {
         .destroy = iree_hal_system_library_loader_destroy,
-        .infer_format = iree_hal_system_library_loader_infer_format,
-        .query_support = iree_hal_system_library_loader_query_support,
+        .query_target_support =
+            iree_hal_system_library_loader_query_target_support,
         .query_spec = iree_hal_system_library_loader_query_spec,
-        .try_load = iree_hal_system_library_loader_try_load,
+        .claims_executable = iree_hal_system_library_loader_claims_executable,
+        .load = iree_hal_system_library_loader_load,
 };

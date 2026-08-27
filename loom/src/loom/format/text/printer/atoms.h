@@ -16,14 +16,8 @@
 extern "C" {
 #endif
 
-// Stack buffer size for formatting generated value names (%0, %1$2, ...).
-// Explicit names live in the module string table and are streamed directly so
-// they are not capped by this fallback buffer.
-#define LOOM_VALUE_NAME_BUFFER_SIZE 32
-
 // Prints an SSA value reference without token spacing.
-iree_status_t loom_print_value_ref(loom_output_stream_t* stream,
-                                   const loom_module_t* module,
+iree_status_t loom_print_value_ref(const loom_print_context_t* ctx,
                                    loom_value_id_t value_id);
 
 // Emits an SSA value name through the token spacing model.
@@ -36,10 +30,14 @@ iree_status_t loom_print_value_name_with_field(
     loom_print_field_ref_t field_ref);
 
 // Prints a canonical attribute payload.
-iree_status_t loom_print_attr(loom_output_stream_t* stream,
+iree_status_t loom_print_attr(const loom_print_context_t* ctx,
                               const loom_attribute_t* attr,
-                              const loom_module_t* module,
                               const loom_attr_descriptor_t* descriptor);
+
+// Prints one exact-family parameterized attribute's angle payload.
+iree_status_t loom_print_parameterized_attr_parameters(
+    const loom_print_context_t* ctx, const loom_attribute_t* attr,
+    const loom_attr_descriptor_t* descriptor);
 
 // Prints |type| using the current contextual printer state.
 iree_status_t loom_print_type(loom_print_context_t* ctx, loom_type_t type);

@@ -1,0 +1,212 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1170> @target
+func.def target(@target) @scalar_f32_minmax_semantics(%lhs: f32, %rhs: f32) -> (f32, f32, f32, f32) {
+  %minnum = scalar.minnumf %lhs, %rhs : f32
+  %maxnum = scalar.maxnumf %lhs, %rhs : f32
+  %minimum = scalar.minimumf %lhs, %rhs : f32
+  %maximum = scalar.maximumf %lhs, %rhs : f32
+  func.return %minnum, %maxnum, %minimum, %maximum : f32, f32, f32, f32
+}
+
+// ----
+low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @scalar_f32_minmax_semantics(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %minnum = v_min_num_f32 %lhs, %rhs
+  %maxnum = v_max_num_f32 %lhs, %rhs
+  %minimum = v_minimum_f32 %lhs, %rhs
+  %maximum = v_maximum_f32 %lhs, %rhs
+  return %minnum, %maxnum, %minimum, %maximum
+}
+
+// ====
+
+amdgpu.target<gfx1170> @target
+func.def target(@target) @scalar_f16_minmax_semantics(%lhs: f16, %rhs: f16) -> (f16, f16, f16, f16) {
+  %minnum = scalar.minnumf %lhs, %rhs : f16
+  %maxnum = scalar.maxnumf %lhs, %rhs : f16
+  %minimum = scalar.minimumf %lhs, %rhs : f16
+  %maximum = scalar.maximumf %lhs, %rhs : f16
+  func.return %minnum, %maxnum, %minimum, %maximum : f16, f16, f16, f16
+}
+
+// ----
+low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @scalar_f16_minmax_semantics(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %minnum = v_min_num_f16 %lhs, %rhs
+  %maxnum = v_max_num_f16 %lhs, %rhs
+  %minimum = v_minimum_f16 %lhs, %rhs
+  %maximum = v_maximum_f16 %lhs, %rhs
+  %20 = v_bfe_u32_offset_0_width_16_low16 %minnum
+  %21 = v_bfe_u32_offset_0_width_16_low16 %maxnum
+  %22 = v_bfe_u32_offset_0_width_16_low16 %minimum
+  %23 = v_bfe_u32_offset_0_width_16_low16 %maximum
+  return %20, %21, %22, %23
+}
+
+// ====
+
+amdgpu.target<gfx1170> @target
+func.def target(@target) @scalar_f64_minmax_semantics(%lhs: f64, %rhs: f64) -> (f64, f64, f64, f64) {
+  %minnum = scalar.minnumf %lhs, %rhs : f64
+  %maxnum = scalar.maxnumf %lhs, %rhs : f64
+  %minimum = scalar.minimumf %lhs, %rhs : f64
+  %maximum = scalar.maximumf %lhs, %rhs : f64
+  func.return %minnum, %maxnum, %minimum, %maximum : f64, f64, f64, f64
+}
+
+// ----
+low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @scalar_f64_minmax_semantics(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %minnum = v_min_num_f64 %lhs, %rhs
+  %maxnum = v_max_num_f64 %lhs, %rhs
+  %minimum = v_minimum_f64 %lhs, %rhs
+  %maximum = v_maximum_f64 %lhs, %rhs
+  return %minnum, %maxnum, %minimum, %maximum
+}
+
+// ====
+
+amdgpu.target<gfx1170> @target
+func.def target(@target) @packed_f16_minmax_semantics(%lhs: vector<4xf16>, %rhs: vector<4xf16>) -> (vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>) {
+  %minnum = vector.minnumf %lhs, %rhs : vector<4xf16>
+  %maxnum = vector.maxnumf %lhs, %rhs : vector<4xf16>
+  %minimum = vector.minimumf %lhs, %rhs : vector<4xf16>
+  %maximum = vector.maximumf %lhs, %rhs : vector<4xf16>
+  func.return %minnum, %maxnum, %minimum, %maximum : vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @packed_f16_minmax_semantics(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %16 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %17 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %18 = v_pk_min_num_f16 %16, %17
+  %19 = slice %lhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %20 = slice %rhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %21 = v_pk_min_num_f16 %19, %20
+  %minnum = concat(%18, %21) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %25 = v_pk_max_num_f16 %16, %17
+  %28 = v_pk_max_num_f16 %19, %20
+  %maxnum = concat(%25, %28) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %32 = v_pk_minimum_f16 %16, %17
+  %35 = v_pk_minimum_f16 %19, %20
+  %minimum = concat(%32, %35) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %39 = v_pk_maximum_f16 %16, %17
+  %42 = v_pk_maximum_f16 %19, %20
+  %maximum = concat(%39, %42) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %minnum, %maxnum, %minimum, %maximum
+}
+
+// ====
+
+amdgpu.target<gfx1170> @target
+func.def target(@target) @scalar_f32_clamp_semantics(%value: f32, %lower: f32, %upper: f32) -> (f32, f32) {
+  %number = scalar.clampf<number, nnan|nsz> %value, %lower, %upper : f32
+  %ieee = scalar.clampf<ieee> %value, %lower, %upper : f32
+  func.return %number, %ieee : f32, f32
+}
+
+// ----
+low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @scalar_f32_clamp_semantics(%value: reg<amdgpu.vgpr>, %lower: reg<amdgpu.vgpr>, %upper: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %number = v_maxmin_num_f32 %value, %lower, %upper
+  %ieee = v_maximumminimum_f32 %value, %lower, %upper
+  return %number, %ieee
+}
+
+// ====
+
+amdgpu.target<gfx1170> @target
+func.def target(@target) @scalar_f16_clamp_semantics(%value: f16, %lower: f16, %upper: f16) -> (f16, f16) {
+  %number = scalar.clampf<number, nnan|nsz> %value, %lower, %upper : f16
+  %ieee = scalar.clampf<ieee> %value, %lower, %upper : f16
+  func.return %number, %ieee : f16, f16
+}
+
+// ----
+low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @scalar_f16_clamp_semantics(%value: reg<amdgpu.vgpr>, %lower: reg<amdgpu.vgpr>, %upper: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %number = v_maxmin_num_f16 %value, %lower, %upper
+  %ieee = v_maximumminimum_f16 %value, %lower, %upper
+  %14 = v_bfe_u32_offset_0_width_16_low16 %number
+  %15 = v_bfe_u32_offset_0_width_16_low16 %ieee
+  return %14, %15
+}
+
+// ====
+
+amdgpu.target<gfx1170> @target
+func.def target(@target) @vector_f32_clamp_semantics(%value: vector<4xf32>, %lower: vector<4xf32>, %upper: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
+  %number = vector.clampf<number, nnan|nsz> %value, %lower, %upper : vector<4xf32>
+  %ieee = vector.clampf<ieee> %value, %lower, %upper : vector<4xf32>
+  func.return %number, %ieee : vector<4xf32>, vector<4xf32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @vector_f32_clamp_semantics(%value: reg<amdgpu.vgpr x4>, %lower: reg<amdgpu.vgpr x4>, %upper: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm {
+  %12 = slice %value[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %13 = slice %lower[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %14 = slice %upper[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %15 = v_maxmin_num_f32 %12, %13, %14
+  %16 = slice %value[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %17 = slice %lower[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %18 = slice %upper[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %19 = v_maxmin_num_f32 %16, %17, %18
+  %20 = slice %value[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %21 = slice %lower[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %22 = slice %upper[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %23 = v_maxmin_num_f32 %20, %21, %22
+  %24 = slice %value[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %25 = slice %lower[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %26 = slice %upper[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %27 = v_maxmin_num_f32 %24, %25, %26
+  %number = concat(%15, %19, %23, %27) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %32 = v_maximumminimum_f32 %12, %13, %14
+  %36 = v_maximumminimum_f32 %16, %17, %18
+  %40 = v_maximumminimum_f32 %20, %21, %22
+  %44 = v_maximumminimum_f32 %24, %25, %26
+  %ieee = concat(%32, %36, %40, %44) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %number, %ieee
+}
+
+// ====
+
+amdgpu.target<gfx1170> @target
+func.def target(@target) @packed_f16_clamp_semantics(%value: vector<4xf16>, %lower: vector<4xf16>, %upper: vector<4xf16>) -> (vector<4xf16>, vector<4xf16>) {
+  %number = vector.clampf<number, nnan|nsz> %value, %lower, %upper : vector<4xf16>
+  %ieee = vector.clampf<ieee> %value, %lower, %upper : vector<4xf16>
+  func.return %number, %ieee : vector<4xf16>, vector<4xf16>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @packed_f16_clamp_semantics(%value: reg<amdgpu.vgpr x2>, %lower: reg<amdgpu.vgpr x2>, %upper: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %12 = slice %value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %13 = slice %lower[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %14 = v_pk_max_num_f16 %12, %13
+  %15 = slice %value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %16 = slice %lower[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %17 = v_pk_max_num_f16 %15, %16
+  %20 = slice %upper[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %21 = v_pk_min_num_f16 %14, %20
+  %23 = slice %upper[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %24 = v_pk_min_num_f16 %17, %23
+  %number = concat(%21, %24) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %28 = v_pk_maximum_f16 %12, %13
+  %31 = v_pk_maximum_f16 %15, %16
+  %35 = v_pk_minimum_f16 %28, %20
+  %38 = v_pk_minimum_f16 %31, %23
+  %ieee = concat(%35, %38) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %number, %ieee
+}
+
+// ====
+
+amdgpu.target<gfx1170> @target
+func.def target(@target) @scalar_f32_clamp_ordered(%value: f32, %lower: f32, %upper: f32) -> (f32) {
+  %result = scalar.clampf<ordered> %value, %lower, %upper : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @scalar_f32_clamp_ordered(%value: reg<amdgpu.vgpr>, %lower: reg<amdgpu.vgpr>, %upper: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %9 = v_cmp_lt_f32 %value, %lower
+  %10 = v_cndmask_b32 %value, %lower, %9
+  %11 = v_cmp_gt_f32 %10, %upper
+  %result = v_cndmask_b32 %10, %upper, %11
+  return %result
+}

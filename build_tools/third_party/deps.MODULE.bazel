@@ -20,6 +20,7 @@ bazel_dep(
 )
 
 bazel_dep(name = "libbacktrace", version = "1.0.0-20250926-7939218")
+bazel_dep(name = "zstd", version = "1.5.7.bcr.1")
 
 bazel_dep(name = "catch2", version = "3.13.0", dev_dependency = True)
 
@@ -30,30 +31,32 @@ rocm_repository = use_repo_rule("//build_tools/third_party/rocm:repository.bzl",
 http_archive(
     name = "spirv_headers",
     build_file = "//build_tools/third_party/spirv_tools:spirv_headers.BUILD.bazel",
-    sha256 = "cab0a654c4917e16367483296b44cdb1d614e3120c721beafcd37e3a8580486c",
-    strip_prefix = "SPIRV-Headers-vulkan-sdk-1.4.341.0",
-    url = "https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/vulkan-sdk-1.4.341.0.tar.gz",
+    sha256 = "4d703067a7e06331ccb37bdfed3f9b7879cc61969a2689ae95c95db34a47ff07",
+    strip_prefix = "SPIRV-Headers-vulkan-sdk-1.4.357.0",
+    url = "https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/vulkan-sdk-1.4.357.0.tar.gz",
 )
 
 http_archive(
     name = "spirv_tools",
     build_file = "//build_tools/third_party/spirv_tools:spirv_tools.BUILD.bazel",
-    sha256 = "35dc16cf2dc64be5b6bbbe86d210e6f4a82b070cffd751605a3365cd8bce2d7e",
-    strip_prefix = "SPIRV-Tools-2026.1",
-    url = "https://github.com/KhronosGroup/SPIRV-Tools/archive/refs/tags/v2026.1.tar.gz",
+    sha256 = "d31e7109b6ef3559067e53e520870eafed7c9534d00db9728814b6df03fa4a5e",
+    strip_prefix = "SPIRV-Tools-vulkan-sdk-1.4.357.0",
+    url = "https://github.com/KhronosGroup/SPIRV-Tools/archive/refs/tags/vulkan-sdk-1.4.357.0.tar.gz",
 )
 
 http_archive(
     name = "vulkan_headers",
     build_file = "//build_tools/third_party/vulkan_headers:vulkan_headers.BUILD.bazel",
-    sha256 = "70de3ec1eec289552052dfb886a49a4578b65d84fd536da3254731c8165cb3e6",
-    strip_prefix = "Vulkan-Headers-df60f0316899460eeaaefa06d2dd7e4e300c1604",
-    url = "https://github.com/KhronosGroup/Vulkan-Headers/archive/df60f0316899460eeaaefa06d2dd7e4e300c1604.tar.gz",
+    sha256 = "e87dce08116151f6b6d7de6b6faf41498e87e6cf848ff16fa3bd5402190ad4a3",
+    strip_prefix = "Vulkan-Headers-vulkan-sdk-1.4.357.0",
+    url = "https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/vulkan-sdk-1.4.357.0.tar.gz",
 )
 
 http_archive(
     name = "flatcc",
     build_file = "//build_tools/third_party/flatcc:flatcc.BUILD.bazel",
+    patch_args = ["-p1"],
+    patches = ["//build_tools/third_party/flatcc:xxhash_msvc_restrict.patch"],
     sha256 = "f77f842e996f5bbfa25305a7b38b40d1325fb44154f2bf9880c58356ece92c62",
     strip_prefix = "flatcc-9362cd00f0007d8cbee7bff86e90fb4b6b227ff3",
     url = "https://github.com/dvidelabs/flatcc/archive/9362cd00f0007d8cbee7bff86e90fb4b6b227ff3.tar.gz",
@@ -63,9 +66,9 @@ rocm_repository(
     name = "hsa_runtime_headers",
     build_file = "//build_tools/third_party/rocm:hsa_runtime_headers.BUILD.bazel",
     display_name = "HSA runtime and AQL profile SDK headers",
-    sha256 = "66bd23285a3886c9b9983ac6de5efe4a828a2a293fd898d7fd75ab6c500741fb",
-    strip_prefix = "hsa-runtime-headers-cc2b5f429de4d1cb2be96ed10e6f45246e408d0e",
-    url = "https://github.com/iree-org/hsa-runtime-headers/archive/cc2b5f429de4d1cb2be96ed10e6f45246e408d0e.tar.gz",
+    sha256 = "a906b35e77b9cee074995d144cf7718a0069eba08ba7bc741ee7576950fde923",
+    strip_prefix = "hsa-runtime-headers-4285513114a70f7cf4830c89279c8cfa57b901bb",
+    url = "https://github.com/iree-org/hsa-runtime-headers/archive/4285513114a70f7cf4830c89279c8cfa57b901bb.tar.gz",
 )
 
 rocm_repository(

@@ -1,0 +1,339 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/index_addressing.loom-test
+// RUN: emit source-low output=low control-flow=structured-low
+
+// XFAIL: SPIR-V ordinary vector memory lowering is unsupported
+spirv.target<vulkan1_3> @target
+kernel.def target(@target) @index_madd_global_b32() {
+  %unit = index.constant 1 : index
+  %tile = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%tile, %tile, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %column = kernel.workitem.id<x> : index
+  %row = kernel.workitem.id<y> : index
+  %buffer_base = index.constant 0 : offset
+  %row_stride = index.constant 4 : index
+  %linear = index.madd %row, %row_stride, %column : index
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<16xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<16xi32>
+  %loaded = vector.load %input_view[%linear] : view<16xi32> -> vector<1xi32>
+  vector.store %loaded, %output_view[%linear] : vector<1xi32>, view<16xi32>
+  kernel.return
+}
+
+// ====
+
+// XFAIL: SPIR-V ordinary vector memory lowering is unsupported
+spirv.target<vulkan1_3> @target
+kernel.def target(@target) @index_madd_u24_global_b32() {
+  %unit = index.constant 1 : index
+  %columns = index.constant 8 : index
+  %rows = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%columns, %rows, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %column = kernel.workitem.id<x> : index
+  %row = kernel.workitem.id<y> : index
+  %buffer_base = index.constant 0 : offset
+  %row_stride = index.constant 9 : index
+  %linear = index.madd %row, %row_stride, %column : index
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<36xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<36xi32>
+  %loaded = vector.load %input_view[%linear] : view<36xi32> -> vector<1xi32>
+  vector.store %loaded, %output_view[%linear] : vector<1xi32>, view<36xi32>
+  kernel.return
+}
+
+// ====
+
+// XFAIL: SPIR-V ordinary vector memory lowering is unsupported
+spirv.target<vulkan1_3> @target
+kernel.def target(@target) @index_madd_u24_literal_lhs_global_b32() {
+  %unit = index.constant 1 : index
+  %columns = index.constant 8 : index
+  %rows = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%columns, %rows, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %column = kernel.workitem.id<x> : index
+  %row = kernel.workitem.id<y> : index
+  %buffer_base = index.constant 0 : offset
+  %row_stride = index.constant 9 : index
+  %linear = index.madd %row_stride, %row, %column : index
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<36xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<36xi32>
+  %loaded = vector.load %input_view[%linear] : view<36xi32> -> vector<1xi32>
+  vector.store %loaded, %output_view[%linear] : vector<1xi32>, view<36xi32>
+  kernel.return
+}
+
+// ====
+
+// XFAIL: SPIR-V ordinary vector memory lowering is unsupported
+spirv.target<vulkan1_3> @target
+kernel.def target(@target) @index_madd_u24_literal_addend_global_b32() {
+  %unit = index.constant 1 : index
+  %columns = index.constant 8 : index
+  %rows = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%columns, %rows, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %column = kernel.workitem.id<x> : index
+  %row = kernel.workitem.id<y> : index
+  %buffer_base = index.constant 0 : offset
+  %linear_bias = index.constant 1 : index
+  %linear = index.madd %row, %column, %linear_bias : index
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<36xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<36xi32>
+  %loaded = vector.load %input_view[%linear] : view<36xi32> -> vector<1xi32>
+  vector.store %loaded, %output_view[%linear] : vector<1xi32>, view<36xi32>
+  kernel.return
+}
+
+// ====
+
+// XFAIL: SPIR-V ordinary vector memory lowering is unsupported
+spirv.target<vulkan1_3> @target
+kernel.def target(@target) @index_madd_constant_addend_global_b32() {
+  %unit = index.constant 1 : index
+  %row_count = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%row_count, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %row = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %row_stride = index.constant 4 : index
+  %column = index.constant 1 : index
+  %linear = index.madd %row, %row_stride, %column : index
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<16xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<16xi32>
+  %loaded = vector.load %input_view[%linear] : view<16xi32> -> vector<1xi32>
+  vector.store %loaded, %output_view[%linear] : vector<1xi32>, view<16xi32>
+  kernel.return
+}
+
+// ====
+
+// XFAIL: SPIR-V ordinary vector memory lowering is unsupported
+spirv.target<vulkan1_3> @target
+kernel.def target(@target) @index_madd_nested_scale_global_b32() {
+  %unit = index.constant 1 : index
+  %row_count = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%row_count, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %row = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %c9 = index.constant 9 : index
+  %c2 = index.constant 2 : index
+  %c16 = index.constant 16 : index
+  %scaled = index.mul %row, %c9 : index
+  %linear = index.madd %scaled, %c2, %c16 : index
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<80xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<80xi32>
+  %loaded = vector.load %input_view[%linear] : view<80xi32> -> vector<1xi32>
+  vector.store %loaded, %output_view[%linear] : vector<1xi32>, view<80xi32>
+  kernel.return
+}
+
+// ====
+
+// XFAIL: SPIR-V ordinary vector memory lowering is unsupported
+spirv.target<vulkan1_3> @target
+kernel.def target(@target) @index_shli_global_b32() {
+  %unit = index.constant 1 : index
+  %lane_count = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lane_count, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %shift = index.constant 2 : index
+  %linear = index.shli %lane, %shift : index
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<16xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<16xi32>
+  %loaded = vector.load %input_view[%linear] : view<16xi32> -> vector<1xi32>
+  vector.store %loaded, %output_view[%linear] : vector<1xi32>, view<16xi32>
+  kernel.return
+}
+
+// ====
+
+// XFAIL: SPIR-V ordinary vector memory lowering is unsupported
+spirv.target<vulkan1_3> @target
+kernel.def target(@target) @index_scale_byte_offset_global_b32() {
+  %unit = index.constant 1 : index
+  %element_count = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%element_count, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %element = kernel.workitem.id<x> : index
+  %first_element = index.constant 0 : index
+  %byte_stride = index.constant 4 : offset
+  %byte_offset = index.scale %element, %byte_stride : index, offset -> offset
+  %input_view = buffer.view %input[%byte_offset] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%byte_offset] : buffer -> view<1xi32>
+  %loaded = vector.load %input_view[%first_element] : view<1xi32> -> vector<1xi32>
+  vector.store %loaded, %output_view[%first_element] : vector<1xi32>, view<1xi32>
+  kernel.return
+}
+
+// ====
+
+// XFAIL: SPIR-V ordinary vector memory lowering is unsupported
+spirv.target<vulkan1_3> @target
+kernel.def target(@target) @index_shli_previous_row_global_b128() {
+  %unit = index.constant 1 : index
+  %active_lanes = index.constant 31 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%active_lanes, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base_offset = index.constant 0 : offset
+  %column_offset = index.constant 1 : index
+  %column = index.add %lane, %column_offset : index
+  %previous = index.sub %column, %column_offset : index
+  %shift = index.constant 2 : index
+  %linear = index.shli %previous, %shift : index
+  %input_view = buffer.view %input[%base_offset] : buffer -> view<128xi32>
+  %output_view = buffer.view %output[%base_offset] : buffer -> view<128xi32>
+  %loaded = vector.load %input_view[%linear] : view<128xi32> -> vector<4xi32>
+  vector.store %loaded, %output_view[%linear] : vector<4xi32>, view<128xi32>
+  kernel.return
+}
+
+// ====
+
+// XFAIL: Structured-low vector footprint analysis is incomplete
+spirv.target<vulkan1_3> @target
+kernel.def target(@target) @index_edge_loop_dynamic_lower_bound_global_b32() {
+  %unit = index.constant 1 : index
+  %lane_count = index.constant 1024 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lane_count, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base_offset = index.constant 0 : offset
+  %left_edge_lane = index.constant 0 : index
+  %full_tap_begin = index.constant 0 : index
+  %left_edge_tap_begin = index.constant 1 : index
+  %tap_step = index.constant 1 : index
+  %padding_offset = index.constant 1 : index
+  %right_edge_tap_end = index.constant 2 : index
+  %input_lane_divisor = index.constant 2 : index
+  %full_tap_end = index.constant 3 : index
+  %last_lane = index.constant 1023 : index
+  %is_left_edge = index.cmp eq, %lane, %left_edge_lane : index
+  %begin = scf.select %is_left_edge, %left_edge_tap_begin, %full_tap_begin : index
+  %is_right_edge = index.cmp eq, %lane, %last_lane : index
+  %end = scf.select %is_right_edge, %right_edge_tap_end, %full_tap_end : index
+  %input_view = buffer.view %input[%base_offset] : buffer -> view<512xi32>
+  %output_view = buffer.view %output[%base_offset] : buffer -> view<1024xi32>
+  scf.for %tap = [%begin to %end step %tap_step] {
+    %shifted = index.add %lane, %tap : index
+    %source_lane = index.sub %shifted, %padding_offset : index
+    %input_lane = index.div %source_lane, %input_lane_divisor : index
+    %loaded = vector.load %input_view[%input_lane] : view<512xi32> -> vector<1xi32>
+    vector.store %loaded, %output_view[%lane] : vector<1xi32>, view<1024xi32>
+  }
+  kernel.return
+}
+
+// ====
+
+// XFAIL: SPIR-V ordinary vector memory lowering is unsupported
+spirv.target<vulkan1_3> @target
+kernel.def target(@target) @index_div_rem_power_of_two_global_b32() {
+  %unit = index.constant 1 : index
+  %lane_count = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lane_count, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base_offset = index.constant 0 : offset
+  %divisor = index.constant 8 : index
+  %quotient = index.div %lane, %divisor : index
+  %remainder = index.rem %lane, %divisor : index
+  %input_view = buffer.view %input[%base_offset] : buffer -> view<4xi32>
+  %output_view = buffer.view %output[%base_offset] : buffer -> view<8xi32>
+  %loaded = vector.load %input_view[%quotient] : view<4xi32> -> vector<1xi32>
+  vector.store %loaded, %output_view[%remainder] : vector<1xi32>, view<8xi32>
+  kernel.return
+}
+
+// ====
+
+// XFAIL: SPIR-V ordinary vector memory lowering is unsupported
+spirv.target<vulkan1_3> @target
+kernel.def target(@target) @index_div_rem_magic_mul_global_b32() {
+  %unit = index.constant 1 : index
+  %lane_count = index.constant 25 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lane_count, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base_offset = index.constant 0 : offset
+  %divisor = index.constant 5 : index
+  %quotient = index.div %lane, %divisor : index
+  %remainder = index.rem %lane, %divisor : index
+  %input_view = buffer.view %input[%base_offset] : buffer -> view<5xi32>
+  %output_view = buffer.view %output[%base_offset] : buffer -> view<5xi32>
+  %loaded = vector.load %input_view[%quotient] : view<5xi32> -> vector<1xi32>
+  vector.store %loaded, %output_view[%remainder] : vector<1xi32>, view<5xi32>
+  kernel.return
+}
+
+// ====
+
+// XFAIL: SPIR-V ordinary vector memory lowering is unsupported
+spirv.target<vulkan1_3> @target
+kernel.def target(@target) @index_div_rem_magic_add_global_b32() {
+  %unit = index.constant 1 : index
+  %lane_count = index.constant 49 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lane_count, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base_offset = index.constant 0 : offset
+  %divisor = index.constant 7 : index
+  %quotient = index.div %lane, %divisor : index
+  %remainder = index.rem %lane, %divisor : index
+  %input_view = buffer.view %input[%base_offset] : buffer -> view<7xi32>
+  %output_view = buffer.view %output[%base_offset] : buffer -> view<7xi32>
+  %loaded = vector.load %input_view[%quotient] : view<7xi32> -> vector<1xi32>
+  vector.store %loaded, %output_view[%remainder] : vector<1xi32>, view<7xi32>
+  kernel.return
+}
+
+// ====
+
+// XFAIL: SPIR-V workgroup view and vector memory lowering is unsupported
+spirv.target<vulkan1_3> @target
+kernel.def target(@target) @workitem_y_lds_uses_explicit_vaddr() {
+  %unit = index.constant 1 : index
+  %row_count = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %row_count, %unit) : index
+} launch(%output: buffer) {
+  %row = kernel.workitem.id<y> : index
+  %scratch_base = index.constant 0 : offset
+  %output_base = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi32>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<64xi32>
+  %value = vector.constant 7 : vector<1xi32>
+  vector.store %value, %scratch_view[%row] : vector<1xi32>, view<64xi32>
+  %loaded = vector.load %scratch_view[%row] : view<64xi32> -> vector<1xi32>
+  vector.store %loaded, %output_view[%row] : vector<1xi32>, view<64xi32>
+  kernel.return
+}
+
+// ====
+
+// XFAIL: SPIR-V ordinary vector construction and memory lowering is unsupported
+spirv.target<vulkan1_3> @target
+kernel.def target(@target) @dispatch_id_xy_global_b32() {
+  %unit = index.constant 1 : index
+  %workgroups_x = index.constant 4 : index
+  %workgroups_y = index.constant 4 : index
+  %workgroup_size_x = index.constant 8 : index
+  %workgroup_size_y = index.constant 4 : index
+  kernel.launch.config workgroups(%workgroups_x, %workgroups_y, %unit) workgroup_size(%workgroup_size_x, %workgroup_size_y, %unit) : index
+} launch(%output: buffer) {
+  %dispatch_column = kernel.workitem.dispatch.id<x> : index
+  %dispatch_row = kernel.workitem.dispatch.id<y> : index
+  %row_stride = index.constant 32 : index
+  %linear = index.madd %dispatch_row, %row_stride, %dispatch_column : index
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<512xi32>
+  %stored_value = vector.constant 1 : vector<1xi32>
+  vector.store %stored_value, %output_view[%linear] : vector<1xi32>, view<512xi32>
+  kernel.return
+}

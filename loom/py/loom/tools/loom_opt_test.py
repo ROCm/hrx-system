@@ -18,16 +18,18 @@ from loom.tools.loom_opt import (
 )
 
 
-def test_resolve_prefers_explicit_path() -> None:
-    resolved = LoomOpt.resolve(Path("/tmp/loom/bin/loom-opt"))
+def test_resolve_prefers_explicit_path(tmp_path: Path) -> None:
+    explicit_path = tmp_path / "loom-opt-custom"
+    resolved = LoomOpt.resolve(explicit_path)
 
     assert resolved is not None
-    assert resolved.executable == Path("/tmp/loom/bin/loom-opt")
+    assert resolved.executable == explicit_path
 
 
-def test_resolve_uses_loom_bin_dir_override() -> None:
+def test_resolve_uses_loom_bin_dir_override(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
     old_value = os.environ.get(LOOM_BIN_DIR_ENV_VAR)
-    os.environ[LOOM_BIN_DIR_ENV_VAR] = "/opt/loom/bin"
+    os.environ[LOOM_BIN_DIR_ENV_VAR] = str(bin_dir)
     try:
         resolved = LoomOpt.resolve()
     finally:
@@ -37,7 +39,8 @@ def test_resolve_uses_loom_bin_dir_override() -> None:
             os.environ[LOOM_BIN_DIR_ENV_VAR] = old_value
 
     assert resolved is not None
-    assert resolved.executable == Path("/opt/loom/bin/loom-opt")
+    executable_name = "loom-opt.exe" if os.name == "nt" else "loom-opt"
+    assert resolved.executable == bin_dir / executable_name
 
 
 def test_parse_diagnostic_jsonl_preserves_structured_fields() -> None:

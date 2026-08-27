@@ -1,0 +1,5 @@
+target.decl @gpu
+
+func.def public target(@gpu) @entry() {
+  func.return
+}

@@ -13,6 +13,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/check/ops.h"
+#include "loom/ops/kernel/ops.h"
 #include "loom/ops/test/ops.h"
 
 namespace loom {
@@ -27,6 +28,7 @@ class TestbenchTest : public ::testing::Test {
 
     loom_context_initialize(iree_allocator_system(), &context_);
     RegisterDialect(LOOM_DIALECT_CHECK, loom_check_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_KERNEL, loom_kernel_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
   }
@@ -62,6 +64,78 @@ class TestbenchTest : public ::testing::Test {
   iree_arena_allocator_t plan_arena_;
   loom_context_t context_;
 };
+
+TEST_F(TestbenchTest, PlansKernelLaunchExecutionEpochs) {
+  loom_module_t* module = ParseModule(R"(
+kernel.decl @step() launch(%output: buffer)
+
+check.case @launch_schedule {
+  %output = check.generate.fill value(0) : tensor<1xi32>
+  kernel.launch @step(%output) : (tensor<1xi32>)
+  kernel.launch.concurrent {
+    kernel.launch @step(%output) : (tensor<1xi32>)
+    kernel.launch @step(%output) : (tensor<1xi32>)
+  }
+  kernel.launch.serial {
+    kernel.launch @step(%output) : (tensor<1xi32>)
+    kernel.launch @step(%output) : (tensor<1xi32>)
+  }
+  kernel.launch @step(%output) : (tensor<1xi32>)
+  check.return
+}
+)");
+  ASSERT_NE(module, nullptr);
+
+  loom_testbench_module_plan_t plan = {};
+  IREE_ASSERT_OK(
+      loom_testbench_plan_module(module, nullptr, &plan_arena_, &plan));
+
+  ASSERT_EQ(plan.case_count, 1u);
+  const loom_testbench_case_plan_t& case_plan = plan.cases[0];
+  ASSERT_EQ(case_plan.invocation_count, 6u);
+  ASSERT_EQ(case_plan.kernel_launch_count, 6u);
+  const iree_host_size_t expected_epochs[] = {0, 1, 1, 2, 3, 4};
+  const iree_host_size_t expected_depths[] = {0, 1, 1, 1, 1, 0};
+  for (iree_host_size_t i = 0; i < case_plan.invocation_count; ++i) {
+    EXPECT_EQ(case_plan.invocations[i].execution_epoch, expected_epochs[i]);
+    EXPECT_EQ(case_plan.invocations[i].launch_schedule_depth,
+              expected_depths[i]);
+  }
+  EXPECT_EQ(plan.issue_count, 0u);
+
+  loom_module_free(module);
+}
+
+TEST_F(TestbenchTest, PreservesNestedLaunchScheduleDepth) {
+  loom_module_t* module = ParseModule(R"(
+kernel.decl @step() launch(%output: buffer)
+
+check.case @nested_launch_schedule {
+  %output = check.generate.fill value(0) : tensor<1xi32>
+  kernel.launch.serial {
+    kernel.launch.concurrent {
+      kernel.launch @step(%output) : (tensor<1xi32>)
+    }
+  }
+  check.return
+}
+)");
+  ASSERT_NE(module, nullptr);
+
+  loom_testbench_module_plan_t plan = {};
+  IREE_ASSERT_OK(
+      loom_testbench_plan_module(module, nullptr, &plan_arena_, &plan));
+
+  ASSERT_EQ(plan.case_count, 1u);
+  const loom_testbench_case_plan_t& case_plan = plan.cases[0];
+  ASSERT_EQ(case_plan.invocation_count, 1u);
+  EXPECT_EQ(case_plan.invocations[0].execution_epoch,
+            LOOM_TESTBENCH_EXECUTION_EPOCH_INVALID);
+  EXPECT_EQ(case_plan.invocations[0].launch_schedule_depth, 2u);
+  EXPECT_EQ(plan.issue_count, 0u);
+
+  loom_module_free(module);
+}
 
 TEST_F(TestbenchTest, DiscoversCasesAndBenchmarks) {
   loom_module_t* module = ParseModule(R"(
@@ -100,8 +174,10 @@ check.benchmark<@private_case>
   EXPECT_EQ(loom_attr_as_i64(plan.cases[0].value_sources[0].literal.value), 2);
   EXPECT_EQ(plan.cases[0].file_write_count, 0u);
   ASSERT_EQ(plan.cases[0].invocation_count, 1u);
+  ASSERT_EQ(plan.cases[0].kernel_launch_count, 0u);
+  EXPECT_EQ(plan.cases[0].first_kernel_launch, nullptr);
   EXPECT_EQ(plan.cases[0].invocations[0].kind,
-            LOOM_TESTBENCH_INVOCATION_ACTUAL);
+            LOOM_TESTBENCH_INVOCATION_FUNCTION_CALL);
   EXPECT_EQ(plan.cases[0].invocations[0].input_count, 1u);
   EXPECT_EQ(plan.cases[0].invocations[0].result_count, 1u);
   ASSERT_EQ(plan.cases[0].expectation_count, 1u);
@@ -111,6 +187,8 @@ check.benchmark<@private_case>
   EXPECT_TRUE(
       iree_string_view_equal(plan.cases[1].name, IREE_SV("private_case")));
   EXPECT_FALSE(plan.cases[1].is_public);
+  EXPECT_EQ(plan.cases[1].kernel_launch_count, 0u);
+  EXPECT_EQ(plan.cases[1].first_kernel_launch, nullptr);
 
   ASSERT_EQ(plan.benchmark_count, 2u);
   EXPECT_TRUE(iree_string_view_equal(plan.benchmarks[0].name,
@@ -134,7 +212,9 @@ check.case @sources {
   %seed = check.param.seed base(7) count(2) : i64
   %scalar = check.literal value(42) : i32
   %iota = check.generate.iota offset(0) step(1) : tensor<4xi32>
+  %periodic_iota = check.generate.iota offset(0) step(1) period(4) : tensor<10xi32>
   %fill = check.generate.fill value(17) : tensor<4xi32>
+  %fill_tail = check.tensor.view %fill offset(8) : tensor<4xi32> -> tensor<2xi32>
   %uniform = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<4xf32>
   %file = check.file.read.npy path("fixtures/input.npy") : tensor<4xf32>
   check.file.write.npy value(%uniform) path("outputs/actual.npy") mode(always) : tensor<4xf32>
@@ -152,21 +232,29 @@ check.case @sources {
   ASSERT_EQ(plan.case_count, 1u);
   const loom_testbench_case_plan_t& case_plan = plan.cases[0];
   ASSERT_EQ(case_plan.parameter_count, 1u);
-  ASSERT_EQ(case_plan.value_source_count, 5u);
+  ASSERT_EQ(case_plan.value_source_count, 7u);
   EXPECT_EQ(case_plan.value_sources[0].kind,
             LOOM_TESTBENCH_VALUE_SOURCE_LITERAL);
   EXPECT_EQ(loom_attr_as_i64(case_plan.value_sources[0].literal.value), 42);
   EXPECT_EQ(case_plan.value_sources[1].kind, LOOM_TESTBENCH_VALUE_SOURCE_IOTA);
   EXPECT_EQ(loom_attr_as_i64(case_plan.value_sources[1].iota.step), 1);
-  EXPECT_EQ(case_plan.value_sources[2].kind, LOOM_TESTBENCH_VALUE_SOURCE_FILL);
-  EXPECT_EQ(loom_attr_as_i64(case_plan.value_sources[2].fill.value), 17);
-  EXPECT_EQ(case_plan.value_sources[3].kind,
-            LOOM_TESTBENCH_VALUE_SOURCE_RANDOM_UNIFORM);
-  EXPECT_EQ(case_plan.value_sources[3].random_uniform.seed_value_id,
-            case_plan.parameters[0].value_id);
+  EXPECT_EQ(case_plan.value_sources[1].iota.period, 0u);
+  EXPECT_EQ(case_plan.value_sources[2].kind, LOOM_TESTBENCH_VALUE_SOURCE_IOTA);
+  EXPECT_EQ(case_plan.value_sources[2].iota.period, 4u);
+  EXPECT_EQ(case_plan.value_sources[3].kind, LOOM_TESTBENCH_VALUE_SOURCE_FILL);
+  EXPECT_EQ(loom_attr_as_i64(case_plan.value_sources[3].fill.value), 17);
   EXPECT_EQ(case_plan.value_sources[4].kind,
+            LOOM_TESTBENCH_VALUE_SOURCE_TENSOR_VIEW);
+  EXPECT_EQ(case_plan.value_sources[4].tensor_view.source_value_id,
+            case_plan.value_sources[3].value_id);
+  EXPECT_EQ(case_plan.value_sources[4].tensor_view.byte_offset, 8u);
+  EXPECT_EQ(case_plan.value_sources[5].kind,
+            LOOM_TESTBENCH_VALUE_SOURCE_RANDOM_UNIFORM);
+  EXPECT_EQ(case_plan.value_sources[5].random_uniform.seed_value_id,
+            case_plan.parameters[0].value_id);
+  EXPECT_EQ(case_plan.value_sources[6].kind,
             LOOM_TESTBENCH_VALUE_SOURCE_FILE_READ_NPY);
-  EXPECT_TRUE(iree_string_view_equal(case_plan.value_sources[4].file.path,
+  EXPECT_TRUE(iree_string_view_equal(case_plan.value_sources[6].file.path,
                                      IREE_SV("fixtures/input.npy")));
 
   ASSERT_EQ(case_plan.file_write_count, 1u);
@@ -179,6 +267,49 @@ check.case @sources {
   EXPECT_EQ(case_plan.expectations[1].kind, LOOM_TESTBENCH_EXPECTATION_BITWISE);
   EXPECT_EQ(case_plan.issue_count, 0u);
   EXPECT_EQ(plan.issue_count, 0u);
+
+  loom_module_free(module);
+}
+
+TEST_F(TestbenchTest, RejectsNonpositiveIotaPeriodDuringPlanning) {
+  loom_module_t* module = ParseModule(R"(
+check.case @invalid_period {
+  %iota = check.generate.iota offset(0) step(1) period(0) : tensor<4xi32>
+  check.return
+}
+)");
+  ASSERT_NE(module, nullptr);
+
+  loom_testbench_module_plan_t plan = {};
+  IREE_ASSERT_OK(
+      loom_testbench_plan_module(module, nullptr, &plan_arena_, &plan));
+  ASSERT_EQ(plan.case_count, 1u);
+  ASSERT_EQ(plan.issue_count, 1u);
+  ASSERT_EQ(plan.cases[0].value_source_count, 1u);
+  EXPECT_EQ(plan.issues[0].kind, LOOM_TESTBENCH_ISSUE_INVALID_VALUE_SOURCE);
+  EXPECT_EQ(plan.issues[0].op, plan.cases[0].value_sources[0].op);
+
+  loom_module_free(module);
+}
+
+TEST_F(TestbenchTest, RejectsNegativeTensorViewOffsetDuringPlanning) {
+  loom_module_t* module = ParseModule(R"(
+check.case @negative_tensor_view_offset {
+  %source = check.generate.fill value(0) : tensor<4xi32>
+  %view = check.tensor.view %source offset(-1) : tensor<4xi32> -> tensor<4xi8>
+  check.return
+}
+)");
+  ASSERT_NE(module, nullptr);
+
+  loom_testbench_module_plan_t plan = {};
+  IREE_ASSERT_OK(
+      loom_testbench_plan_module(module, nullptr, &plan_arena_, &plan));
+  ASSERT_EQ(plan.case_count, 1u);
+  ASSERT_EQ(plan.issue_count, 1u);
+  ASSERT_EQ(plan.cases[0].value_source_count, 2u);
+  EXPECT_EQ(plan.issues[0].kind, LOOM_TESTBENCH_ISSUE_INVALID_VALUE_SOURCE);
+  EXPECT_EQ(plan.issues[0].op, plan.cases[0].value_sources[1].op);
 
   loom_module_free(module);
 }

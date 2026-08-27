@@ -1,0 +1,250 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_benchmark",
+    "loom_cc_library",
+    "loom_cc_test",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "schedule",
+    srcs = ["schedule.c"],
+    hdrs = ["schedule.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/command",
+        "//loom/src/loom/ops/kernel",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "program_composition",
+    srcs = ["program_composition.c"],
+    hdrs = ["program_composition.h"],
+    deps = [
+        "//loom/src/loom/analysis:scc",
+        "//loom/src/loom/analysis:symbol_references",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/rewrite:callable",
+        "//loom/src/loom/rewrite:rewriter",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "dispatch_counts",
+    srcs = ["dispatch_counts.c"],
+    hdrs = ["dispatch_counts.h"],
+    deps = [
+        ":schedule",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/command",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/cmd:program",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "lower",
+    srcs = ["lower.c"],
+    hdrs = ["lower.h"],
+    deps = [
+        ":dispatch_counts",
+        ":schedule",
+        "//loom/src/loom/codegen/low:builder",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/command",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/cmd:abi_layout",
+        "//loom/src/loom/target/arch/cmd/descriptors",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "parameters",
+    srcs = ["parameters.c"],
+    hdrs = ["parameters.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops/command",
+        "//loom/src/loom/target/arch/cmd:abi_layout",
+        "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "transients",
+    srcs = ["transients.c"],
+    hdrs = ["transients.h"],
+    deps = [
+        ":schedule",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/target/arch/cmd:abi_layout",
+        "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "program_plan",
+    srcs = ["program_plan.c"],
+    hdrs = ["program_plan.h"],
+    visibility = ["//loom/src/loom/target/arch/cmd:__subpackages__"],
+    deps = [
+        ":dispatch_counts",
+        ":lower",
+        ":parameters",
+        ":program_composition",
+        ":schedule",
+        ":transients",
+        "//loom/src/loom/analysis:symbol_references",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/link:plan_materializer",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/pass:builder",
+        "//loom/src/loom/pass:interpreter",
+        "//loom/src/loom/pass:program",
+        "//loom/src/loom/pass:registry",
+        "//loom/src/loom/target/arch/cmd:abi_layout",
+        "//loom/src/loom/target/arch/cmd:program",
+        "//loom/src/loom/transforms/kernel:resolve_launches",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "program_plan_index",
+    srcs = ["program_plan_index.c"],
+    hdrs = ["program_plan_index.h"],
+    visibility = [
+        "//loom/binding/c/target/cmd:__pkg__",
+        "//loom/src/loom/target/arch/cmd:__subpackages__",
+        "//loom/src/loom/tools/loom-compile:__pkg__",
+    ],
+    deps = [
+        ":program_plan",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/link:module_index",
+        "//loom/src/loom/link:plan_materializer",
+        "//loom/src/loom/link:planner",
+        "//loom/src/loom/pass:registry",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "serialize",
+    srcs = ["serialize.c"],
+    hdrs = ["serialize.h"],
+    visibility = ["//loom/src/loom/target/arch/cmd:__subpackages__"],
+    deps = [
+        ":program_plan",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/cmd:abi_layout",
+        "//loom/src/loom/target/arch/cmd:program",
+        "//loom/src/loom/target/arch/cmd/descriptors",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+# The program-plan C++ test covers ownership after the source module is
+# released. Compiler transformations are covered textually through loom-check.
+loom_cc_test(
+    name = "program_plan_test",
+    srcs = ["program_plan_test.cc"],
+    deps = [
+        ":program_plan",
+        ":serialize",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/pass:builtin_registry",
+        "//loom/src/loom/target/arch/cmd:artifact_set",
+        "//loom/src/loom/target/arch/cmd:program",
+        "//loom/src/loom/target/arch/cmd/descriptors",
+        "//loom/src/loom/testing:diagnostic_matchers",
+        "//loom/src/loom/testing:module_ptr",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "program_plan_benchmark",
+    srcs = ["program_plan_benchmark.cc"],
+    deps = [
+        ":program_plan",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/link:module_index",
+        "//loom/src/loom/link:plan_materializer",
+        "//loom/src/loom/link:planner",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/pass:builtin_registry",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)

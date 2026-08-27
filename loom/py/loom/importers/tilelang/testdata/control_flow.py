@@ -60,16 +60,16 @@ def thread_return_prefix_guard(tir: Any) -> TileLangImportInput:
     )
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="thread_return_prefix_guard",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("thread_return_prefix_guard") @thread_return_prefix_guard() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("thread_return_prefix_guard") @thread_return_prefix_guard() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%n: i32, %i: i32, %src: buffer, %dst: buffer) {
@@ -125,16 +125,16 @@ def thread_return_prefix_guard_with_effects(tir: Any) -> TileLangImportInput:
     )
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="thread_return_prefix_guard_with_effects",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("thread_return_prefix_guard_with_effects") @thread_return_prefix_guard_with_effects() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("thread_return_prefix_guard_with_effects") @thread_return_prefix_guard_with_effects() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%n: i32, %i: i32, %src: buffer, %dst: buffer) {

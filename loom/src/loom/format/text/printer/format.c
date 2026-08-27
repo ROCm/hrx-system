@@ -25,8 +25,7 @@ static iree_status_t loom_print_predicate_arg(loom_print_context_t* ctx,
                                               uint8_t tag, int64_t value) {
   switch (tag) {
     case LOOM_PRED_ARG_VALUE: {
-      return loom_print_value_ref(ctx->stream, ctx->module,
-                                  (loom_value_id_t)value);
+      return loom_print_value_ref(ctx, (loom_value_id_t)value);
     }
     case LOOM_PRED_ARG_CONST:
       return loom_output_stream_write_format(ctx->stream, "%" PRId64, value);
@@ -34,6 +33,39 @@ static iree_status_t loom_print_predicate_arg(loom_print_context_t* ctx,
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "unknown predicate arg tag %d", (int)tag);
   }
+}
+
+static iree_status_t loom_print_predicate(loom_print_context_t* ctx,
+                                          const loom_predicate_t* predicate) {
+  const char* predicate_name = loom_predicate_kind_name(predicate->kind);
+  if (!predicate_name) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unknown predicate kind %d", (int)predicate->kind);
+  }
+  uint8_t expected_argument_count =
+      loom_predicate_kind_argument_count(predicate->kind);
+  if (predicate->arg_count != expected_argument_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "predicate kind %s expects %u arguments, got %u",
+                            predicate_name, expected_argument_count,
+                            predicate->arg_count);
+  }
+  // Emit kind name and opening paren: "mul("
+  IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
+  IREE_RETURN_IF_ERROR(
+      loom_output_stream_write_cstring(ctx->stream, predicate_name));
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '('));
+  // Emit arguments separated by ", ".
+  for (uint8_t j = 0; j < predicate->arg_count; ++j) {
+    if (j > 0) {
+      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, ", "));
+    }
+    IREE_RETURN_IF_ERROR(loom_print_predicate_arg(ctx, predicate->arg_tags[j],
+                                                  predicate->args[j]));
+  }
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, ')'));
+  loom_print_did_write(ctx);
+  return iree_ok_status();
 }
 
 // Prints a predicate list in the format: [pred(%name, 16), lt(%K, 1024)]
@@ -50,67 +82,18 @@ static iree_status_t loom_print_predicate_list(
     if (i > 0) {
       IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ",", false));
     }
-    const loom_predicate_t* predicate = &predicates[i];
-    const char* predicate_name = loom_predicate_kind_name(predicate->kind);
-    if (!predicate_name) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "unknown predicate kind %d",
-                              (int)predicate->kind);
-    }
-    uint8_t expected_argument_count =
-        loom_predicate_kind_argument_count(predicate->kind);
-    if (predicate->arg_count != expected_argument_count) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "predicate kind %s expects %u arguments, got %u",
-                              predicate_name, expected_argument_count,
-                              predicate->arg_count);
-    }
-    // Emit kind name and opening paren: "mul("
-    IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(ctx->stream, predicate_name));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '('));
-    // Emit arguments separated by ", ".
-    for (uint8_t j = 0; j < predicate->arg_count; ++j) {
-      if (j > 0) {
-        IREE_RETURN_IF_ERROR(
-            loom_output_stream_write_cstring(ctx->stream, ", "));
-      }
-      IREE_RETURN_IF_ERROR(loom_print_predicate_arg(ctx, predicate->arg_tags[j],
-                                                    predicate->args[j]));
-    }
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, ')'));
-    loom_print_did_write(ctx);
+    IREE_RETURN_IF_ERROR(loom_print_predicate(ctx, &predicates[i]));
   }
   IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "]", false));
   return iree_ok_status();
 }
 
-static bool loom_print_optional_attr_present(const loom_op_vtable_t* vtable,
-                                             const loom_op_t* op,
+static bool loom_print_optional_attr_present(const loom_op_t* op,
                                              uint16_t attr_index) {
   if (attr_index >= op->attribute_count) {
     return false;
   }
-  loom_attribute_t attr = loom_op_attrs(op)[attr_index];
-  if (loom_attr_is_absent(attr)) {
-    return false;
-  }
-  if (!vtable->attr_descriptors || attr_index >= vtable->attribute_count ||
-      !iree_any_bit_set(vtable->attr_descriptors[attr_index].flags,
-                        LOOM_ATTR_OPTIONAL)) {
-    return true;
-  }
-  switch ((loom_attr_kind_t)attr.kind) {
-    case LOOM_ATTR_DICT:
-    case LOOM_ATTR_I64_ARRAY:
-    case LOOM_ATTR_PREDICATE_LIST:
-      return attr.count > 0;
-    case LOOM_ATTR_BYTES:
-      return attr.reserved_1 > 0;
-    default:
-      return true;
-  }
+  return !loom_attr_is_absent(loom_op_attrs(op)[attr_index]);
 }
 
 static bool loom_print_attr_is_optional(const loom_op_vtable_t* vtable,
@@ -120,35 +103,37 @@ static bool loom_print_attr_is_optional(const loom_op_vtable_t* vtable,
                           LOOM_ATTR_OPTIONAL);
 }
 
-static bool loom_print_symbol_ref_targets_register_context(
-    const loom_op_vtable_t* vtable, uint16_t attr_index) {
-  if (!vtable->func_like || !vtable->attr_descriptors ||
-      attr_index >= vtable->attribute_count) {
-    return false;
-  }
-  const loom_attr_descriptor_t* descriptor =
-      &vtable->attr_descriptors[attr_index];
-  return descriptor->symbol_ref &&
-         iree_any_bit_set(descriptor->symbol_ref->interfaces,
-                          LOOM_SYMBOL_INTERFACE_TARGET);
-}
-
-static iree_status_t loom_print_update_register_context_from_target(
+static iree_status_t loom_print_bind_function_low_repr(
     loom_print_context_t* ctx, const loom_op_vtable_t* vtable,
     uint16_t attr_index, loom_attribute_t attr) {
-  if (!loom_print_symbol_ref_targets_register_context(vtable, attr_index)) {
+  if (!vtable->func_like ||
+      vtable->func_like->repr_contract_attr_index == LOOM_ATTR_INDEX_NONE ||
+      vtable->func_like->repr_contract_attr_index != attr_index) {
     return iree_ok_status();
   }
-  if (!ctx->low_asm_environment.vtable ||
-      !ctx->low_asm_environment.vtable->lookup_target_descriptor_set) {
-    return iree_ok_status();
+  if (attr.kind != LOOM_ATTR_STRING ||
+      attr.string_id == LOOM_STRING_ID_INVALID ||
+      attr.string_id >= ctx->module->strings.count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "function representation contract must be a valid string key");
   }
-  const loom_text_low_asm_descriptor_set_t* descriptor_set = NULL;
-  IREE_RETURN_IF_ERROR(
-      ctx->low_asm_environment.vtable->lookup_target_descriptor_set(
-          ctx->low_asm_environment.state, ctx->module, attr, &descriptor_set));
-  if (descriptor_set != NULL) {
-    ctx->low_register_descriptor_set = descriptor_set;
+  ctx->low_repr = (loom_text_low_repr_context_t){
+      .contract_key = ctx->module->strings.entries[attr.string_id],
+  };
+  if (!loom_text_low_asm_environment_supports_printing(
+          &ctx->low_asm_environment)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "printing a Low function requires a representation environment");
+  }
+  ctx->low_repr.descriptor_set = loom_low_repr_lookup_descriptor_set(
+      &ctx->low_asm_environment.low_repr, ctx->low_repr.contract_key);
+  if (!ctx->low_repr.descriptor_set) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "Low representation contract '%.*s' was not found",
+                            (int)ctx->low_repr.contract_key.size,
+                            ctx->low_repr.contract_key.data);
   }
   return iree_ok_status();
 }
@@ -163,8 +148,7 @@ static iree_status_t loom_print_attr_with_field(
     loom_print_field_ref_t field_ref) {
   IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
   iree_host_size_t start = ctx->stream->offset;
-  IREE_RETURN_IF_ERROR(
-      loom_print_attr(ctx->stream, attr, ctx->module, descriptor));
+  IREE_RETURN_IF_ERROR(loom_print_attr(ctx, attr, descriptor));
   iree_host_size_t end = ctx->stream->offset;
   loom_print_did_write(ctx);
   loom_print_report_field(ctx, field_ref, start, end);
@@ -309,9 +293,6 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
         IREE_RETURN_IF_ERROR(loom_print_attr_with_field(
             ctx, &loom_op_attrs(op)[element->field_index], NULL,
             loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->field_index)));
-        IREE_RETURN_IF_ERROR(loom_print_update_register_context_from_target(
-            ctx, vtable, element->field_index,
-            loom_op_attrs(op)[element->field_index]));
         break;
       }
       case LOOM_FORMAT_KIND_OPERAND_TYPE: {
@@ -451,7 +432,7 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
         break;
       }
       case LOOM_FORMAT_KIND_FUNC_ARGS: {
-        IREE_RETURN_IF_ERROR(loom_print_func_args(ctx, op, vtable));
+        IREE_RETURN_IF_ERROR(loom_print_func_args(ctx, op, vtable, element));
         break;
       }
       case LOOM_FORMAT_KIND_ATTR_DICT: {
@@ -487,9 +468,6 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
               "format ATTR_DICT field_index %u expected DICT attr but found %d",
               element->field_index, (int)dict_attr.kind);
         }
-        if (optional && dict_attr.count == 0) {
-          break;
-        }
         IREE_RETURN_IF_ERROR(loom_print_attr_with_field(
             ctx, &dict_attr, NULL,
             loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->field_index)));
@@ -501,6 +479,10 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
       }
       case LOOM_FORMAT_KIND_ATTR_TABLE: {
         IREE_RETURN_IF_ERROR(loom_print_attr_table(ctx, op, vtable, element));
+        break;
+      }
+      case LOOM_FORMAT_KIND_ALIGNED_REFS: {
+        IREE_RETURN_IF_ERROR(loom_print_aligned_refs(ctx, op, vtable, element));
         break;
       }
       case LOOM_FORMAT_KIND_REGION_TABLE: {
@@ -548,14 +530,14 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
         }
         break;
       }
-      case LOOM_FORMAT_KIND_OP_REF: {
-        // Op kind reference in angle brackets, glued to the op name:
-        // func.template<tile.contract>. The field_index references a
-        // string attribute holding the target op name.
+      case LOOM_FORMAT_KIND_KEY_REF: {
+        // Bare symbolic key in angle brackets, glued to the preceding token:
+        // template.def<@tile.contract>. The field_index references a string
+        // attribute holding the canonical key spelling.
         if (element->field_index >= op->attribute_count) {
           return iree_make_status(
               IREE_STATUS_INVALID_ARGUMENT,
-              "format OP_REF field_index %u out of range (op has %u "
+              "format KEY_REF field_index %u out of range (op has %u "
               "attributes)",
               element->field_index, op->attribute_count);
         }
@@ -563,29 +545,29 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
         if (attr.kind == LOOM_ATTR_STRING &&
             attr.string_id != LOOM_STRING_ID_INVALID &&
             attr.string_id < ctx->module->strings.count) {
-          iree_string_view_t op_name =
-              ctx->module->strings.entries[attr.string_id];
-          iree_host_size_t op_ref_start = ctx->stream->offset;
+          iree_string_view_t key = ctx->module->strings.entries[attr.string_id];
+          iree_host_size_t key_ref_start = ctx->stream->offset;
           IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "<", true));
-          IREE_RETURN_IF_ERROR(loom_print_emit(ctx, op_name, true));
+          IREE_RETURN_IF_ERROR(loom_print_emit(ctx, key, true));
           IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ">", true));
           loom_print_did_write(ctx);
           loom_print_report_field(
               ctx,
               loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->field_index),
-              op_ref_start, ctx->stream->offset);
+              key_ref_start, ctx->stream->offset);
         }
+        IREE_RETURN_IF_ERROR(loom_print_bind_function_low_repr(
+            ctx, vtable, element->field_index, attr));
         break;
       }
-      case LOOM_FORMAT_KIND_DESCRIPTOR_REF:
       case LOOM_FORMAT_KIND_STABLE_KEY_REF: {
-        // Symbolic key reference in angle brackets, glued to the op name:
-        // low.op<amdgpu.v_add_u32>. The field_index references the diagnostic
-        // key spelling and data references the hidden numeric identity.
+        // Stable-key reference in angle brackets, glued to the op name. The
+        // field_index references the spelling and data references its derived
+        // numeric identity.
         if (element->field_index >= op->attribute_count) {
           return iree_make_status(
               IREE_STATUS_INVALID_ARGUMENT,
-              "format DESCRIPTOR_REF field_index %u out of range (op has %u "
+              "format STABLE_KEY_REF field_index %u out of range (op has %u "
               "attributes)",
               element->field_index, op->attribute_count);
         }
@@ -616,6 +598,55 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
         }
         break;
       }
+      case LOOM_FORMAT_KIND_SCOPED_ENUM_REF: {
+        // Stable spelling of a representation-scoped enum, glued to the op
+        // name: low.op<amdgpu.v_add_u32>.
+        if (element->field_index >= op->attribute_count) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "format SCOPED_ENUM_REF field_index %u out of range (op has %u "
+              "attributes)",
+              element->field_index, op->attribute_count);
+        }
+        loom_attribute_t attr = loom_op_attrs(op)[element->field_index];
+        if (attr.kind != LOOM_ATTR_SCOPED_ENUM) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "format SCOPED_ENUM_REF field %u is not a scoped enum",
+              element->field_index);
+        }
+        if (!ctx->low_repr.descriptor_set) {
+          return iree_make_status(
+              IREE_STATUS_FAILED_PRECONDITION,
+              "printing a scoped descriptor requires an enclosing Low "
+              "representation contract");
+        }
+        if (!ctx->low_asm_environment.low_repr.vtable) {
+          return iree_make_status(
+              IREE_STATUS_FAILED_PRECONDITION,
+              "printing a scoped descriptor requires a Low representation "
+              "environment");
+        }
+        iree_string_view_t key = loom_low_repr_descriptor_key(
+            &ctx->low_asm_environment.low_repr, ctx->low_repr.descriptor_set,
+            loom_attr_as_scoped_enum(attr));
+        if (iree_string_view_is_empty(key)) {
+          return iree_make_status(
+              IREE_STATUS_OUT_OF_RANGE,
+              "scoped enum ordinal is outside the active Low representation "
+              "contract");
+        }
+        iree_host_size_t ref_start = ctx->stream->offset;
+        IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "<", true));
+        IREE_RETURN_IF_ERROR(loom_print_emit(ctx, key, true));
+        IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ">", true));
+        loom_print_did_write(ctx);
+        loom_print_report_field(
+            ctx,
+            loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->field_index),
+            ref_start, ctx->stream->offset);
+        break;
+      }
       case LOOM_FORMAT_KIND_TEMPLATE_PARAM: {
         // Required compile-time op parameter in angle brackets, glued to
         // the op name: vector.reduce<addf>.
@@ -634,9 +665,34 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
         loom_attribute_t attr = loom_op_attrs(op)[element->field_index];
         iree_host_size_t param_start = ctx->stream->offset;
         IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "<", true));
-        IREE_RETURN_IF_ERROR(
-            loom_print_attr(ctx->stream, &attr, ctx->module, descriptor));
+        IREE_RETURN_IF_ERROR(loom_print_attr(ctx, &attr, descriptor));
         IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ">", true));
+        loom_print_did_write(ctx);
+        loom_print_report_field(
+            ctx,
+            loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->field_index),
+            param_start, ctx->stream->offset);
+        break;
+      }
+      case LOOM_FORMAT_KIND_ATTR_PARAMS: {
+        // Known-family parameter payload glued to the op name:
+        // encoding.matches<element_format = u4>.
+        if (element->field_index >= op->attribute_count) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "format ATTR_PARAMS field_index %u out of range (op has %u "
+              "attributes)",
+              element->field_index, op->attribute_count);
+        }
+        const loom_attr_descriptor_t* descriptor =
+            (vtable->attr_descriptors &&
+             element->field_index < vtable->attribute_count)
+                ? &vtable->attr_descriptors[element->field_index]
+                : NULL;
+        loom_attribute_t attr = loom_op_attrs(op)[element->field_index];
+        iree_host_size_t param_start = ctx->stream->offset;
+        IREE_RETURN_IF_ERROR(
+            loom_print_parameterized_attr_parameters(ctx, &attr, descriptor));
         loom_print_did_write(ctx);
         loom_print_report_field(
             ctx,
@@ -662,8 +718,7 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
         loom_attribute_t attr = loom_op_attrs(op)[element->field_index];
         iree_host_size_t param_start = ctx->stream->offset;
         IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "<", true));
-        IREE_RETURN_IF_ERROR(
-            loom_print_attr(ctx->stream, &attr, ctx->module, descriptor));
+        IREE_RETURN_IF_ERROR(loom_print_attr(ctx, &attr, descriptor));
         uint8_t flags = op->instance_flags;
         if (flags != 0 && vtable->instance_flags_case_names != NULL) {
           IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ", ", false));
@@ -691,8 +746,8 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
                 loom_op_operand_field_present(vtable, op, element->field_index);
             break;
           case LOOM_ANCHOR_ATTR:
-            present = loom_print_optional_attr_present(vtable, op,
-                                                       element->field_index);
+            present =
+                loom_print_optional_attr_present(op, element->field_index);
             break;
           case LOOM_ANCHOR_REGION: {
             if (element->field_index < op->region_count) {

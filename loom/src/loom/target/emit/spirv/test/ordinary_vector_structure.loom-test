@@ -1,0 +1,96 @@
+// RUN: emit spirv-dis validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @ordinary_vector_structure() asm {
+  %one = OpConstant.i32 1
+  %two = OpConstant.i32 2
+  %three = OpConstant.i32 3
+  %four = OpConstant.i32 4
+  %five = OpConstant.i32 5
+  %six = OpConstant.i32 6
+  %seven = OpConstant.i32 7
+  %eight = OpConstant.i32 8
+  %replacement = OpConstant.i32 9
+  %values = OpCompositeConstruct.v4i32 %one, %two, %three, %four
+  %alternates = OpCompositeConstruct.v4i32 %five, %six, %seven, %eight
+  %true = OpConstantTrue.bool
+  %false = OpConstantFalse.bool
+  %mask = OpCompositeConstruct.v4bool %true, %false, %true, %false
+  %selected = OpSelect.v4i32 %mask, %values, %alternates
+  %inserted = OpCompositeInsert.i32.v4i32 %replacement, %selected, 2
+  %extracted = OpCompositeExtract.v4i32.i32 %inserted, 2
+  %condition = OpIEqual %extracted, %replacement
+  low.scf.if %condition {
+    OpControlBarrier.workgroup.workgroup.acq_rel
+  }
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %ordinary_vector_structure "ordinary_vector_structure"
+               OpExecutionMode %ordinary_vector_structure LocalSize 1 1 1
+               OpName %ordinary_vector_structure "ordinary_vector_structure"
+               OpName %one "one"
+               OpName %two "two"
+               OpName %three "three"
+               OpName %four "four"
+               OpName %five "five"
+               OpName %six "six"
+               OpName %seven "seven"
+               OpName %eight "eight"
+               OpName %replacement "replacement"
+               OpName %values "values"
+               OpName %alternates "alternates"
+               OpName %true "true"
+               OpName %false "false"
+               OpName %mask "mask"
+               OpName %selected "selected"
+               OpName %inserted "inserted"
+               OpName %extracted "extracted"
+               OpName %condition "condition"
+       %void = OpTypeVoid
+          %3 = OpTypeFunction %void
+        %int = OpTypeInt 32 1
+        %one = OpConstant %int 1
+        %two = OpConstant %int 2
+      %three = OpConstant %int 3
+       %four = OpConstant %int 4
+       %five = OpConstant %int 5
+        %six = OpConstant %int 6
+      %seven = OpConstant %int 7
+      %eight = OpConstant %int 8
+%replacement = OpConstant %int 9
+      %v4int = OpTypeVector %int 4
+       %bool = OpTypeBool
+       %true = OpConstantTrue %bool
+      %false = OpConstantFalse %bool
+     %v4bool = OpTypeVector %bool 4
+       %uint = OpTypeInt 32 0
+     %uint_2 = OpConstant %uint 2
+   %uint_264 = OpConstant %uint 264
+%ordinary_vector_structure = OpFunction %void None %3
+          %4 = OpLabel
+     %values = OpCompositeConstruct %v4int %one %two %three %four
+ %alternates = OpCompositeConstruct %v4int %five %six %seven %eight
+       %mask = OpCompositeConstruct %v4bool %true %false %true %false
+   %selected = OpSelect %v4int %mask %values %alternates
+   %inserted = OpCompositeInsert %v4int %replacement %selected 2
+  %extracted = OpCompositeExtract %int %inserted 2
+  %condition = OpIEqual %bool %extracted %replacement
+               OpSelectionMerge %28 None
+               OpBranchConditional %condition %27 %28
+         %27 = OpLabel
+               OpControlBarrier %uint_2 %uint_2 %uint_264
+               OpBranch %28
+         %28 = OpLabel
+               OpReturn
+               OpFunctionEnd

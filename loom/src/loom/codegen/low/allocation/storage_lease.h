@@ -36,7 +36,7 @@ typedef struct loom_low_allocation_storage_lease_unit_entry_t
     loom_low_allocation_storage_lease_unit_entry_t;
 
 // Hash index over units owned by materialized storage leases.
-typedef struct loom_low_allocation_storage_lease_unit_index_t {
+struct loom_low_allocation_storage_lease_unit_index_t {
   // Bucket heads into |entries|. Missing buckets contain UINT32_MAX.
   uint32_t* bucket_heads;
   // Power-of-two number of entries in |bucket_heads|.
@@ -47,7 +47,29 @@ typedef struct loom_low_allocation_storage_lease_unit_index_t {
   iree_host_size_t entry_capacity;
   // Number of initialized entries in |entries|.
   iree_host_size_t entry_count;
-} loom_low_allocation_storage_lease_unit_index_t;
+};
+
+// Cursor over physical-unit index entries matching one register-like range.
+// A lease spanning several queried units may be returned more than once;
+// callers that mutate per-lease state must suppress duplicate lease indices.
+typedef struct loom_low_allocation_storage_lease_unit_query_t {
+  // Borrowed immutable index being queried.
+  const loom_low_allocation_storage_lease_unit_index_t* index;
+  // Target-storage identity key shared by aliasing register classes.
+  uint32_t storage_key;
+  // Target-visible storage kind required of matching entries.
+  loom_low_allocation_location_kind_t location_kind;
+  // First physical unit in the queried range.
+  uint32_t location_base;
+  // Number of physical units in the queried range.
+  uint32_t location_count;
+  // Next unit offset whose hash bucket has not been opened.
+  uint32_t next_unit_offset;
+  // Physical unit owning the currently open hash bucket.
+  uint32_t active_location;
+  // Next candidate entry in the currently open hash bucket.
+  uint32_t next_entry_index;
+} loom_low_allocation_storage_lease_unit_query_t;
 
 // Mutable allocation-side lease state derived from a storage-lease table.
 typedef struct loom_low_allocation_storage_lease_state_t {
@@ -61,12 +83,14 @@ typedef struct loom_low_allocation_storage_lease_state_t {
   loom_low_storage_release_action_t* release_actions;
   // Storage-lease record heads indexed by allocation-local value ordinal.
   uint32_t* record_heads_by_value_ordinal;
+  // Defining schedule node indexed by allocation-local value ordinal.
+  uint32_t* defining_node_indices_by_value_ordinal;
   // Next storage-lease record index for the same allocation-local value.
   uint32_t* next_record_indices;
   // True when the storage-lease record has a materialized instance.
   uint8_t* instance_written;
   // Hash index for materialized register-like storage-lease units.
-  loom_low_allocation_storage_lease_unit_index_t units;
+  loom_low_allocation_storage_lease_unit_index_t* unit_index;
   // Number of initialized assignment-backed storage-lease records.
   iree_host_size_t instance_count;
   // Number of initialized storage release actions.
@@ -74,6 +98,38 @@ typedef struct loom_low_allocation_storage_lease_state_t {
   // Number of storage-lease records marked releasable for pressure.
   iree_host_size_t pressure_release_record_count;
 } loom_low_allocation_storage_lease_state_t;
+
+// Initializes |index| for up to |lease_unit_capacity| materialized physical
+// lease units. Empty indexes remain disabled.
+iree_status_t loom_low_allocation_storage_lease_unit_index_initialize(
+    loom_low_allocation_storage_lease_unit_index_t* index,
+    iree_host_size_t lease_unit_capacity, iree_arena_allocator_t* arena);
+
+// Inserts one materialized lease range into |index|.
+iree_status_t loom_low_allocation_storage_lease_unit_index_insert(
+    loom_low_allocation_storage_lease_unit_index_t* index,
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint16_t descriptor_reg_class_id,
+    loom_low_allocation_location_kind_t location_kind, uint32_t location_base,
+    uint32_t location_count, uint32_t storage_lease_index);
+
+// Returns true when |index| can answer physical-unit queries.
+bool loom_low_allocation_storage_lease_unit_index_is_enabled(
+    const loom_low_allocation_storage_lease_unit_index_t* index);
+
+// Initializes a query for storage leases overlapping one physical range.
+void loom_low_allocation_storage_lease_unit_query_initialize(
+    const loom_low_allocation_storage_lease_unit_index_t* index,
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint16_t descriptor_reg_class_id,
+    loom_low_allocation_location_kind_t location_kind, uint32_t location_base,
+    uint32_t location_count,
+    loom_low_allocation_storage_lease_unit_query_t* out_query);
+
+// Advances |query| and returns the next matching storage-lease index.
+bool loom_low_allocation_storage_lease_unit_query_next(
+    loom_low_allocation_storage_lease_unit_query_t* query,
+    uint32_t* out_storage_lease_index);
 
 // Initializes |out_state| and builds the value-to-lease-record index for
 // |lease_table|. Empty lease tables leave |out_state| inert.

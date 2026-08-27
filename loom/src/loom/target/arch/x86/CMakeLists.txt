@@ -111,10 +111,13 @@ loom_check_test_suite(
     loom_check_file_test
   SRCS
     "test/source_low/allocation.loom-test"
+    "test/source_low/buffer_bulk.loom-test"
+    "test/source_low/buffer_raw.loom-test"
     "test/source_low/source_low.loom-test"
     "test/source_low/source_low_avx2.loom-test"
     "test/source_low/source_low_avx512_packed_dot.loom-test"
     "test/source_low/source_low_avx_vnni.loom-test"
+    "test/source_low/source_low_contraction.loom-test"
     "test/source_low/source_low_packed_dot.loom-test"
     "test/source_low/source_low_scalar_addressing.loom-test"
     "test/source_low/source_low_scalar_arithmetic.loom-test"
@@ -152,6 +155,8 @@ loom_generated_cc_library(
   DEPS
     ::feature_bits
     iree::base
+    loom::analysis::native_layout
+    loom::codegen::low::descriptors
 )
 endif()
 
@@ -197,6 +202,7 @@ loom_cc_test(
     ::packed_dot_contract
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::target::arch::x86::descriptors::shards_for_testing
   LABELS
     "iree-build-requirement=loom.target.arch.x86"
 )

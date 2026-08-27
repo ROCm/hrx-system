@@ -234,8 +234,10 @@ static bool loom_test_low_matrix_request_is_tiny_i32(
 
 static bool loom_test_low_matrix_target_is_quirky(
     const loom_target_contract_query_environment_t* environment) {
-  return environment->bundle != NULL && environment->bundle->snapshot != NULL &&
-         environment->bundle->snapshot->subgroup_size == 7;
+  const loom_target_bundle_t* bundle =
+      loom_target_contract_query_environment_bundle(environment);
+  return bundle != NULL && bundle->snapshot != NULL &&
+         bundle->snapshot->subgroup_size == 7;
 }
 
 static iree_status_t loom_test_low_matrix_query(

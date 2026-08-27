@@ -2,9 +2,9 @@
 
 // Static encoding attrs and dynamic encoding operands are two views of one
 // parameter namespace; a name can appear in only one place.
-func.def @static_dynamic_duplicate(%block: index) {
-  // ERROR@+1: ENCODING/006 "block"
-  %enc = encoding.define #q8_0<block=32> {block = %block : index} : encoding<schema>
+func.def @static_dynamic_duplicate(%payload_elements: index) {
+  // ERROR@+1: ENCODING/006 "payload_elements"
+  %enc = encoding.define #encoding.i8<payload_elements=32> {payload_elements = %payload_elements : index} : encoding<schema>
   func.return
 }
 
@@ -12,8 +12,8 @@ func.def @static_dynamic_duplicate(%block: index) {
 
 // SSA values never appear inside static #family<...> parameter attributes.
 func.def @static_param_ssa_value(%group_size: index) {
-  // ERROR@+1: PARSE/028 "group_size"
-  %enc = encoding.define #q8_0<group_size=%group_size> : encoding<schema>
+  // ERROR@+1: PARSE/028 "payload_elements"
+  %enc = encoding.define #encoding.operand<element_format=i8, payload_elements=%group_size, payload_packing=dense_lanes> : encoding<schema>
   func.return
 }
 
@@ -23,24 +23,48 @@ func.def @static_param_ssa_value(%group_size: index) {
 // at the definition site; generic `encoding` would push role discovery to
 // later consumers.
 func.def @encoding_define_generic_result_role() {
-  // ERROR@+1: ENCODING/012 {encoding_name="q8_0", actual_type="encoding", expected_type="encoding<schema>"}
-  %enc = encoding.define #q8_0<block=32> : encoding
+  // ERROR@+1: ENCODING/012 {encoding_name="encoding.operand", actual_type="encoding", expected_type="encoding<schema>"}
+  %enc = encoding.define #encoding.i8<payload_elements=32> : encoding
   func.return
 }
 
 // ====
 
 func.def @encoding_define_wrong_result_role() {
-  // ERROR@+1: ENCODING/012 {encoding_name="q8_0", actual_type="encoding<transform>", expected_type="encoding<schema>"}
-  %enc = encoding.define #q8_0<block=32> : encoding<transform>
+  // ERROR@+1: ENCODING/012 {encoding_name="encoding.operand", actual_type="encoding<transform>", expected_type="encoding<schema>"}
+  %enc = encoding.define #encoding.i8<payload_elements=32> : encoding<transform>
   func.return
 }
 
 // ====
 
-func.def @encoding_isa_result_must_be_i1(%enc: encoding<schema>) {
-  // ERROR@+1: TYPE/004 "i1"
-  %is = encoding.isa %enc, "quantized" : i32
+func.def @encoding_isa_rejects_role_mismatch(%schema: encoding<schema>) {
+  // ERROR@+1: ENCODING/021 "dense" "encoding<layout>" "encoding<schema>"
+  %is = encoding.isa<#encoding.layout.dense> %schema : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @encoding_matches_rejects_empty_requirements(%schema: encoding<schema>) {
+  // ERROR@+1: ENCODING/022
+  %is = encoding.matches<> %schema : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @encoding_assume_match_rejects_empty_requirements(%schema: encoding<schema>) {
+  // ERROR@+1: ENCODING/022
+  %schema2 = encoding.assume.match<> %schema : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @encoding_matches_requires_schema_role(%layout: encoding<layout>) {
+  // ERROR@+1: TYPE/003 "encoding<schema>"
+  %is = encoding.matches<element_format = u4> %layout : encoding<layout>
   func.return
 }
 
@@ -64,311 +88,311 @@ func.def @layout_strided_rejects_negative_static_stride() {
 
 func.def @assume_spec_rejects_role_mismatch(%schema: encoding<schema>) {
   // ERROR@+1: ENCODING/012 "dense" "encoding<schema>" "encoding<layout>"
-  %bad = encoding.assume.spec %schema, #dense : encoding<schema>
+  %bad = encoding.assume.spec %schema, #encoding.layout.dense : encoding<schema>
   func.return
 }
 
 // ====
 
-// Numeric transform descriptors are verified when declared, even before a
-// vector.transform use site sees them.
-func.def @numeric_transform_unknown_family_define_only() {
-  // ERROR@+1: ENCODING/013 "numeric_transform" "family" "mystery"
-  %xf = encoding.define #numeric_transform<family="mystery", input_elems=128, output_elems=128> : encoding<transform>
+// Static family semantics are verified independently of encoding.define.
+func.def @assume_spec_rejects_negative_static_stride(%layout: encoding<layout>) {
+  // ERROR@+1: STRUCTURE/014 "stride" "-1" "non-negative stride"
+  %bad = encoding.assume.spec %layout, #encoding.layout.strided<strides=[-1]> : encoding<layout>
   func.return
 }
 
 // ====
 
-func.def @physical_storage_dynamic_params() {
+func.def @assume_spec_rejects_bad_named_fp8_rounding(%schema: encoding<schema>) {
+  // ERROR@+1: PARSE/017 "rounding" "wat"
+  %bad = encoding.assume.spec %schema, #encoding.f8e4m3fn<rounding=wat> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @assume_spec_rejects_bad_operand_format(%schema: encoding<schema>) {
+  // ERROR@+1: PARSE/017 "element_format" "wat"
+  %bad = encoding.assume.spec %schema, #encoding.operand<element_format=wat, payload_elements=32, payload_registers=6> : encoding<schema>
+  func.return
+}
+
+// ====
+
+// Transform descriptors are verified when declared, before a vector.transform
+// use site sees them.
+func.def @hadamard_unknown_normalization() {
+  // ERROR@+1: PARSE/017 "normalization" "mystery"
+  %xf = encoding.define #transform.hadamard<normalization=mystery> : encoding<transform>
+  func.return
+}
+
+// ====
+
+func.def @storage_dynamic_params() {
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
-  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   func.return
 }
 
 // ====
 
-func.def @physical_storage_static_params() {
-  %storage = encoding.define #physical_storage<layout=#dense, schema=#ggml_q4_0<block_elems=32, storage_bytes=18>> : encoding<storage>
+func.def @storage_static_params() {
+  %storage = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0> : encoding<storage>
   func.return
 }
 
 // ====
 
-func.def @physical_storage_fp8_fnuz_params() {
+func.def @storage_fp8_fnuz_params() {
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #fp8_e4m3fnuz : encoding<schema>
-  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
-  %storage2 = encoding.define #physical_storage<layout=#dense, schema=#fp8_e5m2fnuz> : encoding<storage>
+  %ieee_schema = encoding.define #encoding.f8e5m2 : encoding<schema>
+  %storage0 = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %ieee_schema : encoding<schema>} : encoding<storage>
+  %schema = encoding.define #encoding.f8e4m3fnuz : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %storage2 = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.f8e5m2fnuz> : encoding<storage>
   func.return
 }
 
 // ====
 
-func.def @matrix_operand_fp8_fnuz_formats() {
-  %e4m3 = encoding.define #matrix_operand<element_format=f8e4m3fnuz, payload_elements=8, payload_registers=2> : encoding<schema>
-  %e5m2 = encoding.define #matrix_operand<element_format=f8e5m2fnuz, payload_elements=8, payload_registers=2> : encoding<schema>
+func.def @operand_fp8_schema_rounding_params() {
+  %schema = encoding.define #encoding.f8e4m3fn<rounding=finite_only> : encoding<schema>
   func.return
 }
 
 // ====
 
-func.def @physical_storage_missing_schema() {
+func.def @operand_fp8_schema_unsupported_param() {
+  // ERROR@+1: ENCODING/008 "encoding.operand" "bogus"
+  %schema = encoding.define #encoding.f8e4m3fn<bogus=16> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @operand_fp8_schema_bad_rounding() {
+  // ERROR@+1: PARSE/017 "rounding" "wat"
+  %schema = encoding.define #encoding.f8e4m3fn<rounding=wat> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @operand_fp8_schema_rejects_storage_bits() {
+  // ERROR@+1: ENCODING/008 "encoding.operand" "storage_bits"
+  %schema = encoding.define #encoding.f8e4m3<storage_bits=16> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @operand_fp8_fnuz_formats() {
+  %e4m3 = encoding.define #encoding.operand<element_format=f8e4m3fnuz, payload_elements=8, payload_registers=2> : encoding<schema>
+  %e5m2 = encoding.define #encoding.operand<element_format=f8e5m2fnuz, payload_elements=8, payload_registers=2> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @storage_missing_schema() {
   %layout = encoding.layout.dense : encoding<layout>
-  // ERROR@+1: ENCODING/007 {encoding_name="physical_storage", param_name="schema"}
-  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>} : encoding<storage>
+  // ERROR@+1: ENCODING/007 {encoding_name="encoding.storage", param_name="schema"}
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>} : encoding<storage>
   func.return
 }
 
 // ====
 
-func.def @physical_storage_wrong_layout_type(%x: index) {
-  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
-  // ERROR@+1: ENCODING/009 {encoding_name="physical_storage", param_name="layout", actual_type="index", expected_type="encoding"}
-  %storage = encoding.define #physical_storage {layout = %x : index, schema = %schema : encoding<schema>} : encoding<storage>
+func.def @storage_wrong_layout_type(%x: index) {
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
+  // ERROR@+1: ENCODING/009 {encoding_name="encoding.storage", param_name="layout", actual_type="index", expected_type="encoding<layout>"}
+  %storage = encoding.define #encoding.storage {layout = %x : index, schema = %schema : encoding<schema>} : encoding<storage>
   func.return
 }
 
 // ====
 
-func.def @physical_storage_role_mismatch() {
+func.def @storage_role_mismatch() {
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
-  // ERROR@+2: ENCODING/011 {encoding_name="physical_storage", param_name="layout", expected_role="an address layout encoding"}
-  // ERROR@+1: ENCODING/011 {encoding_name="physical_storage", param_name="schema", expected_role="a storage schema encoding"}
-  %storage = encoding.define #physical_storage {layout = %schema : encoding<schema>, schema = %layout : encoding<layout>} : encoding<storage>
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
+  // ERROR@+1: ENCODING/009 {encoding_name="encoding.storage", param_name="layout", actual_type="encoding<schema>", expected_type="encoding<layout>"}
+  %storage = encoding.define #encoding.storage {layout = %schema : encoding<schema>, schema = %layout : encoding<layout>} : encoding<storage>
   func.return
 }
 
 // ====
 
-func.def @numeric_transform_hadamard_rejects_signs() {
-  %signs = vector.constant false : vector<128xi1>
-  // ERROR@+1: ENCODING/008 "numeric_transform" "signs"
-  %xf = encoding.define #numeric_transform<family="hadamard", input_elems=128, output_elems=128> {signs = %signs : vector<128xi1>} : encoding<transform>
+func.def @storage_static_role_mismatch() {
+  // ERROR@+2: ENCODING/011 {encoding_name="encoding.storage", param_name="layout", expected_role="an address layout encoding"}
+  // ERROR@+1: ENCODING/011 {encoding_name="encoding.storage", param_name="schema", expected_role="a storage schema encoding"}
+  %storage = encoding.define #encoding.storage<layout=#ggml.q4_0, schema=#encoding.layout.dense> : encoding<storage>
   func.return
 }
 
 // ====
 
-func.def @numeric_transform_hadamard_sign_requires_signs_or_seed() {
-  // ERROR@+1: ENCODING/007 "numeric_transform" "signs or seed"
-  %xf = encoding.define #numeric_transform<family="hadamard_sign", input_elems=128, output_elems=128> : encoding<transform>
+func.def @hadamard_default_normalization() {
+  %xf = encoding.define #transform.hadamard : encoding<transform>
   func.return
 }
 
 // ====
 
-func.def @numeric_transform_hadamard_sign_rejects_signs_and_seed(%seed: index) {
-  %signs = vector.constant false : vector<128xi1>
-  // ERROR@+1: ENCODING/014 "numeric_transform" "signs" "seed"
-  %xf = encoding.define #numeric_transform<family="hadamard_sign", input_elems=128, output_elems=128> {seed = %seed : index, signs = %signs : vector<128xi1>} : encoding<transform>
+func.def @hadamard_orthonormal() {
+  %xf = encoding.define #transform.hadamard<normalization=orthonormal> : encoding<transform>
   func.return
 }
 
 // ====
 
-func.def @numeric_transform_sign_permute_requires_permutation() {
-  %signs = vector.constant false : vector<128xi1>
-  // ERROR@+1: ENCODING/007 "numeric_transform" "permutation"
-  %xf = encoding.define #numeric_transform<family="sign_permute_hadamard", input_elems=128, output_elems=128> {signs = %signs : vector<128xi1>} : encoding<transform>
+func.def @hadamard_unknown_parameter() {
+  // ERROR@+1: ENCODING/008 "transform.hadamard" "window"
+  %xf = encoding.define #transform.hadamard<window=8> : encoding<transform>
   func.return
 }
 
 // ====
 
-func.def @numeric_transform_jl_dense_requires_matrix() {
-  // ERROR@+1: ENCODING/007 "numeric_transform" "matrix"
-  %xf = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> : encoding<transform>
+func.def @operand_rejects_bad_element_format() {
+  // ERROR@+1: PARSE/017 "element_format" "wat"
+  %schema = encoding.define #encoding.operand<element_format=wat, payload_elements=32, payload_registers=6> : encoding<schema>
   func.return
 }
 
 // ====
 
-func.def @numeric_transform_jl_dense_rejects_orthonormal() {
-  %matrix = vector.constant 0.0 : vector<64x128xf32>
-  // ERROR@+1: ENCODING/013 "numeric_transform" "normalization" "orthonormal"
-  %xf = encoding.define #numeric_transform<family="jl_dense", input_elems=128, normalization="orthonormal", output_elems=64> {matrix = %matrix : vector<64x128xf32>} : encoding<transform>
+func.def @operand_rejects_numeric_element_format() {
+  // ERROR@+1: PARSE/003
+  %schema = encoding.define #encoding.operand<element_format=268435456, payload_elements=32, payload_registers=6> : encoding<schema>
   func.return
 }
 
 // ====
 
-func.def @matrix_operand_rejects_bad_element_format() {
-  // ERROR@+1: ENCODING/013 "matrix_operand" "element_format" "wat"
-  %schema = encoding.define #matrix_operand<element_format=wat, payload_elements=32, payload_registers=6> : encoding<schema>
+func.def @operand_rejects_dynamic_params(%format: index) {
+  // ERROR@+1: ENCODING/007 "encoding.operand" "element_format"
+  %schema = encoding.define #encoding.operand<payload_elements=32, payload_registers=6> {element_format = %format : index} : encoding<schema>
   func.return
 }
 
 // ====
 
-func.def @matrix_operand_rejects_numeric_element_format() {
-  // ERROR@+1: ENCODING/010 "matrix_operand" "element_format"
-  %schema = encoding.define #matrix_operand<element_format=268435456, payload_elements=32, payload_registers=6> : encoding<schema>
-  func.return
-}
-
-// ====
-
-func.def @matrix_operand_rejects_dynamic_params(%format: index) {
-  // ERROR@+1: ENCODING/008 "matrix_operand" "element_format"
-  %schema = encoding.define #matrix_operand<payload_elements=32, payload_registers=6> {element_format = %format : index} : encoding<schema>
-  func.return
-}
-
-// ====
-
-func.def @matrix_operand_rejects_scale_format_without_scale_shape() {
+func.def @operand_rejects_scale_format_without_scale_shape() {
   // ERROR@+1: STRUCTURE/014 "scale" "1"
-  %schema = encoding.define #matrix_operand<element_format=f4e2m1, payload_elements=128, payload_registers=16, scale_format=f8e4m3> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=128, payload_registers=16, scale_format=f8e4m3> : encoding<schema>
   func.return
 }
 
 // ====
 
-func.def @matrix_operand_rejects_scaled_schema_without_scale_operands() {
+func.def @operand_rejects_scaled_schema_without_scale_operands() {
   // ERROR@+1: STRUCTURE/014 "scale" "1"
-  %schema = encoding.define #matrix_operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   func.return
 }
 
 // ====
 
-func.def @matrix_operand_rejects_zero_payload_registers() {
+func.def @operand_rejects_missing_2d_scale_group_shape() {
+  // ERROR@+1: ENCODING/007 "encoding.operand" "scale_group_shape"
+  %schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=256, payload_registers=32, scale_format=f8e4m3fn, scale_group_elements=256, scale_operands=1, scale_topology=block_2d> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @operand_rejects_non_array_scale_group_shape() {
+  // ERROR@+1: PARSE/003
+  %schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=256, payload_registers=32, scale_format=f8e4m3fn, scale_group_shape=256, scale_operands=1, scale_topology=block_2d> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @operand_rejects_empty_scale_group_shape() {
+  // ERROR@+1: STRUCTURE/014 "scale_group_shape" "0"
+  %schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=256, payload_registers=32, scale_format=f8e4m3fn, scale_group_shape=[], scale_operands=1, scale_topology=block_2d> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @operand_rejects_oversized_scale_group_rank() {
+  // ERROR@+1: STRUCTURE/014 "scale_group_shape" "5"
+  %schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=1, payload_registers=1, scale_format=f8e4m3fn, scale_group_shape=[1, 1, 1, 1, 1], scale_operands=1, scale_topology=hierarchical> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @operand_rejects_zero_scale_group_dimension() {
+  // ERROR@+1: STRUCTURE/014 "scale_group_shape" "0"
+  %schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=256, payload_registers=32, scale_format=f8e4m3fn, scale_group_shape=[16, 0], scale_operands=1, scale_topology=block_2d> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @operand_rejects_1d_scale_group_rank_two() {
+  // ERROR@+1: STRUCTURE/014 "scale_group_shape" "2"
+  %schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=16, payload_registers=2, scale_format=f8e4m3fn, scale_group_shape=[1, 16], scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @operand_rejects_2d_scale_group_rank_one() {
+  // ERROR@+1: STRUCTURE/014 "scale_group_shape" "1"
+  %schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=256, payload_registers=32, scale_format=f8e4m3fn, scale_group_shape=[256], scale_operands=1, scale_topology=block_2d> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @operand_rejects_scale_group_elements_and_shape() {
+  // ERROR@+1: ENCODING/014 "encoding.operand" "scale_group_elements" "scale_group_shape"
+  %schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=256, payload_registers=32, scale_format=f8e4m3fn, scale_group_elements=128, scale_group_shape=[8, 16], scale_operands=1, scale_topology=block_2d> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @operand_rejects_scale_group_shape_product_overflow() {
+  // ERROR@+1: STRUCTURE/014 "scale_group_shape" "65536"
+  %schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=256, payload_registers=32, scale_format=f8e4m3fn, scale_group_shape=[256, 256], scale_operands=1, scale_topology=block_2d> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @operand_rejects_target_fragment_without_payload_registers() {
   // ERROR@+1: STRUCTURE/014 "payload_registers" "0"
-  %schema = encoding.define #matrix_operand<element_format=f6e3m2, payload_elements=32, payload_registers=0> : encoding<schema>
+  %schema = encoding.define #encoding.f6e3m2<payload_elements=32, payload_packing=target_fragment> : encoding<schema>
   func.return
 }
 
 // ====
 
-func.def @turboquant_missing_static_param(%params: buffer, %thresholds_offset: offset, %centroids_offset: offset) {
-  %dense = encoding.layout.dense : encoding<layout>
-  %thresholds = buffer.view %params[%thresholds_offset] : buffer -> view<3xf32, %dense>
-  %centroids = buffer.view %params[%centroids_offset] : buffer -> view<4xf16, %dense>
-  %signs = vector.constant false : vector<128xi1>
-  %qjl_matrix = vector.constant 0.0 : vector<64x128xf32>
-  %transform = encoding.define #numeric_transform<family="hadamard_sign", input_elems=128, output_elems=128> {signs = %signs : vector<128xi1>} : encoding<transform>
-  %qjl_transform = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %qjl_matrix : vector<64x128xf32>} : encoding<transform>
-  // ERROR@+1: ENCODING/007 "turboquant_kv" "logical_element"
-  %schema = encoding.define #turboquant_kv<first_stage_bits=2, logical_elems=128, pack_order="lsb0", qjl_rows=64, record_bytes=40, residual_bits=1, scalar_quantizer="lloyd_max", transform_family="hadamard_sign"> {centroids = %centroids : view<4xf16, %dense>, qjl_transform = %qjl_transform : encoding<transform>, thresholds = %thresholds : view<3xf32, %dense>, transform = %transform : encoding<transform>} : encoding<schema>
+func.def @operand_rejects_structured_sparsity_without_density() {
+  // ERROR@+1: STRUCTURE/014 "sparsity_group_nonzero_elements" "0"
+  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured> : encoding<schema>
   func.return
 }
 
 // ====
 
-func.def @turboquant_wrong_static_kind(%params: buffer, %thresholds_offset: offset, %centroids_offset: offset) {
-  %dense = encoding.layout.dense : encoding<layout>
-  %thresholds = buffer.view %params[%thresholds_offset] : buffer -> view<3xf32, %dense>
-  %centroids = buffer.view %params[%centroids_offset] : buffer -> view<4xf16, %dense>
-  %signs = vector.constant false : vector<128xi1>
-  %qjl_matrix = vector.constant 0.0 : vector<64x128xf32>
-  %transform = encoding.define #numeric_transform<family="hadamard_sign", input_elems=128, output_elems=128> {signs = %signs : vector<128xi1>} : encoding<transform>
-  %qjl_transform = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %qjl_matrix : vector<64x128xf32>} : encoding<transform>
-  // ERROR@+1: ENCODING/010 "turboquant_kv" "first_stage_bits"
-  %schema = encoding.define #turboquant_kv<first_stage_bits="2", logical_element="f16", logical_elems=128, pack_order="lsb0", qjl_rows=64, record_bytes=40, residual_bits=1, scalar_quantizer="lloyd_max", transform_family="hadamard_sign"> {centroids = %centroids : view<4xf16, %dense>, qjl_transform = %qjl_transform : encoding<transform>, thresholds = %thresholds : view<3xf32, %dense>, transform = %transform : encoding<transform>} : encoding<schema>
+func.def @operand_rejects_non_decreasing_structured_sparsity_density() {
+  // ERROR@+1: STRUCTURE/014 "sparsity_group_nonzero_elements" "4"
+  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=4> : encoding<schema>
   func.return
 }
 
 // ====
 
-func.def @turboquant_unsupported_pack_order(%params: buffer, %thresholds_offset: offset, %centroids_offset: offset) {
-  %dense = encoding.layout.dense : encoding<layout>
-  %thresholds = buffer.view %params[%thresholds_offset] : buffer -> view<3xf32, %dense>
-  %centroids = buffer.view %params[%centroids_offset] : buffer -> view<4xf16, %dense>
-  %signs = vector.constant false : vector<128xi1>
-  %qjl_matrix = vector.constant 0.0 : vector<64x128xf32>
-  %transform = encoding.define #numeric_transform<family="hadamard_sign", input_elems=128, output_elems=128> {signs = %signs : vector<128xi1>} : encoding<transform>
-  %qjl_transform = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %qjl_matrix : vector<64x128xf32>} : encoding<transform>
-  // ERROR@+1: ENCODING/013 "turboquant_kv" "pack_order" "msb0"
-  %schema = encoding.define #turboquant_kv<first_stage_bits=2, logical_element="f16", logical_elems=128, pack_order="msb0", qjl_rows=64, record_bytes=40, residual_bits=1, scalar_quantizer="lloyd_max", transform_family="hadamard_sign"> {centroids = %centroids : view<4xf16, %dense>, qjl_transform = %qjl_transform : encoding<transform>, thresholds = %thresholds : view<3xf32, %dense>, transform = %transform : encoding<transform>} : encoding<schema>
-  func.return
-}
-
-// ====
-
-func.def @turboquant_record_too_small(%params: buffer, %thresholds_offset: offset, %centroids_offset: offset) {
-  %dense = encoding.layout.dense : encoding<layout>
-  %thresholds = buffer.view %params[%thresholds_offset] : buffer -> view<3xf32, %dense>
-  %centroids = buffer.view %params[%centroids_offset] : buffer -> view<4xf16, %dense>
-  %signs = vector.constant false : vector<128xi1>
-  %qjl_matrix = vector.constant 0.0 : vector<64x128xf32>
-  %transform = encoding.define #numeric_transform<family="hadamard_sign", input_elems=128, output_elems=128> {signs = %signs : vector<128xi1>} : encoding<transform>
-  %qjl_transform = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %qjl_matrix : vector<64x128xf32>} : encoding<transform>
-  // ERROR@+1: STRUCTURE/014 "record_bytes" "39"
-  %schema = encoding.define #turboquant_kv<first_stage_bits=2, logical_element="f16", logical_elems=128, pack_order="lsb0", qjl_rows=64, record_bytes=39, residual_bits=1, scalar_quantizer="lloyd_max", transform_family="hadamard_sign"> {centroids = %centroids : view<4xf16, %dense>, qjl_transform = %qjl_transform : encoding<transform>, thresholds = %thresholds : view<3xf32, %dense>, transform = %transform : encoding<transform>} : encoding<schema>
-  func.return
-}
-
-// ====
-
-func.def @turboquant_threshold_count_mismatch(%params: buffer, %thresholds_offset: offset, %centroids_offset: offset) {
-  %dense = encoding.layout.dense : encoding<layout>
-  %thresholds = buffer.view %params[%thresholds_offset] : buffer -> view<4xf32, %dense>
-  %centroids = buffer.view %params[%centroids_offset] : buffer -> view<4xf16, %dense>
-  %signs = vector.constant false : vector<128xi1>
-  %qjl_matrix = vector.constant 0.0 : vector<64x128xf32>
-  %transform = encoding.define #numeric_transform<family="hadamard_sign", input_elems=128, output_elems=128> {signs = %signs : vector<128xi1>} : encoding<transform>
-  %qjl_transform = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %qjl_matrix : vector<64x128xf32>} : encoding<transform>
-  // ERROR@+1: STRUCTURE/014 "thresholds" "4"
-  %schema = encoding.define #turboquant_kv<first_stage_bits=2, logical_element="f16", logical_elems=128, pack_order="lsb0", qjl_rows=64, record_bytes=40, residual_bits=1, scalar_quantizer="lloyd_max", transform_family="hadamard_sign"> {centroids = %centroids : view<4xf16, %dense>, qjl_transform = %qjl_transform : encoding<transform>, thresholds = %thresholds : view<4xf32, %dense>, transform = %transform : encoding<transform>} : encoding<schema>
-  func.return
-}
-
-// ====
-
-func.def @turboquant_centroids_wrong_type(%params: buffer, %thresholds_offset: offset, %centroids_offset: offset) {
-  %dense = encoding.layout.dense : encoding<layout>
-  %thresholds = buffer.view %params[%thresholds_offset] : buffer -> view<3xf32, %dense>
-  %centroids = buffer.view %params[%centroids_offset] : buffer -> view<4xi32, %dense>
-  %signs = vector.constant false : vector<128xi1>
-  %qjl_matrix = vector.constant 0.0 : vector<64x128xf32>
-  %transform = encoding.define #numeric_transform<family="hadamard_sign", input_elems=128, output_elems=128> {signs = %signs : vector<128xi1>} : encoding<transform>
-  %qjl_transform = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %qjl_matrix : vector<64x128xf32>} : encoding<transform>
-  // ERROR@+1: ENCODING/009 "turboquant_kv" "centroids"
-  %schema = encoding.define #turboquant_kv<first_stage_bits=2, logical_element="f16", logical_elems=128, pack_order="lsb0", qjl_rows=64, record_bytes=40, residual_bits=1, scalar_quantizer="lloyd_max", transform_family="hadamard_sign"> {centroids = %centroids : view<4xi32, %dense>, qjl_transform = %qjl_transform : encoding<transform>, thresholds = %thresholds : view<3xf32, %dense>, transform = %transform : encoding<transform>} : encoding<schema>
-  func.return
-}
-
-// ====
-
-func.def @turboquant_transform_role_mismatch(%params: buffer, %thresholds_offset: offset, %centroids_offset: offset) {
-  %dense = encoding.layout.dense : encoding<layout>
-  %thresholds = buffer.view %params[%thresholds_offset] : buffer -> view<3xf32, %dense>
-  %centroids = buffer.view %params[%centroids_offset] : buffer -> view<4xf16, %dense>
-  %schema_param = encoding.define #q8_0<block=32> : encoding<schema>
-  %qjl_matrix = vector.constant 0.0 : vector<64x128xf32>
-  %qjl_transform = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %qjl_matrix : vector<64x128xf32>} : encoding<transform>
-  // ERROR@+1: ENCODING/011 "turboquant_kv" "transform" "a numeric transform encoding"
-  %schema = encoding.define #turboquant_kv<first_stage_bits=2, logical_element="f16", logical_elems=128, pack_order="lsb0", qjl_rows=64, record_bytes=40, residual_bits=1, scalar_quantizer="lloyd_max", transform_family="hadamard_sign"> {centroids = %centroids : view<4xf16, %dense>, qjl_transform = %qjl_transform : encoding<transform>, thresholds = %thresholds : view<3xf32, %dense>, transform = %schema_param : encoding<schema>} : encoding<schema>
-  func.return
-}
-
-// ====
-
-func.def @turboquant_transform_family_mismatch(%params: buffer, %thresholds_offset: offset, %centroids_offset: offset) {
-  %dense = encoding.layout.dense : encoding<layout>
-  %thresholds = buffer.view %params[%thresholds_offset] : buffer -> view<3xf32, %dense>
-  %centroids = buffer.view %params[%centroids_offset] : buffer -> view<4xf16, %dense>
-  %transform = encoding.define #numeric_transform<family="hadamard", input_elems=128, output_elems=128> : encoding<transform>
-  %qjl_matrix = vector.constant 0.0 : vector<64x128xf32>
-  %qjl_transform = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %qjl_matrix : vector<64x128xf32>} : encoding<transform>
-  // ERROR@+1: ENCODING/013 "turboquant_kv" "transform" "hadamard"
-  %schema = encoding.define #turboquant_kv<first_stage_bits=2, logical_element="f16", logical_elems=128, pack_order="lsb0", qjl_rows=64, record_bytes=40, residual_bits=1, scalar_quantizer="lloyd_max", transform_family="hadamard_sign"> {centroids = %centroids : view<4xf16, %dense>, qjl_transform = %qjl_transform : encoding<transform>, thresholds = %thresholds : view<3xf32, %dense>, transform = %transform : encoding<transform>} : encoding<schema>
-  func.return
-}
-
-// ====
-
-func.def @turboquant_qjl_transform_family_mismatch(%params: buffer, %thresholds_offset: offset, %centroids_offset: offset) {
-  %dense = encoding.layout.dense : encoding<layout>
-  %thresholds = buffer.view %params[%thresholds_offset] : buffer -> view<3xf32, %dense>
-  %centroids = buffer.view %params[%centroids_offset] : buffer -> view<4xf16, %dense>
-  %signs = vector.constant false : vector<128xi1>
-  %transform = encoding.define #numeric_transform<family="hadamard_sign", input_elems=128, output_elems=128> {signs = %signs : vector<128xi1>} : encoding<transform>
-  %qjl_transform = encoding.define #numeric_transform<family="hadamard", input_elems=128, output_elems=64> : encoding<transform>
-  // ERROR@+1: ENCODING/013 "turboquant_kv" "qjl_transform" "hadamard"
-  %schema = encoding.define #turboquant_kv<first_stage_bits=2, logical_element="f16", logical_elems=128, pack_order="lsb0", qjl_rows=64, record_bytes=40, residual_bits=1, scalar_quantizer="lloyd_max", transform_family="hadamard_sign"> {centroids = %centroids : view<4xf16, %dense>, qjl_transform = %qjl_transform : encoding<transform>, thresholds = %thresholds : view<3xf32, %dense>, transform = %transform : encoding<transform>} : encoding<schema>
+func.def @operand_rejects_density_without_structured_sparsity() {
+  // ERROR@+1: STRUCTURE/014 "sparsity_group_elements" "4"
+  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
   func.return
 }

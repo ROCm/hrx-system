@@ -31,6 +31,7 @@ loom_cc_library(
     iree::base::internal::arena
     iree::base::internal::unicode
     loom::analysis::consumption
+    loom::analysis::ownership
     loom::error::diagnostic
     loom::error::emitter
     loom::error::error_defs
@@ -40,6 +41,7 @@ loom_cc_library(
     loom::ops::op_defs
     loom::ops::special_values
     loom::target::registers
+    loom::util::adaptive_sort
   PUBLIC
 )
 
@@ -53,6 +55,7 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::codegen::low::text_asm
     loom::error::diagnostic
     loom::error::error_defs
     loom::error::json_sink
@@ -61,7 +64,9 @@ loom_cc_test(
     loom::ir
     loom::ops::low
     loom::ops::op_defs
+    loom::ops::template
     loom::ops::test
+    loom::target::low_descriptor_registry_core_test
     loom::testing::diagnostic_matchers
     loom::util::stream
 )

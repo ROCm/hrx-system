@@ -123,8 +123,6 @@ typedef struct loom_llvmir_kernel_profile_t {
   // Fixed subgroup size in invocations, or zero when the target profile does
   // not select a fixed subgroup size.
   uint32_t subgroup_size;
-  // Target-specific flag word for descriptor-backed kernel binding resources.
-  uint32_t binding_resource_flags;
   // Optional LLVM function-attribute key for the flat workgroup size range.
   iree_string_view_t flat_workgroup_size_attr_name;
   // Optional LLVM function-attribute key declaring uniform workgroup size.

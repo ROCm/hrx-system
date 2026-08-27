@@ -8,9 +8,16 @@ package(default_visibility = ["//visibility:public"])
 
 exports_files([
     ".github/scripts/check_vulkan_hardware_environment.sh",
+    ".github/scripts/fetch_rocm_toolchain.sh",
     ".github/workflows/ci_core_linux.yml",
+    ".github/workflows/ci_core_windows.yml",
     ".github/workflows/ci_importers.yml",
     ".github/workflows/ci_iree_bazel.yml",
     ".github/workflows/ci_iree_cmake.yml",
+    ".github/workflows/build_core_windows.yml",
+    ".github/workflows/ci_libhrx_bazel.yml",
+    ".github/workflows/docs.yml",
+    ".github/workflows/presubmit.yml",
     ".github/workflows/test_core_linux_gpu.yml",
+    ".github/workflows/test_core_linux_gpu_source.yml",
 ])

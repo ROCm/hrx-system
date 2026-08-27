@@ -13,52 +13,48 @@
 
 #include "iree/base/api.h"
 #include "loom/target/arch/amdgpu/target_info.h"
+#include "loom/target/residency.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef struct loom_amdgpu_occupancy_pressure_cliff_model_t {
-  // Live allocation units at which this cliff is crossed.
-  uint32_t cliff_units;
-  // Occupancy tier before crossing the cliff.
-  uint32_t tier_before;
-  // Occupancy tier after crossing the cliff.
-  uint32_t tier_after;
-} loom_amdgpu_occupancy_pressure_cliff_model_t;
-
 typedef struct loom_amdgpu_occupancy_register_class_model_t {
   // Stable target-low register-class name.
   iree_string_view_t register_class;
+  // Descriptor-set-local register class ID for |register_class|.
+  uint16_t descriptor_reg_class_id;
   // Occupancy register-file pool shared by resident waves.
   uint32_t pool_units;
   // Allocation granularity used by occupancy calculations.
   uint32_t allocation_granularity;
-  // Scheduler pressure cliffs in ascending unit order.
-  const loom_amdgpu_occupancy_pressure_cliff_model_t* pressure_cliffs;
-  // Number of entries in |pressure_cliffs|.
-  iree_host_size_t pressure_cliff_count;
+  // Whether this register class directly limits resident waves.
+  bool limits_occupancy;
 } loom_amdgpu_occupancy_register_class_model_t;
 
-typedef struct loom_amdgpu_occupancy_resource_member_model_t {
-  // Index into loom_amdgpu_occupancy_model_t::register_classes.
-  uint16_t register_class_index;
-  // Member contribution granularity applied before summing pressure.
-  uint32_t contribution_granularity;
-} loom_amdgpu_occupancy_resource_member_model_t;
+typedef enum loom_amdgpu_occupancy_wave_slot_e {
+  // Generated occupancy model slot for wave32 execution.
+  LOOM_AMDGPU_OCCUPANCY_WAVE_SLOT_32 = 0,
+  // Generated occupancy model slot for wave64 execution.
+  LOOM_AMDGPU_OCCUPANCY_WAVE_SLOT_64 = 1,
+  // Number of generated wave-mode slots per processor.
+  LOOM_AMDGPU_OCCUPANCY_WAVE_SLOT_COUNT = 2,
+} loom_amdgpu_occupancy_wave_slot_t;
 
-typedef struct loom_amdgpu_occupancy_resource_model_t {
-  // Stable target-low resource name.
-  iree_string_view_t resource;
-  // Occupancy resource pool shared by resident waves.
-  uint32_t pool_units;
-  // Allocation granularity used by occupancy calculations.
-  uint32_t allocation_granularity;
-  // Register-class members contributing to this resource.
-  const loom_amdgpu_occupancy_resource_member_model_t* members;
-  // Number of entries in members.
-  iree_host_size_t member_count;
-} loom_amdgpu_occupancy_resource_model_t;
+// Hardware resources shared by waves in one occupancy calculation domain.
+//
+// On current AMDGPU processors the domain is either a CU or a WGP. Naming it
+// by its scheduling role keeps the units stable across both hardware modes.
+typedef struct loom_amdgpu_occupancy_domain_model_t {
+  // Number of SIMD execution units in the occupancy domain.
+  uint32_t simd_count;
+  // Local-memory bytes shared by workgroups in the occupancy domain.
+  uint32_t local_memory_bytes;
+  // Local-memory allocation granularity in bytes per workgroup.
+  uint32_t local_memory_allocation_granularity;
+  // Barrier-using workgroups available in the occupancy domain.
+  uint32_t max_barrier_workgroup_count;
+} loom_amdgpu_occupancy_domain_model_t;
 
 typedef struct loom_amdgpu_occupancy_model_t {
   // Dense generated AMDGPU descriptor-set ordinal.
@@ -67,23 +63,26 @@ typedef struct loom_amdgpu_occupancy_model_t {
   uint32_t wave_size;
   // Maximum resident waves per SIMD.
   uint32_t max_waves_per_simd;
-  // Total scheduler pressure-cliff rows across all register classes.
-  iree_host_size_t pressure_cliff_count;
+  // Workgroup and local-memory resources in one occupancy domain.
+  loom_amdgpu_occupancy_domain_model_t domain;
+  // Target residency policy shared by scheduling and final occupancy.
+  loom_target_residency_model_t residency_model;
   // Register-class occupancy models in diagnostic order.
   const loom_amdgpu_occupancy_register_class_model_t* register_classes;
   // Number of entries in register_classes.
   iree_host_size_t register_class_count;
-  // Derived occupancy resources in diagnostic order.
-  const loom_amdgpu_occupancy_resource_model_t* resources;
-  // Number of entries in resources.
-  iree_host_size_t resource_count;
+  // Model index by descriptor-set-local register class ID, or UINT16_MAX for
+  // descriptor classes that do not contribute to occupancy.
+  const uint16_t* register_class_indices_by_descriptor_reg_class_id;
+  // Number of entries in register_class_indices_by_descriptor_reg_class_id.
+  iree_host_size_t descriptor_reg_class_count;
 } loom_amdgpu_occupancy_model_t;
 
-// Returns the occupancy model for |descriptor_set_ordinal|, or NULL when the
-// descriptor set does not define one.
-const loom_amdgpu_occupancy_model_t*
-loom_amdgpu_occupancy_model_for_descriptor_set_ordinal(
-    uint16_t descriptor_set_ordinal);
+// Returns the generated occupancy model for |properties| and |wave_size|.
+//
+// The target properties and wave mode must have passed target verification.
+const loom_amdgpu_occupancy_model_t* loom_amdgpu_occupancy_model_for_properties(
+    const loom_amdgpu_processor_properties_t* properties, uint32_t wave_size);
 
 #ifdef __cplusplus
 }  // extern "C"

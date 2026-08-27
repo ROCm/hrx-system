@@ -1,9 +1,9 @@
 // RUN: pass canonicalize
 
 func.def @mixed_dynamic_strided_layout_facts() -> (i64, i64, i64, i64) {
-  %sixty_four = index.constant 64 : index
-  %layout = encoding.layout.strided [1, %sixty_four] : encoding<layout>
-  %constant_hi = test.fact_range_hi %sixty_four : index -> i64
+  %outer_stride = index.constant 64 : index
+  %layout = encoding.layout.strided [1, %outer_stride] : encoding<layout>
+  %constant_hi = test.fact_range_hi %outer_stride : index -> i64
   %kind = test.fact_encoding_layout_kind %layout : encoding<layout> -> i64
   %stride0 = test.fact_encoding_layout_stride_hi %layout[0] : encoding<layout> -> i64
   %stride1 = test.fact_encoding_layout_stride_hi %layout[1] : encoding<layout> -> i64
@@ -41,16 +41,16 @@ func.def @assumed_strided_layout_facts() -> (i64, i64, i64) {
 // ====
 
 func.def @predicate_attribute_keeps_dynamic_bound(%origin0: index, %count: index) -> (index) {
-  %one = index.constant 1 : index
-  %max_vector_origin = index.sub %count, %one : index
+  %last_origin_adjustment = index.constant 1 : index
+  %max_vector_origin = index.sub %count, %last_origin_adjustment : index
   %origin = index.assume %origin0 [lt(%origin0, %max_vector_origin)] : index
   func.return %origin : index
 }
 
 // ----
 func.def @predicate_attribute_keeps_dynamic_bound(%origin0: index, %count: index) -> (index) {
-  %one = index.constant 1 : index
-  %max_vector_origin = index.sub %count, %one : index
+  %last_origin_adjustment = index.constant 1 : index
+  %max_vector_origin = index.sub %count, %last_origin_adjustment : index
   %origin = index.assume %origin0 [lt(%origin0, %max_vector_origin)] : index
   func.return %origin : index
 }

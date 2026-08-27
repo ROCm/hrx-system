@@ -30,9 +30,20 @@ typedef struct iree_hal_device_t iree_hal_device_t;
 // Invalid device ordinal sentinel value.
 #define IREE_HAL_TOPOLOGY_DEVICE_ORDINAL_INVALID UINT32_MAX
 
+// Number of physical-device affinity bits available in one logical device.
+#define IREE_HAL_PHYSICAL_DEVICE_AFFINITY_BIT_COUNT 64
+
 //===----------------------------------------------------------------------===//
 // Types and Enums
 //===----------------------------------------------------------------------===//
+
+// Identifies physical-device records within one logical device specification.
+//
+// The bit namespace is local to the canonical device spec containing the
+// records. The device-spec producer assigns one unique bit to each physical
+// device record; bit positions are independent of backend physical-device
+// ordinals and iree_hal_queue_affinity_t bits.
+typedef uint64_t iree_hal_physical_device_affinity_t;
 
 // Bitmap type for device compatibility masks.
 // Sized based on max device count for efficient bitwise operations.
@@ -116,7 +127,7 @@ typedef uint64_t iree_hal_topology_edge_scheduling_word_t;
 #define IREE_HAL_TOPOLOGY_EDGE_NUMA_DISTANCE_MASK                    0xFull
 #define IREE_HAL_TOPOLOGY_EDGE_LINK_CLASS_SHIFT                      48
 #define IREE_HAL_TOPOLOGY_EDGE_LINK_CLASS_MASK                       0x7ull
-// Interop word layout constants.
+// Cold word layout constants.
 #define IREE_HAL_TOPOLOGY_EDGE_SEMAPHORE_IMPORT_TIMEPOINT_TYPES_SHIFT 0
 #define IREE_HAL_TOPOLOGY_EDGE_SEMAPHORE_IMPORT_TIMEPOINT_TYPES_MASK  0xFFFFull
 #define IREE_HAL_TOPOLOGY_EDGE_SEMAPHORE_EXPORT_TIMEPOINT_TYPES_SHIFT 16
@@ -125,10 +136,15 @@ typedef uint64_t iree_hal_topology_edge_scheduling_word_t;
 #define IREE_HAL_TOPOLOGY_EDGE_BUFFER_IMPORT_TYPES_MASK              0xFFull
 #define IREE_HAL_TOPOLOGY_EDGE_BUFFER_EXPORT_TYPES_SHIFT             40
 #define IREE_HAL_TOPOLOGY_EDGE_BUFFER_EXPORT_TYPES_MASK              0xFFull
+#define IREE_HAL_TOPOLOGY_EDGE_LINK_TYPE_SHIFT                       48
+#define IREE_HAL_TOPOLOGY_EDGE_LINK_TYPE_MASK                        0xFFull
+#define IREE_HAL_TOPOLOGY_EDGE_PATH_HOP_COUNT_SHIFT                  56
+#define IREE_HAL_TOPOLOGY_EDGE_PATH_HOP_COUNT_MASK                   0xFFull
 // clang-format on
 
-// Interop word: external handle/timepoint bitmasks for resource sharing.
-// This is cold-path data read only during resource import/export negotiation.
+// Cold word: resource-interoperability masks and physical-path details.
+// This is read only during resource negotiation, topology inspection, and
+// other control-plane operations.
 //
 // Layout (64 bits):
 //  Bits  0-15: semaphore_import_timepoint_types (16 bits)
@@ -137,7 +153,8 @@ typedef uint64_t iree_hal_topology_edge_scheduling_word_t;
 //               iree_hal_external_timepoint_type_t bits src can export.
 //  Bits 32-39: buffer_import_types (8 bits) - buffer types dst can import.
 //  Bits 40-47: buffer_export_types (8 bits) - buffer types src can export.
-//  Bits 48-63: reserved (16 bits) - must be zero.
+//  Bits 48-55: link_type (8 bits) - physical interconnect technology.
+//  Bits 56-63: path_hop_count (8 bits) - physical path length.
 typedef uint64_t iree_hal_topology_edge_interop_word_t;
 
 // 128-bit packed edge descriptor encoding directional device capabilities.
@@ -147,12 +164,14 @@ typedef uint64_t iree_hal_topology_edge_interop_word_t;
 // optimized for different access patterns:
 //
 //  Scheduling word (lo) — read on every placement decision (nanosecond path).
-//  Interop word (hi) — read during resource import/export (microsecond path).
+//  Cold word (hi) — read during resource negotiation and topology inspection.
 //
 // This split allows iree_hal_resource_origin_t to cache only the scheduling
 // word (8 bytes) while the full 128-bit edge lives in the topology matrix.
 typedef struct iree_hal_topology_edge_t {
+  // Scheduling properties queried by placement and compatibility hot paths.
   iree_hal_topology_edge_scheduling_word_t lo;
+  // Resource interoperability and physical-path control-plane properties.
   iree_hal_topology_edge_interop_word_t hi;
 } iree_hal_topology_edge_t;
 
@@ -222,6 +241,28 @@ enum iree_hal_topology_link_class_bits_t {
 };
 typedef uint8_t iree_hal_topology_link_class_t;
 
+// First-hop physical interconnect technology for a device topology edge.
+//
+// This identifies the transport itself while |iree_hal_topology_link_class_t|
+// describes portable scheduling characteristics of the complete path. A
+// backend that cannot identify one first-hop transport for the represented
+// path leaves the type UNKNOWN.
+typedef uint8_t iree_hal_topology_link_type_t;
+typedef enum iree_hal_topology_link_type_e {
+  // Physical link technology is unavailable or ambiguous.
+  IREE_HAL_TOPOLOGY_LINK_TYPE_UNKNOWN = 0,
+  // HyperTransport interconnect.
+  IREE_HAL_TOPOLOGY_LINK_TYPE_HYPERTRANSPORT = 1,
+  // QuickPath Interconnect or an equivalent coherent socket link.
+  IREE_HAL_TOPOLOGY_LINK_TYPE_QPI = 2,
+  // PCI Express interconnect.
+  IREE_HAL_TOPOLOGY_LINK_TYPE_PCIE = 3,
+  // InfiniBand interconnect.
+  IREE_HAL_TOPOLOGY_LINK_TYPE_INFINIBAND = 4,
+  // xGMI interconnect.
+  IREE_HAL_TOPOLOGY_LINK_TYPE_XGMI = 5,
+} iree_hal_topology_link_type_e;
+
 // External buffer handle type bits for import/export operations.
 // These map to platform-specific handle types used for cross-device and
 // cross-driver resource sharing. Each bit represents a buffer handle format.
@@ -282,6 +323,10 @@ enum iree_hal_topology_capability_bits_t {
   // per-allocation access grants. Until the allocation/access policy proves a
   // grant was applied, those buffer modes must not report NATIVE access.
   IREE_HAL_TOPOLOGY_CAPABILITY_PEER_ACCESS_REQUIRES_GRANT = 1u << 12,
+  // 32-bit atomic transactions work across the link.
+  IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_32 = 1u << 13,
+  // 64-bit atomic transactions work across the link.
+  IREE_HAL_TOPOLOGY_CAPABILITY_ATOMIC_64 = 1u << 14,
 };
 typedef uint16_t iree_hal_topology_capability_t;
 
@@ -323,7 +368,7 @@ typedef struct iree_hal_topology_node_t {
   uint32_t local_ordinal;
   // Physical device affinity represented by this node, or 0 when not tied to
   // a specific physical-device subset.
-  uint64_t physical_device_affinity;
+  iree_hal_physical_device_affinity_t physical_device_affinity;
 } iree_hal_topology_node_t;
 
 // Kinds of links in a normalized HAL topology graph.
@@ -387,10 +432,10 @@ typedef struct iree_hal_topology_link_t {
 // the scheduling word (lo) from the owning device's diagonal topology entry,
 // while topology_index identifies the device within its topology group.
 //
-// Only the scheduling word is cached because the fast-path compatibility
-// check only needs mode/capability/cost information. Handle type negotiation
-// (the interop word) is a cold path that looks up the full 128-bit edge from
-// the topology matrix.
+// Only the scheduling word is cached because the fast-path compatibility check
+// only needs mode/capability/cost information. Handle negotiation and physical
+// path inspection are cold paths that look up the full 128-bit edge from the
+// topology matrix.
 typedef struct iree_hal_resource_origin_t {
   // Scheduling word from the device's self-edge (edge[i][i].lo).
   // Contains interop modes, capability flags, costs, and link class.
@@ -640,16 +685,20 @@ iree_hal_topology_edge_buffer_write_mode_coherent(
 // - HOST_COHERENT: CPU can observe device writes without explicit sync
 // - P2P_COPY: Hardware DMA between devices (bypasses host)
 // - CONCURRENT_SAFE: Can safely access same memory concurrently (no races)
-// - ATOMIC_DEVICE: Atomic operations visible across devices
-// - ATOMIC_SYSTEM: Atomic operations visible system-wide (CPU + all devices)
+// - ATOMIC_DEVICE: Device-scope atomic operations visible across the link
+// - ATOMIC_SYSTEM: System-scope atomic operations visible across the link
+// - ATOMIC_32: 32-bit atomic transactions supported across the link
+// - ATOMIC_64: 64-bit atomic transactions supported across the link
 // - TIMELINE_SEMAPHORE: Supports timeline semaphores for fine-grained sync
 // - REMOTE_DMA: RDMA transfers supported across this link
 // - SHARED_VIRTUAL_ADDRESS: SVA/SVM across this link
 // - PEER_ACCESS_REQUIRES_GRANT: direct peer access needs allocation grants
 //
 // Implementations should be conservative - only set flags that hardware truly
-// guarantees. ATOMIC_SYSTEM requires platform support (PCIe atomics, vendor
-// extensions). Check CUDA unified addressing, ROCm fine-grained memory, etc.
+// guarantees. A usable atomic cell requires both its width and scope bits;
+// queue-family and memory-type capabilities are required independently.
+// ATOMIC_SYSTEM requires platform support (PCIe atomics, vendor extensions).
+// Check CUDA unified addressing, ROCm fine-grained memory, etc.
 static inline iree_hal_topology_capability_t
 iree_hal_topology_edge_capability_flags(
     iree_hal_topology_edge_scheduling_word_t word) {
@@ -776,11 +825,11 @@ static inline iree_hal_topology_link_class_t iree_hal_topology_edge_link_class(
 }
 
 //===----------------------------------------------------------------------===//
-// Interop word (hi) getters
+// Cold word (hi) getters
 //===----------------------------------------------------------------------===//
 //
-// These getters operate on the interop word (edge.hi). They extract external
-// handle/timepoint bitmasks used during resource import/export negotiation.
+// These getters operate on edge.hi. They extract external handle/timepoint
+// bitmasks and physical-path details used by control-plane operations.
 
 // Returns semaphore import timepoint types from an interop word.
 // An iree_hal_external_timepoint_type_mask_t value indicating which external
@@ -845,6 +894,25 @@ iree_hal_topology_edge_buffer_export_types(
   return (iree_hal_topology_handle_type_t)raw_types;
 }
 
+// Returns the first-hop physical interconnect technology for the represented
+// path. UNKNOWN means that the backend did not report a transport or that a
+// composite edge spans paths with different first-hop transport types.
+static inline iree_hal_topology_link_type_t iree_hal_topology_edge_link_type(
+    iree_hal_topology_edge_interop_word_t word) {
+  return (
+      iree_hal_topology_link_type_t)((word >>
+                                      IREE_HAL_TOPOLOGY_EDGE_LINK_TYPE_SHIFT) &
+                                     IREE_HAL_TOPOLOGY_EDGE_LINK_TYPE_MASK);
+}
+
+// Returns the physical path length reported by the backend. Zero means that
+// the path length is unavailable or that the edge is a self-edge.
+static inline uint8_t iree_hal_topology_edge_path_hop_count(
+    iree_hal_topology_edge_interop_word_t word) {
+  return (uint8_t)((word >> IREE_HAL_TOPOLOGY_EDGE_PATH_HOP_COUNT_SHIFT) &
+                   IREE_HAL_TOPOLOGY_EDGE_PATH_HOP_COUNT_MASK);
+}
+
 //===----------------------------------------------------------------------===//
 // Scheduling use cases
 //===----------------------------------------------------------------------===//
@@ -864,9 +932,10 @@ iree_hal_topology_edge_buffer_export_types(
 //
 // Shared state buffer for multi-GPU coordination (small, frequently updated).
 // Scheduler reads edge A->B:
-//   buffer_read_mode_coherent = NATIVE, PEER_COHERENT set, ATOMIC_SYSTEM set
-// Decision: allocate as coherent on A, B uses it in-place with system atomics.
-// No transfer needed — hardware coherency handles visibility.
+//   buffer_read_mode_coherent = NATIVE, PEER_COHERENT set,
+//   ATOMIC_SYSTEM and ATOMIC_64 set
+// Decision: allocate as coherent on A, B uses it in-place with 64-bit system
+// atomics. No transfer needed — hardware coherency handles visibility.
 //
 // ** Choosing allocation pool for a new buffer **
 //
@@ -888,9 +957,9 @@ iree_hal_topology_edge_buffer_export_types(
 // ** Scheduling algorithm selection **
 //
 // The scheduler inspects edges to choose between global strategies:
-//   coherent NATIVE + ATOMIC_SYSTEM  -> shared-memory work-stealing
-//   noncoherent COPY + P2P_COPY      -> pipeline with DMA
-//   otherwise                        -> replicate-and-compute
+//   coherent NATIVE + ATOMIC_SYSTEM + ATOMIC_64 -> shared-memory work-stealing
+//   noncoherent COPY + P2P_COPY                  -> pipeline with DMA
+//   otherwise                                    -> replicate-and-compute
 // This decision happens once at plan construction time — no buffers exist yet.
 
 //===----------------------------------------------------------------------===//
@@ -898,7 +967,7 @@ iree_hal_topology_edge_buffer_export_types(
 //===----------------------------------------------------------------------===//
 
 // Formats a topology edge as a human-readable string for debugging.
-// Example: "wait=NATIVE signal=IMPORT read=COPY write=NONE link=PCIE cost=3"
+// Example: "wait=NATIVE signal=IMPORT link=PCIE transport=XGMI hops=1"
 IREE_API_EXPORT iree_status_t iree_hal_topology_edge_format(
     iree_hal_topology_edge_t edge, iree_string_builder_t* builder);
 

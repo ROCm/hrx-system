@@ -10,7 +10,6 @@
 
 #include "loom/ir/context.h"
 #include "loom/ops/low/ops.h"
-#include "loom/target/emit/native/fragment.h"
 
 iree_string_view_t loom_native_assembly_module_string(
     const loom_module_t* module, loom_string_id_t string_id) {
@@ -21,15 +20,10 @@ iree_string_view_t loom_native_assembly_module_string(
   return module->strings.entries[string_id];
 }
 
-iree_status_t loom_native_assembly_descriptor_string(
+iree_string_view_t loom_native_assembly_descriptor_string(
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_bstring_table_offset_t string_offset, iree_string_view_t* out_string) {
-  *out_string = loom_low_descriptor_set_string(descriptor_set, string_offset);
-  if (iree_string_view_is_empty(*out_string)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "native assembly descriptor string is empty");
-  }
-  return iree_ok_status();
+    loom_bstring_table_offset_t string_offset) {
+  return loom_low_descriptor_set_string(descriptor_set, string_offset);
 }
 
 const loom_named_attr_t* loom_native_assembly_find_attr(
@@ -157,8 +151,9 @@ static bool loom_native_assembly_block_is_branch_target(
     for (uint32_t i = 0; i < scheduled_block->scheduled_node_count; ++i) {
       const iree_host_size_t packet_index =
           (iree_host_size_t)scheduled_block->scheduled_node_start + i;
-      const loom_low_schedule_node_t* node = &schedule->nodes[packet_index];
-      if (loom_native_assembly_op_branches_to(node->op, block)) {
+      const loom_low_packet_view_t packet =
+          loom_low_packet_at(schedule, packet_index);
+      if (loom_native_assembly_op_branches_to(packet.node->op, block)) {
         return true;
       }
     }
@@ -179,9 +174,7 @@ static iree_status_t loom_native_assembly_append_block(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_native_assembly_format_options_t* options,
-    iree_string_builder_t* builder,
-    loom_low_move_sequence_scratch_t* move_scratch,
-    iree_host_size_t block_index) {
+    iree_string_builder_t* builder, iree_host_size_t block_index) {
   const loom_low_schedule_block_t* block = &schedule->blocks[block_index];
   if (loom_native_assembly_should_print_block_label(schedule, block_index)) {
     IREE_RETURN_IF_ERROR(loom_native_assembly_append_block_label(
@@ -191,25 +184,26 @@ static iree_status_t loom_native_assembly_append_block(
   for (uint32_t i = 0; i < block->scheduled_node_count; ++i) {
     const iree_host_size_t packet_index =
         (iree_host_size_t)block->scheduled_node_start + i;
-    loom_low_packet_view_t packet = {0};
-    IREE_RETURN_IF_ERROR(
-        loom_low_packet_view_at(schedule, allocation, packet_index, &packet));
-    if (loom_low_live_in_isa(packet.node->op) ||
-        loom_low_storage_reserve_isa(packet.node->op) ||
-        loom_low_storage_view_isa(packet.node->op)) {
+    const loom_low_packet_view_t packet =
+        loom_low_packet_at(schedule, packet_index);
+    if (loom_low_packet_is_compile_time_only(&packet)) {
       continue;
     }
+    const bool packet_is_visible =
+        !loom_low_live_in_isa(packet.node->op) &&
+        !loom_low_storage_reserve_isa(packet.node->op) &&
+        !loom_low_storage_view_isa(packet.node->op);
     loom_native_assembly_packet_context_t context = {
         .schedule = schedule,
         .allocation = allocation,
         .packet = &packet,
         .builder = builder,
-        .move_scratch = move_scratch,
     };
     if (options->append_before_packet.fn != NULL) {
       IREE_RETURN_IF_ERROR(options->append_before_packet.fn(
           options->append_before_packet.user_data, &context));
     }
+    if (!packet_is_visible) continue;
     const iree_host_size_t line_start = iree_string_builder_size(builder);
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "  "));
     const iree_host_size_t content_start = iree_string_builder_size(builder);
@@ -228,20 +222,16 @@ iree_status_t loom_native_assembly_format_fragment(
     const loom_low_allocation_table_t* allocation,
     const loom_native_assembly_format_options_t* options,
     iree_string_builder_t* builder, iree_arena_allocator_t* scratch_arena) {
-  IREE_RETURN_IF_ERROR(
-      loom_native_fragment_validate_emission_inputs(schedule, allocation));
-
+  (void)scratch_arena;
   loom_low_allocation_value_scratch_t value_scratch = {0};
   IREE_RETURN_IF_ERROR(
       loom_low_allocation_acquire_value_scratch(allocation, &value_scratch));
-  loom_low_move_sequence_scratch_t move_scratch = {0};
-  loom_low_move_sequence_scratch_initialize(scratch_arena, &move_scratch);
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t block_index = 0;
        block_index < schedule->block_count && iree_status_is_ok(status);
        ++block_index) {
-    status = loom_native_assembly_append_block(
-        schedule, allocation, options, builder, &move_scratch, block_index);
+    status = loom_native_assembly_append_block(schedule, allocation, options,
+                                               builder, block_index);
   }
   loom_low_allocation_release_value_scratch(&value_scratch);
   return status;

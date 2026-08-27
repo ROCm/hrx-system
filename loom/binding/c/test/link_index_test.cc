@@ -7,6 +7,7 @@
 #include "loomc/link_index.h"
 
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -86,6 +87,31 @@ void FinishSucceeded(loomc_link_index_builder_t* builder,
   ASSERT_TRUE(loomc_result_succeeded(result_ptr.get()));
   ASSERT_NE(link_index, nullptr);
   *out_link_index = LinkIndexPtr(link_index);
+}
+
+TEST(LinkIndexTest, RejectsInvalidBlockSizes) {
+  ContextPtr context = CreateContext();
+  loomc_link_index_builder_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_LINK_INDEX_BUILDER_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.block_size=*/1,
+  };
+  loomc_link_index_builder_t* builder =
+      reinterpret_cast<loomc_link_index_builder_t*>(0x1);
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_INVALID_ARGUMENT,
+      loomc_link_index_builder_create(context.get(), &options,
+                                      loomc_allocator_system(), &builder));
+  EXPECT_EQ(builder, nullptr);
+
+  options.block_size = std::numeric_limits<loomc_host_size_t>::max();
+  builder = reinterpret_cast<loomc_link_index_builder_t*>(0x1);
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_OUT_OF_RANGE,
+      loomc_link_index_builder_create(context.get(), &options,
+                                      loomc_allocator_system(), &builder));
+  EXPECT_EQ(builder, nullptr);
 }
 
 std::vector<uint8_t> WriteBytecodeModule(const char* source_text) {
@@ -181,7 +207,31 @@ func.def @helper(%x: i32) -> (i32) {
   EXPECT_EQ(helper.identity, LOOMC_LINK_SYMBOL_IDENTITY_PRIVATE);
 }
 
-TEST(LinkIndexTest, InputProviderPrecedesLibraryProvider) {
+TEST(LinkIndexTest, ExposesGenericTestOnlySymbolRole) {
+  ContextPtr context = CreateContext();
+  BuilderPtr builder = CreateBuilder(context.get());
+  SourcePtr source = CreateTextSource("checks.loom", R"(
+check.case public @kernel_case {
+  check.return
+}
+)");
+  loomc_link_index_source_options_t options = {
+      /*.provider_name=*/loomc_make_cstring_view("checks"),
+      /*.role=*/LOOMC_LINK_PROVIDER_ROLE_INPUT,
+  };
+  LOOMC_ASSERT_OK(loomc_link_index_builder_add_source(
+      builder.get(), source.get(), &options, nullptr));
+
+  LinkIndexPtr link_index;
+  FinishSucceeded(builder.get(), &link_index);
+
+  loomc_link_index_symbol_t symbol = {};
+  ASSERT_TRUE(loomc_link_index_lookup_global(
+      link_index.get(), loomc_make_cstring_view("@kernel_case"), &symbol));
+  EXPECT_TRUE((symbol.flags & LOOMC_LINK_SYMBOL_FLAG_TEST_ONLY) != 0);
+}
+
+TEST(LinkIndexTest, CanonicalGlobalOrderPlacesInputBeforeLibrary) {
   ContextPtr context = CreateContext();
   BuilderPtr builder = CreateBuilder(context.get());
   SourcePtr library = CreateTextSource("library.loom", R"(

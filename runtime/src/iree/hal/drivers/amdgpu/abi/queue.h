@@ -372,6 +372,8 @@ typedef enum {
   IREE_HSA_AMD_AQL_FORMAT_PM4_IB = 1,
   // iree_hsa_amd_barrier_value_packet_t
   IREE_HSA_AMD_AQL_FORMAT_BARRIER_VALUE = 2,
+  // iree_hsa_amd_ext_kernel_dispatch_packet_t
+  IREE_HSA_AMD_AQL_FORMAT_EXT_KERNEL_DISPATCH = 3,
 } iree_hsa_amd_aql_format_t;
 typedef uint8_t iree_hsa_amd_aql_format8_t;
 
@@ -383,6 +385,118 @@ typedef struct iree_hsa_amd_vendor_packet_header_t {
   iree_hsa_amd_aql_format8_t AmdFormat;
   uint8_t reserved;  // must be 0
 } iree_hsa_amd_vendor_packet_header_t;
+
+// AMD extended kernel dispatch packet.
+//
+// Extends ordinary kernel dispatch with workgroup-cluster geometry and an
+// explicit dependency signal. The packet expresses its grid as a count of
+// clusters and a count of workgroups per cluster instead of work-items. The
+// full work-item grid size in each dimension is:
+//
+//   cluster_count * cluster_size * workgroup_size
+//
+// The first dword is published atomically as header, AMD format, and setup.
+typedef struct iree_hsa_amd_ext_kernel_dispatch_packet_t {
+  // AQL packet header. Must use IREE_HSA_PACKET_TYPE_VENDOR_SPECIFIC.
+  uint16_t header;
+  // AMD vendor packet format. Must be
+  // IREE_HSA_AMD_AQL_FORMAT_EXT_KERNEL_DISPATCH.
+  iree_hsa_amd_aql_format8_t amd_format;
+  // Number of grid dimensions. IREE dispatches always use three.
+  uint8_t setup;
+  // Workgroup size in work-items.
+  uint16_t workgroup_size[3];
+  // Reserved. Must be zero.
+  uint16_t reserved0;
+  // X dimension of the grid in clusters.
+  uint32_t cluster_count_x;
+  // Y dimension of the grid in clusters.
+  uint16_t cluster_count_y;
+  // Z dimension of the grid in clusters.
+  uint16_t cluster_count_z;
+  // Cluster size in workgroups.
+  uint8_t cluster_size[3];
+  // AMD extended-dispatch performance hints. Zero lets the agent decide.
+  uint8_t perf_hint;
+  // Private segment byte size per work-item.
+  uint32_t private_segment_size;
+  // Group segment byte size per workgroup.
+  uint32_t group_segment_size;
+  // Kernel object handle returned by the HSA executable loader.
+  uint64_t kernel_object;
+  // Kernel argument storage, which must remain live through completion.
+  void* kernarg_address;
+  // Launch dependency signal. A null signal is already satisfied.
+  iree_hsa_signal_t dep_signal;
+  // Optional signal decremented when the dispatch completes.
+  iree_hsa_signal_t completion_signal;
+} iree_hsa_amd_ext_kernel_dispatch_packet_t;
+IREE_AMDGPU_STATIC_ASSERT(
+    sizeof(iree_hsa_amd_ext_kernel_dispatch_packet_t) == 64,
+    "extended dispatch packet must be exactly one AQL slot");
+IREE_AMDGPU_STATIC_ASSERT(
+    IREE_AMDGPU_OFFSETOF(iree_hsa_amd_ext_kernel_dispatch_packet_t, header) ==
+        0,
+    "extended dispatch header offset must match ROCR AQL layout");
+IREE_AMDGPU_STATIC_ASSERT(
+    IREE_AMDGPU_OFFSETOF(iree_hsa_amd_ext_kernel_dispatch_packet_t,
+                         amd_format) == 2,
+    "extended dispatch AMD format offset must match ROCR AQL layout");
+IREE_AMDGPU_STATIC_ASSERT(
+    IREE_AMDGPU_OFFSETOF(iree_hsa_amd_ext_kernel_dispatch_packet_t, setup) == 3,
+    "extended dispatch setup offset must match ROCR AQL layout");
+IREE_AMDGPU_STATIC_ASSERT(
+    IREE_AMDGPU_OFFSETOF(iree_hsa_amd_ext_kernel_dispatch_packet_t,
+                         workgroup_size) == 4,
+    "extended dispatch workgroup size offset must match ROCR AQL layout");
+IREE_AMDGPU_STATIC_ASSERT(
+    IREE_AMDGPU_OFFSETOF(iree_hsa_amd_ext_kernel_dispatch_packet_t,
+                         reserved0) == 10,
+    "extended dispatch reserved offset must match ROCR AQL layout");
+IREE_AMDGPU_STATIC_ASSERT(
+    IREE_AMDGPU_OFFSETOF(iree_hsa_amd_ext_kernel_dispatch_packet_t,
+                         cluster_count_x) == 12,
+    "extended dispatch X cluster count offset must match ROCR AQL layout");
+IREE_AMDGPU_STATIC_ASSERT(
+    IREE_AMDGPU_OFFSETOF(iree_hsa_amd_ext_kernel_dispatch_packet_t,
+                         cluster_count_y) == 16,
+    "extended dispatch Y cluster count offset must match ROCR AQL layout");
+IREE_AMDGPU_STATIC_ASSERT(
+    IREE_AMDGPU_OFFSETOF(iree_hsa_amd_ext_kernel_dispatch_packet_t,
+                         cluster_count_z) == 18,
+    "extended dispatch Z cluster count offset must match ROCR AQL layout");
+IREE_AMDGPU_STATIC_ASSERT(
+    IREE_AMDGPU_OFFSETOF(iree_hsa_amd_ext_kernel_dispatch_packet_t,
+                         cluster_size) == 20,
+    "extended dispatch cluster size offset must match ROCR AQL layout");
+IREE_AMDGPU_STATIC_ASSERT(
+    IREE_AMDGPU_OFFSETOF(iree_hsa_amd_ext_kernel_dispatch_packet_t,
+                         perf_hint) == 23,
+    "extended dispatch performance hint offset must match ROCR AQL layout");
+IREE_AMDGPU_STATIC_ASSERT(
+    IREE_AMDGPU_OFFSETOF(iree_hsa_amd_ext_kernel_dispatch_packet_t,
+                         private_segment_size) == 24,
+    "extended dispatch private segment offset must match ROCR AQL layout");
+IREE_AMDGPU_STATIC_ASSERT(
+    IREE_AMDGPU_OFFSETOF(iree_hsa_amd_ext_kernel_dispatch_packet_t,
+                         group_segment_size) == 28,
+    "extended dispatch group segment offset must match ROCR AQL layout");
+IREE_AMDGPU_STATIC_ASSERT(
+    IREE_AMDGPU_OFFSETOF(iree_hsa_amd_ext_kernel_dispatch_packet_t,
+                         kernel_object) == 32,
+    "extended dispatch kernel object offset must match ROCR AQL layout");
+IREE_AMDGPU_STATIC_ASSERT(
+    IREE_AMDGPU_OFFSETOF(iree_hsa_amd_ext_kernel_dispatch_packet_t,
+                         kernarg_address) == 40,
+    "extended dispatch kernarg offset must match ROCR AQL layout");
+IREE_AMDGPU_STATIC_ASSERT(
+    IREE_AMDGPU_OFFSETOF(iree_hsa_amd_ext_kernel_dispatch_packet_t,
+                         dep_signal) == 48,
+    "extended dispatch dependency offset must match ROCR AQL layout");
+IREE_AMDGPU_STATIC_ASSERT(
+    IREE_AMDGPU_OFFSETOF(iree_hsa_amd_ext_kernel_dispatch_packet_t,
+                         completion_signal) == 56,
+    "extended dispatch completion offset must match ROCR AQL layout");
 
 // PM4 indirect-buffer extension.
 // Executes the PM4 indirect buffer referenced by ib_jump_cmd.

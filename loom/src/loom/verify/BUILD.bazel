@@ -32,6 +32,7 @@ loom_cc_library(
     ],
     deps = [
         "//loom/src/loom/analysis:consumption",
+        "//loom/src/loom/analysis:ownership",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
@@ -41,6 +42,7 @@ loom_cc_library(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops:special_values",
         "//loom/src/loom/target:registers",
+        "//loom/src/loom/util:adaptive_sort",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/base/internal:unicode",
@@ -52,6 +54,7 @@ loom_cc_test(
     srcs = ["verify_test.cc"],
     deps = [
         ":verify",
+        "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/error:json_sink",
@@ -60,7 +63,9 @@ loom_cc_test(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:low_descriptor_registry_core_test",
         "//loom/src/loom/testing:diagnostic_matchers",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base/internal:arena",

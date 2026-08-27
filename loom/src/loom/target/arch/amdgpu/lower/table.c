@@ -65,6 +65,13 @@ typedef struct loom_amdgpu_table_lookup_strategy_row_t {
   loom_amdgpu_table_lookup_descriptor_flags_t descriptor_flags;
 } loom_amdgpu_table_lookup_strategy_row_t;
 
+typedef struct loom_amdgpu_table_lookup_descriptor_requirement_t {
+  // Strategy descriptor flag that requires this descriptor ref.
+  loom_amdgpu_table_lookup_descriptor_flags_t descriptor_flags;
+  // Required descriptor ref for strategy availability.
+  loom_amdgpu_descriptor_ref_t descriptor_ref;
+} loom_amdgpu_table_lookup_descriptor_requirement_t;
+
 typedef struct loom_amdgpu_table_lookup_type_summary_t {
   // Number of f32 vector lanes accepted by the table lookup lowering surface.
   uint32_t f32_lane_count;
@@ -170,6 +177,23 @@ static const loom_amdgpu_table_lookup_strategy_row_t
             .index_lane_unsigned_bit_count = 4,
             .descriptor_flags =
                 LOOM_AMDGPU_TABLE_LOOKUP_DESCRIPTOR_FLAG_PERMUTE,
+        },
+};
+
+static const loom_amdgpu_table_lookup_descriptor_requirement_t
+    kTableLookupDescriptorRequirements[] = {
+        {
+            .descriptor_flags = LOOM_AMDGPU_TABLE_LOOKUP_DESCRIPTOR_FLAG_LADDER,
+            .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32,
+        },
+        {
+            .descriptor_flags = LOOM_AMDGPU_TABLE_LOOKUP_DESCRIPTOR_FLAG_LADDER,
+            .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_CNDMASK_B32,
+        },
+        {
+            .descriptor_flags =
+                LOOM_AMDGPU_TABLE_LOOKUP_DESCRIPTOR_FLAG_PERMUTE,
+            .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_PERM_B32,
         },
 };
 
@@ -458,34 +482,22 @@ iree_status_t loom_amdgpu_select_vector_table_lookup_plan(
 static bool loom_amdgpu_table_lookup_strategy_descriptors_present(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_table_lookup_strategy_row_t* row) {
-  if (iree_any_bit_set(row->descriptor_flags,
-                       LOOM_AMDGPU_TABLE_LOOKUP_DESCRIPTOR_FLAG_LADDER) &&
-      (!loom_amdgpu_descriptor_set_has_ref(
-           descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32) ||
-       !loom_amdgpu_descriptor_set_has_ref(
-           descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_CNDMASK_B32))) {
-    return false;
+  bool matched_requirement = false;
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(kTableLookupDescriptorRequirements); ++i) {
+    const loom_amdgpu_table_lookup_descriptor_requirement_t* requirement =
+        &kTableLookupDescriptorRequirements[i];
+    if (!iree_any_bit_set(row->descriptor_flags,
+                          requirement->descriptor_flags)) {
+      continue;
+    }
+    matched_requirement = true;
+    if (!loom_amdgpu_descriptor_set_has_ref(descriptor_set,
+                                            requirement->descriptor_ref)) {
+      return false;
+    }
   }
-  if (iree_any_bit_set(row->descriptor_flags,
-                       LOOM_AMDGPU_TABLE_LOOKUP_DESCRIPTOR_FLAG_PERMUTE) &&
-      !loom_amdgpu_descriptor_set_has_ref(
-          descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_PERM_B32)) {
-    return false;
-  }
-  return row->descriptor_flags != 0;
-}
-
-static iree_status_t loom_amdgpu_table_lookup_slice_if_needed(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_value_id_t source, uint32_t register_count, uint32_t register_offset,
-    loom_type_t lane_type, loom_value_id_t* out_lane) {
-  *out_lane = LOOM_VALUE_ID_INVALID;
-  if (register_count == 1) {
-    *out_lane = source;
-    return iree_ok_status();
-  }
-  return loom_amdgpu_emit_low_slice(context, source_op, source, register_offset,
-                                    lane_type, out_lane);
+  return matched_requirement;
 }
 
 static iree_status_t loom_amdgpu_table_lookup_extract_i32_index_lane(
@@ -493,7 +505,7 @@ static iree_status_t loom_amdgpu_table_lookup_extract_i32_index_lane(
     const loom_amdgpu_table_lookup_plan_t* plan, loom_value_id_t low_indices,
     uint32_t result_lane, loom_type_t lane_type,
     loom_value_id_t* out_index_lane) {
-  return loom_amdgpu_table_lookup_slice_if_needed(
+  return loom_amdgpu_extract_low_register_unit(
       context, source_op, low_indices, plan->index_register_count, result_lane,
       lane_type, out_index_lane);
 }
@@ -512,7 +524,7 @@ static iree_status_t loom_amdgpu_table_lookup_extract_i8_index_lane(
   const uint32_t register_offset = result_lane / 4u;
   const uint32_t byte_offset = result_lane & 3u;
   loom_value_id_t source_register = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_table_lookup_slice_if_needed(
+  IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
       context, source_op, low_indices, plan->index_register_count,
       register_offset, lane_type, &source_register));
 
@@ -557,7 +569,7 @@ static iree_status_t loom_amdgpu_table_lookup_extract_table_lane(
     const loom_amdgpu_table_lookup_plan_t* plan, loom_value_id_t low_table,
     uint32_t table_lane, loom_type_t lane_type,
     loom_value_id_t* out_table_lane) {
-  return loom_amdgpu_table_lookup_slice_if_needed(
+  return loom_amdgpu_extract_low_register_unit(
       context, source_op, low_table, plan->table_lane_count, table_lane,
       lane_type, out_table_lane);
 }
@@ -575,7 +587,7 @@ static iree_status_t loom_amdgpu_table_lookup_emit_index_compare(
   loom_value_id_t operands[2] = {index_lane, ordinal_lane};
   iree_host_size_t operand_count = 2;
   if (plan->compare_src1_inline_descriptor.descriptor != NULL &&
-      ordinal <= 64) {
+      ordinal <= LOOM_AMDGPU_SOURCE_INLINE_U32_MAX) {
     descriptor = &plan->compare_src1_inline_descriptor;
     operand_count = 1;
     IREE_RETURN_IF_ERROR(
@@ -675,7 +687,7 @@ static iree_status_t loom_amdgpu_lower_vector_table_lookup_packed_i8_u4_permute(
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &lane_type));
   loom_value_id_t table_registers[4] = {0};
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(table_registers); ++i) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_table_lookup_slice_if_needed(
+    IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
         context, source_op, low_table, plan->table_register_count, i, lane_type,
         &table_registers[i]));
   }

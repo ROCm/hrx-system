@@ -9,239 +9,44 @@
 #include "iree/base/internal/debugging.h"
 #include "iree/hal/drivers/amdgpu/asan_state.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
+#include "iree/hal/drivers/amdgpu/executable_global_resolver.h"
 #include "iree/hal/drivers/amdgpu/executable_metadata_hsaco.h"
 #include "iree/hal/drivers/amdgpu/feedback_state.h"
+#include "iree/hal/drivers/amdgpu/physical_device.h"
 #include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/source_context.h"
 #include "iree/hal/drivers/amdgpu/tsan_state.h"
-#include "iree/hal/drivers/amdgpu/util/code_object_target.h"
 #include "iree/hal/drivers/amdgpu/util/global_table.h"
 #include "iree/hal/drivers/amdgpu/util/hsaco_metadata.h"
 #include "iree/hal/drivers/amdgpu/util/kernarg_ring.h"
 #include "iree/hal/drivers/amdgpu/util/loaded_code_object.h"
-#include "iree/hal/drivers/amdgpu/util/target_id.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
 #include "iree/hal/drivers/amdgpu/util/vmem.h"
-#include "iree/hal/utils/elf_format.h"
+#include "iree/hal/executable/amdgpu/code_object_target.h"
+#include "iree/hal/executable/amdgpu/target_id.h"
 
 //===----------------------------------------------------------------------===//
 // ISA Support
 //===----------------------------------------------------------------------===//
 
-typedef struct iree_hal_amdgpu_agent_available_isas_t {
-  // Number of valid entries in |values|.
-  iree_host_size_t count;
-  // Fixed-capacity ISA list populated by HSA iteration callbacks.
-  hsa_isa_t values[32];
-} iree_hal_amdgpu_agent_available_isas_t;
+static iree_status_t iree_hal_amdgpu_executable_resolve_isa_target(
+    const iree_hal_amdgpu_agent_target_t* agent_target,
+    iree_string_view_t target_key,
+    const iree_hal_amdgpu_agent_isa_target_t** out_isa_target) {
+  IREE_ASSERT_ARGUMENT(agent_target);
+  IREE_ASSERT_ARGUMENT(out_isa_target);
+  *out_isa_target = NULL;
 
-typedef struct iree_hal_amdgpu_agent_isa_target_t {
-  // HSA ISA handle the target identity was queried from.
-  hsa_isa_t isa;
-  // NUL-terminated HSA ISA name storage.
-  char name_buffer[64 + /*NUL*/ 1];
-  // Borrowed view into |name_buffer| excluding the NUL terminator.
-  iree_string_view_t name;
-  // Parsed target identity borrowing processor text from |name_buffer|.
-  iree_hal_amdgpu_target_id_t target_id;
-} iree_hal_amdgpu_agent_isa_target_t;
-
-static hsa_status_t iree_hal_amdgpu_iterate_agent_isa(hsa_isa_t isa,
-                                                      void* user_data) {
-  iree_hal_amdgpu_agent_available_isas_t* isas =
-      (iree_hal_amdgpu_agent_available_isas_t*)user_data;
-  if (isas->count >= IREE_ARRAYSIZE(isas->values)) {
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  }
-  isas->values[isas->count++] = isa;
-  return HSA_STATUS_SUCCESS;
-}
-
-static iree_status_t iree_hal_amdgpu_query_agent_available_isas(
-    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
-    iree_hal_amdgpu_agent_available_isas_t* out_available_isas) {
-  memset(out_available_isas, 0, sizeof(*out_available_isas));
-  return iree_hsa_agent_iterate_isas(IREE_LIBHSA(libhsa), device_agent,
-                                     iree_hal_amdgpu_iterate_agent_isa,
-                                     out_available_isas);
-}
-
-static iree_status_t iree_hal_amdgpu_query_agent_isa_target(
-    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_isa_t isa,
-    iree_hal_amdgpu_agent_isa_target_t* out_isa_target) {
-  memset(out_isa_target, 0, sizeof(*out_isa_target));
-  out_isa_target->isa = isa;
-
-  uint32_t name_length = 0;
-  IREE_RETURN_IF_ERROR(iree_hsa_isa_get_info_alt(
-      IREE_LIBHSA(libhsa), isa, HSA_ISA_INFO_NAME_LENGTH, &name_length));
-  if (name_length == 0 ||
-      name_length > IREE_ARRAYSIZE(out_isa_target->name_buffer)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "ISA name invalid (empty or too long: %u)",
-                            name_length);
-  }
-
-  IREE_RETURN_IF_ERROR(iree_hsa_isa_get_info_alt(IREE_LIBHSA(libhsa), isa,
-                                                 HSA_ISA_INFO_NAME,
-                                                 out_isa_target->name_buffer));
-  out_isa_target->name = iree_make_string_view(out_isa_target->name_buffer,
-                                               name_length - /*NUL*/ 1);
-  return iree_hal_amdgpu_target_id_parse_hsa_isa_name(
-      out_isa_target->name, &out_isa_target->target_id);
-}
-
-static iree_status_t iree_hal_amdgpu_verify_isas_equal(
-    const iree_hal_amdgpu_libhsa_t* libhsa, iree_host_size_t agent_a_ordinal,
-    hsa_isa_t isa_a, iree_host_size_t agent_b_ordinal, hsa_isa_t isa_b,
-    iree_host_size_t isa_ordinal) {
-  iree_hal_amdgpu_agent_isa_target_t target_a;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_query_agent_isa_target(libhsa, isa_a, &target_a));
-  iree_hal_amdgpu_agent_isa_target_t target_b;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_query_agent_isa_target(libhsa, isa_b, &target_b));
-
-  iree_hal_amdgpu_target_compatibility_t mismatch =
-      IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_COMPATIBLE;
-  if (target_a.target_id.kind != target_b.target_id.kind ||
-      target_a.target_id.version.major != target_b.target_id.version.major ||
-      target_a.target_id.version.minor != target_b.target_id.version.minor ||
-      target_a.target_id.version.stepping !=
-          target_b.target_id.version.stepping) {
-    mismatch |= IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_PROCESSOR;
-  }
-  if ((target_a.target_id.kind == IREE_HAL_AMDGPU_TARGET_KIND_GENERIC ||
-       target_b.target_id.kind == IREE_HAL_AMDGPU_TARGET_KIND_GENERIC) &&
-      !iree_string_view_equal(target_a.target_id.processor,
-                              target_b.target_id.processor)) {
-    mismatch |= IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_GENERIC_FAMILY;
-  }
-  if (target_a.target_id.generic_version !=
-      target_b.target_id.generic_version) {
-    mismatch |= IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_GENERIC_VERSION;
-  }
-  if (target_a.target_id.sramecc != target_b.target_id.sramecc) {
-    mismatch |= IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_SRAMECC;
-  }
-  if (target_a.target_id.xnack != target_b.target_id.xnack) {
-    mismatch |= IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_XNACK;
-  }
-  if (mismatch != IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_COMPATIBLE) {
-    char target_a_string[128] = {0};
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_format(
-        &target_a.target_id, sizeof(target_a_string), target_a_string,
-        /*out_buffer_length=*/NULL));
-    char target_b_string[128] = {0};
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_format(
-        &target_b.target_id, sizeof(target_b_string), target_b_string,
-        /*out_buffer_length=*/NULL));
-    char mismatch_reasons[128] = {0};
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_compatibility_format(
-        mismatch, sizeof(mismatch_reasons), mismatch_reasons,
-        /*out_buffer_length=*/NULL));
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "GPU agent[%" PRIhsz "] ISA[%" PRIhsz
-                            "] target `%s` does not match GPU agent[%" PRIhsz
-                            "] ISA[%" PRIhsz "] target `%s` (mismatched %s)",
-                            agent_a_ordinal, isa_ordinal, target_a_string,
-                            agent_b_ordinal, isa_ordinal, target_b_string,
-                            mismatch_reasons);
-  }
-  return iree_ok_status();
-}
-
-iree_status_t iree_hal_amdgpu_verify_device_isa_commonality(
-    const iree_hal_amdgpu_libhsa_t* libhsa,
-    const iree_hal_amdgpu_topology_t* topology) {
-  // If only one agent then no need to check.
-  if (topology->gpu_agent_count == 1) return iree_ok_status();
-
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  // Query all available ISAs supported by the first GPU agent.
-  // We'll use this to compare with all other GPU agents.
-  iree_hal_amdgpu_agent_available_isas_t expected_isas;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_amdgpu_query_agent_available_isas(
-              libhsa, topology->gpu_agents[0], &expected_isas));
-
-  // For all subsequent GPU agents ensure their ISAs match.
-  for (iree_host_size_t i = 1; i < topology->gpu_agent_count; ++i) {
-    // Get ISAs supported by this agent.
-    iree_hal_amdgpu_agent_available_isas_t available_isas;
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_amdgpu_query_agent_available_isas(
-                libhsa, topology->gpu_agents[i], &available_isas));
-
-    // Ensure ISAs match.
-    // We could be less strict here and require only one matching ISA that we
-    // share for all devices but in practice today all devices have a single
-    // supported ISA and we expect devices to match exactly so this is just for
-    // being thorough.
-    if (available_isas.count != expected_isas.count) {
-      IREE_RETURN_AND_END_ZONE_IF_ERROR(
-          z0, iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                               "runtime currently expects all GPU agents must "
-                               "support the same ISAs; gpu_agents[%" PRIhsz
-                               "] does not match gpu_agents[0]",
-                               i));
-    }
-    for (iree_host_size_t j = 0; j < expected_isas.count; ++j) {
-      IREE_RETURN_AND_END_ZONE_IF_ERROR(
-          z0, iree_hal_amdgpu_verify_isas_equal(
-                  libhsa, /*agent_a_ordinal=*/0, expected_isas.values[j],
-                  /*agent_b_ordinal=*/i, available_isas.values[j],
-                  /*isa_ordinal=*/j));
-    }
-  }
-
-  IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
-}
-
-iree_status_t iree_hal_amdgpu_executable_format_supported(
-    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
-    iree_string_view_t format, bool* out_supported, hsa_isa_t* out_isa) {
-  IREE_ASSERT_ARGUMENT(out_supported);
-  *out_supported = false;
-  if (out_isa) out_isa->handle = 0;
-
-  if (!iree_string_view_starts_with(format, IREE_SV("gfx")) &&
-      !iree_string_view_starts_with(format, IREE_SV("amdgcn-amd-amdhsa--"))) {
+  if (!iree_string_view_starts_with(target_key, IREE_SV("gfx"))) {
     return iree_ok_status();
   }
 
-  iree_hal_amdgpu_target_id_t format_target_id;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_parse(
-      format,
-      IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_HSA_PREFIX |
-          IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_ARCH_ONLY |
-          IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_FEATURE_SUFFIXES,
-      &format_target_id));
+  iree_hal_amdgpu_target_identity_t requested_target_id;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_identity_parse_artifact_key(
+      target_key, &requested_target_id));
 
-  // Query all available ISAs supported by any GPU agent.
-  // This list is ordered by descending priority.
-  iree_hal_amdgpu_agent_available_isas_t available_isas;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_query_agent_available_isas(
-      libhsa, device_agent, &available_isas));
-
-  for (iree_host_size_t i = 0; i < available_isas.count; ++i) {
-    iree_hal_amdgpu_agent_isa_target_t isa_target;
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_query_agent_isa_target(
-        libhsa, available_isas.values[i], &isa_target));
-    if (iree_hal_amdgpu_target_id_check_compatible(&format_target_id,
-                                                   &isa_target.target_id) ==
-        IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_COMPATIBLE) {
-      *out_supported = true;
-      if (out_isa) *out_isa = isa_target.isa;
-      return iree_ok_status();
-    }
-  }
-
-  // No compatible ISAs found.
-  *out_supported = false;
-  if (out_isa) out_isa->handle = 0;
+  *out_isa_target = iree_hal_amdgpu_agent_target_find_compatible_isa(
+      agent_target, &requested_target_id);
   return iree_ok_status();
 }
 
@@ -249,67 +54,16 @@ iree_status_t iree_hal_amdgpu_executable_format_supported(
 // Executable Verification
 //===----------------------------------------------------------------------===//
 
-typedef struct iree_hal_amdgpu_device_limits_t {
-  // Maximum total workgroup size from HSA_ISA_INFO_WORKGROUP_MAX_SIZE.
-  uint32_t max_workgroup_size;
-  // Maximum workgroup size per dimension from HSA_ISA_INFO_WORKGROUP_MAX_DIM.
-  uint16_t max_workgroup_size_per_dim[3];
-} iree_hal_amdgpu_device_limits_t;
-static iree_status_t iree_hal_amdgpu_query_device_limits(
-    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
-    hsa_isa_t isa, iree_hal_amdgpu_device_limits_t* out_limits) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-  memset(out_limits, 0, sizeof(*out_limits));
-
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hsa_isa_get_info_alt(IREE_LIBHSA(libhsa), isa,
-                                    HSA_ISA_INFO_WORKGROUP_MAX_SIZE,
-                                    &out_limits->max_workgroup_size));
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hsa_isa_get_info_alt(IREE_LIBHSA(libhsa), isa,
-                                    HSA_ISA_INFO_WORKGROUP_MAX_DIM,
-                                    &out_limits->max_workgroup_size_per_dim));
-
-  IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
-}
-
-static iree_status_t iree_hal_amdgpu_executable_format_from_target_id(
-    const iree_hal_amdgpu_target_id_t* target_id,
-    iree_host_size_t executable_format_capacity, char* executable_format) {
-  return iree_hal_amdgpu_target_id_format(target_id, executable_format_capacity,
-                                          executable_format,
-                                          /*out_buffer_length=*/NULL);
-}
-
-iree_status_t iree_hal_amdgpu_executable_infer_format(
-    iree_const_byte_span_t executable_data,
-    iree_host_size_t executable_format_capacity, char* executable_format,
-    iree_allocator_t host_allocator, iree_host_size_t* out_inferred_size) {
-  (void)host_allocator;
-
-  const bool unsafe_infer_size = (executable_data.data_length == 0);
-  iree_const_byte_span_t hsaco_data = executable_data;
-  if (unsafe_infer_size) {
-    iree_host_size_t hsaco_size = 0;
-    IREE_RETURN_IF_ERROR(iree_hal_elf_calculate_size(hsaco_data, &hsaco_size),
-                         "calculating raw HSACO ELF size");
-    hsaco_data = iree_make_const_byte_span(executable_data.data, hsaco_size);
-  }
-
-  iree_hal_amdgpu_target_id_t code_object_target_id;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_code_object_target_id_from_elf(
-      hsaco_data, &code_object_target_id));
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_executable_format_from_target_id(
-      &code_object_target_id, executable_format_capacity, executable_format));
-
-  *out_inferred_size = hsaco_data.data_length;
-  return iree_ok_status();
-}
-
-//===----------------------------------------------------------------------===//
-// Executable Loading
-//===----------------------------------------------------------------------===//
+// Launch and resource limits shared by every physical device selected for an
+// executable load.
+typedef struct iree_hal_amdgpu_executable_limits_t {
+  // Maximum total workgroup size accepted by the selected HSA ISA.
+  uint32_t maximum_workgroup_invocations;
+  // Maximum XYZ workgroup sizes accepted by the selected HSA ISA.
+  uint16_t maximum_workgroup_size[3];
+  // Minimum workgroup-local memory capacity of the selected physical devices.
+  uint32_t maximum_workgroup_local_memory_size;
+} iree_hal_amdgpu_executable_limits_t;
 
 static bool iree_hal_amdgpu_physical_device_mask_contains(
     uint64_t physical_device_mask, iree_host_size_t physical_device_ordinal) {
@@ -317,6 +71,225 @@ static bool iree_hal_amdgpu_physical_device_mask_contains(
          iree_all_bits_set(physical_device_mask,
                            ((uint64_t)1) << physical_device_ordinal);
 }
+
+iree_status_t
+iree_hal_amdgpu_executable_dispatch_limits_validate_workgroup_size(
+    const iree_hal_amdgpu_executable_dispatch_limits_t* dispatch_limits,
+    const uint32_t workgroup_size[3]) {
+  IREE_ASSERT_ARGUMENT(dispatch_limits);
+  IREE_ASSERT_ARGUMENT(workgroup_size);
+
+  for (iree_host_size_t i = 0; i < 3; ++i) {
+    if (IREE_UNLIKELY(workgroup_size[i] == 0)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "workgroup size dimension %" PRIhsz " must be non-zero", i);
+    }
+    if (IREE_UNLIKELY(workgroup_size[i] >
+                      dispatch_limits->maximum_workgroup_size[i])) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "workgroup size dimension %" PRIhsz " value %u exceeds maximum %u", i,
+          workgroup_size[i], dispatch_limits->maximum_workgroup_size[i]);
+    }
+  }
+
+  const uint64_t total_workgroup_size =
+      (uint64_t)workgroup_size[0] * workgroup_size[1] * workgroup_size[2];
+  if (IREE_UNLIKELY(total_workgroup_size >
+                    dispatch_limits->maximum_workgroup_invocations)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "workgroup size total %" PRIu64 " exceeds maximum %u",
+        total_workgroup_size, dispatch_limits->maximum_workgroup_invocations);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_amdgpu_executable_validate_export_limits(
+    const iree_hal_amdgpu_executable_limits_t* limits,
+    iree_string_view_t symbol_name,
+    const iree_hal_amdgpu_executable_export_t* export_info) {
+  const bool has_resource_metadata = iree_any_bit_set(
+      export_info->flags,
+      IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_HAS_RESOURCE_METADATA);
+  if (has_resource_metadata) {
+    if (IREE_UNLIKELY(export_info->maximum_workgroup_invocations == 0)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AMDGPU kernel `%.*s` maximum workgroup size must be non-zero",
+          (int)symbol_name.size, symbol_name.data);
+    }
+    if (IREE_UNLIKELY(export_info->maximum_workgroup_invocations >
+                      limits->maximum_workgroup_invocations)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AMDGPU kernel `%.*s` maximum workgroup size %u exceeds device "
+          "maximum %u",
+          (int)symbol_name.size, symbol_name.data,
+          export_info->maximum_workgroup_invocations,
+          limits->maximum_workgroup_invocations);
+    }
+    if (IREE_UNLIKELY(export_info->fixed_workgroup_local_memory_size >
+                      limits->maximum_workgroup_local_memory_size)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AMDGPU kernel `%.*s` fixed workgroup-local memory size %u exceeds "
+          "selected device capacity %u",
+          (int)symbol_name.size, symbol_name.data,
+          export_info->fixed_workgroup_local_memory_size,
+          limits->maximum_workgroup_local_memory_size);
+    }
+  }
+
+  if (iree_any_bit_set(
+          export_info->flags,
+          IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_REQUIRES_DISPATCH_WORKGROUP_SIZE)) {
+    return iree_ok_status();
+  }
+
+  iree_hal_amdgpu_executable_dispatch_limits_t dispatch_limits = {
+      .maximum_workgroup_invocations =
+          has_resource_metadata ? export_info->maximum_workgroup_invocations
+                                : limits->maximum_workgroup_invocations,
+      .maximum_workgroup_size =
+          {
+              limits->maximum_workgroup_size[0],
+              limits->maximum_workgroup_size[1],
+              limits->maximum_workgroup_size[2],
+          },
+  };
+  return iree_status_annotate_f(
+      iree_hal_amdgpu_executable_dispatch_limits_validate_workgroup_size(
+          &dispatch_limits, export_info->workgroup_size),
+      "AMDGPU kernel `%.*s` fixed workgroup size is invalid",
+      (int)symbol_name.size, symbol_name.data);
+}
+
+static iree_status_t iree_hal_amdgpu_executable_populate_resource_usage(
+    const iree_hal_amdgpu_executable_limits_t* limits,
+    iree_string_view_t symbol_name,
+    const iree_hal_amdgpu_executable_export_t* export_info,
+    const iree_hal_amdgpu_device_kernel_args_t* loaded_kernel_args,
+    iree_hal_executable_function_resource_usage_t* out_resource_usage) {
+  const bool has_resource_metadata = iree_any_bit_set(
+      export_info->flags,
+      IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_HAS_RESOURCE_METADATA);
+  if (has_resource_metadata &&
+      IREE_UNLIKELY(loaded_kernel_args->group_segment_size !=
+                    export_info->fixed_workgroup_local_memory_size)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU kernel `%.*s` loaded workgroup-local memory size %u does not "
+        "match metadata value %u",
+        (int)symbol_name.size, symbol_name.data,
+        loaded_kernel_args->group_segment_size,
+        export_info->fixed_workgroup_local_memory_size);
+  }
+  if (has_resource_metadata &&
+      IREE_UNLIKELY(loaded_kernel_args->private_segment_size !=
+                    export_info->fixed_private_memory_size)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU kernel `%.*s` loaded private memory size %u does not match "
+        "metadata value %u",
+        (int)symbol_name.size, symbol_name.data,
+        loaded_kernel_args->private_segment_size,
+        export_info->fixed_private_memory_size);
+  }
+  if (IREE_UNLIKELY(loaded_kernel_args->group_segment_size >
+                    limits->maximum_workgroup_local_memory_size)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU kernel `%.*s` loaded workgroup-local memory size %u exceeds "
+        "selected device capacity %u",
+        (int)symbol_name.size, symbol_name.data,
+        loaded_kernel_args->group_segment_size,
+        limits->maximum_workgroup_local_memory_size);
+  }
+
+  *out_resource_usage = (iree_hal_executable_function_resource_usage_t){
+      .provided_flags =
+          IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_WORKGROUP_LOCAL_MEMORY |
+          IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_PRIVATE_MEMORY,
+      .fixed_workgroup_local_memory_size =
+          loaded_kernel_args->group_segment_size,
+      .fixed_private_memory_size = loaded_kernel_args->private_segment_size,
+  };
+  if (has_resource_metadata) {
+    out_resource_usage->provided_flags |=
+        IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_INVOCATION_REGISTERS;
+    out_resource_usage->invocation_register_count =
+        export_info->invocation_register_count;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_amdgpu_executable_query_limits(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_isa_t isa,
+    const iree_hal_amdgpu_queue_affinity_physical_device_set_t*
+        selected_devices,
+    iree_host_size_t physical_device_count,
+    iree_hal_amdgpu_physical_device_t* const* physical_device_list,
+    iree_hal_amdgpu_executable_limits_t* out_limits) {
+  memset(out_limits, 0, sizeof(*out_limits));
+
+  IREE_RETURN_IF_ERROR(iree_hsa_isa_get_info_alt(
+      IREE_LIBHSA(libhsa), isa, HSA_ISA_INFO_WORKGROUP_MAX_SIZE,
+      &out_limits->maximum_workgroup_invocations));
+  IREE_RETURN_IF_ERROR(iree_hsa_isa_get_info_alt(
+      IREE_LIBHSA(libhsa), isa, HSA_ISA_INFO_WORKGROUP_MAX_DIM,
+      &out_limits->maximum_workgroup_size));
+  if (IREE_UNLIKELY(out_limits->maximum_workgroup_invocations == 0 ||
+                    out_limits->maximum_workgroup_size[0] == 0 ||
+                    out_limits->maximum_workgroup_size[1] == 0 ||
+                    out_limits->maximum_workgroup_size[2] == 0)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "HSA reported invalid zero workgroup limits");
+  }
+
+  out_limits->maximum_workgroup_local_memory_size = UINT32_MAX;
+  iree_host_size_t observed_device_count = 0;
+  for (iree_host_size_t device_ordinal = 0;
+       device_ordinal < physical_device_count; ++device_ordinal) {
+    if (!iree_hal_amdgpu_physical_device_mask_contains(
+            selected_devices->physical_device_mask, device_ordinal)) {
+      continue;
+    }
+    const iree_hal_amdgpu_physical_device_t* physical_device =
+        physical_device_list[device_ordinal];
+    if (IREE_UNLIKELY(!physical_device ||
+                      physical_device->device_ordinal != device_ordinal)) {
+      return iree_make_status(IREE_STATUS_INTERNAL,
+                              "AMDGPU physical device list entry %" PRIhsz
+                              " does not match its topology ordinal",
+                              device_ordinal);
+    }
+    if (IREE_UNLIKELY(physical_device->group_segment_max_size == 0)) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "AMDGPU physical device %" PRIhsz
+                              " has zero workgroup-local memory capacity",
+                              device_ordinal);
+    }
+    out_limits->maximum_workgroup_local_memory_size =
+        iree_min(out_limits->maximum_workgroup_local_memory_size,
+                 physical_device->group_segment_max_size);
+    ++observed_device_count;
+  }
+  if (IREE_UNLIKELY(observed_device_count !=
+                    selected_devices->physical_device_count)) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "AMDGPU selected physical device count changed from %" PRIhsz
+        " to %" PRIhsz,
+        selected_devices->physical_device_count, observed_device_count);
+  }
+  return iree_ok_status();
+}
+
+//===----------------------------------------------------------------------===//
+// Executable Loading
+//===----------------------------------------------------------------------===//
 
 static iree_status_t iree_hal_amdgpu_executable_select_physical_devices(
     const iree_hal_amdgpu_topology_t* topology,
@@ -347,76 +320,62 @@ static iree_status_t iree_hal_amdgpu_executable_select_physical_devices(
 }
 
 static iree_status_t iree_hal_amdgpu_executable_format_target_id_for_message(
-    const iree_hal_amdgpu_target_id_t* target_id,
+    const iree_hal_amdgpu_target_identity_t* target_id,
     iree_host_size_t buffer_capacity, char* buffer) {
-  return iree_hal_amdgpu_target_id_format(target_id, buffer_capacity, buffer,
-                                          /*out_buffer_length=*/NULL);
+  return iree_hal_amdgpu_target_identity_format_artifact_key(
+      target_id, buffer_capacity, buffer,
+      /*out_buffer_length=*/NULL);
 }
 
 static iree_status_t iree_hal_amdgpu_executable_preflight_agent_code_object(
-    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
+    const iree_hal_amdgpu_physical_device_t* physical_device,
     iree_host_size_t physical_device_ordinal,
-    const iree_hal_amdgpu_target_id_t* code_object_target_id) {
-  iree_hal_amdgpu_agent_available_isas_t available_isas;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_query_agent_available_isas(
-      libhsa, device_agent, &available_isas));
-  if (available_isas.count == 0) {
-    return iree_make_status(IREE_STATUS_INCOMPATIBLE,
-                            "GPU agent[%" PRIhsz
-                            "] reports no AMDGPU ISA targets",
-                            physical_device_ordinal);
+    const iree_hal_amdgpu_target_identity_t* code_object_target_id) {
+  const iree_hal_amdgpu_agent_target_t* agent_target =
+      physical_device->agent_target;
+  if (iree_hal_amdgpu_agent_target_find_compatible_isa(agent_target,
+                                                       code_object_target_id)) {
+    return iree_ok_status();
   }
-
-  iree_hal_amdgpu_target_compatibility_t first_mismatch =
-      IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_COMPATIBLE;
-  char first_agent_target[128] = {0};
-  for (iree_host_size_t i = 0; i < available_isas.count; ++i) {
-    iree_hal_amdgpu_agent_isa_target_t isa_target;
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_query_agent_isa_target(
-        libhsa, available_isas.values[i], &isa_target));
-    const iree_hal_amdgpu_target_compatibility_t compatibility =
-        iree_hal_amdgpu_target_id_check_compatible(code_object_target_id,
-                                                   &isa_target.target_id);
-    if (compatibility == IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_COMPATIBLE) {
-      return iree_ok_status();
-    }
-    if (first_mismatch == IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_COMPATIBLE) {
-      first_mismatch = compatibility;
-      IREE_RETURN_IF_ERROR(
-          iree_hal_amdgpu_executable_format_target_id_for_message(
-              &isa_target.target_id, sizeof(first_agent_target),
-              first_agent_target));
-    }
-  }
+  const iree_hal_amdgpu_target_compatibility_t primary_compatibility =
+      iree_hal_amdgpu_target_identity_check_compatible(
+          code_object_target_id, &agent_target->primary_isa.identity);
 
   char code_object_target[128] = {0};
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_executable_format_target_id_for_message(
       code_object_target_id, sizeof(code_object_target), code_object_target));
+  char primary_agent_target[128] = {0};
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_executable_format_target_id_for_message(
+      &agent_target->primary_isa.identity, sizeof(primary_agent_target),
+      primary_agent_target));
   char mismatch_reasons[128] = {0};
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_compatibility_format(
-      first_mismatch, sizeof(mismatch_reasons), mismatch_reasons,
+      primary_compatibility, sizeof(mismatch_reasons), mismatch_reasons,
       /*out_buffer_length=*/NULL));
   return iree_make_status(
       IREE_STATUS_INCOMPATIBLE,
       "AMDGPU code object target `%s` is not compatible with GPU agent[%" PRIhsz
-      "] target `%s` (mismatched %s)",
-      code_object_target, physical_device_ordinal, first_agent_target,
-      mismatch_reasons);
+      "] ISA targets (primary `%s` mismatched %s; %" PRIhsz " targets checked)",
+      code_object_target, physical_device_ordinal, primary_agent_target,
+      mismatch_reasons, agent_target->isa_count);
 }
 
 static iree_status_t iree_hal_amdgpu_executable_preflight_code_object(
-    const iree_hal_amdgpu_libhsa_t* libhsa,
-    const iree_hal_amdgpu_topology_t* topology,
     const iree_hal_amdgpu_queue_affinity_physical_device_set_t*
         physical_devices,
-    const iree_hal_amdgpu_target_id_t* code_object_target_id) {
-  for (iree_host_size_t i = 0; i < topology->gpu_agent_count; ++i) {
+    iree_const_byte_span_t code_object_data,
+    iree_host_size_t physical_device_count,
+    iree_hal_amdgpu_physical_device_t* const* physical_device_list) {
+  iree_hal_amdgpu_target_identity_t code_object_target_id;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_code_object_target_id_from_elf(
+      code_object_data, &code_object_target_id));
+  for (iree_host_size_t i = 0; i < physical_device_count; ++i) {
     if (!iree_hal_amdgpu_physical_device_mask_contains(
             physical_devices->physical_device_mask, i)) {
       continue;
     }
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_executable_preflight_agent_code_object(
-        libhsa, topology->gpu_agents[i], i, code_object_target_id));
+        physical_device_list[i], i, &code_object_target_id));
   }
   return iree_ok_status();
 }
@@ -475,15 +434,15 @@ static iree_status_t iree_hal_amdgpu_executable_select_agent_profile(
   return iree_ok_status();
 }
 
-// Loads an executable ELF from memory for selected agents in |topology| and
-// stores the frozen executable in |out_handle|.
+// Loads an executable ELF from |code_object_reader| for selected agents in
+// |topology| and stores the frozen executable in |out_handle|.
 static iree_status_t iree_hal_amdgpu_executable_load_module(
     const iree_hal_amdgpu_libhsa_t* libhsa,
     const iree_hal_amdgpu_topology_t* topology,
     const iree_hal_amdgpu_queue_affinity_physical_device_set_t*
         physical_devices,
-    const iree_hal_executable_params_t* executable_params,
-    iree_const_byte_span_t code_object_data, hsa_executable_t* out_handle) {
+    const iree_hal_executable_load_params_t* load_params,
+    hsa_code_object_reader_t code_object_reader, hsa_executable_t* out_handle) {
   IREE_TRACE_ZONE_BEGIN(z0);
   *out_handle = (hsa_executable_t){0};
 
@@ -494,7 +453,7 @@ static iree_status_t iree_hal_amdgpu_executable_load_module(
   // allocate one copy of the constant table per agent. I don't know if it's
   // best to have one base symbol pointing to the table or one symbol per
   // constant in the table.
-  if (executable_params->constant_count != 0) {
+  if (load_params->constant_count != 0) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                              "executable constants not yet implemented"));
@@ -503,21 +462,6 @@ static iree_status_t iree_hal_amdgpu_executable_load_module(
   // TODO(benvanik): figure out what options we could pass? Documentation is ...
   // lacking. These may have only been used for HSAIL anyway.
   const char* options = NULL;
-
-  iree_hal_amdgpu_target_id_t code_object_target_id;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_amdgpu_code_object_target_id_from_elf(
-              code_object_data, &code_object_target_id));
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_amdgpu_executable_preflight_code_object(
-              libhsa, topology, physical_devices, &code_object_target_id));
-
-  // Bind a code object reader to the memory sourced from our rodata.
-  hsa_code_object_reader_t code_object_reader;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hsa_code_object_reader_create_from_memory(
-              IREE_LIBHSA(libhsa), (const char*)code_object_data.data,
-              code_object_data.data_length, &code_object_reader));
 
   // Create the executable that will hold all of the loaded code objects.
   hsa_profile_t executable_profile = HSA_PROFILE_BASE;
@@ -550,11 +494,6 @@ static iree_status_t iree_hal_amdgpu_executable_load_module(
   if (iree_status_is_ok(status)) {
     status = iree_hsa_executable_freeze(IREE_LIBHSA(libhsa), handle, options);
   }
-
-  // Release the reader now that the executable has been fully loaded.
-  status =
-      iree_status_join(status, iree_hsa_code_object_reader_destroy(
-                                   IREE_LIBHSA(libhsa), code_object_reader));
 
   if (iree_status_is_ok(status)) {
     *out_handle = handle;
@@ -642,6 +581,7 @@ static iree_status_t iree_hal_amdgpu_executable_resolve_kernel_args_from_symbol(
     iree_hal_amdgpu_device_kernel_args_t* out_kernel_args) {
   IREE_ASSERT_ARGUMENT(out_kernel_args);
   IREE_TRACE_ZONE_BEGIN(z0);
+  memset(out_kernel_args, 0, sizeof(*out_kernel_args));
 
   // All of our kernels assume 3 dimensions.
   out_kernel_args->setup = 3 << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS;
@@ -788,35 +728,14 @@ static iree_status_t iree_hal_amdgpu_executable_calculate_kernarg_block_count(
       layout->total_kernarg_size, out_kernarg_block_count);
 }
 
-static iree_status_t
-iree_hal_amdgpu_executable_query_kernel_descriptor_host_ptr(
-    const iree_hal_amdgpu_libhsa_t* libhsa, uint64_t kernel_object,
-    const iree_hal_amdgpu_kernel_descriptor_t** out_descriptor) {
-  *out_descriptor = NULL;
-  if (kernel_object == 0) return iree_ok_status();
-
-  const void* host_ptr = NULL;
-  const hsa_status_t hsa_status =
-      libhsa->amd_loader.hsa_ven_amd_loader_query_host_address(
-          (void*)(uintptr_t)kernel_object, &host_ptr);
-  if (hsa_status != HSA_STATUS_SUCCESS) {
-    return iree_status_from_hsa_status(__FILE__, __LINE__, hsa_status,
-                                       "hsa_ven_amd_loader_query_host_address",
-                                       "querying kernel object host address");
-  }
-  if (IREE_UNLIKELY(!host_ptr)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU kernel object host address translation returned NULL");
-  }
-
-  *out_descriptor = (const iree_hal_amdgpu_kernel_descriptor_t*)host_ptr;
-  return iree_ok_status();
-}
-
 static iree_status_t iree_hal_amdgpu_executable_initialize_dispatch_descriptor(
     const iree_hal_amdgpu_libhsa_t* libhsa,
     iree_hal_amdgpu_gfxip_version_t gfxip_version,
+    iree_host_size_t physical_device_ordinal,
+    const iree_hal_amdgpu_executable_limits_t* executable_limits,
+    const iree_hal_amdgpu_executable_export_t* export_info,
+    uint32_t physical_device_workgroup_local_memory_size,
+    const iree_hal_amdgpu_workgroup_cluster_capabilities_t* workgroup_cluster,
     const iree_hal_amdgpu_device_kernel_args_t* kernel_args,
     const iree_hal_amdgpu_kernarg_layout_t* kernarg_layout,
     iree_host_size_t custom_explicit_kernarg_size,
@@ -842,6 +761,9 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_dispatch_descriptor(
   }
 
   out_descriptor->kernel_args = *kernel_args;
+  out_descriptor->workgroup_cluster_count_limits =
+      workgroup_cluster->cluster_count;
+  out_descriptor->physical_device_ordinal = physical_device_ordinal;
   out_descriptor->kernarg_layout = kernarg_layout;
   if (kernarg_layout) {
     IREE_RETURN_IF_ERROR(
@@ -865,9 +787,9 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_dispatch_descriptor(
       };
   if (custom_implicit_args_offset != UINT16_MAX) {
     // Custom-direct callers own every visible native kernarg byte. Hidden
-    // metadata marks the implicit suffix location, but visible args may appear
-    // after the first hidden record in some code objects, so validate/copy the
-    // full visible extent instead of truncating at the suffix offset.
+    // metadata marks where the queue code must synthesize the implicit suffix.
+    // A zero explicit size remains dynamic: some HIP callers omit ABI padding
+    // before the suffix, and the command buffer zero-fills that gap.
     out_descriptor->custom_kernarg_layout.implicit_args_offset =
         custom_implicit_args_offset;
     out_descriptor->custom_kernarg_layout.total_kernarg_size =
@@ -887,11 +809,26 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_dispatch_descriptor(
           IREE_STATUS_FAILED_PRECONDITION,
           "executable kernel workgroup size dimension %" PRIhsz " is zero", i);
     }
-    out_descriptor->max_workgroup_count[i] =
+    out_descriptor->maximum_workgroup_count[i] =
         UINT32_MAX / kernel_args->workgroup_size[i];
   }
-  out_descriptor->max_dynamic_workgroup_local_memory =
-      UINT32_MAX - kernel_args->group_segment_size;
+  IREE_ASSERT(kernel_args->group_segment_size <=
+              physical_device_workgroup_local_memory_size);
+  out_descriptor->limits = (iree_hal_amdgpu_executable_dispatch_limits_t){
+      .maximum_workgroup_invocations =
+          export_info->maximum_workgroup_invocations
+              ? export_info->maximum_workgroup_invocations
+              : executable_limits->maximum_workgroup_invocations,
+      .maximum_workgroup_size =
+          {
+              executable_limits->maximum_workgroup_size[0],
+              executable_limits->maximum_workgroup_size[1],
+              executable_limits->maximum_workgroup_size[2],
+          },
+      .maximum_dynamic_workgroup_local_memory_size =
+          physical_device_workgroup_local_memory_size -
+          kernel_args->group_segment_size,
+  };
 
   // HSA reports the kernel object as the dispatch handle, but CPU-side
   // descriptor reads must go through the AMD loader host-address translation.
@@ -900,12 +837,16 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_dispatch_descriptor(
     return iree_ok_status();
   }
   const iree_hal_amdgpu_kernel_descriptor_t* amdhsa_descriptor = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_executable_query_kernel_descriptor_host_ptr(
-          libhsa, kernel_object, &amdhsa_descriptor));
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_loaded_code_object_query_host_address(
+      libhsa, kernel_object, (const void**)&amdhsa_descriptor));
   out_descriptor->pm4_group_segment_fixed_size =
       amdhsa_descriptor->group_segment_fixed_size;
+  const bool uses_workgroup_clusters =
+      kernel_args->workgroup_cluster_size[0] != 0 ||
+      kernel_args->workgroup_cluster_size[1] != 0 ||
+      kernel_args->workgroup_cluster_size[2] != 0;
   out_descriptor->pm4_launch_state_valid =
+      !uses_workgroup_clusters &&
       iree_hal_amdgpu_pm4_dispatch_launch_state_is_supported(
           gfxip_version, amdhsa_descriptor, kernel_object,
           kernel_args->workgroup_size,
@@ -938,6 +879,9 @@ typedef struct iree_hal_amdgpu_executable_load_variant_t {
   // Loaded HSA executable handle for this variant.
   hsa_executable_t handle;
 
+  // HSA-backed resolver state borrowed by |global_table|.
+  iree_hal_amdgpu_executable_global_resolver_t global_resolver;
+
   // Executable global lookup and per-device buffer alias cache for |handle|.
   iree_hal_amdgpu_global_table_t global_table;
 
@@ -957,6 +901,13 @@ typedef struct iree_hal_amdgpu_executable_t {
 
   // Borrowed HAL device used for global-buffer placement metadata.
   iree_hal_device_t* device;
+
+  // Executable-owned copy of the exact HSACO bytes backing
+  // |code_object_reader|.
+  iree_byte_span_t code_object_data;
+  // HSA code-object reader retained until all associated executable variants
+  // have been destroyed.
+  hsa_code_object_reader_t code_object_reader;
 
   // Logical-device-local executable identifier assigned at creation.
   uint64_t executable_id;
@@ -1007,7 +958,7 @@ typedef struct iree_hal_amdgpu_executable_t {
   bool requires_queue_scope;
   // Number of entries in |queue_scopes|.
   iree_host_size_t queue_scope_count;
-  // Immutable queue identities copied from the executable cache.
+  // Immutable queue identities captured from the owning logical device.
   iree_hal_amdgpu_queue_scope_t* queue_scopes;
   // Loaded code-object host/device ranges indexed by physical device ordinal.
   iree_hal_amdgpu_loaded_code_object_range_t*
@@ -1566,6 +1517,9 @@ static iree_status_t iree_hal_amdgpu_executable_publish_feedback_config(
           "AMDGPU feedback config global `%s` did not resolve to device memory",
           IREE_HAL_AMDGPU_FEEDBACK_CONFIG_GLOBAL_NAME);
     }
+    // The context pointer crosses the device global and feedback packet before
+    // an HSA signal wakes the host reader. TSAN cannot observe that path.
+    IREE_TSAN_RELEASE(&executable->source_context);
     IREE_RETURN_IF_ERROR(
         iree_hsa_memory_copy(IREE_LIBHSA(executable->libhsa), target_ptr,
                              &config, sizeof(config)),
@@ -1581,6 +1535,8 @@ iree_hal_amdgpu_executable_initialize_dispatch_descriptors_for_device(
     iree_hal_amdgpu_executable_t* executable,
     iree_hal_amdgpu_gfxip_version_t gfxip_version,
     iree_host_size_t variant_ordinal, iree_host_size_t device_ordinal,
+    const iree_hal_amdgpu_executable_limits_t* executable_limits,
+    const iree_hal_amdgpu_physical_device_t* physical_device,
     const iree_hal_amdgpu_executable_metadata_t* dispatch_metadata,
     const iree_host_size_t* custom_explicit_kernarg_sizes,
     const uint16_t* custom_implicit_args_offsets) {
@@ -1609,7 +1565,10 @@ iree_hal_amdgpu_executable_initialize_dispatch_descriptors_for_device(
     }
     IREE_RETURN_IF_ERROR(
         iree_hal_amdgpu_executable_initialize_dispatch_descriptor(
-            executable->libhsa, gfxip_version,
+            executable->libhsa, gfxip_version, device_ordinal,
+            executable_limits, &dispatch_metadata->exports[kernel_ordinal],
+            physical_device->group_segment_max_size,
+            &physical_device->workgroup_cluster,
             &executable->host_kernel_args[kernel_ordinal], kernarg_layout,
             custom_explicit_kernarg_size, custom_implicit_args_offset,
             &executable->host_dispatch_descriptors[descriptor_ordinal]),
@@ -1740,37 +1699,38 @@ static iree_status_t iree_hal_amdgpu_executable_create_metadata_from_hsaco(
   return status;
 }
 
-static iree_status_t iree_hal_amdgpu_executable_validate_workgroup_size(
-    iree_string_view_t symbol_name, const uint32_t workgroup_size[3],
-    const iree_hal_amdgpu_device_limits_t* limits) {
-  if (workgroup_size[0] > limits->max_workgroup_size_per_dim[0] ||
-      workgroup_size[1] > limits->max_workgroup_size_per_dim[1] ||
-      workgroup_size[2] > limits->max_workgroup_size_per_dim[2]) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU kernel `%.*s` workgroup size dims %ux%ux%u exceed device "
-        "maximum %ux%ux%u",
-        (int)symbol_name.size, symbol_name.data, workgroup_size[0],
-        workgroup_size[1], workgroup_size[2],
-        limits->max_workgroup_size_per_dim[0],
-        limits->max_workgroup_size_per_dim[1],
-        limits->max_workgroup_size_per_dim[2]);
-  }
-  const uint64_t total_workgroup_size =
-      (uint64_t)workgroup_size[0] * workgroup_size[1] * workgroup_size[2];
-  if (total_workgroup_size > limits->max_workgroup_size) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU kernel `%.*s` workgroup size total %" PRIu64
-                            " exceeds device maximum %u",
-                            (int)symbol_name.size, symbol_name.data,
-                            total_workgroup_size, limits->max_workgroup_size);
+static iree_status_t
+iree_hal_amdgpu_executable_validate_workgroup_cluster_sizes(
+    const iree_hal_amdgpu_executable_metadata_t* metadata,
+    const iree_hal_amdgpu_queue_affinity_physical_device_set_t*
+        selected_devices,
+    iree_host_size_t physical_device_count,
+    iree_hal_amdgpu_physical_device_t* const* physical_device_list) {
+  for (iree_host_size_t export_ordinal = 0;
+       export_ordinal < metadata->export_count; ++export_ordinal) {
+    const iree_hal_amdgpu_executable_export_t* metadata_export =
+        &metadata->exports[export_ordinal];
+    const iree_string_view_t symbol_name =
+        metadata->reflection[export_ordinal].symbol_name;
+    for (iree_host_size_t device_ordinal = 0;
+         device_ordinal < physical_device_count; ++device_ordinal) {
+      if (!iree_hal_amdgpu_physical_device_mask_contains(
+              selected_devices->physical_device_mask, device_ordinal)) {
+        continue;
+      }
+      const iree_hal_amdgpu_physical_device_t* physical_device =
+          physical_device_list[device_ordinal];
+      IREE_RETURN_IF_ERROR(iree_hal_amdgpu_validate_workgroup_cluster_size(
+          symbol_name, metadata_export->workgroup_cluster_size, device_ordinal,
+          &physical_device->workgroup_cluster));
+    }
   }
   return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amdgpu_executable_initialize_export_infos(
     const iree_hal_amdgpu_executable_metadata_t* metadata,
-    const iree_hal_amdgpu_device_limits_t* limits,
+    const iree_hal_amdgpu_executable_limits_t* limits,
     iree_hal_amdgpu_executable_t* executable) {
   executable->export_parameters = metadata->parameters;
   for (iree_host_size_t i = 0; i < metadata->export_count; ++i) {
@@ -1786,6 +1746,9 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_export_infos(
         metadata_export->flags,
         IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_CUSTOM_DIRECT_ONLY);
 
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_executable_validate_export_limits(
+        limits, reflection->symbol_name, metadata_export));
+
     const iree_hal_amdgpu_kernarg_layout_t* layout = NULL;
     if (!custom_direct_only) {
       IREE_RETURN_IF_ERROR(
@@ -1793,11 +1756,6 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_export_infos(
               metadata, metadata_export->kernarg_layout, &layout),
           "resolving dispatch kernarg layout for export %" PRIhsz, i);
     }
-    if (!requires_dispatch_workgroup_size) {
-      IREE_RETURN_IF_ERROR(iree_hal_amdgpu_executable_validate_workgroup_size(
-          reflection->symbol_name, metadata_export->workgroup_size, limits));
-    }
-
     executable->custom_direct_only_exports[i] = custom_direct_only;
     executable->export_parameter_offsets[i] = reflection->parameter_offset;
 
@@ -1809,6 +1767,8 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_export_infos(
     info->constant_byte_length = layout ? layout->constant_byte_length : 0;
     info->binding_count = layout ? layout->binding_count : 0;
     info->parameter_count = reflection->parameter_count;
+    info->maximum_workgroup_invocations =
+        metadata_export->maximum_workgroup_invocations;
     if (requires_dispatch_workgroup_size) {
       info->workgroup_size[0] = 1;
       info->workgroup_size[1] = 1;
@@ -1872,6 +1832,9 @@ static iree_status_t iree_hal_amdgpu_executable_resolve_metadata_kernel_args(
     out_host_kernel_args->kernarg_alignment = iree_max(
         out_host_kernel_args->kernarg_alignment, layout->kernarg_alignment);
   }
+  memcpy(out_host_kernel_args->workgroup_cluster_size,
+         metadata_export->workgroup_cluster_size,
+         sizeof(out_host_kernel_args->workgroup_cluster_size));
   return iree_ok_status();
 }
 
@@ -1879,18 +1842,20 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_variant_global_table(
     iree_hal_amdgpu_executable_t* executable,
     iree_hal_amdgpu_executable_load_variant_t* load_variant,
     iree_allocator_t host_allocator) {
-  const iree_hal_amdgpu_global_table_hsa_params_t global_table_params = {
-      .host_allocator = host_allocator,
-      .queue_affinity_domain = executable->queue_affinity_domain,
-      .loaded_physical_device_mask = executable->loaded_physical_device_mask,
-      .libhsa = executable->libhsa,
-      .device = executable->device,
-      .executable = load_variant->handle,
-      .device_agent_count = executable->device_count,
-      .device_agents = executable->device_agents,
-  };
-  return iree_hal_amdgpu_global_table_initialize_hsa(
-      &global_table_params, &load_variant->global_table);
+  load_variant->global_resolver =
+      (iree_hal_amdgpu_executable_global_resolver_t){
+          .host_allocator = host_allocator,
+          .queue_affinity_domain = executable->queue_affinity_domain,
+          .loaded_physical_device_mask =
+              executable->loaded_physical_device_mask,
+          .libhsa = executable->libhsa,
+          .device = executable->device,
+          .executable = load_variant->handle,
+          .device_agent_count = executable->device_count,
+          .device_agents = executable->device_agents,
+      };
+  return iree_hal_amdgpu_executable_global_resolver_initialize_table(
+      &load_variant->global_resolver, &load_variant->global_table);
 }
 
 static iree_status_t iree_hal_amdgpu_executable_load_variant(
@@ -1898,14 +1863,13 @@ static iree_status_t iree_hal_amdgpu_executable_load_variant(
     const iree_hal_amdgpu_topology_t* topology,
     const iree_hal_amdgpu_queue_affinity_physical_device_set_t*
         physical_devices,
-    const iree_hal_executable_params_t* executable_params,
-    iree_const_byte_span_t code_object_data,
+    const iree_hal_executable_load_params_t* load_params,
     iree_host_size_t physical_queue_ordinal, iree_allocator_t host_allocator,
     iree_hal_amdgpu_executable_load_variant_t* out_load_variant) {
   out_load_variant->physical_queue_ordinal = physical_queue_ordinal;
   iree_status_t status = iree_hal_amdgpu_executable_load_module(
-      executable->libhsa, topology, physical_devices, executable_params,
-      code_object_data, &out_load_variant->handle);
+      executable->libhsa, topology, physical_devices, load_params,
+      executable->code_object_reader, &out_load_variant->handle);
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_executable_initialize_variant_global_table(
         executable, out_load_variant, host_allocator);
@@ -1918,11 +1882,13 @@ static iree_status_t iree_hal_amdgpu_executable_create_from_raw_hsaco(
     const iree_hal_amdgpu_topology_t* topology,
     const iree_hal_amdgpu_queue_affinity_physical_device_set_t*
         physical_devices,
-    const iree_hal_executable_params_t* executable_params,
-    uint64_t executable_id, const iree_hal_amdgpu_device_limits_t* limits,
+    const iree_hal_executable_load_params_t* load_params,
+    uint64_t executable_id, const iree_hal_amdgpu_executable_limits_t* limits,
     const iree_hal_amdgpu_feedback_state_t* feedback_state,
     const iree_hal_amdgpu_asan_state_t* asan_state,
     const iree_hal_amdgpu_tsan_state_t* tsan_state,
+    iree_host_size_t physical_device_count,
+    iree_hal_amdgpu_physical_device_t* const* physical_device_list,
     iree_host_size_t queue_scope_count,
     const iree_hal_amdgpu_queue_scope_t* queue_scopes,
     hsa_agent_t any_device_agent, iree_hal_amdgpu_gfxip_version_t gfxip_version,
@@ -1934,7 +1900,7 @@ static iree_status_t iree_hal_amdgpu_executable_create_from_raw_hsaco(
                             "AMDGPU executable id is required");
   }
 
-  iree_const_byte_span_t code_object_data = executable_params->executable_data;
+  iree_const_byte_span_t code_object_data = load_params->executable_data;
   iree_hal_amdgpu_hsaco_metadata_t hsaco_metadata = {0};
   iree_status_t status = iree_hal_amdgpu_hsaco_metadata_initialize_from_elf(
       code_object_data, host_allocator, &hsaco_metadata);
@@ -1967,11 +1933,28 @@ static iree_status_t iree_hal_amdgpu_executable_create_from_raw_hsaco(
         executable->loaded_code_object_ranges, &executable->source_context);
   }
 
+  // HSA requires the source memory to outlive its code-object reader and the
+  // reader to outlive every executable loaded from it. HAL load inputs are
+  // call-scoped, so retain one exact copy and reader for all load variants.
+  if (iree_status_is_ok(status)) {
+    void* owned_code_object_data = NULL;
+    status = iree_allocator_clone(host_allocator, code_object_data,
+                                  &owned_code_object_data);
+    if (iree_status_is_ok(status)) {
+      executable->code_object_data = iree_make_byte_span(
+          owned_code_object_data, code_object_data.data_length);
+      status = iree_hsa_code_object_reader_create_from_memory(
+          IREE_LIBHSA(libhsa), executable->code_object_data.data,
+          executable->code_object_data.data_length,
+          &executable->code_object_reader);
+    }
+  }
+
   // Load executable and register it with selected GPU agents.
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_executable_load_variant(
-        executable, topology, physical_devices, executable_params,
-        code_object_data, /*physical_queue_ordinal=*/0, host_allocator,
+        executable, topology, physical_devices, load_params,
+        /*physical_queue_ordinal=*/0, host_allocator,
         iree_hal_amdgpu_executable_primary_variant(executable));
   }
   if (iree_status_is_ok(status)) {
@@ -2000,8 +1983,8 @@ static iree_status_t iree_hal_amdgpu_executable_create_from_raw_hsaco(
            iree_status_is_ok(status);
            ++physical_queue_ordinal) {
         status = iree_hal_amdgpu_executable_load_variant(
-            executable, topology, physical_devices, executable_params,
-            code_object_data, physical_queue_ordinal, host_allocator,
+            executable, topology, physical_devices, load_params,
+            physical_queue_ordinal, host_allocator,
             &executable->load_variants[physical_queue_ordinal]);
         if (iree_status_is_ok(status)) {
           executable->load_variant_count = physical_queue_ordinal + 1;
@@ -2037,6 +2020,11 @@ static iree_status_t iree_hal_amdgpu_executable_create_from_raw_hsaco(
         &executable->metadata);
   }
   if (iree_status_is_ok(status)) {
+    status = iree_hal_amdgpu_executable_validate_workgroup_cluster_sizes(
+        executable->metadata, physical_devices, physical_device_count,
+        physical_device_list);
+  }
+  if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_executable_initialize_export_infos(
         executable->metadata, limits, executable);
   }
@@ -2064,6 +2052,13 @@ static iree_status_t iree_hal_amdgpu_executable_create_from_raw_hsaco(
           iree_hal_amdgpu_executable_primary_variant(executable)->handle,
           executable->metadata, kernel_ordinal, any_device_agent,
           host_kernel_args);
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_amdgpu_executable_populate_resource_usage(
+            limits,
+            executable->metadata->reflection[kernel_ordinal].symbol_name,
+            &executable->metadata->exports[kernel_ordinal], host_kernel_args,
+            &executable->export_infos[kernel_ordinal].resource_usage);
+      }
       if (iree_status_is_ok(status)) {
         if (executable->custom_direct_only_exports[kernel_ordinal]) {
           custom_explicit_kernarg_sizes[kernel_ordinal] =
@@ -2104,6 +2099,7 @@ static iree_status_t iree_hal_amdgpu_executable_create_from_raw_hsaco(
           status =
               iree_hal_amdgpu_executable_initialize_dispatch_descriptors_for_device(
                   executable, gfxip_version, variant_ordinal, device_ordinal,
+                  limits, physical_device_list[device_ordinal],
                   executable->metadata, custom_explicit_kernarg_sizes,
                   custom_implicit_args_offsets);
         }
@@ -2135,15 +2131,20 @@ static iree_status_t iree_hal_amdgpu_executable_create_from_raw_hsaco(
 iree_status_t iree_hal_amdgpu_executable_create(
     iree_hal_device_t* device, const iree_hal_amdgpu_libhsa_t* libhsa,
     const iree_hal_amdgpu_topology_t* topology,
-    const iree_hal_executable_params_t* executable_params,
+    iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
     uint64_t executable_id, iree_hal_amdgpu_feedback_state_t* feedback_state,
     iree_hal_amdgpu_asan_state_t* asan_state,
     iree_hal_amdgpu_tsan_state_t* tsan_state,
+    iree_host_size_t physical_device_count,
+    iree_hal_amdgpu_physical_device_t* const* physical_device_list,
     iree_host_size_t queue_scope_count,
     const iree_hal_amdgpu_queue_scope_t* queue_scopes,
     iree_hal_amdgpu_profile_metadata_registry_t* profile_metadata,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
-  IREE_ASSERT_ARGUMENT(executable_params);
+  IREE_ASSERT_ARGUMENT(target);
+  IREE_ASSERT_ARGUMENT(load_params);
   IREE_ASSERT_ARGUMENT(profile_metadata);
   IREE_ASSERT_ARGUMENT(out_executable);
   *out_executable = NULL;
@@ -2159,6 +2160,14 @@ iree_status_t iree_hal_amdgpu_executable_create(
         z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                              "topology must have at least one GPU device"));
   }
+  if (IREE_UNLIKELY(physical_device_count != topology->gpu_agent_count ||
+                    !physical_device_list)) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "physical device list count %" PRIhsz
+                             " must match topology GPU agent count %" PRIhsz,
+                             physical_device_count, topology->gpu_agent_count));
+  }
   if (IREE_UNLIKELY(queue_scope_count != 0 && !queue_scopes)) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0,
@@ -2171,46 +2180,87 @@ iree_status_t iree_hal_amdgpu_executable_create(
   iree_hal_amdgpu_queue_affinity_physical_device_set_t physical_devices;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_amdgpu_executable_select_physical_devices(
-              topology, executable_params->queue_affinity, &physical_devices));
+              topology, queue_affinity, &physical_devices));
 
-  // Pick a selected device to be our template for device queries. All devices
-  // in the topology are expected to be the same. This should have been checked
-  // earlier but we do it here in case the user is bypassing that code.
-  hsa_agent_t any_device_agent =
-      topology->gpu_agents[physical_devices.first_physical_device_ordinal];
-
-  // Check that the executable is supported and get the ISA it matches.
-  bool supported = false;
-  hsa_isa_t isa = {0};
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_amdgpu_executable_format_supported(
-              libhsa, any_device_agent, executable_params->executable_format,
-              &supported, &isa));
-  if (!supported) {
+  const iree_hal_device_identity_spec_t* identity =
+      iree_hal_device_spec_identity(iree_hal_device_spec(device));
+  iree_hal_physical_device_affinity_t resolved_physical_device_affinity = 0;
+  for (iree_host_size_t i = 0; i < topology->gpu_agent_count; ++i) {
+    if (!iree_hal_amdgpu_physical_device_mask_contains(
+            physical_devices.physical_device_mask, i)) {
+      continue;
+    }
+    if (IREE_UNLIKELY(i >= identity->physical_device_count)) {
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0,
+          iree_make_status(IREE_STATUS_INTERNAL,
+                           "AMDGPU topology physical device ordinal %" PRIhsz
+                           " is absent from the immutable device spec",
+                           i));
+    }
+    resolved_physical_device_affinity |=
+        identity->physical_devices[i].physical_device_affinity;
+  }
+  if (!iree_all_bits_set(target->physical_device_affinity,
+                         resolved_physical_device_affinity)) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_make_status(IREE_STATUS_INCOMPATIBLE,
-                             "executable format `%.*s` not supported by the "
-                             "devices in the topology",
-                             (int)executable_params->executable_format.size,
-                             executable_params->executable_format.data));
+        z0, iree_make_status(
+                IREE_STATUS_INCOMPATIBLE,
+                "AMDGPU target `%.*s` physical-device affinity 0x%016" PRIx64
+                " does not cover the queue-selected affinity 0x%016" PRIx64,
+                (int)target->target_key.size, target->target_key.data,
+                target->physical_device_affinity,
+                resolved_physical_device_affinity));
   }
 
-  iree_hal_amdgpu_device_limits_t limits = {0};
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_amdgpu_query_device_limits(libhsa, any_device_agent, isa,
-                                              &limits));
+  if (!iree_string_view_equal(target->family, IREE_SV("amdgpu"))) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INCOMPATIBLE,
+                             "executable target family `%.*s` is not AMDGPU",
+                             (int)target->family.size, target->family.data));
+  }
 
-  iree_hal_amdgpu_agent_isa_target_t agent_isa_target;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, iree_hal_amdgpu_query_agent_isa_target(
-                                            libhsa, isa, &agent_isa_target));
+  // Pick a selected device to be our template for device queries. All devices
+  // in the topology have the same immutable target identity.
+  const iree_host_size_t template_device_ordinal =
+      physical_devices.first_physical_device_ordinal;
+  hsa_agent_t any_device_agent = topology->gpu_agents[template_device_ordinal];
+  const iree_hal_amdgpu_agent_target_t* agent_target =
+      physical_device_list[template_device_ordinal]->agent_target;
+
+  // Resolve the selected target to the compatible HSA ISA used for device
+  // limits and executable metadata.
+  const iree_hal_amdgpu_agent_isa_target_t* isa_target = NULL;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_amdgpu_executable_resolve_isa_target(
+              agent_target, target->target_key, &isa_target));
+  if (!isa_target) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INCOMPATIBLE,
+                             "executable target `%.*s` is not supported by the "
+                             "devices in the topology",
+                             (int)target->target_key.size,
+                             target->target_key.data));
+  }
+
+  iree_hal_amdgpu_executable_limits_t limits = {0};
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_amdgpu_executable_query_limits(
+              libhsa, isa_target->isa, &physical_devices, physical_device_count,
+              physical_device_list, &limits));
+
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_amdgpu_executable_preflight_code_object(
+              &physical_devices, load_params->executable_data,
+              physical_device_count, physical_device_list));
   const iree_hal_amdgpu_gfxip_version_t gfxip_version =
-      agent_isa_target.target_id.version;
+      isa_target->identity.version;
 
   iree_status_t status = iree_hal_amdgpu_executable_create_from_raw_hsaco(
-      device, libhsa, topology, &physical_devices, executable_params,
-      executable_id, &limits, feedback_state, asan_state, tsan_state,
-      queue_scope_count, queue_scopes, any_device_agent, gfxip_version,
-      profile_metadata, host_allocator, out_executable);
+      device, libhsa, topology, &physical_devices, load_params, executable_id,
+      &limits, feedback_state, asan_state, tsan_state, physical_device_count,
+      physical_device_list, queue_scope_count, queue_scopes, any_device_agent,
+      gfxip_version, profile_metadata, host_allocator, out_executable);
   if (!iree_status_is_ok(status)) {
     iree_hal_executable_release(*out_executable);
     *out_executable = NULL;
@@ -2259,7 +2309,13 @@ static void iree_hal_amdgpu_executable_destroy(
                                           load_variant->handle));
     }
   }
+  if (executable->code_object_reader.handle) {
+    iree_hal_amdgpu_hsa_cleanup_assert_success(
+        iree_hsa_code_object_reader_destroy_raw(
+            executable->libhsa, executable->code_object_reader));
+  }
   iree_hal_amdgpu_executable_metadata_free(executable->metadata);
+  iree_allocator_free(host_allocator, executable->code_object_data.data);
 
   iree_allocator_free(host_allocator, executable);
 

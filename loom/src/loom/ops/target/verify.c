@@ -9,6 +9,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/target/ops.h"
+#include "loom/target/projection.h"
 
 static iree_status_t loom_target_emit(iree_diagnostic_emitter_t emitter,
                                       const loom_op_t* op,
@@ -94,8 +95,7 @@ iree_status_t loom_target_record_verify(const loom_module_t* module,
       loom_target_like_descriptor(target);
   const uint32_t selector =
       (uint32_t)loom_attr_as_enum(loom_target_like_selector(target));
-  if (selector >= descriptor->bundle_table->count ||
-      descriptor->bundle_table->values[selector] == NULL) {
+  if (!loom_target_bundle_table_lookup(descriptor->bundle_table, selector)) {
     iree_string_view_t selector_attr_name =
         loom_target_attr_name(module, op, target.vtable->selector_attr_index);
     return loom_target_emit_attr_constraint(

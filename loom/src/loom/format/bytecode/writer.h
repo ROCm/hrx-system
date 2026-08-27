@@ -21,7 +21,7 @@
 // this. Non-seekable consumers (network) wrap in a vec_stream.
 //
 // Section data is NOT buffered in memory (except SYMBOLS, which needs
-// internal offset table patching and is always small). All other
+// internal offset table patching and remains compact). All other
 // sections stream directly through a 4KB page buffer to amortize
 // the iree_io_stream_write vtable dispatch cost.
 
@@ -32,6 +32,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/io/stream.h"
 #include "loom/format/bytecode/format.h"
+#include "loom/format/low_repr.h"
 #include "loom/ir/ir.h"
 
 #ifdef __cplusplus
@@ -46,6 +47,8 @@ typedef struct loom_bytecode_write_options_t {
   // Source-location mode to write in the file header. Zero selects
   // LOOM_BYTECODE_LOCATION_MODE_SOURCE_LOCATIONS.
   loom_bytecode_location_mode_t location_mode;
+  // Stable-key codec required when serializing Low function bodies.
+  loom_low_repr_environment_t low_repr_environment;
 } loom_bytecode_write_options_t;
 
 // Serializes |module| to .loombc format through |stream|.

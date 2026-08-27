@@ -7,6 +7,10 @@ The plugin builds against the LLVM installation that provides the `clang-tidy`
 binary that loads it. Normal runtime, Loom, and libhrx builds do not require
 LLVM development packages.
 
+`clang_tidy_config.yaml` is the single repository analysis policy. Bazel
+declares it as an input to each clang-tidy action, and the secondary CMake lane
+passes the same file to `run-clang-tidy`.
+
 ## Bazel
 
 ```bash
@@ -22,8 +26,16 @@ enabled. `dev.py bazel clang-tidy` enables it with
 
 Discovery checks `IREE_CLANG_TIDY_LLVM_CONFIG`, `LLVM_CONFIG`,
 `IREE_CLANG_TIDY_LLVM_ROOT`, `IREE_LLVM_ROOT`, `LLVM_ROOT`, and then `PATH`.
-Use `IREE_CLANG_TIDY_BINARY` or `IREE_CLANG_TIDY_CLANGXX_BINARY` only when the
-tools are not next to the discovered `llvm-config`.
+The selected `llvm-config --bindir` must contain the matching `clang-tidy` and
+`clang++`; discovery never mixes tools from different LLVM installations.
+
+The external repository imports the selected tools, Clang resource headers,
+and their exact non-glibc ELF dynamic-library closure. It does not import the
+LLVM installation's entire library directory or Clang's target runtime
+libraries. The imported resource headers are exposed through a stable virtual
+resource directory, so the source LLVM prefix does not enter clang-tidy action
+keys. Selected tools must have usable rpaths rather than depending on ambient
+loader configuration.
 
 The Bazel action runner uses the same configured C/C++ compile arguments that
 feed `dev.py bazel compile-commands`, builds one cacheable action per source
@@ -31,9 +43,7 @@ file, and writes a per-source report:
 
 ```bash
 iree-bazel-test --repo_env=IREE_CLANG_TIDY_LLVM=auto \
-  //build_tools/clang_tidy:refcount_checks_test \
-  //build_tools/clang_tidy:status_checks_test \
-  //build_tools/clang_tidy:trace_checks_test
+  //build_tools/clang_tidy:plugin_tests
 ```
 
 ## CMake
@@ -61,6 +71,22 @@ ctest --test-dir .tmp/iree-clang-tidy-plugin --output-on-failure
 ```
 
 ## Checks
+
+### `iree-assert-output-call`
+
+`iree-assert-output-call` diagnoses calls with writable `out_*` parameters
+inside `IREE_ASSERT*` conditions. IREE assertions are compiled out of release
+builds, so any output produced by such a call would otherwise be left
+uninitialized or stale:
+
+```c
+descriptor_t descriptor = {0};
+IREE_ASSERT(resolve_descriptor(kind, &descriptor));
+use_descriptor(descriptor);
+```
+
+Evaluate the query unconditionally and use the assertion only to document the
+trusted invariant.
 
 ### `iree-status-discarded`
 
@@ -114,6 +140,35 @@ and documented borrowed callback boundaries are modeled explicitly. Ordinary
 debug/reporting helpers should use `iree_status_code_t`, `const iree_status_t`,
 or `const iree_status_t&` instead of accepting an owned status they do not
 consume.
+
+### `iree-unbounded-recursion`
+
+`iree-unbounded-recursion` diagnoses one call-graph cycle for each recursive
+strongly connected component. It follows direct calls and locally resolvable
+function-pointer flow through callback parameters, aggregate initializers, and
+constant dispatch tables. The representative notes show a concrete cycle,
+including which edges are indirect.
+
+The Bazel-owned whole-target lane writes one versioned JSON call graph per
+translation unit and aggregates those graphs before computing SCCs. This makes
+cycles spanning C/C++ source files visible without relying on link-time
+optimization or a compilation database. The secondary CMake plugin tests feed
+the same summaries into the same aggregator. A local inventory of the Loom
+compiler and its configured runtime dependencies is available without enabling
+policy enforcement:
+
+```bash
+iree-bazel-build --repo_env=IREE_CLANG_TIDY_LLVM=auto \
+  //build_tools/clang_tidy:loom_recursion_inventory
+less bazel-bin/build_tools/clang_tidy/loom_recursion_inventory.txt
+```
+
+Native recursion is unsafe when authored IR, graph, type, or container depth
+can become stack depth. Those traversals use explicit worklists with indexed
+visited and result state. A recursive implementation is accepted only when a
+small fixed maximum depth is mechanically established. The check is registered
+but explicitly disabled in `clang_tidy_config.yaml` while the current findings
+are converted; removing that exclusion is the final enablement gate.
 
 ### `iree-status-lifetime`
 
@@ -328,6 +383,14 @@ iree_status_t iree_vm_stack_initialize(
 Without an explicit `storage` or `*_storage` parameter, a pointer-to-pointer
 output reads like a callee-owned object factory and should use
 `create/destroy/retain/release` or `allocate/free` naming instead.
+
+Callee-owned pointer factories must use one complete lifecycle vocabulary.
+`create/free` obscures whether the result is a storage resource or an object,
+as does `allocate/destroy`. When the matching cleanup function is visible,
+`iree-lifecycle-naming` diagnoses both mismatches and requires either
+`allocate/free` or `create/destroy` consistently. Private destroy callbacks
+used by polymorphic implementations are not public lifecycle pairs and do not
+participate in this check.
 
 ### `iree-refcount-lifecycle`
 

@@ -21,6 +21,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::ir
     loom::ops::check
+    loom::ops::kernel
     loom::ops::op_defs
   PUBLIC
 )
@@ -58,7 +59,6 @@ loom_cc_library(
     iree::tooling::numpy_io
     iree::tooling::value_io
     loom::ir
-    loom::util::math
   PUBLIC
 )
 
@@ -179,6 +179,7 @@ loom_cc_test(
     loom::format::text::parser
     loom::ir
     loom::ops::check
+    loom::ops::kernel
     loom::ops::test
 )
 
@@ -198,6 +199,7 @@ loom_cc_test(
     loom::format::text::parser
     loom::ir
     loom::ops::check
+    loom::ops::kernel
     loom::ops::test
 )
 

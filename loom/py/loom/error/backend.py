@@ -123,8 +123,10 @@ ERR_BACKEND_009 = ErrorDef(
     message=(
         "target '{target_key}' export '{export_name}' config '{config_key}' "
         "inserted spill storage '{storage_name}' for {value_class} value "
-        "'{value_name}' in '@{function_name}' using {spill_bytes} byte(s), "
-        "{store_count} store(s), and {reload_count} reload(s)"
+        "'{value_name}' produced by '{origin_operation_name}' in "
+        "'@{function_name}' reserving {storage_bytes} byte(s), "
+        "{store_count} store(s) for {store_bytes} byte(s), and "
+        "{reload_count} reload(s) for {reload_bytes} byte(s)"
     ),
     params=(
         ErrorParam("target_key", ParamKind.STRING),
@@ -132,11 +134,14 @@ ERR_BACKEND_009 = ErrorDef(
         ErrorParam("config_key", ParamKind.STRING),
         ErrorParam("function_name", ParamKind.STRING),
         ErrorParam("value_name", ParamKind.STRING),
+        ErrorParam("origin_operation_name", ParamKind.STRING),
         ErrorParam("value_class", ParamKind.STRING),
         ErrorParam("storage_name", ParamKind.STRING),
-        ErrorParam("spill_bytes", ParamKind.U32),
+        ErrorParam("storage_bytes", ParamKind.U64),
         ErrorParam("store_count", ParamKind.U32),
+        ErrorParam("store_bytes", ParamKind.U64),
         ErrorParam("reload_count", ParamKind.U32),
+        ErrorParam("reload_bytes", ParamKind.U64),
     ),
 )
 
@@ -235,7 +240,8 @@ ERR_BACKEND_015 = ErrorDef(
         "target '{target_key}' export '{export_name}' config '{config_key}' "
         "'@{function_name}' scheduler chose '{chosen_packet}' over "
         "'{rejected_packet}' at block '{block_name}' ordinal "
-        "{scheduled_ordinal}: {candidate_count} ready candidate(s), chosen "
+        "{scheduled_ordinal}: scored {scored_candidate_count} of "
+        "{ready_candidate_count} ready candidate(s), chosen "
         "dep-latency/latency/pair-affinity/projected/killed/produced "
         "{chosen_dependency_latency_cycles}/{chosen_latency_cycles}/"
         "{chosen_pair_affinity_score}/{chosen_projected_live_units}/"
@@ -243,8 +249,8 @@ ERR_BACKEND_015 = ErrorDef(
         "data/resource/hazard/effective stall "
         "{chosen_data_ready_stall_cycles}/{chosen_resource_stall_cycles}/"
         "{chosen_hazard_stall_cycles}/{chosen_effective_stall_cycles}, chosen "
-        "cliff class/units/penalty/next "
-        "{chosen_pressure_cliff_reg_class_id}/{chosen_pressure_cliff_units}/"
+        "cliff source/units/penalty/next "
+        "{chosen_pressure_cliff_source}/{chosen_pressure_cliff_units}/"
         "{chosen_pressure_cliff_penalty}/"
         "{chosen_units_until_pressure_cliff}, rejected "
         "dep-latency/latency/pair-affinity/projected/killed/produced "
@@ -255,8 +261,8 @@ ERR_BACKEND_015 = ErrorDef(
         "{rejected_data_ready_stall_cycles}/{rejected_resource_stall_cycles}/"
         "{rejected_hazard_stall_cycles}/{rejected_effective_stall_cycles}, "
         "rejected "
-        "cliff class/units/penalty/next "
-        "{rejected_pressure_cliff_reg_class_id}/"
+        "cliff source/units/penalty/next "
+        "{rejected_pressure_cliff_source}/"
         "{rejected_pressure_cliff_units}/{rejected_pressure_cliff_penalty}/"
         "{rejected_units_until_pressure_cliff}"
     ),
@@ -267,7 +273,8 @@ ERR_BACKEND_015 = ErrorDef(
         ErrorParam("function_name", ParamKind.STRING),
         ErrorParam("block_name", ParamKind.STRING),
         ErrorParam("scheduled_ordinal", ParamKind.U32),
-        ErrorParam("candidate_count", ParamKind.U32),
+        ErrorParam("ready_candidate_count", ParamKind.U32),
+        ErrorParam("scored_candidate_count", ParamKind.U32),
         ErrorParam("chosen_packet", ParamKind.STRING),
         ErrorParam("rejected_packet", ParamKind.STRING),
         ErrorParam("chosen_dependency_latency_cycles", ParamKind.U32),
@@ -280,7 +287,7 @@ ERR_BACKEND_015 = ErrorDef(
         ErrorParam("chosen_resource_stall_cycles", ParamKind.U32),
         ErrorParam("chosen_hazard_stall_cycles", ParamKind.U32),
         ErrorParam("chosen_effective_stall_cycles", ParamKind.U32),
-        ErrorParam("chosen_pressure_cliff_reg_class_id", ParamKind.U32),
+        ErrorParam("chosen_pressure_cliff_source", ParamKind.STRING),
         ErrorParam("chosen_pressure_cliff_units", ParamKind.U32),
         ErrorParam("chosen_pressure_cliff_penalty", ParamKind.U32),
         ErrorParam("chosen_units_until_pressure_cliff", ParamKind.U32),
@@ -294,7 +301,7 @@ ERR_BACKEND_015 = ErrorDef(
         ErrorParam("rejected_resource_stall_cycles", ParamKind.U32),
         ErrorParam("rejected_hazard_stall_cycles", ParamKind.U32),
         ErrorParam("rejected_effective_stall_cycles", ParamKind.U32),
-        ErrorParam("rejected_pressure_cliff_reg_class_id", ParamKind.U32),
+        ErrorParam("rejected_pressure_cliff_source", ParamKind.STRING),
         ErrorParam("rejected_pressure_cliff_units", ParamKind.U32),
         ErrorParam("rejected_pressure_cliff_penalty", ParamKind.U32),
         ErrorParam("rejected_units_until_pressure_cliff", ParamKind.U32),
@@ -343,9 +350,7 @@ ERR_BACKEND_017 = ErrorDef(
         "'{fallback_reason}', static offset {static_offset_bytes} byte(s), "
         "element {element_bytes} byte(s), vector lanes {vector_lanes}, "
         "dynamic stride {dynamic_stride_bytes} byte(s), vector lane stride "
-        "{vector_lane_stride_bytes} byte(s), bank stride {bank_stride_words} "
-        "word(s), conflict degree {bank_conflict_degree}, bank conflict "
-        "'{bank_conflict_kind}'"
+        "{vector_lane_stride_bytes} byte(s)"
     ),
     params=(
         ErrorParam("target_key", ParamKind.STRING),
@@ -364,9 +369,6 @@ ERR_BACKEND_017 = ErrorDef(
         ErrorParam("vector_lanes", ParamKind.U32),
         ErrorParam("dynamic_stride_bytes", ParamKind.U32),
         ErrorParam("vector_lane_stride_bytes", ParamKind.U32),
-        ErrorParam("bank_stride_words", ParamKind.U32),
-        ErrorParam("bank_conflict_degree", ParamKind.U32),
-        ErrorParam("bank_conflict_kind", ParamKind.STRING),
     ),
 )
 
@@ -1117,6 +1119,64 @@ ERR_BACKEND_044 = ErrorDef(
     ),
 )
 
+# ERR_BACKEND_045: Allocation rematerialization decision was recorded.
+ERR_BACKEND_045 = ErrorDef(
+    domain=ErrorDomain.BACKEND,
+    code=45,
+    severity=Severity.REMARK,
+    summary="Allocation rematerialization decision recorded.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "rematerialized value '{value_name}' for value class "
+        "'{value_class}' in '@{function_name}' after '{trigger_kind}' by "
+        "cloning {cloned_packet_count} packet(s), rewriting "
+        "{rewritten_operand_count} operand use(s), and applying reason key "
+        "'{reason_key}'"
+    ),
+    params=(
+        ErrorParam("target_key", ParamKind.STRING),
+        ErrorParam("export_name", ParamKind.STRING),
+        ErrorParam("config_key", ParamKind.STRING),
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("value_name", ParamKind.STRING),
+        ErrorParam("value_class", ParamKind.STRING),
+        ErrorParam("trigger_kind", ParamKind.STRING),
+        ErrorParam("cloned_packet_count", ParamKind.U32),
+        ErrorParam("rewritten_operand_count", ParamKind.U32),
+        ErrorParam("reason_key", ParamKind.STRING),
+    ),
+)
+
+# ERR_BACKEND_046: Allocation live-range split decision was recorded.
+ERR_BACKEND_046 = ErrorDef(
+    domain=ErrorDomain.BACKEND,
+    code=46,
+    severity=Severity.REMARK,
+    summary="Allocation live-range split decision recorded.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "split fixed value '{source_value_name}' into '{split_value_name}' "
+        "for value class '{value_class}' in '@{function_name}' after "
+        "'{trigger_kind}' by inserting {transfer_packet_count} transfer "
+        "packet(s), "
+        "rewriting {rewritten_operand_count} operand use(s), and applying "
+        "reason key '{reason_key}'"
+    ),
+    params=(
+        ErrorParam("target_key", ParamKind.STRING),
+        ErrorParam("export_name", ParamKind.STRING),
+        ErrorParam("config_key", ParamKind.STRING),
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("source_value_name", ParamKind.STRING),
+        ErrorParam("split_value_name", ParamKind.STRING),
+        ErrorParam("value_class", ParamKind.STRING),
+        ErrorParam("trigger_kind", ParamKind.STRING),
+        ErrorParam("transfer_packet_count", ParamKind.U32),
+        ErrorParam("rewritten_operand_count", ParamKind.U32),
+        ErrorParam("reason_key", ParamKind.STRING),
+    ),
+)
+
 ALL_BACKEND_ERRORS: tuple[ErrorDef, ...] = (
     ERR_BACKEND_003,
     ERR_BACKEND_005,
@@ -1156,4 +1216,6 @@ ALL_BACKEND_ERRORS: tuple[ErrorDef, ...] = (
     ERR_BACKEND_042,
     ERR_BACKEND_043,
     ERR_BACKEND_044,
+    ERR_BACKEND_045,
+    ERR_BACKEND_046,
 )

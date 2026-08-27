@@ -16,6 +16,7 @@ loom_generated_cc_library(
     loom::py::loom::gen::ops::c_tables_test_generator
   SRCS
     "canonicalize.c"
+    "condition_refinement.c"
     "facts.c"
     "registry.c"
     "symbol_facts.c"
@@ -23,13 +24,16 @@ loom_generated_cc_library(
   GENERATED_SRC_FLAGS
     "--builders"
     "--tables"
+    "--types"
   GENERATED_SRCS
     "builders.c"
     "tables.c"
+    "types.c"
   HDRS
     "facts.h"
     "ops.h"
     "registry.h"
+    "types.h"
   ARGS
     "--dialect=test"
   DEPS
@@ -39,9 +43,11 @@ loom_generated_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ir::facts
+    loom::ops::index
     loom::ops::op_defs
     loom::ops::storage_facts
     loom::ops::target
+    loom::ops::type_registry
     loom::rewrite::rewriter
     loom::target::test::target_record_table
     loom::target::types

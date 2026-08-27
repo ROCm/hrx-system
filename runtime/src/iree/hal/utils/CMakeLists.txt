@@ -81,6 +81,19 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_test(
+  NAME
+    deferred_command_buffer_test
+  SRCS
+    "deferred_command_buffer_test.cc"
+  DEPS
+    ::deferred_command_buffer
+    iree::base::internal::arena
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 iree_cc_library(
   NAME
     device_spec_builder
@@ -158,20 +171,6 @@ iree_cc_library(
     iree::base::threading
     iree::hal
     iree::io::file_handle
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
-    file_transfer
-  HDRS
-    "file_transfer.h"
-  SRCS
-    "file_transfer.c"
-  DEPS
-    iree::base
-    iree::base::internal
-    iree::hal
   PUBLIC
 )
 
@@ -288,6 +287,7 @@ iree_cc_library(
     "statistics_sink.c"
   DEPS
     iree::base
+    iree::base::internal
     iree::hal
   PUBLIC
 )

@@ -67,8 +67,7 @@ TEST_P(ZeroCopyTest, ZeroCopy_SendRecv) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &connect_op.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   ASSERT_NE(accept_op.accepted_socket, nullptr);
   iree_async_socket_t* server = accept_op.accepted_socket;
@@ -100,8 +99,7 @@ TEST_P(ZeroCopyTest, ZeroCopy_SendRecv) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   IREE_EXPECT_OK(send_tracker.ConsumeStatus());
   EXPECT_EQ(send_op.bytes_sent, send_length);

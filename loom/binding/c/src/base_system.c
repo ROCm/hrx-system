@@ -12,8 +12,7 @@ static loomc_status_t loomc_system_allocator_ctl(
     void** inout_ptr) {
   (void)self;
   iree_allocator_t allocator = iree_allocator_system();
-  return (loomc_status_t)allocator.ctl(
-      allocator.self, (iree_allocator_command_t)command, params, inout_ptr);
+  return allocator.ctl(allocator.self, command, params, inout_ptr);
 }
 
 loomc_allocator_t loomc_allocator_system(void) {

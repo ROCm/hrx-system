@@ -11,7 +11,7 @@
 #include "iree/hal/drivers/webgpu/webgpu_allocator.h"
 #include "iree/hal/drivers/webgpu/webgpu_builtins.h"
 #include "iree/hal/drivers/webgpu/webgpu_command_buffer.h"
-#include "iree/hal/drivers/webgpu/webgpu_executable_cache.h"
+#include "iree/hal/drivers/webgpu/webgpu_executable.h"
 #include "iree/hal/drivers/webgpu/webgpu_fd_file.h"
 #include "iree/hal/drivers/webgpu/webgpu_imports.h"
 #include "iree/hal/drivers/webgpu/webgpu_queue.h"
@@ -343,24 +343,15 @@ static iree_status_t iree_hal_webgpu_device_create_command_buffer(
       device->host_allocator, out_command_buffer);
 }
 
-static iree_status_t iree_hal_webgpu_device_create_event(
+static iree_status_t iree_hal_webgpu_device_load_executable(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_event_flags_t flags, iree_hal_event_t** out_event) {
-  // WebGPU commands within a single queue execute in submission order with
-  // implicit memory visibility. Events (intra-command-buffer barriers) are
-  // not needed — the command encoder provides implicit ordering.
-  return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                          "WebGPU does not support events; commands within a "
-                          "queue have implicit ordering");
-}
-
-static iree_status_t iree_hal_webgpu_device_create_executable_cache(
-    iree_hal_device_t* base_device, iree_string_view_t identifier,
-    iree_hal_executable_cache_t** out_executable_cache) {
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
+    iree_hal_executable_t** out_executable) {
   iree_hal_webgpu_device_t* device = iree_hal_webgpu_device_cast(base_device);
-  return iree_hal_webgpu_executable_cache_create(
-      device->device_handle, identifier, device->host_allocator,
-      out_executable_cache);
+  return iree_hal_webgpu_executable_create(device->device_handle, load_params,
+                                           device->host_allocator,
+                                           out_executable);
 }
 
 static iree_status_t iree_hal_webgpu_device_import_file(
@@ -376,7 +367,8 @@ static iree_status_t iree_hal_webgpu_device_import_file(
       // host allocations as GPU buffers).
       return iree_hal_memory_file_wrap(
           iree_hal_device_allocator(base_device), queue_affinity, access,
-          handle, iree_hal_device_host_allocator(base_device), out_file);
+          handle, IREE_HAL_MEMORY_FILE_FLAG_NONE,
+          iree_hal_device_host_allocator(base_device), out_file);
     case IREE_IO_FILE_HANDLE_TYPE_FD: {
       // Use WebGPU FD file — the fd is a JS file object table index, not a
       // POSIX fd. The standard fd_file uses pread/pwrite (unavailable on wasm).
@@ -557,6 +549,47 @@ static iree_status_t iree_hal_webgpu_device_queue_execute(
                                        binding_table, flags);
 }
 
+static iree_status_t iree_hal_webgpu_device_queue_atomic_wait(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_wait_params_t params) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "WebGPU devices do not support atomic waits");
+}
+
+static iree_status_t iree_hal_webgpu_device_queue_atomic_store(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_store_params_t params) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "WebGPU devices do not support atomic stores");
+}
+
+static iree_status_t iree_hal_webgpu_device_queue_atomic_rmw(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_rmw_params_t params) {
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "WebGPU devices do not support atomic read-modify-write");
+}
+
+static iree_status_t iree_hal_webgpu_device_queue_timestamp(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_timestamp_flags_t flags) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "WebGPU device-side timestamps not implemented");
+}
+
 static iree_status_t iree_hal_webgpu_device_queue_flush(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity) {
   iree_hal_webgpu_device_t* device = iree_hal_webgpu_device_cast(base_device);
@@ -603,8 +636,7 @@ static const iree_hal_device_vtable_t iree_hal_webgpu_device_vtable = {
     .assign_topology_info = iree_hal_webgpu_device_assign_topology_info,
     .create_channel = iree_hal_webgpu_device_create_channel,
     .create_command_buffer = iree_hal_webgpu_device_create_command_buffer,
-    .create_event = iree_hal_webgpu_device_create_event,
-    .create_executable_cache = iree_hal_webgpu_device_create_executable_cache,
+    .load_executable = iree_hal_webgpu_device_load_executable,
     .import_file = iree_hal_webgpu_device_import_file,
     .create_semaphore = iree_hal_webgpu_device_create_semaphore,
     .query_semaphore_compatibility =
@@ -619,6 +651,10 @@ static const iree_hal_device_vtable_t iree_hal_webgpu_device_vtable = {
     .queue_host_call = iree_hal_webgpu_device_queue_host_call,
     .queue_dispatch = iree_hal_webgpu_device_queue_dispatch,
     .queue_execute = iree_hal_webgpu_device_queue_execute,
+    .queue_atomic_wait = iree_hal_webgpu_device_queue_atomic_wait,
+    .queue_atomic_store = iree_hal_webgpu_device_queue_atomic_store,
+    .queue_atomic_rmw = iree_hal_webgpu_device_queue_atomic_rmw,
+    .queue_timestamp = iree_hal_webgpu_device_queue_timestamp,
     .queue_flush = iree_hal_webgpu_device_queue_flush,
     .profiling_begin = iree_hal_webgpu_device_profiling_begin,
     .profiling_flush = iree_hal_webgpu_device_profiling_flush,

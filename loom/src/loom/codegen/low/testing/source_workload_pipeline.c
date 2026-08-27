@@ -14,6 +14,7 @@
 #include "loom/codegen/low/lower/source_selection.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/codegen/low/pipeline/pipeline.h"
+#include "loom/codegen/low/testing/allocation_checker.h"
 #include "loom/codegen/low/verify.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
@@ -125,7 +126,7 @@ static iree_status_t loom_low_source_workload_prepare_low_functions(
           options->descriptor_registry, /*lower_policy_registry=*/NULL,
           /*legality_provider_list=*/NULL, /*legalizer_provider_list=*/NULL,
           /*math_policy_registry=*/NULL, /*compile_report=*/NULL,
-          loom_target_selection_empty(), loom_symbol_ref_null(),
+          /*target_environment=*/NULL, /*function_versions=*/NULL,
           &environment_storage);
   loom_pass_program_t program = {0};
   if (iree_status_is_ok(status)) {
@@ -211,15 +212,14 @@ iree_status_t loom_low_source_workload_run_pipeline(
       status = loom_pass_value_fact_owner_acquire(
           &value_facts, module,
           loom_pass_value_fact_scope_function_for_target(
-              selection->func, selection->target_bundle),
+              selection->func, selection->target_facts),
           &fact_table);
       if (!iree_status_is_ok(status)) {
         break;
       }
       const loom_low_lower_options_t lower_options = {
           .target_ref = selection->target_ref,
-          .bundle = selection->target_bundle,
-          .target_data = selection->target_data,
+          .target_facts = selection->target_facts,
           .descriptor_registry = options->descriptor_registry,
           .policy = selection->policy,
           .fact_table = fact_table,
@@ -291,10 +291,30 @@ iree_status_t loom_low_source_workload_run_pipeline(
       status = loom_low_emission_frame_build(
           module, lowered_funcs[i], &frame_options, &frame_arena, &frame);
       if (iree_status_is_ok(status)) {
+        loom_low_allocation_check_result_t check_result = {0};
+        status = loom_low_allocation_check_frame(&frame, &frame_arena,
+                                                 &check_result);
+        if (iree_status_is_ok(status) && check_result.violation_count != 0) {
+          const iree_string_view_t violation_name =
+              loom_low_allocation_check_violation_kind_name(
+                  check_result.first_violation.kind);
+          status = iree_make_status(
+              IREE_STATUS_INTERNAL,
+              "independent allocation check found %" PRIu32
+              " violation%s; first=%.*s primary=%" PRIu32 " secondary=%" PRIu32,
+              check_result.violation_count,
+              check_result.violation_count == 1 ? "" : "s",
+              (int)violation_name.size, violation_name.data,
+              check_result.first_violation.primary_index,
+              check_result.first_violation.secondary_index);
+        }
+      }
+      if (iree_status_is_ok(status)) {
+        ++out_counters->allocation_check_count;
         out_counters->schedule_node_count +=
             frame.schedule.scheduled_node_count;
         out_counters->schedule_dependency_count +=
-            frame.schedule.dependency_count;
+            frame.schedule.dependencies.count;
         out_counters->schedule_resource_use_count +=
             frame.schedule.resource_use_count;
         out_counters->schedule_hazard_gap_count +=

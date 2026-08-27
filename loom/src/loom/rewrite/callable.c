@@ -6,6 +6,7 @@
 
 #include "loom/rewrite/callable.h"
 
+#include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
 #include "loom/rewrite/materialize.h"
@@ -123,8 +124,9 @@ static bool loom_callable_op_is_inside_region(const loom_op_t* op,
 }
 
 static iree_status_t loom_callable_validate_inline_body(
-    const loom_op_t* call_op, loom_func_like_t callee,
-    loom_block_t** out_entry_block, loom_op_t** out_return_op) {
+    const loom_module_t* module, const loom_op_t* call_op,
+    loom_func_like_t callee, loom_block_t** out_entry_block,
+    loom_op_t** out_terminator_op) {
   loom_region_t* body = loom_func_like_body(callee);
   if (!body) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -144,13 +146,22 @@ static iree_status_t loom_callable_validate_inline_body(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "callee body has no terminator");
   }
-  loom_op_t* return_op = loom_block_op(entry_block, entry_block->op_count - 1);
-  if (!loom_func_return_isa(return_op)) {
+  loom_op_t* terminator_op =
+      loom_block_op(entry_block, entry_block->op_count - 1);
+  const uint8_t body_region_index = loom_func_like_body_region_index(callee);
+  const loom_op_vtable_t* callee_vtable = loom_op_vtable(module, callee.op);
+  const loom_region_descriptor_t* body_descriptor =
+      loom_op_vtable_region_descriptor(callee_vtable, body_region_index);
+  if (!body_descriptor ||
+      !loom_op_has_trait(module, terminator_op, LOOM_TRAIT_TERMINATOR) ||
+      (body_descriptor->terminator != LOOM_OP_KIND_UNKNOWN &&
+       terminator_op->kind != body_descriptor->terminator)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "callee body must end with func.return to inline");
+                            "callee body must end with its declared "
+                            "terminator to inline");
   }
   *out_entry_block = entry_block;
-  *out_return_op = return_op;
+  *out_terminator_op = terminator_op;
   return iree_ok_status();
 }
 
@@ -174,14 +185,18 @@ static iree_status_t loom_callable_bind_entry_args(loom_ir_remap_t* remap,
 }
 
 static iree_status_t loom_callable_resolve_return_replacements(
-    loom_rewriter_t* rewriter, loom_call_like_t call, loom_op_t* return_op,
+    loom_rewriter_t* rewriter, loom_call_like_t call, loom_op_t* terminator_op,
     loom_ir_remap_t* remap, loom_value_id_t* replacements) {
-  loom_value_slice_t return_operands = loom_func_return_operands(return_op);
+  loom_value_slice_t return_operands = {
+      .values = loom_op_operands(terminator_op),
+      .count = terminator_op->operand_count,
+  };
   loom_value_slice_t call_results_slice = loom_call_like_results(call);
   if (return_operands.count != call_results_slice.count) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
-        "func.return operand count %u does not match call result count %u",
+        "callee terminator operand count %u does not match call result count "
+        "%u",
         (unsigned)return_operands.count, (unsigned)call_results_slice.count);
   }
   for (uint16_t i = 0; i < call_results_slice.count; ++i) {
@@ -233,169 +248,6 @@ static iree_status_t loom_callable_preserve_call_result_names(
 static bool loom_callable_symbol_ref_equal(loom_symbol_ref_t a,
                                            loom_symbol_ref_t b) {
   return a.module_id == b.module_id && a.symbol_id == b.symbol_id;
-}
-
-typedef enum loom_callable_symbol_scan_mode_e {
-  LOOM_CALLABLE_SYMBOL_SCAN_EXACT,
-  LOOM_CALLABLE_SYMBOL_SCAN_OTHER,
-} loom_callable_symbol_scan_mode_t;
-
-static bool loom_callable_symbol_scan_matches(
-    loom_symbol_ref_t ref, loom_symbol_ref_t target_ref,
-    loom_callable_symbol_scan_mode_t mode) {
-  switch (mode) {
-    case LOOM_CALLABLE_SYMBOL_SCAN_EXACT:
-      return loom_callable_symbol_ref_equal(ref, target_ref);
-    case LOOM_CALLABLE_SYMBOL_SCAN_OTHER:
-      return !loom_symbol_ref_is_valid(ref) ||
-             !loom_callable_symbol_ref_equal(ref, target_ref);
-  }
-  return true;
-}
-
-static bool loom_callable_attr_may_reference_symbol_in_mode(
-    const loom_module_t* module, const loom_attribute_t* attr,
-    loom_symbol_ref_t target_ref, loom_callable_symbol_scan_mode_t mode,
-    uint8_t depth) {
-  if (!attr) return false;
-  if (depth > LOOM_ATTR_DICT_MAX_NESTING_DEPTH) return true;
-  switch ((loom_attr_kind_t)attr->kind) {
-    case LOOM_ATTR_SYMBOL:
-      return loom_callable_symbol_scan_matches(loom_attr_as_symbol(*attr),
-                                               target_ref, mode);
-    case LOOM_ATTR_DICT:
-      if (attr->count > 0 && !attr->dict_entries) return true;
-      for (uint16_t i = 0; i < attr->count; ++i) {
-        if (loom_callable_attr_may_reference_symbol_in_mode(
-                module, &attr->dict_entries[i].value, target_ref, mode,
-                (uint8_t)(depth + 1))) {
-          return true;
-        }
-      }
-      return false;
-    case LOOM_ATTR_ENCODING: {
-      const loom_encoding_t* encoding =
-          loom_module_encoding(module, attr->encoding_id);
-      if (!encoding) return true;
-      if (encoding->attribute_count > 0 && !encoding->attributes) return true;
-      for (uint8_t i = 0; i < encoding->attribute_count; ++i) {
-        if (loom_callable_attr_may_reference_symbol_in_mode(
-                module, &encoding->attributes[i].value, target_ref, mode,
-                (uint8_t)(depth + 1))) {
-          return true;
-        }
-      }
-      return false;
-    }
-    default:
-      return false;
-  }
-}
-
-static bool loom_callable_op_may_reference_symbol_in_mode(
-    const loom_module_t* module, const loom_op_t* op,
-    loom_symbol_ref_t target_ref, loom_callable_symbol_scan_mode_t mode) {
-  const loom_attribute_t* attrs = loom_op_const_attrs(op);
-  for (uint8_t i = 0; i < op->attribute_count; ++i) {
-    if (loom_callable_attr_may_reference_symbol_in_mode(module, &attrs[i],
-                                                        target_ref, mode, 0)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-static bool loom_callable_op_may_reference_symbol(
-    const loom_module_t* module, const loom_op_t* op,
-    loom_symbol_ref_t symbol_ref) {
-  return loom_callable_op_may_reference_symbol_in_mode(
-      module, op, symbol_ref, LOOM_CALLABLE_SYMBOL_SCAN_EXACT);
-}
-
-static bool loom_callable_op_may_reference_other_symbol(
-    const loom_module_t* module, const loom_op_t* op,
-    loom_symbol_ref_t ignored_symbol_ref) {
-  return loom_callable_op_may_reference_symbol_in_mode(
-      module, op, ignored_symbol_ref, LOOM_CALLABLE_SYMBOL_SCAN_OTHER);
-}
-
-static bool loom_callable_region_may_reference_other_symbol(
-    const loom_module_t* module, const loom_region_t* region,
-    loom_symbol_ref_t ignored_symbol_ref) {
-  if (!region) return false;
-  loom_block_t* block = NULL;
-  loom_region_for_each_block(region, block) {
-    const loom_op_t* op = NULL;
-    loom_block_for_each_op(block, op) {
-      if (iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) continue;
-      if (loom_callable_op_may_reference_other_symbol(module, op,
-                                                      ignored_symbol_ref)) {
-        return true;
-      }
-      loom_region_t** regions = loom_op_regions(op);
-      for (uint8_t i = 0; i < op->region_count; ++i) {
-        if (loom_callable_region_may_reference_other_symbol(
-                module, regions[i], ignored_symbol_ref)) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
-static bool loom_callable_region_may_reference_symbol_except(
-    const loom_module_t* module, const loom_region_t* region,
-    loom_symbol_ref_t symbol_ref, const loom_op_t* ignored_attr_op_a,
-    const loom_op_t* ignored_attr_op_b) {
-  if (!region) return false;
-  loom_block_t* block = NULL;
-  loom_region_for_each_block(region, block) {
-    const loom_op_t* op = NULL;
-    loom_block_for_each_op(block, op) {
-      if (iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) continue;
-      if (op != ignored_attr_op_a && op != ignored_attr_op_b &&
-          loom_callable_op_may_reference_symbol(module, op, symbol_ref)) {
-        return true;
-      }
-      loom_region_t** regions = loom_op_regions(op);
-      for (uint8_t i = 0; i < op->region_count; ++i) {
-        if (loom_callable_region_may_reference_symbol_except(
-                module, regions[i], symbol_ref, ignored_attr_op_a,
-                ignored_attr_op_b)) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
-static iree_status_t loom_callable_validate_consumable_callee(
-    const loom_module_t* module, const loom_op_t* call_op,
-    loom_func_like_t callee) {
-  loom_symbol_ref_t callee_ref = loom_func_like_callee(callee);
-  if (!loom_symbol_ref_is_valid(callee_ref) || callee_ref.module_id != 0 ||
-      callee_ref.symbol_id >= module->symbols.count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "callee symbol ref {module=%u, symbol=%u} is invalid in target module",
-        (unsigned)callee_ref.module_id, (unsigned)callee_ref.symbol_id);
-  }
-  const loom_symbol_t* symbol = &module->symbols.entries[callee_ref.symbol_id];
-  if (iree_any_bit_set(symbol->flags, LOOM_SYMBOL_FLAG_PUBLIC)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "consuming inline requires a private callee symbol");
-  }
-  if (loom_callable_region_may_reference_symbol_except(
-          module, module->body, callee_ref, call_op, callee.op)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "consuming inline requires the selected call to be the only live "
-        "callee reference");
-  }
-  return iree_ok_status();
 }
 
 static bool loom_callable_value_is_call_operand(loom_call_like_t call,
@@ -452,9 +304,9 @@ iree_status_t loom_callable_inline_call(loom_rewriter_t* rewriter,
       loom_callable_get_whole_call(rewriter->module, call_op, &call));
 
   loom_block_t* entry_block = NULL;
-  loom_op_t* return_op = NULL;
+  loom_op_t* terminator_op = NULL;
   IREE_RETURN_IF_ERROR(loom_callable_validate_inline_body(
-      call_op, callee, &entry_block, &return_op));
+      rewriter->module, call_op, callee, &entry_block, &terminator_op));
 
   loom_ir_remap_t remap = {0};
   IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
@@ -479,7 +331,7 @@ iree_status_t loom_callable_inline_call(loom_rewriter_t* rewriter,
       &rewriter->builder, entry_block, &remap, &clone_options);
   if (iree_status_is_ok(status)) {
     status = loom_callable_resolve_return_replacements(
-        rewriter, call, return_op, &remap, replacements);
+        rewriter, call, terminator_op, &remap, replacements);
   }
   loom_builder_restore(&rewriter->builder, saved_ip);
   IREE_RETURN_IF_ERROR(status);
@@ -490,9 +342,9 @@ iree_status_t loom_callable_inline_call(loom_rewriter_t* rewriter,
       rewriter, call_op, replacements, call_results.count);
 }
 
-iree_status_t loom_callable_inline_consuming_call(loom_rewriter_t* rewriter,
-                                                  loom_op_t* call_op,
-                                                  loom_func_like_t callee) {
+iree_status_t loom_callable_inline_consuming_call(
+    loom_rewriter_t* rewriter, const loom_availability_analysis_t* availability,
+    loom_op_t* call_op, loom_func_like_t callee) {
   if (!call_op->parent_block ||
       iree_any_bit_set(call_op->flags, LOOM_OP_FLAG_DEAD)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -505,13 +357,11 @@ iree_status_t loom_callable_inline_consuming_call(loom_rewriter_t* rewriter,
   loom_call_like_t call = {0};
   IREE_RETURN_IF_ERROR(
       loom_callable_get_whole_call(rewriter->module, call_op, &call));
-  IREE_RETURN_IF_ERROR(loom_callable_validate_consumable_callee(
-      rewriter->module, call_op, callee));
 
   loom_block_t* entry_block = NULL;
-  loom_op_t* return_op = NULL;
+  loom_op_t* terminator_op = NULL;
   IREE_RETURN_IF_ERROR(loom_callable_validate_inline_body(
-      call_op, callee, &entry_block, &return_op));
+      rewriter->module, call_op, callee, &entry_block, &terminator_op));
 
   loom_ir_remap_options_t remap_options = {
       .allow_unmapped_values = true,
@@ -530,13 +380,13 @@ iree_status_t loom_callable_inline_consuming_call(loom_rewriter_t* rewriter,
         (void**)&replacements));
   }
   IREE_RETURN_IF_ERROR(loom_callable_resolve_return_replacements(
-      rewriter, call, return_op, &remap, replacements));
+      rewriter, call, terminator_op, &remap, replacements));
 
   loom_ir_move_block_options_t move_options = {
       .omit_terminators = true,
   };
   IREE_RETURN_IF_ERROR(loom_ir_move_block_ops_before(
-      rewriter, entry_block, call_op, &remap, &move_options));
+      rewriter, availability, entry_block, call_op, &remap, &move_options));
   IREE_RETURN_IF_ERROR(loom_callable_preserve_consuming_call_result_names(
       rewriter, call, replacements, call_results.count));
   IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
@@ -552,131 +402,72 @@ iree_status_t loom_callable_inline_direct_call(loom_rewriter_t* rewriter,
   return loom_callable_inline_call(rewriter, call_op, callee);
 }
 
-iree_status_t loom_callable_inline_consuming_direct_call(
-    loom_rewriter_t* rewriter, loom_op_t* call_op) {
-  loom_func_like_t callee = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_callable_resolve_direct_callee(rewriter->module, call_op, &callee));
-  return loom_callable_inline_consuming_call(rewriter, call_op, callee);
-}
+typedef struct loom_callable_clone_symbol_state_t {
+  // Source function symbol replaced during cloning.
+  loom_symbol_ref_t source_ref;
 
-typedef struct loom_callable_import_symbol_state_t {
-  // Source-module symbol ref of the callable being imported.
-  loom_symbol_ref_t source_callee_ref;
-  // Target-module symbol ref created for the imported callable.
-  loom_symbol_ref_t target_callee_ref;
-  // Optional caller policy for non-callee source symbol refs.
-  loom_ir_remap_symbol_callback_t external_symbol_remap;
-} loom_callable_import_symbol_state_t;
+  // Target function symbol replacing |source_ref|.
+  loom_symbol_ref_t target_ref;
+} loom_callable_clone_symbol_state_t;
 
-static iree_status_t loom_callable_import_remap_symbol(
+static iree_status_t loom_callable_clone_remap_symbol(
     void* user_data, const loom_module_t* source_module,
     loom_module_t* target_module, loom_symbol_ref_t source_ref,
     loom_symbol_ref_t* out_target_ref) {
-  loom_callable_import_symbol_state_t* state =
-      (loom_callable_import_symbol_state_t*)user_data;
-  if (loom_callable_symbol_ref_equal(source_ref, state->source_callee_ref)) {
-    *out_target_ref = state->target_callee_ref;
-    return iree_ok_status();
-  }
-  if (!state->external_symbol_remap.fn) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "callable import encountered an unresolved external symbol reference");
-  }
-  return state->external_symbol_remap.fn(state->external_symbol_remap.user_data,
-                                         source_module, target_module,
-                                         source_ref, out_target_ref);
+  (void)source_module;
+  (void)target_module;
+  const loom_callable_clone_symbol_state_t* state =
+      (const loom_callable_clone_symbol_state_t*)user_data;
+  *out_target_ref =
+      loom_callable_symbol_ref_equal(source_ref, state->source_ref)
+          ? state->target_ref
+          : source_ref;
+  return iree_ok_status();
 }
 
-iree_status_t loom_callable_import_definition(
-    loom_builder_t* builder, const loom_module_t* source_module,
-    loom_func_like_t source, const loom_callable_import_options_t* options,
-    loom_func_like_t* out_imported, iree_arena_allocator_t* scratch_arena) {
-  *out_imported = (loom_func_like_t){0};
-  if (!loom_func_like_isa(source) || !source.op ||
-      iree_any_bit_set(source.op->flags, LOOM_OP_FLAG_DEAD)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "source must be a live function-like op");
-  }
-  loom_symbol_ref_t source_ref = loom_func_like_callee(source);
-  if (!loom_symbol_ref_is_valid(source_ref) || source_ref.module_id != 0 ||
-      source_ref.symbol_id >= source_module->symbols.count) {
+iree_status_t loom_callable_clone_definition(
+    loom_builder_t* builder, loom_func_like_t source,
+    loom_symbol_ref_t target_ref, loom_func_like_t* out_cloned,
+    iree_arena_allocator_t* scratch_arena) {
+  *out_cloned = (loom_func_like_t){0};
+  IREE_RETURN_IF_ERROR(
+      loom_callable_validate_same_module_callee(builder->module, source));
+  if (!loom_symbol_ref_is_valid(target_ref) || target_ref.module_id != 0 ||
+      target_ref.symbol_id >= builder->module->symbols.count) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "source symbol ref {module=%u, symbol=%u} is invalid",
-        (unsigned)source_ref.module_id, (unsigned)source_ref.symbol_id);
+        "target symbol ref {module=%u, symbol=%u} is invalid",
+        (unsigned)target_ref.module_id, (unsigned)target_ref.symbol_id);
   }
-  const loom_symbol_t* source_symbol =
-      &source_module->symbols.entries[source_ref.symbol_id];
-  if (source_symbol->name_id == LOOM_STRING_ID_INVALID ||
-      source_symbol->name_id >= source_module->strings.count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "source symbol name id %u is invalid",
-                            (unsigned)source_symbol->name_id);
-  }
-  if (source_symbol->defining_op != source.op) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "source symbol does not point at the requested callable");
-  }
-  if (!options || !options->external_symbol_remap.fn) {
-    if (loom_callable_op_may_reference_other_symbol(source_module, source.op,
-                                                    source_ref)) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "callable import requires an external symbol policy for non-callee "
-          "symbol references");
-    }
-    loom_region_t** regions = loom_op_regions(source.op);
-    for (uint8_t i = 0; i < source.op->region_count; ++i) {
-      if (loom_callable_region_may_reference_other_symbol(
-              source_module, regions[i], source_ref)) {
-        return iree_make_status(
-            IREE_STATUS_FAILED_PRECONDITION,
-            "callable import requires an external symbol policy for "
-            "non-callee symbol references");
-      }
-    }
-  }
-
-  iree_string_view_t source_name =
-      source_module->strings.entries[source_symbol->name_id];
-  loom_string_id_t target_name_id = LOOM_STRING_ID_INVALID;
-  IREE_RETURN_IF_ERROR(
-      loom_module_intern_string(builder->module, source_name, &target_name_id));
-  if (loom_module_find_symbol(builder->module, target_name_id) !=
-      LOOM_SYMBOL_ID_INVALID) {
+  loom_symbol_t* target_symbol =
+      &builder->module->symbols.entries[target_ref.symbol_id];
+  if (target_symbol->defining_op != NULL) {
     return iree_make_status(IREE_STATUS_ALREADY_EXISTS,
-                            "target module already has a symbol named %.*s",
-                            (int)source_name.size, source_name.data);
+                            "target symbol already has a defining op");
   }
 
-  uint16_t target_symbol_id = LOOM_SYMBOL_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_module_add_symbol(builder->module, target_name_id,
-                                              &target_symbol_id));
-  loom_callable_import_symbol_state_t symbol_state = {
-      .source_callee_ref = source_ref,
-      .target_callee_ref = {.module_id = 0, .symbol_id = target_symbol_id},
-      .external_symbol_remap = options ? options->external_symbol_remap
-                                       : loom_ir_remap_symbol_callback_empty(),
+  loom_callable_clone_symbol_state_t symbol_state = {
+      .source_ref = loom_func_like_callee(source),
+      .target_ref = target_ref,
   };
-  loom_ir_remap_options_t remap_options = {
+  const loom_ir_remap_options_t remap_options = {
       .remap_symbol = loom_ir_remap_symbol_callback_make(
-          loom_callable_import_remap_symbol, &symbol_state),
+          loom_callable_clone_remap_symbol, &symbol_state),
+      .remap_same_module_symbols = true,
   };
   loom_ir_remap_t remap = {0};
   IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
-      source_module, builder->module, scratch_arena, &remap_options, &remap));
+      builder->module, builder->module, scratch_arena, &remap_options, &remap));
 
-  loom_op_t* imported_op = NULL;
+  loom_op_t* cloned_op = NULL;
   IREE_RETURN_IF_ERROR(
-      loom_ir_clone_op(builder, source.op, &remap, &imported_op));
-  loom_func_like_t imported = loom_func_like_cast(builder->module, imported_op);
-  if (!loom_func_like_isa(imported)) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "imported op is not function-like after cloning");
+      loom_ir_clone_op(builder, source.op, &remap, &cloned_op));
+  loom_func_like_t cloned = loom_func_like_cast(builder->module, cloned_op);
+  if (!loom_func_like_isa(cloned) || target_symbol->defining_op != cloned_op) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "cloned function did not bind the requested target symbol");
   }
-  *out_imported = imported;
+  *out_cloned = cloned;
   return iree_ok_status();
 }

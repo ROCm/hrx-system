@@ -1,0 +1,12 @@
+// Attaches logical matrix roles and dimensions to physical carrier vectors,
+// then states one target-independent matrix multiply-accumulate.
+func.def @matrix_tile(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %acc_values: vector<8xf32>) -> (vector<8xf32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
+  %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xbf16>
+  %init = vector.fragment<init> %acc_values shape [%m, %n] : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  func.return %result : vector<8xf32>
+}

@@ -17,6 +17,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/string_builder.h"
+#include "loom/ir/scalar_type.h"
 #include "loom/target/types.h"
 #include "loom/util/bstring.h"
 
@@ -25,7 +26,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 26u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 36u
 
 // Sentinel for absent string-table offsets.
 #define LOOM_LOW_STRING_OFFSET_NONE LOOM_BSTRING_TABLE_OFFSET_NONE
@@ -45,6 +46,9 @@ extern "C" {
 // Sentinel for absent asm-form ordinals.
 #define LOOM_LOW_ASM_FORM_ORDINAL_NONE UINT32_MAX
 
+// Sentinel for asm forms without exact semantic result value types.
+#define LOOM_LOW_ASM_RESULT_VALUE_TYPE_START_NONE UINT32_MAX
+
 // Sentinel used before verification; verified descriptors must name a class.
 #define LOOM_LOW_SCHEDULE_CLASS_NONE UINT16_MAX
 
@@ -60,7 +64,9 @@ extern "C" {
 // Sentinel for absent resources.
 #define LOOM_LOW_RESOURCE_NONE UINT16_MAX
 
-typedef enum loom_low_operand_role_e {
+typedef uint8_t loom_low_operand_role_t;
+
+enum loom_low_operand_role_e {
   // Unknown or uninitialized operand role.
   LOOM_LOW_OPERAND_ROLE_UNKNOWN = 0,
   // SSA result defined by the descriptor.
@@ -75,12 +81,34 @@ typedef enum loom_low_operand_role_e {
   LOOM_LOW_OPERAND_ROLE_RESOURCE = 5,
   // Target-owned implicit architectural operand.
   LOOM_LOW_OPERAND_ROLE_IMPLICIT = 6,
-} loom_low_operand_role_t;
+};
+
+// Canonical source binding compiled from descriptor operand field names.
+// Dynamic contract adapters use this instead of inspecting target-owned text.
+typedef uint8_t loom_low_operand_source_binding_t;
+
+enum loom_low_operand_source_binding_e {
+  // The operand has no canonical dynamic source binding.
+  LOOM_LOW_OPERAND_SOURCE_BINDING_NONE = 0,
+  // Left-hand contraction input.
+  LOOM_LOW_OPERAND_SOURCE_BINDING_LHS = 1,
+  // Right-hand contraction input.
+  LOOM_LOW_OPERAND_SOURCE_BINDING_RHS = 2,
+  // Contraction accumulator input.
+  LOOM_LOW_OPERAND_SOURCE_BINDING_ACCUMULATOR = 3,
+  // Sparse contraction metadata or index input.
+  LOOM_LOW_OPERAND_SOURCE_BINDING_SPARSE_METADATA = 4,
+  // Scale associated with the left-hand contraction input.
+  LOOM_LOW_OPERAND_SOURCE_BINDING_LHS_SCALE = 5,
+  // Scale associated with the right-hand contraction input.
+  LOOM_LOW_OPERAND_SOURCE_BINDING_RHS_SCALE = 6,
+};
 
 typedef enum loom_low_operand_address_map_kind_e {
   // Operand can directly address any unit assigned by its register class.
   LOOM_LOW_OPERAND_ADDRESS_MAP_DIRECT = 0,
-  // Operand directly encodes only the low |addressable_unit_count| units.
+  // Operand directly encodes only the low |addressable_unit_count| units. A
+  // nonzero address-state slot also requires that slot's low window.
   LOOM_LOW_OPERAND_ADDRESS_MAP_LOW_SUBSET = 1,
   // Operand encodes a low window selected by target-owned address state.
   LOOM_LOW_OPERAND_ADDRESS_MAP_TARGET_STATE = 2,
@@ -92,9 +120,9 @@ typedef uint16_t loom_low_operand_flags_t;
 // Operand is omitted from the target assembly spelling but participates in low
 // semantics. Rows with role IMPLICIT are also omitted from low packet operands.
 #define LOOM_LOW_OPERAND_FLAG_IMPLICIT ((uint16_t)1u << 0)
-// Operand is tied to another operand by a constraint row.
+// Operand shares packet storage identity with another operand through a tie.
 #define LOOM_LOW_OPERAND_FLAG_TIED ((uint16_t)1u << 1)
-// Operand must be considered early-clobbered by allocation.
+// Result storage begins in the packet Pre phase before untied input reads end.
 #define LOOM_LOW_OPERAND_FLAG_EARLY_CLOBBER ((uint16_t)1u << 2)
 // Operand is optional for some descriptor forms.
 #define LOOM_LOW_OPERAND_FLAG_OPTIONAL ((uint16_t)1u << 3)
@@ -105,6 +133,18 @@ typedef uint16_t loom_low_operand_flags_t;
 // Operand reads implicit state that constrains scheduling but is not a hidden
 // value dependency for generic CSE identity.
 #define LOOM_LOW_OPERAND_FLAG_SCHEDULE_ONLY_STATE ((uint16_t)1u << 6)
+// Result may be safely rematerialized near each use. The descriptor generator
+// derives this projection after validating the result constraint, packet
+// effects, descriptor flags, and target-state behavior.
+#define LOOM_LOW_OPERAND_FLAG_REMATERIALIZABLE ((uint16_t)1u << 7)
+// Operand participates in a tied partial-write chain. The packet preserves the
+// disjoint register parts supplied by the tied input without reading them for
+// execution, and writes only the result's declared register part. The source
+// establishes issue order and storage identity but not completion dependence.
+#define LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION ((uint16_t)1u << 8)
+// Operand row describes zero or more trailing packet operands. Variadic rows
+// are explicit packet operands and must terminate the descriptor operand list.
+#define LOOM_LOW_OPERAND_FLAG_VARIADIC ((uint16_t)1u << 9)
 
 // Bitset of register-class alternative flags.
 typedef uint16_t loom_low_reg_class_alt_flags_t;
@@ -257,7 +297,7 @@ typedef enum loom_low_constraint_kind_e {
   LOOM_LOW_CONSTRAINT_KIND_COMMUTABLE = 2,
   // Operand is destructively updated.
   LOOM_LOW_CONSTRAINT_KIND_DESTRUCTIVE = 3,
-  // Operand or result has early-clobber allocation semantics.
+  // Result storage begins before the packet has consumed all untied inputs.
   LOOM_LOW_CONSTRAINT_KIND_EARLY_CLOBBER = 4,
   // Descriptor may be rematerialized instead of spilled.
   LOOM_LOW_CONSTRAINT_KIND_REMATERIALIZABLE = 5,
@@ -345,6 +385,12 @@ typedef enum loom_low_resource_kind_e {
 // Bitset of resource flags.
 typedef uint16_t loom_low_resource_flags_t;
 
+// Instructions issuing on this resource advance a target vector-issue stream.
+#define LOOM_LOW_RESOURCE_FLAG_VECTOR_ISSUE ((uint16_t)1u << 0)
+// Instructions issuing on this resource establish matrix/vector coexecution
+// operand-retention state.
+#define LOOM_LOW_RESOURCE_FLAG_MATRIX_COEXECUTION_SOURCE ((uint16_t)1u << 1)
+
 typedef enum loom_low_hazard_kind_e {
   // Unknown or uninitialized hazard kind.
   LOOM_LOW_HAZARD_KIND_UNKNOWN = 0,
@@ -383,6 +429,74 @@ typedef uint16_t loom_low_descriptor_flags_t;
 #define LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE ((uint16_t)1u << 2)
 // Descriptor is a Loom pseudo packet that requires target lowering.
 #define LOOM_LOW_DESCRIPTOR_FLAG_PSEUDO ((uint16_t)1u << 3)
+// Descriptor carries a barrier effect and fences source-order scheduling.
+#define LOOM_LOW_DESCRIPTOR_FLAG_BARRIER ((uint16_t)1u << 4)
+// Descriptor has at least one result whose storage begins in the packet Pre
+// phase before untied input reads end.
+#define LOOM_LOW_DESCRIPTOR_FLAG_EARLY_CLOBBER ((uint16_t)1u << 5)
+// Descriptor ends in a variadic packet operand row.
+#define LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS ((uint16_t)1u << 6)
+
+// Target-neutral semantic classes attached to generated low descriptors.
+// Multiple classes may be present when a packet contributes to several
+// aggregates, such as a buffer load also contributing global-memory work.
+typedef uint32_t loom_low_instruction_class_flags_t;
+
+// Descriptor is intentionally outside the classified instruction families.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_OTHER ((uint32_t)1u << 0)
+// Descriptor contributes scalar ALU work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_SCALAR_ALU ((uint32_t)1u << 1)
+// Descriptor contributes vector ALU work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_VECTOR_ALU ((uint32_t)1u << 2)
+// Descriptor contributes matrix or tensor-core-like work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_MATRIX ((uint32_t)1u << 3)
+// Descriptor contributes MFMA-family matrix work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_MFMA ((uint32_t)1u << 4)
+// Descriptor contributes scaled MFMA-family matrix work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_SMFMAC ((uint32_t)1u << 5)
+// Descriptor contributes WMMA-family matrix work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_WMMA ((uint32_t)1u << 6)
+// Descriptor contributes scaled WMMA-family matrix work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_SWMMAC ((uint32_t)1u << 7)
+// Descriptor contributes dot-product work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_DOT ((uint32_t)1u << 8)
+// Descriptor contributes global-memory work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_GLOBAL_MEMORY ((uint32_t)1u << 9)
+// Descriptor is a raw global-load-family memory instruction.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_GLOBAL_LOAD ((uint32_t)1u << 10)
+// Descriptor is a raw global-store-family memory instruction.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_GLOBAL_STORE ((uint32_t)1u << 11)
+// Descriptor is a resource-buffer-load-family memory instruction.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_BUFFER_LOAD ((uint32_t)1u << 12)
+// Descriptor is a resource-buffer-store-family memory instruction.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_BUFFER_STORE ((uint32_t)1u << 13)
+// Descriptor is a flat-memory-family instruction.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_FLAT_MEMORY ((uint32_t)1u << 14)
+// Descriptor contributes local, shared, or workgroup-memory work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_LOCAL_MEMORY ((uint32_t)1u << 15)
+// Descriptor contributes scalar-memory work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_SCALAR_MEMORY ((uint32_t)1u << 16)
+// Descriptor contributes private or stack-memory work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_PRIVATE_MEMORY ((uint32_t)1u << 17)
+// Descriptor contributes memory work without a more specific family.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_GENERIC_MEMORY ((uint32_t)1u << 18)
+// Descriptor contributes atomic-memory work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_ATOMIC ((uint32_t)1u << 19)
+// Descriptor contributes a branch, return, or call control transfer.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_BRANCH ((uint32_t)1u << 20)
+// Descriptor contributes barrier or synchronization work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_BARRIER ((uint32_t)1u << 21)
+// Descriptor contributes control-flow or other control work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_CONTROL ((uint32_t)1u << 22)
+// Descriptor contributes numeric conversion work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_CONVERSION ((uint32_t)1u << 23)
+// Descriptor contributes cache maintenance or prefetch work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_CACHE ((uint32_t)1u << 24)
+// Descriptor contributes register-move or repair work.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_REGISTER_MOVE ((uint32_t)1u << 25)
+// Descriptor moves device memory directly to workgroup memory through a DMA
+// path that also advances a target vector issue stream.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_LDSDMA ((uint32_t)1u << 26)
 
 typedef struct loom_low_reg_class_t {
   // String-table offset for the stable register-class name.
@@ -395,7 +509,13 @@ typedef struct loom_low_reg_class_t {
   uint16_t alloc_unit_bits;
   // Allocatable units in this class, or zero when virtual/unbounded.
   uint16_t allocatable_count;
-  // Alias-set identifier shared by overlapping register classes.
+  // First non-allocatable physical location available only to ABI-fixed values.
+  uint16_t fixed_location_base;
+  // Number of contiguous ABI-fixed physical locations at
+  // |fixed_location_base|, or zero when none exist.
+  uint16_t fixed_location_count;
+  // Dense one-based alias-set identifier shared by overlapping register
+  // classes, or zero when this class has a disjoint storage namespace.
   uint16_t alias_set_id;
   // Register class used for spill/reload values, or LOOM_LOW_REG_CLASS_NONE.
   uint16_t spill_class_id;
@@ -404,6 +524,19 @@ typedef struct loom_low_reg_class_t {
   // Storage space used when values from this class are spilled.
   uint8_t spill_slot_space;
 } loom_low_reg_class_t;
+
+// Returns true when the non-empty physical range is wholly contained in the
+// register class's non-allocatable ABI-fixed location window.
+static inline bool loom_low_reg_class_fixed_location_range_contains(
+    const loom_low_reg_class_t* reg_class, uint32_t location_base,
+    uint32_t location_count) {
+  const uint64_t fixed_location_end = (uint64_t)reg_class->fixed_location_base +
+                                      reg_class->fixed_location_count;
+  const uint64_t location_end = (uint64_t)location_base + location_count;
+  return location_count != 0 && reg_class->fixed_location_count != 0 &&
+         location_base >= reg_class->fixed_location_base &&
+         location_end <= fixed_location_end;
+}
 
 typedef struct loom_low_register_part_t {
   // String-table offset for the stable register-part name.
@@ -429,8 +562,15 @@ typedef struct loom_low_operand_t {
   // Target-owned encoding field identifier, or zero when this operand does not
   // directly populate a binary encoding field.
   uint16_t encoding_field_id;
+  // Result or packet operand index supplying this value, or LOOM_LOW_ID_NONE
+  // for target-owned implicit state.
+  uint16_t source_value_index;
   // Semantic role this operand row plays.
   loom_low_operand_role_t role;
+  // Canonical source binding for dynamic contract adapters.
+  loom_low_operand_source_binding_t source_binding;
+  // Reserved bytes preserving the compact operand row layout.
+  uint16_t reserved0;
   // Operand flags used by verifier, allocator, and emitter.
   loom_low_operand_flags_t flags;
   // First register-class alternative row for this operand.
@@ -444,6 +584,11 @@ typedef struct loom_low_operand_t {
   // Directly addressable low units for bounded address maps, or zero when the
   // map directly addresses the selected register class.
   uint16_t addressable_unit_count;
+  // Target-owned state slot controlling the encoded address window. For a
+  // target-state map it selects the assigned window; for a low-subset map it
+  // requires the low window. Zero means the operand does not participate in
+  // target address state.
+  uint16_t address_state_slot;
   // Target-owned data-format identifier.
   uint16_t data_format_id;
   // Register part read or written by this operand, or NONE for full register.
@@ -453,6 +598,17 @@ typedef struct loom_low_operand_t {
   // Scheduling stage where the operand result becomes ready.
   uint16_t ready_stage;
 } loom_low_operand_t;
+
+static_assert(sizeof(loom_low_operand_t) == 36,
+              "low descriptor operand rows must remain compact");
+static_assert(offsetof(loom_low_operand_t, source_value_index) == 6,
+              "source value index must occupy the existing layout padding");
+static_assert(offsetof(loom_low_operand_t, role) == 8,
+              "operand role must not move following descriptor fields");
+static_assert(offsetof(loom_low_operand_t, source_binding) == 9,
+              "source binding must occupy operand role padding");
+static_assert(offsetof(loom_low_operand_t, flags) == 12,
+              "source binding must not move operand flags");
 
 typedef struct loom_low_immediate_t {
   // String-table offset for the immediate field name.
@@ -533,6 +689,18 @@ typedef struct loom_low_effect_t {
   // Access width in bits, or zero when not width-specific.
   uint16_t width_bits;
 } loom_low_effect_t;
+
+// Summary of descriptor memory effect widths.
+typedef struct loom_low_descriptor_memory_effect_summary_t {
+  // Byte width of descriptor read effects with byte-aligned known widths.
+  uint32_t read_byte_count;
+  // Byte width of descriptor write effects with byte-aligned known widths.
+  uint32_t write_byte_count;
+  // Number of descriptor read effects without known byte-aligned widths.
+  uint16_t read_unknown_width_count;
+  // Number of descriptor write effects without known byte-aligned widths.
+  uint16_t write_unknown_width_count;
+} loom_low_descriptor_memory_effect_summary_t;
 
 typedef struct loom_low_descriptor_storage_lease_t {
   // Target-visible lease kind.
@@ -628,6 +796,10 @@ typedef struct loom_low_schedule_class_t {
   loom_bstring_table_offset_t name_string_offset;
   // Latency in cycles when latency_kind is exact or estimated.
   uint16_t latency_cycles;
+  // Scheduler dependency distance in cycles, or zero to use latency_cycles.
+  // This permits target models to keep hardware dependency latency separate
+  // from a conservative readiness distance used only for instruction order.
+  uint16_t schedule_distance_cycles;
   // Latency interpretation for scheduling and diagnostics.
   loom_low_latency_kind_t latency_kind;
   // First issue-use row for this schedule class.
@@ -647,6 +819,23 @@ typedef struct loom_low_schedule_class_t {
   // Number of pressure-delta rows for this schedule class.
   uint16_t pressure_delta_count;
 } loom_low_schedule_class_t;
+
+// Returns the scheduler dependency distance for |schedule_class|.
+// A zero override preserves the historical latency_cycles behavior.
+static inline uint16_t loom_low_schedule_class_schedule_distance_cycles(
+    const loom_low_schedule_class_t* schedule_class) {
+  if (schedule_class == NULL) return 0;
+  return schedule_class->schedule_distance_cycles != 0
+             ? schedule_class->schedule_distance_cycles
+             : schedule_class->latency_cycles;
+}
+
+typedef enum loom_low_descriptor_op_kind_e {
+  // Descriptor packets use the general low.op representation.
+  LOOM_LOW_DESCRIPTOR_OP_KIND_OP = 0,
+  // Descriptor packets use the operandless, single-result low.const form.
+  LOOM_LOW_DESCRIPTOR_OP_KIND_CONST = 1,
+} loom_low_descriptor_op_kind_t;
 
 typedef struct loom_low_descriptor_t {
   // String-table offset for the stable descriptor key.
@@ -678,6 +867,9 @@ typedef struct loom_low_descriptor_t {
   uint16_t operand_count;
   // Number of leading operand rows that define results.
   uint16_t result_count;
+  // Minimum packet operand count. Fixed descriptors accept exactly this count;
+  // variadic descriptors accept this count or greater.
+  uint16_t minimum_packet_operand_count;
   // First immediate row for this descriptor.
   uint32_t immediate_start;
   // Number of immediate rows for this descriptor.
@@ -702,10 +894,17 @@ typedef struct loom_low_descriptor_t {
   uint16_t schedule_class_id;
   // Descriptor flags used by verifier, scheduler, and optimizer.
   loom_low_descriptor_flags_t flags;
+  // Canonical low IR operation used to represent this descriptor packet.
+  loom_low_descriptor_op_kind_t op_kind;
+  // Generated target-neutral semantic instruction classes.
+  loom_low_instruction_class_flags_t instruction_class_flags;
   // Unique canonical asm form ordinal for descriptor-driven text emission, or
   // LOOM_LOW_ASM_FORM_ORDINAL_NONE when no unambiguous form exists.
   uint32_t canonical_asm_form_ordinal;
 } loom_low_descriptor_t;
+
+static_assert(sizeof(loom_low_descriptor_t) == 112,
+              "loom_low_descriptor_t must be 112 bytes");
 
 typedef struct loom_low_operand_form_match_t {
   // Descriptor-local operand index whose value facts select this form.
@@ -771,6 +970,10 @@ typedef enum loom_low_native_asm_value_kind_e {
   LOOM_LOW_NATIVE_ASM_VALUE_KIND_IMMEDIATE_UNSIGNED_HEX = 5,
   // Descriptor-local immediate printed by a target-owned native format.
   LOOM_LOW_NATIVE_ASM_VALUE_KIND_IMMEDIATE_TARGET_FORMAT = 6,
+  // Descriptor operand printed with its target register-part spelling.
+  LOOM_LOW_NATIVE_ASM_VALUE_KIND_REGISTER_PART = 7,
+  // Fixed native assembly modifier separated by whitespace.
+  LOOM_LOW_NATIVE_ASM_VALUE_KIND_MODIFIER_LITERAL = 8,
 } loom_low_native_asm_value_kind_t;
 
 typedef struct loom_low_native_asm_value_t {
@@ -786,6 +989,61 @@ typedef struct loom_low_native_asm_value_t {
   loom_bstring_table_offset_t literal_string_offset;
 } loom_low_native_asm_value_t;
 
+enum loom_low_asm_result_value_type_kind_e {
+  // No exact semantic type is inferred for this result.
+  LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_NONE = 0,
+  // Scalar semantic result type.
+  LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_SCALAR = 1,
+  // Static rank-1 vector semantic result type.
+  LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_VECTOR = 2,
+};
+typedef uint8_t loom_low_asm_result_value_type_kind_t;
+
+// Exact semantic value type reconstructed for one target-asm result.
+typedef struct loom_low_asm_result_value_type_t {
+  // Shape category of the inferred semantic value type.
+  loom_low_asm_result_value_type_kind_t kind;
+  // Scalar type or vector element type.
+  loom_scalar_type_t element_type;
+  // Static vector lane count, or zero for scalar and absent rows.
+  uint16_t vector_lane_count;
+} loom_low_asm_result_value_type_t;
+
+static_assert(sizeof(loom_low_asm_result_value_type_t) == 4,
+              "loom_low_asm_result_value_type_t must be 4 bytes");
+
+enum loom_low_asm_operand_segment_delimiter_e {
+  // Unknown or uninitialized operand segment delimiter.
+  LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_UNKNOWN = 0,
+  // Angle brackets: `<...>`.
+  LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_ANGLE = 1,
+  // Square brackets: `[...]`.
+  LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_SQUARE = 2,
+  // Parentheses: `(...)`.
+  LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_PAREN = 3,
+};
+typedef uint8_t loom_low_asm_operand_segment_delimiter_t;
+
+// Bitset of compact Low asm operand segment flags.
+typedef uint8_t loom_low_asm_operand_segment_flags_t;
+
+// The final operand row in the segment repeats over the remaining packet
+// operand suffix and may have zero instances.
+#define LOOM_LOW_ASM_OPERAND_SEGMENT_FLAG_VARIADIC ((uint8_t)1u << 0)
+
+typedef struct loom_low_asm_operand_segment_t {
+  // Number of descriptor operand rows in the segment. A variadic final row is
+  // included once in this count as its schema template.
+  uint16_t operand_count;
+  // Delimiter pair enclosing the segment.
+  loom_low_asm_operand_segment_delimiter_t delimiter;
+  // Segment flags controlling packet operand cardinality.
+  loom_low_asm_operand_segment_flags_t flags;
+} loom_low_asm_operand_segment_t;
+
+static_assert(sizeof(loom_low_asm_operand_segment_t) == 4,
+              "loom_low_asm_operand_segment_t must be 4 bytes");
+
 typedef struct loom_low_asm_form_t {
   // String-table offset for the unqualified asm mnemonic.
   loom_bstring_table_offset_t mnemonic_string_offset;
@@ -795,21 +1053,30 @@ typedef struct loom_low_asm_form_t {
   uint32_t descriptor_ordinal;
   // First descriptor-local result operand index in asm_operand_indices.
   uint32_t result_operand_index_start;
-  // Number of result operand indices for this asm form.
-  uint16_t result_operand_index_count;
+  // First exact semantic result row, or START_NONE when none are declared.
+  uint32_t result_value_type_start;
   // First descriptor-local input operand index in asm_operand_indices.
   uint32_t operand_index_start;
-  // Number of input operand indices for this asm form.
-  uint16_t operand_index_count;
+  // First delimited input operand segment row.
+  uint32_t operand_segment_start;
   // First immediate spelling row for this asm form.
   uint32_t immediate_start;
-  // Number of immediate spelling rows for this asm form.
-  uint16_t immediate_count;
   // First native assembly value row for this asm form.
   uint32_t native_assembly_value_start;
+  // Number of result operand indices for this asm form.
+  uint16_t result_operand_index_count;
+  // Number of input operand indices for this asm form.
+  uint16_t operand_index_count;
+  // Number of delimited input operand segments for this asm form.
+  uint16_t operand_segment_count;
+  // Number of immediate spelling rows for this asm form.
+  uint16_t immediate_count;
   // Number of native assembly value rows for this asm form.
   uint16_t native_assembly_value_count;
 } loom_low_asm_form_t;
+
+static_assert(sizeof(loom_low_asm_form_t) == 48,
+              "loom_low_asm_form_t must be 48 bytes");
 
 typedef struct loom_low_descriptor_set_t {
   // Descriptor table ABI version.
@@ -820,6 +1087,11 @@ typedef struct loom_low_descriptor_set_t {
   uint64_t stable_id;
   // Durable target-family identity derived from the target-family key, or NONE.
   uint64_t target_stable_id;
+  // Native target-contract identities supported by this representation
+  // contract in addition to its own stable identity.
+  const uint64_t* supported_target_contract_stable_ids;
+  // Number of identities in |supported_target_contract_stable_ids|.
+  uint16_t supported_target_contract_count;
   // Target-generated dense descriptor-set ordinal, or NONE when this set is not
   // part of a target-owned dense descriptor-set table.
   uint16_t descriptor_set_ordinal;
@@ -847,6 +1119,14 @@ typedef struct loom_low_descriptor_set_t {
   const uint16_t* asm_operand_indices;
   // Number of descriptor-local operand index rows owned by this set.
   uint32_t asm_operand_index_count;
+  // Packed delimited operand segments referenced by asm forms.
+  const loom_low_asm_operand_segment_t* asm_operand_segments;
+  // Number of operand segment rows owned by this set.
+  uint32_t asm_operand_segment_count;
+  // Packed exact semantic result rows referenced by asm forms.
+  const loom_low_asm_result_value_type_t* asm_result_value_types;
+  // Number of exact semantic result rows owned by this set.
+  uint32_t asm_result_value_type_count;
   // Packed immediate spelling rows referenced by asm forms.
   const loom_low_asm_immediate_t* asm_immediates;
   // Number of immediate spelling rows owned by this set.
@@ -1022,6 +1302,12 @@ const loom_low_descriptor_t* loom_low_descriptor_set_descriptor_at(
     const loom_low_descriptor_set_t* descriptor_set,
     uint32_t descriptor_ordinal);
 
+// Summarizes byte-aligned memory effect widths for |descriptor|.
+loom_low_descriptor_memory_effect_summary_t
+loom_low_descriptor_memory_effect_summary(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor);
+
 // Returns the descriptor-set-local ordinal for |descriptor|, or
 // LOOM_LOW_DESCRIPTOR_ORDINAL_NONE when |descriptor| is not a row in
 // |descriptor_set|.
@@ -1031,6 +1317,16 @@ uint32_t loom_low_descriptor_set_descriptor_ordinal(
 
 // Returns the durable descriptor identity derived from a descriptor key.
 uint64_t loom_low_descriptor_stable_id_from_key(iree_string_view_t key);
+
+// Returns whether |descriptor_set| can represent low IR for the native target
+// descriptor contract named by |target_contract_key|.
+//
+// Every descriptor set supports its own key. Portable representation
+// contracts additionally carry a generated, directional set of native target
+// contracts whose encodings and semantics they conservatively represent.
+bool loom_low_descriptor_set_supports_target_contract(
+    const loom_low_descriptor_set_t* descriptor_set,
+    iree_string_view_t target_contract_key);
 
 // Returns true if |lhs_operand_index| and |rhs_operand_index| form a tied
 // result/packet-operand pair in |descriptor|. Callers must pass a verified
@@ -1055,28 +1351,35 @@ uint32_t loom_low_descriptor_set_lookup_canonical_asm_form(
 // Returns the stable diagnostic spelling for an operand role.
 iree_string_view_t loom_low_operand_role_name(loom_low_operand_role_t role);
 
-// Returns true if |role| names an explicit packet operand consumed by a low
-// descriptor. Result and implicit rows are not packet operands.
+// Returns true if |role| names a packet operand consumed by a low descriptor.
+// Result rows and rows with role IMPLICIT are not packet operands.
 bool loom_low_operand_role_is_packet_operand(loom_low_operand_role_t role);
 
-// Returns true if |descriptor_operand_index| names an explicit low packet
-// operand. The descriptor must be a verified row from |descriptor_set|.
+// Returns true if |descriptor_operand_index| names a low packet operand. Rows
+// flagged IMPLICIT still count as packet operands because they remain part of
+// the low op operand stream.
 bool loom_low_descriptor_operand_maps_to_packet_operand(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint16_t descriptor_operand_index);
 
-// Returns the low packet operand index for |descriptor_operand_index|. The
-// descriptor operand must map to an explicit low packet operand.
+// Returns true when |descriptor| ends in a variadic packet operand row.
+static inline bool loom_low_descriptor_has_variadic_operands(
+    const loom_low_descriptor_t* descriptor) {
+  return iree_any_bit_set(descriptor->flags,
+                          LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS);
+}
+
+// Returns the first low packet resource operand omitted from target assembly,
+// or NULL when |descriptor| has no implicit resource operand.
+const loom_low_operand_t* loom_low_descriptor_implicit_resource_operand(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor);
+
+// Returns the first low packet operand index for |descriptor_operand_index|.
+// The descriptor operand must map to a low packet operand.
 uint16_t loom_low_descriptor_operand_packet_index(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint16_t descriptor_operand_index);
-
-// Returns the descriptor operand index for |packet_operand_index|, or
-// LOOM_LOW_ID_NONE when no explicit descriptor operand maps to that packet
-// operand.
-uint16_t loom_low_descriptor_packet_operand_descriptor_index(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, uint16_t packet_operand_index);
 
 // Returns the stable diagnostic spelling for an operand address map.
 iree_string_view_t loom_low_operand_address_map_kind_name(

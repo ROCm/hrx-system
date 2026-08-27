@@ -16,9 +16,6 @@
 
 typedef enum iree_hal_amdxdna_cmd_type_e {
   IREE_HAL_AMDXDNA_CMD_EXECUTION_BARRIER = 0,
-  IREE_HAL_AMDXDNA_CMD_SIGNAL_EVENT,
-  IREE_HAL_AMDXDNA_CMD_RESET_EVENT,
-  IREE_HAL_AMDXDNA_CMD_WAIT_EVENTS,
   IREE_HAL_AMDXDNA_CMD_ADVISE_BUFFER,
   IREE_HAL_AMDXDNA_CMD_COLLECTIVE,
   IREE_HAL_AMDXDNA_CMD_DISPATCH,
@@ -314,150 +311,48 @@ static iree_status_t iree_hal_amdxdna_apply_execution_barrier(
       cmd->buffer_barrier_count, buffer_barriers);
 }
 
-typedef struct iree_hal_amdxdna_cmd_signal_event_t {
-  iree_hal_amdxdna_cmd_header_t header;
-  iree_hal_event_t* event;
-  iree_hal_execution_stage_t source_stage_mask;
-} iree_hal_amdxdna_cmd_signal_event_t;
-
-static iree_status_t iree_hal_amdxdna_command_buffer_signal_event(
-    iree_hal_command_buffer_t* base_command_buffer, iree_hal_event_t* event,
-    iree_hal_execution_stage_t source_stage_mask) {
-  iree_hal_amdxdna_command_buffer_t* command_buffer =
-      iree_hal_amdxdna_command_buffer_cast(base_command_buffer);
-  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_command_buffer_retain_resources(
-      command_buffer, 1, &event));
-  iree_hal_amdxdna_cmd_signal_event_t* cmd = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_cmd_list_append(
-      &command_buffer->cmd_list, IREE_HAL_AMDXDNA_CMD_SIGNAL_EVENT,
-      sizeof(*cmd), (void**)&cmd));
-  cmd->event = event;
-  cmd->source_stage_mask = source_stage_mask;
-  return iree_ok_status();
-}
-
-static iree_status_t iree_hal_amdxdna_apply_signal_event(
-    iree_hal_command_buffer_t* target_command_buffer,
-    iree_hal_buffer_binding_table_t binding_table,
-    const iree_hal_amdxdna_cmd_signal_event_t* cmd) {
-  (void)binding_table;
-  return iree_hal_command_buffer_signal_event(target_command_buffer, cmd->event,
-                                              cmd->source_stage_mask);
-}
-
-typedef struct iree_hal_amdxdna_cmd_reset_event_t {
-  iree_hal_amdxdna_cmd_header_t header;
-  iree_hal_event_t* event;
-  iree_hal_execution_stage_t source_stage_mask;
-} iree_hal_amdxdna_cmd_reset_event_t;
-
-static iree_status_t iree_hal_amdxdna_command_buffer_reset_event(
-    iree_hal_command_buffer_t* base_command_buffer, iree_hal_event_t* event,
-    iree_hal_execution_stage_t source_stage_mask) {
-  iree_hal_amdxdna_command_buffer_t* command_buffer =
-      iree_hal_amdxdna_command_buffer_cast(base_command_buffer);
-  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_command_buffer_retain_resources(
-      command_buffer, 1, &event));
-  iree_hal_amdxdna_cmd_reset_event_t* cmd = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_cmd_list_append(
-      &command_buffer->cmd_list, IREE_HAL_AMDXDNA_CMD_RESET_EVENT, sizeof(*cmd),
-      (void**)&cmd));
-  cmd->event = event;
-  cmd->source_stage_mask = source_stage_mask;
-  return iree_ok_status();
-}
-
-static iree_status_t iree_hal_amdxdna_apply_reset_event(
-    iree_hal_command_buffer_t* target_command_buffer,
-    iree_hal_buffer_binding_table_t binding_table,
-    const iree_hal_amdxdna_cmd_reset_event_t* cmd) {
-  (void)binding_table;
-  return iree_hal_command_buffer_reset_event(target_command_buffer, cmd->event,
-                                             cmd->source_stage_mask);
-}
-
-typedef struct iree_hal_amdxdna_cmd_wait_events_t {
-  iree_hal_amdxdna_cmd_header_t header;
-  iree_host_size_t event_count;
-  iree_hal_execution_stage_t source_stage_mask;
-  iree_hal_execution_stage_t target_stage_mask;
-  iree_host_size_t memory_barrier_count;
-  const iree_hal_memory_barrier_t* memory_barriers;
-  iree_host_size_t buffer_barrier_count;
-  const iree_hal_buffer_barrier_t* buffer_barriers;
-  iree_hal_event_t* events[];
-} iree_hal_amdxdna_cmd_wait_events_t;
-
-static iree_status_t iree_hal_amdxdna_command_buffer_wait_events(
+static iree_status_t iree_hal_amdxdna_command_buffer_atomic_wait(
     iree_hal_command_buffer_t* base_command_buffer,
-    iree_host_size_t event_count, const iree_hal_event_t** events,
     iree_hal_execution_stage_t source_stage_mask,
     iree_hal_execution_stage_t target_stage_mask,
-    iree_host_size_t memory_barrier_count,
-    const iree_hal_memory_barrier_t* memory_barriers,
-    iree_host_size_t buffer_barrier_count,
-    const iree_hal_buffer_barrier_t* buffer_barriers) {
-  iree_hal_amdxdna_command_buffer_t* command_buffer =
-      iree_hal_amdxdna_command_buffer_cast(base_command_buffer);
-  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_command_buffer_retain_resources(
-      command_buffer, event_count, events));
-  iree_host_size_t total_size = 0;
-  if (IREE_UNLIKELY(!iree_host_size_checked_mul_add(
-          sizeof(iree_hal_amdxdna_cmd_wait_events_t), event_count,
-          sizeof(iree_hal_event_t*), &total_size))) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "wait event command is too large");
-  }
-  iree_hal_amdxdna_cmd_wait_events_t* cmd = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_cmd_list_append(
-      &command_buffer->cmd_list, IREE_HAL_AMDXDNA_CMD_WAIT_EVENTS, total_size,
-      (void**)&cmd));
-  cmd->event_count = event_count;
-  cmd->source_stage_mask = source_stage_mask;
-  cmd->target_stage_mask = target_stage_mask;
-  cmd->memory_barrier_count = memory_barrier_count;
-  cmd->memory_barriers = NULL;
-  cmd->buffer_barrier_count = buffer_barrier_count;
-  cmd->buffer_barriers = NULL;
-  memcpy(cmd->events, events, event_count * sizeof(cmd->events[0]));
-  if (memory_barrier_count > 0) {
-    IREE_RETURN_IF_ERROR(iree_hal_amdxdna_cmd_list_clone_data(
-        &command_buffer->cmd_list, memory_barriers,
-        memory_barrier_count * sizeof(memory_barriers[0]),
-        (void**)&cmd->memory_barriers));
-  }
-  if (buffer_barrier_count > 0) {
-    IREE_RETURN_IF_ERROR(iree_hal_amdxdna_cmd_list_clone_data(
-        &command_buffer->cmd_list, buffer_barriers,
-        buffer_barrier_count * sizeof(buffer_barriers[0]),
-        (void**)&cmd->buffer_barriers));
-  }
-  return iree_ok_status();
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_wait_params_t params) {
+  (void)base_command_buffer;
+  (void)source_stage_mask;
+  (void)target_stage_mask;
+  (void)target_ref;
+  (void)params;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "amdxdna command buffers do not support atomic waits");
 }
 
-static iree_status_t iree_hal_amdxdna_apply_wait_events(
-    iree_hal_command_buffer_t* target_command_buffer,
-    iree_hal_buffer_binding_table_t binding_table,
-    const iree_hal_amdxdna_cmd_wait_events_t* cmd) {
-  const iree_hal_buffer_barrier_t* buffer_barriers = cmd->buffer_barriers;
-  iree_hal_buffer_barrier_t* resolved_buffer_barriers = NULL;
-  if (cmd->buffer_barrier_count > 0) {
-    resolved_buffer_barriers = (iree_hal_buffer_barrier_t*)iree_alloca(
-        cmd->buffer_barrier_count * sizeof(*resolved_buffer_barriers));
-    memcpy(resolved_buffer_barriers, cmd->buffer_barriers,
-           cmd->buffer_barrier_count * sizeof(*resolved_buffer_barriers));
-    for (iree_host_size_t i = 0; i < cmd->buffer_barrier_count; ++i) {
-      IREE_RETURN_IF_ERROR(iree_hal_buffer_binding_table_resolve_ref(
-          binding_table, cmd->buffer_barriers[i].buffer_ref,
-          &resolved_buffer_barriers[i].buffer_ref));
-    }
-    buffer_barriers = resolved_buffer_barriers;
-  }
-  return iree_hal_command_buffer_wait_events(
-      target_command_buffer, cmd->event_count,
-      (const iree_hal_event_t**)cmd->events, cmd->source_stage_mask,
-      cmd->target_stage_mask, cmd->memory_barrier_count, cmd->memory_barriers,
-      cmd->buffer_barrier_count, buffer_barriers);
+static iree_status_t iree_hal_amdxdna_command_buffer_atomic_store(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_store_params_t params) {
+  (void)base_command_buffer;
+  (void)source_stage_mask;
+  (void)target_stage_mask;
+  (void)target_ref;
+  (void)params;
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "amdxdna command buffers do not support atomic stores");
+}
+
+static iree_status_t iree_hal_amdxdna_command_buffer_atomic_rmw(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_rmw_params_t params) {
+  (void)base_command_buffer;
+  (void)source_stage_mask;
+  (void)target_stage_mask;
+  (void)target_ref;
+  (void)params;
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "amdxdna command buffers do not support atomic read-modify-write");
 }
 
 typedef struct iree_hal_amdxdna_cmd_advise_buffer_t {
@@ -690,12 +585,6 @@ static const iree_hal_amdxdna_cmd_apply_fn_t
         [IREE_HAL_AMDXDNA_CMD_EXECUTION_BARRIER] =
             (iree_hal_amdxdna_cmd_apply_fn_t)
                 iree_hal_amdxdna_apply_execution_barrier,
-        [IREE_HAL_AMDXDNA_CMD_SIGNAL_EVENT] = (iree_hal_amdxdna_cmd_apply_fn_t)
-            iree_hal_amdxdna_apply_signal_event,
-        [IREE_HAL_AMDXDNA_CMD_RESET_EVENT] =
-            (iree_hal_amdxdna_cmd_apply_fn_t)iree_hal_amdxdna_apply_reset_event,
-        [IREE_HAL_AMDXDNA_CMD_WAIT_EVENTS] =
-            (iree_hal_amdxdna_cmd_apply_fn_t)iree_hal_amdxdna_apply_wait_events,
         [IREE_HAL_AMDXDNA_CMD_ADVISE_BUFFER] = (iree_hal_amdxdna_cmd_apply_fn_t)
             iree_hal_amdxdna_apply_advise_buffer,
         [IREE_HAL_AMDXDNA_CMD_COLLECTIVE] =
@@ -742,9 +631,9 @@ static const iree_hal_command_buffer_vtable_t
         .begin_debug_group = iree_hal_amdxdna_command_buffer_begin_debug_group,
         .end_debug_group = iree_hal_amdxdna_command_buffer_end_debug_group,
         .execution_barrier = iree_hal_amdxdna_command_buffer_execution_barrier,
-        .signal_event = iree_hal_amdxdna_command_buffer_signal_event,
-        .reset_event = iree_hal_amdxdna_command_buffer_reset_event,
-        .wait_events = iree_hal_amdxdna_command_buffer_wait_events,
+        .atomic_wait = iree_hal_amdxdna_command_buffer_atomic_wait,
+        .atomic_store = iree_hal_amdxdna_command_buffer_atomic_store,
+        .atomic_rmw = iree_hal_amdxdna_command_buffer_atomic_rmw,
         .advise_buffer = iree_hal_amdxdna_command_buffer_advise_buffer,
         .fill_buffer = iree_hal_amdxdna_command_buffer_fill_buffer,
         .update_buffer = iree_hal_amdxdna_command_buffer_update_buffer,

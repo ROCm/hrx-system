@@ -7,8 +7,24 @@
 // Fact implementations for the view dialect.
 
 #include "loom/ir/module.h"
+#include "loom/ops/encoding/storage.h"
 #include "loom/ops/view/ops.h"
 #include "loom/ops/view/reference.h"
+
+iree_status_t loom_view_load_facts(loom_fact_context_t* context,
+                                   const loom_module_t* module,
+                                   const loom_op_t* op,
+                                   const loom_value_facts_t* operand_facts,
+                                   loom_value_facts_t* result_facts) {
+  (void)operand_facts;
+  loom_type_t view_type =
+      loom_module_value_type(module, loom_view_load_view(op));
+  if (!loom_encoding_query_type_storage_content_facts(
+          context, module, view_type, &result_facts[0])) {
+    result_facts[0] = loom_value_facts_unknown();
+  }
+  return iree_ok_status();
+}
 
 iree_status_t loom_view_subview_facts(loom_fact_context_t* context,
                                       const loom_module_t* module,

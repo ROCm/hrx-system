@@ -89,7 +89,13 @@ def _same_type_constraint_covers(op: Op, field_names: set[str]) -> bool:
     return any(trait.name == "AllTypesMatch" and field_names.issubset(trait.args) for trait in op.traits)
 
 
-def _is_same_type_elementwise_vector_decomposable(op: Op) -> bool:
+def _same_shape_constraint_covers(op: Op, field_names: set[str]) -> bool:
+    if _same_type_constraint_covers(op, field_names):
+        return True
+    return any(constraint.name == "SameShape" and field_names.issubset(constraint.args) for constraint in op.constraints)
+
+
+def _is_shape_preserving_elementwise_vector_decomposable(op: Op) -> bool:
     if not _has_trait(op, "Elementwise"):
         return False
     if len(op.results) != 1 or op.regions or op.successors:
@@ -105,7 +111,7 @@ def _is_same_type_elementwise_vector_decomposable(op: Op) -> bool:
         return False
     if any(field.type_constraint not in _VECTOR_TYPE_CONSTRAINTS for field in value_fields):
         return False
-    return _same_type_constraint_covers(op, {field.name for field in value_fields})
+    return _same_shape_constraint_covers(op, {field.name for field in value_fields})
 
 
 def trait_flags(op: Op) -> str:
@@ -118,11 +124,20 @@ def trait_flags(op: Op) -> str:
         c_name = TRAIT_MAP.get(trait.name)
         if c_name:
             bits.append(c_name)
-    is_derived_decomposable = _is_same_type_elementwise_vector_decomposable(op)
+    is_derived_decomposable = _is_shape_preserving_elementwise_vector_decomposable(op)
     if has_explicit_decomposable and not is_derived_decomposable:
-        raise ValueError(f"Op '{op.name}': Decomposable requires a single-result same-type elementwise vector op with no regions, successors, variadic fields, optional operands, or tied results")
+        raise ValueError(
+            f"Op '{op.name}': Decomposable requires a single-result shape-preserving elementwise vector op with no regions, successors, variadic fields, optional operands, or tied results"
+        )
     if "LOOM_TRAIT_DECOMPOSABLE" not in bits and is_derived_decomposable:
         bits.append("LOOM_TRAIT_DECOMPOSABLE")
+
+    # ConstantLike's DSL contract requires a pure, operand-free, region-free,
+    # single-result operation. Such a materialization cannot trap or observe
+    # runtime state, so every consumer should see the same speculation fact
+    # without each transform carrying a ConstantLike exception.
+    if _has_trait(op, "ConstantLike") and "LOOM_TRAIT_SAFE_TO_SPECULATE" not in bits:
+        bits.append("LOOM_TRAIT_SAFE_TO_SPECULATE")
 
     has_read = False
     has_write = False
@@ -144,6 +159,7 @@ def trait_flags(op: Op) -> str:
     explicit_pure = any(trait.name == "Pure" for trait in op.traits)
     has_non_deterministic = any(trait.name == "NonDeterministic" for trait in op.traits)
     has_unknown_effects = any(trait.name == "UnknownEffects" for trait in op.traits)
+    has_memory_fence = any(trait.name == "MemoryFence" for trait in op.traits)
     has_hint = any(trait.name == "Hint" for trait in op.traits)
     if (
         not explicit_pure
@@ -151,6 +167,7 @@ def trait_flags(op: Op) -> str:
         and not op.ownership_effects
         and not has_non_deterministic
         and not has_unknown_effects
+        and not has_memory_fence
         and not has_hint
         and not has_allocating_result
         and not has_explicit_unique_identity

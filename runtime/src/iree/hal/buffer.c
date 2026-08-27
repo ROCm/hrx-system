@@ -30,6 +30,7 @@ static const iree_bitfield_string_mapping_t iree_hal_memory_type_mappings[] = {
     {IREE_HAL_MEMORY_TYPE_HOST_COHERENT, IREE_SVL("HOST_COHERENT")},
     {IREE_HAL_MEMORY_TYPE_HOST_CACHED, IREE_SVL("HOST_CACHED")},
     {IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE, IREE_SVL("DEVICE_VISIBLE")},
+    {IREE_HAL_MEMORY_TYPE_DEVICE_UNCACHED, IREE_SVL("DEVICE_UNCACHED")},
 };
 
 IREE_API_EXPORT iree_status_t iree_hal_memory_type_parse(
@@ -80,7 +81,7 @@ static const iree_bitfield_string_mapping_t iree_hal_buffer_usage_mappings[] = {
   // Combined:
   {IREE_HAL_BUFFER_USAGE_TRANSFER, IREE_SVL("TRANSFER")},
   {IREE_HAL_BUFFER_USAGE_DISPATCH, IREE_SVL("DISPATCH")},
-  {IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE, IREE_SVL("DISPATCH_STORAGE")},
+  {IREE_HAL_BUFFER_USAGE_STORAGE, IREE_SVL("STORAGE")},
   {IREE_HAL_BUFFER_USAGE_DISPATCH_IMAGE, IREE_SVL("DISPATCH_IMAGE")},
   {IREE_HAL_BUFFER_USAGE_MAPPING, IREE_SVL("MAPPING")},
   // Separate:
@@ -88,8 +89,8 @@ static const iree_bitfield_string_mapping_t iree_hal_buffer_usage_mappings[] = {
   {IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET, IREE_SVL("TRANSFER_TARGET")},
   {IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS, IREE_SVL("DISPATCH_INDIRECT_PARAMETERS")},
   {IREE_HAL_BUFFER_USAGE_DISPATCH_UNIFORM_READ, IREE_SVL("DISPATCH_UNIFORM_READ")},
-  {IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ, IREE_SVL("DISPATCH_STORAGE_READ")},
-  {IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_WRITE, IREE_SVL("DISPATCH_STORAGE_WRITE")},
+  {IREE_HAL_BUFFER_USAGE_STORAGE_READ, IREE_SVL("STORAGE_READ")},
+  {IREE_HAL_BUFFER_USAGE_STORAGE_WRITE, IREE_SVL("STORAGE_WRITE")},
   {IREE_HAL_BUFFER_USAGE_DISPATCH_IMAGE_READ, IREE_SVL("DISPATCH_IMAGE_READ")},
   {IREE_HAL_BUFFER_USAGE_DISPATCH_IMAGE_WRITE, IREE_SVL("DISPATCH_IMAGE_WRITE")},
   {IREE_HAL_BUFFER_USAGE_SHARING_EXPORT, IREE_SVL("SHARING_EXPORT")},
@@ -123,8 +124,14 @@ IREE_API_EXPORT iree_string_view_t iree_hal_buffer_usage_format(
 //===----------------------------------------------------------------------===//
 
 typedef struct iree_hal_subspan_buffer_t {
+  // Base HAL buffer resource exposed through this subspan.
   iree_hal_buffer_t base;
+
+  // Allocator used for the subspan wrapper itself.
   iree_allocator_t host_allocator;
+
+  // Invoked after |base.allocated_buffer| is released during destruction.
+  iree_hal_buffer_release_callback_t release_callback;
 } iree_hal_subspan_buffer_t;
 
 static const iree_hal_buffer_vtable_t iree_hal_subspan_buffer_vtable;
@@ -133,6 +140,16 @@ IREE_API_EXPORT iree_status_t iree_hal_subspan_buffer_create(
     iree_hal_buffer_t* allocated_buffer, iree_device_size_t byte_offset,
     iree_device_size_t byte_length, iree_allocator_t host_allocator,
     iree_hal_buffer_t** out_buffer) {
+  return iree_hal_subspan_buffer_create_with_callback(
+      allocated_buffer, byte_offset, byte_length,
+      iree_hal_buffer_release_callback_null(), host_allocator, out_buffer);
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_subspan_buffer_create_with_callback(
+    iree_hal_buffer_t* allocated_buffer, iree_device_size_t byte_offset,
+    iree_device_size_t byte_length,
+    iree_hal_buffer_release_callback_t release_callback,
+    iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer) {
   IREE_ASSERT_ARGUMENT(allocated_buffer);
   IREE_ASSERT_ARGUMENT(out_buffer);
   *out_buffer = NULL;
@@ -149,6 +166,7 @@ IREE_API_EXPORT iree_status_t iree_hal_subspan_buffer_create(
         allocated_buffer->allowed_usage, &iree_hal_subspan_buffer_vtable,
         &buffer->base);
     buffer->host_allocator = host_allocator;
+    buffer->release_callback = release_callback;
     *out_buffer = &buffer->base;
   }
 
@@ -162,6 +180,10 @@ static void iree_hal_subspan_buffer_destroy(iree_hal_buffer_t* base_buffer) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_buffer_release(base_buffer->allocated_buffer);
+  if (buffer->release_callback.fn) {
+    buffer->release_callback.fn(buffer->release_callback.user_data,
+                                base_buffer);
+  }
   iree_allocator_free(host_allocator, buffer);
 
   IREE_TRACE_ZONE_END(z0);
@@ -357,30 +379,27 @@ iree_hal_buffer_validate_usage(iree_hal_buffer_usage_t allowed_usage,
 IREE_API_EXPORT iree_status_t iree_hal_buffer_validate_range(
     iree_hal_buffer_t* buffer, iree_device_size_t byte_offset,
     iree_device_size_t byte_length) {
+  const iree_device_size_t buffer_length = iree_hal_buffer_byte_length(buffer);
+
   // Check if the start of the range runs off the end of the buffer.
-  if (IREE_UNLIKELY(byte_offset > iree_hal_buffer_byte_length(buffer))) {
+  if (IREE_UNLIKELY(byte_offset > buffer_length)) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
         "attempted to access an address off the end of the valid buffer range "
         "(offset=%" PRIdsz ", length=%" PRIdsz ", buffer byte_length=%" PRIdsz
         ")",
-        byte_offset, byte_length, iree_hal_buffer_byte_length(buffer));
+        byte_offset, byte_length, buffer_length);
   }
 
-  if (byte_length == 0) {
-    // Fine to have a zero length.
-    return iree_ok_status();
-  }
-
-  // Check if the end runs over the allocation.
-  iree_device_size_t end = byte_offset + byte_length;
-  if (IREE_UNLIKELY(end > iree_hal_buffer_byte_length(buffer))) {
+  // Check the length against the remaining range without forming an end
+  // offset that could wrap.
+  if (IREE_UNLIKELY(byte_length > buffer_length - byte_offset)) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
         "attempted to access an address outside of the valid buffer range "
-        "(offset=%" PRIdsz ", length=%" PRIdsz ", end(inc)=%" PRIdsz
-        ", buffer byte_length=%" PRIdsz ")",
-        byte_offset, byte_length, end - 1, iree_hal_buffer_byte_length(buffer));
+        "(offset=%" PRIdsz ", length=%" PRIdsz ", buffer byte_length=%" PRIdsz
+        ")",
+        byte_offset, byte_length, buffer_length);
   }
 
   return iree_ok_status();

@@ -43,8 +43,8 @@ typedef enum iree_benchmark_loom_event_kind_e {
   IREE_BENCHMARK_LOOM_EVENT_SAMPLE = 6,
   // One benchmark measurement result.
   IREE_BENCHMARK_LOOM_EVENT_BENCHMARK_RESULT = 7,
-  // Optional profile rows derived from a benchmark measurement.
-  IREE_BENCHMARK_LOOM_EVENT_PROFILE = 8,
+  // Optional profile-replay rows from a distinct post-measurement execution.
+  IREE_BENCHMARK_LOOM_EVENT_PROFILE_REPLAY = 8,
   // Parse, verify, planning, or infrastructure failure metadata.
   IREE_BENCHMARK_LOOM_EVENT_FAILURE = 9,
   // One interleaved comparison benchmark repetition.
@@ -60,8 +60,6 @@ typedef struct iree_benchmark_loom_run_event_t {
   const iree_benchmark_loom_run_identity_t* run;
   // True when the run stops after planning selected benchmarks.
   bool dry_run;
-  // Requested dispatch sample-compilation mode for this run.
-  iree_benchmark_loom_sample_compilation_mode_t sample_compilation_mode;
   // Sanitizer checks and reporting mode used for compiler-backed work.
   loom_sanitizer_options_t sanitizer;
 } iree_benchmark_loom_run_event_t;
@@ -75,8 +73,6 @@ typedef struct iree_benchmark_loom_plan_event_t {
   const iree_benchmark_loom_selected_benchmark_t* selection;
   // Effective benchmark runner options for plan-policy reporting.
   const iree_benchmark_loom_options_t* options;
-  // Requested dispatch sample-compilation mode for this run.
-  iree_benchmark_loom_sample_compilation_mode_t sample_compilation_mode;
 } iree_benchmark_loom_plan_event_t;
 
 typedef struct iree_benchmark_loom_summary_event_t {
@@ -104,8 +100,6 @@ typedef struct iree_benchmark_loom_summary_event_t {
   iree_host_size_t correctness_failed_sample_count;
   // True when the run stopped after planning selected benchmarks.
   bool dry_run;
-  // Requested dispatch sample-compilation mode for this run.
-  iree_benchmark_loom_sample_compilation_mode_t sample_compilation_mode;
 } iree_benchmark_loom_summary_event_t;
 
 typedef struct iree_benchmark_loom_device_event_t {
@@ -141,8 +135,6 @@ typedef struct iree_benchmark_loom_sample_event_t {
   const loom_testbench_benchmark_plan_t* benchmark_plan;
   // Case plan referenced by |benchmark_plan|.
   const loom_testbench_case_plan_t* case_plan;
-  // Optional sample-compilation label.
-  iree_string_view_t sample_compilation;
   // Zero-based sample ordinal within the benchmark's selected sample space.
   iree_host_size_t benchmark_sample_ordinal;
   // Zero-based sample ordinal within the check.case cartesian sample space.
@@ -174,24 +166,24 @@ typedef struct iree_benchmark_loom_benchmark_result_event_t {
   iree_host_size_t correctness_failed_sample_count;
 } iree_benchmark_loom_benchmark_result_event_t;
 
-typedef struct iree_benchmark_loom_profile_event_t {
+typedef struct iree_benchmark_loom_profile_replay_event_t {
   // Run identity shared by all emitted events.
   const iree_benchmark_loom_run_identity_t* run;
-  // Stable candidate identity for the profile rows.
+  // Stable candidate identity for the profile-replay rows.
   const iree_benchmark_loom_candidate_identity_t* candidate;
   // Stable physical work item ordinal, or IREE_BENCHMARK_LOOM_INDEX_INVALID.
   iree_host_size_t work_item_index;
   // Parsed module used to render sample parameter assignments.
   const loom_module_t* module;
-  // Benchmark plan owning the profiled result.
+  // Benchmark plan owning the replay result.
   const loom_testbench_benchmark_plan_t* benchmark_plan;
   // Case plan referenced by |benchmark_plan|.
   const loom_testbench_case_plan_t* case_plan;
-  // Effective benchmark policy used by the measurement.
+  // Effective benchmark policy used by the replay.
   const iree_benchmark_loom_benchmark_policy_t* policy;
   // Borrowed benchmark result payload.
   const iree_benchmark_loom_benchmark_result_t* benchmark_result;
-} iree_benchmark_loom_profile_event_t;
+} iree_benchmark_loom_profile_replay_event_t;
 
 typedef struct iree_benchmark_loom_failure_event_t {
   // Run identity shared by all emitted events.
@@ -275,8 +267,8 @@ typedef struct iree_benchmark_loom_event_t {
     iree_benchmark_loom_sample_event_t sample;
     // Payload for IREE_BENCHMARK_LOOM_EVENT_BENCHMARK_RESULT.
     iree_benchmark_loom_benchmark_result_event_t benchmark_result;
-    // Payload for IREE_BENCHMARK_LOOM_EVENT_PROFILE.
-    iree_benchmark_loom_profile_event_t profile;
+    // Payload for IREE_BENCHMARK_LOOM_EVENT_PROFILE_REPLAY.
+    iree_benchmark_loom_profile_replay_event_t profile_replay;
     // Payload for IREE_BENCHMARK_LOOM_EVENT_FAILURE.
     iree_benchmark_loom_failure_event_t failure;
     // Payload for IREE_BENCHMARK_LOOM_EVENT_BENCHMARK_REPETITION.
@@ -314,7 +306,6 @@ iree_status_t iree_benchmark_loom_event_sink_emit(
 iree_status_t iree_benchmark_loom_event_sink_emit_run(
     const iree_benchmark_loom_event_sink_t* sink,
     const iree_benchmark_loom_run_identity_t* run, bool dry_run,
-    iree_benchmark_loom_sample_compilation_mode_t sample_compilation_mode,
     const loom_sanitizer_options_t* sanitizer);
 
 // Emits one selected benchmark plan event.
@@ -322,8 +313,7 @@ iree_status_t iree_benchmark_loom_event_sink_emit_plan(
     const iree_benchmark_loom_event_sink_t* sink,
     const iree_benchmark_loom_run_identity_t* run, const loom_module_t* module,
     const iree_benchmark_loom_selected_benchmark_t* selection,
-    const iree_benchmark_loom_options_t* options,
-    iree_benchmark_loom_sample_compilation_mode_t sample_compilation_mode);
+    const iree_benchmark_loom_options_t* options);
 
 // Emits the deduplicated planned work graph.
 iree_status_t iree_benchmark_loom_event_sink_emit_work_plan(
@@ -342,8 +332,7 @@ iree_status_t iree_benchmark_loom_event_sink_emit_summary(
     iree_host_size_t logical_sample_count, iree_host_size_t work_item_count,
     iree_host_size_t failure_count, iree_host_size_t failed_benchmark_count,
     iree_host_size_t correctness_sample_count,
-    iree_host_size_t correctness_failed_sample_count, bool dry_run,
-    iree_benchmark_loom_sample_compilation_mode_t sample_compilation_mode);
+    iree_host_size_t correctness_failed_sample_count, bool dry_run);
 
 // Emits selected HAL device metadata.
 iree_status_t iree_benchmark_loom_event_sink_emit_device(
@@ -368,7 +357,6 @@ iree_status_t iree_benchmark_loom_event_sink_emit_sample(
     iree_host_size_t work_item_index, const loom_module_t* module,
     const loom_testbench_benchmark_plan_t* benchmark_plan,
     const loom_testbench_case_plan_t* case_plan,
-    iree_string_view_t sample_compilation,
     iree_host_size_t benchmark_sample_ordinal,
     iree_host_size_t case_sample_ordinal,
     const loom_testbench_case_sample_result_t* sample_result);
@@ -386,8 +374,8 @@ iree_status_t iree_benchmark_loom_event_sink_emit_benchmark_result(
     iree_host_size_t correctness_sample_count,
     iree_host_size_t correctness_failed_sample_count);
 
-// Emits optional profile rows for one benchmark measurement result.
-iree_status_t iree_benchmark_loom_event_sink_emit_profile(
+// Emits optional profile-replay rows for one benchmark result.
+iree_status_t iree_benchmark_loom_event_sink_emit_profile_replay(
     const iree_benchmark_loom_event_sink_t* sink,
     const iree_benchmark_loom_run_identity_t* run,
     const iree_benchmark_loom_candidate_identity_t* candidate,

@@ -14,6 +14,7 @@
 #include "loom/ir/types.h"
 #include "loom/pass/types.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/transforms/vector/to_scalar_descriptors.h"
 #include "loom/transforms/vector/to_scalar_options.h"
 
 #ifdef __cplusplus
@@ -44,10 +45,10 @@ loom_vector_to_scalar_statistics_if_available(loom_pass_t* pass) {
              : NULL;
 }
 
-typedef struct loom_vector_to_scalar_descriptor_t
-    loom_vector_to_scalar_descriptor_t;
 typedef struct loom_vector_to_scalar_lane_cache_entry_t
     loom_vector_to_scalar_lane_cache_entry_t;
+typedef struct loom_vector_to_scalar_rematerialization_context_t
+    loom_vector_to_scalar_rematerialization_context_t;
 
 typedef struct loom_vector_to_scalar_state_t {
   // Current pass instance owning statistics and transient arena state.
@@ -62,7 +63,7 @@ typedef struct loom_vector_to_scalar_state_t {
   // Vector op currently being scalarized.
   loom_op_t* op;
   // Descriptor that selects the lane-program family for |op|.
-  const loom_vector_to_scalar_descriptor_t* descriptor;
+  loom_vector_to_scalar_descriptor_t descriptor;
   // Rewriter value checkpoint used to preserve result names on new values.
   loom_value_id_t value_checkpoint;
   // Result ordinal being scalarized for multi-result vector ops.
@@ -77,16 +78,21 @@ typedef struct loom_vector_to_scalar_state_t {
   const loom_matrix_fragment_layout_t* matrix_fragment_layout;
   // Cached static lane materializations owned by the rewriter arena.
   loom_vector_to_scalar_lane_cache_entry_t* lane_cache;
+  // Last source operation before op, captured before replacement IR is built.
+  const loom_op_t* source_predecessor_op;
+  // Source-position legality cache shared by recursively decomposed producers.
+  loom_vector_to_scalar_rematerialization_context_t* rematerialization;
   // Source location assigned to replacement ops.
   loom_location_id_t location;
 } loom_vector_to_scalar_state_t;
 
-static inline void loom_vector_to_scalar_state_bind_statistics(
+static inline void loom_vector_to_scalar_state_initialize(
     loom_vector_to_scalar_state_t* state, loom_pass_t* pass) {
   state->statistics = loom_vector_to_scalar_statistics_if_available(pass);
   if (!state->statistics) {
     state->statistics = &state->discarded_statistics;
   }
+  state->source_predecessor_op = state->op ? state->op->prev_op : NULL;
 }
 
 static inline void loom_vector_to_scalar_record_ops_lowered(

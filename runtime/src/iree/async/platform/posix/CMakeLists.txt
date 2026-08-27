@@ -52,6 +52,7 @@ iree_cc_library(
     iree::async::util::message_pool
     iree::async::util::operation_pool
     iree::async::util::ready_pool
+    iree::async::util::semaphore_wait
     iree::async::util::sequence_emulation
     iree::async::util::signal
     iree::base

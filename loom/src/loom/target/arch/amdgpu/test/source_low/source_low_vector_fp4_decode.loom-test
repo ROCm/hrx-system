@@ -1,0 +1,469 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx942> @target
+func.def target(@target) @decode_packed_e2m1_to_f16(%payload: vector<2xi32>) -> (vector<16xf16>) {
+  %schema = encoding.define #encoding.f4e2m1<payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2> : encoding<schema>
+  %decoded = vector.decode %payload using %schema : vector<2xi32>, encoding<schema> -> vector<16xf16>
+  func.return %decoded : vector<16xf16>
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @decode_packed_e2m1_to_f16(%payload: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x8>) asm {
+  %6 = s_mov_b32 262152
+  %7 = s_mov_b32 262148
+  %8 = s_mov_b32 1178878528
+  %9 = v_mov_b32 1044133888
+  %10 = v_mov_b32 0
+  %11 = s_mov_b32 327685
+  %12 = s_mov_b32 393222
+  %13 = s_mov_b32 458759
+  %14 = slice %payload[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %15 = v_perm_b32 %14, %10, %7
+  %16 = v_pk_lshlrev_b16 %6, %15
+  %17 = v_and_b32_lit %16, 117442304
+  %18 = v_perm_b32 %8, %9, %17
+  %19 = v_pk_lshlrev_b16 %7, %16
+  %20 = v_and_b32_lit %19, 2147516416
+  %21 = v_or_b32 %18, %20
+  %22 = v_perm_b32 %14, %10, %11
+  %23 = v_pk_lshlrev_b16 %6, %22
+  %24 = v_and_b32_lit %23, 117442304
+  %25 = v_perm_b32 %8, %9, %24
+  %26 = v_pk_lshlrev_b16 %7, %23
+  %27 = v_and_b32_lit %26, 2147516416
+  %28 = v_or_b32 %25, %27
+  %29 = v_perm_b32 %14, %10, %12
+  %30 = v_pk_lshlrev_b16 %6, %29
+  %31 = v_and_b32_lit %30, 117442304
+  %32 = v_perm_b32 %8, %9, %31
+  %33 = v_pk_lshlrev_b16 %7, %30
+  %34 = v_and_b32_lit %33, 2147516416
+  %35 = v_or_b32 %32, %34
+  %36 = v_perm_b32 %14, %10, %13
+  %37 = v_pk_lshlrev_b16 %6, %36
+  %38 = v_and_b32_lit %37, 117442304
+  %39 = v_perm_b32 %8, %9, %38
+  %40 = v_pk_lshlrev_b16 %7, %37
+  %41 = v_and_b32_lit %40, 2147516416
+  %42 = v_or_b32 %39, %41
+  %43 = slice %payload[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %44 = v_perm_b32 %43, %10, %7
+  %45 = v_pk_lshlrev_b16 %6, %44
+  %46 = v_and_b32_lit %45, 117442304
+  %47 = v_perm_b32 %8, %9, %46
+  %48 = v_pk_lshlrev_b16 %7, %45
+  %49 = v_and_b32_lit %48, 2147516416
+  %50 = v_or_b32 %47, %49
+  %51 = v_perm_b32 %43, %10, %11
+  %52 = v_pk_lshlrev_b16 %6, %51
+  %53 = v_and_b32_lit %52, 117442304
+  %54 = v_perm_b32 %8, %9, %53
+  %55 = v_pk_lshlrev_b16 %7, %52
+  %56 = v_and_b32_lit %55, 2147516416
+  %57 = v_or_b32 %54, %56
+  %58 = v_perm_b32 %43, %10, %12
+  %59 = v_pk_lshlrev_b16 %6, %58
+  %60 = v_and_b32_lit %59, 117442304
+  %61 = v_perm_b32 %8, %9, %60
+  %62 = v_pk_lshlrev_b16 %7, %59
+  %63 = v_and_b32_lit %62, 2147516416
+  %64 = v_or_b32 %61, %63
+  %65 = v_perm_b32 %43, %10, %13
+  %66 = v_pk_lshlrev_b16 %6, %65
+  %67 = v_and_b32_lit %66, 117442304
+  %68 = v_perm_b32 %8, %9, %67
+  %69 = v_pk_lshlrev_b16 %7, %66
+  %70 = v_and_b32_lit %69, 2147516416
+  %71 = v_or_b32 %68, %70
+  %decoded = concat(%21, %28, %35, %42, %50, %57, %64, %71) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  return %decoded
+}
+
+// ====
+
+amdgpu.target<gfx950> @target
+func.def target(@target) @decode_packed_e2m1_to_f16(%payload: vector<2xi32>) -> (vector<16xf16>) {
+  %schema = encoding.define #encoding.f4e2m1<payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2> : encoding<schema>
+  %decoded = vector.decode %payload using %schema : vector<2xi32>, encoding<schema> -> vector<16xf16>
+  func.return %decoded : vector<16xf16>
+}
+
+// ----
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @decode_packed_e2m1_to_f16(%payload: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x8>) asm {
+  %6 = s_mov_b32 262152
+  %7 = s_mov_b32 262148
+  %8 = s_mov_b32 1178878528
+  %9 = v_mov_b32 1044133888
+  %10 = v_mov_b32 0
+  %11 = s_mov_b32 327685
+  %12 = s_mov_b32 393222
+  %13 = s_mov_b32 458759
+  %14 = slice %payload[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %15 = v_perm_b32 %14, %10, %7
+  %16 = v_pk_lshlrev_b16 %6, %15
+  %17 = v_and_b32_lit %16, 117442304
+  %18 = v_perm_b32 %8, %9, %17
+  %19 = v_pk_lshlrev_b16 %7, %16
+  %20 = v_and_b32_lit %19, 2147516416
+  %21 = v_or_b32 %18, %20
+  %22 = v_perm_b32 %14, %10, %11
+  %23 = v_pk_lshlrev_b16 %6, %22
+  %24 = v_and_b32_lit %23, 117442304
+  %25 = v_perm_b32 %8, %9, %24
+  %26 = v_pk_lshlrev_b16 %7, %23
+  %27 = v_and_b32_lit %26, 2147516416
+  %28 = v_or_b32 %25, %27
+  %29 = v_perm_b32 %14, %10, %12
+  %30 = v_pk_lshlrev_b16 %6, %29
+  %31 = v_and_b32_lit %30, 117442304
+  %32 = v_perm_b32 %8, %9, %31
+  %33 = v_pk_lshlrev_b16 %7, %30
+  %34 = v_and_b32_lit %33, 2147516416
+  %35 = v_or_b32 %32, %34
+  %36 = v_perm_b32 %14, %10, %13
+  %37 = v_pk_lshlrev_b16 %6, %36
+  %38 = v_and_b32_lit %37, 117442304
+  %39 = v_perm_b32 %8, %9, %38
+  %40 = v_pk_lshlrev_b16 %7, %37
+  %41 = v_and_b32_lit %40, 2147516416
+  %42 = v_or_b32 %39, %41
+  %43 = slice %payload[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %44 = v_perm_b32 %43, %10, %7
+  %45 = v_pk_lshlrev_b16 %6, %44
+  %46 = v_and_b32_lit %45, 117442304
+  %47 = v_perm_b32 %8, %9, %46
+  %48 = v_pk_lshlrev_b16 %7, %45
+  %49 = v_and_b32_lit %48, 2147516416
+  %50 = v_or_b32 %47, %49
+  %51 = v_perm_b32 %43, %10, %11
+  %52 = v_pk_lshlrev_b16 %6, %51
+  %53 = v_and_b32_lit %52, 117442304
+  %54 = v_perm_b32 %8, %9, %53
+  %55 = v_pk_lshlrev_b16 %7, %52
+  %56 = v_and_b32_lit %55, 2147516416
+  %57 = v_or_b32 %54, %56
+  %58 = v_perm_b32 %43, %10, %12
+  %59 = v_pk_lshlrev_b16 %6, %58
+  %60 = v_and_b32_lit %59, 117442304
+  %61 = v_perm_b32 %8, %9, %60
+  %62 = v_pk_lshlrev_b16 %7, %59
+  %63 = v_and_b32_lit %62, 2147516416
+  %64 = v_or_b32 %61, %63
+  %65 = v_perm_b32 %43, %10, %13
+  %66 = v_pk_lshlrev_b16 %6, %65
+  %67 = v_and_b32_lit %66, 117442304
+  %68 = v_perm_b32 %8, %9, %67
+  %69 = v_pk_lshlrev_b16 %7, %66
+  %70 = v_and_b32_lit %69, 2147516416
+  %71 = v_or_b32 %68, %70
+  %decoded = concat(%21, %28, %35, %42, %50, %57, %64, %71) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  return %decoded
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @decode_packed_e2m1_to_f16(%payload: vector<2xi32>) -> (vector<16xf16>) {
+  %schema = encoding.define #encoding.f4e2m1<payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2> : encoding<schema>
+  %decoded = vector.decode %payload using %schema : vector<2xi32>, encoding<schema> -> vector<16xf16>
+  func.return %decoded : vector<16xf16>
+}
+
+// ----
+low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @decode_packed_e2m1_to_f16(%payload: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x8>) asm {
+  %6 = s_mov_b32 262152
+  %7 = s_mov_b32 262148
+  %8 = s_mov_b32 1178878528
+  %9 = s_mov_b32 1044133888
+  %10 = slice %payload[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %11 = v_perm_b32_src1_zero_src2_lit %10, 262148
+  %12 = v_pk_lshlrev_b16 %6, %11
+  %13 = v_and_b32_lit %12, 117442304
+  %14 = v_perm_b32 %8, %9, %13
+  %15 = v_pk_lshlrev_b16 %7, %12
+  %16 = v_and_b32_lit %15, 2147516416
+  %17 = v_or_b32 %14, %16
+  %18 = v_perm_b32_src1_zero_src2_lit %10, 327685
+  %19 = v_pk_lshlrev_b16 %6, %18
+  %20 = v_and_b32_lit %19, 117442304
+  %21 = v_perm_b32 %8, %9, %20
+  %22 = v_pk_lshlrev_b16 %7, %19
+  %23 = v_and_b32_lit %22, 2147516416
+  %24 = v_or_b32 %21, %23
+  %25 = v_perm_b32_src1_zero_src2_lit %10, 393222
+  %26 = v_pk_lshlrev_b16 %6, %25
+  %27 = v_and_b32_lit %26, 117442304
+  %28 = v_perm_b32 %8, %9, %27
+  %29 = v_pk_lshlrev_b16 %7, %26
+  %30 = v_and_b32_lit %29, 2147516416
+  %31 = v_or_b32 %28, %30
+  %32 = v_perm_b32_src1_zero_src2_lit %10, 458759
+  %33 = v_pk_lshlrev_b16 %6, %32
+  %34 = v_and_b32_lit %33, 117442304
+  %35 = v_perm_b32 %8, %9, %34
+  %36 = v_pk_lshlrev_b16 %7, %33
+  %37 = v_and_b32_lit %36, 2147516416
+  %38 = v_or_b32 %35, %37
+  %39 = slice %payload[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %40 = v_perm_b32_src1_zero_src2_lit %39, 262148
+  %41 = v_pk_lshlrev_b16 %6, %40
+  %42 = v_and_b32_lit %41, 117442304
+  %43 = v_perm_b32 %8, %9, %42
+  %44 = v_pk_lshlrev_b16 %7, %41
+  %45 = v_and_b32_lit %44, 2147516416
+  %46 = v_or_b32 %43, %45
+  %47 = v_perm_b32_src1_zero_src2_lit %39, 327685
+  %48 = v_pk_lshlrev_b16 %6, %47
+  %49 = v_and_b32_lit %48, 117442304
+  %50 = v_perm_b32 %8, %9, %49
+  %51 = v_pk_lshlrev_b16 %7, %48
+  %52 = v_and_b32_lit %51, 2147516416
+  %53 = v_or_b32 %50, %52
+  %54 = v_perm_b32_src1_zero_src2_lit %39, 393222
+  %55 = v_pk_lshlrev_b16 %6, %54
+  %56 = v_and_b32_lit %55, 117442304
+  %57 = v_perm_b32 %8, %9, %56
+  %58 = v_pk_lshlrev_b16 %7, %55
+  %59 = v_and_b32_lit %58, 2147516416
+  %60 = v_or_b32 %57, %59
+  %61 = v_perm_b32_src1_zero_src2_lit %39, 458759
+  %62 = v_pk_lshlrev_b16 %6, %61
+  %63 = v_and_b32_lit %62, 117442304
+  %64 = v_perm_b32 %8, %9, %63
+  %65 = v_pk_lshlrev_b16 %7, %62
+  %66 = v_and_b32_lit %65, 2147516416
+  %67 = v_or_b32 %64, %66
+  %decoded = concat(%17, %24, %31, %38, %46, %53, %60, %67) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  return %decoded
+}
+
+// ====
+
+amdgpu.target<gfx1151> @target
+func.def target(@target) @decode_packed_e2m1_to_f16(%payload: vector<2xi32>) -> (vector<16xf16>) {
+  %schema = encoding.define #encoding.f4e2m1<payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2> : encoding<schema>
+  %decoded = vector.decode %payload using %schema : vector<2xi32>, encoding<schema> -> vector<16xf16>
+  func.return %decoded : vector<16xf16>
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @decode_packed_e2m1_to_f16(%payload: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x8>) asm {
+  %6 = s_mov_b32 262152
+  %7 = s_mov_b32 262148
+  %8 = s_mov_b32 1178878528
+  %9 = s_mov_b32 1044133888
+  %10 = slice %payload[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %11 = v_perm_b32_src1_zero_src2_lit %10, 262148
+  %12 = v_pk_lshlrev_b16 %6, %11
+  %13 = v_and_b32_lit %12, 117442304
+  %14 = v_perm_b32 %8, %9, %13
+  %15 = v_pk_lshlrev_b16 %7, %12
+  %16 = v_and_b32_lit %15, 2147516416
+  %17 = v_or_b32 %14, %16
+  %18 = v_perm_b32_src1_zero_src2_lit %10, 327685
+  %19 = v_pk_lshlrev_b16 %6, %18
+  %20 = v_and_b32_lit %19, 117442304
+  %21 = v_perm_b32 %8, %9, %20
+  %22 = v_pk_lshlrev_b16 %7, %19
+  %23 = v_and_b32_lit %22, 2147516416
+  %24 = v_or_b32 %21, %23
+  %25 = v_perm_b32_src1_zero_src2_lit %10, 393222
+  %26 = v_pk_lshlrev_b16 %6, %25
+  %27 = v_and_b32_lit %26, 117442304
+  %28 = v_perm_b32 %8, %9, %27
+  %29 = v_pk_lshlrev_b16 %7, %26
+  %30 = v_and_b32_lit %29, 2147516416
+  %31 = v_or_b32 %28, %30
+  %32 = v_perm_b32_src1_zero_src2_lit %10, 458759
+  %33 = v_pk_lshlrev_b16 %6, %32
+  %34 = v_and_b32_lit %33, 117442304
+  %35 = v_perm_b32 %8, %9, %34
+  %36 = v_pk_lshlrev_b16 %7, %33
+  %37 = v_and_b32_lit %36, 2147516416
+  %38 = v_or_b32 %35, %37
+  %39 = slice %payload[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %40 = v_perm_b32_src1_zero_src2_lit %39, 262148
+  %41 = v_pk_lshlrev_b16 %6, %40
+  %42 = v_and_b32_lit %41, 117442304
+  %43 = v_perm_b32 %8, %9, %42
+  %44 = v_pk_lshlrev_b16 %7, %41
+  %45 = v_and_b32_lit %44, 2147516416
+  %46 = v_or_b32 %43, %45
+  %47 = v_perm_b32_src1_zero_src2_lit %39, 327685
+  %48 = v_pk_lshlrev_b16 %6, %47
+  %49 = v_and_b32_lit %48, 117442304
+  %50 = v_perm_b32 %8, %9, %49
+  %51 = v_pk_lshlrev_b16 %7, %48
+  %52 = v_and_b32_lit %51, 2147516416
+  %53 = v_or_b32 %50, %52
+  %54 = v_perm_b32_src1_zero_src2_lit %39, 393222
+  %55 = v_pk_lshlrev_b16 %6, %54
+  %56 = v_and_b32_lit %55, 117442304
+  %57 = v_perm_b32 %8, %9, %56
+  %58 = v_pk_lshlrev_b16 %7, %55
+  %59 = v_and_b32_lit %58, 2147516416
+  %60 = v_or_b32 %57, %59
+  %61 = v_perm_b32_src1_zero_src2_lit %39, 458759
+  %62 = v_pk_lshlrev_b16 %6, %61
+  %63 = v_and_b32_lit %62, 117442304
+  %64 = v_perm_b32 %8, %9, %63
+  %65 = v_pk_lshlrev_b16 %7, %62
+  %66 = v_and_b32_lit %65, 2147516416
+  %67 = v_or_b32 %64, %66
+  %decoded = concat(%17, %24, %31, %38, %46, %53, %60, %67) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  return %decoded
+}
+
+// ====
+
+amdgpu.target<gfx1200> @target
+func.def target(@target) @decode_packed_e2m1_to_f16(%payload: vector<2xi32>) -> (vector<16xf16>) {
+  %schema = encoding.define #encoding.f4e2m1<payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2> : encoding<schema>
+  %decoded = vector.decode %payload using %schema : vector<2xi32>, encoding<schema> -> vector<16xf16>
+  func.return %decoded : vector<16xf16>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @decode_packed_e2m1_to_f16(%payload: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x8>) asm {
+  %6 = s_mov_b32 262152
+  %7 = s_mov_b32 262148
+  %8 = s_mov_b32 1178878528
+  %9 = s_mov_b32 1044133888
+  %10 = slice %payload[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %11 = v_perm_b32_src1_zero_src2_lit %10, 262148
+  %12 = v_pk_lshlrev_b16 %6, %11
+  %13 = v_and_b32_lit %12, 117442304
+  %14 = v_perm_b32 %8, %9, %13
+  %15 = v_pk_lshlrev_b16 %7, %12
+  %16 = v_and_b32_lit %15, 2147516416
+  %17 = v_or_b32 %14, %16
+  %18 = v_perm_b32_src1_zero_src2_lit %10, 327685
+  %19 = v_pk_lshlrev_b16 %6, %18
+  %20 = v_and_b32_lit %19, 117442304
+  %21 = v_perm_b32 %8, %9, %20
+  %22 = v_pk_lshlrev_b16 %7, %19
+  %23 = v_and_b32_lit %22, 2147516416
+  %24 = v_or_b32 %21, %23
+  %25 = v_perm_b32_src1_zero_src2_lit %10, 393222
+  %26 = v_pk_lshlrev_b16 %6, %25
+  %27 = v_and_b32_lit %26, 117442304
+  %28 = v_perm_b32 %8, %9, %27
+  %29 = v_pk_lshlrev_b16 %7, %26
+  %30 = v_and_b32_lit %29, 2147516416
+  %31 = v_or_b32 %28, %30
+  %32 = v_perm_b32_src1_zero_src2_lit %10, 458759
+  %33 = v_pk_lshlrev_b16 %6, %32
+  %34 = v_and_b32_lit %33, 117442304
+  %35 = v_perm_b32 %8, %9, %34
+  %36 = v_pk_lshlrev_b16 %7, %33
+  %37 = v_and_b32_lit %36, 2147516416
+  %38 = v_or_b32 %35, %37
+  %39 = slice %payload[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %40 = v_perm_b32_src1_zero_src2_lit %39, 262148
+  %41 = v_pk_lshlrev_b16 %6, %40
+  %42 = v_and_b32_lit %41, 117442304
+  %43 = v_perm_b32 %8, %9, %42
+  %44 = v_pk_lshlrev_b16 %7, %41
+  %45 = v_and_b32_lit %44, 2147516416
+  %46 = v_or_b32 %43, %45
+  %47 = v_perm_b32_src1_zero_src2_lit %39, 327685
+  %48 = v_pk_lshlrev_b16 %6, %47
+  %49 = v_and_b32_lit %48, 117442304
+  %50 = v_perm_b32 %8, %9, %49
+  %51 = v_pk_lshlrev_b16 %7, %48
+  %52 = v_and_b32_lit %51, 2147516416
+  %53 = v_or_b32 %50, %52
+  %54 = v_perm_b32_src1_zero_src2_lit %39, 393222
+  %55 = v_pk_lshlrev_b16 %6, %54
+  %56 = v_and_b32_lit %55, 117442304
+  %57 = v_perm_b32 %8, %9, %56
+  %58 = v_pk_lshlrev_b16 %7, %55
+  %59 = v_and_b32_lit %58, 2147516416
+  %60 = v_or_b32 %57, %59
+  %61 = v_perm_b32_src1_zero_src2_lit %39, 458759
+  %62 = v_pk_lshlrev_b16 %6, %61
+  %63 = v_and_b32_lit %62, 117442304
+  %64 = v_perm_b32 %8, %9, %63
+  %65 = v_pk_lshlrev_b16 %7, %62
+  %66 = v_and_b32_lit %65, 2147516416
+  %67 = v_or_b32 %64, %66
+  %decoded = concat(%17, %24, %31, %38, %46, %53, %60, %67) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  return %decoded
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+func.def target(@target) @decode_packed_e2m1_to_f16(%payload: vector<2xi32>) -> (vector<16xf16>) {
+  %schema = encoding.define #encoding.f4e2m1<payload_elements=16, payload_packing=little_endian_nibbles, payload_registers=2> : encoding<schema>
+  %decoded = vector.decode %payload using %schema : vector<2xi32>, encoding<schema> -> vector<16xf16>
+  func.return %decoded : vector<16xf16>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @decode_packed_e2m1_to_f16(%payload: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x8>) asm {
+  %6 = s_mov_b32 262152
+  %7 = s_mov_b32 262148
+  %8 = s_mov_b32 1178878528
+  %9 = s_mov_b32 1044133888
+  %10 = slice %payload[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %11 = v_perm_b32_src1_zero_src2_lit %10, 262148
+  %12 = v_pk_lshlrev_b16 %6, %11
+  %13 = v_and_b32_lit %12, 117442304
+  %14 = v_perm_b32 %8, %9, %13
+  %15 = v_pk_lshlrev_b16 %7, %12
+  %16 = v_and_b32_lit %15, 2147516416
+  %17 = v_or_b32 %14, %16
+  %18 = v_perm_b32_src1_zero_src2_lit %10, 327685
+  %19 = v_pk_lshlrev_b16 %6, %18
+  %20 = v_and_b32_lit %19, 117442304
+  %21 = v_perm_b32 %8, %9, %20
+  %22 = v_pk_lshlrev_b16 %7, %19
+  %23 = v_and_b32_lit %22, 2147516416
+  %24 = v_or_b32 %21, %23
+  %25 = v_perm_b32_src1_zero_src2_lit %10, 393222
+  %26 = v_pk_lshlrev_b16 %6, %25
+  %27 = v_and_b32_lit %26, 117442304
+  %28 = v_perm_b32 %8, %9, %27
+  %29 = v_pk_lshlrev_b16 %7, %26
+  %30 = v_and_b32_lit %29, 2147516416
+  %31 = v_or_b32 %28, %30
+  %32 = v_perm_b32_src1_zero_src2_lit %10, 458759
+  %33 = v_pk_lshlrev_b16 %6, %32
+  %34 = v_and_b32_lit %33, 117442304
+  %35 = v_perm_b32 %8, %9, %34
+  %36 = v_pk_lshlrev_b16 %7, %33
+  %37 = v_and_b32_lit %36, 2147516416
+  %38 = v_or_b32 %35, %37
+  %39 = slice %payload[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %40 = v_perm_b32_src1_zero_src2_lit %39, 262148
+  %41 = v_pk_lshlrev_b16 %6, %40
+  %42 = v_and_b32_lit %41, 117442304
+  %43 = v_perm_b32 %8, %9, %42
+  %44 = v_pk_lshlrev_b16 %7, %41
+  %45 = v_and_b32_lit %44, 2147516416
+  %46 = v_or_b32 %43, %45
+  %47 = v_perm_b32_src1_zero_src2_lit %39, 327685
+  %48 = v_pk_lshlrev_b16 %6, %47
+  %49 = v_and_b32_lit %48, 117442304
+  %50 = v_perm_b32 %8, %9, %49
+  %51 = v_pk_lshlrev_b16 %7, %48
+  %52 = v_and_b32_lit %51, 2147516416
+  %53 = v_or_b32 %50, %52
+  %54 = v_perm_b32_src1_zero_src2_lit %39, 393222
+  %55 = v_pk_lshlrev_b16 %6, %54
+  %56 = v_and_b32_lit %55, 117442304
+  %57 = v_perm_b32 %8, %9, %56
+  %58 = v_pk_lshlrev_b16 %7, %55
+  %59 = v_and_b32_lit %58, 2147516416
+  %60 = v_or_b32 %57, %59
+  %61 = v_perm_b32_src1_zero_src2_lit %39, 458759
+  %62 = v_pk_lshlrev_b16 %6, %61
+  %63 = v_and_b32_lit %62, 117442304
+  %64 = v_perm_b32 %8, %9, %63
+  %65 = v_pk_lshlrev_b16 %7, %62
+  %66 = v_and_b32_lit %65, 2147516416
+  %67 = v_or_b32 %64, %66
+  %decoded = concat(%17, %24, %31, %38, %46, %53, %60, %67) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  return %decoded
+}

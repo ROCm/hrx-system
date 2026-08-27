@@ -50,7 +50,8 @@ static bool hip_registered_ =
          "hip",
          {"hip",
           CreateHipDevice,
-          /*executable_format=*/nullptr,
+          /*executable_target_family=*/nullptr,
+          /*executable_target_key=*/nullptr,
           /*executable_data=*/nullptr,
           RecordingMode::kDirect,
           /*unsupported_tests=*/
@@ -103,7 +104,6 @@ static bool hip_registered_ =
                "MultiQueueFanOutDifferentValuesBeforeSignal",
                "Blocked by the same HIP queue pool backend UNIMPLEMENTED "
                "path as CrossQueueWaitBeforeSignal."},
-              {"EventTest.*", "HIP does not implement HAL events"},
               {"ExecutableTest.*",
                "HIP does not implement executable reflection"},
               {"QueueDispatchIndirectParametersTest.*",
@@ -208,7 +208,7 @@ static bool hip_registered_ =
                "HIP dispatch reuse CTS can hit ROCm memory reservation "
                "failures and invalid binding tables on RDNA runners."},
           }},
-         {"async_queue"},
+         {"async_queue", "file_io"},
      }),
      true);
 

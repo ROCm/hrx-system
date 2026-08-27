@@ -32,7 +32,6 @@ iree_py_library(
   NAME
     low_descriptor_shard
   SRCS
-    "__init__.py"
     "low_descriptor_shard.py"
   DEPS
     loom::py::loom::gen::target::low::low_descriptors
@@ -41,12 +40,19 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    cmd_low_descriptor_shard
+  MAIN_MODULE
+    "loom.gen.target.low.low_descriptor_shard"
+  DEPS
+    loom::py::loom::gen::target::low::low_descriptor_shard
+    loom::py::loom::target::arch::cmd::descriptors
+)
+
+iree_py_library(
+  NAME
     ireevm_low_descriptor_shard
-  MAIN
-    "low_descriptor_shard.py"
-  SRCS
-    "__init__.py"
-    "low_descriptor_shard.py"
+  MAIN_MODULE
+    "loom.gen.target.low.low_descriptor_shard"
   DEPS
     loom::py::loom::gen::target::low::low_descriptor_shard
     loom::py::loom::target::arch::ireevm::descriptors
@@ -55,11 +61,8 @@ iree_py_library(
 iree_py_library(
   NAME
     llvmir_low_descriptor_shard
-  MAIN
-    "low_descriptor_shard.py"
-  SRCS
-    "__init__.py"
-    "low_descriptor_shard.py"
+  MAIN_MODULE
+    "loom.gen.target.low.low_descriptor_shard"
   DEPS
     loom::py::loom::gen::target::low::low_descriptor_shard
     loom::py::loom::target::arch::llvmir::descriptors
@@ -68,11 +71,8 @@ iree_py_library(
 iree_py_library(
   NAME
     spirv_low_descriptor_shard
-  MAIN
-    "low_descriptor_shard.py"
-  SRCS
-    "__init__.py"
-    "low_descriptor_shard.py"
+  MAIN_MODULE
+    "loom.gen.target.low.low_descriptor_shard"
   DEPS
     loom::py::loom::gen::target::low::low_descriptor_shard
     loom::py::loom::target::arch::spirv::descriptors
@@ -81,11 +81,8 @@ iree_py_library(
 iree_py_library(
   NAME
     wasm_low_descriptor_shard
-  MAIN
-    "low_descriptor_shard.py"
-  SRCS
-    "__init__.py"
-    "low_descriptor_shard.py"
+  MAIN_MODULE
+    "loom.gen.target.low.low_descriptor_shard"
   DEPS
     loom::py::loom::gen::target::low::low_descriptor_shard
     loom::py::loom::target::arch::wasm::descriptors
@@ -94,11 +91,8 @@ iree_py_library(
 iree_py_library(
   NAME
     test_low_descriptor_shard
-  MAIN
-    "low_descriptor_shard.py"
-  SRCS
-    "__init__.py"
-    "low_descriptor_shard.py"
+  MAIN_MODULE
+    "loom.gen.target.low.low_descriptor_shard"
   DEPS
     loom::py::loom::gen::target::low::low_descriptor_shard
     loom::py::loom::target::test::descriptors
@@ -107,11 +101,17 @@ iree_py_library(
 iree_py_test(
   NAME
     low_descriptors_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
   SRCS
+    "low_descriptor_shard_test.py"
+    "low_descriptors_test.py"
+    "physical_validation_test.py"
     "../../../tools/pytest_style_runner.py"
   ARGS
     "loom.gen.target.low.low_descriptor_shard_test"
     "loom.gen.target.low.low_descriptors_test"
+    "loom.gen.target.low.physical_validation_test"
   DEPS
     loom::py::loom::gen::target::low::low_descriptor_shard
     loom::py::loom::gen::target::low::low_descriptors
@@ -121,6 +121,7 @@ iree_py_test(
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -39,6 +39,7 @@ iree_cc_library(
     iree::async::util::intrusive_list
     iree::async::util::message_pool
     iree::async::util::operation_pool
+    iree::async::util::semaphore_wait
     iree::async::util::sequence_emulation
     iree::async::util::signal
     iree::base
@@ -91,6 +92,7 @@ iree_cc_library(
     ::defs
     iree::base
     iree::base::internal
+    iree::base::threading
   PUBLIC
 )
 endif()
@@ -132,6 +134,22 @@ iree_cc_test(
   DEPS
     ::defs
     ::uring
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    proactor_lifetime_test
+  SRCS
+    "proactor_lifetime_test.cc"
+  DEPS
+    ::io_uring
+    iree::async
+    iree::async::types
+    iree::base
     iree::testing::gtest
     iree::testing::gtest_main
 )

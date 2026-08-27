@@ -44,7 +44,7 @@ static iree_status_t iree_hal_emulated_host_call_issue(
 
   if (is_nonblocking || iree_status_is_deferred(call_status)) {
     // User callback will signal in the future (or they are fire-and-forget).
-    iree_status_ignore(call_status);
+    iree_status_free(call_status);
   } else if (iree_status_is_ok(call_status)) {
     // Signal callback completed synchronously.
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -56,7 +56,7 @@ static iree_status_t iree_hal_emulated_host_call_issue(
     if (!is_nonblocking) {
       iree_hal_semaphore_list_fail(signal_semaphore_list, call_status);
     } else {
-      iree_status_ignore(call_status);
+      iree_status_free(call_status);
     }
   }
 
@@ -135,6 +135,7 @@ static int iree_hal_emulated_host_call_main(void* entry_arg) {
 
   // Release signal semaphores.
   iree_hal_semaphore_list_release(state->signal_semaphore_list);
+  iree_hal_resource_release(state->call.resource);
 
   // Deallocate state (note that we must take the thread handle locally).
   iree_allocator_t host_allocator =
@@ -188,6 +189,7 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_emulated_host_call(
   state->device = device;
   state->queue_affinity = queue_affinity;
   state->call = call;
+  iree_hal_resource_retain(state->call.resource);
   memcpy(state->args, args, sizeof(state->args));
   state->flags = flags;
 
@@ -238,6 +240,7 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_emulated_host_call(
   if (!iree_status_is_ok(status)) {
     iree_hal_semaphore_list_release(state->wait_semaphore_list);
     iree_hal_semaphore_list_release(state->signal_semaphore_list);
+    iree_hal_resource_release(state->call.resource);
     iree_allocator_free(host_allocator, state);
   }
 

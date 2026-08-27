@@ -88,6 +88,8 @@ _GCC_CXXOPTS = [
 
 _MSVC_COPTS = [
     "/W3",
+    "/WX",
+    "/utf-8",
     "/DWIN32_LEAN_AND_MEAN",
     "/DNOMINMAX",
     "/D_USE_MATH_DEFINES",
@@ -109,13 +111,32 @@ _MSVC_COPTS = [
     "/wd5105",  # Macro expansion producing 'defined' has undefined behavior.
 ]
 
-_MSVC_CONLYOPTS = [
-    "/std:c11",
+_CLANG_CL_COPTS = _MSVC_COPTS + [
+    "-Wno-unused-function",
+    "-Wno-unused-lambda-capture",
+    "-Wno-unused-variable",
 ]
+
+_MSVC_ONLY_COPTS = [
+    # Enable the standards-conforming preprocessor required by __VA_OPT__.
+    # clang-cl is already conforming and diagnoses this option as unused.
+    "/Zc:preprocessor",
+]
+
+# The rules_cc Windows toolchain enables its standards-conforming C17 mode.
+# Do not append another /std option: MSVC warns whenever the later option
+# overrides the toolchain default, and C17 preserves the C11 language surface
+# required by IREE code.
+_MSVC_CONLYOPTS = []
 
 _MSVC_CXXOPTS = [
     "/GR-",
     "/std:c++17",
+    "/Zc:__cplusplus",
+]
+
+_CLANG_CL_CXXOPTS = _MSVC_CXXOPTS + [
+    "-Wno-invalid-offsetof",
 ]
 
 def _append(values, appended_values):
@@ -125,10 +146,14 @@ def _append(values, appended_values):
         appended_values = []
     return values + appended_values
 
-def _compiler_options(clang_options, gcc_options, msvc_options):
+def _compiler_options(
+        clang_options,
+        gcc_options,
+        clang_cl_options,
+        msvc_options):
     return select({
         "//build_tools/bazel:cc_compiler_clang": clang_options,
-        "//build_tools/bazel:cc_compiler_clang_cl": msvc_options,
+        "//build_tools/bazel:cc_compiler_clang_cl": clang_cl_options,
         "//build_tools/bazel:cc_compiler_gcc": gcc_options,
         "//build_tools/bazel:cc_compiler_msvc": msvc_options,
         "//conditions:default": clang_options,
@@ -146,15 +171,30 @@ def _iree_code_compiler_options(
     """
     return struct(
         copts = _append(
-            _compiler_options(_CLANG_COPTS, _GCC_COPTS, _MSVC_COPTS),
+            _compiler_options(
+                _CLANG_COPTS,
+                _GCC_COPTS,
+                _CLANG_CL_COPTS,
+                _MSVC_COPTS + _MSVC_ONLY_COPTS,
+            ),
             copts,
         ),
         conlyopts = _append(
-            _compiler_options(_CLANG_CONLYOPTS, _GCC_CONLYOPTS, _MSVC_CONLYOPTS),
+            _compiler_options(
+                _CLANG_CONLYOPTS,
+                _GCC_CONLYOPTS,
+                _MSVC_CONLYOPTS,
+                _MSVC_CONLYOPTS,
+            ),
             conlyopts,
         ),
         cxxopts = _append(
-            _compiler_options(_CLANG_CXXOPTS, _GCC_CXXOPTS, _MSVC_CXXOPTS),
+            _compiler_options(
+                _CLANG_CXXOPTS,
+                _GCC_CXXOPTS,
+                _CLANG_CL_CXXOPTS,
+                _MSVC_CXXOPTS,
+            ),
             cxxopts,
         ),
     )

@@ -1,0 +1,19 @@
+// RUN: emit source-low output=low
+
+wasm.target<simd128> @target
+func.def target(@target) @i32x4_memory_wasm32_address_boundary(%input: buffer, %i: index) -> (vector<4xi32>) {
+  %bounded_i = index.assume %i [range(%i, 0, 1073741820)] : index
+  %input_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%input_base] : buffer -> view<1073741824xi32>
+  %loaded = vector.load %input_view[%bounded_i] : view<1073741824xi32> -> vector<4xi32>
+  func.return %loaded : vector<4xi32>
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @i32x4_memory_wasm32_address_boundary(%input_view: reg<wasm.i32>, %bounded_i: reg<wasm.i32>) -> (reg<wasm.v128>) asm {
+  %10 = i32.const 4
+  %11 = i32.mul %bounded_i, %10
+  %12 = i32.add %input_view, %11
+  %loaded = v128.load %12
+  return %loaded
+}

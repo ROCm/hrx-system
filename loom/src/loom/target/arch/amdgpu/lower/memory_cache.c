@@ -83,12 +83,12 @@ typedef struct loom_amdgpu_memory_cache_policy_encoding_row_t {
 } loom_amdgpu_memory_cache_policy_encoding_row_t;
 
 static const int64_t kAmdgpuGfx12CacheTemporalTh[LOOM_CACHE_TEMPORAL_COUNT_] = {
-#include "loom/target/arch/amdgpu/lower/memory_cache_policy_temporal_th.inl"
+#include "loom/target/arch/amdgpu/memory_cache_policy_temporal_th.inl"
 };
 
 static const loom_amdgpu_memory_cache_policy_encoding_row_t
     kAmdgpuMemoryCachePolicyEncodingRows[] = {
-#include "loom/target/arch/amdgpu/lower/memory_cache_policy_encoding_rows.inl"
+#include "loom/target/arch/amdgpu/memory_cache_policy_encoding_rows.inl"
 };
 
 static const loom_amdgpu_memory_cache_policy_encoding_row_t*
@@ -131,7 +131,7 @@ static iree_string_view_t loom_amdgpu_memory_cache_policy_selected_name(
   return IREE_SV("memory_cache_policy.invalid");
 }
 
-static loom_amdgpu_vector_memory_cache_policy_encoding_t
+loom_amdgpu_vector_memory_cache_policy_encoding_t
 loom_amdgpu_memory_cache_policy_descriptor_encoding(
     const loom_low_descriptor_set_t* descriptor_set) {
   const loom_amdgpu_descriptor_set_info_t* descriptor_set_info =
@@ -159,7 +159,8 @@ static bool loom_amdgpu_memory_cache_policy_bits_contain(uint32_t bits,
   return ordinal < 32 && iree_any_bit_set(bits, (uint32_t)1u << ordinal);
 }
 
-bool loom_amdgpu_memory_cache_policy_encode(
+loom_amdgpu_memory_cache_policy_resolution_t
+loom_amdgpu_memory_cache_policy_resolve(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_memory_access_t* access,
     loom_amdgpu_memory_cache_policy_attrs_t* out_attrs) {
@@ -168,28 +169,30 @@ bool loom_amdgpu_memory_cache_policy_encode(
   const loom_vector_memory_cache_policy_t* policy =
       &access->source.cache_policy;
   if (!loom_amdgpu_memory_cache_policy_is_present(policy)) {
-    return true;
+    return LOOM_AMDGPU_MEMORY_CACHE_POLICY_RESOLUTION_ABSENT;
   }
   if (!loom_amdgpu_memory_cache_policy_is_complete(policy) ||
       access->source.memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
-    return false;
+    return LOOM_AMDGPU_MEMORY_CACHE_POLICY_RESOLUTION_REJECTED;
   }
 
   const loom_amdgpu_descriptor_set_info_t* descriptor_set_info =
       loom_amdgpu_target_info_descriptor_set_at(
           descriptor_set->descriptor_set_ordinal);
   if (descriptor_set_info == NULL) {
-    return false;
+    return LOOM_AMDGPU_MEMORY_CACHE_POLICY_RESOLUTION_REJECTED;
   }
   const loom_amdgpu_memory_cache_policy_encoding_row_t* row =
       loom_amdgpu_memory_cache_policy_encoding_row(
           descriptor_set_info->vector_memory.cache_policy_encoding);
-  if (row == NULL ||
-      !loom_amdgpu_memory_cache_policy_bits_contain(row->scope_bits,
+  if (row == NULL) {
+    return LOOM_AMDGPU_MEMORY_CACHE_POLICY_RESOLUTION_REJECTED;
+  }
+  if (!loom_amdgpu_memory_cache_policy_bits_contain(row->scope_bits,
                                                     policy->cache_scope) ||
       !loom_amdgpu_memory_cache_policy_bits_contain(row->temporal_bits,
                                                     policy->cache_temporal)) {
-    return false;
+    return LOOM_AMDGPU_MEMORY_CACHE_POLICY_RESOLUTION_DROPPED;
   }
 
   if (iree_any_bit_set(row->attr_flags,
@@ -210,14 +213,16 @@ bool loom_amdgpu_memory_cache_policy_encode(
     out_attrs->flags |= LOOM_AMDGPU_MEMORY_CACHE_POLICY_ATTR_NT;
     out_attrs->nt = 1;
   }
-  return true;
+  return LOOM_AMDGPU_MEMORY_CACHE_POLICY_RESOLUTION_ENCODED;
 }
 
 bool loom_amdgpu_memory_cache_policy_can_lower(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_memory_access_t* access) {
   loom_amdgpu_memory_cache_policy_attrs_t attrs;
-  return loom_amdgpu_memory_cache_policy_encode(descriptor_set, access, &attrs);
+  return loom_amdgpu_memory_cache_policy_resolve(descriptor_set, access,
+                                                 &attrs) !=
+         LOOM_AMDGPU_MEMORY_CACHE_POLICY_RESOLUTION_REJECTED;
 }
 
 iree_string_view_t loom_amdgpu_memory_cache_policy_rejection_key(

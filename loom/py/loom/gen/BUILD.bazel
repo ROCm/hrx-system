@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:python.bzl", "iree_py_library")
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
 
 package(
     default_visibility = ["//loom/py/loom/gen:__subpackages__"],
@@ -14,9 +14,57 @@ package(
 iree_py_library(
     name = "package",
     srcs = ["__init__.py"],
+    imports = ["../.."],
 )
 
 iree_py_library(
     name = "bootstrap",
     srcs = ["bootstrap.py"],
+    deps = [":package"],
+)
+
+iree_py_library(
+    name = "checked_in_artifacts",
+    srcs = ["checked_in_artifacts.py"],
+    tags = ["skip-bazel_to_cmake"],
+    visibility = ["//loom/build_tools:__pkg__"],
+    deps = [
+        ":bootstrap",
+        "//loom/build_tools/amdgpu:target_config",
+        "//loom/py/loom/dialect:package",
+        "//loom/py/loom/gen/editor:textmate",
+        "//loom/py/loom/gen/ops:c_tables",
+        "//loom/py/loom/gen/python",
+        "//loom/py/loom/gen/support",
+        "//loom/py/loom/gen/target/arch/x86:packed_dot_contract",
+        "//loom/py/loom/gen/test:numeric_conversion_matrix",
+        "//loom/py/loom/target/arch/amdgpu:dialect",
+        "//loom/py/loom/target/arch/ireevm:dialect",
+        "//loom/py/loom/target/arch/spirv:dialect",
+        "//loom/py/loom/target/arch/wasm:dialect",
+        "//loom/py/loom/target/arch/x86:dialect",
+    ],
+)
+
+iree_py_test(
+    name = "bootstrap_test",
+    srcs = [
+        "bootstrap_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.gen.bootstrap_test"],
+    main = "pytest_style_runner.py",
+    deps = [":bootstrap"],
+)
+
+iree_py_test(
+    name = "checked_in_artifacts_test",
+    srcs = [
+        "checked_in_artifacts_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.gen.checked_in_artifacts_test"],
+    main = "pytest_style_runner.py",
+    tags = ["skip-bazel_to_cmake"],
+    deps = [":checked_in_artifacts"],
 )

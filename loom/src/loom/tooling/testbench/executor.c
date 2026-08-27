@@ -114,48 +114,102 @@ iree_status_t loom_testbench_run_case_sample(
       &executor->materializer_options, case_plan, sample_ordinal,
       &executor->value_table));
   IREE_RETURN_IF_ERROR(loom_testbench_run_case_invocations(
-      &executor->invocation_executor, &executor->value_table));
-  loom_testbench_case_sample_observations_t observations =
-      loom_testbench_case_sample_observations_empty();
-  loom_testbench_device_event_list_t device_events = {0};
-  if (executor->device_event_capture != NULL) {
-    loom_testbench_device_event_capture_events(executor->device_event_capture,
-                                               &device_events);
-    observations.device_events = &device_events;
+      &executor->invocation_executor, sample_ordinal, &executor->value_table));
+  const bool has_sample_issues = executor->invocation_executor.issue_count != 0;
+  if (!has_sample_issues) {
+    loom_testbench_case_sample_observations_t observations =
+        loom_testbench_case_sample_observations_empty();
+    loom_testbench_device_event_list_t device_events = {0};
+    if (executor->device_event_capture != NULL) {
+      loom_testbench_device_event_capture_events(executor->device_event_capture,
+                                                 &device_events);
+      observations.device_events = &device_events;
+    }
+    IREE_RETURN_IF_ERROR(loom_testbench_evaluate_case_expectations(
+        &executor->prepared_case->expectation_schedule, &executor->value_table,
+        &observations, &executor->expectation_report));
   }
-  IREE_RETURN_IF_ERROR(loom_testbench_evaluate_case_expectations(
-      &executor->prepared_case->expectation_schedule, &executor->value_table,
-      &observations, &executor->expectation_report));
 
-  bool case_failed = executor->expectation_report.failure_count != 0;
-  IREE_RETURN_IF_ERROR(loom_testbench_write_case_files(
-      &executor->materializer_options, case_plan, &executor->value_table,
-      case_failed));
+  const bool case_failed =
+      has_sample_issues || executor->expectation_report.failure_count != 0;
+  if (!has_sample_issues) {
+    IREE_RETURN_IF_ERROR(loom_testbench_write_case_files(
+        &executor->materializer_options, case_plan, &executor->value_table,
+        case_failed));
+  }
 
   out_result->case_plan = case_plan;
   out_result->sample_ordinal = sample_ordinal;
+  out_result->issues = executor->invocation_executor.issues;
+  out_result->issue_count = executor->invocation_executor.issue_count;
   out_result->passed = !case_failed;
   out_result->expectation_report = &executor->expectation_report;
   return iree_ok_status();
 }
 
+static const char* loom_testbench_sample_issue_category_name(
+    loom_testbench_sample_issue_category_t category) {
+  switch (category) {
+    case LOOM_TESTBENCH_SAMPLE_ISSUE_NONE:
+      return "none";
+    case LOOM_TESTBENCH_SAMPLE_ISSUE_COMPILE_REJECTED:
+      return "compile_rejected";
+    default:
+      return "unknown";
+  }
+}
+
+static iree_status_t loom_testbench_write_sample_issue_json(
+    const loom_testbench_sample_issue_t* issue, loom_output_stream_t* stream) {
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("category"),
+      iree_make_cstring_view(
+          loom_testbench_sample_issue_category_name(issue->category))));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field_if_nonempty(
+      &object, IREE_SV("provider"), issue->provider));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field_if_nonempty(
+      &object, IREE_SV("stage"), issue->stage));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field_if_nonempty(
+      &object, IREE_SV("kind"), issue->kind));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field_if_nonempty(
+      &object, IREE_SV("message"), issue->message));
+  return loom_json_object_end(&object);
+}
+
+static iree_status_t loom_testbench_write_sample_issues_json(
+    const loom_testbench_case_sample_result_t* result,
+    loom_json_object_writer_t* object) {
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(object, IREE_SV("issues")));
+  loom_json_array_writer_t issues;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(object->stream, &issues));
+  for (iree_host_size_t i = 0; i < result->issue_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&issues));
+    IREE_RETURN_IF_ERROR(loom_testbench_write_sample_issue_json(
+        &result->issues[i], object->stream));
+  }
+  return loom_json_array_end(&issues);
+}
+
 iree_status_t loom_testbench_case_sample_result_write_json(
     const loom_testbench_case_sample_result_t* result,
     loom_output_stream_t* stream) {
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "\"case\":"));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("case"), result->case_plan->name));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("sample_ordinal"), result->sample_ordinal));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
+      &object, IREE_SV("passed"), result->passed));
   IREE_RETURN_IF_ERROR(
-      loom_json_write_escaped_string(stream, result->case_plan->name));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, ",\"sample_ordinal\":%" PRIhsz, result->sample_ordinal));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"passed\":"));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(
-      stream, result->passed ? "true" : "false"));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"expectations\":"));
+      loom_json_object_begin_field(&object, IREE_SV("expectations")));
   IREE_RETURN_IF_ERROR(loom_testbench_expectation_report_write_json(
       result->expectation_report, stream));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "}"));
-  return iree_ok_status();
+  if (result->issue_count != 0) {
+    IREE_RETURN_IF_ERROR(
+        loom_testbench_write_sample_issues_json(result, &object));
+  }
+  return loom_json_object_end(&object);
 }

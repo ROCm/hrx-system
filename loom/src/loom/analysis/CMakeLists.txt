@@ -11,6 +11,44 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    control_uniformity
+  HDRS
+    "control_uniformity.h"
+  SRCS
+    "control_uniformity.c"
+  DEPS
+    ::scc
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::ir::facts
+    loom::ops::op_defs
+    loom::util::cfg_graph
+    loom::util::fact_table
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    control_uniformity_test
+  SRCS
+    "control_uniformity_test.cc"
+  DEPS
+    ::control_uniformity
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::ir
+    loom::ops::cfg
+    loom::ops::func
+    loom::ops::scalar
+    loom::ops::test
+    loom::testing::module_ptr
+)
+
+loom_cc_library(
+  NAME
     availability
   HDRS
     "availability.h"
@@ -22,6 +60,31 @@ loom_cc_library(
     loom::ir
     loom::util::dominance
   PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    symbol_value_constraints
+  HDRS
+    "symbol_value_constraints.h"
+  SRCS
+    "symbol_value_constraints.c"
+  DEPS
+    iree::base
+    loom::ir
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    symbol_value_constraints_test
+  SRCS
+    "symbol_value_constraints_test.cc"
+  DEPS
+    ::symbol_value_constraints
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
 )
 
 loom_cc_test(
@@ -49,6 +112,7 @@ loom_cc_library(
   DEPS
     ::integer_relation
     iree::base
+    iree::base::internal::arena
     loom::ir
     loom::ir::facts
     loom::ops::index
@@ -71,6 +135,21 @@ loom_cc_test(
     loom::ops::index
     loom::ops::scalar
     loom::util::fact_table
+)
+
+loom_cc_benchmark(
+  NAME
+    condition_facts_benchmark
+  SRCS
+    "condition_facts_benchmark.cc"
+  DEPS
+    ::condition_facts
+    iree::base::internal::arena
+    iree::testing::benchmark_main
+    loom::ir
+    loom::ops::scalar
+    loom::util::fact_table
+  TESTONLY
 )
 
 loom_cc_library(
@@ -113,11 +192,11 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
-    func_provider_catalog
+    template_provider_catalog
   HDRS
-    "func_provider_catalog.h"
+    "template_provider_catalog.h"
   SRCS
-    "func_provider_catalog.c"
+    "template_provider_catalog.c"
   DEPS
     ::symbol_facts
     iree::base
@@ -125,17 +204,19 @@ loom_cc_library(
     loom::ir
     loom::ops::func_symbol_facts
     loom::ops::op_defs
+    loom::ops::target
+    loom::target::facts
   PUBLIC
 )
 
 loom_cc_test(
   NAME
-    func_provider_catalog_test
+    template_provider_catalog_test
   SRCS
-    "func_provider_catalog_test.cc"
+    "template_provider_catalog_test.cc"
   DEPS
-    ::func_provider_catalog
     ::symbol_facts
+    ::template_provider_catalog
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
@@ -143,8 +224,21 @@ loom_cc_test(
     loom::ir
     loom::ops::func
     loom::ops::op_defs
+    loom::ops::target
+    loom::ops::template
     loom::ops::test
     loom::testing::module_ptr
+)
+
+loom_cc_library(
+  NAME
+    native_layout
+  HDRS
+    "native_layout.h"
+  DEPS
+    ::contract_roles
+    iree::base
+  PUBLIC
 )
 
 loom_cc_library(
@@ -156,6 +250,7 @@ loom_cc_library(
     "matrix_fragment_layout.c"
   DEPS
     ::contract_roles
+    ::native_layout
     iree::base
   PUBLIC
 )
@@ -251,6 +346,7 @@ loom_cc_library(
   SRCS
     "kernel_async_legality.c"
   DEPS
+    ::control_uniformity
     ::movement
     iree::base
     iree::base::internal::arena
@@ -280,6 +376,7 @@ loom_cc_library(
     loom::ops::func_symbol_facts
     loom::ops::kernel
     loom::pass::value_facts
+    loom::target::facts
     loom::target::function_contract
     loom::target::types
   PUBLIC
@@ -298,6 +395,8 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::format::text::parser
     loom::ir
+    loom::target::facts
+    loom::target::types
     loom::testing::context
     loom::testing::module_ptr
 )
@@ -306,14 +405,19 @@ loom_cc_library(
   NAME
     vector_memory_footprint
   HDRS
+    "memory_root_bounds.h"
     "vector_memory_footprint.h"
+    "vector_memory_mask_bounds.h"
   SRCS
+    "memory_root_bounds.c"
     "vector_memory_footprint.c"
+    "vector_memory_mask_bounds.c"
   DEPS
     ::cfg_condition_facts
     ::condition_facts
     ::symbolic_expr
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::error::emitter
     loom::error::error_defs
@@ -327,7 +431,6 @@ loom_cc_library(
     loom::util::cfg_graph
     loom::util::dominance
     loom::util::fact_table
-    loom::util::math
   PUBLIC
 )
 
@@ -390,6 +493,7 @@ loom_cc_library(
     iree::base
     loom::ops::encoding
     loom::util::fact_table
+    loom::util::numeric_format
   PUBLIC
 )
 
@@ -441,6 +545,7 @@ loom_cc_library(
     ::contract_storage
     iree::base
     loom::ir
+    loom::ops::encoding
     loom::ops::vector
     loom::util::fact_table
   PUBLIC
@@ -480,7 +585,9 @@ loom_cc_library(
     iree::base::internal::arena
     loom::ir
     loom::target::registers
+    loom::util::adaptive_sort
     loom::util::cfg_graph
+    loom::util::segmented_storage
   PUBLIC
 )
 
@@ -577,13 +684,13 @@ loom_cc_library(
   DEPS
     ::view_regions
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::ir
     loom::ir::facts
     loom::ops::kernel
     loom::ops::vector
     loom::util::fact_table
-    loom::util::math
   PUBLIC
 )
 
@@ -605,6 +712,7 @@ loom_cc_test(
     loom::ops::kernel
     loom::ops::test
     loom::ops::vector
+    loom::ops::view
     loom::util::fact_table
 )
 
@@ -617,6 +725,8 @@ loom_cc_library(
     "motion.c"
   DEPS
     ::availability
+    ::loop_domain
+    ::movement
     iree::base
     iree::base::internal::arena
     loom::ir
@@ -667,27 +777,29 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
-    symbol_dependencies
+    symbol_references
   HDRS
-    "symbol_dependencies.h"
+    "symbol_references.h"
   SRCS
-    "symbol_dependencies.c"
+    "symbol_references.c"
   DEPS
     ::scc
     iree::base
     iree::base::internal::arena
     loom::ir
+    loom::ops::func
     loom::ops::op_defs
+    loom::ops::template
   PUBLIC
 )
 
 loom_cc_test(
   NAME
-    symbol_dependencies_test
+    symbol_references_test
   SRCS
-    "symbol_dependencies_test.cc"
+    "symbol_references_test.cc"
   DEPS
-    ::symbol_dependencies
+    ::symbol_references
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
@@ -696,7 +808,10 @@ loom_cc_test(
     loom::ops::config
     loom::ops::func
     loom::ops::global
+    loom::ops::kernel
     loom::ops::op_defs
+    loom::ops::target
+    loom::ops::template
     loom::ops::test
     loom::testing::module_ptr
 )
@@ -740,7 +855,7 @@ loom_cc_library(
   SRCS
     "symbol_liveness.c"
   DEPS
-    ::symbol_dependencies
+    ::symbol_references
     iree::base
     iree::base::internal::arena
     loom::ir
@@ -754,8 +869,8 @@ loom_cc_test(
   SRCS
     "symbol_liveness_test.cc"
   DEPS
-    ::symbol_dependencies
     ::symbol_liveness
+    ::symbol_references
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
@@ -763,6 +878,8 @@ loom_cc_test(
     loom::ir
     loom::ops::func
     loom::ops::op_defs
+    loom::ops::template
+    loom::ops::test
     loom::testing::module_ptr
 )
 
@@ -771,12 +888,17 @@ loom_cc_library(
     symbolic_expr
   HDRS
     "symbolic_expr.h"
+    "symbolic_expr_proof.h"
   SRCS
     "symbolic_expr.c"
+    "symbolic_expr_proof.c"
+    "symbolic_value.c"
+    "symbolic_value.h"
   DEPS
     ::condition_facts
     ::integer_relation
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::ir
     loom::ir::facts
@@ -784,8 +906,26 @@ loom_cc_library(
     loom::ops::kernel
     loom::ops::scalar
     loom::ops::scf
+    loom::util::adaptive_sort
     loom::util::fact_table
-    loom::util::math
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    symbolic_expr_test_fixture
+  HDRS
+    "symbolic_expr_test_fixture.h"
+  DEPS
+    ::symbolic_expr
+    iree::base::internal::arena
+    iree::testing::gtest
+    loom::ir
+    loom::ops::index
+    loom::ops::scalar
+    loom::ops::scf
+    loom::util::fact_table
+  TESTONLY
   PUBLIC
 )
 
@@ -816,6 +956,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::ir
+    loom::ir::facts
     loom::ir::type_refinement
     loom::util::fact_table
 )
@@ -830,6 +971,7 @@ loom_cc_library(
   DEPS
     ::symbolic_expr
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::ir
     loom::ir::facts
@@ -838,7 +980,6 @@ loom_cc_library(
     loom::ops::op_defs
     loom::ops::view
     loom::util::fact_table
-    loom::util::math
   PUBLIC
 )
 
@@ -868,8 +1009,25 @@ loom_cc_test(
   SRCS
     "symbolic_expr_test.cc"
   DEPS
+    ::symbolic_expr
+    ::symbolic_expr_test_fixture
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::ops::index
+    loom::ops::scalar
+    loom::ops::scf
+)
+
+loom_cc_test(
+  NAME
+    symbolic_expr_proof_test
+  SRCS
+    "symbolic_expr_proof_test.cc"
+  DEPS
     ::condition_facts
     ::symbolic_expr
+    ::symbolic_expr_test_fixture
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main

@@ -1,0 +1,17 @@
+func.decl pure hot inline @source(%value: i32) -> (i32)
+
+func.decl @selected(%value: i32) -> (i32)
+
+func.decl pure cold inline @field_mismatch(%value: i32) -> (i32)
+
+func.decl @argument_count_mismatch(%lhs: i32, %rhs: i32) -> (i32)
+
+func.decl @argument_type_mismatch(%value: f32) -> (i32)
+
+func.decl @result_type_mismatch(%value: i32) -> (f32)
+
+kernel.decl @kernel_source(%workload_count: index) launch(%value: i32)
+
+kernel.decl @kernel_count_mismatch(%workload_x: index, %workload_y: index) launch(%value: i32)
+
+kernel.decl @kernel_type_mismatch(%workload_count: i32) launch(%value: i32)

@@ -1,0 +1,48 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// Exercises workgroup scan stitching across every native 32-lane partition in
+// a wave64 gfx11 workgroup.
+amdgpu.target<gfx11-generic> @workgroup_scan_gfx11_wave64 {subgroup_size = 64}
+
+kernel.def target(@workgroup_scan_gfx11_wave64) @workgroup_scan_wave64() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 1024 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%forward_inclusive_output: buffer, %forward_exclusive_output: buffer, %reverse_inclusive_output: buffer, %reverse_exclusive_output: buffer) {
+  %scan_input = scalar.constant 1 : i32
+  %base = index.constant 0 : offset
+  %thread = kernel.workitem.id<x> : index
+  %forward_inclusive_view = buffer.view %forward_inclusive_output[%base] : buffer -> view<1024xi32>
+  %forward_exclusive_view = buffer.view %forward_exclusive_output[%base] : buffer -> view<1024xi32>
+  %reverse_inclusive_view = buffer.view %reverse_inclusive_output[%base] : buffer -> view<1024xi32>
+  %reverse_exclusive_view = buffer.view %reverse_exclusive_output[%base] : buffer -> view<1024xi32>
+  %forward_inclusive = kernel.workgroup.scan<addi> %scan_input {direction = forward, mode = inclusive} : i32
+  %forward_exclusive = kernel.workgroup.scan<addi> %scan_input {direction = forward, mode = exclusive} : i32
+  %reverse_inclusive = kernel.workgroup.scan<addi> %scan_input {direction = reverse, mode = inclusive} : i32
+  %reverse_exclusive = kernel.workgroup.scan<addi> %scan_input {direction = reverse, mode = exclusive} : i32
+  view.store %forward_inclusive, %forward_inclusive_view[%thread] : i32, view<1024xi32>
+  view.store %forward_exclusive, %forward_exclusive_view[%thread] : i32, view<1024xi32>
+  view.store %reverse_inclusive, %reverse_inclusive_view[%thread] : i32, view<1024xi32>
+  view.store %reverse_exclusive, %reverse_exclusive_view[%thread] : i32, view<1024xi32>
+  kernel.return
+}
+
+check.case public @workgroup_scan_wave64_partitions {
+  %expected_forward_inclusive = check.generate.iota offset(1) step(1) : tensor<1024xi32>
+  %expected_forward_exclusive = check.generate.iota offset(0) step(1) : tensor<1024xi32>
+  %expected_reverse_inclusive = check.generate.iota offset(1024) step(-1) : tensor<1024xi32>
+  %expected_reverse_exclusive = check.generate.iota offset(1023) step(-1) : tensor<1024xi32>
+  %actual_forward_inclusive = check.generate.fill value(-1) : tensor<1024xi32>
+  %actual_forward_exclusive = check.generate.fill value(-1) : tensor<1024xi32>
+  %actual_reverse_inclusive = check.generate.fill value(-1) : tensor<1024xi32>
+  %actual_reverse_exclusive = check.generate.fill value(-1) : tensor<1024xi32>
+  kernel.launch @workgroup_scan_wave64(%actual_forward_inclusive, %actual_forward_exclusive, %actual_reverse_inclusive, %actual_reverse_exclusive) : (tensor<1024xi32>, tensor<1024xi32>, tensor<1024xi32>, tensor<1024xi32>)
+  check.expect.equal actual(%actual_forward_inclusive) expected(%expected_forward_inclusive) : tensor<1024xi32>
+  check.expect.equal actual(%actual_forward_exclusive) expected(%expected_forward_exclusive) : tensor<1024xi32>
+  check.expect.equal actual(%actual_reverse_inclusive) expected(%expected_reverse_inclusive) : tensor<1024xi32>
+  check.expect.equal actual(%actual_reverse_exclusive) expected(%expected_reverse_exclusive) : tensor<1024xi32>
+  check.return
+}

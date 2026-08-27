@@ -4,6 +4,14 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+// _GNU_SOURCE must be defined before any system header so that <dlfcn.h>
+// exposes the GNU extensions dladdr()/Dl_info and the RTLD_NOLOAD flag, which
+// hipGetProcAddress() uses to resolve symbols against this shared object
+// itself rather than the process-global scope.
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include "binding/hip/api.h"
 
 #include <dlfcn.h>
@@ -18,8 +26,13 @@
 #include <unistd.h>
 #endif
 
+#include "binding/hip/binding_internal.h"
+#include "binding/hip/blocking_printf_provider.h"
+#include "binding/hip/handle_registry.h"
+#include "binding/hip/launch_params.h"
 #include "common/graph.h"
 #include "common/internal.h"
+#include "common/stream.h"
 #include "common/tls.h"
 #include "hrx_runtime.h"
 #include "iree/base/threading/call_once.h"
@@ -131,18 +144,36 @@ typedef struct hrx_hip_batch_mem_op_node_params_t {
 } hrx_hip_batch_mem_op_node_params_t;
 
 static bool iree_hip_graph_handle_is_live(hipGraph_t graph);
+static hipError_t iree_status_to_hip_result(iree_status_t status);
 
 #define IREE_HIP_ARRAY_MAGIC 0x6872786869706179ull
-
+// HRX HIP arrays are backed by normal device allocations. The practical limit
+// is checked allocation size and available device memory; HIP device attributes
+// expose these dimensions as int-valued fields.
+#define IREE_HIP_ARRAY_MAX_DIMENSION INT_MAX
+#define IREE_HIP_ARRAY_MAX_1D IREE_HIP_ARRAY_MAX_DIMENSION
+#define IREE_HIP_ARRAY_MAX_2D_WIDTH IREE_HIP_ARRAY_MAX_DIMENSION
+#define IREE_HIP_ARRAY_MAX_2D_HEIGHT IREE_HIP_ARRAY_MAX_DIMENSION
+#define IREE_HIP_ARRAY_MAX_3D_WIDTH IREE_HIP_ARRAY_MAX_DIMENSION
+#define IREE_HIP_ARRAY_MAX_3D_HEIGHT IREE_HIP_ARRAY_MAX_DIMENSION
+#define IREE_HIP_ARRAY_MAX_3D_DEPTH IREE_HIP_ARRAY_MAX_DIMENSION
 struct hipArray_st {
+  // References held by the registry and active API callers.
+  iree_atomic_ref_count_t ref_count;
   // Next live array handle in the process registry.
   struct hipArray_st* next_live_array;
   // Magic value used to reject invalid or freed handles.
   uint64_t magic;
   // Channel descriptor supplied at allocation time.
   hipChannelFormatDesc desc;
-  // Logical extent in array elements.
+  // Public logical extent reported by descriptor APIs.
+  hipExtent public_extent;
+  // Normalized backing extent used for storage and copies.
   hipExtent extent;
+  // Driver API format equivalent for desc.
+  hipArray_Format format;
+  // Driver API channel count equivalent for desc.
+  unsigned int num_channels;
   // Allocation flags supplied at allocation time.
   unsigned int flags;
   // Context that owns the backing device allocation.
@@ -179,6 +210,24 @@ static void iree_hip_array_registry_lock(void) {
   iree_slim_mutex_lock(&iree_hip_array_registry_mutex);
 }
 
+static hipError_t iree_hip_array_retain(hipArray_const_t array,
+                                        struct hipArray_st** out);
+
+static void iree_hip_array_release(struct hipArray_st* array);
+
+static hipError_t iree_hip_array_byte_range_to_elements(
+    hipArray_const_t array, size_t byte_offset, size_t byte_width,
+    size_t* out_element_offset, size_t* out_element_width);
+
+static hipError_t iree_hip_array_byte_range_to_elements_for_array(
+    const struct hipArray_st* array, size_t byte_offset, size_t byte_width,
+    size_t* out_element_offset, size_t* out_element_width);
+
+static hipError_t iree_hip_memcpy2d_array_to_3d_params(
+    const hip_Memcpy2D* copy, hipMemcpy3DParms* out_params);
+
+static hipError_t iree_hip_array_validate_extent_limits(hipExtent extent);
+
 static void iree_hip_array_registry_insert(struct hipArray_st* array) {
   iree_hip_array_registry_lock();
   array->next_live_array = iree_hip_array_registry_head;
@@ -186,22 +235,29 @@ static void iree_hip_array_registry_insert(struct hipArray_st* array) {
   iree_slim_mutex_unlock(&iree_hip_array_registry_mutex);
 }
 
-static void iree_hip_array_registry_remove(struct hipArray_st* array) {
+static bool iree_hip_array_registry_remove(hipArray_t array,
+                                           struct hipArray_st** out_array) {
+  if (out_array) *out_array = NULL;
+  if (!array) return false;
+  bool removed = false;
   iree_hip_array_registry_lock();
   struct hipArray_st** current = &iree_hip_array_registry_head;
   while (*current) {
     if (*current == array) {
+      if (out_array) *out_array = *current;
       *current = array->next_live_array;
       array->next_live_array = NULL;
+      removed = true;
       break;
     }
     current = &(*current)->next_live_array;
   }
   iree_slim_mutex_unlock(&iree_hip_array_registry_mutex);
+  return removed;
 }
 
 static bool iree_hip_array_registry_lookup(hipArray_const_t array,
-                                           const struct hipArray_st** out) {
+                                           struct hipArray_st** out) {
   if (out) *out = NULL;
   if (!array) return false;
   bool found = false;
@@ -209,6 +265,7 @@ static bool iree_hip_array_registry_lookup(hipArray_const_t array,
   for (struct hipArray_st* current = iree_hip_array_registry_head; current;
        current = current->next_live_array) {
     if (current == array && current->magic == IREE_HIP_ARRAY_MAGIC) {
+      iree_atomic_ref_count_inc(&current->ref_count);
       if (out) *out = current;
       found = true;
       break;
@@ -217,6 +274,291 @@ static bool iree_hip_array_registry_lookup(hipArray_const_t array,
   iree_slim_mutex_unlock(&iree_hip_array_registry_mutex);
   return found;
 }
+
+//===----------------------------------------------------------------------===//
+// Memory pool handles
+//===----------------------------------------------------------------------===//
+
+struct hipMemPool_st {
+  // References held by the live-handle registry and active API callers.
+  iree_atomic_ref_count_t ref_count;
+  // Next live pool handle in the process registry.
+  struct hipMemPool_st* next_live_pool;
+  // HRX pool owned by a user-created handle, or NULL for a default handle.
+  hrx_mem_pool_t hrx_pool;
+  // Device ordinal associated with the pool's allocation location.
+  int device_ordinal;
+  // Allocation type accepted by this pool handle.
+  hipMemAllocationType allocation_type;
+  // True when this handle resolves the device's default pool dynamically.
+  bool is_default;
+};
+
+typedef struct iree_hip_managed_mem_pool_selection_t {
+  // Next managed-pool selection in the process registry.
+  struct iree_hip_managed_mem_pool_selection_t* next;
+  // Device ordinal associated with the selected managed pool.
+  int device_ordinal;
+  // Retained pool handle selected for managed allocations on the device.
+  struct hipMemPool_st* pool;
+} iree_hip_managed_mem_pool_selection_t;
+
+static iree_once_flag iree_hip_mem_pool_registry_mutex_once =
+    IREE_ONCE_FLAG_INIT;
+static iree_slim_mutex_t iree_hip_mem_pool_registry_mutex;
+static struct hipMemPool_st* iree_hip_mem_pool_registry_head = NULL;
+static iree_hip_managed_mem_pool_selection_t*
+    iree_hip_managed_mem_pool_selection_head = NULL;
+
+static void iree_hip_mem_pool_registry_mutex_initialize(void) {
+  iree_slim_mutex_initialize(&iree_hip_mem_pool_registry_mutex);
+}
+
+static void iree_hip_mem_pool_registry_lock(void) {
+  iree_call_once(&iree_hip_mem_pool_registry_mutex_once,
+                 iree_hip_mem_pool_registry_mutex_initialize);
+  iree_slim_mutex_lock(&iree_hip_mem_pool_registry_mutex);
+}
+
+static void iree_hip_mem_pool_release(struct hipMemPool_st* pool) {
+  if (!pool) return;
+  if (iree_atomic_ref_count_dec(&pool->ref_count) != 1) return;
+  hrx_mem_pool_release(pool->hrx_pool);
+  iree_allocator_free(iree_allocator_system(), pool);
+}
+
+static hipError_t iree_hip_mem_pool_registry_acquire(
+    hipMemPool_t pool, struct hipMemPool_st** out_pool) {
+  if (out_pool) *out_pool = NULL;
+  if (!pool) return hipErrorInvalidValue;
+
+  iree_hip_mem_pool_registry_lock();
+  for (struct hipMemPool_st* current = iree_hip_mem_pool_registry_head; current;
+       current = current->next_live_pool) {
+    if (current == pool) {
+      iree_atomic_ref_count_inc(&current->ref_count);
+      if (out_pool) *out_pool = current;
+      iree_slim_mutex_unlock(&iree_hip_mem_pool_registry_mutex);
+      return hipSuccess;
+    }
+  }
+  iree_slim_mutex_unlock(&iree_hip_mem_pool_registry_mutex);
+  return hipErrorInvalidValue;
+}
+
+static hipError_t iree_hip_mem_pool_create_handle(
+    hrx_mem_pool_t hrx_pool, int device_ordinal,
+    hipMemAllocationType allocation_type, bool is_default,
+    hipMemPool_t* out_pool) {
+  *out_pool = NULL;
+  struct hipMemPool_st* pool = NULL;
+  iree_status_t status = iree_allocator_malloc(iree_allocator_system(),
+                                               sizeof(*pool), (void**)&pool);
+  if (!iree_status_is_ok(status)) return iree_status_to_hip_result(status);
+
+  memset(pool, 0, sizeof(*pool));
+  iree_atomic_ref_count_init(&pool->ref_count);
+  pool->hrx_pool = hrx_pool;
+  pool->device_ordinal = device_ordinal;
+  pool->allocation_type = allocation_type;
+  pool->is_default = is_default;
+
+  iree_hip_mem_pool_registry_lock();
+  pool->next_live_pool = iree_hip_mem_pool_registry_head;
+  iree_hip_mem_pool_registry_head = pool;
+  iree_slim_mutex_unlock(&iree_hip_mem_pool_registry_mutex);
+  *out_pool = pool;
+  return hipSuccess;
+}
+
+static hipError_t iree_hip_mem_pool_get_default(
+    int device_ordinal, hipMemAllocationType allocation_type,
+    hipMemPool_t* out_pool) {
+  *out_pool = NULL;
+  iree_hip_mem_pool_registry_lock();
+  for (struct hipMemPool_st* current = iree_hip_mem_pool_registry_head; current;
+       current = current->next_live_pool) {
+    if (current->is_default && current->device_ordinal == device_ordinal &&
+        current->allocation_type == allocation_type) {
+      *out_pool = current;
+      iree_slim_mutex_unlock(&iree_hip_mem_pool_registry_mutex);
+      return hipSuccess;
+    }
+  }
+  iree_slim_mutex_unlock(&iree_hip_mem_pool_registry_mutex);
+
+  struct hipMemPool_st* pool = NULL;
+  iree_status_t status = iree_allocator_malloc(iree_allocator_system(),
+                                               sizeof(*pool), (void**)&pool);
+  if (!iree_status_is_ok(status)) return iree_status_to_hip_result(status);
+  memset(pool, 0, sizeof(*pool));
+  iree_atomic_ref_count_init(&pool->ref_count);
+  pool->device_ordinal = device_ordinal;
+  pool->allocation_type = allocation_type;
+  pool->is_default = true;
+
+  iree_hip_mem_pool_registry_lock();
+  for (struct hipMemPool_st* current = iree_hip_mem_pool_registry_head; current;
+       current = current->next_live_pool) {
+    if (current->is_default && current->device_ordinal == device_ordinal &&
+        current->allocation_type == allocation_type) {
+      *out_pool = current;
+      iree_slim_mutex_unlock(&iree_hip_mem_pool_registry_mutex);
+      iree_allocator_free(iree_allocator_system(), pool);
+      return hipSuccess;
+    }
+  }
+  pool->next_live_pool = iree_hip_mem_pool_registry_head;
+  iree_hip_mem_pool_registry_head = pool;
+  iree_slim_mutex_unlock(&iree_hip_mem_pool_registry_mutex);
+  *out_pool = pool;
+  return hipSuccess;
+}
+
+static hipError_t iree_hip_mem_pool_retain_backend(
+    const struct hipMemPool_st* pool, hrx_mem_pool_t* out_hrx_pool) {
+  *out_hrx_pool = NULL;
+  if (!pool->is_default) {
+    hrx_mem_pool_retain(pool->hrx_pool);
+    *out_hrx_pool = pool->hrx_pool;
+    return hipSuccess;
+  }
+
+  iree_hal_streaming_device_t* device =
+      iree_hal_streaming_device_entry(pool->device_ordinal);
+  if (!device) return hipErrorInvalidDevice;
+  iree_status_t status =
+      iree_hal_streaming_device_ensure_default_mem_pool(device);
+  if (!iree_status_is_ok(status)) return iree_status_to_hip_result(status);
+  *out_hrx_pool = iree_hal_streaming_device_retain_default_mem_pool(device);
+  return *out_hrx_pool ? hipSuccess : hipErrorInvalidValue;
+}
+
+static bool iree_hip_mem_pool_registry_remove(hipMemPool_t pool,
+                                              struct hipMemPool_st** out_pool) {
+  if (out_pool) *out_pool = NULL;
+  if (!pool) return false;
+
+  iree_hip_managed_mem_pool_selection_t* removed_selection = NULL;
+  iree_hip_mem_pool_registry_lock();
+  struct hipMemPool_st** current = &iree_hip_mem_pool_registry_head;
+  while (*current) {
+    if (*current == pool && !pool->is_default) {
+      if (out_pool) *out_pool = *current;
+      *current = pool->next_live_pool;
+      pool->next_live_pool = NULL;
+
+      iree_hip_managed_mem_pool_selection_t** selection =
+          &iree_hip_managed_mem_pool_selection_head;
+      while (*selection) {
+        if ((*selection)->pool == pool) {
+          removed_selection = *selection;
+          *selection = removed_selection->next;
+          break;
+        }
+        selection = &(*selection)->next;
+      }
+      iree_slim_mutex_unlock(&iree_hip_mem_pool_registry_mutex);
+      if (removed_selection) {
+        iree_hip_mem_pool_release(removed_selection->pool);
+        iree_allocator_free(iree_allocator_system(), removed_selection);
+      }
+      return true;
+    }
+    current = &(*current)->next_live_pool;
+  }
+  iree_slim_mutex_unlock(&iree_hip_mem_pool_registry_mutex);
+  return false;
+}
+
+static hipError_t iree_hip_mem_pool_get_current(
+    iree_hal_streaming_device_t* device, int device_ordinal,
+    hipMemPool_t* out_pool) {
+  *out_pool = NULL;
+  hrx_mem_pool_t hrx_pool = iree_hal_streaming_device_retain_mem_pool(device);
+  if (!hrx_pool) return hipErrorInvalidValue;
+
+  iree_hip_mem_pool_registry_lock();
+  for (struct hipMemPool_st* current = iree_hip_mem_pool_registry_head; current;
+       current = current->next_live_pool) {
+    if (!current->is_default &&
+        current->allocation_type == hipMemAllocationTypePinned &&
+        current->device_ordinal == device_ordinal &&
+        current->hrx_pool == hrx_pool) {
+      *out_pool = current;
+      break;
+    }
+  }
+  iree_slim_mutex_unlock(&iree_hip_mem_pool_registry_mutex);
+  hrx_mem_pool_release(hrx_pool);
+
+  return *out_pool ? hipSuccess
+                   : iree_hip_mem_pool_get_default(
+                         device_ordinal, hipMemAllocationTypePinned, out_pool);
+}
+
+static hipError_t iree_hip_mem_pool_get_managed_selection(
+    int device_ordinal, hipMemPool_t* out_pool) {
+  *out_pool = NULL;
+  iree_hip_mem_pool_registry_lock();
+  for (iree_hip_managed_mem_pool_selection_t* selection =
+           iree_hip_managed_mem_pool_selection_head;
+       selection; selection = selection->next) {
+    if (selection->device_ordinal == device_ordinal) {
+      *out_pool = selection->pool;
+      break;
+    }
+  }
+  iree_slim_mutex_unlock(&iree_hip_mem_pool_registry_mutex);
+
+  return *out_pool ? hipSuccess
+                   : iree_hip_mem_pool_get_default(
+                         device_ordinal, hipMemAllocationTypeManaged, out_pool);
+}
+
+static hipError_t iree_hip_mem_pool_set_managed_selection(
+    int device_ordinal, struct hipMemPool_st* pool) {
+  iree_hip_managed_mem_pool_selection_t* new_selection = NULL;
+  iree_status_t status = iree_allocator_malloc(
+      iree_allocator_system(), sizeof(*new_selection), (void**)&new_selection);
+  if (!iree_status_is_ok(status)) return iree_status_to_hip_result(status);
+  memset(new_selection, 0, sizeof(*new_selection));
+
+  iree_hip_managed_mem_pool_selection_t* previous_selection = NULL;
+  iree_hip_mem_pool_registry_lock();
+  iree_hip_managed_mem_pool_selection_t** selection =
+      &iree_hip_managed_mem_pool_selection_head;
+  while (*selection && (*selection)->device_ordinal != device_ordinal) {
+    selection = &(*selection)->next;
+  }
+  if (*selection) {
+    previous_selection = *selection;
+    *selection = previous_selection->next;
+  }
+  new_selection->device_ordinal = device_ordinal;
+  new_selection->pool = pool;
+  iree_atomic_ref_count_inc(&pool->ref_count);
+  new_selection->next = iree_hip_managed_mem_pool_selection_head;
+  iree_hip_managed_mem_pool_selection_head = new_selection;
+  iree_slim_mutex_unlock(&iree_hip_mem_pool_registry_mutex);
+
+  if (previous_selection) {
+    iree_hip_mem_pool_release(previous_selection->pool);
+    iree_allocator_free(iree_allocator_system(), previous_selection);
+  }
+  return hipSuccess;
+}
+
+static bool iree_hip_mem_pool_allocation_type_is_supported(
+    hipMemAllocationType allocation_type) {
+  return allocation_type == hipMemAllocationTypePinned ||
+         allocation_type == hipMemAllocationTypeManaged;
+}
+
+// Pool allocation and stream-ordered release are implemented for every
+// registered streaming device. This capability is independent of GPU
+// architecture.
+static bool iree_hip_memory_pools_supported(void) { return true; }
 
 //===----------------------------------------------------------------------===//
 // Flag translation functions
@@ -229,6 +571,22 @@ static iree_hal_streaming_stream_flags_t iree_hip_stream_flags_to_internal(
     flags |= IREE_HAL_STREAMING_STREAM_FLAG_NON_BLOCKING;
   }
   return flags;
+}
+
+static bool iree_hip_stream_create_flags_are_valid(unsigned int flags) {
+  return (flags & ~hipStreamNonBlocking) == 0;
+}
+
+static bool iree_hip_synchronization_policy_is_valid(
+    hipSynchronizationPolicy policy) {
+  switch (policy) {
+    case hipSyncPolicyAuto:
+    case hipSyncPolicySpin:
+    case hipSyncPolicyYield:
+    case hipSyncPolicyBlockingSync:
+      return true;
+  }
+  return false;
 }
 
 static int iree_hip_clamp_stream_priority(int priority) {
@@ -255,6 +613,24 @@ static iree_hal_streaming_event_flags_t iree_hip_event_flags_to_internal(
     flags |= IREE_HAL_STREAMING_EVENT_FLAG_INTERPROCESS;
   }
   return flags;
+}
+
+static bool iree_hip_event_create_flags_are_valid(unsigned int flags) {
+  const unsigned int supported_flags =
+      hipEventBlockingSync | hipEventDisableTiming | hipEventInterprocess |
+      hipEventDisableSystemFence | hipEventReleaseToDevice |
+      hipEventReleaseToSystem;
+  if ((flags & ~supported_flags) != 0) return false;
+  if ((flags & hipEventInterprocess) && !(flags & hipEventDisableTiming)) {
+    return false;
+  }
+  const unsigned int release_flags =
+      flags & (hipEventReleaseToDevice | hipEventReleaseToSystem |
+               hipEventDisableSystemFence);
+  if (release_flags && (release_flags & (release_flags - 1))) {
+    return false;
+  }
+  return true;
 }
 
 static iree_hal_streaming_memory_flags_t iree_hip_memory_flags_to_internal(
@@ -419,6 +795,33 @@ static uint32_t iree_hip_mem_location_type_to_uint(hipMemLocationType type) {
   }
 }
 
+static hipError_t iree_hip_validate_mem_pool_props(
+    const hipMemPoolProps* props) {
+  if (!props) return hipErrorInvalidValue;
+  if (!iree_hip_mem_pool_allocation_type_is_supported(props->allocType)) {
+    return hipErrorInvalidValue;
+  }
+  if (props->handleTypes != hipMemHandleTypeNone) {
+    return hipErrorNotSupported;
+  }
+  if (props->win32SecurityAttributes) {
+    return hipErrorInvalidValue;
+  }
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(props->reserved); ++i) {
+    if (props->reserved[i] != 0) return hipErrorInvalidValue;
+  }
+  if (props->location.type != hipMemLocationTypeDevice) {
+    return hipErrorInvalidValue;
+  }
+  int device_count = 0;
+  hipError_t count_result = hipGetDeviceCount(&device_count);
+  if (count_result != hipSuccess) return count_result;
+  if (props->location.id < 0 || props->location.id >= device_count) {
+    return hipErrorInvalidValue;
+  }
+  return hipSuccess;
+}
+
 static iree_hal_streaming_mem_access_flags_t
 iree_hip_mem_access_flags_to_internal(hipMemAccessFlags flags) {
   switch (flags) {
@@ -481,13 +884,16 @@ static inline hrx_device_t iree_hip_hrx_device_from_context(
 //===----------------------------------------------------------------------===//
 
 // Thread-local error state for HIP.
-static iree_thread_local struct {
+static IREE_THREAD_LOCAL struct {
   hipError_t last_error;
   bool sticky;
 } iree_hip_thread_error = {hipSuccess, false};
 
 static iree_slim_mutex_t iree_hip_global_init_mutex;
 static iree_once_flag iree_hip_global_init_mutex_once = IREE_ONCE_FLAG_INIT;
+static iree_atomic_int32_t iree_hip_runtime_initialized =
+    IREE_ATOMIC_VAR_INIT(0);
+static iree_hip_blocking_printf_provider_t iree_hip_blocking_printf_provider;
 
 typedef struct iree_hip_per_thread_stream_state_t {
   // Context associated with the cached per-thread stream.
@@ -1040,29 +1446,47 @@ static hipError_t iree_hip_ensure_initialized(void) {
   if (iree_hip_no_visible_devices_requested()) {
     return hipErrorNoDevice;
   }
+  if (IREE_LIKELY(iree_atomic_load(&iree_hip_runtime_initialized,
+                                   iree_memory_order_acquire))) {
+    return hipSuccess;
+  }
 
   iree_call_once(&iree_hip_global_init_mutex_once,
                  iree_hip_initialize_global_init_mutex);
   iree_slim_mutex_lock(&iree_hip_global_init_mutex);
+  if (iree_atomic_load(&iree_hip_runtime_initialized,
+                       iree_memory_order_relaxed)) {
+    iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
+    return hipSuccess;
+  }
+  if (!iree_hal_streaming_device_registry()) {
+    iree_hal_device_event_sink_t event_sink = {0};
+    hrx_runtime_try_get_hal_device_event_sink(&event_sink);
+    iree_hip_blocking_printf_provider_initialize(
+        event_sink, iree_allocator_system(),
+        &iree_hip_blocking_printf_provider);
+  }
+
+  const iree_hal_device_create_params_extension_t* device_extension =
+      iree_hip_blocking_printf_provider_device_extension(
+          &iree_hip_blocking_printf_provider);
+  iree_status_t status =
+      iree_hal_streaming_init_global(device_extension, iree_allocator_system());
+  if (!iree_status_is_ok(status)) {
+    const iree_status_code_t status_code = iree_status_code(status);
+    iree_status_free(status);
+    iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
+    return status_code == IREE_STATUS_NOT_FOUND ? hipErrorNoDevice
+                                                : hipErrorNotInitialized;
+  }
   iree_hal_streaming_device_registry_t* device_registry =
       iree_hal_streaming_device_registry();
-  if (!device_registry) {
-    // Initialize the runtime.
-    iree_status_t status = iree_hal_streaming_init_global(
-        IREE_HAL_STREAMING_INIT_FLAG_NONE, iree_allocator_system());
-    if (!iree_status_is_ok(status)) {
-      const iree_status_code_t status_code = iree_status_code(status);
-      iree_status_free(status);
-      iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
-      return status_code == IREE_STATUS_NOT_FOUND ? hipErrorNoDevice
-                                                  : hipErrorNotInitialized;
-    }
-    device_registry = iree_hal_streaming_device_registry();
-  }
   if (!device_registry || device_registry->device_count == 0) {
     iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
     return hipErrorNoDevice;
   }
+  iree_atomic_store(&iree_hip_runtime_initialized, 1,
+                    iree_memory_order_release);
   iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
   return hipSuccess;
 }
@@ -1160,27 +1584,171 @@ static hipError_t iree_hip_resolve_per_thread_stream(
   return hipSuccess;
 }
 
-static hipError_t iree_hip_resolve_stream(
-    hipStream_t stream, iree_hal_streaming_stream_t** out_stream) {
-  IREE_ASSERT_ARGUMENT(out_stream);
-  iree_hal_streaming_context_t* context = NULL;
-  hipError_t init_result = iree_hip_ensure_context(&context);
-  if (init_result != hipSuccess) {
-    *out_stream = NULL;
-    return init_result;
+static iree_once_flag iree_hip_stream_registry_once = IREE_ONCE_FLAG_INIT;
+static iree_hip_handle_registry_t iree_hip_stream_registry;
+
+static void iree_hip_stream_registry_initialize(void) {
+  iree_hip_handle_registry_initialize(&iree_hip_stream_registry);
+}
+
+static void iree_hip_stream_handle_retain(uintptr_t handle) {
+  iree_hal_streaming_stream_retain((iree_hal_streaming_stream_t*)handle);
+}
+
+static iree_status_t iree_hip_stream_register(
+    iree_hal_streaming_stream_t* stream) {
+  iree_call_once(&iree_hip_stream_registry_once,
+                 iree_hip_stream_registry_initialize);
+  return iree_hip_handle_registry_insert(&iree_hip_stream_registry,
+                                         (uintptr_t)stream);
+}
+
+static bool iree_hip_stream_unregister_public_handle(
+    iree_hal_streaming_stream_t* stream) {
+  iree_call_once(&iree_hip_stream_registry_once,
+                 iree_hip_stream_registry_initialize);
+  if (!iree_hip_handle_registry_remove(&iree_hip_stream_registry,
+                                       (uintptr_t)stream)) {
+    return false;
   }
 
+  // The initial stream reference is owned by the published handle. The
+  // registry itself only records the address so lookups can reject stale
+  // handles without dereferencing them.
+  iree_hal_streaming_stream_release(stream);
+  return true;
+}
+
+static bool iree_hip_stream_lookup_retain(
+    hipStream_t stream, iree_hal_streaming_stream_t** out_stream) {
+  IREE_ASSERT_ARGUMENT(out_stream);
+  *out_stream = NULL;
+  if (!stream || stream == hipStreamLegacy || stream == hipStreamPerThread) {
+    return false;
+  }
+
+  iree_call_once(&iree_hip_stream_registry_once,
+                 iree_hip_stream_registry_initialize);
+  if (!iree_hip_handle_registry_lookup_retain(&iree_hip_stream_registry,
+                                              (uintptr_t)stream,
+                                              iree_hip_stream_handle_retain)) {
+    return false;
+  }
+  *out_stream = (iree_hal_streaming_stream_t*)stream;
+  return true;
+}
+
+static void iree_hip_stream_discard_unpublished(
+    iree_hal_streaming_stream_t* stream) {
+  if (!stream) return;
+  iree_hal_streaming_context_t* context = NULL;
+  iree_hal_streaming_stream_retain_context(stream, &context);
+  iree_hal_streaming_context_unregister_stream(context, stream);
+  iree_hal_streaming_stream_release(stream);
+  iree_hal_streaming_context_release(context);
+}
+
+typedef struct iree_hip_resolved_stream_t {
+  // Context retained for the duration of the API operation.
+  iree_hal_streaming_context_t* context;
+  // Stream retained for the duration of the API operation.
+  iree_hal_streaming_stream_t* stream;
+} iree_hip_resolved_stream_t;
+
+static void iree_hip_resolved_stream_release(
+    iree_hip_resolved_stream_t* resolved_stream) {
+  if (!resolved_stream) return;
+  iree_hal_streaming_stream_release(resolved_stream->stream);
+  iree_hal_streaming_context_release(resolved_stream->context);
+  memset(resolved_stream, 0, sizeof(*resolved_stream));
+}
+
+static hipError_t iree_hip_resolve_registered_stream(
+    hipStream_t stream, iree_hip_resolved_stream_t* out_resolved_stream) {
+  IREE_ASSERT_ARGUMENT(out_resolved_stream);
+  memset(out_resolved_stream, 0, sizeof(*out_resolved_stream));
+
+  if (stream && stream != hipStreamLegacy && stream != hipStreamPerThread) {
+    hipError_t result = iree_hip_ensure_initialized();
+    if (result != hipSuccess) return result;
+    if (!iree_hip_stream_lookup_retain(stream, &out_resolved_stream->stream)) {
+      return hipErrorInvalidResourceHandle;
+    }
+    if (!iree_hal_streaming_stream_retain_context(
+            out_resolved_stream->stream, &out_resolved_stream->context)) {
+      iree_hip_resolved_stream_release(out_resolved_stream);
+      return hipErrorContextIsDestroyed;
+    }
+    return hipSuccess;
+  }
+
+  iree_hal_streaming_context_t* context = NULL;
+  hipError_t result = iree_hip_ensure_context(&context);
+  if (result != hipSuccess) return result;
+
   if (stream == hipStreamPerThread) {
-    return iree_hip_resolve_per_thread_stream(context, out_stream);
+    result = iree_hip_resolve_per_thread_stream(context,
+                                                &out_resolved_stream->stream);
   } else if (!stream || stream == hipStreamLegacy) {
-    *out_stream = context->default_stream;
+    out_resolved_stream->stream = context->default_stream;
   } else {
-    *out_stream = (iree_hal_streaming_stream_t*)stream;
+    return hipErrorInvalidResourceHandle;
+  }
+  if (result != hipSuccess) return result;
+  iree_hal_streaming_stream_retain(out_resolved_stream->stream);
+  if (!iree_hal_streaming_stream_retain_context(
+          out_resolved_stream->stream, &out_resolved_stream->context)) {
+    iree_hip_resolved_stream_release(out_resolved_stream);
+    return hipErrorContextIsDestroyed;
   }
   return hipSuccess;
 }
 
-static hipError_t iree_hip_synchronize_legacy_stream_dependencies(
+static iree_once_flag iree_hip_event_registry_once = IREE_ONCE_FLAG_INIT;
+static iree_hip_handle_registry_t iree_hip_event_registry;
+
+static void iree_hip_event_registry_initialize(void) {
+  iree_hip_handle_registry_initialize(&iree_hip_event_registry);
+}
+
+static void iree_hip_event_handle_retain(uintptr_t handle) {
+  iree_hal_streaming_event_retain((iree_hal_streaming_event_t*)handle);
+}
+
+static iree_status_t iree_hip_event_register(
+    iree_hal_streaming_event_t* event) {
+  iree_call_once(&iree_hip_event_registry_once,
+                 iree_hip_event_registry_initialize);
+  return iree_hip_handle_registry_insert(&iree_hip_event_registry,
+                                         (uintptr_t)event);
+}
+
+static hipError_t iree_hip_event_lookup_retain(
+    hipEvent_t event, iree_hal_streaming_event_t** out_event) {
+  IREE_ASSERT_ARGUMENT(out_event);
+  *out_event = NULL;
+  if (!event) return hipErrorInvalidResourceHandle;
+
+  iree_call_once(&iree_hip_event_registry_once,
+                 iree_hip_event_registry_initialize);
+  if (!iree_hip_handle_registry_lookup_retain(&iree_hip_event_registry,
+                                              (uintptr_t)event,
+                                              iree_hip_event_handle_retain)) {
+    return hipErrorInvalidResourceHandle;
+  }
+  *out_event = (iree_hal_streaming_event_t*)event;
+  return hipSuccess;
+}
+
+static bool iree_hip_event_unregister(hipEvent_t event) {
+  if (!event) return false;
+  iree_call_once(&iree_hip_event_registry_once,
+                 iree_hip_event_registry_initialize);
+  return iree_hip_handle_registry_remove(&iree_hip_event_registry,
+                                         (uintptr_t)event);
+}
+
+static hipError_t iree_hip_order_legacy_stream_dependencies(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_stream_t* stream) {
   if (!context || !stream || !context->default_stream ||
@@ -1190,13 +1758,13 @@ static hipError_t iree_hip_synchronize_legacy_stream_dependencies(
 
   iree_status_t status = iree_ok_status();
   if (stream == context->default_stream) {
-    status = iree_hal_streaming_context_synchronize_blocking_streams(context,
-                                                                     stream);
+    status = iree_hal_streaming_context_wait_blocking_streams(context, stream);
   } else if (!iree_any_bit_set(stream->flags,
                                IREE_HAL_STREAMING_STREAM_FLAG_NON_BLOCKING) &&
              context->default_stream->capture_status ==
                  IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
-    status = iree_hal_streaming_stream_synchronize(context->default_stream);
+    status =
+        iree_hal_streaming_stream_wait_stream(stream, context->default_stream);
   }
   return iree_status_to_hip_result(status);
 }
@@ -1244,11 +1812,29 @@ HIPAPI hipError_t hipInit(unsigned int flags) {
   return result;
 }
 
-// Custom function to deinitialize the HAL backend.
-// This is not a standard HIP API function.
+HIPAPI hipError_t hipHRXSetDeviceEventSink(hrx_device_event_sink_t sink) {
+  iree_call_once(&iree_hip_global_init_mutex_once,
+                 iree_hip_initialize_global_init_mutex);
+  iree_slim_mutex_lock(&iree_hip_global_init_mutex);
+  const hipError_t result =
+      iree_hal_streaming_device_registry()
+          ? hipErrorSetOnActiveProcess
+          : hrx_status_to_hip_result(hrx_runtime_set_device_event_sink(sink));
+  iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
+  return result;
+}
+
+// Deinitializes the embedded HRX runtime.
+// This is an HRX extension, not a standard HIP API function.
 HIPAPI hipError_t hipHALDeinit(void) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  iree_call_once(&iree_hip_global_init_mutex_once,
+                 iree_hip_initialize_global_init_mutex);
+  iree_slim_mutex_lock(&iree_hip_global_init_mutex);
   iree_hal_streaming_cleanup_global();
+  iree_atomic_store(&iree_hip_runtime_initialized, 0,
+                    iree_memory_order_release);
+  iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
 }
@@ -1640,25 +2226,25 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   prop->integrated = 0;
   prop->canMapHostMemory = 1;
   prop->computeMode = 0;  // Default compute mode
-  prop->maxTexture1D = 0;
-  prop->maxTexture1DMipmap = 0;
-  prop->maxTexture1DLinear = 0;
-  prop->maxTexture2D[0] = 0;
-  prop->maxTexture2D[1] = 0;
-  prop->maxTexture2DMipmap[0] = 0;
-  prop->maxTexture2DMipmap[1] = 0;
-  prop->maxTexture2DLinear[0] = 0;
-  prop->maxTexture2DLinear[1] = 0;
-  prop->maxTexture2DLinear[2] = 0;
-  prop->maxTexture2DGather[0] = 0;
-  prop->maxTexture2DGather[1] = 0;
-  prop->maxTexture3D[0] = 0;
-  prop->maxTexture3D[1] = 0;
-  prop->maxTexture3D[2] = 0;
-  prop->maxTexture3DAlt[0] = 0;
-  prop->maxTexture3DAlt[1] = 0;
-  prop->maxTexture3DAlt[2] = 0;
-  prop->maxTextureCubemap = 0;
+  prop->maxTexture1D = IREE_HIP_ARRAY_MAX_1D;
+  prop->maxTexture1DMipmap = IREE_HIP_ARRAY_MAX_1D;
+  prop->maxTexture1DLinear = IREE_HIP_ARRAY_MAX_1D;
+  prop->maxTexture2D[0] = IREE_HIP_ARRAY_MAX_2D_WIDTH;
+  prop->maxTexture2D[1] = IREE_HIP_ARRAY_MAX_2D_HEIGHT;
+  prop->maxTexture2DMipmap[0] = IREE_HIP_ARRAY_MAX_2D_WIDTH;
+  prop->maxTexture2DMipmap[1] = IREE_HIP_ARRAY_MAX_2D_HEIGHT;
+  prop->maxTexture2DLinear[0] = IREE_HIP_ARRAY_MAX_2D_WIDTH;
+  prop->maxTexture2DLinear[1] = IREE_HIP_ARRAY_MAX_2D_HEIGHT;
+  prop->maxTexture2DLinear[2] = INT_MAX;
+  prop->maxTexture2DGather[0] = IREE_HIP_ARRAY_MAX_2D_WIDTH;
+  prop->maxTexture2DGather[1] = IREE_HIP_ARRAY_MAX_2D_HEIGHT;
+  prop->maxTexture3D[0] = IREE_HIP_ARRAY_MAX_3D_WIDTH;
+  prop->maxTexture3D[1] = IREE_HIP_ARRAY_MAX_3D_HEIGHT;
+  prop->maxTexture3D[2] = IREE_HIP_ARRAY_MAX_3D_DEPTH;
+  prop->maxTexture3DAlt[0] = IREE_HIP_ARRAY_MAX_3D_WIDTH;
+  prop->maxTexture3DAlt[1] = IREE_HIP_ARRAY_MAX_3D_HEIGHT;
+  prop->maxTexture3DAlt[2] = IREE_HIP_ARRAY_MAX_3D_DEPTH;
+  prop->maxTextureCubemap = IREE_HIP_ARRAY_MAX_2D_WIDTH;
   prop->maxTexture1DLayered[0] = 0;
   prop->maxTexture1DLayered[1] = 0;
   prop->maxTexture2DLayered[0] = 0;
@@ -1666,12 +2252,12 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   prop->maxTexture2DLayered[2] = 0;
   prop->maxTextureCubemapLayered[0] = 0;
   prop->maxTextureCubemapLayered[1] = 0;
-  prop->maxSurface1D = 0;
-  prop->maxSurface2D[0] = 0;
-  prop->maxSurface2D[1] = 0;
-  prop->maxSurface3D[0] = 0;
-  prop->maxSurface3D[1] = 0;
-  prop->maxSurface3D[2] = 0;
+  prop->maxSurface1D = IREE_HIP_ARRAY_MAX_1D;
+  prop->maxSurface2D[0] = IREE_HIP_ARRAY_MAX_2D_WIDTH;
+  prop->maxSurface2D[1] = IREE_HIP_ARRAY_MAX_2D_HEIGHT;
+  prop->maxSurface3D[0] = IREE_HIP_ARRAY_MAX_3D_WIDTH;
+  prop->maxSurface3D[1] = IREE_HIP_ARRAY_MAX_3D_HEIGHT;
+  prop->maxSurface3D[2] = IREE_HIP_ARRAY_MAX_3D_DEPTH;
   prop->maxSurface1DLayered[0] = 0;
   prop->maxSurface1DLayered[1] = 0;
   prop->maxSurface2DLayered[0] = 0;
@@ -1713,14 +2299,16 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   prop->canUseHostPointerForRegisteredMem = 1;
   prop->cooperativeLaunch = 0;
   prop->cooperativeMultiDeviceLaunch = 0;
-  prop->sharedMemPerBlockOptin = device_obj->max_shared_memory_per_block;
+  prop->sharedMemPerBlockOptin = device_obj->max_shared_memory_per_block_optin;
   prop->pageableMemoryAccessUsesHostPageTables = 0;
   prop->directManagedMemAccessFromHost = 1;
   prop->maxBlocksPerMultiProcessor = device_obj->max_blocks_per_multiprocessor;
   prop->accessPolicyMaxWindowSize = 0;
   prop->reservedSharedMemPerBlock = 0;
-  prop->hostNativeAtomicSupported = is_gfx1100 ? 1 : 0;
-  prop->memoryPoolsSupported = is_gfx1100 ? 1 : 0;
+  // HIP-on-AMDGPU supports native host/device atomics on the fine-grained
+  // shared memory required during device initialization.
+  prop->hostNativeAtomicSupported = 1;
+  prop->memoryPoolsSupported = iree_hip_memory_pools_supported() ? 1 : 0;
   prop->hostRegisterSupported = 1;
   prop->hostRegisterReadOnlySupported = 1;
   prop->maxSharedMemoryPerMultiProcessor =
@@ -1845,6 +2433,10 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
     case hipDeviceAttributeCanUseHostPointerForRegisteredMem:
       *value = 1;
       break;
+    case hipDeviceAttributeHostNativeAtomicSupported:
+      // HIP-on-AMDGPU requires fine-grained host/device atomic shared memory.
+      *value = 1;
+      break;
     case hipDeviceAttributeMultiprocessorCount:
       *value = device_obj->multiprocessor_count;
       break;
@@ -1876,7 +2468,7 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       *value = device_obj->max_threads_per_multiprocessor;
       break;
     case hipDeviceAttributeSharedMemPerBlockOptin:
-      *value = device_obj->max_shared_memory_per_block;
+      *value = device_obj->max_shared_memory_per_block_optin;
       break;
     case hipDeviceAttributeMaxSharedMemoryPerMultiprocessor:
       *value = device_obj->max_shared_memory_per_multiprocessor;
@@ -1897,6 +2489,9 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       break;
     case hipDeviceAttributeHostRegisterSupported:
       *value = 1;
+      break;
+    case hipDeviceAttributeMemoryPoolsSupported:
+      *value = iree_hip_memory_pools_supported() ? 1 : 0;
       break;
     case hipDeviceAttributeConcurrentManagedAccess:
       *value = 1;
@@ -1932,6 +2527,35 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       break;
     case hipDeviceAttributeNumberOfXccs:
       *value = is_gfx942 ? 8 : (is_gfx1100 ? 1 : 0);
+      break;
+    case hipDeviceAttributeMaxTexture1DWidth:
+    case hipDeviceAttributeMaxTexture1DLinear:
+    case hipDeviceAttributeMaxTexture1DMipmap:
+    case hipDeviceAttributeMaxSurface1D:
+      *value = IREE_HIP_ARRAY_MAX_1D;
+      break;
+    case hipDeviceAttributeMaxTexture2DWidth:
+    case hipDeviceAttributeMaxTexture2DLinear:
+    case hipDeviceAttributeMaxTexture2DMipmap:
+    case hipDeviceAttributeMaxTexture2DGather:
+    case hipDeviceAttributeMaxTextureCubemap:
+    case hipDeviceAttributeMaxSurface2D:
+    case hipDeviceAttributeMaxSurfaceCubemap:
+      *value = IREE_HIP_ARRAY_MAX_2D_WIDTH;
+      break;
+    case hipDeviceAttributeMaxTexture2DHeight:
+      *value = IREE_HIP_ARRAY_MAX_2D_HEIGHT;
+      break;
+    case hipDeviceAttributeMaxTexture3DWidth:
+    case hipDeviceAttributeMaxTexture3DAlt:
+    case hipDeviceAttributeMaxSurface3D:
+      *value = IREE_HIP_ARRAY_MAX_3D_WIDTH;
+      break;
+    case hipDeviceAttributeMaxTexture3DHeight:
+      *value = IREE_HIP_ARRAY_MAX_3D_HEIGHT;
+      break;
+    case hipDeviceAttributeMaxTexture3DDepth:
+      *value = IREE_HIP_ARRAY_MAX_3D_DEPTH;
       break;
     default:
       // Return sensible defaults for other attributes.
@@ -2227,7 +2851,7 @@ HIPAPI hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attrib,
 //
 // Parameters:
 //  - peerDevice: [IN] Peer device to enable access to.
-//  - flags: [IN] Reserved for future use (must be 0).
+//  - flags: [IN] 0 or hipEventWaitExternal for an explicit graph wait node.
 //
 // Returns:
 //  - hipSuccess: Peer access enabled successfully.
@@ -3083,7 +3707,8 @@ HIPAPI hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev) {
     }
 
     // All allocations are released with the context — reset free memory.
-    device->free_memory = device->total_memory;
+    iree_atomic_store(&device->free_memory, device->total_memory,
+                      iree_memory_order_relaxed);
 
     // Lock to ensure thread safety during reset.
     iree_slim_mutex_lock(&device->primary_context_mutex);
@@ -3804,10 +4429,7 @@ static hipError_t iree_hip_current_mem_pool(
     iree_hal_streaming_context_t* context, hrx_mem_pool_t* out_pool) {
   if (!context || !context->device_entry) return hipErrorInvalidDevice;
   hrx_mem_pool_t pool =
-      iree_hal_streaming_device_mem_pool(context->device_entry);
-  if (!pool) {
-    pool = iree_hal_streaming_device_default_mem_pool(context->device_entry);
-  }
+      iree_hal_streaming_device_retain_mem_pool(context->device_entry);
   if (!pool) return hipErrorInvalidDevice;
   *out_pool = pool;
   return hipSuccess;
@@ -3843,7 +4465,7 @@ static hipError_t iree_hip_context_total_memory_from_spec(
 
 static hipError_t iree_hip_malloc_from_pool(
     iree_hal_streaming_context_t* context, hrx_mem_pool_t pool, size_t size,
-    void** out_ptr) {
+    iree_hal_streaming_stream_t* stream, void** out_ptr) {
   if (!pool) return hipErrorInvalidValue;
 
   // Reject absurdly large sizes that can't possibly succeed.
@@ -3861,8 +4483,11 @@ static hipError_t iree_hip_malloc_from_pool(
 
   iree_hal_streaming_buffer_t* buffer = NULL;
   const size_t allocation_size = iree_max(size, (size_t)8);
-  iree_status_t status = iree_hal_streaming_memory_allocate_device_from_pool(
-      context, pool, allocation_size, /*flags=*/0, &buffer);
+  iree_status_t status =
+      stream ? iree_hal_streaming_memory_allocate_device_from_pool_async(
+                   context, pool, allocation_size, /*flags=*/0, stream, &buffer)
+             : iree_hal_streaming_memory_allocate_device_from_pool(
+                   context, pool, allocation_size, /*flags=*/0, &buffer);
   if (!iree_status_is_ok(status)) return iree_status_to_hip_result(status);
   buffer->logical_size = (iree_device_size_t)size;
   *out_ptr = (void*)buffer->device_ptr;
@@ -4225,7 +4850,7 @@ static void iree_hip_managed_fill_accessed_by(uint64_t mask, int* devices,
 // - Memory persists until freed with hipFree().
 // - Memory is accessible from all streams on the device.
 // - Allocation is aligned to meet all alignment requirements.
-// - Zero-size allocations are allowed and return a valid pointer.
+// - Zero-size allocations are allowed and return NULL.
 //
 // Multi-GPU: Memory is allocated on the current device.
 //
@@ -4243,6 +4868,7 @@ HIPAPI hipError_t hipMalloc(void** ptr, size_t size) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  *ptr = NULL;
 
   // Ensure initialization and get context.
   iree_hal_streaming_context_t* context = NULL;
@@ -4258,14 +4884,21 @@ HIPAPI hipError_t hipMalloc(void** ptr, size_t size) {
     HIP_RETURN_ERROR(hipErrorStreamCaptureUnsupported);
   }
 
-  hrx_mem_pool_t pool = NULL;
-  hipError_t pool_result = iree_hip_current_mem_pool(context, &pool);
-  if (pool_result != hipSuccess) {
+  if (size == 0) {
+    *ptr = NULL;
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(pool_result);
+    return hipSuccess;
   }
 
-  hipError_t result = iree_hip_malloc_from_pool(context, pool, size, ptr);
+  iree_hal_streaming_buffer_t* buffer = NULL;
+  const size_t allocation_size = iree_max(size, (size_t)8);
+  iree_status_t status = iree_hal_streaming_memory_allocate_device(
+      context, allocation_size, /*flags=*/0, &buffer);
+  hipError_t result = iree_status_to_hip_result(status);
+  if (result == hipSuccess) {
+    buffer->logical_size = (iree_device_size_t)size;
+    *ptr = (void*)buffer->device_ptr;
+  }
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -4282,18 +4915,84 @@ HIPAPI hipError_t hipMalloc(void** ptr, size_t size) {
 //  - hipErrorInvalidValue: ptr is NULL or invalid flags.
 //  - hipErrorOutOfMemory: Insufficient device memory.
 //
-// Note: This implementation ignores the flags and allocates default device
-// memory. Special memory types (fine-grained, uncached, signal) are not
-// currently supported and will be allocated as regular device memory.
+// Note: Default, uncached, and fixed-size signal-memory allocation modes are
+// implemented. Fine-grained allocations require a distinct HAL memory property
+// and fail loudly instead of falling back to default memory.
 //
 // See also: hipMalloc, hipFree.
 HIPAPI hipError_t hipExtMallocWithFlags(void** ptr, size_t sizeBytes,
                                         unsigned int flags) {
-  // For now, ignore flags and delegate to regular hipMalloc.
-  // Special memory types would require HAL support for different
-  // memory pool types.
-  (void)flags;
-  return hipMalloc(ptr, sizeBytes);
+  hipError_t init_result = iree_hip_ensure_initialized();
+  if (init_result != hipSuccess) {
+    HIP_RETURN_ERROR(init_result);
+  }
+  if (!ptr) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  *ptr = NULL;
+  switch (flags) {
+    case hipDeviceMallocDefault:
+      return hipMalloc(ptr, sizeBytes);
+    case hipMallocSignalMemory: {
+      if (sizeBytes != sizeof(uint64_t)) {
+        HIP_RETURN_ERROR(hipErrorInvalidValue);
+      }
+
+      iree_hal_streaming_context_t* context = NULL;
+      hipError_t context_result = iree_hip_ensure_context(&context);
+      if (context_result != hipSuccess) {
+        HIP_RETURN_ERROR(context_result);
+      }
+      if (iree_hip_context_invalidate_non_relaxed_visible_captures(context)) {
+        HIP_RETURN_ERROR(hipErrorStreamCaptureUnsupported);
+      }
+
+      iree_hal_streaming_buffer_t* buffer = NULL;
+      iree_status_t status = iree_hal_streaming_memory_allocate_host(
+          context, sizeBytes,
+          IREE_HAL_STREAMING_HOST_REGISTER_FLAG_HIP_SIGNAL_MEMORY, &buffer);
+      if (iree_status_is_ok(status)) {
+        *ptr = buffer->host_ptr;
+      }
+      return iree_status_to_hip_result(status);
+    }
+    case hipDeviceMallocUncached: {
+      if (sizeBytes == 0) {
+        return hipSuccess;
+      }
+      iree_hal_streaming_context_t* context = NULL;
+      hipError_t context_result = iree_hip_ensure_context(&context);
+      if (context_result != hipSuccess) {
+        HIP_RETURN_ERROR(context_result);
+      }
+      if (iree_hip_context_invalidate_non_relaxed_visible_captures(context)) {
+        HIP_RETURN_ERROR(hipErrorStreamCaptureUnsupported);
+      }
+      iree_hal_streaming_buffer_t* buffer = NULL;
+      iree_status_t status = iree_hal_streaming_memory_allocate_device(
+          context, sizeBytes, IREE_HAL_STREAMING_MEMORY_FLAG_UNCACHED, &buffer);
+      if (iree_status_is_ok(status)) {
+        *ptr = (void*)iree_hal_streaming_buffer_device_pointer(buffer);
+      }
+      return iree_status_to_hip_result(status);
+    }
+    case hipDeviceMallocFinegrained: {
+      // Zero-byte allocations never consume a mode-specific resource, while
+      // unrepresentable requests must not be misreported as missing hardware
+      // support.
+      if (sizeBytes == 0) {
+        return hipSuccess;
+      }
+      hipError_t size_result =
+          iree_hip_validate_host_allocation_size(sizeBytes);
+      if (size_result != hipSuccess) {
+        HIP_RETURN_ERROR(size_result);
+      }
+      HIP_RETURN_ERROR(hipErrorNotSupported);
+    }
+    default:
+      HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
 }
 
 // Allocates pitched linear memory on the device.
@@ -4421,15 +5120,42 @@ HIPAPI hipError_t hipFree(void* ptr) {
   iree_status_t status = iree_hal_streaming_memory_free_device(
       context, (iree_hal_streaming_deviceptr_t)ptr);
 
-  // Convert status to HIP error. Invalid pointers (including already-freed
-  // pointers) should return hipErrorInvalidValue, not hipErrorNotFound.
+  // A signal allocation is host-visible storage but, unlike ordinary host
+  // allocations, this API owns it. Keep that exception explicit so hipFree
+  // does not accidentally accept arbitrary pinned host pointers.
   hipError_t result;
   if (iree_status_is_ok(status)) {
     result = hipSuccess;
-  } else if (iree_status_code(status) == IREE_STATUS_NOT_FOUND) {
-    // Pointer not found in allocation table - invalid or already freed.
+  } else if (iree_status_code(status) == IREE_STATUS_NOT_FOUND ||
+             iree_status_code(status) == IREE_STATUS_INVALID_ARGUMENT) {
     iree_status_free(status);
-    result = hipErrorInvalidValue;
+    iree_hal_streaming_host_register_flags_t host_flags =
+        IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT;
+    status = iree_hal_streaming_memory_host_flags(context, ptr, &host_flags);
+    if (!iree_status_is_ok(status)) {
+      if (iree_status_code(status) == IREE_STATUS_NOT_FOUND ||
+          iree_status_code(status) == IREE_STATUS_INVALID_ARGUMENT) {
+        iree_status_free(status);
+        result = hipErrorInvalidValue;
+      } else {
+        result = iree_status_to_hip_result(status);
+      }
+    } else if (iree_any_bit_set(
+                   host_flags,
+                   IREE_HAL_STREAMING_HOST_REGISTER_FLAG_HIP_SIGNAL_MEMORY)) {
+      status = iree_hal_streaming_memory_free_host(context, ptr);
+      if (iree_status_is_ok(status)) {
+        result = hipSuccess;
+      } else if (iree_status_code(status) == IREE_STATUS_NOT_FOUND ||
+                 iree_status_code(status) == IREE_STATUS_INVALID_ARGUMENT) {
+        iree_status_free(status);
+        result = hipErrorInvalidValue;
+      } else {
+        result = iree_status_to_hip_result(status);
+      }
+    } else {
+      result = hipErrorInvalidValue;
+    }
   } else {
     result = iree_status_to_hip_result(status);
   }
@@ -4438,22 +5164,12 @@ HIPAPI hipError_t hipFree(void* ptr) {
 }
 
 HIPAPI hipError_t hipFreeArray(hipArray_t array) {
-  if (!array) return hipSuccess;
-  if (array->magic != IREE_HIP_ARRAY_MAGIC || !array->context) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (!array) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  struct hipArray_st* removed_array = NULL;
+  if (!iree_hip_array_registry_remove(array, &removed_array)) {
+    HIP_RETURN_ERROR(hipErrorContextIsDestroyed);
   }
-  iree_hal_streaming_context_t* context = array->context;
-  const iree_hal_streaming_deviceptr_t device_ptr = array->device_ptr;
-  iree_hip_array_registry_remove(array);
-  array->magic = 0;
-  array->context = NULL;
-  array->buffer = NULL;
-  iree_status_t status =
-      iree_hal_streaming_memory_free_device(context, device_ptr);
-  free(array);
-  if (!iree_status_is_ok(status)) {
-    HIP_RETURN_STATUS(status, hipErrorInvalidValue);
-  }
+  iree_hip_array_release(removed_array);
   return hipSuccess;
 }
 
@@ -5297,16 +6013,32 @@ static hipError_t iree_hip_resolve_memcpy_kind(
   return hipSuccess;
 }
 
+static hipError_t iree_hip_validate_hip_visible_memcpy_range(
+    iree_hal_streaming_buffer_ref_t range_ref, size_t count) {
+  if (!range_ref.buffer || count > (size_t)IREE_DEVICE_SIZE_MAX) {
+    return hipErrorInvalidValue;
+  }
+  const iree_device_size_t device_count = (iree_device_size_t)count;
+  const iree_device_size_t logical_size = range_ref.buffer->logical_size;
+  if (range_ref.offset > logical_size ||
+      device_count > logical_size - range_ref.offset) {
+    return hipErrorInvalidValue;
+  }
+  return hipSuccess;
+}
+
 static hipError_t iree_hip_validate_known_memcpy_range(
     iree_hal_streaming_context_t* context, const void* ptr, size_t count,
     bool use_hip_visible_pool_size) {
-  (void)use_hip_visible_pool_size;
   if (count == 0) return hipSuccess;
 
   iree_hal_streaming_buffer_ref_t range_ref;
   iree_status_t status = iree_hal_streaming_memory_lookup_range(
       context, (iree_hal_streaming_deviceptr_t)ptr, count, &range_ref);
   if (iree_status_is_ok(status)) {
+    if (use_hip_visible_pool_size) {
+      return iree_hip_validate_hip_visible_memcpy_range(range_ref, count);
+    }
     return hipSuccess;
   }
   const iree_status_code_t code = iree_status_code(status);
@@ -5319,8 +6051,12 @@ static hipError_t iree_hip_validate_known_memcpy_range(
   status = iree_hal_streaming_memory_lookup_range_across_contexts(
       (iree_hal_streaming_deviceptr_t)ptr, count, &owner_context, &range_ref);
   if (iree_status_is_ok(status)) {
+    hipError_t result = hipSuccess;
+    if (use_hip_visible_pool_size) {
+      result = iree_hip_validate_hip_visible_memcpy_range(range_ref, count);
+    }
     iree_hal_streaming_context_release(owner_context);
-    return hipSuccess;
+    return result;
   }
   if (iree_status_code(status) != IREE_STATUS_NOT_FOUND) {
     return iree_status_to_hip_result(status);
@@ -5332,6 +6068,20 @@ static hipError_t iree_hip_validate_known_memcpy_range(
       context, (iree_hal_streaming_deviceptr_t)ptr, &buffer_ref);
   if (iree_status_is_ok(status)) {
     return hipErrorInvalidValue;
+  }
+  if (iree_status_code(status) != IREE_STATUS_NOT_FOUND) {
+    return iree_status_to_hip_result(status);
+  }
+  iree_status_ignore(status);
+
+  status = iree_hal_streaming_memory_lookup_range_across_contexts(
+      (iree_hal_streaming_deviceptr_t)ptr, 1, &owner_context, &buffer_ref);
+  if (iree_status_is_ok(status)) {
+    iree_hal_streaming_context_release(owner_context);
+    return hipErrorInvalidValue;
+  }
+  if (iree_status_code(status) != IREE_STATUS_NOT_FOUND) {
+    return iree_status_to_hip_result(status);
   }
   iree_status_ignore(status);
   return hipSuccess;
@@ -5362,6 +6112,24 @@ static hipError_t iree_hip_validate_memcpy_ranges(
       return hipErrorInvalidValue;
   }
 }
+
+// Returns true when |dst| is not backed by a host allocation tracked in the
+// current context. HIP completes D2H copies to such pageable memory before the
+// API call returns, while tracked host memory remains stream ordered.
+static bool iree_hip_memcpy_destination_is_pageable(
+    iree_hal_streaming_context_t* context, const void* dst, size_t size) {
+  iree_hal_streaming_buffer_ref_t dst_ref;
+  iree_status_t status = iree_hal_streaming_memory_lookup_range(
+      context, (iree_hal_streaming_deviceptr_t)(uintptr_t)dst, size, &dst_ref);
+  const bool is_pageable = !iree_status_is_ok(status);
+  iree_status_ignore(status);
+  return is_pageable;
+}
+
+static hipError_t iree_hip_memcpy_peer_staged(
+    iree_hal_streaming_context_t* dst_context, void* dst,
+    iree_hal_streaming_context_t* src_context, const void* src,
+    size_t size_bytes, iree_hal_streaming_stream_t* stream);
 
 static hipError_t iree_hip_try_cross_context_h2d(
     iree_hal_streaming_context_t* context, void* dst, const void* src,
@@ -5669,8 +6437,8 @@ HIPAPI hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(kind_result);
   }
-  hipError_t range_result = iree_hip_validate_memcpy_ranges(
-      context, dst, src, sizeBytes, kind, false);
+  hipError_t range_result =
+      iree_hip_validate_memcpy_ranges(context, dst, src, sizeBytes, kind, true);
   if (range_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(range_result);
@@ -5786,48 +6554,45 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  // Explicit streams carry their owning context and can be used from worker
-  // threads that have no current context set.
-  iree_hal_streaming_context_t* context = NULL;
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  hipError_t init_result = hipSuccess;
-  if (stream && stream != hipStreamLegacy && stream != hipStreamPerThread) {
-    init_result = iree_hip_ensure_initialized();
-    if (init_result == hipSuccess) {
-      stream_obj = (iree_hal_streaming_stream_t*)stream;
-      context = stream_obj->context;
-      if (!context) {
-        init_result = hipErrorContextIsDestroyed;
-      }
-    }
-  } else {
-    init_result = iree_hip_ensure_context(&context);
-    if (init_result == hipSuccess) {
-      init_result = iree_hip_resolve_stream(stream, &stream_obj);
-    }
-  }
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t init_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (init_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
   }
+  iree_hal_streaming_context_t* context = resolved_stream.context;
+  iree_hal_streaming_stream_t* stream_obj = resolved_stream.stream;
 
   hipError_t kind_result =
       iree_hip_resolve_memcpy_kind(context, dst, src, kind, &kind);
   if (kind_result != hipSuccess) {
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(kind_result);
   }
-  hipError_t range_result = iree_hip_validate_memcpy_ranges(
-      context, dst, src, sizeBytes, kind, false);
+  hipError_t range_result =
+      iree_hip_validate_memcpy_ranges(context, dst, src, sizeBytes, kind, true);
   if (range_result != hipSuccess) {
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(range_result);
   }
 
+  const bool pageable_d2h =
+      kind == hipMemcpyDeviceToHost &&
+      stream_obj->capture_status != IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE &&
+      iree_hip_memcpy_destination_is_pageable(context, dst, sizeBytes);
+
   if (!stream || stream == hipStreamLegacy) {
     iree_status_t order_status =
         iree_hal_streaming_context_synchronize_legacy_default(context);
-    HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(z0, order_status);
+    if (!iree_status_is_ok(order_status)) {
+      iree_hip_resolved_stream_release(&resolved_stream);
+      hipError_t result = iree_status_to_hip_result(order_status);
+      IREE_TRACE_ZONE_END(z0);
+      return result;
+    }
   }
 
   if (stream_obj->capture_status != IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
@@ -5844,14 +6609,16 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
           iree_hip_try_managed_d2d(context, dst, src, sizeBytes, &handled);
     }
     if (handled || special_result != hipSuccess) {
+      iree_hip_resolved_stream_release(&resolved_stream);
       IREE_TRACE_ZONE_END(z0);
       HIP_RETURN_ERROR(special_result);
     }
   }
 
   hipError_t dependency_result =
-      iree_hip_synchronize_legacy_stream_dependencies(context, stream_obj);
+      iree_hip_order_legacy_stream_dependencies(context, stream_obj);
   if (dependency_result != hipSuccess) {
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(dependency_result);
   }
@@ -5892,8 +6659,12 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
       status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
       break;
   }
+  if (iree_status_is_ok(status) && pageable_d2h) {
+    status = iree_hal_streaming_stream_synchronize(stream_obj);
+  }
 
   hipError_t result = iree_status_to_hip_result(status);
+  iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -5924,6 +6695,14 @@ HIPAPI hipError_t hipMemcpyWithStream(void* dst, const void* src,
   return result;
 }
 
+static bool iree_hip_calculate_2d_copy_span(size_t pitch, size_t width,
+                                            size_t height, size_t* out_span) {
+  *out_span = 0;
+  if (width == 0 || height == 0) return true;
+  return iree_host_size_checked_mul(height - 1, pitch, out_span) &&
+         iree_host_size_checked_add(*out_span, width, out_span);
+}
+
 static hipError_t iree_hip_validate_2d_copy_shape(size_t dst_pitch,
                                                   size_t src_pitch,
                                                   size_t width, size_t height,
@@ -5931,6 +6710,12 @@ static hipError_t iree_hip_validate_2d_copy_shape(size_t dst_pitch,
   if (width == 0 || height == 0) return hipSuccess;
   if (width > dst_pitch || width > src_pitch) {
     return pitch_error;
+  }
+  size_t dst_span = 0;
+  size_t src_span = 0;
+  if (!iree_hip_calculate_2d_copy_span(dst_pitch, width, height, &dst_span) ||
+      !iree_hip_calculate_2d_copy_span(src_pitch, width, height, &src_span)) {
+    return hipErrorInvalidValue;
   }
   int max_pitch = 0;
   if (hipDeviceGetAttribute(&max_pitch, hipDeviceAttributeMaxPitch, 0) ==
@@ -5975,11 +6760,9 @@ static hipError_t iree_hip_memcpy2d_to_3d_params(const hip_Memcpy2D* copy,
   if (!copy || !out_params) return hipErrorInvalidValue;
   memset(out_params, 0, sizeof(*out_params));
 
-  if (copy->srcMemoryType == hipMemoryTypeArray) {
-    return copy->srcArray ? hipErrorNotSupported : hipErrorInvalidValue;
-  }
-  if (copy->dstMemoryType == hipMemoryTypeArray) {
-    return copy->dstArray ? hipErrorNotSupported : hipErrorInvalidValue;
+  if (copy->srcMemoryType == hipMemoryTypeArray ||
+      copy->dstMemoryType == hipMemoryTypeArray) {
+    return iree_hip_memcpy2d_array_to_3d_params(copy, out_params);
   }
 
   hipError_t shape_result = iree_hip_validate_2d_copy_shape(
@@ -6122,24 +6905,20 @@ HIPAPI hipError_t hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src,
     return hipSuccess;
   }
 
-  // Ensure initialization and get context.
-  iree_hal_streaming_context_t* context = NULL;
-  hipError_t init_result = iree_hip_ensure_context(&context);
-  if (init_result != hipSuccess) {
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t resolve_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (resolve_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
+    HIP_RETURN_ERROR(resolve_result);
   }
-
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  init_result = iree_hip_resolve_stream(stream, &stream_obj);
-  if (init_result != hipSuccess) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
-  }
+  iree_hal_streaming_context_t* context = resolved_stream.context;
+  iree_hal_streaming_stream_t* stream_obj = resolved_stream.stream;
 
   hipError_t shape_result = iree_hip_validate_2d_copy_shape(
       dpitch, spitch, width, height, hipErrorInvalidPitchValue);
   if (shape_result != hipSuccess) {
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(shape_result);
   }
@@ -6148,6 +6927,7 @@ HIPAPI hipError_t hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src,
   hipError_t kind_result =
       iree_hip_resolve_memcpy_kind(context, dst, src, kind, &kind);
   if (kind_result != hipSuccess) {
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(kind_result);
   }
@@ -6169,11 +6949,38 @@ HIPAPI hipError_t hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src,
     params.kind = requested_kind;
 
     hipError_t result = iree_hip_capture_memcpy3d_node(stream_obj, &params);
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     if (result != hipSuccess) {
       HIP_RETURN_ERROR(result);
     }
     return hipSuccess;
+  }
+
+  size_t dst_span = 0;
+  if (!iree_hip_calculate_2d_copy_span(dpitch, width, height, &dst_span)) {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  const bool pageable_d2h =
+      kind == hipMemcpyDeviceToHost &&
+      iree_hip_memcpy_destination_is_pageable(context, dst, dst_span);
+
+  if (kind == hipMemcpyDeviceToHost) {
+    iree_status_t packed_status = iree_hal_streaming_memcpy_device_to_host_2d(
+        context, dst, dpitch, (iree_hal_streaming_deviceptr_t)src, spitch,
+        width, height, stream_obj);
+    if (!iree_status_is_unavailable(packed_status)) {
+      if (iree_status_is_ok(packed_status) && pageable_d2h) {
+        packed_status = iree_hal_streaming_stream_synchronize(stream_obj);
+      }
+      hipError_t result = iree_status_to_hip_result(packed_status);
+      iree_hip_resolved_stream_release(&resolved_stream);
+      IREE_TRACE_ZONE_END(z0);
+      return result;
+    }
+    iree_status_ignore(packed_status);
   }
 
   // Copy row by row.
@@ -6212,8 +7019,12 @@ HIPAPI hipError_t hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src,
     src_ptr += spitch;
     dst_ptr += dpitch;
   }
+  if (iree_status_is_ok(status) && pageable_d2h) {
+    status = iree_hal_streaming_stream_synchronize(stream_obj);
+  }
 
   hipError_t result = iree_status_to_hip_result(status);
+  iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -6334,21 +7145,47 @@ static hipError_t iree_hip_memcpy3d_staged_rows(
     return iree_status_to_hip_result(status);
   }
 
+  if (src_context) {
+    // A stream can only record commands for buffers owned by its HAL device.
+    // Cross-device copies may be requested while another device is current,
+    // making the implicit stream foreign to the source allocation. Preserve
+    // ordering with that stream, then use blocking transfers on the source
+    // device instead of recording an invalid cross-device command buffer.
+    if (stream->context != src_context) {
+      status = iree_hal_streaming_stream_synchronize(stream);
+      for (size_t z = 0; z < depth && iree_status_is_ok(status); ++z) {
+        uint8_t* dst_slice = dst_base + z * dst_slice_pitch;
+        const uint8_t* src_slice = src_base + z * src_slice_pitch;
+        for (size_t y = 0; y < height && iree_status_is_ok(status); ++y) {
+          status = iree_hal_streaming_memcpy_device_to_host(
+              src_context, dst_slice + y * dst_pitch,
+              (iree_hal_streaming_deviceptr_t)(src_slice + y * src_pitch),
+              width, NULL);
+        }
+      }
+      return iree_status_to_hip_result(status);
+    }
+    for (size_t z = 0; z < depth && iree_status_is_ok(status); ++z) {
+      status = iree_hal_streaming_memcpy_device_to_host_2d(
+          src_context, dst_base + z * dst_slice_pitch, dst_pitch,
+          (iree_hal_streaming_deviceptr_t)(src_base + z * src_slice_pitch),
+          src_pitch, width, height, stream);
+    }
+    return iree_status_to_hip_result(status);
+  }
+
+  if (stream->context != dst_context) {
+    status = iree_hal_streaming_stream_synchronize(stream);
+    stream = NULL;
+  }
   for (size_t z = 0; z < depth && iree_status_is_ok(status); ++z) {
     uint8_t* dst_slice = dst_base + z * dst_slice_pitch;
     const uint8_t* src_slice = src_base + z * src_slice_pitch;
     for (size_t y = 0; y < height && iree_status_is_ok(status); ++y) {
-      if (src_context) {
-        status = iree_hal_streaming_memcpy_device_to_host(
-            src_context, dst_slice + y * dst_pitch,
-            (iree_hal_streaming_deviceptr_t)(src_slice + y * src_pitch), width,
-            stream);
-      } else {
-        status = iree_hal_streaming_memcpy_host_to_device(
-            dst_context,
-            (iree_hal_streaming_deviceptr_t)(dst_slice + y * dst_pitch),
-            src_slice + y * src_pitch, width, stream);
-      }
+      status = iree_hal_streaming_memcpy_host_to_device(
+          dst_context,
+          (iree_hal_streaming_deviceptr_t)(dst_slice + y * dst_pitch),
+          src_slice + y * src_pitch, width, stream);
     }
   }
   return iree_status_to_hip_result(status);
@@ -6532,15 +7369,18 @@ HIPAPI hipError_t hipMemcpy3DAsync(const hipMemcpy3DParms* p,
   const uint8_t* src_base = (const uint8_t*)p->srcPtr.ptr + src_base_offset;
   uint8_t* dst_base = (uint8_t*)p->dstPtr.ptr + dst_base_offset;
 
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  hipError_t stream_result = iree_hip_resolve_stream(stream, &stream_obj);
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t stream_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (stream_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(stream_result);
   }
+  iree_hal_streaming_stream_t* stream_obj = resolved_stream.stream;
   if (stream_obj->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
     hipError_t result =
         iree_hip_capture_memcpy3d_node(stream_obj, original_params);
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     if (result != hipSuccess) {
       HIP_RETURN_ERROR(result);
@@ -6553,6 +7393,7 @@ HIPAPI hipError_t hipMemcpy3DAsync(const hipMemcpy3DParms* p,
       p->dstPtr.pitch, dst_rows_per_slice, p->extent.width, p->extent.height,
       p->extent.depth, &dst_span);
   if (span_result != hipSuccess) {
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(span_result);
   }
@@ -6561,6 +7402,7 @@ HIPAPI hipError_t hipMemcpy3DAsync(const hipMemcpy3DParms* p,
       p->srcPtr.pitch, src_rows_per_slice, p->extent.width, p->extent.height,
       p->extent.depth, &src_span);
   if (span_result != hipSuccess) {
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(span_result);
   }
@@ -6612,7 +7454,12 @@ HIPAPI hipError_t hipMemcpy3DAsync(const hipMemcpy3DParms* p,
   const bool dst_is_contiguous = p->dstPos.x == 0 && p->dstPos.y == 0 &&
                                  p->extent.width == p->dstPtr.pitch &&
                                  p->extent.height == dst_rows_per_slice;
-  if (!return_after_lookup && src_is_contiguous && dst_is_contiguous) {
+  const bool is_cross_context_device_copy =
+      (effective_kind == hipMemcpyDeviceToDevice ||
+       effective_kind == hipMemcpyDeviceToDeviceNoCU) &&
+      dst_is_device && src_is_device && dst_context != src_context;
+  if (!return_after_lookup && !is_cross_context_device_copy &&
+      src_is_contiguous && dst_is_contiguous) {
     iree_host_size_t byte_count = 0;
     if (IREE_UNLIKELY(!iree_host_size_checked_mul(
             src_slice_pitch, p->extent.depth, &byte_count))) {
@@ -6662,6 +7509,13 @@ HIPAPI hipError_t hipMemcpy3DAsync(const hipMemcpy3DParms* p,
     }
     if (use_staged_copy) {
       result = staged_result;
+      // Strided copies queue one transfer per row. Complete the pageable D2H
+      // operation only after its final row is queued on the source stream.
+      if (result == hipSuccess && effective_kind == hipMemcpyDeviceToHost &&
+          !have_dst && resolved_stream.context == src_context) {
+        result = iree_status_to_hip_result(
+            iree_hal_streaming_stream_synchronize(stream_obj));
+      }
       return_after_lookup = true;
     }
   }
@@ -6675,6 +7529,7 @@ HIPAPI hipError_t hipMemcpy3DAsync(const hipMemcpy3DParms* p,
   }
   iree_status_ignore(src_status);
   if (return_after_lookup) {
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     if (result != hipSuccess) {
       HIP_RETURN_ERROR(result);
@@ -6698,6 +7553,7 @@ HIPAPI hipError_t hipMemcpy3DAsync(const hipMemcpy3DParms* p,
     if (result != hipSuccess) break;
   }
 
+  iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -6745,46 +7601,177 @@ HIPAPI hipChannelFormatDesc hipCreateChannelDesc(int x, int y, int z, int w,
   return desc;
 }
 
-static hipError_t iree_hip_array_element_size(const hipChannelFormatDesc* desc,
-                                              size_t* out_element_size) {
-  *out_element_size = 0;
-  if (!desc || desc->x < 0 || desc->y < 0 || desc->z < 0 || desc->w < 0) {
+static bool iree_hip_array_channel_bits_supported(hipChannelFormatKind kind,
+                                                  int bits) {
+  switch (kind) {
+    case hipChannelFormatKindSigned:
+    case hipChannelFormatKindUnsigned:
+      return bits == 8 || bits == 16 || bits == 32;
+    case hipChannelFormatKindFloat:
+      return bits == 16 || bits == 32;
+    default:
+      return false;
+  }
+}
+
+static hipError_t iree_hip_array_desc_to_format(
+    const hipChannelFormatDesc* desc, hipArray_Format* out_format,
+    unsigned int* out_num_channels, size_t* out_element_size) {
+  if (out_format) *out_format = 0;
+  if (out_num_channels) *out_num_channels = 0;
+  if (out_element_size) *out_element_size = 0;
+  if (!desc || desc->x <= 0 || desc->y < 0 || desc->z < 0 || desc->w < 0) {
     return hipErrorInvalidValue;
   }
-  size_t bit_count = 0;
-  if (IREE_UNLIKELY(
-          !iree_host_size_checked_add((size_t)desc->x, (size_t)desc->y,
-                                      &bit_count) ||
-          !iree_host_size_checked_add(bit_count, (size_t)desc->z, &bit_count) ||
-          !iree_host_size_checked_add(bit_count, (size_t)desc->w,
-                                      &bit_count))) {
+  if (!iree_hip_array_channel_bits_supported(desc->f, desc->x)) {
     return hipErrorInvalidValue;
   }
-  if (bit_count == 0) return hipErrorInvalidValue;
-  *out_element_size = (bit_count + 7) / 8;
+
+  const int bits[4] = {desc->x, desc->y, desc->z, desc->w};
+  unsigned int channel_count = 0;
+  bool saw_zero_channel = false;
+  for (size_t i = 0; i < IREE_ARRAYSIZE(bits); ++i) {
+    if (bits[i] == 0) {
+      saw_zero_channel = true;
+      continue;
+    }
+    if (saw_zero_channel || bits[i] != desc->x) {
+      return hipErrorInvalidValue;
+    }
+    ++channel_count;
+  }
+  if (channel_count != 1 && channel_count != 2 && channel_count != 4) {
+    return hipErrorInvalidValue;
+  }
+
+  hipArray_Format format = 0;
+  switch (desc->f) {
+    case hipChannelFormatKindUnsigned:
+      format = desc->x == 8    ? HIP_AD_FORMAT_UNSIGNED_INT8
+               : desc->x == 16 ? HIP_AD_FORMAT_UNSIGNED_INT16
+                               : HIP_AD_FORMAT_UNSIGNED_INT32;
+      break;
+    case hipChannelFormatKindSigned:
+      format = desc->x == 8    ? HIP_AD_FORMAT_SIGNED_INT8
+               : desc->x == 16 ? HIP_AD_FORMAT_SIGNED_INT16
+                               : HIP_AD_FORMAT_SIGNED_INT32;
+      break;
+    case hipChannelFormatKindFloat:
+      format = desc->x == 16 ? HIP_AD_FORMAT_HALF : HIP_AD_FORMAT_FLOAT;
+      break;
+    default:
+      return hipErrorInvalidValue;
+  }
+
+  if (out_format) *out_format = format;
+  if (out_num_channels) *out_num_channels = channel_count;
+  if (out_element_size) {
+    *out_element_size = ((size_t)desc->x * channel_count) / 8;
+  }
   return hipSuccess;
 }
 
-static hipError_t iree_hip_array_validate(hipArray_const_t array,
-                                          const struct hipArray_st** out) {
+static hipError_t iree_hip_array_format_to_desc(hipArray_Format format,
+                                                unsigned int num_channels,
+                                                hipChannelFormatDesc* out_desc,
+                                                size_t* out_element_size) {
+  if (out_desc) memset(out_desc, 0, sizeof(*out_desc));
+  if (out_element_size) *out_element_size = 0;
+  if (num_channels != 1 && num_channels != 2 && num_channels != 4) {
+    return hipErrorInvalidValue;
+  }
+
+  int bits = 0;
+  hipChannelFormatKind kind = hipChannelFormatKindNone;
+  switch (format) {
+    case HIP_AD_FORMAT_UNSIGNED_INT8:
+      bits = 8;
+      kind = hipChannelFormatKindUnsigned;
+      break;
+    case HIP_AD_FORMAT_UNSIGNED_INT16:
+      bits = 16;
+      kind = hipChannelFormatKindUnsigned;
+      break;
+    case HIP_AD_FORMAT_UNSIGNED_INT32:
+      bits = 32;
+      kind = hipChannelFormatKindUnsigned;
+      break;
+    case HIP_AD_FORMAT_SIGNED_INT8:
+      bits = 8;
+      kind = hipChannelFormatKindSigned;
+      break;
+    case HIP_AD_FORMAT_SIGNED_INT16:
+      bits = 16;
+      kind = hipChannelFormatKindSigned;
+      break;
+    case HIP_AD_FORMAT_SIGNED_INT32:
+      bits = 32;
+      kind = hipChannelFormatKindSigned;
+      break;
+    case HIP_AD_FORMAT_HALF:
+      bits = 16;
+      kind = hipChannelFormatKindFloat;
+      break;
+    case HIP_AD_FORMAT_FLOAT:
+      bits = 32;
+      kind = hipChannelFormatKindFloat;
+      break;
+    default:
+      return hipErrorInvalidValue;
+  }
+
+  hipChannelFormatDesc desc = {
+      .x = num_channels >= 1 ? bits : 0,
+      .y = num_channels >= 2 ? bits : 0,
+      .z = num_channels >= 4 ? bits : 0,
+      .w = num_channels >= 4 ? bits : 0,
+      .f = kind,
+  };
+  if (out_desc) *out_desc = desc;
+  if (out_element_size) *out_element_size = ((size_t)bits * num_channels) / 8;
+  return hipSuccess;
+}
+
+static void iree_hip_array_destroy(struct hipArray_st* array) {
+  iree_hal_streaming_context_t* context = array->context;
+  const iree_hal_streaming_deviceptr_t device_ptr = array->device_ptr;
+  array->magic = 0;
+  array->context = NULL;
+  array->buffer = NULL;
+  array->device_ptr = 0;
+  if (context && device_ptr) {
+    iree_status_ignore(
+        iree_hal_streaming_memory_free_device(context, device_ptr));
+  }
+  iree_hal_streaming_context_release(context);
+  free(array);
+}
+
+static void iree_hip_array_release(struct hipArray_st* array) {
+  if (array && iree_atomic_ref_count_dec(&array->ref_count) == 1) {
+    iree_hip_array_destroy(array);
+  }
+}
+
+static hipError_t iree_hip_array_retain(hipArray_const_t array,
+                                        struct hipArray_st** out) {
   if (out) *out = NULL;
-  const struct hipArray_st* array_info = NULL;
+  struct hipArray_st* array_info = NULL;
   if (!iree_hip_array_registry_lookup(array, &array_info) ||
       !array_info->context || !array_info->buffer || !array_info->device_ptr) {
+    iree_hip_array_release(array_info);
     return hipErrorInvalidValue;
   }
   if (out) *out = array_info;
   return hipSuccess;
 }
 
-static hipError_t iree_hip_array_byte_range_to_elements(
-    hipArray_const_t array, size_t byte_offset, size_t byte_width,
+static hipError_t iree_hip_array_byte_range_to_elements_for_array(
+    const struct hipArray_st* array_info, size_t byte_offset, size_t byte_width,
     size_t* out_element_offset, size_t* out_element_width) {
   if (out_element_offset) *out_element_offset = 0;
   if (out_element_width) *out_element_width = 0;
-  const struct hipArray_st* array_info = NULL;
-  hipError_t result = iree_hip_array_validate(array, &array_info);
-  if (result != hipSuccess) return result;
+  if (!array_info) return hipErrorInvalidValue;
   if (array_info->element_size == 0 ||
       byte_offset % array_info->element_size != 0 ||
       byte_width % array_info->element_size != 0) {
@@ -6801,6 +7788,339 @@ static hipError_t iree_hip_array_byte_range_to_elements(
   return hipSuccess;
 }
 
+static hipError_t iree_hip_array_byte_range_to_elements(
+    hipArray_const_t array, size_t byte_offset, size_t byte_width,
+    size_t* out_element_offset, size_t* out_element_width) {
+  struct hipArray_st* array_info = NULL;
+  hipError_t result = iree_hip_array_retain(array, &array_info);
+  if (result != hipSuccess) return result;
+  result = iree_hip_array_byte_range_to_elements_for_array(
+      array_info, byte_offset, byte_width, out_element_offset,
+      out_element_width);
+  iree_hip_array_release(array_info);
+  return result;
+}
+
+static hipError_t iree_hip_array_row_device_pointer(
+    const struct hipArray_st* array_info, size_t row_offset, size_t byte_offset,
+    iree_hal_streaming_deviceptr_t* out_device_ptr) {
+  *out_device_ptr = 0;
+  if (!array_info || row_offset >= array_info->rows_per_slice ||
+      byte_offset >= array_info->width_bytes) {
+    return hipErrorInvalidValue;
+  }
+  iree_host_size_t row_start = 0;
+  iree_host_size_t range_start = 0;
+  if (IREE_UNLIKELY(
+          !iree_host_size_checked_mul(row_offset, array_info->pitch,
+                                      &row_start) ||
+          !iree_host_size_checked_add(row_start, byte_offset, &range_start) ||
+          range_start > array_info->allocation_size)) {
+    return hipErrorInvalidValue;
+  }
+  *out_device_ptr = array_info->device_ptr + range_start;
+  return hipSuccess;
+}
+
+static hipError_t iree_hip_array_enqueue_packed_row_copy(
+    bool array_is_destination, iree_hal_streaming_deviceptr_t array_ptr,
+    void* external_ptr, size_t byte_count, hipMemcpyKind kind) {
+  if (array_is_destination) {
+    return hipMemcpyAsync((void*)array_ptr, external_ptr, byte_count, kind,
+                          NULL);
+  }
+  return hipMemcpyAsync(external_ptr, (const void*)array_ptr, byte_count, kind,
+                        NULL);
+}
+
+static hipError_t iree_hip_array_enqueue_packed_rows_copy(
+    bool array_is_destination, iree_hal_streaming_deviceptr_t array_ptr,
+    size_t array_pitch, void* external_ptr, size_t row_width, size_t row_count,
+    hipMemcpyKind kind) {
+  if (array_is_destination) {
+    return hipMemcpy2DAsync((void*)array_ptr, array_pitch, external_ptr,
+                            row_width, row_width, row_count, kind, NULL);
+  }
+  return hipMemcpy2DAsync(external_ptr, row_width, (const void*)array_ptr,
+                          array_pitch, row_width, row_count, kind, NULL);
+}
+
+// Copies the selected 2D array slice as a packed byte stream. The allocation
+// pitch is an implementation detail, so a range spanning rows must skip its
+// padding rather than expose that padding to the caller. The synchronous APIs
+// enqueue a prefix, complete-row range, and suffix on the default stream, then
+// synchronize once after all successfully queued work has completed.
+static hipError_t iree_hip_array_copy_packed_rows(
+    hipArray_const_t array, size_t byte_offset, size_t row_offset,
+    void* external_ptr, size_t byte_count, hipMemcpyKind kind,
+    bool array_is_destination) {
+  struct hipArray_st* array_info = NULL;
+  hipError_t result = iree_hip_array_retain(array, &array_info);
+  if (result != hipSuccess) return result;
+
+  iree_host_size_t whole_row_byte_count = 0;
+  iree_host_size_t remaining_byte_count = 0;
+  if (byte_offset >= array_info->width_bytes ||
+      row_offset >= array_info->rows_per_slice ||
+      !iree_host_size_checked_mul(array_info->rows_per_slice - row_offset - 1,
+                                  array_info->width_bytes,
+                                  &whole_row_byte_count) ||
+      !iree_host_size_checked_add(array_info->width_bytes - byte_offset,
+                                  whole_row_byte_count,
+                                  &remaining_byte_count) ||
+      byte_count > remaining_byte_count) {
+    iree_hip_array_release(array_info);
+    return hipErrorInvalidValue;
+  }
+
+  iree_hal_streaming_context_t* context = NULL;
+  result = iree_hip_ensure_context(&context);
+  if (result == hipSuccess &&
+      iree_hip_context_invalidate_visible_captures(context)) {
+    result = hipErrorStreamCaptureImplicit;
+  }
+
+  bool may_have_enqueued_work = false;
+  size_t external_offset = 0;
+  size_t current_row = row_offset;
+  size_t remaining = byte_count;
+  const size_t first_row_byte_count =
+      byte_offset == 0 ? 0
+                       : (remaining < array_info->width_bytes - byte_offset
+                              ? remaining
+                              : array_info->width_bytes - byte_offset);
+  if (result == hipSuccess && first_row_byte_count != 0) {
+    iree_hal_streaming_deviceptr_t array_ptr = 0;
+    result = iree_hip_array_row_device_pointer(array_info, current_row,
+                                               byte_offset, &array_ptr);
+    if (result == hipSuccess) {
+      may_have_enqueued_work = true;
+      result = iree_hip_array_enqueue_packed_row_copy(
+          array_is_destination, array_ptr, (uint8_t*)external_ptr,
+          first_row_byte_count, kind);
+    }
+    external_offset = first_row_byte_count;
+    remaining -= first_row_byte_count;
+    ++current_row;
+  }
+
+  const size_t full_row_count = remaining / array_info->width_bytes;
+  if (result == hipSuccess && full_row_count != 0) {
+    iree_hal_streaming_deviceptr_t array_ptr = 0;
+    result = iree_hip_array_row_device_pointer(array_info, current_row, 0,
+                                               &array_ptr);
+    if (result == hipSuccess) {
+      may_have_enqueued_work = true;
+      result = iree_hip_array_enqueue_packed_rows_copy(
+          array_is_destination, array_ptr, array_info->pitch,
+          (uint8_t*)external_ptr + external_offset, array_info->width_bytes,
+          full_row_count, kind);
+    }
+    const size_t full_row_byte_count = full_row_count * array_info->width_bytes;
+    external_offset += full_row_byte_count;
+    remaining -= full_row_byte_count;
+    current_row += full_row_count;
+  }
+
+  if (result == hipSuccess && remaining != 0) {
+    iree_hal_streaming_deviceptr_t array_ptr = 0;
+    result = iree_hip_array_row_device_pointer(array_info, current_row, 0,
+                                               &array_ptr);
+    if (result == hipSuccess) {
+      may_have_enqueued_work = true;
+      result = iree_hip_array_enqueue_packed_row_copy(
+          array_is_destination, array_ptr,
+          (uint8_t*)external_ptr + external_offset, remaining, kind);
+    }
+  }
+
+  if (may_have_enqueued_work) {
+    hipError_t synchronize_result = hipDeviceSynchronize();
+    if (result == hipSuccess) result = synchronize_result;
+  }
+  iree_hip_array_release(array_info);
+  return result;
+}
+
+static hipError_t iree_hip_array_legacy_row_range(
+    hipArray_const_t array, size_t byte_offset, size_t byte_count,
+    const struct hipArray_st** out_array,
+    iree_hal_streaming_deviceptr_t* out_device_ptr) {
+  if (out_array) *out_array = NULL;
+  if (out_device_ptr) *out_device_ptr = 0;
+  if (!array) return hipErrorInvalidValue;
+  struct hipArray_st* array_info = NULL;
+  hipError_t result = iree_hip_array_retain(array, &array_info);
+  if (result != hipSuccess) return result;
+  if (byte_offset > array_info->width_bytes ||
+      byte_count > array_info->width_bytes - byte_offset) {
+    iree_hip_array_release(array_info);
+    return hipErrorInvalidValue;
+  }
+  if (out_array) *out_array = array_info;
+  if (out_device_ptr) *out_device_ptr = array_info->device_ptr + byte_offset;
+  if (!out_array) iree_hip_array_release(array_info);
+  return hipSuccess;
+}
+
+static hipError_t iree_hip_memcpy2d_array_to_3d_params(
+    const hip_Memcpy2D* copy, hipMemcpy3DParms* out_params) {
+  if (!copy || !out_params) return hipErrorInvalidValue;
+  memset(out_params, 0, sizeof(*out_params));
+
+  const bool src_is_array = copy->srcMemoryType == hipMemoryTypeArray;
+  const bool dst_is_array = copy->dstMemoryType == hipMemoryTypeArray;
+  if (!src_is_array && !dst_is_array) return hipErrorInvalidValue;
+
+  size_t array_width_elements = 0;
+  bool array_width_set = false;
+  if (src_is_array) {
+    struct hipArray_st* src_array = NULL;
+    hipError_t result =
+        iree_hip_array_retain((hipArray_const_t)copy->srcArray, &src_array);
+    if (result != hipSuccess) return result;
+    size_t src_element_offset = 0;
+    size_t src_element_width = 0;
+    result = iree_hip_array_byte_range_to_elements_for_array(
+        src_array, copy->srcXInBytes, copy->WidthInBytes, &src_element_offset,
+        &src_element_width);
+    if (result != hipSuccess) {
+      iree_hip_array_release(src_array);
+      return result;
+    }
+    if (copy->Height != 0 &&
+        (copy->srcY >= src_array->extent.height ||
+         copy->Height > src_array->extent.height - copy->srcY)) {
+      iree_hip_array_release(src_array);
+      return hipErrorInvalidValue;
+    }
+    out_params->srcArray = copy->srcArray;
+    out_params->srcPos.x = src_element_offset;
+    out_params->srcPos.y = copy->srcY;
+    array_width_elements = src_element_width;
+    array_width_set = true;
+    iree_hip_array_release(src_array);
+  } else {
+    const void* src = NULL;
+    switch (copy->srcMemoryType) {
+      case hipMemoryTypeHost:
+        src = copy->srcHost;
+        break;
+      case hipMemoryTypeDevice:
+      case hipMemoryTypeUnified:
+        src = copy->srcDevice;
+        break;
+      default:
+        return hipErrorInvalidValue;
+    }
+    if ((copy->WidthInBytes != 0 || copy->Height != 0) && !src) {
+      return hipErrorInvalidValue;
+    }
+    iree_host_size_t src_width = 0;
+    iree_host_size_t src_height = 0;
+    if (IREE_UNLIKELY(!iree_host_size_checked_add(
+                          copy->srcXInBytes, copy->WidthInBytes, &src_width) ||
+                      !iree_host_size_checked_add(copy->srcY, copy->Height,
+                                                  &src_height))) {
+      return hipErrorInvalidValue;
+    }
+    if (copy->WidthInBytes != 0 && src_width > copy->srcPitch) {
+      return hipErrorInvalidValue;
+    }
+    out_params->srcPtr.ptr = (void*)src;
+    out_params->srcPtr.pitch = copy->srcPitch;
+    out_params->srcPtr.xsize = src_width;
+    out_params->srcPtr.ysize = src_height;
+    out_params->srcPos.x = copy->srcXInBytes;
+    out_params->srcPos.y = copy->srcY;
+  }
+
+  if (dst_is_array) {
+    struct hipArray_st* dst_array = NULL;
+    hipError_t result =
+        iree_hip_array_retain((hipArray_const_t)copy->dstArray, &dst_array);
+    if (result != hipSuccess) return result;
+    size_t dst_element_offset = 0;
+    size_t dst_element_width = 0;
+    result = iree_hip_array_byte_range_to_elements_for_array(
+        dst_array, copy->dstXInBytes, copy->WidthInBytes, &dst_element_offset,
+        &dst_element_width);
+    if (result != hipSuccess) {
+      iree_hip_array_release(dst_array);
+      return result;
+    }
+    if (copy->Height != 0 &&
+        (copy->dstY >= dst_array->extent.height ||
+         copy->Height > dst_array->extent.height - copy->dstY)) {
+      iree_hip_array_release(dst_array);
+      return hipErrorInvalidValue;
+    }
+    if (array_width_set && array_width_elements != dst_element_width) {
+      iree_hip_array_release(dst_array);
+      return hipErrorInvalidValue;
+    }
+    out_params->dstArray = copy->dstArray;
+    out_params->dstPos.x = dst_element_offset;
+    out_params->dstPos.y = copy->dstY;
+    array_width_elements = dst_element_width;
+    array_width_set = true;
+    iree_hip_array_release(dst_array);
+  } else {
+    void* dst = NULL;
+    switch (copy->dstMemoryType) {
+      case hipMemoryTypeHost:
+        dst = copy->dstHost;
+        break;
+      case hipMemoryTypeDevice:
+      case hipMemoryTypeUnified:
+        dst = copy->dstDevice;
+        break;
+      default:
+        return hipErrorInvalidValue;
+    }
+    if ((copy->WidthInBytes != 0 || copy->Height != 0) && !dst) {
+      return hipErrorInvalidValue;
+    }
+    iree_host_size_t dst_width = 0;
+    iree_host_size_t dst_height = 0;
+    if (IREE_UNLIKELY(!iree_host_size_checked_add(
+                          copy->dstXInBytes, copy->WidthInBytes, &dst_width) ||
+                      !iree_host_size_checked_add(copy->dstY, copy->Height,
+                                                  &dst_height))) {
+      return hipErrorInvalidValue;
+    }
+    if (copy->WidthInBytes != 0 && dst_width > copy->dstPitch) {
+      return hipErrorInvalidValue;
+    }
+    out_params->dstPtr.ptr = dst;
+    out_params->dstPtr.pitch = copy->dstPitch;
+    out_params->dstPtr.xsize = dst_width;
+    out_params->dstPtr.ysize = dst_height;
+    out_params->dstPos.x = copy->dstXInBytes;
+    out_params->dstPos.y = copy->dstY;
+  }
+
+  out_params->extent.width =
+      array_width_set ? array_width_elements : copy->WidthInBytes;
+  out_params->extent.height = copy->Height;
+  out_params->extent.depth = 1;
+
+  if (copy->srcMemoryType == hipMemoryTypeUnified ||
+      copy->dstMemoryType == hipMemoryTypeUnified) {
+    out_params->kind = hipMemcpyDefault;
+  } else if (copy->srcMemoryType == hipMemoryTypeHost &&
+             copy->dstMemoryType == hipMemoryTypeHost) {
+    out_params->kind = hipMemcpyHostToHost;
+  } else if (copy->srcMemoryType == hipMemoryTypeHost) {
+    out_params->kind = hipMemcpyHostToDevice;
+  } else if (copy->dstMemoryType == hipMemoryTypeHost) {
+    out_params->kind = hipMemcpyDeviceToHost;
+  } else {
+    out_params->kind = hipMemcpyDeviceToDevice;
+  }
+  return hipSuccess;
+}
+
 static hipError_t iree_hip_array_create(hipArray_t* array,
                                         const hipChannelFormatDesc* desc,
                                         hipExtent extent, unsigned int flags) {
@@ -6810,11 +8130,20 @@ static hipError_t iree_hip_array_create(hipArray_t* array,
   *array = NULL;
 
   size_t element_size = 0;
-  hipError_t element_result = iree_hip_array_element_size(desc, &element_size);
+  hipArray_Format format = 0;
+  unsigned int num_channels = 0;
+  hipError_t element_result = iree_hip_array_desc_to_format(
+      desc, &format, &num_channels, &element_size);
   if (element_result != hipSuccess) {
     HIP_RETURN_ERROR(element_result);
   }
+  if (flags != hipArrayDefault) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  hipError_t extent_result = iree_hip_array_validate_extent_limits(extent);
+  if (extent_result != hipSuccess) HIP_RETURN_ERROR(extent_result);
 
+  const hipExtent public_extent = extent;
   if (extent.height == 0) extent.height = 1;
   if (extent.depth == 0) extent.depth = 1;
 
@@ -6852,10 +8181,15 @@ static hipError_t iree_hip_array_create(hipArray_t* array,
   }
 
   new_array->magic = IREE_HIP_ARRAY_MAGIC;
+  iree_atomic_ref_count_init(&new_array->ref_count);
   new_array->desc = *desc;
+  new_array->public_extent = public_extent;
   new_array->extent = extent;
+  new_array->format = format;
+  new_array->num_channels = num_channels;
   new_array->flags = flags;
   new_array->context = context;
+  iree_hal_streaming_context_retain(context);
   new_array->buffer = buffer;
   new_array->device_ptr = buffer->device_ptr;
   new_array->element_size = element_size;
@@ -6873,65 +8207,72 @@ static hipError_t iree_hip_resolve_memcpy3d_array_params(
     const hipMemcpy3DParms* params, hipMemcpy3DParms* out_params) {
   if (!params || !out_params) return hipErrorInvalidValue;
   *out_params = *params;
-  const struct hipArray_st* src_array = NULL;
-  const struct hipArray_st* dst_array = NULL;
+  struct hipArray_st* src_array = NULL;
+  struct hipArray_st* dst_array = NULL;
+  hipError_t result = hipSuccess;
   if (params->srcArray) {
-    if (params->srcPtr.ptr) return hipErrorInvalidValue;
-    hipError_t result =
-        iree_hip_array_validate((hipArray_const_t)params->srcArray, &src_array);
-    if (result != hipSuccess) return result;
-  }
-  if (params->dstArray) {
-    if (params->dstPtr.ptr) return hipErrorInvalidValue;
-    hipError_t result =
-        iree_hip_array_validate((hipArray_const_t)params->dstArray, &dst_array);
-    if (result != hipSuccess) return result;
-  }
-  if (src_array && dst_array) {
-    if (src_array->element_size != dst_array->element_size ||
-        src_array->extent.width != dst_array->extent.width ||
-        src_array->extent.height != dst_array->extent.height ||
-        src_array->extent.depth != dst_array->extent.depth) {
-      return hipErrorInvalidValue;
+    if (params->srcPtr.ptr) {
+      result = hipErrorInvalidValue;
+    } else {
+      result =
+          iree_hip_array_retain((hipArray_const_t)params->srcArray, &src_array);
     }
   }
-  if (src_array || dst_array) {
+  if (result == hipSuccess && params->dstArray) {
+    if (params->dstPtr.ptr) {
+      result = hipErrorInvalidValue;
+    } else {
+      result =
+          iree_hip_array_retain((hipArray_const_t)params->dstArray, &dst_array);
+    }
+  }
+  if (result == hipSuccess && src_array && dst_array) {
+    if (src_array->element_size != dst_array->element_size) {
+      result = hipErrorInvalidValue;
+    }
+  }
+  if (result == hipSuccess && (src_array || dst_array)) {
     const size_t element_size =
         dst_array ? dst_array->element_size : src_array->element_size;
     iree_host_size_t width_bytes = 0;
     if (IREE_UNLIKELY(!iree_host_size_checked_mul(
             params->extent.width, element_size, &width_bytes))) {
-      return hipErrorInvalidValue;
+      result = hipErrorInvalidValue;
+    } else {
+      out_params->extent.width = width_bytes;
     }
-    out_params->extent.width = width_bytes;
   }
-  if (src_array) {
+  if (result == hipSuccess && src_array) {
     iree_host_size_t src_x_in_bytes = 0;
     if (IREE_UNLIKELY(!iree_host_size_checked_mul(
             params->srcPos.x, src_array->element_size, &src_x_in_bytes))) {
-      return hipErrorInvalidValue;
+      result = hipErrorInvalidValue;
+    } else {
+      out_params->srcArray = NULL;
+      out_params->srcPos.x = src_x_in_bytes;
+      out_params->srcPtr.ptr = (void*)src_array->device_ptr;
+      out_params->srcPtr.pitch = src_array->pitch;
+      out_params->srcPtr.xsize = src_array->width_bytes;
+      out_params->srcPtr.ysize = src_array->rows_per_slice;
     }
-    out_params->srcArray = NULL;
-    out_params->srcPos.x = src_x_in_bytes;
-    out_params->srcPtr.ptr = (void*)src_array->device_ptr;
-    out_params->srcPtr.pitch = src_array->pitch;
-    out_params->srcPtr.xsize = src_array->width_bytes;
-    out_params->srcPtr.ysize = src_array->rows_per_slice;
   }
-  if (dst_array) {
+  if (result == hipSuccess && dst_array) {
     iree_host_size_t dst_x_in_bytes = 0;
     if (IREE_UNLIKELY(!iree_host_size_checked_mul(
             params->dstPos.x, dst_array->element_size, &dst_x_in_bytes))) {
-      return hipErrorInvalidValue;
+      result = hipErrorInvalidValue;
+    } else {
+      out_params->dstArray = NULL;
+      out_params->dstPos.x = dst_x_in_bytes;
+      out_params->dstPtr.ptr = (void*)dst_array->device_ptr;
+      out_params->dstPtr.pitch = dst_array->pitch;
+      out_params->dstPtr.xsize = dst_array->width_bytes;
+      out_params->dstPtr.ysize = dst_array->rows_per_slice;
     }
-    out_params->dstArray = NULL;
-    out_params->dstPos.x = dst_x_in_bytes;
-    out_params->dstPtr.ptr = (void*)dst_array->device_ptr;
-    out_params->dstPtr.pitch = dst_array->pitch;
-    out_params->dstPtr.xsize = dst_array->width_bytes;
-    out_params->dstPtr.ysize = dst_array->rows_per_slice;
   }
-  return hipSuccess;
+  iree_hip_array_release(dst_array);
+  iree_hip_array_release(src_array);
+  return result;
 }
 
 HIPAPI hipError_t hipMemcpy2DToArrayAsync(hipArray_t dst, size_t wOffset,
@@ -6939,7 +8280,8 @@ HIPAPI hipError_t hipMemcpy2DToArrayAsync(hipArray_t dst, size_t wOffset,
                                           size_t spitch, size_t width,
                                           size_t height, hipMemcpyKind kind,
                                           hipStream_t stream) {
-  if (!dst || !src || spitch < width) {
+  if (!dst) HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  if (!src || spitch < width) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   if (width == 0 || height == 0) return hipSuccess;
@@ -6969,7 +8311,8 @@ HIPAPI hipError_t hipMemcpy2DToArray(hipArray_t dst, size_t wOffset,
                                      size_t hOffset, const void* src,
                                      size_t spitch, size_t width, size_t height,
                                      hipMemcpyKind kind) {
-  if (!dst || !src || spitch < width) {
+  if (!dst) HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  if (!src || spitch < width) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   if (width == 0 || height == 0) return hipSuccess;
@@ -7001,7 +8344,8 @@ HIPAPI hipError_t hipMemcpy2DFromArrayAsync(void* dst, size_t dpitch,
                                             size_t width, size_t height,
                                             hipMemcpyKind kind,
                                             hipStream_t stream) {
-  if (!dst || !src || dpitch < width) {
+  if (!src) HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  if (!dst || dpitch < width) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   if (width == 0 || height == 0) return hipSuccess;
@@ -7031,7 +8375,8 @@ HIPAPI hipError_t hipMemcpy2DFromArray(void* dst, size_t dpitch,
                                        hipArray_const_t src, size_t wOffset,
                                        size_t hOffset, size_t width,
                                        size_t height, hipMemcpyKind kind) {
-  if (!dst || !src || dpitch < width) {
+  if (!src) HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  if (!dst || dpitch < width) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   if (width == 0 || height == 0) return hipSuccess;
@@ -7100,59 +8445,131 @@ HIPAPI hipError_t hipMemcpy2DArrayToArray(hipArray_t dst, size_t wOffsetDst,
 HIPAPI hipError_t hipMemcpyToArray(hipArray_t dst, size_t wOffset,
                                    size_t hOffset, const void* src,
                                    size_t count, hipMemcpyKind kind) {
-  return hipMemcpy2DToArray(dst, wOffset, hOffset, src, count, count, 1, kind);
+  if (!src) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  hipError_t result = iree_hip_array_copy_packed_rows(
+      (hipArray_const_t)dst, wOffset, hOffset, (void*)src, count, kind,
+      /*array_is_destination=*/true);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  return hipSuccess;
 }
 
 HIPAPI hipError_t hipMemcpyFromArray(void* dst, hipArray_const_t srcArray,
                                      size_t wOffset, size_t hOffset,
                                      size_t count, hipMemcpyKind kind) {
-  return hipMemcpy2DFromArray(dst, count, srcArray, wOffset, hOffset, count, 1,
-                              kind);
+  if (!dst) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  hipError_t result = iree_hip_array_copy_packed_rows(
+      srcArray, wOffset, hOffset, dst, count, kind,
+      /*array_is_destination=*/false);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  return hipSuccess;
 }
 
 HIPAPI hipError_t hipMemcpyHtoAAsync(hipArray_t dstArray, size_t dstOffset,
                                      const void* srcHost, size_t ByteCount,
                                      hipStream_t stream) {
-  return hipMemcpy2DToArrayAsync(dstArray, dstOffset, 0, srcHost, ByteCount,
-                                 ByteCount, 1, hipMemcpyHostToDevice, stream);
+  if (!srcHost) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (ByteCount == 0) return hipSuccess;
+  iree_hal_streaming_deviceptr_t dst_ptr = 0;
+  hipError_t result = iree_hip_array_legacy_row_range(
+      (hipArray_const_t)dstArray, dstOffset, ByteCount, NULL, &dst_ptr);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  return hipMemcpyAsync((void*)dst_ptr, srcHost, ByteCount,
+                        hipMemcpyHostToDevice, stream);
 }
 
 HIPAPI hipError_t hipMemcpyHtoA(hipArray_t dstArray, size_t dstOffset,
                                 const void* srcHost, size_t count) {
-  return hipMemcpyToArray(dstArray, dstOffset, 0, srcHost, count,
-                          hipMemcpyHostToDevice);
+  if (!srcHost) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (count == 0) return hipSuccess;
+  iree_hal_streaming_deviceptr_t dst_ptr = 0;
+  hipError_t result = iree_hip_array_legacy_row_range(
+      (hipArray_const_t)dstArray, dstOffset, count, NULL, &dst_ptr);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  return hipMemcpy((void*)dst_ptr, srcHost, count, hipMemcpyHostToDevice);
 }
 
 HIPAPI hipError_t hipMemcpyAtoHAsync(void* dstHost, hipArray_t srcArray,
                                      size_t srcOffset, size_t ByteCount,
                                      hipStream_t stream) {
-  return hipMemcpy2DFromArrayAsync(dstHost, ByteCount, srcArray, srcOffset, 0,
-                                   ByteCount, 1, hipMemcpyDeviceToHost, stream);
+  if (!dstHost) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (ByteCount == 0) return hipSuccess;
+  iree_hal_streaming_deviceptr_t src_ptr = 0;
+  hipError_t result = iree_hip_array_legacy_row_range(
+      (hipArray_const_t)srcArray, srcOffset, ByteCount, NULL, &src_ptr);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  return hipMemcpyAsync(dstHost, (const void*)src_ptr, ByteCount,
+                        hipMemcpyDeviceToHost, stream);
 }
 
 HIPAPI hipError_t hipMemcpyAtoH(void* dst, hipArray_t srcArray,
                                 size_t srcOffset, size_t count) {
-  return hipMemcpyFromArray(dst, srcArray, srcOffset, 0, count,
-                            hipMemcpyDeviceToHost);
+  if (!dst) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (count == 0) return hipSuccess;
+  iree_hal_streaming_deviceptr_t src_ptr = 0;
+  hipError_t result = iree_hip_array_legacy_row_range(
+      (hipArray_const_t)srcArray, srcOffset, count, NULL, &src_ptr);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  return hipMemcpy(dst, (const void*)src_ptr, count, hipMemcpyDeviceToHost);
 }
 
 HIPAPI hipError_t hipMemcpyDtoA(hipArray_t dstArray, size_t dstOffset,
                                 hipDeviceptr_t srcDevice, size_t ByteCount) {
-  return hipMemcpyToArray(dstArray, dstOffset, 0, srcDevice, ByteCount,
-                          hipMemcpyDeviceToDevice);
+  if (!srcDevice) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (ByteCount == 0) return hipSuccess;
+  iree_hal_streaming_deviceptr_t dst_ptr = 0;
+  hipError_t result = iree_hip_array_legacy_row_range(
+      (hipArray_const_t)dstArray, dstOffset, ByteCount, NULL, &dst_ptr);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  return hipMemcpy((void*)dst_ptr, srcDevice, ByteCount,
+                   hipMemcpyDeviceToDevice);
 }
 
 HIPAPI hipError_t hipMemcpyAtoD(hipDeviceptr_t dstDevice, hipArray_t srcArray,
                                 size_t srcOffset, size_t ByteCount) {
-  return hipMemcpyFromArray(dstDevice, srcArray, srcOffset, 0, ByteCount,
-                            hipMemcpyDeviceToDevice);
+  if (!dstDevice) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (ByteCount == 0) return hipSuccess;
+  iree_hal_streaming_deviceptr_t src_ptr = 0;
+  hipError_t result = iree_hip_array_legacy_row_range(
+      (hipArray_const_t)srcArray, srcOffset, ByteCount, NULL, &src_ptr);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  return hipMemcpy(dstDevice, (const void*)src_ptr, ByteCount,
+                   hipMemcpyDeviceToDevice);
+}
+
+static hipError_t iree_hip_array_validate_extent_limits(hipExtent extent) {
+  if (extent.width == 0) return hipErrorInvalidValue;
+  if (extent.height == 0 && extent.depth != 0) return hipErrorInvalidValue;
+  if (extent.height == 0) {
+    return extent.width <= IREE_HIP_ARRAY_MAX_1D ? hipSuccess
+                                                 : hipErrorInvalidValue;
+  }
+  if (extent.depth == 0) {
+    return extent.width <= IREE_HIP_ARRAY_MAX_2D_WIDTH &&
+                   extent.height <= IREE_HIP_ARRAY_MAX_2D_HEIGHT
+               ? hipSuccess
+               : hipErrorInvalidValue;
+  }
+  return extent.width <= IREE_HIP_ARRAY_MAX_3D_WIDTH &&
+                 extent.height <= IREE_HIP_ARRAY_MAX_3D_HEIGHT &&
+                 extent.depth <= IREE_HIP_ARRAY_MAX_3D_DEPTH
+             ? hipSuccess
+             : hipErrorInvalidValue;
 }
 
 HIPAPI hipError_t hipMemcpyAtoA(hipArray_t dstArray, size_t dstOffset,
                                 hipArray_t srcArray, size_t srcOffset,
                                 size_t ByteCount) {
-  return hipMemcpy2DArrayToArray(dstArray, dstOffset, 0, srcArray, srcOffset, 0,
-                                 ByteCount, 1, hipMemcpyDeviceToDevice);
+  if (ByteCount == 0) return hipSuccess;
+  iree_hal_streaming_deviceptr_t dst_ptr = 0;
+  hipError_t result = iree_hip_array_legacy_row_range(
+      (hipArray_const_t)dstArray, dstOffset, ByteCount, NULL, &dst_ptr);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  iree_hal_streaming_deviceptr_t src_ptr = 0;
+  result = iree_hip_array_legacy_row_range(
+      (hipArray_const_t)srcArray, srcOffset, ByteCount, NULL, &src_ptr);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  return hipMemcpy((void*)dst_ptr, (const void*)src_ptr, ByteCount,
+                   hipMemcpyDeviceToDevice);
 }
 
 // Sets 2D device memory to a value (asynchronous).
@@ -7195,28 +8612,32 @@ HIPAPI hipError_t hipMemset2DAsync(void* dst, size_t pitch, int value,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  // Ensure initialization and get context.
-  iree_hal_streaming_context_t* context = NULL;
-  hipError_t init_result = iree_hip_ensure_context(&context);
-  if (init_result != hipSuccess) {
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t resolve_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (resolve_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
+    HIP_RETURN_ERROR(resolve_result);
   }
-
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  init_result = iree_hip_resolve_stream(stream, &stream_obj);
-  if (init_result != hipSuccess) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
-  }
+  iree_hal_streaming_context_t* context = resolved_stream.context;
+  iree_hal_streaming_stream_t* stream_obj = resolved_stream.stream;
 
   iree_hal_streaming_buffer_ref_t dst_ref;
   iree_status_t range_status = iree_hal_streaming_memory_lookup_range(
       context, (iree_hal_streaming_deviceptr_t)dst, byte_span, &dst_ref);
   if (!iree_status_is_ok(range_status)) {
     hipError_t result = iree_memset_status_to_hip_result(range_status);
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(result);
+  }
+
+  hipError_t dependency_result =
+      iree_hip_order_legacy_stream_dependencies(context, stream_obj);
+  if (dependency_result != hipSuccess) {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(dependency_result);
   }
 
   if (stream_obj->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
@@ -7234,15 +8655,16 @@ HIPAPI hipError_t hipMemset2DAsync(void* dst, size_t pitch, int value,
         (const hipGraphNode_t*)stream_obj->capture_dependencies,
         stream_obj->capture_dependency_count, &params);
     if (result != hipSuccess) {
+      iree_hip_resolved_stream_release(&resolved_stream);
       IREE_TRACE_ZONE_END(z0);
       HIP_RETURN_ERROR(result);
     }
-    HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
-        z0,
-        iree_hal_streaming_capture_set_last_node(
-            stream_obj, (iree_hal_streaming_graph_node_t*)node),
-        hipErrorInvalidValue);
+    iree_status_t status = iree_hal_streaming_capture_set_last_node(
+        stream_obj, (iree_hal_streaming_graph_node_t*)node);
+    result = iree_status_to_hip_result(status);
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
+    if (result != hipSuccess) HIP_RETURN_ERROR(result);
     return hipSuccess;
   }
 
@@ -7254,11 +8676,13 @@ HIPAPI hipError_t hipMemset2DAsync(void* dst, size_t pitch, int value,
         &value, 1, stream_obj);
     if (!iree_status_is_ok(status)) {
       hipError_t result = iree_memset_status_to_hip_result(status);
+      iree_hip_resolved_stream_release(&resolved_stream);
       IREE_TRACE_ZONE_END(z0);
       return result;
     }
   }
 
+  iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
 }
@@ -7506,7 +8930,7 @@ HIPAPI hipError_t hipMalloc3D(hipPitchedPtr* pitchedDevPtr, hipExtent extent) {
     HIP_RETURN_ERROR(init_result);
   }
 
-  const size_t alignment = 512;
+  const size_t alignment = IREE_HAL_STREAMING_PITCHED_ALLOCATION_ALIGNMENT;
   size_t pitch = 0;
   size_t slice_size = 0;
   size_t total_size = 0;
@@ -7548,8 +8972,8 @@ HIPAPI hipError_t hipMalloc3DArray(hipArray_t* array,
 HIPAPI hipError_t hipMallocArray(hipArray_t* array,
                                  const hipChannelFormatDesc* desc, size_t width,
                                  size_t height, unsigned int flags) {
-  return iree_hip_array_create(
-      array, desc, (hipExtent){width, height ? height : 1, 1}, flags);
+  return iree_hip_array_create(array, desc, (hipExtent){width, height, 0},
+                               flags);
 }
 
 // Copies data from host memory to device memory (synchronous).
@@ -7818,6 +9242,12 @@ static hipError_t iree_hip_memcpy_peer_staged(
         src_context, staging, (iree_hal_streaming_deviceptr_t)src, size_bytes,
         src_stream);
   }
+  if (iree_status_is_ok(status) && src_stream) {
+    // This fallback consumes and releases |staging| before returning. A D2H
+    // queued on the source stream must complete before the destination
+    // transfer can read that storage.
+    status = iree_hal_streaming_stream_synchronize(src_stream);
+  }
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_memcpy_host_to_device(
         dst_context, (iree_hal_streaming_deviceptr_t)dst, staging, size_bytes,
@@ -7860,16 +9290,13 @@ HIPAPI hipError_t hipMemcpyPeerAsync(void* dst, int dstDeviceId,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  result = iree_hip_resolve_stream(stream, &stream_obj);
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  result = iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(result);
   }
-  if (!stream_obj || !stream_obj->context) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorContextIsDestroyed);
-  }
+  iree_hal_streaming_stream_t* stream_obj = resolved_stream.stream;
 
   if (stream_obj->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
     hipMemcpy3DParms params;
@@ -7887,12 +9314,14 @@ HIPAPI hipError_t hipMemcpyPeerAsync(void* dst, int dstDeviceId,
     params.extent.depth = 1;
     params.kind = hipMemcpyDeviceToDevice;
     result = iree_hip_capture_memcpy3d_node(stream_obj, &params);
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(result);
   }
 
   result = iree_hip_memcpy_peer_staged(dst_context, dst, src_context, src,
                                        sizeBytes, stream_obj);
+  iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(result);
 }
@@ -7938,6 +9367,105 @@ HIPAPI hipError_t hipMemcpyPeer(void* dst, int dstDeviceId, const void* src,
                                        sizeBytes, NULL);
   IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(result);
+}
+
+HIPAPI hipError_t hipArrayCreate(hipArray_t* pHandle,
+                                 const HIP_ARRAY_DESCRIPTOR* pAllocateArray) {
+  if (!pHandle || !pAllocateArray) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  hipChannelFormatDesc desc;
+  hipError_t result = iree_hip_array_format_to_desc(
+      pAllocateArray->Format, pAllocateArray->NumChannels, &desc, NULL);
+  if (result != hipSuccess) {
+    HIP_RETURN_ERROR(result);
+  }
+  return iree_hip_array_create(
+      pHandle, &desc,
+      (hipExtent){pAllocateArray->Width, pAllocateArray->Height, 0},
+      hipArrayDefault);
+}
+
+HIPAPI hipError_t hipArray3DCreate(
+    hipArray_t* array, const HIP_ARRAY3D_DESCRIPTOR* pAllocateArray) {
+  if (!array || !pAllocateArray) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  hipChannelFormatDesc desc;
+  hipError_t result = iree_hip_array_format_to_desc(
+      pAllocateArray->Format, pAllocateArray->NumChannels, &desc, NULL);
+  if (result != hipSuccess) {
+    HIP_RETURN_ERROR(result);
+  }
+  return iree_hip_array_create(
+      array, &desc,
+      (hipExtent){pAllocateArray->Width, pAllocateArray->Height,
+                  pAllocateArray->Depth},
+      pAllocateArray->Flags);
+}
+
+HIPAPI hipError_t hipArrayDestroy(hipArray_t array) {
+  return hipFreeArray(array);
+}
+
+HIPAPI hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDescriptor,
+                                        hipArray_t array) {
+  if (!array) HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  if (!pArrayDescriptor) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  struct hipArray_st* array_info = NULL;
+  hipError_t result =
+      iree_hip_array_retain((hipArray_const_t)array, &array_info);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  pArrayDescriptor->Width = array_info->public_extent.width;
+  pArrayDescriptor->Height = array_info->public_extent.height;
+  pArrayDescriptor->Format = array_info->format;
+  pArrayDescriptor->NumChannels = array_info->num_channels;
+  iree_hip_array_release(array_info);
+  return hipSuccess;
+}
+
+HIPAPI hipError_t hipArray3DGetDescriptor(
+    HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hipArray_t array) {
+  if (!array) HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  if (!pArrayDescriptor) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  struct hipArray_st* array_info = NULL;
+  hipError_t result =
+      iree_hip_array_retain((hipArray_const_t)array, &array_info);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  pArrayDescriptor->Width = array_info->public_extent.width;
+  pArrayDescriptor->Height = array_info->public_extent.height;
+  pArrayDescriptor->Depth = array_info->public_extent.depth;
+  pArrayDescriptor->Format = array_info->format;
+  pArrayDescriptor->NumChannels = array_info->num_channels;
+  pArrayDescriptor->Flags = array_info->flags;
+  iree_hip_array_release(array_info);
+  return hipSuccess;
+}
+
+HIPAPI hipError_t hipArrayGetInfo(hipChannelFormatDesc* desc, hipExtent* extent,
+                                  unsigned int* flags, hipArray_t array) {
+  if (!array) HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  if (!desc && !extent && !flags) return hipSuccess;
+  struct hipArray_st* array_info = NULL;
+  hipError_t result =
+      iree_hip_array_retain((hipArray_const_t)array, &array_info);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  if (desc) *desc = array_info->desc;
+  if (extent) *extent = array_info->public_extent;
+  if (flags) *flags = array_info->flags;
+  iree_hip_array_release(array_info);
+  return hipSuccess;
+}
+
+HIPAPI hipError_t hipGetChannelDesc(hipChannelFormatDesc* desc,
+                                    hipArray_const_t array) {
+  if (!desc) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  struct hipArray_st* array_info = NULL;
+  hipError_t result = iree_hip_array_retain(array, &array_info);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  *desc = array_info->desc;
+  iree_hip_array_release(array_info);
+  return hipSuccess;
 }
 
 //===----------------------------------------------------------------------===//
@@ -8387,26 +9915,27 @@ HIPAPI hipError_t hipMemsetAsync(void* dst, int value, size_t sizeBytes,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  // Ensure initialization and get context.
-  iree_hal_streaming_context_t* context = NULL;
-  hipError_t init_result = iree_hip_ensure_context(&context);
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t init_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (init_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
   }
 
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  init_result = iree_hip_resolve_stream(stream, &stream_obj);
-  if (init_result != hipSuccess) {
+  hipError_t dependency_result = iree_hip_order_legacy_stream_dependencies(
+      resolved_stream.context, resolved_stream.stream);
+  if (dependency_result != hipSuccess) {
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
+    HIP_RETURN_ERROR(dependency_result);
   }
-
   iree_status_t status = iree_hal_streaming_memory_memset(
-      context, (iree_hal_streaming_deviceptr_t)dst, sizeBytes, &value, 1,
-      stream_obj);
+      resolved_stream.context, (iree_hal_streaming_deviceptr_t)dst, sizeBytes,
+      &value, 1, resolved_stream.stream);
 
   hipError_t result = iree_status_to_hip_result(status);
+  iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -8667,19 +10196,27 @@ HIPAPI hipError_t hipMemsetD8Async(hipDeviceptr_t dstDevice, unsigned char uc,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  // Ensure initialization and get context.
-  iree_hal_streaming_context_t* context = NULL;
-  hipError_t init_result = iree_hip_ensure_context(&context);
-  if (init_result != hipSuccess) {
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t resolve_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (resolve_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
+    HIP_RETURN_ERROR(resolve_result);
   }
 
+  hipError_t dependency_result = iree_hip_order_legacy_stream_dependencies(
+      resolved_stream.context, resolved_stream.stream);
+  if (dependency_result != hipSuccess) {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(dependency_result);
+  }
   iree_status_t status = iree_hal_streaming_memory_memset(
-      context, (iree_hal_streaming_deviceptr_t)dstDevice, N, &uc, 1,
-      stream ? (iree_hal_streaming_stream_t*)stream : context->default_stream);
+      resolved_stream.context, (iree_hal_streaming_deviceptr_t)dstDevice, N,
+      &uc, 1, resolved_stream.stream);
 
   hipError_t result = iree_status_to_hip_result(status);
+  iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -8734,19 +10271,33 @@ HIPAPI hipError_t hipMemsetD16Async(hipDeviceptr_t dstDevice, unsigned short us,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  // Ensure initialization and get context.
-  iree_hal_streaming_context_t* context = NULL;
-  hipError_t init_result = iree_hip_ensure_context(&context);
-  if (init_result != hipSuccess) {
+  iree_host_size_t byte_count = 0;
+  if (IREE_UNLIKELY(!iree_host_size_checked_mul(N, sizeof(us), &byte_count))) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t resolve_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (resolve_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(resolve_result);
+  }
+
+  hipError_t dependency_result = iree_hip_order_legacy_stream_dependencies(
+      resolved_stream.context, resolved_stream.stream);
+  if (dependency_result != hipSuccess) {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(dependency_result);
+  }
   iree_status_t status = iree_hal_streaming_memory_memset(
-      context, (iree_hal_streaming_deviceptr_t)dstDevice, N * 2, &us, 2,
-      stream ? (iree_hal_streaming_stream_t*)stream : context->default_stream);
+      resolved_stream.context, (iree_hal_streaming_deviceptr_t)dstDevice,
+      byte_count, &us, sizeof(us), resolved_stream.stream);
 
   hipError_t result = iree_status_to_hip_result(status);
+  iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -8802,19 +10353,33 @@ HIPAPI hipError_t hipMemsetD32Async(hipDeviceptr_t dstDevice, int i, size_t N,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  // Ensure initialization and get context.
-  iree_hal_streaming_context_t* context = NULL;
-  hipError_t init_result = iree_hip_ensure_context(&context);
-  if (init_result != hipSuccess) {
+  iree_host_size_t byte_count = 0;
+  if (IREE_UNLIKELY(!iree_host_size_checked_mul(N, sizeof(i), &byte_count))) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t resolve_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (resolve_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(resolve_result);
+  }
+
+  hipError_t dependency_result = iree_hip_order_legacy_stream_dependencies(
+      resolved_stream.context, resolved_stream.stream);
+  if (dependency_result != hipSuccess) {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(dependency_result);
+  }
   iree_status_t status = iree_hal_streaming_memory_memset(
-      context, (iree_hal_streaming_deviceptr_t)dstDevice, N * 4, &i, 4,
-      stream ? (iree_hal_streaming_stream_t*)stream : context->default_stream);
+      resolved_stream.context, (iree_hal_streaming_deviceptr_t)dstDevice,
+      byte_count, &i, sizeof(i), resolved_stream.stream);
 
   hipError_t result = iree_status_to_hip_result(status);
+  iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -8875,7 +10440,12 @@ HIPAPI hipError_t hipStreamCreate(hipStream_t* stream) {
       &stream_obj);
 
   if (iree_status_is_ok(status)) {
+    status = iree_hip_stream_register(stream_obj);
+  }
+  if (iree_status_is_ok(status)) {
     *stream = (hipStream_t)stream_obj;
+  } else {
+    iree_hip_stream_discard_unpublished(stream_obj);
   }
 
   hipError_t result = iree_status_to_hip_result(status);
@@ -8929,6 +10499,10 @@ HIPAPI hipError_t hipStreamCreateWithFlags(hipStream_t* stream,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  if (!iree_hip_stream_create_flags_are_valid(flags)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
 
   // Ensure initialization and get context.
   iree_hal_streaming_context_t* context = NULL;
@@ -8944,7 +10518,12 @@ HIPAPI hipError_t hipStreamCreateWithFlags(hipStream_t* stream,
       context->host_allocator, &stream_obj);
 
   if (iree_status_is_ok(status)) {
+    status = iree_hip_stream_register(stream_obj);
+  }
+  if (iree_status_is_ok(status)) {
     *stream = (hipStream_t)stream_obj;
+  } else {
+    iree_hip_stream_discard_unpublished(stream_obj);
   }
 
   hipError_t result = iree_status_to_hip_result(status);
@@ -9003,6 +10582,10 @@ HIPAPI hipError_t hipStreamCreateWithPriority(hipStream_t* stream,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  if (!iree_hip_stream_create_flags_are_valid(flags)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
 
   // Ensure initialization and get context.
   iree_hal_streaming_context_t* context = NULL;
@@ -9019,7 +10602,12 @@ HIPAPI hipError_t hipStreamCreateWithPriority(hipStream_t* stream,
       &stream_obj);
 
   if (iree_status_is_ok(status)) {
+    status = iree_hip_stream_register(stream_obj);
+  }
+  if (iree_status_is_ok(status)) {
     *stream = (hipStream_t)stream_obj;
+  } else {
+    iree_hip_stream_discard_unpublished(stream_obj);
   }
 
   hipError_t result = iree_status_to_hip_result(status);
@@ -9059,16 +10647,31 @@ HIPAPI hipError_t hipStreamDestroy(hipStream_t stream) {
     HIP_RETURN_ERROR(hipErrorInvalidResourceHandle);
   }
 
-  iree_hal_streaming_stream_t* streaming_stream =
-      (iree_hal_streaming_stream_t*)stream;
-  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_stream_synchronize(streaming_stream));
-  iree_hal_streaming_context_unregister_stream(streaming_stream->context,
-                                               streaming_stream);
-  streaming_stream->context = NULL;
-  iree_hal_streaming_stream_release(streaming_stream);
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(result);
+  }
+  if (!iree_hip_stream_unregister_public_handle(resolved_stream.stream)) {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidResourceHandle);
+  }
+
+  // Remove handle visibility before synchronizing so no new API operation can
+  // acquire the stream. Operations that resolved the handle concurrently hold
+  // both the stream and its context. The final stream release performs another
+  // synchronization after those operations finish queueing their work.
+  iree_status_t status =
+      iree_hal_streaming_stream_synchronize(resolved_stream.stream);
+  iree_hal_streaming_context_unregister_stream(resolved_stream.context,
+                                               resolved_stream.stream);
+  iree_hip_resolved_stream_release(&resolved_stream);
+  result = iree_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
-  return hipSuccess;
+  return result;
 }
 
 // Queries the priority of a stream.
@@ -9100,13 +10703,15 @@ HIPAPI hipError_t hipStreamGetPriority(hipStream_t stream, int* priority) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  hipError_t init_result = iree_hip_resolve_stream(stream, &stream_obj);
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t init_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (init_result != hipSuccess) {
     HIP_RETURN_ERROR(init_result);
   }
 
-  *priority = stream_obj->priority;
+  *priority = resolved_stream.stream->priority;
+  iree_hip_resolved_stream_release(&resolved_stream);
   return hipSuccess;
 }
 
@@ -9149,13 +10754,15 @@ HIPAPI hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int* flags) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  hipError_t init_result = iree_hip_resolve_stream(stream, &stream_obj);
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t init_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (init_result != hipSuccess) {
     HIP_RETURN_ERROR(init_result);
   }
 
-  *flags = stream_obj->flags;
+  *flags = resolved_stream.stream->flags;
+  iree_hip_resolved_stream_release(&resolved_stream);
   return hipSuccess;
 }
 
@@ -9192,17 +10799,76 @@ HIPAPI hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t* device) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  hipError_t init_result = iree_hip_resolve_stream(stream, &stream_obj);
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t init_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (init_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
   }
 
-  *device = (hipDevice_t)stream_obj->context->device_ordinal;
+  *device = (hipDevice_t)resolved_stream.context->device_ordinal;
+  iree_hip_resolved_stream_release(&resolved_stream);
 
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
+}
+
+HIPAPI hipError_t hipStreamGetAttribute(hipStream_t stream,
+                                        hipStreamAttrID attribute,
+                                        hipStreamAttrValue* value_out) {
+  if (!value_out) HIP_RETURN_ERROR(hipErrorInvalidValue);
+
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+
+  if (attribute == hipStreamAttributePriority) {
+    value_out->priority = resolved_stream.stream->priority;
+  } else if (attribute == hipStreamAttributeSynchronizationPolicy) {
+    value_out->syncPolicy = hipSyncPolicyAuto;
+  } else {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    HIP_RETURN_ERROR(hipErrorNotSupported);
+  }
+  iree_hip_resolved_stream_release(&resolved_stream);
+  return hipSuccess;
+}
+
+HIPAPI hipError_t hipStreamSetAttribute(hipStream_t stream,
+                                        hipStreamAttrID attribute,
+                                        const hipStreamAttrValue* value) {
+  if (!value) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (attribute == hipStreamAttributeSynchronizationPolicy &&
+      !iree_hip_synchronization_policy_is_valid(value->syncPolicy)) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  iree_hip_resolved_stream_release(&resolved_stream);
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipStreamCopyAttributes(hipStream_t destination,
+                                          hipStream_t source) {
+  iree_hip_resolved_stream_t source_stream = {0};
+  hipError_t result =
+      iree_hip_resolve_registered_stream(source, &source_stream);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+
+  iree_hip_resolved_stream_t destination_stream = {0};
+  result = iree_hip_resolve_registered_stream(destination, &destination_stream);
+  if (result != hipSuccess) {
+    iree_hip_resolved_stream_release(&source_stream);
+    HIP_RETURN_ERROR(result);
+  }
+  iree_hip_resolved_stream_release(&destination_stream);
+  iree_hip_resolved_stream_release(&source_stream);
+  HIP_RETURN_ERROR(hipErrorNotSupported);
 }
 
 HIPAPI hipError_t hipStreamGetId(hipStream_t stream,
@@ -9211,13 +10877,15 @@ HIPAPI hipError_t hipStreamGetId(hipStream_t stream,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  hipError_t init_result = iree_hip_resolve_stream(stream, &stream_obj);
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t init_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (init_result != hipSuccess) {
     HIP_RETURN_ERROR(init_result);
   }
 
-  *stream_id = stream_obj->stream_id;
+  *stream_id = resolved_stream.stream->stream_id;
+  iree_hip_resolved_stream_release(&resolved_stream);
   return hipSuccess;
 }
 
@@ -9242,15 +10910,17 @@ HIPAPI hipError_t hipStreamGetId(hipStream_t stream,
 HIPAPI int hipGetStreamDeviceId(hipStream_t stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  hipError_t init_result = iree_hip_resolve_stream(stream, &stream_obj);
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t init_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (init_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     iree_hip_thread_error_set(init_result, false);
     return -1;
   }
 
-  int device_id = (int)stream_obj->context->device_ordinal;
+  int device_id = (int)resolved_stream.context->device_ordinal;
+  iree_hip_resolved_stream_release(&resolved_stream);
 
   IREE_TRACE_ZONE_END(z0);
   return device_id;
@@ -9292,35 +10962,40 @@ HIPAPI hipError_t hipStreamSynchronize(hipStream_t stream) {
   HIP_DEBUG_LOG("[HIP_API] hipStreamSynchronize(stream=%p) called\n",
                 (void*)stream);
 
-  iree_hal_streaming_stream_t* streaming_stream = NULL;
-  hipError_t init_result = iree_hip_resolve_stream(stream, &streaming_stream);
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t init_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (init_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
   }
 
   if (!stream || stream == hipStreamLegacy) {
-    iree_hal_streaming_context_t* context = streaming_stream->context;
-    if (iree_hip_context_invalidate_visible_captures(context)) {
+    if (iree_hip_context_invalidate_visible_captures(resolved_stream.context)) {
+      iree_hip_resolved_stream_release(&resolved_stream);
       IREE_TRACE_ZONE_END(z0);
       HIP_RETURN_ERROR(hipErrorStreamCaptureUnsupported);
     }
 
     iree_status_t status =
-        iree_hal_streaming_context_synchronize_legacy_default(context);
+        iree_hal_streaming_context_synchronize_legacy_default(
+            resolved_stream.context);
+    iree_hip_resolved_stream_release(&resolved_stream);
     hipError_t result = iree_status_to_hip_result(status);
     IREE_TRACE_ZONE_END(z0);
     return result;
   }
 
   if (iree_hip_context_invalidate_stream_blocking_capture(
-          streaming_stream->context, streaming_stream)) {
+          resolved_stream.context, resolved_stream.stream)) {
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorStreamCaptureUnsupported);
   }
 
   iree_status_t status =
-      iree_hal_streaming_stream_synchronize(streaming_stream);
+      iree_hal_streaming_stream_synchronize(resolved_stream.stream);
+  iree_hip_resolved_stream_release(&resolved_stream);
   hipError_t result = iree_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
   return result;
@@ -9361,25 +11036,29 @@ HIPAPI hipError_t hipStreamSynchronize(hipStream_t stream) {
 //
 // See also: hipStreamSynchronize, hipEventQuery, hipDeviceSynchronize.
 HIPAPI hipError_t hipStreamQuery(hipStream_t stream) {
-  iree_hal_streaming_stream_t* streaming_stream = NULL;
-  hipError_t init_result = iree_hip_resolve_stream(stream, &streaming_stream);
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t init_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (init_result != hipSuccess) {
     HIP_RETURN_ERROR(init_result);
   }
 
   if (iree_hip_context_invalidate_stream_blocking_capture(
-          streaming_stream->context, streaming_stream)) {
+          resolved_stream.context, resolved_stream.stream)) {
+    iree_hip_resolved_stream_release(&resolved_stream);
     HIP_RETURN_ERROR(hipErrorStreamCaptureUnsupported);
   }
 
   int is_complete = 0;
   iree_status_t status = iree_ok_status();
   if (!stream || stream == hipStreamLegacy) {
-    status = iree_hal_streaming_context_query(streaming_stream->context,
-                                              &is_complete);
+    status =
+        iree_hal_streaming_context_query(resolved_stream.context, &is_complete);
   } else {
-    status = iree_hal_streaming_stream_query(streaming_stream, &is_complete);
+    status =
+        iree_hal_streaming_stream_query(resolved_stream.stream, &is_complete);
   }
+  iree_hip_resolved_stream_release(&resolved_stream);
   // is_complete == 0 means complete, is_complete == 1 means not complete.
   hipError_t result = iree_status_is_ok(status)
                           ? (is_complete == 0 ? hipSuccess : hipErrorNotReady)
@@ -9426,16 +11105,31 @@ HIPAPI hipError_t hipStreamQuery(hipStream_t stream) {
 HIPAPI hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event,
                                      unsigned int flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  if (flags != 0 && flags != hipEventWaitExternal) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
 
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  hipError_t init_result = iree_hip_resolve_stream(stream, &stream_obj);
+  iree_hal_streaming_event_t* event_object = NULL;
+  hipError_t event_result = iree_hip_event_lookup_retain(event, &event_object);
+  if (event_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(event_result);
+  }
+
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t init_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (init_result != hipSuccess) {
+    iree_hal_streaming_event_release(event_object);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
   }
 
   iree_status_t status = iree_hal_streaming_stream_wait_event(
-      stream_obj, (iree_hal_streaming_event_t*)event);
+      resolved_stream.stream, event_object, flags == hipEventWaitExternal);
+  iree_hip_resolved_stream_release(&resolved_stream);
+  iree_hal_streaming_event_release(event_object);
   hipError_t result = iree_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
   return result;
@@ -9445,77 +11139,300 @@ HIPAPI hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event,
 // Stream memory operations
 //===----------------------------------------------------------------------===//
 
-// Writes a 32-bit value to device memory as part of ` execution.
+enum {
+  IREE_HIP_STREAM_WAIT_VALUE_GTE = 0x0,
+  IREE_HIP_STREAM_WAIT_VALUE_EQ = 0x1,
+  IREE_HIP_STREAM_WAIT_VALUE_AND = 0x2,
+  IREE_HIP_STREAM_WAIT_VALUE_NOR = 0x3,
+  IREE_HIP_STREAM_WRITE_VALUE_DEFAULT = 0x0,
+  IREE_HIP_EXT_STREAM_WRITE_VALUE_INCREMENT = 0x1000,
+  IREE_HIP_EXT_STREAM_WRITE_VALUE_DECREMENT = 0x1001,
+};
+
+typedef struct iree_hip_stream_value_write_t {
+  // Resource retained until the stream-ordered host write completes.
+  iree_hal_resource_t resource;
+  // Context retaining the allocation registry and its imported host memory.
+  iree_hal_streaming_context_t* context;
+  // HAL allocation retained while the write is pending.
+  iree_hal_buffer_t* buffer;
+  // Host address updated by the stream-ordered callback.
+  void* host_pointer;
+  // Value supplied by the caller, narrowed to |byte_length|.
+  uint64_t value;
+  // Width of the value in bytes.
+  iree_host_size_t byte_length;
+  // Operation selecting assignment, atomic addition, or atomic subtraction.
+  unsigned int flags;
+} iree_hip_stream_value_write_t;
+
+static void iree_hip_stream_value_write_destroy(
+    iree_hal_resource_t* base_resource) {
+  iree_hip_stream_value_write_t* write =
+      (iree_hip_stream_value_write_t*)base_resource;
+  iree_hal_buffer_release(write->buffer);
+  iree_hal_streaming_context_release(write->context);
+  iree_allocator_free(iree_allocator_system(), write);
+}
+
+static const iree_hal_resource_vtable_t iree_hip_stream_value_write_vtable = {
+    .destroy = iree_hip_stream_value_write_destroy,
+};
+
+static bool iree_hip_stream_write_value_flags_are_valid(unsigned int flags) {
+  return flags == IREE_HIP_STREAM_WRITE_VALUE_DEFAULT ||
+         flags == IREE_HIP_EXT_STREAM_WRITE_VALUE_INCREMENT ||
+         flags == IREE_HIP_EXT_STREAM_WRITE_VALUE_DECREMENT;
+}
+
+static bool iree_hip_stream_wait_value_flags_are_valid(unsigned int flags) {
+  return flags == IREE_HIP_STREAM_WAIT_VALUE_GTE ||
+         flags == IREE_HIP_STREAM_WAIT_VALUE_EQ ||
+         flags == IREE_HIP_STREAM_WAIT_VALUE_AND ||
+         flags == IREE_HIP_STREAM_WAIT_VALUE_NOR;
+}
+
+static iree_status_t iree_hip_stream_value_host_write(
+    void* user_data, const uint64_t args[4],
+    iree_hal_host_call_context_t* call_context) {
+  (void)args;
+  (void)call_context;
+  iree_hip_stream_value_write_t* write =
+      (iree_hip_stream_value_write_t*)user_data;
+  if (write->byte_length == sizeof(uint32_t)) {
+    uint32_t* target = (uint32_t*)write->host_pointer;
+    const uint32_t value = (uint32_t)write->value;
+    if (write->flags == IREE_HIP_EXT_STREAM_WRITE_VALUE_INCREMENT) {
+      __atomic_fetch_add(target, value, __ATOMIC_ACQ_REL);
+    } else if (write->flags == IREE_HIP_EXT_STREAM_WRITE_VALUE_DECREMENT) {
+      __atomic_fetch_sub(target, value, __ATOMIC_ACQ_REL);
+    } else {
+      __atomic_store_n(target, value, __ATOMIC_RELEASE);
+    }
+  } else {
+    uint64_t* target = (uint64_t*)write->host_pointer;
+    if (write->flags == IREE_HIP_EXT_STREAM_WRITE_VALUE_INCREMENT) {
+      __atomic_fetch_add(target, write->value, __ATOMIC_ACQ_REL);
+    } else if (write->flags == IREE_HIP_EXT_STREAM_WRITE_VALUE_DECREMENT) {
+      __atomic_fetch_sub(target, write->value, __ATOMIC_ACQ_REL);
+    } else {
+      __atomic_store_n(target, write->value, __ATOMIC_RELEASE);
+    }
+  }
+  return iree_ok_status();
+}
+
+static hipError_t iree_hip_enqueue_stream_value_write(
+    hipStream_t stream, void* ptr, uint64_t value, unsigned int flags,
+    iree_host_size_t byte_length) {
+  if (!ptr || !iree_hip_stream_write_value_flags_are_valid(flags)) {
+    return hipErrorInvalidValue;
+  }
+  if ((uintptr_t)ptr % byte_length != 0) return hipErrorInvalidValue;
+
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (result != hipSuccess) return result;
+
+  result = iree_hip_order_legacy_stream_dependencies(resolved_stream.context,
+                                                     resolved_stream.stream);
+  if (result != hipSuccess) {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    return result;
+  }
+
+  iree_hal_streaming_context_t* owner_context = NULL;
+  iree_hal_streaming_buffer_ref_t buffer_ref = {0};
+  result = iree_hip_lookup_streaming_range_with_owner(
+      resolved_stream.context, ptr, byte_length, &owner_context, &buffer_ref);
+  if (result != hipSuccess || !buffer_ref.buffer) {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    iree_hal_streaming_context_release(owner_context);
+    return hipErrorInvalidValue;
+  }
+
+  iree_status_t status = iree_ok_status();
+  if (!buffer_ref.buffer->host_ptr) {
+    if (flags != IREE_HIP_STREAM_WRITE_VALUE_DEFAULT) {
+      iree_hal_streaming_context_release(owner_context);
+      iree_hip_resolved_stream_release(&resolved_stream);
+      return hipErrorNotSupported;
+    }
+    const void* value_storage = &value;
+    if (resolved_stream.stream->capture_status ==
+        IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
+      void* graph_value = NULL;
+      status =
+          iree_arena_allocate(&resolved_stream.stream->capture_graph->arena,
+                              byte_length, &graph_value);
+      if (iree_status_is_ok(status)) {
+        memcpy(graph_value, &value, byte_length);
+        value_storage = graph_value;
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_streaming_memcpy_host_to_device(
+          owner_context, (iree_hal_streaming_deviceptr_t)(uintptr_t)ptr,
+          value_storage, byte_length, resolved_stream.stream);
+    }
+  } else {
+    iree_hip_stream_value_write_t* write = NULL;
+    status = iree_allocator_malloc(iree_allocator_system(), sizeof(*write),
+                                   (void**)&write);
+    if (iree_status_is_ok(status)) {
+      iree_hal_resource_initialize(&iree_hip_stream_value_write_vtable,
+                                   &write->resource);
+      write->context = owner_context;
+      write->buffer = buffer_ref.buffer->buffer;
+      write->host_pointer =
+          (uint8_t*)buffer_ref.buffer->host_ptr + buffer_ref.offset;
+      write->value = value;
+      write->byte_length = byte_length;
+      write->flags = flags;
+      iree_hal_buffer_retain(write->buffer);
+
+      uint64_t args[4] = {0, 0, 0, 0};
+      iree_hal_host_call_t call = iree_hal_make_host_call_with_resource(
+          iree_hip_stream_value_host_write, write, &write->resource);
+      status = iree_hal_streaming_queue_host_call(
+          resolved_stream.stream, call, args, IREE_HAL_HOST_CALL_FLAG_NONE);
+      iree_hal_resource_release(&write->resource);
+      owner_context = NULL;
+    }
+  }
+
+  iree_hal_streaming_context_release(owner_context);
+  iree_hip_resolved_stream_release(&resolved_stream);
+  return iree_status_to_hip_result(status);
+}
+
+static hipError_t iree_hip_validate_stream_value_wait(
+    hipStream_t stream, const void* ptr, unsigned int flags,
+    iree_host_size_t byte_length) {
+  if (!ptr || !iree_hip_stream_wait_value_flags_are_valid(flags)) {
+    return hipErrorInvalidValue;
+  }
+  if ((uintptr_t)ptr % byte_length != 0) return hipErrorInvalidValue;
+
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (result != hipSuccess) return result;
+
+  iree_hal_streaming_context_t* owner_context = NULL;
+  iree_hal_streaming_buffer_ref_t buffer_ref = {0};
+  result = iree_hip_lookup_streaming_range_with_owner(
+      resolved_stream.context, ptr, byte_length, &owner_context, &buffer_ref);
+  const bool allocation_found = result == hipSuccess && buffer_ref.buffer;
+  iree_hal_streaming_context_release(owner_context);
+  iree_hip_resolved_stream_release(&resolved_stream);
+  return allocation_found ? hipErrorNotSupported : hipErrorInvalidValue;
+}
+
+// Writes a 32-bit value to memory as part of stream execution.
 HIPAPI hipError_t hipStreamWriteValue32(hipStream_t stream, void* ptr,
                                         uint32_t value, unsigned int flags) {
-  (void)stream;
-  (void)ptr;
-  (void)value;
-  (void)flags;
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  return iree_hip_enqueue_stream_value_write(stream, ptr, value, flags,
+                                             sizeof(value));
 }
 
 // Writes a 64-bit value to device memory as part of stream execution.
 HIPAPI hipError_t hipStreamWriteValue64(hipStream_t stream, void* ptr,
                                         uint64_t value, unsigned int flags) {
-  (void)stream;
-  (void)ptr;
-  (void)value;
-  (void)flags;
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  return iree_hip_enqueue_stream_value_write(stream, ptr, value, flags,
+                                             sizeof(value));
 }
 
 // Waits until a 32-bit value meets a condition as part of stream execution.
 HIPAPI hipError_t hipStreamWaitValue32(hipStream_t stream, void* ptr,
                                        uint32_t value, unsigned int flags,
                                        uint32_t mask) {
-  (void)stream;
-  (void)ptr;
   (void)value;
-  (void)flags;
   (void)mask;
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  return iree_hip_validate_stream_value_wait(stream, ptr, flags, sizeof(value));
 }
 
 // Waits until a 64-bit value meets a condition as part of stream execution.
 HIPAPI hipError_t hipStreamWaitValue64(hipStream_t stream, void* ptr,
                                        uint64_t value, unsigned int flags,
                                        uint64_t mask) {
-  (void)stream;
-  (void)ptr;
   (void)value;
-  (void)flags;
   (void)mask;
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  return iree_hip_validate_stream_value_wait(stream, ptr, flags, sizeof(value));
+}
+
+HIPAPI hipError_t hipStreamBatchMemOp(hipStream_t stream, unsigned int count,
+                                      hipStreamBatchMemOpParams* param_array,
+                                      unsigned int flags) {
+  if (!param_array || count == 0 || count > 256 || flags != 0) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  iree_hip_resolved_stream_release(&resolved_stream);
+  return hipErrorNotSupported;
 }
 
 //===----------------------------------------------------------------------===//
 // Extended stream creation (CU mask)
 //===----------------------------------------------------------------------===//
 
-// Creates a stream with a compute unit mask.
-// We ignore the CU mask and create a regular stream.
-HIPAPI hipError_t hipExtStreamCreateWithCUMask(hipStream_t* stream,
-                                               uint32_t cuMaskSize,
-                                               const uint32_t* cuMask) {
-  (void)cuMaskSize;
-  (void)cuMask;
-  // Ignore the CU mask and create a regular stream.
-  return hipStreamCreate(stream);
+static void iree_hip_fill_default_cu_mask(
+    const iree_hal_streaming_context_t* context, uint32_t mask_count,
+    uint32_t* mask) {
+  memset(mask, 0, mask_count * sizeof(*mask));
+  const iree_host_size_t compute_unit_count =
+      context && context->device_entry
+          ? context->device_entry->multiprocessor_count
+          : 0;
+  for (iree_host_size_t compute_unit = 0; compute_unit < compute_unit_count;
+       ++compute_unit) {
+    const iree_host_size_t word = compute_unit / 32;
+    if (word >= mask_count) break;
+    mask[word] |= 1u << (compute_unit % 32);
+  }
 }
 
-// Gets the CU mask for a stream.
-// We don't track CU masks, so we return all bits set.
-HIPAPI hipError_t hipExtStreamGetCUMask(hipStream_t stream, uint32_t cuMaskSize,
-                                        uint32_t* cuMask) {
-  (void)stream;
-  if (!cuMask || cuMaskSize == 0) {
+HIPAPI hipError_t hipExtStreamCreateWithCUMask(hipStream_t* stream,
+                                               uint32_t mask_count,
+                                               const uint32_t* mask) {
+  if (!stream || mask_count == 0 || !mask) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  // Return all CUs enabled (all bits set).
-  for (uint32_t i = 0; i < cuMaskSize; ++i) {
-    cuMask[i] = 0xFFFFFFFF;
+  *stream = NULL;
+  // A masked stream requires queue selection that enforces the requested
+  // compute-unit set. Recording the mask on a virtual stream without applying
+  // it to submitted work would expose a stream that violates its contract.
+  HIP_RETURN_ERROR(hipErrorNotSupported);
+}
+
+HIPAPI hipError_t hipExtStreamGetCUMask(hipStream_t stream, uint32_t mask_count,
+                                        uint32_t* mask) {
+  if (!mask || mask_count == 0) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+
+  const iree_host_size_t compute_unit_count =
+      resolved_stream.context->device_entry
+          ? resolved_stream.context->device_entry->multiprocessor_count
+          : 0;
+  const iree_host_size_t required_mask_count = (compute_unit_count + 31) / 32;
+  if (mask_count < required_mask_count) {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  iree_hip_fill_default_cu_mask(resolved_stream.context, mask_count, mask);
+  iree_hip_resolved_stream_release(&resolved_stream);
   return hipSuccess;
 }
 
@@ -9593,6 +11510,7 @@ HIPAPI hipError_t hipEventCreate(hipEvent_t* event) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  *event = NULL;
 
   // Ensure initialization and get context.
   iree_hal_streaming_context_t* context = NULL;
@@ -9608,7 +11526,12 @@ HIPAPI hipError_t hipEventCreate(hipEvent_t* event) {
       &event_obj);
 
   if (iree_status_is_ok(status)) {
+    status = iree_hip_event_register(event_obj);
+  }
+  if (iree_status_is_ok(status)) {
     *event = (hipEvent_t)event_obj;
+  } else {
+    iree_hal_streaming_event_release(event_obj);
   }
 
   hipError_t result = iree_status_to_hip_result(status);
@@ -9652,6 +11575,11 @@ HIPAPI hipError_t hipEventCreateWithFlags(hipEvent_t* event,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  *event = NULL;
+  if (!iree_hip_event_create_flags_are_valid(flags)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
 
   // Ensure initialization and get context.
   iree_hal_streaming_context_t* context = NULL;
@@ -9667,7 +11595,12 @@ HIPAPI hipError_t hipEventCreateWithFlags(hipEvent_t* event,
       &event_obj);
 
   if (iree_status_is_ok(status)) {
+    status = iree_hip_event_register(event_obj);
+  }
+  if (iree_status_is_ok(status)) {
     *event = (hipEvent_t)event_obj;
+  } else {
+    iree_hal_streaming_event_release(event_obj);
   }
 
   hipError_t result = iree_status_to_hip_result(status);
@@ -9691,7 +11624,7 @@ HIPAPI hipError_t hipEventCreateWithFlags(hipEvent_t* event,
 // Event behavior:
 // - All uses of the event must complete before destruction.
 // - After destruction, the event handle becomes invalid.
-// - Using a destroyed event results in undefined behavior.
+// - A destroyed event is rejected as an invalid resource handle.
 //
 // Multi-GPU: Event must be destroyed from a context that can access it.
 //
@@ -9701,6 +11634,10 @@ HIPAPI hipError_t hipEventCreateWithFlags(hipEvent_t* event,
 // See also: hipEventCreate, hipEventCreateWithFlags, hipEventSynchronize.
 HIPAPI hipError_t hipEventDestroy(hipEvent_t event) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  if (!iree_hip_event_unregister(event)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidResourceHandle);
+  }
   iree_hal_streaming_event_release((iree_hal_streaming_event_t*)event);
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -9714,11 +11651,16 @@ HIPAPI hipError_t hipEventDestroy(hipEvent_t event) {
 //
 // Returns:
 //  - hipSuccess: Event recorded successfully.
-//  - hipErrorInvalidValue: event is NULL or invalid.
-//  - hipErrorInvalidResourceHandle: Invalid stream handle.
-//  - hipErrorInvalidContext: No active HIP context.
+//  - hipErrorInvalidValue: A queue operation this record submits was rejected.
+//  - hipErrorInvalidHandle: The event or the stream is not a live handle, or
+//    the stream belongs to a context other than the one that created the
+//    event.
+//  - hipErrorContextIsDestroyed: The stream's context has been destroyed.
+//  - hipErrorNoDevice: No device is visible to the runtime.
 //  - hipErrorNotInitialized: HIP runtime not initialized.
-//  - hipErrorLaunchFailure: Previous kernel launch failed.
+//  - hipErrorOutOfMemory: An allocation this record needs failed - a timed
+//    record's tick slot, or the capture dependency list a captured record
+//    grows - or the stream's timeline values ran out.
 //  - hipErrorUnknown: Internal error during recording.
 //
 // Synchronization: This operation is asynchronous.
@@ -9727,8 +11669,19 @@ HIPAPI hipError_t hipEventDestroy(hipEvent_t event) {
 // - The event captures the current position in the stream's command queue.
 // - All previously enqueued operations in the stream must complete before
 //   the event is signaled.
-// - If stream is NULL, uses the default stream.
-// - Graph capture: Supported. Creates event node when capturing.
+// - The record submits the work already recorded on the stream before
+//   enqueueing itself, so a failure to submit that work is reported here.
+//   Neither step happens while the stream is capturing.
+// - If stream is NULL, uses the current context's default stream.
+// - The stream must belong to the context that created the event, whether or
+//   not it is capturing. This binding refuses the pair itself, ahead of the
+//   record, so a capturing stream is held to the rule as well even though the
+//   streaming layer's record accepts one from any context.
+// - Graph capture: Supported. A record made on a capturing stream snapshots
+//   the stream's dependency frontier onto the event and associates the event
+//   with the graph being captured, so that a later wait on the event joins
+//   that capture. No node is created, no queue point is named, and nothing is
+//   submitted.
 // - The event can be waited on by other streams using hipStreamWaitEvent().
 // - The event can be queried with hipEventQuery() or synchronized with
 //   hipEventSynchronize().
@@ -9738,20 +11691,38 @@ HIPAPI hipError_t hipEventDestroy(hipEvent_t event) {
 // Warning: Recording an event multiple times overwrites the previous
 // recording. Wait for the event to complete before re-recording.
 //
-// Note: Use hipEventElapsedTime() to measure time between two events
-// recorded in the same stream.
+// Note: Use hipEventElapsedTime() to measure the interval between two records;
+// records made on different streams of one device share a clock.
 HIPAPI hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  hipError_t init_result = iree_hip_resolve_stream(stream, &stream_obj);
+  iree_hal_streaming_event_t* event_object = NULL;
+  hipError_t event_result = iree_hip_event_lookup_retain(event, &event_object);
+  if (event_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(event_result);
+  }
+
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t init_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (init_result != hipSuccess) {
+    iree_hal_streaming_event_release(event_object);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
   }
 
-  iree_status_t status = iree_hal_streaming_event_record(
-      (iree_hal_streaming_event_t*)event, stream_obj);
+  if (event_object->context != resolved_stream.context) {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    iree_hal_streaming_event_release(event_object);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  }
+
+  iree_status_t status =
+      iree_hal_streaming_event_record(event_object, resolved_stream.stream);
+  iree_hip_resolved_stream_release(&resolved_stream);
+  iree_hal_streaming_event_release(event_object);
   hipError_t result = iree_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
   return result;
@@ -9768,6 +11739,8 @@ HIPAPI hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) {
 //  - hipErrorLaunchFailure: A kernel launch associated with event failed.
 //  - hipErrorIllegalAddress: Invalid memory access in associated operations.
 //  - hipErrorNotInitialized: HIP runtime not initialized.
+//  - hipErrorCapturedEvent: The event's last record went into a stream
+//    capture, which names a dependency frontier and no queue point.
 //
 // Synchronization: This operation blocks the host thread until the event
 // completes.
@@ -9781,7 +11754,9 @@ HIPAPI hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) {
 //
 // Performance note: For polling without blocking, use hipEventQuery.
 //
-// Graph capture: Not supported. Returns hipErrorStreamCaptureUnsupported.
+// Graph capture: An event whose last record went into a stream capture is
+// refused with hipErrorCapturedEvent, and a stream of the current context
+// capturing into that graph is invalidated.
 //
 // See also: hipEventQuery, hipEventRecord, hipStreamSynchronize.
 HIPAPI hipError_t hipEventSynchronize(hipEvent_t event) {
@@ -9789,26 +11764,37 @@ HIPAPI hipError_t hipEventSynchronize(hipEvent_t event) {
   HIP_DEBUG_LOG("[HIP_API] hipEventSynchronize(event=%p) called\n",
                 (void*)event);
 
+  iree_hal_streaming_event_t* streaming_event = NULL;
+  hipError_t event_result =
+      iree_hip_event_lookup_retain(event, &streaming_event);
+  if (event_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(event_result);
+  }
+
   // Check if any stream is capturing - synchronous operations not allowed
   // during capture. Note: We need to check global capture status since events
   // can be shared across streams.
   iree_hal_streaming_context_t* context = NULL;
   hipError_t init_result = iree_hip_ensure_context(&context);
   if (init_result != hipSuccess) {
+    iree_hal_streaming_event_release(streaming_event);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
   }
 
-  iree_hal_streaming_event_t* streaming_event =
-      (iree_hal_streaming_event_t*)event;
-  if (streaming_event->capture_graph) {
-    iree_hip_context_invalidate_capture_graph(context,
-                                              streaming_event->capture_graph);
+  iree_hal_streaming_graph_t* capture_graph =
+      iree_hal_streaming_event_acquire_capture_graph(streaming_event);
+  if (capture_graph) {
+    iree_hip_context_invalidate_capture_graph(context, capture_graph);
+    iree_hal_streaming_graph_release(capture_graph);
+    iree_hal_streaming_event_release(streaming_event);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorCapturedEvent);
   }
 
   iree_status_t status = iree_hal_streaming_event_synchronize(streaming_event);
+  iree_hal_streaming_event_release(streaming_event);
   hipError_t result = iree_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
   return result;
@@ -9825,9 +11811,14 @@ HIPAPI hipError_t hipEventSynchronize(hipEvent_t event) {
 //  - hipErrorInvalidResourceHandle: Invalid event handle.
 //  - hipErrorLaunchFailure: A kernel launch associated with event failed.
 //  - hipErrorNotInitialized: HIP runtime not initialized.
+//  - hipErrorCapturedEvent: The event's last record went into a stream
+//    capture, which names a dependency frontier and no queue point.
 //
-// Synchronization: This operation is non-blocking. Returns immediately with
-// the current status.
+// Synchronization: Never waits for a record to complete; an event whose record
+// is still outstanding is reported as hipErrorNotReady. Refusing a captured
+// event takes a reference to the graph that capture is building and drops it
+// again, and dropping the last reference frees the host allocations the graph
+// owns, which synchronizes every context.
 //
 // Event behavior:
 // - Checks if all operations before the event recording have completed.
@@ -9843,35 +11834,66 @@ HIPAPI hipError_t hipEventSynchronize(hipEvent_t event) {
 // }
 // ```
 //
-// Graph capture: Not supported. Returns hipErrorStreamCaptureUnsupported.
+// Graph capture: An event whose last record went into a stream capture is
+// refused with hipErrorCapturedEvent, and a stream of the current context
+// capturing into that graph is invalidated.
 //
 // See also: hipEventSynchronize, hipEventRecord, hipStreamQuery.
 HIPAPI hipError_t hipEventQuery(hipEvent_t event) {
+  iree_hal_streaming_event_t* streaming_event = NULL;
+  hipError_t event_result =
+      iree_hip_event_lookup_retain(event, &streaming_event);
+  if (event_result != hipSuccess) HIP_RETURN_ERROR(event_result);
+
   // Check if any stream is capturing - synchronous operations not allowed
   // during capture. Note: We need to check global capture status since events
   // can be shared across streams.
   iree_hal_streaming_context_t* context = NULL;
   hipError_t init_result = iree_hip_ensure_context(&context);
   if (init_result != hipSuccess) {
+    iree_hal_streaming_event_release(streaming_event);
     HIP_RETURN_ERROR(init_result);
   }
 
-  iree_hal_streaming_event_t* streaming_event =
-      (iree_hal_streaming_event_t*)event;
-  if (streaming_event->capture_graph) {
-    iree_hip_context_invalidate_capture_graph(context,
-                                              streaming_event->capture_graph);
+  iree_hal_streaming_graph_t* capture_graph =
+      iree_hal_streaming_event_acquire_capture_graph(streaming_event);
+  if (capture_graph) {
+    iree_hip_context_invalidate_capture_graph(context, capture_graph);
+    iree_hal_streaming_graph_release(capture_graph);
+    iree_hal_streaming_event_release(streaming_event);
     HIP_RETURN_ERROR(hipErrorCapturedEvent);
   }
 
   int is_complete = 0;
   iree_status_t status =
       iree_hal_streaming_event_query(streaming_event, &is_complete);
+  iree_hal_streaming_event_release(streaming_event);
   // is_complete == 0 means complete, is_complete == 1 means not complete.
   hipError_t result = iree_status_is_ok(status)
                           ? (is_complete == 0 ? hipSuccess : hipErrorNotReady)
                           : iree_status_to_hip_result(status);
   return result;
+}
+
+// Invalidates the stream capture |event|'s last record went into. An event
+// that names no capture invalidates nothing: one whose last record was
+// submitted, and one that has never been recorded.
+//
+// The graph identifies the capture and the context only narrows which streams
+// are searched for it, so this searches the event's own context: the one
+// hipEventElapsedTime has already established both of its events share. The
+// streams searched are then a property of the pair being measured, and an
+// entry point that resolves no current context needs none. hipEventQuery and
+// hipEventSynchronize search the current context instead, which
+// iree_hip_ensure_context hands them when they initialize the runtime. A
+// capture recorded on a stream belonging to neither context is found by none
+// of the three.
+static void iree_hip_invalidate_event_capture(
+    iree_hal_streaming_event_t* event) {
+  iree_hal_streaming_graph_t* capture_graph =
+      iree_hal_streaming_event_acquire_capture_graph(event);
+  iree_hip_context_invalidate_capture_graph(event->context, capture_graph);
+  iree_hal_streaming_graph_release(capture_graph);
 }
 
 // Computes elapsed time between two events.
@@ -9883,19 +11905,34 @@ HIPAPI hipError_t hipEventQuery(hipEvent_t event) {
 //
 // Returns:
 //  - hipSuccess: Time computed successfully.
-//  - hipErrorInvalidValue: ms is NULL or events are NULL.
-//  - hipErrorInvalidResourceHandle: Invalid event handles.
-//  - hipErrorNotReady: One or both events have not completed.
-//  - hipErrorInvalidHandle: Events created with hipEventDisableTiming.
+//  - hipErrorInvalidValue: ms is NULL.
+//  - hipErrorInvalidHandle: An event handle is not a live handle, the two
+//    events belong to different contexts, an event was created with
+//    hipEventDisableTiming, or an event carries no submitted record.
+//  - hipErrorNotReady: One or both records have not been reached.
+//  - hipErrorCapturedEvent: An event's last record went into a stream capture,
+//    which names a dependency frontier and no queue point.
+//  - hipErrorNotSupported: The device advertises no timestamp domain, so no
+//    clock the two records share can measure the interval between them.
 //
-// Synchronization: This operation may block if events have not completed.
+// Synchronization: Never waits for a record to complete; an event whose record
+// is still outstanding is reported as hipErrorNotReady. Refusing a captured
+// pair invalidates that capture, and dropping the last reference to the graph
+// it was building frees the host allocations the graph owns, which
+// synchronizes every context.
 //
 // Timing behavior:
-// - Both events must be recorded in the same stream.
 // - Stop event must be recorded after start event.
 // - Events must not have hipEventDisableTiming flag.
-// - Returns time in milliseconds with ~0.5 microsecond resolution.
+// - The interval covers the device work between the two records, measured
+//   from the device clock ticks they captured; it is not a measure of how
+//   long the host took to issue them.
+// - Records made on different streams of one device share a clock and can be
+//   differenced.
+// - Resolution is the device's timestamp period.
 // - Time measurement includes all operations between events.
+// - A failure of the timeline a record names, or of reading a tick back, is
+//   reported with the code that failure maps to and not as a bad handle.
 //
 // Multi-GPU: Both events must be from the same device.
 //
@@ -9909,39 +11946,74 @@ HIPAPI hipError_t hipEventQuery(hipEvent_t event) {
 // hipEventElapsedTime(&milliseconds, start, stop);
 // ```
 //
-// Warning: Events must be recorded in the same stream for accurate timing.
-//
 // See also: hipEventCreate, hipEventRecord, hipEventSynchronize.
 HIPAPI hipError_t hipEventElapsedTime(float* ms, hipEvent_t start,
                                       hipEvent_t stop) {
   if (!ms) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  if (!start || !stop) {
+
+  iree_hal_streaming_event_t* start_event = NULL;
+  hipError_t result = iree_hip_event_lookup_retain(start, &start_event);
+  if (result != hipSuccess) HIP_RETURN_ERROR(hipErrorInvalidHandle);
+
+  iree_hal_streaming_event_t* stop_event = NULL;
+  result = iree_hip_event_lookup_retain(stop, &stop_event);
+  if (result != hipSuccess) {
+    iree_hal_streaming_event_release(start_event);
     HIP_RETURN_ERROR(hipErrorInvalidHandle);
   }
-
-  iree_hal_streaming_event_t* start_event = (iree_hal_streaming_event_t*)start;
-  iree_hal_streaming_event_t* stop_event = (iree_hal_streaming_event_t*)stop;
 
   if (start_event->context != stop_event->context) {
+    iree_hal_streaming_event_release(stop_event);
+    iree_hal_streaming_event_release(start_event);
     HIP_RETURN_ERROR(hipErrorInvalidHandle);
   }
 
-  // Check if either event has timing disabled.
-  if ((start_event->flags & IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING) ||
-      (stop_event->flags & IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING)) {
-    HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  iree_hal_streaming_event_timing_t timing =
+      IREE_HAL_STREAMING_EVENT_TIMING_UNTIMED;
+  iree_status_t status = iree_hal_streaming_event_elapsed_time(
+      ms, start_event, stop_event, &timing);
+  if (!iree_status_is_ok(status)) {
+    // The timeline a record names has failed; the event handles are fine.
+    result = iree_status_to_hip_result(status);
+    iree_hal_streaming_event_release(stop_event);
+    iree_hal_streaming_event_release(start_event);
+    HIP_RETURN_ERROR(result);
   }
-
-  if (start_event->record_time_ns == 0 || stop_event->record_time_ns == 0) {
-    HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  // Both events stay held across the outcomes below: refusing a captured pair
+  // reaches back into each event for the capture it names.
+  result = hipErrorInvalidHandle;
+  switch (timing) {
+    case IREE_HAL_STREAMING_EVENT_TIMING_MEASURED:
+      result = hipSuccess;
+      break;
+    case IREE_HAL_STREAMING_EVENT_TIMING_INCOMPLETE:
+      result = hipErrorNotReady;
+      break;
+    case IREE_HAL_STREAMING_EVENT_TIMING_UNTIMED:
+      // An event with timing disabled or without a submitted record is a bad
+      // handle here, not a bad value.
+      result = hipErrorInvalidHandle;
+      break;
+    case IREE_HAL_STREAMING_EVENT_TIMING_CAPTURED:
+      // Measuring a captured event is not something a capture can express, so
+      // the capture it belongs to is invalidated and the pair refused, which
+      // is how hipEventQuery and hipEventSynchronize answer a captured event
+      // too. Either event may be the captured one and an event whose last
+      // record was submitted names no capture, so both are offered and one
+      // naming no capture invalidates nothing.
+      iree_hip_invalidate_event_capture(start_event);
+      iree_hip_invalidate_event_capture(stop_event);
+      result = hipErrorCapturedEvent;
+      break;
+    case IREE_HAL_STREAMING_EVENT_TIMING_UNSUPPORTED:
+      result = hipErrorNotSupported;
+      break;
   }
-
-  iree_status_t status =
-      iree_hal_streaming_event_elapsed_time(ms, start_event, stop_event);
-  hipError_t result = iree_status_to_hip_result(status);
-  return result;
+  iree_hal_streaming_event_release(stop_event);
+  iree_hal_streaming_event_release(start_event);
+  HIP_RETURN_ERROR(result);
 }
 
 //===----------------------------------------------------------------------===//
@@ -9997,11 +12069,10 @@ HIPAPI hipError_t hipModuleLoad(hipModule_t* module, const char* fname) {
 
   // Load module from file.
   iree_hal_streaming_module_t* stream_module = NULL;
-  iree_hal_executable_caching_mode_t caching_mode =
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_PERSISTENT_CACHING |
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_OPTIMIZATION;
+  iree_hal_executable_load_flags_t load_flags =
+      IREE_HAL_EXECUTABLE_LOAD_FLAG_ALLOW_OPTIMIZATION;
   iree_status_t status = iree_hal_streaming_module_create_from_file(
-      context, caching_mode, iree_make_cstring_view(fname),
+      context, load_flags, iree_make_cstring_view(fname),
       context->host_allocator, &stream_module);
 
   if (iree_status_is_ok(status)) {
@@ -10089,8 +12160,8 @@ HIPAPI hipError_t hipModuleLoadData(hipModule_t* module, const void* image) {
 //
 // Multi-GPU: Module is loaded for the current device's architecture.
 //
-// Warning: Ensure the image buffer remains valid during loading.
-// The implementation may reference the buffer asynchronously.
+// Image lifetime: The image buffer must remain valid until this call returns
+// and may be released immediately afterward.
 //
 // See also: hipModuleLoad, hipModuleLoadData, hipModuleUnload,
 //           hipModuleGetFunction.
@@ -10184,15 +12255,12 @@ HIPAPI hipError_t hipModuleLoadDataEx(hipModule_t* module, const void* image,
     }
   }
 
-  // Cache-mode options are accepted as hints; HAL executable caching still owns
-  // the concrete code-object caching policy.
-  iree_hal_executable_caching_mode_t caching_mode =
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA |
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_OPTIMIZATION;
+  iree_hal_executable_load_flags_t load_flags =
+      IREE_HAL_EXECUTABLE_LOAD_FLAG_ALLOW_OPTIMIZATION;
 
   iree_hal_streaming_module_t* stream_module = NULL;
   iree_status_t status = iree_hal_streaming_module_create_from_memory(
-      context, caching_mode, iree_make_const_byte_span(image, 0),
+      context, load_flags, iree_make_const_byte_span(image, 0),
       context->host_allocator, &stream_module);
 
   if (iree_status_is_ok(status)) {
@@ -10467,25 +12535,26 @@ HIPAPI hipError_t hipFuncGetAttribute(int* pi, hipFuncAttribute_t attrib,
   if (symbol->type != IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION) {
     HIP_RETURN_ERROR(hipErrorInvalidHandle);
   }
+  iree_hal_streaming_function_attributes_t* attributes =
+      &symbol->function_attributes;
 
   // Return attribute value based on what we have cached.
   switch (attrib) {
     case hipFuncAttributeMaxThreadsPerBlock:
-      *pi = symbol->max_threads_per_block;
+      *pi = attributes->maximum_threads_per_block;
       break;
     case hipFuncAttributeSharedSizeBytes:
-      *pi = symbol->shared_size_bytes;
+      *pi = attributes->fixed_shared_memory_size;
       break;
     case hipFuncAttributeConstSizeBytes:
       // We don't track constant memory usage.
       *pi = 0;
       break;
     case hipFuncAttributeLocalSizeBytes:
-      // Local memory is typically 0 for modern GPUs.
-      *pi = 0;
+      *pi = attributes->fixed_local_memory_size;
       break;
     case hipFuncAttributeNumRegs:
-      *pi = symbol->num_regs;
+      *pi = attributes->register_count;
       break;
     case hipFuncAttributePtxVersion:
       // Return a default PTX version equivalent for HIP.
@@ -10500,8 +12569,8 @@ HIPAPI hipError_t hipFuncGetAttribute(int* pi, hipFuncAttribute_t attrib,
       *pi = 0;
       break;
     case hipFuncAttributeMaxDynamicSharedSizeBytes:
-      // Return the kernel's maximum dynamic shared memory size.
-      *pi = symbol->max_dynamic_shared_size_bytes;
+      *pi = iree_hal_streaming_function_attributes_dynamic_shared_memory_size(
+          attributes);
       break;
     case hipFuncAttributePreferredSharedMemoryCarveout:
       // Carveout percentage not tracked.
@@ -10563,18 +12632,22 @@ HIPAPI hipError_t hipFuncGetAttributes(hipFuncAttributes* attr,
   if (symbol->type != IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION) {
     HIP_RETURN_ERROR(hipErrorInvalidHandle);
   }
+  iree_hal_streaming_function_attributes_t* attributes =
+      &symbol->function_attributes;
 
   // Fill in the attributes structure.
   memset(attr, 0, sizeof(hipFuncAttributes));
-  attr->maxThreadsPerBlock = symbol->max_threads_per_block;
-  attr->sharedSizeBytes = symbol->shared_size_bytes;
+  attr->maxThreadsPerBlock = attributes->maximum_threads_per_block;
+  attr->sharedSizeBytes = attributes->fixed_shared_memory_size;
   attr->constSizeBytes = 0;  // Not tracked.
-  attr->localSizeBytes = 0;  // Typically 0 for modern GPUs.
-  attr->numRegs = symbol->num_regs;
+  attr->localSizeBytes = attributes->fixed_local_memory_size;
+  attr->numRegs = attributes->register_count;
   attr->ptxVersion = 0;     // Not applicable to HIP/ROCm.
   attr->binaryVersion = 0;  // Not tracked.
   attr->cacheModeCA = 0;    // Not tracked.
-  attr->maxDynamicSharedSizeBytes = symbol->max_dynamic_shared_size_bytes;
+  attr->maxDynamicSharedSizeBytes =
+      iree_hal_streaming_function_attributes_dynamic_shared_memory_size(
+          attributes);
   attr->preferredShmemCarveout = 0;  // Not tracked.
 
   HIP_RETURN_ERROR(hipSuccess);
@@ -10636,15 +12709,18 @@ HIPAPI hipError_t hipFuncSetAttribute(hipFunction_t hfunc,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidHandle);
   }
+  iree_hal_streaming_function_attributes_t* attributes =
+      &symbol->function_attributes;
 
   // Only certain attributes can be set.
   hipError_t result = hipSuccess;
   switch (attrib) {
     case hipFuncAttributeMaxDynamicSharedSizeBytes:
-      // Store the maximum dynamic shared memory size for this function.
-      // This is used by kernels that need more than 48KB shared memory.
-      // Note that this is not actually used for anything but queries.
-      symbol->max_dynamic_shared_size_bytes = (uint32_t)value;
+      if (value < 0 ||
+          !iree_hal_streaming_function_attributes_try_set_dynamic_shared_memory_size(
+              attributes, (uint32_t)value)) {
+        result = hipErrorInvalidValue;
+      }
       break;
     case hipFuncAttributePreferredSharedMemoryCarveout:
       // This controls the L1/shared memory split.
@@ -10805,7 +12881,7 @@ HIPAPI hipError_t hipFuncSetSharedMemConfig(hipFunction_t hfunc,
 // Returns the name of a kernel function.
 // Returns a placeholder since we don't track kernel names.
 HIPAPI const char* hipKernelNameRef(const hipFunction_t f) {
-  (void)f;
+  if (!f) return NULL;
   return "<unknown kernel>";
 }
 
@@ -10813,7 +12889,7 @@ HIPAPI const char* hipKernelNameRef(const hipFunction_t f) {
 // Returns a placeholder since we don't track kernel names.
 HIPAPI const char* hipKernelNameRefByPtr(const void* hostFunction,
                                          hipStream_t stream) {
-  (void)hostFunction;
+  if (!hostFunction) return NULL;
   (void)stream;
   return "<unknown kernel>";
 }
@@ -10866,23 +12942,18 @@ HIPAPI hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
 
   if (!function_address) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
+    HIP_RETURN_ERROR(hipErrorInvalidDeviceFunction);
   }
 
-  // Ensure initialization and get context.
-  iree_hal_streaming_context_t* context = NULL;
-  hipError_t init_result = iree_hip_ensure_context(&context);
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t init_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (init_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
   }
-
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  init_result = iree_hip_resolve_stream(stream, &stream_obj);
-  if (init_result != hipSuccess) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
-  }
+  iree_hal_streaming_context_t* context = resolved_stream.context;
+  iree_hal_streaming_stream_t* stream_obj = resolved_stream.stream;
 
   // Resolve the host function pointer to a symbol.
   // Check if this is already a tagged symbol from hipModuleGetFunction (driver
@@ -10925,20 +12996,31 @@ HIPAPI hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
   }
 
   if (!symbol) {
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidDeviceFunction);
+  }
+
+  hipError_t launch_config_result = iree_hip_validate_launch_configuration(
+      context->device_entry, symbol, numBlocks.x, numBlocks.y, numBlocks.z,
+      dimBlocks.x, dimBlocks.y, dimBlocks.z, sharedMemBytes);
+  if (launch_config_result != hipSuccess) {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(launch_config_result);
   }
 
   const iree_hal_streaming_dispatch_params_t params = {
       .grid_dim = {numBlocks.x, numBlocks.y, numBlocks.z},
       .block_dim = {dimBlocks.x, dimBlocks.y, dimBlocks.z},
-      .shared_memory_bytes = sharedMemBytes,
+      .shared_memory_bytes = (uint32_t)sharedMemBytes,
       .buffer = args,  // args is already the kernelParams array
       .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY,
   };
   hipError_t dependency_result =
-      iree_hip_synchronize_legacy_stream_dependencies(context, stream_obj);
+      iree_hip_order_legacy_stream_dependencies(context, stream_obj);
   if (dependency_result != hipSuccess) {
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(dependency_result);
   }
@@ -10949,18 +13031,16 @@ HIPAPI hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
 
 #if IREE_HIP_SYNC_AFTER_EVERY_LAUNCH
   if (result == hipSuccess) {
-    iree_hal_streaming_context_t* ctx = iree_hal_streaming_context_current();
-    if (ctx) {
-      iree_status_t sync_status = iree_hal_streaming_context_synchronize(ctx);
-      if (!iree_status_is_ok(sync_status)) {
-        HIP_DEBUG_LOG(
-            "[HIP_API] Warning: device sync after hipLaunchKernel failed\n");
-        iree_status_ignore(sync_status);
-      }
+    iree_status_t sync_status = iree_hal_streaming_context_synchronize(context);
+    if (!iree_status_is_ok(sync_status)) {
+      HIP_DEBUG_LOG(
+          "[HIP_API] Warning: device sync after hipLaunchKernel failed\n");
+      iree_status_ignore(sync_status);
     }
   }
 #endif
 
+  iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -11003,9 +13083,57 @@ HIPAPI hipError_t hipExtLaunchKernel(const void* function_address,
                                      void** args, size_t sharedMemBytes,
                                      hipStream_t stream, hipEvent_t startEvent,
                                      hipEvent_t stopEvent, int flags) {
-  // TODO: handle start and end events.
-  return hipLaunchKernel(function_address, numBlocks, dimBlocks, args,
-                         sharedMemBytes, stream);
+  if (!function_address) HIP_RETURN_ERROR(hipErrorInvalidDeviceFunction);
+  if (flags & ~hipExtAnyOrderLaunch) HIP_RETURN_ERROR(hipErrorInvalidValue);
+
+  // Validate the opaque handles before passing them to the normal launch path.
+  // A stale handle is only an address and must never be dereferenced to decide
+  // whether it is still live.
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+
+  iree_hal_streaming_event_t* start_event = NULL;
+  if (startEvent) {
+    result = iree_hip_event_lookup_retain(startEvent, &start_event);
+    if (result != hipSuccess ||
+        start_event->context != resolved_stream.context) {
+      iree_hal_streaming_event_release(start_event);
+      iree_hip_resolved_stream_release(&resolved_stream);
+      HIP_RETURN_ERROR(hipErrorInvalidValue);
+    }
+  }
+
+  iree_hal_streaming_event_t* stop_event = NULL;
+  if (stopEvent) {
+    result = iree_hip_event_lookup_retain(stopEvent, &stop_event);
+    if (result != hipSuccess ||
+        stop_event->context != resolved_stream.context) {
+      iree_hal_streaming_event_release(stop_event);
+      iree_hal_streaming_event_release(start_event);
+      iree_hip_resolved_stream_release(&resolved_stream);
+      HIP_RETURN_ERROR(hipErrorInvalidValue);
+    }
+  }
+
+  if (start_event) {
+    result = iree_status_to_hip_result(
+        iree_hal_streaming_event_record(start_event, resolved_stream.stream));
+  }
+  if (result == hipSuccess) {
+    result = hipLaunchKernel(function_address, numBlocks, dimBlocks, args,
+                             sharedMemBytes, stream);
+  }
+  if (result == hipSuccess && stop_event) {
+    result = iree_status_to_hip_result(
+        iree_hal_streaming_event_record(stop_event, resolved_stream.stream));
+  }
+
+  iree_hal_streaming_event_release(stop_event);
+  iree_hal_streaming_event_release(start_event);
+  iree_hip_resolved_stream_release(&resolved_stream);
+  return result;
 }
 
 // Launches a kernel function with specified dimensions and parameters.
@@ -11108,19 +13236,45 @@ HIPAPI hipError_t hipModuleLaunchKernel(
     }
   }
 #endif
-  // Ensure initialization and get context.
-  iree_hal_streaming_context_t* context = NULL;
-  hipError_t init_result = iree_hip_ensure_context(&context);
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t init_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (init_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
   }
+  iree_hal_streaming_context_t* context = resolved_stream.context;
+  iree_hal_streaming_stream_t* stream_obj = resolved_stream.stream;
 
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  init_result = iree_hip_resolve_stream(stream, &stream_obj);
-  if (init_result != hipSuccess) {
+  // Validate the function handle before untagging it. An untagged or
+  // non-function handle is rejected here (as the other driver-style entry
+  // points do) so the extra-buffer handling below can safely dereference
+  // symbol->parameters.
+  if (!iree_hal_streaming_symbol_has_tag(f)) {
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
+    HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  }
+  iree_hal_streaming_symbol_t* symbol = iree_hal_streaming_symbol_untag(f);
+  if (!symbol || symbol->type != IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION) {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  }
+
+  if (kernelParams && extra) {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  hipError_t launch_config_result = iree_hip_validate_launch_configuration(
+      context->device_entry, symbol, gridDimX, gridDimY, gridDimZ, blockDimX,
+      blockDimY, blockDimZ, sharedMemBytes);
+  if (launch_config_result != hipSuccess) {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(launch_config_result);
   }
 
   // Extract params pointer and size from HIP's parameter format.
@@ -11129,29 +13283,22 @@ HIPAPI hipError_t hipModuleLaunchKernel(
   iree_hal_streaming_dispatch_flags_t dispatch_flags =
       IREE_HAL_STREAMING_DISPATCH_FLAG_NONE;
   if (extra) {
-    // Extra format: {
-    //   HIP_LAUNCH_PARAM_BUFFER_POINTER, &buffer,
-    //   HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
-    //   HIP_LAUNCH_PARAM_END,
-    // }
-    for (int i = 0; extra[i] != HIP_LAUNCH_PARAM_END; i += 2) {
-      if (extra[i] == HIP_LAUNCH_PARAM_BUFFER_POINTER) {
-        params_ptr = extra[i + 1];
-      } else if (extra[i] == HIP_LAUNCH_PARAM_BUFFER_SIZE) {
-        params_size = *(size_t*)extra[i + 1];
-      }
+    hipError_t parse_result =
+        iree_hip_parse_launch_extra(extra, &params_ptr, &params_size);
+    if (parse_result != hipSuccess) {
+      iree_hip_resolved_stream_release(&resolved_stream);
+      IREE_TRACE_ZONE_END(z0);
+      HIP_RETURN_ERROR(parse_result);
     }
-    // The extra format provides a pre-packed buffer in the kernel's native ABI.
-    // Mark it as pre-packed so the streaming layer passes it through directly.
+    // The extra buffer is already laid out in the kernel's native kernarg ABI.
+    // Preserve it byte-for-byte: HIP device pointers may appear in formal
+    // pointer parameters or inside opaque data copied by the caller.
     dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED;
   } else if (kernelParams) {
     // kernelParams is an array of pointers to the actual parameters.
     params_ptr = kernelParams;
     dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY;
   }
-
-  // Untag the function pointer if it was tagged by hipModuleGetFunction.
-  iree_hal_streaming_symbol_t* symbol = iree_hal_streaming_symbol_untag(f);
 
   const iree_hal_streaming_dispatch_params_t params = {
       .grid_dim = {gridDimX, gridDimY, gridDimZ},
@@ -11162,8 +13309,9 @@ HIPAPI hipError_t hipModuleLaunchKernel(
       .flags = dispatch_flags,
   };
   hipError_t dependency_result =
-      iree_hip_synchronize_legacy_stream_dependencies(context, stream_obj);
+      iree_hip_order_legacy_stream_dependencies(context, stream_obj);
   if (dependency_result != hipSuccess) {
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(dependency_result);
   }
@@ -11194,17 +13342,15 @@ HIPAPI hipError_t hipModuleLaunchKernel(
 #endif
 #if IREE_HIP_SYNC_AFTER_EVERY_LAUNCH
   if (result == hipSuccess) {
-    iree_hal_streaming_context_t* ctx = iree_hal_streaming_context_current();
-    if (ctx) {
-      iree_status_t sync_status = iree_hal_streaming_context_synchronize(ctx);
-      if (!iree_status_is_ok(sync_status)) {
-        HIP_DEBUG_LOG("[HIP_API] Warning: device sync after launch failed\n");
-        iree_status_ignore(sync_status);
-      }
+    iree_status_t sync_status = iree_hal_streaming_context_synchronize(context);
+    if (!iree_status_is_ok(sync_status)) {
+      HIP_DEBUG_LOG("[HIP_API] Warning: device sync after launch failed\n");
+      iree_status_ignore(sync_status);
     }
   }
 #endif
 
+  iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -11361,42 +13507,59 @@ HIPAPI hipError_t hipModuleLaunchCooperativeKernel(
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  // Ensure initialization and get context.
-  iree_hal_streaming_context_t* context = NULL;
-  hipError_t init_result = iree_hip_ensure_context(&context);
-  if (init_result != hipSuccess) {
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t resolve_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (resolve_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
+    HIP_RETURN_ERROR(resolve_result);
+  }
+  iree_hal_streaming_context_t* context = resolved_stream.context;
+  iree_hal_streaming_stream_t* stream_obj = resolved_stream.stream;
+  iree_hal_streaming_device_t* device = context->device_entry;
+
+  if (!iree_hal_streaming_symbol_has_tag(f)) {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  }
+  iree_hal_streaming_symbol_t* symbol = iree_hal_streaming_symbol_untag(f);
+  if (!symbol || symbol->type != IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION) {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidHandle);
   }
 
-  // Resolve NULL stream to default stream.
-  if (!stream) {
-    stream = (hipStream_t)context->default_stream;
+  hipError_t launch_config_result = iree_hip_validate_launch_configuration(
+      device, symbol, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY,
+      blockDimZ, sharedMemBytes);
+  if (launch_config_result != hipSuccess) {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(launch_config_result);
   }
-
-  // Get the device from the stream's context.
-  iree_hal_streaming_stream_t* hal_stream =
-      (iree_hal_streaming_stream_t*)stream;
-  iree_hal_streaming_device_t* device = hal_stream->context->device_entry;
-
-  // Get symbol.
-  iree_hal_streaming_symbol_t* symbol = (iree_hal_streaming_symbol_t*)f;
 
   // Calculate maximum blocks for cooperative launch.
   // This will return 0 if the device doesn't support cooperative launch.
-  int block_size = blockDimX * blockDimY * blockDimZ;
+  uint32_t block_size = blockDimX * blockDimY * blockDimZ;
   uint32_t max_blocks = 0;
-  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_hal_streaming_calculate_max_cooperative_blocks(
-          device, symbol, block_size, sharedMemBytes, &max_blocks),
-      hipErrorInvalidValue);
+  iree_status_t status = iree_hal_streaming_calculate_max_cooperative_blocks(
+      device, symbol, block_size, sharedMemBytes, &max_blocks);
+  hipError_t result =
+      iree_status_to_fixed_hip_result(status, hipErrorInvalidValue);
+  if (result != hipSuccess) {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(result);
+  }
 
   // Verify grid size doesn't exceed max active blocks.
   // If max_blocks is 0 (device doesn't support cooperative launch) or
   // grid is too large, return error.
-  int total_blocks = gridDimX * gridDimY * gridDimZ;
+  uint64_t total_blocks =
+      (uint64_t)gridDimX * (uint64_t)gridDimY * (uint64_t)gridDimZ;
   if (max_blocks == 0 || total_blocks > max_blocks) {
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorCooperativeLaunchTooLarge);
   }
@@ -11411,11 +13574,21 @@ HIPAPI hipError_t hipModuleLaunchCooperativeKernel(
       .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_COOPERATIVE,
   };
 
-  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_hal_streaming_launch_kernel((iree_hal_streaming_symbol_t*)f, &params,
-                                       (iree_hal_streaming_stream_t*)stream),
-      hipErrorInvalidConfiguration);
+  hipError_t dependency_result =
+      iree_hip_order_legacy_stream_dependencies(context, stream_obj);
+  if (dependency_result != hipSuccess) {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(dependency_result);
+  }
+  status = iree_hal_streaming_launch_kernel(symbol, &params, stream_obj);
+  result =
+      iree_status_to_fixed_hip_result(status, hipErrorInvalidConfiguration);
+  iree_hip_resolved_stream_release(&resolved_stream);
+  if (result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(result);
+  }
 
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -11486,17 +13659,19 @@ HIPAPI hipError_t hipLaunchHostFunc(hipStream_t stream, hipHostFn_t fn,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  hipError_t init_result = iree_hip_resolve_stream(stream, &stream_obj);
-  if (init_result != hipSuccess) {
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t resolve_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (resolve_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
+    HIP_RETURN_ERROR(resolve_result);
   }
 
-  iree_status_t status =
-      iree_hal_streaming_launch_host_function(stream_obj, fn, userData);
+  iree_status_t status = iree_hal_streaming_launch_host_function(
+      resolved_stream.stream, fn, userData);
 
   hipError_t result = iree_status_to_hip_result(status);
+  iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -12027,25 +14202,22 @@ HIPAPI hipError_t hipMemPrefetchAsync(const void* dev_ptr, size_t count,
     HIP_RETURN_ERROR(result);
   }
 
-  iree_hal_streaming_context_t* context = NULL;
-  result = iree_hip_ensure_context(&context);
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  result = iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(result);
   }
-
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  result = iree_hip_resolve_stream(stream, &stream_obj);
-  if (result != hipSuccess) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(result);
-  }
-  if (stream_obj->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
+  if (resolved_stream.stream->capture_status ==
+      IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorStreamCaptureUnsupported);
   }
 
-  result = iree_hip_managed_record_prefetch(context, dev_ptr, count, device);
+  result = iree_hip_managed_record_prefetch(resolved_stream.context, dev_ptr,
+                                            count, device);
+  iree_hip_resolved_stream_release(&resolved_stream);
   if (result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(result);
@@ -12072,25 +14244,22 @@ HIPAPI hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t count,
     HIP_RETURN_ERROR(result);
   }
 
-  iree_hal_streaming_context_t* context = NULL;
-  result = iree_hip_ensure_context(&context);
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  result = iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(result);
   }
-
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  result = iree_hip_resolve_stream(stream, &stream_obj);
-  if (result != hipSuccess) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(result);
-  }
-  if (stream_obj->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
+  if (resolved_stream.stream->capture_status ==
+      IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorStreamCaptureUnsupported);
   }
 
-  result = iree_hip_managed_record_prefetch(context, dev_ptr, count, device);
+  result = iree_hip_managed_record_prefetch(resolved_stream.context, dev_ptr,
+                                            count, device);
+  iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(result);
 }
@@ -12146,26 +14315,23 @@ HIPAPI hipError_t hipMemPrefetchBatchAsync(
     }
   }
 
-  iree_hal_streaming_context_t* context = NULL;
-  hipError_t result = iree_hip_ensure_context(&context);
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(result);
   }
-
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  result = iree_hip_resolve_stream(stream, &stream_obj);
-  if (result != hipSuccess) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(result);
-  }
-  if (stream_obj->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
+  if (resolved_stream.stream->capture_status ==
+      IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorStreamCaptureUnsupported);
   }
 
   for (size_t i = 0; i < count; ++i) {
     if (!dev_ptrs[i] || sizes[i] == 0) {
+      iree_hip_resolved_stream_release(&resolved_stream);
       IREE_TRACE_ZONE_END(z0);
       HIP_RETURN_ERROR(hipErrorInvalidValue);
     }
@@ -12174,23 +14340,27 @@ HIPAPI hipError_t hipMemPrefetchBatchAsync(
     result = iree_hip_prefetch_batch_location_for_operation(
         i, prefetch_locs, prefetch_loc_idxs, num_prefetch_locs, &location);
     if (result != hipSuccess) {
+      iree_hip_resolved_stream_release(&resolved_stream);
       IREE_TRACE_ZONE_END(z0);
       HIP_RETURN_ERROR(result);
     }
     int device = hipInvalidDeviceId;
     result = iree_hip_managed_location_to_device(location, &device);
     if (result != hipSuccess) {
+      iree_hip_resolved_stream_release(&resolved_stream);
       IREE_TRACE_ZONE_END(z0);
       HIP_RETURN_ERROR(result);
     }
-    result = iree_hip_managed_record_prefetch(context, dev_ptrs[i], sizes[i],
-                                              device);
+    result = iree_hip_managed_record_prefetch(resolved_stream.context,
+                                              dev_ptrs[i], sizes[i], device);
     if (result != hipSuccess) {
+      iree_hip_resolved_stream_release(&resolved_stream);
       IREE_TRACE_ZONE_END(z0);
       HIP_RETURN_ERROR(result);
     }
   }
 
+  iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
 }
@@ -12213,7 +14383,7 @@ typedef struct iree_hip_pointer_metadata_t {
   // Streaming buffer reference when |kind| is BUFFER.
   iree_hal_streaming_buffer_ref_t buffer_ref;
   // Array metadata when |kind| is ARRAY.
-  const struct hipArray_st* array;
+  struct hipArray_st* array;
   // Registered symbol size when |kind| is STATIC_MANAGED.
   size_t symbol_size;
 } iree_hip_pointer_metadata_t;
@@ -12297,6 +14467,14 @@ static hipError_t iree_hip_query_pointer_metadata(
   }
 
   return hipErrorInvalidValue;
+}
+
+static void iree_hip_pointer_metadata_release(
+    iree_hip_pointer_metadata_t* metadata) {
+  if (!metadata) return;
+  iree_hal_streaming_context_release(metadata->owner_context);
+  iree_hip_array_release(metadata->array);
+  memset(metadata, 0, sizeof(*metadata));
 }
 
 // Queries a single attribute of a pointer.
@@ -12391,12 +14569,12 @@ HIPAPI hipError_t hipPointerGetAttribute(void* data,
         case IREE_HIP_POINTER_METADATA_UNREGISTERED_HOST:
         case IREE_HIP_POINTER_METADATA_INVALID:
         default:
-          iree_hal_streaming_context_release(metadata.owner_context);
+          iree_hip_pointer_metadata_release(&metadata);
           IREE_TRACE_ZONE_END(z0);
           HIP_RETURN_ERROR(hipErrorInvalidValue);
       }
     }
-    iree_hal_streaming_context_release(metadata.owner_context);
+    iree_hip_pointer_metadata_release(&metadata);
     IREE_TRACE_ZONE_END(z0);
     return hipSuccess;
   }
@@ -12426,7 +14604,6 @@ HIPAPI hipError_t hipPointerGetAttribute(void* data,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_HOST_POINTER: {
-      // Return the host pointer if available.
       if (!buffer_ref.buffer->host_ptr) {
         result = hipErrorInvalidValue;
         break;
@@ -12461,7 +14638,9 @@ HIPAPI hipError_t hipPointerGetAttribute(void* data,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_MAPPED: {
-      *(unsigned int*)data = buffer_ref.buffer->host_ptr ? 1 : 0;
+      // This attribute describes whether the allocation has a runtime-visible
+      // device mapping, not whether it also has a host alias.
+      *(unsigned int*)data = 1;
       break;
     }
     case HIP_POINTER_ATTRIBUTE_SYNC_MEMOPS: {
@@ -12711,13 +14890,6 @@ HIPAPI hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  if (!ptr) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-
-  // Initialize with defaults.
-  memset(attributes, 0, sizeof(*attributes));
 
   // Get the context.
   iree_hal_streaming_context_t* context = NULL;
@@ -12726,6 +14898,13 @@ HIPAPI hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
   }
+  if (!ptr) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  // Initialize with defaults.
+  memset(attributes, 0, sizeof(*attributes));
 
   iree_hip_pointer_metadata_t metadata;
   hipError_t metadata_result =
@@ -12772,12 +14951,12 @@ HIPAPI hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes,
       break;
     case IREE_HIP_POINTER_METADATA_INVALID:
     default:
-      iree_hal_streaming_context_release(metadata.owner_context);
+      iree_hip_pointer_metadata_release(&metadata);
       IREE_TRACE_ZONE_END(z0);
       HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  iree_hal_streaming_context_release(metadata.owner_context);
+  iree_hip_pointer_metadata_release(&metadata);
   IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(hipSuccess);
 }
@@ -13054,10 +15233,20 @@ HIPAPI hipError_t hipMemRangeGetAttributes(void** data, size_t* data_sizes,
 //===----------------------------------------------------------------------===//
 
 struct hipUserObject {
+  // References held by the live-handle registry, graphs, and active API calls.
+  // This count protects the control block but is not its public reference
+  // count.
+  iree_atomic_int32_t handle_reference_count;
+  // Next live user-object handle in the process registry.
+  struct hipUserObject* next_live_object;
   // Protects reference count changes from user and graph-owner threads.
   iree_slim_mutex_t mutex;
   // Current retained reference count.
   uint64_t ref_count;
+  // Number of graph records that still reference this control block.
+  uint64_t graph_association_count;
+  // Whether the user payload destructor has been invoked.
+  bool destructor_called;
   // User pointer passed to the destructor callback.
   void* ptr;
   // Destructor callback invoked when the retained count reaches zero.
@@ -13066,12 +15255,85 @@ struct hipUserObject {
   iree_allocator_t host_allocator;
 };
 
+static iree_once_flag iree_hip_user_object_registry_mutex_once =
+    IREE_ONCE_FLAG_INIT;
+static iree_slim_mutex_t iree_hip_user_object_registry_mutex;
+static hipUserObject_t iree_hip_user_object_registry_head = NULL;
+
+static void iree_hip_user_object_registry_mutex_initialize(void) {
+  iree_slim_mutex_initialize(&iree_hip_user_object_registry_mutex);
+}
+
+static void iree_hip_user_object_registry_lock(void) {
+  iree_call_once(&iree_hip_user_object_registry_mutex_once,
+                 iree_hip_user_object_registry_mutex_initialize);
+  iree_slim_mutex_lock(&iree_hip_user_object_registry_mutex);
+}
+
+static void iree_hip_user_object_handle_release(hipUserObject_t user_object) {
+  if (user_object && iree_atomic_fetch_sub(&user_object->handle_reference_count,
+                                           1, iree_memory_order_acq_rel) == 1) {
+    iree_slim_mutex_deinitialize(&user_object->mutex);
+    iree_allocator_free(user_object->host_allocator, user_object);
+  }
+}
+
+static void iree_hip_user_object_registry_insert(hipUserObject_t user_object) {
+  iree_hip_user_object_registry_lock();
+  user_object->next_live_object = iree_hip_user_object_registry_head;
+  iree_hip_user_object_registry_head = user_object;
+  iree_slim_mutex_unlock(&iree_hip_user_object_registry_mutex);
+}
+
+static bool iree_hip_user_object_registry_lookup_retain(
+    hipUserObject_t object, hipUserObject_t* out_object) {
+  if (out_object) *out_object = NULL;
+  if (!object) return false;
+
+  bool found = false;
+  iree_hip_user_object_registry_lock();
+  for (hipUserObject_t current = iree_hip_user_object_registry_head; current;
+       current = current->next_live_object) {
+    if (current == object) {
+      iree_atomic_fetch_add(&current->handle_reference_count, 1,
+                            iree_memory_order_relaxed);
+      if (out_object) *out_object = current;
+      found = true;
+      break;
+    }
+  }
+  iree_slim_mutex_unlock(&iree_hip_user_object_registry_mutex);
+  return found;
+}
+
+static bool iree_hip_user_object_registry_remove(hipUserObject_t user_object) {
+  bool removed = false;
+  iree_hip_user_object_registry_lock();
+  hipUserObject_t* current = &iree_hip_user_object_registry_head;
+  while (*current) {
+    if (*current == user_object) {
+      *current = user_object->next_live_object;
+      user_object->next_live_object = NULL;
+      removed = true;
+      break;
+    }
+    current = &(*current)->next_live_object;
+  }
+  iree_slim_mutex_unlock(&iree_hip_user_object_registry_mutex);
+  if (removed) {
+    iree_hip_user_object_handle_release(user_object);
+  }
+  return removed;
+}
+
 static hipError_t iree_hip_user_object_retain_refs_checked(
     hipUserObject_t user_object, uint64_t count) {
   if (!user_object || count == 0) return hipErrorInvalidValue;
   hipError_t result = hipSuccess;
   iree_slim_mutex_lock(&user_object->mutex);
-  if (UINT64_MAX - user_object->ref_count < count) {
+  if (user_object->destructor_called) {
+    // A completed user object cannot be resurrected.
+  } else if (UINT64_MAX - user_object->ref_count < count) {
     result = hipErrorInvalidValue;
   } else {
     user_object->ref_count += count;
@@ -13085,56 +15347,123 @@ static hipError_t iree_hip_user_object_check_ref_count(
   if (!user_object || count == 0) return hipErrorInvalidValue;
   hipError_t result = hipSuccess;
   iree_slim_mutex_lock(&user_object->mutex);
-  if (count > user_object->ref_count) {
+  if (!user_object->destructor_called && count > user_object->ref_count) {
     result = hipErrorInvalidValue;
   }
   iree_slim_mutex_unlock(&user_object->mutex);
   return result;
 }
 
-static iree_status_t iree_hip_user_object_retain_refs(void* object,
-                                                      uint64_t count) {
+static iree_status_t iree_hip_user_object_retain_graph_refs(void* object,
+                                                            uint64_t count) {
   hipUserObject_t user_object = (hipUserObject_t)object;
-  hipError_t result =
-      iree_hip_user_object_retain_refs_checked(user_object, count);
-  if (result != hipSuccess) {
+  if (!user_object || count == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
   }
-  return iree_ok_status();
+
+  iree_status_t status = iree_ok_status();
+  iree_slim_mutex_lock(&user_object->mutex);
+  if (user_object->graph_association_count == UINT64_MAX ||
+      (!user_object->destructor_called &&
+       UINT64_MAX - user_object->ref_count < count)) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED);
+  } else {
+    ++user_object->graph_association_count;
+    iree_atomic_fetch_add(&user_object->handle_reference_count, 1,
+                          iree_memory_order_relaxed);
+    if (!user_object->destructor_called) {
+      user_object->ref_count += count;
+    }
+  }
+  iree_slim_mutex_unlock(&user_object->mutex);
+  return status;
+}
+
+static hipError_t iree_hip_user_object_add_graph_association(
+    hipUserObject_t user_object) {
+  if (!user_object) return hipErrorInvalidValue;
+  hipError_t result = hipSuccess;
+  iree_slim_mutex_lock(&user_object->mutex);
+  if (user_object->graph_association_count == UINT64_MAX) {
+    result = hipErrorInvalidValue;
+  } else {
+    ++user_object->graph_association_count;
+    iree_atomic_fetch_add(&user_object->handle_reference_count, 1,
+                          iree_memory_order_relaxed);
+  }
+  iree_slim_mutex_unlock(&user_object->mutex);
+  return result;
+}
+
+static hipError_t iree_hip_user_object_release_refs_internal(
+    hipUserObject_t user_object, uint64_t count,
+    bool release_graph_association) {
+  if (!user_object || count == 0) return hipErrorInvalidValue;
+
+  bool should_destroy = false;
+  void* ptr = NULL;
+  hipHostFn_t destroy = NULL;
+  hipError_t result = hipSuccess;
+  iree_slim_mutex_lock(&user_object->mutex);
+  if (release_graph_association && user_object->graph_association_count == 0) {
+    result = hipErrorInvalidValue;
+  } else if (!user_object->destructor_called &&
+             count > user_object->ref_count) {
+    result = hipErrorInvalidValue;
+  } else {
+    if (!user_object->destructor_called) {
+      user_object->ref_count -= count;
+      if (user_object->ref_count == 0) {
+        user_object->destructor_called = true;
+        should_destroy = true;
+        ptr = user_object->ptr;
+        destroy = user_object->destroy;
+      }
+    }
+    if (release_graph_association) {
+      --user_object->graph_association_count;
+    }
+  }
+  iree_slim_mutex_unlock(&user_object->mutex);
+
+  if (should_destroy) {
+    // Remove the public handle before invoking user code so reentrant API calls
+    // observe a completed object without dereferencing its control block.
+    (void)iree_hip_user_object_registry_remove(user_object);
+    destroy(ptr);
+  }
+  return result;
 }
 
 static hipError_t iree_hip_user_object_release_refs_checked(
     hipUserObject_t user_object, uint64_t count) {
-  if (!user_object || count == 0) return hipErrorInvalidValue;
-  bool should_destroy = false;
-  void* ptr = NULL;
-  hipHostFn_t destroy = NULL;
-  iree_allocator_t host_allocator = iree_allocator_system();
-  hipError_t result = hipSuccess;
-  iree_slim_mutex_lock(&user_object->mutex);
-  if (count > user_object->ref_count) {
-    result = hipErrorInvalidValue;
-  } else {
-    user_object->ref_count -= count;
-    if (user_object->ref_count == 0) {
-      should_destroy = true;
-      ptr = user_object->ptr;
-      destroy = user_object->destroy;
-      host_allocator = user_object->host_allocator;
-    }
+  return iree_hip_user_object_release_refs_internal(
+      user_object, count, /*release_graph_association=*/false);
+}
+
+static void iree_hip_user_object_release_graph_refs(void* object,
+                                                    uint64_t count) {
+  hipUserObject_t user_object = (hipUserObject_t)object;
+  hipError_t result = iree_hip_user_object_release_refs_internal(
+      user_object, count, /*release_graph_association=*/true);
+  if (result == hipSuccess) {
+    iree_hip_user_object_handle_release(user_object);
   }
-  iree_slim_mutex_unlock(&user_object->mutex);
-  if (should_destroy) {
-    destroy(ptr);
-    iree_slim_mutex_deinitialize(&user_object->mutex);
-    iree_allocator_free(host_allocator, user_object);
-  }
-  return result;
 }
 
 static void iree_hip_user_object_release_refs(void* object, uint64_t count) {
   (void)iree_hip_user_object_release_refs_checked((hipUserObject_t)object,
                                                   count);
+}
+
+static hipError_t iree_hip_user_object_remove_graph_association(
+    hipUserObject_t user_object, uint64_t count) {
+  hipError_t result = iree_hip_user_object_release_refs_internal(
+      user_object, count, /*release_graph_association=*/true);
+  if (result == hipSuccess) {
+    iree_hip_user_object_handle_release(user_object);
+  }
+  return result;
 }
 
 HIPAPI hipError_t hipUserObjectCreate(hipUserObject_t* object_out, void* ptr,
@@ -13154,10 +15483,16 @@ HIPAPI hipError_t hipUserObjectCreate(hipUserObject_t* object_out, void* ptr,
     HIP_RETURN_ERROR(hipErrorOutOfMemory);
   }
   iree_slim_mutex_initialize(&object->mutex);
+  iree_atomic_store(&object->handle_reference_count, 1,
+                    iree_memory_order_relaxed);
+  object->next_live_object = NULL;
   object->ref_count = initialRefcount;
+  object->graph_association_count = 0;
+  object->destructor_called = false;
   object->ptr = ptr;
   object->destroy = destroy;
   object->host_allocator = host_allocator;
+  iree_hip_user_object_registry_insert(object);
   *object_out = object;
   return hipSuccess;
 }
@@ -13167,7 +15502,13 @@ HIPAPI hipError_t hipUserObjectRelease(hipUserObject_t object,
   if (!object || count == 0) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  hipError_t result = iree_hip_user_object_release_refs_checked(object, count);
+  hipUserObject_t retained_object = NULL;
+  if (!iree_hip_user_object_registry_lookup_retain(object, &retained_object)) {
+    return hipSuccess;
+  }
+  hipError_t result =
+      iree_hip_user_object_release_refs_checked(retained_object, count);
+  iree_hip_user_object_handle_release(retained_object);
   if (result != hipSuccess) {
     HIP_RETURN_ERROR(result);
   }
@@ -13179,7 +15520,13 @@ HIPAPI hipError_t hipUserObjectRetain(hipUserObject_t object,
   if (!object || count == 0) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  hipError_t result = iree_hip_user_object_retain_refs_checked(object, count);
+  hipUserObject_t retained_object = NULL;
+  if (!iree_hip_user_object_registry_lookup_retain(object, &retained_object)) {
+    return hipSuccess;
+  }
+  hipError_t result =
+      iree_hip_user_object_retain_refs_checked(retained_object, count);
+  iree_hip_user_object_handle_release(retained_object);
   if (result != hipSuccess) {
     HIP_RETURN_ERROR(result);
   }
@@ -13220,10 +15567,16 @@ HIPAPI hipError_t hipGraphRetainUserObject(hipGraph_t graph,
     }
   }
 
+  hipUserObject_t retained_object = NULL;
+  if (!iree_hip_user_object_registry_lookup_retain(object, &retained_object)) {
+    return hipSuccess;
+  }
+  object = retained_object;
   hipError_t retain_result =
       move_refs ? iree_hip_user_object_check_ref_count(object, count)
                 : iree_hip_user_object_retain_refs_checked(object, count);
   if (retain_result != hipSuccess) {
+    iree_hip_user_object_handle_release(retained_object);
     HIP_RETURN_ERROR(retain_result);
   }
   iree_hal_streaming_graph_user_object_ref_t* ref = NULL;
@@ -13234,14 +15587,25 @@ HIPAPI hipError_t hipGraphRetainUserObject(hipGraph_t graph,
     if (!move_refs) {
       iree_hip_user_object_release_refs(object, count);
     }
+    iree_hip_user_object_handle_release(retained_object);
     HIP_RETURN_ERROR(hipErrorOutOfMemory);
+  }
+  hipError_t association_result =
+      iree_hip_user_object_add_graph_association(object);
+  if (association_result != hipSuccess) {
+    if (!move_refs) {
+      (void)iree_hip_user_object_release_refs_checked(object, count);
+    }
+    iree_hip_user_object_handle_release(retained_object);
+    HIP_RETURN_ERROR(association_result);
   }
   ref->object = object;
   ref->count = count;
-  ref->retain = iree_hip_user_object_retain_refs;
-  ref->release = iree_hip_user_object_release_refs;
+  ref->retain = iree_hip_user_object_retain_graph_refs;
+  ref->release = iree_hip_user_object_release_graph_refs;
   ref->next = stream_graph->user_object_refs;
   stream_graph->user_object_refs = ref;
+  iree_hip_user_object_handle_release(retained_object);
   return hipSuccess;
 }
 
@@ -13263,8 +15627,11 @@ HIPAPI hipError_t hipGraphReleaseUserObject(hipGraph_t graph,
       if (count > ref->count) {
         HIP_RETURN_ERROR(hipErrorInvalidValue);
       }
+      const bool removes_association = count == ref->count;
       hipError_t release_result =
-          iree_hip_user_object_release_refs_checked(object, count);
+          removes_association
+              ? iree_hip_user_object_remove_graph_association(object, count)
+              : iree_hip_user_object_release_refs_checked(object, count);
       if (release_result != hipSuccess) {
         HIP_RETURN_ERROR(release_result);
       }
@@ -13809,8 +16176,8 @@ HIPAPI hipError_t hipGraphLaunch(hipGraphExec_t graphExec, hipStream_t stream) {
     HIP_RETURN_ERROR(init_result);
   }
 
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  init_result = iree_hip_resolve_stream(stream, &stream_obj);
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  init_result = iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (init_result != hipSuccess) {
     iree_hal_streaming_graph_exec_release(exec);
     IREE_TRACE_ZONE_END(z0);
@@ -13818,8 +16185,9 @@ HIPAPI hipError_t hipGraphLaunch(hipGraphExec_t graphExec, hipStream_t stream) {
   }
 
   iree_status_t launch_status =
-      iree_hal_streaming_graph_exec_launch(exec, stream_obj);
+      iree_hal_streaming_graph_exec_launch(exec, resolved_stream.stream);
   iree_hal_streaming_graph_exec_release(exec);
+  iree_hip_resolved_stream_release(&resolved_stream);
   if (!iree_status_is_ok(launch_status)) {
     hipError_t result =
         iree_status_to_fixed_hip_result(launch_status, hipErrorInvalidValue);
@@ -14024,8 +16392,9 @@ static bool iree_hip_symbol_accepts_empty_kernel_params(
 // - Kernel executes on device associated with function.
 // - Cross-device dependencies handled automatically.
 //
-// Warning: Ensure kernel parameters remain valid until graph
-// destruction. Pointers in kernelParams are captured by reference.
+// Argument values are captured when the node is created or updated. Device
+// memory referenced by pointer-valued arguments must remain valid until graph
+// executions using the node complete.
 //
 // See also: hipGraphAddMemcpyNode, hipGraphAddMemsetNode,
 //           hipGraphNodeGetType, hipGraphKernelNodeSetParams.
@@ -14055,6 +16424,34 @@ HIPAPI hipError_t hipGraphAddKernelNode(hipGraphNode_t* pGraphNode,
           ? (iree_hal_streaming_graph_node_t**)pDependencies
           : NULL;
 
+  // Resolve the kernel symbol first so the extra-buffer handling below can key
+  // off its reflected parameter metadata.
+  iree_hal_streaming_symbol_t* symbol = NULL;
+  hipError_t symbol_result = iree_hip_resolve_function_symbol(
+      stream_graph->context, params->func, &symbol);
+  if (symbol_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(symbol_result);
+  }
+  if (!params->kernelParams && !params->extra &&
+      !iree_hip_symbol_accepts_empty_kernel_params(symbol)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (params->kernelParams && params->extra) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  hipError_t launch_config_result = iree_hip_validate_launch_configuration(
+      stream_graph->context ? stream_graph->context->device_entry : NULL,
+      symbol, params->gridDim.x, params->gridDim.y, params->gridDim.z,
+      params->blockDim.x, params->blockDim.y, params->blockDim.z,
+      params->sharedMemBytes);
+  if (launch_config_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(launch_config_result);
+  }
+
   // Create dispatch params from kernel node params.
   // Extract params pointer from HIP's parameter format.
   void* params_ptr = NULL;
@@ -14062,18 +16459,14 @@ HIPAPI hipError_t hipGraphAddKernelNode(hipGraphNode_t* pGraphNode,
   iree_hal_streaming_dispatch_flags_t dispatch_flags =
       IREE_HAL_STREAMING_DISPATCH_FLAG_NONE;
   if (params->extra) {
-    // Extra format: {
-    //   HIP_LAUNCH_PARAM_BUFFER_POINTER, &buffer,
-    //   HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
-    //   HIP_LAUNCH_PARAM_END,
-    // }
-    for (int i = 0; params->extra[i] != HIP_LAUNCH_PARAM_END; i += 2) {
-      if (params->extra[i] == HIP_LAUNCH_PARAM_BUFFER_POINTER) {
-        params_ptr = params->extra[i + 1];
-      } else if (params->extra[i] == HIP_LAUNCH_PARAM_BUFFER_SIZE) {
-        params_size = *(size_t*)params->extra[i + 1];
-      }
+    hipError_t parse_result =
+        iree_hip_parse_launch_extra(params->extra, &params_ptr, &params_size);
+    if (parse_result != hipSuccess) {
+      IREE_TRACE_ZONE_END(z0);
+      HIP_RETURN_ERROR(parse_result);
     }
+    // The extra buffer is already laid out in the kernel's native kernarg ABI.
+    // Preserve it byte-for-byte; graph capture stores a private copy.
     dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED;
   } else if (params->kernelParams) {
     // kernelParams is an array of pointers to the actual parameters.
@@ -14089,19 +16482,6 @@ HIPAPI hipError_t hipGraphAddKernelNode(hipGraphNode_t* pGraphNode,
       .buffer_size = params_size,
       .flags = dispatch_flags,
   };
-
-  iree_hal_streaming_symbol_t* symbol = NULL;
-  hipError_t symbol_result = iree_hip_resolve_function_symbol(
-      stream_graph->context, params->func, &symbol);
-  if (symbol_result != hipSuccess) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(symbol_result);
-  }
-  if (!params->kernelParams && !params->extra &&
-      !iree_hip_symbol_accepts_empty_kernel_params(symbol)) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
 
   // Add kernel node to graph.
   iree_hal_streaming_graph_node_t* node = NULL;
@@ -14409,7 +16789,7 @@ static hipError_t iree_hip_graph_add_staged_peer_memcpy_node(
     }
 
     iree_hal_streaming_graph_node_t* copy_node = NULL;
-    status = iree_hal_streaming_graph_add_memcpy_node_from_refs(
+    status = iree_hal_streaming_graph_add_copy_buffer_node(
         stream_graph, deps, numDependencies, staging_ref, src_ref, size,
         &copy_node);
     if (!iree_status_is_ok(status)) {
@@ -14488,7 +16868,7 @@ static hipError_t iree_hip_graph_add_staged_peer_memcpy_node(
     callback_node->attrs.host.user_data_size = sizeof(*callback_data);
 
     iree_hal_streaming_graph_node_t* copy_node = NULL;
-    status = iree_hal_streaming_graph_add_memcpy_node_with_extra_dependency(
+    status = iree_hal_streaming_graph_add_copy_ptr_node_with_extra_dependency(
         stream_graph, deps, numDependencies, callback_node,
         (iree_hal_streaming_deviceptr_t)dst, staging->device_ptr, size,
         &copy_node);
@@ -14895,7 +17275,7 @@ HIPAPI hipError_t hipGraphAddMemcpyNode(hipGraphNode_t* pGraphNode,
     callback_node->attrs.host.user_data_size = sizeof(*callback_data);
 
     iree_hal_streaming_graph_node_t* node = NULL;
-    status = iree_hal_streaming_graph_add_memcpy_node_with_extra_dependency(
+    status = iree_hal_streaming_graph_add_copy_ptr_node_with_extra_dependency(
         stream_graph, deps, numDependencies, callback_node,
         (iree_hal_streaming_deviceptr_t)dst, staging->device_ptr, size, &node);
     if (!iree_status_is_ok(status)) {
@@ -15018,7 +17398,7 @@ HIPAPI hipError_t hipGraphAddMemcpyNode(hipGraphNode_t* pGraphNode,
     }
 
     iree_hal_streaming_graph_node_t* copy_node = NULL;
-    status = iree_hal_streaming_graph_add_memcpy_node_from_refs(
+    status = iree_hal_streaming_graph_add_copy_buffer_node(
         stream_graph, deps, numDependencies, dst_ref, src_ref, size,
         &copy_node);
     if (!iree_status_is_ok(status)) {
@@ -15072,7 +17452,7 @@ HIPAPI hipError_t hipGraphAddMemcpyNode(hipGraphNode_t* pGraphNode,
   }
 
   iree_hal_streaming_graph_node_t* node = NULL;
-  status = iree_hal_streaming_graph_add_memcpy_node_from_refs(
+  status = iree_hal_streaming_graph_add_copy_buffer_node(
       stream_graph, deps, numDependencies, dst_ref, src_ref, size, &node);
   if (!iree_status_is_ok(status)) {
     iree_status_ignore(status);
@@ -15201,7 +17581,7 @@ HIPAPI hipError_t hipGraphAddMemcpyNode1D(hipGraphNode_t* pGraphNode,
       HIP_RETURN_ERROR(peer_result);
     }
 
-    iree_status_t status = iree_hal_streaming_graph_add_memcpy_node(
+    iree_status_t status = iree_hal_streaming_graph_add_copy_ptr_node(
         stream_graph, deps, numDependencies,
         (iree_hal_streaming_deviceptr_t)dst,
         (iree_hal_streaming_deviceptr_t)src, count, &node);
@@ -15249,7 +17629,7 @@ HIPAPI hipError_t hipGraphAddMemcpyNode1D(hipGraphNode_t* pGraphNode,
 
     HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
         z0,
-        iree_hal_streaming_graph_add_memcpy_node_with_extra_dependency(
+        iree_hal_streaming_graph_add_copy_ptr_node_with_extra_dependency(
             stream_graph, deps, numDependencies, callback_node,
             (iree_hal_streaming_deviceptr_t)dst, staging->device_ptr, count,
             &node),
@@ -15269,7 +17649,7 @@ HIPAPI hipError_t hipGraphAddMemcpyNode1D(hipGraphNode_t* pGraphNode,
     iree_hal_streaming_graph_node_t* copy_node = NULL;
     HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
         z0,
-        iree_hal_streaming_graph_add_memcpy_node(
+        iree_hal_streaming_graph_add_copy_ptr_node(
             stream_graph, deps, numDependencies, staging->device_ptr,
             (iree_hal_streaming_deviceptr_t)src, count, &copy_node),
         hipErrorInvalidValue);
@@ -15462,7 +17842,7 @@ HIPAPI hipError_t hipGraphAddMemsetNode(hipGraphNode_t* pGraphNode,
 
   HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
       z0,
-      iree_hal_streaming_graph_add_memset_node(
+      iree_hal_streaming_graph_add_fill_ptr_node(
           stream_graph, deps, numDependencies,
           (iree_hal_streaming_deviceptr_t)params->dst, params->value,
           params->elementSize, memset_count, &node),
@@ -15780,15 +18160,20 @@ hipGraphAddEventRecordNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
+  iree_hal_streaming_event_t* streaming_event = NULL;
+  hipError_t event_result =
+      iree_hip_event_lookup_retain(event, &streaming_event);
+  if (event_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(event_result);
+  }
   iree_hal_streaming_graph_node_t* node = NULL;
-  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_hal_streaming_graph_add_event_node(
-          (iree_hal_streaming_graph_t*)graph,
-          (iree_hal_streaming_graph_node_t**)pDependencies, numDependencies,
-          IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD,
-          (iree_hal_streaming_event_t*)event, &node),
-      hipErrorInvalidValue);
+  iree_status_t status = iree_hal_streaming_graph_add_event_node(
+      (iree_hal_streaming_graph_t*)graph,
+      (iree_hal_streaming_graph_node_t**)pDependencies, numDependencies,
+      IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD, streaming_event, &node);
+  iree_hal_streaming_event_release(streaming_event);
+  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(z0, status, hipErrorInvalidValue);
   *pGraphNode = (hipGraphNode_t)node;
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -15814,15 +18199,20 @@ HIPAPI hipError_t hipGraphAddEventWaitNode(hipGraphNode_t* pGraphNode,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
+  iree_hal_streaming_event_t* streaming_event = NULL;
+  hipError_t event_result =
+      iree_hip_event_lookup_retain(event, &streaming_event);
+  if (event_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(event_result);
+  }
   iree_hal_streaming_graph_node_t* node = NULL;
-  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_hal_streaming_graph_add_event_node(
-          (iree_hal_streaming_graph_t*)graph,
-          (iree_hal_streaming_graph_node_t**)pDependencies, numDependencies,
-          IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT,
-          (iree_hal_streaming_event_t*)event, &node),
-      hipErrorInvalidValue);
+  iree_status_t status = iree_hal_streaming_graph_add_event_node(
+      (iree_hal_streaming_graph_t*)graph,
+      (iree_hal_streaming_graph_node_t**)pDependencies, numDependencies,
+      IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT, streaming_event, &node);
+  iree_hal_streaming_event_release(streaming_event);
+  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(z0, status, hipErrorInvalidValue);
   *pGraphNode = (hipGraphNode_t)node;
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -16648,8 +19038,10 @@ HIPAPI hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode,
   // This graph-memory implementation allocates backing storage when the graph
   // template is built. Graph exec launch serialization prevents concurrent
   // launches from sharing the same backing allocation.
-  hipError_t alloc_result = iree_hip_malloc_from_pool(
-      stream_graph->context, pool, params->bytesize, &params->dptr);
+  hipError_t alloc_result =
+      iree_hip_malloc_from_pool(stream_graph->context, pool, params->bytesize,
+                                /*stream=*/NULL, &params->dptr);
+  hrx_mem_pool_release(pool);
   if (alloc_result != hipSuccess) {
     iree_status_ignore(iree_hal_streaming_graph_destroy_node(node));
     HIP_RETURN_ERROR(alloc_result);
@@ -17872,16 +20264,22 @@ HIPAPI hipError_t hipGraphEventRecordNodeSetEvent(hipGraphNode_t node,
   }
   iree_hal_streaming_graph_node_t* stream_node =
       (iree_hal_streaming_graph_node_t*)node;
-  iree_hal_streaming_event_t* streaming_event =
-      (iree_hal_streaming_event_t*)event;
   if (!iree_hip_graph_node_is_active(stream_node) ||
-      stream_node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD ||
-      streaming_event->context != stream_node->graph->context) {
+      stream_node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  iree_hal_streaming_event_t* streaming_event = NULL;
+  hipError_t result = iree_hip_event_lookup_retain(event, &streaming_event);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  if (streaming_event->context != stream_node->graph->context) {
+    iree_hal_streaming_event_release(streaming_event);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   iree_hal_streaming_event_retain(streaming_event);
   iree_hal_streaming_event_release(stream_node->attrs.event.event);
   stream_node->attrs.event.event = streaming_event;
+  iree_hal_streaming_event_release(streaming_event);
   return hipSuccess;
 }
 
@@ -17908,16 +20306,22 @@ HIPAPI hipError_t hipGraphEventWaitNodeSetEvent(hipGraphNode_t node,
   }
   iree_hal_streaming_graph_node_t* stream_node =
       (iree_hal_streaming_graph_node_t*)node;
-  iree_hal_streaming_event_t* streaming_event =
-      (iree_hal_streaming_event_t*)event;
   if (!iree_hip_graph_node_is_active(stream_node) ||
-      stream_node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT ||
-      streaming_event->context != stream_node->graph->context) {
+      stream_node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  iree_hal_streaming_event_t* streaming_event = NULL;
+  hipError_t result = iree_hip_event_lookup_retain(event, &streaming_event);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  if (streaming_event->context != stream_node->graph->context) {
+    iree_hal_streaming_event_release(streaming_event);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   iree_hal_streaming_event_retain(streaming_event);
   iree_hal_streaming_event_release(stream_node->attrs.event.event);
   stream_node->attrs.event.event = streaming_event;
+  iree_hal_streaming_event_release(streaming_event);
   return hipSuccess;
 }
 
@@ -17979,9 +20383,17 @@ HIPAPI hipError_t hipGraphExecEventRecordNodeSetEvent(hipGraphExec_t graphExec,
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+
+  iree_hal_streaming_event_t* streaming_event = NULL;
+  result = iree_hip_event_lookup_retain(event, &streaming_event);
+  if (result != hipSuccess) {
+    iree_hal_streaming_graph_exec_release(exec);
+    HIP_RETURN_ERROR(result);
+  }
   iree_status_t status = iree_hal_streaming_graph_exec_set_event_node_event(
       exec, stream_node, IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD,
-      (iree_hal_streaming_event_t*)event);
+      streaming_event);
+  iree_hal_streaming_event_release(streaming_event);
   iree_hal_streaming_graph_exec_release(exec);
   HIP_RETURN_STATUS(status, hipErrorInvalidValue);
   return hipSuccess;
@@ -18005,9 +20417,17 @@ HIPAPI hipError_t hipGraphExecEventWaitNodeSetEvent(hipGraphExec_t graphExec,
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+
+  iree_hal_streaming_event_t* streaming_event = NULL;
+  result = iree_hip_event_lookup_retain(event, &streaming_event);
+  if (result != hipSuccess) {
+    iree_hal_streaming_graph_exec_release(exec);
+    HIP_RETURN_ERROR(result);
+  }
   iree_status_t status = iree_hal_streaming_graph_exec_set_event_node_event(
       exec, stream_node, IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT,
-      (iree_hal_streaming_event_t*)event);
+      streaming_event);
+  iree_hal_streaming_event_release(streaming_event);
   iree_hal_streaming_graph_exec_release(exec);
   HIP_RETURN_STATUS(status, hipErrorInvalidValue);
   return hipSuccess;
@@ -18110,15 +20530,14 @@ HIPAPI hipError_t hipGraphUpload(hipGraphExec_t graphExec, hipStream_t stream) {
   if (result != hipSuccess) {
     HIP_RETURN_ERROR(result);
   }
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  result = iree_hip_resolve_stream(stream, &stream_obj);
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  result = iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (result != hipSuccess) {
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(result);
   }
-  (void)exec;
-  (void)stream_obj;
   iree_hal_streaming_graph_exec_release(exec);
+  iree_hip_resolved_stream_release(&resolved_stream);
   return hipSuccess;
 }
 
@@ -18419,14 +20838,6 @@ hipGraphExecKernelNodeSetParams(hipGraphExec_t graphExec, hipGraphNode_t node,
 
   result = hipGraphKernelNodeSetParams(node, pNodeParams);
   if (result != hipSuccess) {
-    stream_node->attrs.kernel = old_attrs;
-    if (old_constants) {
-      memcpy((void*)old_attrs.constants.data, old_constants,
-             old_attrs.constants_capacity);
-    }
-    if (old_bindings) {
-      memcpy((void*)old_attrs.bindings.values, old_bindings, old_bindings_size);
-    }
     iree_allocator_free(host_allocator, old_bindings);
     iree_allocator_free(host_allocator, old_constants);
     iree_hal_streaming_graph_exec_release(exec);
@@ -18450,7 +20861,8 @@ hipGraphExecKernelNodeSetParams(hipGraphExec_t graphExec, hipGraphNode_t node,
 HIPAPI hipError_t hipGraphExecChildGraphNodeSetParams(hipGraphExec_t graphExec,
                                                       hipGraphNode_t node,
                                                       hipGraph_t childGraph) {
-  if (!graphExec || !node || !childGraph) {
+  if (!graphExec || !node || !childGraph ||
+      !iree_hip_graph_handle_is_live(childGraph)) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   iree_hal_streaming_graph_exec_t* exec = NULL;
@@ -18466,10 +20878,6 @@ HIPAPI hipError_t hipGraphExecChildGraphNodeSetParams(hipGraphExec_t graphExec,
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  if ((iree_hal_streaming_graph_t*)childGraph == stream_node->graph) {
-    iree_hal_streaming_graph_exec_release(exec);
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
   iree_hal_streaming_graph_t* old_child_graph =
       stream_node->attrs.child_graph.graph;
   iree_hal_streaming_graph_t* new_child_graph =
@@ -18478,6 +20886,19 @@ HIPAPI hipError_t hipGraphExecChildGraphNodeSetParams(hipGraphExec_t graphExec,
       old_child_graph->node_count != new_child_graph->node_count) {
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  // The rule iree_hal_streaming_graph_add_child_graph_node holds a template's
+  // child graph node to, applied where an instantiated executable's node is
+  // retargeted. The rebuild below instantiates |new_child_graph| in the context
+  // that graph belongs to and folds its blocks into |exec|, so a child of
+  // another context would leave |exec| holding event record blocks naming that
+  // context's events; a launch on a stream of |exec|'s own context breaks on
+  // the first of them with the blocks ahead of it already submitted.
+  iree_status_t validate_status = iree_hal_streaming_graph_validate_child_graph(
+      stream_node->graph, new_child_graph);
+  if (!iree_status_is_ok(validate_status)) {
+    iree_hal_streaming_graph_exec_release(exec);
+    HIP_RETURN_STATUS(validate_status, hipErrorInvalidValue);
   }
   iree_hal_streaming_graph_retain(new_child_graph);
   stream_node->attrs.child_graph.graph = new_child_graph;
@@ -18606,18 +21027,45 @@ HIPAPI hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   const hipKernelNodeParams* params = (const hipKernelNodeParams*)pNodeParams;
+
+  // Resolve the kernel symbol first so the extra-buffer handling below can key
+  // off its reflected parameter metadata.
+  iree_hal_streaming_symbol_t* symbol = NULL;
+  hipError_t result = iree_hip_resolve_function_symbol(
+      stream_node->graph->context, params->func, &symbol);
+  if (result != hipSuccess) {
+    HIP_RETURN_ERROR(result);
+  }
+  if (!params->kernelParams && !params->extra &&
+      !iree_hip_symbol_accepts_empty_kernel_params(symbol)) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (params->kernelParams && params->extra) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  hipError_t launch_config_result = iree_hip_validate_launch_configuration(
+      stream_node->graph && stream_node->graph->context
+          ? stream_node->graph->context->device_entry
+          : NULL,
+      symbol, params->gridDim.x, params->gridDim.y, params->gridDim.z,
+      params->blockDim.x, params->blockDim.y, params->blockDim.z,
+      params->sharedMemBytes);
+  if (launch_config_result != hipSuccess) {
+    HIP_RETURN_ERROR(launch_config_result);
+  }
+
   void* params_ptr = NULL;
   size_t params_size = 0;
   iree_hal_streaming_dispatch_flags_t dispatch_flags =
       IREE_HAL_STREAMING_DISPATCH_FLAG_NONE;
   if (params->extra) {
-    for (int i = 0; params->extra[i] != HIP_LAUNCH_PARAM_END; i += 2) {
-      if (params->extra[i] == HIP_LAUNCH_PARAM_BUFFER_POINTER) {
-        params_ptr = params->extra[i + 1];
-      } else if (params->extra[i] == HIP_LAUNCH_PARAM_BUFFER_SIZE) {
-        params_size = *(size_t*)params->extra[i + 1];
-      }
+    hipError_t parse_result =
+        iree_hip_parse_launch_extra(params->extra, &params_ptr, &params_size);
+    if (parse_result != hipSuccess) {
+      HIP_RETURN_ERROR(parse_result);
     }
+    // The extra buffer is already laid out in the kernel's native kernarg ABI.
+    // Preserve it byte-for-byte; the graph node update stores a private copy.
     dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED;
   } else if (params->kernelParams) {
     params_ptr = params->kernelParams;
@@ -18632,17 +21080,6 @@ HIPAPI hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node,
       .buffer_size = params_size,
       .flags = dispatch_flags,
   };
-
-  iree_hal_streaming_symbol_t* symbol = NULL;
-  hipError_t result = iree_hip_resolve_function_symbol(
-      stream_node->graph->context, params->func, &symbol);
-  if (result != hipSuccess) {
-    HIP_RETURN_ERROR(result);
-  }
-  if (!params->kernelParams && !params->extra &&
-      !iree_hip_symbol_accepts_empty_kernel_params(symbol)) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
   HIP_RETURN_STATUS(iree_hal_streaming_graph_set_kernel_node_params(
                         stream_node, symbol, &dispatch_params),
                     hipErrorInvalidValue);
@@ -19668,23 +22105,9 @@ HIPAPI hipError_t hipDrvGraphExecMemsetNodeSetParams(
 HIPAPI hipError_t hipStreamBeginCapture(hipStream_t stream,
                                         hipStreamCaptureMode mode) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_hal_streaming_context_t* context = NULL;
-  hipError_t init_result = iree_hip_ensure_context(&context);
-  if (init_result != hipSuccess) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
-  }
-
   if (!stream || stream == hipStreamLegacy) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorStreamCaptureUnsupported);
-  }
-
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  init_result = iree_hip_resolve_stream(stream, &stream_obj);
-  if (init_result != hipSuccess) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
   }
 
   // Map HIP capture mode to internal mode.
@@ -19704,21 +22127,39 @@ HIPAPI hipError_t hipStreamBeginCapture(hipStream_t stream,
       HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t resolve_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (resolve_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(resolve_result);
+  }
+  iree_hal_streaming_stream_t* stream_obj = resolved_stream.stream;
+
   iree_hal_streaming_capture_status_t status_internal =
       IREE_HAL_STREAMING_CAPTURE_STATUS_NONE;
   iree_status_t status =
       iree_hal_streaming_capture_status(stream_obj, &status_internal, NULL);
   if (!iree_status_is_ok(status)) {
-    HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(z0, status, hipErrorUnknown);
+    hipError_t result =
+        iree_status_to_fixed_hip_result(status, hipErrorUnknown);
+    iree_hip_resolved_stream_release(&resolved_stream);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(result);
   }
   if (status_internal != IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorIllegalState);
   }
 
-  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_begin_capture(stream_obj, capture_mode),
-      hipErrorUnknown);
+  status = iree_hal_streaming_begin_capture(stream_obj, capture_mode);
+  hipError_t result = iree_status_to_fixed_hip_result(status, hipErrorUnknown);
+  iree_hip_resolved_stream_release(&resolved_stream);
+  if (result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(result);
+  }
 
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -19755,13 +22196,16 @@ HIPAPI hipError_t hipStreamBeginCaptureToGraph(
       HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  hipError_t init_result = iree_hip_resolve_stream(stream, &stream_obj);
-  if (init_result != hipSuccess) {
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t resolve_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (resolve_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
+    HIP_RETURN_ERROR(resolve_result);
   }
+  iree_hal_streaming_stream_t* stream_obj = resolved_stream.stream;
   if (!iree_hip_graph_handle_is_live(graph)) {
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
@@ -19771,6 +22215,7 @@ HIPAPI hipError_t hipStreamBeginCaptureToGraph(
     iree_hal_streaming_graph_node_t* dependency =
         (iree_hal_streaming_graph_node_t*)dependencies[i];
     if (!dependency || dependency->graph != stream_graph) {
+      iree_hip_resolved_stream_release(&resolved_stream);
       IREE_TRACE_ZONE_END(z0);
       HIP_RETURN_ERROR(hipErrorInvalidValue);
     }
@@ -19781,20 +22226,27 @@ HIPAPI hipError_t hipStreamBeginCaptureToGraph(
   iree_status_t status =
       iree_hal_streaming_capture_status(stream_obj, &status_internal, NULL);
   if (!iree_status_is_ok(status)) {
-    HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(z0, status, hipErrorUnknown);
+    hipError_t result =
+        iree_status_to_fixed_hip_result(status, hipErrorUnknown);
+    iree_hip_resolved_stream_release(&resolved_stream);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(result);
   }
   if (status_internal != IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorIllegalState);
   }
 
-  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_hal_streaming_begin_capture_to_graph(
-          stream_obj, stream_graph,
-          (iree_hal_streaming_graph_node_t**)dependencies, numDependencies,
-          capture_mode),
-      hipErrorUnknown);
+  status = iree_hal_streaming_begin_capture_to_graph(
+      stream_obj, stream_graph, (iree_hal_streaming_graph_node_t**)dependencies,
+      numDependencies, capture_mode);
+  hipError_t result = iree_status_to_fixed_hip_result(status, hipErrorUnknown);
+  iree_hip_resolved_stream_release(&resolved_stream);
+  if (result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(result);
+  }
 
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -19864,12 +22316,14 @@ HIPAPI hipError_t hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph) {
     HIP_RETURN_ERROR(hipErrorStreamCaptureUnsupported);
   }
 
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  hipError_t init_result = iree_hip_resolve_stream(stream, &stream_obj);
-  if (init_result != hipSuccess) {
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t resolve_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (resolve_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
+    HIP_RETURN_ERROR(resolve_result);
   }
+  iree_hal_streaming_stream_t* stream_obj = resolved_stream.stream;
   iree_hal_streaming_graph_t* graph = NULL;
   if (pGraph) {
     *pGraph = NULL;
@@ -19880,10 +22334,14 @@ HIPAPI hipError_t hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph) {
     iree_status_t capture_status_result =
         iree_hal_streaming_capture_status(stream_obj, &capture_status, NULL);
     if (!iree_status_is_ok(capture_status_result)) {
-      HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(z0, capture_status_result,
-                                              hipErrorUnknown);
+      hipError_t result = iree_status_to_fixed_hip_result(capture_status_result,
+                                                          hipErrorUnknown);
+      iree_hip_resolved_stream_release(&resolved_stream);
+      IREE_TRACE_ZONE_END(z0);
+      HIP_RETURN_ERROR(result);
     }
     if (capture_status != IREE_HAL_STREAMING_CAPTURE_STATUS_INVALIDATED) {
+      iree_hip_resolved_stream_release(&resolved_stream);
       IREE_TRACE_ZONE_END(z0);
       HIP_RETURN_ERROR(hipErrorIllegalState);
     }
@@ -19896,6 +22354,7 @@ HIPAPI hipError_t hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph) {
     if (pGraph) {
       if (!iree_hip_live_graph_register((hipGraph_t)graph)) {
         iree_hal_streaming_graph_release(graph);
+        iree_hip_resolved_stream_release(&resolved_stream);
         IREE_TRACE_ZONE_END(z0);
         HIP_RETURN_ERROR(hipErrorOutOfMemory);
       }
@@ -19925,10 +22384,12 @@ HIPAPI hipError_t hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph) {
         result = hipErrorInvalidValue;
         break;
     }
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(result);
   }
 
+  iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
 }
@@ -19995,18 +22456,18 @@ HIPAPI hipError_t hipStreamIsCapturing(hipStream_t stream,
       IREE_TRACE_ZONE_END(z0);
       return hipSuccess;
     }
-    stream = (hipStream_t)context->default_stream;
   }
 
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  hipError_t init_result = iree_hip_resolve_stream(stream, &stream_obj);
-  if (init_result != hipSuccess) {
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t resolve_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (resolve_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
+    HIP_RETURN_ERROR(resolve_result);
   }
   bool is_capturing = false;
   iree_status_t status =
-      iree_hal_streaming_is_capturing(stream_obj, &is_capturing);
+      iree_hal_streaming_is_capturing(resolved_stream.stream, &is_capturing);
 
   if (iree_status_is_ok(status)) {
     *pCaptureStatus = is_capturing ? hipStreamCaptureStatusActive
@@ -20016,6 +22477,7 @@ HIPAPI hipError_t hipStreamIsCapturing(hipStream_t stream,
     iree_status_ignore(status);
   }
 
+  iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
 }
@@ -20092,19 +22554,19 @@ HIPAPI hipError_t hipStreamGetCaptureInfo(
       IREE_TRACE_ZONE_END(z0);
       return hipSuccess;
     }
-    stream = (hipStream_t)context->default_stream;
   }
 
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  hipError_t init_result = iree_hip_resolve_stream(stream, &stream_obj);
-  if (init_result != hipSuccess) {
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t resolve_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (resolve_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
+    HIP_RETURN_ERROR(resolve_result);
   }
   iree_hal_streaming_capture_status_t status_internal;
   unsigned long long capture_id;
   iree_status_t status = iree_hal_streaming_capture_status(
-      stream_obj, &status_internal, &capture_id);
+      resolved_stream.stream, &status_internal, &capture_id);
 
   if (iree_status_is_ok(status)) {
     // Map internal status to HIP status.
@@ -20131,6 +22593,7 @@ HIPAPI hipError_t hipStreamGetCaptureInfo(
     iree_status_ignore(status);
   }
 
+  iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
 }
@@ -20172,7 +22635,6 @@ HIPAPI hipError_t hipStreamGetCaptureInfo_v2(
     HIP_RETURN_ERROR(hipErrorStreamCaptureImplicit);
   }
 
-  iree_hal_streaming_stream_t* stream_obj = NULL;
   if (!stream) {
     iree_hal_streaming_context_t* context =
         iree_hal_streaming_context_current();
@@ -20185,14 +22647,16 @@ HIPAPI hipError_t hipStreamGetCaptureInfo_v2(
       IREE_TRACE_ZONE_END(z0);
       return hipSuccess;
     }
-    stream_obj = context->default_stream;
-  } else {
-    hipError_t init_result = iree_hip_resolve_stream(stream, &stream_obj);
-    if (init_result != hipSuccess) {
-      IREE_TRACE_ZONE_END(z0);
-      HIP_RETURN_ERROR(init_result);
-    }
   }
+
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t resolve_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (resolve_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(resolve_result);
+  }
+  iree_hal_streaming_stream_t* stream_obj = resolved_stream.stream;
 
   iree_slim_mutex_lock(&stream_obj->mutex);
   const iree_hal_streaming_capture_status_t capture_status =
@@ -20229,6 +22693,7 @@ HIPAPI hipError_t hipStreamGetCaptureInfo_v2(
   }
   iree_slim_mutex_unlock(&stream_obj->mutex);
 
+  iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
 }
@@ -20298,12 +22763,14 @@ HIPAPI hipError_t hipStreamUpdateCaptureDependencies(
     HIP_RETURN_ERROR(hipErrorStreamCaptureUnsupported);
   }
 
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  hipError_t init_result = iree_hip_resolve_stream(stream, &stream_obj);
-  if (init_result != hipSuccess) {
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t resolve_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (resolve_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
+    HIP_RETURN_ERROR(resolve_result);
   }
+  iree_hal_streaming_stream_t* stream_obj = resolved_stream.stream;
 
   iree_hal_streaming_capture_dependencies_mode_t mode;
   switch ((hipStreamUpdateCaptureDependenciesFlags)flags) {
@@ -20314,6 +22781,7 @@ HIPAPI hipError_t hipStreamUpdateCaptureDependencies(
       mode = IREE_HAL_STREAMING_CAPTURE_DEPENDENCIES_SET;
       break;
     default:
+      iree_hip_resolved_stream_release(&resolved_stream);
       IREE_TRACE_ZONE_END(z0);
       HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
@@ -20324,12 +22792,14 @@ HIPAPI hipError_t hipStreamUpdateCaptureDependencies(
   if (!iree_status_is_ok(status)) {
     const iree_status_code_t status_code = iree_status_code(status);
     iree_status_free(status);
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(status_code == IREE_STATUS_FAILED_PRECONDITION
                          ? hipErrorIllegalState
                          : hipErrorInvalidValue);
   }
 
+  iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
 }
@@ -20398,13 +22868,24 @@ HIPAPI hipError_t hipMemPoolCreate(hipMemPool_t* pool,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  *pool = NULL;
 
-  // Ensure initialization and get context.
-  iree_hal_streaming_context_t* context = NULL;
-  hipError_t init_result = iree_hip_ensure_context(&context);
+  hipError_t init_result = iree_hip_ensure_initialized();
   if (init_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
+  }
+
+  hipError_t props_result = iree_hip_validate_mem_pool_props(poolProps);
+  if (props_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(props_result);
+  }
+  iree_hal_streaming_device_t* device =
+      iree_hal_streaming_device_entry(poolProps->location.id);
+  if (!device) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidDevice);
   }
 
   hrx_mem_pool_props_t props = {
@@ -20413,17 +22894,23 @@ HIPAPI hipError_t hipMemPoolCreate(hipMemPool_t* pool,
       .location_type =
           iree_hip_mem_location_type_to_uint(poolProps->location.type),
       .location_id = poolProps->location.id,
+      .max_size = poolProps->maxSize,
   };
 
   hrx_mem_pool_t mem_pool = NULL;
-  iree_status_t status = HRX_CALL(hrx_mem_pool_create(
-      context->device_entry->hrx_device, &props, &mem_pool));
-
-  if (iree_status_is_ok(status)) {
-    *pool = (hipMemPool_t)mem_pool;
-  }
+  iree_status_t status =
+      HRX_CALL(hrx_mem_pool_create(device->hrx_device, &props, &mem_pool));
 
   hipError_t result = iree_status_to_hip_result(status);
+  if (result == hipSuccess) {
+    result = iree_hip_mem_pool_create_handle(mem_pool, poolProps->location.id,
+                                             poolProps->allocType,
+                                             /*is_default=*/false, pool);
+    if (result != hipSuccess) {
+      hrx_mem_pool_release(mem_pool);
+    }
+  }
+
   IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(result);
 }
@@ -20457,12 +22944,21 @@ HIPAPI hipError_t hipMemPoolCreate(hipMemPool_t* pool,
 //           hipMemPoolTrimTo.
 HIPAPI hipError_t hipMemPoolDestroy(hipMemPool_t pool) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  if (!pool) {
+  struct hipMemPool_st* removed_pool = NULL;
+  if (!iree_hip_mem_pool_registry_remove(pool, &removed_pool)) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  hrx_mem_pool_release((hrx_mem_pool_t)pool);
+  if (removed_pool->allocation_type == hipMemAllocationTypePinned) {
+    iree_hal_streaming_device_t* device =
+        iree_hal_streaming_device_entry(removed_pool->device_ordinal);
+    if (device) {
+      iree_hal_streaming_device_reset_mem_pool_if_current(
+          device, removed_pool->hrx_pool);
+    }
+  }
+  iree_hip_mem_pool_release(removed_pool);
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
 }
@@ -20519,7 +23015,9 @@ HIPAPI hipError_t hipMemPoolSetAttribute(hipMemPool_t pool,
   uint64_t attr_value = 0;
   switch (attr) {
     case hipMemPoolAttrReleaseThreshold:
-      attr_value = *(size_t*)value;
+    case hipMemPoolAttrReservedMemHigh:
+    case hipMemPoolAttrUsedMemHigh:
+      attr_value = *(uint64_t*)value;
       break;
     case hipMemPoolAttrReuseFollowEventDependencies:
     case hipMemPoolAttrReuseAllowOpportunistic:
@@ -20531,11 +23029,23 @@ HIPAPI hipError_t hipMemPoolSetAttribute(hipMemPool_t pool,
       HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
+  struct hipMemPool_st* pool_handle = NULL;
+  hipError_t result = iree_hip_mem_pool_registry_acquire(pool, &pool_handle);
+  if (result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(result);
+  }
+  hrx_mem_pool_t hrx_pool = NULL;
+  result = iree_hip_mem_pool_retain_backend(pool_handle, &hrx_pool);
   hrx_mem_pool_attr_t hrx_attr = iree_hip_mempool_attr_to_hrx(attr);
-  iree_status_t status = HRX_CALL(
-      hrx_mem_pool_set_attribute((hrx_mem_pool_t)pool, hrx_attr, attr_value));
+  if (result == hipSuccess) {
+    iree_status_t status =
+        HRX_CALL(hrx_mem_pool_set_attribute(hrx_pool, hrx_attr, attr_value));
+    result = iree_status_to_hip_result(status);
+  }
+  hrx_mem_pool_release(hrx_pool);
+  iree_hip_mem_pool_release(pool_handle);
 
-  hipError_t result = iree_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(result);
 }
@@ -20584,12 +23094,24 @@ HIPAPI hipError_t hipMemPoolGetAttribute(hipMemPool_t pool,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
+  struct hipMemPool_st* pool_handle = NULL;
+  hipError_t result = iree_hip_mem_pool_registry_acquire(pool, &pool_handle);
+  if (result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(result);
+  }
+  hrx_mem_pool_t hrx_pool = NULL;
+  result = iree_hip_mem_pool_retain_backend(pool_handle, &hrx_pool);
+
   uint64_t attr_value = 0;
   hrx_mem_pool_attr_t hrx_attr = iree_hip_mempool_attr_to_hrx(attr);
-  iree_status_t status = HRX_CALL(
-      hrx_mem_pool_get_attribute((hrx_mem_pool_t)pool, hrx_attr, &attr_value));
+  iree_status_t status = iree_ok_status();
+  if (result == hipSuccess) {
+    status =
+        HRX_CALL(hrx_mem_pool_get_attribute(hrx_pool, hrx_attr, &attr_value));
+  }
 
-  if (iree_status_is_ok(status)) {
+  if (result == hipSuccess && iree_status_is_ok(status)) {
     switch (attr) {
       case hipMemPoolAttrReleaseThreshold:
       case hipMemPoolAttrReservedMemCurrent:
@@ -20609,7 +23131,9 @@ HIPAPI hipError_t hipMemPoolGetAttribute(hipMemPool_t pool,
     }
   }
 
-  hipError_t result = iree_status_to_hip_result(status);
+  if (result == hipSuccess) result = iree_status_to_hip_result(status);
+  hrx_mem_pool_release(hrx_pool);
+  iree_hip_mem_pool_release(pool_handle);
   IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(result);
 }
@@ -20622,17 +23146,51 @@ HIPAPI hipError_t hipMemPoolGetAttribute(hipMemPool_t pool,
 //  - count: [IN] Number of access descriptors.
 //
 // Returns:
-//  - hipSuccess: Access permissions set.
-//  - hipErrorNotSupported: Not implemented.
+//  - hipErrorInvalidValue: Invalid parameters.
+//  - hipErrorInvalidDevice: Invalid or unsupported device access.
 //
 // See also: hipMemPoolGetAccess.
 HIPAPI hipError_t hipMemPoolSetAccess(hipMemPool_t pool,
                                       const hipMemAccessDesc* map,
                                       size_t count) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  // Not implemented yet.
+  if (!pool || (count > 0 && !map)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  struct hipMemPool_st* pool_handle = NULL;
+  hipError_t result = iree_hip_mem_pool_registry_acquire(pool, &pool_handle);
+  if (result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(result);
+  }
+
+  int device_count = 0;
+  result = hipGetDeviceCount(&device_count);
+  if (result == hipSuccess && count > (size_t)device_count) {
+    result = hipErrorInvalidDevice;
+  }
+  for (size_t i = 0; result == hipSuccess && i < count; ++i) {
+    if (map[i].location.type != hipMemLocationTypeDevice ||
+        (map[i].flags != hipMemAccessFlagsProtNone &&
+         map[i].flags != hipMemAccessFlagsProtRead &&
+         map[i].flags != hipMemAccessFlagsProtReadWrite)) {
+      result = hipErrorInvalidValue;
+    } else if (map[i].location.id < 0 || map[i].location.id >= device_count) {
+      result = hipErrorInvalidDevice;
+    } else if (map[i].location.id != pool_handle->device_ordinal) {
+      // Cross-device pool mappings require direct peer access. The streaming
+      // runtime does not advertise a peer path without a backend capability
+      // source that can establish that mapping.
+      result = hipErrorNotSupported;
+    } else if (map[i].flags != hipMemAccessFlagsProtReadWrite) {
+      result = hipErrorInvalidDevice;
+    }
+  }
+  iree_hip_mem_pool_release(pool_handle);
   IREE_TRACE_ZONE_END(z0);
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  HIP_RETURN_ERROR(result);
 }
 
 // Gets memory access permissions for a memory pool.
@@ -20643,17 +23201,45 @@ HIPAPI hipError_t hipMemPoolSetAccess(hipMemPool_t pool,
 //  - location: [IN] Memory location to query.
 //
 // Returns:
-//  - hipSuccess: Access permissions retrieved.
-//  - hipErrorNotSupported: Not implemented.
+//  - hipErrorInvalidValue: Invalid parameters.
+//  - hipErrorInvalidDevice: Invalid or unsupported device access.
 //
 // See also: hipMemPoolSetAccess.
 HIPAPI hipError_t hipMemPoolGetAccess(hipMemAccessFlags* flags,
                                       hipMemPool_t pool,
                                       hipMemLocation* location) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  // Not implemented yet.
+  if (!flags || !pool || !location) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  struct hipMemPool_st* pool_handle = NULL;
+  hipError_t result = iree_hip_mem_pool_registry_acquire(pool, &pool_handle);
+  if (result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(result);
+  }
+
+  if (location->type != hipMemLocationTypeDevice) {
+    result = hipErrorInvalidValue;
+  } else {
+    int device_count = 0;
+    result = hipGetDeviceCount(&device_count);
+    if (result == hipSuccess &&
+        (location->id < 0 || location->id >= device_count)) {
+      result = hipErrorInvalidValue;
+    }
+    if (result == hipSuccess && location->id != pool_handle->device_ordinal) {
+      result = hipErrorNotSupported;
+    }
+    if (result == hipSuccess) {
+      *flags = hipMemAccessFlagsProtReadWrite;
+    }
+  }
+  iree_hip_mem_pool_release(pool_handle);
   IREE_TRACE_ZONE_END(z0);
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  HIP_RETURN_ERROR(result);
 }
 
 // Trims a memory pool to specified size.
@@ -20676,10 +23262,25 @@ HIPAPI hipError_t hipMemPoolTrimTo(hipMemPool_t pool, size_t minBytesToKeep) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  iree_status_t status =
-      HRX_CALL(hrx_mem_pool_trim((hrx_mem_pool_t)pool, minBytesToKeep));
+  struct hipMemPool_st* pool_handle = NULL;
+  hipError_t result = iree_hip_mem_pool_registry_acquire(pool, &pool_handle);
+  if (result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(result);
+  }
+  hrx_mem_pool_t hrx_pool = NULL;
+  result = iree_hip_mem_pool_retain_backend(pool_handle, &hrx_pool);
+  if (result == hipSuccess) {
+    iree_status_t status =
+        iree_hal_streaming_memory_release_completed_async_frees_from_pool(
+            hrx_pool);
+    status = iree_status_join(
+        status, HRX_CALL(hrx_mem_pool_trim(hrx_pool, minBytesToKeep)));
+    result = iree_status_to_hip_result(status);
+  }
+  hrx_mem_pool_release(hrx_pool);
+  iree_hip_mem_pool_release(pool_handle);
 
-  hipError_t result = iree_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(result);
 }
@@ -20783,9 +23384,31 @@ HIPAPI hipError_t hipDeviceSetMemPool(int device, hipMemPool_t pool) {
     HIP_RETURN_ERROR(hipErrorInvalidDevice);
   }
 
-  iree_hal_streaming_device_set_mem_pool(device_obj, (hrx_mem_pool_t)pool);
+  iree_status_t status =
+      iree_hal_streaming_device_ensure_default_mem_pool(device_obj);
+  if (!iree_status_is_ok(status)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(iree_status_to_hip_result(status));
+  }
+
+  struct hipMemPool_st* pool_handle = NULL;
+  hipError_t result = iree_hip_mem_pool_registry_acquire(pool, &pool_handle);
+  if (result == hipSuccess &&
+      (pool_handle->device_ordinal != device ||
+       pool_handle->allocation_type != hipMemAllocationTypePinned)) {
+    result = hipErrorInvalidValue;
+  }
+  hrx_mem_pool_t hrx_pool = NULL;
+  if (result == hipSuccess) {
+    result = iree_hip_mem_pool_retain_backend(pool_handle, &hrx_pool);
+  }
+  if (result == hipSuccess) {
+    iree_hal_streaming_device_set_mem_pool(device_obj, hrx_pool);
+  }
+  hrx_mem_pool_release(hrx_pool);
+  iree_hip_mem_pool_release(pool_handle);
   IREE_TRACE_ZONE_END(z0);
-  return hipSuccess;
+  HIP_RETURN_ERROR(result);
 }
 
 // Gets the current memory pool for a device.
@@ -20817,9 +23440,12 @@ HIPAPI hipError_t hipDeviceGetMemPool(hipMemPool_t* pool, int device) {
     HIP_RETURN_ERROR(hipErrorInvalidDevice);
   }
 
-  *pool = (hipMemPool_t)iree_hal_streaming_device_mem_pool(device_obj);
-
-  return hipSuccess;
+  iree_status_t status =
+      iree_hal_streaming_device_ensure_default_mem_pool(device_obj);
+  if (!iree_status_is_ok(status)) {
+    HIP_RETURN_ERROR(iree_status_to_hip_result(status));
+  }
+  HIP_RETURN_ERROR(iree_hip_mem_pool_get_current(device_obj, device, pool));
 }
 
 // Gets the default memory pool for a device.
@@ -20854,10 +23480,87 @@ HIPAPI hipError_t hipDeviceGetDefaultMemPool(hipMemPool_t* pool_out,
     HIP_RETURN_ERROR(hipErrorInvalidDevice);
   }
 
-  *pool_out =
-      (hipMemPool_t)iree_hal_streaming_device_default_mem_pool(device_obj);
+  iree_status_t status =
+      iree_hal_streaming_device_ensure_default_mem_pool(device_obj);
+  if (!iree_status_is_ok(status)) {
+    HIP_RETURN_ERROR(iree_status_to_hip_result(status));
+  }
+  HIP_RETURN_ERROR(iree_hip_mem_pool_get_default(
+      device, hipMemAllocationTypePinned, pool_out));
+}
 
-  return hipSuccess;
+HIPAPI hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
+                                   hipMemAllocationType type) {
+  if (!pool || !location ||
+      !iree_hip_mem_pool_allocation_type_is_supported(type)) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  *pool = NULL;
+
+  hipError_t init_result = iree_hip_ensure_initialized();
+  if (init_result != hipSuccess) HIP_RETURN_ERROR(init_result);
+  if (location->type != hipMemLocationTypeDevice || location->id < 0) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  iree_hal_streaming_device_t* device =
+      iree_hal_streaming_device_entry(location->id);
+  if (!device) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  iree_status_t status =
+      iree_hal_streaming_device_ensure_default_mem_pool(device);
+  if (!iree_status_is_ok(status)) {
+    HIP_RETURN_ERROR(iree_status_to_hip_result(status));
+  }
+
+  if (type == hipMemAllocationTypePinned) {
+    HIP_RETURN_ERROR(iree_hip_mem_pool_get_current(device, location->id, pool));
+  }
+  HIP_RETURN_ERROR(iree_hip_mem_pool_get_managed_selection(location->id, pool));
+}
+
+HIPAPI hipError_t hipMemSetMemPool(hipMemLocation* location,
+                                   hipMemAllocationType type,
+                                   hipMemPool_t pool) {
+  if (!location || !pool ||
+      !iree_hip_mem_pool_allocation_type_is_supported(type)) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  hipError_t init_result = iree_hip_ensure_initialized();
+  if (init_result != hipSuccess) HIP_RETURN_ERROR(init_result);
+  if (location->type != hipMemLocationTypeDevice || location->id < 0) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  iree_hal_streaming_device_t* device =
+      iree_hal_streaming_device_entry(location->id);
+  if (!device) HIP_RETURN_ERROR(hipErrorInvalidValue);
+
+  iree_status_t status =
+      iree_hal_streaming_device_ensure_default_mem_pool(device);
+  if (!iree_status_is_ok(status)) {
+    HIP_RETURN_ERROR(iree_status_to_hip_result(status));
+  }
+
+  struct hipMemPool_st* pool_handle = NULL;
+  hipError_t result = iree_hip_mem_pool_registry_acquire(pool, &pool_handle);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  if (pool_handle->device_ordinal != location->id ||
+      pool_handle->allocation_type != type) {
+    iree_hip_mem_pool_release(pool_handle);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  if (type == hipMemAllocationTypePinned) {
+    hrx_mem_pool_t hrx_pool = NULL;
+    result = iree_hip_mem_pool_retain_backend(pool_handle, &hrx_pool);
+    if (result == hipSuccess) {
+      iree_hal_streaming_device_set_mem_pool(device, hrx_pool);
+    }
+    hrx_mem_pool_release(hrx_pool);
+  } else {
+    result = iree_hip_mem_pool_set_managed_selection(location->id, pool_handle);
+  }
+  iree_hip_mem_pool_release(pool_handle);
+  HIP_RETURN_ERROR(result);
 }
 
 // Allocates memory asynchronously from the default pool.
@@ -20885,17 +23588,21 @@ HIPAPI hipError_t hipMallocAsync(void** ptr, size_t size, hipStream_t stream) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  *ptr = NULL;
 
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  hipError_t resolve_result = iree_hip_resolve_stream(stream, &stream_obj);
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t resolve_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (resolve_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(resolve_result);
   }
+  iree_hal_streaming_stream_t* stream_obj = resolved_stream.stream;
 
   if (stream_obj->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
     if (size == 0) {
       *ptr = NULL;
+      iree_hip_resolved_stream_release(&resolved_stream);
       IREE_TRACE_ZONE_END(z0);
       return hipSuccess;
     }
@@ -20904,7 +23611,7 @@ HIPAPI hipError_t hipMallocAsync(void** ptr, size_t size, hipStream_t stream) {
     params.bytesize = size;
     params.poolProps.allocType = hipMemAllocationTypePinned;
     params.poolProps.location.type = hipMemLocationTypeDevice;
-    params.poolProps.location.id = (int)stream_obj->context->device_ordinal;
+    params.poolProps.location.id = (int)resolved_stream.context->device_ordinal;
 
     hipGraphNode_t node = NULL;
     hipError_t result = hipGraphAddMemAllocNode(
@@ -20912,24 +23619,42 @@ HIPAPI hipError_t hipMallocAsync(void** ptr, size_t size, hipStream_t stream) {
         (const hipGraphNode_t*)stream_obj->capture_dependencies,
         stream_obj->capture_dependency_count, &params);
     if (result != hipSuccess) {
+      iree_hip_resolved_stream_release(&resolved_stream);
       IREE_TRACE_ZONE_END(z0);
       HIP_RETURN_ERROR(result);
     }
-    HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
-        z0,
-        iree_hal_streaming_capture_set_last_node(
-            stream_obj, (iree_hal_streaming_graph_node_t*)node),
-        hipErrorInvalidValue);
+    iree_status_t status = iree_hal_streaming_capture_set_last_node(
+        stream_obj, (iree_hal_streaming_graph_node_t*)node);
+    result = iree_status_to_hip_result(status);
+    if (result != hipSuccess) {
+      iree_hip_resolved_stream_release(&resolved_stream);
+      IREE_TRACE_ZONE_END(z0);
+      HIP_RETURN_ERROR(result);
+    }
     *ptr = params.dptr;
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     return hipSuccess;
   }
 
-  // Route through hipMalloc until HRX implements stream-ordered allocation.
-  // The synchronous path still allocates through the selected HRX/HAL pool.
-  hipError_t result = hipMalloc(ptr, size);
+  if (size == 0) {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
+  }
+
+  // Allocate eagerly from the stream's selected pool. A pending free on this
+  // stream can reuse its backing only after every preceding operation.
+  hrx_mem_pool_t pool = NULL;
+  hipError_t result = iree_hip_current_mem_pool(resolved_stream.context, &pool);
+  if (result == hipSuccess) {
+    result = iree_hip_malloc_from_pool(resolved_stream.context, pool, size,
+                                       stream_obj, ptr);
+  }
+  hrx_mem_pool_release(pool);
+  iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
-  return result;
+  HIP_RETURN_ERROR(result);
 }
 
 // Allocates memory asynchronously from a specific pool.
@@ -20960,31 +23685,79 @@ HIPAPI hipError_t hipMallocFromPoolAsync(void** ptr, size_t size,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  *ptr = NULL;
   if (!pool) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  // Ensure initialization and get context.
-  iree_hal_streaming_context_t* context = NULL;
-  hipError_t init_result = iree_hip_ensure_context(&context);
-  if (init_result != hipSuccess) {
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t stream_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (stream_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
+    HIP_RETURN_ERROR(stream_result);
+  }
+  iree_hal_streaming_stream_t* stream_obj = resolved_stream.stream;
+  if (size == 0) {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
   }
 
-  // Check if capturing - synchronous operations not allowed during capture.
-  if (context->default_stream && context->default_stream->capture_status ==
-                                     IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
+  struct hipMemPool_st* pool_handle = NULL;
+  hipError_t pool_result =
+      iree_hip_mem_pool_registry_acquire(pool, &pool_handle);
+  if (pool_result != hipSuccess) {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(pool_result);
+  }
+
+  if (stream_obj->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
+    iree_hip_mem_pool_release(pool_handle);
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorStreamCaptureUnsupported);
   }
 
-  // Use the explicit pool even though allocation is still synchronous.
-  hipError_t result =
-      iree_hip_malloc_from_pool(context, (hrx_mem_pool_t)pool, size, ptr);
+  // The allocation's backing is materialized before this call returns. A pool
+  // owned by another device therefore does not require foreign-stream work to
+  // make the returned address available, but it cannot reuse a free cached by
+  // that stream's context.
+  iree_hal_streaming_context_t* allocation_context = resolved_stream.context;
+  iree_hal_streaming_stream_t* allocation_stream = stream_obj;
+  if (pool_handle->device_ordinal !=
+      (int)resolved_stream.context->device_ordinal) {
+    iree_hal_streaming_device_t* pool_device =
+        iree_hal_streaming_device_entry(pool_handle->device_ordinal);
+    if (!pool_device) {
+      pool_result = hipErrorInvalidDevice;
+    } else {
+      iree_status_t status =
+          iree_hal_streaming_device_get_or_create_primary_context(
+              pool_device, &allocation_context);
+      if (!iree_status_is_ok(status)) {
+        pool_result = iree_status_to_hip_result(status);
+      } else {
+        allocation_stream = NULL;
+      }
+    }
+  }
+
+  hrx_mem_pool_t hrx_pool = NULL;
+  if (pool_result == hipSuccess) {
+    pool_result = iree_hip_mem_pool_retain_backend(pool_handle, &hrx_pool);
+  }
+  if (pool_result == hipSuccess) {
+    pool_result = iree_hip_malloc_from_pool(allocation_context, hrx_pool, size,
+                                            allocation_stream, ptr);
+  }
+  hrx_mem_pool_release(hrx_pool);
+  iree_hip_mem_pool_release(pool_handle);
+  iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
-  return result;
+  HIP_RETURN_ERROR(pool_result);
 }
 
 // Frees memory asynchronously.
@@ -21004,15 +23777,18 @@ HIPAPI hipError_t hipMallocFromPoolAsync(void** ptr, size_t size,
 HIPAPI hipError_t hipFreeAsync(void* ptr, hipStream_t stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_hal_streaming_stream_t* stream_obj = NULL;
-  hipError_t resolve_result = iree_hip_resolve_stream(stream, &stream_obj);
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t resolve_result =
+      iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (resolve_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(resolve_result);
   }
+  iree_hal_streaming_stream_t* stream_obj = resolved_stream.stream;
 
   if (stream_obj->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
     if (!ptr) {
+      iree_hip_resolved_stream_release(&resolved_stream);
       IREE_TRACE_ZONE_END(z0);
       return hipSuccess;
     }
@@ -21022,20 +23798,21 @@ HIPAPI hipError_t hipFreeAsync(void* ptr, hipStream_t stream) {
         (const hipGraphNode_t*)stream_obj->capture_dependencies,
         stream_obj->capture_dependency_count, ptr);
     if (result != hipSuccess) {
+      iree_hip_resolved_stream_release(&resolved_stream);
       IREE_TRACE_ZONE_END(z0);
       HIP_RETURN_ERROR(result);
     }
-    HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
-        z0,
-        iree_hal_streaming_capture_set_last_node(
-            stream_obj, (iree_hal_streaming_graph_node_t*)node),
-        hipErrorInvalidValue);
+    iree_status_t status = iree_hal_streaming_capture_set_last_node(
+        stream_obj, (iree_hal_streaming_graph_node_t*)node);
+    result = iree_status_to_hip_result(status);
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
+    if (result != hipSuccess) HIP_RETURN_ERROR(result);
     return hipSuccess;
   }
 
   iree_status_t status = iree_hal_streaming_memory_free_device_async(
-      stream_obj->context, (iree_hal_streaming_deviceptr_t)ptr, stream_obj);
+      resolved_stream.context, (iree_hal_streaming_deviceptr_t)ptr, stream_obj);
   hipError_t result;
   if (iree_status_is_ok(status)) {
     result = hipSuccess;
@@ -21045,6 +23822,7 @@ HIPAPI hipError_t hipFreeAsync(void* ptr, hipStream_t stream) {
   } else {
     result = iree_status_to_hip_result(status);
   }
+  iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -21447,6 +24225,27 @@ HIPAPI const char* hipGetErrorName(hipError_t error) {
   return hipGetErrorString(error);
 }
 
+// Handle scoped to THIS shared object (the HIP shim), resolved once. See the
+// declaration in binding_internal.h and the note on hipGetProcAddress() for why
+// the process-global scope is insufficient.
+static void* iree_hip_self_dl_handle_cached = NULL;
+static iree_once_flag iree_hip_self_dl_handle_once = IREE_ONCE_FLAG_INIT;
+static void iree_hip_init_self_dl_handle(void) {
+  Dl_info info;
+  // dladdr() on a symbol we define yields the path to this library; reopening
+  // it with RTLD_NOLOAD returns a handle to the already-resident module (the
+  // extra reference intentionally pins the always-loaded HIP runtime).
+  if (dladdr((void*)&hipGetProcAddress, &info) != 0 && info.dli_fname) {
+    iree_hip_self_dl_handle_cached =
+        dlopen(info.dli_fname, RTLD_LAZY | RTLD_NOLOAD);
+  }
+}
+
+void* iree_hip_self_dl_handle(void) {
+  iree_call_once(&iree_hip_self_dl_handle_once, iree_hip_init_self_dl_handle);
+  return iree_hip_self_dl_handle_cached;
+}
+
 HIPAPI hipError_t hipGetProcAddress(const char* symbol, void** pfn,
                                     int hipVersion, uint64_t flags,
                                     void* symbolStatus) {
@@ -21456,13 +24255,25 @@ HIPAPI hipError_t hipGetProcAddress(const char* symbol, void** pfn,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  void* process = dlopen(NULL, RTLD_LAZY);
-  if (!process) {
+  // Resolve symbols against this library, not the process-global scope. A
+  // consumer may dlopen us with RTLD_LOCAL (Triton's AMD backend does exactly
+  // this), so our symbols never enter the global namespace and a
+  // dlsym(dlopen(NULL), ...) lookup would spuriously fail with
+  // hipErrorNotFound. Fall back to the global scope only if the self-handle
+  // could not be established.
+  void* handle = iree_hip_self_dl_handle();
+  bool close_handle = false;
+  if (!handle) {
+    handle = dlopen(NULL, RTLD_LAZY);
+    close_handle = handle != NULL;
+  }
+  if (!handle) {
     *pfn = NULL;
     if (symbolStatus) *(int*)symbolStatus = 1;
     HIP_RETURN_ERROR(hipErrorSharedObjectInitFailed);
   }
-  *pfn = dlsym(process, symbol);
+  *pfn = dlsym(handle, symbol);
+  if (close_handle) dlclose(handle);
   if (symbolStatus) *(int*)symbolStatus = *pfn ? 0 : 1;
   HIP_RETURN_ERROR(*pfn ? hipSuccess : hipErrorNotFound);
 }
@@ -21875,7 +24686,7 @@ typedef struct iree_hip_call_configuration_t {
   hipStream_t stream;
   bool valid;  // true if configuration has been pushed
 } iree_hip_call_configuration_t;
-static iree_thread_local iree_hip_call_configuration_t iree_hip_call_config = {
+static IREE_THREAD_LOCAL iree_hip_call_configuration_t iree_hip_call_config = {
     0};
 
 // Pushes kernel launch configuration onto the call stack.

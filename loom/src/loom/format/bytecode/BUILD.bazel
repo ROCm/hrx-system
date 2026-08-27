@@ -64,21 +64,94 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "function_header",
+    hdrs = ["function_header.h"],
+    deps = [
+        "//loom/src/loom/format/bytecode/reader:source_trivia",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "module_summary",
+    hdrs = ["module_summary.h"],
+    deps = [
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "index",
+    hdrs = ["index.h"],
+    deps = [
+        ":format",
+        ":module_summary",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "index_reader",
+    srcs = ["index.c"],
+    deps = [
+        ":index",
+        "//loom/src/loom/format/bytecode/reader:validation",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "reader",
     srcs = ["reader.c"],
     hdrs = ["reader.h"],
     deps = [
-        ":diagnostic",
-        ":format",
-        ":varint",
-        "//loom/src/loom/error:diagnostic",
-        "//loom/src/loom/error:error_defs",
+        ":index",
+        ":index_reader",
+        "//loom/src/loom/format:low_repr",
+        "//loom/src/loom/format/bytecode/reader:materializer",
+        "//loom/src/loom/format/bytecode/reader:validation",
         "//loom/src/loom/ir",
-        "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/verify",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/base/internal:unicode",
+    ],
+)
+
+loom_cc_library(
+    name = "selected_reader",
+    srcs = ["selected_reader.c"],
+    hdrs = ["selected_reader.h"],
+    deps = [
+        ":reader",
+        "//loom/src/loom/format/bytecode/reader:selected_materializer",
+        "//loom/src/loom/format/bytecode/reader:validation",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "function_projection_reader",
+    srcs = ["function_projection_reader.c"],
+    hdrs = ["function_projection_reader.h"],
+    deps = [
+        ":function_header",
+        ":index",
+        "//loom/src/loom/format:low_repr",
+        "//loom/src/loom/format/bytecode/reader:decoder",
+        "//loom/src/loom/format/bytecode/reader:selected_body",
+        "//loom/src/loom/format/bytecode/reader:selected_symbol",
+        "//loom/src/loom/format/bytecode/reader:selected_tables",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 
@@ -88,13 +161,16 @@ loom_cc_test(
     deps = [
         ":format",
         ":reader",
+        ":selected_reader",
         ":varint",
         ":writer",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/global",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/test",
-        "//loom/src/loom/target:registers",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:stream",
         "//runtime/src/iree/testing:gtest",
@@ -108,11 +184,13 @@ loom_cc_test(
     deps = [
         ":reader",
         ":writer",
+        "//loom/src/loom/codegen/low:repr",
         "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/format/text:printer",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/target:low_descriptor_registry_core_test",
         "//loom/src/loom/test/corpus/text:golden_text_corpus",
         "//loom/src/loom/testing:context",
@@ -129,7 +207,13 @@ loom_cc_library(
     hdrs = ["writer.h"],
     deps = [
         ":format",
-        ":varint",
+        "//loom/src/loom/format:low_repr",
+        "//loom/src/loom/format/bytecode/writer:body",
+        "//loom/src/loom/format/bytecode/writer:catalog",
+        "//loom/src/loom/format/bytecode/writer:encoder",
+        "//loom/src/loom/format/bytecode/writer:numbering",
+        "//loom/src/loom/format/bytecode/writer:symbol",
+        "//loom/src/loom/format/bytecode/writer:tables",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//runtime/src/iree/base",
@@ -161,8 +245,10 @@ loom_cc_fuzz(
     deps = [
         ":reader",
         ":writer",
+        "//loom/src/loom/codegen/low:repr",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/ir",
+        "//loom/src/loom/target:low_descriptor_registry_core_test",
         "//loom/src/loom/testing:context",
         "//loom/src/loom/testing:gen",
         "//runtime/src/iree/base",
@@ -190,11 +276,26 @@ loom_cc_benchmark(
     srcs = ["reader_benchmark.cc"],
     deps = [
         ":reader",
+        ":selected_reader",
         ":writer",
+        "//loom/src/loom/format/bytecode/reader:selected_materializer",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/testing:gen",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "writer_benchmark",
+    srcs = ["writer_benchmark.cc"],
+    deps = [
+        ":writer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/test",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:stream",
         "//runtime/src/iree/testing:benchmark_main",

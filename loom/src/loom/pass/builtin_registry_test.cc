@@ -10,6 +10,8 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/pass/testing/registry_verify.h"
+#include "loom/target/pass_environment.h"
+#include "loom/target/pass_requirements.h"
 
 namespace loom {
 namespace {
@@ -132,6 +134,16 @@ TEST(PassBuiltinRegistryTest, ValidatesBuiltinOptionSchemas) {
   EXPECT_TRUE(
       iree_string_view_equal(low_dce->requirement_defs[0].key,
                              IREE_SV("target.low-descriptor-registry")));
+
+  const loom_pass_descriptor_t* specialize_target_callgraph =
+      LookupBuiltinPass(IREE_SV("specialize-target-callgraph"));
+  ASSERT_NE(specialize_target_callgraph, nullptr);
+  ASSERT_EQ(specialize_target_callgraph->requirement_count, 1u);
+  EXPECT_EQ(specialize_target_callgraph->requirement_defs[0].capability_type,
+            &loom_target_pass_capability_type);
+  EXPECT_TRUE(iree_string_view_equal(
+      specialize_target_callgraph->requirement_defs[0].key,
+      IREE_SV(LOOM_TARGET_PASS_REQUIREMENT_MUTABLE_FUNCTION_VERSIONS)));
 
   const loom_pass_descriptor_t* source_to_low =
       LookupBuiltinPass(IREE_SV("source-to-low"));

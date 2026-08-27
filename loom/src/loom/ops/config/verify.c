@@ -8,6 +8,7 @@
 #include "loom/error/error_catalog.h"
 #include "loom/ir/module.h"
 #include "loom/ops/config/ops.h"
+#include "loom/ops/encoding/roles.h"
 
 static loom_type_t loom_config_symbol_type(const loom_module_t* module,
                                            const loom_symbol_t* symbol) {
@@ -91,6 +92,19 @@ static iree_status_t loom_config_emit_type_mismatch(
   return iree_diagnostic_emit(emitter, &emission);
 }
 
+static iree_status_t loom_config_emit_value_type_mismatch(
+    const loom_op_t* op, iree_diagnostic_emitter_t emitter,
+    loom_type_t value_type, loom_type_t config_type) {
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(IREE_SV("value")),
+      loom_param_type(value_type),
+      loom_param_string(IREE_SV("config")),
+      loom_param_type(config_type),
+  };
+  return loom_config_emit(emitter, op, LOOM_ERR_TYPE_001, params,
+                          IREE_ARRAYSIZE(params));
+}
+
 static iree_status_t loom_config_verify_type(const loom_module_t* module,
                                              const loom_op_t* op,
                                              iree_diagnostic_emitter_t emitter,
@@ -121,9 +135,23 @@ static iree_status_t loom_config_verify_value(const loom_module_t* module,
     return iree_ok_status();
   }
 
-  if (loom_type_is_encoding(config_type) && value.kind != LOOM_ATTR_ENCODING) {
-    return loom_config_emit_value_kind_mismatch(
-        op, emitter, (loom_attr_kind_t)value.kind, LOOM_ATTR_ENCODING);
+  if (loom_type_is_encoding(config_type)) {
+    if (value.kind != LOOM_ATTR_ENCODING) {
+      return loom_config_emit_value_kind_mismatch(
+          op, emitter, (loom_attr_kind_t)value.kind, LOOM_ATTR_ENCODING);
+    }
+    const loom_encoding_t* encoding =
+        loom_module_encoding(module, loom_attr_as_encoding_id(value));
+    if (!encoding) return iree_ok_status();
+    const loom_encoding_role_t config_role =
+        loom_type_encoding_role(config_type);
+    const loom_encoding_role_t value_role =
+        loom_encoding_static_role(module, encoding);
+    if (config_role != LOOM_ENCODING_ROLE_UNKNOWN &&
+        value_role != LOOM_ENCODING_ROLE_UNKNOWN && config_role != value_role) {
+      return loom_config_emit_value_type_mismatch(
+          op, emitter, loom_type_encoding_with_role(value_role), config_type);
+    }
   }
   return iree_ok_status();
 }

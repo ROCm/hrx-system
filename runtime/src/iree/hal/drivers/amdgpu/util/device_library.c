@@ -6,7 +6,6 @@
 
 #include "iree/hal/drivers/amdgpu/util/device_library.h"
 
-#include "iree/base/internal/debugging.h"
 #include "iree/hal/drivers/amdgpu/device/binaries/toc.h"
 #include "iree/hal/drivers/amdgpu/device/kernels.h"
 #include "iree/hal/drivers/amdgpu/util/device_library_target.h"
@@ -28,11 +27,6 @@ static iree_status_t iree_file_toc_append_names_to_builder(
   }
   return iree_ok_status();
 }
-
-typedef struct iree_hal_amdgpu_agent_available_isas_t {
-  iree_host_size_t count;
-  hsa_isa_t values[32];
-} iree_hal_amdgpu_agent_available_isas_t;
 
 static iree_status_t iree_hal_amdgpu_device_library_query_agent_profile(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
@@ -75,39 +69,6 @@ static iree_status_t iree_hal_amdgpu_device_library_select_agent_profile(
   return iree_ok_status();
 }
 
-static hsa_status_t iree_hal_amdgpu_iterate_agent_isa(hsa_isa_t isa,
-                                                      void* user_data) {
-  iree_hal_amdgpu_agent_available_isas_t* isas =
-      (iree_hal_amdgpu_agent_available_isas_t*)user_data;
-  if (isas->count >= IREE_ARRAYSIZE(isas->values)) {
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  }
-  isas->values[isas->count++] = isa;
-  return HSA_STATUS_SUCCESS;
-}
-
-static iree_status_t iree_hal_amdgpu_agent_available_isas_append_to_builder(
-    const iree_hal_amdgpu_libhsa_t* libhsa,
-    const iree_hal_amdgpu_agent_available_isas_t* isas,
-    iree_string_builder_t* builder) {
-  for (iree_host_size_t i = 0; i < isas->count; ++i) {
-    if (i > 0) {
-      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ", "));
-    }
-    uint32_t isa_name_length = 0;
-    IREE_RETURN_IF_ERROR(
-        iree_hsa_isa_get_info_alt(IREE_LIBHSA(libhsa), isas->values[i],
-                                  HSA_ISA_INFO_NAME_LENGTH, &isa_name_length));
-    IREE_ASSERT_GT(isa_name_length, 0);  // always +1 in HSA
-    char* isa_name = NULL;
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_inline(
-        builder, isa_name_length - 1, &isa_name));
-    IREE_RETURN_IF_ERROR(iree_hsa_isa_get_info_alt(
-        IREE_LIBHSA(libhsa), isas->values[i], HSA_ISA_INFO_NAME, isa_name));
-  }
-  return iree_ok_status();
-}
-
 static const iree_file_toc_t* iree_hal_amdgpu_device_library_find_file_for_arch(
     iree_string_view_t arch) {
   const iree_string_view_t isa_prefix = IREE_SVL("amdgcn-amd-amdhsa--");
@@ -127,13 +88,15 @@ static const iree_file_toc_t* iree_hal_amdgpu_device_library_find_file_for_arch(
   return NULL;
 }
 
-static iree_status_t iree_hal_amdgpu_device_library_find_file_for_isa(
-    iree_string_view_t isa_name, const iree_file_toc_t** out_file_toc) {
+static iree_status_t iree_hal_amdgpu_device_library_find_file_for_target(
+    const iree_hal_amdgpu_target_identity_t* physical_identity,
+    const iree_hal_amdgpu_target_identity_t* isa_identity,
+    const iree_file_toc_t** out_file_toc) {
   *out_file_toc = NULL;
   iree_hal_amdgpu_device_library_target_candidate_list_t candidates = {0};
   IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_device_library_target_candidates_from_isa(isa_name,
-                                                                &candidates));
+      iree_hal_amdgpu_device_library_target_candidates_from_agent_isa(
+          physical_identity, isa_identity, &candidates));
   for (iree_host_size_t i = 0; i < candidates.count; ++i) {
     const iree_file_toc_t* file_toc =
         iree_hal_amdgpu_device_library_find_file_for_arch(
@@ -146,70 +109,43 @@ static iree_status_t iree_hal_amdgpu_device_library_find_file_for_isa(
   return iree_ok_status();
 }
 
-// Selects a device library binary file that supports the ISA of the provided
-// |agent|.
+// Selects a device library binary file for a physical agent target set.
 static iree_status_t iree_hal_amdgpu_device_library_select_file(
-    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t agent,
-    iree_allocator_t host_allocator, hsa_isa_t* out_isa,
-    const iree_file_toc_t** out_file_toc) {
-  IREE_ASSERT_ARGUMENT(out_isa);
+    const iree_hal_amdgpu_agent_target_t* agent_target,
+    iree_allocator_t host_allocator, const iree_file_toc_t** out_file_toc) {
+  IREE_ASSERT_ARGUMENT(agent_target);
   IREE_ASSERT_ARGUMENT(out_file_toc);
   IREE_TRACE_ZONE_BEGIN(z0);
-  *out_isa = (hsa_isa_t){0};
   *out_file_toc = NULL;
 
-  // Query all available ISAs supported by the agent.
-  // This list is ordered by descending priority.
-  iree_hal_amdgpu_agent_available_isas_t available_isas;
-  memset(&available_isas, 0, sizeof(available_isas));
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hsa_agent_iterate_isas(IREE_LIBHSA(libhsa), agent,
-                                      iree_hal_amdgpu_iterate_agent_isa,
-                                      &available_isas));
-
-  // For each ISA in decreasing priority try to find a binary that matches.
-  // The binaries are named the same as HSA uses for the ISA name with the .so
-  // suffix.
-  hsa_isa_t best_isa = {0};
   const iree_file_toc_t* best_file_toc = NULL;
-  for (iree_host_size_t i = 0; i < available_isas.count && !best_file_toc;
+  for (iree_host_size_t i = 0; i < agent_target->isa_count && !best_file_toc;
        ++i) {
-    // Get the ISA name - it'll be something like `amdgcn-amd-amdhsa--gfx1100`
-    // for some reason.
-    hsa_isa_t isa = available_isas.values[i];
-    uint32_t isa_name_length = 0;
+    const iree_hal_amdgpu_agent_isa_target_t* isa_target =
+        iree_hal_amdgpu_agent_target_isa_at(agent_target, i);
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0,
-        iree_hsa_isa_get_info_alt(IREE_LIBHSA(libhsa), isa,
-                                  HSA_ISA_INFO_NAME_LENGTH, &isa_name_length));
-    IREE_ASSERT_GT(isa_name_length, 0);  // always +1 in HSA
-    char* isa_name_buffer = iree_alloca(isa_name_length);
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hsa_isa_get_info_alt(IREE_LIBHSA(libhsa), isa,
-                                      HSA_ISA_INFO_NAME, isa_name_buffer));
-    iree_string_view_t isa_name =
-        iree_make_string_view(isa_name_buffer, isa_name_length - /*NUL*/ 1);
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_amdgpu_device_library_find_file_for_isa(isa_name,
-                                                             &best_file_toc));
-    if (best_file_toc) {
-      best_isa = isa;
-      break;
-    }
+        z0, iree_hal_amdgpu_device_library_find_file_for_target(
+                &agent_target->primary_isa.identity, &isa_target->identity,
+                &best_file_toc));
   }
 
-  // If we found a matching file return that for loading. It _should_ work but
-  // is not guaranteed.
+  // If we found a matching file return that for loading. It should work but is
+  // not guaranteed until HSA accepts and freezes the embedded code object.
   iree_status_t status = iree_ok_status();
   if (best_file_toc) {
-    *out_isa = best_isa;
     *out_file_toc = best_file_toc;
     IREE_TRACE_ZONE_APPEND_TEXT(z0, best_file_toc->name);
   } else {
-    // Failures get nice errors with available/supported ISAs listed out.
-    status = iree_make_status(IREE_STATUS_INCOMPATIBLE,
-                              "no device library binary found that matches one "
-                              "of the supported ISAs");
+    char target_id[128] = {0};
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_amdgpu_target_identity_format_artifact_key(
+                &agent_target->primary_isa.identity, sizeof(target_id),
+                target_id, /*out_buffer_length=*/NULL));
+    status =
+        iree_make_status(IREE_STATUS_INCOMPATIBLE,
+                         "no device library binary found for any of %" PRIhsz
+                         " GPU agent ISA targets (primary `%s`)",
+                         agent_target->isa_count, target_id);
 #if IREE_STATUS_MODE >= 2
     iree_string_builder_t builder;
     iree_string_builder_initialize(host_allocator, &builder);
@@ -219,15 +155,6 @@ static iree_status_t iree_hal_amdgpu_device_library_select_file(
       annotation_status = iree_file_toc_append_names_to_builder(
           iree_hal_amdgpu_device_binaries_create(),
           iree_hal_amdgpu_device_binaries_size(), &builder);
-    }
-    if (iree_status_is_ok(annotation_status)) {
-      annotation_status = iree_string_builder_append_string(
-          &builder, IREE_SV("], supported by agent: ["));
-    }
-    if (iree_status_is_ok(annotation_status)) {
-      annotation_status =
-          iree_hal_amdgpu_agent_available_isas_append_to_builder(
-              libhsa, &available_isas, &builder);
     }
     if (iree_status_is_ok(annotation_status)) {
       annotation_status =
@@ -249,10 +176,13 @@ static iree_status_t iree_hal_amdgpu_device_library_select_file(
 
 iree_status_t iree_hal_amdgpu_device_library_initialize(
     const iree_hal_amdgpu_libhsa_t* libhsa,
-    const iree_hal_amdgpu_topology_t* topology, iree_allocator_t host_allocator,
+    const iree_hal_amdgpu_topology_t* topology,
+    const iree_hal_amdgpu_agent_target_t* gpu_agent_targets,
+    iree_allocator_t host_allocator,
     iree_hal_amdgpu_device_library_t* out_library) {
   IREE_ASSERT_ARGUMENT(libhsa);
   IREE_ASSERT_ARGUMENT(topology);
+  IREE_ASSERT_ARGUMENT(gpu_agent_targets);
   IREE_ASSERT_ARGUMENT(out_library);
 
   if (IREE_UNLIKELY(topology->gpu_agent_count == 0)) {
@@ -268,27 +198,19 @@ iree_status_t iree_hal_amdgpu_device_library_initialize(
   // Select (or try to) the binary file for the leading GPU agent.
   // Today we require a single device ISA for all devices as heterogeneous
   // multi-device HAL usage is expected for different devices.
-  hsa_isa_t isa = {0};
   const iree_file_toc_t* file_toc = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_hal_amdgpu_device_library_select_file(
-          libhsa, topology->gpu_agents[0], host_allocator, &isa, &file_toc));
+      z0, iree_hal_amdgpu_device_library_select_file(
+              &gpu_agent_targets[0], host_allocator, &file_toc));
 
   // TODO(benvanik): figure out what options we could pass? Documentation is ...
   // lacking. These may have only been used for HSAIL anyway.
   const char* options = NULL;
 
-  // ROCR's executable loader retains some process-lifetime bookkeeping while
-  // building executable/code-object state. Keep LeakSanitizer focused on
-  // IREE-owned allocations by bracketing those HSA setup calls.
-
   // Bind a code object reader to the memory sourced from our rodata.
-  hsa_code_object_reader_t code_object_reader;
-  IREE_LEAK_CHECK_DISABLE_PUSH();
   iree_status_t status = iree_hsa_code_object_reader_create_from_memory(
-      IREE_LIBHSA(libhsa), file_toc->data, file_toc->size, &code_object_reader);
-  IREE_LEAK_CHECK_DISABLE_POP();
+      IREE_LIBHSA(libhsa), file_toc->data, file_toc->size,
+      &out_library->code_object_reader);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
 
   // Create the executable that will hold all of the loaded code objects.
@@ -297,13 +219,11 @@ iree_status_t iree_hal_amdgpu_device_library_initialize(
       HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT;
   status = iree_hal_amdgpu_device_library_select_agent_profile(
       libhsa, topology, &executable_profile, &executable_rounding_mode);
-  IREE_LEAK_CHECK_DISABLE_PUSH();
   if (iree_status_is_ok(status)) {
     status = iree_hsa_executable_create_alt(
         IREE_LIBHSA(libhsa), executable_profile, executable_rounding_mode,
         options, &out_library->executable);
   }
-  IREE_LEAK_CHECK_DISABLE_POP();
 
   // Load the code object for each agent.
   // Note that we could save off the loaded_code_object per-agent here but then
@@ -313,11 +233,9 @@ iree_status_t iree_hal_amdgpu_device_library_initialize(
   // loaded_code_objects caches the results.
   if (iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0; i < topology->gpu_agent_count; ++i) {
-      IREE_LEAK_CHECK_DISABLE_PUSH();
       status = iree_hsa_executable_load_agent_code_object(
           IREE_LIBHSA(libhsa), out_library->executable, topology->gpu_agents[i],
-          code_object_reader, options, NULL);
-      IREE_LEAK_CHECK_DISABLE_POP();
+          out_library->code_object_reader, options, NULL);
       if (!iree_status_is_ok(status)) break;
     }
   }
@@ -325,16 +243,9 @@ iree_status_t iree_hal_amdgpu_device_library_initialize(
   // Freeze the executable now that loading has completed. Most queries require
   // that the executable be frozen.
   if (iree_status_is_ok(status)) {
-    IREE_LEAK_CHECK_DISABLE_PUSH();
     status = iree_hsa_executable_freeze(IREE_LIBHSA(libhsa),
                                         out_library->executable, options);
-    IREE_LEAK_CHECK_DISABLE_POP();
   }
-
-  // Release the reader now that the executable has been fully loaded.
-  status =
-      iree_status_join(status, iree_hsa_code_object_reader_destroy(
-                                   IREE_LIBHSA(libhsa), code_object_reader));
 
   if (!iree_status_is_ok(status)) {
     iree_hal_amdgpu_device_library_deinitialize(out_library);
@@ -351,6 +262,11 @@ void iree_hal_amdgpu_device_library_deinitialize(
   if (library->executable.handle) {
     iree_hal_amdgpu_hsa_cleanup_assert_success(
         iree_hsa_executable_destroy_raw(library->libhsa, library->executable));
+  }
+  if (library->code_object_reader.handle) {
+    iree_hal_amdgpu_hsa_cleanup_assert_success(
+        iree_hsa_code_object_reader_destroy_raw(library->libhsa,
+                                                library->code_object_reader));
   }
 
   memset(library, 0, sizeof(*library));

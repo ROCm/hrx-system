@@ -166,7 +166,8 @@ iree_status_t iree_hal_streaming_device_memory_info(
   iree_hal_streaming_device_t* device = NULL;
   iree_status_t status = iree_hal_streaming_device_by_ordinal(ordinal, &device);
   if (iree_status_is_ok(status)) {
-    *out_free_memory = device->free_memory;
+    *out_free_memory = (iree_device_size_t)iree_atomic_load(
+        &device->free_memory, iree_memory_order_relaxed);
     *out_total_memory = device->total_memory;
   }
   return status;
@@ -303,61 +304,63 @@ iree_status_t iree_hal_streaming_device_ensure_default_mem_pool(
   return status;
 }
 
+// Requires |device->primary_context_mutex| to be held. The context and its
+// default allocation pool become visible together so callers never observe a
+// context that cannot service runtime allocations.
+static iree_status_t iree_hal_streaming_device_create_primary_context_locked(
+    iree_hal_streaming_device_t* device) {
+  IREE_ASSERT_ARGUMENT(device);
+  if (device->primary_context) {
+    return iree_hal_streaming_device_ensure_default_mem_pool_locked(device);
+  }
+
+  iree_hal_streaming_device_registry_t* device_registry =
+      iree_hal_streaming_device_registry();
+  if (!device_registry) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "device registry not initialized");
+  }
+
+  const bool had_default_mem_pool = device->default_mem_pool != NULL;
+  const bool had_current_mem_pool = device->current_mem_pool != NULL;
+  iree_hal_streaming_context_t* context = NULL;
+  iree_status_t status = iree_hal_streaming_context_create(
+      device, device->primary_context_flags, device_registry->host_allocator,
+      &context);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_device_ensure_default_mem_pool_locked(device);
+  }
+  if (iree_status_is_ok(status)) {
+    device->primary_context = context;
+    return iree_ok_status();
+  }
+
+  iree_hal_streaming_context_release(context);
+  if (!had_current_mem_pool) {
+    hrx_mem_pool_release(device->current_mem_pool);
+    device->current_mem_pool = NULL;
+  }
+  if (!had_default_mem_pool) {
+    hrx_mem_pool_release(device->default_mem_pool);
+    device->default_mem_pool = NULL;
+  }
+  return status;
+}
+
 iree_status_t iree_hal_streaming_device_get_or_create_primary_context(
     iree_hal_streaming_device_t* device,
     iree_hal_streaming_context_t** out_context) {
   IREE_ASSERT_ARGUMENT(device);
   IREE_ASSERT_ARGUMENT(out_context);
   IREE_TRACE_ZONE_BEGIN(z0);
+  *out_context = NULL;
 
-  // Fast path: context already exists.
-  if (device->primary_context) {
-    *out_context = device->primary_context;
-    IREE_TRACE_ZONE_END(z0);
-    return iree_ok_status();
-  }
-
-  // Slow path: need to create the context (with mutex protection).
   iree_slim_mutex_lock(&device->primary_context_mutex);
-
-  // Double-check inside the lock - another thread may have created it.
-  if (device->primary_context) {
-    *out_context = device->primary_context;
-    iree_slim_mutex_unlock(&device->primary_context_mutex);
-    IREE_TRACE_ZONE_END(z0);
-    return iree_ok_status();
-  }
-
-  // Create the primary context.
-  iree_hal_streaming_device_registry_t* device_registry =
-      iree_hal_streaming_device_registry();
-  if (!device_registry) {
-    iree_slim_mutex_unlock(&device->primary_context_mutex);
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                             "device registry not initialized"));
-  }
-
-  iree_status_t status = iree_hal_streaming_context_create(
-      device, device->primary_context_flags, device_registry->host_allocator,
-      &device->primary_context);
-
-  // Ensure runtime allocations have a backing pool for this device.
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_streaming_device_ensure_default_mem_pool_locked(device);
-  }
-
+  iree_status_t status =
+      iree_hal_streaming_device_create_primary_context_locked(device);
   if (iree_status_is_ok(status)) {
     *out_context = device->primary_context;
-  } else {
-    iree_hal_streaming_context_release(device->primary_context);
-    device->primary_context = NULL;
-    hrx_mem_pool_release(device->current_mem_pool);
-    device->current_mem_pool = NULL;
-    hrx_mem_pool_release(device->default_mem_pool);
-    device->default_mem_pool = NULL;
   }
-
   iree_slim_mutex_unlock(&device->primary_context_mutex);
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -369,50 +372,28 @@ iree_status_t iree_hal_streaming_device_retain_primary_context(
   IREE_ASSERT_ARGUMENT(device);
   IREE_ASSERT_ARGUMENT(out_context);
   IREE_TRACE_ZONE_BEGIN(z0);
+  *out_context = NULL;
 
   iree_slim_mutex_lock(&device->primary_context_mutex);
 
-  // Increment reference count.
-  device->primary_context_ref_count++;
-
-  // If this is the first retain (count went from 0 to 1), create the context.
-  if (device->primary_context_ref_count == 1 && !device->primary_context) {
-    iree_hal_streaming_device_registry_t* device_registry =
-        iree_hal_streaming_device_registry();
-    if (!device_registry) {
-      device->primary_context_ref_count--;
-      iree_slim_mutex_unlock(&device->primary_context_mutex);
-      IREE_RETURN_AND_END_ZONE_IF_ERROR(
-          z0, iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                               "device registry not initialized"));
-    }
-
-    iree_status_t status = iree_hal_streaming_context_create(
-        device, device->primary_context_flags, device_registry->host_allocator,
-        &device->primary_context);
-
-    // Ensure runtime allocations have a backing pool for this device.
+  iree_status_t status = iree_ok_status();
+  if (device->primary_context_ref_count == INT32_MAX) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "primary context reference count overflow");
+  } else {
+    ++device->primary_context_ref_count;
+    status = iree_hal_streaming_device_create_primary_context_locked(device);
     if (iree_status_is_ok(status)) {
-      status = iree_hal_streaming_device_ensure_default_mem_pool_locked(device);
-    }
-
-    if (!iree_status_is_ok(status)) {
-      // Creation failed - decrement ref count back to 0.
-      device->primary_context_ref_count--;
-      iree_hal_streaming_context_release(device->primary_context);
-      device->primary_context = NULL;
-      iree_slim_mutex_unlock(&device->primary_context_mutex);
-      IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
+      iree_hal_streaming_context_retain(device->primary_context);
+      *out_context = device->primary_context;
+    } else {
+      --device->primary_context_ref_count;
     }
   }
 
-  // Retain the context for the caller.
-  iree_hal_streaming_context_retain(device->primary_context);
-  *out_context = device->primary_context;
-
   iree_slim_mutex_unlock(&device->primary_context_mutex);
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  return status;
 }
 
 iree_status_t iree_hal_streaming_device_release_primary_context(
@@ -485,39 +466,46 @@ iree_status_t iree_hal_streaming_calculate_max_active_blocks_per_multiprocessor(
                             "symbol is not a function (type=%d)", symbol->type);
   }
 
-  if (block_size <= 0) {
+  if (block_size == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "block size must be positive");
   }
 
   // Calculate constraints.
   // 1. Thread constraint: blocks limited by max threads per SM.
-  const int blocks_by_threads =
+  const uint32_t blocks_by_threads =
       device->max_threads_per_multiprocessor / block_size;
 
   // 2. Block constraint: hardware limit on blocks per SM.
-  const int blocks_by_limit = device->max_blocks_per_multiprocessor;
+  const uint32_t blocks_by_limit = device->max_blocks_per_multiprocessor;
 
   // 3. Register constraint: blocks limited by register usage.
-  uint32_t blocks_by_regs = 1000000;  // Large number as default.
-  if (symbol->num_regs > 0) {
+  uint32_t blocks_by_regs = UINT32_MAX;
+  const uint32_t register_count = symbol->function_attributes.register_count;
+  if (register_count > 0) {
     // Round up register allocation to warp granularity.
-    const int warps_per_block =
+    const uint32_t warps_per_block =
         (block_size + device->warp_size - 1) / device->warp_size;
-    const int regs_per_block =
-        symbol->num_regs * warps_per_block * device->warp_size;
-    if (regs_per_block > 0) {
+    const uint64_t registers_per_block =
+        (uint64_t)register_count * warps_per_block * device->warp_size;
+    if (registers_per_block > device->max_registers_per_multiprocessor) {
+      blocks_by_regs = 0;
+    } else if (registers_per_block > 0) {
       blocks_by_regs =
-          device->max_registers_per_multiprocessor / regs_per_block;
+          device->max_registers_per_multiprocessor / registers_per_block;
     }
   }
 
   // 4. Shared memory constraint.
-  uint32_t blocks_by_smem = 1000000;  // Large number as default.
-  const uint32_t total_smem =
-      symbol->shared_size_bytes + dynamic_shared_mem_size;
-  if (total_smem > 0) {
-    blocks_by_smem = device->max_shared_memory_per_multiprocessor / total_smem;
+  uint32_t blocks_by_smem = UINT32_MAX;
+  const uint64_t total_shared_memory =
+      (uint64_t)symbol->function_attributes.fixed_shared_memory_size +
+      dynamic_shared_mem_size;
+  if (total_shared_memory > device->max_shared_memory_per_multiprocessor) {
+    blocks_by_smem = 0;
+  } else if (total_shared_memory > 0) {
+    blocks_by_smem =
+        device->max_shared_memory_per_multiprocessor / total_shared_memory;
   }
 
   // Take the minimum of all constraints.
@@ -525,9 +513,6 @@ iree_status_t iree_hal_streaming_calculate_max_active_blocks_per_multiprocessor(
   if (blocks_by_limit < max_blocks) max_blocks = blocks_by_limit;
   if (blocks_by_regs < max_blocks) max_blocks = blocks_by_regs;
   if (blocks_by_smem < max_blocks) max_blocks = blocks_by_smem;
-
-  // Ensure at least 0 blocks.
-  if (max_blocks < 0) max_blocks = 0;
 
   *out_max_blocks = max_blocks;
   return iree_ok_status();
@@ -551,11 +536,14 @@ iree_status_t iree_hal_streaming_calculate_optimal_block_size(
   }
 
   // Determine the maximum block size.
-  uint32_t max_block_size = symbol->max_threads_per_block;
+  uint32_t max_block_size =
+      symbol->function_attributes.maximum_threads_per_block;
+  if (max_block_size == 0) {
+    max_block_size = device->max_threads_per_block;
+  }
   if (block_size_limit > 0 && block_size_limit < max_block_size) {
     max_block_size = block_size_limit;
   }
-  if (max_block_size > 1024) max_block_size = 1024;  // Hardware limit.
 
   // Try different block sizes and find the one with best occupancy.
   uint32_t best_block_size = 32;

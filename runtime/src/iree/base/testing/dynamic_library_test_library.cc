@@ -16,6 +16,11 @@ extern "C" {
 
 int IREE_SYM_EXPORT times_two(int value) { return value * 2; }
 
+int IREE_SYM_EXPORT next_value() {
+  static int value = 0;
+  return ++value;
+}
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

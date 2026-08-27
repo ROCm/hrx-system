@@ -20,9 +20,9 @@ extern "C" {
 typedef struct loom_amdgpu_target_record_info_t {
   // Numeric selector value used by amdgpu.target.
   uint32_t target_kind;
-  // Default processor named by this target record.
-  iree_string_view_t default_processor_name;
-  // Descriptor-set ordinal selected by the default processor.
+  // Canonical target selector named by this record.
+  iree_string_view_t target_name;
+  // Descriptor-set ordinal selected by the processor.
   uint16_t descriptor_set_ordinal;
   // Target bundle selected by the target record.
   const loom_target_bundle_t* bundle;
@@ -34,9 +34,9 @@ extern const loom_target_bundle_table_t loom_amdgpu_target_bundles;
 const loom_amdgpu_target_record_info_t* loom_amdgpu_target_record_info_for_kind(
     uint32_t target_kind);
 
-// Returns the target record whose default processor is |processor_name|.
+// Returns the target record whose selector is |target_name|.
 const loom_amdgpu_target_record_info_t*
-loom_amdgpu_target_record_info_for_processor(iree_string_view_t processor_name);
+loom_amdgpu_target_record_info_for_target(iree_string_view_t target_name);
 
 // Returns the default target record for |descriptor_set_ordinal|, or NULL.
 const loom_amdgpu_target_record_info_t*

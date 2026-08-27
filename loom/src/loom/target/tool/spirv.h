@@ -34,8 +34,6 @@ typedef struct loom_spirv_toolchain_t {
   iree_string_view_t tool_paths[LOOM_SPIRV_TOOL_COUNT];
 } loom_spirv_toolchain_t;
 
-typedef loom_tool_output_t loom_spirv_tool_output_t;
-
 // Initializes |out_toolchain| from LOOM_SPIRV_AS, LOOM_SPIRV_DIS,
 // LOOM_SPIRV_VAL, LOOM_SPIRV_TOOLCHAIN_ROOT, and LOOM_SPIRV_TOOLCHAIN_BIN,
 // falling back to PATH lookup for tools without an explicit path or root.
@@ -57,20 +55,16 @@ iree_status_t loom_spirv_tool_run(const loom_spirv_toolchain_t* toolchain,
                                   iree_allocator_t allocator,
                                   loom_tool_process_result_t* out_result);
 
-// Releases output bytes allocated by SPIR-V tool helpers.
-void loom_spirv_tool_output_deinitialize(loom_spirv_tool_output_t* output,
-                                         iree_allocator_t allocator);
-
 // Runs `<tool> --version` and returns captured stdout in |out_version_text|.
 iree_status_t loom_spirv_tool_query_version(
     const loom_spirv_toolchain_t* toolchain, loom_spirv_tool_kind_t tool_kind,
-    iree_allocator_t allocator, loom_spirv_tool_output_t* out_version_text);
+    iree_allocator_t allocator, loom_tool_output_t* out_version_text);
 
 // Writes |binary| to a temporary file, runs `spirv-dis <temp> -o -`, and
 // returns textual SPIR-V disassembly.
 iree_status_t loom_spirv_tool_disassemble_binary(
     const loom_spirv_toolchain_t* toolchain, iree_const_byte_span_t binary,
-    iree_allocator_t allocator, loom_spirv_tool_output_t* out_text);
+    iree_allocator_t allocator, loom_tool_output_t* out_text);
 
 // Writes |binary| to a temporary file and runs `spirv-val <temp>`.
 iree_status_t loom_spirv_tool_validate_binary(

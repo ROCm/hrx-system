@@ -85,6 +85,91 @@ extern "C" {
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_WORKGROUP_ID_Z_SOURCE_ID \
   UINT64_C(0x64E1C6EA699CE029)
 
+// Stable low.live_in source spelling for the packed cluster-local workgroup
+// coordinates and cluster extent in gfx1250 TTMP6.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_WORKGROUP_INFO_SOURCE \
+  "amdgpu.cluster_workgroup_info"
+
+// Stable low.live_in source ID for the packed cluster workgroup information.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_WORKGROUP_INFO_SOURCE_ID \
+  UINT64_C(0x7A5A999A4B91578F)
+
+// Stable low.live_in source spelling for gfx1250 TTMP6 when only the x
+// cluster-local workgroup coordinate is enabled.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_WORKGROUP_INFO_X_SOURCE \
+  "amdgpu.cluster_workgroup_info.x"
+
+// Stable low.live_in source ID for x-only packed cluster workgroup state.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_WORKGROUP_INFO_X_SOURCE_ID \
+  UINT64_C(0x11B87FDAAA3D6151)
+
+// Stable low.live_in source spelling for gfx1250 TTMP6 when the x and y
+// cluster-local workgroup coordinates are enabled.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_WORKGROUP_INFO_XY_SOURCE \
+  "amdgpu.cluster_workgroup_info.xy"
+
+// Stable low.live_in source ID for x/y packed cluster workgroup state.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_WORKGROUP_INFO_XY_SOURCE_ID \
+  UINT64_C(0x59E2688F464C16F8)
+
+// Stable low.live_in source spelling for gfx1250 TTMP6 when the x and z
+// cluster-local workgroup coordinates are enabled.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_WORKGROUP_INFO_XZ_SOURCE \
+  "amdgpu.cluster_workgroup_info.xz"
+
+// Stable low.live_in source ID for x/z packed cluster workgroup state.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_WORKGROUP_INFO_XZ_SOURCE_ID \
+  UINT64_C(0x59E26B8F464C1C11)
+
+// Stable low.live_in source spelling for the packed architected y/z
+// workgroup or cluster coordinates in TTMP7.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_YZ_SOURCE "amdgpu.cluster_id_yz"
+
+// Stable low.live_in source ID for packed cluster_id.y/z.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_YZ_SOURCE_ID \
+  UINT64_C(0x5CC9CA25D8E49D3B)
+
+// Stable low.live_in source spelling for the architected y workgroup or
+// cluster coordinate in TTMP7.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_Y_SOURCE "amdgpu.cluster_id_y"
+
+// Stable low.live_in source ID for cluster_id.y.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_Y_SOURCE_ID \
+  UINT64_C(0x68A4B9A3B10CE223)
+
+// Stable low.live_in source spelling for the architected z workgroup or
+// cluster coordinate in TTMP7.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_Z_SOURCE "amdgpu.cluster_id_z"
+
+// Stable low.live_in source ID for cluster_id.z.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_Z_SOURCE_ID \
+  UINT64_C(0x68A4BAA3B10CE3D6)
+
+// Stable low.live_in source spelling for the architected x workgroup or
+// cluster coordinate in TTMP9.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_X_SOURCE "amdgpu.cluster_id_x"
+
+// Stable low.live_in source ID for cluster_id.x.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_X_SOURCE_ID \
+  UINT64_C(0x68A4B8A3B10CE070)
+
+typedef enum loom_amdgpu_hal_kernel_abi_launch_workgroup_id_flag_bits_e {
+  // Dispatch must initialize the x workgroup-coordinate launch state.
+  LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_X = 1u << 0,
+  // Dispatch must initialize the y workgroup-coordinate launch state.
+  LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_Y = 1u << 1,
+  // Dispatch must initialize the z workgroup-coordinate launch state.
+  LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_Z = 1u << 2,
+  // Workgroup-coordinate launch-state flags known by the AMDGPU HAL ABI.
+  LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_KNOWN_FLAGS =
+      LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_X |
+      LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_Y |
+      LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_Z,
+} loom_amdgpu_hal_kernel_abi_launch_workgroup_id_flag_bits_t;
+
+// Bitset of loom_amdgpu_hal_kernel_abi_launch_workgroup_id_flag_bits_t values.
+typedef uint32_t loom_amdgpu_hal_kernel_abi_launch_workgroup_id_flags_t;
+
 // Stable low.live_in source spelling for workitem_id.x in v0.
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_WORKITEM_ID_X_SOURCE "amdgpu.workitem_id.x"
 
@@ -147,7 +232,25 @@ typedef enum loom_amdgpu_hal_kernel_abi_source_kind_e {
   LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKITEM_ID_PACKED_XY = 10,
   LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKITEM_ID_PACKED_XYZ = 11,
   LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_M0 = 12,
+  LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_CLUSTER_WORKGROUP_INFO = 13,
+  LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_CLUSTER_ID_YZ = 14,
+  LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_CLUSTER_ID_X = 15,
+  LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_CLUSTER_ID_Y = 16,
+  LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_CLUSTER_ID_Z = 17,
+  LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_CLUSTER_WORKGROUP_INFO_X = 18,
+  LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_CLUSTER_WORKGROUP_INFO_XY = 19,
+  LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_CLUSTER_WORKGROUP_INFO_XZ = 20,
 } loom_amdgpu_hal_kernel_abi_source_kind_t;
+
+// Maximum number of fixed physical values required by one AMDGPU HAL kernel
+// ABI. This covers hidden user SGPRs, three coordinate dimensions, packed
+// workitem state, M0, and the fixed architected launch-state sources.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_MAX_FIXED_VALUE_COUNT (8u + 2u * 3u)
+
+// Returns the stable low.live_in source spelling for |source_kind|, or an
+// empty string for unknown/invalid kinds.
+iree_string_view_t loom_amdgpu_hal_kernel_abi_source_name(
+    loom_amdgpu_hal_kernel_abi_source_kind_t source_kind);
 
 typedef struct loom_amdgpu_hal_kernarg_resource_t {
   // Defining low.resource op for diagnostics and cross-checks.
@@ -198,7 +301,9 @@ typedef struct loom_amdgpu_hal_kernel_abi_layout_t {
   uint32_t kernarg_segment_size;
   // Required kernarg segment alignment in bytes.
   uint32_t kernarg_segment_alignment;
-  // True when the kernel descriptor must request the kernarg segment pointer.
+  // True when surviving parameter uses require the kernarg segment pointer.
+  // Source lowering may initialize this conservatively; HAL ABI materialization
+  // refines it after low-level dead-code elimination.
   bool uses_kernarg_segment_ptr;
   // HAL dispatch constant word count consumed by direct arguments.
   uint32_t constant_count;
@@ -215,6 +320,18 @@ typedef struct loom_amdgpu_hal_kernel_abi_layout_t {
 typedef struct loom_amdgpu_hal_kernel_abi_verify_result_t {
   // Number of AMDGPU HAL-kernel ABI errors emitted for the function.
   uint32_t error_count;
+  // Bitset of verified ABI source kinds present in the function.
+  uint64_t live_in_source_bits;
+  // Launch workgroup-coordinate state required by the verified low function.
+  loom_amdgpu_hal_kernel_abi_launch_workgroup_id_flags_t
+      launch_workgroup_id_flags;
+  // Number of hidden user SGPRs consumed by verified ABI live-ins.
+  uint32_t user_sgpr_count;
+  // Fixed physical values retained from verified ABI live-ins.
+  loom_low_allocation_fixed_value_t
+      fixed_values[LOOM_AMDGPU_HAL_KERNEL_ABI_MAX_FIXED_VALUE_COUNT];
+  // Number of populated entries in |fixed_values|.
+  iree_host_size_t fixed_value_count;
 } loom_amdgpu_hal_kernel_abi_verify_result_t;
 
 // Emits AMDGPU HAL-kernel ABI diagnostics for |function_op|.
@@ -271,73 +388,6 @@ iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_attr(
 loom_amdgpu_hal_kernel_abi_source_kind_t
 loom_amdgpu_hal_kernel_abi_live_in_source_kind(const loom_module_t* module,
                                                loom_value_id_t value_id);
-
-// Returns true if |value_id| is defined by the kernarg segment pointer live-in.
-bool loom_amdgpu_hal_kernel_abi_is_kernarg_segment_ptr_live_in(
-    const loom_module_t* module, loom_value_id_t value_id);
-
-// Returns true if |value_id| is defined by the dispatch packet pointer live-in.
-bool loom_amdgpu_hal_kernel_abi_is_dispatch_ptr_live_in(
-    const loom_module_t* module, loom_value_id_t value_id);
-
-// Returns true if |value_id| is defined by the dispatch packet ID live-in.
-bool loom_amdgpu_hal_kernel_abi_is_dispatch_id_live_in(
-    const loom_module_t* module, loom_value_id_t value_id);
-
-// Returns true if |value_id| is defined by the workgroup_id.x live-in.
-bool loom_amdgpu_hal_kernel_abi_is_workgroup_id_x_live_in(
-    const loom_module_t* module, loom_value_id_t value_id);
-
-// Returns true if |value_id| is defined by the workgroup_id.y live-in.
-bool loom_amdgpu_hal_kernel_abi_is_workgroup_id_y_live_in(
-    const loom_module_t* module, loom_value_id_t value_id);
-
-// Returns true if |value_id| is defined by the workgroup_id.z live-in.
-bool loom_amdgpu_hal_kernel_abi_is_workgroup_id_z_live_in(
-    const loom_module_t* module, loom_value_id_t value_id);
-
-// Returns true if |value_id| is defined by the workitem_id.x live-in.
-bool loom_amdgpu_hal_kernel_abi_is_workitem_id_x_live_in(
-    const loom_module_t* module, loom_value_id_t value_id);
-
-// Returns true if |value_id| is defined by the workitem_id.y live-in.
-bool loom_amdgpu_hal_kernel_abi_is_workitem_id_y_live_in(
-    const loom_module_t* module, loom_value_id_t value_id);
-
-// Returns true if |value_id| is defined by the workitem_id.z live-in.
-bool loom_amdgpu_hal_kernel_abi_is_workitem_id_z_live_in(
-    const loom_module_t* module, loom_value_id_t value_id);
-
-// Returns true if |value_id| is defined by the packed workitem_id.x/y live-in.
-bool loom_amdgpu_hal_kernel_abi_is_workitem_id_packed_xy_live_in(
-    const loom_module_t* module, loom_value_id_t value_id);
-
-// Returns true if |value_id| is defined by the packed workitem_id.x/y/z
-// live-in.
-bool loom_amdgpu_hal_kernel_abi_is_workitem_id_packed_xyz_live_in(
-    const loom_module_t* module, loom_value_id_t value_id);
-
-// Returns true if |value_id| is defined by the M0 special-register live-in.
-bool loom_amdgpu_hal_kernel_abi_is_m0_live_in(const loom_module_t* module,
-                                              loom_value_id_t value_id);
-
-// Finds AMDGPU ABI live-ins that require fixed physical locations during
-// allocation.
-//
-// The returned array is arena-owned. The current ABI fixes hidden user SGPRs in
-// AMDHSA order: dispatch pointer, then kernarg segment pointer. Each pointer
-// consumes two SGPRs starting at the next available user-SGPR location.
-// workgroup_id.x/y/z live-ins use the SGPRs immediately following enabled user
-// SGPRs. Unpacked workitem_id.x/y/z live-ins use v0/v1/v2, and packed
-// workitem-id live-ins use v0 when present.
-//
-// The function must already have passed
-// loom_amdgpu_hal_kernel_abi_verify_low. Status is reserved for allocation and
-// contract misuse that would otherwise make fixed-value construction unsafe.
-iree_status_t loom_amdgpu_hal_kernel_abi_fixed_values_from_low(
-    const loom_module_t* module, const loom_op_t* function_op,
-    const loom_low_allocation_fixed_value_t** out_fixed_values,
-    iree_host_size_t* out_fixed_value_count, iree_arena_allocator_t* arena);
 
 #ifdef __cplusplus
 }  // extern "C"

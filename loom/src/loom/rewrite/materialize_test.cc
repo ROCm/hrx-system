@@ -73,6 +73,13 @@ class MaterializeTest : public ::testing::Test {
     return remap;
   }
 
+  loom_availability_analysis_t InitializeAvailability() {
+    loom_availability_analysis_t availability = {};
+    IREE_CHECK_OK(loom_availability_analysis_initialize(source_, &remap_arena_,
+                                                        &availability));
+    return availability;
+  }
+
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_;
   loom_module_t* source_ = nullptr;
@@ -320,6 +327,75 @@ TEST_F(MaterializeTest, ClonesRegionSuccessorsToClonedBlocks) {
   ASSERT_TRUE(loom_test_br_isa(cloned_branch));
   EXPECT_EQ(loom_test_br_dest(cloned_branch), cloned_dest);
   EXPECT_NE(loom_test_br_dest(cloned_branch), source_dest);
+  EXPECT_EQ(remap.block_map_count, 0u);
+}
+
+TEST_F(MaterializeTest, ClonesRegionSourcePresentation) {
+  loom_region_t* source_region = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate_region(source_, 1, &source_region));
+  source_region->source_flags |= LOOM_REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM;
+
+  loom_ir_remap_t remap = InitializeRemap();
+  loom_region_t* cloned_region = nullptr;
+  IREE_ASSERT_OK(loom_ir_clone_region(&target_builder_, source_region, &remap,
+                                      &cloned_region));
+
+  ASSERT_NE(cloned_region, nullptr);
+  EXPECT_EQ(cloned_region->source_flags, source_region->source_flags);
+}
+
+TEST_F(MaterializeTest, ClonesOperationAndBlockSourcePresentation) {
+  loom_region_t* source_region = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate_region(source_, 1, &source_region));
+  loom_block_t* source_block = loom_region_entry_block(source_region);
+  source_block->flags |= LOOM_BLOCK_FLAG_LEADING_BLANK_LINE;
+  const iree_string_view_t block_comments[] = {
+      IREE_SV("block heading"),
+  };
+  IREE_ASSERT_OK(loom_module_attach_block_comments(
+      source_, source_block, block_comments, IREE_ARRAYSIZE(block_comments)));
+
+  loom_builder_t source_region_builder = {};
+  loom_builder_initialize(source_, &source_->arena, source_block,
+                          &source_region_builder);
+  loom_op_t* source_op = nullptr;
+  IREE_ASSERT_OK(
+      loom_test_constant_build(&source_region_builder, loom_attr_i64(42),
+                               loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+                               LOOM_LOCATION_UNKNOWN, &source_op));
+  source_op->flags |= LOOM_OP_FLAG_LEADING_BLANK_LINE;
+  const iree_string_view_t op_comments[] = {
+      IREE_SV("operation heading"),
+      IREE_SV("operation detail"),
+  };
+  IREE_ASSERT_OK(loom_module_attach_op_comments(source_, source_op, op_comments,
+                                                IREE_ARRAYSIZE(op_comments)));
+
+  loom_ir_remap_t remap = InitializeRemap();
+  loom_region_t* cloned_region = nullptr;
+  IREE_ASSERT_OK(loom_ir_clone_region(&target_builder_, source_region, &remap,
+                                      &cloned_region));
+
+  const loom_block_t* cloned_block =
+      loom_region_const_entry_block(cloned_region);
+  EXPECT_TRUE(iree_any_bit_set(cloned_block->flags,
+                               LOOM_BLOCK_FLAG_LEADING_BLANK_LINE));
+  iree_host_size_t cloned_block_comment_count = 0;
+  const iree_string_view_t* cloned_block_comments = loom_module_block_comments(
+      target_, cloned_block, &cloned_block_comment_count);
+  ASSERT_EQ(cloned_block_comment_count, IREE_ARRAYSIZE(block_comments));
+  EXPECT_TRUE(
+      iree_string_view_equal(cloned_block_comments[0], block_comments[0]));
+
+  const loom_op_t* cloned_op = loom_block_const_op(cloned_block, 0);
+  EXPECT_TRUE(
+      iree_any_bit_set(cloned_op->flags, LOOM_OP_FLAG_LEADING_BLANK_LINE));
+  iree_host_size_t cloned_op_comment_count = 0;
+  const iree_string_view_t* cloned_op_comments =
+      loom_module_op_comments(target_, cloned_op, &cloned_op_comment_count);
+  ASSERT_EQ(cloned_op_comment_count, IREE_ARRAYSIZE(op_comments));
+  EXPECT_TRUE(iree_string_view_equal(cloned_op_comments[0], op_comments[0]));
+  EXPECT_TRUE(iree_string_view_equal(cloned_op_comments[1], op_comments[1]));
 }
 
 TEST_F(MaterializeTest, RejectsCrossModuleCloneWithUnmappedSuccessor) {
@@ -341,6 +417,36 @@ TEST_F(MaterializeTest, RejectsCrossModuleCloneWithUnmappedSuccessor) {
       loom_ir_clone_op(&target_builder_, branch_op, &remap, &cloned_op));
   EXPECT_EQ(cloned_op, nullptr);
   EXPECT_EQ(loom_module_block(target_)->op_count, 0u);
+}
+
+TEST_F(MaterializeTest, ClonesStandaloneSuccessorThroughExplicitBlockMap) {
+  loom_region_t* source_region = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate_region(source_, 2, &source_region));
+  loom_block_t* source_entry = loom_region_block(source_region, 0);
+  loom_block_t* source_dest = loom_region_block(source_region, 1);
+  loom_builder_t source_region_builder = {};
+  loom_builder_initialize(source_, &source_->arena, source_entry,
+                          &source_region_builder);
+  loom_op_t* branch_op = nullptr;
+  IREE_ASSERT_OK(loom_test_br_build(&source_region_builder, source_dest,
+                                    LOOM_LOCATION_UNKNOWN, &branch_op));
+
+  loom_region_t* target_region = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate_region(target_, 2, &target_region));
+  loom_block_t* target_entry = loom_region_block(target_region, 0);
+  loom_block_t* target_dest = loom_region_block(target_region, 1);
+  loom_builder_t target_region_builder = {};
+  loom_builder_initialize(target_, &target_->arena, target_entry,
+                          &target_region_builder);
+
+  loom_ir_remap_t remap = InitializeRemap();
+  IREE_ASSERT_OK(loom_ir_remap_map_block(&remap, source_dest, target_dest));
+  loom_op_t* cloned_op = nullptr;
+  IREE_ASSERT_OK(
+      loom_ir_clone_op(&target_region_builder, branch_op, &remap, &cloned_op));
+
+  ASSERT_TRUE(loom_test_br_isa(cloned_op));
+  EXPECT_EQ(loom_test_br_dest(cloned_op), target_dest);
 }
 
 TEST_F(MaterializeTest, ClonesOperandDictOps) {
@@ -504,8 +610,10 @@ TEST_F(MaterializeTest, MovesBlockOpsAndRemapsCapturedBlockArgs) {
   loom_ir_move_block_options_t options = {
       /*.omit_terminators=*/true,
   };
-  IREE_ASSERT_OK(loom_ir_move_block_ops_before(
-      &rewriter, loom_region_entry_block(body), sentinel_op, &remap, &options));
+  loom_availability_analysis_t availability = InitializeAvailability();
+  IREE_ASSERT_OK(loom_ir_move_block_ops_before(&rewriter, &availability,
+                                               loom_region_entry_block(body),
+                                               sentinel_op, &remap, &options));
 
   EXPECT_EQ(neg_op->parent_block, loom_module_block(source_));
   EXPECT_EQ(neg_op->parent_op, nullptr);
@@ -564,8 +672,10 @@ TEST_F(MaterializeTest, MovesBlockOpsAndRemapsDynamicResultTypes) {
   loom_ir_remap_t remap =
       InitializeSameModuleRemap(/*allow_unmapped_values=*/true);
   IREE_ASSERT_OK(loom_ir_remap_map_value(&remap, source_dim, target_dim));
+  loom_availability_analysis_t availability = InitializeAvailability();
   IREE_ASSERT_OK(loom_ir_move_block_ops_before(
-      &rewriter, source_block, sentinel_op, &remap, /*options=*/nullptr));
+      &rewriter, &availability, source_block, sentinel_op, &remap,
+      /*options=*/nullptr));
 
   EXPECT_EQ(source_block->op_count, 0u);
   EXPECT_EQ(input_op->parent_block, loom_module_block(source_));
@@ -618,8 +728,10 @@ TEST_F(MaterializeTest, MovesBlockOpsAndRemapsPredicateAttrs) {
   loom_ir_remap_t remap =
       InitializeSameModuleRemap(/*allow_unmapped_values=*/true);
   IREE_ASSERT_OK(loom_ir_remap_map_value(&remap, source_dim, target_dim));
+  loom_availability_analysis_t availability = InitializeAvailability();
   IREE_ASSERT_OK(loom_ir_move_block_ops_before(
-      &rewriter, source_block, sentinel_op, &remap, /*options=*/nullptr));
+      &rewriter, &availability, source_block, sentinel_op, &remap,
+      /*options=*/nullptr));
 
   EXPECT_EQ(source_block->op_count, 0u);
   EXPECT_EQ(assume_op->parent_block, loom_module_block(source_));
@@ -669,10 +781,11 @@ TEST_F(MaterializeTest, RejectsMoveWithUnavailableRemappedCaptures) {
   IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, source_, &remap_arena_));
   loom_ir_remap_t remap =
       InitializeSameModuleRemap(/*allow_unmapped_values=*/true);
+  loom_availability_analysis_t availability = InitializeAvailability();
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
-      loom_ir_move_block_ops_before(&rewriter, source_block, sentinel_op,
-                                    &remap, /*options=*/nullptr));
+      loom_ir_move_block_ops_before(&rewriter, &availability, source_block,
+                                    sentinel_op, &remap, /*options=*/nullptr));
 
   EXPECT_EQ(source_block->op_count, 2u);
   EXPECT_EQ(input_op->parent_block, source_block);

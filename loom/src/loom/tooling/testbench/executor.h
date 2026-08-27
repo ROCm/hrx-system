@@ -9,7 +9,7 @@
 // This layer binds planning, value materialization, invocation dispatch, and
 // expectation reporting into the production case-execution primitive shared by
 // run, test, benchmark, tuning, and custom harnesses. It stays target-free:
-// callers inject actual/oracle/expectation/file providers.
+// callers inject function-call/kernel-launch/oracle/expectation/file providers.
 
 #ifndef LOOM_TOOLING_TESTBENCH_EXECUTOR_H_
 #define LOOM_TOOLING_TESTBENCH_EXECUTOR_H_
@@ -29,7 +29,7 @@ typedef struct loom_testbench_case_execution_options_t {
   // Runtime dependencies used while materializing parameters, generated values,
   // fixture file values, and reusable executor scratch storage.
   loom_testbench_value_materializer_options_t materializer;
-  // Actual and oracle invocation providers visible while preparing the case.
+  // Invocation providers visible while preparing the case.
   loom_testbench_invocation_options_t invocation;
   // Custom expectation providers visible while preparing the case.
   loom_testbench_expectation_options_t expectation;
@@ -68,6 +68,10 @@ typedef struct loom_testbench_case_sample_result_t {
   const loom_testbench_case_plan_t* case_plan;
   // Concrete sample ordinal executed for |case_plan|.
   iree_host_size_t sample_ordinal;
+  // Borrowed sample issues owned by the executor until the next run.
+  const loom_testbench_sample_issue_t* issues;
+  // Number of entries in |issues|.
+  iree_host_size_t issue_count;
   // True when all expectations passed.
   bool passed;
   // Borrowed report owned by the executor until the next run or deinitialize.

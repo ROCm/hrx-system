@@ -11,7 +11,6 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
-#include "iree/hal/profile_sink.h"
 #include "iree/hal/utils/statistics_sink.h"
 #include "loom/tooling/execution/benchmark.h"
 #include "loom/tooling/execution/hal/invocation.h"
@@ -89,6 +88,35 @@ typedef struct loom_run_hal_profile_row_summary_t {
   char function_name[LOOM_RUN_HAL_PROFILE_FUNCTION_NAME_CAPACITY];
 } loom_run_hal_profile_row_summary_t;
 
+typedef struct loom_run_hal_profile_dispatch_distribution_t {
+  // True when at least one individually represented duration was scaled.
+  bool available;
+  // True when every source dispatch sample has an individual scaled duration.
+  bool complete;
+  // True when all represented samples use the same device and time domain.
+  bool comparable;
+  // True when all represented samples name the same executable function.
+  bool homogeneous_function;
+  // Aggregate row type used to recover individual dispatch durations.
+  iree_hal_profile_statistics_row_type_t source_row_type;
+  // Physical device ordinal shared by represented samples.
+  uint32_t physical_device_ordinal;
+  // Time domain shared by represented samples before nanosecond scaling.
+  iree_hal_profile_statistics_time_domain_t time_domain;
+  // Session-local executable identifier shared by homogeneous samples.
+  uint64_t executable_id;
+  // Executable function ordinal shared by homogeneous samples.
+  uint32_t function_ordinal;
+  // Number of source dispatch samples described by selected aggregate rows.
+  uint64_t source_sample_count;
+  // Number of source dispatch samples rejected by the profile producer.
+  uint64_t invalid_sample_count;
+  // Number of valid samples lacking an individual comparable scaled duration.
+  uint64_t unrepresented_sample_count;
+  // Robust statistics over individually represented dispatch durations.
+  loom_run_benchmark_timing_stats_t duration_ns;
+} loom_run_hal_profile_dispatch_distribution_t;
+
 typedef struct loom_run_hal_profile_summary_t {
   // True when final-batch profiling was requested.
   bool requested;
@@ -104,9 +132,9 @@ typedef struct loom_run_hal_profile_summary_t {
   iree_host_size_t artifact_path_length;
   // Path to the raw HAL profile bundle, truncated when necessary.
   char artifact_path[LOOM_RUN_HAL_PROFILE_ARTIFACT_PATH_CAPACITY];
-  // Length of the formatted profiling failure message.
+  // Length of the primary profiling failure message.
   iree_host_size_t error_message_length;
-  // Formatted profiling failure message, truncated when necessary.
+  // Primary profiling failure message, truncated when necessary.
   char error_message[512];
   // Producer profiling flags requested for the final batch.
   iree_hal_device_profiling_flags_t flags;
@@ -116,6 +144,8 @@ typedef struct loom_run_hal_profile_summary_t {
   iree_host_size_t row_count;
   // Source records reported as dropped by the profile producer.
   uint64_t dropped_record_count;
+  // Exact device-duration distribution recovered from dispatch profile rows.
+  loom_run_hal_profile_dispatch_distribution_t dispatch_distribution;
   // Number of row summaries copied into |rows|.
   iree_host_size_t captured_row_count;
   // Number of aggregate rows omitted because |rows| was full.
@@ -130,7 +160,8 @@ typedef struct loom_run_hal_benchmark_options_t {
   loom_run_hal_benchmark_flags_t flags;
   // Generic warmup, measured timing, batch, and stability policy.
   loom_run_benchmark_options_t timing;
-  // Command-buffer recording and queue execute options for the batch.
+  // Dispatch multiplicity and command-buffer options for multi-dispatch
+  // batches.
   loom_run_hal_dispatch_batch_options_t dispatch_batch;
   // Producer profiling flags used for a requested final profiled batch.
   iree_hal_device_profiling_flags_t profile_flags;
@@ -151,12 +182,13 @@ typedef struct loom_run_hal_benchmark_options_t {
 typedef struct loom_run_hal_benchmark_result_t {
   // Generic host timing benchmark result.
   loom_run_benchmark_result_t timing;
-  // Number of physical binding lists rotated through command-buffer dispatches.
+  // Number of physical binding lists rotated through benchmark operations.
   iree_host_size_t binding_ring_count;
-  // Number of pre-recorded command buffers rotated across benchmark batches.
+  // Number of pre-recorded command buffers rotated across benchmark batches,
+  // or zero when isolated operations use direct queue dispatch.
   iree_host_size_t command_buffer_ring_count;
-  // Final profiled-batch summary.
-  loom_run_hal_profile_summary_t profile;
+  // Separate final profiled replay executed after the timing measurement.
+  loom_run_hal_profile_summary_t profile_replay;
 } loom_run_hal_benchmark_result_t;
 
 // Initializes HAL benchmark options for rigorous batched dispatch timing.
@@ -167,7 +199,9 @@ void loom_run_hal_benchmark_options_initialize(
 void loom_run_hal_benchmark_result_initialize(
     loom_run_hal_benchmark_result_t* out_result);
 
-// Prepares and times a reusable HAL command buffer containing a dispatch batch.
+// Prepares and times one logical dispatch batch. Isolated single-dispatch
+// batches use direct queue dispatch; larger batches use reusable command
+// buffers to amortize submission overhead.
 iree_status_t loom_run_hal_benchmark_dispatch_plan(
     const loom_run_hal_runtime_t* runtime,
     const loom_run_hal_prepared_candidate_t* candidate,
@@ -175,8 +209,9 @@ iree_status_t loom_run_hal_benchmark_dispatch_plan(
     const loom_run_hal_benchmark_options_t* options, iree_allocator_t allocator,
     loom_run_hal_benchmark_result_t* out_result);
 
-// Prepares and times reusable HAL command buffers whose dispatch slots cycle
-// across |binding_lists|. Each measured batch still executes
+// Prepares and times dispatches whose operation slots cycle across
+// |binding_lists|. Isolated single-dispatch batches use direct queue dispatch;
+// larger batches use reusable command buffers. Each measured batch executes
 // |options->dispatch_batch.dispatch_count| dispatches.
 iree_status_t loom_run_hal_benchmark_dispatch_binding_ring(
     const loom_run_hal_runtime_t* runtime,
@@ -191,11 +226,14 @@ iree_status_t loom_run_hal_benchmark_dispatch_binding_ring(
 // fixed sequence of dispatches. |candidates| has |sequence_count| entries.
 // |plans| is a flattened row-major array with
 // |plan_ring_count * sequence_count| entries, indexed as ring slot first and
-// sequence step second.
+// sequence step second. |execution_epochs| contains one monotonic epoch
+// ordinal per sequence step. Epoch transitions carry dispatch execution and
+// write-visibility edges; steps in one epoch may overlap. No barrier follows a
+// logical sequence's terminal step.
 iree_status_t loom_run_hal_benchmark_dispatch_sequence_plan_ring(
     const loom_run_hal_runtime_t* runtime, iree_host_size_t sequence_count,
     const loom_run_hal_prepared_candidate_t* const* candidates,
-    iree_host_size_t plan_ring_count,
+    const iree_host_size_t* execution_epochs, iree_host_size_t plan_ring_count,
     const loom_run_hal_invocation_plan_t* const* plans,
     const loom_run_hal_benchmark_options_t* options, iree_allocator_t allocator,
     loom_run_hal_benchmark_result_t* out_result);

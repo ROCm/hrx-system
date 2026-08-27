@@ -1,0 +1,163 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1250-a0> @target
+
+kernel.def target(@target) @a0_legalizes_constrained_lds_packets() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %scratch_base = index.constant 0 : offset
+  %bytes = index.constant 4096 : offset
+  %regular_b32_layout = encoding.layout.strided [8, 2] : encoding<layout>
+  %regular_b64_layout = encoding.layout.strided [4, 2] : encoding<layout>
+  %stride64_layout = encoding.layout.strided [512, 256] : encoding<layout>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %regular_b32 = buffer.view %scratch[%scratch_base] : buffer -> view<1x2xi32, %regular_b32_layout>
+  %regular_b64 = buffer.view %scratch[%scratch_base] : buffer -> view<1x2xi64, %regular_b64_layout>
+  %stride64_b32 = buffer.view %scratch[%scratch_base] : buffer -> view<1x2xi32, %stride64_layout>
+  %stride64_b64 = buffer.view %scratch[%scratch_base] : buffer -> view<1x2xi64, %stride64_layout>
+  %dense = buffer.view %scratch[%scratch_base] : buffer -> view<4096xi8>
+  %pair_b32 = vector.constant 1 : vector<2xi32>
+  %pair_b64 = vector.constant 1 : vector<2xi64>
+  vector.store %pair_b32, %regular_b32[0, 0] : vector<2xi32>, view<1x2xi32, %regular_b32_layout>
+  %loaded_regular_b32 = vector.load %regular_b32[0, 0] : view<1x2xi32, %regular_b32_layout> -> vector<2xi32>
+  vector.store %loaded_regular_b32, %regular_b32[0, 0] : vector<2xi32>, view<1x2xi32, %regular_b32_layout>
+  vector.store %pair_b64, %regular_b64[0, 0] : vector<2xi64>, view<1x2xi64, %regular_b64_layout>
+  %loaded_regular_b64 = vector.load %regular_b64[0, 0] : view<1x2xi64, %regular_b64_layout> -> vector<2xi64>
+  vector.store %loaded_regular_b64, %regular_b64[0, 0] : vector<2xi64>, view<1x2xi64, %regular_b64_layout>
+  vector.store %pair_b32, %stride64_b32[0, 0] : vector<2xi32>, view<1x2xi32, %stride64_layout>
+  %loaded_stride64_b32 = vector.load %stride64_b32[0, 0] : view<1x2xi32, %stride64_layout> -> vector<2xi32>
+  vector.store %loaded_stride64_b32, %stride64_b32[0, 0] : vector<2xi32>, view<1x2xi32, %stride64_layout>
+  vector.store %pair_b64, %stride64_b64[0, 0] : vector<2xi64>, view<1x2xi64, %stride64_layout>
+  %loaded_stride64_b64 = vector.load %stride64_b64[0, 0] : view<1x2xi64, %stride64_layout> -> vector<2xi64>
+  vector.store %loaded_stride64_b64, %stride64_b64[0, 0] : vector<2xi64>, view<1x2xi64, %stride64_layout>
+  %word = vector.constant 1 : vector<4xi8>
+  vector.store %word, %dense[%lane] : vector<4xi8>, view<4096xi8>
+  %loaded_word = vector.load %dense[%lane] : view<4096xi8> -> vector<4xi8>
+  vector.store %loaded_word, %dense[%lane] : vector<4xi8>, view<4096xi8>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.gfx1250_a0.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @a0_legalizes_constrained_lds_packets() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %23 = storage {byte_alignment = 16, byte_length = 4096} : low.storage<workgroup>
+  %25 = v_mov_b32 1
+  %29 = v_mov_b32 0
+  %pair_b64 = concat(%25, %29, %25, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  low.op<amdgpu.ds_write_b32>(%29, %25) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 4, 4]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  low.op<amdgpu.ds_write_b32>(%29, %25) {offset = 8} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 8, 8, 12, 12]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %38 = low.op<amdgpu.ds_read_b32>(%29) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 4, 4]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  %40 = low.op<amdgpu.ds_read_b32>(%29) {offset = 8} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 8, 8, 12, 12]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.op<amdgpu.ds_write_b32>(%29, %38) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 4, 4]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  low.op<amdgpu.ds_write_b32>(%29, %40) {offset = 8} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 8, 8, 12, 12]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %46 = slice %pair_b64[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  low.op<amdgpu.ds_write_b64>(%29, %46) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 8, 8]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>)
+  %48 = slice %pair_b64[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  low.op<amdgpu.ds_write_b64>(%29, %48) {offset = 16} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 16, 16, 24, 24]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>)
+  %51 = low.op<amdgpu.ds_read_b64>(%29) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 8, 8]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %53 = low.op<amdgpu.ds_read_b64>(%29) {offset = 16} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 16, 16, 24, 24]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.op<amdgpu.ds_write_b64>(%29, %51) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 8, 8]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>)
+  low.op<amdgpu.ds_write_b64>(%29, %53) {offset = 16} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 16, 16, 24, 24]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>)
+  low.op<amdgpu.ds_write_b32>(%29, %25) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 4, 4]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  low.op<amdgpu.ds_write_b32>(%29, %25) {offset = 1024} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 1024, 1024, 1028, 1028]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %64 = low.op<amdgpu.ds_read_b32>(%29) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 4, 4]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  %66 = low.op<amdgpu.ds_read_b32>(%29) {offset = 1024} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 1024, 1024, 1028, 1028]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.op<amdgpu.ds_write_b32>(%29, %64) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 4, 4]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  low.op<amdgpu.ds_write_b32>(%29, %66) {offset = 1024} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 1024, 1024, 1028, 1028]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  low.op<amdgpu.ds_write_b64>(%29, %46) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 8, 8]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>)
+  low.op<amdgpu.ds_write_b64>(%29, %48) {offset = 2048} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 2048, 2048, 2056, 2056]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>)
+  %77 = low.op<amdgpu.ds_read_b64>(%29) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 8, 8]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %79 = low.op<amdgpu.ds_read_b64>(%29) {offset = 2048} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 2048, 2048, 2056, 2056]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.op<amdgpu.ds_write_b64>(%29, %77) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 8, 8]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>)
+  low.op<amdgpu.ds_write_b64>(%29, %79) {offset = 2048} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 2048, 2048, 2056, 2056]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>)
+  %word = v_mov_b32 16843009
+  low.op<amdgpu.ds_write_b32>(%lane, %word) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 31, 4, 35]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %loaded_word = low.op<amdgpu.ds_read_b32>(%lane) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 31, 4, 35]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.op<amdgpu.ds_write_b32>(%lane, %loaded_word) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 31, 4, 35]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  return
+}
+
+// ====
+
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @b0_retains_native_lds_packets() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %scratch_base = index.constant 0 : offset
+  %bytes = index.constant 4096 : offset
+  %regular_b32_layout = encoding.layout.strided [8, 2] : encoding<layout>
+  %regular_b64_layout = encoding.layout.strided [4, 2] : encoding<layout>
+  %stride64_layout = encoding.layout.strided [512, 256] : encoding<layout>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %regular_b32 = buffer.view %scratch[%scratch_base] : buffer -> view<1x2xi32, %regular_b32_layout>
+  %regular_b64 = buffer.view %scratch[%scratch_base] : buffer -> view<1x2xi64, %regular_b64_layout>
+  %stride64_b32 = buffer.view %scratch[%scratch_base] : buffer -> view<1x2xi32, %stride64_layout>
+  %stride64_b64 = buffer.view %scratch[%scratch_base] : buffer -> view<1x2xi64, %stride64_layout>
+  %dense = buffer.view %scratch[%scratch_base] : buffer -> view<4096xi8>
+  %pair_b32 = vector.constant 1 : vector<2xi32>
+  %pair_b64 = vector.constant 1 : vector<2xi64>
+  vector.store %pair_b32, %regular_b32[0, 0] : vector<2xi32>, view<1x2xi32, %regular_b32_layout>
+  %loaded_regular_b32 = vector.load %regular_b32[0, 0] : view<1x2xi32, %regular_b32_layout> -> vector<2xi32>
+  vector.store %loaded_regular_b32, %regular_b32[0, 0] : vector<2xi32>, view<1x2xi32, %regular_b32_layout>
+  vector.store %pair_b64, %regular_b64[0, 0] : vector<2xi64>, view<1x2xi64, %regular_b64_layout>
+  %loaded_regular_b64 = vector.load %regular_b64[0, 0] : view<1x2xi64, %regular_b64_layout> -> vector<2xi64>
+  vector.store %loaded_regular_b64, %regular_b64[0, 0] : vector<2xi64>, view<1x2xi64, %regular_b64_layout>
+  vector.store %pair_b32, %stride64_b32[0, 0] : vector<2xi32>, view<1x2xi32, %stride64_layout>
+  %loaded_stride64_b32 = vector.load %stride64_b32[0, 0] : view<1x2xi32, %stride64_layout> -> vector<2xi32>
+  vector.store %loaded_stride64_b32, %stride64_b32[0, 0] : vector<2xi32>, view<1x2xi32, %stride64_layout>
+  vector.store %pair_b64, %stride64_b64[0, 0] : vector<2xi64>, view<1x2xi64, %stride64_layout>
+  %loaded_stride64_b64 = vector.load %stride64_b64[0, 0] : view<1x2xi64, %stride64_layout> -> vector<2xi64>
+  vector.store %loaded_stride64_b64, %stride64_b64[0, 0] : vector<2xi64>, view<1x2xi64, %stride64_layout>
+  %word = vector.constant 1 : vector<4xi8>
+  vector.store %word, %dense[%lane] : vector<4xi8>, view<4096xi8>
+  %loaded_word = vector.load %dense[%lane] : view<4096xi8> -> vector<4xi8>
+  vector.store %loaded_word, %dense[%lane] : vector<4xi8>, view<4096xi8>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @b0_retains_native_lds_packets() asm {
+  %23 = storage {byte_alignment = 16, byte_length = 4096} : low.storage<workgroup>
+  %25 = v_mov_b32 1
+  %29 = v_mov_b32 0
+  %pair_b64 = concat(%25, %29, %25, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  low.op<amdgpu.ds_write2_b32>(%29, %25, %25) {offset0 = 0, offset1 = 2} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 12, 12]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %loaded_regular_b32 = low.op<amdgpu.ds_read2_b32>(%29) {offset0 = 0, offset1 = 2} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 12, 12]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %39 = slice %loaded_regular_b32[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %40 = slice %loaded_regular_b32[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  low.op<amdgpu.ds_write2_b32>(%29, %39, %40) {offset0 = 0, offset1 = 2} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 12, 12]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %42 = slice %pair_b64[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %43 = slice %pair_b64[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  low.op<amdgpu.ds_write2_b64>(%29, %42, %43) {offset0 = 0, offset1 = 2} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 24, 24]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>)
+  %loaded_regular_b64 = low.op<amdgpu.ds_read2_b64>(%29) {offset0 = 0, offset1 = 2} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 24, 24]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %47 = slice %loaded_regular_b64[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %48 = slice %loaded_regular_b64[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  low.op<amdgpu.ds_write2_b64>(%29, %47, %48) {offset0 = 0, offset1 = 2} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 24, 24]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>)
+  low.op<amdgpu.ds_write2st64_b32>(%29, %25, %25) {offset0 = 0, offset1 = 4} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 1028, 1028]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %loaded_stride64_b32 = low.op<amdgpu.ds_read2st64_b32>(%29) {offset0 = 0, offset1 = 4} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 1028, 1028]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %55 = slice %loaded_stride64_b32[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %56 = slice %loaded_stride64_b32[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  low.op<amdgpu.ds_write2st64_b32>(%29, %55, %56) {offset0 = 0, offset1 = 4} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 1028, 1028]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  low.op<amdgpu.ds_write2st64_b64>(%29, %42, %43) {offset0 = 0, offset1 = 4} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 2056, 2056]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>)
+  %loaded_stride64_b64 = low.op<amdgpu.ds_read2st64_b64>(%29) {offset0 = 0, offset1 = 4} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 2056, 2056]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %63 = slice %loaded_stride64_b64[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %64 = slice %loaded_stride64_b64[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  low.op<amdgpu.ds_write2st64_b64>(%29, %63, %64) {offset0 = 0, offset1 = 4} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 2056, 2056]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>)
+  %word = v_mov_b32 16843009
+  %66 = s_mov_b32_m0_imm 0
+  low.op<amdgpu.ds_write_addtid_b32>(%word, %66) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 31, 4, 35]) : (reg<amdgpu.vgpr>, reg<amdgpu.m0>)
+  %67 = s_mov_b32_m0_imm 0
+  %loaded_word = low.op<amdgpu.ds_read_addtid_b32>(%67) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 31, 4, 35]) : (reg<amdgpu.m0>) -> reg<amdgpu.vgpr>
+  %69 = s_mov_b32_m0_imm 0
+  low.op<amdgpu.ds_write_addtid_b32>(%loaded_word, %69) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 31, 4, 35]) : (reg<amdgpu.vgpr>, reg<amdgpu.m0>)
+  return
+}

@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/codegen/low/repr.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/error/diagnostic.h"
 #include "loom/format/bytecode/format.h"
@@ -16,7 +17,7 @@
 #include "loom/ir/module.h"
 
 enum {
-  LOOM_RUN_DEFAULT_BLOCK_POOL_BLOCK_SIZE = 32 * 1024,
+  LOOM_RUN_DEFAULT_BLOCK_POOL_BLOCK_SIZE = 128 * 1024,
   LOOM_RUN_DEFAULT_MAX_PARSE_ERRORS = 20,
 };
 
@@ -39,6 +40,15 @@ iree_status_t loom_run_session_initialize(
       options->block_pool_block_size == 0
           ? LOOM_RUN_DEFAULT_BLOCK_POOL_BLOCK_SIZE
           : options->block_pool_block_size;
+  if (IREE_UNLIKELY(block_pool_block_size < sizeof(iree_arena_block_t))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "session block pool size is too small");
+  }
+  if (IREE_UNLIKELY(
+          !iree_arena_block_pool_is_valid_total_size(block_pool_block_size))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "session block pool size is too large");
+  }
   iree_arena_block_pool_initialize(
       block_pool_block_size, options->host_allocator, &out_session->block_pool);
   out_session->block_pool_initialized = true;
@@ -150,6 +160,9 @@ static iree_status_t loom_run_module_read_bytecode(
       .verify_module = false,
       .verify_max_errors = options->max_errors,
   };
+  loom_low_repr_environment_initialize(
+      &session->low_descriptor_registry.registry,
+      &read_options.low_repr_environment);
   loom_bytecode_read_result_t read_result = {0};
   IREE_RETURN_IF_ERROR(loom_bytecode_read_module(
       bytecode, options->filename, &session->context, &session->block_pool,
@@ -190,12 +203,12 @@ void loom_run_module_deinitialize(loom_run_module_t* run_module) {
 }
 
 loom_source_resolver_t loom_run_module_source_resolver(
-    loom_run_module_t* run_module) {
+    const loom_run_module_t* run_module) {
   if (run_module == NULL || !run_module->has_source_entry) {
     return (loom_source_resolver_t){0};
   }
   return (loom_source_resolver_t){
       .fn = loom_source_table_resolve,
-      .user_data = &run_module->source_table_resolver,
+      .user_data = (void*)&run_module->source_table_resolver,
   };
 }

@@ -51,6 +51,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/async/util:intrusive_list",
         "//runtime/src/iree/async/util:message_pool",
         "//runtime/src/iree/async/util:operation_pool",
+        "//runtime/src/iree/async/util:semaphore_wait",
         "//runtime/src/iree/async/util:sequence_emulation",
         "//runtime/src/iree/async/util:signal",
         "//runtime/src/iree/base",
@@ -96,6 +97,7 @@ iree_runtime_cc_library(
         ":defs",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
     ],
 )
 
@@ -128,6 +130,20 @@ iree_runtime_cc_test(
     deps = [
         ":defs",
         ":uring",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "proactor_lifetime_test",
+    srcs = ["proactor_lifetime_test.cc"],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":io_uring",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:types",
+        "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

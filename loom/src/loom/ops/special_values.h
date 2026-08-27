@@ -21,7 +21,7 @@
 extern "C" {
 #endif
 
-// Returns true when |op| is one of the typed poison materialization ops.
+// Returns true when |op| carries the poison materializer trait.
 bool loom_op_is_poison(const loom_op_t* op);
 
 // Returns true when |value_id| is defined by a typed poison op in |module|.

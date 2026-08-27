@@ -13,7 +13,7 @@ func.def target(@target) @scalar_f32_minnum_maxnum(%lhs: f32, %rhs: f32) -> (f32
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scalar_f32_minnum_maxnum(%lhs: reg<llvmir.f32>, %rhs: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_f32_minnum_maxnum(%lhs: reg<llvmir.f32>, %rhs: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
   %min = minnum.f32 %lhs, %rhs
   %max = maxnum.f32 %lhs, %rhs
   %sum = add.f32 %min, %max
@@ -34,7 +34,7 @@ func.def target(@target) @vector_f32_minnum_maxnum(%lhs: vector<2xf32>, %rhs: ve
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @vector_f32_minnum_maxnum(%lhs: reg<llvmir.f32 x2>, %rhs: reg<llvmir.f32 x2>) -> (reg<llvmir.f32 x2>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @vector_f32_minnum_maxnum(%lhs: reg<llvmir.f32 x2>, %rhs: reg<llvmir.f32 x2>) -> (reg<llvmir.f32 x2>) asm {
   %min = minnum.v2f32 %lhs, %rhs
   %max = maxnum.v2f32 %lhs, %rhs
   %sum = add.v2f32 %min, %max
@@ -55,7 +55,7 @@ func.def target(@target) @scalar_f32_clampf_number(%input: f32) -> (f32) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scalar_f32_clampf_number(%input: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_f32_clampf_number(%input: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
   %lower = const.f32 3212836864
   %upper = const.f32 1065353216
   %9 = maxnum.f32 %input, %lower
@@ -77,7 +77,7 @@ func.def target(@target) @vector_f32_clampf_number(%input: vector<2xf32>) -> (ve
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @vector_f32_clampf_number(%input: reg<llvmir.f32 x2>) -> (reg<llvmir.f32 x2>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @vector_f32_clampf_number(%input: reg<llvmir.f32 x2>) -> (reg<llvmir.f32 x2>) asm {
   %lower = const.v2f32 3212836864
   %upper = const.v2f32 1065353216
   %9 = maxnum.v2f32 %input, %lower
@@ -97,7 +97,7 @@ func.def target(@target) @scalar_f32_clampf_ordered(%input: f32, %lower: f32, %u
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scalar_f32_clampf_ordered(%input: reg<llvmir.f32>, %lower: reg<llvmir.f32>, %upper: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_f32_clampf_ordered(%input: reg<llvmir.f32>, %lower: reg<llvmir.f32>, %upper: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
   %9 = cmp.olt.f32 %input, %lower
   %10 = select.f32 %9, %lower, %input
   %11 = cmp.ogt.f32 %10, %upper
@@ -117,7 +117,7 @@ func.def target(@target) @vector_f32_clampf_ordered(%input: vector<2xf32>, %lowe
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @vector_f32_clampf_ordered(%input: reg<llvmir.f32 x2>, %lower: reg<llvmir.f32 x2>, %upper: reg<llvmir.f32 x2>) -> (reg<llvmir.f32 x2>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @vector_f32_clampf_ordered(%input: reg<llvmir.f32 x2>, %lower: reg<llvmir.f32 x2>, %upper: reg<llvmir.f32 x2>) -> (reg<llvmir.f32 x2>) asm {
   %9 = cmp.olt.v2f32 %input, %lower
   %10 = select.v2f32 %9, %lower, %input
   %11 = cmp.ogt.v2f32 %10, %upper
@@ -132,8 +132,8 @@ llvmir.target<object> @target {
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
 func.def target(@target) @index_minmax_sgpr(%lhs0: index, %rhs0: index) -> (index) {
-  %lhs = index.assume %lhs0 [range(%lhs0, 0, 1024)] : index
-  %rhs = index.assume %rhs0 [range(%rhs0, 0, 1024)] : index
+  %lhs = index.assume %lhs0 [range(%lhs0, -1024, 1024)] : index
+  %rhs = index.assume %rhs0 [range(%rhs0, -1024, 1024)] : index
   %min = index.min %lhs, %rhs : index
   %max = index.max %lhs, %rhs : index
   %sum = index.add %min, %max : index
@@ -141,7 +141,7 @@ func.def target(@target) @index_minmax_sgpr(%lhs0: index, %rhs0: index) -> (inde
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @index_minmax_sgpr(%lhs: reg<llvmir.i64>, %rhs: reg<llvmir.i64>) -> (reg<llvmir.i64>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @index_minmax_sgpr(%lhs: reg<llvmir.i64>, %rhs: reg<llvmir.i64>) -> (reg<llvmir.i64>) asm {
   %11 = cmp.slt.i64 %lhs, %rhs
   %min = select.i64 %11, %lhs, %rhs
   %13 = cmp.sgt.i64 %lhs, %rhs
@@ -163,7 +163,7 @@ func.def target(@target) @scf_select_sgpr(%lhs: i32, %rhs: i32, %a: i32, %b: i32
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scf_select_sgpr(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %a: reg<llvmir.i32>, %b: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scf_select_sgpr(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %a: reg<llvmir.i32>, %b: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm {
   %cond = cmp.slt.i32 %lhs, %rhs
   %selected = select.i32 %cond, %a, %b
   return %selected
@@ -182,10 +182,49 @@ func.def target(@target) @scf_select_i64_sgpr(%lhs: i32, %rhs: i32, %a: i64, %b:
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scf_select_i64_sgpr(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %a: reg<llvmir.i64>, %b: reg<llvmir.i64>) -> (reg<llvmir.i64>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scf_select_i64_sgpr(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %a: reg<llvmir.i64>, %b: reg<llvmir.i64>) -> (reg<llvmir.i64>) asm {
   %cond = cmp.slt.i32 %lhs, %rhs
   %selected = select.i64 %cond, %a, %b
   return %selected
+}
+
+// ====
+
+// XFAIL: LLVMIR narrow integer scf.select forms are unsupported
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scf_select_q6_nibble_i8(%code: i32, %use_high: i32) -> (i8) {
+  %low_selector = scalar.constant 0 : i32
+  %nibble_shift = scalar.constant 4 : i32
+  %mask = scalar.constant 15 : i32
+  %high_shifted = scalar.shrui %code, %nibble_shift : i32
+  %low_i32 = scalar.andi %code, %mask : i32
+  %high_i32 = scalar.andi %high_shifted, %mask : i32
+  %low = scalar.trunci %low_i32 : i32 to i8
+  %high = scalar.trunci %high_i32 : i32 to i8
+  %cond = scalar.cmpi ne, %use_high, %low_selector : i32
+  %selected = scf.select %cond, %high, %low : i8
+  func.return %selected : i8
+}
+
+// ====
+
+// XFAIL: LLVMIR narrow integer scf.select forms are unsupported
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scf_select_scale_piece_i16(%packed: i32, %use_high: i32) -> (i16) {
+  %low_selector = scalar.constant 0 : i32
+  %halfword_shift = scalar.constant 16 : i32
+  %low = scalar.trunci %packed : i32 to i16
+  %high_shifted = scalar.shrui %packed, %halfword_shift : i32
+  %high = scalar.trunci %high_shifted : i32 to i16
+  %cond = scalar.cmpi ne, %use_high, %low_selector : i32
+  %selected = scf.select %cond, %high, %low : i16
+  func.return %selected : i16
 }
 
 // ====
@@ -201,7 +240,7 @@ func.def target(@target) @scf_select_vgpr(%lhs: f32, %rhs: f32, %a: f32, %b: f32
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scf_select_vgpr(%lhs: reg<llvmir.f32>, %rhs: reg<llvmir.f32>, %a: reg<llvmir.f32>, %b: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scf_select_vgpr(%lhs: reg<llvmir.f32>, %rhs: reg<llvmir.f32>, %a: reg<llvmir.f32>, %b: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
   %cond = cmp.olt.f32 %lhs, %rhs
   %selected = select.f32 %cond, %a, %b
   return %selected
@@ -223,7 +262,7 @@ func.def target(@target) @scf_select_chained_vgpr_i32(%values: vector<2xi32>, %l
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scf_select_chained_vgpr_i32(%values: reg<llvmir.i32 x2>, %limit: reg<llvmir.i32>, %fallback: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scf_select_chained_vgpr_i32(%values: reg<llvmir.i32 x2>, %limit: reg<llvmir.i32>, %fallback: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm {
   %lane = extract.v2i32 %values, 0
   %is_lane = cmp.slt.i32 %lane, %limit
   %selected = select.i32 %is_lane, %lane, %fallback
@@ -235,37 +274,368 @@ low.func.def target(@target) abi(object_function) @scf_select_chained_vgpr_i32(%
 // ====
 
 llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scf_select_tail_zero_i32(%values: vector<2xi32>, %limit: i32) -> (i32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %tail_fill = scalar.constant 0 : i32
+  %cond = scalar.cmpi slt, %lane, %limit : i32
+  %selected = scf.select %cond, %lane, %tail_fill : i32
+  func.return %selected : i32
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scf_select_tail_zero_i32(%values: reg<llvmir.i32 x2>, %limit: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm {
+  %lane = extract.v2i32 %values, 0
+  %tail_fill = const.i32 0
+  %cond = cmp.slt.i32 %lane, %limit
+  %selected = select.i32 %cond, %lane, %tail_fill
+  return %selected
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scf_select_vgpr_i64(%values: vector<2xi32>, %limit: i32, %fallback: i32) -> (i64) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %wide_lane = scalar.extsi %lane : i32 to i64
+  %wide_fallback = scalar.extsi %fallback : i32 to i64
+  %cond = scalar.cmpi slt, %lane, %limit : i32
+  %selected = scf.select %cond, %wide_lane, %wide_fallback : i64
+  func.return %selected : i64
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scf_select_vgpr_i64(%values: reg<llvmir.i32 x2>, %limit: reg<llvmir.i32>, %fallback: reg<llvmir.i32>) -> (reg<llvmir.i64>) asm {
+  %lane = extract.v2i32 %values, 0
+  %wide_lane = sext.i32.i64 %lane
+  %wide_fallback = sext.i32.i64 %fallback
+  %cond = cmp.slt.i32 %lane, %limit
+  %selected = select.i64 %cond, %wide_lane, %wide_fallback
+  return %selected
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scf_select_vgpr_extui_i64(%values: vector<2xi32>, %limit: i32, %fallback: i32) -> (i64) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %wide_lane = scalar.extui %lane : i32 to i64
+  %wide_fallback = scalar.extui %fallback : i32 to i64
+  %cond = scalar.cmpi slt, %lane, %limit : i32
+  %selected = scf.select %cond, %wide_lane, %wide_fallback : i64
+  func.return %selected : i64
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scf_select_vgpr_extui_i64(%values: reg<llvmir.i32 x2>, %limit: reg<llvmir.i32>, %fallback: reg<llvmir.i32>) -> (reg<llvmir.i64>) asm {
+  %lane = extract.v2i32 %values, 0
+  %wide_lane = zext.i32.i64 %lane
+  %wide_fallback = zext.i32.i64 %fallback
+  %cond = cmp.slt.i32 %lane, %limit
+  %selected = select.i64 %cond, %wide_lane, %wide_fallback
+  return %selected
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scf_select_vector_extract_i64(%values: vector<2xi64>, %guards: vector<2xi32>, %limit: i32, %fallback: i64) -> (i64) {
+  %lane = vector.extract %guards[0] : vector<2xi32> -> i32
+  %extracted = vector.extract %values[0] : vector<2xi64> -> i64
+  %cond = scalar.cmpi slt, %lane, %limit : i32
+  %selected = scf.select %cond, %extracted, %fallback : i64
+  func.return %selected : i64
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scf_select_vector_extract_i64(%values: reg<llvmir.i64 x2>, %guards: reg<llvmir.i32 x2>, %limit: reg<llvmir.i32>, %fallback: reg<llvmir.i64>) -> (reg<llvmir.i64>) asm {
+  %lane = extract.v2i32 %guards, 0
+  %extracted = extract.v2i64 %values, 0
+  %cond = cmp.slt.i32 %lane, %limit
+  %selected = select.i64 %cond, %extracted, %fallback
+  return %selected
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scf_select_i1_mask_condition(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %lane_condition = scalar.cmpi slt, %lane, %limit : i32
+  %selected_condition = scf.select %lane_condition, %lane_condition, %fallback_condition : i1
+  %result = scf.select %selected_condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scf_select_i1_mask_condition(%values: reg<llvmir.i32 x2>, %limit: reg<llvmir.i32>, %fallback_condition: reg<llvmir.i1>, %true_value: reg<llvmir.f32>, %false_value: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
+  %lane = extract.v2i32 %values, 0
+  %lane_condition = cmp.slt.i32 %lane, %limit
+  %selected_condition = select.i1 %lane_condition, %lane_condition, %fallback_condition
+  %result = select.f32 %selected_condition, %true_value, %false_value
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scf_select_i1_false_condition(%values: vector<2xi32>, %limit: i32, %upper: i32, %true_value: f32, %false_value: f32) -> (f32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %lane_condition = scalar.cmpi slt, %lane, %limit : i32
+  %inside_upper = scalar.cmpi slt, %lane, %upper : i32
+  %selected_condition = scf.select %lane_condition, %inside_upper, %lane_condition : i1
+  %result = scf.select %selected_condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scf_select_i1_false_condition(%values: reg<llvmir.i32 x2>, %limit: reg<llvmir.i32>, %upper: reg<llvmir.i32>, %true_value: reg<llvmir.f32>, %false_value: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
+  %lane = extract.v2i32 %values, 0
+  %lane_condition = cmp.slt.i32 %lane, %limit
+  %inside_upper = cmp.slt.i32 %lane, %upper
+  %selected_condition = select.i1 %lane_condition, %inside_upper, %lane_condition
+  %result = select.f32 %selected_condition, %true_value, %false_value
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scf_select_i1_assume_second_condition(%values: vector<2xi32>, %limit: i32, %upper: i32, %true_value: f32, %false_value: f32) -> (f32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %lane_condition = scalar.cmpi slt, %lane, %limit : i32
+  %scalar_condition = scalar.cmpi slt, %limit, %upper : i32
+  %checked_lane_condition, %checked_scalar_condition = scalar.assume %lane_condition, %scalar_condition [] : i1, i1
+  %result = scf.select %checked_scalar_condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scf_select_i1_assume_second_condition(%values: reg<llvmir.i32 x2>, %limit: reg<llvmir.i32>, %upper: reg<llvmir.i32>, %true_value: reg<llvmir.f32>, %false_value: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
+  %checked_scalar_condition = cmp.slt.i32 %limit, %upper
+  %result = select.f32 %checked_scalar_condition, %true_value, %false_value
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scf_select_i1_true_false_constants(%values: vector<2xi32>, %limit: i32, %true_value: f32, %false_value: f32) -> (f32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %lane_condition = scalar.cmpi slt, %lane, %limit : i32
+  %true = scalar.constant true : i1
+  %false = scalar.constant false : i1
+  %selected_condition = scf.select %lane_condition, %true, %false : i1
+  %result = scf.select %selected_condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scf_select_i1_true_false_constants(%values: reg<llvmir.i32 x2>, %limit: reg<llvmir.i32>, %true_value: reg<llvmir.f32>, %false_value: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
+  %lane = extract.v2i32 %values, 0
+  %lane_condition = cmp.slt.i32 %lane, %limit
+  %result = select.f32 %lane_condition, %true_value, %false_value
+  return %result
+}
+
+// ====
+
+// XFAIL: LLVMIR i1 scalar constants are unsupported
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scf_select_i1_false_true_constants(%values: vector<2xi32>, %limit: i32, %true_value: f32, %false_value: f32) -> (f32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %lane_condition = scalar.cmpi slt, %lane, %limit : i32
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %selected_condition = scf.select %lane_condition, %false, %true : i1
+  %result = scf.select %selected_condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ====
+
+// XFAIL: LLVMIR i1 scalar constants are unsupported
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scf_select_i1_true_payload(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %lane_condition = scalar.cmpi slt, %lane, %limit : i32
+  %true = scalar.constant true : i1
+  %selected_condition = scf.select %lane_condition, %true, %fallback_condition : i1
+  %result = scf.select %selected_condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ====
+
+// XFAIL: LLVMIR i1 scalar constants are unsupported
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scf_select_i1_false_payload(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %lane_condition = scalar.cmpi slt, %lane, %limit : i32
+  %false = scalar.constant false : i1
+  %selected_condition = scf.select %lane_condition, %false, %fallback_condition : i1
+  %result = scf.select %selected_condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ====
+
+// XFAIL: LLVMIR i1 scalar constants are unsupported
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scf_select_i1_true_fallback(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %lane_condition = scalar.cmpi slt, %lane, %limit : i32
+  %true = scalar.constant true : i1
+  %selected_condition = scf.select %lane_condition, %fallback_condition, %true : i1
+  %result = scf.select %selected_condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ====
+
+// XFAIL: LLVMIR i1 scalar constants are unsupported
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scf_select_i1_false_fallback(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %lane_condition = scalar.cmpi slt, %lane, %limit : i32
+  %false = scalar.constant false : i1
+  %selected_condition = scf.select %lane_condition, %fallback_condition, %false : i1
+  %result = scf.select %selected_condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scf_select_i1_true_condition(%true_value: f32, %false_value: f32) -> (f32) {
+  %condition = scalar.constant true : i1
+  %result = scf.select %condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scf_select_i1_true_condition(%true_value: reg<llvmir.f32>, %false_value: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
+  return %true_value
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scf_select_i1_false_condition_constant(%true_value: f32, %false_value: f32) -> (f32) {
+  %condition = scalar.constant false : i1
+  %result = scf.select %condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scf_select_i1_false_condition_constant(%true_value: reg<llvmir.f32>, %false_value: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
+  return %false_value
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scf_select_i1_scc_condition(%lhs: i32, %rhs: i32, %alt: i32, %true_value: f32, %false_value: f32) -> (f32) {
+  %inactive_condition = scalar.constant 0 : i32
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %lhs_nonzero = scalar.cmpi ne, %lhs, %inactive_condition : i32
+  %alt_nonzero = scalar.cmpi ne, %alt, %inactive_condition : i32
+  %selected_condition = scf.select %condition, %lhs_nonzero, %alt_nonzero : i1
+  %result = scf.select %selected_condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scf_select_i1_scc_condition(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %alt: reg<llvmir.i32>, %true_value: reg<llvmir.f32>, %false_value: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
+  %inactive_condition = const.i32 0
+  %condition = cmp.slt.i32 %lhs, %rhs
+  %lhs_nonzero = cmp.ne.i32 %lhs, %inactive_condition
+  %alt_nonzero = cmp.ne.i32 %alt, %inactive_condition
+  %selected_condition = select.i1 %condition, %lhs_nonzero, %alt_nonzero
+  %result = select.f32 %selected_condition, %true_value, %false_value
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {
   triple = "amdgcn-amd-amdhsa"
 }
 kernel.def target(@target) @index_minmax_vgpr_select() {
-  %c1 = index.constant 1 : index
-  %c64 = index.constant 64 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%output: buffer) {
-  %tid0 = kernel.workitem.id<x> : index
-  %tid = index.assume %tid0 [range(%tid0, 0, 63)] : index
+  %lane = kernel.workitem.id<x> : index
   %limit = index.constant 31 : index
-  %min = index.min %tid, %limit : index
-  %max = index.max %tid, %limit : index
-  %cond = index.cmp slt, %tid, %limit : index
+  %min = index.min %lane, %limit : index
+  %max = index.max %lane, %limit : index
+  %cond = index.cmp slt, %lane, %limit : index
   %selected = scf.select %cond, %min, %max : index
-  %zero = index.constant 0 : offset
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xi32, #dense>
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<64xi32>
   %stored = vector.constant 1 : vector<1xi32>
-  vector.store %stored, %output_view[%selected] : vector<1xi32>, view<64xi32, #dense>
+  vector.store %stored, %output_view[%selected] : vector<1xi32>, view<64xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @index_minmax_vgpr_select() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @index_minmax_vgpr_select() asm {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
-  %tid = kernel.workitem_id.x
+  %lane = kernel.workitem_id.x
   %limit = const.i64 31
-  %16 = cmp.slt.i64 %tid, %limit
-  %min = select.i64 %16, %tid, %limit
-  %18 = cmp.sgt.i64 %tid, %limit
-  %max = select.i64 %18, %tid, %limit
-  %selected = select.i64 %16, %min, %max
+  %15 = cmp.slt.i64 %lane, %limit
+  %min = select.i64 %15, %lane, %limit
+  %17 = cmp.sgt.i64 %lane, %limit
+  %max = select.i64 %17, %lane, %limit
+  %selected = select.i64 %15, %min, %max
   %stored = const.i32 1
   store.indexed.i32 %stored, %output_view, %selected, 0, 4
   return
@@ -278,21 +648,21 @@ llvmir.target<object> @target {
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
 func.def target(@target) @f32_reduce_minnum_maxnum(%input: buffer, %output: buffer) {
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<4xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<2xf32, #dense>
-  %loaded = vector.load %input_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<2xf32>
+  %loaded = vector.load %input_view[0] : view<4xf32> -> vector<4xf32>
   %min_init = scalar.constant 1000.0 : f32
   %min = vector.reduce<minnumf, reassoc|nnan|nsz> %loaded, %min_init : vector<4xf32>, f32
   %max_init = scalar.constant -1000.0 : f32
   %max = vector.reduce<maxnumf, reassoc|nnan|nsz> %loaded, %max_init : vector<4xf32>, f32
   %stored = vector.from_elements %min, %max : vector<2xf32>
-  vector.store %stored, %output_view[0] : vector<2xf32>, view<2xf32, #dense>
+  vector.store %stored, %output_view[0] : vector<2xf32>, view<2xf32>
   func.return
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32_reduce_minnum_maxnum(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32_reduce_minnum_maxnum(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm {
   %min_init = const.f32 1148846080
   %30 = load.f32 %input_view, 0
   %31 = load.f32 %input_view, 4

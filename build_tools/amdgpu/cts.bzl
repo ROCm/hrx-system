@@ -9,13 +9,12 @@
 load("//build_tools/amdgpu:binary.bzl", "iree_amdgpu_binary")
 load(
     "//build_tools/amdgpu:selectors.bzl",
-    "iree_amdgpu_exact_target_selector_config_settings",
     "iree_amdgpu_target_label_fragment",
+    "iree_amdgpu_target_selector_config_settings",
 )
 load(
     "//build_tools/amdgpu:target_map.bzl",
-    "IREE_AMDGPU_EXACT_TARGETS",
-    "IREE_AMDGPU_EXACT_TARGET_CODE_OBJECTS",
+    "IREE_AMDGPU_CODE_OBJECT_TARGETS",
 )
 load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
@@ -34,13 +33,10 @@ def _source_stem(src):
         fail("AMDGPU CTS executable source must be a C file: {}".format(src))
     return filename[:-2]
 
-def _target_deps(deps, exact_target, code_object_target):
-    exact_target_fragment = iree_amdgpu_target_label_fragment(exact_target)
+def _target_deps(deps, code_object_target):
     code_object_target_fragment = iree_amdgpu_target_label_fragment(code_object_target)
     return [
-        dep.replace("{AMDGPU_TARGET}", exact_target)
-            .replace("{AMDGPU_TARGET_FRAGMENT}", exact_target_fragment)
-            .replace("{AMDGPU_CODE_OBJECT_TARGET}", code_object_target)
+        dep.replace("{AMDGPU_CODE_OBJECT_TARGET}", code_object_target)
             .replace("{AMDGPU_CODE_OBJECT_TARGET_FRAGMENT}", code_object_target_fragment)
         for dep in deps
     ]
@@ -65,24 +61,26 @@ _registration = rule(
 def _generate_registration(
         name,
         header,
-        format_name,
-        format_string,
+        target_name,
+        target_family,
+        target_key,
         identifier,
         backend_name,
         testonly):
     registration = "%s.cc" % name
     _registration(
         name = "%s_gen" % name,
-        template = "//runtime/src/iree/hal/cts/util:testdata_format.cc.tpl",
+        template = "//runtime/src/iree/hal/cts/util:testdata_target.cc.tpl",
         out = registration,
         substitutions = {
             "{BACKEND_NAME}": backend_name,
-            "{FORMAT_FUNC_NAME}": _camel_case(format_name),
-            "{FORMAT_NAME}": format_name,
-            "{FORMAT_STRING}": format_string,
-            "{FORMAT_VAR_NAME}": "%s_format" % format_name,
             "{HEADER_PATH}": "%s/%s" % (native.package_name(), header),
             "{IDENTIFIER}": identifier,
+            "{TARGET_FAMILY}": target_family,
+            "{TARGET_FUNC_NAME}": _camel_case(target_name),
+            "{TARGET_KEY}": target_key,
+            "{TARGET_NAME}": target_name,
+            "{TARGET_VAR_NAME}": "%s_target" % target_name,
         },
         testonly = testonly,
     )
@@ -92,10 +90,10 @@ def iree_amdgpu_hal_cts_testdata(
         name,
         srcs,
         target_selectors_flag,
-        format_name,
-        format_string,
+        target_name,
         identifier,
         backend_name = "amdgpu",
+        target_family = "amdgpu",
         target = "amdgcn-amd-amdhsa",
         deps = [],
         internal_hdrs = [],
@@ -109,35 +107,32 @@ def iree_amdgpu_hal_cts_testdata(
       srcs: C sources. Each source basename maps to `<basename>.bin` in the CTS
         executable-data table of contents.
       target_selectors_flag: AMDGPU target selector build setting.
-      format_name: CTS executable format prefix.
-      format_string: HAL executable format string with `{AMDGPU_TARGET}`.
+      target_name: CTS executable target prefix.
       identifier: C identifier prefix for generated TOC functions.
       backend_name: CTS backend name.
+      target_family: HAL executable target family.
       target: LLVM target triple.
       deps: Bitcode archives passed to each generated executable. Labels may
-        use `{AMDGPU_TARGET}`, `{AMDGPU_TARGET_FRAGMENT}`,
-        `{AMDGPU_CODE_OBJECT_TARGET}`, or
+        use `{AMDGPU_CODE_OBJECT_TARGET}` or
         `{AMDGPU_CODE_OBJECT_TARGET_FRAGMENT}` placeholders to refer to the
-        exact target or code-object target being generated.
+        code-object target being generated.
       internal_hdrs: Headers that should invalidate device compilation.
       internalize: whether to internalize linked dependency symbols after lazy
         archive extraction.
       testonly: Whether generated targets are test-only.
       tags: Tags applied to generated device binaries and libraries.
     """
-    requested = iree_amdgpu_exact_target_selector_config_settings(
-        name = "%s_exact_target" % name,
+    target_settings = iree_amdgpu_target_selector_config_settings(
+        name = "%s_target" % name,
         flag = target_selectors_flag,
     )
 
     selected_target_libs = []
-    variant_token = "{AMDGPU_TARGET}"
-    for exact_target in IREE_AMDGPU_EXACT_TARGETS:
-        target_fragment = iree_amdgpu_target_label_fragment(exact_target)
-        code_object_target = IREE_AMDGPU_EXACT_TARGET_CODE_OBJECTS[exact_target]
+    for code_object_target in IREE_AMDGPU_CODE_OBJECT_TARGETS:
+        target_fragment = iree_amdgpu_target_label_fragment(code_object_target)
         target_identifier = "%s_%s" % (identifier, target_fragment)
         target_compatible_with = select({
-            requested[exact_target]: [],
+            target_settings.requested[code_object_target]: [],
             "//conditions:default": _INCOMPATIBLE_TARGET,
         })
         target_srcs = []
@@ -150,7 +145,7 @@ def iree_amdgpu_hal_cts_testdata(
                 target = target,
                 arch = code_object_target,
                 srcs = [src],
-                deps = _target_deps(deps, exact_target, code_object_target),
+                deps = _target_deps(deps, code_object_target),
                 internal_hdrs = internal_hdrs,
                 internalize = internalize,
                 out = binary_out,
@@ -174,12 +169,13 @@ def iree_amdgpu_hal_cts_testdata(
             target_compatible_with = target_compatible_with,
         )
 
-        target_format_name = "%s_%s" % (format_name, target_fragment)
+        registration_target_name = "%s_%s" % (target_name, target_fragment)
         registration = _generate_registration(
             name = "%s_%s_registration" % (name, target_fragment),
             header = header,
-            format_name = target_format_name,
-            format_string = format_string.replace(variant_token, exact_target),
+            target_name = registration_target_name,
+            target_family = target_family,
+            target_key = code_object_target,
             identifier = target_identifier,
             backend_name = backend_name,
             testonly = testonly,
@@ -198,7 +194,7 @@ def iree_amdgpu_hal_cts_testdata(
             target_compatible_with = target_compatible_with,
         )
         selected_target_libs = selected_target_libs + select({
-            requested[exact_target]: [":%s" % target_lib_name],
+            target_settings.requested[code_object_target]: [":%s" % target_lib_name],
             "//conditions:default": [],
         })
 

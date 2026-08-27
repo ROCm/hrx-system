@@ -9,11 +9,11 @@
 #include "iree/base/api.h"
 
 static iree_status_t iree_status_from_loomc_status(loomc_status_t status) {
-  return (iree_status_t)status;
+  return status;
 }
 
 static loomc_status_t loomc_status_from_iree_status(iree_status_t status) {
-  return (loomc_status_t)status;
+  return status;
 }
 
 loomc_status_t loomc_status_allocate(loomc_status_code_t code, const char* file,

@@ -30,8 +30,8 @@ TEST_P(TimerTest, BasicTimer) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &timer.base));
 
-  // Poll until the timer fires. 200ms budget should be plenty.
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(200));
+  // Poll until the timer fires.
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -57,7 +57,7 @@ TEST_P(TimerTest, ImmediateTimer) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &timer.base));
 
   // Should complete quickly since deadline is already passed.
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(100));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -117,7 +117,7 @@ TEST_P(TimerTest, MultipleTimersOrder) {
   IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
 
   // Wait for all three to complete.
-  PollUntil(/*min_completions=*/3, /*total_budget=*/iree_make_duration_ms(300));
+  PollUntil(/*min_completions=*/3);
 
   // Verify order: timer3 (25ms), timer2 (50ms), timer1 (100ms).
   ASSERT_EQ(order_tracker.order.size(), 3u);

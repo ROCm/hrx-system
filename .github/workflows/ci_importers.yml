@@ -20,8 +20,7 @@ on:
       - "requirements-importers-*.in"
       - "requirements-importers-*.lock.txt"
       - "build_tools/devtools/**"
-      - "loom/config/**"
-      - "loom/py/loom/importers/**"
+      - "loom/**"
   push:
     branches:
       - main
@@ -37,8 +36,11 @@ on:
       - "requirements-importers-*.in"
       - "requirements-importers-*.lock.txt"
       - "build_tools/devtools/**"
-      - "loom/config/**"
-      - "loom/py/loom/importers/**"
+      - "loom/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -46,10 +48,10 @@ permissions:
 jobs:
   linux_importer:
     name: ${{ matrix.name }}
-    runs-on: aws-linux-scale-rocm-prod
+    runs-on: azure-linux-scale-rocm
     timeout-minutes: 45
     container:
-      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
     strategy:
       fail-fast: false
       matrix:
@@ -59,6 +61,9 @@ jobs:
             command: iree-importers-tilelang
             lock_file: requirements-importers-tilelang.lock.txt
     env:
+      AR: ar
+      CC: clang
+      CXX: clang++
       HRX_ARTIFACT_SET: core
       HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/importers/downloads
       HRX_OUTPUT_DIR: ${{ github.workspace }}/build/importers
@@ -76,6 +81,11 @@ jobs:
 
       - name: Adjust git config
         run: git config --global --add safe.directory "$PWD"
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
 
       - name: Compute importer cache key
         id: importer-cache
@@ -129,8 +139,8 @@ jobs:
           cmake --version
           ctest --version
           ninja --version
-          clang --version
-          "${CC}" --version
+          bash .github/scripts/check_host_toolchain.sh
+          bash .github/scripts/check_rocm_device_toolchain.sh
           test -d "${HRX_ROCM_ROOT}/include"
           echo "Importer profile: ${IMPORTER_PROFILE}"
           echo "Importer lock: ${IMPORTER_LOCK_FILE}"

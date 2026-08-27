@@ -30,6 +30,7 @@ from loom.target.arch.amdgpu.encoding import (
     AMDGPU_ENCODING_FORMAT_FLAT,
     AMDGPU_ENCODING_FORMAT_MUBUF,
     AMDGPU_ENCODING_FORMAT_SOP1,
+    AMDGPU_ENCODING_FORMAT_SOP1_LITERAL,
     AMDGPU_ENCODING_FORMAT_SOP2,
     AMDGPU_ENCODING_FORMAT_SOP2_LITERAL,
     AMDGPU_ENCODING_FORMAT_SOPP,
@@ -39,19 +40,26 @@ from loom.target.arch.amdgpu.encoding import (
     AMDGPU_ENCODING_FORMAT_VGLOBAL,
     AMDGPU_ENCODING_FORMAT_VOP1,
     AMDGPU_ENCODING_FORMAT_VOP1_DPP,
+    AMDGPU_ENCODING_FORMAT_VOP1_DPP8,
     AMDGPU_ENCODING_FORMAT_VOP1_DPP16,
     AMDGPU_ENCODING_FORMAT_VOP1_LITERAL,
     AMDGPU_ENCODING_FORMAT_VOP1_SDWA,
     AMDGPU_ENCODING_FORMAT_VOP2,
     AMDGPU_ENCODING_FORMAT_VOP2_DPP,
+    AMDGPU_ENCODING_FORMAT_VOP2_DPP8,
     AMDGPU_ENCODING_FORMAT_VOP2_DPP16,
     AMDGPU_ENCODING_FORMAT_VOP2_LITERAL,
     AMDGPU_ENCODING_FORMAT_VOP3,
+    AMDGPU_ENCODING_FORMAT_VOP3_DPP8,
+    AMDGPU_ENCODING_FORMAT_VOP3_DPP16,
     AMDGPU_ENCODING_FORMAT_VOP3_LITERAL,
     AMDGPU_ENCODING_FORMAT_VOP3_SDST,
+    AMDGPU_ENCODING_FORMAT_VOP3_SDST_DPP8,
     AMDGPU_ENCODING_FORMAT_VOP3P,
+    AMDGPU_ENCODING_FORMAT_VOP3P_DPP8,
     AMDGPU_ENCODING_FORMAT_VOP3P_LITERAL,
     AMDGPU_ENCODING_FORMAT_VOP3PX2,
+    AMDGPU_ENCODING_FORMAT_VOPC_DPP8,
     AMDGPU_ENCODING_FORMAT_VSCRATCH,
     amdgpu_encoding_field_id,
     amdgpu_encoding_field_name,
@@ -76,6 +84,7 @@ from loom.target.low_descriptors import (
     DescriptorAsmSurface,
     DescriptorCategory,
     DescriptorFlag,
+    DescriptorOpKind,
     DescriptorSet,
     Effect,
     EffectFlag,
@@ -109,6 +118,7 @@ from loom.target.low_descriptors import (
     RegClassFlag,
     RegisterPart,
     Resource,
+    ResourceFlag,
     ResourceKind,
     ScheduleClass,
     ScheduleClassFlag,
@@ -120,7 +130,25 @@ from loom.target.low_descriptors import (
     StorageLeaseReleaseScope,
 )
 
+from .matrix_schedule import (
+    _AMDGPU_GFX9_4_GENERIC_MATRIX_TIMINGS,
+    _AMDGPU_GFX942_MATRIX_TIMINGS,
+    _AMDGPU_GFX950_MATRIX_TIMINGS,
+    _amdgpu_mfma_has_qualified_timing,
+    _AmdgpuMatrixTiming,
+)
+
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU = 1
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_SCALE_SEL = 2
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_CTRL = 3
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_BANK_MASK = 4
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST = 5
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64 = 6
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG = 7
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE = 8
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL = 9
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64 = 10
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP8 = 11
 
 _REG_SGPR = "amdgpu.sgpr"
 _REG_VGPR = "amdgpu.vgpr"
@@ -149,9 +177,11 @@ _RESOURCE_LDS_CROSSLANE = "amdgpu.lds.crosslane"
 _RESOURCE_MFMA = "amdgpu.mfma"
 _RESOURCE_WMMA = "amdgpu.wmma"
 _RESOURCE_SWMMAC = "amdgpu.swmmac"
+_RESOURCE_TENSOR = "amdgpu.tensor"
 _RESOURCE_CONTROL = "amdgpu.control"
 
 _SCHEDULE_SALU = "amdgpu.salu"
+_SCHEDULE_SALU_COMPARE = "amdgpu.salu.compare"
 _SCHEDULE_VALU = "amdgpu.valu"
 _SCHEDULE_TRANS = "amdgpu.trans"
 _SCHEDULE_PACKED_DOT = "amdgpu.dot.packed"
@@ -168,9 +198,13 @@ _SCHEDULE_LDS_ATOMIC = "amdgpu.lds.atomic"
 _SCHEDULE_LDS_CROSSLANE = "amdgpu.lds.crosslane"
 _SCHEDULE_BARRIER = "amdgpu.barrier"
 _SCHEDULE_MFMA = "amdgpu.mfma"
+_SCHEDULE_MFMA_QUALIFIED_PREFIX = f"{_SCHEDULE_MFMA}."
+_SCHEDULE_MATRIX = "amdgpu.matrix"
 _SCHEDULE_WMMA = "amdgpu.wmma"
 _SCHEDULE_WMMA_SCALE = "amdgpu.wmma.scale"
 _SCHEDULE_SWMMAC = "amdgpu.swmmac"
+_SCHEDULE_TENSOR_LOAD_LDS = "amdgpu.tensor.load.lds"
+_SCHEDULE_CLUSTER_LOAD_LDS = "amdgpu.cluster.load.lds"
 _SCHEDULE_CACHE_CONTROL = "amdgpu.cache.control"
 _SCHEDULE_MODE_CONTROL = "amdgpu.mode.control"
 _SCHEDULE_WAIT_MEMORY = "amdgpu.wait.memory"
@@ -181,6 +215,41 @@ _SCHEDULE_WAIT_LOAD = "amdgpu.wait.load"
 _SCHEDULE_WAIT_STORE = "amdgpu.wait.store"
 _SCHEDULE_WAIT_ALU = "amdgpu.wait.alu"
 _SCHEDULE_WAIT_IDLE = "amdgpu.wait.idle"
+_SCHEDULE_WAIT_TENSOR = "amdgpu.wait.tensor"
+_SCHEDULE_WAIT_ASYNC = "amdgpu.wait.async"
+_SCHEDULE_WAIT_X = "amdgpu.wait.x"
+
+
+def _amdgpu_mfma_schedule_class_name(descriptor_key: str) -> str:
+    if not _amdgpu_mfma_has_qualified_timing(descriptor_key):
+        raise ValueError(
+            f"AMDGPU descriptor '{descriptor_key}' has no qualified GFX9.4 "
+            "matrix timing"
+        )
+    return f"{_SCHEDULE_MFMA_QUALIFIED_PREFIX}{descriptor_key.removeprefix('amdgpu.')}"
+
+
+def _amdgpu_mfma_schedule_classes(
+    timings: Mapping[str, _AmdgpuMatrixTiming],
+) -> tuple[ScheduleClass, ...]:
+    return tuple(
+        ScheduleClass(
+            _amdgpu_mfma_schedule_class_name(descriptor_key),
+            latency_kind=LatencyKind.ESTIMATE,
+            latency_cycles=timing.latency_cycles,
+            issue_uses=(
+                IssueUse(
+                    _RESOURCE_MFMA,
+                    cycles=timing.reciprocal_throughput_cycles,
+                    units=1,
+                ),
+            ),
+            hazards=_matrix_hazards(_RESOURCE_MFMA),
+            model_quality=ModelQuality.ESTIMATED,
+        )
+        for descriptor_key, timing in timings.items()
+    )
+
 
 _AMDGPU_TRANS_DESCRIPTOR_KEYS = (
     "amdgpu.v_exp_f32",
@@ -218,7 +287,10 @@ _EXECUTION_MASKED_SCHEDULE_CLASSES = frozenset(
         _SCHEDULE_LDS_STORE,
         _SCHEDULE_LDS_ATOMIC,
         _SCHEDULE_LDS_CROSSLANE,
+        _SCHEDULE_TENSOR_LOAD_LDS,
+        _SCHEDULE_CLUSTER_LOAD_LDS,
         _SCHEDULE_MFMA,
+        _SCHEDULE_MATRIX,
         _SCHEDULE_WMMA,
         _SCHEDULE_WMMA_SCALE,
         _SCHEDULE_SWMMAC,
@@ -235,7 +307,13 @@ def _amdgpu_trans_schedule_class_name(descriptor_key: str) -> str:
 def _amdgpu_schedule_class_reads_exec_state(schedule_class: str) -> bool:
     return (
         schedule_class in _EXECUTION_MASKED_SCHEDULE_CLASSES
-        or schedule_class.startswith(f"{_SCHEDULE_TRANS}.")
+        or schedule_class.startswith(
+            (
+                f"{_SCHEDULE_TRANS}.",
+                _SCHEDULE_MFMA_QUALIFIED_PREFIX,
+                f"{_SCHEDULE_MATRIX}.",
+            )
+        )
     )
 
 
@@ -298,6 +376,22 @@ _AMDGPU_DESCRIPTOR_PUBLIC_HEADER_DIR = "loom/target/arch/amdgpu/descriptors"
 _AMDGPU_INLINE_F32_ENUM_DOMAIN_NAME = "amdgpu.source_inline_f32"
 _AMDGPU_INLINE_U32_16_ENUM_DOMAIN_NAME = "amdgpu.source_inline_u32_16"
 
+_AMDGPU_SOURCE_INLINE_F32_NAMED_VALUES = (
+    ("f32_0_0", 0.0),
+    ("f32_0_5", 0.5),
+    ("f32_n0_5", -0.5),
+    ("f32_1_0", 1.0),
+    ("f32_n1_0", -1.0),
+    ("f32_2_0", 2.0),
+    ("f32_n2_0", -2.0),
+    ("f32_4_0", 4.0),
+    ("f32_n4_0", -4.0),
+    ("f32_inv_2pi", 0.15915494),
+)
+AMDGPU_SOURCE_INLINE_F32_VALUES = tuple(
+    value for _, value in _AMDGPU_SOURCE_INLINE_F32_NAMED_VALUES
+)
+
 
 def _f32_bits(value: float) -> int:
     return int(struct.unpack("<I", struct.pack("<f", value))[0])
@@ -305,17 +399,9 @@ def _f32_bits(value: float) -> int:
 
 _AMDGPU_SOURCE_INLINE_F32_ENUM_DOMAIN = EnumDomain(
     _AMDGPU_INLINE_F32_ENUM_DOMAIN_NAME,
-    values=(
-        EnumValue("f32_0_0", _f32_bits(0.0)),
-        EnumValue("f32_0_5", _f32_bits(0.5)),
-        EnumValue("f32_n0_5", _f32_bits(-0.5)),
-        EnumValue("f32_1_0", _f32_bits(1.0)),
-        EnumValue("f32_n1_0", _f32_bits(-1.0)),
-        EnumValue("f32_2_0", _f32_bits(2.0)),
-        EnumValue("f32_n2_0", _f32_bits(-2.0)),
-        EnumValue("f32_4_0", _f32_bits(4.0)),
-        EnumValue("f32_n4_0", _f32_bits(-4.0)),
-        EnumValue("f32_inv_2pi", _f32_bits(0.15915494)),
+    values=tuple(
+        EnumValue(name, _f32_bits(value))
+        for name, value in _AMDGPU_SOURCE_INLINE_F32_NAMED_VALUES
     ),
 )
 _AMDGPU_SOURCE_INLINE_U32_16_ENUM_DOMAIN = EnumDomain(
@@ -339,6 +425,18 @@ def _amdgpu_camel_case(value: str) -> str:
     return "".join(part[:1].upper() + part[1:] for part in value.split("_") if part)
 
 
+def _validate_amdgpu_reg_class_spill_slots(
+    key: str, reg_classes: tuple[RegClass, ...]
+) -> None:
+    for reg_class in reg_classes:
+        if reg_class.spill_slot_space is SpillSlotSpace.LDS:
+            raise ValueError(
+                f"AMDGPU descriptor set '{key}' register class "
+                f"'{reg_class.name}' uses LDS spill slots without a "
+                "lane-private LDS storage contract"
+            )
+
+
 def _amdgpu_core_descriptor_set(
     *,
     key: str,
@@ -353,6 +451,7 @@ def _amdgpu_core_descriptor_set(
     ),
     categories: tuple[DescriptorCategory, ...] = AMDGPU_DESCRIPTOR_CATEGORIES,
 ) -> DescriptorSet:
+    _validate_amdgpu_reg_class_spill_slots(key, reg_classes)
     file_stem = _amdgpu_descriptor_set_file_stem(key)
     c_suffix = _amdgpu_camel_case(file_stem)
     c_enum_stem = file_stem.upper()
@@ -383,11 +482,86 @@ def _amdgpu_core_descriptor_set(
     )
 
 
+def _amdgpu_core_descriptor_set_intersection(
+    *,
+    key: str,
+    members: Sequence[DescriptorSet],
+) -> DescriptorSet:
+    if not members:
+        raise ValueError(f"AMDGPU generic descriptor set '{key}' has no members")
+
+    def named_intersection(
+        attribute: str,
+        *,
+        key_attribute: str,
+    ) -> tuple[object, ...]:
+        member_values = tuple(getattr(member, attribute) for member in members)
+        member_maps = []
+        for member, values in zip(members, member_values, strict=True):
+            values_by_key = {getattr(value, key_attribute): value for value in values}
+            if len(values_by_key) != len(values):
+                raise ValueError(
+                    f"AMDGPU descriptor set '{member.key}' has duplicate "
+                    f"{attribute} keys"
+                )
+            member_maps.append(values_by_key)
+        return tuple(
+            value
+            for value in member_values[0]
+            if all(
+                member_map.get(getattr(value, key_attribute)) == value
+                for member_map in member_maps[1:]
+            )
+        )
+
+    member_reg_classes = tuple(
+        {reg_class.name: reg_class for reg_class in member.reg_classes}
+        for member in members
+    )
+    reg_classes = []
+    for reg_class in members[0].reg_classes:
+        member_rows = tuple(
+            member_map.get(reg_class.name) for member_map in member_reg_classes
+        )
+        if any(member_row is None for member_row in member_rows):
+            continue
+        allocatable_count = min(
+            member_row.allocatable_count
+            for member_row in member_rows
+            if member_row is not None
+        )
+        portable_row = replace(reg_class, allocatable_count=allocatable_count)
+        if any(
+            replace(member_row, allocatable_count=allocatable_count) != portable_row
+            for member_row in member_rows
+            if member_row is not None
+        ):
+            raise ValueError(
+                f"AMDGPU generic descriptor set '{key}' register class "
+                f"'{reg_class.name}' differs beyond allocatable count"
+            )
+        reg_classes.append(portable_row)
+
+    return _amdgpu_core_descriptor_set(
+        key=key,
+        reg_classes=tuple(reg_classes),
+        register_parts=named_intersection("register_parts", key_attribute="name"),
+        enum_domains=named_intersection("enum_domains", key_attribute="name"),
+        resources=named_intersection("resources", key_attribute="name"),
+        schedule_classes=named_intersection("schedule_classes", key_attribute="name"),
+        descriptors=named_intersection("descriptors", key_attribute="key"),
+        categories=named_intersection("categories", key_attribute="key"),
+    )
+
+
 _COUNTER_VMEM_LOAD = 1
 _COUNTER_VMEM_STORE = 2
 _COUNTER_LDS = 3
 _COUNTER_SMEM = 4
 _COUNTER_ALU = 5
+_COUNTER_TENSOR = 6
+_COUNTER_ASYNC = 7
+_COUNTER_X = 8
 
 
 def _predefined(
@@ -425,6 +599,9 @@ _VMEM_STORE_COUNTER_HAZARD = Hazard(
 _LDS_COUNTER_HAZARD = Hazard(HazardKind.WAIT_COUNTER, counter_id=_COUNTER_LDS)
 _SMEM_COUNTER_HAZARD = Hazard(HazardKind.WAIT_COUNTER, counter_id=_COUNTER_SMEM)
 _ALU_COUNTER_HAZARD = Hazard(HazardKind.WAIT_COUNTER, counter_id=_COUNTER_ALU)
+_TENSOR_COUNTER_HAZARD = Hazard(HazardKind.WAIT_COUNTER, counter_id=_COUNTER_TENSOR)
+_ASYNC_COUNTER_HAZARD = Hazard(HazardKind.WAIT_COUNTER, counter_id=_COUNTER_ASYNC)
+_X_COUNTER_HAZARD = Hazard(HazardKind.WAIT_COUNTER, counter_id=_COUNTER_X)
 _GFX950_MEMORY_WAIT_HAZARDS = (
     _VMEM_LOAD_COUNTER_HAZARD,
     _VMEM_STORE_COUNTER_HAZARD,
@@ -441,6 +618,9 @@ _VMEM_STORE_WAIT_HAZARDS = (_VMEM_STORE_COUNTER_HAZARD,)
 _LDS_WAIT_HAZARDS = (_LDS_COUNTER_HAZARD,)
 _SMEM_WAIT_HAZARDS = (_SMEM_COUNTER_HAZARD,)
 _ALU_WAIT_HAZARDS = (_ALU_COUNTER_HAZARD,)
+_TENSOR_WAIT_HAZARDS = (_TENSOR_COUNTER_HAZARD,)
+_ASYNC_WAIT_HAZARDS = (_ASYNC_COUNTER_HAZARD,)
+_X_WAIT_HAZARDS = (_X_COUNTER_HAZARD,)
 _IDLE_WAIT_HAZARDS = (
     _VMEM_LOAD_COUNTER_HAZARD,
     _VMEM_STORE_COUNTER_HAZARD,
@@ -473,6 +653,9 @@ _WAIT_COUNTER_VMEM_STORE_ENCODING_ID = 19
 _WAIT_COUNTER_LDS_ENCODING_ID = 20
 _WAIT_COUNTER_SMEM_ENCODING_ID = 21
 _WAIT_COUNTER_ALU_ENCODING_ID = 22
+_WAIT_COUNTER_TENSOR_ENCODING_ID = 23
+_WAIT_COUNTER_ASYNC_ENCODING_ID = 24
+_WAIT_COUNTER_X_ENCODING_ID = 25
 _GFX9_11_VECTOR_CACHE_FIELDS = (("GLC", 1), ("SLC", 1), ("DLC", 1))
 _GFX950_VECTOR_CACHE_FIELDS = (("NT", 1), ("SC0", 1), ("SC1", 1))
 _GFX12_VECTOR_CACHE_FIELDS = (("NV", 1), ("SCOPE", 2), ("TH", 3))
@@ -560,8 +743,8 @@ class AmdgpuMemoryDescriptorDomain(CEnum):
 
 
 class AmdgpuMemoryOperationKind(CEnum):
-    LOAD = "LOOM_AMDGPU_MEMORY_OPERATION_LOAD"
-    STORE = "LOOM_AMDGPU_MEMORY_OPERATION_STORE"
+    LOAD = "LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD"
+    STORE = "LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE"
 
 
 class AmdgpuMemoryPayloadRegisterClass(CEnum):
@@ -573,6 +756,7 @@ class AmdgpuMemoryPayloadFormat(CEnum):
     GENERIC = "LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_GENERIC"
     LOW_16BIT_FLOAT = "LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_LOW_16BIT_FLOAT"
     SIGNED_16BIT_INTEGER = "LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_SIGNED_16BIT_INTEGER"
+    UNSIGNED_8BIT_INTEGER = "LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_UNSIGNED_8BIT_INTEGER"
 
 
 class AmdgpuAtomicOperationKind(CEnum):
@@ -599,8 +783,11 @@ class AmdgpuAtomicKind(CEnum):
 
 
 class AmdgpuAtomicValueKind(CEnum):
+    B32 = "LOOM_AMDGPU_ATOMIC_VALUE_KIND_B32"
+    B64 = "LOOM_AMDGPU_ATOMIC_VALUE_KIND_B64"
     I32 = "LOOM_AMDGPU_ATOMIC_VALUE_KIND_I32"
     F32 = "LOOM_AMDGPU_ATOMIC_VALUE_KIND_F32"
+    I64 = "LOOM_AMDGPU_ATOMIC_VALUE_KIND_I64"
     PACKED_F16 = "LOOM_AMDGPU_ATOMIC_VALUE_KIND_PACKED_F16"
     PACKED_BF16 = "LOOM_AMDGPU_ATOMIC_VALUE_KIND_PACKED_BF16"
 
@@ -649,7 +836,12 @@ def _matrix_hazards(resource: str) -> tuple[Hazard, ...]:
 def _common_scalar_vector_memory_resources() -> tuple[Resource, ...]:
     return (
         Resource(_RESOURCE_SALU, capacity_per_cycle=1, kind=ResourceKind.SCALAR_ALU),
-        Resource(_RESOURCE_VALU, capacity_per_cycle=1, kind=ResourceKind.VECTOR_ALU),
+        Resource(
+            _RESOURCE_VALU,
+            capacity_per_cycle=1,
+            kind=ResourceKind.VECTOR_ALU,
+            flags=(ResourceFlag.VECTOR_ISSUE,),
+        ),
         Resource(_RESOURCE_SMEM, capacity_per_cycle=1, kind=ResourceKind.LOAD),
         Resource(_RESOURCE_VMEM_LOAD, capacity_per_cycle=1, kind=ResourceKind.LOAD),
         Resource(_RESOURCE_VMEM_STORE, capacity_per_cycle=1, kind=ResourceKind.STORE),
@@ -705,6 +897,13 @@ def _common_scalar_vector_memory_schedule_classes(
             _SCHEDULE_SALU,
             latency_kind=LatencyKind.ESTIMATE,
             latency_cycles=1,
+            issue_uses=(IssueUse(_RESOURCE_SALU, cycles=1, units=1),),
+            model_quality=ModelQuality.ESTIMATED,
+        ),
+        ScheduleClass(
+            _SCHEDULE_SALU_COMPARE,
+            latency_kind=LatencyKind.ESTIMATE,
+            latency_cycles=2,
             issue_uses=(IssueUse(_RESOURCE_SALU, cycles=1, units=1),),
             model_quality=ModelQuality.ESTIMATED,
         ),
@@ -885,8 +1084,16 @@ def _native_operand(field_name: str) -> NativeAsmValue:
     return NativeAsmValue(NativeAsmValueKind.OPERAND, field_name=field_name)
 
 
+def _native_register_part(field_name: str) -> NativeAsmValue:
+    return NativeAsmValue(NativeAsmValueKind.REGISTER_PART, field_name=field_name)
+
+
 def _native_literal(spelling: str) -> NativeAsmValue:
     return NativeAsmValue(NativeAsmValueKind.LITERAL, literal=spelling)
+
+
+def _native_modifier_literal(spelling: str) -> NativeAsmValue:
+    return NativeAsmValue(NativeAsmValueKind.MODIFIER_LITERAL, literal=spelling)
 
 
 def _native_i64_immediate(field_name: str) -> NativeAsmValue:
@@ -906,6 +1113,105 @@ def _native_amdgpu_delay_alu_immediate(field_name: str) -> NativeAsmValue:
         NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
         field_name=field_name,
         target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU,
+    )
+
+
+def _native_amdgpu_scale_sel_immediate(field_name: str) -> NativeAsmValue:
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_SCALE_SEL,
+    )
+
+
+def _native_amdgpu_dpp_ctrl_immediate(field_name: str) -> NativeAsmValue:
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_CTRL,
+    )
+
+
+def _native_amdgpu_dpp8_immediate(field_name: str) -> NativeAsmValue:
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP8,
+    )
+
+
+def _native_amdgpu_dpp_bank_mask_immediate(field_name: str) -> NativeAsmValue:
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_BANK_MASK,
+    )
+
+
+def _native_amdgpu_named_bit_list_immediate(
+    field_name: str, bit_width: int, *, name: str | None = None
+) -> NativeAsmValue:
+    if bit_width <= 0 or bit_width >= 64:
+        raise ValueError("AMDGPU named bit-list width must be in [1, 63]")
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        literal=name or field_name,
+        bit_width=bit_width,
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST,
+    )
+
+
+def _native_amdgpu_named_i64_immediate(
+    field_name: str, *, name: str | None = None
+) -> NativeAsmValue:
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        literal=name or field_name,
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64,
+    )
+
+
+def _native_amdgpu_required_named_i64_immediate(
+    field_name: str, *, name: str | None = None
+) -> NativeAsmValue:
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        literal=name or field_name,
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64,
+    )
+
+
+def _native_amdgpu_named_flag_immediate(
+    field_name: str, *, name: str | None = None
+) -> NativeAsmValue:
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        literal=name or field_name,
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG,
+    )
+
+
+def _native_amdgpu_gfx12_scope_immediate(field_name: str) -> NativeAsmValue:
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        literal="scope",
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE,
+    )
+
+
+def _native_amdgpu_gfx12_load_temporal_immediate(
+    field_name: str,
+) -> NativeAsmValue:
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        literal="th",
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL,
     )
 
 
@@ -1067,16 +1373,6 @@ def _m0_implicit_resource(field_name: str = "m0") -> Operand:
     )
 
 
-def _m0_clobber(field_name: str = "m0") -> Operand:
-    return Operand(
-        field_name,
-        OperandRole.IMPLICIT,
-        _M0_ALT,
-        flags=(OperandFlag.IMPLICIT,),
-        unit_count=1,
-    )
-
-
 def _m0_result(field_name: str = "dst") -> Operand:
     return Operand(
         field_name,
@@ -1181,12 +1477,26 @@ def _exec_state_read(field_name: str = "exec_in") -> Operand:
     )
 
 
+def _exec_value_read(field_name: str = "exec_in") -> Operand:
+    return Operand(
+        field_name,
+        OperandRole.IMPLICIT,
+        _EXEC_ALT,
+        flags=(OperandFlag.IMPLICIT, OperandFlag.STATE_READ),
+        unit_count=1,
+    )
+
+
 def _mode_state_read(field_name: str = "mode_in") -> Operand:
     return Operand(
         field_name,
         OperandRole.IMPLICIT,
         _MODE_ALT,
-        flags=(OperandFlag.IMPLICIT, OperandFlag.STATE_READ),
+        flags=(
+            OperandFlag.IMPLICIT,
+            OperandFlag.STATE_READ,
+            OperandFlag.SCHEDULE_ONLY_STATE,
+        ),
         unit_count=1,
     )
 
@@ -1259,13 +1569,20 @@ def _vgpr_result(
 
 
 def _vgpr_operand(
-    field_name: str, *, units: int = 1, register_part: str | None = None
+    field_name: str,
+    *,
+    units: int = 1,
+    register_part: str | None = None,
+    address_map_kind: OperandAddressMapKind = OperandAddressMapKind.DIRECT,
+    addressable_unit_count: int = 0,
 ) -> Operand:
     return Operand(
         field_name,
         OperandRole.OPERAND,
         _VGPR_ALT,
         unit_count=units,
+        address_map_kind=address_map_kind,
+        addressable_unit_count=addressable_unit_count,
         register_part=register_part,
     )
 
@@ -1359,6 +1676,33 @@ _SOURCE_INLINE_U32_IMMEDIATE = _source_inline_u32_immediate()
 _SOURCE_INLINE_U32_16_IMMEDIATE = _source_inline_u32_16_immediate()
 _SOURCE_INLINE_F32_IMMEDIATE = _source_inline_f32_immediate()
 
+_DPP_CTRL_IMMEDIATE = Immediate(
+    "dpp_ctrl",
+    ImmediateKind.UNSIGNED,
+    bit_width=9,
+    unsigned_max=0x1FF,
+)
+
+_DPP8_IMMEDIATE = Immediate(
+    "dpp8",
+    ImmediateKind.UNSIGNED,
+    bit_width=24,
+    encoding_slices=tuple(
+        ImmediateEncodingSlice(
+            amdgpu_encoding_field_id(f"LANE_SEL_{lane}"), lane * 3, 3
+        )
+        for lane in range(8)
+    ),
+    unsigned_max=0xFFFFFF,
+)
+
+_DPP_BANK_MASK_IMMEDIATE = Immediate(
+    "bank_mask",
+    ImmediateKind.UNSIGNED,
+    bit_width=4,
+    unsigned_max=0xF,
+)
+
 _LITERAL_U32_IMMEDIATE = replace(
     _U32_IMMEDIATE, encoding_field_id=amdgpu_encoding_field_id("LITERAL")
 )
@@ -1380,6 +1724,7 @@ _HAL_BUFFER_DESCRIPTOR_CACHE_SWIZZLE_STRIDE_IMMEDIATE = Immediate(
 
 _MANUAL_SCALAR_DESCRIPTOR_KEYS = (
     "amdgpu.s_mov_b32",
+    "amdgpu.s_mov_b32_vcc.imm",
     "amdgpu.s_getpc_b64",
     "amdgpu.s_mov_b32_m0",
     "amdgpu.s_mov_b32_m0.imm",
@@ -1399,6 +1744,7 @@ def _s_mov_b32_contract_overlay() -> AmdgpuDescriptorOverlay:
         semantic_tag="integer.const.u32",
         schedule_class=_SCHEDULE_SALU,
         operands=(AmdgpuOperandOverlay("SDST", _sgpr_result()),),
+        op_kind=DescriptorOpKind.CONST,
         asm_forms=_asm(results=("dst",), immediates=("imm32",)),
         immediates=(_U32_IMMEDIATE,),
         constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0),),
@@ -1419,12 +1765,45 @@ def _manual_scalar_descriptors(
             mnemonic="s_mov_b32",
             semantic_tag="integer.const.u32",
             operands=(_sgpr_result(),),
+            op_kind=DescriptorOpKind.CONST,
             immediates=(_U32_IMMEDIATE,),
             asm_forms=_asm(results=("dst",), immediates=("imm32",)),
             schedule_class=_SCHEDULE_SALU,
             encoding_format_id=AMDGPU_ENCODING_FORMAT_SOP1,
             encoding_id=s_mov_b32_opcode,
             constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0),),
+            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        ),
+        Descriptor(
+            key="amdgpu.s_mov_b32_vcc.imm",
+            mnemonic="s_mov_b32",
+            semantic_tag="predicate.vcc.const.u32",
+            operands=(_vcc_result("mask"),),
+            op_kind=DescriptorOpKind.CONST,
+            immediates=(_LITERAL_U32_IMMEDIATE,),
+            encoding_field_values=(
+                EncodingFieldValue(
+                    amdgpu_encoding_field_id("SDST"),
+                    spec.operand_predefined_value("OPR_SDST", "VCC_LO"),
+                ),
+                EncodingFieldValue(
+                    amdgpu_encoding_field_id("SSRC0"),
+                    spec.operand_predefined_value("OPR_SSRC", "SRC_LITERAL"),
+                ),
+            ),
+            asm_forms=_asm(
+                mnemonic="s_mov_b32_vcc_imm",
+                native_assembly_mnemonic="s_mov_b32",
+                results=("mask",),
+                immediates=("imm32",),
+                native_assembly_values=(
+                    _native_literal("vcc_lo"),
+                    _native_i64_immediate("imm32"),
+                ),
+            ),
+            schedule_class=_SCHEDULE_SALU,
+            encoding_format_id=AMDGPU_ENCODING_FORMAT_SOP1_LITERAL,
+            encoding_id=s_mov_b32_opcode,
             flags=(DescriptorFlag.DEAD_REMOVABLE,),
         ),
         Descriptor(
@@ -1470,7 +1849,14 @@ def _manual_scalar_descriptors(
                 ),
             ),
             asm_forms=_asm(
-                mnemonic="s_mov_b32_m0", results=("dst",), operands=("src",)
+                mnemonic="s_mov_b32_m0",
+                native_assembly_mnemonic="s_mov_b32",
+                results=("dst",),
+                operands=("src",),
+                native_assembly_values=(
+                    _native_result("dst"),
+                    _native_operand("src"),
+                ),
             ),
             schedule_class=_SCHEDULE_SALU,
             encoding_format_id=AMDGPU_ENCODING_FORMAT_SOP1,
@@ -1482,6 +1868,7 @@ def _manual_scalar_descriptors(
             mnemonic="s_mov_b32",
             semantic_tag="special.m0.const.u32",
             operands=(_m0_result(),),
+            op_kind=DescriptorOpKind.CONST,
             immediates=(_U32_IMMEDIATE,),
             encoding_field_values=(
                 EncodingFieldValue(
@@ -1490,7 +1877,14 @@ def _manual_scalar_descriptors(
                 ),
             ),
             asm_forms=_asm(
-                mnemonic="s_mov_b32_m0_imm", results=("dst",), immediates=("imm32",)
+                mnemonic="s_mov_b32_m0_imm",
+                native_assembly_mnemonic="s_mov_b32",
+                results=("dst",),
+                immediates=("imm32",),
+                native_assembly_values=(
+                    _native_result("dst"),
+                    _native_i64_immediate("imm32"),
+                ),
             ),
             schedule_class=_SCHEDULE_SALU,
             encoding_format_id=AMDGPU_ENCODING_FORMAT_SOP1,
@@ -1573,7 +1967,7 @@ def _manual_scalar_descriptors(
                     encoding_field_id=amdgpu_encoding_field_id("SDST"),
                     unit_count=2,
                 ),
-                _exec_state_read(),
+                _exec_value_read(),
             ),
             encoding_field_values=(
                 EncodingFieldValue(
@@ -1771,6 +2165,33 @@ _MATRIX_B_REUSE_IMMEDIATE = Immediate(
     ImmediateKind.UNSIGNED,
     bit_width=1,
     unsigned_max=1,
+)
+
+_MATRIX_SIGN_SELECT_IMMEDIATE = Immediate(
+    "neg_lo",
+    ImmediateKind.UNSIGNED,
+    flags=(ImmediateFlag.DEFAULT_VALUE,),
+    bit_width=3,
+    unsigned_max=7,
+    default_value=0,
+)
+
+_MATRIX_SIGN_SELECT_HIGH_IMMEDIATE = Immediate(
+    "neg_hi",
+    ImmediateKind.UNSIGNED,
+    flags=(ImmediateFlag.DEFAULT_VALUE,),
+    bit_width=3,
+    unsigned_max=7,
+    default_value=0,
+)
+
+_MATRIX_CLAMP_IMMEDIATE = Immediate(
+    "clamp",
+    ImmediateKind.UNSIGNED,
+    flags=(ImmediateFlag.DEFAULT_VALUE,),
+    bit_width=1,
+    unsigned_max=1,
+    default_value=0,
 )
 
 _GLOBAL_LOAD_EFFECT = Effect(
@@ -1993,6 +2414,24 @@ _ALU_WAIT_EFFECT = Effect(
     counter_id=_COUNTER_ALU,
 )
 
+_TENSOR_WAIT_EFFECT = Effect(
+    EffectKind.COUNTER,
+    flags=(EffectFlag.ORDERED, EffectFlag.DEPENDENCY),
+    counter_id=_COUNTER_TENSOR,
+)
+
+_ASYNC_WAIT_EFFECT = Effect(
+    EffectKind.COUNTER,
+    flags=(EffectFlag.ORDERED, EffectFlag.DEPENDENCY),
+    counter_id=_COUNTER_ASYNC,
+)
+
+_X_WAIT_EFFECT = Effect(
+    EffectKind.COUNTER,
+    flags=(EffectFlag.ORDERED, EffectFlag.DEPENDENCY),
+    counter_id=_COUNTER_X,
+)
+
 
 _EARLY_CLOBBER_RESULT_CONSTRAINTS = (Constraint(ConstraintKind.EARLY_CLOBBER, 0),)
 
@@ -2199,10 +2638,13 @@ def _vcc_input(descriptor_operand: Operand) -> AmdgpuImplicitOperandOverlay:
 
 
 def _vcc_output(
-    descriptor_operand: Operand, *, xml_operand_required: bool = True
+    descriptor_operand: Operand,
+    *,
+    operand_type: str = "OPR_SDST",
+    xml_operand_required: bool = True,
 ) -> AmdgpuImplicitOperandOverlay:
     return AmdgpuImplicitOperandOverlay(
-        operand_type="OPR_SDST",
+        operand_type=operand_type,
         descriptor_operand=descriptor_operand,
         data_format_name="FMT_NUM_M64",
         size_bits=64,
@@ -2623,18 +3065,9 @@ def _implicit_m0_input(
     )
 
 
-def _implicit_m0_clobber() -> AmdgpuImplicitOperandOverlay:
-    return AmdgpuImplicitOperandOverlay(
-        operand_type="OPR_SDST_M0",
-        descriptor_operand=_m0_clobber(),
-        data_format_name="FMT_NUM_B32",
-        size_bits=32,
-        is_input=True,
-        is_output=False,
-    )
-
-
 __all__ = (
+    "AMDGPU_SOURCE_INLINE_F32_VALUES",
+    "_AmdgpuMatrixTiming",
     "AMDGPU_ATOMIC_DESCRIPTOR_CATEGORY",
     "AMDGPU_CACHE_DESCRIPTOR_CATEGORY",
     "AMDGPU_COMPARE_SELECT_DESCRIPTOR_CATEGORY",
@@ -2655,23 +3088,40 @@ __all__ = (
     "AMDGPU_ENCODING_FORMAT_VOP1",
     "AMDGPU_ENCODING_FORMAT_VOP1_DPP",
     "AMDGPU_ENCODING_FORMAT_VOP1_DPP16",
+    "AMDGPU_ENCODING_FORMAT_VOP1_DPP8",
     "AMDGPU_ENCODING_FORMAT_VOP1_LITERAL",
     "AMDGPU_ENCODING_FORMAT_VOP1_SDWA",
     "AMDGPU_ENCODING_FORMAT_VOP2",
     "AMDGPU_ENCODING_FORMAT_VOP2_DPP",
     "AMDGPU_ENCODING_FORMAT_VOP2_DPP16",
+    "AMDGPU_ENCODING_FORMAT_VOP2_DPP8",
     "AMDGPU_ENCODING_FORMAT_VOP2_LITERAL",
     "AMDGPU_ENCODING_FORMAT_VOP3",
+    "AMDGPU_ENCODING_FORMAT_VOP3_DPP16",
+    "AMDGPU_ENCODING_FORMAT_VOP3_DPP8",
     "AMDGPU_ENCODING_FORMAT_VOP3_LITERAL",
+    "AMDGPU_ENCODING_FORMAT_VOP3_SDST",
+    "AMDGPU_ENCODING_FORMAT_VOP3_SDST_DPP8",
     "AMDGPU_ENCODING_FORMAT_VOP3P",
+    "AMDGPU_ENCODING_FORMAT_VOP3P_DPP8",
     "AMDGPU_ENCODING_FORMAT_VOP3P_LITERAL",
     "AMDGPU_ENCODING_FORMAT_VOP3PX2",
-    "AMDGPU_ENCODING_FORMAT_VOP3_SDST",
+    "AMDGPU_ENCODING_FORMAT_VOPC_DPP8",
     "AMDGPU_ENCODING_FORMAT_VSCRATCH",
     "AMDGPU_MATRIX_DESCRIPTOR_CATEGORY",
     "AMDGPU_MEMORY_DESCRIPTOR_CATEGORY",
     "AMDGPU_MISC_DESCRIPTOR_CATEGORY",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_BANK_MASK",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_CTRL",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP8",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_I64",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_SCALE_SEL",
     "AMDGPU_SCALAR_DESCRIPTOR_CATEGORY",
     "AMDGPU_VECTOR_DESCRIPTOR_CATEGORY",
     "AmdgpuAtomicDescriptorCandidate",
@@ -2704,6 +3154,7 @@ __all__ = (
     "DescriptorAsmSurface",
     "DescriptorCategory",
     "DescriptorFlag",
+    "DescriptorOpKind",
     "DescriptorSet",
     "Effect",
     "EffectFlag",
@@ -2739,6 +3190,7 @@ __all__ = (
     "RegClassFlag",
     "RegisterPart",
     "Resource",
+    "ResourceFlag",
     "ResourceKind",
     "ScheduleClass",
     "ScheduleClassFlag",
@@ -2760,11 +3212,15 @@ __all__ = (
     "_ALU_COUNTER_HAZARD",
     "_ALU_WAIT_EFFECT",
     "_ALU_WAIT_HAZARDS",
+    "_ASYNC_COUNTER_HAZARD",
+    "_ASYNC_WAIT_EFFECT",
+    "_ASYNC_WAIT_HAZARDS",
     "_AMDGPU_DESCRIPTOR_PUBLIC_HEADER_DIR",
     "_AMDGPU_DESCRIPTOR_SOURCE_DIR",
     "_AMDGPU_INLINE_F32_ENUM_DOMAIN_NAME",
     "_AMDGPU_REGISTER_PARTS",
     "_AMDGPU_SOURCE_INLINE_F32_ENUM_DOMAIN",
+    "_AMDGPU_SOURCE_INLINE_U32_16_ENUM_DOMAIN",
     "_AMDGPU_TRANS_DESCRIPTOR_KEYS",
     "_AMDGPU_TRANS_DESCRIPTOR_LATENCY_CYCLES",
     "_AMDGPU_TRANS_PROXY_LATENCY_CYCLES",
@@ -2774,13 +3230,19 @@ __all__ = (
     "_CDNA_SMEM_SGPR_IMM_FIXED_FIELDS",
     "_CONVERGENT_EFFECT",
     "_COUNTER_ALU",
+    "_COUNTER_ASYNC",
     "_COUNTER_LDS",
     "_COUNTER_SMEM",
+    "_COUNTER_TENSOR",
     "_COUNTER_VMEM_LOAD",
     "_COUNTER_VMEM_STORE",
+    "_COUNTER_X",
     "_D16_PARTIAL_REGISTER_ADDRESSABLE_UNIT_COUNT",
     "_D16_PARTIAL_REGISTER_SIZE_REASON",
     "_DEPCTR_IMMEDIATE",
+    "_DPP_BANK_MASK_IMMEDIATE",
+    "_DPP_CTRL_IMMEDIATE",
+    "_DPP8_IMMEDIATE",
     "_DESTRUCTIVE_ACCUMULATOR_CONSTRAINTS",
     "_DESTRUCTIVE_BUFFER_ATOMIC_CONSTRAINTS",
     "_DSCNT_IMMEDIATE",
@@ -2793,6 +3255,9 @@ __all__ = (
     "_GFX950_MEMORY_WAIT_HAZARDS",
     "_GFX950_VECTOR_CACHE_FIELDS",
     "_GFX9_11_VECTOR_CACHE_FIELDS",
+    "_AMDGPU_GFX942_MATRIX_TIMINGS",
+    "_AMDGPU_GFX950_MATRIX_TIMINGS",
+    "_AMDGPU_GFX9_4_GENERIC_MATRIX_TIMINGS",
     "_GLOBAL_GFX950_SADDR_OFF",
     "_GLOBAL_LOAD_B16_EFFECT",
     "_GLOBAL_LOAD_B128_EFFECT",
@@ -2855,6 +3320,9 @@ __all__ = (
     "_MATRIX_B_REUSE_IMMEDIATE",
     "_MATRIX_B_SCALE_FORMAT_IMMEDIATE",
     "_MATRIX_B_SCALE_IMMEDIATE",
+    "_MATRIX_CLAMP_IMMEDIATE",
+    "_MATRIX_SIGN_SELECT_HIGH_IMMEDIATE",
+    "_MATRIX_SIGN_SELECT_IMMEDIATE",
     "_MUBUF_SOFFSET_INLINE_ZERO",
     "_MUBUF_VADDR_OFFSET_ONLY_SIZE_REASON",
     "_PC_RELATIVE_EFFECT",
@@ -2884,6 +3352,7 @@ __all__ = (
     "_RESOURCE_SALU",
     "_RESOURCE_SMEM",
     "_RESOURCE_SWMMAC",
+    "_RESOURCE_TENSOR",
     "_RESOURCE_VALU",
     "_RESOURCE_VMEM_LOAD",
     "_RESOURCE_VMEM_STORE",
@@ -2892,17 +3361,22 @@ __all__ = (
     "_SCC_CLOBBER_OUTPUT",
     "_SCHEDULE_BARRIER",
     "_SCHEDULE_CACHE_CONTROL",
+    "_SCHEDULE_CLUSTER_LOAD_LDS",
     "_SCHEDULE_LDS_ATOMIC",
     "_SCHEDULE_LDS_CROSSLANE",
     "_SCHEDULE_LDS_LOAD",
     "_SCHEDULE_LDS_STORE",
+    "_SCHEDULE_MATRIX",
     "_SCHEDULE_MFMA",
+    "_SCHEDULE_MFMA_QUALIFIED_PREFIX",
     "_SCHEDULE_MODE_CONTROL",
     "_SCHEDULE_PACKED_DOT",
     "_SCHEDULE_SALU",
+    "_SCHEDULE_SALU_COMPARE",
     "_SCHEDULE_SMEM_LOAD",
     "_SCHEDULE_SMEM_STORE",
     "_SCHEDULE_SWMMAC",
+    "_SCHEDULE_TENSOR_LOAD_LDS",
     "_SCHEDULE_TRANS",
     "_SCHEDULE_VALU",
     "_SCHEDULE_VMEM_ATOMIC_NO_RETURN",
@@ -2911,13 +3385,16 @@ __all__ = (
     "_SCHEDULE_VMEM_LOAD_LDS",
     "_SCHEDULE_VMEM_STORE",
     "_SCHEDULE_WAIT_ALU",
+    "_SCHEDULE_WAIT_ASYNC",
     "_SCHEDULE_WAIT_IDLE",
     "_SCHEDULE_WAIT_LDS",
     "_SCHEDULE_WAIT_LOAD",
     "_SCHEDULE_WAIT_MEMORY",
     "_SCHEDULE_WAIT_SMEM",
     "_SCHEDULE_WAIT_STORE",
+    "_SCHEDULE_WAIT_TENSOR",
     "_SCHEDULE_WAIT_VMEM_STORE",
+    "_SCHEDULE_WAIT_X",
     "_SCHEDULE_WMMA",
     "_SCHEDULE_WMMA_SCALE",
     "_SGPR_ALT",
@@ -2926,6 +3403,9 @@ __all__ = (
     "_SMEM_COUNTER_HAZARD",
     "_SMEM_WAIT_EFFECT",
     "_SMEM_WAIT_HAZARDS",
+    "_TENSOR_COUNTER_HAZARD",
+    "_TENSOR_WAIT_EFFECT",
+    "_TENSOR_WAIT_HAZARDS",
     "_SMFMAC_VDST_ACCUMULATOR_REASON",
     "_SOURCE_INLINE_F32_ENCODING_ID",
     "_SOURCE_INLINE_F32_IMMEDIATE",
@@ -2949,17 +3429,27 @@ __all__ = (
     "_VMEM_STORE_WAIT_HAZARDS",
     "_VSCNT_IMMEDIATE",
     "_WAIT_COUNTER_ALU_ENCODING_ID",
+    "_WAIT_COUNTER_ASYNC_ENCODING_ID",
     "_WAIT_COUNTER_LDS_ENCODING_ID",
     "_WAIT_COUNTER_LGKM_ENCODING_ID",
     "_WAIT_COUNTER_SMEM_ENCODING_ID",
+    "_WAIT_COUNTER_TENSOR_ENCODING_ID",
     "_WAIT_COUNTER_VMEM_ENCODING_ID",
     "_WAIT_COUNTER_VMEM_LOAD_ENCODING_ID",
     "_WAIT_COUNTER_VMEM_STORE_ENCODING_ID",
+    "_WAIT_COUNTER_X_ENCODING_ID",
     "_WAIT_EFFECT",
+    "_X_COUNTER_HAZARD",
+    "_X_WAIT_EFFECT",
+    "_X_WAIT_HAZARDS",
     "_WORKGROUP_BARRIER_EFFECT",
     "_amdgpu_camel_case",
     "_amdgpu_core_descriptor_set",
+    "_amdgpu_core_descriptor_set_intersection",
     "_amdgpu_descriptor_set_file_stem",
+    "_amdgpu_mfma_has_qualified_timing",
+    "_amdgpu_mfma_schedule_class_name",
+    "_amdgpu_mfma_schedule_classes",
     "_amdgpu_schedule_class_reads_exec_state",
     "_amdgpu_trans_schedule_class_name",
     "_amdgpu_trans_schedule_classes",
@@ -2980,6 +3470,7 @@ __all__ = (
     "_destructive_accumulator_constraints",
     "_exec_clobber",
     "_exec_state_read",
+    "_exec_value_read",
     "_f32_bits",
     "_generic_atomic_effects",
     "_generic_memory_effect",
@@ -3000,13 +3491,11 @@ __all__ = (
     "_ignore_global_write_memory",
     "_ignore_scratch_memory",
     "_ignore_workgroup_memory",
-    "_implicit_m0_clobber",
     "_implicit_m0_input",
     "_instruction_encoding_opcode",
     "_is_exec_state_read",
     "_is_mode_state_read",
     "_literal_operand_form",
-    "_m0_clobber",
     "_m0_implicit_resource",
     "_m0_result",
     "_mode_state_read",
@@ -3015,10 +3504,22 @@ __all__ = (
     "_matrix_hazards",
     "_memory_asm_immediate_names",
     "_mubuf_vaddr_operand",
+    "_native_amdgpu_dpp_ctrl_immediate",
+    "_native_amdgpu_dpp8_immediate",
+    "_native_amdgpu_dpp_bank_mask_immediate",
+    "_native_amdgpu_gfx12_load_temporal_immediate",
+    "_native_amdgpu_gfx12_scope_immediate",
+    "_native_amdgpu_named_bit_list_immediate",
+    "_native_amdgpu_named_flag_immediate",
+    "_native_amdgpu_named_i64_immediate",
+    "_native_amdgpu_required_named_i64_immediate",
     "_native_i64_immediate",
     "_native_amdgpu_delay_alu_immediate",
+    "_native_amdgpu_scale_sel_immediate",
     "_native_literal",
+    "_native_modifier_literal",
     "_native_operand",
+    "_native_register_part",
     "_native_result",
     "_native_unsigned_hex_immediate",
     "_named_offset_immediate",

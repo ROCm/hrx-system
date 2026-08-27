@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_generated_cc_library")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_test", "loom_generated_cc_library")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -35,6 +35,8 @@ loom_generated_cc_library(
     ],
     generator = "//loom/py/loom/gen/ops:c_tables_kernel_generator",
     deps = [
+        "//loom/src/loom/analysis:control_uniformity",
+        "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
@@ -45,13 +47,29 @@ loom_generated_cc_library(
         "//loom/src/loom/ops:func_symbol_facts",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/view",
         "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:facts",
         "//loom/src/loom/target:types",
         "//loom/src/loom/util:fact_table",
-        "//loom/src/loom/util:math",
         "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base/internal",
+    ],
+)
+
+loom_cc_test(
+    name = "launch_config_test",
+    srcs = ["launch_config_test.cc"],
+    deps = [
+        ":kernel",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/testing:diagnostic_matchers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )

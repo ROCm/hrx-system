@@ -72,6 +72,18 @@ iree_status_t loom_dominance_info_initialize(const loom_module_t* module,
                                              iree_arena_allocator_t* arena,
                                              loom_dominance_info_t* out_info);
 
+// Initializes dominance info for |region| and its nested region tree.
+//
+// All queries requiring CFG dominance must remain within that region tree.
+// Structured ancestry and same-block order queries remain allocation-free, but
+// querying a CFG region outside the initialized scope conservatively reports no
+// dominance. The caller must rebuild the analysis after mutating scoped region
+// block structure or successor edges; moving operations without changing CFG
+// topology leaves the analysis valid.
+iree_status_t loom_dominance_info_initialize_region(
+    const loom_module_t* module, const loom_region_t* region,
+    iree_arena_allocator_t* arena, loom_dominance_info_t* out_info);
+
 //===----------------------------------------------------------------------===//
 // Dominance queries
 //===----------------------------------------------------------------------===//

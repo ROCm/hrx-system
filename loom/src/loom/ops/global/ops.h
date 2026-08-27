@@ -21,21 +21,27 @@ extern "C" {
 enum {
   LOOM_OP_GLOBAL_CONSTANT = LOOM_OP_KIND(LOOM_DIALECT_GLOBAL, 0),
   LOOM_OP_GLOBAL_VARIABLE = LOOM_OP_KIND(LOOM_DIALECT_GLOBAL, 1),
-  LOOM_OP_GLOBAL_RODATA = LOOM_OP_KIND(LOOM_DIALECT_GLOBAL, 2),
+  LOOM_OP_GLOBAL_RODATA_DEF = LOOM_OP_KIND(LOOM_DIALECT_GLOBAL, 2),
   LOOM_OP_GLOBAL_LOAD = LOOM_OP_KIND(LOOM_DIALECT_GLOBAL, 3),
   LOOM_OP_GLOBAL_STORE = LOOM_OP_KIND(LOOM_DIALECT_GLOBAL, 4),
-  LOOM_OP_GLOBAL_COUNT_ = 5,
+  LOOM_OP_GLOBAL_RODATA_DECL = LOOM_OP_KIND(LOOM_DIALECT_GLOBAL, 5),
+  LOOM_OP_GLOBAL_COUNT_ = 6,
 };
 
-// LOOM_OP_GLOBAL_CONSTANT: Immutable global value with an optional inline scalar initializer. Declaration-local dim/encoding names in the type annotation express structural constraints. Predicates constrain dynamic dimensions and are propagated to every load site as value facts. Non-scalar or computed initialization is modeled by global.store in initializer functions; resource-backed artifact payloads belong in global.rodata instead of overloading inline attrs.
+// LOOM_OP_GLOBAL_CONSTANT: Immutable global value with an optional inline scalar initializer. Declaration-local dim/encoding names in the type annotation express structural constraints. Predicates constrain dynamic dimensions and are propagated to every load site as value facts. Non-scalar or computed initialization is modeled by global.store in initializer functions; resource-backed artifact payloads belong in global.rodata.def instead of overloading inline attrs.
 // global.constant @pi : f32 = 3.14159265358979
 LOOM_DEFINE_ISA(loom_global_constant_isa, LOOM_OP_GLOBAL_CONSTANT)
 LOOM_DEFINE_RESULT(loom_global_constant_type, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_global_constant_symbol, 0)
 LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_global_constant_predicates, 1)
 LOOM_DEFINE_ATTR_ANY(loom_global_constant_initializer, 2)
+enum loom_global_constant_build_flag_bits_e {
+  LOOM_GLOBAL_CONSTANT_BUILD_FLAG_HAS_PREDICATES = 1u << 0,
+};
+typedef uint32_t loom_global_constant_build_flags_t;
 iree_status_t loom_global_constant_build(
     loom_builder_t* builder,
+    loom_global_constant_build_flags_t build_flags,
     loom_symbol_ref_t symbol,
     loom_type_t result_type,
     loom_optional const loom_predicate_t* predicates,
@@ -54,8 +60,13 @@ LOOM_DEFINE_RESULT(loom_global_variable_type, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_global_variable_symbol, 0)
 LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_global_variable_predicates, 1)
 LOOM_DEFINE_ATTR_ANY(loom_global_variable_initializer, 2)
+enum loom_global_variable_build_flag_bits_e {
+  LOOM_GLOBAL_VARIABLE_BUILD_FLAG_HAS_PREDICATES = 1u << 0,
+};
+typedef uint32_t loom_global_variable_build_flags_t;
 iree_status_t loom_global_variable_build(
     loom_builder_t* builder,
+    loom_global_variable_build_flags_t build_flags,
     loom_symbol_ref_t symbol,
     loom_type_t result_type,
     loom_optional const loom_predicate_t* predicates,
@@ -67,29 +78,29 @@ iree_status_t loom_global_variable_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_GLOBAL_RODATA: Read-only executable data payload. This defines a named artifact symbol containing uninterpreted bytes, optionally with a stronger power-of-two byte alignment requirement. It is used for compiler-owned tables and metadata such as sanitizer site records; user-visible value globals remain global.constant/global.variable.
-// global.rodata @loom_sanitizer_sites = bytes("4c53495401000000"), align 8
-LOOM_DEFINE_ISA(loom_global_rodata_isa, LOOM_OP_GLOBAL_RODATA)
-LOOM_DEFINE_ATTR_SYMBOL(loom_global_rodata_symbol, 0)
-LOOM_DEFINE_ATTR_BYTES(loom_global_rodata_contents, 1)
-LOOM_DEFINE_ATTR_I64(loom_global_rodata_alignment, 2)
-enum loom_global_rodata_build_flag_bits_e {
-  LOOM_GLOBAL_RODATA_BUILD_FLAG_HAS_ALIGNMENT = 1u << 0,
+// LOOM_OP_GLOBAL_RODATA_DEF: Read-only executable data payload. This defines a named artifact symbol containing uninterpreted bytes, optionally with a stronger power-of-two byte alignment requirement. It is used for compiler-owned tables and metadata such as sanitizer site records; user-visible value globals remain global.constant/global.variable.
+// global.rodata.def @loom_sanitizer_sites = align(8) bytes("4c53495401000000")
+LOOM_DEFINE_ISA(loom_global_rodata_def_isa, LOOM_OP_GLOBAL_RODATA_DEF)
+LOOM_DEFINE_ATTR_SYMBOL(loom_global_rodata_def_symbol, 0)
+LOOM_DEFINE_ATTR_BYTES(loom_global_rodata_def_contents, 1)
+LOOM_DEFINE_ATTR_I64(loom_global_rodata_def_alignment, 2)
+enum loom_global_rodata_def_build_flag_bits_e {
+  LOOM_GLOBAL_RODATA_DEF_BUILD_FLAG_HAS_ALIGNMENT = 1u << 0,
 };
-typedef uint32_t loom_global_rodata_build_flags_t;
-iree_status_t loom_global_rodata_build(
+typedef uint32_t loom_global_rodata_def_build_flags_t;
+iree_status_t loom_global_rodata_def_build(
     loom_builder_t* builder,
-    loom_global_rodata_build_flags_t build_flags,
+    loom_global_rodata_def_build_flags_t build_flags,
     loom_symbol_ref_t symbol,
-    iree_const_byte_span_t contents,
     loom_optional int64_t alignment,
+    iree_const_byte_span_t contents,
     loom_location_id_t location,
     loom_op_t** out_op);
-iree_status_t loom_global_rodata_verify(
+iree_status_t loom_global_rodata_def_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_GLOBAL_LOAD: Load a value from a global. Dynamic dims and encodings in the type annotation reference co-results by name. Predicates on the global definition are propagated as value facts.
+// LOOM_OP_GLOBAL_LOAD: Load a value global or materialize a read-only data symbol. Value-global dynamic dims and encodings in the type annotation reference co-results by name, and predicates on the definition are propagated as value facts. A read-only data symbol requires one `buffer` result representing the complete payload with constant-memory provenance. Definitions provide exact byte-extent and authored alignment facts; declarations remain conservative until linking supplies their definition.
 // %tile, %m, %k = global.load @weights : tile<[%m]x[%k]xf32>
 LOOM_DEFINE_ISA(loom_global_load_isa, LOOM_OP_GLOBAL_LOAD)
 LOOM_DEFINE_VARIADIC_RESULTS(loom_global_load_result, 0)
@@ -125,6 +136,16 @@ iree_status_t loom_global_store_build(
 iree_status_t loom_global_store_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_GLOBAL_RODATA_DECL: Declare a read-only executable data symbol whose payload is supplied by artifact emission or linking. The declaration carries symbol identity without inventing placeholder contents.
+// global.rodata.decl @iree_asan_config
+LOOM_DEFINE_ISA(loom_global_rodata_decl_isa, LOOM_OP_GLOBAL_RODATA_DECL)
+LOOM_DEFINE_ATTR_SYMBOL(loom_global_rodata_decl_symbol, 0)
+iree_status_t loom_global_rodata_decl_build(
+    loom_builder_t* builder,
+    loom_symbol_ref_t symbol,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 
 // Returns the vtable array for the global dialect.
 const loom_op_vtable_t* const* loom_global_dialect_vtables(

@@ -13,7 +13,14 @@ import pytest
 from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.dialect.encoding import ALL_ENCODING_OPS
 from loom.dialect.func import ALL_FUNC_OPS
-from loom.dialect.test import ALL_TEST_OPS
+from loom.dialect.test import (
+    ALL_TEST_OPS,
+    ALL_TEST_PARAMETERIZED_ATTRS,
+    test_array_type,
+    test_matrix_type,
+    test_scope_type,
+    test_tile_attr,
+)
 from loom.format.text.parser import Parser
 from loom.format.text.printer import Printer, print_type
 from loom.ir import (
@@ -35,14 +42,14 @@ from loom.ir import (
     OFFSET,
     Block,
     CanonicalAttrDict,
+    DialectType,
     DynamicDim,
     DynamicEncoding,
     EncodingInstance,
+    EnumArrayAttr,
     FileLocation,
     FunctionType,
     FusedLocation,
-    GroupScope,
-    GroupType,
     Module,
     OpaqueLocation,
     Operation,
@@ -52,6 +59,7 @@ from loom.ir import (
     ScalarType,
     ScalarTypeKind,
     ShapedType,
+    SignedEnumSetAttr,
     StaticDim,
     StorageSpace,
     StorageType,
@@ -92,6 +100,7 @@ def _module_parser() -> Parser:
     parser.register_ops(ALL_TEST_OPS)
     parser.register_ops(ALL_FUNC_OPS)
     parser.register_types(ALL_BUILTIN_TYPES)
+    parser.register_parameterized_attrs(ALL_TEST_PARAMETERIZED_ATTRS)
     return parser
 
 
@@ -126,12 +135,15 @@ def _module_with(*names_and_types: tuple[str, Type]) -> tuple[Module, list[int]]
     return module, value_ids
 
 
-def _test_ptr_register_type(unit_count: int = 1) -> RegisterType:
+def _test_ptr_register_type(
+    unit_count: int = 1, value_type: Type | None = None
+) -> RegisterType:
     return RegisterType(
         _TEST_LOW_CORE_STABLE_ID,
         _TEST_PTR_REGISTER_CLASS_ID,
         unit_count,
         "test.ptr",
+        value_type,
     )
 
 
@@ -265,9 +277,6 @@ class TestPrintType:
         t = ShapedType(TypeKind.TILE, I8, (StaticDim(256),))
         assert print_type(t) == "tile<256xi8>"
 
-    def test_group_type(self) -> None:
-        assert print_type(GroupType(GroupScope.WORKGROUP)) == "group<workgroup>"
-
     def test_function_type(self) -> None:
         ft = FunctionType((F32, I32), (F32,))
         assert print_type(ft) == "(f32, i32) -> (f32)"
@@ -286,6 +295,19 @@ class TestPrintType:
     def test_register_type(self) -> None:
         assert print_type(_test_ptr_register_type()) == "reg<test.ptr>"
         assert print_type(_test_ptr_register_type(4)) == "reg<test.ptr x4>"
+        assert (
+            print_type(_test_ptr_register_type(value_type=I32)) == "reg<test.ptr : i32>"
+        )
+        vector_type = ShapedType(TypeKind.VECTOR, I32, (StaticDim(4),))
+        assert (
+            print_type(_test_ptr_register_type(4, vector_type))
+            == "reg<test.ptr x4 : vector<4xi32>>"
+        )
+        dialect_type = DialectType("vm.ref", (I32,))
+        assert (
+            print_type(_test_ptr_register_type(value_type=dialect_type))
+            == "reg<test.ptr : vm.ref<i32>>"
+        )
 
     def test_dialect_type_opaque(self) -> None:
         from loom.ir import DialectType
@@ -336,6 +358,32 @@ class TestPrintType:
         t = DialectType("test.pair", (F32, I32))
         result = print_type(t)
         assert result == "test.pair<f32, i32>"
+
+    def test_descriptor_backed_type_positional_parameter(self) -> None:
+        assert print_type(test_scope_type(scope="subgroup")) == "test.scope<subgroup>"
+
+    def test_descriptor_backed_type_mixed_parameters(self) -> None:
+        assert (
+            print_type(test_matrix_type(element_type=BF16, scope="subgroup", rows=16))
+            == "test.matrix<bf16, scope = subgroup, rows = 16>"
+        )
+
+    def test_descriptor_backed_type_optional_parameter(self) -> None:
+        assert print_type(test_array_type(element_type=BF16)) == "test.array<bf16>"
+        assert (
+            print_type(test_array_type(element_type=BF16, alignment=16))
+            == "test.array<bf16, alignment = 16>"
+        )
+
+    def test_descriptor_backed_type_nested_dictionary_parameter(self) -> None:
+        metadata = CanonicalAttrDict(
+            (("tile", test_tile_attr(width=8)), ("purpose", "scratch"))
+        )
+        assert (
+            print_type(test_array_type(element_type=BF16, metadata=metadata))
+            == 'test.array<bf16, metadata = {purpose = "scratch", '
+            "tile = #test.tile<width = 8>}>"
+        )
 
 
 # ============================================================================
@@ -730,8 +778,7 @@ class TestPrintAttrDict:
             attributes={"dict": {}},
         )
         text = _printer().print_operation(op, module)
-        assert "{" not in text
-        assert text == "%r = test.attrs %x : f32"
+        assert text == "%r = test.attrs %x {} : f32"
 
     def test_no_dict_attr(self) -> None:
         module, [x, r] = _module_with(("x", F32), ("r", F32))
@@ -753,6 +800,43 @@ class TestPrintAttrDict:
             text
             == '%r = test.attrs %x {axis = 0, meta = {opt = 3, phase = "link"}} : f32'
         )
+
+    def test_enum_array_requires_descriptor_backed_field(self) -> None:
+        module, [x, r] = _module_with(("x", F32), ("r", F32))
+        op = Operation(
+            name="test.attrs",
+            operands=[x],
+            results=[r],
+            attributes={"dict": {"modes": EnumArrayAttr([1, 7])}},
+        )
+
+        with pytest.raises(ValueError, match="descriptor-backed field"):
+            _printer().print_operation(op, module)
+
+    def test_signed_enum_set_prints_in_stable_ordinal_order(self) -> None:
+        op = Operation(
+            name="test.signed_enum_set_attrs",
+            attributes={
+                "required_features": SignedEnumSetAttr([255, 1], [7]),
+                "optional_features": SignedEnumSetAttr([], [255]),
+            },
+        )
+
+        assert _printer().print_operation(op, Module()) == (
+            "test.signed_enum_set_attrs [low, -middle, high] using [-high]"
+        )
+
+    def test_signed_enum_set_requires_descriptor_backed_field(self) -> None:
+        module, [x, r] = _module_with(("x", F32), ("r", F32))
+        op = Operation(
+            name="test.attrs",
+            operands=[x],
+            results=[r],
+            attributes={"dict": {"features": SignedEnumSetAttr([1])}},
+        )
+
+        with pytest.raises(ValueError, match="descriptor-backed field"):
+            _printer().print_operation(op, module)
 
 
 # ============================================================================

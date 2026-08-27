@@ -31,10 +31,10 @@ typedef struct link_modules_state_t {
   // Per-worker scratch storage used for the link invocation.
   loomc_workspace_t* workspace;
 
-  // Primary source that defines the caller and imports the library symbol.
+  // Primary source that defines the caller and declares the library symbol.
   loomc_source_t* harness_source;
 
-  // Library source that provides the imported implementation.
+  // Library source that provides the declared implementation.
   loomc_source_t* library_source;
 
   // Mutable builder used only until the frozen link index is finished.
@@ -201,26 +201,22 @@ static loomc_status_t create_resources(link_modules_state_t* state) {
   return status;
 }
 
-static loomc_status_t add_source_to_index(link_modules_state_t* state,
-                                          loomc_source_t* source,
-                                          loomc_string_view_t provider_name,
-                                          loomc_link_provider_role_t role) {
-  loomc_link_index_source_options_t options = {
-      .provider_name = provider_name,
-      .role = role,
-  };
-  return loomc_link_index_builder_add_source(state->index_builder, source,
-                                             &options, NULL);
-}
-
 static loomc_status_t build_link_index(link_modules_state_t* state) {
-  loomc_status_t status = add_source_to_index(
-      state, state->harness_source, loomc_make_cstring_view("harness"),
-      LOOMC_LINK_PROVIDER_ROLE_INPUT);
+  const loomc_link_index_source_options_t harness_options = {
+      .provider_name = loomc_make_cstring_view("harness"),
+      .role = LOOMC_LINK_PROVIDER_ROLE_INPUT,
+  };
+  loomc_status_t status = loomc_link_index_builder_add_source(
+      state->index_builder, state->harness_source, &harness_options, NULL);
   if (loomc_status_is_ok(status)) {
-    status = add_source_to_index(state, state->library_source,
-                                 loomc_make_cstring_view("library"),
-                                 LOOMC_LINK_PROVIDER_ROLE_LIBRARY);
+    // --8<-- [start:library-source]
+    const loomc_link_index_source_options_t library_options = {
+        .provider_name = loomc_make_cstring_view("library"),
+        .role = LOOMC_LINK_PROVIDER_ROLE_LIBRARY,
+    };
+    status = loomc_link_index_builder_add_source(
+        state->index_builder, state->library_source, &library_options, NULL);
+    // --8<-- [end:library-source]
   }
   if (loomc_status_is_ok(status)) {
     status = loomc_link_index_builder_finish(
@@ -244,6 +240,7 @@ static loomc_status_t link_module(link_modules_state_t* state) {
       .type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
       .structure_size = sizeof(link_options),
       .link_index = state->link_index,
+      .mode = LOOMC_LINK_MODE_LINK,
       .root_symbols = roots,
       .root_symbol_count = 1,
   };
@@ -279,8 +276,7 @@ static loomc_status_t compile_linked_module(link_modules_state_t* state) {
               .binding_count = 1,
               .json_object =
                   loomc_make_cstring_view("{\"model\":{\"hidden_size\":2048}}"),
-              .flags = LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN |
-                       LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+              .flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
           },
   };
 
@@ -317,8 +313,10 @@ static loomc_status_t run_link_modules_example(void) {
 }
 
 int main(int argc, char** argv) {
-  (void)argc;
-  (void)argv;
+  if (argc != 1) {
+    fprintf(stderr, "usage: %s\n", argv[0]);
+    return 64;
+  }
 
   loomc_status_t status = run_link_modules_example();
   if (loomc_status_is_ok(status)) {

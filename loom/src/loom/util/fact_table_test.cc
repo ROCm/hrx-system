@@ -35,6 +35,22 @@ class FactTableTest : public ::testing::Test {
 
 static constexpr uint8_t kTestRawPayloadTag = 42;
 
+static loom_value_fact_uniform_scale_origin_t UniformScaleOrigin(
+    loom_value_id_t source_value_id, loom_value_id_t scale_value_id) {
+  loom_value_fact_uniform_scale_origin_t origin = {};
+  origin.source_value_id = source_value_id;
+  origin.scale_value_id = scale_value_id;
+  return origin;
+}
+
+static loom_value_fact_contextual_query_origin_t ContextualQueryOrigin(
+    loom_parameterized_attr_kind_t family_kind, loom_attribute_t key) {
+  loom_value_fact_contextual_query_origin_t origin = {};
+  origin.family_kind = family_kind;
+  origin.key = key;
+  return origin;
+}
+
 static const loom_value_fact_domain_t* FactTableTestResolveDomain(
     void* user_data, const loom_fact_context_t* context,
     const loom_module_t* module, loom_type_t type) {
@@ -174,6 +190,33 @@ TEST_F(FactTableTest, DefineAndLookup) {
   EXPECT_EQ(result.range_hi, 42);
 }
 
+TEST_F(FactTableTest, DefineAndLookupPreservesIndependentFlagBits) {
+  loom_value_fact_table_t table = {0};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 5));
+
+  constexpr loom_value_fact_flags_t kFlags[] = {
+      LOOM_VALUE_FACT_FLOAT | LOOM_VALUE_FACT_NAN,
+      LOOM_VALUE_FACT_FLOAT | LOOM_VALUE_FACT_INF,
+      LOOM_VALUE_FACT_FLOAT | LOOM_VALUE_FACT_NOT_SUBNORMAL,
+      LOOM_VALUE_FACT_SUBGROUP_UNIFORM | LOOM_VALUE_FACT_WORKGROUP_UNIFORM,
+      LOOM_VALUE_FACT_SUBGROUP_UNIFORM | LOOM_VALUE_FACT_WORKGROUP_UNIFORM |
+          LOOM_VALUE_FACT_CLUSTER_UNIFORM,
+  };
+  for (loom_value_id_t value_id = 0; value_id < IREE_ARRAYSIZE(kFlags);
+       ++value_id) {
+    loom_value_facts_t facts = loom_value_facts_unknown();
+    facts.flags = kFlags[value_id];
+    IREE_ASSERT_OK(loom_value_fact_table_define(&table, value_id, facts));
+  }
+
+  for (loom_value_id_t value_id = 0; value_id < IREE_ARRAYSIZE(kFlags);
+       ++value_id) {
+    const loom_value_facts_t facts =
+        loom_value_fact_table_lookup(&table, value_id);
+    EXPECT_EQ(facts.flags, kFlags[value_id]);
+  }
+}
+
 TEST_F(FactTableTest, UndefinedEntriesAreUnknown) {
   loom_value_fact_table_t table = {0};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 100));
@@ -276,6 +319,101 @@ TEST_F(FactTableTest, UniformElementOriginsClearOnlyTouchedEntries) {
   EXPECT_EQ(table.uniform_element_origins.entries[5], 7u);
 }
 
+TEST_F(FactTableTest, UniformScaleOriginsClearOnlyTouchedEntries) {
+  loom_value_fact_table_t table = {0};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
+
+  IREE_ASSERT_OK(loom_value_fact_table_define_uniform_scale_origin(
+      &table, 5,
+      UniformScaleOrigin(/*source_value_id=*/2,
+                         /*scale_value_id=*/3)));
+  IREE_ASSERT_OK(loom_value_fact_table_define_uniform_scale_origin(
+      &table, 8,
+      UniformScaleOrigin(/*source_value_id=*/4,
+                         /*scale_value_id=*/5)));
+  IREE_ASSERT_OK(loom_value_fact_table_define_uniform_scale_origin(
+      &table, 8,
+      UniformScaleOrigin(/*source_value_id=*/6,
+                         /*scale_value_id=*/7)));
+
+  EXPECT_GE(table.uniform_scale_origins.capacity, (iree_host_size_t)9);
+  EXPECT_EQ(table.uniform_scale_origins.touched_count, 2u);
+  EXPECT_EQ(table.uniform_scale_origins.entries[5].source_value_id, 2u);
+  EXPECT_EQ(table.uniform_scale_origins.entries[5].scale_value_id, 3u);
+  EXPECT_EQ(table.uniform_scale_origins.entries[8].source_value_id, 6u);
+  EXPECT_EQ(table.uniform_scale_origins.entries[8].scale_value_id, 7u);
+
+  loom_value_fact_uniform_scale_origin_t* const entries =
+      table.uniform_scale_origins.entries;
+  loom_value_id_t* const touched_values =
+      table.uniform_scale_origins.touched_values;
+  loom_value_fact_table_clear_scope(&table);
+
+  EXPECT_EQ(table.uniform_scale_origins.entries, entries);
+  EXPECT_EQ(table.uniform_scale_origins.touched_values, touched_values);
+  EXPECT_EQ(table.uniform_scale_origins.touched_count, 0u);
+  EXPECT_EQ(table.uniform_scale_origins.entries[5].source_value_id,
+            LOOM_VALUE_ID_INVALID);
+  EXPECT_EQ(table.uniform_scale_origins.entries[5].scale_value_id,
+            LOOM_VALUE_ID_INVALID);
+  EXPECT_EQ(table.uniform_scale_origins.entries[8].source_value_id,
+            LOOM_VALUE_ID_INVALID);
+  EXPECT_EQ(table.uniform_scale_origins.entries[8].scale_value_id,
+            LOOM_VALUE_ID_INVALID);
+
+  IREE_ASSERT_OK(loom_value_fact_table_define_uniform_scale_origin(
+      &table, 5,
+      UniformScaleOrigin(/*source_value_id=*/9,
+                         /*scale_value_id=*/10)));
+  EXPECT_EQ(table.uniform_scale_origins.touched_count, 1u);
+  EXPECT_EQ(table.uniform_scale_origins.entries[5].source_value_id, 9u);
+  EXPECT_EQ(table.uniform_scale_origins.entries[5].scale_value_id, 10u);
+}
+
+TEST_F(FactTableTest, ContextualQueryOriginsAreSparseAndScopeLocal) {
+  loom_value_fact_table_t table = {0};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 1024));
+
+  EXPECT_EQ(table.contextual_query_origins.entries, nullptr);
+  EXPECT_EQ(table.contextual_query_origins.origins, nullptr);
+  const loom_parameterized_attr_kind_t family_kind =
+      LOOM_PARAMETERIZED_ATTR_KIND(/*dialect_id=*/3, /*family_index=*/7);
+  IREE_ASSERT_OK(loom_value_fact_table_define_contextual_query_origin(
+      &table, 900, ContextualQueryOrigin(family_kind, loom_attr_enum(4))));
+
+  ASSERT_GE(table.contextual_query_origins.capacity, (iree_host_size_t)901);
+  EXPECT_EQ(table.contextual_query_origins.touched_count, 1u);
+  EXPECT_EQ(table.contextual_query_origins.origin_count, 1u);
+  const uint32_t origin_id = table.contextual_query_origins.entries[900];
+  ASSERT_NE(origin_id, 0u);
+  const loom_value_fact_contextual_query_origin_t& origin =
+      table.contextual_query_origins.origins[origin_id - 1];
+  EXPECT_EQ(origin.family_kind, family_kind);
+  EXPECT_EQ(loom_attr_as_enum(origin.key), 4u);
+
+  uint32_t* const entries = table.contextual_query_origins.entries;
+  loom_value_fact_contextual_query_origin_t* const origins =
+      table.contextual_query_origins.origins;
+  loom_value_fact_table_clear_scope(&table);
+
+  EXPECT_EQ(table.contextual_query_origins.entries, entries);
+  EXPECT_EQ(table.contextual_query_origins.origins, origins);
+  EXPECT_EQ(table.contextual_query_origins.entries[900], 0u);
+  EXPECT_EQ(table.contextual_query_origins.touched_count, 0u);
+  EXPECT_EQ(table.contextual_query_origins.origin_count, 0u);
+
+  IREE_ASSERT_OK(loom_value_fact_table_define_contextual_query_origin(
+      &table, 5, ContextualQueryOrigin(family_kind, loom_attr_enum(9))));
+  EXPECT_EQ(table.contextual_query_origins.touched_count, 1u);
+  EXPECT_EQ(table.contextual_query_origins.origin_count, 1u);
+  const uint32_t reused_origin_id = table.contextual_query_origins.entries[5];
+  ASSERT_NE(reused_origin_id, 0u);
+  EXPECT_EQ(
+      loom_attr_as_enum(
+          table.contextual_query_origins.origins[reused_origin_id - 1].key),
+      9u);
+}
+
 //===----------------------------------------------------------------------===//
 // Capacity
 //===----------------------------------------------------------------------===//
@@ -369,6 +507,24 @@ TEST_F(FactTableTest, UniformElementExtensionRoundTrips) {
       loom_value_facts_query_uniform_element(&table.context, facts, &uniform));
   EXPECT_TRUE(loom_value_facts_is_exact(uniform.element));
   EXPECT_EQ(uniform.element.range_lo, 42);
+}
+
+TEST_F(FactTableTest, UniformElementPreservesFloatPredicateFacts) {
+  loom_value_fact_table_t table = {0};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
+
+  loom_value_facts_t element = loom_value_facts_unknown();
+  element.flags |= LOOM_VALUE_FACT_FLOAT_PREDICATE_MASK;
+
+  loom_value_facts_t facts = loom_value_facts_unknown();
+  IREE_ASSERT_OK(
+      loom_value_facts_make_uniform_element(&table.context, element, &facts));
+
+  EXPECT_TRUE(loom_value_facts_is_float(facts));
+  EXPECT_TRUE(loom_value_facts_is_not_nan(facts));
+  EXPECT_TRUE(loom_value_facts_is_not_inf(facts));
+  EXPECT_TRUE(loom_value_facts_is_finite(facts));
+  EXPECT_TRUE(loom_value_facts_is_not_subnormal(facts));
 }
 
 TEST_F(FactTableTest, IdenticalExtensionsInternToSameId) {
@@ -513,6 +669,16 @@ TEST_F(FactTableTest, EncodingSummaryDenseLayoutRoundTrips) {
   EXPECT_EQ(result.address_layout.kind, LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE);
 }
 
+TEST(EncodedOperandSchemaTest, SemanticAbsenceDoesNotImplyScale) {
+  loom_value_fact_encoded_operand_schema_t schema = {};
+  schema.flags = LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_ELEMENT_FORMAT_NONE |
+                 LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_AFFINE_NONE;
+  EXPECT_FALSE(loom_value_fact_encoded_operand_schema_has_scale(schema));
+
+  schema.flags |= LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_ZERO_SCALE_FALLBACK;
+  EXPECT_TRUE(loom_value_fact_encoded_operand_schema_has_scale(schema));
+}
+
 TEST_F(FactTableTest, EncodingSummaryStridedLayoutInternsStrideFacts) {
   loom_value_fact_table_t table = {0};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
@@ -617,6 +783,60 @@ TEST_F(FactTableTest, CloneDefinedFactsCopiesUniformElementOrigins) {
       &target.context, loom_value_fact_table_lookup(&target, 7), nullptr));
   ASSERT_GE(target.uniform_element_origins.capacity, (iree_host_size_t)8);
   EXPECT_EQ(target.uniform_element_origins.entries[7], 2u);
+
+  iree_arena_deinitialize(&target_arena);
+}
+
+TEST_F(FactTableTest, CloneDefinedFactsCopiesUniformScaleOrigins) {
+  loom_value_fact_table_t source = {0};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&source, &arena_, 8));
+
+  IREE_ASSERT_OK(
+      loom_value_fact_table_define(&source, 7, loom_value_facts_unknown()));
+  IREE_ASSERT_OK(loom_value_fact_table_define_uniform_scale_origin(
+      &source, 7,
+      UniformScaleOrigin(/*source_value_id=*/2,
+                         /*scale_value_id=*/3)));
+
+  iree_arena_allocator_t target_arena;
+  iree_arena_initialize(&block_pool_, &target_arena);
+  loom_value_fact_table_t target = {0};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&target, &target_arena, 8));
+  IREE_ASSERT_OK(
+      loom_value_fact_table_clone_defined_facts(&target, &source, nullptr));
+
+  ASSERT_GE(target.uniform_scale_origins.capacity, (iree_host_size_t)8);
+  EXPECT_EQ(target.uniform_scale_origins.entries[7].source_value_id, 2u);
+  EXPECT_EQ(target.uniform_scale_origins.entries[7].scale_value_id, 3u);
+
+  iree_arena_deinitialize(&target_arena);
+}
+
+TEST_F(FactTableTest, CloneDefinedFactsCopiesContextualQueryOrigins) {
+  loom_value_fact_table_t source = {0};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&source, &arena_, 8));
+
+  IREE_ASSERT_OK(
+      loom_value_fact_table_define(&source, 7, loom_value_facts_unknown()));
+  const loom_parameterized_attr_kind_t family_kind =
+      LOOM_PARAMETERIZED_ATTR_KIND(/*dialect_id=*/3, /*family_index=*/7);
+  IREE_ASSERT_OK(loom_value_fact_table_define_contextual_query_origin(
+      &source, 7, ContextualQueryOrigin(family_kind, loom_attr_i64(32))));
+
+  iree_arena_allocator_t target_arena;
+  iree_arena_initialize(&block_pool_, &target_arena);
+  loom_value_fact_table_t target = {0};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&target, &target_arena, 8));
+  IREE_ASSERT_OK(
+      loom_value_fact_table_clone_defined_facts(&target, &source, nullptr));
+
+  ASSERT_GE(target.contextual_query_origins.capacity, (iree_host_size_t)8);
+  const uint32_t origin_id = target.contextual_query_origins.entries[7];
+  ASSERT_NE(origin_id, 0u);
+  const loom_value_fact_contextual_query_origin_t& origin =
+      target.contextual_query_origins.origins[origin_id - 1];
+  EXPECT_EQ(origin.family_kind, family_kind);
+  EXPECT_EQ(loom_attr_as_i64(origin.key), 32);
 
   iree_arena_deinitialize(&target_arena);
 }

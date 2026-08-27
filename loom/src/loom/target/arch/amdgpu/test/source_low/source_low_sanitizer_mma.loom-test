@@ -1,6 +1,6 @@
 // RUN: emit source-low output=low sanitizer=access sanitizer-reporting=trap
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @sanitizer_fragment_result_store() {
   %unit = index.constant 1 : index
@@ -12,7 +12,7 @@ kernel.def target(@target) @sanitizer_fragment_result_store() {
   %n = index.constant 16 : index
   %k = index.constant 16 : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %output_global[%base] : buffer -> view<16x16xf32, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<16x16xf32>
   %lhs_data = vector.constant 0.0 : vector<16xf16>
   %rhs_data = vector.constant 0.0 : vector<16xf16>
   %init_data = vector.constant 0.0 : vector<8xf32>
@@ -20,12 +20,12 @@ kernel.def target(@target) @sanitizer_fragment_result_store() {
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<16xf16>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf32>
-  vector.fragment.store<result> %result, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %result, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @sanitizer_fragment_result_store() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @sanitizer_fragment_result_store() asm {
   %16 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %18 = v_mov_b32 0
@@ -691,23 +691,23 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @sanitizer_fragment_resu
   low.cond_br %1453, ^_bb2, ^_bb1 : reg<amdgpu.scc>
 ^_bb1:
   %1456 = v_and_b32_src0_inline %16, 31
-  %1459 = v_lshlrev_b32_src0_inline %1456, 2
-  %1460 = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  global_store_b32_saddr %1459, %1460, %output_view
-  %1461 = slice %result[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  global_store_b32_saddr %1459, %1461, %output_view {offset = 128}
-  %1462 = slice %result[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  global_store_b32_saddr %1459, %1462, %output_view {offset = 256}
-  %1463 = slice %result[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  global_store_b32_saddr %1459, %1463, %output_view {offset = 384}
-  %1464 = slice %result[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  global_store_b32_saddr %1459, %1464, %output_view {offset = 512}
-  %1465 = slice %result[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  global_store_b32_saddr %1459, %1465, %output_view {offset = 640}
-  %1466 = slice %result[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  global_store_b32_saddr %1459, %1466, %output_view {offset = 768}
-  %1467 = slice %result[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  global_store_b32_saddr %1459, %1467, %output_view {offset = 896}
+  %1457 = v_lshlrev_b32_src0_inline %1456, 2
+  %1458 = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %1457, %1458, %output_view
+  %1459 = slice %result[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %1457, %1459, %output_view {offset = 128}
+  %1460 = slice %result[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %1457, %1460, %output_view {offset = 256}
+  %1461 = slice %result[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %1457, %1461, %output_view {offset = 384}
+  %1462 = slice %result[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %1457, %1462, %output_view {offset = 512}
+  %1463 = slice %result[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %1457, %1463, %output_view {offset = 640}
+  %1464 = slice %result[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %1457, %1464, %output_view {offset = 768}
+  %1465 = slice %result[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %1457, %1465, %output_view {offset = 896}
   return
 ^_bb2:
   %1454, %1455 = s_and_saveexec_b64 %1443

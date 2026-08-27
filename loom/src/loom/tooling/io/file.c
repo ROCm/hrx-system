@@ -17,6 +17,7 @@
 #endif  // defined(IREE_PLATFORM_WINDOWS)
 
 #include "iree/base/internal/path.h"
+#include "iree/io/stdio_stream.h"
 
 static iree_status_t loom_tooling_file_path_dup(iree_string_view_t path,
                                                 iree_allocator_t allocator,
@@ -175,6 +176,30 @@ iree_status_t loom_tooling_write_output_file(iree_string_view_t path,
                                                 "failed to flush stdout");
 }
 
+static iree_status_t loom_tooling_write_byte_sequence_segment(
+    void* user_data, iree_const_byte_span_t segment) {
+  loom_tooling_output_stream_t* output =
+      (loom_tooling_output_stream_t*)user_data;
+  return loom_output_stream_write(
+      &output->stream,
+      iree_make_string_view((const char*)segment.data, segment.data_length));
+}
+
+iree_status_t loom_tooling_write_output_byte_sequence(
+    iree_string_view_t path, const iree_io_byte_sequence_t* contents,
+    iree_allocator_t allocator) {
+  IREE_ASSERT_ARGUMENT(contents);
+  loom_tooling_output_stream_t output = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_tooling_output_stream_open(path, allocator, &output));
+  iree_status_t status = iree_io_byte_sequence_enumerate(
+      contents, (iree_io_byte_sequence_segment_callback_t){
+                    .fn = loom_tooling_write_byte_sequence_segment,
+                    .user_data = &output,
+                });
+  return iree_status_join(status, loom_tooling_output_stream_close(&output));
+}
+
 iree_status_t loom_tooling_write_stdout(iree_string_view_t contents) {
   if (iree_string_view_is_empty(contents)) {
     return iree_ok_status();
@@ -201,17 +226,8 @@ iree_status_t loom_tooling_output_stream_open(
     return iree_ok_status();
   }
 
-  char* path_cstring = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_tooling_file_path_dup(path, allocator, &path_cstring));
-  FILE* file = fopen(path_cstring, "wb");
-  const int open_error = file == NULL ? errno : 0;
-  iree_allocator_free(allocator, path_cstring);
-  if (file == NULL) {
-    return iree_make_status(iree_status_code_from_errno(open_error),
-                            "failed to open output stream '%.*s' (%d)",
-                            (int)path.size, path.data, open_error);
-  }
+  FILE* file = NULL;
+  IREE_RETURN_IF_ERROR(iree_io_stdio_file_open(path, "wb", allocator, &file));
   out_output->file = file;
   out_output->close_file = true;
   loom_output_stream_for_file(file, &out_output->stream);

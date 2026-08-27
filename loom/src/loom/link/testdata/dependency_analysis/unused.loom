@@ -1,0 +1,3 @@
+func.def public @unrelated(%x: i32) -> (i32) {
+  func.return %x : i32
+}

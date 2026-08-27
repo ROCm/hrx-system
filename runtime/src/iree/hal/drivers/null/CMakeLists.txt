@@ -27,12 +27,8 @@ iree_cc_library(
     "device.h"
     "driver.c"
     "driver.h"
-    "event.c"
-    "event.h"
     "executable.c"
     "executable.h"
-    "executable_cache.c"
-    "executable_cache.h"
     "semaphore.c"
     "semaphore.h"
   DEPS
@@ -42,8 +38,6 @@ iree_cc_library(
     iree::base::internal
     iree::hal
     iree::hal::utils::device_spec_builder
-    iree::hal::utils::file_transfer
-    iree::hal::utils::files
     iree::hal::utils::queue_emulation
     iree::hal::utils::queue_host_call_emulation
   PUBLIC

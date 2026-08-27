@@ -71,8 +71,6 @@ IREE_FLAG_NAMED(string, pass_reproducer, "pass-reproducer", "",
                 "failure.");
 IREE_FLAG_NAMED(string, diagnostic_format, "diagnostic-format", "text",
                 "Diagnostic output format. Use 'text' or 'json'.");
-IREE_FLAG_NAMED(string, low_asm_descriptor_set, "low-asm-descriptor-set", "",
-                "Descriptor-set key used when printing low asm regions.");
 
 typedef enum loom_opt_pass_report_mode_e {
   LOOM_OPT_PASS_REPORT_NONE = 0,
@@ -449,14 +447,6 @@ static iree_status_t loom_opt_append_reproducer_run_line(
     IREE_RETURN_IF_ERROR(
         loom_opt_append_shell_quoted(builder, config_assignments.values[i]));
   }
-  iree_string_view_t low_asm_descriptor_set = iree_string_view_trim(
-      iree_make_cstring_view(FLAG_low_asm_descriptor_set));
-  if (!iree_string_view_is_empty(low_asm_descriptor_set)) {
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
-        builder, " --low-asm-descriptor-set="));
-    IREE_RETURN_IF_ERROR(
-        loom_opt_append_shell_quoted(builder, low_asm_descriptor_set));
-  }
   iree_string_view_t pass_report =
       iree_string_view_trim(iree_make_cstring_view(FLAG_pass_report));
   if (!iree_string_view_is_empty(pass_report)) {
@@ -622,29 +612,29 @@ static iree_status_t loom_opt_format_pass_selection_json(
     loom_output_stream_t* stream) {
   iree_string_view_t pipeline_symbol =
       iree_string_view_trim(iree_make_cstring_view(FLAG_pipeline));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
   if (!iree_string_view_is_empty(pipeline_symbol)) {
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, "{\"kind\":\"pipeline\","));
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, "\"pipeline\":"));
-    IREE_RETURN_IF_ERROR(
-        loom_json_write_escaped_string(stream, pipeline_symbol));
-    return loom_output_stream_write_cstring(stream, "}");
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &object, IREE_SV("kind"), IREE_SV("pipeline")));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &object, IREE_SV("pipeline"), pipeline_symbol));
+    return loom_json_object_end(&object);
   }
 
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("kind"), IREE_SV("pass-list")));
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, "{\"kind\":\"pass-list\","));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, "\"passes\":["));
+      loom_json_object_begin_field(&object, IREE_SV("passes")));
+  loom_json_array_writer_t passes_array;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &passes_array));
   iree_flag_string_list_t passes = FLAG_pass_list();
   for (iree_host_size_t i = 0; i < passes.count; ++i) {
     IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, i == 0 ? "" : ","));
-    IREE_RETURN_IF_ERROR(
-        loom_json_write_escaped_string(stream, passes.values[i]));
+        loom_json_array_write_string_element(&passes_array, passes.values[i]));
   }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "]}"));
-  return iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&passes_array));
+  return loom_json_object_end(&object);
 }
 
 static iree_status_t loom_opt_append_commented_block(
@@ -686,28 +676,35 @@ static iree_status_t loom_opt_append_reproducer_metadata(
   loom_output_stream_t metadata_stream;
   loom_output_stream_for_builder(&metadata_builder, &metadata_stream);
 
-  iree_status_t status = loom_output_stream_write_cstring(
-      &metadata_stream, "{\n  \"selection\": ");
+  loom_json_object_writer_t metadata_object;
+  iree_status_t status =
+      loom_json_object_begin(&metadata_stream, &metadata_object);
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_json_object_begin_field(&metadata_object, IREE_SV("selection"));
+  }
   if (iree_status_is_ok(status)) {
     status = loom_opt_format_pass_selection_json(&metadata_stream);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_output_stream_write_cstring(&metadata_stream,
-                                              ",\n  \"failure_status\": ");
+    status = loom_json_object_begin_field(&metadata_object, IREE_SV("status"));
   }
   if (iree_status_is_ok(status)) {
-    status = loom_json_write_escaped_cstring(
-        &metadata_stream, iree_status_code_string(failure_status_code));
+    status = loom_json_write_status_object(
+        &metadata_stream, failure_status_code, iree_string_view_empty());
   }
   if (iree_status_is_ok(status)) {
-    status = loom_output_stream_write_cstring(&metadata_stream,
-                                              ",\n  \"registry\": ");
+    status =
+        loom_json_object_begin_field(&metadata_object, IREE_SV("registry"));
   }
   if (iree_status_is_ok(status)) {
     status = loom_pass_report_format_registry_json(registry, &metadata_stream);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_output_stream_write_cstring(&metadata_stream, "}\n");
+    status = loom_json_object_end(&metadata_object);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_output_stream_write_char(&metadata_stream, '\n');
   }
   if (iree_status_is_ok(status)) {
     status = iree_string_builder_append_cstring(builder,
@@ -897,14 +894,19 @@ static iree_status_t loom_opt_run_passes(
     loom_pass_trace_initialize(&run_trace_options, &trace);
     trace_ptr = &trace;
   }
+  iree_arena_allocator_t function_version_arena;
+  iree_arena_initialize(block_pool, &function_version_arena);
+  loom_function_version_owner_t function_versions;
+  loom_function_version_owner_initialize(&function_version_arena,
+                                         &function_versions);
   loom_pass_tool_run_options_t run_options = {
       .registry = pass_registry,
-      .environment = loom_low_pass_environment_storage_initialize(
+      .environment = loom_low_pass_environment_storage_initialize_mutable(
           &low_registry->registry, &low_lower_policy_registry,
           &low_legality_provider_list, &legalizer_provider_list,
-          &math_policy_registry, /*compile_report=*/NULL,
-          loom_target_selection_empty(), loom_symbol_ref_null(),
-          &low_pass_environment_storage),
+          &math_policy_registry, /*compile_report=*/NULL, target_environment,
+          &function_versions, &low_pass_environment_storage),
+      .function_versions = &function_versions.list,
       .predicate_provider =
           loom_target_pass_predicate_provider(&predicate_storage),
       .block_pool = block_pool,
@@ -914,28 +916,29 @@ static iree_status_t loom_opt_run_passes(
       .trace = trace_ptr,
   };
 
+  iree_status_t status = iree_ok_status();
   if (pipeline_kind == LOOM_OPT_PIPELINE_MODULE_SYMBOL) {
     *out_execution_started = true;
-    return loom_pass_tool_run_pipeline_symbol(module, pipeline_symbol,
-                                              &run_options, out_result);
-  }
-  if (pipeline_kind == LOOM_OPT_PIPELINE_SOURCE_LOW ||
-      pipeline_kind == LOOM_OPT_PIPELINE_PREPARED_LOW) {
+    status = loom_pass_tool_run_pipeline_symbol(module, pipeline_symbol,
+                                                &run_options, out_result);
+  } else if (pipeline_kind == LOOM_OPT_PIPELINE_SOURCE_LOW ||
+             pipeline_kind == LOOM_OPT_PIPELINE_PREPARED_LOW) {
     *out_execution_started = true;
-    return loom_opt_run_shared_compile_pipeline(
+    status = loom_opt_run_shared_compile_pipeline(
         module, pipeline_kind, target_environment, &run_options, out_result);
+  } else {
+    iree_string_builder_t pipeline_builder;
+    iree_string_builder_initialize(allocator, &pipeline_builder);
+    status = loom_opt_join_pass_list(passes, &pipeline_builder);
+    if (iree_status_is_ok(status)) {
+      *out_execution_started = true;
+      status = loom_pass_tool_run_flat_pipeline(
+          module, iree_string_builder_view(&pipeline_builder), &run_options,
+          out_result);
+    }
+    iree_string_builder_deinitialize(&pipeline_builder);
   }
-
-  iree_string_builder_t pipeline_builder;
-  iree_string_builder_initialize(allocator, &pipeline_builder);
-  iree_status_t status = loom_opt_join_pass_list(passes, &pipeline_builder);
-  if (iree_status_is_ok(status)) {
-    *out_execution_started = true;
-    status = loom_pass_tool_run_flat_pipeline(
-        module, iree_string_builder_view(&pipeline_builder), &run_options,
-        out_result);
-  }
-  iree_string_builder_deinitialize(&pipeline_builder);
+  iree_arena_deinitialize(&function_version_arena);
   return status;
 }
 
@@ -1000,8 +1003,6 @@ static iree_status_t loom_opt_print_module(
 
   loom_text_print_options_t print_options = {
       .flags = LOOM_TEXT_PRINT_DEFAULT,
-      .low_asm_descriptor_set_key =
-          iree_make_cstring_view(FLAG_low_asm_descriptor_set),
   };
   loom_low_descriptor_text_asm_environment_initialize(
       &low_registry->registry, &print_options.low_asm_environment);
@@ -1225,6 +1226,9 @@ int main(int argc, char** argv) {
       return 0;
     }
   }
+  IREE_TRACE_APP_ENTER();
+  IREE_TRACE_ZONE_BEGIN(z0);
+
   loom_tooling_cli_set_default_help_filter();
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
 
@@ -1382,8 +1386,6 @@ int main(int argc, char** argv) {
         &(loom_tooling_pass_trace_open_options_t){
             .tool_name = IREE_SV("loom-opt"),
             .input_path = filename,
-            .low_asm_descriptor_set_key =
-                iree_make_cstring_view(FLAG_low_asm_descriptor_set),
             .stdout_conflicts = stdout_conflicts,
             .stdout_conflict_count = IREE_ARRAYSIZE(stdout_conflicts),
         },
@@ -1468,5 +1470,9 @@ int main(int argc, char** argv) {
   loom_run_module_deinitialize(&run_module);
   iree_io_file_contents_free(contents);
   loom_run_session_deinitialize(&run_session);
-  return had_error ? 1 : 0;
+
+  const int exit_code = had_error ? 1 : 0;
+  IREE_TRACE_ZONE_END(z0);
+  IREE_TRACE_APP_EXIT(exit_code);
+  return exit_code;
 }

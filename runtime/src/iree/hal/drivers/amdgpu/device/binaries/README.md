@@ -20,7 +20,7 @@ only when the builtin device sources change or when adding/removing an
 architecture from the checked-in set:
 
 ```bash
-python build_tools/scripts/amdgpu_device_binaries.py \
+python3 build_tools/scripts/amdgpu_device_binaries.py \
   --output-dir runtime/src/iree/hal/drivers/amdgpu/device/binaries/prebuilt \
   --rocm-path /path/to/rocm-or-therock-sdk \
   --targets gfx9-generic,gfx90a,gfx9-4-generic,gfx10-1-generic,gfx10-3-generic,gfx11-generic,gfx12-generic
@@ -31,9 +31,22 @@ The script accepts the shared selector vocabulary: exact targets such as
 `gfx94X-all`. If `--targets` is omitted, the script uses
 `IREE_HAL_AMDGPU_TARGETS` when set, otherwise it builds the checked-in
 generic-family set plus `gfx90a`. Pass `--all-targets` to build every known
-code-object target. Some ROCm releases may not yet support every generic target
+device-binary artifact. Some exact processors require an additional qualified
+artifact before their normal code-object-family fallback. These artifact names
+are internal build outputs rather than public architecture selectors; the
+shared target map expands exact, generic, and family selectors to the complete
+ordered artifact set. Some ROCm releases may not yet support every architecture
 recorded in the map; in that case the script fails before compilation and
-reports the unsupported target names.
+reports the unsupported architecture names.
+
+`gfx1250` revision A0 is the first qualified artifact. Selecting exact
+`gfx1250`, `gfx12-5-generic`, or a family containing `gfx1250` builds
+`gfx1250-a0` before `gfx12-5-generic`. The A0 artifact uses `gfx1250` as its
+LLVM architecture and enforces the A0 override during both source compilation
+and LTO code generation. At runtime an A0 physical identity selects only that
+artifact; it cannot fall through to the B0-qualified generic binary. A
+toolchain that recognizes the `gfx1250` processor but predates the A0 override
+fails during option parsing instead of silently producing B0 code.
 
 Tool discovery is intentionally compatible with both in-tree and out-of-tree
 LLVM flows. Explicit `--clang`, `--llvm-link`, `--lld`, and `--llvm-objcopy`
@@ -75,17 +88,19 @@ Bazel source mode is enabled with:
 
 ```bash
 iree-bazel-build \
-  --config=amdgpu_device_binaries_source_rocm \
+  --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm \
   --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH=/path/to/rocm-or-therock-sdk \
+  --//runtime/src/iree/hal/drivers/amdgpu/device/binaries:build_mode=source \
   --//runtime/src/iree/hal/drivers/amdgpu:targets=gfx11-generic \
   //runtime/src/iree/hal/drivers/amdgpu/device/binaries:toc
 ```
 
-Use `--config=amdgpu_device_binaries_source_llvm_project` when deliberately
-building through the in-tree `@llvm-project` repository instead of ROCm tools.
-Both Bazel source modes invoke `build_tools/scripts/amdgpu_device_binaries.py`;
-the target selector flag accepts the shared exact, code-object, and family
-selectors.
+Use `--repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=llvm-project` when
+deliberately building through the in-tree `@llvm-project` repository instead
+of ROCm tools. Source mode invokes
+`build_tools/scripts/amdgpu_device_binaries.py`; the target selector flag
+accepts the shared exact, code-object, and family selectors. Targets without
+checked-in artifacts, including the gfx12.5 family, must use source mode.
 
 CMake uses the matching cache variables:
 
@@ -93,21 +108,25 @@ CMake uses the matching cache variables:
   `prebuilt`.
 - `IREE_HAL_AMDGPU_TARGETS`, default
   `gfx9-generic;gfx90a;gfx9-4-generic;gfx10-1-generic;gfx10-3-generic;gfx11-generic;gfx12-generic`.
-- `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=auto|rocm|llvm-tools|llvm-project`, default
-  `auto` for source mode.
+- `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none|auto|rocm|llvm-tools`, default
+  `auto`.
 - `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH` for a ROCm or TheRock SDK root.
 - `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_TOOLS_DIR` for a directory containing
-  `clang`, `llvm-link`, `lld`, and `llvm-objcopy`.
+  `clang`, `llvm-ar`, `llvm-link`, `lld`, and `llvm-objcopy`.
 - `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_BINARY`,
+  `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_AR_BINARY`,
   `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_LINK_BINARY`,
   `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLD_BINARY`,
   `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_OBJCOPY_BINARY`, and
   `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_RESOURCE_INCLUDE` for exact per-tool
   overrides.
 
-In source mode CMake invokes `build_tools/scripts/amdgpu_device_binaries.py`.
-The `rocm` and `auto` modes search standard ROCm installs, ask `clang` or
-`amdclang` for companion tool locations, check `hipcc` on `PATH`, and check
-`/opt/rocm`. The `llvm-tools` mode searches explicit LLVM/IREE tool directories
-and per-tool overrides. The `llvm-project` mode uses tools already configured by
-the containing IREE build.
+`auto` selects a configured `IREE_ROCM_PATH`, a dedicated ROCm root, or an
+explicit installed LLVM tools directory. It does not inspect
+`CMAKE_C_COMPILER` or select an arbitrary compiler from `PATH`. `rocm` and
+`llvm-tools` make the provider requirement explicit; `none` disables
+source-built device artifacts. When
+`IREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE=source`, an incomplete provider is a
+configuration error. CMake passes the resolved tools directly to
+`build_tools/scripts/amdgpu_device_binaries.py`, bypassing the standalone
+script's broader discovery fallbacks.

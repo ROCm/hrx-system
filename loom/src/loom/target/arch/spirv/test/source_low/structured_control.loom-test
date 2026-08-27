@@ -10,15 +10,30 @@ func.def target(@target) @structured_pipeline_probe(%value: i32) -> (i32) {
 pass.pipeline<module> @__loom_check_source_low pipeline {
   for func {
     where target {
-      legalize-math
       normalize-kernel-resources
       promote-private-fragments
       canonicalize
       cse
     }
   }
+  repeat until_converged(max_iterations = 64) {
+    select-templates(mode = "early")
+    inline-callables
+    if changed {
+      for func {
+        where target {
+          canonicalize
+        }
+      }
+    }
+  }
   select-templates(mode = "final")
-  inline-callables
+  specialize-target-callgraph
+  for func {
+    where target {
+      legalize-math
+    }
+  }
   target-legalize(mode = "eager")
   for func {
     where target {
@@ -26,12 +41,16 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
       linearize-view-accesses
       canonicalize
       cse
+      if changed {
+        canonicalize
+      }
     }
   }
   target-legalize(mode = "eager")
   source-to-low(control-flow = "structured-low")
   for func {
     where target {
+      low-decompose-cfg-tuples
       canonicalize
       cse
       low-dce

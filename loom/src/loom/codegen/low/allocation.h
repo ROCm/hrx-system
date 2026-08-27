@@ -15,16 +15,17 @@
 #define LOOM_CODEGEN_LOW_ALLOCATION_H_
 
 #include "iree/base/api.h"
+#include "iree/base/bitmap.h"
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/allocation/assignment.h"
 #include "loom/codegen/low/allocation/diagnostics.h"
-#include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/move_topology.h"
 #include "loom/codegen/low/allocation/storage.h"
 #include "loom/codegen/low/allocation/table.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/descriptors.h"
+#include "loom/codegen/low/function_model.h"
 #include "loom/codegen/low/storage_lease.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/error/emitter.h"
@@ -34,15 +35,14 @@
 extern "C" {
 #endif
 
+struct loom_target_residency_model_t;
+struct loom_low_schedule_table_t;
+
 // Options controlling allocation table construction.
 typedef struct loom_low_allocation_options_t {
-  // Optional operation order used for live intervals.
-  loom_liveness_order_t liveness_order;
-  // Descriptor registry available to the allocator.
-  const loom_low_descriptor_registry_t* descriptor_registry;
-  // Optional runtime/device target overlay applied when compatible with the
-  // function's target record.
-  loom_target_selection_t target_selection;
+  // Optional final schedule. Allocation uses its retained operation order for
+  // liveness and its node ordinals for schedule-sensitive coalescing.
+  const struct loom_low_schedule_table_t* schedule;
   // Explicit per-class register budgets.
   const loom_low_allocation_budget_t* budgets;
   // Number of entries in |budgets|.
@@ -55,22 +55,26 @@ typedef struct loom_low_allocation_options_t {
   const loom_low_allocation_reserved_range_t* reserved_ranges;
   // Number of entries in |reserved_ranges|.
   iree_host_size_t reserved_range_count;
-  // Optional target storage leases built over the same scheduled low function
-  // represented by |liveness_order|.
+  // Optional target storage leases built over |schedule|.
   loom_low_storage_lease_table_t storage_leases;
   // Structured diagnostic emitter for allocation failures and feedback.
   iree_diagnostic_emitter_t emitter;
   // Optional structured allocation feedback to emit.
   loom_low_allocation_diagnostic_flags_t diagnostic_flags;
+  // Optional target residency model. Direct resources are dense by descriptor
+  // register-class ID for the resolved low target.
+  const struct loom_target_residency_model_t* residency_model;
+  // Borrowed bitmap indexed by module value ID. Set values require register
+  // storage throughout allocation.
+  iree_bitmap_t required_register_values;
 } loom_low_allocation_options_t;
 
-// Allocates one target-low function body and writes an arena-owned table.
-// This first allocator is deliberately simple and deterministic: it performs
-// per-class linear-scan-style first-fit assignment over liveness intervals,
-// uses target allocatable unit counts or explicit budgets as hard limits, and
-// reports spills as table remarks without mutating IR.
+// Allocates one modeled target-low function body and writes an arena-owned
+// table. |model| must remain live and its function semantically immutable until
+// this function returns. The allocator performs deterministic per-class
+// interval assignment and reports spills as table facts without mutating IR.
 iree_status_t loom_low_allocate_function(
-    loom_module_t* module, const loom_op_t* low_func_op,
+    const loom_low_function_model_t* model,
     const loom_low_allocation_options_t* options, iree_arena_allocator_t* arena,
     loom_low_allocation_table_t* out_table);
 

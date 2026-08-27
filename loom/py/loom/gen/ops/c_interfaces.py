@@ -14,19 +14,34 @@ from typing import Any
 
 from loom.dsl import (
     ATTR_TYPE_FLAGS,
+    ATTR_TYPE_I64,
+    ATTR_TYPE_PARAMETERIZED_ARRAY,
+    ATTR_TYPE_STRING,
     CallLikeInterface,
     CallLikeKind,
+    EffectKind,
     FuncLikeInterface,
     LoopLikeInterface,
     MemoryAccessInterface,
+    MemoryAccessOperationKind,
     Op,
     RegionBranchInterface,
+    TargetFactSpecialization,
     TargetLikeInterface,
 )
 from loom.fields import compute_layout
 from loom.gen.ops import c_queries, c_symbols
 from loom.gen.ops.c_enums import CALL_LIKE_KIND_MAP
 from loom.gen.ops.c_names import c_prefix
+
+_MEMORY_ACCESS_OPERATION_KIND_MAP: dict[MemoryAccessOperationKind, str] = {
+    MemoryAccessOperationKind.LOAD: "LOOM_MEMORY_ACCESS_OPERATION_LOAD",
+    MemoryAccessOperationKind.STORE: "LOOM_MEMORY_ACCESS_OPERATION_STORE",
+    MemoryAccessOperationKind.PREFETCH: "LOOM_MEMORY_ACCESS_OPERATION_PREFETCH",
+    MemoryAccessOperationKind.ATOMIC_REDUCE: "LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_REDUCE",
+    MemoryAccessOperationKind.ATOMIC_RMW: "LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_RMW",
+    MemoryAccessOperationKind.ATOMIC_CMPXCHG: "LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_CMPXCHG",
+}
 
 # Interfaces declared in the Python DSL are emitted as per-op .rodata vtable
 # structs on the C side. Each interface also has a pointer slot on cache line 3
@@ -60,6 +75,8 @@ class InterfaceFieldSpec:
         resolve to a declared op field.
     c_pointee_type: For kind="c_ptr", the const pointee type used to emit an
         extern declaration for the referenced C symbol.
+    expected_attr_type: For kind="attr", the required AttrDef type. Empty when
+        the interface field accepts any non-flags attribute.
     """
 
     py_field: str
@@ -68,6 +85,7 @@ class InterfaceFieldSpec:
     region_field: str = ""
     required: bool = False
     c_pointee_type: str = ""
+    expected_attr_type: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,7 +122,7 @@ INTERFACES: tuple[InterfaceSpec, ...] = (
             InterfaceFieldSpec("purity", "purity_attr_index", "attr"),
             InterfaceFieldSpec("temperature", "temperature_attr_index", "attr"),
             InterfaceFieldSpec("inline_policy", "inline_policy_attr_index", "attr"),
-            InterfaceFieldSpec("operands", "operand_offset", "operand"),
+            InterfaceFieldSpec("operands", "operand_field_index", "operand"),
             InterfaceFieldSpec("results", "result_offset", "result"),
             InterfaceFieldSpec("kind", "kind", "call_kind"),
         ),
@@ -119,6 +137,12 @@ INTERFACES: tuple[InterfaceSpec, ...] = (
             InterfaceFieldSpec("import_module", "import_module_attr_index", "attr"),
             InterfaceFieldSpec("import_symbol", "import_symbol_attr_index", "attr"),
             InterfaceFieldSpec("target", "target_attr_index", "attr"),
+            InterfaceFieldSpec(
+                "repr_contract",
+                "repr_contract_attr_index",
+                "attr",
+                expected_attr_type=ATTR_TYPE_STRING,
+            ),
             InterfaceFieldSpec("abi", "abi_attr_index", "attr"),
             InterfaceFieldSpec("abi_attrs", "abi_attrs_attr_index", "attr"),
             InterfaceFieldSpec("export_symbol", "export_symbol_attr_index", "attr"),
@@ -130,10 +154,22 @@ INTERFACES: tuple[InterfaceSpec, ...] = (
             InterfaceFieldSpec("temperature", "temperature_attr_index", "attr"),
             InterfaceFieldSpec("inline_policy", "inline_policy_attr_index", "attr"),
             InterfaceFieldSpec("predicates", "predicates_attr_index", "attr"),
+            InterfaceFieldSpec(
+                "requires",
+                "requires_attr_index",
+                "attr",
+                expected_attr_type=ATTR_TYPE_PARAMETERIZED_ARRAY,
+            ),
+            InterfaceFieldSpec(
+                "specialization_count",
+                "specialization_count_attr_index",
+                "attr",
+                expected_attr_type=ATTR_TYPE_I64,
+            ),
             InterfaceFieldSpec("body", "body_region_index", "region"),
-            InterfaceFieldSpec("implements", "implements_attr_index", "attr"),
+            InterfaceFieldSpec("template_family", "template_family_attr_index", "attr"),
             InterfaceFieldSpec("priority", "priority_attr_index", "attr"),
-            InterfaceFieldSpec("args_as_operands", "args_as_operands", "bool"),
+            InterfaceFieldSpec("args", "args_operand_field_index", "operand"),
         ),
     ),
     InterfaceSpec(
@@ -181,14 +217,16 @@ INTERFACES: tuple[InterfaceSpec, ...] = (
         c_struct="loom_memory_access_vtable_t",
         vtable_field="memory_access",
         fields=(
+            InterfaceFieldSpec("operation_kind", "operation_kind", "memory_access_operation"),
             InterfaceFieldSpec("view", "view_operand_index", "operand", required=True),
+            InterfaceFieldSpec("byte_offset", "byte_offset_operand_index", "operand"),
             InterfaceFieldSpec("value", "value_operand_index", "operand"),
             InterfaceFieldSpec("expected", "expected_operand_index", "operand"),
             InterfaceFieldSpec("replacement", "replacement_operand_index", "operand"),
             InterfaceFieldSpec("mask", "mask_operand_index", "operand"),
             InterfaceFieldSpec("passthrough", "passthrough_operand_index", "operand"),
             InterfaceFieldSpec("offsets", "offsets_operand_index", "operand"),
-            InterfaceFieldSpec("indices", "indices_operand_offset", "operand"),
+            InterfaceFieldSpec("indices", "indices_operand_field_index", "operand"),
             InterfaceFieldSpec("static_indices", "static_indices_attr_index", "attr"),
             InterfaceFieldSpec("cache_scope", "cache_scope_attr_index", "attr"),
             InterfaceFieldSpec("cache_temporal", "cache_temporal_attr_index", "attr"),
@@ -212,6 +250,7 @@ _TARGET_PROJECTION_FIELDS: dict[str, tuple[str, str]] = {
     "max_workgroup_size_y": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_workgroup_size.y"),
     "max_workgroup_size_z": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_workgroup_size.z"),
     "max_flat_workgroup_size": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_flat_workgroup_size"),
+    "max_workgroup_storage_bytes": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U64", "snapshot.max_workgroup_storage_bytes"),
     "subgroup_size": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.subgroup_size"),
     "max_grid_size_x": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_grid_size.x"),
     "max_grid_size_y": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_grid_size.y"),
@@ -230,7 +269,6 @@ _TARGET_PROJECTION_FIELDS: dict[str, tuple[str, str]] = {
     "abi": ("LOOM_TARGET_PROJECTION_VALUE_ENUM_U8", "export_plan.abi_kind"),
     "export_symbol": ("LOOM_TARGET_PROJECTION_VALUE_STRING_VIEW", "export_plan.export_symbol"),
     "linkage": ("LOOM_TARGET_PROJECTION_VALUE_ENUM_U8", "export_plan.linkage"),
-    "hal_buffer_resource_flags": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "export_plan.hal_kernel.buffer_resource_flags"),
     "contract_set_key": ("LOOM_TARGET_PROJECTION_VALUE_STRING_VIEW", "config.contract_set_key"),
     "contract_feature_bits": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U64", "config.contract_feature_bits"),
 }
@@ -293,10 +331,19 @@ def _resolve_interface_field(
 ) -> str:
     """Resolves one interface field to its emitted C initializer value."""
     py_value = getattr(iface, field_spec.py_field)
+    if isinstance(iface, CallLikeInterface) and field_spec.py_field == "results" and py_value is None:
+        return "0"
     if _interface_soft_default_is_absent(op, iface, field_spec, py_value):
         return "255"
     if field_spec.kind == "attr":
-        return str(c_queries.resolve_attr_index(op, py_value, interface_name))
+        attr_index = c_queries.resolve_attr_index(op, py_value, interface_name)
+        if attr_index != 0xFF and field_spec.expected_attr_type:
+            attr_def = c_queries.non_flags_attrs(op)[attr_index]
+            if attr_def.attr_type != field_spec.expected_attr_type:
+                raise ValueError(
+                    f"{interface_name} on {op.name!r}: attr {py_value!r} referenced by {field_spec.py_field!r} must have type {field_spec.expected_attr_type!r}, got {attr_def.attr_type!r}"
+                )
+        return str(attr_index)
     if field_spec.kind == "region":
         return str(c_queries.resolve_region_index(op, py_value, interface_name))
     if field_spec.kind == "operand":
@@ -323,6 +370,9 @@ def _resolve_interface_field(
         if not isinstance(py_value, str) or not py_value:
             raise ValueError(f"{interface_name} field {field_spec.py_field!r}: expected C symbol name or None, got {py_value!r}")
         return f"&{c_symbols.normalize_c_symbol_reference(py_value)}"
+    if field_spec.kind == "memory_access_operation":
+        operation_kind = _memory_access_operation_kind(op, iface, interface_name)
+        return _MEMORY_ACCESS_OPERATION_KIND_MAP[operation_kind]
     raise ValueError(f"{interface_name} field {field_spec.py_field!r}: unknown kind {field_spec.kind!r}")
 
 
@@ -347,14 +397,60 @@ def _resolve_soft_memory_field(
     return None if index == 0xFF else index
 
 
+def _memory_access_operation_kind(op: Op, iface: MemoryAccessInterface, interface_name: str) -> MemoryAccessOperationKind:
+    """Infers and validates the operation family represented by MemoryAccess."""
+    value_index = _resolve_soft_memory_field(op, iface, "value", "operand", interface_name)
+    expected_index = _resolve_soft_memory_field(op, iface, "expected", "operand", interface_name)
+    replacement_index = _resolve_soft_memory_field(op, iface, "replacement", "operand", interface_name)
+    atomic_indices = (
+        _resolve_soft_memory_field(op, iface, "atomic_kind", "attr", interface_name),
+        _resolve_soft_memory_field(op, iface, "atomic_ordering", "attr", interface_name),
+        _resolve_soft_memory_field(op, iface, "atomic_success_ordering", "attr", interface_name),
+        _resolve_soft_memory_field(op, iface, "atomic_failure_ordering", "attr", interface_name),
+        _resolve_soft_memory_field(op, iface, "atomic_scope", "attr", interface_name),
+    )
+    has_atomic_attrs = any(index is not None for index in atomic_indices)
+    has_hint_trait = any(trait.name == "Hint" for trait in op.traits)
+    reads = any(effect.kind in (EffectKind.READ, EffectKind.READWRITE) for effect in op.effects)
+    writes = any(effect.kind in (EffectKind.WRITE, EffectKind.READWRITE) for effect in op.effects)
+
+    inferred_kind: MemoryAccessOperationKind | None = None
+    if expected_index is not None or replacement_index is not None:
+        if expected_index is None or replacement_index is None:
+            raise ValueError(f"{interface_name} on {op.name!r}: compare-exchange requires both expected and replacement operands")
+        if not reads or not writes or not has_atomic_attrs:
+            raise ValueError(f"{interface_name} on {op.name!r}: compare-exchange requires read/write effects and atomic attrs")
+        inferred_kind = MemoryAccessOperationKind.ATOMIC_CMPXCHG
+    elif has_atomic_attrs:
+        if not reads or not writes or value_index is None:
+            raise ValueError(f"{interface_name} on {op.name!r}: atomic update requires read/write effects and a value operand")
+        inferred_kind = MemoryAccessOperationKind.ATOMIC_REDUCE if not op.results else MemoryAccessOperationKind.ATOMIC_RMW
+    elif reads and not writes:
+        inferred_kind = MemoryAccessOperationKind.LOAD
+    elif writes and not reads:
+        if value_index is None:
+            raise ValueError(f"{interface_name} on {op.name!r}: write access requires a value operand")
+        inferred_kind = MemoryAccessOperationKind.STORE
+    elif not reads and not writes and has_hint_trait:
+        inferred_kind = MemoryAccessOperationKind.PREFETCH
+
+    if inferred_kind is None:
+        raise ValueError(f"{interface_name} on {op.name!r}: unable to infer memory access operation kind from effects and roles")
+    if iface.operation_kind is not None and iface.operation_kind != inferred_kind:
+        raise ValueError(f"{interface_name} on {op.name!r}: explicit operation kind {iface.operation_kind.value!r} does not match inferred kind {inferred_kind.value!r}")
+    return inferred_kind
+
+
 def _validate_call_like_interface(op: Op, iface: CallLikeInterface, interface_name: str) -> None:
-    """Validates CallLikeInterface's trailing variadic slice contract."""
+    """Validates CallLikeInterface's trailing argument-slice contract."""
     operand_index = c_queries.resolve_operand_index(op, iface.operands, interface_name)
     operand = op.operands[operand_index]
     if not operand.variadic:
         raise ValueError(f"{interface_name} on {op.name!r}: operand {iface.operands!r} must be variadic")
-    if operand_index + 1 != len(op.operands):
-        raise ValueError(f"{interface_name} on {op.name!r}: operand {iface.operands!r} must be the trailing operand field")
+    if iface.results is None:
+        if op.results:
+            raise ValueError(f"{interface_name} on {op.name!r}: results=None requires the operation to declare no results")
+        return
 
     result_index = c_queries.resolve_result_index(op, iface.results, interface_name)
     result = op.results[result_index]
@@ -362,6 +458,63 @@ def _validate_call_like_interface(op: Op, iface: CallLikeInterface, interface_na
         raise ValueError(f"{interface_name} on {op.name!r}: result {iface.results!r} must be variadic")
     if result_index + 1 != len(op.results):
         raise ValueError(f"{interface_name} on {op.name!r}: result {iface.results!r} must be the trailing result field")
+
+
+def _validate_loop_like_interface(op: Op, iface: LoopLikeInterface, interface_name: str) -> None:
+    """Validates LoopLikeInterface's carried-state boundary contract."""
+    iter_args_index = c_queries.resolve_operand_index(op, iface.iter_args, interface_name)
+    if not op.operands[iter_args_index].variadic:
+        raise ValueError(f"{interface_name} on {op.name!r}: operand {iface.iter_args!r} must be variadic")
+
+    body_index = c_queries.resolve_region_index(op, iface.body, interface_name)
+    body = op.regions[body_index]
+    if body.variadic or body.optional or not body.single_block or body.terminator is None:
+        raise ValueError(f"{interface_name} on {op.name!r}: body {iface.body!r} must be a required single-block region with a terminator")
+    if body.arg_source != iface.iter_args:
+        raise ValueError(f"{interface_name} on {op.name!r}: body {iface.body!r} must source carried arguments from {iface.iter_args!r}")
+
+    result_constraints = [constraint for constraint in op.constraints if constraint.name == "IterArgsMatchResults" and constraint.args[:1] == (iface.iter_args,)]
+    if len(result_constraints) != 1 or len(result_constraints[0].args) != 2:
+        raise ValueError(f"{interface_name} on {op.name!r}: requires one IterArgsMatchResults constraint for {iface.iter_args!r}")
+    results_name = result_constraints[0].args[1]
+    results_index = c_queries.resolve_result_index(op, results_name, interface_name)
+    if len(op.results) != 1 or results_index != 0 or not op.results[results_index].variadic:
+        raise ValueError(f"{interface_name} on {op.name!r}: carried results {results_name!r} must be the only variadic result field")
+
+    required_constraints = (
+        ("YieldCountMatchesResults", (iface.body, results_name)),
+        ("YieldTypesMatchResults", (iface.body, results_name)),
+    )
+    for constraint_name, constraint_args in required_constraints:
+        if not any(constraint.name == constraint_name and constraint.args == constraint_args for constraint in op.constraints):
+            raise ValueError(f"{interface_name} on {op.name!r}: requires {constraint_name}{constraint_args!r}")
+
+    bound_names = (iface.lower_bound, iface.upper_bound, iface.step)
+    present_bound_count = sum(name is not None for name in bound_names)
+    if present_bound_count not in (0, len(bound_names)):
+        raise ValueError(f"{interface_name} on {op.name!r}: lower_bound, upper_bound, and step must be declared together")
+    has_counted_range = present_bound_count == len(bound_names)
+    has_condition_region = iface.condition_region is not None
+    if has_counted_range == has_condition_region:
+        raise ValueError(f"{interface_name} on {op.name!r}: requires exactly one of a counted range or condition region")
+
+    if has_counted_range:
+        if iface.iv is None:
+            raise ValueError(f"{interface_name} on {op.name!r}: counted loops require an induction variable")
+        for bound_name in bound_names:
+            c_queries.resolve_operand_index(op, bound_name, interface_name)
+        iv_index = c_queries.resolve_block_arg_index(op, iface.body, iface.iv, interface_name)
+        expected_iv_type = f"type_of:{iface.lower_bound}"
+        if body.implicit_args[iv_index][1] != expected_iv_type:
+            raise ValueError(f"{interface_name} on {op.name!r}: induction variable {iface.iv!r} must use {expected_iv_type!r}")
+        if iv_index != 0 or len(body.implicit_args) != 1:
+            raise ValueError(f"{interface_name} on {op.name!r}: induction variable must be the only implicit body argument")
+    else:
+        if iface.iv is not None:
+            raise ValueError(f"{interface_name} on {op.name!r}: condition loops cannot declare an induction variable")
+        c_queries.resolve_region_index(op, iface.condition_region, interface_name)
+        if body.implicit_args:
+            raise ValueError(f"{interface_name} on {op.name!r}: condition-loop carried body arguments must begin at block argument zero")
 
 
 def _validate_memory_access_interface(op: Op, iface: MemoryAccessInterface, interface_name: str) -> None:
@@ -374,8 +527,12 @@ def _validate_memory_access_interface(op: Op, iface: MemoryAccessInterface, inte
         indices_operand = op.operands[indices_index]
         if not indices_operand.variadic:
             raise ValueError(f"{interface_name} on {op.name!r}: operand {iface.indices!r} must be variadic")
-        if indices_index + 1 != len(op.operands):
-            raise ValueError(f"{interface_name} on {op.name!r}: operand {iface.indices!r} must be the trailing operand field")
+
+    byte_offset_index = _resolve_soft_memory_field(op, iface, "byte_offset", "operand", interface_name)
+    offsets_index = _resolve_soft_memory_field(op, iface, "offsets", "operand", interface_name)
+    static_indices_index = _resolve_soft_memory_field(op, iface, "static_indices", "attr", interface_name)
+    if byte_offset_index is not None and (offsets_index is not None or indices_index is not None or static_indices_index is not None):
+        raise ValueError(f"{interface_name} on {op.name!r}: byte_offset is mutually exclusive with logical indices and per-lane offsets")
 
     cache_scope_index = _resolve_soft_memory_field(op, iface, "cache_scope", "attr", interface_name)
     cache_temporal_index = _resolve_soft_memory_field(op, iface, "cache_temporal", "attr", interface_name)
@@ -389,39 +546,60 @@ def _validate_memory_access_interface(op: Op, iface: MemoryAccessInterface, inte
         raise ValueError(f"{interface_name} on {op.name!r}: atomic_success_ordering and atomic_failure_ordering must be declared together")
     if atomic_ordering_index is not None and atomic_success_ordering_index is not None:
         raise ValueError(f"{interface_name} on {op.name!r}: use either atomic_ordering or success/failure orderings, not both")
+    _memory_access_operation_kind(op, iface, interface_name)
 
 
-def _target_like_projection_entries(op: Op) -> list[tuple[int, str, str]]:
-    entries: list[tuple[int, str, str]] = []
+def _target_like_projection_entries(op: Op) -> list[tuple[int, str, str, str]]:
+    entries: list[tuple[int, str, str, str]] = []
     for attr_def in op.attrs:
         projection = _TARGET_PROJECTION_FIELDS.get(attr_def.name)
         if projection is None:
             continue
         value_kind, storage_field = projection
         attr_index = c_queries.resolve_attr_index(op, attr_def.name, "TargetLikeInterface")
-        entries.append((attr_index, value_kind, storage_field))
+        fact_field = f"LOOM_TARGET_FACT_FIELD_{attr_def.name.upper()}"
+        entries.append((attr_index, fact_field, value_kind, storage_field))
     return entries
 
 
 def emit_target_like_descriptor(op: Op, iface: TargetLikeInterface, lines: list[str]) -> None:
     if iface.bundle_table is None:
         return
+    if iface.fact_type is not None and iface.fact_specialization != TargetFactSpecialization.EXACT:
+        raise ValueError(f"TargetLikeInterface on {op.name!r}: an external fact type owns its specialization relation")
+    if iface.fact_projector is not None and iface.fact_type is None:
+        raise ValueError(f"TargetLikeInterface on {op.name!r}: a family fact projector requires an external fact type")
     descriptor = c_symbols.normalize_c_symbol_reference(iface.descriptor or f"{c_prefix(op)}_target_like_descriptor")
     bundle_table = c_symbols.normalize_c_symbol_reference(iface.bundle_table)
     prefix = c_prefix(op)
+    if iface.fact_type is None:
+        fact_type = f"{prefix}_fact_type"
+        lines.append(f"static const loom_target_fact_type_t {fact_type} = {{")
+        lines.append(f'    .name = IREE_SVL("{op.group.name}"),')
+        lines.append("    .storage_size = sizeof(loom_target_facts_t),")
+        lines.append("    .satisfies_identity_requirement = loom_target_facts_selector_satisfies_identity_requirement,")
+        if iface.fact_specialization == TargetFactSpecialization.STRUCTURAL:
+            lines.append("    .satisfies_specialization_requirement = loom_target_facts_structural_satisfy_specialization_requirement,")
+        lines.append("};")
+    else:
+        fact_type = c_symbols.normalize_c_symbol_reference(iface.fact_type)
     projections = _target_like_projection_entries(op)
     projection_array = "NULL"
     if projections:
         projection_array = f"{prefix}_target_projections"
         lines.append(f"static const loom_target_projection_t {projection_array}[] = {{")
-        for attr_index, value_kind, storage_field in projections:
-            lines.append(f"    {{offsetof(loom_target_bundle_storage_t, {storage_field}), {attr_index}, {value_kind}}},")
+        for attr_index, fact_field, value_kind, storage_field in projections:
+            lines.append(f"    {{offsetof(loom_target_bundle_storage_t, {storage_field}), {attr_index}, {fact_field}, {value_kind}}},")
         lines.append("};")
     lines.append(f"static const loom_target_like_descriptor_t {descriptor} = {{")
     lines.append(f"    .bundle_table = &{bundle_table},")
     if projection_array != "NULL":
         lines.append(f"    .projections = {projection_array},")
         lines.append(f"    .projection_count = IREE_ARRAYSIZE({projection_array}),")
+    lines.append(f"    .fact_type = &{fact_type},")
+    if iface.fact_projector is not None:
+        fact_projector = c_symbols.normalize_c_symbol_reference(iface.fact_projector)
+        lines.append(f"    .fact_projector = &{fact_projector},")
     lines.append("};")
     lines.append("")
 
@@ -433,6 +611,8 @@ def emit_interface_vtable(op: Op, spec: InterfaceSpec, lines: list[str]) -> None
         return
     if isinstance(iface, CallLikeInterface):
         _validate_call_like_interface(op, iface, spec.name)
+    if isinstance(iface, LoopLikeInterface):
+        _validate_loop_like_interface(op, iface, spec.name)
     if isinstance(iface, MemoryAccessInterface):
         _validate_memory_access_interface(op, iface, spec.name)
     prefix = c_prefix(op)
@@ -440,6 +620,17 @@ def emit_interface_vtable(op: Op, spec: InterfaceSpec, lines: list[str]) -> None
     for field_spec in spec.fields:
         value_str = _resolve_interface_field(op, iface, field_spec, spec.name)
         lines.append(f"    .{field_spec.c_field} = {value_str},")
+    if isinstance(iface, FuncLikeInterface):
+        implements_kernel_entry = op.symbol_def is not None and "kernel_entry" in op.symbol_def.interfaces
+        func_like_flags = "LOOM_FUNC_LIKE_FLAG_KERNEL_ENTRY" if implements_kernel_entry else "0"
+        lines.append(f"    .flags = {func_like_flags},")
+        layout = compute_layout(op)
+        segment_count = len(op.operands) if iface.args is not None and layout.segmented_operands else 0
+        lines.append(f"    .args_operand_segment_count = {segment_count},")
+    if isinstance(iface, CallLikeInterface):
+        layout = compute_layout(op)
+        segment_count = len(op.operands) if layout.segmented_operands else 0
+        lines.append(f"    .operand_segment_count = {segment_count},")
     if isinstance(iface, LoopLikeInterface):
         layout = compute_layout(op)
         lines.append(f"    .operand_field_count = {len(op.operands)},")
@@ -486,4 +677,24 @@ def target_like_bundle_table_symbols(ops: Sequence[Op]) -> list[str]:
         if iface is None or iface.bundle_table is None:
             continue
         symbols.add(c_symbols.normalize_c_symbol_reference(iface.bundle_table))
+    return sorted(symbols)
+
+
+def target_like_fact_type_symbols(ops: Sequence[Op]) -> list[str]:
+    symbols: set[str] = set()
+    for op in ops:
+        iface = c_queries.find_interface(op, TargetLikeInterface)
+        if iface is None or iface.fact_type is None:
+            continue
+        symbols.add(c_symbols.normalize_c_symbol_reference(iface.fact_type))
+    return sorted(symbols)
+
+
+def target_like_fact_projector_symbols(ops: Sequence[Op]) -> list[str]:
+    symbols: set[str] = set()
+    for op in ops:
+        iface = c_queries.find_interface(op, TargetLikeInterface)
+        if iface is None or iface.fact_projector is None:
+            continue
+        symbols.add(c_symbols.normalize_c_symbol_reference(iface.fact_projector))
     return sorted(symbols)

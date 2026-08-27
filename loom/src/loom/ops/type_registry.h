@@ -11,87 +11,70 @@
 #define LOOM_OPS_TYPE_REGISTRY_H_
 
 #include "iree/base/api.h"
-#include "loom/ir/types.h"
+#include "loom/ir/type_descriptor.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ir/types.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef struct loom_value_fact_domain_t loom_value_fact_domain_t;
+typedef struct loom_module_t loom_module_t;
+typedef struct loom_context_t loom_context_t;
 
-// Format element kinds for type interiors (inside <...>).
-// These are separate from op format elements because type
-// interiors have different semantics (shape dims, element
-// types, encodings) than op bodies (operand refs, attr values).
-typedef enum loom_type_format_kind_e {
-  LOOM_TYPE_FMT_SHAPE = 0,      // Dimension list: 4x[%M]x...
-  LOOM_TYPE_FMT_SCALAR = 1,      // Element type keyword: f32, i8.
-  LOOM_TYPE_FMT_ENCODING = 2,    // Encoding ref: #q8_0 or %enc.
-  LOOM_TYPE_FMT_TYPE = 3,         // Recursive type: vm.ref<T>.
-  LOOM_TYPE_FMT_ATTR = 4,         // Bare identifier: group<workgroup>.
-  LOOM_TYPE_FMT_KEYWORD = 5,      // Literal punctuation/word.
-  LOOM_TYPE_FMT_OPTIONAL = 6,     // Conditional elements.
-  LOOM_TYPE_FMT_GLUE = 7,         // Suppress space.
-} loom_type_format_kind_t;
+extern const loom_parameterized_type_descriptor_t loom_encoding_type_parameterized_descriptor;
+static inline iree_string_view_t loom_encoding_type_role_name(loom_encoding_role_t value) {
+  loom_bstring_t name = loom_attr_descriptor_enum_case_name(
+      &loom_encoding_type_parameterized_descriptor.parameter_descriptors[0], (uint8_t)value);
+  return name ? loom_bstring_view(name) : iree_string_view_empty();
+}
+static inline bool loom_encoding_type_role_parse(iree_string_view_t name, loom_encoding_role_t* out_value) {
+  uint8_t value = 0;
+  if (!loom_attr_descriptor_find_enum_case(
+          &loom_encoding_type_parameterized_descriptor.parameter_descriptors[0], name, &value)) {
+    return false;
+  }
+  *out_value = (loom_encoding_role_t)value;
+  return true;
+}
 
-// A 4-byte format element for type interiors. Same layout
-// as loom_format_element_t for consistent handling.
-typedef struct loom_type_format_element_t {
-  // Format opcode, encoded as loom_type_format_kind_t.
-  uint8_t kind;
+extern const loom_parameterized_type_descriptor_t loom_low_storage_type_parameterized_descriptor;
+static inline iree_string_view_t loom_low_storage_type_space_name(loom_storage_space_t value) {
+  loom_bstring_t name = loom_attr_descriptor_enum_case_name(
+      &loom_low_storage_type_parameterized_descriptor.parameter_descriptors[0], (uint8_t)value);
+  return name ? loom_bstring_view(name) : iree_string_view_empty();
+}
+static inline bool loom_low_storage_type_space_parse(iree_string_view_t name, loom_storage_space_t* out_value) {
+  uint8_t value = 0;
+  if (!loom_attr_descriptor_find_enum_case(
+          &loom_low_storage_type_parameterized_descriptor.parameter_descriptors[0], name, &value)) {
+    return false;
+  }
+  *out_value = (loom_storage_space_t)value;
+  return true;
+}
 
-  // Parameter index consumed by this element.
-  uint8_t field_index;
-
-  // Kind-specific payload such as a keyword ID or skip count.
-  uint16_t data;
-} loom_type_format_element_t;
-
-// Descriptor for a registered type. Contains the name,
-// the IR type kind to construct, parameter count, and
-// format elements describing the type interior syntax.
-typedef struct loom_type_descriptor_t {
-  // B-string name: [length]"tile", [length]"hal.buffer".
-  const uint8_t* name;
-
-  // What IR type kind to construct when parsing.
-  loom_type_kind_t ir_kind;
-
-  // Number of declared parameters.
-  uint8_t param_count;
-
-  // Optional type-owned value fact domain. NULL means the type only has generic
-  // scalar facts or uses the domain-free extension behavior.
-  const loom_value_fact_domain_t* fact_domain;
-
-  // Semantic role and target-contract families for this type.
-  loom_type_semantics_t semantics;
-
-  // Format element array for the type interior (inside <...>).
-  // NULL for opaque types (no angle brackets).
-  const loom_type_format_element_t* format_elements;
-
-  // Number of entries in |format_elements|.
-  uint8_t format_element_count;
-} loom_type_descriptor_t;
-
-// Entry in the sorted type registry.
-typedef struct loom_type_registry_entry_t {
-  iree_string_view_t name;
-  const loom_type_descriptor_t* descriptor;
-} loom_type_registry_entry_t;
-
-// Returns the number of entries in the global type registry.
+// Returns the number of entries in the common type registry.
 iree_host_size_t loom_type_registry_count(void);
 
-// Returns the sorted registry array (for iteration/testing).
+// Returns the sorted common registry array (for iteration/testing).
 const loom_type_registry_entry_t* loom_type_registry_entries(void);
 
-// Looks up a type descriptor by name (e.g., "tile", "hal.buffer").
+// Registers a generated dialect-owned type table with |context|.
+// Common and previously registered names cannot be replaced.
+iree_status_t loom_type_registry_register_types(
+    loom_context_t* context, const loom_type_registry_entry_t* entries,
+    iree_host_size_t entry_count);
+
+// Looks up a common or context-registered type by name.
 // Returns the descriptor on success, NULL if not found.
 const loom_type_descriptor_t* loom_type_registry_lookup(
-    iree_string_view_t name);
+    const loom_context_t* context, iree_string_view_t name);
+
+// Looks up a registered built-in descriptor by runtime type kind.
+// Returns NULL for dialect, generic parameterized, or invalid kinds.
+const loom_type_descriptor_t* loom_type_registry_lookup_builtin(
+    loom_type_kind_t kind);
 
 // Resolves the type-owned value fact domain for |type|, or NULL if the
 // registered type has no extension fact domain.

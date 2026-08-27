@@ -22,6 +22,33 @@ fill (memset) you can often implement copy (memcpy) as well at the same time.
    GitHub issue number tracking driver creation (e.g. `// TODO(#1234):`).
 1. Find/replace `iree/hal/drivers/null/` with your source path.
 
+## Device Specs and Executable Loading
+
+Every HAL device owns an immutable `iree_hal_device_spec_t` created with the
+device. The null driver uses `iree_hal_device_spec_create_minimal`, which records
+identity only and deliberately advertises no executable targets because its
+executable implementation is a stub. Public executable loads against the null
+device therefore fail target validation before entering the driver vtable.
+
+A driver with executable support constructs its spec with
+`iree_hal_device_spec_builder_t`. Each loadable native artifact target is an
+`iree_hal_executable_target_t` row with a family, family-owned target key, kind,
+priority, physical-device affinity, and flags. These rows describe real loader
+capabilities; a target appears in the spec only when the corresponding device
+can load it. Multiple rows allow generic and specialized artifacts to coexist
+without an opaque format string or runtime format inference.
+
+Callers select an exact target row from `iree_hal_device_spec(device)` and pass
+that borrowed pointer to `iree_hal_device_load_executable`. The common API
+validates target ownership and bounded artifact inputs before invoking
+`iree_hal_device_vtable_t::load_executable`. The driver method resolves queue
+affinity to physical devices, checks that the selected target covers those
+devices, and supplies backend-native handles to executable construction.
+
+Executable creation parses and validates the native artifact synchronously so
+malformed input and unsupported features are reported at load time. Artifact
+bytes and specialization constants are borrowed only for the load call.
+
 ## Build Setup
 
 HAL drivers are setup by adding some specially named cmake variables and then

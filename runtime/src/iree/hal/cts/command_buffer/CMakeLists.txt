@@ -24,6 +24,20 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    atomic_test
+  SRCS
+    "atomic_test.cc"
+  DEPS
+    iree::hal
+    iree::hal::cts::util::atomic_test_util
+    iree::hal::cts::util::test_base
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     copy_buffer_test
   SRCS
     "copy_buffer_test.cc"
@@ -169,6 +183,7 @@ iree_cc_library(
   NAME
     all_tests
   DEPS
+    ::atomic_test
     ::basic_test
     ::copy_buffer_test
     ::fill_buffer_test

@@ -51,8 +51,8 @@ func.def @vector_f32_clampf_ordered(%input: vector<2xf32>, %lower: vector<2xf32>
 // ====
 
 func.def @index_minmax_sgpr(%lhs0: index, %rhs0: index) -> (index) {
-  %lhs = index.assume %lhs0 [range(%lhs0, 0, 1024)] : index
-  %rhs = index.assume %rhs0 [range(%rhs0, 0, 1024)] : index
+  %lhs = index.assume %lhs0 [range(%lhs0, -1024, 1024)] : index
+  %rhs = index.assume %rhs0 [range(%rhs0, -1024, 1024)] : index
   %min = index.min %lhs, %rhs : index
   %max = index.max %lhs, %rhs : index
   %sum = index.add %min, %max : index
@@ -78,15 +78,15 @@ func.def @scf_select_i64_sgpr(%lhs: i32, %rhs: i32, %a: i64, %b: i64) -> (i64) {
 // ====
 
 func.def @scf_select_q6_nibble_i8(%code: i32, %use_high: i32) -> (i8) {
-  %zero = scalar.constant 0 : i32
-  %four = scalar.constant 4 : i32
+  %low_selector = scalar.constant 0 : i32
+  %nibble_shift = scalar.constant 4 : i32
   %mask = scalar.constant 15 : i32
-  %high_shifted = scalar.shrui %code, %four : i32
+  %high_shifted = scalar.shrui %code, %nibble_shift : i32
   %low_i32 = scalar.andi %code, %mask : i32
   %high_i32 = scalar.andi %high_shifted, %mask : i32
   %low = scalar.trunci %low_i32 : i32 to i8
   %high = scalar.trunci %high_i32 : i32 to i8
-  %cond = scalar.cmpi ne, %use_high, %zero : i32
+  %cond = scalar.cmpi ne, %use_high, %low_selector : i32
   %selected = scf.select %cond, %high, %low : i8
   func.return %selected : i8
 }
@@ -94,12 +94,12 @@ func.def @scf_select_q6_nibble_i8(%code: i32, %use_high: i32) -> (i8) {
 // ====
 
 func.def @scf_select_scale_piece_i16(%packed: i32, %use_high: i32) -> (i16) {
-  %zero = scalar.constant 0 : i32
-  %sixteen = scalar.constant 16 : i32
+  %low_selector = scalar.constant 0 : i32
+  %halfword_shift = scalar.constant 16 : i32
   %low = scalar.trunci %packed : i32 to i16
-  %high_shifted = scalar.shrui %packed, %sixteen : i32
+  %high_shifted = scalar.shrui %packed, %halfword_shift : i32
   %high = scalar.trunci %high_shifted : i32 to i16
-  %cond = scalar.cmpi ne, %use_high, %zero : i32
+  %cond = scalar.cmpi ne, %use_high, %low_selector : i32
   %selected = scf.select %cond, %high, %low : i16
   func.return %selected : i16
 }
@@ -127,9 +127,9 @@ func.def @scf_select_chained_vgpr_i32(%values: vector<2xi32>, %limit: i32, %fall
 
 func.def @scf_select_tail_zero_i32(%values: vector<2xi32>, %limit: i32) -> (i32) {
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
-  %zero = scalar.constant 0 : i32
+  %tail_fill = scalar.constant 0 : i32
   %cond = scalar.cmpi slt, %lane, %limit : i32
-  %selected = scf.select %cond, %lane, %zero : i32
+  %selected = scf.select %cond, %lane, %tail_fill : i32
   func.return %selected : i32
 }
 
@@ -183,6 +183,17 @@ func.def @scf_select_i1_false_condition(%values: vector<2xi32>, %limit: i32, %up
   %inside_upper = scalar.cmpi slt, %lane, %upper : i32
   %selected_condition = scf.select %lane_condition, %inside_upper, %lane_condition : i1
   %result = scf.select %selected_condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ====
+
+func.def @scf_select_i1_assume_second_condition(%values: vector<2xi32>, %limit: i32, %upper: i32, %true_value: f32, %false_value: f32) -> (f32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %lane_condition = scalar.cmpi slt, %lane, %limit : i32
+  %scalar_condition = scalar.cmpi slt, %limit, %upper : i32
+  %checked_lane_condition, %checked_scalar_condition = scalar.assume %lane_condition, %scalar_condition [] : i1, i1
+  %result = scf.select %checked_scalar_condition, %true_value, %false_value : f32
   func.return %result : f32
 }
 
@@ -273,10 +284,10 @@ func.def @scf_select_i1_false_condition_constant(%true_value: f32, %false_value:
 // ====
 
 func.def @scf_select_i1_scc_condition(%lhs: i32, %rhs: i32, %alt: i32, %true_value: f32, %false_value: f32) -> (f32) {
-  %zero = scalar.constant 0 : i32
+  %inactive_condition = scalar.constant 0 : i32
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
-  %lhs_nonzero = scalar.cmpi ne, %lhs, %zero : i32
-  %alt_nonzero = scalar.cmpi ne, %alt, %zero : i32
+  %lhs_nonzero = scalar.cmpi ne, %lhs, %inactive_condition : i32
+  %alt_nonzero = scalar.cmpi ne, %alt, %inactive_condition : i32
   %selected_condition = scf.select %condition, %lhs_nonzero, %alt_nonzero : i1
   %result = scf.select %selected_condition, %true_value, %false_value : f32
   func.return %result : f32
@@ -295,25 +306,25 @@ kernel.def @index_minmax_vgpr_select() {
   %max = index.max %lane, %limit : index
   %cond = index.cmp slt, %lane, %limit : index
   %selected = scf.select %cond, %min, %max : index
-  %zero = index.constant 0 : offset
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xi32, #dense>
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<64xi32>
   %stored = vector.constant 1 : vector<1xi32>
-  vector.store %stored, %output_view[%selected] : vector<1xi32>, view<64xi32, #dense>
+  vector.store %stored, %output_view[%selected] : vector<1xi32>, view<64xi32>
   kernel.return
 }
 
 // ====
 
 func.def @f32_reduce_minnum_maxnum(%input: buffer, %output: buffer) {
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<4xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<2xf32, #dense>
-  %loaded = vector.load %input_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<2xf32>
+  %loaded = vector.load %input_view[0] : view<4xf32> -> vector<4xf32>
   %min_init = scalar.constant 1000.0 : f32
   %min = vector.reduce<minnumf, reassoc|nnan|nsz> %loaded, %min_init : vector<4xf32>, f32
   %max_init = scalar.constant -1000.0 : f32
   %max = vector.reduce<maxnumf, reassoc|nnan|nsz> %loaded, %max_init : vector<4xf32>, f32
   %stored = vector.from_elements %min, %max : vector<2xf32>
-  vector.store %stored, %output_view[0] : vector<2xf32>, view<2xf32, #dense>
+  vector.store %stored, %output_view[0] : vector<2xf32>, view<2xf32>
   func.return
 }

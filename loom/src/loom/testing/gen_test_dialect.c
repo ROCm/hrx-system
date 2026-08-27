@@ -122,13 +122,13 @@ static iree_status_t loom_test_gen_hook_test_simple(
         *out_result = LOOM_TEST_GEN_HOOK_SKIPPED;
         return iree_ok_status();
       }
-      uint8_t predicate = (uint8_t)loom_test_gen_next_range(
-          context->gen, LOOM_TEST_CMP_PREDICATE_COUNT_);
+      loom_test_cmp_predicate_t predicate =
+          (loom_test_cmp_predicate_t)loom_test_gen_next_range(
+              context->gen, LOOM_TEST_CMP_PREDICATE_COUNT_);
       loom_type_t i1_type = loom_type_scalar(LOOM_SCALAR_TYPE_I1);
       loom_op_t* op = NULL;
-      IREE_RETURN_IF_ERROR(loom_test_cmp_build(context->builder, predicate, lhs,
-                                               rhs, operand_type, i1_type,
-                                               LOOM_LOCATION_UNKNOWN, &op));
+      IREE_RETURN_IF_ERROR(loom_test_cmp_build(
+          context->builder, predicate, lhs, rhs, LOOM_LOCATION_UNKNOWN, &op));
       loom_test_gen_values_add(context->values, loom_op_results(op)[0],
                                i1_type);
       *out_result = LOOM_TEST_GEN_HOOK_EMITTED;
@@ -233,7 +233,7 @@ static iree_status_t loom_test_gen_region_map(
   loom_block_t* entry_block = loom_region_entry_block(body);
   for (uint16_t j = 0; j < entry_block->arg_count; ++j) {
     loom_value_id_t arg_id = loom_block_arg_id(entry_block, j);
-    loom_value_t* arg_val = &context->builder->module->values.entries[arg_id];
+    loom_value_t* arg_val = loom_module_value(context->builder->module, arg_id);
     loom_test_gen_values_add(&body_values, arg_id, arg_val->type);
   }
 
@@ -301,7 +301,7 @@ static iree_status_t loom_test_gen_region_loop(
   uint16_t iter_arg_count =
       (uint16_t)(1 + loom_test_gen_next_range(context->gen, 2));
   loom_value_id_t iter_args[2];
-  loom_type_t result_types[2];
+  loom_type_t iter_arg_types[2];
   for (uint16_t j = 0; j < iter_arg_count; ++j) {
     iter_args[j] = loom_test_gen_values_pick_any(context->gen, context->values);
     if (iter_args[j] == LOOM_VALUE_ID_INVALID) {
@@ -315,14 +315,14 @@ static iree_status_t loom_test_gen_region_loop(
       iter_args[j] = loom_op_results(const_op)[0];
       loom_test_gen_values_add(context->values, iter_args[j], type);
     }
-    result_types[j] =
+    iter_arg_types[j] =
         loom_test_gen_values_type_of(context->values, iter_args[j]);
   }
 
   loom_op_t* loop_op = NULL;
   IREE_RETURN_IF_ERROR(loom_test_loop_build(
-      context->builder, lower, upper, step, iter_args, iter_arg_count,
-      result_types, iter_arg_count, NULL, 0, LOOM_LOCATION_UNKNOWN, &loop_op));
+      context->builder, lower, upper, step, iter_args, iter_arg_count, NULL, 0,
+      LOOM_LOCATION_UNKNOWN, &loop_op));
 
   loom_region_t* body = loom_test_loop_body(loop_op);
   loom_builder_ip_t saved =
@@ -333,7 +333,7 @@ static iree_status_t loom_test_gen_region_loop(
   loom_block_t* entry_block = loom_region_entry_block(body);
   for (uint16_t j = 0; j < entry_block->arg_count; ++j) {
     loom_value_id_t arg_id = loom_block_arg_id(entry_block, j);
-    loom_value_t* arg_val = &context->builder->module->values.entries[arg_id];
+    loom_value_t* arg_val = loom_module_value(context->builder->module, arg_id);
     loom_test_gen_values_add(&body_values, arg_id, arg_val->type);
   }
 
@@ -344,7 +344,7 @@ static iree_status_t loom_test_gen_region_loop(
   // Yield values matching iter_arg types.
   loom_value_id_t yield_vals[2];
   for (uint16_t j = 0; j < iter_arg_count; ++j) {
-    loom_scalar_type_t scalar = loom_type_element_type(result_types[j]);
+    loom_scalar_type_t scalar = loom_type_element_type(iter_arg_types[j]);
     yield_vals[j] =
         loom_test_gen_values_pick_typed(context->gen, &body_values, scalar);
     if (yield_vals[j] == LOOM_VALUE_ID_INVALID) {
@@ -352,11 +352,11 @@ static iree_status_t loom_test_gen_region_loop(
     }
     if (yield_vals[j] == LOOM_VALUE_ID_INVALID) {
       loom_attribute_t const_val =
-          loom_test_gen_constant_attr(result_types[j], (int64_t)j);
+          loom_test_gen_constant_attr(iter_arg_types[j], (int64_t)j);
       loom_op_t* const_op = NULL;
-      IREE_RETURN_IF_ERROR(
-          loom_test_constant_build(context->builder, const_val, result_types[j],
-                                   LOOM_LOCATION_UNKNOWN, &const_op));
+      IREE_RETURN_IF_ERROR(loom_test_constant_build(
+          context->builder, const_val, iter_arg_types[j], LOOM_LOCATION_UNKNOWN,
+          &const_op));
       yield_vals[j] = loom_op_results(const_op)[0];
     }
   }
@@ -368,7 +368,7 @@ static iree_status_t loom_test_gen_region_loop(
   loom_builder_restore(context->builder, saved);
   for (uint16_t j = 0; j < iter_arg_count; ++j) {
     loom_test_gen_values_add(context->values, loom_op_results(loop_op)[j],
-                             result_types[j]);
+                             iter_arg_types[j]);
   }
   *out_result = LOOM_TEST_GEN_HOOK_EMITTED;
   return iree_ok_status();

@@ -14,6 +14,17 @@ func.def @for_iter_args_too_few(%lo: index, %hi: index, %step: index, %init: f32
 
 // ====
 
+// All counted-loop bounds share one address domain.
+func.def @for_bound_type_mismatch(%lo: offset, %hi: index, %step: offset) {
+  // ERROR@+1: TYPE/001 "lower_bound" "upper_bound"
+  scf.for %byte_offset = [%lo to %hi step %step] {
+    test.use %byte_offset : offset
+  }
+  func.return
+}
+
+// ====
+
 // scf.for with more iter_args than results: count check fires the
 // other direction.
 func.def @for_iter_args_too_many(%lo: index, %hi: index, %step: index, %a: f32, %b: f32) -> (f32) {
@@ -109,11 +120,11 @@ func.def @if_result_missing_else(%cond: i1, %a: i32) -> (i32) {
 // forwarding rule as scf.yield. The init view is tied to the init layout, while
 // the loop result view is tied to the sibling loop result layout.
 func.def @for_iter_arg_result_type_refs_forwarded_results(%n: index, %buffer: buffer, %offset: offset) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
   %base_layout = encoding.layout.dense : encoding<layout>
   %base_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %base_layout>
-  %layout, %view = scf.for %i = [%zero to %n step %one](%layout_acc = %base_layout : encoding<layout>, %view_acc = %base_view : view<4xf32, %base_layout>) -> (encoding<layout>, view<4xf32, %layout>) {
+  %layout, %view = scf.for %i = [%loop_begin to %n step %loop_step](%layout_acc = %base_layout : encoding<layout>, %view_acc = %base_view : view<4xf32, %base_layout>) -> (encoding<layout>, view<4xf32, %layout>) {
     %next_layout = encoding.layout.dense : encoding<layout>
     %next_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %next_layout>
     scf.yield %next_layout, %next_view : encoding<layout>, view<4xf32, %next_layout>
@@ -140,7 +151,7 @@ func.def @while_after_arg_type_mismatch(%cond: i1, %init: index) -> (index) {
 // scf.condition forwards one value for each after-region entry block arg.
 func.def @while_condition_forward_count_mismatch(%cond: i1, %init: index) -> (index) {
   %r = scf.while(%before = %init : index) -> (index) {
-    // ERROR@+1: STRUCTURE/013 "forwarded" "0" "after block args" "1"
+    // ERROR@+1: STRUCTURE/013 "forwarded" "0" "target block args" "1"
     scf.condition %cond : i1
   } do(%body: index) {
     scf.yield %body : index
@@ -153,7 +164,7 @@ func.def @while_condition_forward_count_mismatch(%cond: i1, %init: index) -> (in
 // scf.condition forwarded values must match the after-region block arg types.
 func.def @while_condition_forward_type_mismatch(%cond: i1, %init: index, %wrong: f32) -> (index) {
   %r = scf.while(%before = %init : index) -> (index) {
-    // ERROR@+1: TYPE/001 "forwarded[0]" "after[0]"
+    // ERROR@+1: TYPE/001 "forwarded[0]" "target[0]"
     scf.condition %cond, %wrong : i1, f32
   } do(%body: index) {
     scf.yield %body : index
@@ -173,6 +184,20 @@ func.def @while_wrong_before_terminator(%cond: i1, %init: index) -> (index) {
     scf.yield %body : index
   }
   func.return %r : index
+}
+
+// ====
+
+// scf.condition is meaningful only as the direct terminator of a scf.while
+// before region. Nesting it under another structured op must not reach while
+// lowering as malformed IR.
+func.def @while_condition_requires_direct_while_parent(%cond: i1) {
+  // ERROR@+1: STRUCTURE/018 "scf.if" "0" "scf.yield" "scf.condition"
+  scf.if %cond {
+    // ERROR@+1: STRUCTURE/029 "scf.condition" "parent" "scf.while" "scf.if"
+    scf.condition %cond : i1
+  }
+  func.return
 }
 
 // ====

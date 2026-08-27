@@ -17,6 +17,7 @@ from dataclasses import replace
 
 import pytest
 
+from loom.assembly import FuncArgs
 from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.dialect.buffer import ALL_BUFFER_OPS
 from loom.dialect.cfg import ALL_CFG_OPS
@@ -28,8 +29,19 @@ from loom.dialect.kernel import ALL_KERNEL_OPS, ALL_KERNEL_TYPES
 from loom.dialect.low import ALL_LOW_OPS
 from loom.dialect.pass_ import ALL_PASS_OPS
 from loom.dialect.scalar import ALL_SCALAR_OPS
-from loom.dialect.target import ALL_TARGET_OPS
-from loom.dialect.test import ALL_TEST_OPS
+from loom.dialect.target import ALL_TARGET_OPS, ALL_TARGET_PARAMETERIZED_ATTRS
+from loom.dialect.template import ALL_TEMPLATE_OPS
+from loom.dialect.test import (
+    ALL_TEST_OPS,
+    ALL_TEST_PARAMETERIZED_ATTRS,
+    ALL_TEST_TYPES,
+    test_array_type,
+    test_matrix_type,
+    test_options_attr,
+    test_scope_type,
+    test_tile_attr,
+    test_variant_set_type,
+)
 from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dsl import (
     ANY,
@@ -37,8 +49,10 @@ from loom.dsl import (
     AttrDef,
     FuncLikeInterface,
     Op,
+    Operand,
     Result,
     SymbolDefinition,
+    SymbolDefinitionFlag,
     SymbolReference,
 )
 from loom.format.bytecode.encoding import decode_varint
@@ -49,6 +63,10 @@ from loom.format.bytecode.writer import (
     LOCATION_MODE_NO_LOCATIONS,
     LOCATION_MODE_SOURCE_LOCATIONS,
     SECTION_LOCATIONS,
+    SECTION_SYMBOL_REFERENCES,
+    SECTION_SYMBOLS,
+    SYMBOL_FLAG_EXPORT,
+    SYMBOL_INTERFACE_BITS,
     write_module,
 )
 from loom.format.text.parser import Parser
@@ -66,21 +84,24 @@ from loom.ir import (
     I64,
     INDEX,
     LOCATION_UNKNOWN,
+    SYMBOL_FLAG_DECLARATION,
     SYMBOL_FLAG_IMPORT,
     SYMBOL_FLAG_PUBLIC,
+    SYMBOL_FLAG_TEST_ONLY,
     Block,
     CanonicalAttrDict,
     DialectType,
     DynamicDim,
     DynamicEncoding,
     EncodingInstance,
+    EnumArrayAttr,
     FileLocation,
     FunctionType,
-    GroupScope,
-    GroupType,
     LocationTable,
     Module,
     Operation,
+    ParameterizedAttr,
+    ParameterizedAttrArray,
     PlaceholderType,
     PoolType,
     Region,
@@ -88,12 +109,15 @@ from loom.ir import (
     ScalarType,
     ScalarTypeKind,
     ShapedType,
+    SignedEnumSetAttr,
     StaticDim,
     StorageSpace,
     StorageType,
     Symbol,
     SymbolKind,
     SymbolName,
+    SymbolNameArray,
+    SymbolNameSet,
     TaggedLocation,
     TiedResult,
     Type,
@@ -146,12 +170,32 @@ def _section_kinds(data: bytes | bytearray) -> list[int]:
     return section_kinds
 
 
-def _test_ptr_register_type(unit_count: int = 1) -> RegisterType:
+def _section_payload(data: bytes, section_kind: int) -> bytes:
+    module_offset, _module_length = _module_range(data)
+    offset = module_offset
+    section_count, offset = decode_varint(data, offset)
+    for _ in range(4):
+        _count, offset = decode_varint(data, offset)
+    for _ in range(section_count):
+        kind = struct.unpack_from("<H", data, offset)[0]
+        section_offset = struct.unpack_from("<Q", data, offset + 8)[0]
+        section_length = struct.unpack_from("<Q", data, offset + 16)[0]
+        if kind == section_kind:
+            absolute_offset = module_offset + section_offset
+            return data[absolute_offset : absolute_offset + section_length]
+        offset += 32
+    raise AssertionError(f"missing section kind {section_kind}")
+
+
+def _test_ptr_register_type(
+    unit_count: int = 1, value_type: Type | None = None
+) -> RegisterType:
     return RegisterType(
         _TEST_LOW_CORE_STABLE_ID,
         _TEST_PTR_REGISTER_CLASS_ID,
         unit_count,
         "test.ptr",
+        value_type,
     )
 
 
@@ -165,7 +209,12 @@ def _text_parser(
     include_pass: bool = False,
 ) -> Parser:
     parser = Parser()
-    ops = list(ALL_FUNC_OPS) + list(ALL_CFG_OPS) + list(ALL_TEST_OPS)
+    ops = (
+        list(ALL_FUNC_OPS)
+        + list(ALL_TEMPLATE_OPS)
+        + list(ALL_CFG_OPS)
+        + list(ALL_TEST_OPS)
+    )
     if include_encoding:
         _append_unique(ops, ALL_ENCODING_OPS)
     if include_global:
@@ -187,6 +236,9 @@ def _text_parser(
     if include_pass:
         _append_unique(ops, ALL_PASS_OPS)
     parser.register_ops(ops)
+    parser.register_parameterized_attrs(
+        (*ALL_TEST_PARAMETERIZED_ATTRS, *ALL_TARGET_PARAMETERIZED_ATTRS)
+    )
     types = list(ALL_BUILTIN_TYPES)
     if include_kernel:
         _append_unique(types, ALL_KERNEL_TYPES)
@@ -204,7 +256,12 @@ def _text_printer(
     include_pass: bool = False,
 ) -> Printer:
     printer = Printer()
-    ops = list(ALL_FUNC_OPS) + list(ALL_CFG_OPS) + list(ALL_TEST_OPS)
+    ops = (
+        list(ALL_FUNC_OPS)
+        + list(ALL_TEMPLATE_OPS)
+        + list(ALL_CFG_OPS)
+        + list(ALL_TEST_OPS)
+    )
     if include_encoding:
         _append_unique(ops, ALL_ENCODING_OPS)
     if include_global:
@@ -249,7 +306,13 @@ def _parse_write_read(
         include_kernel=include_kernel,
         include_low=include_low,
     ).parse(text)
-    return read_module(write_module(module))
+    return read_module(
+        write_module(module),
+        parameterized_attrs=(
+            *ALL_TEST_PARAMETERIZED_ATTRS,
+            *ALL_TARGET_PARAMETERIZED_ATTRS,
+        ),
+    )
 
 
 def _roundtrip_text_through_bytecode(
@@ -515,6 +578,59 @@ class TestFileHeader:
         assert write_module(m1) == write_module(m2)
 
 
+class TestSymbolReferencesSection:
+    def test_records_retain_contract_and_root_region_origins(self) -> None:
+        module = _text_parser().parse(
+            "test.record @config_dependency\n"
+            "test.record @implementation_dependency\n"
+            "template.decl @demo.contract() -> (index)\n"
+            "test.split_func @split_root() {\n"
+            "  test.symbol_array_attrs [@config_dependency] using []\n"
+            "  test.yield\n"
+            "} launch {\n"
+            "  test.symbol_array_attrs [@implementation_dependency] using []\n"
+            "  %result = template.apply<@demo.contract>() : () -> (index)\n"
+            "  test.yield\n"
+            "}\n"
+        )
+        data = _section_payload(write_module(module), SECTION_SYMBOL_REFERENCES)
+        offset = 0
+        symbol_count, offset = decode_varint(data, offset)
+        dependency_count, offset = decode_varint(data, offset)
+        template_demand_count, offset = decode_varint(data, offset)
+        module_dependency_count, offset = decode_varint(data, offset)
+        assert (symbol_count, dependency_count, template_demand_count) == (4, 3, 1)
+        assert module_dependency_count == 0
+
+        rows: list[tuple[list[tuple[int, int, int]], list[tuple[int, int]]]] = []
+        for _ in range(symbol_count):
+            row_dependency_count, offset = decode_varint(data, offset)
+            dependencies = []
+            for _ in range(row_dependency_count):
+                source_root, offset = decode_varint(data, offset)
+                target_symbol, offset = decode_varint(data, offset)
+                target_interfaces, offset = decode_varint(data, offset)
+                dependencies.append((source_root, target_symbol, target_interfaces))
+            row_template_demand_count, offset = decode_varint(data, offset)
+            template_demands = []
+            for _ in range(row_template_demand_count):
+                source_root, offset = decode_varint(data, offset)
+                family_symbol, offset = decode_varint(data, offset)
+                template_demands.append((source_root, family_symbol))
+            rows.append((dependencies, template_demands))
+
+        assert rows[:3] == [([], []), ([], []), ([], [])]
+        assert rows[3] == (
+            [
+                (2, 2, SYMBOL_INTERFACE_BITS["template_family"]),
+                (2, 1, SYMBOL_INTERFACE_BITS["record"]),
+                (1, 0, SYMBOL_INTERFACE_BITS["record"]),
+            ],
+            [(2, 2)],
+        )
+        assert offset == len(data)
+
+
 class TestModuleDirectory:
     def test_module_offset_valid(self) -> None:
         data = write_module(Module(name="test"))
@@ -571,7 +687,13 @@ class TestStringsSection:
 
 
 class TestTypesSection:
-    def _roundtrip_type(self, ir_type: Type) -> None:
+    def _roundtrip_type(
+        self,
+        ir_type: Type,
+        *,
+        type_defs: tuple[object, ...] | None = None,
+        parameterized_attrs: tuple[object, ...] | None = None,
+    ) -> None:
         """Write a module with a value of this type, read back, verify.
 
         For types with dynamic dims, creates index-typed SSA values
@@ -597,7 +719,11 @@ class TestTypesSection:
         module.add_symbol(Symbol(name="f", kind=SymbolKind.FUNC_DEF, op=func_op))
 
         data = write_module(module)
-        loaded = read(data)
+        loaded = read(
+            data,
+            type_defs=type_defs,
+            parameterized_attrs=parameterized_attrs,
+        )
         loaded_op = loaded.symbols[0].op
         assert loaded_op is not None
         # The value under test is the last block arg.
@@ -742,12 +868,6 @@ class TestTypesSection:
             ShapedType(TypeKind.TILE, F32, (StaticDim(4),), encoding=enc)
         )
 
-    def test_group_type(self) -> None:
-        self._roundtrip_type(GroupType(GroupScope.WORKGROUP))
-
-    def test_group_subgroup(self) -> None:
-        self._roundtrip_type(GroupType(GroupScope.SUBGROUP))
-
     def test_function_type(self) -> None:
         self._roundtrip_type(FunctionType((F32, I32), (F32,)))
 
@@ -764,8 +884,39 @@ class TestTypesSection:
         inner = DialectType("vm.list", (I32,))
         self._roundtrip_type(DialectType("vm.ref", (inner,)))
 
+    def test_descriptor_backed_types(self) -> None:
+        types = (
+            test_scope_type(scope="subgroup"),
+            test_matrix_type(element_type=BF16, scope="workgroup", rows=16),
+            test_array_type(element_type=BF16),
+            test_array_type(element_type=BF16, alignment=32),
+        )
+        for ir_type in types:
+            self._roundtrip_type(ir_type, type_defs=ALL_TEST_TYPES)
+
+        tile = test_tile_attr(width=8)
+        self._roundtrip_type(
+            test_variant_set_type(
+                values=[tile, test_options_attr(mode="fast"), tile],
+                alternatives=[],
+            ),
+            type_defs=ALL_TEST_TYPES,
+            parameterized_attrs=ALL_TEST_PARAMETERIZED_ATTRS,
+        )
+
     def test_register_type(self) -> None:
         self._roundtrip_type(_test_ptr_register_type(4))
+
+    def test_register_scalar_value_type(self) -> None:
+        self._roundtrip_type(_test_ptr_register_type(value_type=I32))
+
+    def test_register_vector_value_type(self) -> None:
+        vector_type = ShapedType(TypeKind.VECTOR, I32, (StaticDim(4),))
+        self._roundtrip_type(_test_ptr_register_type(4, vector_type))
+
+    def test_register_dialect_value_type(self) -> None:
+        dialect_type = DialectType("vm.ref", (I32,))
+        self._roundtrip_type(_test_ptr_register_type(value_type=dialect_type))
 
     def test_pool_static(self) -> None:
         self._roundtrip_type(PoolType(StaticDim(65536)))
@@ -1108,6 +1259,15 @@ class TestOpPatterns:
         data = write_module(module)
         return read(data)
 
+    def test_unsupported_region_source_flags_are_rejected(self) -> None:
+        module = _make_func_module()
+        func_op = module.symbols[0].op
+        assert func_op is not None
+        func_op.regions[0].source_flags = 1 << 1
+
+        with pytest.raises(ValueError, match="unsupported source flag bits"):
+            write_module(module)
+
     def test_binary_op(self) -> None:
         module = Module(name="test")
         a = module.add_value(Value(name="a", type=I32))
@@ -1389,13 +1549,294 @@ class TestCrossFormatRoundTrip:
         op = loaded.symbols[0].op
         assert op is not None
         assert len(op.regions) == 2
-        config_arg_ids = op.regions[0].blocks[0].arg_ids
+        workload_arg_ids = op.regions[0].blocks[0].arg_ids
         body_arg_ids = op.regions[1].blocks[0].arg_ids
-        assert len(body_arg_ids) == len(config_arg_ids) == 2
-        assert body_arg_ids[0] != config_arg_ids[0]
+        assert len(body_arg_ids) == len(workload_arg_ids) == 2
+        assert body_arg_ids[0] != workload_arg_ids[0]
         assert loaded.values[body_arg_ids[0]].name == "arg"
-        assert loaded.values[config_arg_ids[0]].name == "arg"
+        assert loaded.values[workload_arg_ids[0]].name == "arg"
         assert _roundtrip_text_through_bytecode(text) == text
+
+    def test_enum_arrays_survive_bytecode_with_presence_and_order(self) -> None:
+        text = (
+            "test.func @enum_arrays() {\n"
+            "  test.enum_array_attrs [low, high, low] "
+            "using [middle, <42>, middle]\n"
+            "  test.enum_array_attrs [] using []\n"
+            "  test.enum_array_attrs []\n"
+            "  test.yield\n"
+            "}\n"
+        )
+        loaded = _parse_write_read(text)
+        func_op = loaded.symbols[0].op
+        assert func_op is not None
+        body_ops = func_op.regions[0].blocks[0].ops
+        assert body_ops[0].attributes["required_values"] == EnumArrayAttr([1, 255, 1])
+        assert body_ops[0].attributes["optional_values"] == EnumArrayAttr([7, 42, 7])
+        assert body_ops[1].attributes["optional_values"] == EnumArrayAttr()
+        assert "optional_values" not in body_ops[2].attributes
+        assert _roundtrip_text_through_bytecode(text) == text
+
+    def test_signed_enum_sets_survive_bytecode_with_presence(self) -> None:
+        text = (
+            "test.func @signed_enum_sets() {\n"
+            "  test.signed_enum_set_attrs [low, -middle, high] using []\n"
+            "  test.signed_enum_set_attrs [] using [-high]\n"
+            "  test.signed_enum_set_attrs []\n"
+            "  test.yield\n"
+            "}\n"
+        )
+        loaded = _parse_write_read(text)
+        func_op = loaded.symbols[0].op
+        assert func_op is not None
+        body_ops = func_op.regions[0].blocks[0].ops
+        assert body_ops[0].attributes["required_features"] == SignedEnumSetAttr(
+            [1, 255], [7]
+        )
+        assert body_ops[0].attributes["optional_features"] == SignedEnumSetAttr()
+        assert body_ops[1].attributes["required_features"] == SignedEnumSetAttr()
+        assert body_ops[1].attributes["optional_features"] == SignedEnumSetAttr(
+            [], [255]
+        )
+        assert "optional_features" not in body_ops[2].attributes
+        assert _roundtrip_text_through_bytecode(text) == text
+
+    def test_symbol_arrays_survive_bytecode_with_presence_and_order(self) -> None:
+        text = (
+            "test.func @symbol_arrays() {\n"
+            "  test.symbol_array_attrs [@b, @a, @b] using [@a]\n"
+            "  test.symbol_array_attrs [] using []\n"
+            "  test.symbol_array_attrs []\n"
+            "  test.yield\n"
+            "}\n"
+            "\n"
+            "test.record @a\n"
+            "\n"
+            "test.record @b\n"
+        )
+
+        loaded = _parse_write_read(text)
+        function = next(
+            symbol.op for symbol in loaded.symbols if symbol.name == "symbol_arrays"
+        )
+        assert function is not None
+        body_ops = function.regions[0].blocks[0].ops
+        assert body_ops[0].attributes["dependencies"] == SymbolNameArray(
+            [SymbolName("b"), SymbolName("a"), SymbolName("b")]
+        )
+        assert body_ops[0].attributes["available"] == SymbolNameArray([SymbolName("a")])
+        assert body_ops[1].attributes["available"] == SymbolNameArray()
+        assert "available" not in body_ops[2].attributes
+        roundtrip_text = _roundtrip_text_through_bytecode(text)
+        assert roundtrip_text == text, roundtrip_text
+
+    def test_symbol_sets_survive_bytecode_in_canonical_order(self) -> None:
+        text = (
+            "test.func @symbol_sets() {\n"
+            "  test.symbol_set_attrs [@zeta, @alpha]\n"
+            "  test.symbol_set_attrs []\n"
+            "  test.yield\n"
+            "}\n"
+            "\n"
+            "test.record @alpha\n"
+            "\n"
+            "test.record @zeta\n"
+        )
+        expected = text.replace("[@zeta, @alpha]", "[@alpha, @zeta]")
+
+        loaded = _parse_write_read(text)
+        function = next(
+            symbol.op for symbol in loaded.symbols if symbol.name == "symbol_sets"
+        )
+        assert function is not None
+        body_ops = function.regions[0].blocks[0].ops
+        assert body_ops[0].attributes["symbols"] == SymbolNameSet(
+            [SymbolName("alpha"), SymbolName("zeta")]
+        )
+        assert body_ops[1].attributes["symbols"] == SymbolNameSet()
+        assert _roundtrip_text_through_bytecode(text) == expected
+
+    def test_parameterized_attrs_survive_bytecode_with_named_slots(self) -> None:
+        text = (
+            "test.func @parameterized() {\n"
+            "  test.parameterized_attr "
+            "#test.options<mode = fast, scopes = [subgroup, <254>], "
+            "element_type = bf16, tile = #test.tile<width = 16>>\n"
+            "  test.parameterized_attr "
+            "#test.options<mode = precise, scopes = []>\n"
+            "  test.parameterized_attr #test.options<mode = fast>\n"
+            "  test.yield\n"
+            "}\n"
+        )
+        loaded = _parse_write_read(text)
+        function = next(
+            symbol.op for symbol in loaded.symbols if symbol.name == "parameterized"
+        )
+        assert function is not None
+        body_ops = function.regions[0].blocks[0].ops
+        first = body_ops[0].attributes["options"]
+        present_empty = body_ops[1].attributes["options"]
+        absent = body_ops[2].attributes["options"]
+        assert isinstance(first, ParameterizedAttr)
+        assert first.family_name == "test.options"
+        assert first.get("mode") == 1
+        assert first.get("scopes") == EnumArrayAttr([2, 254])
+        assert first.get("element_type") == BF16
+        assert isinstance(first.get("tile"), ParameterizedAttr)
+        assert first.get("tile").get("width") == 16
+        assert present_empty.has("scopes")
+        assert present_empty.get("scopes") == EnumArrayAttr()
+        assert not absent.has("scopes")
+        assert _roundtrip_text_through_bytecode(text) == text
+
+    def test_parameterized_attr_arrays_survive_bytecode(self) -> None:
+        text = (
+            "test.func @parameterized_arrays() {\n"
+            "  test.parameterized_attr_array "
+            "[#test.tile<width = 8>, #test.options<mode = fast>, "
+            "#test.tile<width = 8>, "
+            "#test.feature_set<[low, -middle, high]>] "
+            "using [#test.tile<width = 4>]\n"
+            "  test.parameterized_attr_array [] using []\n"
+            "  test.parameterized_attr_array []\n"
+            "  test.parameterized_attr "
+            "#test.options<mode = precise, "
+            "tiles = [#test.tile<width = 16>]>\n"
+            "  test.yield\n"
+            "}\n"
+        )
+
+        loaded = _parse_write_read(text)
+        function = next(
+            symbol.op
+            for symbol in loaded.symbols
+            if symbol.name == "parameterized_arrays"
+        )
+        assert function is not None
+        body_ops = function.regions[0].blocks[0].ops
+        values = body_ops[0].attributes["values"]
+        assert isinstance(values, ParameterizedAttrArray)
+        assert tuple(value.family_name for value in values) == (
+            "test.tile",
+            "test.options",
+            "test.tile",
+            "test.feature_set",
+        )
+        assert values.values[0] == values.values[2]
+        assert values.values[3].get("features") == SignedEnumSetAttr([1, 255], [7])
+        assert body_ops[0].attributes["tiles"] == ParameterizedAttrArray(
+            [test_tile_attr(width=4)]
+        )
+        assert body_ops[1].attributes["tiles"] == ParameterizedAttrArray()
+        assert "tiles" not in body_ops[2].attributes
+        nested = body_ops[3].attributes["options"]
+        assert nested.get("tiles") == ParameterizedAttrArray([test_tile_attr(width=16)])
+        assert _roundtrip_text_through_bytecode(text) == text
+
+    def test_compact_parameterized_attr_survives_named_slot_bytecode(self) -> None:
+        text = (
+            "test.func @compact() {\n"
+            "  test.compact_parameterized_attr "
+            '#test.compact<64, label = "wave">\n'
+            "  test.yield\n"
+            "}\n"
+        )
+        loaded = _parse_write_read(text)
+        function = next(
+            symbol.op for symbol in loaded.symbols if symbol.name == "compact"
+        )
+        assert function is not None
+        compact = function.regions[0].blocks[0].ops[0].attributes["value"]
+        assert isinstance(compact, ParameterizedAttr)
+        assert compact.slots == ("wave", 64)
+        assert _roundtrip_text_through_bytecode(text) == text
+
+    def test_empty_optional_aggregates_survive_bytecode(self) -> None:
+        text = (
+            "test.func @empty_predicates() where [] {\n"
+            "  test.enum_array_attrs [] {}\n"
+            "  test.yield\n"
+            "}\n"
+        )
+
+        loaded = _parse_write_read(text)
+        function = loaded.symbols[0].op
+        assert function is not None
+        assert loaded.symbols[0].flags == 0
+        assert function.attributes["predicates"] == []
+        enum_op = function.regions[0].blocks[0].ops[0]
+        assert len(enum_op.attributes["dict"]) == 0
+        assert _roundtrip_text_through_bytecode(text) == text
+
+    def test_enum_array_in_generic_dict_is_rejected(self) -> None:
+        module = Module(name="test")
+        operation = Operation(
+            name="test.attrs",
+            attributes={"dict": {"modes": EnumArrayAttr([1, 7])}},
+        )
+        body = Region(blocks=[Block(ops=[operation, Operation(name="test.yield")])])
+        function = Operation(
+            name="test.func",
+            attributes={"callee": "f"},
+            regions=[body],
+        )
+        module.add_symbol(Symbol(name="f", kind=SymbolKind.FUNC_DEF, op=function))
+
+        with pytest.raises(ValueError, match="descriptor-backed field"):
+            write_module(module)
+
+    def test_symbol_array_in_generic_dict_is_rejected(self) -> None:
+        module = Module(name="test")
+        operation = Operation(
+            name="test.attrs",
+            attributes={"dict": {"symbols": SymbolNameArray([SymbolName("record")])}},
+        )
+        body = Region(blocks=[Block(ops=[operation, Operation(name="test.yield")])])
+        function = Operation(
+            name="test.func",
+            attributes={"callee": "f"},
+            regions=[body],
+        )
+        module.add_symbol(Symbol(name="f", kind=SymbolKind.FUNC_DEF, op=function))
+
+        with pytest.raises(ValueError, match="descriptor-backed field"):
+            write_module(module)
+
+    def test_symbol_set_in_generic_dict_is_rejected(self) -> None:
+        module = Module(name="test")
+        operation = Operation(
+            name="test.attrs",
+            attributes={"dict": {"symbols": SymbolNameSet([SymbolName("record")])}},
+        )
+        body = Region(blocks=[Block(ops=[operation, Operation(name="test.yield")])])
+        function = Operation(
+            name="test.func",
+            attributes={"callee": "f"},
+            regions=[body],
+        )
+        module.add_symbol(Symbol(name="f", kind=SymbolKind.FUNC_DEF, op=function))
+
+        with pytest.raises(ValueError, match="descriptor-backed field"):
+            write_module(module)
+
+    def test_parameterized_attr_array_in_generic_dict_is_rejected(self) -> None:
+        module = Module(name="test")
+        operation = Operation(
+            name="test.attrs",
+            attributes={
+                "dict": {"values": ParameterizedAttrArray([test_tile_attr(width=8)])}
+            },
+        )
+        body = Region(blocks=[Block(ops=[operation, Operation(name="test.yield")])])
+        function = Operation(
+            name="test.func",
+            attributes={"callee": "f"},
+            regions=[body],
+        )
+        module.add_symbol(Symbol(name="f", kind=SymbolKind.FUNC_DEF, op=function))
+
+        with pytest.raises(ValueError, match="descriptor-backed field"):
+            write_module(module)
 
     def test_record_symbol_survives_bytecode(self) -> None:
         text = 'test.record @target {arch = "gfx1100", lanes = 64}\n'
@@ -1478,25 +1919,31 @@ class TestCrossFormatRoundTrip:
         custom_func = Op(
             "bytecode.func",
             traits=[SYMBOL_DEFINE],
+            operands=[Operand("args", ANY, variadic=True)],
             symbol_def=SymbolDefinition(
                 field="callee",
                 name="function",
                 interfaces=["func_like"],
                 bytecode_kind="LOOM_SYMBOL_FUNC_DECL",
+                flags=[
+                    SymbolDefinitionFlag.DECLARATION,
+                    SymbolDefinitionFlag.TEST_ONLY,
+                ],
             ),
-            interfaces=[FuncLikeInterface(callee="callee", args_as_operands=True)],
+            interfaces=[FuncLikeInterface(callee="callee", args="args")],
             attrs=[
                 AttrDef("callee", "symbol"),
                 AttrDef(
                     "target",
                     "symbol",
                     optional=True,
-                    symbol_ref=SymbolReference("record", ["record"]),
+                    symbol_ref=SymbolReference("function", ["func_like"]),
                 ),
                 AttrDef("tag", "string", optional=True),
                 AttrDef("priority", "i64", optional=True),
             ],
             results=[Result("results", ANY, variadic=True)],
+            format=[FuncArgs("args")],
         )
         module = Module()
         input_id = module.add_value(Value(name="input", type=F32))
@@ -1507,7 +1954,7 @@ class TestCrossFormatRoundTrip:
             results=[result_id],
             attributes={
                 "callee": "entry",
-                "target": "gfx1100",
+                "target": "entry",
                 "tag": "amdgpu",
                 "priority": 3,
             },
@@ -1521,36 +1968,44 @@ class TestCrossFormatRoundTrip:
 
         assert len(loaded.symbols) == 1
         symbol = loaded.symbols[0]
+        assert symbol.flags & SYMBOL_FLAG_DECLARATION
+        assert symbol.flags & SYMBOL_FLAG_TEST_ONLY
         assert symbol.op is not None
         assert symbol.op.attributes == {
             "callee": "entry",
-            "target": "gfx1100",
+            "target": "entry",
             "tag": "amdgpu",
             "priority": 3,
         }
 
-    def test_func_template_metadata_survives_bytecode(self) -> None:
+    def test_template_metadata_survives_bytecode(self) -> None:
         text = (
-            "func.template<tile.contract> device priority(7) "
-            "@kernel(%input: f32) -> (f32) {\n"
-            "  func.return %input : f32\n"
+            "template.decl @tile.contract(%input: f32) -> (f32)\n"
+            "\n"
+            "template.def<@tile.contract> device "
+            "requires [#target.subgroup.size<64>] "
+            "priority(7) @kernel(%input: f32) -> (f32) {\n"
+            "  template.return %input : f32\n"
             "}\n"
         )
 
         loaded = _parse_write_read(text)
-        assert len(loaded.symbols) == 1
-        symbol = loaded.symbols[0]
-        assert symbol.kind == SymbolKind.FUNC_TEMPLATE
+        assert len(loaded.symbols) == 2
+        symbol = loaded.symbols[1]
+        assert symbol.kind == SymbolKind.TEMPLATE_DEF
         assert symbol.op is not None
-        assert symbol.op.attributes["implements"] == "tile.contract"
+        assert symbol.op.attributes["family"] == "tile.contract"
         assert symbol.op.attributes["priority"] == 7
         assert symbol.op.attributes["cc"] == "device"
+        requirements = symbol.op.attributes["requires"]
+        assert isinstance(requirements, ParameterizedAttrArray)
+        assert requirements.values[0].family_name == "target.subgroup.size"
         assert _roundtrip_text_through_bytecode(text) == text
 
     def test_low_func_target_and_register_body_survive_bytecode(self) -> None:
         text = (
-            "test.record @test_target\n\n"
-            "low.func.def target(@test_target) "
+            "test.target<low_core> @test_target\n\n"
+            "low.func.def target<test.low.core>(@test_target) "
             "@add(%lhs: reg<test.ptr>, %rhs: reg<test.ptr>) "
             "-> (reg<test.ptr>) {\n"
             "  %sum = low.op<test.add.i32>(%lhs, %rhs) : "
@@ -1566,18 +2021,31 @@ class TestCrossFormatRoundTrip:
         assert symbol.op is not None
         assert symbol.op.attributes["callee"] == "add"
         assert symbol.op.attributes["target"] == "test_target"
+        assert symbol.op.attributes["descriptor_set"] == "test.low.core"
+        assert _roundtrip_text_through_bytecode(text, include_low=True) == text
+
+    def test_targetless_low_func_contract_survives_bytecode(self) -> None:
+        text = "low.func.def target<test.low.core> @targetless() {\n  low.return\n}\n"
+
+        loaded = _parse_write_read(text, include_low=True)
+        assert len(loaded.symbols) == 1
+        symbol = loaded.symbols[0]
+        assert symbol.op is not None
+        assert symbol.op.attributes["descriptor_set"] == "test.low.core"
+        assert "target" not in symbol.op.attributes
         assert _roundtrip_text_through_bytecode(text, include_low=True) == text
 
     def test_low_invoke_and_low_function_survive_bytecode(self) -> None:
         text = (
-            "test.record @test_target\n\n"
+            "test.target<low_core> @test_target\n\n"
             "func.def @caller(%lhs: i32, %rhs: i32) -> (i32) {\n"
             "  %sum = low.invoke @test_add(%lhs, %rhs) : "
             "(i32, i32) -> (i32)\n"
             "  func.return %sum : i32\n"
             "}\n\n"
-            "low.func.decl target(@test_target) @test_add(%lhs: reg<test.ptr>, "
-            "%rhs: reg<test.ptr>) -> (reg<test.ptr>)\n"
+            "low.func.decl target<test.low.core>(@test_target) "
+            "@test_add(%lhs: reg<test.ptr>, %rhs: reg<test.ptr>) "
+            "-> (reg<test.ptr>)\n"
         )
 
         loaded = _parse_write_read(text, include_low=True)
@@ -1585,6 +2053,7 @@ class TestCrossFormatRoundTrip:
         low_symbol = loaded.symbols[2]
         assert low_symbol.op is not None
         assert "source" not in low_symbol.op.attributes
+        assert low_symbol.op.attributes["descriptor_set"] == "test.low.core"
         assert _roundtrip_text_through_bytecode(text, include_low=True) == text
 
     def test_enum_future_ordinal_survives_bytecode(self) -> None:
@@ -1660,11 +2129,11 @@ class TestCrossFormatRoundTrip:
         with pytest.raises(TypeError, match="uint8 ordinal"):
             write_module(module)
 
-    def test_symbol_without_bytecode_payload_kind_fails_loud(self) -> None:
+    def test_symbol_without_serializable_kind_fails_loud(self) -> None:
         module = Module()
         module.add_symbol(Symbol(name="opaque", kind=SymbolKind.NONE))
 
-        with pytest.raises(ValueError, match="no bytecode symbol payload kind"):
+        with pytest.raises(ValueError, match="has no serializable symbol kind"):
             write_module(module)
 
     def test_operand_dict_survives_bytecode(self) -> None:
@@ -1712,8 +2181,7 @@ class TestCrossFormatRoundTrip:
             "func.def @vector_schema_aux(%payload: vector<4xi32>, "
             "%scale: vector<1xf16>, %values: vector<32xf32>, "
             "%amax: vector<1xf32>) -> (vector<32xf32>, vector<4xi32>) {\n"
-            "  %schema = encoding.define #ggml_q4_0<block_elems=32, "
-            "storage_bytes=18> : encoding<schema>\n"
+            "  %schema = encoding.define #ggml.q4_0 : encoding<schema>\n"
             "  %decoded = vector.decode %payload using %schema "
             "{scale = %scale : vector<1xf16>} : vector<4xi32>, "
             "encoding<schema> -> vector<32xf32>\n"
@@ -1727,8 +2195,7 @@ class TestCrossFormatRoundTrip:
             "func.def @vector_schema_aux(%payload: vector<4xi32>, "
             "%scale: vector<1xf16>, %values: vector<32xf32>, "
             "%amax: vector<1xf32>) -> (vector<32xf32>, vector<4xi32>) {\n"
-            "  %schema = encoding.define #ggml_q4_0<block_elems=32, "
-            "storage_bytes=18> : encoding<schema>\n"
+            "  %schema = encoding.define #ggml.q4_0 : encoding<schema>\n"
             "  %decoded = vector.decode %payload using %schema "
             "{scale = %scale : vector<1xf16>} : vector<4xi32>, "
             "encoding<schema> -> vector<32xf32>\n"
@@ -1851,8 +2318,7 @@ class TestCrossFormatRoundTrip:
             "%source_buffer : buffer\n"
             "  %source = buffer.view %source_global[%source_offset] : buffer -> "
             "view<16xi8, %layout>\n"
-            "  %scratch = buffer.alloca %bytes {base_alignment = 64, "
-            "memory_space = workgroup} : buffer\n"
+            "  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer\n"
             "  %dest = buffer.view %scratch[%zero] : buffer -> view<16xi8, %layout>\n"
             "  %copy = kernel.async.cluster.gather %source to %dest using "
             "%cluster_mask {cache_scope = se, cache_temporal = high_temporal} : "
@@ -1890,8 +2356,7 @@ class TestCrossFormatRoundTrip:
             "%source_buffer : buffer\n"
             "  %source = buffer.view %source_global[%source_offset] : buffer -> "
             "view<64x64xf32, %layout>\n"
-            "  %scratch = buffer.alloca %bytes {base_alignment = 256, "
-            "memory_space = workgroup} : buffer\n"
+            "  %scratch = buffer.alloca<workgroup> align(256) %bytes : buffer\n"
             "  %lds = buffer.view %scratch[%zero] : buffer -> "
             "view<64x64xf32, %layout>\n"
             "  %load = kernel.async.tensor.load.to.lds %source to %lds using "
@@ -1973,6 +2438,7 @@ class TestCrossFormatRoundTrip:
             "  %r = test.attrs %x {target = @target} : f32\n"
             "  test.yield %r : f32\n"
             "}\n"
+            "func.decl @target()\n"
         )
 
         parser = Parser()
@@ -2277,6 +2743,58 @@ class TestImportExportBytecodeRoundTrip:
         names = {s.name: s for s in loaded.symbols}
         assert not names["helper"].is_public
         assert names["entry"].is_public
+
+    def test_explicit_export_is_indexed_without_public_visibility(self) -> None:
+        """Explicit exports are indexed independently of source visibility."""
+        module = Module(name="test")
+        argument_id = module.add_value(Value(name="x", type=F32))
+        function_op = Operation(
+            name="func.def",
+            attributes={"callee": "entry", "export_symbol": "entry"},
+            regions=[
+                Region(
+                    blocks=[
+                        Block(
+                            arg_ids=[argument_id],
+                            ops=[Operation(name="test.yield", operands=[argument_id])],
+                        )
+                    ]
+                )
+            ],
+        )
+        module.add_symbol(
+            Symbol(
+                name="entry",
+                kind=SymbolKind.FUNC_DEF,
+                flags=0,
+                op=function_op,
+            )
+        )
+
+        data = write_module(module)
+        symbols = _section_payload(data, SECTION_SYMBOLS)
+        offset = 0
+        symbol_count, offset = decode_varint(symbols, offset)
+        import_count, offset = decode_varint(symbols, offset)
+        export_count, offset = decode_varint(symbols, offset)
+        _root_region_payload_count, offset = decode_varint(symbols, offset)
+        assert symbol_count == 1
+        assert import_count == 0
+        assert export_count == 1
+        assert struct.unpack_from("<Q", symbols, offset)[0] == 0
+        offset += 8
+        _name_id, offset = decode_varint(symbols, offset)
+        _kind = symbols[offset]
+        visibility = symbols[offset + 1]
+        flags = struct.unpack_from("<H", symbols, offset + 2)[0]
+        assert visibility == 1
+        assert flags & SYMBOL_FLAG_EXPORT
+
+        loaded = read_module(data)
+        loaded_symbol = loaded.symbols[0]
+        assert not loaded_symbol.is_public
+        assert loaded_symbol.op is not None
+        assert loaded_symbol.op.attributes["export_symbol"] == "entry"
 
     def test_mixed_import_export_private(self) -> None:
         """Module with imports, exports, and private symbols."""

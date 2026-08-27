@@ -121,9 +121,8 @@ static iree_status_t loom_ireevm_map_type(void* user_data,
     default:
       IREE_ASSERT_UNREACHABLE(
           "checked by loom_ireevm_type_is_supported_scalar");
-      break;
+      IREE_BUILTIN_UNREACHABLE();
   }
-  return iree_make_status(IREE_STATUS_INTERNAL, "unreachable scalar type");
 }
 
 typedef struct loom_ireevm_buffer_lower_info_t {
@@ -218,18 +217,18 @@ static iree_status_t loom_ireevm_select_op(void* user_data,
   }
 }
 
-static iree_status_t loom_ireevm_resolve_descriptor_ordinal(
-    loom_low_lower_context_t* context, uint32_t descriptor_ordinal,
-    loom_low_lower_resolved_descriptor_t* out_descriptor) {
+static loom_low_lower_resolved_descriptor_t
+loom_ireevm_resolve_descriptor_ordinal(loom_low_lower_context_t* context,
+                                       uint32_t descriptor_ordinal) {
   const loom_low_descriptor_set_t* descriptor_set =
       loom_low_lower_context_descriptor_set(context);
   if (descriptor_ordinal >= descriptor_set->descriptor_count) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "IREE VM descriptor ordinal is out of range");
+    IREE_ASSERT_UNREACHABLE("IREE VM descriptor ordinal is out of range");
+    IREE_BUILTIN_UNREACHABLE();
   }
-  return loom_low_lower_resolve_descriptor_row(
-      context, &descriptor_set->descriptors[descriptor_ordinal],
-      out_descriptor);
+  return (loom_low_lower_resolved_descriptor_t){
+      .descriptor = &descriptor_set->descriptors[descriptor_ordinal],
+  };
 }
 
 static iree_status_t loom_ireevm_check_ref_value(
@@ -328,9 +327,9 @@ static iree_status_t loom_ireevm_emit_ref_retain(
     return iree_ok_status();
   }
 
-  loom_low_lower_resolved_descriptor_t descriptor = {0};
-  IREE_RETURN_IF_ERROR(loom_ireevm_resolve_descriptor_ordinal(
-      context, IREEVM_CORE_DESCRIPTOR_REF_REF_RETAIN, &descriptor));
+  const loom_low_lower_resolved_descriptor_t descriptor =
+      loom_ireevm_resolve_descriptor_ordinal(
+          context, IREEVM_CORE_DESCRIPTOR_REF_REF_RETAIN);
   loom_op_t* low_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
       context, &descriptor, &low_resource, 1, loom_named_attr_slice_empty(),
@@ -353,9 +352,9 @@ static iree_status_t loom_ireevm_emit_ref_release(
   IREE_RETURN_IF_ERROR(
       loom_low_lower_lookup_value(context, resource, &low_resource));
 
-  loom_low_lower_resolved_descriptor_t descriptor = {0};
-  IREE_RETURN_IF_ERROR(loom_ireevm_resolve_descriptor_ordinal(
-      context, IREEVM_CORE_DESCRIPTOR_REF_REF_RELEASE, &descriptor));
+  const loom_low_lower_resolved_descriptor_t descriptor =
+      loom_ireevm_resolve_descriptor_ordinal(
+          context, IREEVM_CORE_DESCRIPTOR_REF_REF_RELEASE);
   loom_op_t* low_op = NULL;
   return loom_low_lower_emit_resolved_descriptor_op(
       context, &descriptor, &low_resource, 1, loom_named_attr_slice_empty(),
@@ -422,9 +421,8 @@ static iree_status_t loom_ireevm_emit_buffer_op(
     result_count = 1;
   }
 
-  loom_low_lower_resolved_descriptor_t descriptor = {0};
-  IREE_RETURN_IF_ERROR(loom_ireevm_resolve_descriptor_ordinal(
-      context, info->descriptor_ordinal, &descriptor));
+  const loom_low_lower_resolved_descriptor_t descriptor =
+      loom_ireevm_resolve_descriptor_ordinal(context, info->descriptor_ordinal);
   loom_op_t* low_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
       context, &descriptor, low_operands, low_operand_count,
@@ -459,8 +457,8 @@ static iree_status_t loom_ireevm_emit_op(void* user_data,
       }
     }
   }
-  return iree_make_status(IREE_STATUS_INTERNAL,
-                          "unknown IREE VM lowering plan");
+  IREE_ASSERT_UNREACHABLE("unknown IREE VM lowering plan");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
 static const loom_low_lower_rule_set_t* const kIreeVmRuleSets[] = {

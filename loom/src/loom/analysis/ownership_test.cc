@@ -113,9 +113,10 @@ func.def @ownership(%size: index) {
   %retained = test.resource.retain %fresh : pool<16> -> pool<16>
   %alias = test.resource.alias %retained : pool<16> -> pool<16>
   %borrowed = test.resource.borrowed %alias : pool<16> -> pool<16>
+  %moved = test.resource.move %borrowed : pool<16> -> pool<16>
   test.resource.release %retained : pool<16>
   test.resource.discard %alias : pool<16>
-  test.resource.escape %borrowed : pool<16>
+  test.resource.escape %moved : pool<16>
   test.resource.consume %fresh : pool<16>
   func.return
 }
@@ -172,6 +173,13 @@ func.def @ownership(%size: index) {
   EXPECT_TRUE(loom_ownership_result_effect_at(module.get(), borrowed, 0,
                                               &result_effect));
   EXPECT_EQ(result_effect.effect, LOOM_RESULT_OWNERSHIP_BORROWED);
+
+  loom_op_t* move = FindOp(module.get(), LOOM_OP_TEST_RESOURCE_MOVE);
+  ASSERT_NE(move, nullptr);
+  EXPECT_TRUE(
+      loom_ownership_result_effect_at(module.get(), move, 0, &result_effect));
+  EXPECT_EQ(result_effect.effect, LOOM_RESULT_OWNERSHIP_MOVED);
+  EXPECT_EQ(result_effect.source_operand_index, 0);
 
   loom_op_t* release = FindOp(module.get(), LOOM_OP_TEST_RESOURCE_RELEASE);
   ASSERT_NE(release, nullptr);

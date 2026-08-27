@@ -30,9 +30,11 @@
 #include "iree/async/span.h"
 #include "iree/async/util/message_pool.h"
 #include "iree/async/util/operation_pool.h"
+#include "iree/async/util/semaphore_wait.h"
 #include "iree/async/util/sequence_emulation.h"
 #include "iree/base/internal/atomics.h"
 #include "iree/base/internal/memory.h"
+#include "iree/base/internal/path.h"
 
 #if defined(IREE_PLATFORM_WINDOWS)
 
@@ -53,6 +55,7 @@ static inline void iree_async_proactor_complete_operation(
     iree_async_completion_flags_t flags) {
   bool is_final = !iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE);
   iree_async_operation_pool_t* pool = is_final ? operation->pool : NULL;
+  status = iree_async_operation_resolve_completion(operation, status, &flags);
   if (operation->completion_fn) {
     operation->completion_fn(operation->user_data, operation, status, flags);
   } else {
@@ -751,66 +754,12 @@ static iree_status_t iree_async_proactor_iocp_submit_socket_close(
 // Semaphore operations
 //===----------------------------------------------------------------------===//
 
-void iree_async_proactor_iocp_semaphore_wait_enqueue_completion(
-    iree_async_iocp_semaphore_wait_tracker_t* tracker) {
-  // Guard against double-enqueue: success callbacks (remaining_or_satisfied),
-  // error callbacks, and cancel all independently decide to enqueue. Only the
-  // first to set the flag actually pushes.
-  int32_t expected = 0;
-  if (!iree_atomic_compare_exchange_strong(&tracker->enqueued, &expected, 1,
-                                           iree_memory_order_acq_rel,
-                                           iree_memory_order_relaxed)) {
-    return;
-  }
-  iree_atomic_slist_push(&tracker->proactor->pending_semaphore_waits,
-                         &tracker->slist_entry);
-  iree_async_proactor_iocp_wake(&tracker->proactor->base);
-}
-
-// Timepoint callback for SEMAPHORE_WAIT operations.
-// Called under the semaphore's internal lock — must be fast and non-blocking.
-// Decodes the tracker and index from user_data, then tracks ALL/ANY
-// satisfaction. When the wait is complete, pushes the tracker to the
-// pending_semaphore_waits MPSC slist for the poll thread to drain.
-static void iree_async_proactor_iocp_semaphore_wait_timepoint_callback(
-    void* user_data, iree_async_semaphore_timepoint_t* timepoint,
-    iree_status_t status) {
-  uintptr_t encoded = (uintptr_t)user_data;
-  iree_async_iocp_semaphore_wait_tracker_t* tracker =
-      (iree_async_iocp_semaphore_wait_tracker_t*)(encoded &
-                                                  0x00FFFFFFFFFFFFFFull);
-  iree_host_size_t index = (iree_host_size_t)(encoded >> 56);
-
-  if (!iree_status_is_ok(status)) {
-    // Failure or cancellation. Store the error status (first one wins).
-    intptr_t expected = (intptr_t)iree_ok_status();
-    if (!iree_atomic_compare_exchange_strong(
-            &tracker->completion_status, &expected, (intptr_t)status,
-            iree_memory_order_acq_rel, iree_memory_order_acquire)) {
-      iree_status_ignore(status);
-    }
-    // Enqueue for completion regardless of whether we won the status race.
-    iree_async_proactor_iocp_semaphore_wait_enqueue_completion(tracker);
-    return;
-  }
-
-  if (tracker->operation->mode == IREE_ASYNC_WAIT_MODE_ANY) {
-    // ANY mode: first satisfied index wins via CAS.
-    int32_t expected = -1;
-    if (iree_atomic_compare_exchange_strong(
-            &tracker->remaining_or_satisfied, &expected, (int32_t)index,
-            iree_memory_order_acq_rel, iree_memory_order_acquire)) {
-      iree_async_proactor_iocp_semaphore_wait_enqueue_completion(tracker);
-    }
-  } else {
-    // ALL mode: decrement remaining count.
-    int32_t remaining = iree_atomic_fetch_sub(&tracker->remaining_or_satisfied,
-                                              1, iree_memory_order_acq_rel) -
-                        1;
-    if (remaining == 0) {
-      iree_async_proactor_iocp_semaphore_wait_enqueue_completion(tracker);
-    }
-  }
+// Enqueues a terminal semaphore wait tracker and wakes the poll thread.
+static void iree_async_proactor_iocp_enqueue_semaphore_wait(
+    void* user_data, iree_atomic_slist_entry_t* entry) {
+  iree_async_proactor_iocp_t* proactor = (iree_async_proactor_iocp_t*)user_data;
+  iree_atomic_slist_push(&proactor->pending_semaphore_waits, entry);
+  iree_async_proactor_iocp_wake(&proactor->base);
 }
 
 static iree_status_t iree_async_proactor_iocp_submit_semaphore_signal(
@@ -853,16 +802,6 @@ static iree_status_t iree_async_proactor_iocp_submit_semaphore_wait(
     iree_async_semaphore_wait_operation_t* wait_op) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // The timepoint callback encodes {tracker_pointer, semaphore_index} in a
-  // single pointer using a 56-bit/8-bit split. The 8-bit index field limits
-  // the maximum number of semaphores per wait to 255.
-  if (IREE_UNLIKELY(wait_op->count > 255)) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "semaphore wait count exceeds the maximum of 255 "
-                            "(limited by timepoint user_data encoding)");
-  }
-
   // Check for immediate satisfaction before allocating a tracker.
   bool immediately_satisfied = false;
   bool all_satisfied = true;
@@ -890,78 +829,19 @@ static iree_status_t iree_async_proactor_iocp_submit_semaphore_wait(
     return iree_ok_status();
   }
 
-  // Calculate allocation size with overflow checking.
-  iree_host_size_t total_size = 0;
+  iree_async_semaphore_wait_enqueue_callback_t enqueue_callback = {
+      .fn = iree_async_proactor_iocp_enqueue_semaphore_wait,
+      .user_data = proactor,
+  };
+  iree_async_semaphore_wait_tracker_t* tracker = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, IREE_STRUCT_LAYOUT(
-              sizeof(iree_async_iocp_semaphore_wait_tracker_t), &total_size,
-              IREE_STRUCT_FIELD_FAM(wait_op->count,
-                                    iree_async_semaphore_timepoint_t)));
-
-  // Allocate tracker with embedded timepoints.
-  iree_async_iocp_semaphore_wait_tracker_t* tracker = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc(proactor->base.allocator, total_size,
-                                (void**)&tracker));
-  memset(tracker, 0, total_size);
-
-  tracker->operation = wait_op;
-  tracker->proactor = proactor;
-  tracker->allocator = proactor->base.allocator;
-  tracker->count = wait_op->count;
-  tracker->registered_count = 0;
-  iree_atomic_store(&tracker->completion_status, (intptr_t)iree_ok_status(),
-                    iree_memory_order_release);
-  iree_atomic_store(&tracker->enqueued, 0, iree_memory_order_release);
-
-  // Transfer LINKED continuation chain from operation to tracker.
-  tracker->continuation_head = wait_op->base.linked_next;
-  wait_op->base.linked_next = NULL;
-
-  if (wait_op->mode == IREE_ASYNC_WAIT_MODE_ALL) {
-    iree_atomic_store(&tracker->remaining_or_satisfied, (int32_t)wait_op->count,
-                      iree_memory_order_release);
-  } else {
-    // ANY mode: -1 indicates not yet satisfied.
-    iree_atomic_store(&tracker->remaining_or_satisfied, -1,
-                      iree_memory_order_release);
-  }
-
-  // Store tracker in operation for cancel to find it.
-  wait_op->base.next = (iree_async_operation_t*)tracker;
-
-  // Register timepoints for each semaphore. Use status chaining so that
-  // on failure we cancel only the successfully registered timepoints.
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0; i < wait_op->count && iree_status_is_ok(status);
-       ++i) {
-    iree_async_semaphore_timepoint_t* timepoint = &tracker->timepoints[i];
-    timepoint->callback =
-        iree_async_proactor_iocp_semaphore_wait_timepoint_callback;
-    // Encode tracker pointer + index in user_data using a 56-bit/8-bit split
-    // for LA57 (5-level paging) safety: userspace pointers use at most 56 bits
-    // on x86-64, leaving 8 bits for the index (max 255).
-    // The count <= 255 check above guarantees this shift is safe.
-    timepoint->user_data = (void*)((uintptr_t)tracker | ((uintptr_t)i << 56));
-    status = iree_async_semaphore_acquire_timepoint(
-        wait_op->semaphores[i], wait_op->values[i], timepoint);
-    if (iree_status_is_ok(status)) {
-      tracker->registered_count = i + 1;
-    }
-  }
-
-  // Single exit point: on failure, cancel registered timepoints and free.
-  if (!iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < tracker->registered_count; ++i) {
-      iree_async_semaphore_cancel_timepoint(wait_op->semaphores[i],
-                                            &tracker->timepoints[i]);
-    }
-    wait_op->base.next = NULL;
-    iree_allocator_free(tracker->allocator, tracker);
-  }
+      z0, iree_async_semaphore_wait_tracker_create(
+              &proactor->semaphore_wait_context, wait_op, enqueue_callback,
+              proactor->base.allocator, &tracker));
+  iree_async_semaphore_wait_tracker_register_timepoints(tracker);
 
   IREE_TRACE_ZONE_END(z0);
-  return status;
+  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//
@@ -1102,38 +982,24 @@ static iree_status_t iree_async_proactor_iocp_submit_file_open(
     flags_and_attributes |= FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH;
   }
 
-  // Convert path to wide string. Two-pass MultiByteToWideChar: first call
-  // determines the required buffer size, second call performs the conversion.
-  // This avoids MAX_PATH (260 char) limitation and supports long paths.
-  int wide_length = MultiByteToWideChar(CP_UTF8, 0, open_op->path, -1, NULL, 0);
-  if (wide_length == 0) {
-    DWORD error = GetLastError();
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(iree_status_code_from_win32_error(error),
-                            "failed to determine wide string length for path "
-                            "(error %lu)",
-                            (unsigned long)error);
-  }
-  WCHAR* wide_path = (WCHAR*)iree_alloca(wide_length * sizeof(WCHAR));
-  int converted_length = MultiByteToWideChar(CP_UTF8, 0, open_op->path, -1,
-                                             wide_path, wide_length);
-  if (converted_length == 0) {
-    DWORD error = GetLastError();
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(iree_status_code_from_win32_error(error),
-                            "failed to convert path to wide string (error %lu)",
-                            (unsigned long)error);
-  }
+  // Convert from the runtime's UTF-8 representation only at the Win32 API
+  // boundary. The converted path is absolute and extended-length.
+  wchar_t* win32_path = NULL;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_file_path_to_win32(iree_make_cstring_view(open_op->path),
+                                  proactor->base.allocator, &win32_path));
 
   HANDLE file_handle =
-      CreateFileW(wide_path, desired_access, share_mode, NULL,
+      CreateFileW(win32_path, desired_access, share_mode, NULL,
                   creation_disposition, flags_and_attributes, NULL);
+  DWORD open_error =
+      file_handle == INVALID_HANDLE_VALUE ? GetLastError() : ERROR_SUCCESS;
+  iree_allocator_free(proactor->base.allocator, win32_path);
   if (file_handle == INVALID_HANDLE_VALUE) {
-    DWORD error = GetLastError();
     IREE_TRACE_ZONE_END(z0);
     // Post failure as direct completion for poll-thread delivery.
     iree_async_proactor_iocp_post_submit_failure(proactor, &open_op->base,
-                                                 (int)error);
+                                                 (int)open_error);
     return iree_ok_status();
   }
 

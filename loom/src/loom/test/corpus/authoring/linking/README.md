@@ -22,20 +22,26 @@ python dev.py bazel run //loom/src/loom/tools/loom-link:loom-link -- \
 
 | File | Role |
 | --- | --- |
-| `root.loom` | Targetless public kernel for artifact packaging. The kernel asks for `authoring.link.scale_i32` with `func.apply`. |
+| `root.loom` | Targetless public kernel for artifact packaging. The kernel asks for `authoring.link.scale_i32` with `template.apply`. |
 | `checks.loom` | Correctness case and benchmark rows for the root workload. It declares the callable surface so checks can be linked during authoring without being part of the artifact root file. |
-| `providers.loom` | Reusable provider library with AMDGPU target records, gfx-specific `func.template` implementations, a generic fallback, and an unused provider. |
+| `providers.loom` | Reusable provider library with AMDGPU target records, gfx-specific `template.def` implementations, a generic fallback, and an unused provider. |
 | `linking.test.json` | Production CLI proof for source linking, bytecode-library linking, and AMDGPU artifact compilation from linked bytecode. |
 
 The kernel deliberately has no authored `target(@...)`. It is portable source
-until a compile or JIT invocation selects a target. The provider library carries
+until a compile or JIT invocation specializes it. Both the root and provider
+modules carry the same `template.decl`; the linker merges that family contract
+and never uses a provider path as a matching rule. The provider library carries
 `amdgpu.target<gfx1100> @gfx1100` and `amdgpu.target<gfx1200> @gfx1200` records
-so target-specialized providers can say which target they apply to. When the
-compiler is invoked with `--target=gfx1100`, the AMDGPU target provider
-materializes or reuses `@gfx1100` as the invocation target. Template selection
-then resolves `func.apply<authoring.link.scale_i32>` against the effective
-target: authored function target first, invocation-selected target second, and
-generic fallback when no target-specific provider applies.
+so target-specialized definitions can state their exact applicability.
+
+A closed link uses the facts available at that link boundary. With
+this targetless root, it chooses `@scale_i32_fallback` and omits the target
+records and target-specific alternatives. A merge of the root and provider
+modules preserves the full explicit universe. Compiling that module with
+`--target=gfx1100`
+then specializes the requested kernel to a materialized or reused `@gfx1100`
+target record and resolves `template.apply<@authoring.link.scale_i32>` against
+that durable target.
 
 ## Inspecting a Library
 
@@ -45,7 +51,7 @@ List the indexed symbols before deciding what to link:
 loom-link root.loom --library=providers.loom --list-symbols
 ```
 
-Print the selective link plan for one root:
+Print the link plan for one root:
 
 ```bash
 loom-link root.loom --library=providers.loom \
@@ -53,9 +59,9 @@ loom-link root.loom --library=providers.loom \
   --print-plan
 ```
 
-The plan keeps the root kernel, target records, and provider candidates needed
-to resolve the `func.apply` contract. It does not keep unrelated public or
-private helpers unless they are roots or dependencies.
+The plan keeps the root kernel, its family declaration, and the proven fallback
+selected for the targetless application. It does not retain the target-specific
+definitions, their target records, or the unrelated provider.
 
 During correctness work, make the check case the root and provide the kernel
 and implementation library as libraries:
@@ -117,17 +123,30 @@ loom-link root.loom \
   --output=linked.loombc
 ```
 
-That is the shape an embedding API mirrors with a link index: add root sources
-as input providers, add prebuilt `.loombc` as library providers, name the roots
-for the current artifact, and link to text or bytecode depending on the next
-stage.
+That link is closed for the facts currently available and therefore
+contains the portable fallback. It is the shape an embedding API mirrors when
+the current boundary has enough information to choose implementations: add
+root sources, add prebuilt `.loombc` libraries, name the roots, and link to text
+or bytecode depending on the next stage.
+
+When target facts arrive only at compilation, merge the explicit input universe
+instead of prematurely selecting a targetless fallback. Both modules are
+positional because both should become part of the output:
+
+```bash
+loom-link root.loom providers.loombc \
+  --mode=merge \
+  --strip-check \
+  --to=bc \
+  --output=portable.loombc
+```
 
 ## Compiling an AMDGPU Artifact
 
-Compile the linked bytecode with an invocation target:
+Compile the merged bytecode with a function specialization target:
 
 ```bash
-loom-compile linked.loombc \
+loom-compile portable.loombc \
   --backend=amdgpu-hal \
   --target=gfx1100 \
   --output=scale_i32.vmfb \
@@ -136,18 +155,23 @@ loom-compile linked.loombc \
   --compile-report=summary
 ```
 
-`--target=gfx1100` is not a source rewrite. It selects the compiler target
-context for this invocation, materializes the matching target record when
-needed, selects target-applicable providers, lowers targetless roots with that
-effective target, and emits the requested artifacts.
+`--target=gfx1100` does not establish a module-global target. The command-line
+driver maps the requested profile to the HAL kernel entries it is compiling,
+materializes the exact target record once, and writes that durable target onto
+those functions before target-aware passes run. A module may still contain
+unrequested functions for other targets.
 
-The loomc C API uses the same model with `loomc_target_selection_options_t`.
-When an embedder splits linking and compilation into separate calls, pass the
-target-selection option on both `loomc_link_options_t.next` and
-`loomc_compile_options_t.next`. The link phase then materializes the
-module-local target record and keeps the provider candidates needed by the
-selected target context, while the compile phase uses the same selection for
-template selection, pass predicates, lowering, reporting, and emission.
+The loomc C API expresses the same operation with
+`loomc_target_specialization_options_t` attached only to
+`loomc_compile_options_t.next`. A direct specialization row pairs one function
+symbol with one structured target profile. A target binding row instead pairs
+one authored `target.decl` symbol with a profile and seeds every function using
+that declaration; this is the compact form for heterogeneous command or VM
+programs with named target roles. Plain loading and linking preserve all
+authored targets and never accept a specialization option; emission consumes
+the durable targets in prepared IR and never accepts an override. Embedders can
+therefore link a multi-target library once, clone or filter it as appropriate,
+and specialize different function versions in later compile invocations.
 
 The artifact manifest is the sidecar a packager or benchmark database should
 keep with `scale_i32.hsaco`. The compile report is the per-invocation feedback
@@ -156,11 +180,11 @@ the command line or C API.
 
 ## Debugging Selection
 
-Use pass IR dumps during compilation to see which provider was selected for an
-invocation target:
+Use pass IR dumps during compilation to see which provider was selected for a
+specialized function:
 
 ```bash
-loom-compile linked.loombc \
+loom-compile portable.loombc \
   --backend=amdgpu-hal \
   --target=gfx1100 \
   --output=scale_i32.vmfb \
@@ -200,8 +224,8 @@ jq '.invocations[]
 `func.call @symbol` names one exact helper. Use it for mechanical helpers whose
 identity is part of the algorithm.
 
-`func.apply<contract>` names a compile-time implementation demand. Use it when a
-library may provide several target-, layout-, or shape-specialized
+`template.apply<@family>` names a compile-time implementation demand. Use it
+when a library may provide several target-, layout-, or shape-specialized
 implementations.
 
 `target(@...)` on a provider is an applicability constraint. It should describe

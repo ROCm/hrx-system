@@ -45,9 +45,8 @@ class EncodingBuilder(DialectBuilder):
     def isa(
         self,
         *,
+        spec: Any,
         enc: ValueRef,
-        category: str,
-        results: list[Type | TiedResultSpec],
         name: str | None = ...,
         names: Sequence[str] | None = ...,
         result_names: Sequence[str] | None = ...,
@@ -79,6 +78,27 @@ class EncodingBuilder(DialectBuilder):
         *,
         enc: ValueRef,
         spec: Any,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def matches(
+        self,
+        *,
+        requirements: Any,
+        enc: ValueRef,
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def match(
+        self,
+        *,
+        requirements: Any,
+        enc: ValueRef,
         results: list[Type | TiedResultSpec],
         name: str | None = ...,
         names: Sequence[str] | None = ...,

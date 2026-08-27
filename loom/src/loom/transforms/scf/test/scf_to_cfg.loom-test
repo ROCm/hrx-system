@@ -111,6 +111,34 @@ func.def @lowers_counted_for(%n: index, %seed: i32, %x: i32) -> (i32) {
 
 // ====
 
+func.def @lowers_offset_for(%byte_length: offset) {
+  %c0 = index.constant 0 : offset
+  %c1 = index.constant 1 : offset
+  scf.for %byte_offset = [%c0 to %byte_length step %c1] {
+    test.use %byte_offset : offset
+  }
+  func.return
+}
+
+// ----
+func.def @lowers_offset_for(%byte_length: offset) {
+  %c0 = index.constant 0 : offset
+  %c1 = index.constant 1 : offset
+  cfg.br ^_bb1(%c0: offset)
+^_bb1(%4: offset):
+  %6 = index.cmp ult, %4, %byte_length : offset
+  cfg.cond_br %6, ^_bb2, ^_bb3
+^_bb2:
+  %byte_offset = index.assume %4 [lt(%4, %byte_length)] : offset
+  test.use %byte_offset : offset
+  %7 = index.add %byte_offset, %c1 : offset
+  cfg.br ^_bb1(%7: offset)
+^_bb3:
+  func.return
+}
+
+// ====
+
 func.def @preserves_static_for_iv_facts() {
   %start = index.constant 0 : index
   %limit = index.constant 4 : index
@@ -281,10 +309,99 @@ func.def @remaps_join_argument_dependent_type(%cond: i1, %buffer: buffer, %offse
 
 // ====
 
+func.def @lowers_frontier_across_cfg_blocks(%route: i1, %condition: i1) {
+  cfg.cond_br %route, ^left, ^right
+^left:
+  scf.if %condition {
+    test.use %route : i1
+    scf.yield
+  }
+  cfg.br ^done
+^right:
+  scf.if %condition {
+    test.use %condition : i1
+    scf.yield
+  }
+  cfg.br ^done
+^done:
+  func.return
+}
+
+// ----
+func.def @lowers_frontier_across_cfg_blocks(%route: i1, %condition: i1) {
+  cfg.cond_br %route, ^left, ^right
+^left:
+  cfg.cond_br %condition, ^_bb2, ^_bb3
+^_bb2:
+  test.use %route : i1
+  cfg.br ^_bb3
+^_bb3:
+  cfg.br ^done
+^right:
+  cfg.cond_br %condition, ^_bb5, ^_bb6
+^_bb5:
+  test.use %condition : i1
+  cfg.br ^_bb6
+^_bb6:
+  cfg.br ^done
+^done:
+  func.return
+}
+
+// ====
+
+func.def @lowers_outer_frontier_before_nested_frontier(%first_condition: i1, %second_condition: i1, %a: i32, %b: i32) -> (i32) {
+  %first = scf.if %first_condition -> (i32) {
+    %nested = scf.if %second_condition -> (i32) {
+      scf.yield %a : i32
+    } else {
+      scf.yield %b : i32
+    }
+    scf.yield %nested : i32
+  } else {
+    scf.yield %b : i32
+  }
+  %second = scf.if %second_condition -> (i32) {
+    %sum = test.addi %first, %a : i32
+    scf.yield %sum : i32
+  } else {
+    %sum = test.addi %first, %b : i32
+    scf.yield %sum : i32
+  }
+  func.return %second : i32
+}
+
+// ----
+func.def @lowers_outer_frontier_before_nested_frontier(%first_condition: i1, %second_condition: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %first_condition, ^_bb1, ^_bb5
+^_bb1:
+  cfg.cond_br %second_condition, ^_bb2, ^_bb3
+^_bb2:
+  cfg.br ^_bb4(%a: i32)
+^_bb3:
+  cfg.br ^_bb4(%b: i32)
+^_bb4(%nested: i32):
+  cfg.br ^_bb6(%nested: i32)
+^_bb5:
+  cfg.br ^_bb6(%b: i32)
+^_bb6(%first: i32):
+  cfg.cond_br %second_condition, ^_bb7, ^_bb8
+^_bb7:
+  %sum$8 = test.addi %first, %a : i32
+  cfg.br ^_bb9(%sum$8: i32)
+^_bb8:
+  %sum$9 = test.addi %first, %b : i32
+  cfg.br ^_bb9(%sum$9: i32)
+^_bb9(%second: i32):
+  func.return %second : i32
+}
+
+// ====
+
 func.def @rejects_unknown_for_step(%n: index, %step: index) {
-  %zero = index.constant 0 : index
+  %loop_begin = index.constant 0 : index
   // ERROR@+1: STRUCTURE/035 {op_name="scf.for", pass_name="scf-to-cfg"}
-  scf.for %i = [%zero to %n step %step] {
+  scf.for %i = [%loop_begin to %n step %step] {
     scf.yield
   }
   func.return

@@ -46,25 +46,34 @@ on:
       - "third_party/**"
       - "tools/**"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   linux_cmake_cpu:
     name: ${{ matrix.name }}
-    runs-on: aws-linux-scale-rocm-prod
+    runs-on: azure-linux-scale-rocm
     timeout-minutes: 45
     container:
-      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: Linux / CPU
             command: iree-cmake-cpu
+            install_compiler_rt: false
           - name: Linux / CPU / Sanitizer Smoke
             command: iree-cmake-sanitizer-smoke
+            install_compiler_rt: true
     env:
+      AR: ar
+      CC: clang
+      CXX: clang++
       HRX_ARTIFACT_SET: core
       HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/iree-cmake/downloads
       HRX_OUTPUT_DIR: ${{ github.workspace }}/build/iree-cmake
@@ -78,6 +87,17 @@ jobs:
 
       - name: Adjust git config
         run: git config --global --add safe.directory "$PWD"
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Clang sanitizer runtimes
+        if: matrix.install_compiler_rt
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libclang-rt-18-dev
 
       - name: Fetch ROCm toolchain
         run: bash .github/scripts/fetch_rocm_toolchain.sh
@@ -93,14 +113,79 @@ jobs:
           cmake --version
           ctest --version
           ninja --version
-          clang --version
-          "$CC" --version
+          bash .github/scripts/check_host_toolchain.sh
+          bash .github/scripts/check_rocm_device_toolchain.sh
           test -d "${HRX_ROCM_ROOT}/include"
 
       - name: Run IREE CMake CI
         run: |
           echo "python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going"
           python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going
+
+  windows_cmake:
+    name: ${{ matrix.name }}
+    runs-on: azure-windows-scale-rocm
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows / Repository / MSVC Build
+            command: iree-cmake-repository-build
+            host_toolchain: msvc
+            fetch_rocm: false
+          - name: Windows / CPU
+            command: iree-cmake-cpu
+            host_toolchain: clang-cl
+            fetch_rocm: true
+    env:
+      HRX_ARTIFACT_SET: core
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}\build\iree-cmake-windows\downloads
+      HRX_OUTPUT_DIR: ${{ github.workspace }}\build\iree-cmake-windows
+      HRX_RELEASE_TYPE: nightly
+      HRX_ROCM_ROOT: ${{ github.workspace }}\build\iree-cmake-windows\rocm-root
+      IREE_CI_PYTHON: python
+      PIP_CACHE_DIR: ${{ github.workspace }}\build\iree-cmake-windows\caches\pip
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Fetch ROCm toolchain
+        if: matrix.fetch_rocm
+        run: |
+          python -m pip install --upgrade boto3 zstandard
+          python build_tools/ci/ci_core_windows.py fetch-rocm
+
+      - name: Install developer tools
+        shell: pwsh
+        run: |
+          python --version
+          python dev.py cmake setup --venv
+          "$PWD\.venv\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Run IREE CMake CI
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS_INSTALL=%%i"
+          if not defined VS_INSTALL exit /b 1
+          call "%VS_INSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+          if "${{ matrix.host_toolchain }}"=="msvc" (
+            set "CC=cl.exe"
+            set "CXX=cl.exe"
+            set "AR=lib.exe"
+          ) else (
+            if not exist "%HRX_ROCM_ROOT%\lib\llvm\bin\clang-cl.exe" exit /b 1
+            if not exist "%HRX_ROCM_ROOT%\lib\llvm\bin\llvm-lib.exe" exit /b 1
+            set "CC=%HRX_ROCM_ROOT%\lib\llvm\bin\clang-cl.exe"
+            set "CXX=%HRX_ROCM_ROOT%\lib\llvm\bin\clang-cl.exe"
+            set "AR=%HRX_ROCM_ROOT%\lib\llvm\bin\llvm-lib.exe"
+          )
+          python build_tools/devtools/ci.py ${{ matrix.command }} --keep-going
 
   linux_cmake_vulkan:
     name: ${{ matrix.name }}
@@ -113,6 +198,9 @@ jobs:
           - name: Linux / Vulkan
             command: iree-cmake-vulkan
     env:
+      AR: ${{ github.workspace }}/build/iree-cmake-vulkan/rocm-root/lib/llvm/bin/llvm-ar
+      CC: ${{ github.workspace }}/build/iree-cmake-vulkan/rocm-root/lib/llvm/bin/clang
+      CXX: ${{ github.workspace }}/build/iree-cmake-vulkan/rocm-root/lib/llvm/bin/clang++
       HRX_ARTIFACT_SET: core
       HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/iree-cmake-vulkan/downloads
       HRX_OUTPUT_DIR: ${{ github.workspace }}/build/iree-cmake-vulkan
@@ -144,8 +232,8 @@ jobs:
           cmake --version
           ctest --version
           ninja --version
-          clang --version
-          "$CC" --version
+          bash .github/scripts/check_host_toolchain.sh --expect-rocm
+          bash .github/scripts/check_rocm_device_toolchain.sh
           test -d "${HRX_ROCM_ROOT}/include"
 
       - name: Run IREE CMake CI
@@ -155,15 +243,34 @@ jobs:
 
   linux_cmake_amdgpu:
     name: ${{ matrix.name }}
-    runs-on: linux-gfx942-1gpu-core42-ossci-rocm
+    runs-on: ${{ matrix.runner_label }}
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: >-
+        --ipc host
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --group-add 993
+        --group-add 992
+        --group-add 110
+        --ulimit memlock=-1:-1
+        --security-opt seccomp=unconfined
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+        --user 0:0
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: Linux / AMDGPU
+          - name: Linux / AMDGPU / gfx942
             command: iree-cmake-amdgpu
+            runner_label: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+            target_selector: gfx942
     env:
+      AR: ${{ github.workspace }}/build/iree-cmake-gpu/rocm-root/lib/llvm/bin/llvm-ar
+      CC: ${{ github.workspace }}/build/iree-cmake-gpu/rocm-root/lib/llvm/bin/clang
+      CXX: ${{ github.workspace }}/build/iree-cmake-gpu/rocm-root/lib/llvm/bin/clang++
       HRX_ARTIFACT_SET: core
       HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/iree-cmake-gpu/downloads
       HRX_OUTPUT_DIR: ${{ github.workspace }}/build/iree-cmake-gpu
@@ -177,7 +284,14 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Adjust git config
-        run: git config --global --add safe.directory "$PWD"
+        run: |
+          mkdir -p "$HOME"
+          git config --global --add safe.directory "$PWD"
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
 
       - name: Fetch ROCm toolchain
         run: bash .github/scripts/fetch_rocm_toolchain.sh
@@ -193,8 +307,8 @@ jobs:
           cmake --version
           ctest --version
           ninja --version
-          clang --version
-          "$CC" --version
+          bash .github/scripts/check_host_toolchain.sh --expect-rocm
+          bash .github/scripts/check_rocm_device_toolchain.sh
           test -d "${HRX_ROCM_ROOT}/include"
 
       - name: Report ROCm environment
@@ -202,5 +316,6 @@ jobs:
 
       - name: Run IREE CMake CI
         run: |
-          echo "python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going"
-          python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going
+          echo "python3 build_tools/devtools/ci.py ${{ matrix.command }} --amdgpu-target ${{ matrix.target_selector }} --keep-going"
+          python3 build_tools/devtools/ci.py ${{ matrix.command }} \
+            --amdgpu-target "${{ matrix.target_selector }}" --keep-going

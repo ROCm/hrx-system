@@ -16,6 +16,8 @@
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/internal/arena.h"
 #include "iree/base/internal/math.h"
+#include "iree/base/threading/mutex.h"
+#include "iree/base/threading/notification.h"
 #include "iree/base/tracing.h"
 #include "iree/hal/drivers/hip/cleanup_thread.h"
 #include "iree/hal/drivers/hip/device_spec_builder.h"
@@ -28,21 +30,18 @@
 #include "iree/hal/drivers/hip/hip_buffer.h"
 #include "iree/hal/drivers/hip/hip_multi_queue_command_buffer.h"
 #include "iree/hal/drivers/hip/memory_pools.h"
-#include "iree/hal/drivers/hip/nop_executable_cache.h"
+#include "iree/hal/drivers/hip/native_executable.h"
 #include "iree/hal/drivers/hip/per_device_information.h"
 #include "iree/hal/drivers/hip/rccl_channel.h"
 #include "iree/hal/drivers/hip/rccl_dynamic_symbols.h"
 #include "iree/hal/drivers/hip/status_util.h"
 #include "iree/hal/drivers/hip/stream_command_buffer.h"
 #include "iree/hal/utils/deferred_command_buffer.h"
-#include "iree/hal/utils/file_registry.h"
-#include "iree/hal/utils/file_transfer.h"
+#include "iree/hal/utils/memory_file.h"
 #include "iree/hal/utils/queue_emulation.h"
 #include "iree/hal/utils/queue_host_call_emulation.h"
 #include "iree/hal/utils/stream_tracing.h"
 
-#define IREE_HAL_DEVICE_TRANSFER_DEFAULT_BUFFER_SIZE (128 * 1024 * 1024)
-#define IREE_HAL_DEVICE_MAX_TRANSFER_DEFAULT_CHUNK_SIZE (64 * 1024 * 1024)
 #define IREE_HAL_DEVICE_INVALID_EXTERNAL_STREAM (0xFFFFFFFFFFFFFFFFul)
 #define IREE_HAL_HIP_DEVICE_UUID_PATH_LENGTH (4 + 36 + 1)
 
@@ -271,10 +270,6 @@ IREE_API_EXPORT void iree_hal_hip_device_params_initialize(
   out_params->command_buffer_mode = IREE_HAL_HIP_COMMAND_BUFFER_MODE_STREAM;
   out_params->stream_tracing = 0;
   out_params->async_allocations = true;
-  out_params->file_transfer_buffer_size =
-      IREE_HAL_DEVICE_TRANSFER_DEFAULT_BUFFER_SIZE;
-  out_params->file_transfer_chunk_size =
-      IREE_HAL_DEVICE_MAX_TRANSFER_DEFAULT_CHUNK_SIZE;
   out_params->allow_inline_execution = false;
   out_params->async_caching = true;
   out_params->external_stream = IREE_HAL_DEVICE_INVALID_EXTERNAL_STREAM;
@@ -330,7 +325,6 @@ static void iree_hal_hip_copy_fixed_cstring(const char* source,
 static iree_hal_hip_device_facts_t iree_hal_hip_device_spec_from_properties(
     const hipDeviceProp_tR0000* properties) {
   iree_hal_hip_device_facts_t spec = {
-      .architecture = {0},
       .launch =
           {
               .maximum_workgroup_invocations =
@@ -378,6 +372,8 @@ static iree_hal_hip_device_facts_t iree_hal_hip_device_spec_from_properties(
   iree_hal_hip_copy_fixed_cstring(properties->gcnArchName,
                                   sizeof(spec.architecture.gcn_arch_name),
                                   spec.architecture.gcn_arch_name);
+  spec.architecture.asic_revision =
+      iree_hal_hip_u32_from_nonnegative_int(properties->asicRevision);
   return spec;
 }
 
@@ -626,34 +622,6 @@ static iree_status_t iree_hal_hip_device_initialize_internal(
     }
   }
 
-  if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < device->device_count; ++i) {
-      iree_hal_buffer_params_t buffer_params = {
-          .usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
-                   IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED,
-          .access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE |
-                    IREE_HAL_MEMORY_ACCESS_DISCARD,
-          .type = IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
-                  IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-          .queue_affinity = (iree_hal_queue_affinity_t)1 << i,
-          .min_alignment = 0,
-      };
-      status = iree_hal_allocator_allocate_buffer(
-          device->device_allocator, buffer_params,
-          params->file_transfer_buffer_size,
-          &device->devices[i].file_transfer_staging_buffer.buffer);
-      if (!iree_status_is_ok(status)) {
-        break;
-      }
-      device->devices[i].file_transfer_staging_buffer.head = 0;
-      device->devices[i].file_transfer_staging_buffer.tail = 0;
-      iree_slim_mutex_initialize(
-          &device->devices[i].file_transfer_staging_buffer.mutex);
-      iree_notification_initialize(
-          &device->devices[i].file_transfer_staging_buffer.notify);
-    }
-  }
-
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -844,15 +812,6 @@ static void iree_hal_hip_device_destroy(iree_hal_device_t* base_device) {
   iree_hal_hip_cleanup_thread_free(device->buffer_free_thread);
   device->cleanup_thread = NULL;
   device->buffer_free_thread = NULL;
-
-  for (iree_host_size_t i = 0; i < device->device_count; ++i) {
-    iree_hal_resource_release(
-        device->devices[i].file_transfer_staging_buffer.buffer);
-    iree_slim_mutex_deinitialize(
-        &device->devices[i].file_transfer_staging_buffer.mutex);
-    iree_notification_deinitialize(
-        &device->devices[i].file_transfer_staging_buffer.notify);
-  }
 
   // There should be no more buffers live that use the allocator.
   iree_hal_allocator_release(device->device_allocator);
@@ -1294,36 +1253,47 @@ static iree_status_t iree_hal_hip_device_create_command_buffer(
   }
 }
 
-static iree_status_t iree_hal_hip_device_create_event(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_event_flags_t flags, iree_hal_event_t** out_event) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "event not yet implemented");
-}
-
 static iree_status_t iree_hal_hip_device_import_file(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     iree_hal_memory_access_t access, iree_io_file_handle_t* handle,
     iree_hal_external_file_flags_t flags, iree_hal_file_t** out_file) {
-  return iree_hal_file_from_handle(
+  (void)flags;
+  return iree_hal_memory_file_wrap(
       iree_hal_device_allocator(base_device), queue_affinity, access, handle,
-      /*proactor=*/NULL, iree_hal_device_host_allocator(base_device), out_file);
+      IREE_HAL_MEMORY_FILE_FLAG_REQUIRE_DEVICE_VISIBLE_STORAGE,
+      iree_hal_device_host_allocator(base_device), out_file);
 }
 
-static iree_status_t iree_hal_hip_device_create_executable_cache(
-    iree_hal_device_t* base_device, iree_string_view_t identifier,
-    iree_hal_executable_cache_t** out_executable_cache) {
+static iree_status_t iree_hal_hip_device_load_executable(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
+    iree_hal_executable_t** out_executable) {
   iree_hal_hip_device_t* device = iree_hal_hip_device_cast(base_device);
-  hipDevice_t devices[IREE_HAL_MAX_QUEUES];
-  hipCtx_t contexts[IREE_HAL_MAX_QUEUES];
-  for (iree_host_size_t i = 0; i < device->device_count; ++i) {
-    devices[i] = device->devices[i].hip_device;
-    contexts[i] = device->devices[i].hip_context;
+
+  // HIP native executables replicate module state across the entire logical
+  // device and select a per-device module during dispatch.
+  const iree_hal_device_identity_spec_t* identity =
+      iree_hal_device_spec_identity(device->device_spec);
+  iree_hal_physical_device_affinity_t physical_device_affinity = 0;
+  for (iree_host_size_t i = 0; i < identity->physical_device_count; ++i) {
+    physical_device_affinity |=
+        identity->physical_devices[i].physical_device_affinity;
   }
-  return iree_hal_hip_nop_executable_cache_create(
-      base_device, identifier, device->hip_symbols,
-      iree_hal_hip_device_make_topology(device), device->host_allocator,
-      out_executable_cache);
+  if (!iree_all_bits_set(target->physical_device_affinity,
+                         physical_device_affinity)) {
+    return iree_make_status(
+        IREE_STATUS_INCOMPATIBLE,
+        "HIP executable target `%.*s` physical-device affinity 0x%016" PRIx64
+        " does not cover logical-device affinity 0x%016" PRIx64,
+        (int)target->target_key.size, target->target_key.data,
+        target->physical_device_affinity, physical_device_affinity);
+  }
+
+  return iree_hal_hip_native_executable_create(
+      base_device, device->hip_symbols,
+      iree_hal_hip_device_make_topology(device), load_params,
+      device->host_allocator, out_executable);
 }
 
 static iree_status_t iree_hal_hip_device_create_semaphore(
@@ -2209,394 +2179,6 @@ static iree_status_t iree_hal_hip_device_queue_dealloca(
   return status;
 }
 
-typedef struct iree_hal_hip_device_semaphore_queue_read_callback_data_t {
-  iree_hal_hip_semaphore_callback_data_t base;
-  iree_hal_file_t* source_file;
-  uint64_t source_offset;
-  iree_hal_buffer_t* target_buffer;
-  iree_device_size_t target_offset;
-  iree_device_size_t length;
-  iree_hal_read_flags_t flags;
-  int64_t read_chunks_completed;
-  uint64_t num_read_chunks;
-  uint64_t* read_chunk_sizes;
-  iree_hal_command_buffer_t** command_buffers;
-} iree_hal_hip_device_semaphore_queue_read_callback_data_t;
-
-void iree_hal_hip_device_destroy_queue_read_callback_data(
-    iree_hal_hip_device_semaphore_queue_read_callback_data_t* data) {
-  if (!data) {
-    return;
-  }
-  iree_hal_file_release(data->source_file);
-  iree_hal_resource_release(data->target_buffer);
-  iree_hal_hip_semaphore_callback_data_deinitialize(&data->base);
-  iree_allocator_free(data->base.host_allocator, data);
-}
-
-static iree_status_t iree_hal_hip_device_complete_queue_read_operation(
-    void* user_data, iree_hal_hip_event_t* event, iree_status_t status) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-  iree_hal_hip_device_semaphore_queue_read_callback_data_t* data =
-      (iree_hal_hip_device_semaphore_queue_read_callback_data_t*)user_data;
-
-  // Free the event we specifically created.
-  iree_hal_hip_event_release(event);
-
-  // Release the next chunk of buffer back to the ring.
-  int device_ordinal =
-      iree_math_count_trailing_zeros_u64(data->base.queue_affinity);
-  iree_slim_mutex_lock(&data->base.device->devices[device_ordinal]
-                            .file_transfer_staging_buffer.mutex);
-  data->base.device->devices[device_ordinal]
-      .file_transfer_staging_buffer.tail +=
-      data->read_chunk_sizes[data->read_chunks_completed];
-  data->base.device->devices[device_ordinal]
-      .file_transfer_staging_buffer.tail %=
-      data->base.device->params.file_transfer_buffer_size;
-  if (data->base.device->devices[device_ordinal]
-          .file_transfer_staging_buffer.head ==
-      data->base.device->devices[device_ordinal]
-          .file_transfer_staging_buffer.tail) {
-    // Slight optimization here. If the buffer is empty, reset it to 0, so that
-    // we are less likely to wrap.
-    data->base.device->devices[device_ordinal]
-        .file_transfer_staging_buffer.head = 0;
-    data->base.device->devices[device_ordinal]
-        .file_transfer_staging_buffer.tail = 0;
-  }
-  iree_slim_mutex_unlock(&data->base.device->devices[device_ordinal]
-                              .file_transfer_staging_buffer.mutex);
-  iree_notification_post(&data->base.device->devices[device_ordinal]
-                              .file_transfer_staging_buffer.notify,
-                         IREE_ALL_WAITERS);
-
-  iree_hal_command_buffer_t* command_buffer =
-      data->command_buffers[data->read_chunks_completed];
-  if (iree_hal_hip_multi_queue_command_buffer_isa(command_buffer)) {
-    status = iree_hal_hip_multi_queue_command_buffer_get(
-        command_buffer, data->base.queue_affinity, &command_buffer);
-  }
-
-  status = iree_status_join(
-      status,
-      iree_hal_stream_tracing_context_collect_list(
-          // Get the tracing context from the device/stream/queue affinity.
-          data->base.device->devices[device_ordinal].tracing_context,
-          // Get the tracing event list from the command buffer.
-          iree_hal_hip_stream_command_buffer_tracing_events(command_buffer)
-              .head));
-
-  iree_hal_resource_release(data->command_buffers[data->read_chunks_completed]);
-  // If there are more chunks to this transfer don't destroy and advance
-  // the semaphores yet.
-  if (++data->read_chunks_completed != data->num_read_chunks) {
-    IREE_TRACE_ZONE_END(z0);
-    return status;
-  }
-
-  // Notify all of the signal semaphores that they have been incremented.
-  for (iree_host_size_t i = 0; i < data->base.signal_semaphore_list.count;
-       ++i) {
-    iree_status_ignore(iree_hal_hip_event_semaphore_advance(
-        data->base.signal_semaphore_list.semaphores[i]));
-  }
-
-  iree_hal_hip_device_destroy_queue_read_callback_data(data);
-
-  IREE_TRACE_ZONE_END(z0);
-  return status;
-}
-
-iree_device_size_t iree_hal_hip_transfer_buffer_size_left(
-    iree_hal_hip_device_t* device, iree_hal_hip_per_device_info_t* info) {
-  iree_slim_mutex_lock(&info->file_transfer_staging_buffer.mutex);
-  iree_device_size_t size_left =
-      info->file_transfer_staging_buffer.head >=
-              info->file_transfer_staging_buffer.tail
-          ? device->params.file_transfer_buffer_size -
-                (info->file_transfer_staging_buffer.head -
-                 info->file_transfer_staging_buffer.tail)
-          : info->file_transfer_staging_buffer.tail -
-                info->file_transfer_staging_buffer.head;
-  iree_slim_mutex_unlock(&info->file_transfer_staging_buffer.mutex);
-  return size_left;
-}
-
-typedef struct iree_hal_hip_transfer_buffer_chunk_t {
-  iree_device_size_t offset;
-  iree_device_size_t size;
-} iree_hal_hip_transfer_buffer_chunk_t;
-
-typedef struct iree_hal_hip_transfer_buffer_size_check_data_t {
-  iree_host_size_t device_ordinal;
-  iree_device_size_t num_bytes;
-  iree_hal_hip_device_t* device;
-} iree_hal_hip_transfer_buffer_size_check_data_t;
-
-bool iree_hal_hip_transfer_buffer_size_check_condition(void* user_data) {
-  iree_hal_hip_transfer_buffer_size_check_data_t* data =
-      (iree_hal_hip_transfer_buffer_size_check_data_t*)user_data;
-  return iree_hal_hip_transfer_buffer_size_left(
-             data->device, &data->device->devices[data->device_ordinal]) ==
-         data->device->params.file_transfer_buffer_size;
-}
-
-// Returns two chunks that are needed to cover the buffer. Pass in an
-// array of 2 chunks to be filled in. It will wait on the availability
-// of the chunks if there are transfers in progress. It is possible that
-// either of the chunks may have a size of 0. The requested size must be
-// less than or equal to the file_transfer_chunk_size.
-void iree_hal_hip_transfer_buffer_reserve_chunks(
-    iree_hal_hip_device_t* device, iree_host_size_t device_ordinal,
-    iree_device_size_t size, iree_hal_hip_transfer_buffer_chunk_t* out_chunks) {
-  IREE_ASSERT_ARGUMENT(out_chunks);
-  IREE_ASSERT(size <= device->params.file_transfer_chunk_size,
-              "Trying to allocate a chunk that is too large.");
-  iree_hal_hip_transfer_buffer_size_check_data_t size_check = {
-      .device_ordinal = device_ordinal, .num_bytes = size, .device = device};
-
-  iree_notification_await(
-      &device->devices[device_ordinal].file_transfer_staging_buffer.notify,
-      iree_hal_hip_transfer_buffer_size_check_condition, (void*)&size_check,
-      iree_infinite_timeout());
-
-  iree_hal_hip_per_device_info_t* info = &device->devices[device_ordinal];
-  iree_slim_mutex_lock(&info->file_transfer_staging_buffer.mutex);
-  out_chunks[0].offset = info->file_transfer_staging_buffer.head;
-  out_chunks[0].size =
-      iree_min(size, device->params.file_transfer_buffer_size -
-                         info->file_transfer_staging_buffer.head);
-  if (size != out_chunks->size) {
-    out_chunks[1].offset = 0;
-    out_chunks[1].size = size - out_chunks[0].size;
-    info->file_transfer_staging_buffer.head = out_chunks[1].size;
-  } else {
-    out_chunks[1].offset = 0;
-    out_chunks[1].size = 0;
-    info->file_transfer_staging_buffer.head += size;
-  }
-  info->file_transfer_staging_buffer.head %=
-      device->params.file_transfer_buffer_size;
-
-  iree_slim_mutex_unlock(&info->file_transfer_staging_buffer.mutex);
-}
-
-static iree_status_t iree_hal_hip_device_perform_queue_read_now(
-    void* user_data, iree_status_t status) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  iree_hal_hip_device_semaphore_queue_read_callback_data_t* data =
-      (iree_hal_hip_device_semaphore_queue_read_callback_data_t*)user_data;
-
-  iree_hal_hip_device_t* device = data->base.device;
-
-  // If we had a semaphore failure then we should propagate it
-  // but not run anything.
-  if (!iree_status_is_ok(data->base.status)) {
-    status = iree_status_join(data->base.status, status);
-  }
-
-  int device_ordinal =
-      iree_math_count_trailing_zeros_u64(data->base.queue_affinity);
-
-  if (iree_status_is_ok(status)) {
-    status = IREE_HIP_CALL_TO_STATUS(
-        device->hip_symbols,
-        hipCtxPushCurrent(device->devices[device_ordinal].hip_context));
-  }
-  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, device_ordinal);
-
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_hip_device_stream_wait_for_semaphores(
-        device, device->devices[device_ordinal].hip_dispatch_stream,
-        data->base.wait_semaphore_list, device_ordinal);
-  }
-  iree_hal_hip_dispatch_completed_data_t* external_stream_dispatch_data = NULL;
-  if (device->uses_external_stream) {
-    external_stream_dispatch_data = data->base.external_stream_dispatch_data;
-    iree_hal_resource_retain(external_stream_dispatch_data);
-  }
-
-  const iree_hal_hip_dynamic_symbols_t* symbols = device->hip_symbols;
-  iree_device_size_t amount_left = data->length;
-  iree_device_size_t offset = 0;
-  for (iree_host_size_t i = 0;
-       i < data->num_read_chunks && iree_status_is_ok(status); ++i) {
-    iree_device_size_t chunk_size =
-        iree_min(device->params.file_transfer_chunk_size, amount_left);
-    iree_hal_hip_transfer_buffer_chunk_t chunks[2];
-    iree_hal_hip_transfer_buffer_reserve_chunks(device, device_ordinal,
-                                                chunk_size, &chunks[0]);
-
-    iree_device_size_t read_offset = offset;
-    for (iree_host_size_t j = 0; j < 2; ++j) {
-      if (chunks[j].size) {
-        status = iree_hal_file_read(
-            data->source_file, data->source_offset + read_offset,
-            device->devices[device_ordinal].file_transfer_staging_buffer.buffer,
-            chunks[j].offset, chunks[j].size);
-        if (!iree_status_is_ok(status)) {
-          break;
-        }
-        read_offset += chunks[j].size;
-      }
-    }
-
-    // We use a command buffer because it allows us to easily get tracing events
-    // into the trace, and the actual overhead is quite minimal We only start it
-    // here, rather than creating up above the read which is more natural,
-    // because it will show up as actively doing work while we are recording,
-    // because hip stream command buffers are executed at record-time, so we
-    // don't want to get the file io mixed with the record.
-    iree_hal_command_buffer_t* stream_command_buffer = NULL;
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_hip_device_create_stream_command_buffer(
-          (iree_hal_device_t*)device,
-          IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
-              IREE_HAL_COMMAND_BUFFER_MODE_ALLOW_INLINE_EXECUTION |
-              IREE_HAL_COMMAND_BUFFER_MODE_UNVALIDATED,
-          IREE_HAL_COMMAND_CATEGORY_TRANSFER, data->base.queue_affinity, 0,
-          &stream_command_buffer);
-    }
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_command_buffer_begin(stream_command_buffer);
-    }
-    for (iree_host_size_t j = 0; j < 2; ++j) {
-      if (iree_status_is_ok(status)) {
-        iree_hal_buffer_ref_t src = {0};
-        src.buffer =
-            device->devices[device_ordinal].file_transfer_staging_buffer.buffer;
-        src.offset = chunks[j].offset;
-        src.length = chunks[j].size;
-
-        iree_hal_buffer_ref_t dst = {0};
-        dst.buffer = data->target_buffer;
-        dst.offset = data->target_offset + offset;
-        dst.length = chunks[j].size;
-
-        status = iree_hal_command_buffer_copy_buffer(
-            stream_command_buffer, src, dst, IREE_HAL_COPY_FLAG_NONE);
-      }
-      offset += chunks[j].size;
-      amount_left -= chunks[j].size;
-    }
-
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_command_buffer_end(stream_command_buffer);
-      data->command_buffers[i] = stream_command_buffer;
-    }
-
-    if (iree_status_is_ok(status)) {
-      data->read_chunk_sizes[i] = chunk_size;
-      // We only want to signal the semaphores on the final
-      // chunk.
-      if (i == data->num_read_chunks - 1) {
-        status = iree_hal_hip_device_stream_signal_semaphores_and_add_cleanup(
-            device, device->devices[device_ordinal].hip_dispatch_stream,
-            device->cleanup_thread, data->base.signal_semaphore_list,
-            device_ordinal, &iree_hal_hip_device_complete_queue_read_operation,
-            data);
-        // Break here because data could immediately be cleaned up before the
-        // next loop iteration.
-        break;
-      } else {
-        status = iree_hal_hip_device_stream_add_cleanup(
-            device, device->cleanup_thread, device_ordinal,
-            &iree_hal_hip_device_complete_queue_read_operation, data);
-      }
-    }
-  }
-
-  if (!iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < data->base.signal_semaphore_list.count;
-         ++i) {
-      iree_hal_semaphore_fail(data->base.signal_semaphore_list.semaphores[i],
-                              iree_status_clone(status));
-    }
-
-    iree_hal_hip_device_destroy_queue_read_callback_data(data);
-  }
-
-  if (external_stream_dispatch_data) {
-    iree_hal_hip_set_external_stream_data_completed(
-        external_stream_dispatch_data);
-    iree_hal_resource_release(external_stream_dispatch_data);
-  }
-
-  IREE_TRACE_ZONE_END(z0);
-  return iree_status_join(
-      status, IREE_HIP_CALL_TO_STATUS(symbols, hipCtxPopCurrent(NULL)));
-}
-
-static iree_status_t iree_hal_hip_device_make_queue_read_callback_data(
-    iree_hal_hip_device_t* device, iree_allocator_t host_allocator,
-    iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_file_t* source_file, uint64_t source_offset,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, iree_hal_read_flags_t flags,
-    iree_hal_hip_device_semaphore_queue_read_callback_data_t** out_data) {
-  *out_data = NULL;
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  iree_hal_hip_device_semaphore_queue_read_callback_data_t* callback_data =
-      NULL;
-
-  uint64_t chunk_count =
-      (length + device->params.file_transfer_chunk_size - 1) /
-      device->params.file_transfer_chunk_size;
-
-  const iree_host_size_t additional_data_for_base =
-      iree_hal_hip_semaphore_callback_data_get_additional_allocation_size(
-          wait_semaphore_list, signal_semaphore_list);
-  const iree_host_size_t additional_data_for_chunks =
-      sizeof(*callback_data->read_chunk_sizes) * chunk_count +
-      sizeof(*callback_data->command_buffers) * chunk_count;
-
-  const iree_host_size_t total_callback_size = sizeof(*callback_data) +
-                                               additional_data_for_base +
-                                               additional_data_for_chunks;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc(host_allocator, total_callback_size,
-                                (void**)&callback_data));
-  iree_status_t status = iree_hal_hip_semaphore_callback_data_initialize(
-      host_allocator, device, queue_affinity,
-      &iree_hal_hip_device_perform_queue_read_now, wait_semaphore_list,
-      signal_semaphore_list,
-      (void*)((uint8_t*)callback_data + sizeof(*callback_data)),
-      &callback_data->base);
-
-  if (!iree_status_is_ok(status)) {
-    iree_allocator_free(host_allocator, callback_data);
-    IREE_TRACE_ZONE_END(z0);
-    return status;
-  }
-  uint64_t* chunk_base =
-      (void*)((uint8_t*)callback_data + sizeof(*callback_data) +
-              additional_data_for_base);
-  iree_hal_command_buffer_t** command_buffer_base =
-      (iree_hal_command_buffer_t**)((uint8_t*)chunk_base +
-                                    sizeof(*callback_data->read_chunk_sizes) *
-                                        chunk_count);
-  callback_data->source_file = source_file;
-  callback_data->source_offset = source_offset;
-  callback_data->target_buffer = target_buffer;
-  iree_hal_resource_retain(target_buffer);
-  iree_hal_file_retain(source_file);
-  callback_data->target_offset = target_offset;
-  callback_data->length = length;
-  callback_data->flags = flags;
-  callback_data->read_chunks_completed = 0;
-  callback_data->num_read_chunks = chunk_count;
-  callback_data->read_chunk_sizes = chunk_base;
-  callback_data->command_buffers = command_buffer_base;
-  *out_data = callback_data;
-  IREE_TRACE_ZONE_END(z0);
-  return status;
-}
-
 static iree_status_t iree_hal_hip_device_queue_read(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -2604,62 +2186,18 @@ static iree_status_t iree_hal_hip_device_queue_read(
     iree_hal_file_t* source_file, uint64_t source_offset,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, iree_hal_read_flags_t flags) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  iree_hal_hip_device_t* device = iree_hal_hip_device_cast(base_device);
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_hip_device_select_queue_affinity(device, queue_affinity,
-                                                    &queue_affinity));
-  const int device_ordinal =
-      iree_hal_queue_affinity_find_first_set(queue_affinity);
-
-  iree_hal_hip_device_semaphore_queue_read_callback_data_t* callback_data =
-      NULL;
-  iree_status_t status = iree_hal_hip_device_make_queue_read_callback_data(
-      device, device->host_allocator, queue_affinity, wait_semaphore_list,
-      signal_semaphore_list, source_file, source_offset, target_buffer,
-      target_offset, length, flags, &callback_data);
-
-  iree_hal_hip_dispatch_completed_data_t* external_stream_data = NULL;
-  if (device->uses_external_stream) {
-    external_stream_data = callback_data->base.external_stream_dispatch_data;
-    iree_hal_resource_retain(external_stream_data);
-  }
-
-  if (iree_status_is_ok(status) && wait_semaphore_list.count == 0) {
-    status = iree_hal_hip_dispatch_thread_add_dispatch(
-        device->devices[device_ordinal].dispatch_thread,
-        &iree_hal_hip_device_perform_queue_read_now, callback_data);
-  } else if (iree_status_is_ok(status) && wait_semaphore_list.count != 0) {
-    for (iree_host_size_t i = 0;
-         i < wait_semaphore_list.count && iree_status_is_ok(status); ++i) {
-      status = iree_status_join(
-          status, iree_hal_hip_semaphore_notify_work(
-                      wait_semaphore_list.semaphores[i],
-                      wait_semaphore_list.payload_values[i],
-                      device->devices[device_ordinal].device_event_pool,
-                      &iree_hal_hip_device_semaphore_callback, callback_data));
-    }
-  } else {
-    iree_hal_hip_device_destroy_queue_read_callback_data(callback_data);
-  }
-  if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < signal_semaphore_list.count; ++i) {
-      iree_hal_hip_semaphore_for_exported_timepoints(
-          signal_semaphore_list.semaphores[i],
-          signal_semaphore_list.payload_values[i]);
-    }
-  }
-
-  if (device->uses_external_stream) {
-    if (iree_status_is_ok(status)) {
-      iree_hal_hip_wait_for_dispatch(external_stream_data);
-    }
-    iree_hal_resource_release(external_stream_data);
-  }
-
-  IREE_TRACE_ZONE_END(z0);
-  return status;
+  (void)base_device;
+  (void)queue_affinity;
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)source_file;
+  (void)source_offset;
+  (void)target_buffer;
+  (void)target_offset;
+  (void)length;
+  (void)flags;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "HIP native file queue reads not implemented");
 }
 
 static iree_status_t iree_hal_hip_device_queue_write(
@@ -2669,26 +2207,18 @@ static iree_status_t iree_hal_hip_device_queue_write(
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     iree_hal_file_t* target_file, uint64_t target_offset,
     iree_device_size_t length, iree_hal_write_flags_t flags) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  iree_hal_file_transfer_options_t options = {
-      .chunk_count = IREE_HAL_FILE_TRANSFER_CHUNK_COUNT_DEFAULT,
-      .chunk_size = IREE_HAL_FILE_TRANSFER_CHUNK_SIZE_DEFAULT,
-  };
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_device_queue_write_streaming(
-              base_device, queue_affinity, wait_semaphore_list,
-              signal_semaphore_list, source_buffer, source_offset, target_file,
-              target_offset, length, flags, options));
-
-  for (iree_host_size_t i = 0; i < signal_semaphore_list.count; ++i) {
-    iree_hal_hip_semaphore_for_exported_timepoints(
-        signal_semaphore_list.semaphores[i],
-        signal_semaphore_list.payload_values[i]);
-  }
-
-  IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  (void)base_device;
+  (void)queue_affinity;
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)source_buffer;
+  (void)source_offset;
+  (void)target_file;
+  (void)target_offset;
+  (void)length;
+  (void)flags;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "HIP native file queue writes not implemented");
 }
 
 typedef struct iree_hal_hip_device_semaphore_submit_callback_data_t {
@@ -3040,6 +2570,47 @@ static iree_status_t iree_hal_hip_device_queue_execute(
   return status;
 }
 
+static iree_status_t iree_hal_hip_device_queue_atomic_wait(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_wait_params_t params) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "HIP devices do not support atomic waits");
+}
+
+static iree_status_t iree_hal_hip_device_queue_atomic_store(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_store_params_t params) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "HIP devices do not support atomic stores");
+}
+
+static iree_status_t iree_hal_hip_device_queue_atomic_rmw(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_rmw_params_t params) {
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "HIP devices do not support atomic read-modify-write");
+}
+
+static iree_status_t iree_hal_hip_device_queue_timestamp(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_timestamp_flags_t flags) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "HIP device-side timestamps not implemented");
+}
+
 static iree_status_t iree_hal_hip_device_queue_flush(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity) {
   return iree_ok_status();
@@ -3097,8 +2668,7 @@ static const iree_hal_device_vtable_t iree_hal_hip_device_vtable = {
     .assign_topology_info = iree_hal_hip_device_assign_topology_info,
     .create_channel = iree_hal_hip_device_create_channel,
     .create_command_buffer = iree_hal_hip_device_create_command_buffer,
-    .create_event = iree_hal_hip_device_create_event,
-    .create_executable_cache = iree_hal_hip_device_create_executable_cache,
+    .load_executable = iree_hal_hip_device_load_executable,
     .import_file = iree_hal_hip_device_import_file,
     .create_semaphore = iree_hal_hip_device_create_semaphore,
     .query_semaphore_compatibility =
@@ -3114,6 +2684,10 @@ static const iree_hal_device_vtable_t iree_hal_hip_device_vtable = {
     .queue_host_call = iree_hal_device_queue_emulated_host_call,
     .queue_dispatch = iree_hal_device_queue_emulated_dispatch,
     .queue_execute = iree_hal_hip_device_queue_execute,
+    .queue_atomic_wait = iree_hal_hip_device_queue_atomic_wait,
+    .queue_atomic_store = iree_hal_hip_device_queue_atomic_store,
+    .queue_atomic_rmw = iree_hal_hip_device_queue_atomic_rmw,
+    .queue_timestamp = iree_hal_hip_device_queue_timestamp,
     .queue_flush = iree_hal_hip_device_queue_flush,
     .profiling_begin = iree_hal_hip_device_profiling_begin,
     .profiling_flush = iree_hal_hip_device_profiling_flush,

@@ -33,33 +33,32 @@ def default_fuzz_cache_dir(
         return Path(configured_cache_dir).expanduser()
 
     platform = sys.platform if platform is None else platform
-    home = Path.home() if home is None else home
     if platform.startswith("win"):
         cache_root = environ.get(WINDOWS_LOCAL_APPDATA_ENV) or environ.get(
             WINDOWS_APPDATA_ENV
         )
         if cache_root:
             return Path(cache_root) / FUZZ_CACHE_DIR_NAME
+        home = Path.home() if home is None else home
         return home / "AppData" / "Local" / FUZZ_CACHE_DIR_NAME
     if platform == "darwin":
+        home = Path.home() if home is None else home
         return home / "Library" / "Caches" / FUZZ_CACHE_DIR_NAME
 
     cache_root = environ.get(XDG_CACHE_HOME_ENV)
     if cache_root:
         return Path(cache_root).expanduser() / FUZZ_CACHE_DIR_NAME
+    home = Path.home() if home is None else home
     return home / ".cache" / FUZZ_CACHE_DIR_NAME
-
-
-FUZZ_CACHE_DIR = default_fuzz_cache_dir()
 
 
 def bazel_fuzz_target_dir(target: str) -> Path:
     package, target_name = split_bazel_target_label(target)
-    return FUZZ_CACHE_DIR.expanduser() / package / target_name
+    return default_fuzz_cache_dir() / package / target_name
 
 
 def cmake_fuzz_target_dir(target: str) -> Path:
-    return FUZZ_CACHE_DIR.expanduser() / "cmake" / sanitized_identifier_path(target)
+    return default_fuzz_cache_dir() / "cmake" / sanitized_identifier_path(target)
 
 
 def split_bazel_target_label(target: str) -> tuple[str, str]:

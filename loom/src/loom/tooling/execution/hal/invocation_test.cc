@@ -193,9 +193,10 @@ TEST_F(HalInvocationTest, PreparedCandidatePrepareRequiresInitializedRuntime) {
   loom_run_hal_artifact_t executable = {};
   loom_run_hal_prepared_candidate_t candidate = {};
 
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_run_hal_prepared_candidate_prepare(
-                            &runtime, &executable, &candidate));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_run_hal_prepared_candidate_prepare(
+          &runtime, &executable, iree_allocator_system(), &candidate));
 
   loom_run_hal_prepared_candidate_deinitialize(&candidate);
 }
@@ -228,7 +229,7 @@ TEST_F(HalInvocationTest, PreparePlanFromListsRetainsBindings) {
   buffer_params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
   buffer_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   buffer_params.usage =
-      IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+      IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       allocator, buffer_params, /*allocation_size=*/4, &buffer));
@@ -263,7 +264,7 @@ TEST_F(HalInvocationTest, BindingListTotalByteLengthUsesLogicalBufferExtents) {
   buffer_params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
   buffer_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   buffer_params.usage =
-      IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+      IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
   iree_hal_buffer_t* allocation = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       allocator, buffer_params, /*allocation_size=*/256, &allocation));

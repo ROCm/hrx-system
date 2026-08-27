@@ -19,6 +19,7 @@ from loom.assembly import (
     RBRACKET,
     RPAREN,
     TO,
+    AlignedRefs,
     Attr,
     AttrDict,
     AttrTable,
@@ -66,6 +67,13 @@ class TestRefs:
         assert Ref("x") != Refs("x")  # type: ignore[comparison-overlap]
 
 
+class TestAlignedRefs:
+    def test_construct(self) -> None:
+        refs = AlignedRefs("byte_lengths", "minimum_alignments")
+        assert refs.refs == "byte_lengths"
+        assert refs.alignments == "minimum_alignments"
+
+
 class TestAttr:
     def test_construct(self) -> None:
         a = Attr("value")
@@ -97,6 +105,12 @@ class TestResultTypeList:
     def test_construct(self) -> None:
         r = ResultTypeList("results")
         assert r.field == "results"
+        assert not r.uniform
+
+    def test_uniform(self) -> None:
+        r = ResultTypeList("results", parens=False, uniform=True)
+        assert not r.parens
+        assert r.uniform
 
 
 class TestKeyword:
@@ -209,6 +223,20 @@ class TestFuncArgs:
     def test_construct(self) -> None:
         fa = FuncArgs("args")
         assert fa.field == "args"
+        assert fa.group is None
+        assert fa.start_attr is None
+        assert fa.end_attr is None
+
+    def test_construct_projected_group(self) -> None:
+        fa = FuncArgs(
+            "args",
+            group="bindings",
+            start_attr="specialization_count",
+        )
+        assert fa.field == "args"
+        assert fa.group == "bindings"
+        assert fa.start_attr == "specialization_count"
+        assert fa.end_attr is None
 
 
 class TestPredicateList:

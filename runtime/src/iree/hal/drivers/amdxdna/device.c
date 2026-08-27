@@ -22,8 +22,7 @@
 #include "iree/hal/drivers/amdxdna/completion_queue.h"
 #include "iree/hal/drivers/amdxdna/context_cache.h"
 #include "iree/hal/drivers/amdxdna/direct_command_buffer.h"
-#include "iree/hal/drivers/amdxdna/event.h"
-#include "iree/hal/drivers/amdxdna/nop_executable_cache.h"
+#include "iree/hal/drivers/amdxdna/executable.h"
 #include "iree/hal/drivers/amdxdna/semaphore.h"
 #include "iree/hal/drivers/amdxdna/util.h"
 #include "iree/hal/memory/cpu_slab_provider.h"
@@ -215,18 +214,32 @@ static iree_status_t iree_hal_amdxdna_device_assign_topology_info(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_amdxdna_device_create_executable_cache(
-    iree_hal_device_t* base_device, iree_string_view_t identifier,
-    iree_hal_executable_cache_t** out_executable_cache) {
+static iree_status_t iree_hal_amdxdna_device_load_executable(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
+    iree_hal_executable_t** out_executable) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  (void)queue_affinity;
+  (void)target;
 
   iree_hal_amdxdna_device* device = IREE_HAL_AMDXDNA_CHECKED_VTABLE_CAST(
       base_device, iree_hal_amdxdna_device_vtable, iree_hal_amdxdna_device);
+  iree_status_t status = iree_hal_amdxdna_native_executable_create(
+      device->native_device, load_params, device->host_allocator,
+      out_executable);
+  if (iree_status_is_ok(status) &&
+      device->native_caps.requires_executable_context_cache) {
+    status = iree_hal_amdxdna_executable_preload_contexts(device,
+                                                          *out_executable);
+    if (!iree_status_is_ok(status)) {
+      iree_hal_executable_release(*out_executable);
+      *out_executable = NULL;
+    }
+  }
 
   IREE_TRACE_ZONE_END(z0);
-  return iree_hal_amdxdna_nop_executable_cache_create(
-      device, device->native_device, identifier, device->host_allocator,
-      out_executable_cache);
+  return status;
 }
 
 static iree_status_t iree_hal_amdxdna_device_create_command_buffer(
@@ -814,15 +827,6 @@ static iree_status_t iree_hal_amdxdna_device_create_channel(
   (void)out_channel;
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                           "collectives not implemented");
-}
-
-static iree_status_t iree_hal_amdxdna_device_create_event(
-    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_event_flags_t flags, iree_hal_event_t** out_event) {
-  iree_hal_amdxdna_device* device = IREE_HAL_AMDXDNA_CHECKED_VTABLE_CAST(
-      base_device, iree_hal_amdxdna_device_vtable, iree_hal_amdxdna_device);
-  return iree_hal_amdxdna_event_create(queue_affinity, flags,
-                                       device->host_allocator, out_event);
 }
 
 static iree_status_t iree_hal_amdxdna_device_import_file(
@@ -1592,6 +1596,75 @@ static iree_status_t iree_hal_amdxdna_device_queue_dispatch(
   return status;
 }
 
+static iree_status_t iree_hal_amdxdna_device_queue_atomic_wait(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_wait_params_t params) {
+  (void)base_device;
+  (void)queue_affinity;
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)target_buffer;
+  (void)target_offset;
+  (void)params;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "amdxdna devices do not support atomic waits");
+}
+
+static iree_status_t iree_hal_amdxdna_device_queue_atomic_store(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_store_params_t params) {
+  (void)base_device;
+  (void)queue_affinity;
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)target_buffer;
+  (void)target_offset;
+  (void)params;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "amdxdna devices do not support atomic stores");
+}
+
+static iree_status_t iree_hal_amdxdna_device_queue_atomic_rmw(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_rmw_params_t params) {
+  (void)base_device;
+  (void)queue_affinity;
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)target_buffer;
+  (void)target_offset;
+  (void)params;
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "amdxdna devices do not support atomic read-modify-write");
+}
+
+static iree_status_t iree_hal_amdxdna_device_queue_timestamp(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_timestamp_flags_t flags) {
+  (void)base_device;
+  (void)queue_affinity;
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)target_buffer;
+  (void)target_offset;
+  (void)flags;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "amdxdna device-side timestamps not implemented");
+}
+
 static iree_status_t iree_hal_amdxdna_device_queue_flush(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity) {
   (void)base_device;
@@ -1739,6 +1812,53 @@ void iree_hal_amdxdna_device_options_initialize(
   IREE_TRACE_ZONE_END(z0);
 }
 
+// Advertises the amdxdna executable family/key used by libhrx load_data.
+// Must stay aligned with HRX_AMDXDNA_EXECUTABLE_TARGET_FAMILY/KEY.
+static iree_status_t iree_hal_amdxdna_device_spec_create(
+    iree_string_view_t identifier, iree_allocator_t host_allocator,
+    iree_hal_device_spec_t** out_spec) {
+  const iree_hal_physical_device_spec_t physical_device = {
+      .identity =
+          {
+              .display_name = identifier,
+              .backend_path = identifier,
+          },
+      .partition_count = 1,
+      .physical_device_affinity = 1ull,
+  };
+  const iree_hal_device_identity_spec_t identity = {
+      .logical_device_id = identifier,
+      .display_name = identifier,
+      .driver_id = IREE_SV("amdxdna"),
+      .backend_id = IREE_SV("amdxdna"),
+      .physical_device_count = 1,
+      .physical_devices = &physical_device,
+      .flags = IREE_HAL_DEVICE_IDENTITY_FLAG_NONE,
+  };
+  const iree_hal_executable_target_t executable_target = {
+      .family = IREE_SV("amdxdna"),
+      .target_key = IREE_SV("amdxdna"),
+      .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
+      .priority = 100,
+      .physical_device_affinity = 1ull,
+      .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+  };
+
+  iree_hal_device_spec_builder_t builder;
+  iree_hal_device_spec_builder_initialize(host_allocator, &builder);
+  iree_status_t status =
+      iree_hal_device_spec_builder_set_identity(&builder, &identity);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_spec_builder_add_executable_target(
+        &builder, &executable_target);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_spec_builder_finalize(&builder, out_spec);
+  }
+  iree_hal_device_spec_builder_deinitialize(&builder);
+  return status;
+}
+
 iree_status_t iree_hal_amdxdna_device_create(
     iree_string_view_t identifier,
     const struct iree_hal_amdxdna_device_params* options,
@@ -1777,9 +1897,8 @@ iree_status_t iree_hal_amdxdna_device_create(
       identifier, &device->identifier,
       (char*)device + total_size - identifier.size);
 
-  status = iree_hal_device_spec_create_minimal(
-      identifier, identifier, IREE_SV("amdxdna"), IREE_SV("amdxdna"),
-      device->host_allocator, &device->device_spec);
+  status = iree_hal_amdxdna_device_spec_create(
+      identifier, device->host_allocator, &device->device_spec);
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdxdna_native_device_c_create(
         &resolved_options, device->host_allocator, &device->native_device);
@@ -1856,8 +1975,7 @@ static const iree_hal_device_vtable_t iree_hal_amdxdna_device_vtable = {
     .assign_topology_info = iree_hal_amdxdna_device_assign_topology_info,
     .create_channel = iree_hal_amdxdna_device_create_channel,
     .create_command_buffer = iree_hal_amdxdna_device_create_command_buffer,
-    .create_event = iree_hal_amdxdna_device_create_event,
-    .create_executable_cache = iree_hal_amdxdna_device_create_executable_cache,
+    .load_executable = iree_hal_amdxdna_device_load_executable,
     .import_file = iree_hal_amdxdna_device_import_file,
     .create_semaphore = iree_hal_amdxdna_device_create_semaphore,
     .query_semaphore_compatibility =
@@ -1877,6 +1995,10 @@ static const iree_hal_device_vtable_t iree_hal_amdxdna_device_vtable = {
     .queue_host_call = iree_hal_amdxdna_device_queue_host_call,
     .queue_dispatch = iree_hal_amdxdna_device_queue_dispatch,
     .queue_execute = iree_hal_amdxdna_device_queue_execute,
+    .queue_atomic_wait = iree_hal_amdxdna_device_queue_atomic_wait,
+    .queue_atomic_store = iree_hal_amdxdna_device_queue_atomic_store,
+    .queue_atomic_rmw = iree_hal_amdxdna_device_queue_atomic_rmw,
+    .queue_timestamp = iree_hal_amdxdna_device_queue_timestamp,
     .queue_flush = iree_hal_amdxdna_device_queue_flush,
     // Returning UNIMPLEMENTED here signals callers (e.g. the CTS profiling
     // tests) to skip profiling-dependent assertions instead of treating the

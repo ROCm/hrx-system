@@ -29,6 +29,8 @@ typedef struct iree_hal_amdgpu_hsaco_kernel_load_plan_t {
   // Native byte offset of the implicit-argument suffix, or
   // IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE.
   iree_host_size_t implicit_args_byte_offset;
+  // Semantic kernarg layout flags derived from exact HSACO argument kinds.
+  iree_hal_amdgpu_kernarg_layout_flags_t declared_layout_flags;
   // Byte length required for the immutable native kernarg layout record.
   iree_host_size_t layout_byte_length;
 } iree_hal_amdgpu_hsaco_kernel_load_plan_t;
@@ -112,6 +114,16 @@ static bool iree_hal_amdgpu_hsaco_metadata_arg_kind_is_hidden(
          kind == IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN_NONE;
 }
 
+static bool iree_hal_amdgpu_hsaco_metadata_arg_uses_implicit_block_count(
+    const iree_hal_amdgpu_hsaco_metadata_arg_t* arg) {
+  return iree_string_view_equal(arg->value_kind,
+                                IREE_SV("hidden_block_count_x")) ||
+         iree_string_view_equal(arg->value_kind,
+                                IREE_SV("hidden_block_count_y")) ||
+         iree_string_view_equal(arg->value_kind,
+                                IREE_SV("hidden_block_count_z"));
+}
+
 static iree_status_t iree_hal_amdgpu_hsaco_load_plan_check_u16(
     iree_string_view_t symbol_name, iree_string_view_t field_name,
     iree_host_size_t value) {
@@ -165,6 +177,10 @@ static iree_status_t iree_hal_amdgpu_hsaco_load_plan_analyze_kernel(
     if (iree_hal_amdgpu_hsaco_metadata_arg_kind_is_hidden(arg->kind)) {
       hidden_args_offset =
           iree_min(hidden_args_offset, (iree_host_size_t)arg->offset);
+      if (iree_hal_amdgpu_hsaco_metadata_arg_uses_implicit_block_count(arg)) {
+        out_load_plan->declared_layout_flags |=
+            IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_USES_IMPLICIT_BLOCK_COUNT;
+      }
       continue;
     }
 
@@ -382,6 +398,7 @@ static iree_status_t iree_hal_amdgpu_hsaco_load_plan_populate_layout_tables(
       .kernarg_alignment = kernel->kernarg_segment_alignment,
       .constant_byte_length = load_plan->constant_byte_length,
       .implicit_args_byte_offset = load_plan->implicit_args_byte_offset,
+      .declared_flags = load_plan->declared_layout_flags,
       .binding_count = load_plan->binding_count,
       .binding_slots = binding_slots,
       .constant_span_count = load_plan->constant_span_count,
@@ -400,6 +417,7 @@ static iree_status_t iree_hal_amdgpu_hsaco_load_plan_populate_parameters(
 
   iree_host_size_t parameter_ordinal = 0;
   iree_host_size_t constant_source_offset = 0;
+  uint16_t binding_ordinal = 0;
   for (iree_host_size_t i = 0; i < kernel->arg_count; ++i) {
     const iree_hal_amdgpu_hsaco_metadata_arg_t* arg = &kernel->args[i];
     if (iree_hal_amdgpu_hsaco_metadata_arg_kind_is_hidden(arg->kind)) {
@@ -413,19 +431,21 @@ static iree_status_t iree_hal_amdgpu_hsaco_load_plan_populate_parameters(
     iree_hal_executable_function_parameter_t* parameter =
         &out_parameters[parameter_ordinal++];
     memset(parameter, 0, sizeof(*parameter));
-    parameter->flags = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NONE;
+    parameter->flags =
+        IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NATIVE_ABI_OFFSET;
     parameter->size = (uint16_t)arg->size;
+    parameter->native_abi_offset = (uint16_t)arg->offset;
     IREE_RETURN_IF_ERROR(
         iree_hal_amdgpu_hsaco_loaded_code_object_rebase_string_view(
             rebase, "parameter name", arg->name, &parameter->name));
     switch (arg->kind) {
       case IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_GLOBAL_BUFFER:
-        // Preserve native kernarg offsets for HIP-style custom-direct callers.
-        // The internal kernarg layout still records binding slots for normal
-        // HAL dispatch binding lists.
-        parameter->type =
-            IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BUFFER_PTR;
-        parameter->offset = (uint16_t)arg->offset;
+        // HAL dispatches use a dense binding list while native callers use the
+        // target kernarg byte image. Keep those representations distinct: the
+        // public offset is the HAL binding ordinal and native_abi_offset is the
+        // target-specific placement for custom-direct dispatch.
+        parameter->type = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BINDING;
+        parameter->offset = binding_ordinal++;
         break;
       case IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_BY_VALUE:
         parameter->type = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT;
@@ -455,6 +475,14 @@ static void iree_hal_amdgpu_hsaco_load_plan_populate_workgroup_size(
     out_export->flags |=
         IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_REQUIRES_DISPATCH_WORKGROUP_SIZE;
   }
+}
+
+static void iree_hal_amdgpu_hsaco_load_plan_populate_workgroup_cluster_size(
+    const iree_hal_amdgpu_hsaco_metadata_kernel_t* kernel,
+    iree_hal_amdgpu_executable_export_t* out_export) {
+  if (!kernel->has_workgroup_cluster_size) return;
+  memcpy(out_export->workgroup_cluster_size, kernel->workgroup_cluster_size,
+         sizeof(out_export->workgroup_cluster_size));
 }
 
 iree_status_t iree_hal_amdgpu_executable_metadata_populate_from_hsaco(
@@ -520,14 +548,18 @@ iree_status_t iree_hal_amdgpu_executable_metadata_populate_from_hsaco(
     reflection->parameter_count = (uint32_t)load_plan.parameter_count;
 
     iree_hal_amdgpu_executable_export_t* export_info = &metadata->exports[i];
-    export_info->flags = IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_NONE;
-    export_info->fixed_group_segment_size = kernel->group_segment_fixed_size;
-    export_info->fixed_private_segment_size =
-        kernel->private_segment_fixed_size;
-    export_info->max_dynamic_workgroup_local_memory =
-        UINT32_MAX - kernel->group_segment_fixed_size;
+    export_info->flags =
+        IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_HAS_RESOURCE_METADATA;
+    export_info->maximum_workgroup_invocations =
+        kernel->max_flat_workgroup_size;
+    export_info->fixed_workgroup_local_memory_size =
+        kernel->group_segment_fixed_size;
+    export_info->fixed_private_memory_size = kernel->private_segment_fixed_size;
+    export_info->invocation_register_count = kernel->vgpr_count;
     iree_hal_amdgpu_hsaco_load_plan_populate_workgroup_size(kernel,
                                                             export_info);
+    iree_hal_amdgpu_hsaco_load_plan_populate_workgroup_cluster_size(
+        kernel, export_info);
 
     iree_byte_span_t layout_storage = iree_byte_span_empty();
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_executable_metadata_append_layout(

@@ -178,6 +178,84 @@ iree_status_t iree_hal_cmd_build_update(iree_hal_cmd_block_builder_t* builder,
 }
 
 //===----------------------------------------------------------------------===//
+// ATOMIC
+//===----------------------------------------------------------------------===//
+
+static iree_status_t iree_hal_cmd_build_atomic(
+    iree_hal_cmd_block_builder_t* builder, iree_hal_cmd_opcode_t opcode,
+    iree_host_size_t command_size, void** out_command,
+    iree_hal_cmd_fixup_t** out_fixups, iree_hal_cmd_build_token_t* out_token) {
+  out_token->command = NULL;
+  out_token->cmd_bytes = command_size;
+  out_token->flags = IREE_HAL_CMD_FLAG_NONE;
+  out_token->fixup_count = 1;
+  out_token->binding_count = 1;
+  out_token->tile_count = 1;
+  IREE_RETURN_IF_ERROR(iree_hal_cmd_block_builder_append_cmd(
+      builder, opcode, IREE_HAL_CMD_FLAG_NONE, command_size,
+      out_token->fixup_count, out_token->binding_count, out_token->tile_count,
+      out_command, out_fixups));
+
+  const uint16_t target_binding =
+      (uint16_t)(builder->total_binding_count - out_token->binding_count);
+  (*out_fixups)[0].data_index = target_binding;
+  out_token->command = (iree_hal_cmd_header_t*)*out_command;
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_cmd_build_atomic_wait(
+    iree_hal_cmd_block_builder_t* builder, iree_hal_atomic_wait_params_t params,
+    iree_hal_cmd_fixup_t** out_fixups, iree_hal_cmd_build_token_t* out_token) {
+  IREE_ASSERT_ARGUMENT(builder);
+  IREE_ASSERT_ARGUMENT(out_fixups);
+  IREE_ASSERT_ARGUMENT(out_token);
+
+  iree_hal_cmd_atomic_wait_t* command = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_cmd_build_atomic(
+      builder, IREE_HAL_CMD_ATOMIC_WAIT, sizeof(iree_hal_cmd_atomic_wait_t),
+      (void**)&command, out_fixups, out_token));
+  command->target_binding = (*out_fixups)[0].data_index;
+  command->reserved = 0;
+  command->params = params;
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_cmd_build_atomic_store(
+    iree_hal_cmd_block_builder_t* builder,
+    iree_hal_atomic_store_params_t params, iree_hal_cmd_fixup_t** out_fixups,
+    iree_hal_cmd_build_token_t* out_token) {
+  IREE_ASSERT_ARGUMENT(builder);
+  IREE_ASSERT_ARGUMENT(out_fixups);
+  IREE_ASSERT_ARGUMENT(out_token);
+
+  iree_hal_cmd_atomic_store_t* command = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_cmd_build_atomic(
+      builder, IREE_HAL_CMD_ATOMIC_STORE, sizeof(iree_hal_cmd_atomic_store_t),
+      (void**)&command, out_fixups, out_token));
+  command->target_binding = (*out_fixups)[0].data_index;
+  command->reserved = 0;
+  command->params = params;
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_cmd_build_atomic_rmw(
+    iree_hal_cmd_block_builder_t* builder, iree_hal_atomic_rmw_params_t params,
+    iree_hal_cmd_fixup_t** out_fixups, iree_hal_cmd_build_token_t* out_token) {
+  IREE_ASSERT_ARGUMENT(builder);
+  IREE_ASSERT_ARGUMENT(out_fixups);
+  IREE_ASSERT_ARGUMENT(out_token);
+
+  iree_hal_cmd_atomic_rmw_t* command = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_cmd_build_atomic(
+      builder, IREE_HAL_CMD_ATOMIC_RMW, sizeof(iree_hal_cmd_atomic_rmw_t),
+      (void**)&command, out_fixups, out_token));
+  command->target_binding = (*out_fixups)[0].data_index;
+  command->reserved = 0;
+  command->params = params;
+  return iree_ok_status();
+}
+
+//===----------------------------------------------------------------------===//
 // DISPATCH
 //===----------------------------------------------------------------------===//
 

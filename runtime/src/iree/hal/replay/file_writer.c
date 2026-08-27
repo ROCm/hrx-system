@@ -88,7 +88,7 @@ static iree_status_t iree_hal_replay_file_calculate_payload_length(
   return iree_ok_status();
 }
 
-IREE_API_EXPORT iree_status_t iree_hal_replay_file_writer_create(
+IREE_API_EXPORT iree_status_t iree_hal_replay_file_writer_allocate(
     iree_io_file_handle_t* file_handle, iree_allocator_t host_allocator,
     iree_hal_replay_file_writer_t** out_writer) {
   IREE_ASSERT_ARGUMENT(file_handle);

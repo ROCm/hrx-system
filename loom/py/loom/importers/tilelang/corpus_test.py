@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import re
 from argparse import Namespace
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -15,7 +14,12 @@ from unittest import SkipTest
 
 from loom.importers.check.tilelang.backend import TileLangBackend
 from loom.importers.check.tilelang.harness import TileLangHarness
-from loom.importers.core import kernel_module_ops, print_loom_module
+from loom.importers.core import (
+    kernel_module_ops,
+    print_loom_module,
+    sanitize_identifier,
+    target_preset_amdgpu_kind,
+)
 from loom.importers.tilelang.importer import TileLangImportOptions, import_tilelang
 from loom.importers.tilelang.model import TileLangImportInput
 from loom.importers.tilelang.testdata.tilekernels import (
@@ -28,11 +32,12 @@ from loom.importers.tilelang.testdata.tilekernels import (
     transpose,
 )
 
-_TARGET_PRESETS = ("hip -mcpu=gfx942", "hip -mcpu=gfx1100")
-_TARGET_DECL_RE = re.compile(
-    r"amdgpu\.target<gfx(?:942|1100)> @hip_mcpu_gfx(?:942|1100)"
+_GFX9_4_TARGET_PRESET = "hip -mcpu=gfx9-4-generic"
+_GFX11_TARGET_PRESET = "hip -mcpu=gfx11-generic"
+_TARGET_PRESETS = (
+    _GFX9_4_TARGET_PRESET,
+    _GFX11_TARGET_PRESET,
 )
-_TARGET_SYMBOL_RE = re.compile(r"@hip_mcpu_gfx(?:942|1100)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,7 +50,7 @@ class _CorpusCase:
 _CORPUS_CASES = (
     _CorpusCase(
         name="batched_transpose",
-        fixture=transpose.tilekernels_batched_transpose_gfx942,
+        fixture=transpose.tilekernels_batched_transpose_gfx9_4_generic,
         required_fragments=(
             "kernel.barrier<workgroup>",
             "buffer.alloca",
@@ -54,7 +59,7 @@ _CORPUS_CASES = (
     ),
     _CorpusCase(
         name="engram_hash",
-        fixture=engram.tilekernels_engram_hash_gfx1100,
+        fixture=engram.tilekernels_engram_hash_gfx11_generic,
         required_fragments=(
             "kernel.exit",
             "scalar.remsi",
@@ -64,7 +69,7 @@ _CORPUS_CASES = (
     ),
     _CorpusCase(
         name="group_count",
-        fixture=moe_histogram.tilekernels_group_count_gfx1100,
+        fixture=moe_histogram.tilekernels_group_count_gfx11_generic,
         required_fragments=(
             "view.atomic.reduce<addi>",
             "kernel.barrier<workgroup>",
@@ -73,7 +78,7 @@ _CORPUS_CASES = (
     ),
     _CorpusCase(
         name="expand_to_fused",
-        fixture=moe_expand.tilekernels_expand_to_fused_gfx1100,
+        fixture=moe_expand.tilekernels_expand_to_fused_gfx11_generic,
         required_fragments=(
             "index.max",
             "kernel.exit",
@@ -82,7 +87,7 @@ _CORPUS_CASES = (
     ),
     _CorpusCase(
         name="topk_gate",
-        fixture=moe_gate.tilekernels_topk_gate_gfx1100,
+        fixture=moe_gate.tilekernels_topk_gate_gfx11_generic,
         required_fragments=(
             "vector.reduce<maxnumf>",
             "kernel.workgroup.reduce<minsi>",
@@ -91,7 +96,7 @@ _CORPUS_CASES = (
     ),
     _CorpusCase(
         name="reduce_fused",
-        fixture=moe_reduce.tilekernels_reduce_fused_gfx1100,
+        fixture=moe_reduce.tilekernels_reduce_fused_gfx11_generic,
         required_fragments=(
             "scalar.assume",
             "scalar.extf",
@@ -100,7 +105,7 @@ _CORPUS_CASES = (
     ),
     _CorpusCase(
         name="normalize_weight",
-        fixture=moe_normalize.tilekernels_normalize_weight_gfx1100,
+        fixture=moe_normalize.tilekernels_normalize_weight_gfx11_generic,
         required_fragments=(
             "scalar.addf",
             "scalar.divf",
@@ -110,7 +115,7 @@ _CORPUS_CASES = (
 )
 
 
-def test_tilekernels_corpus_retargets_between_cdna_and_rdna() -> None:
+def test_tilekernels_corpus_retargets_between_generic_gfx9_4_and_gfx11() -> None:
     _require_tilelang()
     harness = TileLangHarness()
     for corpus_case in _CORPUS_CASES:
@@ -122,8 +127,14 @@ def test_tilekernels_corpus_retargets_between_cdna_and_rdna() -> None:
             )
             for target_preset in _TARGET_PRESETS
         }
-        assert _erase_target_identity(outputs["hip -mcpu=gfx942"]) == (
-            _erase_target_identity(outputs["hip -mcpu=gfx1100"])
+        assert _erase_target_identity(
+            outputs[_GFX9_4_TARGET_PRESET],
+            _GFX9_4_TARGET_PRESET,
+        ) == (
+            _erase_target_identity(
+                outputs[_GFX11_TARGET_PRESET],
+                _GFX11_TARGET_PRESET,
+            )
         ), corpus_case.name
 
 
@@ -141,7 +152,7 @@ def test_cdna_fp8_high_level_gemm_imports_to_mfma_fragments() -> None:
     )
 
     for fragment in (
-        'matrix_operand<element_format="f8e4m3fnuz"',
+        "#encoding.f8e4m3fnuz",
         "kernel.barrier<workgroup>",
         "vector.bitcast",
         "vector.fragment<lhs>",
@@ -167,9 +178,10 @@ def _import_corpus_case(
         result.module,
         ops=kernel_module_ops(target_preset),
     )
-    arch = _target_arch(target_preset)
-    target_symbol = f"hip_mcpu_{arch}"
-    assert f"amdgpu.target<{arch}> @{target_symbol}" in output
+    target_kind = target_preset_amdgpu_kind(target_preset)
+    assert target_kind is not None
+    target_symbol = sanitize_identifier(target_preset, fallback="target")
+    assert f"amdgpu.target<{target_kind}> @{target_symbol}" in output
     assert f"kernel.def target(@{target_symbol})" in output
     for fragment in corpus_case.required_fragments:
         assert fragment in output, f"{corpus_case.name}: {fragment}"
@@ -207,16 +219,15 @@ def _build_cdna_fp8_gemm_input(T: Any) -> TileLangImportInput:
     )
 
 
-def _erase_target_identity(output: str) -> str:
-    output = _TARGET_DECL_RE.sub("amdgpu.target<gfx> @hip_mcpu_gfx", output)
-    return _TARGET_SYMBOL_RE.sub("@hip_mcpu_gfx", output)
-
-
-def _target_arch(target_preset: str) -> str:
-    match = re.search(r"\bgfx[0-9]+\b", target_preset)
-    if match is None:
-        raise AssertionError(f"target preset has no AMDGPU arch: {target_preset}")
-    return match.group(0)
+def _erase_target_identity(output: str, target_preset: str) -> str:
+    target_kind = target_preset_amdgpu_kind(target_preset)
+    assert target_kind is not None
+    target_symbol = sanitize_identifier(target_preset, fallback="target")
+    output = output.replace(
+        f"amdgpu.target<{target_kind}> @{target_symbol}",
+        "amdgpu.target<gfx> @hip_mcpu_gfx",
+    )
+    return output.replace(f"@{target_symbol}", "@hip_mcpu_gfx")
 
 
 def _require_tilelang() -> None:

@@ -21,6 +21,10 @@ extern "C" {
 LOOMC_API_PRIVATE loomc_context_t* loomc_link_index_context(
     const loomc_link_index_t* link_index);
 
+// Returns the host allocator owned by a frozen public link index.
+LOOMC_API_PRIVATE loomc_allocator_t
+loomc_link_index_allocator(const loomc_link_index_t* link_index);
+
 // Returns the internal module index owned by a frozen public link index.
 LOOMC_API_PRIVATE const loom_link_module_index_t* loomc_link_index_module_index(
     const loomc_link_index_t* link_index);

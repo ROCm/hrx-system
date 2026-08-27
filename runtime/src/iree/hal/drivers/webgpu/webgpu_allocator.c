@@ -21,7 +21,7 @@
 //
 // 2. Staging write: MAP_WRITE | COPY_SRC. Created with mappedAtCreation:true.
 //    Host writes data, unmaps to trigger GPU upload, then copies to
-//    device-local. This is the bd-bqa path for HOST_LOCAL|DEVICE_VISIBLE.
+//    device-local. This is the HOST_LOCAL | DEVICE_VISIBLE path.
 //
 // 3. Staging read: MAP_READ | COPY_DST. Created normally, mapped after GPU
 //    copies results into it via mapAsync. Host reads results from the mapped
@@ -145,8 +145,9 @@ static iree_status_t iree_hal_webgpu_allocator_query_memory_heaps(
   // HOST_LOCAL | DEVICE_VISIBLE with MAP_WRITE | COPY_SRC.
   // Created with mappedAtCreation:true for immediate host write access.
   heaps[i++] = (iree_hal_allocator_memory_heap_t){
-      .type =
-          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+              IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
+              IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
       .allowed_usage =
           IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED,
       .max_allocation_size = max_allocation_size,
@@ -210,7 +211,7 @@ iree_hal_webgpu_allocator_compute_gpu_usage(iree_hal_memory_type_t memory_type,
   if (iree_any_bit_set(usage, IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET)) {
     gpu_usage |= IREE_HAL_WEBGPU_BUFFER_USAGE_COPY_DST;
   }
-  if (iree_any_bit_set(usage, IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE)) {
+  if (iree_any_bit_set(usage, IREE_HAL_BUFFER_USAGE_STORAGE)) {
     gpu_usage |= IREE_HAL_WEBGPU_BUFFER_USAGE_STORAGE;
   }
   if (iree_any_bit_set(usage, IREE_HAL_BUFFER_USAGE_DISPATCH_UNIFORM_READ)) {
@@ -234,31 +235,24 @@ iree_hal_webgpu_allocator_query_buffer_compatibility(
     iree_hal_allocator_t* IREE_RESTRICT base_allocator,
     iree_hal_buffer_params_t* IREE_RESTRICT params,
     iree_device_size_t* IREE_RESTRICT allocation_size) {
+  const iree_hal_memory_type_t required_type =
+      params->type & ~IREE_HAL_MEMORY_TYPE_OPTIMAL;
+  if (iree_any_bit_set(params->type, IREE_HAL_MEMORY_TYPE_DEVICE_UNCACHED)) {
+    return IREE_HAL_BUFFER_COMPATIBILITY_NONE;
+  }
+  if (iree_all_bits_set(required_type, IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                                           IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL)) {
+    return IREE_HAL_BUFFER_COMPATIBILITY_NONE;
+  }
+
   iree_hal_buffer_compatibility_t compatibility =
       IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE;
 
-  // If the buffer is device-visible it can participate in queue operations.
-  if (iree_all_bits_set(params->type, IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE) ||
-      iree_all_bits_set(params->type, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL)) {
-    if (iree_any_bit_set(params->usage, IREE_HAL_BUFFER_USAGE_TRANSFER)) {
-      compatibility |= IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_TRANSFER;
-    }
-    if (iree_any_bit_set(params->usage,
-                         IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE)) {
-      compatibility |= IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_DISPATCH;
-    }
-  }
-
-  // WebGPU cannot have a buffer that is both a storage binding and
-  // host-mappable. If someone requests DEVICE_LOCAL | HOST_VISIBLE with
-  // DISPATCH_STORAGE, we can allocate it as device-local (dropping
-  // HOST_VISIBLE) but warn that it will require staging for host access.
-  if (iree_all_bits_set(params->type, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
-                                          IREE_HAL_MEMORY_TYPE_HOST_VISIBLE) &&
-      iree_any_bit_set(params->usage, IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE)) {
-    // Coerce to pure device-local — host access requires staging copies.
-    compatibility |= IREE_HAL_BUFFER_COMPATIBILITY_LOW_PERFORMANCE;
-    params->type &= ~IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
+  // WebGPU storage buffers cannot be host-mappable.
+  if (iree_all_bits_set(required_type, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
+                                           IREE_HAL_MEMORY_TYPE_HOST_VISIBLE) &&
+      iree_any_bit_set(params->usage, IREE_HAL_BUFFER_USAGE_STORAGE)) {
+    return IREE_HAL_BUFFER_COMPATIBILITY_NONE;
   }
 
   // Handle OPTIMAL: choose the best heap based on usage.
@@ -266,35 +260,39 @@ iree_hal_webgpu_allocator_query_buffer_compatibility(
     params->type &= ~IREE_HAL_MEMORY_TYPE_OPTIMAL;
     if (iree_any_bit_set(params->usage, IREE_HAL_BUFFER_USAGE_MAPPING)) {
       // Mapping requested → staging buffer.
-      params->type |=
-          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+      params->type |= IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                      IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
+                      IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
     } else {
       // Default to device-local for compute buffers.
       params->type |= IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
     }
-  } else {
-    // Not OPTIMAL — clear the bit if it somehow snuck in.
-    params->type &= ~IREE_HAL_MEMORY_TYPE_OPTIMAL;
   }
 
   // WebGPU only has host-visible buffers in the form of mappable staging
-  // buffers (MAP_READ|COPY_DST or MAP_WRITE|COPY_SRC). If someone requests
-  // host-visible memory without MAPPING usage, there is no WebGPU buffer type
-  // that matches — coerce to device-local since the caller doesn't need host
-  // access. This happens when e.g. HOST_LOCAL is requested for a storage
-  // buffer without explicit MAPPING_SCOPED/MAPPING_PERSISTENT usage.
+  // buffers (MAP_READ|COPY_DST or MAP_WRITE|COPY_SRC).
   if (iree_all_bits_set(params->type, IREE_HAL_MEMORY_TYPE_HOST_VISIBLE) &&
       !iree_any_bit_set(params->usage, IREE_HAL_BUFFER_USAGE_MAPPING)) {
-    params->type &= ~(
-        IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
-        IREE_HAL_MEMORY_TYPE_HOST_COHERENT | IREE_HAL_MEMORY_TYPE_HOST_CACHED);
-    params->type |= IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+    return IREE_HAL_BUFFER_COMPATIBILITY_NONE;
   }
 
-  // Ensure HOST_LOCAL staging buffers have DEVICE_VISIBLE set (implied by the
-  // staging buffer model — the GPU must be able to copy from/to the buffer).
-  if (iree_all_bits_set(params->type, IREE_HAL_MEMORY_TYPE_HOST_LOCAL)) {
-    params->type |= IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+  // Staging buffers are coherent and device-visible.
+  if (iree_all_bits_set(params->type, IREE_HAL_MEMORY_TYPE_HOST_VISIBLE) &&
+      iree_any_bit_set(params->usage, IREE_HAL_BUFFER_USAGE_MAPPING)) {
+    params->type |= IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
+                    IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+  }
+  if (!iree_all_bits_set(params->type, required_type)) {
+    return IREE_HAL_BUFFER_COMPATIBILITY_NONE;
+  }
+
+  if (iree_all_bits_set(params->type, IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE)) {
+    if (iree_any_bit_set(params->usage, IREE_HAL_BUFFER_USAGE_TRANSFER)) {
+      compatibility |= IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_TRANSFER;
+    }
+    if (iree_any_bit_set(params->usage, IREE_HAL_BUFFER_USAGE_STORAGE)) {
+      compatibility |= IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_DISPATCH;
+    }
   }
 
   // WebGPU buffer sizes must be multiples of 4 bytes.

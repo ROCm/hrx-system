@@ -11,16 +11,23 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/json.h"
+#include "loom/analysis/symbol_value_constraints.h"
 #include "loom/format/text/parser.h"
 #include "loom/format/text/printer.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/encoding.h"
-#include "loom/ops/config/contract.h"
 #include "loom/ops/config/ops.h"
 #include "loom/ops/encoding/roles.h"
 #include "loom/tooling/io/file.h"
 #include "loom/util/json.h"
 #include "loom/util/stream.h"
+
+static loom_value_id_t loom_tooling_config_symbol_result_value(
+    const loom_op_t* op) {
+  if (loom_config_decl_isa(op)) return loom_config_decl_type(op);
+  if (loom_config_def_isa(op)) return loom_config_def_type(op);
+  return LOOM_VALUE_ID_INVALID;
+}
 
 void loom_tooling_config_materialize_options_initialize(
     loom_tooling_config_materialize_options_t* out_options) {
@@ -417,10 +424,10 @@ static iree_status_t loom_tooling_config_copy_named_attrs(
     *out_target_entries = NULL;
     return iree_ok_status();
   }
-  if (depth >= LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
+  if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "config value attribute nesting exceeds max %u",
-                            (unsigned)LOOM_ATTR_DICT_MAX_NESTING_DEPTH);
+                            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
   }
   loom_named_attr_t* target_entries = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(&target_module->arena, count,
@@ -443,10 +450,10 @@ static iree_status_t loom_tooling_config_copy_encoding(
     const loom_module_t* source_module, loom_module_t* target_module,
     uint16_t source_encoding_id, uint8_t depth,
     uint16_t* out_target_encoding_id) {
-  if (depth >= LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
+  if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "config encoding nesting exceeds max %u",
-                            (unsigned)LOOM_ATTR_DICT_MAX_NESTING_DEPTH);
+                            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
   }
   const loom_encoding_t* source_encoding =
       loom_module_encoding(source_module, source_encoding_id);
@@ -520,6 +527,33 @@ static iree_status_t loom_tooling_config_copy_attr(
           loom_make_named_attr_slice(target_entries, source_attr.count),
           out_attr);
     }
+    case LOOM_ATTR_PARAMETERIZED: {
+      loom_attribute_t target_slots[UINT8_MAX];
+      for (uint16_t i = 0; i < source_attr.count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_tooling_config_copy_attr(
+            source_module, target_module, source_attr.parameterized_slots[i],
+            (uint8_t)(depth + 1), &target_slots[i]));
+      }
+      return loom_module_make_parameterized_attr(
+          target_module, (loom_parameterized_attr_kind_t)source_attr.reserved_1,
+          target_slots, source_attr.count, out_attr);
+    }
+    case LOOM_ATTR_PARAMETERIZED_ARRAY: {
+      loom_attribute_t* target_attributes = NULL;
+      if (source_attr.count > 0) {
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            &target_module->arena, source_attr.count,
+            sizeof(*target_attributes), (void**)&target_attributes));
+        for (uint16_t i = 0; i < source_attr.count; ++i) {
+          IREE_RETURN_IF_ERROR(loom_tooling_config_copy_attr(
+              source_module, target_module, source_attr.parameterized_array[i],
+              (uint8_t)(depth + 1), &target_attributes[i]));
+        }
+      }
+      *out_attr =
+          loom_attr_parameterized_array(target_attributes, source_attr.count);
+      return iree_ok_status();
+    }
     case LOOM_ATTR_ENCODING: {
       uint16_t target_encoding_id = 0;
       IREE_RETURN_IF_ERROR(loom_tooling_config_copy_encoding(
@@ -530,8 +564,13 @@ static iree_status_t loom_tooling_config_copy_attr(
       return iree_ok_status();
     }
     case LOOM_ATTR_SYMBOL:
+    case LOOM_ATTR_SYMBOL_ARRAY:
+    case LOOM_ATTR_SYMBOL_SET:
     case LOOM_ATTR_TYPE:
     case LOOM_ATTR_PREDICATE_LIST:
+    case LOOM_ATTR_SCOPED_ENUM:
+    case LOOM_ATTR_ENUM_ARRAY:
+    case LOOM_ATTR_SIGNED_ENUM_SET:
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "config encoding value contains unsupported attribute kind %u",
@@ -719,7 +758,7 @@ static iree_status_t loom_tooling_config_replace_with_def(
   loom_op_t* before_op = old_op->next_op;
   loom_op_t* parent_op = old_op->parent_op;
   loom_location_id_t location = old_op->location;
-  loom_value_id_t old_result = loom_config_symbol_result_value(old_op);
+  loom_value_id_t old_result = loom_tooling_config_symbol_result_value(old_op);
 
   IREE_RETURN_IF_ERROR(loom_op_erase(module, old_op));
 
@@ -759,8 +798,6 @@ iree_status_t loom_tooling_config_materialize_module(
     return iree_ok_status();
   }
 
-  const bool require_matches = iree_any_bit_set(
-      options->flags, LOOM_TOOLING_CONFIG_MATERIALIZE_REQUIRE_MATCHES);
   for (iree_host_size_t i = 0; i < binding_count; ++i) {
     const loom_tooling_config_binding_t* binding = &config_set->bindings[i];
     iree_string_view_t key = binding->key;
@@ -769,27 +806,18 @@ iree_status_t loom_tooling_config_materialize_module(
     IREE_RETURN_IF_ERROR(
         loom_tooling_config_lookup_symbol(module, key, &symbol_id));
     if (symbol_id == LOOM_SYMBOL_ID_INVALID) {
-      if (require_matches) {
-        return iree_make_status(IREE_STATUS_NOT_FOUND, "unknown config '%.*s'",
-                                (int)key.size, key.data);
-      }
       ++result.ignored_count;
       continue;
     }
 
     loom_symbol_t* symbol = &module->symbols.entries[symbol_id];
     if (!loom_tooling_config_symbol_is_config(symbol)) {
-      if (!require_matches && symbol->definition == NULL &&
-          symbol->defining_op == NULL) {
-        ++result.ignored_count;
-        continue;
-      }
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "symbol '%.*s' is not a config symbol",
-                              (int)key.size, key.data);
+      ++result.ignored_count;
+      continue;
     }
     loom_op_t* old_op = symbol->defining_op;
-    loom_value_id_t config_value = loom_config_symbol_result_value(old_op);
+    loom_value_id_t config_value =
+        loom_tooling_config_symbol_result_value(old_op);
     if (config_value == LOOM_VALUE_ID_INVALID ||
         config_value >= module->values.count) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -802,7 +830,7 @@ iree_status_t loom_tooling_config_materialize_module(
     IREE_RETURN_IF_ERROR(loom_tooling_config_parse_value(
         module, key, config_type, value_text, block_pool, &value));
     if (loom_config_decl_isa(old_op)) {
-      IREE_RETURN_IF_ERROR(loom_config_check_value_constraints(
+      IREE_RETURN_IF_ERROR(loom_symbol_value_constraints_check_exact(
           loom_tooling_config_symbol_name(module, symbol), config_type,
           loom_config_decl_type(old_op), value,
           loom_config_decl_predicates(old_op)));
@@ -844,13 +872,6 @@ iree_status_t loom_tooling_config_require_resolved_module(
       " unresolved config%s total)",
       (int)first_unresolved_name.size, first_unresolved_name.data,
       result.unresolved_count, result.unresolved_count == 1 ? "" : "s");
-}
-
-static iree_status_t loom_tooling_config_write_json_string_field(
-    loom_output_stream_t* stream, const char* name, iree_string_view_t value) {
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_format(stream, "\"%s\":", name));
-  return loom_json_write_escaped_string(stream, value);
 }
 
 static iree_status_t loom_tooling_config_write_printed_type_string(
@@ -899,42 +920,46 @@ static iree_status_t loom_tooling_config_format_predicate_arg_json(
     tag = predicate->arg_tags[arg_index];
     value = predicate->args[arg_index];
   }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
-  IREE_RETURN_IF_ERROR(loom_tooling_config_write_json_string_field(
-      stream, "kind", loom_tooling_config_predicate_arg_kind_name(tag)));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("kind"),
+      loom_tooling_config_predicate_arg_kind_name(tag)));
   switch ((loom_predicate_arg_tag_t)tag) {
     case LOOM_PRED_ARG_VALUE: {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-          stream, ",\"value_id\":%" PRId64, value));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_int64_field(
+          &object, IREE_SV("value_id"), value));
       break;
     }
     case LOOM_PRED_ARG_CONST: {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-          stream, ",\"value\":%" PRId64, value));
+      IREE_RETURN_IF_ERROR(
+          loom_json_object_write_int64_field(&object, IREE_SV("value"), value));
       break;
     }
     default:
       break;
   }
-  return loom_output_stream_write_cstring(stream, "}");
+  return loom_json_object_end(&object);
 }
 
 static iree_status_t loom_tooling_config_format_predicate_json(
     const loom_predicate_t* predicate, loom_output_stream_t* stream) {
   const char* kind_name = loom_predicate_kind_name(predicate->kind);
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
-  IREE_RETURN_IF_ERROR(loom_tooling_config_write_json_string_field(
-      stream, "kind",
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("kind"),
       kind_name ? iree_make_cstring_view(kind_name) : IREE_SV("unknown")));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ",\"args\":["));
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(&object, IREE_SV("args")));
+  loom_json_array_writer_t args;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &args));
   for (uint8_t i = 0; i < predicate->arg_count; ++i) {
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, i == 0 ? "" : ","));
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&args));
     IREE_RETURN_IF_ERROR(
         loom_tooling_config_format_predicate_arg_json(predicate, i, stream));
   }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "]"));
-  return loom_output_stream_write_cstring(stream, "}");
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&args));
+  return loom_json_object_end(&object);
 }
 
 static iree_status_t loom_tooling_config_format_predicates_json(
@@ -949,16 +974,16 @@ static iree_status_t loom_tooling_config_format_predicates_json(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "config constraints predicate list is missing");
   }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "["));
+  loom_json_array_writer_t array;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &array));
   if (predicates.kind == LOOM_ATTR_PREDICATE_LIST) {
     for (uint16_t i = 0; i < predicates.count; ++i) {
-      IREE_RETURN_IF_ERROR(
-          loom_output_stream_write_cstring(stream, i == 0 ? "" : ","));
+      IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&array));
       IREE_RETURN_IF_ERROR(loom_tooling_config_format_predicate_json(
           &predicates.predicate_list[i], stream));
     }
   }
-  return loom_output_stream_write_cstring(stream, "]");
+  return loom_json_array_end(&array);
 }
 
 static iree_status_t loom_tooling_config_format_schema_entry_json(
@@ -975,7 +1000,7 @@ static iree_status_t loom_tooling_config_format_schema_entry_json(
                             (int)symbol_name.size, symbol_name.data);
   }
 
-  loom_value_id_t config_value = loom_config_symbol_result_value(op);
+  loom_value_id_t config_value = loom_tooling_config_symbol_result_value(op);
   if (config_value == LOOM_VALUE_ID_INVALID ||
       config_value >= module->values.count) {
     iree_string_view_t symbol_name =
@@ -986,50 +1011,56 @@ static iree_status_t loom_tooling_config_format_schema_entry_json(
   }
   loom_type_t config_type = loom_module_value_type(module, config_value);
 
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
-  IREE_RETURN_IF_ERROR(loom_tooling_config_write_json_string_field(
-      stream, "name", loom_tooling_config_symbol_name(module, symbol)));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-  IREE_RETURN_IF_ERROR(loom_tooling_config_write_json_string_field(
-      stream, "state", is_decl ? IREE_SV("decl") : IREE_SV("def")));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, ",\"required\":%s,\"type\":", is_decl ? "true" : "false"));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("name"),
+      loom_tooling_config_symbol_name(module, symbol)));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("state"), is_decl ? IREE_SV("decl") : IREE_SV("def")));
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_write_bool_field(&object, IREE_SV("required"), is_decl));
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(&object, IREE_SV("type")));
   IREE_RETURN_IF_ERROR(loom_tooling_config_write_printed_type_string(
       module, config_type, stream));
   if (is_def) {
     IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, ",\"default\":"));
+        loom_json_object_begin_field(&object, IREE_SV("default")));
     IREE_RETURN_IF_ERROR(loom_tooling_config_write_printed_attr_string(
         module, loom_config_def_value(op), stream));
   }
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"constraints\":"));
+      loom_json_object_begin_field(&object, IREE_SV("constraints")));
   loom_attribute_t predicates =
       is_decl ? loom_config_decl_predicates(op) : loom_attr_absent();
   IREE_RETURN_IF_ERROR(
       loom_tooling_config_format_predicates_json(predicates, stream));
-  return loom_output_stream_write_cstring(stream, "}");
+  return loom_json_object_end(&object);
 }
 
 iree_status_t loom_tooling_config_format_schema_json(
     const loom_module_t* module, loom_output_stream_t* stream) {
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(stream);
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, "{\"configs\":["));
+      loom_json_object_begin_field(&object, IREE_SV("configs")));
+  loom_json_array_writer_t configs;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &configs));
   iree_host_size_t config_count = 0;
   const loom_symbol_t* symbol = NULL;
   loom_module_for_each_symbol(module, symbol) {
     if (!loom_tooling_config_symbol_is_config(symbol)) {
       continue;
     }
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, config_count == 0 ? "" : ","));
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&configs));
     IREE_RETURN_IF_ERROR(
         loom_tooling_config_format_schema_entry_json(module, symbol, stream));
     ++config_count;
   }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, "],\"count\":%" PRIhsz "}", config_count));
-  return iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&configs));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("count"), config_count));
+  return loom_json_object_end(&object);
 }

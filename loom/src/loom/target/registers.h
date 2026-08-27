@@ -64,9 +64,39 @@ static inline uint32_t loom_low_register_type_unit_count(loom_type_t type) {
   return (uint32_t)((loom_type_register_payload1(type) >> 16) & 0xFFFFFFFFu);
 }
 
-// Returns a register type with the same descriptor/class identity as |type|
-// and a different unit count.
-static inline loom_type_t loom_low_register_type_with_unit_count(
+// Returns true when |lhs| and |rhs| name the same target-low register class.
+// Semantic value types and contiguous unit counts do not participate.
+static inline bool loom_low_register_type_same_class(loom_type_t lhs,
+                                                     loom_type_t rhs) {
+  return loom_low_type_is_register(lhs) && loom_low_type_is_register(rhs) &&
+         loom_low_register_type_descriptor_set_stable_id(lhs) ==
+             loom_low_register_type_descriptor_set_stable_id(rhs) &&
+         loom_low_register_type_class_id(lhs) ==
+             loom_low_register_type_class_id(rhs);
+}
+
+// Returns true when |lhs| and |rhs| carry the same number of contiguous
+// register-class units. Carrier classes and semantic value types do not
+// participate.
+static inline bool loom_low_register_type_same_unit_count(loom_type_t lhs,
+                                                          loom_type_t rhs) {
+  return loom_low_type_is_register(lhs) && loom_low_type_is_register(rhs) &&
+         loom_low_register_type_unit_count(lhs) ==
+             loom_low_register_type_unit_count(rhs);
+}
+
+// Returns the preferred base-unit alignment for a contiguous register value.
+// Power-of-two widths align to their width so packet-sized values naturally
+// occupy encodable register groups; other widths have no extra alignment.
+static inline uint32_t loom_low_register_unit_alignment(uint32_t unit_count) {
+  return unit_count > 1 && (unit_count & (unit_count - 1u)) == 0 ? unit_count
+                                                                 : 1u;
+}
+
+// Projects the carrier identity from |type| and returns an untyped register
+// range with |unit_count| units. This deliberately discards any semantic value
+// type and is only valid for code operating on physical carrier bits.
+static inline loom_type_t loom_low_register_carrier_type_with_unit_count(
     loom_type_t type, uint32_t unit_count) {
   return loom_low_register_type(
       loom_low_register_type_descriptor_set_stable_id(type),

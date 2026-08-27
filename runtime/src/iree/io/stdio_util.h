@@ -22,6 +22,7 @@
 
 #define iree_dup _dup
 #define iree_close _close
+#define iree_fdopen _fdopen
 
 #define iree_fseek _fseeki64
 #define iree_ftell _ftelli64
@@ -34,6 +35,7 @@
 
 #define iree_dup dup
 #define iree_close close
+#define iree_fdopen fdopen
 
 #if _FILE_OFFSET_BITS == 64 || _POSIX_C_SOURCE >= 200112L
 #define iree_fseek fseeko

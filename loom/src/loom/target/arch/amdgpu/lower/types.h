@@ -41,6 +41,15 @@ bool loom_amdgpu_type_is_i8(loom_type_t type);
 // Returns true when the source type is a scalar i1.
 bool loom_amdgpu_type_is_i1(loom_type_t type);
 
+// Returns the bit count for i8/i16/i32/i64 scalar payloads, or zero when the
+// scalar type is not an ordinary integer payload.
+uint32_t loom_amdgpu_integer_scalar_type_bit_count(
+    loom_scalar_type_t scalar_type);
+
+// Returns the bit count for i8/i16/i32/i64 scalar source types, or zero when
+// the source type is not an ordinary integer scalar payload.
+uint32_t loom_amdgpu_type_integer_scalar_bit_count(loom_type_t type);
+
 // Returns true when the source type is an address-sized scalar lowered through
 // the current 32-bit AMDGPU scalar path.
 bool loom_amdgpu_type_is_address_scalar(loom_type_t type);
@@ -70,7 +79,19 @@ typedef enum loom_amdgpu_vector_storage_kind_e {
   LOOM_AMDGPU_VECTOR_STORAGE_KIND_I1_MASK = 3,
   LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_16BIT_FLOAT = 4,
   LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_INTEGER = 5,
+  LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_8BIT_FLOAT = 6,
+  LOOM_AMDGPU_VECTOR_STORAGE_KIND_COUNT_ = 7,
 } loom_amdgpu_vector_storage_kind_t;
+
+typedef enum loom_amdgpu_vector_storage_kind_flag_bits_e {
+  // Values use SGPR mask-pair storage instead of ordinary VGPR storage.
+  LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_SGPR_MASK = 1u << 0,
+  // Values need use-sensitive SGPR/VGPR bank analysis before type mapping.
+  LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_ANALYZE_REGISTER_BANK = 1u << 1,
+  // Values pack sub-32-bit lanes into VGPR payload registers.
+  LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_PACKED_PAYLOAD = 1u << 2,
+} loom_amdgpu_vector_storage_kind_flag_bits_t;
+typedef uint8_t loom_amdgpu_vector_storage_kind_flags_t;
 
 typedef struct loom_amdgpu_vector_storage_t {
   // Physical storage shape selected for the source vector type.
@@ -91,6 +112,10 @@ typedef struct loom_amdgpu_vector_storage_t {
 // vector storage classes.
 bool loom_amdgpu_type_vector_storage(loom_type_t type,
                                      loom_amdgpu_vector_storage_t* out_storage);
+
+// Returns fixed behavior flags for an AMDGPU vector storage kind.
+loom_amdgpu_vector_storage_kind_flags_t loom_amdgpu_vector_storage_kind_flags(
+    loom_amdgpu_vector_storage_kind_t kind);
 
 // Returns a static rank-1 vector lane count for the requested element type, or
 // zero when the type is not a supported static rank-1 vector.
@@ -152,6 +177,13 @@ bool loom_amdgpu_type_packed_integer_storage(loom_type_t type,
                                              uint32_t* out_payload_bit_count,
                                              uint32_t* out_register_count);
 
+// Returns true when the source type is an f8 vector payload that can be stored
+// in packed 32-bit registers. Partial registers occupy low bytes; unused high
+// bytes in the final register are unspecified.
+bool loom_amdgpu_type_packed_8bit_float_storage(loom_type_t type,
+                                                uint32_t* out_payload_bit_count,
+                                                uint32_t* out_register_count);
+
 // Returns true when the source type is an f16/bf16 vector payload that can be
 // stored in packed 32-bit registers. Odd lane counts occupy the low half of the
 // final register; the high half is unspecified.
@@ -200,33 +232,37 @@ iree_status_t loom_amdgpu_make_vgpr_type(loom_low_lower_context_t* context,
 iree_status_t loom_amdgpu_make_scc_type(loom_low_lower_context_t* context,
                                         loom_type_t* out_type);
 
+// Builds the one-unit VCC register type in the current lowering context.
+iree_status_t loom_amdgpu_make_vcc_type(loom_low_lower_context_t* context,
+                                        loom_type_t* out_type);
+
 // Builds a multi-unit VGPR register type in the current lowering context.
 iree_status_t loom_amdgpu_make_vgpr_range_type(
     loom_low_lower_context_t* context, uint32_t unit_count,
     loom_type_t* out_type);
 
-// Builds the register type for a descriptor row's implicit resource operand.
-iree_status_t loom_amdgpu_make_descriptor_row_implicit_resource_type(
-    loom_low_lower_context_t* context, const loom_low_descriptor_t* descriptor,
-    loom_type_t* out_type);
-
 // Returns whether a low register type belongs to the requested AMDGPU register
 // class.
-iree_status_t loom_amdgpu_low_type_register_class_is(
-    loom_low_lower_context_t* context, loom_type_t type, uint16_t reg_class_id,
-    bool* out_match);
+bool loom_amdgpu_low_type_is_register_class(loom_low_lower_context_t* context,
+                                            loom_type_t type,
+                                            uint16_t reg_class_id);
 
 // Returns whether a low register type belongs to the requested AMDGPU register
 // class and occupies the requested number of 32-bit register units.
-iree_status_t loom_amdgpu_low_type_is_register_class_count(
+bool loom_amdgpu_low_type_is_register_class_count(
     loom_low_lower_context_t* context, loom_type_t type, uint16_t reg_class_id,
-    uint32_t register_unit_count, bool* out_match);
+    uint32_t register_unit_count);
 
 // Returns whether a low value belongs to the requested AMDGPU register class
 // and occupies the requested number of 32-bit register units.
-iree_status_t loom_amdgpu_low_value_is_register_class_count(
+bool loom_amdgpu_low_value_is_register_class_count(
     loom_low_lower_context_t* context, loom_value_id_t low_value,
-    uint16_t reg_class_id, uint32_t register_unit_count, bool* out_match);
+    uint16_t reg_class_id, uint32_t register_unit_count);
+
+// Returns the one-unit lane register type for a low register value, or none
+// when the value is not a low register.
+loom_type_t loom_amdgpu_low_register_lane_type(const loom_module_t* module,
+                                               loom_value_id_t low_value);
 
 // Returns true when the source value should prefer a VGPR mapping even if its
 // scalar type could otherwise map to an SGPR. Fact and view-region tables
@@ -251,11 +287,23 @@ iree_status_t loom_amdgpu_context_value_prefers_vgpr(
     loom_low_lower_context_t* context, loom_value_id_t source_value_id,
     bool* out_prefers_vgpr);
 
+// Computes whether the source value should prefer a VGPR mapping in the active
+// target-low legality context.
+iree_status_t loom_amdgpu_target_low_legality_value_prefers_vgpr(
+    loom_target_low_legality_context_t* context,
+    loom_value_id_t source_value_id, bool* out_prefers_vgpr);
+
 // Computes whether the source value is represented as an EXEC-width native lane
 // mask in the active lowering context.
 iree_status_t loom_amdgpu_context_value_is_native_i1_mask(
     loom_low_lower_context_t* context, loom_value_id_t source_value_id,
     bool* out_is_native_mask);
+
+// Computes whether the source value is represented as an EXEC-width native lane
+// mask in the active target-low legality context.
+iree_status_t loom_amdgpu_target_low_legality_value_is_native_i1_mask(
+    loom_target_low_legality_context_t* context,
+    loom_value_id_t source_value_id, bool* out_is_native_mask);
 
 // Returns true when the source value is a subgroup lane-mask integer and every
 // active lane observes the same mask payload.
@@ -275,6 +323,11 @@ iree_status_t loom_amdgpu_map_type(void* user_data,
                                    const loom_op_t* source_op,
                                    loom_type_t source_type,
                                    loom_type_t* out_low_type);
+
+// Reports target-owned source types with an AMDGPU low register mapping.
+bool loom_amdgpu_source_type_supported(void* user_data,
+                                       const loom_module_t* module,
+                                       loom_type_t source_type);
 
 // Maps a source value to the AMDGPU low register type selected for its
 // placement-sensitive use.

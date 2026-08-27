@@ -7,9 +7,22 @@
 """Tests for loom.ir — in-memory IR representation."""
 
 import math
+from itertools import repeat
 
 import pytest
 
+from loom.dialect.test import (
+    test_array_type,
+    test_compact_attr,
+    test_feature_set_attr,
+    test_matrix_type,
+    test_node_attr,
+    test_options_attr,
+    test_scope_type,
+    test_tile_attr,
+    test_variant_set_type,
+)
+from loom.dsl import AttrDef, Dialect, ParameterizedAttrDef, SymbolReference
 from loom.ir import (
     BF16,
     BUFFER_TYPE,
@@ -43,15 +56,17 @@ from loom.ir import (
     EncodingInstance,
     EncodingRole,
     EncodingType,
+    EnumArrayAttr,
     FileLocation,
     FunctionType,
     FusedLocation,
-    GroupScope,
-    GroupType,
     LocationTable,
     Module,
     OpaqueLocation,
     Operation,
+    ParameterizedAttr,
+    ParameterizedAttrArray,
+    ParameterizedType,
     PoolType,
     Predicate,
     PredicateArg,
@@ -59,12 +74,16 @@ from loom.ir import (
     ScalarType,
     ScalarTypeKind,
     ShapedType,
+    SignedEnumSetAttr,
     StaticDim,
     StorageSpace,
     StorageType,
     StringTable,
     Symbol,
     SymbolKind,
+    SymbolName,
+    SymbolNameArray,
+    SymbolNameSet,
     SymbolRef,
     TaggedLocation,
     TiedResult,
@@ -263,16 +282,9 @@ class TestShapedTypes:
 # ============================================================================
 
 
-class TestGroupType:
-    def test_basic(self) -> None:
-        t = GroupType(GroupScope.WORKGROUP)
-        assert t.scope == GroupScope.WORKGROUP
-        assert t.type_kind == TypeKind.GROUP
-        assert repr(t) == "group<workgroup>"
-
-    def test_equality(self) -> None:
-        assert GroupType(GroupScope.WORKGROUP) == GroupType(GroupScope.WORKGROUP)
-        assert GroupType(GroupScope.WORKGROUP) != GroupType(GroupScope.SUBGROUP)
+def test_unassigned_type_kind_is_invalid() -> None:
+    with pytest.raises(ValueError, match="4 is not a valid TypeKind"):
+        TypeKind(4)
 
 
 class TestFunctionType:
@@ -652,6 +664,245 @@ class TestCanonicalAttrDict:
         assert isinstance(updated["config"], CanonicalAttrDict)
 
 
+class TestParameterizedAttr:
+    def test_canonicalizes_symbol_array_parameters(self) -> None:
+        family = ParameterizedAttrDef(
+            "test.providers",
+            group=Dialect("test"),
+            parameters=[
+                AttrDef(
+                    "values",
+                    "symbol_array",
+                    symbol_ref=SymbolReference("record", ["record"]),
+                )
+            ],
+        )
+
+        value = ParameterizedAttr(
+            family,
+            {
+                "values": [
+                    SymbolName("b"),
+                    SymbolName("a"),
+                    SymbolName("b"),
+                ]
+            },
+        )
+
+        assert value.get("values") == SymbolNameArray(
+            [SymbolName("b"), SymbolName("a"), SymbolName("b")]
+        )
+
+    def test_rejects_untyped_symbol_array_parameters(self) -> None:
+        family = ParameterizedAttrDef(
+            "test.providers",
+            group=Dialect("test"),
+            parameters=[
+                AttrDef(
+                    "values",
+                    "symbol_array",
+                    symbol_ref=SymbolReference("record", ["record"]),
+                )
+            ],
+        )
+
+        with pytest.raises(TypeError, match="symbol name array element 0"):
+            ParameterizedAttr(family, {"values": ["untyped"]})
+
+    def test_compact_primary_preserves_named_declaration_order_storage(self) -> None:
+        compact = test_compact_attr(label="wave", value=64)
+
+        assert compact.slots == ("wave", 64)
+        assert compact.present_items() == (("label", "wave"), ("value", 64))
+        assert compact.definition.primary_parameter_index == 1
+
+    def test_constructs_declaration_order_slots_and_nested_values(self) -> None:
+        tile = test_tile_attr(width=16)
+        options = test_options_attr(
+            mode="fast",
+            scopes=["subgroup", 254],
+            element_type=BF16,
+            tile=tile,
+            tiles=[tile, test_tile_attr(width=8)],
+            target=SymbolName("target"),
+        )
+
+        assert isinstance(options, ParameterizedAttr)
+        assert options.family_name == "test.options"
+        assert options.slots == (
+            1,
+            EnumArrayAttr([2, 254]),
+            BF16,
+            tile,
+            SymbolName("target"),
+            ParameterizedAttrArray([tile, test_tile_attr(width=8)]),
+        )
+        assert options.present_items() == (
+            ("mode", 1),
+            ("scopes", EnumArrayAttr([2, 254])),
+            ("element_type", BF16),
+            ("tile", tile),
+            ("target", SymbolName("target")),
+            ("tiles", ParameterizedAttrArray([tile, test_tile_attr(width=8)])),
+        )
+
+    def test_preserves_absent_and_present_empty_optional_values(self) -> None:
+        absent = test_options_attr(mode="precise")
+        present_empty = test_options_attr(mode="precise", scopes=[])
+
+        assert not absent.has("scopes")
+        assert absent.get("scopes") is None
+        assert absent.slots == (2, None, None, None, None, None)
+        assert present_empty.has("scopes")
+        assert present_empty.get("scopes") == EnumArrayAttr()
+        assert absent != present_empty
+
+    def test_rejects_missing_unknown_and_wrong_family_parameters(self) -> None:
+        with pytest.raises(TypeError, match="missing required parameter 'mode'"):
+            test_options_attr()
+        with pytest.raises(TypeError, match=r"unknown parameter.*mood"):
+            test_options_attr(mode="fast", mood="precise")
+        with pytest.raises(ValueError, match=r"has family 'test\.options'"):
+            test_options_attr(mode="fast", tile=test_options_attr(mode="precise"))
+        with pytest.raises(ValueError, match=r"element 0 has family 'test\.options'"):
+            test_options_attr(
+                mode="fast",
+                tiles=[test_options_attr(mode="precise")],
+            )
+
+    def test_rejects_closed_enum_values_and_bad_scalar_types(self) -> None:
+        with pytest.raises(ValueError, match="undeclared enum value 255"):
+            test_options_attr(mode=255)
+        with pytest.raises(TypeError, match="must be an enum keyword or byte"):
+            test_options_attr(mode=True)
+        with pytest.raises(TypeError, match="signed 64-bit integer"):
+            test_tile_attr(width=True)
+
+    def test_equality_and_hash_use_stable_family_and_frozen_values(self) -> None:
+        lhs = test_options_attr(mode="fast", scopes=["subgroup"])
+        rhs = test_options_attr(mode=1, scopes=EnumArrayAttr([2]))
+
+        assert lhs == rhs
+        assert hash(lhs) == hash(rhs)
+        assert {lhs, rhs} == {lhs}
+
+    def test_signed_enum_set_parameter_resolves_sparse_domain(self) -> None:
+        features = test_feature_set_attr(features={"high": True, "low": False, 7: True})
+
+        assert features.slots == (SignedEnumSetAttr([7, 255], [1]),)
+
+    def test_signed_enum_set_parameter_rejects_invalid_assertions(self) -> None:
+        with pytest.raises(ValueError, match="undeclared enum value 2"):
+            test_feature_set_attr(features={2: True})
+        with pytest.raises(TypeError, match="exact Boolean assertions"):
+            test_feature_set_attr(features={"low": 1})
+
+
+class TestParameterizedAttrArray:
+    def test_preserves_order_repetition_and_mixed_families(self) -> None:
+        tile = test_tile_attr(width=8)
+        options = test_options_attr(mode="fast")
+
+        values = ParameterizedAttrArray([tile, options, tile])
+
+        assert values.values == (tile, options, tile)
+        assert tuple(values) == (tile, options, tile)
+        assert len(values) == 3
+
+    def test_empty_array_is_immutable_and_hashable(self) -> None:
+        assert ParameterizedAttrArray() == ParameterizedAttrArray([])
+        assert hash(ParameterizedAttrArray()) == hash(ParameterizedAttrArray([]))
+
+    def test_rejects_non_parameterized_elements_and_excessive_length(self) -> None:
+        with pytest.raises(TypeError, match="element 0 must be a ParameterizedAttr"):
+            ParameterizedAttrArray([42])  # type: ignore[list-item]
+
+        tile = test_tile_attr(width=8)
+        with pytest.raises(ValueError, match="exceeds UINT16_MAX"):
+            ParameterizedAttrArray(repeat(tile, 0x10000))
+
+    def test_recursively_nests_open_family_arrays(self) -> None:
+        leaf = test_node_attr(value=0)
+        child = test_node_attr(value=1, children=[leaf])
+        root = test_node_attr(
+            value=2,
+            children=[child, test_tile_attr(width=8), child],
+        )
+
+        children = root.get("children")
+        assert isinstance(children, ParameterizedAttrArray)
+        assert children.values == (child, test_tile_attr(width=8), child)
+
+
+class TestParameterizedType:
+    def test_constructs_positional_and_mixed_format_families(self) -> None:
+        scope = test_scope_type(scope="subgroup")
+        matrix = test_matrix_type(
+            element_type=BF16,
+            scope="workgroup",
+            rows=16,
+            target=SymbolName("target"),
+        )
+
+        assert isinstance(scope, ParameterizedType)
+        assert scope.type_kind == TypeKind.PARAMETERIZED
+        assert scope.slots == (2,)
+        assert matrix.family_name == "test.matrix"
+        assert matrix.present_items() == (
+            ("element_type", BF16),
+            ("scope", 1),
+            ("rows", 16),
+            ("target", SymbolName("target")),
+        )
+
+    def test_equality_hash_and_validation_use_named_schema(self) -> None:
+        lhs = test_matrix_type(element_type=BF16, scope="subgroup", rows=16)
+        rhs = test_matrix_type(element_type=BF16, scope=2, rows=16)
+
+        assert lhs == rhs
+        assert hash(lhs) == hash(rhs)
+        with pytest.raises(TypeError, match="missing required parameter 'rows'"):
+            test_matrix_type(element_type=BF16, scope="subgroup")
+        with pytest.raises(TypeError, match=r"unknown parameter.*columns"):
+            test_matrix_type(
+                element_type=BF16,
+                scope="subgroup",
+                rows=16,
+                columns=16,
+            )
+
+    def test_optional_parameter_has_explicit_presence(self) -> None:
+        packed = test_array_type(element_type=BF16)
+        aligned = test_array_type(element_type=BF16, alignment=16)
+
+        assert packed.slots == (BF16, None, None)
+        assert not packed.has("alignment")
+        assert packed.get("alignment") is None
+        assert aligned.has("alignment")
+        assert aligned.get("alignment") == 16
+
+    def test_dictionary_parameter_preserves_nested_family_values(self) -> None:
+        metadata = CanonicalAttrDict(
+            (("tile", test_tile_attr(width=8)), ("purpose", "scratch"))
+        )
+        array = test_array_type(element_type=BF16, metadata=metadata)
+
+        assert array.has("metadata")
+        assert array.get("metadata") == metadata
+
+    def test_parameterized_array_parameters_preserve_family_contracts(self) -> None:
+        tile = test_tile_attr(width=8)
+        options = test_options_attr(mode="fast")
+        variants = test_variant_set_type(
+            values=[tile, options, tile],
+            alternatives=[],
+        )
+
+        assert variants.get("values") == ParameterizedAttrArray([tile, options, tile])
+        assert variants.has("alternatives")
+        assert variants.get("alternatives") == ParameterizedAttrArray()
+
+
 class TestOperations:
     def test_basic_op(self) -> None:
         op = Operation(kind=1, name="test.unary", operands=[0], results=[1])
@@ -687,6 +938,92 @@ class TestOperations:
         assert list(op.attributes.items()) == [("axis", 0), ("combine", "add")]
         assert op.attributes["axis"] == 0
         assert op.attributes["combine"] == "add"
+
+    def test_enum_array_attribute_preserves_stable_values(self) -> None:
+        values = EnumArrayAttr([1, 255, 1])
+        op = Operation(
+            kind=4,
+            name="test.enum_array_attrs",
+            attributes={"required_values": values},
+        )
+
+        assert op.attributes["required_values"] is values
+        assert values.values == (1, 255, 1)
+        assert len(EnumArrayAttr()) == 0
+
+    def test_enum_array_attribute_rejects_invalid_values(self) -> None:
+        for values in ([False], [-1], [256], ["low"]):
+            with pytest.raises(ValueError, match="enum array element"):
+                EnumArrayAttr(values)  # type: ignore[arg-type]
+
+    def test_signed_enum_set_is_canonical_and_distinguishes_polarity(self) -> None:
+        value = SignedEnumSetAttr([255, 1], [7])
+
+        assert value.positive_values == (1, 255)
+        assert value.negative_values == (7,)
+        assert value == SignedEnumSetAttr([1, 255], [7])
+        assert hash(value) == hash(SignedEnumSetAttr([1, 255], [7]))
+        assert SignedEnumSetAttr() != value
+
+    def test_signed_enum_set_rejects_invalid_and_ambiguous_values(self) -> None:
+        with pytest.raises(ValueError, match="duplicate positive"):
+            SignedEnumSetAttr([1, 1])
+        with pytest.raises(ValueError, match="contradictory assertions"):
+            SignedEnumSetAttr([1], [1])
+        for value in (False, -1, 256, "low"):
+            with pytest.raises(ValueError, match="signed enum set positive"):
+                SignedEnumSetAttr([value])  # type: ignore[list-item]
+
+    def test_symbol_name_array_preserves_order_and_duplicates(self) -> None:
+        values = SymbolNameArray(
+            [
+                SymbolName("provider_b"),
+                SymbolName("provider_a"),
+                SymbolName("provider_b"),
+            ]
+        )
+        op = Operation(
+            kind=4,
+            name="test.symbol_array_attrs",
+            attributes={"providers": values},
+        )
+
+        assert op.attributes["providers"] is values
+        assert values.values == (
+            SymbolName("provider_b"),
+            SymbolName("provider_a"),
+            SymbolName("provider_b"),
+        )
+        assert len(SymbolNameArray()) == 0
+
+    def test_symbol_name_array_rejects_untyped_strings(self) -> None:
+        with pytest.raises(TypeError, match="symbol name array element 1"):
+            SymbolNameArray([SymbolName("typed"), "untyped"])  # type: ignore[list-item]
+
+    def test_symbol_name_set_sorts_and_rejects_duplicates(self) -> None:
+        values = SymbolNameSet(
+            [
+                SymbolName("provider_b"),
+                SymbolName("provider_a"),
+            ]
+        )
+
+        assert values.values == (
+            SymbolName("provider_a"),
+            SymbolName("provider_b"),
+        )
+        assert len(SymbolNameSet()) == 0
+        with pytest.raises(ValueError, match="duplicate symbol name '@provider_a'"):
+            SymbolNameSet(
+                [
+                    SymbolName("provider_a"),
+                    SymbolName("provider_a"),
+                ]
+            )
+
+    def test_symbol_name_set_rejects_untyped_strings(self) -> None:
+        with pytest.raises(TypeError, match="symbol name set element 1"):
+            SymbolNameSet([SymbolName("typed"), "untyped"])  # type: ignore[list-item]
 
     def test_op_with_nested_canonical_attr_dict(self) -> None:
         op = Operation(
@@ -923,6 +1260,15 @@ class TestModule:
         sym = Symbol(name="foo", kind=SymbolKind.FUNC_DEF, op=func_op)
         sid = m.add_symbol(sym)
         assert m.symbols[sid].name == "foo"
+        assert m.body.ops == [func_op]
+
+    def test_add_top_level_operation(self) -> None:
+        m = Module()
+        metadata_op = Operation(name="test.module_metadata")
+        operation_index = m.add_top_level_operation(metadata_op)
+        assert operation_index == 0
+        assert m.body.ops == [metadata_op]
+        assert not m.symbols
 
     def test_rebuild_value_metadata(self) -> None:
         m = Module()

@@ -12,7 +12,6 @@
 #include "loom/ir/scalar_type.h"
 #include "loom/ops/index/ops.h"
 #include "loom/transforms/vector/to_scalar_lanes.h"
-#include "loom/util/math.h"
 
 //===----------------------------------------------------------------------===//
 // Index op emission
@@ -138,21 +137,21 @@ iree_status_t loom_vector_to_scalar_build_term_binary(
     int64_t result = 0;
     switch (binary) {
       case LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_ADD:
-        if (!loom_checked_add_i64(lhs.static_value, rhs.static_value,
+        if (!iree_checked_add_i64(lhs.static_value, rhs.static_value,
                                   &result)) {
           break;
         }
         *out_term = loom_vector_to_scalar_static_term(result);
         return iree_ok_status();
       case LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_SUB:
-        if (!loom_checked_sub_i64(lhs.static_value, rhs.static_value,
+        if (!iree_checked_sub_i64(lhs.static_value, rhs.static_value,
                                   &result)) {
           break;
         }
         *out_term = loom_vector_to_scalar_static_term(result);
         return iree_ok_status();
       case LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_MUL:
-        if (!loom_checked_mul_i64(lhs.static_value, rhs.static_value,
+        if (!iree_checked_mul_i64(lhs.static_value, rhs.static_value,
                                   &result)) {
           break;
         }
@@ -170,11 +169,11 @@ iree_status_t loom_vector_to_scalar_build_term_binary(
         return iree_ok_status();
       case LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_MIN:
         *out_term = loom_vector_to_scalar_static_term(
-            loom_min_i64(lhs.static_value, rhs.static_value));
+            iree_min(lhs.static_value, rhs.static_value));
         return iree_ok_status();
       case LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_MAX:
         *out_term = loom_vector_to_scalar_static_term(
-            loom_max_i64(lhs.static_value, rhs.static_value));
+            iree_max(lhs.static_value, rhs.static_value));
         return iree_ok_status();
       default:
         IREE_ASSERT_UNREACHABLE("unsupported vector-to-scalar index term op");
@@ -276,9 +275,8 @@ iree_status_t loom_vector_to_scalar_build_index_term_cmp(
       loom_vector_to_scalar_term_value(state, rhs, &rhs_value));
   loom_op_t* cmp_op = NULL;
   IREE_RETURN_IF_ERROR(loom_index_cmp_build(
-      &state->rewriter->builder, predicate, lhs_value, rhs_value,
-      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
-      loom_type_scalar(LOOM_SCALAR_TYPE_I1), state->location, &cmp_op));
+      &state->rewriter->builder, (loom_index_cmp_predicate_t)predicate,
+      lhs_value, rhs_value, state->location, &cmp_op));
   *out_condition = loom_index_cmp_result(cmp_op);
   return iree_ok_status();
 }

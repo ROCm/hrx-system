@@ -1,0 +1,142 @@
+# Copyright 2026 The IREE Authors
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+site_name: Loom Programming Guide
+site_description: Author, specialize, test, benchmark, and embed Loom programs.
+site_url: https://rocm.github.io/hrx-system/loom/
+repo_url: https://github.com/ROCm/hrx-system
+repo_name: ROCm/hrx-system
+edit_uri: edit/main/loom/docs/src/
+
+docs_dir: src
+strict: true
+
+hooks:
+  - hooks/prepare.py
+
+watch:
+  - src
+  - examples
+  - loom_docs
+  - ../py/loom/builtin_types.py
+  - ../binding/c/doc
+  - ../binding/c/include
+  - ../py/loom/dialect
+  - ../py/loom/dsl.py
+  - ../py/loom/gen/docs
+  - ../py/loom/gen/ops/model.py
+  - ../py/loom/target
+  - ../src/loom/editor/textmate
+
+theme:
+  name: material
+  language: en
+  features:
+    - content.code.annotate
+    - content.code.copy
+    - navigation.footer
+    - navigation.indexes
+    - navigation.sections
+    - navigation.tabs
+    - navigation.top
+    - search.highlight
+    - search.suggest
+    - toc.follow
+  icon:
+    logo: octicons/cpu-24
+    repo: octicons/mark-github-16
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: octicons/moon-24
+        name: Use dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: octicons/sun-24
+        name: Use light mode
+
+nav:
+  - Loom: index.md
+  - Programming guide:
+      - Guide map: guide/index.md
+      - Acquiring Loom: getting-started/acquiring-loom.md
+      - From source to artifacts: getting-started/source-to-artifacts.md
+      - Source modules and canonical text: guide/source-modules.md
+      - Values, types, and shapes: guide/values-types-shapes.md
+      - Functions and structured control flow: guide/functions-and-control.md
+      - Buffers, views, and memory: guide/buffers-views-memory.md
+      - Vectors and structured compute: guide/vectors-and-structured-compute.md
+      - Kernels and launch configuration: guide/kernels-and-launch.md
+      - Facts and specialization: guide/facts-and-specialization.md
+      - Checks and benchmarks: guide/checks-and-benchmarks.md
+      - Command programs: guide/command-programs.md
+  - Workflows:
+      - Workflow map: workflows/index.md
+      - Agent-driven kernel development: workflows/agent-driven-kernel-development.md
+      - Format and verify source: workflows/format-and-verify.md
+      - Link and package modules: workflows/link-and-package.md
+      - Build libraries and binaries with Bazel: workflows/build-with-bazel.md
+      - Test correctness: workflows/test-correctness.md
+      - Benchmark checked work: workflows/benchmark.md
+      - Compile artifacts: workflows/compile-artifacts.md
+      - Read compile reports: workflows/compile-reports.md
+      - External oracles:
+          - RADV and Vulkan: workflows/oracles/radv.md
+          - LLVM MC instruction encoding: workflows/oracles/llvm-mc.md
+          - GGML and llama.cpp: workflows/oracles/ggml-llama-cpp.md
+  - Integration:
+      - Integration map: integration/index.md
+      - Compose modules in memory: integration/module-composition.md
+      - Embed kernel JIT compilation: integration/jit-kernel.md
+  - Reference:
+      - Reference map: reference/index.md
+      - Dialects: reference/dialects/index.md
+      - Types: reference/types/index.md
+      - Attributes: reference/attributes/index.md
+      - Encodings: reference/encodings/index.md
+      - C API: reference/c-api/index.md
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+  - loom_docs.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets:
+      base_path:
+        - loom/docs
+      check_paths: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+validation:
+  nav:
+    omitted_files: ignore
+    not_found: warn
+  links:
+    not_found: warn
+    unrecognized_links: warn
+
+extra_css:
+  - stylesheets/extra.css
+
+copyright: "&copy; 2026 Advanced Micro Devices, Inc."

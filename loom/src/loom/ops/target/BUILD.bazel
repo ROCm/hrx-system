@@ -15,6 +15,7 @@ package(
 loom_generated_cc_library(
     name = "target",
     srcs = [
+        "conditions.c",
         "facts.c",
         "verify.c",
     ],
@@ -38,7 +39,11 @@ loom_generated_cc_library(
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/target:condition",
+        "//loom/src/loom/target:facts",
+        "//loom/src/loom/target:projection",
         "//loom/src/loom/target:types",
+        "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
     ],
 )

@@ -64,7 +64,7 @@ permissions:
 jobs:
   build_core_linux:
     name: ${{ inputs.name }}
-    runs-on: aws-linux-scale-rocm-prod
+    runs-on: azure-linux-scale-rocm
     timeout-minutes: 30
     container:
       image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
@@ -93,7 +93,6 @@ jobs:
       HRX_TEST_GPU: ${{ inputs.test_gpu }}
       HRX_PACKAGE: ${{ inputs.package }}
       HRX_PACKAGE_SUFFIX: ${{ inputs.package_suffix }}
-      CCACHE_DIR: ${{ github.workspace }}/build/linux/caches/ccache
       PIP_CACHE_DIR: ${{ github.workspace }}/build/linux/caches/pip
     steps:
       - name: Checkout repository
@@ -106,18 +105,18 @@ jobs:
         run: python3 -m pip install --upgrade boto3 cmake==3.31.6 zstandard
 
       - name: Fetch ROCm artifacts
-        run: python3 build_tools/ci_core_linux.py fetch-rocm
+        run: python3 build_tools/ci/ci_core_linux.py fetch-rocm
 
-      - name: Configure, build, and install
-        run: python3 build_tools/ci_core_linux.py build
+      - name: Prepare CMake build
+        run: python3 build_tools/ci/ci_core_linux.py build
 
-      - name: Run installed tests
+      - name: Run tests
         if: ${{ inputs.run_tests }}
-        run: python3 build_tools/ci_core_linux.py test
+        run: python3 build_tools/ci/ci_core_linux.py test
 
       - name: Package
         if: ${{ inputs.package }}
-        run: python3 build_tools/ci_core_linux.py package
+        run: python3 build_tools/ci/ci_core_linux.py package
 
       - name: Upload public package
         if: ${{ inputs.package }}

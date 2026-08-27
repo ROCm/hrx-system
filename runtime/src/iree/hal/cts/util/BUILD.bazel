@@ -21,7 +21,7 @@ package(
 # Main entry point for CTS test binaries and testdata generation template.
 exports_files([
     "test_main.cc",
-    "testdata_format.cc.tpl",
+    "testdata_target.cc.tpl",
 ])
 
 # CTS registry for link-time test composition.
@@ -47,6 +47,17 @@ iree_runtime_cc_library(
     deps = [
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
+    ],
+)
+
+# Device-spec-driven atomic operation test selection helpers.
+iree_runtime_cc_library(
+    name = "atomic_test_util",
+    testonly = True,
+    srcs = ["atomic_test_util.cc"],
+    hdrs = ["atomic_test_util.h"],
+    deps = [
+        "//runtime/src/iree/hal",
     ],
 )
 

@@ -25,15 +25,15 @@ def _ensure_runtime_py_on_path() -> None:
 
 _ensure_runtime_py_on_path()
 
+from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.target.low.low_descriptors import (  # noqa: E402
-    generate_descriptor_set,
-    generate_descriptor_set_shared_header,
-    generate_descriptor_set_shared_source,
+    generate_descriptor_set_family,
     write_descriptor_set_to_paths,
 )
 from loom.target.arch.x86.target_info import (  # noqa: E402
     X86DescriptorSetInfo,
     x86_descriptor_set_info_by_generator_target,
+    x86_descriptor_set_ordinal,
     x86_descriptor_set_storage_info_by_generator_target,
     x86_descriptor_set_view_infos_by_storage_generator_target,
 )
@@ -62,7 +62,10 @@ def _parse_view_headers(values: Sequence[str]) -> dict[str, Path]:
 
 
 def _descriptor_set_for_info(info: X86DescriptorSetInfo) -> DescriptorSet:
-    return resolve_descriptor_set(info.key)
+    return replace(
+        resolve_descriptor_set(info.key),
+        descriptor_set_ordinal=x86_descriptor_set_ordinal(info.key),
+    )
 
 
 def _view_infos_for_storage_target(
@@ -156,32 +159,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             descriptor_set,
             view_descriptor_sets,
         )
-        generated = generate_descriptor_set(descriptor_set)
-        args.header.parent.mkdir(parents=True, exist_ok=True)
-        args.source.parent.mkdir(parents=True, exist_ok=True)
-        args.header.write_text(generated.header, encoding="utf-8")
-        args.source.write_text(
-            generate_descriptor_set_shared_source(
-                storage_descriptor_set,
-                (*view_descriptor_sets, descriptor_set),
-            ),
-            encoding="utf-8",
+        generated = generate_descriptor_set_family(
+            storage_descriptor_set,
+            (*view_descriptor_sets, descriptor_set),
         )
-        for view_info, view_descriptor_set in zip(
+        write_text_file(args.header, generated.view_headers[-1])
+        write_text_file(args.source, generated.source)
+        for view_info, view_header in zip(
             view_infos,
-            view_descriptor_sets,
+            generated.view_headers[:-1],
             strict=True,
         ):
             view_header_path = view_headers[view_info.generator_target]
-            view_header = generate_descriptor_set_shared_header(
-                storage_descriptor_set,
-                view_descriptor_set,
-            )
-            view_header_path.parent.mkdir(parents=True, exist_ok=True)
-            view_header_path.write_text(
-                view_header,
-                encoding="utf-8",
-            )
+            write_text_file(view_header_path, view_header)
         return 0
 
     write_descriptor_set_to_paths(

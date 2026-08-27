@@ -1,23 +1,23 @@
 // RUN: roundtrip
 
 func.def @generic_atomic_i32_static(%input: buffer) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %generic = buffer.assume.memory_space<generic> %input : buffer
-  %view = buffer.view %generic[%zero] : buffer -> view<1xi32, #dense>
-  %one = scalar.constant 1 : i32
-  view.atomic.reduce<addi> %one, %view[0] {ordering = relaxed, scope = device} : i32, view<1xi32, #dense>
-  %old_add = view.atomic.rmw<addi> %one, %view[0] {ordering = relaxed, scope = device} : i32, view<1xi32, #dense> -> i32
+  %view = buffer.view %generic[%buffer_base] : buffer -> view<1xi32>
+  %increment = scalar.constant 1 : i32
+  view.atomic.reduce<addi> %increment, %view[0] {ordering = relaxed, scope = device} : i32, view<1xi32>
+  %old_add = view.atomic.rmw<addi> %increment, %view[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
   func.return
 }
 
 // ====
 
 func.def @generic_atomic_cmpxchg_i32_static(%input: buffer) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %generic = buffer.assume.memory_space<generic> %input : buffer
-  %view = buffer.view %generic[%zero] : buffer -> view<1xi32, #dense>
+  %view = buffer.view %generic[%buffer_base] : buffer -> view<1xi32>
   %expected = scalar.constant 7 : i32
   %replacement = scalar.constant 9 : i32
-  %old_cmpxchg = view.atomic.cmpxchg %expected, %replacement, %view[0] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i32, view<1xi32, #dense> -> i32
+  %old_cmpxchg = view.atomic.cmpxchg %expected, %replacement, %view[0] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i32, view<1xi32> -> i32
   func.return
 }

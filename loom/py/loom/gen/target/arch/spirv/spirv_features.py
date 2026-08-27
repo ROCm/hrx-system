@@ -23,18 +23,24 @@ def _ensure_runtime_py_on_path() -> None:
 
 _ensure_runtime_py_on_path()
 
-from loom.gen.support.c import c_string_view as _c_string_view  # noqa: E402
-from loom.gen.support.files import (  # noqa: E402
-    read_optional_text_file as _read_optional_text,
+from build_tools.spirv.registry.spirv_core_grammar import (  # noqa: E402
+    load_spirv_core_grammar,
 )
+from build_tools.spirv.registry.vulkan_spirv_availability import (  # noqa: E402
+    load_vulkan_spirv_availability,
+)
+
+from loom.gen.support.c import c_string_view as _c_string_view  # noqa: E402
 from loom.gen.support.files import write_text_file as _write_text  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
+from loom.gen.target.arch.spirv.feature_catalog_validation import (  # noqa: E402
+    validate_feature_catalog_sources,
+)
 from loom.target.arch.spirv.features import (  # noqa: E402
     FEATURE_ATOMS,
     FEATURE_PROFILES,
     feature_atom_enum,
     feature_bits_expression,
-    parse_isa_symbols,
     validate_feature_catalog,
 )
 
@@ -75,13 +81,15 @@ def _emit_descriptor_field(
     lines.append(f"            .{count_name} = IREE_ARRAYSIZE({array_symbol}),")
 
 
-def generate_tables(isa_header: str | None = None) -> str:
-    isa_symbols = parse_isa_symbols(isa_header) if isa_header is not None else None
+def generate_tables() -> str:
     validate_feature_catalog(
         atoms=FEATURE_ATOMS,
         profiles=FEATURE_PROFILES,
-        isa_symbols=isa_symbols,
     )
+    return _emit_tables()
+
+
+def _emit_tables() -> str:
     lines = [
         *line_comment_header("//", generator="loom.gen.target.arch.spirv.spirv_features"),
         "// clang-format off",
@@ -191,7 +199,20 @@ def _parse_arguments(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--isa-header",
         type=Path,
+        required=True,
         help="Path to isa.h for validating referenced SPIR-V wire symbols.",
+    )
+    parser.add_argument(
+        "--spirv-grammar",
+        type=Path,
+        required=True,
+        help="Path to the pinned SPIR-V core grammar JSON file.",
+    )
+    parser.add_argument(
+        "--vulkan-registry",
+        type=Path,
+        required=True,
+        help="Path to the pinned Vulkan registry XML file.",
     )
     parser.add_argument(
         "--check",
@@ -208,15 +229,20 @@ def _parse_arguments(argv: Sequence[str] | None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_arguments(argv)
-    isa_header = _read_optional_text(args.isa_header)
+    validate_feature_catalog(atoms=FEATURE_ATOMS, profiles=FEATURE_PROFILES)
+    isa_header = args.isa_header.read_text(encoding="utf-8")
+    grammar = load_spirv_core_grammar(args.spirv_grammar)
+    vulkan_registry = load_vulkan_spirv_availability(args.vulkan_registry)
+    validate_feature_catalog_sources(
+        atoms=FEATURE_ATOMS,
+        isa_header=isa_header,
+        isa_source=str(args.isa_header),
+        grammar=grammar,
+        vulkan_registry=vulkan_registry,
+    )
     if args.check:
-        validate_feature_catalog(
-            atoms=FEATURE_ATOMS,
-            profiles=FEATURE_PROFILES,
-            isa_symbols=parse_isa_symbols(isa_header) if isa_header is not None else None,
-        )
         return 0
-    _write_text(args.tables, generate_tables(isa_header))
+    _write_text(args.tables, _emit_tables())
     return 0
 
 

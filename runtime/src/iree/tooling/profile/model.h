@@ -99,6 +99,10 @@ typedef struct iree_profile_model_metric_descriptor_t {
 typedef struct iree_profile_model_device_t {
   // Session-local physical device ordinal.
   uint32_t physical_device_ordinal;
+  // Device metadata flags observed for this physical device.
+  iree_hal_profile_device_flags_t metadata_flags;
+  // Authoritative device timestamp rate advertised by device metadata.
+  uint64_t timestamp_frequency_hz;
   // Number of clock-correlation samples seen for this physical device.
   uint64_t clock_sample_count;
   // Number of clock samples that report invalid device event tick alignment.
@@ -137,6 +141,27 @@ typedef struct iree_profile_model_clock_fit_t {
   // Host nanosecond distance between the first and last samples.
   uint64_t time_span_ns;
 } iree_profile_model_clock_fit_t;
+
+// Source used to convert elapsed device ticks to nanoseconds.
+typedef uint32_t iree_profile_model_duration_scale_source_t;
+enum iree_profile_model_duration_scale_source_e {
+  IREE_PROFILE_MODEL_DURATION_SCALE_SOURCE_NONE = 0u,
+  // Scale is the authoritative timestamp frequency in device metadata.
+  IREE_PROFILE_MODEL_DURATION_SCALE_SOURCE_DEVICE_METADATA = 1u,
+  // Scale is derived from aligned clock-correlation samples in an older
+  // profile bundle without explicit timestamp frequency metadata.
+  IREE_PROFILE_MODEL_DURATION_SCALE_SOURCE_CLOCK_CORRELATION = 2u,
+};
+
+// Exact rational scale from elapsed device ticks to nanoseconds.
+typedef struct iree_profile_model_duration_scale_t {
+  // Provenance of this scale.
+  iree_profile_model_duration_scale_source_t source;
+  // Device tick span in the denominator of the scale.
+  uint64_t device_tick_span;
+  // Nanosecond span in the numerator of the scale.
+  uint64_t time_span_ns;
+} iree_profile_model_duration_scale_t;
 
 // Shared profile metadata side tables.
 typedef struct iree_profile_model_t {
@@ -281,6 +306,34 @@ bool iree_profile_model_device_try_fit_clock_exact(
 bool iree_profile_model_device_try_fit_clock(
     const iree_profile_model_device_t* device, double* out_ns_per_tick,
     double* out_tick_frequency_hz);
+
+// Resolves the exact scale for elapsed device tick counts.
+//
+// Explicit device metadata is authoritative. A valid clock-correlation slope
+// is accepted only for profile bundles produced before timestamp frequency
+// metadata was available. This scale does not place absolute ticks on a host
+// timeline; use iree_profile_model_device_try_fit_clock_exact for that.
+bool iree_profile_model_device_try_resolve_duration_scale(
+    const iree_profile_model_device_t* device,
+    iree_profile_model_duration_scale_t* out_scale);
+
+// Converts |device_tick_count| through |scale| and rounds to the nearest
+// nanosecond duration.
+bool iree_profile_model_duration_scale_ticks_to_ns(
+    const iree_profile_model_duration_scale_t* scale,
+    uint64_t device_tick_count, int64_t* out_duration_ns);
+
+// Returns the scale's nanoseconds per device tick as a display value.
+double iree_profile_model_duration_scale_ns_per_tick(
+    const iree_profile_model_duration_scale_t* scale);
+
+// Returns the scale's device tick frequency in Hz as a display value.
+double iree_profile_model_duration_scale_tick_frequency_hz(
+    const iree_profile_model_duration_scale_t* scale);
+
+// Returns a stable diagnostic name for |source|.
+const char* iree_profile_model_duration_scale_source_name(
+    iree_profile_model_duration_scale_source_t source);
 
 // Maps |device_tick| through |fit| and rounds to the nearest host nanosecond.
 bool iree_profile_model_clock_fit_map_tick(

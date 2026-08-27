@@ -34,21 +34,21 @@ func.def @keeps_unrelated_vector_ops(%input: vector<2x3xf32>, %bias: vector<2x3x
 
 // Reductions over vector.load recursively materialize scalar view.load lanes so
 // later source-normalization passes can linearize the accesses normally.
-func.def @scalarizes_loaded_lanes(%source: view<2x2xf32, #dense>, %zero: f32) -> (f32) {
-  %tile = vector.load %source[0, 0] : view<2x2xf32, #dense> -> vector<2x2xf32>
+func.def @scalarizes_loaded_lanes(%source: view<2x2xf32>, %zero: f32) -> (f32) {
+  %tile = vector.load %source[0, 0] : view<2x2xf32> -> vector<2x2xf32>
   %sum = vector.reduce.axes<addf> %tile, %zero axes [0, 1] : vector<2x2xf32>, f32
   func.return %sum : f32
 }
 
 // ----
-func.def @scalarizes_loaded_lanes(%source: view<2x2xf32, #dense>, %zero: f32) -> (f32) {
-  %5 = view.load %source[0, 0] : view<2x2xf32, #dense> -> f32
+func.def @scalarizes_loaded_lanes(%source: view<2x2xf32>, %zero: f32) -> (f32) {
+  %5 = view.load %source[0, 0] : view<2x2xf32> -> f32
   %6 = scalar.addf %zero, %5 : f32
-  %7 = view.load %source[0, 1] : view<2x2xf32, #dense> -> f32
+  %7 = view.load %source[0, 1] : view<2x2xf32> -> f32
   %8 = scalar.addf %6, %7 : f32
-  %9 = view.load %source[1, 0] : view<2x2xf32, #dense> -> f32
+  %9 = view.load %source[1, 0] : view<2x2xf32> -> f32
   %10 = scalar.addf %8, %9 : f32
-  %11 = view.load %source[1, 1] : view<2x2xf32, #dense> -> f32
+  %11 = view.load %source[1, 1] : view<2x2xf32> -> f32
   %sum = scalar.addf %10, %11 : f32
   func.return %sum : f32
 }

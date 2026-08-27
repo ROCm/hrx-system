@@ -10,7 +10,23 @@ func.def target(@test_target) @records_reduce_axes_reference_rewrite(%v: vector<
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: target_legalization legal=0 rewritten=1 target_rewritten=0 reference_rewritten=1 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1
-COMPILE-REPORT: target_legalization[0] function=records_reduce_axes_reference_rewrite source_op=vector.reduce.axes mode=eager policy=prefer-native action=rewritten outcome=reference-fallback contract=unhandled legalizer=vector strategy=reference bundle=test_target config=test_target binding=65535 case=65535 rule_set=65535 rule=65535 diagnostic=65535 descriptor=18446744073709551615 source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=8 erased_ops=1
+COMPILE-REPORT: target_legalization[0] function=records_reduce_axes_reference_rewrite source_op=vector.reduce.axes mode=eager policy=prefer-native action=rewritten outcome=reference-fallback contract=unhandled legalizer=vector strategy=reference bundle=test_target config=test_target source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=8 erased_ops=1
+
+// ====
+// RUN: pass-report target-legalize
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @records_decode_reference_rewrite(%payload: vector<2xf8E4M3>, %scale: vector<1xf32>) -> (vector<2xf32>) {
+  %schema = encoding.define #encoding.f8e4m3<affine=scale_only, payload_elements=2, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf32>} : vector<2xf8E4M3>, encoding<schema> -> vector<2xf32>
+  func.return %decoded : vector<2xf32>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: target_legalization legal=0 rewritten=1 target_rewritten=0 reference_rewritten=1 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1
+COMPILE-REPORT: target_legalization[0] function=records_decode_reference_rewrite source_op=vector.decode mode=eager policy=prefer-native action=rewritten outcome=reference-fallback contract=unhandled legalizer=vector strategy=reference bundle=test_target config=test_target source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=9 erased_ops=1
 
 // ====
 // RUN: pass-report target-legalize
@@ -20,15 +36,15 @@ test.target<low_core> @test_target
 func.def target(@test_target) @reports_vector_store_deferred_to_later_phase(%out_buffer: buffer, %value: vector<4xf32>) {
   %base = index.constant 0 : offset
   %origin = index.constant 0 : index
-  %view = buffer.view %out_buffer[%base] : buffer -> view<4xf32, #dense>
-  vector.store %value, %view[%origin] : vector<4xf32>, view<4xf32, #dense>
+  %view = buffer.view %out_buffer[%base] : buffer -> view<4xf32>
+  vector.store %value, %view[%origin] : vector<4xf32>, view<4xf32>
   func.return
 }
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: target_legalization legal=0 rewritten=0 target_rewritten=0 reference_rewritten=0 deferred=1 invalid_ir=0 unsupported=0 unhandled=0 rows=1
-COMPILE-REPORT: target_legalization[0] function=reports_vector_store_deferred_to_later_phase source_op=vector.store mode=eager policy=prefer-native action=deferred outcome=deferred contract=unsupported legalizer=vector strategy=reference bundle=test_target config=test_target binding=0 case=18 rule_set=0 rule=65535 diagnostic=19 descriptor=18446744073709551615 source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=0 erased_ops=0
+COMPILE-REPORT: target_legalization[0] function=reports_vector_store_deferred_to_later_phase source_op=vector.store mode=eager policy=prefer-native action=deferred outcome=deferred contract=unsupported legalizer=vector strategy=reference bundle=test_target config=test_target source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=0 erased_ops=0
 
 // ====
 // RUN: pass-report target-legalize{mode=final,policy=require-native}
@@ -44,7 +60,7 @@ func.def target(@test_target) @reports_require_native_reduce_axes_reference_reje
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: target_legalization legal=0 rewritten=0 target_rewritten=0 reference_rewritten=0 deferred=0 invalid_ir=0 unsupported=1 unhandled=0 rows=1
-COMPILE-REPORT: target_legalization[0] function=reports_require_native_reduce_axes_reference_rejection source_op=vector.reduce.axes mode=final policy=require-native action=reject-unsupported-final outcome=reject-unsupported contract=unhandled legalizer=vector strategy=reference bundle=test_target config=test_target binding=65535 case=65535 rule_set=65535 rule=65535 diagnostic=65535 descriptor=18446744073709551615 source_rejections=0x00000040 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=0 erased_ops=0
+COMPILE-REPORT: target_legalization[0] function=reports_require_native_reduce_axes_reference_rejection source_op=vector.reduce.axes mode=final policy=require-native action=reject-unsupported-final outcome=reject-unsupported contract=unhandled legalizer=vector strategy=reference bundle=test_target config=test_target source_rejections=0x00000040 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=0 erased_ops=0
 
 // ====
 // RUN: pass-report target-legalize{mode=final}
@@ -66,7 +82,7 @@ func.def target(@test_target) @reports_target_shaped_mma_fragment_rejection(%lhs
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: target_legalization legal=0 rewritten=0 target_rewritten=0 reference_rewritten=0 deferred=0 invalid_ir=0 unsupported=1 unhandled=0 rows=1
-COMPILE-REPORT: target_legalization[0] function=reports_target_shaped_mma_fragment_rejection source_op=vector.mma mode=final policy=prefer-native action=reject-unsupported-final outcome=reject-unsupported contract=unhandled legalizer=vector strategy=reference bundle=test_target config=test_target binding=65535 case=65535 rule_set=65535 rule=65535 diagnostic=65535 descriptor=18446744073709551615 source_rejections=0x00000010 source_rejection_detail=1 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=0 erased_ops=0
+COMPILE-REPORT: target_legalization[0] function=reports_target_shaped_mma_fragment_rejection source_op=vector.mma mode=final policy=prefer-native action=reject-unsupported-final outcome=reject-unsupported contract=unhandled legalizer=vector strategy=reference bundle=test_target config=test_target source_rejections=0x00000010 source_rejection_detail=1 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=0 erased_ops=0
 
 // ====
 // RUN: pass-report target-legalize{mode=final}
@@ -87,7 +103,7 @@ func.def target(@test_target) @reports_matrix_descriptor_reference_fallback(%lhs
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: target_legalization legal=0 rewritten=1 target_rewritten=0 reference_rewritten=1 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1
-COMPILE-REPORT: target_legalization[0] function=reports_matrix_descriptor_reference_fallback source_op=vector.mma mode=final policy=prefer-native action=rewritten outcome=reference-fallback contract=unsupported legalizer=vector strategy=reference bundle=test_target config=test_target binding=0 case=28 rule_set=65535 rule=0 diagnostic=65535 descriptor=18446744073709551615 source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=30 erased_ops=1
+COMPILE-REPORT: target_legalization[0] function=reports_matrix_descriptor_reference_fallback source_op=vector.mma mode=final policy=prefer-native action=rewritten outcome=reference-fallback contract=unsupported legalizer=vector strategy=reference bundle=test_target config=test_target source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=30 erased_ops=1
 
 // ====
 // RUN: pass-report target-legalize{mode=final,policy=reference-only}
@@ -108,4 +124,4 @@ func.def target(@test_target) @reports_reference_only_matrix_override(%lhs_data:
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: target_legalization legal=0 rewritten=1 target_rewritten=0 reference_rewritten=1 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1
-COMPILE-REPORT: target_legalization[0] function=reports_reference_only_matrix_override source_op=vector.mma mode=final policy=reference-only action=rewritten outcome=reference-fallback contract=legal legalizer=vector strategy=reference bundle=test_target config=test_target binding=0 case=28 rule_set=65535 rule=0 diagnostic=65535 descriptor=6382105870249825446 source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=30 erased_ops=1
+COMPILE-REPORT: target_legalization[0] function=reports_reference_only_matrix_override source_op=vector.mma mode=final policy=reference-only action=rewritten outcome=reference-fallback contract=legal legalizer=vector strategy=reference bundle=test_target config=test_target descriptor_key=test.mma.i32.2x2x2 source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=30 erased_ops=1

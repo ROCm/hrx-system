@@ -14,6 +14,7 @@ presubmit entry points. Project-specific test policy stays in each project.
 from __future__ import annotations
 
 import argparse
+import collections
 import concurrent.futures
 import contextlib
 import io
@@ -25,12 +26,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
@@ -67,6 +70,8 @@ C_INCLUDE_FRAGMENT_EXTENSIONS = {
     ".inl",
 }
 C_ANALYSIS_EXTENSIONS = C_FORMAT_EXTENSIONS | C_INCLUDE_FRAGMENT_EXTENSIONS
+# Keep spawned commands below Win32's CreateProcess limit after argument quoting.
+COMMAND_LINE_CHARACTER_LIMIT = 16_000
 C_FORMAT_BATCH_SIZE = 64
 C_FORMAT_DEFAULT_MAX_JOBS = 16
 SEMGREP_CONFIG = "build_tools/static_analysis/semgrep/iree.yml"
@@ -103,7 +108,7 @@ CLANG_TIDY_LOCAL_OUTPUT_GROUP = "iree_clang_tidy_local_reports"
 CLANG_TIDY_OUTPUT_GROUP = "iree_clang_tidy_reports"
 CLANG_TIDY_PATH_PREFIXES = SEMGREP_PATH_PREFIXES
 CLANG_TIDY_REPO_ENV = "--repo_env=IREE_CLANG_TIDY_LLVM=auto"
-CLANG_TIDY_CHECKS = "-*,iree-*"
+CLANG_TIDY_CONFIG = REPO_ROOT / "build_tools/clang_tidy/clang_tidy_config.yaml"
 CLANG_TIDY_CMAKE_BUILD_DIR = REPO_ROOT / ".tmp" / "iree-clang-tidy-plugin"
 CLANG_TIDY_FIXES_ROOT = "iree-clang-tidy-fixes"
 CLANG_TIDY_SETUP_HINT = (
@@ -130,6 +135,7 @@ WATCHWORD_PATTERNS = (
     re.compile("TODO before " + "submit", re.IGNORECASE),
 )
 FAILURE_OUTPUT_LINE_LIMIT = 240
+FAILURE_OUTPUT_TAIL_CHARACTER_LIMIT = 64 * 1024
 
 
 def git_worktree_dir() -> Path:
@@ -179,6 +185,7 @@ GLOBAL_PROJECT_TRIGGERS = (
     "requirements",
 )
 ROOT_DEVTOOLS_TRIGGERS = (
+    ".github/workflows/docs.yml",
     ".github/workflows/presubmit.yml",
     "CONTRIBUTING.md",
     "README.md",
@@ -186,6 +193,7 @@ ROOT_DEVTOOLS_TRIGGERS = (
     "lefthook.yml",
     "requirements-analysis",
     "requirements-dev",
+    "loom/docs/requirements",
     "build_tools/static_analysis/",
     "build_tools/devtools/",
     "build_tools/lefthook/",
@@ -267,8 +275,16 @@ def parse_arguments() -> argparse.Namespace:
         "--commit",
         action="store_true",
         help=(
-            "Use files staged for commit plus files changed by HEAD. This is "
-            "the Git hook scope and covers amended commit contents."
+            "Use files staged for commit. This legacy Git-hook spelling is "
+            "equivalent to --staged."
+        ),
+    )
+    inputs.add_argument(
+        "--amend",
+        action="store_true",
+        help=(
+            "Use the exact amended commit candidate: the index compared with "
+            "HEAD's first parent. This scope is check-only."
         ),
     )
     inputs.add_argument("--all", action="store_true", help="Use all tracked files.")
@@ -325,6 +341,14 @@ def parse_arguments() -> argparse.Namespace:
         help="Print the selected plan before running it.",
     )
     parser.add_argument(
+        "--fail-on-fix",
+        action="store_true",
+        help=(
+            "Return a failure after staging any fix so a Git hook stops before "
+            "test-bearing validation and retries against the repaired index."
+        ),
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Stream command output and print exact commands.",
@@ -341,12 +365,17 @@ def parse_arguments() -> argparse.Namespace:
         args.changed
         or args.staged
         or args.commit
+        or args.amend
         or args.all
         or args.base
         or args.since
         or args.files_from
     ):
         parser.error("explicit paths cannot be combined with another input mode")
+    if args.fix and args.amend:
+        parser.error("--amend is a non-mutating validation scope; use --check")
+    if args.fail_on_fix and not args.fix:
+        parser.error("--fail-on-fix requires --fix")
     apply_profile_defaults(args)
     return args
 
@@ -365,6 +394,7 @@ def apply_profile_defaults(args: argparse.Namespace) -> None:
         and not args.changed
         and not args.staged
         and not args.commit
+        and not args.amend
         and not args.all
         and not args.base
         and not args.since
@@ -462,19 +492,7 @@ def run_command(command: list[str], description: str, verbose: bool) -> bool:
     if verbose:
         print("  " + command_text(command))
         sys.stdout.flush()
-        result = subprocess.run(command, cwd=REPO_ROOT)
-        output = None
-    else:
-        result = subprocess.run(
-            command,
-            cwd=REPO_ROOT,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-        output = result.stdout
+    result = run_command_batch(command)
     elapsed_seconds = time.monotonic() - start_time
     if result.returncode == 0:
         print(f"[ok] {description} ({format_duration(elapsed_seconds)})")
@@ -483,7 +501,6 @@ def run_command(command: list[str], description: str, verbose: bool) -> bool:
         description,
         elapsed_seconds,
         command=None if verbose else command,
-        output=output,
         exit_code=result.returncode,
     )
     return False
@@ -493,11 +510,54 @@ def run_command(command: list[str], description: str, verbose: bool) -> bool:
 class CommandBatchResult:
     command: list[str]
     returncode: int
-    output: str
+    output_tail: str
+    omitted_output_character_count: int
 
 
-def run_command_batch(command: list[str]) -> CommandBatchResult:
-    result = subprocess.run(
+class BoundedOutputTail:
+    def __init__(self, character_limit: int):
+        if character_limit <= 0:
+            raise ValueError("output tail character limit must be positive")
+        self.character_limit = character_limit
+        self.chunks: collections.deque[str] = collections.deque()
+        self.character_count = 0
+        self.omitted_character_count = 0
+
+    def append(self, chunk: str) -> None:
+        if not chunk:
+            return
+        if len(chunk) >= self.character_limit:
+            self.omitted_character_count += (
+                self.character_count + len(chunk) - self.character_limit
+            )
+            self.chunks.clear()
+            self.chunks.append(chunk[-self.character_limit :])
+            self.character_count = self.character_limit
+            return
+
+        self.chunks.append(chunk)
+        self.character_count += len(chunk)
+        while self.character_count > self.character_limit:
+            overflow = self.character_count - self.character_limit
+            first_chunk = self.chunks[0]
+            if len(first_chunk) <= overflow:
+                self.chunks.popleft()
+                self.character_count -= len(first_chunk)
+                self.omitted_character_count += len(first_chunk)
+            else:
+                self.chunks[0] = first_chunk[overflow:]
+                self.character_count -= overflow
+                self.omitted_character_count += overflow
+
+    def text(self) -> str:
+        return "".join(self.chunks)
+
+
+def run_command_batch(
+    command: list[str], output_lock: threading.Lock | None = None
+) -> CommandBatchResult:
+    output_tail = BoundedOutputTail(FAILURE_OUTPUT_TAIL_CHARACTER_LIMIT)
+    with subprocess.Popen(
         command,
         cwd=REPO_ROOT,
         stdout=subprocess.PIPE,
@@ -505,11 +565,25 @@ def run_command_batch(command: list[str]) -> CommandBatchResult:
         text=True,
         encoding="utf-8",
         errors="replace",
-    )
+        bufsize=1,
+    ) as process:
+        if process.stdout is None:
+            raise RuntimeError("presubmit subprocess stdout pipe was not created")
+        for line in process.stdout:
+            if output_lock is None:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+            else:
+                with output_lock:
+                    sys.stdout.write(line)
+                    sys.stdout.flush()
+            output_tail.append(line)
+        returncode = process.wait()
     return CommandBatchResult(
         command=command,
-        returncode=result.returncode,
-        output=result.stdout,
+        returncode=returncode,
+        output_tail=output_tail.text(),
+        omitted_output_character_count=output_tail.omitted_character_count,
     )
 
 
@@ -535,9 +609,10 @@ def run_parallel_commands(
         sys.stdout.flush()
 
     results: list[CommandBatchResult | None] = [None] * len(commands)
+    output_lock = threading.Lock()
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as executor:
         future_to_index = {
-            executor.submit(run_command_batch, command): index
+            executor.submit(run_command_batch, command, output_lock): index
             for index, command in enumerate(commands)
         }
         for future in concurrent.futures.as_completed(future_to_index):
@@ -554,9 +629,16 @@ def run_parallel_commands(
     for result in failed_results:
         failure_output_parts.append("command:")
         failure_output_parts.append("  " + command_text(result.command))
-        if result.output:
+        if result.omitted_output_character_count or result.output_tail:
             failure_output_parts.append("output:")
-            failure_output_parts.append(result.output.rstrip())
+            if result.omitted_output_character_count:
+                failure_output_parts.append(
+                    "[... omitted "
+                    f"{result.omitted_output_character_count} earlier output "
+                    "characters; full output was streamed above ...]"
+                )
+            if result.output_tail:
+                failure_output_parts.append(result.output_tail.rstrip())
     print_step_failure(
         description,
         elapsed_seconds,
@@ -564,6 +646,30 @@ def run_parallel_commands(
         exit_code=max(result.returncode for result in failed_results),
     )
     return False
+
+
+def command_argument_batches(
+    command_prefix: list[str], arguments: list[str]
+) -> list[list[str]]:
+    """Partitions trailing command arguments at a portable command-line size."""
+    if not arguments:
+        return []
+    prefix_length = len(subprocess.list2cmdline(command_prefix))
+    command = list(command_prefix)
+    command_length = prefix_length
+    commands = []
+    for argument in arguments:
+        argument_length = len(subprocess.list2cmdline([argument])) + 1
+        if len(command) > len(command_prefix) and (
+            command_length + argument_length > COMMAND_LINE_CHARACTER_LIMIT
+        ):
+            commands.append(command)
+            command = list(command_prefix)
+            command_length = prefix_length
+        command.append(argument)
+        command_length += argument_length
+    commands.append(command)
+    return commands
 
 
 def run_inline_check(description: str, action, verbose: bool) -> bool:
@@ -638,37 +744,73 @@ def unique_paths(paths: list[str]) -> list[str]:
     return unique
 
 
+def git_diff_files(*revisions: str, cached: bool = False) -> list[str]:
+    command = ["diff"]
+    if cached:
+        command.append("--cached")
+    command += ["--name-only", "-z", "--no-renames", *revisions, "--"]
+    return git_list(command)
+
+
+def git_unstaged_files(paths: list[str]) -> list[str]:
+    if not paths:
+        return []
+    command_prefix = [
+        "--literal-pathspecs",
+        "diff",
+        "--name-only",
+        "-z",
+        "--no-renames",
+        "--",
+    ]
+    return unique_paths(
+        [
+            path
+            for command in command_argument_batches(command_prefix, paths)
+            for path in git_list(command)
+        ]
+    )
+
+
 def changed_files() -> list[str]:
     return unique_paths(
         [
-            *git_list(["diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"]),
-            *git_list(["diff", "--name-only", "-z", "--diff-filter=ACMR"]),
+            *git_diff_files(cached=True),
+            *git_diff_files(),
             *git_list(["ls-files", "--others", "--exclude-standard", "-z"]),
         ]
     )
 
 
-def head_commit_files() -> list[str]:
+def empty_tree() -> str:
+    result = subprocess.run(
+        ["git", "hash-object", "-t", "tree", "--stdin"],
+        cwd=REPO_ROOT,
+        check=True,
+        input=b"",
+        stdout=subprocess.PIPE,
+    )
+    return result.stdout.decode("ascii").strip()
+
+
+def amend_base() -> str:
     result = subprocess.run(
         ["git", "rev-parse", "--verify", "HEAD^"],
         cwd=REPO_ROOT,
-        stdout=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
     )
-    if result.returncode != 0:
-        return []
-    return git_list(
-        ["diff", "--name-only", "-z", "--diff-filter=ACMR", "HEAD^", "HEAD", "--"]
-    )
+    if result.returncode == 0:
+        return result.stdout.decode("ascii").strip()
+    return empty_tree()
 
 
 def commit_files() -> list[str]:
-    return unique_paths(
-        [
-            *git_list(["diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"]),
-            *head_commit_files(),
-        ]
-    )
+    return git_diff_files(cached=True)
+
+
+def amend_files() -> list[str]:
+    return git_diff_files(amend_base(), cached=True)
 
 
 def tracked_files() -> list[str]:
@@ -690,9 +832,7 @@ def presubmit_inputs(args: argparse.Namespace) -> PresubmitInputs:
             changed_paths=paths,
         )
     if args.staged:
-        paths = git_list(
-            ["diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"]
-        )
+        paths = git_diff_files(cached=True)
         return PresubmitInputs(
             mode="staged",
             selected_paths=paths,
@@ -702,6 +842,13 @@ def presubmit_inputs(args: argparse.Namespace) -> PresubmitInputs:
         paths = commit_files()
         return PresubmitInputs(
             mode="commit",
+            selected_paths=paths,
+            changed_paths=paths,
+        )
+    if args.amend:
+        paths = amend_files()
+        return PresubmitInputs(
+            mode="amend",
             selected_paths=paths,
             changed_paths=paths,
         )
@@ -716,16 +863,7 @@ def presubmit_inputs(args: argparse.Namespace) -> PresubmitInputs:
     if args.base:
         paths = unique_paths(
             [
-                *git_list(
-                    [
-                        "diff",
-                        "--name-only",
-                        "-z",
-                        "--diff-filter=ACMR",
-                        f"{args.base}...HEAD",
-                        "--",
-                    ]
-                ),
+                *git_diff_files(f"{args.base}...HEAD"),
                 *changed_files(),
             ]
         )
@@ -744,9 +882,7 @@ def presubmit_inputs(args: argparse.Namespace) -> PresubmitInputs:
             selected_paths=paths,
             changed_paths=paths,
         )
-    paths = git_list(
-        ["diff", "--name-only", "-z", "--diff-filter=ACMR", args.since, "--"]
-    )
+    paths = git_diff_files(args.since)
     return PresubmitInputs(
         mode="since",
         selected_paths=paths,
@@ -758,32 +894,109 @@ def selected_files(args: argparse.Namespace) -> list[str]:
     return presubmit_inputs(args).selected_paths
 
 
+def index_worktree_conflicts(inputs: PresubmitInputs) -> list[str]:
+    selected_path_set = set(inputs.selected_paths)
+    if inputs.mode in ("staged", "commit", "amend"):
+        unstaged_path_set = set(git_unstaged_files(inputs.selected_paths))
+        return sorted(selected_path_set.intersection(unstaged_path_set))
+    if inputs.mode == "explicit":
+        unstaged_path_set = set(git_unstaged_files(inputs.selected_paths))
+        staged_path_set = set(commit_files())
+        return sorted(
+            selected_path_set.intersection(unstaged_path_set, staged_path_set)
+        )
+    return []
+
+
+def validate_index_worktree_coherence(
+    args: argparse.Namespace, inputs: PresubmitInputs
+) -> bool:
+    conflict_paths = index_worktree_conflicts(inputs)
+    if not conflict_paths:
+        return True
+    print_section("Index Boundary")
+    print(
+        "[fail] Candidate paths also contain unstaged changes. Presubmit tools "
+        "consume whole working-tree files, so continuing would validate or "
+        "stage content outside the candidate:"
+    )
+    for path in conflict_paths:
+        print(f"  {path}")
+    print(
+        "[next] Keep the commit narrow by running "
+        f"`python dev.py {args.lane} fix` before partial staging, then stage "
+        "only the intended hunks again. A whole-file commit boundary also "
+        "resolves this state."
+    )
+    return False
+
+
 def existing_files(paths: list[str]) -> list[str]:
     return [path for path in paths if (REPO_ROOT / path).is_file()]
-
-
-def has_unstaged_changes(paths: list[str]) -> bool:
-    if not paths:
-        return False
-    result = subprocess.run(
-        ["git", "diff", "--quiet", "--", *paths],
-        cwd=REPO_ROOT,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    if result.returncode == 0:
-        return False
-    if result.returncode == 1:
-        return True
-    raise subprocess.CalledProcessError(result.returncode, result.args)
 
 
 def stage_files(paths: list[str], verbose: bool) -> bool:
     if not paths:
         return True
-    if not has_unstaged_changes(paths):
+    unstaged_files = git_unstaged_files(paths)
+    if not unstaged_files:
         return True
-    return run_command(["git", "add", "--", *paths], "Stage local fixups", verbose)
+    commands = command_argument_batches(
+        ["git", "--literal-pathspecs", "add", "--"], unstaged_files
+    )
+    return run_parallel_commands(
+        commands,
+        "Stage local fixups",
+        verbose,
+        jobs=1,
+    )
+
+
+def index_tree() -> str:
+    result = subprocess.run(
+        ["git", "write-tree"],
+        cwd=REPO_ROOT,
+        check=True,
+        stdout=subprocess.PIPE,
+    )
+    return result.stdout.decode("ascii").strip()
+
+
+def changed_index_paths(before_tree: str) -> list[str]:
+    after_tree = index_tree()
+    if after_tree == before_tree:
+        return []
+    return git_list(
+        [
+            "diff-tree",
+            "--no-commit-id",
+            "--name-only",
+            "-z",
+            "-r",
+            "--no-renames",
+            before_tree,
+            after_tree,
+        ]
+    )
+
+
+def print_fix_summary(paths: list[str], *, stops_for_retry: bool) -> None:
+    if not paths:
+        return
+    print_section("Index Fixups")
+    print(f"[fix] Mechanical fixups changed {len(paths)} staged path(s):")
+    for path in paths:
+        print(f"  {path}")
+    if stops_for_retry:
+        print(
+            "[next] This commit attempt stops before tests. Review `git diff "
+            "--cached`, then retry the same commit; the repaired index will "
+            "receive non-mutating hygiene, tests, and static analysis."
+        )
+        print(
+            "[note] Lefthook's fail_on_changes policy independently prevents "
+            "a hook-modified index from being committed without review."
+        )
 
 
 def is_buildifier_file(path: str) -> bool:
@@ -987,7 +1200,11 @@ def clang_tidy_jobs() -> int:
             return 1
         return max(1, jobs)
     cpu_count = os.cpu_count() or 1
-    default_jobs = max(1, (cpu_count + CLANG_TIDY_DEFAULT_CORE_DIVISOR - 1) // 2)
+    default_jobs = max(
+        1,
+        (cpu_count + CLANG_TIDY_DEFAULT_CORE_DIVISOR - 1)
+        // CLANG_TIDY_DEFAULT_CORE_DIVISOR,
+    )
     return min(cpu_count, CLANG_TIDY_DEFAULT_MAX_JOBS, default_jobs)
 
 
@@ -1033,11 +1250,11 @@ def run_buildifier(paths: list[str], fix: bool, verbose: bool) -> bool:
         return skip_step("Buildifier", "no Bazel files")
     if not require_tool("buildifier", "Buildifier"):
         return False
-    command = ["buildifier", "-lint=off"]
+    command_prefix = ["buildifier", "-lint=off"]
     if not fix:
-        command.append("-mode=check")
-    command += files
-    ok = run_command(command, "Buildifier", verbose)
+        command_prefix.append("-mode=check")
+    commands = command_argument_batches(command_prefix, files)
+    ok = run_parallel_commands(commands, "Buildifier", verbose, jobs=1)
     if fix and ok:
         ok = stage_files(files, verbose)
     return ok
@@ -1050,17 +1267,17 @@ def run_ruff(paths: list[str], fix: bool, verbose: bool) -> bool:
     if not require_tool("ruff", "Ruff"):
         return False
     ok = True
-    lint_command = ["ruff", "check", "--cache-dir", ".ruff_cache"]
+    lint_command_prefix = ["ruff", "check", "--cache-dir", ".ruff_cache"]
     if fix:
-        lint_command.append("--fix")
-    lint_command += files
-    ok = run_command(lint_command, "Ruff lint", verbose) and ok
+        lint_command_prefix.append("--fix")
+    lint_commands = command_argument_batches(lint_command_prefix, files)
+    ok = run_parallel_commands(lint_commands, "Ruff lint", verbose, jobs=1) and ok
 
-    format_command = ["ruff", "format", "--cache-dir", ".ruff_cache"]
+    format_command_prefix = ["ruff", "format", "--cache-dir", ".ruff_cache"]
     if not fix:
-        format_command.append("--check")
-    format_command += files
-    ok = run_command(format_command, "Ruff format", verbose) and ok
+        format_command_prefix.append("--check")
+    format_commands = command_argument_batches(format_command_prefix, files)
+    ok = run_parallel_commands(format_commands, "Ruff format", verbose, jobs=1) and ok
 
     if fix:
         ok = stage_files(files, verbose) and ok
@@ -1171,16 +1388,47 @@ def run_watchwords(paths: list[str]) -> bool:
 
 def run_build_filename_check(paths: list[str]) -> bool:
     ok = True
-    for path in paths:
+    for path in existing_files(paths):
         if Path(path).name == "BUILD":
             print(f"{path}: use BUILD.bazel instead of BUILD")
             ok = False
     return ok
 
 
-def run_bazel_to_cmake(fix: bool, verbose: bool) -> bool:
-    command = ["python", "build_tools/bazel_to_cmake/bazel_to_cmake.py"]
-    command.append("--stage-updates" if fix else "--check")
+def is_bazel_to_cmake_global_trigger(path: str) -> bool:
+    return (
+        Path(path).name == ".bazel_to_cmake.cfg.py"
+        or path == "loom/build_tools/amdgpu/target_config.bzl"
+        or path.startswith(
+            (
+                "build_tools/bazel_to_cmake/",
+                "loom/requirements/",
+                "runtime/requirements/",
+            )
+        )
+    )
+
+
+def bazel_to_cmake_input_paths(paths: list[str]) -> list[str]:
+    return existing_files(
+        [
+            path
+            for path in paths
+            if Path(path).name in {"BUILD", "BUILD.bazel", "CMakeLists.txt"}
+        ]
+    )
+
+
+def run_bazel_to_cmake(paths: list[str], fix: bool, verbose: bool) -> bool:
+    command = [sys.executable, "build_tools/bazel_to_cmake/bazel_to_cmake.py"]
+    if any(is_bazel_to_cmake_global_trigger(path) for path in paths):
+        command.append("--check")
+        return run_command(command, "Bazel-to-CMake", verbose)
+
+    input_paths = bazel_to_cmake_input_paths(paths)
+    if not input_paths:
+        return skip_step("Bazel-to-CMake", "no selected Bazel/CMake files")
+    command += ["--stage-updates" if fix else "--check", *input_paths]
     return run_command(command, "Bazel-to-CMake", verbose)
 
 
@@ -1188,11 +1436,12 @@ def run_amdgpu_target_map(paths: list[str], fix: bool, verbose: bool) -> bool:
     relevant_prefixes = (
         "build_tools/amdgpu/elf_machine_map.inl",
         "build_tools/amdgpu/target_map.",
-        "runtime/src/iree/hal/drivers/amdgpu/util/target_id_map.inl",
+        "runtime/src/iree/hal/drivers/amdgpu/util/device_library_target_map.inl",
+        "runtime/src/iree/hal/executable/amdgpu/target_id_map.inl",
     )
     if not any(path.startswith(relevant_prefixes) for path in paths):
         return skip_step("AMDGPU target map", "no AMDGPU target-map inputs")
-    command = ["python", "build_tools/amdgpu/target_map.py"]
+    command = [sys.executable, "build_tools/amdgpu/target_map.py"]
     if not fix:
         command.append("--check")
     ok = run_command(command, "AMDGPU target map", verbose)
@@ -1203,7 +1452,8 @@ def run_amdgpu_target_map(paths: list[str], fix: bool, verbose: bool) -> bool:
                 "build_tools/amdgpu/target_map.bzl",
                 "build_tools/amdgpu/target_map.cmake",
                 "build_tools/amdgpu/target_map.h",
-                "runtime/src/iree/hal/drivers/amdgpu/util/target_id_map.inl",
+                "runtime/src/iree/hal/drivers/amdgpu/util/device_library_target_map.inl",
+                "runtime/src/iree/hal/executable/amdgpu/target_id_map.inl",
             ],
             verbose,
         )
@@ -1231,7 +1481,7 @@ def run_hygiene(paths: list[str], fix: bool, verbose: bool) -> bool:
     ok = run_buildifier(paths, fix=fix, verbose=verbose) and ok
     ok = run_ruff(paths, fix=fix, verbose=verbose) and ok
     ok = run_clang_format(paths, fix=fix, verbose=verbose) and ok
-    ok = run_bazel_to_cmake(fix=fix, verbose=verbose) and ok
+    ok = run_bazel_to_cmake(paths, fix=fix, verbose=verbose) and ok
     ok = run_amdgpu_target_map(paths, fix=fix, verbose=verbose) and ok
     return ok
 
@@ -1262,15 +1512,20 @@ def is_global_trigger(path: str) -> bool:
     )
 
 
-def run_project_tests(
+def run_project_presubmits(
     projects: list[Project],
     paths: list[str],
     fix: bool,
     verbose: bool,
     lane: str,
+    *,
+    phase: str,
 ) -> bool:
+    if phase not in ("hygiene", "tests"):
+        raise ValueError(f"unknown project presubmit phase: {phase}")
+    phase_description = "Project hygiene" if phase == "hygiene" else "Project tests"
     if not projects:
-        return skip_step("Project tests", "no affected project entry points")
+        return skip_step(phase_description, "no affected project entry points")
     ok = True
     with tempfile.NamedTemporaryFile(
         mode="w",
@@ -1291,10 +1546,10 @@ def run_project_tests(
                 lane,
                 "--files-from",
                 file_list_path,
-                "--tests",
+                f"--{phase}",
             ]
             command.append("--fix" if fix else "--check")
-            ok = run_command(command, f"{project.name} tests", verbose) and ok
+            ok = run_command(command, f"{project.name} {phase}", verbose) and ok
     finally:
         Path(file_list_path).unlink(missing_ok=True)
     return ok
@@ -1380,6 +1635,8 @@ def run_root_devtools_tests_for_lane(
             "unittest",
             "build_tools.devtools.cli_test",
             "build_tools.devtools.command_plan_test",
+            "build_tools.devtools.environment_test",
+            "build_tools.devtools.install_test",
             "build_tools.devtools.setup_test",
         ],
         "Root devtools Python tests",
@@ -1404,8 +1661,14 @@ def run_semgrep(inputs: PresubmitInputs, profile: str, verbose: bool) -> bool:
     validate_config = SEMGREP_CONFIG in paths
     if not files and not validate_config:
         return skip_step("Semgrep", "no C/C++ runtime inputs")
-    if not require_static_tool("semgrep", "Semgrep", profile):
-        return False
+    if sys.platform == "win32":
+        return skip_step(
+            "Semgrep",
+            "semgrep-core.exe is not distributed for native Windows; "
+            "enforced by the Linux paranoid presubmit",
+        )
+    if shutil.which("semgrep") is None:
+        return require_static_tool("semgrep", "Semgrep", profile)
 
     ok = True
     if validate_config:
@@ -1413,8 +1676,9 @@ def run_semgrep(inputs: PresubmitInputs, profile: str, verbose: bool) -> bool:
             semgrep_validate_command(), "Semgrep config validation", verbose
         )
     if files:
+        commands = command_argument_batches(semgrep_scan_command([]), files)
         ok = (
-            run_command(semgrep_scan_command(files), "Semgrep hard rules", verbose)
+            run_parallel_commands(commands, "Semgrep hard rules", verbose, jobs=1)
             and ok
         )
     return ok
@@ -1434,6 +1698,7 @@ def clang_tidy_bazel_command(
     ]
     if keep_going:
         command.append("--keep_going")
+    command += ["--jobs", str(clang_tidy_jobs())]
     output_groups = [
         CLANG_TIDY_LOCAL_OUTPUT_GROUP if local_outputs else CLANG_TIDY_OUTPUT_GROUP
     ]
@@ -1468,7 +1733,7 @@ def bazel_file_uri_to_path(uri: str) -> Path:
         raise ValueError(f"expected file URI for Bazel output, got {uri}")
     if parsed.netloc:
         raise ValueError(f"file URI has unsupported host component: {uri}")
-    return Path(unquote(parsed.path))
+    return Path(url2pathname(parsed.path))
 
 
 def bazel_output_paths_from_bep(
@@ -1582,6 +1847,19 @@ def llvm_cmake_dir(llvm_config: str) -> str | None:
     return result.stdout.strip()
 
 
+def cmake_clang_tidy_plugin_configure_command(*, llvm_package_dir: Path) -> list[str]:
+    clang_package_dir = llvm_package_dir.parent / "clang"
+    return [
+        "cmake",
+        "-S",
+        "build_tools/clang_tidy",
+        "-B",
+        str(CLANG_TIDY_CMAKE_BUILD_DIR),
+        f"-DLLVM_DIR={llvm_package_dir}",
+        f"-DClang_DIR={clang_package_dir}",
+    ]
+
+
 def cmake_clang_tidy_plugin_path(build_dir: Path) -> Path | None:
     names = (
         "IREEClangTidyPlugin.dll",
@@ -1618,7 +1896,7 @@ def cmake_clang_tidy_command(
         clang_tidy,
         "-p",
         str(compile_commands_dir),
-        f"-checks={CLANG_TIDY_CHECKS}",
+        f"-config-file={CLANG_TIDY_CONFIG}",
         f"-load={plugin}",
         "-j",
         str(clang_tidy_jobs()),
@@ -1656,7 +1934,7 @@ def cmake_run_clang_tidy_fix_command(
         clang_apply_replacements,
         "-p",
         str(compile_commands_dir),
-        f"-checks={CLANG_TIDY_CHECKS}",
+        f"-config-file={CLANG_TIDY_CONFIG}",
         f"-load={plugin}",
         "-j",
         str(clang_tidy_jobs()),
@@ -1799,19 +2077,22 @@ def run_clang_tidy_cmake(
     if not require_tool("cmake", "clang-tidy CMake plugin"):
         return False
 
-    cmake_dir = llvm_cmake_dir(llvm_config)
-    if not cmake_dir:
+    llvm_package_dir_value = llvm_cmake_dir(llvm_config)
+    if not llvm_package_dir_value:
+        return False
+    llvm_package_dir = Path(llvm_package_dir_value)
+    clang_package_dir = llvm_package_dir.parent / "clang"
+    if not (clang_package_dir / "ClangConfig.cmake").is_file():
+        print(
+            "[fail] clang-tidy CMake plugin: matching Clang package is "
+            f"missing under {clang_package_dir}"
+        )
         return False
 
     ok = True
-    configure_command = [
-        "cmake",
-        "-S",
-        "build_tools/clang_tidy",
-        "-B",
-        str(CLANG_TIDY_CMAKE_BUILD_DIR),
-        f"-DLLVM_DIR={cmake_dir}",
-    ]
+    configure_command = cmake_clang_tidy_plugin_configure_command(
+        llvm_package_dir=llvm_package_dir
+    )
     ok = (
         run_command(
             configure_command,
@@ -2055,11 +2336,7 @@ def run_clang_tidy(
                     "test",
                     "--config=presubmit",
                     CLANG_TIDY_REPO_ENV,
-                    "//build_tools/clang_tidy:plugin_smoke_test",
-                    "//build_tools/clang_tidy:refcount_checks_test",
-                    "//build_tools/clang_tidy:status_checks_test",
-                    "//build_tools/clang_tidy:style_checks_test",
-                    "//build_tools/clang_tidy:trace_checks_test",
+                    "//build_tools/clang_tidy:plugin_tests",
                 ],
                 "clang-tidy plugin tests",
                 verbose,
@@ -2165,6 +2442,8 @@ def print_plan(
         input_mode = "changed"
     elif args.commit:
         input_mode = "commit"
+    elif args.amend:
+        input_mode = "amend"
     elif args.all:
         input_mode = "all"
     elif args.base:
@@ -2188,7 +2467,13 @@ def print_plan(
     print(f"  lane: {args.lane}")
     print(f"  profile: {args.profile}")
     print(f"  mode: {mutation}")
-    print(f"  input: {input_mode} ({len(paths)} file(s))")
+    print(f"  validation input: {input_mode} ({len(paths)} path(s))")
+    if args.fix:
+        print(
+            "  mutation input: selected existing files and declared generated outputs"
+        )
+    else:
+        print("  mutation input: none (read-only)")
     print("  scopes: " + ", ".join(scopes))
     if projects:
         print("  projects: " + ", ".join(project.name for project in projects))
@@ -2221,6 +2506,8 @@ def dev_py_rerun_command(args: argparse.Namespace, verbose: bool) -> list[str]:
         ]
         if args.base:
             command += ["--base", args.base]
+        elif args.amend:
+            command.append("--amend")
         elif args.commit:
             command.append("--commit")
         elif args.staged or args.paths:
@@ -2271,6 +2558,17 @@ def run_presubmit(
     ok = True
     if args.hygiene:
         ok = run_hygiene(paths, fix=args.fix, verbose=args.verbose) and ok
+        ok = (
+            run_project_presubmits(
+                projects,
+                paths,
+                fix=args.fix,
+                verbose=args.verbose,
+                lane=args.lane,
+                phase="hygiene",
+            )
+            and ok
+        )
     if args.tests:
         print_section("Tests")
         ok = (
@@ -2281,12 +2579,13 @@ def run_presubmit(
         )
         if args.project_tests:
             ok = (
-                run_project_tests(
+                run_project_presubmits(
                     projects,
                     paths,
                     fix=args.fix,
                     verbose=args.verbose,
                     lane=args.lane,
+                    phase="tests",
                 )
                 and ok
             )
@@ -2319,18 +2618,27 @@ def run_presubmit(
 def run_presubmit_with_source_guard(
     args: argparse.Namespace, inputs: PresubmitInputs, projects: list[Project]
 ) -> int:
+    before_tree = index_tree() if args.fix else None
     snapshot = NonEmptyTrackedFileSnapshot.capture_tracked_package_initializers(
         REPO_ROOT
     )
     result = run_presubmit(args, inputs, projects)
     if not snapshot.verify(REPO_ROOT):
         result = 1
+    if before_tree is not None:
+        fixed_paths = changed_index_paths(before_tree)
+        stops_for_retry = bool(fixed_paths and args.fail_on_fix)
+        print_fix_summary(fixed_paths, stops_for_retry=stops_for_retry)
+        if stops_for_retry:
+            result = 1
     return result
 
 
 def main() -> int:
     args = parse_arguments()
     inputs = presubmit_inputs(args)
+    if not validate_index_worktree_coherence(args, inputs):
+        return 1
     projects = projects_for_paths(inputs.selected_paths)
     if args.fix:
         with source_mutation_lock(REPO_ROOT, "root-presubmit-fix"):

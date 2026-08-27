@@ -32,9 +32,11 @@ func.def target(@target) @unsupported_source_op(%lhs: i32, %rhs: i32) -> (i32) {
 
 spirv.target<vulkan1_3> @target
 
+template.decl @demo.missing(%value: i32) -> (i32)
+
 func.def target(@target) @unresolved_apply_rejected_at_source_low(%value: i32) -> (i32) {
-  // ERROR@+1: LOWERING/045 {op_name="func.apply", phase_name="select-templates", contract_key="demo.missing", failure_code="no_provider"}
-  %result = func.apply<demo.missing>(%value) : (i32) -> (i32)
+  // ERROR@+1: LOWERING/045 {op_name="template.apply", phase_name="select-templates", contract_key="demo.missing", failure_code="no_provider"}
+  %result = template.apply<@demo.missing>(%value) : (i32) -> (i32)
   func.return %result : i32
 }
 
@@ -72,9 +74,10 @@ func.def target(@target) @unsupported_semantic_math(%input: f32) -> (f32) {
 
 spirv.target<vulkan1_3> @target
 
-func.def target(@target) @unsupported_source_type(%value: f8E4M3) {
-  // ERROR@-1: TARGET/031 {target_key="target", export_name="unsupported_source_type", config_key="target", op_name="func.def", function_name="unsupported_source_type", actual_type="f8E4M3", type_constraint="scalar.fp8_decode_or_contract"}
-  func.return
+func.def target(@target) @fp8_bits_do_not_imply_fp8_arithmetic(%lhs: f8E4M3, %rhs: f8E4M3) -> (f8E4M3) {
+  // ERROR@+1: LOWERING/036 {op_name="scalar.addf", element_type="f8E4M3"}
+  %result = scalar.addf %lhs, %rhs : f8E4M3
+  func.return %result : f8E4M3
 }
 
 // ====
@@ -82,14 +85,15 @@ func.def target(@target) @unsupported_source_type(%value: f8E4M3) {
 spirv.target<vulkan1_3> @target
 
 func.def target(@target) @storage_buffer_f16_requires_target_features(%input: buffer, %output: buffer, %byte_offset: offset) {
+  %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 2)] : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 2} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 2} : buffer
+  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<1xf16>
   // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_ptr_access_chain.storage_buffer.f16.byte_offset", constraint_key="descriptor_available"}
-  %input_view = buffer.view %input[%byte_offset] : buffer -> view<1xf16, #dense>
-  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_load.storage_buffer.f16", constraint_key="descriptor_available"}
-  %loaded = view.load %input_view[0] : view<1xf16, #dense> -> f16
+  %loaded = view.load %input_view[0] : view<1xf16> -> f16
+  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xf16>
   // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_ptr_access_chain.storage_buffer.f16.byte_offset", constraint_key="descriptor_available"}
-  %output_view = buffer.view %output[%byte_offset] : buffer -> view<1xf16, #dense>
-  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_store.storage_buffer.f16", constraint_key="descriptor_available"}
-  view.store %loaded, %output_view[0] : f16, view<1xf16, #dense>
+  view.store %loaded, %output_view[0] : f16, view<1xf16>
   func.return
 }
 
@@ -99,10 +103,74 @@ spirv.target<vulkan1_3> @target
 
 func.def target(@target) @storage_buffer_i32_requires_known_root_alignment(%input: buffer, %byte_offset: offset) -> (i32) {
   %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 4)] : offset
-  %input_view = buffer.view %input[%byte_offset_aligned] : buffer -> view<1xi32, #dense>
+  %input_view = buffer.view %input[%byte_offset_aligned] : buffer -> view<1xi32>
   // ERROR@+1: TARGET/050 {required_alignment="4", known_alignment="1"}
-  %loaded = view.load %input_view[0] : view<1xi32, #dense> -> i32
+  %loaded = view.load %input_view[0] : view<1xi32> -> i32
   func.return %loaded : i32
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 2318}
+
+func.def target(@target) @cooperative_matrix_rejects_noncompact_storage_tile(%input: buffer, %byte_offset: offset) -> (vector<16xf16>) {
+  %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 16)] : offset
+  %m = index.constant 16 : index
+  %k = index.constant 16 : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<32x16xf16>
+  // ERROR@+1: TARGET/003 {subject_role="value", subject_name="view", constraint_key="cooperative_matrix.compact_storage_tile"}
+  %fragment = vector.fragment.load<lhs> %input_view[0, 0] shape [%m, %k] : view<32x16xf16> -> vector<16xf16>
+  func.return %fragment : vector<16xf16>
+}
+
+// ====
+
+spirv.target<vulkan1_3> @hal_target_compact_matrix {abi = hal_kernel, contract_feature_bits = 2318}
+
+kernel.def target(@hal_target_compact_matrix) @cooperative_matrix_accepts_explicit_compact_layout() {
+  %unit = index.constant 1 : index
+  %subgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%subgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %byte_offset: offset) {
+  %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 16)] : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %layout = encoding.layout.strided [16, 1] : encoding<layout>
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<16x16xf32, %layout>
+  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<16x16xf32, %layout>
+  %fragment = vector.fragment.load<init> %input_view[0, 0] shape [%m, %n] : view<16x16xf32, %layout> -> vector<8xf32>
+  vector.fragment.store<result> %fragment, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, %layout>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core>(@hal_target_compact_matrix) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @cooperative_matrix_accepts_explicit_compact_layout(%byte_offset_aligned: reg<spirv.offset64>) asm {
+  %input_aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %17 = OpPtrAccessChain.storage_buffer.f32.byte_offset %input_aligned, %byte_offset_aligned
+  %fragment = OpCooperativeMatrixLoadKHR.init.f16.16x16x16.f32.subgroup.row_major %17 : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %19 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output_aligned, %byte_offset_aligned
+  OpCooperativeMatrixStoreKHR.result.f16.16x16x16.f32.subgroup.row_major %19, %fragment
+  return
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 2318}
+
+func.def target(@target) @cooperative_matrix_rejects_padded_storage_layout(%input: buffer, %byte_offset: offset) -> (vector<16xf16>) {
+  %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 16)] : offset
+  %m = index.constant 16 : index
+  %k = index.constant 16 : index
+  %layout = encoding.layout.strided [32, 1] : encoding<layout>
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<16x16xf16, %layout>
+  // ERROR@+1: TARGET/003 {subject_role="value", subject_name="view", constraint_key="cooperative_matrix.compact_storage_tile"}
+  %fragment = vector.fragment.load<lhs> %input_view[0, 0] shape [%m, %k] : view<16x16xf16, %layout> -> vector<16xf16>
+  func.return %fragment : vector<16xf16>
 }
 
 // ====
@@ -111,9 +179,211 @@ spirv.target<vulkan1_3> @target
 
 func.def target(@target) @storage_buffer_i32_rejects_misaligned_static_offset(%input: buffer) -> (i32) {
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
-  %two = index.constant 2 : offset
-  %input_view = buffer.view %input_aligned[%two] : buffer -> view<1xi32, #dense>
+  %misaligned_base = index.constant 2 : offset
+  %input_view = buffer.view %input_aligned[%misaligned_base] : buffer -> view<1xi32>
   // ERROR@+1: TARGET/050 {required_alignment="4", known_alignment="2"}
-  %loaded = view.load %input_view[0] : view<1xi32, #dense> -> i32
+  %loaded = view.load %input_view[0] : view<1xi32> -> i32
   func.return %loaded : i32
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @storage_buffer_i32_rejects_wide_index(%input: buffer, %element0: index) -> (i32) {
+  %input_base = index.constant 0 : offset
+  %element = index.assume %element0 [range(%element0, 0, 2147483648)] : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%input_base] : buffer -> view<2147483649xi32>
+  // ERROR@+1: SPIRV/028 {required_range_lo="0", required_range_hi="2147483647", constraint_key="source_memory.address_index_non_negative_s32"}
+  %loaded = view.load %input_view[%element] : view<2147483649xi32> -> i32
+  func.return %loaded : i32
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @storage_buffer_i32_rejects_wide_dynamic_stride(%input: buffer, %columns0: index, %row0: index) -> (i32) {
+  %input_base = index.constant 0 : offset
+  %columns = index.assume %columns0 [range(%columns0, 1, 2147483648)] : index
+  %row = index.assume %row0 [range(%row0, 0, 3)] : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%input_base] : buffer -> view<4x[%columns]xi32>
+  // ERROR@+1: SPIRV/028 {required_range_lo="0", required_range_hi="2147483647", constraint_key="source_memory.address_index_non_negative_s32"}
+  %loaded = view.load %input_view[%row, 0] : view<4x[%columns]xi32> -> i32
+  func.return %loaded : i32
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @workgroup_i32_rejects_wide_element_index() -> (i32) {
+  %byte_length = index.constant 8589934596 : offset
+  %scratch_base = index.constant 0 : offset
+  %scratch = buffer.alloca<workgroup> align(4) %byte_length : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<2147483649xi32>
+  // ERROR@+1: SPIRV/029 {element_byte_count="4", required_range_lo="0", required_range_hi="2147483647", constraint_key="source_memory.workgroup_element_index_non_negative_s32"}
+  %loaded = view.load %scratch_view[2147483648] : view<2147483649xi32> -> i32
+  func.return %loaded : i32
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @workgroup_i32_requires_element_expression(%byte_offset0: offset) -> (i32) {
+  %byte_length = index.constant 128 : offset
+  %byte_offset = index.assume %byte_offset0 [range(%byte_offset0, 0, 124), mul(%byte_offset0, 4)] : offset
+  %scratch = buffer.alloca<workgroup> align(4) %byte_length : buffer
+  %scratch_view = buffer.view %scratch[%byte_offset] : buffer -> view<1xi32>
+  // ERROR@+1: SPIRV/029 {element_byte_count="4", required_range_lo="0", required_range_hi="2147483647", constraint_key="source_memory.workgroup_element_index_non_negative_s32"}
+  %loaded = view.load %scratch_view[0] : view<1xi32> -> i32
+  func.return %loaded : i32
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @int8_operation_requires_target_feature(%lhs: i8, %rhs: i8) -> (i8) {
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_bitwise_and.i8", constraint_key="descriptor_available"}
+  %result = scalar.andi %lhs, %rhs : i8
+  func.return %result : i8
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @int16_operation_requires_target_feature(%lhs: i16, %rhs: i16) -> (i16) {
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_bitwise_and.i16", constraint_key="descriptor_available"}
+  %result = scalar.andi %lhs, %rhs : i16
+  func.return %result : i16
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 2}
+
+func.def target(@target) @int64_operation_requires_target_feature(%lhs: i64, %rhs: i64) -> (i64) {
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_bitwise_and.i64", constraint_key="descriptor_available"}
+  %result = scalar.andi %lhs, %rhs : i64
+  func.return %result : i64
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 4}
+
+func.def target(@target) @i64_to_index_requires_s32_proof(%input: i64) -> (index) {
+  // ERROR@+1: SPIRV/026 {source_type="i64", result_type="index", required_range_lo="-2147483648", required_range_hi="2147483647", constraint_key="index_cast.s32_exact"}
+  %result = index.cast %input : i64 to index
+  func.return %result : index
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @index_to_offset_requires_non_negative_proof(%input: index) -> (offset) {
+  // ERROR@+1: SPIRV/026 {source_type="index", result_type="offset", required_range_lo="0", required_range_hi="2147483647", constraint_key="index_cast.offset_non_negative"}
+  %result = index.cast %input : index to offset
+  func.return %result : offset
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @offset_to_index_requires_s32_proof(%input: offset) -> (index) {
+  // ERROR@+1: SPIRV/026 {source_type="offset", result_type="index", required_range_lo="0", required_range_hi="2147483647", constraint_key="index_cast.s32_exact"}
+  %result = index.cast %input : offset to index
+  func.return %result : index
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @index_scale_requires_non_negative_s32_coordinate(%input0: index, %stride: offset) -> (offset) {
+  %input = index.assume %input0 [range(%input0, -8, -1)] : index
+  // ERROR@+1: SPIRV/027 {field_name="index", value_type="index", required_range_lo="0", required_range_hi="2147483647", constraint_key="spirv.index.scale_coordinate.non_negative_s32"}
+  %result = index.scale %input, %stride : index, offset -> offset
+  func.return %result : offset
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @index_div_requires_unsigned_dividend(%lhs0: index, %rhs0: index) -> (index) {
+  %lhs, %rhs = index.assume %lhs0, %rhs0 [range(%lhs0, -8, -1), range(%rhs0, 1, 8)] : index, index
+  // ERROR@+1: SPIRV/027 {field_name="lhs", value_type="index", required_range_lo="0", required_range_hi="4294967295", constraint_key="spirv.index.dividend.u32"}
+  %result = index.div %lhs, %rhs : index
+  func.return %result : index
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @index_rem_requires_positive_divisor(%lhs0: index, %rhs0: index) -> (index) {
+  %lhs, %rhs = index.assume %lhs0, %rhs0 [range(%lhs0, 0, 8), range(%rhs0, -1, 0)] : index, index
+  // ERROR@+1: SPIRV/027 {field_name="rhs", value_type="index", required_range_lo="1", required_range_hi="4294967295", constraint_key="spirv.index.divisor.positive_u32"}
+  %result = index.rem %lhs, %rhs : index
+  func.return %result : index
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @index_shift_requires_u5_amount(%input: index, %amount0: index) -> (index) {
+  %amount = index.assume %amount0 [range(%amount0, 32, 64)] : index
+  // ERROR@+1: SPIRV/027 {field_name="rhs", value_type="index", required_range_lo="0", required_range_hi="31", constraint_key="spirv.index.shift_amount.u5"}
+  %result = index.shrui %input, %amount : index
+  func.return %result : index
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @ordinary_vector_rejects_five_lanes() -> (vector<5xi32>) {
+  // ERROR@+1: TARGET/002 {field_name="result", actual_type="vector<5xi32>"}
+  %value = vector.constant 0 : vector<5xi32>
+  func.return %value : vector<5xi32>
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @ordinary_vector_rejects_rank_two(%a: i32, %b: i32, %c: i32, %d: i32) -> (vector<2x2xi32>) {
+  // ERROR@+1: TARGET/002 {field_name="result", actual_type="vector<2x2xi32>"}
+  %value = vector.from_elements %a, %b, %c, %d : vector<2x2xi32>
+  func.return %value : vector<2x2xi32>
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @ordinary_vector_rejects_dynamic_extract(%a: i32, %b: i32, %c: i32, %d: i32, %lane: index) -> (i32) {
+  %value = vector.from_elements %a, %b, %c, %d : vector<4xi32>
+  // ERROR@+1: TARGET/004 {subject_role="operand_segment", subject_name="indices", constraint_key="operand_segment_count", expected_count="0"}
+  %result = vector.extract %value[%lane] : vector<4xi32> -> i32
+  func.return %result : i32
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @ordinary_vector_rejects_direct_target_result(%a: i32, %b: i32, %c: i32, %d: i32) -> (vector<4xi32>) {
+  %value = vector.from_elements %a, %b, %c, %d : vector<4xi32>
+  // ERROR@+1: TARGET/033 {field_name="source", actual_type="vector<4xi32>"}
+  func.return %value : vector<4xi32>
 }

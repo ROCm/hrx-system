@@ -1,0 +1,82 @@
+// RUN: emit source-low output=low
+
+// An outer condition cannot remain in ephemeral SCC while its payload
+// materializes a later condition. The outer condition is retained as an SGPR
+// boolean and rematerializes SCC immediately before its select.
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @select_nested_scalar(%x: i32, %y: i32, %zero: i32, %two: i32, %lhs: i32, %middle: i32, %rhs: i32) -> (i32) {
+  %use_lhs = scalar.cmpi eq, %x, %zero : i32
+  %use_rhs = scalar.cmpi eq, %y, %two : i32
+  %middle_or_rhs = scf.select %use_rhs, %rhs, %middle : i32
+  %selected = scf.select %use_lhs, %lhs, %middle_or_rhs : i32
+  func.return %selected : i32
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @select_nested_scalar(%x: reg<amdgpu.sgpr>, %y: reg<amdgpu.sgpr>, %zero: reg<amdgpu.sgpr>, %two: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>, %middle: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %20 = s_cmp_eq_i32 %x, %zero
+  %21 = s_mov_b32 0
+  %22 = s_mov_b32 1
+  %use_lhs = s_cselect_b32 %22, %21, %20
+  %use_rhs = s_cmp_eq_i32 %y, %two
+  %middle_or_rhs = s_cselect_b32 %rhs, %middle, %use_rhs
+  %26 = s_cmp_lg_i32_src1_inline %use_lhs {rhs = 0}
+  %selected = s_cselect_b32 %lhs, %middle_or_rhs, %26
+  return %selected
+}
+
+// ====
+
+// The same predicate lifetime applies to multi-register global buffer
+// descriptors. Both descriptor lanes must select under the corresponding
+// condition before the selected address is consumed.
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @select_nested_global_buffer(%select_lhs: index, %select_rhs: index) {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%select_lhs: index, %select_rhs: index, %lhs: buffer, %middle: buffer, %rhs: buffer, %output: buffer) {
+  %c0 = index.constant 0 : index
+  %rhs_selector = index.constant 2 : index
+  %buffer_base = index.constant 0 : offset
+  %use_lhs = index.cmp eq, %select_lhs, %c0 : index
+  %use_rhs = index.cmp eq, %select_rhs, %rhs_selector : index
+  %middle_or_rhs = scf.select %use_rhs, %rhs, %middle : buffer
+  %selected = scf.select %use_lhs, %lhs, %middle_or_rhs : buffer
+  %selected_view = buffer.view %selected[%buffer_base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
+  %selected_value = view.load %selected_view[%c0] : view<1xi32> -> i32
+  view.store %selected_value, %output_view[%c0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @select_nested_global_buffer(%select_lhs: reg<amdgpu.sgpr>, %select_rhs: reg<amdgpu.sgpr>) asm {
+  %lhs = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %middle = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %rhs = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 3, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %c0 = s_mov_b32 0
+  %rhs_selector = s_mov_b32 2
+  %27 = s_cmp_eq_i32 %select_lhs, %c0
+  %29 = s_mov_b32 1
+  %use_lhs = s_cselect_b32 %29, %c0, %27
+  %use_rhs = s_cmp_eq_i32 %select_rhs, %rhs_selector
+  %32 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %33 = slice %middle[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %34 = s_cselect_b32 %32, %33, %use_rhs
+  %35 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %36 = slice %middle[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %37 = s_cselect_b32 %35, %36, %use_rhs
+  %39 = s_cmp_lg_i32_src1_inline %use_lhs {rhs = 0}
+  %40 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %42 = s_cselect_b32 %40, %34, %39
+  %43 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %45 = s_cselect_b32 %43, %37, %39
+  %selected_view = concat(%42, %45) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %47 = v_mov_b32 0
+  %selected_value = global_load_b32_saddr %47, %selected_view
+  global_store_b32_saddr %47, %selected_value, %output_view
+  return
+}

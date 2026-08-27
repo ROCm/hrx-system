@@ -32,11 +32,17 @@ static const uint8_t kSourceCodeObjectData[] =
     "buffer\0"
     "value\0"
     "grid_x\0"
+    "block_count_x\0"
+    "block_count_y\0"
+    "block_count_z\0"
     "direct\0"
     "direct.kd\0"
     "global_buffer\0"
     "by_value\0"
-    "hidden_global_offset_x\0";
+    "hidden_global_offset_x\0"
+    "hidden_block_count_x\0"
+    "hidden_block_count_y\0"
+    "hidden_block_count_z\0";
 
 static iree_const_byte_span_t SourceCodeObjectData() {
   return iree_make_const_byte_span(kSourceCodeObjectData,
@@ -122,8 +128,13 @@ static iree_hal_amdgpu_hsaco_metadata_kernel_t MakeKernel(
       /*.kernarg_segment_alignment=*/8,
       /*.group_segment_fixed_size=*/16,
       /*.private_segment_fixed_size=*/32,
+      /*.max_flat_workgroup_size=*/256,
+      /*.vgpr_count=*/40,
       /*.required_workgroup_size=*/{},
       /*.has_required_workgroup_size=*/{},
+      /*.uniform_workgroup_size=*/{},
+      /*.workgroup_cluster_size=*/{},
+      /*.has_workgroup_cluster_size=*/{},
       /*.arg_count=*/args.size(),
       /*.args=*/args.data(),
   };
@@ -170,6 +181,10 @@ TEST(ExecutableMetadataHsacoTest, PopulatesSparseInterleavedKernelLayout) {
   kernel.required_workgroup_size[0] = 4;
   kernel.required_workgroup_size[1] = 2;
   kernel.required_workgroup_size[2] = 1;
+  kernel.has_workgroup_cluster_size = true;
+  kernel.workgroup_cluster_size[0] = 1;
+  kernel.workgroup_cluster_size[1] = 2;
+  kernel.workgroup_cluster_size[2] = 1;
   iree_hal_amdgpu_hsaco_metadata_t hsaco_metadata = {
       /*.host_allocator=*/{},
       /*.elf_data=*/source_code_object_data,
@@ -202,12 +217,18 @@ TEST(ExecutableMetadataHsacoTest, PopulatesSparseInterleavedKernelLayout) {
             loaded_code_object_data.data_length);
 
   const iree_hal_amdgpu_executable_export_t& export_info = metadata->exports[0];
-  EXPECT_EQ(export_info.flags, IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_NONE);
+  EXPECT_EQ(export_info.flags,
+            IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_HAS_RESOURCE_METADATA);
   EXPECT_EQ(export_info.workgroup_size[0], 4);
   EXPECT_EQ(export_info.workgroup_size[1], 2);
   EXPECT_EQ(export_info.workgroup_size[2], 1);
-  EXPECT_EQ(export_info.fixed_group_segment_size, 16);
-  EXPECT_EQ(export_info.fixed_private_segment_size, 32);
+  EXPECT_EQ(export_info.workgroup_cluster_size[0], 1);
+  EXPECT_EQ(export_info.workgroup_cluster_size[1], 2);
+  EXPECT_EQ(export_info.workgroup_cluster_size[2], 1);
+  EXPECT_EQ(export_info.maximum_workgroup_invocations, 256);
+  EXPECT_EQ(export_info.fixed_workgroup_local_memory_size, 16);
+  EXPECT_EQ(export_info.fixed_private_memory_size, 32);
+  EXPECT_EQ(export_info.invocation_register_count, 40);
 
   const iree_hal_amdgpu_kernarg_layout_t* layout = nullptr;
   IREE_ASSERT_OK(iree_hal_amdgpu_executable_metadata_resolve_layout(
@@ -252,21 +273,30 @@ TEST(ExecutableMetadataHsacoTest, PopulatesSparseInterleavedKernelLayout) {
   EXPECT_EQ(metadata->parameters[0].offset, 0);
   EXPECT_EQ(metadata->parameters[0].size, 2);
   EXPECT_EQ(metadata->parameters[1].type,
-            IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BUFFER_PTR);
+            IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BINDING);
+  EXPECT_TRUE(iree_all_bits_set(
+      metadata->parameters[1].flags,
+      IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NATIVE_ABI_OFFSET));
   ExpectRebasedView(loaded_code_object_data, args[1].name,
                     metadata->parameters[1].name);
-  EXPECT_EQ(metadata->parameters[1].offset, 8);
+  EXPECT_EQ(metadata->parameters[1].offset, 0);
+  EXPECT_EQ(metadata->parameters[1].native_abi_offset, 8);
   EXPECT_EQ(metadata->parameters[2].type,
             IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT);
   ExpectRebasedView(loaded_code_object_data, args[2].name,
                     metadata->parameters[2].name);
   EXPECT_EQ(metadata->parameters[2].offset, 2);
+  EXPECT_EQ(metadata->parameters[2].native_abi_offset, 20);
   EXPECT_EQ(metadata->parameters[2].size, 6);
   EXPECT_EQ(metadata->parameters[3].type,
-            IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BUFFER_PTR);
+            IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BINDING);
+  EXPECT_TRUE(iree_all_bits_set(
+      metadata->parameters[3].flags,
+      IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NATIVE_ABI_OFFSET));
   ExpectRebasedView(loaded_code_object_data, args[3].name,
                     metadata->parameters[3].name);
-  EXPECT_EQ(metadata->parameters[3].offset, 32);
+  EXPECT_EQ(metadata->parameters[3].offset, 1);
+  EXPECT_EQ(metadata->parameters[3].native_abi_offset, 32);
 
   iree_hal_amdgpu_executable_metadata_free(metadata);
 }
@@ -317,8 +347,57 @@ TEST(ExecutableMetadataHsacoTest, PopulatesImplicitArgsSuffixLayout) {
       layout->flags,
       IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_IMPLICIT_ARGS |
           IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_REQUIRES_ZERO_FILL));
+  EXPECT_FALSE(iree_any_bit_set(
+      layout->flags,
+      IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_USES_IMPLICIT_BLOCK_COUNT));
   EXPECT_EQ(layout->binding_count, 1);
   EXPECT_EQ(layout->constant_byte_length, 4);
+
+  iree_hal_amdgpu_executable_metadata_free(metadata);
+}
+
+TEST(ExecutableMetadataHsacoTest, MarksImplicitBlockCountUsage) {
+  const iree_const_byte_span_t source_code_object_data = SourceCodeObjectData();
+  std::vector<uint8_t> loaded_code_object_storage = MakeLoadedCodeObjectData();
+  const iree_const_byte_span_t loaded_code_object_data =
+      LoadedCodeObjectData(loaded_code_object_storage);
+  std::vector<iree_hal_amdgpu_hsaco_metadata_arg_t> args = {
+      MakeArg(ViewFromCodeObjectData(source_code_object_data, "block_count_x"),
+              16, 4, IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN,
+              ViewFromCodeObjectData(source_code_object_data,
+                                     "hidden_block_count_x")),
+      MakeArg(ViewFromCodeObjectData(source_code_object_data, "block_count_y"),
+              20, 4, IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN,
+              ViewFromCodeObjectData(source_code_object_data,
+                                     "hidden_block_count_y")),
+      MakeArg(ViewFromCodeObjectData(source_code_object_data, "block_count_z"),
+              24, 4, IREE_HAL_AMDGPU_HSACO_METADATA_ARG_KIND_HIDDEN,
+              ViewFromCodeObjectData(source_code_object_data,
+                                     "hidden_block_count_z")),
+  };
+  iree_hal_amdgpu_hsaco_metadata_kernel_t kernel =
+      MakeKernel(ViewFromCodeObjectData(source_code_object_data, "implicit"),
+                 ViewFromCodeObjectData(source_code_object_data, "implicit.kd"),
+                 16 + IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE, args);
+  iree_hal_amdgpu_hsaco_metadata_t hsaco_metadata = {
+      /*.host_allocator=*/{},
+      /*.elf_data=*/source_code_object_data,
+      /*.message_pack_data=*/{},
+      /*.target=*/{},
+      /*.reflection_name_storage_size=*/{},
+      /*.arg_name_storage_size=*/{},
+      /*.kernel_count=*/1,
+      /*.kernels=*/&kernel,
+  };
+
+  iree_hal_amdgpu_executable_metadata_t* metadata =
+      AllocateAndPopulate(&hsaco_metadata, loaded_code_object_data);
+  const iree_hal_amdgpu_kernarg_layout_t* layout = nullptr;
+  IREE_ASSERT_OK(iree_hal_amdgpu_executable_metadata_resolve_layout(
+      metadata, metadata->exports[0].kernarg_layout, &layout));
+  EXPECT_TRUE(iree_any_bit_set(
+      layout->flags,
+      IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_USES_IMPLICIT_BLOCK_COUNT));
 
   iree_hal_amdgpu_executable_metadata_free(metadata);
 }
@@ -365,6 +444,12 @@ TEST(ExecutableMetadataHsacoTest, PopulatesElfOnlyCustomDirectExport) {
       metadata->exports[0].flags,
       IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_CUSTOM_DIRECT_ONLY |
           IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_REQUIRES_DISPATCH_WORKGROUP_SIZE));
+  EXPECT_FALSE(iree_any_bit_set(
+      metadata->exports[0].flags,
+      IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_HAS_RESOURCE_METADATA));
+  EXPECT_EQ(metadata->exports[0].workgroup_cluster_size[0], 0);
+  EXPECT_EQ(metadata->exports[0].workgroup_cluster_size[1], 0);
+  EXPECT_EQ(metadata->exports[0].workgroup_cluster_size[2], 0);
   EXPECT_FALSE(iree_hal_amdgpu_kernarg_layout_ref_is_valid(
       metadata->exports[0].kernarg_layout));
 

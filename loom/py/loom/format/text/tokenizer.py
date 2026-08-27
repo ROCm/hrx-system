@@ -11,15 +11,15 @@ its kind, text, and source location (line:col) for error reporting.
 
 This is a single-pass scanner with one character of lookahead. No
 regex. The scanner handles all disambiguation:
-  - '#' letter → HASH_ATTR, '#' digit is invalid
+  - '#' letter → HASH_ATTR (including dotted names), '#' digit is invalid
   - '-' '>' → ARROW, '-' digit → negative number
   - identifier '.' identifier → OP_NAME, bare identifier → BARE_IDENT
   - '-' may continue identifiers for descriptor keys such as pass names
   - 'tile' before '<' → BARE_IDENT (type keyword), 'tile' before '.' → OP_NAME
 
-Comments (//) are collected separately and not emitted as tokens.
-The parser retrieves them via collect_pending_comments() and attaches
-them to the next operation for round-trip preservation.
+Comments (//) and an authored leading blank line are collected separately
+from tokens. The parser retrieves that source trivia and attaches it to the
+next operation or explicit block label for round-trip preservation.
 """
 
 from __future__ import annotations
@@ -67,7 +67,7 @@ class TokenKind(IntEnum):
     # References.
     SSA_VALUE = 3  # %name, %0, %arg0
     SYMBOL = 4  # @name
-    HASH_ATTR = 5  # #q8_0, #enc
+    HASH_ATTR = 5  # #test.schema, #test.options, #enc
     BLOCK_LABEL = 6  # ^bb0, ^entry
 
     # Identifiers.
@@ -89,9 +89,10 @@ class TokenKind(IntEnum):
     ARROW = 20  # ->
     DIM_X = 21  # 'x' dimension separator (only when in_dim_list)
     PIPE = 22  # |
+    MINUS = 23  # -
 
     # Special.
-    EOF = 23
+    EOF = 24
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,6 +202,11 @@ class Tokenizer:
         "_column",
         "_peeked",
         "_comments",
+        "_comment_start_line",
+        "_comment_end_line",
+        "_file_header_line_count",
+        "_leading_blank_line",
+        "_consumed_end_line",
         "in_dim_list",
     )
 
@@ -212,6 +218,11 @@ class Tokenizer:
         self._column = 1
         self._peeked: Token | None = None
         self._comments: list[str] = []
+        self._comment_start_line: int = 0
+        self._comment_end_line: int = 0
+        self._file_header_line_count: int = 0
+        self._leading_blank_line: bool = False
+        self._consumed_end_line: int = 0
         self.in_dim_list: bool = False
 
     # --- Public interface ---
@@ -231,6 +242,11 @@ class Tokenizer:
         saved_column = self._column
         saved_peeked = self._peeked
         saved_comments = list(self._comments)
+        saved_comment_start_line = self._comment_start_line
+        saved_comment_end_line = self._comment_end_line
+        saved_file_header_line_count = self._file_header_line_count
+        saved_leading_blank_line = self._leading_blank_line
+        saved_consumed_end_line = self._consumed_end_line
         saved_in_dim_list = self.in_dim_list
         token = self.peek()
         try:
@@ -243,6 +259,11 @@ class Tokenizer:
             self._column = saved_column
             self._peeked = saved_peeked
             self._comments = saved_comments
+            self._comment_start_line = saved_comment_start_line
+            self._comment_end_line = saved_comment_end_line
+            self._file_header_line_count = saved_file_header_line_count
+            self._leading_blank_line = saved_leading_blank_line
+            self._consumed_end_line = saved_consumed_end_line
             self.in_dim_list = saved_in_dim_list
 
     def next(self) -> Token:
@@ -250,8 +271,10 @@ class Tokenizer:
         if self._peeked is not None:
             token = self._peeked
             self._peeked = None
-            return token
-        return self._scan_token()
+        else:
+            token = self._scan_token()
+        self._consumed_end_line = token.end_location.line
+        return token
 
     def expect(self, kind: TokenKind, text: str | None = None) -> Token:
         """Consume the next token, raising ParseError if it doesn't match."""
@@ -286,11 +309,23 @@ class Tokenizer:
             return self.next()
         return None
 
-    def collect_pending_comments(self) -> list[str]:
-        """Return and clear accumulated comment lines."""
+    def take_file_header(self) -> list[str]:
+        """Take the separated line-1 comment block, if present."""
+        file_header = self._comments[: self._file_header_line_count]
+        self._comments = self._comments[self._file_header_line_count :]
+        self._file_header_line_count = 0
+        return file_header
+
+    def take_pending_source_trivia(self) -> tuple[list[str], bool]:
+        """Return and clear comments and their leading source grouping."""
         comments = self._comments
+        leading_blank_line = self._leading_blank_line
         self._comments = []
-        return comments
+        self._comment_start_line = 0
+        self._comment_end_line = 0
+        self._file_header_line_count = 0
+        self._leading_blank_line = False
+        return comments, leading_blank_line
 
     def current_location(self) -> SourceLocation:
         """Current scanner position (for range tracking by the parser)."""
@@ -300,7 +335,9 @@ class Tokenizer:
         """Scan from current position to the matching '>'.
 
         The opening '<' must already have been consumed. Handles
-        nested angle brackets (for encodings like #q8_0<block=32>>)
+        nested angle brackets (for encodings like
+        #encoding.operand<element_format=i8, payload_elements=32,
+        payload_packing=dense_lanes>>)
         and ignores brackets inside string literals.
         Returns the text between the brackets (exclusive).
         """
@@ -322,6 +359,7 @@ class Tokenizer:
                 if depth == 0:
                     interior = self._source[start : self._position]
                     self._advance()  # consume the closing '>'
+                    self._consumed_end_line = self._line
                     return interior
             if character == "\n":
                 self._line += 1
@@ -381,6 +419,15 @@ class Tokenizer:
 
             # Comment: // to end of line.
             if character == "/" and self._peek_char() == "/":
+                if not self._comments:
+                    self._comment_start_line = self._line
+                elif (
+                    self._comment_start_line == 1
+                    and self._file_header_line_count == 0
+                    and self._line > self._comment_end_line + 1
+                ):
+                    self._file_header_line_count = len(self._comments)
+                self._comment_end_line = self._line
                 comment_start = self._position + 2
                 self._advance()  # skip first /
                 self._advance()  # skip second /
@@ -389,6 +436,8 @@ class Tokenizer:
                 comment_text = self._source[comment_start : self._position]
                 if comment_text.endswith("\r"):
                     comment_text = comment_text[:-1]
+                if comment_text.startswith(" "):
+                    comment_text = comment_text[1:]
                 self._comments.append(comment_text)
                 continue
 
@@ -397,6 +446,21 @@ class Tokenizer:
     def _scan_token(self) -> Token:
         """Scan and return the next token."""
         self._skip_whitespace_and_comments()
+
+        source_start_line = self._comment_start_line or self._line
+        if (
+            self._comment_start_line == 1
+            and self._file_header_line_count == 0
+            and (
+                self._position == len(self._source)
+                or self._line > self._comment_end_line + 1
+            )
+        ):
+            self._file_header_line_count = len(self._comments)
+        self._leading_blank_line = (
+            self._consumed_end_line != 0
+            and source_start_line > self._consumed_end_line + 1
+        )
 
         if self._position >= len(self._source):
             return self._make_token(
@@ -452,11 +516,8 @@ class Tokenizer:
                 self._advance()
                 self._advance()
                 return self._make_token(TokenKind.FLOAT, "-nan", location)
-            raise ParseError(
-                "unexpected '-' (not followed by '>' or digit)",
-                location,
-                self._filename,
-            )
+            self._advance()
+            return self._make_token(TokenKind.MINUS, "-", location)
 
         # Number.
         if character.isdigit():
@@ -530,7 +591,7 @@ class Tokenizer:
         name_start = self._position
         if not _is_ident_start(self._char()):
             raise ParseError("expected identifier after '@'", location, self._filename)
-        while _is_ident_continue_no_dot(self._char()):
+        while _is_ident_continue(self._char()):
             self._advance()
         text = self._source[name_start : self._position]
         return self._make_token(TokenKind.SYMBOL, text, location)
@@ -539,12 +600,12 @@ class Tokenizer:
         """Scan #name (hash attr).
 
         Token text is the bare name without the '#' sigil:
-        #q8_0 -> "q8_0".
+        #test.schema -> "test.schema", #test.options -> "test.options".
         """
         self._advance()  # skip #
         name_start = self._position
         if _is_ident_start(self._char()):
-            while _is_ident_continue_no_dot(self._char()):
+            while _is_ident_continue(self._char()):
                 self._advance()
             text = self._source[name_start : self._position]
             return self._make_token(TokenKind.HASH_ATTR, text, location)
@@ -698,8 +759,9 @@ class Tokenizer:
         if is_negative:
             self._advance()
 
-        # Hex integer: 0x... (but not when in_dim_list — 'x' is a
-        # dimension separator, so '0' is a static dim of size 0).
+        # Hexadecimal integer or C99 hexadecimal float (but not when
+        # in_dim_list — 'x' is a dimension separator, so '0' is a static dim
+        # of size 0).
         if (
             self._char() == "0"
             and self._peek_char() in ("x", "X")
@@ -707,14 +769,46 @@ class Tokenizer:
         ):
             self._advance()  # 0
             self._advance()  # x
-            if self._char() not in "0123456789abcdefABCDEF":
-                raise ParseError(
-                    "expected hex digits after '0x'", location, self._filename
-                )
-            while self._char() in "0123456789abcdefABCDEF":
+            hex_digits = "0123456789abcdefABCDEF"
+            has_significand_digit = False
+            while self._char() in hex_digits:
+                has_significand_digit = True
                 self._advance()
+
+            has_radix_point = self._char() == "."
+            if has_radix_point:
+                self._advance()
+                while self._char() in hex_digits:
+                    has_significand_digit = True
+                    self._advance()
+
+            has_binary_exponent = self._char() in ("p", "P")
+            has_exponent_digit = False
+            if has_binary_exponent:
+                self._advance()
+                if self._char() in ("+", "-"):
+                    self._advance()
+                while self._char().isdigit():
+                    has_exponent_digit = True
+                    self._advance()
+
             text = self._source[start : self._position]
-            return self._make_token(TokenKind.INTEGER, text, location)
+            is_float = has_radix_point or has_binary_exponent
+            if not has_significand_digit:
+                literal_kind = "float" if is_float else "integer"
+                raise ParseError(
+                    f"invalid {literal_kind} literal '{text}'",
+                    location,
+                    self._filename,
+                )
+            if (has_radix_point and not has_binary_exponent) or (
+                has_binary_exponent and not has_exponent_digit
+            ):
+                raise ParseError(
+                    f"invalid float literal '{text}'", location, self._filename
+                )
+            kind = TokenKind.FLOAT if has_binary_exponent else TokenKind.INTEGER
+            return self._make_token(kind, text, location)
 
         # Decimal digits.
         while self._char().isdigit():
@@ -734,8 +828,9 @@ class Tokenizer:
             if self._char() in ("+", "-"):
                 self._advance()
             if not self._char().isdigit():
+                text = self._source[start : self._position]
                 raise ParseError(
-                    "expected digits in exponent", location, self._filename
+                    f"invalid float literal '{text}'", location, self._filename
                 )
             while self._char().isdigit():
                 self._advance()

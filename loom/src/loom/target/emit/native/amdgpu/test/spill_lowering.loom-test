@@ -1,0 +1,317 @@
+// RUN: emit amdgpu-assembly @gfx9_4_generic_sgpr_spill_reload waits=none strategy=source
+
+amdgpu.target<gfx9-4-generic> @gfx9_4_generic_target
+
+low.func.def target<amdgpu.gfx9_4.generic.core>(@gfx9_4_generic_target) @gfx9_4_generic_sgpr_spill_reload(%value: reg<amdgpu.sgpr x2>) {
+  %storage = low.storage.reserve {byte_alignment = 4, byte_length = 8} : low.storage<private>
+  low.spill %value, %storage : reg<amdgpu.sgpr x2>, low.storage<private>
+  %reload = low.reload %storage : low.storage<private> -> reg<amdgpu.sgpr x2>
+  low.return
+}
+
+// ----
+  s_mov_b64_exec_read s[2:3]
+  s_mov_b64 exec, -1
+  v_mov_b32_copy v0, s0
+  s_mov_b32 m0, 0
+  scratch_store_b32 off, v0, off offset:0 nt:0 sc0:0 sc1:0
+  v_mov_b32_copy v0, s1
+  s_mov_b32 m0, 0
+  scratch_store_b32 off, v0, off offset:4 nt:0 sc0:0 sc1:0
+  s_mov_b64 exec, s[2:3]
+  s_mov_b64_exec_read s[0:1]
+  s_mov_b64 exec, -1
+  s_mov_b32 m0, 0
+  scratch_load_b32 v0, off, off offset:0 nt:0 sc0:0 sc1:0
+  v_readfirstlane_b32 s2, v0
+  s_mov_b32 m0, 0
+  scratch_load_b32 v0, off, off offset:4 nt:0 sc0:0 sc1:0
+  v_readfirstlane_b32 s3, v0
+  s_mov_b64 exec, s[0:1]
+  s_endpgm
+
+// ====
+
+// Repairing SGPR pressure lowers spill traffic through EXEC-save and
+// SGPR-to-VGPR copy values. Those repair-generated values must remain in
+// registers; spilling them recursively recreates the same helpers and prevents
+// frame construction from converging.
+// RUN: emit amdgpu-native @spill_repair_values_remain_in_registers waits=none strategy=source amdgpu.sgpr=6
+
+amdgpu.target<gfx1100> @gfx11_target
+
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @spill_repair_values_remain_in_registers(
+    %lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>,
+    %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>,
+    %lhs2: reg<amdgpu.vgpr>, %rhs2: reg<amdgpu.vgpr>,
+    %lhs3: reg<amdgpu.vgpr>, %rhs3: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>) {
+  %mask0 = low.op<amdgpu.v_cmp_ult_u32>(%lhs0, %rhs0) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.sgpr x2>
+  %mask1 = low.op<amdgpu.v_cmp_ult_u32>(%lhs1, %rhs1) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.sgpr x2>
+  %mask2 = low.op<amdgpu.v_cmp_ult_u32>(%lhs2, %rhs2) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.sgpr x2>
+  %mask3 = low.op<amdgpu.v_cmp_ult_u32>(%lhs3, %rhs3) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.sgpr x2>
+  %and01 = low.op<amdgpu.s_and_b64>(%mask0, %mask1) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>
+  %and23 = low.op<amdgpu.s_and_b64>(%mask2, %mask3) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>
+  %and0123 = low.op<amdgpu.s_and_b64>(%and01, %and23) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>
+  %and4 = low.op<amdgpu.s_and_b64>(%and0123, %mask0) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>
+  %and5 = low.op<amdgpu.s_and_b64>(%and4, %mask1) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>
+  %result = low.op<amdgpu.s_and_b64>(%and5, %mask2) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>
+  low.return %result : reg<amdgpu.sgpr x2>
+}
+
+// ----
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx9_4_generic_sgpr_spill_reload_waits strategy=source
+
+amdgpu.target<gfx9-4-generic> @gfx9_4_generic_target
+
+low.func.def target<amdgpu.gfx9_4.generic.core>(@gfx9_4_generic_target) @gfx9_4_generic_sgpr_spill_reload_waits(%value: reg<amdgpu.sgpr x2>) {
+  %storage = low.storage.reserve {byte_alignment = 4, byte_length = 8} : low.storage<private>
+  low.spill %value, %storage : reg<amdgpu.sgpr x2>, low.storage<private>
+  %reload = low.reload %storage : low.storage<private> -> reg<amdgpu.sgpr x2>
+  low.return
+}
+
+// ----
+  s_mov_b64_exec_read s[2:3]
+  s_mov_b64 exec, -1
+  v_mov_b32_copy v0, s0
+  s_mov_b32 m0, 0
+  scratch_store_b32 off, v0, off offset:0 nt:0 sc0:0 sc1:0
+  v_mov_b32_copy v0, s1
+  s_mov_b32 m0, 0
+  scratch_store_b32 off, v0, off offset:4 nt:0 sc0:0 sc1:0
+  s_mov_b64 exec, s[2:3]
+  s_mov_b64_exec_read s[0:1]
+  s_mov_b64 exec, -1
+  s_mov_b32 m0, 0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  scratch_load_b32 v0, off, off offset:0 nt:0 sc0:0 sc1:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  v_readfirstlane_b32 s2, v0
+  s_mov_b32 m0, 0
+  scratch_load_b32 v0, off, off offset:4 nt:0 sc0:0 sc1:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  v_readfirstlane_b32 s3, v0
+  s_mov_b64 exec, s[0:1]
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_generic_sgpr_spill_reload waits=none strategy=source
+
+amdgpu.target<gfx11-generic> @gfx11_generic_target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic_target) @gfx11_generic_sgpr_spill_reload(%value: reg<amdgpu.sgpr x2>) {
+  %storage = low.storage.reserve {byte_alignment = 4, byte_length = 8} : low.storage<private>
+  low.spill %value, %storage : reg<amdgpu.sgpr x2>, low.storage<private>
+  %reload = low.reload %storage : low.storage<private> -> reg<amdgpu.sgpr x2>
+  low.return
+}
+
+// ----
+  s_mov_b64_exec_read s[2:3]
+  s_mov_b64 exec, -1
+  v_mov_b32_copy v0, s0
+  scratch_store_b32 off, v0, off offset:0 glc:0 slc:0 dlc:0
+  v_mov_b32_copy v0, s1
+  scratch_store_b32 off, v0, off offset:4 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[2:3]
+  s_mov_b64_exec_read s[0:1]
+  s_mov_b64 exec, -1
+  scratch_load_b32 v0, off, off offset:0 glc:0 slc:0 dlc:0
+  v_readfirstlane_b32 s2, v0
+  scratch_load_b32 v0, off, off offset:4 glc:0 slc:0 dlc:0
+  v_readfirstlane_b32 s3, v0
+  s_mov_b64 exec, s[0:1]
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx12_generic_sgpr_spill_reload waits=none strategy=source
+
+amdgpu.target<gfx12-generic> @gfx12_generic_target
+
+low.func.def target<amdgpu.gfx12.generic.core>(@gfx12_generic_target) @gfx12_generic_sgpr_spill_reload(%value: reg<amdgpu.sgpr x2>) {
+  %storage = low.storage.reserve {byte_alignment = 4, byte_length = 8} : low.storage<private>
+  low.spill %value, %storage : reg<amdgpu.sgpr x2>, low.storage<private>
+  %reload = low.reload %storage : low.storage<private> -> reg<amdgpu.sgpr x2>
+  low.return
+}
+
+// ----
+  s_mov_b64_exec_read s[2:3]
+  s_mov_b64 exec, -1
+  v_mov_b32_copy v0, s0
+  scratch_store_b32 off, v0, off offset:0 nv:0 scope:0 th:0
+  v_mov_b32_copy v0, s1
+  scratch_store_b32 off, v0, off offset:4 nv:0 scope:0 th:0
+  s_mov_b64 exec, s[2:3]
+  s_mov_b64_exec_read s[0:1]
+  s_mov_b64 exec, -1
+  scratch_load_b32 v0, off, off offset:0 nv:0 scope:0 th:0
+  v_readfirstlane_b32 s2, v0
+  scratch_load_b32 v0, off, off offset:4 nv:0 scope:0 th:0
+  v_readfirstlane_b32 s3, v0
+  s_mov_b64 exec, s[0:1]
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx12_5_generic_sgpr_spill_reload waits=none strategy=source
+
+amdgpu.target<gfx12-5-generic> @gfx12_5_generic_target
+
+low.func.def target<amdgpu.gfx12_5.generic.core>(@gfx12_5_generic_target) @gfx12_5_generic_sgpr_spill_reload(%value: reg<amdgpu.sgpr x2>) {
+  %storage = low.storage.reserve {byte_alignment = 4, byte_length = 8} : low.storage<private>
+  low.spill %value, %storage : reg<amdgpu.sgpr x2>, low.storage<private>
+  %reload = low.reload %storage : low.storage<private> -> reg<amdgpu.sgpr x2>
+  low.return
+}
+
+// ----
+  s_mov_b64_exec_read s[2:3]
+  s_mov_b64 exec, -1
+  v_mov_b32_copy v0, s0
+  scratch_store_b32 off, v0, off offset:0 nv:0 scope:0 th:0
+  v_mov_b32_copy v0, s1
+  scratch_store_b32 off, v0, off offset:4 nv:0 scope:0 th:0
+  s_mov_b64 exec, s[2:3]
+  s_mov_b64_exec_read s[0:1]
+  s_mov_b64 exec, -1
+  scratch_load_b32 v0, off, off offset:0 nv:0 scope:0 th:0
+  v_readfirstlane_b32 s2, v0
+  scratch_load_b32 v0, off, off offset:4 nv:0 scope:0 th:0
+  v_readfirstlane_b32 s3, v0
+  s_mov_b64 exec, s[0:1]
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_spill_packet_widths waits=none strategy=source
+
+amdgpu.target<gfx11-generic> @gfx11_generic_target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic_target) @gfx11_spill_packet_widths(%aligned: reg<amdgpu.vgpr x4>, %misaligned: reg<amdgpu.vgpr x4>) {
+  %storage = low.storage.reserve {byte_alignment = 16, byte_length = 64} : low.storage<private>
+  low.spill %aligned, %storage : reg<amdgpu.vgpr x4>, low.storage<private>
+  %aligned_reload = low.reload %storage : low.storage<private> -> reg<amdgpu.vgpr x4>
+  low.spill %misaligned, %storage {offset = 20} : reg<amdgpu.vgpr x4>, low.storage<private>
+  %misaligned_reload = low.reload %storage {offset = 20} : low.storage<private> -> reg<amdgpu.vgpr x4>
+  low.return
+}
+
+// ----
+  s_mov_b64_exec_read s[0:1]
+  s_mov_b64 exec, -1
+  scratch_store_b128 off, v[0:3], off offset:0 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[0:1]
+  s_mov_b64_exec_read s[0:1]
+  s_mov_b64 exec, -1
+  scratch_load_b128 v[0:3], off, off offset:0 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[0:1]
+  s_mov_b64_exec_read s[0:1]
+  s_mov_b64 exec, -1
+  scratch_store_b32 off, v4, off offset:20 glc:0 slc:0 dlc:0
+  v_mov_b32 v0, v5
+  v_mov_b32 v1, v6
+  scratch_store_b64 off, v[0:1], off offset:24 glc:0 slc:0 dlc:0
+  scratch_store_b32 off, v7, off offset:32 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[0:1]
+  s_mov_b64_exec_read s[0:1]
+  s_mov_b64 exec, -1
+  scratch_load_b32 v0, off, off offset:20 glc:0 slc:0 dlc:0
+  scratch_load_b64 v[2:3], off, off offset:24 glc:0 slc:0 dlc:0
+  scratch_load_b32 v1, off, off offset:32 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[0:1]
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_spill_vaddr_packet_widths waits=none strategy=source
+
+amdgpu.target<gfx11-generic> @gfx11_generic_target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic_target) @gfx11_spill_vaddr_packet_widths(%b32: reg<amdgpu.vgpr>, %b64: reg<amdgpu.vgpr x2>, %b128: reg<amdgpu.vgpr x4>) {
+  %storage = low.storage.reserve {byte_alignment = 16, byte_length = 8192} : low.storage<private>
+  low.spill %b32, %storage {offset = 4104} : reg<amdgpu.vgpr>, low.storage<private>
+  %b32_reload = low.reload %storage {offset = 4104} : low.storage<private> -> reg<amdgpu.vgpr>
+  low.spill %b64, %storage {offset = 4112} : reg<amdgpu.vgpr x2>, low.storage<private>
+  %b64_reload = low.reload %storage {offset = 4112} : low.storage<private> -> reg<amdgpu.vgpr x2>
+  low.spill %b128, %storage {offset = 4128} : reg<amdgpu.vgpr x4>, low.storage<private>
+  %b128_reload = low.reload %storage {offset = 4128} : low.storage<private> -> reg<amdgpu.vgpr x4>
+  low.return
+}
+
+// ----
+  s_mov_b64_exec_read s[0:1]
+  s_mov_b64 exec, -1
+  v_mov_b32 v1, 4104
+  scratch_store_b32 v1, v0, off offset:0 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[0:1]
+  s_mov_b64_exec_read s[0:1]
+  s_mov_b64 exec, -1
+  v_mov_b32 v0, 4104
+  scratch_load_b32 v0, v0, off offset:0 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[0:1]
+  s_mov_b64_exec_read s[0:1]
+  s_mov_b64 exec, -1
+  v_mov_b32 v0, 4112
+  scratch_store_b64 v0, v[2:3], off offset:0 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[0:1]
+  s_mov_b64_exec_read s[0:1]
+  s_mov_b64 exec, -1
+  v_mov_b32 v0, 4112
+  scratch_load_b64 v[0:1], v0, off offset:0 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[0:1]
+  s_mov_b64_exec_read s[0:1]
+  s_mov_b64 exec, -1
+  v_mov_b32 v0, 4128
+  scratch_store_b128 v0, v[4:7], off offset:0 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[0:1]
+  s_mov_b64_exec_read s[0:1]
+  s_mov_b64 exec, -1
+  v_mov_b32 v0, 4128
+  scratch_load_b128 v[0:3], v0, off offset:0 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[0:1]
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @spill_rejects_workgroup_storage waits=none
+
+amdgpu.target<gfx11-generic> @gfx11_generic_target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic_target) @spill_rejects_workgroup_storage(%value: reg<amdgpu.vgpr>) {
+  %storage = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<workgroup>
+  // ERROR@+1: AMDGPU/037 {function_name="spill_rejects_workgroup_storage", op_name="low.spill", storage_value_name="storage", storage_space="workgroup", supported_storage_spaces="[scratch, private]"}
+  low.spill %value, %storage : reg<amdgpu.vgpr>, low.storage<workgroup>
+  low.return
+}
+
+// ====
+
+// RUN: emit amdgpu-assembly @spill_rejects_agpr_registers waits=none
+
+amdgpu.target<gfx9-4-generic> @gfx9_4_generic_target
+
+low.func.def target<amdgpu.gfx9_4.generic.core>(@gfx9_4_generic_target) @spill_rejects_agpr_registers(%value: reg<amdgpu.agpr>) {
+  %storage = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  // ERROR@+1: AMDGPU/038 {function_name="spill_rejects_agpr_registers", op_name="low.spill", value_name="value", actual_type="reg<amdgpu.agpr>"}
+  low.spill %value, %storage : reg<amdgpu.agpr>, low.storage<private>
+  low.return
+}
+
+// ====
+
+// RUN: emit amdgpu-assembly @reload_rejects_access_past_storage_end waits=none
+
+amdgpu.target<gfx11-generic> @gfx11_generic_target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic_target) @reload_rejects_access_past_storage_end() {
+  %storage = low.storage.reserve {byte_alignment = 8, byte_length = 8} : low.storage<private>
+  // ERROR@+1: AMDGPU/039 {function_name="reload_rejects_access_past_storage_end", op_name="low.reload", storage_value_name="storage", access_byte_offset="4", access_byte_length="8", storage_byte_length="8"}
+  %value = low.reload %storage {offset = 4} : low.storage<private> -> reg<amdgpu.vgpr x2>
+  low.return
+}

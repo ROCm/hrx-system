@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+#include "iree/hal/executable/amdgpu/executable_target.h"
+
 static iree_status_t iree_hal_amdgpu_device_spec_verify_params(
     const iree_hal_amdgpu_device_spec_params_t* params) {
   IREE_ASSERT_ARGUMENT(params);
@@ -17,17 +19,89 @@ static iree_status_t iree_hal_amdgpu_device_spec_verify_params(
         IREE_STATUS_INVALID_ARGUMENT,
         "AMDGPU device spec requires initialized physical devices");
   }
-  if (IREE_UNLIKELY(params->physical_device_count > 64)) {
+  if (IREE_UNLIKELY(params->physical_device_count >
+                    IREE_HAL_PHYSICAL_DEVICE_AFFINITY_BIT_COUNT)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "AMDGPU device spec physical device count %" PRIhsz
-                            " exceeds the 64-bit affinity mask capacity",
-                            params->physical_device_count);
+                            " exceeds physical-device affinity capacity %d",
+                            params->physical_device_count,
+                            IREE_HAL_PHYSICAL_DEVICE_AFFINITY_BIT_COUNT);
   }
   if (IREE_UNLIKELY(!params->device_allocator)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "AMDGPU device spec allocator is NULL");
   }
+  const iree_host_size_t queue_count = params->physical_devices[0].queue_count;
+  iree_host_size_t total_queue_count = 0;
+  if (IREE_UNLIKELY(queue_count == 0 ||
+                    !iree_host_size_checked_mul(params->physical_device_count,
+                                                queue_count,
+                                                &total_queue_count) ||
+                    total_queue_count > IREE_HAL_MAX_QUEUES)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AMDGPU logical queue count must be in [1, %" PRIhsz
+                            "] (physical_devices=%" PRIhsz
+                            ", queues_per_device=%" PRIhsz ")",
+                            (iree_host_size_t)IREE_HAL_MAX_QUEUES,
+                            params->physical_device_count, queue_count);
+  }
+  for (iree_host_size_t i = 0; i < params->physical_device_count; ++i) {
+    if (IREE_UNLIKELY(params->physical_devices[i].queue_count != queue_count)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AMDGPU physical devices must expose a uniform queue count; device "
+          "0 reports %" PRIhsz " but device %" PRIhsz " reports %u",
+          queue_count, i, params->physical_devices[i].queue_count);
+    }
+    if (IREE_UNLIKELY(params->physical_devices[i].timestamp_frequency_hz ==
+                      0)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "AMDGPU physical device %" PRIhsz
+                              " has no timestamp frequency; timestamp deltas "
+                              "cannot be converted to a duration",
+                              i);
+    }
+  }
+
+  // The device-scope timing spec carries one tick rate for the whole logical
+  // device, so physical devices ticking at different rates have no correct
+  // value to publish there. The params come from an exported entry point, so
+  // this check is input validation rather than an assertable invariant.
+  for (iree_host_size_t i = 1; i < params->physical_device_count; ++i) {
+    if (IREE_UNLIKELY(params->physical_devices[i].timestamp_frequency_hz !=
+                      params->physical_devices[0].timestamp_frequency_hz)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AMDGPU physical devices have no common timestamp frequency: "
+          "device 0 reports %" PRIu64 " hz but device %" PRIhsz
+          " reports %" PRIu64 " hz",
+          params->physical_devices[0].timestamp_frequency_hz, i,
+          params->physical_devices[i].timestamp_frequency_hz);
+    }
+  }
   return iree_ok_status();
+}
+
+static iree_hal_physical_device_affinity_t
+iree_hal_amdgpu_device_spec_all_physical_device_affinity(
+    iree_host_size_t physical_device_count) {
+  return physical_device_count == IREE_HAL_PHYSICAL_DEVICE_AFFINITY_BIT_COUNT
+             ? UINT64_MAX
+             : ((1ull << physical_device_count) - 1ull);
+}
+
+static iree_hal_queue_affinity_t
+iree_hal_amdgpu_device_spec_queue_affinity_for_physical_device(
+    iree_host_size_t physical_device_ordinal,
+    iree_host_size_t queue_count_per_physical_device) {
+  const iree_host_size_t first_queue_ordinal =
+      physical_device_ordinal * queue_count_per_physical_device;
+  if (queue_count_per_physical_device == IREE_HAL_MAX_QUEUES) {
+    return IREE_HAL_QUEUE_AFFINITY_ANY;
+  }
+  return (
+      (((iree_hal_queue_affinity_t)1 << queue_count_per_physical_device) - 1)
+      << first_queue_ordinal);
 }
 
 static iree_status_t iree_hal_amdgpu_device_spec_populate_identity(
@@ -44,8 +118,8 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_identity(
     const iree_hal_amdgpu_device_spec_physical_device_params_t*
         physical_device = &params->physical_devices[i];
     iree_hal_physical_device_spec_t* physical_spec = &physical_devices[i];
-    physical_spec->identity.display_name = physical_device->target_id.processor;
-    physical_spec->identity.backend_path = physical_device->target_id.processor;
+    physical_spec->identity.display_name = physical_device->identity.processor;
+    physical_spec->identity.backend_path = physical_device->identity.processor;
     if (iree_all_bits_set(
             physical_device->flags,
             IREE_HAL_AMDGPU_DEVICE_SPEC_PHYSICAL_DEVICE_FLAG_UUID)) {
@@ -166,9 +240,8 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_memory(
           .allocation_alignment = allocator_heap->min_alignment,
           .maximum_allocation_size = allocator_heap->max_allocation_size,
           .physical_device_affinity =
-              params->physical_device_count == 64
-                  ? UINT64_MAX
-                  : ((1ull << params->physical_device_count) - 1ull),
+              iree_hal_amdgpu_device_spec_all_physical_device_affinity(
+                  params->physical_device_count),
           .flags = heap_flags,
       };
       memory_types[i] = (iree_hal_memory_type_spec_t){
@@ -179,6 +252,7 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_memory(
               iree_hal_amdgpu_device_spec_memory_access(allocator_heap),
           .minimum_alignment = allocator_heap->min_alignment,
           .optimal_transfer_granularity = 1,
+          .atomic_operations = allocator_heap->atomic_operations,
           .flags = IREE_HAL_MEMORY_TYPE_SPEC_FLAG_NONE,
       };
     }
@@ -232,6 +306,48 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_memory(
   return status;
 }
 
+static iree_hal_atomic_capabilities_t
+iree_hal_amdgpu_device_spec_atomic_capabilities(
+    iree_hal_atomic_operation_flags_t operations) {
+  const iree_hal_atomic_operation_capabilities_t operation_capabilities = {
+      .device_scope_32 = operations,
+      .device_scope_64 = operations,
+      .system_scope_32 = operations,
+      .system_scope_64 = operations,
+  };
+  const iree_hal_atomic_wait_condition_flags_t wait_conditions =
+      iree_any_bit_set(operations, IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT)
+          ? IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL
+          : IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_NONE;
+  const iree_hal_atomic_wait_condition_capabilities_t
+      wait_condition_capabilities = {
+          .device_scope_32 = wait_conditions,
+          .device_scope_64 = wait_conditions,
+          .system_scope_32 = wait_conditions,
+          .system_scope_64 = wait_conditions,
+      };
+  return (iree_hal_atomic_capabilities_t){
+      .operations = operation_capabilities,
+      .wait_conditions = wait_condition_capabilities,
+  };
+}
+
+static iree_hal_atomic_capabilities_t
+iree_hal_amdgpu_device_spec_zero_compute_atomic_capabilities(
+    iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities) {
+  iree_hal_atomic_operation_flags_t operations =
+      IREE_HAL_ATOMIC_OPERATION_FLAG_NONE;
+  if (iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_atomic_wait(
+          capabilities)) {
+    operations |= IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT;
+  }
+  if (iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_atomic_store(
+          capabilities)) {
+    operations |= IREE_HAL_ATOMIC_OPERATION_FLAG_STORE;
+  }
+  return iree_hal_amdgpu_device_spec_atomic_capabilities(operations);
+}
+
 static iree_status_t iree_hal_amdgpu_device_spec_populate_queues(
     const iree_hal_amdgpu_device_spec_params_t* params,
     iree_hal_device_spec_builder_t* builder) {
@@ -247,16 +363,25 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_queues(
     const iree_hal_amdgpu_device_spec_physical_device_params_t*
         physical_device = &params->physical_devices[i];
     families[i] = (iree_hal_queue_family_spec_t){
-        .name = physical_device->target_id.processor,
+        .name = physical_device->identity.processor,
         .queue_count = physical_device->queue_count,
         .priority_count = 1,
         .timestamp_valid_bits = 64,
-        .timestamp_frequency_hz = params->timestamp_frequency_hz,
+        .timestamp_frequency_hz = physical_device->timestamp_frequency_hz,
         .physical_device_affinity = 1ull << i,
+        .queue_affinity =
+            iree_hal_amdgpu_device_spec_queue_affinity_for_physical_device(
+                i, physical_device->queue_count),
         .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
                       IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
                       IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_HOST_CALL |
-                      IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_PROFILING,
+                      IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_PROFILING |
+                      IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC,
+        .atomic_capabilities = iree_hal_amdgpu_device_spec_atomic_capabilities(
+            IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL),
+        .zero_compute_atomic_capabilities =
+            iree_hal_amdgpu_device_spec_zero_compute_atomic_capabilities(
+                physical_device->vendor_packet_capabilities),
         .flags = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_NONE,
     };
   }
@@ -276,8 +401,8 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_queues(
 static void iree_hal_amdgpu_device_spec_query_wavefront_support(
     const iree_hal_amdgpu_device_spec_physical_device_params_t* physical_device,
     iree_hal_amdgpu_wavefront_size_support_t* out_support) {
-  if (iree_hal_amdgpu_target_id_lookup_wavefront_size_support(
-          &physical_device->target_id, out_support)) {
+  if (iree_hal_amdgpu_target_identity_lookup_wavefront_size_support(
+          &physical_device->identity, out_support)) {
     return;
   }
 
@@ -330,6 +455,11 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_dispatch(
       IREE_HAL_AMDGPU_WAVEFRONT_SIZE_FLAG_NONE;
   uint32_t maximum_workgroup_local_memory_size =
       params->physical_devices[0].maximum_workgroup_local_memory_size;
+  uint32_t maximum_resident_subgroup_count =
+      params->physical_devices[0].maximum_waves_per_compute_unit;
+  uint32_t maximum_resident_invocation_count =
+      params->physical_devices[0].maximum_waves_per_compute_unit *
+      params->physical_devices[0].wavefront_size;
   uint32_t compute_unit_count = 0;
   for (iree_host_size_t i = 0; i < params->physical_device_count; ++i) {
     const iree_hal_amdgpu_device_spec_physical_device_params_t*
@@ -349,6 +479,13 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_dispatch(
     maximum_workgroup_local_memory_size =
         iree_min(maximum_workgroup_local_memory_size,
                  physical_device->maximum_workgroup_local_memory_size);
+    maximum_resident_subgroup_count =
+        iree_min(maximum_resident_subgroup_count,
+                 physical_device->maximum_waves_per_compute_unit);
+    maximum_resident_invocation_count =
+        iree_min(maximum_resident_invocation_count,
+                 physical_device->maximum_waves_per_compute_unit *
+                     physical_device->wavefront_size);
     if (IREE_UNLIKELY(UINT32_MAX - compute_unit_count <
                       physical_device->compute_unit_count)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -382,6 +519,10 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_dispatch(
               supported_wavefront_sizes),
       .execution.unit_count = compute_unit_count,
       .execution.group_count = (uint32_t)params->physical_device_count,
+      .execution.maximum_resident_invocation_count =
+          maximum_resident_invocation_count,
+      .execution.maximum_resident_subgroup_count =
+          maximum_resident_subgroup_count,
       .execution.maximum_workgroup_local_memory_size =
           maximum_workgroup_local_memory_size,
       .execution.maximum_workgroup_local_memory_size_optin =
@@ -396,15 +537,24 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_dispatch(
 static iree_status_t iree_hal_amdgpu_device_spec_populate_timing(
     const iree_hal_amdgpu_device_spec_params_t* params,
     iree_hal_device_spec_builder_t* builder) {
+  // Every GPU agent has a wallclock at a known rate independent of its gfx
+  // arch, so every logical device this driver builds describes a domain.
+  iree_hal_device_timing_spec_flags_t flags =
+      IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS |
+      IREE_HAL_DEVICE_TIMING_SPEC_FLAG_HOST_CORRELATION |
+      IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DISPATCH_EVENTS |
+      IREE_HAL_DEVICE_TIMING_SPEC_FLAG_HARDWARE_COUNTERS |
+      IREE_HAL_DEVICE_TIMING_SPEC_FLAG_TRACE_CAPTURE |
+      IREE_HAL_DEVICE_TIMING_SPEC_FLAG_PROFILING_PERTURBS_EXECUTION;
+
+  // verify_params established that every physical device reports the same
+  // nonzero rate, so device 0's rate is the rate of every agent here.
   iree_hal_device_timing_spec_t timing = {
+      // The agent wallclock is a 64-bit counter.
       .timestamp_valid_bits = 64,
-      .timestamp_frequency_hz = params->timestamp_frequency_hz,
-      .flags = IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS |
-               IREE_HAL_DEVICE_TIMING_SPEC_FLAG_HOST_CORRELATION |
-               IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DISPATCH_EVENTS |
-               IREE_HAL_DEVICE_TIMING_SPEC_FLAG_HARDWARE_COUNTERS |
-               IREE_HAL_DEVICE_TIMING_SPEC_FLAG_TRACE_CAPTURE |
-               IREE_HAL_DEVICE_TIMING_SPEC_FLAG_PROFILING_PERTURBS_EXECUTION,
+      .timestamp_frequency_hz =
+          params->physical_devices[0].timestamp_frequency_hz,
+      .flags = flags,
   };
   return iree_hal_device_spec_builder_set_timing(builder, &timing);
 }
@@ -412,102 +562,15 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_timing(
 static iree_status_t iree_hal_amdgpu_device_spec_populate_executables(
     const iree_hal_amdgpu_device_spec_params_t* params,
     iree_hal_device_spec_builder_t* builder) {
-  const iree_hal_amdgpu_target_id_t* exact_target_id =
-      &params->physical_devices[0].target_id;
-  iree_hal_amdgpu_target_id_t code_object_target_id;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_lookup_code_object_target(
-      exact_target_id, &code_object_target_id));
-
-  char exact_format_storage[128] = {0};
-  iree_host_size_t exact_format_length = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_format(
-      exact_target_id, sizeof(exact_format_storage), exact_format_storage,
-      &exact_format_length));
-
-  char code_object_format_storage[128] = {0};
-  iree_host_size_t code_object_format_length = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_format(
-      &code_object_target_id, sizeof(code_object_format_storage),
-      code_object_format_storage, &code_object_format_length));
-
-  iree_hal_executable_format_spec_t executable_formats[2] = {
-      {
-          .format =
-              iree_make_string_view(exact_format_storage, exact_format_length),
-          .caching_modes = IREE_HAL_EXECUTABLE_CACHING_MODE_NONE,
-          .flags = IREE_HAL_EXECUTABLE_FORMAT_SPEC_FLAG_NONE,
-      },
-  };
-  iree_host_size_t format_count = 1;
-  if (!iree_string_view_equal(
-          executable_formats[0].format,
-          iree_make_string_view(code_object_format_storage,
-                                code_object_format_length))) {
-    executable_formats[format_count++] = (iree_hal_executable_format_spec_t){
-        .format = iree_make_string_view(code_object_format_storage,
-                                        code_object_format_length),
-        .caching_modes = IREE_HAL_EXECUTABLE_CACHING_MODE_NONE,
-        .flags = IREE_HAL_EXECUTABLE_FORMAT_SPEC_FLAG_NONE,
-    };
+  for (iree_host_size_t i = 0; i < params->physical_device_count; ++i) {
+    const iree_hal_amdgpu_target_identity_t* exact_identity =
+        &params->physical_devices[i].identity;
+    const iree_hal_physical_device_affinity_t target_affinity = 1ull << i;
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_device_spec_builder_add_executable_targets(
+            builder, exact_identity, target_affinity));
   }
-
-  iree_hal_executable_target_t executable_targets[2] = {
-      {
-          .family = IREE_SV("amdgpu"),
-          .architecture = IREE_SV("gfxip"),
-          .processor = exact_target_id->processor,
-          .features = iree_string_view_empty(),
-          .artifact_format =
-              iree_make_string_view(exact_format_storage, exact_format_length),
-          .runtime_abi = IREE_SV("hsa"),
-          .loader_namespace = IREE_SV("amdgpu"),
-          .loader_target =
-              iree_make_string_view(exact_format_storage, exact_format_length),
-          .metadata_schema = IREE_SV("amdgpu.hsaco.metadata"),
-          .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
-          .priority = 100,
-          .physical_device_affinity =
-              params->physical_device_count == 64
-                  ? UINT64_MAX
-                  : ((1ull << params->physical_device_count) - 1ull),
-          .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
-      },
-  };
-  iree_host_size_t target_count = 1;
-  if (!iree_string_view_equal(exact_target_id->processor,
-                              code_object_target_id.processor) ||
-      exact_target_id->sramecc != code_object_target_id.sramecc ||
-      exact_target_id->xnack != code_object_target_id.xnack) {
-    executable_targets[target_count++] = (iree_hal_executable_target_t){
-        .family = IREE_SV("amdgpu"),
-        .architecture = IREE_SV("gfxip"),
-        .processor = code_object_target_id.processor,
-        .features = iree_string_view_empty(),
-        .artifact_format = iree_make_string_view(code_object_format_storage,
-                                                 code_object_format_length),
-        .runtime_abi = IREE_SV("hsa"),
-        .loader_namespace = IREE_SV("amdgpu"),
-        .loader_target = iree_make_string_view(code_object_format_storage,
-                                               code_object_format_length),
-        .metadata_schema = IREE_SV("amdgpu.hsaco.metadata"),
-        .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC,
-        .priority = 50,
-        .physical_device_affinity =
-            params->physical_device_count == 64
-                ? UINT64_MAX
-                : ((1ull << params->physical_device_count) - 1ull),
-        .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
-    };
-  }
-
-  iree_hal_device_executable_spec_t executables = {
-      .format_count = format_count,
-      .formats = executable_formats,
-      .target_count = target_count,
-      .targets = executable_targets,
-      .flags = IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
-  };
-  return iree_hal_device_spec_builder_set_executables(builder, &executables);
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amdgpu_device_spec_populate_sanitizer(

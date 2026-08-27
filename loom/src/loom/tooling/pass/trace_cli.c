@@ -325,9 +325,6 @@ iree_status_t loom_tooling_pass_trace_open_from_flags(
   out_trace->pass_options.dump_after_all = FLAG_dump_ir_after_all;
   out_trace->pass_options.tool_name = options->tool_name;
   out_trace->pass_options.input_path = options->input_path;
-  out_trace->pass_options.print_options.low_asm_descriptor_set_key =
-      options->low_asm_descriptor_set_key;
-
   IREE_RETURN_IF_ERROR(
       loom_pass_trace_parse_format(iree_make_cstring_view(FLAG_dump_ir_format),
                                    &out_trace->pass_options.format));

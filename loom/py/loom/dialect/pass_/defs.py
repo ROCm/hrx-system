@@ -9,7 +9,7 @@
 from loom.assembly import (
     Attr,
     AttrDict,
-    OpRef,
+    KeyRef,
     Region,
     SymbolRef,
     TemplateParam,
@@ -159,7 +159,7 @@ pass_where = Op(
         )
     ],
     format=[
-        OpRef("predicate"),
+        KeyRef("predicate"),
         AttrDict("attrs"),
         Region("body", syntax="pipeline"),
     ],
@@ -202,6 +202,28 @@ pass_repeat = Op(
 )
 
 # ============================================================================
+# pass.if_changed
+# ============================================================================
+
+pass_if_changed = Op(
+    "pass.if_changed",
+    group=pass_ops,
+    doc=("Execute a nested pipeline body when the immediately preceding sibling statement changed the current anchor."),
+    traits=[UNKNOWN_EFFECTS, ImplicitTerminator("pass.yield")],
+    regions=[
+        RegionDef(
+            "body",
+            doc="Body executed when the preceding sibling reported a mutation.",
+            terminator="pass.yield",
+        )
+    ],
+    format=[Region("body", syntax="pipeline")],
+    examples=[
+        "pass.if_changed pipeline {\n  canonicalize\n  cse\n}",
+    ],
+)
+
+# ============================================================================
 # pass.call
 # ============================================================================
 
@@ -237,7 +259,7 @@ pass_run = Op(
         AttrDef("options", "dict", optional=True),
     ],
     format=[
-        OpRef("key"),
+        KeyRef("key"),
         AttrDict("options"),
     ],
     examples=[
@@ -307,4 +329,6 @@ ALL_PASS_OPS: tuple[Op, ...] = (
     pass_fail,
     pass_halt,
     pass_yield,
+    # Keep new operations after the original stable bytecode ordinals.
+    pass_if_changed,
 )

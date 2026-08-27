@@ -81,6 +81,10 @@ class TestSymbol:
     def test_complex(self) -> None:
         assert _texts("@dn_layer") == ["dn_layer"]
 
+    def test_dotted(self) -> None:
+        assert _texts("@demo.quantized_dot") == ["demo.quantized_dot"]
+        assert _kinds("@demo.quantized_dot") == [TokenKind.SYMBOL]
+
     def test_error_bare_at(self) -> None:
         with pytest.raises(ParseError, match="expected identifier"):
             _tokens("@ ")
@@ -94,6 +98,10 @@ class TestHashAttr:
     def test_encoding_name(self) -> None:
         assert _texts("#enc") == ["enc"]
         assert _texts("#q6_k") == ["q6_k"]
+
+    def test_dotted_family_name(self) -> None:
+        assert _texts("#test.options") == ["test.options"]
+        assert _kinds("#test.options") == [TokenKind.HASH_ATTR]
 
     def test_error_numeric_name(self) -> None:
         with pytest.raises(ParseError, match="expected identifier after '#'"):
@@ -128,6 +136,10 @@ class TestInteger:
     def test_negative_hex(self) -> None:
         assert _texts("-0x1A") == ["-0x1A"]
 
+    def test_uppercase_hex_prefix(self) -> None:
+        assert _texts("0XdeadBEEF") == ["0XdeadBEEF"]
+        assert _kinds("0XdeadBEEF") == [TokenKind.INTEGER]
+
 
 class TestFloat:
     def test_simple(self) -> None:
@@ -147,6 +159,33 @@ class TestFloat:
 
     def test_negative_exponent(self) -> None:
         assert _texts("2.5E+10") == ["2.5E+10"]
+
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            "0x1p0",
+            "0x1.p0",
+            "0x.8p+1",
+            "0X1.FP-4",
+            "-0x0p+0",
+            "0x1.fffffep+127",
+        ],
+    )
+    def test_hexadecimal(self, spelling: str) -> None:
+        assert _texts(spelling) == [spelling]
+        assert _kinds(spelling) == [TokenKind.FLOAT]
+
+    @pytest.mark.parametrize(
+        "spelling",
+        ["0x.", "0x.p0", "0x1.", "0x1.2", "0x1p", "0x1p+", "1e", "1e-"],
+    )
+    def test_malformed(self, spelling: str) -> None:
+        with pytest.raises(ParseError, match="invalid float literal"):
+            _tokens(spelling)
+
+    def test_missing_hex_digits(self) -> None:
+        with pytest.raises(ParseError, match="invalid integer literal"):
+            _tokens("0x")
 
 
 class TestString:
@@ -303,6 +342,10 @@ class TestPunctuation:
 
     def test_arrow(self) -> None:
         assert _texts("->") == ["->"]
+
+    def test_standalone_minus(self) -> None:
+        assert _kinds("-feature") == [TokenKind.MINUS, TokenKind.BARE_IDENT]
+        assert _texts("-feature") == ["-", "feature"]
         assert _kinds("->") == [TokenKind.ARROW]
 
     def test_arrow_vs_negative(self) -> None:
@@ -331,20 +374,62 @@ class TestComments:
 
     def test_comment_collected(self) -> None:
         tokenizer = Tokenizer("// hello\n%x")
-        tokenizer.next()  # consume %x
-        # Comments were already collected during scanning.
-        # Need to call collect before consuming %x.
-        # Let me re-test with proper ordering.
-        tokenizer2 = Tokenizer("// hello\n%x")
-        tokenizer2.peek()  # triggers scan, collects comment
-        comments = tokenizer2.collect_pending_comments()
-        assert comments == [" hello"]
+        tokenizer.peek()
+        comments, leading_blank_line = tokenizer.take_pending_source_trivia()
+        assert comments == ["hello"]
+        assert not leading_blank_line
 
     def test_multiple_comments(self) -> None:
         tokenizer = Tokenizer("// first\n// second\n%x")
         tokenizer.peek()
-        comments = tokenizer.collect_pending_comments()
-        assert comments == [" first", " second"]
+        comments, leading_blank_line = tokenizer.take_pending_source_trivia()
+        assert comments == ["first", "second"]
+        assert not leading_blank_line
+
+    def test_file_header_is_separate_from_operation_comments(self) -> None:
+        adjacent = Tokenizer("// declaration\n%x")
+        adjacent.peek()
+        assert adjacent.take_file_header() == []
+        comments, leading_blank_line = adjacent.take_pending_source_trivia()
+        assert comments == ["declaration"]
+        assert not leading_blank_line
+
+        separated = Tokenizer("// file header\n\n// declaration\n%x")
+        separated.peek()
+        assert separated.take_file_header() == ["file header"]
+        comments, leading_blank_line = separated.take_pending_source_trivia()
+        assert comments == ["declaration"]
+        assert not leading_blank_line
+
+        header_only = Tokenizer("// file header")
+        assert header_only.peek().kind == TokenKind.EOF
+        assert header_only.take_file_header() == ["file header"]
+
+    def test_leading_blank_line_before_comments_or_token(self) -> None:
+        tokenizer = Tokenizer("\n0\n1\n\n// grouped\n2\n\n\n3")
+
+        assert tokenizer.next().text == "0"
+        comments, leading_blank_line = tokenizer.take_pending_source_trivia()
+        assert comments == []
+        assert not leading_blank_line
+
+        assert tokenizer.peek_n(0).text == "1"
+        assert tokenizer.next().text == "1"
+        comments, leading_blank_line = tokenizer.take_pending_source_trivia()
+        assert comments == []
+        assert not leading_blank_line
+
+        assert tokenizer.peek_n(0).text == "2"
+        assert tokenizer.peek().text == "2"
+        comments, leading_blank_line = tokenizer.take_pending_source_trivia()
+        assert comments == ["grouped"]
+        assert leading_blank_line
+
+        assert tokenizer.next().text == "2"
+        assert tokenizer.peek().text == "3"
+        comments, leading_blank_line = tokenizer.take_pending_source_trivia()
+        assert comments == []
+        assert leading_blank_line
 
     def test_inline_comment(self) -> None:
         tokens = _tokens("%x // comment\n%y")
@@ -697,10 +782,8 @@ class TestEdgeCases:
         assert tokens[1].kind == TokenKind.BARE_IDENT
         assert tokens[1].text == "tile"
 
-    def test_negative_sign_error(self) -> None:
-        """'-' not followed by '>' or digit is an error."""
-        with pytest.raises(ParseError, match="unexpected '-'"):
-            _tokens("- x")
+    def test_standalone_minus_before_whitespace(self) -> None:
+        assert _kinds("- x") == [TokenKind.MINUS, TokenKind.BARE_IDENT]
 
     def test_hash_error(self) -> None:
         """'#' not followed by an identifier is an error."""

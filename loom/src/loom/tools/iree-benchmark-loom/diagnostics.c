@@ -14,10 +14,8 @@ void iree_benchmark_loom_diagnostic_capture_initialize(
     iree_benchmark_loom_diagnostic_capture_t* capture) {
   *capture = (iree_benchmark_loom_diagnostic_capture_t){
       .initialized = true,
-      .first_diagnostic = true,
   };
-  iree_string_builder_initialize(allocator, &capture->output);
-  loom_output_stream_for_builder(&capture->output, &capture->stream);
+  loom_json_value_list_initialize(allocator, &capture->json_values);
 }
 
 void iree_benchmark_loom_diagnostic_capture_deinitialize(
@@ -25,7 +23,7 @@ void iree_benchmark_loom_diagnostic_capture_deinitialize(
   if (capture == NULL || !capture->initialized) {
     return;
   }
-  iree_string_builder_deinitialize(&capture->output);
+  loom_json_value_list_deinitialize(&capture->json_values);
   *capture = (iree_benchmark_loom_diagnostic_capture_t){0};
 }
 
@@ -34,31 +32,28 @@ iree_string_view_t iree_benchmark_loom_diagnostic_capture_json(
   if (!capture || !capture->initialized) {
     return iree_string_view_empty();
   }
-  return iree_string_builder_view(&capture->output);
+  return loom_json_value_list_body(&capture->json_values);
 }
 
 iree_status_t iree_benchmark_loom_write_diagnostic_array_json(
     const iree_benchmark_loom_diagnostic_capture_t* capture,
     loom_output_stream_t* stream) {
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "["));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write(
-      stream, iree_benchmark_loom_diagnostic_capture_json(capture)));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "]"));
-  return iree_ok_status();
+  if (!capture || !capture->initialized) {
+    return loom_json_write_value_list_array(iree_string_view_empty(), stream);
+  }
+  return loom_json_value_list_write_array(&capture->json_values, stream);
 }
 
 iree_status_t iree_benchmark_loom_diagnostic_capture_sink(
     void* user_data, const loom_diagnostic_t* diagnostic) {
   iree_benchmark_loom_diagnostic_capture_t* capture =
       (iree_benchmark_loom_diagnostic_capture_t*)user_data;
-  if (!capture->first_diagnostic) {
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(&capture->stream, ","));
-  }
+  loom_output_stream_t stream;
+  IREE_RETURN_IF_ERROR(
+      loom_json_value_list_begin_value(&capture->json_values, &stream));
   IREE_RETURN_IF_ERROR(loom_diagnostic_json_write_object(
-      &capture->stream, diagnostic,
+      &stream, diagnostic,
       (loom_type_formatter_t){loom_type_format_minimal, NULL}));
-  capture->first_diagnostic = false;
   switch (diagnostic->severity) {
     case LOOM_DIAGNOSTIC_ERROR:
       ++capture->error_count;

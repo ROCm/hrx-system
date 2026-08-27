@@ -17,13 +17,17 @@ from __future__ import annotations
 
 import struct
 from collections.abc import Iterable
-from typing import Any, ClassVar, cast
+from dataclasses import replace
+from typing import Any, ClassVar, Literal, cast
 
+from loom.dsl import FuncLikeInterface
 from loom.fields import compute_layout
 from loom.format.bytecode.encoding import decode_signed_varint, decode_varint
 from loom.format.bytecode.op_decls import (
     attr_def_for_op,
     build_op_decl_map,
+    build_parameterized_attr_def_map,
+    build_parameterized_type_def_map,
     func_like_interface_for_op,
     symbol_def_for_op,
 )
@@ -34,22 +38,33 @@ from loom.format.bytecode.writer import (
     LOCATION_MODE_NO_LOCATIONS,
     LOCATION_MODE_SOURCE_LOCATIONS,
     MAGIC,
+    MAX_SOURCE_COMMENT_COUNT,
     SECTION_ENCODINGS,
     SECTION_IR,
     SECTION_LOCATIONS,
     SECTION_OPS,
+    SECTION_SOURCE_TRIVIA,
     SECTION_SOURCES,
     SECTION_STRINGS,
+    SECTION_SYMBOL_REFERENCES,
     SECTION_SYMBOLS,
     SECTION_TYPES,
+    SOURCE_TRIVIA_COMMENT_COUNT_SHIFT,
+    SOURCE_TRIVIA_LEADING_BLANK_LINE,
+    SYMBOL_FLAG_EXPORT,
+    SYMBOL_INTERFACE_FLAG_MASK,
 )
 from loom.ir import (
+    ATTR_AGGREGATE_MAX_NESTING_DEPTH,
     BUFFER_TYPE,
     ENCODING_TYPE,
     NONE_TYPE,
+    REGION_SOURCE_FLAG_MASK,
+    SYMBOL_FLAG_DECLARATION,
     SYMBOL_FLAG_IMPORT,
     SYMBOL_FLAG_PUBLIC,
     SYMBOL_FLAG_RETAIN,
+    SYMBOL_FLAG_TEST_ONLY,
     Block,
     CanonicalAttrDict,
     DialectType,
@@ -58,14 +73,16 @@ from loom.ir import (
     EncodingInstance,
     EncodingRole,
     EncodingType,
+    EnumArrayAttr,
     FileLocation,
     FunctionType,
     FusedLocation,
-    GroupScope,
-    GroupType,
     Module,
     OpaqueLocation,
     Operation,
+    ParameterizedAttr,
+    ParameterizedAttrArray,
+    ParameterizedType,
     PoolType,
     Predicate,
     PredicateArg,
@@ -74,18 +91,22 @@ from loom.ir import (
     ScalarType,
     ScalarTypeKind,
     ShapedType,
+    SignedEnumSetAttr,
     StaticDim,
     StorageSpace,
     StorageType,
     Symbol,
     SymbolKind,
     SymbolName,
+    SymbolNameArray,
+    SymbolNameSet,
     TaggedLocation,
     TiedResult,
     Type,
     TypeKind,
     Value,
     rebuild_value_metadata,
+    replace_canonical_attr_dict,
 )
 from loom.stable_id import stable_id_from_string
 from loom.target.descriptor_sets import DESCRIPTOR_SET_REGISTRATIONS
@@ -110,12 +131,21 @@ _FUNC_PURITY_BYTES: list[str | None] = [None, "pure"]
 # Bytecode-only flag bit recording whether an import explicitly wrote its
 # source symbol, even when the source name matches the local symbol name.
 _SYMBOL_FLAG_IMPORT_SYMBOL = 0x0004
-_SYMBOL_SUPPORTED_FLAGS = (
+_SYMBOL_FLAG_PREDICATES = 0x0040
+_SYMBOL_IR_FLAGS = (
     SYMBOL_FLAG_PUBLIC
     | SYMBOL_FLAG_IMPORT
-    | _SYMBOL_FLAG_IMPORT_SYMBOL
     | SYMBOL_FLAG_RETAIN
+    | SYMBOL_FLAG_DECLARATION
+    | SYMBOL_FLAG_TEST_ONLY
 )
+_SYMBOL_SUPPORTED_FLAGS = (
+    _SYMBOL_IR_FLAGS
+    | _SYMBOL_FLAG_IMPORT_SYMBOL
+    | _SYMBOL_FLAG_PREDICATES
+    | SYMBOL_FLAG_EXPORT
+)
+_SYMBOL_DEFINITION_FLAGS = SYMBOL_FLAG_DECLARATION | SYMBOL_FLAG_TEST_ONLY
 
 
 class BytecodeError(Exception):
@@ -138,10 +168,21 @@ def _register_name_for_payload(
 class BytecodeReader:
     """Reads .loombc bytes and constructs an ir.py Module."""
 
-    def __init__(self, data: bytes, *, op_decls: Iterable[Any] | None = None) -> None:
+    def __init__(
+        self,
+        data: bytes,
+        *,
+        op_decls: Iterable[Any] | None = None,
+        parameterized_attrs: Iterable[Any] | None = None,
+        type_defs: Iterable[Any] | None = None,
+    ) -> None:
         self._data = data
         self._offset = 0
         self._op_decls_by_name = build_op_decl_map(op_decls)
+        self._parameterized_attrs_by_name = build_parameterized_attr_def_map(
+            self._op_decls_by_name, parameterized_attrs
+        )
+        self._parameterized_types_by_name = build_parameterized_type_def_map(type_defs)
         self._strings: list[str] = []
         self._sources: list[str] = []
         self._types: list[Type] = []
@@ -153,6 +194,9 @@ class BytecodeReader:
         self._module_region_count = 0
         self._module_block_count = 0
         self._module_op_count = 0
+        self._wire_symbol_names: list[str] = []
+        self._wire_symbol_kinds: list[int] = []
+        self._wire_symbol_root_region_counts: list[int] = []
 
     def read(self) -> Module:
         """Read and return the module."""
@@ -180,6 +224,10 @@ class BytecodeReader:
         module = Module()
         module.encodings = list(self._encodings)
         module.sources = list(self._sources)
+        if SECTION_SOURCE_TRIVIA in sections:
+            module.file_header = self._read_source_trivia_section(
+                sections[SECTION_SOURCE_TRIVIA]
+            )
 
         if self._location_mode == LOCATION_MODE_NO_LOCATIONS:
             if SECTION_LOCATIONS in sections:
@@ -198,6 +246,10 @@ class BytecodeReader:
         symbols_data = sections.get(SECTION_SYMBOLS, (0, b""))
         if isinstance(symbols_data, tuple):
             self._read_symbols_section(symbols_data, ir_data, module)
+        symbol_references_data = sections.get(SECTION_SYMBOL_REFERENCES)
+        if symbol_references_data is None:
+            raise BytecodeError("bytecode must have a SYMBOL_REFERENCES section")
+        self._read_symbol_references_section(symbol_references_data)
 
         allocation_counts = self._module_allocation_counts(module)
         if allocation_counts != (
@@ -455,6 +507,120 @@ class BytecodeReader:
                 EncodingInstance(name=name, alias=alias, params=tuple(param_list))
             )
 
+    def _resolve_prior_type(self, type_index: int, field_name: str) -> Type:
+        if type_index >= len(self._types):
+            raise BytecodeError(
+                f"{field_name} index {type_index} must refer to a prior type "
+                f"(available: {len(self._types)})"
+            )
+        return self._types[type_index]
+
+    def _read_register_type(self, data: bytes, offset: int) -> tuple[RegisterType, int]:
+        try:
+            descriptor_set_stable_id, offset = decode_varint(data, offset)
+            payload1, offset = decode_varint(data, offset)
+        except ValueError as err:
+            raise BytecodeError(f"malformed register carrier payload: {err}") from err
+        if offset >= len(data):
+            raise BytecodeError("register value type presence is truncated")
+        has_value_type = data[offset]
+        offset += 1
+        register_class_id = payload1 & 0xFFFF
+        unit_count = (payload1 >> 16) & 0xFFFFFFFF
+        if descriptor_set_stable_id == 0:
+            raise BytecodeError("register descriptor set stable ID must be non-zero")
+        if unit_count == 0:
+            raise BytecodeError("register unit count must be non-zero")
+        if payload1 >> 48:
+            raise BytecodeError("register payload reserved bits must be zero")
+        if has_value_type not in (0, 1):
+            raise BytecodeError(
+                f"register has_value_type must be 0 or 1, got {has_value_type}"
+            )
+        value_type = None
+        if has_value_type:
+            try:
+                value_type_index, offset = decode_varint(data, offset)
+            except ValueError as err:
+                raise BytecodeError(
+                    f"malformed register value type reference: {err}"
+                ) from err
+            value_type = self._resolve_prior_type(
+                value_type_index, "register value type"
+            )
+        name = _register_name_for_payload(descriptor_set_stable_id, register_class_id)
+        try:
+            ir_type = RegisterType(
+                descriptor_set_stable_id,
+                register_class_id,
+                unit_count,
+                name,
+                value_type,
+            )
+        except ValueError as err:
+            raise BytecodeError(str(err)) from err
+        return ir_type, offset
+
+    def _read_parameterized_type(
+        self, data: bytes, offset: int
+    ) -> tuple[ParameterizedType, int]:
+        family_id, offset = decode_varint(data, offset)
+        if family_id >= len(self._strings):
+            raise BytecodeError(
+                f"parameterized type family string_id {family_id} out of range "
+                f"(string table has {len(self._strings)} entries)"
+            )
+        family_name = self._strings[family_id]
+        definition = self._parameterized_types_by_name.get(family_name)
+        if definition is None:
+            raise BytecodeError(
+                f"parameterized type family {family_name!r} is not registered"
+            )
+
+        present_count, offset = decode_varint(data, offset)
+        if present_count > len(definition.params):
+            raise BytecodeError(
+                f"parameterized type {family_name!r} has {present_count} present "
+                f"parameters but declares only {len(definition.params)}"
+            )
+        parameter_by_name = {
+            parameter.name: (index, parameter)
+            for index, parameter in enumerate(definition.params)
+        }
+        parameters: dict[str, Any] = {}
+        previous_index = -1
+        for _ in range(present_count):
+            parameter_name_id, offset = decode_varint(data, offset)
+            if parameter_name_id >= len(self._strings):
+                raise BytecodeError(
+                    "parameterized type parameter string_id "
+                    f"{parameter_name_id} out of range (string table has "
+                    f"{len(self._strings)} entries)"
+                )
+            parameter_name = self._strings[parameter_name_id]
+            parameter_entry = parameter_by_name.get(parameter_name)
+            if parameter_entry is None:
+                raise BytecodeError(
+                    f"parameterized type {family_name!r} has unknown parameter "
+                    f"{parameter_name!r}"
+                )
+            parameter_index, parameter_def = parameter_entry
+            if parameter_index <= previous_index:
+                raise BytecodeError(
+                    f"parameterized type {family_name!r} parameters are not in "
+                    "declaration order"
+                )
+            parameter_value, offset = self._read_attr_value(
+                data, offset, attr_def=parameter_def
+            )
+            parameters[parameter_name] = parameter_value
+            previous_index = parameter_index
+
+        try:
+            return ParameterizedType(definition, parameters), offset
+        except (TypeError, ValueError) as err:
+            raise BytecodeError(str(err)) from err
+
     def _read_types_section(self, section: tuple[int, bytes]) -> None:
         _, data = section
         offset = 0
@@ -531,27 +697,21 @@ class BytecodeReader:
                         )
                     except ValueError as err:
                         raise BytecodeError(str(err)) from err
-                case TypeKind.GROUP:
-                    scope_byte = data[offset]
-                    offset += 1
-                    try:
-                        scope = GroupScope(scope_byte)
-                    except ValueError as err:
-                        raise BytecodeError(
-                            f"unknown group scope byte: {scope_byte}"
-                        ) from err
-                    ir_type = GroupType(scope)
                 case TypeKind.FUNCTION:
                     arg_count, offset = decode_varint(data, offset)
                     result_count, offset = decode_varint(data, offset)
                     arg_types = []
                     for _ in range(arg_count):
                         type_idx, offset = decode_varint(data, offset)
-                        arg_types.append(self._types[type_idx])
+                        arg_types.append(
+                            self._resolve_prior_type(type_idx, "function argument type")
+                        )
                     result_types = []
                     for _ in range(result_count):
                         type_idx, offset = decode_varint(data, offset)
-                        result_types.append(self._types[type_idx])
+                        result_types.append(
+                            self._resolve_prior_type(type_idx, "function result type")
+                        )
                     ir_type = FunctionType(tuple(arg_types), tuple(result_types))
                 case TypeKind.DIALECT:
                     name_id, offset = decode_varint(data, offset)
@@ -559,35 +719,14 @@ class BytecodeReader:
                     params = []
                     for _ in range(param_count):
                         type_idx, offset = decode_varint(data, offset)
-                        params.append(self._types[type_idx])
+                        params.append(
+                            self._resolve_prior_type(type_idx, "dialect parameter type")
+                        )
                     ir_type = DialectType(self._strings[name_id], tuple(params))
                 case TypeKind.REGISTER:
-                    descriptor_set_stable_id, offset = decode_varint(data, offset)
-                    payload1, offset = decode_varint(data, offset)
-                    register_class_id = payload1 & 0xFFFF
-                    unit_count = (payload1 >> 16) & 0xFFFFFFFF
-                    if descriptor_set_stable_id == 0:
-                        raise BytecodeError(
-                            "register descriptor set stable ID must be non-zero"
-                        )
-                    if unit_count == 0:
-                        raise BytecodeError("register unit count must be non-zero")
-                    if payload1 >> 48:
-                        raise BytecodeError(
-                            "register payload reserved bits must be zero"
-                        )
-                    name = _register_name_for_payload(
-                        descriptor_set_stable_id, register_class_id
-                    )
-                    try:
-                        ir_type = RegisterType(
-                            descriptor_set_stable_id,
-                            register_class_id,
-                            unit_count,
-                            name,
-                        )
-                    except ValueError as err:
-                        raise BytecodeError(str(err)) from err
+                    ir_type, offset = self._read_register_type(data, offset)
+                case TypeKind.PARAMETERIZED:
+                    ir_type, offset = self._read_parameterized_type(data, offset)
                 case TypeKind.STORAGE:
                     space_byte = data[offset]
                     offset += 1
@@ -684,11 +823,15 @@ class BytecodeReader:
                         )
                     )
 
-    def _read_comment_list(
+    def _read_source_trivia(
         self, data: bytes, offset: int
-    ) -> tuple[tuple[str, ...], int]:
-        """Read a bytecode comment list encoded as raw UTF-8 strings."""
-        count, offset = decode_varint(data, offset)
+    ) -> tuple[bool, tuple[str, ...], int]:
+        """Read a leading-blank bit and normalized UTF-8 comment payloads."""
+        source_trivia, offset = decode_varint(data, offset)
+        leading_blank_line = (source_trivia & SOURCE_TRIVIA_LEADING_BLANK_LINE) != 0
+        count = source_trivia >> SOURCE_TRIVIA_COMMENT_COUNT_SHIFT
+        if count > MAX_SOURCE_COMMENT_COUNT:
+            raise BytecodeError("comment count exceeds UINT16_MAX")
         comments: list[str] = []
         for _ in range(count):
             length, offset = decode_varint(data, offset)
@@ -696,8 +839,26 @@ class BytecodeReader:
             if len(comment_bytes) != length:
                 raise BytecodeError("comment extends past end of data")
             offset += length
-            comments.append(comment_bytes.decode("utf-8"))
-        return tuple(comments), offset
+            try:
+                comment = comment_bytes.decode("utf-8")
+            except UnicodeDecodeError as error:
+                raise BytecodeError("comment is not valid UTF-8") from error
+            if comment.startswith(" "):
+                comment = comment[1:]
+            comments.append(comment)
+        return leading_blank_line, tuple(comments), offset
+
+    def _read_source_trivia_section(
+        self, section: tuple[int, bytes]
+    ) -> tuple[str, ...]:
+        """Read module-owned source presentation."""
+        _, data = section
+        leading_blank_line, file_header, offset = self._read_source_trivia(data, 0)
+        if leading_blank_line:
+            raise BytecodeError("file header must not have a leading blank line")
+        if offset != len(data):
+            raise BytecodeError("SOURCE_TRIVIA section has trailing bytes")
+        return file_header
 
     def _map_value_ref(self, value_ref: int, value_map: list[int]) -> int:
         """Translate an available function-local value number to a module value id."""
@@ -723,10 +884,9 @@ class BytecodeReader:
         """
         reserved: list[int] = []
         predefined_values = predefined_values or []
-        for _ in range(count):
-            local_number = len(value_map)
-            if local_number < len(predefined_values):
-                value_id = predefined_values[local_number]
+        for definition_index in range(count):
+            if definition_index < len(predefined_values):
+                value_id = predefined_values[definition_index]
             else:
                 value_id = module.add_value(Value(name="", type=NONE_TYPE))
             value_map.append(value_id)
@@ -797,6 +957,49 @@ class BytecodeReader:
             return target_value_id, offset
         return module.add_value(value), offset
 
+    def _read_value_def_range(
+        self,
+        data: bytes,
+        offset: int,
+        module: Module,
+        value_map: list[int],
+        target_value_ids: list[int],
+        start_index: int,
+        count: int,
+    ) -> tuple[list[int], int]:
+        """Read a contiguous range of pre-reserved value definitions."""
+        value_ids: list[int] = []
+        for definition_index in range(start_index, start_index + count):
+            value_id, offset = self._read_value_def(
+                data,
+                offset,
+                module,
+                value_map,
+                target_value_ids[definition_index],
+            )
+            value_ids.append(value_id)
+        return value_ids, offset
+
+    def _read_function_implementation_metadata(
+        self,
+        data: bytes,
+        offset: int,
+        func_like: FuncLikeInterface,
+        symbol_count: int,
+    ) -> tuple[int | None, int, int]:
+        """Read the fixed implementation metadata declared by a FuncLike op."""
+        if func_like.template_family is None:
+            return None, 0, offset
+        template_family_symbol_ordinal, offset = decode_varint(data, offset)
+        if template_family_symbol_ordinal >= symbol_count:
+            raise BytecodeError(
+                "template family symbol ordinal "
+                f"{template_family_symbol_ordinal} out of range "
+                f"(symbol table has {symbol_count} entries)"
+            )
+        priority, offset = decode_varint(data, offset)
+        return template_family_symbol_ordinal, priority, offset
+
     def _read_symbols_section(
         self,
         symbols_section: tuple[int, bytes],
@@ -811,9 +1014,13 @@ class BytecodeReader:
         # Import/export offset tables.
         import_count, offset = decode_varint(sym_data, offset)
         export_count, offset = decode_varint(sym_data, offset)
+        declared_region_payload_count, offset = decode_varint(sym_data, offset)
+        decoded_region_payload_count = 0
         # Skip the offset tables (uint64 each).
         offset += import_count * 8
         offset += export_count * 8
+
+        pending_template_families: list[tuple[Symbol, int, str, int]] = []
 
         for _ in range(count):
             name_id, offset = decode_varint(sym_data, offset)
@@ -825,12 +1032,9 @@ class BytecodeReader:
             offset += 2
 
             name = self._strings[name_id]
-            if visibility not in (0, 1):
-                raise BytecodeError(f"unsupported symbol visibility byte: {visibility}")
-            if flags & ~_SYMBOL_SUPPORTED_FLAGS:
-                raise BytecodeError("symbol has unsupported flag bits")
-            if (visibility == 0) != ((flags & SYMBOL_FLAG_PUBLIC) != 0):
-                raise BytecodeError("symbol visibility byte does not match flags")
+            self._validate_symbol_header(flags, kind, visibility)
+            self._wire_symbol_names.append(name)
+            self._wire_symbol_kinds.append(kind)
 
             # Import metadata: source module and symbol for cross-module refs.
             is_import = (flags & SYMBOL_FLAG_IMPORT) != 0
@@ -842,7 +1046,8 @@ class BytecodeReader:
                 source_module = self._strings[source_module_id]
                 source_symbol = self._strings[source_symbol_id]
 
-            if kind <= 3:  # FUNC_DEF, FUNC_DECL, FUNC_TEMPLATE, FUNC_UKERNEL
+            root_region_count = 0
+            if kind <= 4:  # Function and template signature symbol kinds.
                 op_table_index_plus1, offset = decode_varint(sym_data, offset)
                 if op_table_index_plus1 == 0:
                     raise BytecodeError(
@@ -855,29 +1060,48 @@ class BytecodeReader:
                         f"entry {op_table_index} but only {len(self._ops)} exist"
                     )
                 op_name = self._ops[op_table_index]
-                op_comments, offset = self._read_comment_list(sym_data, offset)
+                self._validate_symbol_definition_flags(flags, op_name)
+                func_like = func_like_interface_for_op(self._op_decls_by_name, op_name)
+                if func_like is None:
+                    raise BytecodeError(
+                        f"function symbol defining op {op_name!r} is not FuncLike"
+                    )
+                op_leading_blank_line, op_comments, offset = self._read_source_trivia(
+                    sym_data, offset
+                )
 
                 cc_byte = sym_data[offset]
                 offset += 1
                 purity_byte = sym_data[offset]
                 offset += 1
+                workload_arg_count, offset = decode_varint(sym_data, offset)
                 arg_count, offset = decode_varint(sym_data, offset)
                 result_count, offset = decode_varint(sym_data, offset)
 
                 signature_value_map: list[int] = []
                 signature_value_ids = self._reserve_value_defs(
-                    module, signature_value_map, arg_count + result_count
+                    module,
+                    signature_value_map,
+                    workload_arg_count + arg_count + result_count,
                 )
-                arg_ids: list[int] = []
-                for i in range(arg_count):
-                    value_id, offset = self._read_value_def(
-                        sym_data,
-                        offset,
-                        module,
-                        signature_value_map,
-                        signature_value_ids[i],
-                    )
-                    arg_ids.append(value_id)
+                workload_arg_ids, offset = self._read_value_def_range(
+                    sym_data,
+                    offset,
+                    module,
+                    signature_value_map,
+                    signature_value_ids,
+                    start_index=0,
+                    count=workload_arg_count,
+                )
+                arg_ids, offset = self._read_value_def_range(
+                    sym_data,
+                    offset,
+                    module,
+                    signature_value_map,
+                    signature_value_ids,
+                    start_index=workload_arg_count,
+                    count=arg_count,
+                )
 
                 result_ids: list[int] = []
                 tied_results: list[TiedResult] = []
@@ -889,7 +1113,7 @@ class BytecodeReader:
                         offset,
                         module,
                         signature_value_map,
-                        signature_value_ids[arg_count + i],
+                        signature_value_ids[workload_arg_count + arg_count + i],
                     )
                     result_ids.append(value_id)
                     if is_tied:
@@ -902,22 +1126,15 @@ class BytecodeReader:
                 predicates, offset = self._read_predicate_list(
                     sym_data, offset, module, signature_value_map
                 )
+                predicates_attr_name = self._function_predicates_attr_name(
+                    op_name, flags, predicates
+                )
 
-                implements: str | None = None
-                priority = 0
-                if kind in (
-                    SymbolKind.FUNC_TEMPLATE.value,
-                    SymbolKind.FUNC_UKERNEL.value,
-                ):
-                    implements_id, offset = decode_varint(sym_data, offset)
-                    if implements_id >= len(self._strings):
-                        raise BytecodeError(
-                            "function implements string_id "
-                            f"{implements_id} out of range "
-                            f"(string table has {len(self._strings)} entries)"
-                        )
-                    priority, offset = decode_varint(sym_data, offset)
-                    implements = self._strings[implements_id]
+                template_family_symbol_ordinal, priority, offset = (
+                    self._read_function_implementation_metadata(
+                        sym_data, offset, func_like, count
+                    )
+                )
 
                 payload_attr_count, offset = decode_varint(sym_data, offset)
                 payload_attrs, offset = self._read_op_attr_entries(
@@ -929,22 +1146,25 @@ class BytecodeReader:
                     op_name,
                 )
 
-                has_body = sym_data[offset]
-                offset += 1
-                regions: list[Region] = []
-                if has_body:
-                    ir_offset = struct.unpack_from("<Q", sym_data, offset)[0]
-                    offset += 8
-                    ir_length = struct.unpack_from("<I", sym_data, offset)[0]
-                    offset += 4
-                    body_region_index = self._func_body_region_index(op_name)
-                    regions = self._read_symbol_regions(
-                        ir_data[ir_offset : ir_offset + ir_length],
+                body_region_index = self._func_body_region_index(op_name)
+                predefined_region_values: dict[int, list[int]] = {}
+                if body_region_index is not None:
+                    predefined_region_values[body_region_index] = arg_ids
+                workload_region_index, _ = self._kernel_workload_contract(op_name)
+                if workload_region_index is not None:
+                    predefined_region_values[workload_region_index] = workload_arg_ids
+                regions, region_payload_count, offset = (
+                    self._read_root_region_payload_references(
+                        sym_data,
+                        offset,
+                        ir_data,
                         module,
-                        root_region_count=self._op_region_count(op_name),
-                        predefined_values=arg_ids,
-                        predefined_region_index=body_region_index,
+                        op_name,
+                        predefined_region_values,
                     )
+                )
+                decoded_region_payload_count += region_payload_count
+                root_region_count = len(regions)
 
                 # Build the attributes dict for this func-like op.
                 symbol_field = self._symbol_field_for_op(op_name)
@@ -965,16 +1185,14 @@ class BytecodeReader:
                 )
                 if purity_str is not None:
                     op_attrs["purity"] = purity_str
-                if predicates:
-                    op_attrs["predicates"] = predicates
+                if predicates_attr_name is not None:
+                    op_attrs[predicates_attr_name] = predicates
                 if source_module:
                     op_attrs["import_module"] = source_module
                     if flags & _SYMBOL_FLAG_IMPORT_SYMBOL:
                         op_attrs["import_symbol"] = source_symbol
-                if implements is not None:
-                    op_attrs["implements"] = implements
-                    if priority != 0:
-                        op_attrs["priority"] = priority
+                if priority != 0:
+                    op_attrs["priority"] = priority
                 shared_attr_keys = self._shared_func_metadata_attr_keys(op_name)
                 for key, value in payload_attrs.items():
                     if key in shared_attr_keys:
@@ -983,30 +1201,48 @@ class BytecodeReader:
                         )
                     op_attrs[key] = value
 
-                # For declaration-style ops (no body), args are operands.
-                # For definition-style ops (with body), args are entry block args.
+                # Declarations materialize explicitly designated signature
+                # operand fields. Definitions bind signatures to entry blocks.
                 operand_ids: list[int] = []
+                operand_segment_counts: tuple[int, ...] = ()
                 if not regions:
-                    operand_ids = arg_ids
+                    operand_ids, operand_segment_counts = (
+                        self._build_signature_operands(
+                            op_name, workload_arg_ids, arg_ids
+                        )
+                    )
 
                 op = Operation(
                     name=op_name,
                     operands=operand_ids,
+                    operand_segment_counts=operand_segment_counts,
                     results=result_ids,
                     tied_results=tied_results,
                     attributes=op_attrs,
                     regions=regions,
                     comments=op_comments,
+                    leading_blank_line=op_leading_blank_line,
                 )
                 symbol = Symbol(
                     name=name,
                     kind=SymbolKind(kind),
-                    flags=flags,
+                    flags=flags & _SYMBOL_IR_FLAGS,
                     op=op,
                     source_module=source_module,
                     source_symbol=source_symbol,
                 )
+                body_operation_index = len(module.body.ops)
                 module.add_symbol(symbol)
+                if template_family_symbol_ordinal is not None:
+                    assert func_like.template_family is not None
+                    pending_template_families.append(
+                        (
+                            symbol,
+                            body_operation_index,
+                            func_like.template_family,
+                            template_family_symbol_ordinal,
+                        )
+                    )
             elif kind == SymbolKind.GLOBAL.value:
                 op_table_index_plus1, offset = decode_varint(sym_data, offset)
                 if op_table_index_plus1 == 0:
@@ -1020,7 +1256,10 @@ class BytecodeReader:
                         f"entry {op_table_index} but only {len(self._ops)} exist"
                     )
                 op_name = self._ops[op_table_index]
-                op_comments, offset = self._read_comment_list(sym_data, offset)
+                self._validate_symbol_definition_flags(flags, op_name)
+                op_leading_blank_line, op_comments, offset = self._read_source_trivia(
+                    sym_data, offset
+                )
 
                 result_count, offset = decode_varint(sym_data, offset)
                 if result_count == 0:
@@ -1058,29 +1297,143 @@ class BytecodeReader:
                     results=result_ids,
                     attributes=op_attrs,
                     comments=op_comments,
+                    leading_blank_line=op_leading_blank_line,
                 )
                 symbol = Symbol(
                     name=name,
                     kind=SymbolKind.GLOBAL,
-                    flags=flags,
+                    flags=flags & _SYMBOL_IR_FLAGS,
                     op=op,
                     source_module=source_module,
                     source_symbol=source_symbol,
                 )
                 module.add_symbol(symbol)
             elif kind == SymbolKind.RECORD.value:
-                offset = self._read_record_symbol_payload(
-                    sym_data,
-                    offset,
-                    ir_data,
-                    module,
-                    name,
-                    flags,
-                    source_module,
-                    source_symbol,
+                offset, region_payload_count, root_region_count = (
+                    self._read_record_symbol_payload(
+                        sym_data,
+                        offset,
+                        ir_data,
+                        module,
+                        name,
+                        flags,
+                        source_module,
+                        source_symbol,
+                    )
                 )
+                decoded_region_payload_count += region_payload_count
             else:
                 raise BytecodeError(f"unsupported symbol kind: {kind}")
+            self._wire_symbol_root_region_counts.append(root_region_count)
+
+        for (
+            symbol,
+            body_operation_index,
+            attr_name,
+            source_symbol_ordinal,
+        ) in pending_template_families:
+            assert symbol.op is not None
+            replacement = replace(
+                symbol.op,
+                attributes=replace_canonical_attr_dict(
+                    symbol.op.attributes,
+                    {attr_name: self._wire_symbol_names[source_symbol_ordinal]},
+                ),
+            )
+            symbol.op = replacement
+            module.body.ops[body_operation_index] = replacement
+
+        if decoded_region_payload_count != declared_region_payload_count:
+            raise BytecodeError(
+                "root region payload records do not match declared total"
+            )
+        if offset != len(sym_data):
+            raise BytecodeError("SYMBOLS section has trailing bytes")
+
+    def _read_symbol_references_section(self, section: tuple[int, bytes]) -> None:
+        """Validate metadata-only dependency and abstract-provider rows."""
+        _, data = section
+        offset = 0
+        symbol_count, offset = decode_varint(data, offset)
+        total_dependency_count, offset = decode_varint(data, offset)
+        total_template_demand_count, offset = decode_varint(data, offset)
+        if symbol_count != len(self._wire_symbol_names):
+            raise BytecodeError("SYMBOL_REFERENCES row count does not match SYMBOLS")
+        minimum_encoded_bytes = (
+            1
+            + symbol_count * 2
+            + total_dependency_count * 3
+            + total_template_demand_count * 2
+        )
+        if minimum_encoded_bytes > len(data) - offset:
+            raise BytecodeError(
+                "SYMBOL_REFERENCES declared records exceed section length"
+            )
+
+        decoded_dependency_count = 0
+        module_dependency_count, offset = decode_varint(data, offset)
+        if module_dependency_count > total_dependency_count:
+            raise BytecodeError("module dependency count exceeds declared total")
+
+        def read_dependencies(
+            count: int, offset: int, source_root_region_count: int
+        ) -> int:
+            nonlocal decoded_dependency_count
+            for _ in range(count):
+                source_root_region_index_plus_one, offset = decode_varint(data, offset)
+                if source_root_region_index_plus_one > source_root_region_count:
+                    raise BytecodeError(
+                        "dependency source root region index is out of range"
+                    )
+                dependency, offset = decode_varint(data, offset)
+                if dependency >= symbol_count:
+                    raise BytecodeError("dependency symbol index is out of range")
+                target_interfaces, offset = decode_varint(data, offset)
+                if target_interfaces & ~SYMBOL_INTERFACE_FLAG_MASK:
+                    raise BytecodeError("dependency target interfaces are invalid")
+                decoded_dependency_count += 1
+            return offset
+
+        offset = read_dependencies(module_dependency_count, offset, 0)
+        decoded_template_demand_count = 0
+        for symbol_index in range(symbol_count):
+            source_root_region_count = self._wire_symbol_root_region_counts[
+                symbol_index
+            ]
+            dependency_count, offset = decode_varint(data, offset)
+            if dependency_count > total_dependency_count - decoded_dependency_count:
+                raise BytecodeError("symbol dependency count exceeds declared total")
+            offset = read_dependencies(
+                dependency_count, offset, source_root_region_count
+            )
+
+            template_demand_count, offset = decode_varint(data, offset)
+            if (
+                template_demand_count
+                > total_template_demand_count - decoded_template_demand_count
+            ):
+                raise BytecodeError(
+                    "symbol contract demand count exceeds declared total"
+                )
+            for _ in range(template_demand_count):
+                source_root_region_index_plus_one, offset = decode_varint(data, offset)
+                if source_root_region_index_plus_one > source_root_region_count:
+                    raise BytecodeError(
+                        "template demand source root region index is out of range"
+                    )
+                family_symbol_ordinal, offset = decode_varint(data, offset)
+                if family_symbol_ordinal >= symbol_count:
+                    raise BytecodeError(
+                        "template family symbol ordinal is out of range"
+                    )
+                decoded_template_demand_count += 1
+
+        if decoded_dependency_count != total_dependency_count:
+            raise BytecodeError("dependency records do not match declared total")
+        if decoded_template_demand_count != total_template_demand_count:
+            raise BytecodeError("template demand records do not match declared total")
+        if offset != len(data):
+            raise BytecodeError("SYMBOL_REFERENCES section has trailing bytes")
 
     def _read_record_symbol_payload(
         self,
@@ -1092,7 +1445,7 @@ class BytecodeReader:
         flags: int,
         source_module: str,
         source_symbol: str,
-    ) -> int:
+    ) -> tuple[int, int, int]:
         """Read one RECORD symbol payload and append it to ``module``."""
         op_table_index_plus1, offset = decode_varint(sym_data, offset)
         if op_table_index_plus1 == 0:
@@ -1104,7 +1457,10 @@ class BytecodeReader:
                 f"entry {op_table_index} but only {len(self._ops)} exist"
             )
         op_name = self._ops[op_table_index]
-        op_comments, offset = self._read_comment_list(sym_data, offset)
+        self._validate_symbol_definition_flags(flags, op_name)
+        op_leading_blank_line, op_comments, offset = self._read_source_trivia(
+            sym_data, offset
+        )
 
         attr_count, offset = decode_varint(sym_data, offset)
         op_attrs, offset = self._read_op_attr_entries(
@@ -1113,25 +1469,11 @@ class BytecodeReader:
         symbol_field = self._symbol_field_for_op(op_name)
         op_attrs = {symbol_field: name, **op_attrs}
 
-        has_body = sym_data[offset]
-        offset += 1
-        if has_body > 1:
-            raise BytecodeError(f"invalid record has_body value: {has_body}")
-        record_regions: list[Region] = []
-        if has_body:
-            if offset + 12 > len(sym_data):
-                raise BytecodeError("record body reference is truncated")
-            ir_offset = struct.unpack_from("<Q", sym_data, offset)[0]
-            offset += 8
-            ir_length = struct.unpack_from("<I", sym_data, offset)[0]
-            offset += 4
-            if ir_offset + ir_length > len(ir_data):
-                raise BytecodeError("record body range extends past IR section")
-            record_regions = self._read_symbol_regions(
-                ir_data[ir_offset : ir_offset + ir_length],
-                module,
-                root_region_count=self._op_region_count(op_name),
+        record_regions, region_payload_count, offset = (
+            self._read_root_region_payload_references(
+                sym_data, offset, ir_data, module, op_name, {}
             )
+        )
 
         op = Operation(
             name=op_name,
@@ -1140,17 +1482,72 @@ class BytecodeReader:
             attributes=op_attrs,
             regions=record_regions,
             comments=op_comments,
+            leading_blank_line=op_leading_blank_line,
         )
         symbol = Symbol(
             name=name,
             kind=SymbolKind.RECORD,
-            flags=flags,
+            flags=flags & _SYMBOL_IR_FLAGS,
             op=op,
             source_module=source_module,
             source_symbol=source_symbol,
         )
         module.add_symbol(symbol)
-        return offset
+        return offset, region_payload_count, len(record_regions)
+
+    def _validate_symbol_header(self, flags: int, kind: int, visibility: int) -> None:
+        """Validate the common symbol record header."""
+        if kind > SymbolKind.RECORD.value:
+            raise BytecodeError(f"unsupported symbol kind: {kind}")
+        if visibility not in (0, 1):
+            raise BytecodeError(f"unsupported symbol visibility byte: {visibility}")
+        if flags & ~_SYMBOL_SUPPORTED_FLAGS:
+            raise BytecodeError("symbol has unsupported flag bits")
+        if flags & _SYMBOL_FLAG_PREDICATES and kind > 4:
+            raise BytecodeError(
+                "symbol predicates flag requires a function symbol kind"
+            )
+        is_import = bool(flags & SYMBOL_FLAG_IMPORT)
+        is_export = bool(flags & SYMBOL_FLAG_EXPORT)
+        if is_import and is_export:
+            raise BytecodeError("symbol cannot be both imported and exported")
+        if not is_import and flags & SYMBOL_FLAG_PUBLIC and not is_export:
+            raise BytecodeError("public definition requires export flag")
+        if (visibility == 0) != ((flags & SYMBOL_FLAG_PUBLIC) != 0):
+            raise BytecodeError("symbol visibility byte does not match flags")
+
+    def _function_predicates_attr_name(
+        self, op_name: str, flags: int, predicates: list[Predicate]
+    ) -> str | None:
+        """Resolve and validate function predicate attribute presence."""
+        has_predicates = bool(flags & _SYMBOL_FLAG_PREDICATES)
+        if predicates and not has_predicates:
+            raise BytecodeError(
+                "nonempty function predicate list requires the predicates flag"
+            )
+        func_like = func_like_interface_for_op(self._op_decls_by_name, op_name)
+        predicates_attr_name = (
+            getattr(func_like, "predicates", None) if func_like is not None else None
+        )
+        if has_predicates and predicates_attr_name is None:
+            raise BytecodeError(
+                "function predicates flag requires a FuncLike predicates attribute"
+            )
+        return predicates_attr_name if has_predicates else None
+
+    def _validate_symbol_definition_flags(self, flags: int, op_name: str) -> None:
+        """Validate encoded roles against the defining op declaration."""
+
+        symbol_def = symbol_def_for_op(self._op_decls_by_name, op_name)
+        expected_flags = 0
+        if symbol_def.is_declaration:
+            expected_flags |= SYMBOL_FLAG_DECLARATION
+        if symbol_def.is_test_only:
+            expected_flags |= SYMBOL_FLAG_TEST_ONLY
+        if flags & _SYMBOL_DEFINITION_FLAGS != expected_flags:
+            raise BytecodeError(
+                "symbol definition flags do not match defining op contract"
+            )
 
     def _shared_func_metadata_attr_keys(self, op_name: str) -> frozenset[str]:
         """Return func-like attrs encoded by fixed symbol metadata fields."""
@@ -1166,20 +1563,16 @@ class BytecodeReader:
                 attr_name = getattr(func_like, field_name, None)
                 if attr_name is not None:
                     keys.add(attr_name)
-            if symbol_def.bytecode_kind in (
-                "LOOM_SYMBOL_FUNC_TEMPLATE",
-                "LOOM_SYMBOL_FUNC_UKERNEL",
-            ):
-                for field_name in ("implements", "priority"):
-                    attr_name = getattr(func_like, field_name, None)
-                    if attr_name is not None:
-                        keys.add(attr_name)
+            for field_name in ("template_family", "priority"):
+                attr_name = getattr(func_like, field_name, None)
+                if attr_name is not None:
+                    keys.add(attr_name)
         return frozenset(keys)
 
     def _func_body_region_index(self, op_name: str) -> int | None:
         """Return op_name's FuncLike body region index, if it has one."""
         func_like = func_like_interface_for_op(self._op_decls_by_name, op_name)
-        if func_like is None or func_like.args_as_operands or func_like.body is None:
+        if func_like is None or func_like.body is None:
             return None
         op_decl = self._op_decls_by_name.get(op_name)
         if op_decl is None:
@@ -1189,6 +1582,60 @@ class BytecodeReader:
                 return region_index
         return None
 
+    def _kernel_workload_contract(self, op_name: str) -> tuple[int | None, int | None]:
+        """Return workload region and operand field indices for a kernel."""
+        op_decl = self._op_decls_by_name.get(op_name)
+        symbol_def = symbol_def_for_op(self._op_decls_by_name, op_name)
+        if op_decl is None or symbol_def is None or symbol_def.kernel_contract is None:
+            return None, None
+        contract = symbol_def.kernel_contract
+        layout = compute_layout(op_decl)
+        region_index = (
+            layout.fields[contract.workload_region].index
+            if contract.workload_region is not None
+            else None
+        )
+        operand_field_index = (
+            layout.fields[contract.workload_operands].index
+            if contract.workload_operands is not None
+            else None
+        )
+        return region_index, operand_field_index
+
+    def _build_signature_operands(
+        self, op_name: str, workload_arg_ids: list[int], arg_ids: list[int]
+    ) -> tuple[list[int], tuple[int, ...]]:
+        """Build declaration operands from workload and FuncLike signatures."""
+        op_decl = self._op_decls_by_name.get(op_name)
+        if op_decl is None:
+            return [], ()
+        layout = compute_layout(op_decl)
+        fields: dict[int, list[int]] = {}
+        _, workload_operand_field = self._kernel_workload_contract(op_name)
+        if workload_operand_field is not None:
+            fields[workload_operand_field] = workload_arg_ids
+        func_like = func_like_interface_for_op(self._op_decls_by_name, op_name)
+        if func_like is not None and func_like.args is not None:
+            arg_field_index = layout.fields[func_like.args].index
+            if arg_field_index in fields:
+                raise BytecodeError("kernel signatures share one operand field")
+            fields[arg_field_index] = arg_ids
+        if not fields:
+            return [], ()
+
+        operand_ids: list[int] = []
+        if layout.segmented_operands:
+            segment_counts = [0] * len(op_decl.operands)
+            for field_index in range(len(op_decl.operands)):
+                values = fields.get(field_index, [])
+                segment_counts[field_index] = len(values)
+                operand_ids.extend(values)
+            return operand_ids, tuple(segment_counts)
+
+        for field_index in sorted(fields):
+            operand_ids.extend(fields[field_index])
+        return operand_ids, ()
+
     def _op_region_count(self, op_name: str) -> int:
         """Return the declared root region slot count for op_name."""
         op_decl = self._op_decls_by_name.get(op_name)
@@ -1196,21 +1643,59 @@ class BytecodeReader:
             return 0
         return len(getattr(op_decl, "regions", ()))
 
-    def _read_symbol_regions(
+    def _read_root_region_payload_references(
+        self,
+        symbol_data: bytes,
+        offset: int,
+        ir_data: bytes,
+        module: Module,
+        op_name: str,
+        predefined_region_values: dict[int, list[int]],
+    ) -> tuple[list[Region], int, int]:
+        """Read one symbol's bounded root-region reference list."""
+        payload_count, offset = decode_varint(symbol_data, offset)
+        declared_region_count = self._op_region_count(op_name)
+        if payload_count > declared_region_count:
+            raise BytecodeError("root region payload count exceeds op region slots")
+        regions: list[Region] = []
+        for expected_region_index in range(payload_count):
+            region_index = symbol_data[offset]
+            offset += 1
+            if region_index != expected_region_index:
+                raise BytecodeError(
+                    "root region payload indices must be contiguous and ordered"
+                )
+            ir_offset = struct.unpack_from("<Q", symbol_data, offset)[0]
+            offset += 8
+            ir_length = struct.unpack_from("<I", symbol_data, offset)[0]
+            offset += 4
+            if ir_length == 0 or ir_offset + ir_length > len(ir_data):
+                raise BytecodeError("root region payload range is invalid")
+            regions.append(
+                self._read_root_region_payload(
+                    ir_data[ir_offset : ir_offset + ir_length],
+                    module,
+                    predefined_region_values.get(region_index),
+                )
+            )
+        for region_index in predefined_region_values:
+            if region_index >= payload_count:
+                raise BytecodeError("root region payload is missing a signature region")
+        return regions, payload_count, offset
+
+    def _read_root_region_payload(
         self,
         data: bytes,
         module: Module,
-        root_region_count: int,
         predefined_values: list[int] | None = None,
-        predefined_region_index: int | None = None,
-    ) -> list[Region]:
-        """Read a symbol root-region payload from IR section data.
+    ) -> Region:
+        """Read one independently numbered root-region payload.
 
-        The bytecode uses function-local sequential value numbers (0, 1, 2, ...)
-        for all SSA references within the symbol regions. The value_map
+        The bytecode uses region-local sequential value numbers (0, 1, 2, ...)
+        for all SSA references within the region. The value_map
         translates these numbers to module-level value IDs as block args and op
-        results are created during reading. When predefined_values are supplied,
-        they are bound only while reading predefined_region_index.
+        results are created during reading. Signature values may be rebound to
+        the root entry arguments.
         """
         offset = 0
         value_map: list[int] = []
@@ -1218,56 +1703,19 @@ class BytecodeReader:
         _region_count, offset = decode_varint(data, offset)
         _block_count, offset = decode_varint(data, offset)
         _op_count, offset = decode_varint(data, offset)
-        encoded_root_region_count, offset = decode_varint(data, offset)
-        regions_by_index: dict[int, Region] = {}
-        if encoded_root_region_count == 0:
-            raise BytecodeError("symbol root region count must be nonzero")
-        if encoded_root_region_count > root_region_count:
-            raise BytecodeError("symbol root region count exceeds op region slots")
-        for root_ordinal in range(encoded_root_region_count):
-            region_index, offset = decode_varint(data, offset)
-            if region_index >= root_region_count:
-                raise BytecodeError("symbol region index is out of range")
-            if region_index in regions_by_index:
-                raise BytecodeError("symbol region index appears more than once")
-            if (
-                predefined_region_index is not None
-                and root_ordinal == 0
-                and region_index != predefined_region_index
-            ):
-                raise BytecodeError("FuncLike body region must be first")
-            region_predefined_values = (
-                predefined_values or []
-                if predefined_region_index is not None
-                and region_index == predefined_region_index
-                else []
-            )
-            region, offset = self._read_region(
-                data,
-                offset,
-                module,
-                value_map,
-                predefined_values=region_predefined_values,
-            )
-            regions_by_index[region_index] = region
+        region, offset = self._read_region(
+            data,
+            offset,
+            module,
+            value_map,
+            predefined_values=predefined_values,
+        )
         if offset != len(data):
-            raise BytecodeError("symbol region payload has trailing bytes")
-        if (
-            predefined_region_index is not None
-            and predefined_region_index not in regions_by_index
-        ):
-            raise BytecodeError("symbol region payload is missing the FuncLike body")
-
-        regions: list[Region] = []
-        if regions_by_index:
-            for region_index in range(max(regions_by_index.keys()) + 1):
-                if region_index not in regions_by_index:
-                    raise BytecodeError("symbol region payload has index gaps")
-                regions.append(regions_by_index[region_index])
-        parsed_counts = self._count_region_forest(regions)
+            raise BytecodeError("root region payload has trailing bytes")
+        parsed_counts = self._count_region_tree(region)
         if parsed_counts != (_value_count, _region_count, _block_count, _op_count):
-            raise BytecodeError("symbol region allocation summary does not match IR")
-        return regions
+            raise BytecodeError("root region allocation summary does not match IR")
+        return region
 
     def _count_region_tree(self, region: Region) -> tuple[int, int, int, int]:
         """Return value, region, block, and op counts for a parsed region tree."""
@@ -1310,15 +1758,28 @@ class BytecodeReader:
         offset: int,
         module: Module,
         value_map: list[int],
-        predefined_values: list[int],
+        predefined_values: list[int] | None,
     ) -> tuple[Region, int]:
+        source_flags, offset = decode_varint(data, offset)
+        if source_flags > 0xFFFF:
+            raise BytecodeError("region source flags exceed UINT16_MAX")
+        if source_flags & ~REGION_SOURCE_FLAG_MASK:
+            raise BytecodeError(
+                f"region has unsupported source flag bits: {source_flags:#x}"
+            )
         block_count, offset = decode_varint(data, offset)
         blocks = [Block() for _ in range(block_count)]
-        for block in blocks:
+        for block_index, block in enumerate(blocks):
             offset = self._read_block(
-                data, offset, module, value_map, predefined_values, block, blocks
+                data,
+                offset,
+                module,
+                value_map,
+                predefined_values if block_index == 0 else None,
+                block,
+                blocks,
             )
-        return Region(blocks=blocks), offset
+        return Region(blocks=blocks, source_flags=source_flags), offset
 
     def _read_block(
         self,
@@ -1326,7 +1787,7 @@ class BytecodeReader:
         offset: int,
         module: Module,
         value_map: list[int],
-        predefined_values: list[int],
+        predefined_values: list[int] | None,
         block: Block,
         region_blocks: list[Block],
     ) -> int:
@@ -1336,19 +1797,20 @@ class BytecodeReader:
         if has_label:
             label_id, offset = decode_varint(data, offset)
             label = self._strings[label_id]
-        comments, offset = self._read_comment_list(data, offset)
+        leading_blank_line, comments, offset = self._read_source_trivia(data, offset)
 
         # Block args.
         arg_count, offset = decode_varint(data, offset)
+        if predefined_values is not None and arg_count != len(predefined_values):
+            raise BytecodeError(
+                "signature argument count does not match region entry block"
+            )
         arg_ids = self._reserve_value_defs(
             module, value_map, arg_count, predefined_values
         )
         for i, arg_id in enumerate(arg_ids):
             vid, offset = self._read_value_def(data, offset, module, value_map, arg_id)
             arg_ids[i] = vid
-        if len(value_map) < len(predefined_values):
-            raise BytecodeError("function body entry block is missing signature args")
-
         # Operations.
         op_count, offset = decode_varint(data, offset)
         ops = []
@@ -1362,6 +1824,7 @@ class BytecodeReader:
         block.arg_ids = arg_ids
         block.ops = ops
         block.comments = comments
+        block.leading_blank_line = leading_blank_line
         return offset
 
     def _read_operation(
@@ -1380,7 +1843,7 @@ class BytecodeReader:
         location_id, offset = decode_varint(data, offset)
         if self._location_mode == LOCATION_MODE_NO_LOCATIONS and location_id != 0:
             raise BytecodeError("NO_LOCATIONS bytecode op location must be 0")
-        comments, offset = self._read_comment_list(data, offset)
+        leading_blank_line, comments, offset = self._read_source_trivia(data, offset)
 
         kind_id = op_table_index_plus1 - 1
         op_name = self._ops[kind_id] if kind_id < len(self._ops) else ""
@@ -1462,7 +1925,7 @@ class BytecodeReader:
                 offset,
                 module,
                 value_map,
-                predefined_values=[],
+                predefined_values=None,
             )
             regions.append(region)
 
@@ -1477,8 +1940,90 @@ class BytecodeReader:
             regions=regions,
             location_id=location_id,
             comments=comments,
+            leading_blank_line=leading_blank_line,
         )
         return op, offset
+
+    def _read_parameterized_attr_payload(
+        self,
+        data: bytes,
+        offset: int,
+        module: Module | None,
+        value_map: list[int] | None,
+        expected_definition: Any | None,
+        aggregate_nesting_depth: int,
+    ) -> tuple[ParameterizedAttr, int]:
+        """Read a parameterized attribute payload without a kind byte."""
+        if aggregate_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
+            raise BytecodeError(
+                "aggregate attribute nesting exceeds maximum depth "
+                f"{ATTR_AGGREGATE_MAX_NESTING_DEPTH}"
+            )
+        family_id, offset = decode_varint(data, offset)
+        if family_id >= len(self._strings):
+            raise BytecodeError(
+                f"parameterized attr family string_id {family_id} out of "
+                f"range (string table has {len(self._strings)} entries)"
+            )
+        family_name = self._strings[family_id]
+        definition = self._parameterized_attrs_by_name.get(family_name)
+        if definition is None:
+            raise BytecodeError(
+                f"parameterized attr family {family_name!r} is not registered"
+            )
+        if expected_definition is not None and expected_definition.name != family_name:
+            raise BytecodeError(
+                f"parameterized attr family {family_name!r} does not match "
+                f"field contract {expected_definition.name!r}"
+            )
+        present_count, offset = decode_varint(data, offset)
+        if present_count > len(definition.parameters):
+            raise BytecodeError(
+                f"parameterized attr {family_name!r} has {present_count} "
+                f"present parameters but declares only "
+                f"{len(definition.parameters)}"
+            )
+        parameter_by_name = {
+            parameter.name: (index, parameter)
+            for index, parameter in enumerate(definition.parameters)
+        }
+        parameters: dict[str, Any] = {}
+        previous_index = -1
+        for _ in range(present_count):
+            parameter_name_id, offset = decode_varint(data, offset)
+            if parameter_name_id >= len(self._strings):
+                raise BytecodeError(
+                    "parameterized attr parameter string_id "
+                    f"{parameter_name_id} out of range (string table has "
+                    f"{len(self._strings)} entries)"
+                )
+            parameter_name = self._strings[parameter_name_id]
+            parameter_entry = parameter_by_name.get(parameter_name)
+            if parameter_entry is None:
+                raise BytecodeError(
+                    f"parameterized attr {family_name!r} has unknown "
+                    f"parameter {parameter_name!r}"
+                )
+            parameter_index, parameter_def = parameter_entry
+            if parameter_index <= previous_index:
+                raise BytecodeError(
+                    f"parameterized attr {family_name!r} parameters are "
+                    "not in declaration order"
+                )
+            parameter_value, offset = self._read_attr_value(
+                data,
+                offset,
+                module,
+                value_map,
+                parameter_def,
+                aggregate_nesting_depth + 1,
+            )
+            parameters[parameter_name] = parameter_value
+            previous_index = parameter_index
+        try:
+            return ParameterizedAttr(definition, parameters), offset
+        except (TypeError, ValueError) as err:
+            raise BytecodeError(str(err)) from err
 
     def _read_attr_value(
         self,
@@ -1486,6 +2031,8 @@ class BytecodeReader:
         offset: int,
         module: Module | None = None,
         value_map: list[int] | None = None,
+        attr_def: Any | None = None,
+        aggregate_nesting_depth: int = 0,
     ) -> tuple[Any, int]:
         kind = data[offset]
         offset += 1
@@ -1515,16 +2062,26 @@ class BytecodeReader:
                 return SymbolName(self._strings[string_id]), offset
             case 7:  # TYPE
                 type_idx, offset = decode_varint(data, offset)
-                return self._types[type_idx], offset
+                return self._resolve_prior_type(type_idx, "attribute type"), offset
             case 8:  # PREDICATE_LIST
                 predicates, offset = self._read_predicate_list(
                     data, offset, module, value_map
                 )
                 return predicates, offset
             case 9:  # DICT
+                if aggregate_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
+                    raise BytecodeError(
+                        "aggregate attribute nesting exceeds maximum depth "
+                        f"{ATTR_AGGREGATE_MAX_NESTING_DEPTH}"
+                    )
                 count, offset = decode_varint(data, offset)
                 return self._read_attr_dict_entries(
-                    data, offset, count, module, value_map
+                    data,
+                    offset,
+                    count,
+                    module,
+                    value_map,
+                    aggregate_nesting_depth + 1,
                 )
             case 10:  # ENCODING
                 encoding_id, offset = decode_varint(data, offset)
@@ -1542,8 +2099,180 @@ class BytecodeReader:
                         f"bytes attr length {byte_length} exceeds payload size"
                     )
                 return data[offset:end_offset], end_offset
+            case 12:  # SCOPED_ENUM
+                string_id, offset = decode_varint(data, offset)
+                return self._strings[string_id], offset
+            case 13:  # ENUM_ARRAY
+                if getattr(attr_def, "attr_type", None) != "enum_array":
+                    raise BytecodeError(
+                        "enum-array attributes require a descriptor-backed field"
+                    )
+                count, offset = decode_varint(data, offset)
+                end_offset = offset + count
+                if count > 0xFFFF:
+                    raise BytecodeError(f"enum-array length {count} exceeds UINT16_MAX")
+                if end_offset > len(data):
+                    raise BytecodeError(
+                        f"enum-array length {count} exceeds payload size"
+                    )
+                return EnumArrayAttr(data[offset:end_offset]), end_offset
+            case 14:  # PARAMETERIZED
+                if attr_def is not None and (
+                    getattr(attr_def, "attr_type", None) != "parameterized"
+                ):
+                    raise BytecodeError(
+                        "parameterized attr does not match the field contract"
+                    )
+                return self._read_parameterized_attr_payload(
+                    data,
+                    offset,
+                    module,
+                    value_map,
+                    getattr(attr_def, "parameterized_attr", None),
+                    aggregate_nesting_depth,
+                )
+            case 15:  # PARAMETERIZED_ARRAY
+                if getattr(attr_def, "attr_type", None) != "parameterized_array":
+                    raise BytecodeError(
+                        "parameterized attribute arrays require a "
+                        "descriptor-backed field"
+                    )
+                if aggregate_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
+                    raise BytecodeError(
+                        "aggregate attribute nesting exceeds maximum depth "
+                        f"{ATTR_AGGREGATE_MAX_NESTING_DEPTH}"
+                    )
+                count, offset = decode_varint(data, offset)
+                if count > 0xFFFF:
+                    raise BytecodeError(
+                        "parameterized attribute array length "
+                        f"{count} exceeds UINT16_MAX"
+                    )
+                values: list[ParameterizedAttr] = []
+                expected_definition = getattr(attr_def, "parameterized_attr", None)
+                for _ in range(count):
+                    value, offset = self._read_parameterized_attr_payload(
+                        data,
+                        offset,
+                        module,
+                        value_map,
+                        expected_definition,
+                        aggregate_nesting_depth + 1,
+                    )
+                    values.append(value)
+                return ParameterizedAttrArray(values), offset
+            case 16:  # SIGNED_ENUM_SET
+                return self._read_signed_enum_set_attr(data, offset, attr_def)
+            case 17:  # SYMBOL_ARRAY
+                return self._read_symbol_collection(
+                    data, offset, attr_def, "symbol_array"
+                )
+            case 18:  # SYMBOL_SET
+                return self._read_symbol_collection(
+                    data, offset, attr_def, "symbol_set"
+                )
             case _:
                 raise BytecodeError(f"unknown attr value kind: {kind}")
+
+    def _read_signed_enum_set_attr(
+        self, data: bytes, offset: int, attr_def: Any | None
+    ) -> tuple[SignedEnumSetAttr, int]:
+        if getattr(attr_def, "attr_type", None) != "signed_enum_set" or getattr(
+            attr_def, "open_enum", False
+        ):
+            raise BytecodeError(
+                "signed enum sets require a closed descriptor-backed field"
+            )
+        enum_def = getattr(attr_def, "enum_def", None)
+        if enum_def is None:
+            raise BytecodeError("signed enum sets require an enum descriptor")
+        if offset >= len(data):
+            raise BytecodeError("signed enum-set payload is missing its word count")
+        word_count = data[offset]
+        offset += 1
+        if word_count > 4:
+            raise BytecodeError(
+                f"signed enum-set word count {word_count} exceeds maximum 4"
+            )
+        payload_end = offset + word_count * 2 * 8
+        if payload_end > len(data):
+            raise BytecodeError("signed enum-set words exceed payload size")
+
+        positive_words = [
+            struct.unpack_from("<Q", data, offset + word_index * 8)[0]
+            for word_index in range(word_count)
+        ]
+        negative_offset = offset + word_count * 8
+        negative_words = [
+            struct.unpack_from("<Q", data, negative_offset + word_index * 8)[0]
+            for word_index in range(word_count)
+        ]
+        for positive_word, negative_word in zip(
+            positive_words, negative_words, strict=True
+        ):
+            if positive_word & negative_word:
+                raise BytecodeError("signed enum set contains contradictory assertions")
+        if word_count and positive_words[-1] == 0 and negative_words[-1] == 0:
+            raise BytecodeError("signed enum set is not canonically trimmed")
+
+        positive_values: list[int] = []
+        negative_values: list[int] = []
+        for stable_value in range(word_count * 64):
+            bit = 1 << (stable_value % 64)
+            word_index = stable_value // 64
+            if positive_words[word_index] & bit:
+                positive_values.append(stable_value)
+            if negative_words[word_index] & bit:
+                negative_values.append(stable_value)
+        declared_values = {enum_case.value for enum_case in enum_def.cases}
+        undeclared_values = sorted(
+            (set(positive_values) | set(negative_values)) - declared_values
+        )
+        if undeclared_values:
+            raise BytecodeError(
+                "signed enum set contains undeclared stable value(s) "
+                f"{undeclared_values}"
+            )
+        return SignedEnumSetAttr(positive_values, negative_values), payload_end
+
+    def _read_symbol_collection(
+        self,
+        data: bytes,
+        offset: int,
+        attr_def: Any | None,
+        collection_type: Literal["symbol_array", "symbol_set"],
+    ) -> tuple[SymbolNameArray | SymbolNameSet, int]:
+        collection_name = collection_type.replace("_", "-")
+        if getattr(attr_def, "attr_type", None) != collection_type:
+            raise BytecodeError(
+                f"{collection_name} attributes require a descriptor-backed field"
+            )
+        count, offset = decode_varint(data, offset)
+        if count > 0xFFFF:
+            raise BytecodeError(f"{collection_name} length {count} exceeds UINT16_MAX")
+        values: list[SymbolName] = []
+        previous_name_bytes: bytes | None = None
+        for index in range(count):
+            name_id, offset = decode_varint(data, offset)
+            if name_id >= len(self._strings):
+                raise BytecodeError(
+                    f"{collection_name} element {index} string_id {name_id} "
+                    "out of range "
+                    f"(string table has {len(self._strings)} entries)"
+                )
+            name = SymbolName(self._strings[name_id])
+            if collection_type == "symbol_set":
+                name_bytes = name.encode("utf-8")
+                if (
+                    previous_name_bytes is not None
+                    and previous_name_bytes >= name_bytes
+                ):
+                    raise BytecodeError("symbol-set elements are not sorted and unique")
+                previous_name_bytes = name_bytes
+            values.append(name)
+        if collection_type == "symbol_set":
+            return SymbolNameSet(values), offset
+        return SymbolNameArray(values), offset
 
     def _read_attr_dict_entries(
         self,
@@ -1552,6 +2281,7 @@ class BytecodeReader:
         count: int,
         module: Module | None = None,
         value_map: list[int] | None = None,
+        aggregate_nesting_depth: int = 0,
     ) -> tuple[CanonicalAttrDict, int]:
         """Read canonical dict attr entries and verify sorted/deduped order."""
         entries: list[tuple[str, Any]] = []
@@ -1571,7 +2301,13 @@ class BytecodeReader:
                     "dict attr keys are not in canonical order: "
                     f"{previous_key!r} appears before {key!r}"
                 )
-            value, offset = self._read_attr_value(data, offset, module, value_map)
+            value, offset = self._read_attr_value(
+                data,
+                offset,
+                module,
+                value_map,
+                aggregate_nesting_depth=aggregate_nesting_depth,
+            )
             entries.append((key, value))
             previous_key = key
         return CanonicalAttrDict.from_sorted_items(entries), offset
@@ -1597,8 +2333,10 @@ class BytecodeReader:
             key = self._strings[key_id]
             if key in attributes:
                 raise BytecodeError(f"duplicate op attr key: {key!r}")
-            value, offset = self._read_attr_value(data, offset, module, value_map)
             attr_def = self._attr_def_for_op_attr(op_name, key) if op_name else None
+            value, offset = self._read_attr_value(
+                data, offset, module, value_map, attr_def
+            )
             if getattr(attr_def, "attr_type", None) == "enum":
                 value = self._enum_value_for_attr(attr_def, value)
             attributes[key] = value
@@ -1711,12 +2449,19 @@ def read_module(
     data: bytes,
     *,
     op_decls: Iterable[Any] | None = None,
+    parameterized_attrs: Iterable[Any] | None = None,
+    type_defs: Iterable[Any] | None = None,
     verify: bool = False,
 ) -> Module:
     """Read a module from .loombc bytes."""
     op_decl_tuple = tuple(op_decls) if op_decls is not None else None
     try:
-        module = BytecodeReader(data, op_decls=op_decl_tuple).read()
+        module = BytecodeReader(
+            data,
+            op_decls=op_decl_tuple,
+            parameterized_attrs=parameterized_attrs,
+            type_defs=type_defs,
+        ).read()
     except ValueError as err:
         raise BytecodeError(str(err)) from err
     if verify:

@@ -6,6 +6,8 @@
 
 # Shared sanitizer suppression helpers for CTest rules.
 
+set(IREE_SANITIZER_SUPPRESSION_HSA_LSAN
+  "${CMAKE_SOURCE_DIR}/build_tools/sanitizer/lsan_suppressions_hsa.txt")
 set(IREE_SANITIZER_SUPPRESSION_ROCM_LSAN
   "${CMAKE_SOURCE_DIR}/build_tools/sanitizer/lsan_suppressions_rocm.txt")
 set(IREE_SANITIZER_SUPPRESSION_VULKAN_LSAN

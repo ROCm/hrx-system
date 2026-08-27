@@ -52,11 +52,7 @@ void loom_wasm_toolchain_initialize_from_environment(
 iree_string_view_t loom_wasm_tool_name(loom_wasm_tool_kind_t tool_kind) {
   switch (tool_kind) {
     case LOOM_WASM_TOOL_LLVM_OBJDUMP:
-#if defined(IREE_PLATFORM_WINDOWS)
-      return IREE_SV("llvm-objdump.exe");
-#else
-      return IREE_SV("llvm-objdump");
-#endif
+      return IREE_SV("llvm-objdump" IREE_PLATFORM_EXECUTABLE_SUFFIX);
   }
   return iree_string_view_empty();
 }
@@ -108,11 +104,6 @@ iree_status_t loom_wasm_tool_run(const loom_wasm_toolchain_t* toolchain,
   return status;
 }
 
-void loom_wasm_tool_output_deinitialize(loom_wasm_tool_output_t* output,
-                                        iree_allocator_t allocator) {
-  loom_tool_output_deinitialize(output, allocator);
-}
-
 static iree_status_t loom_wasm_tool_checked_status(
     loom_wasm_tool_kind_t tool_kind, const loom_tool_process_result_t* result,
     iree_string_view_t action) {
@@ -120,15 +111,15 @@ static iree_status_t loom_wasm_tool_checked_status(
   const int tool_name_length =
       (int)iree_min(tool_name.size, (iree_host_size_t)INT_MAX);
   const int stdout_length =
-      (int)iree_min(result->stdout_text.length, (iree_host_size_t)INT_MAX);
+      (int)iree_min(result->stdout_bytes.length, (iree_host_size_t)INT_MAX);
   const int stderr_length =
-      (int)iree_min(result->stderr_text.length, (iree_host_size_t)INT_MAX);
+      (int)iree_min(result->stderr_bytes.length, (iree_host_size_t)INT_MAX);
   const int action_length =
       (int)iree_min(action.size, (iree_host_size_t)INT_MAX);
   const char* stdout_data =
-      result->stdout_text.data ? result->stdout_text.data : "";
+      result->stdout_bytes.data ? result->stdout_bytes.data : "";
   const char* stderr_data =
-      result->stderr_text.data ? result->stderr_text.data : "";
+      result->stderr_bytes.data ? result->stderr_bytes.data : "";
   return iree_make_status(
       IREE_STATUS_FAILED_PRECONDITION,
       "Wasm tool %.*s failed while %.*s with exit code %d\nstdout:\n%.*s\n"
@@ -140,10 +131,10 @@ static iree_status_t loom_wasm_tool_checked_status(
 
 iree_status_t loom_wasm_tool_query_version(
     const loom_wasm_toolchain_t* toolchain, loom_wasm_tool_kind_t tool_kind,
-    iree_allocator_t allocator, loom_wasm_tool_output_t* out_version_text) {
+    iree_allocator_t allocator, loom_tool_output_t* out_version_text) {
   IREE_ASSERT_ARGUMENT(toolchain);
   IREE_ASSERT_ARGUMENT(out_version_text);
-  *out_version_text = (loom_wasm_tool_output_t){0};
+  *out_version_text = (loom_tool_output_t){0};
 
   const iree_string_view_t arguments[] = {IREE_SV("--version")};
   loom_tool_process_result_t result = {0};
@@ -156,8 +147,9 @@ iree_status_t loom_wasm_tool_query_version(
                                            IREE_SV("querying version"));
   }
   if (iree_status_is_ok(status)) {
-    *out_version_text = result.stdout_text;
-    result.stdout_text = (loom_tool_output_t){0};
+    loom_tool_output_normalize_newlines(&result.stdout_bytes);
+    *out_version_text = result.stdout_bytes;
+    result.stdout_bytes = (loom_tool_output_t){0};
   }
   loom_tool_process_result_deinitialize(&result, allocator);
   return status;
@@ -171,17 +163,18 @@ static iree_status_t loom_wasm_tool_write_temp_binary(
   iree_status_t status = iree_io_file_contents_write(
       loom_tool_temp_file_path(out_file), binary, allocator);
   if (!iree_status_is_ok(status)) {
-    loom_tool_temp_file_deinitialize(out_file);
+    status =
+        iree_status_join(status, loom_tool_temp_file_deinitialize(out_file));
   }
   return status;
 }
 
 iree_status_t loom_wasm_tool_disassemble_binary(
     const loom_wasm_toolchain_t* toolchain, iree_const_byte_span_t binary,
-    iree_allocator_t allocator, loom_wasm_tool_output_t* out_text) {
+    iree_allocator_t allocator, loom_tool_output_t* out_text) {
   IREE_ASSERT_ARGUMENT(toolchain);
   IREE_ASSERT_ARGUMENT(out_text);
-  *out_text = (loom_wasm_tool_output_t){0};
+  *out_text = (loom_tool_output_t){0};
 
   loom_tool_temp_file_t input_file = {0};
   iree_status_t status =
@@ -205,10 +198,15 @@ iree_status_t loom_wasm_tool_disassemble_binary(
                                            IREE_SV("disassembling binary"));
   }
   if (iree_status_is_ok(status)) {
-    *out_text = result.stdout_text;
-    result.stdout_text = (loom_tool_output_t){0};
+    loom_tool_output_normalize_newlines(&result.stdout_bytes);
+    *out_text = result.stdout_bytes;
+    result.stdout_bytes = (loom_tool_output_t){0};
   }
   loom_tool_process_result_deinitialize(&result, allocator);
-  loom_tool_temp_file_deinitialize(&input_file);
+  status =
+      iree_status_join(status, loom_tool_temp_file_deinitialize(&input_file));
+  if (!iree_status_is_ok(status)) {
+    loom_tool_output_deinitialize(out_text, allocator);
+  }
   return status;
 }

@@ -27,6 +27,7 @@
 #include "loom/ops/test/ops.h"
 #include "loom/target/test/descriptors.h"
 #include "loom/testing/module_ptr.h"
+#include "loom/verify/verify.h"
 
 namespace loom {
 namespace {
@@ -126,6 +127,16 @@ class SymbolDCETest : public ::testing::Test {
     iree_arena_deinitialize(&pass_arena);
   }
 
+  void VerifyOk(loom_module_t* module) {
+    loom_verify_options_t options = {
+        /*.sink=*/{loom_diagnostic_stderr_sink, NULL},
+        /*.max_errors=*/20,
+    };
+    loom_verify_result_t result = {};
+    IREE_EXPECT_OK(loom_verify_module(module, &options, &result));
+    EXPECT_EQ(result.error_count, 0u);
+  }
+
   iree_status_t WriteModule(const loom_module_t* module,
                             std::vector<uint8_t>* out_bytes) {
     iree_io_stream_t* stream = nullptr;
@@ -187,9 +198,9 @@ func.def @dead_wrapper(%lhs: i32, %rhs: i32) -> (i32) {
   func.return %sum : i32
 }
 
-low.func.decl target(@test_target) @live_add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>)
+low.func.decl target<test.low.core>(@test_target) @live_add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>)
 
-low.func.decl target(@test_target) @dead_add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>)
+low.func.decl target<test.low.core>(@test_target) @dead_add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>)
 )";
 
   ModulePtr module(Parse(iree_make_cstring_view(source)));

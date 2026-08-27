@@ -18,7 +18,7 @@ from loom.assembly import (
     Attr,
     AttrDict,
     Flags,
-    OpRef,
+    KeyRef,
     OptionalGroup,
     Refs,
     ResultTypeList,
@@ -49,6 +49,7 @@ llvmir_ops = Dialect(
     "llvmir",
     dialect_id=0x11,
     doc=("LLVM IR target punch-through operations. These ops preserve target specific intent in Loom IR while still lowering through structured LLVMIR builders instead of raw textual emission."),
+    register_by_default=False,
 )
 
 AsmFlags = EnumDef(
@@ -80,6 +81,8 @@ llvmir_target = Op(
             symbol="symbol",
             selector="kind",
             bundle_table="loom_llvmir_target_bundles",
+            fact_type="loom_llvmir_target_fact_type",
+            fact_projector="loom_llvmir_target_fact_projector",
         )
     ],
     symbol_def=SymbolDefinition(
@@ -181,7 +184,7 @@ llvmir_intrinsic = Op(
     ],
     traits=[UNKNOWN_EFFECTS],
     format=[
-        OpRef("kind"),
+        KeyRef("kind"),
         LPAREN,
         Refs("operands"),
         RPAREN,

@@ -11,8 +11,10 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "iree/base/tooling/flags.h"
+#include "loom/codegen/low/text_asm.h"
 #include "loom/error/diagnostic.h"
 #include "loom/target/configured/provider.h"
+#include "loom/target/provider.h"
 #include "loom/tooling/cli/help.h"
 #include "loom/tooling/context/context.h"
 #include "loom/tooling/io/file.h"
@@ -23,6 +25,29 @@ IREE_FLAG(string, from, "auto", "Input format: auto, text, bc, or bytecode.");
 IREE_FLAG(string, to, "text", "Output format: text, bc, or bytecode.");
 IREE_FLAG(string, output, "-",
           "Output path. Use '-' or the empty string for stdout.");
+IREE_FLAG(bool, check, false,
+          "Verifies that text input is already in canonical form without "
+          "writing output.");
+IREE_FLAG(bool, in_place, false,
+          "Formats one or more verified text input files in place.");
+
+typedef enum loom_format_action_e {
+  LOOM_FORMAT_ACTION_CONVERT = 0,
+  LOOM_FORMAT_ACTION_CHECK,
+  LOOM_FORMAT_ACTION_IN_PLACE,
+} loom_format_action_t;
+
+static const char* loom_format_action_flag(loom_format_action_t action) {
+  switch (action) {
+    case LOOM_FORMAT_ACTION_CONVERT:
+      return "conversion";
+    case LOOM_FORMAT_ACTION_CHECK:
+      return "--check";
+    case LOOM_FORMAT_ACTION_IN_PLACE:
+      return "--in-place";
+  }
+  return "unknown action";
+}
 
 static iree_status_t loom_format_stderr_diagnostic_sink(
     void* user_data, const loom_diagnostic_t* diagnostic) {
@@ -40,6 +65,104 @@ static iree_status_t loom_format_write_output(
       allocator);
 }
 
+static iree_status_t loom_format_check_canonical(
+    iree_string_view_t filename, const iree_io_file_contents_t* contents,
+    const loom_format_output_t* output) {
+  const iree_string_view_t input_text =
+      loom_tooling_file_contents_string_view(contents);
+  const iree_string_view_t canonical_text =
+      iree_make_string_view((const char*)output->data, output->length);
+  if (iree_string_view_equal(input_text, canonical_text)) {
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_FAILED_PRECONDITION,
+      "'%.*s' is not canonically formatted; run loom-format --in-place "
+      "<input>",
+      (int)filename.size, filename.data);
+}
+
+static iree_status_t loom_format_process_input(
+    iree_string_view_t input_path, iree_string_view_t output_path,
+    loom_format_action_t action, loom_module_format_t input_format,
+    loom_module_format_t output_format, loom_context_t* context,
+    iree_arena_block_pool_t* block_pool,
+    loom_text_low_asm_environment_t low_asm_environment,
+    iree_allocator_t allocator, bool* out_changed) {
+  *out_changed = false;
+
+  const iree_string_view_t filename =
+      loom_tooling_file_path_is_stdio(input_path)
+          ? iree_make_cstring_view("<stdin>")
+          : input_path;
+  iree_io_file_contents_t* contents = NULL;
+  loom_format_output_t output = {0};
+
+  iree_status_t status =
+      loom_tooling_read_input_file(input_path, allocator, &contents);
+  loom_module_format_t resolved_input_format = input_format;
+  if (iree_status_is_ok(status) &&
+      resolved_input_format == LOOM_MODULE_FORMAT_AUTO) {
+    resolved_input_format =
+        loom_module_format_detect_input(contents->const_buffer);
+  }
+  if (iree_status_is_ok(status) && action != LOOM_FORMAT_ACTION_CONVERT &&
+      resolved_input_format != LOOM_MODULE_FORMAT_TEXT) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "%s requires text input, but '%.*s' contains %s",
+                              loom_format_action_flag(action),
+                              (int)filename.size, filename.data,
+                              loom_module_format_name(resolved_input_format));
+  }
+  if (iree_status_is_ok(status)) {
+    loom_format_convert_options_t convert_options = {
+        .input_format = resolved_input_format,
+        .output_format = output_format,
+        .diagnostic_sink =
+            {
+                .fn = loom_format_stderr_diagnostic_sink,
+                .user_data = stderr,
+            },
+        .low_asm_environment = low_asm_environment,
+    };
+    status =
+        loom_format_convert(contents->const_buffer, filename, context,
+                            block_pool, &convert_options, &output, allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    switch (action) {
+      case LOOM_FORMAT_ACTION_CONVERT:
+        status = loom_format_write_output(output_path, &output, allocator);
+        break;
+      case LOOM_FORMAT_ACTION_CHECK:
+        status = loom_format_check_canonical(filename, contents, &output);
+        break;
+      case LOOM_FORMAT_ACTION_IN_PLACE: {
+        const iree_string_view_t input_text =
+            loom_tooling_file_contents_string_view(contents);
+        const iree_string_view_t canonical_text =
+            iree_make_string_view((const char*)output.data, output.length);
+        if (!iree_string_view_equal(input_text, canonical_text)) {
+          // Release the input mapping before opening the same path for
+          // overwrite. Windows mappings can keep the file locked after the
+          // original read handle closes.
+          iree_io_file_contents_free(contents);
+          contents = NULL;
+          status = loom_format_write_output(input_path, &output, allocator);
+          if (iree_status_is_ok(status)) {
+            *out_changed = true;
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  loom_format_output_deinitialize(&output, allocator);
+  iree_io_file_contents_free(contents);
+  return status;
+}
+
 static void loom_format_print_agents_markdown(FILE* stream) {
   fprintf(
       stream,
@@ -54,6 +177,9 @@ static void loom_format_print_agents_markdown(FILE* stream) {
       "```shell\n"
       "loom-format source.loom --from=text --to=bc --output=source.loombc\n"
       "loom-format source.loombc --from=bc --to=text --output=source.loom\n"
+      "loom-format source.loom --check\n"
+      "loom-format --check first.loom second.loom\n"
+      "loom-format --in-place first.loom second.loom\n"
       "cat source.loom | loom-format --from=text --to=bc "
       "--output=source.loombc\n"
       "loom-format source.loom --from=auto --to=text\n"
@@ -62,7 +188,12 @@ static void loom_format_print_agents_markdown(FILE* stream) {
       "`--from=auto` detects bytecode by the LOOM file magic and treats every\n"
       "other input as text. `--to=text` prints canonical text IR. `--to=bc`\n"
       "writes bytecode suitable for `loom-link --library=...` and\n"
-      "`loom-compile` input.\n");
+      "`loom-compile` input. The complete module is verified before either\n"
+      "output is written; external calls require a matching `func.decl` or\n"
+      "definition. Text conversion resolves target-low syntax using the\n"
+      "configured target descriptors. `--check` verifies canonical text\n"
+      "without writing output. `--in-place` rewrites only noncanonical text\n"
+      "files after each complete module has parsed and verified.\n");
 }
 
 int main(int argc, char** argv) {
@@ -73,21 +204,29 @@ int main(int argc, char** argv) {
       "Usage:\n"
       "  loom-format [--from=auto|text|bc] [--to=text|bc] [--output=file] "
       "[file]\n"
+      "  loom-format [--from=auto|text] --check [file ...]\n"
+      "  loom-format [--from=auto|text] --in-place file ...\n"
       "  cat module.loom | loom-format --from=text --to=bc "
       "--output=module.loombc\n"
       "  loom-format --agents_md\n"
       "\n"
       "Input defaults to stdin when no file is provided. Output defaults to "
       "stdout.\n"
+      "Conversion accepts one input. Check and in-place modes accept multiple "
+      "text inputs.\n"
       "The auto input format detects bytecode by the LOOM file magic and "
       "treats\n"
-      "all other input as text.\n");
+      "all other input as text. The complete module is verified before output "
+      "is written.\n");
   for (int i = 1; i < argc; ++i) {
     if (loom_tooling_cli_is_agents_markdown_arg(argv[i])) {
       loom_format_print_agents_markdown(stdout);
       return 0;
     }
   }
+  IREE_TRACE_APP_ENTER();
+  IREE_TRACE_ZONE_BEGIN(z0);
+
   loom_tooling_cli_set_default_help_filter();
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
 
@@ -97,23 +236,73 @@ int main(int argc, char** argv) {
 
   loom_context_t context = {0};
   bool context_initialized = false;
-  iree_io_file_contents_t* contents = NULL;
-  loom_format_output_t output = {0};
+  loom_target_low_descriptor_registry_t low_descriptor_registry = {0};
+  loom_text_low_asm_environment_t low_asm_environment = {0};
 
   loom_module_format_t input_format = LOOM_MODULE_FORMAT_AUTO;
   loom_module_format_t output_format = LOOM_MODULE_FORMAT_TEXT;
+  loom_format_action_t action = LOOM_FORMAT_ACTION_CONVERT;
   iree_status_t status = loom_module_format_parse(
       iree_make_cstring_view(FLAG_from), /*allow_auto=*/true, &input_format);
   if (iree_status_is_ok(status)) {
     status = loom_module_format_parse(iree_make_cstring_view(FLAG_to),
                                       /*allow_auto=*/false, &output_format);
   }
-  if (iree_status_is_ok(status) && argc > 2) {
+  if (iree_status_is_ok(status)) {
+    if (FLAG_check && FLAG_in_place) {
+      status =
+          iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                           "--check and --in-place are mutually exclusive");
+    } else if (FLAG_check) {
+      action = LOOM_FORMAT_ACTION_CHECK;
+    } else if (FLAG_in_place) {
+      action = LOOM_FORMAT_ACTION_IN_PLACE;
+    }
+  }
+  if (iree_status_is_ok(status) && action == LOOM_FORMAT_ACTION_CONVERT &&
+      argc > 2) {
     status = iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "loom-format accepts at most one input file or '-' for stdin; got %d "
         "inputs",
         argc - 1);
+  }
+  if (iree_status_is_ok(status) && action != LOOM_FORMAT_ACTION_CONVERT &&
+      output_format != LOOM_MODULE_FORMAT_TEXT) {
+    status =
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "%s requires --to=text",
+                         loom_format_action_flag(action));
+  }
+  if (iree_status_is_ok(status) && action != LOOM_FORMAT_ACTION_CONVERT &&
+      input_format == LOOM_MODULE_FORMAT_BYTECODE) {
+    status =
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "%s requires text input",
+                         loom_format_action_flag(action));
+  }
+  if (iree_status_is_ok(status) && action != LOOM_FORMAT_ACTION_CONVERT &&
+      !loom_tooling_file_path_is_stdio(iree_make_cstring_view(FLAG_output))) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "%s does not accept --output",
+                              loom_format_action_flag(action));
+  }
+  if (iree_status_is_ok(status) && action == LOOM_FORMAT_ACTION_IN_PLACE &&
+      argc < 2) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "--in-place requires at least one input file");
+  }
+  if (iree_status_is_ok(status) && action != LOOM_FORMAT_ACTION_CONVERT) {
+    for (int i = 1; i < argc; ++i) {
+      const iree_string_view_t input_path = iree_make_cstring_view(argv[i]);
+      if (loom_tooling_file_path_is_stdio(input_path) &&
+          (action == LOOM_FORMAT_ACTION_IN_PLACE || argc > 2)) {
+        status = iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "%s batch inputs must be file paths; stdin is supported only by "
+            "single-input --check",
+            loom_format_action_flag(action));
+        break;
+      }
+    }
   }
   if (iree_status_is_ok(status)) {
     loom_context_initialize(allocator, &context);
@@ -123,36 +312,15 @@ int main(int argc, char** argv) {
             loom_configured_target_environment(), &context);
   }
   if (iree_status_is_ok(status)) {
+    status = loom_target_environment_initialize_low_descriptor_registry(
+        loom_configured_target_environment(), &low_descriptor_registry);
+  }
+  if (iree_status_is_ok(status)) {
+    loom_low_descriptor_text_asm_environment_initialize(
+        &low_descriptor_registry.registry, &low_asm_environment);
+  }
+  if (iree_status_is_ok(status)) {
     status = loom_context_finalize(&context);
-  }
-
-  iree_string_view_t input_path =
-      argc < 2 ? iree_string_view_empty() : iree_make_cstring_view(argv[1]);
-  iree_string_view_t filename =
-      (argc < 2 || loom_tooling_file_path_is_stdio(input_path))
-          ? iree_make_cstring_view("<stdin>")
-          : input_path;
-
-  if (iree_status_is_ok(status)) {
-    status = loom_tooling_read_input_file(input_path, allocator, &contents);
-  }
-  if (iree_status_is_ok(status)) {
-    loom_format_convert_options_t convert_options = {
-        .input_format = input_format,
-        .output_format = output_format,
-        .diagnostic_sink =
-            {
-                .fn = loom_format_stderr_diagnostic_sink,
-                .user_data = stderr,
-            },
-    };
-    status =
-        loom_format_convert(contents->const_buffer, filename, &context,
-                            &block_pool, &convert_options, &output, allocator);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_format_write_output(iree_make_cstring_view(FLAG_output),
-                                      &output, allocator);
   }
 
   int exit_code = 0;
@@ -160,13 +328,53 @@ int main(int argc, char** argv) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);
     exit_code = 1;
+  } else {
+    const int input_count = argc < 2 ? 1 : argc - 1;
+    int failure_count = 0;
+    int changed_count = 0;
+    for (int i = 0; i < input_count; ++i) {
+      const iree_string_view_t input_path =
+          argc < 2 ? iree_string_view_empty()
+                   : iree_make_cstring_view(argv[i + 1]);
+      bool changed = false;
+      iree_status_t input_status = loom_format_process_input(
+          input_path, iree_make_cstring_view(FLAG_output), action, input_format,
+          output_format, &context, &block_pool, low_asm_environment, allocator,
+          &changed);
+      if (!iree_status_is_ok(input_status)) {
+        iree_status_fprint(stderr, input_status);
+        iree_status_free(input_status);
+        ++failure_count;
+        continue;
+      }
+      if (changed) {
+        ++changed_count;
+        printf("loom-format: formatted %.*s\n", (int)input_path.size,
+               input_path.data);
+      }
+    }
+    if (action == LOOM_FORMAT_ACTION_IN_PLACE) {
+      FILE* summary_stream = failure_count == 0 ? stdout : stderr;
+      fprintf(summary_stream,
+              "loom-format: %d formatted, %d unchanged, %d failed\n",
+              changed_count, input_count - changed_count - failure_count,
+              failure_count);
+    } else if (action == LOOM_FORMAT_ACTION_CHECK && input_count > 1) {
+      FILE* summary_stream = failure_count == 0 ? stdout : stderr;
+      fprintf(summary_stream, "loom-format: %s (%d checked, %d failed)\n",
+              failure_count == 0 ? "PASS" : "FAIL", input_count, failure_count);
+    }
+    if (failure_count != 0) {
+      exit_code = 1;
+    }
   }
 
-  loom_format_output_deinitialize(&output, allocator);
-  iree_io_file_contents_free(contents);
   if (context_initialized) {
     loom_context_deinitialize(&context);
   }
   iree_arena_block_pool_deinitialize(&block_pool);
+
+  IREE_TRACE_ZONE_END(z0);
+  IREE_TRACE_APP_EXIT(exit_code);
   return exit_code;
 }

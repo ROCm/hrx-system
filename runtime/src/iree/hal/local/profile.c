@@ -189,6 +189,14 @@ static iree_status_t iree_hal_local_profile_recorder_validate_records(
                               " has invalid queue identity",
                               i);
     }
+    if (iree_all_bits_set(record->flags,
+                          IREE_HAL_PROFILE_DEVICE_FLAG_TIMESTAMP_FREQUENCY) &&
+        record->timestamp_frequency_hz == 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "local profiling device metadata record %" PRIhsz
+                              " advertises a zero timestamp frequency",
+                              i);
+    }
   }
   for (iree_host_size_t i = 0; i < recorder_options->queue_record_count; ++i) {
     const iree_hal_profile_queue_record_t* record =

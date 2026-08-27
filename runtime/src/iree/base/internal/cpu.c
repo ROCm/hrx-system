@@ -9,8 +9,6 @@
 
 #include "iree/base/internal/cpu.h"
 
-#include "iree/schemas/cpu_data.h"
-
 //===----------------------------------------------------------------------===//
 // Platform-specific processor data queries
 //===----------------------------------------------------------------------===//
@@ -462,8 +460,9 @@ static iree_alignas(64) uint64_t
 
 void iree_cpu_initialize(iree_allocator_t temp_allocator) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  memset(iree_cpu_data_cache_, 0, sizeof(iree_cpu_data_cache_));
-  iree_cpu_initialize_from_platform(temp_allocator, iree_cpu_data_cache_);
+  iree_cpu_data_t cpu_data;
+  iree_cpu_query_data(temp_allocator, &cpu_data);
+  memcpy(iree_cpu_data_cache_, cpu_data.fields, sizeof(iree_cpu_data_cache_));
   IREE_TRACE_ZONE_END(z0);
 }
 
@@ -473,6 +472,14 @@ void iree_cpu_initialize_with_data(iree_host_size_t field_count,
   memcpy(iree_cpu_data_cache_, fields,
          iree_min(field_count, IREE_ARRAYSIZE(iree_cpu_data_cache_)) *
              sizeof(*iree_cpu_data_cache_));
+}
+
+void iree_cpu_query_data(iree_allocator_t temp_allocator,
+                         iree_cpu_data_t* out_cpu_data) {
+  IREE_ASSERT_ARGUMENT(out_cpu_data);
+  memset(out_cpu_data, 0, sizeof(*out_cpu_data));
+  out_cpu_data->architecture = iree_cpu_architecture_host();
+  iree_cpu_initialize_from_platform(temp_allocator, out_cpu_data->fields);
 }
 
 const uint64_t* iree_cpu_data_fields(void) { return iree_cpu_data_cache_; }
@@ -487,27 +494,6 @@ void iree_cpu_read_data(iree_host_size_t field_count, uint64_t* out_fields) {
   memcpy(out_fields, iree_cpu_data_cache_,
          iree_min(field_count, IREE_ARRAYSIZE(iree_cpu_data_cache_)) *
              sizeof(*out_fields));
-}
-
-//===----------------------------------------------------------------------===//
-// Processor data lookup by key
-//===----------------------------------------------------------------------===//
-
-iree_status_t iree_cpu_lookup_data_by_key(iree_string_view_t key,
-                                          int64_t* IREE_RESTRICT out_value) {
-#define IREE_CPU_FEATURE_BIT(arch, field_index, bit_pos, bit_name, llvm_name) \
-  if (IREE_ARCH_ENUM == IREE_ARCH_ENUM_##arch) {                              \
-    if (iree_string_view_equal(key, IREE_SV(llvm_name))) {                    \
-      *out_value = (iree_cpu_data_cache_[field_index] >> bit_pos) & 1;        \
-      return iree_ok_status();                                                \
-    }                                                                         \
-  }
-#include "iree/schemas/cpu_feature_bits.inl"
-#undef IREE_CPU_FEATURE_BIT
-
-  return iree_make_status(IREE_STATUS_NOT_FOUND,
-                          "CPU feature '%.*s' unknown on %s", (int)key.size,
-                          key.data, IREE_ARCH);
 }
 
 //===----------------------------------------------------------------------===//

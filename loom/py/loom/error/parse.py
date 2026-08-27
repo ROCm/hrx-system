@@ -231,15 +231,15 @@ ERR_PARSE_020 = ErrorDef(
     fix_hint="Each key in an attribute dictionary must be unique",
 )
 
-# ERR_PARSE_021: Dictionary attribute nesting exceeds the supported depth.
+# ERR_PARSE_021: Aggregate attribute nesting exceeds the supported depth.
 ERR_PARSE_021 = ErrorDef(
     domain=ErrorDomain.PARSE,
     code=21,
     severity=Severity.ERROR,
-    summary="Dictionary attribute nesting is too deep.",
-    message="dictionary attribute nesting exceeds the maximum depth {max_depth}",
+    summary="Aggregate attribute nesting is too deep.",
+    message="aggregate attribute nesting exceeds the maximum depth {max_depth}",
     params=(ErrorParam("max_depth", ParamKind.U32),),
-    fix_hint="Flatten deeply nested attribute dictionaries",
+    fix_hint="Flatten deeply nested aggregate attributes",
 )
 
 # ERR_PARSE_022: Unresolved forward reference in a declaration scope.
@@ -398,6 +398,17 @@ ERR_PARSE_034 = ErrorDef(
     params=(ErrorParam("detail", ParamKind.STRING),),
 )
 
+# ERR_PARSE_035: Duplicate symbol-set entry.
+ERR_PARSE_035 = ErrorDef(
+    domain=ErrorDomain.PARSE,
+    code=35,
+    severity=Severity.ERROR,
+    summary="Duplicate symbol-set entry.",
+    message="symbol set contains duplicate '@{symbol_name}'",
+    params=(ErrorParam("symbol_name", ParamKind.STRING),),
+    fix_hint="List each symbol at most once",
+)
+
 ALL_PARSE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_PARSE_001,
     ERR_PARSE_002,
@@ -433,4 +444,5 @@ ALL_PARSE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_PARSE_032,
     ERR_PARSE_033,
     ERR_PARSE_034,
+    ERR_PARSE_035,
 )

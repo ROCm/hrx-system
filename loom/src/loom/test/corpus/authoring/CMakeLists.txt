@@ -9,159 +9,25 @@
 
 iree_add_all_subdirs()
 
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-iree_native_test(
+file(GLOB _GLOB_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
+loom_module(
   NAME
-    "ffn_gate_up_swiglu_q6q8_plan_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/ffn_gate_up_swiglu_q6q8.loom}}"
-    "--dry-run"
-  SRC
-    loom::tools::iree-benchmark-loom
-  LABELS
-    "hostonly"
+    authoring_cases
+  SRCS
+    "${_GLOB_X_LOOM}"
+  CONFIGS
+    "indexed_row_gather_f32.column_capacity=4"
+    "indexed_row_gather_f32.row_capacity=5"
+    "indexed_row_gather_f32.source_row_capacity=2"
+    "memset_i8.element_capacity=1009"
+    "mlp_down_projection_residual_bf16.row_capacity=3584"
+  MODE
+    "merge"
+  OUTPUT
+    "authoring_cases.loombc"
+  OUTPUT_FORMAT
+    "bc"
+  REQUIRE_RESOLVED_CONFIG
 )
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-iree_native_test(
-  NAME
-    "indexed_row_gather_f32_plan_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/indexed_row_gather_f32.loom}}"
-    "--dry-run"
-  SRC
-    loom::tools::iree-benchmark-loom
-  LABELS
-    "hostonly"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-iree_native_test(
-  NAME
-    "memset_i8_plan_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/memset_i8.loom}}"
-    "--dry-run"
-  SRC
-    loom::tools::iree-benchmark-loom
-  LABELS
-    "hostonly"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-iree_native_test(
-  NAME
-    "mlp_down_projection_residual_bf16_plan_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/mlp_down_projection_residual_bf16.loom}}"
-    "--dry-run"
-  SRC
-    loom::tools::iree-benchmark-loom
-  LABELS
-    "hostonly"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
-  NAME
-    "ffn_gate_up_swiglu_q6q8_amdgpu_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/ffn_gate_up_swiglu_q6q8.loom}}"
-    "--device=amdgpu"
-    "--measure=dispatch_complete"
-    "--iterations=1"
-    "--warmup-iterations=0"
-    "--batch-size=1"
-    "--min-time-ms=0"
-    "--max-batches=1"
-    "--input-ring-count=1"
-  SRC
-    loom::tools::iree-benchmark-loom
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
-  NAME
-    "indexed_row_gather_f32_amdgpu_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/indexed_row_gather_f32.loom}}"
-    "--device=amdgpu"
-    "--measure=dispatch_complete"
-    "--sample-compilation=per_sample"
-    "--iterations=1"
-    "--warmup-iterations=0"
-    "--batch-size=1"
-    "--min-time-ms=0"
-    "--max-batches=1"
-    "--input-ring-count=1"
-  SRC
-    loom::tools::iree-benchmark-loom
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
-  NAME
-    "memset_i8_amdgpu_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/memset_i8.loom}}"
-    "--device=amdgpu"
-    "--measure=dispatch_complete"
-    "--sample-compilation=per_sample"
-    "--iterations=1"
-    "--warmup-iterations=0"
-    "--batch-size=1"
-    "--min-time-ms=0"
-    "--max-batches=1"
-    "--input-ring-count=1"
-  SRC
-    loom::tools::iree-benchmark-loom
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
-  NAME
-    "mlp_down_projection_residual_bf16_amdgpu_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/mlp_down_projection_residual_bf16.loom}}"
-    "--device=amdgpu"
-    "--measure=dispatch_complete"
-    "--sample-compilation=per_sample"
-    "--iterations=1"
-    "--warmup-iterations=0"
-    "--batch-size=1"
-    "--min-time-ms=0"
-    "--max-batches=1"
-    "--input-ring-count=1"
-  SRC
-    loom::tools::iree-benchmark-loom
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

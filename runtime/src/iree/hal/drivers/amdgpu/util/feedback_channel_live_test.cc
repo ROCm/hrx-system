@@ -18,8 +18,8 @@
 #include "iree/hal/drivers/amdgpu/util/feedback_channel.h"
 #include "iree/hal/drivers/amdgpu/util/feedback_channel_test_kernels.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
-#include "iree/hal/drivers/amdgpu/util/target_id.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
+#include "iree/hal/executable/amdgpu/target_id.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -150,16 +150,16 @@ static hsa_status_t FindAgentCodeObjectTarget(hsa_isa_t isa, void* user_data) {
     return HSA_STATUS_ERROR;
   }
 
-  iree_hal_amdgpu_target_id_t exact_target_id;
-  iree_status_t status = iree_hal_amdgpu_target_id_parse_hsa_isa_name(
+  iree_hal_amdgpu_target_identity_t exact_target_id;
+  iree_status_t status = iree_hal_amdgpu_target_identity_parse_hsa_isa_name(
       iree_make_cstring_view(name.data()), &exact_target_id);
   if (!iree_status_is_ok(status)) {
     iree_status_free(status);
     return HSA_STATUS_SUCCESS;
   }
 
-  iree_hal_amdgpu_target_id_t code_object_target_id;
-  status = iree_hal_amdgpu_target_id_lookup_code_object_target(
+  iree_hal_amdgpu_target_identity_t code_object_target_id;
+  status = iree_hal_amdgpu_target_identity_project_code_object(
       &exact_target_id, &code_object_target_id);
   if (!iree_status_is_ok(status)) {
     iree_status_free(status);
@@ -358,9 +358,13 @@ TEST_F(FeedbackChannelLiveTest, DeviceProducerSignalsHost) {
   IREE_ASSERT_OK(iree_hsa_queue_create(
       IREE_LIBHSA(&libhsa), gpu_agent, /*size=*/64, HSA_QUEUE_TYPE_MULTI,
       HsaQueueErrorCallback, &queue_error, UINT32_MAX, UINT32_MAX, &queue));
+  iree_hal_amdgpu_aql_queue_execution_mode_t aql_queue_execution_mode;
+  IREE_ASSERT_OK(iree_hal_amdgpu_query_aql_queue_execution_mode(
+      &libhsa, gpu_agent, &aql_queue_execution_mode));
   iree_hal_amdgpu_aql_ring_t aql_ring;
   iree_hal_amdgpu_aql_ring_initialize(
-      &libhsa, reinterpret_cast<iree_amd_queue_t*>(queue), &aql_ring);
+      &libhsa, reinterpret_cast<iree_amd_queue_t*>(queue),
+      aql_queue_execution_mode, &aql_ring);
 
   hsa_signal_t completion_signal = iree_hsa_signal_null();
   IREE_ASSERT_OK(iree_hsa_amd_signal_create(
@@ -370,7 +374,6 @@ TEST_F(FeedbackChannelLiveTest, DeviceProducerSignalsHost) {
   const uint64_t packet_id = iree_hal_amdgpu_aql_ring_reserve(&aql_ring, 1);
   iree_hal_amdgpu_aql_packet_t* packet =
       iree_hal_amdgpu_aql_ring_packet(&aql_ring, packet_id);
-  memset(packet, 0, sizeof(*packet));
   uint16_t setup = 0;
   const uint16_t header = iree_hal_amdgpu_aql_emit_dispatch(
       &packet->dispatch, kernel.kernel_object, &memory->kernargs,

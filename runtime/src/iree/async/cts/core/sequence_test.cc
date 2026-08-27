@@ -110,7 +110,7 @@ TEST_P(SequenceTest, TwoLinkedNops) {
   iree_async_operation_list_t list = {ops, 2};
   IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
 
-  PollUntil(/*min_completions=*/2, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/2);
 
   ASSERT_EQ(tracker.order.size(), 2u);
   // Linked operations complete in submission order.
@@ -138,8 +138,7 @@ TEST_P(SequenceTest, LinkedNopChain) {
   iree_async_operation_list_t list = {ops, kChainLength};
   IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
 
-  PollUntil(/*min_completions=*/kChainLength,
-            /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/kChainLength);
 
   ASSERT_EQ(tracker.order.size(), static_cast<size_t>(kChainLength));
   for (int i = 0; i < kChainLength; ++i) {
@@ -196,8 +195,8 @@ TEST_P(SequenceTest, LinkedTimerOrder) {
   iree_async_operation_list_t list = {ops, 2};
   IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
 
-  // Budget enough for timer_a to fire.
-  PollUntil(/*min_completions=*/2, /*total_budget=*/iree_make_duration_ms(200));
+  // Wait for both linked timers.
+  PollUntil(/*min_completions=*/2);
 
   ASSERT_EQ(tracker.order.size(), 2u);
   // timer_a must complete before timer_b despite timer_b's earlier deadline.
@@ -219,10 +218,8 @@ TEST_P(SequenceTest, ChainWithCancellation) {
   timer_a.base.type = IREE_ASYNC_OPERATION_TYPE_TIMER;
   timer_b.base.type = IREE_ASYNC_OPERATION_TYPE_TIMER;
 
-  // Both far in the future so we have time to cancel.
-  iree_time_t now = iree_time_now();
-  timer_a.deadline_ns = now + iree_make_duration_ms(10000);  // 10s
-  timer_b.deadline_ns = now + iree_make_duration_ms(10000);  // 10s
+  timer_a.deadline_ns = IREE_TIME_INFINITE_FUTURE;
+  timer_b.deadline_ns = IREE_TIME_INFINITE_FUTURE;
 
   timer_a.base.flags = IREE_ASYNC_OPERATION_FLAG_LINKED;
 
@@ -240,8 +237,7 @@ TEST_P(SequenceTest, ChainWithCancellation) {
   IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &timer_a.base));
 
   // Poll to receive both callbacks.
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/2);
 
   // timer_a should get CANCELLED.
   EXPECT_EQ(tracker_a.call_count, 1);
@@ -312,7 +308,7 @@ TEST_P(SequenceTest, MixedLinkedUnlinked) {
   iree_async_operation_list_t list = {ops, 4};
   IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
 
-  PollUntil(/*min_completions=*/4, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/4);
 
   ASSERT_EQ(tracker.order.size(), 4u);
 
@@ -389,7 +385,7 @@ TEST_P(SequenceTest, LinkedEventWaitNop) {
   // Signal the event.
   IREE_ASSERT_OK(iree_async_event_set(event));
 
-  PollUntil(/*min_completions=*/2, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/2);
 
   ASSERT_EQ(tracker.order.size(), 2u);
   // Event wait must complete before the NOP.
@@ -456,8 +452,7 @@ TEST_P(SequenceTest, LinkedConnectSend) {
   IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
 
   // Wait for accept + connect + send.
-  PollUntil(/*min_completions=*/3,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/3);
 
   ASSERT_EQ(tracker.order.size(), 2u);
   // Connect must complete before send.
@@ -559,10 +554,8 @@ TEST_P(SequenceTest, LinkedConnectFailurePropagates) {
   iree_async_operation_list_t list = {ops, 2};
   IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
 
-  // Wait for both operations. Connect will fail, send will be cancelled.
-  // Use a shorter timeout since we know the connect will fail quickly.
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  // Wait for both operations. Connect will fail and send will be cancelled.
+  PollUntil(/*min_completions=*/2);
 
   // Connect should have failed (not OK).
   EXPECT_EQ(connect_tracker.call_count, 1);
@@ -600,10 +593,8 @@ TEST_P(SequenceTest, LinkedTimerChainMidCancellation) {
 
   iree_time_t now = iree_time_now();
   timer_a.deadline_ns = now + iree_make_duration_ms(50);  // 50ms
-  timer_b.deadline_ns =
-      now + iree_make_duration_ms(10000);  // 10s (will be cancelled)
-  timer_c.deadline_ns =
-      now + iree_make_duration_ms(10000);  // 10s (will be cancelled)
+  timer_b.deadline_ns = IREE_TIME_INFINITE_FUTURE;
+  timer_c.deadline_ns = IREE_TIME_INFINITE_FUTURE;
 
   timer_a.base.flags = IREE_ASYNC_OPERATION_FLAG_LINKED;
   timer_b.base.flags = IREE_ASYNC_OPERATION_FLAG_LINKED;
@@ -621,7 +612,7 @@ TEST_P(SequenceTest, LinkedTimerChainMidCancellation) {
   IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
 
   // Wait for timer_a to fire (50ms), then cancel timer_b.
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(200));
+  PollUntil(/*min_completions=*/1);
   ASSERT_EQ(tracker_a.call_count, 1);
   IREE_EXPECT_OK(tracker_a.ConsumeStatus());
 
@@ -629,8 +620,7 @@ TEST_P(SequenceTest, LinkedTimerChainMidCancellation) {
   IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &timer_b.base));
 
   // Poll for remaining completions.
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/2);
 
   // timer_b should be cancelled.
   EXPECT_EQ(tracker_b.call_count, 1);
@@ -676,8 +666,7 @@ TEST_P(SequenceTest, LinkedTimerAsyncSubmit) {
     IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
   }();
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/2);
 
   EXPECT_EQ(tracker_a.call_count, 1);
   EXPECT_EQ(tracker_b.call_count, 1);
@@ -711,11 +700,16 @@ class SequenceOperationTest : public CtsTestBase<> {
   }
 
   // Helper: initialize a timer operation for use as a sequence step.
-  void InitStepTimer(iree_async_timer_operation_t* timer,
-                     iree_duration_t delay_ns) {
+  void InitStepTimerAt(iree_async_timer_operation_t* timer,
+                       iree_time_t deadline_ns) {
     memset(timer, 0, sizeof(*timer));
     timer->base.type = IREE_ASYNC_OPERATION_TYPE_TIMER;
-    timer->deadline_ns = iree_time_now() + delay_ns;
+    timer->deadline_ns = deadline_ns;
+  }
+
+  void InitStepTimer(iree_async_timer_operation_t* timer,
+                     iree_duration_t delay_ns) {
+    InitStepTimerAt(timer, iree_time_now() + delay_ns);
   }
 
   // Helper: set up a sequence operation with pre-filled step pointers.
@@ -766,8 +760,7 @@ TEST_P(SequenceOperationTest, SingleStepNop) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &sequence.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -787,8 +780,7 @@ TEST_P(SequenceOperationTest, TwoStepNop) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &sequence.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/2);
 
   // Base callback fires exactly once, not once per step.
   EXPECT_EQ(tracker.call_count, 1);
@@ -809,8 +801,7 @@ TEST_P(SequenceOperationTest, ThreeStepNop) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &sequence.base));
 
-  PollUntil(/*min_completions=*/3,
-            /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/3);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -833,19 +824,18 @@ TEST_P(SequenceOperationTest, SequenceWithTimer) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &sequence.base));
 
-  PollUntil(/*min_completions=*/3,
-            /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/3);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
 }
 
 // Cancel a sequence during execution.
-// [TIMER(10s), NOP] — cancel while the timer is pending.
+// [TIMER(infinite), NOP] - cancel while the timer is pending.
 TEST_P(SequenceOperationTest, SequenceCancellation) {
   iree_async_timer_operation_t timer;
   iree_async_nop_operation_t nop;
-  InitStepTimer(&timer, iree_make_duration_ms(10000));  // 10s
+  InitStepTimerAt(&timer, IREE_TIME_INFINITE_FUTURE);
   InitStepNop(&nop);
 
   CompletionTracker tracker;
@@ -859,8 +849,7 @@ TEST_P(SequenceOperationTest, SequenceCancellation) {
   // Cancel the sequence while the timer is pending.
   IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &sequence.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/2);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, tracker.ConsumeStatus());
@@ -908,8 +897,7 @@ TEST_P(SequenceOperationTest, StepFnCalled) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &sequence.base));
 
   // Emulation path: one poll round-trip per step.
-  PollUntil(/*min_completions=*/3,
-            /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/3);
 
   // step_fn fires after every step: after step 0, step 1, and step 2 (last).
   // The last call receives next_step == NULL signaling sequence completion.
@@ -933,8 +921,7 @@ TEST_P(SequenceOperationTest, StepFnModifiesNextStep) {
   iree_async_nop_operation_t nop;
   iree_async_timer_operation_t timer;
   InitStepNop(&nop);
-  // Timer starts with a far-future deadline (10s).
-  InitStepTimer(&timer, iree_make_duration_ms(10000));
+  InitStepTimerAt(&timer, IREE_TIME_INFINITE_FUTURE);
 
   // step_fn overwrites the timer deadline to 10ms, so it actually completes.
   auto step_fn = [](void* user_data, iree_async_operation_t* completed_step,
@@ -955,10 +942,9 @@ TEST_P(SequenceOperationTest, StepFnModifiesNextStep) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &sequence.base));
 
-  // If step_fn didn't modify the timer, this would time out (10s deadline).
-  // With the modification, it should complete within 200ms.
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(500));
+  // If step_fn does not modify the timer the outer test harness detects the
+  // hang. With the modification the timer completes normally.
+  PollUntil(/*min_completions=*/2);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -984,8 +970,7 @@ TEST_P(SequenceOperationTest, StepFnAbort) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &sequence.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/1);
 
   // step_fn error aborts the sequence.
   EXPECT_EQ(tracker.call_count, 1);
@@ -996,7 +981,7 @@ TEST_P(SequenceOperationTest, StepFnAbort) {
 TEST_P(SequenceOperationTest, EmulationCancellation) {
   iree_async_timer_operation_t timer;
   iree_async_nop_operation_t nop;
-  InitStepTimer(&timer, iree_make_duration_ms(10000));  // 10s
+  InitStepTimerAt(&timer, IREE_TIME_INFINITE_FUTURE);
   InitStepNop(&nop);
 
   // Both step_fn and completion_fn share user_data, so use a combined context
@@ -1032,8 +1017,7 @@ TEST_P(SequenceOperationTest, EmulationCancellation) {
   // Cancel while the timer is pending.
   IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &sequence.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, tracker.ConsumeStatus());
@@ -1086,7 +1070,7 @@ TEST_P(SequenceOperationTest, ZeroStepWithStepFn) {
 // Single NOP step that gets cancelled immediately after submit.
 TEST_P(SequenceOperationTest, SingleStepCancellation) {
   iree_async_timer_operation_t timer;
-  InitStepTimer(&timer, iree_make_duration_ms(10000));  // 10s
+  InitStepTimerAt(&timer, IREE_TIME_INFINITE_FUTURE);
 
   CompletionTracker tracker;
   iree_async_operation_t* steps[] = {&timer.base};
@@ -1097,8 +1081,7 @@ TEST_P(SequenceOperationTest, SingleStepCancellation) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &sequence.base));
   IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &sequence.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, tracker.ConsumeStatus());
@@ -1188,8 +1171,7 @@ TEST_P(SequenceOperationTest, StepFnErrorOnLastStep) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &sequence.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   // step_fn called twice: once after step 0 (next_step=&nop1, OK), once after
@@ -1201,17 +1183,19 @@ TEST_P(SequenceOperationTest, StepFnErrorOnLastStep) {
 // Cancel arrives between the first CANCEL_REQUESTED check and the step_fn call.
 // The second CANCEL_REQUESTED check (after step_fn) should catch it.
 TEST_P(SequenceOperationTest, CancelDuringStepFn) {
-  // Use two timers: a short one that completes quickly, and a long one that
-  // would take 10s if not cancelled. The step_fn sleeps briefly to widen the
-  // window for cancel arrival.
+  // Use a short timer followed by one that remains pending until cancelled.
   iree_async_timer_operation_t timer_short, timer_long;
   InitStepTimer(&timer_short, iree_make_duration_ms(1));
-  InitStepTimer(&timer_long, iree_make_duration_ms(10000));
+  InitStepTimerAt(&timer_long, IREE_TIME_INFINITE_FUTURE);
 
   struct CancelDuringContext {
+    // Tracks the sequence terminal callback.
     CompletionTracker* tracker;
+    // Proactor owning the sequence operation.
     iree_async_proactor_t* proactor;
+    // Sequence cancelled from its own step callback.
     iree_async_sequence_operation_t* sequence;
+    // Number of step callbacks observed.
     int step_fn_call_count;
   };
   CompletionTracker tracker;
@@ -1227,10 +1211,7 @@ TEST_P(SequenceOperationTest, CancelDuringStepFn) {
     // Cancel the sequence from within step_fn. The second CANCEL_REQUESTED
     // check (after step_fn returns) should prevent timer_long from being
     // submitted.
-    iree_status_t cancel_status =
-        iree_async_proactor_cancel(ctx->proactor, &ctx->sequence->base);
-    iree_status_ignore(cancel_status);
-    return iree_ok_status();
+    return iree_async_proactor_cancel(ctx->proactor, &ctx->sequence->base);
   };
   auto completion_fn = [](void* user_data, iree_async_operation_t* op,
                           iree_status_t status,
@@ -1243,8 +1224,7 @@ TEST_P(SequenceOperationTest, CancelDuringStepFn) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &sequence.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(2000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, tracker.ConsumeStatus());
@@ -1257,10 +1237,10 @@ TEST_P(SequenceOperationTest, CancelDuringStepFn) {
 // trampoline's CANCEL_REQUESTED check that handles the cancel-step race
 // (where the cancel-step call is a no-op because the step already completed).
 TEST_P(SequenceOperationTest, LinkCancelAfterStepCompletion) {
-  // Short timer completes quickly, long timer would take 10s.
+  // The short timer completes normally; the long timer remains pending.
   iree_async_timer_operation_t timer_short, timer_long;
   InitStepTimer(&timer_short, iree_make_duration_ms(1));
-  InitStepTimer(&timer_long, iree_make_duration_ms(10000));
+  InitStepTimerAt(&timer_long, IREE_TIME_INFINITE_FUTURE);
 
   CompletionTracker tracker;
   iree_async_operation_t* steps[] = {&timer_short.base, &timer_long.base};
@@ -1270,19 +1250,12 @@ TEST_P(SequenceOperationTest, LinkCancelAfterStepCompletion) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &sequence.base));
 
-  // Wait briefly for timer_short to complete, then cancel.
-  iree_time_t deadline = iree_time_now() + iree_make_duration_ms(200);
-  while (iree_time_now() < deadline) {
-    iree_host_size_t count = 0;
-    iree_status_t poll_status =
-        iree_async_proactor_poll(proactor_, iree_make_timeout_ms(10), &count);
-    iree_status_ignore(poll_status);
-  }
+  PollUntilCondition([&] { return sequence.current_step >= 1; },
+                     "first linked sequence step completion");
 
   IREE_ASSERT_OK(iree_async_proactor_cancel(proactor_, &sequence.base));
 
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(2000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, tracker.ConsumeStatus());

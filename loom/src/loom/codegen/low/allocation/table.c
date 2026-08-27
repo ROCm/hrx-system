@@ -146,16 +146,16 @@ loom_low_allocation_find_edge_copy_group_by_source_ordinal(
   return NULL;
 }
 
-const loom_low_allocation_packet_move_temporary_group_t*
-loom_low_allocation_find_packet_move_temporary_group_by_source_ordinal(
+const loom_low_allocation_packet_move_group_t*
+loom_low_allocation_find_packet_move_group_by_source_ordinal(
     const loom_low_allocation_table_t* table, uint32_t source_ordinal) {
   IREE_ASSERT_ARGUMENT(table);
   iree_host_size_t lower = 0;
-  iree_host_size_t upper = table->packet_move_temporary_group_count;
+  iree_host_size_t upper = table->packet_move_group_count;
   while (lower < upper) {
     iree_host_size_t middle = lower + (upper - lower) / 2;
-    const loom_low_allocation_packet_move_temporary_group_t* group =
-        &table->packet_move_temporary_groups[middle];
+    const loom_low_allocation_packet_move_group_t* group =
+        &table->packet_move_groups[middle];
     if (source_ordinal < group->source_ordinal) {
       upper = middle;
     } else if (source_ordinal > group->source_ordinal) {

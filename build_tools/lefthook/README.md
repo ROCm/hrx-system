@@ -10,23 +10,23 @@ routing. Project-specific policy stays in each project under
 
 A successful Git commit must not commit stale formatter or generated-file
 output or private work-tracking breadcrumbs. The generated Git commit hook uses
-commit scope: files staged for commit plus files changed by `HEAD`, so
-`git commit --amend` validates the commit being replaced without scanning the
-full feature branch. Test-bearing hook profiles run a mechanical fix pass first,
-stage files owned by those fixers, and then run the same profile in
-non-mutating check mode:
+the Git index as both the ordinary validation boundary and the authority for
+mechanical mutation. Files present only in `HEAD`, the unstaged worktree, or an
+unrelated dirty change set never become fixer inputs merely because a commit is
+running. Test-bearing hook profiles start with a bounded mechanical fix pass:
 
 ```bash
-python dev.py <lane> precommit --profile <profile> --commit
+python dev.py <lane> precommit --profile <profile> --staged
 ```
 
-This fix-then-check path is used for `paranoid` and `ci` when the input is the
-generated hook's commit scope or an explicit `--staged` precommit. The mutating
-pass is limited to hygiene fixers and is also the hygiene validation boundary:
-unfixable diagnostics fail there. The validation pass then runs affected tests
-and static analysis once against the post-fix tree. Broader local-change
-precommit runs stay check-only. The `default` profile remains check-only. Local
-fixups are also available through explicit commands:
+This path is used for `paranoid` and `ci` with staged or explicit inputs. When
+the pass changes the index, it prints the exact paths and returns nonzero before
+tests. Lefthook's `fail_on_changes: always` independently observes the mutation.
+The next commit attempt finds the repaired index unchanged and continues through
+read-only hygiene, affected tests, and static analysis. This two-pass contract
+makes the review boundary visible instead of silently adding formatter output
+to a commit. Broader local-change precommit runs and the `default` profile stay
+check-only. Local fixups are also available through explicit commands:
 
 ```bash
 python dev.py bazel fix
@@ -34,9 +34,30 @@ python dev.py cmake fix
 ```
 
 `fix` applies staged hygiene repairs and stages files owned by those fixers.
-`precommit` checks the current local change set, with autofix enabled for
-commit-scope, staged, and explicit-path test-bearing runs. `presubmit` is
+Bazel-to-CMake receives only selected BUILD/CMake inputs and may stage their
+same-directory generated output. Converter-wide inputs are checked without
+writing. Loom artifact maintenance updates only families whose owned outputs
+were selected; the read-only retry detects source changes that require an
+explicit regeneration. `precommit` checks the current local change set, with
+autofix enabled for staged and explicit-path test-bearing runs. `presubmit` is
 non-mutating and runs the full-tree CI-shaped profile.
+
+Whole-file tools cannot faithfully consume a candidate file that also contains
+unstaged hunks. That state fails before mutation and names each conflicting
+path. Running `python dev.py <lane> fix` before selecting hunks, then staging the
+intended hunks again, retains the narrow commit boundary.
+
+Git's pre-commit event provides no amend discriminator. Amend validation is an
+explicit read-only operation:
+
+```bash
+python dev.py <lane> precommit --profile <profile> --amend
+```
+
+It compares the current index with `HEAD^`, which is the exact tree that an
+amend would write relative to the replaced commit's parent. The compatibility
+spelling `--commit` now has the same staged-only semantics as `--staged`, keeping
+previously installed hook configurations safe.
 
 The `commit-msg` hook validates the final Git commit message text. The subject
 line must start with a bracketed subsystem tag such as `[Loom]`, `[HRX]`,
@@ -125,8 +146,10 @@ python dev.py cmake presubmit --profile default
 
 ## Lefthook Groups
 
-The installed Git commit hook runs fixups first with `paranoid` or `ci` and
-then validates the same commit-scope set; with `default` it is check-only.
+The installed Git commit hook runs staged fixups first with `paranoid` or `ci`.
+An unchanged fix pass proceeds directly to read-only validation; a changed pass
+stops for review and validation runs on the retry. The `default` profile is
+check-only.
 
 `dev.py` installs lane-specific local hook policy into ignored
 `lefthook-local.yml`:
@@ -270,5 +293,6 @@ configured project entry point instead of maintaining dependency-specific folder
 lists.
 
 This keeps root policy focused on repository-wide hygiene while preserving
-project ownership of tests, expensive checks, and future project-specific static
-analysis.
+project ownership of cheap invariant checks, tests, expensive checks, and
+future project-specific static analysis. `--no-project-tests` suppresses only
+the project test phase; project hygiene still runs in CI.

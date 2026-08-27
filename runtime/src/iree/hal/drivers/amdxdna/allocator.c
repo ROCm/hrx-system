@@ -148,8 +148,7 @@ iree_hal_amdxdna_allocator_query_buffer_compatibility(
 
   // Buffers can only be used on the queue if they are device visible.
   if (iree_all_bits_set(params->type, IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE)) {
-    if (iree_any_bit_set(params->usage,
-                         IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE)) {
+    if (iree_any_bit_set(params->usage, IREE_HAL_BUFFER_USAGE_DISPATCH)) {
       compatibility |= IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_DISPATCH;
     }
   }
@@ -191,10 +190,14 @@ static iree_status_t iree_hal_amdxdna_allocator_query_memory_heaps(
     return iree_status_from_code(IREE_STATUS_OUT_OF_RANGE);
   }
   heaps[0] = (iree_hal_allocator_memory_heap_t){
-      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH |
-          IREE_HAL_BUFFER_USAGE_MAPPING,
-      ~(iree_device_size_t)0, 4};
+      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+              IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      .allowed_usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
+                       IREE_HAL_BUFFER_USAGE_DISPATCH |
+                       IREE_HAL_BUFFER_USAGE_MAPPING,
+      .max_allocation_size = IREE_DEVICE_SIZE_MAX,
+      .min_alignment = 4,
+  };
   return iree_ok_status();
 }
 
@@ -237,10 +240,11 @@ static iree_status_t iree_hal_amdxdna_allocator_allocate_buffer(
 
   iree_hal_buffer_t* buffer = NULL;
   const iree_hal_buffer_placement_t placement = {
-      NULL,
-      params->queue_affinity ? params->queue_affinity
-                             : IREE_HAL_QUEUE_AFFINITY_ANY,
-      IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE, 0};
+      .device = NULL,
+      .queue_affinity = params->queue_affinity ? params->queue_affinity
+                                               : IREE_HAL_QUEUE_AFFINITY_ANY,
+      .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
+  };
   iree_hal_buffer_release_callback_t release_callback =
       iree_hal_amdxdna_allocator_make_release_callback(allocator);
   iree_status_t status = iree_hal_amdxdna_buffer_wrap(

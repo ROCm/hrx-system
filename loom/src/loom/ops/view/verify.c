@@ -53,21 +53,6 @@ static iree_status_t loom_view_emit_operand_constraint(
                         IREE_ARRAYSIZE(params));
 }
 
-static iree_status_t loom_view_verify_type_has_encoding(
-    const loom_op_t* op, iree_diagnostic_emitter_t emitter,
-    iree_string_view_t field_name, loom_type_t type) {
-  if (!loom_type_is_view(type) || loom_type_has_encoding(type)) {
-    return iree_ok_status();
-  }
-
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(field_name),
-      loom_param_string(IREE_SV("view type")),
-  };
-  return loom_view_emit(emitter, op, LOOM_ERR_ENCODING_001, params,
-                        IREE_ARRAYSIZE(params));
-}
-
 static iree_status_t loom_view_verify_optional_cache_policy(
     iree_diagnostic_emitter_t emitter, const loom_op_t* op,
     uint16_t cache_scope_attr_index, uint16_t cache_temporal_attr_index,
@@ -196,11 +181,6 @@ iree_status_t loom_view_refine_verify(const loom_module_t* module,
       loom_module_value_type(module, loom_view_refine_source(op));
   loom_type_t result_type =
       loom_module_value_type(module, loom_view_refine_result(op));
-
-  IREE_RETURN_IF_ERROR(loom_view_verify_type_has_encoding(
-      op, emitter, IREE_SV("source type layout"), source_type));
-  IREE_RETURN_IF_ERROR(loom_view_verify_type_has_encoding(
-      op, emitter, IREE_SV("result type layout"), result_type));
 
   if (!loom_type_is_view(source_type) || !loom_type_is_view(result_type) ||
       !loom_type_rank_equals(source_type, result_type)) {

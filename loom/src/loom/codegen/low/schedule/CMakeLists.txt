@@ -11,12 +11,57 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    dependency_index
+  HDRS
+    "dependency_index.h"
+  SRCS
+    "dependency_index.c"
+  DEPS
+    ::dependencies
+    iree::base
+    iree::base::internal::arena
+    loom::util::segmented_storage
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    dependencies
+  HDRS
+    "dependencies.h"
+  SRCS
+    "dependencies.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::util::segmented_storage
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    ready_frontier
+  HDRS
+    "ready_frontier.h"
+  SRCS
+    "ready_frontier.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::util::segmented_storage
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     schedule
   HDRS
     "json.h"
     "run.h"
     "types.h"
   SRCS
+    "candidate_policy.c"
+    "candidate_policy.h"
     "context.h"
     "descriptor_rows.c"
     "descriptor_rows.h"
@@ -25,16 +70,36 @@ loom_cc_library(
     "graph.c"
     "graph.h"
     "json.c"
+    "pressure.c"
+    "pressure.h"
+    "pressure_alias.c"
+    "pressure_alias.h"
+    "ready_policy.c"
+    "ready_policy.h"
     "run.c"
+    "storage_relation_index.c"
+    "storage_relation_index.h"
+    "target_pressure.c"
+    "target_pressure.h"
   DEPS
+    ::dependencies
+    ::dependency_index
+    ::ready_frontier
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::analysis::liveness
     loom::analysis::liveness_json
+    loom::codegen::low::allocation::storage
+    loom::codegen::low::allocation::target_constraints
     loom::codegen::low::descriptors
     loom::codegen::low::diagnostics
     loom::codegen::low::function
+    loom::codegen::low::function_model
     loom::codegen::low::memory_access
+    loom::codegen::low::placement
+    loom::codegen::low::storage_layout
+    loom::codegen::low::storage_relation
     loom::codegen::low::target_binding
     loom::codegen::low::text_asm
     loom::error::emitter
@@ -43,9 +108,47 @@ loom_cc_library(
     loom::ops::low
     loom::ops::op_defs
     loom::target::registers
+    loom::target::residency
+    loom::util::cfg_graph
+    loom::util::cfg_loop
     loom::util::json
+    loom::util::segmented_storage
     loom::util::stream
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    dependency_index_test
+  SRCS
+    "dependency_index_test.cc"
+  DEPS
+    ::dependencies
+    ::dependency_index
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_test(
+  NAME
+    ready_frontier_test
+  SRCS
+    "ready_frontier_test.cc"
+  DEPS
+    ::ready_frontier
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_test(
+  NAME
+    dependencies_test
+  SRCS
+    "dependencies_test.cc"
+  DEPS
+    ::dependencies
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

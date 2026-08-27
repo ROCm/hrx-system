@@ -19,24 +19,30 @@ constexpr iree_hal_amdgpu_vendor_packet_capability_flags_t
         IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX10;
 
 constexpr iree_hal_amdgpu_vendor_packet_capability_flags_t
+    kBarrierCapabilitiesGfx12 =
+        kBarrierCapabilitiesGfx10 |
+        IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_CP_MEMORY_BYPASSES_GL2;
+
+constexpr iree_hal_amdgpu_vendor_packet_capability_flags_t
     kBarrierCapabilitiesGfx9 =
         IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_EVENT_WRITE |
         IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM |
         IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX9;
+
+constexpr uint32_t kAgentGcrCntl =
+    IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GLI_INV_ALL |
+    IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GLK_INV |
+    IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GLV_INV |
+    IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GL1_INV;
 
 TEST(PM4BarrierTest, MapsFenceScopesToGfx10GcrControl) {
   EXPECT_EQ(iree_hal_amdgpu_pm4_barrier_gcr_cntl_for_scopes_gfx10(
                 IREE_HSA_FENCE_SCOPE_NONE, IREE_HSA_FENCE_SCOPE_NONE),
             0u);
 
-  const uint32_t agent_gcr_cntl =
-      IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GLI_INV_ALL |
-      IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GLK_INV |
-      IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GLV_INV |
-      IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GL1_INV;
   EXPECT_EQ(iree_hal_amdgpu_pm4_barrier_gcr_cntl_for_scopes_gfx10(
                 IREE_HSA_FENCE_SCOPE_AGENT, IREE_HSA_FENCE_SCOPE_NONE),
-            agent_gcr_cntl);
+            kAgentGcrCntl);
 
   EXPECT_EQ(iree_hal_amdgpu_pm4_barrier_gcr_cntl_for_scopes_gfx10(
                 IREE_HSA_FENCE_SCOPE_AGENT, IREE_HSA_FENCE_SCOPE_SYSTEM),
@@ -102,6 +108,46 @@ TEST(PM4BarrierTest, EmitsScopedExecutionBarrier) {
   EXPECT_EQ(dwords[9], IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_CNTL_CONSERVATIVE);
 }
 
+TEST(PM4BarrierTest, AddsOnlyRequiredGfx12BypassGl2Operations) {
+  uint32_t dwords[IREE_HAL_AMDGPU_PM4_BARRIER_GFX10_MAX_DWORD_COUNT];
+  uint32_t dword_count = 0;
+
+  EXPECT_TRUE(iree_hal_amdgpu_pm4_barrier_emit_gfx10(
+      kBarrierCapabilitiesGfx12,
+      IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_EXECUTION |
+          IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_TARGET_BYPASSES_GL2,
+      IREE_HSA_FENCE_SCOPE_AGENT, IREE_HSA_FENCE_SCOPE_AGENT,
+      IREE_ARRAYSIZE(dwords), dwords, &dword_count));
+  EXPECT_EQ(dword_count, IREE_HAL_AMDGPU_PM4_BARRIER_GFX10_MAX_DWORD_COUNT);
+  EXPECT_EQ(dwords[9],
+            kAgentGcrCntl | IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GL2_WB);
+
+  EXPECT_TRUE(iree_hal_amdgpu_pm4_barrier_emit_gfx10(
+      kBarrierCapabilitiesGfx12,
+      IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_EXECUTION |
+          IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_SOURCE_BYPASSES_GL2,
+      IREE_HSA_FENCE_SCOPE_AGENT, IREE_HSA_FENCE_SCOPE_AGENT,
+      IREE_ARRAYSIZE(dwords), dwords, &dword_count));
+  EXPECT_EQ(dwords[9], kAgentGcrCntl |
+                           IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GL2_WB |
+                           IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GL2_INV);
+
+  EXPECT_TRUE(iree_hal_amdgpu_pm4_barrier_emit_gfx10(
+      kBarrierCapabilitiesGfx10,
+      IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_EXECUTION |
+          IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_SOURCE_BYPASSES_GL2 |
+          IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_TARGET_BYPASSES_GL2,
+      IREE_HSA_FENCE_SCOPE_AGENT, IREE_HSA_FENCE_SCOPE_AGENT,
+      IREE_ARRAYSIZE(dwords), dwords, &dword_count));
+  EXPECT_EQ(dwords[9], kAgentGcrCntl);
+
+  EXPECT_TRUE(iree_hal_amdgpu_pm4_barrier_emit_gfx10(
+      kBarrierCapabilitiesGfx12, IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_EXECUTION,
+      IREE_HSA_FENCE_SCOPE_AGENT, IREE_HSA_FENCE_SCOPE_AGENT,
+      IREE_ARRAYSIZE(dwords), dwords, &dword_count));
+  EXPECT_EQ(dwords[9], kAgentGcrCntl);
+}
+
 TEST(PM4BarrierTest, EmitsConservativeFixupToIbVisibilityBarrier) {
   uint32_t dwords[IREE_HAL_AMDGPU_PM4_BARRIER_GFX10_MAX_DWORD_COUNT];
   std::memset(dwords, 0xCC, sizeof(dwords));
@@ -151,6 +197,14 @@ TEST(PM4BarrierTest, RejectsInvalidArgumentsWithoutWriting) {
   EXPECT_FALSE(iree_hal_amdgpu_pm4_barrier_emit_gfx10(
       kBarrierCapabilitiesGfx10, IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_NONE,
       IREE_HSA_FENCE_SCOPE_NONE, IREE_HSA_FENCE_SCOPE_NONE,
+      IREE_ARRAYSIZE(dwords), dwords, &dword_count));
+  EXPECT_EQ(dword_count, 0u);
+  EXPECT_EQ(dwords[0], 0xCCCCCCCCu);
+
+  EXPECT_FALSE(iree_hal_amdgpu_pm4_barrier_emit_gfx10(
+      kBarrierCapabilitiesGfx12,
+      IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_TARGET_BYPASSES_GL2,
+      IREE_HSA_FENCE_SCOPE_AGENT, IREE_HSA_FENCE_SCOPE_AGENT,
       IREE_ARRAYSIZE(dwords), dwords, &dword_count));
   EXPECT_EQ(dword_count, 0u);
   EXPECT_EQ(dwords[0], 0xCCCCCCCCu);

@@ -10,6 +10,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/analysis/symbol_facts.h"
+#include "loom/codegen/low/text_asm.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -17,7 +18,10 @@
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/target/ops.h"
+#include "loom/ops/template/ops.h"
 #include "loom/ops/test/ops.h"
+#include "loom/target/low_descriptor_registry_core_test.h"
 #include "loom/target/types.h"
 #include "loom/testing/module_ptr.h"
 
@@ -36,8 +40,17 @@ class FuncSymbolFactsTest : public ::testing::Test {
     RegisterDialect(LOOM_DIALECT_INDEX, loom_index_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_KERNEL, loom_kernel_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_LOW, loom_low_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_TEMPLATE, loom_template_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
+    iree_host_size_t parameterized_attr_count = 0;
+    const loom_parameterized_attr_descriptor_t* parameterized_attrs =
+        loom_target_dialect_parameterized_attrs(&parameterized_attr_count);
+    IREE_ASSERT_OK(loom_context_register_parameterized_attrs(
+        &context_, LOOM_DIALECT_TARGET, parameterized_attrs,
+        parameterized_attr_count));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
+    loom_target_core_test_low_descriptor_registry_initialize(&low_registry_);
     iree_arena_initialize(&block_pool_, &analysis_arena_);
     loom_symbol_fact_table_initialize(&fact_table_, &analysis_arena_);
   }
@@ -61,6 +74,8 @@ class FuncSymbolFactsTest : public ::testing::Test {
   ModulePtr ParseModule(const char* source) {
     loom_module_t* module = nullptr;
     loom_text_parse_options_t options = {};
+    loom_low_descriptor_text_asm_environment_initialize(
+        &low_registry_.registry, &options.low_asm_environment);
     IREE_CHECK_OK(loom_text_parse(iree_make_cstring_view(source),
                                   IREE_SV("func_symbol_facts_test.loom"),
                                   &context_, &block_pool_, &options, &module));
@@ -98,6 +113,9 @@ class FuncSymbolFactsTest : public ::testing::Test {
 
   // Dense symbol fact table under test.
   loom_symbol_fact_table_t fact_table_;
+
+  // Descriptor tables required by Low function representation contracts.
+  loom_target_low_descriptor_registry_t low_registry_ = {};
 };
 
 TEST_F(FuncSymbolFactsTest, SourceFuncFactsRemainTargetIndependent) {
@@ -117,8 +135,8 @@ func.def public device @semantic() {
   EXPECT_EQ(facts->purity, 0);
   EXPECT_EQ(facts->temperature, 0);
   EXPECT_EQ(facts->inline_policy, 0);
-  EXPECT_EQ(facts->implements_id, LOOM_STRING_ID_INVALID);
-  EXPECT_TRUE(iree_string_view_is_empty(facts->implements));
+  EXPECT_FALSE(loom_symbol_ref_is_valid(facts->template_family));
+  EXPECT_TRUE(iree_string_view_is_empty(facts->template_family_name));
   EXPECT_EQ(facts->priority, 0);
   EXPECT_EQ(facts->predicate_count, 0);
   EXPECT_EQ(facts->argument_count, 0);
@@ -128,28 +146,40 @@ func.def public device @semantic() {
   EXPECT_FALSE(facts->exports);
 }
 
-TEST_F(FuncSymbolFactsTest, TemplateFactsCarryProviderContract) {
+TEST_F(FuncSymbolFactsTest, TemplateFactsCarryFamilyIdentity) {
   ModulePtr module = ParseModule(R"(
-func.template<qwen.q4.matmul> public device pure hot inline priority(7) @impl(%m: index) -> (index) where [mul(%m, 16)] {
-  func.return %m : index
+template.decl @qwen.q4.matmul(%m: index) -> (index)
+
+template.def<@qwen.q4.matmul> public device pure hot requires [#target.subgroup.size<64>] priority(7) @impl(%m: index) -> (index) where [mul(%m, 16)] {
+  template.return %m : index
 }
 )");
 
   const loom_func_symbol_facts_t* facts =
       LookupFunc(module.get(), IREE_SV("impl"));
-  EXPECT_EQ(facts->base.symbol_kind, LOOM_SYMBOL_FUNC_TEMPLATE);
+  EXPECT_EQ(facts->base.symbol_kind, LOOM_SYMBOL_TEMPLATE_DEF);
   EXPECT_TRUE(facts->has_body);
   EXPECT_EQ(facts->visibility, 1);
   EXPECT_EQ(facts->calling_convention, 2);
   EXPECT_EQ(facts->purity, 1);
   EXPECT_EQ(facts->temperature, 1);
-  EXPECT_EQ(facts->inline_policy, 1);
-  EXPECT_TRUE(
-      iree_string_view_equal(facts->implements, IREE_SV("qwen.q4.matmul")));
+  EXPECT_EQ(facts->inline_policy, 0);
+  ASSERT_TRUE(loom_symbol_ref_is_valid(facts->template_family));
+  EXPECT_TRUE(iree_string_view_equal(facts->template_family_name,
+                                     IREE_SV("qwen.q4.matmul")));
+  EXPECT_EQ(facts->template_family.symbol_id,
+            FindSymbol(module.get(), IREE_SV("qwen.q4.matmul")));
   EXPECT_EQ(facts->priority, 7);
   EXPECT_EQ(facts->argument_count, 1);
   EXPECT_EQ(facts->result_count, 1);
   EXPECT_EQ(facts->predicate_count, 1);
+  ASSERT_EQ(facts->target_condition_count, 1);
+  ASSERT_NE(facts->target_conditions, nullptr);
+  EXPECT_EQ(facts->target_conditions[0].descriptor,
+            &loom_target_subgroup_size_condition);
+  EXPECT_EQ(
+      loom_target_subgroup_size_attr_size(facts->target_conditions[0].value),
+      64);
 }
 
 TEST_F(FuncSymbolFactsTest, DeclarationFactsCarryImportContract) {
@@ -163,6 +193,23 @@ func.decl import("env", "do.work") @do_work(%arg0: i32) -> (i32)
   EXPECT_TRUE(facts->imports);
   EXPECT_TRUE(iree_string_view_equal(facts->import_module, IREE_SV("env")));
   EXPECT_TRUE(iree_string_view_equal(facts->import_symbol, IREE_SV("do.work")));
+  EXPECT_EQ(facts->argument_count, 1);
+  EXPECT_EQ(facts->result_count, 1);
+}
+
+TEST_F(FuncSymbolFactsTest, TemplateDeclarationFactsCarryFamilySignature) {
+  ModulePtr module = ParseModule(R"(
+template.decl @qwen.routed_down(%arg0: i32) -> (i32)
+)");
+
+  const loom_func_symbol_facts_t* facts =
+      LookupFunc(module.get(), IREE_SV("qwen.routed_down"));
+  EXPECT_EQ(facts->base.symbol_kind, LOOM_SYMBOL_TEMPLATE_DECL);
+  EXPECT_FALSE(facts->has_body);
+  EXPECT_FALSE(facts->imports);
+  EXPECT_FALSE(loom_symbol_ref_is_valid(facts->template_family));
+  EXPECT_TRUE(iree_string_view_is_empty(facts->template_family_name));
+  EXPECT_EQ(facts->priority, 0);
   EXPECT_EQ(facts->argument_count, 1);
   EXPECT_EQ(facts->result_count, 1);
 }
@@ -230,7 +277,7 @@ TEST_F(FuncSymbolFactsTest, LowKernelDefFactsDefaultToExportedSymbolName) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @target
 
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @kernel() {
+low.kernel.def target<test.low.core>(@target) workgroup_size(1, 1, 1) @kernel() {
   low.return
 }
 )");

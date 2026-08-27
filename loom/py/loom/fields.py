@@ -571,7 +571,7 @@ class ResolvedFields:
         """Get the SSA name of the operand or func arg a result is tied to.
 
         For body ops, tied.operand_index indexes into op.operands. For
-        func-like ops with a body region (func.def, func.template), there
+        func-like ops with a body region (func.def, template.def), there
         are no op-level operands — tied.operand_index indexes into the
         entry block's arguments instead.
         """
@@ -593,25 +593,33 @@ class ResolvedFields:
 
     # --- FuncArgs support for func-like ops ---
 
-    def func_args(self) -> tuple[list[str], list[Type], list[int]]:
+    def func_args(
+        self, field: str | None = None
+    ) -> tuple[list[str], list[Type], list[int]]:
         """Get function argument data for the FuncArgs format element.
 
-        For ops with a body region (func.def, func.template), args are the
+        For ops with a body region (func.def, template.def), args are the
         entry block's arguments. For declaration-style ops (func.decl,
-        func.ukernel), args are the op's operands.
+        template.ukernel), args are the op's operands.
         """
-        body_region_index = self._layout.func_body_region_index
-        if body_region_index is not None and body_region_index < len(self._op.regions):
+        field_desc = self._layout.fields.get(field) if field is not None else None
+        if field_desc is not None:
+            if field_desc.kind != FieldKind.OPERAND or not field_desc.variadic:
+                raise ValueError(
+                    f"Op '{self._op.name}' FuncArgs field '{field}' must be a "
+                    "variadic operand field."
+                )
+            arg_ids = self.value_ids(field)
+        elif (
+            self._layout.func_body_region_index is not None
+            and self._layout.func_body_region_index < len(self._op.regions)
+        ):
+            body_region_index = self._layout.func_body_region_index
             region = self._op.regions[body_region_index]
             entry = region.blocks[0] if region.blocks else None
             arg_ids = list(entry.arg_ids) if entry else []
-        elif self._op.regions:
-            entry = (
-                self._op.regions[0].blocks[0] if self._op.regions[0].blocks else None
-            )
-            arg_ids = list(entry.arg_ids) if entry else []
         else:
-            arg_ids = list(self._op.operands)
+            arg_ids = []
         names = [self._module.values[vid].name for vid in arg_ids]
         types = [self._module.values[vid].type for vid in arg_ids]
         return (names, types, arg_ids)

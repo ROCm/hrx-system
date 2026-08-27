@@ -21,6 +21,7 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
         "//loom/src/loom/rewrite:rewriter",
         "//runtime/src/iree/base",
     ],
@@ -31,6 +32,7 @@ loom_cc_library(
     srcs = ["loop_fusion.c"],
     hdrs = ["loop_fusion.h"],
     deps = [
+        "//loom/src/loom/analysis:availability",
         "//loom/src/loom/analysis:loop_domain",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",

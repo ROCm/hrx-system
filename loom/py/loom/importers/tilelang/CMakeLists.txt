@@ -62,7 +62,26 @@ if(LOOM_IMPORT_TILELANG)
 iree_py_test(
   NAME
     tilelang_test
+  MAIN
+    "../../tools/pytest_style_runner.py"
   SRCS
+    "analysis_test.py"
+    "calls_test.py"
+    "context_test.py"
+    "corpus_test.py"
+    "coverage_test.py"
+    "differential_test.py"
+    "oracle_test.py"
+    "testdata/__init__.py"
+    "testdata/tilekernels/__init__.py"
+    "testdata/tilekernels/engram.py"
+    "testdata/tilekernels/moe_expand.py"
+    "testdata/tilekernels/moe_gate.py"
+    "testdata/tilekernels/moe_histogram.py"
+    "testdata/tilekernels/moe_normalize.py"
+    "testdata/tilekernels/moe_reduce.py"
+    "testdata/tilekernels/transpose.py"
+    "types_test.py"
     "../../tools/pytest_style_runner.py"
   ARGS
     "loom.importers.tilelang.analysis_test"
@@ -81,6 +100,7 @@ iree_py_test(
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 endif()
 
@@ -114,11 +134,17 @@ add_custom_command(OUTPUT tilelang_import_tests.stamp
 add_custom_target(tilelang_import_tests
     DEPENDS tilelang_import_tests.stamp
 )
+iree_register_generated_compile_input(tilelang_import_tests
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/tilelang_import_tests.stamp"
+)
 
 if(LOOM_IMPORT_TILELANG)
 iree_py_test(
   NAME
     tilelang_import_test
+  MAIN
+    "../check/import_test.py"
   SRCS
     "../check/import_test.py"
   ARGS
@@ -134,6 +160,7 @@ iree_py_test(
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 endif()
 

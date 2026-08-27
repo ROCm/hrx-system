@@ -47,6 +47,16 @@ class LowAllocationIntervalOrderTest : public ::testing::Test {
     return interval;
   }
 
+  static void ExpectOrderedValueIds(
+      const loom_low_allocation_interval_order_t& order,
+      const loom_value_id_t* expected_value_ids,
+      iree_host_size_t expected_count) {
+    ASSERT_EQ(order.interval_count, expected_count);
+    for (iree_host_size_t i = 0; i < expected_count; ++i) {
+      EXPECT_EQ(order.intervals[i]->value_id, expected_value_ids[i]) << i;
+    }
+  }
+
   iree_arena_block_pool_t block_pool_;
   iree_arena_allocator_t arena_;
 };
@@ -91,10 +101,35 @@ TEST_F(LowAllocationIntervalOrderTest, SortsByStartEndAndValueId) {
   ASSERT_NE(order.intervals, nullptr);
   ASSERT_EQ(order.interval_count, 4u);
   EXPECT_EQ(order.unit_count, 15u);
-  EXPECT_EQ(order.intervals[0]->value_id, 1u);
-  EXPECT_EQ(order.intervals[1]->value_id, 2u);
-  EXPECT_EQ(order.intervals[2]->value_id, 3u);
-  EXPECT_EQ(order.intervals[3]->value_id, 4u);
+  const loom_value_id_t expected_value_ids[] = {1, 2, 3, 4};
+  ExpectOrderedValueIds(order, expected_value_ids,
+                        IREE_ARRAYSIZE(expected_value_ids));
+}
+
+TEST_F(LowAllocationIntervalOrderTest, SortsLargeReverseStartOrder) {
+  enum : iree_host_size_t {
+    kIntervalCount = 96,
+  };
+  loom_liveness_interval_t intervals[kIntervalCount];
+  for (iree_host_size_t i = 0; i < kIntervalCount; ++i) {
+    const uint32_t start_point = (uint32_t)(kIntervalCount - i);
+    intervals[i] = RegisterInterval(/*value_id=*/(loom_value_id_t)(i + 1),
+                                    start_point, start_point + 1u,
+                                    /*unit_count=*/1);
+  }
+  loom_liveness_analysis_t liveness = {};
+  liveness.intervals = intervals;
+  liveness.interval_count = IREE_ARRAYSIZE(intervals);
+
+  loom_low_allocation_interval_order_t order = {};
+  IREE_ASSERT_OK(
+      loom_low_allocation_interval_order_build(&liveness, &arena_, &order));
+  ASSERT_NE(order.intervals, nullptr);
+  ASSERT_EQ(order.interval_count, kIntervalCount);
+  EXPECT_EQ(order.unit_count, kIntervalCount);
+  for (iree_host_size_t i = 0; i < kIntervalCount; ++i) {
+    EXPECT_EQ(order.intervals[i]->start_point, (uint32_t)(i + 1u)) << i;
+  }
 }
 
 }  // namespace

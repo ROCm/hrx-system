@@ -23,7 +23,21 @@ import math
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from enum import IntEnum, unique
+from itertools import pairwise
 from typing import Any
+
+from loom.location_tag import (
+    LOCATION_TAG_SANITIZER_SITE,
+    LOCATION_TAG_TEMPLATE_INSTANTIATION,
+    LOCATION_TAG_TILE_LOWERING,
+    LOCATION_TAG_UKERNEL_SELECTION,
+    LOCATION_TAG_USER_BASE,
+)
+from loom.scalar_type import (
+    ScalarTypeKind,
+    parse_scalar_type_kind,
+    scalar_type_name,
+)
 
 __all__ = [
     # Scalar types.
@@ -51,19 +65,15 @@ __all__ = [
     "ShapedType",
     "BufferType",
     "BUFFER_TYPE",
-    "GroupScope",
-    "GROUP_SCOPE_BY_NAME",
-    "GroupType",
     "StorageSpace",
-    "STORAGE_SPACE_BY_NAME",
     "StorageType",
     "PoolType",
     "FunctionType",
     "NoneType",
     "RegisterType",
     "DialectType",
+    "ParameterizedType",
     "EncodingRole",
-    "ENCODING_ROLE_BY_NAME",
     "EncodingType",
     "ENCODING_TYPE",
     "ENCODING_LAYOUT_TYPE",
@@ -92,6 +102,11 @@ __all__ = [
     "EncodingInstance",
     # Predicates.
     "CanonicalAttrDict",
+    "ATTR_AGGREGATE_MAX_NESTING_DEPTH",
+    "EnumArrayAttr",
+    "SignedEnumSetAttr",
+    "ParameterizedAttr",
+    "ParameterizedAttrArray",
     "canonicalize_attr_dict",
     "replace_canonical_attr_dict",
     "PredicateArg",
@@ -112,13 +127,19 @@ __all__ = [
     "Operation",
     "Block",
     "Region",
+    "REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM",
+    "REGION_SOURCE_FLAG_MASK",
     # Symbols.
     "SymbolKind",
     "Symbol",
     "symbol_from_operation",
     "SymbolRef",
     "SymbolName",
+    "SymbolNameArray",
+    "SymbolNameSet",
     "SYMBOL_FLAG_IMPORT",
+    "SYMBOL_FLAG_DECLARATION",
+    "SYMBOL_FLAG_TEST_ONLY",
     "SYMBOL_FLAG_PUBLIC",
     "SYMBOL_FLAG_RETAIN",
     # Tables.
@@ -138,62 +159,6 @@ __all__ = [
 # ============================================================================
 # Scalar types
 # ============================================================================
-
-
-@unique
-class ScalarTypeKind(IntEnum):
-    """Scalar element type kind.
-
-    Values match loom_scalar_type_e in ir/types.h. These are internal
-    compiler values, NOT bytecode-stable.
-
-    Ordered: address types, integers by width, floats by width.
-    """
-
-    INDEX = 0
-    OFFSET = 1
-    I1 = 2
-    I8 = 3
-    I16 = 4
-    I32 = 5
-    I64 = 6
-    F8E4M3 = 7
-    F8E5M2 = 8
-    F16 = 9
-    BF16 = 10
-    F32 = 11
-    F64 = 12
-
-
-# Scalar type name -> enum mapping.
-_SCALAR_NAMES: dict[str, ScalarTypeKind] = {
-    "index": ScalarTypeKind.INDEX,
-    "offset": ScalarTypeKind.OFFSET,
-    "i1": ScalarTypeKind.I1,
-    "i8": ScalarTypeKind.I8,
-    "i16": ScalarTypeKind.I16,
-    "i32": ScalarTypeKind.I32,
-    "i64": ScalarTypeKind.I64,
-    "f8E4M3": ScalarTypeKind.F8E4M3,
-    "f8E5M2": ScalarTypeKind.F8E5M2,
-    "f16": ScalarTypeKind.F16,
-    "bf16": ScalarTypeKind.BF16,
-    "f32": ScalarTypeKind.F32,
-    "f64": ScalarTypeKind.F64,
-}
-
-# Reverse mapping.
-_SCALAR_KIND_NAMES: dict[ScalarTypeKind, str] = {v: k for k, v in _SCALAR_NAMES.items()}
-
-
-def scalar_type_name(kind: ScalarTypeKind) -> str:
-    """Return the textual name for a scalar type kind."""
-    return _SCALAR_KIND_NAMES[kind]
-
-
-def parse_scalar_type_kind(name: str) -> ScalarTypeKind | None:
-    """Parse a scalar type name, returning None if not recognized."""
-    return _SCALAR_NAMES.get(name)
 
 
 # ============================================================================
@@ -238,7 +203,6 @@ class TypeKind(IntEnum):
     SCALAR = 1
     TILE = 2
     TENSOR = 3
-    GROUP = 4
     FUNCTION = 5
     DIALECT = 6
     ENCODING = 7
@@ -248,7 +212,8 @@ class TypeKind(IntEnum):
     BUFFER = 11
     REGISTER = 12
     STORAGE = 13
-    PLACEHOLDER = 14
+    PARAMETERIZED = 14
+    PLACEHOLDER = 15
 
 
 # ============================================================================
@@ -422,43 +387,6 @@ class BufferType:
 BUFFER_TYPE = BufferType()
 
 
-class GroupScope(IntEnum):
-    """Group scope kind. Must match loom_group_scope_t in types.h."""
-
-    WORKGROUP = 0
-    SUBGROUP = 1
-
-    @property
-    def text(self) -> str:
-        """The canonical text representation for printing."""
-        return _GROUP_SCOPE_NAMES[self]
-
-
-_GROUP_SCOPE_NAMES: dict[GroupScope, str] = {
-    GroupScope.WORKGROUP: "workgroup",
-    GroupScope.SUBGROUP: "subgroup",
-}
-
-# Reverse mapping for parsing: "workgroup" -> GroupScope.WORKGROUP.
-GROUP_SCOPE_BY_NAME: dict[str, GroupScope] = {
-    name: scope for scope, name in _GROUP_SCOPE_NAMES.items()
-}
-
-
-@dataclass(frozen=True, slots=True)
-class GroupType:
-    """A group type: group<scope>."""
-
-    scope: GroupScope
-
-    @property
-    def type_kind(self) -> TypeKind:
-        return TypeKind.GROUP
-
-    def __repr__(self) -> str:
-        return f"group<{self.scope.text}>"
-
-
 class StorageSpace(IntEnum):
     """Function-local byte storage space. Must match loom_storage_space_t."""
 
@@ -466,23 +394,6 @@ class StorageSpace(IntEnum):
     SCRATCH = 1
     PRIVATE = 2
     WORKGROUP = 3
-
-    @property
-    def text(self) -> str:
-        """The canonical text representation for printing."""
-        return _STORAGE_SPACE_NAMES[self]
-
-
-_STORAGE_SPACE_NAMES: dict[StorageSpace, str] = {
-    StorageSpace.STACK: "stack",
-    StorageSpace.SCRATCH: "scratch",
-    StorageSpace.PRIVATE: "private",
-    StorageSpace.WORKGROUP: "workgroup",
-}
-
-STORAGE_SPACE_BY_NAME: dict[str, StorageSpace] = {
-    name: space for space, name in _STORAGE_SPACE_NAMES.items()
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -499,7 +410,9 @@ class StorageType:
         return TypeKind.STORAGE
 
     def __repr__(self) -> str:
-        return f"low.storage<{self.space.text}>"
+        from loom.format.text.printer import print_type
+
+        return print_type(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -521,17 +434,18 @@ class FunctionType:
 
 @dataclass(frozen=True, slots=True)
 class RegisterType:
-    """A target-low register value with compact descriptor identity.
+    """A target-low register value with physical and semantic identity.
 
-    Register types carry only physical allocation shape, not value semantics.
-    The op descriptor determines whether a register is interpreted as i32,
-    f32, v128, an address, or an instruction-specific packed payload.
+    The descriptor fields identify the physical register carrier. ``value_type``
+    preserves the optional source-level value semantics represented by that
+    carrier so target emitters do not have to recover them from op position.
     """
 
     descriptor_set_stable_id: int
     register_class_id: int
     unit_count: int = 1
     name: str | None = None
+    value_type: Type | None = None
 
     def __post_init__(self) -> None:
         if self.descriptor_set_stable_id < 1:
@@ -559,9 +473,9 @@ class RegisterType:
             if self.name is not None
             else f"0x{self.descriptor_set_stable_id:x}:{self.register_class_id}"
         )
-        if self.unit_count == 1:
-            return f"reg<{reg_class}>"
-        return f"reg<{reg_class} x{self.unit_count}>"
+        unit_suffix = "" if self.unit_count == 1 else f" x{self.unit_count}"
+        value_suffix = "" if self.value_type is None else f" : {self.value_type!r}"
+        return f"reg<{reg_class}{unit_suffix}{value_suffix}>"
 
 
 @dataclass(frozen=True, slots=True)
@@ -569,7 +483,7 @@ class DialectType:
     """A dialect-defined type (hal.buffer, vm.ref<T>, etc.).
 
     Catch-all for types defined by dialects outside the built-in set.
-    Built-in types (ScalarType, ShapedType, GroupType, FunctionType)
+    Built-in types (ScalarType, ShapedType, FunctionType)
     keep their specific dataclasses for performance and ergonomics.
     Dialect types use DialectType with the TypeDef driving print/parse.
 
@@ -591,6 +505,93 @@ class DialectType:
         return self.name
 
 
+@dataclass(frozen=True, slots=True, init=False, eq=False)
+class ParameterizedType:
+    """Immutable descriptor-backed generic type value.
+
+    The declaration format controls whether each named slot is printed
+    positionally or with a key. Storage and identity always use declaration-
+    order slots so generated accessors require no lookup.
+    """
+
+    definition: Any
+    _slots: tuple[Any, ...]
+
+    def __init__(self, definition: Any, parameters: Mapping[str, Any]) -> None:
+        from loom.dsl import TypeDef
+
+        if (
+            not isinstance(definition, TypeDef)
+            or not definition.uses_attribute_parameters
+        ):
+            raise TypeError(
+                "ParameterizedType definition must be a descriptor-backed "
+                f"TypeDef, got {definition!r}"
+            )
+        object.__setattr__(self, "definition", definition)
+        object.__setattr__(
+            self,
+            "_slots",
+            _canonicalize_parameterized_slots(
+                definition.name, definition.params, parameters
+            ),
+        )
+
+    @property
+    def type_kind(self) -> TypeKind:
+        return TypeKind.PARAMETERIZED
+
+    @property
+    def family_name(self) -> str:
+        return self.definition.name
+
+    @property
+    def slots(self) -> tuple[Any, ...]:
+        return tuple(
+            None if value is _ABSENT_PARAMETERIZED_VALUE else value
+            for value in self._slots
+        )
+
+    def has(self, parameter_name: str) -> bool:
+        return (
+            self._slots[self._parameter_index(parameter_name)]
+            is not _ABSENT_PARAMETERIZED_VALUE
+        )
+
+    def get(self, parameter_name: str, default: Any = None) -> Any:
+        value = self._slots[self._parameter_index(parameter_name)]
+        return default if value is _ABSENT_PARAMETERIZED_VALUE else value
+
+    def present_items(self) -> tuple[tuple[str, Any], ...]:
+        return tuple(
+            (parameter.name, value)
+            for parameter, value in zip(
+                self.definition.params, self._slots, strict=True
+            )
+            if value is not _ABSENT_PARAMETERIZED_VALUE
+        )
+
+    def _parameter_index(self, parameter_name: str) -> int:
+        for index, parameter in enumerate(self.definition.params):
+            if parameter.name == parameter_name:
+                return index
+        raise KeyError(parameter_name)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ParameterizedType):
+            return NotImplemented
+        return self.family_name == other.family_name and self._slots == other._slots
+
+    def __hash__(self) -> int:
+        return hash((self.family_name, self._slots))
+
+    def __repr__(self) -> str:
+        parameters = ", ".join(
+            f"{name}={value!r}" for name, value in self.present_items()
+        )
+        return f"{self.family_name}<{parameters}>"
+
+
 @unique
 class EncodingRole(IntEnum):
     """Semantic role carried by an encoding SSA value type."""
@@ -600,26 +601,6 @@ class EncodingRole(IntEnum):
     SCHEMA = 2
     STORAGE = 3
     TRANSFORM = 4
-
-    @property
-    def text(self) -> str:
-        match self:
-            case EncodingRole.UNKNOWN:
-                return ""
-            case EncodingRole.LAYOUT:
-                return "layout"
-            case EncodingRole.SCHEMA:
-                return "schema"
-            case EncodingRole.STORAGE:
-                return "storage"
-            case EncodingRole.TRANSFORM:
-                return "transform"
-        raise ValueError(f"unknown encoding role: {self!r}")
-
-
-ENCODING_ROLE_BY_NAME: dict[str, EncodingRole] = {
-    role.text: role for role in EncodingRole if role != EncodingRole.UNKNOWN
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -642,9 +623,9 @@ class EncodingType:
         return TypeKind.ENCODING
 
     def __repr__(self) -> str:
-        if self.role != EncodingRole.UNKNOWN:
-            return f"encoding<{self.role.text}>"
-        return "encoding"
+        from loom.format.text.printer import print_type
+
+        return print_type(self)
 
 
 # Singletons for encoding type variants.
@@ -709,11 +690,11 @@ type Type = (
     ScalarType
     | ShapedType
     | BufferType
-    | GroupType
     | StorageType
     | FunctionType
     | RegisterType
     | DialectType
+    | ParameterizedType
     | EncodingType
     | PoolType
     | PlaceholderType
@@ -762,13 +743,6 @@ class LocationKind(IntEnum):
 
 # Location flag bits (matches loom_location_flag_bits_e in ir.h).
 LOCATION_FLAG_SYNTHETIC = 1 << 0
-
-# Built-in tagged location payload tags (matches loom_location_tag_e).
-LOCATION_TAG_SANITIZER_SITE = 0x0001
-LOCATION_TAG_TEMPLATE_INSTANTIATION = 0x0002
-LOCATION_TAG_TILE_LOWERING = 0x0003
-LOCATION_TAG_UKERNEL_SELECTION = 0x0004
-LOCATION_TAG_USER_BASE = 0x8000
 
 
 @dataclass(frozen=True, slots=True)
@@ -843,11 +817,13 @@ class EncodingInstance:
     entry. `ShapedType.encoding` holds the encoding object directly in Python;
     bytecode writers assign table indices during numbering.
 
-    name: Encoding name ("q8_0", "q6_k", "dense"). Always present.
-        This is the name used in textual format: #q8_0, #q6_k.
+    name: Qualified encoding family name ("encoding.operand",
+        "encoding.layout.dense", "ggml.q4_k"). Always present and used in
+        textual format.
     alias: Attribute alias for pretty-printing ("enc"), or empty.
         When set, the printer uses the alias instead of the full
-        #name<params> form. Defined at file level: #enc = #q8_0<block=32>
+        #name<params> form. Defined at file level:
+        #enc = #test.schema<block=32>
         Aliases are display-only and do not participate in equality/hash.
     params: Canonical static attributes as sorted key-value pairs. Values use
         the same Python attribute domain as op attrs: ints, floats, bools,
@@ -1051,6 +1027,479 @@ class TiedResult:
 # ============================================================================
 # Canonical attribute dictionaries
 # ============================================================================
+
+
+ATTR_AGGREGATE_MAX_NESTING_DEPTH = 8
+
+
+class _AbsentParameterizedValue:
+    """Private sentinel preserving optional absence in immutable slot tuples."""
+
+    __slots__ = ()
+
+
+_ABSENT_PARAMETERIZED_VALUE = _AbsentParameterizedValue()
+
+
+@dataclass(frozen=True, slots=True, init=False, eq=False)
+class ParameterizedAttr:
+    """Immutable descriptor-backed parameterized attribute value.
+
+    Values are stored in declaration order. Optional omission uses a private
+    sentinel so an absent parameter remains distinct from a present empty array,
+    byte span, or dictionary.
+    """
+
+    definition: Any
+    _slots: tuple[Any, ...]
+
+    def __init__(self, definition: Any, parameters: Mapping[str, Any]) -> None:
+        from loom.dsl import ParameterizedAttrDef
+
+        if not isinstance(definition, ParameterizedAttrDef):
+            raise TypeError(
+                "ParameterizedAttr definition must be a ParameterizedAttrDef, "
+                f"got {type(definition).__name__}"
+            )
+        object.__setattr__(self, "definition", definition)
+        object.__setattr__(
+            self,
+            "_slots",
+            _canonicalize_parameterized_slots(
+                definition.name, definition.parameters, parameters
+            ),
+        )
+
+    @property
+    def family_name(self) -> str:
+        """Returns the stable namespaced family identity."""
+
+        return self.definition.name
+
+    @property
+    def slots(self) -> tuple[Any, ...]:
+        """Returns declaration-order values with absent slots represented by None."""
+
+        return tuple(
+            None if value is _ABSENT_PARAMETERIZED_VALUE else value
+            for value in self._slots
+        )
+
+    def has(self, parameter_name: str) -> bool:
+        """Returns whether an optional parameter is present."""
+
+        index = self._parameter_index(parameter_name)
+        return self._slots[index] is not _ABSENT_PARAMETERIZED_VALUE
+
+    def get(self, parameter_name: str, default: Any = None) -> Any:
+        """Returns a present parameter value or |default| when absent."""
+
+        index = self._parameter_index(parameter_name)
+        value = self._slots[index]
+        return default if value is _ABSENT_PARAMETERIZED_VALUE else value
+
+    def present_items(self) -> tuple[tuple[str, Any], ...]:
+        """Returns present parameters in declaration order."""
+
+        return tuple(
+            (parameter.name, value)
+            for parameter, value in zip(
+                self.definition.parameters, self._slots, strict=True
+            )
+            if value is not _ABSENT_PARAMETERIZED_VALUE
+        )
+
+    def _parameter_index(self, parameter_name: str) -> int:
+        for index, parameter in enumerate(self.definition.parameters):
+            if parameter.name == parameter_name:
+                return index
+        raise KeyError(parameter_name)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ParameterizedAttr):
+            return NotImplemented
+        return self.family_name == other.family_name and self._slots == other._slots
+
+    def __hash__(self) -> int:
+        return hash((self.family_name, self._slots))
+
+    def __repr__(self) -> str:
+        parameters = ", ".join(
+            f"{name}={value!r}" for name, value in self.present_items()
+        )
+        return f"#{self.family_name}<{parameters}>"
+
+
+def _canonicalize_parameterized_enum_value(
+    family_name: str, parameter: Any, value: Any
+) -> int:
+    assert parameter.enum_def is not None
+    value_by_keyword = {
+        enum_case.keyword: enum_case.value for enum_case in parameter.enum_def.cases
+    }
+    declared_values = frozenset(value_by_keyword.values())
+    if isinstance(value, str):
+        normalized = value_by_keyword.get(value)
+        if normalized is None:
+            raise ValueError(
+                f"{family_name}: parameter '{parameter.name}' has unknown enum "
+                f"keyword {value!r}"
+            )
+        return normalized
+    if type(value) is not int or not 0 <= value <= 0xFF:
+        raise TypeError(
+            f"{family_name}: parameter '{parameter.name}' must be an enum "
+            f"keyword or byte value, got {value!r}"
+        )
+    if not parameter.open_enum and value not in declared_values:
+        raise ValueError(
+            f"{family_name}: parameter '{parameter.name}' has undeclared enum "
+            f"value {value}"
+        )
+    return value
+
+
+def _canonicalize_parameterized_slots(
+    family_name: str,
+    descriptors: Iterable[Any],
+    parameters: Mapping[str, Any],
+) -> tuple[Any, ...]:
+    """Canonicalizes a named parameter mapping into immutable ordered slots."""
+
+    if not isinstance(parameters, Mapping):
+        raise TypeError(
+            f"{family_name}: parameters must be a mapping, got "
+            f"{type(parameters).__name__}"
+        )
+    frozen_descriptors = tuple(descriptors)
+    parameter_names = {parameter.name for parameter in frozen_descriptors}
+    unknown_names = sorted(set(parameters) - parameter_names)
+    if unknown_names:
+        raise TypeError(
+            f"{family_name}: unknown parameter(s): {', '.join(unknown_names)}"
+        )
+
+    slots: list[Any] = []
+    for descriptor in frozen_descriptors:
+        if descriptor.name not in parameters:
+            if descriptor.optional:
+                slots.append(_ABSENT_PARAMETERIZED_VALUE)
+                continue
+            raise TypeError(
+                f"{family_name}: missing required parameter '{descriptor.name}'"
+            )
+        slots.append(
+            _canonicalize_parameterized_value(
+                family_name, descriptor, parameters[descriptor.name]
+            )
+        )
+    return tuple(slots)
+
+
+def _canonicalize_parameterized_attr_array(
+    family_name: str, parameter: Any, value: Any
+) -> ParameterizedAttrArray:
+    """Canonicalizes an ordered parameterized attribute array."""
+    values = value.values if isinstance(value, ParameterizedAttrArray) else value
+    if isinstance(values, str | bytes | bytearray) or not isinstance(values, Iterable):
+        raise TypeError(
+            f"{family_name}: parameter '{parameter.name}' must be an iterable "
+            f"of parameterized attributes, got {value!r}"
+        )
+
+    array = ParameterizedAttrArray(values)
+    expected_family = parameter.parameterized_attr
+    if expected_family is not None:
+        for index, element in enumerate(array):
+            if element.family_name != expected_family.name:
+                raise ValueError(
+                    f"{family_name}: parameter '{parameter.name}' element "
+                    f"{index} has family '{element.family_name}', expected "
+                    f"'{expected_family.name}'"
+                )
+    return array
+
+
+def _canonicalize_parameterized_signed_enum_set(
+    family_name: str, parameter: Any, value: Any
+) -> SignedEnumSetAttr:
+    """Canonicalizes a signed enum set against its enclosing enum domain."""
+    if isinstance(value, SignedEnumSetAttr):
+        assertions: Mapping[str | int, bool] = {
+            **{ordinal: True for ordinal in value.positive_values},
+            **{ordinal: False for ordinal in value.negative_values},
+        }
+    elif isinstance(value, Mapping):
+        assertions = value
+    else:
+        raise TypeError(
+            f"{family_name}: parameter '{parameter.name}' must be a signed "
+            "enum set or mapping of enum values to Booleans, "
+            f"got {value!r}"
+        )
+
+    positive_values: list[int] = []
+    negative_values: list[int] = []
+    resolved_values: set[int] = set()
+    for enum_value, assertion in assertions.items():
+        if type(assertion) is not bool:
+            raise TypeError(
+                f"{family_name}: parameter '{parameter.name}' must be a "
+                "mapping of enum values to exact Boolean assertions, "
+                f"got {value!r}"
+            )
+        stable_value = _canonicalize_parameterized_enum_value(
+            family_name, parameter, enum_value
+        )
+        if stable_value in resolved_values:
+            raise ValueError(
+                f"{family_name}: parameter '{parameter.name}' names stable "
+                f"enum value {stable_value} more than once"
+            )
+        resolved_values.add(stable_value)
+        (positive_values if assertion else negative_values).append(stable_value)
+    return SignedEnumSetAttr(positive_values, negative_values)
+
+
+def _canonicalize_parameterized_value(
+    family_name: str, parameter: Any, value: Any
+) -> Any:
+    from loom.dsl import (
+        ATTR_TYPE_BOOL,
+        ATTR_TYPE_BYTES,
+        ATTR_TYPE_DICT,
+        ATTR_TYPE_ENCODING,
+        ATTR_TYPE_ENUM,
+        ATTR_TYPE_ENUM_ARRAY,
+        ATTR_TYPE_F64,
+        ATTR_TYPE_I64,
+        ATTR_TYPE_I64_ARRAY,
+        ATTR_TYPE_PARAMETERIZED,
+        ATTR_TYPE_PARAMETERIZED_ARRAY,
+        ATTR_TYPE_SIGNED_ENUM_SET,
+        ATTR_TYPE_STRING,
+        ATTR_TYPE_SYMBOL,
+        ATTR_TYPE_SYMBOL_ARRAY,
+        ATTR_TYPE_TYPE,
+    )
+
+    def type_error(expected: str) -> TypeError:
+        return TypeError(
+            f"{family_name}: parameter '{parameter.name}' must be {expected}, "
+            f"got {value!r}"
+        )
+
+    match parameter.attr_type:
+        case kind if kind == ATTR_TYPE_I64:
+            if type(value) is not int or not -(2**63) <= value < 2**63:
+                raise type_error("a signed 64-bit integer")
+            return value
+        case kind if kind == ATTR_TYPE_F64:
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                raise type_error("a floating-point number")
+            return float(value)
+        case kind if kind == ATTR_TYPE_STRING:
+            if type(value) is not str:
+                raise type_error("a string")
+            return value
+        case kind if kind == ATTR_TYPE_BOOL:
+            if type(value) is not bool:
+                raise type_error("a Boolean")
+            return value
+        case kind if kind == ATTR_TYPE_ENUM:
+            return _canonicalize_parameterized_enum_value(family_name, parameter, value)
+        case kind if kind == ATTR_TYPE_ENUM_ARRAY:
+            values = value.values if isinstance(value, EnumArrayAttr) else value
+            if isinstance(values, str) or not isinstance(values, Iterable):
+                raise type_error("an iterable of enum keywords or byte values")
+            return EnumArrayAttr(
+                _canonicalize_parameterized_enum_value(family_name, parameter, element)
+                for element in values
+            )
+        case kind if kind == ATTR_TYPE_SIGNED_ENUM_SET:
+            return _canonicalize_parameterized_signed_enum_set(
+                family_name, parameter, value
+            )
+        case kind if kind == ATTR_TYPE_TYPE:
+            if not isinstance(
+                value,
+                (
+                    ScalarType,
+                    ShapedType,
+                    BufferType,
+                    StorageType,
+                    FunctionType,
+                    RegisterType,
+                    DialectType,
+                    ParameterizedType,
+                    EncodingType,
+                    PoolType,
+                    PlaceholderType,
+                    NoneType,
+                ),
+            ):
+                raise type_error("a Loom type")
+            return value
+        case kind if kind == ATTR_TYPE_I64_ARRAY:
+            if isinstance(value, str | bytes | bytearray) or not isinstance(
+                value, Iterable
+            ):
+                raise type_error("an iterable of signed 64-bit integers")
+            values = tuple(value)
+            for index, element in enumerate(values):
+                if type(element) is not int or not -(2**63) <= element < 2**63:
+                    raise TypeError(
+                        f"{family_name}: parameter '{parameter.name}' element "
+                        f"{index} must be a signed 64-bit integer, got "
+                        f"{element!r}"
+                    )
+            if len(values) > 0xFFFF:
+                raise ValueError(
+                    f"{family_name}: parameter '{parameter.name}' has "
+                    f"{len(values)} elements, exceeding UINT16_MAX"
+                )
+            return values
+        case kind if kind == ATTR_TYPE_BYTES:
+            if not isinstance(value, bytes | bytearray | memoryview):
+                raise type_error("a byte payload")
+            return bytes(value)
+        case kind if kind == ATTR_TYPE_ENCODING:
+            if not isinstance(value, EncodingInstance):
+                raise type_error("a static encoding")
+            return value
+        case kind if kind == ATTR_TYPE_SYMBOL:
+            if not isinstance(value, SymbolName):
+                raise type_error("a symbol name")
+            return value
+        case kind if kind == ATTR_TYPE_SYMBOL_ARRAY:
+            values = value.values if isinstance(value, SymbolNameArray) else value
+            if isinstance(values, str | bytes | bytearray) or not isinstance(
+                values, Iterable
+            ):
+                raise type_error("an iterable of symbol names")
+            return SymbolNameArray(values)
+        case kind if kind == ATTR_TYPE_DICT:
+            if not isinstance(value, Mapping):
+                raise type_error("an attribute dictionary")
+            return canonicalize_attr_dict(value)
+        case kind if kind == ATTR_TYPE_PARAMETERIZED:
+            if not isinstance(value, ParameterizedAttr):
+                raise type_error("a parameterized attribute")
+            expected_family = parameter.parameterized_attr
+            if (
+                expected_family is not None
+                and value.family_name != expected_family.name
+            ):
+                raise ValueError(
+                    f"{family_name}: parameter '{parameter.name}' has family "
+                    f"'{value.family_name}', expected '{expected_family.name}'"
+                )
+            return value
+        case kind if kind == ATTR_TYPE_PARAMETERIZED_ARRAY:
+            return _canonicalize_parameterized_attr_array(family_name, parameter, value)
+        case _:
+            raise ValueError(
+                f"{family_name}: parameter '{parameter.name}' has unsupported "
+                f"kind '{parameter.attr_type}'"
+            )
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class EnumArrayAttr:
+    """Ordered stable enum values owned by an operation field descriptor."""
+
+    values: tuple[int, ...]
+
+    def __init__(self, values: Iterable[int] = ()) -> None:
+        frozen_values = tuple(values)
+        if len(frozen_values) > 0xFFFF:
+            raise ValueError(
+                f"enum array length {len(frozen_values)} exceeds UINT16_MAX"
+            )
+        for index, value in enumerate(frozen_values):
+            if type(value) is not int or not 0 <= value <= 0xFF:
+                raise ValueError(
+                    f"enum array element {index} must be an integer in "
+                    f"[0, 255], got {value!r}"
+                )
+        object.__setattr__(self, "values", frozen_values)
+
+    def __iter__(self) -> Iterator[int]:
+        return iter(self.values)
+
+    def __len__(self) -> int:
+        return len(self.values)
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class SignedEnumSetAttr:
+    """Sparse positive and negative assertions over a stable enum domain."""
+
+    positive_values: tuple[int, ...]
+    negative_values: tuple[int, ...]
+
+    def __init__(
+        self,
+        positive_values: Iterable[int] = (),
+        negative_values: Iterable[int] = (),
+    ) -> None:
+        positive = self._canonicalize_values("positive", positive_values)
+        negative = self._canonicalize_values("negative", negative_values)
+        contradictory_values = sorted(set(positive) & set(negative))
+        if contradictory_values:
+            raise ValueError(
+                "signed enum set contains contradictory assertions for "
+                f"stable value(s) {contradictory_values}"
+            )
+        object.__setattr__(self, "positive_values", positive)
+        object.__setattr__(self, "negative_values", negative)
+
+    @staticmethod
+    def _canonicalize_values(polarity: str, values: Iterable[int]) -> tuple[int, ...]:
+        frozen_values = tuple(values)
+        for index, value in enumerate(frozen_values):
+            if type(value) is not int or not 0 <= value <= 0xFF:
+                raise ValueError(
+                    f"signed enum set {polarity} element {index} must be an "
+                    f"integer in [0, 255], got {value!r}"
+                )
+        if len(set(frozen_values)) != len(frozen_values):
+            raise ValueError(
+                f"signed enum set contains duplicate {polarity} assertions"
+            )
+        return tuple(sorted(frozen_values))
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class ParameterizedAttrArray:
+    """Ordered registered parameterized attribute values.
+
+    The enclosing field descriptor may constrain every element to one exact
+    family. This value preserves ordering and repeated families.
+    """
+
+    values: tuple[ParameterizedAttr, ...]
+
+    def __init__(self, values: Iterable[ParameterizedAttr] = ()) -> None:
+        frozen_values = tuple(values)
+        if len(frozen_values) > 0xFFFF:
+            raise ValueError(
+                "parameterized attribute array length "
+                f"{len(frozen_values)} exceeds UINT16_MAX"
+            )
+        for index, value in enumerate(frozen_values):
+            if not isinstance(value, ParameterizedAttr):
+                raise TypeError(
+                    "parameterized attribute array element "
+                    f"{index} must be a ParameterizedAttr, got {value!r}"
+                )
+        object.__setattr__(self, "values", frozen_values)
+
+    def __iter__(self) -> Iterator[ParameterizedAttr]:
+        return iter(self.values)
+
+    def __len__(self) -> int:
+        return len(self.values)
 
 
 class CanonicalAttrDict(Mapping[str, Any]):
@@ -1295,7 +1744,10 @@ class Operation:
     attributes: Mapping[str, Any] = field(default_factory=CanonicalAttrDict)
     regions: list[Region] = field(default_factory=list)
     location_id: int = LOCATION_UNKNOWN
+    # Leading line comments without // or its conventional separator space.
     comments: tuple[str, ...] = ()
+    # True when one canonical empty source line precedes this operation.
+    leading_blank_line: bool = False
     name: str = ""
     is_dead: bool = False
     _attributes_frozen: bool = field(default=False, init=False, repr=False)
@@ -1325,14 +1777,23 @@ class Block:
     label: str = ""
     arg_ids: list[int] = field(default_factory=list)
     ops: list[Operation] = field(default_factory=list)
+    # Leading line comments without // or its conventional separator space.
     comments: tuple[str, ...] = ()
+    # True when one canonical empty source line precedes this explicit label.
+    leading_blank_line: bool = False
+
+
+# Region source-presentation flags. These bits are bytecode-stable.
+REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM = 1 << 0
+REGION_SOURCE_FLAG_MASK = REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM
 
 
 @dataclass(slots=True)
 class Region:
-    """An ordered list of blocks."""
+    """An ordered list of blocks and its retained source presentation."""
 
     blocks: list[Block] = field(default_factory=list)
+    source_flags: int = 0
 
 
 # ============================================================================
@@ -1347,19 +1808,22 @@ class SymbolKind(IntEnum):
     NONE = -1
     FUNC_DEF = 0
     FUNC_DECL = 1
-    FUNC_TEMPLATE = 2
-    FUNC_UKERNEL = 3
-    GLOBAL = 4
-    EXECUTABLE = 5
-    RECORD = 6
+    TEMPLATE_DECL = 2
+    TEMPLATE_DEF = 3
+    TEMPLATE_UKERNEL = 4
+    GLOBAL = 5
+    EXECUTABLE = 6
+    RECORD = 7
 
 
 # Symbol flags.
-# These bits are bytecode-stable. Bit 2 is reserved by the bytecode-only
-# explicit import-symbol marker.
+# These bits are bytecode-stable. Bits 2, 6, and 7 are reserved by bytecode-only
+# metadata flags.
 SYMBOL_FLAG_PUBLIC = 1 << 0
 SYMBOL_FLAG_IMPORT = 1 << 1
 SYMBOL_FLAG_RETAIN = 1 << 3
+SYMBOL_FLAG_DECLARATION = 1 << 4
+SYMBOL_FLAG_TEST_ONLY = 1 << 5
 
 
 @dataclass(frozen=True, slots=True)
@@ -1374,6 +1838,81 @@ class SymbolName(str):
     """Module-local symbol-name attribute payload."""
 
     __slots__ = ()
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class SymbolNameArray:
+    """Ordered module-local symbol-name attribute payloads.
+
+    The enclosing field descriptor owns the symbol interface and reference
+    role. Ordering and duplicate names are preserved.
+    """
+
+    values: tuple[SymbolName, ...]
+
+    def __init__(self, values: Iterable[SymbolName] = ()) -> None:
+        frozen_values = tuple(values)
+        if len(frozen_values) > 0xFFFF:
+            raise ValueError(
+                f"symbol name array length {len(frozen_values)} exceeds UINT16_MAX"
+            )
+        for index, value in enumerate(frozen_values):
+            if not isinstance(value, SymbolName):
+                raise TypeError(
+                    f"symbol name array element {index} must be a SymbolName, "
+                    f"got {value!r}"
+                )
+        object.__setattr__(self, "values", frozen_values)
+
+    def __iter__(self) -> Iterator[SymbolName]:
+        return iter(self.values)
+
+    def __len__(self) -> int:
+        return len(self.values)
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class SymbolNameSet:
+    """Canonical module-local symbol-name set attribute payloads.
+
+    Values are stored in strict UTF-8 byte order with no duplicates. The
+    enclosing field descriptor owns the symbol interface and reference role.
+    """
+
+    values: tuple[SymbolName, ...]
+
+    def __init__(self, values: Iterable[SymbolName] = ()) -> None:
+        frozen_values = tuple(values)
+        if len(frozen_values) > 0xFFFF:
+            raise ValueError(
+                f"symbol name set length {len(frozen_values)} exceeds UINT16_MAX"
+            )
+        for index, value in enumerate(frozen_values):
+            if not isinstance(value, SymbolName):
+                raise TypeError(
+                    f"symbol name set element {index} must be a SymbolName, "
+                    f"got {value!r}"
+                )
+        ordered_values = tuple(
+            sorted(frozen_values, key=lambda value: value.encode("utf-8"))
+        )
+        for previous, current in pairwise(ordered_values):
+            if previous == current:
+                raise ValueError(f"duplicate symbol name '@{current}'")
+        object.__setattr__(self, "values", ordered_values)
+
+    def __iter__(self) -> Iterator[SymbolName]:
+        return iter(self.values)
+
+    def __len__(self) -> int:
+        return len(self.values)
+
+    @classmethod
+    def _from_canonical_values(cls, values: tuple[SymbolName, ...]) -> SymbolNameSet:
+        """Construct from an already validated strict UTF-8 ordering."""
+        result = object.__new__(cls)
+        object.__setattr__(result, "values", values)
+        return result
 
 
 @dataclass(slots=True)
@@ -1410,8 +1949,9 @@ class Symbol:
 _BYTECODE_SYMBOL_KIND_BY_NAME: dict[str, SymbolKind] = {
     "LOOM_SYMBOL_FUNC_DEF": SymbolKind.FUNC_DEF,
     "LOOM_SYMBOL_FUNC_DECL": SymbolKind.FUNC_DECL,
-    "LOOM_SYMBOL_FUNC_TEMPLATE": SymbolKind.FUNC_TEMPLATE,
-    "LOOM_SYMBOL_FUNC_UKERNEL": SymbolKind.FUNC_UKERNEL,
+    "LOOM_SYMBOL_TEMPLATE_DECL": SymbolKind.TEMPLATE_DECL,
+    "LOOM_SYMBOL_TEMPLATE_DEF": SymbolKind.TEMPLATE_DEF,
+    "LOOM_SYMBOL_TEMPLATE_UKERNEL": SymbolKind.TEMPLATE_UKERNEL,
     "LOOM_SYMBOL_GLOBAL": SymbolKind.GLOBAL,
     "LOOM_SYMBOL_EXECUTABLE": SymbolKind.EXECUTABLE,
     "LOOM_SYMBOL_RECORD": SymbolKind.RECORD,
@@ -1438,6 +1978,10 @@ def symbol_from_operation(operation: Operation, op_decl: Any | None = None) -> S
         symbol_flags |= SYMBOL_FLAG_PUBLIC
     if operation.attributes.get("retain") == "retain":
         symbol_flags |= SYMBOL_FLAG_RETAIN
+    if symbol_def.is_declaration:
+        symbol_flags |= SYMBOL_FLAG_DECLARATION
+    if symbol_def.is_test_only:
+        symbol_flags |= SYMBOL_FLAG_TEST_ONLY
 
     source_module = operation.attributes.get("import_module", "")
     if source_module:
@@ -1555,12 +2099,16 @@ class LocationTable:
 class Module:
     """Top-level IR container.
 
-    Owns all IR through its tables. The module is the unit of
-    serialization, linking, and compilation.
+    Owns all IR through its top-level body and uniqued tables. The symbol table
+    indexes symbol-defining operations in the body; it is not an operation
+    ownership container. The module is the unit of serialization, linking, and
+    compilation.
     """
 
     name: str = ""
     flags: int = 0
+    # File header lines without // or its conventional separator space.
+    file_header: tuple[str, ...] = ()
 
     # Tables.
     strings: StringTable = field(default_factory=StringTable)
@@ -1569,6 +2117,9 @@ class Module:
     values: list[Value] = field(default_factory=list)
     symbols: list[Symbol] = field(default_factory=list)
     encodings: list[EncodingInstance] = field(default_factory=list)
+
+    # Single module-scope block owning every top-level operation.
+    body: Block = field(default_factory=Block)
 
     # Source table is on the context, but for standalone modules
     # we keep a local source list.
@@ -1585,10 +2136,18 @@ class Module:
         return self.locations.add(loc)
 
     def add_symbol(self, symbol: Symbol) -> int:
-        """Add a symbol, returning its ID."""
+        """Add a symbol and its defining operation, returning its ID."""
         sym_id = len(self.symbols)
         self.symbols.append(symbol)
+        if symbol.op is not None:
+            self.body.ops.append(symbol.op)
         return sym_id
+
+    def add_top_level_operation(self, operation: Operation) -> int:
+        """Add a non-symbol module-scope operation, returning its ordinal."""
+        operation_index = len(self.body.ops)
+        self.body.ops.append(operation)
+        return operation_index
 
     def add_encoding(self, instance: EncodingInstance) -> int:
         """Add an encoding instance, returning its index. Deduplicates."""
@@ -1703,7 +2262,7 @@ def record_operation_value_metadata(
 
 
 def rebuild_value_metadata(module: Module) -> None:
-    """Rebuild all def/use metadata from module.symbols and nested regions."""
+    """Rebuild all def/use metadata from the module body and nested regions."""
     for value in module.values:
         value.flags &= ~VALUE_FLAG_BLOCK_ARG
         value.def_op_index = VALUE_DEF_OP_NONE
@@ -1711,15 +2270,20 @@ def rebuild_value_metadata(module: Module) -> None:
         value.def_result_index = 0
         value.uses.clear()
 
-    for symbol_index, symbol in enumerate(module.symbols):
-        if symbol.op is None:
-            continue
-        operand_def_count = len(symbol.op.operands) if not symbol.op.regions else 0
+    symbol_operation_ids = {
+        id(symbol.op) for symbol in module.symbols if symbol.op is not None
+    }
+    for operation_index, operation in enumerate(module.body.ops):
+        operand_def_count = (
+            len(operation.operands)
+            if id(operation) in symbol_operation_ids and not operation.regions
+            else 0
+        )
         record_operation_value_metadata(
             module,
-            symbol.op,
+            operation,
             block_index=VALUE_DEF_BLOCK_NONE,
-            op_index=symbol_index,
+            op_index=operation_index,
             operand_def_count=operand_def_count,
         )
 

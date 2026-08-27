@@ -1,0 +1,89 @@
+// RUN: emit source-low output=low
+
+// Nested provider predicates acquire their useful facts only after each outer
+// provider has been selected and inlined at the concrete application site.
+// Both conditional levels must select their specialized provider before the
+// source-to-low pipeline begins. The nested device providers similarly defer
+// their required kernel ancestry until the outer provider reaches its caller.
+amdgpu.target<gfx11-generic> @target
+
+template.decl @nested.kernel_inner()
+template.decl @nested.kernel_outer()
+template.decl @nested.leaf(%value: index) -> (index)
+template.decl @nested.middle(%value: index) -> (index)
+template.decl @nested.outer(%value: index) -> (index)
+
+template.def<@nested.leaf> priority(20) @leaf_specialized(%value: index) -> (index) where [range(%value, 1, 256)] {
+  %increment = index.constant 1 : index
+  %result = index.add %value, %increment : index
+  template.return %result : index
+}
+
+template.def<@nested.leaf> priority(10) @leaf_fallback(%value: index) -> (index) {
+  %fallback_value = index.constant 0 : index
+  template.return %fallback_value : index
+}
+
+template.def<@nested.middle> priority(20) @middle_specialized(%value: index) -> (index) where [range(%value, 1, 256)] {
+  %result = template.apply<@nested.leaf>(%value) : (index) -> (index)
+  template.return %result : index
+}
+
+template.def<@nested.middle> priority(10) @middle_fallback(%value: index) -> (index) {
+  %fallback_value = index.constant 0 : index
+  template.return %fallback_value : index
+}
+
+template.def<@nested.outer> @outer(%value: index) -> (index) {
+  %result = template.apply<@nested.middle>(%value) : (index) -> (index)
+  template.return %result : index
+}
+
+template.def<@nested.kernel_inner> device @kernel_inner() {
+  %workitem = kernel.workitem.id<x> : index
+  template.return
+}
+
+template.def<@nested.kernel_outer> device @kernel_outer() {
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  template.apply<@nested.kernel_inner>() : ()
+  template.return
+}
+
+func.def target(@target) @nested_template_expansion() -> (index) {
+  %value = index.constant 64 : index
+  %result = template.apply<@nested.outer>(%value) : (index) -> (index)
+  func.return %result : index
+}
+
+func.def target(@target) @nested_template_fallback() -> (index) {
+  %value = index.constant 512 : index
+  %result = template.apply<@nested.outer>(%value) : (index) -> (index)
+  func.return %result : index
+}
+
+kernel.def target(@target) @nested_kernel_template_expansion() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  template.apply<@nested.kernel_outer>() : ()
+  template.apply<@nested.kernel_inner>() : ()
+  kernel.return
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @nested_template_expansion() -> (reg<amdgpu.sgpr>) asm {
+  %result = s_mov_b32 65
+  return %result
+}
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @nested_template_fallback() -> (reg<amdgpu.sgpr>) asm {
+  %fallback_value = s_mov_b32 0
+  return %fallback_value
+}
+
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @nested_kernel_template_expansion() asm {
+  s_waitcnt {lgkmcnt = 0}
+  return
+}

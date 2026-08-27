@@ -94,7 +94,7 @@ static void BM_SequenceLinkNops(::benchmark::State& state,
       break;
     }
     if (!context->SpinPollUntilComplete(expected)) {
-      state.SkipWithError("Poll timed out");
+      state.SkipWithError("Proactor polling failed before sequence completion");
       break;
     }
     auto end = std::chrono::high_resolution_clock::now();
@@ -153,7 +153,7 @@ static void BM_SequenceEmulationNops(::benchmark::State& state,
       break;
     }
     if (!context->SpinPollUntilComplete(expected)) {
-      state.SkipWithError("Poll timed out");
+      state.SkipWithError("Proactor polling failed before sequence completion");
       break;
     }
     auto end = std::chrono::high_resolution_clock::now();
@@ -212,7 +212,7 @@ static void BM_SequenceVsRawLinked(::benchmark::State& state,
       break;
     }
     if (!context->SpinPollUntilComplete(expected)) {
-      state.SkipWithError("Poll timed out");
+      state.SkipWithError("Proactor polling failed before sequence completion");
       break;
     }
     auto end = std::chrono::high_resolution_clock::now();

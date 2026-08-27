@@ -1,0 +1,121 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx11-generic> @target {subgroup_size = 32}
+func.def target(@target) @gfx11_wmma_families_wave32(
+    %f16_data: vector<16xf16>,
+    %bf16_data: vector<16xbf16>,
+    %f32_init_data: vector<8xf32>,
+    %f16_init_data: vector<16xf16>,
+    %bf16_init_data: vector<16xbf16>,
+    %i8_lhs_data: vector<4xi32>,
+    %i8_rhs_data: vector<4xi32>,
+    %i4_lhs_data: vector<2xi32>,
+    %i4_rhs_data: vector<2xi32>,
+    %i32_init_data: vector<8xi32>) -> (
+    vector<8xf32>, vector<8xf32>, vector<16xf16>,
+    vector<16xbf16>, vector<8xi32>, vector<8xi32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %f16_lhs = vector.fragment<lhs> %f16_data shape [%m, %k] : vector<16xf16>
+  %f16_rhs = vector.fragment<rhs> %f16_data shape [%k, %n] : vector<16xf16>
+  %bf16_lhs = vector.fragment<lhs> %bf16_data shape [%m, %k] : vector<16xbf16>
+  %bf16_rhs = vector.fragment<rhs> %bf16_data shape [%k, %n] : vector<16xbf16>
+  %f32_init = vector.fragment<init> %f32_init_data shape [%m, %n] : vector<8xf32>
+  %f16_init = vector.fragment<init> %f16_init_data shape [%m, %n] : vector<16xf16>
+  %bf16_init = vector.fragment<init> %bf16_init_data shape [%m, %n] : vector<16xbf16>
+  %f32_f16_result = vector.mma %f16_lhs, %f16_rhs, %f32_init : vector<16xf16>, vector<16xf16>, vector<8xf32>
+  %f32_bf16_result = vector.mma %bf16_lhs, %bf16_rhs, %f32_init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %f16_result = vector.mma %f16_lhs, %f16_rhs, %f16_init : vector<16xf16>, vector<16xf16>, vector<16xf16>
+  %bf16_result = vector.mma %bf16_lhs, %bf16_rhs, %bf16_init : vector<16xbf16>, vector<16xbf16>, vector<16xbf16>
+  %i8_lhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
+  %i8_rhs_schema = encoding.define #encoding.operand<element_format=u8, payload_elements=16, payload_registers=4> : encoding<schema>
+  %i8_lhs = vector.fragment<lhs> %i8_lhs_data shape [%m, %k] using {schema = %i8_lhs_schema : encoding<schema>} : vector<4xi32>
+  %i8_rhs = vector.fragment<rhs> %i8_rhs_data shape [%k, %n] using {schema = %i8_rhs_schema : encoding<schema>} : vector<4xi32>
+  %i32_init = vector.fragment<init> %i32_init_data shape [%m, %n] : vector<8xi32>
+  %i8_result = vector.mma %i8_lhs, %i8_rhs, %i32_init : vector<4xi32>, vector<4xi32>, vector<8xi32>
+  %i4_lhs_schema = encoding.define #encoding.operand<element_format=i4, payload_elements=16, payload_registers=2> : encoding<schema>
+  %i4_rhs_schema = encoding.define #encoding.operand<element_format=u4, payload_elements=16, payload_registers=2> : encoding<schema>
+  %i4_lhs = vector.fragment<lhs> %i4_lhs_data shape [%m, %k] using {schema = %i4_lhs_schema : encoding<schema>} : vector<2xi32>
+  %i4_rhs = vector.fragment<rhs> %i4_rhs_data shape [%k, %n] using {schema = %i4_rhs_schema : encoding<schema>} : vector<2xi32>
+  %i4_result = vector.mma %i4_lhs, %i4_rhs, %i32_init : vector<2xi32>, vector<2xi32>, vector<8xi32>
+  func.return %f32_f16_result, %f32_bf16_result, %f16_result, %bf16_result, %i8_result, %i4_result : vector<8xf32>, vector<8xf32>, vector<16xf16>, vector<16xbf16>, vector<8xi32>, vector<8xi32>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @gfx11_wmma_families_wave32(%f16_rhs: reg<amdgpu.vgpr x8>, %bf16_rhs: reg<amdgpu.vgpr x8>, %f32_init: reg<amdgpu.vgpr x8>, %f16_init: reg<amdgpu.vgpr x8>, %bf16_init: reg<amdgpu.vgpr x8>, %i8_lhs: reg<amdgpu.vgpr x4>, %i8_rhs: reg<amdgpu.vgpr x4>, %i4_lhs: reg<amdgpu.vgpr x2>, %i4_rhs: reg<amdgpu.vgpr x2>, %i32_init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) asm {
+  %57 = copy %f32_init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %f32_f16_result = v_wmma_f32_16x16x16_f16 %f16_rhs, %f16_rhs, %57
+  %59 = copy %f32_init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %f32_bf16_result = v_wmma_f32_16x16x16_bf16 %bf16_rhs, %bf16_rhs, %59
+  %61 = copy %f16_init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %f16_result = v_wmma_f16_16x16x16_f16 %f16_rhs, %f16_rhs, %61
+  %63 = copy %bf16_init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %bf16_result = v_wmma_bf16_16x16x16_bf16 %bf16_rhs, %bf16_rhs, %63
+  %65 = copy %i32_init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %i8_result = v_wmma_i32_16x16x16_iu8 %i8_lhs, %i8_rhs, %65 {neg_lo = 1, neg_hi = 1}
+  %67 = copy %i32_init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %i4_result = v_wmma_i32_16x16x16_iu4 %i4_lhs, %i4_rhs, %67 {neg_lo = 1, neg_hi = 1}
+  return %f32_f16_result, %f32_bf16_result, %f16_result, %bf16_result, %i8_result, %i4_result
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+func.def target(@target) @gfx11_wmma_families_wave64(
+    %f16_data: vector<16xf16>,
+    %bf16_data: vector<16xbf16>,
+    %f32_init_data: vector<4xf32>,
+    %f16_init_data: vector<8xf16>,
+    %bf16_init_data: vector<8xbf16>,
+    %i8_lhs_data: vector<4xi32>,
+    %i8_rhs_data: vector<4xi32>,
+    %i4_lhs_data: vector<2xi32>,
+    %i4_rhs_data: vector<2xi32>,
+    %i32_init_data: vector<4xi32>) -> (
+    vector<4xf32>, vector<4xf32>, vector<8xf16>,
+    vector<8xbf16>, vector<4xi32>, vector<4xi32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %f16_lhs = vector.fragment<lhs> %f16_data shape [%m, %k] : vector<16xf16>
+  %f16_rhs = vector.fragment<rhs> %f16_data shape [%k, %n] : vector<16xf16>
+  %bf16_lhs = vector.fragment<lhs> %bf16_data shape [%m, %k] : vector<16xbf16>
+  %bf16_rhs = vector.fragment<rhs> %bf16_data shape [%k, %n] : vector<16xbf16>
+  %f32_init = vector.fragment<init> %f32_init_data shape [%m, %n] : vector<4xf32>
+  %f16_init = vector.fragment<init> %f16_init_data shape [%m, %n] : vector<8xf16>
+  %bf16_init = vector.fragment<init> %bf16_init_data shape [%m, %n] : vector<8xbf16>
+  %f32_f16_result = vector.mma %f16_lhs, %f16_rhs, %f32_init : vector<16xf16>, vector<16xf16>, vector<4xf32>
+  %f32_bf16_result = vector.mma %bf16_lhs, %bf16_rhs, %f32_init : vector<16xbf16>, vector<16xbf16>, vector<4xf32>
+  %f16_result = vector.mma %f16_lhs, %f16_rhs, %f16_init : vector<16xf16>, vector<16xf16>, vector<8xf16>
+  %bf16_result = vector.mma %bf16_lhs, %bf16_rhs, %bf16_init : vector<16xbf16>, vector<16xbf16>, vector<8xbf16>
+  %i8_lhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
+  %i8_rhs_schema = encoding.define #encoding.operand<element_format=u8, payload_elements=16, payload_registers=4> : encoding<schema>
+  %i8_lhs = vector.fragment<lhs> %i8_lhs_data shape [%m, %k] using {schema = %i8_lhs_schema : encoding<schema>} : vector<4xi32>
+  %i8_rhs = vector.fragment<rhs> %i8_rhs_data shape [%k, %n] using {schema = %i8_rhs_schema : encoding<schema>} : vector<4xi32>
+  %i32_init = vector.fragment<init> %i32_init_data shape [%m, %n] : vector<4xi32>
+  %i8_result = vector.mma %i8_lhs, %i8_rhs, %i32_init : vector<4xi32>, vector<4xi32>, vector<4xi32>
+  %i4_lhs_schema = encoding.define #encoding.operand<element_format=i4, payload_elements=16, payload_registers=2> : encoding<schema>
+  %i4_rhs_schema = encoding.define #encoding.operand<element_format=u4, payload_elements=16, payload_registers=2> : encoding<schema>
+  %i4_lhs = vector.fragment<lhs> %i4_lhs_data shape [%m, %k] using {schema = %i4_lhs_schema : encoding<schema>} : vector<2xi32>
+  %i4_rhs = vector.fragment<rhs> %i4_rhs_data shape [%k, %n] using {schema = %i4_rhs_schema : encoding<schema>} : vector<2xi32>
+  %i4_result = vector.mma %i4_lhs, %i4_rhs, %i32_init : vector<2xi32>, vector<2xi32>, vector<4xi32>
+  func.return %f32_f16_result, %f32_bf16_result, %f16_result, %bf16_result, %i8_result, %i4_result : vector<4xf32>, vector<4xf32>, vector<8xf16>, vector<8xbf16>, vector<4xi32>, vector<4xi32>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @gfx11_wmma_families_wave64(%f16_rhs: reg<amdgpu.vgpr x8>, %bf16_rhs: reg<amdgpu.vgpr x8>, %f32_init: reg<amdgpu.vgpr x4>, %f16_init: reg<amdgpu.vgpr x4>, %bf16_init: reg<amdgpu.vgpr x4>, %i8_lhs: reg<amdgpu.vgpr x4>, %i8_rhs: reg<amdgpu.vgpr x4>, %i4_lhs: reg<amdgpu.vgpr x2>, %i4_rhs: reg<amdgpu.vgpr x2>, %i32_init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm {
+  %57 = copy %f32_init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %f32_f16_result = v_wmma_f32_16x16x16_f16_w64 %f16_rhs, %f16_rhs, %57
+  %59 = copy %f32_init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %f32_bf16_result = v_wmma_f32_16x16x16_bf16_w64 %bf16_rhs, %bf16_rhs, %59
+  %61 = copy %f16_init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %f16_result = v_wmma_f16_16x16x16_f16_w64 %f16_rhs, %f16_rhs, %61
+  %63 = copy %bf16_init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %bf16_result = v_wmma_bf16_16x16x16_bf16_w64 %bf16_rhs, %bf16_rhs, %63
+  %65 = copy %i32_init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %i8_result = v_wmma_i32_16x16x16_iu8_w64 %i8_lhs, %i8_rhs, %65 {neg_lo = 1, neg_hi = 1}
+  %67 = copy %i32_init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %i4_result = v_wmma_i32_16x16x16_iu4_w64 %i4_lhs, %i4_rhs, %67 {neg_lo = 1, neg_hi = 1}
+  return %f32_f16_result, %f32_bf16_result, %f16_result, %bf16_result, %i8_result, %i4_result
+}

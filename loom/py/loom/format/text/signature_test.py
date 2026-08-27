@@ -6,12 +6,61 @@
 
 import pytest
 
+from loom.assembly import AttrDict, FuncArgs, Region, SymbolRef, kw
 from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.dialect.func import ALL_FUNC_OPS
 from loom.dialect.index import ALL_INDEX_OPS
 from loom.dialect.scalar import ALL_SCALAR_OPS
+from loom.dsl import (
+    ISOLATED_FROM_ABOVE,
+    SYMBOL_DEFINE,
+    AttrDef,
+    Dialect,
+    FuncLikeInterface,
+    Op,
+    RegionDef,
+    SymbolDefinition,
+)
+from loom.format.bytecode.reader import read_module
+from loom.format.bytecode.writer import write_module
 from loom.format.text.parser import ParseError, Parser
 from loom.format.text.printer import Printer
+
+_signature_test_ops = Dialect("signature_test", dialect_id=0xFE)
+_partitioned_function = Op(
+    "signature_test.partitioned",
+    group=_signature_test_ops,
+    traits=[SYMBOL_DEFINE, ISOLATED_FROM_ABOVE],
+    attrs=[
+        AttrDef("callee", "symbol"),
+        AttrDef("specialization_count", "i64"),
+    ],
+    symbol_def=SymbolDefinition(
+        field="callee",
+        name="function",
+        interfaces=["func_like", "callable"],
+        bytecode_kind="LOOM_SYMBOL_FUNC_DEF",
+    ),
+    regions=[RegionDef("body", terminator="func.return")],
+    interfaces=[FuncLikeInterface(callee="callee", body="body")],
+    format=[
+        SymbolRef("callee"),
+        FuncArgs(
+            "args",
+            group="specializations",
+            end_attr="specialization_count",
+        ),
+        AttrDict(),
+        kw("launch"),
+        FuncArgs(
+            "args",
+            group="bindings",
+            start_attr="specialization_count",
+        ),
+        Region("body"),
+    ],
+)
+_PARTITIONED_OPS = (*ALL_FUNC_OPS, _partitioned_function)
 
 
 def _roundtrip(text: str) -> str:
@@ -29,9 +78,34 @@ def _roundtrip(text: str) -> str:
     return printer.print_module(module).strip()
 
 
+def _roundtrip_partitioned(text: str, *, bytecode: bool = False) -> str:
+    parser = Parser()
+    parser.register_ops(_PARTITIONED_OPS)
+    parser.register_types(ALL_BUILTIN_TYPES)
+    module = parser.parse(text)
+    if bytecode:
+        module = read_module(
+            write_module(module, op_decls=_PARTITIONED_OPS),
+            op_decls=_PARTITIONED_OPS,
+            type_defs=ALL_BUILTIN_TYPES,
+        )
+    printer = Printer()
+    printer.register_ops(_PARTITIONED_OPS)
+    printer.register_types(ALL_BUILTIN_TYPES)
+    return printer.print_module(module).strip()
+
+
 def test_simple() -> None:
     text = "func.def @f() {\n  func.return\n}"
     assert _roundtrip(text) == text
+
+
+@pytest.mark.parametrize("bytecode", [False, True])
+def test_partitioned_function_signature(bytecode: bool) -> None:
+    text = """signature_test.partitioned @program(%token_count: index) launch(%input: buffer, %output: buffer) {
+  func.return
+}"""
+    assert _roundtrip_partitioned(text, bytecode=bytecode) == text
 
 
 def test_explicit_dim_arg() -> None:

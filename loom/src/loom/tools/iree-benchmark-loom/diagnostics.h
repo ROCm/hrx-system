@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-// Initializes |capture| to own a JSON diagnostic payload builder.
+// Initializes |capture| to own a deferred diagnostic value list.
 void iree_benchmark_loom_diagnostic_capture_initialize(
     iree_allocator_t allocator,
     iree_benchmark_loom_diagnostic_capture_t* capture);

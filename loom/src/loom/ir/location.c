@@ -6,6 +6,8 @@
 
 #include "loom/ir/location.h"
 
+#include "loom/ir/location_tag_table.inc"
+
 loom_location_kind_t loom_location_get_kind(loom_location_entry_t entry) {
   return (loom_location_kind_t)entry.kind;
 }
@@ -39,38 +41,11 @@ loom_location_entry_t loom_location_tagged(loom_location_tag_t tag,
 }
 
 iree_string_view_t loom_location_tag_name(loom_location_tag_t tag) {
-  switch (tag) {
-    case LOOM_LOCATION_TAG_SANITIZER_SITE:
-      return IREE_SV("sanitizer_site");
-    case LOOM_LOCATION_TAG_TEMPLATE_INSTANTIATION:
-      return IREE_SV("template_instantiation");
-    case LOOM_LOCATION_TAG_TILE_LOWERING:
-      return IREE_SV("tile_lowering");
-    case LOOM_LOCATION_TAG_UKERNEL_SELECTION:
-      return IREE_SV("ukernel_selection");
-    default:
-      return iree_string_view_empty();
-  }
+  return loom_location_tag_builtin_name(tag);
 }
 
 bool loom_location_tag_parse(iree_string_view_t name,
                              loom_location_tag_t* out_tag) {
-  *out_tag = LOOM_LOCATION_TAG_INVALID;
-  if (iree_string_view_equal(name, IREE_SV("sanitizer_site"))) {
-    *out_tag = LOOM_LOCATION_TAG_SANITIZER_SITE;
-    return true;
-  }
-  if (iree_string_view_equal(name, IREE_SV("template_instantiation"))) {
-    *out_tag = LOOM_LOCATION_TAG_TEMPLATE_INSTANTIATION;
-    return true;
-  }
-  if (iree_string_view_equal(name, IREE_SV("tile_lowering"))) {
-    *out_tag = LOOM_LOCATION_TAG_TILE_LOWERING;
-    return true;
-  }
-  if (iree_string_view_equal(name, IREE_SV("ukernel_selection"))) {
-    *out_tag = LOOM_LOCATION_TAG_UKERNEL_SELECTION;
-    return true;
-  }
-  return false;
+  *out_tag = loom_location_tag_classify_name(name);
+  return *out_tag != LOOM_LOCATION_TAG_INVALID;
 }

@@ -42,6 +42,10 @@ iree_string_view_t loom_low_diagnostic_config_key(
 iree_string_view_t loom_low_diagnostic_function_name(
     const loom_module_t* module, const loom_op_t* function_op);
 
+// Returns the dotted operation mnemonic for |op|, or "<unknown>".
+iree_string_view_t loom_low_diagnostic_operation_name(
+    const loom_module_t* module, const loom_op_t* op);
+
 // Returns the SSA value name for |value_id|, or a diagnostic placeholder.
 iree_string_view_t loom_low_diagnostic_value_name(const loom_module_t* module,
                                                   loom_value_id_t value_id);
@@ -58,6 +62,12 @@ iree_string_view_t loom_low_diagnostic_block_name(const loom_module_t* module,
 // Returns the defining op for |value_id|, or |fallback_op| for block args and
 // malformed value references.
 const loom_op_t* loom_low_diagnostic_value_origin_op(
+    const loom_module_t* module, loom_value_id_t value_id,
+    const loom_op_t* fallback_op);
+
+// Returns the operation mnemonic that produced |value_id|. Block arguments
+// report "<block-argument>" because their anchor op is only diagnostic context.
+iree_string_view_t loom_low_diagnostic_value_origin_operation_name(
     const loom_module_t* module, loom_value_id_t value_id,
     const loom_op_t* fallback_op);
 

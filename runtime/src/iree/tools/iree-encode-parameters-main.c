@@ -652,8 +652,10 @@ static iree_status_t iree_encode_create_archives(
     for (iree_host_size_t i = 0; i < output_list->count; ++i) {
       iree_output_archive_t* archive = &archives[i];
 
-      iree_io_physical_size_t archive_size =
-          iree_io_parameter_archive_builder_total_size(&archive->builder);
+      iree_io_physical_size_t archive_size = 0;
+      status = iree_io_parameter_archive_builder_total_size(&archive->builder,
+                                                            &archive_size);
+      if (!iree_status_is_ok(status)) break;
 
       // Create null-terminated path.
       char* path_cstr = NULL;
@@ -948,11 +950,14 @@ static iree_status_t iree_encode_dump_outputs(iree_output_archive_t* archives,
     if (!iree_status_is_ok(status)) break;
 
     // Print archive header.
-    iree_io_physical_size_t archive_size =
-        iree_io_parameter_archive_builder_total_size(&archive->builder);
-    status = iree_string_builder_append_format(
-        &sb, "// Output: %.*s (%" PRIu64 " bytes)\n", (int)archive->path.size,
-        archive->path.data, archive_size);
+    iree_io_physical_size_t archive_size = 0;
+    status = iree_io_parameter_archive_builder_total_size(&archive->builder,
+                                                          &archive_size);
+    if (iree_status_is_ok(status)) {
+      status = iree_string_builder_append_format(
+          &sb, "// Output: %.*s (%" PRIu64 " bytes)\n", (int)archive->path.size,
+          archive->path.data, archive_size);
+    }
     if (!iree_status_is_ok(status)) break;
 
     // Dump parameter index.

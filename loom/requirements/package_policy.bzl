@@ -77,6 +77,14 @@ PACKAGE_POLICIES = [
         build_requirements = [TARGET_ARCH_LLVMIR, EMIT_LLVMIR],
     ),
     package_policy(
+        packages = ["loom/src/loom/target/emit/llvmir/amdgpu/..."],
+        build_requirements = [TARGET_ARCH_AMDGPU],
+    ),
+    package_policy(
+        packages = ["loom/src/loom/target/emit/llvmir/x86/..."],
+        build_requirements = [TARGET_ARCH_X86],
+    ),
+    package_policy(
         packages = ["loom/src/loom/target/emit/native/amdgpu/..."],
         build_requirements = [TARGET_ARCH_AMDGPU, EMIT_AMDGPU],
         forbidden_deps = ["//runtime/src/iree/hal/drivers/amdgpu/..."],

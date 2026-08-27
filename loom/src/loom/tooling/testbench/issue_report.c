@@ -6,8 +6,6 @@
 
 #include "loom/tooling/testbench/issue_report.h"
 
-#include <inttypes.h>
-
 #include "loom/ir/context.h"
 #include "loom/ir/ir.h"
 #include "loom/ir/location.h"
@@ -119,8 +117,7 @@ static const loom_location_entry_t* loom_testbench_issue_file_location(
 
 static iree_status_t loom_testbench_issue_write_source_location_json(
     const loom_testbench_module_plan_t* module_plan,
-    const loom_testbench_issue_t* issue, loom_output_stream_t* stream,
-    bool* first_field) {
+    const loom_testbench_issue_t* issue, loom_json_object_writer_t* object) {
   if (issue->op == NULL) return iree_ok_status();
   const loom_module_t* module = module_plan->module;
   const loom_location_entry_t* location =
@@ -128,47 +125,23 @@ static iree_status_t loom_testbench_issue_write_source_location_json(
   if (location == NULL || location->file.source_id >= module->sources.count) {
     return iree_ok_status();
   }
-  if (!*first_field) {
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-  }
-  *first_field = false;
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, "\"source_location\":{"));
+      loom_json_object_begin_field(object, IREE_SV("source_location")));
+  loom_json_object_writer_t location_object;
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, "\"filename\":"));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
-      stream, module->sources.entries[location->file.source_id]));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream,
-      ",\"start_line\":%u,\"start_column\":%u,\"end_line\":%u,"
-      "\"end_column\":%u",
-      location->file.start_line, location->file.start_col,
-      location->file.end_line, location->file.end_col));
-  return loom_output_stream_write_cstring(stream, "}");
-}
-
-static iree_status_t loom_testbench_issue_write_string_field(
-    loom_output_stream_t* stream, bool* first_field, const char* name,
-    iree_string_view_t value) {
-  if (iree_string_view_is_empty(value)) return iree_ok_status();
-  if (!*first_field) {
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-  }
-  *first_field = false;
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_format(stream, "\"%s\":", name));
-  return loom_json_write_escaped_string(stream, value);
-}
-
-static iree_status_t loom_testbench_issue_write_size_field(
-    loom_output_stream_t* stream, bool* first_field, const char* name,
-    iree_host_size_t value) {
-  if (!*first_field) {
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-  }
-  *first_field = false;
-  return loom_output_stream_write_format(stream, "\"%s\":%" PRIhsz, name,
-                                         value);
+      loom_json_object_begin(object->stream, &location_object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &location_object, IREE_SV("filename"),
+      module->sources.entries[location->file.source_id]));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &location_object, IREE_SV("start_line"), location->file.start_line));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &location_object, IREE_SV("start_column"), location->file.start_col));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &location_object, IREE_SV("end_line"), location->file.end_line));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &location_object, IREE_SV("end_column"), location->file.end_col));
+  return loom_json_object_end(&location_object);
 }
 
 iree_status_t loom_testbench_issue_write_json(
@@ -178,54 +151,53 @@ iree_status_t loom_testbench_issue_write_json(
   IREE_ASSERT_ARGUMENT(issue);
   IREE_ASSERT_ARGUMENT(stream);
 
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
-  bool first_field = true;
-  IREE_RETURN_IF_ERROR(loom_testbench_issue_write_string_field(
-      stream, &first_field, "kind",
-      loom_testbench_issue_kind_name(issue->kind)));
-  IREE_RETURN_IF_ERROR(loom_testbench_issue_write_string_field(
-      stream, &first_field, "message",
-      loom_testbench_issue_message(issue->kind)));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("kind"), loom_testbench_issue_kind_name(issue->kind)));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("message"), loom_testbench_issue_message(issue->kind)));
   const loom_testbench_case_plan_t* case_plan =
       loom_testbench_issue_case_plan(module_plan, issue);
   if (case_plan != NULL) {
-    IREE_RETURN_IF_ERROR(loom_testbench_issue_write_string_field(
-        stream, &first_field, "case", case_plan->name));
-    IREE_RETURN_IF_ERROR(loom_testbench_issue_write_size_field(
-        stream, &first_field, "case_index", issue->case_index));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &object, IREE_SV("case"), case_plan->name));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+        &object, IREE_SV("case_index"), issue->case_index));
   }
   const loom_testbench_benchmark_plan_t* benchmark_plan =
       loom_testbench_issue_benchmark_plan(module_plan, issue);
   if (benchmark_plan != NULL) {
-    IREE_RETURN_IF_ERROR(loom_testbench_issue_write_string_field(
-        stream, &first_field, "benchmark", benchmark_plan->name));
-    IREE_RETURN_IF_ERROR(loom_testbench_issue_write_size_field(
-        stream, &first_field, "benchmark_index", issue->benchmark_index));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &object, IREE_SV("benchmark"), benchmark_plan->name));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+        &object, IREE_SV("benchmark_index"), issue->benchmark_index));
   }
   if (issue->op != NULL) {
-    IREE_RETURN_IF_ERROR(loom_testbench_issue_write_string_field(
-        stream, &first_field, "op",
-        loom_op_name(module_plan->module, issue->op)));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &object, IREE_SV("op"), loom_op_name(module_plan->module, issue->op)));
   }
   IREE_RETURN_IF_ERROR(loom_testbench_issue_write_source_location_json(
-      module_plan, issue, stream, &first_field));
-  IREE_RETURN_IF_ERROR(loom_testbench_issue_write_string_field(
-      stream, &first_field, "fix_hint",
-      loom_testbench_issue_fix_hint(module_plan, issue)));
-  return loom_output_stream_write_cstring(stream, "}");
+      module_plan, issue, &object));
+  const iree_string_view_t fix_hint =
+      loom_testbench_issue_fix_hint(module_plan, issue);
+  if (!iree_string_view_is_empty(fix_hint)) {
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &object, IREE_SV("fix_hint"), fix_hint));
+  }
+  return loom_json_object_end(&object);
 }
 
 iree_status_t loom_testbench_issue_array_write_json(
     const loom_testbench_module_plan_t* module_plan,
     const loom_testbench_issue_t* issues, iree_host_size_t issue_count,
     loom_output_stream_t* stream) {
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "["));
+  loom_json_array_writer_t array;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &array));
   for (iree_host_size_t i = 0; i < issue_count; ++i) {
-    if (i != 0) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-    }
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&array));
     IREE_RETURN_IF_ERROR(
         loom_testbench_issue_write_json(module_plan, &issues[i], stream));
   }
-  return loom_output_stream_write_cstring(stream, "]");
+  return loom_json_array_end(&array);
 }

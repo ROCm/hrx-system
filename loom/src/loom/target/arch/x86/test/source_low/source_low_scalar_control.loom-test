@@ -9,7 +9,7 @@ func.def target(@target) @scalar_i1_constant(%value: i1) -> (i1) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scalar_i1_constant(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm<x86.scalar.core> {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @scalar_i1_constant(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %true = mov.imm32 1
   %7 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
   %result = xor.gpr32 %7, %true
@@ -32,7 +32,7 @@ func.def target(@target) @scalar_i1_bitwise_control(%lhs: i1, %rhs: i1, %true_va
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scalar_i1_bitwise_control(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>, %true_value: reg<x86.gpr32>, %false_value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm<x86.scalar.core> {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @scalar_i1_bitwise_control(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>, %true_value: reg<x86.gpr32>, %false_value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %13 = copy %lhs : reg<x86.gpr32> -> reg<x86.gpr32>
   %both = and.gpr32 %13, %rhs
   %15 = copy %lhs : reg<x86.gpr32> -> reg<x86.gpr32>
@@ -44,4 +44,20 @@ low.func.def target(@target) abi(object_function) @scalar_i1_bitwise_control(%lh
   return %true_value
 ^else:
   return %false_value
+}
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @scalar_i32_select(%condition: i1, %true_value: i32, %false_value: i32) -> (i32) {
+  %result = scf.select %condition, %true_value, %false_value : i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @scalar_i32_select(%condition: reg<x86.gpr32>, %true_value: reg<x86.gpr32>, %false_value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %9 = copy %false_value : reg<x86.gpr32> -> reg<x86.gpr32>
+  %result = select.gpr32 %condition, %true_value, %9
+  return %result
 }

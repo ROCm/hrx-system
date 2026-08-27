@@ -1,0 +1,6 @@
+test.record @available
+
+func.def public @entry() {
+  test.template_param_symbol<@available>
+  func.return
+}

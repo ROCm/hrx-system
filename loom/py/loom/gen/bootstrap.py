@@ -23,13 +23,9 @@ def find_repo_root(start: str | Path | None = None) -> Path:
     raise RuntimeError(f"could not find Loom repository root from {current}")
 
 
-def ensure_runtime_py_on_path(start: str | Path | None = None) -> Path:
-    """Finds the repo root and makes `import loom` work for direct scripts."""
+def ensure_repository_packages_on_path(start: str | Path | None = None) -> Path:
+    """Finds the repo root and prioritizes its Python package roots."""
     repo_root = find_repo_root(start)
-    runtime_py = str(repo_root / "loom" / "py")
-    if runtime_py not in sys.path:
-        sys.path.insert(0, runtime_py)
+    package_roots = [str(repo_root / "loom" / "py"), str(repo_root)]
+    sys.path[:] = package_roots + [path for path in sys.path if path not in package_roots]
     return repo_root
-
-
-REPO_ROOT = find_repo_root(__file__)

@@ -6,6 +6,7 @@
 
 #include "iree/hal/drivers/amdgpu/util/hsaco_metadata.h"
 
+#include <inttypes.h>
 #include <string.h>
 
 //===----------------------------------------------------------------------===//
@@ -36,15 +37,15 @@
 #define IREE_HAL_AMDGPU_ELF64_SYMBOL_SIZE 24
 
 static uint16_t iree_hal_amdgpu_hsaco_metadata_load_le_u16(const uint8_t* ptr) {
-  return iree_unaligned_load_le((const uint16_t*)ptr);
+  return iree_unaligned_load_le_u16(ptr);
 }
 
 static uint32_t iree_hal_amdgpu_hsaco_metadata_load_le_u32(const uint8_t* ptr) {
-  return iree_unaligned_load_le((const uint32_t*)ptr);
+  return iree_unaligned_load_le_u32(ptr);
 }
 
 static uint64_t iree_hal_amdgpu_hsaco_metadata_load_le_u64(const uint8_t* ptr) {
-  return iree_unaligned_load_le((const uint64_t*)ptr);
+  return iree_unaligned_load_le_u64(ptr);
 }
 
 static bool iree_hal_amdgpu_hsaco_metadata_range_in_bounds(
@@ -629,7 +630,11 @@ typedef struct iree_hal_amdgpu_hsaco_metadata_kernel_fields_t {
   bool has_kernarg_segment_alignment;
   bool has_group_segment_fixed_size;
   bool has_private_segment_fixed_size;
+  bool has_max_flat_workgroup_size;
+  bool has_vgpr_count;
   bool has_required_workgroup_size;
+  bool has_uniform_workgroup_size;
+  bool has_workgroup_cluster_size;
   bool has_args;
 } iree_hal_amdgpu_hsaco_metadata_kernel_fields_t;
 
@@ -779,6 +784,37 @@ static iree_status_t iree_hal_amdgpu_hsaco_metadata_parse_workgroup_size(
   for (iree_host_size_t i = 0; i < 3; ++i) {
     IREE_RETURN_IF_ERROR(
         iree_hal_amdgpu_msgpack_read_uint32(reader, &out_value[i]));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
+iree_hal_amdgpu_hsaco_metadata_parse_workgroup_cluster_size(
+    iree_hal_amdgpu_msgpack_reader_t* reader, uint8_t out_value[3]) {
+  uint32_t value_count = 0;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_msgpack_read_array_count(reader, &value_count));
+  if (value_count != 3) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "AMDGPU cluster dimensions metadata must have "
+                            "three elements");
+  }
+  uint32_t dimensions[3] = {0};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(dimensions); ++i) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_msgpack_read_uint32(reader, &dimensions[i]));
+    if (dimensions[i] == 0 || dimensions[i] > UINT8_MAX) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "AMDGPU cluster dimension %" PRIhsz
+                              " must be a positive u8 value; got %" PRIu32,
+                              i, dimensions[i]);
+    }
+    out_value[i] = (uint8_t)dimensions[i];
+  }
+  if (dimensions[0] == 1 && dimensions[1] == 1 && dimensions[2] == 1) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU metadata must omit the trivial 1x1x1 cluster shape");
   }
   return iree_ok_status();
 }
@@ -994,6 +1030,26 @@ static iree_status_t iree_hal_amdgpu_hsaco_metadata_parse_kernel(
       IREE_RETURN_IF_ERROR(iree_hal_amdgpu_msgpack_read_uint32(
           reader, &out_kernel->private_segment_fixed_size));
       fields.has_private_segment_fixed_size = true;
+    } else if (iree_string_view_equal(key,
+                                      IREE_SV(".max_flat_workgroup_size"))) {
+      if (fields.has_max_flat_workgroup_size) {
+        return iree_hal_amdgpu_hsaco_metadata_duplicate_field_status(key);
+      }
+      IREE_RETURN_IF_ERROR(iree_hal_amdgpu_msgpack_read_uint32(
+          reader, &out_kernel->max_flat_workgroup_size));
+      if (out_kernel->max_flat_workgroup_size == 0) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "AMDGPU maximum flat workgroup size must be at least one");
+      }
+      fields.has_max_flat_workgroup_size = true;
+    } else if (iree_string_view_equal(key, IREE_SV(".vgpr_count"))) {
+      if (fields.has_vgpr_count) {
+        return iree_hal_amdgpu_hsaco_metadata_duplicate_field_status(key);
+      }
+      IREE_RETURN_IF_ERROR(
+          iree_hal_amdgpu_msgpack_read_uint32(reader, &out_kernel->vgpr_count));
+      fields.has_vgpr_count = true;
     } else if (iree_string_view_equal(key, IREE_SV(".reqd_workgroup_size"))) {
       if (fields.has_required_workgroup_size) {
         return iree_hal_amdgpu_hsaco_metadata_duplicate_field_status(key);
@@ -1002,6 +1058,30 @@ static iree_status_t iree_hal_amdgpu_hsaco_metadata_parse_kernel(
           reader, out_kernel->required_workgroup_size));
       out_kernel->has_required_workgroup_size = true;
       fields.has_required_workgroup_size = true;
+    } else if (iree_string_view_equal(key,
+                                      IREE_SV(".uniform_work_group_size"))) {
+      if (fields.has_uniform_workgroup_size) {
+        return iree_hal_amdgpu_hsaco_metadata_duplicate_field_status(key);
+      }
+      uint32_t uniform_workgroup_size = 0;
+      IREE_RETURN_IF_ERROR(
+          iree_hal_amdgpu_msgpack_read_uint32(reader, &uniform_workgroup_size));
+      if (uniform_workgroup_size > 1) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "AMDGPU uniform workgroup metadata must be zero or one");
+      }
+      out_kernel->uniform_workgroup_size = uniform_workgroup_size != 0;
+      fields.has_uniform_workgroup_size = true;
+    } else if (iree_string_view_equal(key, IREE_SV(".cluster_dims"))) {
+      if (fields.has_workgroup_cluster_size) {
+        return iree_hal_amdgpu_hsaco_metadata_duplicate_field_status(key);
+      }
+      IREE_RETURN_IF_ERROR(
+          iree_hal_amdgpu_hsaco_metadata_parse_workgroup_cluster_size(
+              reader, out_kernel->workgroup_cluster_size));
+      out_kernel->has_workgroup_cluster_size = true;
+      fields.has_workgroup_cluster_size = true;
     } else if (iree_string_view_equal(key, IREE_SV(".args"))) {
       if (fields.has_args) {
         return iree_hal_amdgpu_hsaco_metadata_duplicate_field_status(key);
@@ -1031,7 +1111,9 @@ static iree_status_t iree_hal_amdgpu_hsaco_metadata_parse_kernel(
   if (!fields.has_symbol_name || !fields.has_kernarg_segment_size ||
       !fields.has_kernarg_segment_alignment ||
       !fields.has_group_segment_fixed_size ||
-      !fields.has_private_segment_fixed_size || !fields.has_args) {
+      !fields.has_private_segment_fixed_size ||
+      !fields.has_max_flat_workgroup_size || !fields.has_vgpr_count ||
+      !fields.has_args) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "AMDGPU kernel metadata missing required fields");
   }

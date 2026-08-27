@@ -79,6 +79,13 @@ iree_status_t iree_hal_amdgpu_query_fine_global_memory_pool(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t agent,
     bool* out_available, hsa_amd_memory_pool_t* out_pool);
 
+// Queries whether an extended fine-grained memory pool is available on the
+// |agent|. Such pools provide the device-side uncached memory mapping used by
+// allocation requests that cannot use the normal device cache hierarchy.
+iree_status_t iree_hal_amdgpu_query_extended_fine_global_memory_pool(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t agent,
+    bool* out_available, hsa_amd_memory_pool_t* out_pool);
+
 // Tries to find a coarse-grained memory pool on the |agent|.
 // Returns true and populates |out_pool| if found, false otherwise.
 bool iree_hal_amdgpu_try_find_coarse_global_memory_pool(
@@ -97,10 +104,19 @@ iree_status_t iree_hal_amdgpu_vmem_translate_memory_type(
     iree_hal_amdgpu_vmem_memory_type_t memory_type,
     hsa_amd_memory_type_t* out_hsa_memory_type);
 
-// Queries the recommended HSA VMM allocation granule for |memory_pool|.
-iree_status_t iree_hal_amdgpu_vmem_query_alloc_granule(
+// Native HSA VMM allocation granularity for one memory pool.
+typedef struct iree_hal_amdgpu_vmem_granularity_t {
+  // Smallest legal allocation and mapping multiple.
+  iree_device_size_t minimum;
+
+  // Preferred allocation multiple used to reduce internal fragmentation.
+  iree_device_size_t recommended;
+} iree_hal_amdgpu_vmem_granularity_t;
+
+// Queries the HSA VMM allocation granularity for |memory_pool|.
+iree_status_t iree_hal_amdgpu_vmem_query_alloc_granularity(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_amd_memory_pool_t memory_pool,
-    iree_device_size_t* out_allocation_granule);
+    iree_hal_amdgpu_vmem_granularity_t* out_granularity);
 
 // Builds HSA VMM access descriptors for |topology| and |access_mode|.
 //

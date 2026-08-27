@@ -1,0 +1,128 @@
+// RUN: emit spirv-dis validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @ordinary_vector_integer_conversion() asm {
+  %minus_one_i32 = OpConstant.i32 -1
+  %one_i32 = OpConstant.i32 1
+  %two_i32 = OpConstant.i32 2
+  %three_i32 = OpConstant.i32 3
+  %signed_input = OpCompositeConstruct.v2i32 %minus_one_i32, %two_i32
+  %signed_wide = OpSConvert.v2i32.v2i64 %signed_input
+  %signed_result = OpCompositeExtract.v2i64.i64 %signed_wide, 0
+
+  %one_i64 = OpConstant.i64 1
+  %two_i64 = OpConstant.i64 2
+  %three_i64 = OpConstant.i64 3
+  %wide_input = OpCompositeConstruct.v3i64 %one_i64, %two_i64, %three_i64
+  %narrow = OpSConvert.v3i64.v3i32 %wide_input
+  %narrow_result = OpCompositeExtract.v3i32.i32 %narrow, 2
+
+  %unsigned_signed_input = OpCompositeConstruct.v4i32 %minus_one_i32, %one_i32, %two_i32, %three_i32
+  %unsigned_input = OpBitcast.v4i32.v4u32 %unsigned_signed_input
+  %unsigned_wide = OpUConvert.v4u32.v4u64 %unsigned_input
+  %unsigned_signed_wide = OpBitcast.v4u64.v4i64 %unsigned_wide
+  %unsigned_result = OpCompositeExtract.v4i64.i64 %unsigned_signed_wide, 0
+
+  %expected_signed = OpConstant.i64 -1
+  %expected_unsigned = OpConstant.i64 4294967295
+  %signed_ok = OpIEqual.i64 %signed_result, %expected_signed
+  %narrow_ok = OpIEqual %narrow_result, %three_i32
+  %unsigned_ok = OpIEqual.i64 %unsigned_result, %expected_unsigned
+  %signed_and_narrow_ok = OpLogicalAnd.bool %signed_ok, %narrow_ok
+  %all_ok = OpLogicalAnd.bool %signed_and_narrow_ok, %unsigned_ok
+  low.scf.if %all_ok {
+    OpControlBarrier.workgroup.workgroup.acq_rel
+  }
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %ordinary_vector_integer_conversion "ordinary_vector_integer_conversion"
+               OpExecutionMode %ordinary_vector_integer_conversion LocalSize 1 1 1
+               OpName %ordinary_vector_integer_conversion "ordinary_vector_integer_conversion"
+               OpName %minus_one_i32 "minus_one_i32"
+               OpName %one_i32 "one_i32"
+               OpName %two_i32 "two_i32"
+               OpName %three_i32 "three_i32"
+               OpName %signed_input "signed_input"
+               OpName %signed_wide "signed_wide"
+               OpName %signed_result "signed_result"
+               OpName %one_i64 "one_i64"
+               OpName %two_i64 "two_i64"
+               OpName %three_i64 "three_i64"
+               OpName %wide_input "wide_input"
+               OpName %narrow "narrow"
+               OpName %narrow_result "narrow_result"
+               OpName %unsigned_signed_input "unsigned_signed_input"
+               OpName %unsigned_input "unsigned_input"
+               OpName %unsigned_wide "unsigned_wide"
+               OpName %unsigned_signed_wide "unsigned_signed_wide"
+               OpName %unsigned_result "unsigned_result"
+               OpName %expected_signed "expected_signed"
+               OpName %expected_unsigned "expected_unsigned"
+               OpName %signed_ok "signed_ok"
+               OpName %narrow_ok "narrow_ok"
+               OpName %unsigned_ok "unsigned_ok"
+               OpName %signed_and_narrow_ok "signed_and_narrow_ok"
+               OpName %all_ok "all_ok"
+       %void = OpTypeVoid
+          %3 = OpTypeFunction %void
+        %int = OpTypeInt 32 1
+%minus_one_i32 = OpConstant %int -1
+    %one_i32 = OpConstant %int 1
+    %two_i32 = OpConstant %int 2
+  %three_i32 = OpConstant %int 3
+      %v2int = OpTypeVector %int 2
+       %long = OpTypeInt 64 1
+     %v2long = OpTypeVector %long 2
+    %one_i64 = OpConstant %long 1
+    %two_i64 = OpConstant %long 2
+  %three_i64 = OpConstant %long 3
+     %v3long = OpTypeVector %long 3
+      %v3int = OpTypeVector %int 3
+      %v4int = OpTypeVector %int 4
+       %uint = OpTypeInt 32 0
+     %v4uint = OpTypeVector %uint 4
+      %ulong = OpTypeInt 64 0
+    %v4ulong = OpTypeVector %ulong 4
+     %v4long = OpTypeVector %long 4
+%expected_signed = OpConstant %long -1
+%expected_unsigned = OpConstant %long 4294967295
+       %bool = OpTypeBool
+     %uint_2 = OpConstant %uint 2
+   %uint_264 = OpConstant %uint 264
+%ordinary_vector_integer_conversion = OpFunction %void None %3
+          %4 = OpLabel
+%signed_input = OpCompositeConstruct %v2int %minus_one_i32 %two_i32
+%signed_wide = OpSConvert %v2long %signed_input
+%signed_result = OpCompositeExtract %long %signed_wide 0
+ %wide_input = OpCompositeConstruct %v3long %one_i64 %two_i64 %three_i64
+     %narrow = OpSConvert %v3int %wide_input
+%narrow_result = OpCompositeExtract %int %narrow 2
+%unsigned_signed_input = OpCompositeConstruct %v4int %minus_one_i32 %one_i32 %two_i32 %three_i32
+%unsigned_input = OpBitcast %v4uint %unsigned_signed_input
+%unsigned_wide = OpUConvert %v4ulong %unsigned_input
+%unsigned_signed_wide = OpBitcast %v4long %unsigned_wide
+%unsigned_result = OpCompositeExtract %long %unsigned_signed_wide 0
+  %signed_ok = OpIEqual %bool %signed_result %expected_signed
+  %narrow_ok = OpIEqual %bool %narrow_result %three_i32
+%unsigned_ok = OpIEqual %bool %unsigned_result %expected_unsigned
+%signed_and_narrow_ok = OpLogicalAnd %bool %signed_ok %narrow_ok
+     %all_ok = OpLogicalAnd %bool %signed_and_narrow_ok %unsigned_ok
+               OpSelectionMerge %44 None
+               OpBranchConditional %all_ok %43 %44
+         %43 = OpLabel
+               OpControlBarrier %uint_2 %uint_2 %uint_264
+               OpBranch %44
+         %44 = OpLabel
+               OpReturn
+               OpFunctionEnd

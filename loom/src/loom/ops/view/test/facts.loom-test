@@ -32,12 +32,12 @@ func.def @buffer_arg_memory_space_unknown(%buffer: buffer) -> (i64) {
 kernel.def @kernel_buffer_arg_memory_space_global(%buffer: buffer) {
   %config_space = test.fact_buffer_memory_space %buffer : buffer -> i64
   %workgroups = index.cast %config_space : i64 to index
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%workgroups, %one, %one) workgroup_size(%one, %one, %one) : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%buffer: buffer) {
-  %zero = index.constant 0 : offset
+  %base = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %view = buffer.view %buffer[%zero] : buffer -> view<1xi64, %layout>
+  %view = buffer.view %buffer[%base] : buffer -> view<1xi64, %layout>
   %body_space = test.fact_buffer_memory_space %buffer : buffer -> i64
   %view_space = test.fact_view_memory_space %view : view<1xi64, %layout> -> i64
   %sum = scalar.addi %body_space, %view_space : i64
@@ -47,14 +47,55 @@ kernel.def @kernel_buffer_arg_memory_space_global(%buffer: buffer) {
 // ----
 kernel.def @kernel_buffer_arg_memory_space_global(%buffer: buffer) {
   %workgroups = index.constant 1 : index
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%workgroups, %one, %one) workgroup_size(%one, %one, %one) : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%buffer: buffer) {
-  %zero = index.constant 0 : offset
+  %base = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %view = buffer.view %buffer[%zero] : buffer -> view<1xi64, %layout>
+  %view = buffer.view %buffer[%base] : buffer -> view<1xi64, %layout>
   %sum = scalar.constant 2 : i64
   view.store %sum, %view[0] : i64, view<1xi64, %layout>
+  kernel.return
+}
+
+// ====
+
+// Kernel ABI references and views are cluster-uniform. Derived views preserve
+// that scope until a lane-varying offset makes the addressed storage vary.
+kernel.def @kernel_reference_distribution(%buffer: buffer, %m: index) {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%buffer: buffer, %m: index) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %source = buffer.view %buffer[%base] : buffer -> view<[%m]xi32>
+  %refined = view.refine %source : view<[%m]xi32> -> view<64xi32>
+  %lane_view = view.subview %refined[%lane] : view<64xi32> -> view<1xi32>
+  %uniform_value = view.load %refined[0] : view<64xi32> -> i32
+  %lane_value = view.load %lane_view[0] : view<1xi32> -> i32
+  %buffer_uniform = test.fact_cluster_uniform %buffer : buffer -> i1
+  %source_uniform = test.fact_cluster_uniform %source : view<[%m]xi32> -> i1
+  %refined_uniform = test.fact_cluster_uniform %refined : view<64xi32> -> i1
+  %uniform_value_uniform = test.fact_cluster_uniform %uniform_value : i32 -> i1
+  %lane_view_varying = test.fact_lane_varying %lane_view : view<1xi32> -> i1
+  %lane_value_varying = test.fact_lane_varying %lane_value : i32 -> i1
+  test.use %buffer_uniform, %source_uniform, %refined_uniform, %uniform_value_uniform, %lane_view_varying, %lane_value_varying : i1, i1, i1, i1, i1, i1
+  kernel.return
+}
+// ----
+kernel.def @kernel_reference_distribution(%buffer: buffer, %m: index) {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%buffer: buffer, %m: index) {
+  %buffer_uniform = scalar.constant true : i1
+  %source_uniform = scalar.constant true : i1
+  %refined_uniform = scalar.constant true : i1
+  %uniform_value_uniform = scalar.constant true : i1
+  %lane_view_varying = scalar.constant true : i1
+  %lane_value_varying = scalar.constant true : i1
+  test.use %buffer_uniform, %source_uniform, %refined_uniform, %uniform_value_uniform, %lane_view_varying, %lane_value_varying : i1, i1, i1, i1, i1, i1
   kernel.return
 }
 
@@ -65,10 +106,10 @@ kernel.def @kernel_buffer_arg_memory_space_global(%buffer: buffer) {
 // typed byte footprint.
 func.def @workgroup_alloca_reference() -> (i64, i64, i64, i64, i64) {
   %bytes = index.constant 256 : offset
-  %zero = index.constant 0 : offset
+  %base = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
-  %view = buffer.view %scratch[%zero] : buffer -> view<16xf32, %layout>
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<16xf32, %layout>
   %buffer_space = test.fact_buffer_memory_space %scratch : buffer -> i64
   %buffer_align = test.fact_buffer_min_alignment %scratch : buffer -> i64
   %view_space = test.fact_view_memory_space %view : view<16xf32, %layout> -> i64
@@ -103,6 +144,74 @@ func.def @assume_memory_space_feeds_view(%buffer: buffer, %offset: offset) -> (i
   %buffer_space = scalar.constant 1 : i64
   %view_space = scalar.constant 1 : i64
   func.return %buffer_space, %view_space : i64, i64
+}
+
+// ====
+
+// Selecting between roots with the same storage contract preserves their
+// shared memory space and makes the selected descriptor the new dynamic root.
+func.def @select_global_buffer_preserves_reference(%condition: i1, %lhs: buffer, %rhs: buffer, %offset: offset) -> (i1, i64, i64, i1) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %global_lhs = buffer.assume.memory_space<global> %lhs : buffer
+  %global_rhs = buffer.assume.memory_space<global> %rhs : buffer
+  %selected = scf.select %condition, %global_lhs, %global_rhs : buffer
+  %view = buffer.view %selected[%offset] : buffer -> view<4xf32, %layout>
+  %is_reference = test.fact_is_buffer_reference %selected : buffer -> i1
+  %buffer_space = test.fact_buffer_memory_space %selected : buffer -> i64
+  %view_space = test.fact_view_memory_space %view : view<4xf32, %layout> -> i64
+  %root_matches = test.fact_view_root_matches %view, %selected : view<4xf32, %layout>, buffer -> i1
+  func.return %is_reference, %buffer_space, %view_space, %root_matches : i1, i64, i64, i1
+}
+// ----
+func.def @select_global_buffer_preserves_reference(%condition: i1, %lhs: buffer, %rhs: buffer, %offset: offset) -> (i1, i64, i64, i1) {
+  %is_reference = scalar.constant true : i1
+  %buffer_space = scalar.constant 1 : i64
+  %view_space = scalar.constant 1 : i64
+  %root_matches = scalar.constant true : i1
+  func.return %is_reference, %buffer_space, %view_space, %root_matches : i1, i64, i64, i1
+}
+
+// ====
+
+// Selecting roots from different memory spaces keeps the dynamic storage root
+// but conservatively drops the incompatible memory-space fact.
+func.def @select_mixed_buffer_space_degrades_space(%condition: i1, %external: buffer, %offset: offset) -> (i1, i64, i64, i1) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %external : buffer
+  %workgroup = buffer.alloca<workgroup> align(64) %bytes : buffer
+  %selected = scf.select %condition, %global, %workgroup : buffer
+  %view = buffer.view %selected[%offset] : buffer -> view<4xf32, %layout>
+  %is_reference = test.fact_is_buffer_reference %selected : buffer -> i1
+  %buffer_space = test.fact_buffer_memory_space %selected : buffer -> i64
+  %view_space = test.fact_view_memory_space %view : view<4xf32, %layout> -> i64
+  %root_matches = test.fact_view_root_matches %view, %selected : view<4xf32, %layout>, buffer -> i1
+  func.return %is_reference, %buffer_space, %view_space, %root_matches : i1, i64, i64, i1
+}
+// ----
+func.def @select_mixed_buffer_space_degrades_space(%condition: i1, %external: buffer, %offset: offset) -> (i1, i64, i64, i1) {
+  %is_reference = scalar.constant true : i1
+  %buffer_space = scalar.constant -1 : i64
+  %view_space = scalar.constant -1 : i64
+  %root_matches = scalar.constant true : i1
+  func.return %is_reference, %buffer_space, %view_space, %root_matches : i1, i64, i64, i1
+}
+
+// ====
+
+// A dynamic root retains only the alignment guaranteed by both candidates.
+func.def @select_buffer_meets_alignment(%condition: i1) -> (i64) {
+  %bytes = index.constant 64 : offset
+  %lhs = buffer.alloca<workgroup> align(64) %bytes : buffer
+  %rhs = buffer.alloca<workgroup> align(128) %bytes : buffer
+  %selected = scf.select %condition, %lhs, %rhs : buffer
+  %alignment = test.fact_buffer_min_alignment %selected : buffer -> i64
+  func.return %alignment : i64
+}
+// ----
+func.def @select_buffer_meets_alignment(%condition: i1) -> (i64) {
+  %alignment = scalar.constant 64 : i64
+  func.return %alignment : i64
 }
 
 // ====
@@ -168,10 +277,10 @@ func.def @assume_same_root_feeds_view_scope(%lhs: buffer, %rhs: buffer, %offset:
 // Subview/refine preserve the underlying root memory-space facts.
 func.def @subview_refine_preserves_memory_space() -> (i64, i64) {
   %bytes = index.constant 256 : offset
-  %zero = index.constant 0 : offset
+  %base = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 128, memory_space = workgroup} : buffer
-  %source = buffer.view %scratch[%zero] : buffer -> view<16xf32, %layout>
+  %scratch = buffer.alloca<workgroup> align(128) %bytes : buffer
+  %source = buffer.view %scratch[%base] : buffer -> view<16xf32, %layout>
   %sub = view.subview %source[4] : view<16xf32, %layout> -> view<8xf32, %layout>
   %refined = view.refine %sub : view<8xf32, %layout> -> view<4xf32, %layout>
   %space = test.fact_view_memory_space %refined : view<4xf32, %layout> -> i64
@@ -232,19 +341,44 @@ func.def @strided_static_footprint(%buffer: buffer) -> (i64) {
 
 // Physical-storage encodings resolve through their nested layout parameter
 // instead of forcing fact consumers to special-case storage schemas.
-func.def @physical_storage_resolves_layout(%buffer: buffer) -> (i64) {
+func.def @storage_resolves_layout(%buffer: buffer) -> (i64) {
   %offset = index.constant 0 : offset
   %layout = encoding.layout.strided [8, 1] : encoding<layout>
-  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
-  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<4x4xf32, %storage>
   %length_hi = test.fact_view_byte_length_hi %view : view<4x4xf32, %storage> -> i64
   func.return %length_hi : i64
 }
 // ----
-func.def @physical_storage_resolves_layout(%buffer: buffer) -> (i64) {
+func.def @storage_resolves_layout(%buffer: buffer) -> (i64) {
   %length_hi = scalar.constant 112 : i64
   func.return %length_hi : i64
+}
+
+// ====
+
+// Dynamic physical-storage parameters carry layout/schema semantics through
+// their SSA encoding value; canonicalization must not replace them with a bare
+// static #encoding.storage family shell.
+func.def @dynamic_storage_encoding_remains_ssa(%buffer: buffer, %i: index) -> (f8E4M3) {
+  %offset = index.constant 0 : offset
+  %layout = encoding.layout.strided [1] : encoding<layout>
+  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf8E4M3, %storage>
+  %value = view.load %view[%i] : view<4xf8E4M3, %storage> -> f8E4M3
+  func.return %value : f8E4M3
+}
+// ----
+func.def @dynamic_storage_encoding_remains_ssa(%buffer: buffer, %i: index) -> (f8E4M3) {
+  %offset = index.constant 0 : offset
+  %layout = encoding.layout.strided [1] : encoding<layout>
+  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf8E4M3, %storage>
+  %value = view.load %view[%i] : view<4xf8E4M3, %storage> -> f8E4M3
+  func.return %value : f8E4M3
 }
 
 // ====
@@ -253,8 +387,8 @@ func.def @physical_storage_resolves_layout(%buffer: buffer) -> (i64) {
 // local SSA layout op just to recover dense footprints.
 func.def @static_dense_type_layout_facts(%buffer: buffer) -> (i64) {
   %offset = index.constant 0 : offset
-  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, #dense>
-  %length_hi = test.fact_view_byte_length_hi %view : view<4xf32, #dense> -> i64
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32>
+  %length_hi = test.fact_view_byte_length_hi %view : view<4xf32> -> i64
   func.return %length_hi : i64
 }
 // ----
@@ -269,8 +403,8 @@ func.def @static_dense_type_layout_facts(%buffer: buffer) -> (i64) {
 // values.
 func.def @static_strided_type_layout_facts(%buffer: buffer) -> (i64) {
   %offset = index.constant 0 : offset
-  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, #strided<stride=8>>
-  %length_hi = test.fact_view_byte_length_hi %view : view<4xf32, #strided<stride=8>> -> i64
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, #encoding.layout.strided<strides=[8]>>
+  %length_hi = test.fact_view_byte_length_hi %view : view<4xf32, #encoding.layout.strided<strides=[8]>> -> i64
   func.return %length_hi : i64
 }
 // ----
@@ -284,15 +418,15 @@ func.def @static_strided_type_layout_facts(%buffer: buffer) -> (i64) {
 // Static physical-storage encodings expose their nested address layout through
 // encoding facts even when the local op resolver has no dynamic layout operand
 // to chase.
-func.def @static_physical_storage_resolves_layout(%buffer: buffer) -> (i64) {
+func.def @static_storage_resolves_layout(%buffer: buffer) -> (i64) {
   %offset = index.constant 0 : offset
-  %storage = encoding.define #physical_storage<layout=#dense, schema=#ggml_q4_0<block_elems=32, storage_bytes=18>> : encoding<storage>
+  %storage = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0> : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %storage>
   %length_hi = test.fact_view_byte_length_hi %view : view<4xf32, %storage> -> i64
   func.return %length_hi : i64
 }
 // ----
-func.def @static_physical_storage_resolves_layout(%buffer: buffer) -> (i64) {
+func.def @static_storage_resolves_layout(%buffer: buffer) -> (i64) {
   %length_hi = scalar.constant 16 : i64
   func.return %length_hi : i64
 }
@@ -414,4 +548,99 @@ func.def @unknown_dynamic_stride_degrades_footprint(%buffer: buffer, %stride: in
   %is = scalar.constant true : i1
   %length_hi = scalar.constant 9223372036854775807 : i64
   func.return %is, %length_hi : i1, i64
+}
+
+// ====
+
+// Finite-only storage schemas publish scalar content facts through view.load.
+func.def @finite_only_storage_view_load_content(%buffer: buffer) -> (i1) {
+  %offset = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf8E4M3, %storage>
+  %value = view.load %view[0] : view<4xf8E4M3, %storage> -> f8E4M3
+  %finite = scalar.isfinitef %value : f8E4M3
+  func.return %finite : i1
+}
+// ----
+func.def @finite_only_storage_view_load_content(%buffer: buffer) -> (i1) {
+  %finite = scalar.constant true : i1
+  func.return %finite : i1
+}
+
+// ====
+
+// Finite-number FP8 storage schemas rule out infinities, but not NaNs.
+func.def @fnuz_fp8_storage_view_load_content(%buffer: buffer) -> (i1, i1) {
+  %offset = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %schema = encoding.define #encoding.f8e5m2fnuz : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf8E5M2, %storage>
+  %value = view.load %view[0] : view<4xf8E5M2, %storage> -> f8E5M2
+  %inf = scalar.isinff %value : f8E5M2
+  %finite = scalar.isfinitef %value : f8E5M2
+  func.return %inf, %finite : i1, i1
+}
+// ----
+func.def @fnuz_fp8_storage_view_load_content(%buffer: buffer) -> (i1, i1) {
+  %offset = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %schema = encoding.define #encoding.f8e5m2fnuz : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf8E5M2, %storage>
+  %value = view.load %view[0] : view<4xf8E5M2, %storage> -> f8E5M2
+  %inf = scalar.constant false : i1
+  %finite = scalar.isfinitef %value : f8E5M2
+  func.return %inf, %finite : i1, i1
+}
+
+// ====
+
+// Raw IEEE E5M2 storage publishes its numeric format, but carries no finite
+// content guarantee.
+func.def @ieee_e5m2_storage_view_load_content_is_unknown(%buffer: buffer) -> (i1, i1) {
+  %offset = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %schema = encoding.define #encoding.f8e5m2 : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf8E5M2, %storage>
+  %value = view.load %view[0] : view<4xf8E5M2, %storage> -> f8E5M2
+  %inf = scalar.isinff %value : f8E5M2
+  %finite = scalar.isfinitef %value : f8E5M2
+  func.return %inf, %finite : i1, i1
+}
+// ----
+func.def @ieee_e5m2_storage_view_load_content_is_unknown(%buffer: buffer) -> (i1, i1) {
+  %offset = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %schema = encoding.define #encoding.f8e5m2 : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf8E5M2, %storage>
+  %value = view.load %view[0] : view<4xf8E5M2, %storage> -> f8E5M2
+  %inf = scalar.isinff %value : f8E5M2
+  %finite = scalar.isfinitef %value : f8E5M2
+  func.return %inf, %finite : i1, i1
+}
+
+// ====
+
+// Bare FP8 element types are still conservative without a content schema.
+func.def @bare_fp8_view_load_content_is_unknown(%buffer: buffer) -> (i1) {
+  %offset = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf8E4M3, %layout>
+  %value = view.load %view[0] : view<4xf8E4M3, %layout> -> f8E4M3
+  %finite = scalar.isfinitef %value : f8E4M3
+  func.return %finite : i1
+}
+// ----
+func.def @bare_fp8_view_load_content_is_unknown(%buffer: buffer) -> (i1) {
+  %offset = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf8E4M3, %layout>
+  %value = view.load %view[0] : view<4xf8E4M3, %layout> -> f8E4M3
+  %finite = scalar.isfinitef %value : f8E4M3
+  func.return %finite : i1
 }

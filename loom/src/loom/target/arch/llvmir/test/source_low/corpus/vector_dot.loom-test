@@ -11,7 +11,7 @@ func.def target(@target) @f32_dotf(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %ac
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32_dotf(%lhs: reg<llvmir.f32 x4>, %rhs: reg<llvmir.f32 x4>, %acc: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32_dotf(%lhs: reg<llvmir.f32 x4>, %rhs: reg<llvmir.f32 x4>, %acc: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
   %21 = extract.v4f32 %lhs, 0
   %22 = extract.v4f32 %rhs, 0
   %23 = fma.f32 %21, %22, %acc
@@ -34,17 +34,17 @@ llvmir.target<object> @target {
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
 func.def target(@target) @f32_dotf_zero_seed(%lhs: vector<4xf32>, %rhs: vector<4xf32>) -> (f32) {
-  %zero = scalar.constant 0.0 : f32
-  %dot = vector.dotf %lhs, %rhs, %zero : vector<4xf32>, vector<4xf32>, f32
+  %initial_accumulator = scalar.constant 0.0 : f32
+  %dot = vector.dotf %lhs, %rhs, %initial_accumulator : vector<4xf32>, vector<4xf32>, f32
   func.return %dot : f32
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32_dotf_zero_seed(%lhs: reg<llvmir.f32 x4>, %rhs: reg<llvmir.f32 x4>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
-  %zero = const.f32 0
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32_dotf_zero_seed(%lhs: reg<llvmir.f32 x4>, %rhs: reg<llvmir.f32 x4>) -> (reg<llvmir.f32>) asm {
+  %initial_accumulator = const.f32 0
   %21 = extract.v4f32 %lhs, 0
   %22 = extract.v4f32 %rhs, 0
-  %23 = fma.f32 %21, %22, %zero
+  %23 = fma.f32 %21, %22, %initial_accumulator
   %24 = extract.v4f32 %lhs, 1
   %25 = extract.v4f32 %rhs, 1
   %26 = fma.f32 %24, %25, %23
@@ -70,7 +70,7 @@ func.def target(@target) @f32_contract_product_reduce(%lhs: vector<8xf32>, %rhs:
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32_contract_product_reduce(%lhs: reg<llvmir.f32 x8>, %rhs: reg<llvmir.f32 x8>, %acc: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32_contract_product_reduce(%lhs: reg<llvmir.f32 x8>, %rhs: reg<llvmir.f32 x8>, %acc: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
   %35 = extract.v8f32 %lhs, 0
   %36 = extract.v8f32 %rhs, 0
   %37 = fma.f32 %35, %36, %acc
@@ -111,7 +111,7 @@ func.def target(@target) @f32_exact_product_reduce(%lhs: vector<4xf32>, %rhs: ve
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32_exact_product_reduce(%lhs: reg<llvmir.f32 x4>, %rhs: reg<llvmir.f32 x4>, %acc: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32_exact_product_reduce(%lhs: reg<llvmir.f32 x4>, %rhs: reg<llvmir.f32 x4>, %acc: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
   %26 = extract.v4f32 %lhs, 0
   %27 = extract.v4f32 %rhs, 0
   %28 = mul.f32 %26, %27
@@ -143,7 +143,7 @@ func.def target(@target) @f16_dot2f(%lhs: vector<8xf16>, %rhs: vector<8xf16>, %a
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f16_dot2f(%lhs: reg<llvmir.f16 x8>, %rhs: reg<llvmir.f16 x8>, %acc: reg<llvmir.f32 x4>) -> (reg<llvmir.f32 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f16_dot2f(%lhs: reg<llvmir.f16 x8>, %rhs: reg<llvmir.f16 x8>, %acc: reg<llvmir.f32 x4>) -> (reg<llvmir.f32 x4>) asm {
   %54 = extract.v4f32 %acc, 0
   %55 = extract.v8f16 %lhs, 0
   %56 = extract.v8f16 %rhs, 0
@@ -204,7 +204,7 @@ func.def target(@target) @bf16_dot2f(%lhs: vector<8xbf16>, %rhs: vector<8xbf16>,
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @bf16_dot2f(%lhs: reg<llvmir.bf16 x8>, %rhs: reg<llvmir.bf16 x8>, %acc: reg<llvmir.f32 x4>) -> (reg<llvmir.f32 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @bf16_dot2f(%lhs: reg<llvmir.bf16 x8>, %rhs: reg<llvmir.bf16 x8>, %acc: reg<llvmir.f32 x4>) -> (reg<llvmir.f32 x4>) asm {
   %54 = extract.v4f32 %acc, 0
   %55 = extract.v8bf16 %lhs, 0
   %56 = extract.v8bf16 %rhs, 0
@@ -263,9 +263,9 @@ func.def target(@target) @f32_uniform_smem_vector_operands(%lhs: vector<4xf32>, 
   %base = index.constant 0 : offset
   %weights_global = buffer.assume.memory_space<global> %weights : buffer
   %weights_noalias = buffer.assume.noalias %weights_global : buffer
-  %weights_view = buffer.view %weights_noalias[%base] : buffer -> view<2x4xf32, #dense>
-  %rhs = vector.load %weights_view[0, 0] : view<2x4xf32, #dense> -> vector<4xf32>
-  %bias_vector = vector.load %weights_view[1, 0] : view<2x4xf32, #dense> -> vector<4xf32>
+  %weights_view = buffer.view %weights_noalias[%base] : buffer -> view<2x4xf32>
+  %rhs = vector.load %weights_view[0, 0] : view<2x4xf32> -> vector<4xf32>
+  %bias_vector = vector.load %weights_view[1, 0] : view<2x4xf32> -> vector<4xf32>
   %bias = vector.extract %bias_vector[0] : vector<4xf32> -> f32
   %scaled = vector.mulf %lhs, %rhs : vector<4xf32>
   %dot = vector.dotf %scaled, %rhs, %bias : vector<4xf32>, vector<4xf32>, f32
@@ -273,7 +273,7 @@ func.def target(@target) @f32_uniform_smem_vector_operands(%lhs: vector<4xf32>, 
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32_uniform_smem_vector_operands(%lhs: reg<llvmir.f32 x4>, %weights_view: reg<llvmir.ptr>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32_uniform_smem_vector_operands(%lhs: reg<llvmir.f32 x4>, %weights_view: reg<llvmir.ptr>) -> (reg<llvmir.f32>) asm {
   %bias = load.f32 %weights_view, 16
   %47 = extract.v4f32 %lhs, 0
   %48 = load.f32 %weights_view, 0

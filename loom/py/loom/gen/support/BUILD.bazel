@@ -12,6 +12,7 @@ package(
 )
 
 GENERATED_FILE_VISIBILITY = [
+    "//loom/build_tools:__subpackages__",
     "//loom/py/loom/gen:__subpackages__",
     "//loom/py/loom/tools:__pkg__",
 ]
@@ -31,6 +32,13 @@ iree_py_library(
         "//loom/py/loom:core",
         "//loom/py/loom/gen:package",
     ],
+)
+
+iree_py_library(
+    name = "native_layout",
+    srcs = ["native_layout.py"],
+    visibility = GENERATED_FILE_VISIBILITY,
+    deps = ["//loom/py/loom/target:native_layout_facts"],
 )
 
 iree_py_test(

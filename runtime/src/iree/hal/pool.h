@@ -12,6 +12,7 @@
 
 #include "iree/async/frontier.h"
 #include "iree/base/api.h"
+#include "iree/hal/atomic.h"
 #include "iree/hal/buffer.h"
 #include "iree/hal/resource.h"
 
@@ -211,6 +212,10 @@ typedef struct iree_hal_pool_capabilities_t {
   // Buffer usages this pool supports. A pool backed by DEVICE_LOCAL memory
   // that isn't host-visible can't serve MAPPING usage.
   iree_hal_buffer_usage_t supported_usage;
+
+  // Atomic operations supported by naturally aligned locations materialized
+  // from this pool. Queue-family capabilities are required independently.
+  iree_hal_atomic_operation_capabilities_t atomic_operations;
 
   // Minimum user-visible allocation size in bytes. Suballocating pools may
   // round internally and report 0 or 1 when they have no practical lower bound.

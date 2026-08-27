@@ -1,0 +1,235 @@
+// RUN: emit spirv-dis validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @ordinary_vector_integer() asm {
+  %one = OpConstant.i32 1
+  %two = OpConstant.i32 2
+  %three = OpConstant.i32 3
+  %four = OpConstant.i32 4
+  %five = OpConstant.i32 5
+  %six = OpConstant.i32 6
+  %seven = OpConstant.i32 7
+  %eight = OpConstant.i32 8
+  %lhs = OpCompositeConstruct.v4i32 %five, %six, %seven, %eight
+  %rhs = OpCompositeConstruct.v4i32 %one, %two, %three, %four
+  %add = OpIAdd.v4i32 %lhs, %rhs
+  %sub = OpISub.v4i32 %add, %rhs
+  %mul = OpIMul.v4i32 %sub, %rhs
+  %sdiv = OpSDiv.v4i32 %mul, %rhs
+  %srem = OpSRem.v4i32 %sdiv, %rhs
+  %and = OpBitwiseAnd.v4i32 %srem, %lhs
+  %or = OpBitwiseOr.v4i32 %and, %rhs
+  %xor = OpBitwiseXor.v4i32 %or, %lhs
+  %shl = OpShiftLeftLogical.v4i32 %xor, %rhs
+  %ashr = OpShiftRightArithmetic.v4i32 %shl, %rhs
+  %lshr = OpShiftRightLogical.v4i32 %ashr, %rhs
+
+  %lhs_unsigned = OpBitcast.v4i32.v4u32 %lshr
+  %rhs_unsigned = OpBitcast.v4i32.v4u32 %rhs
+  %udiv = OpUDiv.v4u32 %lhs_unsigned, %rhs_unsigned
+  %umod = OpUMod.v4u32 %udiv, %rhs_unsigned
+  %signed_again = OpBitcast.v4u32.v4i32 %umod
+
+  %eq = OpIEqual.v4i32 %signed_again, %rhs
+  %ne = OpINotEqual.v4i32 %signed_again, %rhs
+  %slt = OpSLessThan.v4i32 %signed_again, %rhs
+  %sle = OpSLessThanEqual.v4i32 %signed_again, %rhs
+  %sgt = OpSGreaterThan.v4i32 %signed_again, %rhs
+  %sge = OpSGreaterThanEqual.v4i32 %signed_again, %rhs
+  %ult = OpULessThan.v4u32 %lhs_unsigned, %rhs_unsigned
+  %ule = OpULessThanEqual.v4u32 %lhs_unsigned, %rhs_unsigned
+  %ugt = OpUGreaterThan.v4u32 %lhs_unsigned, %rhs_unsigned
+  %uge = OpUGreaterThanEqual.v4u32 %lhs_unsigned, %rhs_unsigned
+
+  %cmp0 = OpLogicalAnd.v4bool %eq, %ne
+  %cmp1 = OpLogicalOr.v4bool %slt, %sle
+  %cmp2 = OpLogicalNotEqual.v4bool %sgt, %sge
+  %cmp3 = OpLogicalAnd.v4bool %ult, %ule
+  %cmp4 = OpLogicalOr.v4bool %ugt, %uge
+  %cmp5 = OpLogicalNotEqual.v4bool %cmp0, %cmp1
+  %cmp6 = OpLogicalOr.v4bool %cmp2, %cmp3
+  %cmp7 = OpLogicalNotEqual.v4bool %cmp5, %cmp6
+  %condition_vector = OpLogicalOr.v4bool %cmp7, %cmp4
+  %condition = OpCompositeExtract.v4bool.bool %condition_vector, 0
+
+  %lhs3 = OpCompositeConstruct.v3i32 %one, %two, %three
+  %rhs3 = OpCompositeConstruct.v3i32 %three, %two, %one
+  %sub3 = OpISub.v3i32 %lhs3, %rhs3
+  %extract3 = OpCompositeExtract.v3i32.i32 %sub3, 0
+
+  %one64 = OpConstant.i64 1
+  %two64 = OpConstant.i64 2
+  %lhs64 = OpCompositeConstruct.v2i64 %one64, %two64
+  %rhs64 = OpCompositeConstruct.v2i64 %two64, %one64
+  %add64 = OpIAdd.v2i64 %lhs64, %rhs64
+  %eq64 = OpIEqual.v2i64 %add64, %lhs64
+  %condition64 = OpCompositeExtract.v2bool.bool %eq64, 0
+  %combined_condition = OpLogicalOr.bool %condition, %condition64
+  %used = OpIAdd %extract3, %one
+  %used_condition = OpIEqual %used, %two
+  %final_condition = OpLogicalOr.bool %combined_condition, %used_condition
+  low.scf.if %final_condition {
+    OpControlBarrier.workgroup.workgroup.acq_rel
+  }
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %ordinary_vector_integer "ordinary_vector_integer"
+               OpExecutionMode %ordinary_vector_integer LocalSize 1 1 1
+               OpName %ordinary_vector_integer "ordinary_vector_integer"
+               OpName %one "one"
+               OpName %two "two"
+               OpName %three "three"
+               OpName %four "four"
+               OpName %five "five"
+               OpName %six "six"
+               OpName %seven "seven"
+               OpName %eight "eight"
+               OpName %lhs "lhs"
+               OpName %rhs "rhs"
+               OpName %add "add"
+               OpName %sub "sub"
+               OpName %mul "mul"
+               OpName %sdiv "sdiv"
+               OpName %srem "srem"
+               OpName %and "and"
+               OpName %or "or"
+               OpName %xor "xor"
+               OpName %shl "shl"
+               OpName %ashr "ashr"
+               OpName %lshr "lshr"
+               OpName %lhs_unsigned "lhs_unsigned"
+               OpName %rhs_unsigned "rhs_unsigned"
+               OpName %udiv "udiv"
+               OpName %umod "umod"
+               OpName %signed_again "signed_again"
+               OpName %eq "eq"
+               OpName %ne "ne"
+               OpName %slt "slt"
+               OpName %sle "sle"
+               OpName %sgt "sgt"
+               OpName %sge "sge"
+               OpName %ult "ult"
+               OpName %ule "ule"
+               OpName %ugt "ugt"
+               OpName %uge "uge"
+               OpName %cmp0 "cmp0"
+               OpName %cmp1 "cmp1"
+               OpName %cmp2 "cmp2"
+               OpName %cmp3 "cmp3"
+               OpName %cmp4 "cmp4"
+               OpName %cmp5 "cmp5"
+               OpName %cmp6 "cmp6"
+               OpName %cmp7 "cmp7"
+               OpName %condition_vector "condition_vector"
+               OpName %condition "condition"
+               OpName %lhs3 "lhs3"
+               OpName %rhs3 "rhs3"
+               OpName %sub3 "sub3"
+               OpName %extract3 "extract3"
+               OpName %one64 "one64"
+               OpName %two64 "two64"
+               OpName %lhs64 "lhs64"
+               OpName %rhs64 "rhs64"
+               OpName %add64 "add64"
+               OpName %eq64 "eq64"
+               OpName %condition64 "condition64"
+               OpName %combined_condition "combined_condition"
+               OpName %used "used"
+               OpName %used_condition "used_condition"
+               OpName %final_condition "final_condition"
+       %void = OpTypeVoid
+          %3 = OpTypeFunction %void
+        %int = OpTypeInt 32 1
+        %one = OpConstant %int 1
+        %two = OpConstant %int 2
+      %three = OpConstant %int 3
+       %four = OpConstant %int 4
+       %five = OpConstant %int 5
+        %six = OpConstant %int 6
+      %seven = OpConstant %int 7
+      %eight = OpConstant %int 8
+      %v4int = OpTypeVector %int 4
+       %uint = OpTypeInt 32 0
+     %v4uint = OpTypeVector %uint 4
+       %bool = OpTypeBool
+     %v4bool = OpTypeVector %bool 4
+      %v3int = OpTypeVector %int 3
+       %long = OpTypeInt 64 1
+      %one64 = OpConstant %long 1
+      %two64 = OpConstant %long 2
+     %v2long = OpTypeVector %long 2
+     %v2bool = OpTypeVector %bool 2
+     %uint_2 = OpConstant %uint 2
+   %uint_264 = OpConstant %uint 264
+%ordinary_vector_integer = OpFunction %void None %3
+          %4 = OpLabel
+        %lhs = OpCompositeConstruct %v4int %five %six %seven %eight
+        %rhs = OpCompositeConstruct %v4int %one %two %three %four
+        %add = OpIAdd %v4int %lhs %rhs
+        %sub = OpISub %v4int %add %rhs
+        %mul = OpIMul %v4int %sub %rhs
+       %sdiv = OpSDiv %v4int %mul %rhs
+       %srem = OpSRem %v4int %sdiv %rhs
+        %and = OpBitwiseAnd %v4int %srem %lhs
+         %or = OpBitwiseOr %v4int %and %rhs
+        %xor = OpBitwiseXor %v4int %or %lhs
+        %shl = OpShiftLeftLogical %v4int %xor %rhs
+       %ashr = OpShiftRightArithmetic %v4int %shl %rhs
+       %lshr = OpShiftRightLogical %v4int %ashr %rhs
+%lhs_unsigned = OpBitcast %v4uint %lshr
+%rhs_unsigned = OpBitcast %v4uint %rhs
+       %udiv = OpUDiv %v4uint %lhs_unsigned %rhs_unsigned
+       %umod = OpUMod %v4uint %udiv %rhs_unsigned
+%signed_again = OpBitcast %v4int %umod
+         %eq = OpIEqual %v4bool %signed_again %rhs
+         %ne = OpINotEqual %v4bool %signed_again %rhs
+        %slt = OpSLessThan %v4bool %signed_again %rhs
+        %sle = OpSLessThanEqual %v4bool %signed_again %rhs
+        %sgt = OpSGreaterThan %v4bool %signed_again %rhs
+        %sge = OpSGreaterThanEqual %v4bool %signed_again %rhs
+        %ult = OpULessThan %v4bool %lhs_unsigned %rhs_unsigned
+        %ule = OpULessThanEqual %v4bool %lhs_unsigned %rhs_unsigned
+        %ugt = OpUGreaterThan %v4bool %lhs_unsigned %rhs_unsigned
+        %uge = OpUGreaterThanEqual %v4bool %lhs_unsigned %rhs_unsigned
+       %cmp0 = OpLogicalAnd %v4bool %eq %ne
+       %cmp1 = OpLogicalOr %v4bool %slt %sle
+       %cmp2 = OpLogicalNotEqual %v4bool %sgt %sge
+       %cmp3 = OpLogicalAnd %v4bool %ult %ule
+       %cmp4 = OpLogicalOr %v4bool %ugt %uge
+       %cmp5 = OpLogicalNotEqual %v4bool %cmp0 %cmp1
+       %cmp6 = OpLogicalOr %v4bool %cmp2 %cmp3
+       %cmp7 = OpLogicalNotEqual %v4bool %cmp5 %cmp6
+%condition_vector = OpLogicalOr %v4bool %cmp7 %cmp4
+  %condition = OpCompositeExtract %bool %condition_vector 0
+       %lhs3 = OpCompositeConstruct %v3int %one %two %three
+       %rhs3 = OpCompositeConstruct %v3int %three %two %one
+       %sub3 = OpISub %v3int %lhs3 %rhs3
+   %extract3 = OpCompositeExtract %int %sub3 0
+      %lhs64 = OpCompositeConstruct %v2long %one64 %two64
+      %rhs64 = OpCompositeConstruct %v2long %two64 %one64
+      %add64 = OpIAdd %v2long %lhs64 %rhs64
+       %eq64 = OpIEqual %v2bool %add64 %lhs64
+%condition64 = OpCompositeExtract %bool %eq64 0
+%combined_condition = OpLogicalOr %bool %condition %condition64
+       %used = OpIAdd %int %extract3 %one
+%used_condition = OpIEqual %bool %used %two
+%final_condition = OpLogicalOr %bool %combined_condition %used_condition
+               OpSelectionMerge %77 None
+               OpBranchConditional %final_condition %76 %77
+         %76 = OpLabel
+               OpControlBarrier %uint_2 %uint_2 %uint_264
+               OpBranch %77
+         %77 = OpLabel
+               OpReturn
+               OpFunctionEnd

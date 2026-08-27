@@ -39,6 +39,7 @@ static iree_status_t loom_pass_tool_run_program(
       .predicate_provider = options->predicate_provider,
       .diagnostic_emitter = options->diagnostic_emitter,
       .environment = options->environment,
+      .function_versions = options->function_versions,
       .report = options->report,
       .trace = options->trace,
   };
@@ -320,8 +321,10 @@ static iree_status_t loom_pass_tool_build_flat_run(
   IREE_RETURN_IF_ERROR(loom_pass_tool_build_option_attrs(
       builder->module, descriptor, options, &option_attrs));
   loom_op_t* run_op = NULL;
-  return loom_pass_ir_build_run(builder, descriptor->key, option_attrs,
-                                &run_op);
+  loom_pass_run_build_flags_t build_flags =
+      option_attrs.count ? LOOM_PASS_RUN_BUILD_FLAG_HAS_OPTIONS : 0;
+  return loom_pass_ir_build_run(builder, build_flags, descriptor->key,
+                                option_attrs, &run_op);
 }
 
 typedef struct loom_pass_tool_flat_function_group_t {

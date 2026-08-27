@@ -36,6 +36,13 @@ loom_cc_binary(
     loom::binding::c::loomc
 )
 
+iree_native_test(
+  NAME
+    "link_modules_test"
+  SRC
+    ::link_modules
+)
+
 if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
 loom_cc_binary(
   NAME

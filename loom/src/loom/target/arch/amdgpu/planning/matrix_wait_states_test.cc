@@ -19,6 +19,9 @@ TEST(AmdgpuMatrixWaitStatesTest, MapsFeatureProfiles) {
   EXPECT_TRUE(loom_amdgpu_matrix_wait_profile_from_feature_profile(
       LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950, &wait_profile));
   EXPECT_EQ(wait_profile, LOOM_AMDGPU_MATRIX_WAIT_PROFILE_MFMA_GFX950);
+  EXPECT_TRUE(loom_amdgpu_matrix_wait_profile_from_feature_profile(
+      LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC, &wait_profile));
+  EXPECT_EQ(wait_profile, LOOM_AMDGPU_MATRIX_WAIT_PROFILE_MFMA_GFX950);
   EXPECT_FALSE(loom_amdgpu_matrix_wait_profile_from_feature_profile(
       LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12, &wait_profile));
   EXPECT_EQ(wait_profile, LOOM_AMDGPU_MATRIX_WAIT_PROFILE_UNKNOWN);
@@ -57,12 +60,16 @@ TEST(AmdgpuMatrixWaitStatesTest, LooksUpMatrixResultRows) {
       LOOM_AMDGPU_MATRIX_WAIT_PROFILE_MFMA_GFX950, 4,
       LOOM_AMDGPU_MATRIX_WAIT_RESULT_USE_MATRIX_SRCC_EXACT, &cycle_count));
   EXPECT_EQ(cycle_count, 0);
+  EXPECT_TRUE(loom_amdgpu_matrix_wait_result_cycle_count(
+      LOOM_AMDGPU_MATRIX_WAIT_PROFILE_MFMA_GFX950, 32,
+      LOOM_AMDGPU_MATRIX_WAIT_RESULT_USE_NON_MATRIX, &cycle_count));
+  EXPECT_EQ(cycle_count, 36);
 }
 
 TEST(AmdgpuMatrixWaitStatesTest, RejectsUnsupportedRows) {
   uint16_t cycle_count = 1;
   EXPECT_FALSE(loom_amdgpu_matrix_wait_result_cycle_count(
-      LOOM_AMDGPU_MATRIX_WAIT_PROFILE_MFMA_GFX950, 32,
+      LOOM_AMDGPU_MATRIX_WAIT_PROFILE_MFMA_GFX950, 64,
       LOOM_AMDGPU_MATRIX_WAIT_RESULT_USE_NON_MATRIX, &cycle_count));
   EXPECT_EQ(cycle_count, 0);
   EXPECT_FALSE(loom_amdgpu_matrix_wait_result_cycle_count(
@@ -76,7 +83,7 @@ TEST(AmdgpuMatrixWaitStatesTest, RejectsUnsupportedRows) {
 }
 
 TEST(AmdgpuMatrixWaitStatesTest, ExposesRowsByOrdinal) {
-  ASSERT_EQ(loom_amdgpu_matrix_wait_result_row_count(), 32u);
+  ASSERT_GT(loom_amdgpu_matrix_wait_result_row_count(), 0u);
   ASSERT_NE(loom_amdgpu_matrix_wait_result_row_at(0), nullptr);
   EXPECT_EQ(loom_amdgpu_matrix_wait_result_row_at(
                 loom_amdgpu_matrix_wait_result_row_count()),

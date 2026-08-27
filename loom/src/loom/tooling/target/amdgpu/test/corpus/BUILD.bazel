@@ -1,0 +1,135 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:executable.bzl", "iree_executable_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:defs.bzl", "loom_module")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_EXECUTION_TAGS = [
+    "iree-run-requirement=runtime.resource.amd_gpu",
+    "requires-gpu-amd",
+    "runtime-resource=amd-gpu",
+]
+
+_GENERIC_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/execute:amdgpu_hal",
+])
+
+_GFX11_ARTIFACT_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target/amdgpu:descriptor_set_gfx11_generic_core",
+])
+
+_GFX11_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/execute:amdgpu_hal",
+    "//loom/config/target/amdgpu:iree_hal_descriptor_set_gfx11_generic_core",
+])
+
+loom_module(
+    name = "generic_test_module",
+    srcs = [
+        "//loom/src/loom/test/corpus/authoring:authoring_cases",
+        "//loom/src/loom/test/corpus/authoring/hip:portable_cases",
+        "//loom/src/loom/test/corpus/checked_benchmarks:checked_benchmark_cases",
+        "//loom/src/loom/test/corpus/conformance:conformance_cases",
+        "//loom/src/loom/test/corpus/encoding:numeric_conversion_cases",
+    ] + glob(["generic/*.loom"]),
+    output_format = "bc",
+)
+
+iree_executable_test(
+    name = "generic_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(rootpath :generic_test_module)",
+        "--device=amdgpu",
+    ],
+    data = [":generic_test_module"],
+    tags = _EXECUTION_TAGS,
+    target_compatible_with = _GENERIC_COMPATIBLE_WITH,
+)
+
+loom_module(
+    name = "gfx11_test_module",
+    srcs = [
+        "//loom/src/loom/test/corpus/authoring/hip:gfx11_cases",
+    ] + glob(["gfx11/*.loom"]),
+    output_format = "bc",
+    target_compatible_with = _GFX11_ARTIFACT_COMPATIBLE_WITH,
+)
+
+iree_executable_test(
+    name = "gfx11_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(rootpath :gfx11_test_module)",
+        "--device=amdgpu",
+    ],
+    data = [":gfx11_test_module"],
+    tags = _EXECUTION_TAGS,
+    target_compatible_with = _GFX11_COMPATIBLE_WITH,
+)
+
+loom_module(
+    name = "gfx1100_test_module",
+    srcs = glob(["gfx1100/*.loom"]),
+    output_format = "bc",
+)
+
+iree_executable_test(
+    name = "gfx1100_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(rootpath :gfx1100_test_module)",
+        "--device=amdgpu",
+    ],
+    data = [":gfx1100_test_module"],
+    tags = _EXECUTION_TAGS + ["manual"],
+    target_compatible_with = _GENERIC_COMPATIBLE_WITH,
+)
+
+loom_module(
+    name = "gfx9_4_test_module",
+    srcs = glob(["gfx9_4/*.loom"]),
+    output_format = "bc",
+)
+
+iree_executable_test(
+    name = "gfx9_4_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(rootpath :gfx9_4_test_module)",
+        "--device=amdgpu",
+    ],
+    data = [":gfx9_4_test_module"],
+    tags = _EXECUTION_TAGS + ["manual"],
+    target_compatible_with = _GENERIC_COMPATIBLE_WITH,
+)
+
+loom_module(
+    name = "gfx1250_test_module",
+    srcs = [
+        "//loom/src/loom/test/corpus/authoring/hip:gfx1250_cases",
+    ],
+    output_format = "bc",
+)
+
+iree_executable_test(
+    name = "gfx1250_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(rootpath :gfx1250_test_module)",
+        "--device=amdgpu",
+    ],
+    data = [":gfx1250_test_module"],
+    tags = _EXECUTION_TAGS + ["manual"],
+    target_compatible_with = _GENERIC_COMPATIBLE_WITH,
+)

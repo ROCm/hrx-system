@@ -256,6 +256,19 @@ typedef enum iree_hal_external_timepoint_type_e {
   IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_HIP_EVENT,
 } iree_hal_external_timepoint_type_t;
 
+// Returns true if |type| identifies a concrete external timepoint type.
+static inline bool iree_hal_external_timepoint_type_is_valid(
+    iree_hal_external_timepoint_type_t type) {
+  switch (type) {
+    case IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_ASYNC_PRIMITIVE:
+    case IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_CUDA_EVENT:
+    case IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_HIP_EVENT:
+      return true;
+    default:
+      return false;
+  }
+}
+
 // A bitmask of iree_hal_external_timepoint_type_t values.
 typedef uint32_t iree_hal_external_timepoint_type_mask_t;
 typedef enum iree_hal_external_timepoint_type_mask_bits_e {
@@ -276,7 +289,7 @@ typedef enum iree_hal_external_timepoint_type_mask_bits_e {
 static inline iree_hal_external_timepoint_type_mask_t
 iree_hal_external_timepoint_type_mask_from_type(
     iree_hal_external_timepoint_type_t type) {
-  if (type == IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_NONE) {
+  if (!iree_hal_external_timepoint_type_is_valid(type)) {
     return IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_NONE;
   }
   const uint32_t ordinal = (uint32_t)type;
@@ -383,7 +396,10 @@ IREE_API_EXPORT iree_status_t
 iree_hal_semaphore_query(iree_hal_semaphore_t* semaphore, uint64_t* out_value);
 
 // Signals the |semaphore| to the given payload value.
-// The call is ignored if the current payload value exceeds |new_value|.
+// The payload advances monotonically: |new_value| must be strictly greater
+// than the current payload value, so values may be skipped but never
+// repeated. Returns IREE_STATUS_INVALID_ARGUMENT without advancing the
+// payload if |new_value| is at or below the current payload.
 // |frontier| is an optional causal frontier to merge into the semaphore's
 // accumulated frontier. Pass NULL for local-only signals where cross-device
 // causal tracking is not needed.

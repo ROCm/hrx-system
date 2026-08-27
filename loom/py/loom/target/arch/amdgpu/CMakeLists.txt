@@ -11,15 +11,85 @@ iree_add_all_subdirs()
 
 iree_py_library(
   NAME
+    target_map_data
+  SRCS
+    "${PROJECT_SOURCE_DIR}/build_tools/amdgpu/target_map_data.py"
+  IMPORTS
+    "../../../../../.."
+)
+
+iree_py_library(
+  NAME
     target_info
   SRCS
     "__init__.py"
+    "lds_bank_service.py"
     "names.py"
     "target_info.py"
   DEPS
+    loom::py::loom::target::arch::amdgpu::target_map_data
     loom::py::loom::dialect::shared
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::package_init
+)
+
+iree_py_library(
+  NAME
+    target_identity
+  SRCS
+    "target_identity.py"
+  DEPS
+    loom::py::loom::target::arch::amdgpu::target_info
+    loom::py::loom::target::arch::amdgpu::target_map_data
+)
+
+iree_py_test(
+  NAME
+    target_identity_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
+  SRCS
+    "target_identity_test.py"
+    "../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.amdgpu.target_identity_test"
+  DEPS
+    loom::py::loom::target::arch::amdgpu::target_identity
+    loom::py::loom::target::arch::amdgpu::target_info
+    loom::py::loom::target::arch::amdgpu::target_map_data
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+)
+
+iree_py_library(
+  NAME
+    compile_report_suggestions
+  SRCS
+    "compile_report_suggestions.py"
+  DEPS
+    loom::py::loom::target::arch::amdgpu::target_identity
+    loom::py::loom::target::arch::amdgpu::target_info
+    loom::py::loom::reporting::reporting
+)
+
+iree_py_test(
+  NAME
+    compile_report_suggestions_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
+  SRCS
+    "compile_report_suggestions_test.py"
+    "../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.amdgpu.compile_report_suggestions_test"
+  DEPS
+    loom::py::loom::target::arch::amdgpu::compile_report_suggestions
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 iree_py_library(
@@ -40,7 +110,6 @@ iree_py_library(
   NAME
     dialect
   SRCS
-    "__init__.py"
     "dialect.py"
   DEPS
     loom::py::loom::core
@@ -53,6 +122,8 @@ iree_py_library(
     low_aliases
   SRCS
     "low_aliases.py"
+  DEPS
+    loom::py::loom::target::arch::amdgpu::descriptors
 )
 
 iree_py_library(
@@ -60,13 +131,57 @@ iree_py_library(
     matrix_contracts
   SRCS
     "matrix_contracts.py"
+  DEPS
+    loom::py::loom::target::arch::amdgpu::matrix_formats
+    loom::py::loom::target::arch::amdgpu::matrix_fragment_layouts
+    loom::py::loom::target::arch::package
+)
+
+iree_py_library(
+  NAME
+    matrix_formats
+  SRCS
+    "matrix_formats.py"
+)
+
+iree_py_library(
+  NAME
+    matrix_fragment_layouts
+  SRCS
+    "matrix_fragment_layouts.py"
+  DEPS
+    loom::py::loom::target::arch::amdgpu::matrix_formats
+    loom::py::loom::target::native_contraction_layout
+    loom::py::loom::target::native_coordinate_projection
+    loom::py::loom::target::native_layout_facts
+    loom::py::loom::target::arch::package
+)
+
+iree_py_test(
+  NAME
+    matrix_fragment_layouts_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
+  SRCS
+    "matrix_fragment_layouts_test.py"
+    "../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.amdgpu.matrix_fragment_layouts_test"
+  DEPS
+    loom::py::loom::target::arch::amdgpu::matrix_fragment_layouts
+    loom::py::loom::target::native_contraction_layout
+    loom::py::loom::target::native_coordinate_projection
+    loom::py::loom::target::native_layout_facts
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 iree_py_library(
   NAME
     descriptors
   SRCS
-    "__init__.py"
     "descriptor_overlay.py"
     "descriptors/__init__.py"
     "descriptors/alu.py"
@@ -75,19 +190,25 @@ iree_py_library(
     "descriptors/candidates.py"
     "descriptors/categories.py"
     "descriptors/cdna.py"
+    "descriptors/cluster.py"
     "descriptors/common.py"
     "descriptors/contracts.py"
     "descriptors/control.py"
     "descriptors/matrix.py"
+    "descriptors/matrix_schedule.py"
     "descriptors/memory.py"
     "descriptors/rdna3.py"
+    "descriptors/rdna35.py"
     "descriptors/rdna4.py"
+    "descriptors/rdna4m.py"
+    "descriptors/scalar_float.py"
     "descriptors/sets.py"
+    "descriptors/tensor.py"
     "descriptors/workgroup.py"
-    "target_info.py"
   DEPS
     loom::py::loom::target::arch::amdgpu::encoding_info
     loom::py::loom::target::arch::amdgpu::isa_xml
+    loom::py::loom::target::arch::amdgpu::matrix_formats
     loom::py::loom::target::arch::amdgpu::target_info
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::package
@@ -96,7 +217,11 @@ iree_py_library(
 iree_py_test(
   NAME
     target_info_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
   SRCS
+    "isa_xml_test.py"
+    "target_info_test.py"
     "../../../tools/pytest_style_runner.py"
   ARGS
     "loom.target.arch.amdgpu.isa_xml_test"
@@ -104,18 +229,32 @@ iree_py_test(
   DEPS
     loom::py::loom::target::arch::amdgpu::isa_xml
     loom::py::loom::target::arch::amdgpu::target_info
+    loom::py::loom::target::arch::amdgpu::target_map_data
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 iree_py_test(
   NAME
     descriptors_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
   SRCS
+    "descriptor_overlay_test.py"
+    "descriptors/rdna35_test.py"
+    "descriptors/rdna4_test.py"
+    "descriptors/rdna4m_test.py"
+    "descriptors_test.py"
+    "isa_xml_test.py"
+    "low_aliases_test.py"
     "../../../tools/pytest_style_runner.py"
   ARGS
     "loom.target.arch.amdgpu.descriptor_overlay_test"
+    "loom.target.arch.amdgpu.descriptors.rdna4_test"
+    "loom.target.arch.amdgpu.descriptors.rdna35_test"
+    "loom.target.arch.amdgpu.descriptors.rdna4m_test"
     "loom.target.arch.amdgpu.descriptors_test"
     "loom.target.arch.amdgpu.low_aliases_test"
   DEPS
@@ -126,6 +265,7 @@ iree_py_test(
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

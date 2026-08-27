@@ -23,6 +23,7 @@
 #include "loom/ops/pass/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/test/ops.h"
+#include "loom/ops/test/registry.h"
 #include "loom/ops/vector/ops.h"
 
 enum {
@@ -149,59 +150,93 @@ typedef const loom_op_vtable_t* const* (
     *loom_low_source_workload_dialect_vtables_fn_t)(iree_host_size_t* count);
 typedef const loom_op_semantics_t* (
     *loom_low_source_workload_dialect_semantics_fn_t)(iree_host_size_t* count);
+typedef const loom_condition_refinement_descriptor_t* (
+    *loom_low_source_workload_condition_refinements_fn_t)(
+    iree_host_size_t* count);
+typedef const loom_parameterized_attr_descriptor_t* (
+    *loom_low_source_workload_parameterized_attrs_fn_t)(
+    iree_host_size_t* count);
+
+typedef struct loom_low_source_workload_dialect_registration_t {
+  // Numeric dialect identifier.
+  uint8_t dialect_id;
+  // Generated operation vtable accessor.
+  loom_low_source_workload_dialect_vtables_fn_t vtables_fn;
+  // Generated operation semantics accessor.
+  loom_low_source_workload_dialect_semantics_fn_t semantics_fn;
+  // Generated condition-refinement accessor, or NULL when absent.
+  loom_low_source_workload_condition_refinements_fn_t condition_refinements_fn;
+  // Generated parameterized-attribute accessor, or NULL when absent.
+  loom_low_source_workload_parameterized_attrs_fn_t parameterized_attrs_fn;
+} loom_low_source_workload_dialect_registration_t;
 
 static iree_status_t loom_low_source_workload_register_dialect(
-    loom_context_t* context, uint8_t dialect_id,
-    loom_low_source_workload_dialect_vtables_fn_t dialect_vtables_fn,
-    loom_low_source_workload_dialect_semantics_fn_t dialect_semantics_fn) {
+    loom_context_t* context,
+    const loom_low_source_workload_dialect_registration_t* registration) {
   iree_host_size_t count = 0;
-  const loom_op_vtable_t* const* vtables = dialect_vtables_fn(&count);
+  const loom_op_vtable_t* const* vtables = registration->vtables_fn(&count);
   iree_host_size_t semantics_count = 0;
-  const loom_op_semantics_t* semantics = dialect_semantics_fn(&semantics_count);
+  const loom_op_semantics_t* semantics =
+      registration->semantics_fn(&semantics_count);
   if (semantics_count != count) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "dialect %u semantics count %" PRIhsz
                             " does not match vtable count %" PRIhsz,
-                            (unsigned)dialect_id, semantics_count, count);
+                            (unsigned)registration->dialect_id, semantics_count,
+                            count);
   }
-  IREE_RETURN_IF_ERROR(loom_context_register_dialect(context, dialect_id,
-                                                     vtables, (uint16_t)count));
-  return loom_context_register_dialect_semantics(context, dialect_id, semantics,
-                                                 (uint16_t)count);
+  IREE_RETURN_IF_ERROR(loom_context_register_dialect(
+      context, registration->dialect_id, vtables, (uint16_t)count));
+  IREE_RETURN_IF_ERROR(loom_context_register_dialect_semantics(
+      context, registration->dialect_id, semantics, (uint16_t)count));
+  if (registration->condition_refinements_fn != NULL) {
+    iree_host_size_t refinement_count = 0;
+    const loom_condition_refinement_descriptor_t* refinements =
+        registration->condition_refinements_fn(&refinement_count);
+    IREE_RETURN_IF_ERROR(loom_context_register_condition_refinements(
+        context, registration->dialect_id, refinements, refinement_count));
+  }
+  if (registration->parameterized_attrs_fn != NULL) {
+    iree_host_size_t attr_count = 0;
+    const loom_parameterized_attr_descriptor_t* attrs =
+        registration->parameterized_attrs_fn(&attr_count);
+    IREE_RETURN_IF_ERROR(loom_context_register_parameterized_attrs(
+        context, registration->dialect_id, attrs, attr_count));
+  }
+  return iree_ok_status();
 }
 
 iree_status_t loom_low_source_workload_register_dialects(
     loom_context_t* context) {
-  IREE_RETURN_IF_ERROR(loom_low_source_workload_register_dialect(
-      context, LOOM_DIALECT_TEST, loom_test_dialect_vtables,
-      loom_test_dialect_op_semantics));
-  IREE_RETURN_IF_ERROR(loom_low_source_workload_register_dialect(
-      context, LOOM_DIALECT_CFG, loom_cfg_dialect_vtables,
-      loom_cfg_dialect_op_semantics));
-  IREE_RETURN_IF_ERROR(loom_low_source_workload_register_dialect(
-      context, LOOM_DIALECT_FUNC, loom_func_dialect_vtables,
-      loom_func_dialect_op_semantics));
-  IREE_RETURN_IF_ERROR(loom_low_source_workload_register_dialect(
-      context, LOOM_DIALECT_BUFFER, loom_buffer_dialect_vtables,
-      loom_buffer_dialect_op_semantics));
-  IREE_RETURN_IF_ERROR(loom_low_source_workload_register_dialect(
-      context, LOOM_DIALECT_ENCODING, loom_encoding_dialect_vtables,
-      loom_encoding_dialect_op_semantics));
-  IREE_RETURN_IF_ERROR(loom_low_source_workload_register_dialect(
-      context, LOOM_DIALECT_SCALAR, loom_scalar_dialect_vtables,
-      loom_scalar_dialect_op_semantics));
-  IREE_RETURN_IF_ERROR(loom_low_source_workload_register_dialect(
-      context, LOOM_DIALECT_INDEX, loom_index_dialect_vtables,
-      loom_index_dialect_op_semantics));
-  IREE_RETURN_IF_ERROR(loom_low_source_workload_register_dialect(
-      context, LOOM_DIALECT_VECTOR, loom_vector_dialect_vtables,
-      loom_vector_dialect_op_semantics));
-  IREE_RETURN_IF_ERROR(loom_low_source_workload_register_dialect(
-      context, LOOM_DIALECT_PASS, loom_pass_dialect_vtables,
-      loom_pass_dialect_op_semantics));
-  return loom_low_source_workload_register_dialect(
-      context, LOOM_DIALECT_LOW, loom_low_dialect_vtables,
-      loom_low_dialect_op_semantics);
+  static const loom_low_source_workload_dialect_registration_t registrations[] =
+      {
+          {LOOM_DIALECT_CFG, loom_cfg_dialect_vtables,
+           loom_cfg_dialect_op_semantics, NULL, NULL},
+          {LOOM_DIALECT_FUNC, loom_func_dialect_vtables,
+           loom_func_dialect_op_semantics, NULL, NULL},
+          {LOOM_DIALECT_BUFFER, loom_buffer_dialect_vtables,
+           loom_buffer_dialect_op_semantics, NULL, NULL},
+          {LOOM_DIALECT_ENCODING, loom_encoding_dialect_vtables,
+           loom_encoding_dialect_op_semantics,
+           loom_encoding_dialect_condition_refinements,
+           loom_encoding_dialect_parameterized_attrs},
+          {LOOM_DIALECT_SCALAR, loom_scalar_dialect_vtables,
+           loom_scalar_dialect_op_semantics, NULL, NULL},
+          {LOOM_DIALECT_INDEX, loom_index_dialect_vtables,
+           loom_index_dialect_op_semantics, NULL, NULL},
+          {LOOM_DIALECT_VECTOR, loom_vector_dialect_vtables,
+           loom_vector_dialect_op_semantics, NULL, NULL},
+          {LOOM_DIALECT_PASS, loom_pass_dialect_vtables,
+           loom_pass_dialect_op_semantics, NULL, NULL},
+          {LOOM_DIALECT_LOW, loom_low_dialect_vtables,
+           loom_low_dialect_op_semantics, NULL, NULL},
+      };
+  IREE_RETURN_IF_ERROR(loom_test_dialect_register(context));
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(registrations); ++i) {
+    IREE_RETURN_IF_ERROR(
+        loom_low_source_workload_register_dialect(context, &registrations[i]));
+  }
+  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//
@@ -1064,9 +1099,8 @@ static iree_status_t loom_low_source_workload_gen_index_madd(
   }
 
   loom_op_t* op = NULL;
-  IREE_RETURN_IF_ERROR(loom_index_madd_build(
-      context->builder, a, b, c, loom_low_source_workload_index_type(),
-      LOOM_LOCATION_UNKNOWN, &op));
+  IREE_RETURN_IF_ERROR(loom_index_madd_build(context->builder, a, b, c,
+                                             LOOM_LOCATION_UNKNOWN, &op));
   loom_low_source_workload_values_add(context->values,
                                       loom_index_madd_result(op),
                                       loom_low_source_workload_index_type());
@@ -1262,7 +1296,8 @@ static iree_status_t loom_low_source_workload_generate_module_into(
       /*default_pointer_bitwidth=*/0, /*index_bitwidth=*/0,
       /*offset_bitwidth=*/0, /*max_workgroup_size_x=*/0,
       /*max_workgroup_size_y=*/0, /*max_workgroup_size_z=*/0,
-      /*max_flat_workgroup_size=*/0, /*subgroup_size=*/0,
+      /*max_flat_workgroup_size=*/0, /*max_workgroup_storage_bytes=*/0,
+      /*subgroup_size=*/0,
       /*max_grid_size_x=*/0, /*max_grid_size_y=*/0, /*max_grid_size_z=*/0,
       /*max_flat_grid_size=*/0,
       /*max_workgroup_count_x=*/0, /*max_workgroup_count_y=*/0,
@@ -1271,7 +1306,6 @@ static iree_status_t loom_low_source_workload_generate_module_into(
       /*memory_space_constant=*/0, /*memory_space_private=*/0,
       /*memory_space_host=*/0, /*memory_space_descriptor=*/0, /*abi=*/0,
       /*export_symbol=*/LOOM_STRING_ID_INVALID, /*linkage=*/0,
-      /*hal_buffer_resource_flags=*/0,
       /*contract_set_key=*/LOOM_STRING_ID_INVALID, /*contract_feature_bits=*/0,
       LOOM_LOCATION_UNKNOWN, &target_op));
   (void)target_op;

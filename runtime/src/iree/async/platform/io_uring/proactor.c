@@ -40,8 +40,14 @@
 #include "iree/async/types.h"
 #include "iree/async/util/message_pool.h"
 #include "iree/async/util/operation_pool.h"
+#include "iree/async/util/semaphore_wait.h"
 #include "iree/base/internal/atomics.h"
 #include "iree/base/internal/memory.h"
+
+// Maximum number of cascading CQE snapshots processed in one poll turn.
+// Additional in-flight operations remain kernel-owned and are resumed by the
+// caller's next poll turn.
+#define IREE_ASYNC_IO_URING_CQE_DRAIN_PASS_BUDGET 32
 
 // TSAN cannot observe the happens-before relationship provided by io_uring's
 // shared memory rings (SQ/CQ). When a submitter thread fills an SQE and the
@@ -75,6 +81,7 @@ static inline void iree_async_proactor_complete_operation(
     iree_async_completion_flags_t flags) {
   bool is_final = !iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE);
   iree_async_operation_pool_t* pool = is_final ? operation->pool : NULL;
+  status = iree_async_operation_resolve_completion(operation, status, &flags);
   if (operation->completion_fn) {
     operation->completion_fn(operation->user_data, operation, status, flags);
   } else {
@@ -145,6 +152,8 @@ iree_status_t iree_async_proactor_create_io_uring(
   proactor->capabilities = IREE_ASYNC_PROACTOR_CAPABILITY_NONE;
   iree_atomic_slist_initialize(&proactor->pending_software_completions);
   iree_atomic_slist_initialize(&proactor->pending_semaphore_waits);
+  iree_async_semaphore_wait_context_initialize(
+      &proactor->semaphore_wait_context);
   proactor->event_sources = NULL;
   proactor->relays = NULL;
 
@@ -247,6 +256,12 @@ static void iree_async_proactor_io_uring_destroy(
       iree_async_proactor_io_uring_cast(base_proactor);
   iree_allocator_t allocator = proactor->base.allocator;
 
+  // Closing the ring synchronously terminates all kernel operations. Keep
+  // event sources, relay state, source primitives, and retained notifications
+  // alive until this completes so terminal callbacks cannot observe cleanup
+  // while the kernel still holds references.
+  iree_io_uring_ring_deinitialize(&proactor->ring);
+
   // Clean up signal handling state.
   if (proactor->signal.initialized) {
     // Free all signal subscriptions.
@@ -282,6 +297,8 @@ static void iree_async_proactor_io_uring_destroy(
   while (proactor->relays) {
     iree_async_relay_t* relay = proactor->relays;
     proactor->relays = relay->next;
+    iree_async_relay_unregistered_callback_t unregistered_callback =
+        relay->unregistered_callback;
     // Close source fd if owned.
     if (iree_any_bit_set(relay->flags,
                          IREE_ASYNC_RELAY_FLAG_OWN_SOURCE_PRIMITIVE) &&
@@ -297,10 +314,18 @@ static void iree_async_proactor_io_uring_destroy(
           relay->sink.signal_notification.notification);
     }
     iree_allocator_free(relay->allocator, relay);
+    if (unregistered_callback.fn) {
+      unregistered_callback.fn(unregistered_callback.user_data);
+    }
   }
 
   // Deinitialize the message pool (all entries returned to free list by now).
   iree_async_message_pool_deinitialize(&proactor->message_pool);
+
+  iree_atomic_slist_deinitialize(&proactor->pending_software_completions);
+  iree_atomic_slist_deinitialize(&proactor->pending_semaphore_waits);
+  iree_async_semaphore_wait_context_deinitialize(
+      &proactor->semaphore_wait_context);
 
   // Free sparse buffer table. The kernel table is automatically destroyed
   // when the ring fd is closed; this frees the userspace slot allocator.
@@ -311,9 +336,6 @@ static void iree_async_proactor_io_uring_destroy(
     close(proactor->wake_eventfd);
     proactor->wake_eventfd = -1;
   }
-
-  // Deinitialize the ring.
-  iree_io_uring_ring_deinitialize(&proactor->ring);
 
   // Free the proactor structure.
   iree_allocator_free(allocator, proactor);
@@ -505,39 +527,21 @@ iree_async_proactor_io_uring_drain_pending_semaphore_waits(
   iree_host_size_t drained_count = 0;
   iree_atomic_slist_entry_t* entry = head;
   while (entry != NULL) {
-    iree_async_io_uring_semaphore_wait_tracker_t* tracker =
-        (iree_async_io_uring_semaphore_wait_tracker_t*)entry;
+    iree_async_semaphore_wait_tracker_t* tracker =
+        (iree_async_semaphore_wait_tracker_t*)entry;
     iree_atomic_slist_entry_t* next = entry->next;
 
-    // Extract completion status.
-    iree_status_t status = (iree_status_t)iree_atomic_load(
-        &tracker->completion_status, iree_memory_order_acquire);
-
-    // For ANY mode, record which semaphore was satisfied.
-    iree_async_semaphore_wait_operation_t* wait_op = tracker->operation;
-    if (wait_op->mode == IREE_ASYNC_WAIT_MODE_ANY &&
-        iree_status_is_ok(status)) {
-      int32_t satisfied = iree_atomic_load(&tracker->remaining_or_satisfied,
-                                           iree_memory_order_acquire);
-      if (satisfied >= 0) {
-        wait_op->satisfied_index = (iree_host_size_t)satisfied;
-      }
+    if (!iree_async_semaphore_wait_tracker_try_prepare_completion(tracker)) {
+      entry = next;
+      continue;
     }
 
-    // Cancel any remaining timepoints before freeing the tracker.
-    // In ANY mode, only one timepoint was satisfied; in ALL mode, all were
-    // satisfied. Either way, some timepoints may still be linked to their
-    // semaphores' lists. We must unlink them before freeing to avoid
-    // use-after-free when those semaphores are later destroyed/failed.
-    for (iree_host_size_t i = 0; i < tracker->count; ++i) {
-      iree_async_semaphore_cancel_timepoint(wait_op->semaphores[i],
-                                            &tracker->timepoints[i]);
-    }
-
-    // Detach continuation chain before callback (callback may free operation).
-    // Continuations are dispatched AFTER the trigger's callback.
-    iree_async_operation_t* continuation = tracker->continuation_head;
-    tracker->continuation_head = NULL;
+    iree_async_semaphore_wait_completion_t completion;
+    iree_async_semaphore_wait_tracker_finalize(tracker, &completion);
+    iree_async_semaphore_wait_operation_t* wait_op = completion.operation;
+    iree_async_operation_t* continuation = completion.continuation_head;
+    iree_status_t status = completion.status;
+    iree_status_code_t status_code = iree_status_code(status);
 
     // Invoke the operation's callback and release to pool.
     iree_async_proactor_complete_operation((iree_async_operation_t*)wait_op,
@@ -548,7 +552,7 @@ iree_async_proactor_io_uring_drain_pending_semaphore_waits(
     // Dispatch continuation chain after the trigger's callback. Software
     // completions are pushed to MPSC (counted by the post-CQE drain).
     if (continuation) {
-      if (iree_status_is_ok(status)) {
+      if (status_code == IREE_STATUS_OK) {
         iree_async_proactor_io_uring_dispatch_continuation_chain(proactor,
                                                                  continuation);
       } else {
@@ -556,12 +560,6 @@ iree_async_proactor_io_uring_drain_pending_semaphore_waits(
             proactor, continuation);
       }
     }
-
-    // Clear the tracker reference from the operation.
-    wait_op->base.next = NULL;
-
-    // Free the tracker.
-    iree_allocator_free(tracker->allocator, tracker);
 
     entry = next;
   }
@@ -714,8 +712,22 @@ static inline void iree_async_proactor_io_uring_handle_message_receive_cqe(
   }
 }
 
-// Handles EVENT_SOURCE internal CQE.
-// Multishot poll completion for an event source.
+// Unlinks and frees an event source after its final kernel CQE.
+static void iree_async_proactor_io_uring_cleanup_event_source(
+    iree_async_proactor_io_uring_t* proactor,
+    iree_async_event_source_t* source) {
+  if (source->prev) {
+    source->prev->next = source->next;
+  } else {
+    proactor->event_sources = source->next;
+  }
+  if (source->next) {
+    source->next->prev = source->prev;
+  }
+  iree_allocator_free(source->allocator, source);
+}
+
+// Handles an EVENT_SOURCE multishot poll completion.
 static void iree_async_proactor_io_uring_handle_event_source_cqe(
     iree_async_proactor_io_uring_t* proactor, const iree_io_uring_cqe_t* cqe) {
   // Extract the event source pointer from the payload.
@@ -724,8 +736,9 @@ static void iree_async_proactor_io_uring_handle_event_source_cqe(
           cqe->user_data);
   if (!source) return;
 
-  // Check if this source is being removed (callback.fn set to NULL).
-  // If so, we're in "zombie" mode waiting for the final CQE.
+  // Unregistration clears the callback before queuing cancellation so a CQE
+  // already in flight cannot reach caller-owned state after unregister
+  // returns.
   if (source->callback.fn) {
     // Translate native poll events to cross-platform enum.
     // cqe->res contains the poll mask for POLL_ADD completions.
@@ -751,22 +764,51 @@ static void iree_async_proactor_io_uring_handle_event_source_cqe(
     source->callback.fn(source->callback.user_data, source, events);
   }
 
-  // Multishot poll produces CQEs until cancelled. CQE_F_MORE indicates
-  // more CQEs will follow. When MORE is clear, this is the final CQE
-  // (poll cancelled or error). If the source is a zombie, unlink and
-  // free it now.
-  if (!(cqe->flags & IREE_IORING_CQE_F_MORE) && !source->callback.fn) {
-    // Unlink from the proactor's event source list.
-    if (source->prev) {
-      source->prev->next = source->next;
+  // Multishot poll produces CQEs until cancelled. CQE_F_MORE indicates more
+  // CQEs will follow; a final CQE proves that the kernel no longer references
+  // the event source.
+  if (!(cqe->flags & IREE_IORING_CQE_F_MORE)) {
+    if (source->state ==
+            IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_UNREGISTRATION_PENDING ||
+        source->state ==
+            IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_UNREGISTRATION_SUBMITTED) {
+      iree_async_proactor_io_uring_cleanup_event_source(proactor, source);
     } else {
-      proactor->event_sources = source->next;
+      // Preserve the caller-visible handle until explicit unregistration even
+      // though the kernel ended the persistent poll after a terminal event.
+      source->state = IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_TERMINAL;
     }
-    if (source->next) {
-      source->next->prev = source->prev;
-    }
-    iree_allocator_free(source->allocator, source);
   }
+}
+
+// Fills an SQE that cancels persistent polling for |source|.
+static void iree_async_proactor_io_uring_fill_event_source_cancel_sqe(
+    iree_async_event_source_t* source, iree_io_uring_sqe_t* sqe) {
+  memset(sqe, 0, sizeof(*sqe));
+  sqe->opcode = IREE_IORING_OP_POLL_REMOVE;
+  sqe->fd = -1;
+  sqe->addr = iree_io_uring_internal_encode(IREE_IO_URING_TAG_EVENT_SOURCE,
+                                            (uintptr_t)source);
+  sqe->user_data = iree_io_uring_internal_encode(IREE_IO_URING_TAG_CANCEL, 0);
+}
+
+// Retries event source cancellations deferred by submission queue pressure.
+static void iree_async_proactor_io_uring_retry_pending_event_sources(
+    iree_async_proactor_io_uring_t* proactor) {
+  iree_io_uring_ring_sq_lock(&proactor->ring);
+  for (iree_async_event_source_t* source = proactor->event_sources; source;
+       source = source->next) {
+    if (source->state !=
+        IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_UNREGISTRATION_PENDING) {
+      continue;
+    }
+    iree_io_uring_sqe_t* sqe = iree_io_uring_ring_get_sqe(&proactor->ring);
+    if (!sqe) break;
+    iree_async_proactor_io_uring_fill_event_source_cancel_sqe(source, sqe);
+    source->state =
+        IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_UNREGISTRATION_SUBMITTED;
+  }
+  iree_io_uring_ring_sq_unlock(&proactor->ring);
 }
 
 // Callback for signalfd dispatch - invoked for each signal read.
@@ -1273,6 +1315,8 @@ static iree_host_size_t iree_async_proactor_io_uring_process_cqe(
     iree_async_operation_release_resources(operation);
   }
 
+  iree_status_code_t status_code = iree_status_code(status);
+
   // Invoke callback and release to pool. The helper extracts the pool pointer
   // before the callback (which may free the operation when pool is NULL).
   iree_async_proactor_complete_operation(operation, status, flags);
@@ -1282,7 +1326,7 @@ static iree_host_size_t iree_async_proactor_io_uring_process_cqe(
   // post-CQE MPSC drain in the poll loop). Kernel ops are submitted and
   // produce their own CQEs.
   if (continuation) {
-    if (iree_status_is_ok(status)) {
+    if (status_code == IREE_STATUS_OK) {
       iree_async_proactor_io_uring_dispatch_continuation_chain(proactor,
                                                                continuation);
     } else {
@@ -1406,14 +1450,16 @@ static iree_status_t iree_async_proactor_io_uring_poll(
   //
   // GETEVENTS is required because DEFER_TASKRUN defers async completions as
   // task_work. Without GETEVENTS, io_uring_enter only processes inline
-  // completions. Deferred CQEs surviving past poll() cause use-after-free if
-  // the operations they reference are freed between polls.
+  // completions and a poll loop could sleep despite runnable task work.
   //
-  // The loop is bounded: each pass processes at least one CQE, and the total
-  // number of in-flight operations is finite. The 32-pass limit is a safety
-  // net against pathological cascading (e.g., persistent ENOBUFS on an empty
-  // buffer ring).
-  for (int drain_pass = 0; drain_pass < 32; ++drain_pass) {
+  // The pass budget is a fairness boundary, not a completion join. Every
+  // processed CQE either terminally returns its operation to the caller or
+  // leaves it retained as in flight. If callbacks keep generating new work
+  // after the budget is exhausted, the current poll returns OK and the
+  // caller's next poll turn observes the ready CQE or blocks on the submitted
+  // operation. No operation lifetime depends on the number of drain passes.
+  for (int drain_pass = 0;
+       drain_pass < IREE_ASYNC_IO_URING_CQE_DRAIN_PASS_BUDGET; ++drain_pass) {
     IREE_RETURN_IF_ERROR(
         iree_io_uring_ring_submit(&proactor->ring,
                                   /*min_complete=*/0,
@@ -1453,8 +1499,9 @@ static iree_status_t iree_async_proactor_io_uring_poll(
   completed +=
       iree_async_proactor_io_uring_drain_pending_software_completions(proactor);
 
-  // Retry re-arming relays that failed due to SQ backpressure.
-  // Now that we've processed CQEs, there may be SQ space available.
+  // Retry terminal cancellations and relay re-arming deferred by SQ pressure.
+  // Processing CQEs above may have made submission queue slots available.
+  iree_async_proactor_io_uring_retry_pending_event_sources(proactor);
   iree_async_io_uring_retry_pending_relays(proactor);
 
   if (out_completed_count) *out_completed_count = completed;
@@ -1491,51 +1538,14 @@ static void iree_async_proactor_io_uring_wake(
 // Cancel
 //===----------------------------------------------------------------------===//
 
-// Cancels a SEMAPHORE_WAIT operation by cancelling its timepoints.
-// SEMAPHORE_WAIT uses software-only timepoints, not kernel operations, so we
-// can't use ASYNC_CANCEL. Instead, we cancel the timepoints directly and
-// enqueue the tracker for completion with CANCELLED status.
+// Requests cancellation of a software-only SEMAPHORE_WAIT operation. The poll
+// thread owns timepoint cancellation so it can join callbacks before freeing
+// the shared tracker.
 static iree_status_t iree_async_proactor_io_uring_cancel_semaphore_wait(
     iree_async_proactor_io_uring_t* proactor,
     iree_async_semaphore_wait_operation_t* wait_op) {
-  // Get the tracker from the operation's platform storage.
-  iree_async_io_uring_semaphore_wait_tracker_t* tracker =
-      (iree_async_io_uring_semaphore_wait_tracker_t*)wait_op->base.next;
-  if (!tracker) {
-    // No tracker means the operation was never submitted or already completed.
-    return iree_ok_status();
-  }
-
-  // Try to set CANCELLED status. If another callback already set a status,
-  // this is a no-op (first status wins).
-  intptr_t expected = (intptr_t)iree_ok_status();
-  iree_status_t cancelled_status =
-      iree_make_status(IREE_STATUS_CANCELLED, "operation cancelled");
-  if (!iree_atomic_compare_exchange_strong(
-          &tracker->completion_status, &expected, (intptr_t)cancelled_status,
-          iree_memory_order_acq_rel, iree_memory_order_acquire)) {
-    // Another callback already set a status. The tracker will be (or has been)
-    // enqueued for completion by that callback.
-    iree_status_ignore(cancelled_status);
-    return iree_ok_status();
-  }
-
-  // Cancel all registered timepoints. This prevents them from firing later.
-  for (iree_host_size_t i = 0; i < tracker->count; ++i) {
-    iree_async_semaphore_cancel_timepoint(wait_op->semaphores[i],
-                                          &tracker->timepoints[i]);
-  }
-
-  // Enqueue the tracker for completion.
-  iree_atomic_slist_push(&proactor->pending_semaphore_waits,
-                         &tracker->slist_entry);
-
-  // Wake the proactor to process the cancellation.
-  uint64_t wake_value = 1;
-  ssize_t result =
-      write(proactor->wake_eventfd, &wake_value, sizeof(wake_value));
-  IREE_ASSERT(result >= 0 || errno == EAGAIN);
-
+  iree_async_semaphore_wait_context_request_cancellation(
+      &proactor->semaphore_wait_context, wait_op);
   return iree_ok_status();
 }
 
@@ -1970,6 +1980,7 @@ static iree_status_t iree_async_proactor_io_uring_register_event_source(
   source->proactor = base_proactor;
   source->fd = handle.value.fd;
   source->callback = callback;
+  source->state = IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_ACTIVE;
   source->allocator = proactor->base.allocator;
 
   // Get an SQE for multishot POLL_ADD.
@@ -2027,42 +2038,35 @@ static void iree_async_proactor_io_uring_unregister_event_source(
   iree_async_proactor_io_uring_t* proactor =
       iree_async_proactor_io_uring_cast(base_proactor);
 
-  // Mark as "zombie" - callback won't be invoked, but struct stays alive
-  // until the final CQE arrives (when POLL_REMOVE completes).
-  // The source stays in the list so destroy() can clean up any stragglers.
-  event_source->callback.fn = NULL;
+  // A terminal CQE has already proven the kernel no longer references this
+  // source, so it can be destroyed synchronously.
+  if (event_source->state == IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_TERMINAL) {
+    iree_async_proactor_io_uring_cleanup_event_source(proactor, event_source);
+    IREE_TRACE_ZONE_END(z0);
+    return;
+  }
 
-  // Submit POLL_REMOVE to cancel the multishot poll.
-  // The poll was submitted with user_data = internal_encode(TAG, source).
-  // POLL_REMOVE identifies polls by their user_data.
+  // Suppress callbacks before racing with source CQEs already in flight. The
+  // source stays in the list until its final CQE or proactor destruction.
+  event_source->callback.fn = NULL;
+  event_source->state =
+      IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_UNREGISTRATION_PENDING;
+
+  // Queue POLL_REMOVE to cancel the multishot poll. If the submission queue is
+  // full, the poll loop retries after processing completions.
   iree_io_uring_ring_sq_lock(&proactor->ring);
   iree_io_uring_sqe_t* sqe = iree_io_uring_ring_get_sqe(&proactor->ring);
   if (sqe) {
-    memset(sqe, 0, sizeof(*sqe));
-    sqe->opcode = IREE_IORING_OP_POLL_REMOVE;
-    sqe->fd = -1;
-    // Target the poll by its user_data value.
-    sqe->addr = iree_io_uring_internal_encode(IREE_IO_URING_TAG_EVENT_SOURCE,
-                                              (uintptr_t)event_source);
-    // Mark the cancel CQE as internal so we don't confuse it with user ops.
-    sqe->user_data = iree_io_uring_internal_encode(IREE_IO_URING_TAG_CANCEL, 0);
+    iree_async_proactor_io_uring_fill_event_source_cancel_sqe(event_source,
+                                                              sqe);
+    event_source->state =
+        IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_UNREGISTRATION_SUBMITTED;
   }
   iree_io_uring_ring_sq_unlock(&proactor->ring);
 
-  if (sqe) {
-    // Submit. Best-effort - if this fails, the poll will continue until the
-    // proactor is destroyed.
-    iree_status_t status = iree_io_uring_ring_submit(&proactor->ring,
-                                                     /*min_complete=*/0,
-                                                     /*flags=*/0);
-    iree_status_ignore(status);
-  }
-
-  // Note: We do NOT free or unlink the event_source here. The CQE handler will
-  // unlink and free it when the final CQE arrives (POLL_REMOVE completion with
-  // !CQE_F_MORE). This prevents use-after-free when there are pending CQEs in
-  // the queue. If the proactor is destroyed first, destroy() cleans up the
-  // list.
+  // The next poll flushes the cancellation and owns the source until the
+  // terminal CQE. Proactor destruction closes the ring before freeing any
+  // remaining source state.
   IREE_TRACE_ZONE_END(z0);
 }
 
@@ -2082,10 +2086,11 @@ static iree_status_t iree_async_proactor_io_uring_register_relay(
 }
 
 static void iree_async_proactor_io_uring_unregister_relay(
-    iree_async_proactor_t* base_proactor, iree_async_relay_t* relay) {
+    iree_async_proactor_t* base_proactor, iree_async_relay_t* relay,
+    iree_async_relay_unregistered_callback_t callback) {
   iree_async_proactor_io_uring_t* proactor =
       iree_async_proactor_io_uring_cast(base_proactor);
-  iree_async_io_uring_unregister_relay(proactor, relay);
+  iree_async_io_uring_unregister_relay(proactor, relay, callback);
 }
 
 //===----------------------------------------------------------------------===//

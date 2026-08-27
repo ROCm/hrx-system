@@ -1,0 +1,167 @@
+// RUN: emit amdgpu-assembly @gfx950_scalef32_packed8_conversions waits=none
+
+amdgpu.target<gfx950> @target
+low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_packed8_conversions(%fp8: reg<amdgpu.vgpr>, %bf8: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>) asm {
+  %f16_fp8 = v_cvt_scalef32_pk_f16_fp8 %fp8, %scale
+  %f16_bf8 = v_cvt_scalef32_pk_f16_bf8 %bf8, %scale
+  %bf16_fp8 = v_cvt_scalef32_pk_bf16_fp8 %fp8, %scale
+  %bf16_bf8 = v_cvt_scalef32_pk_bf16_bf8 %bf8, %scale
+  %f32_fp8 = v_cvt_scalef32_pk_f32_fp8 %fp8, %scale
+  %f32_bf8 = v_cvt_scalef32_pk_f32_bf8 %bf8, %scale
+  return
+}
+
+// ----
+  v_cvt_scalef32_pk_f16_fp8 v3, v0, v2
+  v_cvt_scalef32_pk_f16_bf8 v3, v1, v2
+  v_cvt_scalef32_pk_bf16_fp8 v3, v0, v2
+  v_cvt_scalef32_pk_f32_fp8 v[4:5], v0, v2
+  v_cvt_scalef32_pk_bf16_bf8 v0, v1, v2
+  v_cvt_scalef32_pk_f32_bf8 v[0:1], v1, v2
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @gfx950_scalef32_fp4_conversions waits=none
+
+amdgpu.target<gfx950> @target
+low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_fp4_conversions(%fp4: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>) asm {
+  %f16 = v_cvt_scalef32_pk_f16_fp4 %fp4, %scale
+  %bf16 = v_cvt_scalef32_pk_bf16_fp4 %fp4, %scale
+  %f32 = v_cvt_scalef32_pk_f32_fp4 %fp4, %scale
+  return
+}
+
+// ----
+  v_cvt_scalef32_pk_f16_fp4 v2, v0, v1
+  v_cvt_scalef32_pk_bf16_fp4 v2, v0, v1
+  v_cvt_scalef32_pk_f32_fp4 v[0:1], v0, v1
+  s_endpgm
+
+// ====
+// LLVM encodes the fixed-register instructions as
+// [02 00 50 d2 00 03 02 00 03 00 51 d2 00 03 02 00
+//  04 00 3f d2 00 03 02 00].
+// RUN: emit amdgpu-native-words @gfx950_scalef32_fp4_conversion_words waits=none strategy=source fixed=%fp4:physical_register:0:1 fixed=%scale:physical_register:1:1 fixed=%f16:physical_register:2:1 fixed=%bf16:physical_register:3:1 fixed=%f32:physical_register:4:2
+
+amdgpu.target<gfx950> @target
+low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_fp4_conversion_words(%fp4: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>) asm {
+  %f16 = v_cvt_scalef32_pk_f16_fp4 %fp4, %scale
+  %bf16 = v_cvt_scalef32_pk_bf16_fp4 %fp4, %scale
+  %f32 = v_cvt_scalef32_pk_f32_fp4 %fp4, %scale
+  return
+}
+
+// ----
+0xD2500002
+0x00020300
+0xD2510003
+0x00020300
+0xD23F0004
+0x00020300
+0xBF810000
+
+// ====
+// RUN: emit amdgpu-assembly @gfx950_scalef32_fp4_byte_conversions waits=none
+
+amdgpu.target<gfx950> @target
+low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_fp4_byte_conversions(%fp4: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>) asm {
+  %f16_byte0 = v_cvt_scalef32_pk_f16_fp4 %fp4, %scale
+  %f16_byte1 = v_cvt_scalef32_pk_f16_fp4_byte1 %fp4, %scale
+  %f16_byte2 = v_cvt_scalef32_pk_f16_fp4_byte2 %fp4, %scale
+  %f16_byte3 = v_cvt_scalef32_pk_f16_fp4_byte3 %fp4, %scale
+  %bf16_byte0 = v_cvt_scalef32_pk_bf16_fp4 %fp4, %scale
+  %bf16_byte1 = v_cvt_scalef32_pk_bf16_fp4_byte1 %fp4, %scale
+  %bf16_byte2 = v_cvt_scalef32_pk_bf16_fp4_byte2 %fp4, %scale
+  %bf16_byte3 = v_cvt_scalef32_pk_bf16_fp4_byte3 %fp4, %scale
+  %f32_byte0 = v_cvt_scalef32_pk_f32_fp4 %fp4, %scale
+  %f32_byte1 = v_cvt_scalef32_pk_f32_fp4_byte1 %fp4, %scale
+  %f32_byte2 = v_cvt_scalef32_pk_f32_fp4_byte2 %fp4, %scale
+  %f32_byte3 = v_cvt_scalef32_pk_f32_fp4_byte3 %fp4, %scale
+  return
+}
+
+// ----
+  v_cvt_scalef32_pk_f16_fp4 v2, v0, v1
+  v_cvt_scalef32_pk_f16_fp4 v2, v0, v1, op_sel:[0,1,0]
+  v_cvt_scalef32_pk_f16_fp4 v2, v0, v1, op_sel:[1,0,0]
+  v_cvt_scalef32_pk_f16_fp4 v2, v0, v1, op_sel:[1,1,0]
+  v_cvt_scalef32_pk_bf16_fp4 v2, v0, v1
+  v_cvt_scalef32_pk_bf16_fp4 v2, v0, v1, op_sel:[0,1,0]
+  v_cvt_scalef32_pk_bf16_fp4 v2, v0, v1, op_sel:[1,0,0]
+  v_cvt_scalef32_pk_bf16_fp4 v2, v0, v1, op_sel:[1,1,0]
+  v_cvt_scalef32_pk_f32_fp4 v[2:3], v0, v1
+  v_cvt_scalef32_pk_f32_fp4 v[2:3], v0, v1, op_sel:[0,1,0]
+  v_cvt_scalef32_pk_f32_fp4 v[2:3], v0, v1, op_sel:[1,0,0]
+  v_cvt_scalef32_pk_f32_fp4 v[0:1], v0, v1, op_sel:[1,1,0]
+  s_endpgm
+
+// ====
+// LLVM encodes the fixed-register F16 byte-selector instructions as
+// [02 00 50 d2 00 03 02 00 03 10 50 d2 00 03 02 00
+//  04 08 50 d2 00 03 02 00 05 18 50 d2 00 03 02 00].
+// RUN: emit amdgpu-native-words @gfx950_scalef32_f16_fp4_byte_words waits=none strategy=source fixed=%fp4:physical_register:0:1 fixed=%scale:physical_register:1:1 fixed=%byte0:physical_register:2:1 fixed=%byte1:physical_register:3:1 fixed=%byte2:physical_register:4:1 fixed=%byte3:physical_register:5:1
+
+amdgpu.target<gfx950> @target
+low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_f16_fp4_byte_words(%fp4: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>) asm {
+  %byte0 = v_cvt_scalef32_pk_f16_fp4 %fp4, %scale
+  %byte1 = v_cvt_scalef32_pk_f16_fp4_byte1 %fp4, %scale
+  %byte2 = v_cvt_scalef32_pk_f16_fp4_byte2 %fp4, %scale
+  %byte3 = v_cvt_scalef32_pk_f16_fp4_byte3 %fp4, %scale
+  return
+}
+
+// ----
+0xD2500002
+0x00020300
+0xD2501003
+0x00020300
+0xD2500804
+0x00020300
+0xD2501805
+0x00020300
+0xBF810000
+
+// ====
+// LLVM encodes the fixed-register BF16 byte-selector instructions as
+// [02 00 51 d2 00 03 02 00 03 10 51 d2 00 03 02 00
+//  04 08 51 d2 00 03 02 00 05 18 51 d2 00 03 02 00].
+// RUN: emit amdgpu-native-words @gfx950_scalef32_bf16_fp4_byte_words waits=none strategy=source fixed=%fp4:physical_register:0:1 fixed=%scale:physical_register:1:1 fixed=%byte0:physical_register:2:1 fixed=%byte1:physical_register:3:1 fixed=%byte2:physical_register:4:1 fixed=%byte3:physical_register:5:1
+
+amdgpu.target<gfx950> @target
+low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_scalef32_bf16_fp4_byte_words(%fp4: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>) asm {
+  %byte0 = v_cvt_scalef32_pk_bf16_fp4 %fp4, %scale
+  %byte1 = v_cvt_scalef32_pk_bf16_fp4_byte1 %fp4, %scale
+  %byte2 = v_cvt_scalef32_pk_bf16_fp4_byte2 %fp4, %scale
+  %byte3 = v_cvt_scalef32_pk_bf16_fp4_byte3 %fp4, %scale
+  return
+}
+
+// ----
+0xD2510002
+0x00020300
+0xD2511003
+0x00020300
+0xD2510804
+0x00020300
+0xD2511805
+0x00020300
+0xBF810000
+
+// ====
+// RUN: emit amdgpu-assembly @gfx950_packed8_encode_f32 waits=none
+
+amdgpu.target<gfx950> @target
+low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_packed8_encode_f32(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>, %d: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %fp8_low = v_cvt_pk_fp8_f32_low %a, %b
+  %fp8 = v_cvt_pk_fp8_f32_high %fp8_low, %c, %d
+  %bf8_low = v_cvt_pk_bf8_f32_low %a, %b
+  %bf8 = v_cvt_pk_bf8_f32_high %bf8_low, %c, %d
+  return %fp8, %bf8
+}
+
+// ----
+  v_cvt_pk_fp8_f32 v4, v0, v1
+  v_cvt_pk_bf8_f32 v0, v0, v1
+  v_cvt_pk_fp8_f32 v4, v2, v3, op_sel:[0,0,1]
+  v_cvt_pk_bf8_f32 v0, v2, v3, op_sel:[0,0,1]
+  s_endpgm

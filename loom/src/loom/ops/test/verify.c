@@ -211,6 +211,23 @@ static bool loom_test_signature_type_matches(
       }
       return true;
     }
+    case LOOM_TYPE_REGISTER: {
+      if (loom_type_register_payload0(call_type) !=
+              loom_type_register_payload0(callee_type) ||
+          loom_type_register_payload1(call_type) !=
+              loom_type_register_payload1(callee_type)) {
+        return false;
+      }
+      const loom_type_t* call_value_type =
+          loom_type_register_value_type(call_type);
+      const loom_type_t* callee_value_type =
+          loom_type_register_value_type(callee_type);
+      if (!call_value_type || !callee_value_type) {
+        return call_value_type == callee_value_type;
+      }
+      return loom_test_signature_type_matches(
+          signature, call_op, *call_value_type, *callee_value_type);
+    }
     case LOOM_TYPE_TILE:
     case LOOM_TYPE_TENSOR:
     case LOOM_TYPE_VECTOR:
@@ -228,10 +245,8 @@ static bool loom_test_signature_type_matches(
     }
     case LOOM_TYPE_NONE:
     case LOOM_TYPE_SCALAR:
-    case LOOM_TYPE_GROUP:
     case LOOM_TYPE_ENCODING:
     case LOOM_TYPE_BUFFER:
-    case LOOM_TYPE_REGISTER:
     case LOOM_TYPE_STORAGE:
     case LOOM_TYPE_COUNT_:
       return true;

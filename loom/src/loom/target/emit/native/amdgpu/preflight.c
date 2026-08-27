@@ -10,10 +10,10 @@
 
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/storage_layout.h"
+#include "loom/ops/type_registry.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/emit/native/amdgpu/register_class.h"
-#include "loom/target/emit/native/fragment.h"
 
 static const loom_low_storage_space_set_t kLoomAmdgpuNativeStorageSpaces =
     LOOM_LOW_STORAGE_SPACE_SET_SCRATCH | LOOM_LOW_STORAGE_SPACE_SET_PRIVATE |
@@ -48,15 +48,6 @@ static iree_status_t loom_amdgpu_native_preflight_update_high_water(
   return iree_ok_status();
 }
 
-typedef struct loom_amdgpu_native_preflight_storage_context_t {
-  // Schedule whose function body is being scanned.
-  const loom_low_schedule_table_t* schedule;
-  // Optional structured diagnostic controls.
-  const loom_amdgpu_native_preflight_options_t* options;
-  // Mutable preflight result receiving diagnostic counts.
-  loom_amdgpu_native_preflight_t* preflight;
-} loom_amdgpu_native_preflight_storage_context_t;
-
 static iree_status_t
 loom_amdgpu_native_preflight_emit_unsupported_storage_space(
     const loom_low_schedule_table_t* schedule, loom_value_id_t storage_value_id,
@@ -64,7 +55,7 @@ loom_amdgpu_native_preflight_emit_unsupported_storage_space(
     const loom_amdgpu_native_preflight_options_t* options,
     loom_amdgpu_native_preflight_t* preflight) {
   const iree_string_view_t storage_space =
-      iree_make_cstring_view(loom_storage_space_name(reservation->space));
+      loom_low_storage_type_space_name(reservation->space);
   if (!options || options->emitter.fn == NULL) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -102,32 +93,23 @@ loom_amdgpu_native_preflight_emit_unsupported_storage_space(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_native_preflight_storage_callback(
-    void* user_data, loom_value_id_t storage_value_id,
-    const loom_low_storage_layout_reservation_t* reservation) {
-  loom_amdgpu_native_preflight_storage_context_t* context =
-      (loom_amdgpu_native_preflight_storage_context_t*)user_data;
-  if (loom_low_storage_space_set_contains(kLoomAmdgpuNativeStorageSpaces,
-                                          reservation->space)) {
-    return iree_ok_status();
-  }
-  return loom_amdgpu_native_preflight_emit_unsupported_storage_space(
-      context->schedule, storage_value_id, reservation, context->options,
-      context->preflight);
-}
-
 static iree_status_t loom_amdgpu_native_preflight_collect_storage_usage(
     const loom_low_schedule_table_t* schedule,
     const loom_amdgpu_native_preflight_options_t* options,
     loom_amdgpu_native_preflight_t* preflight) {
-  loom_amdgpu_native_preflight_storage_context_t context = {
-      .schedule = schedule,
-      .options = options,
-      .preflight = preflight,
-  };
-  return loom_low_storage_layout_visit_reservations(
-      schedule->module, schedule->function_op,
-      loom_amdgpu_native_preflight_storage_callback, &context);
+  const loom_low_storage_layout_t* layout = &schedule->storage_layout;
+  for (iree_host_size_t i = 0; i < layout->record_count; ++i) {
+    const loom_low_storage_layout_record_t* record = &layout->records[i];
+    if (loom_low_storage_space_set_contains(kLoomAmdgpuNativeStorageSpaces,
+                                            record->reservation.space)) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_native_preflight_emit_unsupported_storage_space(
+            schedule, record->storage_value_id, &record->reservation, options,
+            preflight));
+  }
+  return iree_ok_status();
 }
 
 static iree_string_view_t
@@ -203,6 +185,14 @@ static iree_status_t loom_amdgpu_native_preflight_collect_register_usage(
       continue;
     }
     if (assignment->descriptor_reg_class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR) {
+      const loom_low_reg_class_t* reg_class =
+          &allocation->target.descriptor_set
+               ->reg_classes[assignment->descriptor_reg_class_id];
+      if (loom_low_reg_class_fixed_location_range_contains(
+              reg_class, assignment->location_base,
+              assignment->location_count)) {
+        continue;
+      }
       IREE_RETURN_IF_ERROR(loom_amdgpu_native_preflight_update_high_water(
           assignment->location_base, assignment->location_count,
           &preflight->next_free_sgpr));
@@ -242,8 +232,6 @@ iree_status_t loom_amdgpu_native_preflight_analyze(
     const loom_amdgpu_native_preflight_options_t* options,
     loom_amdgpu_native_preflight_t* out_preflight) {
   *out_preflight = (loom_amdgpu_native_preflight_t){0};
-  IREE_RETURN_IF_ERROR(
-      loom_native_fragment_validate_emission_inputs(schedule, allocation));
   *out_preflight = (loom_amdgpu_native_preflight_t){
       .schedule = schedule,
       .allocation = allocation,

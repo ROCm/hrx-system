@@ -386,181 +386,247 @@ static inline void iree_page_align_range(void* base_address,
 // Alignment-safe memory accesses
 //===----------------------------------------------------------------------===//
 
-#if IREE_MEMORY_ACCESS_ALIGNMENT_REQUIRED_8
+static_assert(sizeof(float) == sizeof(uint32_t),
+              "f32 accesses require a 32-bit float");
+static_assert(sizeof(double) == sizeof(uint64_t),
+              "f64 accesses require a 64-bit double");
 
-static inline uint8_t iree_unaligned_load_le_u8(const uint8_t* ptr) {
-  return *ptr;
-}
-
-static inline void iree_unaligned_store_le_u8(uint8_t* ptr, uint8_t value) {
-  *ptr = value;
-}
-
+// Converts between host and little-endian byte order. The conversion is its
+// own inverse and is used by both loads and stores.
+static inline uint16_t iree_unaligned_convert_native_le_u16(uint16_t value) {
+#if defined(IREE_ENDIANNESS_BIG)
+  return (uint16_t)((value >> 8) | (value << 8));
 #else
-
-#if defined(IREE_ENDIANNESS_LITTLE)
-
-#define iree_unaligned_load_le_u8(ptr) *(ptr)
-
-#define iree_unaligned_store_le_u8(ptr, value) *(ptr) = (value)
-
-#else
-
-#error "TODO(benvanik): little-endian load/store for big-endian archs"
-
+  return value;
 #endif  // IREE_ENDIANNESS_*
+}
 
-#endif  // IREE_MEMORY_ACCESS_ALIGNMENT_REQUIRED_8
+static inline uint32_t iree_unaligned_convert_native_le_u32(uint32_t value) {
+#if defined(IREE_ENDIANNESS_BIG)
+  return ((value & UINT32_C(0x000000FF)) << 24) |
+         ((value & UINT32_C(0x0000FF00)) << 8) |
+         ((value & UINT32_C(0x00FF0000)) >> 8) |
+         ((value & UINT32_C(0xFF000000)) >> 24);
+#else
+  return value;
+#endif  // IREE_ENDIANNESS_*
+}
 
-#if IREE_MEMORY_ACCESS_ALIGNMENT_REQUIRED_16
+static inline uint64_t iree_unaligned_convert_native_le_u64(uint64_t value) {
+#if defined(IREE_ENDIANNESS_BIG)
+  value = ((value & UINT64_C(0x00000000FFFFFFFF)) << 32) |
+          ((value & UINT64_C(0xFFFFFFFF00000000)) >> 32);
+  value = ((value & UINT64_C(0x0000FFFF0000FFFF)) << 16) |
+          ((value & UINT64_C(0xFFFF0000FFFF0000)) >> 16);
+  return ((value & UINT64_C(0x00FF00FF00FF00FF)) << 8) |
+         ((value & UINT64_C(0xFF00FF00FF00FF00)) >> 8);
+#else
+  return value;
+#endif  // IREE_ENDIANNESS_*
+}
 
-static inline uint16_t iree_unaligned_load_le_u16(const uint16_t* ptr) {
+// Loads little-endian scalar values from byte addresses that may have any
+// alignment. Fixed-size memcpy calls lower to native unaligned accesses when
+// the target supports them.
+static inline uint8_t iree_unaligned_load_le_u8(const void* ptr) {
+  uint8_t value;
+  memcpy(&value, ptr, sizeof(value));
+  return value;
+}
+
+static inline uint16_t iree_unaligned_load_le_u16(const void* ptr) {
   uint16_t value;
-  memcpy(&value, (const char*)ptr, sizeof(value));
-  return value;
+  memcpy(&value, ptr, sizeof(value));
+  return iree_unaligned_convert_native_le_u16(value);
 }
 
-static inline void iree_unaligned_store_le_u16(uint16_t* ptr, uint16_t value) {
-  memcpy((char*)ptr, &value, sizeof(value));
-}
-
-#else
-
-#if defined(IREE_ENDIANNESS_LITTLE)
-
-#define iree_unaligned_load_le_u16(ptr) *(ptr)
-
-#define iree_unaligned_store_le_u16(ptr, value) *(ptr) = (value)
-
-#else
-
-#error "TODO(benvanik): little-endian load/store for big-endian archs"
-
-#endif  // IREE_ENDIANNESS_*
-
-#endif  // IREE_MEMORY_ACCESS_ALIGNMENT_REQUIRED_16
-
-#if IREE_MEMORY_ACCESS_ALIGNMENT_REQUIRED_32
-
-static inline uint32_t iree_unaligned_load_le_u32(const uint32_t* ptr) {
+static inline uint32_t iree_unaligned_load_le_u32(const void* ptr) {
   uint32_t value;
-  memcpy(&value, (const char*)ptr, sizeof(value));
-  return value;
-}
-static inline float iree_unaligned_load_le_f32(const float* ptr) {
-  float value;
-  memcpy(&value, (const char*)ptr, sizeof(value));
-  return value;
+  memcpy(&value, ptr, sizeof(value));
+  return iree_unaligned_convert_native_le_u32(value);
 }
 
-static inline void iree_unaligned_store_le_u32(uint32_t* ptr, uint32_t value) {
-  memcpy((char*)ptr, &value, sizeof(value));
-}
-static inline void iree_unaligned_store_le_f32(float* ptr, float value) {
-  memcpy((char*)ptr, &value, sizeof(value));
-}
-
-#else
-
-#if defined(IREE_ENDIANNESS_LITTLE)
-
-#define iree_unaligned_load_le_u32(ptr) *(ptr)
-#define iree_unaligned_load_le_f32(ptr) *(ptr)
-
-#define iree_unaligned_store_le_u32(ptr, value) *(ptr) = (value)
-#define iree_unaligned_store_le_f32(ptr, value) *(ptr) = (value)
-
-#else
-
-#error "TODO(benvanik): little-endian load/store for big-endian archs"
-
-#endif  // IREE_ENDIANNESS_*
-
-#endif  // IREE_MEMORY_ACCESS_ALIGNMENT_REQUIRED_32
-
-#if IREE_MEMORY_ACCESS_ALIGNMENT_REQUIRED_64
-
-static inline uint64_t iree_unaligned_load_le_u64(const uint64_t* ptr) {
+static inline uint64_t iree_unaligned_load_le_u64(const void* ptr) {
   uint64_t value;
-  memcpy(&value, (const char*)ptr, sizeof(value));
+  memcpy(&value, ptr, sizeof(value));
+  return iree_unaligned_convert_native_le_u64(value);
+}
+
+static inline float iree_unaligned_load_le_f32(const void* ptr) {
+  const uint32_t value_bits = iree_unaligned_load_le_u32(ptr);
+  float value;
+  memcpy(&value, &value_bits, sizeof(value));
   return value;
 }
-static inline double iree_unaligned_load_le_f64(const double* ptr) {
+
+static inline double iree_unaligned_load_le_f64(const void* ptr) {
+  const uint64_t value_bits = iree_unaligned_load_le_u64(ptr);
   double value;
-  memcpy(&value, (const char*)ptr, sizeof(value));
+  memcpy(&value, &value_bits, sizeof(value));
   return value;
 }
 
-static inline void iree_unaligned_store_le_u64(uint64_t* ptr, uint64_t value) {
-  memcpy((char*)ptr, &value, sizeof(value));
+// Stores little-endian scalar values to byte addresses that may have any
+// alignment. Fixed-size memcpy calls lower to native unaligned accesses when
+// the target supports them.
+static inline void iree_unaligned_store_le_u8(void* ptr, uint8_t value) {
+  memcpy(ptr, &value, sizeof(value));
 }
-static inline void iree_unaligned_store_le_f64(double* ptr, double value) {
-  memcpy(&value, (char*)ptr, sizeof(value));
+
+static inline void iree_unaligned_store_le_u16(void* ptr, uint16_t value) {
+  value = iree_unaligned_convert_native_le_u16(value);
+  memcpy(ptr, &value, sizeof(value));
 }
 
-#else
+static inline void iree_unaligned_store_le_u32(void* ptr, uint32_t value) {
+  value = iree_unaligned_convert_native_le_u32(value);
+  memcpy(ptr, &value, sizeof(value));
+}
 
-#if defined(IREE_ENDIANNESS_LITTLE)
+static inline void iree_unaligned_store_le_u64(void* ptr, uint64_t value) {
+  value = iree_unaligned_convert_native_le_u64(value);
+  memcpy(ptr, &value, sizeof(value));
+}
 
-#define iree_unaligned_load_le_u64(ptr) *(ptr)
-#define iree_unaligned_load_le_f64(ptr) *(ptr)
+static inline void iree_unaligned_store_le_f32(void* ptr, float value) {
+  uint32_t value_bits;
+  memcpy(&value_bits, &value, sizeof(value_bits));
+  iree_unaligned_store_le_u32(ptr, value_bits);
+}
 
-#define iree_unaligned_store_le_u64(ptr, value) *(ptr) = (value)
-#define iree_unaligned_store_le_f64(ptr, value) *(ptr) = (value)
-
-#else
-
-#error "TODO(benvanik): little-endian load/store for big-endian archs"
-
-#endif  // IREE_ENDIANNESS_*
-
-#endif  // IREE_MEMORY_ACCESS_ALIGNMENT_REQUIRED_64
+static inline void iree_unaligned_store_le_f64(void* ptr, double value) {
+  uint64_t value_bits;
+  memcpy(&value_bits, &value, sizeof(value_bits));
+  iree_unaligned_store_le_u64(ptr, value_bits);
+}
 
 // clang-format off
 
 // Dereferences |ptr| and returns the value.
 // Automatically handles unaligned accesses on architectures that may not
 // support them natively (or efficiently). Memory is treated as little-endian.
-#define iree_unaligned_load_le(ptr)                                            \
-  _Generic((ptr),                                                              \
-        int8_t*: iree_unaligned_load_le_u8((const uint8_t*)(ptr)),             \
-       uint8_t*: iree_unaligned_load_le_u8((const uint8_t*)(ptr)),             \
-       int16_t*: iree_unaligned_load_le_u16((const uint16_t*)(ptr)),           \
-      uint16_t*: iree_unaligned_load_le_u16((const uint16_t*)(ptr)),           \
-       int32_t*: iree_unaligned_load_le_u32((const uint32_t*)(ptr)),           \
-      uint32_t*: iree_unaligned_load_le_u32((const uint32_t*)(ptr)),           \
-       int64_t*: iree_unaligned_load_le_u64((const uint64_t*)(ptr)),           \
-      uint64_t*: iree_unaligned_load_le_u64((const uint64_t*)(ptr)),           \
-         float*: iree_unaligned_load_le_f32((const float*)(ptr)),              \
-        double*: iree_unaligned_load_le_f64((const double*)(ptr)),             \
-  const int8_t*: iree_unaligned_load_le_u8((const uint8_t*)(ptr)),             \
- const uint8_t*: iree_unaligned_load_le_u8((const uint8_t*)(ptr)),             \
- const int16_t*: iree_unaligned_load_le_u16((const uint16_t*)(ptr)),           \
-const uint16_t*: iree_unaligned_load_le_u16((const uint16_t*)(ptr)),           \
- const int32_t*: iree_unaligned_load_le_u32((const uint32_t*)(ptr)),           \
-const uint32_t*: iree_unaligned_load_le_u32((const uint32_t*)(ptr)),           \
- const int64_t*: iree_unaligned_load_le_u64((const uint64_t*)(ptr)),           \
-const uint64_t*: iree_unaligned_load_le_u64((const uint64_t*)(ptr)),           \
-   const float*: iree_unaligned_load_le_f32((const float*)(ptr)),              \
-  const double*: iree_unaligned_load_le_f64((const double*)(ptr))              \
+#if defined(__cplusplus)
+
+extern "C++" {
+
+static inline uint8_t iree_unaligned_load_le(const int8_t* ptr) {
+  return iree_unaligned_load_le_u8(ptr);
+}
+static inline uint8_t iree_unaligned_load_le(const uint8_t* ptr) {
+  return iree_unaligned_load_le_u8(ptr);
+}
+static inline uint16_t iree_unaligned_load_le(const int16_t* ptr) {
+  return iree_unaligned_load_le_u16(ptr);
+}
+static inline uint16_t iree_unaligned_load_le(const uint16_t* ptr) {
+  return iree_unaligned_load_le_u16(ptr);
+}
+static inline uint32_t iree_unaligned_load_le(const int32_t* ptr) {
+  return iree_unaligned_load_le_u32(ptr);
+}
+static inline uint32_t iree_unaligned_load_le(const uint32_t* ptr) {
+  return iree_unaligned_load_le_u32(ptr);
+}
+static inline uint64_t iree_unaligned_load_le(const int64_t* ptr) {
+  return iree_unaligned_load_le_u64(ptr);
+}
+static inline uint64_t iree_unaligned_load_le(const uint64_t* ptr) {
+  return iree_unaligned_load_le_u64(ptr);
+}
+static inline float iree_unaligned_load_le(const float* ptr) {
+  return iree_unaligned_load_le_f32(ptr);
+}
+static inline double iree_unaligned_load_le(const double* ptr) {
+  return iree_unaligned_load_le_f64(ptr);
+}
+
+}  // extern "C++"
+
+#else
+
+#define iree_unaligned_load_le(ptr)                                  \
+  _Generic((ptr),                                                    \
+        int8_t*: iree_unaligned_load_le_u8((ptr)),                  \
+       uint8_t*: iree_unaligned_load_le_u8((ptr)),                  \
+       int16_t*: iree_unaligned_load_le_u16((ptr)),                 \
+      uint16_t*: iree_unaligned_load_le_u16((ptr)),                 \
+       int32_t*: iree_unaligned_load_le_u32((ptr)),                 \
+      uint32_t*: iree_unaligned_load_le_u32((ptr)),                 \
+       int64_t*: iree_unaligned_load_le_u64((ptr)),                 \
+      uint64_t*: iree_unaligned_load_le_u64((ptr)),                 \
+         float*: iree_unaligned_load_le_f32((ptr)),                 \
+        double*: iree_unaligned_load_le_f64((ptr)),                 \
+  const int8_t*: iree_unaligned_load_le_u8((ptr)),                  \
+ const uint8_t*: iree_unaligned_load_le_u8((ptr)),                  \
+ const int16_t*: iree_unaligned_load_le_u16((ptr)),                 \
+const uint16_t*: iree_unaligned_load_le_u16((ptr)),                 \
+ const int32_t*: iree_unaligned_load_le_u32((ptr)),                 \
+const uint32_t*: iree_unaligned_load_le_u32((ptr)),                 \
+ const int64_t*: iree_unaligned_load_le_u64((ptr)),                 \
+const uint64_t*: iree_unaligned_load_le_u64((ptr)),                 \
+   const float*: iree_unaligned_load_le_f32((ptr)),                 \
+  const double*: iree_unaligned_load_le_f64((ptr))                  \
   )
+
+#endif  // defined(__cplusplus)
 
 // Dereferences |ptr| and writes the given |value|.
 // Automatically handles unaligned accesses on architectures that may not
 // support them natively (or efficiently). Memory is treated as little-endian.
-#define iree_unaligned_store_le(ptr, value)                                    \
-  _Generic((ptr),                                                              \
-        int8_t*: iree_unaligned_store_le_u8((uint8_t*)(ptr), value),           \
-       uint8_t*: iree_unaligned_store_le_u8((uint8_t*)(ptr), value),           \
-       int16_t*: iree_unaligned_store_le_u16((uint16_t*)(ptr), value),         \
-      uint16_t*: iree_unaligned_store_le_u16((uint16_t*)(ptr), value),         \
-       int32_t*: iree_unaligned_store_le_u32((uint32_t*)(ptr), value),         \
-      uint32_t*: iree_unaligned_store_le_u32((uint32_t*)(ptr), value),         \
-       int64_t*: iree_unaligned_store_le_u64((uint64_t*)(ptr), value),         \
-      uint64_t*: iree_unaligned_store_le_u64((uint64_t*)(ptr), value),         \
-         float*: iree_unaligned_store_le_f32((float*)(ptr), value),            \
-        double*: iree_unaligned_store_le_f64((double*)(ptr), value)            \
+#if defined(__cplusplus)
+
+extern "C++" {
+
+static inline void iree_unaligned_store_le(int8_t* ptr, uint8_t value) {
+  iree_unaligned_store_le_u8(ptr, value);
+}
+static inline void iree_unaligned_store_le(uint8_t* ptr, uint8_t value) {
+  iree_unaligned_store_le_u8(ptr, value);
+}
+static inline void iree_unaligned_store_le(int16_t* ptr, uint16_t value) {
+  iree_unaligned_store_le_u16(ptr, value);
+}
+static inline void iree_unaligned_store_le(uint16_t* ptr, uint16_t value) {
+  iree_unaligned_store_le_u16(ptr, value);
+}
+static inline void iree_unaligned_store_le(int32_t* ptr, uint32_t value) {
+  iree_unaligned_store_le_u32(ptr, value);
+}
+static inline void iree_unaligned_store_le(uint32_t* ptr, uint32_t value) {
+  iree_unaligned_store_le_u32(ptr, value);
+}
+static inline void iree_unaligned_store_le(int64_t* ptr, uint64_t value) {
+  iree_unaligned_store_le_u64(ptr, value);
+}
+static inline void iree_unaligned_store_le(uint64_t* ptr, uint64_t value) {
+  iree_unaligned_store_le_u64(ptr, value);
+}
+static inline void iree_unaligned_store_le(float* ptr, float value) {
+  iree_unaligned_store_le_f32(ptr, value);
+}
+static inline void iree_unaligned_store_le(double* ptr, double value) {
+  iree_unaligned_store_le_f64(ptr, value);
+}
+
+}  // extern "C++"
+
+#else
+
+#define iree_unaligned_store_le(ptr, value)                         \
+  _Generic((ptr),                                                   \
+        int8_t*: iree_unaligned_store_le_u8((ptr), (value)),       \
+       uint8_t*: iree_unaligned_store_le_u8((ptr), (value)),       \
+       int16_t*: iree_unaligned_store_le_u16((ptr), (value)),      \
+      uint16_t*: iree_unaligned_store_le_u16((ptr), (value)),      \
+       int32_t*: iree_unaligned_store_le_u32((ptr), (value)),      \
+      uint32_t*: iree_unaligned_store_le_u32((ptr), (value)),      \
+       int64_t*: iree_unaligned_store_le_u64((ptr), (value)),      \
+      uint64_t*: iree_unaligned_store_le_u64((ptr), (value)),      \
+         float*: iree_unaligned_store_le_f32((ptr), (value)),      \
+        double*: iree_unaligned_store_le_f64((ptr), (value))       \
   )
+
+#endif  // defined(__cplusplus)
 
 // clang-format on
 

@@ -15,6 +15,7 @@
 #include "loom/format/text/printer.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/encoding/families.h"
 #include "loom/ops/encoding/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/testing/diagnostic_matchers.h"
@@ -27,12 +28,42 @@ using ::loom::testing::DiagnosticCapture;
 using ::loom::testing::ExpectError;
 using ::loom::testing::GetStringParam;
 
-static const loom_encoding_vtable_t kQ8_0EncodingVtable = {
-    /*.name=*/IREE_SV("q8_0"),
+static const loom_attr_descriptor_t kTestSchemaEncodingParameters[] = {
+    {
+        /*.name=*/LOOM_BSTRING_REF(5, "block"),
+        /*.attr_kind=*/LOOM_ATTR_I64,
+        /*.flags=*/LOOM_ATTR_OPTIONAL,
+    },
+    {
+        /*.name=*/LOOM_BSTRING_REF(10, "group_size"),
+        /*.attr_kind=*/LOOM_ATTR_I64,
+        /*.flags=*/LOOM_ATTR_OPTIONAL,
+    },
+};
+static const loom_encoding_family_descriptor_t kTestSchemaEncodingDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(11, "test.schema"),
+    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    /*.family_flags=*/{},
+    /*.parameter_count=*/IREE_ARRAYSIZE(kTestSchemaEncodingParameters),
+    /*.parameter_descriptors=*/kTestSchemaEncodingParameters,
+};
+static const loom_encoding_vtable_t kTestSchemaEncodingVtable = {
+    /*.descriptor=*/&kTestSchemaEncodingDescriptor,
 };
 
+static const loom_attr_descriptor_t kQuantizationParameters[] = {{
+    /*.name=*/LOOM_BSTRING_REF(4, "spec"),
+    /*.attr_kind=*/LOOM_ATTR_ENCODING,
+}};
+static const loom_encoding_family_descriptor_t kQuantizationDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(12, "quantization"),
+    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    /*.family_flags=*/{},
+    /*.parameter_count=*/IREE_ARRAYSIZE(kQuantizationParameters),
+    /*.parameter_descriptors=*/kQuantizationParameters,
+};
 static const loom_encoding_vtable_t kQuantizationEncodingVtable = {
-    /*.name=*/IREE_SV("quantization"),
+    /*.descriptor=*/&kQuantizationDescriptor,
 };
 
 class EncodingFormatTest : public ::testing::Test {
@@ -43,8 +74,9 @@ class EncodingFormatTest : public ::testing::Test {
     loom_context_initialize(iree_allocator_system(), &context_);
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_ENCODING, loom_encoding_dialect_vtables);
-    IREE_ASSERT_OK(
-        loom_context_register_encoding_vtable(&context_, &kQ8_0EncodingVtable));
+    IREE_ASSERT_OK(loom_context_register_builtin_encoding_vtables(&context_));
+    IREE_ASSERT_OK(loom_context_register_encoding_vtable(
+        &context_, &kTestSchemaEncodingVtable));
     IREE_ASSERT_OK(loom_context_register_encoding_vtable(
         &context_, &kQuantizationEncodingVtable));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
@@ -123,8 +155,9 @@ static loom_block_t* GetEntryBlock(loom_region_t* region) {
 }
 
 TEST_F(EncodingFormatTest, DefineInlineSpec) {
-  loom_module_t* module =
-      ParseOk("%enc = encoding.define #q8_0<block=32> : encoding<schema>\n");
+  loom_module_t* module = ParseOk(
+      "%enc = encoding.define #test.schema<block=32> : "
+      "encoding<schema>\n");
   ASSERT_NE(module, nullptr);
 
   loom_block_t* body = loom_module_block(module);
@@ -139,7 +172,7 @@ TEST_F(EncodingFormatTest, DefineInlineSpec) {
   ASSERT_NE(spec_encoding, nullptr);
   ASSERT_LT(spec_encoding->name_id, module->strings.count);
   EXPECT_TRUE(iree_string_view_equal(
-      module->strings.entries[spec_encoding->name_id], IREE_SV("q8_0")));
+      module->strings.entries[spec_encoding->name_id], IREE_SV("test.schema")));
   ASSERT_EQ(spec_encoding->attribute_count, 1u);
   EXPECT_TRUE(iree_string_view_equal(
       module->strings.entries[spec_encoding->attributes[0].name_id],
@@ -148,14 +181,36 @@ TEST_F(EncodingFormatTest, DefineInlineSpec) {
   EXPECT_EQ(spec_encoding->attributes[0].value.i64, 32);
 
   EXPECT_EQ(PrintModule(module),
-            "%enc = encoding.define #q8_0<block=32> : encoding<schema>\n");
+            "%enc = encoding.define #test.schema<block=32> : "
+            "encoding<schema>\n");
+  loom_module_free(module);
+}
+
+TEST_F(EncodingFormatTest, DenseShapedAttachmentIsImplicit) {
+  loom_module_t* module = ParseOk(
+      "test.func @test(%arg: view<4xf32, #encoding.layout.dense>) {\n"
+      "  test.yield\n"
+      "}\n");
+  ASSERT_NE(module, nullptr);
+
+  loom_op_t* func_op = GetFirstFunctionOp(module);
+  ASSERT_NE(func_op, nullptr);
+  loom_block_t* entry = GetEntryBlock(loom_test_func_body(func_op));
+  ASSERT_NE(entry, nullptr);
+  ASSERT_EQ(entry->arg_count, 1u);
+  EXPECT_FALSE(loom_type_has_encoding(
+      loom_module_value_type(module, entry->arg_ids[0])));
+  EXPECT_EQ(PrintModule(module),
+            "test.func @test(%arg: view<4xf32>) {\n"
+            "  test.yield\n"
+            "}\n");
   loom_module_free(module);
 }
 
 TEST_F(EncodingFormatTest, DefineDynamicParams) {
   loom_module_t* module = ParseOk(
       "test.func @test(%group_size: index, %scale: f32) {\n"
-      "  %enc = encoding.define #q8_0<block=32> "
+      "  %enc = encoding.define #test.schema<block=32> "
       "{scale = %scale : f32, group_size = %group_size : index} : "
       "encoding<schema>\n"
       "  test.yield\n"
@@ -190,7 +245,7 @@ TEST_F(EncodingFormatTest, DefineDynamicParams) {
 
   EXPECT_EQ(PrintModule(module),
             "test.func @test(%group_size: index, %scale: f32) {\n"
-            "  %enc = encoding.define #q8_0<block=32> "
+            "  %enc = encoding.define #test.schema<block=32> "
             "{group_size = %group_size : index, scale = %scale : f32} : "
             "encoding<schema>\n"
             "  test.yield\n"
@@ -201,7 +256,7 @@ TEST_F(EncodingFormatTest, DefineDynamicParams) {
 TEST_F(EncodingFormatTest, StaticEncodingRejectsSSAParameter) {
   const auto& diagnostics = ParseExpectErrors(
       "test.func @test(%group_size: index) {\n"
-      "  %enc = encoding.define #q8_0<group_size=%group_size> : "
+      "  %enc = encoding.define #test.schema<group_size=%group_size> : "
       "encoding<schema>\n"
       "  test.yield\n"
       "}\n");
@@ -213,7 +268,8 @@ TEST_F(EncodingFormatTest, StaticEncodingRejectsSSAParameter) {
 
 TEST_F(EncodingFormatTest, StaticEncodingRejectsDuplicateParameter) {
   const auto& diagnostics = ParseExpectErrors(
-      "%enc = encoding.define #q8_0<block=32, block=64> : encoding<schema>\n");
+      "%enc = encoding.define #test.schema<block=32, block=64> : "
+      "encoding<schema>\n");
   ASSERT_GE(diagnostics.size(), 1u);
   ExpectError(diagnostics[0],
               loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 29));
@@ -222,7 +278,7 @@ TEST_F(EncodingFormatTest, StaticEncodingRejectsDuplicateParameter) {
 
 TEST_F(EncodingFormatTest, DefineAliasSpec) {
   loom_module_t* module = ParseOk(
-      "#enc = #q8_0<block=32>\n"
+      "#enc = #test.schema<block=32>\n"
       "%enc = encoding.define #enc : encoding<schema>\n");
   ASSERT_NE(module, nullptr);
 
@@ -241,15 +297,105 @@ TEST_F(EncodingFormatTest, DefineAliasSpec) {
       module->strings.entries[spec_encoding->alias_id], IREE_SV("enc")));
 
   EXPECT_EQ(PrintModule(module),
-            "#enc = #q8_0<block=32>\n"
+            "#enc = #test.schema<block=32>\n"
             "%enc = encoding.define #enc : encoding<schema>\n");
   loom_module_free(module);
+}
+
+TEST_F(EncodingFormatTest, CanonicalNumericSchemaHasStructuralIdentity) {
+  loom_module_t* module = ParseOk(
+      "%named = encoding.define #encoding.f8e4m3fn : encoding<schema>\n"
+      "%structural = encoding.define #encoding.operand<"
+      "element_format=f8e4m3fn, payload_elements=1, "
+      "payload_packing=dense_lanes> : encoding<schema>\n");
+  ASSERT_NE(module, nullptr);
+
+  loom_block_t* body = loom_module_block(module);
+  ASSERT_EQ(body->op_count, 2u);
+  const loom_op_t* named_op = loom_block_const_op(body, 0);
+  const loom_op_t* structural_op = loom_block_const_op(body, 1);
+  ASSERT_TRUE(loom_encoding_define_isa(named_op));
+  ASSERT_TRUE(loom_encoding_define_isa(structural_op));
+  const uint16_t named_id =
+      loom_attr_as_encoding_id(loom_op_attrs(named_op)[0]);
+  const uint16_t structural_id =
+      loom_attr_as_encoding_id(loom_op_attrs(structural_op)[0]);
+  EXPECT_EQ(named_id, structural_id);
+
+  const loom_encoding_t* encoding = loom_module_encoding(module, named_id);
+  ASSERT_NE(encoding, nullptr);
+  EXPECT_TRUE(iree_string_view_equal(module->strings.entries[encoding->name_id],
+                                     IREE_SV("encoding.operand")));
+  EXPECT_EQ(PrintModule(module),
+            "%named = encoding.define #encoding.f8e4m3fn : "
+            "encoding<schema>\n"
+            "%structural = encoding.define #encoding.f8e4m3fn : "
+            "encoding<schema>\n");
+  loom_module_free(module);
+}
+
+TEST_F(EncodingFormatTest, CanonicalNumericSchemaRetainsOrthogonalParameters) {
+  loom_module_t* module = ParseOk(
+      "%enc = encoding.define "
+      "#encoding.f8e4m3fn<rounding=finite_only> : encoding<schema>\n");
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(PrintModule(module),
+            "%enc = encoding.define "
+            "#encoding.f8e4m3fn<rounding=finite_only> : "
+            "encoding<schema>\n");
+  loom_module_free(module);
+}
+
+TEST_F(EncodingFormatTest, CanonicalNumericSchemaOverridesStructuralDefaults) {
+  loom_module_t* module = ParseOk(
+      "%named = encoding.define "
+      "#encoding.f8e4m3fn<payload_elements=8> : encoding<schema>\n"
+      "%structural = encoding.define #encoding.operand<"
+      "element_format=f8e4m3fn, payload_elements=8, "
+      "payload_packing=dense_lanes> : encoding<schema>\n");
+  ASSERT_NE(module, nullptr);
+
+  loom_block_t* body = loom_module_block(module);
+  ASSERT_EQ(body->op_count, 2u);
+  EXPECT_EQ(
+      loom_attr_as_encoding_id(loom_op_attrs(loom_block_const_op(body, 0))[0]),
+      loom_attr_as_encoding_id(loom_op_attrs(loom_block_const_op(body, 1))[0]));
+  EXPECT_EQ(PrintModule(module),
+            "%named = encoding.define "
+            "#encoding.f8e4m3fn<payload_elements=8> : "
+            "encoding<schema>\n"
+            "%structural = encoding.define "
+            "#encoding.f8e4m3fn<payload_elements=8> : "
+            "encoding<schema>\n");
+  loom_module_free(module);
+}
+
+TEST_F(EncodingFormatTest, CanonicalNumericSchemaRequiresStructuralDefaults) {
+  loom_module_t* module = ParseOk(
+      "%enc = encoding.define #encoding.operand<"
+      "element_format=f8e4m3fn, payload_elements=8> : encoding<schema>\n");
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(PrintModule(module),
+            "%enc = encoding.define #encoding.operand<"
+            "element_format=f8e4m3fn, payload_elements=8> : "
+            "encoding<schema>\n");
+  loom_module_free(module);
+}
+
+TEST_F(EncodingFormatTest, CanonicalNumericSchemaRejectsFixedParameter) {
+  loom_module_t* module = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Parse("%enc = encoding.define "
+                              "#encoding.f8e4m3fn<element_format=f8e4m3fn> : "
+                              "encoding<schema>\n",
+                              &module));
+  EXPECT_EQ(module, nullptr);
 }
 
 TEST_F(EncodingFormatTest, DefineNestedInlineSpec) {
   loom_module_t* module = ParseOk(
       "%enc = encoding.define "
-      "#quantization<spec=#q8_0<block=32>> : encoding<schema>\n");
+      "#quantization<spec=#test.schema<block=32>> : encoding<schema>\n");
   ASSERT_NE(module, nullptr);
 
   loom_block_t* body = loom_module_block(module);
@@ -272,8 +418,9 @@ TEST_F(EncodingFormatTest, DefineNestedInlineSpec) {
   const loom_encoding_t* nested_encoding =
       loom_module_encoding(module, loom_attr_as_encoding_id(nested_spec));
   ASSERT_NE(nested_encoding, nullptr);
-  EXPECT_TRUE(iree_string_view_equal(
-      module->strings.entries[nested_encoding->name_id], IREE_SV("q8_0")));
+  EXPECT_TRUE(
+      iree_string_view_equal(module->strings.entries[nested_encoding->name_id],
+                             IREE_SV("test.schema")));
   ASSERT_EQ(nested_encoding->attribute_count, 1u);
   EXPECT_TRUE(iree_string_view_equal(
       module->strings.entries[nested_encoding->attributes[0].name_id],
@@ -283,7 +430,8 @@ TEST_F(EncodingFormatTest, DefineNestedInlineSpec) {
 
   EXPECT_EQ(PrintModule(module),
             "%enc = encoding.define "
-            "#quantization<spec=#q8_0<block=32>> : encoding<schema>\n");
+            "#quantization<spec=#test.schema<block=32>> : "
+            "encoding<schema>\n");
   loom_module_free(module);
 }
 

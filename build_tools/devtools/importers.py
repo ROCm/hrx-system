@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -34,6 +35,7 @@ class ImporterEnvironmentSpec:
     name: str
     lock_file: Path
     import_modules: tuple[str, ...]
+    python_version: str
     bazel_config: str
     cmake_options: tuple[str, ...]
 
@@ -43,7 +45,7 @@ class ImporterEnvironmentSpec:
 
     @property
     def root(self) -> Path:
-        return self.state_dir / "venv"
+        return self.state_dir / f"venv-{self.python_version}"
 
     @property
     def manifest_path(self) -> Path:
@@ -76,6 +78,7 @@ IMPORTER_ENVIRONMENTS: dict[str, ImporterEnvironmentSpec] = {
             "iree.compiler.dialects.scf",
             "iree.compiler.dialects.vector",
         ),
+        python_version="3.12",
         bazel_config="loom-importer-mlir",
         cmake_options=("LOOM_IMPORT_MLIR=ON",),
     ),
@@ -91,6 +94,7 @@ IMPORTER_ENVIRONMENTS: dict[str, ImporterEnvironmentSpec] = {
             "tvm.te",
             "tvm_ffi",
         ),
+        python_version="3.12",
         bazel_config="loom-importer-tilelang",
         cmake_options=("LOOM_IMPORT_TILELANG=ON",),
     ),
@@ -171,6 +175,16 @@ def load_manifest(spec: ImporterEnvironmentSpec) -> dict[str, object]:
         raise ValueError(
             f"importer environment {spec.name!r} is stale relative to "
             f"{spec.lock_file.name}; run `python dev.py importers setup {spec.name}`"
+        )
+    python_version = manifest.get("python_version")
+    if not isinstance(python_version, str) or not python_version.startswith(
+        spec.python_version + "."
+    ):
+        raise ValueError(
+            f"importer environment {spec.name!r} requires Python "
+            f"{spec.python_version}, but its manifest records "
+            f"{python_version or 'no Python version'}; run "
+            f"`python dev.py importers setup {spec.name}`"
         )
     if not manifest.get("ok"):
         raise ValueError(
@@ -330,14 +344,72 @@ class ImporterManifestStep:
         return 0
 
 
+def _interpreter_version(command: tuple[str, ...]) -> str | None:
+    try:
+        result = subprocess.run(
+            [
+                *command,
+                "-c",
+                (
+                    "import sys; "
+                    "print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+                ),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def resolve_python_interpreter(
+    importer_spec: ImporterEnvironmentSpec,
+    tool_env: ToolEnvironment,
+) -> tuple[str, ...]:
+    """Resolve the Python ABI used by Bazel and the importer package locks."""
+    path = tool_env.path_env().get("PATH")
+    candidates = [
+        (tool_env.python,),
+        (sys.executable,),
+    ]
+    versioned_python = shutil.which(
+        f"python{importer_spec.python_version}",
+        path=path,
+    )
+    if versioned_python is not None:
+        candidates.append((versioned_python,))
+    if os.name == "nt":
+        py_launcher = shutil.which("py", path=path)
+        if py_launcher is not None:
+            candidates.append((py_launcher, f"-{importer_spec.python_version}"))
+
+    seen_commands = set()
+    for command in candidates:
+        if command in seen_commands:
+            continue
+        seen_commands.add(command)
+        if _interpreter_version(command) == importer_spec.python_version:
+            return command
+    raise ValueError(
+        f"importer environment {importer_spec.name!r} requires Python "
+        f"{importer_spec.python_version}, matching the Bazel Python toolchain; "
+        f"install that interpreter and retry"
+    )
+
+
 def setup_plan(importer_name: str, tool_env: ToolEnvironment) -> CommandPlan:
     importer_spec = spec(importer_name)
+    python_command = resolve_python_interpreter(importer_spec, tool_env)
     return CommandPlan(
         [
             EnsureDirectoryStep(importer_spec.state_dir),
             CommandStep(
                 [
-                    tool_env.python,
+                    *python_command,
                     "-m",
                     "venv",
                     str(importer_spec.root),

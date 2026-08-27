@@ -9,6 +9,7 @@
 
 #include "iree/base/api.h"
 #include "loom/format/text/parser/context.h"
+#include "loom/format/text/parser/types.h"
 #include "loom/ir/ir.h"
 
 #ifdef __cplusplus
@@ -18,6 +19,13 @@ extern "C" {
 iree_status_t loom_parse_attr_value(loom_parser_t* parser,
                                     const loom_attr_descriptor_t* descriptor,
                                     loom_attribute_t* out_attr);
+iree_status_t loom_parse_attr_value_with_type_mode(
+    loom_parser_t* parser, const loom_attr_descriptor_t* descriptor,
+    loom_type_parse_mode_t type_mode, loom_attribute_t* out_attr);
+// Parses the angle-bracket parameter payload for one known attribute family.
+iree_status_t loom_parse_parameterized_attr_parameters(
+    loom_parser_t* parser, loom_parameterized_attr_kind_t family_kind,
+    loom_attribute_t* out_attr);
 iree_status_t loom_parse_symbol_ref_attr(loom_parser_t* parser,
                                          loom_attribute_t* out_attr);
 iree_status_t loom_parse_generic_attr_value(loom_parser_t* parser,

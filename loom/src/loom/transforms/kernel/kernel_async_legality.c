@@ -44,7 +44,9 @@ iree_status_t loom_kernel_async_legality_run(loom_pass_t* pass,
   }
 
   loom_local_value_domain_t value_domain = {0};
-  iree_status_t status = loom_local_value_domain_acquire_for_region(
+  // Movement and control analysis recurse through structured source regions,
+  // so every value defined in that region tree must be ordinal-addressable.
+  iree_status_t status = loom_local_value_domain_acquire_for_region_tree(
       module, body, pass->arena, &value_domain);
   loom_value_fact_table_t* fact_table = NULL;
   if (iree_status_is_ok(status)) {
@@ -53,7 +55,6 @@ iree_status_t loom_kernel_async_legality_run(loom_pass_t* pass,
         &fact_table);
   }
   loom_kernel_async_legality_options_t options = {
-      .arena = pass->arena,
       .value_domain = &value_domain,
       .fact_table = fact_table,
       .emitter = pass->diagnostic_emitter,

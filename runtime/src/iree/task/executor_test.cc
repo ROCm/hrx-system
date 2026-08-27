@@ -13,10 +13,11 @@
 #include "iree/task/executor.h"
 
 #include <atomic>
-#include <chrono>
 #include <thread>
+#include <type_traits>
 
 #include "iree/base/api.h"
+#include "iree/base/threading/notification.h"
 #include "iree/task/process.h"
 #include "iree/task/topology.h"
 #include "iree/testing/gtest.h"
@@ -27,6 +28,35 @@ namespace {
 //===----------------------------------------------------------------------===//
 // Test infrastructure
 //===----------------------------------------------------------------------===//
+
+// Exact test-side completion primitive. Producers publish their state before
+// posting and consumers recheck the predicate through the notification's
+// prepare/commit protocol, so transitions cannot be missed.
+class TestWaiter {
+ public:
+  TestWaiter() { iree_notification_initialize(&notification_); }
+  ~TestWaiter() { iree_notification_deinitialize(&notification_); }
+
+  TestWaiter(const TestWaiter&) = delete;
+  TestWaiter& operator=(const TestWaiter&) = delete;
+
+  void Notify() { iree_notification_post(&notification_, IREE_ALL_WAITERS); }
+
+  template <typename Fn>
+  void WaitUntil(Fn&& condition) {
+    using Predicate = std::remove_reference_t<Fn>;
+    bool satisfied = iree_notification_await(
+        &notification_,
+        +[](void* user_data) {
+          return (*static_cast<Predicate*>(user_data))();
+        },
+        &condition, iree_infinite_timeout());
+    IREE_ASSERT(satisfied);
+  }
+
+ private:
+  iree_notification_t notification_;
+};
 
 // Creates a simple executor with the given number of workers.
 // Caller must release with iree_task_executor_release.
@@ -47,7 +77,7 @@ static iree_task_executor_t* CreateExecutor(iree_host_size_t worker_count) {
 
 // Context for a test process that completes after a fixed number of drain
 // calls. Thread-safe: drain_count is atomic.
-struct CountingProcessContext {
+struct CountingProcessContext : public TestWaiter {
   std::atomic<int32_t> drain_count{0};
   int32_t drains_until_complete;
   std::atomic<bool> completed{false};
@@ -69,8 +99,9 @@ static void counting_completion(iree_task_process_t* process,
                                 iree_status_t status) {
   auto* context = reinterpret_cast<CountingProcessContext*>(process->user_data);
   context->completion_status_code = iree_status_code(status);
-  context->completed.store(true, std::memory_order_release);
   iree_status_free(status);
+  context->completed.store(true, std::memory_order_release);
+  context->Notify();
 }
 
 // Drain function that always returns an error on the first call.
@@ -86,13 +117,13 @@ static iree_status_t failing_drain(
 
 // Context for a process that sleeps until woken, then completes on the next
 // drain. Used to test the sleeping/re-wake protocol.
-struct SleepingProcessContext {
+struct SleepingProcessContext : public TestWaiter {
   std::atomic<bool> ready{false};
   std::atomic<bool> completed{false};
   std::atomic<int32_t> drain_count{0};
   // Set by the drain function when it returns did_work=false, indicating the
-  // worker is about to enter the sleep protocol. Tests can spin on this
-  // instead of using a fixed sleep_for.
+  // worker is about to enter the sleep protocol. Tests wait for this exact
+  // transition instead of using a fixed delay.
   std::atomic<bool> entered_sleep{false};
 };
 
@@ -109,6 +140,7 @@ static iree_status_t sleeping_drain(
     result->did_work = false;
     result->completed = false;
     context->entered_sleep.store(true, std::memory_order_release);
+    context->Notify();
   }
   return iree_ok_status();
 }
@@ -116,20 +148,19 @@ static iree_status_t sleeping_drain(
 static void sleeping_completion(iree_task_process_t* process,
                                 iree_status_t status) {
   auto* context = reinterpret_cast<SleepingProcessContext*>(process->user_data);
-  context->completed.store(true, std::memory_order_release);
   iree_status_free(status);
+  context->completed.store(true, std::memory_order_release);
+  context->Notify();
 }
 
-// Spins until a condition is true, with a timeout to prevent hangs.
+// Spins only on executor-private state that intentionally has no waiter list.
+// These are short scheduler state transitions; the outer harness detects a
+// broken transition without adding notification traffic to production paths.
 template <typename Fn>
-static bool SpinUntil(Fn&& condition, std::chrono::milliseconds timeout_ms =
-                                          std::chrono::milliseconds(5000)) {
-  auto deadline = std::chrono::steady_clock::now() + timeout_ms;
+static void SpinUntilInternalState(Fn&& condition) {
   while (!condition()) {
-    if (std::chrono::steady_clock::now() > deadline) return false;
     std::this_thread::yield();
   }
-  return true;
 }
 
 //===----------------------------------------------------------------------===//
@@ -150,8 +181,7 @@ TEST(ExecutorProcessTest, SingleProcessCompletesImmediately) {
 
   iree_task_executor_schedule_process(executor, &process);
 
-  ASSERT_TRUE(SpinUntil([&] { return context.completed.load(); }))
-      << "process did not complete within timeout";
+  context.WaitUntil([&] { return context.completed.load(); });
   EXPECT_EQ(context.drain_count.load(), 1);
   EXPECT_EQ(context.completion_status_code, IREE_STATUS_OK);
 
@@ -171,8 +201,7 @@ TEST(ExecutorProcessTest, MultiDrainProcess) {
 
   iree_task_executor_schedule_process(executor, &process);
 
-  ASSERT_TRUE(SpinUntil([&] { return context.completed.load(); }))
-      << "process did not complete within timeout";
+  context.WaitUntil([&] { return context.completed.load(); });
   EXPECT_EQ(context.drain_count.load(), 5);
 
   iree_task_executor_release(executor);
@@ -209,8 +238,7 @@ TEST(ExecutorProcessTest, DependencyChain) {
   // Only schedule A — B and C are suspended, waiting for A to complete.
   iree_task_executor_schedule_process(executor, &a);
 
-  ASSERT_TRUE(SpinUntil([&] { return context_c.completed.load(); }))
-      << "chain did not complete within timeout";
+  context_c.WaitUntil([&] { return context_c.completed.load(); });
   EXPECT_TRUE(context_a.completed.load());
   EXPECT_TRUE(context_b.completed.load());
   EXPECT_TRUE(context_c.completed.load());
@@ -258,8 +286,7 @@ TEST(ExecutorProcessTest, DiamondDependency) {
 
   iree_task_executor_schedule_process(executor, &a);
 
-  ASSERT_TRUE(SpinUntil([&] { return context_d.completed.load(); }))
-      << "diamond did not complete within timeout";
+  context_d.WaitUntil([&] { return context_d.completed.load(); });
   EXPECT_TRUE(context_a.completed.load());
   EXPECT_TRUE(context_b.completed.load());
   EXPECT_TRUE(context_c.completed.load());
@@ -289,8 +316,7 @@ TEST(ExecutorProcessTest, SleepAndRewake) {
   // point the worker is in the sleep protocol (checking needs_drain,
   // transitioning to IDLE, etc.). This is a deterministic signal — no
   // sleep_for needed.
-  ASSERT_TRUE(SpinUntil([&] { return context.entered_sleep.load(); }))
-      << "process never entered sleep";
+  context.WaitUntil([&] { return context.entered_sleep.load(); });
 
   // The process should NOT be completed — it's sleeping.
   EXPECT_FALSE(context.completed.load());
@@ -299,8 +325,7 @@ TEST(ExecutorProcessTest, SleepAndRewake) {
   context.ready.store(true, std::memory_order_release);
   iree_task_executor_schedule_process(executor, &process);
 
-  ASSERT_TRUE(SpinUntil([&] { return context.completed.load(); }))
-      << "process did not complete after re-wake";
+  context.WaitUntil([&] { return context.completed.load(); });
 
   iree_task_executor_release(executor);
 }
@@ -322,8 +347,7 @@ TEST(ExecutorProcessTest, DrainErrorDeliveredToCompletion) {
 
   iree_task_executor_schedule_process(executor, &process);
 
-  ASSERT_TRUE(SpinUntil([&] { return context.completed.load(); }))
-      << "process did not complete within timeout";
+  context.WaitUntil([&] { return context.completed.load(); });
   EXPECT_EQ(context.completion_status_code, IREE_STATUS_DATA_LOSS);
 
   iree_task_executor_release(executor);
@@ -353,12 +377,9 @@ TEST(ExecutorProcessTest, ManyIndependentProcesses) {
   }
 
   // Wait for all to complete.
-  ASSERT_TRUE(SpinUntil([&] {
-    for (int i = 0; i < kProcessCount; ++i) {
-      if (!contexts[i].completed.load()) return false;
-    }
-    return true;
-  })) << "not all processes completed within timeout";
+  for (int i = 0; i < kProcessCount; ++i) {
+    contexts[i].WaitUntil([&, i] { return contexts[i].completed.load(); });
+  }
 
   for (int i = 0; i < kProcessCount; ++i) {
     EXPECT_EQ(contexts[i].drain_count.load(), 1) << "process " << i;
@@ -395,12 +416,9 @@ TEST(ExecutorProcessTest, ConcurrentScheduleFromMultipleThreads) {
   }
   for (auto& t : threads) t.join();
 
-  ASSERT_TRUE(SpinUntil([&] {
-    for (int i = 0; i < kTotalProcesses; ++i) {
-      if (!contexts[i].completed.load()) return false;
-    }
-    return true;
-  })) << "not all processes completed within timeout";
+  for (int i = 0; i < kTotalProcesses; ++i) {
+    contexts[i].WaitUntil([&, i] { return contexts[i].completed.load(); });
+  }
 
   iree_task_executor_release(executor);
 }
@@ -427,15 +445,14 @@ TEST(ExecutorProcessTest, RepeatedSleepWakeCycles) {
     iree_task_executor_schedule_process(executor, &processes[cycle]);
 
     // Wait for sleep entry.
-    ASSERT_TRUE(SpinUntil([&] { return contexts[cycle].entered_sleep.load(); }))
-        << "cycle " << cycle << ": never entered sleep";
+    contexts[cycle].WaitUntil(
+        [&] { return contexts[cycle].entered_sleep.load(); });
 
     // Wake and complete.
     contexts[cycle].ready.store(true, std::memory_order_release);
     iree_task_executor_schedule_process(executor, &processes[cycle]);
 
-    ASSERT_TRUE(SpinUntil([&] { return contexts[cycle].completed.load(); }))
-        << "cycle " << cycle << ": did not complete after re-wake";
+    contexts[cycle].WaitUntil([&] { return contexts[cycle].completed.load(); });
   }
 
   iree_task_executor_release(executor);
@@ -464,13 +481,13 @@ TEST(ExecutorProcessTest, ConcurrentSleepWakeFromMultipleThreads) {
       iree_task_executor_schedule_process(executor, &processes[t]);
 
       // Wait for sleep.
-      SpinUntil([&]() { return contexts[t].entered_sleep.load(); });
+      contexts[t].WaitUntil([&]() { return contexts[t].entered_sleep.load(); });
 
       // Wake and complete.
       contexts[t].ready.store(true, std::memory_order_release);
       iree_task_executor_schedule_process(executor, &processes[t]);
 
-      SpinUntil([&]() { return contexts[t].completed.load(); });
+      contexts[t].WaitUntil([&]() { return contexts[t].completed.load(); });
       completed_count.fetch_add(1, std::memory_order_relaxed);
     });
   }
@@ -510,8 +527,7 @@ TEST(ExecutorProcessTest, DependencyChainWithMultipleDrains) {
 
   iree_task_executor_schedule_process(executor, &a);
 
-  ASSERT_TRUE(SpinUntil([&] { return context_c.completed.load(); }))
-      << "chain did not complete";
+  context_c.WaitUntil([&] { return context_c.completed.load(); });
   EXPECT_EQ(context_a.drain_count.load(), 10);
   EXPECT_EQ(context_b.drain_count.load(), 5);
   EXPECT_EQ(context_c.drain_count.load(), 3);
@@ -525,7 +541,7 @@ TEST(ExecutorProcessTest, DependencyChainWithMultipleDrains) {
 
 // Context for a compute process that simulates parallel tile work.
 // Multiple workers drain concurrently, each atomically claiming tiles.
-struct ComputeProcessContext {
+struct ComputeProcessContext : public TestWaiter {
   std::atomic<int32_t> tiles_remaining;
   std::atomic<int32_t> tiles_completed{0};
   std::atomic<int32_t> active_drainers{0};
@@ -579,15 +595,65 @@ static void compute_completion(iree_task_process_t* process,
                                iree_status_t status) {
   auto* context = reinterpret_cast<ComputeProcessContext*>(process->user_data);
   context->completion_status_code = iree_status_code(status);
-  context->completed.store(true, std::memory_order_release);
   iree_status_free(status);
+  context->completed.store(true, std::memory_order_release);
+  context->Notify();
+}
+
+// Context for repeatedly reusing process storage as soon as release_fn
+// publishes that all scheduler access has ended.
+struct ComputeReleaseContext : public TestWaiter {
+  // Total jobs in each scheduled process lifetime.
+  int32_t job_count = 0;
+
+  // Next job ordinal available to a drainer.
+  std::atomic<int32_t> next_job_ordinal{0};
+
+  // Number of jobs completed by drainers.
+  std::atomic<int32_t> completed_job_count{0};
+
+  // Set by release_fn after the process is safe to reuse.
+  std::atomic<bool> released{false};
+};
+
+static iree_status_t compute_release_drain(
+    iree_task_process_t* process,
+    const iree_task_worker_context_t* worker_context,
+    iree_task_process_drain_result_t* result) {
+  (void)worker_context;
+  auto* context = reinterpret_cast<ComputeReleaseContext*>(process->user_data);
+  const int32_t job_ordinal =
+      context->next_job_ordinal.fetch_add(1, std::memory_order_acq_rel);
+  if (job_ordinal >= context->job_count) {
+    result->completed = context->completed_job_count.load(
+                            std::memory_order_acquire) >= context->job_count;
+    return iree_ok_status();
+  }
+
+  const int32_t completed_job_count =
+      context->completed_job_count.fetch_add(1, std::memory_order_acq_rel) + 1;
+  result->did_work = true;
+  result->completed = completed_job_count >= context->job_count;
+  return iree_ok_status();
+}
+
+static void compute_release_completion(iree_task_process_t* process,
+                                       iree_status_t status) {
+  (void)process;
+  IREE_EXPECT_OK(status);
+}
+
+static void compute_release_release(iree_task_process_t* process) {
+  auto* context = reinterpret_cast<ComputeReleaseContext*>(process->user_data);
+  context->released.store(true, std::memory_order_release);
+  context->Notify();
 }
 
 // Context for a persistent wake_budget > 1 process that repeatedly goes idle
 // and is rescheduled with one more unit of work. This mirrors the executor
 // contract local-task relies on for its long-lived compute process without
 // involving any HAL queue state.
-struct RepeatedComputeWakeContext {
+struct RepeatedComputeWakeContext : public TestWaiter {
   std::atomic<int32_t> pending_work{0};
   std::atomic<int32_t> processed_work{0};
   std::atomic<int32_t> active_drainers{0};
@@ -612,7 +678,8 @@ static iree_status_t repeated_compute_wake_drain(
     if (context->pending_work.compare_exchange_weak(
             pending_work, pending_work - 1, std::memory_order_acq_rel,
             std::memory_order_acquire)) {
-      context->processed_work.fetch_add(1, std::memory_order_relaxed);
+      context->processed_work.fetch_add(1, std::memory_order_release);
+      context->Notify();
       did_work = true;
       break;
     }
@@ -632,8 +699,9 @@ static void repeated_compute_wake_completion(iree_task_process_t* process,
                                              iree_status_t status) {
   auto* context =
       reinterpret_cast<RepeatedComputeWakeContext*>(process->user_data);
-  context->completed.store(true, std::memory_order_release);
   iree_status_free(status);
+  context->completed.store(true, std::memory_order_release);
+  context->Notify();
 }
 
 // Context for a compute process that first publishes a shared keep-active
@@ -641,7 +709,7 @@ static void repeated_compute_wake_completion(iree_task_process_t* process,
 // single executor worker this deterministically exercises the last-drainer
 // release path: the no-work drain must observe the earlier shared retain
 // publication and keep the compute slot live long enough to reach completion.
-struct SharedKeepActiveContext {
+struct SharedKeepActiveContext : public TestWaiter {
   std::atomic<int32_t> drain_count{0};
   std::atomic<bool> completed{false};
 };
@@ -673,12 +741,13 @@ static void shared_keep_active_completion(iree_task_process_t* process,
   EXPECT_EQ(iree_status_code(status), IREE_STATUS_OK);
   iree_status_free(status);
   context->completed.store(true, std::memory_order_release);
+  context->Notify();
 }
 
 // Context for a compute process that retains a worker warm after the first
 // no-work drain. The second drain must not happen until the test advances the
 // process retention epoch via schedule_process.
-struct WarmRetainerContext {
+struct WarmRetainerContext : public TestWaiter {
   std::atomic<int32_t> drain_count{0};
   std::atomic<int32_t> premature_drain_count{0};
   std::atomic<bool> first_drain_done{false};
@@ -698,6 +767,7 @@ static iree_status_t warm_retainer_drain(
     result->keep_warm = true;
     result->keep_warm_epoch = iree_task_process_retention_epoch(process);
     context->first_drain_done.store(true, std::memory_order_release);
+    context->Notify();
     return iree_ok_status();
   }
   if (!context->allow_second_drain.load(std::memory_order_acquire)) {
@@ -718,6 +788,7 @@ static void warm_retainer_completion(iree_task_process_t* process,
   context->completion_status_code = iree_status_code(status);
   iree_status_free(status);
   context->completed.store(true, std::memory_order_release);
+  context->Notify();
 }
 
 TEST(ExecutorProcessTest, ComputeSlotSingleProcess) {
@@ -734,8 +805,7 @@ TEST(ExecutorProcessTest, ComputeSlotSingleProcess) {
 
   iree_task_executor_schedule_process(executor, &process);
 
-  ASSERT_TRUE(SpinUntil([&] { return context.completed.load(); }))
-      << "compute process did not complete within timeout";
+  context.WaitUntil([&] { return context.completed.load(); });
   EXPECT_EQ(context.tiles_completed.load(), 100);
   EXPECT_EQ(context.completion_status_code, IREE_STATUS_OK);
 
@@ -756,8 +826,7 @@ TEST(ExecutorProcessTest, ComputeSlotMultipleWorkerParticipation) {
 
   iree_task_executor_schedule_process(executor, &process);
 
-  ASSERT_TRUE(SpinUntil([&] { return context.completed.load(); }))
-      << "compute process did not complete within timeout";
+  context.WaitUntil([&] { return context.completed.load(); });
   EXPECT_EQ(context.tiles_completed.load(), 10000);
 
   // With 10000 tiles and 4 workers, we expect multiple workers participated.
@@ -770,6 +839,36 @@ TEST(ExecutorProcessTest, ComputeSlotMultipleWorkerParticipation) {
     }
   }
   EXPECT_GE(participating_workers, 1);
+
+  iree_task_executor_release(executor);
+}
+
+TEST(ExecutorProcessTest, ComputeSlotReleasePublishesProcessQuiescence) {
+  static constexpr int kWorkerCount = 4;
+  static constexpr int kBatchCount = 1000;
+  static constexpr int kJobCount = 8;
+  iree_task_executor_t* executor = CreateExecutor(kWorkerCount);
+
+  ComputeReleaseContext context;
+  context.job_count = kJobCount;
+  iree_task_process_t process;
+  for (int batch = 0; batch < kBatchCount; ++batch) {
+    context.next_job_ordinal.store(0, std::memory_order_relaxed);
+    context.completed_job_count.store(0, std::memory_order_relaxed);
+    context.released.store(false, std::memory_order_relaxed);
+
+    iree_task_process_initialize(compute_release_drain, /*suspend_count=*/0,
+                                 /*wake_budget=*/kWorkerCount, &process);
+    process.completion_fn = compute_release_completion;
+    process.release_fn = compute_release_release;
+    process.user_data = &context;
+    iree_task_executor_schedule_process(executor, &process);
+
+    context.WaitUntil(
+        [&] { return context.released.load(std::memory_order_acquire); });
+    EXPECT_EQ(context.completed_job_count.load(std::memory_order_acquire),
+              kJobCount);
+  }
 
   iree_task_executor_release(executor);
 }
@@ -793,12 +892,9 @@ TEST(ExecutorProcessTest, ComputeSlotMultipleConcurrentProcesses) {
     iree_task_executor_schedule_process(executor, &processes[i]);
   }
 
-  ASSERT_TRUE(SpinUntil([&] {
-    for (int i = 0; i < kProcessCount; ++i) {
-      if (!contexts[i].completed.load()) return false;
-    }
-    return true;
-  })) << "not all compute processes completed within timeout";
+  for (int i = 0; i < kProcessCount; ++i) {
+    contexts[i].WaitUntil([&, i] { return contexts[i].completed.load(); });
+  }
 
   for (int i = 0; i < kProcessCount; ++i) {
     EXPECT_EQ(contexts[i].tiles_completed.load(), 50) << "process " << i;
@@ -840,8 +936,7 @@ TEST(ExecutorProcessTest, ComputeSlotWithDependencyChain) {
 
   iree_task_executor_schedule_process(executor, &a);
 
-  ASSERT_TRUE(SpinUntil([&] { return context_c.completed.load(); }))
-      << "chain did not complete within timeout";
+  context_c.WaitUntil([&] { return context_c.completed.load(); });
   EXPECT_EQ(context_a.tiles_completed.load(), 200);
   EXPECT_EQ(context_b.tiles_completed.load(), 100);
   EXPECT_TRUE(context_a.completed.load());
@@ -865,8 +960,7 @@ TEST(ExecutorProcessTest, ComputeSlotErrorPropagation) {
 
   iree_task_executor_schedule_process(executor, &process);
 
-  ASSERT_TRUE(SpinUntil([&] { return context.completed.load(); }))
-      << "compute process did not complete within timeout";
+  context.WaitUntil([&] { return context.completed.load(); });
   EXPECT_EQ(context.completion_status_code, IREE_STATUS_DATA_LOSS);
 
   iree_task_executor_release(executor);
@@ -894,34 +988,31 @@ TEST(ExecutorProcessTest, ComputeSlotRepeatedSleepWakeCycles) {
 
   static constexpr int kCycles = 500;
   for (int cycle = 0; cycle < kCycles; ++cycle) {
-    ASSERT_TRUE(SpinUntil([&] {
+    SpinUntilInternalState([&] {
       return iree_atomic_load(&process.schedule_state,
                               iree_memory_order_acquire) ==
              IREE_TASK_PROCESS_SCHEDULE_IDLE;
-    })) << "cycle "
-        << cycle << ": process never went idle";
+    });
 
     context.pending_work.fetch_add(1, std::memory_order_release);
     iree_task_executor_schedule_process(executor, &process);
 
-    ASSERT_TRUE(SpinUntil([&] {
+    context.WaitUntil([&] {
       return context.processed_work.load(std::memory_order_acquire) > cycle;
-    })) << "cycle "
-        << cycle << ": process never consumed rescheduled work";
+    });
   }
 
-  ASSERT_TRUE(SpinUntil([&] {
+  SpinUntilInternalState([&] {
     return iree_atomic_load(&process.schedule_state,
                             iree_memory_order_acquire) ==
            IREE_TASK_PROCESS_SCHEDULE_IDLE;
-  })) << "process never went idle after final work item";
+  });
 
   context.shutdown.store(true, std::memory_order_release);
   iree_task_executor_schedule_process(executor, &process);
 
-  ASSERT_TRUE(SpinUntil([&] {
-    return context.completed.load(std::memory_order_acquire);
-  })) << "process did not complete after shutdown";
+  context.WaitUntil(
+      [&] { return context.completed.load(std::memory_order_acquire); });
   EXPECT_EQ(context.processed_work.load(std::memory_order_acquire), kCycles);
 
   iree_task_executor_release(executor);
@@ -940,9 +1031,8 @@ TEST(ExecutorProcessTest, ComputeSlotSharedKeepActiveKeepsSlotLive) {
 
   iree_task_executor_schedule_process(executor, &process);
 
-  ASSERT_TRUE(SpinUntil([&] {
-    return context.completed.load(std::memory_order_acquire);
-  })) << "shared keep-active process did not complete";
+  context.WaitUntil(
+      [&] { return context.completed.load(std::memory_order_acquire); });
   EXPECT_GE(context.drain_count.load(std::memory_order_acquire), 3);
 
   iree_task_executor_release(executor);
@@ -961,21 +1051,18 @@ TEST(ExecutorProcessTest, ComputeSlotWarmRetainerWaitsForEpochAdvance) {
 
   iree_task_executor_schedule_process(executor, &process);
 
-  ASSERT_TRUE(SpinUntil([&] {
-    return context.first_drain_done.load(std::memory_order_acquire);
-  })) << "warm-retainer process did not reach first drain";
-  ASSERT_TRUE(SpinUntil([&] {
-    return iree_task_process_warm_retainer_count(&process) == 1;
-  })) << "worker did not enter warm-retainer state";
+  context.WaitUntil(
+      [&] { return context.first_drain_done.load(std::memory_order_acquire); });
+  SpinUntilInternalState(
+      [&] { return iree_task_process_warm_retainer_count(&process) == 1; });
   EXPECT_EQ(context.drain_count.load(std::memory_order_acquire), 1);
   EXPECT_EQ(context.premature_drain_count.load(std::memory_order_acquire), 0);
 
   context.allow_second_drain.store(true, std::memory_order_release);
   iree_task_executor_schedule_process(executor, &process);
 
-  ASSERT_TRUE(SpinUntil([&] {
-    return context.completed.load(std::memory_order_acquire);
-  })) << "warm-retainer process did not complete after epoch advance";
+  context.WaitUntil(
+      [&] { return context.completed.load(std::memory_order_acquire); });
   EXPECT_EQ(context.completion_status_code, IREE_STATUS_OK);
   EXPECT_EQ(context.premature_drain_count.load(std::memory_order_acquire), 0);
   EXPECT_GE(context.drain_count.load(std::memory_order_acquire), 2);
@@ -1010,17 +1097,16 @@ TEST(ExecutorProcessTest, ComputeSlotConcurrentScheduleWhileDraining) {
   });
   producer.join();
 
-  ASSERT_TRUE(SpinUntil([&] {
+  context.WaitUntil([&] {
     return context.processed_work.load(std::memory_order_acquire) == kWorkItems;
-  })) << "process stranded with producer work still pending";
+  });
   EXPECT_EQ(context.pending_work.load(std::memory_order_acquire), 0);
 
   context.shutdown.store(true, std::memory_order_release);
   iree_task_executor_schedule_process(executor, &process);
 
-  ASSERT_TRUE(SpinUntil([&] {
-    return context.completed.load(std::memory_order_acquire);
-  })) << "process did not complete after shutdown";
+  context.WaitUntil(
+      [&] { return context.completed.load(std::memory_order_acquire); });
   EXPECT_EQ(context.processed_work.load(std::memory_order_acquire), kWorkItems);
 
   iree_task_executor_release(executor);

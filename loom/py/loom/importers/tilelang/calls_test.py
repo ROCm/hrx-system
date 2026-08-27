@@ -59,7 +59,7 @@ def test_decodes_fnuz_tvm_mfma_operand_as_matrix_schema() -> None:
         schema_value = calls._tvm_mfma_matrix_schema(context, operand_format)
 
     expected_schema = EncodingInstance(
-        name="matrix_operand",
+        name="encoding.operand",
         params=(
             ("element_format", "f8e4m3fnuz"),
             ("payload_elements", 8),
@@ -74,7 +74,7 @@ def test_tvm_mfma_rejects_non_cdna_fp8_target() -> None:
     _, builder = loom.module_builder()
     context = TileLangConversionContext(
         builder=builder,
-        target_preset="hip -mcpu=gfx1100",
+        target_preset="hip -mcpu=gfx11-generic",
     )
     expr = _Call(
         "f32_16x16x32_fp8_fp8",

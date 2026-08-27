@@ -50,7 +50,8 @@ static bool cuda_registered_ =
          "cuda",
          {"cuda",
           CreateCudaDevice,
-          /*executable_format=*/nullptr,
+          /*executable_target_family=*/nullptr,
+          /*executable_target_key=*/nullptr,
           /*executable_data=*/nullptr,
           RecordingMode::kDirect,
           /*unsupported_tests=*/
@@ -102,7 +103,6 @@ static bool cuda_registered_ =
                "MultiQueueFanOutDifferentValuesBeforeSignal",
                "Blocked by the same CUDA queue pool backend UNIMPLEMENTED "
                "path as CrossQueueWaitBeforeSignal."},
-              {"EventTest.*", "CUDA does not implement HAL events"},
               {"ExecutableTest.*",
                "CUDA does not implement executable reflection"},
               {"QueueDispatchIndirectParametersTest.*",

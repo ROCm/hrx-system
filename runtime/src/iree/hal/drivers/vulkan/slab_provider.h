@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVERS_VULKAN_SLAB_PROVIDER_H_
 
 #include "iree/base/api.h"
+#include "iree/hal/atomic.h"
 #include "iree/hal/drivers/vulkan/allocator.h"
 #include "iree/hal/memory/slab_provider.h"
 
@@ -41,6 +42,9 @@ typedef struct iree_hal_vulkan_slab_provider_options_t {
 
   // HAL buffer usage bits supported by slabs from this provider.
   iree_hal_buffer_usage_t supported_usage;
+
+  // Atomic operations supported by naturally aligned slab locations.
+  iree_hal_atomic_operation_capabilities_t atomic_operations;
 
   // Queue affinity mask valid for buffers materialized from this provider.
   iree_hal_queue_affinity_t queue_affinity_mask;

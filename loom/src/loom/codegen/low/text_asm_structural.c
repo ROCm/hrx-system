@@ -57,6 +57,23 @@ static const loom_attr_descriptor_t kLowAsmStorageAddressOffsetAttr = {
     .flags = LOOM_ATTR_ELIDE_DEFAULT,
 };
 
+static const loom_attr_descriptor_t*
+loom_low_descriptor_text_asm_transfer_detached_attr(
+    loom_text_low_asm_structural_kind_t kind) {
+  iree_host_size_t vtable_count = 0;
+  const loom_op_vtable_t* const* vtables =
+      loom_low_dialect_vtables(&vtable_count);
+  const loom_op_kind_t op_kind = kind == LOOM_TEXT_LOW_ASM_STRUCTURAL_MOVE
+                                     ? LOOM_OP_LOW_MOVE
+                                     : LOOM_OP_LOW_COPY;
+  const uint8_t op_index = loom_op_dialect_index(op_kind);
+  IREE_ASSERT_LT(op_index, vtable_count);
+  const uint8_t attr_index = kind == LOOM_TEXT_LOW_ASM_STRUCTURAL_MOVE
+                                 ? loom_low_move_detached_ATTR_INDEX
+                                 : loom_low_copy_detached_ATTR_INDEX;
+  return &vtables[op_index]->attr_descriptors[attr_index];
+}
+
 static iree_status_t loom_low_descriptor_text_asm_resource_key_to_kind(
     iree_string_view_t key, uint8_t* out_kind) {
   if (iree_string_view_equal(key, IREE_SV("native_pointer"))) {
@@ -73,6 +90,10 @@ static iree_status_t loom_low_descriptor_text_asm_resource_key_to_kind(
   }
   if (iree_string_view_equal(key, IREE_SV("hal_binding"))) {
     *out_kind = LOOM_LOW_RESOURCE_IMPORT_KIND_HAL_BINDING;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(key, IREE_SV("command_input"))) {
+    *out_kind = LOOM_LOW_RESOURCE_IMPORT_KIND_COMMAND_INPUT;
     return iree_ok_status();
   }
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -94,6 +115,9 @@ static iree_status_t loom_low_descriptor_text_asm_resource_kind_to_key(
       return iree_ok_status();
     case LOOM_LOW_RESOURCE_IMPORT_KIND_HAL_BINDING:
       *out_key = IREE_SV("hal_binding");
+      return iree_ok_status();
+    case LOOM_LOW_RESOURCE_IMPORT_KIND_COMMAND_INPUT:
+      *out_key = IREE_SV("command_input");
       return iree_ok_status();
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -130,6 +154,12 @@ iree_status_t loom_low_descriptor_text_asm_structural_attr_descriptor(
     if (kind == LOOM_TEXT_LOW_ASM_STRUCTURAL_STORAGE_VIEW &&
         iree_string_view_equal(attr_name, IREE_SV("byte_length"))) {
       *out_descriptor = &kLowAsmStorageReserveByteLengthAttr;
+    }
+    if ((kind == LOOM_TEXT_LOW_ASM_STRUCTURAL_COPY ||
+         kind == LOOM_TEXT_LOW_ASM_STRUCTURAL_MOVE) &&
+        iree_string_view_equal(attr_name, IREE_SV("detached"))) {
+      *out_descriptor =
+          loom_low_descriptor_text_asm_transfer_detached_attr(kind);
     }
     return iree_ok_status();
   }
@@ -302,12 +332,30 @@ static iree_status_t loom_low_descriptor_text_asm_build_storage_view(
                                      location, out_op);
 }
 
+static iree_status_t loom_low_descriptor_text_asm_build_transfer(
+    loom_builder_t* builder, loom_text_low_asm_structural_kind_t kind,
+    loom_value_id_t source, loom_named_attr_slice_t attrs,
+    loom_type_t result_type, loom_location_id_t location, loom_op_t** out_op) {
+  const loom_named_attr_t* detached_attr = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_descriptor_text_asm_lookup_attr(
+      builder->module, attrs, IREE_SV("detached"), &detached_attr));
+  const bool detached =
+      detached_attr != NULL && loom_attr_as_bool(detached_attr->value);
+  return kind == LOOM_TEXT_LOW_ASM_STRUCTURAL_MOVE
+             ? loom_low_move_build(builder, source, detached, result_type,
+                                   location, out_op)
+             : loom_low_copy_build(builder, source, detached, result_type,
+                                   location, out_op);
+}
+
 iree_status_t loom_low_descriptor_text_asm_build_structural(
     const loom_text_low_asm_environment_state_t* state, loom_builder_t* builder,
-    loom_text_low_asm_structural_kind_t kind, iree_string_view_t key,
-    const loom_value_id_t* operands, iree_host_size_t operand_count,
-    loom_named_attr_slice_t attributes, int64_t offset, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op) {
+    loom_text_low_asm_structural_kind_t kind,
+    loom_text_low_asm_structural_build_flags_t build_flags,
+    iree_string_view_t key, const loom_value_id_t* operands,
+    iree_host_size_t operand_count, loom_named_attr_slice_t attributes,
+    int64_t offset, loom_type_t result_type, loom_location_id_t location,
+    loom_op_t** out_op) {
   (void)state;
   switch (kind) {
     case LOOM_TEXT_LOW_ASM_STRUCTURAL_RESOURCE:
@@ -325,8 +373,14 @@ iree_status_t loom_low_descriptor_text_asm_build_structural(
       loom_string_id_t source = LOOM_STRING_ID_INVALID;
       IREE_RETURN_IF_ERROR(
           loom_module_intern_string(builder->module, key, &source));
-      return loom_low_live_in_build(builder, source, attributes, result_type,
-                                    location, out_op);
+      const loom_low_live_in_build_flags_t live_in_build_flags =
+          iree_any_bit_set(
+              build_flags,
+              LOOM_TEXT_LOW_ASM_STRUCTURAL_BUILD_FLAG_HAS_ATTRIBUTES)
+              ? LOOM_LOW_LIVE_IN_BUILD_FLAG_HAS_ATTRS
+              : 0;
+      return loom_low_live_in_build(builder, live_in_build_flags, source,
+                                    attributes, result_type, location, out_op);
     }
     case LOOM_TEXT_LOW_ASM_STRUCTURAL_CONCAT:
       return loom_low_concat_build(builder, operands, operand_count,
@@ -360,12 +414,15 @@ iree_status_t loom_low_descriptor_text_asm_build_structural(
       return loom_low_descriptor_text_asm_build_storage_view(
           builder, operands[0], attributes, result_type, location, out_op);
     case LOOM_TEXT_LOW_ASM_STRUCTURAL_COPY:
+    case LOOM_TEXT_LOW_ASM_STRUCTURAL_MOVE:
       if (operand_count != 1) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "low asm copy takes one operand");
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT, "low asm %s takes one operand",
+            kind == LOOM_TEXT_LOW_ASM_STRUCTURAL_MOVE ? "move" : "copy");
       }
-      return loom_low_copy_build(builder, operands[0], result_type, location,
-                                 out_op);
+      return loom_low_descriptor_text_asm_build_transfer(
+          builder, kind, operands[0], attributes, result_type, location,
+          out_op);
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "unknown low asm structural kind %u",
@@ -442,6 +499,11 @@ static iree_status_t loom_low_descriptor_text_asm_describe_live_in(
       .kind = LOOM_TEXT_LOW_ASM_STATEMENT_STRUCTURAL,
       .op = op,
       .structural_kind = LOOM_TEXT_LOW_ASM_STRUCTURAL_LIVE_IN,
+      .structural_build_flags =
+          loom_attr_is_absent(
+              loom_op_attrs(op)[loom_low_live_in_attrs_ATTR_INDEX])
+              ? 0
+              : LOOM_TEXT_LOW_ASM_STRUCTURAL_BUILD_FLAG_HAS_ATTRIBUTES,
       .structural_key = module->strings.entries[source_id],
       .results = loom_op_const_results(op),
       .result_count = 1,
@@ -487,21 +549,26 @@ static iree_status_t loom_low_descriptor_text_asm_describe_slice(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_descriptor_text_asm_describe_copy(
+static iree_status_t loom_low_descriptor_text_asm_describe_transfer(
     const loom_module_t* module, const loom_op_t* op,
+    loom_text_low_asm_structural_kind_t kind,
     loom_text_low_asm_statement_t* out_statement) {
-  (void)module;
   *out_statement = (loom_text_low_asm_statement_t){
       .kind = LOOM_TEXT_LOW_ASM_STATEMENT_STRUCTURAL,
       .op = op,
-      .structural_kind = LOOM_TEXT_LOW_ASM_STRUCTURAL_COPY,
+      .structural_kind = kind,
       .results = loom_op_const_results(op),
       .result_count = 1,
       .operands = loom_op_const_operands(op),
       .operand_count = 1,
       .location = op->location,
   };
-  return iree_ok_status();
+  const uint8_t attr_index = kind == LOOM_TEXT_LOW_ASM_STRUCTURAL_MOVE
+                                 ? loom_low_move_detached_ATTR_INDEX
+                                 : loom_low_copy_detached_ATTR_INDEX;
+  return loom_low_descriptor_text_asm_set_structural_attr(
+      module, op, attr_index, IREE_SV("detached"),
+      loom_low_descriptor_text_asm_transfer_detached_attr(kind), out_statement);
 }
 
 static iree_status_t loom_low_descriptor_text_asm_describe_storage_reserve(
@@ -586,8 +653,12 @@ iree_status_t loom_low_descriptor_text_asm_describe_structural_operation(
                                                        out_statement);
   }
   if (loom_low_copy_isa(op)) {
-    return loom_low_descriptor_text_asm_describe_copy(module, op,
-                                                      out_statement);
+    return loom_low_descriptor_text_asm_describe_transfer(
+        module, op, LOOM_TEXT_LOW_ASM_STRUCTURAL_COPY, out_statement);
+  }
+  if (loom_low_move_isa(op)) {
+    return loom_low_descriptor_text_asm_describe_transfer(
+        module, op, LOOM_TEXT_LOW_ASM_STRUCTURAL_MOVE, out_statement);
   }
   if (loom_low_storage_reserve_isa(op)) {
     return loom_low_descriptor_text_asm_describe_storage_reserve(module, op,

@@ -681,10 +681,14 @@ static iree_status_t loom_sanitizer_build_access_assertion(
   };
   IREE_RETURN_IF_ERROR(loom_sanitizer_make_site_location(
       module, source_location, &payload, &site_location));
+  const loom_sanitizer_assert_access_build_flags_t build_flags =
+      loom_attr_is_absent(static_extents)
+          ? 0
+          : LOOM_SANITIZER_ASSERT_ACCESS_BUILD_FLAG_HAS_STATIC_EXTENTS;
   return loom_sanitizer_assert_access_build(
-      &rewriter->builder, kind, view, indices.values, indices.count,
-      static_indices.i64_array, static_indices.count, static_extents.i64_array,
-      static_extents.count, site_location, out_op);
+      &rewriter->builder, build_flags, kind, view, indices.values,
+      indices.count, static_indices.i64_array, static_indices.count,
+      static_extents.i64_array, static_extents.count, site_location, out_op);
 }
 
 static loom_sanitizer_assert_accesses_kind_t
@@ -896,13 +900,15 @@ static iree_status_t loom_sanitizer_insert_access_assertion(
 
 static iree_status_t loom_sanitizer_build_fragment_access_indices(
     loom_pass_t* pass, loom_module_t* module, loom_rewriter_t* rewriter,
-    const loom_vector_memory_footprint_t* footprint, int64_t row_ordinal,
-    int64_t column_ordinal, loom_value_slice_t* out_indices,
+    const loom_vector_memory_footprint_t* footprint,
+    const int64_t fragment_ordinals[3], loom_value_slice_t* out_indices,
     loom_attribute_t* out_static_indices) {
   *out_indices = (loom_value_slice_t){0};
   *out_static_indices = loom_attr_absent();
   const uint8_t view_rank = loom_type_rank(footprint->view_type);
-  if (view_rank < 2 || footprint->static_indices.kind != LOOM_ATTR_I64_ARRAY ||
+  const uint8_t fragment_rank = loom_type_rank(footprint->vector_type);
+  if (fragment_rank < 2 || fragment_rank > 3 || view_rank < fragment_rank ||
+      footprint->static_indices.kind != LOOM_ATTR_I64_ARRAY ||
       footprint->static_indices.count != view_rank) {
     return loom_sanitizer_emit_vector_access_unsupported(pass, module,
                                                          footprint->access.op);
@@ -917,16 +923,14 @@ static iree_status_t loom_sanitizer_build_fragment_access_indices(
                                                  sizeof(*dynamic_indices),
                                                  (void**)&dynamic_indices));
 
-  const uint8_t row_axis = view_rank - 2;
-  const uint8_t column_axis = view_rank - 1;
+  const uint8_t first_fragment_axis = view_rank - fragment_rank;
   uint16_t source_dynamic_ordinal = 0;
   uint16_t dynamic_count = 0;
   for (uint8_t axis = 0; axis < view_rank; ++axis) {
     const int64_t origin = footprint->static_indices.i64_array[axis];
-    const int64_t axis_ordinal =
-        axis == row_axis ? row_ordinal
-                         : (axis == column_axis ? column_ordinal : 0);
-    if (axis == row_axis || axis == column_axis) {
+    if (axis >= first_fragment_axis) {
+      const int64_t axis_ordinal =
+          fragment_ordinals[axis - first_fragment_axis];
       if (origin == INT64_MIN) {
         if (source_dynamic_ordinal >= footprint->dynamic_indices.count) {
           return loom_sanitizer_emit_vector_access_unsupported(
@@ -980,9 +984,12 @@ static iree_status_t loom_sanitizer_build_fragment_access_indices(
 static iree_status_t loom_sanitizer_insert_fragment_axis_assertions(
     loom_pass_t* pass, loom_module_t* module, loom_rewriter_t* rewriter,
     const loom_vector_memory_footprint_t* footprint,
-    loom_sanitizer_assert_access_kind_t kind, uint8_t contiguous_fragment_axis,
-    int64_t contiguous_count, int64_t repeated_count) {
+    loom_sanitizer_assert_access_kind_t kind, uint8_t contiguous_axis,
+    uint8_t repeated_axis, const int64_t fragment_counts[3],
+    const int64_t fragment_ordinals[3]) {
   const uint8_t view_rank = loom_type_rank(footprint->view_type);
+  const uint8_t fragment_rank = loom_type_rank(footprint->vector_type);
+  const uint8_t first_fragment_axis = view_rank - fragment_rank;
   int64_t* static_extents = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(rewriter->arena, view_rank,
                                                  sizeof(*static_extents),
@@ -992,22 +999,22 @@ static iree_status_t loom_sanitizer_insert_fragment_axis_assertions(
                                                  sizeof(*static_strides),
                                                  (void**)&static_strides));
   for (uint8_t axis = 0; axis < view_rank; ++axis) {
-    const uint8_t fragment_axis =
-        axis + 2 >= view_rank ? (uint8_t)(axis + 2 - view_rank) : UINT8_MAX;
+    const uint8_t fragment_axis = axis >= first_fragment_axis
+                                      ? (uint8_t)(axis - first_fragment_axis)
+                                      : UINT8_MAX;
     static_extents[axis] =
-        fragment_axis == contiguous_fragment_axis ? contiguous_count : 1;
-    static_strides[axis] =
-        fragment_axis != UINT8_MAX && fragment_axis != contiguous_fragment_axis
-            ? 1
-            : 0;
+        fragment_axis == contiguous_axis ? fragment_counts[fragment_axis] : 1;
+    static_strides[axis] = fragment_axis == repeated_axis ? 1 : 0;
   }
 
   loom_value_slice_t indices = {0};
   loom_attribute_t static_indices = loom_attr_absent();
   IREE_RETURN_IF_ERROR(loom_sanitizer_build_fragment_access_indices(
-      pass, module, rewriter, footprint, /*row_ordinal=*/0,
-      /*column_ordinal=*/0, &indices, &static_indices));
+      pass, module, rewriter, footprint, fragment_ordinals, &indices,
+      &static_indices));
   loom_op_t* assertion_op = NULL;
+  const int64_t repeated_count =
+      repeated_axis != UINT8_MAX ? fragment_counts[repeated_axis] : 1;
   return loom_sanitizer_build_repeated_access_assertion(
       module, rewriter, kind, footprint->view, indices, static_indices,
       loom_attr_i64_array(static_extents, view_rank),
@@ -1018,107 +1025,128 @@ static iree_status_t loom_sanitizer_insert_fragment_axis_assertions(
 static iree_status_t loom_sanitizer_insert_fragment_scalar_assertion(
     loom_pass_t* pass, loom_module_t* module, loom_rewriter_t* rewriter,
     const loom_vector_memory_footprint_t* footprint,
-    loom_sanitizer_assert_access_kind_t kind, int64_t row_ordinal,
-    int64_t column_ordinal) {
+    loom_sanitizer_assert_access_kind_t kind,
+    const int64_t fragment_ordinals[3]) {
   loom_value_slice_t indices = {0};
   loom_attribute_t static_indices = loom_attr_absent();
   IREE_RETURN_IF_ERROR(loom_sanitizer_build_fragment_access_indices(
-      pass, module, rewriter, footprint, row_ordinal, column_ordinal, &indices,
+      pass, module, rewriter, footprint, fragment_ordinals, &indices,
       &static_indices));
   return loom_sanitizer_insert_access_assertion(
       pass, module, rewriter, kind, footprint->view, indices, static_indices,
       loom_attr_absent(), footprint->access.op->location);
 }
 
-static bool loom_sanitizer_fragment_axis_is_contiguous(
-    loom_rewriter_t* rewriter, loom_module_t* module,
-    const loom_vector_memory_footprint_t* footprint, int64_t row_count,
-    int64_t column_count, uint8_t fragment_axis) {
-  const uint8_t view_rank = loom_type_rank(footprint->view_type);
-  if (view_rank < 2 || fragment_axis > 1) return false;
-  loom_type_t vector_type = loom_type_shaped_2d(
-      LOOM_TYPE_VECTOR, loom_type_element_type(footprint->view_type),
-      loom_dim_pack_static(row_count), loom_dim_pack_static(column_count),
-      /*encoding_id=*/0);
-  loom_vector_memory_access_t access = {0};
-  const loom_fact_context_t* fact_context =
-      rewriter->fact_table ? &rewriter->fact_table->context : NULL;
-  if (!loom_vector_memory_access_describe(
-          fact_context, module, footprint->view_type, vector_type, &access)) {
+static bool loom_sanitizer_fragment_axis_static_stride(
+    const loom_vector_memory_footprint_t* footprint, uint8_t fragment_axis,
+    int64_t* out_stride) {
+  *out_stride = 0;
+  const uint8_t view_rank = footprint->vector_access.view_rank;
+  const uint8_t fragment_rank = loom_type_rank(footprint->vector_type);
+  if (fragment_rank < 2 || fragment_rank > 3 || view_rank < fragment_rank ||
+      fragment_axis >= fragment_rank) {
     return false;
   }
-  const uint8_t view_axis = (uint8_t)(view_rank - 2 + fragment_axis);
-  int64_t axis_stride = 0;
-  return loom_vector_memory_access_static_axis_stride(&access, view_axis,
-                                                      &axis_stride) &&
-         axis_stride == 1;
+  const uint8_t view_axis =
+      (uint8_t)(view_rank - fragment_rank + fragment_axis);
+  return loom_vector_memory_access_static_axis_stride(&footprint->vector_access,
+                                                      view_axis, out_stride) &&
+         *out_stride > 0;
+}
+
+static bool loom_sanitizer_fragment_axis_count(loom_rewriter_t* rewriter,
+                                               loom_type_t vector_type,
+                                               uint8_t axis,
+                                               int64_t* out_count) {
+  *out_count = 0;
+  if (axis >= loom_type_rank(vector_type)) return false;
+  if (!loom_type_dim_is_dynamic_at(vector_type, axis)) {
+    *out_count = loom_type_dim_static_size_at(vector_type, axis);
+    return *out_count > 0;
+  }
+  return loom_sanitizer_value_exact_positive_i64(
+      rewriter, loom_type_dim_value_id_at(vector_type, axis), out_count);
 }
 
 static iree_status_t loom_sanitizer_try_instrument_fragment_access_op(
     loom_pass_t* pass, loom_module_t* module, loom_rewriter_t* rewriter,
     const loom_vector_memory_footprint_t* footprint,
     loom_sanitizer_assert_access_kind_t kind) {
-  if (loom_type_rank(footprint->view_type) < 2) {
+  const uint8_t fragment_rank = loom_type_rank(footprint->vector_type);
+  if (fragment_rank < 2 || fragment_rank > 3 ||
+      loom_type_rank(footprint->view_type) < fragment_rank) {
     return loom_sanitizer_emit_vector_access_unsupported(pass, module,
                                                          footprint->access.op);
   }
 
-  loom_value_id_t rows = LOOM_VALUE_ID_INVALID;
-  loom_value_id_t columns = LOOM_VALUE_ID_INVALID;
-  switch (footprint->access.op->kind) {
-    case LOOM_OP_VECTOR_FRAGMENT_LOAD:
-      rows = loom_vector_fragment_load_rows(footprint->access.op);
-      columns = loom_vector_fragment_load_columns(footprint->access.op);
-      break;
-    case LOOM_OP_VECTOR_FRAGMENT_STORE:
-      rows = loom_vector_fragment_store_rows(footprint->access.op);
-      columns = loom_vector_fragment_store_columns(footprint->access.op);
-      break;
-    default:
+  int64_t fragment_counts[3] = {1, 1, 1};
+  int64_t element_count = 0;
+  for (uint8_t axis = 0; axis < fragment_rank; ++axis) {
+    if (!loom_sanitizer_fragment_axis_count(rewriter, footprint->vector_type,
+                                            axis, &fragment_counts[axis])) {
+      return loom_sanitizer_emit_vector_access_dynamic(pass, module,
+                                                       footprint->access.op);
+    }
+    if (axis == 0) {
+      element_count = fragment_counts[axis];
+    } else if (!iree_checked_mul_i64(element_count, fragment_counts[axis],
+                                     &element_count)) {
       return loom_sanitizer_emit_vector_access_unsupported(
           pass, module, footprint->access.op);
+    }
   }
-
-  int64_t row_count = 0;
-  int64_t column_count = 0;
-  if (!loom_sanitizer_value_exact_positive_i64(rewriter, rows, &row_count) ||
-      !loom_sanitizer_value_exact_positive_i64(rewriter, columns,
-                                               &column_count)) {
-    return loom_sanitizer_emit_vector_access_dynamic(pass, module,
-                                                     footprint->access.op);
-  }
-  if (row_count > UINT16_MAX) {
-    return loom_sanitizer_emit_vector_access_unsupported(pass, module,
-                                                         footprint->access.op);
-  }
-  int64_t element_count = 0;
-  if (!iree_checked_mul_i64(row_count, column_count, &element_count) ||
-      element_count > UINT16_MAX) {
+  if (element_count > UINT16_MAX) {
     return loom_sanitizer_emit_vector_access_unsupported(pass, module,
                                                          footprint->access.op);
   }
 
+  uint8_t contiguous_axis = UINT8_MAX;
+  uint8_t repeated_axis = UINT8_MAX;
+  int64_t repeated_axis_count = 0;
+  for (uint8_t axis = 0; axis < fragment_rank; ++axis) {
+    int64_t axis_stride = 0;
+    if (!loom_sanitizer_fragment_axis_static_stride(footprint, axis,
+                                                    &axis_stride)) {
+      continue;
+    }
+    if (axis_stride == 1 && contiguous_axis == UINT8_MAX) {
+      contiguous_axis = axis;
+    } else if (fragment_counts[axis] > repeated_axis_count) {
+      repeated_axis = axis;
+      repeated_axis_count = fragment_counts[axis];
+    }
+  }
+  if (repeated_axis == contiguous_axis) repeated_axis = UINT8_MAX;
+
+  int64_t outer_count = 1;
+  for (uint8_t axis = 0; axis < fragment_rank; ++axis) {
+    if (axis != contiguous_axis && axis != repeated_axis &&
+        !iree_checked_mul_i64(outer_count, fragment_counts[axis],
+                              &outer_count)) {
+      return loom_sanitizer_emit_vector_access_unsupported(
+          pass, module, footprint->access.op);
+    }
+  }
   loom_builder_set_before(&rewriter->builder, footprint->access.op);
-  if (loom_sanitizer_fragment_axis_is_contiguous(rewriter, module, footprint,
-                                                 row_count, column_count,
-                                                 /*fragment_axis=*/1)) {
-    IREE_RETURN_IF_ERROR(loom_sanitizer_insert_fragment_axis_assertions(
-        pass, module, rewriter, footprint, kind,
-        /*contiguous_fragment_axis=*/1, column_count, row_count));
-  } else if (loom_sanitizer_fragment_axis_is_contiguous(
-                 rewriter, module, footprint, row_count, column_count,
-                 /*fragment_axis=*/0)) {
-    IREE_RETURN_IF_ERROR(loom_sanitizer_insert_fragment_axis_assertions(
-        pass, module, rewriter, footprint, kind,
-        /*contiguous_fragment_axis=*/0, row_count, column_count));
-  } else {
-    for (int64_t row_ordinal = 0; row_ordinal < row_count; ++row_ordinal) {
-      for (int64_t column_ordinal = 0; column_ordinal < column_count;
-           ++column_ordinal) {
-        IREE_RETURN_IF_ERROR(loom_sanitizer_insert_fragment_scalar_assertion(
-            pass, module, rewriter, footprint, kind, row_ordinal,
-            column_ordinal));
+  for (int64_t outer_ordinal = 0; outer_ordinal < outer_count;
+       ++outer_ordinal) {
+    int64_t fragment_ordinals[3] = {0, 0, 0};
+    int64_t remaining_ordinal = outer_ordinal;
+    for (uint8_t reverse_axis = fragment_rank; reverse_axis > 0;
+         --reverse_axis) {
+      const uint8_t axis = reverse_axis - 1;
+      if (axis != contiguous_axis && axis != repeated_axis) {
+        fragment_ordinals[axis] = remaining_ordinal % fragment_counts[axis];
+        remaining_ordinal /= fragment_counts[axis];
       }
+    }
+    if (contiguous_axis != UINT8_MAX || repeated_axis != UINT8_MAX) {
+      IREE_RETURN_IF_ERROR(loom_sanitizer_insert_fragment_axis_assertions(
+          pass, module, rewriter, footprint, kind, contiguous_axis,
+          repeated_axis, fragment_counts, fragment_ordinals));
+    } else {
+      IREE_RETURN_IF_ERROR(loom_sanitizer_insert_fragment_scalar_assertion(
+          pass, module, rewriter, footprint, kind, fragment_ordinals));
     }
   }
   return iree_ok_status();

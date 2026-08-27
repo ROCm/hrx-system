@@ -31,8 +31,8 @@
 
 #if defined(IREE_PLATFORM_WINDOWS)
 
-// Returns the allowed access and length in bytes of the file descriptor.
-// Returns 0 if the file descriptor has no length (a /proc stream, etc).
+// Returns the allowed access and logical length in bytes of the file
+// descriptor.
 static iree_status_t iree_hal_platform_fd_stat(
     int fd, iree_hal_memory_access_t* out_allowed_access,
     uint64_t* out_length) {
@@ -156,8 +156,8 @@ static iree_status_t iree_hal_platform_fd_pwrite(
 
 #else
 
-// Returns the allowed access and length in bytes of the file descriptor.
-// Returns 0 if the file descriptor has no length (a /proc stream, etc).
+// Returns the allowed access and logical length in bytes of the file
+// descriptor.
 static iree_status_t iree_hal_platform_fd_stat(
     int fd, iree_hal_memory_access_t* out_allowed_access,
     uint64_t* out_length) {

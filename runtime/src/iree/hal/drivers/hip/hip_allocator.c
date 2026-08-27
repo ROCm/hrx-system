@@ -332,29 +332,22 @@ iree_hal_hip_allocator_query_buffer_compatibility(
     iree_hal_allocator_t* IREE_RESTRICT base_allocator,
     iree_hal_buffer_params_t* IREE_RESTRICT params,
     iree_device_size_t* IREE_RESTRICT allocation_size) {
+  const iree_hal_memory_type_t required_type =
+      params->type & ~IREE_HAL_MEMORY_TYPE_OPTIMAL;
+  if (iree_any_bit_set(params->type, IREE_HAL_MEMORY_TYPE_DEVICE_UNCACHED)) {
+    return IREE_HAL_BUFFER_COMPATIBILITY_NONE;
+  }
+  if (iree_all_bits_set(required_type, IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                                           IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL)) {
+    return IREE_HAL_BUFFER_COMPATIBILITY_NONE;
+  }
+
   iree_hal_hip_allocator_t* allocator =
       iree_hal_hip_allocator_cast(base_allocator);
 
   // All buffers can be allocated on the heap.
   iree_hal_buffer_compatibility_t compatibility =
       IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE;
-
-  // Buffers are importable in HIP under most cases, though performance may
-  // vary wildly. We don't fully verify that the buffer parameters are
-  // self-consistent and just look at whether we can get a device pointer.
-  if (iree_all_bits_set(params->type, IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE)) {
-    compatibility |= IREE_HAL_BUFFER_COMPATIBILITY_IMPORTABLE;
-  }
-
-  // Buffers can only be used on the queue if they are device visible.
-  if (iree_all_bits_set(params->type, IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE)) {
-    if (iree_any_bit_set(params->usage, IREE_HAL_BUFFER_USAGE_TRANSFER)) {
-      compatibility |= IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_TRANSFER;
-    }
-    if (iree_any_bit_set(params->usage, IREE_HAL_BUFFER_USAGE_DISPATCH)) {
-      compatibility |= IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_DISPATCH;
-    }
-  }
 
   // If the caller requests mappable device-local memory but did not set
   // HOST_VISIBLE, promote to HOST_VISIBLE so the allocation path can use
@@ -370,24 +363,41 @@ iree_hal_hip_allocator_query_buffer_compatibility(
 
   if (iree_all_bits_set(params->type, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
                                           IREE_HAL_MEMORY_TYPE_HOST_VISIBLE)) {
-    // Device local and host visible in general is much more slower than device
-    // only for discrete GPUs. So mark as so accordingly.
-    compatibility |= IREE_HAL_BUFFER_COMPATIBILITY_LOW_PERFORMANCE;
-    // If concurrent managed access is not supported then make device-local +
-    // host-visible allocations fall back to host-local + device-visible
-    // page-locked memory. This will be significantly slower for the device to
-    // access but the compiler only uses this type for readback staging buffers
-    // and it's better to function than function fast.
     if (!allocator->supports_concurrent_managed_access) {
-      params->type &= ~(IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
-                        IREE_HAL_MEMORY_TYPE_HOST_VISIBLE);
-      params->type |=
-          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+      return IREE_HAL_BUFFER_COMPATIBILITY_NONE;
     }
+    // Device-local managed memory is generally slower than device-only memory
+    // on discrete GPUs.
+    compatibility |= IREE_HAL_BUFFER_COMPATIBILITY_LOW_PERFORMANCE;
+  }
+
+  if (iree_all_bits_set(params->type, IREE_HAL_MEMORY_TYPE_HOST_LOCAL) &&
+      !iree_all_bits_set(params->type, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL)) {
+    params->type |= IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
+                    IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+  } else if (iree_all_bits_set(params->type,
+                               IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
+                                   IREE_HAL_MEMORY_TYPE_HOST_VISIBLE)) {
+    params->type |= IREE_HAL_MEMORY_TYPE_HOST_COHERENT;
   }
 
   // We are now optimal.
   params->type &= ~IREE_HAL_MEMORY_TYPE_OPTIMAL;
+  if (!iree_all_bits_set(params->type, required_type)) {
+    return IREE_HAL_BUFFER_COMPATIBILITY_NONE;
+  }
+
+  // HIP can import and queue buffers when the selected concrete memory type
+  // provides a device pointer.
+  if (iree_all_bits_set(params->type, IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE)) {
+    compatibility |= IREE_HAL_BUFFER_COMPATIBILITY_IMPORTABLE;
+    if (iree_any_bit_set(params->usage, IREE_HAL_BUFFER_USAGE_TRANSFER)) {
+      compatibility |= IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_TRANSFER;
+    }
+    if (iree_any_bit_set(params->usage, IREE_HAL_BUFFER_USAGE_DISPATCH)) {
+      compatibility |= IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_DISPATCH;
+    }
+  }
 
   // Guard against the corner case where the requested buffer size is 0. The
   // application is unlikely to do anything when requesting a 0-byte buffer; but

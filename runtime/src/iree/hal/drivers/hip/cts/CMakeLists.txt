@@ -37,8 +37,8 @@ iree_cc_library(
 endif()
 
 if(IREE_HAL_DRIVER_HIP)
-iree_hal_cts_test_suite(
-  BACKENDS_LIB
+iree_runtime_hal_cts_test_suite(
+  BACKENDS
     ::backends
   NAME
     stream
@@ -54,8 +54,8 @@ iree_hal_cts_test_suite(
 endif()
 
 if(IREE_HAL_DRIVER_HIP)
-iree_hal_cts_test_suite(
-  BACKENDS_LIB
+iree_runtime_hal_cts_test_suite(
+  BACKENDS
     ::backends
   NAME
     graph

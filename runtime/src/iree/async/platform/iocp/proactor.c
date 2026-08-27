@@ -24,6 +24,7 @@
 #include "iree/async/span.h"
 #include "iree/async/util/message_pool.h"
 #include "iree/async/util/operation_pool.h"
+#include "iree/async/util/semaphore_wait.h"
 #include "iree/async/util/sequence_emulation.h"
 #include "iree/base/internal/atomics.h"
 #include "iree/base/internal/memory.h"
@@ -227,6 +228,7 @@ static inline void iree_async_proactor_complete_operation(
     iree_async_completion_flags_t flags) {
   bool is_final = !iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE);
   iree_async_operation_pool_t* pool = is_final ? operation->pool : NULL;
+  status = iree_async_operation_resolve_completion(operation, status, &flags);
   if (operation->completion_fn) {
     operation->completion_fn(operation->user_data, operation, status, flags);
   } else {
@@ -317,6 +319,8 @@ iree_status_t iree_async_proactor_create_iocp(
   // Initialize MPSC queues and carrier freelist.
   iree_atomic_slist_initialize(&proactor->pending_queue);
   iree_atomic_slist_initialize(&proactor->pending_semaphore_waits);
+  iree_async_semaphore_wait_context_initialize(
+      &proactor->semaphore_wait_context);
   iree_atomic_slist_initialize(&proactor->carrier_freelist);
 
   // Initialize timer list.
@@ -602,9 +606,8 @@ static void iree_async_proactor_iocp_relay_unlink(
     iree_async_proactor_iocp_t* proactor, iree_async_relay_t* relay);
 static void iree_async_proactor_iocp_relay_release_resources(
     iree_async_relay_t* relay);
-static void iree_async_proactor_iocp_relay_fault(
-    iree_async_proactor_iocp_t* proactor, iree_async_relay_t* relay,
-    iree_status_t status);
+static void iree_async_proactor_iocp_relay_fault(iree_async_relay_t* relay,
+                                                 iree_status_t status);
 static bool iree_async_proactor_iocp_notification_has_consumers(
     iree_async_notification_t* notification);
 
@@ -686,6 +689,8 @@ static void iree_async_proactor_iocp_destroy(
   // Deinitialize MPSC queues and carrier freelist.
   iree_atomic_slist_deinitialize(&proactor->pending_queue);
   iree_atomic_slist_deinitialize(&proactor->pending_semaphore_waits);
+  iree_async_semaphore_wait_context_deinitialize(
+      &proactor->semaphore_wait_context);
   iree_atomic_slist_deinitialize(&proactor->carrier_freelist);
 
   // Deinitialize message pool.
@@ -1135,36 +1140,23 @@ static iree_host_size_t iree_async_proactor_iocp_drain_pending_semaphore_waits(
   iree_host_size_t drained_count = 0;
   iree_atomic_slist_entry_t* entry = head;
   while (entry != NULL) {
-    iree_async_iocp_semaphore_wait_tracker_t* tracker =
-        (iree_async_iocp_semaphore_wait_tracker_t*)entry;
+    iree_async_semaphore_wait_tracker_t* tracker =
+        (iree_async_semaphore_wait_tracker_t*)entry;
     iree_atomic_slist_entry_t* next = entry->next;
 
-    iree_status_t status = (iree_status_t)iree_atomic_load(
-        &tracker->completion_status, iree_memory_order_acquire);
-
-    // For ANY mode: record the satisfied index in the operation.
-    iree_async_semaphore_wait_operation_t* wait_op = tracker->operation;
-    if (wait_op->mode == IREE_ASYNC_WAIT_MODE_ANY &&
-        iree_status_is_ok(status)) {
-      int32_t satisfied = iree_atomic_load(&tracker->remaining_or_satisfied,
-                                           iree_memory_order_acquire);
-      if (satisfied >= 0) {
-        wait_op->satisfied_index = (iree_host_size_t)satisfied;
-      }
+    if (!iree_async_semaphore_wait_tracker_try_prepare_completion(tracker)) {
+      entry = next;
+      continue;
     }
 
-    // Cancel remaining timepoints. In ANY mode only one was satisfied; on
-    // failure some may still be registered. cancel_timepoint is a no-op for
-    // timepoints that already fired.
-    for (iree_host_size_t i = 0; i < tracker->count; ++i) {
-      iree_async_semaphore_cancel_timepoint(wait_op->semaphores[i],
-                                            &tracker->timepoints[i]);
-    }
+    iree_async_semaphore_wait_completion_t completion;
+    iree_async_semaphore_wait_tracker_finalize(tracker, &completion);
+    iree_async_semaphore_wait_operation_t* wait_op = completion.operation;
+    iree_status_t status = completion.status;
 
     // Dispatch LINKED continuation chain (if any) before invoking callback.
-    if (tracker->continuation_head) {
-      iree_async_operation_t* continuation = tracker->continuation_head;
-      tracker->continuation_head = NULL;
+    if (completion.continuation_head) {
+      iree_async_operation_t* continuation = completion.continuation_head;
       if (iree_status_is_ok(status)) {
         iree_async_proactor_iocp_submit_continuation_chain(proactor,
                                                            continuation);
@@ -1178,10 +1170,6 @@ static iree_host_size_t iree_async_proactor_iocp_drain_pending_semaphore_waits(
     iree_async_proactor_complete_operation(&wait_op->base, status,
                                            IREE_ASYNC_COMPLETION_FLAG_NONE);
     ++drained_count;
-
-    // Clear tracker reference and free.
-    wait_op->base.next = NULL;
-    iree_allocator_free(tracker->allocator, tracker);
 
     entry = next;
   }
@@ -1233,17 +1221,21 @@ static void iree_async_proactor_iocp_dispatch_notification_relays(
 
     // Epoch advanced — fire the sink.
     if (!iree_async_proactor_iocp_relay_fire_sink(relay)) {
-      // Sink fire failed. Unlink from notification relay list before calling
-      // fault handler (which may re-enter unregister).
+      // Sink fire failed. Stop monitoring before reporting the terminal
+      // fault. Persistent relays remain in the proactor list until explicit
+      // unregistration joins their lifetime.
       *previous = next;
       relay->platform.iocp.notification_relay_next = NULL;
-      iree_async_proactor_iocp_relay_unlink(proactor, relay);
+      bool is_persistent =
+          iree_any_bit_set(relay->flags, IREE_ASYNC_RELAY_FLAG_PERSISTENT);
       iree_async_proactor_iocp_relay_fault(
-          proactor, relay,
-          iree_make_status(IREE_STATUS_INTERNAL,
-                           "relay sink fire failed (GetLastError=%lu)",
-                           (unsigned long)GetLastError()));
-      iree_async_proactor_iocp_relay_release_resources(relay);
+          relay, iree_make_status(IREE_STATUS_INTERNAL,
+                                  "relay sink fire failed (GetLastError=%lu)",
+                                  (unsigned long)GetLastError()));
+      if (!is_persistent) {
+        iree_async_proactor_iocp_relay_unlink(proactor, relay);
+        iree_async_proactor_iocp_relay_release_resources(relay);
+      }
       relay = next;
       continue;
     }
@@ -1923,37 +1915,57 @@ static iree_status_t iree_async_proactor_iocp_poll(
       iree_async_proactor_run_progress(base_proactor);
   completed_count += progress_count;
 
-  // Phase 3: Calculate effective timeout considering timer deadlines.
-  DWORD timeout_ms =
-      iree_async_proactor_iocp_calculate_timeout_ms(proactor, timeout);
-  if (progress_count > 0 || base_proactor->progress_list) timeout_ms = 0;
+  // Freeze relative timeouts before a possible multi-wait loop.
+  iree_convert_timeout_to_absolute(&timeout);
 
-  // Phase 4: Dequeue completions from the IOCP port.
+  // Phases 3-5: wait until an IOCP entry, timer, or user deadline completes.
+  // GetQueuedCompletionStatusEx may report WAIT_TIMEOUT slightly before the
+  // nanosecond deadline used to derive its millisecond timeout. Treat that as
+  // an internal wake and continue waiting instead of exposing a premature
+  // DEADLINE_EXCEEDED status to the caller.
   OVERLAPPED_ENTRY entries[IREE_ASYNC_IOCP_MAX_COMPLETIONS_PER_POLL];
   ULONG entry_count = 0;
   iree_status_t gqcs_status = iree_ok_status();
-  BOOL success =
-      GetQueuedCompletionStatusEx((HANDLE)proactor->completion_port, entries,
-                                  IREE_ASYNC_IOCP_MAX_COMPLETIONS_PER_POLL,
-                                  &entry_count, timeout_ms, FALSE);
+  bool retry_wait = false;
+  do {
+    // Phase 3: Calculate the effective timeout considering timer deadlines.
+    DWORD timeout_ms =
+        iree_async_proactor_iocp_calculate_timeout_ms(proactor, timeout);
+    const bool force_nonblocking =
+        completed_count > 0 || base_proactor->progress_list;
+    if (force_nonblocking) timeout_ms = 0;
 
-  if (!success) {
-    DWORD error = GetLastError();
-    if (error != WAIT_TIMEOUT) {
-      // Stash the error but continue through remaining phases so that timer
-      // expirations, notification waits, and re-drains still run. The error
-      // is returned after all phases complete.
-      gqcs_status =
-          iree_make_status(IREE_STATUS_INTERNAL,
-                           "GetQueuedCompletionStatusEx failed (error %lu)",
-                           (unsigned long)error);
+    // Phase 4: Dequeue completions from the IOCP port.
+    entry_count = 0;
+    BOOL success =
+        GetQueuedCompletionStatusEx((HANDLE)proactor->completion_port, entries,
+                                    IREE_ASYNC_IOCP_MAX_COMPLETIONS_PER_POLL,
+                                    &entry_count, timeout_ms, FALSE);
+    bool wait_timed_out = false;
+    if (!success) {
+      DWORD error = GetLastError();
+      wait_timed_out = error == WAIT_TIMEOUT;
+      if (!wait_timed_out) {
+        // Stash the error but continue through remaining phases so that timer
+        // expirations, notification waits, and re-drains still run. The error
+        // is returned after all phases complete.
+        gqcs_status =
+            iree_make_status(IREE_STATUS_INTERNAL,
+                             "GetQueuedCompletionStatusEx failed (error %lu)",
+                             (unsigned long)error);
+      }
     }
-    // WAIT_TIMEOUT: no completions, fall through to timer processing.
-  }
 
-  // Phase 5: Process expired timers (before GQCS completions for consistent
-  // ordering — timer callbacks fire before I/O callbacks in the same poll).
-  completed_count += iree_async_proactor_iocp_process_expired_timers(proactor);
+    // Phase 5: Process expired timers (before GQCS completions for consistent
+    // ordering — timer callbacks fire before I/O callbacks in the same poll).
+    completed_count +=
+        iree_async_proactor_iocp_process_expired_timers(proactor);
+
+    retry_wait = wait_timed_out && entry_count == 0 && completed_count == 0 &&
+                 !force_nonblocking &&
+                 (iree_timeout_is_infinite(timeout) ||
+                  iree_time_now() < iree_timeout_as_deadline_ns(timeout));
+  } while (retry_wait);
 
   // Phase 6: Process GQCS completions.
   for (ULONG i = 0; i < entry_count; ++i) {
@@ -2116,7 +2128,7 @@ static iree_status_t iree_async_proactor_iocp_poll(
   if (out_completed_count) *out_completed_count = completed_count;
   IREE_TRACE_ZONE_END(z0);
   if (!iree_status_is_ok(gqcs_status)) return gqcs_status;
-  return completed_count > 0
+  return completed_count > 0 || entry_count > 0
              ? iree_ok_status()
              : iree_status_from_code(IREE_STATUS_DEADLINE_EXCEEDED);
 }
@@ -2203,33 +2215,8 @@ static iree_status_t iree_async_proactor_iocp_cancel(
     case IREE_ASYNC_OPERATION_TYPE_SEMAPHORE_WAIT: {
       iree_async_semaphore_wait_operation_t* wait_op =
           (iree_async_semaphore_wait_operation_t*)operation;
-      iree_async_iocp_semaphore_wait_tracker_t* tracker =
-          (iree_async_iocp_semaphore_wait_tracker_t*)wait_op->base.next;
-      if (!tracker) {
-        // No tracker: operation was never submitted or already completed.
-        return iree_ok_status();
-      }
-      // Try to set CANCELLED status (first status wins via CAS). If another
-      // callback already set a status, the tracker will be (or has been)
-      // enqueued for completion by that callback.
-      intptr_t expected = (intptr_t)iree_ok_status();
-      iree_status_t cancelled_status =
-          iree_make_status(IREE_STATUS_CANCELLED, "operation cancelled");
-      if (!iree_atomic_compare_exchange_strong(
-              &tracker->completion_status, &expected,
-              (intptr_t)cancelled_status, iree_memory_order_acq_rel,
-              iree_memory_order_acquire)) {
-        iree_status_ignore(cancelled_status);
-        return iree_ok_status();
-      }
-      // Cancel all registered timepoints. cancel_timepoint guarantees the
-      // callback will not fire after it returns, so no double-enqueue risk.
-      for (iree_host_size_t i = 0; i < tracker->count; ++i) {
-        iree_async_semaphore_cancel_timepoint(wait_op->semaphores[i],
-                                              &tracker->timepoints[i]);
-      }
-      // Enqueue the tracker for completion on the poll thread.
-      iree_async_proactor_iocp_semaphore_wait_enqueue_completion(tracker);
+      iree_async_semaphore_wait_context_request_cancellation(
+          &proactor->semaphore_wait_context, wait_op);
       return iree_ok_status();
     }
 
@@ -2814,15 +2801,16 @@ static void iree_async_proactor_iocp_relay_release_resources(
   iree_allocator_free(relay->allocator, relay);
 }
 
-// Invokes the error callback (if registered) and cleans up the relay.
+// Marks a relay terminal and invokes its error callback. Persistent relays
+// retain their caller-visible handle for explicit terminal unregistration.
 // Takes ownership of |status|.
-static void iree_async_proactor_iocp_relay_fault(
-    iree_async_proactor_iocp_t* proactor, iree_async_relay_t* relay,
-    iree_status_t status) {
+static void iree_async_proactor_iocp_relay_fault(iree_async_relay_t* relay,
+                                                 iree_status_t status) {
+  relay->platform.iocp.is_terminal = true;
   if (relay->error_callback.fn) {
     relay->error_callback.fn(relay->error_callback.user_data, relay, status);
   } else {
-    iree_status_ignore(status);
+    iree_status_free(status);
   }
 }
 
@@ -2894,6 +2882,7 @@ static iree_status_t iree_async_proactor_iocp_register_relay(
   relay->sink = sink;
   relay->flags = flags;
   relay->error_callback = error_callback;
+  relay->unregistered_callback = iree_async_relay_unregistered_callback_none();
   relay->wait_epoch = 0;
   relay->allocator = proactor->base.allocator;
   memset(&relay->platform, 0, sizeof(relay->platform));
@@ -2934,14 +2923,16 @@ static iree_status_t iree_async_proactor_iocp_register_relay(
 }
 
 static void iree_async_proactor_iocp_unregister_relay(
-    iree_async_proactor_t* base_proactor, iree_async_relay_t* relay) {
+    iree_async_proactor_t* base_proactor, iree_async_relay_t* relay,
+    iree_async_relay_unregistered_callback_t callback) {
   if (!relay) return;
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_async_proactor_iocp_t* proactor =
       iree_async_proactor_iocp_cast(base_proactor);
 
   // Remove from the source notification's relay list.
-  if (relay->source.type == IREE_ASYNC_RELAY_SOURCE_TYPE_NOTIFICATION) {
+  if (relay->source.type == IREE_ASYNC_RELAY_SOURCE_TYPE_NOTIFICATION &&
+      !relay->platform.iocp.is_terminal) {
     iree_async_proactor_iocp_relay_remove_from_notification_list(relay);
     iree_async_notification_t* notification = relay->source.notification;
     if (!iree_async_proactor_iocp_notification_has_consumers(notification)) {
@@ -2954,6 +2945,7 @@ static void iree_async_proactor_iocp_unregister_relay(
 
   // Release retained notifications and free.
   iree_async_proactor_iocp_relay_release_resources(relay);
+  if (callback.fn) callback.fn(callback.user_data);
   IREE_TRACE_ZONE_END(z0);
 }
 

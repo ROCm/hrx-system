@@ -13,6 +13,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/allocation/active_unit.h"
 #include "loom/codegen/low/allocation/assignment.h"
+#include "loom/codegen/low/allocation/unit_liveness.h"
 #include "loom/codegen/low/descriptors.h"
 
 #ifdef __cplusplus
@@ -22,6 +23,8 @@ extern "C" {
 // Active assignments sorted by increasing end point, plus a unit index for
 // fast conflicts against register-like assignments.
 typedef struct loom_low_allocation_active_set_t {
+  // Sparse liveness segments used to reject false linear-interval conflicts.
+  const loom_liveness_analysis_t* liveness;
   // Assignment indices sorted by increasing assignment end point.
   uint32_t* assignment_indices;
   // First active entry in |assignment_indices|.
@@ -33,16 +36,20 @@ typedef struct loom_low_allocation_active_set_t {
 } loom_low_allocation_active_set_t;
 
 // Initializes |out_active_set| for |assignment_capacity| assignments and
-// |unit_capacity| active unit-index entries.
+// |unit_capacity| active unit-index entries. |liveness| is borrowed and must
+// outlive the active set.
 iree_status_t loom_low_allocation_active_set_initialize(
+    const loom_liveness_analysis_t* liveness,
     iree_host_size_t assignment_capacity, iree_host_size_t unit_capacity,
     iree_arena_allocator_t* arena,
     loom_low_allocation_active_set_t* out_active_set);
 
-// Returns true when |existing| conflicts with |candidate|.
+// Returns true when |existing| conflicts with |candidate|. Both assignments'
+// sparse segment ranges, when present, must belong to |liveness|.
 bool loom_low_allocation_active_assignment_conflicts(
     const loom_low_descriptor_set_t* descriptor_set,
-    const uint32_t* unit_end_points, iree_host_size_t unit_end_point_count,
+    const loom_liveness_analysis_t* liveness,
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
     const loom_low_allocation_assignment_t* existing,
     const loom_low_allocation_assignment_t* candidate,
     const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count);
@@ -51,7 +58,7 @@ bool loom_low_allocation_active_assignment_conflicts(
 bool loom_low_allocation_active_set_conflicts(
     loom_low_allocation_active_set_t* active_set,
     const loom_low_descriptor_set_t* descriptor_set,
-    const uint32_t* unit_end_points, iree_host_size_t unit_end_point_count,
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
     const loom_low_allocation_assignment_t* assignments,
     iree_host_size_t assignment_count,
     const loom_low_allocation_assignment_t* candidate,

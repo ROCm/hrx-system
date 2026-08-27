@@ -16,6 +16,7 @@
 #include "loom/target/arch/x86/contracts/packed_dot_lower_rules.h"
 #include "loom/target/arch/x86/contracts/scalar.h"
 #include "loom/target/arch/x86/contracts/scalar_lower_rules.h"
+#include "loom/target/arch/x86/lower/contraction.h"
 #include "loom/target/arch/x86/lower/internal.h"
 
 static bool loom_x86_type_is_vector_16xi32(loom_type_t type) {
@@ -53,6 +54,20 @@ static bool loom_x86_type_is_vector_4xf32(loom_type_t type) {
          loom_type_dim_static_size_at(type, 0) == 4;
 }
 
+static bool loom_x86_type_is_vector_8xi32(loom_type_t type) {
+  return loom_type_is_vector(type) && loom_type_rank(type) == 1 &&
+         loom_type_is_all_static(type) &&
+         loom_type_element_type(type) == LOOM_SCALAR_TYPE_I32 &&
+         loom_type_dim_static_size_at(type, 0) == 8;
+}
+
+static bool loom_x86_type_is_vector_8xf32(loom_type_t type) {
+  return loom_type_is_vector(type) && loom_type_rank(type) == 1 &&
+         loom_type_is_all_static(type) &&
+         loom_type_element_type(type) == LOOM_SCALAR_TYPE_F32 &&
+         loom_type_dim_static_size_at(type, 0) == 8;
+}
+
 static bool loom_x86_type_is_vector_4xi1(loom_type_t type) {
   return loom_type_is_vector(type) && loom_type_rank(type) == 1 &&
          loom_type_is_all_static(type) &&
@@ -75,9 +90,44 @@ static bool loom_x86_type_is_scalar_i64(loom_type_t type) {
          loom_type_element_type(type) == LOOM_SCALAR_TYPE_I64;
 }
 
+static bool loom_x86_type_is_narrow_scalar_bits(loom_type_t type) {
+  if (!loom_type_is_scalar(type)) {
+    return false;
+  }
+  switch (loom_type_element_type(type)) {
+    case LOOM_SCALAR_TYPE_I8:
+    case LOOM_SCALAR_TYPE_I16:
+    case LOOM_SCALAR_TYPE_F8E4M3:
+    case LOOM_SCALAR_TYPE_F8E5M2:
+    case LOOM_SCALAR_TYPE_F16:
+    case LOOM_SCALAR_TYPE_BF16:
+      return true;
+    default:
+      return false;
+  }
+}
+
 static bool loom_x86_type_is_scalar_f32(loom_type_t type) {
   return loom_type_is_scalar(type) &&
          loom_type_element_type(type) == LOOM_SCALAR_TYPE_F32;
+}
+
+static bool loom_x86_type_is_scalar_f64(loom_type_t type) {
+  return loom_type_is_scalar(type) &&
+         loom_type_element_type(type) == LOOM_SCALAR_TYPE_F64;
+}
+
+static bool loom_x86_source_type_supported(void* user_data,
+                                           const loom_module_t* module,
+                                           loom_type_t source_type) {
+  (void)user_data;
+  (void)module;
+  if (!loom_type_is_scalar(source_type)) {
+    return false;
+  }
+  const loom_scalar_type_t scalar_type = loom_type_element_type(source_type);
+  return scalar_type == LOOM_SCALAR_TYPE_F8E4M3 ||
+         scalar_type == LOOM_SCALAR_TYPE_F8E5M2;
 }
 
 static bool loom_x86_type_is_address_gpr64(loom_type_t type) {
@@ -100,6 +150,7 @@ static bool loom_x86_scalar_register_class_for_source_type(
     return true;
   }
   if (loom_x86_type_is_scalar_i1(source_type) ||
+      loom_x86_type_is_narrow_scalar_bits(source_type) ||
       loom_x86_type_is_scalar_i32(source_type)) {
     *out_register_class = LOOM_X86_REGISTER_CLASS_GPR32;
     return true;
@@ -118,9 +169,15 @@ static bool loom_x86_avx2_register_class_for_source_type(
     return true;
   }
   if (loom_x86_type_is_scalar_f32(source_type) ||
+      loom_x86_type_is_scalar_f64(source_type) ||
       loom_x86_type_is_vector_4xi32(source_type) ||
       loom_x86_type_is_vector_4xf32(source_type)) {
     *out_register_class = LOOM_X86_REGISTER_CLASS_XMM;
+    return true;
+  }
+  if (loom_x86_type_is_vector_8xi32(source_type) ||
+      loom_x86_type_is_vector_8xf32(source_type)) {
+    *out_register_class = LOOM_X86_REGISTER_CLASS_YMM;
     return true;
   }
   return false;
@@ -380,6 +437,8 @@ static const loom_low_lower_policy_t kX86Avx512LowLowerPolicy = {
     .error_catalog = &loom_error_catalog_core,
     .map_type = {.fn = loom_x86_map_avx512_type, .user_data = NULL},
     .map_argument = {.fn = loom_x86_map_avx512_argument, .user_data = NULL},
+    .source_type_supported = {.fn = loom_x86_source_type_supported,
+                              .user_data = NULL},
     .rule_sets =
         {
             .count = IREE_ARRAYSIZE(kX86Avx512RuleSets),
@@ -394,6 +453,8 @@ static const loom_low_lower_policy_t kX86Avx2LowLowerPolicy = {
     .error_catalog = &loom_error_catalog_core,
     .map_type = {.fn = loom_x86_map_avx2_type, .user_data = NULL},
     .map_argument = {.fn = loom_x86_map_avx2_argument, .user_data = NULL},
+    .source_type_supported = {.fn = loom_x86_source_type_supported,
+                              .user_data = NULL},
     .rule_sets =
         {
             .count = IREE_ARRAYSIZE(kX86Avx2RuleSets),
@@ -408,6 +469,8 @@ static const loom_low_lower_policy_t kX86ScalarLowLowerPolicy = {
     .error_catalog = &loom_error_catalog_core,
     .map_type = {.fn = loom_x86_map_scalar_type, .user_data = NULL},
     .map_argument = {.fn = loom_x86_map_scalar_argument, .user_data = NULL},
+    .source_type_supported = {.fn = loom_x86_source_type_supported,
+                              .user_data = NULL},
     .rule_sets =
         {
             .count = IREE_ARRAYSIZE(kX86ScalarRuleSets),
@@ -421,6 +484,11 @@ static const loom_low_lower_policy_t kX86PackedDotLowLowerPolicy = {
     .name = IREE_SVL("x86-packed-dot-low-lower"),
     .error_catalog = &loom_error_catalog_core,
     .map_type = {.fn = loom_x86_map_packed_dot_type, .user_data = NULL},
+    .descriptor_matrix =
+        {
+            .options = loom_x86_descriptor_matrix_options,
+            .query = loom_x86_descriptor_matrix_query,
+        },
     .rule_sets =
         {
             .count = IREE_ARRAYSIZE(kX86PackedDotRuleSets),
@@ -436,6 +504,11 @@ static const loom_low_lower_policy_t kX86Avx512PackedDotLowLowerPolicy = {
     .map_type = {.fn = loom_x86_map_avx512_packed_dot_type, .user_data = NULL},
     .map_argument = {.fn = loom_x86_map_avx512_packed_dot_argument,
                      .user_data = NULL},
+    .descriptor_matrix =
+        {
+            .options = loom_x86_descriptor_matrix_options,
+            .query = loom_x86_descriptor_matrix_query,
+        },
     .rule_sets =
         {
             .count = IREE_ARRAYSIZE(kX86Avx512PackedDotRuleSets),

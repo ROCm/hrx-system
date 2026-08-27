@@ -12,10 +12,13 @@
 # Parameters:
 # NAME: name of the test.
 # MANIFESTS: JSON manifest files, relative to the current source directory.
-# TOOLS: list of tool_name=cmake_target entries.
+# TOOLS: list of tool_name=cmake_target entries. Targets may be native
+#     executables or iree_py_library targets that declare MAIN.
 # DATA: additional data files required by the manifests.
 # ARGS: additional arguments passed to the runner.
 # LABELS: additional labels to apply to the test.
+# RESOURCE_GROUP: If set, tests sharing the same RESOURCE_GROUP name will not
+#     run concurrently.
 # SANITIZER_SUPPRESSIONS: Sanitizer/name pairs selecting suppression files.
 #     For example: lsan vulkan.
 # TIMEOUT: test timeout in seconds.
@@ -31,7 +34,7 @@ function(iree_execution_test_suite)
   cmake_parse_arguments(
     _RULE
     ""
-    "NAME;TIMEOUT"
+    "NAME;RESOURCE_GROUP;TIMEOUT"
     "MANIFESTS;TOOLS;DATA;ARGS;LABELS;SANITIZER_SUPPRESSIONS"
     ${ARGN}
   )
@@ -68,6 +71,7 @@ function(iree_execution_test_suite)
   endforeach()
 
   set(_TOOL_TARGETS)
+  set(_TOOL_PYTHON_PACKAGE_DIRS)
   foreach(_TOOL IN LISTS _RULE_TOOLS)
     if(NOT _TOOL MATCHES "^([^=]+)=(.+)$")
       message(FATAL_ERROR
@@ -77,7 +81,37 @@ function(iree_execution_test_suite)
     set(_TOOL_TARGET "${CMAKE_MATCH_2}")
     string(REGEX REPLACE "^::" "${_PACKAGE_NS}::" _TOOL_TARGET "${_TOOL_TARGET}")
     list(APPEND _TOOL_TARGETS "${_TOOL_TARGET}")
-    list(APPEND _TEST_ARGS "--tool=${_TOOL_NAME}=$<TARGET_FILE:${_TOOL_TARGET}>")
+    iree_package_target_name(_TOOL_CMAKE_TARGET "${_TOOL_TARGET}")
+    set(_TOOL_IS_PYTHON FALSE)
+    if(TARGET "${_TOOL_CMAKE_TARGET}")
+      get_property(
+        _TOOL_IS_PYTHON
+        TARGET "${_TOOL_CMAKE_TARGET}"
+        PROPERTY IREE_PY_ENTRYPOINT_ARGUMENTS
+        SET
+      )
+    endif()
+    if(_TOOL_IS_PYTHON)
+      iree_py_library_entrypoint(_TOOL_ENTRYPOINT_ARGUMENTS "${_TOOL_TARGET}")
+      iree_py_library_collect_sources(_TOOL_SOURCE_FILES "${_TOOL_TARGET}")
+      iree_py_library_collect_package_dirs(
+        _TOOL_PACKAGE_DIRS "${_TOOL_TARGET}"
+      )
+      list(APPEND _TEST_ARGS
+        "--tool=${_TOOL_NAME}=${Python3_EXECUTABLE}"
+      )
+      foreach(_TOOL_ARGUMENT IN LISTS _TOOL_ENTRYPOINT_ARGUMENTS)
+        list(APPEND _TEST_ARGS
+          "--tool-arg=${_TOOL_NAME}=${_TOOL_ARGUMENT}"
+        )
+      endforeach()
+      list(APPEND _REQUIRED_FILES ${_TOOL_SOURCE_FILES})
+      list(APPEND _TOOL_PYTHON_PACKAGE_DIRS ${_TOOL_PACKAGE_DIRS})
+    else()
+      list(APPEND _TEST_ARGS
+        "--tool=${_TOOL_NAME}=$<TARGET_FILE:${_TOOL_TARGET}>"
+      )
+    endif()
   endforeach()
 
   iree_package_name(_PACKAGE_NAME)
@@ -89,21 +123,38 @@ function(iree_execution_test_suite)
   # Build declared tools before any CTest selection attempts to run the suite.
   add_custom_target(${_TEST_TARGET_NAME} ALL)
   foreach(_TOOL_TARGET IN LISTS _TOOL_TARGETS)
-    iree_register_test_target_dependency(
+    iree_register_target_dependency(
       TARGET
         "${_TEST_TARGET_NAME}"
       DEPENDENCY
         "${_TOOL_TARGET}"
     )
   endforeach()
+  set(_DATA_DEPENDENCIES)
+  foreach(_DATA IN LISTS _RULE_DATA)
+    if(IS_ABSOLUTE "${_DATA}" OR
+       TARGET "${_DATA}" OR
+       "${_DATA}" MATCHES "::")
+      list(APPEND _DATA_DEPENDENCIES "${_DATA}")
+    else()
+      list(APPEND _DATA_DEPENDENCIES "${CMAKE_CURRENT_SOURCE_DIR}/${_DATA}")
+    endif()
+  endforeach()
+  iree_add_data_dependencies(
+    NAME
+      "${_TEST_TARGET_NAME}"
+    DATA
+      ${_DATA_DEPENDENCIES}
+    OUT_FILE_DATA
+      _TEST_FILE_DATA
+    OUT_TARGET_DATA
+      _TEST_TARGET_DATA
+  )
   set_property(TARGET ${_TEST_TARGET_NAME} PROPERTY FOLDER ${IREE_IDE_FOLDER}/test)
 
-  foreach(_DATA IN LISTS _RULE_DATA)
-    if(IS_ABSOLUTE "${_DATA}")
-      list(APPEND _REQUIRED_FILES "${_DATA}")
-    else()
-      list(APPEND _REQUIRED_FILES "${CMAKE_CURRENT_SOURCE_DIR}/${_DATA}")
-    endif()
+  list(APPEND _REQUIRED_FILES ${_TEST_FILE_DATA})
+  foreach(_DATA_TARGET IN LISTS _TEST_TARGET_DATA)
+    list(APPEND _REQUIRED_FILES "$<TARGET_FILE:${_DATA_TARGET}>")
   endforeach()
 
   list(APPEND _TEST_ARGS ${_RULE_ARGS})
@@ -117,6 +168,10 @@ function(iree_execution_test_suite)
       ${_TEST_ARGS}
   )
   iree_configure_test(${_TEST_NAME})
+  iree_register_test_build_targets(
+    "${_TEST_NAME}"
+    TARGETS "${_TEST_TARGET_NAME}"
+  )
 
   if(NOT DEFINED _RULE_TIMEOUT)
     set(_RULE_TIMEOUT 60)
@@ -125,6 +180,9 @@ function(iree_execution_test_suite)
   set_property(TEST ${_TEST_NAME} PROPERTY LABELS "${_RULE_LABELS}")
   set_property(TEST ${_TEST_NAME} PROPERTY TIMEOUT "${_RULE_TIMEOUT}")
   set_property(TEST ${_TEST_NAME} PROPERTY REQUIRED_FILES "${_REQUIRED_FILES}")
+  if(_RULE_RESOURCE_GROUP)
+    set_property(TEST ${_TEST_NAME} PROPERTY RESOURCE_LOCK "${_RULE_RESOURCE_GROUP}")
+  endif()
   iree_register_test_resource_build_target(
     TEST_BUILD_TARGET
       "${_TEST_TARGET_NAME}"
@@ -132,6 +190,9 @@ function(iree_execution_test_suite)
       ${_RULE_LABELS}
   )
   set(_ENVIRONMENT_VARS "PYTHONDONTWRITEBYTECODE=1")
+  iree_python_test_add_package_dirs(
+    "${_TEST_NAME}" ${_TOOL_PYTHON_PACKAGE_DIRS}
+  )
   if(_RULE_SANITIZER_SUPPRESSIONS)
     iree_append_sanitizer_suppression_environment(
       _ENVIRONMENT_VARS

@@ -126,19 +126,23 @@ function(iree_c_embed_data)
       set(_REGISTER_COMPILE_INPUT TRUE)
     endif()
   endforeach()
+  if(_RULE_PACKAGE)
+    string(REPLACE "::" "_" _PACKAGE_NAME "${_RULE_PACKAGE}")
+  else()
+    iree_package_name(_PACKAGE_NAME)
+  endif()
   if(_REGISTER_COMPILE_INPUT)
-    if(_RULE_PACKAGE)
-      string(REPLACE "::" "_" _PACKAGE_NAME "${_RULE_PACKAGE}")
-    else()
-      iree_package_name(_PACKAGE_NAME)
-    endif()
     set(_GEN_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}_c_embed_data_gen")
     add_custom_target("${_GEN_TARGET}"
       DEPENDS
         "${_RULE_H_FILE_OUTPUT}"
         "${_RULE_C_FILE_OUTPUT}"
     )
-    iree_register_generated_compile_input("${_GEN_TARGET}")
+    iree_register_generated_compile_input("${_GEN_TARGET}"
+      OUTPUTS
+        "${_RULE_H_FILE_OUTPUT}"
+        "${_RULE_C_FILE_OUTPUT}"
+    )
   endif()
 
   if(_RULE_TESTONLY)
@@ -158,13 +162,23 @@ function(iree_c_embed_data)
     "${_PUBLIC_ARG}"
     "${_TESTONLY_ARG}"
   )
-  if(_REGISTER_COMPILE_INPUT)
-    set(_LIB_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}")
-    if(TARGET "${_LIB_TARGET}")
-      add_dependencies("${_LIB_TARGET}" "${_GEN_TARGET}")
-    endif()
-    if(TARGET "${_LIB_TARGET}.objects")
-      add_dependencies("${_LIB_TARGET}.objects" "${_GEN_TARGET}")
-    endif()
+  set(_LIB_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}")
+  set(_CONSUMER_TARGETS)
+  if(TARGET "${_LIB_TARGET}")
+    list(APPEND _CONSUMER_TARGETS "${_LIB_TARGET}")
   endif()
+  if(TARGET "${_LIB_TARGET}.objects")
+    list(APPEND _CONSUMER_TARGETS "${_LIB_TARGET}.objects")
+  endif()
+  if(_REGISTER_COMPILE_INPUT)
+    foreach(_CONSUMER_TARGET IN LISTS _CONSUMER_TARGETS)
+      add_dependencies("${_CONSUMER_TARGET}" "${_GEN_TARGET}")
+    endforeach()
+  endif()
+  foreach(_RESOLVED_SRC IN LISTS _RESOLVED_SRCS)
+    foreach(_CONSUMER_TARGET IN LISTS _CONSUMER_TARGETS)
+      iree_generated_output_add_consumer(
+        "${_RESOLVED_SRC}" "${_CONSUMER_TARGET}")
+    endforeach()
+  endforeach()
 endfunction()

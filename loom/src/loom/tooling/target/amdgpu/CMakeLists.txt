@@ -21,15 +21,14 @@ loom_cc_library(
     iree::base
     iree::hal
     loom::ir
-    loom::ops::op_defs
-    loom::target::arch::amdgpu::ops
-    loom::target::arch::amdgpu::records::target_records
+    loom::target::arch::amdgpu::artifact_profile
+    loom::target::arch::amdgpu::facts
+    loom::target::arch::amdgpu::profile
     loom::target::arch::amdgpu::runtime_requirements
     loom::target::arch::amdgpu::target_id
-    loom::target::arch::amdgpu::target_info
-    loom::target::compile_report
     loom::target::emit::native::amdgpu::hal_kernel_library
     loom::target::emit::native::amdgpu::runtime_globals
+    loom::target::reporting::report
     loom::target::types
     loom::tooling::execution::compile_options
     loom::tooling::execution::hal::artifact
@@ -48,6 +47,7 @@ loom_cc_library(
     "testbench_requirements.c"
   DEPS
     iree::base
+    loom::target::arch::amdgpu::profile
     loom::target::arch::amdgpu::target_info_defs
     loom::tooling::execution::hal::testbench_actual
     loom::tooling::testbench::requirements
@@ -66,6 +66,7 @@ loom_cc_test(
     iree::base
     iree::base::internal::arena
     iree::hal
+    iree::io::byte_sequence
     iree::testing::gtest
     iree::testing::gtest_main
     loom::codegen::low::text_asm
@@ -75,10 +76,13 @@ loom_cc_test(
     loom::sanitizer::options
     loom::target::arch::amdgpu::descriptors::low_registry
     loom::target::arch::amdgpu::ops
-    loom::target::arch::amdgpu::records::target_records
+    loom::target::arch::amdgpu::profile
+    loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
-    loom::target::compile_report
     loom::target::emit::native::amdgpu::runtime_globals
+    loom::target::entry_selection
+    loom::target::reporting::report
+    loom::testing::byte_sequence
     loom::testing::module_ptr
     loom::tooling::execution::hal::runtime
   LABELS

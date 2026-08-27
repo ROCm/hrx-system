@@ -20,6 +20,7 @@ loom_cc_library(
     "format_signatures.h"
     "format_tables.h"
     "low_asm.h"
+    "name_plan.h"
     "pipeline.h"
     "printer.h"
     "regions.h"
@@ -31,6 +32,7 @@ loom_cc_library(
     "format_signatures.c"
     "format_tables.c"
     "low_asm.c"
+    "name_plan.c"
     "pipeline.c"
     "printer.c"
     "regions.c"
@@ -41,6 +43,7 @@ loom_cc_library(
     loom::format::text::low_asm
     loom::ir
     loom::ops::op_defs
+    loom::ops::type_registry
     loom::target::registers
     loom::util::stream
   PUBLIC

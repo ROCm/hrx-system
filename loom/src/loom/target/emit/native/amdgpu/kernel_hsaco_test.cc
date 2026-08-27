@@ -167,6 +167,9 @@ loom_amdgpu_metadata_kernel_t MinimalKernel(iree_string_view_t name,
       /*.max_flat_workgroup_size=*/64,
       /*.required_workgroup_size=*/{/*.x=*/64, /*.y=*/1, /*.z=*/1},
       /*.has_required_workgroup_size=*/true,
+      /*.workgroup_cluster_size=*/{},
+      /*.has_workgroup_cluster_size=*/false,
+      /*.target_extensions=*/{},
       /*.arguments=*/nullptr,
       /*.argument_count=*/0,
   };
@@ -176,7 +179,8 @@ loom_amdgpu_kernel_hsaco_contribution_t Contribution(
     iree_string_view_t name, iree_string_view_t descriptor_symbol,
     iree_const_byte_span_t text) {
   return {
-      /*.target=*/IREE_SV("amdgcn-amd-amdhsa--gfx1100"),
+      /*.artifact_target_key=*/IREE_SV("gfx1100"),
+      /*.code_object_target_id=*/IREE_SV("amdgcn-amd-amdhsa--gfx1100"),
       /*.processor=*/IREE_SV("gfx1100"),
       /*.kernel=*/
       {
@@ -184,9 +188,16 @@ loom_amdgpu_kernel_hsaco_contribution_t Contribution(
           /*.descriptor_options=*/{},
           /*.text=*/text,
       },
+      /*.branch_layout=*/{},
+      /*.native_insertions=*/nullptr,
+      /*.native_insertion_count=*/0,
       /*.summary=*/
       {
           /*.instruction_count=*/1,
+          /*.body_instruction_count=*/1,
+          /*.entry_instruction_count=*/0,
+          /*.coissued_instruction_count=*/0,
+          /*.coissued_component_count=*/0,
           /*.text_byte_count=*/text.data_length,
           /*.text_storage_byte_count=*/text.data_length,
       },
@@ -304,6 +315,63 @@ TEST(AmdgpuKernelHsacoTest, RejectsMismatchedContributionProcessor) {
                    iree_make_const_byte_span(text, sizeof(text))),
   };
   contributions[1].processor = IREE_SV("gfx1101");
+
+  StreamPtr stream = CreateStream();
+  TestArena arena;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_amdgpu_write_kernel_hsaco_contributions(
+                            contributions, IREE_ARRAYSIZE(contributions), NULL,
+                            stream.get(), arena.arena()));
+}
+
+TEST(AmdgpuKernelHsacoTest, RejectsFeatureDistinctContributionTargets) {
+  const uint8_t text[] = {0x00, 0x00, 0x81, 0xbf};
+  loom_amdgpu_kernel_hsaco_contribution_t contributions[] = {
+      Contribution(IREE_SV("first_kernel"), IREE_SV("first_kernel.kd"),
+                   iree_make_const_byte_span(text, sizeof(text))),
+      Contribution(IREE_SV("second_kernel"), IREE_SV("second_kernel.kd"),
+                   iree_make_const_byte_span(text, sizeof(text))),
+  };
+  contributions[0].artifact_target_key = IREE_SV("gfx942:sramecc-:xnack-");
+  contributions[0].code_object_target_id =
+      IREE_SV("amdgcn-amd-amdhsa--gfx942:sramecc-:xnack-");
+  contributions[0].processor = IREE_SV("gfx942");
+  contributions[1].artifact_target_key = IREE_SV("gfx942:sramecc+:xnack-");
+  contributions[1].code_object_target_id =
+      IREE_SV("amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-");
+  contributions[1].processor = IREE_SV("gfx942");
+
+  StreamPtr stream = CreateStream();
+  TestArena arena;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_amdgpu_write_kernel_hsaco_contributions(
+                            contributions, IREE_ARRAYSIZE(contributions), NULL,
+                            stream.get(), arena.arena()));
+}
+
+TEST(AmdgpuKernelHsacoTest, RejectsDistinctTargetContributions) {
+  const loom_amdgpu_target_info_t* targets[] = {
+      loom_amdgpu_target_info_find_target(IREE_SV("gfx1250-a0")),
+      loom_amdgpu_target_info_find_target(IREE_SV("gfx1250")),
+  };
+  ASSERT_NE(targets[0], nullptr);
+  ASSERT_NE(targets[1], nullptr);
+
+  const uint8_t text[] = {0x00, 0x00, 0x81, 0xbf};
+  loom_amdgpu_kernel_hsaco_contribution_t contributions[] = {
+      Contribution(IREE_SV("first_kernel"), IREE_SV("first_kernel.kd"),
+                   iree_make_const_byte_span(text, sizeof(text))),
+      Contribution(IREE_SV("second_kernel"), IREE_SV("second_kernel.kd"),
+                   iree_make_const_byte_span(text, sizeof(text))),
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(contributions); ++i) {
+    contributions[i].artifact_target_key = targets[i]->name;
+    contributions[i].code_object_target_id =
+        IREE_SV("amdgcn-amd-amdhsa--gfx1250");
+    contributions[i].processor = IREE_SV("gfx1250");
+    contributions[i].kernel.metadata.target_extensions =
+        targets[i]->kernel_metadata_extensions;
+  }
 
   StreamPtr stream = CreateStream();
   TestArena arena;

@@ -7,6 +7,7 @@
 #include "loom/target/low_legality.h"
 
 #include <stdint.h>
+#include <string.h>
 
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/view_regions.h"
@@ -32,7 +33,17 @@ enum loom_target_low_legality_e {
   LOOM_TARGET_LOW_LEGALITY_PROVIDER = 2,
   LOOM_TARGET_LOW_LEGALITY_SOURCE_ONLY = 3,
   LOOM_TARGET_LOW_LEGALITY_MODULE_METADATA = 4,
+  LOOM_TARGET_LOW_LEGALITY_COMPILE_TIME_QUERY = 5,
 };
+
+typedef struct loom_target_low_legality_target_state_record_t {
+  // Target-owned static key identifying this function-local state object.
+  const void* key;
+  // Byte length of state storage.
+  iree_host_size_t data_length;
+  // Zero-initialized state storage allocated from the legality arena.
+  void* data;
+} loom_target_low_legality_target_state_record_t;
 
 struct loom_target_low_legality_context_t {
   // Source module being checked.
@@ -41,23 +52,24 @@ struct loom_target_low_legality_context_t {
   loom_func_like_t function;
   // Caller-owned verification options.
   const loom_target_low_legality_options_t* options;
-  // Descriptor set selected by options.bundle.
+  // Descriptor set selected by options.target_facts.
   const loom_low_descriptor_set_t* descriptor_set;
-  // Source facts visible to target-specific legality providers.
-  loom_value_fact_table_t* fact_table;
-  // Optional active value domain supplied by the source-to-low frame.
-  const loom_local_value_domain_t* value_domain;
-  // View-region table for providers that need read/write summaries.
-  loom_view_region_table_t view_regions;
-  // True after view_regions has been initialized against value_domain.
-  bool view_regions_initialized;
-  // True after view_regions has recorded per-view read/write flags.
-  bool view_regions_analyzed;
+  // Function-local target state records populated by legality providers.
+  loom_target_low_legality_target_state_record_t* target_state_records;
+  // Number of populated target_state_records entries.
+  iree_host_size_t target_state_record_count;
+  // Number of allocated target_state_records entries.
+  iree_host_size_t target_state_record_capacity;
   // Result object receiving counters and selected descriptor set.
   loom_target_low_legality_result_t* result;
   // Scratch arena for the IR walker.
   iree_arena_allocator_t arena;
 };
+
+static const loom_target_bundle_t* loom_target_low_legality_options_bundle(
+    const loom_target_low_legality_options_t* options) {
+  return loom_target_facts_bundle(options->target_facts);
+}
 
 static iree_string_view_t loom_target_low_legality_nonempty(
     iree_string_view_t value, iree_string_view_t placeholder) {
@@ -145,12 +157,11 @@ iree_status_t loom_target_low_legality_emit_error_ref(
 static void loom_target_low_legality_make_context_params(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     loom_diagnostic_param_t* params) {
-  params[0] = loom_param_string(
-      loom_target_low_legality_target_key(context->options->bundle));
-  params[1] = loom_param_string(
-      loom_target_low_legality_export_name(context->options->bundle));
-  params[2] = loom_param_string(
-      loom_target_low_legality_config_key(context->options->bundle));
+  const loom_target_bundle_t* bundle =
+      loom_target_low_legality_options_bundle(context->options);
+  params[0] = loom_param_string(loom_target_low_legality_target_key(bundle));
+  params[1] = loom_param_string(loom_target_low_legality_export_name(bundle));
+  params[2] = loom_param_string(loom_target_low_legality_config_key(bundle));
   params[3] =
       loom_param_string(loom_target_low_legality_function_name(context));
   params[4] = loom_param_string(loom_op_name(context->module, op));
@@ -176,6 +187,13 @@ static iree_status_t loom_target_low_legality_emit_no_target_contract(
     loom_target_low_legality_context_t* context, const loom_op_t* op) {
   return loom_target_low_legality_emit_target_context_error(
       context, op, LOOM_ERR_TARGET_001, /*extra_params=*/NULL,
+      /*extra_param_count=*/0);
+}
+
+static iree_status_t loom_target_low_legality_emit_unresolved_query(
+    loom_target_low_legality_context_t* context, const loom_op_t* op) {
+  return loom_target_low_legality_emit_target_context_error(
+      context, op, LOOM_ERR_TARGET_070, /*extra_params=*/NULL,
       /*extra_param_count=*/0);
 }
 
@@ -217,16 +235,13 @@ iree_status_t loom_target_low_legality_record_memory_access(
     iree_string_view_t dynamic_term_kind, iree_string_view_t fallback_reason,
     iree_string_view_t decision, int64_t static_offset_bytes,
     uint32_t element_bytes, uint32_t vector_lanes,
-    uint32_t dynamic_stride_bytes, uint32_t vector_lane_stride_bytes,
-    uint32_t bank_stride_words, uint32_t bank_conflict_degree,
-    iree_string_view_t bank_conflict_kind) {
+    uint32_t dynamic_stride_bytes, uint32_t vector_lane_stride_bytes) {
+  const loom_target_bundle_t* bundle =
+      loom_target_low_legality_options_bundle(context->options);
   loom_diagnostic_param_t params[] = {
-      loom_param_string(
-          loom_target_low_legality_target_key(context->options->bundle)),
-      loom_param_string(
-          loom_target_low_legality_export_name(context->options->bundle)),
-      loom_param_string(
-          loom_target_low_legality_config_key(context->options->bundle)),
+      loom_param_string(loom_target_low_legality_target_key(bundle)),
+      loom_param_string(loom_target_low_legality_export_name(bundle)),
+      loom_param_string(loom_target_low_legality_config_key(bundle)),
       loom_param_string(loom_target_low_legality_function_name(context)),
       loom_param_string(memory_space),
       loom_param_string(operation_kind),
@@ -240,9 +255,6 @@ iree_status_t loom_target_low_legality_record_memory_access(
       loom_param_u32(vector_lanes),
       loom_param_u32(dynamic_stride_bytes),
       loom_param_u32(vector_lane_stride_bytes),
-      loom_param_u32(bank_stride_words),
-      loom_param_u32(bank_conflict_degree),
-      loom_param_string(bank_conflict_kind),
   };
   return loom_target_low_legality_emit(context, op, LOOM_ERR_BACKEND_017,
                                        params, IREE_ARRAYSIZE(params));
@@ -256,13 +268,12 @@ iree_status_t loom_target_low_legality_record_memory_cache_policy(
     iree_string_view_t encoding_key, bool scope_attr_present,
     int64_t scope_attr, bool th_attr_present, int64_t th_attr,
     bool nt_attr_present, int64_t nt_attr) {
+  const loom_target_bundle_t* bundle =
+      loom_target_low_legality_options_bundle(context->options);
   loom_diagnostic_param_t params[] = {
-      loom_param_string(
-          loom_target_low_legality_target_key(context->options->bundle)),
-      loom_param_string(
-          loom_target_low_legality_export_name(context->options->bundle)),
-      loom_param_string(
-          loom_target_low_legality_config_key(context->options->bundle)),
+      loom_param_string(loom_target_low_legality_target_key(bundle)),
+      loom_param_string(loom_target_low_legality_export_name(bundle)),
+      loom_param_string(loom_target_low_legality_config_key(bundle)),
       loom_param_string(loom_target_low_legality_function_name(context)),
       loom_param_string(loom_op_name(context->module, op)),
       loom_param_string(memory_space),
@@ -290,13 +301,12 @@ iree_status_t loom_target_low_legality_record_memory_prefetch(
     iree_string_view_t decision, iree_string_view_t packet_key,
     int64_t immediate_offset, uint32_t scalar_byte_offset,
     iree_string_view_t dynamic_index_kind, uint32_t count) {
+  const loom_target_bundle_t* bundle =
+      loom_target_low_legality_options_bundle(context->options);
   loom_diagnostic_param_t params[] = {
-      loom_param_string(
-          loom_target_low_legality_target_key(context->options->bundle)),
-      loom_param_string(
-          loom_target_low_legality_export_name(context->options->bundle)),
-      loom_param_string(
-          loom_target_low_legality_config_key(context->options->bundle)),
+      loom_param_string(loom_target_low_legality_target_key(bundle)),
+      loom_param_string(loom_target_low_legality_export_name(bundle)),
+      loom_param_string(loom_target_low_legality_config_key(bundle)),
       loom_param_string(loom_target_low_legality_function_name(context)),
       loom_param_string(loom_op_name(context->module, op)),
       loom_param_string(memory_space),
@@ -326,12 +336,12 @@ loom_func_like_t loom_target_low_legality_function(
 
 const loom_target_bundle_t* loom_target_low_legality_bundle(
     const loom_target_low_legality_context_t* context) {
-  return context->options->bundle;
+  return loom_target_low_legality_options_bundle(context->options);
 }
 
-loom_symbol_ref_t loom_target_low_legality_target_ref(
+const loom_target_facts_t* loom_target_low_legality_target_facts(
     const loom_target_low_legality_context_t* context) {
-  return context->options->target_ref;
+  return context->options->target_facts;
 }
 
 const loom_low_descriptor_set_t* loom_target_low_legality_descriptor_set(
@@ -341,28 +351,66 @@ const loom_low_descriptor_set_t* loom_target_low_legality_descriptor_set(
 
 const loom_value_fact_table_t* loom_target_low_legality_fact_table(
     const loom_target_low_legality_context_t* context) {
-  return context->fact_table;
+  return context->options->view_regions->expression_context->fact_table;
 }
 
-iree_status_t loom_target_low_legality_view_regions(
-    loom_target_low_legality_context_t* context,
-    const loom_view_region_table_t** out_view_regions) {
-  *out_view_regions = NULL;
-  if (context->value_domain == NULL) {
+const loom_local_value_domain_t* loom_target_low_legality_value_domain(
+    const loom_target_low_legality_context_t* context) {
+  return context->options->view_regions->value_domain;
+}
+
+const loom_view_region_table_t* loom_target_low_legality_view_regions(
+    const loom_target_low_legality_context_t* context) {
+  return context->options->view_regions;
+}
+
+iree_arena_allocator_t* loom_target_low_legality_scratch_arena(
+    loom_target_low_legality_context_t* context) {
+  return &context->arena;
+}
+
+iree_status_t loom_target_low_legality_get_or_allocate_target_state(
+    loom_target_low_legality_context_t* context, const void* key,
+    iree_host_size_t data_length, void** out_data) {
+  IREE_ASSERT(key != NULL);
+  IREE_ASSERT_GT(data_length, 0);
+  *out_data = NULL;
+  for (iree_host_size_t i = 0; i < context->target_state_record_count; ++i) {
+    loom_target_low_legality_target_state_record_t* record =
+        &context->target_state_records[i];
+    if (record->key != key) continue;
+    IREE_ASSERT_EQ(record->data_length, data_length);
+    *out_data = record->data;
     return iree_ok_status();
   }
-  if (!context->view_regions_initialized) {
-    IREE_RETURN_IF_ERROR(loom_view_region_table_initialize(
-        context->fact_table, context->value_domain, &context->arena,
-        &context->view_regions));
-    context->view_regions_initialized = true;
+
+  if (context->target_state_record_count ==
+      context->target_state_record_capacity) {
+    iree_host_size_t minimum_capacity = 0;
+    if (!iree_host_size_checked_add(context->target_state_record_count, 1,
+                                    &minimum_capacity)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE, "capacity overflow");
+    }
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        &context->arena, context->target_state_record_count, minimum_capacity,
+        sizeof(*context->target_state_records),
+        &context->target_state_record_capacity,
+        (void**)&context->target_state_records));
   }
-  if (!context->view_regions_analyzed) {
-    IREE_RETURN_IF_ERROR(
-        loom_view_region_table_analyze(&context->view_regions));
-    context->view_regions_analyzed = true;
-  }
-  *out_view_regions = &context->view_regions;
+
+  void* data = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(&context->arena, 1, data_length, &data));
+  memset(data, 0, data_length);
+  const iree_host_size_t record_index = context->target_state_record_count++;
+  loom_target_low_legality_target_state_record_t* record =
+      &context->target_state_records[record_index];
+  *record = (loom_target_low_legality_target_state_record_t){
+      .key = key,
+      .data_length = data_length,
+      .data = data,
+  };
+  *out_data = data;
   return iree_ok_status();
 }
 
@@ -389,11 +437,14 @@ static bool loom_target_low_legality_codegen_format_is_low(
 static bool loom_target_low_legality_abi_is_low(
     loom_target_abi_kind_t abi_kind) {
   switch (abi_kind) {
+    // Module-internal functions intentionally have no artifact ABI.
+    case LOOM_TARGET_ABI_UNKNOWN:
     case LOOM_TARGET_ABI_OBJECT_FUNCTION:
     case LOOM_TARGET_ABI_HAL_KERNEL:
     case LOOM_TARGET_ABI_SHADER_ENTRY_POINT:
     case LOOM_TARGET_ABI_VM_MODULE_FUNCTION:
     case LOOM_TARGET_ABI_WASM_FUNCTION:
+    case LOOM_TARGET_ABI_COMMAND_PROGRAM:
       return true;
     default:
       return false;
@@ -404,28 +455,33 @@ static iree_status_t loom_target_low_legality_validate_options(
     const loom_target_low_legality_options_t* options,
     const loom_low_descriptor_set_t** out_descriptor_set) {
   *out_descriptor_set = NULL;
+  if (options->view_regions == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "target-low legality requires function analysis");
+  }
+  const loom_target_bundle_t* bundle =
+      loom_target_low_legality_options_bundle(options);
   if (!loom_target_low_legality_codegen_format_is_low(
-          options->bundle->snapshot->codegen_format)) {
+          bundle->snapshot->codegen_format)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "target bundle '%.*s' codegen format is not target-low",
-        (int)options->bundle->name.size, options->bundle->name.data);
+        (int)bundle->name.size, bundle->name.data);
   }
-  if (!loom_target_low_legality_abi_is_low(
-          options->bundle->export_plan->abi_kind)) {
+  if (!loom_target_low_legality_abi_is_low(bundle->export_plan->abi_kind)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "target bundle '%.*s' ABI is not accepted by target-low legality",
-        (int)options->bundle->name.size, options->bundle->name.data);
+        (int)bundle->name.size, bundle->name.data);
   }
-  if (options->bundle->snapshot->default_pointer_bitwidth == 0 ||
-      options->bundle->snapshot->index_bitwidth == 0 ||
-      options->bundle->snapshot->offset_bitwidth == 0) {
+  if (bundle->snapshot->default_pointer_bitwidth == 0 ||
+      bundle->snapshot->index_bitwidth == 0 ||
+      bundle->snapshot->offset_bitwidth == 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "target bundle '%.*s' pointer, index, and offset bit widths must be "
         "non-zero",
-        (int)options->bundle->name.size, options->bundle->name.data);
+        (int)bundle->name.size, bundle->name.data);
   }
   if (iree_any_bit_set(options->diagnostic_flags,
                        ~LOOM_TARGET_LOW_LEGALITY_DIAGNOSTIC_ALL)) {
@@ -434,8 +490,8 @@ static iree_status_t loom_target_low_legality_validate_options(
                             "flag bits 0x%08x",
                             (unsigned)options->diagnostic_flags);
   }
-  return loom_target_low_descriptor_set_select_for_bundle(
-      options->descriptor_registry, options->bundle, out_descriptor_set);
+  return loom_target_low_descriptor_set_select_for_source_lowering(
+      options->descriptor_registry, bundle, out_descriptor_set);
 }
 
 static iree_status_t loom_target_low_legality_verify_scalar_type(
@@ -456,6 +512,12 @@ static iree_status_t loom_target_low_legality_verify_scalar_type(
       return iree_ok_status();
     case LOOM_SCALAR_TYPE_F8E4M3:
     case LOOM_SCALAR_TYPE_F8E5M2:
+      if (context->options->type_supported.fn != NULL &&
+          context->options->type_supported.fn(
+              context->options->type_supported.user_data, context->module,
+              type)) {
+        return iree_ok_status();
+      }
       return loom_target_low_legality_emit_type_constraint(
           context, op, type, IREE_SV("scalar.fp8_decode_or_contract"));
     case LOOM_SCALAR_TYPE_COUNT_:
@@ -476,7 +538,8 @@ loom_target_low_legality_resolve_dialect_type(const loom_module_t* module,
     return NULL;
   }
   iree_string_view_t name = module->strings.entries[name_id];
-  const loom_type_descriptor_t* descriptor = loom_type_registry_lookup(name);
+  const loom_type_descriptor_t* descriptor =
+      loom_type_registry_lookup(module->context, name);
   if (descriptor == NULL ||
       descriptor->param_count != loom_type_dialect_param_count(type)) {
     return NULL;
@@ -513,6 +576,15 @@ static iree_status_t loom_target_low_legality_verify_registered_type(
     case LOOM_TYPE_SEMANTIC_TARGET_CONTRACT_VALUE:
       return loom_target_low_legality_emit_type_constraint(
           context, op, type, IREE_SV("type.matching_contract_family"));
+    case LOOM_TYPE_SEMANTIC_MANAGED_REFERENCE:
+      if (context->options->type_supported.fn != NULL &&
+          context->options->type_supported.fn(
+              context->options->type_supported.user_data, context->module,
+              type)) {
+        return iree_ok_status();
+      }
+      return loom_target_low_legality_emit_type_constraint(
+          context, op, type, IREE_SV("type.target_low_mapping"));
     default:
       return loom_target_low_legality_emit_type_constraint(
           context, op, type, IREE_SV("type.target_low_mapping"));
@@ -613,6 +685,15 @@ static iree_status_t loom_target_low_legality_reject_contract_query(
   return loom_target_low_legality_emit_no_target_contract(context, op);
 }
 
+static iree_status_t
+loom_target_low_legality_contract_query_get_or_allocate_target_state(
+    void* user_data, const void* key, iree_host_size_t data_length,
+    void** out_data) {
+  return loom_target_low_legality_get_or_allocate_target_state(
+      (loom_target_low_legality_context_t*)user_data, key, data_length,
+      out_data);
+}
+
 static iree_status_t loom_target_low_legality_try_contract_query_op(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     bool* out_handled) {
@@ -622,19 +703,21 @@ static iree_status_t loom_target_low_legality_try_contract_query_op(
     return iree_ok_status();
   }
 
-  const loom_view_region_table_t* view_regions = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_target_low_legality_view_regions(context, &view_regions));
   const loom_target_contract_query_environment_t environment = {
       .module = context->module,
       .function = context->function,
-      .bundle = context->options->bundle,
-      .target_data = context->options->target_data,
-      .target_ref = context->options->target_ref,
+      .target_facts = context->options->target_facts,
       .descriptor_set = context->descriptor_set,
-      .fact_table = context->fact_table,
-      .view_regions = view_regions,
+      .fact_table = loom_target_low_legality_fact_table(context),
+      .value_domain = loom_target_low_legality_value_domain(context),
+      .view_regions = loom_target_low_legality_view_regions(context),
       .arena = &context->arena,
+      .target_state_allocator =
+          {
+              .fn =
+                  loom_target_low_legality_contract_query_get_or_allocate_target_state,
+              .user_data = context,
+          },
   };
   loom_target_contract_query_result_t result =
       loom_target_contract_query_result_empty();
@@ -774,6 +857,9 @@ static iree_status_t loom_target_low_legality_verify_op_class(
       case LOOM_OP_PHASE_MODULE_METADATA:
         legality = LOOM_TARGET_LOW_LEGALITY_MODULE_METADATA;
         break;
+      case LOOM_OP_PHASE_COMPILE_TIME_QUERY:
+        legality = LOOM_TARGET_LOW_LEGALITY_COMPILE_TIME_QUERY;
+        break;
       case LOOM_OP_PHASE_UNSPECIFIED:
       default:
         legality = LOOM_TARGET_LOW_LEGALITY_UNSUPPORTED;
@@ -793,6 +879,8 @@ static iree_status_t loom_target_low_legality_verify_op_class(
     case LOOM_TARGET_LOW_LEGALITY_MODULE_METADATA:
       return loom_target_low_legality_emit_op_constraint(
           context, op, IREE_SV("module_metadata.outside_executable_region"));
+    case LOOM_TARGET_LOW_LEGALITY_COMPILE_TIME_QUERY:
+      return loom_target_low_legality_emit_unresolved_query(context, op);
     case LOOM_TARGET_LOW_LEGALITY_UNSUPPORTED:
       return loom_target_low_legality_emit_no_target_contract(context, op);
     default: {
@@ -895,8 +983,6 @@ iree_status_t loom_target_low_verify_function_legality(
       .result = out_result,
   };
   iree_arena_initialize(module->arena.block_pool, &context.arena);
-  context.fact_table = options->fact_table;
-  context.value_domain = options->value_domain;
 
   iree_status_t status = iree_ok_status();
   if (iree_status_is_ok(status)) {

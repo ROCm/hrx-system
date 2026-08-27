@@ -88,18 +88,6 @@ extern "C" {
 /// such as compiling a module require exclusive access to that module handle.
 typedef struct loomc_module_t loomc_module_t;
 
-/// Three-dimensional unsigned extent used by Loom C API structs.
-typedef struct loomc_dimension3_t {
-  /// Extent along the x dimension.
-  uint32_t x;
-
-  /// Extent along the y dimension.
-  uint32_t y;
-
-  /// Extent along the z dimension.
-  uint32_t z;
-} loomc_dimension3_t;
-
 /// Public function category reported from a module query.
 typedef enum loomc_module_function_kind_e {
   /// No specific function kind was requested or reported.
@@ -288,16 +276,17 @@ typedef struct loomc_module_global_query_options_t {
 
 /// Text presentation policy used when serializing `.loom` text.
 typedef enum loomc_module_text_presentation_e {
-  /// Prefer target-low assembly syntax when the module selects one descriptor
-  /// set unambiguously; otherwise print canonical text.
+  /// Prefer target-low assembly syntax using each function's representation
+  /// contract, with canonical text as a lossless fallback.
   LOOMC_MODULE_TEXT_PRESENTATION_DEFAULT = 0,
 
   /// Force canonical text with descriptor-backed target-low operations printed
   /// as ordinary `low.op<...>` operations.
   LOOMC_MODULE_TEXT_PRESENTATION_GENERIC = 1,
 
-  /// Force descriptor-backed target-low assembly syntax. Serialization fails
-  /// when no descriptor set is provided or can be selected unambiguously.
+  /// Require descriptor-backed target-low assembly syntax for every
+  /// self-describing target-low function. Serialization fails when a function
+  /// has no lossless assembly spelling for its representation contract.
   LOOMC_MODULE_TEXT_PRESENTATION_LOW_ASM = 2,
 } loomc_module_text_presentation_t;
 
@@ -326,14 +315,6 @@ typedef struct loomc_module_serialize_options_t {
 
   /// Presentation policy for textual `.loom` output.
   loomc_module_text_presentation_t text_presentation;
-
-  /// Target-low descriptor-set key used by low assembly presentation.
-  ///
-  /// Empty lets the serializer infer a single descriptor set from target-low
-  /// functions in the module. Non-empty requests low assembly presentation
-  /// unless `text_presentation` is `LOOMC_MODULE_TEXT_PRESENTATION_GENERIC`,
-  /// which is rejected as contradictory.
-  loomc_string_view_t low_asm_descriptor_set_key;
 } loomc_module_serialize_options_t;
 
 /// Module deserialization options.
@@ -394,7 +375,10 @@ LOOMC_API_EXPORT void loomc_module_release(loomc_module_t* module);
 /// @lifetime
 /// The cloned module retains `workspace` and returns its arena blocks when the
 /// module is released. The clone does not borrow from `source_module`; both
-/// modules may be mutated independently after this call returns.
+/// modules may be mutated independently after this call returns. When a prior
+/// compilation retained resolved function targets outside the source IR, the
+/// clone materializes those targets into ordinary definitions and function
+/// target references. The clone needs no invocation-local compiler facts.
 ///
 /// @thread_safety
 /// Cloning reads `source_module` and mutates `workspace`. Concurrent clones of
@@ -714,6 +698,14 @@ LOOMC_API_EXPORT loomc_status_t loomc_module_function_get_export_info(
 /// `loomc_source_release`. Serialized bytes are owned by that source and remain
 /// valid until the source is released.
 ///
+/// @par Resolved Targets
+/// When a prior compilation retained resolved function targets outside the
+/// module IR, serialization first projects them into a derived module without
+/// mutating the source. The resulting source is self-contained and can be
+/// deserialized in a fresh context without the original profiles.
+/// Serialization fails when an exact target definition cannot be materialized;
+/// it never silently emits the less-specific authored target.
+///
 /// @thread_safety
 /// Serialization is read-only with respect to `module`. Concurrent
 /// serialization of the same module is valid when the caller guarantees that no
@@ -732,6 +724,7 @@ LOOMC_API_EXPORT loomc_status_t loomc_module_serialize_to_source(
 ///
 /// @ownership
 /// The caller retains ownership of `file`; this function does not close it.
+/// Target projection completes before any bytes are written to `file`.
 LOOMC_API_EXPORT loomc_status_t loomc_module_serialize_to_file(
     const loomc_module_t* module,
     const loomc_module_serialize_options_t* options, FILE* file);
@@ -744,6 +737,9 @@ LOOMC_API_EXPORT loomc_status_t loomc_module_serialize_to_file(
 /// need to be NUL-terminated.
 /// @param allocator Host allocator used for transient file path/stream storage.
 /// @return OK when serialization succeeded.
+///
+/// Exact target projection completes before the output path is opened, so a
+/// projection failure does not create or truncate the path.
 LOOMC_API_EXPORT loomc_status_t loomc_module_serialize_to_path(
     const loomc_module_t* module,
     const loomc_module_serialize_options_t* options, loomc_string_view_t path,

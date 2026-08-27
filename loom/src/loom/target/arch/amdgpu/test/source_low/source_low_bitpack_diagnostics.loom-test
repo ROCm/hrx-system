@@ -1,6 +1,6 @@
 // RUN: emit source-low output=low
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @bitpack_width_rejected(%codes: vector<2xi32>) -> (vector<4xi8>) {
   // ERROR@+1: TARGET/003 {subject_role="field-width", subject_name="i32", constraint_key="amdgpu.packed_integer.width_i32"}
   %packed = vector.bitpack<16> %codes : vector<2xi32> -> vector<4xi8>
@@ -9,7 +9,7 @@ func.def target(@target) @bitpack_width_rejected(%codes: vector<2xi32>) -> (vect
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @bitpack_source_type_rejected(%codes: vector<4xi8>) -> (vector<4xi8>) {
   // ERROR@+1: TARGET/003 {subject_role="type", subject_name="vector<i32>", constraint_key="amdgpu.arithmetic.vector_i32"}
@@ -19,7 +19,7 @@ func.def target(@target) @bitpack_source_type_rejected(%codes: vector<4xi8>) -> 
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @bitpack_result_type_rejected(%codes: vector<4xi32>) -> (vector<2xi16>) {
   // ERROR@+1: TARGET/003 {subject_role="type", subject_name="vector<i8>", constraint_key="amdgpu.arithmetic.vector_i8_packed"}
@@ -29,7 +29,7 @@ func.def target(@target) @bitpack_result_type_rejected(%codes: vector<4xi32>) ->
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @bitpack_lane_group_rejected(%codes: vector<3xi32>) -> (vector<3xi8>) {
   // ERROR@+1: TARGET/003 {subject_role="packed-integer-storage", subject_name="vector.bitpack", constraint_key="amdgpu.packed_integer.payload_from_lanes"}

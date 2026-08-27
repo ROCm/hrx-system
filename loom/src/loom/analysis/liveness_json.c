@@ -6,8 +6,6 @@
 
 #include "loom/analysis/liveness_json.h"
 
-#include <inttypes.h>
-
 #include "loom/format/text/printer.h"
 #include "loom/ir/module.h"
 #include "loom/util/json.h"
@@ -24,8 +22,6 @@ static iree_string_view_t loom_liveness_type_kind_name(
       return IREE_SV("tile");
     case LOOM_TYPE_TENSOR:
       return IREE_SV("tensor");
-    case LOOM_TYPE_GROUP:
-      return IREE_SV("group");
     case LOOM_TYPE_FUNCTION:
       return IREE_SV("function");
     case LOOM_TYPE_DIALECT:
@@ -90,63 +86,72 @@ static iree_status_t loom_liveness_json_write_value(
     const loom_text_print_options_t* type_print_options,
     loom_value_id_t value_id, loom_output_stream_t* stream) {
   const loom_module_t* module = analysis->module;
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, "{\"id\":%u,\"name\":", (unsigned)value_id));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("id"), (uint32_t)value_id));
   if (value_id < module->values.count) {
     const loom_value_t* value = loom_module_value(module, value_id);
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin_field(&object, IREE_SV("name")));
     IREE_RETURN_IF_ERROR(loom_liveness_json_write_string_or_null(
         module, value->name_id, stream));
     IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, ",\"type\":"));
+        loom_json_object_begin_field(&object, IREE_SV("type")));
     IREE_RETURN_IF_ERROR(loom_liveness_json_write_type(
         module, type_print_options, value->type, stream));
   } else {
     IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, "null,\"type\":null"));
+        loom_json_object_write_null_field(&object, IREE_SV("name")));
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_write_null_field(&object, IREE_SV("type")));
   }
-  return loom_output_stream_write_cstring(stream, "}");
+  return loom_json_object_end(&object);
 }
 
 static iree_status_t loom_liveness_json_write_value_id_array(
     const loom_value_id_t* values, iree_host_size_t count,
     loom_output_stream_t* stream) {
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '['));
+  loom_json_array_writer_t array;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &array));
   for (iree_host_size_t i = 0; i < count; ++i) {
-    if (i > 0) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, ','));
-    }
     IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_format(stream, "%u", (unsigned)values[i]));
+        loom_json_array_write_uint32_element(&array, (uint32_t)values[i]));
   }
-  return loom_output_stream_write_char(stream, ']');
+  return loom_json_array_end(&array);
 }
 
 static iree_status_t loom_liveness_json_write_value_class(
     const loom_liveness_analysis_t* analysis,
     loom_liveness_value_class_t value_class, loom_output_stream_t* stream) {
   (void)analysis;
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, "{\"type_kind\":%u,\"type_kind_name\":",
-      (unsigned)value_class.type_kind));
-  IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
-      stream, loom_liveness_type_kind_name(value_class.type_kind)));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, ",\"element_type\":%u,\"element_type_name\":",
-      (unsigned)value_class.element_type));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("type_kind"), (uint32_t)value_class.type_kind));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("type_kind_name"),
+      loom_liveness_type_kind_name(value_class.type_kind)));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("element_type"), (uint32_t)value_class.element_type));
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_begin_field(&object, IREE_SV("element_type_name")));
   IREE_RETURN_IF_ERROR(loom_liveness_json_write_scalar_name_or_null(
       value_class.element_type, stream));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(
-      stream, ",\"register_descriptor_set\":"));
   if (value_class.type_kind == LOOM_TYPE_REGISTER) {
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-        stream, "%" PRIu64 ",\"register_class_id\":%u",
-        value_class.register_descriptor_set_stable_id,
-        (unsigned)value_class.register_class_id));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+        &object, IREE_SV("register_descriptor_set"),
+        value_class.register_descriptor_set_stable_id));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &object, IREE_SV("register_class_id"),
+        (uint32_t)value_class.register_class_id));
   } else {
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(
-        stream, "null,\"register_class_id\":null"));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_null_field(
+        &object, IREE_SV("register_descriptor_set")));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_null_field(
+        &object, IREE_SV("register_class_id")));
   }
-  return loom_output_stream_write_cstring(stream, "}");
+  return loom_json_object_end(&object);
 }
 
 static int32_t loom_liveness_json_block_index(
@@ -174,36 +179,47 @@ static iree_status_t loom_liveness_json_write_block(
     const loom_liveness_analysis_t* analysis, iree_host_size_t block_index,
     loom_output_stream_t* stream) {
   const loom_liveness_block_info_t* block_info = &analysis->blocks[block_index];
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, "{\"index\":%zu,\"label\":", (size_t)block_index));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("index"), block_index));
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(&object, IREE_SV("label")));
   IREE_RETURN_IF_ERROR(loom_liveness_json_write_string_or_null(
       analysis->module, block_info->block->label_id, stream));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, ",\"start_point\":%u,\"end_point\":%u,\"live_in\":",
-      block_info->start_point, block_info->end_point));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("start_point"), block_info->start_point));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("end_point"), block_info->end_point));
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_begin_field(&object, IREE_SV("live_in")));
   IREE_RETURN_IF_ERROR(loom_liveness_json_write_value_id_array(
       block_info->live_in_values, block_info->live_in_count, stream));
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"live_out\":"));
+      loom_json_object_begin_field(&object, IREE_SV("live_out")));
   IREE_RETURN_IF_ERROR(loom_liveness_json_write_value_id_array(
       block_info->live_out_values, block_info->live_out_count, stream));
-  return loom_output_stream_write_cstring(stream, "}");
+  return loom_json_object_end(&object);
 }
 
 static iree_status_t loom_liveness_json_write_interval(
     const loom_liveness_analysis_t* analysis,
     const loom_text_print_options_t* type_print_options,
     const loom_liveness_interval_t* interval, loom_output_stream_t* stream) {
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{\"value\":"));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(&object, IREE_SV("value")));
   IREE_RETURN_IF_ERROR(loom_liveness_json_write_value(
       analysis, type_print_options, interval->value_id, stream));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ",\"class\":"));
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(&object, IREE_SV("class")));
   IREE_RETURN_IF_ERROR(loom_liveness_json_write_value_class(
       analysis, interval->value_class, stream));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, ",\"start_point\":%u,\"end_point\":%u,\"unit_count\":%u}",
-      interval->start_point, interval->end_point, interval->unit_count));
-  return iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("start_point"), interval->start_point));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("end_point"), interval->end_point));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("unit_count"), interval->unit_count));
+  return loom_json_object_end(&object);
 }
 
 static iree_status_t loom_liveness_json_write_nullable_i32(
@@ -222,20 +238,25 @@ static iree_status_t loom_liveness_json_write_pressure_summary(
       block_index < 0
           ? -1
           : loom_liveness_json_op_index(summary->peak_block, summary->peak_op);
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{\"class\":"));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(&object, IREE_SV("class")));
   IREE_RETURN_IF_ERROR(loom_liveness_json_write_value_class(
       analysis, summary->value_class, stream));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, ",\"peak_live_units\":%u,\"peak_live_values\":%u,\"peak_block\":",
-      summary->peak_live_units, summary->peak_live_values));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("peak_live_units"), summary->peak_live_units));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("peak_live_values"), summary->peak_live_values));
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_begin_field(&object, IREE_SV("peak_block")));
   IREE_RETURN_IF_ERROR(
       loom_liveness_json_write_nullable_i32(stream, block_index));
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(stream, ",\"peak_op\":"));
+      loom_json_object_begin_field(&object, IREE_SV("peak_op")));
   IREE_RETURN_IF_ERROR(loom_liveness_json_write_nullable_i32(stream, op_index));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, ",\"peak_point\":%u}", summary->peak_point));
-  return iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &object, IREE_SV("peak_point"), summary->peak_point));
+  return loom_json_object_end(&object);
 }
 
 iree_status_t loom_liveness_format_json(
@@ -244,35 +265,44 @@ iree_status_t loom_liveness_format_json(
     iree_string_builder_t* builder) {
   loom_output_stream_t stream;
   loom_output_stream_for_builder(builder, &stream);
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      &stream,
-      "{\"format\":\"loom.liveness.v0\",\"is_cfg\":%s,\"block_count\":%zu,"
-      "\"value_count\":%zu,\"blocks\":[",
-      analysis->is_cfg ? "true" : "false", (size_t)analysis->block_count,
-      (size_t)analysis->value_count));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(&stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("format"), IREE_SV("loom.liveness.v0")));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
+      &object, IREE_SV("is_cfg"), analysis->is_cfg));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("block_count"), analysis->block_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("value_count"), analysis->value_count));
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_begin_field(&object, IREE_SV("blocks")));
+  loom_json_array_writer_t blocks;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(&stream, &blocks));
   for (iree_host_size_t i = 0; i < analysis->block_count; ++i) {
-    if (i > 0) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(&stream, ','));
-    }
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&blocks));
     IREE_RETURN_IF_ERROR(loom_liveness_json_write_block(analysis, i, &stream));
   }
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&blocks));
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(&stream, "],\"intervals\":["));
+      loom_json_object_begin_field(&object, IREE_SV("intervals")));
+  loom_json_array_writer_t intervals;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(&stream, &intervals));
   for (iree_host_size_t i = 0; i < analysis->interval_count; ++i) {
-    if (i > 0) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(&stream, ','));
-    }
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&intervals));
     IREE_RETURN_IF_ERROR(loom_liveness_json_write_interval(
         analysis, type_print_options, &analysis->intervals[i], &stream));
   }
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&intervals));
   IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_cstring(&stream, "],\"pressure_summaries\":["));
+      loom_json_object_begin_field(&object, IREE_SV("pressure_summaries")));
+  loom_json_array_writer_t pressure_summaries;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(&stream, &pressure_summaries));
   for (iree_host_size_t i = 0; i < analysis->pressure_summary_count; ++i) {
-    if (i > 0) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(&stream, ','));
-    }
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&pressure_summaries));
     IREE_RETURN_IF_ERROR(loom_liveness_json_write_pressure_summary(
         analysis, &analysis->pressure_summaries[i], &stream));
   }
-  return loom_output_stream_write_cstring(&stream, "]}");
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&pressure_summaries));
+  return loom_json_object_end(&object);
 }

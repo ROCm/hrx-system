@@ -9,6 +9,7 @@ load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "iree_select",
     "loom_cc_binary",
+    "loom_cc_library",
     "loom_config_compatible_with",
 )
 
@@ -32,10 +33,6 @@ _AMDGPU_COMPILE_DEPS = iree_select({
     ],
     "//conditions:default": [],
 })
-
-_AMDGPU_ARTIFACTS_COMPATIBLE_WITH = loom_config_compatible_with([
-    "//loom/config/target:amdgpu_artifacts",
-])
 
 _IREE_VM_COMPILE_COPTS = iree_select({
     "//loom/config/emit:iree_vm": [
@@ -78,7 +75,33 @@ _LLVMIR_COMPILE_DEPS = iree_select({
     "//loom/config/target:llvmir_artifacts": [
         "//loom/src/loom/target/arch/llvmir:provider",
         "//loom/src/loom/target/emit/llvmir:artifact_emitter",
+    ],
+    "//conditions:default": [],
+})
+
+_LLVMIR_AMDGPU_TARGET_ENV_COPTS = iree_select({
+    "//loom/config/target:llvmir_amdgpu_target_env": [
+        "-DLOOM_COMPILE_HAVE_LLVMIR_AMDGPU_TARGET_ENV=1",
+    ],
+    "//conditions:default": [],
+})
+
+_LLVMIR_AMDGPU_TARGET_ENV_DEPS = iree_select({
+    "//loom/config/target:llvmir_amdgpu_target_env": [
         "//loom/src/loom/target/emit/llvmir/amdgpu:target_env",
+    ],
+    "//conditions:default": [],
+})
+
+_LLVMIR_X86_TARGET_ENV_COPTS = iree_select({
+    "//loom/config/target:llvmir_x86_target_env": [
+        "-DLOOM_COMPILE_HAVE_LLVMIR_X86_TARGET_ENV=1",
+    ],
+    "//conditions:default": [],
+})
+
+_LLVMIR_X86_TARGET_ENV_DEPS = iree_select({
+    "//loom/config/target:llvmir_x86_target_env": [
         "//loom/src/loom/target/emit/llvmir/x86:target_env",
     ],
     "//conditions:default": [],
@@ -88,11 +111,32 @@ _LLVMIR_ARTIFACTS_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/target:llvmir_artifacts",
 ])
 
+loom_cc_library(
+    name = "command_backend",
+    srcs = ["command_backend.c"],
+    hdrs = ["command_backend.h"],
+    deps = [
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/link:module_index",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/command",
+        "//loom/src/loom/pass:builtin_registry",
+        "//loom/src/loom/target:entry_selection",
+        "//loom/src/loom/target/arch/cmd:artifact_set",
+        "//loom/src/loom/target/arch/cmd/lower:program_plan_index",
+        "//loom/src/loom/tooling/execution:session",
+        "//loom/src/loom/tooling/io:file",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
 loom_cc_binary(
     name = "loom-compile",
     srcs = ["loom-compile.c"],
-    copts = _AMDGPU_COMPILE_COPTS + _IREE_VM_COMPILE_COPTS + _SPIRV_VULKAN_COMPILE_COPTS + _LLVMIR_COMPILE_COPTS,
+    copts = _AMDGPU_COMPILE_COPTS + _IREE_VM_COMPILE_COPTS + _SPIRV_VULKAN_COMPILE_COPTS + _LLVMIR_COMPILE_COPTS + _LLVMIR_AMDGPU_TARGET_ENV_COPTS + _LLVMIR_X86_TARGET_ENV_COPTS,
     deps = [
+        ":command_backend",
         "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/format/text:printer",
@@ -101,9 +145,12 @@ loom_cc_binary(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/sanitizer:options",
-        "//loom/src/loom/target:artifact_manifest",
         "//loom/src/loom/target:entry_selection",
         "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target:module_specialization",
+        "//loom/src/loom/target/arch/cmd:artifact_set",
+        "//loom/src/loom/target/arch/cmd:provider",
+        "//loom/src/loom/target/reporting:artifact_manifest",
         "//loom/src/loom/tooling/cli:help",
         "//loom/src/loom/tooling/compile:pipeline",
         "//loom/src/loom/tooling/config",
@@ -119,33 +166,23 @@ loom_cc_binary(
         "//loom/src/loom/tooling/pass:trace_cli",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/io:byte_sequence",
         "//runtime/src/iree/io:file_handle",
-    ] + _AMDGPU_COMPILE_DEPS + _IREE_VM_COMPILE_DEPS + _SPIRV_VULKAN_COMPILE_DEPS + _LLVMIR_COMPILE_DEPS,
+    ] + _AMDGPU_COMPILE_DEPS + _IREE_VM_COMPILE_DEPS + _SPIRV_VULKAN_COMPILE_DEPS + _LLVMIR_COMPILE_DEPS + _LLVMIR_AMDGPU_TARGET_ENV_DEPS + _LLVMIR_X86_TARGET_ENV_DEPS,
 )
 
 iree_execution_test_suite(
     name = "execution_test",
     data = [
+        "command_artifacts.loom",
         "rooted_template_provider.loom",
+        "//loom/src/loom/tools/loom-link:testdata/target_profile_template_selection.loom",
     ],
     manifests = ["loom-compile.test.json"],
     tags = ["hostonly"],
     tools = {
         "loom-compile": ":loom-compile",
         "loom-format": "//loom/src/loom/tools/loom-format",
-    },
-)
-
-iree_execution_test_suite(
-    name = "amdgpu_execution_test",
-    data = [
-        "selected_root_amdgpu.loom",
-    ],
-    manifests = ["loom-compile-amdgpu.test.json"],
-    tags = ["hostonly"],
-    target_compatible_with = _AMDGPU_ARTIFACTS_COMPATIBLE_WITH,
-    tools = {
-        "loom-compile": ":loom-compile",
     },
 )
 

@@ -1,0 +1,67 @@
+// GFX11 wave32 target providing the physical WMMA fragment payloads compared
+// below.
+amdgpu.target<gfx11-generic> @fragment_repack_gfx11_wave32 {subgroup_size = 32}
+
+// Compare the explicit BF16 workgroup round trip used by online attention with
+// the direct in-register result-to-LHS fragment repack.
+kernel.def target(@fragment_repack_gfx11_wave32) @fragment_repack_roundtrip_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %rhs: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %fragment_origin = index.constant 0 : index
+  %tile_extent = index.constant 16 : index
+  %scratch_bytes = index.constant 512 : offset
+  %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %input_view = buffer.view %input[%base] : buffer -> view<16x16xf32>
+  %rhs_view = buffer.view %rhs[%base] : buffer -> view<16x16xbf16, %rhs_layout>
+  %output_view = buffer.view %output[%base] : buffer -> view<16x16xf32>
+  %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<16x16xbf16>
+  %zero_accumulator = vector.constant 0.0 : vector<8xf32>
+  %init = vector.fragment<init> %zero_accumulator shape [%tile_extent, %tile_extent] : vector<8xf32>
+  %result = vector.fragment.load<result> %input_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xf32> -> vector<8xf32>
+  vector.fragment.store<result> %result, %scratch_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<16x16xbf16>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %lhs = vector.fragment.load<lhs> %scratch_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xbf16> -> vector<16xbf16>
+  %rhs_fragment = vector.fragment.load<rhs> %rhs_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xbf16, %rhs_layout> -> vector<16xbf16>
+  %product = vector.mma %lhs, %rhs_fragment, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  vector.fragment.store<result> %product, %output_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<16x16xf32>
+  kernel.return
+}
+
+kernel.def target(@fragment_repack_gfx11_wave32) @fragment_repack_direct_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %rhs: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %fragment_origin = index.constant 0 : index
+  %tile_extent = index.constant 16 : index
+  %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %input_view = buffer.view %input[%base] : buffer -> view<16x16xf32>
+  %rhs_view = buffer.view %rhs[%base] : buffer -> view<16x16xbf16, %rhs_layout>
+  %output_view = buffer.view %output[%base] : buffer -> view<16x16xf32>
+  %zero_accumulator = vector.constant 0.0 : vector<8xf32>
+  %init = vector.fragment<init> %zero_accumulator shape [%tile_extent, %tile_extent] : vector<8xf32>
+  %result = vector.fragment.load<result> %input_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xf32> -> vector<8xf32>
+  %lhs = vector.fragment.repack<lhs> %result shape [%tile_extent, %tile_extent] : vector<8xf32> -> vector<16xbf16>
+  %rhs_fragment = vector.fragment.load<rhs> %rhs_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xbf16, %rhs_layout> -> vector<16xbf16>
+  %product = vector.mma %lhs, %rhs_fragment, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  vector.fragment.store<result> %product, %output_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<16x16xf32>
+  kernel.return
+}
+
+check.case public @fragment_repack_bf16_equivalence_case {
+  %input = check.generate.iota offset(0.0) step(0.00390625) : tensor<16x16xf32>
+  %rhs = check.generate.iota offset(0.5) step(0.00390625) : tensor<16x16xbf16>
+  %roundtrip_output = check.generate.fill value(0.0) : tensor<16x16xf32>
+  %direct_output = check.generate.fill value(0.0) : tensor<16x16xf32>
+  kernel.launch @fragment_repack_roundtrip_bf16(%input, %rhs, %roundtrip_output) : (tensor<16x16xf32>, tensor<16x16xbf16>, tensor<16x16xf32>)
+  kernel.launch @fragment_repack_direct_bf16(%input, %rhs, %direct_output) : (tensor<16x16xf32>, tensor<16x16xbf16>, tensor<16x16xf32>)
+  check.expect.close actual(%direct_output) expected(%roundtrip_output) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xf32>
+  check.return
+}
+
+check.benchmark<@fragment_repack_bf16_equivalence_case>

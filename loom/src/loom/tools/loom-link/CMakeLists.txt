@@ -9,27 +9,43 @@
 
 iree_add_all_subdirs()
 
+set(_loom_link_platform_copts "")
+if(LOOM_TARGET_ARCH_AMDGPU)
+  list(APPEND _loom_link_platform_copts "-DLOOM_LINK_HAVE_AMDGPU=1")
+endif()
+set(_loom_link_platform_deps "")
+if(LOOM_TARGET_ARCH_AMDGPU)
+  list(APPEND _loom_link_platform_deps loom::target::arch::amdgpu::artifact_profile)
+endif()
 loom_cc_binary(
   NAME
     loom-link
   SRCS
     "loom-link.c"
+  COPTS
+    ${_loom_link_platform_copts}
   DEPS
     iree::base
     iree::base::internal::arena
     iree::base::tooling::flags
     iree::io::file_handle
     iree::io::stream
+    loom::codegen::low::repr
+    loom::codegen::low::text_asm
     loom::error::diagnostic
-    loom::format::bytecode::reader
     loom::format::bytecode::writer
     loom::format::text::parser
     loom::format::text::printer
     loom::ir
-    loom::link::linker
+    loom::link::dependency_analysis
+    loom::link::dependency_report
+    loom::link::index_materializer
     loom::link::module_index
     loom::link::planner
     loom::target::configured::provider
+    loom::target::entry_selection
+    loom::target::module_specialization
+    loom::target::provider
     loom::tooling::cli::help
     loom::tooling::config
     loom::tooling::context
@@ -37,6 +53,7 @@ loom_cc_binary(
     loom::tools::loom-format::convert
     loom::util::stream
     loom::verify
+    ${_loom_link_platform_deps}
 )
 
 iree_execution_test_suite(
@@ -47,6 +64,16 @@ iree_execution_test_suite(
   TOOLS
     "loom-format=loom::tools::loom-format"
     "loom-link=::loom-link"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/link/testdata/provider_roots/direct.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/link/testdata/provider_roots/transitive.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/link/testdata/provider_roots/unused.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/dependency_component.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/dependency_direct.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/dependency_transitive.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/merge_inline_kernel_helper.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/merge_many_symbols.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/target_profile_template_selection.loom"
   LABELS
     "hostonly"
 )

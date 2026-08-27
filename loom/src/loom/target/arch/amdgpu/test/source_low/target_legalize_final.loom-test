@@ -1,6 +1,6 @@
 // RUN: pass target-legalize{mode=final}
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @index_uniform_madd(%row_i32: i32, %column_i32: i32) -> (index) {
   %row_index = index.cast %row_i32 : i32 to index
@@ -14,7 +14,7 @@ func.def target(@target) @index_uniform_madd(%row_i32: i32, %column_i32: i32) ->
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_match_all_f32_rejected() {
   %c1 = index.constant 1 : index
@@ -29,4 +29,70 @@ kernel.def target(@target) @subgroup_match_all_f32_rejected() {
   kernel.return
 ^else:
   kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @floating_atomic_add_reference(%input: buffer, %index: index, %reduce_delta: f32, %rmw_delta: f32) -> (f32) {
+  %base = index.constant 0 : offset
+  %bounded_index = index.assume %index [range(%index, 0, 15)] : index
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %view = buffer.view %global[%base] : buffer -> view<16xf32>
+  view.atomic.reduce<addf> %reduce_delta, %view[%bounded_index] {ordering = release, scope = device} : f32, view<16xf32>
+  %old = view.atomic.rmw<addf> %rmw_delta, %view[3] {ordering = acq_rel, scope = device} : f32, view<16xf32> -> f32
+  func.return %old : f32
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @floating_atomic_add_reference(%input: buffer, %index: index, %reduce_delta: f32, %rmw_delta: f32) -> (f32) {
+  %base = index.constant 0 : offset
+  %bounded_index = index.assume %index [range(%index, 0, 15)] : index
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %view = buffer.view %global[%base] : buffer -> view<16xf32>
+  %19 = scalar.constant 0.0 : f32
+  %22 = scf.while(%20 = %19 : f32) -> (f32) {
+    %23 = scalar.addf %20, %reduce_delta : f32
+    %24 = view.atomic.cmpxchg %20, %23, %view[%bounded_index] {failure_ordering = relaxed, scope = device, success_ordering = release} : f32, view<16xf32> -> f32
+    %25 = scalar.bitcast %20 : f32 to i32
+    %26 = scalar.bitcast %24 : f32 to i32
+    %27 = scalar.cmpi ne, %26, %25 : i32
+    scf.condition %27, %24 : i1, f32
+  } do(%21: f32) {
+    scf.yield %21 : f32
+  }
+  %10 = scalar.constant 0.0 : f32
+  %old = scf.while(%11 = %10 : f32) -> (f32) {
+    %14 = scalar.addf %11, %rmw_delta : f32
+    %15 = view.atomic.cmpxchg %11, %14, %view[3] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : f32, view<16xf32> -> f32
+    %16 = scalar.bitcast %11 : f32 to i32
+    %17 = scalar.bitcast %15 : f32 to i32
+    %18 = scalar.cmpi ne, %17, %16 : i32
+    scf.condition %18, %15 : i1, f32
+  } do(%12: f32) {
+    scf.yield %12 : f32
+  }
+  func.return %old : f32
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @hadamard_transform(%input: vector<4xf32>) -> (vector<4xf32>) {
+  %transform = encoding.define #transform.hadamard : encoding<transform>
+  %result = vector.transform %input, %transform : vector<4xf32>, encoding<transform> -> vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @hadamard_transform(%input: vector<4xf32>) -> (vector<4xf32>) {
+  %transform = encoding.define #transform.hadamard : encoding<transform>
+  %result = vector.transform %input, %transform : vector<4xf32>, encoding<transform> -> vector<4xf32>
+  func.return %result : vector<4xf32>
 }

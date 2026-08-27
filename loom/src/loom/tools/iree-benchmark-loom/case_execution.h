@@ -20,13 +20,25 @@
 extern "C" {
 #endif
 
+// Invoked immediately after one concrete case sample executes successfully.
+typedef void(IREE_API_PTR* iree_benchmark_loom_case_sample_observer_fn_t)(
+    void* user_data, iree_host_size_t case_sample_ordinal);
+
+typedef struct iree_benchmark_loom_case_sample_observer_t {
+  // Optional observer callback, or NULL when no sample evidence is required.
+  iree_benchmark_loom_case_sample_observer_fn_t fn;
+  // Caller-owned context passed to |fn|.
+  void* user_data;
+} iree_benchmark_loom_case_sample_observer_t;
+
 // Maps a benchmark-local sample ordinal to its underlying case sample ordinal.
 iree_host_size_t iree_benchmark_loom_case_sample_from_benchmark_sample(
     const loom_testbench_benchmark_plan_t* benchmark_plan,
     const loom_testbench_case_plan_t* case_plan,
     iree_host_size_t benchmark_sample_ordinal);
 
-// Emits result/profile events for every logical benchmark alias of |work_item|.
+// Emits result/profile-replay events for every logical benchmark alias of
+// |work_item|.
 iree_status_t iree_benchmark_loom_emit_work_item_result_aliases(
     const iree_benchmark_loom_run_identity_t* run,
     const loom_testbench_module_plan_t* module_plan,
@@ -47,8 +59,8 @@ iree_status_t iree_benchmark_loom_run_case_correctness_range(
     const loom_testbench_benchmark_plan_t* benchmark_plan,
     iree_host_size_t case_index,
     const loom_testbench_case_execution_options_t* execution_options,
-    iree_string_view_t sample_compilation, iree_host_size_t begin_sample,
-    iree_host_size_t end_sample, iree_arena_allocator_t* arena,
+    iree_host_size_t begin_sample, iree_host_size_t end_sample,
+    iree_arena_allocator_t* arena,
     const iree_benchmark_loom_event_sink_t* event_sink,
     iree_host_size_t* out_sample_count,
     iree_host_size_t* out_failed_sample_count);
@@ -61,9 +73,19 @@ iree_status_t iree_benchmark_loom_run_work_item_correctness_range(
     const iree_benchmark_loom_work_item_t* work_item,
     const loom_testbench_case_execution_options_t* execution_options,
     iree_arena_allocator_t* arena,
+    iree_benchmark_loom_case_sample_observer_t sample_observer,
     const iree_benchmark_loom_event_sink_t* event_sink,
     iree_host_size_t* out_sample_count,
     iree_host_size_t* out_failed_sample_count);
+
+// Measures one prepared case_end_to_end physical work item.
+iree_status_t iree_benchmark_loom_measure_case_end_to_end_work_item(
+    const loom_testbench_module_plan_t* module_plan,
+    const iree_benchmark_loom_work_plan_t* work_plan,
+    const iree_benchmark_loom_work_item_t* work_item,
+    const loom_testbench_case_execution_options_t* execution_options,
+    iree_arena_allocator_t* execution_arena, iree_allocator_t allocator,
+    iree_benchmark_loom_benchmark_result_t* out_result);
 
 // Runs one case_end_to_end physical work item and emits logical alias events.
 iree_status_t iree_benchmark_loom_run_case_end_to_end_work_item(

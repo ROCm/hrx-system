@@ -27,7 +27,7 @@ bool iree_hal_amdxdna_executable_format_supported(
 // iree_hal_executable_release).
 iree_status_t iree_hal_amdxdna_native_executable_create(
     struct iree_hal_amdxdna_native_device_t* native_device,
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_load_params_t* load_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable);
 
 // Preloads native contexts for self-contained entry points. This is executable

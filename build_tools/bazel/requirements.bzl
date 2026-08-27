@@ -10,6 +10,75 @@ Requirement specs are Starlark values consumed by macros during BUILD loading.
 `declare_requirements` emits matching queryable targets for audits and tooling.
 """
 
+_INCOMPATIBLE_TARGET = [Label("@platforms//:incompatible")]
+
+def _requirement_tags(kind, requirements):
+    return [
+        "iree-%s-requirement=%s" % (kind, requirement.id)
+        for requirement in requirements
+    ]
+
+def _append(values, appended_values):
+    if values == None:
+        values = []
+    return values + appended_values
+
+def apply_build_requirements(kwargs, requirements):
+    """Applies explicit build requirements to target keyword arguments.
+
+    Args:
+      kwargs: Rule or macro keyword arguments.
+      requirements: Build requirement specs to apply.
+
+    Returns:
+      New keyword arguments with compatibility selectors and audit tags.
+    """
+    result = dict(kwargs)
+    target_compatible_with = result.get("target_compatible_with")
+    if target_compatible_with == None:
+        target_compatible_with = []
+    for requirement in requirements:
+        if requirement.phase != "build":
+            fail("requirement %s is not a build requirement" % requirement.id)
+        target_compatible_with = target_compatible_with + select({
+            requirement.enabled_by: [],
+            "//conditions:default": _INCOMPATIBLE_TARGET,
+        })
+    result["target_compatible_with"] = target_compatible_with
+    result["tags"] = _append(
+        result.get("tags"),
+        _requirement_tags("build", requirements),
+    )
+    return result
+
+def apply_test_requirements(
+        kwargs,
+        build_requirements = [],
+        run_requirements = [],
+        resource_group = None):
+    """Applies explicit build and runtime requirements to test arguments.
+
+    Args:
+      kwargs: Test rule or macro keyword arguments.
+      build_requirements: Build requirement specs to apply.
+      run_requirements: Runtime resource requirement specs to apply.
+      resource_group: Optional local resource group for the test.
+
+    Returns:
+      New keyword arguments with compatibility, audit, and resource policy.
+    """
+    result = apply_build_requirements(kwargs, build_requirements)
+    for requirement in run_requirements:
+        if requirement.phase != "run":
+            fail("requirement %s is not a run requirement" % requirement.id)
+    result["tags"] = _append(
+        result.get("tags"),
+        _requirement_tags("run", run_requirements),
+    )
+    if resource_group and not result.get("resource_group"):
+        result["resource_group"] = resource_group
+    return result
+
 IreeRequirementInfo = provider(
     doc = "Describes a semantic build or run requirement.",
     fields = {
@@ -91,6 +160,7 @@ _requirement_target = rule(
 )
 
 def _target_name(label):
+    label = str(label)
     if ":" in label:
         return label.rsplit(":", 1)[1]
     return label.rsplit("/", 1)[1]
@@ -107,7 +177,7 @@ def declare_requirements(name, requirements):
             name = _target_name(requirement.label),
             cmake_condition = requirement.cmake_condition or "",
             cmake_label = requirement.cmake_label or "",
-            enabled_by = requirement.enabled_by or "",
+            enabled_by = str(requirement.enabled_by or ""),
             phase = requirement.phase,
             requirement_id = requirement.id,
             skip_contract = requirement.skip_contract or "",

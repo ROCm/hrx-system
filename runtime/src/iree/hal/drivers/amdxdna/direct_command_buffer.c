@@ -442,42 +442,48 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_execution_barrier(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_amdxdna_direct_command_buffer_signal_event(
-    iree_hal_command_buffer_t* base_command_buffer, iree_hal_event_t* event,
-    iree_hal_execution_stage_t source_stage_mask) {
-  (void)base_command_buffer;
-  (void)event;
-  (void)source_stage_mask;
-  // The amdxdna direct command buffer executes synchronously against a single
-  // in-order queue today, so recording an event signal has no extra device work
-  // to enqueue.
-  return iree_ok_status();
-}
-
-static iree_status_t iree_hal_amdxdna_direct_command_buffer_reset_event(
-    iree_hal_command_buffer_t* base_command_buffer, iree_hal_event_t* event,
-    iree_hal_execution_stage_t source_stage_mask) {
-  (void)base_command_buffer;
-  (void)event;
-  (void)source_stage_mask;
-  return iree_ok_status();
-}
-
-static iree_status_t iree_hal_amdxdna_direct_command_buffer_wait_events(
+static iree_status_t iree_hal_amdxdna_direct_command_buffer_atomic_wait(
     iree_hal_command_buffer_t* base_command_buffer,
-    iree_host_size_t event_count, const iree_hal_event_t** events,
     iree_hal_execution_stage_t source_stage_mask,
     iree_hal_execution_stage_t target_stage_mask,
-    iree_host_size_t memory_barrier_count,
-    const iree_hal_memory_barrier_t* memory_barriers,
-    iree_host_size_t buffer_barrier_count,
-    const iree_hal_buffer_barrier_t* buffer_barriers) {
-  (void)event_count;
-  (void)events;
-  return iree_hal_amdxdna_direct_command_buffer_execution_barrier(
-      base_command_buffer, source_stage_mask, target_stage_mask,
-      IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, memory_barrier_count,
-      memory_barriers, buffer_barrier_count, buffer_barriers);
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_wait_params_t params) {
+  (void)base_command_buffer;
+  (void)source_stage_mask;
+  (void)target_stage_mask;
+  (void)target_ref;
+  (void)params;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "amdxdna command buffers do not support atomic waits");
+}
+
+static iree_status_t iree_hal_amdxdna_direct_command_buffer_atomic_store(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_store_params_t params) {
+  (void)base_command_buffer;
+  (void)source_stage_mask;
+  (void)target_stage_mask;
+  (void)target_ref;
+  (void)params;
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "amdxdna command buffers do not support atomic stores");
+}
+
+static iree_status_t iree_hal_amdxdna_direct_command_buffer_atomic_rmw(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_rmw_params_t params) {
+  (void)base_command_buffer;
+  (void)source_stage_mask;
+  (void)target_stage_mask;
+  (void)target_ref;
+  (void)params;
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "amdxdna command buffers do not support atomic read-modify-write");
 }
 
 static iree_status_t iree_hal_amdxdna_direct_command_buffer_update_buffer(
@@ -3045,9 +3051,9 @@ const iree_hal_command_buffer_vtable_t
             iree_hal_amdxdna_direct_command_buffer_end_debug_group,
         .execution_barrier =
             iree_hal_amdxdna_direct_command_buffer_execution_barrier,
-        .signal_event = iree_hal_amdxdna_direct_command_buffer_signal_event,
-        .reset_event = iree_hal_amdxdna_direct_command_buffer_reset_event,
-        .wait_events = iree_hal_amdxdna_direct_command_buffer_wait_events,
+        .atomic_wait = iree_hal_amdxdna_direct_command_buffer_atomic_wait,
+        .atomic_store = iree_hal_amdxdna_direct_command_buffer_atomic_store,
+        .atomic_rmw = iree_hal_amdxdna_direct_command_buffer_atomic_rmw,
         .advise_buffer = iree_hal_amdxdna_direct_command_buffer_advise_buffer,
         .fill_buffer = iree_hal_amdxdna_direct_command_buffer_fill_buffer,
         .update_buffer = iree_hal_amdxdna_direct_command_buffer_update_buffer,

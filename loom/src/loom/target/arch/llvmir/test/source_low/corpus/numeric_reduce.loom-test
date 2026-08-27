@@ -6,19 +6,19 @@ llvmir.target<object> @target {
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
 func.def target(@target) @i32_reduce_add(%input: buffer, %output: buffer) {
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<4xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<1xi32, #dense>
-  %loaded = vector.load %input_view[0] : view<4xi32, #dense> -> vector<4xi32>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
+  %loaded = vector.load %input_view[0] : view<4xi32> -> vector<4xi32>
   %init = scalar.constant 0 : i32
   %sum = vector.reduce<addi> %loaded, %init : vector<4xi32>, i32
   %stored = vector.from_elements %sum : vector<1xi32>
-  vector.store %stored, %output_view[0] : vector<1xi32>, view<1xi32, #dense>
+  vector.store %stored, %output_view[0] : vector<1xi32>, view<1xi32>
   func.return
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32_reduce_add(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_reduce_add(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm {
   %20 = load.i32 %input_view, 0
   %21 = load.i32 %input_view, 4
   %22 = add.i32 %20, %21
@@ -37,19 +37,19 @@ llvmir.target<object> @target {
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
 func.def target(@target) @f32_reduce_add(%input: buffer, %output: buffer) {
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<4xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<1xf32, #dense>
-  %loaded = vector.load %input_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xf32>
+  %loaded = vector.load %input_view[0] : view<4xf32> -> vector<4xf32>
   %init = scalar.constant 0.0 : f32
   %sum = vector.reduce<addf> %loaded, %init : vector<4xf32>, f32
   %stored = vector.from_elements %sum : vector<1xf32>
-  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32, #dense>
+  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32>
   func.return
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32_reduce_add(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32_reduce_add(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm {
   %init = const.f32 0
   %21 = load.f32 %input_view, 0
   %22 = add.f32 %init, %21
@@ -70,19 +70,19 @@ llvmir.target<object> @target {
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
 func.def target(@target) @f32_reduce_add_fastmath(%input: buffer, %output: buffer) {
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<4xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<1xf32, #dense>
-  %loaded = vector.load %input_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xf32>
+  %loaded = vector.load %input_view[0] : view<4xf32> -> vector<4xf32>
   %init = scalar.constant 0.0 : f32
   %sum = vector.reduce<addf, reassoc|nnan|nsz> %loaded, %init : vector<4xf32>, f32
   %stored = vector.from_elements %sum : vector<1xf32>
-  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32, #dense>
+  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32>
   func.return
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32_reduce_add_fastmath(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32_reduce_add_fastmath(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm {
   %20 = load.f32 %input_view, 0
   %21 = load.f32 %input_view, 4
   %22 = add.f32 %20, %21 {fast_math_flags = 11}
@@ -100,52 +100,196 @@ llvmir.target<object> @target {
   triple = "loom-direct64-unknown-none",
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
+func.def target(@target) @f32x64_reduce_add_fastmath(%input: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xf32>
+  %loaded = vector.load %input_view[0] : view<64xf32> -> vector<64xf32>
+  %init = scalar.constant 0.0 : f32
+  %sum = vector.reduce<addf, reassoc|nnan|nsz> %loaded, %init : vector<64xf32>, f32
+  %stored = vector.from_elements %sum : vector<1xf32>
+  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32>
+  func.return
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32x64_reduce_add_fastmath(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm {
+  %140 = load.f32 %input_view, 0
+  %141 = load.f32 %input_view, 4
+  %142 = add.f32 %140, %141 {fast_math_flags = 11}
+  %143 = load.f32 %input_view, 8
+  %144 = load.f32 %input_view, 12
+  %145 = add.f32 %143, %144 {fast_math_flags = 11}
+  %146 = add.f32 %142, %145 {fast_math_flags = 11}
+  %147 = load.f32 %input_view, 16
+  %148 = load.f32 %input_view, 20
+  %149 = add.f32 %147, %148 {fast_math_flags = 11}
+  %150 = load.f32 %input_view, 24
+  %151 = load.f32 %input_view, 28
+  %152 = add.f32 %150, %151 {fast_math_flags = 11}
+  %153 = add.f32 %149, %152 {fast_math_flags = 11}
+  %154 = add.f32 %146, %153 {fast_math_flags = 11}
+  %155 = load.f32 %input_view, 32
+  %156 = load.f32 %input_view, 36
+  %157 = add.f32 %155, %156 {fast_math_flags = 11}
+  %158 = load.f32 %input_view, 40
+  %159 = load.f32 %input_view, 44
+  %160 = add.f32 %158, %159 {fast_math_flags = 11}
+  %161 = add.f32 %157, %160 {fast_math_flags = 11}
+  %162 = load.f32 %input_view, 48
+  %163 = load.f32 %input_view, 52
+  %164 = add.f32 %162, %163 {fast_math_flags = 11}
+  %165 = load.f32 %input_view, 56
+  %166 = load.f32 %input_view, 60
+  %167 = add.f32 %165, %166 {fast_math_flags = 11}
+  %168 = add.f32 %164, %167 {fast_math_flags = 11}
+  %169 = add.f32 %161, %168 {fast_math_flags = 11}
+  %170 = add.f32 %154, %169 {fast_math_flags = 11}
+  %171 = load.f32 %input_view, 64
+  %172 = load.f32 %input_view, 68
+  %173 = add.f32 %171, %172 {fast_math_flags = 11}
+  %174 = load.f32 %input_view, 72
+  %175 = load.f32 %input_view, 76
+  %176 = add.f32 %174, %175 {fast_math_flags = 11}
+  %177 = add.f32 %173, %176 {fast_math_flags = 11}
+  %178 = load.f32 %input_view, 80
+  %179 = load.f32 %input_view, 84
+  %180 = add.f32 %178, %179 {fast_math_flags = 11}
+  %181 = load.f32 %input_view, 88
+  %182 = load.f32 %input_view, 92
+  %183 = add.f32 %181, %182 {fast_math_flags = 11}
+  %184 = add.f32 %180, %183 {fast_math_flags = 11}
+  %185 = add.f32 %177, %184 {fast_math_flags = 11}
+  %186 = load.f32 %input_view, 96
+  %187 = load.f32 %input_view, 100
+  %188 = add.f32 %186, %187 {fast_math_flags = 11}
+  %189 = load.f32 %input_view, 104
+  %190 = load.f32 %input_view, 108
+  %191 = add.f32 %189, %190 {fast_math_flags = 11}
+  %192 = add.f32 %188, %191 {fast_math_flags = 11}
+  %193 = load.f32 %input_view, 112
+  %194 = load.f32 %input_view, 116
+  %195 = add.f32 %193, %194 {fast_math_flags = 11}
+  %196 = load.f32 %input_view, 120
+  %197 = load.f32 %input_view, 124
+  %198 = add.f32 %196, %197 {fast_math_flags = 11}
+  %199 = add.f32 %195, %198 {fast_math_flags = 11}
+  %200 = add.f32 %192, %199 {fast_math_flags = 11}
+  %201 = add.f32 %185, %200 {fast_math_flags = 11}
+  %202 = add.f32 %170, %201 {fast_math_flags = 11}
+  %203 = load.f32 %input_view, 128
+  %204 = load.f32 %input_view, 132
+  %205 = add.f32 %203, %204 {fast_math_flags = 11}
+  %206 = load.f32 %input_view, 136
+  %207 = load.f32 %input_view, 140
+  %208 = add.f32 %206, %207 {fast_math_flags = 11}
+  %209 = add.f32 %205, %208 {fast_math_flags = 11}
+  %210 = load.f32 %input_view, 144
+  %211 = load.f32 %input_view, 148
+  %212 = add.f32 %210, %211 {fast_math_flags = 11}
+  %213 = load.f32 %input_view, 152
+  %214 = load.f32 %input_view, 156
+  %215 = add.f32 %213, %214 {fast_math_flags = 11}
+  %216 = add.f32 %212, %215 {fast_math_flags = 11}
+  %217 = add.f32 %209, %216 {fast_math_flags = 11}
+  %218 = load.f32 %input_view, 160
+  %219 = load.f32 %input_view, 164
+  %220 = add.f32 %218, %219 {fast_math_flags = 11}
+  %221 = load.f32 %input_view, 168
+  %222 = load.f32 %input_view, 172
+  %223 = add.f32 %221, %222 {fast_math_flags = 11}
+  %224 = add.f32 %220, %223 {fast_math_flags = 11}
+  %225 = load.f32 %input_view, 176
+  %226 = load.f32 %input_view, 180
+  %227 = add.f32 %225, %226 {fast_math_flags = 11}
+  %228 = load.f32 %input_view, 184
+  %229 = load.f32 %input_view, 188
+  %230 = add.f32 %228, %229 {fast_math_flags = 11}
+  %231 = add.f32 %227, %230 {fast_math_flags = 11}
+  %232 = add.f32 %224, %231 {fast_math_flags = 11}
+  %233 = add.f32 %217, %232 {fast_math_flags = 11}
+  %234 = load.f32 %input_view, 192
+  %235 = load.f32 %input_view, 196
+  %236 = add.f32 %234, %235 {fast_math_flags = 11}
+  %237 = load.f32 %input_view, 200
+  %238 = load.f32 %input_view, 204
+  %239 = add.f32 %237, %238 {fast_math_flags = 11}
+  %240 = add.f32 %236, %239 {fast_math_flags = 11}
+  %241 = load.f32 %input_view, 208
+  %242 = load.f32 %input_view, 212
+  %243 = add.f32 %241, %242 {fast_math_flags = 11}
+  %244 = load.f32 %input_view, 216
+  %245 = load.f32 %input_view, 220
+  %246 = add.f32 %244, %245 {fast_math_flags = 11}
+  %247 = add.f32 %243, %246 {fast_math_flags = 11}
+  %248 = add.f32 %240, %247 {fast_math_flags = 11}
+  %249 = load.f32 %input_view, 224
+  %250 = load.f32 %input_view, 228
+  %251 = add.f32 %249, %250 {fast_math_flags = 11}
+  %252 = load.f32 %input_view, 232
+  %253 = load.f32 %input_view, 236
+  %254 = add.f32 %252, %253 {fast_math_flags = 11}
+  %255 = add.f32 %251, %254 {fast_math_flags = 11}
+  %256 = load.f32 %input_view, 240
+  %257 = load.f32 %input_view, 244
+  %258 = add.f32 %256, %257 {fast_math_flags = 11}
+  %259 = load.f32 %input_view, 248
+  %260 = load.f32 %input_view, 252
+  %261 = add.f32 %259, %260 {fast_math_flags = 11}
+  %262 = add.f32 %258, %261 {fast_math_flags = 11}
+  %263 = add.f32 %255, %262 {fast_math_flags = 11}
+  %264 = add.f32 %248, %263 {fast_math_flags = 11}
+  %265 = add.f32 %233, %264 {fast_math_flags = 11}
+  %stored = add.f32 %202, %265 {fast_math_flags = 11}
+  store.f32 %stored, %output_view, 0
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
 config.def @runtime.vector_width = 4 : index
 
 kernel.def target(@target) @f32_configured_width_square_reduce() {
-  %one = index.constant 1 : index
+  %singleton_dimension = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%singleton_dimension, %singleton_dimension, %singleton_dimension) workgroup_size(%workgroup_size, %singleton_dimension, %singleton_dimension) : index
 } launch(%input: buffer, %output: buffer) {
-  %zero_offset = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %lane0 = kernel.workitem.id<x> : index
   %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
   %vector_width = config.get @runtime.vector_width : index
   %vector_width_bounded = index.assume %vector_width [range(%vector_width, 2, 4)] : index
   %element_count = index.constant 256 : index
-  %input_view = buffer.view %input[%zero_offset] : buffer -> view<[%element_count]xf32, #dense>
-  %output_view = buffer.view %output[%zero_offset] : buffer -> view<1xf32, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<[%element_count]xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xf32>
   %linear0 = index.mul %lane, %vector_width_bounded : index
   %linear = index.assume %linear0 [range(%linear0, 0, 252)] : index
-  %loaded = vector.load %input_view[%linear] : view<[%element_count]xf32, #dense> -> vector<[%vector_width_bounded]xf32>
+  %loaded = vector.load %input_view[%linear] : view<[%element_count]xf32> -> vector<[%vector_width_bounded]xf32>
   %squared = vector.mulf<reassoc|nnan|ninf|nsz|contract> %loaded, %loaded : vector<[%vector_width_bounded]xf32>
-  %zero_f32 = scalar.constant 0.0 : f32
-  %sum = vector.reduce<addf, reassoc|nnan|ninf|nsz|contract> %squared, %zero_f32 : vector<[%vector_width_bounded]xf32>, f32
+  %initial_sum = scalar.constant 0.0 : f32
+  %sum = vector.reduce<addf, reassoc|nnan|ninf|nsz|contract> %squared, %initial_sum : vector<[%vector_width_bounded]xf32>, f32
   %stored = vector.from_elements %sum : vector<1xf32>
-  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32, #dense>
+  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_configured_width_square_reduce() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_configured_width_square_reduce() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %lane = kernel.workitem_id.x
-  %52 = const.i64 2
-  %linear = shl.i64 %lane, %52
-  %54 = load.indexed.f32 %input_view, %linear, 0, 16
+  %54 = load.indexed.f32 %input_view, %lane, 0, 16
   %55 = mul.f32 %54, %54 {fast_math_flags = 47}
-  %56 = const.i64 1
-  %57 = add.i64 %linear, %56
-  %58 = load.indexed.f32 %input_view, %57, 4, 16
-  %59 = fma.f32 %58, %58, %55
-  %60 = add.i64 %linear, %52
-  %61 = load.indexed.f32 %input_view, %60, 8, 16
-  %62 = fma.f32 %61, %61, %59
-  %63 = const.i64 3
-  %64 = add.i64 %linear, %63
-  %65 = load.indexed.f32 %input_view, %64, 12, 16
-  %stored = fma.f32 %65, %65, %62
+  %56 = load.indexed.f32 %input_view, %lane, 4, 16
+  %57 = fma.f32 %56, %56, %55
+  %58 = load.indexed.f32 %input_view, %lane, 8, 16
+  %59 = fma.f32 %58, %58, %57
+  %60 = load.indexed.f32 %input_view, %lane, 12, 16
+  %stored = fma.f32 %60, %60, %59
   store.f32 %stored, %output_view, 0
   return
 }
@@ -157,8 +301,8 @@ llvmir.target<object> @target {
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
 func.def target(@target) @i32_reduce_minui_select_sentinel(%values: vector<4xi32>) -> (i32) {
-  %zero = scalar.constant 0 : i32
-  %zeros = vector.splat %zero : vector<4xi32>
+  %empty_value = scalar.constant 0 : i32
+  %zeros = vector.splat %empty_value : vector<4xi32>
   %is_zero = vector.cmpi eq, %values, %zeros : vector<4xi32> -> vector<4xi1>
   %start = scalar.constant 0 : i32
   %step = scalar.constant 1 : i32
@@ -171,7 +315,7 @@ func.def target(@target) @i32_reduce_minui_select_sentinel(%values: vector<4xi32
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32_reduce_minui_select_sentinel(%values: reg<llvmir.i32 x4>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_reduce_minui_select_sentinel(%values: reg<llvmir.i32 x4>) -> (reg<llvmir.i32>) asm {
   %45 = const.i32 0
   %46 = const.i32 1
   %47 = const.i32 2

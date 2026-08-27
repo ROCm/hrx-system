@@ -31,8 +31,7 @@ iree_hal_buffer_params_t MakeQueueAllocaBufferParams() {
   iree_hal_buffer_params_t params = {0};
   params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
   params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  params.usage =
-      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE;
   return params;
 }
 
@@ -409,6 +408,8 @@ TEST_P(QueueAllocaTest, ExplicitFixedBlockPoolCrossQueueWaitFrontier) {
 // between the releasing dealloca and the next alloca. Depending on scheduling,
 // the dealloca may still be in flight or may have already published its death
 // frontier; both cases must leave the second allocation usable.
+// The initial host wait establishes queue 0 as the sole block owner before the
+// deallocation/reallocation race begins.
 TEST_P(QueueAllocaTest, ExplicitFixedBlockPoolPendingDeallocaWaitFrontier) {
   IREE_TRACE_SCOPE();
 
@@ -435,6 +436,9 @@ TEST_P(QueueAllocaTest, ExplicitFixedBlockPoolPendingDeallocaWaitFrontier) {
       queue0_params, allocation_size, IREE_HAL_ALLOCA_FLAG_NONE,
       queue0_buffer.out()));
   ASSERT_NE(queue0_buffer.get(), nullptr);
+  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(queue0_alloca_signal,
+                                              iree_infinite_timeout(),
+                                              IREE_ASYNC_WAIT_FLAG_NONE));
 
   SemaphoreList queue0_dealloca_signal(device_, {0}, {1});
   IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
@@ -806,7 +810,7 @@ TEST_P(QueueAllocaTest, BufferMetadata) {
   EXPECT_TRUE(iree_all_bits_set(iree_hal_buffer_allowed_usage(buffer),
                                 IREE_HAL_BUFFER_USAGE_TRANSFER));
   EXPECT_TRUE(iree_all_bits_set(iree_hal_buffer_allowed_usage(buffer),
-                                IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE));
+                                IREE_HAL_BUFFER_USAGE_STORAGE));
 
   // The buffer must have the ASYNCHRONOUS placement flag for dealloca routing.
   const iree_hal_buffer_placement_t placement =
@@ -1055,8 +1059,7 @@ TEST_P(QueueAllocaTest, ZeroAccessFlagsCanonicalized) {
   // .access = 0. The driver must canonicalize this to MEMORY_ACCESS_ALL.
   iree_hal_buffer_params_t params = {0};
   params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
-  params.usage =
-      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE;
 
   iree_hal_buffer_t* buffer = NULL;
   IREE_ASSERT_OK(iree_hal_device_queue_alloca(

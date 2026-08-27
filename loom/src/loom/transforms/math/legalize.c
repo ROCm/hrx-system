@@ -8,22 +8,19 @@
 
 #include <string.h>
 
-#include "loom/analysis/symbol_facts.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
-#include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/ops.h"
-#include "loom/ops/target/facts.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/pass/pipeline.h"
 #include "loom/pass/registry.h"
 #include "loom/rewrite/greedy.h"
-#include "loom/target/compile_report.h"
 #include "loom/target/math_policy.h"
-#include "loom/target/selection.h"
+#include "loom/target/pass_environment.h"
+#include "loom/target/reporting/report.h"
 #include "loom/transforms/math/patterns.h"
 
 //===----------------------------------------------------------------------===//
@@ -61,19 +58,6 @@ typedef struct loom_math_legalize_options_t {
   uint32_t max_iterations;
 } loom_math_legalize_options_t;
 
-typedef struct loom_math_legalize_target_state_t {
-  // True after this function's target policy lookup has run.
-  bool resolved;
-  // Contract-set key selected for this function, or a synthetic key.
-  iree_string_view_t contract_set_key;
-  // Target bundle selected for this function, if any.
-  iree_string_view_t target_bundle_name;
-  // Target config selected for this function, if any.
-  iree_string_view_t target_config_name;
-  // Target math policy selected for this function, or NULL.
-  const loom_target_math_policy_t* policy;
-} loom_math_legalize_target_state_t;
-
 typedef struct loom_math_legalize_state_t {
   // Current pass invocation.
   loom_pass_t* pass;
@@ -81,68 +65,43 @@ typedef struct loom_math_legalize_state_t {
   loom_module_t* module;
   // Function-like op currently being rewritten.
   loom_func_like_t function;
-  // Target math policy registry linked into the current compiler binary.
-  const loom_target_math_policy_registry_t* policy_registry;
-  // Symbol facts used to resolve function target contracts.
-  loom_symbol_fact_table_t symbol_facts;
+  // Function target facts selected for |function|.
+  const loom_target_facts_t* target_facts;
+  // Target math policy selected for |function|, or NULL when unavailable.
+  const loom_target_math_policy_t* policy;
   // Optional target compile report receiving math legalization rows.
   loom_target_compile_report_t* compile_report;
-  // Lazily resolved target policy state for |function|.
-  loom_math_legalize_target_state_t target;
 } loom_math_legalize_state_t;
 
-static loom_target_math_fastmath_flags_t
-loom_math_legalize_scalar_fastmath_flags(uint8_t source_flags) {
-  loom_target_math_fastmath_flags_t flags = 0;
-  if (iree_any_bit_set(source_flags, LOOM_SCALAR_FASTMATHFLAGS_REASSOC)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_REASSOC;
-  }
-  if (iree_any_bit_set(source_flags, LOOM_SCALAR_FASTMATHFLAGS_NNAN)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_NNAN;
-  }
-  if (iree_any_bit_set(source_flags, LOOM_SCALAR_FASTMATHFLAGS_NINF)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_NINF;
-  }
-  if (iree_any_bit_set(source_flags, LOOM_SCALAR_FASTMATHFLAGS_NSZ)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_NSZ;
-  }
-  if (iree_any_bit_set(source_flags, LOOM_SCALAR_FASTMATHFLAGS_ARCP)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_ARCP;
-  }
-  if (iree_any_bit_set(source_flags, LOOM_SCALAR_FASTMATHFLAGS_CONTRACT)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_CONTRACT;
-  }
-  if (iree_any_bit_set(source_flags, LOOM_SCALAR_FASTMATHFLAGS_AFN)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_AFN;
-  }
-  return flags;
-}
+#define LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(dialect, flag) \
+  static_assert(LOOM_##dialect##_FASTMATHFLAGS_##flag ==       \
+                    LOOM_TARGET_MATH_FASTMATH_FLAG_##flag,     \
+                #dialect " fastmath flag " #flag " must match target math")
 
-static loom_target_math_fastmath_flags_t
-loom_math_legalize_vector_fastmath_flags(uint8_t source_flags) {
-  loom_target_math_fastmath_flags_t flags = 0;
-  if (iree_any_bit_set(source_flags, LOOM_VECTOR_FASTMATHFLAGS_REASSOC)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_REASSOC;
-  }
-  if (iree_any_bit_set(source_flags, LOOM_VECTOR_FASTMATHFLAGS_NNAN)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_NNAN;
-  }
-  if (iree_any_bit_set(source_flags, LOOM_VECTOR_FASTMATHFLAGS_NINF)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_NINF;
-  }
-  if (iree_any_bit_set(source_flags, LOOM_VECTOR_FASTMATHFLAGS_NSZ)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_NSZ;
-  }
-  if (iree_any_bit_set(source_flags, LOOM_VECTOR_FASTMATHFLAGS_ARCP)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_ARCP;
-  }
-  if (iree_any_bit_set(source_flags, LOOM_VECTOR_FASTMATHFLAGS_CONTRACT)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_CONTRACT;
-  }
-  if (iree_any_bit_set(source_flags, LOOM_VECTOR_FASTMATHFLAGS_AFN)) {
-    flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_AFN;
-  }
-  return flags;
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(SCALAR, REASSOC);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(SCALAR, NNAN);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(SCALAR, NINF);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(SCALAR, NSZ);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(SCALAR, ARCP);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(SCALAR, CONTRACT);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(SCALAR, AFN);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(SCALAR, FAST);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(VECTOR, REASSOC);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(VECTOR, NNAN);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(VECTOR, NINF);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(VECTOR, NSZ);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(VECTOR, ARCP);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(VECTOR, CONTRACT);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(VECTOR, AFN);
+LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT(VECTOR, FAST);
+
+#undef LOOM_MATH_LEGALIZE_FASTMATH_FLAG_ASSERT
+
+static loom_target_math_fastmath_flags_t loom_math_legalize_fastmath_flags(
+    uint8_t source_flags) {
+  return (
+      loom_target_math_fastmath_flags_t)(source_flags &
+                                         LOOM_TARGET_MATH_FASTMATH_FLAG_FAST);
 }
 
 static iree_status_t loom_math_legalize_parse_option(void* user_data,
@@ -376,104 +335,17 @@ static bool loom_math_legalize_query_for_op(
   if (math_op != LOOM_TARGET_MATH_OP_UNKNOWN) {
     return loom_math_legalize_scalar_result_query(
         module, op, math_op,
-        loom_math_legalize_scalar_fastmath_flags(op->instance_flags),
-        out_query);
+        loom_math_legalize_fastmath_flags(op->instance_flags), out_query);
   }
 
   math_op = loom_math_legalize_vector_op_kind(op);
   if (math_op != LOOM_TARGET_MATH_OP_UNKNOWN) {
     return loom_math_legalize_vector_result_query(
         module, op, math_op,
-        loom_math_legalize_vector_fastmath_flags(op->instance_flags),
-        out_query);
+        loom_math_legalize_fastmath_flags(op->instance_flags), out_query);
   }
 
   return false;
-}
-
-static iree_status_t loom_math_legalize_lookup_func_facts(
-    loom_math_legalize_state_t* state,
-    const loom_func_symbol_facts_t** out_facts) {
-  *out_facts = NULL;
-  const loom_symbol_ref_t symbol_ref = loom_func_like_callee(state->function);
-  if (!loom_symbol_ref_is_valid(symbol_ref)) {
-    return iree_ok_status();
-  }
-  const loom_symbol_facts_base_t* base_facts = NULL;
-  IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup_ref(
-      &state->symbol_facts, state->module, symbol_ref, &base_facts));
-  *out_facts = loom_func_symbol_facts_cast(base_facts);
-  return iree_ok_status();
-}
-
-static iree_status_t loom_math_legalize_lookup_target_facts(
-    loom_math_legalize_state_t* state,
-    const loom_target_symbol_facts_t** out_target) {
-  *out_target = NULL;
-  const loom_func_symbol_facts_t* func_facts = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_math_legalize_lookup_func_facts(state, &func_facts));
-  const loom_symbol_ref_t authored_target_ref =
-      func_facts != NULL ? func_facts->target_symbol
-                         : loom_func_like_target(state->function);
-  const loom_target_pass_capability_t* target_capability =
-      loom_target_pass_capability_from_pass(state->pass);
-  const loom_symbol_ref_t target_ref =
-      loom_target_effective_target_ref(authored_target_ref, target_capability);
-  if (!loom_symbol_ref_is_valid(target_ref)) {
-    return iree_ok_status();
-  }
-  if (target_ref.module_id != 0 ||
-      target_ref.symbol_id >= state->module->symbols.count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "legalize-math effective target ref %u:%u is outside the module symbol "
-        "table",
-        (unsigned)target_ref.module_id, (unsigned)target_ref.symbol_id);
-  }
-
-  const loom_symbol_facts_base_t* base_facts = NULL;
-  IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup_ref(
-      &state->symbol_facts, state->module, target_ref, &base_facts));
-  const loom_target_symbol_facts_t* target =
-      loom_target_symbol_facts_cast(base_facts);
-  if (target == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "legalize-math effective target symbol %u does not resolve to target "
-        "facts",
-        (unsigned)target_ref.symbol_id);
-  }
-  *out_target = target;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_math_legalize_resolve_policy(
-    loom_math_legalize_state_t* state) {
-  if (state->target.resolved) {
-    return iree_ok_status();
-  }
-  state->target = (loom_math_legalize_target_state_t){
-      .resolved = true,
-      .contract_set_key = IREE_SV("<targetless>"),
-  };
-
-  const loom_target_symbol_facts_t* target = NULL;
-  IREE_RETURN_IF_ERROR(loom_math_legalize_lookup_target_facts(state, &target));
-  if (target == NULL) {
-    return iree_ok_status();
-  }
-
-  state->target.contract_set_key = target->storage.config.contract_set_key;
-  state->target.target_bundle_name = target->storage.bundle.name;
-  state->target.target_config_name = target->storage.bundle.config
-                                         ? target->storage.bundle.config->name
-                                         : iree_string_view_empty();
-  if (state->policy_registry != NULL) {
-    state->target.policy = loom_target_math_policy_registry_lookup_for_bundle(
-        state->policy_registry, &target->storage.bundle);
-  }
-  return iree_ok_status();
 }
 
 static iree_string_view_t loom_math_legalize_function_name(
@@ -504,14 +376,18 @@ static iree_status_t loom_math_legalize_record_report_row(
   if (decision == NULL) {
     decision = &empty_decision;
   }
+  const loom_target_bundle_storage_t* target_storage =
+      &state->target_facts->storage;
   const loom_target_compile_report_math_row_t row = {
       .function_name = loom_math_legalize_function_name(state),
       .source_op_name = loom_op_name(state->module, op),
       .source_op_kind = op->kind,
-      .target_bundle_name = state->target.target_bundle_name,
-      .target_config_name = state->target.target_config_name,
-      .policy_name = state->target.policy ? state->target.policy->name
-                                          : iree_string_view_empty(),
+      .target_bundle_name = target_storage->bundle.name,
+      .target_config_name = target_storage->bundle.config
+                                ? target_storage->bundle.config->name
+                                : iree_string_view_empty(),
+      .policy_name =
+          state->policy ? state->policy->name : iree_string_view_empty(),
       .constraint_key = decision->constraint_key,
       .math_op = query->math_op,
       .lane_domain = query->lane_domain,
@@ -545,7 +421,7 @@ static iree_status_t loom_math_legalize_emit_missing_policy(
   const loom_diagnostic_param_t params[] = {
       loom_param_string(loom_op_name(state->module, op)),
       loom_param_string(state->pass->info->name),
-      loom_param_string(state->target.contract_set_key),
+      loom_param_string(state->target_facts->storage.config.contract_set_key),
   };
   return loom_math_legalize_emit(state, op, LOOM_ERR_LOWERING_034, params,
                                  IREE_ARRAYSIZE(params));
@@ -564,7 +440,7 @@ static iree_status_t loom_math_legalize_emit_missing_recipe(
   const loom_diagnostic_param_t params[] = {
       loom_param_string(loom_op_name(state->module, op)),
       loom_param_string(state->pass->info->name),
-      loom_param_string(state->target.policy->name),
+      loom_param_string(state->policy->name),
       loom_param_string(loom_target_math_recipe_name(decision->recipe)),
       loom_param_string(loom_target_math_op_name(query->math_op)),
       loom_param_string(loom_target_math_lane_domain_name(query->lane_domain)),
@@ -583,7 +459,7 @@ static iree_status_t loom_math_legalize_emit_rejected(
   const loom_diagnostic_param_t params[] = {
       loom_param_string(loom_op_name(state->module, op)),
       loom_param_string(state->pass->info->name),
-      loom_param_string(state->target.policy->name),
+      loom_param_string(state->policy->name),
       loom_param_string(loom_target_math_op_name(query->math_op)),
       loom_param_string(loom_target_math_lane_domain_name(query->lane_domain)),
       loom_param_string(
@@ -621,11 +497,7 @@ static iree_status_t loom_math_legalize_rewrite_op(
     return iree_ok_status();
   }
 
-  IREE_RETURN_IF_ERROR(loom_math_legalize_resolve_policy(state));
-  if (loom_pass_has_error_diagnostics(state->pass)) {
-    return iree_ok_status();
-  }
-  if (state->target.policy == NULL) {
+  if (state->policy == NULL) {
     IREE_RETURN_IF_ERROR(loom_math_legalize_record_report_row(
         state, op, &query, /*decision=*/NULL,
         LOOM_TARGET_COMPILE_REPORT_MATH_ACTION_MISSING_POLICY,
@@ -634,14 +506,10 @@ static iree_status_t loom_math_legalize_rewrite_op(
   }
 
   loom_target_math_policy_decision_t decision = {0};
-  loom_target_math_policy_query(state->target.policy, &query, &decision);
+  loom_target_math_policy_query(state->policy, &query, &decision);
   if (!loom_math_legalize_policy_action_is_known(decision.action)) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "target math policy '%.*s' returned unknown action for %.*s",
-        (int)state->target.policy->name.size, state->target.policy->name.data,
-        (int)loom_op_name(state->module, op).size,
-        loom_op_name(state->module, op).data);
+    IREE_ASSERT_UNREACHABLE("target math policy returned unknown action");
+    IREE_BUILTIN_UNREACHABLE();
   }
 
   if (decision.action == LOOM_TARGET_MATH_POLICY_ACTION_KEEP) {
@@ -696,11 +564,12 @@ iree_status_t loom_math_legalize_run(loom_pass_t* pass, loom_module_t* module,
   if (!loom_func_like_body(function)) {
     return iree_ok_status();
   }
-  const loom_target_pass_capability_t* target_capability =
-      loom_target_pass_capability_from_pass(pass);
-  const loom_symbol_ref_t target_ref = loom_target_effective_target_ref(
-      loom_func_like_target(function), target_capability);
-  if (!loom_symbol_ref_is_valid(target_ref)) {
+
+  bool target_resolved = false;
+  const loom_target_facts_t* target_facts = NULL;
+  IREE_RETURN_IF_ERROR(loom_target_pass_resolve_function_facts(
+      pass, module, function, &target_resolved, &target_facts));
+  if (!target_resolved) {
     return iree_ok_status();
   }
 
@@ -710,20 +579,24 @@ iree_status_t loom_math_legalize_run(loom_pass_t* pass, loom_module_t* module,
       loom_target_math_pass_capability_policy_registry(math_capability);
   loom_target_compile_report_t* compile_report =
       loom_target_math_pass_capability_compile_report(math_capability);
+  const loom_target_math_policy_t* policy =
+      policy_registry ? loom_target_math_policy_registry_lookup_for_bundle(
+                            policy_registry, &target_facts->storage.bundle)
+                      : NULL;
   loom_math_legalize_state_t state = {
       .pass = pass,
       .module = module,
       .function = function,
-      .policy_registry = policy_registry,
+      .target_facts = target_facts,
+      .policy = policy,
       .compile_report = compile_report,
   };
-  loom_symbol_fact_table_initialize(&state.symbol_facts, pass->instance_arena);
-
   loom_greedy_rewrite_driver_t driver;
   loom_greedy_rewrite_driver_initialize(module, pass->arena, pass->value_facts,
                                         &driver);
   loom_greedy_rewrite_options_t rewrite_options = {
       .max_iterations = options ? options->max_iterations : 0,
+      .target_facts = target_facts,
   };
   loom_greedy_rewrite_callbacks_t callbacks = {
       .user_data = &state,

@@ -1,0 +1,125 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_AMDGPU_ARTIFACTS_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target:amdgpu_artifacts",
+])
+
+_AMDGPU_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/execute:amdgpu_hal",
+])
+
+_AMDGPU_EXECUTION_TEST_TAGS = [
+    "iree-run-requirement=runtime.resource.amd_gpu",
+    "requires-gpu-amd",
+    "runtime-resource=amd-gpu",
+]
+
+iree_execution_test_suite(
+    name = "loom_compile_execution_test",
+    data = [
+        "amdgpu_bad_return.loom",
+        "amdgpu_unused_kernargs.loom",
+        "complete_authoring_module.loom",
+        "fragment_repack_lane_preamble.loom",
+        "gfx1250_configured_fragment_bank.loom",
+        "long_sopp_branch.loom",
+        "selected_root_amdgpu.loom",
+        "single_subgroup_barrier.loom",
+        "target_family_template_provider_amdgpu.loom",
+        "wave64_named_lane_broadcast.loom",
+    ],
+    manifests = ["loom-compile-amdgpu.test.json"],
+    tags = ["hostonly"],
+    target_compatible_with = _AMDGPU_ARTIFACTS_COMPATIBLE_WITH,
+    tools = {
+        "loom-compile": "//loom/src/loom/tools/loom-compile",
+        "loom-compile-report": "//loom/py/loom/tools:loom-compile-report",
+    },
+)
+
+iree_execution_test_suite(
+    name = "loom_opt_execution_test",
+    data = [
+        "amdgpu_bad_return.loom",
+        "loom_opt_f32_arith.loom",
+    ],
+    manifests = ["loom-opt-amdgpu.test.json"],
+    tags = ["hostonly"],
+    target_compatible_with = _AMDGPU_ARTIFACTS_COMPATIBLE_WITH,
+    tools = {
+        "loom-opt": "//loom/src/loom/tools/loom-opt",
+    },
+)
+
+iree_execution_test_suite(
+    name = "iree_test_loom_execution_test",
+    data = [
+        "amdgpu_hal_actual.loom",
+        "amdgpu_unused_kernargs.loom",
+        "generated_tensor_cases.loom",
+        "//loom/src/loom/tooling/execution/hal:testdata/buffer_bulk_hal_actual.loom",
+        "//loom/src/loom/tooling/execution/hal:testdata/dynamic_workgroup_hal_actual.loom",
+        "//loom/src/loom/tooling/execution/hal:testdata/launch_schedule_hal_actual.loom",
+    ],
+    manifests = ["iree-test-loom_amdgpu.test.json"],
+    tags = _AMDGPU_EXECUTION_TEST_TAGS,
+    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
+    tools = {
+        "iree-test-loom": "//loom/src/loom/tools/iree-test-loom",
+    },
+)
+
+# Host TSAN and AMDGPU ASAN require incompatible process address-space layouts.
+iree_execution_test_suite(
+    name = "iree_test_loom_asan_execution_test",
+    data = [
+        "amdgpu_unused_kernargs.loom",
+        "//loom/src/loom/test/corpus/sanitizer:amdgpu_asan_actual.loom",
+    ],
+    manifests = ["iree-test-loom_amdgpu_asan.test.json"],
+    tags = _AMDGPU_EXECUTION_TEST_TAGS + ["notsan"],
+    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
+    tools = {
+        "iree-test-loom": "//loom/src/loom/tools/iree-test-loom",
+    },
+)
+
+iree_execution_test_suite(
+    name = "iree_test_loom_tsan_execution_test",
+    data = [
+        "//loom/src/loom/test/corpus/sanitizer:amdgpu_tsan_actual.loom",
+    ],
+    manifests = ["iree-test-loom_amdgpu_tsan.test.json"],
+    tags = _AMDGPU_EXECUTION_TEST_TAGS,
+    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
+    tools = {
+        "iree-test-loom": "//loom/src/loom/tools/iree-test-loom",
+    },
+)
+
+iree_execution_test_suite(
+    name = "iree_benchmark_loom_execution_test",
+    data = [
+        "amdgpu_hal_actual.loom",
+        "//loom/src/loom/tooling/execution/hal:testdata/launch_schedule_hal_actual.loom",
+    ],
+    manifests = ["iree-benchmark-loom_amdgpu.test.json"],
+    tags = _AMDGPU_EXECUTION_TEST_TAGS + ["manual"],
+    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
+    tools = {
+        "iree-benchmark-loom": "//loom/src/loom/tools/iree-benchmark-loom",
+    },
+)

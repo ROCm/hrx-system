@@ -18,12 +18,15 @@ add_custom_command(OUTPUT executable_srcs.stamp
     "command_buffer_dispatch_multi_entrypoint_test.mlir"
     "command_buffer_dispatch_multi_workgroup_test.mlir"
     "command_buffer_dispatch_test.mlir"
-    "executable_cache_test.mlir"
     "executable_test.mlir"
 )
 
 add_custom_target(executable_srcs
     DEPENDS executable_srcs.stamp
+)
+iree_register_generated_compile_input(executable_srcs
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/executable_srcs.stamp"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

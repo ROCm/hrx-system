@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVERS_AMDGPU_UTIL_DEVICE_LIBRARY_TARGET_H_
 
 #include "iree/base/api.h"
+#include "iree/hal/executable/amdgpu/target_id.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -38,9 +39,15 @@ typedef struct iree_hal_amdgpu_device_library_target_candidate_list_t {
 bool iree_hal_amdgpu_device_library_target_matches_file_arch(
     iree_string_view_t file_arch, iree_string_view_t target);
 
-// Builds ordered device-library target candidates for an HSA ISA name.
-iree_status_t iree_hal_amdgpu_device_library_target_candidates_from_isa(
-    iree_string_view_t isa_name,
+// Builds ordered device-library candidates for one reported agent ISA.
+//
+// |physical_identity| is the highest-priority identity of the physical agent
+// and qualifies stepping-specific artifact selection. |isa_identity| is one
+// entry from that agent's priority-ordered ISA set. An incompatible fallback
+// ISA produces an empty candidate list.
+iree_status_t iree_hal_amdgpu_device_library_target_candidates_from_agent_isa(
+    const iree_hal_amdgpu_target_identity_t* physical_identity,
+    const iree_hal_amdgpu_target_identity_t* isa_identity,
     iree_hal_amdgpu_device_library_target_candidate_list_t* out_candidates);
 
 #ifdef __cplusplus

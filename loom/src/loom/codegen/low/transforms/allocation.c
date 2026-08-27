@@ -9,13 +9,17 @@
 #include <string.h>
 
 #include "loom/codegen/low/allocation.h"
+#include "loom/codegen/low/allocation_live_range_splitting.h"
 #include "loom/codegen/low/allocation_materialization.h"
-#include "loom/codegen/low/allocation_rematerialization.h"
 #include "loom/codegen/low/function.h"
+#include "loom/codegen/low/function_model.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
+#include "loom/codegen/low/rematerialization.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/type_registry.h"
 #include "loom/pass/pipeline.h"
 #include "loom/pass/registry.h"
+#include "loom/target/function_version.h"
 
 typedef struct loom_low_materialize_allocation_pass_state_t {
   // Fixed register budget overrides parsed from the pass options.
@@ -40,6 +44,32 @@ typedef struct loom_low_materialize_allocation_parse_context_t {
   loom_low_materialize_allocation_pass_state_t* state;
 } loom_low_materialize_allocation_parse_context_t;
 
+static iree_status_t loom_low_materialize_allocation_emit_rematerialization(
+    loom_pass_t* pass,
+    const loom_low_materialize_allocation_pass_state_t* state,
+    const loom_low_allocation_table_t* table,
+    loom_low_allocation_rematerialization_trigger_t trigger,
+    const loom_low_allocation_rematerialization_result_t* result) {
+  if (!state || !state->emit_spill_diagnostics) {
+    return iree_ok_status();
+  }
+  return loom_low_allocation_rematerialization_emit_decision(
+      table, trigger, result, pass->diagnostic_emitter);
+}
+
+static iree_status_t loom_low_materialize_allocation_emit_live_range_split(
+    loom_pass_t* pass,
+    const loom_low_materialize_allocation_pass_state_t* state,
+    const loom_low_allocation_table_t* table,
+    loom_low_allocation_live_range_split_trigger_t trigger,
+    const loom_low_allocation_live_range_split_result_t* result) {
+  if (!state || !state->emit_spill_diagnostics) {
+    return iree_ok_status();
+  }
+  return loom_low_allocation_live_range_split_emit_decision(
+      table, trigger, result, pass->diagnostic_emitter);
+}
+
 static const loom_pass_option_def_t kLowMaterializeAllocationOptions[] = {
     {IREE_SVL("budgets"),
      IREE_SVL("Semicolon-separated register class budgets, such as "
@@ -57,7 +87,9 @@ static const loom_pass_option_def_t kLowMaterializeAllocationOptions[] = {
   V(statistics_type, spills, "spills", "Number of low.spill stores inserted.") \
   V(statistics_type, reloads, "reloads", "Number of low.reload ops inserted.") \
   V(statistics_type, rematerializations, "rematerializations",                 \
-    "Number of allocation-pressure rematerialized packets inserted.")
+    "Number of allocation-pressure rematerialized packets inserted.")          \
+  V(statistics_type, live_range_splits, "live_range_splits",                   \
+    "Number of allocation-pressure low.copy split packets inserted.")
 
 LOOM_PASS_STATISTICS_DEFINE(loom_low_materialize_allocation_statistics,
                             loom_low_materialize_allocation_statistics_t,
@@ -198,7 +230,7 @@ static iree_status_t loom_low_materialize_allocation_parse_storage_space(
     iree_string_view_t token,
     loom_low_materialize_allocation_parse_context_t* context) {
   loom_storage_space_t storage_space = LOOM_STORAGE_SPACE_COUNT_;
-  if (!loom_storage_space_parse(token, &storage_space)) {
+  if (!loom_low_storage_type_space_parse(token, &storage_space)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "pass 'low-materialize-allocation' option 'spill-storage-spaces' "
@@ -344,6 +376,26 @@ iree_status_t loom_low_materialize_allocation_create(
   return iree_ok_status();
 }
 
+// Builds one allocation table while the corresponding immutable function
+// model owns the module value-ordinal scratch map.
+static iree_status_t loom_low_materialize_allocation_build_table(
+    loom_module_t* module, const loom_op_t* low_func_op,
+    const loom_target_facts_t* function_target_facts,
+    const loom_low_descriptor_registry_t* descriptor_registry,
+    const loom_low_allocation_options_t* options, iree_arena_allocator_t* arena,
+    loom_low_allocation_table_t* out_table) {
+  loom_low_function_model_t model = {0};
+  iree_status_t status = loom_low_function_model_initialize(
+      module, low_func_op, function_target_facts, descriptor_registry,
+      options->emitter, LOOM_LOW_FUNCTION_MODEL_FLAG_REGION_TREE, arena,
+      &model);
+  if (iree_status_is_ok(status)) {
+    status = loom_low_allocate_function(&model, options, arena, out_table);
+  }
+  loom_low_function_model_deinitialize(&model);
+  return status;
+}
+
 iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
                                                   loom_module_t* module,
                                                   loom_func_like_t function) {
@@ -357,13 +409,9 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
       loom_low_pass_capability_from_pass(pass);
   const loom_low_descriptor_registry_t* descriptor_registry =
       loom_low_pass_capability_descriptor_registry(low_capability);
-  const loom_target_pass_capability_t* target_capability =
-      loom_target_pass_capability_from_pass(pass);
-  const loom_target_selection_t target_selection =
-      loom_target_pass_capability_target_selection(target_capability);
+  const loom_target_facts_t* function_target_facts =
+      loom_target_function_version_target_facts(pass->function_version);
   loom_low_allocation_options_t allocation_options = {
-      .descriptor_registry = descriptor_registry,
-      .target_selection = target_selection,
       .budgets = state ? state->budgets : NULL,
       .budget_count = state ? state->budget_count : 0,
       .emitter = pass->diagnostic_emitter,
@@ -374,11 +422,11 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
   iree_host_size_t iteration_limit = 0;
   iree_host_size_t rematerialization_iteration_count = 0;
   iree_host_size_t rematerialization_iteration_limit = 0;
-  bool allow_existing_storage_traffic = false;
   for (;;) {
     loom_low_allocation_table_t table = {0};
-    IREE_RETURN_IF_ERROR(loom_low_allocate_function(
-        module, function.op, &allocation_probe_options, pass->arena, &table));
+    IREE_RETURN_IF_ERROR(loom_low_materialize_allocation_build_table(
+        module, function.op, function_target_facts, descriptor_registry,
+        &allocation_probe_options, pass->arena, &table));
     if (iteration_limit == 0) {
       if (table.liveness.value_count == IREE_HOST_SIZE_MAX) {
         return iree_make_status(
@@ -398,31 +446,85 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
         }
         rematerialization_iteration_limit = table.liveness.value_count + 1;
       }
+      if (rematerialization_iteration_count >=
+          rematerialization_iteration_limit) {
+        // Rematerialization is an optimization; preserve normal diagnostics
+        // when pressure repair does not converge.
+        IREE_RETURN_IF_ERROR(loom_low_materialize_allocation_build_table(
+            module, function.op, function_target_facts, descriptor_registry,
+            &allocation_options, pass->arena, &table));
+        return iree_ok_status();
+      }
       loom_low_allocation_rematerialization_result_t result = {0};
       IREE_RETURN_IF_ERROR(loom_low_allocation_rematerialize_failure(
           module, &table, pass->arena, &result));
-      if (result.rewritten_operand_count != 0) {
-        if (rematerialization_iteration_count >=
-            rematerialization_iteration_limit) {
-          return iree_make_status(
-              IREE_STATUS_FAILED_PRECONDITION,
-              "low allocation rematerialization did not reach an "
-              "allocation-successful fixed point after %zu iteration(s)",
-              rematerialization_iteration_count);
-        }
+      if (result.value.rewritten_operand_count != 0) {
+        IREE_RETURN_IF_ERROR(
+            loom_low_materialize_allocation_emit_rematerialization(
+                pass, state, &table,
+                LOOM_LOW_ALLOCATION_REMATERIALIZATION_TRIGGER_ALLOCATION_FAILURE,
+                &result));
         loom_low_materialize_allocation_statistics_t* statistics =
             loom_low_materialize_allocation_statistics(pass);
-        statistics->rematerializations += (int64_t)result.cloned_packet_count;
+        statistics->rematerializations +=
+            (int64_t)result.value.cloned_packet_count;
         loom_pass_mark_changed(pass);
         ++rematerialization_iteration_count;
         continue;
       }
-      IREE_RETURN_IF_ERROR(loom_low_allocate_function(
-          module, function.op, &allocation_options, pass->arena, &table));
+      IREE_RETURN_IF_ERROR(loom_low_materialize_allocation_build_table(
+          module, function.op, function_target_facts, descriptor_registry,
+          &allocation_options, pass->arena, &table));
       return iree_ok_status();
     }
     if (table.spill_plan_count == 0) {
       return iree_ok_status();
+    }
+    if (rematerialization_iteration_limit == 0) {
+      if (table.liveness.value_count == IREE_HOST_SIZE_MAX) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "low allocation rematerialization iteration limit overflows "
+            "host size");
+      }
+      rematerialization_iteration_limit = table.liveness.value_count + 1;
+    }
+    if (rematerialization_iteration_count < rematerialization_iteration_limit) {
+      loom_low_allocation_rematerialization_result_t rematerialization_result =
+          {0};
+      IREE_RETURN_IF_ERROR(loom_low_allocation_rematerialize_spill_plan(
+          module, &table, pass->arena, &rematerialization_result));
+      if (rematerialization_result.value.rewritten_operand_count != 0) {
+        IREE_RETURN_IF_ERROR(
+            loom_low_materialize_allocation_emit_rematerialization(
+                pass, state, &table,
+                LOOM_LOW_ALLOCATION_REMATERIALIZATION_TRIGGER_SPILL_PLAN,
+                &rematerialization_result));
+        loom_low_materialize_allocation_statistics_t* statistics =
+            loom_low_materialize_allocation_statistics(pass);
+        statistics->rematerializations +=
+            (int64_t)rematerialization_result.value.cloned_packet_count;
+        loom_pass_mark_changed(pass);
+        ++rematerialization_iteration_count;
+        continue;
+      }
+      loom_low_allocation_live_range_split_result_t split_result = {0};
+      IREE_RETURN_IF_ERROR(loom_low_allocation_split_fixed_value_spill_plan(
+          module, &table, pass->arena, &split_result));
+      if (split_result.rewritten_operand_count != 0) {
+        IREE_RETURN_IF_ERROR(
+            loom_low_materialize_allocation_emit_live_range_split(
+                pass, state, &table,
+                LOOM_LOW_ALLOCATION_LIVE_RANGE_SPLIT_TRIGGER_SPILL_PLAN,
+                &split_result));
+        loom_low_materialize_allocation_statistics_t* statistics =
+            loom_low_materialize_allocation_statistics(pass);
+        statistics->live_range_splits +=
+            (int64_t)split_result.transfer_packet_count;
+        loom_pass_mark_changed(pass);
+        ++rematerialization_iteration_count;
+        continue;
+      }
     }
     if (iteration_count >= iteration_limit) {
       return iree_make_status(
@@ -434,7 +536,6 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
 
     loom_low_allocation_materialization_result_t result = {0};
     loom_low_allocation_materialization_options_t materialization_options = {
-        .allow_existing_storage_traffic = allow_existing_storage_traffic,
         .has_supported_storage_spaces =
             state && state->has_spill_storage_spaces,
         .supported_storage_spaces = state ? state->spill_storage_spaces
@@ -444,7 +545,7 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
         .emitter = pass->diagnostic_emitter,
     };
     IREE_RETURN_IF_ERROR(loom_low_allocation_materialize_spills(
-        module, &table, &materialization_options, pass->arena, &result));
+        &table, &materialization_options, pass->arena, &result));
     if (result.error_count != 0) {
       return iree_ok_status();
     }
@@ -463,7 +564,6 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
     statistics->spills += (int64_t)result.spill_count;
     statistics->reloads += (int64_t)result.reload_count;
     loom_pass_mark_changed(pass);
-    allow_existing_storage_traffic = true;
     ++iteration_count;
   }
 }

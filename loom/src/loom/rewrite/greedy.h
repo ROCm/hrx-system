@@ -39,8 +39,13 @@ typedef struct loom_greedy_rewrite_options_t {
   // Maximum number of fixed-point iterations. Zero selects the default.
   uint32_t max_iterations;
 
+  // Optional immutable target facts used by target-sensitive fact inference.
+  // Requires a driver with a value-fact owner.
+  const loom_target_facts_t* target_facts;
+
   // Optional seed facts cloned into the driver-owned fact table before the
-  // initial region analysis. Requires a driver with a value-fact owner.
+  // initial region analysis. The target scope is supplied independently by
+  // target_facts. Requires a driver with a value-fact owner.
   const loom_value_fact_table_t* seed_facts;
 
   // Optional constant materialization hook installed on the active rewriter.

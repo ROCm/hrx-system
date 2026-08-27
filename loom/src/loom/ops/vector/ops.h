@@ -172,7 +172,8 @@ enum {
   LOOM_OP_VECTOR_DECODE = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 147),
   LOOM_OP_VECTOR_ENCODE = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 148),
   LOOM_OP_VECTOR_FRAGMENT = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 149),
-  LOOM_OP_VECTOR_COUNT_ = 150,
+  LOOM_OP_VECTOR_FRAGMENT_REPACK = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 150),
+  LOOM_OP_VECTOR_COUNT_ = 151,
 };
 
 // IEEE 754 fast-math relaxation flags for float operations.
@@ -226,7 +227,7 @@ typedef enum loom_vector_cmpi_predicate_e {
   LOOM_VECTOR_CMPI_PREDICATE_COUNT_ = 10,
 } loom_vector_cmpi_predicate_t;
 
-// Floating-point comparison predicates (IEEE 754 total order).
+// IEEE 754 ordered and unordered floating-point predicates.
 typedef enum loom_vector_cmpf_predicate_e {
   LOOM_VECTOR_CMPF_PREDICATE_OEQ = 0,
   LOOM_VECTOR_CMPF_PREDICATE_OGT = 1,
@@ -475,6 +476,7 @@ iree_status_t loom_vector_insert_build(
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
+iree_status_t loom_vector_insert_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_vector_insert_facts(
     loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,
@@ -680,8 +682,8 @@ iree_status_t loom_vector_table_quantize_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_VECTOR_TRANSFORM: Apply an explicit numeric transform descriptor to vector register lanes. The transform operand is an encoding<transform> value that names the numeric mapping, such as scale/zero-point decode, whitening, or projection; verifier rules keep supported transform families and shape-changing parameters explicit. Hadamard-like families act along the last axis. `hadamard_sign` applies either an explicit per-lane sign table or deterministic seed-derived signs from the low bit of SplitMix64(seed + input lane) before the Hadamard. `sign_permute_hadamard` applies explicit signs to source lanes, gathers lanes through the explicit permutation vector, then applies the Hadamard.
-// %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
+// LOOM_OP_VECTOR_TRANSFORM: Apply a numeric transform to invocation-local vector register lanes. A #transform.hadamard descriptor applies a Sylvester Hadamard transform independently along the final vector axis. Distribution across subgroup lanes is explicit in the surrounding program and is not implied by this operation.
+// %r = vector.transform %v, %xf : vector<8xf32>, encoding<transform> -> vector<8xf32>
 LOOM_DEFINE_ISA(loom_vector_transform_isa, LOOM_OP_VECTOR_TRANSFORM)
 LOOM_DEFINE_OPERAND(loom_vector_transform_source, 0)
 LOOM_DEFINE_OPERAND(loom_vector_transform_transform, 1)
@@ -702,21 +704,25 @@ iree_status_t loom_vector_transform_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_VECTOR_FRAGMENT_LOAD: Load a target-shaped matrix fragment payload from a typed view at a full-rank logical origin. Unlike vector.load, the result vector shape is the physical fragment payload selected by role, logical matrix shape, view layout, and target legality; it is not an ordinary trailing-axis footprint of the view. The result carries fragment facts directly so vector.mma can consume it without a separate vector.fragment wrapper.
+// LOOM_OP_VECTOR_FRAGMENT_LOAD: Load a target-shaped matrix fragment payload from a typed view at a full-rank logical origin. Unlike vector.load, the result vector shape is the physical fragment payload selected by role, logical matrix shape, view layout, and target legality; it is not an ordinary trailing-axis footprint of the view. The result carries fragment facts directly so vector.mma can consume it without a separate vector.fragment wrapper. When the view and payload element types differ, the operation represents a fragment-shaped numeric conversion at the load boundary and target lowering must either select that conversion explicitly or reject it with target diagnostics. When the view storage schema requires runtime auxiliary values such as sparse metadata, scale values, or codebooks, the optional keyed `using` operands provide those SSA values while the view type remains the source of truth for the storage schema.
 // %lhs = vector.fragment.load<lhs> %a[%row, %k0] shape [%m, %k] : view<[%M]x[%K]xf16, %layout> -> vector<16xf16>
 LOOM_DEFINE_ISA(loom_vector_fragment_load_isa, LOOM_OP_VECTOR_FRAGMENT_LOAD)
-LOOM_DEFINE_OPERAND(loom_vector_fragment_load_view, 0)
-LOOM_DEFINE_OPERAND(loom_vector_fragment_load_rows, 1)
-LOOM_DEFINE_OPERAND(loom_vector_fragment_load_columns, 2)
-LOOM_DEFINE_VARIADIC_OPERANDS(loom_vector_fragment_load_indices, 3)
+LOOM_DEFINE_SEGMENTED_OPERAND(loom_vector_fragment_load_view, 0)
+LOOM_DEFINE_SEGMENTED_OPERANDS(loom_vector_fragment_load_indices, 1)
+LOOM_DEFINE_SEGMENTED_OPTIONAL_OPERAND(loom_vector_fragment_load_blocks, 2)
+LOOM_DEFINE_SEGMENTED_OPERAND(loom_vector_fragment_load_rows, 3)
+LOOM_DEFINE_SEGMENTED_OPERAND(loom_vector_fragment_load_columns, 4)
+LOOM_DEFINE_SEGMENTED_OPERANDS(loom_vector_fragment_load_auxiliary, 5)
 LOOM_DEFINE_RESULT(loom_vector_fragment_load_result, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_fragment_load_role, 0, loom_vector_role_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_fragment_load_cache_scope, 1, loom_cache_scope_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_fragment_load_cache_temporal, 2, loom_cache_temporal_t)
-LOOM_DEFINE_ATTR_I64_ARRAY(loom_vector_fragment_load_static_indices, 3)
+LOOM_DEFINE_ATTR_DICT(loom_vector_fragment_load_auxiliary_names, 1)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_fragment_load_cache_scope, 2, loom_cache_scope_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_fragment_load_cache_temporal, 3, loom_cache_temporal_t)
+LOOM_DEFINE_ATTR_I64_ARRAY(loom_vector_fragment_load_static_indices, 4)
 enum loom_vector_fragment_load_build_flag_bits_e {
-  LOOM_VECTOR_FRAGMENT_LOAD_BUILD_FLAG_HAS_CACHE_SCOPE = 1u << 0,
-  LOOM_VECTOR_FRAGMENT_LOAD_BUILD_FLAG_HAS_CACHE_TEMPORAL = 1u << 1,
+  LOOM_VECTOR_FRAGMENT_LOAD_BUILD_FLAG_HAS_BLOCKS = 1u << 0,
+  LOOM_VECTOR_FRAGMENT_LOAD_BUILD_FLAG_HAS_CACHE_SCOPE = 1u << 1,
+  LOOM_VECTOR_FRAGMENT_LOAD_BUILD_FLAG_HAS_CACHE_TEMPORAL = 1u << 2,
 };
 typedef uint32_t loom_vector_fragment_load_build_flags_t;
 iree_status_t loom_vector_fragment_load_build(
@@ -728,8 +734,11 @@ iree_status_t loom_vector_fragment_load_build(
     iree_host_size_t indices_count,
     const int64_t* static_indices,
     iree_host_size_t static_indices_count,
+    loom_optional loom_may_consume loom_value_id_t blocks,
     loom_may_consume loom_value_id_t rows,
     loom_may_consume loom_value_id_t columns,
+    loom_may_consume const loom_named_value_t* auxiliary,
+    iree_host_size_t auxiliary_count,
     loom_optional uint8_t cache_scope,
     loom_optional uint8_t cache_temporal,
     loom_type_t result_type,
@@ -747,18 +756,20 @@ iree_status_t loom_vector_fragment_load_verify(
 // LOOM_OP_VECTOR_FRAGMENT_STORE: Store a target-shaped matrix fragment payload into a typed view at a full-rank logical origin. The value is interpreted as the physical payload for the given fragment role and logical matrix shape; the store is therefore a matrix-fragment movement boundary, not an ordinary vector.store footprint. When the payload and view element types differ, the operation represents a fragment-shaped numeric conversion at the store boundary and target lowering must either select that conversion explicitly or reject it with target diagnostics.
 // vector.fragment.store<result> %acc, %c[%row, %col] shape [%m, %n] : vector<8xf32>, view<[%M]x[%N]xf32, %layout>
 LOOM_DEFINE_ISA(loom_vector_fragment_store_isa, LOOM_OP_VECTOR_FRAGMENT_STORE)
-LOOM_DEFINE_OPERAND(loom_vector_fragment_store_value, 0)
-LOOM_DEFINE_OPERAND(loom_vector_fragment_store_view, 1)
-LOOM_DEFINE_OPERAND(loom_vector_fragment_store_rows, 2)
-LOOM_DEFINE_OPERAND(loom_vector_fragment_store_columns, 3)
-LOOM_DEFINE_VARIADIC_OPERANDS(loom_vector_fragment_store_indices, 4)
+LOOM_DEFINE_SEGMENTED_OPERAND(loom_vector_fragment_store_value, 0)
+LOOM_DEFINE_SEGMENTED_OPERAND(loom_vector_fragment_store_view, 1)
+LOOM_DEFINE_SEGMENTED_OPERANDS(loom_vector_fragment_store_indices, 2)
+LOOM_DEFINE_SEGMENTED_OPTIONAL_OPERAND(loom_vector_fragment_store_blocks, 3)
+LOOM_DEFINE_SEGMENTED_OPERAND(loom_vector_fragment_store_rows, 4)
+LOOM_DEFINE_SEGMENTED_OPERAND(loom_vector_fragment_store_columns, 5)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_fragment_store_role, 0, loom_vector_role_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_fragment_store_cache_scope, 1, loom_cache_scope_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_fragment_store_cache_temporal, 2, loom_cache_temporal_t)
 LOOM_DEFINE_ATTR_I64_ARRAY(loom_vector_fragment_store_static_indices, 3)
 enum loom_vector_fragment_store_build_flag_bits_e {
-  LOOM_VECTOR_FRAGMENT_STORE_BUILD_FLAG_HAS_CACHE_SCOPE = 1u << 0,
-  LOOM_VECTOR_FRAGMENT_STORE_BUILD_FLAG_HAS_CACHE_TEMPORAL = 1u << 1,
+  LOOM_VECTOR_FRAGMENT_STORE_BUILD_FLAG_HAS_BLOCKS = 1u << 0,
+  LOOM_VECTOR_FRAGMENT_STORE_BUILD_FLAG_HAS_CACHE_SCOPE = 1u << 1,
+  LOOM_VECTOR_FRAGMENT_STORE_BUILD_FLAG_HAS_CACHE_TEMPORAL = 1u << 2,
 };
 typedef uint32_t loom_vector_fragment_store_build_flags_t;
 iree_status_t loom_vector_fragment_store_build(
@@ -771,6 +782,7 @@ iree_status_t loom_vector_fragment_store_build(
     iree_host_size_t indices_count,
     const int64_t* static_indices,
     iree_host_size_t static_indices_count,
+    loom_optional loom_value_id_t blocks,
     loom_value_id_t rows,
     loom_value_id_t columns,
     loom_optional uint8_t cache_scope,
@@ -808,6 +820,11 @@ iree_status_t loom_vector_load_build(
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
+iree_status_t loom_vector_load_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 iree_status_t loom_vector_load_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
@@ -1285,7 +1302,7 @@ iree_status_t loom_vector_atomic_rmw_mask_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_VECTOR_ATOMIC_CMPXCHG: Atomic compare-exchange at per-lane signed element offsets. Each lane compares origin + offsets[lane] with expected[lane], writes replacement[lane] on success, and returns the old memory value. Success lanes are derived by comparing old == expected.
+// LOOM_OP_VECTOR_ATOMIC_CMPXCHG: Atomic compare-exchange at per-lane signed element offsets. Each lane compares the bits at origin + offsets[lane] with expected[lane], writes replacement[lane] on success, and returns the old memory value. Comparison is bitwise for every accepted element type.
 // %old = vector.atomic.cmpxchg %expected, %replacement, %view[%row, %col][%offsets] {success_ordering = acq_rel, failure_ordering = acquire, scope = workgroup} : vector<4xi32>, view<[%m]x[%n]xi32, %layout>, vector<4xindex> -> vector<4xi32>
 LOOM_DEFINE_ISA(loom_vector_atomic_cmpxchg_isa, LOOM_OP_VECTOR_ATOMIC_CMPXCHG)
 LOOM_DEFINE_OPERAND(loom_vector_atomic_cmpxchg_expected, 0)
@@ -1376,11 +1393,13 @@ LOOM_DEFINE_OPERAND(loom_vector_cmpf_lhs, 0)
 LOOM_DEFINE_OPERAND(loom_vector_cmpf_rhs, 1)
 LOOM_DEFINE_RESULT(loom_vector_cmpf_result, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_cmpf_predicate, 0, loom_vector_cmpf_predicate_t)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_vector_cmpf_fastmath)
 iree_status_t loom_vector_cmpf_build(
-    loom_builder_t* builder, uint8_t predicate,
-    loom_value_id_t lhs, loom_value_id_t rhs,
-    loom_type_t operand_type, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op);
+    loom_builder_t* builder, uint8_t instance_flags,
+    uint8_t predicate, loom_value_id_t lhs,
+    loom_value_id_t rhs, loom_type_t operand_type,
+    loom_type_t result_type, loom_location_id_t location,
+    loom_op_t** out_op);
 iree_status_t loom_vector_cmpf_facts(
     loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,
@@ -1399,6 +1418,7 @@ iree_status_t loom_vector_addf_build(
     loom_value_id_t lhs, loom_value_id_t rhs,
     loom_type_t result_type, loom_location_id_t location,
     loom_op_t** out_op);
+iree_status_t loom_vector_addf_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_vector_addf_facts(
     loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,
@@ -2294,7 +2314,7 @@ iree_status_t loom_vector_cosf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_VECTOR_SINTURNSF: Lanewise sine over turns: sin(2*pi*x), where 1.0 is one full revolution.
+// LOOM_OP_VECTOR_SINTURNSF: Lanewise sine over turns: sin(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinals. Non-finite inputs produce NaN.
 // vector.sinturnsf
 LOOM_DEFINE_ISA(loom_vector_sinturnsf_isa, LOOM_OP_VECTOR_SINTURNSF)
 LOOM_DEFINE_OPERAND(loom_vector_sinturnsf_input, 0)
@@ -2310,7 +2330,7 @@ iree_status_t loom_vector_sinturnsf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_VECTOR_COSTURNSF: Lanewise cosine over turns: cos(2*pi*x), where 1.0 is one full revolution.
+// LOOM_OP_VECTOR_COSTURNSF: Lanewise cosine over turns: cos(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinals. Non-finite inputs produce NaN.
 // vector.costurnsf
 LOOM_DEFINE_ISA(loom_vector_costurnsf_isa, LOOM_OP_VECTOR_COSTURNSF)
 LOOM_DEFINE_OPERAND(loom_vector_costurnsf_input, 0)
@@ -2779,13 +2799,14 @@ iree_status_t loom_vector_extf_build(
     loom_builder_t* builder, loom_value_id_t input,
     loom_type_t input_type, loom_type_t result_type,
     loom_location_id_t location, loom_op_t** out_op);
+iree_status_t loom_vector_extf_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_vector_extf_facts(
     loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_VECTOR_FPTRUNC: Lanewise floating-point precision truncation. Source and result shapes match exactly; only the floating-point element type narrows.
+// LOOM_OP_VECTOR_FPTRUNC: Lanewise floating-point precision truncation using round-to-nearest, ties-to-even. Source and result shapes match exactly; only the floating-point element type narrows. Special values follow the destination format: f8E4M3 saturates finite overflow and infinities to its signed maximum finite value while preserving NaNs; IEEE formats preserve infinities and NaNs.
 // vector.fptrunc
 LOOM_DEFINE_ISA(loom_vector_fptrunc_isa, LOOM_OP_VECTOR_FPTRUNC)
 LOOM_DEFINE_OPERAND(loom_vector_fptrunc_input, 0)
@@ -2794,6 +2815,12 @@ iree_status_t loom_vector_fptrunc_build(
     loom_builder_t* builder, loom_value_id_t input,
     loom_type_t input_type, loom_type_t result_type,
     loom_location_id_t location, loom_op_t** out_op);
+iree_status_t loom_vector_fptrunc_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
+iree_status_t loom_vector_fptrunc_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 
 // LOOM_OP_VECTOR_EXTSI: Lanewise signed integer extension. Source and result shapes match exactly, and each source lane is sign-extended to the result element width.
 // vector.extsi
@@ -3221,6 +3248,11 @@ iree_status_t loom_vector_decode_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_vector_decode_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
+iree_status_t loom_vector_decode_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 iree_status_t loom_vector_decode_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
@@ -3246,21 +3278,29 @@ iree_status_t loom_vector_encode_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_VECTOR_FRAGMENT: Attach a matrix-fragment interpretation to a physical vector value without changing the physical vector type. The role selects how the two shape operands are interpreted: lhs is [m, k], rhs is [k, n], and init/result are [m, n]. Dense/default fragments need only the data value and shape SSA values. Encoded fragments carry schema and scale/table/sparse metadata values in the keyed using dictionary so bulk runtime data remains ordinary SSA while lowering can consume a compact resolved fragment fact.
+// LOOM_OP_VECTOR_FRAGMENT: Attach a matrix-fragment interpretation to a physical vector value without changing the physical vector type. The role selects how the shape operands are interpreted: lhs is [m, k], rhs is [k, n], and init/result are [m, n]. A leading block extent forms independent batched fragments [b, m, k], [b, k, n], and [b, m, n]. Dense/default fragments need only the data value and shape SSA values. Encoded fragments carry schema and scale/table/sparse metadata values in the keyed using dictionary so bulk runtime data remains ordinary SSA while lowering can consume a compact resolved fragment fact.
 // %fragment = vector.fragment<lhs> %payload shape [%m, %k] : vector<4xi32>
 LOOM_DEFINE_ISA(loom_vector_fragment_isa, LOOM_OP_VECTOR_FRAGMENT)
-LOOM_DEFINE_OPERAND(loom_vector_fragment_data, 0)
-LOOM_DEFINE_OPERAND(loom_vector_fragment_rows, 1)
-LOOM_DEFINE_OPERAND(loom_vector_fragment_columns, 2)
-LOOM_DEFINE_VARIADIC_OPERANDS(loom_vector_fragment_params, 3)
+LOOM_DEFINE_SEGMENTED_OPERAND(loom_vector_fragment_data, 0)
+LOOM_DEFINE_SEGMENTED_OPTIONAL_OPERAND(loom_vector_fragment_blocks, 1)
+LOOM_DEFINE_SEGMENTED_OPERAND(loom_vector_fragment_rows, 2)
+LOOM_DEFINE_SEGMENTED_OPERAND(loom_vector_fragment_columns, 3)
+LOOM_DEFINE_SEGMENTED_OPERANDS(loom_vector_fragment_params, 4)
 LOOM_DEFINE_RESULT(loom_vector_fragment_result, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_fragment_role, 0, loom_vector_role_t)
 LOOM_DEFINE_ATTR_DICT(loom_vector_fragment_param_names, 1)
 LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_vector_fragment_predicates, 2)
+enum loom_vector_fragment_build_flag_bits_e {
+  LOOM_VECTOR_FRAGMENT_BUILD_FLAG_HAS_BLOCKS = 1u << 0,
+  LOOM_VECTOR_FRAGMENT_BUILD_FLAG_HAS_PREDICATES = 1u << 1,
+};
+typedef uint32_t loom_vector_fragment_build_flags_t;
 iree_status_t loom_vector_fragment_build(
     loom_builder_t* builder,
+    loom_vector_fragment_build_flags_t build_flags,
     loom_vector_role_t role,
     loom_may_consume loom_value_id_t data,
+    loom_optional loom_may_consume loom_value_id_t blocks,
     loom_may_consume loom_value_id_t rows,
     loom_may_consume loom_value_id_t columns,
     loom_may_consume const loom_named_value_t* params,
@@ -3278,6 +3318,36 @@ iree_status_t loom_vector_fragment_facts(
 iree_status_t loom_vector_fragment_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_VECTOR_FRAGMENT_REPACK: Repack a native matrix-fragment payload to another fragment role without going through memory. The source value must carry fragment facts naming its current role and shape; the target role interprets the result vector lanes and payload registers. The logical shape operands are shared by both roles, so result row/column payloads can become lhs row/reduction or rhs reduction/column payloads for attention-style fragment reuse. When the source and result element types differ, the op also represents a fragment-shaped numeric conversion that target lowering must select explicitly or reject with target diagnostics.
+// %lhs = vector.fragment.repack<lhs> %acc shape [%m, %k] : vector<8xf32> -> vector<16xbf16>
+LOOM_DEFINE_ISA(loom_vector_fragment_repack_isa, LOOM_OP_VECTOR_FRAGMENT_REPACK)
+LOOM_DEFINE_SEGMENTED_OPERAND(loom_vector_fragment_repack_source, 0)
+LOOM_DEFINE_SEGMENTED_OPTIONAL_OPERAND(loom_vector_fragment_repack_blocks, 1)
+LOOM_DEFINE_SEGMENTED_OPERAND(loom_vector_fragment_repack_rows, 2)
+LOOM_DEFINE_SEGMENTED_OPERAND(loom_vector_fragment_repack_columns, 3)
+LOOM_DEFINE_RESULT(loom_vector_fragment_repack_result, 0)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_fragment_repack_role, 0, loom_vector_role_t)
+enum loom_vector_fragment_repack_build_flag_bits_e {
+  LOOM_VECTOR_FRAGMENT_REPACK_BUILD_FLAG_HAS_BLOCKS = 1u << 0,
+};
+typedef uint32_t loom_vector_fragment_repack_build_flags_t;
+iree_status_t loom_vector_fragment_repack_build(
+    loom_builder_t* builder,
+    loom_vector_fragment_repack_build_flags_t build_flags,
+    loom_vector_role_t role,
+    loom_may_consume loom_value_id_t source,
+    loom_optional loom_may_consume loom_value_id_t blocks,
+    loom_may_consume loom_value_id_t rows,
+    loom_may_consume loom_value_id_t columns,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_vector_fragment_repack_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 
 // Returns the vtable array for the vector dialect.
 const loom_op_vtable_t* const* loom_vector_dialect_vtables(

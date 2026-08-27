@@ -7,6 +7,7 @@
 #include "loom/verify/verify_structure.h"
 
 #include "loom/error/error_catalog.h"
+#include "loom/ir/parameterized_type.h"
 #include "loom/ops/op_defs.h"
 #include "loom/verify/verify_diagnostics.h"
 
@@ -127,6 +128,11 @@ static bool loom_verify_trait_conflict(loom_trait_flags_t traits,
     *out_trait_b = IREE_SV("UNKNOWN_EFFECTS");
     return true;
   }
+  if (iree_all_bits_set(traits, LOOM_TRAIT_HINT | LOOM_TRAIT_MEMORY_FENCE)) {
+    *out_trait_a = IREE_SV("HINT");
+    *out_trait_b = IREE_SV("MEMORY_FENCE");
+    return true;
+  }
   if (iree_all_bits_set(traits,
                         LOOM_TRAIT_HINT | LOOM_TRAIT_NON_DETERMINISTIC)) {
     *out_trait_a = IREE_SV("HINT");
@@ -157,6 +163,11 @@ static bool loom_verify_trait_conflict(loom_trait_flags_t traits,
   if (iree_all_bits_set(traits, LOOM_TRAIT_PURE | LOOM_TRAIT_UNKNOWN_EFFECTS)) {
     *out_trait_a = IREE_SV("PURE");
     *out_trait_b = IREE_SV("UNKNOWN_EFFECTS");
+    return true;
+  }
+  if (iree_all_bits_set(traits, LOOM_TRAIT_PURE | LOOM_TRAIT_MEMORY_FENCE)) {
+    *out_trait_a = IREE_SV("PURE");
+    *out_trait_b = IREE_SV("MEMORY_FENCE");
     return true;
   }
   if (iree_all_bits_set(traits, LOOM_TRAIT_PURE | LOOM_TRAIT_UNIQUE_IDENTITY)) {
@@ -190,6 +201,12 @@ static bool loom_verify_trait_conflict(loom_trait_flags_t traits,
           traits, LOOM_TRAIT_SAFE_TO_SPECULATE | LOOM_TRAIT_UNKNOWN_EFFECTS)) {
     *out_trait_a = IREE_SV("SAFE_TO_SPECULATE");
     *out_trait_b = IREE_SV("UNKNOWN_EFFECTS");
+    return true;
+  }
+  if (iree_all_bits_set(
+          traits, LOOM_TRAIT_SAFE_TO_SPECULATE | LOOM_TRAIT_MEMORY_FENCE)) {
+    *out_trait_a = IREE_SV("SAFE_TO_SPECULATE");
+    *out_trait_b = IREE_SV("MEMORY_FENCE");
     return true;
   }
   if (iree_all_bits_set(traits, LOOM_TRAIT_SAFE_TO_SPECULATE |
@@ -246,19 +263,15 @@ static void loom_verify_op_trait_flags_consistency(
                               IREE_ARRAYSIZE(params));
 }
 
-void loom_verify_op_declared_trait_consistency(loom_verify_state_t* state,
-                                               const loom_op_t* op,
-                                               const loom_op_vtable_t* vtable) {
-  loom_verify_op_trait_flags_consistency(state, op, vtable, vtable->traits);
-}
-
-void loom_verify_op_effective_trait_consistency(
+loom_trait_flags_t loom_verify_op_effective_trait_consistency(
     loom_verify_state_t* state, const loom_op_t* op,
     const loom_op_vtable_t* vtable) {
   loom_trait_flags_t effective_traits =
       loom_op_effective_traits(state->module, op);
-  if (effective_traits == vtable->traits) return;
-  loom_verify_op_trait_flags_consistency(state, op, vtable, effective_traits);
+  if (effective_traits != vtable->traits) {
+    loom_verify_op_trait_flags_consistency(state, op, vtable, effective_traits);
+  }
+  return effective_traits;
 }
 
 static iree_string_view_t loom_verify_kind_name(loom_verify_state_t* state,
@@ -283,6 +296,33 @@ static const loom_op_t* loom_verify_find_ancestor(const loom_op_t* op,
   return NULL;
 }
 
+static bool loom_verify_has_deferred_required_ancestor(
+    const loom_verify_state_t* state, const loom_op_t* op) {
+  const loom_op_t* parent = op->parent_op;
+  while (parent) {
+    const loom_op_vtable_t* parent_vtable =
+        loom_context_resolve_op(state->module->context, parent->kind);
+    if (parent_vtable &&
+        parent_vtable->symbol_kind == LOOM_SYMBOL_TEMPLATE_DEF) {
+      return true;
+    }
+    if (parent_vtable && parent_vtable->func_like) {
+      const uint8_t inline_policy_attr_index =
+          parent_vtable->func_like->inline_policy_attr_index;
+      if (inline_policy_attr_index != LOOM_ATTR_INDEX_NONE &&
+          loom_attr_as_enum(loom_op_const_attrs(
+              parent)[inline_policy_attr_index]) == LOOM_INLINE_POLICY_INLINE) {
+        return true;
+      }
+    }
+    if (parent_vtable && loom_traits_is_isolated(parent_vtable->traits)) {
+      return false;
+    }
+    parent = parent->parent_op;
+  }
+  return false;
+}
+
 static void loom_verify_emit_placement_diagnostic(
     loom_verify_state_t* state, const loom_op_t* op,
     const loom_op_vtable_t* vtable, iree_string_view_t constraint_kind,
@@ -299,6 +339,15 @@ static void loom_verify_emit_placement_diagnostic(
 
 void loom_verify_op_placement(loom_verify_state_t* state, const loom_op_t* op,
                               const loom_op_vtable_t* vtable) {
+  if (iree_any_bit_set(vtable->traits, LOOM_TRAIT_MODULE_SCOPE) &&
+      op->parent_op) {
+    loom_diagnostic_param_t params[] = {
+        loom_param_string(loom_op_vtable_name(vtable)),
+    };
+    loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_049, params,
+                                IREE_ARRAYSIZE(params));
+  }
+
   const loom_op_placement_descriptor_t* placement = vtable->placement;
   if (!placement) return;
 
@@ -312,6 +361,12 @@ void loom_verify_op_placement(loom_verify_state_t* state, const loom_op_t* op,
   for (uint8_t i = 0; i < placement->required_ancestor_count; ++i) {
     loom_op_kind_t ancestor_kind = placement->required_ancestors[i];
     if (loom_verify_find_ancestor(op, ancestor_kind)) continue;
+    // Templates and required-inline functions are verified before their final
+    // placement context is known. Materialization or inlining supplies that
+    // context, and verification after the transform enforces the requirement.
+    if (loom_verify_has_deferred_required_ancestor(state, op)) {
+      continue;
+    }
     loom_verify_emit_placement_diagnostic(
         state, op, vtable, IREE_SV("required"), ancestor_kind,
         loom_verify_parent_context_name(state, op));
@@ -470,15 +525,6 @@ void loom_verify_op_structure(loom_verify_state_t* state, const loom_op_t* op,
   }
 }
 
-static bool loom_verify_region_directly_contains_block(
-    const loom_region_t* region, const loom_block_t* target) {
-  if (!region || !target) return false;
-  for (uint16_t i = 0; i < region->block_count; ++i) {
-    if (loom_region_const_block(region, i) == target) return true;
-  }
-  return false;
-}
-
 void loom_verify_successor_targets(loom_verify_state_t* state,
                                    const loom_op_t* op,
                                    const loom_op_vtable_t* vtable) {
@@ -499,9 +545,7 @@ void loom_verify_successor_targets(loom_verify_state_t* state,
                                   IREE_ARRAYSIZE(params));
       continue;
     }
-    if (successors[i]->parent_region != parent_region ||
-        !loom_verify_region_directly_contains_block(parent_region,
-                                                    successors[i])) {
+    if (!loom_region_try_block_index(parent_region, successors[i], NULL)) {
       loom_diagnostic_param_t params[] = {
           loom_param_string(op_name),
           loom_param_with_field_ref(loom_param_u32(i), successor_ref),
@@ -510,15 +554,6 @@ void loom_verify_successor_targets(loom_verify_state_t* state,
                                   IREE_ARRAYSIZE(params));
     }
   }
-}
-
-// Resolves a field reference to its author-facing DSL field name when available
-static bool loom_verify_attr_kind_matches_descriptor(
-    loom_attribute_t attr, const loom_attr_descriptor_t* descriptor) {
-  if (descriptor->attr_kind == LOOM_ATTR_ANY) {
-    return attr.kind > LOOM_ATTR_ABSENT && attr.kind < LOOM_ATTR_ANY;
-  }
-  return attr.kind == descriptor->attr_kind;
 }
 
 static void loom_verify_predicate_list_attr(loom_verify_state_t* state,
@@ -587,6 +622,302 @@ static void loom_verify_predicate_list_attr(loom_verify_state_t* state,
       loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_022, params,
                                   IREE_ARRAYSIZE(params));
     }
+  }
+}
+
+static void loom_verify_enum_array_attr(
+    loom_verify_state_t* state, const loom_op_t* op,
+    const loom_attr_descriptor_t* descriptor, iree_string_view_t name,
+    uint8_t attr_index, loom_attribute_t attr) {
+  if (attr.kind != LOOM_ATTR_ENUM_ARRAY) return;
+  loom_diagnostic_param_t attr_name_param =
+      loom_verify_param_string_for_diagnostic_field(
+          name, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, attr_index);
+  bool payload_present = attr.enum_array != NULL;
+  if ((attr.count != 0) != payload_present) {
+    loom_diagnostic_param_t params[] = {
+        attr_name_param,
+        loom_param_u32(attr.count),
+        loom_param_bool(payload_present),
+    };
+    loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_040, params,
+                                IREE_ARRAYSIZE(params));
+    return;
+  }
+  if (iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM)) return;
+  for (uint16_t element_index = 0; element_index < attr.count;
+       ++element_index) {
+    uint8_t value = attr.enum_array[element_index];
+    if (loom_attr_descriptor_has_enum_case(descriptor, value)) continue;
+    loom_diagnostic_param_t params[] = {
+        attr_name_param,
+        loom_param_u32(value),
+    };
+    loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_010, params,
+                                IREE_ARRAYSIZE(params));
+  }
+}
+
+static void loom_verify_signed_enum_set_attr(
+    loom_verify_state_t* state, const loom_op_t* op,
+    const loom_attr_descriptor_t* descriptor, iree_string_view_t name,
+    uint8_t attr_index, loom_attribute_t attr) {
+  if (attr.kind != LOOM_ATTR_SIGNED_ENUM_SET) return;
+  loom_diagnostic_param_t attr_name_param =
+      loom_verify_param_string_for_diagnostic_field(
+          name, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, attr_index);
+  if (attr.count > LOOM_SIGNED_ENUM_SET_MAX_WORD_COUNT) {
+    loom_diagnostic_param_t params[] = {
+        attr_name_param,
+        loom_param_u32(attr.count),
+        loom_param_u32(LOOM_SIGNED_ENUM_SET_MAX_WORD_COUNT),
+    };
+    loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_046, params,
+                                IREE_ARRAYSIZE(params));
+    return;
+  }
+  bool payload_present = attr.signed_enum_set_words != NULL;
+  if ((attr.count != 0) != payload_present) {
+    loom_diagnostic_param_t params[] = {
+        attr_name_param,
+        loom_param_u32(attr.count),
+        loom_param_bool(payload_present),
+    };
+    loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_040, params,
+                                IREE_ARRAYSIZE(params));
+    return;
+  }
+  if (attr.count == 0) return;
+
+  const uint64_t* positive_words = attr.signed_enum_set_words;
+  const uint64_t* negative_words = positive_words + attr.count;
+  for (uint16_t word_index = 0; word_index < attr.count; ++word_index) {
+    const uint64_t contradictions =
+        positive_words[word_index] & negative_words[word_index];
+    const uint64_t assertions =
+        positive_words[word_index] | negative_words[word_index];
+    for (uint8_t bit_index = 0; bit_index < 64; ++bit_index) {
+      const uint64_t bit = UINT64_C(1) << bit_index;
+      const uint32_t enum_value = (uint32_t)word_index * 64 + bit_index;
+      if (iree_any_bit_set(contradictions, bit)) {
+        loom_diagnostic_param_t params[] = {
+            attr_name_param,
+            loom_param_u32(enum_value),
+        };
+        loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_047, params,
+                                    IREE_ARRAYSIZE(params));
+      }
+      if (!iree_any_bit_set(assertions, bit) ||
+          loom_attr_descriptor_has_enum_case(descriptor, (uint8_t)enum_value)) {
+        continue;
+      }
+      loom_diagnostic_param_t params[] = {
+          attr_name_param,
+          loom_param_u32(enum_value),
+      };
+      loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_010, params,
+                                  IREE_ARRAYSIZE(params));
+    }
+  }
+
+  uint16_t canonical_word_count = attr.count;
+  while (canonical_word_count > 0 &&
+         positive_words[canonical_word_count - 1] == 0 &&
+         negative_words[canonical_word_count - 1] == 0) {
+    --canonical_word_count;
+  }
+  if (canonical_word_count != attr.count) {
+    loom_diagnostic_param_t params[] = {
+        attr_name_param,
+        loom_param_u32(attr.count),
+        loom_param_u32(canonical_word_count),
+    };
+    loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_048, params,
+                                IREE_ARRAYSIZE(params));
+  }
+}
+
+static bool loom_verify_try_resolve_local_symbol_name(
+    const loom_module_t* module, loom_symbol_ref_t ref,
+    iree_string_view_t* out_name) {
+  if (!loom_symbol_ref_is_valid(ref) || ref.module_id != 0 ||
+      ref.symbol_id >= module->symbols.count) {
+    return false;
+  }
+  const loom_string_id_t name_id =
+      module->symbols.entries[ref.symbol_id].name_id;
+  *out_name = module->strings.entries[name_id];
+  return true;
+}
+
+static void loom_verify_symbol_collection_attr(loom_verify_state_t* state,
+                                               const loom_op_t* op,
+                                               iree_string_view_t name,
+                                               uint8_t attr_index,
+                                               loom_attribute_t attr) {
+  if (attr.kind != LOOM_ATTR_SYMBOL_ARRAY &&
+      attr.kind != LOOM_ATTR_SYMBOL_SET) {
+    return;
+  }
+  loom_diagnostic_param_t attr_name_param =
+      loom_verify_param_string_for_diagnostic_field(
+          name, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, attr_index);
+  bool payload_present = attr.symbol_refs != NULL;
+  if ((attr.count != 0) != payload_present) {
+    loom_diagnostic_param_t params[] = {
+        attr_name_param,
+        loom_param_u32(attr.count),
+        loom_param_bool(payload_present),
+    };
+    loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_040, params,
+                                IREE_ARRAYSIZE(params));
+    return;
+  }
+  if (attr.kind != LOOM_ATTR_SYMBOL_SET) return;
+  for (uint16_t i = 1; i < attr.count; ++i) {
+    iree_string_view_t previous_name = iree_string_view_empty();
+    iree_string_view_t current_name = iree_string_view_empty();
+    if (!loom_verify_try_resolve_local_symbol_name(
+            state->module, attr.symbol_refs[i - 1], &previous_name) ||
+        !loom_verify_try_resolve_local_symbol_name(
+            state->module, attr.symbol_refs[i], &current_name)) {
+      continue;
+    }
+    if (iree_string_view_compare(previous_name, current_name) < 0) continue;
+    loom_diagnostic_param_t params[] = {
+        attr_name_param,
+        loom_param_string(current_name),
+        loom_param_string(previous_name),
+    };
+    loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_050, params,
+                                IREE_ARRAYSIZE(params));
+    return;
+  }
+}
+
+static void loom_verify_parameterized_attr(
+    loom_verify_state_t* state, const loom_op_t* op,
+    const loom_attr_descriptor_t* field_descriptor, iree_string_view_t name,
+    uint8_t attr_index, loom_attribute_t attr, iree_host_size_t depth) {
+  if (attr.kind != LOOM_ATTR_PARAMETERIZED) return;
+  loom_diagnostic_param_t attr_name_param =
+      loom_verify_param_string_for_diagnostic_field(
+          name, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, attr_index);
+  if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+    loom_diagnostic_param_t params[] = {
+        attr_name_param,
+        loom_param_u32(LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH),
+    };
+    loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_045, params,
+                                IREE_ARRAYSIZE(params));
+    return;
+  }
+
+  loom_parameterized_attr_kind_t family_kind =
+      loom_attr_as_parameterized_kind(attr);
+  const loom_parameterized_attr_descriptor_t* family_descriptor =
+      loom_context_resolve_parameterized_attr(state->module->context,
+                                              family_kind);
+  if (!family_descriptor) {
+    loom_diagnostic_param_t params[] = {
+        attr_name_param,
+        loom_param_u32(family_kind),
+    };
+    loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_041, params,
+                                IREE_ARRAYSIZE(params));
+    return;
+  }
+
+  loom_parameterized_attr_kind_t expected_family_kind =
+      field_descriptor->reference.parameterized_attr_kind;
+  if (expected_family_kind != LOOM_PARAMETERIZED_ATTR_KIND_ANY &&
+      family_kind != expected_family_kind) {
+    const loom_parameterized_attr_descriptor_t* expected_family_descriptor =
+        loom_context_resolve_parameterized_attr(state->module->context,
+                                                expected_family_kind);
+    IREE_ASSERT(expected_family_descriptor);
+    loom_diagnostic_param_t params[] = {
+        attr_name_param,
+        loom_param_string(loom_bstring_view(family_descriptor->name)),
+        loom_param_string(loom_bstring_view(expected_family_descriptor->name)),
+    };
+    loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_042, params,
+                                IREE_ARRAYSIZE(params));
+    return;
+  }
+  if (attr.count != family_descriptor->parameter_count) {
+    loom_diagnostic_param_t params[] = {
+        attr_name_param,
+        loom_param_u32(attr.count),
+        loom_param_u32(family_descriptor->parameter_count),
+    };
+    loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_043, params,
+                                IREE_ARRAYSIZE(params));
+    return;
+  }
+  bool payload_present = attr.parameterized_slots != NULL;
+  if ((attr.count != 0) != payload_present) {
+    loom_diagnostic_param_t params[] = {
+        attr_name_param,
+        loom_param_u32(attr.count),
+        loom_param_bool(payload_present),
+    };
+    loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_040, params,
+                                IREE_ARRAYSIZE(params));
+    return;
+  }
+
+  for (uint16_t i = 0; i < attr.count; ++i) {
+    const loom_attr_descriptor_t* parameter_descriptor =
+        &family_descriptor->parameter_descriptors[i];
+    loom_attribute_t parameter = attr.parameterized_slots[i];
+    iree_string_view_t parameter_name =
+        loom_bstring_view(parameter_descriptor->name);
+    if (loom_attr_is_absent(parameter)) {
+      if (iree_any_bit_set(parameter_descriptor->flags, LOOM_ATTR_OPTIONAL)) {
+        continue;
+      }
+      loom_diagnostic_param_t params[] = {
+          loom_verify_param_string_for_diagnostic_field(
+              parameter_name, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, attr_index),
+      };
+      loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_044, params,
+                                  IREE_ARRAYSIZE(params));
+      continue;
+    }
+    if (!loom_attr_descriptor_accepts_kind(parameter_descriptor,
+                                           (loom_attr_kind_t)parameter.kind)) {
+      loom_diagnostic_param_t params[] = {
+          loom_verify_param_string_for_diagnostic_field(
+              parameter_name, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, attr_index),
+          loom_param_u32(parameter.kind),
+          loom_param_u32(parameter_descriptor->attr_kind),
+      };
+      loom_verify_emit_structured(state, op, LOOM_ERR_TYPE_005, params,
+                                  IREE_ARRAYSIZE(params));
+      continue;
+    }
+    if (parameter.kind == LOOM_ATTR_ENUM &&
+        !iree_any_bit_set(parameter_descriptor->flags, LOOM_ATTR_OPEN_ENUM)) {
+      uint8_t case_index = loom_attr_as_enum(parameter);
+      if (!loom_attr_descriptor_has_enum_case(parameter_descriptor,
+                                              case_index)) {
+        loom_diagnostic_param_t params[] = {
+            loom_verify_param_string_for_diagnostic_field(
+                parameter_name, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, attr_index),
+            loom_param_u32(case_index),
+        };
+        loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_010, params,
+                                    IREE_ARRAYSIZE(params));
+      }
+    }
+    loom_verify_enum_array_attr(state, op, parameter_descriptor, parameter_name,
+                                attr_index, parameter);
+    loom_verify_signed_enum_set_attr(state, op, parameter_descriptor,
+                                     parameter_name, attr_index, parameter);
+    loom_verify_parameterized_attr(state, op, parameter_descriptor,
+                                   parameter_name, attr_index, parameter,
+                                   depth + 1);
   }
 }
 
@@ -716,7 +1047,8 @@ void loom_verify_type_constraints(loom_verify_state_t* state,
       bool optional = (descriptor->flags & LOOM_ATTR_OPTIONAL) != 0;
       if (optional && loom_attr_is_absent(attrs[i])) continue;
       iree_string_view_t attr_name = loom_bstring_view(descriptor->name);
-      if (!loom_verify_attr_kind_matches_descriptor(attrs[i], descriptor)) {
+      if (!loom_attr_descriptor_accepts_kind(descriptor,
+                                             (loom_attr_kind_t)attrs[i].kind)) {
         loom_diagnostic_param_t params[] = {
             loom_verify_param_string_for_diagnostic_field(
                 attr_name, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, i),
@@ -726,20 +1058,26 @@ void loom_verify_type_constraints(loom_verify_state_t* state,
         loom_verify_emit_structured(state, op, LOOM_ERR_TYPE_005, params,
                                     IREE_ARRAYSIZE(params));
       }
-      if (attrs[i].kind == LOOM_ATTR_ENUM && descriptor->enum_case_count > 0 &&
+      if (attrs[i].kind == LOOM_ATTR_ENUM &&
           (descriptor->flags & LOOM_ATTR_OPEN_ENUM) == 0) {
         uint8_t case_index = (uint8_t)attrs[i].raw;
-        if (case_index >= descriptor->enum_case_count) {
+        if (!loom_attr_descriptor_has_enum_case(descriptor, case_index)) {
           loom_diagnostic_param_t params[] = {
               loom_verify_param_string_for_diagnostic_field(
                   attr_name, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, i),
               loom_param_u32(case_index),
-              loom_param_u32(descriptor->enum_case_count),
           };
           loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_010, params,
                                       IREE_ARRAYSIZE(params));
         }
       }
+      loom_verify_enum_array_attr(state, op, descriptor, attr_name, i,
+                                  attrs[i]);
+      loom_verify_signed_enum_set_attr(state, op, descriptor, attr_name, i,
+                                       attrs[i]);
+      loom_verify_symbol_collection_attr(state, op, attr_name, i, attrs[i]);
+      loom_verify_parameterized_attr(state, op, descriptor, attr_name, i,
+                                     attrs[i], /*depth=*/0);
       loom_verify_predicate_list_attr(state, op, attr_name, i, attrs[i]);
     }
   }
@@ -790,7 +1128,10 @@ static void loom_verify_emit_operand_dict_attr_violation(
 
 void loom_verify_operand_dicts(loom_verify_state_t* state, const loom_op_t* op,
                                const loom_op_vtable_t* vtable) {
-  if (!vtable->format_elements) return;
+  if (!iree_any_bit_set(vtable->vtable_flags,
+                        LOOM_OP_VTABLE_HAS_OPERAND_DICT)) {
+    return;
+  }
   for (uint16_t element_index = 0; element_index < vtable->format_element_count;
        ++element_index) {
     const loom_format_element_t* element =
@@ -1002,6 +1343,250 @@ void loom_verify_block_arg_type_well_formedness(loom_verify_state_t* state,
 }
 
 //===----------------------------------------------------------------------===//
+// Static encoding validation
+//===----------------------------------------------------------------------===//
+
+static iree_string_view_t loom_verify_encoding_attr_kind_name(
+    loom_attr_kind_t kind) {
+  static const iree_string_view_t kNames[LOOM_ATTR_COUNT_] = {
+      [LOOM_ATTR_ABSENT] = IREE_SVL("absent"),
+      [LOOM_ATTR_I64] = IREE_SVL("integer"),
+      [LOOM_ATTR_F64] = IREE_SVL("float"),
+      [LOOM_ATTR_STRING] = IREE_SVL("string"),
+      [LOOM_ATTR_BOOL] = IREE_SVL("boolean"),
+      [LOOM_ATTR_ENUM] = IREE_SVL("enum"),
+      [LOOM_ATTR_I64_ARRAY] = IREE_SVL("integer array"),
+      [LOOM_ATTR_SYMBOL] = IREE_SVL("symbol"),
+      [LOOM_ATTR_TYPE] = IREE_SVL("type"),
+      [LOOM_ATTR_PREDICATE_LIST] = IREE_SVL("predicate list"),
+      [LOOM_ATTR_DICT] = IREE_SVL("dictionary"),
+      [LOOM_ATTR_ENCODING] = IREE_SVL("encoding"),
+      [LOOM_ATTR_BYTES] = IREE_SVL("bytes"),
+      [LOOM_ATTR_SCOPED_ENUM] = IREE_SVL("scoped enum"),
+      [LOOM_ATTR_ANY] = IREE_SVL("attribute"),
+      [LOOM_ATTR_ENUM_ARRAY] = IREE_SVL("enum array"),
+      [LOOM_ATTR_SIGNED_ENUM_SET] = IREE_SVL("signed enum set"),
+      [LOOM_ATTR_PARAMETERIZED] = IREE_SVL("parameterized attribute"),
+      [LOOM_ATTR_PARAMETERIZED_ARRAY] =
+          IREE_SVL("parameterized attribute array"),
+      [LOOM_ATTR_SYMBOL_ARRAY] = IREE_SVL("symbol array"),
+      [LOOM_ATTR_SYMBOL_SET] = IREE_SVL("symbol set"),
+  };
+  if (kind >= IREE_ARRAYSIZE(kNames) || kNames[kind].size == 0) {
+    return IREE_SV("attribute");
+  }
+  return kNames[kind];
+}
+
+static bool loom_verify_static_encoding_is_malformed(
+    const loom_module_t* module, const loom_encoding_t* encoding) {
+  return loom_module_encoding_vtable(module, encoding) &&
+         !loom_encoding_static_is_valid(encoding);
+}
+
+iree_status_t loom_verify_prepare_static_encodings(loom_verify_state_t* state) {
+  const loom_module_t* module = state->module;
+  bool has_malformed_encoding = false;
+  for (iree_host_size_t i = 0; i < module->encodings.count; ++i) {
+    if (loom_verify_static_encoding_is_malformed(
+            module, &module->encodings.entries[i])) {
+      has_malformed_encoding = true;
+      break;
+    }
+  }
+  if (!has_malformed_encoding) return iree_ok_status();
+
+  state->static_encodings.word_count =
+      loom_bitset_word_count(module->encodings.count);
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      &state->arena, state->static_encodings.word_count, sizeof(uint64_t),
+      (void**)&state->static_encodings.diagnosed_bits));
+  memset(state->static_encodings.diagnosed_bits, 0,
+         state->static_encodings.word_count * sizeof(uint64_t));
+  return iree_ok_status();
+}
+
+static void loom_verify_static_encoding_ref(loom_verify_state_t* state,
+                                            const loom_op_t* op,
+                                            uint16_t encoding_id) {
+  if (!state->static_encodings.diagnosed_bits || encoding_id == 0 ||
+      encoding_id > state->module->encodings.count) {
+    return;
+  }
+
+  const uint16_t encoding_index = (uint16_t)(encoding_id - 1);
+  const loom_encoding_t* encoding =
+      &state->module->encodings.entries[encoding_index];
+  if (!loom_verify_static_encoding_is_malformed(state->module, encoding)) {
+    return;
+  }
+  loom_bitset_set(state->static_encodings.diagnosed_bits,
+                  state->static_encodings.word_count, encoding_index);
+
+  const loom_encoding_vtable_t* vtable =
+      loom_module_encoding_vtable(state->module, encoding);
+  if (!loom_encoding_static_parameters_are_valid(encoding)) {
+    const iree_string_view_t encoding_name =
+        state->module->strings.entries[encoding->name_id];
+    for (uint8_t i = 0;
+         i < encoding->attribute_count && !loom_verify_at_error_limit(state);
+         ++i) {
+      const loom_named_attr_t* parameter = &encoding->attributes[i];
+      const iree_string_view_t parameter_name =
+          state->module->strings.entries[parameter->name_id];
+      const uint8_t descriptor_index =
+          loom_encoding_parameter_descriptor_index(parameter);
+      if (descriptor_index == LOOM_ENCODING_PARAMETER_INDEX_INVALID) {
+        const loom_diagnostic_param_t params[] = {
+            loom_param_string(encoding_name),
+            loom_param_string(parameter_name),
+        };
+        loom_verify_emit_structured(state, op, LOOM_ERR_ENCODING_008, params,
+                                    IREE_ARRAYSIZE(params));
+        continue;
+      }
+
+      const loom_attr_descriptor_t* descriptor =
+          &vtable->descriptor->parameter_descriptors[descriptor_index];
+      if (loom_attr_descriptor_accepts_kind(
+              descriptor, (loom_attr_kind_t)parameter->value.kind)) {
+        if (parameter->value.kind == LOOM_ATTR_ENUM &&
+            !iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM) &&
+            !loom_attr_descriptor_has_enum_case(
+                descriptor, loom_attr_as_enum(parameter->value))) {
+          const loom_diagnostic_param_t params[] = {
+              loom_param_string(parameter_name),
+              loom_param_u32(loom_attr_as_enum(parameter->value)),
+          };
+          loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_010, params,
+                                      IREE_ARRAYSIZE(params));
+        }
+        loom_verify_signed_enum_set_attr(state, op, descriptor, parameter_name,
+                                         descriptor_index, parameter->value);
+        continue;
+      }
+      const loom_diagnostic_param_t params[] = {
+          loom_param_string(encoding_name),
+          loom_param_string(parameter_name),
+          loom_param_u32(parameter->value.kind),
+          loom_param_string(loom_verify_encoding_attr_kind_name(
+              (loom_attr_kind_t)descriptor->attr_kind)),
+      };
+      loom_verify_emit_structured(state, op, LOOM_ERR_ENCODING_010, params,
+                                  IREE_ARRAYSIZE(params));
+    }
+
+    return;
+  }
+
+  IREE_ASSERT(vtable->is_static_valid && vtable->diagnose_static);
+  iree_diagnostic_emitter_t emitter = {
+      .fn = loom_verify_diagnostic_emitter_fn,
+      .user_data = state,
+  };
+  loom_verify_record_diagnostic_status(
+      state, vtable->diagnose_static(state->module, encoding, op, emitter));
+}
+
+static void loom_verify_static_encoding_type_ref(loom_verify_state_t* state,
+                                                 const loom_op_t* op,
+                                                 loom_type_t type) {
+  if (loom_type_has_static_encoding(type)) {
+    loom_verify_static_encoding_ref(state, op, type.encoding_id);
+  }
+}
+
+static void loom_verify_static_encoding_attr_refs(loom_verify_state_t* state,
+                                                  const loom_op_t* op,
+                                                  loom_attribute_t attr,
+                                                  uint8_t depth) {
+  switch ((loom_attr_kind_t)attr.kind) {
+    case LOOM_ATTR_ENCODING:
+      loom_verify_static_encoding_ref(state, op,
+                                      loom_attr_as_encoding_id(attr));
+      return;
+    case LOOM_ATTR_TYPE:
+      if (attr.type_id < state->module->types.count) {
+        loom_verify_static_encoding_type_ref(
+            state, op, state->module->types.entries[attr.type_id]);
+      }
+      return;
+    case LOOM_ATTR_DICT:
+      if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          (attr.count > 0 && !attr.dict_entries)) {
+        return;
+      }
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        loom_verify_static_encoding_attr_refs(
+            state, op, attr.dict_entries[i].value, (uint8_t)(depth + 1));
+      }
+      return;
+    case LOOM_ATTR_PARAMETERIZED:
+      if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          (attr.count > 0 && !attr.parameterized_slots)) {
+        return;
+      }
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        loom_verify_static_encoding_attr_refs(
+            state, op, attr.parameterized_slots[i], (uint8_t)(depth + 1));
+      }
+      return;
+    default:
+      return;
+  }
+}
+
+void loom_verify_static_encoding_refs(loom_verify_state_t* state,
+                                      const loom_op_t* op) {
+  if (!state->static_encodings.diagnosed_bits) return;
+  const loom_value_id_t* operands = loom_op_const_operands(op);
+  for (uint16_t i = 0; i < op->operand_count; ++i) {
+    if (operands[i] < state->module->values.count) {
+      loom_verify_static_encoding_type_ref(
+          state, op, loom_module_value_type(state->module, operands[i]));
+    }
+  }
+  const loom_value_id_t* results = loom_op_const_results(op);
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    if (results[i] < state->module->values.count) {
+      loom_verify_static_encoding_type_ref(
+          state, op, loom_module_value_type(state->module, results[i]));
+    }
+  }
+  const loom_attribute_t* attrs = loom_op_attrs(op);
+  for (uint8_t i = 0; i < op->attribute_count; ++i) {
+    loom_verify_static_encoding_attr_refs(state, op, attrs[i], /*depth=*/0);
+  }
+}
+
+void loom_verify_block_arg_static_encoding_refs(loom_verify_state_t* state,
+                                                const loom_block_t* block) {
+  if (!state->static_encodings.diagnosed_bits) return;
+  for (uint16_t i = 0; i < block->arg_count; ++i) {
+    const loom_value_id_t value_id = loom_block_arg_id(block, i);
+    if (value_id < state->module->values.count) {
+      loom_verify_static_encoding_type_ref(
+          state, /*op=*/NULL, loom_module_value_type(state->module, value_id));
+    }
+  }
+}
+
+void loom_verify_remaining_static_encodings(loom_verify_state_t* state) {
+  if (!state->static_encodings.diagnosed_bits) return;
+  for (iree_host_size_t i = 0;
+       i < state->module->encodings.count && !loom_verify_at_error_limit(state);
+       ++i) {
+    const loom_encoding_t* encoding = &state->module->encodings.entries[i];
+    if (!loom_verify_static_encoding_is_malformed(state->module, encoding) ||
+        loom_bitset_test(state->static_encodings.diagnosed_bits,
+                         state->static_encodings.word_count, i)) {
+      continue;
+    }
+    loom_verify_static_encoding_ref(state, /*op=*/NULL, (uint16_t)(i + 1));
+  }
+}
+
+//===----------------------------------------------------------------------===//
 // SSA encoding reference validation
 //===----------------------------------------------------------------------===//
 
@@ -1018,7 +1603,7 @@ static bool loom_verify_op_result_contains_value(const loom_op_t* op,
 static bool loom_verify_value_is_named_placeholder(
     const loom_verify_state_t* state, loom_value_id_t value_id) {
   if (value_id >= state->module->values.count) return false;
-  const loom_value_t* value = &state->module->values.entries[value_id];
+  const loom_value_t* value = loom_module_value(state->module, value_id);
   if (loom_value_is_block_arg(value)) return false;
   return value->name_id != LOOM_STRING_ID_INVALID &&
          loom_def_op(value->def) == NULL;
@@ -1147,6 +1732,324 @@ void loom_verify_block_arg_encoding_refs(loom_verify_state_t* state,
   }
 }
 
+static void loom_verify_record_available_symbol(loom_verify_state_t* state,
+                                                loom_symbol_ref_t ref) {
+  if (!loom_symbol_ref_is_valid(ref) || ref.module_id != 0 ||
+      ref.symbol_id >= state->module->symbols.count) {
+    return;
+  }
+  loom_bitset_set(state->available_symbols.bits,
+                  state->available_symbols.word_count, ref.symbol_id);
+}
+
+static void loom_verify_collect_available_symbols_from_attr(
+    loom_verify_state_t* state, const loom_attr_descriptor_t* descriptor,
+    loom_attribute_t attr, uint8_t aggregate_depth) {
+  switch ((loom_attr_kind_t)attr.kind) {
+    case LOOM_ATTR_SYMBOL:
+      if (descriptor && descriptor->attr_kind == LOOM_ATTR_SYMBOL &&
+          descriptor->reference.symbol_ref &&
+          descriptor->reference.symbol_ref->role ==
+              LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY) {
+        loom_verify_record_available_symbol(state, loom_attr_as_symbol(attr));
+      }
+      return;
+    case LOOM_ATTR_SYMBOL_ARRAY:
+    case LOOM_ATTR_SYMBOL_SET: {
+      if (!descriptor || descriptor->attr_kind != attr.kind ||
+          !descriptor->reference.symbol_ref ||
+          descriptor->reference.symbol_ref->role !=
+              LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY) {
+        return;
+      }
+      loom_symbol_ref_array_t refs = attr.kind == LOOM_ATTR_SYMBOL_SET
+                                         ? loom_attr_as_symbol_set(attr)
+                                         : loom_attr_as_symbol_array(attr);
+      if (refs.count > 0 && !refs.values) {
+        return;
+      }
+      for (uint16_t i = 0; i < refs.count; ++i) {
+        loom_verify_record_available_symbol(state, refs.values[i]);
+      }
+      return;
+    }
+    case LOOM_ATTR_PARAMETERIZED: {
+      if (aggregate_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          (attr.count > 0 && !attr.parameterized_slots)) {
+        return;
+      }
+      const loom_parameterized_attr_descriptor_t* family_descriptor =
+          loom_context_resolve_parameterized_attr(
+              state->module->context, loom_attr_as_parameterized_kind(attr));
+      if (!family_descriptor ||
+          attr.count != family_descriptor->parameter_count) {
+        return;
+      }
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        loom_verify_collect_available_symbols_from_attr(
+            state, &family_descriptor->parameter_descriptors[i],
+            attr.parameterized_slots[i], (uint8_t)(aggregate_depth + 1));
+      }
+      return;
+    }
+    case LOOM_ATTR_PARAMETERIZED_ARRAY:
+      if (aggregate_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          (attr.count > 0 && !attr.parameterized_array)) {
+        return;
+      }
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        loom_verify_collect_available_symbols_from_attr(
+            state, /*descriptor=*/NULL, attr.parameterized_array[i],
+            (uint8_t)(aggregate_depth + 1));
+      }
+      return;
+    default:
+      return;
+  }
+}
+
+static void loom_verify_collect_available_symbols_from_op(
+    loom_verify_state_t* state, const loom_op_t* op) {
+  const loom_op_vtable_t* vtable = loom_verify_lookup_vtable(state, op->kind);
+  if (vtable && vtable->attr_descriptors) {
+    const loom_attribute_t* attrs = loom_op_const_attrs(op);
+    const uint8_t attribute_count =
+        op->attribute_count < vtable->attribute_count ? op->attribute_count
+                                                      : vtable->attribute_count;
+    for (uint8_t i = 0; i < attribute_count; ++i) {
+      loom_verify_collect_available_symbols_from_attr(
+          state, &vtable->attr_descriptors[i], attrs[i],
+          /*aggregate_depth=*/0);
+    }
+  }
+
+  loom_region_t* const* regions = loom_op_regions(op);
+  for (uint8_t region_index = 0; region_index < op->region_count;
+       ++region_index) {
+    const loom_region_t* region = regions[region_index];
+    if (!region || (region->block_count > 0 && !region->blocks)) {
+      continue;
+    }
+    const loom_block_t* block = NULL;
+    loom_region_for_each_block(region, block) {
+      const loom_op_t* child_op = NULL;
+      loom_block_for_each_op(block, child_op) {
+        loom_verify_collect_available_symbols_from_op(state, child_op);
+      }
+    }
+  }
+}
+
+iree_status_t loom_verify_prepare_available_symbols(
+    loom_verify_state_t* state) {
+  state->available_symbols.word_count =
+      loom_bitset_word_count(state->module->symbols.count);
+  if (state->available_symbols.word_count == 0) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      &state->arena, state->available_symbols.word_count,
+      sizeof(*state->available_symbols.bits),
+      (void**)&state->available_symbols.bits));
+  memset(state->available_symbols.bits, 0,
+         state->available_symbols.word_count *
+             sizeof(*state->available_symbols.bits));
+
+  if (!state->module->body || state->module->body->block_count == 0) {
+    return iree_ok_status();
+  }
+  const loom_block_t* entry =
+      loom_region_const_entry_block(state->module->body);
+  const loom_op_t* op = NULL;
+  loom_block_for_each_op(entry, op) {
+    loom_verify_collect_available_symbols_from_op(state, op);
+  }
+  return iree_ok_status();
+}
+
+static void loom_verify_symbol_reference(
+    loom_verify_state_t* state, const loom_op_t* op,
+    const loom_symbol_reference_descriptor_t* reference_descriptor,
+    loom_symbol_ref_t ref, loom_diagnostic_field_ref_t field_ref) {
+  if (!loom_symbol_ref_is_valid(ref)) return;
+
+  if (ref.module_id != 0) {
+    loom_diagnostic_param_t params[] = {
+        loom_param_with_field_ref(loom_param_u32(ref.module_id), field_ref),
+    };
+    loom_verify_emit_structured(state, op, LOOM_ERR_SYMBOL_004, params,
+                                IREE_ARRAYSIZE(params));
+    return;
+  }
+
+  if (ref.symbol_id >= state->module->symbols.count) {
+    loom_diagnostic_param_t params[] = {
+        loom_param_with_field_ref(loom_param_u32(ref.symbol_id), field_ref),
+        loom_param_u32((uint32_t)state->module->symbols.count),
+    };
+    loom_verify_emit_structured(state, op, LOOM_ERR_SYMBOL_001, params,
+                                IREE_ARRAYSIZE(params));
+    return;
+  }
+
+  const loom_symbol_t* symbol = &state->module->symbols.entries[ref.symbol_id];
+  if (symbol->definition == NULL || symbol->defining_op == NULL) {
+    if (reference_descriptor &&
+        reference_descriptor->role == LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY) {
+      return;
+    }
+    // Template families are authored contracts, not discoverable
+    // implementations. Every module that applies or implements a family must
+    // carry its declaration so library placement never controls matching.
+    const bool requires_local_definition =
+        reference_descriptor &&
+        iree_any_bit_set(reference_descriptor->interfaces,
+                         LOOM_SYMBOL_INTERFACE_TEMPLATE_FAMILY);
+    if (!requires_local_definition && state->available_symbols.bits &&
+        loom_bitset_test(state->available_symbols.bits,
+                         state->available_symbols.word_count, ref.symbol_id)) {
+      return;
+    }
+    loom_diagnostic_param_t params[] = {
+        loom_param_with_field_ref(
+            loom_param_string(loom_verify_symbol_name(state, ref)), field_ref),
+    };
+    loom_verify_emit_structured(state, op, LOOM_ERR_SYMBOL_002, params,
+                                IREE_ARRAYSIZE(params));
+    return;
+  }
+
+  if (!reference_descriptor || reference_descriptor->interfaces == 0 ||
+      loom_symbol_implements(symbol, reference_descriptor->interfaces)) {
+    return;
+  }
+
+  loom_diagnostic_param_t params[] = {
+      loom_param_with_field_ref(
+          loom_param_string(loom_verify_symbol_name(state, ref)), field_ref),
+      loom_param_string(loom_verify_symbol_definition_name(symbol)),
+      loom_param_string(
+          loom_symbol_reference_descriptor_name(reference_descriptor)),
+  };
+  loom_diagnostic_related_op_t related_ops[] = {{
+      .label = IREE_SV("defined here"),
+      .op = symbol->defining_op,
+  }};
+  loom_diagnostic_emission_t emission = {
+      .op = op,
+      .error = LOOM_ERR_SYMBOL_003,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+      .related_ops = related_ops,
+      .related_op_count = IREE_ARRAYSIZE(related_ops),
+  };
+  loom_verify_emit_diagnostic(state, &emission);
+}
+
+static void loom_verify_attr_symbol_references(
+    loom_verify_state_t* state, const loom_op_t* op,
+    const loom_attr_descriptor_t* descriptor, loom_attribute_t attr,
+    loom_diagnostic_field_ref_t field_ref, uint8_t aggregate_depth) {
+  switch ((loom_attr_kind_t)attr.kind) {
+    case LOOM_ATTR_SYMBOL:
+      loom_verify_symbol_reference(
+          state, op,
+          descriptor && descriptor->attr_kind == LOOM_ATTR_SYMBOL
+              ? descriptor->reference.symbol_ref
+              : NULL,
+          loom_attr_as_symbol(attr), field_ref);
+      return;
+    case LOOM_ATTR_SYMBOL_ARRAY:
+    case LOOM_ATTR_SYMBOL_SET: {
+      loom_symbol_ref_array_t refs = attr.kind == LOOM_ATTR_SYMBOL_SET
+                                         ? loom_attr_as_symbol_set(attr)
+                                         : loom_attr_as_symbol_array(attr);
+      if (refs.count > 0 && !refs.values) return;
+      const loom_symbol_reference_descriptor_t* reference_descriptor =
+          descriptor && descriptor->attr_kind == attr.kind
+              ? descriptor->reference.symbol_ref
+              : NULL;
+      for (uint16_t i = 0; i < refs.count; ++i) {
+        loom_verify_symbol_reference(state, op, reference_descriptor,
+                                     refs.values[i], field_ref);
+      }
+      return;
+    }
+    case LOOM_ATTR_DICT:
+      // Generic dictionary entries carry no symbol-reference descriptors.
+      // Their semantic interpretation belongs to the owning dialect verifier;
+      // this includes low-level relocation dictionaries whose symbols are
+      // resolved by the artifact emitter instead of an IR declaration.
+      return;
+    case LOOM_ATTR_PARAMETERIZED: {
+      if (aggregate_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          (attr.count > 0 && !attr.parameterized_slots)) {
+        return;
+      }
+      const loom_parameterized_attr_descriptor_t* family_descriptor =
+          loom_context_resolve_parameterized_attr(
+              state->module->context, loom_attr_as_parameterized_kind(attr));
+      if (!family_descriptor ||
+          attr.count != family_descriptor->parameter_count) {
+        return;
+      }
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        loom_verify_attr_symbol_references(
+            state, op, &family_descriptor->parameter_descriptors[i],
+            attr.parameterized_slots[i], field_ref,
+            (uint8_t)(aggregate_depth + 1));
+      }
+      return;
+    }
+    case LOOM_ATTR_PARAMETERIZED_ARRAY:
+      if (aggregate_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          (attr.count > 0 && !attr.parameterized_array)) {
+        return;
+      }
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        loom_verify_attr_symbol_references(
+            state, op, /*descriptor=*/NULL, attr.parameterized_array[i],
+            field_ref, (uint8_t)(aggregate_depth + 1));
+      }
+      return;
+    default:
+      return;
+  }
+}
+
+void loom_verify_module_type_symbol_references(loom_verify_state_t* state) {
+  state->type_summary = (loom_verify_type_summary_t){
+      .all_well_formed = true,
+      .may_reference_values = false,
+  };
+  for (iree_host_size_t i = 0; i < state->module->types.count; ++i) {
+    loom_type_t type = state->module->types.entries[i];
+    if (loom_verify_type_well_formed_malformation(type) !=
+        LOOM_VERIFY_TYPE_MALFORMATION_NONE) {
+      state->type_summary.all_well_formed = false;
+    }
+    state->type_summary.may_reference_values |=
+        loom_type_may_reference_values(type);
+    if (!loom_type_is_parameterized(type)) continue;
+    const loom_parameterized_type_descriptor_t* descriptor =
+        loom_type_parameterized_descriptor(type);
+    const uint8_t parameter_count =
+        loom_type_parameterized_parameter_count(type);
+    const loom_attribute_t* parameters =
+        loom_type_parameterized_parameters(type);
+    if (!descriptor || parameter_count != descriptor->parameter_count ||
+        (parameter_count > 0 && !parameters)) {
+      continue;
+    }
+    for (uint8_t j = 0; j < parameter_count; ++j) {
+      loom_verify_attr_symbol_references(
+          state, /*op=*/NULL, &descriptor->parameter_descriptors[j],
+          parameters[j], loom_diagnostic_field_ref_none(),
+          /*aggregate_depth=*/0);
+    }
+  }
+}
+
 void loom_verify_symbol_references(loom_verify_state_t* state,
                                    const loom_op_t* op,
                                    const loom_op_vtable_t* vtable) {
@@ -1154,75 +2057,10 @@ void loom_verify_symbol_references(loom_verify_state_t* state,
   const loom_attribute_t* attrs = loom_op_attrs(op);
   for (uint8_t i = 0; i < vtable->attribute_count && i < op->attribute_count;
        ++i) {
-    const loom_attr_descriptor_t* descriptor = &vtable->attr_descriptors[i];
-    if (descriptor->attr_kind != LOOM_ATTR_SYMBOL) continue;
-    if ((descriptor->flags & LOOM_ATTR_OPTIONAL) &&
-        loom_attr_is_absent(attrs[i])) {
-      continue;
-    }
-    loom_symbol_ref_t ref = loom_attr_as_symbol(attrs[i]);
-    if (!loom_symbol_ref_is_valid(ref)) continue;
-
-    if (ref.module_id != 0) {
-      loom_diagnostic_param_t params[] = {
-          loom_param_with_field_ref(
-              loom_param_u32(ref.module_id),
-              loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, i)),
-      };
-      loom_verify_emit_structured(state, op, LOOM_ERR_SYMBOL_004, params,
-                                  IREE_ARRAYSIZE(params));
-      continue;
-    }
-
-    if (ref.symbol_id >= state->module->symbols.count) {
-      loom_diagnostic_param_t params[] = {
-          loom_param_with_field_ref(
-              loom_param_u32(ref.symbol_id),
-              loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, i)),
-          loom_param_u32((uint32_t)state->module->symbols.count),
-      };
-      loom_verify_emit_structured(state, op, LOOM_ERR_SYMBOL_001, params,
-                                  IREE_ARRAYSIZE(params));
-      continue;
-    }
-
-    const loom_symbol_t* symbol =
-        &state->module->symbols.entries[ref.symbol_id];
-    if (symbol->definition == NULL || symbol->defining_op == NULL) {
-      loom_diagnostic_param_t params[] = {
-          loom_verify_param_string_for_diagnostic_field(
-              loom_verify_symbol_name(state, ref),
-              LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, i),
-      };
-      loom_verify_emit_structured(state, op, LOOM_ERR_SYMBOL_002, params,
-                                  IREE_ARRAYSIZE(params));
-      continue;
-    }
-
-    if (descriptor->symbol_ref &&
-        !loom_symbol_implements(symbol, descriptor->symbol_ref->interfaces)) {
-      loom_diagnostic_param_t params[] = {
-          loom_verify_param_string_for_diagnostic_field(
-              loom_verify_symbol_name(state, ref),
-              LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, i),
-          loom_param_string(loom_verify_symbol_definition_name(symbol)),
-          loom_param_string(
-              loom_symbol_reference_descriptor_name(descriptor->symbol_ref)),
-      };
-      loom_diagnostic_related_op_t related_ops[] = {{
-          .label = IREE_SV("defined here"),
-          .op = symbol->defining_op,
-      }};
-      loom_diagnostic_emission_t emission = {
-          .op = op,
-          .error = LOOM_ERR_SYMBOL_003,
-          .params = params,
-          .param_count = IREE_ARRAYSIZE(params),
-          .related_ops = related_ops,
-          .related_op_count = IREE_ARRAYSIZE(related_ops),
-      };
-      loom_verify_emit_diagnostic(state, &emission);
-    }
+    loom_verify_attr_symbol_references(
+        state, op, &vtable->attr_descriptors[i], attrs[i],
+        loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, i),
+        /*aggregate_depth=*/0);
   }
 }
 
@@ -1247,21 +2085,6 @@ static bool loom_verify_region_terminator_matches(
   if (!terminator) return false;
   if (region_descriptor->terminator == LOOM_OP_KIND_UNKNOWN) return true;
   return terminator->kind == region_descriptor->terminator;
-}
-
-static bool loom_verify_region_has_cfg_successors(const loom_region_t* region) {
-  if (!region) return false;
-  if (iree_any_bit_set(region->flags, LOOM_REGION_INSTANCE_FLAG_CFG)) {
-    return true;
-  }
-  for (uint16_t b = 0; b < region->block_count; ++b) {
-    const loom_block_t* block = loom_region_const_block(region, b);
-    const loom_op_t* op = NULL;
-    loom_block_for_each_op(block, op) {
-      if (op->successor_count > 0) return true;
-    }
-  }
-  return false;
 }
 
 bool loom_verify_region_entry_yield(
@@ -1292,116 +2115,4 @@ bool loom_verify_region_entry_yield(
     return true;
   }
   return false;
-}
-
-static iree_string_view_t loom_verify_op_kind_name(loom_verify_state_t* state,
-                                                   loom_op_kind_t kind) {
-  const loom_op_vtable_t* vtable = loom_verify_lookup_vtable(state, kind);
-  if (!vtable) return IREE_SV("<unknown op>");
-  return loom_op_vtable_name(vtable);
-}
-
-static void loom_verify_region_terminator_kind(
-    loom_verify_state_t* state, const loom_op_t* op,
-    const loom_op_vtable_t* vtable, uint8_t region_index,
-    bool region_uses_cfg_successors,
-    const loom_region_descriptor_t* region_descriptor,
-    const loom_op_t* terminator_op) {
-  if (!terminator_op || region_uses_cfg_successors ||
-      loom_verify_region_terminator_matches(region_descriptor, terminator_op)) {
-    return;
-  }
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(loom_op_vtable_name(vtable)),
-      loom_param_u32(region_index),
-      loom_param_string(
-          loom_verify_op_kind_name(state, region_descriptor->terminator)),
-      loom_param_string(loom_verify_op_kind_name(state, terminator_op->kind)),
-  };
-  loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_018, params,
-                              IREE_ARRAYSIZE(params));
-}
-
-void loom_verify_region_structure(loom_verify_state_t* state,
-                                  const loom_op_t* op,
-                                  const loom_op_vtable_t* vtable) {
-  if (!vtable->region_descriptors) return;
-  iree_string_view_t op_name = loom_op_vtable_name(vtable);
-  loom_region_t** regions = loom_op_regions(op);
-  for (uint8_t i = 0; i < op->region_count; ++i) {
-    const loom_region_descriptor_t* region_descriptor =
-        loom_op_vtable_region_descriptor(vtable, i);
-    if (!region_descriptor) return;
-    loom_region_t* region = regions[i];
-    if (!region) {
-      if (iree_any_bit_set(region_descriptor->flags, LOOM_REGION_OPTIONAL)) {
-        continue;
-      }
-      loom_diagnostic_param_t params[] = {
-          loom_param_string(op_name),
-          loom_param_u32(op->region_count),
-          loom_param_u32(vtable->region_count),
-      };
-      loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_004, params,
-                                  IREE_ARRAYSIZE(params));
-      continue;
-    }
-    if ((region_descriptor->flags & LOOM_REGION_SINGLE_BLOCK) &&
-        region->block_count != 1) {
-      loom_diagnostic_param_t params[] = {
-          loom_param_string(op_name),
-          loom_param_u32(i),
-          loom_param_u32(region->block_count),
-      };
-      loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_006, params,
-                                  IREE_ARRAYSIZE(params));
-    }
-    bool region_uses_cfg_successors =
-        loom_verify_region_has_cfg_successors(region);
-    for (uint16_t b = 0; b < region->block_count; ++b) {
-      const loom_block_t* block = loom_region_const_block(region, b);
-      const loom_op_t* terminator_op = NULL;
-      const loom_op_t* current_op = NULL;
-      loom_block_for_each_op(block, current_op) {
-        if (terminator_op) {
-          const loom_op_vtable_t* current_vtable =
-              loom_verify_lookup_vtable(state, current_op->kind);
-          iree_string_view_t current_name =
-              current_vtable ? loom_op_vtable_name(current_vtable)
-                             : IREE_SV("<unknown op>");
-          loom_diagnostic_param_t params[] = {
-              loom_param_string(current_name),
-          };
-          loom_diagnostic_related_op_t related_ops[] = {{
-              .label = IREE_SV("terminator here"),
-              .op = terminator_op,
-          }};
-          loom_diagnostic_emission_t emission = {
-              .op = current_op,
-              .error = LOOM_ERR_STRUCTURE_012,
-              .params = params,
-              .param_count = IREE_ARRAYSIZE(params),
-              .related_ops = related_ops,
-              .related_op_count = IREE_ARRAYSIZE(related_ops),
-          };
-          loom_verify_emit_diagnostic(state, &emission);
-          continue;
-        }
-        if (loom_verify_op_is_terminator(state, current_op)) {
-          terminator_op = current_op;
-        }
-      }
-      if (!terminator_op && !region_uses_cfg_successors) {
-        loom_diagnostic_param_t params[] = {
-            loom_param_string(op_name),
-            loom_param_u32(i),
-        };
-        loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_005, params,
-                                    IREE_ARRAYSIZE(params));
-      }
-      loom_verify_region_terminator_kind(state, op, vtable, i,
-                                         region_uses_cfg_successors,
-                                         region_descriptor, terminator_op);
-    }
-  }
 }

@@ -192,6 +192,21 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    semaphore_wait
+  HDRS
+    "semaphore_wait.h"
+  SRCS
+    "semaphore_wait.c"
+  DEPS
+    iree::async
+    iree::base
+    iree::base::internal::atomic_slist
+    iree::base::threading
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     sequence_emulation
   HDRS
     "sequence_emulation.h"

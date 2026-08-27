@@ -19,6 +19,7 @@
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/vector/ops.h"
+#include "loom/ops/view/ops.h"
 #include "loom/util/fact_table.h"
 
 namespace loom {
@@ -37,6 +38,7 @@ class MovementTest : public ::testing::Test {
     RegisterDialect(LOOM_DIALECT_KERNEL, loom_kernel_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_VECTOR, loom_vector_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_VIEW, loom_view_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"),
                                         &block_pool_, nullptr,
@@ -101,9 +103,8 @@ class MovementTest : public ::testing::Test {
         loom_index_constant_result(BuildOffsetConstant(byte_length));
     loom_op_t* op = nullptr;
     IREE_CHECK_OK(loom_buffer_alloca_build(
-        &builder_, byte_length_value, base_alignment,
-        LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP, loom_type_buffer(),
-        LOOM_LOCATION_UNKNOWN, &op));
+        &builder_, LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP, base_alignment,
+        byte_length_value, loom_type_buffer(), LOOM_LOCATION_UNKNOWN, &op));
     return loom_buffer_alloca_result(op);
   }
 
@@ -263,6 +264,65 @@ TEST_F(MovementTest, ClassifiesStaticDenseVectorLoadFootprint) {
   EXPECT_EQ(request.source.static_byte_length, 16);
   EXPECT_EQ(request.dest.kind, LOOM_MOVEMENT_ENDPOINT_REGISTER);
   EXPECT_EQ(diagnostic.rejection_bits, 0u);
+}
+
+TEST_F(MovementTest, ClassifiesStaticDenseScalarLoadFootprint) {
+  loom_value_id_t buffer = DefineBufferArg();
+  loom_value_id_t layout = BuildDenseLayout();
+  loom_value_id_t view =
+      BuildBufferView(buffer, 16, ViewType1D(LOOM_SCALAR_TYPE_F32, 32, layout));
+  int64_t static_indices[] = {3};
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_view_load_build(
+      &builder_, 0, view, nullptr, 0, static_indices,
+      IREE_ARRAYSIZE(static_indices), 0, 0,
+      loom_type_scalar(LOOM_SCALAR_TYPE_F32), LOOM_LOCATION_UNKNOWN, &op));
+
+  loom_movement_analysis_t analysis = {};
+  InitializeAnalysis(&analysis);
+  loom_movement_request_t request = {};
+  loom_movement_diagnostic_t diagnostic = {};
+  ASSERT_TRUE(Describe(&analysis, op, &request, &diagnostic));
+  EXPECT_EQ(request.kind, LOOM_MOVEMENT_KIND_VIEW_LOAD);
+  EXPECT_EQ(request.layout_kind, LOOM_MOVEMENT_LAYOUT_SCALAR_ELEMENT);
+  EXPECT_EQ(request.schema_kind, LOOM_MOVEMENT_SCHEMA_TYPED_ELEMENT);
+  EXPECT_EQ(request.transferred_byte_count, 4);
+  EXPECT_EQ(request.source.kind, LOOM_MOVEMENT_ENDPOINT_VIEW);
+  EXPECT_EQ(request.source.root_value_id, buffer);
+  EXPECT_EQ(request.source.static_begin_byte_offset, 28);
+  EXPECT_EQ(request.source.static_byte_length, 4);
+  EXPECT_EQ(request.dest.kind, LOOM_MOVEMENT_ENDPOINT_REGISTER);
+  EXPECT_EQ(diagnostic.rejection_bits, 0u);
+}
+
+TEST_F(MovementTest, ClassifiesStaticStridedScalarStoreFootprint) {
+  loom_value_id_t buffer = DefineBufferArg();
+  loom_value_id_t value = DefineI32Arg();
+  loom_value_id_t layout = BuildStaticStridedLayout(8, 1);
+  loom_value_id_t view = BuildBufferView(
+      buffer, 8, ViewType2D(LOOM_SCALAR_TYPE_I32, 8, 8, layout));
+  int64_t static_indices[] = {1, 2};
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_view_store_build(
+      &builder_, 0, value, view, nullptr, 0, static_indices,
+      IREE_ARRAYSIZE(static_indices), 0, 0, LOOM_LOCATION_UNKNOWN, &op));
+
+  loom_movement_analysis_t analysis = {};
+  InitializeAnalysis(&analysis);
+  loom_movement_request_t request = {};
+  loom_movement_diagnostic_t diagnostic = {};
+  ASSERT_TRUE(Describe(&analysis, op, &request, &diagnostic));
+  EXPECT_EQ(request.kind, LOOM_MOVEMENT_KIND_VIEW_STORE);
+  EXPECT_EQ(request.source.kind, LOOM_MOVEMENT_ENDPOINT_REGISTER);
+  EXPECT_EQ(request.dest.kind, LOOM_MOVEMENT_ENDPOINT_VIEW);
+  EXPECT_EQ(request.dest.root_value_id, buffer);
+  EXPECT_EQ(request.dest.static_begin_byte_offset, 48);
+  EXPECT_EQ(request.dest.static_byte_length, 4);
+
+  loom_view_region_t region = {};
+  ASSERT_TRUE(loom_movement_endpoint_as_view_region(&request.dest, &region));
+  EXPECT_EQ(region.root_value_id, buffer);
+  EXPECT_TRUE(iree_any_bit_set(region.access_flags, LOOM_VIEW_ACCESS_WRITE));
 }
 
 TEST_F(MovementTest, CarriesViewAlignmentFacts) {

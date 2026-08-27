@@ -1,6 +1,6 @@
 // RUN: emit amdgpu-wait-counter-plan-json @gfx11_smem_result_wait strategy=source
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @gfx11_smem_result_wait(%kernarg: reg<amdgpu.sgpr x2>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_smem_result_wait(%kernarg: reg<amdgpu.sgpr x2>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
   %loaded = s_load_dword %kernarg, %soffset
   %sum = s_add_u32 %loaded, %lhs
   return %sum
@@ -11,23 +11,39 @@ low.func.def target(@gfx11_target) @gfx11_smem_result_wait(%kernarg: reg<amdgpu.
 
 // ====
 
+// RUN: emit amdgpu-wait-counter-plan-json @gfx11_multi_counter_consumer_wait strategy=source fixed=%loaded:physical_register:0:1 fixed=%trans:physical_register:1:1 fixed=%result:physical_register:2:1
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_multi_counter_consumer_wait(%resource: reg<amdgpu.sgpr x4>, %address: reg<amdgpu.vgpr>, %offset: reg<amdgpu.sgpr>, %input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %loaded = buffer_load_dword %resource, %address, %offset
+  %trans = v_exp_f32 %input
+  %result = v_add_f32 %trans, %loaded
+  return %result
+}
+
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"gfx11_multi_counter_consumer_wait","target":"gfx11_target","descriptor_set":"amdgpu.rdna3.core","progress_count":2,"hazard_count":2,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":5,"class_name":"amdgpu.alu","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":0,"producer_packet":0,"producer_scheduled_ordinal":0,"consumer_node":2,"insertion_packet":2,"block":0,"scheduled_ordinal":2,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":6,"reason_name":"amdgpu.trans_result_use","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":1,"consumer_node":2,"insertion_packet":2,"block":0,"scheduled_ordinal":2,"progress_class_id":5,"progress_class_name":"amdgpu.alu","required":1,"observed":0,"residual":1}]}
+
+// ====
+
 // RUN: emit amdgpu-wait-counter-plan-json @gfx11_explicit_smem_wait strategy=source
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @gfx11_explicit_smem_wait(%kernarg: reg<amdgpu.sgpr x2>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_explicit_smem_wait(%kernarg: reg<amdgpu.sgpr x2>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
   %loaded = s_load_dword %kernarg, %soffset
   s_waitcnt {lgkmcnt = 0}
   %sum = s_add_u32 %loaded, %lhs
   return %sum
 }
 
+// lgkmcnt drains LDS and SMEM on gfx11; the implicit vmcnt default remains a
+// no-wait and must not reset VMEM progress.
 // ----
-{"format":"loom.low.packet_hazard_plan.v1","function":"gfx11_explicit_smem_wait","target":"gfx11_target","descriptor_set":"amdgpu.rdna3.core","progress_count":4,"hazard_count":0,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":4,"class_name":"amdgpu.smem","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":1,"class_name":"amdgpu.vmem_load","action":"reset","units":0},{"index":2,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":3,"class_name":"amdgpu.lds","action":"reset","units":0},{"index":3,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":4,"class_name":"amdgpu.smem","action":"reset","units":0}],"hazards":[]}
+{"format":"loom.low.packet_hazard_plan.v1","function":"gfx11_explicit_smem_wait","target":"gfx11_target","descriptor_set":"amdgpu.rdna3.core","progress_count":3,"hazard_count":0,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":4,"class_name":"amdgpu.smem","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":3,"class_name":"amdgpu.lds","action":"reset","units":0},{"index":2,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":4,"class_name":"amdgpu.smem","action":"reset","units":0}],"hazards":[]}
 
 // ====
 
 // RUN: emit amdgpu-wait-counter-plan-json @gfx11_lds_barrier_wait strategy=source
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @gfx11_lds_barrier_wait(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_lds_barrier_wait(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>) asm {
   ds_write_b32 %addr, %value
   s_barrier
   return
@@ -40,7 +56,7 @@ low.func.def target(@gfx11_target) @gfx11_lds_barrier_wait(%addr: reg<amdgpu.vgp
 
 // RUN: emit amdgpu-wait-counter-plan-json @gfx11_same_block_partial_vmem_wait strategy=source
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @gfx11_same_block_partial_vmem_wait(%resource: reg<amdgpu.sgpr x4>, %vaddr0: reg<amdgpu.vgpr>, %vaddr1: reg<amdgpu.vgpr>, %vaddr2: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_same_block_partial_vmem_wait(%resource: reg<amdgpu.sgpr x4>, %vaddr0: reg<amdgpu.vgpr>, %vaddr1: reg<amdgpu.vgpr>, %vaddr2: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>) asm {
   %oldest = buffer_load_dword %resource, %vaddr0, %soffset
   %middle = buffer_load_dword %resource, %vaddr1, %soffset {offset = 4}
   %youngest = buffer_load_dword %resource, %vaddr2, %soffset {offset = 8}
@@ -52,13 +68,13 @@ low.func.def target(@gfx11_target) @gfx11_same_block_partial_vmem_wait(%resource
 }
 
 // ----
-{"format":"loom.low.packet_hazard_plan.v1","function":"gfx11_same_block_partial_vmem_wait","target":"gfx11_target","descriptor_set":"amdgpu.rdna3.core","progress_count":4,"hazard_count":3,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":2,"packet":2,"node":2,"block":0,"scheduled_ordinal":2,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":3,"packet":6,"node":6,"block":0,"scheduled_ordinal":6,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":0,"producer_packet":0,"producer_scheduled_ordinal":0,"consumer_node":3,"insertion_packet":3,"block":0,"scheduled_ordinal":3,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":3,"observed":2,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":1,"consumer_node":4,"insertion_packet":4,"block":0,"scheduled_ordinal":4,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":2,"observed":1,"residual":1},{"index":2,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":2,"producer_packet":2,"producer_scheduled_ordinal":2,"consumer_node":5,"insertion_packet":5,"block":0,"scheduled_ordinal":5,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1}]}
+{"format":"loom.low.packet_hazard_plan.v1","function":"gfx11_same_block_partial_vmem_wait","target":"gfx11_target","descriptor_set":"amdgpu.rdna3.core","progress_count":4,"hazard_count":2,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":2,"packet":2,"node":2,"block":0,"scheduled_ordinal":2,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":3,"packet":6,"node":6,"block":0,"scheduled_ordinal":6,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":2,"producer_packet":2,"producer_scheduled_ordinal":2,"consumer_node":5,"insertion_packet":5,"block":0,"scheduled_ordinal":5,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":9,"reason_name":"amdgpu.program_exit","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":7,"insertion_packet":7,"block":0,"scheduled_ordinal":7,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":1,"observed":0,"residual":1}]}
 
 // ====
 
 // RUN: emit amdgpu-wait-counter-plan-json @gfx11_cross_block_wait strategy=source
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @gfx11_cross_block_wait(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_cross_block_wait(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) asm {
   %loaded = buffer_load_dword %resource, %vaddr, %soffset
   %cond = s_cmp_lt_i32 %lhs, %rhs
   low.cond_br %cond, ^store, ^exit : reg<amdgpu.scc>
@@ -70,13 +86,27 @@ low.func.def target(@gfx11_target) @gfx11_cross_block_wait(%resource: reg<amdgpu
 }
 
 // ----
-{"format":"loom.low.packet_hazard_plan.v1","function":"gfx11_cross_block_wait","target":"gfx11_target","descriptor_set":"amdgpu.rdna3.core","progress_count":2,"hazard_count":1,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":1,"packet":3,"node":3,"block":1,"scheduled_ordinal":0,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":0,"producer_packet":0,"producer_scheduled_ordinal":0,"consumer_node":3,"insertion_packet":3,"block":1,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1}]}
+{"format":"loom.low.packet_hazard_plan.v1","function":"gfx11_cross_block_wait","target":"gfx11_target","descriptor_set":"amdgpu.rdna3.core","progress_count":2,"hazard_count":2,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":1,"packet":3,"node":3,"block":1,"scheduled_ordinal":0,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":8,"reason_name":"amdgpu.memory_effect","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":3,"insertion_packet":3,"block":1,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":9,"reason_name":"amdgpu.program_exit","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":4,"insertion_packet":4,"block":1,"scheduled_ordinal":1,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":1,"observed":0,"residual":1}]}
+
+// ====
+
+// RUN: emit amdgpu-wait-counter-plan-json @gfx11_cross_block_program_exit_wait strategy=source
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_cross_block_program_exit_wait(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>) asm {
+  buffer_store_dword %value, %resource, %vaddr, %soffset
+  low.br ^exit
+^exit:
+  return
+}
+
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"gfx11_cross_block_program_exit_wait","target":"gfx11_target","descriptor_set":"amdgpu.rdna3.core","progress_count":1,"hazard_count":1,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":9,"reason_name":"amdgpu.program_exit","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":2,"insertion_packet":2,"block":1,"scheduled_ordinal":0,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":1,"observed":0,"residual":1}]}
 
 // ====
 
 // RUN: emit amdgpu-wait-counter-plan-json @gfx11_block_entry_wait_preserves_later_load strategy=source
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @gfx11_block_entry_wait_preserves_later_load(%resource: reg<amdgpu.sgpr x4>, %vaddr0: reg<amdgpu.vgpr>, %vaddr1: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_block_entry_wait_preserves_later_load(%resource: reg<amdgpu.sgpr x4>, %vaddr0: reg<amdgpu.vgpr>, %vaddr1: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) asm {
   %older = buffer_load_dword %resource, %vaddr0, %soffset
   %cond = s_cmp_lt_i32 %lhs, %rhs
   low.cond_br %cond, ^body, ^exit : reg<amdgpu.scc>
@@ -93,4 +123,19 @@ low.func.def target(@gfx11_target) @gfx11_block_entry_wait_preserves_later_load(
 }
 
 // ----
-{"format":"loom.low.packet_hazard_plan.v1","function":"gfx11_block_entry_wait_preserves_later_load","target":"gfx11_target","descriptor_set":"amdgpu.rdna3.core","progress_count":3,"hazard_count":2,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":1,"packet":4,"node":4,"block":1,"scheduled_ordinal":1,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":2,"packet":7,"node":7,"block":2,"scheduled_ordinal":1,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":0,"producer_packet":0,"producer_scheduled_ordinal":0,"consumer_node":3,"insertion_packet":3,"block":1,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":4,"producer_packet":4,"producer_scheduled_ordinal":1,"consumer_node":6,"insertion_packet":6,"block":2,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1}]}
+{"format":"loom.low.packet_hazard_plan.v1","function":"gfx11_block_entry_wait_preserves_later_load","target":"gfx11_target","descriptor_set":"amdgpu.rdna3.core","progress_count":3,"hazard_count":3,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":1,"packet":4,"node":4,"block":1,"scheduled_ordinal":1,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":2,"packet":7,"node":7,"block":2,"scheduled_ordinal":1,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":0,"producer_packet":0,"producer_scheduled_ordinal":0,"consumer_node":3,"insertion_packet":3,"block":1,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":4,"producer_packet":4,"producer_scheduled_ordinal":1,"consumer_node":6,"insertion_packet":6,"block":2,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":2,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":9,"reason_name":"amdgpu.program_exit","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":8,"insertion_packet":8,"block":2,"scheduled_ordinal":2,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":1,"observed":0,"residual":1}]}
+
+// ====
+
+// RUN: emit amdgpu-wait-counter-plan-json @gfx11_edge_cycle_scratch_wait strategy=source fixed=%vaddr:physical_register:3:1 fixed=%loaded:physical_register:0:1 fixed=%lhs:physical_register:1:1 fixed=%rhs:physical_register:2:1 fixed=%a:physical_register:1:1 fixed=%b:physical_register:2:1
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_edge_cycle_scratch_wait(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
+  %loaded = buffer_load_dword %resource, %vaddr, %soffset
+  low.br ^join(%rhs: reg<amdgpu.vgpr>, %lhs: reg<amdgpu.vgpr>)
+^join(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>):
+  %sum = v_add_u32 %a, %b
+  return
+}
+
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"gfx11_edge_cycle_scratch_wait","target":"gfx11_target","descriptor_set":"amdgpu.rdna3.core","progress_count":1,"hazard_count":1,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":5,"reason_name":"amdgpu.read_result_reuse","producer_node":0,"producer_packet":0,"producer_scheduled_ordinal":0,"consumer_node":2,"insertion_packet":2,"block":1,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1}]}

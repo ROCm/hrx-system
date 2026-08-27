@@ -17,6 +17,11 @@
 extern "C" {
 #endif
 
+// Selects a generated AMDGPU arithmetic lowering contract for |source_op|.
+iree_status_t loom_amdgpu_select_arithmetic_contract(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    bool* out_selected);
+
 // Selects a mixed-source f32-result FMA plan for scalar.fmaf operands widened
 // from f16 sources.
 iree_status_t loom_amdgpu_select_scalar_fmaf_mix_plan(

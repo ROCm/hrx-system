@@ -76,27 +76,42 @@ static iree_status_t FakeExecutionBarrier(
   return iree_ok_status();
 }
 
-static iree_status_t FakeSignalEvent(iree_hal_command_buffer_t* command_buffer,
-                                     iree_hal_event_t* event,
-                                     iree_hal_execution_stage_t source_stage) {
-  return iree_ok_status();
-}
-
-static iree_status_t FakeResetEvent(iree_hal_command_buffer_t* command_buffer,
-                                    iree_hal_event_t* event,
-                                    iree_hal_execution_stage_t source_stage) {
-  return iree_ok_status();
-}
-
-static iree_status_t FakeWaitEvents(
-    iree_hal_command_buffer_t* command_buffer, iree_host_size_t event_count,
-    const iree_hal_event_t** events,
+static iree_status_t FakeAtomicWait(
+    iree_hal_command_buffer_t* command_buffer,
     iree_hal_execution_stage_t source_stage_mask,
     iree_hal_execution_stage_t target_stage_mask,
-    iree_host_size_t memory_barrier_count,
-    const iree_hal_memory_barrier_t* memory_barriers,
-    iree_host_size_t buffer_barrier_count,
-    const iree_hal_buffer_barrier_t* buffer_barriers) {
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_wait_params_t params) {
+  (void)command_buffer;
+  (void)source_stage_mask;
+  (void)target_stage_mask;
+  (void)target_ref;
+  (void)params;
+  return iree_ok_status();
+}
+
+static iree_status_t FakeAtomicStore(
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_store_params_t params) {
+  (void)command_buffer;
+  (void)source_stage_mask;
+  (void)target_stage_mask;
+  (void)target_ref;
+  (void)params;
+  return iree_ok_status();
+}
+
+static iree_status_t FakeAtomicRmw(iree_hal_command_buffer_t* command_buffer,
+                                   iree_hal_execution_stage_t source_stage_mask,
+                                   iree_hal_execution_stage_t target_stage_mask,
+                                   iree_hal_buffer_ref_t target_ref,
+                                   iree_hal_atomic_rmw_params_t params) {
+  (void)command_buffer;
+  (void)source_stage_mask;
+  (void)target_stage_mask;
+  (void)target_ref;
+  (void)params;
   return iree_ok_status();
 }
 
@@ -156,11 +171,21 @@ static iree_status_t FakeDispatch(iree_hal_command_buffer_t* command_buffer,
 }
 
 static const iree_hal_command_buffer_vtable_t kFakeTargetVtable = {
-    FakeDestroy,         FakeBegin,         FakeEnd,
-    FakeBeginDebugGroup, FakeEndDebugGroup, FakeExecutionBarrier,
-    FakeSignalEvent,     FakeResetEvent,    FakeWaitEvents,
-    FakeAdviseBuffer,    FakeFillBuffer,    FakeUpdateBuffer,
-    FakeCopyBuffer,      FakeCollective,    FakeDispatch,
+    .destroy = FakeDestroy,
+    .begin = FakeBegin,
+    .end = FakeEnd,
+    .begin_debug_group = FakeBeginDebugGroup,
+    .end_debug_group = FakeEndDebugGroup,
+    .execution_barrier = FakeExecutionBarrier,
+    .atomic_wait = FakeAtomicWait,
+    .atomic_store = FakeAtomicStore,
+    .atomic_rmw = FakeAtomicRmw,
+    .advise_buffer = FakeAdviseBuffer,
+    .fill_buffer = FakeFillBuffer,
+    .update_buffer = FakeUpdateBuffer,
+    .copy_buffer = FakeCopyBuffer,
+    .collective = FakeCollective,
+    .dispatch = FakeDispatch,
 };
 
 class CommandBufferTest : public ::testing::Test {

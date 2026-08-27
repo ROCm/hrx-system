@@ -26,7 +26,9 @@ loom_cc_library(
     loom::ops::func_symbol_facts
     loom::ops::low
     loom::target::arch::ireevm::descriptors
+    loom::target::facts
     loom::target::function_contract
+    loom::target::function_version
     loom::target::registers
     loom::target::types
   PUBLIC
@@ -99,11 +101,11 @@ loom_cc_library(
     loom::ops::target
     loom::target::arch::ireevm::descriptors
     loom::target::arch::ireevm::provider
-    loom::target::compile_report
-    loom::target::compile_report_low
     loom::target::entry_selection
     loom::target::provider
     loom::target::registers
+    loom::target::reporting::low
+    loom::target::reporting::report
     loom::verify
   PUBLIC
 )

@@ -14,131 +14,90 @@
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/registers.h"
 
-static iree_status_t loom_amdgpu_sanitizer_race_require_data_register(
+static void loom_amdgpu_sanitizer_race_require_data_register(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
-    loom_value_id_t value, uint32_t unit_count, iree_string_view_t value_name) {
-  if (value >= builder->module->values.count) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU sanitizer race report value `%.*s` is an invalid low value",
-        (int)value_name.size, value_name.data);
-  }
+    loom_value_id_t value, uint32_t unit_count) {
+  IREE_ASSERT(value < builder->module->values.count,
+              "AMDGPU sanitizer race report received an invalid low value");
   const loom_type_t type = loom_module_value_type(builder->module, value);
-  if (!loom_low_type_is_register(type) ||
-      loom_low_register_type_descriptor_set_stable_id(type) !=
-          descriptor_set->stable_id ||
-      loom_low_register_type_unit_count(type) != unit_count) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU sanitizer race report value `%.*s` has an unsupported register "
-        "shape",
-        (int)value_name.size, value_name.data);
-  }
+  IREE_ASSERT(loom_low_type_is_register(type) &&
+                  loom_low_register_type_descriptor_set_stable_id(type) ==
+                      descriptor_set->stable_id &&
+                  loom_low_register_type_unit_count(type) == unit_count,
+              "AMDGPU sanitizer race report received a low value with an "
+              "unsupported register shape");
   const uint16_t register_class = loom_low_register_type_class_id(type);
-  if (register_class != LOOM_AMDGPU_REG_CLASS_ID_SGPR &&
-      register_class != LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU sanitizer race report value `%.*s` must be an SGPR or VGPR",
-        (int)value_name.size, value_name.data);
-  }
-  return iree_ok_status();
+  IREE_ASSERT(register_class == LOOM_AMDGPU_REG_CLASS_ID_SGPR ||
+                  register_class == LOOM_AMDGPU_REG_CLASS_ID_VGPR,
+              "AMDGPU sanitizer race report value must be an SGPR or VGPR");
 }
 
-static iree_status_t loom_amdgpu_sanitizer_race_require_register_class(
+static void loom_amdgpu_sanitizer_race_require_register_class(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
-    loom_value_id_t value, uint32_t unit_count, uint16_t register_class,
-    iree_string_view_t value_name) {
-  if (value >= builder->module->values.count) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU sanitizer race report value `%.*s` is an invalid low value",
-        (int)value_name.size, value_name.data);
-  }
+    loom_value_id_t value, uint32_t unit_count, uint16_t register_class) {
+  IREE_ASSERT(value < builder->module->values.count,
+              "AMDGPU sanitizer race report received an invalid low value");
   const loom_type_t type = loom_module_value_type(builder->module, value);
-  if (!loom_low_type_is_register(type) ||
-      loom_low_register_type_descriptor_set_stable_id(type) !=
-          descriptor_set->stable_id ||
-      loom_low_register_type_unit_count(type) != unit_count ||
-      loom_low_register_type_class_id(type) != register_class) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU sanitizer race report value `%.*s` has an unsupported register "
-        "shape",
-        (int)value_name.size, value_name.data);
-  }
-  return iree_ok_status();
+  IREE_ASSERT(loom_low_type_is_register(type) &&
+                  loom_low_register_type_descriptor_set_stable_id(type) ==
+                      descriptor_set->stable_id &&
+                  loom_low_register_type_unit_count(type) == unit_count,
+              "AMDGPU sanitizer race report received a low value with an "
+              "unsupported register shape");
+  IREE_ASSERT(loom_low_register_type_class_id(type) == register_class,
+              "AMDGPU sanitizer race report received a low value with an "
+              "unsupported register class");
 }
 
-static iree_status_t loom_amdgpu_sanitizer_validate_race_report_values(
+static void loom_amdgpu_sanitizer_validate_race_report_values(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_sanitizer_race_report_t* report) {
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_require_data_register(
-      builder, descriptor_set, report->check_kind, 1, IREE_SV("check_kind")));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_require_data_register(
-      builder, descriptor_set, report->flags, 1, IREE_SV("flags")));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_require_data_register(
-      builder, descriptor_set, report->memory_space, 1,
-      IREE_SV("memory_space")));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_require_data_register(
-      builder, descriptor_set, report->current_access_kind, 1,
-      IREE_SV("current_access_kind")));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_require_data_register(
-      builder, descriptor_set, report->prior_access_kind, 1,
-      IREE_SV("prior_access_kind")));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_require_data_register(
-      builder, descriptor_set, report->access_size, 1, IREE_SV("access_size")));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_require_data_register(
-      builder, descriptor_set, report->current_site_id, 2,
-      IREE_SV("current_site_id")));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_require_data_register(
-      builder, descriptor_set, report->prior_site_id, 2,
-      IREE_SV("prior_site_id")));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_require_data_register(
-      builder, descriptor_set, report->memory_address, 2,
-      IREE_SV("memory_address")));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_require_data_register(
-      builder, descriptor_set, report->shadow_address, 2,
-      IREE_SV("shadow_address")));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_require_data_register(
-      builder, descriptor_set, report->shadow_value, 2,
-      IREE_SV("shadow_value")));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_require_data_register(
-      builder, descriptor_set, report->current_workgroup_id_x, 1,
-      IREE_SV("current_workgroup_id_x")));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_require_data_register(
-      builder, descriptor_set, report->current_workgroup_id_y, 1,
-      IREE_SV("current_workgroup_id_y")));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_require_data_register(
-      builder, descriptor_set, report->current_workgroup_id_z, 1,
-      IREE_SV("current_workgroup_id_z")));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_require_data_register(
-      builder, descriptor_set, report->current_workitem_id_x, 1,
-      IREE_SV("current_workitem_id_x")));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_require_data_register(
-      builder, descriptor_set, report->current_workitem_id_y, 1,
-      IREE_SV("current_workitem_id_y")));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_require_data_register(
-      builder, descriptor_set, report->current_workitem_id_z, 1,
-      IREE_SV("current_workitem_id_z")));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_require_data_register(
-      builder, descriptor_set, report->prior_workgroup_id_x, 1,
-      IREE_SV("prior_workgroup_id_x")));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_require_data_register(
-      builder, descriptor_set, report->prior_workgroup_id_y, 1,
-      IREE_SV("prior_workgroup_id_y")));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_require_data_register(
-      builder, descriptor_set, report->prior_workgroup_id_z, 1,
-      IREE_SV("prior_workgroup_id_z")));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_require_data_register(
-      builder, descriptor_set, report->prior_workitem_id_x, 1,
-      IREE_SV("prior_workitem_id_x")));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_require_data_register(
-      builder, descriptor_set, report->prior_workitem_id_y, 1,
-      IREE_SV("prior_workitem_id_y")));
-  return loom_amdgpu_sanitizer_race_require_data_register(
-      builder, descriptor_set, report->prior_workitem_id_z, 1,
-      IREE_SV("prior_workitem_id_z"));
+  loom_amdgpu_sanitizer_race_require_data_register(builder, descriptor_set,
+                                                   report->check_kind, 1);
+  loom_amdgpu_sanitizer_race_require_data_register(builder, descriptor_set,
+                                                   report->flags, 1);
+  loom_amdgpu_sanitizer_race_require_data_register(builder, descriptor_set,
+                                                   report->memory_space, 1);
+  loom_amdgpu_sanitizer_race_require_data_register(
+      builder, descriptor_set, report->current_access_kind, 1);
+  loom_amdgpu_sanitizer_race_require_data_register(
+      builder, descriptor_set, report->prior_access_kind, 1);
+  loom_amdgpu_sanitizer_race_require_data_register(builder, descriptor_set,
+                                                   report->access_size, 1);
+  loom_amdgpu_sanitizer_race_require_data_register(builder, descriptor_set,
+                                                   report->current_site_id, 2);
+  loom_amdgpu_sanitizer_race_require_data_register(builder, descriptor_set,
+                                                   report->prior_site_id, 2);
+  loom_amdgpu_sanitizer_race_require_data_register(builder, descriptor_set,
+                                                   report->memory_address, 2);
+  loom_amdgpu_sanitizer_race_require_data_register(builder, descriptor_set,
+                                                   report->shadow_address, 2);
+  loom_amdgpu_sanitizer_race_require_data_register(builder, descriptor_set,
+                                                   report->shadow_value, 2);
+  loom_amdgpu_sanitizer_race_require_data_register(
+      builder, descriptor_set, report->current_workgroup_id_x, 1);
+  loom_amdgpu_sanitizer_race_require_data_register(
+      builder, descriptor_set, report->current_workgroup_id_y, 1);
+  loom_amdgpu_sanitizer_race_require_data_register(
+      builder, descriptor_set, report->current_workgroup_id_z, 1);
+  loom_amdgpu_sanitizer_race_require_data_register(
+      builder, descriptor_set, report->current_workitem_id_x, 1);
+  loom_amdgpu_sanitizer_race_require_data_register(
+      builder, descriptor_set, report->current_workitem_id_y, 1);
+  loom_amdgpu_sanitizer_race_require_data_register(
+      builder, descriptor_set, report->current_workitem_id_z, 1);
+  loom_amdgpu_sanitizer_race_require_data_register(
+      builder, descriptor_set, report->prior_workgroup_id_x, 1);
+  loom_amdgpu_sanitizer_race_require_data_register(
+      builder, descriptor_set, report->prior_workgroup_id_y, 1);
+  loom_amdgpu_sanitizer_race_require_data_register(
+      builder, descriptor_set, report->prior_workgroup_id_z, 1);
+  loom_amdgpu_sanitizer_race_require_data_register(
+      builder, descriptor_set, report->prior_workitem_id_x, 1);
+  loom_amdgpu_sanitizer_race_require_data_register(
+      builder, descriptor_set, report->prior_workitem_id_y, 1);
+  loom_amdgpu_sanitizer_race_require_data_register(
+      builder, descriptor_set, report->prior_workitem_id_z, 1);
 }
 
 iree_status_t loom_amdgpu_build_sanitizer_race_report_payload(
@@ -146,8 +105,8 @@ iree_status_t loom_amdgpu_build_sanitizer_race_report_payload(
     const loom_amdgpu_feedback_packet_address_t* packet_address,
     const loom_amdgpu_sanitizer_race_report_t* report,
     loom_location_id_t location) {
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_validate_race_report_values(
-      builder, descriptor_set, report));
+  loom_amdgpu_sanitizer_validate_race_report_values(builder, descriptor_set,
+                                                    report);
 
   const uint32_t payload_base = LOOM_AMDGPU_FEEDBACK_PACKET_BYTE_LENGTH;
   IREE_RETURN_IF_ERROR(loom_amdgpu_build_feedback_packet_store_u32_constant(
@@ -268,8 +227,8 @@ loom_amdgpu_sanitizer_build_race_report_terminate_from_current_block(
     const loom_amdgpu_feedback_packet_source_t* source,
     const loom_amdgpu_sanitizer_race_report_t* report,
     loom_location_id_t location, loom_block_t** out_terminal_block) {
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_validate_race_report_values(
-      builder, descriptor_set, report));
+  loom_amdgpu_sanitizer_validate_race_report_values(builder, descriptor_set,
+                                                    report);
   const loom_amdgpu_feedback_packet_producer_t producer = {
       .payload_byte_length = LOOM_AMDGPU_TSAN_REPORT_BYTE_LENGTH,
       .packet_kind = LOOM_AMDGPU_FEEDBACK_PACKET_KIND_TSAN,
@@ -396,11 +355,9 @@ iree_status_t loom_amdgpu_build_sanitizer_race_report_island(
     loom_amdgpu_sanitizer_race_report_island_t* out_island) {
   IREE_ASSERT_ARGUMENT(out_island);
   *out_island = (loom_amdgpu_sanitizer_race_report_island_t){0};
-  if (after_block->parent_region == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU sanitizer race report island requires a low region block");
-  }
+  IREE_ASSERT(after_block->parent_region != NULL,
+              "AMDGPU sanitizer race report island requires a low region "
+              "block");
 
   loom_amdgpu_sanitizer_race_report_island_t island = {0};
   IREE_RETURN_IF_ERROR(loom_region_insert_block(
@@ -424,17 +381,15 @@ iree_status_t loom_amdgpu_build_sanitizer_race_report_branch(
     const loom_amdgpu_feedback_packet_source_t* source,
     const loom_amdgpu_sanitizer_race_report_t* report,
     loom_location_id_t location) {
-  if (builder->ip.before_op != NULL) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU sanitizer race report branch must be built "
-                            "at the end of a low block");
-  }
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_require_register_class(
+  IREE_ASSERT(builder->ip.before_op == NULL,
+              "AMDGPU sanitizer race report branch must be built at the end "
+              "of a low block");
+  loom_amdgpu_sanitizer_race_require_register_class(
       builder, descriptor_set, source->dispatch_ptr, 2,
-      LOOM_AMDGPU_REG_CLASS_ID_SGPR, IREE_SV("dispatch_ptr")));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_require_register_class(
+      LOOM_AMDGPU_REG_CLASS_ID_SGPR);
+  loom_amdgpu_sanitizer_race_require_register_class(
       builder, descriptor_set, source->workgroup_id_x, 1,
-      LOOM_AMDGPU_REG_CLASS_ID_SGPR, IREE_SV("workgroup_id_x")));
+      LOOM_AMDGPU_REG_CLASS_ID_SGPR);
 
   loom_value_id_t args[26] = {0};
   args[0] = source->dispatch_ptr;

@@ -8,14 +8,15 @@
 
 #include <string.h>
 
+#include "loom/codegen/low/launch_config_program.h"
 #include "loom/codegen/low/lower/source_selection.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/pass/pipeline.h"
 #include "loom/pass/registry.h"
 #include "loom/pass/value_facts.h"
 #include "loom/sanitizer/options.h"
-#include "loom/target/compile_report_low.h"
 #include "loom/target/low_legality.h"
+#include "loom/target/reporting/low.h"
 
 typedef struct loom_low_source_to_low_pass_state_t {
   // Control-flow shape expected by source-to-low.
@@ -40,6 +41,42 @@ typedef struct loom_low_source_to_low_parse_context_t {
   // Mutable pass state being populated.
   loom_low_source_to_low_pass_state_t* state;
 } loom_low_source_to_low_parse_context_t;
+
+static iree_status_t loom_low_source_to_low_record_target_specialization(
+    loom_target_compile_report_t* compile_report,
+    const loom_low_source_selection_t* selection) {
+  if (!loom_target_compile_report_wants_details(
+          compile_report, LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS)) {
+    return iree_ok_status();
+  }
+  if (selection->target_source != LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION) {
+    return iree_ok_status();
+  }
+  const loom_target_bundle_t* bundle =
+      loom_low_source_selection_target_bundle(selection);
+  const loom_target_snapshot_t* snapshot = bundle ? bundle->snapshot : NULL;
+  const loom_target_config_t* config = bundle ? bundle->config : NULL;
+  const loom_target_compile_report_source_low_target_row_t row = {
+      .function_name = selection->function_name,
+      .target_source = selection->target_source,
+      .target_symbol_name = selection->target_symbol_name,
+      .target_bundle_name = bundle ? bundle->name : iree_string_view_empty(),
+      .target_snapshot_name =
+          snapshot ? snapshot->name : iree_string_view_empty(),
+      .target_config_name = config ? config->name : iree_string_view_empty(),
+      .target_subgroup_size = snapshot ? snapshot->subgroup_size : 0,
+      .candidate_target_count = selection->candidate_target_count,
+      .candidate_target_symbol_name = selection->candidate_target_symbol_name,
+      .candidate_target_bundle_name = selection->candidate_target_bundle_name,
+      .candidate_target_snapshot_name =
+          selection->candidate_target_snapshot_name,
+      .candidate_target_config_name = selection->candidate_target_config_name,
+      .candidate_target_subgroup_size =
+          selection->candidate_target_subgroup_size,
+  };
+  return loom_target_compile_report_record_source_low_target_row(compile_report,
+                                                                 &row);
+}
 
 static const loom_pass_option_def_t kLowSourceToLowOptions[] = {
     {IREE_SVL("control-flow"),
@@ -265,11 +302,16 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
       loom_target_pass_capability_from_pass(pass);
   loom_target_compile_report_t* compile_report =
       loom_low_pass_capability_compile_report(low_capability);
+  loom_kernel_launch_config_program_t* launch_config_program =
+      loom_kernel_launch_config_program_from_pass(pass);
   const iree_allocator_t source_low_report_allocator =
       loom_target_compile_report_wants_details(
           compile_report, LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS)
           ? compile_report->allocator
           : iree_allocator_null();
+  const bool record_source_low_targets =
+      loom_target_compile_report_wants_details(
+          compile_report, LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS);
 
   iree_arena_allocator_t selection_arena;
   iree_arena_initialize(module->arena.block_pool, &selection_arena);
@@ -279,12 +321,17 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
       .policy_registry = policy_registry,
       .diagnostic_emitter = pass->diagnostic_emitter,
       .lowering_kind = IREE_SV("source-to-low"),
-      .target_selection =
-          loom_target_pass_capability_target_selection(target_capability),
-      .target_ref = loom_target_pass_capability_target_ref(target_capability),
+      .function_versions =
+          loom_target_pass_capability_function_versions(target_capability),
+      .collect_target_candidates = record_source_low_targets,
   };
   iree_status_t status = loom_low_select_source_symbols(
       module, &selection_options, &selection_arena, &selection_list);
+  for (iree_host_size_t i = 0;
+       i < selection_list.count && iree_status_is_ok(status); ++i) {
+    status = loom_low_source_to_low_record_target_specialization(
+        compile_report, &selection_list.values[i]);
+  }
   if (iree_status_is_ok(status)) {
     status =
         loom_low_lower_module_state_create(&selection_arena, &module_state);
@@ -301,8 +348,7 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
     }
     const loom_low_lower_options_t lower_options = {
         .target_ref = selection->target_ref,
-        .bundle = selection->target_bundle,
-        .target_data = selection->target_data,
+        .target_facts = selection->target_facts,
         .descriptor_registry = descriptor_registry,
         .policy = selection->policy,
         .emitter = pass->diagnostic_emitter,
@@ -326,6 +372,11 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
     }
     if (iree_status_is_ok(status)) {
       IREE_ASSERT(lower_result.low_func_op != NULL);
+      if (selection->version_handle != NULL) {
+        loom_function_version_update(
+            selection->version_handle,
+            loom_func_like_cast(module, lower_result.low_func_op));
+      }
       ++declaration_count;
     }
     loom_low_lower_result_deinitialize(&lower_result);
@@ -344,14 +395,13 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
     loom_value_fact_table_t* fact_table = NULL;
     status = loom_pass_value_facts_acquire(
         pass, module,
-        loom_pass_value_fact_scope_function_for_target(
-            selection->func, selection->target_bundle),
+        loom_pass_value_fact_scope_function_for_target(selection->func,
+                                                       selection->target_facts),
         &fact_table);
     if (!iree_status_is_ok(status)) break;
     const loom_low_lower_options_t lower_options = {
         .target_ref = selection->target_ref,
-        .bundle = selection->target_bundle,
-        .target_data = selection->target_data,
+        .target_facts = selection->target_facts,
         .descriptor_registry = descriptor_registry,
         .legality_provider_list =
             legality_provider_list
@@ -372,11 +422,18 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
         .report_allocator = source_low_report_allocator,
     };
     loom_low_lower_result_t lower_result = {0};
-    status = loom_low_lower_function(module, selection->func, &lower_options,
-                                     &lower_result);
+    if (launch_config_program != NULL) {
+      status = loom_kernel_launch_config_program_capture(
+          launch_config_program, module, selection->func,
+          selection->function_name, selection->version_handle,
+          selection->target_facts, fact_table);
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_low_lower_function(module, selection->func, &lower_options,
+                                       &lower_result);
+    }
     loom_pass_value_fact_owner_invalidate(pass->value_facts);
-    if (iree_status_is_ok(status) &&
-        !iree_allocator_is_null(source_low_report_allocator)) {
+    if (iree_status_is_ok(status) && compile_report != NULL) {
       status = loom_target_compile_report_record_low_lowering(compile_report,
                                                               &lower_result);
     }
@@ -389,6 +446,11 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
     }
     if (iree_status_is_ok(status)) {
       IREE_ASSERT(lower_result.low_func_op != NULL);
+      if (selection->version_handle != NULL) {
+        loom_function_version_update(
+            selection->version_handle,
+            loom_func_like_cast(module, lower_result.low_func_op));
+      }
       ++function_count;
     }
     loom_low_lower_result_deinitialize(&lower_result);

@@ -8,10 +8,12 @@
 
 #include "loom/ir/facts.h"
 
+#include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/global/ops.h"
+#include "loom/util/fact_table.h"
 
-static const loom_op_t* loom_global_load_definition(const loom_module_t* module,
+static const loom_symbol_t* loom_global_load_symbol(const loom_module_t* module,
                                                     const loom_op_t* op) {
   loom_symbol_ref_t ref = loom_global_load_global(op);
   if (!loom_symbol_ref_is_valid(ref) || ref.module_id != 0 ||
@@ -19,10 +21,44 @@ static const loom_op_t* loom_global_load_definition(const loom_module_t* module,
     return NULL;
   }
   const loom_symbol_t* symbol = &module->symbols.entries[ref.symbol_id];
-  if (!loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_GLOBAL)) {
+  if (!loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_GLOBAL |
+                                          LOOM_SYMBOL_INTERFACE_RODATA)) {
     return NULL;
   }
-  return symbol->defining_op;
+  return symbol;
+}
+
+static loom_value_facts_t loom_global_nonnegative_unknown_facts(void) {
+  return loom_value_facts_make(0, INT64_MAX, 1);
+}
+
+static iree_status_t loom_global_load_rodata_facts(
+    loom_fact_context_t* context, const loom_op_t* definition_op,
+    loom_value_id_t result_id, loom_value_facts_t* out_facts) {
+  loom_value_facts_t byte_extent = loom_global_nonnegative_unknown_facts();
+  uint64_t minimum_alignment = 1;
+  if (loom_global_rodata_def_isa(definition_op)) {
+    iree_const_byte_span_t contents =
+        loom_global_rodata_def_contents(definition_op);
+    if ((uint64_t)contents.data_length <= (uint64_t)INT64_MAX) {
+      byte_extent = loom_value_facts_exact_i64((int64_t)contents.data_length);
+    }
+    loom_attribute_t alignment = loom_op_const_attrs(
+        definition_op)[loom_global_rodata_def_alignment_ATTR_INDEX];
+    if (!loom_attr_is_absent(alignment)) {
+      minimum_alignment = (uint64_t)loom_attr_as_i64(alignment);
+    }
+  }
+
+  loom_value_fact_buffer_reference_t reference = {
+      .maximum_byte_extent = byte_extent,
+      .minimum_alignment = minimum_alignment,
+      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_CONSTANT,
+      .root_value_id = result_id,
+      .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
+      .nullability = LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL,
+  };
+  return loom_value_facts_make_buffer_reference(context, reference, out_facts);
 }
 
 static loom_value_id_t loom_global_definition_value(const loom_op_t* op) {
@@ -64,7 +100,8 @@ static bool loom_global_scalar_initializer_facts(
     return true;
   }
   if (loom_scalar_type_is_float(scalar_type)) {
-    *out_facts = loom_value_facts_exact_f64(loom_attr_as_f64(initializer));
+    *out_facts = loom_value_facts_exact_float(scalar_type,
+                                              loom_attr_as_f64(initializer));
     return true;
   }
   return false;
@@ -183,7 +220,6 @@ iree_status_t loom_global_load_facts(loom_fact_context_t* context,
                                      const loom_op_t* op,
                                      const loom_value_facts_t* operand_facts,
                                      loom_value_facts_t* result_facts) {
-  (void)context;
   (void)operand_facts;
 
   loom_value_slice_t results = loom_global_load_result(op);
@@ -191,8 +227,17 @@ iree_status_t loom_global_load_facts(loom_fact_context_t* context,
     result_facts[i] = loom_value_facts_unknown();
   }
 
-  const loom_op_t* definition_op = loom_global_load_definition(module, op);
-  if (!definition_op) return iree_ok_status();
+  const loom_symbol_t* symbol = loom_global_load_symbol(module, op);
+  if (!symbol || !symbol->defining_op) return iree_ok_status();
+  const loom_op_t* definition_op = symbol->defining_op;
+
+  if (loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_RODATA)) {
+    if (results.count != 0 && results.values[0] < module->values.count) {
+      IREE_RETURN_IF_ERROR(loom_global_load_rodata_facts(
+          context, definition_op, results.values[0], &result_facts[0]));
+    }
+    return iree_ok_status();
+  }
 
   loom_global_load_apply_definition_predicates(module, op, definition_op,
                                                result_facts);

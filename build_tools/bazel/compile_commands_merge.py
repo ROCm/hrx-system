@@ -12,7 +12,8 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 COMPILE_COMMANDS_OUTPUT_GROUP = "iree_compile_commands_fragments"
 
@@ -114,7 +115,7 @@ def file_uri_to_path(uri: str) -> Path:
         raise ValueError(f"expected file URI for compile command fragment, got {uri}")
     if parsed.netloc:
         raise ValueError(f"file URI has unsupported host component: {uri}")
-    return Path(unquote(parsed.path))
+    return Path(url2pathname(parsed.path))
 
 
 def main(argv: list[str]) -> int:

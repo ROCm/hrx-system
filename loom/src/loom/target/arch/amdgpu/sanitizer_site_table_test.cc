@@ -31,11 +31,11 @@ namespace {
 using ModulePtr = ::loom::testing::ModulePtr;
 
 uint32_t LoadLeU32(const uint8_t* data, iree_host_size_t offset) {
-  return iree_unaligned_load_le((const uint32_t*)(data + offset));
+  return iree_unaligned_load_le_u32(data + offset);
 }
 
 uint16_t LoadLeU16(const uint8_t* data, iree_host_size_t offset) {
-  return iree_unaligned_load_le((const uint16_t*)(data + offset));
+  return iree_unaligned_load_le_u16(data + offset);
 }
 
 class AmdgpuSanitizerSiteTableTest : public ::testing::Test {
@@ -82,11 +82,12 @@ class AmdgpuSanitizerSiteTableTest : public ::testing::Test {
             &low_registry_.registry, &policy_registry_, &legality_provider_list,
             /*legalizer_provider_list=*/nullptr,
             /*math_policy_registry=*/nullptr, /*compile_report=*/nullptr,
-            loom_target_selection_empty(), loom_symbol_ref_null(),
-            &environment_storage);
+            /*target_environment=*/nullptr,
+            /*function_versions=*/nullptr, &environment_storage);
     loom_pass_tool_run_options_t run_options = {
         /*.registry=*/loom_pass_builtin_registry(),
         /*.environment=*/environment,
+        /*.function_versions=*/nullptr,
         /*.predicate_provider=*/{},
         /*.block_pool=*/&block_pool_,
     };
@@ -124,7 +125,7 @@ class AmdgpuSanitizerSiteTableTest : public ::testing::Test {
 
 TEST_F(AmdgpuSanitizerSiteTableTest, SourceToLowAggregatesMultiKernelSites) {
   static constexpr char kSource[] = R"(
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @read_kernel() {
   %one = index.constant 1 : index
@@ -132,8 +133,8 @@ kernel.def target(@target) @read_kernel() {
 } launch(%input: buffer) {
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
-  %input_view = buffer.view %input_global[%base] : buffer -> view<1xi32, #dense>
-  sanitizer.assert.access<read> %input_view[0] : view<1xi32, #dense>
+  %input_view = buffer.view %input_global[%base] : buffer -> view<1xi32>
+  sanitizer.assert.access<read> %input_view[0] : view<1xi32>
   kernel.return
 }
 
@@ -143,8 +144,8 @@ kernel.def target(@target) @write_kernel() {
 } launch(%output: buffer) {
   %base = index.constant 0 : offset
   %output_global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %output_global[%base] : buffer -> view<1xi32, #dense>
-  sanitizer.assert.access<write> %output_view[0] : view<1xi32, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<1xi32>
+  sanitizer.assert.access<write> %output_view[0] : view<1xi32>
   kernel.return
 }
 )";
@@ -154,9 +155,9 @@ kernel.def target(@target) @write_kernel() {
 
   const loom_op_t* site_table_op = FindSiteTableOp(module.get());
   ASSERT_NE(site_table_op, nullptr);
-  ASSERT_TRUE(loom_global_rodata_isa(site_table_op));
+  ASSERT_TRUE(loom_global_rodata_def_isa(site_table_op));
   const iree_const_byte_span_t contents =
-      loom_global_rodata_contents(site_table_op);
+      loom_global_rodata_def_contents(site_table_op);
   ASSERT_GE(contents.data_length,
             LOOM_SANITIZER_SITE_TABLE_HEADER_LENGTH +
                 2 * LOOM_SANITIZER_SITE_TABLE_RECORD_LENGTH);

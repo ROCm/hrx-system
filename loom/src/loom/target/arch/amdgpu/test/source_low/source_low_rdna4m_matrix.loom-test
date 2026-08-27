@@ -1,0 +1,91 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1170> @target
+func.def target(@target) @fp8_bf8_wmma(%lhs_data: vector<2xi32>, %rhs_data: vector<2xi32>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=8, payload_registers=2> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<2xi32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<2xi32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<2xi32>, vector<2xi32>, vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @fp8_bf8_wmma(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm {
+  %17 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %result = v_wmma_f32_16x16x16_fp8_bf8 %lhs, %rhs, %17
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1170> @target
+func.def target(@target) @f16_swmmac(%lhs_data: vector<4xi32>, %rhs_data: vector<8xi32>, %init_data: vector<8xf32>, %sparsity: vector<1xi32>) -> (vector<8xf32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 32 : index
+  %lhs_schema = encoding.define #encoding.operand<element_format=f16, payload_elements=8, payload_registers=4, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f16, payload_elements=16, payload_registers=8> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {sparsity = %sparsity : vector<1xi32>, schema = %lhs_schema : encoding<schema>} : vector<4xi32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<8xi32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<4xi32>, vector<8xi32>, vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @f16_swmmac(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %sparsity: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>) asm {
+  %19 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %result = v_swmmac_f32_16x16x32_f16 %19, %lhs, %rhs, %sparsity
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1170> @target {subgroup_size = 64}
+func.def target(@target) @fp8_bf8_wmma_wave64(%lhs_data: vector<1xi32>, %rhs_data: vector<1xi32>, %init_data: vector<4xf32>) -> (vector<4xf32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=4, payload_registers=1> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=4, payload_registers=1> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<1xi32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<1xi32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<1xi32>, vector<1xi32>, vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @fp8_bf8_wmma_wave64(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
+  %17 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %result = v_wmma_f32_16x16x16_fp8_bf8_w64 %lhs, %rhs, %17
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1170> @target {subgroup_size = 64}
+func.def target(@target) @f16_swmmac_wave64(%lhs_data: vector<2xi32>, %rhs_data: vector<4xi32>, %init_data: vector<4xf32>, %sparsity: vector<1xi32>) -> (vector<4xf32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 32 : index
+  %lhs_schema = encoding.define #encoding.operand<element_format=f16, payload_elements=4, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f16, payload_elements=8, payload_registers=4> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {sparsity = %sparsity : vector<1xi32>, schema = %lhs_schema : encoding<schema>} : vector<2xi32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<4xi32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<2xi32>, vector<4xi32>, vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @f16_swmmac_wave64(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x4>, %sparsity: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm {
+  %19 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %result = v_swmmac_f32_16x16x32_f16_w64 %19, %lhs, %rhs, %sparsity
+  return %result
+}

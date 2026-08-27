@@ -51,66 +51,82 @@ LOOM_DEFINE_ATTR_I64(loom_llvmir_target_max_workgroup_size_x, 7)
 LOOM_DEFINE_ATTR_I64(loom_llvmir_target_max_workgroup_size_y, 8)
 LOOM_DEFINE_ATTR_I64(loom_llvmir_target_max_workgroup_size_z, 9)
 LOOM_DEFINE_ATTR_I64(loom_llvmir_target_max_flat_workgroup_size, 10)
-LOOM_DEFINE_ATTR_I64(loom_llvmir_target_subgroup_size, 11)
-LOOM_DEFINE_ATTR_I64(loom_llvmir_target_max_grid_size_x, 12)
-LOOM_DEFINE_ATTR_I64(loom_llvmir_target_max_grid_size_y, 13)
-LOOM_DEFINE_ATTR_I64(loom_llvmir_target_max_grid_size_z, 14)
-LOOM_DEFINE_ATTR_I64(loom_llvmir_target_max_flat_grid_size, 15)
-LOOM_DEFINE_ATTR_I64(loom_llvmir_target_max_workgroup_count_x, 16)
-LOOM_DEFINE_ATTR_I64(loom_llvmir_target_max_workgroup_count_y, 17)
-LOOM_DEFINE_ATTR_I64(loom_llvmir_target_max_workgroup_count_z, 18)
-LOOM_DEFINE_ATTR_I64(loom_llvmir_target_memory_space_generic, 19)
-LOOM_DEFINE_ATTR_I64(loom_llvmir_target_memory_space_global, 20)
-LOOM_DEFINE_ATTR_I64(loom_llvmir_target_memory_space_workgroup, 21)
-LOOM_DEFINE_ATTR_I64(loom_llvmir_target_memory_space_constant, 22)
-LOOM_DEFINE_ATTR_I64(loom_llvmir_target_memory_space_private, 23)
-LOOM_DEFINE_ATTR_I64(loom_llvmir_target_memory_space_host, 24)
-LOOM_DEFINE_ATTR_I64(loom_llvmir_target_memory_space_descriptor, 25)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_llvmir_target_abi, 26, loom_target_abi_kind_t)
-LOOM_DEFINE_ATTR_STRING(loom_llvmir_target_export_symbol, 27)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_llvmir_target_linkage, 28, loom_target_linkage_t)
-LOOM_DEFINE_ATTR_I64(loom_llvmir_target_hal_buffer_resource_flags, 29)
+LOOM_DEFINE_ATTR_I64(loom_llvmir_target_max_workgroup_storage_bytes, 11)
+LOOM_DEFINE_ATTR_I64(loom_llvmir_target_subgroup_size, 12)
+LOOM_DEFINE_ATTR_I64(loom_llvmir_target_max_grid_size_x, 13)
+LOOM_DEFINE_ATTR_I64(loom_llvmir_target_max_grid_size_y, 14)
+LOOM_DEFINE_ATTR_I64(loom_llvmir_target_max_grid_size_z, 15)
+LOOM_DEFINE_ATTR_I64(loom_llvmir_target_max_flat_grid_size, 16)
+LOOM_DEFINE_ATTR_I64(loom_llvmir_target_max_workgroup_count_x, 17)
+LOOM_DEFINE_ATTR_I64(loom_llvmir_target_max_workgroup_count_y, 18)
+LOOM_DEFINE_ATTR_I64(loom_llvmir_target_max_workgroup_count_z, 19)
+LOOM_DEFINE_ATTR_I64(loom_llvmir_target_memory_space_generic, 20)
+LOOM_DEFINE_ATTR_I64(loom_llvmir_target_memory_space_global, 21)
+LOOM_DEFINE_ATTR_I64(loom_llvmir_target_memory_space_workgroup, 22)
+LOOM_DEFINE_ATTR_I64(loom_llvmir_target_memory_space_constant, 23)
+LOOM_DEFINE_ATTR_I64(loom_llvmir_target_memory_space_private, 24)
+LOOM_DEFINE_ATTR_I64(loom_llvmir_target_memory_space_host, 25)
+LOOM_DEFINE_ATTR_I64(loom_llvmir_target_memory_space_descriptor, 26)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_llvmir_target_abi, 27, loom_target_abi_kind_t)
+LOOM_DEFINE_ATTR_STRING(loom_llvmir_target_export_symbol, 28)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_llvmir_target_linkage, 29, loom_target_linkage_t)
 LOOM_DEFINE_ATTR_STRING(loom_llvmir_target_contract_set_key, 30)
 LOOM_DEFINE_ATTR_I64(loom_llvmir_target_contract_feature_bits, 31)
 LOOM_DEFINE_ATTR_STRING(loom_llvmir_target_triple, 32)
 LOOM_DEFINE_ATTR_STRING(loom_llvmir_target_data_layout, 33)
 LOOM_DEFINE_ATTR_STRING(loom_llvmir_target_cpu, 34)
 LOOM_DEFINE_ATTR_STRING(loom_llvmir_target_features, 35)
-enum loom_llvmir_target_build_flag_bits_e {
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_CODEGEN_FORMAT = UINT64_C(1) << 0,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_ARTIFACT_FORMAT = UINT64_C(1) << 1,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_DEFAULT_POINTER_BITWIDTH = UINT64_C(1) << 2,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_INDEX_BITWIDTH = UINT64_C(1) << 3,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_OFFSET_BITWIDTH = UINT64_C(1) << 4,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_SIZE_X = UINT64_C(1) << 5,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_SIZE_Y = UINT64_C(1) << 6,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_SIZE_Z = UINT64_C(1) << 7,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MAX_FLAT_WORKGROUP_SIZE = UINT64_C(1) << 8,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_SUBGROUP_SIZE = UINT64_C(1) << 9,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MAX_GRID_SIZE_X = UINT64_C(1) << 10,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MAX_GRID_SIZE_Y = UINT64_C(1) << 11,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MAX_GRID_SIZE_Z = UINT64_C(1) << 12,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MAX_FLAT_GRID_SIZE = UINT64_C(1) << 13,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_COUNT_X = UINT64_C(1) << 14,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_COUNT_Y = UINT64_C(1) << 15,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_COUNT_Z = UINT64_C(1) << 16,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_GENERIC = UINT64_C(1) << 17,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_GLOBAL = UINT64_C(1) << 18,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_WORKGROUP = UINT64_C(1) << 19,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_CONSTANT = UINT64_C(1) << 20,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_PRIVATE = UINT64_C(1) << 21,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_HOST = UINT64_C(1) << 22,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_DESCRIPTOR = UINT64_C(1) << 23,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_ABI = UINT64_C(1) << 24,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_EXPORT_SYMBOL = UINT64_C(1) << 25,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_LINKAGE = UINT64_C(1) << 26,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_HAL_BUFFER_RESOURCE_FLAGS = UINT64_C(1) << 27,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_CONTRACT_SET_KEY = UINT64_C(1) << 28,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_CONTRACT_FEATURE_BITS = UINT64_C(1) << 29,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_DATA_LAYOUT = UINT64_C(1) << 30,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_CPU = UINT64_C(1) << 31,
-  LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_FEATURES = UINT64_C(1) << 32,
-};
+// Build flag values use macros because C enums cannot portably represent
+// values wider than int.
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_CODEGEN_FORMAT (UINT64_C(1) << 0)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_ARTIFACT_FORMAT (UINT64_C(1) << 1)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_DEFAULT_POINTER_BITWIDTH \
+  (UINT64_C(1) << 2)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_INDEX_BITWIDTH (UINT64_C(1) << 3)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_OFFSET_BITWIDTH (UINT64_C(1) << 4)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_SIZE_X \
+  (UINT64_C(1) << 5)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_SIZE_Y \
+  (UINT64_C(1) << 6)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_SIZE_Z \
+  (UINT64_C(1) << 7)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MAX_FLAT_WORKGROUP_SIZE \
+  (UINT64_C(1) << 8)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_STORAGE_BYTES \
+  (UINT64_C(1) << 9)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_SUBGROUP_SIZE (UINT64_C(1) << 10)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MAX_GRID_SIZE_X (UINT64_C(1) << 11)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MAX_GRID_SIZE_Y (UINT64_C(1) << 12)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MAX_GRID_SIZE_Z (UINT64_C(1) << 13)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MAX_FLAT_GRID_SIZE (UINT64_C(1) << 14)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_COUNT_X \
+  (UINT64_C(1) << 15)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_COUNT_Y \
+  (UINT64_C(1) << 16)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MAX_WORKGROUP_COUNT_Z \
+  (UINT64_C(1) << 17)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_GENERIC \
+  (UINT64_C(1) << 18)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_GLOBAL \
+  (UINT64_C(1) << 19)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_WORKGROUP \
+  (UINT64_C(1) << 20)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_CONSTANT \
+  (UINT64_C(1) << 21)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_PRIVATE \
+  (UINT64_C(1) << 22)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_HOST (UINT64_C(1) << 23)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_MEMORY_SPACE_DESCRIPTOR \
+  (UINT64_C(1) << 24)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_ABI (UINT64_C(1) << 25)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_EXPORT_SYMBOL (UINT64_C(1) << 26)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_LINKAGE (UINT64_C(1) << 27)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_CONTRACT_SET_KEY (UINT64_C(1) << 28)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_CONTRACT_FEATURE_BITS \
+  (UINT64_C(1) << 29)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_DATA_LAYOUT (UINT64_C(1) << 30)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_CPU (UINT64_C(1) << 31)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_FEATURES (UINT64_C(1) << 32)
 typedef uint64_t loom_llvmir_target_build_flags_t;
 iree_status_t loom_llvmir_target_build(
     loom_builder_t* builder,
@@ -126,6 +142,7 @@ iree_status_t loom_llvmir_target_build(
     loom_optional int64_t max_workgroup_size_y,
     loom_optional int64_t max_workgroup_size_z,
     loom_optional int64_t max_flat_workgroup_size,
+    loom_optional int64_t max_workgroup_storage_bytes,
     loom_optional int64_t subgroup_size,
     loom_optional int64_t max_grid_size_x,
     loom_optional int64_t max_grid_size_y,
@@ -144,7 +161,6 @@ iree_status_t loom_llvmir_target_build(
     loom_optional uint8_t abi,
     loom_optional loom_string_id_t export_symbol,
     loom_optional uint8_t linkage,
-    loom_optional int64_t hal_buffer_resource_flags,
     loom_optional loom_string_id_t contract_set_key,
     loom_optional int64_t contract_feature_bits,
     loom_string_id_t triple,

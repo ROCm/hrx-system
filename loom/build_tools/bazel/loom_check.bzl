@@ -6,6 +6,7 @@
 
 """Macros for defining tests that run .loom-test files through loom-check."""
 
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//build_tools/bazel:cc_attrs.bzl", "cc_attrs")
 load(
     "//loom/requirements:package_policy.bzl",
@@ -45,7 +46,8 @@ def _loom_check_wrapper_content(ctx):
         "set -euo pipefail\n" +
         "RUNFILES=\"${{RUNFILES_DIR:-$0.runfiles}}\"\n" +
         "cd \"${{RUNFILES}}/{workspace}\"\n" +
-        "exec \"${{PWD}}/{runner}\" \"$@\" \"{fixture}\"\n"
+        "exec \"${{PWD}}/{runner}\" \"$@\" " +
+        "\"--template-root=${{PWD}}\" \"{fixture}\"\n"
     ).format(
         workspace = ctx.workspace_name,
         runner = ctx.executable.runner.short_path,
@@ -53,7 +55,7 @@ def _loom_check_wrapper_content(ctx):
     )
 
 def _loom_check_test_impl(ctx):
-    output = ctx.actions.declare_file(ctx.label.name)
+    output = ctx.actions.declare_file(ctx.label.name + ".sh")
     ctx.actions.write(
         content = _loom_check_wrapper_content(ctx),
         is_executable = True,
@@ -83,10 +85,9 @@ def _loom_check_test_impl(ctx):
             output = output,
             runner = ctx.attr.runner.label,
         ),
-        testing.TestEnvironment(expanded_env),
     ]
 
-_loom_check_executable_test = rule(
+_loom_check_executable = rule(
     implementation = _loom_check_test_impl,
     attrs = {
         "data": attr.label_list(
@@ -112,8 +113,8 @@ _loom_check_executable_test = rule(
             mandatory = True,
         ),
     },
-    doc = "Runs a single .loom-test file through a loom-check compatible runner.",
-    test = True,
+    doc = "Generates a shell launcher for one .loom-test file.",
+    executable = True,
 )
 
 def loom_check_test(
@@ -132,26 +133,37 @@ def loom_check_test(
       src: Source .loom-test file containing the test cases.
       size: Test size (default: "small").
       tags: Additional tags to apply to the test.
-      data: Additional runfiles made available to loom-check.
+      data: Additional runfiles made available to loom-check, including every
+          corpus source named by a TEMPLATE directive.
       env: Additional test environment variables.
       runner: loom-check compatible runner binary.
-      **kwargs: Additional attributes passed to native_test.
+      **kwargs: Additional attributes passed to sh_test.
     """
     _loom_check_test_base_name(src)
     kwargs = apply_loom_test_policy(kwargs, name = name)
     policy_tags = kwargs.pop("tags", [])
     resource_group = kwargs.pop("resource_group", None)
-    _loom_check_executable_test(
-        name = name,
+    test_tags = cc_attrs.with_resource_group_tags(
+        tags + ["loom-check"] + policy_tags,
+        resource_group,
+    )
+    launcher_name = name + "_launcher"
+    _loom_check_executable(
+        name = launcher_name,
         src = src,
         data = data,
         env = env,
         runner = runner,
+        tags = ["manual"],
+        testonly = True,
+    )
+    sh_test(
+        name = name,
+        srcs = [":" + launcher_name],
+        data = data + [runner, src],
+        env = env,
         size = size,
-        tags = cc_attrs.with_resource_group_tags(
-            tags + ["loom-check"] + policy_tags,
-            resource_group,
-        ),
+        tags = test_tags,
         **kwargs
     )
 

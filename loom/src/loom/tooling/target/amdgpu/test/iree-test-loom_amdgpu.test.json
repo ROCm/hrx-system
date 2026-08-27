@@ -1,0 +1,174 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "runs dynamic amdgpu workgroup samples",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../execution/hal/testdata/dynamic_workgroup_hal_actual.loom",
+          "--case=@dynamic_workgroup_hal_actual_case",
+          "--device=amdgpu"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            "\"case\":\"dynamic_workgroup_hal_actual_case\"",
+            "\"sample_count\":2",
+            "\"failed_sample_count\":0",
+            "\"passed\":true"
+          ]
+        }
+      }
+    },
+    {
+      "name": "runs amdgpu bulk buffer operations",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../execution/hal/testdata/buffer_bulk_hal_actual.loom",
+          "--device=amdgpu"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            {
+              "regex": "\"case\":\"buffer_copy_bytes_case\"[^}]*\"passed\":true"
+            },
+            {
+              "regex": "\"case\":\"buffer_fill_bytes_case\"[^}]*\"passed\":true"
+            },
+            {
+              "regex": "\"case\":\"buffer_compare_bytes_case\"[^}]*\"passed\":true"
+            },
+            {
+              "regex": "\"case\":\"buffer_zero_length_ranges_case\"[^}]*\"passed\":true"
+            },
+            "\"failed_sample_count\":0"
+          ]
+        }
+      }
+    },
+    {
+      "name": "runs explicit serial amdgpu dispatch epochs",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../execution/hal/testdata/launch_schedule_hal_actual.loom",
+          "--case=@launch_schedule_serial_case",
+          "--device=amdgpu"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            "\"case\":\"launch_schedule_serial_case\"",
+            "\"passed\":true"
+          ]
+        }
+      }
+    },
+    {
+      "name": "runs concurrent amdgpu dispatch epoch",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../execution/hal/testdata/launch_schedule_hal_actual.loom",
+          "--case=@launch_schedule_concurrent_case",
+          "--device=amdgpu"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            "\"case\":\"launch_schedule_concurrent_case\"",
+            "\"passed\":true"
+          ]
+        }
+      }
+    },
+    {
+      "name": "runs amdgpu cases",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/amdgpu_hal_actual.loom",
+          "--device=amdgpu"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            { "regex": "\"case\":\"store_i32_case\"[^}]*\"passed\":true" },
+            {
+              "regex": "\"case\":\"store_then_double_i32_case\"[^}]*\"passed\":true"
+            },
+            "\"failed_sample_count\":0"
+          ]
+        }
+      }
+    },
+    {
+      "name": "runs generated fp8 tensor case",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/generated_tensor_cases.loom",
+          "--case=@fp8_generated_fill",
+          "--device=amdgpu"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            {
+              "regex": "\"case\":\"fp8_generated_fill\"[^}]*\"passed\":true"
+            },
+            "\"failed_sample_count\":0"
+          ]
+        }
+      }
+    },
+    {
+      "name": "runs kernels with unused and selected kernargs",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/amdgpu_unused_kernargs.loom",
+          "--device=amdgpu"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            {
+              "regex": "\"case\":\"unused_kernargs_case\"[^}]*\"passed\":true"
+            },
+            {
+              "regex": "\"case\":\"unused_middle_binding_case\"[^}]*\"passed\":true"
+            },
+            {
+              "regex": "\"case\":\"selected_lhs_case\"[^}]*\"passed\":true"
+            },
+            {
+              "regex": "\"case\":\"selected_rhs_case\"[^}]*\"passed\":true"
+            },
+            {
+              "regex": "\"case\":\"selected_buffer_per_workgroup_case\"[^}]*\"passed\":true"
+            },
+            "\"failed_sample_count\":0"
+          ]
+        }
+      }
+    }
+  ]
+}

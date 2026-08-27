@@ -1,0 +1,680 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// GENERATED FILE: DO NOT EDIT.
+// Generator: loom.gen.test.numeric_conversion_matrix.
+// Regenerate: python3 loom/py/loom/gen/run.py numeric_conversion_matrix --in-place
+//
+// Exact schema-driven FP8 encode witnesses generated from the
+// target-independent numeric-format definitions. Heterogeneous
+// expected payloads are reduced to zero difference tensors on the device
+// so the complete goldens remain readable here without binary fixtures.
+config.decl @fp8_bidirectional_encode.row_capacity : %value: index where [range(%value, 1, 4294967295)]
+
+// f32 to f8e5m2: exact special values, RNE boundaries,
+// and two packed eight-lane conversions. The final zero lane pads the
+// fifteen semantic witnesses to two complete eight-lane conversions.
+kernel.def @fp8_encode_f8e5m2_f32_exact() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %head_offset = index.constant 0 : index
+  %tail_offset = index.constant 8 : index
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi8>
+  %head_schema = encoding.define #encoding.f8e5m2<payload_elements=8> : encoding<schema>
+  %tail_schema = encoding.define #encoding.f8e5m2<payload_elements=8> : encoding<schema>
+  %source_positive_zero_encode = scalar.constant 0 : i32
+  %expected_positive_zero_encode = scalar.constant 0 : i8
+  %source_negative_zero_encode = scalar.constant -2147483648 : i32
+  %expected_negative_zero_encode = scalar.constant -128 : i8
+  %source_minimum_subnormal_encode = scalar.constant 931135488 : i32
+  %expected_minimum_subnormal_encode = scalar.constant 1 : i8
+  %source_negative_minimum_subnormal_encode = scalar.constant -1216348160 : i32
+  %expected_negative_minimum_subnormal_encode = scalar.constant -127 : i8
+  %source_zero_tie_encode = scalar.constant 922746880 : i32
+  %expected_zero_tie_encode = scalar.constant 0 : i8
+  %source_even_subnormal_tie_encode = scalar.constant 935329792 : i32
+  %expected_even_subnormal_tie_encode = scalar.constant 2 : i8
+  %source_maximum_subnormal_encode = scalar.constant 943718400 : i32
+  %expected_maximum_subnormal_encode = scalar.constant 3 : i8
+  %source_minimum_normal_encode = scalar.constant 947912704 : i32
+  %expected_minimum_normal_encode = scalar.constant 4 : i8
+  %source_one_encode = scalar.constant 1065353216 : i32
+  %expected_one_encode = scalar.constant 60 : i8
+  %source_negative_one_encode = scalar.constant -1082130432 : i32
+  %expected_negative_one_encode = scalar.constant -68 : i8
+  %source_one_next_tie_encode = scalar.constant 1066401792 : i32
+  %expected_one_next_tie_encode = scalar.constant 60 : i8
+  %source_maximum_finite_encode = scalar.constant 1197473792 : i32
+  %expected_maximum_finite_encode = scalar.constant 123 : i8
+  %source_positive_infinity_encode = scalar.constant 2139095040 : i32
+  %expected_positive_infinity_encode = scalar.constant 124 : i8
+  %source_negative_infinity_encode = scalar.constant -8388608 : i32
+  %expected_negative_infinity_encode = scalar.constant -4 : i8
+  %source_quiet_nan_encode = scalar.constant 2143289344 : i32
+  %expected_quiet_nan_encode = scalar.constant 127 : i8
+  %source_bits_head = vector.from_elements %source_positive_zero_encode, %source_negative_zero_encode, %source_minimum_subnormal_encode, %source_negative_minimum_subnormal_encode, %source_zero_tie_encode, %source_even_subnormal_tie_encode, %source_maximum_subnormal_encode, %source_minimum_normal_encode : vector<8xi32>
+  %expected_bits_head = vector.from_elements %expected_positive_zero_encode, %expected_negative_zero_encode, %expected_minimum_subnormal_encode, %expected_negative_minimum_subnormal_encode, %expected_zero_tie_encode, %expected_even_subnormal_tie_encode, %expected_maximum_subnormal_encode, %expected_minimum_normal_encode : vector<8xi8>
+  %source_head = vector.bitcast %source_bits_head : vector<8xi32> to vector<8xf32>
+  %encoded_head = vector.encode %source_head using %head_schema : vector<8xf32>, encoding<schema> -> vector<8xf8E5M2>
+  %encoded_bits_head = vector.bitcast %encoded_head : vector<8xf8E5M2> to vector<8xi8>
+  %difference_head = vector.xori %encoded_bits_head, %expected_bits_head : vector<8xi8>
+  vector.store %difference_head, %output_view[%head_offset] : vector<8xi8>, view<16xi8>
+  %source_bits_tail = vector.from_elements %source_one_encode, %source_negative_one_encode, %source_one_next_tie_encode, %source_maximum_finite_encode, %source_positive_infinity_encode, %source_negative_infinity_encode, %source_quiet_nan_encode, %source_positive_zero_encode : vector<8xi32>
+  %expected_bits_tail = vector.from_elements %expected_one_encode, %expected_negative_one_encode, %expected_one_next_tie_encode, %expected_maximum_finite_encode, %expected_positive_infinity_encode, %expected_negative_infinity_encode, %expected_quiet_nan_encode, %expected_positive_zero_encode : vector<8xi8>
+  %source_tail = vector.bitcast %source_bits_tail : vector<8xi32> to vector<8xf32>
+  %encoded_tail = vector.encode %source_tail using %tail_schema : vector<8xf32>, encoding<schema> -> vector<8xf8E5M2>
+  %encoded_bits_tail = vector.bitcast %encoded_tail : vector<8xf8E5M2> to vector<8xi8>
+  %difference_tail = vector.xori %encoded_bits_tail, %expected_bits_tail : vector<8xi8>
+  vector.store %difference_tail, %output_view[%tail_offset] : vector<8xi8>, view<16xi8>
+  kernel.return
+}
+
+kernel.def @fp8_encode_f8e5m2_f32_rows(%row_count: index) {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %row_capacity = config.get @fp8_bidirectional_encode.row_capacity : index
+  %rounded_rows = index.add %row_capacity, %rounding : index
+  %workgroups = index.div %rounded_rows, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%row_count: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %row_capacity = config.get @fp8_bidirectional_encode.row_capacity : index
+  %bounded_row_count = index.assume %row_count [le(%row_count, %row_capacity)] : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size = index.constant 64 : index
+  %row = index.madd %workgroup, %workgroup_size, %lane : index
+  %column = index.constant 0 : index
+  %in_bounds = index.cmp ult, %row, %bounded_row_count : index
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xf32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8>
+  %schema = encoding.define #encoding.f8e5m2<payload_elements=8> : encoding<schema>
+  scf.if %in_bounds {
+    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xf32> -> vector<8xf32>
+    %encoded = vector.encode %source using %schema : vector<8xf32>, encoding<schema> -> vector<8xf8E5M2>
+    %encoded_bits = vector.bitcast %encoded : vector<8xf8E5M2> to vector<8xi8>
+    vector.store %encoded_bits, %output_view[%row, %column] : vector<8xi8>, view<[%bounded_row_count]x8xi8>
+  }
+  kernel.return
+}
+
+check.case public @fp8_encode_f8e5m2_f32_exact_case {
+  %output = check.generate.fill value(0) : tensor<16xi8>
+  %expected = check.generate.fill value(0) : tensor<16xi8>
+  kernel.launch @fp8_encode_f8e5m2_f32_exact(%output) : (tensor<16xi8>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<16xi8>
+  check.return
+}
+
+check.case public @fp8_encode_f8e5m2_f32_rows_case {
+  %row_count = check.param.choice values([257, 65536]) name("row_count") : index
+  %input = check.generate.fill value(1.0) : tensor<[%row_count]x8xf32>
+  %output = check.generate.fill value(0) : tensor<[%row_count]x8xi8>
+  %expected = check.generate.fill value(60) : tensor<[%row_count]x8xi8>
+  kernel.launch @fp8_encode_f8e5m2_f32_rows[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x8xf32>, tensor<[%row_count]x8xi8>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<[%row_count]x8xi8>
+  check.return
+}
+
+check.benchmark<@fp8_encode_f8e5m2_f32_rows_case> @fp8_encode_f8e5m2_f32_rows_benchmark {row_count = 65536}
+
+// f16 to f8e5m2: exact special values, RNE boundaries,
+// and two packed eight-lane conversions. The final zero lane pads the
+// fifteen semantic witnesses to two complete eight-lane conversions.
+kernel.def @fp8_encode_f8e5m2_f16_exact() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %head_offset = index.constant 0 : index
+  %tail_offset = index.constant 8 : index
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi8>
+  %head_schema = encoding.define #encoding.f8e5m2<payload_elements=8> : encoding<schema>
+  %tail_schema = encoding.define #encoding.f8e5m2<payload_elements=8> : encoding<schema>
+  %source_positive_zero_encode = scalar.constant 0 : i16
+  %expected_positive_zero_encode = scalar.constant 0 : i8
+  %source_negative_zero_encode = scalar.constant -32768 : i16
+  %expected_negative_zero_encode = scalar.constant -128 : i8
+  %source_minimum_subnormal_encode = scalar.constant 256 : i16
+  %expected_minimum_subnormal_encode = scalar.constant 1 : i8
+  %source_negative_minimum_subnormal_encode = scalar.constant -32512 : i16
+  %expected_negative_minimum_subnormal_encode = scalar.constant -127 : i8
+  %source_zero_tie_encode = scalar.constant 128 : i16
+  %expected_zero_tie_encode = scalar.constant 0 : i8
+  %source_even_subnormal_tie_encode = scalar.constant 384 : i16
+  %expected_even_subnormal_tie_encode = scalar.constant 2 : i8
+  %source_maximum_subnormal_encode = scalar.constant 768 : i16
+  %expected_maximum_subnormal_encode = scalar.constant 3 : i8
+  %source_minimum_normal_encode = scalar.constant 1024 : i16
+  %expected_minimum_normal_encode = scalar.constant 4 : i8
+  %source_one_encode = scalar.constant 15360 : i16
+  %expected_one_encode = scalar.constant 60 : i8
+  %source_negative_one_encode = scalar.constant -17408 : i16
+  %expected_negative_one_encode = scalar.constant -68 : i8
+  %source_one_next_tie_encode = scalar.constant 15488 : i16
+  %expected_one_next_tie_encode = scalar.constant 60 : i8
+  %source_maximum_finite_encode = scalar.constant 31488 : i16
+  %expected_maximum_finite_encode = scalar.constant 123 : i8
+  %source_positive_infinity_encode = scalar.constant 31744 : i16
+  %expected_positive_infinity_encode = scalar.constant 124 : i8
+  %source_negative_infinity_encode = scalar.constant -1024 : i16
+  %expected_negative_infinity_encode = scalar.constant -4 : i8
+  %source_quiet_nan_encode = scalar.constant 32256 : i16
+  %expected_quiet_nan_encode = scalar.constant 127 : i8
+  %source_bits_head = vector.from_elements %source_positive_zero_encode, %source_negative_zero_encode, %source_minimum_subnormal_encode, %source_negative_minimum_subnormal_encode, %source_zero_tie_encode, %source_even_subnormal_tie_encode, %source_maximum_subnormal_encode, %source_minimum_normal_encode : vector<8xi16>
+  %expected_bits_head = vector.from_elements %expected_positive_zero_encode, %expected_negative_zero_encode, %expected_minimum_subnormal_encode, %expected_negative_minimum_subnormal_encode, %expected_zero_tie_encode, %expected_even_subnormal_tie_encode, %expected_maximum_subnormal_encode, %expected_minimum_normal_encode : vector<8xi8>
+  %source_head = vector.bitcast %source_bits_head : vector<8xi16> to vector<8xf16>
+  %encoded_head = vector.encode %source_head using %head_schema : vector<8xf16>, encoding<schema> -> vector<8xf8E5M2>
+  %encoded_bits_head = vector.bitcast %encoded_head : vector<8xf8E5M2> to vector<8xi8>
+  %difference_head = vector.xori %encoded_bits_head, %expected_bits_head : vector<8xi8>
+  vector.store %difference_head, %output_view[%head_offset] : vector<8xi8>, view<16xi8>
+  %source_bits_tail = vector.from_elements %source_one_encode, %source_negative_one_encode, %source_one_next_tie_encode, %source_maximum_finite_encode, %source_positive_infinity_encode, %source_negative_infinity_encode, %source_quiet_nan_encode, %source_positive_zero_encode : vector<8xi16>
+  %expected_bits_tail = vector.from_elements %expected_one_encode, %expected_negative_one_encode, %expected_one_next_tie_encode, %expected_maximum_finite_encode, %expected_positive_infinity_encode, %expected_negative_infinity_encode, %expected_quiet_nan_encode, %expected_positive_zero_encode : vector<8xi8>
+  %source_tail = vector.bitcast %source_bits_tail : vector<8xi16> to vector<8xf16>
+  %encoded_tail = vector.encode %source_tail using %tail_schema : vector<8xf16>, encoding<schema> -> vector<8xf8E5M2>
+  %encoded_bits_tail = vector.bitcast %encoded_tail : vector<8xf8E5M2> to vector<8xi8>
+  %difference_tail = vector.xori %encoded_bits_tail, %expected_bits_tail : vector<8xi8>
+  vector.store %difference_tail, %output_view[%tail_offset] : vector<8xi8>, view<16xi8>
+  kernel.return
+}
+
+kernel.def @fp8_encode_f8e5m2_f16_rows(%row_count: index) {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %row_capacity = config.get @fp8_bidirectional_encode.row_capacity : index
+  %rounded_rows = index.add %row_capacity, %rounding : index
+  %workgroups = index.div %rounded_rows, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%row_count: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %row_capacity = config.get @fp8_bidirectional_encode.row_capacity : index
+  %bounded_row_count = index.assume %row_count [le(%row_count, %row_capacity)] : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size = index.constant 64 : index
+  %row = index.madd %workgroup, %workgroup_size, %lane : index
+  %column = index.constant 0 : index
+  %in_bounds = index.cmp ult, %row, %bounded_row_count : index
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xf16>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8>
+  %schema = encoding.define #encoding.f8e5m2<payload_elements=8> : encoding<schema>
+  scf.if %in_bounds {
+    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xf16> -> vector<8xf16>
+    %encoded = vector.encode %source using %schema : vector<8xf16>, encoding<schema> -> vector<8xf8E5M2>
+    %encoded_bits = vector.bitcast %encoded : vector<8xf8E5M2> to vector<8xi8>
+    vector.store %encoded_bits, %output_view[%row, %column] : vector<8xi8>, view<[%bounded_row_count]x8xi8>
+  }
+  kernel.return
+}
+
+check.case public @fp8_encode_f8e5m2_f16_exact_case {
+  %output = check.generate.fill value(0) : tensor<16xi8>
+  %expected = check.generate.fill value(0) : tensor<16xi8>
+  kernel.launch @fp8_encode_f8e5m2_f16_exact(%output) : (tensor<16xi8>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<16xi8>
+  check.return
+}
+
+check.case public @fp8_encode_f8e5m2_f16_rows_case {
+  %row_count = check.param.choice values([257, 65536]) name("row_count") : index
+  %input = check.generate.fill value(1.0) : tensor<[%row_count]x8xf16>
+  %output = check.generate.fill value(0) : tensor<[%row_count]x8xi8>
+  %expected = check.generate.fill value(60) : tensor<[%row_count]x8xi8>
+  kernel.launch @fp8_encode_f8e5m2_f16_rows[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x8xf16>, tensor<[%row_count]x8xi8>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<[%row_count]x8xi8>
+  check.return
+}
+
+check.benchmark<@fp8_encode_f8e5m2_f16_rows_case> @fp8_encode_f8e5m2_f16_rows_benchmark {row_count = 65536}
+
+// bf16 to f8e5m2: exact special values, RNE boundaries,
+// and two packed eight-lane conversions. The final zero lane pads the
+// fifteen semantic witnesses to two complete eight-lane conversions.
+kernel.def @fp8_encode_f8e5m2_bf16_exact() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %head_offset = index.constant 0 : index
+  %tail_offset = index.constant 8 : index
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi8>
+  %head_schema = encoding.define #encoding.f8e5m2<payload_elements=8> : encoding<schema>
+  %tail_schema = encoding.define #encoding.f8e5m2<payload_elements=8> : encoding<schema>
+  %source_positive_zero_encode = scalar.constant 0 : i16
+  %expected_positive_zero_encode = scalar.constant 0 : i8
+  %source_negative_zero_encode = scalar.constant -32768 : i16
+  %expected_negative_zero_encode = scalar.constant -128 : i8
+  %source_minimum_subnormal_encode = scalar.constant 14208 : i16
+  %expected_minimum_subnormal_encode = scalar.constant 1 : i8
+  %source_negative_minimum_subnormal_encode = scalar.constant -18560 : i16
+  %expected_negative_minimum_subnormal_encode = scalar.constant -127 : i8
+  %source_zero_tie_encode = scalar.constant 14080 : i16
+  %expected_zero_tie_encode = scalar.constant 0 : i8
+  %source_even_subnormal_tie_encode = scalar.constant 14272 : i16
+  %expected_even_subnormal_tie_encode = scalar.constant 2 : i8
+  %source_maximum_subnormal_encode = scalar.constant 14400 : i16
+  %expected_maximum_subnormal_encode = scalar.constant 3 : i8
+  %source_minimum_normal_encode = scalar.constant 14464 : i16
+  %expected_minimum_normal_encode = scalar.constant 4 : i8
+  %source_one_encode = scalar.constant 16256 : i16
+  %expected_one_encode = scalar.constant 60 : i8
+  %source_negative_one_encode = scalar.constant -16512 : i16
+  %expected_negative_one_encode = scalar.constant -68 : i8
+  %source_one_next_tie_encode = scalar.constant 16272 : i16
+  %expected_one_next_tie_encode = scalar.constant 60 : i8
+  %source_maximum_finite_encode = scalar.constant 18272 : i16
+  %expected_maximum_finite_encode = scalar.constant 123 : i8
+  %source_positive_infinity_encode = scalar.constant 32640 : i16
+  %expected_positive_infinity_encode = scalar.constant 124 : i8
+  %source_negative_infinity_encode = scalar.constant -128 : i16
+  %expected_negative_infinity_encode = scalar.constant -4 : i8
+  %source_quiet_nan_encode = scalar.constant 32704 : i16
+  %expected_quiet_nan_encode = scalar.constant 127 : i8
+  %source_bits_head = vector.from_elements %source_positive_zero_encode, %source_negative_zero_encode, %source_minimum_subnormal_encode, %source_negative_minimum_subnormal_encode, %source_zero_tie_encode, %source_even_subnormal_tie_encode, %source_maximum_subnormal_encode, %source_minimum_normal_encode : vector<8xi16>
+  %expected_bits_head = vector.from_elements %expected_positive_zero_encode, %expected_negative_zero_encode, %expected_minimum_subnormal_encode, %expected_negative_minimum_subnormal_encode, %expected_zero_tie_encode, %expected_even_subnormal_tie_encode, %expected_maximum_subnormal_encode, %expected_minimum_normal_encode : vector<8xi8>
+  %source_head = vector.bitcast %source_bits_head : vector<8xi16> to vector<8xbf16>
+  %encoded_head = vector.encode %source_head using %head_schema : vector<8xbf16>, encoding<schema> -> vector<8xf8E5M2>
+  %encoded_bits_head = vector.bitcast %encoded_head : vector<8xf8E5M2> to vector<8xi8>
+  %difference_head = vector.xori %encoded_bits_head, %expected_bits_head : vector<8xi8>
+  vector.store %difference_head, %output_view[%head_offset] : vector<8xi8>, view<16xi8>
+  %source_bits_tail = vector.from_elements %source_one_encode, %source_negative_one_encode, %source_one_next_tie_encode, %source_maximum_finite_encode, %source_positive_infinity_encode, %source_negative_infinity_encode, %source_quiet_nan_encode, %source_positive_zero_encode : vector<8xi16>
+  %expected_bits_tail = vector.from_elements %expected_one_encode, %expected_negative_one_encode, %expected_one_next_tie_encode, %expected_maximum_finite_encode, %expected_positive_infinity_encode, %expected_negative_infinity_encode, %expected_quiet_nan_encode, %expected_positive_zero_encode : vector<8xi8>
+  %source_tail = vector.bitcast %source_bits_tail : vector<8xi16> to vector<8xbf16>
+  %encoded_tail = vector.encode %source_tail using %tail_schema : vector<8xbf16>, encoding<schema> -> vector<8xf8E5M2>
+  %encoded_bits_tail = vector.bitcast %encoded_tail : vector<8xf8E5M2> to vector<8xi8>
+  %difference_tail = vector.xori %encoded_bits_tail, %expected_bits_tail : vector<8xi8>
+  vector.store %difference_tail, %output_view[%tail_offset] : vector<8xi8>, view<16xi8>
+  kernel.return
+}
+
+kernel.def @fp8_encode_f8e5m2_bf16_rows(%row_count: index) {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %row_capacity = config.get @fp8_bidirectional_encode.row_capacity : index
+  %rounded_rows = index.add %row_capacity, %rounding : index
+  %workgroups = index.div %rounded_rows, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%row_count: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %row_capacity = config.get @fp8_bidirectional_encode.row_capacity : index
+  %bounded_row_count = index.assume %row_count [le(%row_count, %row_capacity)] : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size = index.constant 64 : index
+  %row = index.madd %workgroup, %workgroup_size, %lane : index
+  %column = index.constant 0 : index
+  %in_bounds = index.cmp ult, %row, %bounded_row_count : index
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xbf16>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8>
+  %schema = encoding.define #encoding.f8e5m2<payload_elements=8> : encoding<schema>
+  scf.if %in_bounds {
+    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xbf16> -> vector<8xbf16>
+    %encoded = vector.encode %source using %schema : vector<8xbf16>, encoding<schema> -> vector<8xf8E5M2>
+    %encoded_bits = vector.bitcast %encoded : vector<8xf8E5M2> to vector<8xi8>
+    vector.store %encoded_bits, %output_view[%row, %column] : vector<8xi8>, view<[%bounded_row_count]x8xi8>
+  }
+  kernel.return
+}
+
+check.case public @fp8_encode_f8e5m2_bf16_exact_case {
+  %output = check.generate.fill value(0) : tensor<16xi8>
+  %expected = check.generate.fill value(0) : tensor<16xi8>
+  kernel.launch @fp8_encode_f8e5m2_bf16_exact(%output) : (tensor<16xi8>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<16xi8>
+  check.return
+}
+
+check.case public @fp8_encode_f8e5m2_bf16_rows_case {
+  %row_count = check.param.choice values([257, 65536]) name("row_count") : index
+  %input = check.generate.fill value(1.0) : tensor<[%row_count]x8xbf16>
+  %output = check.generate.fill value(0) : tensor<[%row_count]x8xi8>
+  %expected = check.generate.fill value(60) : tensor<[%row_count]x8xi8>
+  kernel.launch @fp8_encode_f8e5m2_bf16_rows[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x8xbf16>, tensor<[%row_count]x8xi8>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<[%row_count]x8xi8>
+  check.return
+}
+
+check.benchmark<@fp8_encode_f8e5m2_bf16_rows_case> @fp8_encode_f8e5m2_bf16_rows_benchmark {row_count = 65536}
+
+// f32 to f8e5m2fnuz: exact special values, RNE boundaries,
+// and two packed eight-lane conversions. The final zero lane pads the
+// fifteen semantic witnesses to two complete eight-lane conversions.
+kernel.def @fp8_encode_f8e5m2fnuz_f32_exact() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %head_offset = index.constant 0 : index
+  %tail_offset = index.constant 8 : index
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi8>
+  %head_schema = encoding.define #encoding.f8e5m2fnuz<payload_elements=8> : encoding<schema>
+  %tail_schema = encoding.define #encoding.f8e5m2fnuz<payload_elements=8> : encoding<schema>
+  %source_positive_zero_encode = scalar.constant 0 : i32
+  %expected_positive_zero_encode = scalar.constant 0 : i8
+  %source_negative_zero_encode = scalar.constant -2147483648 : i32
+  %expected_negative_zero_encode = scalar.constant 0 : i8
+  %source_minimum_subnormal_encode = scalar.constant 922746880 : i32
+  %expected_minimum_subnormal_encode = scalar.constant 1 : i8
+  %source_negative_minimum_subnormal_encode = scalar.constant -1224736768 : i32
+  %expected_negative_minimum_subnormal_encode = scalar.constant -127 : i8
+  %source_zero_tie_encode = scalar.constant 914358272 : i32
+  %expected_zero_tie_encode = scalar.constant 0 : i8
+  %source_even_subnormal_tie_encode = scalar.constant 926941184 : i32
+  %expected_even_subnormal_tie_encode = scalar.constant 2 : i8
+  %source_maximum_subnormal_encode = scalar.constant 935329792 : i32
+  %expected_maximum_subnormal_encode = scalar.constant 3 : i8
+  %source_minimum_normal_encode = scalar.constant 939524096 : i32
+  %expected_minimum_normal_encode = scalar.constant 4 : i8
+  %source_one_encode = scalar.constant 1065353216 : i32
+  %expected_one_encode = scalar.constant 64 : i8
+  %source_negative_one_encode = scalar.constant -1082130432 : i32
+  %expected_negative_one_encode = scalar.constant -64 : i8
+  %source_one_next_tie_encode = scalar.constant 1066401792 : i32
+  %expected_one_next_tie_encode = scalar.constant 64 : i8
+  %source_maximum_finite_encode = scalar.constant 1197473792 : i32
+  %expected_maximum_finite_encode = scalar.constant 127 : i8
+  %source_positive_infinity_encode = scalar.constant 2139095040 : i32
+  %expected_positive_infinity_encode = scalar.constant 127 : i8
+  %source_negative_infinity_encode = scalar.constant -8388608 : i32
+  %expected_negative_infinity_encode = scalar.constant -1 : i8
+  %source_quiet_nan_encode = scalar.constant 2143289344 : i32
+  %expected_quiet_nan_encode = scalar.constant -128 : i8
+  %source_bits_head = vector.from_elements %source_positive_zero_encode, %source_negative_zero_encode, %source_minimum_subnormal_encode, %source_negative_minimum_subnormal_encode, %source_zero_tie_encode, %source_even_subnormal_tie_encode, %source_maximum_subnormal_encode, %source_minimum_normal_encode : vector<8xi32>
+  %expected_bits_head = vector.from_elements %expected_positive_zero_encode, %expected_negative_zero_encode, %expected_minimum_subnormal_encode, %expected_negative_minimum_subnormal_encode, %expected_zero_tie_encode, %expected_even_subnormal_tie_encode, %expected_maximum_subnormal_encode, %expected_minimum_normal_encode : vector<8xi8>
+  %source_head = vector.bitcast %source_bits_head : vector<8xi32> to vector<8xf32>
+  %encoded_head = vector.encode %source_head using %head_schema : vector<8xf32>, encoding<schema> -> vector<8xf8E5M2>
+  %encoded_bits_head = vector.bitcast %encoded_head : vector<8xf8E5M2> to vector<8xi8>
+  %difference_head = vector.xori %encoded_bits_head, %expected_bits_head : vector<8xi8>
+  vector.store %difference_head, %output_view[%head_offset] : vector<8xi8>, view<16xi8>
+  %source_bits_tail = vector.from_elements %source_one_encode, %source_negative_one_encode, %source_one_next_tie_encode, %source_maximum_finite_encode, %source_positive_infinity_encode, %source_negative_infinity_encode, %source_quiet_nan_encode, %source_positive_zero_encode : vector<8xi32>
+  %expected_bits_tail = vector.from_elements %expected_one_encode, %expected_negative_one_encode, %expected_one_next_tie_encode, %expected_maximum_finite_encode, %expected_positive_infinity_encode, %expected_negative_infinity_encode, %expected_quiet_nan_encode, %expected_positive_zero_encode : vector<8xi8>
+  %source_tail = vector.bitcast %source_bits_tail : vector<8xi32> to vector<8xf32>
+  %encoded_tail = vector.encode %source_tail using %tail_schema : vector<8xf32>, encoding<schema> -> vector<8xf8E5M2>
+  %encoded_bits_tail = vector.bitcast %encoded_tail : vector<8xf8E5M2> to vector<8xi8>
+  %difference_tail = vector.xori %encoded_bits_tail, %expected_bits_tail : vector<8xi8>
+  vector.store %difference_tail, %output_view[%tail_offset] : vector<8xi8>, view<16xi8>
+  kernel.return
+}
+
+kernel.def @fp8_encode_f8e5m2fnuz_f32_rows(%row_count: index) {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %row_capacity = config.get @fp8_bidirectional_encode.row_capacity : index
+  %rounded_rows = index.add %row_capacity, %rounding : index
+  %workgroups = index.div %rounded_rows, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%row_count: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %row_capacity = config.get @fp8_bidirectional_encode.row_capacity : index
+  %bounded_row_count = index.assume %row_count [le(%row_count, %row_capacity)] : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size = index.constant 64 : index
+  %row = index.madd %workgroup, %workgroup_size, %lane : index
+  %column = index.constant 0 : index
+  %in_bounds = index.cmp ult, %row, %bounded_row_count : index
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xf32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8>
+  %schema = encoding.define #encoding.f8e5m2fnuz<payload_elements=8> : encoding<schema>
+  scf.if %in_bounds {
+    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xf32> -> vector<8xf32>
+    %encoded = vector.encode %source using %schema : vector<8xf32>, encoding<schema> -> vector<8xf8E5M2>
+    %encoded_bits = vector.bitcast %encoded : vector<8xf8E5M2> to vector<8xi8>
+    vector.store %encoded_bits, %output_view[%row, %column] : vector<8xi8>, view<[%bounded_row_count]x8xi8>
+  }
+  kernel.return
+}
+
+check.case public @fp8_encode_f8e5m2fnuz_f32_exact_case {
+  %output = check.generate.fill value(0) : tensor<16xi8>
+  %expected = check.generate.fill value(0) : tensor<16xi8>
+  kernel.launch @fp8_encode_f8e5m2fnuz_f32_exact(%output) : (tensor<16xi8>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<16xi8>
+  check.return
+}
+
+check.case public @fp8_encode_f8e5m2fnuz_f32_rows_case {
+  %row_count = check.param.choice values([257, 65536]) name("row_count") : index
+  %input = check.generate.fill value(1.0) : tensor<[%row_count]x8xf32>
+  %output = check.generate.fill value(0) : tensor<[%row_count]x8xi8>
+  %expected = check.generate.fill value(64) : tensor<[%row_count]x8xi8>
+  kernel.launch @fp8_encode_f8e5m2fnuz_f32_rows[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x8xf32>, tensor<[%row_count]x8xi8>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<[%row_count]x8xi8>
+  check.return
+}
+
+check.benchmark<@fp8_encode_f8e5m2fnuz_f32_rows_case> @fp8_encode_f8e5m2fnuz_f32_rows_benchmark {row_count = 65536}
+
+// f16 to f8e5m2fnuz: exact special values, RNE boundaries,
+// and two packed eight-lane conversions. The final zero lane pads the
+// fifteen semantic witnesses to two complete eight-lane conversions.
+kernel.def @fp8_encode_f8e5m2fnuz_f16_exact() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %head_offset = index.constant 0 : index
+  %tail_offset = index.constant 8 : index
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi8>
+  %head_schema = encoding.define #encoding.f8e5m2fnuz<payload_elements=8> : encoding<schema>
+  %tail_schema = encoding.define #encoding.f8e5m2fnuz<payload_elements=8> : encoding<schema>
+  %source_positive_zero_encode = scalar.constant 0 : i16
+  %expected_positive_zero_encode = scalar.constant 0 : i8
+  %source_negative_zero_encode = scalar.constant -32768 : i16
+  %expected_negative_zero_encode = scalar.constant 0 : i8
+  %source_minimum_subnormal_encode = scalar.constant 128 : i16
+  %expected_minimum_subnormal_encode = scalar.constant 1 : i8
+  %source_negative_minimum_subnormal_encode = scalar.constant -32640 : i16
+  %expected_negative_minimum_subnormal_encode = scalar.constant -127 : i8
+  %source_zero_tie_encode = scalar.constant 64 : i16
+  %expected_zero_tie_encode = scalar.constant 0 : i8
+  %source_even_subnormal_tie_encode = scalar.constant 192 : i16
+  %expected_even_subnormal_tie_encode = scalar.constant 2 : i8
+  %source_maximum_subnormal_encode = scalar.constant 384 : i16
+  %expected_maximum_subnormal_encode = scalar.constant 3 : i8
+  %source_minimum_normal_encode = scalar.constant 512 : i16
+  %expected_minimum_normal_encode = scalar.constant 4 : i8
+  %source_one_encode = scalar.constant 15360 : i16
+  %expected_one_encode = scalar.constant 64 : i8
+  %source_negative_one_encode = scalar.constant -17408 : i16
+  %expected_negative_one_encode = scalar.constant -64 : i8
+  %source_one_next_tie_encode = scalar.constant 15488 : i16
+  %expected_one_next_tie_encode = scalar.constant 64 : i8
+  %source_maximum_finite_encode = scalar.constant 31488 : i16
+  %expected_maximum_finite_encode = scalar.constant 127 : i8
+  %source_positive_infinity_encode = scalar.constant 31744 : i16
+  %expected_positive_infinity_encode = scalar.constant 127 : i8
+  %source_negative_infinity_encode = scalar.constant -1024 : i16
+  %expected_negative_infinity_encode = scalar.constant -1 : i8
+  %source_quiet_nan_encode = scalar.constant 32256 : i16
+  %expected_quiet_nan_encode = scalar.constant -128 : i8
+  %source_bits_head = vector.from_elements %source_positive_zero_encode, %source_negative_zero_encode, %source_minimum_subnormal_encode, %source_negative_minimum_subnormal_encode, %source_zero_tie_encode, %source_even_subnormal_tie_encode, %source_maximum_subnormal_encode, %source_minimum_normal_encode : vector<8xi16>
+  %expected_bits_head = vector.from_elements %expected_positive_zero_encode, %expected_negative_zero_encode, %expected_minimum_subnormal_encode, %expected_negative_minimum_subnormal_encode, %expected_zero_tie_encode, %expected_even_subnormal_tie_encode, %expected_maximum_subnormal_encode, %expected_minimum_normal_encode : vector<8xi8>
+  %source_head = vector.bitcast %source_bits_head : vector<8xi16> to vector<8xf16>
+  %encoded_head = vector.encode %source_head using %head_schema : vector<8xf16>, encoding<schema> -> vector<8xf8E5M2>
+  %encoded_bits_head = vector.bitcast %encoded_head : vector<8xf8E5M2> to vector<8xi8>
+  %difference_head = vector.xori %encoded_bits_head, %expected_bits_head : vector<8xi8>
+  vector.store %difference_head, %output_view[%head_offset] : vector<8xi8>, view<16xi8>
+  %source_bits_tail = vector.from_elements %source_one_encode, %source_negative_one_encode, %source_one_next_tie_encode, %source_maximum_finite_encode, %source_positive_infinity_encode, %source_negative_infinity_encode, %source_quiet_nan_encode, %source_positive_zero_encode : vector<8xi16>
+  %expected_bits_tail = vector.from_elements %expected_one_encode, %expected_negative_one_encode, %expected_one_next_tie_encode, %expected_maximum_finite_encode, %expected_positive_infinity_encode, %expected_negative_infinity_encode, %expected_quiet_nan_encode, %expected_positive_zero_encode : vector<8xi8>
+  %source_tail = vector.bitcast %source_bits_tail : vector<8xi16> to vector<8xf16>
+  %encoded_tail = vector.encode %source_tail using %tail_schema : vector<8xf16>, encoding<schema> -> vector<8xf8E5M2>
+  %encoded_bits_tail = vector.bitcast %encoded_tail : vector<8xf8E5M2> to vector<8xi8>
+  %difference_tail = vector.xori %encoded_bits_tail, %expected_bits_tail : vector<8xi8>
+  vector.store %difference_tail, %output_view[%tail_offset] : vector<8xi8>, view<16xi8>
+  kernel.return
+}
+
+kernel.def @fp8_encode_f8e5m2fnuz_f16_rows(%row_count: index) {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %row_capacity = config.get @fp8_bidirectional_encode.row_capacity : index
+  %rounded_rows = index.add %row_capacity, %rounding : index
+  %workgroups = index.div %rounded_rows, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%row_count: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %row_capacity = config.get @fp8_bidirectional_encode.row_capacity : index
+  %bounded_row_count = index.assume %row_count [le(%row_count, %row_capacity)] : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size = index.constant 64 : index
+  %row = index.madd %workgroup, %workgroup_size, %lane : index
+  %column = index.constant 0 : index
+  %in_bounds = index.cmp ult, %row, %bounded_row_count : index
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xf16>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8>
+  %schema = encoding.define #encoding.f8e5m2fnuz<payload_elements=8> : encoding<schema>
+  scf.if %in_bounds {
+    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xf16> -> vector<8xf16>
+    %encoded = vector.encode %source using %schema : vector<8xf16>, encoding<schema> -> vector<8xf8E5M2>
+    %encoded_bits = vector.bitcast %encoded : vector<8xf8E5M2> to vector<8xi8>
+    vector.store %encoded_bits, %output_view[%row, %column] : vector<8xi8>, view<[%bounded_row_count]x8xi8>
+  }
+  kernel.return
+}
+
+check.case public @fp8_encode_f8e5m2fnuz_f16_exact_case {
+  %output = check.generate.fill value(0) : tensor<16xi8>
+  %expected = check.generate.fill value(0) : tensor<16xi8>
+  kernel.launch @fp8_encode_f8e5m2fnuz_f16_exact(%output) : (tensor<16xi8>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<16xi8>
+  check.return
+}
+
+check.case public @fp8_encode_f8e5m2fnuz_f16_rows_case {
+  %row_count = check.param.choice values([257, 65536]) name("row_count") : index
+  %input = check.generate.fill value(1.0) : tensor<[%row_count]x8xf16>
+  %output = check.generate.fill value(0) : tensor<[%row_count]x8xi8>
+  %expected = check.generate.fill value(64) : tensor<[%row_count]x8xi8>
+  kernel.launch @fp8_encode_f8e5m2fnuz_f16_rows[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x8xf16>, tensor<[%row_count]x8xi8>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<[%row_count]x8xi8>
+  check.return
+}
+
+check.benchmark<@fp8_encode_f8e5m2fnuz_f16_rows_case> @fp8_encode_f8e5m2fnuz_f16_rows_benchmark {row_count = 65536}
+
+// bf16 to f8e5m2fnuz: exact special values, RNE boundaries,
+// and two packed eight-lane conversions. The final zero lane pads the
+// fifteen semantic witnesses to two complete eight-lane conversions.
+kernel.def @fp8_encode_f8e5m2fnuz_bf16_exact() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %head_offset = index.constant 0 : index
+  %tail_offset = index.constant 8 : index
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi8>
+  %head_schema = encoding.define #encoding.f8e5m2fnuz<payload_elements=8> : encoding<schema>
+  %tail_schema = encoding.define #encoding.f8e5m2fnuz<payload_elements=8> : encoding<schema>
+  %source_positive_zero_encode = scalar.constant 0 : i16
+  %expected_positive_zero_encode = scalar.constant 0 : i8
+  %source_negative_zero_encode = scalar.constant -32768 : i16
+  %expected_negative_zero_encode = scalar.constant 0 : i8
+  %source_minimum_subnormal_encode = scalar.constant 14080 : i16
+  %expected_minimum_subnormal_encode = scalar.constant 1 : i8
+  %source_negative_minimum_subnormal_encode = scalar.constant -18688 : i16
+  %expected_negative_minimum_subnormal_encode = scalar.constant -127 : i8
+  %source_zero_tie_encode = scalar.constant 13952 : i16
+  %expected_zero_tie_encode = scalar.constant 0 : i8
+  %source_even_subnormal_tie_encode = scalar.constant 14144 : i16
+  %expected_even_subnormal_tie_encode = scalar.constant 2 : i8
+  %source_maximum_subnormal_encode = scalar.constant 14272 : i16
+  %expected_maximum_subnormal_encode = scalar.constant 3 : i8
+  %source_minimum_normal_encode = scalar.constant 14336 : i16
+  %expected_minimum_normal_encode = scalar.constant 4 : i8
+  %source_one_encode = scalar.constant 16256 : i16
+  %expected_one_encode = scalar.constant 64 : i8
+  %source_negative_one_encode = scalar.constant -16512 : i16
+  %expected_negative_one_encode = scalar.constant -64 : i8
+  %source_one_next_tie_encode = scalar.constant 16272 : i16
+  %expected_one_next_tie_encode = scalar.constant 64 : i8
+  %source_maximum_finite_encode = scalar.constant 18272 : i16
+  %expected_maximum_finite_encode = scalar.constant 127 : i8
+  %source_positive_infinity_encode = scalar.constant 32640 : i16
+  %expected_positive_infinity_encode = scalar.constant 127 : i8
+  %source_negative_infinity_encode = scalar.constant -128 : i16
+  %expected_negative_infinity_encode = scalar.constant -1 : i8
+  %source_quiet_nan_encode = scalar.constant 32704 : i16
+  %expected_quiet_nan_encode = scalar.constant -128 : i8
+  %source_bits_head = vector.from_elements %source_positive_zero_encode, %source_negative_zero_encode, %source_minimum_subnormal_encode, %source_negative_minimum_subnormal_encode, %source_zero_tie_encode, %source_even_subnormal_tie_encode, %source_maximum_subnormal_encode, %source_minimum_normal_encode : vector<8xi16>
+  %expected_bits_head = vector.from_elements %expected_positive_zero_encode, %expected_negative_zero_encode, %expected_minimum_subnormal_encode, %expected_negative_minimum_subnormal_encode, %expected_zero_tie_encode, %expected_even_subnormal_tie_encode, %expected_maximum_subnormal_encode, %expected_minimum_normal_encode : vector<8xi8>
+  %source_head = vector.bitcast %source_bits_head : vector<8xi16> to vector<8xbf16>
+  %encoded_head = vector.encode %source_head using %head_schema : vector<8xbf16>, encoding<schema> -> vector<8xf8E5M2>
+  %encoded_bits_head = vector.bitcast %encoded_head : vector<8xf8E5M2> to vector<8xi8>
+  %difference_head = vector.xori %encoded_bits_head, %expected_bits_head : vector<8xi8>
+  vector.store %difference_head, %output_view[%head_offset] : vector<8xi8>, view<16xi8>
+  %source_bits_tail = vector.from_elements %source_one_encode, %source_negative_one_encode, %source_one_next_tie_encode, %source_maximum_finite_encode, %source_positive_infinity_encode, %source_negative_infinity_encode, %source_quiet_nan_encode, %source_positive_zero_encode : vector<8xi16>
+  %expected_bits_tail = vector.from_elements %expected_one_encode, %expected_negative_one_encode, %expected_one_next_tie_encode, %expected_maximum_finite_encode, %expected_positive_infinity_encode, %expected_negative_infinity_encode, %expected_quiet_nan_encode, %expected_positive_zero_encode : vector<8xi8>
+  %source_tail = vector.bitcast %source_bits_tail : vector<8xi16> to vector<8xbf16>
+  %encoded_tail = vector.encode %source_tail using %tail_schema : vector<8xbf16>, encoding<schema> -> vector<8xf8E5M2>
+  %encoded_bits_tail = vector.bitcast %encoded_tail : vector<8xf8E5M2> to vector<8xi8>
+  %difference_tail = vector.xori %encoded_bits_tail, %expected_bits_tail : vector<8xi8>
+  vector.store %difference_tail, %output_view[%tail_offset] : vector<8xi8>, view<16xi8>
+  kernel.return
+}
+
+kernel.def @fp8_encode_f8e5m2fnuz_bf16_rows(%row_count: index) {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %row_capacity = config.get @fp8_bidirectional_encode.row_capacity : index
+  %rounded_rows = index.add %row_capacity, %rounding : index
+  %workgroups = index.div %rounded_rows, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%row_count: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %row_capacity = config.get @fp8_bidirectional_encode.row_capacity : index
+  %bounded_row_count = index.assume %row_count [le(%row_count, %row_capacity)] : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size = index.constant 64 : index
+  %row = index.madd %workgroup, %workgroup_size, %lane : index
+  %column = index.constant 0 : index
+  %in_bounds = index.cmp ult, %row, %bounded_row_count : index
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x8xbf16>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x8xi8>
+  %schema = encoding.define #encoding.f8e5m2fnuz<payload_elements=8> : encoding<schema>
+  scf.if %in_bounds {
+    %source = vector.load %input_view[%row, %column] : view<[%bounded_row_count]x8xbf16> -> vector<8xbf16>
+    %encoded = vector.encode %source using %schema : vector<8xbf16>, encoding<schema> -> vector<8xf8E5M2>
+    %encoded_bits = vector.bitcast %encoded : vector<8xf8E5M2> to vector<8xi8>
+    vector.store %encoded_bits, %output_view[%row, %column] : vector<8xi8>, view<[%bounded_row_count]x8xi8>
+  }
+  kernel.return
+}
+
+check.case public @fp8_encode_f8e5m2fnuz_bf16_exact_case {
+  %output = check.generate.fill value(0) : tensor<16xi8>
+  %expected = check.generate.fill value(0) : tensor<16xi8>
+  kernel.launch @fp8_encode_f8e5m2fnuz_bf16_exact(%output) : (tensor<16xi8>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<16xi8>
+  check.return
+}
+
+check.case public @fp8_encode_f8e5m2fnuz_bf16_rows_case {
+  %row_count = check.param.choice values([257, 65536]) name("row_count") : index
+  %input = check.generate.fill value(1.0) : tensor<[%row_count]x8xbf16>
+  %output = check.generate.fill value(0) : tensor<[%row_count]x8xi8>
+  %expected = check.generate.fill value(64) : tensor<[%row_count]x8xi8>
+  kernel.launch @fp8_encode_f8e5m2fnuz_bf16_rows[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x8xbf16>, tensor<[%row_count]x8xi8>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<[%row_count]x8xi8>
+  check.return
+}
+
+check.benchmark<@fp8_encode_f8e5m2fnuz_bf16_rows_case> @fp8_encode_f8e5m2fnuz_bf16_rows_benchmark {row_count = 65536}

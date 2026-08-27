@@ -1,0 +1,184 @@
+// RUN: emit amdgpu-assembly @cluster_widths_and_wait waits=none fixed=%lds:physical_register:0:1 fixed=%addr:physical_register:1:1 fixed=%saddr:physical_register:4:2
+
+amdgpu.target<gfx1250> @target
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @cluster_widths_and_wait(%lds: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>) asm {
+  %m0 = s_mov_b32_m0_imm 3
+  cluster_load_async_to_lds_b8 %lds, %addr, %saddr, %m0
+  cluster_load_async_to_lds_b32 %lds, %addr, %saddr, %m0 {scope = 1}
+  cluster_load_async_to_lds_b64 %lds, %addr, %saddr, %m0 {nv = 1, scope = 2, th = 2}
+  cluster_load_async_to_lds_b128 %lds, %addr, %saddr, %m0 {scope = 3, th = 3}
+  s_wait_asynccnt {asynccnt = 0}
+  return
+}
+
+// ----
+  s_mov_b32 m0, 3
+  cluster_load_async_to_lds_b8 v0, v1, s[4:5]
+  cluster_load_async_to_lds_b32 v0, v1, s[4:5] scope:SCOPE_SE
+  cluster_load_async_to_lds_b64 v0, v1, s[4:5] nv scope:SCOPE_DEV th:TH_LOAD_HT
+  cluster_load_async_to_lds_b128 v0, v1, s[4:5] scope:SCOPE_SYS th:TH_LOAD_BYPASS
+  s_wait_asynccnt 0
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @cluster_disjoint_workgroup_store strategy=source fixed=%cluster_addr:physical_register:0:1 fixed=%source_addr:physical_register:1:1 fixed=%store_addr:physical_register:2:1 fixed=%saddr:physical_register:4:2 fixed=%payload:physical_register:8:4
+
+amdgpu.target<gfx1250> @target
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @cluster_disjoint_workgroup_store(%cluster_addr: reg<amdgpu.vgpr>, %source_addr: reg<amdgpu.vgpr>, %store_addr: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>, %payload: reg<amdgpu.vgpr x4>) asm {
+  %m0 = s_mov_b32_m0_imm 3
+  low.op<amdgpu.cluster_load_async_to_lds_b128>(%cluster_addr, %source_addr, %saddr, %m0) memory_access([0, 3, 7, -1, 3, 0, 0, 0, 0, 0, 0, 0, 0]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  low.op<amdgpu.ds_write_b128>(%store_addr, %payload) memory_access([0, 3, 8, -1, 3, 0, 0, 0, 0, 0, 0, 0, 0]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>)
+  s_wait_asynccnt {asynccnt = 0}
+  return
+}
+
+// ----
+  s_mov_b32 m0, 3
+  cluster_load_async_to_lds_b128 v0, v1, s[4:5]
+  ds_write_b128 v2, v[8:11] offset:0
+  s_wait_asynccnt 0
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @cluster_overlapping_workgroup_store strategy=source fixed=%cluster_addr:physical_register:0:1 fixed=%source_addr:physical_register:1:1 fixed=%store_addr:physical_register:2:1 fixed=%saddr:physical_register:4:2 fixed=%payload:physical_register:8:4
+
+amdgpu.target<gfx1250> @target
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @cluster_overlapping_workgroup_store(%cluster_addr: reg<amdgpu.vgpr>, %source_addr: reg<amdgpu.vgpr>, %store_addr: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>, %payload: reg<amdgpu.vgpr x4>) asm {
+  %m0 = s_mov_b32_m0_imm 3
+  low.op<amdgpu.cluster_load_async_to_lds_b128>(%cluster_addr, %source_addr, %saddr, %m0) memory_access([0, 3, 7, -1, 3, 0, 0, 0, 0, 0, 0, 0, 0]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  low.op<amdgpu.ds_write_b128>(%store_addr, %payload) memory_access([0, 3, 7, -1, 3, 0, 0, 0, 0, 0, 0, 0, 0]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>)
+  s_wait_asynccnt {asynccnt = 0}
+  return
+}
+
+// ----
+  s_mov_b32 m0, 3
+  cluster_load_async_to_lds_b128 v0, v1, s[4:5]
+  s_wait_asynccnt asynccnt(0)
+  ds_write_b128 v2, v[8:11] offset:0
+  s_wait_asynccnt 0
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @cluster_unknown_workgroup_store strategy=source fixed=%cluster_addr:physical_register:0:1 fixed=%source_addr:physical_register:1:1 fixed=%store_addr:physical_register:2:1 fixed=%saddr:physical_register:4:2 fixed=%payload:physical_register:8:4
+
+amdgpu.target<gfx1250> @target
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @cluster_unknown_workgroup_store(%cluster_addr: reg<amdgpu.vgpr>, %source_addr: reg<amdgpu.vgpr>, %store_addr: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>, %payload: reg<amdgpu.vgpr x4>) asm {
+  %m0 = s_mov_b32_m0_imm 3
+  low.op<amdgpu.cluster_load_async_to_lds_b128>(%cluster_addr, %source_addr, %saddr, %m0) memory_access([0, 3, 7, -1, 3, 0, 0, 0, 0, 0, 0, 0, 0]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  ds_write_b128 %store_addr, %payload
+  s_wait_asynccnt {asynccnt = 0}
+  return
+}
+
+// ----
+  s_mov_b32 m0, 3
+  cluster_load_async_to_lds_b128 v0, v1, s[4:5]
+  s_wait_asynccnt asynccnt(0)
+  ds_write_b128 v2, v[8:11] offset:0
+  s_wait_asynccnt 0
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @cluster_destination_consumer_ordering strategy=source fixed=%cluster_lds:physical_register:0:1 fixed=%source_addr:physical_register:1:1 fixed=%consumer_addr:physical_register:2:1 fixed=%saddr:physical_register:4:2 fixed=%loaded:physical_register:8:4
+
+amdgpu.target<gfx1250> @target
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @cluster_destination_consumer_ordering(%cluster_lds: reg<amdgpu.vgpr>, %source_addr: reg<amdgpu.vgpr>, %consumer_addr: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>) asm {
+  %m0 = s_mov_b32_m0_imm 3
+  low.op<amdgpu.cluster_load_async_to_lds_b128>(%cluster_lds, %source_addr, %saddr, %m0) memory_access([0, 3, 7, -1, 35, 64, 0, 16, 0, 0, 0, 0, 0]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  %loaded = ds_read_b128 %consumer_addr
+  return
+}
+
+// A later LDS read has a conservative workgroup-memory effect and therefore
+// aliases the precise cluster destination. The scheduler must retain the
+// effect edge and let wait planning drain ASYNC_CNT before the read.
+// ----
+  s_mov_b32 m0, 3
+  cluster_load_async_to_lds_b128 v0, v1, s[4:5]
+  s_wait_asynccnt asynccnt(0)
+  ds_read_b128 v[8:11], v2 offset:0
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @cluster_workgroup_barrier_ordering strategy=source fixed=%lds:physical_register:0:1 fixed=%addr:physical_register:1:1 fixed=%saddr:physical_register:4:2
+
+amdgpu.target<gfx1250> @target
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @cluster_workgroup_barrier_ordering(%lds: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>) asm {
+  %m0 = s_mov_b32_m0_imm 3
+  low.op<amdgpu.cluster_load_async_to_lds_b128>(%lds, %addr, %saddr, %m0) memory_access([0, 3, 7, -1, 35, 64, 0, 16, 0, 0, 0, 0, 0]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  s_barrier_signal_all
+  s_barrier_wait_all
+  return
+}
+
+// Workgroup barriers order all prior workgroup-memory effects. The precise
+// cluster destination must still reach the ordered frontier and drain before
+// any participant signals the barrier.
+// ----
+  s_mov_b32 m0, 3
+  cluster_load_async_to_lds_b128 v0, v1, s[4:5]
+  s_wait_asynccnt asynccnt(0)
+  s_barrier_signal -1
+  s_barrier_wait -1
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-wait-counter-plan-json @cluster_counter_progress strategy=source
+
+amdgpu.target<gfx1250> @target
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @cluster_counter_progress(%lds: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>) asm {
+  %m0 = s_mov_b32_m0_imm 3
+  cluster_load_async_to_lds_b128 %lds, %addr, %saddr, %m0
+  s_wait_asynccnt {asynccnt = 0}
+  return
+}
+
+// The cluster load advances both ASYNCCNT completion and the gfx125x XCNT
+// source-translation lifetime. The explicit async wait drains only ASYNCCNT;
+// program termination supplies the architectural XCNT drain.
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"cluster_counter_progress","target":"target","descriptor_set":"amdgpu.rdna4.gfx125x.core","progress_count":4,"hazard_count":0,"progress":[{"index":0,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":7,"class_name":"amdgpu.async","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":8,"class_name":"amdgpu.x","action":"advance","units":1},{"index":2,"packet":2,"node":2,"block":0,"scheduled_ordinal":2,"class_id":7,"class_name":"amdgpu.async","action":"reset","units":0},{"index":3,"packet":3,"node":3,"block":0,"scheduled_ordinal":3,"class_id":8,"class_name":"amdgpu.x","action":"reset","units":0}],"hazards":[]}
+
+// ====
+// RUN: emit amdgpu-assembly @cluster_disjoint_memory_access strategy=source fixed=%lds:physical_register:0:1 fixed=%addr:physical_register:1:1 fixed=%saddr:physical_register:4:2
+
+amdgpu.target<gfx1250> @target
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @cluster_disjoint_memory_access(%lds: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>) asm {
+  %m0 = s_mov_b32_m0_imm 3
+  low.op<amdgpu.cluster_load_async_to_lds_b128>(%lds, %addr, %saddr, %m0) memory_access([0, 3, 7, -1, 35, 64, 0, 16, 0, 0, 0, 0, 0]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  low.op<amdgpu.cluster_load_async_to_lds_b128>(%lds, %addr, %saddr, %m0) memory_access([0, 3, 7, -1, 35, 64, 16, 32, 0, 0, 0, 0, 0]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  low.op<amdgpu.cluster_load_async_to_lds_b128>(%lds, %addr, %saddr, %m0) memory_access([0, 3, 7, -1, 35, 64, 32, 48, 0, 0, 0, 0, 0]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  low.op<amdgpu.cluster_load_async_to_lds_b128>(%lds, %addr, %saddr, %m0) memory_access([0, 3, 7, -1, 35, 64, 48, 64, 0, 0, 0, 0, 0]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  s_wait_asynccnt {asynccnt = 0}
+  return
+}
+
+// ----
+  s_mov_b32 m0, 3
+  cluster_load_async_to_lds_b128 v0, v1, s[4:5]
+  cluster_load_async_to_lds_b128 v0, v1, s[4:5]
+  cluster_load_async_to_lds_b128 v0, v1, s[4:5]
+  cluster_load_async_to_lds_b128 v0, v1, s[4:5]
+  s_wait_asynccnt 0
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @cluster_overlapping_memory_access strategy=source fixed=%lds:physical_register:0:1 fixed=%addr:physical_register:1:1 fixed=%saddr:physical_register:4:2
+
+amdgpu.target<gfx1250> @target
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @cluster_overlapping_memory_access(%lds: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>) asm {
+  %m0 = s_mov_b32_m0_imm 3
+  low.op<amdgpu.cluster_load_async_to_lds_b128>(%lds, %addr, %saddr, %m0) memory_access([0, 3, 7, -1, 35, 64, 0, 16, 0, 0, 0, 0, 0]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  low.op<amdgpu.cluster_load_async_to_lds_b128>(%lds, %addr, %saddr, %m0) memory_access([0, 3, 7, -1, 35, 64, 0, 16, 0, 0, 0, 0, 0]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  s_wait_asynccnt {asynccnt = 0}
+  return
+}
+
+// ----
+  s_mov_b32 m0, 3
+  cluster_load_async_to_lds_b128 v0, v1, s[4:5]
+  s_wait_asynccnt asynccnt(0)
+  cluster_load_async_to_lds_b128 v0, v1, s[4:5]
+  s_wait_asynccnt 0
+  s_endpgm

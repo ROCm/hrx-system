@@ -43,7 +43,7 @@ TEST_F(PassProgramTest, CompilesStructuredProgram) {
   loom_pass_program_t& program = storage.program;
   IREE_ASSERT_OK(Compile(module, Pipeline(module, 1), &program));
 
-  ASSERT_EQ(program.instruction_count, 9u);
+  ASSERT_EQ(program.instruction_count, 10u);
   EXPECT_EQ(program.root_kind, LOOM_PASS_MODULE);
 
   const loom_pass_program_instruction_t& module_invoke =
@@ -117,8 +117,14 @@ TEST_F(PassProgramTest, CompilesStructuredProgram) {
   EXPECT_TRUE(iree_string_view_equal(function_invoke.invoke.descriptor->key,
                                      IREE_SV("test.noop")));
 
-  const loom_pass_program_instruction_t& callee_invoke =
+  const loom_pass_program_instruction_t& call_instruction =
       program.instructions[6];
+  EXPECT_EQ(call_instruction.kind, LOOM_PASS_PROGRAM_INSTRUCTION_CALL);
+  EXPECT_EQ(call_instruction.call.body_start, 7u);
+  EXPECT_EQ(call_instruction.call.body_end, 8u);
+
+  const loom_pass_program_instruction_t& callee_invoke =
+      program.instructions[7];
   EXPECT_EQ(callee_invoke.kind, LOOM_PASS_PROGRAM_INSTRUCTION_INVOKE);
   EXPECT_TRUE(iree_string_view_equal(callee_invoke.invoke.descriptor->key,
                                      IREE_SV("test.module-noop")));
@@ -128,16 +134,39 @@ TEST_F(PassProgramTest, CompilesStructuredProgram) {
   EXPECT_TRUE(loom_pass_call_isa(callee_invoke.source.call_stack[0]));
 
   const loom_pass_program_instruction_t& fail_instruction =
-      program.instructions[7];
+      program.instructions[8];
   EXPECT_EQ(fail_instruction.kind, LOOM_PASS_PROGRAM_INSTRUCTION_FAIL);
   EXPECT_TRUE(iree_string_view_equal(fail_instruction.message.message,
                                      IREE_SV("stop")));
 
   const loom_pass_program_instruction_t& halt_instruction =
-      program.instructions[8];
+      program.instructions[9];
   EXPECT_EQ(halt_instruction.kind, LOOM_PASS_PROGRAM_INSTRUCTION_HALT);
   EXPECT_TRUE(iree_string_view_equal(halt_instruction.message.message,
                                      IREE_SV("inspect")));
+}
+
+TEST_F(PassProgramTest, CompilesIfChangedBody) {
+  loom_module_t* module =
+      Parse(IREE_SV("pass.pipeline<func> @pipeline pipeline {\n"
+                    "  test.noop\n"
+                    "  if changed {\n"
+                    "    test.mark-changed\n"
+                    "  }\n"
+                    "}\n"));
+  ASSERT_NE(module, nullptr);
+
+  PassProgramStorage storage;
+  loom_pass_program_t& program = storage.program;
+  IREE_ASSERT_OK(Compile(module, Pipeline(module, 0), &program));
+
+  ASSERT_EQ(program.instruction_count, 3u);
+  EXPECT_EQ(program.instructions[0].kind, LOOM_PASS_PROGRAM_INSTRUCTION_INVOKE);
+  const loom_pass_program_instruction_t& if_changed = program.instructions[1];
+  EXPECT_EQ(if_changed.kind, LOOM_PASS_PROGRAM_INSTRUCTION_IF_CHANGED);
+  EXPECT_EQ(if_changed.if_changed.body_start, 2u);
+  EXPECT_EQ(if_changed.if_changed.body_end, 3u);
+  EXPECT_EQ(program.instructions[2].kind, LOOM_PASS_PROGRAM_INSTRUCTION_INVOKE);
 }
 
 TEST_F(PassProgramTest, CompilesFunctionRootPipeline) {

@@ -205,28 +205,35 @@ static iree_status_t iree_async_io_uring_relay_submit_source(
   return iree_ok_status();
 }
 
-// Transitions a relay to FAULTED state and invokes the error callback.
-// Takes ownership of |status|. If no callback is registered, the status is
-// ignored (freed).
+// Transitions a relay to a faulted state and invokes the error callback.
+// |source_is_active| indicates that a persistent multishot source still holds
+// a kernel reference and must be cancelled before terminal unregistration can
+// destroy the relay. Takes ownership of |status|.
 static void iree_async_io_uring_relay_fault(iree_async_relay_t* relay,
+                                            bool source_is_active,
                                             iree_status_t status) {
-  relay->platform.io_uring.state = IREE_ASYNC_IO_URING_RELAY_STATE_FAULTED;
+  relay->platform.io_uring.state =
+      source_is_active
+          ? IREE_ASYNC_IO_URING_RELAY_STATE_FAULT_CANCELLATION_PENDING
+          : IREE_ASYNC_IO_URING_RELAY_STATE_FAULTED;
   if (relay->error_callback.fn) {
     // Transfer ownership to callback.
     relay->error_callback.fn(relay->error_callback.user_data, relay, status);
   } else {
-    // No callback - must still consume the status.
-    iree_status_ignore(status);
+    // The caller explicitly opted out of terminal fault observation.
+    iree_status_free(status);
   }
 }
 
 // Performs final cleanup of a relay: unlinks from the proactor's relay list,
 // closes owned source fd, releases retained notifications, and frees the
-// struct. The relay must have no in-flight kernel operation (PENDING_REARM,
-// FAULTED, or received final CQE). Caller must not access the relay after this
-// call.
+// struct. The relay must have no in-flight kernel operation. Caller must not
+// access the relay after this call.
 static void iree_async_io_uring_relay_cleanup(
     iree_async_proactor_io_uring_t* proactor, iree_async_relay_t* relay) {
+  iree_async_relay_unregistered_callback_t unregistered_callback =
+      relay->unregistered_callback;
+
   // Unlink from proactor's relay list.
   if (relay->prev) {
     relay->prev->next = relay->next;
@@ -255,6 +262,10 @@ static void iree_async_io_uring_relay_cleanup(
 
   // Free the relay struct.
   iree_allocator_free(relay->allocator, relay);
+
+  if (unregistered_callback.fn) {
+    unregistered_callback.fn(unregistered_callback.user_data);
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -360,6 +371,7 @@ iree_status_t iree_async_io_uring_register_relay(
   relay->sink = sink;
   relay->flags = flags;
   relay->error_callback = error_callback;
+  relay->unregistered_callback = iree_async_relay_unregistered_callback_none();
   relay->platform.io_uring.state = IREE_ASYNC_IO_URING_RELAY_STATE_ACTIVE;
   relay->wait_epoch = 0;
   relay->platform.io_uring.write_buffer = 0;
@@ -420,62 +432,76 @@ iree_status_t iree_async_io_uring_register_relay(
 // Unregister relay
 //===----------------------------------------------------------------------===//
 
+// Fills an SQE that terminates source monitoring for |relay|.
+static void iree_async_io_uring_relay_fill_unregistration_sqe(
+    iree_async_relay_t* relay, iree_io_uring_sqe_t* sqe) {
+  memset(sqe, 0, sizeof(*sqe));
+  bool use_async_cancel =
+      relay->source.type == IREE_ASYNC_RELAY_SOURCE_TYPE_NOTIFICATION &&
+      relay->source.notification->mode == IREE_ASYNC_NOTIFICATION_MODE_FUTEX;
+  sqe->opcode = use_async_cancel ? IREE_IORING_OP_ASYNC_CANCEL
+                                 : IREE_IORING_OP_POLL_REMOVE;
+  sqe->fd = -1;
+  sqe->addr = iree_io_uring_relay_encode(relay);
+  sqe->user_data = iree_io_uring_internal_encode(IREE_IO_URING_TAG_CANCEL, 0);
+}
+
 void iree_async_io_uring_unregister_relay(
-    iree_async_proactor_io_uring_t* proactor, iree_async_relay_t* relay) {
+    iree_async_proactor_io_uring_t* proactor, iree_async_relay_t* relay,
+    iree_async_relay_unregistered_callback_t callback) {
   if (!relay) return;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // PENDING_REARM and FAULTED relays have no in-flight kernel operation — the
-  // FUTEX_WAIT completed (triggering the re-arm attempt) and no new SQE was
-  // successfully submitted. There's nothing to cancel, so clean up immediately.
+  relay->unregistered_callback = callback;
+
+  // These states have no in-flight kernel operation, so terminal
+  // unregistration can complete synchronously.
   if (relay->platform.io_uring.state ==
-          IREE_ASYNC_IO_URING_RELAY_STATE_PENDING_REARM ||
+          IREE_ASYNC_IO_URING_RELAY_STATE_REARM_PENDING ||
       relay->platform.io_uring.state ==
-          IREE_ASYNC_IO_URING_RELAY_STATE_FAULTED) {
+          IREE_ASYNC_IO_URING_RELAY_STATE_FAULTED ||
+      relay->platform.io_uring.state ==
+          IREE_ASYNC_IO_URING_RELAY_STATE_TERMINAL) {
     iree_async_io_uring_relay_cleanup(proactor, relay);
     IREE_TRACE_ZONE_END(z0);
     return;
   }
 
-  // Mark as zombie so CQE handler knows not to fire sink.
-  relay->platform.io_uring.state = IREE_ASYNC_IO_URING_RELAY_STATE_ZOMBIE;
+  // A fault has already started cancellation. Attach terminal ownership to
+  // that operation instead of submitting a duplicate cancellation request.
+  if (relay->platform.io_uring.state ==
+      IREE_ASYNC_IO_URING_RELAY_STATE_FAULT_CANCELLATION_PENDING) {
+    relay->platform.io_uring.state =
+        IREE_ASYNC_IO_URING_RELAY_STATE_UNREGISTRATION_PENDING;
+    IREE_TRACE_ZONE_END(z0);
+    return;
+  }
+  if (relay->platform.io_uring.state ==
+      IREE_ASYNC_IO_URING_RELAY_STATE_FAULT_CANCELLATION_SUBMITTED) {
+    relay->platform.io_uring.state =
+        IREE_ASYNC_IO_URING_RELAY_STATE_UNREGISTRATION_SUBMITTED;
+    IREE_TRACE_ZONE_END(z0);
+    return;
+  }
+
+  // Suppress the sink before racing with any source CQE already in flight.
+  relay->platform.io_uring.state =
+      IREE_ASYNC_IO_URING_RELAY_STATE_UNREGISTRATION_PENDING;
 
   // Submit POLL_REMOVE or ASYNC_CANCEL to stop source monitoring.
   iree_io_uring_ring_sq_lock(&proactor->ring);
   iree_io_uring_sqe_t* sqe = iree_io_uring_ring_get_sqe(&proactor->ring);
   if (sqe) {
-    memset(sqe, 0, sizeof(*sqe));
-
-    // For POLL_ADD sources, use POLL_REMOVE.
-    // For FUTEX_WAIT, use ASYNC_CANCEL.
-    bool use_async_cancel =
-        (relay->source.type == IREE_ASYNC_RELAY_SOURCE_TYPE_NOTIFICATION &&
-         relay->source.notification->mode ==
-             IREE_ASYNC_NOTIFICATION_MODE_FUTEX);
-
-    if (use_async_cancel) {
-      sqe->opcode = IREE_IORING_OP_ASYNC_CANCEL;
-    } else {
-      sqe->opcode = IREE_IORING_OP_POLL_REMOVE;
-    }
-    sqe->fd = -1;
-    sqe->addr = iree_io_uring_relay_encode(relay);
-    sqe->user_data = iree_io_uring_internal_encode(IREE_IO_URING_TAG_CANCEL, 0);
-    iree_io_uring_ring_sq_unlock(&proactor->ring);
-
-    iree_status_ignore(iree_io_uring_ring_submit(&proactor->ring,
-                                                 /*min_complete=*/0,
-                                                 /*flags=*/0));
-  } else {
-    iree_io_uring_ring_sq_unlock(&proactor->ring);
-    // SQ full — the relay stays zombie. For multishot poll-based relays, the
-    // CQE handler will retry POLL_REMOVE on each subsequent CQE delivery.
-    // For one-shot sources, the final CQE will trigger cleanup directly.
+    iree_async_io_uring_relay_fill_unregistration_sqe(relay, sqe);
+    relay->platform.io_uring.state =
+        IREE_ASYNC_IO_URING_RELAY_STATE_UNREGISTRATION_SUBMITTED;
   }
+  iree_io_uring_ring_sq_unlock(&proactor->ring);
 
-  // The relay stays in the list as a zombie. The CQE handler will unlink and
-  // free it when the final CQE arrives (no CQE_F_MORE or cancel completion).
-  // If the proactor is destroyed first, destroy() cleans up zombies.
+  // The relay stays in the list until its final source CQE arrives. If SQ
+  // pressure prevented cancellation submission, the poll loop retries after
+  // processing CQEs. Proactor destruction closes the ring before completing
+  // any pending unregistration callback.
   IREE_TRACE_ZONE_END(z0);
 }
 
@@ -488,8 +514,16 @@ void iree_async_io_uring_handle_relay_cqe(
     int32_t result, uint32_t cqe_flags) {
   if (!relay) return;
 
-  bool is_zombie = (relay->platform.io_uring.state ==
-                    IREE_ASYNC_IO_URING_RELAY_STATE_ZOMBIE);
+  bool is_unregistering =
+      relay->platform.io_uring.state ==
+          IREE_ASYNC_IO_URING_RELAY_STATE_UNREGISTRATION_PENDING ||
+      relay->platform.io_uring.state ==
+          IREE_ASYNC_IO_URING_RELAY_STATE_UNREGISTRATION_SUBMITTED;
+  bool is_fault_cancelling =
+      relay->platform.io_uring.state ==
+          IREE_ASYNC_IO_URING_RELAY_STATE_FAULT_CANCELLATION_PENDING ||
+      relay->platform.io_uring.state ==
+          IREE_ASYNC_IO_URING_RELAY_STATE_FAULT_CANCELLATION_SUBMITTED;
   bool has_more = (cqe_flags & IREE_IORING_CQE_F_MORE) != 0;
   bool is_persistent =
       iree_any_bit_set(relay->flags, IREE_ASYNC_RELAY_FLAG_PERSISTENT);
@@ -498,8 +532,8 @@ void iree_async_io_uring_handle_relay_cqe(
   // of this CQE means the in-kernel FUTEX_WAIT completed (whether by wake,
   // cancel, or value mismatch). Decrement the source notification's relay
   // count so the signal path computes a precise futex wake count.
-  // This is unconditional (even for zombies) because the count was incremented
-  // when the FUTEX_WAIT SQE was submitted.
+  // This is unconditional during terminal cancellation because the count was
+  // incremented when the FUTEX_WAIT SQE was submitted.
   bool is_futex_source = iree_async_io_uring_relay_is_futex_source(relay);
   if (is_futex_source) {
     iree_atomic_fetch_add(
@@ -507,8 +541,10 @@ void iree_async_io_uring_handle_relay_cqe(
         iree_memory_order_release);
   }
 
-  // Fire sink if not zombie and no error (or not error-sensitive).
-  if (!is_zombie) {
+  // Fire the sink only while the relay is active.
+  if (!is_unregistering && !is_fault_cancelling &&
+      relay->platform.io_uring.state ==
+          IREE_ASYNC_IO_URING_RELAY_STATE_ACTIVE) {
     bool should_fire = true;
 
     // Check for source errors if ERROR_SENSITIVE flag is set.
@@ -535,9 +571,9 @@ void iree_async_io_uring_handle_relay_cqe(
         // Sink write failed. Capture errno before any other calls.
         int saved_errno = errno;
         iree_async_io_uring_relay_fault(
-            relay, iree_make_status(iree_status_code_from_errno(saved_errno),
-                                    "relay sink write failed"));
-        // Faulted relays are cleaned up below via is_final.
+            relay, is_persistent && has_more,
+            iree_make_status(iree_status_code_from_errno(saved_errno),
+                             "relay sink write failed"));
       } else {
         // For persistent poll-based sources, drain the source fd to prevent
         // busy-loops. Level-triggered fds (like eventfd) remain readable until
@@ -548,7 +584,7 @@ void iree_async_io_uring_handle_relay_cqe(
           if (!iree_async_io_uring_relay_drain_source(relay)) {
             int saved_errno = errno;
             iree_async_io_uring_relay_fault(
-                relay,
+                relay, /*source_is_active=*/true,
                 iree_make_status(iree_status_code_from_errno(saved_errno),
                                  "relay source drain failed"));
           }
@@ -557,38 +593,65 @@ void iree_async_io_uring_handle_relay_cqe(
     }
   }
 
-  // For zombie relays with multishot still active, attempt to stop the
-  // kernel-side poll so the relay can be cleaned up. This handles the case
-  // where unregister_relay couldn't submit POLL_REMOVE due to SQ pressure.
-  // The multishot keeps delivering CQEs, giving us repeated opportunities
-  // to retry until the SQ has space.
-  if (is_zombie && has_more) {
+  // If cancellation was deferred by SQ pressure and the multishot source
+  // produced another CQE, use the newly available slot to stop it.
+  bool cancellation_pending =
+      relay->platform.io_uring.state ==
+          IREE_ASYNC_IO_URING_RELAY_STATE_UNREGISTRATION_PENDING ||
+      relay->platform.io_uring.state ==
+          IREE_ASYNC_IO_URING_RELAY_STATE_FAULT_CANCELLATION_PENDING;
+  if (cancellation_pending && has_more) {
     iree_io_uring_ring_sq_lock(&proactor->ring);
     iree_io_uring_sqe_t* sqe = iree_io_uring_ring_get_sqe(&proactor->ring);
     if (sqe) {
-      memset(sqe, 0, sizeof(*sqe));
-      sqe->opcode = IREE_IORING_OP_POLL_REMOVE;
-      sqe->fd = -1;
-      sqe->addr = iree_io_uring_relay_encode(relay);
-      sqe->user_data =
-          iree_io_uring_internal_encode(IREE_IO_URING_TAG_CANCEL, 0);
+      iree_async_io_uring_relay_fill_unregistration_sqe(relay, sqe);
+      relay->platform.io_uring.state =
+          relay->platform.io_uring.state ==
+                  IREE_ASYNC_IO_URING_RELAY_STATE_UNREGISTRATION_PENDING
+              ? IREE_ASYNC_IO_URING_RELAY_STATE_UNREGISTRATION_SUBMITTED
+              : IREE_ASYNC_IO_URING_RELAY_STATE_FAULT_CANCELLATION_SUBMITTED;
     }
     iree_io_uring_ring_sq_unlock(&proactor->ring);
-    // SQE is submitted with the next ring_submit in poll().
-    // If SQ was full, the multishot keeps delivering CQEs so we retry.
   }
 
-  // Determine if this is the final CQE for this relay.
-  // Faulted relays always need cleanup regardless of has_more.
-  bool is_final = !has_more || relay->platform.io_uring.state ==
-                                   IREE_ASYNC_IO_URING_RELAY_STATE_FAULTED;
+  // A final source CQE proves the kernel no longer references the relay. An
+  // unregistering relay can now complete; a fault-cancelling relay remains as
+  // a caller-visible faulted handle until explicit terminal unregistration.
+  if (!has_more &&
+      (relay->platform.io_uring.state ==
+           IREE_ASYNC_IO_URING_RELAY_STATE_UNREGISTRATION_PENDING ||
+       relay->platform.io_uring.state ==
+           IREE_ASYNC_IO_URING_RELAY_STATE_UNREGISTRATION_SUBMITTED)) {
+    iree_async_io_uring_relay_cleanup(proactor, relay);
+    return;
+  }
+  if (!has_more &&
+      (relay->platform.io_uring.state ==
+           IREE_ASYNC_IO_URING_RELAY_STATE_FAULT_CANCELLATION_PENDING ||
+       relay->platform.io_uring.state ==
+           IREE_ASYNC_IO_URING_RELAY_STATE_FAULT_CANCELLATION_SUBMITTED)) {
+    relay->platform.io_uring.state = IREE_ASYNC_IO_URING_RELAY_STATE_FAULTED;
+    return;
+  }
 
-  // For persistent relays with notification sources in futex mode,
-  // we need to re-submit the FUTEX_WAIT after each completion.
-  // Skip if zombie, faulted, or has_more (multishot still active).
+  // A fault with no active multishot source is already terminal. Persistent
+  // relays retain their handle for explicit unregistration; one-shot relays
+  // preserve their normal auto-cleanup contract.
   if (relay->platform.io_uring.state ==
-          IREE_ASYNC_IO_URING_RELAY_STATE_ACTIVE &&
-      is_persistent && is_final && is_futex_source) {
+      IREE_ASYNC_IO_URING_RELAY_STATE_FAULTED) {
+    if (!is_persistent) iree_async_io_uring_relay_cleanup(proactor, relay);
+    return;
+  }
+
+  if (relay->platform.io_uring.state !=
+          IREE_ASYNC_IO_URING_RELAY_STATE_ACTIVE ||
+      has_more) {
+    return;
+  }
+
+  // Persistent futex notification sources use one-shot FUTEX_WAIT operations
+  // and must submit a fresh wait after each terminal CQE.
+  if (is_persistent && is_futex_source) {
     // Try to get an SQE. Use direct check to avoid status allocation for
     // expected SQ backpressure.
     iree_io_uring_ring_sq_lock(&proactor->ring);
@@ -597,7 +660,7 @@ void iree_async_io_uring_handle_relay_cqe(
       iree_io_uring_ring_sq_unlock(&proactor->ring);
       // SQ full - mark as pending re-arm for retry next poll cycle.
       relay->platform.io_uring.state =
-          IREE_ASYNC_IO_URING_RELAY_STATE_PENDING_REARM;
+          IREE_ASYNC_IO_URING_RELAY_STATE_REARM_PENDING;
     } else {
       iree_async_io_uring_relay_fill_source_sqe(relay, sqe);
       iree_io_uring_ring_sq_unlock(&proactor->ring);
@@ -605,8 +668,8 @@ void iree_async_io_uring_handle_relay_cqe(
           &proactor->ring, /*min_complete=*/0, /*flags=*/0);
       if (!iree_status_is_ok(status)) {
         // Unrecoverable syscall error (EINTR handled internally by submit).
-        // Transfer status ownership to fault handler.
-        iree_async_io_uring_relay_fault(relay, status);
+        iree_async_io_uring_relay_fault(relay, /*source_is_active=*/false,
+                                        status);
       } else {
         // Re-armed: new FUTEX_WAIT is in-flight.
         iree_atomic_fetch_add(
@@ -614,22 +677,20 @@ void iree_async_io_uring_handle_relay_cqe(
             iree_memory_order_release);
       }
     }
-    // Relay still alive unless faulted during submit.
-    if (relay->platform.io_uring.state !=
-        IREE_ASYNC_IO_URING_RELAY_STATE_FAULTED) {
-      is_final = false;
-    }
+    return;
   }
 
-  // Clean up if this is the final CQE. One-shot relays clean up after first
-  // completion; persistent poll-based relays clean up when multishot ends.
-  if (is_final) {
+  if (is_persistent) {
+    // A persistent poll source ended without an explicit unregistration. Keep
+    // the handle alive so the caller can join terminal cleanup exactly.
+    relay->platform.io_uring.state = IREE_ASYNC_IO_URING_RELAY_STATE_TERMINAL;
+  } else {
     iree_async_io_uring_relay_cleanup(proactor, relay);
   }
 }
 
 //===----------------------------------------------------------------------===//
-// Retry pending re-arms
+// Retry pending relay operations
 //===----------------------------------------------------------------------===//
 
 void iree_async_io_uring_retry_pending_relays(
@@ -637,8 +698,22 @@ void iree_async_io_uring_retry_pending_relays(
   iree_io_uring_ring_sq_lock(&proactor->ring);
   for (iree_async_relay_t* relay = proactor->relays; relay;
        relay = relay->next) {
+    if (relay->platform.io_uring.state ==
+            IREE_ASYNC_IO_URING_RELAY_STATE_UNREGISTRATION_PENDING ||
+        relay->platform.io_uring.state ==
+            IREE_ASYNC_IO_URING_RELAY_STATE_FAULT_CANCELLATION_PENDING) {
+      iree_io_uring_sqe_t* sqe = iree_io_uring_ring_get_sqe(&proactor->ring);
+      if (!sqe) break;
+      iree_async_io_uring_relay_fill_unregistration_sqe(relay, sqe);
+      relay->platform.io_uring.state =
+          relay->platform.io_uring.state ==
+                  IREE_ASYNC_IO_URING_RELAY_STATE_UNREGISTRATION_PENDING
+              ? IREE_ASYNC_IO_URING_RELAY_STATE_UNREGISTRATION_SUBMITTED
+              : IREE_ASYNC_IO_URING_RELAY_STATE_FAULT_CANCELLATION_SUBMITTED;
+      continue;
+    }
     if (relay->platform.io_uring.state !=
-        IREE_ASYNC_IO_URING_RELAY_STATE_PENDING_REARM) {
+        IREE_ASYNC_IO_URING_RELAY_STATE_REARM_PENDING) {
       continue;
     }
 

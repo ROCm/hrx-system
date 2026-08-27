@@ -155,10 +155,6 @@ void loom_llvmir_target_profile_storage_initialize_from_bundle(
       flat_workgroup_size_max =
           projected_profile->kernel.flat_workgroup_size_max;
     }
-    const uint32_t buffer_resource_flags =
-        export_plan->hal_kernel.buffer_resource_flags != 0
-            ? export_plan->hal_kernel.buffer_resource_flags
-            : projected_profile->kernel.binding_resource_flags;
     out_storage->profile.kind = LOOM_LLVMIR_TARGET_PROFILE_KERNEL;
     out_storage->profile.kernel = projected_profile->kernel;
     out_storage->profile.kernel.required_workgroup_size =
@@ -174,7 +170,6 @@ void loom_llvmir_target_profile_storage_initialize_from_bundle(
     out_storage->profile.kernel.subgroup_size =
         snapshot->subgroup_size != 0 ? snapshot->subgroup_size
                                      : projected_profile->kernel.subgroup_size;
-    out_storage->profile.kernel.binding_resource_flags = buffer_resource_flags;
   }
 }
 

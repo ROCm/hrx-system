@@ -1,0 +1,109 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# bazel-to-cmake: skip
+
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load(
+    "//loom/build_tools/bazel:defs.bzl",
+    "loom_command_binary",
+    "loom_library",
+)
+
+package(default_visibility = ["//loom/build_tools/bazel/test:__pkg__"])
+
+loom_library(
+    name = "implementation",
+    srcs = ["implementation.loom"],
+    tags = ["manual"],
+)
+
+loom_library(
+    name = "unused",
+    srcs = ["unused.loom"],
+    tags = ["manual"],
+)
+
+loom_library(
+    name = "interface",
+    srcs = ["interface.loom"],
+    tags = ["manual"],
+    deps = [
+        ":implementation",
+        ":unused",
+    ],
+)
+
+loom_command_binary(
+    name = "deps_subject",
+    tags = ["manual"],
+    target = "//loom/target/amdgpu:gfx11-generic",
+    deps = [":interface"],
+)
+
+loom_command_binary(
+    name = "explicit_subject",
+    roots = ["@scale_once"],
+    tags = ["manual"],
+    target = "//loom/target/amdgpu:gfx11-generic",
+    deps = [":interface"],
+)
+
+loom_command_binary(
+    name = "srcs_subject",
+    srcs = ["standalone.loom"],
+    tags = ["manual"],
+    target = "//loom/target/amdgpu:gfx11-generic",
+)
+
+loom_command_binary(
+    name = "mixed_subject",
+    srcs = ["interface.loom"],
+    tags = ["manual"],
+    target = "//loom/target/amdgpu:gfx11-generic",
+    deps = [
+        ":implementation",
+        ":unused",
+    ],
+)
+
+filegroup(
+    name = "deps_subject_command_report",
+    srcs = [":deps_subject"],
+    output_group = "command_compile_reports",
+)
+
+filegroup(
+    name = "deps_subject_kernel_report",
+    srcs = [":deps_subject"],
+    output_group = "kernel_compile_reports",
+)
+
+filegroup(
+    name = "deps_subject_linked_module",
+    srcs = [":deps_subject"],
+    output_group = "linked_modules",
+)
+
+sh_test(
+    name = "product_test",
+    srcs = ["product_test.sh"],
+    data = [
+        ":deps_subject",
+        ":deps_subject_command_report",
+        ":deps_subject_kernel_report",
+        ":deps_subject_linked_module",
+        ":explicit_subject",
+        ":mixed_subject",
+        ":srcs_subject",
+        "//loom/src/loom/tools/loom-format",
+    ],
+)
+
+test_suite(
+    name = "test",
+    tests = [":product_test"],
+)

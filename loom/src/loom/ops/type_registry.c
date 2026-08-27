@@ -6,6 +6,7 @@
 
 #include "loom/ops/type_registry.h"
 
+#include "loom/ir/context.h"
 #include "loom/ops/type_registry_tables.h"
 #include "loom/util/fact_table.h"
 
@@ -17,16 +18,32 @@ const loom_type_registry_entry_t* loom_type_registry_entries(void) {
   return loom_type_registry_entries_storage;
 }
 
-static iree_string_view_t loom_type_registry_builtin_name(
-    loom_type_kind_t kind) {
-  if (kind >= LOOM_TYPE_COUNT_) {
-    return iree_string_view_empty();
+iree_status_t loom_type_registry_register_types(
+    loom_context_t* context, const loom_type_registry_entry_t* entries,
+    iree_host_size_t entry_count) {
+  if (entry_count == 0 || entries == NULL) {
+    return loom_context_register_type_descriptors(context, entries,
+                                                  entry_count);
   }
-  return loom_type_registry_builtin_names[kind];
+  for (iree_host_size_t i = 0; i < entry_count; ++i) {
+    if (loom_type_registry_lookup(NULL, entries[i].name) == NULL) continue;
+    return iree_make_status(IREE_STATUS_ALREADY_EXISTS,
+                            "type '%.*s' conflicts with a common type",
+                            (int)entries[i].name.size, entries[i].name.data);
+  }
+  return loom_context_register_type_descriptors(context, entries, entry_count);
+}
+
+const loom_type_descriptor_t* loom_type_registry_lookup_builtin(
+    loom_type_kind_t kind) {
+  if (!loom_type_kind_is_valid(kind)) {
+    return NULL;
+  }
+  return loom_type_registry_builtin_descriptors[kind];
 }
 
 const loom_type_descriptor_t* loom_type_registry_lookup(
-    iree_string_view_t name) {
+    const loom_context_t* context, iree_string_view_t name) {
   iree_host_size_t low = 0;
   iree_host_size_t high = loom_type_registry_entry_count;
   while (low < high) {
@@ -41,7 +58,8 @@ const loom_type_descriptor_t* loom_type_registry_lookup(
       return loom_type_registry_entries_storage[mid].descriptor;
     }
   }
-  return NULL;
+  return context != NULL ? loom_context_lookup_type_by_name(context, name)
+                         : NULL;
 }
 
 const loom_value_fact_domain_t* loom_type_registry_resolve_fact_domain(
@@ -49,21 +67,18 @@ const loom_value_fact_domain_t* loom_type_registry_resolve_fact_domain(
     const loom_module_t* module, loom_type_t type) {
   (void)user_data;
   (void)context;
-  iree_string_view_t name = iree_string_view_empty();
   if (loom_type_is_dialect(type)) {
     const loom_string_id_t name_id = loom_type_dialect_name_id(type);
     if (module == NULL || name_id == LOOM_STRING_ID_INVALID ||
         (iree_host_size_t)name_id >= module->strings.count) {
       return NULL;
     }
-    name = module->strings.entries[name_id];
-  } else {
-    name = loom_type_registry_builtin_name(loom_type_kind(type));
+    const loom_type_descriptor_t* descriptor = loom_type_registry_lookup(
+        module->context, module->strings.entries[name_id]);
+    return descriptor != NULL ? descriptor->fact_domain : NULL;
   }
-  if (iree_string_view_is_empty(name)) {
-    return NULL;
-  }
-  const loom_type_descriptor_t* descriptor = loom_type_registry_lookup(name);
+  const loom_type_descriptor_t* descriptor =
+      loom_type_registry_lookup_builtin(loom_type_kind(type));
   return descriptor != NULL ? descriptor->fact_domain : NULL;
 }
 

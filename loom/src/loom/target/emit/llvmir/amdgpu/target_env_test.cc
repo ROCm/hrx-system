@@ -118,8 +118,6 @@ void ExpectDerivedProfileMatchesStatic(
             static_profile->kernel.flat_workgroup_size_min);
   EXPECT_EQ(derived_profile->kernel.flat_workgroup_size_max,
             static_profile->kernel.flat_workgroup_size_max);
-  EXPECT_EQ(derived_profile->kernel.binding_resource_flags,
-            static_profile->kernel.binding_resource_flags);
 }
 
 TEST(LlvmIrAmdgpuTargetEnvTest, AmdgpuHalProfileNamesKernelAbi) {
@@ -150,8 +148,6 @@ TEST(LlvmIrAmdgpuTargetEnvTest, AmdgpuHalProfileNamesKernelAbi) {
   EXPECT_EQ(profile->kernel.required_workgroup_size.z, 0u);
   EXPECT_EQ(profile->kernel.flat_workgroup_size_min, 1u);
   EXPECT_EQ(profile->kernel.flat_workgroup_size_max, 1024u);
-  EXPECT_EQ(profile->kernel.binding_resource_flags, 0x31027000u);
-
   loom_llvmir_attr_t
       binding_attrs[LOOM_LLVMIR_TARGET_PROFILE_MAX_KERNEL_BINDING_ATTR_COUNT];
   iree_host_size_t binding_attr_count = 0;
@@ -190,8 +186,6 @@ TEST(LlvmIrAmdgpuTargetEnvTest, AmdgpuHalProfileHasGenericTargetBundle) {
   EXPECT_EQ(profile->kernel.flat_workgroup_size_min, 1u);
   EXPECT_EQ(profile->kernel.flat_workgroup_size_max,
             bundle->snapshot->max_flat_workgroup_size);
-  EXPECT_EQ(bundle->export_plan->hal_kernel.buffer_resource_flags,
-            profile->kernel.binding_resource_flags);
   ASSERT_NE(bundle->config, nullptr);
   EXPECT_TRUE(iree_string_view_is_empty(bundle->config->contract_set_key));
 }

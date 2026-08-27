@@ -6,12 +6,12 @@
 
 // Source module selection for source-to-low lowering.
 //
-// This is cold compilation setup: it resolves each source symbol's effective
-// target, checks that the low lowering policy supports the resulting target
-// contract, and returns the concrete inputs needed by the core lowerer.
-// Authored func target records win over invocation target selection; compatible
-// invocation selections refine the target bundle and provide target-owned
-// payloads without rewriting source attrs.
+// This is once-per-module JIT compilation setup. It resolves each source
+// symbol's target binding, checks that the low lowering policy supports the
+// resulting target contract, and returns the concrete inputs needed by the
+// core lowerer. Specialized functions use their compiler-owned
+// function-version facts; unrefined functions use facts projected from their
+// authored target witness.
 
 #ifndef LOOM_CODEGEN_LOW_LOWER_SOURCE_SELECTION_H_
 #define LOOM_CODEGEN_LOW_LOWER_SOURCE_SELECTION_H_
@@ -22,6 +22,7 @@
 #include "loom/codegen/low/lower/lower.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
+#include "loom/target/function_version.h"
 #include "loom/target/types.h"
 
 #ifdef __cplusplus
@@ -39,13 +40,11 @@ typedef struct loom_low_source_selection_options_t {
   // User-facing lowering kind used in diagnostics.
   iree_string_view_t lowering_kind;
 
-  // Optional runtime-selected target overlay. When compatible with a source
-  // function's module target record, this bundle refines the target contract
-  // used by legality and lowering while preserving the module target symbol.
-  loom_target_selection_t target_selection;
+  // Concrete compiler function versions participating in this lowering.
+  const loom_function_version_list_t* function_versions;
 
-  // Module-local target record materialized for |target_selection|, or null.
-  loom_symbol_ref_t target_ref;
+  // True to collect compatible different-topology target candidates.
+  bool collect_target_candidates;
 } loom_low_source_selection_options_t;
 
 typedef enum loom_low_source_selection_kind_e {
@@ -62,22 +61,54 @@ typedef struct loom_low_source_selection_t {
   // Source func-like op selected for lowering.
   loom_func_like_t func;
 
-  // Module-local target record symbol referenced by |func|.
+  // Borrowed source function symbol name.
+  iree_string_view_t function_name;
+
+  // Mutable identity for the target-refined compiler version, or NULL when
+  // unrefined. The target facts reachable through this selection are immutable.
+  loom_function_version_t* version_handle;
+
+  // Whether target facts came from authorship alone or specialization.
+  loom_target_binding_source_t target_source;
+
+  // Authored module-local target record symbol referenced by |func|, or an
+  // invalid ref when a targetless function was refined by the invocation.
   loom_symbol_ref_t target_ref;
 
-  // Storage for the effective target bundle selected by |func|.
-  loom_target_bundle_storage_t target_bundle_storage;
+  // Borrowed immutable function target facts for |func|.
+  const loom_target_facts_t* target_facts;
 
-  // Effective target bundle selected by |func|.
-  const loom_target_bundle_t* target_bundle;
+  // Borrowed module symbol name for |target_ref|, or empty when targetless.
+  iree_string_view_t target_symbol_name;
 
-  // Target-owned payload associated with |target_bundle|, or NULL when the
-  // bundle came only from module target records.
-  const void* target_data;
+  // Number of compatible module target records with different topology.
+  uint32_t candidate_target_count;
 
-  // Lowering policy selected by |target_bundle|.
+  // First compatible different-topology target symbol name, if any.
+  iree_string_view_t candidate_target_symbol_name;
+
+  // First compatible different-topology target bundle name, if any.
+  iree_string_view_t candidate_target_bundle_name;
+
+  // First compatible different-topology target snapshot name, if any.
+  iree_string_view_t candidate_target_snapshot_name;
+
+  // First compatible different-topology target config name, if any.
+  iree_string_view_t candidate_target_config_name;
+
+  // First compatible different-topology target fixed subgroup size, if any.
+  uint32_t candidate_target_subgroup_size;
+
+  // Lowering policy selected by |target_facts|.
   const loom_low_lower_policy_t* policy;
 } loom_low_source_selection_t;
+
+// Returns the common target bundle projected into |selection|'s facts.
+static inline const loom_target_bundle_t*
+loom_low_source_selection_target_bundle(
+    const loom_low_source_selection_t* selection) {
+  return loom_target_facts_bundle(selection->target_facts);
+}
 
 typedef struct loom_low_source_selection_list_t {
   // Source func-like symbols selected for lowering.

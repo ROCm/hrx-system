@@ -37,16 +37,16 @@ static iree_status_t loom_print_braced_region(
 }
 
 static char loom_print_region_syntax_first_char(loom_print_context_t* ctx,
+                                                const loom_region_t* region,
                                                 loom_region_syntax_t syntax) {
   switch (syntax) {
     case LOOM_REGION_SYNTAX_DEFAULT:
       return '{';
     case LOOM_REGION_SYNTAX_TEST_DO:
       return 'd';
-    case LOOM_REGION_SYNTAX_LOW_ASM:
-      return 'a';
     case LOOM_REGION_SYNTAX_LOW_ASM_OPTIONAL:
-      return loom_print_low_asm_is_requested(ctx) ? 'a' : '{';
+      if (!loom_print_low_asm_is_requested(ctx, region)) return '{';
+      return loom_print_low_asm_uses_marker(ctx, region) ? 'a' : '{';
     case LOOM_REGION_SYNTAX_PIPELINE:
       return 'p';
     default:
@@ -117,15 +117,8 @@ static iree_status_t loom_print_region_body_with_syntax(
       IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
       break;
     }
-    case LOOM_REGION_SYNTAX_LOW_ASM:
-      return loom_print_low_asm_region(ctx, region, region_descriptor,
-                                       entry_args_declared_by_parent);
     case LOOM_REGION_SYNTAX_LOW_ASM_OPTIONAL:
-      if (loom_print_low_asm_is_requested(ctx)) {
-        if (iree_any_bit_set(ctx->flags, LOOM_TEXT_PRINT_REQUIRE_LOW_ASM)) {
-          return loom_print_low_asm_region(ctx, region, region_descriptor,
-                                           entry_args_declared_by_parent);
-        }
+      if (loom_print_low_asm_is_requested(ctx, region)) {
         bool printed = false;
         IREE_RETURN_IF_ERROR(loom_print_low_asm_optional_region(
             ctx, region, region_descriptor, entry_args_declared_by_parent,
@@ -191,7 +184,8 @@ iree_status_t loom_print_region_element(loom_print_context_t* ctx,
       loom_print_region_entry_args_declared_by_parent(
           vtable, region_descriptor, (uint8_t)element->field_index, element);
   iree_host_size_t region_start = loom_print_next_token_start_offset(
-      ctx, /*glue=*/false, loom_print_region_syntax_first_char(ctx, syntax));
+      ctx, /*glue=*/false,
+      loom_print_region_syntax_first_char(ctx, region, syntax));
   IREE_RETURN_IF_ERROR(loom_print_region_body_with_syntax(
       ctx, region, region_descriptor, syntax, region_args_declared_by_parent));
   loom_print_report_field(

@@ -65,32 +65,28 @@ TEST(LowAllocationTableTest, FindsEdgeCopyGroupsBySourceOrdinal) {
                          &table, /*source_ordinal=*/8));
 }
 
-TEST(LowAllocationTableTest, FindsPacketMoveTemporaryGroupsBySourceOrdinal) {
-  loom_low_allocation_packet_move_temporary_group_t groups[3] = {};
+TEST(LowAllocationTableTest, FindsPacketMoveGroupsBySourceOrdinal) {
+  loom_low_allocation_packet_move_group_t groups[3] = {};
   groups[0].source_ordinal = 3;
   groups[1].source_ordinal = 5;
   groups[2].source_ordinal = 13;
 
   loom_low_allocation_table_t table = {};
-  table.packet_move_temporary_groups = groups;
-  table.packet_move_temporary_group_count = IREE_ARRAYSIZE(groups);
+  table.packet_move_groups = groups;
+  table.packet_move_group_count = IREE_ARRAYSIZE(groups);
 
-  EXPECT_EQ(
-      &groups[0],
-      loom_low_allocation_find_packet_move_temporary_group_by_source_ordinal(
-          &table, /*source_ordinal=*/3));
-  EXPECT_EQ(
-      &groups[1],
-      loom_low_allocation_find_packet_move_temporary_group_by_source_ordinal(
-          &table, /*source_ordinal=*/5));
-  EXPECT_EQ(
-      &groups[2],
-      loom_low_allocation_find_packet_move_temporary_group_by_source_ordinal(
-          &table, /*source_ordinal=*/13));
-  EXPECT_EQ(
-      nullptr,
-      loom_low_allocation_find_packet_move_temporary_group_by_source_ordinal(
-          &table, /*source_ordinal=*/12));
+  EXPECT_EQ(&groups[0],
+            loom_low_allocation_find_packet_move_group_by_source_ordinal(
+                &table, /*source_ordinal=*/3));
+  EXPECT_EQ(&groups[1],
+            loom_low_allocation_find_packet_move_group_by_source_ordinal(
+                &table, /*source_ordinal=*/5));
+  EXPECT_EQ(&groups[2],
+            loom_low_allocation_find_packet_move_group_by_source_ordinal(
+                &table, /*source_ordinal=*/13));
+  EXPECT_EQ(nullptr,
+            loom_low_allocation_find_packet_move_group_by_source_ordinal(
+                &table, /*source_ordinal=*/12));
 }
 
 }  // namespace

@@ -13,6 +13,7 @@
 
 #include "loom/codegen/low/lower/lower.h"
 #include "loom/codegen/low/source_memory_plan.h"
+#include "loom/target/arch/amdgpu/lower/descriptor_ref.h"
 #include "loom/target/arch/amdgpu/lower/materializers.h"
 #include "loom/target/arch/amdgpu/lower/plan.h"
 
@@ -70,6 +71,13 @@ iree_status_t loom_amdgpu_build_low_register_range(
     const loom_value_id_t* low_registers, uint32_t register_count,
     loom_type_t result_type, loom_value_id_t* out_low_result);
 
+// Extracts one 32-bit unit from an already-emitted low register range.
+iree_status_t loom_amdgpu_extract_low_register_unit(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t low_source, uint32_t register_count,
+    uint32_t register_offset, loom_type_t unit_type,
+    loom_value_id_t* out_register_unit);
+
 // Binds a source result to one or more already-emitted low register units.
 iree_status_t loom_amdgpu_bind_low_register_range(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
@@ -111,20 +119,19 @@ iree_status_t loom_amdgpu_resolve_descriptor_ref(
     loom_amdgpu_descriptor_ref_t descriptor_ref,
     loom_low_lower_resolved_descriptor_t* out_descriptor);
 
-// Returns true when |descriptor_set| contains the target-generated descriptor
-// reference.
-bool loom_amdgpu_descriptor_set_has_ref(
+// Returns true when |descriptor_set| can emit |descriptor_ref| with |immediate|
+// through the normal VGPR immediate helper, including target inline forms.
+bool loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_amdgpu_descriptor_ref_t descriptor_ref);
+    loom_amdgpu_descriptor_ref_t descriptor_ref, uint32_t immediate);
 
-// Returns true when |descriptor_set| contains a descriptor with |key|.
-bool loom_amdgpu_descriptor_set_has_key(
-    const loom_low_descriptor_set_t* descriptor_set, iree_string_view_t key);
-
-// Returns true when a descriptor row has an implicit resource operand.
-bool loom_amdgpu_descriptor_has_implicit_resource_operand(
+// Returns true when a VGPR compare against |immediate| can use either the
+// supplied RHS-inline form or a materialized VGPR immediate.
+bool loom_amdgpu_descriptor_set_can_emit_vgpr_compare_immediate(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor);
+    loom_amdgpu_descriptor_ref_t descriptor_ref,
+    loom_amdgpu_descriptor_ref_t src1_inline_descriptor_ref,
+    uint32_t immediate);
 
 // Resolves one optional explicit packet descriptor and its immediate names.
 iree_status_t loom_amdgpu_resolve_explicit_packet_plan(
@@ -173,6 +180,39 @@ iree_status_t loom_amdgpu_emit_resolved_vgpr_binary_immediate(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_lower_resolved_descriptor_t* descriptor, loom_value_id_t lhs,
     loom_value_id_t rhs, uint32_t immediate, loom_type_t lane_type,
+    loom_value_id_t* out_value);
+
+// Emits one resolved VGPR descriptor op with one register operand.
+iree_status_t loom_amdgpu_emit_resolved_vgpr_unary(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_resolved_descriptor_t* descriptor,
+    loom_value_id_t value, loom_type_t lane_type, loom_value_id_t* out_value);
+
+// Emits one resolved VGPR descriptor op with two VGPR operands.
+iree_status_t loom_amdgpu_emit_resolved_vgpr_binary(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_resolved_descriptor_t* descriptor, loom_value_id_t lhs,
+    loom_value_id_t rhs, loom_type_t lane_type, loom_value_id_t* out_value);
+
+// Emits one resolved VGPR descriptor op with three register operands.
+iree_status_t loom_amdgpu_emit_resolved_vgpr_ternary(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_resolved_descriptor_t* descriptor, loom_value_id_t lhs,
+    loom_value_id_t rhs, loom_value_id_t third, loom_type_t lane_type,
+    loom_value_id_t* out_value);
+
+// Materializes distinct SGPR sources beyond the active target's VOP3 scalar
+// bus limit. Repeated source IDs share the same legalized value.
+iree_status_t loom_amdgpu_legalize_vop3_scalar_sources(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t sources[3]);
+
+// Emits one resolved VGPR descriptor op with one VGPR operand and one imm32
+// immediate attribute.
+iree_status_t loom_amdgpu_emit_resolved_vgpr_unary_immediate(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_resolved_descriptor_t* descriptor,
+    loom_value_id_t value, uint32_t immediate, loom_type_t lane_type,
     loom_value_id_t* out_value);
 
 // Emits a fresh VGPR carrying the same 32-bit bit payload as |low_source|.
@@ -233,6 +273,13 @@ iree_status_t loom_amdgpu_emit_sgpr_scale_u32(loom_low_lower_context_t* context,
                                               loom_type_t lane_type,
                                               loom_value_id_t* out_value);
 
+// Emits |value * scale + addend| into a one-unit SGPR, using a fused scalar
+// shift-add descriptor when the target provides the exact power-of-two form.
+iree_status_t loom_amdgpu_emit_sgpr_scaled_add_u32(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t value, uint32_t scale, loom_value_id_t addend,
+    loom_type_t lane_type, loom_value_id_t* out_value);
+
 // Emits an SGPR x2 value zero-extending the supplied one-unit SGPR.
 iree_status_t loom_amdgpu_emit_sgpr64_from_u32(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
@@ -242,6 +289,25 @@ iree_status_t loom_amdgpu_emit_sgpr64_from_u32(
 iree_status_t loom_amdgpu_emit_sgpr64_constant_u64(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     uint64_t value, loom_value_id_t* out_low_wide_value);
+
+// Emits SCC true when any active lane in an EXEC-width SGPRx2 lane mask is set.
+//
+// Wave64 compares the full SGPR pair. Wave32 VOPC producers define the low
+// half and may leave the high half unspecified, so this compares only the
+// defined low half.
+iree_status_t loom_amdgpu_emit_lane_mask_nonzero_scc(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t low_mask, uint32_t wavefront_size,
+    loom_value_id_t* out_low_scc);
+
+// Emits SCC true when two EXEC-width SGPRx2 lane masks are equal.
+//
+// Wave64 compares the full SGPR pairs. Wave32 compares the defined low halves
+// and ignores unspecified high halves.
+iree_status_t loom_amdgpu_emit_lane_mask_equal_scc(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t low_lhs, loom_value_id_t low_rhs, uint32_t wavefront_size,
+    loom_value_id_t* out_low_scc);
 
 // Emits an SGPR x2 add using the target carry-chain instructions.
 iree_status_t loom_amdgpu_emit_sgpr64_add(loom_low_lower_context_t* context,
@@ -262,6 +328,39 @@ iree_status_t loom_amdgpu_emit_vgpr_binary(
     loom_amdgpu_descriptor_ref_t descriptor_ref, loom_value_id_t lhs,
     loom_value_id_t rhs, loom_type_t lane_type, loom_value_id_t* out_value);
 
+// Emits one unary VGPR descriptor op.
+iree_status_t loom_amdgpu_emit_vgpr_unary(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_descriptor_ref_t descriptor_ref, loom_value_id_t value,
+    loom_type_t lane_type, loom_value_id_t* out_value);
+
+// Emits a VGPR compare against an immediate using an already-resolved inline
+// form when available and otherwise materializing the immediate in a VGPR.
+iree_status_t loom_amdgpu_emit_resolved_vgpr_compare_immediate(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_resolved_descriptor_t* src1_inline_descriptor,
+    loom_amdgpu_descriptor_ref_t descriptor_ref, loom_value_id_t value,
+    uint32_t immediate, loom_type_t vgpr_type, loom_type_t mask_type,
+    loom_value_id_t* out_mask);
+
+// Emits a VGPR compare against an immediate, resolving the supplied RHS-inline
+// descriptor form when the immediate is encodable.
+iree_status_t loom_amdgpu_emit_vgpr_compare_immediate(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_descriptor_ref_t descriptor_ref,
+    loom_amdgpu_descriptor_ref_t src1_inline_descriptor_ref,
+    loom_value_id_t value, uint32_t immediate, loom_type_t vgpr_type,
+    loom_type_t mask_type, loom_value_id_t* out_mask);
+
+// Emits a VGPR select using a lane-mask condition.
+iree_status_t loom_amdgpu_emit_vgpr_select(loom_low_lower_context_t* context,
+                                           const loom_op_t* source_op,
+                                           loom_value_id_t false_value,
+                                           loom_value_id_t true_value,
+                                           loom_value_id_t condition,
+                                           loom_type_t vgpr_type,
+                                           loom_value_id_t* out_value);
+
 // Emits one VGPR descriptor op with one VGPR operand and one imm32 immediate.
 iree_status_t loom_amdgpu_emit_vgpr_binary_immediate(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
@@ -274,6 +373,14 @@ iree_status_t loom_amdgpu_emit_vgpr_shift(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_amdgpu_descriptor_ref_t descriptor_ref, uint32_t shift,
     loom_value_id_t value, loom_type_t lane_type, loom_value_id_t* out_value);
+
+// Emits |value << shift| + |addend| using a resolved V_LSHL_ADD_U32
+// immediate-shift descriptor.
+iree_status_t loom_amdgpu_emit_resolved_vgpr_lshl_add_u32(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_resolved_descriptor_t* descriptor,
+    loom_value_id_t value, loom_value_id_t addend, uint32_t shift,
+    loom_type_t lane_type, loom_value_id_t* out_value);
 
 // Tries to emit |value << shift| + |addend| using the V_LSHL_ADD_U32
 // immediate-shift form. If the active descriptor set lacks the packet or the
@@ -315,20 +422,6 @@ iree_status_t loom_amdgpu_emit_vgpr64_shl(loom_low_lower_context_t* context,
                                           loom_value_id_t low_value,
                                           loom_value_id_t low_shift,
                                           loom_value_id_t* out_low_shifted);
-
-// Emits round-to-nearest-even conversion from one f32 lane to one BF16 lane.
-// The result is held in the low 16 bits of a one-unit VGPR.
-iree_status_t loom_amdgpu_emit_f32_to_bf16_lane(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_value_id_t source_lane, loom_type_t lane_type,
-    loom_value_id_t* out_lane);
-
-// Emits round-to-nearest-even conversion from two f32 lanes to one packed BF16
-// register. The low source becomes the low 16 bits of the result.
-iree_status_t loom_amdgpu_emit_f32_pair_to_packed_bf16(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_value_id_t low_source_lane, loom_value_id_t high_source_lane,
-    loom_type_t lane_type, loom_value_id_t* out_packed);
 
 typedef enum loom_amdgpu_vgpr_sdwa_extract_flag_bits_e {
   // No additional source selection modifiers are applied.

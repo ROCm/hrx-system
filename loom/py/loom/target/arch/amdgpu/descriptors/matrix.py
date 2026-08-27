@@ -11,9 +11,23 @@
 
 from __future__ import annotations
 
+from ..matrix_formats import (
+    AMDGPU_CDNA4_MATRIX_FORMAT_ENUM_DOMAIN_NAMES,
+    AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS,
+)
 from .common import *
 
 _WMMA_GFX11_WAVE64_ACCUMULATOR_SIZE_REASON = "gfx11-wave64-wmma-half-width-accumulator"
+_GFX12_WAVE64_MATRIX_OPERAND_SIZE_REASON = "gfx12-wave64-matrix-half-width-operands"
+_CDNA4_F8F6F4_VARIABLE_OPERAND_WIDTH_REASON = (
+    "cdna4-f8f6f4-selector-controls-operand-width"
+)
+
+
+def _cdna4_f8f6f4_operand_width_exception_reason(
+    units: int,
+) -> str | None:
+    return None if units == 8 else _CDNA4_F8F6F4_VARIABLE_OPERAND_WIDTH_REASON
 
 
 def _v_wmma_16x16x16_overlay(
@@ -25,7 +39,9 @@ def _v_wmma_16x16x16_overlay(
     semantic_tag: str,
     input_units: int,
     accumulator_units: int,
+    input_size_exception_reason: str | None = None,
     accumulator_size_exception_reason: str | None = None,
+    op_sel_hi_field: str = "OP_SEL_HI",
 ) -> AmdgpuDescriptorOverlay:
     low_mnemonic = f"{mnemonic}{low_mnemonic_suffix}"
     asm_forms = None
@@ -33,7 +49,7 @@ def _v_wmma_16x16x16_overlay(
         asm_forms = _asm(
             native_assembly_mnemonic=mnemonic,
             results=("dst",),
-            operands=("a", "b", "acc"),
+            operands=("lhs", "rhs", "acc"),
         )
     return AmdgpuDescriptorOverlay(
         descriptor_key=descriptor_key,
@@ -48,14 +64,23 @@ def _v_wmma_16x16x16_overlay(
                 _vgpr_result(units=accumulator_units),
                 size_exception_reason=accumulator_size_exception_reason,
             ),
-            AmdgpuOperandOverlay("SRC0", _vgpr_operand("a", units=input_units)),
-            AmdgpuOperandOverlay("SRC1", _vgpr_operand("b", units=input_units)),
+            AmdgpuOperandOverlay(
+                "SRC0",
+                _vgpr_operand("lhs", units=input_units),
+                size_exception_reason=input_size_exception_reason,
+            ),
+            AmdgpuOperandOverlay(
+                "SRC1",
+                _vgpr_operand("rhs", units=input_units),
+                size_exception_reason=input_size_exception_reason,
+            ),
             AmdgpuOperandOverlay(
                 "SRC2",
                 _vgpr_const_operand("acc", units=accumulator_units),
                 size_exception_reason=accumulator_size_exception_reason,
             ),
         ),
+        fixed_encoding_fields=((op_sel_hi_field, 0x7),),
         constraints=_destructive_accumulator_constraints(3),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
         asm_forms=asm_forms,
@@ -118,6 +143,18 @@ def _with_zero_accumulator_form(
     zero_native_values = tuple(
         _native_result(field_name) for field_name in zero_result_names
     ) + tuple(_native_operand(field_name) for field_name in zero_operand_names)
+    zero_native_modifiers = ()
+    if overlay.asm_forms is not None:
+        zero_native_modifiers = tuple(
+            value
+            for value in overlay.asm_forms[0].native_assembly_values
+            if value.kind
+            in (
+                NativeAsmValueKind.IMMEDIATE_I64,
+                NativeAsmValueKind.IMMEDIATE_UNSIGNED_HEX,
+                NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+            )
+        )
     zero_overlay = replace(
         overlay,
         descriptor_key=zero_descriptor_key,
@@ -126,7 +163,7 @@ def _with_zero_accumulator_form(
             *overlay.fixed_encoding_fields,
             ("SRC2", _predefined("0")),
         ),
-        constraints=(),
+        constraints=_EARLY_CLOBBER_RESULT_CONSTRAINTS,
         operand_forms=(),
         asm_forms=_asm(
             mnemonic=f"{overlay.mnemonic}_acc_zero",
@@ -136,6 +173,7 @@ def _with_zero_accumulator_form(
             native_assembly_values=(
                 *zero_native_values,
                 _native_literal("0"),
+                *zero_native_modifiers,
             ),
         ),
     )
@@ -148,7 +186,9 @@ def _v_wmma_f32_16x16x16_f16_overlay(
     low_mnemonic_suffix: str = "",
     input_units: int = 4,
     accumulator_units: int = 8,
+    input_size_exception_reason: str | None = None,
     accumulator_size_exception_reason: str | None = None,
+    op_sel_hi_field: str = "OP_SEL_HI",
 ) -> AmdgpuDescriptorOverlay:
     return _v_wmma_16x16x16_overlay(
         descriptor_key=f"amdgpu.v_wmma_f32_16x16x16_f16{descriptor_key_suffix}",
@@ -158,7 +198,9 @@ def _v_wmma_f32_16x16x16_f16_overlay(
         semantic_tag="matrix.wmma.f32.16x16x16.f16",
         input_units=input_units,
         accumulator_units=accumulator_units,
+        input_size_exception_reason=input_size_exception_reason,
         accumulator_size_exception_reason=accumulator_size_exception_reason,
+        op_sel_hi_field=op_sel_hi_field,
     )
 
 
@@ -168,7 +210,9 @@ def _v_wmma_f32_16x16x16_bf16_overlay(
     low_mnemonic_suffix: str = "",
     input_units: int = 4,
     accumulator_units: int = 8,
+    input_size_exception_reason: str | None = None,
     accumulator_size_exception_reason: str | None = None,
+    op_sel_hi_field: str = "OP_SEL_HI",
 ) -> AmdgpuDescriptorOverlay:
     return _v_wmma_16x16x16_overlay(
         descriptor_key=f"amdgpu.v_wmma_f32_16x16x16_bf16{descriptor_key_suffix}",
@@ -178,7 +222,9 @@ def _v_wmma_f32_16x16x16_bf16_overlay(
         semantic_tag="matrix.wmma.f32.16x16x16.bf16",
         input_units=input_units,
         accumulator_units=accumulator_units,
+        input_size_exception_reason=input_size_exception_reason,
         accumulator_size_exception_reason=accumulator_size_exception_reason,
+        op_sel_hi_field=op_sel_hi_field,
     )
 
 
@@ -188,7 +234,9 @@ def _v_wmma_f16_16x16x16_f16_overlay(
     low_mnemonic_suffix: str = "",
     input_units: int = 4,
     accumulator_units: int = 4,
+    input_size_exception_reason: str | None = None,
     accumulator_size_exception_reason: str | None = None,
+    op_sel_hi_field: str = "OP_SEL_HI",
 ) -> AmdgpuDescriptorOverlay:
     return _v_wmma_16x16x16_overlay(
         descriptor_key=f"amdgpu.v_wmma_f16_16x16x16_f16{descriptor_key_suffix}",
@@ -198,7 +246,9 @@ def _v_wmma_f16_16x16x16_f16_overlay(
         semantic_tag="matrix.wmma.f16.16x16x16.f16",
         input_units=input_units,
         accumulator_units=accumulator_units,
+        input_size_exception_reason=input_size_exception_reason,
         accumulator_size_exception_reason=accumulator_size_exception_reason,
+        op_sel_hi_field=op_sel_hi_field,
     )
 
 
@@ -208,7 +258,9 @@ def _v_wmma_bf16_16x16x16_bf16_overlay(
     low_mnemonic_suffix: str = "",
     input_units: int = 4,
     accumulator_units: int = 4,
+    input_size_exception_reason: str | None = None,
     accumulator_size_exception_reason: str | None = None,
+    op_sel_hi_field: str = "OP_SEL_HI",
 ) -> AmdgpuDescriptorOverlay:
     return _v_wmma_16x16x16_overlay(
         descriptor_key=f"amdgpu.v_wmma_bf16_16x16x16_bf16{descriptor_key_suffix}",
@@ -218,22 +270,39 @@ def _v_wmma_bf16_16x16x16_bf16_overlay(
         semantic_tag="matrix.wmma.bf16.16x16x16.bf16",
         input_units=input_units,
         accumulator_units=accumulator_units,
+        input_size_exception_reason=input_size_exception_reason,
         accumulator_size_exception_reason=accumulator_size_exception_reason,
+        op_sel_hi_field=op_sel_hi_field,
     )
 
 
 def _v_wmma_f32_16x16x16_packed8_overlay(
-    *, lhs_type: str, rhs_type: str, input_units: int = 2
+    *,
+    lhs_type: str,
+    rhs_type: str,
+    descriptor_key_suffix: str = "",
+    low_mnemonic_suffix: str = "",
+    input_units: int = 2,
+    accumulator_units: int = 8,
+    input_size_exception_reason: str | None = None,
+    accumulator_size_exception_reason: str | None = None,
+    op_sel_hi_field: str = "OP_SEL_HI",
 ) -> AmdgpuDescriptorOverlay:
     lhs_type_upper = lhs_type.upper()
     rhs_type_upper = rhs_type.upper()
     return _v_wmma_16x16x16_overlay(
-        descriptor_key=f"amdgpu.v_wmma_f32_16x16x16_{lhs_type}_{rhs_type}",
+        descriptor_key=(
+            f"amdgpu.v_wmma_f32_16x16x16_{lhs_type}_{rhs_type}{descriptor_key_suffix}"
+        ),
         instruction_name=f"V_WMMA_F32_16X16X16_{lhs_type_upper}_{rhs_type_upper}",
         mnemonic=f"v_wmma_f32_16x16x16_{lhs_type}_{rhs_type}",
+        low_mnemonic_suffix=low_mnemonic_suffix,
         semantic_tag=f"matrix.wmma.f32.16x16x16.{lhs_type}.{rhs_type}",
         input_units=input_units,
-        accumulator_units=8,
+        accumulator_units=accumulator_units,
+        input_size_exception_reason=input_size_exception_reason,
+        accumulator_size_exception_reason=accumulator_size_exception_reason,
+        op_sel_hi_field=op_sel_hi_field,
     )
 
 
@@ -247,16 +316,49 @@ def _v_wmma_i32_16x16x16_overlay(
     semantic_tag: str,
     operand_units: int,
     accumulator_units: int = 8,
+    operand_size_exception_reason: str | None = None,
     accumulator_size_exception_reason: str | None = None,
+    mirrors_sign_select_to_high_halves: bool = False,
+    op_sel_hi_field: str = "OP_SEL_HI",
 ) -> AmdgpuDescriptorOverlay:
     low_mnemonic = f"{mnemonic}{low_mnemonic_suffix}"
-    asm_forms = None
-    if low_mnemonic_suffix:
-        asm_forms = _asm(
-            native_assembly_mnemonic=mnemonic,
-            results=("dst",),
-            operands=("a", "b", "acc"),
+    immediate_fields = (
+        ("NEG", "NEG_HI", "CLAMP")
+        if mirrors_sign_select_to_high_halves
+        else ("NEG", "CLAMP")
+    )
+    immediates = (
+        (
+            _MATRIX_SIGN_SELECT_IMMEDIATE,
+            _MATRIX_SIGN_SELECT_HIGH_IMMEDIATE,
+            _MATRIX_CLAMP_IMMEDIATE,
         )
+        if mirrors_sign_select_to_high_halves
+        else (_MATRIX_SIGN_SELECT_IMMEDIATE, _MATRIX_CLAMP_IMMEDIATE)
+    )
+    native_modifiers = (
+        _native_amdgpu_named_bit_list_immediate("neg_lo", 3),
+        *(
+            (_native_amdgpu_named_bit_list_immediate("neg_hi", 3),)
+            if mirrors_sign_select_to_high_halves
+            else ()
+        ),
+        _native_amdgpu_named_flag_immediate("clamp"),
+    )
+    asm_forms = _asm(
+        native_assembly_mnemonic=mnemonic if low_mnemonic_suffix else None,
+        results=("dst",),
+        operands=("lhs", "rhs", "acc"),
+        immediates=tuple(immediate.field_name for immediate in immediates),
+        named_immediates=True,
+        native_assembly_values=(
+            _native_result("dst"),
+            _native_operand("lhs"),
+            _native_operand("rhs"),
+            _native_operand("acc"),
+            *native_modifiers,
+        ),
+    )
     return AmdgpuDescriptorOverlay(
         descriptor_key=f"{descriptor_key}{descriptor_key_suffix}",
         instruction_name=instruction_name,
@@ -270,14 +372,25 @@ def _v_wmma_i32_16x16x16_overlay(
                 _vgpr_result(units=accumulator_units),
                 size_exception_reason=accumulator_size_exception_reason,
             ),
-            AmdgpuOperandOverlay("SRC0", _vgpr_operand("a", units=operand_units)),
-            AmdgpuOperandOverlay("SRC1", _vgpr_operand("b", units=operand_units)),
+            AmdgpuOperandOverlay(
+                "SRC0",
+                _vgpr_operand("lhs", units=operand_units),
+                size_exception_reason=operand_size_exception_reason,
+            ),
+            AmdgpuOperandOverlay(
+                "SRC1",
+                _vgpr_operand("rhs", units=operand_units),
+                size_exception_reason=operand_size_exception_reason,
+            ),
             AmdgpuOperandOverlay(
                 "SRC2",
                 _vgpr_const_operand("acc", units=accumulator_units),
                 size_exception_reason=accumulator_size_exception_reason,
             ),
         ),
+        immediate_fields=immediate_fields,
+        immediates=immediates,
+        fixed_encoding_fields=((op_sel_hi_field, 0x7),),
         constraints=_destructive_accumulator_constraints(3),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
         asm_forms=asm_forms,
@@ -290,7 +403,10 @@ def _v_wmma_i32_16x16x16_iu8_overlay(
     low_mnemonic_suffix: str = "",
     operand_units: int = 2,
     accumulator_units: int = 8,
+    operand_size_exception_reason: str | None = None,
     accumulator_size_exception_reason: str | None = None,
+    mirrors_sign_select_to_high_halves: bool = False,
+    op_sel_hi_field: str = "OP_SEL_HI",
 ) -> AmdgpuDescriptorOverlay:
     return _v_wmma_i32_16x16x16_overlay(
         descriptor_key="amdgpu.v_wmma_i32_16x16x16_iu8",
@@ -301,7 +417,10 @@ def _v_wmma_i32_16x16x16_iu8_overlay(
         semantic_tag="matrix.wmma.i32.16x16x16.iu8",
         operand_units=operand_units,
         accumulator_units=accumulator_units,
+        operand_size_exception_reason=operand_size_exception_reason,
         accumulator_size_exception_reason=accumulator_size_exception_reason,
+        mirrors_sign_select_to_high_halves=mirrors_sign_select_to_high_halves,
+        op_sel_hi_field=op_sel_hi_field,
     )
 
 
@@ -311,7 +430,10 @@ def _v_wmma_i32_16x16x16_iu4_overlay(
     low_mnemonic_suffix: str = "",
     operand_units: int = 1,
     accumulator_units: int = 8,
+    operand_size_exception_reason: str | None = None,
     accumulator_size_exception_reason: str | None = None,
+    mirrors_sign_select_to_high_halves: bool = False,
+    op_sel_hi_field: str = "OP_SEL_HI",
 ) -> AmdgpuDescriptorOverlay:
     return _v_wmma_i32_16x16x16_overlay(
         descriptor_key="amdgpu.v_wmma_i32_16x16x16_iu4",
@@ -322,17 +444,85 @@ def _v_wmma_i32_16x16x16_iu4_overlay(
         semantic_tag="matrix.wmma.i32.16x16x16.iu4",
         operand_units=operand_units,
         accumulator_units=accumulator_units,
+        operand_size_exception_reason=operand_size_exception_reason,
         accumulator_size_exception_reason=accumulator_size_exception_reason,
+        mirrors_sign_select_to_high_halves=mirrors_sign_select_to_high_halves,
+        op_sel_hi_field=op_sel_hi_field,
     )
 
 
-def _v_wmma_i32_16x16x32_iu4_overlay() -> AmdgpuDescriptorOverlay:
+def _v_wmma_i32_16x16x32_iu4_overlay(
+    *,
+    descriptor_key_suffix: str = "",
+    low_mnemonic_suffix: str = "",
+    operand_units: int = 2,
+    accumulator_units: int = 8,
+    operand_size_exception_reason: str | None = None,
+    accumulator_size_exception_reason: str | None = None,
+    op_sel_hi_field: str = "OP_SEL_HI",
+) -> AmdgpuDescriptorOverlay:
     return _v_wmma_i32_16x16x16_overlay(
         descriptor_key="amdgpu.v_wmma_i32_16x16x32_iu4",
+        descriptor_key_suffix=descriptor_key_suffix,
         instruction_name="V_WMMA_I32_16X16X32_IU4",
         mnemonic="v_wmma_i32_16x16x32_iu4",
+        low_mnemonic_suffix=low_mnemonic_suffix,
         semantic_tag="matrix.wmma.i32.16x16x32.iu4",
-        operand_units=2,
+        operand_units=operand_units,
+        accumulator_units=accumulator_units,
+        operand_size_exception_reason=operand_size_exception_reason,
+        accumulator_size_exception_reason=accumulator_size_exception_reason,
+        op_sel_hi_field=op_sel_hi_field,
+    )
+
+
+def _matrix_schedule_class(descriptor_key: str) -> str:
+    if _amdgpu_mfma_has_qualified_timing(descriptor_key):
+        return _amdgpu_mfma_schedule_class_name(descriptor_key)
+    return _SCHEDULE_MFMA
+
+
+def _cdna4_f8f6f4_matrix_format_immediate(
+    field_name: str, physical_format: str
+) -> Immediate:
+    return Immediate(
+        field_name,
+        ImmediateKind.ENUM,
+        bit_width=3,
+        enum_domain=AMDGPU_CDNA4_MATRIX_FORMAT_ENUM_DOMAIN_NAMES[physical_format],
+    )
+
+
+def _cdna4_f8f6f4_matrix_format_immediates(
+    matrix_physical_formats: tuple[str, str],
+) -> tuple[Immediate, ...]:
+    lhs_physical_format, rhs_physical_format = matrix_physical_formats
+    return (
+        _cdna4_f8f6f4_matrix_format_immediate("matrix_a_fmt", lhs_physical_format),
+        _cdna4_f8f6f4_matrix_format_immediate("matrix_b_fmt", rhs_physical_format),
+    )
+
+
+def _cdna4_f8f6f4_matrix_asm_forms(
+    mnemonic: str, *, has_scale_operands: bool
+) -> tuple[AsmForm, ...]:
+    operands = (
+        ("lhs", "rhs", "acc", "lhs_scale", "rhs_scale")
+        if has_scale_operands
+        else ("lhs", "rhs", "acc")
+    )
+    return _asm(
+        native_assembly_mnemonic=mnemonic,
+        results=("dst",),
+        operands=operands,
+        immediates=("matrix_a_fmt", "matrix_b_fmt"),
+        named_immediates=True,
+        native_assembly_values=(
+            _native_result("dst"),
+            *(_native_operand(operand) for operand in operands),
+            _native_amdgpu_required_named_i64_immediate("matrix_a_fmt", name="cbsz"),
+            _native_amdgpu_required_named_i64_immediate("matrix_b_fmt", name="blgp"),
+        ),
     )
 
 
@@ -344,25 +534,59 @@ def _v_mfma_overlay(
     lhs_units: int,
     rhs_units: int,
     encoding_name: str = "VOP3P_MFMA",
+    low_mnemonic_suffix: str = "",
+    matrix_physical_formats: tuple[str, str] | None = None,
 ) -> AmdgpuDescriptorOverlay:
-    mnemonic = instruction_name.lower()
+    native_mnemonic = instruction_name.lower()
+    mnemonic = f"{native_mnemonic}{low_mnemonic_suffix}"
+    descriptor_key = f"amdgpu.{mnemonic}"
+    matrix_format_immediates = (
+        _cdna4_f8f6f4_matrix_format_immediates(matrix_physical_formats)
+        if matrix_physical_formats is not None
+        else ()
+    )
     return AmdgpuDescriptorOverlay(
-        descriptor_key=f"amdgpu.{mnemonic}",
+        descriptor_key=descriptor_key,
         instruction_name=instruction_name,
         mnemonic=mnemonic,
         encoding_name=encoding_name,
         semantic_tag=semantic_tag,
-        schedule_class=_SCHEDULE_MFMA,
+        schedule_class=_matrix_schedule_class(descriptor_key),
         operands=(
             AmdgpuOperandOverlay("VDST", _vgpr_agpr_result(units=accumulator_units)),
-            AmdgpuOperandOverlay("SRC0", _vgpr_agpr_operand("a", units=lhs_units)),
-            AmdgpuOperandOverlay("SRC1", _vgpr_agpr_operand("b", units=rhs_units)),
+            AmdgpuOperandOverlay(
+                "SRC0",
+                _vgpr_agpr_operand("lhs", units=lhs_units),
+                size_exception_reason=(
+                    _cdna4_f8f6f4_operand_width_exception_reason(lhs_units)
+                    if matrix_physical_formats is not None
+                    else None
+                ),
+            ),
+            AmdgpuOperandOverlay(
+                "SRC1",
+                _vgpr_agpr_operand("rhs", units=rhs_units),
+                size_exception_reason=(
+                    _cdna4_f8f6f4_operand_width_exception_reason(rhs_units)
+                    if matrix_physical_formats is not None
+                    else None
+                ),
+            ),
             AmdgpuOperandOverlay(
                 "SRC2", _vgpr_agpr_const_operand("acc", units=accumulator_units)
             ),
         ),
+        immediate_fields=(
+            ("CBSZ", "BLGP") if matrix_physical_formats is not None else ()
+        ),
+        immediates=matrix_format_immediates,
         constraints=_destructive_accumulator_constraints(3),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        asm_forms=(
+            _cdna4_f8f6f4_matrix_asm_forms(native_mnemonic, has_scale_operands=False)
+            if matrix_physical_formats is not None
+            else None
+        ),
     )
 
 
@@ -373,27 +597,53 @@ def _v_mfma_scale_overlay(
     accumulator_units: int,
     lhs_units: int,
     rhs_units: int,
+    low_mnemonic_suffix: str,
+    matrix_physical_formats: tuple[str, str],
 ) -> AmdgpuDescriptorOverlay:
-    mnemonic = instruction_name.lower()
+    native_mnemonic = instruction_name.lower()
+    mnemonic = f"{native_mnemonic}{low_mnemonic_suffix}"
+    descriptor_key = f"amdgpu.{mnemonic}"
     return AmdgpuDescriptorOverlay(
-        descriptor_key=f"amdgpu.{mnemonic}",
+        descriptor_key=descriptor_key,
         instruction_name=instruction_name,
         mnemonic=mnemonic,
         encoding_name="ENC_VOP3PX2",
         semantic_tag=semantic_tag,
-        schedule_class=_SCHEDULE_MFMA,
+        schedule_class=_matrix_schedule_class(descriptor_key),
         operands=(
             AmdgpuOperandOverlay("VDST", _vgpr_agpr_result(units=accumulator_units)),
-            AmdgpuOperandOverlay("SRC0", _vgpr_agpr_operand("a", units=lhs_units)),
-            AmdgpuOperandOverlay("SRC1", _vgpr_agpr_operand("b", units=rhs_units)),
+            AmdgpuOperandOverlay(
+                "SRC0",
+                _vgpr_agpr_operand("lhs", units=lhs_units),
+                size_exception_reason=(
+                    _cdna4_f8f6f4_operand_width_exception_reason(lhs_units)
+                ),
+            ),
+            AmdgpuOperandOverlay(
+                "SRC1",
+                _vgpr_agpr_operand("rhs", units=rhs_units),
+                size_exception_reason=(
+                    _cdna4_f8f6f4_operand_width_exception_reason(rhs_units)
+                ),
+            ),
             AmdgpuOperandOverlay(
                 "SRC2", _vgpr_agpr_const_operand("acc", units=accumulator_units)
             ),
-            AmdgpuOperandOverlay("SCALE_SRC0", _sgpr_vgpr_operand("scale_a")),
-            AmdgpuOperandOverlay("SCALE_SRC1", _sgpr_vgpr_operand("scale_b")),
+            AmdgpuOperandOverlay("SCALE_SRC0", _sgpr_vgpr_operand("lhs_scale")),
+            AmdgpuOperandOverlay("SCALE_SRC1", _sgpr_vgpr_operand("rhs_scale")),
+        ),
+        immediate_fields=("CBSZ", "BLGP"),
+        immediates=_cdna4_f8f6f4_matrix_format_immediates(matrix_physical_formats),
+        fixed_encoding_fields=(
+            ("ABID", 1),
+            ("ENCODING", 0x1A7),
+            ("X2ENCODING", 0xD3AC),
         ),
         constraints=_destructive_accumulator_constraints(3),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        asm_forms=_cdna4_f8f6f4_matrix_asm_forms(
+            native_mnemonic, has_scale_operands=True
+        ),
     )
 
 
@@ -638,6 +888,47 @@ def _cdna3_mfma_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     )
 
 
+def _cdna4_f8f6f4_mfma_overlays(
+    *,
+    instruction_name: str,
+    semantic_tag: str,
+    accumulator_units: int,
+    operand_element_count: int,
+    has_scale_operands: bool,
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return tuple(
+        (
+            _v_mfma_scale_overlay(
+                instruction_name=instruction_name,
+                semantic_tag=(f"{semantic_tag}.{lhs_format.token}.{rhs_format.token}"),
+                accumulator_units=accumulator_units,
+                lhs_units=lhs_format.register_count_for(operand_element_count),
+                rhs_units=rhs_format.register_count_for(operand_element_count),
+                low_mnemonic_suffix=(f"_{lhs_format.token}_{rhs_format.token}"),
+                matrix_physical_formats=(
+                    lhs_format.token,
+                    rhs_format.token,
+                ),
+            )
+            if has_scale_operands
+            else _v_mfma_overlay(
+                instruction_name=instruction_name,
+                semantic_tag=(f"{semantic_tag}.{lhs_format.token}.{rhs_format.token}"),
+                accumulator_units=accumulator_units,
+                lhs_units=lhs_format.register_count_for(operand_element_count),
+                rhs_units=rhs_format.register_count_for(operand_element_count),
+                low_mnemonic_suffix=(f"_{lhs_format.token}_{rhs_format.token}"),
+                matrix_physical_formats=(
+                    lhs_format.token,
+                    rhs_format.token,
+                ),
+            )
+        )
+        for lhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS
+        for rhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS
+    )
+
+
 def _cdna4_mfma_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
         *(
@@ -691,33 +982,33 @@ def _cdna4_mfma_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
             lhs_units=4,
             rhs_units=4,
         ),
-        _v_mfma_overlay(
+        *_cdna4_f8f6f4_mfma_overlays(
             instruction_name="V_MFMA_F32_16X16X128_F8F6F4",
             semantic_tag="matrix.mfma.f32.16x16x128.f8f6f4",
             accumulator_units=4,
-            lhs_units=8,
-            rhs_units=8,
+            operand_element_count=32,
+            has_scale_operands=False,
         ),
-        _v_mfma_overlay(
+        *_cdna4_f8f6f4_mfma_overlays(
             instruction_name="V_MFMA_F32_32X32X64_F8F6F4",
             semantic_tag="matrix.mfma.f32.32x32x64.f8f6f4",
             accumulator_units=16,
-            lhs_units=8,
-            rhs_units=8,
+            operand_element_count=32,
+            has_scale_operands=False,
         ),
-        _v_mfma_scale_overlay(
+        *_cdna4_f8f6f4_mfma_overlays(
             instruction_name="V_MFMA_SCALE_F32_16X16X128_F8F6F4",
             semantic_tag="matrix.mfma.scale.f32.16x16x128.f8f6f4",
             accumulator_units=4,
-            lhs_units=8,
-            rhs_units=8,
+            operand_element_count=32,
+            has_scale_operands=True,
         ),
-        _v_mfma_scale_overlay(
+        *_cdna4_f8f6f4_mfma_overlays(
             instruction_name="V_MFMA_SCALE_F32_32X32X64_F8F6F4",
             semantic_tag="matrix.mfma.scale.f32.32x32x64.f8f6f4",
             accumulator_units=16,
-            lhs_units=8,
-            rhs_units=8,
+            operand_element_count=32,
+            has_scale_operands=True,
         ),
     )
 
@@ -786,7 +1077,7 @@ def _v_smfmac_f32_overlay(
         mnemonic=mnemonic,
         encoding_name="VOP3P_MFMA",
         semantic_tag=semantic_tag,
-        schedule_class=_SCHEDULE_MFMA,
+        schedule_class=_matrix_schedule_class(descriptor_key),
         operands=(
             AmdgpuOperandOverlay("VDST", _vgpr_agpr_result(units=accumulator_units)),
             AmdgpuOperandOverlay(
@@ -794,12 +1085,22 @@ def _v_smfmac_f32_overlay(
                 _vgpr_agpr_operand("acc", units=accumulator_units),
                 role_exception_reason=_SMFMAC_VDST_ACCUMULATOR_REASON,
             ),
-            AmdgpuOperandOverlay("SRC0", _vgpr_agpr_operand("a", units=lhs_units)),
-            AmdgpuOperandOverlay("SRC1", _vgpr_agpr_operand("b", units=rhs_units)),
-            AmdgpuOperandOverlay("SRC2", _vgpr_operand("index")),
+            AmdgpuOperandOverlay("SRC0", _vgpr_agpr_operand("lhs", units=lhs_units)),
+            AmdgpuOperandOverlay("SRC1", _vgpr_agpr_operand("rhs", units=rhs_units)),
+            AmdgpuOperandOverlay("SRC2", _vgpr_operand("sparse_metadata")),
         ),
         constraints=_DESTRUCTIVE_ACCUMULATOR_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        asm_forms=_asm(
+            results=("dst",),
+            operands=("acc", "lhs", "rhs", "sparse_metadata"),
+            native_assembly_values=(
+                _native_result("dst"),
+                _native_operand("lhs"),
+                _native_operand("rhs"),
+                _native_operand("sparse_metadata"),
+            ),
+        ),
     )
 
 
@@ -1013,109 +1314,248 @@ def _v_swmmac_overlay(
     accumulator_units: int,
     lhs_units: int,
     rhs_units: int,
+    descriptor_key_suffix: str = "",
+    low_mnemonic_suffix: str = "",
+    accumulator_size_exception_reason: str | None = None,
+    lhs_size_exception_reason: str | None = None,
+    rhs_size_exception_reason: str | None = None,
+    has_integer_sign_select: bool = False,
+    op_sel_hi_field: str = "OP_SEL_HI",
 ) -> AmdgpuDescriptorOverlay:
     mnemonic = instruction_name.lower()
+    low_mnemonic = f"{mnemonic}{low_mnemonic_suffix}"
+    immediate_fields = ("NEG", "CLAMP") if has_integer_sign_select else ()
+    immediates = (
+        (_MATRIX_SIGN_SELECT_IMMEDIATE, _MATRIX_CLAMP_IMMEDIATE)
+        if has_integer_sign_select
+        else ()
+    )
+    native_modifiers = (
+        (
+            _native_amdgpu_named_bit_list_immediate("neg_lo", 3),
+            _native_amdgpu_named_flag_immediate("clamp"),
+        )
+        if has_integer_sign_select
+        else ()
+    )
     return AmdgpuDescriptorOverlay(
-        descriptor_key=f"amdgpu.{mnemonic}",
+        descriptor_key=f"amdgpu.{mnemonic}{descriptor_key_suffix}",
         instruction_name=instruction_name,
-        mnemonic=mnemonic,
+        mnemonic=low_mnemonic,
         encoding_name="ENC_VOP3P",
         semantic_tag=semantic_tag,
         schedule_class=_SCHEDULE_SWMMAC,
         operands=(
-            AmdgpuOperandOverlay("VDST", _vgpr_result(units=accumulator_units)),
+            AmdgpuOperandOverlay(
+                "VDST",
+                _vgpr_result(units=accumulator_units),
+                size_exception_reason=accumulator_size_exception_reason,
+            ),
             AmdgpuOperandOverlay(
                 "VDST",
                 _vgpr_operand("acc", units=accumulator_units),
                 role_exception_reason=_SMFMAC_VDST_ACCUMULATOR_REASON,
+                size_exception_reason=accumulator_size_exception_reason,
             ),
-            AmdgpuOperandOverlay("SRC0", _vgpr_operand("a", units=lhs_units)),
-            AmdgpuOperandOverlay("SRC1", _vgpr_operand("b", units=rhs_units)),
-            AmdgpuOperandOverlay("SRC2", _vgpr_operand("index")),
+            AmdgpuOperandOverlay(
+                "SRC0",
+                _vgpr_operand("lhs", units=lhs_units),
+                size_exception_reason=lhs_size_exception_reason,
+            ),
+            AmdgpuOperandOverlay(
+                "SRC1",
+                _vgpr_operand("rhs", units=rhs_units),
+                size_exception_reason=rhs_size_exception_reason,
+            ),
+            AmdgpuOperandOverlay("SRC2", _vgpr_operand("sparse_metadata")),
         ),
+        immediate_fields=immediate_fields,
+        immediates=immediates,
+        fixed_encoding_fields=((op_sel_hi_field, 0x7),),
         constraints=_DESTRUCTIVE_ACCUMULATOR_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        asm_forms=_asm(
+            native_assembly_mnemonic=mnemonic if low_mnemonic_suffix else None,
+            results=("dst",),
+            operands=("acc", "lhs", "rhs", "sparse_metadata"),
+            immediates=tuple(immediate.field_name for immediate in immediates),
+            named_immediates=True,
+            native_assembly_values=(
+                _native_result("dst"),
+                _native_operand("lhs"),
+                _native_operand("rhs"),
+                _native_operand("sparse_metadata"),
+                *native_modifiers,
+            ),
+        ),
     )
 
 
-def _rdna4_swmmac_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+def _v_swmmac_16x16_overlays(
+    *, wave_size: int = 32, op_sel_hi_field: str = "OP_SEL_HI"
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
+    if wave_size not in (32, 64):
+        raise ValueError(f"unsupported SWMMAC wave size {wave_size}")
+    unit_divisor = wave_size // 32
+    descriptor_key_suffix = ".w64" if wave_size == 64 else ""
+    low_mnemonic_suffix = "_w64" if wave_size == 64 else ""
+
+    def units(wave32_units: int) -> int:
+        return max(1, wave32_units // unit_divisor)
+
+    def size_exception_reason(wave32_units: int) -> str | None:
+        return (
+            _GFX12_WAVE64_MATRIX_OPERAND_SIZE_REASON
+            if units(wave32_units) != wave32_units
+            else None
+        )
+
     return (
         _v_swmmac_overlay(
             instruction_name="V_SWMMAC_F32_16X16X32_F16",
             semantic_tag="matrix.swmmac.f32.16x16x32.f16",
-            accumulator_units=8,
-            lhs_units=4,
-            rhs_units=8,
+            accumulator_units=units(8),
+            lhs_units=units(4),
+            rhs_units=units(8),
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            accumulator_size_exception_reason=size_exception_reason(8),
+            lhs_size_exception_reason=size_exception_reason(4),
+            rhs_size_exception_reason=size_exception_reason(8),
+            op_sel_hi_field=op_sel_hi_field,
         ),
         _v_swmmac_overlay(
             instruction_name="V_SWMMAC_F32_16X16X32_BF16",
             semantic_tag="matrix.swmmac.f32.16x16x32.bf16",
-            accumulator_units=8,
-            lhs_units=4,
-            rhs_units=8,
+            accumulator_units=units(8),
+            lhs_units=units(4),
+            rhs_units=units(8),
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            accumulator_size_exception_reason=size_exception_reason(8),
+            lhs_size_exception_reason=size_exception_reason(4),
+            rhs_size_exception_reason=size_exception_reason(8),
+            op_sel_hi_field=op_sel_hi_field,
         ),
         _v_swmmac_overlay(
             instruction_name="V_SWMMAC_F16_16X16X32_F16",
             semantic_tag="matrix.swmmac.f16.16x16x32.f16",
-            accumulator_units=4,
-            lhs_units=4,
-            rhs_units=8,
+            accumulator_units=units(4),
+            lhs_units=units(4),
+            rhs_units=units(8),
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            accumulator_size_exception_reason=size_exception_reason(4),
+            lhs_size_exception_reason=size_exception_reason(4),
+            rhs_size_exception_reason=size_exception_reason(8),
+            op_sel_hi_field=op_sel_hi_field,
         ),
         _v_swmmac_overlay(
             instruction_name="V_SWMMAC_BF16_16X16X32_BF16",
             semantic_tag="matrix.swmmac.bf16.16x16x32.bf16",
-            accumulator_units=4,
-            lhs_units=4,
-            rhs_units=8,
+            accumulator_units=units(4),
+            lhs_units=units(4),
+            rhs_units=units(8),
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            accumulator_size_exception_reason=size_exception_reason(4),
+            lhs_size_exception_reason=size_exception_reason(4),
+            rhs_size_exception_reason=size_exception_reason(8),
+            op_sel_hi_field=op_sel_hi_field,
         ),
         _v_swmmac_overlay(
             instruction_name="V_SWMMAC_I32_16X16X32_IU8",
             semantic_tag="matrix.swmmac.i32.16x16x32.iu8",
-            accumulator_units=8,
-            lhs_units=2,
-            rhs_units=4,
+            accumulator_units=units(8),
+            lhs_units=units(2),
+            rhs_units=units(4),
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            accumulator_size_exception_reason=size_exception_reason(8),
+            lhs_size_exception_reason=size_exception_reason(2),
+            rhs_size_exception_reason=size_exception_reason(4),
+            has_integer_sign_select=True,
+            op_sel_hi_field=op_sel_hi_field,
         ),
         _v_swmmac_overlay(
             instruction_name="V_SWMMAC_I32_16X16X32_IU4",
             semantic_tag="matrix.swmmac.i32.16x16x32.iu4",
-            accumulator_units=8,
-            lhs_units=1,
-            rhs_units=2,
+            accumulator_units=units(8),
+            lhs_units=units(1),
+            rhs_units=units(2),
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            accumulator_size_exception_reason=size_exception_reason(8),
+            lhs_size_exception_reason=size_exception_reason(1),
+            rhs_size_exception_reason=size_exception_reason(2),
+            has_integer_sign_select=True,
+            op_sel_hi_field=op_sel_hi_field,
         ),
         _v_swmmac_overlay(
             instruction_name="V_SWMMAC_I32_16X16X64_IU4",
             semantic_tag="matrix.swmmac.i32.16x16x64.iu4",
-            accumulator_units=8,
-            lhs_units=2,
-            rhs_units=4,
+            accumulator_units=units(8),
+            lhs_units=units(2),
+            rhs_units=units(4),
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            accumulator_size_exception_reason=size_exception_reason(8),
+            lhs_size_exception_reason=size_exception_reason(2),
+            rhs_size_exception_reason=size_exception_reason(4),
+            has_integer_sign_select=True,
+            op_sel_hi_field=op_sel_hi_field,
         ),
         _v_swmmac_overlay(
             instruction_name="V_SWMMAC_F32_16X16X32_FP8_FP8",
             semantic_tag="matrix.swmmac.f32.16x16x32.fp8.fp8",
-            accumulator_units=8,
-            lhs_units=2,
-            rhs_units=4,
+            accumulator_units=units(8),
+            lhs_units=units(2),
+            rhs_units=units(4),
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            accumulator_size_exception_reason=size_exception_reason(8),
+            lhs_size_exception_reason=size_exception_reason(2),
+            rhs_size_exception_reason=size_exception_reason(4),
+            op_sel_hi_field=op_sel_hi_field,
         ),
         _v_swmmac_overlay(
             instruction_name="V_SWMMAC_F32_16X16X32_FP8_BF8",
             semantic_tag="matrix.swmmac.f32.16x16x32.fp8.bf8",
-            accumulator_units=8,
-            lhs_units=2,
-            rhs_units=4,
+            accumulator_units=units(8),
+            lhs_units=units(2),
+            rhs_units=units(4),
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            accumulator_size_exception_reason=size_exception_reason(8),
+            lhs_size_exception_reason=size_exception_reason(2),
+            rhs_size_exception_reason=size_exception_reason(4),
+            op_sel_hi_field=op_sel_hi_field,
         ),
         _v_swmmac_overlay(
             instruction_name="V_SWMMAC_F32_16X16X32_BF8_FP8",
             semantic_tag="matrix.swmmac.f32.16x16x32.bf8.fp8",
-            accumulator_units=8,
-            lhs_units=2,
-            rhs_units=4,
+            accumulator_units=units(8),
+            lhs_units=units(2),
+            rhs_units=units(4),
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            accumulator_size_exception_reason=size_exception_reason(8),
+            lhs_size_exception_reason=size_exception_reason(2),
+            rhs_size_exception_reason=size_exception_reason(4),
+            op_sel_hi_field=op_sel_hi_field,
         ),
         _v_swmmac_overlay(
             instruction_name="V_SWMMAC_F32_16X16X32_BF8_BF8",
             semantic_tag="matrix.swmmac.f32.16x16x32.bf8.bf8",
-            accumulator_units=8,
-            lhs_units=2,
-            rhs_units=4,
+            accumulator_units=units(8),
+            lhs_units=units(2),
+            rhs_units=units(4),
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            accumulator_size_exception_reason=size_exception_reason(8),
+            lhs_size_exception_reason=size_exception_reason(2),
+            rhs_size_exception_reason=size_exception_reason(4),
+            op_sel_hi_field=op_sel_hi_field,
         ),
     )
 
@@ -1163,6 +1603,7 @@ def _v_dot2_f32_packed_float_overlay(
         constraints=(
             Constraint(ConstraintKind.TIED, 0, 3),
             Constraint(ConstraintKind.DESTRUCTIVE, 0, 3),
+            Constraint(ConstraintKind.COMMUTABLE, 1, 2),
         ),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
@@ -1276,7 +1717,10 @@ def _v_dot4_u32_u8_overlay(
 
 
 def _v_dot4_f32_packed8_overlay(
-    *, lhs_type: str, rhs_type: str
+    *,
+    lhs_type: str,
+    rhs_type: str,
+    op_sel_hi_field: str = "OP_SEL_HI",
 ) -> AmdgpuDescriptorOverlay:
     lhs_type_upper = lhs_type.upper()
     rhs_type_upper = rhs_type.upper()
@@ -1292,6 +1736,9 @@ def _v_dot4_f32_packed8_overlay(
             AmdgpuOperandOverlay("SRC0", _vgpr_operand("lhs")),
             AmdgpuOperandOverlay("SRC1", _vgpr_operand("rhs")),
             AmdgpuOperandOverlay("SRC2", _vgpr_const_operand("acc")),
+        ),
+        fixed_encoding_fields=_vop3p_packed_dot_fixed_fields(
+            op_sel_hi_field=op_sel_hi_field
         ),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
@@ -1381,12 +1828,13 @@ def _v_dot8_u32_u4_overlay(
 
 
 __all__ = (
+    "_GFX12_WAVE64_MATRIX_OPERAND_SIZE_REASON",
     "_WMMA_GFX11_WAVE64_ACCUMULATOR_SIZE_REASON",
     "_cdna3_mfma_overlays",
     "_cdna3_smfmac_overlays",
     "_cdna4_mfma_overlays",
     "_cdna4_smfmac_overlays",
-    "_rdna4_swmmac_overlays",
+    "_v_swmmac_16x16_overlays",
     "_v_dot2_f32_bf16_overlay",
     "_v_dot2_f32_f16_overlay",
     "_v_dot2_f32_packed_float_overlay",

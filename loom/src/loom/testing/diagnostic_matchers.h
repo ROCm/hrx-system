@@ -38,8 +38,6 @@ struct CapturedDiagnosticEmission {
   std::vector<uint64_t> u64_params;
   // Field references copied for all parameters in full parameter order.
   std::vector<loom_diagnostic_field_ref_t> field_refs;
-  // Number of related ops carried by the emission.
-  iree_host_size_t related_count = 0;
   // Deep-copied parameters in full parameter order.
   std::vector<loom_diagnostic_param_t> params;
   // Storage backing deep-copied string-list parameters in |params|.
@@ -74,7 +72,6 @@ struct DiagnosticEmissionCapture {
     CapturedDiagnosticEmission entry;
     entry.error = emission->error;
     entry.op = emission->op;
-    entry.related_count = emission->related_op_count;
     entry.params.reserve(emission->param_count);
     entry.string_params.reserve(emission->param_count);
     entry.string_list_params.reserve(emission->param_count);

@@ -4,12 +4,44 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+# Bazel repository and configuration tooling has no CMake target surface.
+# bazel-to-cmake: skip
+
 load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+load("//build_tools/bazel:cc.bzl", "iree_cc_library")
+load("//build_tools/bazel:cc_link.bzl", "cc_link")
+load("//build_tools/bazel:python.bzl", "iree_py_test")
 
 package(default_visibility = ["//visibility:public"])
 
+iree_cc_library(
+    name = "pthreads",
+    linkopts = cc_link.pthreads_linkopts(),
+)
+
+iree_cc_library(
+    name = "dl",
+    linkopts = cc_link.dl_linkopts(),
+)
+
+iree_cc_library(
+    name = "rt",
+    linkopts = cc_link.rt_linkopts(),
+)
+
+platform(
+    name = "x64_windows_clang_cl",
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+        "@bazel_tools//tools/cpp:clang-cl",
+    ],
+)
+
 exports_files([
     "deps.MODULE.bazel",
+    "elf_dynamic_library_closure.bzl",
+    "msvc_masm_wrapper.bat",
 ])
 
 py_test(
@@ -30,6 +62,22 @@ py_binary(
 py_library(
     name = "compile_commands_merge_lib",
     srcs = ["compile_commands_merge.py"],
+)
+
+py_library(
+    name = "python_test_environment",
+    srcs = ["python_test_environment/sitecustomize.py"],
+    imports = ["python_test_environment"],
+)
+
+iree_py_test(
+    name = "python_test_environment_test",
+    srcs = [
+        "python_test_environment_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["build_tools.bazel.python_test_environment_test"],
+    main = "pytest_style_runner.py",
 )
 
 py_test(

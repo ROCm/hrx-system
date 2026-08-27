@@ -1,0 +1,66 @@
+// CDNA4 encodes the selected matrix formats in fields historically used for
+// MFMA swizzle controls. The selector also determines each source register
+// range, so assembly text and binary encoding must agree on both properties.
+// RUN: emit amdgpu-assembly @scaled_fp4 waits=none strategy=source fixed=%lhs:physical_register:4:4 fixed=%rhs:physical_register:12:4 fixed=%acc:physical_register:20:4 fixed=%result:physical_register:20:4 fixed=%scale_a:physical_register:24:1 fixed=%scale_b:physical_register:25:1
+
+amdgpu.target<gfx950> @target
+low.func.def target<amdgpu.cdna4.core>(@target) @scaled_fp4(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr x4>, %scale_a: reg<amdgpu.vgpr>, %scale_b: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm {
+  %result = v_mfma_scale_f32_16x16x128_f8f6f4_f4_f4 %lhs, %rhs, %acc, %scale_a, %scale_b {matrix_a_fmt = 4, matrix_b_fmt = 4}
+  return %result
+}
+
+// ----
+v_mfma_scale_f32_16x16x128_f8f6f4 v[20:23], v[4:7], v[12:15], v[20:23], v24, v25 cbsz:4 blgp:4
+  s_endpgm
+
+// ====
+
+// LLVM encodes the same fixed-register instruction as
+// [00 00 ac d3 18 33 02 00 14 0c ad d3 04 19 52 84].
+// RUN: emit amdgpu-native-words @scaled_fp4_words waits=none strategy=source fixed=%lhs:physical_register:4:4 fixed=%rhs:physical_register:12:4 fixed=%acc:physical_register:20:4 fixed=%result:physical_register:20:4 fixed=%scale_a:physical_register:24:1 fixed=%scale_b:physical_register:25:1
+
+amdgpu.target<gfx950> @target
+low.func.def target<amdgpu.cdna4.core>(@target) @scaled_fp4_words(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr x4>, %scale_a: reg<amdgpu.vgpr>, %scale_b: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm {
+  %result = v_mfma_scale_f32_16x16x128_f8f6f4_f4_f4 %lhs, %rhs, %acc, %scale_a, %scale_b {matrix_a_fmt = 4, matrix_b_fmt = 4}
+  return %result
+}
+
+// ----
+0xD3AC0000
+0x00023318
+0xD3AD0C14
+0x84521904
+0xBF810000
+
+// ====
+
+// A mixed unscaled instruction exercises the six-register FP6 source, the
+// eight-register BF8 source, and distinct selector values.
+// RUN: emit amdgpu-assembly @unscaled_fp6_bf8 waits=none strategy=source fixed=%lhs:physical_register:4:6 fixed=%rhs:physical_register:16:8 fixed=%acc:physical_register:24:4 fixed=%result:physical_register:24:4
+
+amdgpu.target<gfx950> @target
+low.func.def target<amdgpu.cdna4.core>(@target) @unscaled_fp6_bf8(%lhs: reg<amdgpu.vgpr x6>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
+  %result = v_mfma_f32_16x16x128_f8f6f4_f6_f8 %lhs, %rhs, %acc {matrix_a_fmt = 2, matrix_b_fmt = 1}
+  return %result
+}
+
+// ----
+v_mfma_f32_16x16x128_f8f6f4 v[24:27], v[4:9], v[16:23], v[24:27] cbsz:2 blgp:1
+  s_endpgm
+
+// ====
+
+// LLVM encodes the same fixed-register instruction as
+// [18 02 ad d3 04 21 62 24].
+// RUN: emit amdgpu-native-words @unscaled_fp6_bf8_words waits=none strategy=source fixed=%lhs:physical_register:4:6 fixed=%rhs:physical_register:16:8 fixed=%acc:physical_register:24:4 fixed=%result:physical_register:24:4
+
+amdgpu.target<gfx950> @target
+low.func.def target<amdgpu.cdna4.core>(@target) @unscaled_fp6_bf8_words(%lhs: reg<amdgpu.vgpr x6>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
+  %result = v_mfma_f32_16x16x128_f8f6f4_f6_f8 %lhs, %rhs, %acc {matrix_a_fmt = 2, matrix_b_fmt = 1}
+  return %result
+}
+
+// ----
+0xD3AD0218
+0x24622104
+0xBF810000

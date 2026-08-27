@@ -1,0 +1,234 @@
+// RUN: emit amdgpu-assembly @concat_reservation_preserves_residency strategy=source fixed=%pressure:physical_register:0:47 fixed=%address:physical_register:47:1 fixed=%output:physical_register:0:2
+
+amdgpu.target<gfx1151> @target {subgroup_size = 64}
+
+// The live inputs occupy v0:v47. Reserving v48:v55 for the concat has the
+// same gfx1151 residency as placing its first source at v48:v51, so the
+// interleaved blocker moves above the reservation and both sources remain
+// directly assembled without repair moves.
+low.func.def target<amdgpu.rdna3_5.core>(@target) @concat_reservation_preserves_residency(
+    %pressure: reg<amdgpu.vgpr x47>,
+    %address: reg<amdgpu.vgpr>,
+    %output: reg<amdgpu.sgpr x2>) asm {
+  %first = ds_read_b128 %address
+  %blocker = ds_read_b128 %address {offset = 16}
+  %second = ds_read_b128 %address {offset = 32}
+  %packed = concat(%first, %second) :
+      (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) ->
+      reg<amdgpu.vgpr x8>
+  %packed0 = slice %packed[0] :
+      reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %blocker0 = slice %blocker[0] :
+      reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %address, %packed0, %output
+  global_store_b32_saddr %address, %blocker0, %output {offset = 4}
+  %pressure0 = slice %pressure[0] :
+      reg<amdgpu.vgpr x47> -> reg<amdgpu.vgpr x4>
+  %pressure1 = slice %pressure[4] :
+      reg<amdgpu.vgpr x47> -> reg<amdgpu.vgpr x4>
+  %pressure2 = slice %pressure[8] :
+      reg<amdgpu.vgpr x47> -> reg<amdgpu.vgpr x4>
+  %pressure3 = slice %pressure[12] :
+      reg<amdgpu.vgpr x47> -> reg<amdgpu.vgpr x4>
+  %pressure4 = slice %pressure[16] :
+      reg<amdgpu.vgpr x47> -> reg<amdgpu.vgpr x4>
+  %pressure5 = slice %pressure[20] :
+      reg<amdgpu.vgpr x47> -> reg<amdgpu.vgpr x4>
+  %pressure6 = slice %pressure[24] :
+      reg<amdgpu.vgpr x47> -> reg<amdgpu.vgpr x4>
+  %pressure7 = slice %pressure[28] :
+      reg<amdgpu.vgpr x47> -> reg<amdgpu.vgpr x4>
+  %pressure8 = slice %pressure[32] :
+      reg<amdgpu.vgpr x47> -> reg<amdgpu.vgpr x4>
+  %pressure9 = slice %pressure[36] :
+      reg<amdgpu.vgpr x47> -> reg<amdgpu.vgpr x4>
+  %pressure10 = slice %pressure[40] :
+      reg<amdgpu.vgpr x47> -> reg<amdgpu.vgpr x4>
+  %pressure11 = slice %pressure[44] :
+      reg<amdgpu.vgpr x47> -> reg<amdgpu.vgpr>
+  %pressure12 = slice %pressure[45] :
+      reg<amdgpu.vgpr x47> -> reg<amdgpu.vgpr>
+  %pressure13 = slice %pressure[46] :
+      reg<amdgpu.vgpr x47> -> reg<amdgpu.vgpr>
+  global_store_b128_saddr %address, %pressure0, %output {offset = 16}
+  global_store_b128_saddr %address, %pressure1, %output {offset = 32}
+  global_store_b128_saddr %address, %pressure2, %output {offset = 48}
+  global_store_b128_saddr %address, %pressure3, %output {offset = 64}
+  global_store_b128_saddr %address, %pressure4, %output {offset = 80}
+  global_store_b128_saddr %address, %pressure5, %output {offset = 96}
+  global_store_b128_saddr %address, %pressure6, %output {offset = 112}
+  global_store_b128_saddr %address, %pressure7, %output {offset = 128}
+  global_store_b128_saddr %address, %pressure8, %output {offset = 144}
+  global_store_b128_saddr %address, %pressure9, %output {offset = 160}
+  global_store_b128_saddr %address, %pressure10, %output {offset = 176}
+  global_store_b32_saddr %address, %pressure11, %output {offset = 192}
+  global_store_b32_saddr %address, %pressure12, %output {offset = 196}
+  global_store_b32_saddr %address, %pressure13, %output {offset = 200}
+  return
+}
+
+// ----
+  ds_read_b128 v[48:51], v47 offset:0
+  ds_read_b128 v[56:59], v47 offset:16
+  ds_read_b128 v[52:55], v47 offset:32
+  s_waitcnt vmcnt(63) lgkmcnt(2)
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  global_store_b32 v47, v48, s[0:1] offset:0
+  global_store_b32 v47, v56, s[0:1] offset:4
+  global_store_b128 v47, v[0:3], s[0:1] offset:16
+  global_store_b128 v47, v[4:7], s[0:1] offset:32
+  global_store_b128 v47, v[8:11], s[0:1] offset:48
+  global_store_b128 v47, v[12:15], s[0:1] offset:64
+  global_store_b128 v47, v[16:19], s[0:1] offset:80
+  global_store_b128 v47, v[20:23], s[0:1] offset:96
+  global_store_b128 v47, v[24:27], s[0:1] offset:112
+  global_store_b128 v47, v[28:31], s[0:1] offset:128
+  global_store_b128 v47, v[32:35], s[0:1] offset:144
+  global_store_b128 v47, v[36:39], s[0:1] offset:160
+  global_store_b128 v47, v[40:43], s[0:1] offset:176
+  global_store_b32 v47, v44, s[0:1] offset:192
+  global_store_b32 v47, v45, s[0:1] offset:196
+  global_store_b32 v47, v46, s[0:1] offset:200
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @d16_concat_reserves_past_addresses waits=none
+
+amdgpu.target<gfx1151> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @d16_concat_reserves_past_addresses(
+    %base: reg<amdgpu.vgpr>, %stride: reg<amdgpu.vgpr>)
+    asm {
+  %address0 = v_add_u32 %base, %stride
+  %low0 = ds_load_u16_d16 %address0 {offset = 0}
+  %full0 = ds_load_u16_d16_hi %low0, %address0 {offset = 2}
+  %address1 = v_add_u32 %address0, %stride
+  %low1 = ds_load_u16_d16 %address1 {offset = 0}
+  %full1 = ds_load_u16_d16_hi %low1, %address1 {offset = 2}
+  %address2 = v_add_u32 %address1, %stride
+  %low2 = ds_load_u16_d16 %address2 {offset = 0}
+  %full2 = ds_load_u16_d16_hi %low2, %address2 {offset = 2}
+  %address3 = v_add_u32 %address2, %stride
+  %low3 = ds_load_u16_d16 %address3 {offset = 0}
+  %full3 = ds_load_u16_d16_hi %low3, %address3 {offset = 2}
+  %packed = concat(%full0, %full1, %full2, %full3) :
+      (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>,
+       reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %packed0 = slice %packed[0] :
+      reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %packed1 = slice %packed[1] :
+      reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %packed2 = slice %packed[2] :
+      reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %packed3 = slice %packed[3] :
+      reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  ds_write_b32 %base, %packed0 {offset = 64}
+  ds_write_b32 %base, %packed1 {offset = 68}
+  ds_write_b32 %base, %packed2 {offset = 72}
+  ds_write_b32 %base, %packed3 {offset = 76}
+  return
+}
+
+// ----
+  v_add_u32 v2, v1, v0
+  ds_load_u16_d16 v4, v2 offset:0
+  v_add_u32 v3, v2, v0
+  ds_load_u16_d16 v5, v3 offset:0
+  v_add_u32 v8, v3, v0
+  ds_load_u16_d16 v6, v8 offset:0
+  v_add_u32 v0, v8, v0
+  ds_load_u16_d16 v7, v0 offset:0
+  ds_load_u16_d16_hi v4, v2 offset:2
+  ds_load_u16_d16_hi v5, v3 offset:2
+  ds_load_u16_d16_hi v6, v8 offset:2
+  ds_load_u16_d16_hi v7, v0 offset:2
+  ds_write_b32 v1, v4 offset:64
+  ds_write_b32 v1, v5 offset:68
+  ds_write_b32 v1, v6 offset:72
+  ds_write_b32 v1, v7 offset:76
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @d16_tied_sources_assemble_aligned_concat waits=none
+
+amdgpu.target<gfx1151> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @d16_tied_sources_assemble_aligned_concat(
+    %address: reg<amdgpu.vgpr>) asm {
+  %low0 = ds_load_u16_d16 %address {offset = 0}
+  %full0 = ds_load_u16_d16_hi %low0, %address {offset = 2}
+  %low1 = ds_load_u16_d16 %address {offset = 4}
+  %full1 = ds_load_u16_d16_hi %low1, %address {offset = 6}
+  %low2 = ds_load_u16_d16 %address {offset = 8}
+  %full2 = ds_load_u16_d16_hi %low2, %address {offset = 10}
+  %low3 = ds_load_u16_d16 %address {offset = 12}
+  %full3 = ds_load_u16_d16_hi %low3, %address {offset = 14}
+  %low4 = ds_load_u16_d16 %address {offset = 16}
+  %full4 = ds_load_u16_d16_hi %low4, %address {offset = 18}
+  %low5 = ds_load_u16_d16 %address {offset = 20}
+  %full5 = ds_load_u16_d16_hi %low5, %address {offset = 22}
+  %low6 = ds_load_u16_d16 %address {offset = 24}
+  %full6 = ds_load_u16_d16_hi %low6, %address {offset = 26}
+  %low7 = ds_load_u16_d16 %address {offset = 28}
+  %full7 = ds_load_u16_d16_hi %low7, %address {offset = 30}
+  %packed = concat(%full0, %full1, %full2, %full3,
+      %full4, %full5, %full6, %full7) :
+      (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>,
+       reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>,
+       reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  %packed0 = slice %packed[0] :
+      reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %packed1 = slice %packed[1] :
+      reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %packed2 = slice %packed[2] :
+      reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %packed3 = slice %packed[3] :
+      reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %packed4 = slice %packed[4] :
+      reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %packed5 = slice %packed[5] :
+      reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %packed6 = slice %packed[6] :
+      reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %packed7 = slice %packed[7] :
+      reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  ds_write_b32 %address, %packed0 {offset = 64}
+  ds_write_b32 %address, %packed1 {offset = 68}
+  ds_write_b32 %address, %packed2 {offset = 72}
+  ds_write_b32 %address, %packed3 {offset = 76}
+  ds_write_b32 %address, %packed4 {offset = 80}
+  ds_write_b32 %address, %packed5 {offset = 84}
+  ds_write_b32 %address, %packed6 {offset = 88}
+  ds_write_b32 %address, %packed7 {offset = 92}
+  return
+}
+
+// ----
+  ds_load_u16_d16 v8, v0 offset:0
+  ds_load_u16_d16 v9, v0 offset:4
+  ds_load_u16_d16 v10, v0 offset:8
+  ds_load_u16_d16 v11, v0 offset:12
+  ds_load_u16_d16 v12, v0 offset:16
+  ds_load_u16_d16 v13, v0 offset:20
+  ds_load_u16_d16 v14, v0 offset:24
+  ds_load_u16_d16 v15, v0 offset:28
+  ds_load_u16_d16_hi v8, v0 offset:2
+  ds_load_u16_d16_hi v9, v0 offset:6
+  ds_load_u16_d16_hi v10, v0 offset:10
+  ds_load_u16_d16_hi v11, v0 offset:14
+  ds_load_u16_d16_hi v12, v0 offset:18
+  ds_load_u16_d16_hi v13, v0 offset:22
+  ds_load_u16_d16_hi v14, v0 offset:26
+  ds_load_u16_d16_hi v15, v0 offset:30
+  ds_write_b32 v0, v8 offset:64
+  ds_write_b32 v0, v9 offset:68
+  ds_write_b32 v0, v10 offset:72
+  ds_write_b32 v0, v11 offset:76
+  ds_write_b32 v0, v12 offset:80
+  ds_write_b32 v0, v13 offset:84
+  ds_write_b32 v0, v14 offset:88
+  ds_write_b32 v0, v15 offset:92
+  s_endpgm

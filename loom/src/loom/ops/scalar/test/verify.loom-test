@@ -46,6 +46,57 @@ func.def @boolean_constant_value_range() -> (i1) {
 
 // ====
 
+// Integer constant literals must fit the signed domain of their result type.
+func.def @i8_constant_value_range() {
+  // ERROR@+1: STRUCTURE/014 "value" "-129" "element type domain"
+  %lo = scalar.constant -129 : i8
+  // ERROR@+1: STRUCTURE/014 "value" "128" "element type domain"
+  %hi = scalar.constant 128 : i8
+  func.return
+}
+
+// ====
+
+func.def @i16_constant_value_range() {
+  // ERROR@+1: STRUCTURE/014 "value" "-32769" "element type domain"
+  %lo = scalar.constant -32769 : i16
+  // ERROR@+1: STRUCTURE/014 "value" "32768" "element type domain"
+  %hi = scalar.constant 32768 : i16
+  func.return
+}
+
+// ====
+
+func.def @i32_constant_value_range() {
+  // ERROR@+1: STRUCTURE/014 "value" "-2147483649" "element type domain"
+  %lo = scalar.constant -2147483649 : i32
+  // ERROR@+1: STRUCTURE/014 "value" "2147483648" "element type domain"
+  %hi = scalar.constant 2147483648 : i32
+  func.return
+}
+
+// ====
+
+// Every signed boundary and both accepted i1 spellings compose in ordinary
+// verified source IR.
+func.def @valid_integer_constant_boundaries() {
+  %false_bool = scalar.constant false : i1
+  %true_bool = scalar.constant true : i1
+  %false_i64 = scalar.constant 0 : i1
+  %true_i64 = scalar.constant 1 : i1
+  %i8_min = scalar.constant -128 : i8
+  %i8_max = scalar.constant 127 : i8
+  %i16_min = scalar.constant -32768 : i16
+  %i16_max = scalar.constant 32767 : i16
+  %i32_min = scalar.constant -2147483648 : i32
+  %i32_max = scalar.constant 2147483647 : i32
+  %i64_min = scalar.constant -9223372036854775808 : i64
+  %i64_max = scalar.constant 9223372036854775807 : i64
+  func.return
+}
+
+// ====
+
 // Logical coordinate constants must be authored with index.constant so that
 // address-domain values are structurally unambiguous.
 func.def @index_constant_requires_index_dialect() -> (index) {
@@ -65,12 +116,19 @@ func.def @offset_constant_requires_index_dialect() -> (offset) {
 
 // ====
 
-// scalar.assume constrains integer payload values; address-domain facts use
+// scalar.assume constrains scalar payload values; address-domain facts use
 // index.assume.
 func.def @assume_rejects_index_payload(%x: index) -> (i64) {
-  // ERROR@+1: TYPE/003 "values[0]" "index" "integer"
+  // ERROR@+1: TYPE/004 "values[0]" "index" "integer or floating-point scalar; use index.assume"
   %r = scalar.assume %x [] : i64
   func.return %r : i64
+}
+
+// ====
+
+func.def @assume_accepts_float_payload(%x: f32) -> (f32) {
+  %r = scalar.assume %x [finite(%x)] : f32
+  func.return %r : f32
 }
 
 // ====
@@ -87,6 +145,113 @@ func.def @assume_rejects_count_mismatch(%x: i64, %y: i64) -> (i64) {
   // ERROR@+1: STRUCTURE/013 "values" "2" "results" "1"
   %r = scalar.assume %x, %y [] : i64
   func.return %r : i64
+}
+
+// ====
+
+// Scalar extensions and truncations encode a strict width direction in the
+// operation name.
+func.def @extf_wrong_width(%x: f32) {
+  // ERROR@+1: TYPE/004 "result" "element bit width greater than input"
+  %r = scalar.extf %x : f32 to f16
+  func.return
+}
+
+// ====
+
+// Equal-width float formats require a format-conversion operation rather than
+// pretending that either format extends the other.
+func.def @extf_equal_width(%x: f16) {
+  // ERROR@+1: TYPE/004 "result" "element bit width greater than input"
+  %r = scalar.extf %x : f16 to bf16
+  func.return
+}
+
+// ====
+
+func.def @fptrunc_wrong_width(%x: f16) {
+  // ERROR@+1: TYPE/004 "result" "element bit width less than input"
+  %r = scalar.fptrunc %x : f16 to f32
+  func.return
+}
+
+// ====
+
+func.def @fptrunc_equal_width(%x: bf16) {
+  // ERROR@+1: TYPE/004 "result" "element bit width less than input"
+  %r = scalar.fptrunc %x : bf16 to f16
+  func.return
+}
+
+// ====
+
+func.def @extsi_wrong_width(%x: i32) {
+  // ERROR@+1: TYPE/004 "result" "element bit width greater than input"
+  %r = scalar.extsi %x : i32 to i8
+  func.return
+}
+
+// ====
+
+func.def @extsi_equal_width(%x: i32) {
+  // ERROR@+1: TYPE/004 "result" "element bit width greater than input"
+  %r = scalar.extsi %x : i32 to i32
+  func.return
+}
+
+// ====
+
+func.def @extui_wrong_width(%x: i64) {
+  // ERROR@+1: TYPE/004 "result" "element bit width greater than input"
+  %r = scalar.extui %x : i64 to i16
+  func.return
+}
+
+// ====
+
+func.def @extui_equal_width(%x: i16) {
+  // ERROR@+1: TYPE/004 "result" "element bit width greater than input"
+  %r = scalar.extui %x : i16 to i16
+  func.return
+}
+
+// ====
+
+func.def @trunci_wrong_width(%x: i8) {
+  // ERROR@+1: TYPE/004 "result" "element bit width less than input"
+  %r = scalar.trunci %x : i8 to i32
+  func.return
+}
+
+// ====
+
+func.def @trunci_equal_width(%x: i64) {
+  // ERROR@+1: TYPE/004 "result" "element bit width less than input"
+  %r = scalar.trunci %x : i64 to i64
+  func.return
+}
+
+// ====
+
+// Scalar bitcasts preserve the complete payload bit count.
+func.def @bitcast_width_mismatch(%x: f32) {
+  // ERROR@+1: TYPE/004 "provably same total bit count as input"
+  %r = scalar.bitcast %x : f32 to i64
+  func.return
+}
+
+// ====
+
+// Every legal direction and representation constraint composes in one normal
+// verified program.
+func.def @valid_scalar_cast_widths(%f16_value: f16, %i8_value: i8) -> (f16, i8, i32) {
+  %f32_value = scalar.extf %f16_value : f16 to f32
+  %f16_result = scalar.fptrunc %f32_value : f32 to f16
+  %signed = scalar.extsi %i8_value : i8 to i32
+  %unsigned = scalar.extui %i8_value : i8 to i32
+  %i8_result = scalar.trunci %unsigned : i32 to i8
+  %bits = scalar.bitcast %f32_value : f32 to i32
+  func.return %f16_result, %i8_result, %bits : f16, i8, i32
 }
 
 // ====

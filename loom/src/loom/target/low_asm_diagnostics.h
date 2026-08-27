@@ -20,20 +20,19 @@ extern "C" {
 typedef struct loom_target_low_asm_diagnostic_provider_t
     loom_target_low_asm_diagnostic_provider_t;
 
-typedef iree_status_t (
-    *loom_target_low_asm_diagnostic_try_unknown_mnemonic_fn_t)(
+typedef iree_status_t (*loom_target_low_asm_diagnostic_try_unknown_packet_fn_t)(
     const loom_target_low_asm_diagnostic_provider_t* provider,
     const loom_low_descriptor_set_t* descriptor_set,
-    iree_string_view_t mnemonic,
+    iree_string_view_t packet_name,
     loom_text_low_asm_diagnostic_t* out_diagnostic);
 
 struct loom_target_low_asm_diagnostic_provider_t {
   // Stable provider name available to callbacks.
   iree_string_view_t name;
-  // Attempts to diagnose an unknown descriptor-set mnemonic. Sets
-  // |out_diagnostic->error| NULL when the mnemonic does not belong to this
-  // provider.
-  loom_target_low_asm_diagnostic_try_unknown_mnemonic_fn_t try_unknown_mnemonic;
+  // Attempts to diagnose an unknown stable descriptor key or compact assembly
+  // mnemonic. Sets |out_diagnostic->error| NULL when the name does not belong
+  // to this provider.
+  loom_target_low_asm_diagnostic_try_unknown_packet_fn_t try_unknown_packet;
 };
 
 typedef struct loom_target_low_asm_diagnostic_provider_list_t {

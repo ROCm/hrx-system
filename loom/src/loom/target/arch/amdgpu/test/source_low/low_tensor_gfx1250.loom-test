@@ -1,0 +1,43 @@
+// RUN: emit amdgpu-assembly @tensor_d4_and_wait fixed=%d0:physical_register:0:4 fixed=%d1:physical_register:8:8 fixed=%d2:physical_register:16:4 fixed=%d3:physical_register:20:4
+
+amdgpu.target<gfx1250> @target
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @tensor_d4_and_wait(%d0: reg<amdgpu.sgpr x4>, %d1: reg<amdgpu.sgpr x8>, %d2: reg<amdgpu.sgpr x4>, %d3: reg<amdgpu.sgpr x4>) asm {
+  tensor_load_to_lds_d4 %d0, %d1, %d2, %d3 {scope = 0, th = 0}
+  s_wait_tensorcnt {tensorcnt = 0}
+  return
+}
+
+// ----
+  tensor_load_to_lds s[0:3], s[8:15], s[16:19], s[20:23]
+  s_wait_tensorcnt 0
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @tensor_d2_and_wait fixed=%d0:physical_register:0:4 fixed=%d1:physical_register:8:8
+
+amdgpu.target<gfx1250> @target
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @tensor_d2_and_wait(%d0: reg<amdgpu.sgpr x4>, %d1: reg<amdgpu.sgpr x8>) asm {
+  tensor_load_to_lds_d2 %d0, %d1 {nv = 1, scope = 1, th = 2}
+  s_wait_tensorcnt {tensorcnt = 65535}
+  return
+}
+
+// ----
+  tensor_load_to_lds s[0:3], s[8:15] nv scope:1 th:2
+  s_wait_tensorcnt 65535
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-wait-counter-plan-json @tensor_counter_progress strategy=source
+
+amdgpu.target<gfx1250> @target
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @tensor_counter_progress(%d0: reg<amdgpu.sgpr x4>, %d1: reg<amdgpu.sgpr x8>) asm {
+  tensor_load_to_lds_d2 %d0, %d1
+  s_wait_tensorcnt {tensorcnt = 0}
+  return
+}
+
+// Program termination is an architectural XCNT drain on gfx125x even when the
+// preceding tensor packet does not advance XCNT.
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"tensor_counter_progress","target":"target","descriptor_set":"amdgpu.rdna4.gfx125x.core","progress_count":3,"hazard_count":0,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":6,"class_name":"amdgpu.tensor","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":6,"class_name":"amdgpu.tensor","action":"reset","units":0},{"index":2,"packet":2,"node":2,"block":0,"scheduled_ordinal":2,"class_id":8,"class_name":"amdgpu.x","action":"reset","units":0}],"hazards":[]}

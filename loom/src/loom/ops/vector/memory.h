@@ -66,6 +66,11 @@ typedef struct loom_vector_memory_access_t {
   // encoding values.
   loom_value_fact_address_layout_t layout_summary;
 
+  // Authored operands that materialize a non-exact explicit strided layout.
+  // Empty for dense/exact layouts and fact-only layouts without SSA stride
+  // provenance.
+  loom_encoding_address_layout_operands_t layout_operands;
+
   // Inline stride fact storage backing layout_summary.
   loom_value_facts_t layout_strides[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK];
 } loom_vector_memory_access_t;
@@ -103,6 +108,18 @@ enum loom_vector_memory_footprint_flag_bits_e {
 // Bitfield of loom_vector_memory_footprint_flag_bits_e values.
 typedef uint32_t loom_vector_memory_footprint_flags_t;
 
+// Physical storage scaling applied to one logical vector footprint axis.
+typedef struct loom_vector_memory_footprint_axis_scale_t {
+  // Vector axis whose logical extent is scaled, or UINT8_MAX when absent.
+  uint8_t vector_axis;
+
+  // Physical elements stored for each logical group.
+  uint16_t storage_element_count;
+
+  // Logical elements represented by each physical group.
+  uint16_t logical_element_count;
+} loom_vector_memory_footprint_axis_scale_t;
+
 // Classified vector memory footprint. This is a semantic description of legal
 // vector memory IR, not a second verifier for malformed operations.
 typedef struct loom_vector_memory_footprint_t {
@@ -139,11 +156,17 @@ typedef struct loom_vector_memory_footprint_t {
   // Typed view operand.
   loom_type_t view_type;
 
-  // Vector payload type that describes the logical footprint for non-fragment
-  // families.
+  // Vector payload type that describes the logical footprint. Fragment memory
+  // ops use the logical matrix shape, not the physical fragment payload shape.
   loom_type_t vector_type;
 
-  // Decomposed view/vector relationship for non-fragment families.
+  // Inline backing for synthetic rank-3 fragment footprint dimensions.
+  loom_overflow_dim_t fragment_dimensions[3];
+
+  // Optional physical storage scaling for one logical footprint axis.
+  loom_vector_memory_footprint_axis_scale_t axis_scale;
+
+  // Decomposed view/vector relationship for the logical footprint.
   loom_vector_memory_access_t vector_access;
 } loom_vector_memory_footprint_t;
 
@@ -183,6 +206,11 @@ bool loom_vector_memory_access_describe(
 bool loom_vector_memory_footprint_describe(
     const loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, loom_vector_memory_footprint_t* out_footprint);
+
+// Returns the semantic vector memory footprint family for |op| without
+// decomposing view/vector layout details. Non-vector memory ops return NONE.
+loom_vector_memory_footprint_kind_t loom_vector_memory_op_footprint_kind(
+    const loom_module_t* module, const loom_op_t* op);
 
 // Copies full-rank static logical extents for the footprint into |out_extents|.
 // Returns false when any footprint axis is dynamic or when |capacity| is
@@ -238,6 +266,15 @@ bool loom_vector_memory_access_static_lane_byte_offset(
     const loom_vector_memory_access_t* access, loom_attribute_t static_indices,
     const int64_t* lane_indices, uint8_t lane_index_count,
     int64_t* out_byte_offset);
+
+// Computes facts for the exclusive linear element end of a rectangular access.
+// |axis_exclusive_end_facts| contains one view coordinate per view axis and
+// must have at least access->view_rank entries. Returns false when the address
+// layout does not provide exact element strides.
+bool loom_vector_memory_access_linear_element_end_facts(
+    const loom_vector_memory_access_t* access,
+    const loom_value_facts_t* axis_exclusive_end_facts,
+    loom_value_facts_t* out_element_end_facts);
 
 #ifdef __cplusplus
 }

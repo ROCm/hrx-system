@@ -1,0 +1,29 @@
+kernel.def @increment() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%storage: buffer) {
+  kernel.return
+}
+
+kernel.def @double() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%storage: buffer) {
+  kernel.return
+}
+
+// Unreachable library configuration does not constrain selected command roots.
+config.decl @unused.command_config : %value: index
+
+command.program.def public @increment_once() launch(%storage: buffer) {
+  kernel.launch @increment(%storage) : (buffer)
+  command.return
+}
+
+command.program.def public @increment_then_double() launch(%storage: buffer) {
+  command.serial {
+    kernel.launch @increment(%storage) : (buffer)
+    kernel.launch @double(%storage) : (buffer)
+  }
+  command.return
+}

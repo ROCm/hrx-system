@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "loom/codegen/low/allocation/assignment.h"
 #include "loom/codegen/low/descriptors.h"
+#include "loom/codegen/low/placement.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -74,6 +75,13 @@ bool loom_low_allocation_storage_assignment_subranges_overlap(
     const loom_low_allocation_assignment_t* lhs, uint32_t lhs_start,
     const loom_low_allocation_assignment_t* rhs, uint32_t rhs_start,
     uint32_t unit_count);
+
+// Returns true when assignments satisfy a concrete placement relation.
+bool loom_low_allocation_storage_placement_relation_satisfied(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_placement_relation_t* relation,
+    const loom_low_allocation_assignment_t* result_assignment,
+    const loom_low_allocation_assignment_t* source_assignment);
 
 #ifdef __cplusplus
 }  // extern "C"

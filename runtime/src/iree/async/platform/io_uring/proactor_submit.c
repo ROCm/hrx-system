@@ -38,6 +38,7 @@
 #include "iree/async/platform/io_uring/proactor.h"
 #include "iree/async/platform/io_uring/socket.h"
 #include "iree/async/semaphore.h"
+#include "iree/async/util/semaphore_wait.h"
 
 // See proactor.c for the rationale behind the TSAN annotation bridge.
 #if defined(IREE_SANITIZER_THREAD)
@@ -978,6 +979,18 @@ static inline bool iree_async_proactor_io_uring_is_software_op(
          type == IREE_ASYNC_OPERATION_TYPE_SEMAPHORE_WAIT;
 }
 
+// Returns true when a successful operation can produce a negative CQE result
+// or otherwise requires userspace continuation dispatch. IOSQE_IO_LINK treats
+// every negative result as failure and would cancel the remaining chain before
+// the proactor can apply its operation-specific status mapping.
+static inline bool iree_async_proactor_io_uring_requires_userspace_continuation(
+    iree_async_operation_type_t type) {
+  return type == IREE_ASYNC_OPERATION_TYPE_TIMER ||
+         type == IREE_ASYNC_OPERATION_TYPE_FUTEX_WAIT ||
+         type == IREE_ASYNC_OPERATION_TYPE_NOTIFICATION_WAIT ||
+         iree_async_proactor_io_uring_is_software_op(type);
+}
+
 // Executes a SEMAPHORE_SIGNAL operation synchronously. Returns OK on success,
 // or the first signal failure status. The caller delivers the completion
 // (via MPSC push to the poll thread for callback dispatch).
@@ -990,18 +1003,17 @@ static iree_status_t iree_async_proactor_io_uring_execute_semaphore_signal(
   return iree_ok_status();
 }
 
-// Computes the allocation size for a semaphore wait tracker with |count|
-// semaphores using overflow-checked arithmetic.
-static inline iree_status_t iree_async_io_uring_semaphore_wait_tracker_size(
-    iree_host_size_t count, iree_host_size_t* out_size) {
-  return IREE_STRUCT_LAYOUT(
-      sizeof(iree_async_io_uring_semaphore_wait_tracker_t), out_size,
-      IREE_STRUCT_FIELD_FAM(count, iree_async_semaphore_timepoint_t));
+// Enqueues a terminal semaphore wait tracker and wakes the poll thread.
+static void iree_async_proactor_io_uring_enqueue_semaphore_wait(
+    void* user_data, iree_atomic_slist_entry_t* entry) {
+  iree_async_proactor_io_uring_t* proactor =
+      (iree_async_proactor_io_uring_t*)user_data;
+  iree_atomic_slist_push(&proactor->pending_semaphore_waits, entry);
+  uint64_t wake_value = 1;
+  ssize_t result =
+      write(proactor->wake_eventfd, &wake_value, sizeof(wake_value));
+  IREE_ASSERT(result >= 0 || errno == EAGAIN);
 }
-
-static void iree_async_io_uring_semaphore_wait_timepoint_callback(
-    void* user_data, iree_async_semaphore_timepoint_t* timepoint,
-    iree_status_t status);
 
 // Executes a SEMAPHORE_WAIT operation. Checks for immediate satisfaction
 // first; if not immediately satisfied, allocates a tracker, transfers the
@@ -1020,17 +1032,6 @@ static iree_status_t iree_async_proactor_io_uring_execute_semaphore_wait(
   iree_async_semaphore_wait_operation_t* wait_op =
       (iree_async_semaphore_wait_operation_t*)base_operation;
 
-  // The timepoint callback encodes {tracker_pointer, semaphore_index} in a
-  // single pointer using a 56-bit/8-bit split. The 8-bit index field limits
-  // the maximum number of semaphores per wait to 255.
-  if (IREE_UNLIKELY(wait_op->count > 255)) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "semaphore wait count %" PRIhsz
-        " exceeds the maximum of 255 (limited by timepoint user_data encoding)",
-        wait_op->count);
-  }
-
   // Check for immediate satisfaction before allocating a tracker.
   bool all_satisfied = true;
   for (iree_host_size_t i = 0; i < wait_op->count; ++i) {
@@ -1046,65 +1047,15 @@ static iree_status_t iree_async_proactor_io_uring_execute_semaphore_wait(
   }
   if (all_satisfied) return iree_ok_status();
 
-  // Allocate tracker with embedded timepoints.
-  iree_host_size_t tracker_size = 0;
-  IREE_RETURN_IF_ERROR(iree_async_io_uring_semaphore_wait_tracker_size(
-      wait_op->count, &tracker_size));
-  iree_async_io_uring_semaphore_wait_tracker_t* tracker = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(proactor->base.allocator,
-                                             tracker_size, (void**)&tracker));
-  memset(tracker, 0, tracker_size);
-
-  tracker->operation = wait_op;
-  tracker->proactor = proactor;
-  tracker->allocator = proactor->base.allocator;
-  tracker->count = wait_op->count;
-  iree_atomic_store(&tracker->completion_status, (intptr_t)iree_ok_status(),
-                    iree_memory_order_release);
-
-  // Transfer linked_next chain from operation to tracker. The chain building
-  // phase set linked_next pointers; we move the head to the tracker so it
-  // survives until the wait completes.
-  tracker->continuation_head = wait_op->base.linked_next;
-  wait_op->base.linked_next = NULL;
-
-  if (wait_op->mode == IREE_ASYNC_WAIT_MODE_ALL) {
-    iree_atomic_store(&tracker->remaining_or_satisfied, (int32_t)wait_op->count,
-                      iree_memory_order_release);
-  } else {
-    // ANY mode: -1 indicates not yet satisfied.
-    iree_atomic_store(&tracker->remaining_or_satisfied, -1,
-                      iree_memory_order_release);
-  }
-
-  // Store the tracker in the operation's platform-specific storage.
-  // This allows cancel to find it.
-  wait_op->base.next = (iree_async_operation_t*)tracker;
-
-  // Register timepoints for each semaphore.
-  for (iree_host_size_t i = 0; i < wait_op->count; ++i) {
-    iree_async_semaphore_timepoint_t* timepoint = &tracker->timepoints[i];
-    timepoint->callback = iree_async_io_uring_semaphore_wait_timepoint_callback;
-    // Encode the tracker pointer and semaphore index in user_data.
-    // Uses the same 56-bit/8-bit split as the internal tag encoding
-    // (proactor.h) for LA57 (5-level paging) safety: userspace pointers use
-    // at most 56 bits on x86-64, leaving 8 bits for the index (max 255).
-    // The count <= 255 check above guarantees this shift is safe.
-    timepoint->user_data = (void*)((uintptr_t)tracker | ((uintptr_t)i << 56));
-
-    iree_status_t status = iree_async_semaphore_acquire_timepoint(
-        wait_op->semaphores[i], wait_op->values[i], timepoint);
-    if (!iree_status_is_ok(status)) {
-      // Registration failed. Cancel already-registered timepoints.
-      for (iree_host_size_t j = 0; j < i; ++j) {
-        iree_async_semaphore_cancel_timepoint(wait_op->semaphores[j],
-                                              &tracker->timepoints[j]);
-      }
-      iree_allocator_free(tracker->allocator, tracker);
-      wait_op->base.next = NULL;
-      return status;
-    }
-  }
+  iree_async_semaphore_wait_enqueue_callback_t enqueue_callback = {
+      .fn = iree_async_proactor_io_uring_enqueue_semaphore_wait,
+      .user_data = proactor,
+  };
+  iree_async_semaphore_wait_tracker_t* tracker = NULL;
+  IREE_RETURN_IF_ERROR(iree_async_semaphore_wait_tracker_create(
+      &proactor->semaphore_wait_context, wait_op, enqueue_callback,
+      proactor->base.allocator, &tracker));
+  iree_async_semaphore_wait_tracker_register_timepoints(tracker);
 
   *out_deferred = true;
   return iree_ok_status();
@@ -1207,78 +1158,6 @@ void iree_async_proactor_io_uring_cancel_continuation_chain_to_mpsc(
     iree_async_proactor_io_uring_push_software_completion(
         proactor, op, iree_status_from_code(IREE_STATUS_CANCELLED));
     op = next;
-  }
-}
-
-// Helper to enqueue a tracker for completion and wake the proactor.
-// Multiple callbacks may race to enqueue (error callbacks in ALL mode, success
-// callbacks, cancel). The enqueued CAS ensures exactly one push to the MPSC
-// slist — a duplicate push would create a self-loop and hang the drain.
-static void iree_async_io_uring_semaphore_wait_enqueue_completion(
-    iree_async_io_uring_semaphore_wait_tracker_t* tracker) {
-  int32_t expected = 0;
-  if (!iree_atomic_compare_exchange_strong(&tracker->enqueued, &expected, 1,
-                                           iree_memory_order_acq_rel,
-                                           iree_memory_order_relaxed)) {
-    return;
-  }
-  iree_atomic_slist_push(&tracker->proactor->pending_semaphore_waits,
-                         &tracker->slist_entry);
-  uint64_t wake_value = 1;
-  ssize_t result =
-      write(tracker->proactor->wake_eventfd, &wake_value, sizeof(wake_value));
-  IREE_ASSERT(result >= 0 || errno == EAGAIN);
-}
-
-// Timepoint callback for SEMAPHORE_WAIT operations.
-// Called under the semaphore's lock - MUST be fast and non-blocking.
-static void iree_async_io_uring_semaphore_wait_timepoint_callback(
-    void* user_data, iree_async_semaphore_timepoint_t* timepoint,
-    iree_status_t status) {
-  // Decode tracker and index from user_data. The encoding uses a 56-bit/8-bit
-  // split matching the internal tag encoding for LA57 safety (see encode site).
-  uintptr_t encoded = (uintptr_t)user_data;
-  iree_async_io_uring_semaphore_wait_tracker_t* tracker =
-      (iree_async_io_uring_semaphore_wait_tracker_t*)(encoded &
-                                                      0x00FFFFFFFFFFFFFFull);
-  iree_host_size_t index = (iree_host_size_t)(encoded >> 56);
-
-  if (!iree_status_is_ok(status)) {
-    // Failure or cancellation. Store the error status (first one wins).
-    intptr_t expected = (intptr_t)iree_ok_status();
-    if (!iree_atomic_compare_exchange_strong(
-            &tracker->completion_status, &expected, (intptr_t)status,
-            iree_memory_order_acq_rel, iree_memory_order_acquire)) {
-      // Another callback already stored a status; ignore this one.
-      iree_status_ignore(status);
-    }
-    // Enqueue for completion regardless of whether we won the status race.
-    // The enqueued CAS guard inside enqueue_completion ensures exactly one
-    // push.
-    iree_async_io_uring_semaphore_wait_enqueue_completion(tracker);
-    return;
-  }
-
-  // Success case.
-  if (tracker->operation->mode == IREE_ASYNC_WAIT_MODE_ANY) {
-    // ANY mode: first satisfied index wins.
-    int32_t expected = -1;
-    if (iree_atomic_compare_exchange_strong(
-            &tracker->remaining_or_satisfied, &expected, (int32_t)index,
-            iree_memory_order_acq_rel, iree_memory_order_acquire)) {
-      // We won the race - enqueue for completion.
-      iree_async_io_uring_semaphore_wait_enqueue_completion(tracker);
-    }
-    // Otherwise another callback already completed it; nothing to do.
-  } else {
-    // ALL mode: decrement remaining count.
-    int32_t remaining = iree_atomic_fetch_sub(&tracker->remaining_or_satisfied,
-                                              1, iree_memory_order_acq_rel) -
-                        1;
-    if (remaining == 0) {
-      // All semaphores satisfied - enqueue for completion.
-      iree_async_io_uring_semaphore_wait_enqueue_completion(tracker);
-    }
   }
 }
 
@@ -1513,6 +1392,11 @@ iree_status_t iree_async_proactor_io_uring_submit(
   //   the kernel doesn't reliably post CQEs for not-yet-issued linked ops,
   //   so C in "A->B->C" may never complete if B is cancelled.
   //
+  // Futex and notification waits:
+  //   Value/epoch mismatch produces -EAGAIN, which is semantic success for
+  //   these operations. Kernel LINK interprets all negative CQE results as
+  //   failure and would cancel the successor before userspace can map it.
+  //
   // Software operations (SEMAPHORE_SIGNAL, SEMAPHORE_WAIT):
   //   Execute entirely in userspace with no kernel SQE, so kernel LINK
   //   chains cannot span them. Signals execute their side effects
@@ -1548,8 +1432,8 @@ iree_status_t iree_async_proactor_io_uring_submit(
     // dispatched on predecessor completion.
     if (effective_count == operations.count) {
       bool needs_userspace_emulation =
-          (operation->type == IREE_ASYNC_OPERATION_TYPE_TIMER) ||
-          iree_async_proactor_io_uring_is_software_op(operation->type) ||
+          iree_async_proactor_io_uring_requires_userspace_continuation(
+              operation->type) ||
           (operations.values[i + 1]->type ==
            IREE_ASYNC_OPERATION_TYPE_SEQUENCE) ||
           iree_async_proactor_io_uring_is_software_op(

@@ -1,0 +1,70 @@
+// RUN: emit amdgpu-assembly @rematerialization_budget_falls_back_to_spills strategy=source amdgpu.vgpr=5
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @rematerialization_budget_falls_back_to_spills(%addr: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm {
+  %literal = v_mov_b32 7
+  %loaded0 = global_load_b32_saddr %addr, %input
+  %loaded1 = global_load_b32_saddr %addr, %input {offset = 4}
+  %ab = v_add_u32 %a, %b
+  %bc = v_add_u32 %b, %c
+  %use0 = v_add_u32 %ab, %literal
+  %use1 = v_add_u32 %bc, %literal
+  %sum0 = v_add_u32 %loaded0, %use0
+  %sum1 = v_add_u32 %loaded1, %use1
+  %sum2 = v_add_u32 %sum0, %sum1
+  global_store_b32_saddr %addr, %sum2, %output
+  return
+}
+
+// ----
+  s_mov_b64_exec_read s[4:5]
+  s_mov_b64 exec, -1
+  scratch_store_b32 off, v0, off offset:0 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[4:5]
+  s_mov_b64_exec_read s[4:5]
+  s_mov_b64 exec, -1
+  scratch_store_b32 off, v1, off offset:4 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[4:5]
+  global_load_b32 v0, v3, s[0:1] offset:0
+  global_load_b32 v1, v3, s[0:1] offset:4
+  s_mov_b64_exec_read s[4:5]
+  s_mov_b64 exec, -1
+  s_waitcnt_vscnt vscnt(0)
+  scratch_load_b32 v4, off, off offset:4 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[4:5]
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_add_u32 v2, v2, v4
+  v_mov_b32 v4, 7
+  s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
+  v_add_u32 v2, v2, v4
+  s_mov_b64_exec_read s[4:5]
+  s_mov_b64 exec, -1
+  scratch_store_b32 off, v2, off offset:8 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[4:5]
+  s_mov_b64_exec_read s[4:5]
+  s_mov_b64 exec, -1
+  s_waitcnt_vscnt vscnt(0)
+  scratch_load_b32 v2, off, off offset:0 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[4:5]
+  s_mov_b64_exec_read s[4:5]
+  s_mov_b64 exec, -1
+  scratch_load_b32 v4, off, off offset:4 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[4:5]
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_add_u32 v2, v4, v2
+  v_mov_b32 v4, 7
+  s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
+  v_add_u32 v2, v2, v4
+  s_mov_b64_exec_read s[4:5]
+  s_mov_b64 exec, -1
+  scratch_load_b32 v4, off, off offset:8 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[4:5]
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_add_u32 v0, v0, v4
+  v_add_u32 v1, v1, v2
+  s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
+  v_add_u32 v0, v0, v1
+  global_store_b32 v3, v0, s[2:3] offset:0
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm

@@ -81,11 +81,13 @@ class ExecutorTest : public ::testing::Test {
 
   static iree_status_t InvokeDelta(
       void* user_data, const loom_testbench_invocation_plan_t* invocation,
+      iree_host_size_t workload_count, const loom_testbench_value_t* workloads,
       iree_host_size_t input_count, const loom_testbench_value_t* inputs,
       iree_host_size_t result_count, loom_testbench_value_t* out_results) {
     (void)invocation;
+    (void)workloads;
     DeltaProviderState* state = static_cast<DeltaProviderState*>(user_data);
-    if (input_count != 1 || result_count != 1) {
+    if (workload_count != 0 || input_count != 1 || result_count != 1) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "delta provider expects one input and result");
     }
@@ -112,11 +114,11 @@ class ExecutorTest : public ::testing::Test {
       loom_testbench_oracle_provider_t* oracle_providers) {
     loom_testbench_case_execution_options_t options = {};
     loom_testbench_case_execution_options_initialize(&options);
-    options.invocation.invoke_actual.fn = ExecutorTest::InvokeDelta;
-    options.invocation.invoke_actual.user_data = actual_state;
+    options.invocation.function_call.invoke = ExecutorTest::InvokeDelta;
+    options.invocation.function_call.user_data = actual_state;
     oracle_providers[0].name = IREE_SV("reference.scalar");
-    oracle_providers[0].invoke.fn = ExecutorTest::InvokeDelta;
-    oracle_providers[0].invoke.user_data = oracle_state;
+    oracle_providers[0].provider.invoke = ExecutorTest::InvokeDelta;
+    oracle_providers[0].provider.user_data = oracle_state;
     options.invocation.oracle_providers =
         loom_make_testbench_oracle_provider_list(oracle_providers, 1);
     return options;

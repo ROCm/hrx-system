@@ -1,12 +1,12 @@
 // RUN: emit amdgpu-assembly @gfx11_wmma_base waits=none
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @gfx11_wmma_base(%a8: reg<amdgpu.vgpr x8>, %b8: reg<amdgpu.vgpr x8>, %a4: reg<amdgpu.vgpr x4>, %b4: reg<amdgpu.vgpr x4>, %a2: reg<amdgpu.vgpr x2>, %b2: reg<amdgpu.vgpr x2>, %acc: reg<amdgpu.vgpr x8>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_wmma_base(%a8: reg<amdgpu.vgpr x8>, %b8: reg<amdgpu.vgpr x8>, %a4: reg<amdgpu.vgpr x4>, %b4: reg<amdgpu.vgpr x4>, %a2: reg<amdgpu.vgpr x2>, %b2: reg<amdgpu.vgpr x2>, %acc: reg<amdgpu.vgpr x8>) asm {
   %f32_f16 = v_wmma_f32_16x16x16_f16 %a8, %b8, %acc
   %f32_bf16 = v_wmma_f32_16x16x16_bf16 %a8, %b8, %f32_f16
   %f16 = v_wmma_f16_16x16x16_f16 %a8, %b8, %f32_bf16
   %bf16 = v_wmma_bf16_16x16x16_bf16 %a8, %b8, %f16
-  %i32_iu8 = v_wmma_i32_16x16x16_iu8 %a4, %b4, %bf16
-  %i32_iu4 = v_wmma_i32_16x16x16_iu4 %a2, %b2, %i32_iu8
+  %i32_iu8 = v_wmma_i32_16x16x16_iu8 %a4, %b4, %bf16 {neg_lo = 3, neg_hi = 3}
+  %i32_iu4 = v_wmma_i32_16x16x16_iu4 %a2, %b2, %i32_iu8 {neg_lo = 1, neg_hi = 1, clamp = 1}
   return
 }
 
@@ -15,28 +15,41 @@ low.func.def target(@gfx11_target) @gfx11_wmma_base(%a8: reg<amdgpu.vgpr x8>, %b
   v_wmma_f32_16x16x16_bf16 v[0:7], v[8:15], v[16:23], v[0:7]
   v_wmma_f16_16x16x16_f16 v[0:7], v[8:15], v[16:23], v[0:7]
   v_wmma_bf16_16x16x16_bf16 v[0:7], v[8:15], v[16:23], v[0:7]
-  v_wmma_i32_16x16x16_iu8 v[0:7], v[24:27], v[28:31], v[0:7]
-  v_wmma_i32_16x16x16_iu4 v[0:7], v[32:33], v[34:35], v[0:7]
+  v_wmma_i32_16x16x16_iu8 v[0:7], v[24:27], v[28:31], v[0:7] neg_lo:[1,1,0] neg_hi:[1,1,0]
+  v_wmma_i32_16x16x16_iu4 v[0:7], v[32:33], v[34:35], v[0:7] neg_lo:[1,0,0] neg_hi:[1,0,0] clamp
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_wave64_integer_wmma waits=none
+amdgpu.target<gfx1100> @gfx11_wave64_target {subgroup_size = 64}
+low.func.def target<amdgpu.rdna3.core>(@gfx11_wave64_target) @gfx11_wave64_integer_wmma(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr x4>) asm {
+  %result = v_wmma_i32_16x16x16_iu8_w64 %lhs, %rhs, %acc {neg_lo = 2, neg_hi = 2}
+  return
+}
+
+// ----
+  v_wmma_i32_16x16x16_iu8 v[8:11], v[0:3], v[4:7], v[8:11] neg_lo:[0,1,0] neg_hi:[0,1,0]
   s_endpgm
 
 // ====
 
 // RUN: emit amdgpu-assembly @gfx11_wmma_zero_accumulator waits=none
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @gfx11_wmma_zero_accumulator(%a8: reg<amdgpu.vgpr x8>, %b8: reg<amdgpu.vgpr x8>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_wmma_zero_accumulator(%a8: reg<amdgpu.vgpr x8>, %b8: reg<amdgpu.vgpr x8>) asm {
   %f32_bf16 = v_wmma_f32_16x16x16_bf16_acc_zero %a8, %b8
   return
 }
 
 // ----
-  v_wmma_f32_16x16x16_bf16 v[0:7], v[0:7], v[8:15], 0
+  v_wmma_f32_16x16x16_bf16 v[16:23], v[0:7], v[8:15], 0
   s_endpgm
 
 // ====
 
 // RUN: emit amdgpu-assembly @gfx11_wmma_concat_resource_stall waits=none strategy=resource-stall
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @gfx11_wmma_concat_resource_stall(%lane: reg<amdgpu.vgpr>, %activation_view: reg<amdgpu.sgpr x2>, %weight_view: reg<amdgpu.sgpr x2>, %bias_view: reg<amdgpu.sgpr x2>, %output_view: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_wmma_concat_resource_stall(%lane: reg<amdgpu.vgpr>, %activation_view: reg<amdgpu.sgpr x2>, %weight_view: reg<amdgpu.sgpr x2>, %bias_view: reg<amdgpu.sgpr x2>, %output_view: reg<amdgpu.sgpr x2>) asm {
   %lane15 = v_and_b32_lit %lane, 15
   %activation_address = v_lshlrev_b32_lit %lane15, 5
   %bias_address = v_lshlrev_b32_lit %lane, 2
@@ -109,7 +122,7 @@ low.func.def target(@gfx11_target) @gfx11_wmma_concat_resource_stall(%lane: reg<
 
 // RUN: emit amdgpu-assembly @gfx11_wmma_half_result_store_tail strategy=source
 amdgpu.target<gfx1100> @gfx11_target {subgroup_size = 64}
-low.func.def target(@gfx11_target) @gfx11_wmma_half_result_store_tail(%lds_addr: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x4>, %store_addr: reg<amdgpu.vgpr>, %output_view: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_wmma_half_result_store_tail(%lds_addr: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x4>, %store_addr: reg<amdgpu.vgpr>, %output_view: reg<amdgpu.sgpr x2>) asm {
   %lhs0 = ds_read_b128 %lds_addr {offset = 0}
   %lhs1 = ds_read_b128 %lds_addr {offset = 16}
   %lhs = concat(%lhs0, %lhs1) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
@@ -134,21 +147,26 @@ low.func.def target(@gfx11_target) @gfx11_wmma_half_result_store_tail(%lds_addr:
   ds_read_b128 v[20:23], v0 offset:16
   s_waitcnt vmcnt(63) lgkmcnt(0)
   v_wmma_f16_16x16x16_f16 v[4:7], v[16:23], v[8:15], v[4:7]
+  s_delay_alu instid0(VALU_DEP_1)
   v_cvt_f32_f16 v0, v4
+  s_delay_alu instid0(VALU_DEP_2)
   v_cvt_f32_f16 v2, v5
+  s_delay_alu instid0(VALU_DEP_3)
   v_cvt_f32_f16 v3, v6
+  s_delay_alu instid0(VALU_DEP_4)
   v_cvt_f32_f16 v4, v7
   global_store_b32 v1, v0, s[0:1] offset:0
   global_store_b32 v1, v2, s[0:1] offset:4
   global_store_b32 v1, v3, s[0:1] offset:8
   global_store_b32 v1, v4, s[0:1] offset:12
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
 
 // RUN: emit amdgpu-assembly @gfx12_wmma_base waits=none
 amdgpu.target<gfx1200> @gfx12_target
-low.func.def target(@gfx12_target) @gfx12_wmma_base(%a4: reg<amdgpu.vgpr x4>, %b4: reg<amdgpu.vgpr x4>, %a2: reg<amdgpu.vgpr x2>, %b2: reg<amdgpu.vgpr x2>, %a1: reg<amdgpu.vgpr>, %b1: reg<amdgpu.vgpr>, %acc8: reg<amdgpu.vgpr x8>, %acc4: reg<amdgpu.vgpr x4>) asm<amdgpu.rdna4.core> {
+low.func.def target<amdgpu.rdna4.core>(@gfx12_target) @gfx12_wmma_base(%a4: reg<amdgpu.vgpr x4>, %b4: reg<amdgpu.vgpr x4>, %a2: reg<amdgpu.vgpr x2>, %b2: reg<amdgpu.vgpr x2>, %a1: reg<amdgpu.vgpr>, %b1: reg<amdgpu.vgpr>, %acc8: reg<amdgpu.vgpr x8>, %acc4: reg<amdgpu.vgpr x4>) asm {
   %f32_f16 = v_wmma_f32_16x16x16_f16 %a4, %b4, %acc8
   %f32_bf16 = v_wmma_f32_16x16x16_bf16 %a4, %b4, %f32_f16
   %f16 = v_wmma_f16_16x16x16_f16 %a4, %b4, %acc4
@@ -157,8 +175,8 @@ low.func.def target(@gfx12_target) @gfx12_wmma_base(%a4: reg<amdgpu.vgpr x4>, %b
   %fp8_bf8 = v_wmma_f32_16x16x16_fp8_bf8 %a2, %b2, %fp8_fp8
   %bf8_fp8 = v_wmma_f32_16x16x16_bf8_fp8 %a2, %b2, %fp8_bf8
   %bf8_bf8 = v_wmma_f32_16x16x16_bf8_bf8 %a2, %b2, %bf8_fp8
-  %i32_iu8 = v_wmma_i32_16x16x16_iu8 %a2, %b2, %bf8_bf8
-  %i32_iu4 = v_wmma_i32_16x16x16_iu4 %a1, %b1, %i32_iu8
+  %i32_iu8 = v_wmma_i32_16x16x16_iu8 %a2, %b2, %bf8_bf8 {neg_lo = 1}
+  %i32_iu4 = v_wmma_i32_16x16x16_iu4 %a1, %b1, %i32_iu8 {neg_lo = 2, clamp = 1}
   %i32_iu4_32 = v_wmma_i32_16x16x32_iu4 %a2, %b2, %i32_iu4
   return
 }
@@ -172,8 +190,8 @@ low.func.def target(@gfx12_target) @gfx12_wmma_base(%a4: reg<amdgpu.vgpr x4>, %b
   v_wmma_f32_16x16x16_fp8_bf8 v[0:7], v[22:23], v[24:25], v[0:7]
   v_wmma_f32_16x16x16_bf8_fp8 v[0:7], v[22:23], v[24:25], v[0:7]
   v_wmma_f32_16x16x16_bf8_bf8 v[0:7], v[22:23], v[24:25], v[0:7]
-  v_wmma_i32_16x16x16_iu8 v[0:7], v[22:23], v[24:25], v[0:7]
-  v_wmma_i32_16x16x16_iu4 v[0:7], v20, v21, v[0:7]
+  v_wmma_i32_16x16x16_iu8 v[0:7], v[22:23], v[24:25], v[0:7] neg_lo:[1,0,0]
+  v_wmma_i32_16x16x16_iu4 v[0:7], v20, v21, v[0:7] neg_lo:[0,1,0] clamp
   v_wmma_i32_16x16x32_iu4 v[0:7], v[22:23], v[24:25], v[0:7]
   s_endpgm
 
@@ -181,51 +199,79 @@ low.func.def target(@gfx12_target) @gfx12_wmma_base(%a4: reg<amdgpu.vgpr x4>, %b
 
 // RUN: emit amdgpu-assembly @gfx1250_wmma_supplemental waits=none
 amdgpu.target<gfx1250> @gfx1250_target
-low.func.def target(@gfx1250_target) @gfx1250_wmma_supplemental(%a8: reg<amdgpu.vgpr x8>, %a16: reg<amdgpu.vgpr x16>, %b8: reg<amdgpu.vgpr x8>, %b16: reg<amdgpu.vgpr x16>, %scale0: reg<amdgpu.vgpr>, %scale1: reg<amdgpu.vgpr>, %index: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr x8>, %addr: reg<amdgpu.vgpr>, %output_view: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna4.gfx125x.core> {
-  %wmma32 = v_wmma_f32_16x16x32_f16 %a8, %b8, %acc
-  %scale = v_wmma_scale_f32_16x16x128_f8f6f4_f8_f8 %a16, %b16, %wmma32, %scale0, %scale1 {matrix_a_fmt = 1, matrix_b_fmt = 2, matrix_a_scale = 1, matrix_b_scale = 1, matrix_a_scale_fmt = 0, matrix_b_scale_fmt = 0, matrix_a_reuse = 0, matrix_b_reuse = 0}
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_wmma_supplemental(%a8: reg<amdgpu.vgpr x8>, %a16: reg<amdgpu.vgpr x16>, %b8: reg<amdgpu.vgpr x8>, %b12: reg<amdgpu.vgpr x12>, %b16: reg<amdgpu.vgpr x16>, %scale0: reg<amdgpu.vgpr>, %scale1: reg<amdgpu.vgpr>, %index: reg<amdgpu.vgpr>, %index2: reg<amdgpu.vgpr x2>, %acc: reg<amdgpu.vgpr x8>, %addr: reg<amdgpu.vgpr>, %output_view: reg<amdgpu.sgpr x2>) asm {
+  %wmma32 = v_wmma_f32_16x16x32_f16 %a8, %b8, %acc {matrix_a_reuse = 1}
+  %scale = v_wmma_scale_f32_16x16x128_f8f6f4_f8_f6 %a16, %b12, %wmma32, %scale0, %scale1 {matrix_a_fmt = 1, matrix_b_fmt = 2, matrix_a_scale = 1, matrix_b_scale = 1, matrix_a_scale_fmt = 0, matrix_b_scale_fmt = 0, matrix_a_reuse = 0, matrix_b_reuse = 0}
   %swmmac = v_swmmac_f32_16x16x64_f16 %scale, %a8, %b16, %index {index_key_16bit = 1, matrix_a_reuse = 0, matrix_b_reuse = 1}
-  %out0 = slice %swmmac[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %wmma_i32 = v_wmma_i32_16x16x64_iu8 %a8, %b8, %swmmac {neg_lo = 3, clamp = 1}
+  %swmmac_i32 = v_swmmac_i32_16x16x128_iu8 %wmma_i32, %a8, %b16, %index2 {neg_lo = 2, clamp = 1}
+  %out0 = slice %swmmac_i32[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   global_store_b32_saddr %addr, %out0, %output_view {offset = 0}
   return
 }
 
 // ----
-  v_wmma_f32_16x16x32_f16 v[8:15], v[40:47], v[0:7], v[8:15], matrix_a_reuse(0), matrix_b_reuse(0)
-  v_wmma_scale_f32_16x16x128_f8f6f4_f8_f8 v[8:15], v[16:31], v[48:63], v[8:15], v32, v33, matrix_a_fmt(1), matrix_b_fmt(2), matrix_a_scale(1), matrix_b_scale(1), matrix_a_scale_fmt(0), matrix_b_scale_fmt(0), matrix_a_reuse(0), matrix_b_reuse(0)
-  v_swmmac_f32_16x16x64_f16 v[8:15], v[8:15], v[40:47], v[48:63], v34, index_key_16bit(1), matrix_a_reuse(0), matrix_b_reuse(1)
-  global_store_b32 v35, v8, s[0:1] offset:0
+  v_wmma_f32_16x16x32_f16 v[0:7], v[56:63], v[48:55], v[0:7] matrix_a_reuse
+  v_wmma_scale_f32_16x16x128_f8f6f4 v[0:7], v[16:31], v[32:43], v[0:7], v8, v9 matrix_a_fmt:1 matrix_b_fmt:2 matrix_a_scale:1 matrix_b_scale:1
+  v_swmmac_f32_16x16x64_f16 v[0:7], v[56:63], v[64:79], v10 index_key:1 matrix_b_reuse
+  v_wmma_i32_16x16x64_iu8 v[0:7], v[56:63], v[48:55], v[0:7] neg_lo:[1,1,0] clamp
+  v_swmmac_i32_16x16x128_iu8 v[0:7], v[56:63], v[64:79], v[12:13] neg_lo:[0,1,0] clamp
+  global_store_b32 v11, v0, s[0:1] offset:0
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx1250_wmma_base waits=none
-amdgpu.target<gfx1250> @gfx1250_target
-low.func.def target(@gfx1250_target) @gfx1250_wmma_base(%a4: reg<amdgpu.vgpr x4>, %b4: reg<amdgpu.vgpr x4>, %a2: reg<amdgpu.vgpr x2>, %b2: reg<amdgpu.vgpr x2>, %a1: reg<amdgpu.vgpr>, %b1: reg<amdgpu.vgpr>, %acc8: reg<amdgpu.vgpr x8>, %acc4: reg<amdgpu.vgpr x4>) asm<amdgpu.rdna4.gfx125x.core> {
-  %f32_f16 = v_wmma_f32_16x16x16_f16 %a4, %b4, %acc8
-  %f32_bf16 = v_wmma_f32_16x16x16_bf16 %a4, %b4, %f32_f16
-  %f16 = v_wmma_f16_16x16x16_f16 %a4, %b4, %acc4
-  %bf16 = v_wmma_bf16_16x16x16_bf16 %a4, %b4, %f16
-  %fp8_fp8 = v_wmma_f32_16x16x16_fp8_fp8 %a2, %b2, %f32_bf16
-  %fp8_bf8 = v_wmma_f32_16x16x16_fp8_bf8 %a2, %b2, %fp8_fp8
-  %bf8_fp8 = v_wmma_f32_16x16x16_bf8_fp8 %a2, %b2, %fp8_bf8
-  %bf8_bf8 = v_wmma_f32_16x16x16_bf8_bf8 %a2, %b2, %bf8_fp8
-  %i32_iu8 = v_wmma_i32_16x16x16_iu8 %a2, %b2, %bf8_bf8
-  %i32_iu4 = v_wmma_i32_16x16x16_iu4 %a1, %b1, %i32_iu8
-  %i32_iu4_32 = v_wmma_i32_16x16x32_iu4 %a2, %b2, %i32_iu4
+// gfx1251 shares the gfx125x encoding storage while selecting its own matrix
+// schedule view. Exercise supplemental fields from VOP3, VOP3P, and VOP3PX2
+// through the native encoder rather than only formatting their assembly.
+// RUN: emit amdgpu-native @gfx1251_native_supplemental waits=none
+amdgpu.target<gfx1251> @gfx1251_target
+low.func.def target<amdgpu.rdna4.gfx1251.core>(@gfx1251_target) @gfx1251_native_supplemental(%a16: reg<amdgpu.vgpr x16>, %b12: reg<amdgpu.vgpr x12>, %packed8: reg<amdgpu.vgpr x2>, %scale0: reg<amdgpu.vgpr>, %scale1: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr x8>) asm {
+  %fp8_byte0 = v_cvt_f16_fp8_byte0 %scale0
+  %fp8_byte1 = v_cvt_f16_fp8_byte1 %scale0
+  %fp8_byte2 = v_cvt_f16_fp8_byte2 %scale0
+  %fp8_byte3 = v_cvt_f16_fp8_byte3 %scale0
+  %bf8_byte0 = v_cvt_f16_bf8_byte0 %scale1
+  %bf8_byte1 = v_cvt_f16_bf8_byte1 %scale1
+  %bf8_byte2 = v_cvt_f16_bf8_byte2 %scale1
+  %bf8_byte3 = v_cvt_f16_bf8_byte3 %scale1
+  %converted = v_cvt_scale_pk8_bf16_fp8 %packed8, %scale0 {scale_sel = 3}
+  %wmma = v_wmma_f32_16x16x128_f8f6f4_f8_f6 %a16, %b12, %acc {matrix_a_fmt = 1, matrix_b_fmt = 2}
+  %scaled = v_wmma_scale_f32_16x16x128_f8f6f4_f8_f6 %a16, %b12, %wmma, %scale0, %scale1 {matrix_a_fmt = 1, matrix_b_fmt = 2, matrix_a_scale = 1, matrix_b_scale = 1, matrix_a_scale_fmt = 0, matrix_b_scale_fmt = 0, matrix_a_reuse = 1, matrix_b_reuse = 1}
   return
 }
 
 // ----
-  v_wmma_f32_16x16x16_f16 v[0:7], v[12:15], v[16:19], v[0:7]
-  v_wmma_f16_16x16x16_f16 v[8:11], v[12:15], v[16:19], v[8:11]
-  v_wmma_bf16_16x16x16_bf16 v[8:11], v[12:15], v[16:19], v[8:11]
-  v_wmma_f32_16x16x16_bf16 v[0:7], v[12:15], v[16:19], v[0:7]
-  v_wmma_f32_16x16x16_fp8_fp8 v[0:7], v[22:23], v[24:25], v[0:7]
-  v_wmma_f32_16x16x16_fp8_bf8 v[0:7], v[22:23], v[24:25], v[0:7]
-  v_wmma_f32_16x16x16_bf8_fp8 v[0:7], v[22:23], v[24:25], v[0:7]
-  v_wmma_f32_16x16x16_bf8_bf8 v[0:7], v[22:23], v[24:25], v[0:7]
-  v_wmma_i32_16x16x16_iu8 v[0:7], v[22:23], v[24:25], v[0:7]
-  v_wmma_i32_16x16x16_iu4 v[0:7], v20, v21, v[0:7]
-  v_wmma_i32_16x16x32_iu4 v[0:7], v[22:23], v[24:25], v[0:7]
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1250_retained_gfx12_swmmac waits=none
+amdgpu.target<gfx1250> @gfx1250_target
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_retained_gfx12_swmmac(%acc8: reg<amdgpu.vgpr x8>, %acc4: reg<amdgpu.vgpr x4>, %a4: reg<amdgpu.vgpr x4>, %a2: reg<amdgpu.vgpr x2>, %a1: reg<amdgpu.vgpr>, %b8: reg<amdgpu.vgpr x8>, %b4: reg<amdgpu.vgpr x4>, %b2: reg<amdgpu.vgpr x2>, %index: reg<amdgpu.vgpr>) asm {
+  %f32_f16 = v_swmmac_f32_16x16x32_f16 %acc8, %a4, %b8, %index
+  %f32_bf16 = v_swmmac_f32_16x16x32_bf16 %f32_f16, %a4, %b8, %index
+  %f16 = v_swmmac_f16_16x16x32_f16 %acc4, %a4, %b8, %index
+  %bf16 = v_swmmac_bf16_16x16x32_bf16 %f16, %a4, %b8, %index
+  %i32_iu8 = v_swmmac_i32_16x16x32_iu8 %f32_bf16, %a2, %b4, %index
+  %i32_iu4 = v_swmmac_i32_16x16x32_iu4 %i32_iu8, %a1, %b2, %index
+  %i32_iu4_64 = v_swmmac_i32_16x16x64_iu4 %i32_iu4, %a2, %b4, %index
+  %fp8_fp8 = v_swmmac_f32_16x16x32_fp8_fp8 %i32_iu4_64, %a2, %b4, %index
+  %fp8_bf8 = v_swmmac_f32_16x16x32_fp8_bf8 %fp8_fp8, %a2, %b4, %index
+  %bf8_fp8 = v_swmmac_f32_16x16x32_bf8_fp8 %fp8_bf8, %a2, %b4, %index
+  %bf8_bf8 = v_swmmac_f32_16x16x32_bf8_bf8 %bf8_fp8, %a2, %b4, %index
+  return
+}
+
+// ----
+  v_swmmac_f32_16x16x32_f16 v[0:7], v[12:15], v[16:23], v25
+  v_swmmac_f16_16x16x32_f16 v[8:11], v[12:15], v[16:23], v25
+  v_swmmac_bf16_16x16x32_bf16 v[8:11], v[12:15], v[16:23], v25
+  v_swmmac_f32_16x16x32_bf16 v[0:7], v[12:15], v[16:23], v25
+  v_swmmac_i32_16x16x32_iu8 v[0:7], v[28:29], v[32:35], v25
+  v_swmmac_i32_16x16x32_iu4 v[0:7], v24, v[26:27], v25
+  v_swmmac_i32_16x16x64_iu4 v[0:7], v[28:29], v[32:35], v25
+  v_swmmac_f32_16x16x32_fp8_fp8 v[0:7], v[28:29], v[32:35], v25
+  v_swmmac_f32_16x16x32_fp8_bf8 v[0:7], v[28:29], v[32:35], v25
+  v_swmmac_f32_16x16x32_bf8_fp8 v[0:7], v[28:29], v[32:35], v25
+  v_swmmac_f32_16x16x32_bf8_bf8 v[0:7], v[28:29], v[32:35], v25
   s_endpgm

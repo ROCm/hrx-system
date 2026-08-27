@@ -1,0 +1,28 @@
+// The declaration makes the child program contract explicit without choosing
+// where its definition is packaged.
+command.program.decl @project_layer(%layer: index, %element_count: index) launch(%parameters: buffer, %input: buffer, %output: buffer) where [range(%layer, 0, 127), range(%element_count, 1, 8)]
+
+// Serial composition orders both launches; the intermediate binding carries
+// the first result into the second launch. Exact layer IDs specialize parameter
+// names while element count remains a root specialization input.
+command.program.def public @two_layer(%element_count: index) launch(%parameters: buffer, %input: buffer, %hidden: buffer, %output: buffer) where [range(%element_count, 1, 8)] {
+  %first_layer = index.constant 12 : index
+  %second_layer = index.constant 13 : index
+  command.serial {
+    command.program.launch @project_layer[%first_layer, %element_count](%parameters, %input, %hidden) : [index, index](buffer, buffer, buffer)
+    command.program.launch @project_layer[%second_layer, %element_count](%parameters, %hidden, %output) : [index, index](buffer, buffer, buffer)
+  }
+  command.return
+}
+
+// Concurrent composition creates no dependency edge between the branches and
+// joins both before the program returns.
+command.program.def public @two_branch(%element_count: index) launch(%parameters: buffer, %input: buffer, %left_output: buffer, %right_output: buffer) where [range(%element_count, 1, 8)] {
+  %left_layer = index.constant 20 : index
+  %right_layer = index.constant 21 : index
+  command.concurrent {
+    command.program.launch @project_layer[%left_layer, %element_count](%parameters, %input, %left_output) : [index, index](buffer, buffer, buffer)
+    command.program.launch @project_layer[%right_layer, %element_count](%parameters, %input, %right_output) : [index, index](buffer, buffer, buffer)
+  }
+  command.return
+}

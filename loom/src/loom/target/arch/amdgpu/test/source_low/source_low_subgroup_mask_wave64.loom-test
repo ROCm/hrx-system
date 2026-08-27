@@ -1,0 +1,69 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
+kernel.def target(@target) @subgroup_active_mask_i64_wave64() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%output: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<64xi64>
+  %mask = kernel.subgroup.active.mask : i64
+  %result = vector.from_elements %mask : vector<1xi64>
+  vector.store %result, %output_view[%tid] : vector<1xi64>, view<64xi64>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_active_mask_i64_wave64() asm {
+  %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %mask = s_mov_b64_exec_read
+  %12 = slice %mask[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %13 = v_mov_b32_copy %12
+  %14 = slice %mask[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %15 = v_mov_b32_copy %14
+  %result = concat(%13, %15) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %17 = v_lshlrev_b32_src0_inline %tid, 3
+  global_store_b64_saddr %17, %result, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
+kernel.def target(@target) @subgroup_vote_ballot_i64_wave64() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%output: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<64xi64>
+  %lane = kernel.subgroup.lane.id : index
+  %lane_i32 = index.cast %lane : index to i32
+  %limit = scalar.constant 32 : i32
+  %predicate = scalar.cmpi slt, %lane_i32, %limit : i32
+  %mask = kernel.subgroup.vote.ballot %predicate : i1 -> i64
+  %result = vector.from_elements %mask : vector<1xi64>
+  vector.store %result, %output_view[%tid] : vector<1xi64>, view<64xi64>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_vote_ballot_i64_wave64() asm {
+  %lane_i32 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %mask = v_cmp_lt_i32_src1_inline %lane_i32 {rhs = 32}
+  %16 = slice %mask[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %17 = v_mov_b32_copy %16
+  %18 = slice %mask[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %19 = v_mov_b32_copy %18
+  %result = concat(%17, %19) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %21 = v_lshlrev_b32_src0_inline %lane_i32, 3
+  global_store_b64_saddr %21, %result, %output_view
+  return
+}

@@ -21,6 +21,10 @@
 extern "C" {
 #endif
 
+typedef struct loom_target_profile_t loom_target_profile_t;
+typedef struct loom_target_facts_t loom_target_facts_t;
+typedef struct loom_target_fact_type_t loom_target_fact_type_t;
+
 typedef uint8_t loom_target_codegen_format_t;
 typedef enum loom_target_codegen_format_e {
   LOOM_TARGET_CODEGEN_FORMAT_UNKNOWN = 0,
@@ -52,6 +56,7 @@ typedef enum loom_target_abi_kind_e {
   LOOM_TARGET_ABI_VM_MODULE_FUNCTION = 3,
   LOOM_TARGET_ABI_SHADER_ENTRY_POINT = 4,
   LOOM_TARGET_ABI_WASM_FUNCTION = 5,
+  LOOM_TARGET_ABI_COMMAND_PROGRAM = 6,
 } loom_target_abi_kind_e;
 
 typedef uint8_t loom_target_linkage_t;
@@ -120,6 +125,8 @@ static inline iree_string_view_t loom_target_abi_kind_name(
       return IREE_SV("shader_entry_point");
     case LOOM_TARGET_ABI_WASM_FUNCTION:
       return IREE_SV("wasm_function");
+    case LOOM_TARGET_ABI_COMMAND_PROGRAM:
+      return IREE_SV("command_program");
     case LOOM_TARGET_ABI_UNKNOWN:
       return IREE_SV("unknown");
   }
@@ -163,6 +170,15 @@ typedef struct loom_target_workgroup_size_t {
   // Workgroup size along the z dimension.
   uint32_t z;
 } loom_target_workgroup_size_t;
+
+typedef struct loom_target_workgroup_cluster_size_t {
+  // Number of workgroups in a cluster along the x dimension.
+  uint32_t x;
+  // Number of workgroups in a cluster along the y dimension.
+  uint32_t y;
+  // Number of workgroups in a cluster along the z dimension.
+  uint32_t z;
+} loom_target_workgroup_cluster_size_t;
 
 typedef struct loom_target_grid_size_t {
   // Maximum dispatched grid size along the x dimension.
@@ -237,8 +253,6 @@ typedef struct loom_target_hal_kernel_abi_t {
   uint32_t flat_workgroup_size_min;
   // Optimization upper flat workgroup size advertised to the backend.
   uint32_t flat_workgroup_size_max;
-  // ABI-required raw buffer resource flags for global binding resources.
-  uint32_t buffer_resource_flags;
 } loom_target_hal_kernel_abi_t;
 
 typedef struct loom_target_export_plan_t {
@@ -276,25 +290,28 @@ typedef struct loom_target_bundle_t {
   const loom_target_config_t* config;
 } loom_target_bundle_t;
 
-typedef struct loom_target_selection_t {
-  // Runtime-selected effective target bundle, or NULL when source IR target
-  // records alone select the target contract.
-  const loom_target_bundle_t* bundle;
-  // Target-owned immutable payload associated with |bundle| or with the source
-  // selected target bundle when |bundle| is NULL. Core compiler code passes
-  // this through and never interprets it.
-  const void* data;
-} loom_target_selection_t;
+typedef uint8_t loom_target_binding_source_t;
+enum {
+  // No target binding source is known.
+  LOOM_TARGET_BINDING_SOURCE_UNKNOWN = 0,
+  // The source function authored its target record explicitly.
+  LOOM_TARGET_BINDING_SOURCE_AUTHORED = 1,
+  // The source function was bound by an invocation specialization request.
+  LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION = 2,
+};
 
-// Returns an empty selected target overlay.
-static inline loom_target_selection_t loom_target_selection_empty(void) {
-  return (loom_target_selection_t){0};
-}
-
-// Returns true when |selection| has no selected target overlay.
-static inline bool loom_target_selection_is_empty(
-    loom_target_selection_t selection) {
-  return selection.bundle == NULL && selection.data == NULL;
+// Returns the stable report spelling for |source|.
+static inline iree_string_view_t loom_target_binding_source_name(
+    loom_target_binding_source_t source) {
+  switch (source) {
+    case LOOM_TARGET_BINDING_SOURCE_AUTHORED:
+      return IREE_SV("authored");
+    case LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION:
+      return IREE_SV("specialization");
+    case LOOM_TARGET_BINDING_SOURCE_UNKNOWN:
+    default:
+      return IREE_SV("unknown");
+  }
 }
 
 typedef struct loom_target_bundle_table_t {
@@ -305,38 +322,12 @@ typedef struct loom_target_bundle_table_t {
   uint8_t count;
 } loom_target_bundle_table_t;
 
-enum loom_target_projection_value_bits_e {
-  // Enum attr projected into a uint8_t target enum field.
-  LOOM_TARGET_PROJECTION_VALUE_ENUM_U8 = 1,
-  // I64 attr projected into a uint32_t field after verification.
-  LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32 = 2,
-  // I64 attr projected into a uint64_t field after verification.
-  LOOM_TARGET_PROJECTION_VALUE_I64_TO_U64 = 3,
-  // String attr projected into an iree_string_view_t field.
-  LOOM_TARGET_PROJECTION_VALUE_STRING_VIEW = 4,
-};
-typedef uint8_t loom_target_projection_value_kind_t;
-
-typedef struct loom_target_projection_t {
-  // Byte offset into loom_target_bundle_storage_t for the destination field.
-  uint16_t storage_offset;
-  // Attribute index on the target-like op.
-  uint8_t attr_index;
-  // Projection operation used to copy the present attr payload.
-  loom_target_projection_value_kind_t value_kind;
-} loom_target_projection_t;
-
-static_assert(sizeof(loom_target_projection_t) == 4,
-              "loom_target_projection_t must be exactly 4 bytes");
-
-typedef struct loom_target_like_descriptor_t {
-  // Direct selector-indexed bundle table for a target-like op family.
-  const loom_target_bundle_table_t* bundle_table;
-  // Optional projection rows for typed attrs that override the selected bundle.
-  const loom_target_projection_t* projections;
-  // Number of entries in |projections|.
-  uint8_t projection_count;
-} loom_target_like_descriptor_t;
+// Resolves |selector| to a populated bundle row, or returns NULL when the
+// selector is outside the table or names an unavailable row.
+static inline const loom_target_bundle_t* loom_target_bundle_table_lookup(
+    const loom_target_bundle_table_t* table, uint32_t selector) {
+  return selector < table->count ? table->values[selector] : NULL;
+}
 
 typedef struct loom_target_bundle_storage_t {
   // Materialized target snapshot owned by this storage object.

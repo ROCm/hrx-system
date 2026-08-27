@@ -80,3 +80,19 @@ func.def @float_resize_roundtrip(%x: f16) -> (f16) {
 func.def @float_resize_roundtrip(%x: f16) -> (f16) {
   func.return %x : f16
 }
+
+// ====
+
+// Floating-point truncation chains must not collapse: double rounding can be
+// observably different from one direct truncation.
+func.def @float_truncation_chain_preserves_rounding(%x: f64) -> (f16) {
+  %f32 = scalar.fptrunc %x : f64 to f32
+  %f16 = scalar.fptrunc %f32 : f32 to f16
+  func.return %f16 : f16
+}
+// ----
+func.def @float_truncation_chain_preserves_rounding(%x: f64) -> (f16) {
+  %f32 = scalar.fptrunc %x : f64 to f32
+  %f16 = scalar.fptrunc %f32 : f32 to f16
+  func.return %f16 : f16
+}

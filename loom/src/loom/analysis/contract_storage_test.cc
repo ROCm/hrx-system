@@ -25,10 +25,11 @@ loom_value_fact_storage_schema_t EncodedSchema(
                                      : LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D;
   schema.encoded_operand.payload_register_count = payload_register_count;
   schema.encoded_operand.payload_element_count = payload_element_count;
-  schema.encoded_operand.scale_group_element_count = scale_group_element_count;
+  schema.encoded_operand.scale_group.element_count = scale_group_element_count;
   schema.encoded_operand.scale_operand_count =
       scale_group_element_count == 0 ? 0 : 1;
   if (scale_group_element_count != 0) {
+    schema.encoded_operand.scale_group.shape[0] = scale_group_element_count;
     schema.encoded_operand.flags |=
         LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_ZERO_SCALE_FALLBACK;
   }
@@ -128,6 +129,57 @@ TEST(ContractStorageTest, MapsMatrixStorageSchemaToGenericOperand) {
                                 LOOM_CONTRACT_CAPABILITY_ZERO_SCALE_FALLBACK));
 }
 
+TEST(ContractStorageTest, MapsScaleFormatToAvailableSelectorCapability) {
+  loom_value_fact_storage_schema_t schema =
+      EncodedSchema(LOOM_VALUE_FACT_NUMERIC_FORMAT_F4_E2M1, 32,
+                    LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0, 4, 32);
+
+  const loom_contract_capability_flags_t available_flags =
+      loom_contract_available_capability_flags_from_storage_schema(schema);
+  EXPECT_TRUE(iree_any_bit_set(
+      available_flags, LOOM_CONTRACT_CAPABILITY_SCALE_FORMAT_SELECTORS));
+
+  const loom_contract_capability_flags_t required_flags =
+      loom_contract_required_capability_flags_from_storage_schema(schema);
+  EXPECT_FALSE(iree_any_bit_set(
+      required_flags, LOOM_CONTRACT_CAPABILITY_SCALE_FORMAT_SELECTORS));
+}
+
+TEST(ContractStorageTest, MapsEncodedFloat8FormatsToMatrixNumerics) {
+  loom_contract_numeric_type_t numeric_type = LOOM_CONTRACT_NUMERIC_UNKNOWN;
+  ASSERT_TRUE(loom_contract_numeric_type_from_encoded_format(
+      LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3, &numeric_type));
+  EXPECT_EQ(numeric_type, LOOM_CONTRACT_NUMERIC_FP8);
+  ASSERT_TRUE(loom_contract_numeric_type_from_encoded_format(
+      LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2, &numeric_type));
+  EXPECT_EQ(numeric_type, LOOM_CONTRACT_NUMERIC_BF8);
+  ASSERT_TRUE(loom_contract_numeric_type_from_encoded_format(
+      LOOM_VALUE_FACT_NUMERIC_FORMAT_BF8, &numeric_type));
+  EXPECT_EQ(numeric_type, LOOM_CONTRACT_NUMERIC_BF8);
+}
+
+TEST(ContractStorageTest, MapsEncodedTf32ToContractNumeric) {
+  loom_contract_numeric_type_t numeric_type = LOOM_CONTRACT_NUMERIC_UNKNOWN;
+  EXPECT_TRUE(loom_contract_numeric_type_from_encoded_format(
+      LOOM_VALUE_FACT_NUMERIC_FORMAT_TF32, &numeric_type));
+  EXPECT_EQ(numeric_type, LOOM_CONTRACT_NUMERIC_TF32);
+}
+
+TEST(ContractStorageTest, MapsEncodedIntegerSemanticsToCapabilities) {
+  loom_value_fact_storage_schema_t schema =
+      EncodedSchema(LOOM_VALUE_FACT_NUMERIC_FORMAT_I8, 0,
+                    LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE, 4, 16);
+
+  loom_contract_operand_t operand = {};
+  ASSERT_TRUE(loom_contract_operand_from_storage_schema(
+      LOOM_CONTRACT_OPERAND_ROLE_LHS, schema, &operand));
+  EXPECT_EQ(operand.numeric_type, LOOM_CONTRACT_NUMERIC_I8);
+  EXPECT_TRUE(iree_all_bits_set(
+      operand.encoded.available_capability_flags,
+      LOOM_CONTRACT_CAPABILITY_SIGN_SELECT | LOOM_CONTRACT_CAPABILITY_REUSE |
+          LOOM_CONTRACT_CAPABILITY_OPERAND_MODIFIERS));
+}
+
 TEST(ContractStorageTest, RejectsUnknownMatrixFormat) {
   loom_value_fact_storage_schema_t schema = {};
 
@@ -194,6 +246,7 @@ TEST(ContractStorageTest, BuildsMatrixRequestFromPayloadFacts) {
   EXPECT_EQ(request.shape.m, 16);
   EXPECT_EQ(request.shape.n, 16);
   EXPECT_EQ(request.shape.k, 128);
+  EXPECT_EQ(request.shape.block_count, 1);
   EXPECT_EQ(request.lhs.numeric_type, LOOM_CONTRACT_NUMERIC_FP6);
   EXPECT_EQ(request.lhs.payload_register_count, 6);
   EXPECT_EQ(request.rhs.numeric_type, LOOM_CONTRACT_NUMERIC_BF6);
@@ -246,6 +299,7 @@ TEST(ContractStorageTest, BuildsMatrixRequestWithDynamicShapeRefs) {
   EXPECT_EQ(loom_contract_value_ref_value_id(request.shape_value_refs.m), 42u);
   EXPECT_EQ(request.shape.n, 16);
   EXPECT_EQ(request.shape.k, 128);
+  EXPECT_EQ(request.shape.block_count, 1);
 }
 
 TEST(ContractStorageTest, BuildsPackedDotRequestFromPlainPayloadFacts) {

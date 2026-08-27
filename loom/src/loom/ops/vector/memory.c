@@ -7,6 +7,8 @@
 #include "loom/ops/vector/memory.h"
 
 #include "loom/ir/scalar_type.h"
+#include "loom/ops/encoding/storage.h"
+#include "loom/ops/vector/fragment.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/util/fact_table.h"
 
@@ -28,7 +30,6 @@ static bool loom_vector_memory_query_layout(
     loom_type_t view_type, loom_value_facts_t* stride_storage,
     iree_host_size_t stride_capacity,
     loom_value_fact_address_layout_t* out_layout) {
-  if (!module || !loom_type_has_encoding(view_type)) return false;
   return loom_encoding_query_type_address_layout(
       context, module, view_type, stride_storage, stride_capacity, out_layout);
 }
@@ -61,6 +62,21 @@ bool loom_vector_memory_access_describe(
   (void)loom_vector_memory_query_layout(
       context, module, view_type, layout_strides,
       IREE_ARRAYSIZE(layout_strides), &layout_summary);
+  loom_encoding_address_layout_operands_t layout_operands = {0};
+  bool layout_has_non_exact_stride = false;
+  if (layout_summary.kind == LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED &&
+      layout_summary.strides != NULL) {
+    for (uint8_t i = 0; i < layout_summary.rank; ++i) {
+      if (!loom_value_facts_is_exact(layout_summary.strides[i])) {
+        layout_has_non_exact_stride = true;
+        break;
+      }
+    }
+  }
+  if (context != NULL && layout_has_non_exact_stride) {
+    (void)loom_encoding_query_type_address_layout_operands(module, view_type,
+                                                           &layout_operands);
+  }
   *out_access = (loom_vector_memory_access_t){
       .view_type = view_type,
       .vector_type = vector_type,
@@ -71,6 +87,7 @@ bool loom_vector_memory_access_describe(
       .static_element_byte_count = static_element_byte_count,
       .layout_kind = loom_vector_memory_layout_kind(layout_summary),
       .layout_summary = layout_summary,
+      .layout_operands = layout_operands,
   };
   if (layout_summary.strides == layout_strides) {
     for (uint8_t i = 0; i < layout_summary.rank; ++i) {
@@ -98,15 +115,111 @@ static bool loom_vector_memory_value_type(const loom_module_t* module,
   return true;
 }
 
-static bool loom_vector_memory_access_has_atomic_attrs(
-    loom_memory_access_t access) {
-  return !loom_attr_is_absent(loom_memory_access_atomic_kind(access)) ||
-         !loom_attr_is_absent(loom_memory_access_atomic_ordering(access)) ||
-         !loom_attr_is_absent(
-             loom_memory_access_atomic_success_ordering(access)) ||
-         !loom_attr_is_absent(
-             loom_memory_access_atomic_failure_ordering(access)) ||
-         !loom_attr_is_absent(loom_memory_access_atomic_scope(access));
+static bool loom_vector_memory_fragment_footprint_type(
+    const loom_module_t* module, loom_type_t view_type, const loom_op_t* op,
+    loom_overflow_dim_t dimension_storage[3], loom_type_t* out_type) {
+  *out_type = loom_type_none();
+  if (loom_type_rank(view_type) < 2) return false;
+
+  loom_value_id_t blocks = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t rows = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t columns = LOOM_VALUE_ID_INVALID;
+  switch (op->kind) {
+    case LOOM_OP_VECTOR_FRAGMENT_LOAD:
+      blocks = loom_vector_fragment_load_blocks(op);
+      rows = loom_vector_fragment_load_rows(op);
+      columns = loom_vector_fragment_load_columns(op);
+      break;
+    case LOOM_OP_VECTOR_FRAGMENT_STORE:
+      blocks = loom_vector_fragment_store_blocks(op);
+      rows = loom_vector_fragment_store_rows(op);
+      columns = loom_vector_fragment_store_columns(op);
+      break;
+    default:
+      return false;
+  }
+
+  const uint8_t shape_rank = blocks == LOOM_VALUE_ID_INVALID ? 2 : 3;
+  loom_value_id_t shape[3] = {blocks, rows, columns};
+  const uint8_t shape_offset = (uint8_t)(3 - shape_rank);
+  if (loom_type_rank(view_type) < shape_rank) {
+    return false;
+  }
+  for (uint8_t i = shape_offset; i < 3; ++i) {
+    if (shape[i] == LOOM_VALUE_ID_INVALID || shape[i] >= module->values.count) {
+      return false;
+    }
+  }
+  if (shape_rank == 2) {
+    *out_type = loom_type_shaped_2d(
+        LOOM_TYPE_VECTOR, loom_type_element_type(view_type),
+        loom_dim_pack_dynamic(rows), loom_dim_pack_dynamic(columns),
+        /*encoding_id=*/0);
+    return true;
+  }
+  for (uint8_t i = 0; i < shape_rank; ++i) {
+    dimension_storage[i] = loom_dim_pack_dynamic(shape[i]);
+  }
+  out_type->header =
+      loom_type_make_header(LOOM_TYPE_VECTOR, loom_type_element_type(view_type),
+                            shape_rank, /*flags=*/0);
+  out_type->dims[0] = (uint64_t)(uintptr_t)dimension_storage;
+  return true;
+}
+
+static loom_vector_memory_footprint_axis_scale_t
+loom_vector_memory_fragment_footprint_axis_scale(
+    const loom_fact_context_t* context, const loom_module_t* module,
+    loom_type_t view_type, const loom_op_t* op) {
+  loom_vector_memory_footprint_axis_scale_t scale = {
+      .vector_axis = UINT8_MAX,
+  };
+  loom_value_fact_storage_schema_t storage_schema = {0};
+  if (!loom_encoding_query_type_storage_schema(context, module, view_type,
+                                               &storage_schema)) {
+    return scale;
+  }
+  const loom_value_fact_encoded_operand_schema_t operand =
+      storage_schema.encoded_operand;
+  if (operand.sparsity_policy !=
+          LOOM_VALUE_FACT_SPARSITY_POLICY_N_M_STRUCTURED ||
+      !loom_value_fact_encoded_operand_schema_sparsity_is_complete(operand)) {
+    return scale;
+  }
+
+  loom_vector_role_t role = LOOM_VECTOR_ROLE_COUNT_;
+  bool has_blocks = false;
+  switch (op->kind) {
+    case LOOM_OP_VECTOR_FRAGMENT_LOAD:
+      role = loom_vector_fragment_load_role(op);
+      has_blocks = loom_vector_fragment_load_blocks_is_present(op);
+      break;
+    case LOOM_OP_VECTOR_FRAGMENT_STORE:
+      role = loom_vector_fragment_store_role(op);
+      has_blocks = loom_vector_fragment_store_blocks_is_present(op);
+      break;
+    default:
+      return scale;
+  }
+  static const uint8_t kReductionVectorAxes[LOOM_VECTOR_ROLE_COUNT_] = {
+      [LOOM_VECTOR_ROLE_LHS] = 1,
+      [LOOM_VECTOR_ROLE_RHS] = 0,
+      [LOOM_VECTOR_ROLE_INIT] = UINT8_MAX,
+      [LOOM_VECTOR_ROLE_RESULT] = UINT8_MAX,
+  };
+  if ((iree_host_size_t)role >= IREE_ARRAYSIZE(kReductionVectorAxes)) {
+    return scale;
+  }
+  scale.vector_axis = kReductionVectorAxes[role];
+  if (scale.vector_axis == UINT8_MAX) {
+    return scale;
+  }
+  if (has_blocks) {
+    ++scale.vector_axis;
+  }
+  scale.storage_element_count = operand.sparsity_group.nonzero_element_count;
+  scale.logical_element_count = operand.sparsity_group.element_count;
+  return scale;
 }
 
 static loom_vector_memory_footprint_kind_t
@@ -127,7 +240,8 @@ loom_vector_memory_classify_footprint_kind(const loom_op_t* op,
       loom_memory_access_mask(access) != LOOM_VALUE_ID_INVALID;
   const bool has_offsets =
       loom_memory_access_offsets(access) != LOOM_VALUE_ID_INVALID;
-  const bool has_atomic = loom_vector_memory_access_has_atomic_attrs(access);
+  const bool has_atomic = loom_memory_access_operation_kind_is_atomic(
+      loom_memory_access_operation_kind(access));
   if (has_atomic) {
     return has_mask ? LOOM_VECTOR_MEMORY_FOOTPRINT_MASKED_ATOMIC_PER_LANE
                     : LOOM_VECTOR_MEMORY_FOOTPRINT_ATOMIC_PER_LANE;
@@ -138,6 +252,18 @@ loom_vector_memory_classify_footprint_kind(const loom_op_t* op,
   }
   return has_mask ? LOOM_VECTOR_MEMORY_FOOTPRINT_MASKED_DENSE
                   : LOOM_VECTOR_MEMORY_FOOTPRINT_DENSE;
+}
+
+loom_vector_memory_footprint_kind_t loom_vector_memory_op_footprint_kind(
+    const loom_module_t* module, const loom_op_t* op) {
+  if (!module || !op || loom_op_dialect_id(op->kind) != LOOM_DIALECT_VECTOR) {
+    return LOOM_VECTOR_MEMORY_FOOTPRINT_NONE;
+  }
+  loom_memory_access_t access = loom_memory_access_cast(module, op);
+  if (!loom_memory_access_isa(access)) {
+    return LOOM_VECTOR_MEMORY_FOOTPRINT_NONE;
+  }
+  return loom_vector_memory_classify_footprint_kind(op, access);
 }
 
 bool loom_vector_memory_footprint_describe(
@@ -151,6 +277,7 @@ bool loom_vector_memory_footprint_describe(
       .mask = LOOM_VALUE_ID_INVALID,
       .passthrough = LOOM_VALUE_ID_INVALID,
       .offsets = LOOM_VALUE_ID_INVALID,
+      .axis_scale.vector_axis = UINT8_MAX,
   };
   if (!module || !op || loom_op_dialect_id(op->kind) != LOOM_DIALECT_VECTOR) {
     return false;
@@ -163,7 +290,7 @@ bool loom_vector_memory_footprint_describe(
   if (view >= module->values.count) return false;
   const loom_type_t view_type = loom_module_value_type(module, view);
 
-  loom_vector_memory_footprint_t footprint = {
+  *out_footprint = (loom_vector_memory_footprint_t){
       .kind = loom_vector_memory_classify_footprint_kind(op, access),
       .access = access,
       .view = view,
@@ -175,29 +302,35 @@ bool loom_vector_memory_footprint_describe(
       .static_indices = loom_memory_access_static_indices(access),
       .view_type = view_type,
       .vector_type = loom_type_none(),
+      .axis_scale.vector_axis = UINT8_MAX,
   };
+  loom_vector_memory_footprint_t* footprint = out_footprint;
 
   const loom_trait_flags_t traits = loom_op_effective_traits(module, op);
   if (loom_traits_may_read(traits)) {
-    footprint.flags |= LOOM_VECTOR_MEMORY_FOOTPRINT_READS;
+    footprint->flags |= LOOM_VECTOR_MEMORY_FOOTPRINT_READS;
   }
   if (loom_traits_may_write(traits)) {
-    footprint.flags |= LOOM_VECTOR_MEMORY_FOOTPRINT_WRITES;
+    footprint->flags |= LOOM_VECTOR_MEMORY_FOOTPRINT_WRITES;
   }
 
-  if (footprint.kind != LOOM_VECTOR_MEMORY_FOOTPRINT_FRAGMENT) {
-    if (!loom_vector_memory_value_type(module, op, access,
-                                       &footprint.vector_type)) {
+  if (footprint->kind == LOOM_VECTOR_MEMORY_FOOTPRINT_FRAGMENT) {
+    if (!loom_vector_memory_fragment_footprint_type(
+            module, view_type, op, footprint->fragment_dimensions,
+            &footprint->vector_type)) {
       return false;
     }
-    if (!loom_vector_memory_access_describe(context, module, view_type,
-                                            footprint.vector_type,
-                                            &footprint.vector_access)) {
-      return false;
-    }
+    footprint->axis_scale = loom_vector_memory_fragment_footprint_axis_scale(
+        context, module, view_type, op);
+  } else if (!loom_vector_memory_value_type(module, op, access,
+                                            &footprint->vector_type)) {
+    return false;
   }
-
-  *out_footprint = footprint;
+  if (!loom_vector_memory_access_describe(context, module, view_type,
+                                          footprint->vector_type,
+                                          &footprint->vector_access)) {
+    return false;
+  }
   return true;
 }
 
@@ -384,4 +517,28 @@ bool loom_vector_memory_access_static_lane_byte_offset(
   }
   return iree_checked_mul_i64(element_offset, access->static_element_byte_count,
                               out_byte_offset);
+}
+
+bool loom_vector_memory_access_linear_element_end_facts(
+    const loom_vector_memory_access_t* access,
+    const loom_value_facts_t* axis_exclusive_end_facts,
+    loom_value_facts_t* out_element_end_facts) {
+  loom_value_facts_t maximum_element_offset = loom_value_facts_exact_i64(0);
+  const loom_value_facts_t one = loom_value_facts_exact_i64(1);
+  for (uint8_t axis = 0; axis < access->view_rank; ++axis) {
+    int64_t stride = 0;
+    if (!loom_vector_memory_access_static_axis_stride(access, axis, &stride)) {
+      return false;
+    }
+    loom_value_facts_t maximum_index = loom_value_facts_unknown();
+    loom_value_facts_subi(&axis_exclusive_end_facts[axis], &one,
+                          &maximum_index);
+    const loom_value_facts_t stride_facts = loom_value_facts_exact_i64(stride);
+    loom_value_facts_t contribution = loom_value_facts_unknown();
+    loom_value_facts_muli(&maximum_index, &stride_facts, &contribution);
+    loom_value_facts_addi(&maximum_element_offset, &contribution,
+                          &maximum_element_offset);
+  }
+  loom_value_facts_addi(&maximum_element_offset, &one, out_element_end_facts);
+  return true;
 }

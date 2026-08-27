@@ -1,0 +1,30 @@
+kernel.decl @configured(%count: index) launch()
+
+kernel.entry.decl @dispatched()
+
+func.def @interleaved_dependency() {
+  func.return
+}
+
+config.def @local_configuration_dependency = 1 : index
+
+func.def @local_implementation_dependency() {
+  func.return
+}
+
+kernel.def @local(%count: index) {
+  %configured = config.get @local_configuration_dependency : index
+  kernel.launch.config workgroups(%count, %configured, %configured) workgroup_size(%configured, %configured, %configured) : index
+} launch() {
+  func.call @local_implementation_dependency() : ()
+  kernel.return
+}
+
+func.def public @entry(%count: index) {
+  kernel.launch @configured[%count]() : [index]()
+  func.call @interleaved_dependency() : ()
+  kernel.launch @configured[%count]() : [index]()
+  kernel.launch @local[%count]() : [index]()
+  kernel.dispatch @dispatched[%count]() : [index]()
+  func.return
+}

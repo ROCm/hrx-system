@@ -22,24 +22,24 @@ kernel.def @shared_memory_tile_reverse() {
   //   __shared__ int scratch[64];
   // Loom spelling: allocate workgroup-memory storage and create a typed view.
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
-  %input_view = buffer.view %input_noalias[%base] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output_noalias[%base] : buffer -> view<64xi32, #dense>
-  %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%base] : buffer -> view<64xi32, #dense>
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<64xi32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<64xi32>
+  %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<64xi32>
 
   // HIP concept:
   //   scratch[threadIdx.x] = input[threadIdx.x];
-  %loaded = vector.load %input_view[%lane] : view<64xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<64xi32, #dense>
+  %loaded = vector.load %input_view[%lane] : view<64xi32> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<64xi32>
 
   // HIP concept:
   //   __syncthreads();
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 
   // HIP concept:
   //   output[threadIdx.x] = scratch[63 - threadIdx.x];
-  %reversed = vector.load %scratch_view[%reverse_lane] : view<64xi32, #dense> -> vector<1xi32>
-  vector.store %reversed, %output_view[%lane] : vector<1xi32>, view<64xi32, #dense>
+  %reversed = vector.load %scratch_view[%reverse_lane] : view<64xi32> -> vector<1xi32>
+  vector.store %reversed, %output_view[%lane] : vector<1xi32>, view<64xi32>
   kernel.return
 }
 
@@ -47,7 +47,7 @@ check.case @case_shared_memory_tile_reverse {
   %input = check.generate.iota offset(1) step(1) : tensor<64xi32>
   %output = check.generate.fill value(0) : tensor<64xi32>
   %expected = check.generate.iota offset(64) step(-1) : tensor<64xi32>
-  func.call @shared_memory_tile_reverse(%input, %output) : (tensor<64xi32>, tensor<64xi32>)
+  kernel.launch @shared_memory_tile_reverse(%input, %output) : (tensor<64xi32>, tensor<64xi32>)
   check.expect.equal actual(%output) expected(%expected) : tensor<64xi32>
   check.return
 }

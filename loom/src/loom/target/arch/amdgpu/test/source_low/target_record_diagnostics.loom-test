@@ -17,3 +17,18 @@ amdgpu.target<gfx1250> @gfx1250_wave64 {subgroup_size = 64}
 
 // ERROR@+1: AMDGPU/026 {target_name="gfx1100_zero", subgroup_size="0", processor="gfx1100"}
 amdgpu.target<gfx1100> @gfx1100_zero {subgroup_size = 0}
+
+// ====
+
+// ERROR@+1: AMDGPU/048 {target_name="gfx1151_xnack", feature="xnack", required_state="enabled", processor="gfx1151"}
+amdgpu.target<gfx1151> @gfx1151_xnack {features = [xnack]}
+
+// ====
+
+// ERROR@+1: AMDGPU/048 {target_name="gfx1151_sramecc", feature="sramecc", required_state="disabled", processor="gfx1151"}
+amdgpu.target<gfx1151> @gfx1151_sramecc {features = [-sramecc]}
+
+// ====
+
+// ERROR@+1: AMDGPU/050 {target_name="gfx942_empty"}
+amdgpu.target<gfx942> @gfx942_empty {features = []}

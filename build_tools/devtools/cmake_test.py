@@ -24,6 +24,11 @@ from build_tools.devtools import (
 from build_tools.devtools.environment import REPO_ROOT, ToolEnvironment, ToolMode
 
 
+def normalized_plan_description(plan) -> str:
+    """Returns a host-neutral rendering for semantic plan assertions."""
+    return plan.describe().replace("\\", "/").replace(".exe", "")
+
+
 class CMakeTest(unittest.TestCase):
     def test_local_tmp_root_defaults_to_repo_tmp(self):
         self.assertEqual(
@@ -32,11 +37,12 @@ class CMakeTest(unittest.TestCase):
         )
 
     def test_local_tmp_root_uses_environment_override(self):
+        absolute_path = Path(tempfile.gettempdir()) / "iree-x"
         self.assertEqual(
             environment.local_tmp_root(
-                environ={environment.DEVTOOLS_TMP_ENV: "/tmp/iree-x"}
+                environ={environment.DEVTOOLS_TMP_ENV: str(absolute_path)}
             ),
-            Path("/tmp/iree-x"),
+            absolute_path,
         )
         self.assertEqual(
             environment.local_tmp_root(
@@ -61,7 +67,8 @@ class CMakeTest(unittest.TestCase):
         )
 
     def test_build_dir_preserves_absolute_paths(self):
-        self.assertEqual(cmake_dev.build_dir(Path("/tmp/cmake")), Path("/tmp/cmake"))
+        absolute_path = Path(tempfile.gettempdir()) / "cmake"
+        self.assertEqual(cmake_dev.build_dir(absolute_path), absolute_path)
 
     def test_build_dir_prefers_environment_over_recorded_state(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
@@ -91,10 +98,21 @@ class CMakeTest(unittest.TestCase):
             )
 
     def test_build_args_translate_target_shorthand(self):
-        self.assertEqual(
-            cmake_dev.build_args(["hrx", "iree-run-module", "--parallel", "8"]),
-            ["--target", "hrx", "--target", "iree-run-module", "--parallel", "8"],
-        )
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            self.assertEqual(
+                cmake_dev.build_args(
+                    ["hrx", "iree-run-module", "--parallel", "8"],
+                    configured_build_dir=Path(temporary_dir),
+                ),
+                [
+                    "--target",
+                    "hrx",
+                    "--target",
+                    "iree-run-module",
+                    "--parallel",
+                    "8",
+                ],
+            )
 
     def test_default_fuzz_cache_dir_uses_platform_cache_roots(self):
         self.assertEqual(
@@ -164,7 +182,7 @@ class CMakeTest(unittest.TestCase):
             configured_build_dir=Path("build/cmake-debug"),
             backend_args=["-DIREE_HAL_DRIVER_AMDGPU=OFF"],
         )
-        configure_description = configure_plan.describe()
+        configure_description = normalized_plan_description(configure_plan)
         self.assertIn("build/cmake-debug", configure_description)
         self.assertIn("codemodel-v2", configure_description)
         self.assertIn("record CMake build directory", configure_description)
@@ -184,6 +202,129 @@ class CMakeTest(unittest.TestCase):
         )
         self.assertIn("ctest", test_plan.describe())
         self.assertIn("-R hrx", test_plan.describe())
+        self.assertIn("selected-ctest-build-roots", test_plan.describe())
+        self.assertIn("cmake --build", test_plan.describe())
+
+        inspect_plan = cmake_dev.test_plan(
+            tool_env,
+            configured_build_dir=Path("build/cmake-debug"),
+            backend_args=["-N", "-R", "hrx"],
+        )
+        self.assertIn("ctest", inspect_plan.describe())
+        self.assertNotIn("cmake --build", inspect_plan.describe())
+
+    def test_fresh_configure_preserves_configured_generator(self):
+        tool_env = ToolEnvironment(ToolMode.SYSTEM, None)
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            build_dir = Path(temporary_dir) / "build"
+            build_dir.mkdir()
+            (build_dir / "CMakeCache.txt").write_text(
+                "CMAKE_GENERATOR:INTERNAL=Ninja\n"
+                f"CMAKE_HOME_DIRECTORY:INTERNAL={REPO_ROOT}\n",
+                encoding="utf-8",
+            )
+            nested_cache = build_dir / "_deps/googletest-subbuild/CMakeCache.txt"
+            nested_cache.parent.mkdir(parents=True)
+            nested_cache.write_text(
+                "CMAKE_GENERATOR:INTERNAL=Ninja\n",
+                encoding="utf-8",
+            )
+
+            plan = cmake_dev.configure_plan(
+                tool_env,
+                configured_build_dir=build_dir,
+                backend_args=["--fresh"],
+                env={},
+            )
+
+            description = normalized_plan_description(plan)
+            self.assertIn("preserve CMake generator Ninja", description)
+            self.assertIn("-G Ninja --fresh", description)
+            self.assertFalse(plan.steps[0].reset_build_tree)
+            self.assertEqual(plan.steps[0].run(), 0)
+            self.assertTrue(nested_cache.is_file())
+
+    def test_fresh_configure_removes_tree_when_generator_changes(self):
+        tool_env = ToolEnvironment(ToolMode.SYSTEM, None)
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            build_dir = Path(temporary_dir) / "build"
+            build_dir.mkdir()
+            (build_dir / "CMakeCache.txt").write_text(
+                "CMAKE_GENERATOR:INTERNAL=Ninja\n"
+                f"CMAKE_HOME_DIRECTORY:INTERNAL={REPO_ROOT}\n",
+                encoding="utf-8",
+            )
+            nested_cache = build_dir / "_deps/googletest-subbuild/CMakeCache.txt"
+            nested_cache.parent.mkdir(parents=True)
+            nested_cache.write_text(
+                "CMAKE_GENERATOR:INTERNAL=Ninja\n",
+                encoding="utf-8",
+            )
+
+            plan = cmake_dev.configure_plan(
+                tool_env,
+                configured_build_dir=build_dir,
+                backend_args=["--fresh", "-G", "Unix Makefiles"],
+                env={},
+            )
+
+            description = normalized_plan_description(plan)
+            self.assertIn(
+                "switch CMake generator from Ninja to Unix Makefiles",
+                description,
+            )
+            self.assertTrue(plan.steps[0].reset_build_tree)
+            self.assertEqual(plan.steps[0].run(), 0)
+            self.assertFalse(build_dir.exists())
+
+    def test_fresh_configure_removes_incomplete_build_tree(self):
+        tool_env = ToolEnvironment(ToolMode.SYSTEM, None)
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            build_dir = Path(temporary_dir) / "build"
+            stale_cache = build_dir / "_deps/googletest-subbuild/CMakeCache.txt"
+            stale_cache.parent.mkdir(parents=True)
+            stale_cache.write_text(
+                "CMAKE_GENERATOR:INTERNAL=Ninja\n",
+                encoding="utf-8",
+            )
+            marker_path = build_dir / cmake_dev.CMAKE_BUILD_TREE_MARKER
+            marker_path.parent.mkdir(parents=True, exist_ok=True)
+            marker_path.write_text(
+                cmake_dev.CMAKE_BUILD_TREE_MARKER_CONTENT,
+                encoding="utf-8",
+            )
+
+            plan = cmake_dev.configure_plan(
+                tool_env,
+                configured_build_dir=build_dir,
+                backend_args=["--fresh"],
+                env={},
+            )
+
+            self.assertIn("remove incomplete CMake build tree", plan.describe())
+            self.assertTrue(plan.steps[0].reset_build_tree)
+            self.assertEqual(plan.steps[0].run(), 0)
+            self.assertFalse(build_dir.exists())
+
+    def test_fresh_configure_refuses_to_remove_unrecognized_directory(self):
+        tool_env = ToolEnvironment(ToolMode.SYSTEM, None)
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            build_dir = Path(temporary_dir) / "build"
+            build_dir.mkdir()
+            user_file = build_dir / "keep.txt"
+            user_file.write_text("not a build tree\n", encoding="utf-8")
+
+            plan = cmake_dev.configure_plan(
+                tool_env,
+                configured_build_dir=build_dir,
+                backend_args=["--fresh"],
+                env={},
+            )
+
+            self.assertEqual(plan.steps[0].run(), 1)
+            self.assertEqual(
+                user_file.read_text(encoding="utf-8"), "not a build tree\n"
+            )
 
     def test_run_plan_resolves_target_with_cmake_file_api(self):
         tool_env = ToolEnvironment(ToolMode.SYSTEM, None)
@@ -193,11 +334,12 @@ class CMakeTest(unittest.TestCase):
             configured_build_dir=Path("build/cmake-debug"),
             backend_args=["iree-run-module", "--", "--help"],
         )
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("# cmake run iree-run-module", description)
         self.assertIn("CMake File API", description)
-        self.assertIn("exec '<built executable>' --help", description)
+        self.assertIn("<built executable>", description)
+        self.assertIn("--help", description)
 
     def test_run_parse_supports_print_path(self):
         command = cmake_dev.parse_run_args(["-p", "iree-run-module"])
@@ -214,7 +356,7 @@ class CMakeTest(unittest.TestCase):
             backend_args=[],
         )
 
-        description = plan.describe()
+        description = normalized_plan_description(plan)
         self.assertIn("# cmake compile-commands", description)
         self.assertIn("build/cmake-debug/compile_commands.json", description)
         self.assertIn("print", description)
@@ -287,12 +429,13 @@ class CMakeTest(unittest.TestCase):
                 "-max_total_time=1",
             ],
         )
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn("# cmake fuzz iree::tokenizer::special_tokens_fuzz", description)
         self.assertIn("--target iree::tokenizer::special_tokens_fuzz", description)
         self.assertIn("--parallel 8", description)
-        self.assertIn("exec '<built fuzzer>' '<corpus>'", description)
+        self.assertIn("<built fuzzer>", description)
+        self.assertIn("<corpus>", description)
 
     def test_fuzz_requires_fuzz_enabled_cache(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
@@ -352,7 +495,7 @@ class CMakeTest(unittest.TestCase):
                 "int main() { return 0; }",
             ],
         )
-        description = plan.describe()
+        description = normalized_plan_description(plan)
 
         self.assertIn(".tmp/iree-cmake-try/run-<pid>/try.cmake", description)
         self.assertIn("-DIREE_CMAKE_TRY_FILE=", description)

@@ -19,6 +19,7 @@
 #include "loom/format/text/printer.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/test/registry.h"
 #include "loom/verify/verify.h"
 
 namespace loom {
@@ -35,6 +36,7 @@ class PassOpsTest : public ::testing::Test {
     const loom_op_vtable_t* const* vtables = loom_pass_dialect_vtables(&count);
     IREE_ASSERT_OK(loom_context_register_dialect(&context_, LOOM_DIALECT_PASS,
                                                  vtables, (uint16_t)count));
+    IREE_ASSERT_OK(loom_test_dialect_register(&context_));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
   }
 
@@ -118,6 +120,9 @@ TEST_F(PassOpsTest, ParsePrintVerifyAndBytecodeRoundTrip) {
   static const char kSource[] =
       "pass.pipeline<module> @cleanup pipeline {\n"
       "  canonicalize(max_iterations = 10)\n"
+      "  if changed {\n"
+      "    cse\n"
+      "  }\n"
       "  repeat until_converged(max_iterations = 8) {\n"
       "    cse\n"
       "    dce\n"
@@ -149,6 +154,32 @@ TEST_F(PassOpsTest, ParsePrintVerifyAndBytecodeRoundTrip) {
   loom_module_t* loaded = ReadBytecode(bytecode);
   ASSERT_NE(loaded, nullptr);
   EXPECT_EQ(Print(loaded), std::string(source.data, source.size));
+
+  loom_module_free(loaded);
+  loom_module_free(module);
+}
+
+TEST_F(PassOpsTest, CompactParameterizedAttrsRoundTripInFriendlySyntax) {
+  static const char kInput[] =
+      "pass.pipeline<module> @compact pipeline {\n"
+      "  choose(condition = "
+      "#test.compact<label = \"wave\", value = 64>)\n"
+      "}\n";
+  static const char kExpected[] =
+      "pass.pipeline<module> @compact pipeline {\n"
+      "  choose(condition = #test.compact<64, label = \"wave\">)\n"
+      "}\n";
+
+  loom_module_t* module =
+      Parse(iree_make_string_view(kInput, IREE_ARRAYSIZE(kInput) - 1));
+  ASSERT_NE(module, nullptr);
+  VerifyOk(module);
+  EXPECT_EQ(Print(module), kExpected);
+
+  std::vector<uint8_t> bytecode = WriteBytecode(module);
+  loom_module_t* loaded = ReadBytecode(bytecode);
+  ASSERT_NE(loaded, nullptr);
+  EXPECT_EQ(Print(loaded), kExpected);
 
   loom_module_free(loaded);
   loom_module_free(module);

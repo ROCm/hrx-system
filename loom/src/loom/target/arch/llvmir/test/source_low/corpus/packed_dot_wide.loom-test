@@ -11,7 +11,7 @@ func.def target(@target) @bf16_dot2_256(%lhs: vector<16xbf16>, %rhs: vector<16xb
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @bf16_dot2_256(%lhs: reg<llvmir.bf16 x16>, %rhs: reg<llvmir.bf16 x16>, %acc: reg<llvmir.f32 x8>) -> (reg<llvmir.f32 x8>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @bf16_dot2_256(%lhs: reg<llvmir.bf16 x16>, %rhs: reg<llvmir.bf16 x16>, %acc: reg<llvmir.f32 x8>) -> (reg<llvmir.f32 x8>) asm {
   %98 = extract.v8f32 %acc, 0
   %99 = extract.v16bf16 %lhs, 0
   %100 = extract.v16bf16 %rhs, 0
@@ -116,7 +116,7 @@ func.def target(@target) @dot4i_u8s8_256(%lhs: vector<32xi8>, %rhs: vector<32xi8
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @dot4i_u8s8_256(%lhs: reg<llvmir.i8 x32>, %rhs: reg<llvmir.i8 x32>, %acc: reg<llvmir.i32 x8>) -> (reg<llvmir.i32 x8>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot4i_u8s8_256(%lhs: reg<llvmir.i8 x32>, %rhs: reg<llvmir.i8 x32>, %acc: reg<llvmir.i32 x8>) -> (reg<llvmir.i32 x8>) asm {
   %210 = extract.v8i32 %acc, 0
   %211 = extract.v32i8 %lhs, 0
   %212 = extract.v32i8 %rhs, 0
@@ -333,7 +333,7 @@ func.def target(@target) @dot4i_s8s8_256(%lhs: vector<32xi8>, %rhs: vector<32xi8
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @dot4i_s8s8_256(%lhs: reg<llvmir.i8 x32>, %rhs: reg<llvmir.i8 x32>, %acc: reg<llvmir.i32 x8>) -> (reg<llvmir.i32 x8>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot4i_s8s8_256(%lhs: reg<llvmir.i8 x32>, %rhs: reg<llvmir.i8 x32>, %acc: reg<llvmir.i32 x8>) -> (reg<llvmir.i32 x8>) asm {
   %210 = extract.v8i32 %acc, 0
   %211 = extract.v32i8 %lhs, 0
   %212 = extract.v32i8 %rhs, 0

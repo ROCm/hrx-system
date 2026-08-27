@@ -5,10 +5,10 @@
 
 #include "hrx_internal.h"
 
-_Static_assert(sizeof(hrx_host_allocator_t) == sizeof(iree_allocator_t),
-               "host allocator layout mismatch");
-_Static_assert(_Alignof(hrx_host_allocator_t) == _Alignof(iree_allocator_t),
-               "host allocator alignment mismatch");
+static_assert(sizeof(hrx_host_allocator_t) == sizeof(iree_allocator_t),
+              "host allocator layout mismatch");
+static_assert(_Alignof(hrx_host_allocator_t) == _Alignof(iree_allocator_t),
+              "host allocator alignment mismatch");
 
 // Type-pun allocator values. Both are two-word structs {self, ctl} with
 // identical layout, but HRX keeps the control pointer opaque in the public API.

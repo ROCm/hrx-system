@@ -8,30 +8,128 @@
 # Main user rules
 ###############################################################################
 
+function(_iree_finalize_windows_python_sources)
+  get_property(
+    _SOURCE_FILES GLOBAL PROPERTY IREE_WINDOWS_PYTHON_SOURCE_FILES
+  )
+  get_property(
+    _DESTINATION_FILES GLOBAL PROPERTY IREE_WINDOWS_PYTHON_DESTINATION_FILES
+  )
+  list(LENGTH _SOURCE_FILES _SOURCE_FILE_COUNT)
+  list(LENGTH _DESTINATION_FILES _DESTINATION_FILE_COUNT)
+  if(_SOURCE_FILE_COUNT EQUAL 0 OR
+     NOT _SOURCE_FILE_COUNT EQUAL _DESTINATION_FILE_COUNT)
+    message(FATAL_ERROR
+      "invalid Windows Python source materialization registration"
+    )
+  endif()
+
+  set(_MANIFEST_CONTENT "")
+  math(EXPR _LAST_SOURCE_FILE_INDEX "${_SOURCE_FILE_COUNT} - 1")
+  foreach(_FILE_INDEX RANGE ${_LAST_SOURCE_FILE_INDEX})
+    list(GET _SOURCE_FILES ${_FILE_INDEX} _SOURCE_FILE)
+    list(GET _DESTINATION_FILES ${_FILE_INDEX} _DESTINATION_FILE)
+    string(APPEND _MANIFEST_CONTENT
+      "${_SOURCE_FILE}|${_DESTINATION_FILE}\n"
+    )
+  endforeach()
+
+  set(_MATERIALIZATION_MANIFEST
+    "${CMAKE_BINARY_DIR}/CMakeFiles/iree_windows_python_sources.txt"
+  )
+  set(_MATERIALIZATION_STAMP
+    "${CMAKE_BINARY_DIR}/CMakeFiles/iree_windows_python_sources.stamp"
+  )
+  set(_MATERIALIZE_FILES_SCRIPT
+    "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/iree_materialize_files.cmake"
+  )
+  file(CONFIGURE
+    OUTPUT "${_MATERIALIZATION_MANIFEST}"
+    CONTENT "${_MANIFEST_CONTENT}"
+    @ONLY
+    NEWLINE_STYLE UNIX
+  )
+
+  add_custom_command(
+    OUTPUT
+      "${_MATERIALIZATION_STAMP}"
+    BYPRODUCTS
+      ${_DESTINATION_FILES}
+    COMMAND
+      ${CMAKE_COMMAND}
+        "-DIREE_MATERIALIZATION_MANIFEST=${_MATERIALIZATION_MANIFEST}"
+        "-DIREE_MATERIALIZATION_STAMP=${_MATERIALIZATION_STAMP}"
+        -P "${_MATERIALIZE_FILES_SCRIPT}"
+    DEPENDS
+      ${_SOURCE_FILES}
+      "${_MATERIALIZATION_MANIFEST}"
+      "${_MATERIALIZE_FILES_SCRIPT}"
+    COMMENT
+      "Materializing Windows Python sources"
+    VERBATIM
+  )
+  add_custom_target(iree_windows_python_sources
+    DEPENDS
+      "${_MATERIALIZATION_STAMP}"
+  )
+endfunction()
+
+function(_iree_register_windows_python_source SOURCE_PATH DESTINATION_PATH)
+  set_property(GLOBAL APPEND PROPERTY
+    IREE_WINDOWS_PYTHON_SOURCE_FILES "${SOURCE_PATH}"
+  )
+  set_property(GLOBAL APPEND PROPERTY
+    IREE_WINDOWS_PYTHON_DESTINATION_FILES "${DESTINATION_PATH}"
+  )
+  get_property(_FINALIZATION_SCHEDULED GLOBAL PROPERTY
+    IREE_WINDOWS_PYTHON_FINALIZATION_SCHEDULED
+  )
+  if(NOT _FINALIZATION_SCHEDULED)
+    set_property(GLOBAL PROPERTY
+      IREE_WINDOWS_PYTHON_FINALIZATION_SCHEDULED TRUE
+    )
+    cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
+      CALL _iree_finalize_windows_python_sources
+    )
+  endif()
+endfunction()
+
 function(_iree_py_library_source_target OUTPUT_TARGET SOURCE_FILE)
   iree_package_name(_PACKAGE_NAME)
   string(REGEX REPLACE "[^A-Za-z0-9_]" "_" _SOURCE_TARGET_SUFFIX "${SOURCE_FILE}")
   set(_SOURCE_TARGET "${_PACKAGE_NAME}_${_SOURCE_TARGET_SUFFIX}_py_source")
   if(NOT TARGET "${_SOURCE_TARGET}")
+    set(_SOURCE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/${SOURCE_FILE}")
     set(_SOURCE_BIN_PATH "${CMAKE_CURRENT_BINARY_DIR}/${SOURCE_FILE}")
     get_filename_component(_SOURCE_BIN_DIR "${_SOURCE_BIN_PATH}" DIRECTORY)
-    add_custom_command(
-      OUTPUT
-        "${_SOURCE_BIN_PATH}"
-      COMMAND
-        ${CMAKE_COMMAND} -E make_directory "${_SOURCE_BIN_DIR}"
-      COMMAND
-        ${CMAKE_COMMAND} -E create_symlink
-          "${CMAKE_CURRENT_SOURCE_DIR}/${SOURCE_FILE}"
+    if(WIN32)
+      # Windows file symlinks require Developer Mode or elevated privileges.
+      # Materialize all Python sources through one batch edge so a clean build
+      # launches one process while retaining tracked outputs and repair.
+      _iree_register_windows_python_source(
+        "${_SOURCE_PATH}" "${_SOURCE_BIN_PATH}"
+      )
+      add_custom_target("${_SOURCE_TARGET}")
+      add_dependencies("${_SOURCE_TARGET}" iree_windows_python_sources)
+    else()
+      add_custom_command(
+        OUTPUT
           "${_SOURCE_BIN_PATH}"
-      DEPENDS
-        "${CMAKE_CURRENT_SOURCE_DIR}/${SOURCE_FILE}"
-      VERBATIM
-    )
-    add_custom_target("${_SOURCE_TARGET}"
-      DEPENDS
-        "${_SOURCE_BIN_PATH}"
-    )
+        COMMAND
+          ${CMAKE_COMMAND} -E make_directory "${_SOURCE_BIN_DIR}"
+        COMMAND
+          ${CMAKE_COMMAND} -E create_symlink
+            "${_SOURCE_PATH}"
+            "${_SOURCE_BIN_PATH}"
+        DEPENDS
+          "${_SOURCE_PATH}"
+        VERBATIM
+      )
+      add_custom_target("${_SOURCE_TARGET}"
+        DEPENDS
+          "${_SOURCE_BIN_PATH}"
+      )
+    endif()
   endif()
   set(${OUTPUT_TARGET} "${_SOURCE_TARGET}" PARENT_SCOPE)
 endfunction()
@@ -42,7 +140,8 @@ endfunction()
 #
 # Parameters:
 # NAME: name of target
-# MAIN: optional executable Python entry point for py_binary-style targets
+# MAIN: optional executable Python source entry point for py_binary-style targets
+# MAIN_MODULE: optional executable Python module entry point for py_binary-style targets
 # SRCS: List of source files for the library
 # IMPORTS: List of package import directories relative to the current package
 # DEPS: List of other targets the test python libraries require
@@ -51,7 +150,7 @@ function(iree_py_library)
   cmake_parse_arguments(
     _RULE
     ""
-    "NAME;MAIN"
+    "NAME;MAIN;MAIN_MODULE"
     "SRCS;IMPORTS;DEPS;PYEXT_DEPS"
     ${ARGN}
   )
@@ -67,9 +166,14 @@ function(iree_py_library)
   set(_SOURCE_FILES)
   set(_SOURCE_TARGETS)
   foreach(_SRC_FILE ${_RULE_SRCS})
-    list(APPEND _SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/${_SRC_FILE}")
-    _iree_py_library_source_target(_SOURCE_TARGET "${_SRC_FILE}")
-    list(APPEND _SOURCE_TARGETS "${_SOURCE_TARGET}")
+    if(IS_ABSOLUTE "${_SRC_FILE}")
+      list(APPEND _SOURCE_FILES "${_SRC_FILE}")
+      list(APPEND _SOURCE_TARGETS "${_SRC_FILE}")
+    else()
+      list(APPEND _SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/${_SRC_FILE}")
+      _iree_py_library_source_target(_SOURCE_TARGET "${_SRC_FILE}")
+      list(APPEND _SOURCE_TARGETS "${_SOURCE_TARGET}")
+    endif()
   endforeach()
 
   set(_IMPORT_DIRS)
@@ -94,9 +198,20 @@ function(iree_py_library)
     IREE_PY_IMPORT_DIRS "${_IMPORT_DIRS}"
     IREE_PY_DEPS "${_RULE_DEPS}"
   )
-  if(_RULE_MAIN)
+  if(_RULE_MAIN AND _RULE_MAIN_MODULE)
+    message(FATAL_ERROR "iree_py_library accepts either MAIN or MAIN_MODULE, not both")
+  elseif(_RULE_MAIN)
+    if(IS_ABSOLUTE "${_RULE_MAIN}")
+      set(_MAIN "${_RULE_MAIN}")
+    else()
+      set(_MAIN "${CMAKE_CURRENT_SOURCE_DIR}/${_RULE_MAIN}")
+    endif()
     set_target_properties(${_NAME} PROPERTIES
-      IREE_PY_MAIN "${CMAKE_CURRENT_SOURCE_DIR}/${_RULE_MAIN}"
+      IREE_PY_ENTRYPOINT_ARGUMENTS "${_MAIN}"
+    )
+  elseif(_RULE_MAIN_MODULE)
+    set_target_properties(${_NAME} PROPERTIES
+      IREE_PY_ENTRYPOINT_ARGUMENTS "-m;${_RULE_MAIN_MODULE}"
     )
   endif()
 
@@ -108,20 +223,35 @@ function(iree_py_library)
   endif()
 endfunction()
 
-function(iree_py_library_main OUTPUT_MAIN TARGET_NAME)
+function(iree_py_library_entrypoint OUTPUT_ARGUMENTS TARGET_NAME)
   iree_package_target_name(_TARGET_NAME "${TARGET_NAME}")
   if(NOT TARGET "${_TARGET_NAME}")
     message(FATAL_ERROR "iree_py_library target ${TARGET_NAME} was not found")
   endif()
-  get_target_property(_MAIN "${_TARGET_NAME}" IREE_PY_MAIN)
-  if(NOT _MAIN)
-    message(FATAL_ERROR "iree_py_library target ${TARGET_NAME} does not declare MAIN")
+  get_target_property(
+    _ENTRYPOINT_ARGUMENTS
+    "${_TARGET_NAME}"
+    IREE_PY_ENTRYPOINT_ARGUMENTS
+  )
+  if(NOT _ENTRYPOINT_ARGUMENTS)
+    message(FATAL_ERROR
+      "iree_py_library target ${TARGET_NAME} does not declare MAIN or MAIN_MODULE")
   endif()
-  set(${OUTPUT_MAIN} "${_MAIN}" PARENT_SCOPE)
+  set(${OUTPUT_ARGUMENTS} "${_ENTRYPOINT_ARGUMENTS}" PARENT_SCOPE)
 endfunction()
 
 function(iree_py_library_collect_sources OUTPUT_SOURCE_FILES TARGET_NAME)
-  iree_package_target_name(_TARGET_NAME "${TARGET_NAME}")
+  if(TARGET "${TARGET_NAME}")
+    set(_TARGET_NAME "${TARGET_NAME}")
+    get_target_property(_ALIASED_TARGET "${_TARGET_NAME}" ALIASED_TARGET)
+    if(_ALIASED_TARGET)
+      set(_TARGET_NAME "${_ALIASED_TARGET}")
+    endif()
+  elseif("${TARGET_NAME}" MATCHES "^[^:].*::")
+    string(REPLACE "::" "_" _TARGET_NAME "${TARGET_NAME}")
+  else()
+    iree_package_target_name(_TARGET_NAME "${TARGET_NAME}")
+  endif()
   if(NOT TARGET "${_TARGET_NAME}")
     message(FATAL_ERROR "iree_py_library target ${TARGET_NAME} was not found")
   endif()
@@ -170,6 +300,31 @@ function(iree_py_library_collect_package_dirs OUTPUT_PACKAGE_DIRS TARGET_NAME)
   set(${OUTPUT_PACKAGE_DIRS} "${_PACKAGE_DIRS}" PARENT_SCOPE)
 endfunction()
 
+# Prepends Python package directories to the PYTHONPATH of a CTest test.
+#
+# CTest applies ENVIRONMENT_MODIFICATION entries sequentially. Reverse the
+# directories before prepending them so their declared precedence is preserved.
+# The path_list_prepend operation selects the native path separator at test time
+# and retains any PYTHONPATH inherited by CTest.
+function(iree_python_test_add_package_dirs TEST_NAME)
+  set(_PACKAGE_DIRS ${ARGN})
+  if(NOT _PACKAGE_DIRS)
+    return()
+  endif()
+
+  list(REMOVE_DUPLICATES _PACKAGE_DIRS)
+  list(REVERSE _PACKAGE_DIRS)
+  set(_PYTHONPATH_MODIFICATIONS)
+  foreach(_PACKAGE_DIR IN LISTS _PACKAGE_DIRS)
+    list(APPEND _PYTHONPATH_MODIFICATIONS
+      "PYTHONPATH=path_list_prepend:${_PACKAGE_DIR}"
+    )
+  endforeach()
+  set_property(TEST "${TEST_NAME}" APPEND PROPERTY ENVIRONMENT_MODIFICATION
+    ${_PYTHONPATH_MODIFICATIONS}
+  )
+endfunction()
+
 # iree_local_py_test()
 #
 # CMake function to run python test with provided python package paths.
@@ -177,6 +332,8 @@ endfunction()
 # Parameters:
 # NAME: name of test
 # SRC: Test source file
+# SOURCES: All Python sources required by the test.
+# DEPS: Python library targets required by the test.
 # ARGS: Command line arguments to the Python source file.
 # LABELS: Additional labels to apply to the test. The package path is added
 #     automatically.
@@ -192,7 +349,7 @@ function(iree_local_py_test)
     _RULE
     "GENERATED_IN_BINARY_DIR"
     "NAME;SRC"
-    "ARGS;LABELS;PACKAGE_DIRS;TIMEOUT"
+    "ARGS;DEPS;LABELS;PACKAGE_DIRS;SOURCES;TIMEOUT"
     ${ARGN}
   )
 
@@ -226,20 +383,33 @@ function(iree_local_py_test)
 
   set(_IREE_INSTALL_PACKAGE_DIRS ${_RULE_PACKAGE_DIRS})
 
-  # Extend the PYTHONPATH environment variable with _RULE_PACKAGE_DIRS.
-  list(APPEND _RULE_PACKAGE_DIRS "$ENV{PYTHONPATH}")
-  if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
-    # Windows uses semi-colon delimiters, but so does CMake, so escape them.
-    list(JOIN _RULE_PACKAGE_DIRS "\\;" _PYTHONPATH)
-  else()
-    list(JOIN _RULE_PACKAGE_DIRS ":" _PYTHONPATH)
-  endif()
+  iree_python_test_add_package_dirs("${_NAME_PATH}" ${_RULE_PACKAGE_DIRS})
   set_property(TEST ${_NAME_PATH} PROPERTY ENVIRONMENT
-      "PYTHONPATH=${_PYTHONPATH}"
-      "PYTHONDONTWRITEBYTECODE=1"
+    "PYTHONDONTWRITEBYTECODE=1"
   )
 
+  set(_TEST_BUILD_TARGETS)
+  if(_RULE_DEPS)
+    set(_TEST_BUILD_TARGET "${_NAME}_test_deps")
+    add_custom_target("${_TEST_BUILD_TARGET}" ALL)
+    set_property(
+      TARGET "${_TEST_BUILD_TARGET}"
+      PROPERTY FOLDER ${IREE_IDE_FOLDER}/test
+    )
+    foreach(_TEST_DEPENDENCY IN LISTS _RULE_DEPS)
+      iree_register_target_dependency(
+        TARGET "${_TEST_BUILD_TARGET}"
+        DEPENDENCY "${_TEST_DEPENDENCY}"
+      )
+    endforeach()
+    list(APPEND _TEST_BUILD_TARGETS "${_TEST_BUILD_TARGET}")
+  endif()
+
   iree_configure_test(${_NAME_PATH})
+  iree_register_test_build_targets(
+    "${_NAME_PATH}"
+    TARGETS ${_TEST_BUILD_TARGETS}
+  )
 
   if(IREE_PYTHON_TEST_REGISTRATION_FUNCTION AND
      NOT IREE_SKIP_TEST_REGISTRATION)
@@ -249,6 +419,10 @@ function(iree_local_py_test)
           "${_NAME_PATH}"
         SRC
           "${_RULE_SRC}"
+        SOURCES
+          ${_RULE_SOURCES}
+        DEPS
+          ${_RULE_DEPS}
         ARGS
           ${_RULE_ARGS}
         LABELS
@@ -270,7 +444,8 @@ endfunction()
 #
 # Parameters:
 # NAME: name of test
-# SRCS: Test source file (single file only, despite name)
+# MAIN: Python source file to execute.
+# SRCS: All Python sources required by the test.
 # ARGS: Command line arguments to the Python source file.
 # LABELS: Additional labels to apply to the test. The package path is added
 #     automatically.
@@ -282,10 +457,19 @@ function(iree_py_test)
   cmake_parse_arguments(
     _RULE
     "GENERATED_IN_BINARY_DIR"
-    "NAME;SRCS"
-    "ARGS;LABELS;PACKAGE_DIRS;IMPORTS;DEPS;TIMEOUT"
+    "MAIN;NAME"
+    "ARGS;LABELS;PACKAGE_DIRS;IMPORTS;DEPS;SRCS;TIMEOUT"
     ${ARGN}
   )
+  if(_RULE_MAIN)
+    set(_RULE_MAIN_SOURCE "${_RULE_MAIN}")
+  elseif("${_RULE_SRCS}" MATCHES "^[^;]+$")
+    set(_RULE_MAIN_SOURCE "${_RULE_SRCS}")
+  else()
+    message(FATAL_ERROR
+      "iree_py_test ${_RULE_NAME} requires MAIN when declaring multiple SRCS")
+  endif()
+
   set(_HAS_EXPLICIT_PACKAGE_DIRS FALSE)
   if(NOT _RULE_PACKAGE_DIRS)
     set(_RULE_PACKAGE_DIRS
@@ -308,6 +492,7 @@ function(iree_py_test)
 
   iree_package_ns(_PACKAGE_NS)
   list(TRANSFORM _RULE_DEPS REPLACE "^::" "${_PACKAGE_NS}::")
+  set(_RULE_SOURCE_FILES ${_RULE_SRCS})
   if(NOT _HAS_EXPLICIT_PACKAGE_DIRS)
     foreach(_DEP ${_RULE_DEPS})
       iree_py_library_collect_package_dirs(_DEP_PACKAGE_DIRS "${_DEP}")
@@ -322,7 +507,11 @@ function(iree_py_test)
     NAME
       "${_RULE_NAME}"
     SRC
-      "${_RULE_SRCS}"
+      "${_RULE_MAIN_SOURCE}"
+    SOURCES
+      ${_RULE_SOURCE_FILES}
+    DEPS
+      ${_RULE_DEPS}
     ARGS
       ${_RULE_ARGS}
     LABELS

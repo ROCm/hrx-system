@@ -202,8 +202,7 @@ TEST_P(SocketTest, IPv6_LoopbackSendRecv) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &connect_op.base));
 
   // Poll until both connect and accept complete.
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   ASSERT_EQ(accept_tracker.call_count, 1);
   IREE_ASSERT_OK(accept_tracker.ConsumeStatus());
@@ -244,8 +243,7 @@ TEST_P(SocketTest, IPv6_LoopbackSendRecv) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op.base));
 
   // Poll until send and recv complete.
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   EXPECT_EQ(send_tracker.call_count, 1);
   IREE_EXPECT_OK(send_tracker.ConsumeStatus());
@@ -413,8 +411,7 @@ TEST_P(SocketTest, StickyFailure_ReleaseAfterError) {
                        CompletionTracker::Callback, &tracker);
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &connect_op.base));
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   // Retain and release multiple times - should not crash even in failed state.
   iree_async_socket_retain(client);
@@ -450,8 +447,7 @@ TEST_P(SocketTest, ConnectSuccess) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &connect_op.base));
 
   // Poll until connect completes.
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(connect_tracker.call_count, 1);
   IREE_EXPECT_OK(connect_tracker.ConsumeStatus());
@@ -490,8 +486,7 @@ TEST_P(SocketTest, AcceptSuccess) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &connect_op.base));
 
   // Poll until both connect and accept complete.
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   EXPECT_EQ(accept_tracker.call_count, 1);
   IREE_EXPECT_OK(accept_tracker.ConsumeStatus());
@@ -535,8 +530,7 @@ TEST_P(SocketTest, LoopbackSendRecv) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &connect_op.base));
 
   // Poll until both connect and accept complete.
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   ASSERT_EQ(accept_tracker.call_count, 1);
   IREE_ASSERT_OK(accept_tracker.ConsumeStatus());
@@ -577,8 +571,7 @@ TEST_P(SocketTest, LoopbackSendRecv) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op.base));
 
   // Poll until send and recv complete.
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   EXPECT_EQ(send_tracker.call_count, 1);
   IREE_EXPECT_OK(send_tracker.ConsumeStatus());
@@ -616,8 +609,7 @@ TEST_P(SocketTest, ConnectRefused) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &connect_op.base));
 
   // Poll until connect completes (should fail).
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(connect_tracker.call_count, 1);
   // Should be UNAVAILABLE (ECONNREFUSED).
@@ -656,8 +648,7 @@ TEST_P(SocketTest, MultipleExchanges) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &connect_op.base));
 
   // Poll until both connect and accept complete.
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   ASSERT_NE(accept_op.accepted_socket, nullptr);
   iree_async_socket_t* server = accept_op.accepted_socket;
@@ -695,8 +686,7 @@ TEST_P(SocketTest, MultipleExchanges) {
     IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op.base));
 
     // Poll until send and recv complete.
-    PollUntil(/*min_completions=*/2,
-              /*total_budget=*/iree_make_duration_ms(5000));
+    PollUntil(/*min_completions=*/2);
 
     EXPECT_EQ(send_tracker.call_count, 1);
     IREE_EXPECT_OK(send_tracker.ConsumeStatus());

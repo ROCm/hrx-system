@@ -50,13 +50,15 @@ typedef struct iree_hal_amdgpu_device_kernel_args_t {
   // which is the maximum of 16 and the maximum alignment of any of the kernel
   // arguments.
   uint16_t kernarg_alignment;
+  // Immutable workgroup cluster size required by the kernel. All zeroes mean
+  // the kernel uses ordinary non-clustered dispatch.
+  uint8_t workgroup_cluster_size[3];
   // Reserved for future hot kernel metadata. Must be zero.
-  uint32_t reserved;
+  uint8_t reserved;
 } iree_hal_amdgpu_device_kernel_args_t;
 IREE_AMDGPU_STATIC_ASSERT(
-    sizeof(iree_hal_amdgpu_device_kernel_args_t) <= 64,
-    "keep hot kernel arg structure in as few cache lines as possible; every "
-    "dispatch issued must access this information and it is likely uncached");
+    sizeof(iree_hal_amdgpu_device_kernel_args_t) == 32,
+    "keep hot kernel args in their existing half-cache-line footprint");
 
 // Implicit kernel arguments passed to OpenCL/HIP kernels that use them.
 // Not all kernels require this and the metadata needs to be checked to detect
@@ -149,8 +151,8 @@ typedef struct IREE_AMDGPU_ALIGNAS(8) iree_amdgpu_kernel_implicit_args_t {
   //   hidden_grid_dims
   uint16_t grid_dims;  // + 64
 
-  // Fixed-size buffer for `-mprintf-kind=buffered` support.
-  // By default LLVM uses `hostcall` but that's a mess and we avoid it.
+  // Fixed-size buffer for `-mprintf-kind=buffered` support. LLVM's default
+  // blocking mode uses the separate hostcall buffer below.
   // `__printf_alloc` in the device library is used to grab this pointer, the
   // header DWORDs are manipulated, and the contents are written to the buffer.
   //

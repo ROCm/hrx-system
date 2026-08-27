@@ -88,8 +88,11 @@ loom_check_test_suite(
   NAME
     loom_check_file_test
   SRCS
+    "test/source_low/buffer_bulk.loom-test"
+    "test/source_low/buffer_raw.loom-test"
     "test/source_low/source_low.loom-test"
     "test/source_low/source_low_diagnostics.loom-test"
+    "test/source_low/source_low_wasm32_address_boundary.loom-test"
     "test/source_low/structured_allocation.loom-test"
     "test/source_low/structured_control.loom-test"
   DATA

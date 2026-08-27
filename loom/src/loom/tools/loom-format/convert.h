@@ -71,6 +71,10 @@ loom_module_format_t loom_module_format_detect_input(
 
 // Converts |input| from options.input_format to options.output_format.
 //
+// The parsed/read module is verified before either output format is written.
+// Syntax and verification diagnostics are reported through
+// options.diagnostic_sink and invalid modules return INVALID_ARGUMENT.
+//
 // The context must be finalized with every dialect/encoding that may appear in
 // the input. |block_pool| supplies transient parser, reader, and writer
 // storage. The returned output must be released with

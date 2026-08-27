@@ -250,36 +250,31 @@ static iree_status_t iree_io_memory_stream_fill(
       z0, iree_io_stream_validate_fixed_range(stream->offset, stream->length,
                                               access_length, NULL));
 
-  iree_status_t status = iree_ok_status();
-  uint8_t* data_ptr = stream->contents + stream->offset;
+  uint8_t* data = stream->contents + stream->offset;
   switch (pattern_length) {
     case 1: {
-      uint8_t* data = (uint8_t*)data_ptr;
-      uint8_t value_bits = *(const uint8_t*)(pattern);
+      uint8_t value_bits = iree_unaligned_load_le_u8(pattern);
       memset(data, value_bits, count);
       break;
     }
     case 2: {
-      uint16_t* data = (uint16_t*)data_ptr;
-      uint16_t value_bits = *(const uint16_t*)(pattern);
+      uint16_t value_bits = iree_unaligned_load_le_u16(pattern);
       for (iree_device_size_t i = 0; i < count; ++i) {
-        iree_unaligned_store_le(&data[i], value_bits);
+        iree_unaligned_store_le_u16(data + i * sizeof(value_bits), value_bits);
       }
       break;
     }
     case 4: {
-      uint32_t* data = (uint32_t*)data_ptr;
-      uint32_t value_bits = *(const uint32_t*)(pattern);
+      uint32_t value_bits = iree_unaligned_load_le_u32(pattern);
       for (iree_device_size_t i = 0; i < count; ++i) {
-        iree_unaligned_store_le(&data[i], value_bits);
+        iree_unaligned_store_le_u32(data + i * sizeof(value_bits), value_bits);
       }
       break;
     }
     case 8: {
-      uint64_t* data = (uint64_t*)data_ptr;
-      uint64_t value_bits = *(const uint64_t*)(pattern);
+      uint64_t value_bits = iree_unaligned_load_le_u64(pattern);
       for (iree_device_size_t i = 0; i < count; ++i) {
-        iree_unaligned_store_le(&data[i], value_bits);
+        iree_unaligned_store_le_u64(data + i * sizeof(value_bits), value_bits);
       }
       break;
     }
@@ -287,12 +282,10 @@ static iree_status_t iree_io_memory_stream_fill(
       IREE_ASSERT_UNREACHABLE("verified in iree_io_stream_fill");
       break;
   }
-  if (iree_status_is_ok(status)) {
-    stream->offset += access_length;
-  }
+  stream->offset += access_length;
 
   IREE_TRACE_ZONE_END(z0);
-  return status;
+  return iree_ok_status();
 }
 
 static iree_status_t iree_io_memory_stream_map_read(

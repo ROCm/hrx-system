@@ -61,12 +61,12 @@ typedef struct loomc_link_index_builder_t loomc_link_index_builder_t;
 /// across many threads.
 typedef struct loomc_link_index_t loomc_link_index_t;
 
-/// Search role assigned to a source provider in a link index.
+/// Linkage role assigned to a source provider in a link index.
 typedef enum loomc_link_provider_role_e {
-  /// Primary input providers are selected before libraries.
+  /// Direct sources jointly owned by the module being assembled.
   LOOMC_LINK_PROVIDER_ROLE_INPUT = 0,
 
-  /// Library providers are searched after primary inputs.
+  /// Separate libraries contributing exported exact definitions and templates.
   LOOMC_LINK_PROVIDER_ROLE_LIBRARY = 1,
 } loomc_link_provider_role_t;
 
@@ -135,17 +135,14 @@ typedef enum loomc_link_symbol_flag_bits_e {
   /// Symbol is declaration-like and may be superseded by a concrete definition.
   LOOMC_LINK_SYMBOL_FLAG_DECLARATION = 1u << 3,
 
-  /// Symbol has materializable IR owned by its provider.
-  LOOMC_LINK_SYMBOL_FLAG_HAS_BODY = 1u << 4,
+  /// Symbol is a concrete definition owned by its provider.
+  LOOMC_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION = 1u << 4,
 
   /// Symbol implements the config symbol interface.
   LOOMC_LINK_SYMBOL_FLAG_CONFIG = 1u << 5,
 
-  /// Symbol is a check.case correctness harness.
-  LOOMC_LINK_SYMBOL_FLAG_CHECK_CASE = 1u << 6,
-
-  /// Symbol is a check.benchmark policy record.
-  LOOMC_LINK_SYMBOL_FLAG_CHECK_BENCHMARK = 1u << 7,
+  /// Symbol exists only for test or benchmark tooling.
+  LOOMC_LINK_SYMBOL_FLAG_TEST_ONLY = 1u << 6,
 } loomc_link_symbol_flag_bits_t;
 
 /// Bitmask of `loomc_link_symbol_flag_bits_t` values.
@@ -167,7 +164,8 @@ typedef struct loomc_link_index_builder_options_t {
   /// Extension chain for future builder options.
   const void* next;
 
-  /// Arena block size used for persistent frozen-index metadata.
+  /// Total bytes acquired from the host allocator per persistent frozen-index
+  /// block. Internal tracking metadata consumes part of this capacity.
   loomc_host_size_t block_size;
 } loomc_link_index_builder_options_t;
 
@@ -189,8 +187,9 @@ typedef struct loomc_link_index_source_options_t {
   /// Stable provider label for diagnostics and private-name determinism.
   loomc_string_view_t provider_name;
 
-  /// Provider search precedence role.
+  /// Provider linkage role.
   loomc_link_provider_role_t role;
+
 } loomc_link_index_source_options_t;
 
 /// Indexed provider metadata.
@@ -205,7 +204,7 @@ typedef struct loomc_link_index_provider_t {
   /// Source representation kind.
   loomc_link_provider_kind_t kind;
 
-  /// Provider search precedence role.
+  /// Provider linkage role.
   loomc_link_provider_role_t role;
 
   /// Provider label used for diagnostics.
@@ -435,17 +434,25 @@ LOOMC_API_EXPORT bool loomc_link_index_symbol_at(
     const loomc_link_index_t* link_index, loomc_host_size_t ordinal,
     loomc_link_index_symbol_t* out_symbol);
 
-/// Looks up the selected global symbol by name.
+/// Looks up the first global symbol by name in canonical enumeration order.
+///
+/// INPUT providers enumerate before LIBRARY providers and ties use source-slot
+/// order. This order does not resolve duplicate definitions; linkage validates
+/// uniqueness.
 ///
 /// @param link_index Index to inspect.
 /// @param name Symbol name with or without a leading `@`.
-/// @param out_symbol Receives selected symbol metadata.
+/// @param out_symbol Receives symbol metadata.
 /// @return True when a global symbol named `name` was found.
 LOOMC_API_EXPORT bool loomc_link_index_lookup_global(
     const loomc_link_index_t* link_index, loomc_string_view_t name,
     loomc_link_index_symbol_t* out_symbol);
 
-/// Returns the next duplicate global symbol for `symbol`.
+/// Returns the next duplicate global symbol in canonical order.
+///
+/// Begin enumeration with a symbol returned by
+/// `loomc_link_index_lookup_global` and pass each returned duplicate back to
+/// continue until this returns false.
 ///
 /// @param link_index Index to inspect.
 /// @param symbol Symbol previously returned from this index.

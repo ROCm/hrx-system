@@ -21,9 +21,12 @@ loom_contract_operand_t Operand(loom_contract_operand_role_t role,
 
 loom_value_fact_storage_schema_t EncodedSchema(
     loom_value_fact_numeric_format_flags_t element_format,
-    uint16_t scale_group_element_count) {
+    uint16_t scale_group_element_count,
+    loom_value_fact_numeric_format_flags_t scale_format =
+        LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE) {
   loom_value_fact_storage_schema_t schema = {};
   schema.encoded_operand.element_format = element_format;
+  schema.encoded_operand.scale_format = scale_format;
   schema.encoded_operand.payload_packing =
       LOOM_VALUE_FACT_PAYLOAD_PACKING_TARGET_FRAGMENT;
   schema.encoded_operand.scale_topology =
@@ -31,9 +34,12 @@ loom_value_fact_storage_schema_t EncodedSchema(
                                      : LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D;
   schema.encoded_operand.payload_register_count = 4;
   schema.encoded_operand.payload_element_count = 32;
-  schema.encoded_operand.scale_group_element_count = scale_group_element_count;
+  schema.encoded_operand.scale_group.element_count = scale_group_element_count;
   schema.encoded_operand.scale_operand_count =
       scale_group_element_count == 0 ? 0 : 1;
+  if (scale_group_element_count != 0) {
+    schema.encoded_operand.scale_group.shape[0] = scale_group_element_count;
+  }
   return schema;
 }
 
@@ -78,6 +84,7 @@ loom_contract_request_t MatrixRequest(
       /*.m=*/m,
       /*.n=*/n,
       /*.k=*/k,
+      /*.block_count=*/1,
   };
   request.k_group_size = 1;
   request.lhs = Operand(LOOM_CONTRACT_OPERAND_ROLE_LHS, lhs_numeric_type);
@@ -128,6 +135,23 @@ TEST(MatrixContractProjectionTest, RejectsDynamicShapeValueRefs) {
   EXPECT_EQ(diagnostic.rejection_bits, LOOM_CONTRACT_REJECTION_SHAPE);
 }
 
+TEST(MatrixContractProjectionTest, ProjectsTf32AsAmdgpuXf32) {
+  loom_contract_request_t contract = MatrixRequest(
+      16, 16, 8, LOOM_CONTRACT_NUMERIC_TF32, LOOM_CONTRACT_NUMERIC_TF32,
+      LOOM_CONTRACT_NUMERIC_F32, LOOM_CONTRACT_NUMERIC_F32);
+
+  loom_amdgpu_matrix_contract_match_request_t amdgpu_request = {};
+  loom_contract_diagnostic_t diagnostic = {};
+  ASSERT_TRUE(loom_amdgpu_matrix_contract_match_request_from_contract(
+      &contract, 0, 64, &amdgpu_request, &diagnostic));
+  EXPECT_EQ(diagnostic.rejection_bits, LOOM_CONTRACT_REJECTION_NONE);
+  EXPECT_EQ(amdgpu_request.tile_shape.block_count, 1);
+  EXPECT_EQ(amdgpu_request.lhs_payload.numeric_type,
+            LOOM_AMDGPU_MATRIX_NUMERIC_XF32);
+  EXPECT_EQ(amdgpu_request.rhs_payload.numeric_type,
+            LOOM_AMDGPU_MATRIX_NUMERIC_XF32);
+}
+
 TEST(MatrixContractProjectionTest, ProjectsRoleLocalScaleFacts) {
   loom_contract_request_t contract = MatrixRequest(
       16, 16, 16, LOOM_CONTRACT_NUMERIC_FP4, LOOM_CONTRACT_NUMERIC_FP4,
@@ -151,6 +175,33 @@ TEST(MatrixContractProjectionTest, ProjectsRoleLocalScaleFacts) {
   EXPECT_FALSE(
       iree_any_bit_set(amdgpu_request.required_flags,
                        LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_MATRIX_FORMATS));
+}
+
+TEST(MatrixContractProjectionTest, ProjectsRoleLocalScaleFormatFacts) {
+  loom_contract_request_t contract = MatrixRequest(
+      16, 16, 128, LOOM_CONTRACT_NUMERIC_FP4, LOOM_CONTRACT_NUMERIC_FP4,
+      LOOM_CONTRACT_NUMERIC_F32, LOOM_CONTRACT_NUMERIC_F32);
+  AttachEncodedSchema(EncodedSchema(LOOM_VALUE_FACT_NUMERIC_FORMAT_F4_E2M1, 32,
+                                    LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0),
+                      &contract.lhs);
+  AttachEncodedSchema(EncodedSchema(LOOM_VALUE_FACT_NUMERIC_FORMAT_F4_E2M1, 32,
+                                    LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0),
+                      &contract.rhs);
+
+  loom_amdgpu_matrix_contract_match_request_t amdgpu_request = {};
+  loom_contract_diagnostic_t diagnostic = {};
+  ASSERT_TRUE(loom_amdgpu_matrix_contract_match_request_from_contract(
+      &contract, 0, 64, &amdgpu_request, &diagnostic));
+  EXPECT_EQ(diagnostic.rejection_bits, LOOM_CONTRACT_REJECTION_NONE);
+  EXPECT_TRUE(iree_any_bit_set(amdgpu_request.available_flags,
+                               LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_SCALE_FORMATS));
+  EXPECT_FALSE(
+      iree_any_bit_set(amdgpu_request.required_flags,
+                       LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_SCALE_FORMATS));
+  EXPECT_EQ(amdgpu_request.lhs_scale_format_selector_bits,
+            1u << LOOM_AMDGPU_MATRIX_SCALE_FORMAT_SELECTOR_E8M0);
+  EXPECT_EQ(amdgpu_request.rhs_scale_format_selector_bits,
+            1u << LOOM_AMDGPU_MATRIX_SCALE_FORMAT_SELECTOR_E8M0);
 }
 
 TEST(MatrixContractProjectionTest, ProjectsZeroScaleFallbackCapabilityFacts) {

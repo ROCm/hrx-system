@@ -15,6 +15,7 @@ loom_generated_cc_library(
   GENERATOR
     loom::py::loom::gen::ops::c_tables_target_generator
   SRCS
+    "conditions.c"
     "facts.c"
     "verify.c"
   GENERATED_SRC_FLAGS
@@ -35,7 +36,11 @@ loom_generated_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ops::op_defs
+    loom::target::condition
+    loom::target::facts
+    loom::target::projection
     loom::target::types
+    loom::util::fact_table
 )
 
 loom_cc_test(

@@ -31,8 +31,6 @@ typedef struct loom_wasm_toolchain_t {
   iree_string_view_t root_path;
 } loom_wasm_toolchain_t;
 
-typedef loom_tool_output_t loom_wasm_tool_output_t;
-
 // Initializes |out_toolchain| from LOOM_WASM_LLVM_OBJDUMP first, then
 // LOOM_WASM_TOOLCHAIN_ROOT, then LOOM_WASM_TOOLCHAIN_BIN. When no environment
 // variable is set the tool runner searches PATH.
@@ -54,20 +52,16 @@ iree_status_t loom_wasm_tool_run(const loom_wasm_toolchain_t* toolchain,
                                  iree_allocator_t allocator,
                                  loom_tool_process_result_t* out_result);
 
-// Releases output bytes allocated by Wasm tool helpers.
-void loom_wasm_tool_output_deinitialize(loom_wasm_tool_output_t* output,
-                                        iree_allocator_t allocator);
-
 // Runs `<tool> --version` and returns captured stdout in |out_version_text|.
 iree_status_t loom_wasm_tool_query_version(
     const loom_wasm_toolchain_t* toolchain, loom_wasm_tool_kind_t tool_kind,
-    iree_allocator_t allocator, loom_wasm_tool_output_t* out_version_text);
+    iree_allocator_t allocator, loom_tool_output_t* out_version_text);
 
 // Writes |binary| to a temporary file, runs llvm-objdump disassembly, and
 // returns textual Wasm disassembly.
 iree_status_t loom_wasm_tool_disassemble_binary(
     const loom_wasm_toolchain_t* toolchain, iree_const_byte_span_t binary,
-    iree_allocator_t allocator, loom_wasm_tool_output_t* out_text);
+    iree_allocator_t allocator, loom_tool_output_t* out_text);
 
 #ifdef __cplusplus
 }  // extern "C"

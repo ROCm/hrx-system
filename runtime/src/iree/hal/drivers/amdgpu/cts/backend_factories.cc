@@ -10,6 +10,7 @@
 
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/amdgpu/api.h"
+#include "iree/hal/executable/amdgpu/executable_target.h"
 
 namespace iree::hal::cts {
 namespace {
@@ -60,6 +61,22 @@ static bool IsAmdgpuCtsBackendHostCompatible(AmdgpuCtsBackendMode mode,
   return false;
 }
 
+static iree_status_t SelectAmdgpuCtsExecutableTarget(
+    const iree_hal_device_spec_t* device_spec,
+    iree_string_view_t artifact_target_family,
+    iree_string_view_t artifact_target_key,
+    iree_hal_physical_device_affinity_t physical_device_affinity,
+    iree_hal_executable_target_selection_result_t* out_result) {
+  if (!iree_string_view_equal(artifact_target_family, IREE_SV("amdgpu"))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU CTS executable target family must be 'amdgpu'; got '%.*s'",
+        (int)artifact_target_family.size, artifact_target_family.data);
+  }
+  return iree_hal_amdgpu_device_spec_select_executable_target(
+      device_spec, artifact_target_key, physical_device_affinity, out_result);
+}
+
 static iree_status_t CreateAmdgpuCtsDevice(
     AmdgpuCtsBackendMode mode,
     const iree_hal_device_create_params_t* create_params,
@@ -101,11 +118,11 @@ BackendInfo MakeAmdgpuCtsBackendInfo(const char* name,
   };
   info.unsupported_tests = {
       // Features and API surface not currently implemented.
-      {"EventTest.*", "AMDGPU does not implement HAL events"},
   };
   info.host_compatibility_fn = [mode](std::string* out_reason) {
     return IsAmdgpuCtsBackendHostCompatible(mode, out_reason);
   };
+  info.executable_target_selector = SelectAmdgpuCtsExecutableTarget;
   return info;
 }
 

@@ -7,6 +7,8 @@
 #ifndef IREE_BASE_INTERNAL_PATH_H_
 #define IREE_BASE_INTERNAL_PATH_H_
 
+#include <stddef.h>
+
 #include "iree/base/api.h"
 
 #ifdef __cplusplus
@@ -42,16 +44,17 @@ iree_status_t iree_file_path_join(iree_string_view_t lhs,
                                   iree_string_view_t rhs,
                                   iree_allocator_t allocator, char** out_path);
 
-// Splits |path| into the dirname and basename at the final `/`.
+// Splits |path| into the dirname and basename at the final platform path
+// separator. Windows paths accept both `/` and `\`.
 void iree_file_path_split(iree_string_view_t path,
                           iree_string_view_t* out_dirname,
                           iree_string_view_t* out_basename);
 
 // Gets the directory name component of a file |path| (everything before the
-// final `/`).
+// final platform path separator).
 iree_string_view_t iree_file_path_dirname(iree_string_view_t path);
 
-// Returns the part of the |path| after the final `/`.
+// Returns the part of the |path| after the final platform path separator.
 iree_string_view_t iree_file_path_basename(iree_string_view_t path);
 
 // Returns the parts of the basename of path, split on the final `.`.
@@ -69,6 +72,23 @@ iree_string_view_t iree_file_path_extension(iree_string_view_t path);
 
 // Returns true if |path| _likely_ represents a system dynamic library.
 bool iree_file_path_is_dynamic_library(iree_string_view_t path);
+
+#if defined(IREE_PLATFORM_WINDOWS)
+
+// Converts the UTF-8 |path| to a NUL-terminated UTF-16 path suitable for
+// passing to Win32 APIs.
+//
+// Relative filesystem paths are resolved to absolute extended-length paths so
+// that the result does not depend on the embedding process having opted in to
+// long-path support. Existing extended-length (`\\?\`) and device (`\\.\`)
+// paths are preserved. Embedded NUL characters and invalid UTF-8 are rejected.
+//
+// The caller must free |*out_path| with |allocator|.
+iree_status_t iree_file_path_to_win32(iree_string_view_t path,
+                                      iree_allocator_t allocator,
+                                      wchar_t** out_path);
+
+#endif  // IREE_PLATFORM_WINDOWS
 
 //===----------------------------------------------------------------------===//
 // URIs

@@ -1,0 +1,187 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_index.loom-test
+// RUN: emit source-low output=low control-flow=structured-low
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
+func.def target(@target) @index_arithmetic(%lhs0: index, %rhs0: index, %stride: offset) -> (index, index, index, index, index, index, index, index, offset) {
+  %lhs, %rhs = index.assume %lhs0, %rhs0 [range(%lhs0, 0, 2147483647), range(%rhs0, 1, 1024)] : index, index
+  %add = index.add %lhs, %rhs : index
+  %sub = index.sub %lhs, %rhs : index
+  %mul = index.mul %lhs, %rhs : index
+  %div = index.div %lhs, %rhs : index
+  %rem = index.rem %lhs, %rhs : index
+  %min = index.min %lhs, %rhs : index
+  %max = index.max %lhs, %rhs : index
+  %madd = index.madd %lhs, %rhs, %sub : index
+  %scaled = index.scale %lhs, %stride : index, offset -> offset
+  func.return %add, %sub, %mul, %div, %rem, %min, %max, %madd, %scaled : index, index, index, index, index, index, index, index, offset
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @index_arithmetic(%lhs: reg<spirv.id : index>, %rhs: reg<spirv.id : index>, %stride: reg<spirv.offset64>) -> (reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.offset64>) asm {
+  %add = OpIAdd %lhs, %rhs : reg<spirv.id : index>
+  %sub = OpISub %lhs, %rhs : reg<spirv.id : index>
+  %mul = OpIMul %lhs, %rhs : reg<spirv.id : index>
+  %38 = OpBitcast.i32.u32 %lhs
+  %39 = OpBitcast.i32.u32 %rhs
+  %40 = OpUDiv.u32 %38, %39
+  %div = OpBitcast.u32.i32 %40 : reg<spirv.id : index>
+  %44 = OpUMod.u32 %38, %39
+  %rem = OpBitcast.u32.i32 %44 : reg<spirv.id : index>
+  %46 = OpSLessThan %lhs, %rhs
+  %min = OpSelect %46, %lhs, %rhs : reg<spirv.id : index>
+  %48 = OpSGreaterThan %lhs, %rhs
+  %max = OpSelect %48, %lhs, %rhs : reg<spirv.id : index>
+  %madd = OpIMulAdd %lhs, %rhs, %sub : reg<spirv.id : index>
+  %52 = OpUConvert.u32.offset64 %38
+  %scaled = OpIMul.offset64 %52, %stride
+  return %add, %sub, %mul, %div, %rem, %min, %max, %madd, %scaled
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
+func.def target(@target) @offset_arithmetic(%lhs: offset, %rhs: offset) -> (offset, offset) {
+  %add = index.add %lhs, %rhs : offset
+  %sub = index.sub %lhs, %rhs : offset
+  func.return %add, %sub : offset, offset
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @offset_arithmetic(%lhs: reg<spirv.offset64>, %rhs: reg<spirv.offset64>) -> (reg<spirv.offset64>, reg<spirv.offset64>) asm {
+  %add = OpIAdd.offset64 %lhs, %rhs
+  %sub = OpISub.offset64 %lhs, %rhs
+  return %add, %sub
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
+func.def target(@target) @index_bitwise(%input: index, %other: index, %amount0: index) -> (index, index, index, index, index, index, index, index, index, index, index) {
+  %amount = index.assume %amount0 [range(%amount0, 1, 31)] : index
+  %and = index.andi %input, %other : index
+  %or = index.ori %input, %other : index
+  %xor = index.xori %input, %other : index
+  %shl = index.shli %input, %amount : index
+  %shrs = index.shrsi %input, %amount : index
+  %shru = index.shrui %input, %amount : index
+  %rotl = index.rotli %input, %amount : index
+  %rotr = index.rotri %input, %amount : index
+  %clz = index.ctlzi %input : index
+  %ctz = index.cttzi %input : index
+  %pop = index.ctpopi %input : index
+  func.return %and, %or, %xor, %shl, %shrs, %shru, %rotl, %rotr, %clz, %ctz, %pop : index, index, index, index, index, index, index, index, index, index, index
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @index_bitwise(%input: reg<spirv.id : index>, %other: reg<spirv.id : index>, %amount: reg<spirv.id : index>) -> (reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>) asm {
+  %and = OpBitwiseAnd %input, %other : reg<spirv.id : index>
+  %or = OpBitwiseOr %input, %other : reg<spirv.id : index>
+  %xor = OpBitwiseXor %input, %other : reg<spirv.id : index>
+  %shl = OpShiftLeftLogical %input, %amount : reg<spirv.id : index>
+  %shrs = OpShiftRightArithmetic %input, %amount : reg<spirv.id : index>
+  %shru = OpShiftRightLogical %input, %amount : reg<spirv.id : index>
+  %47 = OpConstant.i32 32 : reg<spirv.id : index>
+  %48 = OpISub %47, %amount : reg<spirv.id : index>
+  %49 = OpConstant.i32 31 : reg<spirv.id : index>
+  %50 = OpBitwiseAnd %48, %49 : reg<spirv.id : index>
+  %51 = OpShiftRightLogical %input, %50 : reg<spirv.id : index>
+  %rotl = OpBitwiseOr %shl, %51 : reg<spirv.id : index>
+  %58 = OpShiftLeftLogical %input, %50 : reg<spirv.id : index>
+  %rotr = OpBitwiseOr %shru, %58 : reg<spirv.id : index>
+  %60 = OpConstant.i32 1 : reg<spirv.id : index>
+  %61 = OpShiftRightLogical %input, %60 : reg<spirv.id : index>
+  %62 = OpBitwiseOr %input, %61 : reg<spirv.id : index>
+  %63 = OpConstant.i32 2 : reg<spirv.id : index>
+  %64 = OpShiftRightLogical %62, %63 : reg<spirv.id : index>
+  %65 = OpBitwiseOr %62, %64 : reg<spirv.id : index>
+  %66 = OpConstant.i32 4 : reg<spirv.id : index>
+  %67 = OpShiftRightLogical %65, %66 : reg<spirv.id : index>
+  %68 = OpBitwiseOr %65, %67 : reg<spirv.id : index>
+  %69 = OpConstant.i32 8 : reg<spirv.id : index>
+  %70 = OpShiftRightLogical %68, %69 : reg<spirv.id : index>
+  %71 = OpBitwiseOr %68, %70 : reg<spirv.id : index>
+  %72 = OpConstant.i32 16 : reg<spirv.id : index>
+  %73 = OpShiftRightLogical %71, %72 : reg<spirv.id : index>
+  %74 = OpBitwiseOr %71, %73 : reg<spirv.id : index>
+  %75 = OpBitCount %74 : reg<spirv.id : index>
+  %clz = OpISub %47, %75 : reg<spirv.id : index>
+  %78 = OpConstant.i32 0 : reg<spirv.id : index>
+  %79 = OpISub %78, %input : reg<spirv.id : index>
+  %80 = OpBitwiseAnd %input, %79 : reg<spirv.id : index>
+  %82 = OpISub %80, %60 : reg<spirv.id : index>
+  %ctz = OpBitCount %82 : reg<spirv.id : index>
+  %pop = OpBitCount %input : reg<spirv.id : index>
+  return %and, %or, %xor, %shl, %shrs, %shru, %rotl, %rotr, %clz, %ctz, %pop
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
+func.def target(@target) @index_compare_select(%lhs: index, %rhs: index) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, index) {
+  %eq = index.cmp eq, %lhs, %rhs : index
+  %ne = index.cmp ne, %lhs, %rhs : index
+  %slt = index.cmp slt, %lhs, %rhs : index
+  %sle = index.cmp sle, %lhs, %rhs : index
+  %sgt = index.cmp sgt, %lhs, %rhs : index
+  %sge = index.cmp sge, %lhs, %rhs : index
+  %ult = index.cmp ult, %lhs, %rhs : index
+  %ule = index.cmp ule, %lhs, %rhs : index
+  %ugt = index.cmp ugt, %lhs, %rhs : index
+  %uge = index.cmp uge, %lhs, %rhs : index
+  %selected = scf.select %ult, %lhs, %rhs : index
+  func.return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge, %selected : i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, index
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @index_compare_select(%lhs: reg<spirv.id : index>, %rhs: reg<spirv.id : index>) -> (reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : index>) asm {
+  %eq = OpIEqual %lhs, %rhs
+  %ne = OpINotEqual %lhs, %rhs
+  %slt = OpSLessThan %lhs, %rhs
+  %sle = OpSLessThanEqual %lhs, %rhs
+  %sgt = OpSGreaterThan %lhs, %rhs
+  %sge = OpSGreaterThanEqual %lhs, %rhs
+  %43 = OpBitcast.i32.u32 %lhs
+  %44 = OpBitcast.i32.u32 %rhs
+  %ult = OpULessThan.u32 %43, %44
+  %ule = OpULessThanEqual.u32 %43, %44
+  %ugt = OpUGreaterThan.u32 %43, %44
+  %uge = OpUGreaterThanEqual.u32 %43, %44
+  %selected = OpSelect %ult, %lhs, %rhs : reg<spirv.id : index>
+  return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge, %selected
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
+func.def target(@target) @offset_compare_select(%lhs: offset, %rhs: offset) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, offset) {
+  %eq = index.cmp eq, %lhs, %rhs : offset
+  %ne = index.cmp ne, %lhs, %rhs : offset
+  %slt = index.cmp slt, %lhs, %rhs : offset
+  %sle = index.cmp sle, %lhs, %rhs : offset
+  %sgt = index.cmp sgt, %lhs, %rhs : offset
+  %sge = index.cmp sge, %lhs, %rhs : offset
+  %ult = index.cmp ult, %lhs, %rhs : offset
+  %ule = index.cmp ule, %lhs, %rhs : offset
+  %ugt = index.cmp ugt, %lhs, %rhs : offset
+  %uge = index.cmp uge, %lhs, %rhs : offset
+  %selected = scf.select %ult, %lhs, %rhs : offset
+  func.return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge, %selected : i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, offset
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @offset_compare_select(%lhs: reg<spirv.offset64>, %rhs: reg<spirv.offset64>) -> (reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.offset64>) asm {
+  %eq = OpIEqual.offset64 %lhs, %rhs
+  %ne = OpINotEqual.offset64 %lhs, %rhs
+  %39 = OpBitcast.offset64.i64 %lhs
+  %40 = OpBitcast.offset64.i64 %rhs
+  %slt = OpSLessThan.i64 %39, %40
+  %sle = OpSLessThanEqual.i64 %39, %40
+  %sgt = OpSGreaterThan.i64 %39, %40
+  %sge = OpSGreaterThanEqual.i64 %39, %40
+  %ult = OpULessThan.offset64 %lhs, %rhs
+  %ule = OpULessThanEqual.offset64 %lhs, %rhs
+  %ugt = OpUGreaterThan.offset64 %lhs, %rhs
+  %uge = OpUGreaterThanEqual.offset64 %lhs, %rhs
+  %selected = OpSelect.offset64 %ult, %lhs, %rhs
+  return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge, %selected
+}

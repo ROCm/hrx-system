@@ -5,6 +5,8 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <array>
+#include <cstdint>
+#include <cstring>
 #include <string>
 #include <string_view>
 
@@ -22,6 +24,18 @@ using testing::Eq;
 
 static std::string ToString(iree_string_view_t value) {
   return std::string(value.data, value.size);
+}
+
+static uint32_t FloatBits(float value) {
+  uint32_t bits = 0;
+  std::memcpy(&bits, &value, sizeof(bits));
+  return bits;
+}
+
+static uint64_t DoubleBits(double value) {
+  uint64_t bits = 0;
+  std::memcpy(&bits, &value, sizeof(bits));
+  return bits;
 }
 
 TEST(StringViewTest, Empty) {
@@ -762,6 +776,108 @@ TEST(StringViewTest, ParseDeviceSizeInvalid) {
   EXPECT_THAT(ParseDeviceSize("abc"), StatusIs(StatusCode::kInvalidArgument));
 }
 
+TEST(StringViewTest, ParseEmptyNumber) {
+  const iree_string_view_t empty = iree_string_view_empty();
+  int32_t i32 = 0;
+  uint32_t u32 = 0;
+  int64_t i64 = 0;
+  uint64_t u64 = 0;
+  float f32 = 0.0f;
+  double f64 = 0.0;
+  EXPECT_FALSE(iree_string_view_atoi_int32(empty, &i32));
+  EXPECT_FALSE(iree_string_view_atoi_uint32(empty, &u32));
+  EXPECT_FALSE(iree_string_view_atoi_int64(empty, &i64));
+  EXPECT_FALSE(iree_string_view_atoi_uint64(empty, &u64));
+  EXPECT_FALSE(iree_string_view_atof(empty, &f32));
+  EXPECT_FALSE(iree_string_view_atod(empty, &f64));
+}
+
+TEST(StringViewTest, ParseHexFloat32) {
+  struct TestCase {
+    const char* text;
+    uint32_t expected_bits;
+  };
+  const TestCase test_cases[] = {
+      {"0x0p+0", UINT32_C(0x00000000)},
+      {"-0X0P-100000", UINT32_C(0x80000000)},
+      {"+0x1p0", UINT32_C(0x3F800000)},
+      {"0x1.fffffep+127", UINT32_C(0x7F7FFFFF)},
+      {"0x1p-126", UINT32_C(0x00800000)},
+      {"0x1p-149", UINT32_C(0x00000001)},
+      // Round-to-nearest-even at an ordinary, subnormal, and overflow edge.
+      {"0x1.000001p0", UINT32_C(0x3F800000)},
+      {"0x1.000001000001p0", UINT32_C(0x3F800001)},
+      {"0x1.000003p0", UINT32_C(0x3F800002)},
+      {"0x1p-150", UINT32_C(0x00000000)},
+      {"0x1.000001p-150", UINT32_C(0x00000001)},
+      {"0x1.ffffffp+127", UINT32_C(0x7F800000)},
+  };
+  for (const TestCase& test_case : test_cases) {
+    float value = -42.0f;
+    EXPECT_TRUE(
+        iree_string_view_atof(iree_make_cstring_view(test_case.text), &value))
+        << test_case.text;
+    EXPECT_EQ(test_case.expected_bits, FloatBits(value)) << test_case.text;
+  }
+}
+
+TEST(StringViewTest, ParseHexFloat64) {
+  struct TestCase {
+    const char* text;
+    uint64_t expected_bits;
+  };
+  const TestCase test_cases[] = {
+      {"0x0p0", UINT64_C(0x0000000000000000)},
+      {"-0x0p0", UINT64_C(0x8000000000000000)},
+      {"0x1p0", UINT64_C(0x3FF0000000000000)},
+      {"0x1.fffffffffffffp+1023", UINT64_C(0x7FEFFFFFFFFFFFFF)},
+      {"0x1p-1022", UINT64_C(0x0010000000000000)},
+      {"0x1p-1074", UINT64_C(0x0000000000000001)},
+      {"0x1.00000000000008p0", UINT64_C(0x3FF0000000000000)},
+      {"0x1.0000000000000800000000001p0", UINT64_C(0x3FF0000000000001)},
+      {"0x1.00000000000018p0", UINT64_C(0x3FF0000000000002)},
+      {"0x1p-1075", UINT64_C(0x0000000000000000)},
+      {"0x1.0000000000001p-1075", UINT64_C(0x0000000000000001)},
+      {"0x1.fffffffffffff8p+1023", UINT64_C(0x7FF0000000000000)},
+      // Retain sticky information beyond the 64-bit parser prefix.
+      {"0x1.000000000000080000000000000000000000000000000000000000000001p0",
+       UINT64_C(0x3FF0000000000001)},
+  };
+  for (const TestCase& test_case : test_cases) {
+    double value = -42.0;
+    EXPECT_TRUE(
+        iree_string_view_atod(iree_make_cstring_view(test_case.text), &value))
+        << test_case.text;
+    EXPECT_EQ(test_case.expected_bits, DoubleBits(value)) << test_case.text;
+  }
+}
+
+TEST(StringViewTest, ParseFloatRequiresCompleteValidSpelling) {
+  const char* invalid_values[] = {
+      "0x",    "0xp0",  "0x.p0",  "0x1",        "0x1.",  "0x1p",
+      "0x1p+", "0x1p-", "0x1p0x", "1.25suffix", "--1.0", "   ",
+  };
+  for (const char* text : invalid_values) {
+    float f32 = 42.0f;
+    double f64 = 42.0;
+    EXPECT_FALSE(iree_string_view_atof(iree_make_cstring_view(text), &f32))
+        << text;
+    EXPECT_FALSE(iree_string_view_atod(iree_make_cstring_view(text), &f64))
+        << text;
+    EXPECT_EQ(42.0f, f32) << text;
+    EXPECT_EQ(42.0, f64) << text;
+  }
+}
+
+TEST(StringViewTest, ParseFloatTrimsWhitespace) {
+  float f32 = 0.0f;
+  double f64 = 0.0;
+  EXPECT_TRUE(iree_string_view_atof(IREE_SV(" \t0x1.8p+2\n"), &f32));
+  EXPECT_EQ(6.0f, f32);
+  EXPECT_TRUE(iree_string_view_atod(IREE_SV(" \t-1.25e+2\n"), &f64));
+  EXPECT_EQ(-125.0, f64);
+}
+
 TEST(StringViewTest, MatchPattern) {
   auto match = [](const char* value, const char* pattern) -> bool {
     return iree_string_view_match_pattern(iree_make_cstring_view(value),
@@ -802,20 +918,18 @@ TEST(StringViewTest, MatchPattern) {
   EXPECT_TRUE(match("abc", "?*?"));
   EXPECT_TRUE(match("abcdef", "a?c*f"));
 
-  // Consecutive wildcards (tests coalescing to avoid exponential backtracking).
+  // Consecutive stars share the same match semantics as one star.
   EXPECT_TRUE(match("abc", "**"));
   EXPECT_TRUE(match("abc", "***"));
   EXPECT_TRUE(match("abc", "a**c"));
   EXPECT_TRUE(match("abc", "**c"));
   EXPECT_TRUE(match("abc", "a**"));
+  EXPECT_TRUE(match("*ba", "*a"));
 
-  // Pathological pattern that would cause exponential backtracking without
-  // coalescing: many wildcards followed by a non-matching suffix.
-  // This must complete in reasonable time (milliseconds, not seconds).
+  // Repeated stars do not multiply suffix retries.
   EXPECT_FALSE(match("aaaaaaaaaaaaaaaaaaaab", "**************c"));
   EXPECT_TRUE(match("aaaaaaaaaaaaaaaaaaaab", "**************b"));
 
-  // Alternating ?* patterns - also pathological without normalization.
   // ?* means "1 or more chars", ?*?* means "2 or more chars", etc.
   EXPECT_TRUE(match("ab", "?*"));
   EXPECT_TRUE(match("abc", "?*?"));
@@ -823,19 +937,23 @@ TEST(StringViewTest, MatchPattern) {
   EXPECT_TRUE(match("abcd", "?*?*"));
   EXPECT_FALSE(match("a", "?*?*"));  // Need at least 2 chars.
 
-  // Pathological alternating patterns - must complete quickly.
+  // Alternating patterns retry both matching and non-matching suffixes.
   EXPECT_FALSE(match("aaaaaaaaaaaaaaaaaaaab", "?*?*?*?*?*?*?*c"));
   EXPECT_TRUE(match("aaaaaaaaaaaaaaaaaaaab", "?*?*?*?*?*?*?*b"));
   EXPECT_FALSE(match("aaaaaaaaaaaaaaaaaaaab", "*?*?*?*?*?*?*?c"));
   EXPECT_TRUE(match("aaaaaaaaaaaaaaaaaaaab", "*?*?*?*?*?*?*?b"));
 
-  // Patterns with too many wildcards are rejected (returns false).
-  // Limit is 16 wildcards to prevent O(n^2) blowup.
+  // Separated stars retry the remaining suffix without recursive
+  // combinatorial backtracking.
+  EXPECT_TRUE(match("aaaaaaaaaaaaaaaaab", "*a*a*a*a*a*a*a*a*b"));
+  EXPECT_FALSE(match("aaaaaaaaaaaaaaaaac", "*a*a*a*a*a*a*a*a*b"));
+
+  // Wildcard count does not change matching semantics.
   EXPECT_TRUE(match("abcdefghijklmnop", "????????????????"));  // 16 - ok
-  EXPECT_FALSE(
-      match("abcdefghijklmnopq", "?????????????????"));  // 17 - rejected
-  EXPECT_FALSE(
-      match("anything", "?*?*?*?*?*?*?*?*?*"));  // 18 wildcards - rejected
+  EXPECT_TRUE(match("abcdefghijklmnopq", "?????????????????"));
+  EXPECT_FALSE(match("abcdefghijklmnop", "?????????????????"));
+  EXPECT_TRUE(match("abcdefghijklmnopq", "*****************"));
+  EXPECT_TRUE(match("abcdefghijklmnopq", "?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*"));
 }
 
 }  // namespace

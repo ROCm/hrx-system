@@ -1,0 +1,256 @@
+// RUN: pass-report source-to-low,low-dce
+
+amdgpu.target<gfx942> @target
+
+func.def target(@target) @report_cdna3_native_bf8_fp8_mfma(%lhs_data: vector<2xi32>, %rhs_data: vector<2xi32>, %init_data: vector<4xf32>) -> (vector<4xf32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 32 : index
+  %lhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=8, payload_registers=2> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<2xi32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<2xi32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<2xi32>, vector<2xi32>, vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=4 emitted_ops=2 rows=4
+COMPILE-REPORT: source_low[0] function=report_cdna3_native_bf8_fp8_mfma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_cdna3_native_bf8_fp8_mfma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_cdna3_native_bf8_fp8_mfma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_cdna3_native_bf8_fp8_mfma source_op=vector.mma selection=plan descriptor_key=amdgpu.v_mfma_f32_16x16x32_bf8_fp8 descriptor_semantic_tag=matrix.mfma.f32.16x16x32.bf8.fp8 emitted_ops=2
+COMPILE-REPORT: source_low_native[3] function=report_cdna3_native_bf8_fp8_mfma source_op=vector.mma native_contraction={tile:1x16x16x32,participants:64,lhs:{evidence:exact,bits:8,registers:2,payload:8,positions:512,coordinates:512,owners:1},rhs:{evidence:exact,bits:8,registers:2,payload:8,positions:512,coordinates:512,owners:1},accumulator:{evidence:exact,bits:32,registers:4,payload:4,positions:256,coordinates:256,owners:1},result:{evidence:exact,bits:32,registers:4,payload:4,positions:256,coordinates:256,owners:1}}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+func.def target(@target) @report_cdna3_native_fp8_fp8_mfma(%lhs_data: vector<2xi32>, %rhs_data: vector<2xi32>, %init_data: vector<4xf32>) -> (vector<4xf32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 32 : index
+  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<2xi32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %schema : encoding<schema>} : vector<2xi32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<2xi32>, vector<2xi32>, vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=4 emitted_ops=2 rows=4
+COMPILE-REPORT: source_low[0] function=report_cdna3_native_fp8_fp8_mfma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_cdna3_native_fp8_fp8_mfma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_cdna3_native_fp8_fp8_mfma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_cdna3_native_fp8_fp8_mfma source_op=vector.mma selection=plan descriptor_key=amdgpu.v_mfma_f32_16x16x32_fp8_fp8 descriptor_semantic_tag=matrix.mfma.f32.16x16x32.fp8.fp8 emitted_ops=2
+COMPILE-REPORT: source_low_native[3] function=report_cdna3_native_fp8_fp8_mfma source_op=vector.mma native_contraction={tile:1x16x16x32,participants:64,lhs:{evidence:exact,bits:8,registers:2,payload:8,positions:512,coordinates:512,owners:1},rhs:{evidence:exact,bits:8,registers:2,payload:8,positions:512,coordinates:512,owners:1},accumulator:{evidence:exact,bits:32,registers:4,payload:4,positions:256,coordinates:256,owners:1},result:{evidence:exact,bits:32,registers:4,payload:4,positions:256,coordinates:256,owners:1}}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+func.def target(@target) @report_cdna3_native_bf8_fp8_smfmac(%lhs_data: vector<2xi32>, %rhs_data: vector<4xi32>, %init_data: vector<4xf32>, %sparsity: vector<1xi32>) -> (vector<4xf32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 64 : index
+  %lhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=16, payload_registers=4> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {sparsity = %sparsity : vector<1xi32>, schema = %lhs_schema : encoding<schema>} : vector<2xi32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<4xi32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<2xi32>, vector<4xi32>, vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=4 emitted_ops=2 rows=4
+COMPILE-REPORT: source_low[0] function=report_cdna3_native_bf8_fp8_smfmac source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_cdna3_native_bf8_fp8_smfmac source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_cdna3_native_bf8_fp8_smfmac source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_cdna3_native_bf8_fp8_smfmac source_op=vector.mma selection=plan descriptor_key=amdgpu.v_smfmac_f32_16x16x64_bf8_fp8 descriptor_semantic_tag=matrix.smfmac.f32.16x16x64.bf8.fp8 emitted_ops=2
+COMPILE-REPORT: source_low_native[3] function=report_cdna3_native_bf8_fp8_smfmac source_op=vector.mma native_contraction={tile:1x16x16x64,participants:64,lhs:{evidence:metadata-dependent,bits:8,registers:2,payload:8,positions:512,coordinates:1024},rhs:{evidence:exact,bits:8,registers:4,payload:16,positions:1024,coordinates:1024,owners:1},accumulator:{evidence:exact,bits:32,registers:4,payload:4,positions:256,coordinates:256,owners:1},result:{evidence:exact,bits:32,registers:4,payload:4,positions:256,coordinates:256,owners:1}}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+func.def target(@target) @report_cdna3_native_fp8_bf8_mfma_32x32(%lhs_data: vector<2xi32>, %rhs_data: vector<2xi32>, %init_data: vector<16xf32>) -> (vector<16xf32>) {
+  %m = index.constant 32 : index
+  %n = index.constant 32 : index
+  %k = index.constant 16 : index
+  %lhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=8, payload_registers=2> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<2xi32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<2xi32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<16xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<2xi32>, vector<2xi32>, vector<16xf32>
+  func.return %result : vector<16xf32>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=4 emitted_ops=2 rows=4
+COMPILE-REPORT: source_low[0] function=report_cdna3_native_fp8_bf8_mfma_32x32 source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_cdna3_native_fp8_bf8_mfma_32x32 source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_cdna3_native_fp8_bf8_mfma_32x32 source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_cdna3_native_fp8_bf8_mfma_32x32 source_op=vector.mma selection=plan descriptor_key=amdgpu.v_mfma_f32_32x32x16_fp8_bf8 descriptor_semantic_tag=matrix.mfma.f32.32x32x16.fp8.bf8 emitted_ops=2
+COMPILE-REPORT: source_low_native[3] function=report_cdna3_native_fp8_bf8_mfma_32x32 source_op=vector.mma native_contraction={tile:1x32x32x16,participants:64,lhs:{evidence:exact,bits:8,registers:2,payload:8,positions:512,coordinates:512,owners:1},rhs:{evidence:exact,bits:8,registers:2,payload:8,positions:512,coordinates:512,owners:1},accumulator:{evidence:exact,bits:32,registers:16,payload:16,positions:1024,coordinates:1024,owners:1},result:{evidence:exact,bits:32,registers:16,payload:16,positions:1024,coordinates:1024,owners:1}}
+
+// ====
+
+amdgpu.target<gfx950> @target
+
+func.def target(@target) @report_cdna4_native_fp8_bf8_mfma(%lhs_data: vector<2xi32>, %rhs_data: vector<2xi32>, %init_data: vector<4xf32>) -> (vector<4xf32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 32 : index
+  %lhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=8, payload_registers=2> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<2xi32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<2xi32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<2xi32>, vector<2xi32>, vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=4 emitted_ops=2 rows=4
+COMPILE-REPORT: source_low[0] function=report_cdna4_native_fp8_bf8_mfma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_cdna4_native_fp8_bf8_mfma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_cdna4_native_fp8_bf8_mfma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_cdna4_native_fp8_bf8_mfma source_op=vector.mma selection=plan descriptor_key=amdgpu.v_mfma_f32_16x16x32_fp8_bf8 descriptor_semantic_tag=matrix.mfma.f32.16x16x32.fp8.bf8 emitted_ops=2
+COMPILE-REPORT: source_low_native[3] function=report_cdna4_native_fp8_bf8_mfma source_op=vector.mma native_contraction={tile:1x16x16x32,participants:64,lhs:{evidence:exact,bits:8,registers:2,payload:8,positions:512,coordinates:512,owners:1},rhs:{evidence:exact,bits:8,registers:2,payload:8,positions:512,coordinates:512,owners:1},accumulator:{evidence:exact,bits:32,registers:4,payload:4,positions:256,coordinates:256,owners:1},result:{evidence:exact,bits:32,registers:4,payload:4,positions:256,coordinates:256,owners:1}}
+
+// ====
+
+amdgpu.target<gfx950> @target
+
+func.def target(@target) @report_cdna4_native_fp8_bf8_smfmac(%lhs_data: vector<4xi32>, %rhs_data: vector<8xi32>, %init_data: vector<4xf32>, %sparsity: vector<1xi32>) -> (vector<4xf32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 128 : index
+  %lhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=16, payload_registers=4, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=32, payload_registers=8> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {sparsity = %sparsity : vector<1xi32>, schema = %lhs_schema : encoding<schema>} : vector<4xi32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<8xi32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<4xi32>, vector<8xi32>, vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=4 emitted_ops=2 rows=4
+COMPILE-REPORT: source_low[0] function=report_cdna4_native_fp8_bf8_smfmac source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_cdna4_native_fp8_bf8_smfmac source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_cdna4_native_fp8_bf8_smfmac source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_cdna4_native_fp8_bf8_smfmac source_op=vector.mma selection=plan descriptor_key=amdgpu.v_smfmac_f32_16x16x128_fp8_bf8 descriptor_semantic_tag=matrix.smfmac.f32.16x16x128.fp8.bf8 emitted_ops=2
+COMPILE-REPORT: source_low_native[3] function=report_cdna4_native_fp8_bf8_smfmac source_op=vector.mma native_contraction={tile:1x16x16x128,participants:64,lhs:{evidence:metadata-dependent,bits:8,registers:4,payload:16,positions:1024,coordinates:2048},rhs:{evidence:exact,bits:8,registers:8,payload:32,positions:2048,coordinates:2048,owners:1},accumulator:{evidence:exact,bits:32,registers:4,payload:4,positions:256,coordinates:256,owners:1},result:{evidence:exact,bits:32,registers:4,payload:4,positions:256,coordinates:256,owners:1}}
+
+// ====
+
+amdgpu.target<gfx1200> @target
+
+func.def target(@target) @report_rdna4_native_fp8_fp8_wmma(%lhs_data: vector<2xi32>, %rhs_data: vector<2xi32>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<2xi32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %schema : encoding<schema>} : vector<2xi32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<2xi32>, vector<2xi32>, vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=4 emitted_ops=2 rows=4
+COMPILE-REPORT: source_low[0] function=report_rdna4_native_fp8_fp8_wmma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_rdna4_native_fp8_fp8_wmma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_rdna4_native_fp8_fp8_wmma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_rdna4_native_fp8_fp8_wmma source_op=vector.mma selection=plan descriptor_key=amdgpu.v_wmma_f32_16x16x16_fp8_fp8 descriptor_semantic_tag=matrix.wmma.f32.16x16x16.fp8.fp8 emitted_ops=2
+COMPILE-REPORT: source_low_native[3] function=report_rdna4_native_fp8_fp8_wmma source_op=vector.mma native_contraction={tile:1x16x16x16,participants:32,lhs:{evidence:exact,bits:8,registers:2,payload:8,positions:256,coordinates:256,owners:1},rhs:{evidence:exact,bits:8,registers:2,payload:8,positions:256,coordinates:256,owners:1},accumulator:{evidence:exact,bits:32,registers:8,payload:8,positions:256,coordinates:256,owners:1},result:{evidence:exact,bits:32,registers:8,payload:8,positions:256,coordinates:256,owners:1}}
+
+// ====
+
+amdgpu.target<gfx1200> @target
+
+func.def target(@target) @report_rdna4_native_bf8_fp8_wmma(%lhs_data: vector<2xi32>, %rhs_data: vector<2xi32>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=8, payload_registers=2> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<2xi32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<2xi32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<2xi32>, vector<2xi32>, vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=4 emitted_ops=2 rows=4
+COMPILE-REPORT: source_low[0] function=report_rdna4_native_bf8_fp8_wmma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_rdna4_native_bf8_fp8_wmma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_rdna4_native_bf8_fp8_wmma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_rdna4_native_bf8_fp8_wmma source_op=vector.mma selection=plan descriptor_key=amdgpu.v_wmma_f32_16x16x16_bf8_fp8 descriptor_semantic_tag=matrix.wmma.f32.16x16x16.bf8.fp8 emitted_ops=2
+COMPILE-REPORT: source_low_native[3] function=report_rdna4_native_bf8_fp8_wmma source_op=vector.mma native_contraction={tile:1x16x16x16,participants:32,lhs:{evidence:exact,bits:8,registers:2,payload:8,positions:256,coordinates:256,owners:1},rhs:{evidence:exact,bits:8,registers:2,payload:8,positions:256,coordinates:256,owners:1},accumulator:{evidence:exact,bits:32,registers:8,payload:8,positions:256,coordinates:256,owners:1},result:{evidence:exact,bits:32,registers:8,payload:8,positions:256,coordinates:256,owners:1}}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+func.def target(@target) @report_gfx1250_native_fp8_bf8_wmma_x64(%lhs_data: vector<8xi32>, %rhs_data: vector<8xi32>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 64 : index
+  %lhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=32, payload_registers=8> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=32, payload_registers=8> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<8xi32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<8xi32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<8xi32>, vector<8xi32>, vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=4 emitted_ops=2 rows=4
+COMPILE-REPORT: source_low[0] function=report_gfx1250_native_fp8_bf8_wmma_x64 source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_gfx1250_native_fp8_bf8_wmma_x64 source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_gfx1250_native_fp8_bf8_wmma_x64 source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_gfx1250_native_fp8_bf8_wmma_x64 source_op=vector.mma selection=plan descriptor_key=amdgpu.v_wmma_f32_16x16x64_fp8_bf8 descriptor_semantic_tag=matrix.wmma.f32.16x16x64.fp8.bf8 emitted_ops=2
+COMPILE-REPORT: source_low_native[3] function=report_gfx1250_native_fp8_bf8_wmma_x64 source_op=vector.mma native_contraction={tile:1x16x16x64,participants:32,lhs:{evidence:exact,bits:8,registers:8,payload:32,positions:1024,coordinates:1024,owners:1},rhs:{evidence:exact,bits:8,registers:8,payload:32,positions:1024,coordinates:1024,owners:1},accumulator:{evidence:exact,bits:32,registers:8,payload:8,positions:256,coordinates:256,owners:1},result:{evidence:exact,bits:32,registers:8,payload:8,positions:256,coordinates:256,owners:1}}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+func.def target(@target) @report_gfx1250_native_fp8_fp8_wmma_x64(%lhs_data: vector<8xi32>, %rhs_data: vector<8xi32>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 64 : index
+  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=32, payload_registers=8> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<8xi32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %schema : encoding<schema>} : vector<8xi32>
+  %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<8xi32>, vector<8xi32>, vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=4 emitted_ops=2 rows=4
+COMPILE-REPORT: source_low[0] function=report_gfx1250_native_fp8_fp8_wmma_x64 source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_gfx1250_native_fp8_fp8_wmma_x64 source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_gfx1250_native_fp8_fp8_wmma_x64 source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_gfx1250_native_fp8_fp8_wmma_x64 source_op=vector.mma selection=plan descriptor_key=amdgpu.v_wmma_f32_16x16x64_fp8_fp8 descriptor_semantic_tag=matrix.wmma.f32.16x16x64.fp8.fp8 emitted_ops=2
+COMPILE-REPORT: source_low_native[3] function=report_gfx1250_native_fp8_fp8_wmma_x64 source_op=vector.mma native_contraction={tile:1x16x16x64,participants:32,lhs:{evidence:exact,bits:8,registers:8,payload:32,positions:1024,coordinates:1024,owners:1},rhs:{evidence:exact,bits:8,registers:8,payload:32,positions:1024,coordinates:1024,owners:1},accumulator:{evidence:exact,bits:32,registers:8,payload:8,positions:256,coordinates:256,owners:1},result:{evidence:exact,bits:32,registers:8,payload:8,positions:256,coordinates:256,owners:1}}

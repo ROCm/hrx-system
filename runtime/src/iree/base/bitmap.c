@@ -100,6 +100,7 @@ void iree_bitmap_set(iree_bitmap_t bitmap, iree_host_size_t bit_index) {
 
 void iree_bitmap_set_span(iree_bitmap_t bitmap, iree_host_size_t bit_index,
                           iree_host_size_t bit_length) {
+  if (bit_length == 0) return;
   const iree_host_size_t bit_end = bit_index + bit_length;
 
   // Set from the start of the span to the last full word.
@@ -138,6 +139,7 @@ void iree_bitmap_reset(iree_bitmap_t bitmap, iree_host_size_t bit_index) {
 
 void iree_bitmap_reset_span(iree_bitmap_t bitmap, iree_host_size_t bit_index,
                             iree_host_size_t bit_length) {
+  if (bit_length == 0) return;
   const iree_host_size_t bit_end = bit_index + bit_length;
 
   // Reset from the start of the span to the last full word.

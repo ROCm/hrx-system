@@ -168,6 +168,24 @@ typedef struct loom_low_storage_release_action_t {
   uint32_t lease_record_index;
 } loom_low_storage_release_action_t;
 
+// Integer key used to group storage-release actions.
+typedef enum loom_low_storage_release_action_index_key_e {
+  // Groups actions by |insertion_packet_index|.
+  LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_BY_INSERTION_PACKET = 0,
+  // Groups actions by |insertion_node_index|.
+  LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_BY_INSERTION_NODE = 1,
+} loom_low_storage_release_action_index_key_t;
+
+// Sparse first/next chain index over storage-release actions.
+typedef struct loom_low_storage_release_action_index_t {
+  // First action index per key, or STORAGE_RELEASE_ACTION_INDEX_NONE.
+  uint32_t* first_action_indices;
+  // Next action index for the same key, or STORAGE_RELEASE_ACTION_INDEX_NONE.
+  uint32_t* next_action_indices;
+  // Number of key entries in |first_action_indices|.
+  iree_host_size_t key_count;
+} loom_low_storage_release_action_index_t;
+
 // Ordered storage-lease sidecar for one scheduled low function.
 typedef struct loom_low_storage_lease_table_t {
   // Schedule table walked to build this storage-lease table.
@@ -183,6 +201,14 @@ iree_status_t loom_low_storage_lease_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_storage_lease_provider_t* provider,
     iree_arena_allocator_t* arena, loom_low_storage_lease_table_t* out_table);
+
+// Builds a stable-order action chain index by the selected release-action key.
+iree_status_t loom_low_storage_release_action_index_build(
+    const loom_low_storage_release_action_t* actions,
+    iree_host_size_t action_count,
+    loom_low_storage_release_action_index_key_t key, iree_host_size_t key_count,
+    iree_arena_allocator_t* arena,
+    loom_low_storage_release_action_index_t* out_index);
 
 #ifdef __cplusplus
 }  // extern "C"

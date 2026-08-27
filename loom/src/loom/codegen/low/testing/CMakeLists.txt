@@ -11,6 +11,44 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    allocation_checker
+  HDRS
+    "allocation_checker.h"
+  SRCS
+    "allocation_checker.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::liveness
+    loom::codegen::low::allocation::assignment
+    loom::codegen::low::allocation::live_range
+    loom::codegen::low::allocation::storage
+    loom::codegen::low::frame
+    loom::codegen::low::placement
+    loom::codegen::low::storage_lease
+    loom::target::registers
+  TESTONLY
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    allocation_checker_test
+  SRCS
+    "allocation_checker_test.cc"
+  DEPS
+    ::allocation_checker
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::analysis::liveness
+    loom::codegen::low::allocation::assignment
+    loom::codegen::low::frame
+    loom::codegen::low::placement
+)
+
+loom_cc_library(
+  NAME
     descriptors_verify
   HDRS
     "descriptors_verify.h"
@@ -70,6 +108,7 @@ loom_cc_library(
   SRCS
     "source_workload_pipeline.c"
   DEPS
+    ::allocation_checker
     ::source_workload
     iree::base
     iree::base::internal::arena

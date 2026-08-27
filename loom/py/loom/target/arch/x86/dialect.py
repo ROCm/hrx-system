@@ -16,6 +16,7 @@ from loom.dsl import (
     Op,
     OpPhase,
     SymbolDefinition,
+    TargetFactSpecialization,
     TargetLikeInterface,
 )
 
@@ -58,6 +59,7 @@ x86_target = Op(
             symbol="symbol",
             selector="kind",
             bundle_table="loom_x86_target_bundles",
+            fact_specialization=TargetFactSpecialization.STRUCTURAL,
         )
     ],
     symbol_def=SymbolDefinition(

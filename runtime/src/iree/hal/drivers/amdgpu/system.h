@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVERS_AMDGPU_SYSTEM_H_
 
 #include "iree/base/api.h"
+#include "iree/hal/drivers/amdgpu/util/agent_target.h"
 #include "iree/hal/drivers/amdgpu/util/device_clock.h"
 #include "iree/hal/drivers/amdgpu/util/device_library.h"
 #include "iree/hal/drivers/amdgpu/util/info.h"
@@ -75,6 +76,10 @@ typedef struct iree_hal_amdgpu_system_t {
   // System topology as visible to the HAL device. This may be a subset of
   // the devices available in the system.
   iree_hal_amdgpu_topology_t topology;
+
+  // Immutable target identities corresponding to |topology.gpu_agents|.
+  iree_hal_amdgpu_agent_target_t
+      gpu_agent_targets[IREE_HAL_AMDGPU_MAX_GPU_AGENT];
 
   // Cached system information queried from HSA or the platform.
   iree_hal_amdgpu_system_info_t info;

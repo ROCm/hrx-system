@@ -1,0 +1,32 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# bazel-to-cmake: skip
+
+load("//loom/build_tools/bazel:defs.bzl", "loom_library")
+
+package(default_visibility = ["//loom/build_tools/bazel/test:__pkg__"])
+
+exports_files([
+    "duplicate_a.loom",
+    "duplicate_b.loom",
+])
+
+loom_library(
+    name = "dependency",
+    srcs = ["dependency.loom"],
+    tags = ["manual"],
+)
+
+loom_library(
+    name = "subject",
+    srcs = [
+        "helper.loom",
+        "root.loom",
+    ],
+    tags = ["manual"],
+    deps = [":dependency"],
+)

@@ -117,6 +117,7 @@ def precommit_plan(
     lane: str,
     tool_env: ToolEnvironment,
     profile: str,
+    amend: bool = False,
     base: str | None = None,
     commit: bool = False,
     cmake_build_dir: Path | None = None,
@@ -134,6 +135,8 @@ def precommit_plan(
     input_args: list[str] = []
     if paths:
         input_args += paths
+    elif amend:
+        input_args.append("--amend")
     elif base is not None:
         input_args += ["--base", base]
     elif commit:
@@ -152,7 +155,9 @@ def precommit_plan(
             "--lane",
             lane,
             "--fix",
+            "--fail-on-fix",
             "--hygiene",
+            "--print-plan",
             *input_args,
             "--profile",
             profile,
@@ -174,12 +179,13 @@ def precommit_plan(
         "--lane",
         lane,
         "--check",
+        "--print-plan",
         *input_args,
         "--profile",
         profile,
     ]
     if should_autofix:
-        command += ["--tests", "--static-analysis"]
+        command += ["--hygiene", "--tests", "--static-analysis"]
     if verbose:
         command.append("--verbose")
     plan.add(

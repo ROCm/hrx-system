@@ -85,23 +85,24 @@ loomc_status_t loomc_option_chain_resolve(
     const loomc_descriptor_prefix_t* prefix =
         (const loomc_descriptor_prefix_t*)next;
     switch (prefix->type) {
-      case LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS: {
-        if (!iree_all_bits_set(allowed_options,
-                               LOOMC_OPTION_CHAIN_ALLOW_TARGET_SELECTION)) {
+      case LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS: {
+        if (!iree_all_bits_set(
+                allowed_options,
+                LOOMC_OPTION_CHAIN_ALLOW_TARGET_SPECIALIZATION)) {
           return loomc_make_status(
               LOOMC_STATUS_UNIMPLEMENTED,
-              "target selection option extension is not supported here");
+              "target specialization option extension is not supported here");
         }
-        if (out_options->target_selection != NULL) {
+        if (out_options->target_specialization != NULL) {
           return loomc_make_status(
               LOOMC_STATUS_INVALID_ARGUMENT,
-              "option chain contains duplicate target selection options");
+              "option chain contains duplicate target specialization options");
         }
-        const loomc_target_selection_options_t* target_options =
-            (const loomc_target_selection_options_t*)next;
+        const loomc_target_specialization_options_t* target_options =
+            (const loomc_target_specialization_options_t*)next;
         LOOMC_RETURN_IF_ERROR(
-            loomc_target_selection_options_validate(target_options));
-        out_options->target_selection = target_options->target_selection;
+            loomc_target_specialization_options_validate(target_options));
+        out_options->target_specialization = target_options;
         next = target_options->next;
         break;
       }

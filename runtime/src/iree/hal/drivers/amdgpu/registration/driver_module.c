@@ -47,13 +47,19 @@ IREE_FLAG(int32_t, amdgpu_default_pool_frontier_capacity, 0,
           "Maximum death-frontier entry count stored per free default-pool "
           "block or 0 for the default.");
 
+IREE_FLAG(int64_t, amdgpu_file_staging_slot_size, 0,
+          "Byte length of each queue_read/queue_write file staging slot. Must "
+          "be a power of two or 0 for the default.");
+IREE_FLAG(int32_t, amdgpu_file_staging_slot_count, 0,
+          "Number of queue_read/queue_write file staging slots per physical "
+          "device. Must be a power of two or 0 for the default.");
+
 IREE_FLAG(string, amdgpu_queue_placement, "any",
           "Device queue placement: 'any' (currently host), 'host', or "
           "'device' (reserved and currently unsupported).");
 
 IREE_FLAG(string, amdgpu_command_buffer_mode, "aql",
-          "Command-buffer execution mode: 'aql', 'pm4', or 'auto'. PM4 is an "
-          "experimental gfx1100 dispatch-only reusable-command-buffer path.");
+          "Command-buffer execution mode: 'aql', 'pm4', or 'auto'.");
 IREE_FLAG(
     string, amdgpu_pm4_command_buffer_publication_mode, "host-copy",
     "PM4 command-buffer resident publication mode: 'host-copy' writes host "
@@ -74,12 +80,6 @@ IREE_FLAG(
     bool, amdgpu_force_wait_barrier_defer, false,
     "Forces cross-queue wait barriers through the software deferral path "
     "instead of using the device-side strategy selected from the GPU ISA.");
-
-IREE_FLAG(bool, amdgpu_experimental_pm4_command_buffers, false,
-          "Enables PM4 dispatch command-buffer capabilities on unvalidated "
-          "gfx9-gfx12 "
-          "targets. This is for hardware bring-up only; default automatic PM4 "
-          "selection remains limited to validated GPU ISAs.");
 
 IREE_FLAG(bool, amdgpu_asan, false,
           "Enables AMDGPU ASAN runtime state and config global publication.");
@@ -249,6 +249,21 @@ static iree_status_t iree_hal_amdgpu_driver_factory_try_create(
     device_options->default_pool.frontier_capacity =
         (uint8_t)FLAG_amdgpu_default_pool_frontier_capacity;
   }
+  if (FLAG_amdgpu_file_staging_slot_size) {
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_flag_int64_to_host_size(
+        "--amdgpu_file_staging_slot_size", FLAG_amdgpu_file_staging_slot_size,
+        &device_options->file_staging.slot_size));
+  }
+  if (FLAG_amdgpu_file_staging_slot_count) {
+    if (FLAG_amdgpu_file_staging_slot_count < 0) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "file staging slot count must be non-negative (got %d)",
+          FLAG_amdgpu_file_staging_slot_count);
+    }
+    device_options->file_staging.slot_count =
+        (uint32_t)FLAG_amdgpu_file_staging_slot_count;
+  }
 
   if (strcmp(FLAG_amdgpu_queue_placement, "any") == 0) {
     device_options->queue_placement = IREE_HAL_AMDGPU_QUEUE_PLACEMENT_ANY;
@@ -302,9 +317,6 @@ static iree_status_t iree_hal_amdgpu_driver_factory_try_create(
 
   device_options->force_wait_barrier_defer =
       FLAG_amdgpu_force_wait_barrier_defer;
-
-  device_options->enable_experimental_pm4_command_buffers =
-      FLAG_amdgpu_experimental_pm4_command_buffers;
 
   device_options->asan.enabled =
       device_options->asan.enabled || FLAG_amdgpu_asan;

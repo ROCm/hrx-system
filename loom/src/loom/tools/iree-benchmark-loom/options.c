@@ -39,12 +39,12 @@ IREE_FLAG(string, pipeline, "default",
           "'none', '@symbol', or a comma-separated pass list.");
 IREE_FLAG_LIST(
     string, config,
-    "Compile-time config binding for HAL actual invocations. Repeat as "
+    "Compile-time config binding for HAL kernel launches. Repeat as "
     "--config=key=value. Bindings not referenced by the loaded module are "
     "ignored.");
 IREE_FLAG_LIST_NAMED(
     string, config_file, "config-file",
-    "JSON/JSONC config object file for HAL actual invocations. Repeat for "
+    "JSON/JSONC config object file for HAL kernel launches. Repeat for "
     "multiple files. Nested object keys are flattened with '.' separators.");
 IREE_FLAG(string, sanitizer, "none",
           "Sanitizer checks inserted by the target pipeline. Use 'none', "
@@ -106,19 +106,14 @@ IREE_FLAG_NAMED(
     "Directory receiving raw IREE HAL profile bundles from final profiled "
     "batches. Setting this implies --profile-final-batch=true unless that flag "
     "was explicitly set false.");
-IREE_FLAG_NAMED(string, sample_compilation, "sample-compilation", "once",
-                "Sample compilation mode for dispatch_complete benchmarks. "
-                "Use 'once' to compile once and pass parameter values at "
-                "dispatch time, 'per_sample' to compile each selected sample "
-                "with concrete parameter facts, or 'both' to emit both result "
-                "sets.");
 IREE_FLAG_NAMED(
     int64_t, input_ring_min_bytes, "input-ring-min-bytes",
     IREE_BENCHMARK_LOOM_DEFAULT_INPUT_RING_MIN_BYTES,
     "Minimum total byte size of the device-buffer binding ring used by "
-    "dispatch_complete benchmarks. The auto ring count is max(batch-size, "
-    "ceil(min bytes / bytes per binding set)); use 0 to record one "
-    "hot-reuse binding set.");
+    "dispatch_complete benchmarks. Automatic selection materializes enough "
+    "binding sets to approach this target, capped at one set per batch "
+    "dispatch. A binding set already larger than the target is not "
+    "duplicated; use 0 to record one hot-reuse binding set.");
 IREE_FLAG_NAMED(
     int32_t, input_ring_count, "input-ring-count", 0,
     "Exact number of physical device-buffer binding sets to rotate through "
@@ -196,8 +191,6 @@ void iree_benchmark_loom_options_initialize(
   out_options->measure = IREE_SV("case_end_to_end");
   out_options->compile_report = IREE_SV("summary");
   out_options->artifact_manifest = IREE_SV("none");
-  out_options->sample_compilation_mode =
-      IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE;
   out_options->input_ring_min_bytes =
       IREE_BENCHMARK_LOOM_DEFAULT_INPUT_RING_MIN_BYTES;
   out_options->interleave_mode = IREE_BENCHMARK_LOOM_INTERLEAVE_NONE;
@@ -301,9 +294,6 @@ iree_status_t iree_benchmark_loom_options_from_flags(
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_parse_artifact_bundle_policy(
       iree_make_cstring_view(FLAG_artifact_bundle_policy),
       &out_options->artifact_bundle_policy));
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_parse_sample_compilation_mode(
-      iree_make_cstring_view(FLAG_sample_compilation),
-      &out_options->sample_compilation_mode));
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_positive_i32_to_host_size(
       "max-samples-per-case", FLAG_max_samples_per_case,
       &out_options->max_samples_per_case));
@@ -377,13 +367,6 @@ iree_status_t iree_benchmark_loom_options_from_flags(
         IREE_STATUS_INVALID_ARGUMENT,
         "--compare selects benchmark/case pairs directly and cannot be "
         "combined with --case");
-  }
-  if (compare_requested && out_options->sample_compilation_mode ==
-                               IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_BOTH) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "--compare requires one sample-compilation mode; use "
-        "--sample-compilation=once or --sample-compilation=per_sample");
   }
   if (iree_string_view_equal(
           iree_string_view_trim(out_options->file_output_dir), IREE_SV("-"))) {
@@ -467,55 +450,6 @@ iree_status_t iree_benchmark_loom_parse_artifact_bundle_policy(
       "--artifact-bundle-policy must be one of minimal, debug, full, or none; "
       "got '%.*s'",
       (int)value.size, value.data);
-}
-
-iree_status_t iree_benchmark_loom_parse_sample_compilation_mode(
-    iree_string_view_t value,
-    iree_benchmark_loom_sample_compilation_mode_t* out_mode) {
-  value = iree_string_view_trim(value);
-  if (iree_string_view_equal(value, IREE_SV("once"))) {
-    *out_mode = IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE;
-    return iree_ok_status();
-  }
-  if (iree_string_view_equal(value, IREE_SV("per_sample"))) {
-    *out_mode = IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_PER_SAMPLE;
-    return iree_ok_status();
-  }
-  if (iree_string_view_equal(value, IREE_SV("both"))) {
-    *out_mode = IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_BOTH;
-    return iree_ok_status();
-  }
-  return iree_make_status(
-      IREE_STATUS_INVALID_ARGUMENT,
-      "--sample-compilation must be one of once, per_sample, or both; got "
-      "'%.*s'",
-      (int)value.size, value.data);
-}
-
-iree_string_view_t iree_benchmark_loom_sample_compilation_mode_name(
-    iree_benchmark_loom_sample_compilation_mode_t mode) {
-  switch (mode) {
-    case IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE:
-      return IREE_SV("once");
-    case IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_PER_SAMPLE:
-      return IREE_SV("per_sample");
-    case IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_BOTH:
-      return IREE_SV("both");
-    default:
-      return IREE_SV("unknown");
-  }
-}
-
-bool iree_benchmark_loom_sample_compilation_runs_once(
-    iree_benchmark_loom_sample_compilation_mode_t mode) {
-  return mode == IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE ||
-         mode == IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_BOTH;
-}
-
-bool iree_benchmark_loom_sample_compilation_runs_per_sample(
-    iree_benchmark_loom_sample_compilation_mode_t mode) {
-  return mode == IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_PER_SAMPLE ||
-         mode == IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_BOTH;
 }
 
 iree_status_t iree_benchmark_loom_parse_interleave_mode(
@@ -664,8 +598,8 @@ iree_status_t iree_benchmark_loom_parse_profile_data_families(
 iree_status_t iree_benchmark_loom_write_profile_family_names_json(
     iree_hal_device_profiling_data_families_t profile_data_families,
     loom_output_stream_t* stream) {
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "["));
-  bool first = true;
+  loom_json_array_writer_t array;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &array));
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(iree_benchmark_loom_profile_family_names); ++i) {
     const iree_benchmark_loom_profile_family_name_t* family =
@@ -673,15 +607,10 @@ iree_status_t iree_benchmark_loom_write_profile_family_names_json(
     if (!iree_all_bits_set(profile_data_families, family->bit)) {
       continue;
     }
-    if (!first) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-    }
-    IREE_RETURN_IF_ERROR(
-        loom_json_write_escaped_cstring(stream, family->json_name));
-    first = false;
+    IREE_RETURN_IF_ERROR(loom_json_array_write_string_element(
+        &array, iree_make_cstring_view(family->json_name)));
   }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "]"));
-  return iree_ok_status();
+  return loom_json_array_end(&array);
 }
 
 iree_status_t iree_benchmark_loom_parse_i32_flag(iree_string_view_t flag_name,

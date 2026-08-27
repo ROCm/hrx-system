@@ -1,0 +1,589 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_benchmark",
+    "loom_cc_library",
+    "loom_cc_test",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "attribute",
+    srcs = ["attribute.c"],
+    hdrs = ["attribute.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":decoder",
+        ":module_view",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:symbol_map",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "attribute_test",
+    srcs = ["attribute_test.cc"],
+    deps = [
+        ":attribute",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "body",
+    srcs = ["body.c"],
+    hdrs = ["body.h"],
+    textual_hdrs = ["body_materializer_impl.inl"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":attribute",
+        ":decoder",
+        ":module_view",
+        ":source_trivia",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format:low_repr",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "body_test",
+    srcs = ["body_test.cc"],
+    deps = [
+        ":body",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "encoding",
+    srcs = ["encoding.c"],
+    hdrs = ["encoding.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":attribute",
+        ":decoder",
+        ":module_view",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format/bytecode:index",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "encoding_test",
+    srcs = ["encoding_test.cc"],
+    deps = [
+        ":encoding",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "encoding_validator_test",
+    srcs = ["encoding_validator_test.cc"],
+    deps = [
+        ":encoding",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "location",
+    srcs = ["location.c"],
+    hdrs = ["location.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":decoder",
+        ":module_view",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format/bytecode:index",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "location_test",
+    srcs = ["location_test.cc"],
+    deps = [
+        ":location",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "operation",
+    srcs = ["operation.c"],
+    hdrs = ["operation.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":decoder",
+        ":module_view",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format/bytecode:index",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "operation_test",
+    srcs = ["operation_test.cc"],
+    deps = [
+        ":operation",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "materializer",
+    srcs = ["materializer.c"],
+    hdrs = ["materializer.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":decoder",
+        ":encoding",
+        ":location",
+        ":module_view",
+        ":string_table",
+        ":symbol_materializer",
+        ":type",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format:low_repr",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "module_view",
+    hdrs = ["module_view.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":source_trivia",
+        ":type_plan",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/format/bytecode:index",
+        "//loom/src/loom/format/bytecode:module_summary",
+        "//loom/src/loom/ir:symbol_map",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "validation",
+    srcs = ["validation.c"],
+    hdrs = ["validation.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":decoder",
+        ":encoding",
+        ":location",
+        ":module_view",
+        ":operation",
+        ":source_trivia",
+        ":string_table",
+        ":symbol_validator",
+        ":type_validator",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format/bytecode:index",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/internal:unicode",
+    ],
+)
+
+loom_cc_library(
+    name = "type_plan",
+    hdrs = ["type_plan.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "type_validator",
+    srcs = ["type_validator.c"],
+    hdrs = ["type_validator.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":attribute",
+        ":decoder",
+        ":module_view",
+        ":type_plan",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:type_registry",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "type",
+    srcs = ["type.c"],
+    hdrs = ["type.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":attribute",
+        ":decoder",
+        ":module_view",
+        ":type_plan",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "type_test",
+    srcs = ["type_test.cc"],
+    deps = [
+        ":module_view",
+        ":type",
+        ":type_validator",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "source_trivia",
+    srcs = ["source_trivia.c"],
+    hdrs = ["source_trivia.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":decoder",
+        "//loom/src/loom/format/bytecode:format",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/internal:unicode",
+    ],
+)
+
+loom_cc_test(
+    name = "source_trivia_test",
+    srcs = ["source_trivia_test.cc"],
+    deps = [
+        ":source_trivia",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "selected_projection",
+    srcs = ["selected_projection.c"],
+    hdrs = ["selected_projection.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_test(
+    name = "selected_projection_test",
+    srcs = ["selected_projection_test.cc"],
+    deps = [
+        ":selected_projection",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "selected_projection_benchmark",
+    srcs = ["selected_projection_benchmark.cc"],
+    deps = [
+        ":selected_projection",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
+loom_cc_library(
+    name = "selected_tables",
+    srcs = [
+        "selected_attribute.c",
+        "selected_tables.c",
+    ],
+    hdrs = [
+        "selected_attribute.h",
+        "selected_tables.h",
+    ],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":attribute",
+        ":decoder",
+        ":module_view",
+        ":selected_projection",
+        ":type_plan",
+        ":type_validator",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/format/bytecode:index",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "selected_body",
+    srcs = ["selected_body.c"],
+    hdrs = ["selected_body.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":body",
+        ":decoder",
+        ":selected_tables",
+        ":source_trivia",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format:low_repr",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "selected_symbol",
+    srcs = ["selected_symbol.c"],
+    hdrs = ["selected_symbol.h"],
+    textual_hdrs = ["symbol_materializer_impl.inl"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":selected_body",
+        ":selected_tables",
+        ":source_trivia",
+        ":symbol_schema",
+        "//loom/src/loom/format:low_repr",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/format/bytecode:function_header",
+        "//loom/src/loom/format/bytecode:index",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "selected_materializer",
+    srcs = ["selected_materializer.c"],
+    hdrs = ["selected_materializer.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":decoder",
+        ":selected_symbol",
+        ":selected_tables",
+        "//loom/src/loom/format:low_repr",
+        "//loom/src/loom/format/bytecode:index",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "selected_body_test",
+    srcs = ["selected_body_test.cc"],
+    deps = [
+        ":selected_body",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "selected_tables_test",
+    srcs = ["selected_tables_test.cc"],
+    deps = [
+        ":selected_tables",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "selected_tables_benchmark",
+    srcs = ["selected_tables_benchmark.cc"],
+    deps = [
+        ":selected_tables",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
+loom_cc_library(
+    name = "string_table",
+    srcs = ["string_table.c"],
+    hdrs = ["string_table.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":decoder",
+        ":module_view",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/internal:unicode",
+    ],
+)
+
+loom_cc_test(
+    name = "string_table_test",
+    srcs = ["string_table_test.cc"],
+    deps = [
+        ":string_table",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "symbol_schema",
+    srcs = ["symbol_schema.c"],
+    hdrs = ["symbol_schema.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":decoder",
+        ":module_view",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "symbol_validator",
+    srcs = ["symbol.c"],
+    hdrs = ["symbol_validator.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":attribute",
+        ":decoder",
+        ":module_view",
+        ":source_trivia",
+        ":symbol_schema",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/format/bytecode:index",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:symbol_map",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "symbol_materializer",
+    srcs = ["symbol_materializer.c"],
+    hdrs = ["symbol_materializer.h"],
+    textual_hdrs = ["symbol_materializer_impl.inl"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        ":attribute",
+        ":body",
+        ":decoder",
+        ":module_view",
+        ":source_trivia",
+        ":symbol_schema",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format:low_repr",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/format/bytecode:function_header",
+        "//loom/src/loom/format/bytecode:index",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "decoder",
+    srcs = ["decoder.c"],
+    hdrs = ["decoder.h"],
+    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    deps = [
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format/bytecode:diagnostic",
+        "//loom/src/loom/format/bytecode:varint",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "decoder_test",
+    srcs = ["decoder_test.cc"],
+    deps = [
+        ":decoder",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

@@ -14,6 +14,7 @@
 #include "loom/format/text/parser/diagnostics.h"
 #include "loom/format/text/parser/format_signatures.h"
 #include "loom/format/text/parser/format_tables.h"
+#include "loom/format/text/parser/low_asm.h"
 #include "loom/format/text/parser/regions.h"
 #include "loom/format/text/parser/scope.h"
 #include "loom/format/text/parser/types.h"
@@ -49,7 +50,9 @@ static iree_status_t loom_parse_format_index_list(
     return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'['"));
   }
 
-  int64_t static_values[32];
+  int64_t inline_static_values[32];
+  int64_t* static_values = inline_static_values;
+  iree_host_size_t static_value_capacity = IREE_ARRAYSIZE(inline_static_values);
   uint16_t value_count = 0;
   uint16_t dynamic_value_count = 0;
   while (!loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_RBRACKET) &&
@@ -59,10 +62,16 @@ static iree_status_t loom_parse_format_index_list(
         break;
       }
     }
-    if (value_count >= 32) {
+    if (value_count == UINT16_MAX) {
       loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
       return loom_parser_emit_token_text_error(parser, LOOM_ERR_PARSE_004,
                                                peek);
+    }
+    if (value_count >= static_value_capacity) {
+      IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+          &parser->parser_arena, value_count, (iree_host_size_t)value_count + 1,
+          sizeof(*static_values), &static_value_capacity,
+          (void**)&static_values));
     }
 
     if (loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_SSA_VALUE)) {
@@ -107,10 +116,13 @@ static iree_status_t loom_parse_format_index_list(
 
   // Build the static i64 array attribute.
   int64_t* arena_values = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(&parser->module->arena,
-                                                 value_count, sizeof(int64_t),
-                                                 (void**)&arena_values));
-  memcpy(arena_values, static_values, value_count * sizeof(int64_t));
+  if (value_count > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(&parser->module->arena,
+                                                   value_count, sizeof(int64_t),
+                                                   (void**)&arena_values));
+    memcpy(arena_values, static_values,
+           (iree_host_size_t)value_count * sizeof(int64_t));
+  }
   loom_attribute_t attr = loom_attr_i64_array(arena_values, value_count);
   IREE_RETURN_IF_ERROR(loom_parsed_op_set_attribute(
       parsed, &parser->parser_arena, static_attr_index, attr));
@@ -266,10 +278,13 @@ static iree_status_t loom_parse_format_optional_group(
             &vtable->attr_descriptors[first_inner->field_index];
         if (descriptor->attr_kind == LOOM_ATTR_ENUM &&
             descriptor->enum_case_names) {
-          present = false;
-          if (peek.kind == LOOM_TOKEN_BARE_IDENT ||
-              peek.kind == LOOM_TOKEN_OP_NAME) {
-            for (uint8_t c = 0; c < descriptor->enum_case_count; ++c) {
+          present = iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM) &&
+                    peek.kind == LOOM_TOKEN_LANGLE;
+          if (!present && (peek.kind == LOOM_TOKEN_BARE_IDENT ||
+                           peek.kind == LOOM_TOKEN_OP_NAME)) {
+            iree_host_size_t case_span =
+                loom_attr_descriptor_enum_case_span(descriptor);
+            for (iree_host_size_t c = 0; c < case_span; ++c) {
               if (descriptor->enum_case_names[c] &&
                   loom_bstring_equal(descriptor->enum_case_names[c],
                                      peek.text)) {
@@ -278,6 +293,9 @@ static iree_status_t loom_parse_format_optional_group(
               }
             }
           }
+        } else if (descriptor->attr_kind == LOOM_ATTR_ENUM_ARRAY ||
+                   descriptor->attr_kind == LOOM_ATTR_SIGNED_ENUM_SET) {
+          present = peek.kind == LOOM_TOKEN_LBRACKET;
         } else {
           present = (peek.kind == LOOM_TOKEN_INTEGER ||
                      peek.kind == LOOM_TOKEN_FLOAT ||
@@ -290,9 +308,10 @@ static iree_status_t loom_parse_format_optional_group(
                  first_inner->kind == LOOM_FORMAT_KIND_SYMBOL_REF) {
         present = peek.kind == LOOM_TOKEN_SYMBOL;
       } else if (first_inner &&
-                 (first_inner->kind == LOOM_FORMAT_KIND_OP_REF ||
-                  first_inner->kind == LOOM_FORMAT_KIND_DESCRIPTOR_REF ||
+                 (first_inner->kind == LOOM_FORMAT_KIND_KEY_REF ||
+                  first_inner->kind == LOOM_FORMAT_KIND_SCOPED_ENUM_REF ||
                   first_inner->kind == LOOM_FORMAT_KIND_STABLE_KEY_REF ||
+                  first_inner->kind == LOOM_FORMAT_KIND_ATTR_PARAMS ||
                   first_inner->kind == LOOM_FORMAT_KIND_TEMPLATE_PARAM ||
                   first_inner->kind == LOOM_FORMAT_KIND_TEMPLATE_PARAM_FLAGS)) {
         present = peek.kind == LOOM_TOKEN_LANGLE;
@@ -393,11 +412,14 @@ static iree_status_t loom_parse_format_flags(loom_parser_t* parser,
   return iree_ok_status();
 }
 
-// Parses an op or descriptor key reference: <op.name> or <descriptor-key>.
-static iree_status_t loom_parse_format_op_ref(
+// Parses a bare symbolic key reference: <key.name>.
+static iree_status_t loom_parse_format_key_ref(
     loom_parser_t* parser, const loom_format_element_t* element,
-    loom_parsed_op_t* parsed) {
-  loom_token_t op_ref_start_token = loom_tokenizer_peek(&parser->tokenizer);
+    loom_parsed_op_t* parsed, iree_string_view_t* out_key,
+    loom_token_t* out_key_token) {
+  *out_key = iree_string_view_empty();
+  *out_key_token = loom_token_none();
+  loom_token_t key_ref_start_token = loom_tokenizer_peek(&parser->tokenizer);
   if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LANGLE)) {
     loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
     return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'<'"));
@@ -419,14 +441,16 @@ static iree_status_t loom_parse_format_op_ref(
   loom_attribute_t attr = loom_attr_string(name_id);
   IREE_RETURN_IF_ERROR(loom_parsed_op_set_attribute(
       parsed, &parser->parser_arena, element->field_index, attr));
+  *out_key = name_token.text;
+  *out_key_token = name_token;
   return loom_parse_format_add_field_span(
       parser, parsed, LOOM_LOCATION_FIELD_ATTRIBUTE, element->field_index,
-      op_ref_start_token);
+      key_ref_start_token);
 }
 
-// Parses a descriptor key reference whose row ordinal is resolved later after
-// target binding selects the descriptor set: <target.descriptor>.
-static iree_status_t loom_parse_format_descriptor_ref(
+// Parses a stable case key directly into the active representation contract's
+// dense enum ordinal: <target.descriptor>.
+static iree_status_t loom_parse_format_scoped_enum_ref(
     loom_parser_t* parser, const loom_format_element_t* element,
     loom_parsed_op_t* parsed) {
   loom_token_t descriptor_ref_start_token =
@@ -446,19 +470,38 @@ static iree_status_t loom_parse_format_descriptor_ref(
     loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
     return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'>'"));
   }
-  loom_string_id_t key_id = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_module_intern_string(parser->module, key_token.text, &key_id));
+  if (!parser->low_repr.descriptor_set) {
+    return loom_parser_emit_low_asm_error(
+        parser, key_token,
+        IREE_SV(
+            "descriptor requires an enclosing Low representation contract"));
+  }
+  if (!parser->low_asm_environment.low_repr.vtable) {
+    return loom_parser_emit_low_asm_error(
+        parser, key_token,
+        IREE_SV("Low representation environment is not configured"));
+  }
+  loom_low_repr_descriptor_value_t value = {0};
+  if (!loom_low_repr_resolve_descriptor(&parser->low_asm_environment.low_repr,
+                                        parser->low_repr.descriptor_set,
+                                        key_token.text, &value)) {
+    bool diagnostic_emitted = false;
+    IREE_RETURN_IF_ERROR(loom_parser_try_emit_unknown_low_packet_diagnostic(
+        parser, parser->low_repr.descriptor_set, key_token,
+        &diagnostic_emitted));
+    if (diagnostic_emitted) return iree_ok_status();
+    return loom_parser_emit_low_asm_error(
+        parser, key_token,
+        IREE_SV(
+            "unknown descriptor in the active Low representation contract"));
+  }
   IREE_RETURN_IF_ERROR(loom_parsed_op_set_attribute(
       parsed, &parser->parser_arena, element->field_index,
-      loom_attr_string(key_id)));
-  IREE_RETURN_IF_ERROR(loom_parsed_op_set_attribute(
-      parsed, &parser->parser_arena, element->data, loom_attr_i64(-1)));
-  IREE_RETURN_IF_ERROR(loom_parse_format_add_field_span(
-      parser, parsed, LOOM_LOCATION_FIELD_ATTRIBUTE, element->field_index,
-      descriptor_ref_start_token));
+      loom_attr_scoped_enum(value.ordinal)));
+  parsed->effective_traits = value.effective_traits;
+  parsed->has_effective_traits = true;
   return loom_parse_format_add_field_span(
-      parser, parsed, LOOM_LOCATION_FIELD_ATTRIBUTE, element->data,
+      parser, parsed, LOOM_LOCATION_FIELD_ATTRIBUTE, element->field_index,
       descriptor_ref_start_token);
 }
 
@@ -520,6 +563,25 @@ static iree_status_t loom_parse_format_template_param(
     loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
     return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'>'"));
   }
+  IREE_RETURN_IF_ERROR(loom_parsed_op_set_attribute(
+      parsed, &parser->parser_arena, element->field_index, attr));
+  return loom_parse_format_add_field_span(parser, parsed,
+                                          LOOM_LOCATION_FIELD_ATTRIBUTE,
+                                          element->field_index, start_token);
+}
+
+// Parses a known-family parameterized attribute payload: <key = value, ...>.
+static iree_status_t loom_parse_format_attr_params(
+    loom_parser_t* parser, const loom_op_vtable_t* vtable,
+    const loom_format_element_t* element, loom_parsed_op_t* parsed) {
+  loom_token_t start_token = loom_tokenizer_peek(&parser->tokenizer);
+  const loom_attr_descriptor_t* descriptor =
+      &vtable->attr_descriptors[element->field_index];
+  loom_attribute_t attr = {0};
+  uint32_t attr_errors_before = parser->error_count;
+  IREE_RETURN_IF_ERROR(loom_parse_parameterized_attr_parameters(
+      parser, descriptor->reference.parameterized_attr_kind, &attr));
+  if (parser->error_count > attr_errors_before) return iree_ok_status();
   IREE_RETURN_IF_ERROR(loom_parsed_op_set_attribute(
       parsed, &parser->parser_arena, element->field_index, attr));
   return loom_parse_format_add_field_span(parser, parsed,
@@ -691,39 +753,70 @@ static iree_status_t loom_parse_format_project_func_args(
   return iree_ok_status();
 }
 
-static bool loom_parse_format_symbol_ref_targets_register_context(
-    const loom_op_vtable_t* vtable, uint16_t attr_index) {
-  if (!vtable->func_like || !vtable->attr_descriptors ||
-      attr_index >= vtable->attribute_count) {
-    return false;
-  }
-  const loom_attr_descriptor_t* descriptor =
-      &vtable->attr_descriptors[attr_index];
-  return descriptor->symbol_ref &&
-         iree_any_bit_set(descriptor->symbol_ref->interfaces,
-                          LOOM_SYMBOL_INTERFACE_TARGET);
-}
-
-static iree_status_t loom_parse_format_update_register_context_from_target(
+static iree_status_t loom_parse_format_bind_function_low_repr(
     loom_parser_t* parser, const loom_op_vtable_t* vtable, uint16_t attr_index,
-    loom_attribute_t attr) {
-  if (!loom_parse_format_symbol_ref_targets_register_context(vtable,
-                                                             attr_index)) {
+    iree_string_view_t key, loom_token_t key_token) {
+  if (!vtable->func_like ||
+      vtable->func_like->repr_contract_attr_index == LOOM_ATTR_INDEX_NONE ||
+      vtable->func_like->repr_contract_attr_index != attr_index) {
     return iree_ok_status();
   }
-  if (!parser->low_asm_environment.vtable ||
-      !parser->low_asm_environment.vtable->lookup_target_descriptor_set) {
-    return iree_ok_status();
+  parser->low_repr = (loom_text_low_repr_context_t){
+      .contract_key = key,
+  };
+  if (!loom_text_low_asm_environment_is_configured(
+          &parser->low_asm_environment)) {
+    return loom_parser_emit_low_asm_error(
+        parser, key_token,
+        IREE_SV("Low representation environment is not configured"));
   }
-  const loom_text_low_asm_descriptor_set_t* descriptor_set = NULL;
-  IREE_RETURN_IF_ERROR(
-      parser->low_asm_environment.vtable->lookup_target_descriptor_set(
-          parser->low_asm_environment.state, parser->module, attr,
-          &descriptor_set));
-  if (descriptor_set != NULL) {
-    parser->low_register_descriptor_set = descriptor_set;
+  parser->low_repr.descriptor_set = loom_low_repr_lookup_descriptor_set(
+      &parser->low_asm_environment.low_repr, key);
+  if (!parser->low_repr.descriptor_set) {
+    return loom_parser_emit_low_asm_error(
+        parser, key_token, IREE_SV("unknown Low representation contract"));
   }
   return iree_ok_status();
+}
+
+// Resolves a counted loop's implicit induction-variable type after its range
+// operands have been parsed and before the body region consumes the pending
+// block argument. Counted loops define the induction variable in the same
+// address domain as their lower bound.
+static iree_status_t loom_parse_format_resolve_loop_iv_type(
+    loom_parser_t* parser, const loom_op_vtable_t* vtable,
+    const loom_parsed_op_t* parsed, uint8_t region_index) {
+  const loom_loop_like_vtable_t* loop_like = vtable->loop_like;
+  if (!loop_like || loop_like->body_region_index != region_index ||
+      loop_like->iv_block_arg_index == LOOM_BLOCK_ARG_INDEX_NONE) {
+    return iree_ok_status();
+  }
+
+  IREE_ASSERT(loop_like->iv_block_arg_index < parser->pending_block_args.count);
+  uint16_t lower_bound_operand_index = loop_like->lower_bound_operand_index;
+  if (loop_like->segmented_operands) {
+    IREE_ASSERT(lower_bound_operand_index < parsed->operand_segment_count);
+    uint16_t flat_operand_index = 0;
+    for (uint8_t i = 0; i < lower_bound_operand_index; ++i) {
+      flat_operand_index += parsed->operand_segment_counts[i];
+    }
+    IREE_ASSERT(parsed->operand_segment_counts[lower_bound_operand_index] == 1);
+    lower_bound_operand_index = flat_operand_index;
+  }
+  IREE_ASSERT(lower_bound_operand_index < parsed->operand_count);
+
+  const loom_value_id_t iv_value_id =
+      parser->pending_block_args.entries[loop_like->iv_block_arg_index]
+          .value_id;
+  if (loom_type_kind(loom_module_value_type(parser->module, iv_value_id)) !=
+      LOOM_TYPE_NONE) {
+    return iree_ok_status();
+  }
+  const loom_value_id_t lower_bound_value_id =
+      parsed->operand_ids[lower_bound_operand_index];
+  return loom_module_set_value_type(
+      parser->module, iv_value_id,
+      loom_module_value_type(parser->module, lower_bound_value_id));
 }
 
 iree_status_t loom_parser_walk_format(loom_parser_t* parser,
@@ -744,16 +837,15 @@ iree_status_t loom_parser_walk_format(loom_parser_t* parser,
     switch (element->kind) {
       case LOOM_FORMAT_KIND_OPERAND_REF: {
         if (element->field_index == 0xFF) {
-          // Induction variable reference (e.g., %iv in test.loop).
-          // Consume the SSA token, create an index-typed value, and queue it
-          // as a pending block arg. REGION defines the loop IV name in the
-          // child scope when seeding the entry block.
+          // Counted-loop induction variable reference (for example, %iv in
+          // scf.for). Its type follows the lower bound, which appears later in
+          // the format, so REGION resolves the type before seeding the entry
+          // block.
           loom_token_t iv_token = loom_token_none();
           LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_SSA_VALUE, &iv_token);
           loom_value_id_t iv_value_id = 0;
           IREE_RETURN_IF_ERROR(loom_module_define_value(
-              parser->module, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
-              &iv_value_id));
+              parser->module, loom_type_none(), &iv_value_id));
           IREE_RETURN_IF_ERROR(
               loom_parser_add_pending_block_arg(parser, iv_value_id, iv_token));
           break;
@@ -898,9 +990,6 @@ iree_status_t loom_parser_walk_format(loom_parser_t* parser,
         IREE_RETURN_IF_ERROR(loom_parsed_op_add_field_span(
             parsed, &parser->parser_arena, LOOM_LOCATION_FIELD_ATTRIBUTE,
             element->field_index, token, token.line, token.end_column));
-        IREE_RETURN_IF_ERROR(
-            loom_parse_format_update_register_context_from_target(
-                parser, vtable, element->field_index, attr));
         break;
       }
 
@@ -982,6 +1071,8 @@ iree_status_t loom_parser_walk_format(loom_parser_t* parser,
               "format REGION field_index %u out of range (op has %u regions)",
               element->field_index, vtable->region_count);
         }
+        IREE_RETURN_IF_ERROR(loom_parse_format_resolve_loop_iv_type(
+            parser, vtable, parsed, element->field_index));
         bool has_pending_func_args =
             parser->pending_func_args.count > pending_func_arg_start;
         bool is_func_like_body =
@@ -1028,7 +1119,8 @@ iree_status_t loom_parser_walk_format(loom_parser_t* parser,
       }
 
       case LOOM_FORMAT_KIND_FUNC_ARGS: {
-        IREE_RETURN_IF_ERROR(loom_parse_format_func_args(parser, parsed));
+        IREE_RETURN_IF_ERROR(loom_parse_format_func_args(
+            parser, vtable, element, pending_func_arg_start, parsed));
         break;
       }
 
@@ -1061,14 +1153,19 @@ iree_status_t loom_parser_walk_format(loom_parser_t* parser,
         break;
       }
 
-      case LOOM_FORMAT_KIND_OP_REF: {
-        IREE_RETURN_IF_ERROR(loom_parse_format_op_ref(parser, element, parsed));
+      case LOOM_FORMAT_KIND_KEY_REF: {
+        iree_string_view_t key = iree_string_view_empty();
+        loom_token_t key_token = loom_token_none();
+        IREE_RETURN_IF_ERROR(loom_parse_format_key_ref(parser, element, parsed,
+                                                       &key, &key_token));
+        IREE_RETURN_IF_ERROR(loom_parse_format_bind_function_low_repr(
+            parser, vtable, element->field_index, key, key_token));
         break;
       }
 
-      case LOOM_FORMAT_KIND_DESCRIPTOR_REF: {
+      case LOOM_FORMAT_KIND_SCOPED_ENUM_REF: {
         IREE_RETURN_IF_ERROR(
-            loom_parse_format_descriptor_ref(parser, element, parsed));
+            loom_parse_format_scoped_enum_ref(parser, element, parsed));
         break;
       }
 
@@ -1081,6 +1178,12 @@ iree_status_t loom_parser_walk_format(loom_parser_t* parser,
       case LOOM_FORMAT_KIND_TEMPLATE_PARAM: {
         IREE_RETURN_IF_ERROR(
             loom_parse_format_template_param(parser, vtable, element, parsed));
+        break;
+      }
+
+      case LOOM_FORMAT_KIND_ATTR_PARAMS: {
+        IREE_RETURN_IF_ERROR(
+            loom_parse_format_attr_params(parser, vtable, element, parsed));
         break;
       }
 
@@ -1121,6 +1224,12 @@ iree_status_t loom_parser_walk_format(loom_parser_t* parser,
       case LOOM_FORMAT_KIND_ATTR_TABLE: {
         IREE_RETURN_IF_ERROR(
             loom_parse_format_attr_table(parser, vtable, element, parsed));
+        break;
+      }
+
+      case LOOM_FORMAT_KIND_ALIGNED_REFS: {
+        IREE_RETURN_IF_ERROR(
+            loom_parse_format_aligned_refs(parser, vtable, element, parsed));
         break;
       }
 

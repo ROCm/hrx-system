@@ -1,0 +1,12 @@
+// RUN: emit amdgpu-kernel-assembly
+
+amdgpu.target<gfx1250-a0> @a0
+low.kernel.def target<amdgpu.rdna4.gfx1250_a0.core>(@a0) workgroup_size(32, 1, 1) @reject_a0_k32_swmmac() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %lhs = concat(%lane, %lane) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %rhs = concat(%lane, %lane, %lane, %lane) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %acc = concat(%rhs, %rhs) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  // ERROR@+1: AMDGPU/047 {function_name="reject_a0_k32_swmmac", descriptor_name="amdgpu.v_swmmac_f32_16x16x32_fp8_bf8", descriptor_set_name="amdgpu.rdna4.gfx1250_a0.core", target="gfx1250-a0", constraint_key="amdgpu.swmmac.low_precision_lowering", legalization_key="lower_low_precision_swmmac"}
+  %result = v_swmmac_f32_16x16x32_fp8_bf8 %acc, %lhs, %rhs, %lane
+  return
+}

@@ -24,9 +24,11 @@ from loom.target.arch.x86.packed_dot_data import (
     NUMERIC_U8,
     X86_PACKED_DOT_DESCRIPTORS,
     PackedDotDescriptor,
+    packed_dot_native_layout,
 )
 from loom.target.contracts import (
     ContractFragment,
+    DescriptorMatrixRule,
     DescriptorRule,
     DotDescriptorCase,
     GuardDiagnostic,
@@ -77,8 +79,6 @@ class _PackedDotSourceCase:
     input_numeric_type: str
 
 
-type _PackedDotSignature = tuple[int, str, str, str, str]
-
 _PACKED_DOT_SOURCE_CASES = {
     **{
         (2, numeric_type, numeric_type, NUMERIC_F32, NUMERIC_F32): (
@@ -120,32 +120,27 @@ def _type_diagnostic(field: str) -> GuardDiagnostic:
     )
 
 
-def _source_signature(descriptor_data: PackedDotDescriptor) -> _PackedDotSignature:
-    return (
-        descriptor_data.reduction_group_size,
-        descriptor_data.lhs_numeric_type,
-        descriptor_data.rhs_numeric_type,
-        descriptor_data.accumulator_numeric_type,
-        descriptor_data.result_numeric_type,
-    )
-
-
-def _source_case(descriptor_data: PackedDotDescriptor) -> _PackedDotSourceCase | None:
-    return _PACKED_DOT_SOURCE_CASES.get(_source_signature(descriptor_data))
-
-
 def _packed_dot_case(descriptor_data: PackedDotDescriptor) -> DotDescriptorCase | None:
-    source_case = _source_case(descriptor_data)
+    native_shape = packed_dot_native_layout(descriptor_data).shape
+    source_case = _PACKED_DOT_SOURCE_CASES.get(
+        (
+            native_shape.k,
+            descriptor_data.lhs_numeric_type,
+            descriptor_data.rhs_numeric_type,
+            descriptor_data.accumulator_numeric_type,
+            descriptor_data.result_numeric_type,
+        )
+    )
     if source_case is None:
         return None
     descriptor = _descriptor(descriptor_data.key)
     source_type = _vector_type(
         source_case.input_numeric_type,
-        descriptor_data.input_lane_count,
+        native_shape.block_count * native_shape.k,
     )
     result_type = _vector_type(
         descriptor_data.result_numeric_type,
-        descriptor_data.result_lane_count,
+        native_shape.block_count,
     )
     return DotDescriptorCase(
         source_op=source_case.source_op,
@@ -184,5 +179,8 @@ X86_PACKED_DOT_CONTRACT_FRAGMENT = ContractFragment(
     name="x86.packed_dot",
     descriptor_set=X86_PACKED_DOT_DESCRIPTOR_SET,
     public_header="loom/target/arch/x86/contracts/packed_dot.h",
-    cases=_packed_dot_rules(),
+    cases=(
+        *_packed_dot_rules(),
+        DescriptorMatrixRule(source_op=vector.vector_mma, source="vector_mma"),
+    ),
 )

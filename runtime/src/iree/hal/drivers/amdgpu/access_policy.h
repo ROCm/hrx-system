@@ -30,10 +30,21 @@ typedef struct iree_hal_amdgpu_access_agent_list_t {
   // Number of initialized entries in |values|.
   uint32_t count;
 
-  // HSA agents to pass to hsa_amd_agents_allow_access or hsa_amd_memory_lock.
+  // HSA agents to pass to memory allocation, locking, or VMM access APIs.
   hsa_agent_t
       values[IREE_HAL_AMDGPU_MAX_CPU_AGENT + IREE_HAL_AMDGPU_MAX_GPU_AGENT];
 } iree_hal_amdgpu_access_agent_list_t;
+
+// Resolves the GPU agents selected by |queue_affinity|.
+//
+// The resulting list contains each selected GPU agent and no CPU agents. This
+// is used for operations whose contract grants access to device queues rather
+// than to every host and device participant in a memory placement.
+iree_status_t iree_hal_amdgpu_access_agent_list_resolve_queue_agents(
+    const iree_hal_amdgpu_topology_t* topology,
+    iree_hal_amdgpu_queue_affinity_domain_t queue_affinity_domain,
+    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_amdgpu_access_agent_list_t* out_agent_list);
 
 // Resolves the HSA agents that may access memory placed for |queue_affinity|.
 //
@@ -43,7 +54,7 @@ typedef struct iree_hal_amdgpu_access_agent_list_t {
 // to that physical device. Sharing usage bits define how queues may share the
 // buffer within the requested placement; they do not expand the placement past
 // |queue_affinity|.
-iree_status_t iree_hal_amdgpu_access_agent_list_resolve(
+iree_status_t iree_hal_amdgpu_access_agent_list_resolve_memory_agents(
     const iree_hal_amdgpu_topology_t* topology,
     iree_hal_amdgpu_queue_affinity_domain_t queue_affinity_domain,
     iree_hal_queue_affinity_t queue_affinity,
@@ -54,10 +65,12 @@ iree_status_t iree_hal_amdgpu_access_allow_agent_list(
     const iree_hal_amdgpu_libhsa_t* libhsa,
     const iree_hal_amdgpu_access_agent_list_t* agent_list, const void* ptr);
 
-// Pins |host_ptr| for the HSA agents in |agent_list|.
-iree_status_t iree_hal_amdgpu_access_lock_host_allocation(
+// Pins |host_ptr| for the HSA agents in |agent_list| using the access
+// properties of the CPU-owned |memory_pool|.
+iree_status_t iree_hal_amdgpu_access_lock_host_allocation_to_pool(
     const iree_hal_amdgpu_libhsa_t* libhsa,
-    const iree_hal_amdgpu_access_agent_list_t* agent_list, void* host_ptr,
+    const iree_hal_amdgpu_access_agent_list_t* agent_list,
+    hsa_amd_memory_pool_t memory_pool, void* host_ptr,
     iree_device_size_t length, void** out_agent_ptr);
 
 #ifdef __cplusplus

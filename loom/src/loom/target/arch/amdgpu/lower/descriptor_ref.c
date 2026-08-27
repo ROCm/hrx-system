@@ -6,61 +6,80 @@
 
 #include "loom/target/arch/amdgpu/lower/descriptor_ref.h"
 
-#include <inttypes.h>
 #include <stdint.h>
 
 #include "loom/codegen/low/builder.h"
 #include "loom/ops/op_defs.h"
 
-iree_status_t loom_amdgpu_lookup_descriptor_ref(
-    loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
-    loom_amdgpu_descriptor_ref_t descriptor_ref,
-    const loom_low_descriptor_t** out_descriptor,
-    loom_string_id_t* out_opcode_id) {
-  *out_descriptor = NULL;
-  *out_opcode_id = LOOM_STRING_ID_INVALID;
-  const uint32_t descriptor_ordinal =
-      loom_amdgpu_descriptor_ref_ordinal(descriptor_set, descriptor_ref);
-  if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "generated AMDGPU lowering references missing descriptor ref %" PRIu16,
-        descriptor_ref);
+bool loom_amdgpu_descriptor_set_has_ref(
+    const loom_low_descriptor_set_t* descriptor_set,
+    loom_amdgpu_descriptor_ref_t descriptor_ref) {
+  if (descriptor_set == NULL) {
+    return false;
   }
-  const loom_low_descriptor_t* descriptor =
-      loom_low_descriptor_set_descriptor_at(descriptor_set, descriptor_ordinal);
-  iree_string_view_t key = loom_low_descriptor_set_string(
-      descriptor_set, descriptor->key_string_offset);
-  IREE_RETURN_IF_ERROR(loom_builder_intern_string(builder, key, out_opcode_id));
-  *out_descriptor = descriptor;
-  return iree_ok_status();
+  return loom_amdgpu_descriptor_ref_ordinal(descriptor_set, descriptor_ref) !=
+         LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
 }
 
-iree_status_t loom_amdgpu_make_descriptor_implicit_resource_type(
+iree_string_view_t loom_amdgpu_descriptor_set_key(
+    const loom_low_descriptor_set_t* descriptor_set) {
+  if (descriptor_set == NULL) {
+    return IREE_SV("<missing>");
+  }
+  const iree_string_view_t descriptor_set_key = loom_low_descriptor_set_string(
+      descriptor_set, descriptor_set->key_string_offset);
+  return iree_string_view_is_empty(descriptor_set_key) ? IREE_SV("<empty>")
+                                                       : descriptor_set_key;
+}
+
+bool loom_amdgpu_descriptor_set_has_all_refs(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, loom_type_t* out_type) {
-  *out_type = loom_type_none();
-  const loom_low_operand_t* operands =
-      &descriptor_set->operands[descriptor->operand_start];
-  for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
-    const loom_low_operand_t* operand = &operands[i];
-    if (operand->role != LOOM_LOW_OPERAND_ROLE_RESOURCE ||
-        !iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_IMPLICIT)) {
+    const loom_amdgpu_descriptor_ref_t* descriptor_refs,
+    iree_host_size_t descriptor_ref_count) {
+  for (iree_host_size_t i = 0; i < descriptor_ref_count; ++i) {
+    const loom_amdgpu_descriptor_ref_t descriptor_ref = descriptor_refs[i];
+    if (descriptor_ref == LOOM_AMDGPU_DESCRIPTOR_REF_NONE) {
       continue;
     }
-    for (uint16_t j = 0; j < operand->reg_class_alt_count; ++j) {
-      const uint32_t alt_index = operand->reg_class_alt_start + j;
-      const loom_low_reg_class_alt_t* alt =
-          &descriptor_set->reg_class_alts[alt_index];
-      if (iree_any_bit_set(alt->flags, LOOM_LOW_REG_CLASS_ALT_FLAG_IMMEDIATE)) {
-        continue;
-      }
-      return loom_low_build_register_type(descriptor_set, alt->reg_class_id,
-                                          operand->unit_count, out_type);
+    if (!loom_amdgpu_descriptor_set_has_ref(descriptor_set, descriptor_ref)) {
+      return false;
     }
   }
-  return iree_make_status(IREE_STATUS_INTERNAL,
-                          "AMDGPU descriptor has no implicit resource operand");
+  return true;
+}
+
+bool loom_amdgpu_descriptor_requirements_present(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_descriptor_requirement_t* requirements,
+    iree_host_size_t requirement_count,
+    iree_string_view_t* out_constraint_key) {
+  for (iree_host_size_t i = 0; i < requirement_count; ++i) {
+    *out_constraint_key = requirements[i].constraint_key;
+    if (!loom_amdgpu_descriptor_set_has_ref(descriptor_set,
+                                            requirements[i].descriptor_ref)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool loom_amdgpu_descriptor_requirement_present(
+    const loom_low_descriptor_set_t* descriptor_set,
+    iree_string_view_t constraint_key,
+    loom_amdgpu_descriptor_ref_t descriptor_ref,
+    iree_string_view_t* out_constraint_key) {
+  *out_constraint_key = constraint_key;
+  return loom_amdgpu_descriptor_set_has_ref(descriptor_set, descriptor_ref);
+}
+
+const loom_low_descriptor_t* loom_amdgpu_lookup_descriptor_ref(
+    const loom_low_descriptor_set_t* descriptor_set,
+    loom_amdgpu_descriptor_ref_t descriptor_ref) {
+  const loom_low_descriptor_t* descriptor =
+      loom_amdgpu_descriptor_ref_descriptor(descriptor_set, descriptor_ref);
+  IREE_ASSERT(descriptor != NULL,
+              "generated AMDGPU lowering references missing descriptor ref");
+  return descriptor;
 }
 
 bool loom_amdgpu_descriptor_has_immediate(

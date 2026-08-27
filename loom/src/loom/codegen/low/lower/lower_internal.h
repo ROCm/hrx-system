@@ -17,6 +17,7 @@
 #include "loom/codegen/low/lower/lower.h"
 #include "loom/codegen/low/lower/lower_rules.h"
 #include "loom/codegen/low/memory_access.h"
+#include "loom/codegen/low/source_memory_plan.h"
 #include "loom/ir/local_value_domain.h"
 #include "loom/ir/module.h"
 
@@ -38,6 +39,28 @@ enum loom_low_lower_selected_plan_flag_bits_e {
   LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED = (uint8_t)1u << 0,
 };
 typedef uint8_t loom_low_lower_selected_plan_flags_t;
+
+typedef struct loom_low_lower_memory_expr_term_t {
+  // Source SSA value multiplied into this symbolic byte expression.
+  loom_value_id_t value_id;
+  // Signed byte coefficient applied to |value_id|.
+  int64_t coefficient;
+} loom_low_lower_memory_expr_term_t;
+
+typedef struct loom_low_lower_memory_expr_key_t {
+  // Static byte constant added to all dynamic terms.
+  int64_t constant;
+  // Number of populated entries in |terms|.
+  uint8_t term_count;
+  // Sorted symbolic byte terms.
+  loom_low_lower_memory_expr_term_t
+      terms[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY];
+} loom_low_lower_memory_expr_key_t;
+
+typedef struct loom_low_lower_memory_expr_entry_t {
+  // Comparable symbolic expression key interned for report-only accounting.
+  loom_low_lower_memory_expr_key_t key;
+} loom_low_lower_memory_expr_entry_t;
 
 typedef enum loom_low_lower_selected_plan_kind_e {
   // Selection came from a table-driven source-to-low rule.
@@ -65,6 +88,9 @@ typedef struct loom_low_lower_selected_plan_t {
   const loom_low_lower_rule_t* rule;
   // Resolved emit rows for |rule|, or NULL for target-owned callbacks.
   const loom_low_lower_resolved_emit_t* resolved_emits;
+  // Canonical source-memory plan retained from rule selection, or NULL when
+  // the selected rule does not consume source memory.
+  const loom_low_source_memory_access_plan_t* source_memory_access;
   // Target-owned plan selected during planning, or empty for table rules.
   loom_low_lower_plan_t plan;
 } loom_low_lower_selected_plan_t;
@@ -85,6 +111,12 @@ typedef struct loom_low_lower_successor_interpositions_t {
   // Number of entries in low_dests.
   uint8_t low_dest_count;
 } loom_low_lower_successor_interpositions_t;
+
+// Returns exact source execution evidence for an operation when loop and CFG
+// facts can prove it without target execution.
+iree_status_t loom_low_lower_source_op_execution_count_plus_one(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    uint64_t* out_execution_count_plus_one);
 
 typedef struct loom_low_lower_target_state_record_t {
   // Target-owned static key identifying this function-local state object.
@@ -115,17 +147,30 @@ struct loom_low_lower_module_state_t {
   iree_host_size_t target_state_record_capacity;
 };
 
+typedef enum loom_low_lower_function_analysis_phase_e {
+  LOOM_LOW_LOWER_FUNCTION_ANALYSIS_EMPTY = 0,
+  LOOM_LOW_LOWER_FUNCTION_ANALYSIS_EXPRESSIONS = 1,
+  LOOM_LOW_LOWER_FUNCTION_ANALYSIS_VIEW_REGIONS = 2,
+} loom_low_lower_function_analysis_phase_t;
+
+typedef struct loom_low_lower_function_analysis_t {
+  // Furthest analysis phase completed for the active fact table.
+  loom_low_lower_function_analysis_phase_t phase;
+  // Function-local stable symbolic expressions shared by rules and views.
+  loom_symbolic_expr_context_t expression_context;
+  // View-region table borrowing expression_context.
+  loom_view_region_table_t view_regions;
+} loom_low_lower_function_analysis_t;
+
 typedef struct loom_low_lowering_frame_t {
   // Active source-function value domain for dense per-value lowering state.
   loom_local_value_domain_t value_domain;
   // Borrowed source value facts computed before planning.
   loom_value_fact_table_t* fact_table;
-  // Function-local symbolic proof context initialized on first rule query.
-  loom_symbolic_expr_context_t expression_context;
-  // Fact table used to initialize expression_context.
-  const loom_value_fact_table_t* expression_context_fact_table;
-  // True once expression_context owns arena-backed memo/scratch storage.
-  bool expression_context_initialized;
+  // Reusable traversal state for condition-fact queries.
+  loom_condition_query_t condition_query;
+  // Stable function analyses advanced monotonically on demand.
+  loom_low_lower_function_analysis_t function_analysis;
   // Per-source-value storage demand flags indexed by source value ordinal.
   loom_low_lower_value_storage_flags_t* value_storage_flags;
   // Source local value ordinal to emitted low value ID map.
@@ -148,18 +193,24 @@ typedef struct loom_low_lowering_frame_t {
   iree_host_size_t selected_plan_capacity;
   // Next selected plan consumed by the emission walk.
   iree_host_size_t selected_plan_emit_index;
+  // Cached source-function CFG block execution counts for memory reports.
+  uint64_t* source_block_execution_counts;
+  // True when source_block_execution_counts has been initialized.
+  bool source_block_execution_counts_initialized;
+  // True when every reachable source CFG backedge was counted exactly.
+  bool source_block_execution_counts_exact;
+  // Function-local symbolic byte expressions interned for report accounting.
+  loom_low_lower_memory_expr_entry_t* memory_expr_entries;
+  // Number of interned symbolic byte expressions.
+  iree_host_size_t memory_expr_entry_count;
+  // Capacity of |memory_expr_entries|.
+  iree_host_size_t memory_expr_entry_capacity;
   // Source-derived memory access rows copied into options.table_arena.
   loom_low_memory_access_record_t* memory_access_records;
   // Number of memory access rows recorded during emission.
   iree_host_size_t memory_access_record_count;
   // Capacity of memory_access_records.
   iree_host_size_t memory_access_record_capacity;
-  // View-region table for the source function, initialized on first use.
-  loom_view_region_table_t view_regions;
-  // True after view_regions has been initialized against value_domain.
-  bool view_regions_initialized;
-  // True after view_regions has recorded per-view read/write flags.
-  bool view_regions_analyzed;
   // Descriptor set used to build rule_descriptor_maps.
   const loom_low_descriptor_set_t* rule_descriptor_map_set;
   // Per-policy-rule-set descriptor-ref to descriptor-row maps.
@@ -192,8 +243,16 @@ struct loom_low_lower_context_t {
   const loom_low_descriptor_set_t* descriptor_set;
   // Result object receiving counters and emitted low function metadata.
   loom_low_lower_result_t* result;
-  // Scratch arena for transient maps and remapped operand lists.
-  iree_arena_allocator_t arena;
+  // Arena retaining function plans, maps, analyses, and target state.
+  iree_arena_allocator_t function_arena;
+  // Arena reset after each source-op planning callback.
+  iree_arena_allocator_t planning_arena;
+  // True only while a source-op planning callback may request scratch storage.
+  bool planning_arena_active;
+  // Arena reset after each bounded low-IR emission scope.
+  iree_arena_allocator_t emission_arena;
+  // True only while a low-IR builder callback may request emission storage.
+  bool emission_arena_active;
   // Module-scope state shared by source-to-low calls in the current module
   // pass, or NULL when the caller is lowering a standalone function.
   loom_low_lower_module_state_t* module_state;

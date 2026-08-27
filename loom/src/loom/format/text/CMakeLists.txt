@@ -17,6 +17,7 @@ loom_cc_library(
   DEPS
     iree::base
     loom::error::error_defs
+    loom::format::low_repr
     loom::ir
     loom::ops::op_defs
   PUBLIC
@@ -81,6 +82,25 @@ loom_cc_library(
   DEPS
     loom::format::text::printer::printer_impl
   PUBLIC
+)
+
+loom_cc_benchmark(
+  NAME
+    type_syntax_benchmark
+  SRCS
+    "type_syntax_benchmark.cc"
+  DEPS
+    ::parser
+    ::printer
+    iree::base
+    iree::base::internal::arena
+    iree::testing::benchmark_main
+    loom::ir
+    loom::ops::test
+    loom::util::stream
+  ARGS
+    "--benchmark_filter=BM_((ScalarType|LocationTag)Classify.*|(Parse|Print)(ScalarTypes|ShapedTypes|TaggedLocations)/16)"
+  TESTONLY
 )
 
 loom_cc_fuzz(

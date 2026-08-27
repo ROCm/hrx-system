@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <future>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -16,6 +17,48 @@ namespace iree::hal::cts {
 using iree::testing::status::StatusIs;
 
 class QueueHostCallTest : public CtsTestBase<> {};
+
+class AsyncQueueHostCallLifetimeTest : public CtsTestBase<> {};
+
+struct HostCallResourceState {
+  // HAL resource retained by asynchronous queue implementations.
+  iree_hal_resource_t resource;
+
+  // External invocation counter that outlives this state.
+  std::atomic<int>* call_count;
+
+  // External notification fulfilled immediately before destruction.
+  std::promise<void>* destroyed;
+};
+
+static void DestroyHostCallResourceState(iree_hal_resource_t* base_resource) {
+  auto* state = reinterpret_cast<HostCallResourceState*>(base_resource);
+  state->destroyed->set_value();
+  delete state;
+}
+
+static const iree_hal_resource_vtable_t kHostCallResourceStateVtable = {
+    /*.destroy=*/DestroyHostCallResourceState,
+};
+
+static HostCallResourceState* CreateHostCallResourceState(
+    std::atomic<int>* call_count, std::promise<void>* destroyed) {
+  auto* state = new HostCallResourceState;
+  iree_hal_resource_initialize(&kHostCallResourceStateVtable, &state->resource);
+  state->call_count = call_count;
+  state->destroyed = destroyed;
+  return state;
+}
+
+static iree_status_t InvokeHostCallResourceState(
+    void* user_data, const uint64_t args[4],
+    iree_hal_host_call_context_t* context) {
+  (void)args;
+  (void)context;
+  auto* state = static_cast<HostCallResourceState*>(user_data);
+  ++*state->call_count;
+  return iree_ok_status();
+}
 
 // Enqueues a host call on a wait condition that is signaled after the queue
 // request starts.
@@ -111,15 +154,22 @@ TEST_P(QueueHostCallTest, NonBlockingFlag) {
   IREE_TRACE_SCOPE();
 
   struct state_t {
-    std::atomic<int> did_call;
-    std::atomic<bool> received_semaphores;
+    // Guards all callback-produced state through sideband signaling.
+    std::mutex mutex;
+    // Number of times the callback was invoked.
+    int did_call = 0;
+    // Whether the callback received signal semaphores in its context.
+    bool received_semaphores = false;
+    // Signals that the detached callback has started executing.
     SemaphoreList sideband_semaphore_list;
-  } state = {0, false, {device_, {0}, {1}}};
+  } state;
+  state.sideband_semaphore_list = SemaphoreList(device_, {0}, {1});
   auto call = iree_hal_make_host_call(
       +[](void* user_data, const uint64_t args[4],
           iree_hal_host_call_context_t* context) {
         IREE_TRACE_SCOPE_NAMED("callback");
         auto* state = (state_t*)user_data;
+        std::lock_guard<std::mutex> lock(state->mutex);
         ++state->did_call;
         state->received_semaphores =
             !iree_hal_semaphore_list_is_empty(context->signal_semaphore_list);
@@ -148,6 +198,10 @@ TEST_P(QueueHostCallTest, NonBlockingFlag) {
                                               iree_infinite_timeout(),
                                               IREE_ASYNC_WAIT_FLAG_NONE));
 
+  // Observing the sideband payload does not imply that its signal operation
+  // has finished dispatching timepoints. Wait until the callback releases the
+  // state mutex before inspecting or destroying its semaphore list.
+  std::lock_guard<std::mutex> lock(state.mutex);
   EXPECT_EQ(state.did_call, 1);
   EXPECT_FALSE(state.received_semaphores)
       << "Callback should not receive semaphores with NON_BLOCKING flag";
@@ -357,6 +411,76 @@ TEST_P(QueueHostCallTest, CallbackReturnsErrorAfterWait) {
               StatusIs(StatusCode::kPermissionDenied));
 }
 
+// Proves that asynchronous queues retain callback state after queue submission
+// returns and until the delayed callback has completed.
+TEST_P(AsyncQueueHostCallLifetimeTest, RetainsStateUntilInvocation) {
+  IREE_TRACE_SCOPE();
+
+  std::atomic<int> call_count{0};
+  std::promise<void> destroyed;
+  std::future<void> destroyed_future = destroyed.get_future();
+  HostCallResourceState* state =
+      CreateHostCallResourceState(&call_count, &destroyed);
+  iree_hal_host_call_t call = iree_hal_make_host_call_with_resource(
+      InvokeHostCallResourceState, state, &state->resource);
+
+  SemaphoreList wait_semaphore_list(device_, {0}, {1});
+  SemaphoreList signal_semaphore_list(device_, {0}, {1});
+  uint64_t args[4] = {0, 0, 0, 0};
+
+  iree_status_t status = iree_hal_device_queue_host_call(
+      device_, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphore_list,
+      signal_semaphore_list, call, args, IREE_HAL_HOST_CALL_FLAG_NONE);
+  iree_hal_resource_release(&state->resource);
+  IREE_ASSERT_OK(status);
+
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_list_signal(wait_semaphore_list, /*frontier=*/NULL));
+  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(signal_semaphore_list,
+                                              iree_infinite_timeout(),
+                                              IREE_ASYNC_WAIT_FLAG_NONE));
+  destroyed_future.wait();
+
+  EXPECT_EQ(call_count, 1);
+}
+
+// Proves that a failed prerequisite skips the effect callback while still
+// releasing callback state through the queue's terminal cleanup path.
+TEST_P(AsyncQueueHostCallLifetimeTest, ReleasesStateAfterFailedPrerequisite) {
+  IREE_TRACE_SCOPE();
+
+  std::atomic<int> call_count{0};
+  std::promise<void> destroyed;
+  std::future<void> destroyed_future = destroyed.get_future();
+  HostCallResourceState* state =
+      CreateHostCallResourceState(&call_count, &destroyed);
+  iree_hal_host_call_t call = iree_hal_make_host_call_with_resource(
+      InvokeHostCallResourceState, state, &state->resource);
+
+  SemaphoreList wait_semaphore_list(device_, {0}, {1});
+  SemaphoreList signal_semaphore_list(device_, {0}, {1});
+  uint64_t args[4] = {0, 0, 0, 0};
+
+  iree_status_t status = iree_hal_device_queue_host_call(
+      device_, IREE_HAL_QUEUE_AFFINITY_ANY, wait_semaphore_list,
+      signal_semaphore_list, call, args, IREE_HAL_HOST_CALL_FLAG_NONE);
+  iree_hal_resource_release(&state->resource);
+  IREE_ASSERT_OK(status);
+
+  iree_hal_semaphore_fail(
+      wait_semaphore_list.semaphores[0],
+      iree_make_status(IREE_STATUS_CANCELLED, "host call prerequisite failed"));
+  EXPECT_THAT(Status(iree_hal_semaphore_list_wait(signal_semaphore_list,
+                                                  iree_infinite_timeout(),
+                                                  IREE_ASYNC_WAIT_FLAG_NONE)),
+              StatusIs(StatusCode::kCancelled));
+  destroyed_future.wait();
+
+  EXPECT_EQ(call_count, 0);
+}
+
 CTS_REGISTER_TEST_SUITE(QueueHostCallTest);
+CTS_REGISTER_TEST_SUITE_WITH_TAGS(AsyncQueueHostCallLifetimeTest,
+                                  {"async_queue"}, {});
 
 }  // namespace iree::hal::cts

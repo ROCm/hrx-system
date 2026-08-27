@@ -18,22 +18,23 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 from loom.assembly import (
+    AlignedRefs,
     Attr,
     AttrDict,
+    AttrParams,
     AttrTable,
     BindingList,
     BlockArgs,
     BlockRef,
     Clause,
-    DescriptorRef,
     Flags,
     FormatElement,
     FuncArgs,
     Glue,
     IndexList,
+    KeyRef,
     Keyword,
     OperandDict,
-    OpRef,
     OptionalGroup,
     PredicateList,
     Ref,
@@ -42,6 +43,7 @@ from loom.assembly import (
     ResultType,
     ResultTypeList,
     Scope,
+    ScopedEnumRef,
     StableKeyRef,
     SymbolRef,
     TemplateParam,
@@ -53,7 +55,7 @@ from loom.assembly import (
 from loom.assembly import (
     Region as RegionFmt,
 )
-from loom.dsl import AttrDef, Op
+from loom.dsl import AttrDef, Op, Result, TypeConstraint
 from loom.fields import FieldKind, compute_layout
 
 __all__ = [
@@ -62,6 +64,8 @@ __all__ = [
     "BuilderSignature",
     "attr_type_hint",
     "builder_method_names",
+    "dialect_python_name",
+    "fixed_result_type_constraints",
     "signature_for_op",
     "signatures_for_ops",
 ]
@@ -69,13 +73,34 @@ __all__ = [
 
 _PYTHON_KEYWORDS = frozenset(keyword.kwlist)
 
+# Public LoomBuilder members that cannot also name a dialect namespace.
+_LOOM_BUILDER_MEMBER_NAMES = frozenset(
+    {
+        "insertion_block",
+        "ir",
+        "location",
+        "module",
+        "region",
+        "value",
+    }
+)
+
+_FIXED_RESULT_TYPE_CONSTRAINTS = frozenset(
+    {
+        TypeConstraint.I1,
+        TypeConstraint.I32,
+        TypeConstraint.INDEX,
+        TypeConstraint.OFFSET,
+    }
+)
+
 
 class BuilderParamKind(Enum):
     """Kind of public builder parameter and its lowering behavior."""
 
     ATTR = auto()
     BLOCK_ARGS = auto()
-    DESCRIPTOR_REF = auto()
+    STABLE_KEY_REF = auto()
     FLAGS = auto()
     FUNC_ARGS = auto()
     INDEX_LIST = auto()
@@ -102,11 +127,12 @@ class BuilderParam:
     attr_def: AttrDef | None = None
     binding_kind: str | None = None
     names_field: str | None = None
+    operand_field: str | None = None
     region_field: str | None = None
     region_optional: bool = False
     stable_id_field: str | None = None
-    ordinal_field: str | None = None
     static_field: str | None = None
+    end_attr_field: str | None = None
 
     @property
     def py_name(self) -> str:
@@ -139,8 +165,14 @@ def attr_type_hint(attr_def: AttrDef | None) -> str:
             return "bool"
         case "enum":
             return "str"
+        case "enum_array":
+            return "Sequence[str | int]"
+        case "signed_enum_set":
+            return "SignedEnumSetAttr | Mapping[str | int, bool]"
         case "symbol":
             return "str"
+        case "symbol_array" | "symbol_set":
+            return "Sequence[str]"
         case "type":
             return "Type"
         case "i64_array":
@@ -197,13 +229,25 @@ def python_name(name: str) -> str:
     return name
 
 
+def dialect_python_name(name: str) -> str:
+    """Return the unambiguous LoomBuilder namespace for a dialect."""
+    name = python_name(name)
+    if name in _LOOM_BUILDER_MEMBER_NAMES:
+        return name + "_"
+    return name
+
+
 def signature_for_op(op: Op, method_name: str | None = None) -> BuilderSignature:
     """Derive the public builder signature for one op."""
     params = _extract_params(op)
     has_result_types = any(
         param.kind == BuilderParamKind.RESULT_TYPES for param in params
     )
-    if op.results and not has_result_types:
+    if (
+        op.results
+        and not has_result_types
+        and fixed_result_type_constraints(op) is None
+    ):
         params.append(
             BuilderParam(
                 name="results",
@@ -219,6 +263,20 @@ def signature_for_op(op: Op, method_name: str | None = None) -> BuilderSignature
         params=tuple(params),
         return_hint=_return_hint(op),
     )
+
+
+def fixed_result_type_constraints(op: Op) -> tuple[TypeConstraint, ...] | None:
+    """Returns statically known result types that a builder can synthesize."""
+    if not op.results:
+        return ()
+    if any(
+        not isinstance(result, Result)
+        or result.variadic
+        or result.type_constraint not in _FIXED_RESULT_TYPE_CONSTRAINTS
+        for result in op.results
+    ):
+        return None
+    return tuple(result.type_constraint for result in op.results)
 
 
 def signatures_for_ops(ops: tuple[Op, ...] | list[Op]) -> dict[str, BuilderSignature]:
@@ -261,7 +319,29 @@ def _extract_params(op: Op) -> list[BuilderParam]:  # noqa: C901
     """Extract public builder parameters from an op's assembly format."""
     layout = compute_layout(op)
     params: list[BuilderParam] = []
-    covered_attrs: set[str] = set()
+
+    def collect_func_args_boundaries(
+        elements: tuple[FormatElement, ...],
+    ) -> set[str]:
+        boundaries: set[str] = set()
+        for element in elements:
+            match element:
+                case FuncArgs(start_attr=start_attr, end_attr=end_attr):
+                    if start_attr is not None:
+                        boundaries.add(start_attr)
+                    if end_attr is not None:
+                        boundaries.add(end_attr)
+                case (
+                    Clause(elements=nested)
+                    | OptionalGroup(elements=nested)
+                    | Scope(elements=nested)
+                ):
+                    boundaries.update(collect_func_args_boundaries(nested))
+                case _:
+                    pass
+        return boundaries
+
+    covered_attrs = collect_func_args_boundaries(op.format)
     region_defs = {region.name: region for region in op.regions}
 
     def append_attr_param(name: str) -> None:
@@ -312,6 +392,54 @@ def _extract_params(op: Op) -> list[BuilderParam]:  # noqa: C901
             )
         )
 
+    def append_symbolic_ref_param(
+        element: ScopedEnumRef | StableKeyRef,
+    ) -> None:
+        match element:
+            case ScopedEnumRef(field=name):
+                attr_def = op.attr(name)
+                if attr_def is None or attr_def.attr_type != "scoped_enum":
+                    raise ValueError(
+                        f"Op '{op.name}': ScopedEnumRef field '{name}' "
+                        "must be a scoped_enum attr"
+                    )
+                params.append(
+                    BuilderParam(
+                        name=name,
+                        kind=BuilderParamKind.ATTR,
+                        type_hint="str",
+                        attr_def=attr_def,
+                        doc=attr_def.doc,
+                    )
+                )
+                covered_attrs.add(name)
+
+            case StableKeyRef(key=name, stable_id=stable_id):
+                attr_def = op.attr(name)
+                stable_id_attr = op.attr(stable_id)
+                if attr_def is None or attr_def.attr_type != "string":
+                    raise ValueError(
+                        f"Op '{op.name}': StableKeyRef key field "
+                        f"'{name}' must be a string attr"
+                    )
+                if stable_id_attr is None or stable_id_attr.attr_type != "i64":
+                    raise ValueError(
+                        f"Op '{op.name}': StableKeyRef stable ID field "
+                        f"'{stable_id}' must be an i64 attr"
+                    )
+                params.append(
+                    BuilderParam(
+                        name=name,
+                        kind=BuilderParamKind.STABLE_KEY_REF,
+                        type_hint=attr_type_hint(attr_def),
+                        attr_def=attr_def,
+                        stable_id_field=stable_id,
+                        doc=attr_def.doc,
+                    )
+                )
+                covered_attrs.add(name)
+                covered_attrs.add(stable_id)
+
     def walk(elements: tuple[FormatElement, ...] | list[FormatElement]) -> None:
         for element in elements:
             match element:
@@ -329,6 +457,18 @@ def _extract_params(op: Op) -> list[BuilderParam]:  # noqa: C901
                         )
                     )
 
+                case AlignedRefs(refs=refs_field, alignments=alignments_field):
+                    params.append(
+                        BuilderParam(
+                            name=refs_field,
+                            kind=BuilderParamKind.OPERAND_VARIADIC,
+                            type_hint="list[ValueRef]",
+                            required=False,
+                            doc=f"Variadic operands: {refs_field}",
+                        )
+                    )
+                    append_attr_param(alignments_field)
+
                 case BlockRef(field=name):
                     params.append(
                         BuilderParam(
@@ -342,8 +482,9 @@ def _extract_params(op: Op) -> list[BuilderParam]:  # noqa: C901
                 case (
                     Attr(field=name)
                     | SymbolRef(field=name)
-                    | OpRef(field=name)
+                    | KeyRef(field=name)
                     | TemplateParam(field=name)
+                    | AttrParams(field=name)
                 ):
                     append_attr_param(name)
 
@@ -480,14 +621,22 @@ def _extract_params(op: Op) -> list[BuilderParam]:  # noqa: C901
                 case Clause(elements=inner):
                     walk(inner)
 
-                case FuncArgs(field=name):
+                case FuncArgs(field=name, group=group, end_attr=end_attr):
+                    field_desc = layout.fields.get(name)
                     params.append(
                         BuilderParam(
-                            name=name,
+                            name=group or name,
                             kind=BuilderParamKind.FUNC_ARGS,
                             type_hint="list[ValueRef]",
                             required=False,
-                            doc=f"Function signature args: {name}",
+                            operand_field=(
+                                name
+                                if field_desc is not None
+                                and field_desc.kind == FieldKind.OPERAND
+                                else None
+                            ),
+                            end_attr_field=end_attr,
+                            doc=f"Function signature args: {group or name}",
                         )
                     )
 
@@ -508,57 +657,8 @@ def _extract_params(op: Op) -> list[BuilderParam]:  # noqa: C901
                     )
                     covered_attrs.add(name)
 
-                case DescriptorRef(key=name, ordinal=ordinal):
-                    attr_def = op.attr(name)
-                    ordinal_attr = op.attr(ordinal)
-                    if attr_def is None or attr_def.attr_type != "string":
-                        raise ValueError(
-                            f"Op '{op.name}': DescriptorRef key field "
-                            f"'{name}' must be a string attr"
-                        )
-                    if ordinal_attr is None or ordinal_attr.attr_type != "i64":
-                        raise ValueError(
-                            f"Op '{op.name}': DescriptorRef ordinal field "
-                            f"'{ordinal}' must be an i64 attr"
-                        )
-                    params.append(
-                        BuilderParam(
-                            name=name,
-                            kind=BuilderParamKind.DESCRIPTOR_REF,
-                            type_hint=attr_type_hint(attr_def),
-                            attr_def=attr_def,
-                            ordinal_field=ordinal,
-                            doc=attr_def.doc,
-                        )
-                    )
-                    covered_attrs.add(name)
-                    covered_attrs.add(ordinal)
-
-                case StableKeyRef(key=name, stable_id=stable_id):
-                    attr_def = op.attr(name)
-                    stable_id_attr = op.attr(stable_id)
-                    if attr_def is None or attr_def.attr_type != "string":
-                        raise ValueError(
-                            f"Op '{op.name}': StableKeyRef key field "
-                            f"'{name}' must be a string attr"
-                        )
-                    if stable_id_attr is None or stable_id_attr.attr_type != "i64":
-                        raise ValueError(
-                            f"Op '{op.name}': StableKeyRef stable ID field "
-                            f"'{stable_id}' must be an i64 attr"
-                        )
-                    params.append(
-                        BuilderParam(
-                            name=name,
-                            kind=BuilderParamKind.DESCRIPTOR_REF,
-                            type_hint=attr_type_hint(attr_def),
-                            attr_def=attr_def,
-                            stable_id_field=stable_id,
-                            doc=attr_def.doc,
-                        )
-                    )
-                    covered_attrs.add(name)
-                    covered_attrs.add(stable_id)
+                case ScopedEnumRef() | StableKeyRef():
+                    append_symbolic_ref_param(element)
 
                 case PredicateList(field=name):
                     attr_def = op.attr(name)

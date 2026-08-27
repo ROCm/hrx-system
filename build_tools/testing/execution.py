@@ -45,6 +45,14 @@ class RunSummary:
         )
 
 
+@dataclasses.dataclass(frozen=True)
+class ToolCommand:
+    """Fixed command prefix used to launch a manifest tool."""
+
+    executable: str
+    arguments: tuple[str, ...] = ()
+
+
 def resolve_runfile(path: str) -> Path:
     """Resolves a Bazel runfile path or ordinary filesystem path."""
     candidate = Path(path)
@@ -166,7 +174,7 @@ def _normalize_text(text: str, normalizers: list[Any] | None) -> str:
 
 
 class _Substituter:
-    def __init__(self, values: dict[str, str], tools: dict[str, Path]):
+    def __init__(self, values: dict[str, str], tools: dict[str, ToolCommand]):
         self._values = values
         self._tools = tools
 
@@ -188,7 +196,12 @@ class _Substituter:
             name = match.group(1)
             if name not in self._tools:
                 raise SchemaError(f"unknown tool substitution {name!r}")
-            return str(self._tools[name])
+            command = self._tools[name]
+            if command.arguments:
+                raise SchemaError(
+                    f"tool substitution {name!r} has a multi-argument command"
+                )
+            return command.executable
 
         return re.sub(r"\{tool:([^}]+)\}", replace_tool, result)
 
@@ -199,7 +212,7 @@ class ExecutionRunner:
     def __init__(
         self,
         *,
-        tools: dict[str, Path],
+        tools: dict[str, ToolCommand],
         case_filters: set[str] | None = None,
         keep_temp: bool = False,
         list_only: bool = False,
@@ -322,7 +335,8 @@ class ExecutionRunner:
                 run.get("args", []), f"{case_name}:{step_name}.run.args"
             )
         ]
-        argv = [str(self._tools[tool_name]), *args]
+        command = self._tools[tool_name]
+        argv = [command.executable, *command.arguments, *args]
         stdin = self._stdin_bytes(
             case_name, step_name, run.get("stdin", step.get("stdin")), step_outputs
         )
@@ -374,10 +388,8 @@ class ExecutionRunner:
         )
         path.parent.mkdir(parents=True, exist_ok=True)
         if "text" in write:
-            path.write_text(
-                _as_string(write["text"], f"{case_name}:{step_name}.write.text"),
-                encoding="utf-8",
-            )
+            text = _as_string(write["text"], f"{case_name}:{step_name}.write.text")
+            path.write_bytes(text.encode("utf-8"))
         elif "bytes" in write:
             path.write_bytes(
                 bytes(
@@ -611,14 +623,30 @@ class ExecutionRunner:
             )
 
 
-def parse_tool_bindings(values: list[str]) -> dict[str, Path]:
-    tools: dict[str, Path] = {}
+def parse_tool_bindings(
+    values: list[str], argument_values: list[str]
+) -> dict[str, ToolCommand]:
+    tool_argv: dict[str, list[str]] = {}
     for value in values:
         name, separator, path = value.partition("=")
         if not separator or not name:
             raise SchemaError(f"invalid --tool binding {value!r}; expected name=path")
-        tools[name] = resolve_runfile(path)
-    return tools
+        if name in tool_argv:
+            raise SchemaError(f"duplicate --tool binding for {name!r}")
+        tool_argv[name] = [str(resolve_runfile(path))]
+    for value in argument_values:
+        name, separator, argument = value.partition("=")
+        if not separator or not name:
+            raise SchemaError(
+                f"invalid --tool-arg binding {value!r}; expected name=argument"
+            )
+        if name not in tool_argv:
+            raise SchemaError(f"--tool-arg references unknown tool {name!r}")
+        tool_argv[name].append(argument)
+    return {
+        name: ToolCommand(executable=argv[0], arguments=tuple(argv[1:]))
+        for name, argv in tool_argv.items()
+    }
 
 
 def run_from_args(argv: list[str]) -> int:
@@ -628,6 +656,12 @@ def run_from_args(argv: list[str]) -> int:
     )
     parser.add_argument(
         "--tool", action="append", default=[], help="Tool binding as name=path."
+    )
+    parser.add_argument(
+        "--tool-arg",
+        action="append",
+        default=[],
+        help="Fixed tool argument as name=argument.",
     )
     parser.add_argument(
         "--case", action="append", default=[], help="Only run a case name."
@@ -642,7 +676,7 @@ def run_from_args(argv: list[str]) -> int:
     if not args.manifest:
         raise SchemaError("at least one --manifest is required")
     runner = ExecutionRunner(
-        tools=parse_tool_bindings(args.tool),
+        tools=parse_tool_bindings(args.tool, args.tool_arg),
         case_filters=set(args.case),
         keep_temp=args.keep_temp,
         list_only=args.list,

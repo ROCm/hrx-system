@@ -44,6 +44,7 @@ PASSTHROUGH_COMMANDS = {
             "query",
             "cquery",
             "info",
+            "shutdown",
             "run",
             "try",
             "fuzz",
@@ -450,7 +451,8 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     if sum(selected_tool_modes) > 1:
         parser.error("--venv, --system, and --tool-root are mutually exclusive")
     if getattr(args, "paths", None) and (
-        getattr(args, "base", None) is not None
+        getattr(args, "amend", False)
+        or getattr(args, "base", None) is not None
         or getattr(args, "staged", False)
         or getattr(args, "commit", False)
     ):
@@ -512,6 +514,12 @@ def add_root_commands(subparsers: argparse._SubParsersAction) -> None:
     add_tool_environment_options(setup_parser)
     add_argument(
         setup_parser, "--alias-dir", type=Path, help="Directory for generated aliases."
+    )
+    add_argument(
+        setup_parser,
+        "--docs",
+        action="store_true",
+        help="Install the optional documentation toolchain.",
     )
     setup_parser.set_defaults(handler=handle_root_setup)
 
@@ -589,6 +597,43 @@ def add_root_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Output format. Defaults to json.",
     )
     importer_env_parser.set_defaults(handler=handle_importers_env)
+
+    docs_parser = add_subparser(
+        subparsers,
+        "docs",
+        command_help=help_text.root_command_help("docs"),
+        help="Build or serve the Loom programming guide.",
+    )
+    add_common_options(docs_parser)
+    add_tool_environment_options(docs_parser)
+    docs_subparsers = docs_parser.add_subparsers(dest="docs_command", required=True)
+
+    docs_build_parser = docs_subparsers.add_parser(
+        "build", help="Build the Loom programming guide."
+    )
+    add_common_options(docs_build_parser)
+    add_tool_environment_options(docs_build_parser)
+    add_argument(
+        docs_build_parser,
+        "--site-dir",
+        type=Path,
+        default=argparse.SUPPRESS,
+        help="Output directory. Defaults to build/loom-docs/site/.",
+    )
+    docs_build_parser.set_defaults(handler=handle_docs)
+
+    docs_serve_parser = docs_subparsers.add_parser(
+        "serve", help="Serve the Loom programming guide with live reload."
+    )
+    add_common_options(docs_serve_parser)
+    add_tool_environment_options(docs_serve_parser)
+    add_argument(
+        docs_serve_parser,
+        "--address",
+        default=argparse.SUPPRESS,
+        help="Development server address. Defaults to 127.0.0.1:8000.",
+    )
+    docs_serve_parser.set_defaults(handler=handle_docs)
 
 
 def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None:
@@ -677,7 +722,7 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
     test_parser.set_defaults(handler=handle_test, lane=lane)
 
     if lane == "bazel":
-        for command_name in ("query", "cquery", "info"):
+        for command_name in ("query", "cquery", "info", "shutdown"):
             command_help = help_text.lane_command_help(lane, command_name)
             command_parser = add_subparser(
                 lane_subparsers,
@@ -754,7 +799,7 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
             input_group,
             "--commit",
             action="store_true",
-            help="Check the Git hook commit scope.",
+            help="Legacy alias for --staged.",
         )
         add_argument(
             input_group,
@@ -840,7 +885,7 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
             input_group,
             "--commit",
             action="store_true",
-            help="Check the Git hook commit scope.",
+            help="Legacy alias for --staged.",
         )
         add_argument(
             input_group,
@@ -876,6 +921,12 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
     precommit_input_group = precommit_parser.add_mutually_exclusive_group()
     add_argument(
         precommit_input_group,
+        "--amend",
+        action="store_true",
+        help="Check the exact amended commit candidate without applying fixups.",
+    )
+    add_argument(
+        precommit_input_group,
         "--base",
         metavar="GIT_REF",
         help="Check branch changes since GIT_REF plus local changes.",
@@ -884,7 +935,7 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
         precommit_input_group,
         "--commit",
         action="store_true",
-        help="Check the Git hook commit scope.",
+        help="Legacy alias for --staged.",
     )
     add_argument(
         precommit_input_group,
@@ -973,7 +1024,7 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
 
 def handle_root_setup(args: argparse.Namespace) -> CommandPlan:
     tool_env = tool_environment_from_args(args)
-    return setup.common_setup_plan(tool_env)
+    return setup.common_setup_plan(tool_env, include_docs=args.docs)
 
 
 def handle_lane_setup(args: argparse.Namespace) -> CommandPlan:
@@ -1046,6 +1097,29 @@ def handle_importers_env(args: argparse.Namespace) -> CommandPlan:
     if len(importer_names) != 1:
         raise ValueError("importers env prints exactly one importer environment")
     return importer_dev.env_plan(importer_names[0], output_format=args.format)
+
+
+def handle_docs(args: argparse.Namespace) -> CommandPlan:
+    tool_env = tool_environment_from_args(args)
+    command = [
+        tool_env.python,
+        str(REPO_ROOT / "loom/docs/build.py"),
+        args.docs_command,
+    ]
+    if hasattr(args, "site_dir"):
+        command.extend(["--site-dir", str(args.site_dir)])
+    if hasattr(args, "address"):
+        command.extend(["--address", args.address])
+    return CommandPlan(
+        [
+            ExecCommandStep(
+                command,
+                cwd=REPO_ROOT,
+                env=tool_env.path_env(),
+                label=f"Loom documentation {args.docs_command}",
+            )
+        ]
+    )
 
 
 def extract_importer_options(args: list[str]) -> tuple[tuple[str, ...], list[str]]:
@@ -1359,6 +1433,7 @@ def handle_precommit(args: argparse.Namespace) -> CommandPlan:
         args.lane,
         existing_or_system_environment(args),
         args.profile,
+        amend=args.amend,
         base=args.base,
         commit=args.commit,
         cmake_build_dir=configured_cmake_build_dir(args)

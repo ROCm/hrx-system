@@ -19,7 +19,6 @@ static bool loom_type_refinement_has_element_or_role(loom_type_t type) {
     case LOOM_TYPE_TENSOR:
     case LOOM_TYPE_VECTOR:
     case LOOM_TYPE_VIEW:
-    case LOOM_TYPE_GROUP:
     case LOOM_TYPE_ENCODING:
       return true;
     default:
@@ -253,13 +252,12 @@ iree_status_t loom_type_refine_encoding_with_attachment(
       loom_type_refinement_prepare_outputs(current_type, out_type, out_result));
 
   bool current_can_have_encoding = loom_type_can_have_encoding(current_type);
-  bool current_has_encoding = loom_type_has_encoding(current_type);
-  bool candidate_has_encoding =
+  bool candidate_carries_attachment =
       candidate_encoding_id != 0 || candidate_encoding_flags != 0;
 
   if (!current_can_have_encoding) {
-    *out_result = candidate_has_encoding ? LOOM_TYPE_REFINEMENT_CONFLICT
-                                         : LOOM_TYPE_REFINEMENT_UNCHANGED;
+    *out_result = candidate_carries_attachment ? LOOM_TYPE_REFINEMENT_CONFLICT
+                                               : LOOM_TYPE_REFINEMENT_UNCHANGED;
     return iree_ok_status();
   }
 
@@ -268,11 +266,9 @@ iree_status_t loom_type_refine_encoding_with_attachment(
     return iree_ok_status();
   }
 
-  if (!current_has_encoding || !candidate_has_encoding) {
-    *out_result = LOOM_TYPE_REFINEMENT_CONFLICT;
-    return iree_ok_status();
-  }
-
+  // The zero attachment on a shaped type is concrete native dense storage.
+  // Only SSA attachments are unresolved: a concrete attachment narrows one
+  // and cannot be widened back to it.
   bool current_is_ssa =
       iree_all_bits_set(current_type.encoding_flags, LOOM_ENCODING_FLAG_SSA);
   bool candidate_is_ssa =
@@ -324,7 +320,8 @@ iree_status_t loom_type_refine_with_candidate(
   }
 
   loom_type_kind_t kind = loom_type_kind(current_type);
-  if (kind == LOOM_TYPE_FUNCTION || kind == LOOM_TYPE_DIALECT) {
+  if (kind == LOOM_TYPE_FUNCTION || kind == LOOM_TYPE_DIALECT ||
+      kind == LOOM_TYPE_REGISTER) {
     *out_result = loom_type_equal(current_type, candidate_type)
                       ? LOOM_TYPE_REFINEMENT_UNCHANGED
                       : LOOM_TYPE_REFINEMENT_CONFLICT;

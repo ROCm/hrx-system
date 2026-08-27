@@ -1,5 +1,174 @@
 // RUN: pass canonicalize
 
+// Extracting exactly the leading axes introduced by a broadcast returns the
+// original trailing vector.
+func.def @extract_broadcast_leading_axes(%value: vector<4xf32>) -> (vector<4xf32>) {
+  %bank = vector.broadcast %value : vector<4xf32> -> vector<2x3x4xf32>
+  %result = vector.extract %bank[1, 2] : vector<2x3x4xf32> -> vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+// ----
+func.def @extract_broadcast_leading_axes(%value: vector<4xf32>) -> (vector<4xf32>) {
+  func.return %value : vector<4xf32>
+}
+
+// ====
+
+// Extracting the slot just inserted returns the inserted payload.
+func.def @extract_insert_same_slot(%dest: vector<2x2x4xf32>, %value: vector<4xf32>) -> (vector<4xf32>) {
+  %updated = vector.insert %value into %dest[1, 0] : vector<4xf32>, vector<2x2x4xf32>
+  %result = vector.extract %updated[1, 0] : vector<2x2x4xf32> -> vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+// ----
+func.def @extract_insert_same_slot(%dest: vector<2x2x4xf32>, %value: vector<4xf32>) -> (vector<4xf32>) {
+  func.return %value : vector<4xf32>
+}
+
+// ====
+
+// Equal-rank static prefixes select disjoint slots when any index differs.
+func.def @extract_insert_disjoint_slot(%dest: vector<2x2x4xf32>, %value: vector<4xf32>) -> (vector<4xf32>) {
+  %updated = vector.insert %value into %dest[1, 0] : vector<4xf32>, vector<2x2x4xf32>
+  %result = vector.extract %updated[0, 1] : vector<2x2x4xf32> -> vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+// ----
+func.def @extract_insert_disjoint_slot(%dest: vector<2x2x4xf32>, %value: vector<4xf32>) -> (vector<4xf32>) {
+  %result = vector.extract %dest[0, 1] : vector<2x2x4xf32> -> vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ====
+
+// Reinserting an unchanged slot returns the original aggregate.
+func.def @insert_unchanged_slot(%dest: vector<2x2x4xf32>) -> (vector<2x2x4xf32>) {
+  %value = vector.extract %dest[1, 0] : vector<2x2x4xf32> -> vector<4xf32>
+  %result = vector.insert %value into %dest[1, 0] : vector<4xf32>, vector<2x2x4xf32>
+  func.return %result : vector<2x2x4xf32>
+}
+// ----
+func.def @insert_unchanged_slot(%dest: vector<2x2x4xf32>) -> (vector<2x2x4xf32>) {
+  func.return %dest : vector<2x2x4xf32>
+}
+
+// ====
+
+// A later write to the same slot makes the earlier write irrelevant.
+func.def @insert_overwrites_same_slot(%dest: vector<2x2x4xf32>, %first: vector<4xf32>, %second: vector<4xf32>) -> (vector<2x2x4xf32>) {
+  %updated = vector.insert %first into %dest[1, 0] : vector<4xf32>, vector<2x2x4xf32>
+  %result = vector.insert %second into %updated[1, 0] : vector<4xf32>, vector<2x2x4xf32>
+  func.return %result : vector<2x2x4xf32>
+}
+// ----
+func.def @insert_overwrites_same_slot(%dest: vector<2x2x4xf32>, %first: vector<4xf32>, %second: vector<4xf32>) -> (vector<2x2x4xf32>) {
+  %result = vector.insert %second into %dest[1, 0] : vector<4xf32>, vector<2x2x4xf32>
+  func.return %result : vector<2x2x4xf32>
+}
+
+// ====
+
+// Exact dynamic coordinates become static insert indices.
+func.def @insert_dynamic_exact_indices(%dest: vector<2x2x4xf32>, %value: vector<4xf32>) -> (vector<2x2x4xf32>) {
+  %row = index.constant 1 : index
+  %column = index.constant 0 : index
+  %result = vector.insert %value into %dest[%row, %column] : vector<4xf32>, vector<2x2x4xf32>
+  func.return %result : vector<2x2x4xf32>
+}
+// ----
+func.def @insert_dynamic_exact_indices(%dest: vector<2x2x4xf32>, %value: vector<4xf32>) -> (vector<2x2x4xf32>) {
+  %result = vector.insert %value into %dest[1, 0] : vector<4xf32>, vector<2x2x4xf32>
+  func.return %result : vector<2x2x4xf32>
+}
+
+// ====
+
+// Extension chains collapse to the final width.
+func.def @float_extension_chain(%x: vector<4xf8E4M3>) -> (vector<4xf32>) {
+  %bf16 = vector.extf %x : vector<4xf8E4M3> to vector<4xbf16>
+  %f32 = vector.extf %bf16 : vector<4xbf16> to vector<4xf32>
+  func.return %f32 : vector<4xf32>
+}
+// ----
+func.def @float_extension_chain(%x: vector<4xf8E4M3>) -> (vector<4xf32>) {
+  %f32 = vector.extf %x : vector<4xf8E4M3> to vector<4xf32>
+  func.return %f32 : vector<4xf32>
+}
+
+// ====
+
+// Truncating an exact extension collapses to the direct resize.
+func.def @float_trunc_after_extension(%x: vector<4xf8E4M3>) -> (vector<4xbf16>) {
+  %f32 = vector.extf %x : vector<4xf8E4M3> to vector<4xf32>
+  %bf16 = vector.fptrunc %f32 : vector<4xf32> to vector<4xbf16>
+  func.return %bf16 : vector<4xbf16>
+}
+// ----
+func.def @float_trunc_after_extension(%x: vector<4xf8E4M3>) -> (vector<4xbf16>) {
+  %bf16 = vector.extf %x : vector<4xf8E4M3> to vector<4xbf16>
+  func.return %bf16 : vector<4xbf16>
+}
+
+// ====
+
+// Truncating an extension back to the original type returns the source.
+func.def @float_resize_roundtrip(%x: vector<4xf16>) -> (vector<4xf16>) {
+  %f32 = vector.extf %x : vector<4xf16> to vector<4xf32>
+  %f16 = vector.fptrunc %f32 : vector<4xf32> to vector<4xf16>
+  func.return %f16 : vector<4xf16>
+}
+// ----
+func.def @float_resize_roundtrip(%x: vector<4xf16>) -> (vector<4xf16>) {
+  func.return %x : vector<4xf16>
+}
+
+// ====
+
+// Casting a splat casts the scalar once and then splats the result.
+func.def @float_extf_splat(%x: bf16) -> (vector<4xf32>) {
+  %splat = vector.splat %x : vector<4xbf16>
+  %wide = vector.extf %splat : vector<4xbf16> to vector<4xf32>
+  func.return %wide : vector<4xf32>
+}
+// ----
+func.def @float_extf_splat(%x: bf16) -> (vector<4xf32>) {
+  %4 = scalar.extf %x : bf16 to f32
+  %wide = vector.splat %4 : vector<4xf32>
+  func.return %wide : vector<4xf32>
+}
+
+// ====
+
+func.def @float_fptrunc_splat(%x: f32) -> (vector<4xbf16>) {
+  %splat = vector.splat %x : vector<4xf32>
+  %narrow = vector.fptrunc %splat : vector<4xf32> to vector<4xbf16>
+  func.return %narrow : vector<4xbf16>
+}
+// ----
+func.def @float_fptrunc_splat(%x: f32) -> (vector<4xbf16>) {
+  %4 = scalar.fptrunc %x : f32 to bf16
+  %narrow = vector.splat %4 : vector<4xbf16>
+  func.return %narrow : vector<4xbf16>
+}
+
+// ====
+
+// Floating-point truncation chains must not collapse: double rounding can be
+// observably different from one direct truncation.
+func.def @float_truncation_chain_preserves_rounding(%x: vector<4xf64>) -> (vector<4xf16>) {
+  %f32 = vector.fptrunc %x : vector<4xf64> to vector<4xf32>
+  %f16 = vector.fptrunc %f32 : vector<4xf32> to vector<4xf16>
+  func.return %f16 : vector<4xf16>
+}
+// ----
+func.def @float_truncation_chain_preserves_rounding(%x: vector<4xf64>) -> (vector<4xf16>) {
+  %f32 = vector.fptrunc %x : vector<4xf64> to vector<4xf32>
+  %f16 = vector.fptrunc %f32 : vector<4xf32> to vector<4xf16>
+  func.return %f16 : vector<4xf16>
+}
+
+// ====
+
 // Zero-lane construction produces the empty aggregate even when the source
 // scalar is poison: no vector lane observes the operand.
 func.def @empty_splat_ignores_poison() -> (vector<0xf32>) {
@@ -253,7 +422,7 @@ func.def @divf_arcp_constant_rhs_to_reciprocal_mulf(%values: vector<4xf32>) -> (
 func.def @divf_arcp_constant_rhs_to_reciprocal_mulf(%values: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
   %scale = vector.constant 127.0 : vector<4xf32>
   %strict = vector.divf %values, %scale : vector<4xf32>
-  %6 = vector.constant 0.007874015748031496 : vector<4xf32>
+  %6 = vector.constant 0.007874015718698502 : vector<4xf32>
   %fast = vector.mulf<nnan|ninf|nsz|arcp> %values, %6 : vector<4xf32>
   func.return %strict, %fast : vector<4xf32>, vector<4xf32>
 }
@@ -264,15 +433,15 @@ func.def @divf_arcp_constant_rhs_to_reciprocal_mulf(%values: vector<4xf32>) -> (
 // view.load. This avoids forcing wide payload lowering for table-style record
 // loads where only one field is used.
 func.def @extract_single_use_load_to_view_load(%input: buffer, %offset: offset) -> (i32) {
-  %view = buffer.view %input[%offset] : buffer -> view<4xi32, #dense>
-  %wide = vector.load %view[0] : view<4xi32, #dense> -> vector<4xi32>
+  %view = buffer.view %input[%offset] : buffer -> view<4xi32>
+  %wide = vector.load %view[0] : view<4xi32> -> vector<4xi32>
   %lane2 = vector.extract %wide[2] : vector<4xi32> -> i32
   func.return %lane2 : i32
 }
 // ----
 func.def @extract_single_use_load_to_view_load(%input: buffer, %offset: offset) -> (i32) {
-  %view = buffer.view %input[%offset] : buffer -> view<4xi32, #dense>
-  %lane2 = view.load %view[2] : view<4xi32, #dense> -> i32
+  %view = buffer.view %input[%offset] : buffer -> view<4xi32>
+  %lane2 = view.load %view[2] : view<4xi32> -> i32
   func.return %lane2 : i32
 }
 
@@ -285,15 +454,15 @@ kernel.def @extract_single_use_workgroup_load_keeps_wide_load() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch() {
-  %zero = index.constant 0 : offset
+  %base = index.constant 0 : offset
   %bytes = index.constant 64 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %view = buffer.view %scratch[%zero] : buffer -> view<4xi32, #dense>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<4xi32>
   %seed = vector.constant 1 : vector<4xi32>
-  vector.store %seed, %view[0] : vector<4xi32>, view<4xi32, #dense>
-  %wide = vector.load %view[0] : view<4xi32, #dense> -> vector<4xi32>
+  vector.store %seed, %view[0] : vector<4xi32>, view<4xi32>
+  %wide = vector.load %view[0] : view<4xi32> -> vector<4xi32>
   %lane2 = vector.extract %wide[2] : vector<4xi32> -> i32
-  view.store %lane2, %view[0] : i32, view<4xi32, #dense>
+  view.store %lane2, %view[0] : i32, view<4xi32>
   kernel.return
 }
 
@@ -303,8 +472,8 @@ kernel.def @extract_single_use_workgroup_load_keeps_wide_load() {
 // better canonical form: target lowering can select one coalesced memory op and
 // slice registers instead of scalarizing into several smaller loads.
 func.def @extract_multi_use_load_keeps_wide_load(%input: buffer, %offset: offset) -> (i32, i32) {
-  %view = buffer.view %input[%offset] : buffer -> view<4xi32, #dense>
-  %wide = vector.load %view[0] : view<4xi32, #dense> -> vector<4xi32>
+  %view = buffer.view %input[%offset] : buffer -> view<4xi32>
+  %wide = vector.load %view[0] : view<4xi32> -> vector<4xi32>
   %lane1 = vector.extract %wide[1] : vector<4xi32> -> i32
   %lane2 = vector.extract %wide[2] : vector<4xi32> -> i32
   func.return %lane1, %lane2 : i32, i32
@@ -356,6 +525,111 @@ func.def @mask_range_static_all_false() -> (vector<4xi1>) {
 
 // ====
 
+// Bounded dynamic operands prove every static lane is below the exclusive
+// upper bound.
+func.def @mask_range_bounded_all_true(%lo0: index, %hi0: index, %step0: index) -> (vector<16xi1>) {
+  %lo = index.assume %lo0 [range(%lo0, 0, 752)] : index
+  %hi = index.assume %hi0 [range(%hi0, 768, 1024)] : index
+  %step = index.assume %step0 [range(%step0, 0, 1)] : index
+  %r = vector.mask.range [%lo to %hi step %step] : index -> vector<16xi1>
+  func.return %r : vector<16xi1>
+}
+// ----
+func.def @mask_range_bounded_all_true(%lo0: index, %hi0: index, %step0: index) -> (vector<16xi1>) {
+  %r = vector.constant true : vector<16xi1>
+  func.return %r : vector<16xi1>
+}
+
+// ====
+
+// A non-positive step makes lane zero the maximum lane value.
+func.def @mask_range_bounded_all_true_negative_step(%lo0: index, %hi0: index, %step0: index) -> (vector<16xi1>) {
+  %lo = index.assume %lo0 [range(%lo0, 0, 4)] : index
+  %hi = index.assume %hi0 [range(%hi0, 5, 8)] : index
+  %step = index.assume %step0 [range(%step0, -8, -1)] : index
+  %r = vector.mask.range [%lo to %hi step %step] : index -> vector<16xi1>
+  func.return %r : vector<16xi1>
+}
+// ----
+func.def @mask_range_bounded_all_true_negative_step(%lo0: index, %hi0: index, %step0: index) -> (vector<16xi1>) {
+  %r = vector.constant true : vector<16xi1>
+  func.return %r : vector<16xi1>
+}
+
+// ====
+
+// A non-negative step makes lane zero the minimum lane value. Equality with
+// the exclusive upper bound is false.
+func.def @mask_range_bounded_all_false_positive_step(%lo0: index, %hi0: index, %step0: index) -> (vector<16xi1>) {
+  %lo = index.assume %lo0 [range(%lo0, 8, 16)] : index
+  %hi = index.assume %hi0 [range(%hi0, 0, 8)] : index
+  %step = index.assume %step0 [range(%step0, 1, 8)] : index
+  %r = vector.mask.range [%lo to %hi step %step] : index -> vector<16xi1>
+  func.return %r : vector<16xi1>
+}
+// ----
+func.def @mask_range_bounded_all_false_positive_step(%lo0: index, %hi0: index, %step0: index) -> (vector<16xi1>) {
+  %r = vector.constant false : vector<16xi1>
+  func.return %r : vector<16xi1>
+}
+
+// ====
+
+// The minimum lane accounts for a negative step when proving an all-false
+// bounded mask.
+func.def @mask_range_bounded_all_false_negative_step(%lo0: index, %hi0: index, %step0: index) -> (vector<16xi1>) {
+  %lo = index.assume %lo0 [range(%lo0, 768, 1024)] : index
+  %hi = index.assume %hi0 [range(%hi0, 0, 512)] : index
+  %step = index.assume %step0 [range(%step0, -8, -1)] : index
+  %r = vector.mask.range [%lo to %hi step %step] : index -> vector<16xi1>
+  func.return %r : vector<16xi1>
+}
+// ----
+func.def @mask_range_bounded_all_false_negative_step(%lo0: index, %hi0: index, %step0: index) -> (vector<16xi1>) {
+  %r = vector.constant false : vector<16xi1>
+  func.return %r : vector<16xi1>
+}
+
+// ====
+
+// Ranges that can cross the exclusive upper bound remain structural masks.
+func.def @mask_range_bounded_partial_negative_step(%lo0: index, %hi0: index, %step0: index) -> (vector<2xi1>) {
+  %lo = index.assume %lo0 [range(%lo0, 4, 10)] : index
+  %hi = index.assume %hi0 [range(%hi0, 5, 5)] : index
+  %step = index.assume %step0 [range(%step0, -10, -1)] : index
+  %r = vector.mask.range [%lo to %hi step %step] : index -> vector<2xi1>
+  func.return %r : vector<2xi1>
+}
+// ----
+func.def @mask_range_bounded_partial_negative_step(%lo0: index, %hi0: index, %step0: index) -> (vector<2xi1>) {
+  %lo = index.assume %lo0 [range(%lo0, 4, 10)] : index
+  %hi = index.constant 5 : index
+  %step = index.assume %step0 [range(%step0, -10, -1)] : index
+  %r = vector.mask.range [%lo to %hi step %step] : index -> vector<2xi1>
+  func.return %r : vector<2xi1>
+}
+
+// ====
+
+// A positive-step range that may reach the exclusive bound remains structural.
+func.def @mask_range_bounded_partial_positive_step(%lo0: index, %hi0: index, %step0: index) -> (vector<16xi1>) {
+  %lo = index.assume %lo0 [range(%lo0, 0, 1)] : index
+  %hi = index.assume %hi0 [range(%hi0, 16, 16)] : index
+  %step = index.assume %step0 [range(%step0, 1, 1)] : index
+  %r = vector.mask.range [%lo to %hi step %step] : index -> vector<16xi1>
+  func.return %r : vector<16xi1>
+}
+// ----
+func.def @mask_range_bounded_partial_positive_step(%lo0: index, %hi0: index, %step0: index) -> (vector<16xi1>) {
+  %lo = index.assume %lo0 [range(%lo0, 0, 1)] : index
+  %hi = index.constant 16 : index
+  %step = index.constant 1 : index
+  %r = vector.mask.range [%lo to %hi step %step] : index -> vector<16xi1>
+  func.return %r : vector<16xi1>
+}
+
+// ====
+
 // A negative step can make later lanes true even when lane 0 is false.
 func.def @mask_range_negative_step_not_all_false() -> (vector<2xi1>) {
   %c10 = index.constant 10 : index
@@ -389,6 +663,52 @@ func.def @reduce_axes_all_axes_to_reduce(%v: vector<2x3xf32>, %init: f32) -> (f3
 func.def @reduce_axes_all_axes_to_reduce(%v: vector<2x3xf32>, %init: f32) -> (f32) {
   %r = vector.reduce<addf> %v, %init : vector<2x3xf32>, f32
   func.return %r : f32
+}
+
+// ====
+
+// Contracted product-add spellings become an explicit fused multiply-add.
+func.def @contracted_product_add_to_fmaf(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %addend: vector<4xf32>) -> (vector<4xf32>) {
+  %product = vector.mulf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs : vector<4xf32>
+  %r = vector.addf<reassoc|nnan|ninf|nsz|contract> %product, %addend : vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+// ----
+func.def @contracted_product_add_to_fmaf(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %addend: vector<4xf32>) -> (vector<4xf32>) {
+  %r = vector.fmaf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs, %addend : vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+
+// ====
+
+// Addition is commutative, so the product can appear on either side.
+func.def @contracted_reversed_product_add_to_fmaf(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %addend: vector<4xf32>) -> (vector<4xf32>) {
+  %product = vector.mulf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs : vector<4xf32>
+  %r = vector.addf<reassoc|nnan|ninf|nsz|contract> %addend, %product : vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+// ----
+func.def @contracted_reversed_product_add_to_fmaf(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %addend: vector<4xf32>) -> (vector<4xf32>) {
+  %r = vector.fmaf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs, %addend : vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+
+// ====
+
+// Exact add keeps the separately rounded product and addition.
+func.def @exact_product_add_stays_separate(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %addend: vector<4xf32>) -> (vector<4xf32>) {
+  %product = vector.mulf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs : vector<4xf32>
+  %r = vector.addf<reassoc|nnan|ninf|nsz> %product, %addend : vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+
+// ====
+
+// A shared product remains explicit instead of duplicating the multiply.
+func.def @shared_product_add_stays_separate(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %addend: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
+  %product = vector.mulf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs : vector<4xf32>
+  %r = vector.addf<reassoc|nnan|ninf|nsz|contract> %product, %addend : vector<4xf32>
+  func.return %product, %r : vector<4xf32>, vector<4xf32>
 }
 
 // ====
@@ -471,6 +791,92 @@ func.def @empty_store(%buffer: buffer, %offset: offset) {
 
 // ====
 
+// Zero-lane masked loads also have no footprint; their result is empty
+// regardless of inactive-lane passthrough.
+func.def @empty_load_mask(%buffer: buffer, %offset: offset) -> (vector<0xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %mask = vector.empty : vector<0xi1>
+  %old = vector.empty : vector<0xf32>
+  %r = vector.load.mask %view[0], %mask, %old : view<16xf32, %layout>, vector<0xi1>, vector<0xf32>
+  func.return %r : vector<0xf32>
+}
+// ----
+func.def @empty_load_mask(%buffer: buffer, %offset: offset) -> (vector<0xf32>) {
+  %r = vector.empty : vector<0xf32>
+  func.return %r : vector<0xf32>
+}
+
+// ====
+
+// Zero-lane scatters erase completely even though the address form carries
+// per-lane offsets.
+func.def @empty_scatter(%buffer: buffer, %offset: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
+  %offsets = vector.empty : vector<0xindex>
+  %value = vector.empty : vector<0xf32>
+  vector.scatter %value, %view[0][%offsets] : vector<0xf32>, view<16xf32, %layout>, vector<0xindex>
+  func.return
+}
+// ----
+func.def @empty_scatter(%buffer: buffer, %offset: offset) {
+  func.return
+}
+
+// ====
+
+// Zero-lane atomic RMWs produce the unique empty result and no memory update.
+func.def @empty_atomic_rmw(%buffer: buffer, %offset: offset) -> (vector<0xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xi32, %layout>
+  %offsets = vector.empty : vector<0xindex>
+  %value = vector.empty : vector<0xi32>
+  %r = vector.atomic.rmw<addi> %value, %view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<0xi32>, view<16xi32, %layout>, vector<0xindex>
+  func.return %r : vector<0xi32>
+}
+// ----
+func.def @empty_atomic_rmw(%buffer: buffer, %offset: offset) -> (vector<0xi32>) {
+  %r = vector.empty : vector<0xi32>
+  func.return %r : vector<0xi32>
+}
+
+// ====
+
+// Zero-lane atomic reductions erase completely.
+func.def @empty_atomic_reduce(%buffer: buffer, %offset: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xi32, %layout>
+  %offsets = vector.empty : vector<0xindex>
+  %value = vector.empty : vector<0xi32>
+  vector.atomic.reduce<addi> %value, %view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<0xi32>, view<16xi32, %layout>, vector<0xindex>
+  func.return
+}
+// ----
+func.def @empty_atomic_reduce(%buffer: buffer, %offset: offset) {
+  func.return
+}
+
+// ====
+
+// Zero-lane compare-exchange has no compare payload lanes and returns empty.
+func.def @empty_atomic_cmpxchg(%buffer: buffer, %offset: offset) -> (vector<0xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xi32, %layout>
+  %offsets = vector.empty : vector<0xindex>
+  %expected = vector.empty : vector<0xi32>
+  %replacement = vector.empty : vector<0xi32>
+  %r = vector.atomic.cmpxchg %expected, %replacement, %view[0][%offsets] {failure_ordering = relaxed, scope = workgroup, success_ordering = relaxed} : vector<0xi32>, view<16xi32, %layout>, vector<0xindex> -> vector<0xi32>
+  func.return %r : vector<0xi32>
+}
+// ----
+func.def @empty_atomic_cmpxchg(%buffer: buffer, %offset: offset) -> (vector<0xi32>) {
+  %r = vector.empty : vector<0xi32>
+  func.return %r : vector<0xi32>
+}
+
+// ====
+
 // Exact scalar facts splatted into a vector become a vector constant directly.
 func.def @splat_constant_to_vector_constant() -> (vector<4xi32>) {
   %c = scalar.constant 7 : i32
@@ -502,8 +908,8 @@ func.def @addi_uniform_constants_to_vector_constant() -> (vector<4xi32>) {
 
 // Dynamic vector shapes still use fact-driven integer identities.
 func.def @addi_dynamic_zero_identity(%n: index, %x: vector<[%n]xi32>) -> (vector<[%n]xi32>) {
-  %zero_scalar = scalar.constant 0 : i32
-  %zero = vector.splat %zero_scalar : vector<[%n]xi32>
+  %additive_identity_element = scalar.constant 0 : i32
+  %zero = vector.splat %additive_identity_element : vector<[%n]xi32>
   %r = vector.addi %x, %zero : vector<[%n]xi32>
   func.return %r : vector<[%n]xi32>
 }
@@ -517,9 +923,9 @@ func.def @addi_dynamic_zero_identity(%n: index, %x: vector<[%n]xi32>) -> (vector
 // Floating-point subtraction identities require signed-zero freedom and keep
 // negation explicit instead of relying on target-specific subtract literals.
 func.def @subf_zero_identities(%n: index, %x: vector<[%n]xf32>) -> (vector<[%n]xf32>, vector<[%n]xf32>) {
-  %zero = vector.constant 0.0 : vector<[%n]xf32>
-  %sub_rhs = vector.subf<nsz> %x, %zero : vector<[%n]xf32>
-  %sub_lhs = vector.subf<nnan|nsz> %zero, %x : vector<[%n]xf32>
+  %c0 = vector.constant 0.0 : vector<[%n]xf32>
+  %sub_rhs = vector.subf<nsz> %x, %c0 : vector<[%n]xf32>
+  %sub_lhs = vector.subf<nnan|nsz> %c0, %x : vector<[%n]xf32>
   func.return %sub_rhs, %sub_lhs : vector<[%n]xf32>, vector<[%n]xf32>
 }
 // ----
@@ -533,15 +939,15 @@ func.def @subf_zero_identities(%n: index, %x: vector<[%n]xf32>) -> (vector<[%n]x
 // A negated input multiplied by an exact constant keeps the sign on the
 // constant so target lowering does not need a separate negation instruction.
 func.def @mulf_absorbs_negated_input_constant(%x: vector<4xf32>) -> (vector<4xf32>) {
-  %zero = vector.constant 0.0 : vector<4xf32>
-  %neg = vector.subf<nnan|nsz> %zero, %x : vector<4xf32>
+  %c0 = vector.constant 0.0 : vector<4xf32>
+  %neg = vector.subf<nnan|nsz> %c0, %x : vector<4xf32>
   %scale = vector.constant 1.4426950408889634 : vector<4xf32>
   %scaled = vector.mulf<nnan|ninf|nsz> %neg, %scale : vector<4xf32>
   func.return %scaled : vector<4xf32>
 }
 // ----
 func.def @mulf_absorbs_negated_input_constant(%x: vector<4xf32>) -> (vector<4xf32>) {
-  %7 = vector.constant -1.4426950408889634 : vector<4xf32>
+  %7 = vector.constant -1.4426950216293335 : vector<4xf32>
   %scaled = vector.mulf<nnan|ninf|nsz> %x, %7 : vector<4xf32>
   func.return %scaled : vector<4xf32>
 }
@@ -647,8 +1053,8 @@ func.def @shuffle_identity(%v: vector<4xf32>) -> (vector<4xf32>) {
 
 // Reducing identity lanes leaves the explicit accumulator unchanged.
 func.def @reduce_dynamic_zero_to_init(%n: index, %init: i32) -> (i32) {
-  %zero_scalar = scalar.constant 0 : i32
-  %zero = vector.splat %zero_scalar : vector<[%n]xi32>
+  %additive_identity_element = scalar.constant 0 : i32
+  %zero = vector.splat %additive_identity_element : vector<[%n]xi32>
   %r = vector.reduce<addi> %zero, %init : vector<[%n]xi32>, i32
   func.return %r : i32
 }
@@ -661,8 +1067,8 @@ func.def @reduce_dynamic_zero_to_init(%n: index, %init: i32) -> (i32) {
 
 // Identity lanes preserve vector accumulators across dynamic reduced extents.
 func.def @reduce_axes_dynamic_zero_to_init(%n: index, %init: vector<2xi32>) -> (vector<2xi32>) {
-  %zero_scalar = scalar.constant 0 : i32
-  %zero = vector.splat %zero_scalar : vector<[%n]x2xi32>
+  %additive_identity_element = scalar.constant 0 : i32
+  %zero = vector.splat %additive_identity_element : vector<[%n]x2xi32>
   %r = vector.reduce.axes<addi> %zero, %init axes [0] : vector<[%n]x2xi32>, vector<2xi32>
   func.return %r : vector<2xi32>
 }
@@ -676,8 +1082,8 @@ func.def @reduce_axes_dynamic_zero_to_init(%n: index, %init: vector<2xi32>) -> (
 
 // Integer identities fold without requiring the vector shape to become static.
 func.def @integer_identities(%n: index, %x: vector<[%n]xi32>) -> (vector<[%n]xi32>, vector<[%n]xi32>, vector<[%n]xi32>) {
-  %zero = vector.constant 0 : vector<[%n]xi32>
-  %sub = vector.subi %x, %zero : vector<[%n]xi32>
+  %c0 = vector.constant 0 : vector<[%n]xi32>
+  %sub = vector.subi %x, %c0 : vector<[%n]xi32>
   %xor = vector.xori %x, %x : vector<[%n]xi32>
   %and = vector.andi %x, %x : vector<[%n]xi32>
   func.return %sub, %xor, %and : vector<[%n]xi32>, vector<[%n]xi32>, vector<[%n]xi32>
@@ -708,14 +1114,14 @@ func.def @cmpi_same_operand(%x: vector<4xi32>) -> (vector<4xi1>, vector<4xi1>) {
 // Floating-point self-comparisons fold only for NaN-stable predicates.
 func.def @cmpf_same_operand(%x: vector<4xf32>) -> (vector<4xi1>, vector<4xi1>) {
   %ueq = vector.cmpf ueq, %x, %x : vector<4xf32> -> vector<4xi1>
-  %one = vector.cmpf one, %x, %x : vector<4xf32> -> vector<4xi1>
-  func.return %ueq, %one : vector<4xi1>, vector<4xi1>
+  %ordered_not_equal = vector.cmpf one, %x, %x : vector<4xf32> -> vector<4xi1>
+  func.return %ueq, %ordered_not_equal : vector<4xi1>, vector<4xi1>
 }
 // ----
 func.def @cmpf_same_operand(%x: vector<4xf32>) -> (vector<4xi1>, vector<4xi1>) {
   %ueq = vector.constant true : vector<4xi1>
-  %one = vector.constant false : vector<4xi1>
-  func.return %ueq, %one : vector<4xi1>, vector<4xi1>
+  %ordered_not_equal = vector.constant false : vector<4xi1>
+  func.return %ueq, %ordered_not_equal : vector<4xi1>, vector<4xi1>
 }
 
 // ====
@@ -960,6 +1366,29 @@ func.def @load_mask_full_range_to_load(%buffer: buffer, %offset: offset, %old: v
   %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
   %r = vector.load %view[0] : view<16xf32, %layout> -> vector<4xf32>
   func.return %r : vector<4xf32>
+}
+
+// ====
+
+// A bounded full range removes the masked-memory operation, not just the
+// standalone mask producer.
+func.def @store_mask_bounded_full_range_to_store(%buffer: buffer, %offset: offset, %value: vector<16xf32>, %lo0: index, %hi0: index, %step0: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<1024xf32, %layout>
+  %lo = index.assume %lo0 [range(%lo0, 0, 752)] : index
+  %hi = index.assume %hi0 [range(%hi0, 768, 1024)] : index
+  %step = index.assume %step0 [range(%step0, 0, 1)] : index
+  %mask = vector.mask.range [%lo to %hi step %step] : index -> vector<16xi1>
+  vector.store.mask %value, %view[%lo], %mask : vector<16xf32>, view<1024xf32, %layout>, vector<16xi1>
+  func.return
+}
+// ----
+func.def @store_mask_bounded_full_range_to_store(%buffer: buffer, %offset: offset, %value: vector<16xf32>, %lo0: index, %hi0: index, %step0: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<1024xf32, %layout>
+  %lo = index.assume %lo0 [range(%lo0, 0, 752)] : index
+  vector.store %value, %view[%lo] : vector<16xf32>, view<1024xf32, %layout>
+  func.return
 }
 
 // ====

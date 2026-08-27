@@ -6,6 +6,7 @@ check.case @scalar_equal {
 }
 
 check.benchmark<@scalar_equal> @scalar_equal_latency
+
 check.benchmark<@scalar_equal> @scalar_equal_dispatch_latency
 
 check.case @sampled_choice {
@@ -15,4 +16,5 @@ check.case @sampled_choice {
 }
 
 check.benchmark<@sampled_choice> @sampled_choice_latency
+
 check.benchmark<@sampled_choice> @sampled_choice_value7 {value = 7}

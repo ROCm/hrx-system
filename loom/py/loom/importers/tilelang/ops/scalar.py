@@ -300,13 +300,14 @@ def convert_binary_expr(
     if index_like:
         builder_name = _BINARY_INDEX_OPS[kind]
         builder = getattr(context.builder.index, builder_name)
+        result_kwargs = {"results": [INDEX]} if builder_name in ("add", "sub") else {}
         result = cast(
             ValueRef,
             builder(
                 lhs=lhs,
                 rhs=rhs,
-                results=[INDEX],
                 name=context.fresh_name(builder_name),
+                **result_kwargs,
             ),
         )
         context.map_value(expr, result, "index")
@@ -388,14 +389,12 @@ def _convert_signed_floor_mod_expr(
         predicate="sge",
         lhs=rhs,
         rhs=zero,
-        results=[I1],
         name=context.fresh_name("divisor_nonnegative"),
     )
     remainder_nonnegative = context.builder.scalar.cmpi(
         predicate="sge",
         lhs=remainder,
         rhs=zero,
-        results=[I1],
         name=context.fresh_name("remainder_nonnegative"),
     )
     positive_case = context.builder.scalar.andi(
@@ -408,14 +407,12 @@ def _convert_signed_floor_mod_expr(
         predicate="slt",
         lhs=rhs,
         rhs=zero,
-        results=[I1],
         name=context.fresh_name("divisor_negative"),
     )
     remainder_nonpositive = context.builder.scalar.cmpi(
         predicate="sle",
         lhs=remainder,
         rhs=zero,
-        results=[I1],
         name=context.fresh_name("remainder_nonpositive"),
     )
     negative_case = context.builder.scalar.andi(
@@ -502,7 +499,6 @@ def _build_index_madd_expr(
         a=a,
         b=b,
         c=c,
-        results=[INDEX],
         name=context.fresh_name("madd"),
     )
     context.map_value(expr, result, "index")
@@ -566,7 +562,6 @@ def convert_compare(
         predicate=predicate,
         lhs=lhs,
         rhs=rhs,
-        results=[I1],
         name=context.fresh_name("cmp"),
     )
     context.map_value(expr, result, "i1")

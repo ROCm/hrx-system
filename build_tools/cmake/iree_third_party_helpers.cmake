@@ -75,7 +75,7 @@ function(iree_get_locked_dependency_property out_var dep_name property_name)
 endfunction()
 
 function(iree_declare_locked_fetch_content dep_name)
-  cmake_parse_arguments(PARSE_ARGV 1 _ARGS "" "FETCH_NAME" "")
+  cmake_parse_arguments(PARSE_ARGV 1 _ARGS "" "FETCH_NAME;SOURCE_SUBDIR" "")
   if(_ARGS_UNPARSED_ARGUMENTS)
     message(FATAL_ERROR
       "iree_declare_locked_fetch_content(${dep_name}) received unexpected "
@@ -96,12 +96,17 @@ function(iree_declare_locked_fetch_content dep_name)
     message(FATAL_ERROR "${dep_name} has no locked SHA256")
   endif()
 
+  set(_source_subdir_args)
+  if(_ARGS_SOURCE_SUBDIR)
+    list(APPEND _source_subdir_args SOURCE_SUBDIR "${_ARGS_SOURCE_SUBDIR}")
+  endif()
   FetchContent_Declare(
     ${_fetch_name}
     URL ${_urls}
     URL_HASH SHA256=${_sha256}
     DOWNLOAD_EXTRACT_TIMESTAMP FALSE
     EXCLUDE_FROM_ALL
+    ${_source_subdir_args}
   )
 endfunction()
 

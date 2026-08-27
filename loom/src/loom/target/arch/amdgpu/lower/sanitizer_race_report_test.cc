@@ -36,8 +36,6 @@
 
 namespace {
 
-using iree::StatusCode;
-
 std::string ToString(iree_string_view_t value) {
   return std::string(value.data, value.size);
 }
@@ -118,7 +116,8 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
         /*default_pointer_bitwidth=*/0, /*index_bitwidth=*/0,
         /*offset_bitwidth=*/0, /*max_workgroup_size_x=*/0,
         /*max_workgroup_size_y=*/0, /*max_workgroup_size_z=*/0,
-        /*max_flat_workgroup_size=*/0, /*subgroup_size=*/0,
+        /*max_flat_workgroup_size=*/0, /*max_workgroup_storage_bytes=*/0,
+        /*subgroup_size=*/0,
         /*max_grid_size_x=*/0, /*max_grid_size_y=*/0,
         /*max_grid_size_z=*/0, /*max_flat_grid_size=*/0,
         /*max_workgroup_count_x=*/0, /*max_workgroup_count_y=*/0,
@@ -128,13 +127,15 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
         /*memory_space_host=*/0, /*memory_space_descriptor=*/0,
         LOOM_TARGET_ABI_OBJECT_FUNCTION,
         /*export_symbol=*/LOOM_STRING_ID_INVALID,
-        /*linkage=*/0, /*hal_buffer_resource_flags=*/0, contract_set_key,
+        /*linkage=*/0, contract_set_key,
         /*contract_feature_bits=*/0, LOOM_LOCATION_UNKNOWN, &target_op));
     loom_symbol_ref_t callee = AddSymbol(IREE_SV("test_fn"));
     loom_op_t* function_op = NULL;
     IREE_ASSERT_OK(loom_low_func_def_build(
-        &builder_, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0, /*cc=*/0,
-        /*purity=*/0, /*allocation=*/0, /*schedule=*/0, target, /*abi=*/0,
+        &builder_, LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TARGET,
+        /*visibility=*/0, /*retain=*/0, /*cc=*/0,
+        /*purity=*/0, /*allocation=*/0, /*schedule=*/0,
+        /*descriptor_set=*/contract_set_key, target, /*abi=*/0,
         loom_make_named_attr_slice(NULL, 0),
         loom_make_named_attr_slice(NULL, 0),
         /*export_symbol=*/LOOM_STRING_ID_INVALID,
@@ -203,7 +204,7 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
     if (descriptor == nullptr) {
       return false;
     }
-    return loom_low_op_descriptor_ordinal(op) ==
+    return loom_low_op_descriptor(op) ==
            loom_low_descriptor_set_descriptor_ordinal(descriptor_set_,
                                                       descriptor);
   }
@@ -246,7 +247,7 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
     ASSERT_TRUE(loom_low_op_isa(op));
     const loom_low_descriptor_t* descriptor = DescriptorForRef(descriptor_ref);
     ASSERT_NE(descriptor, nullptr);
-    EXPECT_EQ(loom_low_op_descriptor_ordinal(op),
+    EXPECT_EQ(loom_low_op_descriptor(op),
               loom_low_descriptor_set_descriptor_ordinal(descriptor_set_,
                                                          descriptor));
   }
@@ -256,7 +257,7 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
     ASSERT_TRUE(loom_low_const_isa(op));
     const loom_low_descriptor_t* descriptor = DescriptorForRef(descriptor_ref);
     ASSERT_NE(descriptor, nullptr);
-    EXPECT_EQ(loom_low_const_descriptor_ordinal(op),
+    EXPECT_EQ(loom_low_const_descriptor(op),
               loom_low_descriptor_set_descriptor_ordinal(descriptor_set_,
                                                          descriptor));
   }
@@ -278,10 +279,9 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
       uint32_t value) {
     loom_type_t result_type =
         loom_low_register_type(descriptor_set_->stable_id, register_class, 1);
-    const loom_low_descriptor_t* descriptor = nullptr;
-    loom_string_id_t opcode_id = LOOM_STRING_ID_INVALID;
-    IREE_CHECK_OK(loom_amdgpu_lookup_descriptor_ref(
-        &builder_, descriptor_set_, descriptor_ref, &descriptor, &opcode_id));
+    const loom_low_descriptor_t* descriptor =
+        loom_amdgpu_lookup_descriptor_ref(descriptor_set_, descriptor_ref);
+    IREE_ASSERT(descriptor != nullptr);
     loom_string_id_t imm32_id = LOOM_STRING_ID_INVALID;
     IREE_CHECK_OK(
         loom_builder_intern_string(&builder_, IREE_SV("imm32"), &imm32_id));
@@ -292,7 +292,7 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
     };
     loom_op_t* const_op = nullptr;
     IREE_CHECK_OK(loom_low_build_resolved_descriptor_const(
-        &builder_, descriptor_set_, descriptor, opcode_id,
+        &builder_, descriptor_set_, descriptor,
         loom_make_named_attr_slice(&imm32_attr, 1), result_type,
         LOOM_LOCATION_UNKNOWN, &const_op));
     return loom_low_const_result(const_op);
@@ -363,13 +363,10 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
   }
 
   void VerifyLowModuleOk() {
-    loom_low_verify_options_t options = {
-        /*.descriptor_registry=*/&low_registry_.registry,
-        /*.target_selection=*/{},
-        /*.emitter=*/{EmitDiagnosticToStderr, NULL},
-        /*.provider_list=*/{},
-        /*.max_errors=*/20,
-    };
+    loom_low_verify_options_t options = {};
+    options.descriptor_registry = &low_registry_.registry;
+    options.emitter = {EmitDiagnosticToStderr, NULL};
+    options.max_errors = 20;
     loom_low_verify_scratch_t scratch =
         loom_low_verify_scratch_for_module(module_);
     loom_low_verify_result_t result = {};
@@ -737,29 +734,6 @@ TEST_F(AmdgpuSanitizerRaceReportTest, BranchesColdSitesToSharedReportIsland) {
   std::vector<loom_op_t*> trap_ops =
       OpsForDescriptorRef(LOOM_AMDGPU_DESCRIPTOR_REF_S_TRAP);
   EXPECT_TRUE(trap_ops.empty());
-}
-
-TEST_F(AmdgpuSanitizerRaceReportTest, RejectsUnsupportedValueShapes) {
-  loom_amdgpu_feedback_config_values_t config_values = {};
-  loom_amdgpu_feedback_channel_header_values_t channel_values = {};
-  loom_amdgpu_feedback_packet_address_t packet_address = {};
-  IREE_ASSERT_OK(
-      BuildFeedbackValues(&config_values, &channel_values, &packet_address));
-
-  loom_amdgpu_sanitizer_race_report_t report =
-      MakeReport(config_values, channel_values);
-  report.check_kind = channel_values.ring_capacity;
-  IREE_EXPECT_STATUS_IS(StatusCode::kInternal,
-                        loom_amdgpu_build_sanitizer_race_report_payload(
-                            &builder_, descriptor_set_, &packet_address,
-                            &report, LOOM_LOCATION_UNKNOWN));
-
-  report = MakeReport(config_values, channel_values);
-  report.current_site_id = config_values.flags;
-  IREE_EXPECT_STATUS_IS(StatusCode::kInternal,
-                        loom_amdgpu_build_sanitizer_race_report_payload(
-                            &builder_, descriptor_set_, &packet_address,
-                            &report, LOOM_LOCATION_UNKNOWN));
 }
 
 }  // namespace

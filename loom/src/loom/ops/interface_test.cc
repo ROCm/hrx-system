@@ -4,13 +4,9 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Unit tests for the CallLike, FuncLike, LoopLike, and RegionBranch interface
-// cast functions and inline accessors. These tests verify the
-// .rodata interface vtables on cache line 3 of the op vtable are
-// wired correctly: cast() returns a non-null fat reference for ops
-// that implement the interface and {NULL, NULL} for ops that don't,
-// and the inline accessors return the right block args / regions /
-// operands derived from the interface vtable's stored indices.
+// Unit tests for generic operation interface casts and accessors. Synthetic
+// test ops cover each supported field layout without coupling the generic
+// interface contract to production dialects.
 
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
@@ -18,8 +14,6 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
-#include "loom/ops/scalar/ops.h"
-#include "loom/ops/scf/ops.h"
 #include "loom/ops/test/ops.h"
 
 namespace loom {
@@ -40,20 +34,10 @@ class InterfaceTest : public ::testing::Test {
                                      &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
 
-    // Register test, scalar, and scf dialects. test provides
-    // test.func to host the body and test.constant for value
-    // factories; scf provides the loop/branch ops under test;
-    // scalar isn't strictly required but kept available for any
-    // future expansion.
+    // The synthetic test dialect owns every operation shape used below.
     iree_host_size_t count = 0;
     const loom_op_vtable_t* const* vtables = loom_test_dialect_vtables(&count);
     IREE_ASSERT_OK(loom_context_register_dialect(&context_, LOOM_DIALECT_TEST,
-                                                 vtables, (uint16_t)count));
-    vtables = loom_scalar_dialect_vtables(&count);
-    IREE_ASSERT_OK(loom_context_register_dialect(&context_, LOOM_DIALECT_SCALAR,
-                                                 vtables, (uint16_t)count));
-    vtables = loom_scf_dialect_vtables(&count);
-    IREE_ASSERT_OK(loom_context_register_dialect(&context_, LOOM_DIALECT_SCF,
                                                  vtables, (uint16_t)count));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
 
@@ -162,6 +146,19 @@ TEST_F(InterfaceTest, CallLikeCastReturnsValidForInvoke) {
   EXPECT_EQ(loom_call_like_result_offset(call), 0);
   EXPECT_EQ(loom_call_like_callee(call).symbol_id, func_ref_.symbol_id);
 
+  loom_string_id_t replacement_name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_string(module_, IREE_SV("replacement"),
+                                           &replacement_name_id));
+  uint16_t replacement_symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_add_symbol(module_, replacement_name_id,
+                                        &replacement_symbol_id));
+  const loom_symbol_ref_t replacement_ref = {
+      /*.module_id=*/0,
+      /*.symbol_id=*/replacement_symbol_id,
+  };
+  loom_call_like_set_callee(module_, call, replacement_ref);
+  EXPECT_EQ(loom_call_like_callee(call).symbol_id, replacement_symbol_id);
+
   loom_value_slice_t operands = loom_call_like_operands(call);
   ASSERT_EQ(operands.count, 1);
   EXPECT_EQ(operands.values[0], input_id);
@@ -176,6 +173,32 @@ TEST_F(InterfaceTest, CallLikeCastReturnsNullForNonCall) {
   EXPECT_FALSE(loom_call_like_isa(call));
   EXPECT_EQ(call.op, nullptr);
   EXPECT_EQ(call.vtable, nullptr);
+}
+
+TEST_F(InterfaceTest, CallLikeSpansTrailingOperandPartitions) {
+  loom_value_id_t prefix[] = {
+      loom_op_results(build_index(16))[0],
+      loom_op_results(build_index(32))[0],
+  };
+  loom_value_id_t specializations[] = {
+      loom_op_results(build_index(64))[0],
+  };
+  loom_value_id_t bindings[] = {
+      loom_op_results(build_i32(42))[0],
+  };
+  loom_op_t* call_op = nullptr;
+  IREE_ASSERT_OK(loom_test_partitioned_call_build(
+      &builder_, func_ref_, prefix, IREE_ARRAYSIZE(prefix), specializations,
+      IREE_ARRAYSIZE(specializations), bindings, IREE_ARRAYSIZE(bindings),
+      LOOM_LOCATION_UNKNOWN, &call_op));
+
+  loom_call_like_t call = loom_call_like_cast(module_, call_op);
+  EXPECT_EQ(loom_call_like_kind(call), LOOM_CALL_LIKE_KIND_COMMAND_PROGRAM);
+  EXPECT_EQ(loom_call_like_operand_offset(call), 2);
+  loom_value_slice_t operands = loom_call_like_operands(call);
+  ASSERT_EQ(operands.count, 2);
+  EXPECT_EQ(operands.values[0], specializations[0]);
+  EXPECT_EQ(operands.values[1], bindings[0]);
 }
 
 TEST_F(InterfaceTest, CallLikeCastReturnsNullForNullOp) {
@@ -195,6 +218,7 @@ TEST_F(InterfaceTest, FuncLikeCastReturnsValidForFunc) {
   EXPECT_EQ(func_like.op, func_op_);
   EXPECT_NE(func_like.vtable, nullptr);
   EXPECT_EQ(loom_func_like_body(func_like), body_);
+  EXPECT_EQ(loom_func_like_repr_contract(func_like), LOOM_STRING_ID_INVALID);
 }
 
 TEST_F(InterfaceTest, FuncLikeCastReturnsNullForNonFunc) {
@@ -216,7 +240,7 @@ TEST_F(InterfaceTest, FuncLikeCastReturnsNullForNullOp) {
 // LoopLike interface
 //===----------------------------------------------------------------------===//
 
-TEST_F(InterfaceTest, LoopLikeCastReturnsValidForScfFor) {
+TEST_F(InterfaceTest, LoopLikeCastReturnsValidForLoop) {
   loom_op_t* lower = build_index(0);
   loom_op_t* upper = build_index(8);
   loom_op_t* step = build_index(1);
@@ -224,15 +248,14 @@ TEST_F(InterfaceTest, LoopLikeCastReturnsValidForScfFor) {
   loom_value_id_t upper_id = loom_op_results(upper)[0];
   loom_value_id_t step_id = loom_op_results(step)[0];
 
-  loom_op_t* for_op = nullptr;
-  IREE_ASSERT_OK(loom_scf_for_build(
-      &builder_, /*build_flags=*/0, lower_id, upper_id, step_id, nullptr, 0,
-      nullptr, 0, nullptr, 0, LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0,
-      /*unroll_schedule=*/0, LOOM_LOCATION_UNKNOWN, &for_op));
+  loom_op_t* loop_op = nullptr;
+  IREE_ASSERT_OK(loom_test_loop_build(&builder_, lower_id, upper_id, step_id,
+                                      nullptr, 0, nullptr, 0,
+                                      LOOM_LOCATION_UNKNOWN, &loop_op));
 
-  loom_loop_like_t loop = loom_loop_like_cast(module_, for_op);
+  loom_loop_like_t loop = loom_loop_like_cast(module_, loop_op);
   EXPECT_TRUE(loom_loop_like_isa(loop));
-  EXPECT_EQ(loop.op, for_op);
+  EXPECT_EQ(loop.op, loop_op);
   EXPECT_NE(loop.vtable, nullptr);
 }
 
@@ -249,20 +272,20 @@ TEST_F(InterfaceTest, LoopLikeCastReturnsNullForNullOp) {
   EXPECT_FALSE(loom_loop_like_isa(loop));
 }
 
-TEST_F(InterfaceTest, LoopLikeCastReturnsNullForScfIf) {
-  // scf.if is region-branch-like, not loop-like.
+TEST_F(InterfaceTest, LoopLikeCastReturnsNullForBranch) {
+  // test.branch is region-branch-like, not loop-like.
   loom_op_t* condition = build_i1(true);
   loom_value_id_t condition_id = loom_op_results(condition)[0];
-  loom_op_t* if_op = nullptr;
-  IREE_ASSERT_OK(loom_scf_if_build(
-      &builder_, LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION, condition_id, nullptr,
-      0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &if_op));
+  loom_op_t* branch_op = nullptr;
+  IREE_ASSERT_OK(loom_test_branch_build(&builder_, condition_id, nullptr, 0,
+                                        nullptr, 0, LOOM_LOCATION_UNKNOWN,
+                                        &branch_op));
 
-  loom_loop_like_t loop = loom_loop_like_cast(module_, if_op);
+  loom_loop_like_t loop = loom_loop_like_cast(module_, branch_op);
   EXPECT_FALSE(loom_loop_like_isa(loop));
 }
 
-TEST_F(InterfaceTest, LoopLikeAccessorsForScfFor) {
+TEST_F(InterfaceTest, LoopLikeAccessorsForLoop) {
   loom_op_t* lower = build_index(0);
   loom_op_t* upper = build_index(16);
   loom_op_t* step = build_index(1);
@@ -270,21 +293,20 @@ TEST_F(InterfaceTest, LoopLikeAccessorsForScfFor) {
   loom_value_id_t upper_id = loom_op_results(upper)[0];
   loom_value_id_t step_id = loom_op_results(step)[0];
 
-  loom_op_t* for_op = nullptr;
-  IREE_ASSERT_OK(loom_scf_for_build(
-      &builder_, /*build_flags=*/0, lower_id, upper_id, step_id, nullptr, 0,
-      nullptr, 0, nullptr, 0, LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0,
-      /*unroll_schedule=*/0, LOOM_LOCATION_UNKNOWN, &for_op));
+  loom_op_t* loop_op = nullptr;
+  IREE_ASSERT_OK(loom_test_loop_build(&builder_, lower_id, upper_id, step_id,
+                                      nullptr, 0, nullptr, 0,
+                                      LOOM_LOCATION_UNKNOWN, &loop_op));
 
-  loom_loop_like_t loop = loom_loop_like_cast(module_, for_op);
+  loom_loop_like_t loop = loom_loop_like_cast(module_, loop_op);
   ASSERT_TRUE(loom_loop_like_isa(loop));
 
-  // body region matches the auto-created body region.
+  // The generic body accessor returns the operation's body region.
   loom_region_t* body = loom_loop_like_body(loop);
   ASSERT_NE(body, nullptr);
-  EXPECT_EQ(body, loom_scf_for_body(for_op));
+  EXPECT_EQ(body, loom_test_loop_body(loop_op));
 
-  // scf.for has no separate condition region.
+  // A counted loop has no separate condition region.
   EXPECT_EQ(loom_loop_like_condition_region(loop), nullptr);
 
   // The IV is the first block arg of the body's entry block.
@@ -303,14 +325,13 @@ TEST_F(InterfaceTest, LoopLikeIterArgsEmpty) {
   loom_op_t* lower = build_index(0);
   loom_op_t* upper = build_index(8);
   loom_op_t* step = build_index(1);
-  loom_op_t* for_op = nullptr;
-  IREE_ASSERT_OK(loom_scf_for_build(
-      &builder_, /*build_flags=*/0, loom_op_results(lower)[0],
-      loom_op_results(upper)[0], loom_op_results(step)[0], nullptr, 0, nullptr,
-      0, nullptr, 0, LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0,
-      /*unroll_schedule=*/0, LOOM_LOCATION_UNKNOWN, &for_op));
+  loom_op_t* loop_op = nullptr;
+  IREE_ASSERT_OK(loom_test_loop_build(
+      &builder_, loom_op_results(lower)[0], loom_op_results(upper)[0],
+      loom_op_results(step)[0], nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN,
+      &loop_op));
 
-  loom_loop_like_t loop = loom_loop_like_cast(module_, for_op);
+  loom_loop_like_t loop = loom_loop_like_cast(module_, loop_op);
   loom_value_slice_t iter_args = loom_loop_like_iter_args(loop);
   EXPECT_EQ(iter_args.count, 0);
 }
@@ -319,45 +340,45 @@ TEST_F(InterfaceTest, LoopLikeIterArgsNonEmpty) {
   loom_op_t* lower = build_index(0);
   loom_op_t* upper = build_index(8);
   loom_op_t* step = build_index(1);
-  loom_op_t* factor = build_index(2);
   loom_op_t* init0 = build_i32(10);
   loom_op_t* init1 = build_i32(20);
   loom_value_id_t init_ids[2] = {loom_op_results(init0)[0],
                                  loom_op_results(init1)[0]};
-  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
-  loom_type_t result_types[2] = {i32, i32};
 
-  loom_op_t* for_op = nullptr;
-  IREE_ASSERT_OK(
-      loom_scf_for_build(&builder_, LOOM_SCF_FOR_BUILD_FLAG_HAS_UNROLL_FACTOR,
-                         loom_op_results(lower)[0], loom_op_results(upper)[0],
-                         loom_op_results(step)[0], init_ids, 2, result_types, 2,
-                         nullptr, 0, loom_op_results(factor)[0],
-                         /*unroll_policy=*/0, /*unroll_schedule=*/0,
-                         LOOM_LOCATION_UNKNOWN, &for_op));
+  loom_op_t* loop_op = nullptr;
+  IREE_ASSERT_OK(loom_test_loop_build(
+      &builder_, loom_op_results(lower)[0], loom_op_results(upper)[0],
+      loom_op_results(step)[0], init_ids, IREE_ARRAYSIZE(init_ids), nullptr, 0,
+      LOOM_LOCATION_UNKNOWN, &loop_op));
 
-  loom_loop_like_t loop = loom_loop_like_cast(module_, for_op);
+  loom_loop_like_t loop = loom_loop_like_cast(module_, loop_op);
   loom_value_slice_t iter_args = loom_loop_like_iter_args(loop);
   EXPECT_EQ(iter_args.count, 2);
   EXPECT_EQ(iter_args.values[0], init_ids[0]);
   EXPECT_EQ(iter_args.values[1], init_ids[1]);
+  ASSERT_EQ(loop_op->result_count, 2);
+  const loom_value_id_t* results = loom_op_const_results(loop_op);
+  for (uint16_t i = 0; i < loop_op->result_count; ++i) {
+    EXPECT_TRUE(loom_type_equal(loom_module_value_type(module_, results[i]),
+                                loom_module_value_type(module_, init_ids[i])));
+  }
 }
 
 //===----------------------------------------------------------------------===//
 // RegionBranch interface
 //===----------------------------------------------------------------------===//
 
-TEST_F(InterfaceTest, RegionBranchCastReturnsValidForScfIf) {
+TEST_F(InterfaceTest, RegionBranchCastReturnsValidForBranch) {
   loom_op_t* condition = build_i1(true);
   loom_value_id_t condition_id = loom_op_results(condition)[0];
-  loom_op_t* if_op = nullptr;
-  IREE_ASSERT_OK(loom_scf_if_build(
-      &builder_, LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION, condition_id, nullptr,
-      0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &if_op));
+  loom_op_t* branch_op = nullptr;
+  IREE_ASSERT_OK(loom_test_branch_build(&builder_, condition_id, nullptr, 0,
+                                        nullptr, 0, LOOM_LOCATION_UNKNOWN,
+                                        &branch_op));
 
-  loom_region_branch_t branch = loom_region_branch_cast(module_, if_op);
+  loom_region_branch_t branch = loom_region_branch_cast(module_, branch_op);
   EXPECT_TRUE(loom_region_branch_isa(branch));
-  EXPECT_EQ(branch.op, if_op);
+  EXPECT_EQ(branch.op, branch_op);
   EXPECT_NE(branch.vtable, nullptr);
 }
 
@@ -374,36 +395,35 @@ TEST_F(InterfaceTest, RegionBranchCastReturnsNullForNullOp) {
   EXPECT_FALSE(loom_region_branch_isa(branch));
 }
 
-TEST_F(InterfaceTest, RegionBranchCastReturnsNullForScfFor) {
-  // scf.for is loop-like, not region-branch-like.
+TEST_F(InterfaceTest, RegionBranchCastReturnsNullForLoop) {
+  // test.loop is loop-like, not region-branch-like.
   loom_op_t* lower = build_index(0);
   loom_op_t* upper = build_index(8);
   loom_op_t* step = build_index(1);
-  loom_op_t* for_op = nullptr;
-  IREE_ASSERT_OK(loom_scf_for_build(
-      &builder_, /*build_flags=*/0, loom_op_results(lower)[0],
-      loom_op_results(upper)[0], loom_op_results(step)[0], nullptr, 0, nullptr,
-      0, nullptr, 0, LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0,
-      /*unroll_schedule=*/0, LOOM_LOCATION_UNKNOWN, &for_op));
+  loom_op_t* loop_op = nullptr;
+  IREE_ASSERT_OK(loom_test_loop_build(
+      &builder_, loom_op_results(lower)[0], loom_op_results(upper)[0],
+      loom_op_results(step)[0], nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN,
+      &loop_op));
 
-  loom_region_branch_t branch = loom_region_branch_cast(module_, for_op);
+  loom_region_branch_t branch = loom_region_branch_cast(module_, loop_op);
   EXPECT_FALSE(loom_region_branch_isa(branch));
 }
 
-TEST_F(InterfaceTest, RegionBranchSelectorForScfIf) {
+TEST_F(InterfaceTest, RegionBranchSelectorForBranch) {
   loom_op_t* condition = build_i1(false);
   loom_value_id_t condition_id = loom_op_results(condition)[0];
-  loom_op_t* if_op = nullptr;
-  IREE_ASSERT_OK(loom_scf_if_build(
-      &builder_, LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION, condition_id, nullptr,
-      0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &if_op));
+  loom_op_t* branch_op = nullptr;
+  IREE_ASSERT_OK(loom_test_branch_build(&builder_, condition_id, nullptr, 0,
+                                        nullptr, 0, LOOM_LOCATION_UNKNOWN,
+                                        &branch_op));
 
-  loom_region_branch_t branch = loom_region_branch_cast(module_, if_op);
+  loom_region_branch_t branch = loom_region_branch_cast(module_, branch_op);
   ASSERT_TRUE(loom_region_branch_isa(branch));
   EXPECT_EQ(loom_region_branch_selector(branch), condition_id);
 }
 
-TEST_F(InterfaceTest, RegionBranchYieldOnlyOperandsForScfIf) {
+TEST_F(InterfaceTest, RegionBranchYieldOnlyOperandsForBranch) {
   loom_op_t* condition = build_i1(false);
   loom_op_t* then_value = build_i32(10);
   loom_op_t* else_value = build_i32(20);
@@ -411,26 +431,25 @@ TEST_F(InterfaceTest, RegionBranchYieldOnlyOperandsForScfIf) {
   loom_value_id_t else_id = loom_op_results(else_value)[0];
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
 
-  loom_op_t* if_op = nullptr;
-  IREE_ASSERT_OK(loom_scf_if_build(&builder_,
-                                   LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION,
-                                   loom_op_results(condition)[0], &i32, 1,
-                                   nullptr, 0, LOOM_LOCATION_UNKNOWN, &if_op));
-  build_region_branch_yield(if_op, 0, &then_id, 1);
-  build_region_branch_yield(if_op, 1, &else_id, 1);
+  loom_op_t* branch_op = nullptr;
+  IREE_ASSERT_OK(
+      loom_test_branch_build(&builder_, loom_op_results(condition)[0], &i32, 1,
+                             nullptr, 0, LOOM_LOCATION_UNKNOWN, &branch_op));
+  build_region_branch_yield(branch_op, 0, &then_id, 1);
+  build_region_branch_yield(branch_op, 1, &else_id, 1);
 
-  loom_region_branch_t branch = loom_region_branch_cast(module_, if_op);
+  loom_region_branch_t branch = loom_region_branch_cast(module_, branch_op);
   ASSERT_TRUE(loom_region_branch_isa(branch));
   EXPECT_EQ(loom_region_branch_region(module_, branch, 0),
-            loom_scf_if_then_region(if_op));
+            loom_test_branch_then_region(branch_op));
   EXPECT_EQ(loom_region_branch_region(module_, branch, 1),
-            loom_scf_if_else_region(if_op));
+            loom_test_branch_else_region(branch_op));
   EXPECT_EQ(loom_region_branch_region(module_, branch, 2), nullptr);
 
   loom_op_t* terminator =
       loom_region_branch_region_terminator(module_, branch, 0);
   ASSERT_NE(terminator, nullptr);
-  EXPECT_TRUE(loom_scf_yield_isa(terminator));
+  EXPECT_TRUE(loom_test_yield_isa(terminator));
 
   loom_value_slice_t yielded_values = {0};
   EXPECT_TRUE(loom_region_branch_region_yield_only_operands(
@@ -447,23 +466,22 @@ TEST_F(InterfaceTest, RegionBranchYieldOnlyRejectsBranchBody) {
   loom_value_id_t fallback_id = loom_op_results(fallback_value)[0];
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
 
-  loom_op_t* if_op = nullptr;
-  IREE_ASSERT_OK(loom_scf_if_build(&builder_,
-                                   LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION,
-                                   loom_op_results(condition)[0], &i32, 1,
-                                   nullptr, 0, LOOM_LOCATION_UNKNOWN, &if_op));
+  loom_op_t* branch_op = nullptr;
+  IREE_ASSERT_OK(
+      loom_test_branch_build(&builder_, loom_op_results(condition)[0], &i32, 1,
+                             nullptr, 0, LOOM_LOCATION_UNKNOWN, &branch_op));
 
   loom_builder_ip_t saved_ip = loom_builder_enter_region(
-      &builder_, if_op, loom_scf_if_then_region(if_op));
+      &builder_, branch_op, loom_test_branch_then_region(branch_op));
   loom_op_t* local_value = build_i32(10);
   loom_value_id_t local_id = loom_op_results(local_value)[0];
   loom_op_t* yield_op = nullptr;
-  loom_region_branch_t branch = loom_region_branch_cast(module_, if_op);
+  loom_region_branch_t branch = loom_region_branch_cast(module_, branch_op);
   IREE_EXPECT_OK(loom_region_branch_build_region_terminator(
       &builder_, module_, branch, 0, &local_id, 1, LOOM_LOCATION_UNKNOWN,
       &yield_op));
   loom_builder_restore(&builder_, saved_ip);
-  build_region_branch_yield(if_op, 1, &fallback_id, 1);
+  build_region_branch_yield(branch_op, 1, &fallback_id, 1);
 
   ASSERT_TRUE(loom_region_branch_isa(branch));
   EXPECT_NE(loom_region_branch_region_terminator(module_, branch, 0), nullptr);
@@ -473,32 +491,26 @@ TEST_F(InterfaceTest, RegionBranchYieldOnlyRejectsBranchBody) {
       module_, branch, 0, 1, &yielded_values));
 }
 
-TEST_F(InterfaceTest, RegionBranchRegionsForScfSwitch) {
+TEST_F(InterfaceTest, RegionBranchRegionsForRegionTable) {
   loom_op_t* selector = build_index(1);
-  loom_op_t* case0_value = build_i32(10);
-  loom_op_t* case1_value = build_i32(20);
-  loom_op_t* default_value = build_i32(30);
-  loom_value_id_t case0_id = loom_op_results(case0_value)[0];
-  loom_value_id_t case1_id = loom_op_results(case1_value)[0];
-  loom_value_id_t default_id = loom_op_results(default_value)[0];
   int64_t case_keys[2] = {0, 1};
-  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
 
-  loom_op_t* switch_op = nullptr;
-  IREE_ASSERT_OK(loom_scf_switch_build(
-      &builder_, loom_op_results(selector)[0], &i32, 1, nullptr, 0, case_keys,
-      IREE_ARRAYSIZE(case_keys), LOOM_LOCATION_UNKNOWN, &switch_op));
-  build_region_branch_yield(switch_op, 0, &default_id, 1);
-  loom_region_slice_t case_regions = loom_scf_switch_case_regions(switch_op);
+  loom_op_t* table_op = nullptr;
+  IREE_ASSERT_OK(loom_test_region_table_build(
+      &builder_, loom_op_results(selector)[0], case_keys,
+      IREE_ARRAYSIZE(case_keys), LOOM_LOCATION_UNKNOWN, &table_op));
+  build_region_branch_yield(table_op, 0, nullptr, 0);
+  loom_region_slice_t case_regions =
+      loom_test_region_table_case_regions(table_op);
   ASSERT_EQ(case_regions.count, 2);
-  build_region_branch_yield(switch_op, 1, &case0_id, 1);
-  build_region_branch_yield(switch_op, 2, &case1_id, 1);
+  build_region_branch_yield(table_op, 1, nullptr, 0);
+  build_region_branch_yield(table_op, 2, nullptr, 0);
 
-  loom_region_branch_t branch = loom_region_branch_cast(module_, switch_op);
+  loom_region_branch_t branch = loom_region_branch_cast(module_, table_op);
   ASSERT_TRUE(loom_region_branch_isa(branch));
   EXPECT_EQ(loom_region_branch_selector(branch), loom_op_results(selector)[0]);
   EXPECT_EQ(loom_region_branch_region(module_, branch, 0),
-            loom_scf_switch_default_region(switch_op));
+            loom_test_region_table_default_region(table_op));
   EXPECT_EQ(loom_region_branch_region(module_, branch, 1),
             case_regions.regions[0]);
   EXPECT_EQ(loom_region_branch_region(module_, branch, 2),
@@ -507,9 +519,8 @@ TEST_F(InterfaceTest, RegionBranchRegionsForScfSwitch) {
 
   loom_value_slice_t yielded_values = {0};
   EXPECT_TRUE(loom_region_branch_region_yield_only_operands(
-      module_, branch, 2, 1, &yielded_values));
-  ASSERT_EQ(yielded_values.count, 1);
-  EXPECT_EQ(yielded_values.values[0], case1_id);
+      module_, branch, 2, 0, &yielded_values));
+  EXPECT_EQ(yielded_values.count, 0);
 }
 
 }  // namespace

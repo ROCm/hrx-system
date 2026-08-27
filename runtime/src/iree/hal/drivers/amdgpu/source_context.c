@@ -86,12 +86,12 @@ static uint8_t iree_hal_amdgpu_source_context_load_u8(const uint8_t* data,
 
 static uint16_t iree_hal_amdgpu_source_context_load_u16(
     const uint8_t* data, iree_host_size_t offset) {
-  return iree_unaligned_load_le_u16((const uint16_t*)(data + offset));
+  return iree_unaligned_load_le_u16(data + offset);
 }
 
 static uint32_t iree_hal_amdgpu_source_context_load_u32(
     const uint8_t* data, iree_host_size_t offset) {
-  return iree_unaligned_load_le_u32((const uint32_t*)(data + offset));
+  return iree_unaligned_load_le_u32(data + offset);
 }
 
 static bool iree_hal_amdgpu_source_context_span_in_bounds(
@@ -214,6 +214,8 @@ void iree_hal_amdgpu_source_context_initialize(
   out_context->physical_device_count = physical_device_count;
   out_context->loaded_physical_device_mask = loaded_physical_device_mask;
   out_context->loaded_code_object_ranges = loaded_code_object_ranges;
+  iree_atomic_store(&out_context->sanitizer_site_table_published, 0,
+                    iree_memory_order_relaxed);
 }
 
 iree_status_t iree_hal_amdgpu_source_context_set_loaded_code_object_range(
@@ -350,6 +352,8 @@ iree_status_t iree_hal_amdgpu_source_context_set_sanitizer_site_table(
   }
 
   context->sanitizer_site_table = site_table;
+  iree_atomic_store(&context->sanitizer_site_table_published, 1,
+                    iree_memory_order_release);
   return iree_ok_status();
 }
 
@@ -359,6 +363,10 @@ bool iree_hal_amdgpu_source_context_try_resolve_sanitizer_site(
   IREE_ASSERT_ARGUMENT(out_site);
   *out_site = iree_hal_device_event_site_default();
   if (!context || site_id > UINT32_MAX) return false;
+  if (!iree_atomic_load(&context->sanitizer_site_table_published,
+                        iree_memory_order_acquire)) {
+    return false;
+  }
 
   const iree_hal_amdgpu_source_context_site_table_t* table =
       &context->sanitizer_site_table;

@@ -1,0 +1,37 @@
+// RUN: emit amdgpu-assembly @gfx1151_dpp_integer_compare waits=none
+
+amdgpu.target<gfx1151> @target
+low.func.def target<amdgpu.rdna3_5.core>(@target) @gfx1151_dpp_integer_compare(%crosslane: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.sgpr>, %third: reg<amdgpu.vgpr>, %carry_in: reg<amdgpu.sgpr x2>) asm {
+  %add = v_add_u32_dpp8_sgpr %crosslane, %rhs {dpp8 = 342391}
+  %sub = v_sub_nc_u32_dpp16_src1_inline %add {rhs = 42, dpp_ctrl = 27}
+  %add3 = v_add3_u32_dpp8_sgpr %sub, %rhs, %third {dpp8 = 342391}
+  %mask = v_cmp_ne_i32_dpp16_src1_inline %add3 {rhs = 42, dpp_ctrl = 27}
+  %sum, %carry = v_add_co_u32_dpp8_sgpr %add3, %rhs {dpp8 = 342391}
+  %sum_with_carry, %carry_out = v_add_co_ci_u32_dpp16_sgpr %sum, %rhs, %carry_in {dpp_ctrl = 27}
+  return
+}
+
+// ----
+  v_add_nc_u32_e64_dpp v0, v0, s0, dpp8:[7,6,5,4,3,2,1,0]
+  v_sub_nc_u32_e64_dpp v0, v0, 42, quad_perm:[3,2,1,0], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  v_add3_u32_e64_dpp v0, v0, s0, v1, dpp8:[7,6,5,4,3,2,1,0]
+  v_cmp_ne_i32_e64_dpp s[4:5], v0, 42, quad_perm:[3,2,1,0], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  v_add_co_u32_e64_dpp v0, s[4:5], v0, s0, dpp8:[7,6,5,4,3,2,1,0]
+  v_add_co_ci_u32_e64_dpp v0, s[0:1], v0, s0, s[2:3], quad_perm:[3,2,1,0], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1170_dpp_integer_compare waits=none
+
+amdgpu.target<gfx1170> @target
+low.func.def target<amdgpu.rdna4m.core>(@target) @gfx1170_dpp_integer_compare(%crosslane: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.sgpr>) asm {
+  %minimum = v_min_i32_dpp8_sgpr %crosslane, %rhs {dpp8 = 342391}
+  %mask = v_cmp_ge_u32_dpp16_src1_inline %minimum {rhs = 42, dpp_ctrl = 27}
+  return
+}
+
+// ----
+  v_min_i32_e64_dpp v0, v0, s0, dpp8:[7,6,5,4,3,2,1,0]
+  v_cmp_ge_u32_e64_dpp s[0:1], v0, 42, quad_perm:[3,2,1,0], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  s_endpgm

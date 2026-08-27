@@ -90,8 +90,9 @@ class MotionTest : public ::testing::Test {
 
   void PrepareMotionAnalysis() {
     IREE_ASSERT_OK(loom_module_compute_uses(module_));
-    IREE_ASSERT_OK(
-        loom_motion_analysis_initialize(module_, &motion_arena_, &motion_));
+    IREE_ASSERT_OK(loom_motion_analysis_initialize(
+        module_, /*fact_table=*/nullptr, /*value_domain=*/nullptr,
+        &motion_arena_, &motion_));
   }
 
   iree_status_t QueryRelocateBefore(loom_op_t* candidate_op,
@@ -157,6 +158,17 @@ TEST_F(MotionTest, LocalClassificationSeparatesEraseRelocateAndSpeculate) {
   IREE_ASSERT_OK(loom_test_convergent_build(
       &builder_, lhs, i32_type, LOOM_LOCATION_UNKNOWN, &convergent_op));
 
+  loom_op_t* size_op = nullptr;
+  loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(4096),
+                                          index_type, LOOM_LOCATION_UNKNOWN,
+                                          &size_op));
+  loom_op_t* alloc_op = nullptr;
+  IREE_ASSERT_OK(
+      loom_test_alloc_build(&builder_, loom_test_constant_result(size_op),
+                            loom_type_pool(loom_dim_pack_static(4096)),
+                            LOOM_LOCATION_UNKNOWN, &alloc_op));
+
   loom_op_t* source_op = nullptr;
   IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(1),
                                           tile_type, LOOM_LOCATION_UNKNOWN,
@@ -195,9 +207,17 @@ TEST_F(MotionTest, LocalClassificationSeparatesEraseRelocateAndSpeculate) {
   EXPECT_FALSE(loom_motion_op_can_relocate_effect_free(module_, use_op));
   EXPECT_FALSE(loom_motion_op_can_relocate_effect_free(module_, convergent_op));
   EXPECT_FALSE(loom_motion_op_can_relocate_effect_free(module_, update_op));
+  EXPECT_TRUE(loom_motion_op_can_rematerialize_effect_free(module_, add_op));
+  EXPECT_FALSE(
+      loom_motion_op_can_rematerialize_effect_free(module_, convergent_op));
+  EXPECT_FALSE(loom_motion_op_can_rematerialize_effect_free(module_, alloc_op));
   EXPECT_FALSE(loom_motion_op_can_speculate(module_, add_op));
   EXPECT_FALSE(loom_motion_op_can_speculate(module_, convergent_op));
   EXPECT_TRUE(loom_motion_op_can_speculate(module_, select_op));
+  EXPECT_TRUE(loom_motion_read_can_cross_op(module_, add_op));
+  EXPECT_FALSE(loom_motion_read_can_cross_op(module_, use_op));
+  EXPECT_FALSE(loom_motion_read_can_cross_op(module_, convergent_op));
+  EXPECT_TRUE(loom_motion_read_can_cross_op(module_, update_op));
 }
 
 TEST_F(MotionTest, SubtreeAllowsOperandsAvailableBeforeInsertion) {

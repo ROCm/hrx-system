@@ -168,6 +168,33 @@ TEST_F(TypePropagationTest, MayApplySkipsScalarOnlyConstraints) {
   EXPECT_FALSE(may_apply);
 }
 
+TEST_F(TypePropagationTest, MayApplySkipsScalarTypesWithFacts) {
+  loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_op_t* lhs_op = NULL;
+  IREE_ASSERT_OK(BuildConstant(loom_attr_i64(1), i32_type, &lhs_op));
+  loom_op_t* rhs_op = NULL;
+  IREE_ASSERT_OK(BuildConstant(loom_attr_i64(2), i32_type, &rhs_op));
+
+  loom_op_t* add_op = NULL;
+  IREE_ASSERT_OK(
+      loom_test_addi_build(&builder_, loom_test_constant_result(lhs_op),
+                           loom_test_constant_result(rhs_op), i32_type,
+                           LOOM_LOCATION_UNKNOWN, &add_op));
+
+  loom_pass_value_fact_owner_t value_fact_owner = {};
+  loom_pass_value_fact_owner_initialize(&block_pool_, &value_fact_owner);
+  loom_value_fact_table_t* facts = NULL;
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_prepare(
+      &value_fact_owner, module_,
+      loom_pass_value_fact_scope_function(function_), &facts));
+
+  bool may_apply = true;
+  IREE_EXPECT_OK(MayApply(add_op, facts, &may_apply));
+
+  EXPECT_FALSE(may_apply);
+  loom_pass_value_fact_owner_deinitialize(&value_fact_owner);
+}
+
 TEST_F(TypePropagationTest, MayApplySkipsRefinableOpWithConcreteTypes) {
   loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
   loom_op_t* source_op = NULL;
@@ -176,7 +203,7 @@ TEST_F(TypePropagationTest, MayApplySkipsRefinableOpWithConcreteTypes) {
   loom_named_attr_slice_t empty_attrs = {0};
   loom_op_t* attrs_op = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
-      &builder_, loom_test_constant_result(source_op), empty_attrs, i32_type,
+      &builder_, 0, loom_test_constant_result(source_op), empty_attrs, i32_type,
       LOOM_LOCATION_UNKNOWN, &attrs_op));
 
   bool may_apply = true;
@@ -196,7 +223,7 @@ TEST_F(TypePropagationTest, MayApplyAcceptsRefinableOpWithDynamicTypes) {
   loom_named_attr_slice_t empty_attrs = {0};
   loom_op_t* attrs_op = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
-      &builder_, loom_test_constant_result(source_op), empty_attrs,
+      &builder_, 0, loom_test_constant_result(source_op), empty_attrs,
       dynamic_vector, LOOM_LOCATION_UNKNOWN, &attrs_op));
 
   bool may_apply = false;
@@ -241,7 +268,7 @@ TEST_F(TypePropagationTest, SameTypeNarrowsResult) {
   IREE_ASSERT_OK(BuildConstant(loom_attr_i64(0), static_vector, &source_op));
   loom_op_t* attrs_op = NULL;
   IREE_ASSERT_OK(
-      loom_test_attrs_build(&builder_, loom_test_constant_result(source_op),
+      loom_test_attrs_build(&builder_, 0, loom_test_constant_result(source_op),
                             (loom_named_attr_slice_t){0}, dynamic_vector,
                             LOOM_LOCATION_UNKNOWN, &attrs_op));
 
@@ -266,11 +293,11 @@ TEST_F(TypePropagationTest, SameTypeClosureVisitsOtherUsers) {
 
   loom_op_t* first_user = NULL;
   IREE_ASSERT_OK(
-      loom_test_attrs_build(&builder_, source, (loom_named_attr_slice_t){0},
+      loom_test_attrs_build(&builder_, 0, source, (loom_named_attr_slice_t){0},
                             static_vector, LOOM_LOCATION_UNKNOWN, &first_user));
   loom_op_t* second_user = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
-      &builder_, source, (loom_named_attr_slice_t){0}, dynamic_vector,
+      &builder_, 0, source, (loom_named_attr_slice_t){0}, dynamic_vector,
       LOOM_LOCATION_UNKNOWN, &second_user));
 
   bool changed = false;
@@ -298,11 +325,11 @@ TEST_F(TypePropagationTest, SameTypeConflictRejectsTransaction) {
 
   loom_op_t* first_user = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
-      &builder_, source, (loom_named_attr_slice_t){0}, static_vector_16,
+      &builder_, 0, source, (loom_named_attr_slice_t){0}, static_vector_16,
       LOOM_LOCATION_UNKNOWN, &first_user));
   loom_op_t* second_user = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
-      &builder_, source, (loom_named_attr_slice_t){0}, static_vector_32,
+      &builder_, 0, source, (loom_named_attr_slice_t){0}, static_vector_32,
       LOOM_LOCATION_UNKNOWN, &second_user));
 
   bool changed = false;

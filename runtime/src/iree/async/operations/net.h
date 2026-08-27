@@ -317,6 +317,10 @@ typedef uint32_t iree_async_socket_send_flags_t;
 //   yes     | yes      | yes  | yes
 //
 // Data lifetime:
+//   The span descriptor array is consumed during submit and need not remain
+//   valid after submit returns. Backends materialize native descriptors before
+//   returning.
+//
 //   Buffer data referenced by spans must remain valid until the completion
 //   callback fires. The send operation does not copy buffer contents; the
 //   kernel reads directly from the provided addresses at an unspecified time
@@ -442,6 +446,9 @@ static inline void iree_async_socket_send_operation_initialize(
 //   count is IREE_ASYNC_SOCKET_SENDTO_MAX_BUFFERS.
 //
 // Data lifetime:
+//   The span descriptor array is consumed during submit and need not remain
+//   valid after submit returns.
+//
 //   Buffer data referenced by spans must remain valid until the completion
 //   callback fires. See SOCKET_SEND documentation for per-backend details.
 //

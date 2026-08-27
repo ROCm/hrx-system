@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Source-of-truth rows for ordinary SPIR-V scalar ALU predicates."""
+"""Source-of-truth rows for ordinary SPIR-V scalar ALU operations."""
 
 from __future__ import annotations
 
@@ -28,8 +28,29 @@ class ScalarAluType:
 @dataclass(frozen=True, slots=True)
 class IntegerAluTypePair:
     source_type: str
+    bit_width: int
     signed: ScalarAluType
     unsigned: ScalarAluType
+
+    @property
+    def signed_minimum(self) -> int:
+        return -(2 ** (self.bit_width - 1))
+
+    @property
+    def signed_maximum(self) -> int:
+        return (2 ** (self.bit_width - 1)) - 1
+
+    @property
+    def literal_word_count(self) -> int:
+        return (self.bit_width + 31) // 32
+
+
+@dataclass(frozen=True, slots=True)
+class BooleanConstant:
+    value: int
+    descriptor_suffix: str
+    mnemonic: str
+    opcode: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +72,7 @@ class IntegerComparePredicate:
 INTEGER_SCALAR_ALU_TYPE_PAIRS = (
     IntegerAluTypePair(
         source_type="i8",
+        bit_width=8,
         signed=ScalarAluType(
             source_type="i8",
             suffix="i8",
@@ -66,6 +88,7 @@ INTEGER_SCALAR_ALU_TYPE_PAIRS = (
     ),
     IntegerAluTypePair(
         source_type="i16",
+        bit_width=16,
         signed=ScalarAluType(
             source_type="i16",
             suffix="i16",
@@ -81,6 +104,7 @@ INTEGER_SCALAR_ALU_TYPE_PAIRS = (
     ),
     IntegerAluTypePair(
         source_type="i32",
+        bit_width=32,
         signed=ScalarAluType(
             source_type="i32",
             suffix="i32",
@@ -94,6 +118,7 @@ INTEGER_SCALAR_ALU_TYPE_PAIRS = (
     ),
     IntegerAluTypePair(
         source_type="i64",
+        bit_width=64,
         signed=ScalarAluType(
             source_type="i64",
             suffix="i64",
@@ -136,6 +161,13 @@ FLOAT_SCALAR_ALU_TYPES = (
     ),
 )
 
+BFLOAT16_SCALAR_TYPE = ScalarAluType(
+    source_type="bf16",
+    suffix="bf16",
+    scalar_enum="LOOM_SPIRV_SCALAR_TYPE_BF16",
+    feature_atoms=("bfloat16_type_khr",),
+)
+
 SCALAR_ALU_TYPES = SIGNED_INTEGER_SCALAR_ALU_TYPES + FLOAT_SCALAR_ALU_TYPES
 
 OFFSET64_ALU_TYPE = ScalarAluType(
@@ -150,6 +182,81 @@ SIGNED_INTEGER_BINARY_OPERATIONS = (
     ScalarBinaryOperation("muli", "imul", "OpIMul", "LOOM_SPIRV_OP_I_MUL"),
     ScalarBinaryOperation("divsi", "sdiv", "OpSDiv", "LOOM_SPIRV_OP_S_DIV"),
     ScalarBinaryOperation("remsi", "srem", "OpSRem", "LOOM_SPIRV_OP_S_REM"),
+)
+
+INTEGER_BITWISE_BINARY_OPERATIONS = (
+    ScalarBinaryOperation(
+        "andi",
+        "bitwise_and",
+        "OpBitwiseAnd",
+        "LOOM_SPIRV_OP_BITWISE_AND",
+    ),
+    ScalarBinaryOperation(
+        "ori",
+        "bitwise_or",
+        "OpBitwiseOr",
+        "LOOM_SPIRV_OP_BITWISE_OR",
+    ),
+    ScalarBinaryOperation(
+        "xori",
+        "bitwise_xor",
+        "OpBitwiseXor",
+        "LOOM_SPIRV_OP_BITWISE_XOR",
+    ),
+    ScalarBinaryOperation(
+        "shli",
+        "shift_left_logical",
+        "OpShiftLeftLogical",
+        "LOOM_SPIRV_OP_SHIFT_LEFT_LOGICAL",
+    ),
+    ScalarBinaryOperation(
+        "shrsi",
+        "shift_right_arithmetic",
+        "OpShiftRightArithmetic",
+        "LOOM_SPIRV_OP_SHIFT_RIGHT_ARITHMETIC",
+    ),
+    ScalarBinaryOperation(
+        "shrui",
+        "shift_right_logical",
+        "OpShiftRightLogical",
+        "LOOM_SPIRV_OP_SHIFT_RIGHT_LOGICAL",
+    ),
+)
+
+BOOLEAN_BINARY_OPERATIONS = (
+    ScalarBinaryOperation(
+        "andi",
+        "logical_and",
+        "OpLogicalAnd",
+        "LOOM_SPIRV_OP_LOGICAL_AND",
+    ),
+    ScalarBinaryOperation(
+        "ori",
+        "logical_or",
+        "OpLogicalOr",
+        "LOOM_SPIRV_OP_LOGICAL_OR",
+    ),
+    ScalarBinaryOperation(
+        "xori",
+        "logical_not_equal",
+        "OpLogicalNotEqual",
+        "LOOM_SPIRV_OP_LOGICAL_NOT_EQUAL",
+    ),
+)
+
+BOOLEAN_CONSTANTS = (
+    BooleanConstant(
+        value=0,
+        descriptor_suffix="false",
+        mnemonic="OpConstantFalse",
+        opcode="LOOM_SPIRV_OP_CONSTANT_FALSE",
+    ),
+    BooleanConstant(
+        value=1,
+        descriptor_suffix="true",
+        mnemonic="OpConstantTrue",
+        opcode="LOOM_SPIRV_OP_CONSTANT_TRUE",
+    ),
 )
 
 UNSIGNED_INTEGER_BINARY_OPERATIONS = (

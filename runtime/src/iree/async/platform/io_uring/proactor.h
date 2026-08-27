@@ -19,6 +19,7 @@
 #include "iree/async/platform/linux/signal.h"
 #include "iree/async/semaphore.h"
 #include "iree/async/util/message_pool.h"
+#include "iree/async/util/semaphore_wait.h"
 #include "iree/async/util/sequence_emulation.h"
 #include "iree/async/util/signal.h"
 #include "iree/base/internal/atomic_slist.h"
@@ -34,12 +35,30 @@ typedef struct iree_async_semaphore_wait_operation_t
 // Event source tracking
 //===----------------------------------------------------------------------===//
 
+// Internal state for event source lifecycle management.
+typedef enum iree_async_io_uring_event_source_state_e {
+  // The multishot poll is active and callbacks may be dispatched.
+  IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_ACTIVE = 0,
+
+  // Unregistration was requested but SQ pressure prevented cancellation from
+  // being queued. Callbacks are suppressed while the proactor retries.
+  IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_UNREGISTRATION_PENDING = 1,
+
+  // Cancellation was queued and the final multishot poll CQE is pending.
+  IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_UNREGISTRATION_SUBMITTED = 2,
+
+  // The multishot poll ended without an explicit unregistration request.
+  IREE_ASYNC_IO_URING_EVENT_SOURCE_STATE_TERMINAL = 3,
+} iree_async_io_uring_event_source_state_t;
+
 // Tracks a registered event source for persistent monitoring of an external fd.
 // Uses multishot POLL_ADD to receive callbacks when the fd becomes readable.
 // Doubly-linked list node; proactor owns the list.
 struct iree_async_event_source_t {
-  // Intrusive doubly-linked list for efficient removal.
+  // Next event source in the owning proactor's intrusive list.
   struct iree_async_event_source_t* next;
+
+  // Previous event source in the owning proactor's intrusive list.
   struct iree_async_event_source_t* prev;
 
   // Owning proactor (for vtable access in callbacks).
@@ -50,6 +69,9 @@ struct iree_async_event_source_t {
 
   // User callback invoked when the fd is readable.
   iree_async_event_source_callback_t callback;
+
+  // Current backend registration lifecycle state.
+  iree_async_io_uring_event_source_state_t state;
 
   // Allocator used to allocate this struct (for deallocation).
   iree_allocator_t allocator;
@@ -107,9 +129,7 @@ typedef struct iree_async_proactor_io_uring_t {
   // decide how to flush:
   //
   //   poll_tid == gettid()  → poll thread: flush SQEs via ring_submit(0, 0)
-  //                           directly. The kernel reads span data during
-  //                           io_uring_enter, while the CQE callback's callers
-  //                           still have their data alive.
+  //                           directly to minimize continuation latency.
   //
   //   poll_tid != 0, mismatch → cross-thread during CQE processing: skip
   //                              wake (the poll thread is already active and
@@ -168,6 +188,9 @@ typedef struct iree_async_proactor_io_uring_t {
   // MPSC queue of semaphore wait operations ready to complete.
   // Timepoint callbacks push trackers here, poll() drains and completes them.
   iree_atomic_slist_t pending_semaphore_waits;
+
+  // Serializes wait operation association with cancellation and completion.
+  iree_async_semaphore_wait_context_t semaphore_wait_context;
 
   // Linked list of registered event sources. Proactor-owned.
   // Uses doubly-linked list for O(1) removal during unregister.
@@ -286,46 +309,6 @@ typedef struct iree_async_io_uring_fence_export_tracker_t {
   int eventfd;
   iree_allocator_t allocator;  // For freeing this tracker.
 } iree_async_io_uring_fence_export_tracker_t;
-
-// Tracks a pending SEMAPHORE_WAIT operation.
-// Heap-allocated per wait operation, freed when the operation completes.
-// Contains embedded timepoints for each semaphore being waited on.
-typedef struct iree_async_io_uring_semaphore_wait_tracker_t {
-  // Intrusive MPSC list link for pending completion queue.
-  iree_atomic_slist_entry_t slist_entry;
-
-  // Back-pointer to the wait operation being tracked.
-  iree_async_semaphore_wait_operation_t* operation;
-
-  // Proactor to wake when a semaphore fires.
-  iree_async_proactor_io_uring_t* proactor;
-
-  // Allocator used for this tracker.
-  iree_allocator_t allocator;
-
-  // Number of semaphores being waited on.
-  iree_host_size_t count;
-
-  // For ALL mode: remaining semaphores to satisfy.
-  // For ANY mode: first satisfied index (written by callback).
-  iree_atomic_int32_t remaining_or_satisfied;
-
-  // Completion status. Written by timepoint callback if failure occurs.
-  iree_atomic_intptr_t completion_status;
-
-  // Guard against double-enqueue: success callbacks (remaining_or_satisfied),
-  // error callbacks, and cancel all independently decide to enqueue. Only the
-  // first to CAS this from 0->1 actually pushes to the MPSC slist.
-  iree_atomic_int32_t enqueued;
-
-  // LINKED chain continuation head (for userspace chain emulation).
-  // When the wait operation has LINKED flag, points to the first operation
-  // in the continuation chain (linked via linked_next pointers).
-  iree_async_operation_t* continuation_head;
-
-  // Flexible array of timepoints (one per semaphore).
-  iree_async_semaphore_timepoint_t timepoints[];
-} iree_async_io_uring_semaphore_wait_tracker_t;
 
 //===----------------------------------------------------------------------===//
 // Internal APIs (shared across proactor implementation files)

@@ -1,0 +1,8 @@
+ireevm.target<core> @vm_target
+
+// A VM binary consumes ordinary public functions carrying an authored VM
+// target. Device kernels and command schedules remain separate products.
+func.def public target(@vm_target) @double_i32(%value: i32) -> (i32) {
+  %result = scalar.addi %value, %value : i32
+  func.return %result : i32
+}

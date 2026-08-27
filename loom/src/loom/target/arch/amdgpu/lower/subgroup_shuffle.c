@@ -28,15 +28,14 @@ typedef enum loom_amdgpu_subgroup_shuffle_shape_failure_e {
   LOOM_AMDGPU_SUBGROUP_SHUFFLE_SHAPE_FAILURE_NONE = 0,
   LOOM_AMDGPU_SUBGROUP_SHUFFLE_SHAPE_FAILURE_EXACT_WIDTH = 1,
   LOOM_AMDGPU_SUBGROUP_SHUFFLE_SHAPE_FAILURE_POWER_OF_TWO_WIDTH = 2,
-  LOOM_AMDGPU_SUBGROUP_SHUFFLE_SHAPE_FAILURE_EXACT_LANE = 3,
-  LOOM_AMDGPU_SUBGROUP_SHUFFLE_SHAPE_FAILURE_LANE_RANGE = 4,
+  LOOM_AMDGPU_SUBGROUP_SHUFFLE_SHAPE_FAILURE_LANE_RANGE = 3,
 } loom_amdgpu_subgroup_shuffle_shape_failure_t;
 
 typedef struct loom_amdgpu_subgroup_shuffle_shape_t {
   // Exact cluster width in lanes.
   uint32_t width;
-  // Exact source-lane offset within the cluster.
-  uint32_t offset;
+  // Exact source-lane offset within the cluster, or UINT32_MAX when dynamic.
+  uint32_t exact_offset;
 } loom_amdgpu_subgroup_shuffle_shape_t;
 
 static bool loom_amdgpu_subgroup_shuffle_resolve_width(
@@ -67,22 +66,28 @@ static bool loom_amdgpu_subgroup_shuffle_resolve_offset(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_op_t* op, loom_amdgpu_subgroup_shuffle_shape_t* out_shape,
     loom_amdgpu_subgroup_shuffle_shape_failure_t* out_failure) {
-  out_shape->offset = 0;
+  out_shape->exact_offset = UINT32_MAX;
   *out_failure = LOOM_AMDGPU_SUBGROUP_SHUFFLE_SHAPE_FAILURE_NONE;
 
+  const loom_value_id_t source_offset = loom_kernel_subgroup_shuffle_offset(op);
   int64_t offset = 0;
-  if (!loom_amdgpu_value_as_exact_i32(module, fact_table,
-                                      loom_kernel_subgroup_shuffle_offset(op),
-                                      &offset)) {
-    *out_failure = LOOM_AMDGPU_SUBGROUP_SHUFFLE_SHAPE_FAILURE_EXACT_LANE;
-    return false;
+  if (loom_amdgpu_value_as_exact_i32(module, fact_table, source_offset,
+                                     &offset)) {
+    if (offset < 0 || offset >= (int64_t)out_shape->width) {
+      *out_failure = LOOM_AMDGPU_SUBGROUP_SHUFFLE_SHAPE_FAILURE_LANE_RANGE;
+      return false;
+    }
+    out_shape->exact_offset = (uint32_t)offset;
+    return true;
   }
-  if (offset < 0 || offset >= (int64_t)out_shape->width) {
+
+  const loom_value_facts_t facts =
+      loom_value_fact_table_lookup(fact_table, source_offset);
+  if (loom_value_facts_is_float(facts) || facts.range_lo < 0 ||
+      facts.range_hi >= (int64_t)out_shape->width) {
     *out_failure = LOOM_AMDGPU_SUBGROUP_SHUFFLE_SHAPE_FAILURE_LANE_RANGE;
     return false;
   }
-
-  out_shape->offset = (uint32_t)offset;
   return true;
 }
 
@@ -93,8 +98,6 @@ static iree_string_view_t loom_amdgpu_subgroup_shuffle_shape_failure_key(
       return IREE_SV("subgroup_shuffle.exact_width");
     case LOOM_AMDGPU_SUBGROUP_SHUFFLE_SHAPE_FAILURE_POWER_OF_TWO_WIDTH:
       return IREE_SV("subgroup_shuffle.power_of_two_width");
-    case LOOM_AMDGPU_SUBGROUP_SHUFFLE_SHAPE_FAILURE_EXACT_LANE:
-      return IREE_SV("subgroup_shuffle.exact_lane");
     case LOOM_AMDGPU_SUBGROUP_SHUFFLE_SHAPE_FAILURE_LANE_RANGE:
       return IREE_SV("subgroup_shuffle.lane_range");
     case LOOM_AMDGPU_SUBGROUP_SHUFFLE_SHAPE_FAILURE_NONE:
@@ -125,10 +128,7 @@ iree_status_t loom_amdgpu_select_kernel_subgroup_shuffle_plan(
   }
 
   uint32_t wavefront_size = 0;
-  bool wavefront_selected = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_select_subgroup_wavefront_size(
-      context, &wavefront_size, &wavefront_selected));
-  if (!wavefront_selected) {
+  if (!loom_amdgpu_select_subgroup_wavefront_size(context, &wavefront_size)) {
     return iree_ok_status();
   }
 
@@ -140,10 +140,8 @@ iree_status_t loom_amdgpu_select_kernel_subgroup_shuffle_plan(
           wavefront_size, &shape, &shape_failure)) {
     return iree_ok_status();
   }
-  bool direct_width_selected = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_select_direct_subgroup_width(
-      context, wavefront_size, shape.width, &direct_width_selected));
-  if (!direct_width_selected) {
+  if (!loom_amdgpu_select_direct_subgroup_width(context, wavefront_size,
+                                                shape.width)) {
     return iree_ok_status();
   }
 
@@ -153,21 +151,42 @@ iree_status_t loom_amdgpu_select_kernel_subgroup_shuffle_plan(
     return iree_ok_status();
   }
 
+  const loom_kernel_subgroup_shuffle_mode_t mode =
+      loom_kernel_subgroup_shuffle_mode(source_op);
+  loom_amdgpu_crosslane_kind_t crosslane_kind = LOOM_AMDGPU_CROSSLANE_BPERMUTE;
+  uint32_t crosslane_immediate = 0;
   bool descriptor_present = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-      context, LOOM_AMDGPU_DESCRIPTOR_REF_DS_BPERMUTE_B32,
-      &out_plan->descriptor, &descriptor_present));
+  loom_amdgpu_direct_xor_lane_recipe_t xor_recipe = {0};
+  if (mode == LOOM_KERNEL_SUBGROUP_SHUFFLE_MODE_XOR &&
+      shape.exact_offset != UINT32_MAX &&
+      loom_amdgpu_select_direct_xor_lane_recipe(
+          loom_low_lower_context_descriptor_set(context), shape.width,
+          shape.exact_offset, &xor_recipe)) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(
+        context, xor_recipe.descriptor_ref, &out_plan->descriptor));
+    crosslane_kind = xor_recipe.crosslane_kind;
+    crosslane_immediate = xor_recipe.immediate;
+    descriptor_present = true;
+  }
   if (!descriptor_present) {
-    return iree_ok_status();
+    IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
+        context, LOOM_AMDGPU_DESCRIPTOR_REF_DS_BPERMUTE_B32,
+        &out_plan->descriptor, &descriptor_present));
+    if (!descriptor_present) {
+      return iree_ok_status();
+    }
   }
 
   out_plan->value = value;
+  out_plan->source_offset = loom_kernel_subgroup_shuffle_offset(source_op);
   out_plan->result = loom_kernel_subgroup_shuffle_result(source_op);
   out_plan->valid = loom_kernel_subgroup_shuffle_valid(source_op);
   out_plan->payload_kind = payload_kind;
   out_plan->register_count = register_count;
-  out_plan->mode = loom_kernel_subgroup_shuffle_mode(source_op);
-  out_plan->offset = shape.offset;
+  out_plan->crosslane_kind = crosslane_kind;
+  out_plan->mode = mode;
+  out_plan->crosslane_immediate = crosslane_immediate;
+  out_plan->exact_offset = shape.exact_offset;
   out_plan->width = shape.width;
   out_plan->wavefront_size = wavefront_size;
   *out_selected = true;
@@ -226,24 +245,34 @@ static iree_status_t loom_amdgpu_emit_subgroup_lane_relative_to_width(
 static iree_status_t loom_amdgpu_emit_subgroup_shuffle_index_source_lane(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_subgroup_shuffle_plan_t* plan, loom_value_id_t lane_id,
-    loom_type_t lane_type, loom_value_id_t* out_source_lane) {
+    loom_value_id_t low_source_offset, loom_type_t lane_type,
+    loom_value_id_t* out_source_lane) {
   *out_source_lane = LOOM_VALUE_ID_INVALID;
   if (plan->width == plan->wavefront_size) {
-    return loom_amdgpu_emit_const_u32(context, source_op,
-                                      LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
-                                      plan->offset, lane_type, out_source_lane);
+    if (plan->exact_offset == UINT32_MAX) {
+      *out_source_lane = low_source_offset;
+      return iree_ok_status();
+    }
+    return loom_amdgpu_emit_const_u32(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
+        plan->exact_offset, lane_type, out_source_lane);
   }
 
   loom_value_id_t cluster_base = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_cluster_base(
       context, source_op, plan, lane_id, lane_type, &cluster_base));
-  if (plan->offset == 0) {
+  if (plan->exact_offset == 0) {
     *out_source_lane = cluster_base;
     return iree_ok_status();
   }
+  if (plan->exact_offset == UINT32_MAX) {
+    return loom_amdgpu_emit_vgpr_binary(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_OR_B32, cluster_base,
+        low_source_offset, lane_type, out_source_lane);
+  }
   return loom_amdgpu_emit_vgpr_binary_immediate(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_OR_B32_LIT, cluster_base,
-      plan->offset, lane_type, out_source_lane);
+      plan->exact_offset, lane_type, out_source_lane);
 }
 
 static iree_status_t loom_amdgpu_emit_subgroup_shuffle_source_byte_offset(
@@ -254,13 +283,26 @@ static iree_status_t loom_amdgpu_emit_subgroup_shuffle_source_byte_offset(
   *out_source_byte_offset = LOOM_VALUE_ID_INVALID;
   *out_valid = LOOM_VALUE_ID_INVALID;
 
+  loom_value_id_t low_source_offset = LOOM_VALUE_ID_INVALID;
+  if (plan->exact_offset == UINT32_MAX) {
+    IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
+        context, plan->source_offset, &low_source_offset));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_vgpr_b32(
+        context, source_op, low_source_offset, &low_source_offset));
+  }
+
   if (plan->mode == LOOM_KERNEL_SUBGROUP_SHUFFLE_MODE_INDEX &&
       plan->width == plan->wavefront_size) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_valid_true(
         context, source_op, lane_type, valid_type, out_valid));
+    if (plan->exact_offset == UINT32_MAX) {
+      return loom_amdgpu_emit_subgroup_lane_byte_offset(
+          context, source_op, low_source_offset, lane_type,
+          out_source_byte_offset);
+    }
     return loom_amdgpu_emit_const_u32(
         context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
-        plan->offset * 4u, lane_type, out_source_byte_offset);
+        plan->exact_offset * 4u, lane_type, out_source_byte_offset);
   }
 
   loom_value_id_t lane_id = LOOM_VALUE_ID_INVALID;
@@ -271,32 +313,39 @@ static iree_status_t loom_amdgpu_emit_subgroup_shuffle_source_byte_offset(
   switch (plan->mode) {
     case LOOM_KERNEL_SUBGROUP_SHUFFLE_MODE_INDEX: {
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_shuffle_index_source_lane(
-          context, source_op, plan, lane_id, lane_type, &source_lane));
+          context, source_op, plan, lane_id, low_source_offset, lane_type,
+          &source_lane));
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_valid_true(
           context, source_op, lane_type, valid_type, out_valid));
       break;
     }
     case LOOM_KERNEL_SUBGROUP_SHUFFLE_MODE_XOR:
-      if (plan->offset == 0) {
+      if (plan->exact_offset == 0) {
         source_lane = lane_id;
+      } else if (plan->exact_offset == UINT32_MAX) {
+        IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary(
+            context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_XOR_B32, lane_id,
+            low_source_offset, lane_type, &source_lane));
       } else {
         IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
             context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_XOR_B32_LIT,
-            lane_id, plan->offset, lane_type, &source_lane));
+            lane_id, plan->exact_offset, lane_type, &source_lane));
       }
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_valid_true(
           context, source_op, lane_type, valid_type, out_valid));
       break;
     case LOOM_KERNEL_SUBGROUP_SHUFFLE_MODE_UP: {
+      loom_value_id_t offset = low_source_offset;
+      if (plan->exact_offset != UINT32_MAX) {
+        IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+            context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
+            plan->exact_offset, lane_type, &offset));
+      }
       loom_value_id_t lane_for_compare = lane_id;
       if (plan->width != plan->wavefront_size) {
         IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_lane_relative_to_width(
             context, source_op, plan, lane_id, lane_type, &lane_for_compare));
       }
-      loom_value_id_t offset = LOOM_VALUE_ID_INVALID;
-      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
-          context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
-          plan->offset, lane_type, &offset));
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary(
           context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_SUB_U32, lane_id,
           offset, lane_type, &source_lane));
@@ -306,10 +355,12 @@ static iree_status_t loom_amdgpu_emit_subgroup_shuffle_source_byte_offset(
       break;
     }
     case LOOM_KERNEL_SUBGROUP_SHUFFLE_MODE_DOWN: {
-      loom_value_id_t offset = LOOM_VALUE_ID_INVALID;
-      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
-          context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
-          plan->offset, lane_type, &offset));
+      loom_value_id_t offset = low_source_offset;
+      if (plan->exact_offset != UINT32_MAX) {
+        IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+            context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
+            plan->exact_offset, lane_type, &offset));
+      }
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary(
           context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_U32, lane_id,
           offset, lane_type, &source_lane));
@@ -355,11 +406,16 @@ iree_status_t loom_amdgpu_lower_kernel_subgroup_shuffle(
   IREE_RETURN_IF_ERROR(loom_amdgpu_collective_lookup_payload(
       context, source_op, plan->value, plan->payload_kind, &low_value));
 
-  loom_value_id_t low_source_byte_offset = LOOM_VALUE_ID_INVALID;
   loom_value_id_t low_valid = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_shuffle_source_byte_offset(
-      context, source_op, plan, lane_type, valid_type, &low_source_byte_offset,
-      &low_valid));
+  loom_value_id_t low_source_byte_offset = LOOM_VALUE_ID_INVALID;
+  if (plan->crosslane_kind != LOOM_AMDGPU_CROSSLANE_BPERMUTE) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_valid_true(
+        context, source_op, lane_type, valid_type, &low_valid));
+  } else {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_shuffle_source_byte_offset(
+        context, source_op, plan, lane_type, valid_type,
+        &low_source_byte_offset, &low_valid));
+  }
   IREE_RETURN_IF_ERROR(
       loom_low_lower_bind_value(context, plan->valid, low_valid));
 
@@ -369,14 +425,39 @@ iree_status_t loom_amdgpu_lower_kernel_subgroup_shuffle(
     IREE_RETURN_IF_ERROR(loom_amdgpu_collective_payload_register(
         context, source_op, plan->register_count, low_value, i, lane_type,
         &low_source_register));
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_bpermute_register(
-        context, source_op, &plan->descriptor, low_source_byte_offset,
-        low_source_register, lane_type, &result_registers[i]));
+    switch (plan->crosslane_kind) {
+      case LOOM_AMDGPU_CROSSLANE_DPP:
+      case LOOM_AMDGPU_CROSSLANE_SWIZZLE: {
+        IREE_RETURN_IF_ERROR(loom_amdgpu_emit_direct_crosslane_register(
+            context, source_op, &plan->descriptor, plan->crosslane_kind,
+            low_source_register, plan->crosslane_immediate, lane_type,
+            &result_registers[i]));
+        break;
+      }
+      case LOOM_AMDGPU_CROSSLANE_BPERMUTE: {
+        IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_bpermute_register(
+            context, source_op, &plan->descriptor, low_source_byte_offset,
+            /*static_byte_offset=*/0, low_source_register, lane_type,
+            &result_registers[i]));
+        break;
+      }
+    }
   }
 
   return loom_amdgpu_collective_bind_payload_result(
       context, source_op, plan->result, plan->register_count, result_registers);
 }
+
+void loom_amdgpu_mark_subgroup_shuffle_plan_storage_demands(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_subgroup_shuffle_plan_t* plan) {
+  (void)source_op;
+  loom_low_lower_require_source_value_storage(context, plan->value);
+  if (plan->exact_offset == UINT32_MAX) {
+    loom_low_lower_require_source_value_storage(context, plan->source_offset);
+  }
+}
+
 iree_status_t loom_amdgpu_low_legality_verify_kernel_subgroup_shuffle(
     const loom_target_low_legality_provider_t* provider,
     loom_target_low_legality_context_t* context, const loom_op_t* op,
@@ -398,9 +479,7 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_subgroup_shuffle(
                                            IREE_SV("subgroup_shuffle.payload"));
   }
 
-  uint32_t wavefront_size = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_target_wavefront_size(bundle, &wavefront_size));
+  const uint32_t wavefront_size = loom_amdgpu_target_wavefront_size(bundle);
   if (!loom_amdgpu_wavefront_size_is_valid(wavefront_size)) {
     return loom_amdgpu_low_legality_reject(
         context, op, IREE_SV("subgroup_shuffle.wavefront_size"));
@@ -428,6 +507,15 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_subgroup_shuffle(
         loom_amdgpu_subgroup_shuffle_shape_failure_key(shape_failure));
   }
 
+  loom_amdgpu_direct_xor_lane_recipe_t unused_xor_recipe = {0};
+  if (loom_kernel_subgroup_shuffle_mode(op) ==
+          LOOM_KERNEL_SUBGROUP_SHUFFLE_MODE_XOR &&
+      shape.exact_offset != UINT32_MAX &&
+      loom_amdgpu_select_direct_xor_lane_recipe(
+          loom_target_low_legality_descriptor_set(context), shape.width,
+          shape.exact_offset, &unused_xor_recipe)) {
+    return iree_ok_status();
+  }
   return loom_amdgpu_low_legality_verify_descriptor_requirement(
       context, op, LOOM_AMDGPU_DESCRIPTOR_REF_DS_BPERMUTE_B32,
       IREE_SV("descriptor.ds_bpermute_b32"));

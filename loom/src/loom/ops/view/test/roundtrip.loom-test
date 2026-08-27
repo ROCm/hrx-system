@@ -12,10 +12,10 @@ func.def @dense_view(%buffer: buffer, %offset: offset, %m: index) {
 
 // Scratch roots carry explicit memory-space and root-alignment facts.
 func.def @workgroup_scratch_view(%bytes: offset) {
-  %zero = index.constant 0 : offset
+  %base = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
-  %view = buffer.view %scratch[%zero] : buffer -> view<16xf32, %layout>
+  %scratch = buffer.alloca<workgroup> align(64) %bytes : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<16xf32, %layout>
   test.use %view : view<16xf32, %layout>
   func.return
 }
@@ -91,7 +91,8 @@ func.def @scalar_view_atomics(%buffer: buffer, %offset: offset, %row: index, %co
   %oldi = view.atomic.rmw<xchgi> %ivalue, %iview[0, %col] {ordering = acq_rel, scope = system} : i32, view<8x16xi32, %layout> -> i32
   %oldf = view.atomic.rmw<addf> %fvalue, %fview[%row, %col] {ordering = seq_cst, scope = device} : f32, view<8x16xf32, %layout> -> f32
   %cmp = view.atomic.cmpxchg %ivalue, %ivalue, %iview[%row, %col] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : i32, view<8x16xi32, %layout> -> i32
-  test.use %oldi, %oldf, %cmp : i32, f32, i32
+  %cmpf = view.atomic.cmpxchg %fvalue, %fvalue, %fview[%row, %col] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : f32, view<8x16xf32, %layout> -> f32
+  test.use %oldi, %oldf, %cmp, %cmpf : i32, f32, i32, f32
   func.return
 }
 
@@ -99,10 +100,10 @@ func.def @scalar_view_atomics(%buffer: buffer, %offset: offset, %row: index, %co
 
 // Encoded physical storage composes an address layout with a storage schema.
 // Loads from this view still produce physical i8 records; decode is explicit.
-func.def @encoded_physical_storage_view(%buffer: buffer, %offset: offset, %m: index, %kb: index) {
+func.def @encoded_storage_view(%buffer: buffer, %offset: offset, %m: index, %kb: index) {
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
-  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %view = buffer.view %buffer[%offset] : buffer -> view<[%m]x[%kb]x18xi8, %storage>
   test.use %view : view<[%m]x[%kb]x18xi8, %storage>
   func.return

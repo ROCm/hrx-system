@@ -17,6 +17,40 @@ package(
 )
 
 loom_cc_library(
+    name = "allocation_checker",
+    testonly = True,
+    srcs = ["allocation_checker.c"],
+    hdrs = ["allocation_checker.h"],
+    deps = [
+        "//loom/src/loom/analysis:liveness",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:placement",
+        "//loom/src/loom/codegen/low:storage_lease",
+        "//loom/src/loom/codegen/low/allocation:assignment",
+        "//loom/src/loom/codegen/low/allocation:live_range",
+        "//loom/src/loom/codegen/low/allocation:storage",
+        "//loom/src/loom/target:registers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "allocation_checker_test",
+    srcs = ["allocation_checker_test.cc"],
+    deps = [
+        ":allocation_checker",
+        "//loom/src/loom/analysis:liveness",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:placement",
+        "//loom/src/loom/codegen/low/allocation:assignment",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "descriptors_verify",
     testonly = True,
     srcs = ["descriptors_verify.c"],
@@ -68,6 +102,7 @@ loom_cc_library(
     srcs = ["source_workload_pipeline.c"],
     hdrs = ["source_workload_pipeline.h"],
     deps = [
+        ":allocation_checker",
         ":source_workload",
         "//loom/src/loom/codegen/low:frame",
         "//loom/src/loom/codegen/low:function",

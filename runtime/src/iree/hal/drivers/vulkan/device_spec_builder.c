@@ -8,20 +8,27 @@
 
 #include <string.h>
 
+#include "iree/hal/drivers/vulkan/atomic.h"
+
 IREE_API_EXPORT iree_status_t iree_hal_vulkan_device_spec_builder_add_facet(
     iree_hal_device_spec_builder_t* builder,
-    const iree_hal_vulkan_device_spec_t* spec) {
+    const iree_hal_vulkan_device_spec_t* spec,
+    iree_host_size_t cooperative_matrix_property_count,
+    const iree_hal_vulkan_cooperative_matrix_property_t*
+        cooperative_matrix_properties) {
   IREE_ASSERT_ARGUMENT(builder);
   IREE_ASSERT_ARGUMENT(spec);
 
-  const iree_host_size_t payload_size =
-      iree_hal_vulkan_device_spec_payload_size();
+  iree_host_size_t payload_size = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_device_spec_calculate_payload_size(
+      cooperative_matrix_property_count, &payload_size));
   uint8_t* payload_storage = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       builder->host_allocator, payload_size, (void**)&payload_storage));
 
   iree_status_t status = iree_hal_vulkan_device_spec_encode(
-      spec, iree_make_byte_span(payload_storage, payload_size));
+      spec, cooperative_matrix_property_count, cooperative_matrix_properties,
+      iree_make_byte_span(payload_storage, payload_size));
   if (iree_status_is_ok(status)) {
     iree_hal_device_spec_facet_t facet = {
         .schema_id =
@@ -212,6 +219,7 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_memory(
               iree_hal_vulkan_device_spec_memory_access(allocator_heap),
           .minimum_alignment = allocator_heap->min_alignment,
           .optimal_transfer_granularity = 1,
+          .atomic_operations = allocator_heap->atomic_operations,
           .flags = IREE_HAL_MEMORY_TYPE_SPEC_FLAG_NONE,
       };
     }
@@ -267,8 +275,7 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_virtual_memory(
   iree_hal_buffer_params_t buffer_params = {
       .type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE |
               IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
-               IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE,
       .access = IREE_HAL_MEMORY_ACCESS_ALL,
   };
   iree_device_size_t minimum_page_size = 0;
@@ -353,30 +360,62 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_queues(
     iree_hal_device_spec_builder_t* builder) {
   const iree_hal_vulkan_queue_assignment_t* queue_assignment =
       &params->device_plan->queue_assignment;
-  const uint32_t timestamp_valid_bits =
-      iree_hal_vulkan_device_spec_queue_timestamp_valid_bits(queue_assignment);
-  iree_hal_queue_family_role_flags_t role_flags =
-      IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
-      IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER;
-  if (timestamp_valid_bits != 0) {
-    role_flags |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_PROFILING;
-  }
-  iree_hal_queue_family_spec_t queue_family = {
-      .name = IREE_SV("default"),
-      .queue_count = (uint32_t)queue_assignment->queue_count,
-      .priority_count = 1,
-      .timestamp_valid_bits = timestamp_valid_bits,
-      .timestamp_frequency_hz =
-          iree_hal_vulkan_device_spec_timestamp_frequency_hz(
-              params->physical_device->properties2.properties.limits
-                  .timestampPeriod),
-      .physical_device_affinity = 1ull,
-      .role_flags = role_flags,
-      .flags = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_NONE,
+  const iree_hal_atomic_capabilities_t atomic_capabilities =
+      iree_hal_vulkan_atomic_capabilities(
+          params->device_plan->enabled_features);
+  const iree_hal_vulkan_queue_selection_t* queue_selections[] = {
+      &queue_assignment->compute,
+      &queue_assignment->transfer,
   };
+  const iree_string_view_t queue_names[] = {
+      IREE_SV("compute"),
+      IREE_SV("transfer"),
+  };
+  iree_hal_queue_family_spec_t queue_families[IREE_ARRAYSIZE(queue_selections)];
+  const uint64_t timestamp_frequency_hz =
+      iree_hal_vulkan_device_spec_timestamp_frequency_hz(
+          params->physical_device->properties2.properties.limits
+              .timestampPeriod);
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(queue_selections); ++i) {
+    const iree_hal_vulkan_queue_selection_t* queue = queue_selections[i];
+    iree_hal_queue_family_role_flags_t role_flags =
+        IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_HOST_CALL;
+    if (iree_all_bits_set(queue->flags, VK_QUEUE_COMPUTE_BIT)) {
+      role_flags |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH;
+    }
+    if (iree_all_bits_set(queue->flags, VK_QUEUE_TRANSFER_BIT)) {
+      role_flags |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER;
+    }
+    if (queue->timestamp_valid_bits != 0) {
+      role_flags |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_PROFILING;
+    }
+    const bool supports_atomics =
+        iree_all_bits_set(queue->flags, VK_QUEUE_COMPUTE_BIT) &&
+        (atomic_capabilities.operations.device_scope_32 != 0 ||
+         atomic_capabilities.operations.device_scope_64 != 0 ||
+         atomic_capabilities.operations.system_scope_32 != 0 ||
+         atomic_capabilities.operations.system_scope_64 != 0);
+    if (supports_atomics) {
+      role_flags |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC;
+    }
+    queue_families[i] = (iree_hal_queue_family_spec_t){
+        .name = queue_names[i],
+        .queue_count = 1,
+        .priority_count = 1,
+        .timestamp_valid_bits = queue->timestamp_valid_bits,
+        .timestamp_frequency_hz = timestamp_frequency_hz,
+        .physical_device_affinity = 1ull,
+        .queue_affinity = queue->affinity,
+        .role_flags = role_flags,
+        .flags = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_NONE,
+    };
+    if (supports_atomics) {
+      queue_families[i].atomic_capabilities = atomic_capabilities;
+    }
+  }
   iree_hal_device_queue_spec_t queues = {
-      .family_count = 1,
-      .families = &queue_family,
+      .family_count = IREE_ARRAYSIZE(queue_families),
+      .families = queue_families,
       .flags = IREE_HAL_DEVICE_QUEUE_SPEC_FLAG_NONE,
   };
   return iree_hal_device_spec_builder_set_queues(builder, &queues);
@@ -499,49 +538,76 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_executables(
           IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES)) {
     return iree_ok_status();
   }
-  iree_hal_executable_format_spec_t executable_format = {
-      .format = IREE_SV("vulkan-spirv-bda"),
-      .caching_modes = IREE_HAL_EXECUTABLE_CACHING_MODE_NONE,
-      .flags = IREE_HAL_EXECUTABLE_FORMAT_SPEC_FLAG_NONE,
-  };
   iree_hal_executable_target_t executable_target = {
       .family = IREE_SV("spirv"),
-      .architecture = IREE_SV("vulkan"),
-      .processor = IREE_SV("vulkan1.3"),
-      .features = IREE_SV("bda"),
-      .artifact_format = IREE_SV("vulkan-spirv-bda"),
-      .runtime_abi = IREE_SV("iree-hal"),
-      .loader_namespace = IREE_SV("vulkan"),
-      .loader_target = IREE_SV("vulkan-spirv-bda"),
-      .metadata_schema = IREE_SV("iree.hal.vulkan.spirv.bda"),
-      .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
-      .priority = 100,
+      .target_key = IREE_SV("vulkan1.3+bda"),
+      .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC,
+      .priority = 50,
       .physical_device_affinity = 1ull,
       .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
   };
-  iree_hal_device_executable_spec_t executables = {
-      .format_count = 1,
-      .formats = &executable_format,
-      .target_count = 1,
-      .targets = &executable_target,
-      .flags = IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
-  };
-  return iree_hal_device_spec_builder_set_executables(builder, &executables);
+  return iree_hal_device_spec_builder_add_executable_target(builder,
+                                                            &executable_target);
 }
 
 static iree_status_t iree_hal_vulkan_device_spec_populate_facet(
     const iree_hal_vulkan_device_spec_params_t* params,
     iree_hal_device_spec_builder_t* builder) {
-  const VkPhysicalDeviceProperties* properties =
+  const VkPhysicalDeviceProperties* physical_device_properties =
       &params->physical_device->properties2.properties;
   iree_hal_vulkan_device_spec_t vulkan_spec = {
-      .api_version = properties->apiVersion,
-      .driver_version = properties->driverVersion,
-      .physical_device_type = properties->deviceType,
+      .api_version = physical_device_properties->apiVersion,
+      .driver_version = physical_device_properties->driverVersion,
+      .physical_device_type = physical_device_properties->deviceType,
       .enabled_features = params->device_plan->enabled_features,
       .flags = IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_NONE,
   };
-  return iree_hal_vulkan_device_spec_builder_add_facet(builder, &vulkan_spec);
+
+  iree_host_size_t property_count = 0;
+  const VkCooperativeMatrixPropertiesKHR* source_properties = NULL;
+  if (iree_all_bits_set(params->device_plan->enabled_features,
+                        IREE_HAL_VULKAN_FEATURE_ENABLE_COOPERATIVE_MATRIX)) {
+    property_count = params->physical_device->cooperative_matrix_property_count;
+    source_properties =
+        params->physical_device->cooperative_matrix_property_rows;
+    if (IREE_UNLIKELY(property_count != 0 && !source_properties)) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "Vulkan cooperative matrix support has %" PRIhsz
+                              " property rows but no retained row storage",
+                              property_count);
+    }
+  }
+
+  iree_hal_vulkan_cooperative_matrix_property_t* cooperative_matrix_properties =
+      NULL;
+  iree_status_t status = iree_ok_status();
+  if (property_count != 0) {
+    status =
+        iree_allocator_malloc_array(builder->host_allocator, property_count,
+                                    sizeof(*cooperative_matrix_properties),
+                                    (void**)&cooperative_matrix_properties);
+  }
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < property_count; ++i) {
+      cooperative_matrix_properties[i] =
+          (iree_hal_vulkan_cooperative_matrix_property_t){
+              .m_size = source_properties[i].MSize,
+              .n_size = source_properties[i].NSize,
+              .k_size = source_properties[i].KSize,
+              .a_type = source_properties[i].AType,
+              .b_type = source_properties[i].BType,
+              .c_type = source_properties[i].CType,
+              .result_type = source_properties[i].ResultType,
+              .saturating_accumulation =
+                  source_properties[i].saturatingAccumulation,
+              .scope = source_properties[i].scope,
+          };
+    }
+    status = iree_hal_vulkan_device_spec_builder_add_facet(
+        builder, &vulkan_spec, property_count, cooperative_matrix_properties);
+  }
+  iree_allocator_free(builder->host_allocator, cooperative_matrix_properties);
+  return status;
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_vulkan_device_spec_create(

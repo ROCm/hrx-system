@@ -12,15 +12,21 @@
 #include "iree/base/api.h"
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/allocation/assignment.h"
+#include "loom/codegen/low/allocation/move.h"
+#include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/placement.h"
 #include "loom/codegen/low/storage_lease.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/ir/ir.h"
+#include "loom/util/cfg_graph.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+typedef struct loom_low_allocation_storage_lease_unit_index_t
+    loom_low_allocation_storage_lease_unit_index_t;
 
 typedef enum loom_low_allocation_remark_kind_e {
   // Unknown or uninitialized remark kind.
@@ -141,9 +147,11 @@ typedef struct loom_low_allocation_spill_plan_t {
   uint32_t byte_size;
   // Required slot alignment in bytes.
   uint32_t byte_alignment;
-  // Predicted stores needed by the current synthetic spill plan.
+  // Predicted stores needed by the current synthetic spill plan. Actual
+  // materialization may differ after earlier spill rewrites in the same frame.
   uint32_t store_count;
-  // Predicted operand-use reloads in the current synthetic spill plan.
+  // Predicted operand-use reloads in the current synthetic spill plan. Actual
+  // materialization may differ after earlier spill rewrites in the same frame.
   uint32_t reload_count;
 } loom_low_allocation_spill_plan_t;
 
@@ -182,61 +190,30 @@ typedef struct loom_low_allocation_edge_copy_t {
   uint32_t unit_count;
 } loom_low_allocation_edge_copy_t;
 
-// Scratch unit reserved for sequencing cyclic edge-copy moves.
-typedef struct loom_low_allocation_edge_copy_temporary_t {
-  // Storage class of the cyclic move set.
-  loom_liveness_value_class_t value_class;
-  // Descriptor-set-local register class ID for |value_class|.
-  uint16_t descriptor_reg_class_id;
-  // Target-visible scratch location kind.
-  loom_low_allocation_location_kind_t location_kind;
-  // Physical register, target ID, or spill slot ordinal used as scratch.
-  uint32_t location;
-} loom_low_allocation_edge_copy_temporary_t;
-
-// Scratch unit reserved for sequencing one cyclic packet-local move set.
-typedef struct loom_low_allocation_packet_move_temporary_t {
-  // Storage class of the cyclic move set.
-  loom_liveness_value_class_t value_class;
-  // Descriptor-set-local register class ID for |value_class|.
-  uint16_t descriptor_reg_class_id;
-  // Target-visible scratch location kind.
-  loom_low_allocation_location_kind_t location_kind;
-  // Physical register, target ID, or spill slot ordinal used as scratch.
-  uint32_t location;
-} loom_low_allocation_packet_move_temporary_t;
-
 // Contiguous edge-copy group for one low.br terminator.
 typedef struct loom_low_allocation_edge_copy_group_t {
   // low.br terminator that owns this outgoing edge.
   const loom_op_t* terminator_op;
   // Source-order ordinal of |terminator_op| in its low function body.
   uint32_t source_ordinal;
-  // Program point where the edge copies execute before |terminator_op|.
-  uint32_t program_point;
   // First edge-copy record for |terminator_op|.
-  uint32_t copy_start;
+  iree_host_size_t copy_start;
   // Number of edge-copy records for |terminator_op|.
-  uint32_t copy_count;
-  // First temporary record reserved for |terminator_op|.
-  uint32_t temporary_start;
-  // Number of temporary records reserved for |terminator_op|.
-  uint32_t temporary_count;
+  iree_host_size_t copy_count;
+  // Final sequential physical moves emitted before |terminator_op|.
+  loom_low_move_group_t move_group;
 } loom_low_allocation_edge_copy_group_t;
 
-// Scratch-unit group for one packet-local parallel move operation.
-typedef struct loom_low_allocation_packet_move_temporary_group_t {
-  // low.copy, low.slice, or low.concat operation that owns the move set.
-  const loom_op_t* op;
-  // Source-order ordinal of |op| in its low function body.
+// Final move group for one materialized packet-local parallel move operation.
+typedef struct loom_low_allocation_packet_move_group_t {
+  // Source-order ordinal of the owning low.copy, low.move, low.slice, or
+  // low.concat.
   uint32_t source_ordinal;
-  // Program point where the packet-local moves execute.
-  uint32_t program_point;
-  // First scratch record for |op|.
-  uint32_t temporary_start;
-  // Number of scratch records reserved for |op|.
-  uint32_t temporary_count;
-} loom_low_allocation_packet_move_temporary_group_t;
+  // Structural placement cause that produced the move group.
+  loom_low_placement_cause_t cause;
+  // Final sequential physical moves emitted by the owning operation.
+  loom_low_move_group_t move_group;
+} loom_low_allocation_packet_move_group_t;
 
 // Assignment-backed storage lease over target-visible physical units.
 //
@@ -281,6 +258,10 @@ typedef struct loom_low_allocation_table_t {
   loom_liveness_analysis_t liveness;
   // Placement relations consumed while assigning intervals.
   loom_low_placement_table_t placement;
+  // Resolved fixed SSA value locations consumed by this allocation.
+  const loom_low_allocation_resolved_fixed_value_t* fixed_values;
+  // Number of records in |fixed_values|.
+  iree_host_size_t fixed_value_count;
   // Allocation mode requested on the low function, or 0 for the default.
   uint8_t allocation_mode;
   // Number of error diagnostics emitted while attempting allocation.
@@ -289,13 +270,23 @@ typedef struct loom_low_allocation_table_t {
   const loom_low_allocation_assignment_t* assignments;
   // Number of records in |assignments|.
   iree_host_size_t assignment_count;
+  // Dense physical extents retained from assignment and move planning.
+  struct {
+    // Maximum one-past-last assigned or move-scratch location indexed by
+    // descriptor register class ID.
+    const uint32_t* ends_by_reg_class;
+    // Number of entries in |ends_by_reg_class|.
+    iree_host_size_t count;
+  } physical_extents;
   // Assignment indices by liveness local value ordinal. Entries without an
   // assignment contain UINT32_MAX.
   const uint32_t* assignment_indices_by_value_ordinal;
+  // First live storage program point for each assigned unit.
+  const uint32_t* unit_start_points;
   // One-past-last live program point for each assigned unit.
   const uint32_t* unit_end_points;
-  // Number of records in |unit_end_points|.
-  iree_host_size_t unit_end_point_count;
+  // Number of records in |unit_start_points| and |unit_end_points|.
+  iree_host_size_t unit_point_count;
   // Spill materialization plans in assignment order.
   const loom_low_allocation_spill_plan_t* spill_plans;
   // Number of records in |spill_plans|.
@@ -318,25 +309,26 @@ typedef struct loom_low_allocation_table_t {
   const loom_low_allocation_edge_copy_group_t* edge_copy_groups;
   // Number of records in |edge_copy_groups|.
   iree_host_size_t edge_copy_group_count;
-  // Scratch units reserved for cyclic edge-copy groups.
-  const loom_low_allocation_edge_copy_temporary_t* edge_copy_temporaries;
-  // Number of records in |edge_copy_temporaries|.
-  iree_host_size_t edge_copy_temporary_count;
-  // Per-packet groups indexing |packet_move_temporaries|.
-  const loom_low_allocation_packet_move_temporary_group_t*
-      packet_move_temporary_groups;
-  // Number of records in |packet_move_temporary_groups|.
-  iree_host_size_t packet_move_temporary_group_count;
-  // Scratch units reserved for cyclic packet-local move groups.
-  const loom_low_allocation_packet_move_temporary_t* packet_move_temporaries;
-  // Number of records in |packet_move_temporaries|.
-  iree_host_size_t packet_move_temporary_count;
+  // Packet-local move groups in source order.
+  const loom_low_allocation_packet_move_group_t* packet_move_groups;
+  // Number of records in |packet_move_groups|.
+  iree_host_size_t packet_move_group_count;
+  // Final sequential physical move rows shared by all move groups.
+  const loom_low_move_t* moves;
+  // Indices into |moves| for the first row writing each cycle-scratch location.
+  const iree_host_size_t* scratch_move_indices;
+  // Number of final move rows across packet-local move groups.
+  iree_host_size_t packet_move_count;
   // Target storage-lease facts consumed by this allocation.
   loom_low_storage_lease_table_t storage_leases;
   // Assignment-backed storage-lease records in storage-lease table order.
   const loom_low_allocation_storage_lease_t* storage_lease_instances;
   // Number of records in |storage_lease_instances|.
   iree_host_size_t storage_lease_instance_count;
+  // Physical-unit index over |storage_lease_instances| retained from
+  // allocation, or NULL when no register-like leases were materialized.
+  const loom_low_allocation_storage_lease_unit_index_t*
+      storage_lease_unit_index;
   // Allocator-requested storage release actions in allocation order.
   const loom_low_storage_release_action_t* storage_release_actions;
   // Number of records in |storage_release_actions|.
@@ -347,6 +339,14 @@ typedef struct loom_low_allocation_table_t {
   iree_host_size_t coalesced_copy_count;
   // Number of low.copy ops that must remain materialized.
   iree_host_size_t materialized_copy_count;
+  // Resolved whole-function target-owned location ranges.
+  const loom_low_allocation_resolved_reserved_range_t* reserved_ranges;
+  // Number of records in |reserved_ranges|.
+  iree_host_size_t reserved_range_count;
+  // Function CFG used to construct this allocation. Its block adjacency
+  // remains valid while spill materialization rewrites branch payloads without
+  // changing topology; edge terminator pointers remain snapshot facts.
+  loom_cfg_graph_t cfg_graph;
 } loom_low_allocation_table_t;
 
 // Active allocation-owned lease over the module value-ordinal scratch map.
@@ -401,10 +401,10 @@ const loom_low_allocation_edge_copy_group_t*
 loom_low_allocation_find_edge_copy_group_by_source_ordinal(
     const loom_low_allocation_table_t* table, uint32_t source_ordinal);
 
-// Finds the packet-local move temporary group for the source-order node, or
-// NULL when the node has no cyclic packet-local move set.
-const loom_low_allocation_packet_move_temporary_group_t*
-loom_low_allocation_find_packet_move_temporary_group_by_source_ordinal(
+// Finds the materialized packet-local move group for the source-order node, or
+// NULL when the node emits no final moves.
+const loom_low_allocation_packet_move_group_t*
+loom_low_allocation_find_packet_move_group_by_source_ordinal(
     const loom_low_allocation_table_t* table, uint32_t source_ordinal);
 
 // Resolves the descriptor-set register class spelling for |assignment|.

@@ -15,6 +15,7 @@ import pytest
 # dialect imports belong in dialect-specific importer/builder coverage, not here.
 import loom
 import loom.dialect as dialect
+from loom.assembly import Attr
 from loom.builder import ValueRef, tied
 from loom.builders import LoomBuilder, module_builder
 from loom.builtin_types import ALL_BUILTIN_TYPES
@@ -22,16 +23,26 @@ from loom.dialect import vector
 from loom.dialect.globals import ALL_GLOBAL_OPS
 from loom.dialect.pass_ import ALL_PASS_OPS
 from loom.dialect.scf import ALL_SCF_OPS
-from loom.dialect.test import ALL_TEST_OPS
+from loom.dialect.test import (
+    ALL_TEST_OPS,
+    test_options_attr,
+    test_tile_attr,
+)
+from loom.dsl import AttrDef, Dialect, EnumCase, EnumDef, Op, Result, TypeConstraint
 from loom.format.text.printer import Printer
 from loom.ir import (
     F32,
     I32,
     INDEX,
     Block,
+    EnumArrayAttr,
     OpaqueLocation,
+    ParameterizedAttrArray,
     ShapedType,
+    SignedEnumSetAttr,
     StaticDim,
+    SymbolName,
+    SymbolNameArray,
     TypeKind,
 )
 
@@ -67,6 +78,7 @@ def test_default_dynamic_builder_registers_all_dialects() -> None:
     assert result.name == "c0"
     assert builder.vector.name == "vector"
     assert builder.scf.name == "scf"
+    assert builder.command.name == "command"
 
 
 def test_dynamic_builder_constructs_binary_op_with_result_name() -> None:
@@ -81,6 +93,159 @@ def test_dynamic_builder_constructs_binary_op_with_result_name() -> None:
     assert len(block.ops) == 1
     assert block.ops[0].name == "test.addi"
     assert block.ops[0].operands == [lhs.id, rhs.id]
+
+
+def test_dynamic_builder_synthesizes_exact_result_type() -> None:
+    op = Op(
+        "fixed.result",
+        group=Dialect("fixed"),
+        results=[Result("result", TypeConstraint.I32)],
+        format=[],
+    )
+    block = Block()
+    _module, builder = module_builder(insertion_block=block, ops=[op])
+
+    result = builder.fixed.result(name="order")
+
+    assert isinstance(result, ValueRef)
+    assert result.name == "order"
+    assert result.type == I32
+
+
+def test_dynamic_builder_inserts_module_scope_operation_without_block() -> None:
+    module, builder = module_builder(ops=ALL_TEST_OPS)
+
+    builder.test.module_metadata()
+
+    assert [operation.name for operation in module.body.ops] == ["test.module_metadata"]
+    assert not module.symbols
+
+
+def test_dynamic_builder_root_routes_module_scope_operation_from_block() -> None:
+    block = Block()
+    module, builder = module_builder(insertion_block=block, ops=ALL_TEST_OPS)
+
+    builder.test.module_metadata()
+
+    assert [operation.name for operation in module.body.ops] == ["test.module_metadata"]
+    assert not block.ops
+
+
+def test_dynamic_builder_resolves_enum_array_values_and_presence() -> None:
+    block, builder = _builder()
+
+    builder.test.enum_array_attrs(
+        required_values=["low", "high", "low"],
+        optional_values=["middle", 42],
+    )
+    builder.test.enum_array_attrs(
+        required_values=[],
+        optional_values=[],
+    )
+    builder.test.enum_array_attrs(required_values=["middle"])
+
+    first = block.ops[0].attributes
+    assert first["required_values"] == EnumArrayAttr([1, 255, 1])
+    assert first["optional_values"] == EnumArrayAttr([7, 42])
+    second = block.ops[1].attributes
+    assert second["required_values"] == EnumArrayAttr()
+    assert second["optional_values"] == EnumArrayAttr()
+    assert "optional_values" not in block.ops[2].attributes
+
+
+def test_dynamic_builder_normalizes_symbol_arrays_and_presence() -> None:
+    block, builder = _builder()
+
+    builder.test.symbol_array_attrs(
+        dependencies=["b", "a", "b"],
+        available=["a"],
+    )
+    builder.test.symbol_array_attrs(dependencies=[], available=[])
+    builder.test.symbol_array_attrs(dependencies=["a"])
+
+    first = block.ops[0].attributes
+    assert first["dependencies"] == SymbolNameArray(
+        [SymbolName("b"), SymbolName("a"), SymbolName("b")]
+    )
+    assert first["available"] == SymbolNameArray([SymbolName("a")])
+    second = block.ops[1].attributes
+    assert second["dependencies"] == SymbolNameArray()
+    assert second["available"] == SymbolNameArray()
+    assert "available" not in block.ops[2].attributes
+
+
+def test_dynamic_builder_rejects_symbol_sigil_in_symbol_array() -> None:
+    _block, builder = _builder()
+
+    with pytest.raises(ValueError, match="must not include '@'"):
+        builder.test.symbol_array_attrs(dependencies=["@record"])
+
+
+def test_dynamic_builder_rejects_undeclared_closed_enum_array_value() -> None:
+    _block, builder = _builder()
+
+    with pytest.raises(ValueError, match="undeclared value 42"):
+        builder.test.enum_array_attrs(required_values=[42])
+
+
+def test_dynamic_builder_normalizes_signed_enum_set_assertions() -> None:
+    feature = EnumDef(
+        "Feature",
+        [EnumCase("low", 1), EnumCase("middle", 7), EnumCase("high", 255)],
+    )
+    op = Op(
+        "signed.features",
+        group=Dialect("signed"),
+        attrs=[AttrDef("features", "signed_enum_set", enum_def=feature)],
+        format=[Attr("features")],
+    )
+    block = Block()
+    _module, builder = module_builder(insertion_block=block, ops=[op])
+
+    builder.signed.features(features={"high": True, "low": False, 7: True})
+
+    assert block.ops[0].attributes["features"] == SignedEnumSetAttr([7, 255], [1])
+
+
+def test_dynamic_builder_rejects_invalid_signed_enum_set_assertions() -> None:
+    feature = EnumDef("Feature", [EnumCase("low", 1)])
+    op = Op(
+        "signed.features",
+        group=Dialect("signed"),
+        attrs=[AttrDef("features", "signed_enum_set", enum_def=feature)],
+        format=[Attr("features")],
+    )
+    _module, builder = module_builder(ops=[op])
+
+    with pytest.raises(ValueError, match="undeclared value 7"):
+        builder.signed.features(features={7: True})
+    with pytest.raises(TypeError, match="must be a Boolean"):
+        builder.signed.features(features={"low": 1})
+
+
+def test_dynamic_builder_normalizes_parameterized_attribute_arrays() -> None:
+    block, builder = _builder()
+    tile = test_tile_attr(width=8)
+    options = test_options_attr(mode="fast")
+
+    builder.test.parameterized_attr_array(
+        values=[tile, options, tile],
+        tiles=[tile],
+    )
+
+    op = block.ops[0]
+    assert op.attributes["values"] == ParameterizedAttrArray([tile, options, tile])
+    assert op.attributes["tiles"] == ParameterizedAttrArray([tile])
+
+
+def test_dynamic_builder_rejects_wrong_exact_array_family() -> None:
+    _block, builder = _builder()
+
+    with pytest.raises(ValueError, match=r"element 0 has family 'test\.options'"):
+        builder.test.parameterized_attr_array(
+            values=[],
+            tiles=[test_options_attr(mode="fast")],
+        )
 
 
 def test_dynamic_builder_records_segmented_operand_counts() -> None:

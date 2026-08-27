@@ -1,23 +1,23 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_global_atomic.loom-test
 // RUN: emit source-low output=low
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @global_atomic_add_i32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%input: buffer) {
   %tid = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
-  %view = buffer.view %global[%zero] : buffer -> view<64xi32, #dense>
-  %one = scalar.constant 1 : i32
-  view.atomic.reduce<addi> %one, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense>
-  %old = view.atomic.rmw<addi> %one, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense> -> i32
+  %view = buffer.view %global[%buffer_base] : buffer -> view<64xi32>
+  %increment = scalar.constant 1 : i32
+  view.atomic.reduce<addi> %increment, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32>
+  %old = view.atomic.rmw<addi> %increment, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32> -> i32
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_add_i32() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_add_i32() asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %11 = v_mov_b32 0
   %12 = s_mov_b32 0
@@ -27,7 +27,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_add_i32() 
   %23 = s_and_b32 %21, %22
   %24 = concat(%20, %23) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %25 = s_mov_b32 256
-  %26 = s_mov_b32 822243328
+  %26 = s_mov_b32 822173696
   %27 = concat(%24, %25, %26) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %14 = v_mov_b32 1
   buffer_atomic_add_u32 %14, %27, %11, %12
@@ -38,62 +38,163 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_add_i32() 
 
 // ====
 
-amdgpu.target<gfx1100> @target
-kernel.def target(@target) @global_atomic_add_f32() {
+amdgpu.target<gfx11-generic> @target
+kernel.def target(@target) @global_atomic_add_i64() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%input: buffer) {
   %tid = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
-  %view = buffer.view %global[%zero] : buffer -> view<64xf32, #dense>
-  %one = scalar.constant 1.0 : f32
-  view.atomic.reduce<addf> %one, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32, #dense>
-  %old = view.atomic.rmw<addf> %one, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32, #dense> -> f32
+  %view = buffer.view %global[%buffer_base] : buffer -> view<64xi64>
+  %increment = scalar.constant 1 : i64
+  view.atomic.reduce<addi> %increment, %view[%tid] {ordering = relaxed, scope = device} : i64, view<64xi64>
+  %old = view.atomic.rmw<addi> %increment, %view[%tid] {ordering = relaxed, scope = device} : i64, view<64xi64> -> i64
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_add_f32() asm<amdgpu.rdna3.core> {
-  %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
-  %one = v_mov_b32 1065353216
-  %11 = v_mov_b32 0
-  %12 = s_mov_b32 0
-  %19 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %20 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %21 = s_mov_b32 65535
-  %22 = s_and_b32 %20, %21
-  %23 = concat(%19, %22) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %24 = s_mov_b32 256
-  %25 = s_mov_b32 822243328
-  %26 = concat(%23, %24, %25) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
-  buffer_atomic_add_f32 %one, %26, %11, %12
-  %17 = v_mov_b32 1065353216
-  %old = buffer_atomic_add_f32_rtn %17, %26, %11, %12
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_add_i64() asm {
+  %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %13 = v_mov_b32 0
+  %14 = v_mov_b32 1
+  %16 = concat(%14, %13) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_atomic_add_u64_saddr %13, %16, %view
+  %20 = concat(%14, %13) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %old = global_atomic_add_u64_rtn_saddr %13, %20, %view
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
+kernel.def target(@target) @global_atomic_dynamic_add_i64() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer, %value: i64) {
+  %tid = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %view = buffer.view %global[%buffer_base] : buffer -> view<64xi64>
+  %old = view.atomic.rmw<addi> %value, %view[%tid] {ordering = relaxed, scope = device} : i64, view<64xi64> -> i64
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_dynamic_add_i64(%value: reg<amdgpu.sgpr x2>) asm {
+  %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %11 = v_mov_b32 0
+  %12 = slice %value[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %13 = v_mov_b32_copy %12
+  %14 = slice %value[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %15 = v_mov_b32_copy %14
+  %16 = concat(%13, %15) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %old = global_atomic_add_u64_rtn_saddr %11, %16, %view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+kernel.def target(@target) @global_atomic_add_f32() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %view = buffer.view %global[%buffer_base] : buffer -> view<64xf32>
+  %increment = scalar.constant 1.0 : f32
+  view.atomic.reduce<addf> %increment, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32>
+  %old = view.atomic.rmw<addf> %increment, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32> -> f32
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_add_f32() asm {
+  %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %36 = v_mov_b32 0
+  low.br ^_bb6
+^_bb1(%31: reg<amdgpu.vgpr>):
+  %37 = v_add_f32_src0_inline %31, 1065353216
+  %39 = s_mov_b32 0
+  %63 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %64 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %65 = s_mov_b32 65535
+  %66 = s_and_b32 %64, %65
+  %67 = concat(%63, %66) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %68 = s_mov_b32 256
+  %69 = s_mov_b32 822173696
+  %70 = concat(%67, %68, %69) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %41 = v_mov_b32_copy %31
+  %42 = v_mov_b32_copy %37
+  %43 = concat(%42, %41) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %44 = buffer_atomic_cmpswap_b32_rtn %43, %70, %36, %39
+  %45 = slice %44[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %46 = v_cmp_ne_i32 %45, %31
+  %48, %49 = s_and_saveexec_b64 %46
+  low.cond_br %49, ^_bb2, ^_bb7 : reg<amdgpu.scc>
+^_bb2:
+  low.br ^_bb1(%45: reg<amdgpu.vgpr>)
+^_bb3:
+  low.br ^_bb8
+^_bb4(%32: reg<amdgpu.vgpr>):
+  %50 = v_add_f32_src0_inline %32, 1065353216
+  %51 = v_mov_b32 0
+  %52 = s_mov_b32 0
+  %71 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %72 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %73 = s_mov_b32 65535
+  %74 = s_and_b32 %72, %73
+  %75 = concat(%71, %74) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %76 = s_mov_b32 256
+  %77 = s_mov_b32 822173696
+  %78 = concat(%75, %76, %77) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %54 = v_mov_b32_copy %32
+  %55 = v_mov_b32_copy %50
+  %56 = concat(%55, %54) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %57 = buffer_atomic_cmpswap_b32_rtn %56, %78, %51, %52
+  %58 = slice %57[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %59 = v_cmp_ne_i32 %58, %32
+  %61, %62 = s_and_saveexec_b64 %59
+  low.cond_br %62, ^_bb5, ^_bb9 : reg<amdgpu.scc>
+^_bb5:
+  low.br ^_bb4(%58: reg<amdgpu.vgpr>)
+^_bb6:
+  %47 = s_mov_b64_exec_read
+  low.br ^_bb1(%36: reg<amdgpu.vgpr>)
+^_bb7:
+  s_mov_b64_exec %47
+  low.br ^_bb3
+^_bb8:
+  %60 = s_mov_b64_exec_read
+  low.br ^_bb4(%36: reg<amdgpu.vgpr>)
+^_bb9:
+  s_mov_b64_exec %60
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @global_atomic_minnum_maxnum_f32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%input: buffer) {
   %tid = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
-  %view = buffer.view %global[%zero] : buffer -> view<64xf32, #dense>
+  %view = buffer.view %global[%buffer_base] : buffer -> view<64xf32>
   %limit = scalar.constant 1.0 : f32
-  view.atomic.reduce<minnumf> %limit, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32, #dense>
-  view.atomic.reduce<maxnumf> %limit, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32, #dense>
-  %old_min = view.atomic.rmw<minnumf> %limit, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32, #dense> -> f32
-  %old_max = view.atomic.rmw<maxnumf> %limit, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32, #dense> -> f32
+  view.atomic.reduce<minnumf> %limit, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32>
+  view.atomic.reduce<maxnumf> %limit, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32>
+  %old_min = view.atomic.rmw<minnumf> %limit, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32> -> f32
+  %old_max = view.atomic.rmw<maxnumf> %limit, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32> -> f32
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_minnum_maxnum_f32() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_minnum_maxnum_f32() asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %limit = v_mov_b32 1065353216
   %12 = v_mov_b32 0
@@ -104,7 +205,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_minnum_max
   %31 = s_and_b32 %29, %30
   %32 = concat(%28, %31) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %33 = s_mov_b32 256
-  %34 = s_mov_b32 822243328
+  %34 = s_mov_b32 822173696
   %35 = concat(%32, %33, %34) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   buffer_atomic_min_f32 %limit, %35, %12, %13
   buffer_atomic_max_f32 %limit, %35, %12, %13
@@ -117,22 +218,22 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_minnum_max
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @global_atomic_dynamic_minnum_f32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%input: buffer, %value: f32) {
   %tid = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
-  %view = buffer.view %global[%zero] : buffer -> view<64xf32, #dense>
-  %old_min = view.atomic.rmw<minnumf> %value, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32, #dense> -> f32
-  %old_max = view.atomic.rmw<maxnumf> %value, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32, #dense> -> f32
+  %view = buffer.view %global[%buffer_base] : buffer -> view<64xf32>
+  %old_min = view.atomic.rmw<minnumf> %value, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32> -> f32
+  %old_max = view.atomic.rmw<maxnumf> %value, %view[%tid] {ordering = relaxed, scope = device} : f32, view<64xf32> -> f32
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_dynamic_minnum_f32(%value: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_dynamic_minnum_f32(%value: reg<amdgpu.sgpr>) asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %12 = v_mov_b32 0
   %13 = s_mov_b32 0
@@ -142,7 +243,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_dynamic_mi
   %25 = s_and_b32 %23, %24
   %26 = concat(%22, %25) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %27 = s_mov_b32 256
-  %28 = s_mov_b32 822243328
+  %28 = s_mov_b32 822173696
   %29 = concat(%26, %27, %28) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %15 = v_mov_b32_copy %value
   %old_min = buffer_atomic_min_f32_rtn %15, %29, %12, %13
@@ -153,27 +254,27 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_dynamic_mi
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @global_atomic_bitwise_i32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%input: buffer) {
   %tid = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
-  %view = buffer.view %global[%zero] : buffer -> view<64xi32, #dense>
+  %view = buffer.view %global[%buffer_base] : buffer -> view<64xi32>
   %mask = scalar.constant 255 : i32
-  view.atomic.reduce<andi> %mask, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense>
-  view.atomic.reduce<ori> %mask, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense>
-  view.atomic.reduce<xori> %mask, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense>
-  %old_and = view.atomic.rmw<andi> %mask, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense> -> i32
-  %old_or = view.atomic.rmw<ori> %mask, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense> -> i32
-  %old_xor = view.atomic.rmw<xori> %mask, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense> -> i32
+  view.atomic.reduce<andi> %mask, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32>
+  view.atomic.reduce<ori> %mask, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32>
+  view.atomic.reduce<xori> %mask, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32>
+  %old_and = view.atomic.rmw<andi> %mask, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32> -> i32
+  %old_or = view.atomic.rmw<ori> %mask, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32> -> i32
+  %old_xor = view.atomic.rmw<xori> %mask, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32> -> i32
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_bitwise_i32() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_bitwise_i32() asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %13 = v_mov_b32 0
   %14 = s_mov_b32 0
@@ -183,7 +284,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_bitwise_i3
   %43 = s_and_b32 %41, %42
   %44 = concat(%40, %43) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %45 = s_mov_b32 256
-  %46 = s_mov_b32 822243328
+  %46 = s_mov_b32 822173696
   %47 = concat(%44, %45, %46) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %16 = v_mov_b32 255
   buffer_atomic_and_b32 %16, %47, %13, %14
@@ -200,23 +301,23 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_bitwise_i3
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @global_atomic_sub_i32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%input: buffer) {
   %tid = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
-  %view = buffer.view %global[%zero] : buffer -> view<64xi32, #dense>
+  %view = buffer.view %global[%buffer_base] : buffer -> view<64xi32>
   %delta = scalar.constant 1 : i32
-  view.atomic.reduce<subi> %delta, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense>
-  %old_sub = view.atomic.rmw<subi> %delta, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense> -> i32
+  view.atomic.reduce<subi> %delta, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32>
+  %old_sub = view.atomic.rmw<subi> %delta, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32> -> i32
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_sub_i32() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_sub_i32() asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %11 = v_mov_b32 0
   %12 = s_mov_b32 0
@@ -226,7 +327,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_sub_i32() 
   %23 = s_and_b32 %21, %22
   %24 = concat(%20, %23) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %25 = s_mov_b32 256
-  %26 = s_mov_b32 822243328
+  %26 = s_mov_b32 822173696
   %27 = concat(%24, %25, %26) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %14 = v_mov_b32 1
   buffer_atomic_sub_u32 %14, %27, %11, %12
@@ -237,22 +338,22 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_sub_i32() 
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @global_atomic_exchange_i32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%input: buffer) {
   %tid = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
-  %view = buffer.view %global[%zero] : buffer -> view<64xi32, #dense>
+  %view = buffer.view %global[%buffer_base] : buffer -> view<64xi32>
   %value = scalar.constant 7 : i32
-  %old = view.atomic.rmw<xchgi> %value, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense> -> i32
+  %old = view.atomic.rmw<xchgi> %value, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32> -> i32
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_exchange_i32() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_exchange_i32() asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %11 = v_mov_b32 0
   %12 = s_mov_b32 0
@@ -262,7 +363,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_exchange_i
   %19 = s_and_b32 %17, %18
   %20 = concat(%16, %19) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %21 = s_mov_b32 256
-  %22 = s_mov_b32 822243328
+  %22 = s_mov_b32 822173696
   %23 = concat(%20, %21, %22) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %14 = v_mov_b32 7
   %old = buffer_atomic_swap_b32_rtn %14, %23, %11, %12
@@ -271,23 +372,49 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_exchange_i
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
+kernel.def target(@target) @global_atomic_exchange_i64() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %view = buffer.view %global[%buffer_base] : buffer -> view<64xi64>
+  %value = scalar.constant 7 : i64
+  %old = view.atomic.rmw<xchgi> %value, %view[%tid] {ordering = relaxed, scope = device} : i64, view<64xi64> -> i64
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_exchange_i64() asm {
+  %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %13 = v_mov_b32 0
+  %14 = v_mov_b32 7
+  %16 = concat(%14, %13) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %old = global_atomic_swap_u64_rtn_saddr %13, %16, %view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @global_atomic_cmpxchg_i32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%input: buffer) {
   %tid = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
-  %view = buffer.view %global[%zero] : buffer -> view<64xi32, #dense>
+  %view = buffer.view %global[%buffer_base] : buffer -> view<64xi32>
   %expected = scalar.constant 7 : i32
   %replacement = scalar.constant 9 : i32
-  %old = view.atomic.cmpxchg %expected, %replacement, %view[%tid] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i32, view<64xi32, #dense> -> i32
+  %old = view.atomic.cmpxchg %expected, %replacement, %view[%tid] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i32, view<64xi32> -> i32
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_cmpxchg_i32() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_cmpxchg_i32() asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %13 = v_mov_b32 0
   %14 = s_mov_b32 0
@@ -297,40 +424,70 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_cmpxchg_i3
   %24 = s_and_b32 %22, %23
   %25 = concat(%21, %24) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %26 = s_mov_b32 256
-  %27 = s_mov_b32 822243328
+  %27 = s_mov_b32 822173696
   %28 = concat(%25, %26, %27) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %16 = v_mov_b32 7
   %17 = v_mov_b32 9
-  %18 = concat(%16, %17) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %18 = concat(%17, %16) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   %19 = buffer_atomic_cmpswap_b32_rtn %18, %28, %13, %14
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
+kernel.def target(@target) @global_atomic_cmpxchg_i64() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %view = buffer.view %global[%buffer_base] : buffer -> view<64xi64>
+  %expected = scalar.constant 7 : i64
+  %replacement = scalar.constant 9 : i64
+  %old = view.atomic.cmpxchg %expected, %replacement, %view[%tid] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i64, view<64xi64> -> i64
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_cmpxchg_i64() asm {
+  %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %17 = v_mov_b32 0
+  %18 = v_mov_b32 7
+  %20 = concat(%18, %17) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %21 = v_mov_b32 9
+  %23 = concat(%21, %17) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %24 = concat(%23, %20) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %old = global_atomic_cmpswap_b64_rtn_saddr %17, %24, %view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @global_atomic_minmax_i32() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%input: buffer) {
   %tid = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
-  %view = buffer.view %global[%zero] : buffer -> view<64xi32, #dense>
+  %view = buffer.view %global[%buffer_base] : buffer -> view<64xi32>
   %limit = scalar.constant 1 : i32
-  view.atomic.reduce<minsi> %limit, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense>
-  view.atomic.reduce<maxsi> %limit, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense>
-  view.atomic.reduce<minui> %limit, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense>
-  view.atomic.reduce<maxui> %limit, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense>
-  %old_minsi = view.atomic.rmw<minsi> %limit, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense> -> i32
-  %old_maxsi = view.atomic.rmw<maxsi> %limit, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense> -> i32
-  %old_minui = view.atomic.rmw<minui> %limit, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense> -> i32
-  %old_maxui = view.atomic.rmw<maxui> %limit, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense> -> i32
+  view.atomic.reduce<minsi> %limit, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32>
+  view.atomic.reduce<maxsi> %limit, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32>
+  view.atomic.reduce<minui> %limit, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32>
+  view.atomic.reduce<maxui> %limit, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32>
+  %old_minsi = view.atomic.rmw<minsi> %limit, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32> -> i32
+  %old_maxsi = view.atomic.rmw<maxsi> %limit, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32> -> i32
+  %old_minui = view.atomic.rmw<minui> %limit, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32> -> i32
+  %old_maxui = view.atomic.rmw<maxui> %limit, %view[%tid] {ordering = relaxed, scope = device} : i32, view<64xi32> -> i32
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_minmax_i32() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_minmax_i32() asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %14 = v_mov_b32 0
   %15 = s_mov_b32 0
@@ -340,7 +497,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_minmax_i32
   %53 = s_and_b32 %51, %52
   %54 = concat(%50, %53) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %55 = s_mov_b32 256
-  %56 = s_mov_b32 822243328
+  %56 = s_mov_b32 822173696
   %57 = concat(%54, %55, %56) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %17 = v_mov_b32 1
   buffer_atomic_min_i32 %17, %57, %14, %15

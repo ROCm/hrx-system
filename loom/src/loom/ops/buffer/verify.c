@@ -4,13 +4,13 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "iree/base/internal/math.h"
 #include "loom/error/emitter.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/module.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/encoding/storage.h"
 #include "loom/util/fact_table.h"
-#include "loom/util/math.h"
 
 static iree_status_t loom_buffer_emit(iree_diagnostic_emitter_t emitter,
                                       const loom_op_t* op,
@@ -75,16 +75,21 @@ static iree_status_t loom_buffer_verify_concrete_memory_space(
       emitter, op, attr_name, value, IREE_SV("concrete memory space"));
 }
 
-static iree_status_t loom_buffer_verify_scratch_memory_space(
+static iree_status_t loom_buffer_verify_allocatable_memory_space(
     iree_diagnostic_emitter_t emitter, const loom_op_t* op,
     loom_value_fact_memory_space_t value) {
-  if (value == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP ||
-      value == LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE) {
-    return iree_ok_status();
+  switch (value) {
+    case LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL:
+    case LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP:
+    case LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE:
+    case LOOM_VALUE_FACT_MEMORY_SPACE_HOST:
+    case LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC:
+      return iree_ok_status();
+    default:
+      return loom_buffer_emit_attribute_value_constraint(
+          emitter, op, IREE_SV("memory_space"), value,
+          IREE_SV("global, workgroup, private, host, or generic memory space"));
   }
-  return loom_buffer_emit_attribute_value_constraint(
-      emitter, op, IREE_SV("memory_space"), value,
-      IREE_SV("workgroup or private memory space"));
 }
 
 static bool loom_buffer_try_get_local_memory_space_fact(
@@ -135,13 +140,42 @@ iree_status_t loom_buffer_alloca_verify(const loom_module_t* module,
                                         const loom_op_t* op,
                                         iree_diagnostic_emitter_t emitter) {
   int64_t base_alignment = loom_buffer_alloca_base_alignment(op);
-  if (!loom_is_power_of_two_i64(base_alignment)) {
+  if (!iree_math_is_power_of_two_i64(base_alignment)) {
     return loom_buffer_emit_attribute_value_constraint(
         emitter, op, IREE_SV("base_alignment"), base_alignment,
         IREE_SV("positive power-of-two byte alignment"));
   }
-  return loom_buffer_verify_scratch_memory_space(
+  return loom_buffer_verify_allocatable_memory_space(
       emitter, op, loom_buffer_alloca_memory_space(op));
+}
+
+iree_status_t loom_buffer_pack_verify(const loom_module_t* module,
+                                      const loom_op_t* op,
+                                      iree_diagnostic_emitter_t emitter) {
+  loom_value_slice_t byte_lengths = loom_buffer_pack_byte_lengths(op);
+  if (byte_lengths.count == 0) {
+    return loom_buffer_emit_attribute_value_constraint(
+        emitter, op, IREE_SV("byte_lengths"), 0,
+        IREE_SV("at least one physical byte range"));
+  }
+
+  loom_attribute_t minimum_alignments = loom_buffer_pack_minimum_alignments(op);
+  if (minimum_alignments.count != byte_lengths.count) {
+    return loom_buffer_emit_attribute_value_constraint(
+        emitter, op, IREE_SV("minimum_alignments"), minimum_alignments.count,
+        IREE_SV("one entry per byte length"));
+  }
+  for (uint16_t i = 0; i < minimum_alignments.count; ++i) {
+    const int64_t minimum_alignment = minimum_alignments.i64_array[i];
+    if (iree_math_is_power_of_two_i64(minimum_alignment)) continue;
+    char attribute_name[64] = {0};
+    iree_snprintf(attribute_name, sizeof(attribute_name),
+                  "minimum_alignments[%u]", (unsigned)i);
+    return loom_buffer_emit_attribute_value_constraint(
+        emitter, op, iree_make_cstring_view(attribute_name), minimum_alignment,
+        IREE_SV("positive power-of-two byte alignment"));
+  }
+  return iree_ok_status();
 }
 
 iree_status_t loom_buffer_assume_memory_space_verify(
@@ -159,7 +193,7 @@ iree_status_t loom_buffer_assume_alignment_verify(
     iree_diagnostic_emitter_t emitter) {
   int64_t minimum_alignment =
       loom_buffer_assume_alignment_minimum_alignment(op);
-  if (loom_is_power_of_two_i64(minimum_alignment)) {
+  if (iree_math_is_power_of_two_i64(minimum_alignment)) {
     return iree_ok_status();
   }
   return loom_buffer_emit_attribute_value_constraint(
@@ -174,15 +208,6 @@ iree_status_t loom_buffer_view_verify(const loom_module_t* module,
       loom_module_value_type(module, loom_buffer_view_result(op));
   if (!loom_type_is_view(result_type)) {
     return iree_ok_status();
-  }
-
-  if (!loom_type_has_encoding(result_type)) {
-    loom_diagnostic_param_t params[] = {
-        loom_param_string(IREE_SV("result type layout")),
-        loom_param_string(IREE_SV("view result type")),
-    };
-    return loom_buffer_emit(emitter, op, LOOM_ERR_ENCODING_001, params,
-                            IREE_ARRAYSIZE(params));
   }
 
   return loom_buffer_verify_strided_layout_rank(module, op, emitter,

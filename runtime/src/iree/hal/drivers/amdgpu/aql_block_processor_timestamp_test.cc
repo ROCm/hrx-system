@@ -79,13 +79,12 @@ static DirectDispatchBlock MakeDirectDispatchBlock() {
   block.dispatch_command.kernarg_storage_mode =
       IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STORAGE_MODE_CUSTOM_DIRECT;
   block.dispatch_command.implicit_args_offset_qwords = UINT16_MAX;
-  block.dispatch_command.setup = 3;
   block.dispatch_command.workgroup_size[0] = 4;
   block.dispatch_command.workgroup_size[1] = 2;
   block.dispatch_command.workgroup_size[2] = 1;
-  block.dispatch_command.grid_size[0] = 64;
-  block.dispatch_command.grid_size[1] = 8;
-  block.dispatch_command.grid_size[2] = 1;
+  block.dispatch_command.workgroup_count[0] = 16;
+  block.dispatch_command.workgroup_count[1] = 4;
+  block.dispatch_command.workgroup_count[2] = 1;
   block.tail[0] = 0x0A0B0C0D0E0F1011ull;
   block.tail[1] = 0x1213141516171819ull;
 

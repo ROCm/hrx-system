@@ -9,18 +9,35 @@
 
 iree_add_all_subdirs()
 
-set(_hrx_platform_deps "")
+set(_hrx_static_platform_copts "")
 if(IREE_HAL_DRIVER_AMDGPU)
-  list(APPEND _hrx_platform_deps iree::hal::drivers::amdgpu::registration)
+  list(APPEND _hrx_static_platform_copts "-DHRX_HAS_IREE_AMDGPU_DRIVER")
+endif()
+if(IREE_HAL_DRIVER_AMDXDNA)
+  list(APPEND _hrx_static_platform_copts "-DHRX_HAS_IREE_AMDXDNA_DRIVER")
+endif()
+set(_hrx_static_platform_deps "")
+if(IREE_HAL_DRIVER_AMDGPU)
+  list(APPEND _hrx_static_platform_deps iree::hal::drivers::amdgpu::registration)
+endif()
+if(IREE_HAL_DRIVER_AMDXDNA)
+  list(APPEND _hrx_static_platform_deps
+    iree::hal::drivers::amdxdna
+    iree::hal::drivers::amdxdna::registration
+    iree::base::internal::flatcc::building
+    iree::schemas::amdxdna_xclbin_executable_def_c_fbs
+  )
 endif()
 iree_cc_library(
   NAME
-    hrx
+    hrx_static
   COPTS
-    "-DHRX_BUILDING_SHARED"
+    ${_hrx_static_platform_copts}
   HDRS
+    "${LIBHRX_SOURCE_DIR}/src/iree_hal_compat.h"
     "buffer_table.h"
     "hrx_internal.h"
+    "mem_pool.h"
   SRCS
     "allocator.c"
     "amdxdna_executable.c"
@@ -31,6 +48,9 @@ iree_cc_library(
     "event.c"
     "executable.c"
     "fence.c"
+    "graph.c"
+    "graph_analysis.c"
+    "graph_exec.c"
     "host_allocator.c"
     "mem_pool.c"
     "module.c"
@@ -42,17 +62,119 @@ iree_cc_library(
     "stream.c"
     "transfer.c"
     "value_list.c"
+    "vmm_slab_provider.c"
+    "vmm_slab_provider.h"
   DEPS
     ${CMAKE_DL_LIBS}
     iree::async
     iree::async::util::proactor_pool
     iree::base
     iree::base::core_headers
+    iree::base::internal
     iree::base::internal::arena
     iree::base::threading
     iree::hal
     iree::hal::drivers::local_task::task_driver
+    iree::hal::executable::amdgpu::executable_target
     iree::hal::local::loaders::registration
+    iree::hal::memory::asan
+    iree::hal::memory::passthrough_pool
+    iree::hal::memory::slab_provider
+    iree::hal::memory::tlsf_pool
+    iree::hal::utils::profile_file
+    iree::hal::utils::resource_set
+    iree::io::file_handle
+    iree::modules::hal
+    iree::modules::hal::types
+    iree::task::api
+    iree::vm
+    iree::vm::bytecode::module
+    libhrx_defs
+    ${_hrx_static_platform_deps}
+  DEFINES
+    "HRX_STATIC"
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/.>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/.>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../include>"
+  PUBLIC
+)
+
+set(_hrx_platform_copts "")
+if(IREE_HAL_DRIVER_AMDGPU)
+  list(APPEND _hrx_platform_copts "-DHRX_HAS_IREE_AMDGPU_DRIVER")
+endif()
+if(IREE_HAL_DRIVER_AMDXDNA)
+  list(APPEND _hrx_platform_copts "-DHRX_HAS_IREE_AMDXDNA_DRIVER")
+endif()
+set(_hrx_platform_deps "")
+if(IREE_HAL_DRIVER_AMDGPU)
+  list(APPEND _hrx_platform_deps iree::hal::drivers::amdgpu::registration)
+endif()
+if(IREE_HAL_DRIVER_AMDXDNA)
+  list(APPEND _hrx_platform_deps
+    iree::hal::drivers::amdxdna
+    iree::hal::drivers::amdxdna::registration
+    iree::base::internal::flatcc::building
+    iree::schemas::amdxdna_xclbin_executable_def_c_fbs
+  )
+endif()
+iree_cc_library(
+  NAME
+    hrx
+  COPTS
+    "-DHRX_BUILDING_SHARED"
+    ${_hrx_platform_copts}
+  HDRS
+    "${LIBHRX_SOURCE_DIR}/src/iree_hal_compat.h"
+    "buffer_table.h"
+    "hrx_internal.h"
+    "mem_pool.h"
+  SRCS
+    "allocator.c"
+    "amdxdna_executable.c"
+    "buffer.c"
+    "buffer_table.c"
+    "buffer_view.c"
+    "device.c"
+    "event.c"
+    "executable.c"
+    "fence.c"
+    "graph.c"
+    "graph_analysis.c"
+    "graph_exec.c"
+    "host_allocator.c"
+    "mem_pool.c"
+    "module.c"
+    "pool.c"
+    "queue_ops.c"
+    "runtime.c"
+    "semaphore.c"
+    "status.c"
+    "stream.c"
+    "transfer.c"
+    "value_list.c"
+    "vmm_slab_provider.c"
+    "vmm_slab_provider.h"
+  DEPS
+    ${CMAKE_DL_LIBS}
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::core_headers
+    iree::base::internal
+    iree::base::internal::arena
+    iree::base::threading
+    iree::hal
+    iree::hal::drivers::local_task::task_driver
+    iree::hal::executable::amdgpu::executable_target
+    iree::hal::local::loaders::registration
+    iree::hal::memory::asan
+    iree::hal::memory::passthrough_pool
+    iree::hal::memory::slab_provider
     iree::hal::memory::tlsf_pool
     iree::hal::utils::profile_file
     iree::hal::utils::resource_set
@@ -75,15 +197,66 @@ iree_cc_library(
   PUBLIC
 )
 
-if(IREE_HAL_DRIVER_AMDXDNA AND LIBHRX_BUILD_TESTS)
-  add_executable(hrx_amdxdna_executable_test amdxdna_executable_test.cc)
-  target_link_libraries(hrx_amdxdna_executable_test PRIVATE
-    hrx::hrx
-    iree::base::internal::flatcc::parsing
-    iree::schemas::amdxdna_xclbin_executable_def_c_fbs
+iree_cc_test(
+  NAME
+    graph_exec_test
+  SRCS
+    "graph_exec_test.cc"
+  DEPS
+    ::hrx_static
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+
+iree_cc_test(
+  NAME
+    graph_buffer_test
+  SRCS
+    "graph_buffer_test.cc"
+  DEPS
+    ::hrx_static
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+
+iree_cc_test(
+  NAME
+    pool_test
+  SRCS
+    "pool_test.cc"
+  DEPS
+    ::hrx_static
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+
+if(IREE_HAL_DRIVER_AMDXDNA)
+  iree_cc_test(
+    NAME
+      amdxdna_executable_test
+    SRCS
+      "amdxdna_executable_test.cc"
+    DEPS
+      ::hrx_static
+      iree::base
+      iree::base::internal::flatcc::parsing
+      iree::hal
+      iree::schemas::amdxdna_xclbin_executable_def_c_fbs
+      iree::testing::gtest
+      iree::testing::gtest_main
+      libhrx_defs
+    LABELS
+      "driver=amdxdna"
   )
-  add_test(NAME hrx_amdxdna_executable_test
-    COMMAND hrx_amdxdna_executable_test)
 endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
@@ -110,19 +283,23 @@ if(IREE_HAL_DRIVER_AMDXDNA)
 endif()
 # IREE's allocator selector is exposed as a compile definition on the base
 # library target. libhrx is compiled through IREE's object-library wrapper, so
-# forward that definition to the object target that actually compiles the
-# sources using iree_allocator_system().
-target_compile_definitions(libhrx_src_libhrx_hrx.objects PRIVATE
-  $<TARGET_PROPERTY:iree_base_base,INTERFACE_COMPILE_DEFINITIONS>
-)
-foreach(_hrx_generated_header_target
-    iree_base_internal_flatcc_dummy_gen
-    iree_schemas_bytecode_module_def_c_fbs_gen
-    op_table_gen
-    encoding_table_gen)
-  if(TARGET ${_hrx_generated_header_target})
-    add_dependencies(libhrx_src_libhrx_hrx.objects ${_hrx_generated_header_target})
-  endif()
+# forward that definition to the object targets that actually compile sources
+# using iree_allocator_system().
+foreach(_hrx_object_target
+    libhrx_src_libhrx_hrx_static.objects
+    libhrx_src_libhrx_hrx.objects)
+  target_compile_definitions(${_hrx_object_target} PRIVATE
+    $<TARGET_PROPERTY:iree_base_base,INTERFACE_COMPILE_DEFINITIONS>
+  )
+  foreach(_hrx_generated_header_target
+      iree_base_internal_flatcc_dummy_gen
+      iree_schemas_bytecode_module_def_c_fbs_gen
+      op_table_gen
+      encoding_table_gen)
+    if(TARGET ${_hrx_generated_header_target})
+      add_dependencies(${_hrx_object_target} ${_hrx_generated_header_target})
+    endif()
+  endforeach()
 endforeach()
 set_target_properties(libhrx_src_libhrx_hrx PROPERTIES
   OUTPUT_NAME hrx
@@ -131,12 +308,31 @@ set_target_properties(libhrx_src_libhrx_hrx PROPERTIES
   EXPORT_NAME hrx
   POSITION_INDEPENDENT_CODE ON
 )
-if(NOT WIN32)
+if(APPLE)
+  set_target_properties(libhrx_src_libhrx_hrx PROPERTIES
+    BUILD_RPATH "@loader_path"
+    INSTALL_RPATH "@loader_path"
+    C_VISIBILITY_PRESET hidden
+  )
+  set(_hrx_export_file "${LIBHRX_SOURCE_DIR}/cmake/hrx_exports_macos.txt")
+  target_link_options(libhrx_src_libhrx_hrx PRIVATE
+    "-Wl,-exported_symbols_list,${_hrx_export_file}"
+  )
+  set_property(TARGET libhrx_src_libhrx_hrx APPEND PROPERTY
+    LINK_DEPENDS "${_hrx_export_file}"
+  )
+elseif(UNIX)
   set_target_properties(libhrx_src_libhrx_hrx PROPERTIES
     BUILD_RPATH "$ORIGIN"
     INSTALL_RPATH "$ORIGIN"
     C_VISIBILITY_PRESET hidden
-    LINK_FLAGS "-Wl,--version-script=${LIBHRX_SOURCE_DIR}/cmake/hrx_exports.lds"
+  )
+  set(_hrx_export_file "${LIBHRX_SOURCE_DIR}/cmake/hrx_exports.lds")
+  target_link_options(libhrx_src_libhrx_hrx PRIVATE
+    "-Wl,--version-script=${_hrx_export_file}"
+  )
+  set_property(TARGET libhrx_src_libhrx_hrx APPEND PROPERTY
+    LINK_DEPENDS "${_hrx_export_file}"
   )
 endif()
 set_property(TARGET libhrx_src_libhrx_hrx PROPERTY

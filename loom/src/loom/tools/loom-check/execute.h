@@ -42,6 +42,7 @@
 #include "loom/tools/loom-check/check.h"
 #include "loom/tools/loom-check/report.h"
 #include "loom/tools/loom-check/update.h"
+#include "loom/util/json.h"
 #include "loom/verify/verify.h"
 
 #ifdef __cplusplus
@@ -78,12 +79,8 @@ typedef struct loom_check_result_t {
   // messages for parse errors. Empty on PASS.
   iree_string_builder_t detail;
 
-  // Structured diff hunk JSON objects for roundtrip/pass mismatches, separated
-  // by ",\n" for direct embedding in a JSON array.
-  iree_string_builder_t diff_hunk_json;
-
-  // Number of objects in diff_hunk_json.
-  iree_host_size_t diff_hunk_count;
+  // Structured diff hunk objects for roundtrip/pass mismatches.
+  loom_json_value_list_t diff_hunks;
 
   // Printed IR from roundtrip/pass/format/emit modes. Used by --update to
   // rewrite expected sections in test files when has_actual_output is true.
@@ -108,28 +105,18 @@ typedef struct loom_check_result_t {
   // Machine-readable edits for accepting actual verify diagnostics into
   // diagnostic annotation comments. Edit ranges are in the original .loom-test
   // source; apply multiple edits atomically or in descending range order.
-  struct {
-    // Structured annotation edit JSON objects, separated by ",\n" for direct
-    // embedding in a JSON array.
-    iree_string_builder_t json;
-    // Number of objects in json.
-    iree_host_size_t count;
-  } annotation_edits;
+  loom_json_value_list_t annotation_edits;
 
   // Structured diagnostic JSON objects emitted through the shared
-  // loom_diagnostic_json_write_object path, separated by ",\n". This is ready
-  // to embed in a JSON array while preserving the full parser/verifier
-  // diagnostic shape: source ranges, highlights, related locations, params,
-  // field refs, rendered message, and fix hints.
-  iree_string_builder_t diagnostic_json;
-
-  // Number of objects in diagnostic_json.
-  iree_host_size_t diagnostic_count;
+  // loom_diagnostic_json_write_object path. These preserve the full
+  // parser/verifier shape: source ranges, highlights, related locations,
+  // params, field refs, rendered message, and fix hints.
+  loom_json_value_list_t diagnostics;
 } loom_check_result_t;
 
 // Diagnostic capture shared by loom-check execution modes. The sink appends
 // human-readable caret diagnostics to |detail| when non-NULL and appends the
-// canonical structured diagnostic JSON object to |result->diagnostic_json|
+// canonical structured diagnostic JSON object to |result->diagnostics|
 // when |result| is non-NULL.
 typedef struct loom_check_diagnostic_capture_t {
   // Type formatter used for rendered diagnostic messages and JSON params.
@@ -247,6 +234,8 @@ typedef struct loom_check_prepare_source_low_options_t {
   loom_target_control_flow_lowering_t control_flow_lowering;
   // Sanitizer instrumentation checks enabled while preparing source-low IR.
   loom_sanitizer_options_t sanitizer;
+  // Optional caller-owned structured compile report populated by the pipeline.
+  loom_target_compile_report_t* report;
 } loom_check_prepare_source_low_options_t;
 
 // Returns true when |provider| owns emit targets named |target_name|.
@@ -390,11 +379,17 @@ iree_status_t loom_check_diagnostic_capture_sink(
     void* user_data, const loom_diagnostic_t* diagnostic);
 
 // Records a roundtrip/pass mismatch as both human-readable unified diff text
-// in |result->detail| and structured hunk objects in |result->diff_hunk_json|.
+// in |result->detail| and structured hunk objects in |result->diff_hunks|.
 iree_status_t loom_check_result_record_diff(iree_string_view_t expected,
                                             iree_string_view_t actual,
                                             iree_allocator_t allocator,
                                             loom_check_result_t* result);
+
+// Appends an annotation edit while the referenced source text is live.
+iree_status_t loom_check_result_append_annotation_edit(
+    loom_check_result_t* result, loom_check_update_edit_kind_t kind,
+    loom_check_source_range_t range, iree_host_size_t target_line,
+    iree_string_view_t text);
 
 // Initializes source-to-low preparation options with the normal user-facing
 // target-low pipeline.

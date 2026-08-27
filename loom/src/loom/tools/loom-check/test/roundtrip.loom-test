@@ -184,8 +184,8 @@ func.def @slice_tile(%tile: tile<64x64xf16>) -> (tile<16x16xf16>) {
 
 // ====
 
-// Canonical AttrDict printing sorts keys recursively and canonicalizes empty
-// optional dict attrs to absence.
+// Canonical AttrDict printing sorts keys recursively and preserves explicit
+// empty optional dictionaries.
 func.def @canonical_attr_dict(%x: f32) -> (f32) {
   %configured = test.attrs %x {meta = {phase = "link", opt = 3}, axis = 0} : f32
   %passthrough = test.attrs %configured {} : f32
@@ -194,7 +194,7 @@ func.def @canonical_attr_dict(%x: f32) -> (f32) {
 // ----
 func.def @canonical_attr_dict(%x: f32) -> (f32) {
   %configured = test.attrs %x {axis = 0, meta = {opt = 3, phase = "link"}} : f32
-  %passthrough = test.attrs %configured : f32
+  %passthrough = test.attrs %configured {} : f32
   func.return %passthrough : f32
 }
 

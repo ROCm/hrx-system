@@ -1,0 +1,99 @@
+# Copyright 2026 The HRX Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+name: Documentation
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/docs.yml"
+      - "dev.py"
+      - "requirements-analysis.lock.txt"
+      - "requirements-dev.lock.txt"
+      - "build_tools/devtools/**"
+      - "loom/binding/c/**"
+      - "loom/docs/**"
+      - "loom/py/loom/**"
+      - "loom/src/loom/editor/textmate/**"
+  push:
+    branches:
+      - main
+      - main-staging
+    paths:
+      - ".github/workflows/docs.yml"
+      - "dev.py"
+      - "requirements-analysis.lock.txt"
+      - "requirements-dev.lock.txt"
+      - "build_tools/devtools/**"
+      - "loom/binding/c/**"
+      - "loom/docs/**"
+      - "loom/py/loom/**"
+      - "loom/src/loom/editor/textmate/**"
+
+permissions:
+  contents: read
+
+jobs:
+  build_docs:
+    name: Linux / Documentation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: ${{ github.workflow }}-build-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.lock.txt
+            requirements-analysis.lock.txt
+            loom/docs/requirements.lock.txt
+
+      - name: Install documentation tools
+        run: python3 dev.py setup --docs
+
+      - name: Build documentation
+        run: |
+          PYTHONPATH=loom/docs .venv/bin/python -m unittest \
+            loom_docs.highlight_test
+          .venv/bin/python loom/docs/build.py build \
+            --site-dir build/loom-pages/loom
+          test -f build/loom-pages/loom/index.html
+          test -f build/loom-pages/loom/reference/dialects/index.html
+          test -f build/loom-pages/loom/reference/c-api/generated/index.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: build/loom-pages
+          retention-days: 7
+
+  deploy_docs:
+    name: GitHub Pages
+    if: github.ref == 'refs/heads/main'
+    needs: build_docs
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    steps:
+      - name: Deploy Pages artifact
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

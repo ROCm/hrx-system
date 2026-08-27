@@ -42,7 +42,7 @@ iree_status_t iree_hal_hip_event_export(iree_hal_hip_event_t* event);
 // iree_hal_hip_event_pool_t
 //===----------------------------------------------------------------------===//
 
-// A simple pool of iree_hal_event_t objects to recycle.
+// A simple pool of private HIP event objects to recycle.
 //
 // Thread-safe; multiple threads may acquire and release events from the pool.
 typedef struct iree_hal_hip_event_pool_t iree_hal_hip_event_pool_t;

@@ -28,6 +28,8 @@ typedef struct loom_pass_tool_run_options_t {
   const loom_pass_registry_t* registry;
   // Typed execution environment capabilities.
   loom_pass_environment_t environment;
+  // Concrete compiler function versions participating in this execution.
+  const loom_function_version_list_t* function_versions;
   // Optional provider for pass.where predicates outside the core built-ins.
   loom_pass_predicate_provider_t predicate_provider;
   // Shared block pool used for compilation, execution, and scratch modules.

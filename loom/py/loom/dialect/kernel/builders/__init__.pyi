@@ -35,6 +35,9 @@ class KernelBuilder(DialectBuilder):
         workgroup_size_x: ValueRef,
         workgroup_size_y: ValueRef,
         workgroup_size_z: ValueRef,
+        workgroup_cluster_size_x: ValueRef | None = ...,
+        workgroup_cluster_size_y: ValueRef | None = ...,
+        workgroup_cluster_size_z: ValueRef | None = ...,
         location_id: int | None = ...,
     ) -> None: ...
     def return_(
@@ -53,8 +56,8 @@ class KernelBuilder(DialectBuilder):
         self,
         *,
         memory_space: str,
-        ordering: str,
         scope: str,
+        ordering: str,
         location_id: int | None = ...,
     ) -> None: ...
     def copy(
@@ -349,7 +352,6 @@ class KernelBuilder(DialectBuilder):
         self,
         *,
         predicate: ValueRef,
-        results: list[Type | TiedResultSpec],
         name: str | None = ...,
         names: Sequence[str] | None = ...,
         result_names: Sequence[str] | None = ...,
@@ -359,7 +361,6 @@ class KernelBuilder(DialectBuilder):
         self,
         *,
         predicate: ValueRef,
-        results: list[Type | TiedResultSpec],
         name: str | None = ...,
         names: Sequence[str] | None = ...,
         result_names: Sequence[str] | None = ...,
@@ -432,7 +433,6 @@ class KernelBuilder(DialectBuilder):
         self,
         *,
         predicate: ValueRef,
-        results: list[Type | TiedResultSpec],
         name: str | None = ...,
         names: Sequence[str] | None = ...,
         result_names: Sequence[str] | None = ...,
@@ -442,7 +442,6 @@ class KernelBuilder(DialectBuilder):
         self,
         *,
         predicate: ValueRef,
-        results: list[Type | TiedResultSpec],
         name: str | None = ...,
         names: Sequence[str] | None = ...,
         result_names: Sequence[str] | None = ...,
@@ -463,5 +462,110 @@ class KernelBuilder(DialectBuilder):
         *,
         condition: ValueRef,
         message: str | None = ...,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def cluster_id(
+        self,
+        *,
+        dimension: str,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def cluster_workgroup_id(
+        self,
+        *,
+        dimension: str,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def cluster_workgroup_flat_id(
+        self,
+        *,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def cluster_size(
+        self,
+        *,
+        dimension: str,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def cluster_count(
+        self,
+        *,
+        dimension: str,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def decl(
+        self,
+        *,
+        retain: str | None = ...,
+        target: str | None = ...,
+        export_symbol: str | None = ...,
+        export_linkage: str | None = ...,
+        callee: str,
+        workloads: list[ValueRef] = ...,
+        args: list[ValueRef] = ...,
+        predicates: list[Predicate] = ...,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def entry_decl(
+        self,
+        *,
+        retain: str | None = ...,
+        target: str | None = ...,
+        callee: str,
+        args: list[ValueRef] = ...,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def launch(
+        self,
+        *,
+        callee: str,
+        workloads: list[ValueRef] = ...,
+        arguments: list[ValueRef] = ...,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def dispatch(
+        self,
+        *,
+        callee: str,
+        workgroup_counts: list[ValueRef] = ...,
+        arguments: list[ValueRef] = ...,
+        workgroup_size: list[ValueRef] = ...,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def yield_(
+        self,
+        *,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def serial(
+        self,
+        *,
+        body: Region | None = ...,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def concurrent(
+        self,
+        *,
+        body: Region | None = ...,
         location_id: int | None = ...,
     ) -> None: ...

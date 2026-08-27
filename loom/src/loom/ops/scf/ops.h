@@ -27,7 +27,8 @@ enum {
   LOOM_OP_SCF_LOOKUP = LOOM_OP_KIND(LOOM_DIALECT_SCF, 5),
   LOOM_OP_SCF_CONDITION = LOOM_OP_KIND(LOOM_DIALECT_SCF, 6),
   LOOM_OP_SCF_WHILE = LOOM_OP_KIND(LOOM_DIALECT_SCF, 7),
-  LOOM_OP_SCF_COUNT_ = 8,
+  LOOM_OP_SCF_SCHEDULE_FENCE = LOOM_OP_KIND(LOOM_DIALECT_SCF, 8),
+  LOOM_OP_SCF_COUNT_ = 9,
 };
 
 // Local scf.for unroll policy.
@@ -40,10 +41,11 @@ typedef enum loom_scf_for_unroll_policy_e {
 typedef enum loom_scf_for_unroll_schedule_e {
   LOOM_SCF_FOR_UNROLL_SCHEDULE_LINEAR = 0,
   LOOM_SCF_FOR_UNROLL_SCHEDULE_INTERLEAVED = 1,
-  LOOM_SCF_FOR_UNROLL_SCHEDULE_COUNT_ = 2,
+  LOOM_SCF_FOR_UNROLL_SCHEDULE_RECURRENCE = 2,
+  LOOM_SCF_FOR_UNROLL_SCHEDULE_COUNT_ = 3,
 } loom_scf_for_unroll_schedule_t;
 
-// LOOM_OP_SCF_FOR: Bounded counted loop with optional loop-carried state.
+// LOOM_OP_SCF_FOR: Bounded counted loop over an index or offset domain with optional loop-carried state.
 // scf.for %iv = [%c0 to %n step %c1] {
 //   scf.yield
 // }
@@ -71,8 +73,6 @@ iree_status_t loom_scf_for_build(
     loom_may_consume loom_value_id_t step,
     loom_may_consume const loom_value_id_t* iter_args,
     iree_host_size_t iter_args_count,
-    const loom_type_t* result_types,
-    iree_host_size_t result_count,
     const loom_tied_result_t* tied_results,
     iree_host_size_t tied_result_count,
     loom_optional loom_may_consume loom_value_id_t unroll_factor,
@@ -241,15 +241,18 @@ iree_status_t loom_scf_while_build(
     loom_builder_t* builder,
     loom_may_consume const loom_value_id_t* iter_args,
     iree_host_size_t iter_args_count,
-    const loom_type_t* result_types,
-    iree_host_size_t result_count,
     const loom_tied_result_t* tied_results,
     iree_host_size_t tied_result_count,
     loom_location_id_t location,
     loom_op_t** out_op);
-iree_status_t loom_scf_while_verify(
-    const loom_module_t* module, const loom_op_t* op,
-    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_SCF_SCHEDULE_FENCE: Compiler hint separating independently reorderable source ranges. The fence has no runtime effect and emits no target instruction.
+// scf.schedule.fence
+LOOM_DEFINE_ISA(loom_scf_schedule_fence_isa, LOOM_OP_SCF_SCHEDULE_FENCE)
+iree_status_t loom_scf_schedule_fence_build(
+    loom_builder_t* builder,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 
 // Returns the vtable array for the scf dialect.
 const loom_op_vtable_t* const* loom_scf_dialect_vtables(

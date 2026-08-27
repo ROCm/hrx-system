@@ -11,7 +11,7 @@ func.def target(@target) @i32x4_to_i8x4_bitpack(%codes: vector<4xi32>) -> (vecto
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32x4_to_i8x4_bitpack(%codes: reg<llvmir.i32 x4>) -> (reg<llvmir.i8 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32x4_to_i8x4_bitpack(%codes: reg<llvmir.i32 x4>) -> (reg<llvmir.i8 x4>) asm {
   %30 = extract.v4i32 %codes, 0
   %31 = const.i32 255
   %32 = and.i32 %30, %31
@@ -27,4 +27,323 @@ low.func.def target(@target) abi(object_function) @i32x4_to_i8x4_bitpack(%codes:
   %42 = trunc.i32.i8 %41
   %packed = from_elements.v4i8 %33, %36, %39, %42
   return %packed
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32x8_to_i4x8_bitpack(%codes: vector<8xi32>) -> (vector<4xi8>) {
+  %packed = vector.bitpack<4> %codes : vector<8xi32> -> vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32x8_to_i4x8_bitpack(%codes: reg<llvmir.i32 x8>) -> (reg<llvmir.i8 x4>) asm {
+  %54 = extract.v8i32 %codes, 0
+  %55 = const.i32 15
+  %56 = and.i32 %54, %55
+  %57 = extract.v8i32 %codes, 1
+  %58 = and.i32 %57, %55
+  %59 = const.i32 4
+  %60 = shl.i32 %58, %59
+  %61 = or.i32 %56, %60
+  %62 = trunc.i32.i8 %61
+  %63 = extract.v8i32 %codes, 2
+  %64 = and.i32 %63, %55
+  %65 = extract.v8i32 %codes, 3
+  %66 = and.i32 %65, %55
+  %67 = shl.i32 %66, %59
+  %68 = or.i32 %64, %67
+  %69 = trunc.i32.i8 %68
+  %70 = extract.v8i32 %codes, 4
+  %71 = and.i32 %70, %55
+  %72 = extract.v8i32 %codes, 5
+  %73 = and.i32 %72, %55
+  %74 = shl.i32 %73, %59
+  %75 = or.i32 %71, %74
+  %76 = trunc.i32.i8 %75
+  %77 = extract.v8i32 %codes, 6
+  %78 = and.i32 %77, %55
+  %79 = extract.v8i32 %codes, 7
+  %80 = and.i32 %79, %55
+  %81 = shl.i32 %80, %59
+  %82 = or.i32 %78, %81
+  %83 = trunc.i32.i8 %82
+  %packed = from_elements.v4i8 %62, %69, %76, %83
+  return %packed
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32x16_to_i2x16_bitpack(%codes: vector<16xi32>) -> (vector<4xi8>) {
+  %packed = vector.bitpack<2> %codes : vector<16xi32> -> vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32x16_to_i2x16_bitpack(%codes: reg<llvmir.i32 x16>) -> (reg<llvmir.i8 x4>) asm {
+  %102 = extract.v16i32 %codes, 0
+  %103 = const.i32 3
+  %104 = and.i32 %102, %103
+  %105 = extract.v16i32 %codes, 1
+  %106 = and.i32 %105, %103
+  %107 = const.i32 2
+  %108 = shl.i32 %106, %107
+  %109 = or.i32 %104, %108
+  %110 = extract.v16i32 %codes, 2
+  %111 = and.i32 %110, %103
+  %112 = const.i32 4
+  %113 = shl.i32 %111, %112
+  %114 = or.i32 %109, %113
+  %115 = extract.v16i32 %codes, 3
+  %116 = and.i32 %115, %103
+  %117 = const.i32 6
+  %118 = shl.i32 %116, %117
+  %119 = or.i32 %114, %118
+  %120 = trunc.i32.i8 %119
+  %121 = extract.v16i32 %codes, 4
+  %122 = and.i32 %121, %103
+  %123 = extract.v16i32 %codes, 5
+  %124 = and.i32 %123, %103
+  %125 = shl.i32 %124, %107
+  %126 = or.i32 %122, %125
+  %127 = extract.v16i32 %codes, 6
+  %128 = and.i32 %127, %103
+  %129 = shl.i32 %128, %112
+  %130 = or.i32 %126, %129
+  %131 = extract.v16i32 %codes, 7
+  %132 = and.i32 %131, %103
+  %133 = shl.i32 %132, %117
+  %134 = or.i32 %130, %133
+  %135 = trunc.i32.i8 %134
+  %136 = extract.v16i32 %codes, 8
+  %137 = and.i32 %136, %103
+  %138 = extract.v16i32 %codes, 9
+  %139 = and.i32 %138, %103
+  %140 = shl.i32 %139, %107
+  %141 = or.i32 %137, %140
+  %142 = extract.v16i32 %codes, 10
+  %143 = and.i32 %142, %103
+  %144 = shl.i32 %143, %112
+  %145 = or.i32 %141, %144
+  %146 = extract.v16i32 %codes, 11
+  %147 = and.i32 %146, %103
+  %148 = shl.i32 %147, %117
+  %149 = or.i32 %145, %148
+  %150 = trunc.i32.i8 %149
+  %151 = extract.v16i32 %codes, 12
+  %152 = and.i32 %151, %103
+  %153 = extract.v16i32 %codes, 13
+  %154 = and.i32 %153, %103
+  %155 = shl.i32 %154, %107
+  %156 = or.i32 %152, %155
+  %157 = extract.v16i32 %codes, 14
+  %158 = and.i32 %157, %103
+  %159 = shl.i32 %158, %112
+  %160 = or.i32 %156, %159
+  %161 = extract.v16i32 %codes, 15
+  %162 = and.i32 %161, %103
+  %163 = shl.i32 %162, %117
+  %164 = or.i32 %160, %163
+  %165 = trunc.i32.i8 %164
+  %packed = from_elements.v4i8 %120, %135, %150, %165
+  return %packed
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32x32_to_i1x32_bitpack(%mask: vector<32xi32>) -> (vector<4xi8>) {
+  %packed = vector.bitpack<1> %mask : vector<32xi32> -> vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32x32_to_i1x32_bitpack(%mask: reg<llvmir.i32 x32>) -> (reg<llvmir.i8 x4>) asm {
+  %198 = extract.v32i32 %mask, 0
+  %199 = const.i32 1
+  %200 = and.i32 %198, %199
+  %201 = extract.v32i32 %mask, 1
+  %202 = and.i32 %201, %199
+  %203 = shl.i32 %202, %199
+  %204 = or.i32 %200, %203
+  %205 = extract.v32i32 %mask, 2
+  %206 = and.i32 %205, %199
+  %207 = const.i32 2
+  %208 = shl.i32 %206, %207
+  %209 = or.i32 %204, %208
+  %210 = extract.v32i32 %mask, 3
+  %211 = and.i32 %210, %199
+  %212 = const.i32 3
+  %213 = shl.i32 %211, %212
+  %214 = or.i32 %209, %213
+  %215 = extract.v32i32 %mask, 4
+  %216 = and.i32 %215, %199
+  %217 = const.i32 4
+  %218 = shl.i32 %216, %217
+  %219 = or.i32 %214, %218
+  %220 = extract.v32i32 %mask, 5
+  %221 = and.i32 %220, %199
+  %222 = const.i32 5
+  %223 = shl.i32 %221, %222
+  %224 = or.i32 %219, %223
+  %225 = extract.v32i32 %mask, 6
+  %226 = and.i32 %225, %199
+  %227 = const.i32 6
+  %228 = shl.i32 %226, %227
+  %229 = or.i32 %224, %228
+  %230 = extract.v32i32 %mask, 7
+  %231 = and.i32 %230, %199
+  %232 = const.i32 7
+  %233 = shl.i32 %231, %232
+  %234 = or.i32 %229, %233
+  %235 = trunc.i32.i8 %234
+  %236 = extract.v32i32 %mask, 8
+  %237 = and.i32 %236, %199
+  %238 = extract.v32i32 %mask, 9
+  %239 = and.i32 %238, %199
+  %240 = shl.i32 %239, %199
+  %241 = or.i32 %237, %240
+  %242 = extract.v32i32 %mask, 10
+  %243 = and.i32 %242, %199
+  %244 = shl.i32 %243, %207
+  %245 = or.i32 %241, %244
+  %246 = extract.v32i32 %mask, 11
+  %247 = and.i32 %246, %199
+  %248 = shl.i32 %247, %212
+  %249 = or.i32 %245, %248
+  %250 = extract.v32i32 %mask, 12
+  %251 = and.i32 %250, %199
+  %252 = shl.i32 %251, %217
+  %253 = or.i32 %249, %252
+  %254 = extract.v32i32 %mask, 13
+  %255 = and.i32 %254, %199
+  %256 = shl.i32 %255, %222
+  %257 = or.i32 %253, %256
+  %258 = extract.v32i32 %mask, 14
+  %259 = and.i32 %258, %199
+  %260 = shl.i32 %259, %227
+  %261 = or.i32 %257, %260
+  %262 = extract.v32i32 %mask, 15
+  %263 = and.i32 %262, %199
+  %264 = shl.i32 %263, %232
+  %265 = or.i32 %261, %264
+  %266 = trunc.i32.i8 %265
+  %267 = extract.v32i32 %mask, 16
+  %268 = and.i32 %267, %199
+  %269 = extract.v32i32 %mask, 17
+  %270 = and.i32 %269, %199
+  %271 = shl.i32 %270, %199
+  %272 = or.i32 %268, %271
+  %273 = extract.v32i32 %mask, 18
+  %274 = and.i32 %273, %199
+  %275 = shl.i32 %274, %207
+  %276 = or.i32 %272, %275
+  %277 = extract.v32i32 %mask, 19
+  %278 = and.i32 %277, %199
+  %279 = shl.i32 %278, %212
+  %280 = or.i32 %276, %279
+  %281 = extract.v32i32 %mask, 20
+  %282 = and.i32 %281, %199
+  %283 = shl.i32 %282, %217
+  %284 = or.i32 %280, %283
+  %285 = extract.v32i32 %mask, 21
+  %286 = and.i32 %285, %199
+  %287 = shl.i32 %286, %222
+  %288 = or.i32 %284, %287
+  %289 = extract.v32i32 %mask, 22
+  %290 = and.i32 %289, %199
+  %291 = shl.i32 %290, %227
+  %292 = or.i32 %288, %291
+  %293 = extract.v32i32 %mask, 23
+  %294 = and.i32 %293, %199
+  %295 = shl.i32 %294, %232
+  %296 = or.i32 %292, %295
+  %297 = trunc.i32.i8 %296
+  %298 = extract.v32i32 %mask, 24
+  %299 = and.i32 %298, %199
+  %300 = extract.v32i32 %mask, 25
+  %301 = and.i32 %300, %199
+  %302 = shl.i32 %301, %199
+  %303 = or.i32 %299, %302
+  %304 = extract.v32i32 %mask, 26
+  %305 = and.i32 %304, %199
+  %306 = shl.i32 %305, %207
+  %307 = or.i32 %303, %306
+  %308 = extract.v32i32 %mask, 27
+  %309 = and.i32 %308, %199
+  %310 = shl.i32 %309, %212
+  %311 = or.i32 %307, %310
+  %312 = extract.v32i32 %mask, 28
+  %313 = and.i32 %312, %199
+  %314 = shl.i32 %313, %217
+  %315 = or.i32 %311, %314
+  %316 = extract.v32i32 %mask, 29
+  %317 = and.i32 %316, %199
+  %318 = shl.i32 %317, %222
+  %319 = or.i32 %315, %318
+  %320 = extract.v32i32 %mask, 30
+  %321 = and.i32 %320, %199
+  %322 = shl.i32 %321, %227
+  %323 = or.i32 %319, %322
+  %324 = extract.v32i32 %mask, 31
+  %325 = and.i32 %324, %199
+  %326 = shl.i32 %325, %232
+  %327 = or.i32 %323, %326
+  %328 = trunc.i32.i8 %327
+  %packed = from_elements.v4i8 %235, %266, %297, %328
+  return %packed
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+kernel.def target(@target) @uniform_global_i32x4_to_i8x4_bitpack_store() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%values: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %index = index.constant 0 : index
+  %values_noalias, %output_noalias = buffer.assume.noalias %values, %output : buffer, buffer
+  %values_view = buffer.view %values_noalias[%base] : buffer -> view<4xi32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<4xi8>
+  %codes = vector.load %values_view[%index] : view<4xi32> -> vector<4xi32>
+  %packed = vector.bitpack<8> %codes : vector<4xi32> -> vector<4xi8>
+  vector.store %packed, %output_view[%index] : vector<4xi8>, view<4xi8>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @uniform_global_i32x4_to_i8x4_bitpack_store() asm {
+  %values_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
+  %38 = load.i32 %values_view, 0
+  %39 = const.i32 255
+  %40 = and.i32 %38, %39
+  %41 = trunc.i32.i8 %40
+  %42 = load.i32 %values_view, 4
+  %43 = and.i32 %42, %39
+  %44 = trunc.i32.i8 %43
+  %45 = load.i32 %values_view, 8
+  %46 = and.i32 %45, %39
+  %47 = trunc.i32.i8 %46
+  %48 = load.i32 %values_view, 12
+  %49 = and.i32 %48, %39
+  %50 = trunc.i32.i8 %49
+  %packed = from_elements.v4i8 %41, %44, %47, %50
+  store.v4i8 %packed, %output_view, 0
+  return
 }

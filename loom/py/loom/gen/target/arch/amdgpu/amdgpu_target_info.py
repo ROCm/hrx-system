@@ -24,13 +24,41 @@ def _ensure_runtime_py_on_path() -> None:
 
 _ensure_runtime_py_on_path()
 
+from build_tools.amdgpu.target_map_data import (  # noqa: E402
+    AMDGPU_PHYSICAL_TARGET_INFOS,
+)
+
 from loom.gen.support.c import c_string_arg as _c_string_arg  # noqa: E402
 from loom.gen.support.c import c_string_literal as _c_string_literal  # noqa: E402
+from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
-from loom.target.arch.amdgpu.isa_xml import (  # noqa: E402
-    AmdgpuIsaFactSource,
-    AmdgpuIsaXmlError,
-    parse_amdgpu_isa_xml_path,
+from loom.gen.target.arch.amdgpu.amdgpu_config_tables import (  # noqa: E402
+    write_config_tables_to_paths,
+)
+from loom.gen.target.arch.amdgpu.amdgpu_low_aliases import (  # noqa: E402
+    write_low_aliases_to_path,
+)
+from loom.gen.target.arch.amdgpu.planning.amdgpu_occupancy_tables import (  # noqa: E402
+    generate_occupancy_tables,
+)
+from loom.gen.target.arch.amdgpu.records.amdgpu_target_records import (  # noqa: E402
+    write_target_record_tables_to_path,
+)
+from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
+    amdgpu_descriptor_ref_keys,
+)
+from loom.target.arch.amdgpu.lds_bank_service import (  # noqa: E402
+    AMDGPU_LDS_BANK_SERVICE_DIRECTION_READ,
+    AMDGPU_LDS_BANK_SERVICE_DIRECTION_WRITE,
+    AMDGPU_LDS_BANK_SERVICE_EVIDENCE_PUBLIC_VENDOR_DOCUMENTATION,
+    AMDGPU_LDS_BANK_SERVICE_EVIDENCE_SILICON_CALIBRATED_VENDOR_MODEL,
+    AMDGPU_LDS_BANK_SERVICE_EVIDENCE_VENDOR_SOFTWARE_MODEL_UNVALIDATED,
+    AMDGPU_LDS_BANK_SERVICE_REQUEST_POLICY_COALESCE_IDENTICAL_READS,
+    AMDGPU_LDS_BANK_SERVICE_REQUEST_POLICY_COUNT_EACH,
+    AmdgpuLdsBankServiceModelInfo,
+    amdgpu_lds_bank_service_model_info_by_key,
+    validate_amdgpu_lds_bank_service_model_coverage,
+    validate_amdgpu_lds_bank_service_model_infos,
 )
 from loom.target.arch.amdgpu.names import (  # noqa: E402
     amdgpu_descriptor_set_ordinal_constant_name,
@@ -39,11 +67,34 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_AMDHSA_TARGET_TRIPLE,
     AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE,
     AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_STRIDE14_ENABLE_BIT,
+    AMDGPU_BUFFER_RESOURCE_RECORD_ENCODING_NONE,
+    AMDGPU_BUFFER_RESOURCE_RECORD_ENCODINGS,
     AMDGPU_CACHE_SCOPE_KEYWORDS,
     AMDGPU_CACHE_TEMPORAL_KEYWORDS,
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_OCP_FP8_NONCANONICAL_NAN,
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_PACKED_BF16_ARITHMETIC,
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_ARITHMETIC,
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_COMPARE,
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_CONVERSION,
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOP3_TWO_SCALAR_SOURCES,
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_DUAL_MOV_SRC2_CACHE,
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_NUMERIC_MINMAX_MNEMONICS,
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION,
     AMDGPU_DESCRIPTOR_SET_INFO_KNOWN_FLAGS,
     AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE,
+    AMDGPU_ELF_GENERIC_VERSION_MASK_V6,
+    AMDGPU_INSTRUCTION_CONSTRAINT_CLUSTER_MULTICAST_MASK_PRESERVATION,
+    AMDGPU_INSTRUCTION_CONSTRAINT_DS_ADDTID_ADDRESS_MATERIALIZATION,
+    AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT,
+    AMDGPU_INSTRUCTION_CONSTRAINT_INTEGER_MATRIX_COEXECUTION_SPACING,
+    AMDGPU_INSTRUCTION_CONSTRAINT_KNOWN_BITS,
+    AMDGPU_INSTRUCTION_CONSTRAINT_SWMMAC_LOW_PRECISION_LOWERING,
+    AMDGPU_INSTRUCTION_CONSTRAINT_TENSOR_MULTICAST_MASK_PRESERVATION,
+    AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_F4_32X16_SPLIT,
+    AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_FP8_BF8_K64_SCALE_PREFIX,
+    AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_FP8_BF8_K128_SPLIT,
+    AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_SCALE_ENCODING,
     AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ACCUM_OFFSET,
     AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ARCHITECTED_FLAT_SCRATCH,
     AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_DX10_CLAMP_AND_IEEE_MODE,
@@ -56,6 +107,18 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX12,
     AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX125,
     AMDGPU_KERNEL_DESCRIPTOR_PROFILE_NONE,
+    AMDGPU_KERNEL_ENTRY_PROFILE_INITIAL_VMEM_REPLAY,
+    AMDGPU_KERNEL_ENTRY_PROFILE_NONE,
+    AMDGPU_LDS_BANK_SERVICE_MODEL_SET_ORDINAL_NONE,
+    AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE,
+    AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_4_8_16,
+    AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_16_32,
+    AMDGPU_MATRIX_COEXECUTION_PROFILES,
+    AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE,
+    AMDGPU_MATRIX_COEXECUTION_SOURCE_INFOS,
+    AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC,
+    AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA,
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX90A,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX908,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940,
@@ -63,14 +126,24 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_MATRIX_FEATURE_PROFILE_NONE,
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11,
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12,
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12_5_GENERIC,
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250,
+    AMDGPU_PROCESSOR_INFO_FLAG_ARCHITECTED_WORKGROUP_IDS,
+    AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE,
+    AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
+    AMDGPU_PROCESSOR_INFO_KNOWN_FLAGS,
+    AMDGPU_PROCESSOR_ORDINAL_NONE,
     AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU,
+    AMDGPU_PROCESSOR_SCHEDULING_DESTINATION_SELECTION_WAIT_STATES,
     AMDGPU_PROCESSOR_SCHEDULING_KNOWN_BITS,
-    AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES,
     AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_DEPCTR,
     AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES,
     AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR,
     AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_WAIT_STATES,
+    AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER,
+    AMDGPU_TARGET_ID_FEATURE_SUPPORT_KNOWN_FLAGS,
+    AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC,
+    AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK,
     AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ATTRS,
     AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_INFOS,
     AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_NONE,
@@ -81,37 +154,38 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_WAVEFRONT_SIZE_KNOWN_FLAGS,
     AmdgpuDescriptorSetInfo,
     AmdgpuProcessorInfo,
+    AmdgpuSoppOpcodeInfo,
+    AmdgpuTargetInfo,
     AmdgpuVectorMemoryCachePolicyEncodingInfo,
     amdgpu_descriptor_set_ordinal,
+    amdgpu_generic_code_object_compatibility_info,
+    amdgpu_lds_bank_service_model_sets,
+    amdgpu_processor_ordinal,
+    amdgpu_target_descriptor_set_key,
+    amdgpu_target_instruction_constraints,
     kernel_descriptor_profile_supports_wavefront_size,
     sorted_descriptor_set_infos,
     sorted_processor_infos,
-    validate_amdgpu_descriptor_set_isa_xml,
+    sorted_target_infos,
+    validate_amdgpu_code_object_processor_rows,
+    validate_amdgpu_generic_contracts,
+    validate_amdgpu_target_id_processor_rows,
+    validate_amdgpu_target_rows,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class _AmdgpuSoppOpcodeRow:
-    nop: int
-    delay_alu: int
-    endpgm: int
-    branch: int
-    conditional_branch_scc0: int
-    conditional_branch_scc1: int
 
 
 @dataclass(frozen=True, slots=True)
 class _AmdgpuDescriptorSetRow:
     info: AmdgpuDescriptorSetInfo
-    sopp: _AmdgpuSoppOpcodeRow
+    sopp: AmdgpuSoppOpcodeInfo
 
 
 def _u16_expr(value: int) -> str:
     return f"UINT16_C({value})"
 
 
-def _padded_arg(value: str, width: int) -> str:
-    return f"{value},{' ' * (width - len(value) + 1)}"
+def _u32_expr(value: int) -> str:
+    return f"UINT32_C({value})"
 
 
 def _c_ident(value: str) -> str:
@@ -134,15 +208,33 @@ _KERNEL_DESCRIPTOR_PROFILE_EXPRS = {
     AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX125: "LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX125",
 }
 
+_KERNEL_ENTRY_PROFILE_EXPRS = {
+    AMDGPU_KERNEL_ENTRY_PROFILE_NONE: "LOOM_AMDGPU_KERNEL_ENTRY_PROFILE_NONE",
+    AMDGPU_KERNEL_ENTRY_PROFILE_INITIAL_VMEM_REPLAY: ("LOOM_AMDGPU_KERNEL_ENTRY_PROFILE_INITIAL_VMEM_REPLAY"),
+}
+
 _MATRIX_FEATURE_PROFILE_EXPRS = {
     AMDGPU_MATRIX_FEATURE_PROFILE_NONE: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_NONE",
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX908: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX908",
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX90A: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX90A",
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940",
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950",
+    AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC",
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11",
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12",
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250",
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12_5_GENERIC: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12_5_GENERIC",
+}
+
+_MATRIX_COEXECUTION_PROFILE_EXPRS = {
+    AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE: "LOOM_AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE",
+    AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_4_8_16: "LOOM_AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_4_8_16",
+    AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_16_32: "LOOM_AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_16_32",
+}
+
+_MATRIX_COEXECUTION_SOURCE_EXPRS = {
+    AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA: "LOOM_AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA",
+    AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC: "LOOM_AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC",
 }
 
 _BUFFER_RESOURCE_CACHE_SWIZZLE_EXPRS = {
@@ -150,12 +242,135 @@ _BUFFER_RESOURCE_CACHE_SWIZZLE_EXPRS = {
     AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_STRIDE14_ENABLE_BIT: "LOOM_AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_STRIDE14_ENABLE_BIT",
 }
 
+_BUFFER_RESOURCE_RECORD_ENCODING_EXPRS = {encoding: f"LOOM_AMDGPU_BUFFER_RESOURCE_RECORD_ENCODING_{_c_ident(encoding)}" for encoding in AMDGPU_BUFFER_RESOURCE_RECORD_ENCODINGS}
+
 _VECTOR_MEMORY_CACHE_POLICY_ENCODING_EXPRS = {encoding: f"LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_{_c_ident(encoding)}" for encoding in AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODINGS}
+
+_LDS_BANK_SERVICE_EVIDENCE_CLASS_EXPRS = {
+    AMDGPU_LDS_BANK_SERVICE_EVIDENCE_PUBLIC_VENDOR_DOCUMENTATION: ("LOOM_AMDGPU_LDS_BANK_SERVICE_EVIDENCE_PUBLIC_VENDOR_DOCUMENTATION"),
+    AMDGPU_LDS_BANK_SERVICE_EVIDENCE_VENDOR_SOFTWARE_MODEL_UNVALIDATED: ("LOOM_AMDGPU_LDS_BANK_SERVICE_EVIDENCE_VENDOR_SOFTWARE_MODEL_UNVALIDATED"),
+    AMDGPU_LDS_BANK_SERVICE_EVIDENCE_SILICON_CALIBRATED_VENDOR_MODEL: ("LOOM_AMDGPU_LDS_BANK_SERVICE_EVIDENCE_SILICON_CALIBRATED_VENDOR_MODEL"),
+}
+
+_LDS_BANK_SERVICE_DIRECTION_EXPRS = {
+    AMDGPU_LDS_BANK_SERVICE_DIRECTION_READ: ("LOOM_AMDGPU_LDS_BANK_SERVICE_DIRECTION_READ"),
+    AMDGPU_LDS_BANK_SERVICE_DIRECTION_WRITE: ("LOOM_AMDGPU_LDS_BANK_SERVICE_DIRECTION_WRITE"),
+}
+
+_LDS_BANK_SERVICE_REQUEST_POLICY_EXPRS = {
+    AMDGPU_LDS_BANK_SERVICE_REQUEST_POLICY_COUNT_EACH: ("LOOM_AMDGPU_LDS_BANK_SERVICE_REQUEST_POLICY_COUNT_EACH"),
+    AMDGPU_LDS_BANK_SERVICE_REQUEST_POLICY_COALESCE_IDENTICAL_READS: ("LOOM_AMDGPU_LDS_BANK_SERVICE_REQUEST_POLICY_COALESCE_IDENTICAL_READS"),
+}
 
 _DESCRIPTOR_SET_INFO_FLAG_EXPRS = (
     (
         AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
         "LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING",
+    ),
+    (
+        AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION,
+        "LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION",
+    ),
+    (
+        AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_NUMERIC_MINMAX_MNEMONICS,
+        "LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_NUMERIC_MINMAX_MNEMONICS",
+    ),
+    (
+        AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_PACKED_BF16_ARITHMETIC,
+        "LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_PACKED_BF16_ARITHMETIC",
+    ),
+    (
+        AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOP3_TWO_SCALAR_SOURCES,
+        "LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOP3_TWO_SCALAR_SOURCES",
+    ),
+    (
+        AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_OCP_FP8_NONCANONICAL_NAN,
+        "LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_OCP_FP8_NONCANONICAL_NAN",
+    ),
+    (
+        AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_ARITHMETIC,
+        "LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_ARITHMETIC",
+    ),
+    (
+        AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_CONVERSION,
+        "LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_CONVERSION",
+    ),
+    (
+        AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_COMPARE,
+        "LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_COMPARE",
+    ),
+    (
+        AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_DUAL_MOV_SRC2_CACHE,
+        "LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_DUAL_MOV_SRC2_CACHE",
+    ),
+)
+
+_PROCESSOR_INFO_FLAG_EXPRS = (
+    (
+        AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
+        "LOOM_AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION",
+    ),
+    (
+        AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE,
+        "LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE",
+    ),
+    (
+        AMDGPU_PROCESSOR_INFO_FLAG_ARCHITECTED_WORKGROUP_IDS,
+        "LOOM_AMDGPU_PROCESSOR_INFO_FLAG_ARCHITECTED_WORKGROUP_IDS",
+    ),
+)
+
+_INSTRUCTION_CONSTRAINT_BIT_EXPRS = (
+    (
+        AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT,
+        "LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT",
+    ),
+    (
+        AMDGPU_INSTRUCTION_CONSTRAINT_DS_ADDTID_ADDRESS_MATERIALIZATION,
+        "LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_DS_ADDTID_ADDRESS_MATERIALIZATION",
+    ),
+    (
+        AMDGPU_INSTRUCTION_CONSTRAINT_CLUSTER_MULTICAST_MASK_PRESERVATION,
+        "LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_CLUSTER_MULTICAST_MASK_PRESERVATION",
+    ),
+    (
+        AMDGPU_INSTRUCTION_CONSTRAINT_TENSOR_MULTICAST_MASK_PRESERVATION,
+        "LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_TENSOR_MULTICAST_MASK_PRESERVATION",
+    ),
+    (
+        AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_FP8_BF8_K64_SCALE_PREFIX,
+        "LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_FP8_BF8_K64_SCALE_PREFIX",
+    ),
+    (
+        AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_FP8_BF8_K128_SPLIT,
+        "LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_FP8_BF8_K128_SPLIT",
+    ),
+    (
+        AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_F4_32X16_SPLIT,
+        "LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_F4_32X16_SPLIT",
+    ),
+    (
+        AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_SCALE_ENCODING,
+        "LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_SCALE_ENCODING",
+    ),
+    (
+        AMDGPU_INSTRUCTION_CONSTRAINT_SWMMAC_LOW_PRECISION_LOWERING,
+        "LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_SWMMAC_LOW_PRECISION_LOWERING",
+    ),
+    (
+        AMDGPU_INSTRUCTION_CONSTRAINT_INTEGER_MATRIX_COEXECUTION_SPACING,
+        "LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_INTEGER_MATRIX_COEXECUTION_SPACING",
+    ),
+)
+
+_TARGET_ID_FEATURE_SUPPORT_FLAG_EXPRS = (
+    (
+        AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC,
+        "LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC",
+    ),
+    (
+        AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK,
+        "LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK",
     ),
 )
 
@@ -207,8 +422,8 @@ _PROCESSOR_SCHEDULING_BIT_EXPRS = (
         "LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES",
     ),
     (
-        AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES,
-        "LOOM_AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES",
+        AMDGPU_PROCESSOR_SCHEDULING_DESTINATION_SELECTION_WAIT_STATES,
+        "LOOM_AMDGPU_PROCESSOR_SCHEDULING_DESTINATION_SELECTION_WAIT_STATES",
     ),
     (
         AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_DEPCTR,
@@ -217,6 +432,10 @@ _PROCESSOR_SCHEDULING_BIT_EXPRS = (
     (
         AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU,
         "LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU",
+    ),
+    (
+        AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER,
+        "LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER",
     ),
 )
 
@@ -232,8 +451,28 @@ def _kernel_descriptor_profile_expr(profile: str) -> str:
     return _enum_expr(profile, _KERNEL_DESCRIPTOR_PROFILE_EXPRS, "kernel descriptor profile")
 
 
+def _kernel_entry_profile_expr(profile: str) -> str:
+    return _enum_expr(profile, _KERNEL_ENTRY_PROFILE_EXPRS, "kernel entry profile")
+
+
 def _matrix_feature_profile_expr(profile: str) -> str:
     return _enum_expr(profile, _MATRIX_FEATURE_PROFILE_EXPRS, "matrix feature profile")
+
+
+def _matrix_coexecution_profile_expr(profile: str) -> str:
+    return _enum_expr(
+        profile,
+        _MATRIX_COEXECUTION_PROFILE_EXPRS,
+        "matrix coexecution profile",
+    )
+
+
+def _matrix_coexecution_source_expr(source: str) -> str:
+    return _enum_expr(
+        source,
+        _MATRIX_COEXECUTION_SOURCE_EXPRS,
+        "matrix coexecution source",
+    )
 
 
 def _buffer_resource_cache_swizzle_expr(kind: str) -> str:
@@ -244,12 +483,51 @@ def _buffer_resource_cache_swizzle_expr(kind: str) -> str:
     )
 
 
+def _buffer_resource_record_encoding_expr(kind: str) -> str:
+    return _enum_expr(
+        kind,
+        _BUFFER_RESOURCE_RECORD_ENCODING_EXPRS,
+        "buffer-resource record encoding",
+    )
+
+
 def _vector_memory_cache_policy_encoding_expr(kind: str) -> str:
     return _enum_expr(
         kind,
         _VECTOR_MEMORY_CACHE_POLICY_ENCODING_EXPRS,
         "vector-memory cache-policy encoding",
     )
+
+
+def _lds_bank_service_evidence_class_expr(evidence_class: str) -> str:
+    return _enum_expr(
+        evidence_class,
+        _LDS_BANK_SERVICE_EVIDENCE_CLASS_EXPRS,
+        "LDS bank-service evidence class",
+    )
+
+
+def _lds_bank_service_direction_expr(direction: str) -> str:
+    return _enum_expr(
+        direction,
+        _LDS_BANK_SERVICE_DIRECTION_EXPRS,
+        "LDS bank-service direction",
+    )
+
+
+def _lds_bank_service_request_policy_expr(request_policy: str) -> str:
+    return _enum_expr(
+        request_policy,
+        _LDS_BANK_SERVICE_REQUEST_POLICY_EXPRS,
+        "LDS bank-service request policy",
+    )
+
+
+def _descriptor_ref_expr(descriptor_key: str) -> str:
+    prefix = "amdgpu."
+    if not descriptor_key.startswith(prefix):
+        raise ValueError(f"AMDGPU descriptor key '{descriptor_key}' must start with '{prefix}'")
+    return "LOOM_AMDGPU_DESCRIPTOR_REF_" + _c_ident(descriptor_key.removeprefix(prefix))
 
 
 def _ordinal_bit_expr(owner: str, values: Sequence[str], vocabulary: Sequence[str]) -> str:
@@ -311,10 +589,9 @@ def _validate_memory_cache_policy_encoding_infos(
 
 
 def _ordered_memory_cache_policy_encoding_infos(
+    descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
     rows: Sequence[AmdgpuVectorMemoryCachePolicyEncodingInfo] = (AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_INFOS),
-    descriptor_sets: Sequence[AmdgpuDescriptorSetInfo] | None = None,
 ) -> tuple[AmdgpuVectorMemoryCachePolicyEncodingInfo, ...]:
-    descriptor_sets = sorted_descriptor_set_infos() if descriptor_sets is None else descriptor_sets
     _validate_memory_cache_policy_encoding_infos(rows, descriptor_sets)
     return tuple(
         sorted(
@@ -383,12 +660,14 @@ def _memory_cache_policy_temporal_th_initializer(row: tuple[str, int]) -> str:
     return f"[{_cache_temporal_c_name(keyword)}] = {th_value},"
 
 
-def _emit_memory_cache_policy_encoding_rows() -> str:
+def _emit_memory_cache_policy_encoding_rows(
+    descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
+) -> str:
     return (
         "\n".join(
             [
                 *_memory_cache_policy_fragment_header(),
-                *(_memory_cache_policy_encoding_info_initializer(row) for row in _ordered_memory_cache_policy_encoding_infos()),
+                *(_memory_cache_policy_encoding_info_initializer(row) for row in _ordered_memory_cache_policy_encoding_infos(descriptor_sets)),
             ]
         )
         + "\n"
@@ -405,6 +684,75 @@ def _emit_memory_cache_policy_temporal_th() -> str:
         )
         + "\n"
     )
+
+
+def _lds_bank_service_fragment_header() -> list[str]:
+    return [
+        "// Copyright 2026 The IREE Authors",
+        "//",
+        "// Licensed under the Apache License v2.0 with LLVM Exceptions.",
+        "// See https://llvm.org/LICENSE.txt for license information.",
+        "// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception",
+        "",
+        *line_comment_header("//", generator="loom.gen.target.arch.amdgpu.amdgpu_target_info"),
+        "",
+    ]
+
+
+def _lds_bank_service_model_initializer(
+    info: AmdgpuLdsBankServiceModelInfo,
+) -> list[str]:
+    lines = [
+        "    {",
+        f"      .descriptor_ref = {_descriptor_ref_expr(info.descriptor_key)},",
+        "      .model = {",
+        f"        .key = IREE_SVL({_c_string_arg(info.key)}),",
+        f"        .revision = IREE_SVL({_c_string_arg(info.revision)}),",
+        f"        .evidence_class = {_lds_bank_service_evidence_class_expr(info.evidence_class)},",
+        f"        .direction = {_lds_bank_service_direction_expr(info.direction)},",
+        f"        .request_policy = {_lds_bank_service_request_policy_expr(info.request_policy)},",
+        f"        .wave_size = {info.wave_size},",
+        f"        .bank_count = {info.bank_count},",
+        f"        .bank_word_byte_count = {info.bank_word_byte_count},",
+        f"        .packet_word_count = {info.packet_word_count},",
+        f"        .phase_count = {len(info.phase_lane_masks)},",
+        "        .phase_lane_masks = {",
+    ]
+    lines.extend(f"          UINT64_C(0x{phase_lane_mask:016x})," for phase_lane_mask in info.phase_lane_masks)
+    lines.extend(
+        [
+            "        },",
+            "      },",
+            "    },",
+        ]
+    )
+    return lines
+
+
+def _emit_lds_bank_service_model_rows(
+    model_sets: Sequence[Sequence[str]],
+) -> str:
+    model_infos_by_key = amdgpu_lds_bank_service_model_info_by_key()
+
+    lines = _lds_bank_service_fragment_header()
+    for ordinal, model_keys in enumerate(model_sets):
+        lines.append(f"static const loom_amdgpu_lds_bank_service_model_binding_t kAmdgpuLdsBankServiceModelSet{ordinal}Bindings[] = {{")
+        for model_key in model_keys:
+            lines.extend(_lds_bank_service_model_initializer(model_infos_by_key[model_key]))
+        lines.extend(["};", ""])
+    lines.append("static const loom_amdgpu_lds_bank_service_model_set_t kAmdgpuLdsBankServiceModelSets[] = {")
+    for ordinal, _ in enumerate(model_sets):
+        array_name = f"kAmdgpuLdsBankServiceModelSet{ordinal}Bindings"
+        lines.extend(
+            [
+                "  {",
+                f"    .bindings = {array_name},",
+                f"    .count = IREE_ARRAYSIZE({array_name}),",
+                "  },",
+            ]
+        )
+    lines.extend(["};", ""])
+    return "\n".join(lines)
 
 
 def _flag_bits_expr(
@@ -438,6 +786,36 @@ def _descriptor_set_info_flags_expr(flags: int) -> str:
         rows=_DESCRIPTOR_SET_INFO_FLAG_EXPRS,
         zero_expr="UINT64_C(0)",
         description="descriptor-set info",
+    )
+
+
+def _processor_info_flags_expr(flags: int) -> str:
+    return _flag_bits_expr(
+        flags,
+        known_bits=AMDGPU_PROCESSOR_INFO_KNOWN_FLAGS,
+        rows=_PROCESSOR_INFO_FLAG_EXPRS,
+        zero_expr="UINT32_C(0)",
+        description="processor info",
+    )
+
+
+def _instruction_constraint_bits_expr(flags: int) -> str:
+    return _flag_bits_expr(
+        flags,
+        known_bits=AMDGPU_INSTRUCTION_CONSTRAINT_KNOWN_BITS,
+        rows=_INSTRUCTION_CONSTRAINT_BIT_EXPRS,
+        zero_expr="UINT32_C(0)",
+        description="instruction constraint",
+    )
+
+
+def _target_id_feature_support_flags_expr(flags: int) -> str:
+    return _flag_bits_expr(
+        flags=flags,
+        known_bits=AMDGPU_TARGET_ID_FEATURE_SUPPORT_KNOWN_FLAGS,
+        rows=_TARGET_ID_FEATURE_SUPPORT_FLAG_EXPRS,
+        zero_expr="LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_NONE",
+        description="target-ID feature support",
     )
 
 
@@ -481,72 +859,19 @@ def _supported_wavefront_sizes(info: AmdgpuProcessorInfo) -> int:
     return flags
 
 
-def _parse_isa_xml_argument(value: str) -> tuple[str, Path]:
-    key, separator, path = value.partition(":")
-    if not separator or not key or not path:
-        raise ValueError("AMDGPU target-info --isa-xml entries must be key:path pairs")
-    return key, Path(path)
-
-
-def _parse_isa_xml_arguments(
-    values: Sequence[str],
-) -> dict[str, AmdgpuIsaFactSource]:
-    specs: dict[str, AmdgpuIsaFactSource] = {}
-    for value in values:
-        key, path = _parse_isa_xml_argument(value)
-        if key in specs:
-            raise ValueError(f"AMDGPU target-info ISA XML key '{key}' is duplicate")
-        specs[key] = parse_amdgpu_isa_xml_path(path)
-    return specs
-
-
-def _sopp_opcode(spec: AmdgpuIsaFactSource, instruction_name: str) -> int:
-    summaries = tuple(
-        summary for summary in spec.instruction_encoding_summaries((instruction_name,), include_aliases=False) if summary.encoding_name == "ENC_SOPP" and summary.condition_name == "default"
-    )
-    if len(summaries) != 1:
-        raise ValueError(f"{spec.source_name}: expected one default ENC_SOPP encoding for {instruction_name}, found {len(summaries)}")
-    return summaries[0].opcode
-
-
-def _sopp_opcode_or_zero(spec: AmdgpuIsaFactSource, instruction_name: str) -> int:
-    try:
-        summaries = tuple(
-            summary for summary in spec.instruction_encoding_summaries((instruction_name,), include_aliases=False) if summary.encoding_name == "ENC_SOPP" and summary.condition_name == "default"
-        )
-    except AmdgpuIsaXmlError as exc:
-        message = str(exc)
-        if "unknown AMDGPU ISA instruction(s)" not in message or instruction_name not in message:
-            raise
-        return 0
-    if not summaries:
-        return 0
-    if len(summaries) != 1:
-        raise ValueError(f"{spec.source_name}: expected at most one default ENC_SOPP encoding for {instruction_name}, found {len(summaries)}")
-    return summaries[0].opcode
-
-
 def _materialize_descriptor_set_rows(
     descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
-    isa_specs: Mapping[str, AmdgpuIsaFactSource],
 ) -> tuple[_AmdgpuDescriptorSetRow, ...]:
     rows: list[_AmdgpuDescriptorSetRow] = []
     for info in descriptor_sets:
-        spec = isa_specs.get(info.isa_xml_key)
-        if spec is None:
-            raise ValueError(f"AMDGPU descriptor set {info.key} references missing ISA XML key '{info.isa_xml_key}'")
-        validate_amdgpu_descriptor_set_isa_xml(info, spec)
+        sopp = info.isa_infos[0].sopp_opcodes
+        for isa_info in info.isa_infos[1:]:
+            if isa_info.sopp_opcodes != sopp:
+                raise ValueError(f"AMDGPU descriptor set {info.key} has incompatible S_OPP opcodes across ISA XML keys '{info.isa_infos[0].isa_xml_key}' and '{isa_info.isa_xml_key}'")
         rows.append(
             _AmdgpuDescriptorSetRow(
                 info=info,
-                sopp=_AmdgpuSoppOpcodeRow(
-                    nop=_sopp_opcode(spec, "S_NOP"),
-                    delay_alu=_sopp_opcode_or_zero(spec, "S_DELAY_ALU"),
-                    endpgm=_sopp_opcode(spec, "S_ENDPGM"),
-                    branch=_sopp_opcode(spec, "S_BRANCH"),
-                    conditional_branch_scc0=_sopp_opcode(spec, "S_CBRANCH_SCC0"),
-                    conditional_branch_scc1=_sopp_opcode(spec, "S_CBRANCH_SCC1"),
-                ),
+                sopp=sopp,
             )
         )
     return tuple(rows)
@@ -569,12 +894,18 @@ def _validate_descriptor_sets(descriptor_sets: Sequence[AmdgpuDescriptorSetInfo]
             raise ValueError("AMDGPU descriptor generator target is required")
         if not info.key:
             raise ValueError("AMDGPU descriptor-set key is required")
-        if not info.isa_xml_key:
-            raise ValueError(f"AMDGPU ISA XML key is required for {info.key}")
-        if not info.isa_architecture_name:
-            raise ValueError(f"AMDGPU ISA XML architecture name is required for {info.key}")
-        if info.isa_architecture_id <= 0:
-            raise ValueError(f"AMDGPU ISA XML architecture id is required for {info.key}")
+        if not info.isa_infos:
+            raise ValueError(f"AMDGPU ISA membership is required for {info.key}")
+        isa_xml_keys = [isa_info.isa_xml_key for isa_info in info.isa_infos]
+        if len(isa_xml_keys) != len(set(isa_xml_keys)):
+            raise ValueError(f"AMDGPU ISA XML keys must be unique for {info.key}")
+        for isa_info in info.isa_infos:
+            if not isa_info.isa_xml_key:
+                raise ValueError(f"AMDGPU ISA XML key is required for {info.key}")
+            if not isa_info.isa_architecture_name:
+                raise ValueError(f"AMDGPU ISA XML architecture name is required for {info.key}")
+            if isa_info.isa_architecture_id <= 0:
+                raise ValueError(f"AMDGPU ISA XML architecture id is required for {info.key}")
         if info.flags < 0 or info.flags > 0xFFFFFFFFFFFFFFFF:
             raise ValueError(f"AMDGPU descriptor-set info flags for {info.key} must fit u64")
         _descriptor_set_info_flags_expr(info.flags)
@@ -588,8 +919,28 @@ def _validate_descriptor_sets(descriptor_sets: Sequence[AmdgpuDescriptorSetInfo]
                 raise ValueError(f"AMDGPU descriptor set {info.key} references unknown storage generator target '{info.storage_generator_target}'")
             if storage_info.storage_generator_target is not None:
                 raise ValueError(f"AMDGPU descriptor set {info.key} uses view-only target '{storage_info.generator_target}' as storage")
-            if storage_info.isa_xml_key != info.isa_xml_key:
-                raise ValueError(f"AMDGPU descriptor set {info.key} storage target '{storage_info.generator_target}' uses ISA XML key '{storage_info.isa_xml_key}', expected '{info.isa_xml_key}'")
+            if not set(storage_info.isa_infos).issubset(info.isa_infos):
+                raise ValueError(f"AMDGPU descriptor set {info.key} storage target '{storage_info.generator_target}' has ISA membership outside the view contract")
+        if info.member_generator_targets:
+            if tuple(sorted(info.member_generator_targets)) != (info.member_generator_targets):
+                raise ValueError(f"AMDGPU descriptor set {info.key} member generator targets must be sorted")
+            if len(info.member_generator_targets) != len(set(info.member_generator_targets)):
+                raise ValueError(f"AMDGPU descriptor set {info.key} member generator targets must be unique")
+            member_isa_infos = []
+            for member_generator_target in info.member_generator_targets:
+                member_info = infos_by_generator_target.get(member_generator_target)
+                if member_info is None:
+                    raise ValueError(f"AMDGPU descriptor set {info.key} references unknown member generator target '{member_generator_target}'")
+                if member_info.member_generator_targets:
+                    raise ValueError(f"AMDGPU descriptor set {info.key} uses generic member target '{member_generator_target}'")
+                for isa_info in member_info.isa_infos:
+                    if isa_info not in member_isa_infos:
+                        member_isa_infos.append(isa_info)
+            if tuple(member_isa_infos) != info.isa_infos:
+                raise ValueError(f"AMDGPU descriptor set {info.key} ISA membership does not match its member generator targets")
+        _buffer_resource_record_encoding_expr(info.buffer_resource.record_encoding)
+        if info.buffer_resource.record_encoding == AMDGPU_BUFFER_RESOURCE_RECORD_ENCODING_NONE:
+            raise ValueError(f"AMDGPU descriptor set {info.key} must declare a buffer-resource record encoding")
         _buffer_resource_cache_swizzle_expr(info.buffer_resource.cache_swizzle)
         _vector_memory_cache_policy_encoding_expr(info.vector_memory.cache_policy_encoding)
         if info.vector_memory.cache_policy_encoding == AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_NONE:
@@ -600,6 +951,7 @@ def _validate_descriptor_set_rows(rows: Sequence[_AmdgpuDescriptorSetRow]) -> No
     for row in rows:
         opcode_rows = (
             ("s_nop", row.sopp.nop),
+            ("s_delay_alu", row.sopp.delay_alu),
             ("s_endpgm", row.sopp.endpgm),
             ("s_branch", row.sopp.branch),
             ("s_cbranch_scc0", row.sopp.conditional_branch_scc0),
@@ -608,6 +960,52 @@ def _validate_descriptor_set_rows(rows: Sequence[_AmdgpuDescriptorSetRow]) -> No
         for name, opcode in opcode_rows:
             if opcode < 0 or opcode > 0xFFFF:
                 raise ValueError(f"AMDGPU {name} opcode for {row.info.key} must fit u16")
+
+
+def _validate_matrix_coexecution_sources() -> None:
+    if tuple(_MATRIX_COEXECUTION_SOURCE_EXPRS) != tuple(info.source for info in AMDGPU_MATRIX_COEXECUTION_SOURCE_INFOS):
+        raise ValueError("AMDGPU matrix coexecution source expressions must cover sources in enum order")
+    for source_info in AMDGPU_MATRIX_COEXECUTION_SOURCE_INFOS:
+        _matrix_coexecution_source_expr(source_info.source)
+        if source_info.result_operand_index < 0 or source_info.result_operand_index > 0xFF:
+            raise ValueError(f"AMDGPU matrix coexecution result operand for {source_info.source} must fit u8")
+        if source_info.source_operand_start < 0 or source_info.source_operand_start > 0xFF:
+            raise ValueError(f"AMDGPU matrix coexecution source operand start for {source_info.source} must fit u8")
+        if source_info.source_operand_count <= 0 or source_info.source_operand_count > 0xFF:
+            raise ValueError(f"AMDGPU matrix coexecution source operand count for {source_info.source} must fit nonzero u8")
+        source_operand_end = source_info.source_operand_start + source_info.source_operand_count
+        if source_operand_end > 0x100:
+            raise ValueError(f"AMDGPU matrix coexecution source operand range for {source_info.source} must fit u8 indexes")
+        if source_info.source_operand_start <= source_info.result_operand_index < source_operand_end:
+            raise ValueError(f"AMDGPU matrix coexecution result operand for {source_info.source} overlaps its sources")
+
+
+def _validate_matrix_coexecution_profiles() -> None:
+    _validate_matrix_coexecution_sources()
+    if tuple(AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE) != (AMDGPU_MATRIX_COEXECUTION_PROFILES):
+        raise ValueError("AMDGPU matrix coexecution rule tables must cover profiles in enum order")
+    for profile, rules in AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE.items():
+        if profile == AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE:
+            if rules:
+                raise ValueError("AMDGPU none matrix coexecution profile cannot contain rules")
+            continue
+        if not rules:
+            raise ValueError(f"AMDGPU matrix coexecution profile {profile} must contain rules")
+        if len(rules) > 0xFF:
+            raise ValueError(f"AMDGPU matrix coexecution profile {profile} must fit u8 rule count")
+        keys: set[tuple[str, int]] = set()
+        for rule in rules:
+            _matrix_coexecution_source_expr(rule.source)
+            if rule.latency_cycles <= 0 or rule.latency_cycles > 0xFF:
+                raise ValueError(f"AMDGPU matrix coexecution latency for {profile} must fit nonzero u8")
+            if rule.vector_issue_distance <= 0 or rule.vector_issue_distance > 0xFF or rule.matrix_issue_distance <= 0 or rule.matrix_issue_distance > 0xFF:
+                raise ValueError(f"AMDGPU matrix coexecution distances for {profile} must fit nonzero u8")
+            if rule.matrix_issue_distance < rule.vector_issue_distance:
+                raise ValueError(f"AMDGPU matrix coexecution matrix distance for {profile} cannot be shorter than its vector distance")
+            key = (rule.source, rule.latency_cycles)
+            if key in keys:
+                raise ValueError(f"AMDGPU matrix coexecution profile {profile} has duplicate rule {key}")
+            keys.add(key)
 
 
 def _validate_processors(
@@ -619,6 +1017,8 @@ def _validate_processors(
         raise ValueError("AMDGPU processor target-info keys must be sorted")
     if len(processor_names) != len(set(processor_names)):
         raise ValueError("AMDGPU processor target-info keys must be unique")
+    if len(processors) >= AMDGPU_PROCESSOR_ORDINAL_NONE:
+        raise ValueError("AMDGPU processor target-info ordinals must fit uint16_t")
     descriptor_set_keys = {info.key for info in descriptor_sets}
     for info in processors:
         kernel_descriptor = info.kernel_descriptor
@@ -634,10 +1034,21 @@ def _validate_processors(
             raise ValueError(f"AMDGPU ELF feature flags for {info.processor} must fit u32")
         if info.elf.feature_flags & 0x0FF:
             raise ValueError(f"AMDGPU ELF feature flags for {info.processor} must not overlap EF_AMDGPU_MACH")
+        if info.elf.feature_flags & AMDGPU_ELF_GENERIC_VERSION_MASK_V6:
+            raise ValueError(f"AMDGPU ELF feature flags for {info.processor} must not overlap the generic version")
+        if info.elf.generic_version < 0 or info.elf.generic_version > 0xFF:
+            raise ValueError(f"AMDGPU ELF generic version for {info.processor} must fit u8")
+        is_generic_processor = info.processor.endswith("-generic")
+        if is_generic_processor != (info.elf.generic_version != 0):
+            raise ValueError(f"AMDGPU processor {info.processor} generic identity and ELF generic version disagree")
+        if info.flags < 0 or info.flags > 0xFFFFFFFF:
+            raise ValueError(f"AMDGPU processor info flags for {info.processor} must fit u32")
+        _processor_info_flags_expr(info.flags)
         if info.wavefront.default_size not in (32, 64):
             raise ValueError(f"AMDGPU default wavefront size for {info.processor} must be 32 or 64")
         supported_wavefront_sizes = _supported_wavefront_sizes(info)
         _matrix_feature_profile_expr(info.features.matrix)
+        _matrix_coexecution_profile_expr(info.features.matrix_coexecution)
         if kernel_descriptor.flags < 0 or kernel_descriptor.flags > 0xFFFFFFFFFFFFFFFF:
             raise ValueError(f"AMDGPU kernel descriptor ABI flags for {info.processor} must fit u64")
         _kernel_descriptor_abi_flags_expr(kernel_descriptor.flags)
@@ -655,9 +1066,17 @@ def _validate_processors(
                 raise ValueError(f"AMDGPU processor {info.processor} has descriptor profile but no VGPR encoding granules")
             if info.elf.machine_flags == 0:
                 raise ValueError(f"AMDGPU processor {info.processor} has a kernel descriptor profile but no ELF machine flags")
+        if info.flags & AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION:
+            if not info.descriptor_set.key:
+                raise ValueError(f"AMDGPU processor {info.processor} has HSACO emission support but no descriptor set")
+            if profile == AMDGPU_KERNEL_DESCRIPTOR_PROFILE_NONE:
+                raise ValueError(f"AMDGPU processor {info.processor} has HSACO emission support but no kernel descriptor profile")
+            if info.elf.machine_flags == 0:
+                raise ValueError(f"AMDGPU processor {info.processor} has HSACO emission support but no ELF machine flags")
         if info.features.scheduling < 0 or info.features.scheduling > 0xFFFFFFFF:
             raise ValueError(f"AMDGPU scheduling bits for {info.processor} must fit u32")
         _processor_scheduling_bits_expr(info.features.scheduling)
+    validate_amdgpu_generic_contracts(processors, descriptor_sets)
 
 
 def _emit_header(descriptor_sets: Sequence[AmdgpuDescriptorSetInfo]) -> str:
@@ -709,18 +1128,28 @@ def _emit_tables_header() -> str:
         "",
         '#include "loom/target/arch/amdgpu/target_info_defs.h"',
         "",
-        "extern const iree_string_view_t",
-        "    loom_amdgpu_target_info_amdhsa_target_id_prefix;",
-        "",
         "extern const loom_amdgpu_descriptor_set_info_t",
         "    loom_amdgpu_target_info_descriptor_set_infos[];",
         "extern const iree_host_size_t",
         "    loom_amdgpu_target_info_descriptor_set_info_count;",
         "",
+        "extern const loom_amdgpu_matrix_coexecution_profile_info_t",
+        "    loom_amdgpu_target_info_matrix_coexecution_profile_infos[];",
+        "",
         "extern const loom_amdgpu_processor_info_t",
         "    loom_amdgpu_target_info_processor_infos[];",
         "extern const iree_host_size_t",
         "    loom_amdgpu_target_info_processor_info_count;",
+        "",
+        "extern const loom_amdgpu_target_info_t",
+        "    loom_amdgpu_target_info_target_infos[];",
+        "extern const iree_host_size_t",
+        "    loom_amdgpu_target_info_target_info_count;",
+        "",
+        "extern const loom_amdgpu_physical_target_info_t",
+        "    loom_amdgpu_target_info_physical_target_infos[];",
+        "extern const iree_host_size_t",
+        "    loom_amdgpu_target_info_physical_target_info_count;",
         "",
         f"#endif  // {guard}",
     ]
@@ -728,132 +1157,286 @@ def _emit_tables_header() -> str:
 
 
 def _emit_descriptor_set_rows(rows: Sequence[_AmdgpuDescriptorSetRow]) -> list[str]:
-    key_width = max(len(_c_string_arg(row.info.key)) for row in rows)
-    ordinal_width = len("UINT16_C(65535)")
-    opcode_width = len("0x000")
-    flags_width = max(len(_descriptor_set_info_flags_expr(row.info.flags)) for row in rows)
-    cache_swizzle_width = len("LOOM_AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_STRIDE14_ENABLE_BIT")
     lines = [
-        "#define LOOM_AMDGPU_DESCRIPTOR_SET_INFO(ordinal_, key_, sopp_nop_, sopp_delay_alu_, sopp_endpgm_, sopp_branch_, sopp_cbranch_scc0_, sopp_cbranch_scc1_, flags_, buffer_resource_cache_swizzle_, vector_memory_cache_policy_encoding_) \\",
-        "  { \\",
-        "    .key = IREE_SVL(key_), \\",
-        "    .ordinal = ordinal_, \\",
-        "    .sopp = { \\",
-        "      .nop = UINT16_C(sopp_nop_), \\",
-        "      .delay_alu = UINT16_C(sopp_delay_alu_), \\",
-        "      .endpgm = UINT16_C(sopp_endpgm_), \\",
-        "      .branch = UINT16_C(sopp_branch_), \\",
-        "      .conditional_branch_scc0 = UINT16_C(sopp_cbranch_scc0_), \\",
-        "      .conditional_branch_scc1 = UINT16_C(sopp_cbranch_scc1_), \\",
-        "    }, \\",
-        "    .flags = flags_, \\",
-        "    .buffer_resource = { \\",
-        "      .cache_swizzle = buffer_resource_cache_swizzle_, \\",
-        "    }, \\",
-        "    .vector_memory = { \\",
-        "      .cache_policy_encoding = vector_memory_cache_policy_encoding_, \\",
-        "    }, \\",
-        "  }",
-        "",
         "const loom_amdgpu_descriptor_set_info_t loom_amdgpu_target_info_descriptor_set_infos[] = {",
-        "  // ordinal         key                    s_nop s_delay_alu s_endpgm s_branch s_cbranch_scc0 s_cbranch_scc1 flags cache_swizzle cache_policy",
     ]
-    lines.extend(
-        (
-            "  LOOM_AMDGPU_DESCRIPTOR_SET_INFO("
-            f"{_padded_arg(_u16_expr(amdgpu_descriptor_set_ordinal(info.key)), ordinal_width)}"
-            f"{_padded_arg(_c_string_arg(info.key), key_width)}"
-            f"{_padded_arg(f'0x{row.sopp.nop:03x}', opcode_width)}"
-            f"{_padded_arg(f'0x{row.sopp.delay_alu:03x}', opcode_width)}"
-            f"{_padded_arg(f'0x{row.sopp.endpgm:03x}', opcode_width)}"
-            f"{_padded_arg(f'0x{row.sopp.branch:03x}', opcode_width)}"
-            f"{_padded_arg(f'0x{row.sopp.conditional_branch_scc0:03x}', opcode_width)}"
-            f"{_padded_arg(f'0x{row.sopp.conditional_branch_scc1:03x}', opcode_width)}"
-            f"{_padded_arg(_descriptor_set_info_flags_expr(info.flags), flags_width)}"
-            f"{_padded_arg(_buffer_resource_cache_swizzle_expr(info.buffer_resource.cache_swizzle), cache_swizzle_width)}"
-            f"{_vector_memory_cache_policy_encoding_expr(info.vector_memory.cache_policy_encoding)}"
-            "),"
+    for row in rows:
+        info = row.info
+        lines.extend(
+            [
+                "  {",
+                f"    .key = IREE_SVL({_c_string_arg(info.key)}),",
+                f"    .ordinal = {_u16_expr(amdgpu_descriptor_set_ordinal(info.key))},",
+                "    .sopp = {",
+                f"      .nop = UINT16_C(0x{row.sopp.nop:03x}),",
+                f"      .delay_alu = UINT16_C(0x{row.sopp.delay_alu:03x}),",
+                f"      .endpgm = UINT16_C(0x{row.sopp.endpgm:03x}),",
+                f"      .branch = UINT16_C(0x{row.sopp.branch:03x}),",
+                f"      .conditional_branch_scc0 = UINT16_C(0x{row.sopp.conditional_branch_scc0:03x}),",
+                f"      .conditional_branch_scc1 = UINT16_C(0x{row.sopp.conditional_branch_scc1:03x}),",
+                "    },",
+                f"    .flags = {_descriptor_set_info_flags_expr(info.flags)},",
+                "    .buffer_resource = {",
+                f"      .record_encoding = {_buffer_resource_record_encoding_expr(info.buffer_resource.record_encoding)},",
+                f"      .cache_swizzle = {_buffer_resource_cache_swizzle_expr(info.buffer_resource.cache_swizzle)},",
+                "    },",
+                "    .vector_memory = {",
+                f"      .cache_policy_encoding = {_vector_memory_cache_policy_encoding_expr(info.vector_memory.cache_policy_encoding)},",
+                "    },",
+                "  },",
+            ]
         )
-        for row in rows
-        for info in (row.info,)
-    )
-    lines.extend(["};", "", "#undef LOOM_AMDGPU_DESCRIPTOR_SET_INFO", ""])
+    lines.extend(["};", ""])
     return lines
 
 
-def _emit_processor_rows(processors: Sequence[AmdgpuProcessorInfo]) -> list[str]:
-    processor_width = max(len(_c_string_arg(info.processor)) for info in processors)
-    descriptor_set_width = max(len(_c_string_arg(info.descriptor_set.key)) for info in processors)
-    ordinal_width = len("UINT16_C(65535)")
-    machine_flags_width = len("0x000")
-    feature_flags_width = len("0x0")
-    wavefront_width = 2
-    wavefront_flags_width = max(len(_wavefront_size_flags_expr(_supported_wavefront_sizes(info))) for info in processors)
-    kernel_profile_width = max(len(_kernel_descriptor_profile_expr(info.kernel_descriptor.profile)) for info in processors)
-    kernel_flags_width = max(len(_kernel_descriptor_abi_flags_expr(info.kernel_descriptor.flags)) for info in processors)
-    matrix_profile_width = max(len(_matrix_feature_profile_expr(info.features.matrix)) for info in processors)
-    scheduling_width = max(len(_processor_scheduling_bits_expr(info.features.scheduling)) for info in processors)
-    register_granule_width = 1
-    lines = [
-        "#define LOOM_AMDGPU_PROCESSOR_INFO(processor_, descriptor_set_key_, descriptor_set_ordinal_, elf_machine_flags_, elf_feature_flags_, default_wavefront_size_, supported_wavefront_sizes_, kd_profile_, kd_flags_, matrix_profile_, scheduling_bits_, vgpr_granule_wave32_, vgpr_granule_wave64_) \\",
-        "  { \\",
-        "    .name = IREE_SVL(processor_), \\",
-        "    .descriptor_set = { \\",
-        "      .key = IREE_SVL(descriptor_set_key_), \\",
-        "      .ordinal = descriptor_set_ordinal_, \\",
-        "    }, \\",
-        "    .elf = { \\",
-        "      .machine_flags = UINT32_C(elf_machine_flags_), \\",
-        "      .feature_flags = UINT32_C(elf_feature_flags_), \\",
-        "    }, \\",
-        "    .wavefront = { \\",
-        "      .default_size = default_wavefront_size_, \\",
-        "      .supported_sizes = supported_wavefront_sizes_, \\",
-        "    }, \\",
-        "    .kernel_descriptor = { \\",
-        "      .profile = kd_profile_, \\",
-        "      .flags = kd_flags_, \\",
-        "      .vgpr_granules = { \\",
-        "        .wave32 = vgpr_granule_wave32_, \\",
-        "        .wave64 = vgpr_granule_wave64_, \\",
-        "      }, \\",
-        "    }, \\",
-        "    .features = { \\",
-        "      .matrix = matrix_profile_, \\",
-        "      .scheduling = scheduling_bits_, \\",
-        "    }, \\",
-        "  }",
-        "",
-        "const loom_amdgpu_processor_info_t loom_amdgpu_target_info_processor_infos[] = {",
-        "  // processor descriptor_set_key    ordinal         mach  feat wave wave_flags kernel_profile                              kd_flags matrix_profile                             sched vgpr32 vgpr64",
-    ]
-    lines.extend(
-        (
-            "  LOOM_AMDGPU_PROCESSOR_INFO("
-            f"{_padded_arg(_c_string_arg(info.processor), processor_width)}"
-            f"{_padded_arg(_c_string_arg(info.descriptor_set.key), descriptor_set_width)}"
-            f"{_padded_arg(_u16_expr(amdgpu_descriptor_set_ordinal(info.descriptor_set.key)) if info.descriptor_set.key else 'LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE', ordinal_width)}"
-            f"{_padded_arg(f'0x{info.elf.machine_flags:03x}', machine_flags_width)}"
-            f"{_padded_arg(f'0x{info.elf.feature_flags:x}', feature_flags_width)}"
-            f"{_padded_arg(str(info.wavefront.default_size), wavefront_width)}"
-            f"{_padded_arg(_wavefront_size_flags_expr(_supported_wavefront_sizes(info)), wavefront_flags_width)}"
-            f"{_padded_arg(_kernel_descriptor_profile_expr(info.kernel_descriptor.profile), kernel_profile_width)}"
-            f"{_padded_arg(_kernel_descriptor_abi_flags_expr(info.kernel_descriptor.flags), kernel_flags_width)}"
-            f"{_padded_arg(_matrix_feature_profile_expr(info.features.matrix), matrix_profile_width)}"
-            f"{_padded_arg(_processor_scheduling_bits_expr(info.features.scheduling), scheduling_width)}"
-            f"{_padded_arg(str(info.kernel_descriptor.vgpr_granules.wave32), register_granule_width)}"
-            f"{info.kernel_descriptor.vgpr_granules.wave64!s}),"
-        )
-        for info in processors
+def _processor_descriptor_set_ordinal_expr(info: AmdgpuProcessorInfo) -> str:
+    if not info.descriptor_set.key:
+        return "LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE"
+    return _u16_expr(amdgpu_descriptor_set_ordinal(info.descriptor_set.key))
+
+
+def _lds_bank_service_model_set_ordinal_expr(
+    model_keys: tuple[str, ...],
+    model_set_ordinals: Mapping[tuple[str, ...], int],
+) -> str:
+    if not model_keys:
+        return "LOOM_AMDGPU_LDS_BANK_SERVICE_MODEL_SET_ORDINAL_NONE"
+    return _u16_expr(model_set_ordinals[model_keys])
+
+
+def _processor_generic_code_object_fields(
+    info: AmdgpuProcessorInfo,
+    processor_ordinals: Mapping[str, int],
+) -> tuple[int | None, int]:
+    compatibility = amdgpu_generic_code_object_compatibility_info(info.processor)
+    if compatibility is None:
+        return None, 0
+    return (
+        processor_ordinals[compatibility.code_object_processor],
+        compatibility.generic_introduction_version,
     )
-    lines.extend(["};", "", "#undef LOOM_AMDGPU_PROCESSOR_INFO", ""])
+
+
+def _target_kernel_metadata_extension_array_name(info: AmdgpuTargetInfo) -> str:
+    return "loom_amdgpu_target_info_" + info.target.replace("-", "_") + "_kernel_metadata_extensions"
+
+
+def _emit_target_rows(
+    targets: Sequence[AmdgpuTargetInfo],
+    processors: Sequence[AmdgpuProcessorInfo],
+    model_set_ordinals: Mapping[tuple[str, ...], int],
+) -> list[str]:
+    lines: list[str] = []
+    processors_by_name = {info.processor: info for info in processors}
+    for info in targets:
+        metadata_extensions = info.semantics.kernel_metadata_extensions
+        if not metadata_extensions:
+            continue
+        metadata_array_name = _target_kernel_metadata_extension_array_name(info)
+        lines.append(f"static const loom_amdgpu_metadata_string_property_t {metadata_array_name}[] = {{")
+        for key, value in metadata_extensions:
+            lines.append(f"  {{.key = IREE_SVL({_c_string_arg(key)}), .value = IREE_SVL({_c_string_arg(value)})}},")
+        lines.extend(["};", ""])
+
+    lines.append("const loom_amdgpu_target_info_t loom_amdgpu_target_info_target_infos[] = {")
+    for info in targets:
+        processor = processors_by_name[info.processor]
+        descriptor_set_key = amdgpu_target_descriptor_set_key(info, processor)
+        model_keys = info.semantics.lds_bank_service_models if info.semantics.lds_bank_service_models is not None else processor.features.lds_bank_service_models
+        metadata_extensions = info.semantics.kernel_metadata_extensions
+        metadata_array_name = _target_kernel_metadata_extension_array_name(info)
+        metadata_entries = metadata_array_name if metadata_extensions else "NULL"
+        metadata_count = f"IREE_ARRAYSIZE({metadata_array_name})" if metadata_extensions else "0"
+        lines.extend(
+            [
+                "  {",
+                f"    .name = IREE_SVL({_c_string_arg(info.target)}),",
+                f"    .target_kind = {_u32_expr(info.enum_value)},",
+                f"    .processor_ordinal = {_u16_expr(amdgpu_processor_ordinal(info.processor))},",
+                f"    .descriptor_set_key = IREE_SVL({_c_string_arg(descriptor_set_key)}),",
+                f"    .descriptor_set_ordinal = {_u16_expr(amdgpu_descriptor_set_ordinal(descriptor_set_key))},",
+                f"    .instruction_constraints = {_instruction_constraint_bits_expr(amdgpu_target_instruction_constraints(info, processor))},",
+                f"    .lds_bank_service_model_set_ordinal = {_lds_bank_service_model_set_ordinal_expr(model_keys, model_set_ordinals)},",
+                "    .kernel_metadata_extensions = {",
+                f"      .entries = {metadata_entries},",
+                f"      .count = {metadata_count},",
+                "    },",
+                "  },",
+            ]
+        )
+    lines.extend(["};", ""])
+    return lines
+
+
+def _emit_physical_target_rows(
+    targets: Sequence[AmdgpuTargetInfo],
+) -> list[str]:
+    targets_by_name = {info.target: info for info in targets}
+    supported_processors = {info.processor for info in targets}
+    lines = ["const loom_amdgpu_physical_target_info_t loom_amdgpu_target_info_physical_target_infos[] = {"]
+    for info in AMDGPU_PHYSICAL_TARGET_INFOS:
+        if info.processor not in supported_processors:
+            continue
+        target = targets_by_name[info.target]
+        lines.extend(
+            [
+                "  {",
+                f"    .processor_ordinal = {_u16_expr(amdgpu_processor_ordinal(info.processor))},",
+                f"    .asic_revision = {_u32_expr(info.asic_revision)},",
+                f"    .target_kind = {_u32_expr(target.enum_value)},",
+                "  },",
+            ]
+        )
+    lines.extend(["};", ""])
+    return lines
+
+
+def _matrix_coexecution_release_table_symbol(profile: str) -> str:
+    return f"kAmdgpuMatrixCoexecutionReleases{_c_ident(profile)}"
+
+
+def _emit_matrix_coexecution_source_layouts() -> str:
+    _validate_matrix_coexecution_sources()
+    lines: list[str] = []
+    for source_info in AMDGPU_MATRIX_COEXECUTION_SOURCE_INFOS:
+        lines.extend(
+            [
+                f"  [{_matrix_coexecution_source_expr(source_info.source)}] = {{",
+                f"    .result_operand_index = {source_info.result_operand_index},",
+                f"    .source_operand_start = {source_info.source_operand_start},",
+                f"    .source_operand_count = {source_info.source_operand_count},",
+                "  },",
+            ]
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _emit_matrix_coexecution_rows() -> list[str]:
+    lines: list[str] = []
+    for profile, rules in AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE.items():
+        if not rules:
+            continue
+        lines.append(
+            "static const loom_amdgpu_matrix_coexecution_release_t "
+            f"{_matrix_coexecution_release_table_symbol(profile)}"
+            "[LOOM_AMDGPU_MATRIX_COEXECUTION_SOURCE_COUNT]"
+            "[LOOM_AMDGPU_MATRIX_COEXECUTION_LATENCY_COUNT] = {"
+        )
+        for source_info in AMDGPU_MATRIX_COEXECUTION_SOURCE_INFOS:
+            source_rules = tuple(rule for rule in rules if rule.source == source_info.source)
+            if not source_rules:
+                continue
+            lines.append(f"  [{_matrix_coexecution_source_expr(source_info.source)}] = {{")
+            for rule in source_rules:
+                lines.extend(
+                    [
+                        f"    [{rule.latency_cycles}] = {{",
+                        f"      .matrix_issue_distance = {rule.matrix_issue_distance},",
+                        f"      .vector_issue_distance = {rule.vector_issue_distance},",
+                        "    },",
+                    ]
+                )
+            lines.append("  },")
+        lines.extend(["};", ""])
+
+    lines.append("const loom_amdgpu_matrix_coexecution_profile_info_t loom_amdgpu_target_info_matrix_coexecution_profile_infos[] = {")
+    for profile, rules in AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE.items():
+        profile_expr = _matrix_coexecution_profile_expr(profile)
+        if not rules:
+            lines.append(f"  [{profile_expr}] = {{0}},")
+            continue
+        maximum_issue_distance = max(max(rule.matrix_issue_distance, rule.vector_issue_distance) for rule in rules)
+        lines.extend(
+            [
+                f"  [{profile_expr}] = {{",
+                f"    .releases = {_matrix_coexecution_release_table_symbol(profile)},",
+                f"    .maximum_issue_distance = {maximum_issue_distance},",
+                "  },",
+            ]
+        )
+    lines.extend(["};", ""])
+    return lines
+
+
+def _emit_processor_rows(
+    processors: Sequence[AmdgpuProcessorInfo],
+    model_set_ordinals: Mapping[tuple[str, ...], int],
+) -> list[str]:
+    lines = [
+        "const loom_amdgpu_processor_info_t loom_amdgpu_target_info_processor_infos[] = {",
+    ]
+    processor_ordinals = {info.processor: ordinal for ordinal, info in enumerate(processors)}
+    for processor_ordinal, info in enumerate(processors):
+        kernel_descriptor = info.kernel_descriptor
+        (
+            generic_processor_ordinal,
+            generic_introduction_version,
+        ) = _processor_generic_code_object_fields(info, processor_ordinals)
+        generic_processor_ordinal_expr = "LOOM_AMDGPU_PROCESSOR_ORDINAL_NONE" if generic_processor_ordinal is None else _u16_expr(generic_processor_ordinal)
+        lines.extend(
+            [
+                "  {",
+                f"    .name = IREE_SVL({_c_string_arg(info.processor)}),",
+                f"    .ordinal = {_u16_expr(processor_ordinal)},",
+                "    .target_id = {",
+                f"      .supported_features = {_target_id_feature_support_flags_expr(info.target_id.supported_features)},",
+                "    },",
+                "    .generic_code_object = {",
+                f"      .processor_ordinal = {generic_processor_ordinal_expr},",
+                f"      .introduction_version = {_u16_expr(generic_introduction_version)},",
+                "    },",
+                "    .properties = {",
+                f"      .occupancy_model_ordinal = {_u16_expr(processor_ordinal)},",
+                f"      .flags = {_processor_info_flags_expr(info.flags)},",
+                "      .descriptor_set = {",
+                f"        .key = IREE_SVL({_c_string_arg(info.descriptor_set.key)}),",
+                f"        .ordinal = {_processor_descriptor_set_ordinal_expr(info)},",
+                "      },",
+                "      .elf = {",
+                f"        .machine_flags = UINT32_C(0x{info.elf.machine_flags:03x}),",
+                f"        .feature_flags = UINT32_C(0x{info.elf.feature_flags:x}),",
+                f"        .generic_version = UINT32_C({info.elf.generic_version}),",
+                "      },",
+                "      .wavefront = {",
+                f"        .default_size = {info.wavefront.default_size},",
+                f"        .supported_sizes = {_wavefront_size_flags_expr(_supported_wavefront_sizes(info))},",
+                "      },",
+                "      .kernel_descriptor = {",
+                f"        .profile = {_kernel_descriptor_profile_expr(kernel_descriptor.profile)},",
+                f"        .flags = {_kernel_descriptor_abi_flags_expr(kernel_descriptor.flags)},",
+                "        .vgpr_granules = {",
+                f"          .wave32 = {kernel_descriptor.vgpr_granules.wave32},",
+                f"          .wave64 = {kernel_descriptor.vgpr_granules.wave64},",
+                "        },",
+                "      },",
+                "      .kernel_entry = {",
+                f"        .profile = {_kernel_entry_profile_expr(info.kernel_entry.profile)},",
+                "      },",
+                "      .instructions = {",
+                f"        .base_constraints = {_instruction_constraint_bits_expr(info.instructions.base_constraints)},",
+                "      },",
+                "      .features = {",
+                f"        .matrix = {_matrix_feature_profile_expr(info.features.matrix)},",
+                f"        .matrix_coexecution = {_matrix_coexecution_profile_expr(info.features.matrix_coexecution)},",
+                f"        .scheduling = {_processor_scheduling_bits_expr(info.features.scheduling)},",
+                f"        .lds_bank_service_model_set_ordinal = {_lds_bank_service_model_set_ordinal_expr(info.features.lds_bank_service_models, model_set_ordinals)},",
+                "      },",
+                "    },",
+                "  },",
+            ]
+        )
+    lines.extend(["};", ""])
     return lines
 
 
 def _emit_tables_source(
     processors: Sequence[AmdgpuProcessorInfo],
+    targets: Sequence[AmdgpuTargetInfo],
     descriptor_set_rows: Sequence[_AmdgpuDescriptorSetRow],
 ) -> str:
+    model_sets = amdgpu_lds_bank_service_model_sets(processors, targets)
+    model_set_ordinals = {model_keys: ordinal for ordinal, model_keys in enumerate(model_sets)}
     lines = [
         "// Copyright 2026 The IREE Authors",
         "//",
@@ -872,7 +1455,10 @@ def _emit_tables_source(
         "// clang-format off",
     ]
     lines.extend(_emit_descriptor_set_rows(descriptor_set_rows))
-    lines.extend(_emit_processor_rows(processors))
+    lines.extend(_emit_matrix_coexecution_rows())
+    lines.extend(_emit_processor_rows(processors, model_set_ordinals))
+    lines.extend(_emit_target_rows(targets, processors, model_set_ordinals))
+    lines.extend(_emit_physical_target_rows(targets))
     lines.append("// clang-format on")
     lines.append("")
     lines.extend(
@@ -884,33 +1470,48 @@ def _emit_tables_source(
             "const iree_host_size_t",
             "    loom_amdgpu_target_info_processor_info_count =",
             "        IREE_ARRAYSIZE(loom_amdgpu_target_info_processor_infos);",
+            "",
+            "const iree_host_size_t",
+            "    loom_amdgpu_target_info_target_info_count =",
+            "        IREE_ARRAYSIZE(loom_amdgpu_target_info_target_infos);",
+            "",
+            "const iree_host_size_t",
+            "    loom_amdgpu_target_info_physical_target_info_count =",
+            "        IREE_ARRAYSIZE(",
+            "            loom_amdgpu_target_info_physical_target_infos);",
         ]
     )
     return "\n".join(lines) + "\n"
 
 
-def write_target_info_to_paths(
+def _write_target_info_to_paths(
     header_path: Path,
     source_path: Path,
     tables_header_path: Path,
-    isa_xml_arguments: Sequence[str],
-) -> None:
-    descriptor_sets = sorted_descriptor_set_infos()
-    processors = sorted_processor_infos()
-    isa_specs = _parse_isa_xml_arguments(isa_xml_arguments)
-    descriptor_set_rows = _materialize_descriptor_set_rows(descriptor_sets, isa_specs)
+    descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
+    processors: Sequence[AmdgpuProcessorInfo],
+    targets: Sequence[AmdgpuTargetInfo],
+) -> tuple[tuple[str, ...], ...]:
     _validate_descriptor_sets(descriptor_sets)
+    descriptor_set_rows = _materialize_descriptor_set_rows(descriptor_sets)
     _validate_descriptor_set_rows(descriptor_set_rows)
+    _validate_matrix_coexecution_profiles()
     _validate_processors(processors, descriptor_sets)
+    validate_amdgpu_lds_bank_service_model_infos(amdgpu_descriptor_ref_keys())
+    validate_amdgpu_code_object_processor_rows(processors)
+    validate_amdgpu_target_id_processor_rows(processors)
+    validate_amdgpu_target_rows(processors, targets)
+    model_sets = amdgpu_lds_bank_service_model_sets(processors, targets)
+    validate_amdgpu_lds_bank_service_model_coverage(model_sets)
+    if len(model_sets) >= AMDGPU_LDS_BANK_SERVICE_MODEL_SET_ORDINAL_NONE:
+        raise ValueError("AMDGPU LDS bank-service model-set ordinals must fit uint16_t")
     header = _emit_header(descriptor_sets)
     tables_header = _emit_tables_header()
-    source = _emit_tables_source(processors, descriptor_set_rows)
-    header_path.parent.mkdir(parents=True, exist_ok=True)
-    source_path.parent.mkdir(parents=True, exist_ok=True)
-    tables_header_path.parent.mkdir(parents=True, exist_ok=True)
-    header_path.write_text(header, encoding="utf-8")
-    source_path.write_text(source, encoding="utf-8")
-    tables_header_path.write_text(tables_header, encoding="utf-8")
+    source = _emit_tables_source(processors, targets, descriptor_set_rows)
+    write_text_file(header_path, header)
+    write_text_file(source_path, source)
+    write_text_file(tables_header_path, tables_header)
+    return model_sets
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -918,58 +1519,129 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--header",
         type=Path,
+        required=True,
         help="Generated target-info header path.",
     )
     parser.add_argument(
         "--source",
         type=Path,
+        required=True,
         help="Generated target-info source path.",
     )
     parser.add_argument(
         "--tables-header",
         type=Path,
+        required=True,
         help="Generated target-info private table header path.",
     )
     parser.add_argument(
         "--cache-policy-encoding-rows",
         type=Path,
+        required=True,
         help="Generated memory cache-policy encoding row fragment path.",
     )
     parser.add_argument(
         "--cache-policy-temporal-th",
         type=Path,
+        required=True,
         help="Generated memory cache-policy temporal TH fragment path.",
     )
     parser.add_argument(
-        "--isa-xml",
-        action="append",
-        default=[],
-        help="ISA XML fact source as key:path.",
+        "--lds-bank-service-model-rows",
+        type=Path,
+        required=True,
+        help="Generated LDS bank-service model-set fragment path.",
+    )
+    parser.add_argument(
+        "--matrix-coexecution-source-layouts",
+        type=Path,
+        required=True,
+        help="Generated matrix coexecution source-layout fragment path.",
+    )
+    parser.add_argument(
+        "--low-registry-tables",
+        type=Path,
+        required=True,
+        help="Generated low descriptor registry X-macro table path.",
+    )
+    parser.add_argument(
+        "--encoding-tables",
+        type=Path,
+        required=True,
+        help="Generated encoding table X-macro table path.",
+    )
+    parser.add_argument(
+        "--encoding-field-ids",
+        type=Path,
+        required=True,
+        help="Generated encoding field ID X-macro row fragment path.",
+    )
+    parser.add_argument(
+        "--low-alias-source",
+        type=Path,
+        required=True,
+        help="Generated blocked low-alias C source path.",
+    )
+    parser.add_argument(
+        "--target-record-tables",
+        type=Path,
+        required=True,
+        help="Generated target-record X-macro table path.",
+    )
+    parser.add_argument(
+        "--occupancy-model-tables",
+        type=Path,
+        required=True,
+        help="Generated occupancy model C source path.",
     )
     args = parser.parse_args(argv)
 
-    wrote_output = False
-    target_info_paths = (args.header, args.source, args.tables_header)
-    if any(path is not None for path in target_info_paths):
-        if not all(path is not None for path in target_info_paths):
-            parser.error("--header, --source, and --tables-header must be provided together")
-        write_target_info_to_paths(
-            header_path=args.header,
-            source_path=args.source,
-            tables_header_path=args.tables_header,
-            isa_xml_arguments=args.isa_xml,
-        )
-        wrote_output = True
-    if args.cache_policy_encoding_rows is not None:
-        args.cache_policy_encoding_rows.parent.mkdir(parents=True, exist_ok=True)
-        args.cache_policy_encoding_rows.write_text(_emit_memory_cache_policy_encoding_rows(), encoding="utf-8")
-        wrote_output = True
-    if args.cache_policy_temporal_th is not None:
-        args.cache_policy_temporal_th.parent.mkdir(parents=True, exist_ok=True)
-        args.cache_policy_temporal_th.write_text(_emit_memory_cache_policy_temporal_th(), encoding="utf-8")
-        wrote_output = True
-    if not wrote_output:
-        parser.error("at least one output path is required")
+    descriptor_sets = sorted_descriptor_set_infos()
+    processors = sorted_processor_infos()
+    targets = sorted_target_infos()
+    lds_bank_service_model_sets = _write_target_info_to_paths(
+        header_path=args.header,
+        source_path=args.source,
+        tables_header_path=args.tables_header,
+        descriptor_sets=descriptor_sets,
+        processors=processors,
+        targets=targets,
+    )
+    write_text_file(
+        args.cache_policy_encoding_rows,
+        _emit_memory_cache_policy_encoding_rows(descriptor_sets),
+    )
+    write_text_file(
+        args.cache_policy_temporal_th,
+        _emit_memory_cache_policy_temporal_th(),
+    )
+    write_text_file(
+        args.lds_bank_service_model_rows,
+        _emit_lds_bank_service_model_rows(lds_bank_service_model_sets),
+    )
+    write_text_file(
+        args.matrix_coexecution_source_layouts,
+        _emit_matrix_coexecution_source_layouts(),
+    )
+    write_config_tables_to_paths(
+        descriptor_sets=descriptor_sets,
+        processors=processors,
+        targets=targets,
+        low_registry_tables_path=args.low_registry_tables,
+        encoding_tables_path=args.encoding_tables,
+        encoding_field_ids_path=args.encoding_field_ids,
+    )
+    write_low_aliases_to_path(args.low_alias_source)
+    write_target_record_tables_to_path(
+        args.target_record_tables,
+        descriptor_sets=descriptor_sets,
+        processors=processors,
+        targets=targets,
+    )
+    write_text_file(
+        args.occupancy_model_tables,
+        generate_occupancy_tables(descriptor_sets, processors),
+    )
     return 0
 
 

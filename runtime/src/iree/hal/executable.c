@@ -6,6 +6,8 @@
 
 #include "iree/hal/executable.h"
 
+#include <string.h>
+
 #include "iree/hal/detail.h"
 #include "iree/hal/resource.h"
 
@@ -13,6 +15,13 @@
   IREE_HAL_VTABLE_DISPATCH(executable, iree_hal_executable, method_name)
 
 IREE_HAL_API_RETAIN_RELEASE(executable);
+
+IREE_API_EXPORT void iree_hal_executable_load_params_initialize(
+    iree_hal_executable_load_params_t* out_params) {
+  IREE_ASSERT_ARGUMENT(out_params);
+  memset(out_params, 0, sizeof(*out_params));
+  out_params->flags = IREE_HAL_EXECUTABLE_LOAD_FLAG_ALLOW_OPTIMIZATION;
+}
 
 IREE_API_EXPORT iree_host_size_t
 iree_hal_executable_function_count(iree_hal_executable_t* executable) {
@@ -25,6 +34,7 @@ IREE_API_EXPORT iree_status_t iree_hal_executable_function_info(
     iree_hal_executable_function_info_t* out_info) {
   IREE_ASSERT_ARGUMENT(executable);
   IREE_ASSERT_ARGUMENT(out_info);
+  memset(out_info, 0, sizeof(*out_info));
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_status_t status = _VTABLE_DISPATCH(executable, function_info)(
       executable, function, out_info);

@@ -1,0 +1,13 @@
+kernel.def @defined_kernel(%workload_count: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%workload_count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%output: buffer) {
+  kernel.return
+}
+
+kernel.decl @declared_kernel(%workload_count: index) launch(%output: buffer)
+
+func.def @launch_program(%count: index, %output: tensor<4xi32>) {
+  kernel.launch @declared_kernel[%count](%output) : [index](tensor<4xi32>)
+  func.return
+}

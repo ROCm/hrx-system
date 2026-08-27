@@ -61,6 +61,7 @@ _LOOM_CONFIG_CMAKE_OPTIONS = {
     "//loom/config/execute:iree_hal_amdgpu": "LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU",
     "//loom/config/execute:iree_hal_vulkan": "LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN",
     "//loom/config/execute:iree_vm": "LOOM_EXECUTE_IREE_VM",
+    "//loom/config/execute:iree_vm_execution": "LOOM_TARGET_ARCH_IREE_VM AND LOOM_EMIT_IREE_VM AND LOOM_EXECUTE_IREE_VM",
     "//loom/config/execute:spirv_vulkan_hal": "LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN",
     "//loom/config/import:mlir": "LOOM_IMPORT_MLIR",
     "//loom/config/import:tilelang": "LOOM_IMPORT_TILELANG",
@@ -78,13 +79,15 @@ _LOOM_CONFIG_CMAKE_OPTIONS = {
 }
 _LOOM_CONFIG_CMAKE_OPTIONS.update(_loom_amdgpu_config_cmake_options())
 
-_LOW_DESCRIPTOR_ROOTPATH_PATTERN = re.compile(r"\$\(rootpath ([^)]+)\)")
+_GENERATED_ROOTPATH_PATTERN = re.compile(r"\$\(rootpath ([^)]+)\)")
+_GENERATED_LOCATION_PATTERN = re.compile(r"\$\(location ([^)]+)\)")
 
 
 class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
     def _custom_initialize(self):
         self._loom_low_descriptor_archive_source_vars = {}
         self._loom_low_descriptor_archive_targets = {}
+        self._loom_generated_external_files = {}
         self.LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY = _LOOM_AMDGPU_TARGET_CONFIG[
             "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY"
         ]
@@ -97,6 +100,11 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         self._loom_amdgpu_descriptor_set_generator_targets = _LOOM_AMDGPU_TARGET_CONFIG[
             "LOOM_AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS"
         ]
+        self._loom_amdgpu_descriptor_set_capabilities_by_storage_generator_target = (
+            _LOOM_AMDGPU_TARGET_CONFIG[
+                "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES_BY_STORAGE_GENERATOR_TARGET"
+            ]
+        )
         self._loom_requirement_policy = bazel_to_cmake_requirements.load_project_policy(
             self._repo_root,
             "loom",
@@ -175,6 +183,83 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
     def loom_config_compatible_with(self, config_labels):
         return list(config_labels)
 
+    def loom_module(
+        self,
+        name,
+        srcs,
+        libraries=None,
+        roots=None,
+        configs=None,
+        mode="merge",
+        output=None,
+        output_format="text",
+        include_input_exports=False,
+        strip_check=False,
+        require_resolved_config=False,
+        tags=None,
+        target_compatible_with=None,
+        **kwargs,
+    ):
+        if self._should_skip_target(tags=tags, **kwargs):
+            return
+        target_compatible_with = self._apply_loom_target_compatible_with(
+            target_compatible_with
+        )
+        output = output or (name + (".loombc" if output_format == "bc" else ".loom"))
+        self._target_file_paths[self._current_target_label(name)] = (
+            f"${{CMAKE_CURRENT_BINARY_DIR}}/{output}"
+        )
+        name_block = self._convert_string_arg_block("NAME", name, quote=False)
+        srcs_block = self._convert_loom_module_inputs("SRCS", srcs)
+        libraries_block = self._convert_loom_module_inputs("LIBRARIES", libraries)
+        roots_block = self._convert_string_list_block("ROOTS", roots, sort=False)
+        configs_block = self._convert_string_list_block("CONFIGS", configs, sort=False)
+        mode_block = self._convert_string_arg_block("MODE", mode)
+        output_block = self._convert_string_arg_block("OUTPUT", output)
+        output_format_block = self._convert_string_arg_block(
+            "OUTPUT_FORMAT", output_format
+        )
+        include_input_exports_block = self._convert_option_block(
+            "INCLUDE_INPUT_EXPORTS", include_input_exports
+        )
+        strip_check_block = self._convert_option_block("STRIP_CHECK", strip_check)
+        require_resolved_config_block = self._convert_option_block(
+            "REQUIRE_RESOLVED_CONFIG", require_resolved_config
+        )
+        self._emit_platform_guard_begin(target_compatible_with)
+        self._converter.body += (
+            f"loom_module(\n"
+            f"{name_block}"
+            f"{srcs_block}"
+            f"{libraries_block}"
+            f"{roots_block}"
+            f"{configs_block}"
+            f"{mode_block}"
+            f"{output_block}"
+            f"{output_format_block}"
+            f"{include_input_exports_block}"
+            f"{strip_check_block}"
+            f"{require_resolved_config_block}"
+            f")\n\n"
+        )
+        self._emit_platform_guard_end(target_compatible_with)
+
+    def _convert_loom_module_inputs(self, block_name, inputs):
+        if inputs is None:
+            return ""
+        converted_inputs = []
+        for input_value in inputs:
+            if input_value.startswith(":") or input_value.startswith("//"):
+                if self._is_source_data_label(input_value):
+                    converted_inputs.append(
+                        self._cmake_source_location_path(input_value)
+                    )
+                else:
+                    converted_inputs.append(self._convert_single_target(input_value))
+            else:
+                converted_inputs.append(input_value)
+        return self._convert_string_list_block(block_name, converted_inputs, sort=False)
+
     def loom_amdgpu_target_selectors_flag(self, **kwargs):
         return None
 
@@ -192,6 +277,21 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         return self.loom_config_compatible_with(
             [self._loom_amdgpu_descriptor_set_config_label(capability)]
         )
+
+    def loom_amdgpu_descriptor_table_compatible_with(self, storage_generator_target):
+        capabilities = self._loom_amdgpu_descriptor_set_capabilities_by_storage_generator_target.get(
+            storage_generator_target
+        )
+        if not capabilities:
+            raise ValueError(
+                f"Unknown AMDGPU descriptor storage target: {storage_generator_target}"
+            )
+        compatibility = {
+            self._loom_amdgpu_descriptor_set_config_label(capability): []
+            for capability in capabilities
+        }
+        compatibility["//conditions:default"] = ["@platforms//:incompatible"]
+        return self.select(compatibility)
 
     def loom_amdgpu_selected_descriptor_set_defines(self):
         defines = []
@@ -225,6 +325,14 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
     def loom_amdgpu_selected_descriptor_set_generator_args(self, args):
         return self.loom_amdgpu_selected_descriptor_set_values(args)
 
+    def loom_amdgpu_selected_descriptor_set_key_args(self):
+        return self.loom_amdgpu_selected_descriptor_set_values(
+            {
+                capability: "--descriptor-set=" + descriptor_set_key
+                for descriptor_set_key, capability in self.LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY.items()
+            }
+        )
+
     def loom_amdgpu_selected_descriptor_set_deps(self, targets):
         return self.loom_amdgpu_selected_descriptor_set_values(targets)
 
@@ -254,6 +362,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         return [
             "${PROJECT_SOURCE_DIR}/loom/py",
             "${PROJECT_BINARY_DIR}/loom/py",
+            "${PROJECT_SOURCE_DIR}",
         ]
 
     def _emit_rewritten_cmake_rule(self, old_rule_name, new_rule_name, emit):
@@ -349,37 +458,81 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             return repo_name, f"{package}/{filename}"
         return repo_name, filename
 
-    def _convert_low_descriptor_file_label(self, label):
+    def _convert_generated_file_label(self, label):
+        generated_external_file = self._loom_generated_external_files.get(label)
+        if generated_external_file is not None:
+            return generated_external_file
         if label.startswith("@"):
             repo_name, filename = self._parse_external_file_label(label)
             try:
                 source_var = self._loom_low_descriptor_archive_source_vars[repo_name]
             except KeyError as exc:
                 raise ValueError(
-                    f"Low descriptor input {label} requires a prior "
-                    f"loom_low_descriptor_data_archive for repo '{repo_name}'"
+                    f"Generated input {label} has no CMake source mapping for "
+                    f"external repo '{repo_name}'"
                 ) from exc
             return f"${{{source_var}}}/{filename}"
         return self._normalize_label(label)
 
-    def _convert_low_descriptor_input_label(self, label):
-        inputs = [self._convert_low_descriptor_file_label(label)]
-        if label.startswith("@"):
+    def _cmake_location_paths(self, label):
+        generated_external_file = self._loom_generated_external_files.get(label)
+        if generated_external_file is not None:
+            return [generated_external_file]
+        return super()._cmake_location_paths(label)
+
+    def loom_spirv_registry_sources(
+        self,
+        name,
+        tags=None,
+        target_compatible_with=None,
+        **kwargs,
+    ):
+        if self._should_skip_target(tags=tags, **kwargs):
+            return
+        _ = name
+        target_compatible_with = self._apply_loom_target_compatible_with(
+            target_compatible_with
+        )
+        self._loom_generated_external_files[
+            "@spirv_headers//:spirv_core_grammar_unified1"
+        ] = "${_LOOM_SPIRV_CORE_GRAMMAR}"
+        self._loom_generated_external_files["@vulkan_headers//:vulkan_xml_registry"] = (
+            "${_LOOM_VULKAN_XML_REGISTRY}"
+        )
+        self._converter.header += self._guard_cmake_text(
+            "\n"
+            "iree_get_spirv_registry_sources(\n"
+            "  _LOOM_SPIRV_CORE_GRAMMAR\n"
+            "  _LOOM_VULKAN_XML_REGISTRY\n"
+            ")\n\n",
+            target_compatible_with,
+        )
+
+    def _convert_generated_input_label(self, label):
+        inputs = [self._convert_generated_file_label(label)]
+        if label.startswith("@") and label not in self._loom_generated_external_files:
             repo_name, _ = self._parse_external_file_label(label)
             inputs.append(self._loom_low_descriptor_archive_targets[repo_name])
         return inputs
 
-    def _convert_low_descriptor_arg(self, arg):
+    def _convert_generated_arg(self, arg):
         def replace_rootpath(match):
-            return self._convert_low_descriptor_file_label(match.group(1))
+            return self._convert_generated_file_label(match.group(1))
 
-        return _LOW_DESCRIPTOR_ROOTPATH_PATTERN.sub(replace_rootpath, arg)
+        def replace_external_location(match):
+            label = match.group(1)
+            if label.startswith("@"):
+                return self._convert_generated_file_label(label)
+            return match.group(0)
+
+        arg = _GENERATED_ROOTPATH_PATTERN.sub(replace_rootpath, arg)
+        return _GENERATED_LOCATION_PATTERN.sub(replace_external_location, arg)
 
     def _convert_generated_args(self, args):
         def convert(args):
             converted_args = []
             for arg in args or []:
-                arg = self._convert_low_descriptor_arg(arg)
+                arg = self._convert_generated_arg(arg)
                 converted_args.extend(self._convert_location_arg(arg))
             return converted_args
 
@@ -389,7 +542,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         def convert(inputs):
             converted_inputs = []
             for label in inputs or []:
-                for converted_input in self._convert_low_descriptor_input_label(label):
+                for converted_input in self._convert_generated_input_label(label):
                     if converted_input not in converted_inputs:
                         converted_inputs.append(converted_input)
             return converted_inputs
@@ -478,12 +631,72 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         )
         self._emit_platform_guard_end(target_compatible_with)
 
+    def loom_generated_file_family(
+        self,
+        name,
+        generator,
+        outputs,
+        output_flags,
+        args=None,
+        inputs=None,
+        comment=None,
+        tags=None,
+        testonly=None,
+        target_compatible_with=None,
+        visibility=None,
+        **kwargs,
+    ):
+        if self._should_skip_target(tags=tags, **kwargs):
+            return
+        target_compatible_with = self._apply_loom_target_compatible_with(
+            target_compatible_with
+        )
+
+        name_block = self._convert_string_arg_block("NAME", name, quote=False)
+        generator_block = self._convert_single_target_block("GENERATOR", generator)
+        outputs_block = self._convert_string_list_block("OUTPUTS", outputs, sort=False)
+        output_flags_block = self._convert_string_list_block(
+            "OUTPUT_FLAGS", output_flags, sort=False
+        )
+        args_block, platform_args_block = self._convert_platform_select_strings(
+            name,
+            "ARGS",
+            self._convert_generated_args(args),
+            sort=False,
+        )
+        inputs_block, platform_inputs_block = self._convert_platform_select_strings(
+            name,
+            "INPUTS",
+            self._convert_generated_inputs(inputs),
+            sort=False,
+        )
+        comment_block = self._convert_string_arg_block("COMMENT", comment)
+
+        self._emit_platform_guard_begin(target_compatible_with)
+        if platform_args_block:
+            self._converter.body += platform_args_block
+        if platform_inputs_block:
+            self._converter.body += platform_inputs_block
+        self._converter.body += (
+            f"loom_generated_file_family(\n"
+            f"{name_block}"
+            f"{generator_block}"
+            f"{outputs_block}"
+            f"{output_flags_block}"
+            f"{args_block}"
+            f"{inputs_block}"
+            f"{comment_block}"
+            f")\n\n"
+        )
+        self._emit_platform_guard_end(target_compatible_with)
+
     def loom_generated_cc_library(
         self,
         name,
         generator,
         source=None,
         srcs=None,
+        textual_hdrs=None,
         generated_src_flags=None,
         generated_srcs=None,
         hdrs=None,
@@ -510,6 +723,9 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         generator_block = self._convert_single_target_block("GENERATOR", generator)
         source_block = self._convert_string_arg_block("SOURCE", source)
         srcs_block = self._convert_srcs_block(srcs, block_name="SRCS")
+        textual_hdrs_block = self._convert_srcs_block(
+            textual_hdrs, block_name="TEXTUAL_HDRS"
+        )
         generated_src_flags_block = self._convert_string_list_block(
             "GENERATED_SRC_FLAGS", generated_src_flags or None, sort=False
         )
@@ -555,6 +771,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             f"{generator_block}"
             f"{source_block}"
             f"{srcs_block}"
+            f"{textual_hdrs_block}"
             f"{generated_src_flags_block}"
             f"{generated_srcs_block}"
             f"{hdrs_block}"
@@ -625,7 +842,6 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         inputs=None,
         deps=None,
         ids_deps=None,
-        exclude_from_cmake_all=False,
         tags=None,
         testonly=None,
         visibility=None,
@@ -659,9 +875,6 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         )
         deps_block = self._convert_target_list_block("DEPS", deps)
         ids_deps_block = self._convert_target_list_block("IDS_DEPS", ids_deps)
-        exclude_from_all_block = self._convert_option_block(
-            "EXCLUDE_FROM_ALL", exclude_from_cmake_all
-        )
         header_only_block = self._convert_option_block("HEADER_ONLY", header_only)
         testonly_block = self._convert_option_block("TESTONLY", testonly)
 
@@ -681,7 +894,6 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             f"{inputs_block}"
             f"{deps_block}"
             f"{ids_deps_block}"
-            f"{exclude_from_all_block}"
             f"{header_only_block}"
             f"{testonly_block}"
             f")\n\n"
@@ -700,7 +912,6 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         inputs=None,
         deps=None,
         ids_deps=None,
-        exclude_from_cmake_all=False,
         tags=None,
         testonly=None,
         target_compatible_with=None,
@@ -725,9 +936,165 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             inputs=inputs,
             deps=deps,
             ids_deps=ids_deps,
-            exclude_from_cmake_all=exclude_from_cmake_all,
             testonly=testonly,
             cmake_rule_name="loom_target_table_cc_library",
+        )
+        self._emit_platform_guard_end(target_compatible_with)
+
+    def loom_target_contract_cc_libraries(
+        self,
+        name,
+        contract_deps=None,
+        lower_rule_deps=None,
+        tags=None,
+        testonly=None,
+        target_compatible_with=None,
+        visibility=None,
+        **kwargs,
+    ):
+        if self._should_skip_target(tags=tags, **kwargs):
+            return
+        target_compatible_with = self._apply_loom_target_compatible_with(
+            target_compatible_with
+        )
+
+        name_block = self._convert_string_arg_block("NAME", name, quote=False)
+        contract_deps_block = self._convert_target_list_block(
+            "CONTRACT_DEPS", contract_deps
+        )
+        lower_rule_deps_block = self._convert_target_list_block(
+            "LOWER_RULE_DEPS", lower_rule_deps
+        )
+        testonly_block = self._convert_option_block("TESTONLY", testonly)
+
+        self._emit_platform_guard_begin(target_compatible_with)
+        self._converter.body += (
+            f"loom_target_contract_cc_libraries(\n"
+            f"{name_block}"
+            f"{contract_deps_block}"
+            f"{lower_rule_deps_block}"
+            f"{testonly_block}"
+            f")\n\n"
+        )
+        self._emit_platform_guard_end(target_compatible_with)
+
+    def loom_target_contract_table_cc_libraries(
+        self,
+        name,
+        generator,
+        args=None,
+        inputs=None,
+        contract_deps=None,
+        lower_rule_deps=None,
+        tags=None,
+        testonly=None,
+        target_compatible_with=None,
+        visibility=None,
+        **kwargs,
+    ):
+        if self._should_skip_target(tags=tags, **kwargs):
+            return
+        target_compatible_with = self._apply_loom_target_compatible_with(
+            target_compatible_with
+        )
+
+        name_block = self._convert_string_arg_block("NAME", name, quote=False)
+        generator_block = self._convert_single_target_block("GENERATOR", generator)
+        args_block, platform_args_block = self._convert_platform_select_strings(
+            name,
+            "ARGS",
+            self._convert_generated_args(args),
+            sort=False,
+        )
+        inputs_block, platform_inputs_block = self._convert_platform_select_strings(
+            name,
+            "INPUTS",
+            self._convert_generated_inputs(inputs),
+            sort=False,
+        )
+        contract_deps_block = self._convert_target_list_block(
+            "CONTRACT_DEPS", contract_deps
+        )
+        lower_rule_deps_block = self._convert_target_list_block(
+            "LOWER_RULE_DEPS", lower_rule_deps
+        )
+        testonly_block = self._convert_option_block("TESTONLY", testonly)
+
+        self._emit_platform_guard_begin(target_compatible_with)
+        if platform_args_block:
+            self._converter.body += platform_args_block
+        if platform_inputs_block:
+            self._converter.body += platform_inputs_block
+        self._converter.body += (
+            f"loom_target_contract_table_cc_libraries(\n"
+            f"{name_block}"
+            f"{generator_block}"
+            f"{args_block}"
+            f"{inputs_block}"
+            f"{contract_deps_block}"
+            f"{lower_rule_deps_block}"
+            f"{testonly_block}"
+            f")\n\n"
+        )
+        self._emit_platform_guard_end(target_compatible_with)
+
+    def loom_target_contract_file_family(
+        self,
+        name,
+        generator,
+        fragments,
+        args=None,
+        inputs=None,
+        comment=None,
+        tags=None,
+        target_compatible_with=None,
+        visibility=None,
+        **kwargs,
+    ):
+        if self._should_skip_target(tags=tags, **kwargs):
+            return
+        target_compatible_with = self._apply_loom_target_compatible_with(
+            target_compatible_with
+        )
+
+        name_block = self._convert_string_arg_block("NAME", name, quote=False)
+        generator_block = self._convert_single_target_block("GENERATOR", generator)
+        fragments_block = self._convert_string_list_block(
+            "FRAGMENTS",
+            [
+                f"{stem}={fragment_key}"
+                for stem, fragment_key in sorted(fragments.items())
+            ],
+            sort=False,
+        )
+        args_block, platform_args_block = self._convert_platform_select_strings(
+            name,
+            "ARGS",
+            self._convert_generated_args(args),
+            sort=False,
+        )
+        inputs_block, platform_inputs_block = self._convert_platform_select_strings(
+            name,
+            "INPUTS",
+            self._convert_generated_inputs(inputs),
+            sort=False,
+        )
+        comment_block = self._convert_string_arg_block("COMMENT", comment)
+
+        self._emit_platform_guard_begin(target_compatible_with)
+        if platform_args_block:
+            self._converter.body += platform_args_block
+        if platform_inputs_block:
+            self._converter.body += platform_inputs_block
+        self._converter.body += (
+            f"loom_target_contract_file_family(\n"
+            f"{name_block}"
+            f"{generator_block}"
+            f"{fragments_block}"
+            f"{args_block}"
+            f"{inputs_block}"
+            f"{comment_block}"
+            f")\n\n"
         )
         self._emit_platform_guard_end(target_compatible_with)
 
@@ -744,7 +1111,6 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         inputs=None,
         deps=None,
         ids_deps=None,
-        exclude_from_cmake_all=False,
         tags=None,
         testonly=None,
         target_compatible_with=None,
@@ -769,31 +1135,8 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             inputs=inputs,
             deps=deps,
             ids_deps=ids_deps,
-            exclude_from_cmake_all=exclude_from_cmake_all,
             testonly=testonly,
             cmake_rule_name="loom_low_descriptor_cc_library",
-        )
-        self._emit_platform_guard_end(target_compatible_with)
-
-    def loom_low_descriptor_exclude_from_cmake_all(
-        self,
-        cc_libraries=None,
-        targets=None,
-        target_compatible_with=None,
-    ):
-        target_compatible_with = self._apply_loom_target_compatible_with(
-            target_compatible_with
-        )
-        cc_libraries_block = self._convert_string_list_block(
-            "CC_LIBRARIES", cc_libraries, sort=True
-        )
-        targets_block = self._convert_string_list_block("TARGETS", targets, sort=True)
-        self._emit_platform_guard_begin(target_compatible_with)
-        self._converter.body += (
-            f"loom_low_descriptor_exclude_from_all(\n"
-            f"{cc_libraries_block}"
-            f"{targets_block}"
-            f")\n\n"
         )
         self._emit_platform_guard_end(target_compatible_with)
 
@@ -806,16 +1149,6 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
                 f"loom_check_test source must use the {extension} extension: {src}"
             )
         return src[: -len(extension)]
-
-    def _convert_loom_check_data(self, data):
-        if not data:
-            return None
-        converted_data = []
-        for label in data:
-            if label.startswith("@") or label.startswith("//third_party:"):
-                continue
-            converted_data.append(self._normalize_label(label))
-        return converted_data or None
 
     def loom_check_runner_binary(
         self,
@@ -867,9 +1200,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         args_block = self._convert_string_list_block(
             "ARGS", [f"${{CMAKE_CURRENT_SOURCE_DIR}}/{src}"]
         )
-        data_block = self._convert_string_list_block(
-            "DATA", self._convert_loom_check_data(data)
-        )
+        data_block = self._convert_data_list_block(data)
         env_block = self._convert_string_list_block(
             "ENV", self._convert_native_test_env(env), sort=False
         )
@@ -920,9 +1251,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             if runner == default_runner
             else self._convert_single_target_block("RUNNER", runner)
         )
-        data_block = self._convert_string_list_block(
-            "DATA", self._convert_loom_check_data(data)
-        )
+        data_block = self._convert_data_list_block(data)
         env_block = self._convert_string_list_block(
             "ENV", self._convert_native_test_env(env), sort=False
         )

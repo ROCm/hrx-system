@@ -6,6 +6,8 @@
 
 #include "loom/error/error_defs.h"
 
+#include <vector>
+
 #include "iree/testing/gtest.h"
 
 namespace {
@@ -78,6 +80,63 @@ TEST(ErrorDefsTest, LookupBackendAllocationError) {
 TEST(ErrorDefsTest, LookupNonExistentReturnsNull) {
   EXPECT_EQ(loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 999), nullptr);
   EXPECT_EQ(loom_error_def_lookup(LOOM_ERROR_DOMAIN_FOLD, 0), nullptr);
+}
+
+TEST(ErrorDefsTest, LookupComposedCatalogFallsBackAndShadows) {
+  const loom_error_def_t* expected =
+      loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 1);
+  ASSERT_NE(expected, nullptr);
+
+  const loom_error_def_t* terminal_errors[] = {nullptr, expected};
+  loom_error_domain_catalog_t terminal_domain = {};
+  terminal_domain.domain = LOOM_ERROR_DOMAIN_TYPE;
+  terminal_domain.code_count = IREE_ARRAYSIZE(terminal_errors);
+  terminal_domain.errors_by_code = terminal_errors;
+  loom_error_catalog_t terminal_catalog = {};
+  terminal_catalog.domains[LOOM_ERROR_DOMAIN_TYPE] = &terminal_domain;
+
+  const loom_error_def_t* missing_errors[] = {nullptr, nullptr};
+  loom_error_domain_catalog_t missing_domain = {};
+  missing_domain.domain = LOOM_ERROR_DOMAIN_TYPE;
+  missing_domain.code_count = IREE_ARRAYSIZE(missing_errors);
+  missing_domain.errors_by_code = missing_errors;
+  loom_error_catalog_t catalog = {};
+  catalog.domains[LOOM_ERROR_DOMAIN_TYPE] = &missing_domain;
+  catalog.fallback_catalog = &terminal_catalog;
+
+  EXPECT_EQ(loom_error_catalog_lookup(&catalog, LOOM_ERROR_DOMAIN_TYPE, 1),
+            expected);
+
+  loom_error_def_t shadow = *expected;
+  const loom_error_def_t* shadow_errors[] = {nullptr, &shadow};
+  loom_error_domain_catalog_t shadow_domain = missing_domain;
+  shadow_domain.errors_by_code = shadow_errors;
+  catalog.domains[LOOM_ERROR_DOMAIN_TYPE] = &shadow_domain;
+  EXPECT_EQ(loom_error_catalog_lookup(&catalog, LOOM_ERROR_DOMAIN_TYPE, 1),
+            &shadow);
+}
+
+TEST(ErrorDefsTest, LookupDeepFallbackChain) {
+  const loom_error_def_t* expected =
+      loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 1);
+  ASSERT_NE(expected, nullptr);
+
+  const loom_error_def_t* terminal_errors[] = {nullptr, expected};
+  loom_error_domain_catalog_t terminal_domain = {};
+  terminal_domain.domain = LOOM_ERROR_DOMAIN_TYPE;
+  terminal_domain.code_count = IREE_ARRAYSIZE(terminal_errors);
+  terminal_domain.errors_by_code = terminal_errors;
+
+  constexpr size_t kCatalogCount = 16384;
+  std::vector<loom_error_catalog_t> catalogs(kCatalogCount);
+  for (size_t i = 0; i + 1 < catalogs.size(); ++i) {
+    catalogs[i].fallback_catalog = &catalogs[i + 1];
+  }
+  catalogs.back().domains[LOOM_ERROR_DOMAIN_TYPE] = &terminal_domain;
+
+  EXPECT_EQ(
+      loom_error_catalog_lookup(&catalogs.front(), LOOM_ERROR_DOMAIN_TYPE, 1),
+      expected);
 }
 
 TEST(ErrorDefsTest, GlobalLookupExcludesOptionalTargetCatalogs) {

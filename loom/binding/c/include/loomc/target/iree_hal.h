@@ -42,7 +42,7 @@
 ///     .structure_size = sizeof(loomc_iree_hal_profile_options_t),
 ///     .identifier = loomc_make_cstring_view("jit-device"),
 ///     .device = device,
-///     .executable_cache = executable_cache,
+///     .physical_device_affinity = 0,
 ///     .providers = providers,
 ///     .provider_count = 1,
 /// };
@@ -130,8 +130,12 @@ struct loomc_iree_hal_profile_options_t {
   /// IREE HAL device borrowed for the duration of the call.
   iree_hal_device_t* device;
 
-  /// IREE HAL executable cache borrowed for the duration of the call.
-  iree_hal_executable_cache_t* executable_cache;
+  /// Optional physical-device set the selected profile must fully cover.
+  ///
+  /// Zero selects the unique highest-priority target for the logical device.
+  /// A heterogeneous logical device may require an explicit affinity to choose
+  /// one exact target profile.
+  iree_hal_physical_device_affinity_t physical_device_affinity;
 
   /// Ordered borrowed array of provider descriptors.
   const loomc_iree_hal_profile_provider_t* const* providers;

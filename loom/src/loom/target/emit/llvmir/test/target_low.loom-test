@@ -5,18 +5,20 @@ llvmir.target<object> @target {
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
 
-low.func.def target(@target) abi(object_function) @first(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @first(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm {
   %sum = add.i32 %lhs, %rhs
-  return %sum
+  %bounded_sum = low.assume %sum [range(%sum, -2147483648, 2147483647)] :
+      reg<llvmir.i32>
+  return %bounded_sum
 }
 
-low.func.def target(@target) abi(object_function) @second(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>, %bounded_i: reg<llvmir.i64>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @second(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>, %bounded_i: reg<llvmir.i64>) -> (reg<llvmir.i32>) asm {
   %loaded = load.indexed.i32 %input_view, %bounded_i, 16, 4
   store.indexed.i32 %loaded, %output_view, %bounded_i, 32, 4
   return %loaded
 }
 
-low.func.def target(@target) abi(object_function) @memory_widths(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>, %bounded_i: reg<llvmir.i64>) -> (reg<llvmir.f32 x16>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @memory_widths(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>, %bounded_i: reg<llvmir.i64>) -> (reg<llvmir.f32 x16>) asm {
   %byte = load.i8 %input_view, 1
   %halves = load.v4f16 %input_view, 8
   %brain = load.v2bf16 %input_view, 32
@@ -28,41 +30,41 @@ low.func.def target(@target) abi(object_function) @memory_widths(%input_view: re
   return %wide
 }
 
-low.func.def target(@target) abi(object_function) @i8_identity(%value: reg<llvmir.i8>) -> (reg<llvmir.i8>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i8_identity(%value: reg<llvmir.i8>) -> (reg<llvmir.i8>) asm {
   return %value
 }
 
-low.func.def target(@target) abi(object_function) @i16_identity(%value: reg<llvmir.i16>) -> (reg<llvmir.i16>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i16_identity(%value: reg<llvmir.i16>) -> (reg<llvmir.i16>) asm {
   return %value
 }
 
-low.func.def target(@target) abi(object_function) @f16_identity(%value: reg<llvmir.f16>) -> (reg<llvmir.f16>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f16_identity(%value: reg<llvmir.f16>) -> (reg<llvmir.f16>) asm {
   return %value
 }
 
-low.func.def target(@target) abi(object_function) @bf16_identity(%value: reg<llvmir.bf16>) -> (reg<llvmir.bf16>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @bf16_identity(%value: reg<llvmir.bf16>) -> (reg<llvmir.bf16>) asm {
   return %value
 }
 
-low.func.def target(@target) abi(object_function) @v32i8_identity(%value: reg<llvmir.i8 x32>) -> (reg<llvmir.i8 x32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @v32i8_identity(%value: reg<llvmir.i8 x32>) -> (reg<llvmir.i8 x32>) asm {
   return %value
 }
 
-low.func.def target(@target) abi(object_function) @v8f16_identity(%value: reg<llvmir.f16 x8>) -> (reg<llvmir.f16 x8>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @v8f16_identity(%value: reg<llvmir.f16 x8>) -> (reg<llvmir.f16 x8>) asm {
   return %value
 }
 
-low.func.def target(@target) abi(object_function) @v16bf16_identity(%value: reg<llvmir.bf16 x16>) -> (reg<llvmir.bf16 x16>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @v16bf16_identity(%value: reg<llvmir.bf16 x16>) -> (reg<llvmir.bf16 x16>) asm {
   return %value
 }
 
-low.func.def target(@target) abi(object_function) @f64_unordered_select(%lhs: reg<llvmir.f64>, %rhs: reg<llvmir.f64>, %true_value: reg<llvmir.f64>, %false_value: reg<llvmir.f64>) -> (reg<llvmir.f64>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f64_unordered_select(%lhs: reg<llvmir.f64>, %rhs: reg<llvmir.f64>, %true_value: reg<llvmir.f64>, %false_value: reg<llvmir.f64>) -> (reg<llvmir.f64>) asm {
   %mask = cmp.uno.f64 %lhs, %rhs
   %selected = select.f64 %mask, %true_value, %false_value
   return %selected
 }
 
-low.func.def target(@target) abi(object_function) @i32x16_vector_ops(%lhs: reg<llvmir.i32 x16>, %rhs: reg<llvmir.i32 x16>, %fallback: reg<llvmir.i32 x16>) -> (reg<llvmir.i32 x16>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32x16_vector_ops(%lhs: reg<llvmir.i32 x16>, %rhs: reg<llvmir.i32 x16>, %fallback: reg<llvmir.i32 x16>) -> (reg<llvmir.i32 x16>) asm {
   %sum = add.v16i32 %lhs, %rhs
   %shifted = shl.v16i32 %sum, %rhs
   %mask = cmp.ugt.v16i32 %shifted, %lhs
@@ -70,28 +72,28 @@ low.func.def target(@target) abi(object_function) @i32x16_vector_ops(%lhs: reg<l
   return %selected
 }
 
-low.func.def target(@target) abi(object_function) @f32x16_unordered_select(%lhs: reg<llvmir.f32 x16>, %rhs: reg<llvmir.f32 x16>, %fallback: reg<llvmir.f32 x16>) -> (reg<llvmir.f32 x16>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32x16_unordered_select(%lhs: reg<llvmir.f32 x16>, %rhs: reg<llvmir.f32 x16>, %fallback: reg<llvmir.f32 x16>) -> (reg<llvmir.f32 x16>) asm {
   %mask = cmp.une.v16f32 %lhs, %rhs
   %selected = select.v16f32 %mask, %lhs, %fallback
   return %selected
 }
 
-low.func.def target(@target) abi(object_function) @v4i8_select(%mask: reg<llvmir.i1 x4>, %true_value: reg<llvmir.i8 x4>, %false_value: reg<llvmir.i8 x4>) -> (reg<llvmir.i8 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @v4i8_select(%mask: reg<llvmir.i1 x4>, %true_value: reg<llvmir.i8 x4>, %false_value: reg<llvmir.i8 x4>) -> (reg<llvmir.i8 x4>) asm {
   %selected = select.v4i8 %mask, %true_value, %false_value
   return %selected
 }
 
-low.func.def target(@target) abi(object_function) @v2i16_select(%mask: reg<llvmir.i1 x2>, %true_value: reg<llvmir.i16 x2>, %false_value: reg<llvmir.i16 x2>) -> (reg<llvmir.i16 x2>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @v2i16_select(%mask: reg<llvmir.i1 x2>, %true_value: reg<llvmir.i16 x2>, %false_value: reg<llvmir.i16 x2>) -> (reg<llvmir.i16 x2>) asm {
   %selected = select.v2i16 %mask, %true_value, %false_value
   return %selected
 }
 
-low.func.def target(@target) abi(object_function) @v16bf16_select(%mask: reg<llvmir.i1 x16>, %true_value: reg<llvmir.bf16 x16>, %false_value: reg<llvmir.bf16 x16>) -> (reg<llvmir.bf16 x16>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @v16bf16_select(%mask: reg<llvmir.i1 x16>, %true_value: reg<llvmir.bf16 x16>, %false_value: reg<llvmir.bf16 x16>) -> (reg<llvmir.bf16 x16>) asm {
   %selected = select.v16bf16 %mask, %true_value, %false_value
   return %selected
 }
 
-low.func.def target(@target) abi(object_function) @structural_i32_vector(%value: reg<llvmir.i32>, %source: reg<llvmir.i32 x4>) -> (reg<llvmir.i32 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @structural_i32_vector(%value: reg<llvmir.i32>, %source: reg<llvmir.i32 x4>) -> (reg<llvmir.i32 x4>) asm {
   %splat = splat.v4i32 %value
   %lane = extract.v4i32 %source, 2
   %from = from_elements.v4i32 %value, %lane, %value, %lane
@@ -100,37 +102,37 @@ low.func.def target(@target) abi(object_function) @structural_i32_vector(%value:
   return %shuffled
 }
 
-low.func.def target(@target) abi(object_function) @structural_slice(%source: reg<llvmir.i32 x4>) -> (reg<llvmir.i32 x2>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @structural_slice(%source: reg<llvmir.i32 x4>) -> (reg<llvmir.i32 x2>) asm {
   %slice = slice.v4i32.v2i32 %source, 1
   return %slice
 }
 
-low.func.def target(@target) abi(object_function) @structural_f32_splat(%float_value: reg<llvmir.f32>) -> (reg<llvmir.f32 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @structural_f32_splat(%float_value: reg<llvmir.f32>) -> (reg<llvmir.f32 x4>) asm {
   %float_splat = splat.v4f32 %float_value
   return %float_splat
 }
 
-low.func.def target(@target) abi(object_function) @structural_f16_insert(%source: reg<llvmir.f16 x4>, %value: reg<llvmir.f16>) -> (reg<llvmir.f16 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @structural_f16_insert(%source: reg<llvmir.f16 x4>, %value: reg<llvmir.f16>) -> (reg<llvmir.f16 x4>) asm {
   %updated = insert.v4f16 %source, %value, 1
   return %updated
 }
 
-low.func.def target(@target) abi(object_function) @structural_bf16_slice(%source: reg<llvmir.bf16 x4>) -> (reg<llvmir.bf16 x2>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @structural_bf16_slice(%source: reg<llvmir.bf16 x4>) -> (reg<llvmir.bf16 x2>) asm {
   %slice = slice.v4bf16.v2bf16 %source, 2
   return %slice
 }
 
-low.func.def target(@target) abi(object_function) @integer_vector_constant() -> (reg<llvmir.i32 x2>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @integer_vector_constant() -> (reg<llvmir.i32 x2>) asm {
   %int = const.v2i32 7
   return %int
 }
 
-low.func.def target(@target) abi(object_function) @float_vector_constant() -> (reg<llvmir.f32 x2>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @float_vector_constant() -> (reg<llvmir.f32 x2>) asm {
   %float = const.v2f32 1073741824
   return %float
 }
 
-low.func.def target(@target) abi(object_function) @scalar_casts(%i8_value: reg<llvmir.i8>, %i32_value: reg<llvmir.i32>, %f16_value: reg<llvmir.f16>, %bf16_value: reg<llvmir.bf16>, %f32_value: reg<llvmir.f32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_casts(%i8_value: reg<llvmir.i8>, %i32_value: reg<llvmir.i32>, %f16_value: reg<llvmir.f16>, %bf16_value: reg<llvmir.bf16>, %f32_value: reg<llvmir.f32>) -> (reg<llvmir.i32>) asm {
   %truncated = trunc.i32.i8 %i32_value
   %sext = sext.i8.i32 %i8_value
   %zext = zext.i8.i32 %i8_value
@@ -145,14 +147,14 @@ low.func.def target(@target) abi(object_function) @scalar_casts(%i8_value: reg<l
   return %bits
 }
 
-low.func.def target(@target) abi(object_function) @vector_casts(%i32_values: reg<llvmir.i32 x2>, %f32_values: reg<llvmir.f32 x2>) -> (reg<llvmir.f32 x2>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @vector_casts(%i32_values: reg<llvmir.i32 x2>, %f32_values: reg<llvmir.f32 x2>) -> (reg<llvmir.f32 x2>) asm {
   %signed_fp = sitofp.v2i32.v2f32 %i32_values
   %unsigned_fp = uitofp.v2i32.v2f32 %i32_values
   %bits = bitcast.v2i32.v2f32 %i32_values
   return %signed_fp
 }
 
-low.func.def target(@target) abi(object_function) @vector_fast_math(%lhs: reg<llvmir.f32 x4>, %rhs: reg<llvmir.f32 x4>) -> (reg<llvmir.f32 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @vector_fast_math(%lhs: reg<llvmir.f32 x4>, %rhs: reg<llvmir.f32 x4>) -> (reg<llvmir.f32 x4>) asm {
   %quotient = div.v4f32 %lhs, %rhs {fast_math_flags = 30}
   return %quotient
 }
@@ -369,7 +371,7 @@ llvmir.target<object> @target {
   triple = "amdgcn-amd-amdhsa"
 }
 
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @dispatch() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) @dispatch() asm {
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %value = load.i32 %input, 4
   %local_x = kernel.workitem_id.x
@@ -453,7 +455,7 @@ llvmir.target<object> @target {
   subgroup_size = 64
 }
 
-low.kernel.def target(@target) workgroup_size(8, 4, 1) @subgroup_queries() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(8, 4, 1) @subgroup_queries() asm {
   %output = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %subgroup_size = kernel.subgroup_size
   %subgroup_count = kernel.subgroup_count

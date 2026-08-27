@@ -41,9 +41,9 @@ func.def @scalar_i1_constants_scc() -> (i1, i1) {
 // ====
 
 func.def @scalar_i1_bitwise_scc(%lhs: i32, %rhs: i32) -> (i1) {
-  %zero = scalar.constant 0 : i32
-  %lhs_nonzero = scalar.cmpi ne, %lhs, %zero : i32
-  %rhs_nonzero = scalar.cmpi ne, %rhs, %zero : i32
+  %inactive_condition = scalar.constant 0 : i32
+  %lhs_nonzero = scalar.cmpi ne, %lhs, %inactive_condition : i32
+  %rhs_nonzero = scalar.cmpi ne, %rhs, %inactive_condition : i32
   %both_nonzero = scalar.andi %lhs_nonzero, %rhs_nonzero : i1
   %either_nonzero = scalar.ori %lhs_nonzero, %rhs_nonzero : i1
   %one_nonzero = scalar.xori %both_nonzero, %either_nonzero : i1

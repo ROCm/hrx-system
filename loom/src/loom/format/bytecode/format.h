@@ -62,7 +62,7 @@
 //
 //   offset  size  field
 //   0       4     magic: "LOOM" (0x4C 0x4F 0x4F 0x4D)
-//   4       1     format_version (currently 16)
+//   4       1     format_version (LOOM_BYTECODE_FORMAT_VERSION)
 //   5       1     location_mode (see loom_bytecode_location_mode_t)
 //   6       2     module_count
 //   8       4     file_string_pool_length (bytes)
@@ -85,7 +85,10 @@ extern "C" {
 
 #define LOOM_BYTECODE_MAGIC "LOOM"
 #define LOOM_BYTECODE_MAGIC_LENGTH 4
-#define LOOM_BYTECODE_FORMAT_VERSION 16
+#define LOOM_BYTECODE_FORMAT_VERSION 34
+
+#define LOOM_BYTECODE_SOURCE_TRIVIA_LEADING_BLANK_LINE (1u << 0)
+#define LOOM_BYTECODE_SOURCE_TRIVIA_COMMENT_COUNT_SHIFT 1
 
 // File-level source-location mode stored in the file header.
 enum loom_bytecode_location_mode_e {
@@ -140,6 +143,10 @@ typedef uint16_t loom_bytecode_module_flags_t;
 //   +-----------------------+
 //   | Section directory     |  Section kind + offset + length for each.
 //   +-----------------------+
+//   | IR section            |  Function bodies: ops, blocks, regions.
+//   +-----------------------+
+//   | SYMBOLS section       |  Symbol table with full metadata.
+//   +-----------------------+
 //   | STRINGS section       |  Interned string table.
 //   +-----------------------+
 //   | SOURCES section       |  Source identifiers (filenames, tags).
@@ -152,9 +159,9 @@ typedef uint16_t loom_bytecode_module_flags_t;
 //   +-----------------------+
 //   | LOCATIONS section     |  Location table.
 //   +-----------------------+
-//   | SYMBOLS section       |  Symbol table with full metadata.
+//   | SOURCE_TRIVIA section |  File-level source presentation.
 //   +-----------------------+
-//   | IR section            |  Function bodies: ops, blocks, regions.
+//   | SYMBOL_REFERENCES     |  Direct dependency and provider-demand rows.
 //   +-----------------------+
 //   | RESOURCES section     |  Large blobs: weights, executables, etc.
 //   |                       |  (last — keeps dense metadata up front,
@@ -165,15 +172,15 @@ typedef uint16_t loom_bytecode_module_flags_t;
 //
 //   [section_count: varint]
 //   [value_count: varint]   Total SSA value definitions serialized by symbols
-//                           and function bodies. Readers may reserve this
-//                           capacity before constructing body IR.
-//   [region_count: varint]  Total serialized function-body regions.
-//   [block_count: varint]   Total serialized function-body blocks.
-//   [op_count: varint]      Total serialized function-body operations.
+//                           and root-region payloads. Readers may reserve this
+//                           capacity before constructing IR.
+//   [region_count: varint]  Total serialized regions.
+//   [block_count: varint]   Total serialized blocks.
+//   [op_count: varint]      Total serialized operations.
 //
 // The allocation counts are construction hints and validation upper bounds for
 // this module. They avoid reader scan-ahead just to size tables, but the reader
-// still validates the actual parsed counts against the section/body payloads.
+// still validates the actual parsed counts against the section/region payloads.
 //
 // Section directory entry:
 //
@@ -208,9 +215,23 @@ typedef enum loom_bytecode_section_kind_e {
           // embedded weights, constant tensors.
           // Aligned, seekable, mmap-friendly.
           // Referenced by symbols and op attributes.
+  LOOM_BYTECODE_SECTION_SOURCE_TRIVIA =
+      9,  // Optional module-owned source presentation.
+  LOOM_BYTECODE_SECTION_SYMBOL_REFERENCES =
+      10,  // Per-symbol dependency and abstract-provider demands.
 } loom_bytecode_section_kind_t;
 
-#define LOOM_BYTECODE_SECTION_COUNT 9
+#define LOOM_BYTECODE_SECTION_COUNT 11
+
+// ==========================================================================
+// SOURCE_TRIVIA section
+// ==========================================================================
+//
+// Optional module-owned source presentation that is not attached to an
+// operation or block. The file header uses the ordinary source-trivia encoding
+// with a required zero leading-blank-line bit:
+//
+//   [file_header: source_trivia]
 
 // ==========================================================================
 // Reader validation requirements
@@ -300,6 +321,9 @@ typedef enum loom_bytecode_section_kind_e {
 //   For each source:
 //     [length: varint]
 //     [utf8_data: length bytes]
+//
+// Source spellings are unique. Their canonical order is the writer's module
+// source-ID order so validated bytecode ordinals can materialize by identity.
 
 // ==========================================================================
 // TYPES section
@@ -317,10 +341,10 @@ typedef enum loom_bytecode_section_kind_e {
 //   [type_count: varint]
 //   For each type:
 //     [kind: byte]
-//       0 = none, 1 = scalar, 2 = tile, 3 = tensor, 4 = group,
+//       0 = none, 1 = scalar, 2 = tile, 3 = tensor, 4 = unassigned,
 //       5 = function, 6 = dialect, 7 = encoding, 8 = pool,
 //       9 = vector, 10 = view, 11 = buffer, 12 = register,
-//       13 = storage
+//       13 = storage, 14 = parameterized
 //     (SCALAR: [element_type: byte])
 //     (TILE/TENSOR/VECTOR/VIEW:
 //       [element_type: byte]
@@ -335,7 +359,6 @@ typedef enum loom_bytecode_section_kind_e {
 //       For each dim (rank times):
 //         [is_dynamic: byte]      (0 = static, 1 = dynamic)
 //         (if static: [size: varint]))
-//     (GROUP: [scope: byte]       (loom_bytecode_group_scope_t))
 //     (FUNCTION:
 //       [arg_count: varint]
 //       [result_count: varint]
@@ -351,9 +374,23 @@ typedef enum loom_bytecode_section_kind_e {
 //       (if static: [size: varint]) (block size in bytes))
 //     (REGISTER:
 //       [payload0: varint]          (target-owned register payload word)
-//       [payload1: varint]          (target-owned register payload word))
+//       [payload1: varint]          (target-owned register payload word)
+//       [has_value_type: byte]      (0 = absent, 1 = present)
+//       (if present: [value_type_index: varint]))
 //     (STORAGE:
 //       [space: byte]               (loom_bytecode_storage_space_t))
+//     (PARAMETERIZED:
+//       [family_name_id: varint]
+//       [present_parameter_count: varint]
+//       For each present parameter in declaration order:
+//         [parameter_name_id: varint]
+//         [value_kind: byte]
+//         [value_data: ...])
+//
+// Parameterized type family and parameter names are stable public identities.
+// Dense descriptor pointers and declaration-order slot ordinals never
+// serialize. TYPE parameter payloads reference earlier TYPES entries so the
+// table remains topologically materializable.
 
 // ==========================================================================
 // ENCODINGS section
@@ -466,6 +503,7 @@ typedef enum loom_bytecode_section_kind_e {
 //   [symbol_count: varint]
 //   [import_count: varint]
 //   [export_count: varint]
+//   [root_region_payload_count: varint]
 //   // Import offset table: byte offsets to import symbol entries.
 //   For each import (import_count times):
 //     [symbol_entry_offset: uint64]
@@ -480,16 +518,27 @@ typedef enum loom_bytecode_section_kind_e {
 // exports from other modules. The import carries full signature
 // metadata for verification during linking.
 //
-// Exports: A symbol with PUBLIC visibility and no IMPORT flag.
-// The export offset table lets the linker enumerate available
-// symbols without scanning private internals.
+// Exports: A symbol with LOOM_BYTECODE_SYMBOL_FLAG_EXPORT set. Public
+// definitions are exports, as are private func-like definitions with an
+// explicit export contract. The export offset table lets the linker enumerate
+// available symbols without scanning private internals or decoding attributes.
+//
+// Source trivia: every [source_trivia: varint] scalar packs the following
+// leading-comment count in bits 1 and above and a leading-blank-line bit in
+// bit 0. The comment count is therefore source_trivia >> 1. Writers
+// canonicalize any authored run of empty lines to the single retained bit.
+// Nonempty comment_data begins with the conventional single ASCII space after
+// the // marker. In-memory comment payloads omit that separator: writers add
+// exactly one and readers remove exactly one while retaining any additional
+// indentation. Empty comments have zero-length comment_data.
 //
 // Symbol entry format:
 //
 //   [name_id: varint]
 //   [kind: byte]            (FUNC_DEF=0, FUNC_DECL=1,
-//                            FUNC_TEMPLATE=2, FUNC_UKERNEL=3,
-//                            GLOBAL=4, EXECUTABLE=5, RECORD=6)
+//                            TEMPLATE_DECL=2, TEMPLATE_DEF=3,
+//                            TEMPLATE_UKERNEL=4, GLOBAL=5,
+//                            EXECUTABLE=6, RECORD=7)
 //   [visibility: byte]      (PUBLIC=0, PRIVATE=1)
 //   [flags: u16]            (see loom_bytecode_symbol_flag_bits_e)
 //
@@ -504,20 +553,31 @@ typedef enum loom_bytecode_section_kind_e {
 //                                  in text is preserved by
 //                                  LOOM_BYTECODE_SYMBOL_FLAG_IMPORT_SYMBOL)
 //
-//   For FUNC_DEF / FUNC_DECL / FUNC_TEMPLATE / FUNC_UKERNEL:
+//   For FUNC_DEF / FUNC_DECL / TEMPLATE_DECL / TEMPLATE_DEF /
+//       TEMPLATE_UKERNEL:
 //     [def_op_table_index_plus1: varint]
 //                         0 is invalid. N > 0 means the defining func-like op
 //                         name is OPS[N - 1]. The symbol kind is semantic
 //                         linkage metadata; this op reference preserves the
 //                         exact dialect op used to define the symbol.
-//     [comment_count: varint]
+//     [source_trivia: varint]
 //     For each leading comment attached to the symbol op:
 //       [comment_length: varint]
 //       [comment_data: comment_length bytes]  bytes after the leading // marker
 //     [calling_convention: byte]
 //     [purity: byte]
+//     [kernel_workload_arg_count: varint]
+//                         Workload signature count for symbols implementing
+//                         the kernel interface; zero for ordinary functions.
 //     [arg_count: varint]
 //     [result_count: varint]
+//     For each kernel workload arg:
+//       [name_id: varint]       0 = no SSA name; otherwise STRINGS id.
+//       [type_index: varint]    (structural type from TYPES section)
+//       [dim_binding_count: varint]
+//       For each dynamic dim:
+//         [value_ref: signed_varint]  Signature-local value number.
+//       [encoding_binding: varint]    0 = no binding, N > 0 = value number N-1.
 //     For each arg:
 //       [name_id: varint]       0 = no SSA name; otherwise STRINGS id.
 //       [type_index: varint]    (structural type from TYPES section)
@@ -544,10 +604,11 @@ typedef enum loom_bytecode_section_kind_e {
 //         (VALUE:   [value_ref: varint] signature-local value number)
 //         (CONST:   [value: signed_varint])
 //
-//     // Template/ukernel metadata (FUNC_TEMPLATE or FUNC_UKERNEL):
-//     (if template or ukernel:
-//       [implements_op_name: varint]  (string index of op name)
-//       [priority: varint])
+//     // Template-provider metadata. Present for template.def and
+//     // template.ukernel operations.
+//     (if defining op declares implements:
+//       [template_family: varint]     (string table index)
+//       [priority: varint])            0 when the op has no priority field
 //
 //     [attr_count: varint]      Present attributes except the identity symbol
 //                               attr and shared function metadata attrs:
@@ -558,20 +619,21 @@ typedef enum loom_bytecode_section_kind_e {
 //       [value_kind: byte]
 //       [value_data: ...]
 //
-//     // IR root-region payload reference. A has_body byte precedes the
-//     // offset/length pair so that declarations-only modules and stripped
-//     // modules can omit IR references even for nominally-bodied kinds.
-//     [has_body: byte]
-//     (if has_body:
+//     // Independently bounded root-region payloads in declared region-slot
+//     // order. Definitions may therefore project one structural region
+//     // without reading or validating bytes owned by another region.
+//     [root_region_payload_count: varint]
+//     For each root region payload:
+//       [region_index: byte]
 //       [ir_offset: u64]    (from IR section start)
-//       [ir_length: u32])
+//       [ir_length: u32]
 //
 //   For GLOBAL symbols:
 //     [def_op_table_index_plus1: varint]
 //                         0 is invalid. N > 0 means the defining global op
 //                         name is OPS[N - 1]. The op must define a GLOBAL
 //                         symbol and have no operands or regions.
-//     [comment_count: varint]
+//     [source_trivia: varint]
 //     For each leading comment attached to the symbol op:
 //       [comment_length: varint]
 //       [comment_data: comment_length bytes]  bytes after the leading // marker
@@ -606,7 +668,7 @@ typedef enum loom_bytecode_section_kind_e {
 //                         name is OPS[N - 1]. The op must define a RECORD
 //                         symbol and have no operands or results. It may have
 //                         one fixed body region.
-//     [comment_count: varint]
+//     [source_trivia: varint]
 //     For each leading comment attached to the symbol op:
 //       [comment_length: varint]
 //       [comment_data: comment_length bytes]  bytes after the leading // marker
@@ -616,21 +678,61 @@ typedef enum loom_bytecode_section_kind_e {
 //       [key_id: varint]
 //       [value_kind: byte]
 //       [value_data: ...]
-//     [has_body: byte]
-//     (if has_body:
+//     [root_region_payload_count: varint]
+//     For each root region payload:
+//       [region_index: byte]
 //       [ir_offset: u64]    (from IR section start)
-//       [ir_length: u32])
+//       [ir_length: u32]
+
+// ==========================================================================
+// SYMBOL_REFERENCES section
+// ==========================================================================
+//
+// Canonical dependency metadata used to plan a selected symbol closure without
+// reading IR bodies. Dependency targets and abstract provider demands are
+// direct SYMBOLS ordinals.
+//
+// Rows preserve every dependency occurrence and contract demand in
+// deterministic analysis order; repeated targets and families are valid.
+// Closure planners use dense selection bitmaps to coalesce repeated work while
+// traversing only reached rows.
+//
+// The module dependency row contains references owned by module-level records,
+// such as static encoding metadata. The following symbol rows are in SYMBOLS
+// ordinal order, including empty rows for symbols with no outgoing edges.
+//
+// Section layout:
+//
+//   [symbol_count: varint]
+//   [total_dependency_count: varint]
+//   [total_template_demand_count: varint]
+//   [module_dependency_count: varint]
+//   For each module dependency:
+//     [source_root_region_index_plus_one: varint] (must be zero)
+//     [target_symbol_index: varint]
+//     [target_interfaces: varint]
+//   For each symbol in SYMBOLS ordinal order:
+//     [dependency_count: varint]
+//     For each dependency:
+//       [source_root_region_index_plus_one: varint]
+//       [target_symbol_index: varint]
+//       [target_interfaces: varint]
+//     [template_demand_count: varint]
+//     For each abstract provider demand:
+//       [source_root_region_index_plus_one: varint]
+//       [family_symbol_index: varint]
 
 // ==========================================================================
 // IR section
 // ==========================================================================
 //
-// Symbol region payloads: the actual operations, blocks, and regions attached
-// to function-like or record symbols. Each symbol's IR is a contiguous byte
-// range addressable by (ir_offset, ir_length) from its symbol table entry. This
-// enables function-level lazy loading.
+// Root-region payloads: the actual operations, blocks, and nested regions
+// attached to one declared region slot of a function-like or record symbol.
+// Every root region is an independent byte range named by its symbol-table
+// entry. This permits structural projections such as a kernel launch
+// configuration to remain body-blind to the kernel implementation region.
 //
-// Within a symbol's IR:
+// Within one root-region payload:
 //
 // Value definition groups are reserved before their individual definitions are
 // decoded. Dynamic dim and SSA encoding bindings may therefore reference any
@@ -639,23 +741,18 @@ typedef enum loom_bytecode_section_kind_e {
 // and predicate value args still reference only values defined by earlier
 // definition groups.
 //
-//   [value_count: varint]   Symbol-local SSA values defined by block args
+//   [value_count: varint]   Region-local SSA values defined by block args
 //                           and operation results in this payload.
 //   [region_count: varint]  Regions in this payload, including nested regions.
 //   [block_count: varint]   Blocks in this payload, including nested regions.
 //   [op_count: varint]      Live operations in this payload, including nested
 //                           regions.
-//   [root_region_count: varint]
-//   For each root region:
-//     [region_index: varint]  Declared op region slot. Function-like payloads
-//                             serialize the FuncLike body region first when one
-//                             exists, then all other materialized root regions
-//                             in slot order.
-//     [block_count: varint]
+//   [source_flags: varint]  loom_region_source_flags_t presentation bits.
+//   [block_count: varint]
 //   For each block:
 //     [has_label: byte]
 //     (if has_label: [label_id: varint])
-//     [comment_count: varint]
+//     [source_trivia: varint]
 //     For each leading comment attached to the block label:
 //       [comment_length: varint]
 //       [comment_data: comment_length bytes]  bytes after the leading // marker
@@ -678,7 +775,7 @@ typedef enum loom_bytecode_section_kind_e {
 //       [instance_flags: byte]  Per-op-instance flags. Zero for ops without a
 //                               Flags format element.
 //       [location_id: varint]
-//       [comment_count: varint]
+//       [source_trivia: varint]
 //       For each leading comment attached to the op:
 //         [comment_length: varint]
 //         [comment_data: comment_length bytes] bytes after the leading //
@@ -727,15 +824,86 @@ typedef enum loom_bytecode_section_kind_e {
 //
 // Attribute value_kind bytes are dense wire tags, not loom_attr_kind_t enum
 // values: 0=I64, 1=F64, 2=STRING, 3=BOOL, 4=ENUM, 5=I64_ARRAY, 6=SYMBOL,
-// 7=TYPE, 8=PREDICATE_LIST, 9=DICT, 10=ENCODING, 11=BYTES. ABSENT is never
-// encoded as a payload value. ENUM value_data is the raw uint8 case ordinal;
+// 7=TYPE, 8=PREDICATE_LIST, 9=DICT, 10=ENCODING, 11=BYTES,
+// 12=SCOPED_ENUM, 13=ENUM_ARRAY, 14=PARAMETERIZED,
+// 15=PARAMETERIZED_ARRAY, 16=SIGNED_ENUM_SET, 17=SYMBOL_ARRAY,
+// 18=SYMBOL_SET. ABSENT is never
+// encoded as a payload value.
+// ENUM value_data is the raw uint8 case ordinal;
 // bytecode readers preserve it without consulting enum case tables so open enum
 // attrs can survive tools whose op tables do not yet name the ordinal. Closed
 // enum policy remains a verifier contract. BYTES value_data is
 // [byte_length: varint] followed by that many uninterpreted bytes.
+// SCOPED_ENUM value_data is a STRINGS table index naming the stable key in the
+// representation contract selected by the enclosing function. Dense runtime
+// ordinals are never serialized.
+// ENUM_ARRAY value_data is [element_count: varint] followed by that many raw
+// uint8 stable enum values. It is valid only for descriptor-backed fields;
+// generic dictionary entries cannot carry it.
+// SIGNED_ENUM_SET value_data is [word_count: byte] followed by |word_count|
+// little-endian positive uint64 words and then |word_count| little-endian
+// negative uint64 words. The partitions must be disjoint and canonically
+// trimmed. It is valid only for closed descriptor-backed enum fields.
+// PARAMETERIZED value_data is encoded as:
+//   [family_name_id: varint]
+//   [present_parameter_count: varint]
+//   For each present parameter in declaration order:
+//     [parameter_name_id: varint]
+//     [value_kind: byte]
+//     [value_data: ...]
+// Family and parameter names are stable public identities in STRINGS. Dense
+// context-local family kinds and declaration-order slot ordinals never
+// serialize. Optional absent slots are omitted; present empty values retain a
+// payload and therefore remain distinct from absence.
+// PARAMETERIZED_ARRAY value_data is encoded as:
+//   [element_count: varint]
+//   For each element in order:
+//     [PARAMETERIZED value_data: ...]
+// The enclosing kind proves that every element is parameterized, so elements
+// do not carry a redundant attribute-kind byte. Empty arrays require a
+// descriptor-backed field to distinguish them from other aggregate kinds.
+// SYMBOL_ARRAY value_data is encoded as:
+//   [element_count: varint]
+//   For each element in order:
+//     [symbol_name_id: varint]
+// Symbol names are stable identities in STRINGS; context-local symbol ordinals
+// never serialize. Ordering and duplicate references are preserved. Empty
+// arrays require a descriptor-backed field to provide the element interface
+// and reference role.
+// SYMBOL_SET value_data has the same element encoding as SYMBOL_ARRAY. Names
+// MUST be stored in strict decoded UTF-8 byte order with no duplicates.
+// Readers reject noncanonical order; writers trust canonical IR and emit
+// references as-is.
 //       [region_count: varint]
 //       For each region:
-//         (recursive: block_count, blocks...)
+//         (recursive: source_flags, block_count, blocks...)
+//
+// Region source_flags directly encode loom_region_source_flags_t. They retain
+// authored presentation choices without changing program semantics. Readers
+// MUST reject bits not defined by the current bytecode version.
+
+typedef enum loom_bytecode_attr_kind_e {
+  LOOM_BYTECODE_ATTR_I64 = 0,
+  LOOM_BYTECODE_ATTR_F64 = 1,
+  LOOM_BYTECODE_ATTR_STRING = 2,
+  LOOM_BYTECODE_ATTR_BOOL = 3,
+  LOOM_BYTECODE_ATTR_ENUM = 4,
+  LOOM_BYTECODE_ATTR_I64_ARRAY = 5,
+  LOOM_BYTECODE_ATTR_SYMBOL = 6,
+  LOOM_BYTECODE_ATTR_TYPE = 7,
+  LOOM_BYTECODE_ATTR_PREDICATE_LIST = 8,
+  LOOM_BYTECODE_ATTR_DICT = 9,
+  LOOM_BYTECODE_ATTR_ENCODING = 10,
+  LOOM_BYTECODE_ATTR_BYTES = 11,
+  LOOM_BYTECODE_ATTR_SCOPED_ENUM = 12,
+  LOOM_BYTECODE_ATTR_ENUM_ARRAY = 13,
+  LOOM_BYTECODE_ATTR_PARAMETERIZED = 14,
+  LOOM_BYTECODE_ATTR_PARAMETERIZED_ARRAY = 15,
+  LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET = 16,
+  LOOM_BYTECODE_ATTR_SYMBOL_ARRAY = 17,
+  LOOM_BYTECODE_ATTR_SYMBOL_SET = 18,
+  LOOM_BYTECODE_ATTR_COUNT,
+} loom_bytecode_attr_kind_t;
 
 // ==========================================================================
 // RESOURCES section
@@ -824,7 +992,7 @@ typedef enum loom_bytecode_type_kind_e {
   LOOM_BYTECODE_TYPE_SCALAR = 1,
   LOOM_BYTECODE_TYPE_TILE = 2,
   LOOM_BYTECODE_TYPE_TENSOR = 3,
-  LOOM_BYTECODE_TYPE_GROUP = 4,
+  // Value 4 is intentionally unassigned and must not be reused.
   LOOM_BYTECODE_TYPE_FUNCTION = 5,
   LOOM_BYTECODE_TYPE_DIALECT = 6,
   LOOM_BYTECODE_TYPE_ENCODING = 7,
@@ -834,14 +1002,9 @@ typedef enum loom_bytecode_type_kind_e {
   LOOM_BYTECODE_TYPE_BUFFER = 11,
   LOOM_BYTECODE_TYPE_REGISTER = 12,
   LOOM_BYTECODE_TYPE_STORAGE = 13,
+  // Descriptor-backed type with stable named attribute parameter slots.
+  LOOM_BYTECODE_TYPE_PARAMETERIZED = 14,
 } loom_bytecode_type_kind_t;
-
-// Group scope byte in the TYPES section (GROUP payload).
-// Append-only; do not reorder.
-typedef enum loom_bytecode_group_scope_e {
-  LOOM_BYTECODE_GROUP_SCOPE_WORKGROUP = 0,
-  LOOM_BYTECODE_GROUP_SCOPE_SUBGROUP = 1,
-} loom_bytecode_group_scope_t;
 
 // Encoding role byte in the TYPES section (ENCODING payload).
 // Append-only; do not reorder.
@@ -945,16 +1108,16 @@ typedef struct loom_bytecode_section_dir_entry_t {
 } loom_bytecode_section_dir_entry_t;
 
 // Symbol kind byte in the SYMBOLS section. These are dense wire values and
-// intentionally not equal to loom_symbol_kind_t, whose zero value is an
-// in-memory "unlinked" sentinel that is never serialized.
+// intentionally not equal to loom_symbol_kind_t.
 typedef enum loom_bytecode_symbol_kind_e {
   LOOM_BYTECODE_SYMBOL_FUNC_DEF = 0,
   LOOM_BYTECODE_SYMBOL_FUNC_DECL = 1,
-  LOOM_BYTECODE_SYMBOL_FUNC_TEMPLATE = 2,
-  LOOM_BYTECODE_SYMBOL_FUNC_UKERNEL = 3,
-  LOOM_BYTECODE_SYMBOL_GLOBAL = 4,
-  LOOM_BYTECODE_SYMBOL_EXECUTABLE = 5,
-  LOOM_BYTECODE_SYMBOL_RECORD = 6,
+  LOOM_BYTECODE_SYMBOL_TEMPLATE_DECL = 2,
+  LOOM_BYTECODE_SYMBOL_TEMPLATE_DEF = 3,
+  LOOM_BYTECODE_SYMBOL_TEMPLATE_UKERNEL = 4,
+  LOOM_BYTECODE_SYMBOL_GLOBAL = 5,
+  LOOM_BYTECODE_SYMBOL_EXECUTABLE = 6,
+  LOOM_BYTECODE_SYMBOL_RECORD = 7,
   LOOM_BYTECODE_SYMBOL_COUNT_,
 } loom_bytecode_symbol_kind_t;
 
@@ -983,6 +1146,17 @@ enum loom_bytecode_symbol_flag_bits_e {
   // Symbol must be preserved by ordinary symbol DCE even when unreachable.
   // Matches SYMBOL_FLAG_RETAIN in the Python IR.
   LOOM_BYTECODE_SYMBOL_FLAG_RETAIN = 1u << 3,
+  // Symbol op is a declaration whose contract may be supplied by a provider.
+  LOOM_BYTECODE_SYMBOL_FLAG_DECLARATION = 1u << 4,
+  // Symbol exists only for test or benchmark tooling.
+  LOOM_BYTECODE_SYMBOL_FLAG_TEST_ONLY = 1u << 5,
+  // Function metadata contains an explicitly present predicate list. This
+  // distinguishes an authored empty list from an absent optional attribute.
+  LOOM_BYTECODE_SYMBOL_FLAG_PREDICATES = 1u << 6,
+  // Symbol is available for cross-module static linkage. This is independent
+  // of source visibility so an explicit export contract can export a private
+  // func-like definition without making it a public source symbol.
+  LOOM_BYTECODE_SYMBOL_FLAG_EXPORT = 1u << 7,
 };
 typedef uint16_t loom_bytecode_symbol_flags_t;
 

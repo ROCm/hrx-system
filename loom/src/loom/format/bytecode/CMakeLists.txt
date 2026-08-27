@@ -72,23 +72,110 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    function_header
+  HDRS
+    "function_header.h"
+  DEPS
+    iree::base
+    loom::format::bytecode::reader::source_trivia
+    loom::ops::op_defs
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    module_summary
+  HDRS
+    "module_summary.h"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    index
+  HDRS
+    "index.h"
+  DEPS
+    ::format
+    ::module_summary
+    iree::base
+    iree::base::internal::arena
+    loom::error::diagnostic
+    loom::ir
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    index_reader
+  SRCS
+    "index.c"
+  DEPS
+    ::index
+    iree::base
+    iree::base::internal::arena
+    loom::format::bytecode::reader::validation
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     reader
   HDRS
     "reader.h"
   SRCS
     "reader.c"
   DEPS
-    ::diagnostic
-    ::format
-    ::varint
+    ::index
+    ::index_reader
     iree::base
     iree::base::internal::arena
-    iree::base::internal::unicode
-    loom::error::diagnostic
-    loom::error::error_defs
+    loom::format::bytecode::reader::materializer
+    loom::format::bytecode::reader::validation
+    loom::format::low_repr
+    loom::ir
+    loom::verify
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    selected_reader
+  HDRS
+    "selected_reader.h"
+  SRCS
+    "selected_reader.c"
+  DEPS
+    ::reader
+    iree::base
+    iree::base::internal::arena
+    loom::format::bytecode::reader::selected_materializer
+    loom::format::bytecode::reader::validation
+    loom::verify
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    function_projection_reader
+  HDRS
+    "function_projection_reader.h"
+  SRCS
+    "function_projection_reader.c"
+  DEPS
+    ::function_header
+    ::index
+    iree::base
+    iree::base::internal::arena
+    loom::format::bytecode::reader::decoder
+    loom::format::bytecode::reader::selected_body
+    loom::format::bytecode::reader::selected_symbol
+    loom::format::bytecode::reader::selected_tables
+    loom::format::low_repr
     loom::ir
     loom::ops::op_defs
-    loom::verify
   PUBLIC
 )
 
@@ -100,6 +187,7 @@ loom_cc_test(
   DEPS
     ::format
     ::reader
+    ::selected_reader
     ::varint
     ::writer
     iree::base::internal::arena
@@ -109,8 +197,10 @@ loom_cc_test(
     loom::ir
     loom::ops::func
     loom::ops::global
+    loom::ops::kernel
+    loom::ops::template
     loom::ops::test
-    loom::target::registers
+    loom::ops::type_registry
 )
 
 loom_cc_test(
@@ -125,11 +215,13 @@ loom_cc_test(
     iree::io::stream
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::codegen::low::repr
     loom::codegen::low::text_asm
     loom::error::diagnostic
     loom::format::text::parser
     loom::format::text::printer
     loom::ir
+    loom::ops::op_defs
     loom::target::low_descriptor_registry_core_test
     loom::test::corpus::text::golden_text_corpus
     loom::testing::context
@@ -144,10 +236,16 @@ loom_cc_library(
     "writer.c"
   DEPS
     ::format
-    ::varint
     iree::base
     iree::base::internal::arena
     iree::io::stream
+    loom::format::bytecode::writer::body
+    loom::format::bytecode::writer::catalog
+    loom::format::bytecode::writer::encoder
+    loom::format::bytecode::writer::numbering
+    loom::format::bytecode::writer::symbol
+    loom::format::bytecode::writer::tables
+    loom::format::low_repr
     loom::ir
     loom::ops::op_defs
   PUBLIC
@@ -182,8 +280,10 @@ loom_cc_fuzz(
     iree::base
     iree::base::internal::arena
     iree::io::stream
+    loom::codegen::low::repr
     loom::error::diagnostic
     loom::ir
+    loom::target::low_descriptor_registry_core_test
     loom::testing::context
     loom::testing::gen
 )
@@ -210,14 +310,31 @@ loom_cc_benchmark(
     "reader_benchmark.cc"
   DEPS
     ::reader
+    ::selected_reader
     ::writer
     iree::base
     iree::base::internal::arena
     iree::io::stream
     iree::testing::benchmark_main
+    loom::format::bytecode::reader::selected_materializer
     loom::ir
     loom::ops::test
     loom::testing::gen
+  TESTONLY
+)
+
+loom_cc_benchmark(
+  NAME
+    writer_benchmark
+  SRCS
+    "writer_benchmark.cc"
+  DEPS
+    ::writer
+    iree::base::internal::arena
+    iree::io::stream
+    iree::testing::benchmark_main
+    loom::ir
+    loom::ops::test
   TESTONLY
 )
 

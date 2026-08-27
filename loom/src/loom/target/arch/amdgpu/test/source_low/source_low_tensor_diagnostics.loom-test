@@ -1,0 +1,51 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1200> @target
+kernel.def target(@target) @tensor_memory_requires_gfx125x() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %bytes = index.constant 16384 : offset
+  %d0 = vector.constant 0 : vector<4xi32>
+  %d1 = vector.constant 0 : vector<8xi32>
+  // ERROR@+1: AMDGPU/023 {constraint_key="tensor_memory.provider_required"}
+  %descriptor = kernel.tensor.lds.descriptor dgroups(%d0, %d1) : vector<4xi32>, vector<8xi32> -> kernel.tensor.lds.descriptor
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %global[%buffer_base] : buffer -> view<64x64xf32>
+  %scratch = buffer.alloca<workgroup> align(256) %bytes : buffer
+  %dest = buffer.view %scratch[%buffer_base] : buffer -> view<64x64xf32>
+  // ERROR@+1: AMDGPU/023 {constraint_key="tensor_memory.provider_required"}
+  %copy = kernel.async.tensor.load.to.lds %source to %dest using %descriptor {cache_scope = cu, cache_temporal = regular} : view<64x64xf32> to view<64x64xf32>, kernel.tensor.lds.descriptor -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  // ERROR@+1: AMDGPU/023 {constraint_key="async_wait.descriptor"}
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+kernel.def target(@target) @tensor_dgroups_must_be_subgroup_uniform() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %lane_i32 = index.cast %lane : index to i32
+  %buffer_base = index.constant 0 : offset
+  %bytes = index.constant 16384 : offset
+  %d0 = vector.splat %lane_i32 : vector<4xi32>
+  %d1 = vector.constant 0 : vector<8xi32>
+  %descriptor = kernel.tensor.lds.descriptor dgroups(%d0, %d1) : vector<4xi32>, vector<8xi32> -> kernel.tensor.lds.descriptor
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %global[%buffer_base] : buffer -> view<64x64xf32>
+  %scratch = buffer.alloca<workgroup> align(256) %bytes : buffer
+  %dest = buffer.view %scratch[%buffer_base] : buffer -> view<64x64xf32>
+  // ERROR@+1: AMDGPU/023 {constraint_key="tensor_memory.dgroup_uniformity"}
+  %copy = kernel.async.tensor.load.to.lds %source to %dest using %descriptor {cache_scope = cu, cache_temporal = regular} : view<64x64xf32> to view<64x64xf32>, kernel.tensor.lds.descriptor -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}

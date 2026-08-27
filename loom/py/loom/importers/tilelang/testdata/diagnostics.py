@@ -28,7 +28,7 @@ def tileop_cumsum_arity(tir: Any) -> TileLangImportInput:
     ).with_attr("global_symbol", "tileop_cumsum_arity")
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="tileop_cumsum_arity",
     )
 
@@ -51,7 +51,7 @@ def sync_grid_requires_cooperative_grid(tir: Any) -> TileLangImportInput:
     ).with_attr("global_symbol", "sync_grid_requires_cooperative_grid")
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="sync_grid_requires_cooperative_grid",
     )
 
@@ -70,7 +70,7 @@ def unsupported_string_evaluate(tir: Any) -> TileLangImportInput:
     ).with_attr("global_symbol", "unsupported_string_evaluate")
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="unsupported_string_evaluate",
     )
 
@@ -101,7 +101,7 @@ def tileop_copy_coalesced_width(tilelang: Any, T: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=get_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="tileop_copy_coalesced_width_kernel",
     )
 
@@ -131,13 +131,13 @@ def tileop_gemm_transpose_b(T: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=tileop_gemm_transpose_b_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="tileop_gemm_transpose_b_kernel",
     )
 
 
 # ====
-# ERROR@+1: "tl.tileop.gemm vector.fragment bridge requires AMDGPU gfx1100"
+# ERROR@+1: "tl.tileop.gemm vector.fragment bridge requires an AMDGPU GFX11 WMMA target"
 @tilelang_case(
     name="tileop_gemm_unsupported_target",
     category="diagnostic",
@@ -161,7 +161,7 @@ def tileop_gemm_unsupported_target(T: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=tileop_gemm_unsupported_target_kernel,
-        target="hip -mcpu=gfx942",
+        target="hip -mcpu=gfx9-4-generic",
         name="tileop_gemm_unsupported_target_kernel",
     )
 
@@ -236,7 +236,7 @@ def masked_warp_shuffle(tir: Any, tvm: Any) -> TileLangImportInput:
     ).with_attr("global_symbol", "masked_warp_shuffle_kernel")
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="masked_warp_shuffle_kernel",
     )
 
@@ -271,7 +271,7 @@ def masked_warp_sync(tir: Any, tvm: Any) -> TileLangImportInput:
     ).with_attr("global_symbol", "masked_warp_sync_kernel")
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="masked_warp_sync_kernel",
     )
 
@@ -279,11 +279,13 @@ def masked_warp_sync(tir: Any, tvm: Any) -> TileLangImportInput:
 # ====
 # ERROR@+1: "call `tl.shfl_xor_sync` TileLang warp width 32 does not match AMDGPU target subgroup width 64"
 @tilelang_case(
-    name="gfx942_warp_shuffle_width_mismatch",
+    name="gfx9_4_generic_warp_shuffle_width_mismatch",
     category="diagnostic",
     tags=("topology", "subgroup", "shuffle", "target"),
 )
-def gfx942_warp_shuffle_width_mismatch(tir: Any, tvm: Any) -> TileLangImportInput:
+def gfx9_4_generic_warp_shuffle_width_mismatch(
+    tir: Any, tvm: Any
+) -> TileLangImportInput:
     src = tir.Var("src", "handle")
     src_buffer = tir.decl_buffer((64,), "float32", name="src")
     thread_index = tvm.te.thread_axis("threadIdx.x")
@@ -306,22 +308,27 @@ def gfx942_warp_shuffle_width_mismatch(tir: Any, tvm: Any) -> TileLangImportInpu
         [src],
         body,
         buffer_map={src: src_buffer},
-    ).with_attr("global_symbol", "gfx942_warp_shuffle_width_mismatch_kernel")
+    ).with_attr(
+        "global_symbol",
+        "gfx9_4_generic_warp_shuffle_width_mismatch_kernel",
+    )
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx942",
-        name="gfx942_warp_shuffle_width_mismatch_kernel",
+        target="hip -mcpu=gfx9-4-generic",
+        name="gfx9_4_generic_warp_shuffle_width_mismatch_kernel",
     )
 
 
 # ====
 # ERROR@+1: "call `tl.warp_reduce_sum` TileLang warp width 32 does not match AMDGPU target subgroup width 64"
 @tilelang_case(
-    name="gfx942_warp_reduce_width_mismatch",
+    name="gfx9_4_generic_warp_reduce_width_mismatch",
     category="diagnostic",
     tags=("topology", "subgroup", "reduce", "target"),
 )
-def gfx942_warp_reduce_width_mismatch(tir: Any, tvm: Any) -> TileLangImportInput:
+def gfx9_4_generic_warp_reduce_width_mismatch(
+    tir: Any, tvm: Any
+) -> TileLangImportInput:
     src = tir.Var("src", "handle")
     src_buffer = tir.decl_buffer((64,), "float32", name="src")
     thread_index = tvm.te.thread_axis("threadIdx.x")
@@ -341,10 +348,13 @@ def gfx942_warp_reduce_width_mismatch(tir: Any, tvm: Any) -> TileLangImportInput
         [src],
         body,
         buffer_map={src: src_buffer},
-    ).with_attr("global_symbol", "gfx942_warp_reduce_width_mismatch_kernel")
+    ).with_attr(
+        "global_symbol",
+        "gfx9_4_generic_warp_reduce_width_mismatch_kernel",
+    )
 
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx942",
-        name="gfx942_warp_reduce_width_mismatch_kernel",
+        target="hip -mcpu=gfx9-4-generic",
+        name="gfx9_4_generic_warp_reduce_width_mismatch_kernel",
     )

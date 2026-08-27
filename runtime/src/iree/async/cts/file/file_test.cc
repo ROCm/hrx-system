@@ -114,7 +114,7 @@ TEST_P(FileTest, OpenExistingFileForRead) {
   open_op.base.user_data = &tracker;
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &open_op.base));
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -138,7 +138,7 @@ TEST_P(FileTest, OpenNonExistentFileFailsNotFound) {
   open_op.base.user_data = &tracker;
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &open_op.base));
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND, tracker.ConsumeStatus());
@@ -165,7 +165,7 @@ TEST_P(FileTest, OpenWithCreateCreatesNewFile) {
   open_op.base.user_data = &tracker;
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &open_op.base));
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -200,7 +200,7 @@ TEST_P(FileTest, ReadEntireFile) {
   read_op.base.user_data = &tracker;
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &read_op.base));
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -232,7 +232,7 @@ TEST_P(FileTest, ReadAtOffset) {
   read_op.base.user_data = &tracker;
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &read_op.base));
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -264,7 +264,7 @@ TEST_P(FileTest, ReadPastEOFShortRead) {
   read_op.base.user_data = &tracker;
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &read_op.base));
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -297,7 +297,7 @@ TEST_P(FileTest, ReadBeyondEOFReturnsZeroBytes) {
   read_op.base.user_data = &tracker;
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &read_op.base));
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -333,7 +333,7 @@ TEST_P(FileTest, WriteAndReadBack) {
   write_op.base.user_data = &write_tracker;
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &write_op.base));
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(write_tracker.call_count, 1);
   IREE_EXPECT_OK(write_tracker.ConsumeStatus());
@@ -354,7 +354,7 @@ TEST_P(FileTest, WriteAndReadBack) {
   read_op.base.user_data = &read_tracker;
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &read_op.base));
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(read_tracker.call_count, 1);
   IREE_EXPECT_OK(read_tracker.ConsumeStatus());
@@ -389,7 +389,7 @@ TEST_P(FileTest, WriteAtOffset) {
   write_op.base.user_data = &write_tracker;
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &write_op.base));
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(write_tracker.call_count, 1);
   IREE_EXPECT_OK(write_tracker.ConsumeStatus());
@@ -410,7 +410,7 @@ TEST_P(FileTest, WriteAtOffset) {
   read_op.base.user_data = &read_tracker;
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &read_op.base));
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(read_tracker.call_count, 1);
   IREE_EXPECT_OK(read_tracker.ConsumeStatus());
@@ -441,7 +441,7 @@ TEST_P(FileTest, AsyncClose) {
   close_op.base.user_data = &tracker;
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &close_op.base));
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
@@ -471,7 +471,7 @@ TEST_P(FileTest, WriteFlushClose) {
   write_op.base.user_data = &write_tracker;
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &write_op.base));
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/1);
   IREE_EXPECT_OK(write_tracker.ConsumeStatus());
 
   // Close the file async.
@@ -485,7 +485,7 @@ TEST_P(FileTest, WriteFlushClose) {
   close_op.base.user_data = &close_tracker;
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &close_op.base));
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/1);
   IREE_EXPECT_OK(close_tracker.ConsumeStatus());
 
   // Re-open and verify the data persisted.
@@ -506,7 +506,7 @@ TEST_P(FileTest, WriteFlushClose) {
   read_op.base.user_data = &read_tracker;
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &read_op.base));
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/1);
 
   IREE_EXPECT_OK(read_tracker.ConsumeStatus());
   EXPECT_EQ(read_op.bytes_read, strlen(kData));
@@ -547,7 +547,7 @@ TEST_P(FileTest, ImportRetainRelease) {
   read_op.base.user_data = &tracker;
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &read_op.base));
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/1);
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
 
@@ -598,7 +598,7 @@ TEST_P(FileTest, ConcurrentReadsAtDifferentOffsets) {
   iree_async_operation_list_t list = {ops, 2};
   IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
 
-  PollUntil(/*min_completions=*/2, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/2);
 
   EXPECT_EQ(tracker_a.call_count, 1);
   IREE_EXPECT_OK(tracker_a.ConsumeStatus());
@@ -644,8 +644,7 @@ TEST_P(FileTest, LargeWriteAndReadBack) {
   write_op.base.user_data = &write_tracker;
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &write_op.base));
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(2000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(write_tracker.call_count, 1);
   IREE_EXPECT_OK(write_tracker.ConsumeStatus());
@@ -666,8 +665,7 @@ TEST_P(FileTest, LargeWriteAndReadBack) {
   read_op.base.user_data = &read_tracker;
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &read_op.base));
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(2000));
+  PollUntil(/*min_completions=*/1);
 
   EXPECT_EQ(read_tracker.call_count, 1);
   IREE_EXPECT_OK(read_tracker.ConsumeStatus());

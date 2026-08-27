@@ -1,0 +1,339 @@
+// Fixed 4096-token, 18-head, 256-wide online BF16 attention workload.
+amdgpu.target<gfx1250> @gfx1250
+
+template.decl @benchmark.attention_bf16.m16n16(%query: buffer, %key: buffer, %value: buffer, %output: buffer, %query_tile: index, %query_head: index, %lane: index)
+
+kernel.def target(@gfx1250) export("planner_attention_bf16") @planner_attention_bf16() {
+  %unit = index.constant 1 : index
+  %query_tile_extent = index.constant 16 : index
+  %workgroup_size_x = index.constant 32 : index
+  %query_block_token_count = index.constant 4096 : index
+  %attention_head_count = index.constant 18 : index
+  %query_tile_count = index.div %query_block_token_count, %query_tile_extent : index
+  kernel.launch.config workgroups(%query_tile_count, %attention_head_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%query: buffer, %key: buffer, %value: buffer, %output: buffer) {
+  %query_tile = kernel.workgroup.id<x> : index
+  %query_head = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  template.apply<@benchmark.attention_bf16.m16n16>(%query, %key, %value, %output, %query_tile, %query_head, %lane) : (buffer, buffer, buffer, buffer, index, index, index)
+  kernel.return
+}
+
+template.def<@benchmark.attention_bf16.m16n16> target(@gfx1250) priority(20) @planner_attention_bf16_gfx1250(%query: buffer, %key: buffer, %value: buffer, %output: buffer, %query_tile: index, %query_head: index, %lane: index) {
+  %k_step_gfx1250 = index.constant 32 : index
+  %base = index.constant 0 : offset
+  %probability_scratch_bytes = index.constant 512 : offset
+  %c0 = index.constant 0 : index
+  %tile_step = index.constant 1 : index
+  %tile_rounding_bias = index.constant 15 : index
+  %tile_extent = index.constant 16 : index
+  %channel_offset2 = index.constant 32 : index
+  %channel_offset3 = index.constant 48 : index
+  %channel_offset4 = index.constant 64 : index
+  %channel_offset5 = index.constant 80 : index
+  %channel_offset6 = index.constant 96 : index
+  %channel_offset7 = index.constant 112 : index
+  %channel_offset8 = index.constant 128 : index
+  %lane_column = index.rem %lane, %tile_extent : index
+  %lane_group = index.div %lane, %tile_extent : index
+  %lane_group_even = index.cmp eq, %lane_group, %c0 : index
+  %valid_token_count = index.constant 4096 : index
+  %padded_token_count = index.constant 4096 : index
+  %query_block_offset = index.constant 0 : index
+  %attention_head_count = index.constant 18 : index
+  %head_size = index.constant 256 : index
+  %head_pair_tile_count = index.div %head_size, %k_step_gfx1250 : index
+  %hidden_size = index.mul %attention_head_count, %head_size : index
+  %head_base = index.mul %query_head, %head_size : index
+  %value_base = index.add %head_base, %c0 : index
+  %local_query_origin = index.mul %query_tile, %tile_extent : index
+  %query_origin = index.add %query_block_offset, %local_query_origin : index
+  %valid_token_count_rounded = index.add %valid_token_count, %tile_rounding_bias : index
+  %key_tile_count = index.div %valid_token_count_rounded, %tile_extent : index
+  %additive_identity = scalar.constant 0.0 : f32
+  %negative_large = scalar.constant -1000000000.0 : f32
+  %zero_acc = vector.constant 0.0 : vector<8xf32>
+  %zero_operand = vector.constant 0.0 : vector<16xbf16>
+  %zero_vector = vector.splat %additive_identity : vector<8xf32>
+  %negative_vector = vector.splat %negative_large : vector<8xf32>
+  %head_size_i32 = index.cast %head_size : index to i32
+  %head_size_f32 = scalar.sitofp %head_size_i32 : i32 to f32
+  %attention_scale = scalar.rsqrtf<nnan|ninf|nsz|afn> %head_size_f32 : f32
+  %attention_scale_vector = vector.splat %attention_scale : vector<8xf32>
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 32 : index
+  %query_noalias, %key_noalias, %value_noalias, %output_noalias = buffer.assume.noalias %query, %key, %value, %output : buffer, buffer, buffer, buffer
+  %query_global = buffer.assume.memory_space<global> %query_noalias : buffer
+  %key_global = buffer.assume.memory_space<global> %key_noalias : buffer
+  %value_global = buffer.assume.memory_space<global> %value_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %query_aligned = buffer.assume.alignment %query_global {minimum_alignment = 16} : buffer
+  %key_aligned = buffer.assume.alignment %key_global {minimum_alignment = 16} : buffer
+  %value_aligned = buffer.assume.alignment %value_global {minimum_alignment = 16} : buffer
+  %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
+  %query_view = buffer.view %query_aligned[%base] : buffer -> view<[%padded_token_count]x[%hidden_size]xbf16>
+  %key_physical_view = buffer.view %key_aligned[%base] : buffer -> view<[%padded_token_count]x[%hidden_size]xbf16>
+  %value_physical_view = buffer.view %value_aligned[%base] : buffer -> view<[%hidden_size]x[%padded_token_count]xbf16>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<[%padded_token_count]x[%hidden_size]xbf16>
+  %probability_scratch = buffer.alloca<workgroup> align(16) %probability_scratch_bytes : buffer
+  %probability_scratch_view = buffer.view %probability_scratch[%base] : buffer -> view<16x16xbf16>
+  %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %final_max_even, %final_sum_even, %final_max_odd, %final_sum_odd, %final_acc0, %final_acc1, %final_acc2, %final_acc3, %final_acc4, %final_acc5, %final_acc6, %final_acc7, %final_acc8, %final_acc9, %final_acc10, %final_acc11, %final_acc12, %final_acc13, %final_acc14, %final_acc15 = scf.for %key_tile = [%c0 to %key_tile_count step %tile_step](%current_max_even = %negative_vector : vector<8xf32>, %current_sum_even = %zero_vector : vector<8xf32>, %current_max_odd = %negative_vector : vector<8xf32>, %current_sum_odd = %zero_vector : vector<8xf32>, %current_acc0 = %init : vector<8xf32>, %current_acc1 = %init : vector<8xf32>, %current_acc2 = %init : vector<8xf32>, %current_acc3 = %init : vector<8xf32>, %current_acc4 = %init : vector<8xf32>, %current_acc5 = %init : vector<8xf32>, %current_acc6 = %init : vector<8xf32>, %current_acc7 = %init : vector<8xf32>, %current_acc8 = %init : vector<8xf32>, %current_acc9 = %init : vector<8xf32>, %current_acc10 = %init : vector<8xf32>, %current_acc11 = %init : vector<8xf32>, %current_acc12 = %init : vector<8xf32>, %current_acc13 = %init : vector<8xf32>, %current_acc14 = %init : vector<8xf32>, %current_acc15 = %init : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    %key_origin = index.mul %key_tile, %tile_extent : index
+    %key_token = index.add %key_origin, %lane_column : index
+    %key_valid = index.cmp ult, %key_token, %valid_token_count : index
+    %lane_query_token = index.add %query_origin, %lane_column : index
+    %lane_head_offset = index.mul %lane_group, %tile_extent : index
+    %raw_scores = scf.for %head_pair_tile = [%c0 to %head_pair_tile_count step %tile_step](%qk_acc = %init : vector<8xf32>) -> (vector<8xf32>) {
+      %head_pair_offset = index.mul %head_pair_tile, %k_step_gfx1250 : index
+      %lane_head_origin = index.add %head_pair_offset, %lane_head_offset : index
+      %query_channel = index.add %head_base, %lane_head_origin : index
+      %lhs_values = vector.load %query_view[%lane_query_token, %query_channel] : view<[%padded_token_count]x[%hidden_size]xbf16> -> vector<16xbf16>
+      %rhs_values = vector.load %key_physical_view[%key_token, %query_channel] : view<[%padded_token_count]x[%hidden_size]xbf16> -> vector<16xbf16>
+      %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
+      %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xbf16>
+      %next = vector.mma %lhs, %rhs, %qk_acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      scf.yield %next : vector<8xf32>
+    }
+    %scaled_scores0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %raw_scores, %attention_scale_vector : vector<8xf32>
+    %scaled_scores = scf.if %key_valid -> (vector<8xf32>) {
+      scf.yield %scaled_scores0 : vector<8xf32>
+    } else {
+      scf.yield %negative_vector : vector<8xf32>
+    }
+    %even_scores = scf.if %lane_group_even -> (vector<8xf32>) {
+      scf.yield %scaled_scores : vector<8xf32>
+    } else {
+      scf.yield %negative_vector : vector<8xf32>
+    }
+    %odd_scores = scf.if %lane_group_even -> (vector<8xf32>) {
+      scf.yield %negative_vector : vector<8xf32>
+    } else {
+      scf.yield %scaled_scores : vector<8xf32>
+    }
+    %tile_max_even = kernel.workgroup.reduce<maxnumf> %even_scores : vector<8xf32>
+    %tile_max_odd = kernel.workgroup.reduce<maxnumf> %odd_scores : vector<8xf32>
+    %next_max_even = vector.maxnumf %current_max_even, %tile_max_even : vector<8xf32>
+    %next_max_odd = vector.maxnumf %current_max_odd, %tile_max_odd : vector<8xf32>
+    %selected_next_max = scf.if %lane_group_even -> (vector<8xf32>) {
+      scf.yield %next_max_even : vector<8xf32>
+    } else {
+      scf.yield %next_max_odd : vector<8xf32>
+    }
+    %score_delta = vector.subf<reassoc|nnan|ninf|nsz> %scaled_scores, %selected_next_max : vector<8xf32>
+    %raw_weight = vector.expf<afn> %score_delta : vector<8xf32>
+    %weight = scf.if %key_valid -> (vector<8xf32>) {
+      scf.yield %raw_weight : vector<8xf32>
+    } else {
+      scf.yield %zero_vector : vector<8xf32>
+    }
+    %even_weight = scf.if %lane_group_even -> (vector<8xf32>) {
+      scf.yield %weight : vector<8xf32>
+    } else {
+      scf.yield %zero_vector : vector<8xf32>
+    }
+    %odd_weight = scf.if %lane_group_even -> (vector<8xf32>) {
+      scf.yield %zero_vector : vector<8xf32>
+    } else {
+      scf.yield %weight : vector<8xf32>
+    }
+    %tile_sum_even = kernel.workgroup.reduce<addf> %even_weight : vector<8xf32>
+    %tile_sum_odd = kernel.workgroup.reduce<addf> %odd_weight : vector<8xf32>
+    %old_delta_even = vector.subf<reassoc|nnan|ninf|nsz> %current_max_even, %next_max_even : vector<8xf32>
+    %old_delta_odd = vector.subf<reassoc|nnan|ninf|nsz> %current_max_odd, %next_max_odd : vector<8xf32>
+    %old_scale_even = vector.expf<afn> %old_delta_even : vector<8xf32>
+    %old_scale_odd = vector.expf<afn> %old_delta_odd : vector<8xf32>
+    %scaled_sum_even = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_sum_even, %old_scale_even : vector<8xf32>
+    %scaled_sum_odd = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_sum_odd, %old_scale_odd : vector<8xf32>
+    %next_sum_even = vector.addf<reassoc|nnan|ninf|nsz> %scaled_sum_even, %tile_sum_even : vector<8xf32>
+    %next_sum_odd = vector.addf<reassoc|nnan|ninf|nsz> %scaled_sum_odd, %tile_sum_odd : vector<8xf32>
+    %selected_old_scale = scf.if %lane_group_even -> (vector<8xf32>) {
+      scf.yield %old_scale_even : vector<8xf32>
+    } else {
+      scf.yield %old_scale_odd : vector<8xf32>
+    }
+    vector.fragment.store<result> %weight, %probability_scratch_view[%c0, %c0] shape [%m, %n] : vector<8xf32>, view<16x16xbf16>
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %probability_values = scf.if %lane_group_even -> (vector<16xbf16>) {
+      %loaded_probability = vector.load %probability_scratch_view[%lane_column, %c0] : view<16x16xbf16> -> vector<16xbf16>
+      scf.yield %loaded_probability : vector<16xbf16>
+    } else {
+      scf.yield %zero_operand : vector<16xbf16>
+    }
+    %probability_lhs = vector.fragment<lhs> %probability_values shape [%m, %k] : vector<16xbf16>
+    %channel0 = index.add %value_base, %c0 : index
+    %channel1 = index.add %value_base, %tile_extent : index
+    %channel2 = index.add %value_base, %channel_offset2 : index
+    %channel3 = index.add %value_base, %channel_offset3 : index
+    %channel4 = index.add %value_base, %channel_offset4 : index
+    %channel5 = index.add %value_base, %channel_offset5 : index
+    %channel6 = index.add %value_base, %channel_offset6 : index
+    %channel7 = index.add %value_base, %channel_offset7 : index
+    %channel8 = index.add %value_base, %channel_offset8 : index
+    %channel9 = index.add %channel8, %tile_extent : index
+    %channel10 = index.add %channel9, %tile_extent : index
+    %channel11 = index.add %channel10, %tile_extent : index
+    %channel12 = index.add %channel11, %tile_extent : index
+    %channel13 = index.add %channel12, %tile_extent : index
+    %channel14 = index.add %channel13, %tile_extent : index
+    %channel15 = index.add %channel14, %tile_extent : index
+    %lane_channel0 = index.add %channel0, %lane_column : index
+    %lane_channel1 = index.add %channel1, %lane_column : index
+    %lane_channel2 = index.add %channel2, %lane_column : index
+    %lane_channel3 = index.add %channel3, %lane_column : index
+    %lane_channel4 = index.add %channel4, %lane_column : index
+    %lane_channel5 = index.add %channel5, %lane_column : index
+    %lane_channel6 = index.add %channel6, %lane_column : index
+    %lane_channel7 = index.add %channel7, %lane_column : index
+    %lane_channel8 = index.add %channel8, %lane_column : index
+    %lane_channel9 = index.add %channel9, %lane_column : index
+    %lane_channel10 = index.add %channel10, %lane_column : index
+    %lane_channel11 = index.add %channel11, %lane_column : index
+    %lane_channel12 = index.add %channel12, %lane_column : index
+    %lane_channel13 = index.add %channel13, %lane_column : index
+    %lane_channel14 = index.add %channel14, %lane_column : index
+    %lane_channel15 = index.add %channel15, %lane_column : index
+    %rhs_values0, %rhs_values1, %rhs_values2, %rhs_values3, %rhs_values4, %rhs_values5, %rhs_values6, %rhs_values7, %rhs_values8, %rhs_values9, %rhs_values10, %rhs_values11, %rhs_values12, %rhs_values13, %rhs_values14, %rhs_values15 = scf.if %lane_group_even -> (vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>) {
+      %loaded0 = vector.load %value_physical_view[%lane_channel0, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded1 = vector.load %value_physical_view[%lane_channel1, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded2 = vector.load %value_physical_view[%lane_channel2, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded3 = vector.load %value_physical_view[%lane_channel3, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded4 = vector.load %value_physical_view[%lane_channel4, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded5 = vector.load %value_physical_view[%lane_channel5, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded6 = vector.load %value_physical_view[%lane_channel6, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded7 = vector.load %value_physical_view[%lane_channel7, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded8 = vector.load %value_physical_view[%lane_channel8, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded9 = vector.load %value_physical_view[%lane_channel9, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded10 = vector.load %value_physical_view[%lane_channel10, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded11 = vector.load %value_physical_view[%lane_channel11, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded12 = vector.load %value_physical_view[%lane_channel12, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded13 = vector.load %value_physical_view[%lane_channel13, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded14 = vector.load %value_physical_view[%lane_channel14, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      %loaded15 = vector.load %value_physical_view[%lane_channel15, %key_origin] : view<[%hidden_size]x[%padded_token_count]xbf16> -> vector<16xbf16>
+      scf.yield %loaded0, %loaded1, %loaded2, %loaded3, %loaded4, %loaded5, %loaded6, %loaded7, %loaded8, %loaded9, %loaded10, %loaded11, %loaded12, %loaded13, %loaded14, %loaded15 : vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>
+    } else {
+      scf.yield %zero_operand, %zero_operand, %zero_operand, %zero_operand, %zero_operand, %zero_operand, %zero_operand, %zero_operand, %zero_operand, %zero_operand, %zero_operand, %zero_operand, %zero_operand, %zero_operand, %zero_operand, %zero_operand : vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>, vector<16xbf16>
+    }
+    %rhs0 = vector.fragment<rhs> %rhs_values0 shape [%k, %n] : vector<16xbf16>
+    %rhs1 = vector.fragment<rhs> %rhs_values1 shape [%k, %n] : vector<16xbf16>
+    %rhs2 = vector.fragment<rhs> %rhs_values2 shape [%k, %n] : vector<16xbf16>
+    %rhs3 = vector.fragment<rhs> %rhs_values3 shape [%k, %n] : vector<16xbf16>
+    %rhs4 = vector.fragment<rhs> %rhs_values4 shape [%k, %n] : vector<16xbf16>
+    %rhs5 = vector.fragment<rhs> %rhs_values5 shape [%k, %n] : vector<16xbf16>
+    %rhs6 = vector.fragment<rhs> %rhs_values6 shape [%k, %n] : vector<16xbf16>
+    %rhs7 = vector.fragment<rhs> %rhs_values7 shape [%k, %n] : vector<16xbf16>
+    %rhs8 = vector.fragment<rhs> %rhs_values8 shape [%k, %n] : vector<16xbf16>
+    %rhs9 = vector.fragment<rhs> %rhs_values9 shape [%k, %n] : vector<16xbf16>
+    %rhs10 = vector.fragment<rhs> %rhs_values10 shape [%k, %n] : vector<16xbf16>
+    %rhs11 = vector.fragment<rhs> %rhs_values11 shape [%k, %n] : vector<16xbf16>
+    %rhs12 = vector.fragment<rhs> %rhs_values12 shape [%k, %n] : vector<16xbf16>
+    %rhs13 = vector.fragment<rhs> %rhs_values13 shape [%k, %n] : vector<16xbf16>
+    %rhs14 = vector.fragment<rhs> %rhs_values14 shape [%k, %n] : vector<16xbf16>
+    %rhs15 = vector.fragment<rhs> %rhs_values15 shape [%k, %n] : vector<16xbf16>
+    %tile0 = vector.mma %probability_lhs, %rhs0, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %tile1 = vector.mma %probability_lhs, %rhs1, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %tile2 = vector.mma %probability_lhs, %rhs2, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %tile3 = vector.mma %probability_lhs, %rhs3, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %tile4 = vector.mma %probability_lhs, %rhs4, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %tile5 = vector.mma %probability_lhs, %rhs5, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %tile6 = vector.mma %probability_lhs, %rhs6, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %tile7 = vector.mma %probability_lhs, %rhs7, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %tile8 = vector.mma %probability_lhs, %rhs8, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %tile9 = vector.mma %probability_lhs, %rhs9, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %tile10 = vector.mma %probability_lhs, %rhs10, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %tile11 = vector.mma %probability_lhs, %rhs11, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %tile12 = vector.mma %probability_lhs, %rhs12, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %tile13 = vector.mma %probability_lhs, %rhs13, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %tile14 = vector.mma %probability_lhs, %rhs14, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %tile15 = vector.mma %probability_lhs, %rhs15, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %scaled_acc0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_acc0, %selected_old_scale : vector<8xf32>
+    %scaled_acc1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_acc1, %selected_old_scale : vector<8xf32>
+    %scaled_acc2 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_acc2, %selected_old_scale : vector<8xf32>
+    %scaled_acc3 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_acc3, %selected_old_scale : vector<8xf32>
+    %scaled_acc4 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_acc4, %selected_old_scale : vector<8xf32>
+    %scaled_acc5 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_acc5, %selected_old_scale : vector<8xf32>
+    %scaled_acc6 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_acc6, %selected_old_scale : vector<8xf32>
+    %scaled_acc7 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_acc7, %selected_old_scale : vector<8xf32>
+    %scaled_acc8 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_acc8, %selected_old_scale : vector<8xf32>
+    %scaled_acc9 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_acc9, %selected_old_scale : vector<8xf32>
+    %scaled_acc10 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_acc10, %selected_old_scale : vector<8xf32>
+    %scaled_acc11 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_acc11, %selected_old_scale : vector<8xf32>
+    %scaled_acc12 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_acc12, %selected_old_scale : vector<8xf32>
+    %scaled_acc13 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_acc13, %selected_old_scale : vector<8xf32>
+    %scaled_acc14 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_acc14, %selected_old_scale : vector<8xf32>
+    %scaled_acc15 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_acc15, %selected_old_scale : vector<8xf32>
+    %next0 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc0, %tile0 : vector<8xf32>
+    %next1 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc1, %tile1 : vector<8xf32>
+    %next2 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc2, %tile2 : vector<8xf32>
+    %next3 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc3, %tile3 : vector<8xf32>
+    %next4 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc4, %tile4 : vector<8xf32>
+    %next5 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc5, %tile5 : vector<8xf32>
+    %next6 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc6, %tile6 : vector<8xf32>
+    %next7 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc7, %tile7 : vector<8xf32>
+    %next8 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc8, %tile8 : vector<8xf32>
+    %next9 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc9, %tile9 : vector<8xf32>
+    %next10 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc10, %tile10 : vector<8xf32>
+    %next11 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc11, %tile11 : vector<8xf32>
+    %next12 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc12, %tile12 : vector<8xf32>
+    %next13 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc13, %tile13 : vector<8xf32>
+    %next14 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc14, %tile14 : vector<8xf32>
+    %next15 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc15, %tile15 : vector<8xf32>
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    scf.yield %next_max_even, %next_sum_even, %next_max_odd, %next_sum_odd, %next0, %next1, %next2, %next3, %next4, %next5, %next6, %next7, %next8, %next9, %next10, %next11, %next12, %next13, %next14, %next15 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }
+  %selected_final_sum = scf.if %lane_group_even -> (vector<8xf32>) {
+    scf.yield %final_sum_even : vector<8xf32>
+  } else {
+    scf.yield %final_sum_odd : vector<8xf32>
+  }
+  %output0 = vector.divf<nnan|ninf|nsz|arcp> %final_acc0, %selected_final_sum : vector<8xf32>
+  %output1 = vector.divf<nnan|ninf|nsz|arcp> %final_acc1, %selected_final_sum : vector<8xf32>
+  %output2 = vector.divf<nnan|ninf|nsz|arcp> %final_acc2, %selected_final_sum : vector<8xf32>
+  %output3 = vector.divf<nnan|ninf|nsz|arcp> %final_acc3, %selected_final_sum : vector<8xf32>
+  %output4 = vector.divf<nnan|ninf|nsz|arcp> %final_acc4, %selected_final_sum : vector<8xf32>
+  %output5 = vector.divf<nnan|ninf|nsz|arcp> %final_acc5, %selected_final_sum : vector<8xf32>
+  %output6 = vector.divf<nnan|ninf|nsz|arcp> %final_acc6, %selected_final_sum : vector<8xf32>
+  %output7 = vector.divf<nnan|ninf|nsz|arcp> %final_acc7, %selected_final_sum : vector<8xf32>
+  %output8 = vector.divf<nnan|ninf|nsz|arcp> %final_acc8, %selected_final_sum : vector<8xf32>
+  %output9 = vector.divf<nnan|ninf|nsz|arcp> %final_acc9, %selected_final_sum : vector<8xf32>
+  %output10 = vector.divf<nnan|ninf|nsz|arcp> %final_acc10, %selected_final_sum : vector<8xf32>
+  %output11 = vector.divf<nnan|ninf|nsz|arcp> %final_acc11, %selected_final_sum : vector<8xf32>
+  %output12 = vector.divf<nnan|ninf|nsz|arcp> %final_acc12, %selected_final_sum : vector<8xf32>
+  %output13 = vector.divf<nnan|ninf|nsz|arcp> %final_acc13, %selected_final_sum : vector<8xf32>
+  %output14 = vector.divf<nnan|ninf|nsz|arcp> %final_acc14, %selected_final_sum : vector<8xf32>
+  %output15 = vector.divf<nnan|ninf|nsz|arcp> %final_acc15, %selected_final_sum : vector<8xf32>
+  %channel0 = index.add %value_base, %c0 : index
+  %channel1 = index.add %value_base, %tile_extent : index
+  %channel2 = index.add %value_base, %channel_offset2 : index
+  %channel3 = index.add %value_base, %channel_offset3 : index
+  %channel4 = index.add %value_base, %channel_offset4 : index
+  %channel5 = index.add %value_base, %channel_offset5 : index
+  %channel6 = index.add %value_base, %channel_offset6 : index
+  %channel7 = index.add %value_base, %channel_offset7 : index
+  %channel8 = index.add %value_base, %channel_offset8 : index
+  %channel9 = index.add %channel8, %tile_extent : index
+  %channel10 = index.add %channel9, %tile_extent : index
+  %channel11 = index.add %channel10, %tile_extent : index
+  %channel12 = index.add %channel11, %tile_extent : index
+  %channel13 = index.add %channel12, %tile_extent : index
+  %channel14 = index.add %channel13, %tile_extent : index
+  %channel15 = index.add %channel14, %tile_extent : index
+  vector.fragment.store<result> %output0, %output_view[%query_origin, %channel0] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output1, %output_view[%query_origin, %channel1] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output2, %output_view[%query_origin, %channel2] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output3, %output_view[%query_origin, %channel3] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output4, %output_view[%query_origin, %channel4] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output5, %output_view[%query_origin, %channel5] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output6, %output_view[%query_origin, %channel6] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output7, %output_view[%query_origin, %channel7] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output8, %output_view[%query_origin, %channel8] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output9, %output_view[%query_origin, %channel9] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output10, %output_view[%query_origin, %channel10] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output11, %output_view[%query_origin, %channel11] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output12, %output_view[%query_origin, %channel12] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output13, %output_view[%query_origin, %channel13] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output14, %output_view[%query_origin, %channel14] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  vector.fragment.store<result> %output15, %output_view[%query_origin, %channel15] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16>
+  template.return
+}

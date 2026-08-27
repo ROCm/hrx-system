@@ -42,7 +42,8 @@ typedef union {
 //       push constants: 0
 //       bindings: 0
 //
-const iree_hal_executable_library_header_t** demo_executable_library_query(
+const iree_hal_executable_library_header_t* const*
+demo_executable_library_query(
     iree_hal_executable_library_version_t max_version,
     const iree_hal_executable_environment_v0_t* environment);
 

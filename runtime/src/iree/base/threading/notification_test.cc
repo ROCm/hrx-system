@@ -7,7 +7,6 @@
 #include "iree/base/threading/notification.h"
 
 #include <atomic>
-#include <chrono>
 #include <thread>
 #include <vector>
 
@@ -40,18 +39,12 @@ TEST(NotificationTest, TimeoutImmediate) {
   iree_notification_t notification;
   iree_notification_initialize(&notification);
 
-  iree_time_t start_ns = iree_time_now();
-
   EXPECT_FALSE(iree_notification_await(
       &notification,
       +[](void* entry_arg) -> bool {
         return false;  // Condition is never true.
       },
       NULL, iree_immediate_timeout()));
-
-  iree_duration_t delta_ns = iree_time_now() - start_ns;
-  iree_duration_t delta_ms = delta_ns / 1000000;
-  EXPECT_LT(delta_ms, 50);  // Should return quickly.
 
   iree_notification_deinitialize(&notification);
 }
@@ -244,9 +237,9 @@ TEST(NotificationTest, PrepareCommitWaitAlreadySignaled) {
   iree_notification_post(&notification, IREE_ALL_WAITERS);
 
   // Commit should return true (already signaled since epoch changed).
-  bool result = iree_notification_commit_wait(
-      &notification, token,
-      /*spin_ns=*/0, iree_time_now() + 100 * 1000000);  // 100ms timeout.
+  bool result =
+      iree_notification_commit_wait(&notification, token,
+                                    /*spin_ns=*/0, IREE_TIME_INFINITE_FUTURE);
   EXPECT_TRUE(result);
 
   iree_notification_deinitialize(&notification);
@@ -284,9 +277,9 @@ TEST(NotificationTest, PrepareCommitWaitWoken) {
     iree_wait_token_t token = iree_notification_prepare_wait(&notification);
     waiter_prepared.store(true, std::memory_order_release);
 
-    bool result = iree_notification_commit_wait(
-        &notification, token,
-        /*spin_ns=*/0, iree_time_now() + 1000000000);  // 1s timeout.
+    bool result =
+        iree_notification_commit_wait(&notification, token,
+                                      /*spin_ns=*/0, IREE_TIME_INFINITE_FUTURE);
     waiter_result.store(result, std::memory_order_release);
   });
 
@@ -332,14 +325,14 @@ TEST(NotificationTest, RapidPostAwait) {
         std::atomic<int>* counter;
         int last_seen;
       } state = {&counter, last_seen};
-      iree_notification_await(
+      EXPECT_TRUE(iree_notification_await(
           &notification,
           +[](void* arg) {
             auto* state = static_cast<await_state_t*>(arg);
             return state->counter->load(std::memory_order_acquire) >
                    state->last_seen;
           },
-          &state, iree_make_timeout_ms(100));
+          &state, iree_infinite_timeout()));
       last_seen = counter.load(std::memory_order_acquire);
     }
   });

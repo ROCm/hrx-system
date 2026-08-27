@@ -1,0 +1,41 @@
+// RUN: emit source-low output=low
+
+// A workgroup-uniform choice between global buffer roots selects both halves of
+// the 64-bit address in SGPRs before using it as a scalar global-load base.
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @select_global_buffer(%select_rhs: index) {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%select_rhs: index, %lhs: buffer, %rhs: buffer, %output: buffer) {
+  %element_index = index.constant 0 : index
+  %rhs_selector = index.constant 1 : index
+  %buffer_base = index.constant 0 : offset
+  %use_rhs = index.cmp eq, %select_rhs, %rhs_selector : index
+  %selected = scf.select %use_rhs, %rhs, %lhs : buffer
+  %selected_view = buffer.view %selected[%buffer_base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
+  %selected_value = view.load %selected_view[%element_index] : view<1xi32> -> i32
+  view.store %selected_value, %output_view[%element_index] : i32, view<1xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @select_global_buffer(%select_rhs: reg<amdgpu.sgpr>) asm {
+  %lhs = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %rhs = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %rhs_selector = s_mov_b32 1
+  %use_rhs = s_cmp_eq_i32 %select_rhs, %rhs_selector
+  %20 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %21 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %22 = s_cselect_b32 %20, %21, %use_rhs
+  %23 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %24 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %25 = s_cselect_b32 %23, %24, %use_rhs
+  %selected_view = concat(%22, %25) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %27 = v_mov_b32 0
+  %selected_value = global_load_b32_saddr %27, %selected_view
+  global_store_b32_saddr %27, %selected_value, %output_view
+  return
+}

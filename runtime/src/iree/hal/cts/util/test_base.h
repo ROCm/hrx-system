@@ -57,7 +57,6 @@ CTS_HAL_TRAITS(iree_hal_buffer_t, iree_hal_buffer_release);
 CTS_HAL_TRAITS(iree_hal_command_buffer_t, iree_hal_command_buffer_release);
 CTS_HAL_TRAITS(iree_hal_semaphore_t, iree_hal_semaphore_release);
 CTS_HAL_TRAITS(iree_hal_executable_t, iree_hal_executable_release);
-CTS_HAL_TRAITS(iree_hal_executable_cache_t, iree_hal_executable_cache_release);
 CTS_HAL_TRAITS(iree_hal_file_t, iree_hal_file_release);
 CTS_HAL_TRAITS(iree_hal_fence_t, iree_hal_fence_release);
 CTS_HAL_TRAITS(iree_hal_pool_t, iree_hal_pool_release);
@@ -243,6 +242,30 @@ inline std::map<std::string, CachedBackendResources>& GetBackendCache() {
   return cache;
 }
 
+// Returns the affinity covering every physical device in |device_spec|.
+inline iree_hal_physical_device_affinity_t GetAllPhysicalDeviceAffinity(
+    const iree_hal_device_spec_t* device_spec) {
+  iree_hal_physical_device_affinity_t physical_device_affinity = 0;
+  const iree_hal_device_identity_spec_t* identity =
+      iree_hal_device_spec_identity(device_spec);
+  for (iree_host_size_t i = 0; i < identity->physical_device_count; ++i) {
+    physical_device_affinity |=
+        identity->physical_devices[i].physical_device_affinity;
+  }
+  return physical_device_affinity;
+}
+
+// Selects the executable target attached to |backend| from |device|.
+inline iree_status_t SelectBackendExecutableTarget(
+    iree_hal_device_t* device, const BackendInfo& backend,
+    iree_hal_executable_target_selection_result_t* out_result) {
+  const iree_hal_device_spec_t* device_spec = iree_hal_device_spec(device);
+  return backend.executable_target_selector(
+      device_spec, iree_make_cstring_view(backend.executable_target_family),
+      iree_make_cstring_view(backend.executable_target_key),
+      GetAllPhysicalDeviceAffinity(device_spec), out_result);
+}
+
 // GTest environment that releases all cached backend resources at program exit.
 // Must be registered via ::testing::AddGlobalTestEnvironment() in test_main.cc.
 class CtsBackendCacheEnvironment : public ::testing::Environment {
@@ -421,10 +444,14 @@ class CtsTestBase : public BaseType {
     return this->GetParam().recording_mode;
   }
 
-  // Returns the executable format string for the current backend, or nullptr
-  // if the backend does not provide pre-compiled executables.
-  const char* executable_format() const {
-    return this->GetParam().executable_format;
+  // Returns the target family for the current executable parameterization.
+  const char* executable_target_family() const {
+    return this->GetParam().executable_target_family;
+  }
+
+  // Returns the family-owned key for the current executable parameterization.
+  const char* executable_target_key() const {
+    return this->GetParam().executable_target_key;
   }
 
   // Returns pre-compiled executable data for the given file name.
@@ -436,34 +463,66 @@ class CtsTestBase : public BaseType {
     return data_fn(file_name);
   }
 
-  // Prepares |file_name| using the current test executable format.
-  //
-  // Executable CTS parameterization represents the formats linked into the
-  // test binary. Some backends can link more targets than the current device
-  // can execute; those unsupported format/device pairs must be skipped without
-  // weakening real loader errors for runnable formats.
-  void PrepareExecutableOrSkipUnsupported(
-      iree_hal_executable_cache_t* executable_cache, const char* file_name,
-      iree_hal_executable_t** out_executable) {
-    *out_executable = nullptr;
-    iree_hal_executable_params_t executable_params;
-    iree_hal_executable_params_initialize(&executable_params);
-    executable_params.caching_mode =
-        IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-    executable_params.executable_format =
-        iree_make_cstring_view(executable_format());
-    executable_params.executable_data =
-        executable_data(iree_make_cstring_view(file_name));
+  // Selects one exact executable target advertised by the current device.
+  iree_hal_executable_target_selection_result_t SelectExecutableTarget(
+      iree_string_view_t family, iree_string_view_t target_key) const {
+    iree_hal_executable_target_selection_t selection = {};
+    selection.family = family;
+    selection.target_key = target_key;
+    return iree_hal_device_spec_select_executable_target(
+        iree_hal_device_spec(device_), &selection);
+  }
 
-    iree_status_t status = iree_hal_executable_cache_prepare_executable(
-        executable_cache, &executable_params, out_executable);
-    if (iree_status_is_incompatible(status)) {
-      iree_status_free(status);
-      GTEST_SKIP() << "Executable format '" << executable_format()
-                   << "' is incompatible with CTS backend/device '"
+  // Selects the current CTS executable parameterization from the device.
+  iree_status_t SelectExecutableTarget(
+      iree_hal_executable_target_selection_result_t* out_result) const {
+    return SelectBackendExecutableTarget(device_, this->GetParam(), out_result);
+  }
+
+  // Loads native executable data for a borrowed target of the current device.
+  iree_status_t LoadExecutable(const iree_hal_executable_target_t* target,
+                               iree_hal_executable_load_flags_t flags,
+                               iree_const_byte_span_t executable_data,
+                               iree_hal_executable_t** out_executable) const {
+    iree_hal_executable_load_params_t load_params;
+    iree_hal_executable_load_params_initialize(&load_params);
+    load_params.flags = flags;
+    load_params.executable_data = executable_data;
+    return iree_hal_device_load_executable(device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+                                           target, &load_params,
+                                           out_executable);
+  }
+
+  // Loads |file_name| for the current test executable target.
+  //
+  // Executable CTS parameterization represents the targets linked into the
+  // test binary. Some backends can link more targets than the current device
+  // can execute; those unsupported target/device pairs are skipped before
+  // loading. Once a target is selected, all native loader errors are failures.
+  void LoadExecutableOrSkipUnsupported(const char* file_name,
+                                       iree_hal_executable_t** out_executable) {
+    *out_executable = nullptr;
+
+    iree_hal_executable_target_selection_result_t result;
+    IREE_ASSERT_OK(SelectExecutableTarget(&result));
+    if (result.outcome ==
+        IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
+      GTEST_SKIP() << "Executable target '" << executable_target_family() << ":"
+                   << executable_target_key()
+                   << "' is not advertised by CTS backend/device '"
                    << this->GetParam().name << "'";
     }
-    IREE_ASSERT_OK(status);
+    if (result.outcome ==
+        IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS) {
+      FAIL() << "Executable target '" << executable_target_family() << ":"
+             << executable_target_key()
+             << "' is ambiguous for CTS backend/device '"
+             << this->GetParam().name << "'";
+    }
+
+    IREE_ASSERT_OK(LoadExecutable(
+        result.target, IREE_HAL_EXECUTABLE_LOAD_FLAG_NONE,
+        executable_data(iree_make_cstring_view(file_name)), out_executable));
   }
 
   //===--------------------------------------------------------------------===//
@@ -476,7 +535,7 @@ class CtsTestBase : public BaseType {
     iree_hal_buffer_params_t params = {0};
     params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
     params.usage =
-        IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+        IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
     return iree_hal_allocator_allocate_buffer(device_allocator_, params,
                                               buffer_size, out_buffer);
   }
@@ -487,7 +546,7 @@ class CtsTestBase : public BaseType {
     iree_hal_buffer_params_t params = {0};
     params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
     params.usage =
-        IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+        IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
     iree_hal_buffer_t* buffer = nullptr;
     iree_status_t status = iree_hal_allocator_allocate_buffer(
         device_allocator_, params, buffer_size, &buffer);
@@ -519,7 +578,7 @@ class CtsTestBase : public BaseType {
     iree_hal_buffer_params_t params = {0};
     params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
     params.usage =
-        IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+        IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
     iree_hal_buffer_t* buffer = nullptr;
     iree_status_t status = iree_hal_allocator_allocate_buffer(
         device_allocator_, params, buffer_size, &buffer);
@@ -551,7 +610,7 @@ class CtsTestBase : public BaseType {
     iree_hal_buffer_params_t params = {0};
     params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
     params.usage =
-        IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+        IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
     iree_hal_buffer_t* buffer = nullptr;
     iree_status_t status = iree_hal_allocator_allocate_buffer(
         device_allocator_, params, buffer_size, &buffer);
@@ -595,9 +654,10 @@ class CtsTestBase : public BaseType {
   }
 
   // Reads a specific byte range from a buffer.
-  std::vector<uint8_t> ReadBufferBytes(iree_hal_buffer_t* buffer,
-                                       iree_device_size_t offset,
-                                       iree_device_size_t length) {
+  std::vector<uint8_t> ReadBufferBytes(
+      iree_hal_buffer_t* buffer, iree_device_size_t offset,
+      iree_device_size_t length,
+      iree_hal_queue_affinity_t queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY) {
     std::vector<uint8_t> data(length);
     if (iree_all_bits_set(iree_hal_buffer_memory_type(buffer),
                           IREE_HAL_MEMORY_TYPE_HOST_VISIBLE) &&
@@ -618,16 +678,16 @@ class CtsTestBase : public BaseType {
 
     iree_hal_file_t* file = nullptr;
     IREE_EXPECT_OK(iree_hal_file_import(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, IREE_HAL_MEMORY_ACCESS_WRITE,
-        handle, IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &file));
+        device_, queue_affinity, IREE_HAL_MEMORY_ACCESS_WRITE, handle,
+        IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &file));
     iree_io_file_handle_release(handle);
     if (!file) return data;
 
     SemaphoreList empty_wait;
     SemaphoreList write_signal(device_, {0}, {1});
     IREE_EXPECT_OK(iree_hal_device_queue_write(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, write_signal, buffer,
-        offset, file, /*target_offset=*/0, length, IREE_HAL_WRITE_FLAG_NONE));
+        device_, queue_affinity, empty_wait, write_signal, buffer, offset, file,
+        /*target_offset=*/0, length, IREE_HAL_WRITE_FLAG_NONE));
     IREE_EXPECT_OK(iree_hal_semaphore_list_wait(
         write_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
     iree_hal_file_release(file);

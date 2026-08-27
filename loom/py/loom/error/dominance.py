@@ -18,19 +18,19 @@ ERR_DOMINANCE_001 = ErrorDef(
     params=(ErrorParam("value_name", ParamKind.STRING),),
 )
 
-# ERR_DOMINANCE_002: Use of consumed value (after tied result).
+# ERR_DOMINANCE_002: Use of a value after an ownership transfer.
 ERR_DOMINANCE_002 = ErrorDef(
     domain=ErrorDomain.DOMINANCE,
     code=2,
     severity=Severity.ERROR,
     summary="Use of consumed value.",
-    message="use of consumed value '{value_name}' (consumed by tied "
-    "result of '{consuming_op}')",
+    message="use of consumed value '{value_name}' after ownership transfer "
+    "by '{consuming_op}'",
     params=(
         ErrorParam("value_name", ParamKind.STRING),
         ErrorParam("consuming_op", ParamKind.STRING),
     ),
-    fix_hint="Use the tied result of '{consuming_op}' instead of '{value_name}'",
+    fix_hint="Use the result of '{consuming_op}' instead of '{value_name}'",
 )
 
 # ERR_DOMINANCE_003: Value ID out of range.

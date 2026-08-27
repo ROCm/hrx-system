@@ -21,7 +21,6 @@ set(IREE_PACKAGE_ROOT_PREFIX "loom/py/loom")
 
 iree_py_library(
     name = "package",
-    srcs = ["__init__.py"],
     imports = [".."],
     deps = [
         ":core",
@@ -39,11 +38,14 @@ iree_py_library(
         "builder_model.py",
         "builders.py",
         "builtin_types.py",
+        "constraint_validation.py",
         "diagnostics.py",
         "dsl.py",
         "errors.py",
         "fields.py",
         "ir.py",
+        "location_tag.py",
+        "scalar_type.py",
         "stable_id.py",
         "verify.py",
     ],
@@ -56,10 +58,12 @@ iree_py_test(
         "assembly_test.py",
         "builder_test.py",
         "builders_test.py",
+        "constraint_validation_test.py",
         "diagnostics_test.py",
         "dsl_test.py",
         "fields_test.py",
         "ir_test.py",
+        "location_tag_test.py",
         "projected_region_test.py",
         "verify_test.py",
         "//loom/py/loom/tools:pytest_style_runner.py",
@@ -68,18 +72,32 @@ iree_py_test(
         "loom.assembly_test",
         "loom.builder_test",
         "loom.builders_test",
+        "loom.constraint_validation_test",
         "loom.diagnostics_test",
         "loom.dsl_test",
         "loom.fields_test",
         "loom.ir_test",
+        "loom.location_tag_test",
         "loom.projected_region_test",
         "loom.verify_test",
     ],
     main = "pytest_style_runner.py",
     deps = [
         ":package",
+        "//loom/py/loom/dialect/func",
         "//loom/py/loom/dialect/test",
         "//loom/py/loom/format/bytecode",
         "//loom/py/loom/format/text",
     ],
+)
+
+iree_py_test(
+    name = "package_import_test",
+    srcs = [
+        "package_import_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.package_import_test"],
+    main = "pytest_style_runner.py",
+    deps = [":package"],
 )

@@ -13,21 +13,13 @@ See bazel_to_cmake.py for usage.
 # pylint: disable=unused-argument
 # pylint: disable=exec-used
 
+import hashlib
 import itertools
 import os
 import re
 
 import bazel_to_cmake_config
 import bazel_to_cmake_targets
-
-# Maps Bazel string_flag labels to CMake variable names. Used by
-# flag_values in iree_hal_executable rules and CTS macros to resolve
-# {PLACEHOLDER} template variables to ${CMAKE_VARIABLE} references.
-_BUILD_SETTING_CMAKE_VARIABLES = {}
-
-_BUILD_SETTING_CMAKE_LIST_VARIABLES = {
-    "//runtime/src/iree/hal/drivers/amdgpu:targets": "_IREE_HAL_AMDGPU_EXACT_TARGETS",
-}
 
 _LOCATION_PATTERN = re.compile(
     r"\$\((location|locations|rootpath|rootpaths|execpath|execpaths) ([^)]+)\)"
@@ -52,6 +44,17 @@ _PLATFORM_CMAKE_SYSTEM_NAME = {
     "@platforms//cpu:wasm32": "wasm_32",
 }
 
+_COMPILER_CMAKE_OPTIONS = {
+    "//build_tools/bazel:cc_compiler_clang": (
+        'CMAKE_C_COMPILER_ID MATCHES "Clang" AND NOT MSVC'
+    ),
+    "//build_tools/bazel:cc_compiler_clang_cl": (
+        'CMAKE_C_COMPILER_ID MATCHES "Clang" AND MSVC'
+    ),
+    "//build_tools/bazel:cc_compiler_gcc": 'CMAKE_C_COMPILER_ID STREQUAL "GNU"',
+    "//build_tools/bazel:cc_compiler_msvc": 'CMAKE_C_COMPILER_ID STREQUAL "MSVC"',
+}
+
 _RUNTIME_HAL_DRIVER_CMAKE_OPTIONS = {
     "//runtime/config/hal:driver_amdgpu": "IREE_HAL_DRIVER_AMDGPU",
     "//runtime/config/hal:driver_amdxdna": "IREE_HAL_DRIVER_AMDXDNA",
@@ -70,7 +73,9 @@ _RUNTIME_HAL_DRIVER_CMAKE_OPTIONS = {
 
 _LOOM_CONFIG_CMAKE_OPTIONS = {
     "//loom/config/target:amdgpu_artifacts": "LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU",
+    "//loom/config/target:llvmir_amdgpu_target_env": "LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_AMDGPU",
     "//loom/config/target:llvmir_artifacts": "LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR",
+    "//loom/config/target:llvmir_x86_target_env": "LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_X86",
     "//loom/config/target:spirv_artifacts": "LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV",
     "//loom/config/target:spirv_vulkan_artifacts": "LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND IREE_HAL_DRIVER_VULKAN",
 }
@@ -227,6 +232,14 @@ class BuildFileFunctions(object):
         "eternal": 3600,
     }
 
+    # Match the default timeout implied by each Bazel test size.
+    _size_timeout_map = {
+        "small": 60,
+        "medium": 300,
+        "large": 900,
+        "enormous": 3600,
+    }
+
     def _should_skip_target(self, tags=None, **kwargs):
         if tags and "skip-bazel_to_cmake" in tags:
             return True
@@ -258,9 +271,11 @@ class BuildFileFunctions(object):
         condition = self._convert_platform_condition(label)
         if condition:
             return condition
-        return _RUNTIME_HAL_DRIVER_CMAKE_OPTIONS.get(
-            label
-        ) or _LOOM_CONFIG_CMAKE_OPTIONS.get(label)
+        return (
+            _COMPILER_CMAKE_OPTIONS.get(label)
+            or _RUNTIME_HAL_DRIVER_CMAKE_OPTIONS.get(label)
+            or _LOOM_CONFIG_CMAKE_OPTIONS.get(label)
+        )
 
     def _condition_select_compatibility_condition(self, condition_select):
         compatible_conditions = []
@@ -470,6 +485,14 @@ class BuildFileFunctions(object):
         value = self._timeout_map[value]
         return f"  {name}\n    {value}\n"
 
+    def _convert_test_timeout_arg_block(self, name, timeout, size):
+        if timeout is not None:
+            return self._convert_timeout_arg_block(name, timeout)
+        if size is None:
+            return ""
+        value = self._size_timeout_map[size]
+        return f"  {name}\n    {value}\n"
+
     def _convert_string_list_block(self, name, values, quote=True, sort=False):
         # Note this deliberately distinguishes between an empty list (argument
         # explicitly specified) and None (argument left as default).
@@ -669,6 +692,8 @@ class BuildFileFunctions(object):
         return labels
 
     def _cmake_location_paths(self, label):
+        if label.startswith("${"):
+            return [label]
         if label.startswith("@"):
             try:
                 cmake_targets = self._targets.convert_target(label)
@@ -962,6 +987,33 @@ class BuildFileFunctions(object):
             list_name, targets, sort=True, quote=False
         )
 
+    def _convert_data_list_block(self, data, block_name="DATA"):
+        if data is None:
+            return ""
+
+        converted_data = []
+        target_file_prefix = "$<TARGET_FILE:"
+        for label in data:
+            if label.startswith("@"):
+                try:
+                    cmake_targets = self._targets.convert_target(label)
+                except (KeyError, ValueError):
+                    continue
+                if not cmake_targets or not all(cmake_targets):
+                    continue
+            for path in self._cmake_location_paths(label):
+                if path.startswith(target_file_prefix) and path.endswith(">"):
+                    converted_data.append(path[len(target_file_prefix) : -1])
+                else:
+                    converted_data.append(path)
+
+        converted_data = list(dict.fromkeys(filter(None, converted_data)))
+        if not converted_data:
+            return ""
+        return self._convert_string_list_block(
+            block_name, converted_data, sort=True, quote=True
+        )
+
     def _convert_amdgpu_bitcode_deps_block(self, deps):
         if deps is None:
             return ""
@@ -1116,6 +1168,10 @@ class BuildFileFunctions(object):
     def iree_build_test(self, **kwargs):
         pass
 
+    def iree_msvc_masm_library(self, **kwargs):
+        # CMakeLists.txt owns its equivalent custom ml.exe/ml64.exe invocation.
+        pass
+
     def iree_assert_no_dependency(self, **kwargs):
         pass
 
@@ -1142,6 +1198,7 @@ class BuildFileFunctions(object):
         srcs=None,
         deps=None,
         main=None,
+        main_module=None,
         imports=None,
         data=None,
         tags=None,
@@ -1162,7 +1219,8 @@ class BuildFileFunctions(object):
             source_list.append(main)
         name_block = self._convert_string_arg_block("NAME", name, quote=False)
         main_block = self._convert_string_arg_block("MAIN", main)
-        source_block = self._convert_string_list_block("SRCS", source_list, sort=False)
+        main_module_block = self._convert_string_arg_block("MAIN_MODULE", main_module)
+        source_block = self._convert_srcs_block(source_list)
         imports_block = self._convert_string_list_block("IMPORTS", imports, sort=False)
         deps_block, deps_var_block = self._convert_python_target_list_blocks(
             name, "DEPS", deps
@@ -1174,6 +1232,7 @@ class BuildFileFunctions(object):
             "iree_py_library(\n"
             f"{name_block}"
             f"{main_block}"
+            f"{main_module_block}"
             f"{source_block}"
             f"{imports_block}"
             f"{deps_block}"
@@ -1202,7 +1261,7 @@ class BuildFileFunctions(object):
         if data and not self._has_only_external_targets(data):
             raise NotImplementedError(f"iree_py_library data: {name}")
         name_block = self._convert_string_arg_block("NAME", name, quote=False)
-        source_block = self._convert_string_list_block("SRCS", srcs, sort=False)
+        source_block = self._convert_srcs_block(srcs)
         imports_block = self._convert_string_list_block("IMPORTS", imports, sort=False)
         deps_block, deps_var_block = self._convert_python_target_list_blocks(
             name, "DEPS", deps
@@ -1235,6 +1294,7 @@ class BuildFileFunctions(object):
         target_compatible_with=None,
         testonly=None,
         timeout=None,
+        size=None,
         visibility=None,
         **kwargs,
     ):
@@ -1277,8 +1337,13 @@ class BuildFileFunctions(object):
             raise ValueError(f"iree_py_test {name} requires a main source")
 
         name_block = self._convert_string_arg_block("NAME", name, quote=False)
-        source_block = self._convert_string_arg_block(
-            "SRCS", self._python_file_cmake_path(main_source)
+        main_block = self._convert_string_arg_block(
+            "MAIN", self._python_file_cmake_path(main_source)
+        )
+        source_block = self._convert_string_list_block(
+            "SRCS",
+            [self._python_file_cmake_path(source) for source in source_list],
+            sort=False,
         )
         args_block = self._convert_string_list_block(
             "ARGS", self._convert_location_args(args), sort=False
@@ -1293,13 +1358,14 @@ class BuildFileFunctions(object):
             package_dirs or self._python_package_dirs(),
             sort=False,
         )
-        timeout_block = self._convert_timeout_arg_block("TIMEOUT", timeout)
+        timeout_block = self._convert_test_timeout_arg_block("TIMEOUT", timeout, size)
         self._emit_platform_guard_begin(target_compatible_with)
         if deps_var_block:
             self._converter.body += deps_var_block
         self._converter.body += (
             "iree_py_test(\n"
             f"{name_block}"
+            f"{main_block}"
             f"{source_block}"
             f"{args_block}"
             f"{deps_block}"
@@ -1355,6 +1421,10 @@ class BuildFileFunctions(object):
             f")\n\n"
             f"add_custom_target({name}\n"
             f"    DEPENDS {stamp_file}\n"
+            f")\n"
+            f"iree_register_generated_compile_input({name}\n"
+            f"  OUTPUTS\n"
+            f'    "${{CMAKE_CURRENT_BINARY_DIR}}/{stamp_file}"\n'
             f")\n\n"
         )
 
@@ -1513,6 +1583,14 @@ class BuildFileFunctions(object):
         if exclude is None:
             exclude = []
 
+        # Exclusions mutate the generated CMake list. Give filtered globs a
+        # stable identity derived from the complete expression so a later glob
+        # over the same include pattern cannot overwrite the filtered result.
+        suffix = ""
+        if exclude:
+            signature = repr((tuple(include), tuple(exclude))).encode("utf-8")
+            suffix = "_" + hashlib.sha256(signature).hexdigest()[:8].upper()
+
         glob_vars = []
         for pattern in include:
             if "**" in pattern:
@@ -1524,7 +1602,7 @@ class BuildFileFunctions(object):
             # Bazel `*.mlir` glob -> CMake variable `_GLOB_X_MLIR`.
             var = (
                 "_GLOB_" + self._cmake_variable_name(pattern.replace("*", "X")).upper()
-            )
+            ) + suffix
             glob_vars.append(var)
             self._converter.body += (
                 f"file(GLOB {var} LIST_DIRECTORIES false"
@@ -1534,7 +1612,9 @@ class BuildFileFunctions(object):
         for pattern in exclude:
             if "**" in pattern:
                 raise NotImplementedError("Recursive globs not supported")
-            exclude_var = "_GLOB_" + pattern.replace("*", "X").replace(".", "_").upper()
+            exclude_var = (
+                "_GLOB_" + pattern.replace("*", "X").replace(".", "_").upper() + suffix
+            )
             self._converter.body += (
                 f"file(GLOB {exclude_var} LIST_DIRECTORIES false"
                 f" RELATIVE {self._expand_cmake_var('CMAKE_CURRENT_SOURCE_DIR')}"
@@ -2065,10 +2145,10 @@ class BuildFileFunctions(object):
         name,
         srcs,
         target_selectors_flag,
-        format_name,
-        format_string,
+        target_name,
         identifier,
         backend_name="amdgpu",
+        target_family="amdgpu",
         target="amdgcn-amd-amdhsa",
         deps=None,
         internal_hdrs=None,
@@ -2085,19 +2165,15 @@ class BuildFileFunctions(object):
         targets_block = self._convert_amdgpu_target_selectors_block(
             target_selectors_flag
         )
-        format_name_block = self._convert_string_arg_block(
-            "FORMAT_NAME", format_name, quote=False
+        target_name_block = self._convert_string_arg_block(
+            "TARGET_NAME", target_name, quote=False
         )
-        if "${" in format_string:
-            escaped_format_string = format_string.replace("\\", "\\\\").replace(
-                '"', '\\"'
-            )
-            format_string_block = f'  FORMAT_STRING\n    "{escaped_format_string}"\n'
-        else:
-            format_string_block = f"  FORMAT_STRING\n    [=[{format_string}]=]\n"
         identifier_block = self._convert_string_arg_block("IDENTIFIER", identifier)
         backend_name_block = self._convert_string_arg_block(
             "BACKEND_NAME", backend_name
+        )
+        target_family_block = self._convert_string_arg_block(
+            "TARGET_FAMILY", target_family
         )
         hdrs_block = self._convert_srcs_block(internal_hdrs, block_name="INTERNAL_HDRS")
         srcs_block = self._convert_srcs_block(srcs)
@@ -2111,10 +2187,10 @@ class BuildFileFunctions(object):
             f"{name_block}"
             f"{target_block}"
             f"{targets_block}"
-            f"{format_name_block}"
-            f"{format_string_block}"
+            f"{target_name_block}"
             f"{identifier_block}"
             f"{backend_name_block}"
+            f"{target_family_block}"
             f"{hdrs_block}"
             f"{srcs_block}"
             f"{deps_block}"
@@ -2145,6 +2221,7 @@ class BuildFileFunctions(object):
         linkopts=None,
         deps=None,
         internalize=True,
+        source_format=None,
         testonly=None,
         tags=None,
         target_compatible_with=None,
@@ -2167,7 +2244,14 @@ class BuildFileFunctions(object):
         linkopts_block = self._convert_string_list_block(
             "LINKOPTS", linkopts, sort=False
         )
-        internalize_block = self._convert_amdgpu_internalize_block(internalize)
+        internalize_block = (
+            ""
+            if source_format == "hip"
+            else self._convert_amdgpu_internalize_block(internalize)
+        )
+        source_format_block = self._convert_string_arg_block(
+            "SOURCE_FORMAT", source_format, quote=False
+        )
         testonly_block = self._convert_option_block("TESTONLY", testonly)
 
         self._emit_platform_guard_begin(target_compatible_with)
@@ -2183,6 +2267,7 @@ class BuildFileFunctions(object):
             f"{copts_block}"
             f"{linkopts_block}"
             f"{internalize_block}"
+            f"{source_format_block}"
             f"{testonly_block}"
             f")\n\n"
         )
@@ -2198,12 +2283,13 @@ class BuildFileFunctions(object):
         c_file_output=None,
         h_file_output=None,
         identifier=None,
-        flatten=None,
+        flatten=True,
         internal_hdrs=None,
         copts=None,
         linkopts=None,
         deps=None,
         internalize=True,
+        source_format=None,
         testonly=None,
         tags=None,
         target_compatible_with=None,
@@ -2233,7 +2319,14 @@ class BuildFileFunctions(object):
             "LINKOPTS", linkopts, sort=False
         )
         deps_block = self._convert_amdgpu_bitcode_deps_block(deps)
-        internalize_block = self._convert_amdgpu_internalize_block(internalize)
+        internalize_block = (
+            ""
+            if source_format == "hip"
+            else self._convert_amdgpu_internalize_block(internalize)
+        )
+        source_format_block = self._convert_string_arg_block(
+            "SOURCE_FORMAT", source_format, quote=False
+        )
         testonly_block = self._convert_option_block("TESTONLY", testonly)
         flatten_block = self._convert_option_block("FLATTEN", flatten)
 
@@ -2253,6 +2346,7 @@ class BuildFileFunctions(object):
             f"{linkopts_block}"
             f"{deps_block}"
             f"{internalize_block}"
+            f"{source_format_block}"
             f"{testonly_block}"
             f"{flatten_block}"
             f"  PUBLIC\n)\n\n"
@@ -2476,132 +2570,10 @@ class BuildFileFunctions(object):
             f"  PUBLIC\n)\n\n"
         )
 
-    def _iree_hal_cts_testdata(
+    def _iree_runtime_hal_cts_test_suite(
         self,
-        format_name,
-        target_device,
-        identifier,
-        backend_name,
-        format_string,
-        testdata,
-        flags=None,
-        flag_values=None,
-        cmake_format_variant_values=None,
-        data=None,
-        testonly=None,
-        target_compatible_with=None,
-        **kwargs,
-    ):
-        variant_placeholders = set(cmake_format_variant_values or [])
-        variant_token = None
-        variant_values_var = None
-        if len(variant_placeholders) > 1:
-            raise NotImplementedError(
-                "iree_hal_cts_testdata supports one CMake format variant value"
-            )
-        if variant_placeholders:
-            if not flag_values:
-                raise ValueError(
-                    "cmake_format_variant_values requires matching flag_values"
-                )
-            variant_placeholder = next(iter(variant_placeholders))
-            variant_label = flag_values.get(variant_placeholder)
-            if not variant_label:
-                raise ValueError(
-                    f"cmake_format_variant_values entry {variant_placeholder} "
-                    "is missing from flag_values"
-                )
-            variant_values_var = _BUILD_SETTING_CMAKE_LIST_VARIABLES.get(variant_label)
-            if not variant_values_var:
-                raise NotImplementedError(
-                    f"No CMake list variable mapping for {variant_label}"
-                )
-            variant_token = "{" + variant_placeholder + "}"
-
-        # Resolve {PLACEHOLDER} template variables from flag_values.
-        # Build settings map to CMake variables; file targets (not in the
-        # mapping) have their flags stripped since CMake auto-discovers
-        # platform libraries via findPlatformLibDirectory().
-        if flag_values:
-            file_templates = set()
-            for placeholder, label in flag_values.items():
-                cmake_var = _BUILD_SETTING_CMAKE_VARIABLES.get(label)
-                template = "{" + placeholder + "}"
-                if cmake_var is not None:
-                    if placeholder not in variant_placeholders:
-                        cmake_ref = "${" + cmake_var + "}"
-                        format_string = format_string.replace(template, cmake_ref)
-                        if flags:
-                            flags = [f.replace(template, cmake_ref) for f in flags]
-                else:
-                    file_templates.add(template)
-            if flags and file_templates:
-                flags = [f for f in flags if not any(t in f for t in file_templates)]
-
-        name_block = self._convert_string_arg_block(
-            "FORMAT_NAME", format_name, quote=False
-        )
-        variant_token_block = self._convert_string_arg_block(
-            "FORMAT_VARIANT_TOKEN", variant_token
-        )
-        if variant_values_var:
-            format_variants_block = self._convert_string_list_block(
-                "FORMAT_VARIANTS", [f"${{{variant_values_var}}}"], quote=False
-            )
-        else:
-            format_variants_block = ""
-        target_device_block = self._convert_string_arg_block(
-            "TARGET_DEVICE", target_device
-        )
-        identifier_block = self._convert_string_arg_block("IDENTIFIER", identifier)
-        backend_name_block = self._convert_string_arg_block(
-            "BACKEND_NAME", backend_name
-        )
-        # Bracket-quote C expressions like "embedded-elf-" IREE_ARCH so CMake
-        # leaves them alone. If placeholder substitution produced a CMake
-        # variable reference, use a normal quoted argument so the generated
-        # testdata registration contains the configured value instead of the
-        # literal ${...} token.
-        if "${" in format_string:
-            escaped_format_string = format_string.replace("\\", "\\\\").replace(
-                '"', '\\"'
-            )
-            format_string_block = f'  FORMAT_STRING\n    "{escaped_format_string}"\n'
-        else:
-            format_string_block = f"  FORMAT_STRING\n    [=[{format_string}]=]\n"
-        flags_block = self._convert_string_list_block("FLAGS", flags)
-
-        # Convert Bazel label to CMake directory path.
-        # "//runtime/src/iree/hal/cts/testdata:executable_srcs"
-        #   -> "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/testdata"
-        testdata_dir = testdata.split(":")[0].lstrip("/")
-        testdata_dir_block = (
-            f'  TESTDATA_DIR\n    "${{PROJECT_SOURCE_DIR}}/{testdata_dir}"\n'
-        )
-
-        self._emit_platform_guard_begin(target_compatible_with)
-        self._converter.body += (
-            f"iree_hal_cts_testdata(\n"
-            f"{name_block}"
-            f"{variant_token_block}"
-            f"{format_variants_block}"
-            f"{target_device_block}"
-            f"{identifier_block}"
-            f"{backend_name_block}"
-            f"{format_string_block}"
-            f"{testdata_dir_block}"
-            f"{flags_block}"
-            f")\n\n"
-        )
-        self._emit_platform_guard_end(target_compatible_with)
-
-    def _iree_hal_cts_test_suite(
-        self,
-        backends_lib,
-        executable_formats=None,
+        backends,
         testdata_libs=None,
-        testdata=None,
-        flag_values=None,
         name="",
         args=None,
         resource_group=None,
@@ -2616,34 +2588,13 @@ class BuildFileFunctions(object):
                     resource_group = tag[len("resource_group:") :]
                     break
 
-        # Expand executable_formats into individual iree_hal_cts_testdata()
-        # calls. The CMake function takes only flat TESTDATA_LIBS, avoiding
-        # nested dict argument parsing.
-        _testdata_libs = list(testdata_libs or [])
-        if executable_formats:
-            for format_name, config in executable_formats.items():
-                self._iree_hal_cts_testdata(
-                    format_name=format_name,
-                    target_device=config["target_device"],
-                    identifier=config["identifier"],
-                    backend_name=config["backend_name"],
-                    format_string=config["format_string"],
-                    testdata=testdata,
-                    flag_values=flag_values,
-                    flags=config.get("flags"),
-                    target_compatible_with=target_compatible_with,
-                )
-                _testdata_libs.append(f":testdata_{format_name}_lib")
-
-        # Use _convert_target_list_block for BACKENDS_LIB so that local
-        # targets like ":backends" preserve their "::" CMake alias form.
-        # (_convert_target_block replaces "::" with "_", which is wrong
-        # for local package-relative references.)
+        # Target-list conversion preserves package-relative CMake aliases such
+        # as ::backends; scalar target conversion rewrites those aliases.
         backends_block = self._convert_target_list_block(
-            "BACKENDS_LIB", [backends_lib] if backends_lib else None
+            "BACKENDS", [backends] if backends else None
         )
         testdata_libs_block = self._convert_target_list_block(
-            "TESTDATA_LIBS", _testdata_libs if _testdata_libs else None
+            "TESTDATA_LIBS", testdata_libs
         )
         name_block = (
             self._convert_string_arg_block("NAME", name, quote=False) if name else ""
@@ -2655,18 +2606,15 @@ class BuildFileFunctions(object):
         resource_group_block = self._convert_string_arg_block(
             "RESOURCE_GROUP", resource_group, quote=False
         )
-        testonly_block = self._convert_option_block("TESTONLY", testonly)
-
         self._emit_platform_guard_begin(target_compatible_with)
         self._converter.body += (
-            f"iree_hal_cts_test_suite(\n"
+            f"iree_runtime_hal_cts_test_suite(\n"
             f"{backends_block}"
             f"{testdata_libs_block}"
             f"{name_block}"
             f"{args_block}"
             f"{labels_block}"
             f"{resource_group_block}"
-            f"{testonly_block}"
             f")\n\n"
         )
         self._emit_platform_guard_end(target_compatible_with)
@@ -2709,6 +2657,7 @@ class BuildFileFunctions(object):
         tools,
         data=None,
         args=None,
+        resource_group=None,
         sanitizer_suppressions=None,
         tags=None,
         timeout=None,
@@ -2721,7 +2670,7 @@ class BuildFileFunctions(object):
 
         name_block = self._convert_string_arg_block("NAME", name, quote=False)
         manifests_block = self._convert_srcs_block(manifests, block_name="MANIFESTS")
-        data_block = self._convert_srcs_block(data, block_name="DATA")
+        data_block = self._convert_data_list_block(data)
         args_block = self._convert_string_list_block(
             "ARGS", self._convert_location_args(args), sort=False
         )
@@ -2729,6 +2678,9 @@ class BuildFileFunctions(object):
             sanitizer_suppressions
         )
         labels_block = self._convert_string_list_block("LABELS", tags)
+        resource_group_block = self._convert_string_arg_block(
+            "RESOURCE_GROUP", resource_group, quote=False
+        )
         timeout_block = self._convert_timeout_arg_block("TIMEOUT", timeout)
 
         tool_entries = []
@@ -2748,6 +2700,7 @@ class BuildFileFunctions(object):
             f"{args_block}"
             f"{sanitizer_suppressions_block}"
             f"{labels_block}"
+            f"{resource_group_block}"
             f"{timeout_block}"
             f")\n\n"
         )
@@ -2841,6 +2794,7 @@ class BuildFileFunctions(object):
         args_block = self._convert_string_list_block(
             "ARGS", self._convert_native_test_location_args(args)
         )
+        data_block = self._convert_data_list_block(data)
         env_block = self._convert_string_list_block(
             "ENV", self._convert_native_test_env(env), sort=False
         )
@@ -2856,6 +2810,7 @@ class BuildFileFunctions(object):
             f"{name_block}"
             f"{args_block}"
             f"{test_binary_block}"
+            f"{data_block}"
             f"{env_block}"
             f"{labels_block}"
             f"{sanitizer_suppressions_block}"
@@ -2884,6 +2839,7 @@ class BuildFileFunctions(object):
         # unused
         size="small",
         timeout=None,
+        visibility=None,
     ):
         if self._should_skip_target(tags=tags):
             return

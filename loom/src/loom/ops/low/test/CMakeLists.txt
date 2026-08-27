@@ -13,6 +13,7 @@ loom_check_test_suite(
   NAME
     test
   SRCS
+    "assume.loom-test"
     "canonicalize.loom-test"
     "facts.loom-test"
     "roundtrip.loom-test"

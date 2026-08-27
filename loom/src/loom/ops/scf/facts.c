@@ -13,7 +13,6 @@
 #include "loom/ir/types.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/util/fact_table.h"
-#include "loom/util/math.h"
 
 //===----------------------------------------------------------------------===//
 // Utilities
@@ -72,7 +71,7 @@ static bool loom_scf_lookup_default_row_may_match(
   }
 
   int64_t span = 0;
-  if (!loom_checked_sub_i64(selector_facts.range_hi, selector_facts.range_lo,
+  if (!iree_checked_sub_i64(selector_facts.range_hi, selector_facts.range_lo,
                             &span) ||
       span < 0 || span > 4096) {
     return true;

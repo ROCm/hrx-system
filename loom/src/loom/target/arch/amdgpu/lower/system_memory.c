@@ -13,19 +13,10 @@
 #include "loom/ops/cache.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/lower/descriptor_ref.h"
+#include "loom/target/arch/amdgpu/lower/memory.h"
 #include "loom/target/arch/amdgpu/planning/wait_packets.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/registers.h"
-
-loom_amdgpu_vector_memory_cache_policy_encoding_t
-loom_amdgpu_system_memory_cache_policy_encoding(
-    const loom_low_descriptor_set_t* descriptor_set) {
-  const loom_amdgpu_descriptor_set_info_t* descriptor_set_info =
-      loom_amdgpu_target_info_descriptor_set_at(
-          descriptor_set->descriptor_set_ordinal);
-  IREE_ASSERT(descriptor_set_info != NULL);
-  return descriptor_set_info->vector_memory.cache_policy_encoding;
-}
 
 iree_status_t loom_amdgpu_system_memory_build_u32_attr(
     loom_builder_t* builder, iree_string_view_t name, uint32_t value,
@@ -71,17 +62,15 @@ static iree_status_t loom_amdgpu_system_memory_build_const_u32(
     loom_type_t result_type, loom_location_id_t location,
     loom_value_id_t* out_value) {
   *out_value = LOOM_VALUE_ID_INVALID;
-  const loom_low_descriptor_t* descriptor = NULL;
-  loom_string_id_t opcode_id = LOOM_STRING_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_descriptor_ref(
-      builder, descriptor_set, descriptor_ref, &descriptor, &opcode_id));
+  const loom_low_descriptor_t* descriptor =
+      loom_amdgpu_lookup_descriptor_ref(descriptor_set, descriptor_ref);
 
   loom_named_attr_t imm32_attr = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_system_memory_build_u32_attr(
       builder, IREE_SV("imm32"), value, &imm32_attr));
   loom_op_t* const_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_build_resolved_descriptor_const(
-      builder, descriptor_set, descriptor, opcode_id,
+      builder, descriptor_set, descriptor,
       loom_make_named_attr_slice(&imm32_attr, 1), result_type, location,
       &const_op));
   *out_value = loom_low_const_result(const_op);
@@ -125,14 +114,12 @@ static iree_status_t loom_amdgpu_system_memory_build_sgpr_u32_binary(
   IREE_RETURN_IF_ERROR(loom_low_build_register_type(
       descriptor_set, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1, &sgpr_type));
   const loom_value_id_t operands[] = {lhs, rhs};
-  const loom_low_descriptor_t* descriptor = NULL;
-  loom_string_id_t opcode_id = LOOM_STRING_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_descriptor_ref(
-      builder, descriptor_set, descriptor_ref, &descriptor, &opcode_id));
+  const loom_low_descriptor_t* descriptor =
+      loom_amdgpu_lookup_descriptor_ref(descriptor_set, descriptor_ref);
   loom_op_t* op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_build_resolved_descriptor_op(
-      builder, descriptor_set, descriptor, opcode_id, operands,
-      IREE_ARRAYSIZE(operands), loom_make_named_attr_slice(NULL, 0), &sgpr_type,
+      builder, descriptor_set, descriptor, operands, IREE_ARRAYSIZE(operands),
+      loom_make_named_attr_slice(NULL, 0), &sgpr_type,
       /*result_count=*/1, /*tied_results=*/NULL,
       /*tied_result_count=*/0, location, &op));
   *out_value = loom_value_slice_get(loom_low_op_results(op), 0);
@@ -145,7 +132,7 @@ static iree_status_t loom_amdgpu_system_memory_build_m0_const_u32(
     loom_location_id_t location, loom_value_id_t* out_value) {
   *out_value = LOOM_VALUE_ID_INVALID;
   loom_type_t m0_type = loom_type_none();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_make_descriptor_implicit_resource_type(
+  IREE_RETURN_IF_ERROR(loom_low_build_descriptor_implicit_resource_type(
       descriptor_set, consumer_descriptor, &m0_type));
   return loom_amdgpu_system_memory_build_const_u32(
       builder, descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32_M0_IMM,
@@ -206,18 +193,15 @@ iree_status_t loom_amdgpu_system_memory_build_saddr_byte_offset(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_system_memory_global_memory_descriptor(
-    loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
+static void loom_amdgpu_system_memory_global_memory_descriptor(
+    const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_descriptor_ref_t descriptor_ref,
     const loom_low_descriptor_t** out_descriptor,
-    loom_string_id_t* out_opcode_id, const loom_low_asm_form_t** out_asm_form) {
+    const loom_low_asm_form_t** out_asm_form) {
   *out_descriptor = NULL;
-  *out_opcode_id = LOOM_STRING_ID_INVALID;
   *out_asm_form = NULL;
-  const loom_low_descriptor_t* descriptor = NULL;
-  loom_string_id_t opcode_id = LOOM_STRING_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_descriptor_ref(
-      builder, descriptor_set, descriptor_ref, &descriptor, &opcode_id));
+  const loom_low_descriptor_t* descriptor =
+      loom_amdgpu_lookup_descriptor_ref(descriptor_set, descriptor_ref);
   IREE_ASSERT_LT(descriptor->canonical_asm_form_ordinal,
                  descriptor_set->asm_form_count);
   const loom_low_asm_form_t* asm_form =
@@ -225,9 +209,7 @@ static iree_status_t loom_amdgpu_system_memory_global_memory_descriptor(
   IREE_ASSERT(asm_form->operand_index_count == 2 ||
               asm_form->operand_index_count == 3);
   *out_descriptor = descriptor;
-  *out_opcode_id = opcode_id;
   *out_asm_form = asm_form;
-  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_system_memory_build_global_load_saddr(
@@ -245,11 +227,9 @@ static iree_status_t loom_amdgpu_system_memory_build_global_load_saddr(
       builder, descriptor_set, 0, location, &zero_vaddr));
 
   const loom_low_descriptor_t* descriptor = NULL;
-  loom_string_id_t opcode_id = LOOM_STRING_ID_INVALID;
   const loom_low_asm_form_t* asm_form = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_system_memory_global_memory_descriptor(
-      builder, descriptor_set, descriptor_ref, &descriptor, &opcode_id,
-      &asm_form));
+  loom_amdgpu_system_memory_global_memory_descriptor(
+      descriptor_set, descriptor_ref, &descriptor, &asm_form);
 
   loom_type_t result_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_low_build_register_type(
@@ -272,7 +252,7 @@ static iree_status_t loom_amdgpu_system_memory_build_global_load_saddr(
   }
   loom_op_t* op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_build_resolved_descriptor_op(
-      builder, descriptor_set, descriptor, opcode_id, operands, operand_count,
+      builder, descriptor_set, descriptor, operands, operand_count,
       loom_make_named_attr_slice(attrs, attr_count), &result_type,
       /*result_count=*/1, /*tied_results=*/NULL, /*tied_result_count=*/0,
       location, &op));
@@ -297,14 +277,11 @@ static iree_status_t loom_amdgpu_system_memory_build_readfirstlane_b32(
   loom_type_t result_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_low_build_register_type(
       descriptor_set, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1, &result_type));
-  const loom_low_descriptor_t* descriptor = NULL;
-  loom_string_id_t opcode_id = LOOM_STRING_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_descriptor_ref(
-      builder, descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_READFIRSTLANE_B32,
-      &descriptor, &opcode_id));
+  const loom_low_descriptor_t* descriptor = loom_amdgpu_lookup_descriptor_ref(
+      descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_READFIRSTLANE_B32);
   loom_op_t* op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_build_resolved_descriptor_op(
-      builder, descriptor_set, descriptor, opcode_id, &source,
+      builder, descriptor_set, descriptor, &source,
       /*operand_count=*/1, loom_make_named_attr_slice(NULL, 0), &result_type,
       /*result_count=*/1, /*tied_results=*/NULL, /*tied_result_count=*/0,
       location, &op));
@@ -324,35 +301,301 @@ static iree_status_t loom_amdgpu_system_memory_append_u32_attr(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_system_memory_append_scope_attr(
-    loom_builder_t* builder, loom_cache_scope_t scope, loom_named_attr_t* attrs,
-    iree_host_size_t attr_capacity, iree_host_size_t* inout_attr_count) {
-  return loom_amdgpu_system_memory_append_u32_attr(
-      builder, IREE_SV("scope"), (uint32_t)scope, attrs, attr_capacity,
-      inout_attr_count);
+typedef uint32_t loom_amdgpu_system_memory_attr_flags_t;
+
+#define LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_GLC ((uint32_t)1u << 0)
+#define LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_DLC ((uint32_t)1u << 1)
+#define LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_SC0 ((uint32_t)1u << 2)
+#define LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_SC1 ((uint32_t)1u << 3)
+#define LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_SCOPE ((uint32_t)1u << 4)
+
+typedef struct loom_amdgpu_system_memory_attr_field_t {
+  // Presence bit required for this descriptor attribute.
+  loom_amdgpu_system_memory_attr_flags_t flag;
+  // Descriptor attribute name.
+  iree_string_view_t name;
+} loom_amdgpu_system_memory_attr_field_t;
+
+static const loom_amdgpu_system_memory_attr_field_t
+    kAmdgpuSystemMemoryAttrFields[] = {
+        {
+            .flag = LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_GLC,
+            .name = IREE_SVL("glc"),
+        },
+        {
+            .flag = LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_DLC,
+            .name = IREE_SVL("dlc"),
+        },
+        {
+            .flag = LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_SC0,
+            .name = IREE_SVL("sc0"),
+        },
+        {
+            .flag = LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_SC1,
+            .name = IREE_SVL("sc1"),
+        },
+        {
+            .flag = LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_SCOPE,
+            .name = IREE_SVL("scope"),
+        },
+};
+
+typedef enum loom_amdgpu_system_memory_action_kind_e {
+  // No system-memory ordering action.
+  LOOM_AMDGPU_SYSTEM_MEMORY_ACTION_NONE = 0,
+  // Emit a wait packet selected by VMEM counter mask.
+  LOOM_AMDGPU_SYSTEM_MEMORY_ACTION_WAIT_COUNTER = 1,
+  // Emit a descriptor-ref packet with table-selected attrs.
+  LOOM_AMDGPU_SYSTEM_MEMORY_ACTION_EXPLICIT_PACKET = 2,
+} loom_amdgpu_system_memory_action_kind_t;
+
+typedef struct loom_amdgpu_system_memory_action_t {
+  // Concrete action emitted for this ordering step.
+  loom_amdgpu_system_memory_action_kind_t kind;
+  // Wait counter mask when |kind| is WAIT_COUNTER.
+  uint32_t counter_mask;
+  // Explicit packet descriptor ref when |kind| is EXPLICIT_PACKET.
+  loom_amdgpu_descriptor_ref_t descriptor_ref;
+  // Descriptor attrs appended when |kind| is EXPLICIT_PACKET.
+  loom_amdgpu_system_memory_attr_flags_t attr_flags;
+} loom_amdgpu_system_memory_action_t;
+
+#define LOOM_AMDGPU_SYSTEM_MEMORY_WAIT(counter_mask_)        \
+  {                                                          \
+      .kind = LOOM_AMDGPU_SYSTEM_MEMORY_ACTION_WAIT_COUNTER, \
+      .counter_mask = (counter_mask_),                       \
+  }
+
+#define LOOM_AMDGPU_SYSTEM_MEMORY_PACKET(descriptor_ref_, attr_flags_) \
+  {                                                                    \
+      .kind = LOOM_AMDGPU_SYSTEM_MEMORY_ACTION_EXPLICIT_PACKET,        \
+      .descriptor_ref = (descriptor_ref_),                             \
+      .attr_flags = (attr_flags_),                                     \
+  }
+
+#define LOOM_AMDGPU_SYSTEM_MEMORY_ORDERING_ACTION_CAPACITY 3
+
+typedef struct loom_amdgpu_system_memory_policy_t {
+  // Descriptor-set cache-policy encoding selected by target info.
+  loom_amdgpu_vector_memory_cache_policy_encoding_t encoding;
+  // Attrs appended to system-memory load packets.
+  loom_amdgpu_system_memory_attr_flags_t load_attrs;
+  // Attrs appended to system-release store packets.
+  loom_amdgpu_system_memory_attr_flags_t release_store_attrs;
+  // Attrs appended to no-return system atomic packets.
+  loom_amdgpu_system_memory_attr_flags_t no_return_atomic_attrs;
+  // Attrs appended to returning system atomic packets.
+  loom_amdgpu_system_memory_attr_flags_t return_atomic_attrs;
+  // Packets emitted before a system-release publication.
+  loom_amdgpu_system_memory_action_t
+      release_actions[LOOM_AMDGPU_SYSTEM_MEMORY_ORDERING_ACTION_CAPACITY];
+  // Number of populated release ordering actions.
+  iree_host_size_t release_action_count;
+  // Packets emitted to wait for system-memory loads.
+  loom_amdgpu_system_memory_action_t
+      load_wait_actions[LOOM_AMDGPU_SYSTEM_MEMORY_ORDERING_ACTION_CAPACITY];
+  // Number of populated load-wait actions.
+  iree_host_size_t load_wait_action_count;
+  // Packets emitted after a system-acquire operation.
+  loom_amdgpu_system_memory_action_t
+      acquire_actions[LOOM_AMDGPU_SYSTEM_MEMORY_ORDERING_ACTION_CAPACITY];
+  // Number of populated acquire ordering actions.
+  iree_host_size_t acquire_action_count;
+} loom_amdgpu_system_memory_policy_t;
+
+static const loom_amdgpu_system_memory_policy_t kAmdgpuSystemMemoryPolicies[] = {
+    {
+        .encoding =
+            LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX9_11_GLC_SLC_DLC,
+        .load_attrs = LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_GLC |
+                      LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_DLC,
+        .release_actions =
+            {
+                LOOM_AMDGPU_SYSTEM_MEMORY_WAIT(
+                    LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD),
+                LOOM_AMDGPU_SYSTEM_MEMORY_WAIT(
+                    LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE),
+            },
+        .release_action_count = 2,
+        .load_wait_actions =
+            {
+                LOOM_AMDGPU_SYSTEM_MEMORY_WAIT(
+                    LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD),
+            },
+        .load_wait_action_count = 1,
+        .acquire_actions =
+            {
+                LOOM_AMDGPU_SYSTEM_MEMORY_WAIT(
+                    LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD),
+                LOOM_AMDGPU_SYSTEM_MEMORY_PACKET(
+                    LOOM_AMDGPU_DESCRIPTOR_REF_BUFFER_GL1_INV, 0),
+                LOOM_AMDGPU_SYSTEM_MEMORY_PACKET(
+                    LOOM_AMDGPU_DESCRIPTOR_REF_BUFFER_GL0_INV, 0),
+            },
+        .acquire_action_count = 3,
+    },
+    {
+        .encoding =
+            LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH,
+        .load_attrs = LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_SCOPE,
+        .release_store_attrs = LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_SCOPE,
+        .no_return_atomic_attrs = LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_SCOPE,
+        .return_atomic_attrs = LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_SCOPE,
+        .release_actions =
+            {
+                LOOM_AMDGPU_SYSTEM_MEMORY_PACKET(
+                    LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_WB,
+                    LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_SCOPE),
+                LOOM_AMDGPU_SYSTEM_MEMORY_WAIT(
+                    LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE),
+            },
+        .release_action_count = 2,
+        .load_wait_actions =
+            {
+                LOOM_AMDGPU_SYSTEM_MEMORY_WAIT(
+                    LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD),
+            },
+        .load_wait_action_count = 1,
+        .acquire_actions =
+            {
+                LOOM_AMDGPU_SYSTEM_MEMORY_WAIT(
+                    LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD),
+                LOOM_AMDGPU_SYSTEM_MEMORY_PACKET(
+                    LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_INV,
+                    LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_SCOPE),
+            },
+        .acquire_action_count = 2,
+    },
+    {
+        .encoding =
+            LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX950_NT_SC0_SC1,
+        .load_attrs = LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_SC0 |
+                      LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_SC1,
+        .release_store_attrs = LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_SC0 |
+                               LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_SC1,
+        .no_return_atomic_attrs = LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_SC1,
+        .return_atomic_attrs = LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_SC0 |
+                               LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_SC1,
+        .release_actions =
+            {
+                LOOM_AMDGPU_SYSTEM_MEMORY_PACKET(
+                    LOOM_AMDGPU_DESCRIPTOR_REF_BUFFER_WBL2,
+                    LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_SC0 |
+                        LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_SC1),
+            },
+        .release_action_count = 1,
+        .load_wait_actions =
+            {
+                LOOM_AMDGPU_SYSTEM_MEMORY_WAIT(
+                    LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD),
+            },
+        .load_wait_action_count = 1,
+        .acquire_actions =
+            {
+                LOOM_AMDGPU_SYSTEM_MEMORY_WAIT(
+                    LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD),
+                LOOM_AMDGPU_SYSTEM_MEMORY_PACKET(
+                    LOOM_AMDGPU_DESCRIPTOR_REF_BUFFER_INV,
+                    LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_SC0 |
+                        LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_SC1),
+            },
+        .acquire_action_count = 2,
+    },
+};
+
+static const loom_amdgpu_system_memory_policy_t*
+loom_amdgpu_system_memory_policy_lookup(
+    const loom_low_descriptor_set_t* descriptor_set) {
+  const loom_amdgpu_vector_memory_cache_policy_encoding_t encoding =
+      loom_amdgpu_memory_cache_policy_descriptor_encoding(descriptor_set);
+  if (encoding == LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_NONE) {
+    return NULL;
+  }
+  const iree_host_size_t row_index = (iree_host_size_t)encoding - 1u;
+  if (row_index < IREE_ARRAYSIZE(kAmdgpuSystemMemoryPolicies) &&
+      kAmdgpuSystemMemoryPolicies[row_index].encoding == encoding) {
+    return &kAmdgpuSystemMemoryPolicies[row_index];
+  }
+  return NULL;
 }
 
-static iree_status_t loom_amdgpu_system_memory_append_sc0_attr(
-    loom_builder_t* builder, loom_named_attr_t* attrs,
-    iree_host_size_t attr_capacity, iree_host_size_t* inout_attr_count) {
-  return loom_amdgpu_system_memory_append_u32_attr(
-      builder, IREE_SV("sc0"), 1, attrs, attr_capacity, inout_attr_count);
+static bool loom_amdgpu_system_memory_actions_available(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_system_memory_action_t* actions,
+    iree_host_size_t action_count) {
+  for (iree_host_size_t i = 0; i < action_count; ++i) {
+    const loom_amdgpu_system_memory_action_t* action = &actions[i];
+    switch (action->kind) {
+      case LOOM_AMDGPU_SYSTEM_MEMORY_ACTION_NONE:
+        break;
+      case LOOM_AMDGPU_SYSTEM_MEMORY_ACTION_WAIT_COUNTER: {
+        loom_amdgpu_wait_packet_selection_t selection = {0};
+        if (!loom_amdgpu_wait_packet_try_select_counter_mask(
+                descriptor_set, action->counter_mask, /*target_count=*/0,
+                &selection)) {
+          return false;
+        }
+        break;
+      }
+      case LOOM_AMDGPU_SYSTEM_MEMORY_ACTION_EXPLICIT_PACKET:
+        if (!loom_amdgpu_descriptor_set_has_ref(descriptor_set,
+                                                action->descriptor_ref)) {
+          return false;
+        }
+        break;
+    }
+  }
+  return true;
 }
 
-static iree_status_t loom_amdgpu_system_memory_append_sc1_attr(
-    loom_builder_t* builder, loom_named_attr_t* attrs,
-    iree_host_size_t attr_capacity, iree_host_size_t* inout_attr_count) {
-  return loom_amdgpu_system_memory_append_u32_attr(
-      builder, IREE_SV("sc1"), 1, attrs, attr_capacity, inout_attr_count);
+bool loom_amdgpu_system_memory_release_ordering_available(
+    const loom_low_descriptor_set_t* descriptor_set) {
+  const loom_amdgpu_system_memory_policy_t* policy =
+      loom_amdgpu_system_memory_policy_lookup(descriptor_set);
+  return policy != NULL && loom_amdgpu_system_memory_actions_available(
+                               descriptor_set, policy->release_actions,
+                               policy->release_action_count);
 }
 
-static iree_status_t loom_amdgpu_system_memory_append_sc0_sc1_attrs(
-    loom_builder_t* builder, loom_named_attr_t* attrs,
+bool loom_amdgpu_system_memory_acquire_ordering_available(
+    const loom_low_descriptor_set_t* descriptor_set) {
+  const loom_amdgpu_system_memory_policy_t* policy =
+      loom_amdgpu_system_memory_policy_lookup(descriptor_set);
+  return policy != NULL && loom_amdgpu_system_memory_actions_available(
+                               descriptor_set, policy->acquire_actions,
+                               policy->acquire_action_count);
+}
+
+static const loom_amdgpu_system_memory_policy_t*
+loom_amdgpu_system_memory_policy_require(
+    const loom_low_descriptor_set_t* descriptor_set) {
+  const loom_amdgpu_system_memory_policy_t* policy =
+      loom_amdgpu_system_memory_policy_lookup(descriptor_set);
+  if (policy == NULL) {
+    IREE_ASSERT_UNREACHABLE("validated AMDGPU system-memory policy");
+    IREE_BUILTIN_UNREACHABLE();
+  }
+  return policy;
+}
+
+static iree_status_t loom_amdgpu_system_memory_append_attrs(
+    loom_builder_t* builder, loom_amdgpu_system_memory_attr_flags_t attr_flags,
+    loom_cache_scope_t scope, loom_named_attr_t* attrs,
     iree_host_size_t attr_capacity, iree_host_size_t* inout_attr_count) {
-  IREE_RETURN_IF_ERROR(loom_amdgpu_system_memory_append_sc0_attr(
-      builder, attrs, attr_capacity, inout_attr_count));
-  return loom_amdgpu_system_memory_append_sc1_attr(
-      builder, attrs, attr_capacity, inout_attr_count);
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(kAmdgpuSystemMemoryAttrFields); ++i) {
+    const loom_amdgpu_system_memory_attr_field_t* field =
+        &kAmdgpuSystemMemoryAttrFields[i];
+    if (!iree_any_bit_set(attr_flags, field->flag)) {
+      continue;
+    }
+    const uint32_t value = field->flag == LOOM_AMDGPU_SYSTEM_MEMORY_ATTR_SCOPE
+                               ? (uint32_t)scope
+                               : 1;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_system_memory_append_u32_attr(
+        builder, field->name, value, attrs, attr_capacity, inout_attr_count));
+  }
+  return iree_ok_status();
 }
 
 iree_status_t loom_amdgpu_system_memory_append_load_attrs(
@@ -368,23 +611,11 @@ iree_status_t loom_amdgpu_system_memory_append_load_attrs_scoped(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     loom_cache_scope_t scope, loom_named_attr_t* attrs,
     iree_host_size_t attr_capacity, iree_host_size_t* inout_attr_count) {
-  switch (loom_amdgpu_system_memory_cache_policy_encoding(descriptor_set)) {
-    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX9_11_GLC_SLC_DLC: {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_system_memory_append_u32_attr(
-          builder, IREE_SV("glc"), 1, attrs, attr_capacity, inout_attr_count));
-      return loom_amdgpu_system_memory_append_u32_attr(
-          builder, IREE_SV("dlc"), 1, attrs, attr_capacity, inout_attr_count);
-    }
-    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX950_NT_SC0_SC1:
-      return loom_amdgpu_system_memory_append_sc0_sc1_attrs(
-          builder, attrs, attr_capacity, inout_attr_count);
-    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH:
-      return loom_amdgpu_system_memory_append_scope_attr(
-          builder, scope, attrs, attr_capacity, inout_attr_count);
-    default:
-      IREE_ASSERT_UNREACHABLE("validated AMDGPU system-memory load policy");
-      IREE_BUILTIN_UNREACHABLE();
-  }
+  const loom_amdgpu_system_memory_policy_t* policy =
+      loom_amdgpu_system_memory_policy_require(descriptor_set);
+  return loom_amdgpu_system_memory_append_attrs(builder, policy->load_attrs,
+                                                scope, attrs, attr_capacity,
+                                                inout_attr_count);
 }
 
 iree_status_t loom_amdgpu_system_memory_append_release_store_attrs(
@@ -400,20 +631,11 @@ iree_status_t loom_amdgpu_system_memory_append_release_store_attrs_scoped(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     loom_cache_scope_t scope, loom_named_attr_t* attrs,
     iree_host_size_t attr_capacity, iree_host_size_t* inout_attr_count) {
-  switch (loom_amdgpu_system_memory_cache_policy_encoding(descriptor_set)) {
-    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX9_11_GLC_SLC_DLC:
-      return iree_ok_status();
-    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX950_NT_SC0_SC1:
-      return loom_amdgpu_system_memory_append_sc0_sc1_attrs(
-          builder, attrs, attr_capacity, inout_attr_count);
-    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH:
-      return loom_amdgpu_system_memory_append_scope_attr(
-          builder, scope, attrs, attr_capacity, inout_attr_count);
-    default:
-      IREE_ASSERT_UNREACHABLE(
-          "validated AMDGPU system-memory release-store policy");
-      IREE_BUILTIN_UNREACHABLE();
-  }
+  const loom_amdgpu_system_memory_policy_t* policy =
+      loom_amdgpu_system_memory_policy_require(descriptor_set);
+  return loom_amdgpu_system_memory_append_attrs(
+      builder, policy->release_store_attrs, scope, attrs, attr_capacity,
+      inout_attr_count);
 }
 
 iree_status_t loom_amdgpu_system_memory_append_no_return_atomic_attrs(
@@ -429,20 +651,11 @@ iree_status_t loom_amdgpu_system_memory_append_no_return_atomic_attrs_scoped(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     loom_cache_scope_t scope, loom_named_attr_t* attrs,
     iree_host_size_t attr_capacity, iree_host_size_t* inout_attr_count) {
-  switch (loom_amdgpu_system_memory_cache_policy_encoding(descriptor_set)) {
-    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX9_11_GLC_SLC_DLC:
-      return iree_ok_status();
-    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX950_NT_SC0_SC1:
-      return loom_amdgpu_system_memory_append_sc1_attr(
-          builder, attrs, attr_capacity, inout_attr_count);
-    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH:
-      return loom_amdgpu_system_memory_append_scope_attr(
-          builder, scope, attrs, attr_capacity, inout_attr_count);
-    default:
-      IREE_ASSERT_UNREACHABLE(
-          "validated AMDGPU system-memory no-return atomic policy");
-      IREE_BUILTIN_UNREACHABLE();
-  }
+  const loom_amdgpu_system_memory_policy_t* policy =
+      loom_amdgpu_system_memory_policy_require(descriptor_set);
+  return loom_amdgpu_system_memory_append_attrs(
+      builder, policy->no_return_atomic_attrs, scope, attrs, attr_capacity,
+      inout_attr_count);
 }
 
 iree_status_t loom_amdgpu_system_memory_append_return_atomic_attrs(
@@ -458,29 +671,20 @@ iree_status_t loom_amdgpu_system_memory_append_return_atomic_attrs_scoped(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     loom_cache_scope_t scope, loom_named_attr_t* attrs,
     iree_host_size_t attr_capacity, iree_host_size_t* inout_attr_count) {
-  switch (loom_amdgpu_system_memory_cache_policy_encoding(descriptor_set)) {
-    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX9_11_GLC_SLC_DLC:
-      return iree_ok_status();
-    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX950_NT_SC0_SC1:
-      return loom_amdgpu_system_memory_append_sc0_sc1_attrs(
-          builder, attrs, attr_capacity, inout_attr_count);
-    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH:
-      return loom_amdgpu_system_memory_append_scope_attr(
-          builder, scope, attrs, attr_capacity, inout_attr_count);
-    default:
-      IREE_ASSERT_UNREACHABLE(
-          "validated AMDGPU system-memory returning atomic policy");
-      IREE_BUILTIN_UNREACHABLE();
-  }
+  const loom_amdgpu_system_memory_policy_t* policy =
+      loom_amdgpu_system_memory_policy_require(descriptor_set);
+  return loom_amdgpu_system_memory_append_attrs(
+      builder, policy->return_atomic_attrs, scope, attrs, attr_capacity,
+      inout_attr_count);
 }
 
 static iree_status_t loom_amdgpu_system_memory_build_resolved_packet(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, loom_string_id_t opcode_id,
-    loom_named_attr_slice_t attrs, loom_location_id_t location) {
+    const loom_low_descriptor_t* descriptor, loom_named_attr_slice_t attrs,
+    loom_location_id_t location) {
   loom_op_t* op = NULL;
   return loom_low_build_resolved_descriptor_op(
-      builder, descriptor_set, descriptor, opcode_id, /*operands=*/NULL,
+      builder, descriptor_set, descriptor, /*operands=*/NULL,
       /*operand_count=*/0, attrs, /*result_types=*/NULL, /*result_count=*/0,
       /*tied_results=*/NULL, /*tied_result_count=*/0, location, &op);
 }
@@ -489,32 +693,30 @@ static iree_status_t loom_amdgpu_system_memory_build_descriptor_packet(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, loom_named_attr_slice_t attrs,
     loom_location_id_t location) {
-  iree_string_view_t key = loom_low_descriptor_set_string(
-      descriptor_set, descriptor->key_string_offset);
-  loom_string_id_t opcode_id = LOOM_STRING_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_builder_intern_string(builder, key, &opcode_id));
   return loom_amdgpu_system_memory_build_resolved_packet(
-      builder, descriptor_set, descriptor, opcode_id, attrs, location);
+      builder, descriptor_set, descriptor, attrs, location);
 }
 
 static iree_status_t loom_amdgpu_system_memory_build_explicit_packet(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_descriptor_ref_t descriptor_ref, loom_named_attr_slice_t attrs,
     loom_location_id_t location) {
-  const loom_low_descriptor_t* descriptor = NULL;
-  loom_string_id_t opcode_id = LOOM_STRING_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_descriptor_ref(
-      builder, descriptor_set, descriptor_ref, &descriptor, &opcode_id));
+  const loom_low_descriptor_t* descriptor =
+      loom_amdgpu_lookup_descriptor_ref(descriptor_set, descriptor_ref);
   return loom_amdgpu_system_memory_build_resolved_packet(
-      builder, descriptor_set, descriptor, opcode_id, attrs, location);
+      builder, descriptor_set, descriptor, attrs, location);
 }
 
 static iree_status_t loom_amdgpu_system_memory_build_wait_counter_mask(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     uint32_t counter_mask, uint16_t target_count, loom_location_id_t location) {
   loom_amdgpu_wait_packet_selection_t selection = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_packet_select_counter_mask(
-      descriptor_set, counter_mask, target_count, &selection));
+  if (!loom_amdgpu_wait_packet_try_select_counter_mask(
+          descriptor_set, counter_mask, target_count, &selection)) {
+    IREE_ASSERT_UNREACHABLE(
+        "validated AMDGPU system-memory wait counter packet");
+    IREE_BUILTIN_UNREACHABLE();
+  }
   loom_named_attr_t
       attrs[LOOM_AMDGPU_WAIT_PACKET_SELECTION_IMMEDIATE_CAPACITY] = {0};
   for (iree_host_size_t i = 0; i < selection.immediate_count; ++i) {
@@ -527,42 +729,40 @@ static iree_status_t loom_amdgpu_system_memory_build_wait_counter_mask(
       loom_make_named_attr_slice(attrs, selection.immediate_count), location);
 }
 
-static iree_status_t loom_amdgpu_system_memory_build_scoped_buffer_wbl2(
+static iree_status_t loom_amdgpu_system_memory_build_action(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_system_memory_action_t* action, loom_cache_scope_t scope,
     loom_location_id_t location) {
-  loom_named_attr_t attrs[2] = {0};
+  switch (action->kind) {
+    case LOOM_AMDGPU_SYSTEM_MEMORY_ACTION_NONE:
+      return iree_ok_status();
+    case LOOM_AMDGPU_SYSTEM_MEMORY_ACTION_WAIT_COUNTER:
+      return loom_amdgpu_system_memory_build_wait_counter_mask(
+          builder, descriptor_set, action->counter_mask, /*target_count=*/0,
+          location);
+    case LOOM_AMDGPU_SYSTEM_MEMORY_ACTION_EXPLICIT_PACKET:
+      break;
+  }
+  loom_named_attr_t attrs[IREE_ARRAYSIZE(kAmdgpuSystemMemoryAttrFields)] = {0};
   iree_host_size_t attr_count = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_system_memory_append_sc0_sc1_attrs(
-      builder, attrs, IREE_ARRAYSIZE(attrs), &attr_count));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_system_memory_append_attrs(
+      builder, action->attr_flags, scope, attrs, IREE_ARRAYSIZE(attrs),
+      &attr_count));
   return loom_amdgpu_system_memory_build_explicit_packet(
-      builder, descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_BUFFER_WBL2,
+      builder, descriptor_set, action->descriptor_ref,
       loom_make_named_attr_slice(attrs, attr_count), location);
 }
 
-static iree_status_t loom_amdgpu_system_memory_build_scoped_buffer_inv(
+static iree_status_t loom_amdgpu_system_memory_build_actions(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_system_memory_action_t* actions,
+    iree_host_size_t action_count, loom_cache_scope_t scope,
     loom_location_id_t location) {
-  loom_named_attr_t attrs[2] = {0};
-  iree_host_size_t attr_count = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_system_memory_append_sc0_sc1_attrs(
-      builder, attrs, IREE_ARRAYSIZE(attrs), &attr_count));
-  return loom_amdgpu_system_memory_build_explicit_packet(
-      builder, descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_BUFFER_INV,
-      loom_make_named_attr_slice(attrs, attr_count), location);
-}
-
-static iree_status_t
-loom_amdgpu_system_memory_build_scoped_global_cache_control(
-    loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
-    loom_amdgpu_descriptor_ref_t descriptor_ref, loom_cache_scope_t scope,
-    loom_location_id_t location) {
-  loom_named_attr_t attr = {0};
-  iree_host_size_t attr_count = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_system_memory_append_scope_attr(
-      builder, scope, &attr, 1, &attr_count));
-  return loom_amdgpu_system_memory_build_explicit_packet(
-      builder, descriptor_set, descriptor_ref,
-      loom_make_named_attr_slice(&attr, attr_count), location);
+  for (iree_host_size_t i = 0; i < action_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_system_memory_build_action(
+        builder, descriptor_set, &actions[i], scope, location));
+  }
+  return iree_ok_status();
 }
 
 iree_status_t loom_amdgpu_system_memory_build_release_ordering(
@@ -575,51 +775,21 @@ iree_status_t loom_amdgpu_system_memory_build_release_ordering(
 iree_status_t loom_amdgpu_system_memory_build_release_ordering_scoped(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     loom_cache_scope_t scope, loom_location_id_t location) {
-  switch (loom_amdgpu_system_memory_cache_policy_encoding(descriptor_set)) {
-    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX9_11_GLC_SLC_DLC: {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_system_memory_build_wait_counter_mask(
-          builder, descriptor_set, LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD,
-          /*target_count=*/0, location));
-      return loom_amdgpu_system_memory_build_wait_counter_mask(
-          builder, descriptor_set, LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE,
-          /*target_count=*/0, location);
-    }
-    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX950_NT_SC0_SC1:
-      return loom_amdgpu_system_memory_build_scoped_buffer_wbl2(
-          builder, descriptor_set, location);
-    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH: {
-      IREE_RETURN_IF_ERROR(
-          loom_amdgpu_system_memory_build_scoped_global_cache_control(
-              builder, descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_WB,
-              scope, location));
-      return loom_amdgpu_system_memory_build_wait_counter_mask(
-          builder, descriptor_set, LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE,
-          /*target_count=*/0, location);
-    }
-    default:
-      IREE_ASSERT_UNREACHABLE(
-          "validated AMDGPU system-memory release ordering");
-      IREE_BUILTIN_UNREACHABLE();
-  }
+  const loom_amdgpu_system_memory_policy_t* policy =
+      loom_amdgpu_system_memory_policy_require(descriptor_set);
+  return loom_amdgpu_system_memory_build_actions(
+      builder, descriptor_set, policy->release_actions,
+      policy->release_action_count, scope, location);
 }
 
 iree_status_t loom_amdgpu_system_memory_build_load_wait(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     loom_location_id_t location) {
-  switch (loom_amdgpu_system_memory_cache_policy_encoding(descriptor_set)) {
-    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX9_11_GLC_SLC_DLC:
-    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX950_NT_SC0_SC1:
-      return loom_amdgpu_system_memory_build_wait_counter_mask(
-          builder, descriptor_set, LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD,
-          /*target_count=*/0, location);
-    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH:
-      return loom_amdgpu_system_memory_build_wait_counter_mask(
-          builder, descriptor_set, LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD,
-          /*target_count=*/0, location);
-    default:
-      IREE_ASSERT_UNREACHABLE("validated AMDGPU system-memory load wait");
-      IREE_BUILTIN_UNREACHABLE();
-  }
+  const loom_amdgpu_system_memory_policy_t* policy =
+      loom_amdgpu_system_memory_policy_require(descriptor_set);
+  return loom_amdgpu_system_memory_build_actions(
+      builder, descriptor_set, policy->load_wait_actions,
+      policy->load_wait_action_count, LOOM_CACHE_SCOPE_SYSTEM, location);
 }
 
 iree_status_t loom_amdgpu_system_memory_build_acquire_ordering(
@@ -632,38 +802,11 @@ iree_status_t loom_amdgpu_system_memory_build_acquire_ordering(
 iree_status_t loom_amdgpu_system_memory_build_acquire_ordering_scoped(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     loom_cache_scope_t scope, loom_location_id_t location) {
-  switch (loom_amdgpu_system_memory_cache_policy_encoding(descriptor_set)) {
-    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX9_11_GLC_SLC_DLC: {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_system_memory_build_wait_counter_mask(
-          builder, descriptor_set, LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD,
-          /*target_count=*/0, location));
-      IREE_RETURN_IF_ERROR(loom_amdgpu_system_memory_build_explicit_packet(
-          builder, descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_BUFFER_GL1_INV,
-          loom_named_attr_slice_empty(), location));
-      return loom_amdgpu_system_memory_build_explicit_packet(
-          builder, descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_BUFFER_GL0_INV,
-          loom_named_attr_slice_empty(), location);
-    }
-    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX950_NT_SC0_SC1: {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_system_memory_build_wait_counter_mask(
-          builder, descriptor_set, LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD,
-          /*target_count=*/0, location));
-      return loom_amdgpu_system_memory_build_scoped_buffer_inv(
-          builder, descriptor_set, location);
-    }
-    case LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH: {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_system_memory_build_wait_counter_mask(
-          builder, descriptor_set, LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD,
-          /*target_count=*/0, location));
-      return loom_amdgpu_system_memory_build_scoped_global_cache_control(
-          builder, descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_INV, scope,
-          location);
-    }
-    default:
-      IREE_ASSERT_UNREACHABLE(
-          "validated AMDGPU system-memory acquire ordering");
-      IREE_BUILTIN_UNREACHABLE();
-  }
+  const loom_amdgpu_system_memory_policy_t* policy =
+      loom_amdgpu_system_memory_policy_require(descriptor_set);
+  return loom_amdgpu_system_memory_build_actions(
+      builder, descriptor_set, policy->acquire_actions,
+      policy->acquire_action_count, scope, location);
 }
 
 iree_status_t loom_amdgpu_system_memory_build_uniform_load_b32(

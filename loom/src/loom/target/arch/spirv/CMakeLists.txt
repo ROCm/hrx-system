@@ -6,6 +6,14 @@
 #                                                                              #
 # To disable autogeneration for this file entirely, delete this header.        #
 ################################################################################
+if(LOOM_TARGET_ARCH_SPIRV)
+
+iree_get_spirv_registry_sources(
+  _LOOM_SPIRV_CORE_GRAMMAR
+  _LOOM_VULKAN_XML_REGISTRY
+)
+
+endif()
 
 iree_add_all_subdirs()
 
@@ -56,8 +64,12 @@ loom_generated_textual_header(
     "--tables"
   ARGS
     "--isa-header=${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/spirv/isa.h"
+    "--spirv-grammar=${_LOOM_SPIRV_CORE_GRAMMAR}"
+    "--vulkan-registry=${_LOOM_VULKAN_XML_REGISTRY}"
   INPUTS
     "isa.h"
+    "${_LOOM_SPIRV_CORE_GRAMMAR}"
+    "${_LOOM_VULKAN_XML_REGISTRY}"
 )
 endif()
 
@@ -97,27 +109,17 @@ endif()
 if(LOOM_TARGET_ARCH_SPIRV)
 loom_cc_library(
   NAME
-    abi
-  HDRS
-    "abi.h"
-  DEPS
-    ::value_types
-    iree::base
-    loom::ir
-  PUBLIC
-)
-endif()
-
-if(LOOM_TARGET_ARCH_SPIRV)
-loom_cc_library(
-  NAME
     value_types
   HDRS
     "value_types.h"
+  SRCS
+    "value_types.c"
   DEPS
     ::isa
     ::scalar_types
     iree::base
+    loom::ir
+    loom::target::arch::spirv::ops
   PUBLIC
 )
 endif()
@@ -168,6 +170,7 @@ loom_cc_library(
     iree::base
     loom::codegen::low::descriptors
     loom::target::arch::spirv::descriptors::descriptors_ids
+    loom::target::registers
   PUBLIC
 )
 endif()
@@ -209,13 +212,49 @@ endif()
 if(LOOM_TARGET_ARCH_SPIRV)
 loom_cc_library(
   NAME
-    profile
+    facts
   HDRS
-    "profile.h"
+    "facts.h"
+  SRCS
+    "facts.c"
   DEPS
     ::cooperative_properties
     iree::base
+    loom::target::facts
   PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV)
+loom_cc_library(
+  NAME
+    profile
+  HDRS
+    "profile.h"
+  SRCS
+    "profile.c"
+  DEPS
+    ::facts
+    iree::base
+    loom::target::profile
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV)
+loom_cc_test(
+  NAME
+    profile_test
+  SRCS
+    "profile_test.cc"
+  DEPS
+    ::profile
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::target::arch::spirv::records::target_records
+  LABELS
+    "iree-build-requirement=loom.target.arch.spirv"
 )
 endif()
 
@@ -259,7 +298,6 @@ loom_cc_library(
   SRCS
     "low_verify.c"
   DEPS
-    ::abi
     ::error_defs
     ::module_contract
     ::packet_rows
@@ -289,15 +327,40 @@ loom_cc_library(
   DEPS
     ::low_verify
     ::math_policy
+    ::profile
     iree::base
-    loom::ir
-    loom::pass::builder
     loom::target::arch::spirv::descriptors::low_registry
     loom::target::arch::spirv::lower
     loom::target::arch::spirv::ops
-    loom::target::arch::spirv::records::target_records
     loom::target::provider
   PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV)
+loom_cc_test(
+  NAME
+    provider_test
+  SRCS
+    "provider_test.cc"
+  DEPS
+    ::features
+    ::profile
+    ::provider
+    iree::base
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::analysis::symbol_facts
+    loom::format::text::parser
+    loom::ir
+    loom::ops::op_registry
+    loom::ops::target
+    loom::target::arch::spirv::records::target_records
+    loom::target::provider
+    loom::testing::module_ptr
+  LABELS
+    "iree-build-requirement=loom.target.arch.spirv"
 )
 endif()
 
@@ -352,6 +415,24 @@ endif()
 if(LOOM_TARGET_ARCH_SPIRV)
 loom_cc_test(
   NAME
+    value_types_test
+  SRCS
+    "value_types_test.cc"
+  DEPS
+    ::value_types
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::target::arch::spirv::ops
+  LABELS
+    "iree-build-requirement=loom.target.arch.spirv"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV)
+loom_cc_test(
+  NAME
     registers_test
   SRCS
     "registers_test.cc"
@@ -362,6 +443,7 @@ loom_cc_test(
     loom::codegen::low::descriptors
     loom::target::arch::spirv::descriptors
     loom::target::arch::spirv::records::target_records
+    loom::target::registers
   LABELS
     "iree-build-requirement=loom.target.arch.spirv"
 )
@@ -374,12 +456,39 @@ loom_check_test_suite(
   SRCS
     "test/source_low/barrier.loom-test"
     "test/source_low/baseline.loom-test"
+    "test/source_low/buffer_bulk.loom-test"
+    "test/source_low/buffer_raw.loom-test"
+    "test/source_low/corpus/index_addressing.loom-test"
+    "test/source_low/corpus/memory_scalar_addressing.loom-test"
+    "test/source_low/corpus/memory_workgroup_scalar_addressing.loom-test"
+    "test/source_low/corpus/numeric_conversion.loom-test"
+    "test/source_low/corpus/numeric_index.loom-test"
+    "test/source_low/corpus/numeric_index_conversion.loom-test"
+    "test/source_low/corpus/numeric_minmax.loom-test"
+    "test/source_low/corpus/numeric_scalar_f32.loom-test"
+    "test/source_low/corpus/numeric_scalar_i32.loom-test"
+    "test/source_low/corpus/numeric_scalar_i64.loom-test"
+    "test/source_low/corpus/ordinary_vector_structure.loom-test"
     "test/source_low/low_verify_diagnostics.loom-test"
     "test/source_low/source_low.loom-test"
     "test/source_low/source_low_diagnostics.loom-test"
+    "test/source_low/structural_value_types_bytecode.loom-test"
     "test/source_low/structured_control.loom-test"
     "test/source_low/target_legalize.loom-test"
     "test/source_low/workgroup_storage.loom-test"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/index_addressing.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/memory_scalar_addressing.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/memory_workgroup_scalar_addressing.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_conversion.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_index.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_index_conversion.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_minmax.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_f32.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_i32.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_i64.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/ordinary_vector_structure.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/sync_barrier.loom-test"
   TEST_NAME_PREFIX_TO_STRIP
     "test/source_low/"
 )

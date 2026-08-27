@@ -9,6 +9,7 @@
 
 #include <stddef.h>
 
+#include "loom/target/arch/cmd/check/provider.h"
 #include "loom/tools/loom-check/provider.h"
 #include "loom/tools/loom-check/test_provider.h"
 
@@ -66,7 +67,7 @@
 #endif  // LOOM_CHECK_HAVE_TARGET_X86
 
 static const loom_check_provider_t* const kLoomCheckProviders[] = {
-    &loom_check_test_provider,
+    &loom_check_test_provider,          &loom_cmd_check_provider,
 #if LOOM_CHECK_HAVE_EMIT_AMDGPU
     &loom_amdgpu_check_provider,
 #endif  // LOOM_CHECK_HAVE_EMIT_AMDGPU
@@ -102,5 +103,11 @@ static const loom_check_provider_set_t kLoomCheckProviderSet = {
 };
 
 int main(int argc, char** argv) {
-  return loom_check_provider_main(argc, argv, &kLoomCheckProviderSet);
+  IREE_TRACE_APP_ENTER();
+  IREE_TRACE_ZONE_BEGIN(z0);
+  const int exit_code =
+      loom_check_provider_main(argc, argv, &kLoomCheckProviderSet);
+  IREE_TRACE_ZONE_END(z0);
+  IREE_TRACE_APP_EXIT(exit_code);
+  return exit_code;
 }

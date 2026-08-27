@@ -44,29 +44,23 @@ loom_generated_cc_library(
     loom::target::registers
     loom::target::types
     loom::util::fact_table
+    loom::util::predicate_facts
     loom::util::stable_id
 )
 
 loom_cc_test(
   NAME
-    hidden_attr_verify_test
+    callable_contract_test
   SRCS
-    "hidden_attr_verify_test.cc"
+    "callable_contract_test.cc"
   DEPS
     ::low
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
-    loom::codegen::low::text_asm
-    loom::error::error_defs
-    loom::format::text::parser
     loom::ir
-    loom::ops::func
-    loom::ops::target
-    loom::ops::test
-    loom::target::low_descriptor_registry_core_test
-    loom::testing::diagnostic_matchers
-    loom::verify
+    loom::rewrite::callable
+    loom::rewrite::rewriter
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -24,6 +24,7 @@ loom_cc_library(
         ":active_unit",
         ":assignment",
         ":live_range",
+        ":unit_liveness",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:descriptors",
         "//runtime/src/iree/base",
@@ -49,6 +50,7 @@ loom_cc_library(
     deps = [
         ":assignment",
         ":live_range",
+        ":unit_liveness",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:descriptors",
         "//runtime/src/iree/base",
@@ -91,15 +93,12 @@ loom_cc_library(
     srcs = ["edge_copy.c"],
     hdrs = ["edge_copy.h"],
     deps = [
-        ":assignment",
         ":assignment_map",
-        ":live_range",
+        ":move_plan",
         ":table",
-        ":target_constraints",
-        ":unit_liveness",
         ":unit_location",
         "//loom/src/loom/analysis:liveness",
-        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:placement",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",
@@ -116,14 +115,19 @@ loom_cc_library(
         ":assignment",
         ":assignment_map",
         ":live_range",
+        ":spill_plan",
         ":spill_traffic",
+        ":storage",
         ":storage_lease",
         ":target_constraints",
         ":unit_liveness",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:placement",
         "//loom/src/loom/ir",
+        "//loom/src/loom/target:residency",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
@@ -134,9 +138,25 @@ loom_cc_test(
     deps = [
         ":search",
         "//loom/src/loom/ir",
+        "//loom/src/loom/target:residency",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "edge_alias",
+    srcs = ["edge_alias.c"],
+    hdrs = ["edge_alias.h"],
+    deps = [
+        ":assignment",
+        "//loom/src/loom/analysis:consumption",
+        "//loom/src/loom/analysis:liveness",
+        "//loom/src/loom/codegen/low:placement",
+        "//loom/src/loom/codegen/low:storage_relation",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
     ],
 )
 
@@ -147,6 +167,7 @@ loom_cc_library(
     deps = [
         ":assignment",
         ":assignment_map",
+        ":edge_alias",
         ":live_range",
         ":search",
         ":storage",
@@ -155,6 +176,8 @@ loom_cc_library(
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:placement",
+        "//loom/src/loom/codegen/low:storage_relation",
+        "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/ir",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -186,6 +209,7 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
     ],
 )
 
@@ -226,6 +250,10 @@ loom_cc_test(
     srcs = ["spill_plan_test.cc"],
     deps = [
         ":spill_plan",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
+        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -284,6 +312,7 @@ loom_cc_library(
     deps = [
         ":assignment",
         "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:placement",
         "//runtime/src/iree/base",
     ],
 )
@@ -339,6 +368,7 @@ loom_cc_library(
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/ir",
+        "//loom/src/loom/target:registers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -351,6 +381,7 @@ loom_cc_library(
     deps = [
         ":live_range",
         "//loom/src/loom/analysis:liveness",
+        "//loom/src/loom/util:adaptive_sort",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -364,6 +395,31 @@ loom_cc_test(
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "loop_edge_relocation",
+    srcs = ["loop_edge_relocation.c"],
+    hdrs = ["loop_edge_relocation.h"],
+    deps = [
+        ":assignment",
+        ":assignment_map",
+        ":edge_alias",
+        ":live_range",
+        ":storage",
+        ":storage_lease",
+        ":target_constraints",
+        ":unit_liveness",
+        "//loom/src/loom/analysis:consumption",
+        "//loom/src/loom/analysis:liveness",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:placement",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/util:cfg_graph",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 
@@ -393,6 +449,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:placement",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/ir",
+        "//loom/src/loom/util:cfg_graph",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -481,7 +538,10 @@ loom_cc_test(
     deps = [
         ":target_constraints",
         "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:facts_builder",
         "//loom/src/loom/target/test:descriptors",
+        "//loom/src/loom/target/test:target_record_table",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -495,7 +555,9 @@ loom_cc_library(
     deps = [
         ":assignment",
         ":live_range",
+        ":move",
         ":storage",
+        ":unit_liveness",
         "//loom/src/loom/codegen/low:descriptors",
         "//runtime/src/iree/base",
     ],
@@ -512,11 +574,64 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "move",
+    hdrs = ["move.h"],
+    deps = [
+        ":assignment",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "move_sequence",
+    srcs = ["move_sequence.c"],
+    hdrs = ["move_sequence.h"],
+    deps = [
+        ":move",
+        ":storage",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/target:registers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "move_sequence_test",
+    srcs = ["move_sequence_test.cc"],
+    deps = [
+        ":move_sequence",
+        ":storage",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "move_plan",
+    srcs = ["move_plan.c"],
+    hdrs = ["move_plan.h"],
+    deps = [
+        ":assignment_map",
+        ":move",
+        ":move_sequence",
+        ":storage",
+        ":target_constraints",
+        ":unit_liveness",
+        ":unit_location",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "move_topology",
     srcs = ["move_topology.c"],
     hdrs = ["move_topology.h"],
     deps = [
-        ":table",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",
@@ -548,16 +663,13 @@ loom_cc_library(
     srcs = ["packet_move.c"],
     hdrs = ["packet_move.h"],
     deps = [
-        ":assignment",
         ":assignment_map",
-        ":live_range",
+        ":move_plan",
         ":move_topology",
         ":table",
-        ":target_constraints",
-        ":unit_liveness",
         ":unit_location",
         "//loom/src/loom/analysis:liveness",
-        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:placement",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",
@@ -571,12 +683,15 @@ loom_cc_library(
     hdrs = ["table.h"],
     deps = [
         ":assignment",
+        ":move",
+        ":target_constraints",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:placement",
         "//loom/src/loom/codegen/low:storage_lease",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/ir",
+        "//loom/src/loom/util:cfg_graph",
         "//runtime/src/iree/base",
     ],
 )

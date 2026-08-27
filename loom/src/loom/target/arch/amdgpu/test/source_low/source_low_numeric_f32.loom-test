@@ -1,29 +1,29 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_f32_memory.loom-test
 // RUN: emit source-low output=low
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @f32_arith() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64xf32, #dense>
-  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
-  %lhs = vector.load %lhs_view[%lane] : view<64xf32, #dense> -> vector<1xf32>
-  %rhs = vector.load %rhs_view[%lane] : view<64xf32, #dense> -> vector<1xf32>
+  %buffer_base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_buffer[%buffer_base] : buffer -> view<64xf32>
+  %rhs_view = buffer.view %rhs_buffer[%buffer_base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf32>
+  %lhs = vector.load %lhs_view[%lane] : view<64xf32> -> vector<1xf32>
+  %rhs = vector.load %rhs_view[%lane] : view<64xf32> -> vector<1xf32>
   %sum = vector.addf %lhs, %rhs : vector<1xf32>
   %product = vector.mulf %sum, %rhs : vector<1xf32>
   %negated = vector.negf %product : vector<1xf32>
   %absolute = vector.absf %negated : vector<1xf32>
-  vector.store %absolute, %output_view[%lane] : vector<1xf32>, view<64xf32, #dense>
+  vector.store %absolute, %output_view[%lane] : vector<1xf32>, view<64xf32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_arith() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_arith() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -41,28 +41,28 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_arith() asm<amdgpu.
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @f32_fma() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64xf32, #dense>
-  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
-  %lhs = vector.load %lhs_view[%lane] : view<64xf32, #dense> -> vector<1xf32>
-  %rhs = vector.load %rhs_view[%lane] : view<64xf32, #dense> -> vector<1xf32>
+  %buffer_base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_buffer[%buffer_base] : buffer -> view<64xf32>
+  %rhs_view = buffer.view %rhs_buffer[%buffer_base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf32>
+  %lhs = vector.load %lhs_view[%lane] : view<64xf32> -> vector<1xf32>
+  %rhs = vector.load %rhs_view[%lane] : view<64xf32> -> vector<1xf32>
   %bias = vector.constant 0.5 : vector<1xf32>
   %fma = vector.fmaf %lhs, %rhs, %bias : vector<1xf32>
   %result = vector.subf %fma, %bias : vector<1xf32>
-  vector.store %result, %output_view[%lane] : vector<1xf32>, view<64xf32, #dense>
+  vector.store %result, %output_view[%lane] : vector<1xf32>, view<64xf32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_fma() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_fma() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -79,26 +79,26 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_fma() asm<amdgpu.rd
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @f32_arcp_div() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64x4xf32, #dense>
-  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64x4xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64x4xf32, #dense>
-  %lhs = vector.load %lhs_view[%lane, 0] : view<64x4xf32, #dense> -> vector<4xf32>
-  %rhs = vector.load %rhs_view[%lane, 0] : view<64x4xf32, #dense> -> vector<4xf32>
+  %buffer_base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_buffer[%buffer_base] : buffer -> view<64x4xf32>
+  %rhs_view = buffer.view %rhs_buffer[%buffer_base] : buffer -> view<64x4xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xf32>
+  %lhs = vector.load %lhs_view[%lane, 0] : view<64x4xf32> -> vector<4xf32>
+  %rhs = vector.load %rhs_view[%lane, 0] : view<64x4xf32> -> vector<4xf32>
   %quotient = vector.divf<nnan|ninf|nsz|arcp> %lhs, %rhs : vector<4xf32>
-  vector.store %quotient, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32, #dense>
+  vector.store %quotient, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_arcp_div() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_arcp_div() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -129,7 +129,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_arcp_div() asm<amdg
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @f32_scalar_arcp_constant_divisor(%value: f32) -> (f32) {
   %scale = scalar.constant 127.0 : f32
   %result = scalar.divf<nnan|ninf|nsz|arcp> %value, %scale : f32
@@ -137,14 +137,14 @@ func.def target(@target) @f32_scalar_arcp_constant_divisor(%value: f32) -> (f32)
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_scalar_arcp_constant_divisor(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_scalar_arcp_constant_divisor(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %result = v_mul_f32_lit %value, 1006699012
   return %result
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @f32_scalar_arcp_literal_dividend(%value: f32) -> (f32) {
   %scale = scalar.constant 127.0 : f32
   %result = scalar.divf<nnan|ninf|nsz|arcp> %scale, %value : f32
@@ -152,7 +152,7 @@ func.def target(@target) @f32_scalar_arcp_literal_dividend(%value: f32) -> (f32)
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_scalar_arcp_literal_dividend(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_scalar_arcp_literal_dividend(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %6 = v_rcp_f32 %value
   %result = v_mul_f32_lit %6, 1123942400
   return %result
@@ -160,7 +160,7 @@ low.func.def target(@target) abi(hal_kernel) @f32_scalar_arcp_literal_dividend(%
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @f32_vector_arcp_constant_divisor(%values: vector<4xf32>) -> (vector<4xf32>) {
   %scale = vector.constant 127.0 : vector<4xf32>
   %result = vector.divf<nnan|ninf|nsz|arcp> %values, %scale : vector<4xf32>
@@ -168,7 +168,7 @@ func.def target(@target) @f32_vector_arcp_constant_divisor(%values: vector<4xf32
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_vector_arcp_constant_divisor(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_vector_arcp_constant_divisor(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %8 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %9 = v_mul_f32_lit %8, 1006699012
   %10 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -183,7 +183,7 @@ low.func.def target(@target) abi(hal_kernel) @f32_vector_arcp_constant_divisor(%
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @f32_vector_arcp_literal_dividend(%values: vector<4xf32>) -> (vector<4xf32>) {
   %scale = vector.constant 127.0 : vector<4xf32>
   %result = vector.divf<nnan|ninf|nsz|arcp> %scale, %values : vector<4xf32>
@@ -191,7 +191,7 @@ func.def target(@target) @f32_vector_arcp_literal_dividend(%values: vector<4xf32
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_vector_arcp_literal_dividend(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_vector_arcp_literal_dividend(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %6 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %7 = v_rcp_f32 %6
   %8 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -210,27 +210,27 @@ low.func.def target(@target) abi(hal_kernel) @f32_vector_arcp_literal_dividend(%
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @f32_guarded_arcp_reciprocal_scale(%amax: f32) -> (f32) {
-  %zero = scalar.constant 0.0 : f32
-  %one = scalar.constant 1.0 : f32
-  %one_over_127 = scalar.constant 0.007874015700000001 : f32
-  %scale = scalar.constant 127.0 : f32
-  %d = scalar.mulf<nnan|ninf|nsz|arcp> %amax, %one_over_127 : f32
+  %fallback_scale = scalar.constant 0.0 : f32
+  %reciprocal_numerator = scalar.constant 1.0 : f32
+  %inverse_scale_limit = scalar.constant 0.007874015700000001 : f32
+  %scale_limit = scalar.constant 127.0 : f32
+  %d = scalar.mulf<nnan|ninf|nsz|arcp> %amax, %inverse_scale_limit : f32
   %zero_for_cmp = scalar.subf %d, %d : f32
   %nonzero = scalar.cmpf one, %d, %zero_for_cmp : f32
   %d_inv = scf.if %nonzero -> (f32) {
-    %amax_inv = scalar.divf<nnan|ninf|nsz|arcp> %one, %amax : f32
-    %candidate = scalar.mulf<nnan|ninf|nsz|arcp> %amax_inv, %scale : f32
+    %amax_inv = scalar.divf<nnan|ninf|nsz|arcp> %reciprocal_numerator, %amax : f32
+    %candidate = scalar.mulf<nnan|ninf|nsz|arcp> %amax_inv, %scale_limit : f32
     scf.yield %candidate : f32
   } else {
-    scf.yield %zero : f32
+    scf.yield %fallback_scale : f32
   }
   func.return %d_inv : f32
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_guarded_arcp_reciprocal_scale(%amax: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_guarded_arcp_reciprocal_scale(%amax: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %d = v_mul_f32_lit %amax, 1006699012
   %zero_for_cmp = v_sub_f32 %d, %d
   %nonzero = v_cmp_lg_f32 %d, %zero_for_cmp
@@ -242,26 +242,26 @@ low.func.def target(@target) abi(hal_kernel) @f32_guarded_arcp_reciprocal_scale(
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @f32_exact_vector_div() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64xf32, #dense>
-  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
-  %lhs = vector.load %lhs_view[%lane] : view<64xf32, #dense> -> vector<1xf32>
-  %rhs = vector.load %rhs_view[%lane] : view<64xf32, #dense> -> vector<1xf32>
+  %buffer_base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_buffer[%buffer_base] : buffer -> view<64xf32>
+  %rhs_view = buffer.view %rhs_buffer[%buffer_base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf32>
+  %lhs = vector.load %lhs_view[%lane] : view<64xf32> -> vector<1xf32>
+  %rhs = vector.load %rhs_view[%lane] : view<64xf32> -> vector<1xf32>
   %quotient = vector.divf %lhs, %rhs : vector<1xf32>
-  vector.store %quotient, %output_view[%lane] : vector<1xf32>, view<64xf32, #dense>
+  vector.store %quotient, %output_view[%lane] : vector<1xf32>, view<64xf32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_exact_vector_div() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_exact_vector_div() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -287,22 +287,22 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_exact_vector_div() 
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @f32_exact_scalar_div(%lhs_buffer: buffer, %rhs_buffer: buffer) -> (f32) {
   %base = index.constant 0 : offset
   %lhs_global = buffer.assume.memory_space<global> %lhs_buffer : buffer
   %rhs_global = buffer.assume.memory_space<global> %rhs_buffer : buffer
   %lhs_noalias, %rhs_noalias = buffer.assume.noalias %lhs_global, %rhs_global : buffer, buffer
-  %lhs_view = buffer.view %lhs_noalias[%base] : buffer -> view<1xf32, #dense>
-  %rhs_view = buffer.view %rhs_noalias[%base] : buffer -> view<1xf32, #dense>
-  %lhs = view.load %lhs_view[0] : view<1xf32, #dense> -> f32
-  %rhs = view.load %rhs_view[0] : view<1xf32, #dense> -> f32
+  %lhs_view = buffer.view %lhs_noalias[%base] : buffer -> view<1xf32>
+  %rhs_view = buffer.view %rhs_noalias[%base] : buffer -> view<1xf32>
+  %lhs = view.load %lhs_view[0] : view<1xf32> -> f32
+  %rhs = view.load %rhs_view[0] : view<1xf32> -> f32
   %quotient = scalar.divf %lhs, %rhs : f32
   func.return %quotient : f32
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_exact_scalar_div() -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_exact_scalar_div() -> (reg<amdgpu.vgpr>) asm {
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %16 = s_mov_b32 0
@@ -327,19 +327,19 @@ low.func.def target(@target) abi(hal_kernel) @f32_exact_scalar_div() -> (reg<amd
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @f32_scalarized() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64x4xf32, #dense>
-  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64x4xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64x4xf32, #dense>
-  %lhs = vector.load %lhs_view[%lane, 0] : view<64x4xf32, #dense> -> vector<4xf32>
-  %rhs = vector.load %rhs_view[%lane, 0] : view<64x4xf32, #dense> -> vector<4xf32>
+  %buffer_base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_buffer[%buffer_base] : buffer -> view<64x4xf32>
+  %rhs_view = buffer.view %rhs_buffer[%buffer_base] : buffer -> view<64x4xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xf32>
+  %lhs = vector.load %lhs_view[%lane, 0] : view<64x4xf32> -> vector<4xf32>
+  %rhs = vector.load %rhs_view[%lane, 0] : view<64x4xf32> -> vector<4xf32>
   %lhs0 = vector.extract %lhs[0] : vector<4xf32> -> f32
   %rhs0 = vector.extract %rhs[0] : vector<4xf32> -> f32
   %lane0 = scalar.addf %lhs0, %rhs0 : f32
@@ -356,12 +356,12 @@ kernel.def target(@target) @f32_scalarized() {
   %bias = scalar.constant 0.5 : f32
   %lane3 = scalar.fmaf %lhs3, %rhs3, %bias : f32
   %result = vector.from_elements %lane0, %lane1, %lane2, %lane3 : vector<4xf32>
-  vector.store %result, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32, #dense>
+  vector.store %result, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_scalarized() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_scalarized() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -389,13 +389,13 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_scalarized() asm<am
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @f32_uniform_vector_bitops(%input: buffer) -> (vector<4xf32>) {
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
   %input_noalias = buffer.assume.noalias %input_global : buffer
-  %input_view = buffer.view %input_noalias[%base] : buffer -> view<4xf32, #dense>
-  %loaded = vector.load %input_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<4xf32>
+  %loaded = vector.load %input_view[0] : view<4xf32> -> vector<4xf32>
   %negated = vector.negf %loaded : vector<4xf32>
   %absolute = vector.absf %loaded : vector<4xf32>
   %result = vector.addf %negated, %absolute : vector<4xf32>
@@ -403,7 +403,7 @@ func.def target(@target) @f32_uniform_vector_bitops(%input: buffer) -> (vector<4
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_uniform_vector_bitops() -> (reg<amdgpu.vgpr x4>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_uniform_vector_bitops() -> (reg<amdgpu.vgpr x4>) asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %12 = s_mov_b32 0
   %loaded = s_load_dwordx4 %input_view, %12
@@ -433,29 +433,29 @@ low.func.def target(@target) abi(hal_kernel) @f32_uniform_vector_bitops() -> (re
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @f32_uniform_vector_binary(%lhs_buffer: buffer, %rhs_buffer: buffer) -> (vector<4xf32>) {
   %base = index.constant 0 : offset
   %lhs_global = buffer.assume.memory_space<global> %lhs_buffer : buffer
   %rhs_global = buffer.assume.memory_space<global> %rhs_buffer : buffer
   %lhs_noalias, %rhs_noalias = buffer.assume.noalias %lhs_global, %rhs_global : buffer, buffer
-  %lhs_view = buffer.view %lhs_noalias[%base] : buffer -> view<4xf32, #dense>
-  %rhs_view = buffer.view %rhs_noalias[%base] : buffer -> view<4xf32, #dense>
-  %lhs = vector.load %lhs_view[0] : view<4xf32, #dense> -> vector<4xf32>
-  %rhs = vector.load %rhs_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %lhs_view = buffer.view %lhs_noalias[%base] : buffer -> view<4xf32>
+  %rhs_view = buffer.view %rhs_noalias[%base] : buffer -> view<4xf32>
+  %lhs = vector.load %lhs_view[0] : view<4xf32> -> vector<4xf32>
+  %rhs = vector.load %rhs_view[0] : view<4xf32> -> vector<4xf32>
   %product = vector.mulf %lhs, %rhs : vector<4xf32>
   %sum = vector.addf %lhs, %rhs : vector<4xf32>
   %difference = vector.subf %lhs, %rhs : vector<4xf32>
   %combined = vector.addf %product, %sum : vector<4xf32>
-  %two = vector.constant 2.0 : vector<4xf32>
-  %scaled = vector.mulf %lhs, %two : vector<4xf32>
+  %scale_factor = vector.constant 2.0 : vector<4xf32>
+  %scaled = vector.mulf %lhs, %scale_factor : vector<4xf32>
   %with_difference = vector.addf %combined, %difference : vector<4xf32>
   %result = vector.addf %with_difference, %scaled : vector<4xf32>
   func.return %result : vector<4xf32>
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_uniform_vector_binary() -> (reg<amdgpu.vgpr x4>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_uniform_vector_binary() -> (reg<amdgpu.vgpr x4>) asm {
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %23 = s_mov_b32 0
@@ -511,22 +511,22 @@ low.func.def target(@target) abi(hal_kernel) @f32_uniform_vector_binary() -> (re
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @f32_uniform_scalar_binary(%lhs_buffer: buffer, %rhs_buffer: buffer) -> (f32) {
   %base = index.constant 0 : offset
   %lhs_global = buffer.assume.memory_space<global> %lhs_buffer : buffer
   %rhs_global = buffer.assume.memory_space<global> %rhs_buffer : buffer
   %lhs_noalias, %rhs_noalias = buffer.assume.noalias %lhs_global, %rhs_global : buffer, buffer
-  %lhs_view = buffer.view %lhs_noalias[%base] : buffer -> view<1xf32, #dense>
-  %rhs_view = buffer.view %rhs_noalias[%base] : buffer -> view<1xf32, #dense>
-  %lhs = view.load %lhs_view[0] : view<1xf32, #dense> -> f32
-  %rhs = view.load %rhs_view[0] : view<1xf32, #dense> -> f32
+  %lhs_view = buffer.view %lhs_noalias[%base] : buffer -> view<1xf32>
+  %rhs_view = buffer.view %rhs_noalias[%base] : buffer -> view<1xf32>
+  %lhs = view.load %lhs_view[0] : view<1xf32> -> f32
+  %rhs = view.load %rhs_view[0] : view<1xf32> -> f32
   %sum = scalar.addf %lhs, %rhs : f32
   func.return %sum : f32
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_uniform_scalar_binary() -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_uniform_scalar_binary() -> (reg<amdgpu.vgpr>) asm {
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %16 = s_mov_b32 0
@@ -539,17 +539,17 @@ low.func.def target(@target) abi(hal_kernel) @f32_uniform_scalar_binary() -> (re
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @f32_inline_zero_arithmetic(%scalar: f32, %vector: vector<2xf32>) -> (f32, vector<2xf32>) {
-  %zero = scalar.constant 0.0 : f32
-  %scalar_result = scalar.mulf %scalar, %zero : f32
-  %zero_vector = vector.splat %zero : vector<2xf32>
+  %zero_factor = scalar.constant 0.0 : f32
+  %scalar_result = scalar.mulf %scalar, %zero_factor : f32
+  %zero_vector = vector.splat %zero_factor : vector<2xf32>
   %vector_result = vector.mulf %vector, %zero_vector : vector<2xf32>
   func.return %scalar_result, %vector_result : f32, vector<2xf32>
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_inline_zero_arithmetic(%scalar: reg<amdgpu.vgpr>, %vector: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_inline_zero_arithmetic(%scalar: reg<amdgpu.vgpr>, %vector: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm {
   %scalar_result = v_mul_f32_src0_inline %scalar, 0
   %14 = slice %vector[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %15 = v_mul_f32_src0_inline %14, 0
@@ -561,25 +561,25 @@ low.func.def target(@target) abi(hal_kernel) @f32_inline_zero_arithmetic(%scalar
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @f32_uniform_scalar_fma(%a_buffer: buffer, %b_buffer: buffer, %c_buffer: buffer) -> (f32) {
   %base = index.constant 0 : offset
   %a_global = buffer.assume.memory_space<global> %a_buffer : buffer
   %b_global = buffer.assume.memory_space<global> %b_buffer : buffer
   %c_global = buffer.assume.memory_space<global> %c_buffer : buffer
   %a_noalias, %b_noalias, %c_noalias = buffer.assume.noalias %a_global, %b_global, %c_global : buffer, buffer, buffer
-  %a_view = buffer.view %a_noalias[%base] : buffer -> view<1xf32, #dense>
-  %b_view = buffer.view %b_noalias[%base] : buffer -> view<1xf32, #dense>
-  %c_view = buffer.view %c_noalias[%base] : buffer -> view<1xf32, #dense>
-  %a = view.load %a_view[0] : view<1xf32, #dense> -> f32
-  %b = view.load %b_view[0] : view<1xf32, #dense> -> f32
-  %c = view.load %c_view[0] : view<1xf32, #dense> -> f32
+  %a_view = buffer.view %a_noalias[%base] : buffer -> view<1xf32>
+  %b_view = buffer.view %b_noalias[%base] : buffer -> view<1xf32>
+  %c_view = buffer.view %c_noalias[%base] : buffer -> view<1xf32>
+  %a = view.load %a_view[0] : view<1xf32> -> f32
+  %b = view.load %b_view[0] : view<1xf32> -> f32
+  %c = view.load %c_view[0] : view<1xf32> -> f32
   %result = scalar.fmaf %a, %b, %c : f32
   func.return %result : f32
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_uniform_scalar_fma() -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_uniform_scalar_fma() -> (reg<amdgpu.vgpr>) asm {
   %a_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %b_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %c_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
@@ -594,25 +594,25 @@ low.func.def target(@target) abi(hal_kernel) @f32_uniform_scalar_fma() -> (reg<a
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @f32_uniform_vector_fma(%a_buffer: buffer, %b_buffer: buffer, %c_buffer: buffer) -> (vector<4xf32>) {
   %base = index.constant 0 : offset
   %a_global = buffer.assume.memory_space<global> %a_buffer : buffer
   %b_global = buffer.assume.memory_space<global> %b_buffer : buffer
   %c_global = buffer.assume.memory_space<global> %c_buffer : buffer
   %a_noalias, %b_noalias, %c_noalias = buffer.assume.noalias %a_global, %b_global, %c_global : buffer, buffer, buffer
-  %a_view = buffer.view %a_noalias[%base] : buffer -> view<4xf32, #dense>
-  %b_view = buffer.view %b_noalias[%base] : buffer -> view<4xf32, #dense>
-  %c_view = buffer.view %c_noalias[%base] : buffer -> view<4xf32, #dense>
-  %a = vector.load %a_view[0] : view<4xf32, #dense> -> vector<4xf32>
-  %b = vector.load %b_view[0] : view<4xf32, #dense> -> vector<4xf32>
-  %c = vector.load %c_view[0] : view<4xf32, #dense> -> vector<4xf32>
+  %a_view = buffer.view %a_noalias[%base] : buffer -> view<4xf32>
+  %b_view = buffer.view %b_noalias[%base] : buffer -> view<4xf32>
+  %c_view = buffer.view %c_noalias[%base] : buffer -> view<4xf32>
+  %a = vector.load %a_view[0] : view<4xf32> -> vector<4xf32>
+  %b = vector.load %b_view[0] : view<4xf32> -> vector<4xf32>
+  %c = vector.load %c_view[0] : view<4xf32> -> vector<4xf32>
   %result = vector.fmaf %a, %b, %c : vector<4xf32>
   func.return %result : vector<4xf32>
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_uniform_vector_fma() -> (reg<amdgpu.vgpr x4>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_uniform_vector_fma() -> (reg<amdgpu.vgpr x4>) asm {
   %a_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %b_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %c_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
@@ -646,22 +646,22 @@ low.func.def target(@target) abi(hal_kernel) @f32_uniform_vector_fma() -> (reg<a
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @f32_direct_arg_scale() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%output: buffer, %scale: f32) {
-  %zero_offset = index.constant 0 : offset
-  %zero_index = index.constant 0 : index
-  %output_view = buffer.view %output[%zero_offset] : buffer -> view<1xf32, #dense>
+  %output_base = index.constant 0 : offset
+  %output_element = index.constant 0 : index
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xf32>
   %unit = scalar.constant 1.0 : f32
   %scaled = scalar.mulf %unit, %scale : f32
-  view.store %scaled, %output_view[%zero_index] : f32, view<1xf32, #dense>
+  view.store %scaled, %output_view[%output_element] : f32, view<1xf32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @f32_direct_arg_scale(%scale: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @f32_direct_arg_scale(%scale: reg<amdgpu.sgpr>) asm {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %10 = v_mov_b32_copy %scale
   %11 = v_mov_b32 0

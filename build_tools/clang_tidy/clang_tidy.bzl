@@ -6,7 +6,11 @@
 
 """Bazel actions for running IREE clang-tidy checks."""
 
-load("@iree_clang_tidy_llvm//:config.bzl", "CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH")
+load(
+    "@iree_clang_tidy_llvm//:config.bzl",
+    "CLANG_TIDY_CLANG_RESOURCE_DIR",
+    "CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH",
+)
 load("@rules_cc//cc:find_cc_toolchain.bzl", "CC_TOOLCHAIN_ATTRS", "find_cc_toolchain", "use_cc_toolchain")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load(
@@ -17,6 +21,27 @@ load(
     "iree_cc_source_files",
 )
 
+# clang-tidy always parses through Clang even when Bazel's configured compile
+# action uses GCC. Keep target semantic flags intact but omit GCC driver flags
+# that Clang rejects before it can analyze the source.
+_CLANG_TIDY_UNSUPPORTED_COMPILE_ARGS = {
+    "-fno-canonical-system-headers": None,
+}
+
+def _clang_tidy_compile_args(compile_args):
+    filtered_args = [
+        arg
+        for arg in compile_args
+        if arg not in _CLANG_TIDY_UNSUPPORTED_COMPILE_ARGS
+    ]
+
+    # Preserve the resource directory named by Bazel's crosstool module map.
+    # The clang-tidy VFS overlay redirects this virtual path to the declared,
+    # relocated LLVM tree.
+    return filtered_args + [
+        "-resource-dir=%s" % CLANG_TIDY_CLANG_RESOURCE_DIR,
+    ]
+
 IreeClangTidyInfo = provider(
     doc = "clang-tidy artifacts collected from configured C/C++ targets.",
     fields = {
@@ -24,6 +49,16 @@ IreeClangTidyInfo = provider(
         "local_fixes": "depset of direct per-translation-unit clang-tidy replacement YAML files.",
         "local_reports": "depset of direct per-translation-unit clang-tidy report files.",
         "reports": "depset of per-translation-unit clang-tidy report files.",
+    },
+)
+
+IreeRecursionInfo = provider(
+    doc = "Cross-translation-unit recursion artifacts collected from C/C++ targets.",
+    fields = {
+        "local_reports": "depset of direct recursion summary clang-tidy reports.",
+        "local_summaries": "depset of direct per-translation-unit call-graph summaries.",
+        "reports": "depset of transitive recursion summary clang-tidy reports.",
+        "summaries": "depset of transitive per-translation-unit call-graph summaries.",
     },
 )
 
@@ -96,6 +131,18 @@ def _clang_tidy_fixes_path(target_label, source):
         _sanitize_path(source.path),
     )
 
+def _recursion_report_path(target_label, source):
+    return "%s.%s.recursion_clang_tidy.txt" % (
+        iree_cc_sanitize_label(target_label),
+        _sanitize_path(source.path),
+    )
+
+def _recursion_summary_path(target_label, source):
+    return "%s.%s.recursion_summary.json" % (
+        iree_cc_sanitize_label(target_label),
+        _sanitize_path(source.path),
+    )
+
 def _run_clang_tidy_action(ctx, target, cc_toolchain, feature_configuration, source):
     compile_command = iree_cc_compile_command(
         ctx,
@@ -116,7 +163,8 @@ def _run_clang_tidy_action(ctx, target, cc_toolchain, feature_configuration, sou
     args.add("--plugin", ctx.executable._plugin)
     args.add("--source", source)
     args.add("--output", report)
-    args.add("--checks=%s" % ctx.attr._checks)
+    args.add("--config-file", ctx.file._config)
+    args.add("--vfsoverlay", ctx.file._clang_resource_overlay)
     if emit_fixes:
         fixes = ctx.actions.declare_file(_clang_tidy_fixes_path(target.label, source))
         outputs.append(fixes)
@@ -125,12 +173,14 @@ def _run_clang_tidy_action(ctx, target, cc_toolchain, feature_configuration, sou
     else:
         args.add("--warnings-as-errors=%s" % ctx.attr._warnings_as_errors)
     args.add("--")
-    args.add_all(compile_command.compile_args)
+    args.add_all(_clang_tidy_compile_args(compile_command.compile_args))
 
     compilation_context = target[CcInfo].compilation_context
     inputs = depset(
-        direct = [source],
-        transitive = _compilation_input_depsets(compilation_context),
+        direct = [source, ctx.file._config, ctx.file._clang_resource_overlay],
+        transitive = _compilation_input_depsets(compilation_context) + [
+            depset(ctx.files._clang_resource_headers),
+        ],
     )
     ctx.actions.run(
         executable = ctx.executable._runner,
@@ -145,6 +195,50 @@ def _run_clang_tidy_action(ctx, target, cc_toolchain, feature_configuration, sou
         progress_message = "Running clang-tidy on %s" % source.short_path,
     )
     return report, fixes
+
+def _run_recursion_summary_action(ctx, target, cc_toolchain, feature_configuration, source):
+    compile_command = iree_cc_compile_command(
+        ctx,
+        target,
+        cc_toolchain,
+        feature_configuration,
+        source,
+    )
+    report = ctx.actions.declare_file(_recursion_report_path(target.label, source))
+    summary = ctx.actions.declare_file(_recursion_summary_path(target.label, source))
+    args = ctx.actions.args()
+    args.add("--clang-tidy", ctx.executable._clang_tidy)
+    args.add("--plugin", ctx.executable._plugin)
+    args.add("--source", source)
+    args.add("--output", report)
+    args.add("--config-file", ctx.file._config)
+    args.add("--vfsoverlay", ctx.file._clang_resource_overlay)
+    args.add("--checks=-*,iree-unbounded-recursion")
+    args.add("--recursion-summary", summary)
+    args.add("--suppress-recursion-diagnostics")
+    args.add("--")
+    args.add_all(_clang_tidy_compile_args(compile_command.compile_args))
+
+    compilation_context = target[CcInfo].compilation_context
+    inputs = depset(
+        direct = [source, ctx.file._config, ctx.file._clang_resource_overlay],
+        transitive = _compilation_input_depsets(compilation_context) + [
+            depset(ctx.files._clang_resource_headers),
+        ],
+    )
+    ctx.actions.run(
+        executable = ctx.executable._runner,
+        arguments = [args],
+        inputs = inputs,
+        outputs = [report, summary],
+        tools = [
+            ctx.executable._clang_tidy,
+            ctx.executable._plugin,
+        ],
+        mnemonic = "IreeRecursionSummary",
+        progress_message = "Extracting recursion call graph from %s" % source.short_path,
+    )
+    return report, summary
 
 def _collect_clang_tidy_aspect_impl(target, ctx):
     transitive_fixes = []
@@ -215,14 +309,25 @@ collect_clang_tidy_aspect = aspect(
             values = ["false", "true"],
             doc = "When true, emit clang-tidy replacement YAML files instead of failing on diagnostics.",
         ),
-        "_checks": attr.string(
-            default = "-*,iree-*",
-            doc = "clang-tidy checks enabled for IREE analysis.",
+        "_clang_resource_headers": attr.label(
+            allow_files = True,
+            cfg = "exec",
+            default = Label("@iree_clang_tidy_llvm//:clang_resource_headers"),
+        ),
+        "_clang_resource_overlay": attr.label(
+            allow_single_file = True,
+            cfg = "exec",
+            default = Label("@iree_clang_tidy_llvm//:clang_resource_overlay"),
         ),
         "_clang_tidy": attr.label(
             cfg = "exec",
             default = Label("@iree_clang_tidy_llvm//:clang-tidy"),
             executable = True,
+        ),
+        "_config": attr.label(
+            allow_single_file = True,
+            default = Label("//build_tools/clang_tidy:clang_tidy_config.yaml"),
+            doc = "Repository clang-tidy policy configuration.",
         ),
         "_plugin": attr.label(
             cfg = "exec",
@@ -237,6 +342,103 @@ collect_clang_tidy_aspect = aspect(
         "_warnings_as_errors": attr.string(
             default = "*",
             doc = "clang-tidy warning globs promoted to errors.",
+        ),
+    }),
+    fragments = ["cpp"],
+    required_providers = [CcInfo],
+    toolchains = use_cc_toolchain(),
+)
+
+def _collect_recursion_aspect_impl(target, ctx):
+    transitive_reports = []
+    transitive_summaries = []
+    for attr_name in [
+        "actual",
+        "deps",
+        "implementation_deps",
+    ]:
+        if not hasattr(ctx.rule.attr, attr_name):
+            continue
+        attr_value = getattr(ctx.rule.attr, attr_name)
+        if type(attr_value) == type([]):
+            deps = attr_value
+        elif attr_value:
+            deps = [attr_value]
+        else:
+            deps = []
+        for dep in deps:
+            if IreeRecursionInfo in dep:
+                transitive_reports.append(dep[IreeRecursionInfo].reports)
+                transitive_summaries.append(dep[IreeRecursionInfo].summaries)
+
+    local_reports = []
+    local_summaries = []
+    if CcInfo in target:
+        cc_toolchain = find_cc_toolchain(ctx)
+        feature_configuration = iree_cc_feature_configuration(ctx, cc_toolchain)
+        for source in iree_cc_source_files(ctx):
+            report, summary = _run_recursion_summary_action(
+                ctx,
+                target,
+                cc_toolchain,
+                feature_configuration,
+                source,
+            )
+            local_reports.append(report)
+            local_summaries.append(summary)
+
+    reports = depset(local_reports, transitive = transitive_reports)
+    summaries = depset(local_summaries, transitive = transitive_summaries)
+    return [
+        IreeRecursionInfo(
+            local_reports = depset(local_reports),
+            local_summaries = depset(local_summaries),
+            reports = reports,
+            summaries = summaries,
+        ),
+        OutputGroupInfo(
+            iree_recursion_reports = reports,
+            iree_recursion_summaries = summaries,
+        ),
+    ]
+
+collect_recursion_aspect = aspect(
+    implementation = _collect_recursion_aspect_impl,
+    attr_aspects = [
+        "actual",
+        "deps",
+        "implementation_deps",
+    ],
+    attrs = dict(CC_TOOLCHAIN_ATTRS, **{
+        "_clang_resource_headers": attr.label(
+            allow_files = True,
+            cfg = "exec",
+            default = Label("@iree_clang_tidy_llvm//:clang_resource_headers"),
+        ),
+        "_clang_resource_overlay": attr.label(
+            allow_single_file = True,
+            cfg = "exec",
+            default = Label("@iree_clang_tidy_llvm//:clang_resource_overlay"),
+        ),
+        "_clang_tidy": attr.label(
+            cfg = "exec",
+            default = Label("@iree_clang_tidy_llvm//:clang-tidy"),
+            executable = True,
+        ),
+        "_config": attr.label(
+            allow_single_file = True,
+            default = Label("//build_tools/clang_tidy:clang_tidy_config.yaml"),
+            doc = "Repository clang-tidy policy configuration.",
+        ),
+        "_plugin": attr.label(
+            cfg = "exec",
+            default = Label("//build_tools/clang_tidy:IREEClangTidyPlugin.so"),
+            executable = True,
+        ),
+        "_runner": attr.label(
+            cfg = "exec",
+            default = Label("//build_tools/clang_tidy:run_clang_tidy_action"),
+            executable = True,
         ),
     }),
     fragments = ["cpp"],
@@ -297,6 +499,75 @@ def iree_clang_tidy(name, **kwargs):
     """
     target_compatible_with = kwargs.pop("target_compatible_with", [])
     _iree_clang_tidy_rule(
+        name = name,
+        target_compatible_with = CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH + target_compatible_with,
+        **kwargs
+    )
+
+def _iree_recursion_analysis_impl(ctx):
+    transitive_reports = []
+    transitive_summaries = []
+    for target in ctx.attr.targets:
+        if IreeRecursionInfo in target:
+            transitive_reports.append(target[IreeRecursionInfo].reports)
+            transitive_summaries.append(target[IreeRecursionInfo].summaries)
+    source_reports = depset(transitive = transitive_reports)
+    summaries = depset(transitive = transitive_summaries)
+    report = ctx.actions.declare_file(ctx.label.name + ".txt")
+    args = ctx.actions.args()
+    args.add("--output", report)
+    if ctx.attr.allow_diagnostics:
+        args.add("--allow-diagnostics")
+        args.add("--quiet")
+    args.add_all(summaries)
+    ctx.actions.run(
+        executable = ctx.executable._aggregator,
+        arguments = [args],
+        inputs = summaries,
+        outputs = [report],
+        mnemonic = "IreeRecursionAnalysis",
+        progress_message = "Checking cross-translation-unit recursion for %s" % ctx.label,
+    )
+    return [
+        DefaultInfo(files = depset([report])),
+        IreeRecursionInfo(
+            local_reports = depset(),
+            local_summaries = depset(),
+            reports = depset([report], transitive = [source_reports]),
+            summaries = summaries,
+        ),
+        OutputGroupInfo(
+            iree_recursion_reports = depset([report], transitive = [source_reports]),
+            iree_recursion_summaries = summaries,
+        ),
+    ]
+
+_iree_recursion_analysis_rule = rule(
+    implementation = _iree_recursion_analysis_impl,
+    attrs = {
+        "allow_diagnostics": attr.bool(
+            default = False,
+            doc = "When true, report recursive SCCs without failing the action.",
+        ),
+        "targets": attr.label_list(
+            aspects = [collect_recursion_aspect],
+            doc = "C/C++ targets to analyze for cross-translation-unit recursion.",
+            mandatory = True,
+            providers = [CcInfo],
+        ),
+        "_aggregator": attr.label(
+            cfg = "exec",
+            default = Label("//build_tools/clang_tidy:aggregate_recursion_summaries"),
+            executable = True,
+        ),
+    },
+    doc = "Extracts and checks a whole-target C/C++ call graph for recursion.",
+)
+
+def iree_recursion_analysis(name, **kwargs):
+    """Checks configured C/C++ targets for cross-translation-unit recursion."""
+    target_compatible_with = kwargs.pop("target_compatible_with", [])
+    _iree_recursion_analysis_rule(
         name = name,
         target_compatible_with = CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH + target_compatible_with,
         **kwargs

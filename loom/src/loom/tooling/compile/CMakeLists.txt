@@ -27,13 +27,15 @@ loom_cc_library(
     loom::pass::registry
     loom::pass::tooling
     loom::pass::trace
-    loom::target::compile_report
     loom::target::entry_selection
+    loom::target::function_version_projection
     loom::target::low_descriptor_registry
     loom::target::math_policy
     loom::target::pipeline
     loom::target::predicate
     loom::target::provider
+    loom::target::reporting::report
+    loom::target::specialization
     loom::target::types
     loom::verify
   PUBLIC

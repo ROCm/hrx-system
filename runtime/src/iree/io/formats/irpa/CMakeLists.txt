@@ -29,12 +29,28 @@ iree_cc_library(
 
 iree_cc_test(
   NAME
+    irpa_builder_test
+  SRCS
+    "irpa_builder_test.cc"
+  DEPS
+    ::irpa
+    iree::base
+    iree::io::file_handle
+    iree::io::parameter_index
+    iree::io::stream
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
     irpa_parser_test
   SRCS
     "irpa_parser_test.cc"
   DEPS
     ::irpa
     iree::io::formats::irpa::testdata::irpa_files
+    iree::schemas::parameter_archive
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

@@ -15,6 +15,7 @@ package(
 loom_check_test_suite(
     name = "test",
     srcs = [
+        "assume.loom-test",
         "canonicalize.loom-test",
         "facts.loom-test",
         "roundtrip.loom-test",

@@ -30,18 +30,19 @@ const loom_low_lower_policy_t* loom_x86_avx512_low_lower_policy(void);
 // Returns the x86 AVX2 register lowering policy.
 //
 // The policy maps object-function buffer arguments and address-domain scalar
-// values to GPR64 registers, maps ordinary integer scalar values to GPR
-// registers, maps scalar f32 and vector<4xi32>/vector<4xf32> values to XMM
-// registers, and lowers scalar plus XMM operations through table-driven AVX2
-// descriptor rules. AVX512 mask and ZMM values are intentionally not legal in
-// this policy.
+// values to GPR64 registers, maps ordinary integer and narrow scalar bit
+// patterns to GPR registers, maps scalar f32/f64 and
+// vector<4xi32>/vector<4xf32> values to XMM registers, and lowers scalar plus
+// XMM operations through table-driven AVX2 descriptor rules. AVX512 mask and
+// ZMM values are intentionally not legal in this policy.
 const loom_low_lower_policy_t* loom_x86_avx2_low_lower_policy(void);
 
 // Returns the baseline x86 scalar register lowering policy.
 //
 // The policy maps object-function buffer arguments and address-domain scalar
-// values to GPR64 registers, maps i32 scalar values to GPR32 registers, and
-// lowers ordinary integer/address operations through scalar descriptor rules.
+// values to GPR64 registers, maps i32 and narrow scalar bit patterns to GPR32
+// registers, and lowers ordinary integer/address operations through scalar
+// descriptor rules.
 const loom_low_lower_policy_t* loom_x86_scalar_low_lower_policy(void);
 
 // Returns the x86 packed-dot register lowering policy.

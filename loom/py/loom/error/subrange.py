@@ -419,6 +419,24 @@ ERR_SUBRANGE_025 = ErrorDef(
     ),
 )
 
+# ERR_SUBRANGE_026: Memory access storage-root upper bound is not proven.
+ERR_SUBRANGE_026 = ErrorDef(
+    domain=ErrorDomain.SUBRANGE,
+    code=26,
+    severity=Severity.ERROR,
+    summary="Memory access storage-root upper bound is not proven.",
+    message=(
+        "{op_name} access byte end may reach {maximum_access_byte_end}, "
+        "exceeding storage root byte extent {root_byte_extent}"
+    ),
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("maximum_access_byte_end", ParamKind.I64),
+        ErrorParam("root_byte_extent", ParamKind.I64),
+    ),
+    fix_hint="Prove the access remains within the root or increase the allocation",
+)
+
 ALL_SUBRANGE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SUBRANGE_001,
     ERR_SUBRANGE_002,
@@ -443,4 +461,5 @@ ALL_SUBRANGE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SUBRANGE_023,
     ERR_SUBRANGE_024,
     ERR_SUBRANGE_025,
+    ERR_SUBRANGE_026,
 )

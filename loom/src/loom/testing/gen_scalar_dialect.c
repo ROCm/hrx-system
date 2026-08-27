@@ -186,33 +186,25 @@ static iree_status_t loom_test_gen_hook_scalar_float_binary(
     return iree_ok_status();
   }
 
-  // copysignf is unflagged; all other float binary ops take fast-math flags.
-  static const loom_scalar_float_binary_fn_t flagged_ops[] = {
+  static const loom_scalar_float_binary_fn_t ops[] = {
       loom_scalar_addf_build,     loom_scalar_subf_build,
       loom_scalar_mulf_build,     loom_scalar_divf_build,
       loom_scalar_remf_build,     loom_scalar_minimumf_build,
       loom_scalar_maximumf_build, loom_scalar_minnumf_build,
       loom_scalar_maxnumf_build,  loom_scalar_powf_build,
-      loom_scalar_atan2f_build,
+      loom_scalar_atan2f_build,   loom_scalar_copysignf_build,
   };
-  static const uint32_t flagged_count = IREE_ARRAYSIZE(flagged_ops);
-  // +1 for copysignf.
-  uint32_t total = flagged_count + 1;
 
   loom_op_t* op = NULL;
-  uint32_t pick = loom_test_gen_next_range(context->gen, total);
-  if (pick < flagged_count) {
-    uint8_t flags = 0;
-    if (loom_test_gen_next_probability(context->gen, 15)) {
-      flags = (uint8_t)loom_test_gen_next_range(
-          context->gen, LOOM_SCALAR_FASTMATHFLAGS_FAST + 1);
-    }
-    IREE_RETURN_IF_ERROR(flagged_ops[pick](context->builder, flags, lhs, rhs,
-                                           type, LOOM_LOCATION_UNKNOWN, &op));
-  } else {
-    IREE_RETURN_IF_ERROR(loom_scalar_copysignf_build(
-        context->builder, lhs, rhs, type, LOOM_LOCATION_UNKNOWN, &op));
+  const uint32_t pick =
+      loom_test_gen_next_range(context->gen, IREE_ARRAYSIZE(ops));
+  uint8_t flags = 0;
+  if (loom_test_gen_next_probability(context->gen, 15)) {
+    flags = (uint8_t)loom_test_gen_next_range(
+        context->gen, LOOM_SCALAR_FASTMATHFLAGS_FAST + 1);
   }
+  IREE_RETURN_IF_ERROR(ops[pick](context->builder, flags, lhs, rhs, type,
+                                 LOOM_LOCATION_UNKNOWN, &op));
   loom_test_gen_values_add(context->values, loom_op_results(op)[0], type);
   *out_result = LOOM_TEST_GEN_HOOK_EMITTED;
   return iree_ok_status();
@@ -299,12 +291,12 @@ static iree_status_t loom_test_gen_hook_scalar_comparison(
       *out_result = LOOM_TEST_GEN_HOOK_SKIPPED;
       return iree_ok_status();
     }
-    uint8_t predicate = (uint8_t)loom_test_gen_next_range(
-        context->gen, LOOM_SCALAR_CMPI_PREDICATE_COUNT_);
+    loom_scalar_cmpi_predicate_t predicate =
+        (loom_scalar_cmpi_predicate_t)loom_test_gen_next_range(
+            context->gen, LOOM_SCALAR_CMPI_PREDICATE_COUNT_);
     loom_op_t* op = NULL;
-    IREE_RETURN_IF_ERROR(loom_scalar_cmpi_build(context->builder, predicate,
-                                                lhs, rhs, operand_type, i1_type,
-                                                LOOM_LOCATION_UNKNOWN, &op));
+    IREE_RETURN_IF_ERROR(loom_scalar_cmpi_build(
+        context->builder, predicate, lhs, rhs, LOOM_LOCATION_UNKNOWN, &op));
     loom_test_gen_values_add(context->values, loom_op_results(op)[0], i1_type);
   } else {
     if (!loom_test_gen_values_pick_binary_float(context->gen, context->values,
@@ -312,17 +304,18 @@ static iree_status_t loom_test_gen_hook_scalar_comparison(
       *out_result = LOOM_TEST_GEN_HOOK_SKIPPED;
       return iree_ok_status();
     }
-    uint8_t predicate = (uint8_t)loom_test_gen_next_range(
-        context->gen, LOOM_SCALAR_CMPF_PREDICATE_COUNT_);
+    loom_scalar_cmpf_predicate_t predicate =
+        (loom_scalar_cmpf_predicate_t)loom_test_gen_next_range(
+            context->gen, LOOM_SCALAR_CMPF_PREDICATE_COUNT_);
     uint8_t flags = 0;
     if (loom_test_gen_next_probability(context->gen, 15)) {
       flags = (uint8_t)loom_test_gen_next_range(
           context->gen, LOOM_SCALAR_FASTMATHFLAGS_FAST + 1);
     }
     loom_op_t* op = NULL;
-    IREE_RETURN_IF_ERROR(loom_scalar_cmpf_build(
-        context->builder, flags, predicate, lhs, rhs, operand_type, i1_type,
-        LOOM_LOCATION_UNKNOWN, &op));
+    IREE_RETURN_IF_ERROR(loom_scalar_cmpf_build(context->builder, flags,
+                                                predicate, lhs, rhs,
+                                                LOOM_LOCATION_UNKNOWN, &op));
     loom_test_gen_values_add(context->values, loom_op_results(op)[0], i1_type);
   }
   *out_result = LOOM_TEST_GEN_HOOK_EMITTED;
@@ -336,6 +329,21 @@ static iree_status_t loom_test_gen_hook_scalar_comparison(
 typedef iree_status_t (*loom_scalar_conversion_fn_t)(
     loom_builder_t* builder, loom_value_id_t input, loom_type_t input_type,
     loom_type_t result_type, loom_location_id_t location, loom_op_t** out_op);
+
+typedef struct loom_scalar_conversion_candidate_t {
+  // Builder for the candidate conversion operation.
+  loom_scalar_conversion_fn_t build;
+  // Scalar element type produced by the conversion.
+  loom_scalar_type_t result_type;
+} loom_scalar_conversion_candidate_t;
+
+static loom_scalar_conversion_candidate_t loom_scalar_conversion_candidate_make(
+    loom_scalar_conversion_fn_t build, loom_scalar_type_t result_type) {
+  loom_scalar_conversion_candidate_t candidate;
+  candidate.build = build;
+  candidate.result_type = result_type;
+  return candidate;
+}
 
 static iree_status_t loom_test_gen_hook_scalar_conversion(
     const loom_test_gen_hook_context_t* context, void* user_data,
@@ -352,45 +360,42 @@ static iree_status_t loom_test_gen_hook_scalar_conversion(
     *out_result = LOOM_TEST_GEN_HOOK_SKIPPED;
     return iree_ok_status();
   }
-  loom_scalar_type_t src_scalar = loom_type_element_type(input_type);
+  loom_scalar_type_t source_scalar = loom_type_element_type(input_type);
 
   // Build a table of valid conversions based on the source type.
-  struct {
-    loom_scalar_conversion_fn_t fn;
-    loom_scalar_type_t result;
-  } candidates[8];
+  loom_scalar_conversion_candidate_t candidates[8];
   uint32_t candidate_count = 0;
 
-  bool src_is_integer = loom_scalar_type_is_integer(src_scalar);
-  bool src_is_float = loom_scalar_type_is_float(src_scalar);
+  bool source_is_integer = loom_scalar_type_is_integer(source_scalar);
+  bool source_is_float = loom_scalar_type_is_float(source_scalar);
 
-  if (src_is_integer) {
-    candidates[candidate_count++] =
-        (typeof(candidates[0])){loom_scalar_sitofp_build, LOOM_SCALAR_TYPE_F32};
-    candidates[candidate_count++] =
-        (typeof(candidates[0])){loom_scalar_sitofp_build, LOOM_SCALAR_TYPE_F64};
-    if (loom_scalar_type_bitwidth(src_scalar) < 64) {
-      candidates[candidate_count++] = (typeof(candidates[0])){
-          loom_scalar_extsi_build, LOOM_SCALAR_TYPE_I64};
-      candidates[candidate_count++] = (typeof(candidates[0])){
-          loom_scalar_extui_build, LOOM_SCALAR_TYPE_I64};
+  if (source_is_integer) {
+    candidates[candidate_count++] = loom_scalar_conversion_candidate_make(
+        loom_scalar_sitofp_build, LOOM_SCALAR_TYPE_F32);
+    candidates[candidate_count++] = loom_scalar_conversion_candidate_make(
+        loom_scalar_sitofp_build, LOOM_SCALAR_TYPE_F64);
+    if (loom_scalar_type_bitwidth(source_scalar) < 64) {
+      candidates[candidate_count++] = loom_scalar_conversion_candidate_make(
+          loom_scalar_extsi_build, LOOM_SCALAR_TYPE_I64);
+      candidates[candidate_count++] = loom_scalar_conversion_candidate_make(
+          loom_scalar_extui_build, LOOM_SCALAR_TYPE_I64);
     }
-    if (loom_scalar_type_bitwidth(src_scalar) > 8) {
-      candidates[candidate_count++] = (typeof(candidates[0])){
-          loom_scalar_trunci_build, LOOM_SCALAR_TYPE_I8};
+    if (loom_scalar_type_bitwidth(source_scalar) > 8) {
+      candidates[candidate_count++] = loom_scalar_conversion_candidate_make(
+          loom_scalar_trunci_build, LOOM_SCALAR_TYPE_I8);
     }
-  } else if (src_is_float) {
-    candidates[candidate_count++] =
-        (typeof(candidates[0])){loom_scalar_fptosi_build, LOOM_SCALAR_TYPE_I32};
-    candidates[candidate_count++] =
-        (typeof(candidates[0])){loom_scalar_fptoui_build, LOOM_SCALAR_TYPE_I32};
-    if (loom_scalar_type_bitwidth(src_scalar) < 64) {
-      candidates[candidate_count++] =
-          (typeof(candidates[0])){loom_scalar_extf_build, LOOM_SCALAR_TYPE_F64};
+  } else if (source_is_float) {
+    candidates[candidate_count++] = loom_scalar_conversion_candidate_make(
+        loom_scalar_fptosi_build, LOOM_SCALAR_TYPE_I32);
+    candidates[candidate_count++] = loom_scalar_conversion_candidate_make(
+        loom_scalar_fptoui_build, LOOM_SCALAR_TYPE_I32);
+    if (loom_scalar_type_bitwidth(source_scalar) < 64) {
+      candidates[candidate_count++] = loom_scalar_conversion_candidate_make(
+          loom_scalar_extf_build, LOOM_SCALAR_TYPE_F64);
     }
-    if (loom_scalar_type_bitwidth(src_scalar) > 16) {
-      candidates[candidate_count++] = (typeof(candidates[0])){
-          loom_scalar_fptrunc_build, LOOM_SCALAR_TYPE_F16};
+    if (loom_scalar_type_bitwidth(source_scalar) > 16) {
+      candidates[candidate_count++] = loom_scalar_conversion_candidate_make(
+          loom_scalar_fptrunc_build, LOOM_SCALAR_TYPE_F16);
     }
   }
 
@@ -399,12 +404,15 @@ static iree_status_t loom_test_gen_hook_scalar_conversion(
     return iree_ok_status();
   }
 
-  uint32_t pick = loom_test_gen_next_range(context->gen, candidate_count);
-  loom_type_t result_type = loom_type_scalar(candidates[pick].result);
+  uint32_t candidate_index =
+      loom_test_gen_next_range(context->gen, candidate_count);
+  const loom_scalar_conversion_candidate_t* candidate =
+      &candidates[candidate_index];
+  loom_type_t result_type = loom_type_scalar(candidate->result_type);
   loom_op_t* op = NULL;
-  IREE_RETURN_IF_ERROR(candidates[pick].fn(context->builder, input, input_type,
-                                           result_type, LOOM_LOCATION_UNKNOWN,
-                                           &op));
+  IREE_RETURN_IF_ERROR(candidate->build(context->builder, input, input_type,
+                                        result_type, LOOM_LOCATION_UNKNOWN,
+                                        &op));
   loom_test_gen_values_add(context->values, loom_op_results(op)[0],
                            result_type);
   *out_result = LOOM_TEST_GEN_HOOK_EMITTED;

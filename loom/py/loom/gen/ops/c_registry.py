@@ -8,14 +8,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
-from loom.dsl import Op
+from loom.dsl import Op, ParameterizedAttrDef
 from loom.gen.ops.c_names import GENERATED_HEADER, c_dialect_enum, c_dialect_include_path
 
 
 def generate_op_registry(
-    dialects: list[tuple[Any, list[Op]]],
+    dialects: list[tuple[Any, list[Op], Sequence[ParameterizedAttrDef]]],
 ) -> tuple[str, str, str]:
     """Generate op_registry.h, op_registry_tables.h, and op_registry_tables.c."""
     header = [GENERATED_HEADER]
@@ -59,10 +60,20 @@ def generate_op_registry(
     tables_header.append("    loom_op_registry_dialect_semantics_fn_t)(")
     tables_header.append("    iree_host_size_t* out_count);")
     tables_header.append("")
+    tables_header.append("typedef const loom_condition_refinement_descriptor_t* (*")
+    tables_header.append("    loom_op_registry_condition_refinements_fn_t)(")
+    tables_header.append("    iree_host_size_t* out_count);")
+    tables_header.append("")
+    tables_header.append("typedef const loom_parameterized_attr_descriptor_t* (*")
+    tables_header.append("    loom_op_registry_parameterized_attrs_fn_t)(")
+    tables_header.append("    iree_host_size_t* out_count);")
+    tables_header.append("")
     tables_header.append("typedef struct loom_op_registry_dialect_registration_t {")
     tables_header.append("  loom_dialect_id_t dialect_id;")
     tables_header.append("  loom_op_registry_dialect_vtables_fn_t vtables_fn;")
     tables_header.append("  loom_op_registry_dialect_semantics_fn_t semantics_fn;")
+    tables_header.append("  loom_op_registry_condition_refinements_fn_t condition_refinements_fn;")
+    tables_header.append("  loom_op_registry_parameterized_attrs_fn_t parameterized_attrs_fn;")
     tables_header.append("} loom_op_registry_dialect_registration_t;")
     tables_header.append("")
     tables_header.append("extern const loom_op_registry_dialect_registration_t")
@@ -75,12 +86,14 @@ def generate_op_registry(
     source = [GENERATED_HEADER]
     source.append('#include "loom/ops/op_registry_tables.h"')
     source.append("")
-    source.extend(f'#include "{c_dialect_include_path(dialect)}/ops.h"' for dialect, _ops in sorted(dialects, key=lambda item: item[0].name))
+    source.extend(f'#include "{c_dialect_include_path(dialect)}/ops.h"' for dialect, _ops, _parameterized_attrs in sorted(dialects, key=lambda item: item[0].name))
     source.append("")
     source.append("const loom_op_registry_dialect_registration_t")
     source.append("    loom_op_registry_dialects[] = {")
-    for dialect, _ops in sorted(dialects, key=lambda item: item[0].dialect_id):
-        source.append(f"    {{{c_dialect_enum(dialect.name)}, loom_{dialect.name}_dialect_vtables, loom_{dialect.name}_dialect_op_semantics}},")
+    for dialect, _ops, _parameterized_attrs in sorted(dialects, key=lambda item: item[0].dialect_id):
+        condition_refinements_fn = f"loom_{dialect.name}_dialect_condition_refinements" if any(op.condition_refinement is not None for op in _ops) else "NULL"
+        parameterized_attrs_fn = f"loom_{dialect.name}_dialect_parameterized_attrs" if _parameterized_attrs else "NULL"
+        source.append(f"    {{{c_dialect_enum(dialect.name)}, loom_{dialect.name}_dialect_vtables, loom_{dialect.name}_dialect_op_semantics, {condition_refinements_fn}, {parameterized_attrs_fn}}},")
     source.append("};")
     source.append("")
     source.append("const iree_host_size_t loom_op_registry_dialect_count =")

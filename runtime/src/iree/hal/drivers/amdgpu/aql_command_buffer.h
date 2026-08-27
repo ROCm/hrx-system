@@ -25,6 +25,10 @@ extern "C" {
 // storage and recording scratch memory. It borrows |resource_set_block_pool|
 // for retained HAL resource sets. Both pools must outlive all command buffers
 // created from them.
+//
+// |hostcall_buffer| is an optional opaque device address copied into every
+// implicit-argument template. The allocation it references must remain valid
+// for the command buffer lifetime.
 iree_status_t iree_hal_amdgpu_aql_command_buffer_create(
     iree_hal_allocator_t* device_allocator, iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
@@ -34,6 +38,7 @@ iree_status_t iree_hal_amdgpu_aql_command_buffer_create(
     uint32_t tsan_shadow_slot_count,
     iree_hal_amdgpu_aql_prepublished_kernarg_storage_t
         prepublished_kernarg_storage,
+    void* hostcall_buffer,
     iree_hal_amdgpu_profile_metadata_registry_t* profile_metadata,
     iree_arena_block_pool_t* program_block_pool,
     iree_arena_block_pool_t* resource_set_block_pool,

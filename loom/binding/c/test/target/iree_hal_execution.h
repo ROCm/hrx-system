@@ -31,7 +31,6 @@ using IreeHalTargetProfileValidateFn = loomc_status_t (*)(
 using IreeHalTargetModuleEmitFn = loomc_status_t (*)(
     loomc_target_environment_t* target_environment,
     loomc_workspace_t* workspace, loomc_module_t* module,
-    loomc_target_selection_t* target_selection,
     loomc_string_view_t artifact_format,
     loomc_string_view_t artifact_identifier, loomc_result_t** out_result);
 
@@ -42,9 +41,6 @@ struct IreeHalKernelExecutionTarget {
 
   // HAL device URI used to create the live device.
   iree_string_view_t device_uri;
-
-  // Executable cache identifier used when preparing the HAL executable.
-  iree_string_view_t executable_cache_identifier;
 
   // Profile identifier passed to `loomc_target_profile_create_iree_hal`.
   loomc_string_view_t target_profile_identifier;
@@ -58,8 +54,8 @@ struct IreeHalKernelExecutionTarget {
   // Module name passed to the compile invocation.
   loomc_string_view_t module_name;
 
-  // Exported kernel function symbol compiled and dispatched by the test.
-  loomc_string_view_t kernel_function_symbol;
+  // Public kernel export compiled and dispatched by the test.
+  loomc_string_view_t kernel_export_name;
 
   // Pipeline identifier reported by pipeline creation diagnostics.
   loomc_string_view_t target_pipeline_identifier;
@@ -79,8 +75,8 @@ struct IreeHalKernelExecutionTarget {
   // Artifact identifier reported by emission diagnostics.
   loomc_string_view_t artifact_identifier;
 
-  // HAL executable format used by `iree_hal_executable_cache_prepare`.
-  iree_string_view_t executable_format;
+  // HAL executable target selected for direct loading.
+  iree_hal_executable_target_selection_t executable_target_selection;
 
   // Static provider array used to project HAL device facts into Loom facts.
   const loomc_iree_hal_profile_provider_t* const* profile_providers;

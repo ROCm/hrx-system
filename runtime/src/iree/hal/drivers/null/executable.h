@@ -14,12 +14,14 @@
 // iree_hal_null_executable_t
 //===----------------------------------------------------------------------===//
 
-// Creates a {Null} executable from a binary in memory. Each executable may
-// contain multiple entry points and be composed of several modules presented to
-// the HAL as a single instance. See iree_hal_executable_params_t for more
-// information about the lifetime of the resources referenced within.
+// Creates a {Null} executable from a native artifact for |target|. Each
+// executable may contain multiple entry points and be composed of several
+// modules presented to the HAL as a single instance. |target| is borrowed from
+// the immutable device spec. See iree_hal_executable_load_params_t for the
+// lifetime of resources referenced by |load_params|.
 iree_status_t iree_hal_null_executable_create(
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable);
 
 #endif  // IREE_HAL_DRIVERS_NULL_EXECUTABLE_H_

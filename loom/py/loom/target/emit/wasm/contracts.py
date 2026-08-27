@@ -16,8 +16,11 @@ from loom.dialect.index import ALL_INDEX_OPS
 from loom.dialect.index import defs as index
 from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
+from loom.dialect.scalar import bitwise as scalar_bitwise
 from loom.dialect.scalar import comparison as scalar_comparison
 from loom.dialect.scalar import conversion as scalar_conversion
+from loom.dialect.scf import ALL_SCF_OPS
+from loom.dialect.scf import defs as scf
 from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
 from loom.dsl import Op
@@ -59,9 +62,17 @@ from loom.target.contracts.templates import (
 )
 from loom.target.low_descriptors import Descriptor
 
-_I32 = Scalar("i32")
-_F32 = Scalar("f32")
 _I1 = Scalar("i1")
+_I8 = Scalar("i8")
+_I16 = Scalar("i16")
+_I32 = Scalar("i32")
+_I64 = Scalar("i64")
+_F8E4M3 = Scalar("f8E4M3")
+_F8E5M2 = Scalar("f8E5M2")
+_F16 = Scalar("f16")
+_BF16 = Scalar("bf16")
+_F32 = Scalar("f32")
+_F64 = Scalar("f64")
 _INDEX = Scalar("index")
 _OFFSET = Scalar("offset")
 _V4I1 = Vector("i1", lanes=4)
@@ -107,12 +118,28 @@ def _descriptor(key: str) -> Descriptor:
 
 
 def _type_text(type_pattern: TypePattern) -> str:
-    if type_pattern == _I32:
-        return "i32 scalar"
-    if type_pattern == _F32:
-        return "f32 scalar"
     if type_pattern == _I1:
         return "i1 scalar"
+    if type_pattern == _I8:
+        return "i8 scalar"
+    if type_pattern == _I16:
+        return "i16 scalar"
+    if type_pattern == _I32:
+        return "i32 scalar"
+    if type_pattern == _I64:
+        return "i64 scalar"
+    if type_pattern == _F8E4M3:
+        return "f8E4M3 scalar"
+    if type_pattern == _F8E5M2:
+        return "f8E5M2 scalar"
+    if type_pattern == _F16:
+        return "f16 scalar"
+    if type_pattern == _BF16:
+        return "bf16 scalar"
+    if type_pattern == _F32:
+        return "f32 scalar"
+    if type_pattern == _F64:
+        return "f64 scalar"
     if type_pattern in (_INDEX, _OFFSET):
         return "index or offset scalar"
     if type_pattern == _V4I1:
@@ -176,6 +203,26 @@ def _const_i32_rule(source_op: Op, result_type: TypePattern) -> DescriptorRule:
     )
 
 
+def _const_i64_rule(source_op: Op, result_type: TypePattern) -> DescriptorRule:
+    descriptor = _descriptor("wasm.i64.const")
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=descriptor,
+        guards=(
+            Guard.attr_kind("value", "i64", diagnostic=_I64_ATTR_DIAGNOSTIC),
+            _value_type("result", result_type),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                results={"dst": ValueRef.result("result")},
+                immediates={"i64_value": AttrProject.direct("value")},
+                form=DescriptorEmitForm.CONST,
+            ),
+        ),
+    )
+
+
 def _binary_rule(
     source_op: Op,
     type_pattern: TypePattern,
@@ -192,6 +239,79 @@ def _binary_rule(
                 operands={
                     "lhs": ValueRef.operand("lhs"),
                     "rhs": ValueRef.operand("rhs"),
+                },
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _conversion_rule(
+    source_op: Op,
+    source_type: TypePattern,
+    result_type: TypePattern,
+    descriptor_key: str,
+) -> DescriptorRule:
+    descriptor = _descriptor(descriptor_key)
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=descriptor,
+        guards=(
+            _value_type("input", source_type),
+            _value_type("result", result_type),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={"input": ValueRef.operand("input")},
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _conversion_alias_rule(
+    source_op: Op,
+    source_type: TypePattern,
+    result_type: TypePattern,
+) -> ValueAliasRule:
+    return ValueAliasRule(
+        source_op=source_op,
+        source=ValueRef.operand("input"),
+        result=ValueRef.result("result"),
+        guards=(
+            _value_type("input", source_type),
+            _value_type("result", result_type),
+        ),
+    )
+
+
+def _masked_extui_rule(
+    source_type: TypePattern,
+    mask: int,
+) -> DescriptorRule:
+    const_descriptor = _descriptor("wasm.i32.const")
+    and_descriptor = _descriptor("wasm.i32.and")
+    return DescriptorRule(
+        source_op=scalar_conversion.scalar_extui,
+        descriptor=and_descriptor,
+        guards=(
+            _value_type("input", source_type),
+            _value_type("result", _I32),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=const_descriptor,
+                results={"dst": ValueRef.temporary("mask")},
+                result_types={"dst": _I32},
+                immediates={"i32_value": mask},
+                form=DescriptorEmitForm.CONST,
+            ),
+            EmitDescriptorOp(
+                descriptor=and_descriptor,
+                operands={
+                    "lhs": ValueRef.operand("input"),
+                    "rhs": ValueRef.temporary("mask"),
                 },
                 results={"dst": ValueRef.result("result")},
             ),
@@ -228,6 +348,31 @@ def _select_rule(value_type: TypePattern) -> DescriptorRule:
             _value_type("true_value", value_type),
             _value_type("false_value", value_type),
             _value_type("result", value_type),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={
+                    "true_value": ValueRef.operand("true_value"),
+                    "false_value": ValueRef.operand("false_value"),
+                    "condition": ValueRef.operand("condition"),
+                },
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _scalar_select_rule() -> DescriptorRule:
+    descriptor = _descriptor("wasm.i32.select")
+    return DescriptorRule(
+        source_op=scf.scf_select,
+        descriptor=descriptor,
+        guards=(
+            _value_type("condition", _I1),
+            _value_type("true_value", _I32),
+            _value_type("false_value", _I32),
+            _value_type("result", _I32),
         ),
         emit=(
             EmitDescriptorOp(
@@ -420,6 +565,70 @@ def _buffer_view_rule() -> ValueAliasRule:
     )
 
 
+def _buffer_byte_address_emits(
+    buffer_field: str,
+) -> tuple[ValueRef, tuple[EmitDescriptorOp, ...]]:
+    address = ValueRef.temporary("address")
+    return address, (
+        EmitDescriptorOp(
+            descriptor=_descriptor("wasm.i32.add"),
+            operands={
+                "lhs": ValueRef.operand(buffer_field),
+                "rhs": ValueRef.operand("byte_offset"),
+            },
+            results={"dst": address},
+            result_types={"dst": _I32},
+            form=DescriptorEmitForm.OP,
+        ),
+    )
+
+
+def _buffer_load_i8_u_rule() -> DescriptorRule:
+    descriptor = _descriptor("wasm.i32.load8_u")
+    address, address_emits = _buffer_byte_address_emits("source")
+    return DescriptorRule(
+        source_op=buffer.buffer_load_i8_u,
+        descriptor=descriptor,
+        guards=(
+            _value_type("byte_offset", _OFFSET),
+            _value_type("result", _I32),
+        ),
+        emit=(
+            *address_emits,
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={"address": address},
+                results={"dst": ValueRef.result("result")},
+                form=DescriptorEmitForm.OP,
+            ),
+        ),
+    )
+
+
+def _buffer_store_i8_rule() -> DescriptorRule:
+    descriptor = _descriptor("wasm.i32.store8")
+    address, address_emits = _buffer_byte_address_emits("target")
+    return DescriptorRule(
+        source_op=buffer.buffer_store_i8,
+        descriptor=descriptor,
+        guards=(
+            _value_type("value", _I32),
+            _value_type("byte_offset", _OFFSET),
+        ),
+        emit=(
+            *address_emits,
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={
+                    "address": address,
+                    "value": ValueRef.operand("value"),
+                },
+                form=DescriptorEmitForm.OP,
+            ),
+        ),
+    )
+
+
 def _source_memory_constraint(
     operation: SourceMemoryOperation,
     *,
@@ -434,12 +643,14 @@ def _source_memory_constraint(
         vector_lane_byte_stride=4,
         static_byte_offset=0,
         dynamic_term_count=1 if dynamic else 0,
+        dynamic_view_base_term_count=0,
         dynamic_index_source=(
             SourceMemoryDynamicIndexSource.VALUE
             if dynamic
             else SourceMemoryDynamicIndexSource.NONE
         ),
         dynamic_byte_stride=4 if dynamic else 0,
+        preserve_source_index=dynamic,
         dynamic_offset_unsigned_bit_count=32 if dynamic else 0,
         dynamic_offset_diagnostic=(_WASM32_ADDRESS_DIAGNOSTIC if dynamic else None),
         diagnostic=_SOURCE_MEMORY_DIAGNOSTIC,
@@ -547,6 +758,7 @@ WASM_CORE_SIMD128_CONTRACT_DIALECT_OPS = {
     "buffer": ALL_BUFFER_OPS,
     "index": ALL_INDEX_OPS,
     "scalar": ALL_SCALAR_OPS,
+    "scf": ALL_SCF_OPS,
     "vector": ALL_VECTOR_OPS,
 }
 
@@ -556,13 +768,51 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
     public_header="loom/target/emit/wasm/contracts/core_simd128.h",
     cases=(
         _buffer_view_rule(),
+        _buffer_load_i8_u_rule(),
+        _buffer_store_i8_rule(),
         _binary_rule(scalar_arithmetic.scalar_addi, _I32, "wasm.i32.add"),
         _binary_rule(scalar_arithmetic.scalar_subi, _I32, "wasm.i32.sub"),
+        _binary_rule(scalar_bitwise.scalar_andi, _I32, "wasm.i32.and"),
+        _binary_rule(scalar_bitwise.scalar_andi, _I1, "wasm.i32.and"),
+        _binary_rule(scalar_bitwise.scalar_ori, _I32, "wasm.i32.or"),
+        _binary_rule(scalar_bitwise.scalar_shli, _I32, "wasm.i32.shl"),
+        _binary_rule(scalar_bitwise.scalar_shrui, _I32, "wasm.i32.shr_u"),
+        _binary_rule(scalar_bitwise.scalar_ori, _I64, "wasm.i64.or"),
+        _binary_rule(scalar_bitwise.scalar_shli, _I64, "wasm.i64.shl"),
+        _binary_rule(scalar_bitwise.scalar_shrui, _I64, "wasm.i64.shr_u"),
         _binary_rule(scalar_arithmetic.scalar_addf, _F32, "wasm.f32.add"),
+        _scalar_compare_rule(scalar_comparison.scalar_cmpi, "eq", _I32, "wasm.i32.eq"),
         _scalar_compare_rule(
             scalar_comparison.scalar_cmpi, "ult", _I32, "wasm.i32.lt_u"
         ),
+        _conversion_rule(
+            scalar_conversion.scalar_bitcast,
+            _F32,
+            _I32,
+            "wasm.i32.reinterpret_f32",
+        ),
+        _conversion_rule(
+            scalar_conversion.scalar_bitcast,
+            _F64,
+            _I64,
+            "wasm.i64.reinterpret_f64",
+        ),
+        _conversion_rule(
+            scalar_conversion.scalar_trunci,
+            _I64,
+            _I32,
+            "wasm.i32.wrap_i64",
+        ),
+        _conversion_alias_rule(scalar_conversion.scalar_bitcast, _F8E4M3, _I8),
+        _conversion_alias_rule(scalar_conversion.scalar_bitcast, _F8E5M2, _I8),
+        _conversion_alias_rule(scalar_conversion.scalar_bitcast, _F16, _I16),
+        _conversion_alias_rule(scalar_conversion.scalar_bitcast, _BF16, _I16),
+        _conversion_alias_rule(scalar_conversion.scalar_extui, _I1, _I32),
+        _masked_extui_rule(_I8, 0xFF),
+        _masked_extui_rule(_I16, 0xFFFF),
         _const_i32_rule(scalar_conversion.scalar_constant, _I32),
+        _const_i64_rule(scalar_conversion.scalar_constant, _I64),
+        _scalar_select_rule(),
         _splat_rule(),
         _select_rule(_V4I32),
         _select_rule(_V4F32),
@@ -589,6 +839,7 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
         _const_i32_rule(index.index_constant, _INDEX),
         _const_i32_rule(index.index_constant, _OFFSET),
         _scalar_compare_rule(index.index_cmp, "ult", _INDEX, "wasm.i32.lt_u"),
+        _scalar_compare_rule(index.index_cmp, "ult", _OFFSET, "wasm.i32.lt_u"),
         _binary_rule(index.index_add, _INDEX, "wasm.i32.add"),
         _binary_rule(index.index_add, _OFFSET, "wasm.i32.add"),
         _binary_rule(index.index_sub, _INDEX, "wasm.i32.sub"),

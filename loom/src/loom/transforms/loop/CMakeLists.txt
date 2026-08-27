@@ -22,6 +22,7 @@ loom_cc_library(
     loom::ir
     loom::ops::op_defs
     loom::pass::types
+    loom::pass::value_facts
     loom::rewrite::rewriter
   PUBLIC
 )
@@ -35,6 +36,7 @@ loom_cc_library(
     "loop_fusion.c"
   DEPS
     iree::base
+    loom::analysis::availability
     loom::analysis::loop_domain
     loom::ir
     loom::ops::op_defs

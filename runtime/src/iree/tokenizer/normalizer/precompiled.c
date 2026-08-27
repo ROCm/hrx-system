@@ -269,9 +269,14 @@ typedef struct iree_tokenizer_precompiled_validation_entry_t {
   iree_host_size_t depth;
 } iree_tokenizer_precompiled_validation_entry_t;
 
+static uint32_t iree_tokenizer_precompiled_load_trie_unit(
+    const uint8_t* trie_data, iree_host_size_t index) {
+  return iree_unaligned_load_le_u32(trie_data + index * sizeof(uint32_t));
+}
+
 // Validates precompiled trie structure before allocation.
 static iree_status_t iree_tokenizer_precompiled_trie_validate(
-    const uint32_t* trie, iree_host_size_t trie_count, const uint8_t* pool,
+    const uint8_t* trie_data, iree_host_size_t trie_count, const uint8_t* pool,
     iree_host_size_t pool_length) {
   // Phase 0: Validate pool size fits in 31 bits.
   if (pool_length > INT32_MAX) {
@@ -283,7 +288,7 @@ static iree_status_t iree_tokenizer_precompiled_trie_validate(
 
   // Phase 1: Validate all leaf pool references.
   for (iree_host_size_t i = 0; i < trie_count; ++i) {
-    uint32_t unit = iree_unaligned_load_le(&trie[i]);
+    uint32_t unit = iree_tokenizer_precompiled_load_trie_unit(trie_data, i);
     if (iree_tokenizer_precompiled_unit_is_leaf(unit)) {
       uint32_t pool_offset = iree_tokenizer_precompiled_unit_value(unit);
       if (pool_offset >= pool_length) {
@@ -354,7 +359,8 @@ static iree_status_t iree_tokenizer_precompiled_trie_validate(
     iree_host_size_t stack_size = 0;
 
     // Start from root.
-    uint32_t root_unit = iree_unaligned_load_le(&trie[0]);
+    uint32_t root_unit =
+        iree_tokenizer_precompiled_load_trie_unit(trie_data, 0);
     iree_host_size_t root_offset = ((iree_host_size_t)(root_unit >> 10))
                                    << (((root_unit >> 9) & 1) * 3);
     stack[stack_size++] =
@@ -370,7 +376,8 @@ static iree_status_t iree_tokenizer_precompiled_trie_validate(
         iree_host_size_t child_position = position ^ c;
         if (child_position >= trie_count) continue;
 
-        uint32_t unit = iree_unaligned_load_le(&trie[child_position]);
+        uint32_t unit = iree_tokenizer_precompiled_load_trie_unit(
+            trie_data, child_position);
         // Skip unallocated positions (zero units). A zero unit has label=0,
         // which would falsely match c=0 and create phantom self-loop edges.
         if (unit == 0) continue;
@@ -427,7 +434,7 @@ iree_status_t iree_tokenizer_precompiled_normalizer_allocate(
                              data.data_length));
   }
 
-  uint32_t trie_size_bytes = iree_unaligned_load_le((const uint32_t*)data.data);
+  uint32_t trie_size_bytes = iree_unaligned_load_le_u32(data.data);
   if (trie_size_bytes % sizeof(uint32_t) != 0) {
     IREE_RETURN_AND_END_ZONE(
         z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -457,10 +464,10 @@ iree_status_t iree_tokenizer_precompiled_normalizer_allocate(
   iree_host_size_t total_size = struct_size + data_size;
 
   // Validate trie structure BEFORE allocating.
-  const uint32_t* input_trie = (const uint32_t*)(data.data + 4);
+  const uint8_t* input_trie_data = data.data + 4;
   const uint8_t* input_pool = data.data + 4 + trie_size_bytes;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_tokenizer_precompiled_trie_validate(input_trie, trie_count,
+      z0, iree_tokenizer_precompiled_trie_validate(input_trie_data, trie_count,
                                                    input_pool, pool_length));
 
   // Single allocation for normalizer + trie + pool.
@@ -486,7 +493,8 @@ iree_status_t iree_tokenizer_precompiled_normalizer_allocate(
 
   // Copy trie, translating leaf offsets for length-prefix format.
   for (iree_host_size_t i = 0; i < trie_count; ++i) {
-    uint32_t unit = iree_unaligned_load_le(&input_trie[i]);
+    uint32_t unit =
+        iree_tokenizer_precompiled_load_trie_unit(input_trie_data, i);
     if (iree_tokenizer_precompiled_unit_is_leaf(unit)) {
       uint32_t old_offset = iree_tokenizer_precompiled_unit_value(unit);
       uint32_t new_offset = old_offset + 1;

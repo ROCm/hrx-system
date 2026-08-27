@@ -71,10 +71,18 @@ class AmdgpuControlPacketTest : public ::testing::Test {
   void BuildFunctionBody() {
     loom_symbol_ref_t target = AddSymbol(IREE_SV("gfx_target"));
     loom_symbol_ref_t callee = AddSymbol(IREE_SV("test_fn"));
+    loom_string_id_t representation_contract = LOOM_STRING_ID_INVALID;
+    IREE_ASSERT_OK(loom_builder_intern_string(
+        &builder_,
+        loom_low_descriptor_set_string(descriptor_set_,
+                                       descriptor_set_->key_string_offset),
+        &representation_contract));
     loom_op_t* function_op = NULL;
     IREE_ASSERT_OK(loom_low_func_def_build(
-        &builder_, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0, /*cc=*/0,
-        /*purity=*/0, /*allocation=*/0, /*schedule=*/0, target, /*abi=*/0,
+        &builder_, LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TARGET,
+        /*visibility=*/0, /*retain=*/0, /*cc=*/0,
+        /*purity=*/0, /*allocation=*/0, /*schedule=*/0,
+        /*descriptor_set=*/representation_contract, target, /*abi=*/0,
         loom_make_named_attr_slice(NULL, 0),
         loom_make_named_attr_slice(NULL, 0),
         /*export_symbol=*/LOOM_STRING_ID_INVALID,
@@ -111,12 +119,9 @@ class AmdgpuControlPacketTest : public ::testing::Test {
     ASSERT_TRUE(loom_low_op_isa(op));
     const loom_low_descriptor_t* descriptor = DescriptorForRef(descriptor_ref);
     ASSERT_NE(descriptor, nullptr);
-    EXPECT_EQ(loom_low_op_descriptor_ordinal(op),
+    EXPECT_EQ(loom_low_op_descriptor(op),
               loom_low_descriptor_set_descriptor_ordinal(descriptor_set_,
                                                          descriptor));
-    EXPECT_EQ(ToString(String(loom_low_op_opcode(op))),
-              ToString(loom_low_descriptor_set_string(
-                  descriptor_set_, descriptor->key_string_offset)));
   }
 
   void ExpectLowConstDescriptorRef(
@@ -124,12 +129,9 @@ class AmdgpuControlPacketTest : public ::testing::Test {
     ASSERT_TRUE(loom_low_const_isa(op));
     const loom_low_descriptor_t* descriptor = DescriptorForRef(descriptor_ref);
     ASSERT_NE(descriptor, nullptr);
-    EXPECT_EQ(loom_low_const_descriptor_ordinal(op),
+    EXPECT_EQ(loom_low_const_descriptor(op),
               loom_low_descriptor_set_descriptor_ordinal(descriptor_set_,
                                                          descriptor));
-    EXPECT_EQ(ToString(String(loom_low_const_opcode(op))),
-              ToString(loom_low_descriptor_set_string(
-                  descriptor_set_, descriptor->key_string_offset)));
   }
 
   void ExpectControlOp(const loom_op_t* op,

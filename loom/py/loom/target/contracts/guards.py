@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum, unique
 from typing import Self
@@ -27,6 +28,7 @@ from loom.target.contracts.diagnostics import (
     string_param,
     target_diagnostic,
 )
+from loom.target.contracts.memory_spaces import MEMORY_SPACE_NAMES
 from loom.target.contracts.patterns import TypePattern
 from loom.target.contracts.source import (
     _require_attr,
@@ -61,11 +63,11 @@ class GuardKind(Enum):
     VALUE_EXACT_I64 = "value_exact_i64"
     VALUE_EXACT_POWER_OF_TWO_I64 = "value_exact_power_of_two_i64"
     VALUE_U32_DIVISOR_MAGIC_IS_ADD = "value_u32_divisor_magic_is_add"
-    VALUE_EXACT_F64 = "value_exact_f64"
+    VALUE_EXACT_FLOAT = "value_exact_float"
     VALUE_I64_RANGE = "value_i64_range"
     VALUE_I64_RANGE_LE = "value_i64_range_le"
     VALUE_I64_RANGE_GE = "value_i64_range_ge"
-    VALUE_F64_EQUALS = "value_f64_equals"
+    VALUE_FLOAT_EQUALS = "value_float_equals"
     VALUE_STORAGE_ELEMENT_FORMAT = "value_storage_element_format"
     VALUE_PACKED_INTEGER_PAYLOAD_FROM_LANES = "value_packed_integer_payload_from_lanes"
     VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD = "value_packed_integer_lanes_from_payload"
@@ -73,6 +75,7 @@ class GuardKind(Enum):
     INSTANCE_FLAGS_HAS_ALL = "instance_flags_has_all"
     VECTOR_EXTRACT_SHAPE = "vector_extract_shape"
     VALUE_STATIC_ELEMENT_COUNT_EQ = "value_static_element_count_eq"
+    VALUE_MEMORY_SPACE = "value_memory_space"
 
 
 _LOW_VALUE_GUARD_KINDS = (
@@ -133,6 +136,7 @@ class Guard:
     descriptor: Descriptor | None = None
     register_class: str | None = None
     materializer: str | None = None
+    memory_spaces: tuple[str, ...] = ()
     diagnostic: GuardDiagnostic | None = None
 
     @classmethod
@@ -412,14 +416,14 @@ class Guard:
         )
 
     @classmethod
-    def value_exact_f64(
+    def value_exact_float(
         cls,
         field: str,
         *,
         diagnostic: GuardDiagnostic | None = None,
     ) -> Self:
         return cls(
-            kind=GuardKind.VALUE_EXACT_F64,
+            kind=GuardKind.VALUE_EXACT_FLOAT,
             field=field,
             diagnostic=diagnostic,
         )
@@ -472,7 +476,7 @@ class Guard:
         )
 
     @classmethod
-    def value_f64_equals(
+    def value_float_equals(
         cls,
         field: str,
         value: float,
@@ -480,7 +484,7 @@ class Guard:
         diagnostic: GuardDiagnostic | None = None,
     ) -> Self:
         return cls(
-            kind=GuardKind.VALUE_F64_EQUALS,
+            kind=GuardKind.VALUE_FLOAT_EQUALS,
             field=field,
             f64_value=value,
             diagnostic=diagnostic,
@@ -498,6 +502,21 @@ class Guard:
             kind=GuardKind.VALUE_STORAGE_ELEMENT_FORMAT,
             field=field,
             numeric_format_c_expression=numeric_format_c_expression,
+            diagnostic=diagnostic,
+        )
+
+    @classmethod
+    def value_memory_space(
+        cls,
+        field: str,
+        memory_spaces: Sequence[str],
+        *,
+        diagnostic: GuardDiagnostic | None = None,
+    ) -> Self:
+        return cls(
+            kind=GuardKind.VALUE_MEMORY_SPACE,
+            field=field,
+            memory_spaces=tuple(memory_spaces),
             diagnostic=diagnostic,
         )
 
@@ -617,7 +636,21 @@ class Guard:
             raise ValueError(f"{self.kind.value} register class must be non-empty")
         if self.materializer is not None and not self.materializer:
             raise ValueError(f"{self.kind.value} materializer must be non-empty")
-        if self.kind == GuardKind.VALUE_F64_EQUALS and self.f64_value is None:
+        if self.kind == GuardKind.VALUE_MEMORY_SPACE:
+            if not self.memory_spaces:
+                raise ValueError(f"{self.kind.value} guard needs a memory space")
+            seen_memory_spaces: set[str] = set()
+            for memory_space in self.memory_spaces:
+                if memory_space not in MEMORY_SPACE_NAMES:
+                    raise ValueError(f"unknown value memory space '{memory_space}'")
+                if memory_space in seen_memory_spaces:
+                    raise ValueError(
+                        f"{self.kind.value} guard repeats memory space '{memory_space}'"
+                    )
+                seen_memory_spaces.add(memory_space)
+        elif self.memory_spaces:
+            raise ValueError(f"{self.kind.value} guard cannot carry a memory-space set")
+        if self.kind == GuardKind.VALUE_FLOAT_EQUALS and self.f64_value is None:
             raise ValueError(f"{self.kind.value} guard needs an f64 value")
         if (
             self.kind == GuardKind.VALUE_STORAGE_ELEMENT_FORMAT
@@ -698,12 +731,13 @@ class Guard:
             GuardKind.VALUE_EXACT_I64,
             GuardKind.VALUE_EXACT_POWER_OF_TWO_I64,
             GuardKind.VALUE_U32_DIVISOR_MAGIC_IS_ADD,
-            GuardKind.VALUE_EXACT_F64,
+            GuardKind.VALUE_EXACT_FLOAT,
             GuardKind.VALUE_I64_RANGE,
             GuardKind.VALUE_I64_RANGE_LE,
             GuardKind.VALUE_I64_RANGE_GE,
-            GuardKind.VALUE_F64_EQUALS,
+            GuardKind.VALUE_FLOAT_EQUALS,
             GuardKind.VALUE_STORAGE_ELEMENT_FORMAT,
+            GuardKind.VALUE_MEMORY_SPACE,
             GuardKind.VALUE_PACKED_INTEGER_PAYLOAD_FROM_LANES,
             GuardKind.VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD,
             GuardKind.VALUE_STATIC_ELEMENT_COUNT_EQ,
@@ -823,7 +857,7 @@ def _validate_value_fact_guard(
         guard.minimum is None or guard.maximum is None
     ):
         raise ValueError(f"{source_op.name}: {subject} needs minimum/maximum")
-    if guard.kind == GuardKind.VALUE_F64_EQUALS and guard.f64_value is None:
+    if guard.kind == GuardKind.VALUE_FLOAT_EQUALS and guard.f64_value is None:
         raise ValueError(f"{source_op.name}: {subject} needs an f64 value")
     if guard.kind in (
         GuardKind.VALUE_PACKED_INTEGER_PAYLOAD_FROM_LANES,

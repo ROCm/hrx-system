@@ -74,14 +74,12 @@ static iree_status_t loom_kernel_launch_config_symbol_has_target(
   return status;
 }
 
-static iree_status_t loom_kernel_launch_config_resolve_target_bundle(
+static iree_status_t loom_kernel_launch_config_resolve_target_facts(
     const loom_module_t* module, loom_symbol_id_t symbol_id,
     iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter,
-    bool* out_valid, loom_target_bundle_storage_t* out_storage,
-    const loom_target_bundle_t** out_bundle) {
+    bool* out_valid, const loom_target_facts_t** out_facts) {
   *out_valid = true;
-  *out_storage = (loom_target_bundle_storage_t){0};
-  *out_bundle = NULL;
+  *out_facts = NULL;
 
   loom_symbol_fact_table_t symbol_facts = {0};
   loom_symbol_fact_table_initialize(&symbol_facts, arena);
@@ -95,13 +93,10 @@ static iree_status_t loom_kernel_launch_config_resolve_target_bundle(
   }
 
   bool contract_valid = false;
-  IREE_RETURN_IF_ERROR(loom_target_function_contract_resolve(
-      module, &symbol_facts, func_facts, emitter, &contract_valid,
-      out_storage));
+  IREE_RETURN_IF_ERROR(loom_target_function_contract_resolve_facts(
+      module, &symbol_facts, func_facts, emitter, arena, &contract_valid,
+      out_facts));
   *out_valid = contract_valid;
-  if (contract_valid) {
-    *out_bundle = &out_storage->bundle;
-  }
   return iree_ok_status();
 }
 
@@ -155,7 +150,7 @@ static iree_status_t loom_kernel_launch_config_define_workload_arguments(
 
 static void loom_kernel_launch_config_fill_known_fields(
     const loom_module_t* module, loom_op_t* kernel_op,
-    const loom_target_bundle_t* target_bundle,
+    const loom_target_facts_t* target_facts,
     const loom_value_fact_table_t* fact_table,
     loom_kernel_launch_config_t* out_config) {
   loom_target_dispatch_workgroup_count_t count = {0};
@@ -172,6 +167,8 @@ static void loom_kernel_launch_config_fill_known_fields(
     out_config->fields |= LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE;
   }
 
+  const loom_target_bundle_t* target_bundle =
+      loom_target_facts_bundle(target_facts);
   if (target_bundle && target_bundle->snapshot &&
       target_bundle->snapshot->subgroup_size != 0) {
     out_config->subgroup_size = target_bundle->snapshot->subgroup_size;
@@ -231,15 +228,17 @@ iree_status_t loom_kernel_launch_config_try_evaluate_direct(
     return iree_ok_status();
   }
 
-  bool has_target = false;
-  IREE_RETURN_IF_ERROR(loom_kernel_launch_config_symbol_has_target(
-      module, symbol_id, block_pool, &has_target));
-  if (has_target) {
-    return iree_ok_status();
+  if (options->function_target_facts == NULL) {
+    bool has_target = false;
+    IREE_RETURN_IF_ERROR(loom_kernel_launch_config_symbol_has_target(
+        module, symbol_id, block_pool, &has_target));
+    if (has_target) {
+      return iree_ok_status();
+    }
   }
 
   loom_kernel_launch_config_fill_known_fields(module, symbol->defining_op,
-                                              /*target_bundle=*/NULL,
+                                              options->function_target_facts,
                                               /*fact_table=*/NULL, out_config);
   loom_kernel_launch_config_report_required_fields(options->required_fields,
                                                    out_config, out_config);
@@ -250,7 +249,7 @@ iree_status_t loom_kernel_launch_config_try_evaluate_direct(
 }
 
 iree_status_t loom_kernel_launch_config_evaluate(
-    loom_module_t* module, iree_arena_block_pool_t* block_pool,
+    const loom_module_t* module, iree_arena_block_pool_t* block_pool,
     const loom_kernel_launch_config_options_t* options,
     loom_kernel_launch_config_t* out_config) {
   if (!module || !block_pool || !options || !out_config) {
@@ -280,12 +279,14 @@ iree_status_t loom_kernel_launch_config_evaluate(
 
   iree_arena_allocator_t target_arena;
   iree_arena_initialize(block_pool, &target_arena);
-  loom_target_bundle_storage_t target_storage = {0};
-  const loom_target_bundle_t* target_bundle = NULL;
+  const loom_target_facts_t* target_facts = options->function_target_facts;
   bool target_valid = true;
-  iree_status_t status = loom_kernel_launch_config_resolve_target_bundle(
-      module, symbol_id, &target_arena, options->diagnostic_emitter,
-      &target_valid, &target_storage, &target_bundle);
+  iree_status_t status = iree_ok_status();
+  if (target_facts == NULL) {
+    status = loom_kernel_launch_config_resolve_target_facts(
+        module, symbol_id, &target_arena, options->diagnostic_emitter,
+        &target_valid, &target_facts);
+  }
   if (iree_status_is_ok(status) && !target_valid) {
     out_config->failure = LOOM_KERNEL_LAUNCH_CONFIG_FAILURE_TARGET_CONTRACT;
   }
@@ -301,7 +302,7 @@ iree_status_t loom_kernel_launch_config_evaluate(
         &fact_owner, module,
         loom_pass_value_fact_scope_region_for_target(
             function, loom_kernel_def_config(symbol->defining_op),
-            symbol->defining_op, target_bundle),
+            symbol->defining_op, target_facts),
         &fact_table);
   }
   if (iree_status_is_ok(status) &&
@@ -320,7 +321,7 @@ iree_status_t loom_kernel_launch_config_evaluate(
   if (iree_status_is_ok(status) &&
       !loom_kernel_launch_config_has_failure(out_config->failure)) {
     loom_kernel_launch_config_fill_known_fields(
-        module, symbol->defining_op, target_bundle, fact_table, out_config);
+        module, symbol->defining_op, target_facts, fact_table, out_config);
     loom_kernel_launch_config_report_required_fields(options->required_fields,
                                                      out_config, out_config);
   }

@@ -443,7 +443,7 @@ TEST(CompileTest, CompileModuleEmitsRequestedArtifacts) {
   EXPECT_NE(report.find(R"("config_binding_count":1)"), std::string::npos);
 }
 
-TEST(CompileTest, CompileModuleReportsUnknownConfigAsResultDiagnostic) {
+TEST(CompileTest, CompileModuleIgnoresUnusedConfig) {
   ContextPtr context = CreateContext();
   WorkspacePtr workspace = CreateWorkspace();
   CompilerPtr compiler = CreateCompiler(context.get());
@@ -467,7 +467,7 @@ TEST(CompileTest, CompileModuleReportsUnknownConfigAsResultDiagnostic) {
           /*.bindings=*/bindings,
           /*.binding_count=*/1,
           /*.json_object=*/loomc_string_view_empty(),
-          /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN,
+          /*.flags=*/0,
       },
   };
   loomc_result_t* result = nullptr;
@@ -476,14 +476,15 @@ TEST(CompileTest, CompileModuleReportsUnknownConfigAsResultDiagnostic) {
       &options, loomc_allocator_system(), &result);
   LOOMC_EXPECT_OK(status);
   ResultPtr result_ptr(result);
-  ExpectFailedResultCode(result_ptr.get(), "CONFIG/INVALID");
+  ExpectSucceededResult(result_ptr.get());
   ASSERT_EQ(loomc_result_artifact_count(result_ptr.get()), 1u);
   const loomc_artifact_t* report_artifact = FindArtifact(
       result_ptr.get(), LOOMC_ARTIFACT_KIND_REPORT, LOOMC_ARTIFACT_FORMAT_JSON);
   ASSERT_NE(report_artifact, nullptr);
   std::string report = ToString(report_artifact->contents);
-  EXPECT_NE(report.find(R"("state":"failed")"), std::string::npos);
-  EXPECT_NE(report.find(R"("diagnostic_count":1)"), std::string::npos);
+  EXPECT_NE(report.find(R"("state":"succeeded")"), std::string::npos);
+  EXPECT_NE(report.find(R"("diagnostic_count":0)"), std::string::npos);
+  EXPECT_NE(report.find(R"("config_binding_count":1)"), std::string::npos);
 }
 
 TEST(CompileTest, CompileModuleReportsUnresolvedConfigAsResultDiagnostic) {

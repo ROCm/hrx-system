@@ -91,6 +91,10 @@ typedef struct loom_kernel_launch_config_options_t {
   // Fields that must be present for evaluation to succeed.
   loom_kernel_launch_config_field_flags_t required_fields;
 
+  // Optional exact target facts selected for the compiled function version.
+  // When absent, authored target contracts are resolved from |module|.
+  const loom_target_facts_t* function_target_facts;
+
   // Structured diagnostic emitter for target-contract diagnostics.
   iree_diagnostic_emitter_t diagnostic_emitter;
 } loom_kernel_launch_config_options_t;
@@ -124,7 +128,7 @@ iree_status_t loom_kernel_launch_config_try_evaluate_direct(
     loom_kernel_launch_config_t* out_config, bool* out_evaluated);
 
 iree_status_t loom_kernel_launch_config_evaluate(
-    loom_module_t* module, iree_arena_block_pool_t* block_pool,
+    const loom_module_t* module, iree_arena_block_pool_t* block_pool,
     const loom_kernel_launch_config_options_t* options,
     loom_kernel_launch_config_t* out_config);
 

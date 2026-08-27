@@ -14,13 +14,15 @@ coloring before semantic tooling is available, but they do not validate op
 formats or resolve symbols. That belongs in the parser/document model.
 
 Usage:
-    python3 loom/py/loom/gen/run.py textmate
+    python3 loom/py/loom/gen/run.py textmate --in-place
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -28,7 +30,17 @@ from loom.dsl import Op, TypeDef
 from loom.errors import ErrorDomain
 from loom.gen import bootstrap as _bootstrap
 from loom.gen.assembly.tokens import KEYWORD_MAP
-from loom.gen.support.generated_file import generated_comment
+from loom.gen.support.generated_file import (
+    GeneratedFileMaintenanceMode,
+    GeneratedFileMaintenanceResult,
+    GeneratedFileSet,
+    generated_comment,
+    maintain_generated_file_set,
+)
+
+DESCRIPTION = "TextMate grammars"
+REGENERATE_COMMAND = "python3 loom/py/loom/gen/run.py textmate --in-place"
+_OUTPUT_ROOT = Path("loom/src/loom/editor/textmate")
 
 
 def _regex_alternation(literals: Sequence[str]) -> str:
@@ -55,12 +67,8 @@ def _token_boundary_pattern() -> str:
 def _generated_comment() -> str:
     return generated_comment(
         generator="loom.gen.editor.textmate",
-        regenerate="python3 loom/py/loom/gen/run.py textmate",
+        regenerate=REGENERATE_COMMAND,
     )
-
-
-def textmate_output_directory() -> Path:
-    return _bootstrap.REPO_ROOT / "loom" / "src" / "loom" / "editor" / "textmate"
 
 
 def _string_rule(scope_suffix: str) -> dict[str, object]:
@@ -401,11 +409,11 @@ def generate_all_grammars(ops: Sequence[Op], type_defs: Sequence[TypeDef]) -> di
     return {filename: json.dumps(grammar, indent=2, ensure_ascii=False) + "\n" for filename, grammar in grammars.items()}
 
 
-def main() -> None:
-    """Generate TextMate grammars for all registered dialects."""
+def _default_grammar_inputs() -> tuple[tuple[Op, ...], tuple[TypeDef, ...]]:
     from loom.builtin_types import ALL_BUILTIN_TYPES
     from loom.dialect.buffer import ALL_BUFFER_OPS
     from loom.dialect.check import ALL_CHECK_OPS
+    from loom.dialect.command import ALL_COMMAND_OPS
     from loom.dialect.config import ALL_CONFIG_OPS
     from loom.dialect.encoding import ALL_ENCODING_OPS
     from loom.dialect.func import ALL_FUNC_OPS
@@ -422,8 +430,9 @@ def main() -> None:
     from loom.dialect.vector import ALL_VECTOR_OPS
     from loom.dialect.view import ALL_VIEW_OPS
     from loom.target.arch.ireevm.dialect import ALL_IREEVM_TYPES
+    from loom.target.arch.spirv.dialect import ALL_SPIRV_TYPES
 
-    ops = [
+    ops = (
         *ALL_TEST_OPS,
         *ALL_SCALAR_OPS,
         *ALL_FUNC_OPS,
@@ -433,6 +442,7 @@ def main() -> None:
         *ALL_GLOBAL_OPS,
         *ALL_SCF_OPS,
         *ALL_CHECK_OPS,
+        *ALL_COMMAND_OPS,
         *ALL_CONFIG_OPS,
         *ALL_BUFFER_OPS,
         *ALL_VIEW_OPS,
@@ -440,24 +450,60 @@ def main() -> None:
         *ALL_INDEX_OPS,
         *ALL_KERNEL_OPS,
         *ALL_LLVMIR_OPS,
-    ]
-    type_defs = [
+    )
+    type_defs = (
         *ALL_BUILTIN_TYPES,
         *ALL_HAL_TYPES,
         *ALL_KERNEL_TYPES,
+        *ALL_SPIRV_TYPES,
         *ALL_IREEVM_TYPES,
-    ]
+    )
+    return ops, type_defs
 
-    output_directory = textmate_output_directory()
-    output_directory.mkdir(parents=True, exist_ok=True)
 
-    outputs = generate_all_grammars(ops, type_defs)
-    for filename, content in outputs.items():
-        path = output_directory / filename
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(content)
-        print(f"  {filename}")
+def _output_files() -> dict[str, str]:
+    ops, type_defs = _default_grammar_inputs()
+    return {(_OUTPUT_ROOT / filename).as_posix(): contents for filename, contents in generate_all_grammars(ops, type_defs).items()}
+
+
+def _obsolete_output_paths(repository_root: Path, expected_paths: set[str]) -> tuple[str, ...]:
+    existing_paths = (path.relative_to(repository_root).as_posix() for path in (repository_root / _OUTPUT_ROOT).glob("*.tmLanguage.json") if path.is_file() or path.is_symlink())
+    return tuple(sorted(path for path in existing_paths if path not in expected_paths))
+
+
+def checked_in_file_set(repository_root: Path | None = None) -> GeneratedFileSet:
+    """Returns expected grammars and any obsolete files under a given root."""
+    files = _output_files()
+    return GeneratedFileSet.from_mapping(
+        files,
+        obsolete_paths=(_obsolete_output_paths(repository_root, set(files)) if repository_root is not None else ()),
+    )
+
+
+def maintain_checked_in_files(
+    mode: GeneratedFileMaintenanceMode,
+) -> GeneratedFileMaintenanceResult:
+    """Checks or updates all checked-in TextMate grammars."""
+    repository_root = _bootstrap.find_repo_root()
+    return maintain_generated_file_set(
+        repository_root,
+        checked_in_file_set(repository_root),
+        mode=mode,
+        description=DESCRIPTION,
+        regenerate_command=REGENERATE_COMMAND,
+    )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--check", action="store_true")
+    mode.add_argument("--in-place", action="store_true")
+    args = parser.parse_args(argv)
+
+    result = maintain_checked_in_files("update" if args.in_place else "check")
+    return 0 if result.ok else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main(sys.argv[1:]))

@@ -64,10 +64,20 @@ if(LOOM_IMPORT_MLIR)
 iree_py_test(
   NAME
     mlir_test
+  MAIN
+    "../../tools/pytest_style_runner.py"
   SRCS
+    "attrs_test.py"
+    "convert_arith_test.py"
+    "importer_test.py"
+    "locations_test.py"
+    "model_test.py"
+    "names_test.py"
+    "types_test.py"
     "../../tools/pytest_style_runner.py"
   ARGS
     "loom.importers.mlir.attrs_test"
+    "loom.importers.mlir.convert_arith_test"
     "loom.importers.mlir.importer_test"
     "loom.importers.mlir.locations_test"
     "loom.importers.mlir.model_test"
@@ -78,6 +88,7 @@ iree_py_test(
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 endif()
 
@@ -90,11 +101,17 @@ add_custom_command(OUTPUT mlir_import_tests.stamp
 add_custom_target(mlir_import_tests
     DEPENDS mlir_import_tests.stamp
 )
+iree_register_generated_compile_input(mlir_import_tests
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/mlir_import_tests.stamp"
+)
 
 if(LOOM_IMPORT_MLIR)
 iree_py_test(
   NAME
     mlir_import_test
+  MAIN
+    "../check/import_test.py"
   SRCS
     "../check/import_test.py"
   ARGS
@@ -110,6 +127,7 @@ iree_py_test(
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 endif()
 

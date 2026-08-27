@@ -72,8 +72,21 @@ typedef enum loom_low_memory_access_precision_bits_e {
   LOOM_LOW_MEMORY_ACCESS_PRECISION_INTERVAL = 1u << 3,
   // A later lane-set summary exactly describes the accessed lanes.
   LOOM_LOW_MEMORY_ACCESS_PRECISION_EXACT_LANES = 1u << 4,
+  // strided_interval exactly describes one repeated byte interval per stride.
+  LOOM_LOW_MEMORY_ACCESS_PRECISION_STRIDED_INTERVAL = 1u << 5,
 } loom_low_memory_access_precision_bits_t;
 typedef uint32_t loom_low_memory_access_precision_flags_t;
+
+// One non-wrapping byte interval repeated at a fixed positive stride relative
+// to an alias root. The interval is half-open within [0, stride_bytes).
+typedef struct loom_low_strided_byte_interval_t {
+  // Positive byte stride between repeated interval instances.
+  uint64_t stride_bytes;
+  // Inclusive byte residue where each interval begins.
+  uint64_t begin_bytes;
+  // Exclusive byte residue where each interval ends.
+  uint64_t end_bytes;
+} loom_low_strided_byte_interval_t;
 
 typedef struct loom_low_memory_access_summary_t {
   // Normalized target-low memory space touched by this summary.
@@ -84,6 +97,8 @@ typedef struct loom_low_memory_access_summary_t {
   uint32_t alias_group_id;
   // Bitset of loom_low_memory_access_precision_bits_t values.
   loom_low_memory_access_precision_flags_t precision_flags;
+  // Optional exact repeated byte interval relative to alias_root_id.
+  loom_low_strided_byte_interval_t strided_interval;
   // Optional conservative byte interval touched by this access.
   const loom_low_byte_interval_t* byte_interval;
 } loom_low_memory_access_summary_t;
@@ -120,6 +135,8 @@ typedef struct loom_low_memory_access_record_t {
   // Low function position whose descriptor memory effect is refined by
   // |summary|.
   loom_low_memory_access_position_t position;
+  // Low op whose descriptor memory effect is refined by |summary|.
+  const loom_op_t* op;
   // Source-derived memory access summary for the recorded low op position.
   loom_low_memory_access_summary_t summary;
   // Inline interval storage borrowed by |summary| when interval precision is
@@ -173,9 +190,16 @@ bool loom_low_memory_access_summaries_may_alias(
     const loom_low_memory_access_summary_t* left,
     const loom_low_memory_access_summary_t* right);
 
-// Returns true when |write_summary| can replace |read_summary| in the effect
-// frontier. This is stronger than may-alias: it must be safe for future writes
-// that would have depended on read_summary to depend on write_summary instead.
+// Returns true when |write_summary| can replace |access_summary| in an effect
+// frontier. This is stronger than may-alias: it must be safe for future memory
+// effects that would have depended on access_summary to depend on write_summary
+// instead.
+bool loom_low_memory_access_write_subsumes_access(
+    const loom_low_memory_access_summary_t* write_summary,
+    const loom_low_memory_access_summary_t* access_summary);
+
+// Returns true when |write_summary| can replace |read_summary| in an effect
+// frontier.
 bool loom_low_memory_access_write_subsumes_read(
     const loom_low_memory_access_summary_t* write_summary,
     const loom_low_memory_access_summary_t* read_summary);

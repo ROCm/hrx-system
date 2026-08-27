@@ -20,8 +20,8 @@
 #include "iree/base/internal/arena.h"
 #include "iree/base/string_builder.h"
 #include "loom/codegen/low/allocation.h"
-#include "loom/codegen/low/schedule/types.h"
 #include "loom/target/arch/amdgpu/target_info_defs.h"
+#include "loom/target/residency.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,6 +40,10 @@ typedef enum loom_amdgpu_occupancy_limiting_resource_kind_e {
   LOOM_AMDGPU_OCCUPANCY_LIMITING_RESOURCE_REGISTER_CLASS = 1,
   // Occupancy is limited by a derived target pressure resource.
   LOOM_AMDGPU_OCCUPANCY_LIMITING_RESOURCE_PRESSURE_RESOURCE = 2,
+  // Occupancy is limited by wave or barrier slots for fixed workgroups.
+  LOOM_AMDGPU_OCCUPANCY_LIMITING_RESOURCE_WORKGROUP_SLOTS = 3,
+  // Occupancy is limited by local memory reserved for fixed workgroups.
+  LOOM_AMDGPU_OCCUPANCY_LIMITING_RESOURCE_LOCAL_MEMORY = 4,
 } loom_amdgpu_occupancy_limiting_resource_kind_t;
 
 typedef enum loom_amdgpu_occupancy_diagnostic_bits_e {
@@ -72,6 +76,8 @@ typedef struct loom_amdgpu_occupancy_register_class_t {
   uint32_t pool_units;
   // Allocation granularity applied before estimating occupancy.
   uint32_t allocation_granularity;
+  // Whether this class directly limits resident waves.
+  bool limits_occupancy;
   // Maximum resident waves allowed by this register class.
   uint32_t wave_limit;
   // Smallest allocated unit count that would reduce |wave_limit|, or 0 when
@@ -128,10 +134,12 @@ typedef struct loom_amdgpu_occupancy_table_t {
   // Number of waves required by one workgroup, or 0 when the workgroup size is
   // unavailable.
   uint32_t waves_per_workgroup;
-  // Estimated resident waves per SIMD after register limits.
+  // Estimated resident waves per SIMD after register and fixed launch limits.
   uint32_t resident_waves_per_simd;
   // Estimated resident wave occupancy as a percentage of |max_waves_per_simd|.
   uint32_t occupancy_percent;
+  // Target residency transition summary before or after exact launch limits.
+  loom_target_residency_summary_t residency_summary;
   // Kind of resource that limited occupancy.
   loom_amdgpu_occupancy_limiting_resource_kind_t limiting_resource_kind;
   // Index into |register_classes| or |pressure_resources| according to
@@ -176,6 +184,8 @@ typedef struct loom_amdgpu_occupancy_target_resources_t {
   uint32_t occupancy_percent;
   // Stable resource name limiting final occupancy, or "max_waves".
   iree_string_view_t limiting_resource;
+  // Exact target residency transition summary, or zero when unavailable.
+  loom_target_residency_summary_t residency_summary;
 } loom_amdgpu_occupancy_target_resources_t;
 
 // Builds an AMDGPU occupancy estimate from |allocation|. The caller must keep
@@ -186,21 +196,20 @@ iree_status_t loom_amdgpu_occupancy_build(
     const loom_amdgpu_occupancy_options_t* options,
     iree_arena_allocator_t* arena, loom_amdgpu_occupancy_table_t* out_table);
 
-// Builds an AMDGPU occupancy estimate from final target metadata. |arena| is
-// used only as scratch during construction.
+// Builds an AMDGPU occupancy estimate from final target metadata.
+// |flat_workgroup_size| is the exact fixed size or zero when it is unknown.
+// Local-memory occupancy is only applied when the fixed size is available.
+// |arena| is used only as scratch during construction.
 iree_status_t loom_amdgpu_occupancy_build_target_resources(
     const loom_amdgpu_processor_info_t* processor, uint32_t wave_size,
     uint32_t scalar_register_count, uint32_t vector_register_count,
+    uint32_t flat_workgroup_size, uint32_t local_memory_bytes,
     iree_arena_allocator_t* arena,
     loom_amdgpu_occupancy_target_resources_t* out_resources);
 
-// Builds target-provided schedule pressure cliffs for |descriptor_set|. The
-// returned list is sorted by descriptor register-class ID and cliff unit count
-// and is suitable for loom_low_schedule_options_t::pressure_cliffs.
-iree_status_t loom_amdgpu_occupancy_build_schedule_pressure_cliffs(
-    const loom_low_descriptor_set_t* descriptor_set,
-    iree_arena_allocator_t* arena,
-    loom_low_schedule_pressure_cliff_list_t* out_pressure_cliffs);
+// Returns the generated target residency model for |target|.
+const loom_target_residency_model_t* loom_amdgpu_occupancy_residency_model(
+    const loom_low_resolved_target_t* target);
 
 // Appends a compact JSON representation of |table| to |builder|.
 iree_status_t loom_amdgpu_occupancy_format_json(

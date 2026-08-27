@@ -86,6 +86,30 @@ extern "C" {
 
 #endif  // IREE_COMPILER_*
 
+// Returns true when 32-bit atomic operations are implemented directly by the
+// target instead of through a process-local fallback lock.
+static inline bool iree_atomic_int32_is_lock_free(void) {
+#if IREE_SYNCHRONIZATION_DISABLE_UNSAFE
+  return false;
+#elif defined(IREE_COMPILER_MSVC)
+  return true;
+#else
+  return __atomic_always_lock_free(sizeof(iree_atomic_int32_t), 0);
+#endif  // IREE_SYNCHRONIZATION_DISABLE_UNSAFE
+}
+
+// Returns true when 64-bit atomic operations are implemented directly by the
+// target instead of through a process-local fallback lock.
+static inline bool iree_atomic_int64_is_lock_free(void) {
+#if IREE_SYNCHRONIZATION_DISABLE_UNSAFE
+  return false;
+#elif defined(IREE_COMPILER_MSVC)
+  return true;
+#else
+  return __atomic_always_lock_free(sizeof(iree_atomic_int64_t), 0);
+#endif  // IREE_SYNCHRONIZATION_DISABLE_UNSAFE
+}
+
 //==============================================================================
 // Reference count atomics
 //==============================================================================

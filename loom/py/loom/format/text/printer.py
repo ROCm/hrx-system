@@ -31,25 +31,28 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, cast
 
 from loom.assembly import (
+    AlignedRefs,
     Attr,
     AttrDict,
+    AttrParams,
     AttrTable,
     BindingList,
     BlockArgs,
     Clause,
-    DescriptorRef,
     Flags,
     FormatElement,
     FuncArgs,
     Glue,
     IndexList,
+    KeyRef,
     Keyword,
     OperandDict,
-    OpRef,
     OptionalGroup,
+    Param,
     PredicateList,
     Ref,
     Refs,
@@ -57,6 +60,7 @@ from loom.assembly import (
     ResultType,
     ResultTypeList,
     Scope,
+    ScopedEnumRef,
     StableKeyRef,
     SymbolRef,
     TemplateParam,
@@ -68,7 +72,14 @@ from loom.assembly import (
 from loom.assembly import (
     Region as RegionFmt,
 )
-from loom.dsl import AttrDef, Op
+from loom.dsl import (
+    AttrDef,
+    EncodingAliasDef,
+    EncodingFamilyDef,
+    Op,
+    ParameterizedAttrDef,
+    TypeDef,
+)
 from loom.fields import (
     FieldLayout,
     FormatFields,
@@ -85,11 +96,14 @@ from loom.ir import (
     DynamicEncoding,
     EncodingInstance,
     EncodingType,
+    EnumArrayAttr,
     FunctionType,
-    GroupType,
     Module,
     NoneType,
     Operation,
+    ParameterizedAttr,
+    ParameterizedAttrArray,
+    ParameterizedType,
     PoolType,
     Predicate,
     PredicateArg,
@@ -97,27 +111,45 @@ from loom.ir import (
     RegisterType,
     ScalarType,
     ShapedType,
+    SignedEnumSetAttr,
     StaticDim,
     StorageType,
     SymbolName,
+    SymbolNameArray,
+    SymbolNameSet,
     Type,
-    TypeKind,
     Value,
 )
+from loom.location_tag import builtin_location_tag_name
 
 _IR_TYPE_CLASSES = (
     ScalarType,
     ShapedType,
     BufferType,
-    GroupType,
     FunctionType,
     RegisterType,
     StorageType,
     DialectType,
+    ParameterizedType,
     EncodingType,
     PoolType,
     NoneType,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _EncodingAliasSelector:
+    """Canonical source-name lookup state for one structural family."""
+
+    # Fixed enum parameter selecting an alias row.
+    discriminator_name: str
+    # Aliases indexed by the discriminator parameter value.
+    aliases_by_discriminator: Mapping[Any, EncodingAliasDef]
+    # Static family parameter descriptors indexed by source name.
+    parameters_by_name: Mapping[str, AttrDef]
+
+
+_EncodingAliasSelectors = Mapping[str, _EncodingAliasSelector]
 
 __all__ = [
     "Printer",
@@ -135,12 +167,20 @@ class TypePrintContext:
 
     When printing a type that belongs to a specific Value, the context
     provides dim name resolution (DynamicDim -> [%M]) and encoding
-    resolution (encoding_instance -> #enc or #q8_0<block=32>).
+    resolution (encoding_instance -> #enc or
+    #encoding.operand<element_format=i8, payload_elements=32,
+    payload_packing=dense_lanes>).
 
     Without context, dynamic dims print as '?' and encodings are omitted.
     """
 
-    __slots__ = ("_dim_bindings", "_encoding_binding", "_module", "_use_aliases")
+    __slots__ = (
+        "_dim_bindings",
+        "_encoding_alias_selectors",
+        "_encoding_binding",
+        "_module",
+        "_use_aliases",
+    )
 
     def __init__(
         self,
@@ -148,8 +188,10 @@ class TypePrintContext:
         module: Module,
         encoding_binding: int = -1,
         use_aliases: bool = True,
+        encoding_alias_selectors: _EncodingAliasSelectors | None = None,
     ) -> None:
         self._dim_bindings = dim_bindings
+        self._encoding_alias_selectors = encoding_alias_selectors
         self._encoding_binding = encoding_binding
         self._module = module
         self._use_aliases = use_aliases
@@ -175,26 +217,86 @@ class TypePrintContext:
         return resolve_value_name(self._module, self._encoding_binding)
 
 
+def _select_canonical_encoding_alias(
+    encoding: EncodingInstance,
+    selectors: _EncodingAliasSelectors | None,
+) -> EncodingAliasDef | None:
+    if selectors is None:
+        return None
+    selector = selectors.get(encoding.name)
+    if selector is None:
+        return None
+    parameters = dict(encoding.params)
+    alias = selector.aliases_by_discriminator.get(
+        parameters.get(selector.discriminator_name)
+    )
+    if alias is None:
+        return None
+
+    # Re-parsing the alias must reproduce the complete structural encoding.
+    # Every contributed parameter must be present and fixed values must match.
+    for parameter_name, parameter_value in alias.parameters:
+        if parameter_name not in parameters:
+            return None
+        if (parameter_name, parameter_value) in alias.fixed_parameters and parameters[
+            parameter_name
+        ] != parameter_value:
+            return None
+    return alias
+
+
 def _format_encoding_instance(
     encoding: EncodingInstance,
     *,
     use_alias: bool,
+    encoding_alias_selectors: _EncodingAliasSelectors | None = None,
 ) -> str:
     """Format a static encoding as #alias or #family<name = value, ...>."""
     if use_alias and encoding.alias:
         return f"#{encoding.alias}"
-    if not encoding.params:
-        return f"#{encoding.name}"
-    param_strs = [
-        f"{name}={_format_attr_value(value)}" for name, value in encoding.params
-    ]
-    return f"#{encoding.name}<{', '.join(param_strs)}>"
+
+    canonical_alias = (
+        _select_canonical_encoding_alias(encoding, encoding_alias_selectors)
+        if use_alias
+        else None
+    )
+    name = canonical_alias.name if canonical_alias is not None else encoding.name
+    parameters = encoding.params
+    if canonical_alias is not None:
+        alias_parameters = dict(canonical_alias.parameters)
+        fixed_parameter_names = {
+            parameter_name for parameter_name, _ in canonical_alias.fixed_parameters
+        }
+        parameters = tuple(
+            (parameter_name, parameter_value)
+            for parameter_name, parameter_value in parameters
+            if parameter_name not in fixed_parameter_names
+            and alias_parameters.get(parameter_name) != parameter_value
+        )
+    if not parameters:
+        return f"#{name}"
+    selector = (
+        encoding_alias_selectors.get(encoding.name)
+        if encoding_alias_selectors is not None
+        else None
+    )
+    parameter_descriptors = selector.parameters_by_name if selector is not None else {}
+    param_strs = []
+    for parameter_name, value in parameters:
+        formatted_value = _format_attr_value(
+            value,
+            parameter_descriptors.get(parameter_name),
+            encoding_alias_selectors=encoding_alias_selectors,
+            use_encoding_aliases=use_alias,
+        )
+        param_strs.append(f"{parameter_name}={formatted_value}")
+    return f"#{name}<{', '.join(param_strs)}>"
 
 
 def print_type(
     ir_type: Type,
     context: TypePrintContext | None = None,
-    type_registry: dict[str, Any] | None = None,
+    type_registry: dict[Any, Any] | None = None,
 ) -> str:
     """Print a loom type in canonical text form.
 
@@ -203,40 +305,88 @@ def print_type(
     With type_registry: DialectType printing walks the TypeDef format spec.
     Without type_registry: DialectType uses comma-separated params fallback.
     """
+    compact_type_def = _compact_type_definition(ir_type, type_registry)
+    if compact_type_def is not None:
+        return _print_descriptor_backed_type(
+            ir_type, compact_type_def, context, type_registry
+        )
+
     match ir_type:
         case ScalarType():
             return repr(ir_type)
         case ShapedType():
-            return _print_shaped_type(ir_type, context)
+            return _print_shaped_type(
+                ir_type, _compact_shape_type_definition(ir_type), context
+            )
         case BufferType():
             return "buffer"
         case PoolType():
-            return _print_pool_type(ir_type, context)
-        case GroupType(scope=scope):
-            return f"group<{scope.text}>"
+            return _print_pool_type(
+                ir_type, _compact_shape_type_definition(ir_type), context
+            )
         case FunctionType(arg_types=args, result_types=results):
             arg_strs = ", ".join(print_type(t, context, type_registry) for t in args)
             result_strs = ", ".join(
                 print_type(t, context, type_registry) for t in results
             )
             return f"({arg_strs}) -> ({result_strs})"
-        case RegisterType():
-            return repr(ir_type)
-        case StorageType():
-            return repr(ir_type)
+        case RegisterType(
+            name=name,
+            descriptor_set_stable_id=descriptor_set_stable_id,
+            register_class_id=register_class_id,
+            unit_count=unit_count,
+            value_type=value_type,
+        ):
+            reg_class = (
+                name
+                if name is not None
+                else f"0x{descriptor_set_stable_id:x}:{register_class_id}"
+            )
+            unit_suffix = "" if unit_count == 1 else f" x{unit_count}"
+            value_suffix = (
+                ""
+                if value_type is None
+                else f" : {print_type(value_type, context, type_registry)}"
+            )
+            return f"reg<{reg_class}{unit_suffix}{value_suffix}>"
         case NoneType():
             return "none"
-        case EncodingType():
-            return repr(ir_type)
+        case ParameterizedType():
+            return _print_descriptor_backed_type(
+                ir_type, ir_type.definition, context, type_registry
+            )
         case DialectType(name=_name, params=_params):
             return _print_dialect_type(ir_type, context, type_registry)
     raise ValueError(f"Unknown type: {ir_type}")
 
 
+def _compact_type_definition(
+    ir_type: Type, type_registry: dict[Any, Any] | None
+) -> TypeDef | None:
+    """Resolves a compact Python value class to its registered declaration."""
+
+    if type_registry is not None:
+        type_def = type_registry.get(type(ir_type))
+        if isinstance(type_def, TypeDef) and type_def.uses_inline_enum_parameter:
+            return type_def
+
+    from loom.builtin_types import BUILTIN_TYPE_BY_PYTHON_TYPE
+
+    return BUILTIN_TYPE_BY_PYTHON_TYPE.get(type(ir_type))
+
+
+def _compact_shape_type_definition(ir_type: ShapedType | PoolType) -> TypeDef:
+    """Resolves a compact shape representation to its declaration."""
+
+    from loom.builtin_types import BUILTIN_COMPACT_SHAPE_TYPE_BY_KIND
+
+    return BUILTIN_COMPACT_SHAPE_TYPE_BY_KIND[ir_type.type_kind]
+
+
 def _print_dialect_type(
     dialect_type: DialectType,
     context: TypePrintContext | None,
-    type_registry: dict[str, Any] | None,
+    type_registry: dict[Any, Any] | None,
 ) -> str:
     """Print a dialect type, walking TypeDef format if available."""
     from loom.assembly import (
@@ -313,17 +463,79 @@ def _print_dialect_type(
     return f"{name}<{interior}>"
 
 
+def _print_descriptor_backed_type(
+    value: Type,
+    type_def: TypeDef,
+    context: TypePrintContext | None,
+    type_registry: dict[Any, Any] | None,
+) -> str:
+    """Prints an indirect or compact type through its declarative format."""
+    stream = TokenStream()
+
+    def has(parameter: AttrDef) -> bool:
+        if isinstance(value, ParameterizedType):
+            return value.has(parameter.name)
+        parameter_value = getattr(value, parameter.name)
+        return not (parameter.optional and int(parameter_value) == 0)
+
+    def get(parameter: AttrDef) -> Any:
+        if isinstance(value, ParameterizedType):
+            return value.get(parameter.name)
+        parameter_value = getattr(value, parameter.name)
+        return (
+            int(parameter_value) if parameter.attr_type == "enum" else parameter_value
+        )
+
+    if type_def.omits_empty_parameter_list and all(
+        isinstance(parameter, AttrDef) and not has(parameter)
+        for parameter in type_def.params
+    ):
+        return type_def.name
+
+    def walk(elements: tuple[FormatElement, ...]) -> None:
+        for element in elements:
+            match element:
+                case Param(field=field):
+                    parameter = type_def.param(field)
+                    assert isinstance(parameter, AttrDef)
+                    parameter_value = get(parameter)
+                    stream.emit(
+                        _format_attr_value(
+                            parameter_value,
+                            parameter,
+                            type_context=context,
+                            type_registry=type_registry,
+                        )
+                    )
+                case Keyword(text=text):
+                    stream.emit(text)
+                case Clause(name=name, elements=inner):
+                    stream.emit(name)
+                    stream.emit("(")
+                    walk(inner)
+                    stream.emit(")")
+                case OptionalGroup(elements=inner, anchor=anchor):
+                    parameter = type_def.param(anchor)
+                    assert isinstance(parameter, AttrDef)
+                    if has(parameter):
+                        walk(inner)
+                case Glue():
+                    stream.set_glue()
+                case _:
+                    raise ValueError(
+                        f"unsupported parameterized type format element: {element!r}"
+                    )
+
+    walk(type_def.format)
+    return f"{type_def.name}<{stream.join()}>"
+
+
 def _print_shaped_type(
-    shaped: ShapedType, context: TypePrintContext | None = None
+    shaped: ShapedType,
+    type_def: TypeDef,
+    context: TypePrintContext | None = None,
 ) -> str:
     """Print shaped types with optional dim names and encodings/layouts."""
-    kind_names = {
-        TypeKind.TILE: "tile",
-        TypeKind.TENSOR: "tensor",
-        TypeKind.VECTOR: "vector",
-        TypeKind.VIEW: "view",
-    }
-    kind_name = kind_names[shaped.type_kind]
     if shaped.rank == 0:
         inner = repr(shaped.element_type)
     else:
@@ -352,21 +564,31 @@ def _print_shaped_type(
                 inner += ", ?"
         elif isinstance(enc, EncodingInstance):
             use_aliases = context._use_aliases if context else True
-            inner += ", " + _format_encoding_instance(enc, use_alias=use_aliases)
+            inner += ", " + _format_encoding_instance(
+                enc,
+                use_alias=use_aliases,
+                encoding_alias_selectors=(
+                    context._encoding_alias_selectors if context else None
+                ),
+            )
 
-    return f"{kind_name}<{inner}>"
+    return f"{type_def.name}<{inner}>"
 
 
-def _print_pool_type(pool: PoolType, context: TypePrintContext | None = None) -> str:
+def _print_pool_type(
+    pool: PoolType,
+    type_def: TypeDef,
+    context: TypePrintContext | None = None,
+) -> str:
     """Print pool<[%block_size]> or pool<N>."""
     match pool.block_size:
         case StaticDim(size=size):
-            return f"pool<{size}>"
+            return f"{type_def.name}<{size}>"
         case DynamicDim():
             dim_name = context.dim_name(0) if context else None
             if dim_name is not None:
-                return f"pool<[{dim_name}]>"
-            return "pool<?>"
+                return f"{type_def.name}<[{dim_name}]>"
+            return f"{type_def.name}<?>"
         case _:
             raise TypeError(f"unexpected dim type: {type(pool.block_size)}")
 
@@ -492,24 +714,89 @@ def _format_string_literal(value: str) -> str:
     return "".join(escaped_chunks)
 
 
-def _format_attr_value(value: Any, attr_def: AttrDef | None = None) -> str:
+def _format_attr_value(
+    value: Any,
+    attr_def: AttrDef | None = None,
+    *,
+    type_context: TypePrintContext | None = None,
+    type_registry: dict[Any, Any] | None = None,
+    encoding_alias_selectors: _EncodingAliasSelectors | None = None,
+    use_encoding_aliases: bool = True,
+) -> str:
     """Format an attribute value for text output.
 
     Enum attributes print as bare keywords (lt, not "lt").
     String attributes print quoted. Everything else prints as literals.
     """
+    if encoding_alias_selectors is None and type_context is not None:
+        encoding_alias_selectors = type_context._encoding_alias_selectors
+    if type_context is not None:
+        use_encoding_aliases = type_context._use_aliases
     if attr_def is not None and attr_def.attr_type == "enum":
-        return str(value)
+        return _format_enum_attr_value(value, attr_def)
+    if attr_def is not None and attr_def.attr_type == "enum_array":
+        if not isinstance(value, EnumArrayAttr):
+            raise TypeError(
+                f"enum-array attribute value must be EnumArrayAttr: {value!r}"
+            )
+        assert attr_def.enum_def is not None
+        keyword_by_value = {
+            case.value: case.keyword for case in attr_def.enum_def.cases
+        }
+        return (
+            "["
+            + ", ".join(
+                _format_enum_attr_value(element, attr_def, keyword_by_value)
+                for element in value
+            )
+            + "]"
+        )
+    if attr_def is not None and attr_def.attr_type == "signed_enum_set":
+        if not isinstance(value, SignedEnumSetAttr):
+            raise TypeError(
+                f"signed enum-set attribute value must be SignedEnumSetAttr: {value!r}"
+            )
+        assert attr_def.enum_def is not None
+        keyword_by_value = {
+            case.value: case.keyword for case in attr_def.enum_def.cases
+        }
+        signed_values = [
+            (stable_value, False) for stable_value in value.positive_values
+        ] + [(stable_value, True) for stable_value in value.negative_values]
+        signed_values.sort(key=lambda item: item[0])
+        formatted_values: list[str] = []
+        for stable_value, is_negative in signed_values:
+            keyword = keyword_by_value.get(stable_value)
+            if keyword is None:
+                raise ValueError(
+                    f"signed enum-set field {attr_def.name!r} has undeclared "
+                    f"value {stable_value}"
+                )
+            formatted_values.append(("-" if is_negative else "") + keyword)
+        return "[" + ", ".join(formatted_values) + "]"
     if attr_def is not None and attr_def.attr_type == "symbol":
-        if not isinstance(value, str):
-            raise TypeError(f"symbol attribute value must be a string: {value!r}")
-        if value.startswith("@"):
+        if not isinstance(value, str | SymbolName):
+            raise TypeError(f"symbol attribute value must be a symbol: {value!r}")
+        symbol_name = str(value)
+        if symbol_name.startswith("@"):
             raise ValueError(f"symbol attribute value must not include '@': {value!r}")
-        return "@" + value
+        return "@" + symbol_name
+    if attr_def is not None and attr_def.attr_type == "symbol_array":
+        if not isinstance(value, SymbolNameArray):
+            raise TypeError(
+                f"symbol-array attribute value must be SymbolNameArray: {value!r}"
+            )
+        return "[" + ", ".join("@" + str(element) for element in value) + "]"
+    if attr_def is not None and attr_def.attr_type == "symbol_set":
+        if not isinstance(value, SymbolNameSet):
+            raise TypeError(
+                f"symbol-set attribute value must be SymbolNameSet: {value!r}"
+            )
+        return "[" + ", ".join("@" + str(element) for element in value) + "]"
     if attr_def is not None and attr_def.attr_type == "type":
         if not isinstance(value, _IR_TYPE_CLASSES):
             raise TypeError(f"type attribute value must be a Type: {value!r}")
-        return print_type(cast(Type, value))
+        return print_type(cast(Type, value), type_context, type_registry)
     if attr_def is not None and attr_def.attr_type == "bytes":
         if not isinstance(value, bytes | bytearray):
             raise TypeError(f"bytes attribute value must be bytes: {value!r}")
@@ -524,17 +811,174 @@ def _format_attr_value(value: Any, attr_def: AttrDef | None = None) -> str:
         return "@" + str(value)
     if isinstance(value, bytes | bytearray):
         return f'bytes("{bytes(value).hex()}")'
+    if isinstance(value, EnumArrayAttr):
+        raise ValueError("enum arrays require a descriptor-backed field")
+    if isinstance(value, SignedEnumSetAttr):
+        raise ValueError("signed enum sets require a descriptor-backed field")
+    if isinstance(value, ParameterizedAttr):
+        if attr_def is not None:
+            if attr_def.attr_type != "parameterized":
+                raise TypeError(
+                    "parameterized attribute value does not match field "
+                    f"kind {attr_def.attr_type!r}"
+                )
+            expected_family = attr_def.parameterized_attr
+            if (
+                expected_family is not None
+                and value.family_name != expected_family.name
+            ):
+                raise ValueError(
+                    f"parameterized attribute family '{value.family_name}' "
+                    f"does not match field contract '{expected_family.name}'"
+                )
+        parameters = _format_parameterized_attr_parameters(
+            value,
+            value.definition,
+            type_context=type_context,
+            type_registry=type_registry,
+            encoding_alias_selectors=encoding_alias_selectors,
+            use_encoding_aliases=use_encoding_aliases,
+        )
+        return f"#{value.family_name}<{parameters}>"
+    if isinstance(value, ParameterizedAttrArray):
+        if attr_def is None or attr_def.attr_type != "parameterized_array":
+            raise ValueError(
+                "parameterized attribute arrays require a descriptor-backed field"
+            )
+        element_descriptor = AttrDef(
+            attr_def.name,
+            "parameterized",
+            parameterized_attr=attr_def.parameterized_attr,
+        )
+        return (
+            "["
+            + ", ".join(
+                _format_attr_value(
+                    element,
+                    element_descriptor,
+                    type_context=type_context,
+                    type_registry=type_registry,
+                    encoding_alias_selectors=encoding_alias_selectors,
+                    use_encoding_aliases=use_encoding_aliases,
+                )
+                for element in value
+            )
+            + "]"
+        )
     if isinstance(value, str):
         return _format_string_literal(value)
     if isinstance(value, list | tuple):
-        parts = [_format_attr_value(v) for v in value]
+        parts = [
+            _format_attr_value(
+                v,
+                type_context=type_context,
+                type_registry=type_registry,
+                encoding_alias_selectors=encoding_alias_selectors,
+                use_encoding_aliases=use_encoding_aliases,
+            )
+            for v in value
+        ]
         return "[" + ", ".join(parts) + "]"
     if isinstance(value, Mapping):
-        parts = [f"{key} = {_format_attr_value(item)}" for key, item in value.items()]
+        parts = []
+        for key, item in value.items():
+            formatted_item = _format_attr_value(
+                item,
+                type_context=type_context,
+                type_registry=type_registry,
+                encoding_alias_selectors=encoding_alias_selectors,
+                use_encoding_aliases=use_encoding_aliases,
+            )
+            parts.append(f"{key} = {formatted_item}")
         return "{" + ", ".join(parts) + "}"
     if isinstance(value, EncodingInstance):
-        return _format_encoding_instance(value, use_alias=True)
+        return _format_encoding_instance(
+            value,
+            use_alias=use_encoding_aliases,
+            encoding_alias_selectors=encoding_alias_selectors,
+        )
     return str(value)
+
+
+def _format_parameterized_attr_parameters(
+    value: Any,
+    definition: ParameterizedAttrDef,
+    *,
+    type_context: TypePrintContext | None = None,
+    type_registry: dict[Any, Any] | None = None,
+    encoding_alias_selectors: _EncodingAliasSelectors | None = None,
+    use_encoding_aliases: bool = True,
+) -> str:
+    """Formats one known-family parameterized attribute payload."""
+    if not isinstance(value, ParameterizedAttr):
+        raise TypeError(
+            f"expected parameterized attribute '{definition.name}', got {value!r}"
+        )
+    if value.family_name != definition.name:
+        raise ValueError(
+            f"parameterized attribute family '{value.family_name}' does not "
+            f"match field contract '{definition.name}'"
+        )
+
+    parameters = []
+    slots = value.slots
+    primary_parameter_index = definition.primary_parameter_index
+    if primary_parameter_index is not None:
+        primary_parameter = definition.parameters[primary_parameter_index]
+        primary_slot = slots[primary_parameter_index]
+        if primary_slot is not None:
+            parameters.append(
+                _format_attr_value(
+                    primary_slot,
+                    primary_parameter,
+                    type_context=type_context,
+                    type_registry=type_registry,
+                    encoding_alias_selectors=encoding_alias_selectors,
+                    use_encoding_aliases=use_encoding_aliases,
+                )
+            )
+    for parameter_index, (parameter, slot) in enumerate(
+        zip(definition.parameters, slots, strict=True)
+    ):
+        if slot is None or parameter_index == primary_parameter_index:
+            continue
+        formatted_slot = _format_attr_value(
+            slot,
+            parameter,
+            type_context=type_context,
+            type_registry=type_registry,
+            encoding_alias_selectors=encoding_alias_selectors,
+            use_encoding_aliases=use_encoding_aliases,
+        )
+        parameters.append(f"{parameter.name} = {formatted_slot}")
+    return ", ".join(parameters)
+
+
+def _format_enum_attr_value(
+    value: Any,
+    attr_def: AttrDef,
+    keyword_by_value: dict[int, str] | None = None,
+) -> str:
+    """Format one descriptor-backed enum keyword or raw open value."""
+    assert attr_def.enum_def is not None
+    if keyword_by_value is None:
+        keyword_by_value = {
+            case.value: case.keyword for case in attr_def.enum_def.cases
+        }
+    if isinstance(value, str):
+        if value not in attr_def.enum_def.keywords:
+            raise ValueError(f"unknown {attr_def.enum_def.name} keyword {value!r}")
+        return value
+    if type(value) is not int or not 0 <= value <= 0xFF:
+        raise ValueError(
+            f"{attr_def.enum_def.name} value must be a byte, got {value!r}"
+        )
+    keyword = keyword_by_value.get(value)
+    if keyword is not None:
+        return keyword
+    if not attr_def.open_enum:
+        raise ValueError(f"closed {attr_def.enum_def.name} enum has no value {value}")
+    return f"<{value}>"
 
 
 def _is_pipeline_printable_name(value: Any, *, allow_dot: bool) -> bool:
@@ -557,7 +1001,42 @@ def _is_pipeline_printable_name(value: Any, *, allow_dot: bool) -> bool:
     return True
 
 
-def _is_pipeline_printable_attr_value(value: Any) -> bool:
+def _is_pipeline_printable_attr_value(
+    value: Any, attr_def: AttrDef | None = None
+) -> bool:
+    if attr_def is not None and attr_def.attr_type in ("enum", "enum_array"):
+        return True
+    if attr_def is not None and attr_def.attr_type == "symbol":
+        return _is_pipeline_printable_name(str(value), allow_dot=False)
+    if attr_def is not None and attr_def.attr_type == "symbol_array":
+        return isinstance(value, SymbolNameArray) and all(
+            _is_pipeline_printable_name(str(element), allow_dot=False)
+            for element in value
+        )
+    if attr_def is not None and attr_def.attr_type == "symbol_set":
+        return isinstance(value, SymbolNameSet) and all(
+            _is_pipeline_printable_name(str(element), allow_dot=False)
+            for element in value
+        )
+    if isinstance(value, ParameterizedAttr):
+        return all(
+            slot is None or _is_pipeline_printable_attr_value(slot, parameter)
+            for parameter, slot in zip(
+                value.definition.parameters, value.slots, strict=True
+            )
+        )
+    if isinstance(value, ParameterizedAttrArray):
+        if attr_def is None or attr_def.attr_type != "parameterized_array":
+            return False
+        element_descriptor = AttrDef(
+            attr_def.name,
+            "parameterized",
+            parameterized_attr=attr_def.parameterized_attr,
+        )
+        return all(
+            _is_pipeline_printable_attr_value(element, element_descriptor)
+            for element in value
+        )
     if isinstance(value, bool | int | float | str | bytes | bytearray):
         return True
     if isinstance(value, list | tuple):
@@ -659,7 +1138,8 @@ class Printer:
         print_regions: bool = True,
     ) -> None:
         self._registry: dict[str, Op] = {}
-        self._type_registry: dict[str, Any] = {}  # TypeDef by name.
+        self._type_registry: dict[Any, Any] = {}  # TypeDef by name and value class.
+        self._encoding_alias_selectors: dict[str, _EncodingAliasSelector] = {}
         self._layouts: dict[str, FieldLayout] = {}
         self._module: Module | None = None
         self._indent: int = 0
@@ -678,6 +1158,26 @@ class Printer:
         """Register type declarations for format-driven type printing."""
         for td in types:
             self._type_registry[td.name] = td
+            if td.python_type is not None:
+                self._type_registry[td.python_type] = td
+
+    def register_encoding_families(self, families: Sequence[EncodingFamilyDef]) -> None:
+        """Register canonical source spellings for encoding families."""
+        for family in families:
+            if not family.aliases:
+                continue
+            discriminator_name = cast(AttrDef, family.alias_discriminator).name
+            aliases_by_discriminator = {
+                dict(alias.fixed_parameters)[discriminator_name]: alias
+                for alias in family.aliases
+            }
+            self._encoding_alias_selectors[family.name] = _EncodingAliasSelector(
+                discriminator_name=discriminator_name,
+                aliases_by_discriminator=aliases_by_discriminator,
+                parameters_by_name={
+                    parameter.name: parameter for parameter in family.parameters
+                },
+            )
 
     # --- Layout cache ---
 
@@ -703,6 +1203,36 @@ class Printer:
             module,
             encoding_binding=value.encoding_binding,
             use_aliases=self._use_aliases,
+            encoding_alias_selectors=self._encoding_alias_selectors,
+        )
+
+    def _format_attr_value(
+        self,
+        value: Any,
+        attr_def: AttrDef | None = None,
+        *,
+        type_context: TypePrintContext | None = None,
+    ) -> str:
+        return _format_attr_value(
+            value,
+            attr_def,
+            type_context=type_context,
+            type_registry=self._type_registry,
+            encoding_alias_selectors=self._encoding_alias_selectors,
+            use_encoding_aliases=self._use_aliases,
+        )
+
+    def _format_parameterized_attr_parameters(
+        self,
+        value: Any,
+        definition: ParameterizedAttrDef,
+    ) -> str:
+        return _format_parameterized_attr_parameters(
+            value,
+            definition,
+            type_registry=self._type_registry,
+            encoding_alias_selectors=self._encoding_alias_selectors,
+            use_encoding_aliases=self._use_aliases,
         )
 
     def _print_value_type(self, value_id: int, module: Module) -> str:
@@ -723,7 +1253,7 @@ class Printer:
     def _emit_comments(self, comments: tuple[str, ...]) -> None:
         """Emit leading line comments at the current indentation."""
         for comment in comments:
-            self._emit("//" + comment)
+            self._emit("//" + (" " + comment if comment else ""))
 
     # --- Module printing ---
 
@@ -731,27 +1261,67 @@ class Printer:
         """Print a complete module to canonical text."""
         self._lines = []
         self._module = module
+        self._emit_comments(module.file_header)
+        if module.file_header and (
+            any(encoding.alias for encoding in module.encodings)
+            or any(symbol.op is not None for symbol in module.symbols)
+        ):
+            self._lines.append("")
         for encoding in module.encodings:
             if encoding.alias:
                 self._emit(
                     f"#{encoding.alias} = "
                     f"{_format_encoding_instance(encoding, use_alias=False)}"
                 )
-        for symbol in module.symbols:
-            if symbol.op is not None:
-                self._print_top_level_op(symbol.op, module)
+        printed_operation = False
+        for operation in self._module_operation_projection(module):
+            op_decl = self._registry.get(operation.name)
+            if printed_operation and (
+                operation.leading_blank_line
+                or (op_decl is not None and _is_symbol_define(op_decl))
+            ):
                 self._lines.append("")
+            self._print_top_level_op(operation, module)
+            printed_operation = True
         # Remove trailing blank line.
         while self._lines and self._lines[-1] == "":
             self._lines.pop()
         return "\n".join(self._lines) + "\n" if self._lines else ""
 
-    def _print_top_level_op(self, op: Operation, module: Module) -> None:
-        """Print a top-level symbol-defining op using the format-element-driven walker.
+    def _module_operation_projection(self, module: Module) -> list[Operation]:
+        """Returns keyed records first in canonical order, then ordinary ops."""
 
-        All func-like ops (func.def, func.decl, func.template, func.ukernel)
-        and future symbol-defining ops are printed through this path using the
-        same format walker as body ops.
+        records: list[tuple[bytes, bytes, int, Operation]] = []
+        ordinary_operations: list[Operation] = []
+        for operation_index, operation in enumerate(module.body.ops):
+            if operation.is_dead:
+                continue
+            declaration = self._registry.get(operation.name)
+            key_attr = (
+                declaration.keyed_module_record_attr
+                if declaration is not None
+                else None
+            )
+            if key_attr is None:
+                ordinary_operations.append(operation)
+                continue
+            key = cast(str, operation.attributes[key_attr])
+            records.append(
+                (
+                    operation.name.encode("utf-8"),
+                    key.encode("utf-8"),
+                    operation_index,
+                    operation,
+                )
+            )
+        records.sort(key=lambda record: record[:3])
+        return [record[3] for record in records] + ordinary_operations
+
+    def _print_top_level_op(self, op: Operation, module: Module) -> None:
+        """Print a module-scope op using the format-element-driven walker.
+
+        Symbol definitions and module metadata use the same format walker as
+        nested operations.
         """
         self._module = module
         self._emit_comments(op.comments)
@@ -799,6 +1369,8 @@ class Printer:
         for block in region.blocks:
             # Block label (if named and not the entry block).
             if block.label:
+                if block.leading_blank_line:
+                    self._lines.append("")
                 saved_indent = self._indent
                 self._indent = max(self._indent - 1, 0)
                 self._emit_comments(block.comments)
@@ -822,6 +1394,8 @@ class Printer:
                         )
                     ):
                         continue
+                    if op.leading_blank_line:
+                        self._lines.append("")
                     self._print_op(op, module)
 
     def _printable_final_op_index(self, block: Block) -> int:
@@ -936,6 +1510,14 @@ class Printer:
                         op.regions[0], module, implicit_terminator_name
                     )
                 )
+            case "pass.if_changed":
+                return (
+                    not op.attributes
+                    and len(op.regions) == 1
+                    and self._can_print_pipeline_region(
+                        op.regions[0], module, implicit_terminator_name
+                    )
+                )
             case "pass.call":
                 return _is_pipeline_printable_name(
                     op.attributes.get("callee"), allow_dot=False
@@ -963,6 +1545,8 @@ class Printer:
                 op, implicit_terminator_name
             ):
                 continue
+            if op.leading_blank_line:
+                self._lines.append("")
             self._print_pipeline_statement(
                 op,
                 module,
@@ -1036,6 +1620,16 @@ class Printer:
                 )
                 self._indent -= 1
                 self._emit("}")
+            case "pass.if_changed":
+                self._emit("if changed {")
+                self._indent += 1
+                self._print_pipeline_region_body(
+                    op.regions[0],
+                    module,
+                    implicit_terminator_name=implicit_terminator_name,
+                )
+                self._indent -= 1
+                self._emit("}")
             case "pass.call":
                 callee = cast(str, op.attributes["callee"])
                 self._emit(f"call @{callee}")
@@ -1052,7 +1646,7 @@ class Printer:
         if not attrs:
             return ""
         body = ", ".join(
-            f"{key} = {_format_attr_value(value)}" for key, value in attrs.items()
+            f"{key} = {self._format_attr_value(value)}" for key, value in attrs.items()
         )
         return f"({body})"
 
@@ -1166,23 +1760,12 @@ class Printer:
     def _format_location(self, location_id: int, module: Module) -> str:
         """Format a location annotation, or return empty string for unknown."""
         from loom.ir import (
-            LOCATION_TAG_SANITIZER_SITE,
-            LOCATION_TAG_TEMPLATE_INSTANTIATION,
-            LOCATION_TAG_TILE_LOWERING,
-            LOCATION_TAG_UKERNEL_SELECTION,
             LOCATION_UNKNOWN,
             FileLocation,
             FusedLocation,
             OpaqueLocation,
             TaggedLocation,
         )
-
-        location_tag_names = {
-            LOCATION_TAG_SANITIZER_SITE: "sanitizer_site",
-            LOCATION_TAG_TEMPLATE_INSTANTIATION: "template_instantiation",
-            LOCATION_TAG_TILE_LOWERING: "tile_lowering",
-            LOCATION_TAG_UKERNEL_SELECTION: "ukernel_selection",
-        }
 
         def format_file_body(loc: FileLocation, *, always_print_range: bool) -> str:
             source = (
@@ -1225,7 +1808,9 @@ class Printer:
             if isinstance(body, TaggedLocation):
                 if body.tag <= 0 or body.tag > 0xFFFF:
                     raise ValueError("tagged location tag must be in [1, 65535]")
-                tag = location_tag_names.get(body.tag, str(body.tag))
+                tag = builtin_location_tag_name(body.tag)
+                if tag is None:
+                    tag = str(body.tag)
                 text = f"tagged<{tag}, {_format_string_literal(body.data.hex())}"
                 if body.child != LOCATION_UNKNOWN:
                     text += f", {format_body(body.child)}"
@@ -1294,7 +1879,7 @@ class Printer:
                     value = fields.attr(name)
                     if value is not None:
                         attr_def = op_decl.attr(name)
-                        stream.emit(_format_attr_value(value, attr_def))
+                        stream.emit(self._format_attr_value(value, attr_def))
 
                 case SymbolRef(field=name):
                     covered_attrs.add(name)
@@ -1319,10 +1904,16 @@ class Printer:
                     result_id = fields.value_id(name)
                     stream.emit(self._print_value_type(result_id, module))
 
-                case ResultTypeList(field=name, parens=parens):
+                case ResultTypeList(field=name, parens=parens, uniform=uniform):
                     assert isinstance(fields, ResolvedFields)
                     stream.emit(
-                        self._format_result_types(fields, name, op_decl, parens=parens)
+                        self._format_result_types(
+                            fields,
+                            name,
+                            op_decl,
+                            parens=parens,
+                            uniform=uniform,
+                        )
                     )
 
                 case Keyword(text=text):
@@ -1347,10 +1938,8 @@ class Printer:
                         # Named dict attribute: read the dict value directly.
                         covered_attrs.add(dict_field)
                         dict_value = fields._op.attributes.get(dict_field)
-                        if isinstance(dict_value, Mapping) and dict_value:
-                            attr_str = self._format_named_dict(dict_value, op_decl)
-                            if attr_str:
-                                stream.emit(attr_str)
+                        if isinstance(dict_value, Mapping):
+                            stream.emit(self._format_named_dict(dict_value, op_decl))
                     elif hasattr(fields, "_op"):
                         # Legacy: uncovered attributes from the op's dict.
                         attr_str = self._format_attr_dict(
@@ -1366,6 +1955,13 @@ class Printer:
                     covered_attrs.add(keys_field)
                     stream = self._emit_attr_table(
                         stream, fields, keys_field, values_field
+                    )
+
+                case AlignedRefs(refs=refs_field, alignments=alignments_field):
+                    assert isinstance(fields, ResolvedFields)
+                    covered_attrs.add(alignments_field)
+                    stream.emit(
+                        self._format_aligned_refs(fields, refs_field, alignments_field)
                     )
 
                 case RegionTable(
@@ -1479,9 +2075,37 @@ class Printer:
                         self._format_block_args(fields, name, module), glue=True
                     )
 
-                case FuncArgs():
+                case FuncArgs(
+                    field=name,
+                    start_attr=start_attr,
+                    end_attr=end_attr,
+                ):
                     assert isinstance(fields, ResolvedFields)
-                    arg_names, _arg_types, arg_value_ids = fields.func_args()
+                    if start_attr is not None:
+                        covered_attrs.add(start_attr)
+                    if end_attr is not None:
+                        covered_attrs.add(end_attr)
+                    arg_names, _arg_types, arg_value_ids = fields.func_args(name)
+                    start = fields.attr(start_attr) if start_attr is not None else 0
+                    end = (
+                        fields.attr(end_attr)
+                        if end_attr is not None
+                        else len(arg_value_ids)
+                    )
+                    if (
+                        not isinstance(start, int)
+                        or not isinstance(end, int)
+                        or start < 0
+                        or end < start
+                        or end > len(arg_value_ids)
+                    ):
+                        raise ValueError(
+                            f"Op '{op_decl.name}' function argument slice "
+                            f"[{start}, {end}) is outside its "
+                            f"{len(arg_value_ids)} arguments."
+                        )
+                    arg_names = arg_names[start:end]
+                    arg_value_ids = arg_value_ids[start:end]
                     arg_strs: list[str] = []
                     for i, arg_value_id in enumerate(arg_value_ids):
                         type_str = self._print_value_type(arg_value_id, module)
@@ -1494,9 +2118,9 @@ class Printer:
 
                 case PredicateList(field=name):
                     predicates = fields.attr(name) if hasattr(fields, "attr") else None
-                    if not predicates and hasattr(fields, "_op"):
-                        predicates = fields._op.attributes.get(name, [])
-                    if predicates:
+                    if predicates is None and hasattr(fields, "_op"):
+                        predicates = fields._op.attributes.get(name)
+                    if predicates is not None:
                         stream.emit(_format_predicate_list(predicates))
 
                 case OptionalGroup(elements=inner, anchor=anchor):
@@ -1528,16 +2152,15 @@ class Printer:
                     if value:
                         stream.emit(f"<{value}>", glue=True)
 
-                case OpRef(field=name):
+                case KeyRef(field=name):
                     covered_attrs.add(name)
                     value = fields.attr(name)
                     if value:
                         stream.emit(f"<{value}>", glue=True)
 
-                case DescriptorRef(key=key, ordinal=ordinal):
-                    covered_attrs.add(key)
-                    covered_attrs.add(ordinal)
-                    value = fields.attr(key)
+                case ScopedEnumRef(field=name):
+                    covered_attrs.add(name)
+                    value = fields.attr(name)
                     if value:
                         stream.emit(f"<{value}>", glue=True)
 
@@ -1552,7 +2175,23 @@ class Printer:
                     covered_attrs.add(name)
                     attr_def = op_decl.attr(name)
                     value = fields.attr(name)
-                    stream.emit(f"<{_format_attr_value(value, attr_def)}>", glue=True)
+                    stream.emit(
+                        f"<{self._format_attr_value(value, attr_def)}>",
+                        glue=True,
+                    )
+
+                case AttrParams(field=name):
+                    covered_attrs.add(name)
+                    attr_def = cast(AttrDef, op_decl.attr(name))
+                    value = fields.attr(name)
+                    definition = cast(ParameterizedAttrDef, attr_def.parameterized_attr)
+                    parameters = self._format_parameterized_attr_parameters(
+                        value, definition
+                    )
+                    stream.emit(
+                        f"<{parameters}>",
+                        glue=True,
+                    )
 
                 case TemplateParamFlags(param=param_name, flags=flags_name):
                     covered_attrs.add(param_name)
@@ -1560,7 +2199,7 @@ class Printer:
                     param_attr_def = op_decl.attr(param_name)
                     param_value = fields.attr(param_name)
                     flags_value = fields.attr(flags_name)
-                    param_text = _format_attr_value(param_value, param_attr_def)
+                    param_text = self._format_attr_value(param_value, param_attr_def)
                     if flags_value:
                         stream.emit(f"<{param_text}, {flags_value}>", glue=True)
                     else:
@@ -1574,14 +2213,22 @@ class Printer:
     # --- Formatting helpers ---
 
     def _format_result_types(
-        self, fields: ResolvedFields, name: str, op_decl: Op, *, parens: bool = True
+        self,
+        fields: ResolvedFields,
+        name: str,
+        op_decl: Op,
+        *,
+        parens: bool = True,
+        uniform: bool = False,
     ) -> str:
         """Format result types with optional parentheses."""
         desc = fields._layout.fields.get(name)
         if desc is None:
             return "()" if parens else ""
 
-        if desc.variadic:
+        if uniform:
+            result_ids = list(fields._op.results)
+        elif desc.variadic:
             result_ids = fields.value_ids(name)
         else:
             result_ids = [fields.value_id(name)]
@@ -1592,7 +2239,7 @@ class Printer:
         tied_map = fields.tied_result_map()
         parts: list[str] = []
 
-        for result_id in result_ids:
+        for result_id in result_ids[:1] if uniform else result_ids:
             type_str = self._print_value_type(result_id, fields._module)
             value = fields._module.values[result_id]
 
@@ -1624,6 +2271,26 @@ class Printer:
         if parens:
             return "(" + text + ")"
         return text
+
+    def _format_aligned_refs(
+        self,
+        fields: ResolvedFields,
+        refs_field: str,
+        alignments_field: str,
+    ) -> str:
+        """Format [align(N) %value, ...] from paired attrs and operands."""
+        alignments = fields.attr(alignments_field) or []
+        value_ids = fields.value_ids(refs_field)
+        if len(alignments) != len(value_ids):
+            raise ValueError(
+                f"AlignedRefs field '{refs_field}' has {len(value_ids)} values "
+                f"but '{alignments_field}' has {len(alignments)} alignments."
+            )
+        parts = [
+            f"align({alignment}) {self._value_name(value_id)}"
+            for alignment, value_id in zip(alignments, value_ids, strict=True)
+        ]
+        return "[" + ", ".join(parts) + "]"
 
     def _format_index_list(
         self, fields: ResolvedFields, dynamic_field: str, static_field: str
@@ -1884,11 +2551,9 @@ class Printer:
 
     def _format_named_dict(self, dict_value: Mapping[str, Any], op_decl: Op) -> str:
         """Format {key = value, ...} from a named dict attribute."""
-        if not dict_value:
-            return ""
         parts: list[str] = []
         for key, value in dict_value.items():
-            parts.append(f"{key} = {_format_attr_value(value, None)}")
+            parts.append(f"{key} = {self._format_attr_value(value)}")
         return "{" + ", ".join(parts) + "}"
 
     def _format_attr_dict(
@@ -1913,7 +2578,7 @@ class Printer:
         parts: list[str] = []
         for key, value in extras.items():
             attr_def = op_decl.attr(key) if op_decl else None
-            parts.append(f"{key} = {_format_attr_value(value, attr_def)}")
+            parts.append(f"{key} = {self._format_attr_value(value, attr_def)}")
         return "{" + ", ".join(parts) + "}"
 
     def _generic_op_string(self, op: Operation, module: Module) -> str:

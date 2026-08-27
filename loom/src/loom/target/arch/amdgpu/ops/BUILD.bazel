@@ -17,6 +17,8 @@ package(
 
 _AMDGPU_HAL_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/hal:__pkg__"]
 
+_AMDGPU_LOWER_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/lower:__pkg__"]
+
 _AMDGPU_NATIVE_VISIBILITY = ["//loom/src/loom/target/emit/native/amdgpu:__pkg__"]
 
 _AMDGPU_ROOT_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu:__pkg__"]
@@ -30,6 +32,7 @@ _AMDGPU_BINDING_VISIBILITY = ["//loom/binding/c/target/amdgpu:__pkg__"]
 loom_generated_cc_library(
     name = "ops",
     srcs = [
+        "fact_projection.c",
         "registry.c",
         "target.c",
     ],
@@ -50,6 +53,7 @@ loom_generated_cc_library(
     generator = "//loom/py/loom/gen/ops:c_tables_amdgpu_generator",
     visibility = (
         _AMDGPU_HAL_VISIBILITY +
+        _AMDGPU_LOWER_VISIBILITY +
         _AMDGPU_NATIVE_VISIBILITY +
         _AMDGPU_ROOT_VISIBILITY +
         _AMDGPU_TARGET_ID_VISIBILITY +
@@ -61,8 +65,11 @@ loom_generated_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/target",
+        "//loom/src/loom/target:resolved_target",
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/arch/amdgpu:error_defs",
+        "//loom/src/loom/target/arch/amdgpu:facts",
+        "//loom/src/loom/target/arch/amdgpu:profile",
         "//loom/src/loom/target/arch/amdgpu:target_info",
         "//loom/src/loom/target/arch/amdgpu/records:target_records",
         "//runtime/src/iree/base",

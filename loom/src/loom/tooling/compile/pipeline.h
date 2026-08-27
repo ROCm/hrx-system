@@ -19,9 +19,10 @@
 #include "loom/ir/ir.h"
 #include "loom/pass/interpreter.h"
 #include "loom/pass/trace.h"
-#include "loom/target/compile_report.h"
 #include "loom/target/low_descriptor_registry.h"
 #include "loom/target/pipeline.h"
+#include "loom/target/reporting/report.h"
+#include "loom/target/specialization.h"
 #include "loom/target/types.h"
 #include "loom/verify/verify.h"
 
@@ -44,6 +45,9 @@ typedef enum loom_compile_default_pipeline_e {
   // Build the full prepared target-low pipeline including target ABI/resource
   // materialization and packetization preparation.
   LOOM_COMPILE_DEFAULT_PIPELINE_PREPARED_LOW = 3,
+  // Normalize target source and expand resolvable authoring templates while
+  // retaining source kernel launch regions and device bodies.
+  LOOM_COMPILE_DEFAULT_PIPELINE_EXPANDED_SOURCE = 4,
 } loom_compile_default_pipeline_t;
 
 typedef struct loom_compile_pipeline_options_t {
@@ -57,8 +61,8 @@ typedef struct loom_compile_pipeline_options_t {
   loom_target_pipeline_options_t target_pipeline_options;
   // Target environment linked into this compile front door.
   const loom_target_environment_t* target_environment;
-  // Optional runtime-selected target overlay visible to source-to-low passes.
-  loom_target_selection_t target_selection;
+  // Per-function target specialization requests for this invocation.
+  loom_target_specialization_request_list_t target_specializations;
   // Target-low descriptor registry package initialized for this session.
   const loom_target_low_descriptor_registry_t* low_descriptor_registry;
   // Diagnostic sink used by pass execution.
@@ -74,10 +78,30 @@ typedef struct loom_compile_pipeline_options_t {
   const loom_pass_trace_options_t* trace_options;
 } loom_compile_pipeline_options_t;
 
+// Compiler products retained after running a compile pipeline.
+//
+// Function versions are stable compiler identities whose current IR functions
+// may change as lowering replaces operations. Their facts remain available to
+// artifact selection and emission until this result is deinitialized.
+typedef struct loom_compile_pipeline_result_t {
+  // Arena owning function versions and their immutable target facts.
+  iree_arena_allocator_t version_arena;
+
+  // Concrete function versions produced for this invocation.
+  loom_function_version_owner_t function_versions;
+
+  // Pass diagnostics observed while executing the selected pipeline.
+  loom_pass_run_result_t pass;
+} loom_compile_pipeline_result_t;
+
 // Initializes compile pipeline options with the artifact-front-door default:
 // prepared target-low, stderr diagnostics, and a small error cap.
 void loom_compile_pipeline_options_initialize(
     loom_compile_pipeline_options_t* out_options);
+
+// Releases compiler products owned by |result|.
+void loom_compile_pipeline_result_deinitialize(
+    loom_compile_pipeline_result_t* result);
 
 // Returns true when |pipeline| disables pass execution.
 bool loom_compile_pipeline_is_disabled(iree_string_view_t pipeline);
@@ -91,9 +115,14 @@ bool loom_compile_pipeline_is_default(iree_string_view_t pipeline);
 // counted in |out_result| and left to the caller's product policy: a compiler
 // front door may exit nonzero, while a tuner can preserve the diagnostics as
 // failed-candidate evidence and continue.
+//
+// |out_result| is initialized on every call and must be deinitialized after
+// the final consumer of its function versions, including when this function
+// returns a non-OK status. |block_pool| must outlive |out_result|.
 iree_status_t loom_compile_run_pipeline(
     loom_module_t* module, const loom_compile_pipeline_options_t* options,
-    iree_arena_block_pool_t* block_pool, loom_pass_run_result_t* out_result);
+    iree_arena_block_pool_t* block_pool,
+    loom_compile_pipeline_result_t* out_result);
 
 #ifdef __cplusplus
 }  // extern "C"

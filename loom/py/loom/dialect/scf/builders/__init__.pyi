@@ -21,6 +21,7 @@ class ScfBuilder(DialectBuilder):
         results: list[Type | TiedResultSpec],
         unroll_factor: ValueRef | None = ...,
         unroll_policy: str | None = ...,
+        unroll_schedule: str | None = ...,
         body: Region | None = ...,
         name: str | None = ...,
         names: Sequence[str] | None = ...,
@@ -101,3 +102,8 @@ class ScfBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> list[ValueRef]: ...
+    def fence(
+        self,
+        *,
+        location_id: int | None = ...,
+    ) -> None: ...

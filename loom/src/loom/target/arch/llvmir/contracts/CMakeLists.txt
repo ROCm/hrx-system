@@ -10,27 +10,16 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_LLVMIR)
-loom_target_table_cc_library(
+loom_target_contract_table_cc_libraries(
   NAME
     generic_core
   GENERATOR
-    loom::py::loom::gen::target::contracts::llvmir_contract_fragment
+    loom::py::loom::gen::target::contracts::llvmir_contract_table_family
   ARGS
     "--contract-fragment=llvmir.generic.core"
-  DEPS
+  CONTRACT_DEPS
     loom::target::contract
-)
-endif()
-
-if(LOOM_TARGET_ARCH_LLVMIR)
-loom_target_table_cc_library(
-  NAME
-    generic_core_lower_rules
-  GENERATOR
-    loom::py::loom::gen::target::contracts::llvmir_lower_rule_shard
-  ARGS
-    "--contract-fragment=llvmir.generic.core"
-  DEPS
+  LOWER_RULE_DEPS
     loom::codegen::low::lower
     loom::ops::buffer
     loom::ops::index

@@ -8,22 +8,6 @@
 
 #include "loom/ops/low/ops.h"
 
-iree_host_size_t loom_low_allocation_move_topology_count_copy_ops(
-    const loom_region_t* body) {
-  IREE_ASSERT_ARGUMENT(body);
-  iree_host_size_t copy_count = 0;
-  loom_block_t* block = NULL;
-  loom_region_for_each_block(body, block) {
-    loom_op_t* op = NULL;
-    loom_block_for_each_op(block, op) {
-      if (loom_low_copy_isa(op)) {
-        ++copy_count;
-      }
-    }
-  }
-  return copy_count;
-}
-
 bool loom_low_allocation_move_topology_concat_requires_packet_materialization_for_module(
     const loom_module_t* module, const loom_op_t* op) {
   IREE_ASSERT_ARGUMENT(module);
@@ -42,16 +26,26 @@ bool loom_low_allocation_move_topology_concat_requires_packet_materialization_fo
   return false;
 }
 
-bool loom_low_allocation_move_topology_concat_requires_packet_materialization(
-    const loom_low_allocation_table_t* table, const loom_op_t* op) {
-  IREE_ASSERT_ARGUMENT(table);
-  return loom_low_allocation_move_topology_concat_requires_packet_materialization_for_module(
-      table->module, op);
+loom_low_allocation_packet_move_op_kind_t
+loom_low_allocation_move_topology_packet_move_op_kind(const loom_op_t* op) {
+  IREE_ASSERT_ARGUMENT(op);
+  if (loom_low_copy_isa(op)) {
+    return LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_COPY;
+  }
+  if (loom_low_move_isa(op)) {
+    return LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_MOVE;
+  }
+  if (loom_low_slice_isa(op)) {
+    return LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_SLICE;
+  }
+  if (loom_low_concat_isa(op)) {
+    return LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_CONCAT;
+  }
+  return LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_NONE;
 }
 
 bool loom_low_allocation_move_topology_op_has_packet_moves(
     const loom_op_t* op) {
-  IREE_ASSERT_ARGUMENT(op);
-  return loom_low_copy_isa(op) || loom_low_slice_isa(op) ||
-         loom_low_concat_isa(op);
+  return loom_low_allocation_move_topology_packet_move_op_kind(op) !=
+         LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_NONE;
 }

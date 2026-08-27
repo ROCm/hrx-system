@@ -86,9 +86,6 @@ struct NumaTopology {
 // Benchmark context
 //===----------------------------------------------------------------------===//
 
-// Default timeout for poll operations (5 seconds).
-static constexpr iree_duration_t kDefaultPollBudget = 5000 * 1000000LL;
-
 // Base context for CTS benchmarks.
 // Manages proactor lifetime and provides common helpers.
 struct BenchmarkContext {
@@ -105,7 +102,7 @@ struct BenchmarkContext {
     auto* context = static_cast<BenchmarkContext*>(user_data);
     context->last_status_code = iree_status_code(status);
     context->completions.fetch_add(1, std::memory_order_release);
-    iree_status_ignore(status);
+    iree_status_free(status);
   }
 
   void Reset() {
@@ -114,20 +111,15 @@ struct BenchmarkContext {
   }
 
   // Blocking poll until expected completions are received.
-  bool PollUntilComplete(int expected,
-                         iree_duration_t budget_ns = kDefaultPollBudget) {
-    iree_time_t deadline = iree_time_now() + budget_ns;
+  bool PollUntilComplete(int expected) {
     while (completions.load(std::memory_order_acquire) < expected) {
-      if (iree_time_now() >= deadline) return false;
       iree_host_size_t count = 0;
       iree_status_t status =
-          iree_async_proactor_poll(proactor, iree_make_timeout_ms(100), &count);
-      if (!iree_status_is_ok(status) &&
-          !iree_status_is_deadline_exceeded(status)) {
-        iree_status_ignore(status);
+          iree_async_proactor_poll(proactor, iree_infinite_timeout(), &count);
+      if (!iree_status_is_ok(status)) {
+        iree_status_free(status);
         return false;
       }
-      iree_status_ignore(status);
     }
     return last_status_code == IREE_STATUS_OK;
   }
@@ -135,24 +127,52 @@ struct BenchmarkContext {
   // Spin poll with immediate timeout for latency-sensitive benchmarks.
   // Does NOT yield - use this only inside manually-timed regions where
   // accuracy matters. For longer waits, use PollUntilComplete().
-  bool SpinPollUntilComplete(int expected,
-                             iree_duration_t budget_ns = kDefaultPollBudget) {
-    iree_time_t deadline = iree_time_now() + budget_ns;
+  bool SpinPollUntilComplete(int expected) {
     while (completions.load(std::memory_order_acquire) < expected) {
-      if (iree_time_now() >= deadline) return false;
       iree_host_size_t count = 0;
       iree_status_t status =
           iree_async_proactor_poll(proactor, iree_immediate_timeout(), &count);
       if (!iree_status_is_ok(status) &&
           !iree_status_is_deadline_exceeded(status)) {
-        iree_status_ignore(status);
+        iree_status_free(status);
         return false;
       }
-      iree_status_ignore(status);
+      iree_status_free(status);
     }
     return last_status_code == IREE_STATUS_OK;
   }
 };
+
+// Unregisters |relay| and polls until all backend references are gone.
+inline void WaitForRelayUnregistration(iree_async_proactor_t* proactor,
+                                       iree_async_relay_t* relay) {
+  struct CompletionState {
+    bool completed = false;
+  } state;
+  iree_async_relay_unregistered_callback_t callback = {
+      +[](void* user_data) {
+        static_cast<CompletionState*>(user_data)->completed = true;
+      },
+      &state,
+  };
+  iree_async_proactor_unregister_relay(proactor, relay, callback);
+  while (!state.completed) {
+    IREE_CHECK_OK(
+        iree_async_proactor_poll(proactor, iree_infinite_timeout(), NULL));
+  }
+}
+
+// Wakes |proactor| and polls until one progress event is processed.
+inline bool PollOneProgressEvent(iree_async_proactor_t* proactor) {
+  iree_async_proactor_wake(proactor);
+  iree_status_t status =
+      iree_async_proactor_poll(proactor, iree_infinite_timeout(), NULL);
+  if (!iree_status_is_ok(status)) {
+    iree_status_free(status);
+    return false;
+  }
+  return true;
+}
 
 // Creates a benchmark context with a proactor from the given factory.
 // Returns nullptr and calls state.SkipWithError() on failure.

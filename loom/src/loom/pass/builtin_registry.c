@@ -11,12 +11,16 @@
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/codegen/low/pipeline/pass_requirements.h"
 #include "loom/codegen/low/transforms/allocation.h"
+#include "loom/codegen/low/transforms/cfg_tuple_decomposition.h"
 #include "loom/codegen/low/transforms/dce.h"
 #include "loom/codegen/low/transforms/operand_forms.h"
 #include "loom/codegen/low/transforms/pipeline/source_to_low.h"
 #include "loom/codegen/low/transforms/pipeline/target_legalize.h"
 #include "loom/sanitizer/pipeline_passes.h"
 #include "loom/sanitizer/race_insertion.h"
+#include "loom/target/callgraph_specialization.h"
+#include "loom/target/pass_environment.h"
+#include "loom/target/pass_requirements.h"
 #include "loom/transforms/cfg/branch_fusion.h"
 #include "loom/transforms/cfg/branch_sink.h"
 #include "loom/transforms/cfg/cfg_simplify.h"
@@ -27,6 +31,7 @@
 #include "loom/transforms/kernel/kernel_async_legality.h"
 #include "loom/transforms/kernel/kernel_resources.h"
 #include "loom/transforms/kernel/promote_private_fragments.h"
+#include "loom/transforms/kernel/stage_loop_carried_fragments.h"
 #include "loom/transforms/loop/licm.h"
 #include "loom/transforms/loop/loop_fusion.h"
 #include "loom/transforms/math/legalize.h"
@@ -37,7 +42,9 @@
 #include "loom/transforms/symbol/refine_boundaries.h"
 #include "loom/transforms/symbol/symbol_dce.h"
 #include "loom/transforms/symbol/template_selection.h"
+#include "loom/transforms/vector/bank_sroa.h"
 #include "loom/transforms/vector/memory_footprint.h"
+#include "loom/transforms/vector/sink_single_use_reads.h"
 #include "loom/transforms/vector/to_scalar.h"
 #include "loom/transforms/view/linearize_view_accesses.h"
 
@@ -290,6 +297,18 @@ static const loom_pass_option_schema_t kTemplateSelectionOptionSchema[] = {
     },
 };
 
+static const loom_pass_requirement_def_t
+    kTargetCallgraphSpecializationRequirements[] = {
+        {
+            .capability_type = &loom_target_pass_capability_type,
+            .key = IREE_SVL(
+                LOOM_TARGET_PASS_REQUIREMENT_MUTABLE_FUNCTION_VERSIONS),
+            .description =
+                IREE_SVL("Requires mutable invocation-local concrete "
+                         "function versions."),
+        },
+};
+
 static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
     {
         .key = IREE_SVL("branch-fusion"),
@@ -363,6 +382,11 @@ static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
         .function_run = loom_low_dce_run,
         .requirement_defs = kLowDceRequirements,
         .requirement_count = IREE_ARRAYSIZE(kLowDceRequirements),
+    },
+    {
+        .key = IREE_SVL("low-decompose-cfg-tuples"),
+        .info = loom_low_decompose_cfg_tuples_pass_info,
+        .function_run = loom_low_decompose_cfg_tuples_run,
     },
     {
         .key = IREE_SVL("low-materialize-allocation"),
@@ -447,6 +471,11 @@ static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
         .option_schema_count = IREE_ARRAYSIZE(kTemplateSelectionOptionSchema),
     },
     {
+        .key = IREE_SVL("sink-single-use-reads"),
+        .info = loom_sink_single_use_reads_pass_info,
+        .function_run = loom_sink_single_use_reads_run,
+    },
+    {
         .key = IREE_SVL("source-to-low"),
         .info = loom_low_source_to_low_pass_info,
         .module_run = loom_low_source_to_low_run,
@@ -455,6 +484,24 @@ static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
         .option_schema_count = IREE_ARRAYSIZE(kLowSourceToLowOptionSchema),
         .requirement_defs = kLowSourceToLowRequirements,
         .requirement_count = IREE_ARRAYSIZE(kLowSourceToLowRequirements),
+    },
+    {
+        .key = IREE_SVL("specialize-target-callgraph"),
+        .info = loom_target_callgraph_specialization_pass_info,
+        .module_run = loom_target_callgraph_specialization_run,
+        .requirement_defs = kTargetCallgraphSpecializationRequirements,
+        .requirement_count =
+            IREE_ARRAYSIZE(kTargetCallgraphSpecializationRequirements),
+    },
+    {
+        .key = IREE_SVL("sroa-vector-banks"),
+        .info = loom_vector_bank_sroa_pass_info,
+        .function_run = loom_vector_bank_sroa_run,
+    },
+    {
+        .key = IREE_SVL("stage-loop-carried-fragments"),
+        .info = loom_stage_loop_carried_fragments_pass_info,
+        .function_run = loom_stage_loop_carried_fragments_run,
     },
     {
         .key = IREE_SVL("strip-hints"),

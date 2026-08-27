@@ -11,6 +11,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/ir/float_facts.h"
 
 namespace loom {
 namespace {
@@ -72,7 +73,7 @@ TEST_F(AnalysisTypeRefinementTest, NegativeDimensionFactConflicts) {
 }
 
 TEST_F(AnalysisTypeRefinementTest, FloatDimensionFactConflicts) {
-  DefineFacts(1, loom_value_facts_exact_f64(4.0));
+  DefineFacts(1, loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 4.0));
   loom_type_t current = loom_type_shaped_1d(
       LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I32, loom_dim_pack_dynamic(1), 0);
 

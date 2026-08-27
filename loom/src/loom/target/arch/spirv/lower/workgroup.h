@@ -21,6 +21,11 @@ iree_status_t loom_spirv_select_workgroup_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_plan_t* out_plan);
 
+// Marks the exact source SSA storage consumed by a selected Workgroup plan.
+void loom_spirv_mark_workgroup_plan_storage_demands(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_low_lower_plan_t plan);
+
 // Emits a previously selected Workgroup storage plan.
 iree_status_t loom_spirv_lower_workgroup_op(loom_low_lower_context_t* context,
                                             const loom_op_t* source_op,

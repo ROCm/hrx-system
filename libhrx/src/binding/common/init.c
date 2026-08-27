@@ -110,7 +110,8 @@ static iree_status_t iree_hal_streaming_query_device_info(
                             "iree_device_size_t range");
   }
   device->total_memory = (iree_device_size_t)total_memory;
-  device->free_memory = device->total_memory;
+  iree_atomic_store(&device->free_memory, device->total_memory,
+                    iree_memory_order_relaxed);
 
   const iree_hal_device_spec_t* device_spec =
       iree_hal_device_spec(device->hal_device);
@@ -185,6 +186,9 @@ static iree_status_t iree_hal_streaming_query_device_info(
   device->max_shared_memory_per_block = iree_hal_streaming_u32_or_default(
       execution ? execution->maximum_workgroup_local_memory_size : 0,
       (is_gfx942 || is_gfx1100) ? 65536u : 49152u);
+  device->max_shared_memory_per_block_optin = iree_hal_streaming_u32_or_default(
+      execution ? execution->maximum_workgroup_local_memory_size_optin : 0,
+      device->max_shared_memory_per_block);
 
   return iree_ok_status();
 }
@@ -492,17 +496,28 @@ void iree_hal_streaming_unregister_context(
 //===----------------------------------------------------------------------===//
 
 iree_status_t iree_hal_streaming_init_global(
-    iree_hal_streaming_init_flags_t flags, iree_allocator_t host_allocator) {
+    const iree_hal_device_create_params_extension_t* device_extensions,
+    iree_allocator_t host_allocator) {
   IREE_TRACE_ZONE_BEGIN(z0);
   if (iree_hal_streaming_global_registry &&
       iree_hal_streaming_global_registry->initialized) {
+    if (IREE_UNLIKELY(iree_hal_streaming_global_registry->device_extensions !=
+                      device_extensions)) {
+      IREE_TRACE_ZONE_END(z0);
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "streaming runtime is already initialized with a different HAL "
+          "device extension configuration");
+    }
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }
 
   // Initialize pyre GPU subsystem (idempotent — handles HSA init,
   // driver registration, device enumeration).
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, HRX_CALL(hrx_gpu_initialize(0)));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, HRX_CALL(hrx_gpu_initialize_with_device_extensions(
+              /*flags=*/0, device_extensions)));
 
   // Create global registry.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -514,6 +529,7 @@ iree_status_t iree_hal_streaming_init_global(
       iree_hal_streaming_device_registry();
   memset(device_registry, 0, sizeof(*device_registry));
   device_registry->host_allocator = host_allocator;
+  device_registry->device_extensions = device_extensions;
   iree_slim_mutex_initialize(&device_registry->mutex);
 
   // Initialize context list.

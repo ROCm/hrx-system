@@ -178,6 +178,23 @@ static iree_status_t iree_hal_amdgpu_kernarg_layout_validate_no_source_overlap(
 
 static iree_status_t iree_hal_amdgpu_kernarg_layout_validate_params(
     const iree_hal_amdgpu_kernarg_layout_params_t* params) {
+  const iree_hal_amdgpu_kernarg_layout_flags_t allowed_declared_flags =
+      IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_USES_IMPLICIT_BLOCK_COUNT;
+  if (IREE_UNLIKELY(params->declared_flags & ~allowed_declared_flags)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported declared kernarg layout flags 0x%08X",
+                            params->declared_flags);
+  }
+  if (IREE_UNLIKELY(
+          iree_any_bit_set(
+              params->declared_flags,
+              IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_USES_IMPLICIT_BLOCK_COUNT) &&
+          params->implicit_args_byte_offset ==
+              IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "implicit block-count use requires an implicit-argument suffix");
+  }
   if (IREE_UNLIKELY(params->kernarg_byte_length >
                     IREE_HAL_AMDGPU_KERNARG_LAYOUT_MAX_BYTE_LENGTH)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -334,8 +351,7 @@ iree_status_t iree_hal_amdgpu_kernarg_layout_initialize(
 
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_kernarg_layout_validate_params(params));
 
-  iree_hal_amdgpu_kernarg_layout_flags_t flags =
-      IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_NONE;
+  iree_hal_amdgpu_kernarg_layout_flags_t flags = params->declared_flags;
   if (params->implicit_args_byte_offset !=
       IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE) {
     flags |= IREE_HAL_AMDGPU_KERNARG_LAYOUT_FLAG_IMPLICIT_ARGS;

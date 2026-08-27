@@ -121,6 +121,48 @@ static inline void iree_memcpy_stream_dst(void* IREE_RESTRICT dst,
 // Checked arithmetic helpers
 //===----------------------------------------------------------------------===//
 
+// Performs a checked unsigned 64-bit addition of |a| and |b|, storing the
+// result in |out_result|. Returns true if the addition succeeded without
+// overflow, false if overflow occurred (|out_result| is undefined on
+// overflow).
+static inline bool iree_checked_add_u64(uint64_t a, uint64_t b,
+                                        uint64_t* out_result) {
+#if IREE_HAVE_BUILTIN(__builtin_add_overflow)
+  return !__builtin_add_overflow(a, b, out_result);
+#else
+  if (a > UINT64_MAX - b) return false;
+  *out_result = a + b;
+  return true;
+#endif
+}
+
+// Performs a checked unsigned 64-bit multiplication of |a| and |b|, storing
+// the result in |out_result|. Returns true if the multiplication succeeded
+// without overflow, false if overflow occurred (|out_result| is undefined on
+// overflow).
+static inline bool iree_checked_mul_u64(uint64_t a, uint64_t b,
+                                        uint64_t* out_result) {
+#if IREE_HAVE_BUILTIN(__builtin_mul_overflow)
+  return !__builtin_mul_overflow(a, b, out_result);
+#else
+  if (b != 0 && a > UINT64_MAX / b) return false;
+  *out_result = a * b;
+  return true;
+#endif
+}
+
+// Aligns |value| up to |alignment| with overflow checking.
+// |alignment| must be a power of two.
+// Returns true if the alignment succeeded without overflow, false if overflow
+// occurred (|out_aligned| is undefined on overflow).
+static inline bool iree_checked_align_u64(uint64_t value, uint64_t alignment,
+                                          uint64_t* out_aligned) {
+  uint64_t padded = 0;
+  if (!iree_checked_add_u64(value, alignment - 1, &padded)) return false;
+  *out_aligned = padded & ~(alignment - 1);
+  return true;
+}
+
 // Performs a checked signed 32-bit addition of |a| and |b|, storing the result
 // in |out_result|. Returns true if the addition succeeded without overflow,
 // false if overflow occurred (|out_result| is undefined on overflow).
@@ -174,6 +216,23 @@ static inline bool iree_checked_add_i64(int64_t a, int64_t b,
     return false;
   }
   *out_result = a + b;
+  return true;
+#endif
+}
+
+// Performs a checked signed 64-bit subtraction of |b| from |a|, storing the
+// result in |out_result|. Returns true if the subtraction succeeded without
+// overflow, false if overflow occurred (|out_result| is undefined on
+// overflow).
+static inline bool iree_checked_sub_i64(int64_t a, int64_t b,
+                                        int64_t* out_result) {
+#if IREE_HAVE_BUILTIN(__builtin_sub_overflow)
+  return !__builtin_sub_overflow(a, b, out_result);
+#else
+  if ((b > 0 && a < INT64_MIN + b) || (b < 0 && a > INT64_MAX + b)) {
+    return false;
+  }
+  *out_result = a - b;
   return true;
 #endif
 }
@@ -474,7 +533,8 @@ iree_struct_layout_calculate(iree_host_size_t base_size,
 //===----------------------------------------------------------------------===//
 
 // Controls the behavior of an iree_allocator_ctl_fn_t callback function.
-typedef enum iree_allocator_command_e {
+typedef uint32_t iree_allocator_command_t;
+enum {
   // Allocates |byte_length| of memory and stores the pointer in |inout_ptr|.
   // Systems should align to 16 byte boundaries (or otherwise their natural
   // SIMD alignment). The runtime pools internally and small allocations
@@ -520,14 +580,19 @@ typedef enum iree_allocator_command_e {
   // This would take a pointer/length and a NUMA node ID to bind the memory to.
   // We may want flags for controlling whether this is a new allocation getting
   // bound or an existing one that is migrating to use MPOL_MF_MOVE.
-} iree_allocator_command_t;
+};
 
 // Parameters for various allocation commands.
+#if !defined(IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_)
+#define IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_
 typedef struct iree_allocator_alloc_params_t {
   // Minimum size, in bytes, of the allocation. The underlying allocator may
   // pad the length out if needed.
   iree_host_size_t byte_length;
 } iree_allocator_alloc_params_t;
+#else
+typedef struct iree_allocator_alloc_params_t iree_allocator_alloc_params_t;
+#endif  // !IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_
 
 // Function pointer for an iree_allocator_t control function.
 // |command| provides the operation to perform. Optionally some commands may use

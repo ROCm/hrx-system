@@ -6,7 +6,7 @@
 // This tiny two-row GEMV-style fixture proves the repack path computes the same
 // integer contribution a scalar reference decode would produce when scale=1.
 func.def @q4_0_repack_to_dot8i4_micro_gemv() -> (i32, i32) {
-  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
   test.use %schema : encoding<schema>
 
   %row0_storage = scalar.constant 1985229328 : i32
@@ -26,7 +26,7 @@ func.def @q4_0_repack_to_dot8i4_micro_gemv() -> (i32, i32) {
 }
 // ----
 func.def @q4_0_repack_to_dot8i4_micro_gemv() -> (i32, i32) {
-  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
   test.use %schema : encoding<schema>
   %r0 = scalar.constant -112 : i32
   %r1 = scalar.constant 112 : i32
@@ -39,7 +39,7 @@ func.def @q4_0_repack_to_dot8i4_micro_gemv() -> (i32, i32) {
 // readable decode path alive even when a target later rewrites the same format
 // into packed dot operations.
 func.def @q4_0_reference_chunk_folds() -> (i1) {
-  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
   test.use %schema : encoding<schema>
 
   %b0 = scalar.constant 0x10 : i8
@@ -70,7 +70,7 @@ func.def @q4_0_reference_chunk_folds() -> (i1) {
 }
 // ----
 func.def @q4_0_reference_chunk_folds() -> (i1) {
-  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
   test.use %schema : encoding<schema>
   %ok = scalar.constant true : i1
   func.return %ok : i1
@@ -83,7 +83,7 @@ func.def @q4_0_reference_chunk_folds() -> (i1) {
 // folding gives Model matmul imports a readable oracle before a target elects a
 // native packed dot path.
 func.def @q8_0_reference_chunk_folds() -> (i1) {
-  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
+  %schema = encoding.define #ggml.q8_0 : encoding<schema>
   test.use %schema : encoding<schema>
 
   %q0 = scalar.constant -3 : i8
@@ -109,7 +109,7 @@ func.def @q8_0_reference_chunk_folds() -> (i1) {
 }
 // ----
 func.def @q8_0_reference_chunk_folds() -> (i1) {
-  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
+  %schema = encoding.define #ggml.q8_0 : encoding<schema>
   test.use %schema : encoding<schema>
   %ok = scalar.constant true : i1
   func.return %ok : i1
@@ -121,7 +121,7 @@ func.def @q8_0_reference_chunk_folds() -> (i1) {
 // This is the scalar/reference shape for Model FFN and attention projections
 // before online activation quantization or a native packed-dot path is selected.
 func.def @q8_0_dense_activation_dot_folds() -> (i1) {
-  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
+  %schema = encoding.define #ggml.q8_0 : encoding<schema>
   test.use %schema : encoding<schema>
 
   %q0 = scalar.constant -3 : i8
@@ -142,15 +142,15 @@ func.def @q8_0_dense_activation_dot_folds() -> (i1) {
   %activation = vector.from_elements %a0, %a1, %a2, %a3 : vector<4xf32>
 
   %products = vector.mulf %decoded, %activation : vector<4xf32>
-  %zero = scalar.constant 0.0 : f32
-  %dot = vector.reduce<addf> %products, %zero : vector<4xf32>, f32
+  %dot_init = scalar.constant 0.0 : f32
+  %dot = vector.reduce<addf> %products, %dot_init : vector<4xf32>, f32
   %expected = scalar.constant 0.875 : f32
   %ok = scalar.cmpf oeq, %dot, %expected : f32
   func.return %ok : i1
 }
 // ----
 func.def @q8_0_dense_activation_dot_folds() -> (i1) {
-  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
+  %schema = encoding.define #ggml.q8_0 : encoding<schema>
   test.use %schema : encoding<schema>
   %ok = scalar.constant true : i1
   func.return %ok : i1
@@ -162,7 +162,7 @@ func.def @q8_0_dense_activation_dot_folds() -> (i1) {
 // useful Model projection slice: each row has independent signed-byte payloads
 // and an independent block scale, while the activation block is common.
 func.def @q8_0_two_row_micro_gemv_folds() -> (f32, f32) {
-  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
+  %schema = encoding.define #ggml.q8_0 : encoding<schema>
   test.use %schema : encoding<schema>
 
   %row0_q0 = scalar.constant -3 : i8
@@ -195,14 +195,14 @@ func.def @q8_0_two_row_micro_gemv_folds() -> (f32, f32) {
 
   %row0_products = vector.mulf %row0_decoded, %activation : vector<4xf32>
   %row1_products = vector.mulf %row1_decoded, %activation : vector<4xf32>
-  %zero = scalar.constant 0.0 : f32
-  %row0_dot = vector.reduce<addf> %row0_products, %zero : vector<4xf32>, f32
-  %row1_dot = vector.reduce<addf> %row1_products, %zero : vector<4xf32>, f32
+  %dot_init = scalar.constant 0.0 : f32
+  %row0_dot = vector.reduce<addf> %row0_products, %dot_init : vector<4xf32>, f32
+  %row1_dot = vector.reduce<addf> %row1_products, %dot_init : vector<4xf32>, f32
   func.return %row0_dot, %row1_dot : f32, f32
 }
 // ----
 func.def @q8_0_two_row_micro_gemv_folds() -> (f32, f32) {
-  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
+  %schema = encoding.define #ggml.q8_0 : encoding<schema>
   test.use %schema : encoding<schema>
   %row0_dot = scalar.constant 0.875 : f32
   %row1_dot = scalar.constant -0.8125 : f32
@@ -215,7 +215,7 @@ func.def @q8_0_two_row_micro_gemv_folds() -> (f32, f32) {
 // floating dot semantics. It shares the same lane values and scale product as
 // the explicit integer-dot contract below so the numeric boundary is obvious.
 func.def @q8_0_decoded_pair_dot_reference_folds() -> (f32) {
-  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
+  %schema = encoding.define #ggml.q8_0 : encoding<schema>
 
   %lhs0 = scalar.constant -3 : i8
   %lhs1 = scalar.constant -1 : i8
@@ -233,8 +233,8 @@ func.def @q8_0_decoded_pair_dot_reference_folds() -> (f32) {
   %rhs_scale = vector.constant -0.25 : vector<1xf16>
   %lhs = vector.decode %lhs_payload using %schema {scale = %lhs_scale : vector<1xf16>} : vector<4xi8>, encoding<schema> -> vector<4xf32>
   %rhs = vector.decode %rhs_payload using %schema {scale = %rhs_scale : vector<1xf16>} : vector<4xi8>, encoding<schema> -> vector<4xf32>
-  %zero = scalar.constant 0.0 : f32
-  %dot = vector.dotf %lhs, %rhs, %zero : vector<4xf32>, vector<4xf32>, f32
+  %dot_init = scalar.constant 0.0 : f32
+  %dot = vector.dotf %lhs, %rhs, %dot_init : vector<4xf32>, vector<4xf32>, f32
   func.return %dot : f32
 }
 // ----
@@ -250,7 +250,7 @@ func.def @q8_0_decoded_pair_dot_reference_folds() -> (f32) {
 // choosing this form means the frontend/importer owns the regrouped integer-dot
 // semantics and the target can select DP4A/VNNI-style instructions directly.
 func.def @q8_0_explicit_scaled_dot4i_contract_folds() -> (f32) {
-  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
+  %schema = encoding.define #ggml.q8_0 : encoding<schema>
   test.use %schema : encoding<schema>
 
   %lhs0 = scalar.constant -3 : i8
@@ -277,7 +277,7 @@ func.def @q8_0_explicit_scaled_dot4i_contract_folds() -> (f32) {
 }
 // ----
 func.def @q8_0_explicit_scaled_dot4i_contract_folds() -> (f32) {
-  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
+  %schema = encoding.define #ggml.q8_0 : encoding<schema>
   test.use %schema : encoding<schema>
   %result = scalar.constant 1.75 : f32
   func.return %result : f32
@@ -289,7 +289,7 @@ func.def @q8_0_explicit_scaled_dot4i_contract_folds() -> (f32) {
 // opaque semantic op. Later target selection can match this visible signed
 // conversion and scale multiply shape.
 func.def @q8_0_vector_decode_expands(%payload: vector<32xi8>, %scale: vector<1xf16>) -> (vector<32xf32>) {
-  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
+  %schema = encoding.define #ggml.q8_0 : encoding<schema>
   %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf16>} : vector<32xi8>, encoding<schema> -> vector<32xf32>
   func.return %decoded : vector<32xf32>
 }
@@ -310,11 +310,11 @@ func.def @q8_0_vector_decode_expands(%payload: vector<32xi8>, %scale: vector<1xf
 // decode expansion. A packed integer dot rewrite would be a different numeric
 // contract, so canonicalize must not invent one here.
 func.def @q8_0_decoded_dotf_keeps_strict_float_contract(%lhs_payload: vector<32xi8>, %rhs_payload: vector<32xi8>, %lhs_scale: vector<1xf16>, %rhs_scale: vector<1xf16>) -> (f32) {
-  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
+  %schema = encoding.define #ggml.q8_0 : encoding<schema>
   %lhs = vector.decode %lhs_payload using %schema {scale = %lhs_scale : vector<1xf16>} : vector<32xi8>, encoding<schema> -> vector<32xf32>
   %rhs = vector.decode %rhs_payload using %schema {scale = %rhs_scale : vector<1xf16>} : vector<32xi8>, encoding<schema> -> vector<32xf32>
-  %zero = scalar.constant 0.0 : f32
-  %dot = vector.dotf %lhs, %rhs, %zero : vector<32xf32>, vector<32xf32>, f32
+  %dot_init = scalar.constant 0.0 : f32
+  %dot = vector.dotf %lhs, %rhs, %dot_init : vector<32xf32>, vector<32xf32>, f32
   func.return %dot : f32
 }
 // ----
@@ -331,8 +331,8 @@ func.def @q8_0_decoded_dotf_keeps_strict_float_contract(%lhs_payload: vector<32x
   %13 = vector.bitunpacks<8> %rhs_payload : vector<32xi8> -> vector<32xi32>
   %14 = vector.sitofp %13 : vector<32xi32> to vector<32xf32>
   %rhs = vector.mulf %14, %12 : vector<32xf32>
-  %zero = scalar.constant 0.0 : f32
-  %dot = vector.dotf %lhs, %rhs, %zero : vector<32xf32>, vector<32xf32>, f32
+  %dot_init = scalar.constant 0.0 : f32
+  %dot = vector.dotf %lhs, %rhs, %dot_init : vector<32xf32>, vector<32xf32>, f32
   func.return %dot : f32
 }
 
@@ -343,7 +343,7 @@ func.def @q8_0_decoded_dotf_keeps_strict_float_contract(%lhs_payload: vector<32x
 // handwritten reference fixtures, leaving no opaque decode op in the optimized
 // reference path.
 func.def @q8_0_vector_decode_folds() -> (i1) {
-  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
+  %schema = encoding.define #ggml.q8_0 : encoding<schema>
   %payload = vector.constant -3 : vector<32xi8>
   %scale = vector.constant 0.5 : vector<1xf16>
   %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf16>} : vector<32xi8>, encoding<schema> -> vector<32xf32>
@@ -365,7 +365,7 @@ func.def @q8_0_vector_decode_folds() -> (i1) {
 // stream, inserts those bits into low nibbles, and interleaves the logical
 // lane order. This folds only if the whole decode-adjacent fact chain lines up.
 func.def @q6_k_reference_chunk_folds() -> (i1) {
-  %schema = encoding.define #ggml_q6_k<block_elems=256, storage_bytes=210> : encoding<schema>
+  %schema = encoding.define #ggml.q6_k : encoding<schema>
   test.use %schema : encoding<schema>
 
   %l0 = scalar.constant 0x10 : i8
@@ -405,7 +405,7 @@ func.def @q6_k_reference_chunk_folds() -> (i1) {
 }
 // ----
 func.def @q6_k_reference_chunk_folds() -> (i1) {
-  %schema = encoding.define #ggml_q6_k<block_elems=256, storage_bytes=210> : encoding<schema>
+  %schema = encoding.define #ggml.q6_k : encoding<schema>
   test.use %schema : encoding<schema>
   %ok = scalar.constant true : i1
   func.return %ok : i1
@@ -416,7 +416,7 @@ func.def @q6_k_reference_chunk_folds() -> (i1) {
 // Grid/table-based formats keep the table explicit; facts can still fold exact
 // code streams through vector.table.lookup and vector.cmpf.
 func.def @iq_grid_reference_chunk_folds() -> (i1) {
-  %schema = encoding.define #ggml_iq_grid<code_bits=4, grid_elems=16> : encoding<schema>
+  %schema = encoding.define #encoding.u4<codebook=dynamic_table_operand, payload_elements=4, payload_packing=codebook_indices> : encoding<schema>
   test.use %schema : encoding<schema>
 
   %p0 = scalar.constant 0x10 : i8
@@ -450,7 +450,7 @@ func.def @iq_grid_reference_chunk_folds() -> (i1) {
 }
 // ----
 func.def @iq_grid_reference_chunk_folds() -> (i1) {
-  %schema = encoding.define #ggml_iq_grid<code_bits=4, grid_elems=16> : encoding<schema>
+  %schema = encoding.define #encoding.u4<codebook=dynamic_table_operand, payload_elements=4, payload_packing=codebook_indices> : encoding<schema>
   test.use %schema : encoding<schema>
   %ok = scalar.constant true : i1
   func.return %ok : i1

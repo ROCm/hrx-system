@@ -14,10 +14,12 @@ loom_check_test_suite(
     test
   SRCS
     "allocation_materialization.loom-test"
+    "cfg_tuple_decomposition.loom-test"
     "dce.loom-test"
     "source_to_low_options.loom-test"
     "source_to_low_structured_control.loom-test"
     "target_legalize.loom-test"
+    "target_legalize_buffer.loom-test"
     "target_legalize_diagnostics.loom-test"
     "target_legalize_matrix.loom-test"
     "target_legalize_report.loom-test"

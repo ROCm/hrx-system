@@ -11,11 +11,14 @@ from loom.assembly import (
     COLON,
     COMMA,
     GLUE,
+    LBRACKET,
     LPAREN,
+    RBRACKET,
     RPAREN,
     Attr,
     AttrDict,
     BlockArgs,
+    Clause,
     FormatElement,
     FuncArgs,
     OptionalGroup,
@@ -42,11 +45,13 @@ from loom.dsl import (
     ATTR_TYPE_ENUM,
     ATTR_TYPE_I64,
     ATTR_TYPE_STRING,
+    COMMAND_EFFECT,
     CONVERGENT,
     I1,
     INDEX,
     INTEGER,
     ISOLATED_FROM_ABOVE,
+    MEMORY_FENCE,
     PURE,
     SCALAR,
     SYMBOL_DEFINE,
@@ -55,6 +60,8 @@ from loom.dsl import (
     VECTOR,
     VIEW,
     AttrDef,
+    CallLikeInterface,
+    CallLikeKind,
     ContractFamily,
     Dialect,
     EnumCase,
@@ -63,6 +70,7 @@ from loom.dsl import (
     HasAncestor,
     HasParent,
     ImplicitTerminator,
+    NoAncestor,
     Op,
     Operand,
     OpPhase,
@@ -71,6 +79,8 @@ from loom.dsl import (
     Result,
     SameType,
     SymbolDefinition,
+    SymbolDefinitionFlag,
+    SymbolKernelContract,
     SymbolReference,
     TypeDef,
     TypeSemantic,
@@ -287,16 +297,17 @@ kernel_def = Op(
     attrs=list(_ENTRY_ATTRS),
     symbol_def=SymbolDefinition(
         field="callee",
-        name="function",
-        interfaces=["func_like"],
+        name="kernel",
+        interfaces=["func_like", "kernel", "kernel_entry"],
         bytecode_kind="LOOM_SYMBOL_FUNC_DEF",
         fact_domain="loom_func_symbol_fact_domain",
         retain="retain",
+        kernel_contract=SymbolKernelContract(workload_region="config"),
     ),
     regions=[
         RegionDef(
             "config",
-            doc=("Launch configuration region. The region owns host launch inputs and must terminate with kernel.launch.config."),
+            doc=("Pure launch configuration region. The region computes launch parameters from its workload arguments and immutable compilation inputs and must terminate with kernel.launch.config."),
             single_block=True,
             terminator="kernel.launch.config",
             buffer_arg_memory_space="global",
@@ -306,6 +317,7 @@ kernel_def = Op(
             doc="Kernel body.",
             terminator="kernel.return",
             buffer_arg_memory_space="global",
+            arg_uniform_scope="cluster",
         ),
     ],
     interfaces=[
@@ -330,7 +342,7 @@ kernel_def = Op(
     ],
     examples=[
         "kernel.def @entry() {\n  %one = index.constant 1 : index\n  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index\n} launch(%buffer: buffer) {\n  kernel.return\n}",
-        'kernel.def target(@gfx1100) export("matmul") @matmul(%m: index, %n: index) {\n  %one = index.constant 1 : index\n  %threads = index.constant 256 : index\n  kernel.launch.config workgroups(%m, %n, %one) workgroup_size(%threads, %one, %one) : index\n} launch(%lhs: buffer, %rhs: buffer, %out: buffer) {\n  kernel.return\n}',
+        'kernel.def target(@gfx11_generic) export("matmul") @matmul(%m: index, %n: index) {\n  %one = index.constant 1 : index\n  %threads = index.constant 256 : index\n  kernel.launch.config workgroups(%m, %n, %one) workgroup_size(%threads, %one, %one) : index\n} launch(%lhs: buffer, %rhs: buffer, %out: buffer) {\n  kernel.return\n}',
     ],
 )
 
@@ -339,7 +351,7 @@ kernel_launch_config = Op(
     "kernel.launch.config",
     group=kernel_ops,
     phase=OpPhase.EXECUTABLE,
-    doc=("Terminate a kernel launch configuration region with the computed workgroup grid and required workgroup size."),
+    doc=("Terminate a kernel launch configuration region with the computed workgroup grid, required workgroup size, and optional static workgroup-cluster size."),
     operands=[
         Operand(
             "workgroup_count_x",
@@ -371,8 +383,27 @@ kernel_launch_config = Op(
             INDEX,
             doc="Required workgroup size in the z dimension.",
         ),
+        Operand(
+            "workgroup_cluster_size_x",
+            INDEX,
+            optional=True,
+            doc="Static workgroup-cluster size in the x dimension.",
+        ),
+        Operand(
+            "workgroup_cluster_size_y",
+            INDEX,
+            optional=True,
+            doc="Static workgroup-cluster size in the y dimension.",
+        ),
+        Operand(
+            "workgroup_cluster_size_z",
+            INDEX,
+            optional=True,
+            doc="Static workgroup-cluster size in the z dimension.",
+        ),
     ],
     traits=[TERMINATOR, HasParent("kernel.def")],
+    verify="loom_kernel_launch_config_verify",
     format=[
         kw("workgroups"),
         GLUE,
@@ -394,11 +425,27 @@ kernel_launch_config = Op(
         Ref("workgroup_size_z"),
         GLUE,
         RPAREN,
+        OptionalGroup(
+            [
+                kw("cluster_size"),
+                GLUE,
+                LPAREN,
+                Ref("workgroup_cluster_size_x"),
+                COMMA,
+                Ref("workgroup_cluster_size_y"),
+                COMMA,
+                Ref("workgroup_cluster_size_z"),
+                GLUE,
+                RPAREN,
+            ],
+            anchor="workgroup_cluster_size_x",
+        ),
         COLON,
         TypeOf("workgroup_count_x"),
     ],
     examples=[
         "kernel.launch.config workgroups(%gx, %gy, %gz) workgroup_size(%sx, %sy, %sz) : index",
+        "kernel.launch.config workgroups(%gx, %gy, %gz) workgroup_size(%sx, %sy, %sz) cluster_size(%cx, %cy, %cz) : index",
     ],
 )
 
@@ -624,6 +671,139 @@ kernel_workgroup_count = Op(
     examples=["%count = kernel.workgroup.count<x> : index"],
 )
 
+
+# ============================================================================
+# Kernel workgroup-cluster query ops
+# ============================================================================
+
+kernel_cluster_id = Op(
+    name="kernel.cluster.id",
+    group=kernel_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Read one coordinate of the current workgroup cluster within the dispatch cluster grid. The global workgroup coordinate in a dimension is cluster.id * cluster.size + cluster.workgroup.id."),
+    results=[
+        Result(
+            "result",
+            INDEX,
+            doc="Current workgroup-cluster coordinate in the selected dimension.",
+        ),
+    ],
+    attrs=[
+        AttrDef(
+            "dimension",
+            ATTR_TYPE_ENUM,
+            enum_def=KernelDimension,
+            doc="Coordinate axis to read.",
+        ),
+    ],
+    traits=[PURE, HasAncestor("kernel.def")],
+    facts="loom_kernel_cluster_id_facts",
+    canonicalize="loom_kernel_cluster_id_canonicalize",
+    format=[TemplateParam("dimension"), COLON, ResultType("result")],
+    examples=["%cluster = kernel.cluster.id<x> : index"],
+)
+
+kernel_cluster_workgroup_id = Op(
+    name="kernel.cluster.workgroup.id",
+    group=kernel_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Read one coordinate of the current workgroup within its workgroup cluster. The coordinate is zero for an ordinary non-clustered launch."),
+    results=[
+        Result(
+            "result",
+            INDEX,
+            doc="Current workgroup coordinate within its cluster.",
+        ),
+    ],
+    attrs=[
+        AttrDef(
+            "dimension",
+            ATTR_TYPE_ENUM,
+            enum_def=KernelDimension,
+            doc="Coordinate axis to read.",
+        ),
+    ],
+    traits=[PURE, HasAncestor("kernel.def")],
+    facts="loom_kernel_cluster_workgroup_id_facts",
+    canonicalize="loom_kernel_cluster_workgroup_id_canonicalize",
+    format=[TemplateParam("dimension"), COLON, ResultType("result")],
+    examples=["%local_cluster_id = kernel.cluster.workgroup.id<y> : index"],
+)
+
+kernel_cluster_workgroup_flat_id = Op(
+    name="kernel.cluster.workgroup.flat_id",
+    group=kernel_ops,
+    builder_name="cluster_workgroup_flat_id",
+    phase=OpPhase.EXECUTABLE,
+    doc=("Read the row-major flat coordinate of the current workgroup within its workgroup cluster, with x as the minor dimension."),
+    results=[
+        Result(
+            "result",
+            INDEX,
+            doc="Flat current-workgroup coordinate within its cluster.",
+        ),
+    ],
+    traits=[PURE, HasAncestor("kernel.def")],
+    facts="loom_kernel_cluster_workgroup_flat_id_facts",
+    canonicalize="loom_kernel_cluster_workgroup_flat_id_canonicalize",
+    format=[COLON, ResultType("result")],
+    examples=["%local_cluster_rank = kernel.cluster.workgroup.flat_id : index"],
+)
+
+kernel_cluster_size = Op(
+    name="kernel.cluster.size",
+    group=kernel_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Read the selected workgroup-cluster extent. An ordinary non-clustered launch has extent one in every dimension."),
+    results=[
+        Result(
+            "result",
+            INDEX,
+            doc="Workgroup-cluster extent in the selected dimension.",
+        ),
+    ],
+    attrs=[
+        AttrDef(
+            "dimension",
+            ATTR_TYPE_ENUM,
+            enum_def=KernelDimension,
+            doc="Coordinate axis to read.",
+        ),
+    ],
+    traits=[PURE, HasAncestor("kernel.def")],
+    facts="loom_kernel_cluster_size_facts",
+    canonicalize="loom_kernel_cluster_size_canonicalize",
+    format=[TemplateParam("dimension"), COLON, ResultType("result")],
+    examples=["%cluster_size = kernel.cluster.size<y> : index"],
+)
+
+kernel_cluster_count = Op(
+    name="kernel.cluster.count",
+    group=kernel_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Read the number of workgroup clusters in one dispatch dimension. This is the exact quotient of workgroup.count by cluster.size."),
+    results=[
+        Result(
+            "result",
+            INDEX,
+            doc="Dispatched workgroup-cluster count in the selected dimension.",
+        ),
+    ],
+    attrs=[
+        AttrDef(
+            "dimension",
+            ATTR_TYPE_ENUM,
+            enum_def=KernelDimension,
+            doc="Coordinate axis to read.",
+        ),
+    ],
+    traits=[PURE, HasAncestor("kernel.def")],
+    facts="loom_kernel_cluster_count_facts",
+    canonicalize="loom_kernel_cluster_count_canonicalize",
+    format=[TemplateParam("dimension"), COLON, ResultType("result")],
+    examples=["%cluster_count = kernel.cluster.count<y> : index"],
+)
+
 kernel_workitem_dispatch_id = Op(
     name="kernel.workitem.dispatch.id",
     group=kernel_ops,
@@ -763,6 +943,7 @@ kernel_subgroup_broadcast = Op(
     constraints=[SameType("value", "result")],
     traits=_KERNEL_CONVERGENT_TRAITS,
     verify="loom_kernel_subgroup_broadcast_verify",
+    facts="loom_kernel_subgroup_broadcast_facts",
     format=[
         Ref("value"),
         kw("from"),
@@ -786,6 +967,7 @@ kernel_subgroup_broadcast_first = Op(
     constraints=[SameType("value", "result")],
     traits=_KERNEL_CONVERGENT_TRAITS,
     verify="loom_kernel_subgroup_value_result_verify",
+    facts="loom_kernel_subgroup_broadcast_first_facts",
     format=[Ref("value"), COLON, TypeOf("value")],
     examples=["%r = kernel.subgroup.broadcast.first %v : f32"],
 )
@@ -815,6 +997,7 @@ kernel_subgroup_reduce = Op(
     constraints=[SameType("value", "result")],
     traits=_KERNEL_CONVERGENT_TRAITS,
     verify="loom_kernel_subgroup_reduce_verify",
+    facts="loom_kernel_subgroup_reduce_facts",
     format=[
         TemplateParam("kind"),
         Ref("value"),
@@ -841,6 +1024,7 @@ kernel_subgroup_scan = Op(
     constraints=[SameType("value", "result")],
     traits=_KERNEL_CONVERGENT_TRAITS,
     verify="loom_kernel_subgroup_scan_verify",
+    facts="loom_kernel_scan_facts",
     format=[
         TemplateParam("kind"),
         Ref("value"),
@@ -964,6 +1148,7 @@ kernel_workgroup_reduce = Op(
     constraints=[SameType("value", "result")],
     traits=_KERNEL_CONVERGENT_TRAITS,
     verify="loom_kernel_workgroup_reduce_verify",
+    facts="loom_kernel_workgroup_reduce_facts",
     format=[TemplateParam("kind"), Ref("value"), COLON, TypeOf("value")],
     examples=["%sum = kernel.workgroup.reduce<addf> %v : f32"],
 )
@@ -984,6 +1169,7 @@ kernel_workgroup_scan = Op(
     constraints=[SameType("value", "result")],
     traits=_KERNEL_CONVERGENT_TRAITS,
     verify="loom_kernel_workgroup_scan_verify",
+    facts="loom_kernel_scan_facts",
     format=[
         TemplateParam("kind"),
         Ref("value"),
@@ -1003,6 +1189,7 @@ kernel_workgroup_vote_any = Op(
     operands=[Operand("predicate", I1, doc="Per-invocation predicate.")],
     results=[Result("result", I1, doc="Workgroup-uniform vote result.")],
     traits=_KERNEL_CONVERGENT_TRAITS,
+    facts="loom_kernel_workgroup_vote_facts",
     format=[Ref("predicate"), COLON, TypeOf("predicate")],
     examples=["%any = kernel.workgroup.vote.any %p : i1"],
 )
@@ -1016,6 +1203,7 @@ kernel_workgroup_vote_all = Op(
     operands=[Operand("predicate", I1, doc="Per-invocation predicate.")],
     results=[Result("result", I1, doc="Workgroup-uniform vote result.")],
     traits=_KERNEL_CONVERGENT_TRAITS,
+    facts="loom_kernel_workgroup_vote_facts",
     format=[Ref("predicate"), COLON, TypeOf("predicate")],
     examples=["%all = kernel.workgroup.vote.all %p : i1"],
 )
@@ -1030,6 +1218,7 @@ kernel_workgroup_vote_count = Op(
     results=[Result("result", INTEGER, doc="Integer true-predicate count.")],
     traits=_KERNEL_CONVERGENT_TRAITS,
     verify="loom_kernel_workgroup_vote_count_verify",
+    facts="loom_kernel_workgroup_vote_facts",
     format=[Ref("predicate"), COLON, TypeOf("predicate"), ARROW, ResultType("result")],
     examples=["%count = kernel.workgroup.vote.count %p : i1 -> i32"],
 )
@@ -1089,12 +1278,13 @@ kernel_barrier = Op(
     contracts=[ContractFamily.KERNEL_SYNCHRONIZATION],
     doc=(
         "Synchronize invocations in an explicit execution scope and fence a "
-        "named memory space with a required ordering. Supported source-level "
-        "kernel barriers synchronize either the current subgroup or workgroup "
-        "while fencing workgroup memory with acquire-release ordering. "
+        "named memory space with a required ordering. Workgroup-memory "
+        "barriers synchronize either the current subgroup or workgroup with "
+        "acquire-release ordering. Global-memory barriers synchronize the "
+        "current workgroup with acquire, release, or acquire-release ordering. "
         "Async-copy completion is modeled by kernel.async.wait; use "
         "kernel.barrier only when invocations must rendezvous before "
-        "consuming shared memory."
+        "consuming shared or global memory."
     ),
     attrs=[
         AttrDef(
@@ -1116,12 +1306,18 @@ kernel_barrier = Op(
             doc="Execution scope synchronized by the barrier.",
         ),
     ],
-    traits=[UNKNOWN_EFFECTS, CONVERGENT],
+    traits=[MEMORY_FENCE, CONVERGENT],
     verify="loom_kernel_barrier_verify",
-    format=[TemplateParam("memory_space"), AttrDict()],
+    format=[
+        TemplateParam("memory_space"),
+        Clause("scope", Attr("scope")),
+        Clause("ordering", Attr("ordering")),
+    ],
     examples=[
-        "kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}",
-        "kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}",
+        "kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)",
+        "kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)",
+        "kernel.barrier<global> scope(workgroup) ordering(release)",
+        "kernel.barrier<global> scope(workgroup) ordering(acquire)",
     ],
 )
 
@@ -1325,7 +1521,7 @@ kernel_async_gather_mask = Op(
 )
 
 # ============================================================================
-# kernel.async.cluster.gather — AMDGPU cluster broadcast into LDS
+# kernel.async.cluster.gather — workgroup-cluster gather into shared memory
 # ============================================================================
 
 kernel_async_cluster_gather = Op(
@@ -1333,22 +1529,22 @@ kernel_async_cluster_gather = Op(
     group=kernel_ops,
     contracts=[ContractFamily.KERNEL_ASYNC],
     doc=(
-        "Initiate an AMDGPU gfx1250+ cluster asynchronous load from a "
-        "global-like source view into a workgroup/LDS destination view. The "
-        "required i32 cluster_mask is the hardware workgroup broadcast mask "
-        "loaded through M0. Source and destination must have the same static "
+        "Initiate a workgroup-cluster asynchronous load from a global-like "
+        "source view into a workgroup/shared-memory destination view. The "
+        "required i32 cluster_mask is a semantic participant set: bit N names "
+        "flat cluster rank N, with x as the minor dimension. Source and "
+        "destination must have the same static "
         "byte footprint, and that footprint must be exactly 1, 4, 8, or 16 "
-        "bytes; target lowering maps those widths to "
-        "llvm.amdgcn.cluster.load.async.to.lds.b8/b32/b64/b128. The LLVM "
-        "offset and cache-policy immediate operands are lowering choices "
-        "derived from the view address and cache attributes, not separate Loom "
-        "semantics. The returned token must be committed to exactly one "
-        "kernel.async.group."
+        "bytes. Every named participant must execute the operation in the same "
+        "dynamic order with corresponding lane-local source and destination "
+        "addresses. Target lowering maps the participant set, addresses, and "
+        "cache policy to the selected machine protocol. The returned token "
+        "must be committed to exactly one kernel.async.group."
     ),
     operands=[
         Operand("source", VIEW, doc="Global-like source fragment broadcast across the cluster."),
         Operand("dest", VIEW, doc="Workgroup/LDS destination fragment for this workgroup."),
-        Operand("cluster_mask", INTEGER, doc="i32 workgroup-cluster broadcast mask consumed by the target M0 operand."),
+        Operand("cluster_mask", INTEGER, doc="i32 set of participating flat workgroup-cluster ranks."),
     ],
     results=[
         Result("token", ANY, doc="Opaque async-copy token for the cluster gather."),
@@ -1378,7 +1574,7 @@ kernel_async_cluster_gather = Op(
 )
 
 # ============================================================================
-# kernel.async.cluster.gather.mask — predicated AMDGPU cluster gather
+# kernel.async.cluster.gather.mask — predicated workgroup-cluster gather
 # ============================================================================
 
 kernel_async_cluster_gather_mask = Op(
@@ -1390,13 +1586,13 @@ kernel_async_cluster_gather_mask = Op(
         "perform no source or destination access for the current invocation "
         "but still produce a completed token, preserving a uniform async group "
         "shape for tails and guarded tiles. The cluster_mask remains the "
-        "target workgroup broadcast mask and is distinct from the scalar i1 "
+        "semantic participant set and is distinct from the scalar i1 "
         "predicate."
     ),
     operands=[
         Operand("source", VIEW, doc="Global-like source fragment broadcast across the cluster."),
         Operand("dest", VIEW, doc="Workgroup/LDS destination fragment for this workgroup."),
-        Operand("cluster_mask", INTEGER, doc="i32 workgroup-cluster broadcast mask consumed by the target M0 operand."),
+        Operand("cluster_mask", INTEGER, doc="i32 set of participating flat workgroup-cluster ranks."),
         Operand("predicate", I1, doc="Scalar predicate controlling this invocation's cluster gather."),
     ],
     results=[
@@ -1616,6 +1812,278 @@ kernel_async_wait = Op(
 )
 
 # ============================================================================
+# Host launch programs
+# ============================================================================
+
+kernel_decl = Op(
+    "kernel.decl",
+    group=kernel_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Bodyless declaration of a dispatchable kernel. The first signature declares workload values consumed by launch configuration and the launch signature declares the device ABI."),
+    traits=[SYMBOL_DEFINE],
+    operands=[
+        Operand("workloads", ANY, variadic=True),
+        Operand("args", ANY, variadic=True),
+    ],
+    attrs=list(_ENTRY_ATTRS),
+    symbol_def=SymbolDefinition(
+        field="callee",
+        name="kernel",
+        interfaces=["func_like", "kernel"],
+        bytecode_kind="LOOM_SYMBOL_FUNC_DECL",
+        fact_domain="loom_func_symbol_fact_domain",
+        retain="retain",
+        flags=[SymbolDefinitionFlag.DECLARATION],
+        kernel_contract=SymbolKernelContract(workload_operands="workloads"),
+    ),
+    interfaces=[
+        FuncLikeInterface(
+            callee="callee",
+            target="target",
+            export_symbol="export_symbol",
+            export_linkage="export_linkage",
+            predicates="predicates",
+            args="args",
+        )
+    ],
+    verify="loom_kernel_decl_verify",
+    format=[
+        *_ENTRY_RETAIN_FORMAT,
+        *_ENTRY_TARGET_FORMAT,
+        *_ENTRY_EXPORT_FORMAT,
+        SymbolRef("callee"),
+        Scope([FuncArgs("workloads")]),
+        kw("launch"),
+        Scope(
+            [
+                FuncArgs("args"),
+                OptionalGroup(
+                    [kw("where"), PredicateList("predicates")],
+                    anchor="predicates",
+                ),
+            ]
+        ),
+    ],
+    examples=[
+        "kernel.decl @scale_i32_buffer(%element_count: index) launch(%element_count: index, %input: buffer, %output: buffer)",
+        "kernel.decl @no_workload() launch(%output: buffer)",
+    ],
+)
+
+kernel_entry_decl = Op(
+    "kernel.entry.decl",
+    group=kernel_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Bodyless declaration of an executable kernel entry. The declaration owns the device ABI but has no workload-to-workgroup configuration contract, execution geometry, or implementation body."
+    ),
+    traits=[SYMBOL_DEFINE],
+    operands=[
+        Operand("args", ANY, variadic=True),
+    ],
+    attrs=[
+        AttrDef("callee", "symbol"),
+        AttrDef(
+            "target",
+            "symbol",
+            optional=True,
+            symbol_ref=SymbolReference("target", ["target"]),
+        ),
+        AttrDef("retain", "enum", enum_def=Retain, optional=True),
+    ],
+    symbol_def=SymbolDefinition(
+        field="callee",
+        name="kernel entry",
+        interfaces=["func_like", "kernel_entry"],
+        bytecode_kind="LOOM_SYMBOL_FUNC_DECL",
+        fact_domain="loom_func_symbol_fact_domain",
+        retain="retain",
+        flags=[SymbolDefinitionFlag.DECLARATION],
+    ),
+    interfaces=[
+        FuncLikeInterface(
+            callee="callee",
+            target="target",
+            args="args",
+        )
+    ],
+    format=[
+        *_ENTRY_RETAIN_FORMAT,
+        *_ENTRY_TARGET_FORMAT,
+        SymbolRef("callee"),
+        Scope([FuncArgs("args")]),
+    ],
+    examples=[
+        "kernel.entry.decl @fill(%count: index, %output: buffer)",
+        "kernel.entry.decl target(@gfx1250) @clustered(%output: buffer)",
+    ],
+)
+
+kernel_launch = Op(
+    "kernel.launch",
+    group=kernel_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Launch a kernel with explicit workload and device-ABI operands. Workloads configure the launch and never alter the kernel ABI."),
+    operands=[
+        Operand("workloads", ANY, variadic=True),
+        Operand("arguments", ANY, variadic=True),
+    ],
+    attrs=[
+        AttrDef(
+            "callee",
+            "symbol",
+            symbol_ref=SymbolReference("kernel", ["kernel"]),
+        ),
+    ],
+    traits=[UNKNOWN_EFFECTS, COMMAND_EFFECT, NoAncestor("kernel.def")],
+    interfaces=[
+        CallLikeInterface(
+            callee="callee",
+            operands="arguments",
+            results=None,
+            kind=CallLikeKind.SEMANTIC,
+        )
+    ],
+    verify="loom_kernel_launch_verify",
+    format=[
+        SymbolRef("callee"),
+        OptionalGroup(
+            [GLUE, LBRACKET, Refs("workloads"), RBRACKET],
+            anchor="workloads",
+        ),
+        GLUE,
+        LPAREN,
+        Refs("arguments"),
+        RPAREN,
+        COLON,
+        OptionalGroup(
+            [LBRACKET, TypesOf("workloads"), RBRACKET, GLUE],
+            anchor="workloads",
+        ),
+        LPAREN,
+        TypesOf("arguments"),
+        RPAREN,
+    ],
+    examples=[
+        "kernel.launch @fill[%count](%count, %output) : [index](index, buffer)",
+        "kernel.launch @no_workload(%output) : (buffer)",
+        "kernel.launch @no_arguments[%count]() : [index]()",
+    ],
+)
+
+kernel_dispatch = Op(
+    "kernel.dispatch",
+    group=kernel_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Dispatch an executable kernel entry with exact workgroup counts and "
+        "device-ABI operands. Counts are one to three index values or one "
+        "dense view<3xi32> for indirect dispatch. An optional XYZ workgroup "
+        "size overrides the executable entry default for targets supporting "
+        "dispatch-time workgroup sizes."
+    ),
+    operands=[
+        Operand("workgroup_counts", ANY, variadic=True),
+        Operand("arguments", ANY, variadic=True),
+        Operand("workgroup_size", INDEX, variadic=True),
+    ],
+    attrs=[
+        AttrDef(
+            "callee",
+            "symbol",
+            symbol_ref=SymbolReference("kernel entry", ["kernel_entry"]),
+        ),
+    ],
+    traits=[UNKNOWN_EFFECTS, COMMAND_EFFECT, NoAncestor("kernel.def")],
+    interfaces=[
+        CallLikeInterface(
+            callee="callee",
+            operands="arguments",
+            results=None,
+            kind=CallLikeKind.SEMANTIC,
+        )
+    ],
+    verify="loom_kernel_dispatch_verify",
+    format=[
+        SymbolRef("callee"),
+        GLUE,
+        LBRACKET,
+        Refs("workgroup_counts"),
+        RBRACKET,
+        GLUE,
+        LPAREN,
+        Refs("arguments"),
+        RPAREN,
+        OptionalGroup(
+            [Clause("workgroup_size", Refs("workgroup_size"))],
+            anchor="workgroup_size",
+        ),
+        COLON,
+        LBRACKET,
+        TypesOf("workgroup_counts"),
+        RBRACKET,
+        GLUE,
+        LPAREN,
+        TypesOf("arguments"),
+        RPAREN,
+    ],
+    examples=[
+        "kernel.dispatch @fill[%count](%count, %output) : [index](index, buffer)",
+        "kernel.dispatch @fill[%x, %y, %z](%count, %output) : [index, index, index](index, buffer)",
+        "kernel.dispatch @fill[%counts](%count, %output) : [view<3xi32>](index, buffer)",
+        "kernel.dispatch @fill[%count](%count, %output) workgroup_size(%x, %y, %z) : [index](index, buffer)",
+    ],
+)
+
+kernel_launch_yield = Op(
+    "kernel.launch.yield",
+    group=kernel_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc="Terminate a structured kernel launch schedule region.",
+    traits=[TERMINATOR],
+    verify="loom_kernel_launch_yield_verify",
+    format=[],
+    examples=["kernel.launch.yield"],
+)
+
+
+def _launch_schedule(name: str, doc: str) -> Op:
+    return Op(
+        name,
+        group=kernel_ops,
+        phase=OpPhase.EXECUTABLE,
+        doc=doc,
+        regions=[
+            RegionDef(
+                "body",
+                doc="Nested kernel launches and launch schedules.",
+                single_block=True,
+                terminator="kernel.launch.yield",
+            ),
+        ],
+        traits=[
+            UNKNOWN_EFFECTS,
+            COMMAND_EFFECT,
+            ImplicitTerminator("kernel.launch.yield"),
+            NoAncestor("kernel.def"),
+        ],
+        verify="loom_kernel_launch_schedule_verify",
+        format=[Region("body")],
+        examples=[f"{name} {{\n  kernel.launch.yield\n}}"],
+    )
+
+
+kernel_launch_serial = _launch_schedule(
+    "kernel.launch.serial",
+    "Order each child launch schedule after the preceding child completes.",
+)
+
+kernel_launch_concurrent = _launch_schedule(
+    "kernel.launch.concurrent",
+    "Run child launch schedules without dependency edges between siblings and join them on exit.",
+)
+
+# ============================================================================
 # Registry
 # ============================================================================
 
@@ -1668,4 +2136,16 @@ ALL_KERNEL_OPS: tuple[Op, ...] = (
     kernel_workgroup_vote_all,
     kernel_workgroup_vote_count,
     kernel_assert,
+    kernel_cluster_id,
+    kernel_cluster_workgroup_id,
+    kernel_cluster_workgroup_flat_id,
+    kernel_cluster_size,
+    kernel_cluster_count,
+    kernel_decl,
+    kernel_entry_decl,
+    kernel_launch,
+    kernel_dispatch,
+    kernel_launch_yield,
+    kernel_launch_serial,
+    kernel_launch_concurrent,
 )

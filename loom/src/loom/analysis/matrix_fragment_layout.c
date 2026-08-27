@@ -6,10 +6,76 @@
 
 #include "loom/analysis/matrix_fragment_layout.h"
 
+#include <string.h>
+
+void loom_matrix_fragment_apply_coordinate_projection(
+    const loom_matrix_fragment_coordinate_projection_term_t* terms,
+    uint8_t term_count,
+    const uint32_t
+        source_terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT],
+    uint32_t out_terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT]) {
+  memset(
+      out_terms, 0,
+      LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT * sizeof(out_terms[0]));
+  for (uint8_t i = 0; i < term_count; ++i) {
+    const loom_matrix_fragment_coordinate_projection_term_t* term = &terms[i];
+    uint32_t digit =
+        source_terms[term->source_dimension] / (uint32_t)term->source_divisor;
+    if (term->source_modulus != 0) {
+      digit %= term->source_modulus;
+    }
+    out_terms[term->destination_dimension] +=
+        digit * (uint32_t)term->destination_multiplier;
+  }
+}
+
+loom_matrix_fragment_coordinate_dimension_t
+loom_matrix_fragment_axis_coordinate_dimension(
+    loom_matrix_fragment_axis_t axis) {
+  switch (axis) {
+    case LOOM_MATRIX_FRAGMENT_AXIS_BLOCK:
+      return LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_BLOCK;
+    case LOOM_MATRIX_FRAGMENT_AXIS_ROW:
+      return LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW;
+    case LOOM_MATRIX_FRAGMENT_AXIS_COLUMN:
+      return LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN;
+    case LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION:
+      return LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_REDUCTION;
+    case LOOM_MATRIX_FRAGMENT_AXIS_COUNT:
+    default:
+      IREE_ASSERT_UNREACHABLE("invalid matrix fragment semantic axis");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+}
+
+loom_matrix_fragment_axis_t loom_matrix_fragment_coordinate_dimension_axis(
+    loom_matrix_fragment_coordinate_dimension_t dimension) {
+  switch (dimension) {
+    case LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_BLOCK:
+      return LOOM_MATRIX_FRAGMENT_AXIS_BLOCK;
+    case LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW:
+      return LOOM_MATRIX_FRAGMENT_AXIS_ROW;
+    case LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN:
+      return LOOM_MATRIX_FRAGMENT_AXIS_COLUMN;
+    case LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_REDUCTION:
+      return LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION;
+    case LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT:
+    case LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE:
+    case LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT:
+    default:
+      return LOOM_MATRIX_FRAGMENT_AXIS_COUNT;
+  }
+}
+
 static bool loom_matrix_fragment_coordinate_matches(
     loom_matrix_fragment_coordinate_t lhs,
     loom_matrix_fragment_coordinate_t rhs) {
   if (lhs.coordinate_flags != rhs.coordinate_flags) {
+    return false;
+  }
+  if (iree_any_bit_set(lhs.coordinate_flags,
+                       LOOM_MATRIX_FRAGMENT_COORDINATE_BLOCK) &&
+      lhs.block != rhs.block) {
     return false;
   }
   if (iree_any_bit_set(lhs.coordinate_flags,
@@ -27,6 +93,74 @@ static bool loom_matrix_fragment_coordinate_matches(
       lhs.reduction != rhs.reduction) {
     return false;
   }
+  return true;
+}
+
+bool loom_matrix_fragment_coordinate(
+    const loom_matrix_fragment_layout_t* layout,
+    loom_contract_operand_role_t role, uint16_t lane,
+    uint16_t payload_element_index,
+    loom_matrix_fragment_coordinate_t* out_coordinate) {
+  IREE_ASSERT_ARGUMENT(out_coordinate);
+
+  const loom_matrix_fragment_role_layout_t* role_layout =
+      loom_matrix_fragment_role_layout(layout, role);
+  return loom_matrix_fragment_coordinate_from_role_layout(
+      layout, role_layout, lane, payload_element_index, out_coordinate);
+}
+
+bool loom_matrix_fragment_coordinate_from_role_layout(
+    const loom_matrix_fragment_layout_t* layout,
+    const loom_matrix_fragment_role_layout_t* role_layout, uint16_t lane,
+    uint16_t payload_element_index,
+    loom_matrix_fragment_coordinate_t* out_coordinate) {
+  IREE_ASSERT_ARGUMENT(out_coordinate);
+  *out_coordinate = (loom_matrix_fragment_coordinate_t){0};
+  if (layout == NULL || role_layout == NULL || layout->wave_size == 0 ||
+      lane >= layout->wave_size ||
+      payload_element_index >= role_layout->payload_element_count ||
+      role_layout->coordinate_projection_plan == NULL ||
+      role_layout->coordinate_element_stride == 0 ||
+      payload_element_index < role_layout->coordinate_element_offset) {
+    return false;
+  }
+  if (role_layout->reduction_group.storage_element_count != 0 ||
+      role_layout->reduction_group.logical_element_count != 0) {
+    return false;
+  }
+
+  const uint32_t relative_payload_element =
+      payload_element_index - role_layout->coordinate_element_offset;
+  if ((relative_payload_element % role_layout->coordinate_element_stride) !=
+      0) {
+    return false;
+  }
+  const uint32_t coordinate_element_index =
+      relative_payload_element / role_layout->coordinate_element_stride;
+  if (coordinate_element_index >= role_layout->coordinate_element_count) {
+    return false;
+  }
+
+  const loom_matrix_fragment_coordinate_projection_plan_t* plan =
+      role_layout->coordinate_projection_plan;
+  const uint32_t source_terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT] =
+      {
+          [LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT] = lane,
+          [LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE] =
+              coordinate_element_index,
+      };
+  uint32_t terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT];
+  loom_matrix_fragment_apply_coordinate_projection(
+      plan->terms, plan->forward_term_count, source_terms, terms);
+  out_coordinate->coordinate_flags = role_layout->coordinate_flags;
+  out_coordinate->block =
+      (uint16_t)terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_BLOCK];
+  out_coordinate->row =
+      (uint16_t)terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW];
+  out_coordinate->column =
+      (uint16_t)terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN];
+  out_coordinate->reduction =
+      (uint16_t)terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_REDUCTION];
   return true;
 }
 
@@ -51,170 +185,15 @@ const loom_matrix_fragment_role_layout_t* loom_matrix_fragment_role_layout(
   }
 }
 
-bool loom_matrix_fragment_coordinate(
+bool loom_matrix_fragment_role_has_contiguous_lane_xor1_columns(
     const loom_matrix_fragment_layout_t* layout,
-    loom_contract_operand_role_t role, uint16_t lane, uint16_t register_index,
-    uint16_t element_index, loom_matrix_fragment_coordinate_t* out_coordinate) {
-  IREE_ASSERT_ARGUMENT(out_coordinate);
-
+    loom_contract_operand_role_t role) {
   const loom_matrix_fragment_role_layout_t* role_layout =
       loom_matrix_fragment_role_layout(layout, role);
-  return loom_matrix_fragment_coordinate_from_role_layout(
-      layout, role_layout, lane, register_index, element_index, out_coordinate);
-}
-
-bool loom_matrix_fragment_coordinate_from_role_layout(
-    const loom_matrix_fragment_layout_t* layout,
-    const loom_matrix_fragment_role_layout_t* role_layout, uint16_t lane,
-    uint16_t register_index, uint16_t element_index,
-    loom_matrix_fragment_coordinate_t* out_coordinate) {
-  IREE_ASSERT_ARGUMENT(out_coordinate);
-
-  *out_coordinate = (loom_matrix_fragment_coordinate_t){0};
-  if (layout == NULL || role_layout == NULL || layout->wave_size == 0 ||
-      lane >= layout->wave_size ||
-      register_index >= role_layout->register_count ||
-      element_index >= role_layout->elements_per_register) {
-    return false;
-  }
-
-  const loom_matrix_fragment_tile_shape_t tile_shape = layout->tile_shape;
-  if (tile_shape.result_row_count == 0 || tile_shape.result_column_count == 0 ||
-      tile_shape.reduction_count == 0) {
-    return false;
-  }
-
-  out_coordinate->coordinate_flags = role_layout->coordinate_flags;
-  switch (role_layout->map_kind) {
-    case LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_PACKED_REDUCTION: {
-      const uint32_t reduction =
-          (uint32_t)register_index * role_layout->elements_per_register +
-          element_index;
-      if (reduction >= tile_shape.reduction_count) {
-        return false;
-      }
-      out_coordinate->row = lane % tile_shape.result_row_count;
-      out_coordinate->reduction = (uint16_t)reduction;
-      return true;
-    }
-    case LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_PACKED_REDUCTION: {
-      const uint32_t reduction =
-          (uint32_t)register_index * role_layout->elements_per_register +
-          element_index;
-      if (reduction >= tile_shape.reduction_count) {
-        return false;
-      }
-      out_coordinate->column = lane % tile_shape.result_column_count;
-      out_coordinate->reduction = (uint16_t)reduction;
-      return true;
-    }
-    case LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN: {
-      const uint32_t lane_group_count =
-          layout->wave_size / tile_shape.result_column_count;
-      if (lane_group_count == 0 ||
-          (layout->wave_size % tile_shape.result_column_count) != 0) {
-        return false;
-      }
-      const uint32_t lane_group = lane / tile_shape.result_column_count;
-      const uint32_t row =
-          (uint32_t)register_index * lane_group_count + lane_group;
-      if (row >= tile_shape.result_row_count) {
-        return false;
-      }
-      out_coordinate->row = (uint16_t)row;
-      out_coordinate->column = lane % tile_shape.result_column_count;
-      return true;
-    }
-    case LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN_LOW_SUBWORD: {
-      if (element_index != 0) {
-        return false;
-      }
-      const uint32_t lane_group_count =
-          layout->wave_size / tile_shape.result_column_count;
-      if (lane_group_count == 0 ||
-          (layout->wave_size % tile_shape.result_column_count) != 0) {
-        return false;
-      }
-      const uint32_t lane_group = lane / tile_shape.result_column_count;
-      const uint32_t row =
-          (uint32_t)register_index * lane_group_count + lane_group;
-      if (row >= tile_shape.result_row_count) {
-        return false;
-      }
-      out_coordinate->row = (uint16_t)row;
-      out_coordinate->column = lane % tile_shape.result_column_count;
-      return true;
-    }
-    case LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_LANE_GROUP_PACKED_REDUCTION: {
-      const uint32_t lane_group = lane / tile_shape.result_row_count;
-      const uint32_t reduction =
-          lane_group * role_layout->register_count *
-              role_layout->elements_per_register +
-          (uint32_t)register_index * role_layout->elements_per_register +
-          element_index;
-      if (reduction >= tile_shape.reduction_count) {
-        return false;
-      }
-      out_coordinate->row = lane % tile_shape.result_row_count;
-      out_coordinate->reduction = (uint16_t)reduction;
-      return true;
-    }
-    case LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_LANE_GROUP_PACKED_REDUCTION: {
-      const uint32_t lane_group = lane / tile_shape.result_column_count;
-      const uint32_t reduction =
-          lane_group * role_layout->register_count *
-              role_layout->elements_per_register +
-          (uint32_t)register_index * role_layout->elements_per_register +
-          element_index;
-      if (reduction >= tile_shape.reduction_count) {
-        return false;
-      }
-      out_coordinate->column = lane % tile_shape.result_column_count;
-      out_coordinate->reduction = (uint16_t)reduction;
-      return true;
-    }
-    case LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN: {
-      const uint32_t row = (uint32_t)(lane / tile_shape.result_column_count) *
-                               role_layout->register_count +
-                           register_index;
-      if (row >= tile_shape.result_row_count) {
-        return false;
-      }
-      out_coordinate->row = (uint16_t)row;
-      out_coordinate->column = lane % tile_shape.result_column_count;
-      return true;
-    }
-    case LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN_LOW_SUBWORD: {
-      if (element_index != 0) {
-        return false;
-      }
-      const uint32_t row = (uint32_t)(lane / tile_shape.result_column_count) *
-                               role_layout->register_count +
-                           register_index;
-      if (row >= tile_shape.result_row_count) {
-        return false;
-      }
-      out_coordinate->row = (uint16_t)row;
-      out_coordinate->column = lane % tile_shape.result_column_count;
-      return true;
-    }
-    case LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_PACKED_ROW_COLUMN: {
-      const uint32_t row =
-          (uint32_t)(lane / tile_shape.result_column_count) *
-              role_layout->register_count * role_layout->elements_per_register +
-          (uint32_t)register_index * role_layout->elements_per_register +
-          element_index;
-      if (row >= tile_shape.result_row_count) {
-        return false;
-      }
-      out_coordinate->row = (uint16_t)row;
-      out_coordinate->column = lane % tile_shape.result_column_count;
-      return true;
-    }
-    case LOOM_MATRIX_FRAGMENT_MAP_UNKNOWN:
-    default:
-      return false;
-  }
+  return role_layout != NULL &&
+         iree_all_bits_set(
+             role_layout->flags,
+             LOOM_MATRIX_FRAGMENT_ROLE_LAYOUT_FLAG_CONTIGUOUS_LANE_XOR1_COLUMNS);
 }
 
 bool loom_matrix_fragment_physical_element_count(
@@ -232,25 +211,21 @@ bool loom_matrix_fragment_physical_element_count(
   }
 
   for (uint16_t lane = 0; lane < layout->wave_size; ++lane) {
-    for (uint16_t register_index = 0;
-         register_index < role_layout->register_count; ++register_index) {
-      for (uint16_t element_index = 0;
-           element_index < role_layout->elements_per_register;
-           ++element_index) {
-        loom_matrix_fragment_coordinate_t candidate = {0};
-        if (!loom_matrix_fragment_coordinate_from_role_layout(
-                layout, role_layout, lane, register_index, element_index,
-                &candidate)) {
-          continue;
-        }
-        if (!loom_matrix_fragment_coordinate_matches(candidate, coordinate)) {
-          continue;
-        }
-        if (*out_count == UINT16_MAX) {
-          return false;
-        }
-        ++(*out_count);
+    for (uint16_t payload_element_index = 0;
+         payload_element_index < role_layout->payload_element_count;
+         ++payload_element_index) {
+      loom_matrix_fragment_coordinate_t candidate = {0};
+      if (!loom_matrix_fragment_coordinate_from_role_layout(
+              layout, role_layout, lane, payload_element_index, &candidate)) {
+        continue;
       }
+      if (!loom_matrix_fragment_coordinate_matches(candidate, coordinate)) {
+        continue;
+      }
+      if (*out_count == UINT16_MAX) {
+        return false;
+      }
+      ++(*out_count);
     }
   }
   return *out_count != 0;
@@ -273,30 +248,25 @@ bool loom_matrix_fragment_physical_element(
 
   uint16_t current_occurrence = 0;
   for (uint16_t lane = 0; lane < layout->wave_size; ++lane) {
-    for (uint16_t register_index = 0;
-         register_index < role_layout->register_count; ++register_index) {
-      for (uint16_t element_index = 0;
-           element_index < role_layout->elements_per_register;
-           ++element_index) {
-        loom_matrix_fragment_coordinate_t candidate = {0};
-        if (!loom_matrix_fragment_coordinate_from_role_layout(
-                layout, role_layout, lane, register_index, element_index,
-                &candidate)) {
-          continue;
-        }
-        if (!loom_matrix_fragment_coordinate_matches(candidate, coordinate)) {
-          continue;
-        }
-        if (current_occurrence == occurrence_index) {
-          *out_element = (loom_matrix_fragment_physical_element_t){
-              .lane = lane,
-              .register_index = register_index,
-              .element_index = element_index,
-          };
-          return true;
-        }
-        ++current_occurrence;
+    for (uint16_t payload_element_index = 0;
+         payload_element_index < role_layout->payload_element_count;
+         ++payload_element_index) {
+      loom_matrix_fragment_coordinate_t candidate = {0};
+      if (!loom_matrix_fragment_coordinate_from_role_layout(
+              layout, role_layout, lane, payload_element_index, &candidate)) {
+        continue;
       }
+      if (!loom_matrix_fragment_coordinate_matches(candidate, coordinate)) {
+        continue;
+      }
+      if (current_occurrence == occurrence_index) {
+        *out_element = (loom_matrix_fragment_physical_element_t){
+            .lane = lane,
+            .payload_element_index = payload_element_index,
+        };
+        return true;
+      }
+      ++current_occurrence;
     }
   }
   return false;

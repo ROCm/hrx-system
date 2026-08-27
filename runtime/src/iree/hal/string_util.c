@@ -259,12 +259,22 @@ IREE_API_EXPORT iree_status_t iree_hal_format_element_type(
 IREE_API_EXPORT iree_status_t
 iree_hal_append_element_type_string(iree_hal_element_type_t element_type,
                                     iree_string_builder_t* string_builder) {
-  char temp[8];
   iree_host_size_t length = 0;
+  iree_status_t status =
+      iree_hal_format_element_type(element_type, 0, NULL, &length);
+  if (!iree_status_is_out_of_range(status)) {
+    return status;
+  }
+  iree_status_free(status);
+
+  char* buffer = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_hal_format_element_type(element_type, sizeof(temp), temp, &length));
-  return iree_string_builder_append_string(string_builder,
-                                           iree_make_string_view(temp, length));
+      iree_string_builder_append_inline(string_builder, length, &buffer));
+  if (buffer != NULL) {
+    IREE_RETURN_IF_ERROR(iree_hal_format_element_type(
+        element_type, length + /*NUL=*/1, buffer, NULL));
+  }
+  return iree_ok_status();
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_parse_shape_and_element_type(
@@ -604,38 +614,41 @@ IREE_API_EXPORT iree_status_t iree_hal_format_element(
       break;
     case IREE_HAL_ELEMENT_TYPE_FLOAT_8_E4M3_FN:
       n = iree_snprintf(buffer, buffer ? buffer_capacity : 0, "%G",
-                        iree_math_f8e4m3fn_to_f32(*(const uint8_t*)data.data));
+                        iree_math_f8e4m3fn_to_f64(*(const uint8_t*)data.data));
       break;
     case IREE_HAL_ELEMENT_TYPE_FLOAT_8_E4M3_FNUZ:
       n = iree_snprintf(
           buffer, buffer ? buffer_capacity : 0, "%G",
-          iree_math_f8e4m3fnuz_to_f32(*(const uint8_t*)data.data));
+          iree_math_f8e4m3fnuz_to_f64(*(const uint8_t*)data.data));
       break;
     case IREE_HAL_ELEMENT_TYPE_FLOAT_8_E5M2:
       n = iree_snprintf(buffer, buffer ? buffer_capacity : 0, "%G",
-                        iree_math_f8e5m2_to_f32(*(const uint8_t*)data.data));
+                        iree_math_f8e5m2_to_f64(*(const uint8_t*)data.data));
       break;
     case IREE_HAL_ELEMENT_TYPE_FLOAT_8_E5M2_FNUZ:
       n = iree_snprintf(
           buffer, buffer ? buffer_capacity : 0, "%G",
-          iree_math_f8e5m2fnuz_to_f32(*(const uint8_t*)data.data));
+          iree_math_f8e5m2fnuz_to_f64(*(const uint8_t*)data.data));
       break;
     case IREE_HAL_ELEMENT_TYPE_FLOAT_8_E8M0_FNU:
       n = iree_snprintf(buffer, buffer ? buffer_capacity : 0, "%G",
-                        iree_math_f8e8m0fnu_to_f32(*(const uint8_t*)data.data));
+                        iree_math_f8e8m0fnu_to_f64(*(const uint8_t*)data.data));
       break;
     case IREE_HAL_ELEMENT_TYPE_BFLOAT_16:
       n = iree_snprintf(buffer, buffer ? buffer_capacity : 0, "%G",
-                        iree_math_bf16_to_f32(*(const uint16_t*)data.data));
+                        iree_math_bf16_to_f64(*(const uint16_t*)data.data));
       break;
     case IREE_HAL_ELEMENT_TYPE_FLOAT_16:
       n = iree_snprintf(buffer, buffer ? buffer_capacity : 0, "%G",
-                        iree_math_f16_to_f32(*(const uint16_t*)data.data));
+                        iree_math_f16_to_f64(*(const uint16_t*)data.data));
       break;
-    case IREE_HAL_ELEMENT_TYPE_FLOAT_32:
+    case IREE_HAL_ELEMENT_TYPE_FLOAT_32: {
+      uint32_t f32_bits = 0;
+      memcpy(&f32_bits, data.data, sizeof(f32_bits));
       n = iree_snprintf(buffer, buffer ? buffer_capacity : 0, "%G",
-                        *(const float*)data.data);
+                        iree_math_make_f64_from_f32_bits(f32_bits));
       break;
+    }
     case IREE_HAL_ELEMENT_TYPE_FLOAT_64:
       n = iree_snprintf(buffer, buffer ? buffer_capacity : 0, "%G",
                         *(const double*)data.data);
@@ -668,7 +681,9 @@ IREE_API_EXPORT iree_status_t iree_hal_parse_buffer_elements(
       iree_hal_element_dense_byte_count(element_type);
   iree_host_size_t element_capacity = data_ptr.data_length / element_size;
   if (iree_string_view_is_empty(data_str)) {
-    memset(data_ptr.data, 0, data_ptr.data_length);
+    if (data_ptr.data_length > 0) {
+      memset(data_ptr.data, 0, data_ptr.data_length);
+    }
     return iree_ok_status();
   }
   iree_host_size_t src_i = 0;

@@ -11,10 +11,9 @@
         "contains": {
           "unordered": [
             "## iree-run-loom",
-            "--backend=vm",
-            "--backend=amdgpu",
-            "--binding=64xf32=0",
-            "--emit-target-artifact=kernel.hsaco",
+            "--backend=",
+            "--kernel-input-buffer=64xf32=0",
+            "--emit-target-artifact=",
             "--compile-report=summary"
           ]
         }
@@ -137,8 +136,7 @@
             "contains": [
               "EXEC @branchy",
               "\"artifact_kind\":\"vm-archive\"",
-              "\"status_code\":0",
-              "\"status\":\"OK\""
+              "\"status\":{\"code\":0,\"name\":\"OK\"}"
             ]
           }
         }

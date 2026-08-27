@@ -24,7 +24,6 @@ iree_status_t iree_benchmark_loom_event_sink_emit(
 iree_status_t iree_benchmark_loom_event_sink_emit_run(
     const iree_benchmark_loom_event_sink_t* sink,
     const iree_benchmark_loom_run_identity_t* run, bool dry_run,
-    iree_benchmark_loom_sample_compilation_mode_t sample_compilation_mode,
     const loom_sanitizer_options_t* sanitizer) {
   IREE_ASSERT_ARGUMENT(run);
   IREE_ASSERT_ARGUMENT(sanitizer);
@@ -35,7 +34,6 @@ iree_status_t iree_benchmark_loom_event_sink_emit_run(
                     {
                         .run = run,
                         .dry_run = dry_run,
-                        .sample_compilation_mode = sample_compilation_mode,
                         .sanitizer = *sanitizer,
                     },
             });
@@ -45,8 +43,7 @@ iree_status_t iree_benchmark_loom_event_sink_emit_plan(
     const iree_benchmark_loom_event_sink_t* sink,
     const iree_benchmark_loom_run_identity_t* run, const loom_module_t* module,
     const iree_benchmark_loom_selected_benchmark_t* selection,
-    const iree_benchmark_loom_options_t* options,
-    iree_benchmark_loom_sample_compilation_mode_t sample_compilation_mode) {
+    const iree_benchmark_loom_options_t* options) {
   IREE_ASSERT_ARGUMENT(run);
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(selection);
@@ -60,7 +57,6 @@ iree_status_t iree_benchmark_loom_event_sink_emit_plan(
                         .module = module,
                         .selection = selection,
                         .options = options,
-                        .sample_compilation_mode = sample_compilation_mode,
                     },
             });
 }
@@ -94,8 +90,7 @@ iree_status_t iree_benchmark_loom_event_sink_emit_summary(
     iree_host_size_t logical_sample_count, iree_host_size_t work_item_count,
     iree_host_size_t failure_count, iree_host_size_t failed_benchmark_count,
     iree_host_size_t correctness_sample_count,
-    iree_host_size_t correctness_failed_sample_count, bool dry_run,
-    iree_benchmark_loom_sample_compilation_mode_t sample_compilation_mode) {
+    iree_host_size_t correctness_failed_sample_count, bool dry_run) {
   IREE_ASSERT_ARGUMENT(run);
   return iree_benchmark_loom_event_sink_emit(
       sink, &(iree_benchmark_loom_event_t){
@@ -115,7 +110,6 @@ iree_status_t iree_benchmark_loom_event_sink_emit_summary(
                         .correctness_failed_sample_count =
                             correctness_failed_sample_count,
                         .dry_run = dry_run,
-                        .sample_compilation_mode = sample_compilation_mode,
                     },
             });
 }
@@ -170,7 +164,6 @@ iree_status_t iree_benchmark_loom_event_sink_emit_sample(
     iree_host_size_t work_item_index, const loom_module_t* module,
     const loom_testbench_benchmark_plan_t* benchmark_plan,
     const loom_testbench_case_plan_t* case_plan,
-    iree_string_view_t sample_compilation,
     iree_host_size_t benchmark_sample_ordinal,
     iree_host_size_t case_sample_ordinal,
     const loom_testbench_case_sample_result_t* sample_result) {
@@ -191,7 +184,6 @@ iree_status_t iree_benchmark_loom_event_sink_emit_sample(
                         .module = module,
                         .benchmark_plan = benchmark_plan,
                         .case_plan = case_plan,
-                        .sample_compilation = sample_compilation,
                         .benchmark_sample_ordinal = benchmark_sample_ordinal,
                         .case_sample_ordinal = case_sample_ordinal,
                         .sample_result = sample_result,
@@ -237,7 +229,7 @@ iree_status_t iree_benchmark_loom_event_sink_emit_benchmark_result(
             });
 }
 
-iree_status_t iree_benchmark_loom_event_sink_emit_profile(
+iree_status_t iree_benchmark_loom_event_sink_emit_profile_replay(
     const iree_benchmark_loom_event_sink_t* sink,
     const iree_benchmark_loom_run_identity_t* run,
     const iree_benchmark_loom_candidate_identity_t* candidate,
@@ -255,8 +247,8 @@ iree_status_t iree_benchmark_loom_event_sink_emit_profile(
   IREE_ASSERT_ARGUMENT(benchmark_result);
   return iree_benchmark_loom_event_sink_emit(
       sink, &(iree_benchmark_loom_event_t){
-                .kind = IREE_BENCHMARK_LOOM_EVENT_PROFILE,
-                .profile =
+                .kind = IREE_BENCHMARK_LOOM_EVENT_PROFILE_REPLAY,
+                .profile_replay =
                     {
                         .run = run,
                         .candidate = candidate,
@@ -381,8 +373,7 @@ static iree_status_t iree_benchmark_loom_jsonl_event_sink_emit(
       return iree_benchmark_loom_jsonl_sink_end(
           jsonl_sink,
           iree_benchmark_loom_append_run_row(
-              event->run.run, event->run.dry_run,
-              event->run.sample_compilation_mode, &event->run.sanitizer,
+              event->run.run, event->run.dry_run, &event->run.sanitizer,
               iree_benchmark_loom_jsonl_sink_begin(jsonl_sink)));
     case IREE_BENCHMARK_LOOM_EVENT_PLAN:
       return iree_benchmark_loom_jsonl_sink_end(
@@ -391,8 +382,7 @@ static iree_status_t iree_benchmark_loom_jsonl_event_sink_emit(
               event->plan.run, &event->plan.selection->identity,
               event->plan.module, event->plan.selection->benchmark_plan,
               event->plan.selection->case_plan, &event->plan.selection->policy,
-              event->plan.options, event->plan.sample_compilation_mode,
-              jsonl_sink->host_allocator,
+              event->plan.options, jsonl_sink->host_allocator,
               iree_benchmark_loom_jsonl_sink_begin(jsonl_sink)));
     case IREE_BENCHMARK_LOOM_EVENT_SUMMARY:
       return iree_benchmark_loom_jsonl_sink_end(
@@ -407,7 +397,7 @@ static iree_status_t iree_benchmark_loom_jsonl_event_sink_emit(
               event->summary.failed_benchmark_count,
               event->summary.correctness_sample_count,
               event->summary.correctness_failed_sample_count,
-              event->summary.dry_run, event->summary.sample_compilation_mode,
+              event->summary.dry_run,
               iree_benchmark_loom_jsonl_sink_begin(jsonl_sink)));
     case IREE_BENCHMARK_LOOM_EVENT_DEVICE:
       return iree_benchmark_loom_jsonl_sink_end(
@@ -429,7 +419,6 @@ static iree_status_t iree_benchmark_loom_jsonl_event_sink_emit(
               event->sample.run, event->sample.candidate,
               event->sample.work_item_index, event->sample.module,
               event->sample.benchmark_plan, event->sample.case_plan,
-              event->sample.sample_compilation,
               event->sample.benchmark_sample_ordinal,
               event->sample.case_sample_ordinal, event->sample.sample_result,
               iree_benchmark_loom_jsonl_sink_begin(jsonl_sink)));
@@ -446,14 +435,16 @@ static iree_status_t iree_benchmark_loom_jsonl_event_sink_emit(
               event->benchmark_result.correctness_sample_count,
               event->benchmark_result.correctness_failed_sample_count,
               iree_benchmark_loom_jsonl_sink_begin(jsonl_sink)));
-    case IREE_BENCHMARK_LOOM_EVENT_PROFILE:
+    case IREE_BENCHMARK_LOOM_EVENT_PROFILE_REPLAY:
       return iree_benchmark_loom_jsonl_sink_end(
           jsonl_sink,
-          iree_benchmark_loom_append_profile_row(
-              event->profile.run, event->profile.candidate,
-              event->profile.work_item_index, event->profile.module,
-              event->profile.benchmark_plan, event->profile.case_plan,
-              event->profile.policy, event->profile.benchmark_result,
+          iree_benchmark_loom_append_profile_replay_row(
+              event->profile_replay.run, event->profile_replay.candidate,
+              event->profile_replay.work_item_index,
+              event->profile_replay.module,
+              event->profile_replay.benchmark_plan,
+              event->profile_replay.case_plan, event->profile_replay.policy,
+              event->profile_replay.benchmark_result,
               jsonl_sink->host_allocator,
               iree_benchmark_loom_jsonl_sink_begin(jsonl_sink)));
     case IREE_BENCHMARK_LOOM_EVENT_FAILURE:

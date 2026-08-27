@@ -1,0 +1,15 @@
+// Copies one fixed-size row. The kernel remains a production library symbol;
+// correctness and benchmark records live in the separate test module.
+kernel.def export("copy_i32") @copy_i32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 8 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<8xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<8xi32>
+  %value = view.load %input_view[%lane] : view<8xi32> -> i32
+  view.store %value, %output_view[%lane] : i32, view<8xi32>
+  kernel.return
+}

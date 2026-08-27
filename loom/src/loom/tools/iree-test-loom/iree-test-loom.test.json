@@ -50,6 +50,78 @@
       }
     },
     {
+      "name": "links explicit bytecode library into authored input",
+      "steps": [
+        {
+          "name": "merge-library",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{srcdir}/testdata/library_cases.loom",
+              "--mode=merge",
+              "--to=bc",
+              "--output={tmp}/library_cases.loombc"
+            ]
+          }
+        },
+        {
+          "name": "run-linked-input",
+          "run": {
+            "tool": "iree-test-loom",
+            "args": [
+              "{srcdir}/testdata/linked_input_cases.loom",
+              "--library={tmp}/library_cases.loombc"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "\"case_count\":2",
+              "\"sample_count\":2",
+              "\"failed_sample_count\":0",
+              "\"case\":\"input_case\",\"sample_ordinal\":0,\"passed\":true",
+              "\"case\":\"library_case\",\"sample_ordinal\":0,\"passed\":true"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "rejects unresolved text symbols before planning",
+      "run": {
+        "tool": "iree-test-loom",
+        "stdin": {
+          "text": "func.def @caller(%value: index) -> (index) {\n  %result = func.call @external_identity(%value) : (index) -> (index)\n  func.return %result : index\n}\n"
+        }
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": [
+          "error [SYMBOL/002]: symbol '@external_identity' is referenced but not defined"
+        ]
+      }
+    },
+    {
+      "name": "rejects invalid modules before planning",
+      "run": {
+        "tool": "iree-test-loom",
+        "stdin": {
+          "text": "global.rodata.def @bad_alignment = align(3) bytes(\"00\")\n"
+        }
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": [
+          "error [STRUCTURE/014]",
+          "positive power-of-two byte alignment",
+          "input module failed verification"
+        ]
+      }
+    },
+    {
       "name": "reports unsupported check.case planning issue before sample validation",
       "run": {
         "tool": "iree-test-loom",

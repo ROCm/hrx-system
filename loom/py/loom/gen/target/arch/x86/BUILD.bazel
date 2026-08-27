@@ -28,6 +28,7 @@ iree_py_binary(
     main = "x86_descriptors.py",
     visibility = GENERATOR_VISIBILITY,
     deps = [
+        "//loom/py/loom/gen/support",
         "//loom/py/loom/gen/target/low:low_descriptors",
         "//loom/py/loom/target:descriptor_sets",
         "//loom/py/loom/target/arch/x86:descriptors",
@@ -72,8 +73,23 @@ iree_py_binary(
     main = "x86_packed_dot_contract.py",
     visibility = GENERATOR_VISIBILITY,
     deps = [
+        "//loom/py/loom/gen:bootstrap",
         "//loom/py/loom/gen/support",
+        "//loom/py/loom/gen/support:native_layout",
+        "//loom/py/loom/target:descriptor_sets",
         "//loom/py/loom/target:low_descriptors",
+        "//loom/py/loom/target/arch/x86:descriptors",
         "//loom/py/loom/target/arch/x86:target_info",
     ],
+)
+
+iree_py_test(
+    name = "packed_dot_contract_test",
+    srcs = [
+        "x86_packed_dot_contract_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.gen.target.arch.x86.x86_packed_dot_contract_test"],
+    main = "pytest_style_runner.py",
+    deps = [":packed_dot_contract"],
 )

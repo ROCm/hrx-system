@@ -20,10 +20,12 @@ _X86_ROOT_VISIBILITY = ["//loom/src/loom/target/arch/x86:__pkg__"]
 loom_cc_library(
     name = "lower",
     srcs = [
+        "contraction.c",
         "packed_dot.c",
         "registry.c",
     ],
     hdrs = [
+        "contraction.h",
         "internal.h",
         "lower.h",
     ],
@@ -33,6 +35,8 @@ loom_cc_library(
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
+        "//loom/src/loom/target/arch/x86:packed_dot_contract",
+        "//loom/src/loom/target/arch/x86:packed_dot_contract_projection",
         "//loom/src/loom/target/arch/x86:register_classes",
         "//loom/src/loom/target/arch/x86/contracts",
         "//runtime/src/iree/base",

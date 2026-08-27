@@ -1,0 +1,73 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+
+package(
+    default_visibility = ["//loom/src/loom/link:__pkg__"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+exports_files(
+    [
+        "provider_roots/direct.loom",
+        "provider_roots/transitive.loom",
+        "provider_roots/unused.loom",
+    ],
+    visibility = ["//loom/src/loom/tools/loom-link:__pkg__"],
+)
+
+iree_c_embed_data(
+    name = "provider_roots",
+    testonly = True,
+    srcs = glob(["provider_roots/*.loom"]),
+    c_file_output = "provider_roots_testdata.c",
+    flatten = True,
+    h_file_output = "provider_roots_testdata.h",
+    identifier = "loom_link_provider_roots_testdata",
+    visibility = ["//loom/binding/c/test:__pkg__"],
+)
+
+iree_c_embed_data(
+    name = "func_contract",
+    testonly = True,
+    srcs = glob(["func_contract/*.loom"]),
+    c_file_output = "func_contract_testdata.c",
+    flatten = True,
+    h_file_output = "func_contract_testdata.h",
+    identifier = "loom_link_func_contract_testdata",
+)
+
+iree_c_embed_data(
+    name = "func_contract_projection",
+    testonly = True,
+    srcs = glob(["func_contract_projection/*.loom"]),
+    c_file_output = "func_contract_projection_testdata.c",
+    flatten = True,
+    h_file_output = "func_contract_projection_testdata.h",
+    identifier = "loom_link_func_contract_projection_testdata",
+)
+
+iree_c_embed_data(
+    name = "dependency_analysis",
+    testonly = True,
+    srcs = glob(["dependency_analysis/*.loom"]),
+    c_file_output = "dependency_analysis_testdata.c",
+    flatten = True,
+    h_file_output = "dependency_analysis_testdata.h",
+    identifier = "loom_link_dependency_analysis_testdata",
+)
+
+iree_c_embed_data(
+    name = "planner",
+    testonly = True,
+    srcs = glob(["planner/*.loom"]),
+    c_file_output = "planner_testdata.c",
+    flatten = True,
+    h_file_output = "planner_testdata.h",
+    identifier = "loom_link_planner_testdata",
+)

@@ -58,6 +58,22 @@ set(_IREE_AMDGPU_CODE_OBJECT_TARGETS
   "gfx12-5-generic"
 )
 
+set(_IREE_AMDGPU_DEVICE_BINARY_TARGETS
+  "gfx9-generic"
+  "gfx908"
+  "gfx90a"
+  "gfx9-4-generic"
+  "gfx10-1-generic"
+  "gfx10-3-generic"
+  "gfx11-generic"
+  "gfx1170"
+  "gfx1171"
+  "gfx1172"
+  "gfx12-generic"
+  "gfx1250-a0"
+  "gfx12-5-generic"
+)
+
 set(_IREE_AMDGPU_TARGET_CODE_OBJECT_gfx900 "gfx9-generic")
 set(_IREE_AMDGPU_TARGET_CODE_OBJECT_gfx902 "gfx9-generic")
 set(_IREE_AMDGPU_TARGET_CODE_OBJECT_gfx904 "gfx9-generic")
@@ -96,6 +112,9 @@ set(_IREE_AMDGPU_TARGET_CODE_OBJECT_gfx1200 "gfx12-generic")
 set(_IREE_AMDGPU_TARGET_CODE_OBJECT_gfx1201 "gfx12-generic")
 set(_IREE_AMDGPU_TARGET_CODE_OBJECT_gfx1250 "gfx12-5-generic")
 set(_IREE_AMDGPU_TARGET_CODE_OBJECT_gfx1251 "gfx12-5-generic")
+set(_IREE_AMDGPU_TARGET_DEVICE_BINARY_VARIANTS_gfx1250
+  "gfx1250-a0"
+)
 
 set(_IREE_AMDGPU_TARGET_FAMILIES
   "all"

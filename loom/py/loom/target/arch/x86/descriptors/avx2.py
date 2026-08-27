@@ -29,9 +29,7 @@ from loom.target.low_descriptors import (
 )
 
 from .common import (
-    _ADDRESS_SCALE_IMMEDIATE,
     _DESTRUCTIVE_ACCUMULATOR_CONSTRAINTS,
-    _DISP32_IMMEDIATE,
     _INSERTPS_CONTROL_IMMEDIATE,
     _LANE_I32X4_IMMEDIATE,
     _REG_XMM,
@@ -41,7 +39,9 @@ from .common import (
     _RESOURCE_STORE,
     _RESOURCE_VECTOR,
     _SCHEDULE_MEMORY_LOAD_XMM,
+    _SCHEDULE_MEMORY_LOAD_YMM,
     _SCHEDULE_MEMORY_STORE_XMM,
+    _SCHEDULE_MEMORY_STORE_YMM,
     _SCHEDULE_VECTOR_F32_XMM,
     _SCHEDULE_VECTOR_FMA_F32_XMM,
     _SCHEDULE_VECTOR_I32_XMM,
@@ -49,18 +49,18 @@ from .common import (
     _asm,
     _gpr32_operand,
     _gpr32_result,
-    _gpr64_resource,
-    _load_effect,
+    _gpr64_operand,
+    _gpr64_result,
     _low_subset_operand,
     _scalar_f32_binary_descriptor,
-    _store_effect,
     _vector_f32_binary_descriptor,
     _vector_i32_binary_descriptor,
     _vector_lane_units,
-    _vector_operand,
+    _vector_memory_descriptors,
     _vector_result,
     _vector_splat_descriptor,
     _xmm_operand,
+    _xmm_result,
 )
 from .scalar import (
     X86_SCALAR_DESCRIPTOR_SET,
@@ -84,7 +84,59 @@ def _vex_descriptor(descriptor: Descriptor) -> Descriptor:
     )
 
 
-_X86_AVX2_XMM_DESCRIPTORS = (
+_X86_AVX2_VECTOR_DESCRIPTORS = (
+    Descriptor(
+        key="x86.avx2.vmovd.gpr32.xmm",
+        mnemonic="vmovd",
+        semantic_tag="bitcast.f32.i32",
+        operands=(_gpr32_result(), _xmm_operand("input")),
+        asm_forms=_asm(
+            mnemonic="vmovd.gpr32.xmm",
+            results=("dst",),
+            operands=("input",),
+        ),
+        schedule_class=_SCHEDULE_VECTOR_I32_XMM,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    ),
+    Descriptor(
+        key="x86.avx2.vmovd.xmm.gpr32",
+        mnemonic="vmovd",
+        semantic_tag="bitcast.i32.f32",
+        operands=(_xmm_result(), _gpr32_operand("input")),
+        asm_forms=_asm(
+            mnemonic="vmovd.xmm.gpr32",
+            results=("dst",),
+            operands=("input",),
+        ),
+        schedule_class=_SCHEDULE_VECTOR_I32_XMM,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    ),
+    Descriptor(
+        key="x86.avx2.vmovq.gpr64.xmm",
+        mnemonic="vmovq",
+        semantic_tag="bitcast.f64.i64",
+        operands=(_gpr64_result(), _xmm_operand("input")),
+        asm_forms=_asm(
+            mnemonic="vmovq.gpr64.xmm",
+            results=("dst",),
+            operands=("input",),
+        ),
+        schedule_class=_SCHEDULE_VECTOR_I32_XMM,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    ),
+    Descriptor(
+        key="x86.avx2.vmovq.xmm.gpr64",
+        mnemonic="vmovq",
+        semantic_tag="bitcast.i64.f64",
+        operands=(_xmm_result(), _gpr64_operand("input")),
+        asm_forms=_asm(
+            mnemonic="vmovq.xmm.gpr64",
+            results=("dst",),
+            operands=("input",),
+        ),
+        schedule_class=_SCHEDULE_VECTOR_I32_XMM,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    ),
     _vector_splat_descriptor(
         vector_bit_width=128,
         key="x86.avx2.vpbroadcastd.xmm",
@@ -254,89 +306,25 @@ _X86_AVX2_XMM_DESCRIPTORS = (
         schedule_class=_SCHEDULE_VECTOR_FMA_F32_XMM,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     ),
-    Descriptor(
-        key="x86.avx2.vmovdqu32.load.xmm",
-        mnemonic="vmovdqu32",
-        semantic_tag="memory.load.i32x4",
-        operands=(_vector_result(128), _gpr64_resource("base")),
-        immediates=(_DISP32_IMMEDIATE,),
-        asm_forms=_asm(
-            mnemonic="vmovdqu32.load.xmm",
-            results=("dst",),
-            operands=("base",),
-            immediates=("disp32",),
-            named_immediates=True,
-        ),
-        effects=(_load_effect(128),),
-        schedule_class=_SCHEDULE_MEMORY_LOAD_XMM,
-        flags=(DescriptorFlag.SIDE_EFFECTING,),
+    *_vector_memory_descriptors(
+        key_prefix="x86.avx2",
+        vector_bit_width=128,
+        native_assembly_mnemonic="vmovdqu",
     ),
-    Descriptor(
-        key="x86.avx2.vmovdqu32.load.indexed.xmm",
-        mnemonic="vmovdqu32",
-        semantic_tag="memory.load.indexed.i32x4",
-        operands=(
-            _vector_result(128),
-            _gpr64_resource("base"),
-            _gpr64_resource("index"),
-        ),
-        immediates=(_DISP32_IMMEDIATE, _ADDRESS_SCALE_IMMEDIATE),
-        asm_forms=_asm(
-            mnemonic="vmovdqu32.load.indexed.xmm",
-            results=("dst",),
-            operands=("base", "index"),
-            immediates=("disp32", "scale"),
-            named_immediates=True,
-        ),
-        effects=(_load_effect(128),),
-        schedule_class=_SCHEDULE_MEMORY_LOAD_XMM,
-        flags=(DescriptorFlag.SIDE_EFFECTING,),
-    ),
-    Descriptor(
-        key="x86.avx2.vmovdqu32.store.xmm",
-        mnemonic="vmovdqu32",
-        semantic_tag="memory.store.i32x4",
-        operands=(_vector_operand(128, "value"), _gpr64_resource("base")),
-        immediates=(_DISP32_IMMEDIATE,),
-        asm_forms=_asm(
-            mnemonic="vmovdqu32.store.xmm",
-            operands=("value", "base"),
-            immediates=("disp32",),
-            named_immediates=True,
-        ),
-        effects=(_store_effect(128),),
-        schedule_class=_SCHEDULE_MEMORY_STORE_XMM,
-        flags=(DescriptorFlag.SIDE_EFFECTING,),
-    ),
-    Descriptor(
-        key="x86.avx2.vmovdqu32.store.indexed.xmm",
-        mnemonic="vmovdqu32",
-        semantic_tag="memory.store.indexed.i32x4",
-        operands=(
-            _vector_operand(128, "value"),
-            _gpr64_resource("base"),
-            _gpr64_resource("index"),
-        ),
-        immediates=(_DISP32_IMMEDIATE, _ADDRESS_SCALE_IMMEDIATE),
-        asm_forms=_asm(
-            mnemonic="vmovdqu32.store.indexed.xmm",
-            operands=("value", "base", "index"),
-            immediates=("disp32", "scale"),
-            named_immediates=True,
-        ),
-        effects=(_store_effect(128),),
-        schedule_class=_SCHEDULE_MEMORY_STORE_XMM,
-        flags=(DescriptorFlag.SIDE_EFFECTING,),
+    *_vector_memory_descriptors(
+        key_prefix="x86.avx2",
+        vector_bit_width=256,
+        native_assembly_mnemonic="vmovdqu",
     ),
 )
 
-X86_AVX2_XMM_DESCRIPTORS = tuple(
-    _vex_descriptor(descriptor) for descriptor in _X86_AVX2_XMM_DESCRIPTORS
+X86_AVX2_VECTOR_DESCRIPTORS = tuple(
+    _vex_descriptor(descriptor) for descriptor in _X86_AVX2_VECTOR_DESCRIPTORS
 )
 
 X86_AVX2_DESCRIPTORS = (
     *X86_SCALAR_PREFIX_DESCRIPTORS,
-    *X86_AVX2_XMM_DESCRIPTORS,
+    *X86_AVX2_VECTOR_DESCRIPTORS,
     *X86_SCALAR_SUFFIX_DESCRIPTORS,
 )
 
@@ -427,6 +415,28 @@ X86_AVX2_DESCRIPTOR_SET = DescriptorSet(
             issue_uses=(
                 IssueUse(_RESOURCE_ADDRESS, cycles=1, units=1),
                 IssueUse(_RESOURCE_STORE, cycles=1, units=_vector_lane_units(128)),
+            ),
+            flags=(ScheduleClassFlag.MAY_STORE,),
+            model_quality=ModelQuality.FALLBACK,
+        ),
+        ScheduleClass(
+            _SCHEDULE_MEMORY_LOAD_YMM,
+            latency_kind=LatencyKind.VARIABLE,
+            latency_cycles=4,
+            issue_uses=(
+                IssueUse(_RESOURCE_ADDRESS, cycles=1, units=1),
+                IssueUse(_RESOURCE_LOAD, cycles=1, units=_vector_lane_units(256)),
+            ),
+            flags=(ScheduleClassFlag.MAY_LOAD,),
+            model_quality=ModelQuality.FALLBACK,
+        ),
+        ScheduleClass(
+            _SCHEDULE_MEMORY_STORE_YMM,
+            latency_kind=LatencyKind.VARIABLE,
+            latency_cycles=1,
+            issue_uses=(
+                IssueUse(_RESOURCE_ADDRESS, cycles=1, units=1),
+                IssueUse(_RESOURCE_STORE, cycles=1, units=_vector_lane_units(256)),
             ),
             flags=(ScheduleClassFlag.MAY_STORE,),
             model_quality=ModelQuality.FALLBACK,

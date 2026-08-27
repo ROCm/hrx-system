@@ -288,3 +288,114 @@ func.def target(@target) @source_for_if(%start: index, %limit: index, %step: ind
                OpStore %43 %result Aligned 4
                OpReturn
                OpFunctionEnd
+
+// ====
+
+// RUN: emit spirv-dis input=source-low control-flow=structured-low validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @source_while(%limit: index, %step: index, %seed: index) -> (index) {
+  %result = scf.while(%before = %seed : index) -> (index) {
+    %c0 = index.constant 0 : index
+    %step_is_positive = index.cmp sgt, %step, %c0 : index
+    %selected_limit = scf.if %step_is_positive -> (index) {
+      scf.yield %limit : index
+    } else {
+      %extended_limit = index.add %limit, %step : index
+      scf.yield %extended_limit : index
+    }
+    %keep_going = index.cmp slt, %before, %selected_limit : index
+    scf.condition %keep_going, %before : i1, index
+  } do(%body: index) {
+    %next = index.add %body, %step : index
+    scf.yield %next : index
+  }
+  func.return %result : index
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %source_while "source_while"
+               OpExecutionMode %source_while LocalSize 1 1 1
+               OpName %source_while "source_while"
+               OpName %limit "limit"
+               OpName %step "step"
+               OpName %seed "seed"
+               OpName %before "before"
+               OpName %c0 "c0"
+               OpName %step_is_positive "step_is_positive"
+               OpName %extended_limit "extended_limit"
+               OpName %selected_limit "selected_limit"
+               OpName %keep_going "keep_going"
+               OpName %body "body"
+               OpName %next "next"
+               OpName %result "result"
+               OpMemberDecorate %_struct_5 0 Offset 0
+               OpDecorate %_struct_5 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %8 DescriptorSet 0
+               OpDecorate %8 Binding 1
+               OpDecorate %9 DescriptorSet 0
+               OpDecorate %9 Binding 2
+               OpDecorate %10 DescriptorSet 0
+               OpDecorate %10 Binding 3
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+  %_struct_5 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_5 = OpTypePointer StorageBuffer %_struct_5
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+          %4 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+          %8 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+          %9 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+         %10 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+       %void = OpTypeVoid
+         %12 = OpTypeFunction %void
+         %c0 = OpConstant %int 0
+       %bool = OpTypeBool
+%source_while = OpFunction %void None %12
+         %13 = OpLabel
+         %14 = OpAccessChain %_ptr_StorageBuffer_int %4 %int_0
+      %limit = OpLoad %int %14 Aligned 4
+         %16 = OpAccessChain %_ptr_StorageBuffer_int %8 %int_0
+       %step = OpLoad %int %16 Aligned 4
+         %18 = OpAccessChain %_ptr_StorageBuffer_int %9 %int_0
+       %seed = OpLoad %int %18 Aligned 4
+               OpBranch %20
+         %20 = OpLabel
+     %before = OpPhi %int %seed %13 %next %23
+               OpLoopMerge %24 %23 None
+               OpBranch %21
+         %21 = OpLabel
+%step_is_positive = OpSGreaterThan %bool %step %c0
+               OpSelectionMerge %32 None
+               OpBranchConditional %step_is_positive %31 %33
+         %31 = OpLabel
+               OpBranch %32
+         %33 = OpLabel
+%extended_limit = OpIAdd %int %limit %step
+               OpBranch %32
+         %32 = OpLabel
+%selected_limit = OpPhi %int %limit %31 %extended_limit %33
+ %keep_going = OpSLessThan %bool %before %selected_limit
+               OpBranchConditional %keep_going %22 %24
+         %22 = OpLabel
+       %body = OpPhi %int %before %32
+       %next = OpIAdd %int %body %step
+               OpBranch %23
+         %23 = OpLabel
+               OpBranch %20
+         %24 = OpLabel
+     %result = OpPhi %int %before %32
+         %38 = OpAccessChain %_ptr_StorageBuffer_int %10 %int_0
+               OpStore %38 %result Aligned 4
+               OpReturn
+               OpFunctionEnd

@@ -81,6 +81,58 @@ class TargetContractIndexTest : public ::testing::Test {
   iree_arena_allocator_t arena_;
 };
 
+TEST(TargetContractQueryEnvironmentTest, MissingAllocatorReturnsNull) {
+  loom_target_contract_query_environment_t environment = {};
+  int key = 0;
+  int stored_data = 0;
+  void* data = &stored_data;
+  IREE_ASSERT_OK(loom_target_contract_query_get_or_allocate_target_state(
+      &environment, &key, sizeof(key), &data));
+
+  EXPECT_EQ(data, nullptr);
+}
+
+struct QueryStateAllocatorTestState {
+  const void* key = nullptr;
+  iree_host_size_t data_length = 0;
+  void* data = nullptr;
+  int call_count = 0;
+};
+
+static iree_status_t AllocateQueryStateForTest(void* user_data, const void* key,
+                                               iree_host_size_t data_length,
+                                               void** out_data) {
+  auto* state = reinterpret_cast<QueryStateAllocatorTestState*>(user_data);
+  ++state->call_count;
+  EXPECT_EQ(key, state->key);
+  EXPECT_EQ(data_length, state->data_length);
+  *out_data = state->data;
+  return iree_ok_status();
+}
+
+TEST(TargetContractQueryEnvironmentTest, DelegatesToAllocator) {
+  int key = 0;
+  int stored_data = 0;
+  QueryStateAllocatorTestState state = {
+      &key,
+      sizeof(stored_data),
+      &stored_data,
+      0,
+  };
+  loom_target_contract_query_environment_t environment = {};
+  environment.target_state_allocator = {
+      AllocateQueryStateForTest,
+      &state,
+  };
+
+  void* data = nullptr;
+  IREE_ASSERT_OK(loom_target_contract_query_get_or_allocate_target_state(
+      &environment, &key, sizeof(stored_data), &data));
+
+  EXPECT_EQ(data, &stored_data);
+  EXPECT_EQ(state.call_count, 1);
+}
+
 TEST_F(TargetContractIndexTest, LookupKindSelectsDescriptorRuleCase) {
   const loom_target_contract_binding_t bindings[] = {
       {

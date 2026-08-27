@@ -45,7 +45,7 @@ typedef struct loom_run_initialize_low_descriptor_registry_callback_t {
 typedef struct loom_run_session_options_t {
   // Host allocator used for session-owned runtime state.
   iree_allocator_t host_allocator;
-  // Block size for transient parser/compiler arenas.
+  // Total bytes retained per transient parser/compiler arena block.
   iree_host_size_t block_pool_block_size;
   // Dialect and encoding registration callback.
   loom_run_register_context_callback_t register_context;
@@ -132,7 +132,7 @@ void loom_run_module_deinitialize(loom_run_module_t* run_module);
 
 // Returns a source resolver for diagnostics against |run_module|.
 loom_source_resolver_t loom_run_module_source_resolver(
-    loom_run_module_t* run_module);
+    const loom_run_module_t* run_module);
 
 #ifdef __cplusplus
 }  // extern "C"

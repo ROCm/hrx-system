@@ -47,8 +47,8 @@ func.def @andi_range_hi(%x: i32) -> (i64) {
 
 // ori with 1: result is definitely non-zero.
 func.def @ori_non_zero(%x: i32) -> (i1) {
-  %one = scalar.constant 1 : i32
-  %r = scalar.ori %x, %one : i32
+  %c1 = scalar.constant 1 : i32
+  %r = scalar.ori %x, %c1 : i32
   %nz = test.fact_non_zero %r : i32 -> i1
   func.return %nz : i1
 }

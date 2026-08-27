@@ -14,6 +14,7 @@ from loom.dialect.func import ALL_FUNC_OPS
 from loom.dsl import Op
 from loom.format.bytecode.reader import read_module
 from loom.format.bytecode.writer import write_module
+from loom.format.text.tokenizer import ParseError
 from loom.ir import Module
 
 
@@ -27,10 +28,12 @@ def _all_roundtrip_ops() -> Sequence[Op]:
 def _parse_module(text: str) -> Module:
     """Parses a module with func and test dialect fixtures registered."""
     from loom.builtin_types import ALL_BUILTIN_TYPES
+    from loom.dialect.target import ALL_TARGET_PARAMETERIZED_ATTRS
     from loom.format.text.parser import Parser
 
     parser = Parser()
     parser.register_ops(_all_roundtrip_ops())
+    parser.register_parameterized_attrs(ALL_TARGET_PARAMETERIZED_ATTRS)
     parser.register_types(ALL_BUILTIN_TYPES)
     return parser.parse(text)
 
@@ -96,7 +99,6 @@ class TestFuncDeclRoundTrip:
         from loom.builtin_types import ALL_BUILTIN_TYPES
         from loom.dialect.test import ALL_TEST_OPS
         from loom.format.text.parser import Parser
-        from loom.format.text.tokenizer import ParseError
 
         parser = Parser()
         parser.register_ops(list(ALL_TEST_OPS) + list(ALL_FUNC_OPS))
@@ -108,7 +110,6 @@ class TestFuncDeclRoundTrip:
         from loom.builtin_types import ALL_BUILTIN_TYPES
         from loom.dialect.test import ALL_TEST_OPS
         from loom.format.text.parser import Parser
-        from loom.format.text.tokenizer import ParseError
 
         parser = Parser()
         parser.register_ops(list(ALL_TEST_OPS) + list(ALL_FUNC_OPS))
@@ -243,14 +244,11 @@ class TestFuncImportCrossFormatRoundTrip:
         )
 
 
-class TestFuncCallApplyRoundTrip:
-    """func.call and func.apply are body ops — they appear inside functions."""
+class TestFuncCallRoundTrip:
+    """func.call operations appear inside function bodies."""
 
     def test_call_in_function(self) -> None:
         _roundtrip("func.def @caller(%a: f32) -> (f32) {\n  %r = func.call @callee(%a) : (f32) -> (f32)\n  func.return %r : f32\n}\n")
-
-    def test_apply_in_function(self) -> None:
-        _roundtrip("func.def @test_template(%a: f32) -> (f32) {\n  %r = func.apply<my.template>(%a) : (f32) -> (f32)\n  func.return %r : f32\n}\n")
 
     def test_call_multiple_args_and_results(self) -> None:
         _roundtrip("func.def @multi(%a: f32, %b: i32) -> (f32, i32) {\n  %r0, %r1 = func.call @process(%a, %b) : (f32, i32) -> (f32, i32)\n  func.return %r0, %r1 : f32, i32\n}\n")
@@ -276,67 +274,3 @@ class TestMultipleFunctions:
 
     def test_multiple_defs(self) -> None:
         _roundtrip("func.def @f1(%a: f32) -> (f32) {\n  func.return %a : f32\n}\n\nfunc.def @f2(%a: i32) -> (i32) {\n  func.return %a : i32\n}\n")
-
-
-class TestFuncTemplateUkernelRoundTrip:
-    def test_template_basic(self) -> None:
-        _roundtrip(
-            _module_text(
-                "func.template<tile.contract> @impl(%a: tile<4xf32>) -> (tile<4xf32>) {",
-                "  func.return %a : tile<4xf32>",
-                "}",
-            )
-        )
-
-    def test_template_with_priority(self) -> None:
-        _roundtrip(
-            _module_text(
-                "func.template<tile.contract> priority(10) @high_priority(%a: tile<4xf32>) -> (tile<4xf32>) {",
-                "  func.return %a : tile<4xf32>",
-                "}",
-            )
-        )
-
-    def test_template_device_cc(self) -> None:
-        _roundtrip(
-            _module_text(
-                "func.template<tile.contract> device @device_impl(%a: tile<4xf32>) -> (tile<4xf32>) {",
-                "  func.return %a : tile<4xf32>",
-                "}",
-            )
-        )
-
-    def test_ukernel_basic(self) -> None:
-        _roundtrip(_module_text("func.ukernel<tile.contract> @asm_impl(%a: tile<4xf32>) -> (tile<4xf32>)"))
-
-    def test_ukernel_device(self) -> None:
-        _roundtrip(_module_text("func.ukernel<tile.contract> device @asm_device(%a: tile<4xf32>) -> (tile<4xf32>)"))
-
-    def test_ukernel_with_priority(self) -> None:
-        _roundtrip(_module_text("func.ukernel<tile.contract> priority(5) @prioritized(%a: f32) -> (f32)"))
-
-    def test_template_implements_stored(self) -> None:
-        module = _parse_module(
-            _module_text(
-                "func.template<tile.contract> @impl(%a: f32) -> (f32) {",
-                "  func.return %a : f32",
-                "}",
-            )
-        )
-        op = module.symbols[0].op
-        assert op is not None
-        assert op.attributes.get("implements") == "tile.contract"
-        assert op.attributes.get("priority") is None
-
-    def test_template_priority_stored(self) -> None:
-        module = _parse_module(
-            _module_text(
-                "func.template<tile.contract> priority(42) @impl(%a: f32) -> (f32) {",
-                "  func.return %a : f32",
-                "}",
-            )
-        )
-        op = module.symbols[0].op
-        assert op is not None
-        assert op.attributes.get("implements") == "tile.contract"
-        assert op.attributes.get("priority") == 42

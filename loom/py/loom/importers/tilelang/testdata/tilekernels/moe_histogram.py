@@ -76,22 +76,22 @@ def _group_count_input(tilelang: Any, T: Any, *, target: str) -> TileLangImportI
 
 
 @tilelang_case(
-    name="tilekernels_group_count_gfx1100",
+    name="tilekernels_group_count_gfx11_generic",
     category="kernel",
     tags=("tilekernels", "moe", "histogram", "amdgpu"),
 )
-def tilekernels_group_count_gfx1100(
+def tilekernels_group_count_gfx11_generic(
     tilelang: Any,
     T: Any,
 ) -> TileLangImportInput:
-    return _group_count_input(tilelang, T, target="hip -mcpu=gfx1100")
+    return _group_count_input(tilelang, T, target="hip -mcpu=gfx11-generic")
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("group_count_kernel") @group_count_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("group_count_kernel") @group_count_kernel() {
   %c8 = index.constant 8 : index
   %c1 = index.constant 1 : index
   %c128 = index.constant 128 : index
@@ -109,7 +109,7 @@ kernel.def target(@hip_mcpu_gfx1100) export("group_count_kernel") @group_count_k
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %out_shared_bytes = index.constant 512 : offset
-  %out_shared_buffer = buffer.alloca %out_shared_bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %out_shared_buffer = buffer.alloca<workgroup> align(4) %out_shared_bytes : buffer
   %out_shared = buffer.view %out_shared_buffer[%c0_bytes] : buffer -> view<128xi32, %layout>
   %c128 = index.constant 128 : index
   %madd = index.madd %bx, %c128, %thread_idx : index
@@ -123,7 +123,7 @@ kernel.def target(@hip_mcpu_gfx1100) export("group_count_kernel") @group_count_k
     %const = scalar.constant 0 : i32
     view.store %const, %out_shared[%madd_2] : i32, view<128xi32, %layout>
   }
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %c1023 = index.constant 1023 : index
   %add = index.add %num_tokens_idx, %c1023 : index
   %sub_2 = index.sub %add, %madd : index
@@ -145,7 +145,7 @@ kernel.def target(@hip_mcpu_gfx1100) export("group_count_kernel") @group_count_k
       }
     }
   }
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %c135 = index.constant 135 : index
   %sub_3 = index.sub %c135, %thread_idx : index
   %div_3 = index.div %sub_3, %c128 : index
@@ -233,22 +233,22 @@ def _aux_fi_input(tilelang: Any, T: Any, *, target: str) -> TileLangImportInput:
 
 
 @tilelang_case(
-    name="tilekernels_aux_fi_gfx1100",
+    name="tilekernels_aux_fi_gfx11_generic",
     category="kernel",
     tags=("tilekernels", "moe", "atomic", "amdgpu"),
 )
-def tilekernels_aux_fi_gfx1100(
+def tilekernels_aux_fi_gfx11_generic(
     tilelang: Any,
     T: Any,
 ) -> TileLangImportInput:
-    return _aux_fi_input(tilelang, T, target="hip -mcpu=gfx1100")
+    return _aux_fi_input(tilelang, T, target="hip -mcpu=gfx11-generic")
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("aux_fi_kernel") @aux_fi_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("aux_fi_kernel") @aux_fi_kernel() {
   %c8 = index.constant 8 : index
   %c1 = index.constant 1 : index
   %c128 = index.constant 128 : index
@@ -266,7 +266,7 @@ kernel.def target(@hip_mcpu_gfx1100) export("aux_fi_kernel") @aux_fi_kernel() {
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %out_shared_bytes = index.constant 512 : offset
-  %out_shared_buffer = buffer.alloca %out_shared_bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %out_shared_buffer = buffer.alloca<workgroup> align(4) %out_shared_bytes : buffer
   %out_shared = buffer.view %out_shared_buffer[%c0_bytes] : buffer -> view<128xi32, %layout>
   %c128 = index.constant 128 : index
   %madd = index.madd %bx, %c128, %thread_idx : index
@@ -280,7 +280,7 @@ kernel.def target(@hip_mcpu_gfx1100) export("aux_fi_kernel") @aux_fi_kernel() {
     %const = scalar.constant 0 : i32
     view.store %const, %out_shared[%madd_2] : i32, view<128xi32, %layout>
   }
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %c1023 = index.constant 1023 : index
   %add = index.add %num_tokens_idx, %c1023 : index
   %sub_2 = index.sub %add, %madd : index
@@ -302,7 +302,7 @@ kernel.def target(@hip_mcpu_gfx1100) export("aux_fi_kernel") @aux_fi_kernel() {
       }
     }
   }
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %c135 = index.constant 135 : index
   %sub_3 = index.sub %c135, %thread_idx : index
   %div_3 = index.div %sub_3, %c128 : index

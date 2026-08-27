@@ -37,8 +37,8 @@ iree_cc_library(
 endif()
 
 if(IREE_ARCH STREQUAL "wasm_32" AND IREE_HAL_DRIVER_WEBGPU)
-iree_hal_cts_test_suite(
-  BACKENDS_LIB
+iree_runtime_hal_cts_test_suite(
+  BACKENDS
     ::backends
   LABELS
     "iree-build-requirement=runtime.hal.webgpu"

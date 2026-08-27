@@ -46,17 +46,24 @@ on:
       - "libhrx/**"
       - "third_party/**"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   linux_amdgpu_build_host_tests:
     name: Linux / AMDGPU Build + Host Tests
-    runs-on: aws-linux-scale-rocm-prod
+    runs-on: azure-linux-scale-rocm
     timeout-minutes: 45
     container:
       image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
     env:
+      AR: ${{ github.workspace }}/build/libhrx-bazel/rocm-root/lib/llvm/bin/llvm-ar
+      CC: ${{ github.workspace }}/build/libhrx-bazel/rocm-root/lib/llvm/bin/clang
+      CXX: ${{ github.workspace }}/build/libhrx-bazel/rocm-root/lib/llvm/bin/clang++
       HRX_ARTIFACT_SET: core
       HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/libhrx-bazel/downloads
       HRX_OUTPUT_DIR: ${{ github.workspace }}/build/libhrx-bazel
@@ -84,8 +91,8 @@ jobs:
       - name: Check tool versions
         run: |
           bazel --version
-          clang --version
-          "${CC}" --version
+          bash .github/scripts/check_host_toolchain.sh --expect-rocm
+          bash .github/scripts/check_rocm_device_toolchain.sh
           test -d "${HRX_ROCM_ROOT}/include"
 
       - name: Configure libhrx Bazel

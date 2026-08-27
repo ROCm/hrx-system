@@ -140,6 +140,7 @@ scalar_ctlzi = unary_op(
     type_constraint=INTEGER,
     doc="Count leading zeros.",
     facts="loom_scalar_ctlzi_facts",
+    traits=[DISTRIBUTION_TRANSFER],
     examples=["%result = scalar.ctlzi %input : i32"],
 )
 scalar_cttzi = unary_op(
@@ -148,6 +149,7 @@ scalar_cttzi = unary_op(
     type_constraint=INTEGER,
     doc="Count trailing zeros.",
     facts="loom_scalar_cttzi_facts",
+    traits=[DISTRIBUTION_TRANSFER],
     examples=["%result = scalar.cttzi %input : i32"],
 )
 scalar_ctpopi = unary_op(
@@ -156,6 +158,7 @@ scalar_ctpopi = unary_op(
     type_constraint=INTEGER,
     doc="Population count (number of set bits).",
     facts="loom_scalar_ctpopi_facts",
+    traits=[DISTRIBUTION_TRANSFER],
     examples=["%result = scalar.ctpopi %input : i32"],
 )
 

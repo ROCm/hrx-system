@@ -56,7 +56,8 @@ class MlirTypeConverter:
             raise ValueError(f"expected memref type, got `{source_type}`")
         body = source_type[len(prefix) : -1]
         shape_and_element = _split_top_level_comma(body)[0].strip()
-        return f"view<{_flatten_vector_element(shape_and_element)}, #dense>"
+        flattened_element = _flatten_vector_element(shape_and_element)
+        return f"view<{flattened_element}>"
 
     def coerce_constant_value(self, value: Any, value_type: str) -> Any:
         if not isinstance(value, str):

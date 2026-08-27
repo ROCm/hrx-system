@@ -22,6 +22,9 @@ _AMDGPU_MATRIX_CONTRACT_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu
 loom_cc_library(
     name = "types",
     hdrs = ["types.h"],
+    visibility = [
+        "//loom/src/loom/target/arch/amdgpu/planning:__pkg__",
+    ],
     deps = [
         "//loom/src/loom/analysis:contract_roles",
         "//loom/src/loom/analysis:matrix_fragment_layout",
@@ -34,7 +37,18 @@ loom_cc_library(
 loom_target_table_cc_library(
     name = "contract_tables",
     args = ["--public-header=loom/target/arch/amdgpu/matrix/contract_tables.h"],
+    generated_hdr_flags = [
+        "--result-to-lhs",
+        "--result-to-rhs",
+    ],
+    generated_hdrs = [
+        "matrix_fragment_repack_result_to_lhs_projections.inl",
+        "matrix_fragment_repack_result_to_rhs_projections.inl",
+    ],
     generator = _AMDGPU_MATRIX_CONTRACT_TABLE_GENERATOR,
+    visibility = [
+        "//loom/src/loom/target/arch/amdgpu/lower:__pkg__",
+    ],
     deps = [
         ":types",
         "//runtime/src/iree/base",
@@ -49,6 +63,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu:__pkg__",
         "//loom/src/loom/target/arch/amdgpu/lower:__pkg__",
         "//loom/src/loom/target/arch/amdgpu/planning:__pkg__",
+        "//loom/src/loom/target/emit/native/amdgpu:__pkg__",
     ],
     deps = [
         ":contract_tables",
@@ -58,6 +73,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu:target_info",
         "//loom/src/loom/target/arch/amdgpu:target_info_defs",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//loom/src/loom/util:numeric_format",
         "//runtime/src/iree/base",
     ],
 )
@@ -82,6 +98,7 @@ loom_cc_test(
     srcs = ["contract_test.cc"],
     deps = [
         ":contract",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

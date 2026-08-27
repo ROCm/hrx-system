@@ -24,6 +24,24 @@ uint64_t loom_low_descriptor_stable_id_from_key(iree_string_view_t key) {
   return loom_stable_id_from_string(key);
 }
 
+bool loom_low_descriptor_set_supports_target_contract(
+    const loom_low_descriptor_set_t* descriptor_set,
+    iree_string_view_t target_contract_key) {
+  const uint64_t target_contract_stable_id =
+      loom_low_descriptor_stable_id_from_key(target_contract_key);
+  if (descriptor_set->stable_id == target_contract_stable_id) {
+    return true;
+  }
+  for (uint16_t i = 0; i < descriptor_set->supported_target_contract_count;
+       ++i) {
+    if (descriptor_set->supported_target_contract_stable_ids[i] ==
+        target_contract_stable_id) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static bool loom_low_descriptor_constraint_ties_operands(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint16_t result_operand_index,
@@ -49,12 +67,14 @@ bool loom_low_descriptor_operands_are_tied(
   const loom_low_operand_t* lhs = &operands[lhs_operand_index];
   const loom_low_operand_t* rhs = &operands[rhs_operand_index];
   if (lhs->role == LOOM_LOW_OPERAND_ROLE_RESULT &&
-      loom_low_operand_role_is_packet_operand(rhs->role)) {
+      loom_low_descriptor_operand_maps_to_packet_operand(
+          descriptor_set, descriptor, rhs_operand_index)) {
     return loom_low_descriptor_constraint_ties_operands(
         descriptor_set, descriptor, lhs_operand_index, rhs_operand_index);
   }
   if (rhs->role == LOOM_LOW_OPERAND_ROLE_RESULT &&
-      loom_low_operand_role_is_packet_operand(lhs->role)) {
+      loom_low_descriptor_operand_maps_to_packet_operand(
+          descriptor_set, descriptor, lhs_operand_index)) {
     return loom_low_descriptor_constraint_ties_operands(
         descriptor_set, descriptor, rhs_operand_index, lhs_operand_index);
   }
@@ -75,41 +95,33 @@ bool loom_low_descriptor_operand_maps_to_packet_operand(
   return loom_low_operand_role_is_packet_operand(operand->role);
 }
 
+const loom_low_operand_t* loom_low_descriptor_implicit_resource_operand(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor) {
+  const loom_low_operand_t* operands =
+      &descriptor_set->operands[descriptor->operand_start];
+  for (uint16_t i = descriptor->result_count; i < descriptor->operand_count;
+       ++i) {
+    const loom_low_operand_t* operand = &operands[i];
+    if (operand->role == LOOM_LOW_OPERAND_ROLE_RESOURCE &&
+        iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_IMPLICIT)) {
+      return operand;
+    }
+  }
+  return NULL;
+}
+
 uint16_t loom_low_descriptor_operand_packet_index(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor,
     uint16_t descriptor_operand_index) {
   IREE_ASSERT_TRUE(loom_low_descriptor_operand_maps_to_packet_operand(
       descriptor_set, descriptor, descriptor_operand_index));
-  uint16_t packet_operand_index = 0;
-  for (uint16_t i = descriptor->result_count; i < descriptor_operand_index;
-       ++i) {
-    if (loom_low_descriptor_operand_maps_to_packet_operand(descriptor_set,
-                                                           descriptor, i)) {
-      ++packet_operand_index;
-    }
-  }
-  return packet_operand_index;
-}
-
-uint16_t loom_low_descriptor_packet_operand_descriptor_index(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, uint16_t packet_operand_index) {
-  uint16_t current_packet_operand_index = 0;
-  for (uint16_t descriptor_operand_index = descriptor->result_count;
-       descriptor_operand_index < descriptor->operand_count;
-       ++descriptor_operand_index) {
-    if (!loom_low_descriptor_operand_maps_to_packet_operand(
-            descriptor_set, descriptor, descriptor_operand_index)) {
-      continue;
-    }
-    if (current_packet_operand_index == packet_operand_index) {
-      return descriptor_operand_index;
-    }
-    ++current_packet_operand_index;
-  }
-  IREE_ASSERT_UNREACHABLE("descriptor packet operand index is out of range");
-  return LOOM_LOW_ID_NONE;
+  const loom_low_operand_t* operand =
+      &descriptor_set
+           ->operands[descriptor->operand_start + descriptor_operand_index];
+  IREE_ASSERT_NE(operand->source_value_index, LOOM_LOW_ID_NONE);
+  return operand->source_value_index;
 }
 
 static iree_string_view_t loom_low_descriptor_set_key(
@@ -238,6 +250,40 @@ const loom_low_descriptor_t* loom_low_descriptor_set_descriptor_at(
     return NULL;
   }
   return &descriptor_set->descriptors[descriptor_ordinal];
+}
+
+loom_low_descriptor_memory_effect_summary_t
+loom_low_descriptor_memory_effect_summary(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor) {
+  IREE_ASSERT_ARGUMENT(descriptor_set);
+  loom_low_descriptor_memory_effect_summary_t summary = {0};
+  if (descriptor == NULL) {
+    return summary;
+  }
+  for (uint16_t i = 0; i < descriptor->effect_count; ++i) {
+    const uint32_t effect_index = descriptor->effect_start + i;
+    IREE_ASSERT(effect_index < descriptor_set->effect_count);
+    const loom_low_effect_t* effect = &descriptor_set->effects[effect_index];
+    if (effect->kind != LOOM_LOW_EFFECT_KIND_READ &&
+        effect->kind != LOOM_LOW_EFFECT_KIND_WRITE) {
+      continue;
+    }
+    if (effect->width_bits == 0 || (effect->width_bits % 8u) != 0) {
+      if (effect->kind == LOOM_LOW_EFFECT_KIND_READ) {
+        ++summary.read_unknown_width_count;
+      } else {
+        ++summary.write_unknown_width_count;
+      }
+      continue;
+    }
+    if (effect->kind == LOOM_LOW_EFFECT_KIND_READ) {
+      summary.read_byte_count += effect->width_bits / 8u;
+    } else {
+      summary.write_byte_count += effect->width_bits / 8u;
+    }
+  }
+  return summary;
 }
 
 uint32_t loom_low_descriptor_set_descriptor_ordinal(

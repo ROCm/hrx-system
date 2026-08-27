@@ -28,6 +28,12 @@ typedef enum loom_low_allocation_location_kind_e {
   LOOM_LOW_ALLOCATION_LOCATION_SPILL_SLOT = 3,
 } loom_low_allocation_location_kind_t;
 
+enum loom_low_allocation_assignment_flag_bits_e {
+  // Uses table-owned per-unit start points instead of |start_point| alone.
+  LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REFINED_UNIT_STARTS = 1u << 0,
+};
+typedef uint16_t loom_low_allocation_assignment_flags_t;
+
 // Assignment for one liveness interval.
 typedef struct loom_low_allocation_assignment_t {
   // SSA value represented by this assignment.
@@ -36,6 +42,8 @@ typedef struct loom_low_allocation_assignment_t {
   loom_liveness_value_class_t value_class;
   // Descriptor-set-local register class ID for |value_class|.
   uint16_t descriptor_reg_class_id;
+  // Assignment behavior flags.
+  loom_low_allocation_assignment_flags_t flags;
   // First storage program point covered by this assignment.
   uint32_t start_point;
   // One-past-last storage program point covered by this assignment.
@@ -51,8 +59,12 @@ typedef struct loom_low_allocation_assignment_t {
   uint32_t location_base;
   // Number of contiguous units assigned at |location_base|.
   uint32_t location_count;
-  // First per-unit end-point entry in the allocation table.
-  uint32_t unit_end_point_start;
+  // First per-unit lifetime entry in the allocation table.
+  uint32_t unit_point_start;
+  // Sparse liveness segments for |value_id| in the owning liveness analysis.
+  // An empty range keeps conflict checks conservative for synthetic
+  // assignments and dead definitions.
+  loom_liveness_segment_range_t liveness_segments;
 } loom_low_allocation_assignment_t;
 
 // Returns true when |location_kind| is one of the defined allocation location

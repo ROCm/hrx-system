@@ -10,7 +10,7 @@ kernel.def @lane_distribution_contract() {
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%lhs: i32, %rhs: i32) {
-  %zero_index = index.constant 0 : index
+  %leader_lane = index.constant 0 : index
   %workgroup_size = index.constant 64 : index
 
   // HIP concept: `blockIdx.x`, `blockDim.x`, grid constants, and scalar kernel
@@ -22,9 +22,9 @@ kernel.def @lane_distribution_contract() {
   %block = kernel.workgroup.id<x> : index
   %size = kernel.workgroup.size<x> : index
   %block_base = index.mul %block, %size : index
-  %block_is_uniform = test.fact_uniform %block : index -> i1
+  %block_is_uniform = test.fact_subgroup_uniform %block : index -> i1
   %block_is_varying = test.fact_lane_varying %block : index -> i1
-  %base_is_uniform = test.fact_uniform %block_base : index -> i1
+  %base_is_uniform = test.fact_subgroup_uniform %block_base : index -> i1
   %base_is_varying = test.fact_lane_varying %block_base : index -> i1
 
   // HIP concept: `threadIdx.x` participates in global address math:
@@ -35,9 +35,9 @@ kernel.def @lane_distribution_contract() {
   %thread = kernel.workitem.id<x> : index
   %element_index = index.madd %block, %workgroup_size, %thread : index
   %thread_is_varying = test.fact_lane_varying %thread : index -> i1
-  %thread_is_uniform = test.fact_uniform %thread : index -> i1
+  %thread_is_uniform = test.fact_subgroup_uniform %thread : index -> i1
   %element_is_varying = test.fact_lane_varying %element_index : index -> i1
-  %element_is_uniform = test.fact_uniform %element_index : index -> i1
+  %element_is_uniform = test.fact_subgroup_uniform %element_index : index -> i1
 
   // HIP concept: `lane_id`, `warp lane`, `wavefront lane`, or an inline asm
   // operand constrained so every lane carries a distinct value.
@@ -47,19 +47,19 @@ kernel.def @lane_distribution_contract() {
   // where AMDGPU decides the concrete SGPR/VGPR placement.
   %lane = kernel.subgroup.lane.id : index
   %lane_is_varying = test.fact_lane_varying %lane : index -> i1
-  %lane_is_uniform = test.fact_uniform %lane : index -> i1
+  %lane_is_uniform = test.fact_subgroup_uniform %lane : index -> i1
 
   // HIP concept: `if (lane == 0)` or use of EXEC-controlled predicates.
   //
   // Loom spelling: a comparison that depends on the lane id is a lane predicate.
   // Selecting between uniform scalar arguments with such a predicate produces
   // lane-varying data.
-  %is_lane_zero = index.cmp eq, %lane, %zero_index : index
+  %is_lane_zero = index.cmp eq, %lane, %leader_lane : index
   %selected = scf.select %is_lane_zero, %lhs, %rhs : i32
   %predicate_is_lane = test.fact_lane_predicate %is_lane_zero : i1 -> i1
-  %predicate_is_uniform = test.fact_uniform %is_lane_zero : i1 -> i1
+  %predicate_is_uniform = test.fact_subgroup_uniform %is_lane_zero : i1 -> i1
   %selected_is_varying = test.fact_lane_varying %selected : i32 -> i1
-  %selected_is_uniform = test.fact_uniform %selected : i32 -> i1
+  %selected_is_uniform = test.fact_subgroup_uniform %selected : i32 -> i1
 
   // HIP concept: a dot/load operand that should not collapse to a scalar value
   // must depend on lane-varying data in the source graph.
@@ -71,7 +71,7 @@ kernel.def @lane_distribution_contract() {
   %lane_i32 = index.cast %lane : index to i32
   %dot_operand = scalar.addi %lane_i32, %lhs : i32
   %dot_operand_is_varying = test.fact_lane_varying %dot_operand : i32 -> i1
-  %dot_operand_is_uniform = test.fact_uniform %dot_operand : i32 -> i1
+  %dot_operand_is_uniform = test.fact_subgroup_uniform %dot_operand : i32 -> i1
 
   test.use %block_is_uniform, %block_is_varying, %base_is_uniform, %base_is_varying, %thread_is_varying, %thread_is_uniform, %element_is_varying, %element_is_uniform, %lane_is_varying, %lane_is_uniform, %predicate_is_lane, %predicate_is_uniform, %selected_is_varying, %selected_is_uniform, %dot_operand_is_varying, %dot_operand_is_uniform : i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1
   kernel.return

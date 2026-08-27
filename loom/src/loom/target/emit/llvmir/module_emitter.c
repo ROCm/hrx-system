@@ -18,9 +18,9 @@
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/atomic.h"
-#include "loom/ops/llvmir/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/llvmir/descriptors/descriptors.h"
+#include "loom/target/arch/llvmir/facts.h"
 #include "loom/target/emit/llvmir/builder.h"
 #include "loom/target/emit/llvmir/target_env.h"
 #include "loom/target/launch.h"
@@ -195,12 +195,12 @@ typedef struct loom_llvmir_emit_module_state_t {
   loom_module_t* module;
   // Low descriptor registry used to resolve target-bound packets.
   const loom_low_descriptor_registry_t* descriptor_registry;
-  // Runtime-selected target overlay, or empty for source-selected targets.
-  loom_target_selection_t target_selection;
   // Structured diagnostic emitter for user IR failures.
   iree_diagnostic_emitter_t diagnostic_emitter;
   // Case/module scratch arena.
   iree_arena_allocator_t* scratch_arena;
+  // Function versions observed against the immutable module symbol table.
+  loom_target_function_version_snapshot_t function_versions;
   // Optional registry of linked target profiles for kernel projection.
   const loom_llvmir_target_profile_registry_t* target_profile_registry;
   // Cached symbol facts shared by target resolution for every function.
@@ -961,7 +961,7 @@ static const loom_named_attr_t* loom_llvmir_emit_find_attr(
 }
 
 static loom_named_attr_slice_t loom_llvmir_emit_packet_attrs(
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     uint16_t* out_attrs_attr_index) {
   switch (packet->kind) {
     case LOOM_LOW_DESCRIPTOR_PACKET_CONST:
@@ -1025,30 +1025,19 @@ static iree_status_t loom_llvmir_emit_value_type_diagnostic(
                                      IREE_ARRAYSIZE(params));
 }
 
-static iree_status_t loom_llvmir_emit_missing_descriptor_diagnostic(
-    loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet) {
-  const loom_diagnostic_param_t params[] = {
-      loom_param_string(state->function_name),
-      loom_param_with_field_ref(
-          loom_param_string(packet->key),
-          loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
-                                    packet->key_attr_index)),
-      loom_param_string(state->target->descriptor_set_key),
-  };
-  return loom_llvmir_emit_diagnostic(state, packet->op, LOOM_ERR_TARGET_045,
-                                     params, IREE_ARRAYSIZE(params));
-}
-
 static iree_status_t loom_llvmir_emit_unsupported_descriptor_diagnostic(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet) {
+    const loom_low_descriptor_packet_t* packet) {
+  const iree_string_view_t descriptor_key =
+      loom_low_descriptor_packet_diagnostic_key(state->target->descriptor_set,
+                                                packet);
   const loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
       loom_param_with_field_ref(
-          loom_param_string(packet->key),
-          loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
-                                    packet->key_attr_index)),
+          loom_param_string(descriptor_key),
+          loom_diagnostic_field_ref(
+              LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
+              loom_low_descriptor_packet_attribute_index(packet))),
       loom_param_string(state->target->descriptor_set_key),
       loom_param_string(LOOM_LLVMIR_LOW_EMITTER_KEY),
   };
@@ -1058,14 +1047,18 @@ static iree_status_t loom_llvmir_emit_unsupported_descriptor_diagnostic(
 
 static iree_status_t loom_llvmir_emit_missing_immediate_diagnostic(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     iree_string_view_t immediate_name, uint16_t attrs_attr_index) {
+  const iree_string_view_t descriptor_key =
+      loom_low_descriptor_packet_diagnostic_key(state->target->descriptor_set,
+                                                packet);
   const loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
       loom_param_with_field_ref(
-          loom_param_string(packet->key),
-          loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
-                                    packet->key_attr_index)),
+          loom_param_string(descriptor_key),
+          loom_diagnostic_field_ref(
+              LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
+              loom_low_descriptor_packet_attribute_index(packet))),
       loom_param_with_field_ref(
           loom_param_string(immediate_name),
           loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
@@ -1077,15 +1070,19 @@ static iree_status_t loom_llvmir_emit_missing_immediate_diagnostic(
 
 static iree_status_t loom_llvmir_emit_immediate_kind_diagnostic(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     iree_string_view_t immediate_name, uint16_t attrs_attr_index,
     loom_attr_kind_t actual_kind) {
+  const iree_string_view_t descriptor_key =
+      loom_low_descriptor_packet_diagnostic_key(state->target->descriptor_set,
+                                                packet);
   const loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
       loom_param_with_field_ref(
-          loom_param_string(packet->key),
-          loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
-                                    packet->key_attr_index)),
+          loom_param_string(descriptor_key),
+          loom_diagnostic_field_ref(
+              LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
+              loom_low_descriptor_packet_attribute_index(packet))),
       loom_param_with_field_ref(
           loom_param_string(immediate_name),
           loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
@@ -1116,7 +1113,7 @@ static iree_status_t loom_llvmir_emit_register_class_diagnostic(
 
 static iree_status_t loom_llvmir_emit_read_i64_immediate(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     iree_string_view_t immediate_name, bool* out_present, int64_t* out_value) {
   *out_present = false;
   uint16_t attrs_attr_index = LOOM_ATTR_INDEX_NONE;
@@ -1141,7 +1138,7 @@ static iree_status_t loom_llvmir_emit_read_i64_immediate(
 
 static iree_status_t loom_llvmir_emit_read_optional_i64_immediate(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     iree_string_view_t immediate_name, int64_t* inout_value) {
   uint16_t attrs_attr_index = LOOM_ATTR_INDEX_NONE;
   const loom_named_attr_slice_t attrs =
@@ -1339,15 +1336,12 @@ static iree_status_t loom_llvmir_emit_pointer_address_space_for_low_value(
     }
   }
   if (def_op != NULL) {
-    loom_low_resolved_descriptor_packet_t packet = {0};
-    IREE_RETURN_IF_ERROR(loom_low_resolve_descriptor_packet(
-        state->module, state->target, def_op, &packet));
-    if (packet.descriptor != NULL) {
-      const uint32_t descriptor_ref =
-          loom_low_descriptor_set_descriptor_ordinal(
-              state->target->descriptor_set, packet.descriptor);
+    loom_low_descriptor_packet_t packet = {0};
+    loom_low_descriptor_packet_initialize(state->target->descriptor_set, def_op,
+                                          &packet);
+    if (packet.kind != LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
       const loom_llvmir_emit_alloca_info_t* alloca_info =
-          loom_llvmir_emit_lookup_alloca(descriptor_ref);
+          loom_llvmir_emit_lookup_alloca(packet.descriptor_ordinal);
       if (alloca_info != NULL &&
           !loom_llvmir_emit_memory_space_address_space(
               state->target_profile, alloca_info->memory_space,
@@ -1455,17 +1449,17 @@ static iree_status_t loom_llvmir_emit_descriptor_set_diagnostic(
 
 static iree_status_t loom_llvmir_emit_projection_diagnostic(
     loom_llvmir_emit_function_state_t* state) {
-  const loom_target_bundle_storage_t* bundle_storage =
-      &state->target->bundle_storage;
+  const loom_target_bundle_t* bundle =
+      loom_low_resolved_target_bundle(state->target);
   const loom_diagnostic_param_t params[] = {
       loom_param_string(state->target->target_name),
-      loom_param_string(bundle_storage->export_plan.name),
-      loom_param_string(bundle_storage->config.name),
+      loom_param_string(bundle->export_plan->name),
+      loom_param_string(bundle->config->name),
       loom_param_string(LOOM_LLVMIR_LOW_EMITTER_KEY),
-      loom_param_string(loom_target_codegen_format_name(
-          bundle_storage->snapshot.codegen_format)),
       loom_param_string(
-          loom_target_abi_kind_name(bundle_storage->export_plan.abi_kind)),
+          loom_target_codegen_format_name(bundle->snapshot->codegen_format)),
+      loom_param_string(
+          loom_target_abi_kind_name(bundle->export_plan->abi_kind)),
   };
   return loom_llvmir_emit_diagnostic(state, state->function_op,
                                      LOOM_ERR_TARGET_036, params,
@@ -1655,7 +1649,7 @@ static const loom_llvmir_emit_atomic_info_t* loom_llvmir_emit_lookup_atomic(
 
 static iree_status_t loom_llvmir_emit_prepare_packet_result(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     loom_llvmir_type_id_t* out_result_type, loom_value_id_t* out_result_value) {
   if (packet->op->result_count != 1) {
     IREE_RETURN_IF_ERROR(loom_llvmir_emit_shape_diagnostic(
@@ -1682,7 +1676,7 @@ static uint32_t loom_llvmir_emit_low_value_unit_count(
 
 static iree_status_t loom_llvmir_emit_binary(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     const loom_llvmir_emit_binary_info_t* info) {
   if (packet->op->operand_count != 2) {
     return loom_llvmir_emit_shape_diagnostic(state, packet->op,
@@ -1722,7 +1716,7 @@ static iree_status_t loom_llvmir_emit_binary(
 
 static iree_status_t loom_llvmir_emit_unary(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     const loom_llvmir_emit_unary_info_t* info) {
   if (packet->op->operand_count != 1) {
     return loom_llvmir_emit_shape_diagnostic(state, packet->op,
@@ -1780,7 +1774,7 @@ static iree_status_t loom_llvmir_emit_declare_same_type_intrinsic(
 
 static iree_status_t loom_llvmir_emit_binary_intrinsic(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     const loom_llvmir_emit_binary_intrinsic_info_t* info) {
   if (packet->op->operand_count != 2) {
     return loom_llvmir_emit_shape_diagnostic(state, packet->op,
@@ -1823,7 +1817,7 @@ static iree_status_t loom_llvmir_emit_binary_intrinsic(
 
 static iree_status_t loom_llvmir_emit_unary_intrinsic(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     const loom_llvmir_emit_unary_intrinsic_info_t* info) {
   if (packet->op->operand_count != 1) {
     return loom_llvmir_emit_shape_diagnostic(state, packet->op,
@@ -1858,7 +1852,7 @@ static iree_status_t loom_llvmir_emit_unary_intrinsic(
 
 static iree_status_t loom_llvmir_emit_ternary_intrinsic(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     const loom_llvmir_emit_ternary_intrinsic_info_t* info) {
   if (packet->op->operand_count != 3) {
     return loom_llvmir_emit_shape_diagnostic(state, packet->op,
@@ -1902,7 +1896,7 @@ static iree_status_t loom_llvmir_emit_ternary_intrinsic(
 
 static iree_status_t loom_llvmir_emit_compare(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     const loom_llvmir_emit_compare_info_t* info) {
   if (packet->op->operand_count != 2) {
     return loom_llvmir_emit_shape_diagnostic(state, packet->op,
@@ -1953,7 +1947,7 @@ static iree_status_t loom_llvmir_emit_compare(
 
 static iree_status_t loom_llvmir_emit_cast(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     const loom_llvmir_emit_cast_info_t* info) {
   if (packet->op->operand_count != 1) {
     return loom_llvmir_emit_shape_diagnostic(state, packet->op,
@@ -1985,7 +1979,7 @@ static iree_status_t loom_llvmir_emit_cast(
 
 static iree_status_t loom_llvmir_emit_select(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet) {
+    const loom_low_descriptor_packet_t* packet) {
   if (packet->op->operand_count != 3) {
     return loom_llvmir_emit_shape_diagnostic(state, packet->op,
                                              IREE_SV("packet_operand"),
@@ -2128,7 +2122,7 @@ static iree_status_t loom_llvmir_emit_declare_i32_zero_arg_intrinsic(
 
 static iree_status_t loom_llvmir_emit_i32_kernel_coordinate(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     loom_llvmir_emit_kernel_query_kind_t kind,
     loom_llvmir_emit_dimension_t dimension, loom_llvmir_value_id_t* out_value) {
   iree_string_view_t intrinsic_name =
@@ -2151,7 +2145,7 @@ static iree_status_t loom_llvmir_emit_i32_kernel_coordinate(
 
 static iree_status_t loom_llvmir_emit_i64_kernel_coordinate(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     loom_llvmir_emit_kernel_query_kind_t kind,
     loom_llvmir_emit_dimension_t dimension, loom_llvmir_type_id_t result_type,
     iree_string_view_t result_name, loom_llvmir_value_id_t* out_value) {
@@ -2174,7 +2168,7 @@ static iree_status_t loom_llvmir_emit_i64_kernel_coordinate(
 
 static iree_status_t loom_llvmir_emit_workitem_dispatch_id(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     loom_llvmir_emit_dimension_t dimension, loom_llvmir_type_id_t result_type,
     iree_string_view_t result_name, loom_llvmir_value_id_t* out_value) {
   loom_llvmir_value_id_t workgroup_id = LOOM_LLVMIR_VALUE_ID_INVALID;
@@ -2232,7 +2226,7 @@ static iree_status_t loom_llvmir_emit_workitem_dispatch_id(
 
 static iree_status_t loom_llvmir_emit_kernel_query(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     const loom_llvmir_emit_kernel_query_info_t* info) {
   if (packet->op->operand_count != 0) {
     return loom_llvmir_emit_shape_diagnostic(state, packet->op,
@@ -2348,7 +2342,7 @@ static iree_status_t loom_llvmir_emit_extract_vector_lane(
 
 static iree_status_t loom_llvmir_emit_const(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     const loom_llvmir_emit_const_info_t* info) {
   loom_llvmir_type_id_t result_type = LOOM_LLVMIR_TYPE_ID_INVALID;
   loom_value_id_t result_value = LOOM_VALUE_ID_INVALID;
@@ -2437,7 +2431,7 @@ static iree_status_t loom_llvmir_emit_const(
 
 static iree_status_t loom_llvmir_emit_splat(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet) {
+    const loom_low_descriptor_packet_t* packet) {
   if (packet->op->operand_count != 1) {
     return loom_llvmir_emit_shape_diagnostic(state, packet->op,
                                              IREE_SV("packet_operand"),
@@ -2478,7 +2472,7 @@ static iree_status_t loom_llvmir_emit_splat(
 
 static iree_status_t loom_llvmir_emit_from_elements(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet) {
+    const loom_low_descriptor_packet_t* packet) {
   loom_llvmir_type_id_t result_type = LOOM_LLVMIR_TYPE_ID_INVALID;
   loom_value_id_t result_value = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_llvmir_emit_prepare_packet_result(
@@ -2520,7 +2514,7 @@ static iree_status_t loom_llvmir_emit_from_elements(
 
 static iree_status_t loom_llvmir_emit_concat(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     const loom_llvmir_emit_concat_info_t* info) {
   if (packet->op->operand_count != info->input_count) {
     return loom_llvmir_emit_shape_diagnostic(
@@ -2599,7 +2593,7 @@ static iree_status_t loom_llvmir_emit_concat(
 
 static iree_status_t loom_llvmir_emit_extract(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet) {
+    const loom_low_descriptor_packet_t* packet) {
   if (packet->op->operand_count != 1) {
     return loom_llvmir_emit_shape_diagnostic(state, packet->op,
                                              IREE_SV("packet_operand"),
@@ -2631,7 +2625,7 @@ static iree_status_t loom_llvmir_emit_extract(
 
 static iree_status_t loom_llvmir_emit_insert(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet) {
+    const loom_low_descriptor_packet_t* packet) {
   if (packet->op->operand_count != 2) {
     return loom_llvmir_emit_shape_diagnostic(state, packet->op,
                                              IREE_SV("packet_operand"),
@@ -2666,7 +2660,7 @@ static iree_status_t loom_llvmir_emit_insert(
 
 static iree_status_t loom_llvmir_emit_dynamic_insert(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet) {
+    const loom_low_descriptor_packet_t* packet) {
   if (packet->op->operand_count != 3) {
     return loom_llvmir_emit_shape_diagnostic(state, packet->op,
                                              IREE_SV("packet_operand"),
@@ -2705,7 +2699,7 @@ static iree_status_t loom_llvmir_emit_dynamic_insert(
 
 static iree_status_t loom_llvmir_emit_read_shuffle_mask(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet, uint32_t lane_count,
+    const loom_low_descriptor_packet_t* packet, uint32_t lane_count,
     uint64_t* out_lanes, bool* out_present) {
   *out_present = false;
   for (uint32_t i = 0; i < lane_count; ++i) {
@@ -2733,7 +2727,7 @@ static iree_status_t loom_llvmir_emit_read_shuffle_mask(
 
 static iree_status_t loom_llvmir_emit_shuffle_like(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     loom_llvmir_emit_shuffle_kind_t kind) {
   if (packet->op->operand_count != 1) {
     return loom_llvmir_emit_shape_diagnostic(state, packet->op,
@@ -2818,7 +2812,7 @@ static iree_status_t loom_llvmir_emit_shuffle_like(
 
 static iree_status_t loom_llvmir_emit_byte_pointer(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     const loom_llvmir_emit_memory_info_t* info, loom_value_id_t base_value_id,
     loom_llvmir_value_id_t base, loom_llvmir_value_id_t* out_pointer) {
   int64_t byte_offset = 0;
@@ -2928,7 +2922,7 @@ static iree_status_t loom_llvmir_emit_byte_pointer(
 
 static iree_status_t loom_llvmir_emit_alloca(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     const loom_llvmir_emit_alloca_info_t* info) {
   if (packet->op->operand_count != 1) {
     return loom_llvmir_emit_shape_diagnostic(state, packet->op,
@@ -3030,7 +3024,7 @@ static bool loom_llvmir_emit_atomic_sync_scope(
 
 static iree_status_t loom_llvmir_emit_memory(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     const loom_llvmir_emit_memory_info_t* info) {
   const bool is_load =
       iree_any_bit_set(info->flags, LOOM_LLVMIR_EMIT_MEMORY_FLAG_LOAD);
@@ -3097,7 +3091,7 @@ static iree_status_t loom_llvmir_emit_memory(
 
 static iree_status_t loom_llvmir_emit_atomic(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     const loom_llvmir_emit_atomic_info_t* info) {
   const bool indexed =
       iree_any_bit_set(info->flags, LOOM_LLVMIR_EMIT_ATOMIC_FLAG_INDEXED);
@@ -3272,17 +3266,8 @@ static iree_status_t loom_llvmir_emit_atomic(
 
 static iree_status_t loom_llvmir_emit_packet(
     loom_llvmir_emit_function_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet) {
-  if (!packet->descriptor) {
-    return loom_llvmir_emit_missing_descriptor_diagnostic(state, packet);
-  }
-  const uint32_t descriptor_ref = loom_low_descriptor_set_descriptor_ordinal(
-      state->target->descriptor_set, packet->descriptor);
-  if (descriptor_ref == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "resolved LLVMIR low descriptor is not a row in "
-                            "the selected descriptor set");
-  }
+    const loom_low_descriptor_packet_t* packet) {
+  const uint32_t descriptor_ref = packet->descriptor_ordinal;
 
   const loom_llvmir_emit_const_info_t* const_info =
       loom_llvmir_emit_lookup_const(descriptor_ref);
@@ -3416,12 +3401,13 @@ static iree_status_t loom_llvmir_emit_packet(
   return loom_llvmir_emit_unsupported_descriptor_diagnostic(state, packet);
 }
 
-static iree_status_t loom_llvmir_emit_copy(
+static iree_status_t loom_llvmir_emit_transfer(
     loom_llvmir_emit_function_state_t* state, const loom_op_t* op) {
   loom_llvmir_value_id_t source = LOOM_LLVMIR_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(
-      loom_llvmir_emit_lookup_value(state, loom_low_copy_source(op), &source));
-  return loom_llvmir_emit_define_value(state, loom_low_copy_result(op), source);
+  IREE_RETURN_IF_ERROR(loom_llvmir_emit_lookup_value(
+      state, loom_op_const_operands(op)[0], &source));
+  return loom_llvmir_emit_define_value(state, loom_op_const_results(op)[0],
+                                       source);
 }
 
 static iree_status_t loom_llvmir_emit_return(
@@ -3441,21 +3427,42 @@ static iree_status_t loom_llvmir_emit_return(
   return loom_llvmir_build_ret(state->llvmir_block, value);
 }
 
+static iree_status_t loom_llvmir_emit_compile_time_op(
+    loom_llvmir_emit_function_state_t* state, const loom_op_t* op) {
+  IREE_ASSERT(loom_traits_are_compile_time_only(op->traits));
+  if (op->result_count == 0) return iree_ok_status();
+  IREE_ASSERT(loom_traits_are_fact_identity(op->traits));
+  IREE_ASSERT_EQ(op->operand_count, op->result_count);
+  const loom_value_id_t* operands = loom_op_const_operands(op);
+  const loom_value_id_t* results = loom_op_const_results(op);
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    loom_llvmir_value_id_t value = LOOM_LLVMIR_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(
+        loom_llvmir_emit_lookup_value(state, operands[i], &value));
+    IREE_RETURN_IF_ERROR(
+        loom_llvmir_emit_define_value(state, results[i], value));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_llvmir_emit_low_op(
     loom_llvmir_emit_function_state_t* state, const loom_op_t* op) {
+  if (loom_traits_are_compile_time_only(op->traits)) {
+    return loom_llvmir_emit_compile_time_op(state, op);
+  }
   if (loom_low_return_isa(op)) {
     return loom_llvmir_emit_return(state, op);
   }
   if (loom_low_resource_isa(op)) {
     return iree_ok_status();
   }
-  if (loom_low_copy_isa(op)) {
-    return loom_llvmir_emit_copy(state, op);
+  if (loom_low_copy_isa(op) || loom_low_move_isa(op)) {
+    return loom_llvmir_emit_transfer(state, op);
   }
 
-  loom_low_resolved_descriptor_packet_t packet = {0};
-  IREE_RETURN_IF_ERROR(loom_low_resolve_descriptor_packet(
-      state->module, state->target, op, &packet));
+  loom_low_descriptor_packet_t packet = {0};
+  loom_low_descriptor_packet_initialize(state->target->descriptor_set, op,
+                                        &packet);
   if (packet.kind != LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
     return loom_llvmir_emit_packet(state, &packet);
   }
@@ -3570,7 +3577,8 @@ static iree_status_t loom_llvmir_emit_function_signature(
   if (!valid_signature) return iree_ok_status();
 
   const iree_string_view_t export_symbol =
-      state->target->bundle_storage.export_plan.export_symbol;
+      loom_low_resolved_target_bundle(state->target)
+          ->export_plan->export_symbol;
   const iree_string_view_t function_name =
       iree_string_view_is_empty(export_symbol) ? state->function_name
                                                : export_symbol;
@@ -3655,14 +3663,6 @@ static iree_status_t loom_llvmir_emit_function_body(
   return iree_ok_status();
 }
 
-static iree_string_view_t loom_llvmir_emit_optional_string_attr(
-    const loom_module_t* module, const loom_op_t* op, uint8_t attr_index) {
-  if (attr_index >= op->attribute_count) return iree_string_view_empty();
-  const loom_attribute_t attr = loom_op_const_attrs(op)[attr_index];
-  if (attr.kind != LOOM_ATTR_STRING) return iree_string_view_empty();
-  return loom_llvmir_emit_string_or_empty(module, loom_attr_as_string_id(attr));
-}
-
 static uint32_t loom_llvmir_emit_workgroup_size_dimension_count(
     const loom_target_workgroup_size_t* size) {
   return (size->x != 0 ? 1u : 0u) + (size->y != 0 ? 1u : 0u) +
@@ -3671,28 +3671,21 @@ static uint32_t loom_llvmir_emit_workgroup_size_dimension_count(
 
 static iree_status_t loom_llvmir_emit_prepare_function_profile(
     loom_llvmir_emit_function_state_t* state) {
-  const loom_target_snapshot_t* snapshot =
-      &state->target->bundle_storage.snapshot;
-  const loom_target_export_plan_t* export_plan =
-      &state->target->bundle_storage.export_plan;
+  const loom_target_bundle_t* bundle =
+      loom_low_resolved_target_bundle(state->target);
+  const loom_target_snapshot_t* snapshot = bundle->snapshot;
+  const loom_target_export_plan_t* export_plan = bundle->export_plan;
   iree_string_view_t target_triple = iree_string_view_empty();
   iree_string_view_t data_layout = iree_string_view_empty();
   iree_string_view_t target_cpu = iree_string_view_empty();
   iree_string_view_t target_features = iree_string_view_empty();
-  if (state->target->target_op &&
-      loom_llvmir_target_isa(state->target->target_op)) {
-    target_triple = loom_llvmir_emit_optional_string_attr(
-        state->module, state->target->target_op,
-        loom_llvmir_target_triple_ATTR_INDEX);
-    data_layout = loom_llvmir_emit_optional_string_attr(
-        state->module, state->target->target_op,
-        loom_llvmir_target_data_layout_ATTR_INDEX);
-    target_cpu = loom_llvmir_emit_optional_string_attr(
-        state->module, state->target->target_op,
-        loom_llvmir_target_cpu_ATTR_INDEX);
-    target_features = loom_llvmir_emit_optional_string_attr(
-        state->module, state->target->target_op,
-        loom_llvmir_target_features_ATTR_INDEX);
+  const loom_llvmir_target_facts_t* target_facts =
+      loom_llvmir_target_facts_cast(state->target->target_facts);
+  if (target_facts != NULL) {
+    target_triple = target_facts->target_triple;
+    data_layout = target_facts->data_layout;
+    target_cpu = target_facts->target_cpu;
+    target_features = target_facts->target_features;
   }
 
   loom_llvmir_target_env_t projected_env = {
@@ -3736,7 +3729,7 @@ static iree_status_t loom_llvmir_emit_prepare_function_profile(
       }
       const loom_llvmir_target_profile_t* provider_profile = NULL;
       const loom_llvmir_target_profile_projection_request_t request = {
-          .bundle = &state->target->bundle_storage.bundle,
+          .bundle = bundle,
           .target_triple = target_triple,
       };
       if (!loom_llvmir_target_profile_registry_project_bundle(
@@ -3766,8 +3759,7 @@ static iree_status_t loom_llvmir_emit_prepare_function_profile(
   }
 
   loom_llvmir_target_profile_storage_initialize_from_bundle(
-      &state->target->bundle_storage.bundle, &projected_profile,
-      &state->target_profile_storage);
+      bundle, &projected_profile, &state->target_profile_storage);
   state->target_profile = &state->target_profile_storage.profile;
   return iree_ok_status();
 }
@@ -3793,11 +3785,18 @@ static iree_status_t loom_llvmir_emit_low_function_into_module(
                             "definition");
   }
 
+  const loom_func_like_t function =
+      loom_func_like_cast(module_state->module, low_function_op);
+  const loom_symbol_ref_t function_ref = loom_func_like_callee(function);
+  const loom_target_function_version_t* function_version =
+      loom_target_function_version_snapshot_at(&module_state->function_versions,
+                                               function_ref.symbol_id);
   loom_low_resolved_target_t target = {0};
-  IREE_RETURN_IF_ERROR(loom_low_resolve_function_target_with_facts(
+  IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
       module_state->module, &module_state->symbol_facts, low_function_op,
-      module_state->descriptor_registry, module_state->target_selection,
-      module_state->diagnostic_emitter, &target));
+      function_version ? function_version->function_target_facts : NULL,
+      module_state->descriptor_registry, module_state->diagnostic_emitter,
+      &target));
   if (target.descriptor_set == NULL) {
     ++module_state->error_count;
     return iree_ok_status();
@@ -3878,7 +3877,6 @@ void loom_llvmir_emit_low_module_options_initialize(
 iree_status_t loom_llvmir_emit_low_module(
     loom_module_t* module,
     const loom_low_descriptor_registry_t* descriptor_registry,
-    loom_target_selection_t target_selection,
     iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_allocator_t* scratch_arena,
     const loom_llvmir_emit_low_module_options_t* options,
@@ -3893,13 +3891,15 @@ iree_status_t loom_llvmir_emit_low_module(
   loom_llvmir_emit_module_state_t state = {
       .module = module,
       .descriptor_registry = descriptor_registry,
-      .target_selection = target_selection,
       .diagnostic_emitter = diagnostic_emitter,
       .scratch_arena = scratch_arena,
       .target_profile_registry =
           options ? options->target_profile_registry : NULL,
   };
   loom_symbol_fact_table_initialize(&state.symbol_facts, scratch_arena);
+  IREE_RETURN_IF_ERROR(loom_target_function_version_snapshot_build(
+      module, options ? options->function_versions : NULL, scratch_arena,
+      &state.function_versions));
 
   iree_status_t status = iree_ok_status();
   loom_op_t* op = NULL;

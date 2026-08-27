@@ -139,6 +139,10 @@ add_custom_command(OUTPUT cpu_data_headers_filegroup.stamp
 add_custom_target(cpu_data_headers_filegroup
     DEPENDS cpu_data_headers_filegroup.stamp
 )
+iree_register_generated_compile_input(cpu_data_headers_filegroup
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/cpu_data_headers_filegroup.stamp"
+)
 
 iree_cc_library(
   NAME

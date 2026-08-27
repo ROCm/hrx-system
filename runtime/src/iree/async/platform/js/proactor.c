@@ -64,9 +64,10 @@ static void iree_async_proactor_js_cancel_continuation_chain(
   while (operation) {
     iree_async_operation_t* next = operation->linked_next;
     operation->linked_next = NULL;
-    operation->completion_fn(operation->user_data, operation,
-                             iree_status_from_code(IREE_STATUS_CANCELLED),
-                             IREE_ASYNC_COMPLETION_FLAG_NONE);
+    iree_async_completion_flags_t flags = IREE_ASYNC_COMPLETION_FLAG_NONE;
+    iree_status_t status = iree_async_operation_resolve_completion(
+        operation, iree_status_from_code(IREE_STATUS_CANCELLED), &flags);
+    operation->completion_fn(operation->user_data, operation, status, flags);
     operation = next;
   }
 }
@@ -117,6 +118,7 @@ static void iree_async_proactor_js_complete(
   iree_async_operation_release_resources(operation);
   iree_async_proactor_js_dispatch_linked_continuation(proactor, operation,
                                                       iree_status_code(status));
+  status = iree_async_operation_resolve_completion(operation, status, &flags);
   operation->completion_fn(operation->user_data, operation, status, flags);
   IREE_TRACE_ZONE_END(z0);
 }
@@ -531,7 +533,8 @@ static iree_status_t iree_async_proactor_js_register_relay(
 }
 
 static void iree_async_proactor_js_unregister_relay(
-    iree_async_proactor_t* proactor, iree_async_relay_t* relay) {
+    iree_async_proactor_t* proactor, iree_async_relay_t* relay,
+    iree_async_relay_unregistered_callback_t callback) {
   IREE_ASSERT(false, "unregister_relay called on JS proactor");
 }
 

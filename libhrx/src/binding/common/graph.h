@@ -221,6 +221,16 @@ iree_status_t iree_hal_streaming_graph_schedule_nodes(
     iree_arena_allocator_t* arena,
     iree_hal_streaming_graph_schedule_t* out_schedule);
 
+// Checks whether |child_graph| may be the child graph of a node in
+// |parent_graph|: the two must be distinct, must belong to the same context,
+// and |child_graph| must not reach |parent_graph| through its own child graph
+// nodes. Instantiating a node's child graph instantiates that graph's own child
+// graph nodes in turn, so containment that leads back to |parent_graph| would
+// recurse until the stack ran out.
+iree_status_t iree_hal_streaming_graph_validate_child_graph(
+    iree_hal_streaming_graph_t* parent_graph,
+    iree_hal_streaming_graph_t* child_graph);
+
 // Adds dependencies between nodes in the graph.
 // For each index i in [0, count), adds an edge from from_nodes[i] to
 // to_nodes[i], meaning to_nodes[i] will wait for from_nodes[i] to complete.

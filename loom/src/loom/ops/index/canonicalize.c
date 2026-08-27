@@ -4,12 +4,13 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "iree/base/internal/math.h"
 #include "loom/ir/module.h"
+#include "loom/ops/index/carrier.h"
 #include "loom/ops/index/compare.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/rewrite/rewriter.h"
-#include "loom/util/math.h"
 
 //===----------------------------------------------------------------------===//
 // Utilities
@@ -49,6 +50,17 @@ static bool loom_index_values_are_same_or_same_exact_i64(
          lhs_value == rhs_value;
 }
 
+static const loom_fact_context_t* loom_index_rewriter_fact_context(
+    const loom_rewriter_t* rewriter) {
+  return rewriter->fact_table ? &rewriter->fact_table->context : NULL;
+}
+
+static int32_t loom_index_rewriter_target_bitwidth(
+    const loom_rewriter_t* rewriter) {
+  return loom_index_target_carrier_bitwidth(
+      loom_index_rewriter_fact_context(rewriter), LOOM_SCALAR_TYPE_INDEX);
+}
+
 static bool loom_index_value_facts_are_non_negative(loom_rewriter_t* rewriter,
                                                     loom_value_id_t value) {
   return loom_value_facts_is_non_negative(
@@ -59,6 +71,16 @@ static bool loom_index_value_facts_are_positive(loom_rewriter_t* rewriter,
                                                 loom_value_id_t value) {
   return loom_value_facts_is_positive(
       loom_rewriter_value_facts(rewriter, value));
+}
+
+static bool loom_index_value_facts_are_non_negative_in_signed_target_carrier(
+    loom_rewriter_t* rewriter, loom_value_id_t value) {
+  loom_value_facts_t facts = loom_rewriter_value_facts(rewriter, value);
+  loom_type_t type = loom_module_value_type(rewriter->module, value);
+  return loom_type_is_scalar(type) && loom_value_facts_is_non_negative(facts) &&
+         loom_index_value_facts_fit_signed_target_carrier(
+             loom_index_rewriter_fact_context(rewriter),
+             loom_type_element_type(type), facts);
 }
 
 static loom_op_t* loom_index_defining_op(loom_rewriter_t* rewriter,
@@ -147,56 +169,52 @@ static iree_status_t loom_index_replace_single_result_with_binary_op(
     }
     case LOOM_OP_INDEX_MUL: {
       IREE_RETURN_IF_ERROR(loom_index_mul_build(&rewriter->builder, lhs, rhs,
-                                                result_type, op->location,
-                                                &replacement_op));
+                                                op->location, &replacement_op));
+      break;
+    }
+    case LOOM_OP_INDEX_REM: {
+      IREE_RETURN_IF_ERROR(loom_index_rem_build(&rewriter->builder, lhs, rhs,
+                                                op->location, &replacement_op));
       break;
     }
     case LOOM_OP_INDEX_ANDI: {
-      IREE_RETURN_IF_ERROR(loom_index_andi_build(&rewriter->builder, lhs, rhs,
-                                                 result_type, op->location,
-                                                 &replacement_op));
+      IREE_RETURN_IF_ERROR(loom_index_andi_build(
+          &rewriter->builder, lhs, rhs, op->location, &replacement_op));
       break;
     }
     case LOOM_OP_INDEX_ORI: {
       IREE_RETURN_IF_ERROR(loom_index_ori_build(&rewriter->builder, lhs, rhs,
-                                                result_type, op->location,
-                                                &replacement_op));
+                                                op->location, &replacement_op));
       break;
     }
     case LOOM_OP_INDEX_XORI: {
-      IREE_RETURN_IF_ERROR(loom_index_xori_build(&rewriter->builder, lhs, rhs,
-                                                 result_type, op->location,
-                                                 &replacement_op));
+      IREE_RETURN_IF_ERROR(loom_index_xori_build(
+          &rewriter->builder, lhs, rhs, op->location, &replacement_op));
       break;
     }
     case LOOM_OP_INDEX_SHLI: {
-      IREE_RETURN_IF_ERROR(loom_index_shli_build(&rewriter->builder, lhs, rhs,
-                                                 result_type, op->location,
-                                                 &replacement_op));
+      IREE_RETURN_IF_ERROR(loom_index_shli_build(
+          &rewriter->builder, lhs, rhs, op->location, &replacement_op));
       break;
     }
     case LOOM_OP_INDEX_SHRSI: {
-      IREE_RETURN_IF_ERROR(loom_index_shrsi_build(&rewriter->builder, lhs, rhs,
-                                                  result_type, op->location,
-                                                  &replacement_op));
+      IREE_RETURN_IF_ERROR(loom_index_shrsi_build(
+          &rewriter->builder, lhs, rhs, op->location, &replacement_op));
       break;
     }
     case LOOM_OP_INDEX_SHRUI: {
-      IREE_RETURN_IF_ERROR(loom_index_shrui_build(&rewriter->builder, lhs, rhs,
-                                                  result_type, op->location,
-                                                  &replacement_op));
+      IREE_RETURN_IF_ERROR(loom_index_shrui_build(
+          &rewriter->builder, lhs, rhs, op->location, &replacement_op));
       break;
     }
     case LOOM_OP_INDEX_ROTLI: {
-      IREE_RETURN_IF_ERROR(loom_index_rotli_build(&rewriter->builder, lhs, rhs,
-                                                  result_type, op->location,
-                                                  &replacement_op));
+      IREE_RETURN_IF_ERROR(loom_index_rotli_build(
+          &rewriter->builder, lhs, rhs, op->location, &replacement_op));
       break;
     }
     case LOOM_OP_INDEX_ROTRI: {
-      IREE_RETURN_IF_ERROR(loom_index_rotri_build(&rewriter->builder, lhs, rhs,
-                                                  result_type, op->location,
-                                                  &replacement_op));
+      IREE_RETURN_IF_ERROR(loom_index_rotri_build(
+          &rewriter->builder, lhs, rhs, op->location, &replacement_op));
       break;
     }
     default:
@@ -246,12 +264,10 @@ static iree_status_t loom_index_replace_single_result_with_madd_op(
     loom_value_id_t b, loom_value_id_t c) {
   loom_builder_set_before(&rewriter->builder, op);
   loom_value_id_t value_checkpoint = loom_rewriter_value_checkpoint(rewriter);
-  loom_type_t result_type =
-      loom_module_value_type(rewriter->module, loom_op_const_results(op)[0]);
 
   loom_op_t* replacement_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_index_madd_build(
-      &rewriter->builder, a, b, c, result_type, op->location, &replacement_op));
+  IREE_RETURN_IF_ERROR(loom_index_madd_build(&rewriter->builder, a, b, c,
+                                             op->location, &replacement_op));
   loom_value_id_t replacement = loom_index_madd_result(replacement_op);
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, &replacement, 1, value_checkpoint));
@@ -273,8 +289,9 @@ static iree_status_t loom_index_replace_single_result_with_scaled_madd_op(
                                                        scale_value, addend);
 }
 
-static bool loom_index_shift_amount_is_valid(loom_type_t type, int64_t amount) {
-  int32_t bitwidth = loom_scalar_type_bitwidth(loom_type_element_type(type));
+static bool loom_index_shift_amount_is_valid(const loom_rewriter_t* rewriter,
+                                             int64_t amount) {
+  int32_t bitwidth = loom_index_rewriter_target_bitwidth(rewriter);
   return amount >= 0 && bitwidth > 0 && amount < bitwidth;
 }
 
@@ -332,10 +349,7 @@ static bool loom_index_match_scaled_value_with_exact_positive_factor(
     if (!loom_index_query_exact_i64(rewriter, amount_value, &amount)) {
       return false;
     }
-    loom_type_t result_type =
-        loom_module_value_type(rewriter->module, loom_index_shli_result(op));
-    if (!loom_index_shift_amount_is_valid(result_type, amount) ||
-        amount >= 63) {
+    if (!loom_index_shift_amount_is_valid(rewriter, amount) || amount >= 63) {
       return false;
     }
     out_scaled_value->value = loom_index_shli_lhs(op);
@@ -371,6 +385,30 @@ static bool loom_index_match_madd_with_exact_positive_factor(
   return loom_index_query_exact_i64(rewriter, *out_addend, out_addend_value);
 }
 
+static bool loom_index_match_add_with_exact_non_negative_offset(
+    loom_rewriter_t* rewriter, loom_op_t* add_op, loom_value_id_t* out_value,
+    int64_t* out_offset) {
+  if (!add_op || !loom_index_add_isa(add_op)) return false;
+
+  loom_value_id_t lhs = loom_index_add_lhs(add_op);
+  loom_value_id_t rhs = loom_index_add_rhs(add_op);
+  int64_t lhs_offset = 0;
+  if (loom_index_query_exact_i64(rewriter, lhs, &lhs_offset) &&
+      lhs_offset >= 0) {
+    *out_value = rhs;
+    *out_offset = lhs_offset;
+    return true;
+  }
+  int64_t rhs_offset = 0;
+  if (loom_index_query_exact_i64(rewriter, rhs, &rhs_offset) &&
+      rhs_offset >= 0) {
+    *out_value = lhs;
+    *out_offset = rhs_offset;
+    return true;
+  }
+  return false;
+}
+
 typedef enum loom_index_radix_term_kind_e {
   LOOM_INDEX_RADIX_TERM_QUOTIENT,
   LOOM_INDEX_RADIX_TERM_REMAINDER,
@@ -393,7 +431,7 @@ static bool loom_index_exact_positive_power_of_two_plus_one(
     int64_t mask, int64_t* out_radix) {
   if (mask <= 0 || mask == INT64_MAX) return false;
   int64_t radix = mask + 1;
-  if (!loom_is_power_of_two_i64(radix)) return false;
+  if (!iree_math_is_power_of_two_i64(radix)) return false;
   *out_radix = radix;
   return true;
 }
@@ -421,7 +459,19 @@ static bool loom_index_match_scaled_term(loom_rewriter_t* rewriter,
   *out_scale_value = LOOM_VALUE_ID_INVALID;
 
   loom_op_t* term_def = loom_index_defining_op(rewriter, term);
-  if (!term_def || !loom_index_mul_isa(term_def)) return true;
+  if (!term_def) return true;
+
+  if (loom_index_shli_isa(term_def)) {
+    int64_t scale = 0;
+    if (!loom_index_exact_shift_radix(rewriter, loom_index_shli_rhs(term_def),
+                                      &scale)) {
+      return false;
+    }
+    *out_value = loom_index_shli_lhs(term_def);
+    *out_scale = scale;
+    return true;
+  }
+  if (!loom_index_mul_isa(term_def)) return true;
 
   loom_value_id_t lhs = loom_index_mul_lhs(term_def);
   loom_value_id_t rhs = loom_index_mul_rhs(term_def);
@@ -528,7 +578,7 @@ static bool loom_index_scaled_radix_terms_are_complementary(
     return false;
   }
   int64_t expected_quotient_scale = 0;
-  if (!loom_checked_mul_i64(remainder->scale, quotient->radix,
+  if (!iree_checked_mul_i64(remainder->scale, quotient->radix,
                             &expected_quotient_scale) ||
       quotient->scale != expected_quotient_scale) {
     return false;
@@ -538,10 +588,10 @@ static bool loom_index_scaled_radix_terms_are_complementary(
   return true;
 }
 
-static bool loom_index_integer_value_is_all_ones(loom_type_t type,
-                                                 int64_t value) {
+static bool loom_index_integer_value_is_all_ones(
+    const loom_rewriter_t* rewriter, int64_t value) {
   if (value == -1) return true;
-  int32_t bitwidth = loom_scalar_type_bitwidth(loom_type_element_type(type));
+  int32_t bitwidth = loom_index_rewriter_target_bitwidth(rewriter);
   if (bitwidth <= 0 || bitwidth >= 63) return false;
   return value == (((int64_t)1 << bitwidth) - 1);
 }
@@ -559,12 +609,9 @@ static iree_status_t loom_index_replace_single_result_with_scaled_value(
   IREE_RETURN_IF_ERROR(loom_index_materialize_or_reuse_index_constant(
       op, rewriter, reusable_constant, scale, &scale_value));
 
-  loom_type_t result_type =
-      loom_module_value_type(rewriter->module, loom_op_const_results(op)[0]);
   loom_op_t* replacement_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_index_mul_build(&rewriter->builder, value,
-                                            scale_value, result_type,
-                                            op->location, &replacement_op));
+  IREE_RETURN_IF_ERROR(loom_index_mul_build(
+      &rewriter->builder, value, scale_value, op->location, &replacement_op));
   loom_value_id_t replacement = loom_index_mul_result(replacement_op);
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, &replacement, 1, value_checkpoint));
@@ -594,6 +641,27 @@ static iree_status_t loom_index_try_fold_scaled_radix_reconstruction(
   return iree_ok_status();
 }
 
+static iree_status_t loom_index_try_fold_floor_multiple_subtraction(
+    loom_op_t* op, loom_rewriter_t* rewriter, loom_value_id_t lhs,
+    loom_value_id_t rhs, bool* out_folded) {
+  *out_folded = false;
+  loom_index_scaled_radix_term_t rhs_term;
+  if (!loom_index_match_scaled_radix_term(rewriter, rhs, &rhs_term) ||
+      rhs_term.kind != LOOM_INDEX_RADIX_TERM_QUOTIENT ||
+      rhs_term.scale != rhs_term.radix ||
+      loom_index_strip_identity_assume(rewriter, lhs) !=
+          loom_index_strip_identity_assume(rewriter, rhs_term.source) ||
+      !loom_index_value_facts_are_non_negative(rewriter, rhs_term.source)) {
+    return iree_ok_status();
+  }
+
+  IREE_RETURN_IF_ERROR(loom_index_replace_single_result_with_binary_constant_op(
+      op, rewriter, LOOM_OP_INDEX_REM, rhs_term.source, rhs_term.radix,
+      rhs_term.scale_value));
+  *out_folded = true;
+  return iree_ok_status();
+}
+
 static bool loom_index_match_scaled_radix_product(
     loom_rewriter_t* rewriter, loom_value_id_t value, loom_value_id_t scale,
     loom_index_scaled_radix_term_t* out_term) {
@@ -607,7 +675,7 @@ static bool loom_index_match_scaled_radix_product(
   }
 
   int64_t combined_scale = 0;
-  if (!loom_checked_mul_i64(out_term->scale, scale_factor, &combined_scale)) {
+  if (!iree_checked_mul_i64(out_term->scale, scale_factor, &combined_scale)) {
     return false;
   }
   out_term->scale = combined_scale;
@@ -672,10 +740,9 @@ static iree_status_t loom_index_replace_single_result_with_scaled_add(
     IREE_RETURN_IF_ERROR(loom_index_materialize_or_reuse_index_constant(
         op, rewriter, reusable_scale, scale, &scale_value));
     loom_op_t* replacement_op = NULL;
-    IREE_RETURN_IF_ERROR(loom_index_madd_build(
-        &rewriter->builder, value, scale_value, addend_value,
-        loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), op->location,
-        &replacement_op));
+    IREE_RETURN_IF_ERROR(loom_index_madd_build(&rewriter->builder, value,
+                                               scale_value, addend_value,
+                                               op->location, &replacement_op));
     replacement = loom_index_madd_result(replacement_op);
   }
 
@@ -707,7 +774,7 @@ static bool loom_index_madd_match_nested_scaled_factor(
   }
 
   int64_t combined_factor = 0;
-  if (!loom_checked_mul_i64(nested_scaled.factor, outer_factor,
+  if (!iree_checked_mul_i64(nested_scaled.factor, outer_factor,
                             &combined_factor) ||
       combined_factor <= 0) {
     return false;
@@ -800,6 +867,15 @@ iree_status_t loom_index_sub_canonicalize(loom_op_t* op,
     return loom_index_replace_single_result_with_index_constant(op, rewriter,
                                                                 result_type, 0);
   }
+
+  loom_type_t result_type =
+      loom_module_value_type(rewriter->module, loom_index_sub_result(op));
+  if (!loom_index_type_is_index(result_type)) return iree_ok_status();
+
+  bool folded_floor_multiple = false;
+  IREE_RETURN_IF_ERROR(loom_index_try_fold_floor_multiple_subtraction(
+      op, rewriter, lhs, rhs, &folded_floor_multiple));
+  if (folded_floor_multiple) return iree_ok_status();
   return iree_ok_status();
 }
 
@@ -823,9 +899,9 @@ iree_status_t loom_index_mul_canonicalize(loom_op_t* op,
   loom_index_scaled_value_t scaled;
   if (loom_index_match_scaled_value_with_exact_positive_factor(rewriter, op,
                                                                &scaled) &&
-      scaled.factor > 1 && loom_is_power_of_two_i64(scaled.factor)) {
-    int64_t amount = loom_ilog2_i64(scaled.factor);
-    if (loom_index_shift_amount_is_valid(result_type, amount)) {
+      scaled.factor > 1 && iree_math_is_power_of_two_i64(scaled.factor)) {
+    int64_t amount = iree_math_floor_log2_u64(scaled.factor);
+    if (loom_index_shift_amount_is_valid(rewriter, amount)) {
       return loom_index_replace_single_result_with_binary_constant_op(
           op, rewriter, LOOM_OP_INDEX_SHLI, scaled.value, amount,
           LOOM_VALUE_ID_INVALID);
@@ -905,10 +981,11 @@ iree_status_t loom_index_div_canonicalize(loom_op_t* op,
           addend_value);
     }
   }
-  if (loom_is_power_of_two_i64(divisor) &&
+  if (iree_math_is_power_of_two_i64(divisor) &&
       loom_index_value_facts_are_non_negative(rewriter, lhs)) {
     return loom_index_replace_single_result_with_binary_constant_op(
-        op, rewriter, LOOM_OP_INDEX_SHRUI, lhs, loom_ilog2_i64(divisor), rhs);
+        op, rewriter, LOOM_OP_INDEX_SHRUI, lhs,
+        iree_math_floor_log2_u64(divisor), rhs);
   }
   return iree_ok_status();
 }
@@ -932,10 +1009,39 @@ iree_status_t loom_index_rem_canonicalize(loom_op_t* op,
   if (loom_index_query_exact_i64(rewriter, rhs, &divisor) && divisor > 0) {
     loom_value_facts_t lhs_facts = loom_rewriter_value_facts(rewriter, lhs);
     if (!loom_value_facts_is_float(lhs_facts) &&
-        loom_value_facts_is_non_negative(lhs_facts) &&
+        loom_index_value_facts_are_non_negative(rewriter, lhs) &&
         loom_value_facts_divisible_by(lhs_facts, divisor)) {
       return loom_index_replace_single_result_with_index_constant(
           op, rewriter, result_type, 0);
+    }
+    if (!loom_value_facts_is_float(lhs_facts) &&
+        loom_index_value_facts_are_non_negative(rewriter, lhs) &&
+        lhs_facts.range_hi < divisor) {
+      return loom_index_replace_single_result_with_value(op, rewriter, lhs);
+    }
+
+    loom_value_id_t offset_value = LOOM_VALUE_ID_INVALID;
+    int64_t offset = 0;
+    loom_op_t* lhs_def = loom_index_defining_op(rewriter, lhs);
+    if (loom_index_match_add_with_exact_non_negative_offset(
+            rewriter, lhs_def, &offset_value, &offset)) {
+      const int64_t residual_offset = offset % divisor;
+      loom_value_facts_t value_facts =
+          loom_rewriter_value_facts(rewriter, offset_value);
+      int64_t residual_range_hi = 0;
+      if (!loom_value_facts_is_float(value_facts) &&
+          loom_index_value_facts_are_non_negative(rewriter, offset_value) &&
+          iree_checked_add_i64(value_facts.range_hi, residual_offset,
+                               &residual_range_hi) &&
+          residual_range_hi < divisor) {
+        if (residual_offset == 0) {
+          return loom_index_replace_single_result_with_value(op, rewriter,
+                                                             offset_value);
+        }
+        return loom_index_replace_single_result_with_binary_constant_op(
+            op, rewriter, LOOM_OP_INDEX_ADD, offset_value, residual_offset,
+            LOOM_VALUE_ID_INVALID);
+      }
     }
   }
   if (loom_index_value_facts_are_exact_i64(rewriter, loom_index_rem_rhs(op),
@@ -944,7 +1050,7 @@ iree_status_t loom_index_rem_canonicalize(loom_op_t* op,
                                                                 result_type, 0);
   }
   if (loom_index_query_exact_i64(rewriter, rhs, &divisor) &&
-      loom_is_power_of_two_i64(divisor) &&
+      iree_math_is_power_of_two_i64(divisor) &&
       loom_index_value_facts_are_non_negative(rewriter, lhs)) {
     return loom_index_replace_single_result_with_binary_constant_op(
         op, rewriter, LOOM_OP_INDEX_ANDI, lhs, divisor - 1, rhs);
@@ -961,9 +1067,12 @@ static iree_status_t loom_index_minmax_canonicalize(
 
   loom_value_facts_t lhs_facts = loom_rewriter_value_facts(rewriter, lhs);
   loom_value_facts_t rhs_facts = loom_rewriter_value_facts(rewriter, rhs);
+  loom_scalar_type_t operand_scalar_type =
+      loom_type_element_type(loom_module_value_type(rewriter->module, lhs));
   bool lhs_le_rhs = false;
-  if (!loom_index_cmp_result_from_facts(LOOM_INDEX_CMP_PREDICATE_SLE,
-                                        &lhs_facts, &rhs_facts, &lhs_le_rhs)) {
+  if (!loom_index_cmp_result_from_facts(
+          loom_index_rewriter_fact_context(rewriter), operand_scalar_type,
+          LOOM_INDEX_CMP_PREDICATE_SLE, &lhs_facts, &rhs_facts, &lhs_le_rhs)) {
     return iree_ok_status();
   }
 
@@ -1046,12 +1155,12 @@ iree_status_t loom_index_andi_canonicalize(loom_op_t* op,
   }
   int64_t lhs_value = 0;
   if (loom_index_query_exact_i64(rewriter, lhs, &lhs_value) &&
-      loom_index_integer_value_is_all_ones(result_type, lhs_value)) {
+      loom_index_integer_value_is_all_ones(rewriter, lhs_value)) {
     return loom_index_replace_single_result_with_value(op, rewriter, rhs);
   }
   int64_t rhs_value = 0;
   if (loom_index_query_exact_i64(rewriter, rhs, &rhs_value) &&
-      loom_index_integer_value_is_all_ones(result_type, rhs_value)) {
+      loom_index_integer_value_is_all_ones(rewriter, rhs_value)) {
     return loom_index_replace_single_result_with_value(op, rewriter, lhs);
   }
   return iree_ok_status();
@@ -1070,16 +1179,14 @@ iree_status_t loom_index_ori_canonicalize(loom_op_t* op,
   if (loom_index_value_facts_are_exact_i64(rewriter, rhs, 0)) {
     return loom_index_replace_single_result_with_value(op, rewriter, lhs);
   }
-  loom_type_t result_type =
-      loom_module_value_type(rewriter->module, loom_index_ori_result(op));
   int64_t lhs_value = 0;
   if (loom_index_query_exact_i64(rewriter, lhs, &lhs_value) &&
-      loom_index_integer_value_is_all_ones(result_type, lhs_value)) {
+      loom_index_integer_value_is_all_ones(rewriter, lhs_value)) {
     return loom_index_replace_single_result_with_value(op, rewriter, lhs);
   }
   int64_t rhs_value = 0;
   if (loom_index_query_exact_i64(rewriter, rhs, &rhs_value) &&
-      loom_index_integer_value_is_all_ones(result_type, rhs_value)) {
+      loom_index_integer_value_is_all_ones(rewriter, rhs_value)) {
     return loom_index_replace_single_result_with_value(op, rewriter, rhs);
   }
   return iree_ok_status();
@@ -1144,7 +1251,7 @@ static iree_status_t loom_index_shift_canonicalize(loom_op_t* op,
     if (amount == 0) {
       return loom_index_replace_single_result_with_value(op, rewriter, lhs);
     }
-    if (loom_index_shift_amount_is_valid(result_type, amount) &&
+    if (loom_index_shift_amount_is_valid(rewriter, amount) &&
         loom_index_value_facts_are_exact_i64(rewriter, lhs, 0)) {
       return loom_index_replace_single_result_with_index_constant(
           op, rewriter, result_type, 0);
@@ -1161,8 +1268,8 @@ static iree_status_t loom_index_shift_canonicalize(loom_op_t* op,
     return iree_ok_status();
   }
   int64_t combined_amount = 0;
-  if (!loom_checked_add_i64(inner_amount, amount, &combined_amount) ||
-      !loom_index_shift_amount_is_valid(result_type, combined_amount)) {
+  if (!iree_checked_add_i64(inner_amount, amount, &combined_amount) ||
+      !loom_index_shift_amount_is_valid(rewriter, combined_amount)) {
     return iree_ok_status();
   }
 
@@ -1189,7 +1296,8 @@ iree_status_t loom_index_shrsi_canonicalize(loom_op_t* op,
   if (loom_index_value_facts_are_exact_i64(rewriter, rhs, 0)) {
     return loom_index_replace_single_result_with_value(op, rewriter, lhs);
   }
-  if (loom_index_value_facts_are_non_negative(rewriter, lhs)) {
+  if (loom_index_value_facts_are_non_negative_in_signed_target_carrier(rewriter,
+                                                                       lhs)) {
     return loom_index_replace_single_result_with_binary_op(
         op, rewriter, LOOM_OP_INDEX_SHRUI, lhs, rhs);
   }
@@ -1226,13 +1334,10 @@ iree_status_t loom_index_rotri_canonicalize(loom_op_t* op,
     return loom_index_replace_single_result_with_value(op, rewriter, lhs);
   }
 
-  loom_type_t result_type =
-      loom_module_value_type(rewriter->module, loom_index_rotri_result(op));
-  if (!loom_index_shift_amount_is_valid(result_type, amount)) {
+  if (!loom_index_shift_amount_is_valid(rewriter, amount)) {
     return iree_ok_status();
   }
-  int32_t bitwidth =
-      loom_scalar_type_bitwidth(loom_type_element_type(result_type));
+  int32_t bitwidth = loom_index_rewriter_target_bitwidth(rewriter);
   int64_t left_amount = bitwidth - amount;
 
   loom_builder_set_before(&rewriter->builder, op);
@@ -1266,9 +1371,12 @@ iree_status_t loom_index_cmp_canonicalize(loom_op_t* op,
   bool result = false;
   loom_value_facts_t lhs_facts = loom_rewriter_value_facts(rewriter, lhs);
   loom_value_facts_t rhs_facts = loom_rewriter_value_facts(rewriter, rhs);
+  loom_scalar_type_t operand_scalar_type =
+      loom_type_element_type(loom_module_value_type(rewriter->module, lhs));
   if ((lhs == rhs && loom_index_cmp_same_value_result(predicate, &result)) ||
-      loom_index_cmp_result_from_facts(predicate, &lhs_facts, &rhs_facts,
-                                       &result)) {
+      loom_index_cmp_result_from_facts(
+          loom_index_rewriter_fact_context(rewriter), operand_scalar_type,
+          predicate, &lhs_facts, &rhs_facts, &result)) {
     return loom_index_replace_single_result_with_i1_constant(op, rewriter,
                                                              result);
   }

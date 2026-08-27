@@ -24,11 +24,12 @@ facts are still visible enough to compile, inspect, specialize, and tune.
 | Area | Status |
 | --- | --- |
 | Loom text, bytecode, IR, passes, linking, reports | Active core infrastructure |
-| `loomc` public C API | Active embedding surface for AOT, JIT, packaging, executable caches, and tuning/search |
+| `loomc` public C API | Active embedding surface for AOT, JIT, packaging, caller-owned artifact caches, and tuning/search |
 | AMDGPU HSACO | Most established native target path |
 | SPIR-V/Vulkan | Working examples and tests; still hardening as a product target |
 | x86, Wasm, IREEVM | Real early target paths with providers, lowering/check coverage, and initial emission infrastructure; not mature product targets |
-| Whole model programs | Direction of travel; current checked examples are kernel-focused |
+| Portable command programs | Source dialect, multi-root preparation, target-neutral Low ISA, and immutable artifact core; public embedding and materialization are staged separately |
+| Whole host programs | Direction of travel beyond reusable command-buffer-shaped subgraphs |
 
 ## Build The First Slice
 
@@ -49,6 +50,7 @@ python dev.py bazel build \
   //loom/src/loom/tools/loom-link:loom-link \
   //loom/src/loom/tools/iree-test-loom:iree-test-loom \
   //loom/src/loom/tools/iree-benchmark-loom:iree-benchmark-loom \
+  //loom/py/loom/tools:loom-compile-report \
   //loom/binding/c:loomc \
   //loom/binding/c/example:source_info \
   //loom/binding/c/example:compile_text \
@@ -81,7 +83,8 @@ You can also run the benchmark planner directly:
 ```bash
 python dev.py bazel run //loom/src/loom/tools/iree-benchmark-loom:iree-benchmark-loom -- \
   loom/src/loom/test/corpus/authoring/mlp_down_projection_residual_bf16.loom \
-  --dry-run
+  --dry-run \
+  --config=mlp_down_projection_residual_bf16.row_capacity=3584
 ```
 
 The Bazel HAL driver registry defaults to host-only drivers. On an
@@ -94,9 +97,9 @@ python dev.py bazel run \
   --//runtime/config/hal:drivers=amdgpu,local-sync,local-task,null \
   //loom/src/loom/tools/iree-benchmark-loom:iree-benchmark-loom -- \
   loom/src/loom/test/corpus/authoring/mlp_down_projection_residual_bf16.loom \
+  --config=mlp_down_projection_residual_bf16.row_capacity=3584 \
   --device=amdgpu \
   --measure=dispatch_complete \
-  --sample-compilation=per_sample \
   --iterations=1 \
   --warmup-iterations=0 \
   --batch-size=1 \
@@ -106,13 +109,54 @@ python dev.py bazel run \
 ```
 
 The authoring pattern to notice is that correctness policy and benchmark rows
-live beside the source. `func.apply` requests an implementation contract,
-`func.template` providers satisfy those contracts, and per-case parameters can
-become compile-time facts before lowering.
+live beside the source. `template.apply` requests an implementation from a
+declared family, `template.def` operations provide the candidates, and explicit
+config bindings select compile-time choices while case parameters remain
+runtime values.
 
 The authoring README includes the direct quantized AMDGPU flow for
 `loom-compile` HSACO emission, artifact manifests, compile reports, IR dumps,
 target listings, and correctness-gated dispatch benchmark bundles.
+
+## Inspect Compile Reports
+
+`loom-compile-report` provides a bounded first view over the structured reports
+emitted by `loom-compile` and `iree-benchmark-loom`:
+
+```bash
+python dev.py bazel run //loom/py/loom/tools:loom-compile-report -- \
+  show /tmp/kernel.compile-report.json
+python dev.py bazel run //loom/py/loom/tools:loom-compile-report -- \
+  diff /tmp/baseline.json /tmp/candidate.json --format=json
+python dev.py bazel run //loom/py/loom/tools:loom-compile-report -- \
+  suggest /tmp/candidate.json --format=json
+python dev.py bazel run //loom/py/loom/tools:loom-compile-report -- \
+  suggest /tmp/candidate.json --include-experimental --format=json
+```
+
+`show` separates emitted artifact facts from compiler analysis and omits
+unavailable metrics from its compact JSON. `diff` rejects reports unless their
+schema, target, specialization, workload, and entry identities match exactly.
+`suggest` delegates interpretation to the selected target family and cites the
+evidence behind each proposed experiment. Default findings require a documented
+or silicon-calibrated target model. `--include-experimental` also exposes
+structurally exact findings from hardware-unvalidated models and labels them
+`experimental`, allowing pre-silicon search without presenting model
+predictions as measured hardware behavior.
+
+Final-native facts expose the scheduled body separately from the target-owned
+entry envelope, native coissued instructions separately from their semantic
+components, and each matrix family separately from the broad matrix total.
+Dispatch-scaled operation counts appear only when the report carries an exact
+workload scale. Wait analysis distinguishes waits already present in the low
+stream from waits inserted by target planning, while target-insertion coverage
+states whether dynamic packet counts are exact or unknown. These are structural
+search signals rather than cycle estimates; absent values stay unavailable
+instead of being inferred by the report tool.
+
+Compile reports are version-zero, same-compiler-horizon diagnostics. Regenerate
+them with the current checkout instead of treating them as durable records or
+adding compatibility paths to the consumer.
 
 ## Try The C API
 
@@ -138,12 +182,16 @@ shape:
 source -> module -> link/index -> compile -> result diagnostics/artifacts
 ```
 
+The [in-memory composition guide](docs/src/integration/module-composition.md)
+uses `link_modules` to show a caller-owned root input resolving declarations
+against explicitly supplied libraries.
+
 The API is staged instead of one file-oriented entry point because embedders
 need different compositions:
 
 - AOT packaging can compile and emit ahead of deployment.
 - Runtime JITs can link and specialize around live target facts.
-- Executable caches can own artifact storage and invalidation policy.
+- Caller-owned artifact caches can define storage and invalidation policy.
 - Tuning servers can reuse compilers, linkers, pass programs, target profiles,
   and frozen indexes across many worker-local workspaces.
 
@@ -156,9 +204,12 @@ Offline synthetic AMDGPU processor profile:
 
 ```bash
 python dev.py bazel run //loom/binding/c/example:emit_amdgpu_offline -- \
-  gfx1100 \
+  gfx11-generic \
   /tmp/targetless_store_i32.hsaco
 ```
+
+The generic target emits a portable GFX11 code object. Pass `gfx1151` instead
+when the artifact should be specialized for that exact processor.
 
 Raw HSA probing, HSACO emission, code-object loading, and one kernel dispatch
 without the IREE HAL:
@@ -212,7 +263,7 @@ python dev.py bazel run \
   //loom/binding/c/example:emit_spirv_vulkan
 ```
 
-IREE HAL-derived SPIR-V target facts and executable-cache validation:
+IREE HAL-derived SPIR-V target facts and emission:
 
 ```bash
 python dev.py bazel run \
@@ -222,7 +273,7 @@ python dev.py bazel run \
 
 The raw Vulkan path is useful when evaluating Loom as an embeddable compiler
 near an application's own shader/module loading boundary. The IREE HAL path is
-useful when evaluating Loom as a companion to IREE runtime executable caches.
+useful when evaluating Loom as a compiler for target-explicit IREE HAL loading.
 
 ## Useful Entry Points
 
@@ -239,6 +290,7 @@ useful when evaluating Loom as a companion to IREE runtime executable caches.
 | [src/loom/target/arch/amdgpu](src/loom/target/arch/amdgpu) | AMDGPU source-to-low policy and target contracts |
 | [src/loom/target/emit/native/amdgpu](src/loom/target/emit/native/amdgpu) | Native AMDGPU/HSACO emission path |
 | [src/loom/target/arch/spirv](src/loom/target/arch/spirv) | SPIR-V target facts, profiles, and cooperative-matrix capability handling |
+| [src/loom/target/arch/cmd](src/loom/target/arch/cmd/README.md) | Reusable command-program source, preparation, portable Low ISA, and artifact contracts |
 
 ## Mental Model
 

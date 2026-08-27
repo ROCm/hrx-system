@@ -21,6 +21,7 @@
 extern "C" {
 #endif
 
+/// AMDGPU runtime support global option bits.
 typedef enum loomc_amdgpu_runtime_global_flag_bits_e {
   /// No AMDGPU runtime support globals are emitted.
   LOOMC_AMDGPU_RUNTIME_GLOBAL_NONE = 0u,
@@ -35,16 +36,17 @@ typedef enum loomc_amdgpu_runtime_global_flag_bits_e {
 /// Bitset of `loomc_amdgpu_runtime_global_flag_bits_t` values.
 typedef uint32_t loomc_amdgpu_runtime_global_flags_t;
 
+/// Mask of all AMDGPU runtime support global bits accepted by this API.
 #define LOOMC_AMDGPU_RUNTIME_GLOBALS_KNOWN                                             \
   ((loomc_amdgpu_runtime_global_flags_t)(LOOMC_AMDGPU_RUNTIME_GLOBAL_FEEDBACK_CONFIG | \
                                          LOOMC_AMDGPU_RUNTIME_GLOBAL_ASAN_CONFIG))
 
 /// AMDGPU HSACO emission options.
 ///
-/// AMDGPU emission uses the generic artifact format, artifact identifier, and
-/// target selection settings on `loomc_emit_options_t` and shared invocation
-/// descriptors. The target-specific descriptor carries AMDGPU code-object data
-/// globals required by prepared-low IR that references HAL runtime support.
+/// AMDGPU emission uses the generic artifact format and artifact identifier on
+/// `loomc_emit_options_t`. Emitted functions carry their targets in prepared
+/// IR. The target-specific descriptor carries AMDGPU code-object data globals
+/// required by prepared-low IR that references HAL runtime support.
 typedef struct loomc_amdgpu_emit_options_t {
   /// Structure type. Must be `LOOMC_STRUCTURE_TYPE_AMDGPU_EMIT_OPTIONS` when
   /// nonzero.

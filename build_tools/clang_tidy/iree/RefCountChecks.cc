@@ -742,9 +742,9 @@ using ReleasedVariables = llvm::DenseMap<const VarDecl*, ReleaseInfo>;
 class ReleasedUseVisitor final
     : public ConstStmtVisitor<ReleasedUseVisitor, void> {
  public:
-  ReleasedUseVisitor(ClangTidyCheck& Check, const SourceManager& SourceManager,
+  ReleasedUseVisitor(ClangTidyCheck& Check, const SourceManager& Sources,
                      const ReleasedVariables& Released)
-      : Check(Check), SourceManager(SourceManager), Released(Released) {}
+      : Check(Check), Sources(Sources), Released(Released) {}
 
   void VisitStmt(const Stmt* Statement) { VisitChildren(Statement); }
 
@@ -834,11 +834,11 @@ class ReleasedUseVisitor final
     if (It == Released.end() || Diagnosed.contains(Variable)) {
       return;
     }
-    if (IsExternalMacroBody(Location, SourceManager)) {
+    if (IsExternalMacroBody(Location, Sources)) {
       return;
     }
     Diagnosed.insert(Variable);
-    Check.diag(SourceManager.getExpansionLoc(Location),
+    Check.diag(Sources.getExpansionLoc(Location),
                "%0 is dereferenced after %1 releases it")
         << Variable->getName() << It->second.Function->getName();
   }
@@ -848,17 +848,17 @@ class ReleasedUseVisitor final
     if (It == Released.end() || Diagnosed.contains(Variable)) {
       return;
     }
-    if (IsExternalMacroBody(Location, SourceManager)) {
+    if (IsExternalMacroBody(Location, Sources)) {
       return;
     }
     Diagnosed.insert(Variable);
-    Check.diag(SourceManager.getExpansionLoc(Location),
+    Check.diag(Sources.getExpansionLoc(Location),
                "%0 is used after %1 releases it")
         << Variable->getName() << It->second.Function->getName();
   }
 
   ClangTidyCheck& Check;
-  const SourceManager& SourceManager;
+  const SourceManager& Sources;
   const ReleasedVariables& Released;
   llvm::SmallPtrSet<const VarDecl*, 4> Diagnosed;
 };
@@ -866,8 +866,8 @@ class ReleasedUseVisitor final
 class ReleaseFlowAnalyzer final
     : public ConstStmtVisitor<ReleaseFlowAnalyzer, void> {
  public:
-  ReleaseFlowAnalyzer(ClangTidyCheck& Check, const SourceManager& SourceManager)
-      : Check(Check), SourceManager(SourceManager) {}
+  ReleaseFlowAnalyzer(ClangTidyCheck& Check, const SourceManager& Sources)
+      : Check(Check), Sources(Sources) {}
 
   void VisitStmt(const Stmt* Statement) { VisitChildren(Statement); }
 
@@ -878,7 +878,7 @@ class ReleaseFlowAnalyzer final
       if (!Child) {
         continue;
       }
-      ReleasedUseVisitor UseVisitor(Check, SourceManager, Released);
+      ReleasedUseVisitor UseVisitor(Check, Sources, Released);
       UseVisitor.Visit(Child);
       if (std::optional<DirectRefCountOperation> Release =
               DirectReleaseStatement(Child)) {
@@ -891,8 +891,8 @@ class ReleaseFlowAnalyzer final
                      DirectRetainStatement(Child)) {
         auto It = Released.find(Retain->Variable);
         if (It != Released.end() &&
-            !IsExternalMacroBody(Retain->Location, SourceManager)) {
-          Check.diag(SourceManager.getExpansionLoc(Retain->Location),
+            !IsExternalMacroBody(Retain->Location, Sources)) {
+          Check.diag(Sources.getExpansionLoc(Retain->Location),
                      "%0 is retained by %1 after %2 already released it")
               << Retain->Variable->getName() << Retain->Function->getName()
               << It->second.Function->getName();
@@ -917,8 +917,8 @@ class ReleaseFlowAnalyzer final
       llvm::DenseMap<const VarDecl*, unsigned>& ReferenceCounts) {
     auto It = Released.find(Release.Variable);
     if (It != Released.end() &&
-        !IsExternalMacroBody(Release.Location, SourceManager)) {
-      Check.diag(SourceManager.getExpansionLoc(Release.Location),
+        !IsExternalMacroBody(Release.Location, Sources)) {
+      Check.diag(Sources.getExpansionLoc(Release.Location),
                  "%0 is released by %1 after %2 already released it")
           << Release.Variable->getName() << Release.Function->getName()
           << It->second.Function->getName();
@@ -944,7 +944,7 @@ class ReleaseFlowAnalyzer final
   }
 
   ClangTidyCheck& Check;
-  const SourceManager& SourceManager;
+  const SourceManager& Sources;
 };
 
 }  // namespace

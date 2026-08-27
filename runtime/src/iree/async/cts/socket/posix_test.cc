@@ -186,8 +186,7 @@ TEST_P(SocketPosixTest, UnixSocket_AbstractConnect) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &connect_op.base));
 
   // Poll until both complete.
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/2);
 
   EXPECT_EQ(accept_tracker.call_count, 1);
   IREE_EXPECT_OK(accept_tracker.ConsumeStatus());
@@ -356,8 +355,7 @@ TEST_P(SocketPosixTest, UnixDgram_ConnectedLoopback) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &connect_a.base));
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &connect_b.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/2);
 
   IREE_ASSERT_OK(connect_a_tracker.ConsumeStatus());
   IREE_ASSERT_OK(connect_b_tracker.ConsumeStatus());
@@ -387,8 +385,7 @@ TEST_P(SocketPosixTest, UnixDgram_ConnectedLoopback) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send_op.base));
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   IREE_EXPECT_OK(send_tracker.ConsumeStatus());
   EXPECT_EQ(send_op.bytes_sent, message_length);
@@ -430,8 +427,7 @@ TEST_P(SocketPosixTest, UnixDgram_MessageBoundary) {
                        CompletionTracker::Callback, &connect_tracker);
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &connect_op.base));
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(1000));
+  PollUntil(/*min_completions=*/1);
 
   // Send two separate datagrams.
   const char* msg1 = "First";
@@ -452,8 +448,7 @@ TEST_P(SocketPosixTest, UnixDgram_MessageBoundary) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send1.base));
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send2.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   // Receive - each recv should get exactly one datagram.
   char recv1_buffer[256], recv2_buffer[256];
@@ -475,8 +470,7 @@ TEST_P(SocketPosixTest, UnixDgram_MessageBoundary) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv1.base));
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv2.base));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   IREE_EXPECT_OK(recv1_tracker.ConsumeStatus());
   IREE_EXPECT_OK(recv2_tracker.ConsumeStatus());

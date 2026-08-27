@@ -1,59 +1,55 @@
-// HIP concept: `#if defined(__gfx1100__)` / `#if defined(__gfx1200__)`.
-// Loom spelling: target records are symbols. Providers and functions can refer
-// to them with `target(@...)` instead of baking architecture ifdefs into every
-// call site.
-amdgpu.target<gfx1100> @gfx1100
-amdgpu.target<gfx1200> @gfx1200
+// HIP concept: wave-size-specialized implementations of one operation.
+// Loom spelling: providers state only the normalized target fact they need.
+// The kernel and providers remain targetless so this source can specialize for
+// AMDGPU, SPIR-V, or another backend that projects a subgroup-size fact.
+// Both specialized providers and the fallback implement the same contract:
+// double one i32 value. Selection changes the implementation, not semantics.
+template.decl @hip.recipe.scale_i32(%value: i32) -> (i32)
 
-// HIP concept:
-//   template <typename Arch> int scale_i32(int value);
-//   gfx1100 specialization: multiply by 2.
-// Loom spelling: a `func.template<contract>` provider filtered by target and
-// ranked by priority. `target(@gfx1100)` says where this provider is legal.
-func.template<hip.recipe.scale_i32> target(@gfx1100) priority(20) @scale_i32_gfx1100(%value: i32) -> (i32) {
-  %two = scalar.constant 2 : i32
-  %scaled = scalar.muli %value, %two : i32
-  func.return %scaled : i32
+template.def<@hip.recipe.scale_i32> requires [#target.subgroup.size<64>] priority(20) @scale_i32_subgroup_64(%value: i32) -> (i32) {
+  %scale_factor = scalar.constant 2 : i32
+  %scaled = scalar.muli %value, %scale_factor : i32
+  template.return %scaled : i32
 }
 
-// HIP concept: another architecture specialization. It is semantically the
-// same as the gfx1100 provider so a single check case can stay target-neutral,
-// but its body is intentionally different so the selected provider is visible
-// after inlining.
-func.template<hip.recipe.scale_i32> target(@gfx1200) priority(20) @scale_i32_gfx1200(%value: i32) -> (i32) {
+template.def<@hip.recipe.scale_i32> requires [#target.subgroup.size<32>] priority(20) @scale_i32_subgroup_32(%value: i32) -> (i32) {
   %scaled = scalar.addi %value, %value : i32
-  func.return %scaled : i32
+  template.return %scaled : i32
 }
 
-// HIP concept: generic fallback for targets without a specialization.
-// Loom spelling: omit `target(@...)` so it applies everywhere, and give it a
-// lower priority than target-specific providers.
-func.template<hip.recipe.scale_i32> priority(1) @scale_i32_fallback(%value: i32) -> (i32) {
-  func.return %value : i32
+// A correct fallback keeps the library usable when subgroup size is unknown or
+// neither specialized size applies.
+template.def<@hip.recipe.scale_i32> priority(1) @scale_i32_fallback(%value: i32) -> (i32) {
+  %shift = scalar.constant 1 : i32
+  %scaled = scalar.shli %value, %shift : i32
+  template.return %scaled : i32
 }
 
-// HIP concept:
-//   int y = scale_i32<CurrentArch>(x);
-// Loom spelling: `func.apply<contract>` demands an implementation without
-// naming it. `select-templates` uses this function's target to pick
-// `@scale_i32_gfx1100`, and `inline-callables` then materializes the body.
-func.def public target(@gfx1100) @selects_gfx1100_provider(%value: i32) -> (i32) {
-  %scaled = func.apply<hip.recipe.scale_i32>(%value) : (i32) -> (i32)
-  func.return %scaled : i32
+// The source does not select a backend or processor. A live JIT projects facts
+// from its device; offline compilation supplies a profile with --target. The
+// launch geometry and provider selection consume the same effective fact.
+kernel.def @selects_subgroup_provider() {
+  %c1 = index.constant 1 : index
+  %subgroup_size = target.subgroup.size : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%subgroup_size, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %element_index = index.constant 0 : index
+  %input_view = buffer.view %input[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %value = view.load %input_view[%element_index] : view<1xi32> -> i32
+  %scaled = template.apply<@hip.recipe.scale_i32>(%value) : (i32) -> (i32)
+  view.store %scaled, %output_view[%element_index] : i32, view<1xi32>
+  kernel.return
 }
 
-// HIP concept: a scalar unit test for the provider contract before using it in
-// a kernel. This deliberately tests behavior, while the pass-report test in
-// hip_authoring.test.json tests which provider was selected.
-// Loom spelling: check cases can call ordinary functions, not just kernels.
 check.case @case_target_provider_selection {
-  %input = check.literal value(7) : i32
-  %actual = func.call @selects_gfx1100_provider(%input) : (i32) -> (i32)
-  %expected = check.literal value(14) : i32
-  check.expect.equal actual(%actual) expected(%expected) : i32
+  %input = check.generate.fill value(7) : tensor<1xi32>
+  %output = check.generate.fill value(0) : tensor<1xi32>
+  %expected = check.generate.fill value(14) : tensor<1xi32>
+  kernel.launch @selects_subgroup_provider(%input, %output) : (tensor<1xi32>, tensor<1xi32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
   check.return
 }
 
-// HIP concept: benchmark the same provider-selection path after correctness.
-// Loom spelling: keep the benchmark row attached to the checked scenario.
 check.benchmark<@case_target_provider_selection> @bench_target_provider_selection

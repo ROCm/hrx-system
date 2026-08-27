@@ -11,10 +11,36 @@ from typing import Any
 
 import pytest
 
-from loom.assembly import TypeOf
+from loom.assembly import (
+    GLUE,
+    LPAREN,
+    RPAREN,
+    OptionalGroup,
+    Param,
+    Ref,
+    ScopedEnumRef,
+    TypeOf,
+    kw,
+)
 from loom.builtin_types import ALL_BUILTIN_TYPES
-from loom.dialect.test import ALL_TEST_OPS
-from loom.dsl import ANY, TypeDef, TypeParam
+from loom.dialect.pass_ import ALL_PASS_OPS
+from loom.dialect.target import (
+    ALL_TARGET_PARAMETERIZED_ATTRS,
+    target_subgroup_size_attr,
+)
+from loom.dialect.test import (
+    ALL_TEST_OPS,
+    ALL_TEST_PARAMETERIZED_ATTRS,
+    ALL_TEST_TYPES,
+    test_array_type,
+    test_matrix_type,
+    test_ops,
+    test_options_attr,
+    test_scope_type,
+    test_tile_attr,
+    test_variant_set_type,
+)
+from loom.dsl import ANY, AttrDef, Op, Operand, TypeDef, TypeParam
 from loom.format.bytecode.reader import read_module
 from loom.format.bytecode.writer import write_module
 from loom.format.text.parser import (
@@ -47,19 +73,23 @@ from loom.ir import (
     EncodingInstance,
     EncodingRole,
     EncodingType,
+    EnumArrayAttr,
     FunctionType,
-    GroupScope,
-    GroupType,
     Module,
     Operation,
+    ParameterizedAttr,
+    ParameterizedAttrArray,
+    ParameterizedType,
     RegisterType,
     ScalarType,
     ScalarTypeKind,
     ShapedType,
+    SignedEnumSetAttr,
     StaticDim,
     StorageSpace,
     StorageType,
     SymbolName,
+    SymbolNameArray,
     Type,
     TypeKind,
     Use,
@@ -91,12 +121,15 @@ def _parse_type(text: str, **kwargs: Any) -> Type:
     return _parse(text, **kwargs)[0]
 
 
-def _test_ptr_register_type(unit_count: int = 1) -> RegisterType:
+def _test_ptr_register_type(
+    unit_count: int = 1, value_type: Type | None = None
+) -> RegisterType:
     return RegisterType(
         _TEST_LOW_CORE_STABLE_ID,
         _TEST_PTR_REGISTER_CLASS_ID,
         unit_count,
         "test.ptr",
+        value_type,
     )
 
 
@@ -422,23 +455,6 @@ class TestParseEncoding:
 
 
 # ============================================================================
-# Group types
-# ============================================================================
-
-
-class TestParseGroupType:
-    def test_basic(self) -> None:
-        result = _parse_type("group<workgroup>")
-        assert isinstance(result, GroupType)
-        assert result.scope == GroupScope.WORKGROUP
-
-    def test_subgroup(self) -> None:
-        result = _parse_type("group<subgroup>")
-        assert isinstance(result, GroupType)
-        assert result.scope == GroupScope.SUBGROUP
-
-
-# ============================================================================
 # Buffer type
 # ============================================================================
 
@@ -455,6 +471,9 @@ class TestParseBufferType:
 
 
 class TestParseStorageType:
+    def test_stack(self) -> None:
+        assert _parse_type("low.storage<stack>") == StorageType(StorageSpace.STACK)
+
     def test_workgroup(self) -> None:
         assert _parse_type("low.storage<workgroup>") == StorageType(
             StorageSpace.WORKGROUP
@@ -464,7 +483,7 @@ class TestParseStorageType:
         assert _parse_type("low.storage<private>") == StorageType(StorageSpace.PRIVATE)
 
     def test_unknown_space_fails(self) -> None:
-        with pytest.raises(ParseError, match="storage space"):
+        with pytest.raises(ParseError, match="invalid enum value 'lds'"):
             _parse_type("low.storage<lds>")
 
 
@@ -482,6 +501,33 @@ class TestParseRegisterType:
 
     def test_multiple_units_with_spaced_suffix(self) -> None:
         assert _parse_type("reg<test.ptr x 4>") == _test_ptr_register_type(4)
+
+    def test_semantic_scalar_type(self) -> None:
+        assert _parse_type("reg<test.ptr : i32>") == _test_ptr_register_type(
+            value_type=I32
+        )
+
+    def test_semantic_vector_type(self) -> None:
+        vector_type = ShapedType(TypeKind.VECTOR, I32, (StaticDim(4),))
+        assert _parse_type("reg<test.ptr x4 : vector<4xi32>>") == (
+            _test_ptr_register_type(4, vector_type)
+        )
+
+    def test_semantic_dialect_type(self) -> None:
+        type_registry = {type_def.name: type_def for type_def in ALL_BUILTIN_TYPES}
+        type_registry["vm.ref"] = TypeDef(
+            name="vm.ref",
+            params=[TypeParam("object", ANY)],
+            format=[TypeOf("object")],
+        )
+        dialect_type = DialectType("vm.ref", (I32,))
+        assert _parse_type(
+            "reg<test.ptr : vm.ref<i32>>", type_registry=type_registry
+        ) == _test_ptr_register_type(value_type=dialect_type)
+
+    def test_semantic_type_is_required_after_colon(self) -> None:
+        with pytest.raises(ParseError, match="expected type"):
+            _parse_type("reg<test.ptr : >")
 
     def test_requires_namespace(self) -> None:
         with pytest.raises(ParseError, match="expected OP_NAME"):
@@ -581,6 +627,118 @@ class TestParseDialectTypes:
             _parse_type("unknown", type_registry=self._registry())
 
 
+class TestParseDescriptorBackedTypes:
+    def _registry(self) -> dict[str, TypeDef]:
+        return {
+            type_def.name: type_def
+            for type_def in (*ALL_BUILTIN_TYPES, *ALL_TEST_TYPES)
+        }
+
+    def test_positional_parameter(self) -> None:
+        parsed = _parse_type("test.scope<subgroup>", type_registry=self._registry())
+        assert isinstance(parsed, ParameterizedType)
+        assert parsed == test_scope_type(scope="subgroup")
+        assert print_type(parsed) == "test.scope<subgroup>"
+
+    def test_mixed_positional_and_keyed_parameters(self) -> None:
+        parsed = _parse_type(
+            "test.matrix<bf16, scope = subgroup, rows = 16, target = @target>",
+            type_registry=self._registry(),
+        )
+        assert parsed == test_matrix_type(
+            element_type=BF16,
+            scope="subgroup",
+            rows=16,
+            target=SymbolName("target"),
+        )
+        assert print_type(parsed) == (
+            "test.matrix<bf16, scope = subgroup, rows = 16, target = @target>"
+        )
+
+    def test_optional_keyed_parameter(self) -> None:
+        packed = _parse_type("test.array<bf16>", type_registry=self._registry())
+        aligned = _parse_type(
+            "test.array<bf16, alignment = 16>",
+            type_registry=self._registry(),
+        )
+
+        assert packed == test_array_type(element_type=BF16)
+        assert aligned == test_array_type(element_type=BF16, alignment=16)
+
+    def test_dictionary_parameter_parses_nested_parameterized_attr(self) -> None:
+        module = Module()
+        op = _parse_op(
+            "%array = test.constant 0 : "
+            "test.array<bf16, metadata = {tile = #test.tile<width = 8>}>",
+            module=module,
+        )
+
+        parsed = module.values[op.results[0]].type
+        assert isinstance(parsed, ParameterizedType)
+        assert parsed == test_array_type(
+            element_type=BF16,
+            metadata=CanonicalAttrDict((("tile", test_tile_attr(width=8)),)),
+        )
+
+    def test_parameterized_array_parameters_preserve_order_and_presence(
+        self,
+    ) -> None:
+        text = (
+            "test.variant_set<"
+            "[#test.tile<width = 8>, #test.options<mode = fast>, "
+            "#test.tile<width = 8>], alternatives = []>"
+        )
+        parameterized_attr_registry = {
+            definition.name: definition for definition in ALL_TEST_PARAMETERIZED_ATTRS
+        }
+
+        parsed = _parse_type(
+            text,
+            type_registry=self._registry(),
+            parameterized_attr_registry=parameterized_attr_registry,
+        )
+
+        assert parsed == test_variant_set_type(
+            values=[
+                test_tile_attr(width=8),
+                test_options_attr(mode="fast"),
+                test_tile_attr(width=8),
+            ],
+            alternatives=[],
+        )
+        assert parsed.has("alternatives")
+        assert print_type(parsed) == text
+
+    def test_optional_float_parameter_accepts_special_value(self) -> None:
+        optional_float_type = TypeDef(
+            "test.optional_float",
+            params=[AttrDef("value", "f64", optional=True)],
+            format=[OptionalGroup([Param("value")], anchor="value")],
+        )
+        registry = self._registry()
+        registry[optional_float_type.name] = optional_float_type
+
+        parsed = _parse_type("test.optional_float<inf>", type_registry=registry)
+
+        assert isinstance(parsed, ParameterizedType)
+        assert math.isinf(parsed.get("value"))
+
+    def test_rejects_wrong_enum_domain(self) -> None:
+        with pytest.raises(ParseError, match="invalid enum value 'cluster'"):
+            _parse_type("test.scope<cluster>", type_registry=self._registry())
+
+    def test_rejects_missing_parameter(self) -> None:
+        with pytest.raises(ParseError, match="expected COMMA"):
+            _parse_type(
+                "test.matrix<bf16, scope = subgroup>",
+                type_registry=self._registry(),
+            )
+
+    def test_rejects_trailing_tokens(self) -> None:
+        with pytest.raises(ParseError, match="expected EOF"):
+            _parse_type("test.scope<subgroup extra>", type_registry=self._registry())
+
+
 # ============================================================================
 # Type round-trip: print(parse(text)) == text
 # ============================================================================
@@ -605,9 +763,6 @@ class TestTypeRoundTrip:
         self._roundtrip("vector<4x16xf32>")
         self._roundtrip("view<256xi8>")
         self._roundtrip("tile<f32>")
-
-    def test_group_roundtrip(self) -> None:
-        self._roundtrip("group<workgroup>")
 
     def test_buffer_roundtrip(self) -> None:
         self._roundtrip("buffer")
@@ -648,18 +803,19 @@ class TestTypeRoundTrip:
 
 
 def _op_parser() -> Parser:
-    """Create a parser with test ops and built-in types."""
+    """Create a parser with the complete test dialect vocabulary."""
     parser = Parser()
     parser.register_ops(ALL_TEST_OPS)
-    parser.register_types(ALL_BUILTIN_TYPES)
+    parser.register_types((*ALL_BUILTIN_TYPES, *ALL_TEST_TYPES))
+    parser.register_parameterized_attrs(ALL_TEST_PARAMETERIZED_ATTRS)
     return parser
 
 
 def _op_printer(**kwargs: Any) -> Printer:
-    """Create a printer with test ops and built-in types."""
+    """Create a printer with the complete test dialect vocabulary."""
     printer = Printer(**kwargs)
     printer.register_ops(ALL_TEST_OPS)
-    printer.register_types(ALL_BUILTIN_TYPES)
+    printer.register_types((*ALL_BUILTIN_TYPES, *ALL_TEST_TYPES))
     return printer
 
 
@@ -742,6 +898,61 @@ class TestParseConstantOp:
     def test_float(self) -> None:
         op = _parse_op("%pi = test.constant 3.14 : f32")
         assert abs(op.attributes["value"] - 3.14) < 1e-10
+
+    def test_hexadecimal_float_cross_format_roundtrip(self) -> None:
+        source = """test.func @hexadecimal_float_constants() {
+  %f16 = test.constant 0x1.ffcp+15 : f16
+  %f16_min = test.constant 0x1p-14 : f16
+  %bf16 = test.constant 0x1.fep+127 : bf16
+  %f32 = test.constant 0x1.fffffep+127 : f32
+  %f64 = test.constant 0x1.fffffffffffffp+1023 : f64
+  %f64_min = test.constant 0x0.0000000000001p-1022 : f64
+  %negative_f64 = test.constant -0x1.fffffffffffffp+1023 : f64
+  %overflow = test.constant 0x1p+999999 : f64
+  %negative_overflow = test.constant -0x1p+999999 : f64
+  %underflow = test.constant 0x1p-999999 : f64
+  %negative_underflow = test.constant -0x1p-999999 : f64
+  test.yield
+}
+"""
+        module = _op_parser().parse(source)
+        function = module.symbols[0].op
+        assert function is not None
+        constants = function.regions[0].blocks[0].ops[:-1]
+        assert [op.attributes["value"] for op in constants] == [
+            65504.0,
+            6.103515625e-05,
+            3.3895313892515355e38,
+            3.4028234663852886e38,
+            1.7976931348623157e308,
+            5e-324,
+            -1.7976931348623157e308,
+            math.inf,
+            -math.inf,
+            0.0,
+            -0.0,
+        ]
+
+        canonical = _op_printer().print_module(module)
+        assert "0x" not in canonical
+        for expected in (
+            "%f16 = test.constant 65504.0 : f16",
+            "%f16_min = test.constant 6.103515625e-05 : f16",
+            "%bf16 = test.constant 3.3895313892515355e+38 : bf16",
+            "%f32 = test.constant 3.4028234663852886e+38 : f32",
+            "%f64 = test.constant 1.7976931348623157e+308 : f64",
+            "%f64_min = test.constant 4.9406564584124654e-324 : f64",
+            "%negative_f64 = test.constant -1.7976931348623157e+308 : f64",
+            "%overflow = test.constant inf : f64",
+            "%negative_overflow = test.constant -inf : f64",
+            "%underflow = test.constant 0.0 : f64",
+            "%negative_underflow = test.constant -0.0 : f64",
+        ):
+            assert expected in canonical
+        reparsed = _op_parser().parse(canonical)
+        assert _op_printer().print_module(reparsed) == canonical
+        loaded = read_module(write_module(module))
+        assert _op_printer().print_module(loaded) == canonical
 
     def test_special_float_values(self) -> None:
         nan_op = _parse_op("%nan = test.constant nan : f32")
@@ -847,6 +1058,60 @@ class TestParseSegmentedOp:
         assert op.operand_segment_counts == (1, 0, 0, 2)
 
 
+class TestParseOptionalGroup:
+    def test_parenthesized_operand_after_glue(self) -> None:
+        optional_operand_op = Op(
+            "test.optional_parenthesized_operand",
+            group=test_ops,
+            operands=[Operand("value", ANY, optional=True)],
+            format=[
+                kw("contract"),
+                OptionalGroup(
+                    [GLUE, LPAREN, Ref("value"), RPAREN],
+                    anchor="value",
+                ),
+            ],
+        )
+        parser = Parser()
+        parser.register_ops([optional_operand_op])
+        module, scope = _setup_scope(("value", I32))
+
+        op = parser.parse_operation_from_text(
+            "test.optional_parenthesized_operand contract(%value)",
+            module=module,
+            scope=scope,
+        )
+        absent_op = parser.parse_operation_from_text(
+            "test.optional_parenthesized_operand contract"
+        )
+
+        assert op.operands == [0]
+        assert absent_op.operands == []
+
+
+class TestParseScopedEnumRef:
+    def test_stable_spelling_roundtrips_at_python_format_boundary(self) -> None:
+        packet_op = Op(
+            "test.packet",
+            group=test_ops,
+            attrs=[AttrDef("descriptor", "scoped_enum")],
+            format=[ScopedEnumRef("descriptor")],
+            generate_c_builder=False,
+        )
+        parser = Parser()
+        parser.register_ops([packet_op])
+        module = Module()
+
+        op = parser.parse_operation_from_text(
+            "test.packet<amdgpu.v_add_u32>", module=module
+        )
+
+        assert op.attributes["descriptor"] == "amdgpu.v_add_u32"
+        printer = Printer()
+        printer.register_ops([packet_op])
+        assert printer.print_operation(op, module) == "test.packet<amdgpu.v_add_u32>"
+
+
 class TestParseAttrDictOp:
     def test_with_attrs(self) -> None:
         module, scope = _setup_scope(("x", F32))
@@ -933,6 +1198,16 @@ class TestParseAttrDictOp:
         op = _parse_op(source, module=module, scope=NameScope())
         assert op.attributes["target"] == "target"
         assert op.attributes["flags"] == "debug|trace"
+        assert _op_printer().print_operation(op, module) == source
+
+    def test_parameterized_attr_params_roundtrip(self) -> None:
+        source = "test.attr_params<mode = fast, scopes = [workgroup]>"
+        module = Module()
+        op = _parse_op(source, module=module, scope=NameScope())
+        options = op.attributes["options"]
+        assert isinstance(options, ParameterizedAttr)
+        assert options.family_name == "test.options"
+        assert options.get("mode") == 1
         assert _op_printer().print_operation(op, module) == source
 
     def test_string_that_looks_like_symbol_stays_string(self) -> None:
@@ -1204,6 +1479,8 @@ class TestParseEncodingAlias:
         parser.register_encodings(["q8_0", "dense"])
         with pytest.raises(ParseError, match="alias name shadows"):
             parser.parse("#q8_0 = #dense\n")
+        with pytest.raises(ParseError, match="alias name shadows"):
+            parser.parse("#test.options = #dense\n")
 
     def test_duplicate_alias_definition_fails(self) -> None:
         with pytest.raises(ParseError, match="duplicate encoding alias name"):
@@ -1231,6 +1508,20 @@ class TestEncodingValidation:
                 "}\n"
             )
 
+    def test_qualified_encoding_name_round_trips(self) -> None:
+        parser = _op_parser()
+        parser.register_encodings(["ggml.q4_k"])
+        text = (
+            "test.func @f(%a: tile<256xi8, #ggml.q4_k>) -> "
+            "(tile<256xi8, #ggml.q4_k>) {\n"
+            "  test.yield %a : tile<256xi8, #ggml.q4_k>\n"
+            "}\n"
+        )
+
+        module = parser.parse(text)
+
+        assert _op_printer().print_module(module) == text
+
 
 # ============================================================================
 # Round-trip tests: print → parse → print
@@ -1256,6 +1547,393 @@ class TestRoundTrip:
             "}\n"
         )
 
+    def test_module_scope_metadata(self) -> None:
+        self._roundtrip_text("test.module_metadata\n")
+
+    def test_rejects_body_operation_at_module_scope(self) -> None:
+        with pytest.raises(ParseError, match="not permitted at module scope"):
+            _op_parser().parse("test.yield\n")
+
+    def test_enum_arrays_preserve_order_duplicates_and_open_values(self) -> None:
+        text = "test.enum_array_attrs [low, high, low] using [middle, <42>, middle]"
+        op = _parse_op(text)
+        assert op.attributes["required_values"] == EnumArrayAttr([1, 255, 1])
+        assert op.attributes["optional_values"] == EnumArrayAttr([7, 42, 7])
+        printed = _op_printer().print_operation(op, Module())
+        assert printed == text
+        assert _op_printer().print_operation(_parse_op(printed), Module()) == text
+
+    def test_signed_enum_sets_canonicalize_by_stable_value(self) -> None:
+        text = "test.signed_enum_set_attrs [high, -middle, low] using [-high]"
+        op = _parse_op(text)
+        assert op.attributes["required_features"] == SignedEnumSetAttr([1, 255], [7])
+        assert op.attributes["optional_features"] == SignedEnumSetAttr([], [255])
+        printed = _op_printer().print_operation(op, Module())
+        assert printed == (
+            "test.signed_enum_set_attrs [low, -middle, high] using [-high]"
+        )
+        assert _op_printer().print_operation(_parse_op(printed), Module()) == printed
+
+    def test_signed_enum_sets_preserve_present_empty(self) -> None:
+        op = _parse_op("test.signed_enum_set_attrs [] using []")
+
+        assert op.attributes["required_features"] == SignedEnumSetAttr()
+        assert op.attributes["optional_features"] == SignedEnumSetAttr()
+
+    def test_parameterized_signed_enum_set_uses_same_text_form(self) -> None:
+        text = "test.parameterized_attr_array [#test.feature_set<[high, -middle, low]>]"
+        op = _parse_op(text)
+        values = op.attributes["values"]
+        assert isinstance(values, ParameterizedAttrArray)
+        value = values.values[0]
+        assert isinstance(value, ParameterizedAttr)
+        assert value.family_name == "test.feature_set"
+        assert value.get("features") == SignedEnumSetAttr([1, 255], [7])
+        assert _op_printer().print_operation(op, Module()) == (
+            "test.parameterized_attr_array [#test.feature_set<[low, -middle, high]>]"
+        )
+
+    def test_signed_enum_sets_reject_duplicate_or_unknown_values(self) -> None:
+        with pytest.raises(ParseError, match="appears more than once"):
+            _parse_op("test.signed_enum_set_attrs [low, -low]")
+        with pytest.raises(ParseError, match="invalid enum value"):
+            _parse_op("test.signed_enum_set_attrs [middle, other]")
+
+    def test_symbol_arrays_preserve_order_duplicates_and_presence(self) -> None:
+        text = "test.symbol_array_attrs [@b, @a, @b] using [@a]"
+        op = _parse_op(text)
+        assert op.attributes["dependencies"] == SymbolNameArray(
+            [SymbolName("b"), SymbolName("a"), SymbolName("b")]
+        )
+        assert op.attributes["available"] == SymbolNameArray([SymbolName("a")])
+        assert _op_printer().print_operation(op, Module()) == text
+
+        absent = _parse_op("test.symbol_array_attrs []")
+        present_empty = _parse_op("test.symbol_array_attrs [] using []")
+        assert absent.attributes["dependencies"] == SymbolNameArray()
+        assert "available" not in absent.attributes
+        assert present_empty.attributes["available"] == SymbolNameArray()
+        assert _op_printer().print_operation(absent, Module()) == (
+            "test.symbol_array_attrs []"
+        )
+        assert _op_printer().print_operation(present_empty, Module()) == (
+            "test.symbol_array_attrs [] using []"
+        )
+
+    def test_parameterized_attr_prints_in_declaration_order(self) -> None:
+        op = _parse_op(
+            "test.parameterized_attr "
+            "#test.options<tile = #test.tile<width = 16>, "
+            "element_type = bf16, scopes = [subgroup, <254>], mode = fast, "
+            "target = @target>"
+        )
+        options = op.attributes["options"]
+        assert isinstance(options, ParameterizedAttr)
+        assert options.get("mode") == 1
+        assert options.get("scopes") == EnumArrayAttr([2, 254])
+        assert options.get("element_type") == BF16
+        assert isinstance(options.get("tile"), ParameterizedAttr)
+        assert options.get("target") == SymbolName("target")
+        assert _op_printer().print_operation(op, Module()) == (
+            "test.parameterized_attr "
+            "#test.options<mode = fast, scopes = [subgroup, <254>], "
+            "element_type = bf16, tile = #test.tile<width = 16>, "
+            "target = @target>"
+        )
+
+    def test_compact_parameterized_attr_canonicalizes_primary_first(self) -> None:
+        op = _parse_op(
+            'test.compact_parameterized_attr #test.compact<label = "wave", value = 64>'
+        )
+        value = op.attributes["value"]
+        assert isinstance(value, ParameterizedAttr)
+        assert value.slots == ("wave", 64)
+        assert _op_printer().print_operation(op, Module()) == (
+            'test.compact_parameterized_attr #test.compact<64, label = "wave">'
+        )
+
+        canonical = _parse_op(
+            'test.compact_parameterized_attr #test.compact<64, label = "wave">'
+        )
+        assert canonical.attributes["value"] == value
+
+        primary_only = _parse_op("test.compact_parameterized_attr #test.compact<64>")
+        assert _op_printer().print_operation(primary_only, Module()) == (
+            "test.compact_parameterized_attr #test.compact<64>"
+        )
+
+    def test_target_subgroup_size_uses_paired_compact_name(self) -> None:
+        parser = _op_parser()
+        parser.register_parameterized_attrs(ALL_TARGET_PARAMETERIZED_ATTRS)
+        source = """test.func @conditions() {
+  test.parameterized_attr_array [#target.subgroup.size<64>]
+  test.yield
+}
+"""
+        module = parser.parse(source)
+        function = module.symbols[0].op
+        assert function is not None
+        op = function.regions[0].blocks[0].ops[0]
+
+        values = op.attributes["values"]
+        assert isinstance(values, ParameterizedAttrArray)
+        assert values.values == (target_subgroup_size_attr(size=64),)
+        loaded = read_module(write_module(module))
+        assert _op_printer().print_module(loaded) == source
+
+    def test_compact_parameterized_attr_rejects_missing_or_duplicate_primary(
+        self,
+    ) -> None:
+        with pytest.raises(ParseError, match="missing required parameter 'value'"):
+            _parse_op('test.compact_parameterized_attr #test.compact<label = "wave">')
+        with pytest.raises(ParseError, match="duplicate parameter 'value'"):
+            _parse_op("test.compact_parameterized_attr #test.compact<64, value = 32>")
+
+    def test_compact_parameterized_attr_roundtrips_in_pipeline_syntax(self) -> None:
+        source = """pass.pipeline<module> @compact pipeline {
+  choose(condition = #test.compact<label = "wave", value = 64>)
+}
+"""
+        parser = Parser()
+        parser.register_ops(ALL_PASS_OPS)
+        parser.register_types(ALL_BUILTIN_TYPES)
+        parser.register_parameterized_attrs(ALL_TEST_PARAMETERIZED_ATTRS)
+        module = parser.parse(source)
+
+        printer = Printer()
+        printer.register_ops(ALL_PASS_OPS)
+        printer.register_types(ALL_BUILTIN_TYPES)
+        assert printer.print_module(module) == (
+            "pass.pipeline<module> @compact pipeline {\n"
+            '  choose(condition = #test.compact<64, label = "wave">)\n'
+            "}\n"
+        )
+
+    def test_pipeline_vertical_source_grouping_is_canonicalized(self) -> None:
+        parser = Parser()
+        parser.register_ops(ALL_PASS_OPS)
+        parser.register_types(ALL_BUILTIN_TYPES)
+        module = parser.parse(
+            "pass.pipeline<module> @grouped pipeline {\n"
+            "\n"
+            "\n"
+            "  prepare\n"
+            "\n"
+            "\n"
+            "  // refine results\n"
+            "  refine\n"
+            "}\n"
+        )
+
+        printer = Printer()
+        printer.register_ops(ALL_PASS_OPS)
+        printer.register_types(ALL_BUILTIN_TYPES)
+        assert printer.print_module(module) == (
+            "pass.pipeline<module> @grouped pipeline {\n"
+            "\n"
+            "  prepare\n"
+            "\n"
+            "  // refine results\n"
+            "  refine\n"
+            "}\n"
+        )
+
+    def test_parameterized_attr_array_roundtrips_in_pipeline_syntax(self) -> None:
+        source = """pass.pipeline<module> @arrays pipeline {
+  choose(condition = #test.options<mode = fast, tiles = [#test.tile<width = 4>, #test.tile<width = 8>]>)
+}
+"""
+        parser = Parser()
+        parser.register_ops(ALL_PASS_OPS)
+        parser.register_types(ALL_BUILTIN_TYPES)
+        parser.register_parameterized_attrs(ALL_TEST_PARAMETERIZED_ATTRS)
+        module = parser.parse(source)
+
+        printer = Printer()
+        printer.register_ops(ALL_PASS_OPS)
+        printer.register_types(ALL_BUILTIN_TYPES)
+        assert printer.print_module(module) == source
+
+    def test_parameterized_attr_preserves_present_empty(self) -> None:
+        present = _parse_op(
+            "test.parameterized_attr #test.options<mode = fast, scopes = []>"
+        )
+        absent = _parse_op("test.parameterized_attr #test.options<mode = fast>")
+        present_options = present.attributes["options"]
+        absent_options = absent.attributes["options"]
+        assert isinstance(present_options, ParameterizedAttr)
+        assert isinstance(absent_options, ParameterizedAttr)
+        assert present_options.has("scopes")
+        assert present_options.get("scopes") == EnumArrayAttr()
+        assert not absent_options.has("scopes")
+
+    def test_parameterized_attr_array_preserves_order_and_exact_family(self) -> None:
+        text = (
+            "test.parameterized_attr_array "
+            "[#test.tile<width = 8>, #test.options<mode = fast>, "
+            "#test.tile<width = 8>] using [#test.tile<width = 4>]"
+        )
+        op = _parse_op(text)
+
+        values = op.attributes["values"]
+        tiles = op.attributes["tiles"]
+        assert isinstance(values, ParameterizedAttrArray)
+        assert isinstance(tiles, ParameterizedAttrArray)
+        assert tuple(value.family_name for value in values) == (
+            "test.tile",
+            "test.options",
+            "test.tile",
+        )
+        assert values.values[0] == values.values[2]
+        assert tuple(value.family_name for value in tiles) == ("test.tile",)
+        assert _op_printer().print_operation(op, Module()) == text
+
+    def test_parameterized_attr_array_distinguishes_empty_from_absent(self) -> None:
+        absent = _parse_op("test.parameterized_attr_array []")
+        present_empty = _parse_op("test.parameterized_attr_array [] using []")
+
+        assert absent.attributes["values"] == ParameterizedAttrArray()
+        assert "tiles" not in absent.attributes
+        assert present_empty.attributes["tiles"] == ParameterizedAttrArray()
+        assert _op_printer().print_operation(absent, Module()) == (
+            "test.parameterized_attr_array []"
+        )
+        assert _op_printer().print_operation(present_empty, Module()) == (
+            "test.parameterized_attr_array [] using []"
+        )
+
+    def test_parameterized_attr_array_nests_in_parameterized_attr(self) -> None:
+        text = (
+            "test.parameterized_attr "
+            "#test.options<mode = fast, "
+            "tiles = [#test.tile<width = 4>, #test.tile<width = 8>]>"
+        )
+        op = _parse_op(text)
+        options = op.attributes["options"]
+
+        assert isinstance(options, ParameterizedAttr)
+        assert options.get("tiles") == ParameterizedAttrArray(
+            [test_tile_attr(width=4), test_tile_attr(width=8)]
+        )
+        assert _op_printer().print_operation(op, Module()) == text
+
+    def test_parameterized_attr_array_rejects_excessive_nesting(self) -> None:
+        node = "#test.node<0>"
+        for value in range(1, 10):
+            node = f"#test.node<{value}, children = [{node}]>"
+
+        with pytest.raises(ParseError, match="maximum depth"):
+            _parse_op(f"test.parameterized_attr_array [{node}]")
+
+    @pytest.mark.parametrize(
+        ("text", "message"),
+        [
+            (
+                "test.parameterized_attr_array [42]",
+                "expected HASH_ATTR",
+            ),
+            (
+                "test.parameterized_attr_array [#test.unknown<value = 1>]",
+                "unknown parameterized attribute family",
+            ),
+            (
+                "test.parameterized_attr_array [] using [#test.options<mode = fast>]",
+                "expected parameterized attribute family 'test.tile'",
+            ),
+            (
+                "test.parameterized_attr_array [#test.tile<width = 8>,]",
+                "expected HASH_ATTR",
+            ),
+        ],
+    )
+    def test_parameterized_attr_array_rejects_malformed_input(
+        self, text: str, message: str
+    ) -> None:
+        with pytest.raises(ParseError, match=message):
+            _parse_op(text)
+
+    def test_parameterized_attr_nests_in_generic_dict(self) -> None:
+        text = "test.enum_array_attrs [] {options = #test.options<mode = precise>}"
+        op = _parse_op(text)
+        assert _op_printer().print_operation(op, Module()) == text
+
+    @pytest.mark.parametrize(
+        ("text", "message"),
+        [
+            (
+                "test.parameterized_attr #test.unknown<mode = fast>",
+                "unknown parameterized attribute family",
+            ),
+            (
+                "test.parameterized_attr #test.options<mode = fast, nope = 1>",
+                "unknown parameter 'nope'",
+            ),
+            (
+                "test.parameterized_attr #test.options<mode = fast, mode = precise>",
+                "duplicate parameter 'mode'",
+            ),
+            (
+                "test.parameterized_attr #test.options<scopes = []>",
+                "missing required parameter 'mode'",
+            ),
+            (
+                "test.parameterized_attr #test.options<mode = <42>>",
+                "closed and does not admit raw values",
+            ),
+            (
+                "test.parameterized_attr "
+                "#test.options<mode = fast, "
+                "tile = #test.options<mode = precise>>",
+                "expected parameterized attribute family 'test.tile'",
+            ),
+        ],
+    )
+    def test_parameterized_attr_rejects_malformed_input(
+        self, text: str, message: str
+    ) -> None:
+        with pytest.raises(ParseError, match=message):
+            _parse_op(text)
+
+    def test_optional_enum_array_distinguishes_empty_from_absent(self) -> None:
+        present = _parse_op("test.enum_array_attrs [] using []")
+        absent = _parse_op("test.enum_array_attrs []")
+
+        assert present.attributes["optional_values"] == EnumArrayAttr()
+        assert "optional_values" not in absent.attributes
+        assert _op_printer().print_operation(present, Module()) == (
+            "test.enum_array_attrs [] using []"
+        )
+        assert _op_printer().print_operation(absent, Module()) == (
+            "test.enum_array_attrs []"
+        )
+
+    def test_optional_named_dict_distinguishes_empty_from_absent(self) -> None:
+        present = _parse_op("test.enum_array_attrs [] {}")
+        absent = _parse_op("test.enum_array_attrs []")
+
+        assert len(present.attributes["dict"]) == 0
+        assert "dict" not in absent.attributes
+        assert _op_printer().print_operation(present, Module()) == (
+            "test.enum_array_attrs [] {}"
+        )
+        assert _op_printer().print_operation(absent, Module()) == (
+            "test.enum_array_attrs []"
+        )
+
+    def test_open_scalar_enum_raw_value_round_trips(self) -> None:
+        self._roundtrip_text("test.record <42> @target\n")
+
+    def test_closed_enum_array_rejects_raw_value(self) -> None:
+        with pytest.raises(ParseError, match="closed and does not admit raw values"):
+            _parse_op("test.enum_array_attrs [<42>]")
+
+    @pytest.mark.parametrize("value", [-1, 256])
+    def test_open_enum_array_rejects_value_outside_byte_domain(
+        self, value: int
+    ) -> None:
+        with pytest.raises(ParseError, match="outside the byte domain"):
+            _parse_op(f"test.enum_array_attrs [] using [<{value}>]")
+
     def test_operation_and_block_comments(self) -> None:
         self._roundtrip_text(
             "// top-level function\n"
@@ -1265,6 +1943,76 @@ class TestRoundTrip:
             "  // body terminator\n"
             "  test.yield\n"
             "}\n"
+        )
+
+    def test_file_header_is_owned_by_the_module(self) -> None:
+        text = (
+            "// File-level overview.\n"
+            "//  Indented header detail.\n"
+            "\n"
+            "// Declaration documentation.\n"
+            "test.decl @documented()\n"
+        )
+        module = _op_parser().parse(text)
+        assert module.file_header == (
+            "File-level overview.",
+            " Indented header detail.",
+        )
+        declaration = module.symbols[0].op
+        assert declaration is not None
+        assert declaration.comments == ("Declaration documentation.",)
+        assert not declaration.leading_blank_line
+        assert _op_printer().print_module(module) == text
+
+    def test_comment_separator_space_is_canonicalized(self) -> None:
+        module = _op_parser().parse(
+            "//documentation\n//  indented detail\ntest.decl @documented()\n"
+        )
+        assert _op_printer().print_module(module) == (
+            "// documentation\n//  indented detail\ntest.decl @documented()\n"
+        )
+
+    def test_file_header_only_roundtrip(self) -> None:
+        self._roundtrip_text("// File-level overview.\n")
+
+    def test_vertical_source_grouping_is_canonicalized(self) -> None:
+        module = _op_parser().parse(
+            "\n"
+            "\n"
+            "test.func @grouped() {\n"
+            "\n"
+            "\n"
+            "// explicit entry block\n"
+            "^entry:\n"
+            "  %zero = test.constant 0 : i32\n"
+            "  %one = test.constant 1 : i32\n"
+            "\n"
+            "\n"
+            "  // final value\n"
+            "  %two = test.constant 2 : i32\n"
+            "\n"
+            "\n"
+            "  test.yield\n"
+            "}\n"
+            "\n"
+            "\n"
+            "test.decl @after()\n"
+        )
+        assert _op_printer().print_module(module) == (
+            "test.func @grouped() {\n"
+            "\n"
+            "// explicit entry block\n"
+            "^entry:\n"
+            "  %zero = test.constant 0 : i32\n"
+            "  %one = test.constant 1 : i32\n"
+            "\n"
+            "  // final value\n"
+            "  %two = test.constant 2 : i32\n"
+            "\n"
+            "  test.yield\n"
+            "}\n"
+            "\n"
+            "test.decl @after()\n"
         )
 
     def test_convert_bare_result_type(self) -> None:
@@ -1552,6 +2300,16 @@ class TestParseLoopOp:
             == "test.loop %i = %c0 to %n step %c1 {\n}"
         )
 
+    def test_induction_variable_uses_bound_address_domain(self) -> None:
+        module, scope = _setup_scope(("c0", OFFSET), ("n", OFFSET), ("c1", OFFSET))
+        op = _parse_op(
+            "test.loop %i = %c0 to %n step %c1 {\n}",
+            module=module,
+            scope=scope,
+        )
+        iv_value_id = op.regions[0].blocks[0].arg_ids[0]
+        assert module.values[iv_value_id].type == OFFSET
+
     def test_explicit_implicit_yield_is_canonicalized(self) -> None:
         module, scope = _setup_scope(("c0", INDEX), ("n", INDEX), ("c1", INDEX))
         op = _parse_op(
@@ -1764,8 +2522,8 @@ class TestParseEncodingType:
         assert isinstance(result_type, EncodingType)
         assert result_type.role == EncodingRole.LAYOUT
 
-    def test_unknown_encoding_role_raises(self) -> None:
-        with pytest.raises(ParseError, match="unknown encoding role"):
+    def test_undeclared_encoding_role_raises(self) -> None:
+        with pytest.raises(ParseError, match="invalid enum value 'address'"):
             _parse_type("encoding<address>")
 
 
@@ -1872,6 +2630,21 @@ class TestParsePredicates:
 
     def _parse_module(self, text: str) -> Module:
         return _op_parser().parse(text)
+
+    def test_optional_predicate_list_distinguishes_empty_from_absent(self) -> None:
+        present_text = "test.func @f() where [] {\n  test.yield\n}\n"
+        absent_text = "test.func @g() {\n  test.yield\n}\n"
+
+        present_module = self._parse_module(present_text)
+        absent_module = self._parse_module(absent_text)
+        present_op = present_module.symbols[0].op
+        absent_op = absent_module.symbols[0].op
+        assert present_op is not None
+        assert absent_op is not None
+        assert present_op.attributes["predicates"] == []
+        assert "predicates" not in absent_op.attributes
+        assert _op_printer().print_module(present_module) == present_text
+        assert _op_printer().print_module(absent_module) == absent_text
 
     def test_single_mul_predicate(self) -> None:
         """Parse a function with where [mul(%M, 16)]."""
@@ -2322,8 +3095,31 @@ class TestLocationParsing:
         loc = module.locations.get(op.location_id)
         # Implicit locations are FileLocations derived from the source text.
         assert isinstance(loc, FileLocation)
-        # source_id is 0 (the default for implicit locations).
         assert loc.source_id == 0
+        assert module.sources[loc.source_id] == "<input>"
+
+    def test_module_parser_registers_implicit_location_source(self) -> None:
+        from loom.ir import FileLocation
+
+        module = _op_parser().parse(
+            "test.decl @identity(%arg: i32) -> (i32)\n",
+            filename="model.loom",
+        )
+        op = module.symbols[0].op
+        assert op is not None
+        loc = module.locations.get(op.location_id)
+        assert isinstance(loc, FileLocation)
+        assert module.sources[loc.source_id] == "model.loom"
+
+    def test_empty_filename_omits_implicit_location(self) -> None:
+        module = _op_parser().parse(
+            "test.decl @identity(%arg: i32) -> (i32)\n",
+            filename="",
+        )
+        op = module.symbols[0].op
+        assert op is not None
+        assert op.location_id == 0
+        assert module.sources == []
 
 
 # ============================================================================
@@ -2528,26 +3324,25 @@ class TestNestedDictAttr:
         )
 
     def test_max_nested_dict_depth_is_accepted(self) -> None:
-        # The top-level AttrDict field itself is parser depth 0, so 15 nested
-        # dict values below it gives 16 total dict wrappers and is the deepest
-        # valid shape accepted by the C parser/verifier contract.
+        # The top-level AttrDict field consumes one aggregate level, so seven
+        # nested dict values below it gives the shared maximum of eight.
         module, scope = _setup_scope(("x", F32))
         op = _parse_op(
-            f"%r = test.attrs %x {{meta = {self._nested_dict_text(15)}}} : f32",
+            f"%r = test.attrs %x {{meta = {self._nested_dict_text(7)}}} : f32",
             module=module,
             scope=scope,
         )
         value = op.attributes["dict"]["meta"]
-        for index in range(14):
+        for index in range(6):
             assert isinstance(value, CanonicalAttrDict)
             value = value[f"k{index}"]
-        assert value == CanonicalAttrDict([("k14", 7)])
+        assert value == CanonicalAttrDict([("k6", 7)])
 
     def test_over_max_nested_dict_depth_is_rejected(self) -> None:
         module, scope = _setup_scope(("x", F32))
-        with pytest.raises(ParseError, match="maximum depth 16"):
+        with pytest.raises(ParseError, match="maximum depth 8"):
             _parse_op(
-                f"%r = test.attrs %x {{meta = {self._nested_dict_text(16)}}} : f32",
+                f"%r = test.attrs %x {{meta = {self._nested_dict_text(8)}}} : f32",
                 module=module,
                 scope=scope,
             )

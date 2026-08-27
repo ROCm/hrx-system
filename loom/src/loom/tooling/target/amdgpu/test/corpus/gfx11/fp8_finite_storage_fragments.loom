@@ -1,0 +1,304 @@
+// GFX11 wave32 matrix fragments loaded directly from finite FP8 checkpoint
+// storage. These cases intentionally name the physical fragment payloads used
+// by GFX11 WMMA and therefore belong to the GFX11 execution corpus instead of
+// the target-independent FP8 conversion corpus.
+amdgpu.target<gfx11-generic> @finite_storage_fragments_gfx11_wave32 {subgroup_size = 32}
+
+// Decode a finite FP8 RHS tile directly into a BF16 matrix fragment.
+kernel.def target(@finite_storage_fragments_gfx11_wave32) @fp8_finite_storage_rhs_fragment_decode_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %fragment_origin = index.constant 0 : index
+  %tile_extent = index.constant 16 : index
+  %input_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %input_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=16, payload_registers=4, rounding=finite_only> : encoding<schema>
+  %input_storage = encoding.define #encoding.storage {layout = %input_layout : encoding<layout>, schema = %input_schema : encoding<schema>} : encoding<storage>
+  %input_view = buffer.view %input[%base] : buffer -> view<16x16xf8E4M3, %input_storage>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xbf16>
+  %fragment = vector.fragment.load<rhs> %input_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xf8E4M3, %input_storage> -> vector<16xbf16>
+  vector.store %fragment, %output_view[%fragment_origin] : vector<16xbf16>, view<16xbf16>
+  kernel.return
+}
+
+// Decode a finite FP8 RHS tile and its block scale directly into a BF16 matrix
+// fragment.
+kernel.def target(@finite_storage_fragments_gfx11_wave32) @fp8_finite_storage_scaled_rhs_fragment_decode_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %scale: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c16 = index.constant 16 : index
+  %input_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %input_schema = encoding.define #encoding.f8e4m3<affine=scale_only, payload_elements=16, rounding=finite_only, scale_format=f32, scale_group_elements=16, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %input_storage = encoding.define #encoding.storage {layout = %input_layout : encoding<layout>, schema = %input_schema : encoding<schema>} : encoding<storage>
+  %input_view = buffer.view %input[%base] : buffer -> view<16x16xf8E4M3, %input_storage>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<1xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xbf16>
+  %scale_scalar = view.load %scale_view[%c0] : view<1xf32> -> f32
+  %scale_vector = vector.splat %scale_scalar : vector<1xf32>
+  %fragment = vector.fragment.load<rhs> %input_view[%c0, %c0] shape [%c16, %c16] using {scale = %scale_vector : vector<1xf32>} : view<16x16xf8E4M3, %input_storage> -> vector<16xbf16>
+  vector.store %fragment, %output_view[%c0] : vector<16xbf16>, view<16xbf16>
+  kernel.return
+}
+
+kernel.def target(@finite_storage_fragments_gfx11_wave32) @fp8_finite_storage_compact_rhs_fragment_decode_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %fragment_origin = index.constant 0 : index
+  %tile_extent = index.constant 16 : index
+  %input_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %input_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %input_storage = encoding.define #encoding.storage {layout = %input_layout : encoding<layout>, schema = %input_schema : encoding<schema>} : encoding<storage>
+  %input_view = buffer.view %input[%base] : buffer -> view<16x16xf8E4M3, %input_storage>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xbf16>
+  %fragment = vector.fragment.load<rhs> %input_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xf8E4M3, %input_storage> -> vector<16xbf16>
+  vector.store %fragment, %output_view[%fragment_origin] : vector<16xbf16>, view<16xbf16>
+  kernel.return
+}
+
+// Decode a finite BF8 RHS tile directly into a BF16 matrix fragment.
+kernel.def target(@finite_storage_fragments_gfx11_wave32) @bf8_finite_storage_rhs_fragment_decode_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %fragment_origin = index.constant 0 : index
+  %tile_extent = index.constant 16 : index
+  %input_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %input_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=16, payload_registers=4, rounding=finite_only> : encoding<schema>
+  %input_storage = encoding.define #encoding.storage {layout = %input_layout : encoding<layout>, schema = %input_schema : encoding<schema>} : encoding<storage>
+  %input_view = buffer.view %input[%base] : buffer -> view<16x16xf8E5M2, %input_storage>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xbf16>
+  %fragment = vector.fragment.load<rhs> %input_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xf8E5M2, %input_storage> -> vector<16xbf16>
+  vector.store %fragment, %output_view[%fragment_origin] : vector<16xbf16>, view<16xbf16>
+  kernel.return
+}
+
+kernel.def target(@finite_storage_fragments_gfx11_wave32) @bf8_finite_storage_compact_rhs_fragment_decode_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %fragment_origin = index.constant 0 : index
+  %tile_extent = index.constant 16 : index
+  %input_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %input_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %input_storage = encoding.define #encoding.storage {layout = %input_layout : encoding<layout>, schema = %input_schema : encoding<schema>} : encoding<storage>
+  %input_view = buffer.view %input[%base] : buffer -> view<16x16xf8E5M2, %input_storage>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xbf16>
+  %fragment = vector.fragment.load<rhs> %input_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xf8E5M2, %input_storage> -> vector<16xbf16>
+  vector.store %fragment, %output_view[%fragment_origin] : vector<16xbf16>, view<16xbf16>
+  kernel.return
+}
+
+// Use compact finite FP8 checkpoint storage as a WMMA RHS tile.
+kernel.def target(@finite_storage_fragments_gfx11_wave32) @fp8_finite_storage_compact_rhs_fragment_mma_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %fragment_origin = index.constant 0 : index
+  %tile_extent = index.constant 16 : index
+  %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %rhs_storage = encoding.define #encoding.storage {layout = %rhs_layout : encoding<layout>, schema = %rhs_schema : encoding<schema>} : encoding<storage>
+  %lhs_view = buffer.view %lhs[%base] : buffer -> view<16x16xbf16>
+  %rhs_view = buffer.view %rhs[%base] : buffer -> view<16x16xf8E4M3, %rhs_storage>
+  %output_view = buffer.view %output[%base] : buffer -> view<16x16xf32>
+  %zero_accumulator = vector.constant 0.0 : vector<8xf32>
+  %init = vector.fragment<init> %zero_accumulator shape [%tile_extent, %tile_extent] : vector<8xf32>
+  %lhs_fragment = vector.fragment.load<lhs> %lhs_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xbf16> -> vector<16xbf16>
+  %rhs_fragment = vector.fragment.load<rhs> %rhs_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xf8E4M3, %rhs_storage> -> vector<16xbf16>
+  %result = vector.mma %lhs_fragment, %rhs_fragment, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  vector.fragment.store<result> %result, %output_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<16x16xf32>
+  kernel.return
+}
+
+// Use compact finite BF8 checkpoint storage as a WMMA RHS tile.
+kernel.def target(@finite_storage_fragments_gfx11_wave32) @bf8_finite_storage_compact_rhs_fragment_mma_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %fragment_origin = index.constant 0 : index
+  %tile_extent = index.constant 16 : index
+  %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %rhs_storage = encoding.define #encoding.storage {layout = %rhs_layout : encoding<layout>, schema = %rhs_schema : encoding<schema>} : encoding<storage>
+  %lhs_view = buffer.view %lhs[%base] : buffer -> view<16x16xbf16>
+  %rhs_view = buffer.view %rhs[%base] : buffer -> view<16x16xf8E5M2, %rhs_storage>
+  %output_view = buffer.view %output[%base] : buffer -> view<16x16xf32>
+  %zero_accumulator = vector.constant 0.0 : vector<8xf32>
+  %init = vector.fragment<init> %zero_accumulator shape [%tile_extent, %tile_extent] : vector<8xf32>
+  %lhs_fragment = vector.fragment.load<lhs> %lhs_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xbf16> -> vector<16xbf16>
+  %rhs_fragment = vector.fragment.load<rhs> %rhs_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xf8E5M2, %rhs_storage> -> vector<16xbf16>
+  %result = vector.mma %lhs_fragment, %rhs_fragment, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  vector.fragment.store<result> %result, %output_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<16x16xf32>
+  kernel.return
+}
+
+// Use compact finite-flush FP8 checkpoint storage as a WMMA RHS tile.
+kernel.def target(@finite_storage_fragments_gfx11_wave32) @fp8_finite_flush_storage_compact_rhs_fragment_mma_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %fragment_origin = index.constant 0 : index
+  %tile_extent = index.constant 16 : index
+  %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_flush_subnormal> : encoding<schema>
+  %rhs_storage = encoding.define #encoding.storage {layout = %rhs_layout : encoding<layout>, schema = %rhs_schema : encoding<schema>} : encoding<storage>
+  %lhs_view = buffer.view %lhs[%base] : buffer -> view<16x16xbf16>
+  %rhs_view = buffer.view %rhs[%base] : buffer -> view<16x16xf8E4M3, %rhs_storage>
+  %output_view = buffer.view %output[%base] : buffer -> view<16x16xf32>
+  %zero_accumulator = vector.constant 0.0 : vector<8xf32>
+  %init = vector.fragment<init> %zero_accumulator shape [%tile_extent, %tile_extent] : vector<8xf32>
+  %lhs_fragment = vector.fragment.load<lhs> %lhs_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xbf16> -> vector<16xbf16>
+  %rhs_fragment = vector.fragment.load<rhs> %rhs_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xf8E4M3, %rhs_storage> -> vector<16xbf16>
+  %result = vector.mma %lhs_fragment, %rhs_fragment, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  vector.fragment.store<result> %result, %output_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<16x16xf32>
+  kernel.return
+}
+
+// Use compact finite-flush BF8 checkpoint storage as a WMMA RHS tile.
+kernel.def target(@finite_storage_fragments_gfx11_wave32) @bf8_finite_flush_storage_compact_rhs_fragment_mma_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %fragment_origin = index.constant 0 : index
+  %tile_extent = index.constant 16 : index
+  %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %rhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=1, payload_registers=1, rounding=finite_flush_subnormal> : encoding<schema>
+  %rhs_storage = encoding.define #encoding.storage {layout = %rhs_layout : encoding<layout>, schema = %rhs_schema : encoding<schema>} : encoding<storage>
+  %lhs_view = buffer.view %lhs[%base] : buffer -> view<16x16xbf16>
+  %rhs_view = buffer.view %rhs[%base] : buffer -> view<16x16xf8E5M2, %rhs_storage>
+  %output_view = buffer.view %output[%base] : buffer -> view<16x16xf32>
+  %zero_accumulator = vector.constant 0.0 : vector<8xf32>
+  %init = vector.fragment<init> %zero_accumulator shape [%tile_extent, %tile_extent] : vector<8xf32>
+  %lhs_fragment = vector.fragment.load<lhs> %lhs_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xbf16> -> vector<16xbf16>
+  %rhs_fragment = vector.fragment.load<rhs> %rhs_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xf8E5M2, %rhs_storage> -> vector<16xbf16>
+  %result = vector.mma %lhs_fragment, %rhs_fragment, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  vector.fragment.store<result> %result, %output_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<16x16xf32>
+  kernel.return
+}
+
+check.case public @fp8_finite_storage_rhs_fragment_decode_bf16_case {
+  %input = check.generate.fill value(1.0) : tensor<16x16xf8E4M3>
+  %output = check.generate.fill value(0.0) : tensor<16xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<16xbf16>
+  kernel.launch @fp8_finite_storage_rhs_fragment_decode_bf16(%input, %output) : (tensor<16x16xf8E4M3>, tensor<16xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16xbf16>
+  check.return
+}
+
+check.case public @fp8_finite_storage_scaled_rhs_fragment_decode_bf16_case {
+  %input = check.generate.fill value(1.0) : tensor<16x16xf8E4M3>
+  %scale = check.generate.fill value(2.0) : tensor<1xf32>
+  %output = check.generate.fill value(0.0) : tensor<16xbf16>
+  %expected = check.generate.fill value(2.0) : tensor<16xbf16>
+  kernel.launch @fp8_finite_storage_scaled_rhs_fragment_decode_bf16(%input, %scale, %output) : (tensor<16x16xf8E4M3>, tensor<1xf32>, tensor<16xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16xbf16>
+  check.return
+}
+
+check.case public @fp8_finite_storage_compact_rhs_fragment_decode_bf16_case {
+  %input = check.generate.fill value(1.0) : tensor<16x16xf8E4M3>
+  %output = check.generate.fill value(0.0) : tensor<16xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<16xbf16>
+  kernel.launch @fp8_finite_storage_compact_rhs_fragment_decode_bf16(%input, %output) : (tensor<16x16xf8E4M3>, tensor<16xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16xbf16>
+  check.return
+}
+
+check.case public @bf8_finite_storage_rhs_fragment_decode_bf16_case {
+  %input = check.generate.fill value(1.0) : tensor<16x16xf8E5M2>
+  %output = check.generate.fill value(0.0) : tensor<16xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<16xbf16>
+  kernel.launch @bf8_finite_storage_rhs_fragment_decode_bf16(%input, %output) : (tensor<16x16xf8E5M2>, tensor<16xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16xbf16>
+  check.return
+}
+
+check.case public @bf8_finite_storage_compact_rhs_fragment_decode_bf16_case {
+  %input = check.generate.fill value(1.0) : tensor<16x16xf8E5M2>
+  %output = check.generate.fill value(0.0) : tensor<16xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<16xbf16>
+  kernel.launch @bf8_finite_storage_compact_rhs_fragment_decode_bf16(%input, %output) : (tensor<16x16xf8E5M2>, tensor<16xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16xbf16>
+  check.return
+}
+
+check.case public @fp8_finite_storage_compact_rhs_fragment_mma_f32_case {
+  %lhs = check.generate.fill value(1.0) : tensor<16x16xbf16>
+  %rhs = check.generate.fill value(1.0) : tensor<16x16xf8E4M3>
+  %output = check.generate.fill value(0.0) : tensor<16x16xf32>
+  %expected = check.generate.fill value(16.0) : tensor<16x16xf32>
+  kernel.launch @fp8_finite_storage_compact_rhs_fragment_mma_f32(%lhs, %rhs, %output) : (tensor<16x16xbf16>, tensor<16x16xf8E4M3>, tensor<16x16xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xf32>
+  check.return
+}
+
+check.case public @bf8_finite_storage_compact_rhs_fragment_mma_f32_case {
+  %lhs = check.generate.fill value(1.0) : tensor<16x16xbf16>
+  %rhs = check.generate.fill value(1.0) : tensor<16x16xf8E5M2>
+  %output = check.generate.fill value(0.0) : tensor<16x16xf32>
+  %expected = check.generate.fill value(16.0) : tensor<16x16xf32>
+  kernel.launch @bf8_finite_storage_compact_rhs_fragment_mma_f32(%lhs, %rhs, %output) : (tensor<16x16xbf16>, tensor<16x16xf8E5M2>, tensor<16x16xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xf32>
+  check.return
+}
+
+check.case public @fp8_finite_flush_storage_compact_rhs_fragment_mma_f32_case {
+  // Finite-flush storage still preserves exact zero in the compact decode path.
+  %lhs = check.generate.fill value(1.0) : tensor<16x16xbf16>
+  %rhs = check.generate.fill value(0.0) : tensor<16x16xf8E4M3>
+  %output = check.generate.fill value(1.0) : tensor<16x16xf32>
+  %expected = check.generate.fill value(0.0) : tensor<16x16xf32>
+  kernel.launch @fp8_finite_flush_storage_compact_rhs_fragment_mma_f32(%lhs, %rhs, %output) : (tensor<16x16xbf16>, tensor<16x16xf8E4M3>, tensor<16x16xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xf32>
+  check.return
+}
+
+check.case public @bf8_finite_flush_storage_compact_rhs_fragment_mma_f32_case {
+  // Finite-flush storage still preserves exact zero in the compact decode path.
+  %lhs = check.generate.fill value(1.0) : tensor<16x16xbf16>
+  %rhs = check.generate.fill value(0.0) : tensor<16x16xf8E5M2>
+  %output = check.generate.fill value(1.0) : tensor<16x16xf32>
+  %expected = check.generate.fill value(0.0) : tensor<16x16xf32>
+  kernel.launch @bf8_finite_flush_storage_compact_rhs_fragment_mma_f32(%lhs, %rhs, %output) : (tensor<16x16xbf16>, tensor<16x16xf8E5M2>, tensor<16x16xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xf32>
+  check.return
+}
+
+check.benchmark<@fp8_finite_storage_rhs_fragment_decode_bf16_case>
+
+check.benchmark<@fp8_finite_storage_scaled_rhs_fragment_decode_bf16_case>
+
+check.benchmark<@fp8_finite_storage_compact_rhs_fragment_decode_bf16_case>
+
+check.benchmark<@bf8_finite_storage_rhs_fragment_decode_bf16_case>
+
+check.benchmark<@bf8_finite_storage_compact_rhs_fragment_decode_bf16_case>
+
+check.benchmark<@fp8_finite_storage_compact_rhs_fragment_mma_f32_case>
+
+check.benchmark<@bf8_finite_storage_compact_rhs_fragment_mma_f32_case>
+
+check.benchmark<@fp8_finite_flush_storage_compact_rhs_fragment_mma_f32_case>
+
+check.benchmark<@bf8_finite_flush_storage_compact_rhs_fragment_mma_f32_case>

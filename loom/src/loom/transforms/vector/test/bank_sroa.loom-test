@@ -1,0 +1,344 @@
+// RUN: pass sroa-vector-banks
+
+func.def @rank3_vector_payload_bank(%initial: vector<2x2x4xf32>, %increment: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %loop_end = index.constant 4 : index
+  %result = scf.for %i = [%loop_begin to %loop_end step %loop_step](%bank = %initial : vector<2x2x4xf32>) -> (vector<2x2x4xf32>) {
+    %old00 = vector.extract %bank[0, 0] : vector<2x2x4xf32> -> vector<4xf32>
+    %next00 = vector.addf %old00, %increment : vector<4xf32>
+    %bank0 = vector.insert %next00 into %bank[0, 0] : vector<4xf32>, vector<2x2x4xf32>
+    %old11 = vector.extract %bank0[1, 1] : vector<2x2x4xf32> -> vector<4xf32>
+    %next11 = vector.addf %old11, %increment : vector<4xf32>
+    %bank1 = vector.insert %next11 into %bank0[1, 1] : vector<4xf32>, vector<2x2x4xf32>
+    scf.yield %bank1 : vector<2x2x4xf32>
+  }
+  %result00 = vector.extract %result[0, 0] : vector<2x2x4xf32> -> vector<4xf32>
+  %result01 = vector.extract %result[0, 1] : vector<2x2x4xf32> -> vector<4xf32>
+  %result10 = vector.extract %result[1, 0] : vector<2x2x4xf32> -> vector<4xf32>
+  %result11 = vector.extract %result[1, 1] : vector<2x2x4xf32> -> vector<4xf32>
+  func.return %result00, %result01, %result10, %result11 : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
+}
+
+// ----
+func.def @rank3_vector_payload_bank(%initial: vector<2x2x4xf32>, %increment: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %loop_end = index.constant 4 : index
+  %initial_slot_0 = vector.extract %initial[0, 0] : vector<2x2x4xf32> -> vector<4xf32>
+  %initial_slot_1 = vector.extract %initial[0, 1] : vector<2x2x4xf32> -> vector<4xf32>
+  %initial_slot_2 = vector.extract %initial[1, 0] : vector<2x2x4xf32> -> vector<4xf32>
+  %initial_slot_3 = vector.extract %initial[1, 1] : vector<2x2x4xf32> -> vector<4xf32>
+  %result_slot_0, %result_slot_1, %result_slot_2, %result_slot_3 = scf.for %i = [%loop_begin to %loop_end step %loop_step](%bank_slot_0 = %initial_slot_0 : vector<4xf32>, %bank_slot_1 = %initial_slot_1 : vector<4xf32>, %bank_slot_2 = %initial_slot_2 : vector<4xf32>, %bank_slot_3 = %initial_slot_3 : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
+    %next00 = vector.addf %bank_slot_0, %increment : vector<4xf32>
+    %next11 = vector.addf %bank_slot_3, %increment : vector<4xf32>
+    scf.yield %next00, %bank_slot_1, %bank_slot_2, %next11 : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
+  }
+  func.return %result_slot_0, %result_slot_1, %result_slot_2, %result_slot_3 : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
+}
+
+// ====
+
+func.def @rank2_scalar_payload_bank(%initial: vector<2x2xi32>, %increment: i32) -> (i32, i32) {
+  %loop_begin = index.constant 0 : index
+  %loop_end = index.constant 1 : index
+  %loop_step = index.constant 1 : index
+  %result = scf.for %i = [%loop_begin to %loop_end step %loop_step](%bank = %initial : vector<2x2xi32>) -> (vector<2x2xi32>) {
+    %old = vector.extract %bank[0, 1] : vector<2x2xi32> -> i32
+    %next = scalar.addi %old, %increment : i32
+    %updated = vector.insert %next into %bank[0, 1] : i32, vector<2x2xi32>
+    scf.yield %updated : vector<2x2xi32>
+  }
+  %a = vector.extract %result[0, 1] : vector<2x2xi32> -> i32
+  %b = vector.extract %result[1, 0] : vector<2x2xi32> -> i32
+  func.return %a, %b : i32, i32
+}
+
+// ----
+func.def @rank2_scalar_payload_bank(%initial: vector<2x2xi32>, %increment: i32) -> (i32, i32) {
+  %loop_begin = index.constant 0 : index
+  %loop_end = index.constant 1 : index
+  %loop_step = index.constant 1 : index
+  %initial_slot_0 = vector.extract %initial[0, 0] : vector<2x2xi32> -> i32
+  %initial_slot_1 = vector.extract %initial[0, 1] : vector<2x2xi32> -> i32
+  %initial_slot_2 = vector.extract %initial[1, 0] : vector<2x2xi32> -> i32
+  %initial_slot_3 = vector.extract %initial[1, 1] : vector<2x2xi32> -> i32
+  %result_slot_0, %result_slot_1, %result_slot_2, %result_slot_3 = scf.for %i = [%loop_begin to %loop_end step %loop_step](%bank_slot_0 = %initial_slot_0 : i32, %bank_slot_1 = %initial_slot_1 : i32, %bank_slot_2 = %initial_slot_2 : i32, %bank_slot_3 = %initial_slot_3 : i32) -> (i32, i32, i32, i32) {
+    %next = scalar.addi %bank_slot_1, %increment : i32
+    scf.yield %bank_slot_0, %next, %bank_slot_2, %bank_slot_3 : i32, i32, i32, i32
+  }
+  func.return %result_slot_1, %result_slot_2 : i32, i32
+}
+
+// ====
+
+func.def @mixed_carried_values(%initial: vector<1x2x4xf32>, %scalar: i32) -> (vector<4xf32>, i32) {
+  %loop_begin = index.constant 0 : index
+  %loop_end = index.constant 1 : index
+  %loop_step = index.constant 1 : index
+  %bank_result, %scalar_result = scf.for %i = [%loop_begin to %loop_end step %loop_step](%bank = %initial : vector<1x2x4xf32>, %count = %scalar : i32) -> (vector<1x2x4xf32>, i32) {
+    %value = vector.extract %bank[0, 1] : vector<1x2x4xf32> -> vector<4xf32>
+    %updated = vector.insert %value into %bank[0, 1] : vector<4xf32>, vector<1x2x4xf32>
+    %next_count = scalar.addi %count, %scalar : i32
+    scf.yield %updated, %next_count : vector<1x2x4xf32>, i32
+  }
+  %bank_value = vector.extract %bank_result[0, 1] : vector<1x2x4xf32> -> vector<4xf32>
+  func.return %bank_value, %scalar_result : vector<4xf32>, i32
+}
+
+// ----
+func.def @mixed_carried_values(%initial: vector<1x2x4xf32>, %scalar: i32) -> (vector<4xf32>, i32) {
+  %loop_begin = index.constant 0 : index
+  %loop_end = index.constant 1 : index
+  %loop_step = index.constant 1 : index
+  %initial_slot_0 = vector.extract %initial[0, 0] : vector<1x2x4xf32> -> vector<4xf32>
+  %initial_slot_1 = vector.extract %initial[0, 1] : vector<1x2x4xf32> -> vector<4xf32>
+  %bank_result_slot_0, %bank_result_slot_1, %scalar_result = scf.for %i = [%loop_begin to %loop_end step %loop_step](%bank_slot_0 = %initial_slot_0 : vector<4xf32>, %bank_slot_1 = %initial_slot_1 : vector<4xf32>, %count = %scalar : i32) -> (vector<4xf32>, vector<4xf32>, i32) {
+    %next_count = scalar.addi %count, %scalar : i32
+    scf.yield %bank_slot_0, %bank_slot_1, %next_count : vector<4xf32>, vector<4xf32>, i32
+  }
+  func.return %bank_result_slot_1, %scalar_result : vector<4xf32>, i32
+}
+
+// ====
+// RUN: pass unroll-scf-for,canonicalize,cse,sroa-vector-banks,canonicalize,cse
+
+func.def @nested_configured_bank_updates(%initial: vector<2x2x4xf32>, %increment: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %bank_extent = index.constant 2 : index
+  %stage_count = index.constant 4 : index
+  %result = scf.for %stage = [%loop_begin to %stage_count step %loop_step](%bank = %initial : vector<2x2x4xf32>) -> (vector<2x2x4xf32>) {
+    %after_rows = scf.for %row = [%loop_begin to %bank_extent step %loop_step](%row_bank = %bank : vector<2x2x4xf32>) -> (vector<2x2x4xf32>) unroll {
+      %after_columns = scf.for %column = [%loop_begin to %bank_extent step %loop_step](%column_bank = %row_bank : vector<2x2x4xf32>) -> (vector<2x2x4xf32>) unroll {
+        %old = vector.extract %column_bank[%row, %column] : vector<2x2x4xf32> -> vector<4xf32>
+        %next = vector.addf %old, %increment : vector<4xf32>
+        %updated = vector.insert %next into %column_bank[%row, %column] : vector<4xf32>, vector<2x2x4xf32>
+        scf.yield %updated : vector<2x2x4xf32>
+      }
+      scf.yield %after_columns : vector<2x2x4xf32>
+    }
+    scf.yield %after_rows : vector<2x2x4xf32>
+  }
+  %result00 = vector.extract %result[0, 0] : vector<2x2x4xf32> -> vector<4xf32>
+  %result01 = vector.extract %result[0, 1] : vector<2x2x4xf32> -> vector<4xf32>
+  %result10 = vector.extract %result[1, 0] : vector<2x2x4xf32> -> vector<4xf32>
+  %result11 = vector.extract %result[1, 1] : vector<2x2x4xf32> -> vector<4xf32>
+  func.return %result00, %result01, %result10, %result11 : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
+}
+
+// ----
+func.def @nested_configured_bank_updates(%initial: vector<2x2x4xf32>, %increment: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %stage_count = index.constant 4 : index
+  %initial_slot_0 = vector.extract %initial[0, 0] : vector<2x2x4xf32> -> vector<4xf32>
+  %initial_slot_1 = vector.extract %initial[0, 1] : vector<2x2x4xf32> -> vector<4xf32>
+  %initial_slot_2 = vector.extract %initial[1, 0] : vector<2x2x4xf32> -> vector<4xf32>
+  %initial_slot_3 = vector.extract %initial[1, 1] : vector<2x2x4xf32> -> vector<4xf32>
+  %result_slot_0, %result_slot_1, %result_slot_2, %result_slot_3 = scf.for %stage = [%loop_begin to %stage_count step %loop_step](%bank_slot_0 = %initial_slot_0 : vector<4xf32>, %bank_slot_1 = %initial_slot_1 : vector<4xf32>, %bank_slot_2 = %initial_slot_2 : vector<4xf32>, %bank_slot_3 = %initial_slot_3 : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
+    %next$83 = vector.addf %bank_slot_0, %increment : vector<4xf32>
+    %next_1$84 = vector.addf %bank_slot_1, %increment : vector<4xf32>
+    %next$85 = vector.addf %bank_slot_2, %increment : vector<4xf32>
+    %next_1$86 = vector.addf %bank_slot_3, %increment : vector<4xf32>
+    scf.yield %next$83, %next_1$84, %next$85, %next_1$86 : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
+  }
+  func.return %result_slot_0, %result_slot_1, %result_slot_2, %result_slot_3 : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
+}
+
+// ====
+// RUN: pass canonicalize,cse,sroa-vector-banks,canonicalize,cse
+
+func.def @uniform_initialization_and_repeated_updates(%increment: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %loop_end = index.constant 4 : index
+  %initial_value = scalar.constant 0.0 : f32
+  %initial = vector.splat %initial_value : vector<1x2x4xf32>
+  %result = scf.for %i = [%loop_begin to %loop_end step %loop_step](%bank = %initial : vector<1x2x4xf32>) -> (vector<1x2x4xf32>) {
+    %old = vector.extract %bank[0, 0] : vector<1x2x4xf32> -> vector<4xf32>
+    %first = vector.addf %old, %increment : vector<4xf32>
+    %after_first = vector.insert %first into %bank[0, 0] : vector<4xf32>, vector<1x2x4xf32>
+    %again = vector.extract %after_first[0, 0] : vector<1x2x4xf32> -> vector<4xf32>
+    %second = vector.addf %again, %increment : vector<4xf32>
+    %after_second = vector.insert %second into %after_first[0, 0] : vector<4xf32>, vector<1x2x4xf32>
+    %other = vector.extract %after_second[0, 1] : vector<1x2x4xf32> -> vector<4xf32>
+    %next_other = vector.addf %other, %increment : vector<4xf32>
+    %updated = vector.insert %next_other into %after_second[0, 1] : vector<4xf32>, vector<1x2x4xf32>
+    scf.yield %updated : vector<1x2x4xf32>
+  }
+  %result0 = vector.extract %result[0, 0] : vector<1x2x4xf32> -> vector<4xf32>
+  %result1 = vector.extract %result[0, 1] : vector<1x2x4xf32> -> vector<4xf32>
+  func.return %result0, %result1 : vector<4xf32>, vector<4xf32>
+}
+
+// ----
+func.def @uniform_initialization_and_repeated_updates(%increment: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %loop_end = index.constant 4 : index
+  %initial_slot_0 = vector.constant 0.0 : vector<4xf32>
+  %result_slot_0, %result_slot_1 = scf.for %i = [%loop_begin to %loop_end step %loop_step](%bank_slot_0 = %initial_slot_0 : vector<4xf32>, %bank_slot_1 = %initial_slot_0 : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
+    %first = vector.addf %bank_slot_0, %increment : vector<4xf32>
+    %second = vector.addf %first, %increment : vector<4xf32>
+    %next_other = vector.addf %bank_slot_1, %increment : vector<4xf32>
+    scf.yield %second, %next_other : vector<4xf32>, vector<4xf32>
+  }
+  func.return %result_slot_0, %result_slot_1 : vector<4xf32>, vector<4xf32>
+}
+
+// ====
+// RUN: pass sroa-vector-banks
+
+func.def @partial_prefix_preserves_vector_tail(%initial: vector<2x2x4xf32>, %increment: vector<2x4xf32>) -> (vector<2x4xf32>, vector<2x4xf32>) {
+  %loop_begin = index.constant 0 : index
+  %loop_end = index.constant 1 : index
+  %loop_step = index.constant 1 : index
+  %result = scf.for %i = [%loop_begin to %loop_end step %loop_step](%bank = %initial : vector<2x2x4xf32>) -> (vector<2x2x4xf32>) {
+    %old = vector.extract %bank[1] : vector<2x2x4xf32> -> vector<2x4xf32>
+    %next = vector.addf %old, %increment : vector<2x4xf32>
+    %updated = vector.insert %next into %bank[1] : vector<2x4xf32>, vector<2x2x4xf32>
+    scf.yield %updated : vector<2x2x4xf32>
+  }
+  %result0 = vector.extract %result[0] : vector<2x2x4xf32> -> vector<2x4xf32>
+  %result1 = vector.extract %result[1] : vector<2x2x4xf32> -> vector<2x4xf32>
+  func.return %result0, %result1 : vector<2x4xf32>, vector<2x4xf32>
+}
+
+// ----
+func.def @partial_prefix_preserves_vector_tail(%initial: vector<2x2x4xf32>, %increment: vector<2x4xf32>) -> (vector<2x4xf32>, vector<2x4xf32>) {
+  %loop_begin = index.constant 0 : index
+  %loop_end = index.constant 1 : index
+  %loop_step = index.constant 1 : index
+  %initial_slot_0 = vector.extract %initial[0] : vector<2x2x4xf32> -> vector<2x4xf32>
+  %initial_slot_1 = vector.extract %initial[1] : vector<2x2x4xf32> -> vector<2x4xf32>
+  %result_slot_0, %result_slot_1 = scf.for %i = [%loop_begin to %loop_end step %loop_step](%bank_slot_0 = %initial_slot_0 : vector<2x4xf32>, %bank_slot_1 = %initial_slot_1 : vector<2x4xf32>) -> (vector<2x4xf32>, vector<2x4xf32>) {
+    %next = vector.addf %bank_slot_1, %increment : vector<2x4xf32>
+    scf.yield %bank_slot_0, %next : vector<2x4xf32>, vector<2x4xf32>
+  }
+  func.return %result_slot_0, %result_slot_1 : vector<2x4xf32>, vector<2x4xf32>
+}
+
+// ====
+// RUN: pass sroa-vector-banks
+
+func.def @multiple_banks_and_nonbank_state(%integer_initial: vector<2x2xi32>, %vector_initial: vector<1x2x4xf32>, %integer_increment: i32, %vector_increment: vector<4xf32>, %initial_count: i32) -> (i32, vector<4xf32>, i32) {
+  %loop_begin = index.constant 0 : index
+  %loop_end = index.constant 1 : index
+  %loop_step = index.constant 1 : index
+  %integer_result, %vector_result, %count_result = scf.for %i = [%loop_begin to %loop_end step %loop_step](%integer_bank = %integer_initial : vector<2x2xi32>, %vector_bank = %vector_initial : vector<1x2x4xf32>, %count = %initial_count : i32) -> (vector<2x2xi32>, vector<1x2x4xf32>, i32) {
+    %old_integer = vector.extract %integer_bank[1, 0] : vector<2x2xi32> -> i32
+    %next_integer = scalar.addi %old_integer, %integer_increment : i32
+    %updated_integer = vector.insert %next_integer into %integer_bank[1, 0] : i32, vector<2x2xi32>
+    %old_vector = vector.extract %vector_bank[0, 1] : vector<1x2x4xf32> -> vector<4xf32>
+    %next_vector = vector.addf %old_vector, %vector_increment : vector<4xf32>
+    %updated_vector = vector.insert %next_vector into %vector_bank[0, 1] : vector<4xf32>, vector<1x2x4xf32>
+    %next_count = scalar.addi %count, %integer_increment : i32
+    scf.yield %updated_integer, %updated_vector, %next_count : vector<2x2xi32>, vector<1x2x4xf32>, i32
+  }
+  %integer_value = vector.extract %integer_result[1, 0] : vector<2x2xi32> -> i32
+  %vector_value = vector.extract %vector_result[0, 1] : vector<1x2x4xf32> -> vector<4xf32>
+  func.return %integer_value, %vector_value, %count_result : i32, vector<4xf32>, i32
+}
+
+// ----
+func.def @multiple_banks_and_nonbank_state(%integer_initial: vector<2x2xi32>, %vector_initial: vector<1x2x4xf32>, %integer_increment: i32, %vector_increment: vector<4xf32>, %initial_count: i32) -> (i32, vector<4xf32>, i32) {
+  %loop_begin = index.constant 0 : index
+  %loop_end = index.constant 1 : index
+  %loop_step = index.constant 1 : index
+  %integer_initial_slot_0 = vector.extract %integer_initial[0, 0] : vector<2x2xi32> -> i32
+  %integer_initial_slot_1 = vector.extract %integer_initial[0, 1] : vector<2x2xi32> -> i32
+  %integer_initial_slot_2 = vector.extract %integer_initial[1, 0] : vector<2x2xi32> -> i32
+  %integer_initial_slot_3 = vector.extract %integer_initial[1, 1] : vector<2x2xi32> -> i32
+  %vector_initial_slot_0 = vector.extract %vector_initial[0, 0] : vector<1x2x4xf32> -> vector<4xf32>
+  %vector_initial_slot_1 = vector.extract %vector_initial[0, 1] : vector<1x2x4xf32> -> vector<4xf32>
+  %integer_result_slot_0, %integer_result_slot_1, %integer_result_slot_2, %integer_result_slot_3, %vector_result_slot_0, %vector_result_slot_1, %count_result = scf.for %i = [%loop_begin to %loop_end step %loop_step](%integer_bank_slot_0 = %integer_initial_slot_0 : i32, %integer_bank_slot_1 = %integer_initial_slot_1 : i32, %integer_bank_slot_2 = %integer_initial_slot_2 : i32, %integer_bank_slot_3 = %integer_initial_slot_3 : i32, %vector_bank_slot_0 = %vector_initial_slot_0 : vector<4xf32>, %vector_bank_slot_1 = %vector_initial_slot_1 : vector<4xf32>, %count = %initial_count : i32) -> (i32, i32, i32, i32, vector<4xf32>, vector<4xf32>, i32) {
+    %next_integer = scalar.addi %integer_bank_slot_2, %integer_increment : i32
+    %next_vector = vector.addf %vector_bank_slot_1, %vector_increment : vector<4xf32>
+    %next_count = scalar.addi %count, %integer_increment : i32
+    scf.yield %integer_bank_slot_0, %integer_bank_slot_1, %next_integer, %integer_bank_slot_3, %vector_bank_slot_0, %next_vector, %next_count : i32, i32, i32, i32, vector<4xf32>, vector<4xf32>, i32
+  }
+  func.return %integer_result_slot_2, %vector_result_slot_1, %count_result : i32, vector<4xf32>, i32
+}
+
+// ====
+// RUN: pass sroa-vector-banks
+
+func.def @zero_extent_unselected_bank_is_unchanged(%initial: vector<0x2x4xf32>) -> (vector<0x2x4xf32>) {
+  %loop_begin = index.constant 0 : index
+  %loop_end = index.constant 1 : index
+  %loop_step = index.constant 1 : index
+  %result = scf.for %i = [%loop_begin to %loop_end step %loop_step](%bank = %initial : vector<0x2x4xf32>) -> (vector<0x2x4xf32>) {
+    scf.yield %bank : vector<0x2x4xf32>
+  }
+  func.return %result : vector<0x2x4xf32>
+}
+
+// ----
+func.def @zero_extent_unselected_bank_is_unchanged(%initial: vector<0x2x4xf32>) -> (vector<0x2x4xf32>) {
+  %loop_begin = index.constant 0 : index
+  %loop_end = index.constant 1 : index
+  %loop_step = index.constant 1 : index
+  %result = scf.for %i = [%loop_begin to %loop_end step %loop_step](%bank = %initial : vector<0x2x4xf32>) -> (vector<0x2x4xf32>) {
+    scf.yield %bank : vector<0x2x4xf32>
+  }
+  func.return %result : vector<0x2x4xf32>
+}
+
+// ====
+// RUN: pass sroa-vector-banks
+
+func.def @nested_region_bank_escape_is_rejected(%initial: vector<2x2x4xf32>, %condition: i1) {
+  %loop_begin = index.constant 0 : index
+  %loop_end = index.constant 1 : index
+  %loop_step = index.constant 1 : index
+  %result = scf.for %i = [%loop_begin to %loop_end step %loop_step](%bank = %initial : vector<2x2x4xf32>) -> (vector<2x2x4xf32>) {
+    %top_level = vector.extract %bank[0, 0] : vector<2x2x4xf32> -> vector<4xf32>
+    scf.if %condition {
+      // ERROR@+1: LOWERING/047 {op_name="vector.extract", phase_name="sroa-vector-banks", slot="0", reason="an aggregate state has a non-prefix or nested-region use"}
+      %nested = vector.extract %bank[0, 1] : vector<2x2x4xf32> -> vector<4xf32>
+      test.use %nested : vector<4xf32>
+      scf.yield
+    }
+    %updated = vector.insert %top_level into %bank[0, 0] : vector<4xf32>, vector<2x2x4xf32>
+    scf.yield %updated : vector<2x2x4xf32>
+  }
+  %use = vector.extract %result[0, 0] : vector<2x2x4xf32> -> vector<4xf32>
+  test.use %use : vector<4xf32>
+  func.return
+}
+
+// ====
+// RUN: pass sroa-vector-banks
+
+func.def @dynamic_prefix_is_rejected(%initial: vector<2x2x4xf32>, %dynamic: index) {
+  %loop_begin = index.constant 0 : index
+  %loop_end = index.constant 1 : index
+  %loop_step = index.constant 1 : index
+  %result = scf.for %i = [%loop_begin to %loop_end step %loop_step](%bank = %initial : vector<2x2x4xf32>) -> (vector<2x2x4xf32>) {
+    // ERROR@+1: LOWERING/047 {op_name="vector.extract", phase_name="sroa-vector-banks", slot="0", reason="the access has a dynamic prefix index"}
+    %value = vector.extract %bank[%dynamic, 0] : vector<2x2x4xf32> -> vector<4xf32>
+    %updated = vector.insert %value into %bank[0, 0] : vector<4xf32>, vector<2x2x4xf32>
+    scf.yield %updated : vector<2x2x4xf32>
+  }
+  %use = vector.extract %result[0, 0] : vector<2x2x4xf32> -> vector<4xf32>
+  test.use %use : vector<4xf32>
+  func.return
+}
+
+// ====
+// RUN: pass sroa-vector-banks
+
+func.def @aggregate_result_escape_is_rejected(%initial: vector<2x2x4xf32>) {
+  %loop_begin = index.constant 0 : index
+  %loop_end = index.constant 1 : index
+  %loop_step = index.constant 1 : index
+  %result = scf.for %i = [%loop_begin to %loop_end step %loop_step](%bank = %initial : vector<2x2x4xf32>) -> (vector<2x2x4xf32>) {
+    %value = vector.extract %bank[0, 0] : vector<2x2x4xf32> -> vector<4xf32>
+    %updated = vector.insert %value into %bank[0, 0] : vector<4xf32>, vector<2x2x4xf32>
+    scf.yield %updated : vector<2x2x4xf32>
+  }
+  // ERROR@+1: LOWERING/047 {op_name="test.use", phase_name="sroa-vector-banks", slot="0", reason="the aggregate result has a non-extract use"}
+  test.use %result : vector<2x2x4xf32>
+  func.return
+}

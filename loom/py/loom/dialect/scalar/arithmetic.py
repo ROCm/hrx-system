@@ -456,6 +456,7 @@ scalar_copysignf = binary_op(
     group=scalar_ops,
     type_constraint=FLOAT,
     doc="Copy sign of rhs onto magnitude of lhs.",
+    flags=("fastmath", FastMathFlags),
     facts="loom_scalar_copysignf_facts",
     canonicalize="loom_scalar_copysignf_canonicalize",
     examples=["%result = scalar.copysignf %lhs, %rhs : f32"],

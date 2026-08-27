@@ -50,6 +50,62 @@ bool loom_vector_fragment_fact_is_unknown(loom_vector_fragment_fact_t fact) {
   return loom_vector_fragment_fact_equal(fact, unknown);
 }
 
+bool loom_vector_fragment_fact_is_accumulator_like(
+    loom_vector_fragment_fact_t fact) {
+  const loom_vector_fragment_role_flags_t accumulator_roles =
+      LOOM_VECTOR_FRAGMENT_ROLE_FLAG_INIT |
+      LOOM_VECTOR_FRAGMENT_ROLE_FLAG_RESULT;
+  return (fact.shape_rank == 2 || fact.shape_rank == 3) &&
+         fact.role_flags != 0 && (fact.role_flags & ~accumulator_roles) == 0;
+}
+
+bool loom_vector_fragment_fact_has_matrix_shape(
+    loom_vector_fragment_fact_t fact) {
+  return (fact.shape_rank == 2 || fact.shape_rank == 3) && fact.role_flags != 0;
+}
+
+loom_value_id_t loom_vector_fragment_fact_block_value(
+    loom_vector_fragment_fact_t fact) {
+  return fact.shape_rank == 3 ? fact.shape_value_ids[0] : LOOM_VALUE_ID_INVALID;
+}
+
+loom_value_id_t loom_vector_fragment_fact_row_value(
+    loom_vector_fragment_fact_t fact) {
+  if (fact.shape_rank != 2 && fact.shape_rank != 3) {
+    return LOOM_VALUE_ID_INVALID;
+  }
+  return fact.shape_value_ids[fact.shape_rank - 2];
+}
+
+loom_value_id_t loom_vector_fragment_fact_column_value(
+    loom_vector_fragment_fact_t fact) {
+  if (fact.shape_rank != 2 && fact.shape_rank != 3) {
+    return LOOM_VALUE_ID_INVALID;
+  }
+  return fact.shape_value_ids[fact.shape_rank - 1];
+}
+
+static bool loom_vector_fragment_facts_match_contract_except_native_storage(
+    loom_vector_fragment_fact_t lhs, loom_vector_fragment_fact_t rhs) {
+  lhs.flags &= ~LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_NATIVE_STORAGE;
+  rhs.flags &= ~LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_NATIVE_STORAGE;
+  return loom_vector_fragment_fact_equal(lhs, rhs);
+}
+
+bool loom_vector_fragment_facts_match_accumulator_contract(
+    loom_vector_fragment_fact_t lhs, loom_vector_fragment_fact_t rhs) {
+  if (!loom_vector_fragment_fact_is_accumulator_like(lhs) ||
+      !loom_vector_fragment_fact_is_accumulator_like(rhs)) {
+    return false;
+  }
+  lhs.role_flags = LOOM_VECTOR_FRAGMENT_ROLE_FLAG_INIT |
+                   LOOM_VECTOR_FRAGMENT_ROLE_FLAG_RESULT;
+  rhs.role_flags = LOOM_VECTOR_FRAGMENT_ROLE_FLAG_INIT |
+                   LOOM_VECTOR_FRAGMENT_ROLE_FLAG_RESULT;
+  return loom_vector_fragment_facts_match_contract_except_native_storage(lhs,
+                                                                         rhs);
+}
+
 iree_status_t loom_vector_fragment_fact_make_value_facts(
     loom_fact_context_t* context, loom_vector_fragment_fact_t fact,
     loom_value_facts_t* out_facts) {
@@ -87,7 +143,7 @@ bool loom_vector_fragment_parameter_view_resolve(
   memset(out_view, 0, sizeof(*out_view));
   out_view->schema_value_id = LOOM_VALUE_ID_INVALID;
   out_view->schema_parameter_ordinal = UINT16_MAX;
-  loom_vector_encoding_auxiliary_view_initialize(&out_view->auxiliary);
+  loom_encoding_auxiliary_view_initialize(&out_view->auxiliary);
   if (out_unknown_key) {
     *out_unknown_key = iree_string_view_empty();
   }
@@ -114,9 +170,9 @@ bool loom_vector_fragment_parameter_view_resolve(
       continue;
     }
 
-    loom_vector_encoding_auxiliary_key_t auxiliary_key = 0;
-    if (!loom_vector_encoding_auxiliary_key_lookup_stable_id(stable_id,
-                                                             &auxiliary_key)) {
+    loom_encoding_auxiliary_key_t auxiliary_key = 0;
+    if (!loom_encoding_auxiliary_key_lookup_stable_id(stable_id,
+                                                      &auxiliary_key)) {
       if (out_unknown_key) {
         *out_unknown_key = key_name;
       }
@@ -125,7 +181,7 @@ bool loom_vector_fragment_parameter_view_resolve(
     out_view->auxiliary.values[auxiliary_key] =
         parameter_values.values[ordinal];
     out_view->auxiliary.present_keys |=
-        loom_vector_encoding_auxiliary_key_flag(auxiliary_key);
+        loom_encoding_auxiliary_key_flag(auxiliary_key);
   }
   return true;
 }

@@ -9,6 +9,7 @@
 #include "loom/analysis/symbol_facts.h"
 #include "loom/codegen/low/verify.h"
 #include "loom/error/error_catalog.h"
+#include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/op_defs.h"
@@ -89,13 +90,16 @@ void loom_target_entry_diagnostic_emitter_initialize(
 }
 
 static bool loom_target_entry_resolve_emission_location(
-    const loom_target_entry_diagnostic_emitter_t* emitter, const loom_op_t* op,
+    const loom_target_entry_diagnostic_emitter_t* emitter,
+    const loom_module_t* module, const loom_op_t* op,
     loom_source_range_t* out_source_location) {
-  if (!emitter || !emitter->module || !op) {
+  if (!emitter || !op) {
     return false;
   }
-  if (!loom_source_resolve(emitter->source_resolver, emitter->module,
-                           op->location, out_source_location)) {
+  module = module != NULL ? module : emitter->module;
+  if (module == NULL ||
+      !loom_source_resolve(emitter->source_resolver, module, op->location,
+                           out_source_location)) {
     return false;
   }
   if (out_source_location->provenance ==
@@ -121,8 +125,9 @@ static iree_host_size_t loom_target_entry_collect_related_locations(
     loom_source_range_t source_location = {
         .provenance = LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE,
     };
-    if (!loom_target_entry_resolve_emission_location(emitter, related_ops[i].op,
-                                                     &source_location)) {
+    if (!loom_target_entry_resolve_emission_location(
+            emitter, related_ops[i].module, related_ops[i].op,
+            &source_location)) {
       continue;
     }
     if (related_location_count >= LOOM_DIAGNOSTIC_MAX_RELATED_LOCATIONS) {
@@ -181,7 +186,8 @@ static iree_status_t loom_target_entry_emit_diagnostic(
   }
 
   if (loom_target_entry_resolve_emission_location(
-          emitter, emission->op, &diagnostic.source_location)) {
+          emitter, emission->module, emission->op,
+          &diagnostic.source_location)) {
     diagnostic.origin = diagnostic.source_location;
   }
   return loom_diagnostic_emit(&emitter->diagnostic_sink, &diagnostic);
@@ -225,16 +231,17 @@ iree_status_t loom_target_entry_verify_module(
 iree_status_t loom_target_entry_verify_low_module(
     const loom_module_t* module,
     const loom_target_low_descriptor_registry_t* low_registry,
+    const loom_target_entry_options_t* options,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
-    loom_target_selection_t target_selection, uint32_t max_errors,
+    uint32_t default_max_errors,
     loom_low_verify_provider_list_t low_verify_provider_list,
     loom_low_verify_scratch_t* scratch, loom_low_verify_result_t* out_result) {
   const loom_low_verify_options_t low_verify_options = {
       .descriptor_registry = &low_registry->registry,
-      .target_selection = target_selection,
+      .function_versions = options ? options->function_versions : NULL,
       .emitter = loom_target_entry_emitter(diagnostic_emitter),
       .provider_list = low_verify_provider_list,
-      .max_errors = max_errors,
+      .max_errors = loom_target_entry_max_errors(options, default_max_errors),
   };
   *out_result = (loom_low_verify_result_t){0};
   return loom_low_verify_module(module, &low_verify_options, scratch,
@@ -267,19 +274,6 @@ static void loom_target_entry_from_facts(
       .module_id = 0,
       .symbol_id = symbol_id,
   };
-  out_entry->target_ref = func_facts->target_symbol;
-  if (func_facts->target_symbol.module_id == 0 &&
-      func_facts->target_symbol.symbol_id < module->symbols.count) {
-    out_entry->target_symbol =
-        &module->symbols.entries[func_facts->target_symbol.symbol_id];
-    out_entry->target_op = out_entry->target_symbol->defining_op;
-  }
-}
-
-static void loom_target_entry_assign_entry(const loom_target_entry_t* source,
-                                           loom_target_entry_t* out_entry) {
-  *out_entry = *source;
-  loom_target_bundle_storage_rebind(&out_entry->bundle_storage);
 }
 
 static iree_status_t loom_target_entry_emit_missing_target_record(
@@ -297,7 +291,7 @@ static iree_status_t loom_target_entry_emit_missing_target_record(
 static iree_status_t loom_target_entry_emit_incompatible_bundle(
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
     const loom_target_entry_t* entry, iree_string_view_t pipeline_name) {
-  const loom_target_bundle_t* bundle = &entry->bundle_storage.bundle;
+  const loom_target_bundle_t* bundle = loom_target_entry_bundle(entry);
   const loom_target_snapshot_t* snapshot = bundle->snapshot;
   const loom_target_export_plan_t* export_plan = bundle->export_plan;
   const loom_target_config_t* config = bundle->config;
@@ -349,8 +343,8 @@ static iree_status_t loom_target_entry_emit_ambiguous_entry(
 
 static iree_status_t loom_target_entry_try_entry(
     const loom_module_t* module, loom_symbol_fact_table_t* fact_table,
-    const loom_target_entry_options_t* options, loom_symbol_id_t symbol_id,
-    loom_target_entry_predicate_t predicate,
+    const loom_target_function_version_snapshot_t* function_versions,
+    loom_symbol_id_t symbol_id, loom_target_entry_predicate_t predicate,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
     iree_string_view_t pipeline_name, bool require_export,
     bool require_compatible, bool* out_compatible,
@@ -374,7 +368,10 @@ static iree_status_t loom_target_entry_try_entry(
   if (require_export && !func_facts->exports) {
     return iree_ok_status();
   }
-  if (!loom_symbol_ref_is_valid(func_facts->target_symbol)) {
+  const loom_target_function_version_t* function_version =
+      loom_target_function_version_snapshot_at(function_versions, symbol_id);
+  if (function_version == NULL &&
+      !loom_symbol_ref_is_valid(func_facts->target_symbol)) {
     if (!require_compatible) {
       return iree_ok_status();
     }
@@ -386,11 +383,17 @@ static iree_status_t loom_target_entry_try_entry(
 
   loom_target_entry_t entry = {0};
   loom_target_entry_from_facts(module, symbol_id, func_facts, &entry);
+  entry.function_version = function_version;
   bool contract_valid = false;
-  IREE_RETURN_IF_ERROR(loom_target_function_contract_resolve(
-      module, fact_table, func_facts,
-      loom_target_entry_emitter(diagnostic_emitter), &contract_valid,
-      &entry.bundle_storage));
+  if (function_version != NULL) {
+    entry.target_facts = function_version->function_target_facts;
+    contract_valid = true;
+  } else {
+    IREE_RETURN_IF_ERROR(loom_target_function_contract_resolve_facts(
+        module, fact_table, func_facts,
+        loom_target_entry_emitter(diagnostic_emitter), fact_table->arena,
+        &contract_valid, &entry.target_facts));
+  }
   if (!contract_valid) {
     return iree_ok_status();
   }
@@ -403,39 +406,15 @@ static iree_status_t loom_target_entry_try_entry(
     return iree_ok_status();
   }
 
-  const loom_target_bundle_t* effective_target_bundle =
-      options ? options->effective_target_bundle : NULL;
-  if (effective_target_bundle != NULL) {
-    if (!loom_target_function_contract_bundles_compatible(
-            &entry.bundle_storage.bundle, effective_target_bundle)) {
-      if (!require_compatible) {
-        return iree_ok_status();
-      }
-      IREE_RETURN_IF_ERROR(loom_target_entry_emit_incompatible_bundle(
-          diagnostic_emitter, &entry, pipeline_name));
-      return iree_ok_status();
-    }
-    loom_target_function_contract_apply_compatible_selection(
-        effective_target_bundle, &entry.bundle_storage);
-    if (!predicate.fn(predicate.user_data, &entry)) {
-      if (!require_compatible) {
-        return iree_ok_status();
-      }
-      IREE_RETURN_IF_ERROR(loom_target_entry_emit_incompatible_bundle(
-          diagnostic_emitter, &entry, pipeline_name));
-      return iree_ok_status();
-    }
-  }
-
-  loom_target_entry_assign_entry(&entry, out_entry);
+  *out_entry = entry;
   *out_compatible = true;
   return iree_ok_status();
 }
 
 static iree_status_t loom_target_entry_select_named_entry(
     const loom_module_t* module, loom_symbol_fact_table_t* fact_table,
-    const loom_target_entry_options_t* options, iree_string_view_t entry_symbol,
-    loom_target_entry_predicate_t predicate,
+    const loom_target_function_version_snapshot_t* function_versions,
+    iree_string_view_t entry_symbol, loom_target_entry_predicate_t predicate,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
     iree_string_view_t pipeline_name, bool* out_selected,
     loom_target_entry_t* out_entry) {
@@ -450,16 +429,16 @@ static iree_status_t loom_target_entry_select_named_entry(
   }
   bool compatible = false;
   IREE_RETURN_IF_ERROR(loom_target_entry_try_entry(
-      module, fact_table, options, symbol_id, predicate, diagnostic_emitter,
-      pipeline_name, /*require_export=*/false, /*require_compatible=*/true,
-      &compatible, out_entry));
+      module, fact_table, function_versions, symbol_id, predicate,
+      diagnostic_emitter, pipeline_name, /*require_export=*/false,
+      /*require_compatible=*/true, &compatible, out_entry));
   *out_selected = compatible;
   return iree_ok_status();
 }
 
 static iree_status_t loom_target_entry_select_single_entry(
     const loom_module_t* module, loom_symbol_fact_table_t* fact_table,
-    const loom_target_entry_options_t* options,
+    const loom_target_function_version_snapshot_t* function_versions,
     loom_target_entry_predicate_t predicate,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
     iree_string_view_t pipeline_name, bool* out_selected,
@@ -470,7 +449,7 @@ static iree_status_t loom_target_entry_select_single_entry(
     bool compatible = false;
     loom_target_entry_t candidate = {0};
     IREE_RETURN_IF_ERROR(loom_target_entry_try_entry(
-        module, fact_table, options, (loom_symbol_id_t)i, predicate,
+        module, fact_table, function_versions, (loom_symbol_id_t)i, predicate,
         diagnostic_emitter, pipeline_name, /*require_export=*/false,
         /*require_compatible=*/false, &compatible, &candidate));
     if (!compatible) {
@@ -478,7 +457,7 @@ static iree_status_t loom_target_entry_select_single_entry(
     }
     ++candidate_count;
     if (candidate_count == 1) {
-      loom_target_entry_assign_entry(&candidate, out_entry);
+      *out_entry = candidate;
     }
   }
 
@@ -507,16 +486,20 @@ iree_status_t loom_target_entry_select_entry(
 
   loom_symbol_fact_table_t fact_table = {0};
   loom_target_entry_initialize_fact_table(arena, &fact_table);
+  loom_target_function_version_snapshot_t function_versions = {0};
+  IREE_RETURN_IF_ERROR(loom_target_function_version_snapshot_build(
+      module, options ? options->function_versions : NULL, arena,
+      &function_versions));
 
   iree_string_view_t entry_symbol = loom_target_entry_symbol_name(options);
   if (!iree_string_view_is_empty(entry_symbol)) {
     return loom_target_entry_select_named_entry(
-        module, &fact_table, options, entry_symbol, predicate,
+        module, &fact_table, &function_versions, entry_symbol, predicate,
         diagnostic_emitter, entry_kind, out_selected, out_entry);
   }
   return loom_target_entry_select_single_entry(
-      module, &fact_table, options, predicate, diagnostic_emitter, entry_kind,
-      out_selected, out_entry);
+      module, &fact_table, &function_versions, predicate, diagnostic_emitter,
+      entry_kind, out_selected, out_entry);
 }
 
 iree_status_t loom_target_entry_select_all_entries(
@@ -536,20 +519,23 @@ iree_status_t loom_target_entry_select_all_entries(
 
   loom_symbol_fact_table_t fact_table = {0};
   loom_target_entry_initialize_fact_table(arena, &fact_table);
+  loom_target_function_version_snapshot_t function_versions = {0};
+  IREE_RETURN_IF_ERROR(loom_target_function_version_snapshot_build(
+      module, options ? options->function_versions : NULL, arena,
+      &function_versions));
 
   uint16_t entry_count = 0;
   const loom_block_t* module_block =
       loom_region_const_entry_block(module->body);
   const loom_op_t* op = NULL;
   loom_block_for_each_op(module_block, op) {
-    loom_symbol_ref_t symbol_ref = loom_symbol_ref_null();
-    if (!loom_op_defining_symbol_ref(module, op, &symbol_ref)) {
-      continue;
-    }
+    const loom_symbol_id_t symbol_id =
+        loom_op_defining_symbol_id(module, op, loom_op_vtable(module, op));
+    if (symbol_id == LOOM_SYMBOL_ID_INVALID) continue;
     bool compatible = false;
     loom_target_entry_t candidate = {0};
     IREE_RETURN_IF_ERROR(loom_target_entry_try_entry(
-        module, &fact_table, options, symbol_ref.symbol_id, predicate,
+        module, &fact_table, &function_versions, symbol_id, predicate,
         diagnostic_emitter, entry_kind, /*require_export=*/true,
         /*require_compatible=*/false, &compatible, &candidate));
     if (!compatible) {
@@ -561,7 +547,7 @@ iree_status_t loom_target_entry_select_all_entries(
                               "exported compatible entries",
                               (int)entry_kind.size, entry_kind.data);
     }
-    loom_target_entry_assign_entry(&candidate, &entries[entry_count++]);
+    entries[entry_count++] = candidate;
   }
 
   if (entry_count == 0) {

@@ -33,6 +33,7 @@ iree_cc_library(
   DEPS
     ::api
     iree::base
+    iree::base::core_headers
     iree::hal
   PUBLIC
 )
@@ -62,6 +63,7 @@ iree_cc_library(
     headers
   HDRS
     "api.h"
+    "atomic.h"
     "command_buffer.h"
     "debug_utils.h"
     "device_options.h"
@@ -90,6 +92,7 @@ iree_cc_test(
   DEPS
     ::device_spec
     ::device_spec_builder
+    ::headers
     iree::base
     iree::hal
     iree::hal::utils::device_spec_builder
@@ -192,9 +195,9 @@ endif()
 if(IREE_HAL_DRIVER_VULKAN)
 iree_cc_test(
   NAME
-    executable_test
+    physical_device_selection_test
   SRCS
-    "executable_test.cc"
+    "physical_device_selection_test.cc"
   DEPS
     ::headers
     ::vulkan
@@ -209,9 +212,9 @@ endif()
 if(IREE_HAL_DRIVER_VULKAN)
 iree_cc_test(
   NAME
-    physical_device_selection_test
+    physical_device_test
   SRCS
-    "physical_device_selection_test.cc"
+    "physical_device_test.cc"
   DEPS
     ::headers
     ::vulkan
@@ -248,6 +251,10 @@ iree_cc_library(
     "allocator.c"
     "allocator.h"
     "api.c"
+    "atomic.c"
+    "atomic.h"
+    "barrier.c"
+    "barrier.h"
     "buffer.c"
     "buffer.h"
     "builtins.c"
@@ -264,8 +271,6 @@ iree_cc_library(
     "driver.h"
     "executable.c"
     "executable.h"
-    "executable_cache.c"
-    "executable_cache.h"
     "logical_device.c"
     "logical_device.h"
     "physical_device.c"
@@ -296,6 +301,7 @@ iree_cc_library(
     iree::base::threading
     iree::base::threading::thread
     iree::hal
+    iree::hal::drivers::vulkan::device::library
     iree::hal::drivers::vulkan::util::libvulkan
     iree::hal::local::profile
     iree::hal::local::transient_buffer

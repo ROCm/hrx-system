@@ -970,7 +970,7 @@ func.def @encode_requires_schema_role(%values: vector<32xf32>, %xf: encoding<tra
 // Auxiliary operands are keyed by a small vector-owned vocabulary so lowering
 // can resolve a compact bitset instead of matching arbitrary strings later.
 func.def @decode_rejects_unknown_auxiliary_key(%payload: vector<6xi32>, %scale: vector<1xf16>) {
-  %schema = encoding.define #matrix_operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   // ERROR@+1: ENCODING/015 "vector.decode" "mystery"
   %values = vector.decode %payload using %schema {mystery = %scale : vector<1xf16>} : vector<6xi32>, encoding<schema> -> vector<32xf32>
   func.return
@@ -980,7 +980,7 @@ func.def @decode_rejects_unknown_auxiliary_key(%payload: vector<6xi32>, %scale: 
 
 // Static encoded matrix schemas can require named auxiliary operands.
 func.def @decode_requires_schema_scale_auxiliary(%payload: vector<6xi32>) {
-  %schema = encoding.define #matrix_operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   // ERROR@+1: ENCODING/016 "vector.decode" "scale"
   %values = vector.decode %payload using %schema : vector<6xi32>, encoding<schema> -> vector<32xf32>
   func.return
@@ -1030,12 +1030,23 @@ func.def @fragment_load_requires_full_rank_origin(%buffer: buffer, %offset: offs
 
 // ====
 
-// Dense fragment movement keeps the logical view element type on the physical
-// fragment payload.
-func.def @fragment_load_requires_matching_element_type(%buffer: buffer, %offset: offset, %row: index, %m: index, %k: index) {
+// A blocked fragment carries three semantic matrix dimensions, even when a
+// source tries to hide the block coordinate in a lower-rank view.
+func.def @blocked_fragment_load_requires_rank_three_view(%buffer: buffer, %offset: offset, %row: index, %blocks: index, %m: index, %k: index) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16x16xf16, %layout>
+  // ERROR@+1: TYPE/003 "view" "rank >= 3 view"
+  %lhs = vector.fragment.load<lhs> %view[%row, 0] shape [blocks(%blocks), %m, %k] : view<16x16xf16, %layout> -> vector<2xf16>
+  func.return
+}
+
+// ====
+
+// Fragment loads may request a target-shaped element conversion at the load
+// boundary. Target legality owns selecting or rejecting the conversion.
+func.def @fragment_load_allows_load_boundary_conversion(%buffer: buffer, %offset: offset, %row: index, %m: index, %k: index) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%offset] : buffer -> view<16x16xf32, %layout>
-  // ERROR@+1: TYPE/002 "view" "result"
   %lhs = vector.fragment.load<lhs> %view[%row, 0] shape [%m, %k] : view<16x16xf32, %layout> -> vector<16xf16>
   func.return
 }
@@ -1049,6 +1060,29 @@ func.def @fragment_load_view_annotation_mismatch(%buffer: buffer, %offset: offse
   %view = buffer.view %buffer[%offset] : buffer -> view<16x16xf16, %layout>
   // ERROR@+1: TYPE/001 "view" "type annotation"
   %lhs = vector.fragment.load<lhs> %view[%row, 0] shape [%m, %k] : view<8x16xf16, %layout> -> vector<16xf16>
+  func.return
+}
+
+// ====
+
+// Fragment load auxiliary operands use the same keyed vocabulary as
+// vector.decode/encode and vector.fragment.
+func.def @fragment_load_rejects_unknown_auxiliary_key(%buffer: buffer, %offset: offset, %row: index, %m: index, %k: index, %metadata: vector<1xi32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16x16xf16, %layout>
+  // ERROR@+1: ENCODING/015 "vector.fragment.load" "mystery"
+  %lhs = vector.fragment.load<lhs> %view[%row, 0] shape [%m, %k] using {mystery = %metadata : vector<1xi32>} : view<16x16xf16, %layout> -> vector<16xf16>
+  func.return
+}
+
+// ====
+
+// Static sparse fragment-load storage schemas require explicit metadata SSA
+// operands at the load boundary.
+func.def @fragment_load_requires_sparse_auxiliary(%buffer: buffer, %offset: offset, %row: index, %m: index, %k: index) {
+  %view = buffer.view %buffer[%offset] : buffer -> view<16x16xf8E4M3, #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.operand<element_format=f8e4m3, payload_elements=16, payload_registers=4, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2>>>
+  // ERROR@+1: ENCODING/016 "vector.fragment.load" "sparsity"
+  %lhs = vector.fragment.load<lhs> %view[%row, 0] shape [%m, %k] : view<16x16xf8E4M3, #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.operand<element_format=f8e4m3, payload_elements=16, payload_registers=4, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2>>> -> vector<4xi32>
   func.return
 }
 
@@ -1097,7 +1131,7 @@ func.def @fragment_requires_schema_role(%payload: vector<6xi32>, %m: index, %k: 
 
 // Fragment parameter keys share the vector auxiliary vocabulary.
 func.def @fragment_rejects_unknown_auxiliary_key(%payload: vector<6xi32>, %m: index, %k: index, %scale: vector<1xf16>) {
-  %schema = encoding.define #matrix_operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   // ERROR@+1: ENCODING/015 "vector.fragment" "mystery"
   %fragment = vector.fragment<lhs> %payload shape [%m, %k] using {mystery = %scale : vector<1xf16>, schema = %schema : encoding<schema>} : vector<6xi32>
   func.return
@@ -1107,7 +1141,7 @@ func.def @fragment_rejects_unknown_auxiliary_key(%payload: vector<6xi32>, %m: in
 
 // Static encoded fragment schemas can require named auxiliary operands.
 func.def @fragment_requires_schema_scale_auxiliary(%payload: vector<6xi32>, %m: index, %k: index) {
-  %schema = encoding.define #matrix_operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   // ERROR@+1: ENCODING/016 "vector.fragment" "scale"
   %fragment = vector.fragment<lhs> %payload shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<6xi32>
   func.return
@@ -1137,10 +1171,10 @@ func.def @table_quantize_unsorted_thresholds(%values: vector<4xf32>) {
 
 // ====
 
-// Numeric transforms require an encoding with the numeric-transform role, not
-// an arbitrary storage schema.
+// Numeric transforms require a transform encoding, not an arbitrary storage
+// schema.
 func.def @transform_role_mismatch(%v: vector<128xf32>) {
-  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
   // ERROR@+1: TYPE/003 "encoding<transform>"
   %r = vector.transform %v, %schema : vector<128xf32>, encoding<schema> -> vector<128xf32>
   func.return
@@ -1148,94 +1182,9 @@ func.def @transform_role_mismatch(%v: vector<128xf32>) {
 
 // ====
 
-// Numeric transform descriptors spell their family explicitly.
-func.def @transform_missing_family(%v: vector<128xf32>) {
-  // ERROR@+1: ENCODING/007 "numeric_transform" "family"
-  %xf = encoding.define #numeric_transform<input_elems=128, output_elems=128> : encoding<transform>
-  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
-  func.return
-}
-
-// ====
-
-// Numeric transform descriptors carry input and output extents.
-func.def @transform_missing_extent(%v: vector<128xf32>) {
-  // ERROR@+1: ENCODING/007 "numeric_transform" "input_elems"
-  %xf = encoding.define #numeric_transform<family="hadamard", output_elems=128> : encoding<transform>
-  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
-  func.return
-}
-
-// ====
-
-// Unknown transform descriptor parameters are rejected instead of flowing
-// through as target-specific magic.
-func.def @transform_unknown_param(%v: vector<128xf32>) {
-  // ERROR@+1: ENCODING/008 "numeric_transform" "window"
-  %xf = encoding.define #numeric_transform<family="hadamard", input_elems=128, output_elems=128, window=8> : encoding<transform>
-  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
-  func.return
-}
-
-// ====
-
-// Transform extent parameters must be positive integer attributes when static.
-func.def @transform_static_extent_kind_mismatch(%v: vector<128xf32>) {
-  // ERROR@+1: ENCODING/010 "numeric_transform" "input_elems"
-  %xf = encoding.define #numeric_transform<family="hadamard", input_elems="128", output_elems=128> : encoding<transform>
-  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
-  func.return
-}
-
-// ====
-
-// Static transform extents describe lane counts and must be positive.
-func.def @transform_static_extent_not_positive(%v: vector<128xf32>) {
-  // ERROR@+1: STRUCTURE/014 "input_elems" "0" "positive extent"
-  %xf = encoding.define #numeric_transform<family="hadamard", input_elems=0, output_elems=128> : encoding<transform>
-  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
-  func.return
-}
-
-// ====
-
-// Transform input extent must match the source last axis.
-func.def @transform_input_extent_mismatch(%v: vector<64xf32>) {
-  %matrix = vector.constant 0.0 : vector<64x64xf32>
-  %xf = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %matrix : vector<64x64xf32>} : encoding<transform>
-  // ERROR@+1: TYPE/003 "last axis matching static transform extent"
-  %r = vector.transform %v, %xf : vector<64xf32>, encoding<transform> -> vector<64xf32>
-  func.return
-}
-
-// ====
-
-// Transform output extent must match the result last axis.
-func.def @transform_output_extent_mismatch(%v: vector<128xf32>) {
-  %matrix = vector.constant 0.0 : vector<32x128xf32>
-  %xf = encoding.define #numeric_transform<family="jl_dense", input_elems=128, output_elems=64> {matrix = %matrix : vector<32x128xf32>} : encoding<transform>
-  // ERROR@+1: TYPE/004 "last axis matching static transform extent"
-  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<32xf32>
-  func.return
-}
-
-// ====
-
-// Dynamic transform extents must use the same SSA value as the corresponding
-// dynamic vector dimension.
-func.def @transform_dynamic_extent_mismatch(%n: index, %m: index, %v: vector<[%n]xf32>) {
-  %xf = encoding.define #numeric_transform<family="hadamard"> {input_elems = %m : index, output_elems = %n : index} : encoding<transform>
-  // ERROR@+1: TYPE/003 "last axis matching dynamic transform extent"
-  %r = vector.transform %v, %xf : vector<[%n]xf32>, encoding<transform> -> vector<[%n]xf32>
-  func.return
-}
-
-// ====
-
-// Hadamard-style transforms are square transforms over a power-of-two last
-// axis when the extent is statically known.
+// Hadamard transforms require a power-of-two final axis when statically known.
 func.def @transform_hadamard_non_power_of_two(%v: vector<96xf32>) {
-  %xf = encoding.define #numeric_transform<family="hadamard", input_elems=96, output_elems=96> : encoding<transform>
+  %xf = encoding.define #transform.hadamard : encoding<transform>
   // ERROR@+1: TYPE/003 "power-of-two last axis extent for Hadamard transform"
   %r = vector.transform %v, %xf : vector<96xf32>, encoding<transform> -> vector<96xf32>
   func.return
@@ -1243,56 +1192,21 @@ func.def @transform_hadamard_non_power_of_two(%v: vector<96xf32>) {
 
 // ====
 
-// Hadamard-style transforms preserve shape.
+// Hadamard transforms preserve the complete vector type.
 func.def @transform_hadamard_shape_mismatch(%v: vector<128xf32>) {
-  %xf = encoding.define #numeric_transform<family="hadamard", input_elems=128, output_elems=64> : encoding<transform>
-  // ERROR@+1: SHAPE/002
+  %xf = encoding.define #transform.hadamard : encoding<transform>
+  // ERROR@+1: TYPE/001
   %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<64xf32>
   func.return
 }
 
 // ====
 
-// Sign vectors must match the source shape and have i1 lanes.
-func.def @transform_signs_shape_mismatch(%v: vector<128xf32>, %signs: vector<64xi1>) {
-  // ERROR@+1: ENCODING/009 "numeric_transform" "signs"
-  %xf = encoding.define #numeric_transform<family="hadamard_sign", input_elems=128, output_elems=128> {signs = %signs : vector<64xi1>} : encoding<transform>
-  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
-  func.return
-}
-
-// ====
-
-// Static permutation maps must name in-bounds source lanes.
-func.def @transform_permutation_out_of_bounds(%v: vector<2xf32>, %signs: vector<2xi1>) {
-  %p0 = scalar.constant 0 : i64
-  %p2 = scalar.constant 2 : i64
-  %permutation = vector.from_elements %p0, %p2 : vector<2xi64>
-  %xf = encoding.define #numeric_transform<family="sign_permute_hadamard", input_elems=2, output_elems=2> {permutation = %permutation : vector<2xi64>, signs = %signs : vector<2xi1>} : encoding<transform>
-  // ERROR@+1: SUBRANGE/004
-  %r = vector.transform %v, %xf : vector<2xf32>, encoding<transform> -> vector<2xf32>
-  func.return
-}
-
-// ====
-
-// Static permutation maps must name each source lane once.
-func.def @transform_permutation_duplicate(%v: vector<2xf32>, %signs: vector<2xi1>) {
-  %p0 = scalar.constant 0 : i64
-  %permutation = vector.from_elements %p0, %p0 : vector<2xi64>
-  %xf = encoding.define #numeric_transform<family="sign_permute_hadamard", input_elems=2, output_elems=2> {permutation = %permutation : vector<2xi64>, signs = %signs : vector<2xi1>} : encoding<transform>
-  // ERROR@+1: STRUCTURE/014 "permutation" "0" "unique lane indices"
-  %r = vector.transform %v, %xf : vector<2xf32>, encoding<transform> -> vector<2xf32>
-  func.return
-}
-
-// ====
-
-// Numeric transform families are intentionally enumerated.
-func.def @transform_unknown_family(%v: vector<128xf32>) {
-  // ERROR@+1: ENCODING/013 "numeric_transform" "family" "mystery"
-  %xf = encoding.define #numeric_transform<family="mystery", input_elems=128, output_elems=128> : encoding<transform>
-  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf32>
+// Hadamard transforms preserve element types as well as shape.
+func.def @transform_hadamard_element_mismatch(%v: vector<128xf32>) {
+  %xf = encoding.define #transform.hadamard : encoding<transform>
+  // ERROR@+1: TYPE/001
+  %r = vector.transform %v, %xf : vector<128xf32>, encoding<transform> -> vector<128xf16>
   func.return
 }
 

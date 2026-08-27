@@ -13,12 +13,13 @@
 #include "iree/base/internal/arena.h"
 #include "iree/base/internal/atomics.h"
 #include "loom/format/bytecode/format.h"
-#include "loom/format/bytecode/reader.h"
+#include "loom/format/bytecode/index.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/ir.h"
 #include "loomc/iree.h"
 #include "result.h"
 #include "source.h"
+#include "target.h"
 
 enum {
   LOOMC_LINK_INDEX_DEFAULT_BLOCK_SIZE = 32 * 1024,
@@ -29,7 +30,7 @@ typedef struct loomc_link_index_builder_source_t {
   loomc_source_t* source;
   // Copied provider label.
   loomc_string_view_t provider_name;
-  // Provider search role.
+  // Provider linkage role.
   loomc_link_provider_role_t role;
 } loomc_link_index_builder_source_t;
 
@@ -38,12 +39,15 @@ struct loomc_link_index_builder_t {
   loomc_allocator_t allocator;
   // Context retained while indexing.
   loomc_context_t* context;
-  // Mutable source slots.
-  loomc_link_index_builder_source_t* sources;
-  // Number of reserved source slots.
-  loomc_host_size_t source_count;
-  // Allocated source slot capacity.
-  loomc_host_size_t source_capacity;
+  // Mutable source slot storage.
+  struct {
+    // Source slot records.
+    loomc_link_index_builder_source_t* values;
+    // Number of reserved source slots.
+    loomc_host_size_t count;
+    // Allocated source slot capacity.
+    loomc_host_size_t capacity;
+  } sources;
   // Stable block pool backing text modules and index arena metadata.
   iree_arena_block_pool_t* block_pool;
   // Internal mutable module index.
@@ -67,9 +71,12 @@ struct loomc_link_index_t {
   loom_link_module_index_t* index;
   // Sources retained to keep bytecode metadata and future materialization
   // alive.
-  loomc_link_index_builder_source_t* sources;
-  // Number of retained source records.
-  loomc_host_size_t source_count;
+  struct {
+    // Retained source records.
+    loomc_link_index_builder_source_t* values;
+    // Number of retained source records.
+    loomc_host_size_t count;
+  } sources;
 };
 
 static iree_allocator_t loomc_link_index_iree_allocator(
@@ -98,6 +105,16 @@ static loomc_status_t loomc_link_index_validate_builder_options(
     return loomc_make_status(
         LOOMC_STATUS_UNIMPLEMENTED,
         "link index builder option extensions are not supported");
+  }
+  if (options->block_size != 0) {
+    if (options->block_size < sizeof(iree_arena_block_t)) {
+      return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                               "link index builder block_size is too small");
+    }
+    if (!iree_arena_block_pool_is_valid_total_size(options->block_size)) {
+      return loomc_make_status(LOOMC_STATUS_OUT_OF_RANGE,
+                               "link index builder block_size is too large");
+    }
   }
   return loomc_ok_status();
 }
@@ -143,29 +160,40 @@ static void loomc_link_index_builder_source_deinitialize(
   *source = (loomc_link_index_builder_source_t){0};
 }
 
+static loomc_status_t loomc_link_index_builder_source_initialize(
+    const loomc_link_index_source_options_t* options,
+    loomc_allocator_t allocator,
+    loomc_link_index_builder_source_t* out_source) {
+  loomc_link_index_builder_source_t source = {
+      .role = options ? options->role : LOOMC_LINK_PROVIDER_ROLE_INPUT,
+  };
+  loomc_status_t status = loomc_ok_status();
+  if (options != NULL) {
+    status = loomc_string_view_clone(options->provider_name, allocator,
+                                     &source.provider_name);
+  }
+  if (loomc_status_is_ok(status)) {
+    *out_source = source;
+  } else {
+    loomc_link_index_builder_source_deinitialize(allocator, &source);
+  }
+  return status;
+}
+
 static loomc_status_t loomc_link_index_builder_reserve_sources(
     loomc_link_index_builder_t* builder, loomc_host_size_t required_count) {
-  if (required_count <= builder->source_capacity) {
+  if (required_count <= builder->sources.capacity) {
     return loomc_ok_status();
   }
-  loomc_host_size_t new_capacity =
-      builder->source_capacity == 0 ? 4 : builder->source_capacity * 2;
-  while (new_capacity < required_count) {
-    new_capacity *= 2;
-  }
-  loomc_link_index_builder_source_t* new_sources = NULL;
-  LOOMC_RETURN_IF_ERROR(loomc_allocator_malloc(
-      builder->allocator, new_capacity * sizeof(*new_sources),
-      (void**)&new_sources));
-  if (builder->source_count != 0) {
-    memcpy(new_sources, builder->sources,
-           builder->source_count * sizeof(*new_sources));
-  }
-  memset(new_sources + builder->source_count, 0,
-         (new_capacity - builder->source_count) * sizeof(*new_sources));
-  loomc_allocator_free(builder->allocator, builder->sources);
-  builder->sources = new_sources;
-  builder->source_capacity = new_capacity;
+  const loomc_host_size_t old_capacity = builder->sources.capacity;
+  const loomc_host_size_t minimum_capacity = iree_max(required_count, 4u);
+  LOOMC_RETURN_IF_ERROR(loomc_status_from_iree(iree_allocator_grow_array(
+      loomc_link_index_iree_allocator(builder->allocator), minimum_capacity,
+      sizeof(*builder->sources.values), &builder->sources.capacity,
+      (void**)&builder->sources.values)));
+  memset(builder->sources.values + old_capacity, 0,
+         (builder->sources.capacity - old_capacity) *
+             sizeof(*builder->sources.values));
   return loomc_ok_status();
 }
 
@@ -222,9 +250,9 @@ static loomc_link_symbol_kind_t loomc_link_symbol_kind_from_loom(
       return LOOMC_LINK_SYMBOL_KIND_FUNCTION_DEFINITION;
     case LOOM_SYMBOL_FUNC_DECL:
       return LOOMC_LINK_SYMBOL_KIND_FUNCTION_DECLARATION;
-    case LOOM_SYMBOL_FUNC_TEMPLATE:
+    case LOOM_SYMBOL_TEMPLATE_DEF:
       return LOOMC_LINK_SYMBOL_KIND_FUNCTION_TEMPLATE;
-    case LOOM_SYMBOL_FUNC_UKERNEL:
+    case LOOM_SYMBOL_TEMPLATE_UKERNEL:
       return LOOMC_LINK_SYMBOL_KIND_FUNCTION_UKERNEL;
     case LOOM_SYMBOL_GLOBAL:
       return LOOMC_LINK_SYMBOL_KIND_GLOBAL;
@@ -253,17 +281,14 @@ static loomc_link_symbol_flags_t loomc_link_symbol_flags_from_loom(
   if (iree_all_bits_set(flags, LOOM_LINK_SYMBOL_FLAG_DECLARATION)) {
     result |= LOOMC_LINK_SYMBOL_FLAG_DECLARATION;
   }
-  if (iree_all_bits_set(flags, LOOM_LINK_SYMBOL_FLAG_HAS_BODY)) {
-    result |= LOOMC_LINK_SYMBOL_FLAG_HAS_BODY;
+  if (iree_all_bits_set(flags, LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION)) {
+    result |= LOOMC_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION;
   }
   if (iree_all_bits_set(flags, LOOM_LINK_SYMBOL_FLAG_CONFIG)) {
     result |= LOOMC_LINK_SYMBOL_FLAG_CONFIG;
   }
-  if (iree_all_bits_set(flags, LOOM_LINK_SYMBOL_FLAG_CHECK_CASE)) {
-    result |= LOOMC_LINK_SYMBOL_FLAG_CHECK_CASE;
-  }
-  if (iree_all_bits_set(flags, LOOM_LINK_SYMBOL_FLAG_CHECK_BENCHMARK)) {
-    result |= LOOMC_LINK_SYMBOL_FLAG_CHECK_BENCHMARK;
+  if (iree_all_bits_set(flags, LOOM_LINK_SYMBOL_FLAG_TEST_ONLY)) {
+    result |= LOOMC_LINK_SYMBOL_FLAG_TEST_ONLY;
   }
   return result;
 }
@@ -339,7 +364,7 @@ static loomc_status_t loomc_link_index_add_source_to_index(
   loomc_string_view_t identifier = loomc_source_identifier(source->source);
   iree_status_t status = iree_ok_status();
   if (loomc_link_index_source_is_bytecode(source->source)) {
-    loom_bytecode_read_options_t read_options = {
+    loom_bytecode_index_options_t index_options = {
         .diagnostic_sink =
             {
                 .fn = loomc_link_index_capture_diagnostic,
@@ -349,7 +374,7 @@ static loomc_status_t loomc_link_index_add_source_to_index(
     status = loom_link_module_index_add_bytecode(
         builder->index,
         iree_make_const_byte_span(contents.data, contents.data_length),
-        iree_string_view_from_loomc(identifier), &read_options, &options,
+        iree_string_view_from_loomc(identifier), &index_options, &options,
         /*out_provider_ordinal=*/NULL);
   } else {
     loom_text_parse_options_t parse_options = {
@@ -359,6 +384,9 @@ static loomc_status_t loomc_link_index_add_source_to_index(
                 .user_data = &capture,
             },
     };
+    loomc_target_pass_environment_initialize_text_asm_environment(
+        loomc_context_target_pass_environment(builder->context),
+        &parse_options.low_asm_environment);
     status = loom_link_module_index_add_text(
         builder->index,
         iree_make_string_view((const char*)contents.data, contents.data_length),
@@ -387,11 +415,11 @@ static loomc_status_t loomc_link_index_add_source_to_index(
 static void loomc_link_index_destroy(loomc_link_index_t* link_index) {
   loomc_allocator_t allocator = link_index->allocator;
   loom_link_module_index_free(link_index->index);
-  for (loomc_host_size_t i = 0; i < link_index->source_count; ++i) {
-    loomc_link_index_builder_source_deinitialize(allocator,
-                                                 &link_index->sources[i]);
+  for (loomc_host_size_t i = 0; i < link_index->sources.count; ++i) {
+    loomc_link_index_builder_source_deinitialize(
+        allocator, &link_index->sources.values[i]);
   }
-  loomc_allocator_free(allocator, link_index->sources);
+  loomc_allocator_free(allocator, link_index->sources.values);
   loomc_link_index_block_pool_release(allocator, link_index->block_pool);
   loomc_context_release(link_index->context);
   loomc_allocator_free(allocator, link_index);
@@ -432,16 +460,22 @@ static bool loomc_link_index_module_from_loom(
 }
 
 static bool loomc_link_index_symbol_from_loom(
+    const loom_link_module_index_t* index,
     const loom_link_module_index_symbol_t* source,
     loomc_link_index_symbol_t* out_symbol) {
-  if (source == NULL || out_symbol == NULL) {
+  if (index == NULL || source == NULL || out_symbol == NULL) {
+    return false;
+  }
+  const loom_link_module_index_module_t* module =
+      loom_link_module_index_symbol_module(index, source);
+  if (module == NULL) {
     return false;
   }
   *out_symbol = (loomc_link_index_symbol_t){
       .ordinal = source->ordinal,
-      .provider_ordinal = source->provider_ordinal,
+      .provider_ordinal = module->provider_ordinal,
       .module_ordinal = source->module_ordinal,
-      .provider_module_ordinal = source->provider_module_ordinal,
+      .provider_module_ordinal = module->provider_module_ordinal,
       .module_symbol_ordinal = source->module_symbol_ordinal,
       .name = loomc_string_view_from_iree(source->name),
       .kind = loomc_link_symbol_kind_from_loom(source->kind),
@@ -486,7 +520,7 @@ loomc_status_t loomc_link_index_builder_create(
                                  &builder->result);
   }
   if (loomc_status_is_ok(status)) {
-    status = loomc_status_from_iree(loom_link_module_index_create(
+    status = loomc_status_from_iree(loom_link_module_index_allocate(
         loomc_context_loom_context(context), builder->block_pool,
         loomc_link_index_iree_allocator(allocator), &builder->index));
   }
@@ -503,11 +537,11 @@ void loomc_link_index_builder_release(loomc_link_index_builder_t* builder) {
     return;
   }
   loomc_allocator_t allocator = builder->allocator;
-  for (loomc_host_size_t i = 0; i < builder->source_count; ++i) {
+  for (loomc_host_size_t i = 0; i < builder->sources.count; ++i) {
     loomc_link_index_builder_source_deinitialize(allocator,
-                                                 &builder->sources[i]);
+                                                 &builder->sources.values[i]);
   }
-  loomc_allocator_free(allocator, builder->sources);
+  loomc_allocator_free(allocator, builder->sources.values);
   loomc_result_release(builder->result);
   if (builder->index != NULL) {
     loom_link_module_index_free(builder->index);
@@ -531,18 +565,17 @@ loomc_status_t loomc_link_index_builder_reserve_source_slot(
   LOOMC_RETURN_IF_ERROR(loomc_link_index_builder_require_open(builder));
   LOOMC_RETURN_IF_ERROR(loomc_link_index_validate_source_options(options));
 
-  loomc_host_size_t ordinal = builder->source_count;
-  LOOMC_RETURN_IF_ERROR(
-      loomc_link_index_builder_reserve_sources(builder, ordinal + 1));
-  loomc_link_index_builder_source_t* source = &builder->sources[ordinal];
-  *source = (loomc_link_index_builder_source_t){
-      .role = options ? options->role : LOOMC_LINK_PROVIDER_ROLE_INPUT,
-  };
-  if (options) {
-    LOOMC_RETURN_IF_ERROR(loomc_string_view_clone(
-        options->provider_name, builder->allocator, &source->provider_name));
+  const loomc_host_size_t ordinal = builder->sources.count;
+  loomc_host_size_t required_count = 0;
+  if (!iree_host_size_checked_add(ordinal, 1, &required_count)) {
+    return loomc_make_status(LOOMC_STATUS_RESOURCE_EXHAUSTED,
+                             "link index source count overflow");
   }
-  builder->source_count = ordinal + 1;
+  LOOMC_RETURN_IF_ERROR(
+      loomc_link_index_builder_reserve_sources(builder, required_count));
+  LOOMC_RETURN_IF_ERROR(loomc_link_index_builder_source_initialize(
+      options, builder->allocator, &builder->sources.values[ordinal]));
+  builder->sources.count = required_count;
   *out_slot = (loomc_link_index_source_slot_t){
       .ordinal = ordinal,
   };
@@ -557,11 +590,12 @@ loomc_status_t loomc_link_index_builder_fill_source_slot(
                              "source must not be NULL");
   }
   LOOMC_RETURN_IF_ERROR(loomc_link_index_builder_require_open(builder));
-  if (slot.ordinal >= builder->source_count) {
+  if (slot.ordinal >= builder->sources.count) {
     return loomc_make_status(LOOMC_STATUS_OUT_OF_RANGE,
                              "link index source slot is out of range");
   }
-  loomc_link_index_builder_source_t* target = &builder->sources[slot.ordinal];
+  loomc_link_index_builder_source_t* target =
+      &builder->sources.values[slot.ordinal];
   if (target->source != NULL) {
     return loomc_make_status(LOOMC_STATUS_ALREADY_EXISTS,
                              "link index source slot is already filled");
@@ -605,8 +639,9 @@ loomc_status_t loomc_link_index_builder_finish(
   LOOMC_RETURN_IF_ERROR(loomc_link_index_builder_require_open(builder));
   builder->finished = true;
 
-  for (loomc_host_size_t i = 0; i < builder->source_count; ++i) {
-    const loomc_link_index_builder_source_t* source = &builder->sources[i];
+  for (loomc_host_size_t i = 0; i < builder->sources.count; ++i) {
+    const loomc_link_index_builder_source_t* source =
+        &builder->sources.values[i];
     if (source->source == NULL) {
       LOOMC_RETURN_IF_ERROR(
           loomc_link_index_add_missing_source_diagnostic(builder, i));
@@ -624,23 +659,26 @@ loomc_status_t loomc_link_index_builder_finish(
   }
 
   loomc_link_index_t* link_index = NULL;
-  LOOMC_RETURN_IF_ERROR(loomc_allocator_malloc(
-      builder->allocator, sizeof(*link_index), (void**)&link_index));
+  loomc_status_t status = loomc_allocator_malloc(
+      builder->allocator, sizeof(*link_index), (void**)&link_index);
+  if (!loomc_status_is_ok(status)) {
+    return status;
+  }
   memset(link_index, 0, sizeof(*link_index));
   iree_atomic_ref_count_init(&link_index->ref_count);
   link_index->allocator = builder->allocator;
   link_index->context = builder->context;
   link_index->block_pool = builder->block_pool;
   link_index->index = builder->index;
-  link_index->sources = builder->sources;
-  link_index->source_count = builder->source_count;
+  link_index->sources.values = builder->sources.values;
+  link_index->sources.count = builder->sources.count;
 
   builder->context = NULL;
   builder->block_pool = NULL;
   builder->index = NULL;
-  builder->sources = NULL;
-  builder->source_count = 0;
-  builder->source_capacity = 0;
+  builder->sources.values = NULL;
+  builder->sources.count = 0;
+  builder->sources.capacity = 0;
   *out_link_index = link_index;
   *out_result = builder->result;
   builder->result = NULL;
@@ -709,6 +747,7 @@ bool loomc_link_index_symbol_at(const loomc_link_index_t* link_index,
     return false;
   }
   return loomc_link_index_symbol_from_loom(
+      link_index->index,
       loom_link_module_index_symbol_at(link_index->index, ordinal), out_symbol);
 }
 
@@ -719,6 +758,7 @@ bool loomc_link_index_lookup_global(const loomc_link_index_t* link_index,
     return false;
   }
   return loomc_link_index_symbol_from_loom(
+      link_index->index,
       loom_link_module_index_lookup_global(link_index->index,
                                            iree_string_view_from_loomc(name)),
       out_symbol);
@@ -736,6 +776,7 @@ bool loomc_link_index_next_global_duplicate(
   const loom_link_module_index_symbol_t* internal_symbol =
       loom_link_module_index_symbol_at(link_index->index, symbol->ordinal);
   return loomc_link_index_symbol_from_loom(
+      link_index->index,
       loom_link_module_index_next_global_duplicate(link_index->index,
                                                    internal_symbol),
       out_symbol);
@@ -753,6 +794,7 @@ bool loomc_link_index_lookup_private(const loomc_link_index_t* link_index,
   const loom_link_module_index_module_t* internal_module =
       loom_link_module_index_module_at(link_index->index, module->ordinal);
   return loomc_link_index_symbol_from_loom(
+      link_index->index,
       loom_link_module_index_lookup_private(link_index->index, internal_module,
                                             iree_string_view_from_loomc(name)),
       out_symbol);
@@ -763,6 +805,12 @@ loomc_context_t* loomc_link_index_context(
   return link_index ? link_index->context : NULL;
 }
 
+loomc_allocator_t loomc_link_index_allocator(
+    const loomc_link_index_t* link_index) {
+  IREE_ASSERT_ARGUMENT(link_index);
+  return link_index->allocator;
+}
+
 const loom_link_module_index_t* loomc_link_index_module_index(
     const loomc_link_index_t* link_index) {
   return link_index ? link_index->index : NULL;
@@ -770,8 +818,8 @@ const loom_link_module_index_t* loomc_link_index_module_index(
 
 const loomc_source_t* loomc_link_index_source_for_provider(
     const loomc_link_index_t* link_index, loomc_host_size_t provider_ordinal) {
-  if (link_index == NULL || provider_ordinal >= link_index->source_count) {
+  if (link_index == NULL || provider_ordinal >= link_index->sources.count) {
     return NULL;
   }
-  return link_index->sources[provider_ordinal].source;
+  return link_index->sources.values[provider_ordinal].source;
 }

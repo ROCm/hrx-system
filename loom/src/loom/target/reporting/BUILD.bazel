@@ -1,0 +1,216 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "artifact_manifest",
+    srcs = ["artifact_manifest.c"],
+    hdrs = ["artifact_manifest.h"],
+    deps = [
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "artifact_manifest_collect",
+    srcs = ["artifact_manifest_collect.c"],
+    hdrs = ["artifact_manifest_collect.h"],
+    deps = [
+        ":artifact_manifest",
+        "//loom/src/loom/analysis:symbol_references",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:entry_selection",
+        "//loom/src/loom/target:types",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "report",
+    srcs = [
+        "memory_summary.c",
+        "memory_summary.h",
+        "report.c",
+        "row_list.c",
+        "row_list.h",
+        "target_insertion.c",
+    ],
+    hdrs = [
+        "report.h",
+        "target_insertion.h",
+    ],
+    deps = [
+        "//loom/src/loom/analysis:native_layout",
+        "//loom/src/loom/codegen/low:planning_statistics",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:residency",
+        "//loom/src/loom/target:types",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+    ],
+)
+
+loom_cc_library(
+    name = "format",
+    srcs = [
+        "format.c",
+        "format_json.c",
+        "format_json.h",
+        "format_json_lowering.c",
+        "format_json_planning.c",
+        "format_text.c",
+        "format_text.h",
+        "format_text_lowering.c",
+        "format_text_planning.c",
+        "schema.c",
+        "schema.h",
+    ],
+    hdrs = ["format.h"],
+    deps = [
+        ":format_planning",
+        ":report",
+        "//loom/src/loom/analysis:native_layout",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:math_policy",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+    ],
+)
+
+loom_cc_library(
+    name = "format_planning",
+    srcs = ["format_planning.c"],
+    hdrs = ["format_planning.h"],
+    deps = [
+        "//loom/src/loom/codegen/low:planning_statistics",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "low",
+    srcs = [
+        "low.c",
+        "low_allocation.c",
+        "low_allocation.h",
+        "low_mix.c",
+        "low_names.c",
+    ],
+    hdrs = [
+        "low.h",
+        "low_mix.h",
+        "low_names.h",
+    ],
+    deps = [
+        ":report",
+        "//loom/src/loom/analysis:liveness",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:packet",
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:cfg_loop",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+    ],
+)
+
+loom_cc_test(
+    name = "artifact_manifest_test",
+    srcs = ["artifact_manifest_test.cc"],
+    deps = [
+        ":artifact_manifest",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "artifact_manifest_collect_test",
+    srcs = ["artifact_manifest_collect_test.cc"],
+    deps = [
+        ":artifact_manifest",
+        ":artifact_manifest_collect",
+        "//loom/src/loom/analysis:symbol_references",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/global",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/target:entry_selection",
+        "//loom/src/loom/target:low_descriptor_registry_core_test",
+        "//loom/src/loom/testing:module_ptr",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "low_test",
+    srcs = ["low_test.cc"],
+    deps = [
+        ":low",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:facts_builder",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/test:target_record_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "format_test",
+    srcs = [
+        "format_json_test.cc",
+        "format_lowering_test.cc",
+        "format_planning_test.cc",
+        "format_test.cc",
+        "memory_summary_test.cc",
+    ],
+    deps = [
+        ":format",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:math_policy",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

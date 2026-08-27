@@ -383,24 +383,6 @@ ERR_TARGET_027 = ErrorDef(
     ),
 )
 
-# ERR_TARGET_028: Function predicates reached target-low lowering.
-ERR_TARGET_028 = ErrorDef(
-    domain=ErrorDomain.TARGET,
-    code=28,
-    severity=Severity.ERROR,
-    summary="Function predicates reached target-low lowering.",
-    message=(
-        "target '{target_key}' export '{export_name}' config '{config_key}' "
-        "rejected '{op_name}' in '@{function_name}': {predicate_count} "
-        "function predicate(s) require value remapping before target-low "
-        "lowering"
-    ),
-    params=(
-        *_TARGET_CONTEXT_PARAMS,
-        ErrorParam("predicate_count", ParamKind.U32),
-    ),
-)
-
 # ERR_TARGET_029: Tied function results reached target-low lowering.
 ERR_TARGET_029 = ErrorDef(
     domain=ErrorDomain.TARGET,
@@ -714,17 +696,17 @@ ERR_TARGET_044 = ErrorDef(
     severity=Severity.ERROR,
     summary="Low descriptor set is not available.",
     message=(
-        "low function '@{function_name}' target '@{target_name}' requires "
-        "descriptor set '{descriptor_set_key}', but the descriptor registry "
-        "does not provide it"
+        "low function '@{function_name}' representation contract "
+        "'{descriptor_set_key}' is not available in the descriptor registry"
     ),
     params=(
         ErrorParam("function_name", ParamKind.STRING),
-        ErrorParam("target_name", ParamKind.STRING),
         ErrorParam("descriptor_set_key", ParamKind.STRING),
     ),
-    fix_hint="Link the descriptor package named by '{descriptor_set_key}' or "
-    "choose a target config whose descriptor set is available",
+    fix_hint=(
+        "Link the descriptor package named by '{descriptor_set_key}' before "
+        "compiling this Low function"
+    ),
 )
 
 # ERR_TARGET_045: Low descriptor is not available.
@@ -871,24 +853,24 @@ ERR_TARGET_051 = ErrorDef(
     ),
 )
 
-# ERR_TARGET_052: Function target conflicts with invocation target.
+# ERR_TARGET_052: Function target conflicts with specialization target.
 ERR_TARGET_052 = ErrorDef(
     domain=ErrorDomain.TARGET,
     code=52,
     severity=Severity.ERROR,
-    summary="Function target conflicts with invocation target.",
+    summary="Function target conflicts with specialization target.",
     message=(
         "function '@{function_name}' target record '@{authored_target_name}' "
-        "is incompatible with invocation target '{selected_target_name}'"
+        "is incompatible with specialization target '{specialization_target_name}'"
     ),
     params=(
         ErrorParam("function_name", ParamKind.STRING),
         ErrorParam("authored_target_name", ParamKind.STRING),
-        ErrorParam("selected_target_name", ParamKind.STRING),
+        ErrorParam("specialization_target_name", ParamKind.STRING),
     ),
     fix_hint=(
-        "Compile this function with a compatible target selection or remove "
-        "the explicit target record from the source function."
+        "Specialize this function to a compatible target or revise its authored "
+        "target requirement."
     ),
 )
 
@@ -1104,6 +1086,210 @@ ERR_TARGET_061 = ErrorDef(
     ),
 )
 
+# ERR_TARGET_062: Workgroup-cluster size is not statically resolved.
+ERR_TARGET_062 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=62,
+    severity=Severity.ERROR,
+    summary="Workgroup-cluster size is not statically resolved.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "rejected '{op_name}' in '@{function_name}': every cluster_size "
+        "dimension must resolve to an exact positive u32 after configuration "
+        "specialization"
+    ),
+    params=_TARGET_CONTEXT_PARAMS,
+    fix_hint=(
+        "Select each cluster_size dimension from target-specific exact values; "
+        "use 1x1x1 for an ordinary non-clustered launch"
+    ),
+)
+
+# ERR_TARGET_063: Workgroup-cluster size product exceeds the launch contract.
+ERR_TARGET_063 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=63,
+    severity=Severity.ERROR,
+    summary="Workgroup-cluster size product exceeds the launch contract.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "rejected '{op_name}' in '@{function_name}': cluster_size "
+        "{cluster_size_x}x{cluster_size_y}x{cluster_size_z} has a flat size "
+        "that does not fit u32"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("cluster_size_x", ParamKind.U32),
+        ErrorParam("cluster_size_y", ParamKind.U32),
+        ErrorParam("cluster_size_z", ParamKind.U32),
+    ),
+    fix_hint="Reduce the cluster dimensions so their product fits u32",
+)
+
+# ERR_TARGET_064: Static workgroup grid is not divisible by its cluster shape.
+ERR_TARGET_064 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=64,
+    severity=Severity.ERROR,
+    summary="Static workgroup grid is not divisible by its cluster shape.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "rejected '{op_name}' in '@{function_name}': workgroup_count "
+        "{workgroup_count} along {axis} is not divisible by cluster_size "
+        "{cluster_size}"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("axis", ParamKind.STRING),
+        ErrorParam("workgroup_count", ParamKind.U32),
+        ErrorParam("cluster_size", ParamKind.U32),
+    ),
+    fix_hint=(
+        "Choose a cluster dimension that exactly divides the corresponding "
+        "static workgroup count"
+    ),
+)
+
+# ERR_TARGET_065: Low representation contract is not supported by target.
+ERR_TARGET_065 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=65,
+    severity=Severity.ERROR,
+    summary="Low representation contract is not supported by target.",
+    message=(
+        "low function '@{function_name}' representation contract "
+        "'{representation_contract}' cannot represent target "
+        "'{target_name}' native contract '{target_contract}'"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("representation_contract", ParamKind.STRING),
+        ErrorParam("target_name", ParamKind.STRING),
+        ErrorParam("target_contract", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Use a representation contract generated for '{target_contract}' or "
+        "a portable contract that includes it"
+    ),
+)
+
+# ERR_TARGET_066: Typed register carrier transform has no semantic relation.
+ERR_TARGET_066 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=66,
+    severity=Severity.ERROR,
+    summary="Typed register carrier transform has no semantic relation.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "rejected '{op_name}' in '@{function_name}': generic lowering cannot "
+        "change typed register {actual_type} from {source_unit_count} to "
+        "{result_unit_count} carrier units without a target-defined value "
+        "relation"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("actual_type", ParamKind.TYPE),
+        ErrorParam("source_unit_count", ParamKind.U32),
+        ErrorParam("result_unit_count", ParamKind.U32),
+    ),
+    fix_hint=(
+        "Select a target-specific lowering operation that explicitly produces "
+        "the desired semantic type"
+    ),
+)
+
+# ERR_TARGET_067: Provider target condition contains a non-identity field.
+ERR_TARGET_067 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=67,
+    severity=Severity.ERROR,
+    summary="Provider target condition contains a non-identity field.",
+    message=(
+        "function provider '@{provider_name}' uses target '@{target_name}' as "
+        "an identity condition, but that target authors non-identity field "
+        "'{field_name}'"
+    ),
+    params=(
+        ErrorParam("provider_name", ParamKind.STRING),
+        ErrorParam("target_name", ParamKind.STRING),
+        ErrorParam("field_name", ParamKind.STRING),
+    ),
+)
+
+# ERR_TARGET_068: Function has an invalid target condition.
+ERR_TARGET_068 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=68,
+    severity=Severity.ERROR,
+    summary="Function has an invalid target condition.",
+    message=(
+        "function '@{function_name}' has invalid target condition "
+        "{condition_index}: {reason}"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("condition_index", ParamKind.U32),
+        ErrorParam("reason", ParamKind.STRING),
+    ),
+)
+
+# ERR_TARGET_069: Externally reachable function needs multiple target versions.
+ERR_TARGET_069 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=69,
+    severity=Severity.ERROR,
+    summary="Externally reachable function needs multiple target versions.",
+    message=(
+        "function '@{function_name}' is reachable under more than one "
+        "invocation target context and cannot be implicitly cloned because "
+        "it is externally reachable"
+    ),
+    params=(ErrorParam("function_name", ParamKind.STRING),),
+    fix_hint=(
+        "Request an explicit exported version for each target context or make "
+        "the callable module-internal."
+    ),
+)
+
+# ERR_TARGET_070: Compile-time query remains unresolved.
+ERR_TARGET_070 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=70,
+    severity=Severity.ERROR,
+    summary="Compile-time query remains unresolved.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "cannot lower unresolved compile-time query '{op_name}' in "
+        "'@{function_name}'"
+    ),
+    params=_TARGET_CONTEXT_PARAMS,
+    fix_hint=(
+        "Provide static, configuration, or target facts that resolve "
+        "'{op_name}' and canonicalize the result before target-low lowering"
+    ),
+)
+
+# ERR_TARGET_071: Source-preserving operation cannot carry a reference register.
+ERR_TARGET_071 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=71,
+    severity=Severity.ERROR,
+    summary="Source-preserving operation cannot carry a reference register.",
+    message=(
+        "low function '@{function_name}' uses source-preserving operation "
+        "'{op_name}' with reference register type {actual_type}"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("actual_type", ParamKind.TYPE),
+    ),
+    fix_hint=(
+        "Use low.move when ownership transfers, or use a target operation "
+        "that explicitly retains the reference before creating another value"
+    ),
+)
+
 ALL_TARGET_ERRORS = (
     ERR_TARGET_001,
     ERR_TARGET_002,
@@ -1124,7 +1310,6 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_025,
     ERR_TARGET_026,
     ERR_TARGET_027,
-    ERR_TARGET_028,
     ERR_TARGET_029,
     ERR_TARGET_030,
     ERR_TARGET_031,
@@ -1158,4 +1343,14 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_059,
     ERR_TARGET_060,
     ERR_TARGET_061,
+    ERR_TARGET_062,
+    ERR_TARGET_063,
+    ERR_TARGET_064,
+    ERR_TARGET_065,
+    ERR_TARGET_066,
+    ERR_TARGET_067,
+    ERR_TARGET_068,
+    ERR_TARGET_069,
+    ERR_TARGET_070,
+    ERR_TARGET_071,
 )

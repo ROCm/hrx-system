@@ -208,7 +208,13 @@ void loom_tokenizer_initialize(iree_string_view_t source,
   out_tokenizer->pending_comments = NULL;
   out_tokenizer->pending_comment_count = 0;
   out_tokenizer->pending_comment_capacity = 0;
+  out_tokenizer->pending_comment_start_line = 0;
+  out_tokenizer->pending_comment_end_line = 0;
+  out_tokenizer->pending_file_header_line_count = 0;
+  out_tokenizer->pending_leading_blank_line = false;
   out_tokenizer->status = iree_ok_status();
+  out_tokenizer->consumed_end_line = 0;
+  out_tokenizer->consumed_end_column = 0;
   out_tokenizer->in_dim_list = false;
 }
 
@@ -265,6 +271,8 @@ iree_string_view_t loom_token_kind_name(loom_token_kind_t kind) {
       return IREE_SV("'x'");
     case LOOM_TOKEN_PIPE:
       return IREE_SV("'|'");
+    case LOOM_TOKEN_MINUS:
+      return IREE_SV("'-'");
     case LOOM_TOKEN_EOF:
       return IREE_SV("end of file");
     case LOOM_TOKEN_ERROR:
@@ -280,20 +288,52 @@ iree_status_t loom_tokenizer_consume_status(loom_tokenizer_t* tokenizer) {
   return status;
 }
 
+void loom_tokenizer_take_file_header(loom_tokenizer_t* tokenizer,
+                                     const iree_string_view_t** out_lines,
+                                     iree_host_size_t* out_line_count) {
+  *out_lines = tokenizer->pending_comments;
+  *out_line_count = tokenizer->pending_file_header_line_count;
+  if (tokenizer->pending_file_header_line_count > 0 &&
+      tokenizer->pending_file_header_line_count ==
+          tokenizer->pending_comment_count) {
+    tokenizer->pending_comments = NULL;
+    tokenizer->pending_comment_count = 0;
+    tokenizer->pending_comment_capacity = 0;
+    tokenizer->pending_comment_start_line = 0;
+    tokenizer->pending_comment_end_line = 0;
+  } else if (tokenizer->pending_file_header_line_count > 0) {
+    tokenizer->pending_comments += tokenizer->pending_file_header_line_count;
+    tokenizer->pending_comment_count -=
+        tokenizer->pending_file_header_line_count;
+    tokenizer->pending_comment_capacity -=
+        tokenizer->pending_file_header_line_count;
+  }
+  tokenizer->pending_file_header_line_count = 0;
+}
+
 void loom_tokenizer_take_pending_comments(
     loom_tokenizer_t* tokenizer, const iree_string_view_t** out_comments,
-    iree_host_size_t* out_comment_count) {
+    iree_host_size_t* out_comment_count, bool* out_leading_blank_line) {
   *out_comments = tokenizer->pending_comments;
   *out_comment_count = tokenizer->pending_comment_count;
+  *out_leading_blank_line = tokenizer->pending_leading_blank_line;
   if (tokenizer->pending_comment_count > 0) {
     tokenizer->pending_comments = NULL;
     tokenizer->pending_comment_capacity = 0;
   }
   tokenizer->pending_comment_count = 0;
+  tokenizer->pending_comment_start_line = 0;
+  tokenizer->pending_comment_end_line = 0;
+  tokenizer->pending_file_header_line_count = 0;
+  tokenizer->pending_leading_blank_line = false;
 }
 
 void loom_tokenizer_discard_pending_comments(loom_tokenizer_t* tokenizer) {
   tokenizer->pending_comment_count = 0;
+  tokenizer->pending_comment_start_line = 0;
+  tokenizer->pending_comment_end_line = 0;
+  tokenizer->pending_file_header_line_count = 0;
+  tokenizer->pending_leading_blank_line = false;
 }
 
 iree_status_t loom_tokenizer_error(const loom_tokenizer_t* tokenizer,
@@ -312,6 +352,9 @@ static iree_status_t loom_tokenizer_append_pending_comment(
         sizeof(iree_string_view_t), &t->pending_comment_capacity,
         (void**)&t->pending_comments));
   }
+  if (iree_string_view_starts_with(comment, IREE_SV(" "))) {
+    comment = iree_string_view_remove_prefix(comment, 1);
+  }
   t->pending_comments[t->pending_comment_count++] = comment;
   return iree_ok_status();
 }
@@ -329,6 +372,15 @@ static iree_status_t loom_tokenizer_skip_whitespace(loom_tokenizer_t* t) {
       t->column = 1;
     } else if (c == '/' && loom_tokenizer_char_at(t, 1) == '/') {
       // Line comment: skip to end of line with UTF-8-aware column tracking.
+      if (t->pending_comment_count == 0) {
+        t->pending_comment_start_line = t->line;
+      } else if (t->pending_comment_start_line == 1 &&
+                 t->pending_file_header_line_count == 0 &&
+                 (uint64_t)t->line >
+                     (uint64_t)t->pending_comment_end_line + 1) {
+        t->pending_file_header_line_count = t->pending_comment_count;
+      }
+      t->pending_comment_end_line = t->line;
       iree_host_size_t comment_start = t->position + 2;
       t->position += 2;
       t->column += 2;
@@ -719,8 +771,24 @@ static iree_status_t loom_tokenizer_scan_string(loom_tokenizer_t* t,
   return iree_ok_status();
 }
 
+static iree_status_t loom_tokenizer_set_number_error(
+    loom_tokenizer_t* t, const loom_error_def_t* error, iree_host_size_t start,
+    uint32_t start_line, uint32_t start_column, loom_token_t* out_token) {
+  iree_string_view_t text =
+      iree_make_string_view(t->source.data + start, t->position - start);
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(text),
+  };
+  IREE_RETURN_IF_ERROR(
+      loom_tokenizer_set_current_error(t, error, params, IREE_ARRAYSIZE(params),
+                                       start, start_line, start_column));
+  *out_token = loom_tokenizer_make_error_token(t);
+  return iree_ok_status();
+}
+
 // Scans a number (integer or float). Position is at the first digit or '-'.
-static loom_token_t loom_tokenizer_scan_number(loom_tokenizer_t* t) {
+static iree_status_t loom_tokenizer_scan_number(loom_tokenizer_t* t,
+                                                loom_token_t* out_token) {
   uint32_t start_line = t->line;
   uint32_t start_column = t->column;
   iree_host_size_t start = t->position;
@@ -731,18 +799,69 @@ static loom_token_t loom_tokenizer_scan_number(loom_tokenizer_t* t) {
     ++t->column;
   }
 
-  // Check for hex: 0x... (but not when in_dim_list — 'x' is a
-  // dimension separator, so '0' is a static dim of size 0).
-  if (loom_tokenizer_char(t) == '0' && loom_tokenizer_char_at(t, 1) == 'x' &&
+  // Check for hexadecimal integers and C99 hexadecimal floats (but not when
+  // in_dim_list — 'x' is a dimension separator, so '0' is a static dim of
+  // size 0).
+  char radix = loom_tokenizer_char_at(t, 1);
+  if (loom_tokenizer_char(t) == '0' && (radix == 'x' || radix == 'X') &&
       !t->in_dim_list) {
     t->position += 2;
     t->column += 2;
+
+    bool has_significand_digit = false;
     while (loom_is_hex_digit(loom_tokenizer_char(t))) {
+      has_significand_digit = true;
       ++t->position;
       ++t->column;
     }
-    return loom_tokenizer_make_verbatim_token(t, LOOM_TOKEN_INTEGER, start,
-                                              start_line, start_column);
+
+    bool has_radix_point = false;
+    if (loom_tokenizer_char(t) == '.') {
+      has_radix_point = true;
+      ++t->position;
+      ++t->column;
+      while (loom_is_hex_digit(loom_tokenizer_char(t))) {
+        has_significand_digit = true;
+        ++t->position;
+        ++t->column;
+      }
+    }
+
+    bool has_binary_exponent = false;
+    bool has_exponent_digit = false;
+    char exponent = loom_tokenizer_char(t);
+    if (exponent == 'p' || exponent == 'P') {
+      has_binary_exponent = true;
+      ++t->position;
+      ++t->column;
+      char sign = loom_tokenizer_char(t);
+      if (sign == '+' || sign == '-') {
+        ++t->position;
+        ++t->column;
+      }
+      while (loom_is_digit(loom_tokenizer_char(t))) {
+        has_exponent_digit = true;
+        ++t->position;
+        ++t->column;
+      }
+    }
+
+    bool is_float = has_radix_point || has_binary_exponent;
+    if (!has_significand_digit) {
+      return loom_tokenizer_set_number_error(
+          t, is_float ? LOOM_ERR_PARSE_016 : LOOM_ERR_PARSE_015, start,
+          start_line, start_column, out_token);
+    }
+    if ((has_radix_point && !has_binary_exponent) ||
+        (has_binary_exponent && !has_exponent_digit)) {
+      return loom_tokenizer_set_number_error(
+          t, LOOM_ERR_PARSE_016, start, start_line, start_column, out_token);
+    }
+
+    *out_token = loom_tokenizer_make_verbatim_token(
+        t, has_binary_exponent ? LOOM_TOKEN_FLOAT : LOOM_TOKEN_INTEGER, start,
+        start_line, start_column);
+    return iree_ok_status();
   }
 
   // Decimal digits.
@@ -776,15 +895,20 @@ static loom_token_t loom_tokenizer_scan_number(loom_tokenizer_t* t) {
       ++t->position;
       ++t->column;
     }
+    if (!loom_is_digit(loom_tokenizer_char(t))) {
+      return loom_tokenizer_set_number_error(
+          t, LOOM_ERR_PARSE_016, start, start_line, start_column, out_token);
+    }
     while (loom_is_digit(loom_tokenizer_char(t))) {
       ++t->position;
       ++t->column;
     }
   }
 
-  return loom_tokenizer_make_verbatim_token(
+  *out_token = loom_tokenizer_make_verbatim_token(
       t, is_float ? LOOM_TOKEN_FLOAT : LOOM_TOKEN_INTEGER, start, start_line,
       start_column);
+  return iree_ok_status();
 }
 
 // Scans an identifier or op name. Position is at the first ident char.
@@ -880,7 +1004,8 @@ static iree_status_t loom_tokenizer_scan_symbol(loom_tokenizer_t* t,
 }
 
 // Scans a '#' prefixed hash attr. The returned token text excludes the
-// '#' prefix (e.g., '#q8_0' → 'q8_0'). Rejects bare '#' and '#digits'.
+// '#' prefix (e.g., '#test.schema' → 'test.schema'). Rejects bare '#' and
+// '#digits'.
 static iree_status_t loom_tokenizer_scan_hash(loom_tokenizer_t* t,
                                               loom_token_t* out_token) {
   uint32_t start_line = t->line;
@@ -892,7 +1017,7 @@ static iree_status_t loom_tokenizer_scan_hash(loom_tokenizer_t* t,
   // Token text starts after the '#' prefix.
   iree_host_size_t name_start = t->position;
 
-  // Hash attr: #q8_0, #enc.
+  // Hash attr: #test.schema, #test.options, #enc.
   if (!loom_is_ident_start(loom_tokenizer_char(t))) {
     loom_diagnostic_param_t params[] = {
         loom_param_string(IREE_SV("#")),
@@ -903,7 +1028,7 @@ static iree_status_t loom_tokenizer_scan_hash(loom_tokenizer_t* t,
     *out_token = loom_tokenizer_make_error_token(t);
     return iree_ok_status();
   }
-  while (loom_is_ident_continue_no_dot(loom_tokenizer_char(t))) {
+  while (loom_is_ident_continue(loom_tokenizer_char(t))) {
     ++t->position;
     ++t->column;
   }
@@ -955,6 +1080,18 @@ static iree_status_t loom_tokenizer_scan_block_label(loom_tokenizer_t* t,
 static iree_status_t loom_tokenizer_scan(loom_tokenizer_t* t,
                                          loom_token_t* out_token) {
   IREE_RETURN_IF_ERROR(loom_tokenizer_skip_whitespace(t));
+
+  const uint32_t source_start_line =
+      t->pending_comment_count > 0 ? t->pending_comment_start_line : t->line;
+  if (t->pending_comment_start_line == 1 &&
+      t->pending_file_header_line_count == 0 &&
+      (t->position == t->source.size ||
+       (uint64_t)t->line > (uint64_t)t->pending_comment_end_line + 1)) {
+    t->pending_file_header_line_count = t->pending_comment_count;
+  }
+  t->pending_leading_blank_line =
+      t->consumed_end_line != 0 &&
+      (uint64_t)source_start_line > (uint64_t)t->consumed_end_line + 1;
 
   if (t->position >= t->source.size) {
     *out_token = loom_tokenizer_make_eof_token(t);
@@ -1057,8 +1194,7 @@ static iree_status_t loom_tokenizer_scan(loom_tokenizer_t* t,
 
   // Negative number: '-' followed by digit.
   if (c == '-' && loom_is_digit(loom_tokenizer_char_at(t, 1))) {
-    *out_token = loom_tokenizer_scan_number(t);
-    return iree_ok_status();
+    return loom_tokenizer_scan_number(t, out_token);
   }
 
   if (loom_tokenizer_has_delimited_prefix(t, IREE_SV("-inf")) ||
@@ -1071,10 +1207,17 @@ static iree_status_t loom_tokenizer_scan(loom_tokenizer_t* t,
     return iree_ok_status();
   }
 
+  if (c == '-') {
+    ++t->position;
+    ++t->column;
+    *out_token = loom_tokenizer_make_verbatim_token(t, LOOM_TOKEN_MINUS, start,
+                                                    start_line, start_column);
+    return iree_ok_status();
+  }
+
   // Number.
   if (loom_is_digit(c)) {
-    *out_token = loom_tokenizer_scan_number(t);
-    return iree_ok_status();
+    return loom_tokenizer_scan_number(t, out_token);
   }
 
   // String literal.
@@ -1102,10 +1245,10 @@ static iree_status_t loom_tokenizer_scan(loom_tokenizer_t* t,
     return loom_tokenizer_scan_block_label(t, out_token);
   }
 
-  // Dimension separator: in a dim list, 'x' is a single-character
-  // separator token rather than an identifier start. The parser sets
-  // in_dim_list during shaped type dim parsing and clears it before
-  // scanning element types or encoding parameters.
+  // Dimension separator: in a dim list, 'x' is a single-character separator
+  // token rather than an identifier start. The parser keeps in_dim_list set
+  // through the element-type lookahead and clears it before consuming the
+  // element type or encoding parameters.
   if (t->in_dim_list && c == 'x') {
     ++t->position;
     ++t->column;
@@ -1163,13 +1306,14 @@ static iree_status_t loom_tokenizer_scan(loom_tokenizer_t* t,
 // Public API
 //===----------------------------------------------------------------------===//
 
-loom_token_t loom_tokenizer_peek(loom_tokenizer_t* tokenizer) {
+// Scans and caches the lookahead token when one is not already available.
+static void loom_tokenizer_ensure_peeked(loom_tokenizer_t* tokenizer) {
   if (tokenizer->peeked.kind == LOOM_TOKEN_NONE) {
     loom_tokenizer_clear_error(tokenizer);
     // If a previous scan already failed, keep returning EOF.
     if (!iree_status_is_ok(tokenizer->status)) {
       tokenizer->peeked = loom_tokenizer_make_eof_token(tokenizer);
-      return tokenizer->peeked;
+      return;
     }
     iree_status_t status = loom_tokenizer_scan(tokenizer, &tokenizer->peeked);
     if (!iree_status_is_ok(status)) {
@@ -1178,11 +1322,16 @@ loom_token_t loom_tokenizer_peek(loom_tokenizer_t* tokenizer) {
       tokenizer->peeked = loom_tokenizer_make_eof_token(tokenizer);
     }
   }
+}
+
+loom_token_t loom_tokenizer_peek(loom_tokenizer_t* tokenizer) {
+  loom_tokenizer_ensure_peeked(tokenizer);
   return tokenizer->peeked;
 }
 
 loom_token_t loom_tokenizer_next(loom_tokenizer_t* tokenizer) {
-  loom_token_t token = loom_tokenizer_peek(tokenizer);
+  loom_tokenizer_ensure_peeked(tokenizer);
+  loom_token_t token = tokenizer->peeked;
   tokenizer->peeked.kind = LOOM_TOKEN_NONE;
   tokenizer->consumed_end_line = token.line;
   tokenizer->consumed_end_column = token.end_column;
@@ -1190,23 +1339,24 @@ loom_token_t loom_tokenizer_next(loom_tokenizer_t* tokenizer) {
 }
 
 bool loom_tokenizer_at(loom_tokenizer_t* tokenizer, loom_token_kind_t kind) {
-  return loom_tokenizer_peek(tokenizer).kind == kind;
+  loom_tokenizer_ensure_peeked(tokenizer);
+  return tokenizer->peeked.kind == kind;
 }
 
 bool loom_tokenizer_at_keyword(loom_tokenizer_t* tokenizer,
                                iree_string_view_t text) {
-  loom_token_t token = loom_tokenizer_peek(tokenizer);
-  return token.kind == LOOM_TOKEN_BARE_IDENT &&
-         iree_string_view_equal(token.text, text);
+  loom_tokenizer_ensure_peeked(tokenizer);
+  return tokenizer->peeked.kind == LOOM_TOKEN_BARE_IDENT &&
+         iree_string_view_equal(tokenizer->peeked.text, text);
 }
 
 bool loom_tokenizer_try_consume(loom_tokenizer_t* tokenizer,
                                 loom_token_kind_t kind) {
-  loom_token_t token = loom_tokenizer_peek(tokenizer);
-  if (token.kind == kind) {
+  loom_tokenizer_ensure_peeked(tokenizer);
+  if (tokenizer->peeked.kind == kind) {
+    tokenizer->consumed_end_line = tokenizer->peeked.line;
+    tokenizer->consumed_end_column = tokenizer->peeked.end_column;
     tokenizer->peeked.kind = LOOM_TOKEN_NONE;
-    tokenizer->consumed_end_line = token.line;
-    tokenizer->consumed_end_column = token.end_column;
     return true;
   }
   return false;
@@ -1214,12 +1364,12 @@ bool loom_tokenizer_try_consume(loom_tokenizer_t* tokenizer,
 
 bool loom_tokenizer_try_consume_keyword(loom_tokenizer_t* tokenizer,
                                         iree_string_view_t text) {
-  loom_token_t token = loom_tokenizer_peek(tokenizer);
-  if (token.kind == LOOM_TOKEN_BARE_IDENT &&
-      iree_string_view_equal(token.text, text)) {
+  loom_tokenizer_ensure_peeked(tokenizer);
+  if (tokenizer->peeked.kind == LOOM_TOKEN_BARE_IDENT &&
+      iree_string_view_equal(tokenizer->peeked.text, text)) {
+    tokenizer->consumed_end_line = tokenizer->peeked.line;
+    tokenizer->consumed_end_column = tokenizer->peeked.end_column;
     tokenizer->peeked.kind = LOOM_TOKEN_NONE;
-    tokenizer->consumed_end_line = token.line;
-    tokenizer->consumed_end_column = token.end_column;
     return true;
   }
   return false;

@@ -14,6 +14,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/ireevm/descriptors/descriptors.h"
 #include "loom/target/function_contract.h"
+#include "loom/target/function_version.h"
 #include "loom/target/registers.h"
 
 enum {
@@ -214,17 +215,16 @@ static iree_status_t loom_ireevm_module_plan_append_import(
 static iree_status_t loom_ireevm_module_plan_append_function(
     const loom_module_t* module, loom_symbol_id_t symbol_id,
     const loom_func_symbol_facts_t* func_facts,
-    const loom_target_bundle_storage_t* bundle_storage,
-    iree_arena_allocator_t* arena, loom_ireevm_module_plan_t* plan) {
+    const loom_target_facts_t* target_facts, iree_arena_allocator_t* arena,
+    loom_ireevm_module_plan_t* plan) {
   loom_ireevm_module_plan_function_t* function =
       &plan->functions[plan->function_count];
   *function = (loom_ireevm_module_plan_function_t){
       .symbol_ref = {.module_id = 0, .symbol_id = symbol_id},
       .op = func_facts->func_op,
       .symbol_name = func_facts->name,
-      .bundle_storage = *bundle_storage,
+      .target_facts = target_facts,
   };
-  loom_target_bundle_storage_rebind(&function->bundle_storage);
   IREE_RETURN_IF_ERROR(loom_ireevm_module_plan_build_calling_convention(
       module, loom_func_like_cast(module, func_facts->func_op), arena,
       &function->calling_convention));
@@ -235,7 +235,8 @@ static iree_status_t loom_ireevm_module_plan_append_function(
   };
 
   if (func_facts->exports || func_facts->visibility != 0) {
-    iree_string_view_t export_name = bundle_storage->export_plan.export_symbol;
+    iree_string_view_t export_name =
+        loom_target_facts_bundle(target_facts)->export_plan->export_symbol;
     if (iree_string_view_is_empty(export_name)) {
       export_name = func_facts->name;
     }
@@ -253,6 +254,7 @@ static iree_status_t loom_ireevm_module_plan_append_function(
 
 iree_status_t loom_ireevm_module_plan_build(
     const loom_module_t* module, loom_symbol_fact_table_t* fact_table,
+    const loom_function_version_list_t* function_versions,
     iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
     bool* out_valid, loom_ireevm_module_plan_t* out_plan) {
   *out_valid = false;
@@ -282,6 +284,10 @@ iree_status_t loom_ireevm_module_plan_build(
   out_plan->functions = functions;
   out_plan->exports = exports;
 
+  loom_target_function_version_snapshot_t function_version_snapshot = {0};
+  IREE_RETURN_IF_ERROR(loom_target_function_version_snapshot_build(
+      module, function_versions, arena, &function_version_snapshot));
+
   iree_status_t status = iree_ok_status();
   bool valid = true;
   for (iree_host_size_t i = 0;
@@ -304,11 +310,19 @@ iree_status_t loom_ireevm_module_plan_build(
       continue;
     }
 
-    loom_target_bundle_storage_t bundle_storage = {0};
+    const loom_target_facts_t* target_facts = NULL;
     bool contract_valid = false;
-    status = loom_target_function_contract_resolve(
-        module, fact_table, func_facts, diagnostic_emitter, &contract_valid,
-        &bundle_storage);
+    const loom_target_function_version_t* function_version =
+        loom_target_function_version_snapshot_at(&function_version_snapshot,
+                                                 symbol_id);
+    if (function_version != NULL) {
+      target_facts = function_version->function_target_facts;
+      contract_valid = true;
+    } else {
+      status = loom_target_function_contract_resolve_facts(
+          module, fact_table, func_facts, diagnostic_emitter, arena,
+          &contract_valid, &target_facts);
+    }
     if (!iree_status_is_ok(status)) {
       break;
     }
@@ -316,13 +330,14 @@ iree_status_t loom_ireevm_module_plan_build(
       valid = false;
       break;
     }
-    if (!loom_ireevm_module_plan_is_vm_bundle(&bundle_storage.bundle)) {
+    if (!loom_ireevm_module_plan_is_vm_bundle(
+            loom_target_facts_bundle(target_facts))) {
       continue;
     }
 
     if (loom_low_func_def_isa(symbol->defining_op)) {
       status = loom_ireevm_module_plan_append_function(
-          module, symbol_id, func_facts, &bundle_storage, arena, out_plan);
+          module, symbol_id, func_facts, target_facts, arena, out_plan);
     } else {
       status = loom_ireevm_module_plan_append_import(
           module, symbol_id, func_facts, arena, out_plan);

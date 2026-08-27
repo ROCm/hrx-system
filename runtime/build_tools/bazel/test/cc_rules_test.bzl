@@ -36,6 +36,34 @@ def _expect_no_value(env, values, unexpected_value):
     if unexpected_value in values:
         env.fail("did not expect %r in %r" % (unexpected_value, values))
 
+def _find_compile_action(env, target):
+    for action in target[TestingAspectInfo].actions:
+        if action.mnemonic == "CppCompile":
+            return action
+    env.fail("expected a C/C++ compile action")
+    return None
+
+def _expect_runtime_compiler_policy(env, copts, cxxopts):
+    if "/W3" in copts:
+        _expect_value(env, copts, "/WX")
+        _expect_value(env, copts, "/utf-8")
+        _expect_value(env, cxxopts, "/GR-")
+        _expect_value(env, cxxopts, "/std:c++17")
+        _expect_value(env, cxxopts, "/Zc:__cplusplus")
+        return
+    _expect_value(env, copts, "-Wall")
+    _expect_value(env, copts, "-Werror")
+    _expect_value(env, copts, "-Wno-unused-function")
+    _expect_value(env, cxxopts, "-Wno-invalid-offsetof")
+    _expect_value(env, cxxopts, "-std=c++17")
+
+def _expect_runtime_copts(env, copts):
+    if "/W3" in copts:
+        _expect_value(env, copts, "/WX")
+        _expect_value(env, copts, "/utf-8")
+        return
+    _expect_value(env, copts, "-Wall")
+
 def _test_runtime_library_adds_runtime_include_root(name, **kwargs):
     util.helper_target(
         iree_runtime_cc_library,
@@ -101,14 +129,23 @@ def _test_runtime_c_library_applies_c_options(name, **kwargs):
 def _test_runtime_c_library_applies_c_options_impl(env, target):
     copts = target[TestingAspectInfo].attrs.copts
     cxxopts = target[TestingAspectInfo].attrs.cxxopts
-    _expect_value(env, copts, "-Wall")
-    _expect_value(env, copts, "-Werror")
-    _expect_value(env, copts, "-Wno-unused-function")
+    _expect_runtime_compiler_policy(env, copts, cxxopts)
     _expect_value(env, copts, "-DUSER_COPT")
     _expect_value(env, copts, "-DUSER_SELECTED_COPT")
     _expect_no_value(env, copts, "-Wno-invalid-offsetof")
-    _expect_value(env, cxxopts, "-Wno-invalid-offsetof")
-    _expect_value(env, cxxopts, "-std=c++17")
+    compile_action = _find_compile_action(env, target)
+    compiler_path = compile_action.argv[0].lower()
+    if compiler_path.endswith("cl.exe") and not compiler_path.endswith("clang-cl.exe"):
+        _expect_value(env, compile_action.argv, "/Zc:preprocessor")
+        _expect_value(env, compile_action.argv, "/std:c17")
+        _expect_no_value(env, compile_action.argv, "/std:c11")
+    elif compiler_path.endswith("clang-cl.exe"):
+        _expect_no_value(env, compile_action.argv, "/Zc:preprocessor")
+        _expect_value(env, compile_action.argv, "/std:c17")
+        _expect_no_value(env, compile_action.argv, "/std:c11")
+        _expect_value(env, compile_action.argv, "-Wno-unused-function")
+        _expect_value(env, compile_action.argv, "-Wno-unused-lambda-capture")
+        _expect_value(env, compile_action.argv, "-Wno-unused-variable")
 
 def _test_runtime_cxx_binary_applies_cxx_options(name, **kwargs):
     util.helper_target(
@@ -133,14 +170,14 @@ def _test_runtime_cxx_binary_applies_cxx_options(name, **kwargs):
 def _test_runtime_cxx_binary_applies_cxx_options_impl(env, target):
     copts = target[TestingAspectInfo].attrs.copts
     cxxopts = target[TestingAspectInfo].attrs.cxxopts
-    _expect_value(env, copts, "-Wall")
-    _expect_value(env, copts, "-Werror")
-    _expect_value(env, copts, "-Wno-unused-function")
+    _expect_runtime_compiler_policy(env, copts, cxxopts)
     _expect_value(env, copts, "-DUSER_COPT")
     _expect_value(env, copts, "-DUSER_SELECTED_COPT")
     _expect_no_value(env, copts, "-Wno-invalid-offsetof")
-    _expect_value(env, cxxopts, "-Wno-invalid-offsetof")
-    _expect_value(env, cxxopts, "-std=c++17")
+    compile_action = _find_compile_action(env, target)
+    compiler_path = compile_action.argv[0].lower()
+    if compiler_path.endswith("clang-cl.exe"):
+        _expect_value(env, compile_action.argv, "-Wno-invalid-offsetof")
 
 def _test_runtime_library_allows_configurable_srcs(name, **kwargs):
     util.helper_target(
@@ -163,7 +200,7 @@ def _test_runtime_library_allows_configurable_srcs(name, **kwargs):
 
 def _test_runtime_library_allows_configurable_srcs_impl(env, target):
     copts = target[TestingAspectInfo].attrs.copts
-    _expect_value(env, copts, "-Wall")
+    _expect_runtime_copts(env, copts)
 
 def _test_runtime_test_adds_runtime_include_root(name, **kwargs):
     util.helper_target(

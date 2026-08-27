@@ -52,7 +52,17 @@ iree_py_library(
 iree_py_test(
   NAME
     check_test
+  MAIN
+    "../../tools/pytest_style_runner.py"
   SRCS
+    "annotations_test.py"
+    "cases_test.py"
+    "import_test_test.py"
+    "main_test.py"
+    "python_test.py"
+    "registry_test.py"
+    "results_test.py"
+    "updates_test.py"
     "../../tools/pytest_style_runner.py"
   ARGS
     "loom.importers.check.annotations_test"
@@ -68,6 +78,7 @@ iree_py_test(
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

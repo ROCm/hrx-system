@@ -77,13 +77,11 @@ class ConfigMaterializeTest : public ::testing::Test {
   iree_status_t Materialize(
       loom_module_t* module, const loom_tooling_config_binding_t* bindings,
       iree_host_size_t binding_count,
-      loom_tooling_config_materialize_flags_t flags,
       loom_tooling_config_materialize_result_t* out_result) {
     loom_tooling_config_set_t config_set;
     loom_tooling_config_set_initialize(iree_allocator_system(), &config_set);
     loom_tooling_config_materialize_options_t options;
     loom_tooling_config_materialize_options_initialize(&options);
-    options.flags = flags;
     options.config_set = &config_set;
     iree_status_t status = iree_ok_status();
     for (iree_host_size_t i = 0; i < binding_count && iree_status_is_ok(status);
@@ -195,7 +193,7 @@ TEST_F(ConfigMaterializeTest, ConfigSetAppendsJsonFileBindings) {
   loom_tooling_config_set_deinitialize(&config_set);
 }
 
-TEST_F(ConfigMaterializeTest, IgnoresNonSensitiveBindings) {
+TEST_F(ConfigMaterializeTest, IgnoresBindingsWithoutConfigSymbols) {
   ModulePtr module = Parse(R"(
 func.def @no_config(%x: i32) -> (i32) {
   func.return %x : i32
@@ -203,11 +201,11 @@ func.def @no_config(%x: i32) -> (i32) {
 )");
 
   loom_tooling_config_binding_t binding = {
-      /*.key=*/IREE_SV("model36.model.hidden_size"),
-      /*.value=*/IREE_SV("4096"),
+      /*.key=*/IREE_SV("no_config"),
+      /*.value=*/IREE_SV("not parsed"),
   };
   loom_tooling_config_materialize_result_t result = {0};
-  IREE_ASSERT_OK(Materialize(module.get(), &binding, 1, 0, &result));
+  IREE_ASSERT_OK(Materialize(module.get(), &binding, 1, &result));
   EXPECT_EQ(result.materialized_count, 0u);
   EXPECT_EQ(result.ignored_count, 1u);
 
@@ -231,9 +229,7 @@ func.def @read_config() -> (index) {
       /*.value=*/IREE_SV("4096"),
   };
   loom_tooling_config_materialize_result_t result = {0};
-  IREE_ASSERT_OK(Materialize(module.get(), &binding, 1,
-                             LOOM_TOOLING_CONFIG_MATERIALIZE_REQUIRE_MATCHES,
-                             &result));
+  IREE_ASSERT_OK(Materialize(module.get(), &binding, 1, &result));
   EXPECT_EQ(result.materialized_count, 1u);
   EXPECT_EQ(result.ignored_count, 0u);
 
@@ -254,9 +250,7 @@ config.decl @model36.model.hidden_size : %value: index where [range(%value, 0, 8
       /*.key=*/IREE_SV("model36.model.hidden_size"),
       /*.value=*/IREE_SV("4103"),
   };
-  iree_status_t status =
-      Materialize(module.get(), &binding, 1,
-                  LOOM_TOOLING_CONFIG_MATERIALIZE_REQUIRE_MATCHES, nullptr);
+  iree_status_t status = Materialize(module.get(), &binding, 1, nullptr);
   EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
   iree_status_free(status);
 }
@@ -268,18 +262,17 @@ config.decl @model36.layout : encoding<layout>
 
   loom_tooling_config_binding_t binding = {
       /*.key=*/IREE_SV("@model36.layout"),
-      /*.value=*/IREE_SV(" #dense "),
+      /*.value=*/IREE_SV(" #encoding.layout.dense "),
   };
   loom_tooling_config_materialize_result_t result = {0};
-  IREE_ASSERT_OK(Materialize(module.get(), &binding, 1,
-                             LOOM_TOOLING_CONFIG_MATERIALIZE_REQUIRE_MATCHES,
-                             &result));
+  IREE_ASSERT_OK(Materialize(module.get(), &binding, 1, &result));
   EXPECT_EQ(result.materialized_count, 1u);
 
   std::string printed = Print(module.get());
-  EXPECT_NE(printed.find("config.def @model36.layout = #dense : "
-                         "encoding<layout>"),
-            std::string::npos);
+  EXPECT_NE(
+      printed.find("config.def @model36.layout = #encoding.layout.dense : "
+                   "encoding<layout>"),
+      std::string::npos);
 }
 
 TEST_F(ConfigMaterializeTest, RejectsWrongEncodingRole) {
@@ -289,11 +282,9 @@ config.decl @model36.layout : encoding<layout>
 
   loom_tooling_config_binding_t binding = {
       /*.key=*/IREE_SV("model36.layout"),
-      /*.value=*/IREE_SV("#ggml_q4_0<block_elems=32, storage_bytes=18>"),
+      /*.value=*/IREE_SV("#ggml.q4_0"),
   };
-  iree_status_t status =
-      Materialize(module.get(), &binding, 1,
-                  LOOM_TOOLING_CONFIG_MATERIALIZE_REQUIRE_MATCHES, nullptr);
+  iree_status_t status = Materialize(module.get(), &binding, 1, nullptr);
   EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
   iree_status_free(status);
 }

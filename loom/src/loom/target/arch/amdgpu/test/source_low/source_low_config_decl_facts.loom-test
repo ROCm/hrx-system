@@ -1,6 +1,6 @@
 // RUN: emit source-low output=low
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 config.decl @runtime.column_count : %value: index where [range(%value, 4, 64), mul(%value, 4)]
 
@@ -12,15 +12,15 @@ kernel.def target(@target) @config_decl_facts_bound_dynamic_view() {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
   %columns = config.get @runtime.column_count : index
-  %input_view = buffer.view %input[%base] : buffer -> view<[%columns]xi32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<[%columns]xi32, #dense>
-  %loaded = vector.load %input_view[%lane] : view<[%columns]xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %output_view[%lane] : vector<1xi32>, view<[%columns]xi32, #dense>
+  %input_view = buffer.view %input[%base] : buffer -> view<[%columns]xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%columns]xi32>
+  %loaded = vector.load %input_view[%lane] : view<[%columns]xi32> -> vector<1xi32>
+  vector.store %loaded, %output_view[%lane] : vector<1xi32>, view<[%columns]xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(4, 1, 1) @config_decl_facts_bound_dynamic_view() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(4, 1, 1) workgroup_count(1, 1, 1) @config_decl_facts_bound_dynamic_view() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
@@ -32,7 +32,7 @@ low.kernel.def target(@target) workgroup_size(4, 1, 1) @config_decl_facts_bound_
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 config.decl @runtime.column_count : %value: index where [range(%value, 3072, 8192), mul(%value, 4)]
 
@@ -49,22 +49,22 @@ kernel.def target(@target) @config_decl_matvec_block_lane_vec4_dynamic_view() {
   %block_step = index.constant 4 : index
   %lanes_per_group = index.constant 16 : index
   %block_stride = index.constant 105 : index
-  %input_view = buffer.view %input[%base_offset] : buffer -> view<[%columns]xf32, #dense>
-  %output_view = buffer.view %output[%base_offset] : buffer -> view<[%columns]xf32, #dense>
+  %input_view = buffer.view %input[%base_offset] : buffer -> view<[%columns]xf32>
+  %output_view = buffer.view %output[%base_offset] : buffer -> view<[%columns]xf32>
   scf.for %block_base = [%block_begin to %block_end step %block_step] {
     %lane_group = index.div %lane, %lanes_per_group : index
     %lane_offset = index.rem %lane, %lanes_per_group : index
     %block = index.add %block_base, %lane_group : index
     %block_origin = index.mul %block, %block_stride : index
     %origin = index.add %block_origin, %lane_offset : index
-    %loaded = vector.load %input_view[%origin] : view<[%columns]xf32, #dense> -> vector<4xf32>
-    vector.store %loaded, %output_view[%origin] : vector<4xf32>, view<[%columns]xf32, #dense>
+    %loaded = vector.load %input_view[%origin] : view<[%columns]xf32> -> vector<4xf32>
+    vector.store %loaded, %output_view[%origin] : vector<4xf32>, view<[%columns]xf32>
   }
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @config_decl_matvec_block_lane_vec4_dynamic_view() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @config_decl_matvec_block_lane_vec4_dynamic_view() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
@@ -80,20 +80,20 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @config_decl_matvec_bloc
   %41 = v_mov_b32 15
   %lane_offset = v_and_b32 %lane, %41
   %43 = v_mov_b32_copy %block_base
-  %block = v_add_u32 %43, %lane_group
-  %origin = v_mad_u32_u24_src1_lit %block, %lane_offset, 105
-  %46 = v_lshlrev_b32_src0_inline %origin, 2
+  %44 = v_add_u32 %lane_group, %43
+  %45 = v_mad_u32_u24_src1_lit %44, %lane_offset, 105
+  %46 = v_lshlrev_b32_src0_inline %45, 2
   %loaded = global_load_b128_saddr %46, %input_view
   global_store_b128_saddr %46, %loaded, %output_view
-  %49 = s_add_u32 %block_base, %block_step
-  low.br ^_bb1(%49: reg<amdgpu.sgpr>)
+  %52 = s_add_u32 %block_base, %block_step
+  low.br ^_bb1(%52: reg<amdgpu.sgpr>)
 ^_bb3:
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 config.decl @runtime.column_count : index
 
@@ -105,18 +105,18 @@ kernel.def target(@target) @config_decl_missing_bounds_for_dynamic_view() {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
   %columns = config.get @runtime.column_count : index
-  %input_view = buffer.view %input[%base] : buffer -> view<[%columns]xi32, #dense>
-  %output_view = buffer.view %output[%base] : buffer -> view<[%columns]xi32, #dense>
+  %input_view = buffer.view %input[%base] : buffer -> view<[%columns]xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%columns]xi32>
   // ERROR@+1: SUBRANGE/018 {config_key="runtime.column_count", constraint_key="config_decl.where.vector_footprint_upper_bound"}
-  %loaded = vector.load %input_view[%lane] : view<[%columns]xi32, #dense> -> vector<1xi32>
+  %loaded = vector.load %input_view[%lane] : view<[%columns]xi32> -> vector<1xi32>
   // ERROR@+1: SUBRANGE/018 {config_key="runtime.column_count", constraint_key="config_decl.where.vector_footprint_upper_bound"}
-  vector.store %loaded, %output_view[%lane] : vector<1xi32>, view<[%columns]xi32, #dense>
+  vector.store %loaded, %output_view[%lane] : vector<1xi32>, view<[%columns]xi32>
   kernel.return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 config.decl @runtime.column_count : index
 
@@ -133,8 +133,8 @@ kernel.def target(@target) @config_decl_missing_bounds_for_matvec_vec4_dynamic_v
   %block_step = index.constant 4 : index
   %lanes_per_group = index.constant 16 : index
   %block_stride = index.constant 105 : index
-  %input_view = buffer.view %input[%base_offset] : buffer -> view<[%columns]xf32, #dense>
-  %output_view = buffer.view %output[%base_offset] : buffer -> view<[%columns]xf32, #dense>
+  %input_view = buffer.view %input[%base_offset] : buffer -> view<[%columns]xf32>
+  %output_view = buffer.view %output[%base_offset] : buffer -> view<[%columns]xf32>
   scf.for %block_base = [%block_begin to %block_end step %block_step] {
     %lane_group = index.div %lane, %lanes_per_group : index
     %lane_offset = index.rem %lane, %lanes_per_group : index
@@ -142,16 +142,16 @@ kernel.def target(@target) @config_decl_missing_bounds_for_matvec_vec4_dynamic_v
     %block_origin = index.mul %block, %block_stride : index
     %origin = index.add %block_origin, %lane_offset : index
     // ERROR@+1: SUBRANGE/018 {config_key="runtime.column_count", constraint_key="config_decl.where.vector_footprint_upper_bound"}
-    %loaded = vector.load %input_view[%origin] : view<[%columns]xf32, #dense> -> vector<4xf32>
+    %loaded = vector.load %input_view[%origin] : view<[%columns]xf32> -> vector<4xf32>
     // ERROR@+1: SUBRANGE/018 {config_key="runtime.column_count", constraint_key="config_decl.where.vector_footprint_upper_bound"}
-    vector.store %loaded, %output_view[%origin] : vector<4xf32>, view<[%columns]xf32, #dense>
+    vector.store %loaded, %output_view[%origin] : vector<4xf32>, view<[%columns]xf32>
   }
   kernel.return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 config.decl @runtime.scalar_count : %value: index where [range(%value, 4, 64), mul(%value, 4)]
 
@@ -160,12 +160,12 @@ kernel.def target(@target) @config_decl_runtime_use_stays_illegal() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%output: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %output_view = buffer.view %output[%base] : buffer -> view<1xi32, #dense>
+  %output_index = index.constant 0 : index
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
   // ERROR@+1: TARGET/003 {subject_role="value", subject_name="result", constraint_key="no_ordinary_uses"}
   %columns = config.get @runtime.scalar_count : index
   %columns_i32 = index.cast %columns : index to i32
   %stored = vector.splat %columns_i32 : vector<1xi32>
-  vector.store %stored, %output_view[%zero] : vector<1xi32>, view<1xi32, #dense>
+  vector.store %stored, %output_view[%output_index] : vector<1xi32>, view<1xi32>
   kernel.return
 }

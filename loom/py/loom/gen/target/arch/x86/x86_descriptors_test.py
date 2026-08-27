@@ -14,6 +14,7 @@ from types import TracebackType
 
 from loom.gen.target.arch.x86 import x86_descriptors
 from loom.target.arch.x86 import descriptors as x86_descriptor_data
+from loom.target.arch.x86.target_info import x86_descriptor_set_ordinal
 
 
 class _RaisesValueError:
@@ -112,6 +113,8 @@ def test_storage_generation_emits_current_public_views() -> None:
     assert "loom_x86_packed_dot_core_descriptor_set" in packed_dot_header
     assert "loom_x86_scalar_core_descriptor_set" in scalar_header
     assert "loom_x86_simd128_core_descriptor_set" in simd128_header
+    assert f"#define X86_AVX512_PACKED_DOT_CORE_DESCRIPTOR_SET_ORDINAL UINT16_C({x86_descriptor_set_ordinal('x86.avx512_packed_dot.core')})" in composite_header
+    assert f"#define X86_PACKED_DOT_CORE_DESCRIPTOR_SET_ORDINAL UINT16_C({x86_descriptor_set_ordinal('x86.packed_dot.core')})" in packed_dot_header
     _assert_descriptor_ref(avx512_header, "X86_AVX512_CORE_DESCRIPTOR_REF_AVX2_VADDPS_XMM")
     _assert_descriptor_ref(avx2_header, "X86_AVX2_CORE_DESCRIPTOR_REF_AVX2_VADDPS_XMM")
     _assert_descriptor_ref(

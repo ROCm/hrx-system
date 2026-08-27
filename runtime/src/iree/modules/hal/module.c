@@ -94,12 +94,6 @@ typedef struct iree_hal_module_state_t {
   // remain live longer than any module state allocated from it.
   iree_hal_device_group_t* device_group;
 
-  // Shared executable cache for each device used to cache all executables
-  // created in the context. We could have multiple to allow for modules to
-  // create distinct sets of executables like ones for training vs inference in
-  // the same model or allow these to be injected so that multiple loaded
-  // contexts share the caches.
-  iree_hal_executable_cache_t* executable_caches[];
 } iree_hal_module_state_t;
 
 static iree_status_t IREE_API_PTR
@@ -108,39 +102,20 @@ iree_hal_module_alloc_state(void* self, iree_allocator_t host_allocator,
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_module_t* module = IREE_HAL_MODULE_CAST(self);
-  iree_host_size_t device_count =
-      iree_hal_device_group_device_count(module->device_group);
-
   iree_hal_module_state_t* state = NULL;
-  iree_host_size_t total_size =
-      sizeof(*state) + device_count * sizeof(state->executable_caches[0]);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc(host_allocator, total_size, (void**)&state));
-  memset(state, 0, total_size);
+      z0,
+      iree_allocator_malloc(host_allocator, sizeof(*state), (void**)&state));
+  memset(state, 0, sizeof(*state));
   state->host_allocator = host_allocator;
   state->flags = module->flags;
   state->debug_sink = module->debug_sink;
   state->device_policy = module->device_policy;
   state->device_group = module->device_group;
 
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0; i < device_count; ++i) {
-    status = iree_hal_executable_cache_create(
-        iree_hal_device_group_device_at(state->device_group, i),
-        iree_string_view_empty(), &state->executable_caches[i]);
-    if (!iree_status_is_ok(status)) break;
-  }
-
-  if (iree_status_is_ok(status)) {
-    *out_module_state = (iree_vm_module_state_t*)state;
-  } else {
-    for (iree_host_size_t i = 0; i < device_count; ++i) {
-      iree_hal_executable_cache_release(state->executable_caches[i]);
-    }
-    iree_allocator_free(host_allocator, state);
-  }
+  *out_module_state = (iree_vm_module_state_t*)state;
   IREE_TRACE_ZONE_END(z0);
-  return status;
+  return iree_ok_status();
 }
 
 static void IREE_API_PTR
@@ -148,11 +123,6 @@ iree_hal_module_free_state(void* self, iree_vm_module_state_t* module_state) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_module_state_t* state = (iree_hal_module_state_t*)module_state;
-  iree_host_size_t device_count =
-      iree_hal_device_group_device_count(state->device_group);
-  for (iree_host_size_t i = 0; i < device_count; ++i) {
-    iree_hal_executable_cache_release(state->executable_caches[i]);
-  }
   iree_allocator_free(state->host_allocator, state);
 
   IREE_TRACE_ZONE_END(z0);
@@ -167,57 +137,16 @@ static iree_status_t IREE_API_PTR iree_hal_module_fork_state(
   iree_hal_module_state_t* parent_state =
       (iree_hal_module_state_t*)base_parent_state;
 
-  // The base module state is derived entirely from the shared module.
-  iree_hal_module_t* module = IREE_HAL_MODULE_CAST(self);
-  iree_host_size_t device_count =
-      iree_hal_device_group_device_count(module->device_group);
-
   iree_hal_module_state_t* child_state = NULL;
-  iree_host_size_t total_size =
-      sizeof(*child_state) +
-      device_count * sizeof(child_state->executable_caches[0]);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_allocator_malloc(host_allocator, total_size, (void**)&child_state));
-  memset(child_state, 0, total_size);
+      z0, iree_allocator_malloc(host_allocator, sizeof(*child_state),
+                                (void**)&child_state));
+  *child_state = *parent_state;
   child_state->host_allocator = host_allocator;
-  child_state->flags = module->flags;
-  child_state->device_group = module->device_group;
-
-  // Reference the parent executable caches.
-  for (iree_host_size_t i = 0; i < device_count; ++i) {
-    iree_hal_executable_cache_t* executable_cache =
-        parent_state->executable_caches[i];
-    child_state->executable_caches[i] = executable_cache;
-    iree_hal_executable_cache_retain(executable_cache);
-  }
 
   *out_child_state = (iree_vm_module_state_t*)child_state;
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
-}
-
-// Returns an unretained reference to the executable cache for the given device.
-// If the same device is registered multiple times the first cache is returned.
-static iree_status_t iree_hal_module_state_lookup_executable_cache(
-    iree_hal_module_state_t* state, iree_hal_device_t* device,
-    iree_hal_executable_cache_t** out_executable_cache) {
-  IREE_ASSERT_ARGUMENT(state);
-  IREE_ASSERT_ARGUMENT(device);
-  IREE_ASSERT_ARGUMENT(out_executable_cache);
-  *out_executable_cache = NULL;
-  iree_host_size_t device_count =
-      iree_hal_device_group_device_count(state->device_group);
-  for (iree_host_size_t i = 0; i < device_count; ++i) {
-    if (iree_hal_device_group_device_at(state->device_group, i) == device) {
-      *out_executable_cache = state->executable_caches[i];
-      return iree_ok_status();
-    }
-  }
-  return iree_make_status(
-      IREE_STATUS_NOT_FOUND,
-      "no executable cache for the given device found; possibly a device not "
-      "registered with the HAL module");
 }
 
 static iree_status_t IREE_API_PTR iree_hal_module_notify(
@@ -1586,55 +1515,11 @@ IREE_VM_ABI_EXPORT(iree_hal_module_devices_get,  //
 IREE_VM_ABI_EXPORT(iree_hal_module_executable_create,  //
                    iree_hal_module_state_t,            //
                    rIrrr, r) {
-  iree_hal_device_t* device = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_device_check_deref(args->r0, &device));
-  iree_hal_queue_affinity_t queue_affinity =
-      (iree_hal_queue_affinity_t)args->i1;
-  iree_vm_buffer_t* executable_format = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_vm_buffer_check_deref(args->r2, &executable_format));
-  iree_string_view_t executable_format_str =
-      iree_vm_buffer_as_string(executable_format);
-  iree_vm_buffer_t* executable_data = NULL;
-  IREE_RETURN_IF_ERROR(iree_vm_buffer_check_deref(args->r3, &executable_data));
-  iree_host_size_t constant_count = 0;
-  const uint32_t* constants = NULL;
-  if (iree_vm_buffer_isa(args->r4)) {
-    iree_vm_buffer_t* constant_buffer = NULL;
-    IREE_RETURN_IF_ERROR(
-        iree_vm_buffer_check_deref(args->r4, &constant_buffer));
-    if (constant_buffer->data.data_length % 4 != 0) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "constant buffer data must contain 4-byte "
-                              "elements but data length is %" PRIhsz,
-                              constant_buffer->data.data_length);
-    }
-    constant_count = constant_buffer->data.data_length / sizeof(uint32_t);
-    constants = (const uint32_t*)constant_buffer->data.data;
-  }
-
-  iree_hal_executable_cache_t* executable_cache = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_module_state_lookup_executable_cache(
-      state, device, &executable_cache));
-
-  iree_hal_executable_t* executable = NULL;
-  iree_hal_executable_params_t executable_params;
-  iree_hal_executable_params_initialize(&executable_params);
-  executable_params.queue_affinity = queue_affinity;
-  executable_params.caching_mode |=
-      executable_data->access == IREE_VM_BUFFER_ACCESS_ORIGIN_MODULE
-          ? IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA
-          : 0;
-  executable_params.executable_format = executable_format_str;
-  executable_params.executable_data = iree_make_const_byte_span(
-      executable_data->data.data, executable_data->data.data_length);
-  executable_params.constant_count = constant_count;
-  executable_params.constants = constants;
-  IREE_RETURN_IF_ERROR(iree_hal_executable_cache_prepare_executable(
-      executable_cache, &executable_params, &executable));
-
-  rets->r0 = iree_hal_executable_move_ref(executable);
-  return iree_ok_status();
+  // The legacy VM ABI identifies native artifacts with a format string and
+  // cannot provide the exact device-spec target required by direct loading.
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "legacy HAL VM executable loading does not identify a device target");
 }
 
 IREE_VM_ABI_EXPORT(iree_hal_module_executable_lookup_function,  //

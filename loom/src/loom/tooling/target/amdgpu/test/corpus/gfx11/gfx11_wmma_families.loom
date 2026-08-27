@@ -1,0 +1,168 @@
+// Execute every GFX11 WMMA numeric family in both wave32 and wave64 mode.
+//
+// The floating-point rows multiply constant one matrices. The integer rows
+// multiply signed -1 by unsigned 2, making their expected -32 result depend on
+// both the packed element width and the WMMA signedness selectors.
+amdgpu.target<gfx11-generic> @gfx11_wmma_families_wave32_target {subgroup_size = 32}
+
+amdgpu.target<gfx11-generic> @gfx11_wmma_families_wave64_target {subgroup_size = 64}
+
+kernel.def target(@gfx11_wmma_families_wave32_target) @gfx11_wmma_families_wave32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%f32_f16_output: buffer, %f32_bf16_output: buffer, %f16_output: buffer, %bf16_output: buffer, %i8_output: buffer, %i4_output: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %f32_f16_output_view = buffer.view %f32_f16_output[%base] : buffer -> view<16x16xf32>
+  %f32_bf16_output_view = buffer.view %f32_bf16_output[%base] : buffer -> view<16x16xf32>
+  %f16_output_view = buffer.view %f16_output[%base] : buffer -> view<16x16xf16>
+  %bf16_output_view = buffer.view %bf16_output[%base] : buffer -> view<16x16xbf16>
+  %i8_output_view = buffer.view %i8_output[%base] : buffer -> view<16x16xi32>
+  %i4_output_view = buffer.view %i4_output[%base] : buffer -> view<16x16xi32>
+
+  %f16_operand_elements = vector.constant 1.0 : vector<16xf16>
+  %f16_lhs = vector.fragment<lhs> %f16_operand_elements shape [%m, %k] : vector<16xf16>
+  %f16_rhs = vector.fragment<rhs> %f16_operand_elements shape [%k, %n] : vector<16xf16>
+  %f32_accumulator_elements = vector.constant 0.0 : vector<8xf32>
+  %f32_init = vector.fragment<init> %f32_accumulator_elements shape [%m, %n] : vector<8xf32>
+  %f32_f16_result = vector.mma %f16_lhs, %f16_rhs, %f32_init : vector<16xf16>, vector<16xf16>, vector<8xf32>
+  vector.fragment.store<result> %f32_f16_result, %f32_f16_output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
+
+  %bf16_operand_elements = vector.constant 1.0 : vector<16xbf16>
+  %bf16_lhs = vector.fragment<lhs> %bf16_operand_elements shape [%m, %k] : vector<16xbf16>
+  %bf16_rhs = vector.fragment<rhs> %bf16_operand_elements shape [%k, %n] : vector<16xbf16>
+  %f32_bf16_result = vector.mma %bf16_lhs, %bf16_rhs, %f32_init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  vector.fragment.store<result> %f32_bf16_result, %f32_bf16_output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
+
+  %f16_accumulator_elements = vector.constant 0.0 : vector<16xf16>
+  %f16_init = vector.fragment<init> %f16_accumulator_elements shape [%m, %n] : vector<16xf16>
+  %f16_result = vector.mma %f16_lhs, %f16_rhs, %f16_init : vector<16xf16>, vector<16xf16>, vector<16xf16>
+  vector.fragment.store<result> %f16_result, %f16_output_view[0, 0] shape [%m, %n] : vector<16xf16>, view<16x16xf16>
+
+  %bf16_accumulator_elements = vector.constant 0.0 : vector<16xbf16>
+  %bf16_init = vector.fragment<init> %bf16_accumulator_elements shape [%m, %n] : vector<16xbf16>
+  %bf16_result = vector.mma %bf16_lhs, %bf16_rhs, %bf16_init : vector<16xbf16>, vector<16xbf16>, vector<16xbf16>
+  vector.fragment.store<result> %bf16_result, %bf16_output_view[0, 0] shape [%m, %n] : vector<16xbf16>, view<16x16xbf16>
+
+  %i8_lhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
+  %i8_rhs_schema = encoding.define #encoding.operand<element_format=u8, payload_elements=16, payload_registers=4> : encoding<schema>
+  %i8_lhs_words = vector.constant -1 : vector<4xi32>
+  %i8_rhs_words = vector.constant 33686018 : vector<4xi32>
+  %i8_lhs = vector.fragment<lhs> %i8_lhs_words shape [%m, %k] using {schema = %i8_lhs_schema : encoding<schema>} : vector<4xi32>
+  %i8_rhs = vector.fragment<rhs> %i8_rhs_words shape [%k, %n] using {schema = %i8_rhs_schema : encoding<schema>} : vector<4xi32>
+  %i32_accumulator_elements = vector.constant 0 : vector<8xi32>
+  %i32_init = vector.fragment<init> %i32_accumulator_elements shape [%m, %n] : vector<8xi32>
+  %i8_result = vector.mma %i8_lhs, %i8_rhs, %i32_init : vector<4xi32>, vector<4xi32>, vector<8xi32>
+  vector.fragment.store<result> %i8_result, %i8_output_view[0, 0] shape [%m, %n] : vector<8xi32>, view<16x16xi32>
+
+  %i4_lhs_schema = encoding.define #encoding.operand<element_format=i4, payload_elements=16, payload_registers=2> : encoding<schema>
+  %i4_rhs_schema = encoding.define #encoding.operand<element_format=u4, payload_elements=16, payload_registers=2> : encoding<schema>
+  %i4_lhs_words = vector.constant -1 : vector<2xi32>
+  %i4_rhs_words = vector.constant 572662306 : vector<2xi32>
+  %i4_lhs = vector.fragment<lhs> %i4_lhs_words shape [%m, %k] using {schema = %i4_lhs_schema : encoding<schema>} : vector<2xi32>
+  %i4_rhs = vector.fragment<rhs> %i4_rhs_words shape [%k, %n] using {schema = %i4_rhs_schema : encoding<schema>} : vector<2xi32>
+  %i4_result = vector.mma %i4_lhs, %i4_rhs, %i32_init : vector<2xi32>, vector<2xi32>, vector<8xi32>
+  vector.fragment.store<result> %i4_result, %i4_output_view[0, 0] shape [%m, %n] : vector<8xi32>, view<16x16xi32>
+  kernel.return
+}
+
+kernel.def target(@gfx11_wmma_families_wave64_target) @gfx11_wmma_families_wave64() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%f32_f16_output: buffer, %f32_bf16_output: buffer, %f16_output: buffer, %bf16_output: buffer, %i8_output: buffer, %i4_output: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %f32_f16_output_view = buffer.view %f32_f16_output[%base] : buffer -> view<16x16xf32>
+  %f32_bf16_output_view = buffer.view %f32_bf16_output[%base] : buffer -> view<16x16xf32>
+  %f16_output_view = buffer.view %f16_output[%base] : buffer -> view<16x16xf16>
+  %bf16_output_view = buffer.view %bf16_output[%base] : buffer -> view<16x16xbf16>
+  %i8_output_view = buffer.view %i8_output[%base] : buffer -> view<16x16xi32>
+  %i4_output_view = buffer.view %i4_output[%base] : buffer -> view<16x16xi32>
+
+  %f16_operand_elements = vector.constant 1.0 : vector<16xf16>
+  %f16_lhs = vector.fragment<lhs> %f16_operand_elements shape [%m, %k] : vector<16xf16>
+  %f16_rhs = vector.fragment<rhs> %f16_operand_elements shape [%k, %n] : vector<16xf16>
+  %f32_accumulator_elements = vector.constant 0.0 : vector<4xf32>
+  %f32_init = vector.fragment<init> %f32_accumulator_elements shape [%m, %n] : vector<4xf32>
+  %f32_f16_result = vector.mma %f16_lhs, %f16_rhs, %f32_init : vector<16xf16>, vector<16xf16>, vector<4xf32>
+  vector.fragment.store<result> %f32_f16_result, %f32_f16_output_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
+
+  %bf16_operand_elements = vector.constant 1.0 : vector<16xbf16>
+  %bf16_lhs = vector.fragment<lhs> %bf16_operand_elements shape [%m, %k] : vector<16xbf16>
+  %bf16_rhs = vector.fragment<rhs> %bf16_operand_elements shape [%k, %n] : vector<16xbf16>
+  %f32_bf16_result = vector.mma %bf16_lhs, %bf16_rhs, %f32_init : vector<16xbf16>, vector<16xbf16>, vector<4xf32>
+  vector.fragment.store<result> %f32_bf16_result, %f32_bf16_output_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
+
+  %f16_accumulator_elements = vector.constant 0.0 : vector<8xf16>
+  %f16_init = vector.fragment<init> %f16_accumulator_elements shape [%m, %n] : vector<8xf16>
+  %f16_result = vector.mma %f16_lhs, %f16_rhs, %f16_init : vector<16xf16>, vector<16xf16>, vector<8xf16>
+  vector.fragment.store<result> %f16_result, %f16_output_view[0, 0] shape [%m, %n] : vector<8xf16>, view<16x16xf16>
+
+  %bf16_accumulator_elements = vector.constant 0.0 : vector<8xbf16>
+  %bf16_init = vector.fragment<init> %bf16_accumulator_elements shape [%m, %n] : vector<8xbf16>
+  %bf16_result = vector.mma %bf16_lhs, %bf16_rhs, %bf16_init : vector<16xbf16>, vector<16xbf16>, vector<8xbf16>
+  vector.fragment.store<result> %bf16_result, %bf16_output_view[0, 0] shape [%m, %n] : vector<8xbf16>, view<16x16xbf16>
+
+  %i8_lhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
+  %i8_rhs_schema = encoding.define #encoding.operand<element_format=u8, payload_elements=16, payload_registers=4> : encoding<schema>
+  %i8_lhs_words = vector.constant -1 : vector<4xi32>
+  %i8_rhs_words = vector.constant 33686018 : vector<4xi32>
+  %i8_lhs = vector.fragment<lhs> %i8_lhs_words shape [%m, %k] using {schema = %i8_lhs_schema : encoding<schema>} : vector<4xi32>
+  %i8_rhs = vector.fragment<rhs> %i8_rhs_words shape [%k, %n] using {schema = %i8_rhs_schema : encoding<schema>} : vector<4xi32>
+  %i32_accumulator_elements = vector.constant 0 : vector<4xi32>
+  %i32_init = vector.fragment<init> %i32_accumulator_elements shape [%m, %n] : vector<4xi32>
+  %i8_result = vector.mma %i8_lhs, %i8_rhs, %i32_init : vector<4xi32>, vector<4xi32>, vector<4xi32>
+  vector.fragment.store<result> %i8_result, %i8_output_view[0, 0] shape [%m, %n] : vector<4xi32>, view<16x16xi32>
+
+  %i4_lhs_schema = encoding.define #encoding.operand<element_format=i4, payload_elements=16, payload_registers=2> : encoding<schema>
+  %i4_rhs_schema = encoding.define #encoding.operand<element_format=u4, payload_elements=16, payload_registers=2> : encoding<schema>
+  %i4_lhs_words = vector.constant -1 : vector<2xi32>
+  %i4_rhs_words = vector.constant 572662306 : vector<2xi32>
+  %i4_lhs = vector.fragment<lhs> %i4_lhs_words shape [%m, %k] using {schema = %i4_lhs_schema : encoding<schema>} : vector<2xi32>
+  %i4_rhs = vector.fragment<rhs> %i4_rhs_words shape [%k, %n] using {schema = %i4_rhs_schema : encoding<schema>} : vector<2xi32>
+  %i4_result = vector.mma %i4_lhs, %i4_rhs, %i32_init : vector<2xi32>, vector<2xi32>, vector<4xi32>
+  vector.fragment.store<result> %i4_result, %i4_output_view[0, 0] shape [%m, %n] : vector<4xi32>, view<16x16xi32>
+  kernel.return
+}
+
+check.case public @gfx11_wmma_families_case {
+  %wave32_f32_f16_output = check.generate.fill value(0.0) : tensor<16x16xf32>
+  %wave32_f32_bf16_output = check.generate.fill value(0.0) : tensor<16x16xf32>
+  %wave32_f16_output = check.generate.fill value(0.0) : tensor<16x16xf16>
+  %wave32_bf16_output = check.generate.fill value(0.0) : tensor<16x16xbf16>
+  %wave32_i8_output = check.generate.fill value(0) : tensor<16x16xi32>
+  %wave32_i4_output = check.generate.fill value(0) : tensor<16x16xi32>
+  %wave64_f32_f16_output = check.generate.fill value(0.0) : tensor<16x16xf32>
+  %wave64_f32_bf16_output = check.generate.fill value(0.0) : tensor<16x16xf32>
+  %wave64_f16_output = check.generate.fill value(0.0) : tensor<16x16xf16>
+  %wave64_bf16_output = check.generate.fill value(0.0) : tensor<16x16xbf16>
+  %wave64_i8_output = check.generate.fill value(0) : tensor<16x16xi32>
+  %wave64_i4_output = check.generate.fill value(0) : tensor<16x16xi32>
+  %f32_expected = check.generate.fill value(16.0) : tensor<16x16xf32>
+  %f16_expected = check.generate.fill value(16.0) : tensor<16x16xf16>
+  %bf16_expected = check.generate.fill value(16.0) : tensor<16x16xbf16>
+  %integer_expected = check.generate.fill value(-32) : tensor<16x16xi32>
+  kernel.launch @gfx11_wmma_families_wave32(%wave32_f32_f16_output, %wave32_f32_bf16_output, %wave32_f16_output, %wave32_bf16_output, %wave32_i8_output, %wave32_i4_output) : (tensor<16x16xf32>, tensor<16x16xf32>, tensor<16x16xf16>, tensor<16x16xbf16>, tensor<16x16xi32>, tensor<16x16xi32>)
+  kernel.launch @gfx11_wmma_families_wave64(%wave64_f32_f16_output, %wave64_f32_bf16_output, %wave64_f16_output, %wave64_bf16_output, %wave64_i8_output, %wave64_i4_output) : (tensor<16x16xf32>, tensor<16x16xf32>, tensor<16x16xf16>, tensor<16x16xbf16>, tensor<16x16xi32>, tensor<16x16xi32>)
+  check.expect.equal actual(%wave32_f32_f16_output) expected(%f32_expected) : tensor<16x16xf32>
+  check.expect.equal actual(%wave32_f32_bf16_output) expected(%f32_expected) : tensor<16x16xf32>
+  check.expect.equal actual(%wave32_f16_output) expected(%f16_expected) : tensor<16x16xf16>
+  check.expect.equal actual(%wave32_bf16_output) expected(%bf16_expected) : tensor<16x16xbf16>
+  check.expect.equal actual(%wave32_i8_output) expected(%integer_expected) : tensor<16x16xi32>
+  check.expect.equal actual(%wave32_i4_output) expected(%integer_expected) : tensor<16x16xi32>
+  check.expect.equal actual(%wave64_f32_f16_output) expected(%f32_expected) : tensor<16x16xf32>
+  check.expect.equal actual(%wave64_f32_bf16_output) expected(%f32_expected) : tensor<16x16xf32>
+  check.expect.equal actual(%wave64_f16_output) expected(%f16_expected) : tensor<16x16xf16>
+  check.expect.equal actual(%wave64_bf16_output) expected(%bf16_expected) : tensor<16x16xbf16>
+  check.expect.equal actual(%wave64_i8_output) expected(%integer_expected) : tensor<16x16xi32>
+  check.expect.equal actual(%wave64_i4_output) expected(%integer_expected) : tensor<16x16xi32>
+  check.return
+}
+
+check.benchmark<@gfx11_wmma_families_case>

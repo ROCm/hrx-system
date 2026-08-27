@@ -11,7 +11,6 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
-#include "loom/target/arch/spirv/abi.h"
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
 #include "loom/target/arch/spirv/error_catalog.h"
 #include "loom/target/arch/spirv/module_contract.h"
@@ -71,10 +70,6 @@ typedef struct loom_spirv_low_verify_state_t {
   iree_string_view_t function_name;
   // Exact SPIR-V value types indexed by compact hash table.
   loom_spirv_low_value_type_table_t value_types;
-  // Exact ABI result value types.
-  loom_spirv_value_type_t* result_value_types;
-  // Number of entries in result_value_types.
-  iree_host_size_t result_value_type_count;
   // True when the resolved function target uses HAL raw-BDA resources.
   bool raw_bda_hal_kernel;
   // True after a function-level diagnostic makes body-local checks unreliable.
@@ -82,6 +77,8 @@ typedef struct loom_spirv_low_verify_state_t {
   // Structural-control diagnostics already emitted for this function.
   loom_spirv_low_verify_structure_flags_t structure_flags;
 } loom_spirv_low_verify_state_t;
+
+#define LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY 32
 
 static uint64_t loom_spirv_low_hash_value_id(loom_value_id_t value_id) {
   uint64_t value = value_id;
@@ -213,34 +210,9 @@ static loom_type_t loom_spirv_low_module_type_attr(const loom_module_t* module,
   return module->types.entries[type_id];
 }
 
-static bool loom_spirv_low_type_is_spirv_id(loom_type_t type) {
-  return loom_low_type_is_register(type) &&
-         loom_low_register_type_descriptor_set_stable_id(type) ==
-             SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID &&
-         loom_low_register_type_class_id(type) ==
-             SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID;
-}
-
-static bool loom_spirv_low_register_value_type(
-    loom_type_t type, loom_spirv_value_type_t* out_value_type) {
-  *out_value_type = (loom_spirv_value_type_t){0};
-  if (!loom_low_type_is_register(type) ||
-      loom_low_register_type_descriptor_set_stable_id(type) !=
-          SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID) {
-    return false;
-  }
-  switch (loom_low_register_type_class_id(type)) {
-    case SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID:
-      return false;
-    default:
-      return loom_spirv_value_type_from_reg_class_id(
-          loom_low_register_type_class_id(type), out_value_type);
-  }
-}
-
 static iree_string_view_t loom_spirv_low_value_type_format(
-    loom_spirv_low_verify_state_t* state, loom_spirv_value_type_t value_type) {
-  (void)state;
+    loom_spirv_value_type_t value_type, char* buffer,
+    iree_host_size_t buffer_capacity) {
   switch (value_type.value_class) {
     case LOOM_SPIRV_VALUE_CLASS_UNKNOWN:
       return IREE_SV("unknown");
@@ -252,6 +224,17 @@ static iree_string_view_t loom_spirv_low_value_type_format(
       return IREE_SV("storage_buffer_address");
     case LOOM_SPIRV_VALUE_CLASS_SCALAR:
       return loom_spirv_scalar_type_name(value_type.scalar_type);
+    case LOOM_SPIRV_VALUE_CLASS_VECTOR:
+    case LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR: {
+      const iree_string_view_t component_name =
+          value_type.value_class == LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR
+              ? IREE_SV("bool")
+              : loom_spirv_scalar_type_name(value_type.scalar_type);
+      iree_snprintf(buffer, buffer_capacity, "v%u%.*s",
+                    (unsigned)value_type.vector.lane_count,
+                    (int)component_name.size, component_name.data);
+      return iree_make_cstring_view(buffer);
+    }
     case LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER:
       return IREE_SV("ptr.physical_storage_buffer");
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY:
@@ -262,21 +245,6 @@ static iree_string_view_t loom_spirv_low_value_type_format(
       return IREE_SV("cooperative_matrix");
   }
   return IREE_SV("unknown");
-}
-
-static const loom_named_attr_t* loom_spirv_low_find_boundary_attr(
-    const loom_module_t* module, loom_named_attr_slice_t attrs,
-    iree_string_view_t attr_name) {
-  const loom_string_id_t name_id = loom_module_lookup_string(module, attr_name);
-  if (name_id == LOOM_STRING_ID_INVALID) {
-    return NULL;
-  }
-  for (iree_host_size_t i = 0; i < attrs.count; ++i) {
-    if (attrs.entries[i].name_id == name_id) {
-      return &attrs.entries[i];
-    }
-  }
-  return NULL;
 }
 
 static loom_named_attr_slice_t loom_spirv_low_boundary_attrs(
@@ -298,85 +266,23 @@ static iree_status_t loom_spirv_low_emit(loom_low_verify_context_t* context,
   return loom_low_verify_context_emit(context, op, error, params, param_count);
 }
 
-static iree_status_t loom_spirv_low_emit_malformed_abi_attr(
-    loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
-    const loom_op_t* op, iree_string_view_t attr_name,
-    iree_host_size_t expected_count) {
+static iree_status_t loom_spirv_low_emit_abi_layout(
+    loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state) {
   loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
-      loom_param_string(attr_name),
-      loom_param_u32((uint32_t)expected_count),
   };
-  return loom_spirv_low_emit(context, op, LOOM_ERR_SPIRV_001, params,
-                             IREE_ARRAYSIZE(params));
+  return loom_spirv_low_emit(context, state->function_op, LOOM_ERR_SPIRV_030,
+                             params, IREE_ARRAYSIZE(params));
 }
 
-static iree_status_t loom_spirv_low_lookup_abi_value_type_attr(
-    loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
-    iree_string_view_t attr_name, iree_host_size_t expected_count,
-    const loom_attribute_t** out_attr, bool* out_malformed) {
-  *out_attr = NULL;
-  *out_malformed = false;
-  const loom_named_attr_t* entry = loom_spirv_low_find_boundary_attr(
-      state->module, loom_spirv_low_boundary_attrs(state->function_op),
-      attr_name);
-  if (entry == NULL) {
+static iree_status_t loom_spirv_low_verify_empty_abi_layout(
+    loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state) {
+  if (loom_spirv_low_boundary_attrs(state->function_op).count == 0) {
     return iree_ok_status();
   }
-  const loom_attribute_t* attr = &entry->value;
-  if (attr->kind != LOOM_ATTR_I64_ARRAY || attr->count != expected_count ||
-      (attr->count != 0 && attr->i64_array == NULL)) {
-    IREE_RETURN_IF_ERROR(loom_spirv_low_emit_malformed_abi_attr(
-        context, state, state->function_op, attr_name, expected_count));
-    *out_malformed = true;
-    return iree_ok_status();
-  }
-  *out_attr = attr;
+  IREE_RETURN_IF_ERROR(loom_spirv_low_emit_abi_layout(context, state));
+  state->skip_body_checks = true;
   return iree_ok_status();
-}
-
-static iree_status_t loom_spirv_low_emit_missing_abi_value_type(
-    loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
-    const loom_op_t* op, iree_string_view_t attr_name,
-    loom_value_id_t value_id) {
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(state->function_name),
-      loom_param_string(attr_name),
-      loom_param_string(
-          loom_low_diagnostic_value_name(state->module, value_id)),
-  };
-  return loom_spirv_low_emit(context, op, LOOM_ERR_SPIRV_002, params,
-                             IREE_ARRAYSIZE(params));
-}
-
-static iree_status_t loom_spirv_low_emit_non_id_abi_value_type(
-    loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
-    const loom_op_t* op, iree_string_view_t attr_name, loom_value_id_t value_id,
-    int64_t value_code) {
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(state->function_name),
-      loom_param_string(attr_name),
-      loom_param_string(
-          loom_low_diagnostic_value_name(state->module, value_id)),
-      loom_param_i64(value_code),
-  };
-  return loom_spirv_low_emit(context, op, LOOM_ERR_SPIRV_003, params,
-                             IREE_ARRAYSIZE(params));
-}
-
-static iree_status_t loom_spirv_low_emit_invalid_abi_value_type(
-    loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
-    const loom_op_t* op, iree_string_view_t attr_name, loom_value_id_t value_id,
-    int64_t value_code) {
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(state->function_name),
-      loom_param_string(attr_name),
-      loom_param_string(
-          loom_low_diagnostic_value_name(state->module, value_id)),
-      loom_param_i64(value_code),
-  };
-  return loom_spirv_low_emit(context, op, LOOM_ERR_SPIRV_004, params,
-                             IREE_ARRAYSIZE(params));
 }
 
 static iree_status_t loom_spirv_low_emit_unsupported_register_type(
@@ -392,41 +298,16 @@ static iree_status_t loom_spirv_low_emit_unsupported_register_type(
                              IREE_ARRAYSIZE(params));
 }
 
-static iree_status_t loom_spirv_low_prepare_abi_value_type(
+static iree_status_t loom_spirv_low_decode_boundary_value_type(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
-    const loom_op_t* op, iree_string_view_t attr_name,
-    const loom_attribute_t* attr, iree_host_size_t attr_index,
     loom_value_id_t value_id, loom_spirv_value_type_t* out_value_type) {
-  loom_type_t low_type = loom_module_value_type(state->module, value_id);
-  *out_value_type = (loom_spirv_value_type_t){0};
-  if (!loom_spirv_low_type_is_spirv_id(low_type)) {
-    if (attr != NULL && attr->i64_array[attr_index] != 0) {
-      IREE_RETURN_IF_ERROR(loom_spirv_low_emit_non_id_abi_value_type(
-          context, state, op, attr_name, value_id,
-          attr->i64_array[attr_index]));
-      state->skip_body_checks = true;
-      return iree_ok_status();
-    }
-    if (!loom_spirv_low_register_value_type(low_type, out_value_type)) {
-      IREE_RETURN_IF_ERROR(loom_spirv_low_emit_unsupported_register_type(
-          context, state, op, value_id, low_type));
-      state->skip_body_checks = true;
-    }
+  const loom_type_t low_type = loom_module_value_type(state->module, value_id);
+  if (loom_spirv_value_type_from_low_register_type(low_type, out_value_type)) {
     return iree_ok_status();
   }
-  if (attr == NULL) {
-    IREE_RETURN_IF_ERROR(loom_spirv_low_emit_missing_abi_value_type(
-        context, state, op, attr_name, value_id));
-    state->skip_body_checks = true;
-    return iree_ok_status();
-  }
-  if (!loom_spirv_abi_value_type_decode(attr->i64_array[attr_index],
-                                        out_value_type) ||
-      out_value_type->value_class == LOOM_SPIRV_VALUE_CLASS_UNKNOWN) {
-    IREE_RETURN_IF_ERROR(loom_spirv_low_emit_invalid_abi_value_type(
-        context, state, op, attr_name, value_id, attr->i64_array[attr_index]));
-    state->skip_body_checks = true;
-  }
+  IREE_RETURN_IF_ERROR(loom_spirv_low_emit_unsupported_register_type(
+      context, state, state->function_op, value_id, low_type));
+  state->skip_body_checks = true;
   return iree_ok_status();
 }
 
@@ -435,22 +316,11 @@ static iree_status_t loom_spirv_low_seed_entry_args(
   if (state->entry_block == NULL) {
     return iree_ok_status();
   }
-  const loom_attribute_t* attr = NULL;
-  bool malformed = false;
-  IREE_RETURN_IF_ERROR(loom_spirv_low_lookup_abi_value_type_attr(
-      context, state, IREE_SV(LOOM_SPIRV_ABI_ARG_VALUE_TYPES_ATTR_NAME),
-      state->entry_block->arg_count, &attr, &malformed));
-  if (malformed) {
-    state->skip_body_checks = true;
-    return iree_ok_status();
-  }
   for (uint16_t i = 0; i < state->entry_block->arg_count; ++i) {
     const loom_value_id_t value_id = loom_block_arg_id(state->entry_block, i);
     loom_spirv_value_type_t value_type = {0};
-    IREE_RETURN_IF_ERROR(loom_spirv_low_prepare_abi_value_type(
-        context, state, state->function_op,
-        IREE_SV(LOOM_SPIRV_ABI_ARG_VALUE_TYPES_ATTR_NAME), attr, i, value_id,
-        &value_type));
+    IREE_RETURN_IF_ERROR(loom_spirv_low_decode_boundary_value_type(
+        context, state, value_id, &value_type));
     if (value_type.value_class != LOOM_SPIRV_VALUE_CLASS_UNKNOWN) {
       IREE_RETURN_IF_ERROR(loom_spirv_low_value_type_table_define(
           &state->value_types, value_id, value_type, state->arena));
@@ -459,33 +329,24 @@ static iree_status_t loom_spirv_low_seed_entry_args(
   return iree_ok_status();
 }
 
-static iree_status_t loom_spirv_low_prepare_result_value_types(
+static iree_status_t loom_spirv_low_verify_result_value_types(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state) {
-  const iree_host_size_t result_count = state->function_op->result_count;
-  if (result_count == 0) {
-    return iree_ok_status();
-  }
-  const loom_attribute_t* attr = NULL;
-  bool malformed = false;
-  IREE_RETURN_IF_ERROR(loom_spirv_low_lookup_abi_value_type_attr(
-      context, state, IREE_SV(LOOM_SPIRV_ABI_RESULT_VALUE_TYPES_ATTR_NAME),
-      result_count, &attr, &malformed));
-  if (malformed) {
-    state->skip_body_checks = true;
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->arena, result_count, sizeof(*state->result_value_types),
-      (void**)&state->result_value_types));
-  state->result_value_type_count = result_count;
   const loom_value_id_t* results = loom_op_const_results(state->function_op);
-  for (iree_host_size_t i = 0; i < result_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_spirv_low_prepare_abi_value_type(
-        context, state, state->function_op,
-        IREE_SV(LOOM_SPIRV_ABI_RESULT_VALUE_TYPES_ATTR_NAME), attr, i,
-        results[i], &state->result_value_types[i]));
+  for (uint16_t i = 0; i < state->function_op->result_count; ++i) {
+    loom_spirv_value_type_t value_type = {0};
+    IREE_RETURN_IF_ERROR(loom_spirv_low_decode_boundary_value_type(
+        context, state, results[i], &value_type));
   }
   return iree_ok_status();
+}
+
+static loom_spirv_value_type_t loom_spirv_low_verified_boundary_value_type(
+    const loom_spirv_low_verify_state_t* state, loom_value_id_t value_id) {
+  loom_spirv_value_type_t value_type = {0};
+  const bool decoded = loom_spirv_value_type_from_low_register_type(
+      loom_module_value_type(state->module, value_id), &value_type);
+  IREE_ASSERT(decoded);
+  return value_type;
 }
 
 static bool loom_spirv_low_value_type_is_direct_scalar(
@@ -529,6 +390,8 @@ static bool loom_spirv_low_direct_constant_word_count(
       *out_word_count = 2;
       return true;
     case LOOM_SPIRV_VALUE_CLASS_STORAGE_BUFFER_ADDRESS:
+    case LOOM_SPIRV_VALUE_CLASS_VECTOR:
+    case LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR:
     case LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER:
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP:
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY:
@@ -551,11 +414,13 @@ static iree_status_t loom_spirv_low_emit_raw_bda_returns(
 static iree_status_t loom_spirv_low_emit_raw_bda_direct_value(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
     loom_value_id_t value_id, loom_spirv_value_type_t value_type) {
+  char value_type_buffer[LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY];
   loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
       loom_param_string(
           loom_low_diagnostic_value_name(state->module, value_id)),
-      loom_param_string(loom_spirv_low_value_type_format(state, value_type)),
+      loom_param_string(loom_spirv_low_value_type_format(
+          value_type, value_type_buffer, sizeof(value_type_buffer))),
   };
   return loom_spirv_low_emit(context, state->function_op, LOOM_ERR_SPIRV_007,
                              params, IREE_ARRAYSIZE(params));
@@ -575,11 +440,13 @@ static iree_status_t loom_spirv_low_emit_raw_bda_constant_count(
 static iree_status_t loom_spirv_low_emit_shader_argument_value(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
     loom_value_id_t value_id, loom_spirv_value_type_t value_type) {
+  char value_type_buffer[LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY];
   loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
       loom_param_string(
           loom_low_diagnostic_value_name(state->module, value_id)),
-      loom_param_string(loom_spirv_low_value_type_format(state, value_type)),
+      loom_param_string(loom_spirv_low_value_type_format(
+          value_type, value_type_buffer, sizeof(value_type_buffer))),
   };
   return loom_spirv_low_emit(context, state->function_op, LOOM_ERR_SPIRV_022,
                              params, IREE_ARRAYSIZE(params));
@@ -588,11 +455,13 @@ static iree_status_t loom_spirv_low_emit_shader_argument_value(
 static iree_status_t loom_spirv_low_emit_shader_result_value(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
     loom_value_id_t value_id, loom_spirv_value_type_t value_type) {
+  char value_type_buffer[LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY];
   loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
       loom_param_string(
           loom_low_diagnostic_value_name(state->module, value_id)),
-      loom_param_string(loom_spirv_low_value_type_format(state, value_type)),
+      loom_param_string(loom_spirv_low_value_type_format(
+          value_type, value_type_buffer, sizeof(value_type_buffer))),
   };
   return loom_spirv_low_emit(context, state->function_op, LOOM_ERR_SPIRV_016,
                              params, IREE_ARRAYSIZE(params));
@@ -653,11 +522,12 @@ static iree_status_t loom_spirv_low_verify_abi_shape(
   }
 
   const loom_value_id_t* results = loom_op_const_results(state->function_op);
-  for (iree_host_size_t i = 0; i < state->result_value_type_count; ++i) {
-    if (!loom_spirv_low_value_type_is_direct_scalar(
-            state->result_value_types[i])) {
+  for (uint16_t i = 0; i < state->function_op->result_count; ++i) {
+    const loom_spirv_value_type_t result_value_type =
+        loom_spirv_low_verified_boundary_value_type(state, results[i]);
+    if (!loom_spirv_low_value_type_is_direct_scalar(result_value_type)) {
       IREE_RETURN_IF_ERROR(loom_spirv_low_emit_shader_result_value(
-          context, state, results[i], state->result_value_types[i]));
+          context, state, results[i], result_value_type));
     }
   }
   return iree_ok_status();
@@ -747,11 +617,13 @@ static iree_status_t loom_spirv_low_emit_resource_result_type(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
     const loom_op_t* op, loom_value_id_t value_id,
     loom_spirv_value_type_t value_type) {
+  char value_type_buffer[LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY];
   loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
       loom_param_string(
           loom_low_diagnostic_value_name(state->module, value_id)),
-      loom_param_string(loom_spirv_low_value_type_format(state, value_type)),
+      loom_param_string(loom_spirv_low_value_type_format(
+          value_type, value_type_buffer, sizeof(value_type_buffer))),
   };
   return loom_spirv_low_emit(context, op, LOOM_ERR_SPIRV_011, params,
                              IREE_ARRAYSIZE(params));
@@ -784,7 +656,7 @@ static iree_status_t loom_spirv_low_verify_resource(
 
   const loom_value_id_t result = loom_low_resource_result(op);
   loom_spirv_value_type_t result_type = {0};
-  if (!loom_spirv_low_register_value_type(
+  if (!loom_spirv_value_type_from_low_register_type(
           loom_module_value_type(state->module, result), &result_type)) {
     IREE_RETURN_IF_ERROR(loom_spirv_low_emit_unsupported_register_type(
         context, state, op, result,
@@ -802,10 +674,13 @@ static iree_status_t loom_spirv_low_verify_resource(
 
 static iree_status_t loom_spirv_low_emit_missing_packet_row(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet) {
+    const loom_low_descriptor_packet_t* packet) {
+  const iree_string_view_t descriptor_key =
+      loom_low_descriptor_packet_diagnostic_key(state->target->descriptor_set,
+                                                packet);
   loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
-      loom_param_string(packet->key),
+      loom_param_string(descriptor_key),
   };
   return loom_spirv_low_emit(context, packet->op, LOOM_ERR_SPIRV_012, params,
                              IREE_ARRAYSIZE(params));
@@ -813,21 +688,27 @@ static iree_status_t loom_spirv_low_emit_missing_packet_row(
 
 static iree_status_t loom_spirv_low_emit_packet_type_mismatch(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
-    iree_string_view_t field_kind, uint32_t field_index,
-    loom_value_id_t value_id, loom_spirv_value_type_t expected_value_type,
+    const loom_low_descriptor_packet_t* packet, iree_string_view_t field_kind,
+    uint32_t field_index, loom_value_id_t value_id,
+    loom_spirv_value_type_t expected_value_type,
     loom_spirv_value_type_t actual_value_type) {
+  const iree_string_view_t descriptor_key =
+      loom_low_descriptor_packet_diagnostic_key(state->target->descriptor_set,
+                                                packet);
+  char expected_type_buffer[LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY];
+  char actual_type_buffer[LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY];
   loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
-      loom_param_string(packet->key),
+      loom_param_string(descriptor_key),
       loom_param_string(field_kind),
       loom_param_u32(field_index),
       loom_param_string(
           loom_low_diagnostic_value_name(state->module, value_id)),
-      loom_param_string(
-          loom_spirv_low_value_type_format(state, expected_value_type)),
-      loom_param_string(
-          loom_spirv_low_value_type_format(state, actual_value_type)),
+      loom_param_string(loom_spirv_low_value_type_format(
+          expected_value_type, expected_type_buffer,
+          sizeof(expected_type_buffer))),
+      loom_param_string(loom_spirv_low_value_type_format(
+          actual_value_type, actual_type_buffer, sizeof(actual_type_buffer))),
   };
   return loom_spirv_low_emit(context, packet->op, LOOM_ERR_SPIRV_013, params,
                              IREE_ARRAYSIZE(params));
@@ -835,7 +716,7 @@ static iree_status_t loom_spirv_low_emit_packet_type_mismatch(
 
 static iree_status_t loom_spirv_low_verify_packet_operands(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   const loom_value_id_t* operands = loom_op_const_operands(packet->op);
   for (uint8_t i = 0; i < row->operand_count; ++i) {
@@ -844,10 +725,12 @@ static iree_status_t loom_spirv_low_verify_packet_operands(
                                                 operands[i], &actual_type)) {
       continue;
     }
-    if (!loom_spirv_value_type_equal(actual_type, row->operand_types[i])) {
+    const loom_spirv_value_type_t expected_type =
+        loom_spirv_packet_row_operand_type(row, i);
+    if (!loom_spirv_value_type_equal(actual_type, expected_type)) {
       IREE_RETURN_IF_ERROR(loom_spirv_low_emit_packet_type_mismatch(
           context, state, packet, IREE_SV("operand"), i, operands[i],
-          row->operand_types[i], actual_type));
+          expected_type, actual_type));
     }
   }
   return iree_ok_status();
@@ -855,7 +738,7 @@ static iree_status_t loom_spirv_low_verify_packet_operands(
 
 static iree_status_t loom_spirv_low_define_packet_results(
     loom_spirv_low_verify_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   if (row->result_count == 0) {
     return iree_ok_status();
@@ -867,15 +750,9 @@ static iree_status_t loom_spirv_low_define_packet_results(
 
 static iree_status_t loom_spirv_low_verify_packet(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet) {
-  if (packet->descriptor == NULL) {
-    return iree_ok_status();
-  }
-  const uint32_t descriptor_ordinal =
-      loom_low_descriptor_set_descriptor_ordinal(state->target->descriptor_set,
-                                                 packet->descriptor);
+    const loom_low_descriptor_packet_t* packet) {
   const loom_spirv_packet_row_t* row =
-      loom_spirv_packet_row_for_descriptor_ordinal(descriptor_ordinal);
+      loom_spirv_packet_row_for_descriptor_ordinal(packet->descriptor_ordinal);
   if (row == NULL || row->form == LOOM_SPIRV_PACKET_FORM_UNSUPPORTED) {
     return loom_spirv_low_emit_missing_packet_row(context, state, packet);
   }
@@ -888,15 +765,16 @@ static iree_status_t loom_spirv_low_verify_packet(
   return loom_spirv_low_define_packet_results(state, packet, row);
 }
 
-static iree_status_t loom_spirv_low_verify_copy(
+static iree_status_t loom_spirv_low_verify_transfer(
     loom_spirv_low_verify_state_t* state, const loom_op_t* op) {
   loom_spirv_value_type_t source_type = {0};
   if (!loom_spirv_low_value_type_table_lookup(
-          &state->value_types, loom_low_copy_source(op), &source_type)) {
+          &state->value_types, loom_op_const_operands(op)[0], &source_type)) {
     return iree_ok_status();
   }
-  return loom_spirv_low_value_type_table_define(
-      &state->value_types, loom_low_copy_result(op), source_type, state->arena);
+  return loom_spirv_low_value_type_table_define(&state->value_types,
+                                                loom_op_const_results(op)[0],
+                                                source_type, state->arena);
 }
 
 static iree_status_t loom_spirv_low_emit_return_type_mismatch(
@@ -904,15 +782,18 @@ static iree_status_t loom_spirv_low_emit_return_type_mismatch(
     const loom_op_t* op, uint32_t result_index, loom_value_id_t value_id,
     loom_spirv_value_type_t expected_value_type,
     loom_spirv_value_type_t actual_value_type) {
+  char expected_type_buffer[LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY];
+  char actual_type_buffer[LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY];
   loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
       loom_param_u32(result_index),
       loom_param_string(
           loom_low_diagnostic_value_name(state->module, value_id)),
-      loom_param_string(
-          loom_spirv_low_value_type_format(state, expected_value_type)),
-      loom_param_string(
-          loom_spirv_low_value_type_format(state, actual_value_type)),
+      loom_param_string(loom_spirv_low_value_type_format(
+          expected_value_type, expected_type_buffer,
+          sizeof(expected_type_buffer))),
+      loom_param_string(loom_spirv_low_value_type_format(
+          actual_value_type, actual_type_buffer, sizeof(actual_type_buffer))),
   };
   return loom_spirv_low_emit(context, op, LOOM_ERR_SPIRV_014, params,
                              IREE_ARRAYSIZE(params));
@@ -921,21 +802,22 @@ static iree_status_t loom_spirv_low_emit_return_type_mismatch(
 static iree_status_t loom_spirv_low_verify_return(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
     const loom_op_t* op) {
-  if (op->operand_count != state->result_value_type_count) {
+  if (op->operand_count != state->function_op->result_count) {
     return iree_ok_status();
   }
   const loom_value_id_t* operands = loom_op_const_operands(op);
+  const loom_value_id_t* results = loom_op_const_results(state->function_op);
   for (uint16_t i = 0; i < op->operand_count; ++i) {
     loom_spirv_value_type_t actual_type = {0};
     if (!loom_spirv_low_value_type_table_lookup(&state->value_types,
                                                 operands[i], &actual_type)) {
       continue;
     }
-    if (!loom_spirv_value_type_equal(actual_type,
-                                     state->result_value_types[i])) {
+    const loom_spirv_value_type_t expected_type =
+        loom_spirv_low_verified_boundary_value_type(state, results[i]);
+    if (!loom_spirv_value_type_equal(actual_type, expected_type)) {
       IREE_RETURN_IF_ERROR(loom_spirv_low_emit_return_type_mismatch(
-          context, state, op, i, operands[i], state->result_value_types[i],
-          actual_type));
+          context, state, op, i, operands[i], expected_type, actual_type));
     }
   }
   return iree_ok_status();
@@ -945,12 +827,13 @@ static iree_status_t loom_spirv_low_emit_branch_condition_type_mismatch(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
     const loom_op_t* op, loom_value_id_t value_id,
     loom_spirv_value_type_t actual_value_type) {
+  char value_type_buffer[LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY];
   loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
       loom_param_string(
           loom_low_diagnostic_value_name(state->module, value_id)),
-      loom_param_string(
-          loom_spirv_low_value_type_format(state, actual_value_type)),
+      loom_param_string(loom_spirv_low_value_type_format(
+          actual_value_type, value_type_buffer, sizeof(value_type_buffer))),
   };
   return loom_spirv_low_emit(context, op, LOOM_ERR_SPIRV_019, params,
                              IREE_ARRAYSIZE(params));
@@ -962,16 +845,19 @@ static iree_status_t loom_spirv_low_emit_branch_payload_type_mismatch(
     loom_value_id_t target_value_id,
     loom_spirv_value_type_t expected_value_type,
     loom_spirv_value_type_t actual_value_type) {
+  char expected_type_buffer[LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY];
+  char actual_type_buffer[LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY];
   loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
       loom_param_string(
           loom_low_diagnostic_value_name(state->module, source_value_id)),
       loom_param_string(
           loom_low_diagnostic_value_name(state->module, target_value_id)),
-      loom_param_string(
-          loom_spirv_low_value_type_format(state, expected_value_type)),
-      loom_param_string(
-          loom_spirv_low_value_type_format(state, actual_value_type)),
+      loom_param_string(loom_spirv_low_value_type_format(
+          expected_value_type, expected_type_buffer,
+          sizeof(expected_type_buffer))),
+      loom_param_string(loom_spirv_low_value_type_format(
+          actual_value_type, actual_type_buffer, sizeof(actual_type_buffer))),
   };
   return loom_spirv_low_emit(context, op, LOOM_ERR_SPIRV_020, params,
                              IREE_ARRAYSIZE(params));
@@ -1126,6 +1012,73 @@ static iree_status_t loom_spirv_low_verify_scf_for(
   return iree_ok_status();
 }
 
+static iree_status_t loom_spirv_low_verify_scf_while(
+    loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
+    const loom_op_t* op) {
+  const loom_block_t* before_block =
+      loom_region_const_entry_block(loom_low_scf_while_before(op));
+  const loom_block_t* after_block =
+      loom_region_const_entry_block(loom_low_scf_while_after(op));
+  const loom_value_slice_t iter_args = loom_low_scf_while_iter_args(op);
+  const loom_value_slice_t results = loom_low_scf_while_results(op);
+  if (before_block == NULL || after_block == NULL ||
+      before_block->arg_count != iter_args.count ||
+      after_block->arg_count != iter_args.count ||
+      results.count != iter_args.count) {
+    return iree_ok_status();
+  }
+  for (uint16_t i = 0; i < iter_args.count; ++i) {
+    loom_spirv_value_type_t iter_arg_type = {0};
+    if (!loom_spirv_low_value_type_table_lookup(
+            &state->value_types, iter_args.values[i], &iter_arg_type)) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(loom_spirv_low_define_or_verify_value_type(
+        context, state, op, iter_args.values[i],
+        loom_block_arg_id(before_block, i), iter_arg_type));
+    IREE_RETURN_IF_ERROR(loom_spirv_low_define_or_verify_value_type(
+        context, state, op, iter_args.values[i],
+        loom_block_arg_id(after_block, i), iter_arg_type));
+    IREE_RETURN_IF_ERROR(loom_spirv_low_define_or_verify_value_type(
+        context, state, op, iter_args.values[i], results.values[i],
+        iter_arg_type));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_spirv_low_verify_scf_condition(
+    loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
+    const loom_op_t* op) {
+  IREE_RETURN_IF_ERROR(loom_spirv_low_verify_bool_condition(
+      context, state, op, loom_low_scf_condition_condition(op)));
+  const loom_op_t* parent_op = op->parent_op;
+  if (parent_op == NULL || !loom_low_scf_while_isa(parent_op)) {
+    return loom_spirv_low_emit_unsupported_structural_op(context, state, op);
+  }
+  const loom_block_t* after_block =
+      loom_region_const_entry_block(loom_low_scf_while_after(parent_op));
+  const loom_value_slice_t forwarded = loom_low_scf_condition_forwarded(op);
+  const loom_value_slice_t results = loom_low_scf_while_results(parent_op);
+  if (after_block == NULL || after_block->arg_count != forwarded.count ||
+      results.count != forwarded.count) {
+    return iree_ok_status();
+  }
+  for (uint16_t i = 0; i < forwarded.count; ++i) {
+    loom_spirv_value_type_t forwarded_type = {0};
+    if (!loom_spirv_low_value_type_table_lookup(
+            &state->value_types, forwarded.values[i], &forwarded_type)) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(loom_spirv_low_define_or_verify_value_type(
+        context, state, op, forwarded.values[i],
+        loom_block_arg_id(after_block, i), forwarded_type));
+    IREE_RETURN_IF_ERROR(loom_spirv_low_define_or_verify_value_type(
+        context, state, op, forwarded.values[i], results.values[i],
+        forwarded_type));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_spirv_low_verify_scf_if_yield(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
     const loom_op_t* op, const loom_op_t* parent_op) {
@@ -1184,6 +1137,28 @@ static iree_status_t loom_spirv_low_verify_scf_for_yield(
   return iree_ok_status();
 }
 
+static iree_status_t loom_spirv_low_verify_scf_while_yield(
+    loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
+    const loom_op_t* op, const loom_op_t* parent_op) {
+  const loom_block_t* before_block =
+      loom_region_const_entry_block(loom_low_scf_while_before(parent_op));
+  const loom_value_slice_t yielded_values = loom_low_scf_yield_values(op);
+  if (before_block == NULL || before_block->arg_count != yielded_values.count) {
+    return iree_ok_status();
+  }
+  for (uint16_t i = 0; i < yielded_values.count; ++i) {
+    loom_spirv_value_type_t yielded_type = {0};
+    if (!loom_spirv_low_value_type_table_lookup(
+            &state->value_types, yielded_values.values[i], &yielded_type)) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(loom_spirv_low_define_or_verify_value_type(
+        context, state, op, yielded_values.values[i],
+        loom_block_arg_id(before_block, i), yielded_type));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_spirv_low_verify_scf_yield(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
     const loom_op_t* op) {
@@ -1196,6 +1171,9 @@ static iree_status_t loom_spirv_low_verify_scf_yield(
   }
   if (loom_low_scf_for_isa(parent_op)) {
     return loom_spirv_low_verify_scf_for_yield(context, state, op, parent_op);
+  }
+  if (loom_low_scf_while_isa(parent_op)) {
+    return loom_spirv_low_verify_scf_while_yield(context, state, op, parent_op);
   }
   return loom_spirv_low_emit_unsupported_structural_op(context, state, op);
 }
@@ -1263,7 +1241,7 @@ static iree_status_t loom_spirv_low_verify_storage_address(
   }
   const loom_value_id_t result = loom_low_storage_address_result(op);
   loom_spirv_value_type_t result_type = {0};
-  if (!loom_spirv_low_register_value_type(
+  if (!loom_spirv_value_type_from_low_register_type(
           loom_module_value_type(state->module, result), &result_type)) {
     return loom_spirv_low_emit_unsupported_register_type(
         context, state, op, result,
@@ -1362,8 +1340,9 @@ static iree_status_t loom_spirv_low_begin_function(
       .function_name = loom_low_diagnostic_function_name(
           loom_low_verify_context_module(context),
           loom_low_verify_context_function_op(context)),
-      .raw_bda_hal_kernel = target->bundle_storage.export_plan.abi_kind ==
-                            LOOM_TARGET_ABI_HAL_KERNEL,
+      .raw_bda_hal_kernel =
+          loom_low_resolved_target_bundle(target)->export_plan->abi_kind ==
+          LOOM_TARGET_ABI_HAL_KERNEL,
   };
   *out_provider_state = state;
 
@@ -1374,9 +1353,13 @@ static iree_status_t loom_spirv_low_begin_function(
   if (state->body != NULL && state->body->block_count > 0) {
     state->entry_block = loom_region_const_entry_block(state->body);
   }
+  IREE_RETURN_IF_ERROR(loom_spirv_low_verify_empty_abi_layout(context, state));
+  if (state->skip_body_checks) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(loom_spirv_low_seed_entry_args(context, state));
   IREE_RETURN_IF_ERROR(
-      loom_spirv_low_prepare_result_value_types(context, state));
+      loom_spirv_low_verify_result_value_types(context, state));
   if (state->skip_body_checks) {
     return iree_ok_status();
   }
@@ -1386,7 +1369,7 @@ static iree_status_t loom_spirv_low_begin_function(
 static iree_status_t loom_spirv_low_verify_op(
     const loom_low_verify_provider_t* provider,
     loom_low_verify_context_t* context, void* provider_state,
-    const loom_low_resolved_descriptor_packet_t* packet) {
+    const loom_low_descriptor_packet_t* packet) {
   (void)provider;
   loom_spirv_low_verify_state_t* state =
       (loom_spirv_low_verify_state_t*)provider_state;
@@ -1409,6 +1392,12 @@ static iree_status_t loom_spirv_low_verify_op(
   if (loom_low_scf_for_isa(op)) {
     return loom_spirv_low_verify_scf_for(context, state, op);
   }
+  if (loom_low_scf_while_isa(op)) {
+    return loom_spirv_low_verify_scf_while(context, state, op);
+  }
+  if (loom_low_scf_condition_isa(op)) {
+    return loom_spirv_low_verify_scf_condition(context, state, op);
+  }
   if (loom_low_scf_yield_isa(op)) {
     return loom_spirv_low_verify_scf_yield(context, state, op);
   }
@@ -1421,8 +1410,8 @@ static iree_status_t loom_spirv_low_verify_op(
   if (loom_low_storage_address_isa(op)) {
     return loom_spirv_low_verify_storage_address(context, state, op);
   }
-  if (loom_low_copy_isa(op)) {
-    return loom_spirv_low_verify_copy(state, op);
+  if (loom_low_copy_isa(op) || loom_low_move_isa(op)) {
+    return loom_spirv_low_verify_transfer(state, op);
   }
   if (packet->kind != LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
     return loom_spirv_low_verify_packet(context, state, packet);

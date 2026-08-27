@@ -23,11 +23,15 @@ from loom.gen.target.low.compiled import (
 )
 from loom.target.low_descriptors import (
     LOW_DESCRIPTOR_SET_ORDINAL_NONE,
+    AsmResultValueType,
     Descriptor,
     DescriptorSet,
     Hazard,
     HazardReferenceKind,
+    InstructionClass,
+    Operand,
     descriptor_stable_id,
+    operand_source_binding,
 )
 
 
@@ -35,6 +39,16 @@ def _register_part_id_expr(compiled: CompiledDescriptorSet, part_name: str | Non
     if part_name is None:
         return "LOOM_LOW_REGISTER_PART_NONE"
     return str(compiled.register_part_ids[part_name])
+
+
+def _operand_flag_expr(operand: Operand, rematerializable: bool) -> str:
+    flag_expr = c_spelling.flag_expr(operand.flags)
+    if not rematerializable:
+        return flag_expr
+    rematerializable_flag = "LOOM_LOW_OPERAND_FLAG_REMATERIALIZABLE"
+    if flag_expr == "0":
+        return rematerializable_flag
+    return f"{flag_expr} | {rematerializable_flag}"
 
 
 def _hazard_reference_kind(hazard: Hazard) -> HazardReferenceKind:
@@ -214,6 +228,7 @@ def _intern_descriptor_set_view_metadata(compiled: CompiledDescriptorSet, view_s
 def _descriptor_row_lines(
     compiled: CompiledDescriptorSet,
     descriptors: Sequence[Descriptor],
+    instruction_classes: Sequence[tuple[InstructionClass, ...]],
     descriptor_rows: Sequence[dict[str, int]],
     canonical_asm_form_ordinals: Sequence[int | None],
 ) -> list[list[str]]:
@@ -233,6 +248,7 @@ def _descriptor_row_lines(
             f".operand_start = {descriptor_rows[i]['operand_start']},",
             f".operand_count = {descriptor_rows[i]['operand_count']},",
             f".result_count = {descriptor_rows[i]['result_count']},",
+            f".minimum_packet_operand_count = {descriptor_rows[i]['minimum_packet_operand_count']},",
             f".immediate_start = {descriptor_rows[i]['immediate_start']},",
             f".immediate_count = {descriptor_rows[i]['immediate_count']},",
             f".effect_start = {descriptor_rows[i]['effect_start']},",
@@ -245,6 +261,8 @@ def _descriptor_row_lines(
             f".operand_form_count = {descriptor_rows[i]['operand_form_count']},",
             f".schedule_class_id = {compiled.schedule_class_ids[descriptor.schedule_class]},",
             f".flags = {c_spelling.flag_expr(descriptor.flags)},",
+            f".op_kind = {descriptor.op_kind.c_name},",
+            f".instruction_class_flags = {c_spelling.flag_expr(instruction_classes[i])},",
             f".canonical_asm_form_ordinal = {c_spelling.canonical_asm_form_ordinal_expr(canonical_asm_form_ordinals[i])},",
         ]
         for i, descriptor in enumerate(descriptors)
@@ -303,9 +321,12 @@ def _asm_form_row_lines(
             f".native_assembly_mnemonic_string_offset = {c_spelling.optional_string_expr(pool, asm_form.native_assembly_mnemonic_label)},",
             f".descriptor_ordinal = {asm_form.descriptor_ordinal},",
             f".result_operand_index_start = {asm_form.result_index_start},",
+            f".result_value_type_start = {asm_form.result_value_type_start if asm_form.result_value_type_start is not None else 'LOOM_LOW_ASM_RESULT_VALUE_TYPE_START_NONE'},",
             f".result_operand_index_count = {len(asm_form.result_indices)},",
             f".operand_index_start = {asm_form.operand_index_start},",
+            f".operand_segment_start = {asm_form.operand_segment_start},",
             f".operand_index_count = {len(asm_form.operand_indices)},",
+            f".operand_segment_count = {len(asm_form.operand_segments)},",
             f".immediate_start = {asm_form.immediate_start},",
             f".immediate_count = {len(asm_form.immediates)},",
             f".native_assembly_value_start = {asm_form.native_assembly_value_start},",
@@ -313,6 +334,25 @@ def _asm_form_row_lines(
         ]
         for asm_form in asm_forms
     ]
+
+
+def _asm_result_value_type_row_lines(
+    value_types: Sequence[AsmResultValueType | None],
+) -> list[list[str]]:
+    rows: list[list[str]] = []
+    for value_type in value_types:
+        if value_type is None:
+            rows.append([".kind = LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_NONE,"])
+            continue
+        kind = "LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_VECTOR" if value_type.vector_lane_count else "LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_SCALAR"
+        row = [
+            f".kind = {kind},",
+            f".element_type = LOOM_SCALAR_TYPE_{value_type.element_type.name},",
+        ]
+        if value_type.vector_lane_count:
+            row.append(f".vector_lane_count = {value_type.vector_lane_count},")
+        rows.append(row)
+    return rows
 
 
 def _native_asm_value_row_lines(
@@ -375,6 +415,8 @@ def emit_source_for_views(
                 f".flags = {c_spelling.flag_expr(reg_class.flags)},",
                 f".alloc_unit_bits = {reg_class.alloc_unit_bits},",
                 f".allocatable_count = {reg_class.allocatable_count},",
+                f".fixed_location_base = {reg_class.fixed_location_base},",
+                f".fixed_location_count = {reg_class.fixed_location_count},",
                 f".alias_set_id = {reg_class.alias_set_id},",
                 ".spill_class_id = " + ("LOOM_LOW_REG_CLASS_NONE" if reg_class.spill_class is None else str(compiled.reg_class_ids[reg_class.spill_class])) + ",",
                 f".full_register_part_mask = {c_spelling.hex_u32_literal(reg_class.full_register_part_mask)},",
@@ -419,13 +461,17 @@ def emit_source_for_views(
         [
             [
                 f".field_name_string_offset = {pool.ref(f'field_{operand.field_name}')},",
+                ".source_value_index = " + ("LOOM_LOW_ID_NONE" if compiled.operand_source_value_indices[i] is None else str(compiled.operand_source_value_indices[i])) + ",",
                 f".role = {operand.role.c_name},",
-                f".flags = {c_spelling.flag_expr(operand.flags)},",
+                f".source_binding = {operand_source_binding(operand.field_name, operand.role).c_name},",
+                ".reserved0 = 0,",
+                f".flags = {_operand_flag_expr(operand, compiled.operand_rematerializable[i])},",
                 f".reg_class_alt_start = {compiled.operand_alt_starts[i]},",
                 f".reg_class_alt_count = {len(operand.reg_alts)},",
                 f".unit_count = {operand.unit_count},",
                 f".address_map_kind = {operand.address_map_kind.c_name},",
                 f".addressable_unit_count = {operand.addressable_unit_count},",
+                f".address_state_slot = {operand.address_state_slot},",
                 f".encoding_field_id = {operand.encoding_field_id},",
                 f".data_format_id = {operand.data_format_id},",
                 f".register_part_id = {_register_part_id_expr(compiled, operand.register_part)},",
@@ -610,6 +656,7 @@ def emit_source_for_views(
             [
                 f".name_string_offset = {pool.ref(f'schedule_{schedule_class.name}')},",
                 f".latency_cycles = {schedule_class.latency_cycles},",
+                f".schedule_distance_cycles = {schedule_class.schedule_distance_cycles},",
                 f".latency_kind = {schedule_class.latency_kind.c_name},",
                 f".issue_use_start = {compiled.schedule_rows[i]['issue_use_start']},",
                 f".issue_use_count = {compiled.schedule_rows[i]['issue_use_count']},",
@@ -681,33 +728,34 @@ def emit_source_for_views(
         _descriptor_row_lines(
             compiled,
             compiled.descriptors,
+            compiled.instruction_classes,
             compiled.descriptor_rows,
             compiled.canonical_asm_form_ordinals,
         ),
     )
     for view in views:
-        if view.uses_storage_descriptor_tables:
-            continue
-        view_descriptors = [compiled.descriptors[descriptor_ordinal] for descriptor_ordinal in view.descriptor_ordinals]
-        _emit_array(
-            lines,
-            "loom_low_descriptor_t",
-            view.spec.c_table_prefix,
-            "Descriptors",
-            _descriptor_row_lines(
-                compiled,
-                view_descriptors,
-                view.descriptor_rows,
-                view.canonical_asm_form_ordinals,
-            ),
-        )
-        _emit_array(
-            lines,
-            "loom_low_operand_form_t",
-            view.spec.c_table_prefix,
-            "OperandForms",
-            _operand_form_row_lines(view.operand_forms),
-        )
+        if not view.uses_storage_descriptor_tables:
+            _emit_array(
+                lines,
+                "loom_low_descriptor_t",
+                view.spec.c_table_prefix,
+                "Descriptors",
+                _descriptor_row_lines(
+                    compiled,
+                    view.descriptors,
+                    view.instruction_classes,
+                    view.descriptor_rows,
+                    view.canonical_asm_form_ordinals,
+                ),
+            )
+        if not view.uses_storage_operand_form_tables:
+            _emit_array(
+                lines,
+                "loom_low_operand_form_t",
+                view.spec.c_table_prefix,
+                "OperandForms",
+                _operand_form_row_lines(view.operand_forms),
+            )
     for view in views:
         _emit_array(
             lines,
@@ -729,6 +777,27 @@ def emit_source_for_views(
             f"k{spec.c_table_prefix}AsmOperandIndices",
             [str(operand_index) for operand_index in compiled.asm_operand_indices],
         )
+    _emit_array(
+        lines,
+        "loom_low_asm_operand_segment_t",
+        spec.c_table_prefix,
+        "AsmOperandSegments",
+        [
+            [
+                f".delimiter = {segment.delimiter.c_name},",
+                f".operand_count = {segment.operand_count},",
+                f".flags = {'LOOM_LOW_ASM_OPERAND_SEGMENT_FLAG_VARIADIC' if segment.has_variadic_operand else '0'},",
+            ]
+            for segment in compiled.asm_operand_segments
+        ],
+    )
+    _emit_array(
+        lines,
+        "loom_low_asm_result_value_type_t",
+        spec.c_table_prefix,
+        "AsmResultValueTypes",
+        _asm_result_value_type_row_lines(compiled.asm_result_value_types),
+    )
     _emit_array(
         lines,
         "loom_low_asm_immediate_t",
@@ -766,6 +835,15 @@ def emit_source_for_views(
             "AsmForms",
             _asm_form_row_lines(compiled, view.asm_forms),
         )
+    for view in views:
+        if not view.spec.supported_target_contract_keys:
+            continue
+        c_arrays.append_value_array(
+            lines,
+            "uint64_t",
+            f"k{view.spec.c_table_prefix}SupportedTargetContractStableIds",
+            [c_spelling.hex_u64_literal(descriptor_stable_id(key)) for key in view.spec.supported_target_contract_keys],
+        )
 
     table_count_fields = {
         "operands": "operand_count",
@@ -786,6 +864,8 @@ def emit_source_for_views(
         "pressure_deltas": "pressure_delta_count",
         "asm_forms": "asm_form_count",
         "asm_operand_indices": "asm_operand_index_count",
+        "asm_operand_segments": "asm_operand_segment_count",
+        "asm_result_value_types": "asm_result_value_type_count",
         "asm_immediates": "asm_immediate_count",
         "native_asm_values": "native_asm_value_count",
         "encoding_field_values": "encoding_field_value_count",
@@ -811,6 +891,14 @@ def emit_source_for_views(
             f"    .generator_version = {view_spec.generator_version},",
             f"    .stable_id = UINT64_C(0x{descriptor_stable_id(view_spec.key):016x}),",
             f"    .target_stable_id = {c_spelling.hex_u64_literal(descriptor_stable_id(view_spec.target_key)) if view_spec.target_key is not None else 'LOOM_LOW_STABLE_ID_NONE'},",
+            *(
+                [
+                    f"    .supported_target_contract_stable_ids = k{view_spec.c_table_prefix}SupportedTargetContractStableIds,",
+                    f"    .supported_target_contract_count = IREE_ARRAYSIZE(k{view_spec.c_table_prefix}SupportedTargetContractStableIds),",
+                ]
+                if view_spec.supported_target_contract_keys
+                else []
+            ),
             f"    .descriptor_set_ordinal = {c_spelling.u16_literal(view_spec.descriptor_set_ordinal if view_spec.descriptor_set_ordinal is not None else LOW_DESCRIPTOR_SET_ORDINAL_NONE)},",
             f"    .key_string_offset = {pool.ref(_metadata_string_label(spec, view_spec, 'set_key'))},",
             f"    .target_key_string_offset = {c_spelling.optional_string_expr(pool, _metadata_string_label(spec, view_spec, 'target_key') if view_spec.target_key is not None else None)},",
@@ -846,6 +934,12 @@ def emit_source_for_views(
             view_lines.append(f"    .asm_forms = k{asm_form_table_prefix}AsmForms,")
             view_lines.append(f"    .asm_form_count = IREE_ARRAYSIZE(k{asm_form_table_prefix}AsmForms),")
             append_optional_table("asm_operand_indices", "AsmOperandIndices", view_lines)
+            append_optional_table("asm_operand_segments", "AsmOperandSegments", view_lines)
+            append_optional_table(
+                "asm_result_value_types",
+                "AsmResultValueTypes",
+                view_lines,
+            )
             append_optional_table("asm_immediates", "AsmImmediates", view_lines)
             append_optional_table("native_asm_values", "NativeAsmValues", view_lines)
         append_optional_table("encoding_field_values", "EncodingFieldValues", view_lines)
@@ -881,6 +975,8 @@ def emit_source(compiled: CompiledDescriptorSet) -> str:
         views=[
             DescriptorSetView(
                 spec=compiled.spec,
+                descriptors=tuple(compiled.descriptors),
+                instruction_classes=tuple(compiled.instruction_classes),
                 descriptor_ordinals=tuple(range(len(compiled.descriptors))),
                 descriptor_refs=compiled.descriptor_refs,
                 descriptor_rows=compiled.descriptor_rows,

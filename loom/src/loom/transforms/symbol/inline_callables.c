@@ -8,8 +8,9 @@
 
 #include <string.h>
 
+#include "loom/analysis/availability.h"
 #include "loom/analysis/scc.h"
-#include "loom/analysis/symbol_dependencies.h"
+#include "loom/analysis/symbol_references.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -17,7 +18,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/rewrite/callable.h"
 #include "loom/rewrite/rewriter.h"
-#include "loom/target/selection.h"
+#include "loom/target/pass_environment.h"
 
 //===----------------------------------------------------------------------===//
 // Statistics
@@ -80,7 +81,7 @@ typedef enum loom_inline_blocker_e {
   LOOM_INLINE_BLOCKER_CALLEE_BODY_NOT_SINGLE_BLOCK = 11,
   LOOM_INLINE_BLOCKER_RECURSIVE_BODY = 12,
   LOOM_INLINE_BLOCKER_CALLEE_BODY_MISSING_TERMINATOR = 13,
-  LOOM_INLINE_BLOCKER_CALLEE_BODY_MISSING_RETURN = 14,
+  LOOM_INLINE_BLOCKER_CALLEE_BODY_INVALID_TERMINATOR = 14,
   LOOM_INLINE_BLOCKER_OPERAND_COUNT_MISMATCH = 15,
   LOOM_INLINE_BLOCKER_INVALID_OPERAND_OR_ARGUMENT = 16,
   LOOM_INLINE_BLOCKER_OPERAND_TYPE_MISMATCH = 17,
@@ -103,12 +104,14 @@ typedef struct loom_inline_symbol_info_t {
 } loom_inline_symbol_info_t;
 
 typedef struct loom_inline_plan_entry_t {
-  // Stable ordinal assigned in dependency edge order.
+  // Stable ordinal assigned in reference occurrence order.
   uint32_t ordinal;
-  // Dependency edge that produced this call plan entry.
-  loom_symbol_dependency_edge_id_t dependency_edge_id;
+  // Reference occurrence that produced this call plan entry.
+  loom_symbol_reference_occurrence_id_t reference_occurrence_id;
   // Next required-inline entry with the same source symbol.
   uint32_t next_required_from_source;
+  // Next required-inline entry executed in the same SCC component.
+  uint32_t next_required_in_component;
   // Symbol whose definition owns call_op.
   loom_symbol_id_t source_symbol_id;
   // Symbol referenced by the call-like callee attr.
@@ -120,11 +123,11 @@ typedef struct loom_inline_plan_entry_t {
   // Function-like interface for the target definition.
   loom_func_like_t callee;
   // Inline policy read from the callee symbol definition.
-  uint8_t callee_policy;
+  loom_inline_policy_t callee_policy;
   // Inline policy read from the call site.
-  uint8_t call_policy;
+  loom_inline_policy_t call_policy;
   // Effective edge inline policy after conflict resolution.
-  uint8_t effective_policy;
+  loom_inline_policy_t effective_policy;
   // Temperature hint read from the callee symbol definition.
   uint8_t callee_temperature;
   // Temperature hint read from the call site.
@@ -139,6 +142,13 @@ typedef struct loom_inline_plan_entry_t {
   uint32_t execution_ordinal;
 } loom_inline_plan_entry_t;
 
+typedef struct loom_inline_component_entries_t {
+  // First required-inline entry in stable occurrence order.
+  uint32_t first_entry;
+  // Last required-inline entry used to append in stable occurrence order.
+  uint32_t last_entry;
+} loom_inline_component_entries_t;
+
 typedef struct loom_inline_state_t {
   // Active pass invocation.
   loom_pass_t* pass;
@@ -146,8 +156,8 @@ typedef struct loom_inline_state_t {
   loom_inline_callables_statistics_t* statistics;
   // Module being transformed.
   loom_module_t* module;
-  // Dependency table built from the immutable module snapshot.
-  loom_symbol_dependency_table_t dependencies;
+  // Reference table built from the immutable module snapshot.
+  loom_symbol_reference_table_t references;
   // Dense symbol summaries indexed by module symbol id.
   loom_inline_symbol_info_t* symbols;
   // Dense plan entries collected from direct call edges.
@@ -160,14 +170,16 @@ typedef struct loom_inline_state_t {
   loom_scc_list_t sccs;
   // SCC ordinal for each symbol id, or IREE_HOST_SIZE_MAX when absent.
   iree_host_size_t* component_by_symbol;
+  // Required-inline entries indexed by their source SCC component.
+  loom_inline_component_entries_t* component_entries;
 } loom_inline_state_t;
 
-static bool loom_inline_policy_is_inline(uint8_t policy) {
-  return policy == LOOM_FUNC_INLINE_POLICY_INLINE;
+static bool loom_inline_policy_is_inline(loom_inline_policy_t policy) {
+  return policy == LOOM_INLINE_POLICY_INLINE;
 }
 
-static bool loom_inline_policy_is_noinline(uint8_t policy) {
-  return policy == LOOM_FUNC_INLINE_POLICY_NOINLINE;
+static bool loom_inline_policy_is_noinline(loom_inline_policy_t policy) {
+  return policy == LOOM_INLINE_POLICY_NOINLINE;
 }
 
 static iree_string_view_t loom_inline_symbol_name(const loom_module_t* module,
@@ -197,14 +209,7 @@ static bool loom_inline_symbol_is_transferable(const loom_module_t* module,
   if (!loom_func_like_isa(function)) {
     return false;
   }
-  if (loom_func_like_visibility(function) != 0) {
-    return false;
-  }
-  if (loom_func_like_export_symbol(function) != LOOM_STRING_ID_INVALID ||
-      loom_func_like_export_attrs(function).count > 0) {
-    return false;
-  }
-  return true;
+  return loom_func_like_is_module_internal(function);
 }
 
 static iree_string_view_t loom_inline_blocker_code(
@@ -236,8 +241,8 @@ static iree_string_view_t loom_inline_blocker_code(
       return IREE_SV("recursive_body");
     case LOOM_INLINE_BLOCKER_CALLEE_BODY_MISSING_TERMINATOR:
       return IREE_SV("callee_body_missing_terminator");
-    case LOOM_INLINE_BLOCKER_CALLEE_BODY_MISSING_RETURN:
-      return IREE_SV("callee_body_missing_return");
+    case LOOM_INLINE_BLOCKER_CALLEE_BODY_INVALID_TERMINATOR:
+      return IREE_SV("callee_body_invalid_terminator");
     case LOOM_INLINE_BLOCKER_OPERAND_COUNT_MISMATCH:
       return IREE_SV("operand_count_mismatch");
     case LOOM_INLINE_BLOCKER_INVALID_OPERAND_OR_ARGUMENT:
@@ -284,10 +289,11 @@ static bool loom_inline_op_is_inside_region(const loom_op_t* op,
 static iree_status_t loom_inline_allocate_state(loom_inline_state_t* state) {
   loom_pass_t* pass = state->pass;
   loom_module_t* module = state->module;
-  if (state->dependencies.edge_count > UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "inline-callables dependency edge count exceeds "
-                            "uint32_t range");
+  if (state->references.occurrence_count > UINT32_MAX) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "inline-callables reference occurrence count exceeds "
+        "uint32_t range");
   }
   if (module->symbols.count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -308,12 +314,12 @@ static iree_status_t loom_inline_allocate_state(loom_inline_state_t* state) {
     }
   }
 
-  if (state->dependencies.edge_count > 0) {
+  if (state->references.occurrence_count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        pass->arena, state->dependencies.edge_count, sizeof(*state->entries),
-        (void**)&state->entries));
+        pass->arena, state->references.occurrence_count,
+        sizeof(*state->entries), (void**)&state->entries));
     memset(state->entries, 0,
-           state->dependencies.edge_count * sizeof(*state->entries));
+           state->references.occurrence_count * sizeof(*state->entries));
   }
   return iree_ok_status();
 }
@@ -334,6 +340,13 @@ static uint8_t loom_inline_effective_temperature(uint8_t callee_temperature,
 
 static void loom_inline_resolve_entry_policy(loom_inline_state_t* state,
                                              loom_inline_plan_entry_t* entry) {
+  if (loom_call_like_kind(entry->call) == LOOM_CALL_LIKE_KIND_TEMPLATE) {
+    entry->effective_policy = LOOM_INLINE_POLICY_INLINE;
+    entry->action = LOOM_INLINE_PLAN_ACTION_REQUIRED;
+    ++state->statistics->required_edges;
+    return;
+  }
+
   const bool callee_inline = loom_inline_policy_is_inline(entry->callee_policy);
   const bool callee_noinline =
       loom_inline_policy_is_noinline(entry->callee_policy);
@@ -341,20 +354,20 @@ static void loom_inline_resolve_entry_policy(loom_inline_state_t* state,
   const bool call_noinline = loom_inline_policy_is_noinline(entry->call_policy);
 
   if ((callee_inline && call_noinline) || (callee_noinline && call_inline)) {
-    entry->effective_policy = LOOM_FUNC_INLINE_POLICY_INLINE;
+    entry->effective_policy = LOOM_INLINE_POLICY_INLINE;
     loom_inline_mark_blocker(entry, LOOM_INLINE_BLOCKER_POLICY_CONFLICT);
     return;
   }
 
   if (callee_noinline || call_noinline) {
-    entry->effective_policy = LOOM_FUNC_INLINE_POLICY_NOINLINE;
+    entry->effective_policy = LOOM_INLINE_POLICY_NOINLINE;
     entry->action = LOOM_INLINE_PLAN_ACTION_KEEP;
     ++state->statistics->kept_edges;
     return;
   }
 
   if (callee_inline || call_inline) {
-    entry->effective_policy = LOOM_FUNC_INLINE_POLICY_INLINE;
+    entry->effective_policy = LOOM_INLINE_POLICY_INLINE;
     entry->action = LOOM_INLINE_PLAN_ACTION_REQUIRED;
     ++state->statistics->required_edges;
     return;
@@ -381,13 +394,17 @@ static void loom_inline_add_required_graph_edge(loom_inline_state_t* state,
   state->symbols[entry->target_symbol_id].planned_call_removals++;
 }
 
-static void loom_inline_collect_dependency_counts(loom_inline_state_t* state) {
-  for (iree_host_size_t i = 0; i < state->dependencies.edge_count; ++i) {
-    const loom_symbol_dependency_edge_t* edge = &state->dependencies.edges[i];
+static void loom_inline_collect_reference_counts(loom_inline_state_t* state) {
+  for (iree_host_size_t i = 0; i < state->references.occurrence_count; ++i) {
+    const loom_symbol_reference_occurrence_t* edge =
+        &state->references.occurrences[i];
+    if (!loom_symbol_reference_occurrence_is_dependency(edge)) {
+      continue;
+    }
     if (edge->target_symbol_id >= state->module->symbols.count) {
       continue;
     }
-    if (edge->kind == LOOM_SYMBOL_DEPENDENCY_EDGE_CALL) {
+    if (edge->kind == LOOM_SYMBOL_REFERENCE_OCCURRENCE_CALL) {
       state->symbols[edge->target_symbol_id].incoming_call_count++;
     } else {
       state->symbols[edge->target_symbol_id].incoming_non_call_ref_count++;
@@ -396,18 +413,21 @@ static void loom_inline_collect_dependency_counts(loom_inline_state_t* state) {
 }
 
 static iree_status_t loom_inline_build_plan(loom_inline_state_t* state) {
-  loom_inline_collect_dependency_counts(state);
-  for (iree_host_size_t i = 0; i < state->dependencies.edge_count; ++i) {
-    const loom_symbol_dependency_edge_t* edge = &state->dependencies.edges[i];
-    if (edge->kind != LOOM_SYMBOL_DEPENDENCY_EDGE_CALL) {
+  loom_inline_collect_reference_counts(state);
+  for (iree_host_size_t i = 0; i < state->references.occurrence_count; ++i) {
+    const loom_symbol_reference_occurrence_t* edge =
+        &state->references.occurrences[i];
+    if (!loom_symbol_reference_occurrence_is_dependency(edge) ||
+        edge->kind != LOOM_SYMBOL_REFERENCE_OCCURRENCE_CALL) {
       continue;
     }
 
     uint32_t entry_index = state->entry_count++;
     loom_inline_plan_entry_t* entry = &state->entries[entry_index];
     entry->ordinal = entry_index;
-    entry->dependency_edge_id = (loom_symbol_dependency_edge_id_t)i;
+    entry->reference_occurrence_id = (loom_symbol_reference_occurrence_id_t)i;
     entry->next_required_from_source = LOOM_INLINE_PLAN_ENTRY_INVALID;
+    entry->next_required_in_component = LOOM_INLINE_PLAN_ENTRY_INVALID;
     entry->source_symbol_id = edge->source_symbol_id;
     entry->target_symbol_id = edge->target_symbol_id;
     entry->call_op = (loom_op_t*)edge->user_op;
@@ -471,6 +491,44 @@ static iree_status_t loom_inline_compute_required_sccs(
   return iree_ok_status();
 }
 
+static iree_status_t loom_inline_index_required_entries_by_component(
+    loom_inline_state_t* state) {
+  if (state->sccs.count == 0) return iree_ok_status();
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      state->pass->arena, state->sccs.count, sizeof(*state->component_entries),
+      (void**)&state->component_entries));
+  for (iree_host_size_t component_index = 0;
+       component_index < state->sccs.count; ++component_index) {
+    state->component_entries[component_index] =
+        (loom_inline_component_entries_t){
+            .first_entry = LOOM_INLINE_PLAN_ENTRY_INVALID,
+            .last_entry = LOOM_INLINE_PLAN_ENTRY_INVALID,
+        };
+  }
+
+  for (uint32_t entry_index = 0; entry_index < state->entry_count;
+       ++entry_index) {
+    loom_inline_plan_entry_t* entry = &state->entries[entry_index];
+    if (entry->action != LOOM_INLINE_PLAN_ACTION_REQUIRED ||
+        entry->source_symbol_id >= state->module->symbols.count) {
+      continue;
+    }
+    const iree_host_size_t component_index =
+        state->component_by_symbol[entry->source_symbol_id];
+    if (component_index >= state->sccs.count) continue;
+    loom_inline_component_entries_t* component_entries =
+        &state->component_entries[component_index];
+    uint32_t previous_entry = component_entries->last_entry;
+    if (previous_entry == LOOM_INLINE_PLAN_ENTRY_INVALID) {
+      component_entries->first_entry = entry_index;
+    } else {
+      state->entries[previous_entry].next_required_in_component = entry_index;
+    }
+    component_entries->last_entry = entry_index;
+  }
+  return iree_ok_status();
+}
+
 static void loom_inline_mark_cycle_blockers(loom_inline_state_t* state) {
   for (iree_host_size_t component_index = 0;
        component_index < state->sccs.count; ++component_index) {
@@ -478,20 +536,19 @@ static void loom_inline_mark_cycle_blockers(loom_inline_state_t* state) {
     if (!component->is_cycle) {
       continue;
     }
-    for (uint32_t entry_index = 0; entry_index < state->entry_count;
-         ++entry_index) {
+    for (uint32_t entry_index =
+             state->component_entries[component_index].first_entry;
+         entry_index != LOOM_INLINE_PLAN_ENTRY_INVALID;
+         entry_index = state->entries[entry_index].next_required_in_component) {
       loom_inline_plan_entry_t* entry = &state->entries[entry_index];
       if (entry->action != LOOM_INLINE_PLAN_ACTION_REQUIRED) {
         continue;
       }
-      if (entry->source_symbol_id >= state->module->symbols.count ||
-          entry->target_symbol_id >= state->module->symbols.count) {
+      if (entry->target_symbol_id >= state->module->symbols.count) {
         continue;
       }
-      if (state->component_by_symbol[entry->source_symbol_id] ==
-              component_index &&
-          state->component_by_symbol[entry->target_symbol_id] ==
-              component_index) {
+      if (state->component_by_symbol[entry->target_symbol_id] ==
+          component_index) {
         loom_inline_mark_blocker(entry, LOOM_INLINE_BLOCKER_REQUIRED_CYCLE);
       }
     }
@@ -506,6 +563,7 @@ static loom_inline_blocker_t loom_inline_validate_call_kind(
     const loom_inline_plan_entry_t* entry) {
   switch (loom_call_like_kind(entry->call)) {
     case LOOM_CALL_LIKE_KIND_SEMANTIC:
+    case LOOM_CALL_LIKE_KIND_TEMPLATE:
       if (loom_func_like_isa(entry->callee)) {
         return LOOM_INLINE_BLOCKER_NONE;
       }
@@ -558,8 +616,17 @@ static loom_inline_blocker_t loom_inline_validate_inline_body(
     return LOOM_INLINE_BLOCKER_CALLEE_BODY_MISSING_TERMINATOR;
   }
   loom_op_t* return_op = loom_block_op(entry_block, entry_block->op_count - 1);
-  if (!loom_func_return_isa(return_op)) {
-    return LOOM_INLINE_BLOCKER_CALLEE_BODY_MISSING_RETURN;
+  const uint8_t body_region_index =
+      loom_func_like_body_region_index(entry->callee);
+  const loom_op_vtable_t* callee_vtable =
+      loom_op_vtable(module, entry->callee.op);
+  const loom_region_descriptor_t* body_descriptor =
+      loom_op_vtable_region_descriptor(callee_vtable, body_region_index);
+  if (!body_descriptor ||
+      !loom_op_has_trait(module, return_op, LOOM_TRAIT_TERMINATOR) ||
+      (body_descriptor->terminator != LOOM_OP_KIND_UNKNOWN &&
+       return_op->kind != body_descriptor->terminator)) {
+    return LOOM_INLINE_BLOCKER_CALLEE_BODY_INVALID_TERMINATOR;
   }
 
   uint16_t arg_count = 0;
@@ -582,7 +649,10 @@ static loom_inline_blocker_t loom_inline_validate_inline_body(
     }
   }
 
-  loom_value_slice_t return_operands = loom_func_return_operands(return_op);
+  loom_value_slice_t return_operands = {
+      .values = loom_op_operands(return_op),
+      .count = return_op->operand_count,
+  };
   loom_value_slice_t call_results = loom_call_like_results(entry->call);
   if (return_operands.count != call_results.count) {
     return LOOM_INLINE_BLOCKER_RETURN_COUNT_MISMATCH;
@@ -658,17 +728,12 @@ static void loom_inline_assign_execution_order(loom_inline_state_t* state) {
   uint32_t execution_ordinal = 0;
   for (iree_host_size_t component_index = 0;
        component_index < state->sccs.count; ++component_index) {
-    for (uint32_t entry_index = 0; entry_index < state->entry_count;
-         ++entry_index) {
+    for (uint32_t entry_index =
+             state->component_entries[component_index].first_entry;
+         entry_index != LOOM_INLINE_PLAN_ENTRY_INVALID;
+         entry_index = state->entries[entry_index].next_required_in_component) {
       loom_inline_plan_entry_t* entry = &state->entries[entry_index];
       if (entry->action != LOOM_INLINE_PLAN_ACTION_REQUIRED) {
-        continue;
-      }
-      if (entry->source_symbol_id >= state->module->symbols.count) {
-        continue;
-      }
-      if (state->component_by_symbol[entry->source_symbol_id] !=
-          component_index) {
         continue;
       }
       entry->execution_ordinal = execution_ordinal++;
@@ -691,11 +756,19 @@ static bool loom_inline_symbol_can_transfer(const loom_inline_state_t* state,
   if (!loom_inline_symbol_is_transferable(state->module, info->symbol)) {
     return false;
   }
+  const loom_symbol_ref_t family =
+      loom_func_like_template_family(info->function);
+  if (loom_symbol_ref_is_valid(family) &&
+      loom_symbol_reference_template_family_is_demanded(&state->references,
+                                                        family.symbol_id)) {
+    return false;
+  }
   return loom_func_like_body(info->function) != NULL;
 }
 
 static iree_status_t loom_inline_select_transfer_actions(
-    loom_inline_state_t* state) {
+    loom_inline_state_t* state, uint32_t* out_transfer_count) {
+  *out_transfer_count = 0;
   uint32_t* final_entry_by_symbol = NULL;
   if (state->module->symbols.count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -731,6 +804,7 @@ static iree_status_t loom_inline_select_transfer_actions(
     }
     if (final_entry_by_symbol[entry->target_symbol_id] == entry_index) {
       entry->action = LOOM_INLINE_PLAN_ACTION_TRANSFER;
+      ++*out_transfer_count;
     } else {
       entry->action = LOOM_INLINE_PLAN_ACTION_CLONE;
     }
@@ -740,6 +814,7 @@ static iree_status_t loom_inline_select_transfer_actions(
 
 static iree_status_t loom_inline_execute_entry(
     loom_inline_state_t* state, loom_rewriter_t* rewriter,
+    const loom_availability_analysis_t* transfer_availability,
     loom_inline_plan_entry_t* entry) {
   switch (entry->action) {
     case LOOM_INLINE_PLAN_ACTION_CLONE: {
@@ -750,8 +825,9 @@ static iree_status_t loom_inline_execute_entry(
       return iree_ok_status();
     }
     case LOOM_INLINE_PLAN_ACTION_TRANSFER: {
+      IREE_ASSERT(transfer_availability);
       IREE_RETURN_IF_ERROR(loom_callable_inline_consuming_call(
-          rewriter, entry->call_op, entry->callee));
+          rewriter, transfer_availability, entry->call_op, entry->callee));
       loom_pass_mark_changed(state->pass);
       ++state->statistics->calls_transferred;
       ++state->statistics->symbols_transferred;
@@ -762,27 +838,31 @@ static iree_status_t loom_inline_execute_entry(
   }
 }
 
-static iree_status_t loom_inline_execute_plan(loom_inline_state_t* state) {
+static iree_status_t loom_inline_execute_plan(loom_inline_state_t* state,
+                                              uint32_t transfer_count) {
   loom_rewriter_t rewriter = {0};
   IREE_RETURN_IF_ERROR(
       loom_rewriter_initialize(&rewriter, state->module, state->pass->arena));
 
-  iree_status_t status = iree_ok_status();
+  loom_availability_analysis_t transfer_availability = {0};
+  iree_status_t status =
+      transfer_count == 0
+          ? iree_ok_status()
+          : loom_availability_analysis_initialize(
+                state->module, state->pass->arena, &transfer_availability);
+  const loom_availability_analysis_t* transfer_availability_ptr =
+      transfer_count > 0 ? &transfer_availability : NULL;
   for (iree_host_size_t component_index = 0;
        iree_status_is_ok(status) && component_index < state->sccs.count;
        ++component_index) {
-    for (uint32_t entry_index = 0;
-         iree_status_is_ok(status) && entry_index < state->entry_count;
-         ++entry_index) {
+    for (uint32_t entry_index =
+             state->component_entries[component_index].first_entry;
+         iree_status_is_ok(status) &&
+         entry_index != LOOM_INLINE_PLAN_ENTRY_INVALID;
+         entry_index = state->entries[entry_index].next_required_in_component) {
       loom_inline_plan_entry_t* entry = &state->entries[entry_index];
-      if (entry->source_symbol_id >= state->module->symbols.count) {
-        continue;
-      }
-      if (state->component_by_symbol[entry->source_symbol_id] !=
-          component_index) {
-        continue;
-      }
-      status = loom_inline_execute_entry(state, &rewriter, entry);
+      status = loom_inline_execute_entry(state, &rewriter,
+                                         transfer_availability_ptr, entry);
     }
   }
 
@@ -801,12 +881,13 @@ iree_status_t loom_inline_callables_run(loom_pass_t* pass,
       .statistics = loom_inline_callables_statistics(pass),
       .module = module,
   };
-  IREE_RETURN_IF_ERROR(loom_symbol_dependency_table_build(module, pass->arena,
-                                                          &state.dependencies));
+  IREE_RETURN_IF_ERROR(loom_symbol_reference_table_build(module, pass->arena,
+                                                         &state.references));
   IREE_RETURN_IF_ERROR(loom_inline_allocate_state(&state));
   loom_inline_initialize_symbol_infos(&state);
   IREE_RETURN_IF_ERROR(loom_inline_build_plan(&state));
   IREE_RETURN_IF_ERROR(loom_inline_compute_required_sccs(&state));
+  IREE_RETURN_IF_ERROR(loom_inline_index_required_entries_by_component(&state));
   loom_inline_mark_cycle_blockers(&state);
   loom_inline_preflight_required_entries(&state);
   IREE_RETURN_IF_ERROR(loom_inline_emit_blockers(&state));
@@ -815,11 +896,12 @@ iree_status_t loom_inline_callables_run(loom_pass_t* pass,
   }
 
   loom_inline_assign_execution_order(&state);
-  IREE_RETURN_IF_ERROR(loom_inline_select_transfer_actions(&state));
-  IREE_RETURN_IF_ERROR(loom_inline_execute_plan(&state));
+  uint32_t transfer_count = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_inline_select_transfer_actions(&state, &transfer_count));
+  IREE_RETURN_IF_ERROR(loom_inline_execute_plan(&state, transfer_count));
   if (!pass->changed) {
     return iree_ok_status();
   }
-  return loom_target_pass_compact_symbols_preserving_target_ref(
-      pass, module, pass->arena, NULL);
+  return loom_module_compact_symbols(module, pass->arena, NULL);
 }

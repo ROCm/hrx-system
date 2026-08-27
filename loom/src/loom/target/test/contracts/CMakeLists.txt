@@ -9,26 +9,16 @@
 
 iree_add_all_subdirs()
 
-loom_target_table_cc_library(
+loom_target_contract_table_cc_libraries(
   NAME
     core
   GENERATOR
-    loom::py::loom::gen::target::contracts::test_low_contract_fragment
+    loom::py::loom::gen::target::contracts::test_low_contract_table_family
   ARGS
     "--contract-fragment=test_low_core"
-  DEPS
+  CONTRACT_DEPS
     loom::target::contract
-  TESTONLY
-)
-
-loom_target_table_cc_library(
-  NAME
-    core_lower_rules
-  GENERATOR
-    loom::py::loom::gen::target::contracts::test_low_lower_rule_shard
-  ARGS
-    "--contract-fragment=test_low_core"
-  DEPS
+  LOWER_RULE_DEPS
     loom::codegen::low::lower
     loom::ops::buffer
     loom::ops::index

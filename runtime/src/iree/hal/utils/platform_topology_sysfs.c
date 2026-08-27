@@ -160,11 +160,12 @@ iree_status_t iree_hal_platform_query_numa_distance_impl(
   IREE_ASSERT_ARGUMENT(out_distance);
   if (!iree_hal_platform_try_query_numa_distance_impl(node_a, node_b,
                                                       out_distance)) {
+    iree_host_size_t node_count =
+        iree_hal_platform_query_numa_node_count_impl();
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "NUMA node out of range (node_a=%u, node_b=%u, "
                             "node_count=%zu)",
-                            node_a, node_b,
-                            iree_hal_platform_query_numa_node_count_impl());
+                            node_a, node_b, node_count);
   }
   return iree_ok_status();
 }

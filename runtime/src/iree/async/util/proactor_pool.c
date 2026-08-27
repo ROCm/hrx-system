@@ -183,8 +183,11 @@ static iree_status_t iree_async_proactor_pool_ensure_entry_locked(
         iree_make_string_view(name_buffer, strlen(name_buffer));
   }
 
-  IREE_RETURN_IF_ERROR(iree_async_proactor_create_platform(
-      proactor_options, pool->allocator, &entry->proactor));
+  iree_async_proactor_pool_proactor_create_fn_t proactor_create =
+      pool->options.proactor_create ? pool->options.proactor_create
+                                    : iree_async_proactor_create_platform;
+  IREE_RETURN_IF_ERROR(
+      proactor_create(proactor_options, pool->allocator, &entry->proactor));
 
   // Create a poll runner if the factory is configured.
   if (pool->options.runner.create) {

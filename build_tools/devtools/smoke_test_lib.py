@@ -17,6 +17,11 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
+try:
+    from build_tools.devtools import environment
+except ModuleNotFoundError:
+    import environment
+
 
 def find_repo_root() -> Path:
     bazel_workspace_directory = os.environ.get("BUILD_WORKSPACE_DIRECTORY")
@@ -53,8 +58,18 @@ def parse_arguments(description: str) -> argparse.Namespace:
 
 
 def git_paths(*args: str) -> list[str]:
+    git_dir = subprocess.check_output(
+        ["git", "rev-parse", "--absolute-git-dir"],
+        cwd=REPO_ROOT,
+        text=True,
+    ).strip()
     result = subprocess.run(
-        ["git", *args],
+        [
+            "git",
+            f"--git-dir={git_dir}",
+            f"--work-tree={REPO_ROOT}",
+            *args,
+        ],
         cwd=REPO_ROOT,
         check=True,
         stdout=subprocess.PIPE,
@@ -105,14 +120,43 @@ def run_command(
     env: dict[str, str] | None = None,
 ) -> None:
     print("smoke:", " ".join(command), flush=True)
-    subprocess.run(command, cwd=checkout, env=env, check=True)
+    result = subprocess.run(
+        command,
+        cwd=checkout,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    if result.returncode != 0:
+        if result.stdout:
+            print(
+                result.stdout,
+                file=sys.stderr,
+                end="" if result.stdout.endswith("\n") else "\n",
+            )
+        result.check_returncode()
 
 
 def run_bin_wrapper(checkout: Path, wrapper_name: str, args: list[str]) -> None:
     env = smoke_python_environment(remove_python_override=True)
+    wrapper_path = checkout / "build_tools/bin" / wrapper_name
+    command = [str(wrapper_path), *args]
+    if os.name == "nt":
+        bazel_sh = environment.find_windows_bazel_sh(env)
+        if not bazel_sh:
+            raise RuntimeError(
+                "Git Bash is required to run the build_tools/bin wrappers on "
+                "Windows; install Git for Windows or set BAZEL_SH"
+            )
+        # Generated Windows aliases invoke the selected tool-environment Python.
+        # Mirror that contract when exercising the POSIX source wrappers.
+        env[environment.BAZEL_SH_ENV] = bazel_sh
+        env["PYTHON"] = sys.executable
+        command = [bazel_sh, str(wrapper_path), *args]
     run_command(
         checkout,
-        [str(checkout / "build_tools/bin" / wrapper_name), *args],
+        command,
         env=env,
     )
 

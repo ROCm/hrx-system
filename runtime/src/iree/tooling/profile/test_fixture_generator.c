@@ -6,12 +6,23 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 #include "iree/base/api.h"
+#include "iree/base/tooling/flags.h"
 #include "iree/hal/api.h"
 #include "iree/hal/utils/profile_file.h"
 #include "iree/io/file_handle.h"
+
+IREE_FLAG(string, output, "", "Output .ireeprof file path.");
+IREE_FLAG(bool, omit_dispatch_events, false,
+          "Omits device dispatch events from the generated profile.");
+IREE_FLAG(bool, unaligned_device_clock, false,
+          "Marks device clock samples as unaligned with the host clock.");
+
+static const char kUsage[] =
+    "Generates deterministic profile fixtures for iree-profile tests.\n"
+    "\n"
+    "$ test_fixture_generator --output=smoke.ireeprof [options]\n";
 
 static const uint64_t kSmokeSessionId = 1;
 static const uint32_t kSmokePhysicalDevice = 0;
@@ -26,6 +37,7 @@ static const uint64_t kSmokeMetricSourceId = 41;
 static const uint64_t kSmokeSourceSpecificMetricId =
     IREE_HAL_PROFILE_METRIC_ID_PRODUCER_BASE + 1;
 static const uint64_t kSmokeSubmissionId = 77;
+static const uint64_t kSmokeTimestampFrequencyHz = 100000000;
 
 static iree_status_t write_profile_chunk_iovecs(
     iree_hal_profile_sink_t* sink, iree_string_view_t content_type,
@@ -56,7 +68,8 @@ static iree_status_t write_profile_chunk(iree_hal_profile_sink_t* sink,
 }
 
 static iree_status_t write_smoke_profile(iree_string_view_t path,
-                                         bool include_dispatch_events) {
+                                         bool include_dispatch_events,
+                                         bool unaligned_device_clock) {
   iree_io_file_handle_t* file_handle = NULL;
   IREE_RETURN_IF_ERROR(iree_io_file_handle_create(
       IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_WRITE, path,
@@ -80,6 +93,8 @@ static iree_status_t write_smoke_profile(iree_string_view_t path,
         iree_hal_profile_device_record_default();
     device.physical_device_ordinal = kSmokePhysicalDevice;
     device.queue_count = 1;
+    device.flags |= IREE_HAL_PROFILE_DEVICE_FLAG_TIMESTAMP_FREQUENCY;
+    device.timestamp_frequency_hz = kSmokeTimestampFrequencyHz;
     status = write_profile_chunk(
         sink, IREE_HAL_PROFILE_CONTENT_TYPE_DEVICES, IREE_SV("devices"),
         iree_make_const_byte_span(&device, sizeof(device)));
@@ -169,6 +184,10 @@ static iree_status_t write_smoke_profile(iree_string_view_t path,
         IREE_HAL_PROFILE_CLOCK_CORRELATION_FLAG_DEVICE_TICK |
         IREE_HAL_PROFILE_CLOCK_CORRELATION_FLAG_HOST_CPU_TIMESTAMP |
         IREE_HAL_PROFILE_CLOCK_CORRELATION_FLAG_HOST_TIME_BRACKET;
+    if (unaligned_device_clock) {
+      clock_samples[0].flags |=
+          IREE_HAL_PROFILE_CLOCK_CORRELATION_FLAG_DEVICE_TICK_UNALIGNED;
+    }
     clock_samples[0].physical_device_ordinal = kSmokePhysicalDevice;
     clock_samples[0].sample_id = 1;
     clock_samples[0].device_tick = 100;
@@ -237,23 +256,40 @@ static iree_status_t write_smoke_profile(iree_string_view_t path,
   }
 
   if (iree_status_is_ok(status)) {
-    iree_hal_profile_queue_device_event_t device_event =
-        iree_hal_profile_queue_device_event_default();
-    device_event.type = IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_EXECUTE;
-    device_event.event_id = 101;
-    device_event.submission_id = kSmokeSubmissionId;
-    device_event.command_buffer_id = kSmokeCommandBufferId;
-    device_event.stream_id = kSmokeStreamId;
-    device_event.payload_length = 4096;
-    device_event.physical_device_ordinal = kSmokePhysicalDevice;
-    device_event.queue_ordinal = kSmokeQueueOrdinal;
-    device_event.operation_count = 1;
-    device_event.start_tick = 120;
-    device_event.end_tick = 160;
+    iree_hal_profile_queue_device_event_t device_events[3];
+    device_events[0] = iree_hal_profile_queue_device_event_default();
+    device_events[0].type = IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_EXECUTE;
+    device_events[0].event_id = 101;
+    device_events[0].submission_id = kSmokeSubmissionId;
+    device_events[0].command_buffer_id = kSmokeCommandBufferId;
+    device_events[0].stream_id = kSmokeStreamId;
+    device_events[0].payload_length = 4096;
+    device_events[0].physical_device_ordinal = kSmokePhysicalDevice;
+    device_events[0].queue_ordinal = kSmokeQueueOrdinal;
+    device_events[0].operation_count = 1;
+    device_events[0].start_tick = 120;
+    device_events[0].end_tick = 160;
+    device_events[1] = iree_hal_profile_queue_device_event_default();
+    device_events[1].type = IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ALLOCA;
+    device_events[1].event_id = 104;
+    device_events[1].submission_id = kSmokeSubmissionId;
+    device_events[1].allocation_id = kSmokeAllocationId + 1;
+    device_events[1].stream_id = kSmokeStreamId;
+    device_events[1].payload_length = 1024;
+    device_events[1].physical_device_ordinal = kSmokePhysicalDevice;
+    device_events[1].queue_ordinal = kSmokeQueueOrdinal;
+    device_events[1].operation_count = 1;
+    device_events[1].start_tick = 110;
+    device_events[1].end_tick = 115;
+    device_events[2] = device_events[1];
+    device_events[2].type = IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_DEALLOCA;
+    device_events[2].event_id = 105;
+    device_events[2].start_tick = 165;
+    device_events[2].end_tick = 170;
     status = write_profile_chunk(
         sink, IREE_HAL_PROFILE_CONTENT_TYPE_QUEUE_DEVICE_EVENTS,
         IREE_SV("queue-device-events"),
-        iree_make_const_byte_span(&device_event, sizeof(device_event)));
+        iree_make_const_byte_span(device_events, sizeof(device_events)));
   }
 
   if (iree_status_is_ok(status)) {
@@ -296,7 +332,7 @@ static iree_status_t write_smoke_profile(iree_string_view_t path,
   }
 
   if (iree_status_is_ok(status)) {
-    iree_hal_profile_memory_event_t memory_events[2];
+    iree_hal_profile_memory_event_t memory_events[4];
     memory_events[0] = iree_hal_profile_memory_event_default();
     memory_events[0].type = IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_BUFFER_ALLOCATE;
     memory_events[0].result = IREE_STATUS_OK;
@@ -312,6 +348,22 @@ static iree_status_t write_smoke_profile(iree_string_view_t path,
     memory_events[1].type = IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_BUFFER_FREE;
     memory_events[1].event_id = 301;
     memory_events[1].host_time_ns = 3300;
+    memory_events[2] = iree_hal_profile_memory_event_default();
+    memory_events[2].type = IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_QUEUE_ALLOCA;
+    memory_events[2].flags = IREE_HAL_PROFILE_MEMORY_EVENT_FLAG_QUEUE_OPERATION;
+    memory_events[2].result = IREE_STATUS_OK;
+    memory_events[2].event_id = 302;
+    memory_events[2].host_time_ns = 3210;
+    memory_events[2].allocation_id = kSmokeAllocationId + 1;
+    memory_events[2].submission_id = kSmokeSubmissionId;
+    memory_events[2].physical_device_ordinal = kSmokePhysicalDevice;
+    memory_events[2].queue_ordinal = kSmokeQueueOrdinal;
+    memory_events[2].length = 1024;
+    memory_events[2].alignment = 64;
+    memory_events[3] = memory_events[2];
+    memory_events[3].type = IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_QUEUE_DEALLOCA;
+    memory_events[3].event_id = 303;
+    memory_events[3].host_time_ns = 3290;
     status = write_profile_chunk(
         sink, IREE_HAL_PROFILE_CONTENT_TYPE_MEMORY_EVENTS,
         IREE_SV("memory-events"),
@@ -470,20 +522,23 @@ static iree_status_t write_smoke_profile(iree_string_view_t path,
 }
 
 int main(int argc, char** argv) {
-  bool include_dispatch_events = true;
-  int output_path_argument = 1;
-  if (argc == 3 && strcmp(argv[1], "--omit-dispatch-events") == 0) {
-    include_dispatch_events = false;
-    output_path_argument = 2;
-  } else if (argc != 2) {
-    fprintf(stderr, "usage: %s [--omit-dispatch-events] OUTPUT.ireeprof\n",
-            argv[0]);
-    return EXIT_FAILURE;
+  iree_flags_set_usage("test_fixture_generator", kUsage);
+  iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
+
+  iree_status_t status = iree_ok_status();
+  if (argc != 1) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "expected no positional arguments");
+  } else if (!FLAG_output[0]) {
+    status =
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "--output is required");
   }
 
-  iree_status_t status =
-      write_smoke_profile(iree_make_cstring_view(argv[output_path_argument]),
-                          include_dispatch_events);
+  if (iree_status_is_ok(status)) {
+    status = write_smoke_profile(iree_make_cstring_view(FLAG_output),
+                                 !FLAG_omit_dispatch_events,
+                                 FLAG_unaligned_device_clock);
+  }
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);

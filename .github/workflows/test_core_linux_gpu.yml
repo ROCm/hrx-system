@@ -12,8 +12,9 @@ on:
       name:
         type: string
         default: Linux / CMake / GPU gfx942
-      runner_label:
+      runner_labels:
         type: string
+        description: "JSON array of labels that must all match the GPU runner."
         required: true
       artifact_run_id:
         type: string
@@ -45,9 +46,9 @@ on:
         type: string
         description: "GitHub Actions run id containing HRX package artifacts. Empty means this workflow run."
         default: ""
-      runner_label:
+      runner_labels:
         type: string
-        description: "GitHub Actions runner label."
+        description: "JSON array of labels that must all match the GPU runner."
         required: true
       device:
         type: string
@@ -85,11 +86,7 @@ permissions:
 jobs:
   test_core_linux_gpu:
     name: ${{ inputs.name || 'Linux / CMake / GPU gfx942' }}
-    runs-on:
-      - self-hosted
-      - Linux
-      - X64
-      - "${{ inputs.runner_label }}"
+    runs-on: ${{ fromJSON(inputs.runner_labels) }}
     timeout-minutes: 20
     env:
       HRX_OUTPUT_DIR: ${{ github.workspace }}/build/linux-gpu
@@ -152,7 +149,7 @@ jobs:
 
       - name: Extract package artifacts
         run: |
-          "${HRX_PYTHON}" build_tools/ci_core_linux.py extract-packages
+          "${HRX_PYTHON}" build_tools/ci/ci_core_linux.py extract-packages
 
       - name: Report ROCm environment
         id: rocm_environment
@@ -166,4 +163,4 @@ jobs:
         if: ${{ steps.rocm_environment.outcome == 'success' }}
         continue-on-error: ${{ inputs.experimental }}
         run: |
-          "${HRX_PYTHON}" build_tools/ci_core_linux.py test
+          "${HRX_PYTHON}" build_tools/ci/ci_core_linux.py test

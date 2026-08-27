@@ -174,6 +174,55 @@ TEST_F(TypeRefinementTest, StaticEncodingDoesNotWidenToSsaEncoding) {
   EXPECT_TRUE(loom_type_equal(refined, current));
 }
 
+TEST_F(TypeRefinementTest, SsaEncodingNarrowsToNativeDenseEncoding) {
+  loom_type_t current = loom_type_shaped_1d(
+      LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(16), 0);
+  current.encoding_id = 3;
+  current.encoding_flags = LOOM_ENCODING_FLAG_SSA;
+  loom_type_t candidate = loom_type_shaped_1d(
+      LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(16), 0);
+
+  loom_type_t refined = {};
+  loom_type_refinement_result_t result = LOOM_TYPE_REFINEMENT_CONFLICT;
+  IREE_ASSERT_OK(loom_type_refine_encoding_with_candidate(
+      current, candidate, &arena_, &refined, &result));
+
+  EXPECT_EQ(result, LOOM_TYPE_REFINEMENT_NARROWED);
+  EXPECT_FALSE(loom_type_has_encoding(refined));
+  EXPECT_TRUE(loom_type_equal(refined, candidate));
+}
+
+TEST_F(TypeRefinementTest, NativeDenseEncodingDoesNotWidenToSsaEncoding) {
+  loom_type_t current = loom_type_shaped_1d(
+      LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(16), 0);
+  loom_type_t candidate = current;
+  candidate.encoding_id = 3;
+  candidate.encoding_flags = LOOM_ENCODING_FLAG_SSA;
+
+  loom_type_t refined = {};
+  loom_type_refinement_result_t result = LOOM_TYPE_REFINEMENT_CONFLICT;
+  IREE_ASSERT_OK(loom_type_refine_encoding_with_candidate(
+      current, candidate, &arena_, &refined, &result));
+
+  EXPECT_EQ(result, LOOM_TYPE_REFINEMENT_UNCHANGED);
+  EXPECT_TRUE(loom_type_equal(refined, current));
+}
+
+TEST_F(TypeRefinementTest, NativeDenseConflictsWithNonDefaultStaticEncoding) {
+  loom_type_t current = loom_type_shaped_1d(
+      LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(16), 0);
+  loom_type_t candidate = loom_type_shaped_1d(
+      LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(16), 7);
+
+  loom_type_t refined = {};
+  loom_type_refinement_result_t result = LOOM_TYPE_REFINEMENT_UNCHANGED;
+  IREE_ASSERT_OK(loom_type_refine_encoding_with_candidate(
+      current, candidate, &arena_, &refined, &result));
+
+  EXPECT_EQ(result, LOOM_TYPE_REFINEMENT_CONFLICT);
+  EXPECT_TRUE(loom_type_equal(refined, current));
+}
+
 TEST_F(TypeRefinementTest, VectorEncodingCandidateConflicts) {
   loom_type_t current = loom_type_shaped_1d(
       LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(16), 0);
@@ -184,6 +233,27 @@ TEST_F(TypeRefinementTest, VectorEncodingCandidateConflicts) {
   loom_type_refinement_result_t result = LOOM_TYPE_REFINEMENT_UNCHANGED;
   IREE_ASSERT_OK(loom_type_refine_encoding_with_candidate(
       current, candidate, &arena_, &refined, &result));
+
+  EXPECT_EQ(result, LOOM_TYPE_REFINEMENT_CONFLICT);
+  EXPECT_TRUE(loom_type_equal(refined, current));
+}
+
+TEST_F(TypeRefinementTest, RegisterValueTypesRequireStructuralEquality) {
+  loom_type_t current_value_type = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(4), 0);
+  loom_type_t candidate_value_type = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I32, loom_dim_pack_static(4), 0);
+  loom_register_type_data_t current_data = {42, 4, current_value_type};
+  loom_register_type_data_t candidate_data = {42, 4, candidate_value_type};
+  loom_type_t current =
+      loom_type_register_payload_with_value_type(&current_data);
+  loom_type_t candidate =
+      loom_type_register_payload_with_value_type(&candidate_data);
+
+  loom_type_t refined = {};
+  loom_type_refinement_result_t result = LOOM_TYPE_REFINEMENT_UNCHANGED;
+  IREE_ASSERT_OK(loom_type_refine_with_candidate(current, candidate, &arena_,
+                                                 &refined, &result));
 
   EXPECT_EQ(result, LOOM_TYPE_REFINEMENT_CONFLICT);
   EXPECT_TRUE(loom_type_equal(refined, current));

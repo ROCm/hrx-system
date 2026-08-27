@@ -1,0 +1,184 @@
+# Copyright 2026 The HRX Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+name: Build CMake Windows Core
+
+on:
+  workflow_call:
+    inputs:
+      name:
+        type: string
+        default: Default
+      windows_toolchain:
+        type: string
+        default: msvc
+      release_type:
+        type: string
+        default: nightly
+      run_id:
+        type: string
+        default: ""
+      artifact_set:
+        type: string
+        default: core
+      build_type:
+        type: string
+        default: RelWithDebInfo
+      assertions:
+        type: boolean
+        default: false
+      cmake_options:
+        type: string
+        default: ""
+      ctest_regex:
+        type: string
+        default: ""
+      ctest_exclude_regex:
+        type: string
+        default: ""
+      ctest_label_regex:
+        type: string
+        default: ""
+      ctest_label_exclude_regex:
+        type: string
+        default: ""
+      run_tests:
+        type: boolean
+        default: true
+      package:
+        type: boolean
+        default: true
+      package_suffix:
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build_core_windows:
+    name: ${{ inputs.name }}
+    runs-on: azure-windows-scale-rocm
+    timeout-minutes: 45
+    env:
+      HRX_OUTPUT_DIR: ${{ github.workspace }}/build/windows
+      HRX_WINDOWS_TOOLCHAIN: ${{ inputs.windows_toolchain }}
+      HRX_RELEASE_TYPE: ${{ inputs.release_type }}
+      HRX_RUN_ID: ${{ inputs.run_id }}
+      HRX_ARTIFACT_SET: ${{ inputs.artifact_set }}
+      HRX_ROCM_ROOT: ${{ github.workspace }}/build/windows/${{ inputs.windows_toolchain }}/rocm-root
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/windows/${{ inputs.windows_toolchain }}/downloads
+      HRX_BUILD_DIR: ${{ github.workspace }}/build/windows/${{ inputs.windows_toolchain }}/build/hrx-core
+      HRX_PUBLIC_INSTALL_DIR: ${{ github.workspace }}/build/windows/${{ inputs.windows_toolchain }}/install/public
+      HRX_TESTS_INSTALL_DIR: ${{ github.workspace }}/build/windows/${{ inputs.windows_toolchain }}/install/tests
+      HRX_PUBLIC_DEPS_DIR: ${{ github.workspace }}/build/windows/${{ inputs.windows_toolchain }}/install/public-deps
+      HRX_COMPOSED_INSTALL_DIR: ${{ github.workspace }}/build/windows/${{ inputs.windows_toolchain }}/install/composed
+      HRX_PACKAGE_SMOKE_BUILD_DIR: ${{ github.workspace }}/build/windows/${{ inputs.windows_toolchain }}/build/package-smoke
+      HRX_PACKAGE_OUTPUT_DIR: ${{ github.workspace }}/build/windows/${{ inputs.windows_toolchain }}/dist
+      HRX_BUILD_TYPE: ${{ inputs.build_type }}
+      HRX_ASSERTIONS: ${{ inputs.assertions }}
+      HRX_CMAKE_OPTIONS: ${{ inputs.cmake_options }}
+      HRX_CTEST_REGEX: ${{ inputs.ctest_regex }}
+      HRX_CTEST_EXCLUDE_REGEX: ${{ inputs.ctest_exclude_regex }}
+      HRX_CTEST_LABEL_REGEX: ${{ inputs.ctest_label_regex }}
+      HRX_CTEST_LABEL_EXCLUDE_REGEX: ${{ inputs.ctest_label_exclude_regex }}
+      HRX_PACKAGE: ${{ inputs.package }}
+      HRX_PACKAGE_SUFFIX: ${{ inputs.package_suffix }}
+      PIP_CACHE_DIR: ${{ github.workspace }}/build/windows/${{ inputs.windows_toolchain }}/caches/pip
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Adjust git config
+        run: git config --global --add safe.directory "$PWD"
+
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade boto3 cmake==3.31.6 ninja zstandard
+
+      - name: Fetch ROCm artifacts
+        run: python build_tools/ci/ci_core_windows.py fetch-rocm
+
+      - name: Configure, build, and install
+        run: python build_tools/ci/ci_core_windows.py build
+
+      - name: Run installed tests
+        if: ${{ inputs.run_tests }}
+        run: python build_tools/ci/ci_core_windows.py test
+
+      - name: Package
+        if: ${{ inputs.package }}
+        run: python build_tools/ci/ci_core_windows.py package
+
+      - name: Relocate and retest package
+        if: ${{ inputs.package }}
+        shell: pwsh
+        run: |
+          $relocated = "${{ github.workspace }}/build/windows/${{ inputs.windows_toolchain }}/relocated"
+          Move-Item -LiteralPath "$env:HRX_BUILD_DIR" -Destination "${env:HRX_BUILD_DIR}.unavailable"
+          Move-Item -LiteralPath "$env:HRX_PUBLIC_INSTALL_DIR" -Destination "${env:HRX_PUBLIC_INSTALL_DIR}.unavailable"
+          Move-Item -LiteralPath "$env:HRX_TESTS_INSTALL_DIR" -Destination "${env:HRX_TESTS_INSTALL_DIR}.unavailable"
+          python -m venv "$relocated/python-venv"
+          $env:HRX_TEST_PYTHON = "$relocated/python-venv/Scripts/python.exe"
+          & "$env:HRX_TEST_PYTHON" --version
+          python build_tools/ci/ci_core_windows.py extract-packages `
+            --artifact-download-dir "$env:HRX_PACKAGE_OUTPUT_DIR" `
+            --public-install-dir "$relocated/public" `
+            --public-deps-dir "$relocated/public-deps" `
+            --tests-install-dir "$relocated/tests"
+          python build_tools/ci/ci_core_windows.py test `
+            --rocm-root "$relocated/missing-rocm-root" `
+            --public-install-dir "$relocated/public" `
+            --public-deps-dir "$relocated/public-deps" `
+            --tests-install-dir "$relocated/tests" `
+            --composed-install-dir "$relocated/composed" `
+            --package-smoke-build-dir "$relocated/package-smoke" `
+            --no-prepare-public-deps
+
+      - name: Upload public package
+        if: ${{ inputs.package }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hrx-public-windows-${{ inputs.windows_toolchain }}-x86_64
+          path: |
+            build/windows/${{ inputs.windows_toolchain }}/dist/hrx-public-windows-x86_64-*.zip
+            build/windows/${{ inputs.windows_toolchain }}/dist/hrx-public-windows-x86_64-*.manifest.json
+            build/windows/${{ inputs.windows_toolchain }}/dist/hrx-public-windows-x86_64-env.cmd
+            build/windows/${{ inputs.windows_toolchain }}/dist/hrx-public-windows-x86_64-env.ps1
+          if-no-files-found: error
+
+      - name: Upload public dependency package
+        if: ${{ inputs.package }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hrx-public-deps-windows-${{ inputs.windows_toolchain }}-x86_64
+          path: |
+            build/windows/${{ inputs.windows_toolchain }}/dist/hrx-public-deps-windows-x86_64-*.zip
+            build/windows/${{ inputs.windows_toolchain }}/dist/hrx-public-deps-windows-x86_64-*.manifest.json
+            build/windows/${{ inputs.windows_toolchain }}/dist/hrx-public-deps-windows-x86_64-env.cmd
+            build/windows/${{ inputs.windows_toolchain }}/dist/hrx-public-deps-windows-x86_64-env.ps1
+          if-no-files-found: error
+
+      - name: Upload test package
+        if: ${{ inputs.package }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hrx-tests-windows-${{ inputs.windows_toolchain }}-x86_64
+          path: |
+            build/windows/${{ inputs.windows_toolchain }}/dist/hrx-tests-windows-x86_64-*.zip
+            build/windows/${{ inputs.windows_toolchain }}/dist/hrx-tests-windows-x86_64-*.manifest.json
+          if-no-files-found: error
+
+      - name: Upload ROCm build environment package
+        if: ${{ inputs.package }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hrx-rocm-buildenv-windows-${{ inputs.windows_toolchain }}-x86_64
+          path: |
+            build/windows/${{ inputs.windows_toolchain }}/dist/hrx-rocm-buildenv-windows-x86_64-*.zip
+            build/windows/${{ inputs.windows_toolchain }}/dist/hrx-rocm-buildenv-windows-x86_64-*.manifest.json
+            build/windows/${{ inputs.windows_toolchain }}/dist/hrx-rocm-buildenv-windows-x86_64-env.cmd
+            build/windows/${{ inputs.windows_toolchain }}/dist/hrx-rocm-buildenv-windows-x86_64-env.ps1
+          if-no-files-found: error

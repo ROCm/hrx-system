@@ -98,7 +98,8 @@ static iree_status_t loom_call_collector_visit(
   loom_call_like_kind_t kind = loom_call_like_kind(call);
   if (kind != LOOM_CALL_LIKE_KIND_SEMANTIC &&
       kind != LOOM_CALL_LIKE_KIND_LOW_INTERNAL &&
-      kind != LOOM_CALL_LIKE_KIND_LOW_INVOKE) {
+      kind != LOOM_CALL_LIKE_KIND_LOW_INVOKE &&
+      kind != LOOM_CALL_LIKE_KIND_COMMAND_PROGRAM) {
     return iree_ok_status();
   }
   loom_symbol_ref_t callee_ref = loom_call_like_callee(call);

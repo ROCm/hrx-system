@@ -12,13 +12,16 @@ from contextlib import contextmanager
 
 from loom.gen.target.arch.amdgpu.records import amdgpu_target_records
 from loom.target.arch.amdgpu.target_info import (
+    AMDGPU_DEFAULT_MAX_WORKGROUP_STORAGE_BYTES,
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
+    AMDGPU_SOPP_OPCODE_INFO_RDNA,
     AmdgpuDescriptorSetInfo,
-    AmdgpuTargetRecordInfo,
+    AmdgpuDescriptorSetIsaInfo,
+    AmdgpuTargetInfo,
     processor_info,
     sorted_descriptor_set_infos,
     sorted_processor_infos,
-    sorted_target_record_infos,
+    sorted_target_infos,
 )
 
 
@@ -37,9 +40,14 @@ def _descriptor_set_info() -> AmdgpuDescriptorSetInfo:
     return AmdgpuDescriptorSetInfo(
         generator_target="test",
         key="amdgpu.test.core",
-        isa_xml_key="test",
-        isa_architecture_name="AMDGPU Test",
-        isa_architecture_id=1,
+        isa_infos=(
+            AmdgpuDescriptorSetIsaInfo(
+                isa_xml_key="test",
+                isa_architecture_name="AMDGPU Test",
+                isa_architecture_id=1,
+                sopp_opcodes=AMDGPU_SOPP_OPCODE_INFO_RDNA,
+            ),
+        ),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
     )
 
@@ -49,14 +57,17 @@ def _row(
     *,
     enum_value: int = 1,
     default_for_descriptor_set: bool = True,
+    max_workgroup_storage_bytes: int = (AMDGPU_DEFAULT_MAX_WORKGROUP_STORAGE_BYTES),
 ) -> amdgpu_target_records._AmdgpuTargetRecordRow:
     descriptor_set = _descriptor_set_info()
     processor = processor_info(
         processor_name,
         0x001,
         descriptor_set_key=descriptor_set.key,
+        max_workgroup_storage_bytes=max_workgroup_storage_bytes,
     )
-    info = AmdgpuTargetRecordInfo(
+    info = AmdgpuTargetInfo(
+        target=processor_name,
         processor=processor_name,
         enum_value=enum_value,
         doc=f"Test target record for {processor_name}.",
@@ -71,27 +82,80 @@ def _row(
 
 
 def test_target_records_materialize_current_rows() -> None:
+    processors = sorted_processor_infos()
     rows = amdgpu_target_records._materialize_rows(
-        sorted_target_record_infos(),
-        sorted_processor_infos(),
+        sorted_target_infos(),
+        processors,
         sorted_descriptor_set_infos(),
     )
 
     amdgpu_target_records._validate_target_record_infos(rows)
+    amdgpu_target_records._validate_target_record_coverage(rows, processors)
     source = amdgpu_target_records._emit_tables(rows)
 
     assert "typedef " not in source
     assert "static " not in source
-    assert "LOOM_AMDGPU_TARGET_RECORD_INFO(Gfx1250" in source
-    assert "LOOM_AMDGPU_TARGET_RECORD_DEFAULT(" in source
-    assert "Gfx1250)" in source
+    for row in rows:
+        suffix = amdgpu_target_records._c_symbol_suffix(row.info.target)
+        descriptor_suffix = amdgpu_target_records._c_symbol_suffix(row.descriptor_set.generator_target)
+        assert (f'LOOM_AMDGPU_TARGET_RECORD_INFO({suffix}, UINT32_C({row.info.enum_value}), "{row.info.target}", UINT16_C({row.descriptor_set_ordinal}), {descriptor_suffix})') in source
+        if row.info.default_for_descriptor_set:
+            assert (f"LOOM_AMDGPU_TARGET_RECORD_DEFAULT(UINT16_C({row.descriptor_set_ordinal}), {suffix})") in source
+
+    rows_by_target = {row.info.target: row for row in rows}
+    assert rows_by_target["gfx1250"].descriptor_set.key == "amdgpu.rdna4.gfx125x.core"
+    assert rows_by_target["gfx1250-a0"].descriptor_set.key == "amdgpu.rdna4.gfx1250_a0.core"
+
+
+def test_target_record_enum_values_are_stable_and_explicit() -> None:
+    assert {info.target: info.enum_value for info in sorted_target_infos()} == {
+        "gfx942": 1,
+        "gfx950": 2,
+        "gfx1100": 3,
+        "gfx1200": 4,
+        "gfx1250": 5,
+        "gfx1150": 6,
+        "gfx11-generic": 7,
+        "gfx12-generic": 8,
+        "gfx12-5-generic": 9,
+        "gfx940": 10,
+        "gfx941": 11,
+        "gfx1101": 12,
+        "gfx1102": 13,
+        "gfx1103": 14,
+        "gfx1151": 15,
+        "gfx1152": 16,
+        "gfx1153": 17,
+        "gfx1170": 18,
+        "gfx1171": 19,
+        "gfx1172": 20,
+        "gfx1201": 21,
+        "gfx1251": 22,
+        "gfx9-4-generic": 23,
+        "gfx1250-a0": 24,
+    }
+
+
+def test_target_records_reject_missing_descriptor_backed_processor() -> None:
+    processors = sorted_processor_infos()
+    rows = amdgpu_target_records._materialize_rows(
+        sorted_target_infos(),
+        processors,
+        sorted_descriptor_set_infos(),
+    )
+    missing_processor = next(row.info.processor for row in reversed(rows) if row.info.target == row.info.processor)
+    incomplete_rows = tuple(row for row in rows if not (row.info.processor == missing_processor and row.info.target == row.info.processor))
+
+    with _raises_value_error(rf"missing=\['{re.escape(missing_processor)}'\]"):
+        amdgpu_target_records._validate_target_record_coverage(incomplete_rows, processors)
 
 
 def test_target_records_reject_unknown_processor() -> None:
     with _raises_value_error("does not name a known processor"):
         amdgpu_target_records._materialize_rows(
             (
-                AmdgpuTargetRecordInfo(
+                AmdgpuTargetInfo(
+                    target="gfx9999",
                     processor="gfx9999",
                     enum_value=1,
                     doc="Unknown test target record.",
@@ -107,8 +171,8 @@ def test_target_records_reject_sparse_enum_values() -> None:
         amdgpu_target_records._validate_target_record_infos((_row("gfx-test", enum_value=2),))
 
 
-def test_target_records_reject_duplicate_processors() -> None:
-    with _raises_value_error("processors must be unique"):
+def test_target_records_reject_duplicate_identities() -> None:
+    with _raises_value_error("identities must be unique"):
         amdgpu_target_records._validate_target_record_infos(
             (
                 _row("gfx-test", enum_value=1),
@@ -126,5 +190,23 @@ def test_target_records_require_one_default_per_descriptor_set() -> None:
             (
                 _row("gfx-test-a", enum_value=1),
                 _row("gfx-test-b", enum_value=2),
+            )
+        )
+
+
+def test_target_records_require_consistent_descriptor_set_storage_limits() -> None:
+    with _raises_value_error("requires a max workgroup storage limit"):
+        amdgpu_target_records._validate_target_record_infos((_row("gfx-test", max_workgroup_storage_bytes=0),))
+
+    with _raises_value_error("inconsistent max workgroup storage limits"):
+        amdgpu_target_records._validate_target_record_infos(
+            (
+                _row("gfx-test-a", enum_value=1),
+                _row(
+                    "gfx-test-b",
+                    enum_value=2,
+                    default_for_descriptor_set=False,
+                    max_workgroup_storage_bytes=32 * 1024,
+                ),
             )
         )

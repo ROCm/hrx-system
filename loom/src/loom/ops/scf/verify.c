@@ -70,33 +70,6 @@ static iree_status_t loom_scf_emit_count_mismatch(
                        IREE_ARRAYSIZE(params));
 }
 
-static iree_status_t loom_scf_emit_value_type_mismatch(
-    const loom_module_t* module, iree_diagnostic_emitter_t emitter,
-    const loom_op_t* op, iree_string_view_t value_field_name,
-    loom_value_id_t value_id, iree_string_view_t expected_field_name,
-    loom_value_id_t expected_value_id) {
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(value_field_name),
-      loom_param_type(loom_module_value_type(module, value_id)),
-      loom_param_string(expected_field_name),
-      loom_param_type(loom_module_value_type(module, expected_value_id)),
-  };
-  return loom_scf_emit(emitter, op, LOOM_ERR_TYPE_001, params,
-                       IREE_ARRAYSIZE(params));
-}
-
-static const loom_block_t* loom_scf_region_entry_block_or_null(
-    const loom_region_t* region) {
-  if (!region || region->block_count == 0) return NULL;
-  return loom_region_const_entry_block(region);
-}
-
-static const loom_op_t* loom_scf_region_terminator_or_null(
-    const loom_region_t* region) {
-  const loom_block_t* entry = loom_scf_region_entry_block_or_null(region);
-  return entry ? entry->last_op : NULL;
-}
-
 static void loom_scf_format_lookup_field_name(char* buffer,
                                               iree_host_size_t buffer_capacity,
                                               const char* prefix,
@@ -211,60 +184,6 @@ iree_status_t loom_scf_for_verify(const loom_module_t* module,
   return iree_ok_status();
 }
 
-iree_status_t loom_scf_while_verify(const loom_module_t* module,
-                                    const loom_op_t* op,
-                                    iree_diagnostic_emitter_t emitter) {
-  loom_value_slice_t iter_args = loom_scf_while_iter_args(op);
-  const loom_block_t* after_entry =
-      loom_scf_region_entry_block_or_null(loom_scf_while_after(op));
-  iree_host_size_t after_arg_count = after_entry ? after_entry->arg_count : 0;
-  if (after_arg_count != iter_args.count) {
-    return iree_ok_status();
-  }
-  for (uint16_t i = 0; i < iter_args.count; ++i) {
-    loom_type_t iter_arg_type =
-        loom_module_value_type(module, iter_args.values[i]);
-    loom_type_t after_arg_type =
-        loom_module_value_type(module, loom_block_arg_id(after_entry, i));
-    if (!loom_type_equal(iter_arg_type, after_arg_type)) {
-      return iree_ok_status();
-    }
-  }
-
-  const loom_op_t* condition =
-      loom_scf_region_terminator_or_null(loom_scf_while_before(op));
-  if (!condition || !loom_scf_condition_isa(condition)) {
-    return iree_ok_status();
-  }
-
-  loom_value_slice_t forwarded = loom_scf_condition_forwarded(condition);
-  if (forwarded.count != after_arg_count) {
-    return loom_scf_emit_count_mismatch(
-        emitter, condition, IREE_SV("forwarded"), forwarded.count,
-        IREE_SV("after block args"), after_arg_count);
-  }
-
-  for (uint16_t i = 0; i < forwarded.count; ++i) {
-    loom_value_id_t forwarded_id = forwarded.values[i];
-    loom_value_id_t after_arg_id = loom_block_arg_id(after_entry, i);
-    if (loom_type_equal(loom_module_value_type(module, forwarded_id),
-                        loom_module_value_type(module, after_arg_id))) {
-      continue;
-    }
-    char forwarded_name[32];
-    char after_arg_name[32];
-    loom_scf_format_lookup_field_name(forwarded_name, sizeof(forwarded_name),
-                                      "forwarded", i);
-    loom_scf_format_lookup_field_name(after_arg_name, sizeof(after_arg_name),
-                                      "after", i);
-    return loom_scf_emit_value_type_mismatch(
-        module, emitter, condition, iree_make_cstring_view(forwarded_name),
-        forwarded_id, iree_make_cstring_view(after_arg_name), after_arg_id);
-  }
-
-  return iree_ok_status();
-}
-
 iree_status_t loom_scf_if_verify(const loom_module_t* module,
                                  const loom_op_t* op,
                                  iree_diagnostic_emitter_t emitter) {
@@ -323,7 +242,7 @@ static iree_status_t loom_scf_switch_verify_region_yield(
     loom_type_t yield_type =
         loom_module_value_type(module, yielded_values.values[i]);
     loom_type_t result_type = loom_module_value_type(module, results.values[i]);
-    if (loom_type_equal_after_value_remap(result_type, yield_type,
+    if (loom_type_equal_after_value_remap(module, result_type, yield_type,
                                           &yield_remap)) {
       continue;
     }

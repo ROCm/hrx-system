@@ -1,0 +1,242 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_workgroup_scalar_addressing.loom-test
+// RUN: emit source-low output=low control-flow=structured-low
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
+func.def target(@target) @workgroup_static_rank2_i32(%value: i32) -> (i32) {
+  %byte_length = index.constant 256 : offset
+  %base = index.constant 8 : offset
+  %scratch = buffer.alloca<workgroup> align(4) %byte_length : buffer
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<4x8xi32>
+  view.store %value, %scratch_view[2, 3] : i32, view<4x8xi32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %loaded = view.load %scratch_view[2, 3] : view<4x8xi32> -> i32
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @workgroup_static_rank2_i32(%value: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+  %scratch = storage {byte_alignment = 4, byte_length = 256} : low.storage<workgroup>
+  %scratch_view = storage_address %scratch : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  %13 = OpConstant.i32 21 : reg<spirv.id : index>
+  %14 = OpAccessChain.workgroup.i32.element_index %scratch_view, %13
+  OpStore.workgroup.i32 %14, %value
+  OpControlBarrier.workgroup.workgroup.acq_rel
+  %15 = OpConstant.i32 21 : reg<spirv.id : index>
+  %16 = OpAccessChain.workgroup.i32.element_index %scratch_view, %15
+  %loaded = OpLoad.workgroup.i32 %16
+  return %loaded
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
+func.def target(@target) @workgroup_dynamic_base_and_index_i32(%value: i32, %base_element: index, %element: index) -> (i32) {
+  %byte_length = index.constant 128 : offset
+  %element_byte_count = index.constant 4 : index
+  %base_element_bounded = index.assume %base_element [range(%base_element, 0, 15)] : index
+  %element_bounded = index.assume %element [range(%element, 0, 7)] : index
+  %base_byte_index = index.mul %base_element_bounded, %element_byte_count : index
+  %base_byte_offset = index.cast %base_byte_index : index to offset
+  %scratch = buffer.alloca<workgroup> align(4) %byte_length : buffer
+  %scratch_view = buffer.view %scratch[%base_byte_offset] : buffer -> view<8xi32>
+  view.store %value, %scratch_view[%element_bounded] : i32, view<8xi32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %loaded = view.load %scratch_view[%element_bounded] : view<8xi32> -> i32
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @workgroup_dynamic_base_and_index_i32(%value: reg<spirv.id : i32>, %base_element_bounded: reg<spirv.id : index>, %element_bounded: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
+  %scratch = storage {byte_alignment = 4, byte_length = 128} : low.storage<workgroup>
+  %scratch_view = storage_address %scratch : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  %21 = OpIAdd %base_element_bounded, %element_bounded : reg<spirv.id : index>
+  %22 = OpAccessChain.workgroup.i32.element_index %scratch_view, %21
+  OpStore.workgroup.i32 %22, %value
+  OpControlBarrier.workgroup.workgroup.acq_rel
+  %23 = OpIAdd %base_element_bounded, %element_bounded : reg<spirv.id : index>
+  %24 = OpAccessChain.workgroup.i32.element_index %scratch_view, %23
+  %loaded = OpLoad.workgroup.i32 %24
+  return %loaded
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
+func.def target(@target) @workgroup_dynamic_stride_rank2_i32(%value: i32, %column_count: index, %row: index, %column: index) -> (i32) {
+  %byte_length = index.constant 128 : offset
+  %scratch_base = index.constant 0 : offset
+  %column_count_bounded = index.assume %column_count [range(%column_count, 1, 8)] : index
+  %row_bounded = index.assume %row [range(%row, 0, 3)] : index
+  %column_bounded = index.assume %column [range(%column, 0, 7), lt(%column, %column_count_bounded)] : index
+  %scratch = buffer.alloca<workgroup> align(4) %byte_length : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<4x[%column_count_bounded]xi32>
+  view.store %value, %scratch_view[%row_bounded, %column_bounded] : i32, view<4x[%column_count_bounded]xi32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %loaded = view.load %scratch_view[%row_bounded, %column_bounded] : view<4x[%column_count_bounded]xi32> -> i32
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @workgroup_dynamic_stride_rank2_i32(%value: reg<spirv.id : i32>, %column_count_bounded: reg<spirv.id : index>, %row_bounded: reg<spirv.id : index>, %column_bounded: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
+  %scratch = storage {byte_alignment = 4, byte_length = 128} : low.storage<workgroup>
+  %scratch_view = storage_address %scratch : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  %20 = OpIMul %row_bounded, %column_count_bounded : reg<spirv.id : index>
+  %21 = OpIAdd %20, %column_bounded : reg<spirv.id : index>
+  %22 = OpAccessChain.workgroup.i32.element_index %scratch_view, %21
+  OpStore.workgroup.i32 %22, %value
+  OpControlBarrier.workgroup.workgroup.acq_rel
+  %23 = OpIMul %row_bounded, %column_count_bounded : reg<spirv.id : index>
+  %24 = OpIAdd %23, %column_bounded : reg<spirv.id : index>
+  %25 = OpAccessChain.workgroup.i32.element_index %scratch_view, %24
+  %loaded = OpLoad.workgroup.i32 %25
+  return %loaded
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
+func.def target(@target) @workgroup_subview_refine_i32(%value: i32, %element: index) -> (i32) {
+  %byte_length = index.constant 64 : offset
+  %base = index.constant 4 : offset
+  %element_bounded = index.assume %element [range(%element, 0, 3)] : index
+  %scratch = buffer.alloca<workgroup> align(4) %byte_length : buffer
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<8xi32>
+  %scratch_subview = view.subview %scratch_view[2] : view<8xi32> -> view<4xi32>
+  %scratch_refined = view.refine %scratch_subview : view<4xi32> -> view<4xi32>
+  view.store %value, %scratch_refined[%element_bounded] : i32, view<4xi32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %loaded = view.load %scratch_refined[%element_bounded] : view<4xi32> -> i32
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @workgroup_subview_refine_i32(%value: reg<spirv.id : i32>, %element_bounded: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
+  %scratch = storage {byte_alignment = 4, byte_length = 64} : low.storage<workgroup>
+  %scratch_refined = storage_address %scratch : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  %16 = OpConstant.i32 3 : reg<spirv.id : index>
+  %17 = OpIAdd %element_bounded, %16 : reg<spirv.id : index>
+  %18 = OpAccessChain.workgroup.i32.element_index %scratch_refined, %17
+  OpStore.workgroup.i32 %18, %value
+  OpControlBarrier.workgroup.workgroup.acq_rel
+  %19 = OpConstant.i32 3 : reg<spirv.id : index>
+  %20 = OpIAdd %element_bounded, %19 : reg<spirv.id : index>
+  %21 = OpAccessChain.workgroup.i32.element_index %scratch_refined, %20
+  %loaded = OpLoad.workgroup.i32 %21
+  return %loaded
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
+func.def target(@target) @workgroup_integer_scalar_widths(%value_i8: i8, %value_i16: i16, %value_i32: i32, %value_i64: i64) -> (i8, i16, i32, i64) {
+  %byte_length = index.constant 16 : offset
+  %scratch_base = index.constant 0 : offset
+  %scratch_i8 = buffer.alloca<workgroup> align(1) %byte_length : buffer
+  %scratch_i16 = buffer.alloca<workgroup> align(2) %byte_length : buffer
+  %scratch_i32 = buffer.alloca<workgroup> align(4) %byte_length : buffer
+  %scratch_i64 = buffer.alloca<workgroup> align(8) %byte_length : buffer
+  %view_i8 = buffer.view %scratch_i8[%scratch_base] : buffer -> view<2xi8>
+  %view_i16 = buffer.view %scratch_i16[%scratch_base] : buffer -> view<2xi16>
+  %view_i32 = buffer.view %scratch_i32[%scratch_base] : buffer -> view<2xi32>
+  %view_i64 = buffer.view %scratch_i64[%scratch_base] : buffer -> view<2xi64>
+  view.store %value_i8, %view_i8[1] : i8, view<2xi8>
+  view.store %value_i16, %view_i16[1] : i16, view<2xi16>
+  view.store %value_i32, %view_i32[1] : i32, view<2xi32>
+  view.store %value_i64, %view_i64[1] : i64, view<2xi64>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %loaded_i8 = view.load %view_i8[1] : view<2xi8> -> i8
+  %loaded_i16 = view.load %view_i16[1] : view<2xi16> -> i16
+  %loaded_i32 = view.load %view_i32[1] : view<2xi32> -> i32
+  %loaded_i64 = view.load %view_i64[1] : view<2xi64> -> i64
+  func.return %loaded_i8, %loaded_i16, %loaded_i32, %loaded_i64 : i8, i16, i32, i64
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @workgroup_integer_scalar_widths(%value_i8: reg<spirv.id : i8>, %value_i16: reg<spirv.id : i16>, %value_i32: reg<spirv.id : i32>, %value_i64: reg<spirv.id : i64>) -> (reg<spirv.id : i8>, reg<spirv.id : i16>, reg<spirv.id : i32>, reg<spirv.id : i64>) asm {
+  %scratch_i8 = storage {byte_alignment = 1, byte_length = 16} : low.storage<workgroup>
+  %scratch_i16 = storage {byte_alignment = 2, byte_length = 16} : low.storage<workgroup>
+  %scratch_i32 = storage {byte_alignment = 4, byte_length = 16} : low.storage<workgroup>
+  %scratch_i64 = storage {byte_alignment = 8, byte_length = 16} : low.storage<workgroup>
+  %view_i8 = storage_address %scratch_i8 : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i8>
+  %view_i16 = storage_address %scratch_i16 : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i16>
+  %view_i32 = storage_address %scratch_i32 : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  %view_i64 = storage_address %scratch_i64 : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i64>
+  %38 = OpConstant.i32 1 : reg<spirv.id : index>
+  %39 = OpAccessChain.workgroup.i8.element_index %view_i8, %38
+  OpStore.workgroup.i8 %39, %value_i8
+  %41 = OpAccessChain.workgroup.i16.element_index %view_i16, %38
+  OpStore.workgroup.i16 %41, %value_i16
+  %43 = OpAccessChain.workgroup.i32.element_index %view_i32, %38
+  OpStore.workgroup.i32 %43, %value_i32
+  %45 = OpAccessChain.workgroup.i64.element_index %view_i64, %38
+  OpStore.workgroup.i64 %45, %value_i64
+  OpControlBarrier.workgroup.workgroup.acq_rel
+  %46 = OpConstant.i32 1 : reg<spirv.id : index>
+  %47 = OpAccessChain.workgroup.i8.element_index %view_i8, %46
+  %loaded_i8 = OpLoad.workgroup.i8 %47
+  %50 = OpAccessChain.workgroup.i16.element_index %view_i16, %46
+  %loaded_i16 = OpLoad.workgroup.i16 %50
+  %53 = OpAccessChain.workgroup.i32.element_index %view_i32, %46
+  %loaded_i32 = OpLoad.workgroup.i32 %53
+  %56 = OpAccessChain.workgroup.i64.element_index %view_i64, %46
+  %loaded_i64 = OpLoad.workgroup.i64 %56
+  return %loaded_i8, %loaded_i16, %loaded_i32, %loaded_i64
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
+func.def target(@target) @workgroup_float_scalar_widths(%value_f16: f16, %value_bf16: bf16, %value_f32: f32, %value_f64: f64) -> (f16, bf16, f32, f64) {
+  %byte_length = index.constant 16 : offset
+  %scratch_base = index.constant 0 : offset
+  %scratch_f16 = buffer.alloca<workgroup> align(2) %byte_length : buffer
+  %scratch_bf16 = buffer.alloca<workgroup> align(2) %byte_length : buffer
+  %scratch_f32 = buffer.alloca<workgroup> align(4) %byte_length : buffer
+  %scratch_f64 = buffer.alloca<workgroup> align(8) %byte_length : buffer
+  %view_f16 = buffer.view %scratch_f16[%scratch_base] : buffer -> view<2xf16>
+  %view_bf16 = buffer.view %scratch_bf16[%scratch_base] : buffer -> view<2xbf16>
+  %view_f32 = buffer.view %scratch_f32[%scratch_base] : buffer -> view<2xf32>
+  %view_f64 = buffer.view %scratch_f64[%scratch_base] : buffer -> view<2xf64>
+  view.store %value_f16, %view_f16[1] : f16, view<2xf16>
+  view.store %value_bf16, %view_bf16[1] : bf16, view<2xbf16>
+  view.store %value_f32, %view_f32[1] : f32, view<2xf32>
+  view.store %value_f64, %view_f64[1] : f64, view<2xf64>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %loaded_f16 = view.load %view_f16[1] : view<2xf16> -> f16
+  %loaded_bf16 = view.load %view_bf16[1] : view<2xbf16> -> bf16
+  %loaded_f32 = view.load %view_f32[1] : view<2xf32> -> f32
+  %loaded_f64 = view.load %view_f64[1] : view<2xf64> -> f64
+  func.return %loaded_f16, %loaded_bf16, %loaded_f32, %loaded_f64 : f16, bf16, f32, f64
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @workgroup_float_scalar_widths(%value_f16: reg<spirv.id : f16>, %value_bf16: reg<spirv.id : bf16>, %value_f32: reg<spirv.id : f32>, %value_f64: reg<spirv.id : f64>) -> (reg<spirv.id : f16>, reg<spirv.id : bf16>, reg<spirv.id : f32>, reg<spirv.id : f64>) asm {
+  %scratch_f16 = storage {byte_alignment = 2, byte_length = 16} : low.storage<workgroup>
+  %scratch_bf16 = storage {byte_alignment = 2, byte_length = 16} : low.storage<workgroup>
+  %scratch_f32 = storage {byte_alignment = 4, byte_length = 16} : low.storage<workgroup>
+  %scratch_f64 = storage {byte_alignment = 8, byte_length = 16} : low.storage<workgroup>
+  %view_f16 = storage_address %scratch_f16 : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.f16>
+  %view_bf16 = storage_address %scratch_bf16 : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.bf16>
+  %view_f32 = storage_address %scratch_f32 : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.f32>
+  %view_f64 = storage_address %scratch_f64 : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.f64>
+  %38 = OpConstant.i32 1 : reg<spirv.id : index>
+  %39 = OpAccessChain.workgroup.f16.element_index %view_f16, %38
+  OpStore.workgroup.f16 %39, %value_f16
+  %41 = OpAccessChain.workgroup.bf16.element_index %view_bf16, %38
+  OpStore.workgroup.bf16 %41, %value_bf16
+  %43 = OpAccessChain.workgroup.f32.element_index %view_f32, %38
+  OpStore.workgroup.f32 %43, %value_f32
+  %45 = OpAccessChain.workgroup.f64.element_index %view_f64, %38
+  OpStore.workgroup.f64 %45, %value_f64
+  OpControlBarrier.workgroup.workgroup.acq_rel
+  %46 = OpConstant.i32 1 : reg<spirv.id : index>
+  %47 = OpAccessChain.workgroup.f16.element_index %view_f16, %46
+  %loaded_f16 = OpLoad.workgroup.f16 %47
+  %50 = OpAccessChain.workgroup.bf16.element_index %view_bf16, %46
+  %loaded_bf16 = OpLoad.workgroup.bf16 %50
+  %53 = OpAccessChain.workgroup.f32.element_index %view_f32, %46
+  %loaded_f32 = OpLoad.workgroup.f32 %53
+  %56 = OpAccessChain.workgroup.f64.element_index %view_f64, %46
+  %loaded_f64 = OpLoad.workgroup.f64 %56
+  return %loaded_f16, %loaded_bf16, %loaded_f32, %loaded_f64
+}

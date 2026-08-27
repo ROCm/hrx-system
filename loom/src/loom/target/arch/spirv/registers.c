@@ -7,6 +7,29 @@
 #include "loom/target/arch/spirv/registers.h"
 
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
+#include "loom/target/registers.h"
+
+bool loom_spirv_value_type_from_low_register_type(
+    loom_type_t type, loom_spirv_value_type_t* out_value_type) {
+  *out_value_type = (loom_spirv_value_type_t){0};
+  if (!loom_low_type_is_register(type) ||
+      loom_low_register_type_descriptor_set_stable_id(type) !=
+          SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID) {
+    return false;
+  }
+
+  const uint16_t register_class_id = loom_low_register_type_class_id(type);
+  const loom_type_t* value_type = loom_type_register_value_type(type);
+  if (register_class_id == SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID) {
+    return value_type != NULL &&
+           loom_spirv_value_type_from_loom_type(*value_type, out_value_type);
+  }
+  if (value_type != NULL) {
+    return false;
+  }
+  return loom_spirv_value_type_from_reg_class_id(register_class_id,
+                                                 out_value_type);
+}
 
 uint16_t loom_spirv_ptr_workgroup_reg_class_id(
     loom_spirv_scalar_type_t scalar_type) {

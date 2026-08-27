@@ -1,0 +1,39 @@
+// Exercises native SOPP branch relaxation after access-sanitizer expansion.
+// The outer loop remains rolled while the inner reduction is statically
+// expanded into independently observable global loads.
+amdgpu.target<gfx11-generic> @long_sopp_branch_target {subgroup_size = 32}
+
+kernel.def target(@long_sopp_branch_target) @long_sopp_branch() {
+  %c1 = index.constant 1 : index
+  %c32 = index.constant 32 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c32 = index.constant 32 : index
+  %c160 = index.constant 160 : index
+  %c5120 = index.constant 5120 : index
+  %c0_offset = index.constant 0 : offset
+  %c0_f32 = scalar.constant 0.0 : f32
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_view = buffer.view %input_noalias[%c0_offset] : buffer -> view<10240xf32>
+  %output_view = buffer.view %output_noalias[%c0_offset] : buffer -> view<32xf32>
+  %sum = scf.for %pass = [%c0 to %c2 step %c1](%pass_accumulator = %c0_f32 : f32) -> (f32) {
+    %pass_base = index.mul %pass, %c5120 : index
+    %pass_sum = scf.for %element = [%c0 to %c160 step %c1](%element_accumulator = %pass_accumulator : f32) -> (f32) unroll {
+      %element_base = index.mul %element, %c32 : index
+      %pass_element = index.add %pass_base, %element_base : index
+      %input_index0 = index.add %pass_element, %lane : index
+      %input_index = index.assume %input_index0 [range(%input_index0, 0, 10239)] : index
+      %value = view.load %input_view[%input_index] : view<10240xf32> -> f32
+      %next = scalar.addf<reassoc|nnan|ninf|nsz> %element_accumulator, %value : f32
+      scf.yield %next : f32
+    }
+    scf.yield %pass_sum : f32
+  }
+  view.store %sum, %output_view[%lane] : f32, view<32xf32>
+  kernel.return
+}

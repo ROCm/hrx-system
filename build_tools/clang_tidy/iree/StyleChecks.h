@@ -11,6 +11,14 @@
 
 namespace clang::tidy::iree {
 
+class AssertOutputCallCheck final : public ClangTidyCheck {
+ public:
+  AssertOutputCallCheck(StringRef Name, ClangTidyContext* Context);
+
+  void registerMatchers(ast_matchers::MatchFinder* Finder) override;
+  void check(const ast_matchers::MatchFinder::MatchResult& Result) override;
+};
+
 class DirectGotoCheck final : public ClangTidyCheck {
  public:
   DirectGotoCheck(StringRef Name, ClangTidyContext* Context);

@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:executable.bzl", "iree_executable_test")
 load("//build_tools/sanitizer:suppressions.bzl", "vulkan_suppressions")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
@@ -60,6 +61,11 @@ loom_cc_binary(
     ],
 )
 
+iree_executable_test(
+    name = "link_modules_test",
+    src = ":link_modules",
+)
+
 loom_cc_binary(
     name = "emit_spirv_offline",
     srcs = ["emit_spirv_offline.c"],
@@ -85,7 +91,7 @@ loom_cc_binary(
     srcs = ["emit_amdgpu_hsa.c"],
     target_compatible_with = LOOMC_TARGET_AMDGPU_COMPATIBLE_WITH,
     deps = [
-        "//build_tools:dl",
+        "//build_tools/bazel:dl",
         "//loom/binding/c:loomc",
         "//loom/binding/c/target/amdgpu",
         "//third_party:hsa_runtime_headers",
@@ -108,7 +114,7 @@ loom_cc_binary(
     srcs = ["emit_spirv_vulkan.c"],
     target_compatible_with = LOOMC_TARGET_SPIRV_VULKAN_COMPATIBLE_WITH,
     deps = [
-        "//build_tools:dl",
+        "//build_tools/bazel:dl",
         "//loom/binding/c:loomc",
         "//loom/binding/c/target/spirv",
         "//loom/binding/c/target/spirv/vulkan",
@@ -155,7 +161,7 @@ loom_cc_test(
     ],
     target_compatible_with = LOOMC_TARGET_AMDGPU_COMPATIBLE_WITH,
     deps = [
-        "//build_tools:dl",
+        "//build_tools/bazel:dl",
         "//loom/binding/c:loomc",
         "//loom/binding/c/target/amdgpu",
         "//third_party:hsa_runtime_headers",
@@ -174,7 +180,7 @@ loom_cc_test(
     ],
     target_compatible_with = LOOMC_TARGET_SPIRV_VULKAN_COMPATIBLE_WITH,
     deps = [
-        "//build_tools:dl",
+        "//build_tools/bazel:dl",
         "//loom/binding/c:loomc",
         "//loom/binding/c/target/spirv",
         "//loom/binding/c/target/spirv/vulkan",

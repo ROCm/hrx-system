@@ -68,12 +68,15 @@ static inline bool loom_low_lower_contract_case_lower_rule_index(
 }
 
 // Queries one generated descriptor-matrix case through the shared matrix
-// source adapter and target-owned descriptor projection.
+// source adapter and target-owned descriptor projection. When provided,
+// |out_request| receives the adapted semantic request submitted to the target
+// query so planning can retain a legal selection without repeating source
+// analysis.
 iree_status_t loom_low_lower_query_descriptor_matrix_contract(
     const loom_target_contract_query_environment_t* environment,
     const loom_low_lower_descriptor_matrix_t* descriptor_matrix,
     const loom_target_contract_descriptor_matrix_rule_t* rule,
-    const loom_op_t* source_op,
+    const loom_op_t* source_op, loom_contract_request_t* out_request,
     loom_target_contract_query_result_t* out_result);
 
 // Queries source-to-target-low rule tables for one source op.

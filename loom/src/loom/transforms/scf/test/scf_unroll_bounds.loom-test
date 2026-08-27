@@ -1,0 +1,115 @@
+// RUN: pass unroll-scf-for,scf-to-cfg,vector-memory-footprint
+
+func.def @dynamic_interleaved_tile_indices_remain_in_bounds(%payload: buffer, %base: offset, %end0: index, %value: i32) {
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %unroll_factor = index.constant 4 : index
+  %end = index.assume %end0 [range(%end0, 1, 32)] : index
+  %view = buffer.view %payload[%base] : buffer -> view<[%end]xi32>
+  scf.for %i = [%loop_begin to %end step %loop_step] unroll(%unroll_factor) schedule(interleaved) {
+    view.store %value, %view[%i] : i32, view<[%end]xi32>
+  }
+  func.return
+}
+
+// ----
+func.def @dynamic_interleaved_tile_indices_remain_in_bounds(%payload: buffer, %base: offset, %end0: index, %value: i32) {
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %unroll_factor = index.constant 4 : index
+  %end = index.assume %end0 [range(%end0, 1, 32)] : index
+  %view = buffer.view %payload[%base] : buffer -> view<[%end]xi32>
+  %10 = index.constant 4 : index
+  %11 = index.constant 0 : index
+  %12 = index.sub %end, %loop_begin : index
+  %13 = index.max %12, %11 : index
+  %14 = index.constant 4 : index
+  %15 = index.div %13, %14 : index
+  %16 = index.mul %15, %10 : index
+  %17 = index.add %loop_begin, %16 : index
+  cfg.br ^_bb1(%loop_begin: index)
+^_bb1(%34: index):
+  %36 = index.cmp slt, %34, %17 : index
+  cfg.cond_br %36, ^_bb2, ^_bb3
+^_bb2:
+  %35 = index.assume %34 [range(%34, 0, 28), mul(%34, 4), lt(%34, %17)] : index
+  %19 = index.constant 1 : index
+  %20 = index.add %35, %19 : index
+  %21 = index.constant 2 : index
+  %22 = index.add %35, %21 : index
+  %23 = index.constant 3 : index
+  %24 = index.add %35, %23 : index
+  %i$25, %i_1, %i_2, %i_3 = index.assume %35, %20, %22, %24 [lt(%35, %end), lt(%20, %end), lt(%22, %end), lt(%24, %end)] : index, index, index, index
+  view.store %value, %view[%i$25] : i32, view<[%end]xi32>
+  view.store %value, %view[%i_1] : i32, view<[%end]xi32>
+  view.store %value, %view[%i_2] : i32, view<[%end]xi32>
+  view.store %value, %view[%i_3] : i32, view<[%end]xi32>
+  %37 = index.add %35, %10 : index
+  cfg.br ^_bb1(%37: index)
+^_bb3:
+  cfg.br ^_bb4(%17: index)
+^_bb4(%30: index):
+  %32 = index.cmp slt, %30, %end : index
+  cfg.cond_br %32, ^_bb5, ^_bb6
+^_bb5:
+  %i$31 = index.assume %30 [range(%30, 0, 31), ge(%30, %17), lt(%30, %end)] : index
+  view.store %value, %view[%i$31] : i32, view<[%end]xi32>
+  %33 = index.add %i$31, %loop_step : index
+  cfg.br ^_bb4(%33: index)
+^_bb6:
+  func.return
+}
+
+// ====
+
+// A ranged lane-derived lower bound has the same exact trip count at both
+// endpoints. Strip-mining must preserve enough information to prove all four
+// cloned vector origins, including the final packet at channel 2044.
+func.def @ranged_lower_full_span_vector_origins(%payload: buffer, %base: offset, %lane0: index) {
+  %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
+  %vector_width = index.constant 4 : index
+  %channel_start = index.mul %lane, %vector_width : index
+  %channel_end = index.constant 2048 : index
+  %channel_step = index.constant 128 : index
+  %view = buffer.view %payload[%base] : buffer -> view<2048xf32>
+  scf.for %channel = [%channel_start to %channel_end step %channel_step] unroll(%vector_width) schedule(interleaved) {
+    %values = vector.load %view[%channel] : view<2048xf32> -> vector<4xf32>
+    test.use %values : vector<4xf32>
+  }
+  func.return
+}
+
+// ----
+func.def @ranged_lower_full_span_vector_origins(%payload: buffer, %base: offset, %lane0: index) {
+  %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
+  %vector_width = index.constant 4 : index
+  %channel_start = index.mul %lane, %vector_width : index
+  %channel_end = index.constant 2048 : index
+  %channel_step = index.constant 128 : index
+  %view = buffer.view %payload[%base] : buffer -> view<2048xf32>
+  %11 = index.constant 512 : index
+  cfg.br ^_bb1(%channel_start: index)
+^_bb1(%23: index):
+  %25 = index.cmp slt, %23, %channel_end : index
+  cfg.cond_br %25, ^_bb2, ^_bb3
+^_bb2:
+  %channel = index.assume %23 [range(%23, 0, 1660), mul(%23, 4), ge(%23, %channel_start)] : index
+  %13 = index.constant 128 : index
+  %channel_128 = index.add %channel, %13 : index
+  %15 = index.constant 256 : index
+  %channel_256 = index.add %channel, %15 : index
+  %17 = index.constant 384 : index
+  %channel_384 = index.add %channel, %17 : index
+  %values = vector.load %view[%channel] : view<2048xf32> -> vector<4xf32>
+  test.use %values : vector<4xf32>
+  %values_1 = vector.load %view[%channel_128] : view<2048xf32> -> vector<4xf32>
+  test.use %values_1 : vector<4xf32>
+  %values_2 = vector.load %view[%channel_256] : view<2048xf32> -> vector<4xf32>
+  test.use %values_2 : vector<4xf32>
+  %values_3 = vector.load %view[%channel_384] : view<2048xf32> -> vector<4xf32>
+  test.use %values_3 : vector<4xf32>
+  %26 = index.add %channel, %11 : index
+  cfg.br ^_bb1(%26: index)
+^_bb3:
+  func.return
+}

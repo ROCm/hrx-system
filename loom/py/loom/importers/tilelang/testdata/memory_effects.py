@@ -53,15 +53,15 @@ def scalar_atomic_add(tir: Any) -> TileLangImportInput:
         dst_buffer=dst_buffer,
     )
     return TileLangImportInput(
-        source=prim_func, target="hip -mcpu=gfx1100", name="scalar_atomic_add"
+        source=prim_func, target="hip -mcpu=gfx11-generic", name="scalar_atomic_add"
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("scalar_atomic_add") @scalar_atomic_add() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("scalar_atomic_add") @scalar_atomic_add() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%dst: buffer) {
@@ -103,16 +103,16 @@ def scalar_atomic_add_return(tir: Any) -> TileLangImportInput:
     )
     return TileLangImportInput(
         source=prim_func,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="scalar_atomic_add_return",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("scalar_atomic_add_return") @scalar_atomic_add_return() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("scalar_atomic_add_return") @scalar_atomic_add_return() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%dst: buffer) {
@@ -154,16 +154,16 @@ def device_asserts(tilelang: Any, T: Any) -> TileLangImportInput:
 
     return TileLangImportInput(
         source=get_kernel,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
         name="device_asserts_kernel",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("device_asserts_kernel") @device_asserts_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("device_asserts_kernel") @device_asserts_kernel() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%src_handle: buffer, %dst_handle: buffer) {

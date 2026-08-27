@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVERS_AMDGPU_HOST_QUEUE_PENDING_OPERATION_H_
 
 #include "iree/base/threading/notification.h"
+#include "iree/hal/drivers/amdgpu/host_queue_atomic.h"
 #include "iree/hal/drivers/amdgpu/host_queue_pending.h"
 #include "iree/hal/utils/resource_set.h"
 
@@ -27,10 +28,12 @@ typedef enum iree_hal_amdgpu_pending_op_type_e {
   IREE_HAL_AMDGPU_PENDING_OP_UPDATE,
   IREE_HAL_AMDGPU_PENDING_OP_DISPATCH,
   IREE_HAL_AMDGPU_PENDING_OP_EXECUTE,
+  IREE_HAL_AMDGPU_PENDING_OP_ATOMIC,
   IREE_HAL_AMDGPU_PENDING_OP_ALLOCA,
   IREE_HAL_AMDGPU_PENDING_OP_DEALLOCA,
   IREE_HAL_AMDGPU_PENDING_OP_HOST_CALL,
   IREE_HAL_AMDGPU_PENDING_OP_HOST_ACTION,
+  IREE_HAL_AMDGPU_PENDING_OP_TIMESTAMP,
 } iree_hal_amdgpu_pending_op_type_t;
 
 // Completion ownership for a deferred operation.
@@ -174,6 +177,9 @@ struct iree_hal_amdgpu_pending_op_t {
       iree_hal_execute_flags_t flags;
     } execute;
 
+    // Captured queue_atomic_wait/store/rmw payload.
+    iree_hal_amdgpu_host_queue_atomic_operation_t atomic;
+
     // Captured queue_alloca payload.
     struct {
       // Borrowed pool resolved during queue_alloca capture.
@@ -213,6 +219,16 @@ struct iree_hal_amdgpu_pending_op_t {
       // Driver-owned completion-thread action ordered by queue semaphores.
       iree_hal_amdgpu_reclaim_action_t action;
     } host_action;
+
+    // Captured queue_timestamp payload.
+    struct {
+      // Target buffer retained until the deferred capture operation issues.
+      iree_hal_buffer_t* target_buffer;
+      // Target byte offset captured from queue_timestamp.
+      iree_device_size_t target_offset;
+      // HAL timestamp flags captured from queue_timestamp.
+      iree_hal_timestamp_flags_t flags;
+    } timestamp;
   };
 };
 

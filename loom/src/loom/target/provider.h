@@ -17,20 +17,24 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "iree/io/byte_sequence.h"
 #include "loom/codegen/low/lower/lower.h"
 #include "loom/codegen/low/verify.h"
 #include "loom/ir/context.h"
+#include "loom/ir/function_version.h"
 #include "loom/ir/ir.h"
 #include "loom/pass/environment.h"
 #include "loom/pass/registry.h"
-#include "loom/target/artifact_manifest.h"
-#include "loom/target/compile_report.h"
 #include "loom/target/legalization.h"
 #include "loom/target/low_asm_diagnostics.h"
 #include "loom/target/low_descriptor_registry.h"
 #include "loom/target/low_legality.h"
 #include "loom/target/low_packet_diagnostics.h"
 #include "loom/target/math_policy.h"
+#include "loom/target/profile.h"
+#include "loom/target/reporting/artifact_manifest.h"
+#include "loom/target/reporting/report.h"
+#include "loom/target/resolved_target.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -54,30 +58,18 @@ typedef void (*loom_target_math_policy_registry_initializer_t)(
 
 typedef struct loom_builder_t loom_builder_t;
 typedef struct loom_target_environment_t loom_target_environment_t;
-typedef struct loom_target_provider_t loom_target_provider_t;
 
-// Target materialization request passed to target providers.
-typedef struct loom_target_selection_materialization_request_t {
-  // Composed target environment receiving the request.
-  const loom_target_environment_t* target_environment;
-
-  // Mutable module that will receive any materialized target record.
-  loom_module_t* module;
-
-  // Invocation-selected target bundle and target-owned payload.
-  loom_target_selection_t target_selection;
-} loom_target_selection_materialization_request_t;
-
-// Materializes a provider-owned target selection into a module-local target
-// record.
-typedef iree_status_t (*loom_target_provider_materialize_selection_fn_t)(
-    const loom_target_provider_t* provider,
-    const loom_target_selection_materialization_request_t* request,
-    bool* out_materialized, loom_symbol_ref_t* out_target_ref);
+// Materializes an exact resolved target as an ordinary target definition.
+//
+// The resolved facts may include compatible authored target requirements but
+// exclude function-local ABI/export overlays. Builder allocation and string
+// interning are the only fallible operations for a verified resolved target.
+typedef iree_status_t (*loom_target_materialize_definition_fn_t)(
+    loom_builder_t* builder, const loom_resolved_target_t* resolved_target,
+    loom_symbol_ref_t symbol, loom_location_id_t location);
 
 // Target emission artifact storage release callback.
-typedef void (*loom_target_emit_artifact_release_fn_t)(
-    void* storage, iree_allocator_t allocator);
+typedef void (*loom_target_emit_artifact_storage_release_fn_t)(void* storage);
 
 typedef enum loom_target_emit_sidecar_artifact_kind_e {
   // Machine-readable artifact manifest for the primary artifact.
@@ -92,8 +84,10 @@ typedef struct loom_target_emit_sidecar_artifact_t {
   // Sidecar artifact identifier.
   iree_string_view_t identifier;
 
-  // Borrowed view over sidecar artifact bytes.
-  iree_const_byte_span_t contents;
+  // Immutable sidecar artifact contents. The containing artifact owns one
+  // reference; callers may retain the sequence when they need it to outlive
+  // the artifact.
+  iree_io_byte_sequence_t* contents;
 } loom_target_emit_sidecar_artifact_t;
 
 // One target artifact produced by an emitter.
@@ -101,8 +95,9 @@ typedef struct loom_target_emit_artifact_t {
   // Target-neutral artifact format produced by the emitter.
   loom_target_artifact_format_t target_artifact_format;
 
-  // Borrowed view over emitted artifact bytes.
-  iree_const_byte_span_t contents;
+  // Immutable primary artifact contents. The artifact owns one reference;
+  // callers may retain the sequence when they need it to outlive the artifact.
+  iree_io_byte_sequence_t* contents;
 
   // Optional emitter-owned sidecar artifacts.
   const loom_target_emit_sidecar_artifact_t* sidecars;
@@ -110,13 +105,17 @@ typedef struct loom_target_emit_artifact_t {
   // Number of entries in |sidecars|.
   iree_host_size_t sidecar_count;
 
-  // Emitter-owned storage that keeps artifact bytes, sidecar descriptors, and
-  // sidecar bytes alive until released.
+  // Optional emitter-owned storage that keeps sidecar descriptors, identifier
+  // strings, or other provider-specific metadata alive until released.
   void* storage;
 
-  // Optional callback that releases |storage|.
-  loom_target_emit_artifact_release_fn_t release;
+  // Optional callback that releases |storage| after artifact sequences.
+  loom_target_emit_artifact_storage_release_fn_t release_storage;
 } loom_target_emit_artifact_t;
+
+// Releases all storage owned by |artifact| and resets it to a zero-initialized
+// value. Safe to call on a zero-initialized artifact.
+void loom_target_emit_artifact_release(loom_target_emit_artifact_t* artifact);
 
 // Artifact manifest request passed to target-owned emitters.
 typedef struct loom_target_emit_artifact_manifest_request_t {
@@ -138,8 +137,8 @@ typedef struct loom_target_emit_request_t {
   // Mutable module containing already-prepared target-low IR.
   loom_module_t* module;
 
-  // Invocation target selection overlay.
-  loom_target_selection_t target_selection;
+  // Concrete compiler function versions participating in this emission.
+  const loom_function_version_list_t* function_versions;
 
   // Embedding-owned option chain borrowed for the duration of the call.
   const void* option_chain;
@@ -238,6 +237,14 @@ typedef iree_status_t (*loom_target_provider_pipeline_contribution_fn_t)(
 
 // Target-owned compiler capability contribution linked into a tool or driver.
 struct loom_target_provider_t {
+  // Target-family profile representation owned by this provider, or NULL when
+  // the provider contributes no profile-driven semantics.
+  const loom_target_profile_type_t* profile_type;
+  // Optional exact target-definition materializer for facts projected by
+  // |profile_type|. Providers without an ordinary target-IR representation
+  // leave this NULL; only contexts with exact authored target IR can cross an
+  // artifact boundary.
+  loom_target_materialize_definition_fn_t materialize_definition;
   // Optional function that registers target-owned dialects.
   loom_target_provider_context_registration_fn_t register_context;
   // Optional function that initializes target-low descriptor-set providers.
@@ -267,8 +274,6 @@ struct loom_target_provider_t {
   const loom_pass_registry_t* pass_registry;
   // Optional pass-pipeline contribution callback.
   loom_target_provider_pipeline_contribution_fn_t contribute_pipeline;
-  // Optional invocation-target materialization callback.
-  loom_target_provider_materialize_selection_fn_t materialize_selection;
 };
 
 // Static target provider table linked into a binary or embedding.
@@ -417,6 +422,15 @@ loom_target_emitter_list_t loom_target_environment_emitter_list(
 const loom_pass_registry_t* loom_target_environment_pass_registry(
     const loom_target_environment_t* environment);
 
+// Returns the provider owning |profile_type|, or NULL when not linked.
+//
+// This is a cold external-input boundary check used before accepting a
+// structured profile for specialization. Callers retain the returned provider
+// with projected facts instead of resolving the family again downstream.
+const loom_target_provider_t* loom_target_environment_lookup_profile_provider(
+    const loom_target_environment_t* environment,
+    const loom_target_profile_type_t* profile_type);
+
 // Invokes target-provider pass-pipeline contributions for |phase|. The caller
 // owns phase ordering, surrounding pass.for/pass.where scopes, and global
 // cleanup insertion.
@@ -424,13 +438,6 @@ iree_status_t loom_target_environment_contribute_pipeline(
     const loom_target_environment_t* environment,
     loom_target_pipeline_phase_t phase,
     loom_pass_environment_t pass_environment, loom_builder_t* builder);
-
-// Materializes |target_selection| into |module| using the first provider that
-// recognizes the selection. Empty selections return a null target ref.
-iree_status_t loom_target_environment_materialize_selection(
-    const loom_target_environment_t* environment, loom_module_t* module,
-    loom_target_selection_t target_selection,
-    loom_symbol_ref_t* out_target_ref);
 
 #ifdef __cplusplus
 }  // extern "C"

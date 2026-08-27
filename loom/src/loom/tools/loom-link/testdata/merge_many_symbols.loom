@@ -1,0 +1,264 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+func.def @symbol_00() {
+  func.return
+}
+
+func.def @symbol_01() {
+  func.return
+}
+
+func.def @symbol_02() {
+  func.return
+}
+
+func.def @symbol_03() {
+  func.return
+}
+
+func.def @symbol_04() {
+  func.return
+}
+
+func.def @symbol_05() {
+  func.return
+}
+
+func.def @symbol_06() {
+  func.return
+}
+
+func.def @symbol_07() {
+  func.return
+}
+
+func.def @symbol_08() {
+  func.return
+}
+
+func.def @symbol_09() {
+  func.return
+}
+
+func.def @symbol_10() {
+  func.return
+}
+
+func.def @symbol_11() {
+  func.return
+}
+
+func.def @symbol_12() {
+  func.return
+}
+
+func.def @symbol_13() {
+  func.return
+}
+
+func.def @symbol_14() {
+  func.return
+}
+
+func.def @symbol_15() {
+  func.return
+}
+
+func.def @symbol_16() {
+  func.return
+}
+
+func.def @symbol_17() {
+  func.return
+}
+
+func.def @symbol_18() {
+  func.return
+}
+
+func.def @symbol_19() {
+  func.return
+}
+
+func.def @symbol_20() {
+  func.return
+}
+
+func.def @symbol_21() {
+  func.return
+}
+
+func.def @symbol_22() {
+  func.return
+}
+
+func.def @symbol_23() {
+  func.return
+}
+
+func.def @symbol_24() {
+  func.return
+}
+
+func.def @symbol_25() {
+  func.return
+}
+
+func.def @symbol_26() {
+  func.return
+}
+
+func.def @symbol_27() {
+  func.return
+}
+
+func.def @symbol_28() {
+  func.return
+}
+
+func.def @symbol_29() {
+  func.return
+}
+
+func.def @symbol_30() {
+  func.return
+}
+
+func.def @symbol_31() {
+  func.return
+}
+
+func.def @symbol_32() {
+  func.return
+}
+
+func.def @symbol_33() {
+  func.return
+}
+
+func.def @symbol_34() {
+  func.return
+}
+
+func.def @symbol_35() {
+  func.return
+}
+
+func.def @symbol_36() {
+  func.return
+}
+
+func.def @symbol_37() {
+  func.return
+}
+
+func.def @symbol_38() {
+  func.return
+}
+
+func.def @symbol_39() {
+  func.return
+}
+
+func.def @symbol_40() {
+  func.return
+}
+
+func.def @symbol_41() {
+  func.return
+}
+
+func.def @symbol_42() {
+  func.return
+}
+
+func.def @symbol_43() {
+  func.return
+}
+
+func.def @symbol_44() {
+  func.return
+}
+
+func.def @symbol_45() {
+  func.return
+}
+
+func.def @symbol_46() {
+  func.return
+}
+
+func.def @symbol_47() {
+  func.return
+}
+
+func.def @symbol_48() {
+  func.return
+}
+
+func.def @symbol_49() {
+  func.return
+}
+
+func.def @symbol_50() {
+  func.return
+}
+
+func.def @symbol_51() {
+  func.return
+}
+
+func.def @symbol_52() {
+  func.return
+}
+
+func.def @symbol_53() {
+  func.return
+}
+
+func.def @symbol_54() {
+  func.return
+}
+
+func.def @symbol_55() {
+  func.return
+}
+
+func.def @symbol_56() {
+  func.return
+}
+
+func.def @symbol_57() {
+  func.return
+}
+
+func.def @symbol_58() {
+  func.return
+}
+
+func.def @symbol_59() {
+  func.return
+}
+
+func.def @symbol_60() {
+  func.return
+}
+
+func.def @symbol_61() {
+  func.return
+}
+
+func.def @symbol_62() {
+  func.return
+}
+
+func.def @symbol_63() {
+  func.return
+}
+
+func.def @symbol_64() {
+  func.return
+}

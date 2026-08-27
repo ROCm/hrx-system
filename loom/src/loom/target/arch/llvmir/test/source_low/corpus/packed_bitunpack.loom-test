@@ -11,7 +11,7 @@ func.def target(@target) @i32_to_u8x4_bitunpack(%packed: vector<1xi32>) -> (vect
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32_to_u8x4_bitunpack(%packed: reg<llvmir.i32>) -> (reg<llvmir.i32 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_to_u8x4_bitunpack(%packed: reg<llvmir.i32>) -> (reg<llvmir.i32 x4>) asm {
   %29 = const.i32 255
   %30 = and.i32 %packed, %29
   %31 = const.i32 8
@@ -39,7 +39,7 @@ func.def target(@target) @i32_to_s8x4_bitunpack(%packed: vector<1xi32>) -> (vect
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32_to_s8x4_bitunpack(%packed: reg<llvmir.i32>) -> (reg<llvmir.i32 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_to_s8x4_bitunpack(%packed: reg<llvmir.i32>) -> (reg<llvmir.i32 x4>) asm {
   %45 = const.i32 255
   %46 = and.i32 %packed, %45
   %47 = const.i32 24
@@ -75,7 +75,7 @@ func.def target(@target) @i32_to_u4x8_bitunpack(%packed: vector<1xi32>) -> (vect
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32_to_u4x8_bitunpack(%packed: reg<llvmir.i32>) -> (reg<llvmir.i32 x8>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_to_u4x8_bitunpack(%packed: reg<llvmir.i32>) -> (reg<llvmir.i32 x8>) asm {
   %53 = const.i32 15
   %54 = and.i32 %packed, %53
   %55 = const.i32 4
@@ -115,7 +115,7 @@ func.def target(@target) @i8x2_to_u2x8_bitunpack(%packed: vector<2xi8>) -> (vect
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i8x2_to_u2x8_bitunpack(%packed: reg<llvmir.i8 x2>) -> (reg<llvmir.i32 x8>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i8x2_to_u2x8_bitunpack(%packed: reg<llvmir.i8 x2>) -> (reg<llvmir.i32 x8>) asm {
   %54 = extract.v2i8 %packed, 0
   %55 = zext.i8.i32 %54
   %56 = const.i32 3
@@ -152,7 +152,7 @@ func.def target(@target) @i32_to_u8x4_bitunpack_i8_result(%packed: vector<1xi32>
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32_to_u8x4_bitunpack_i8_result(%packed: reg<llvmir.i32>) -> (reg<llvmir.i8 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_to_u8x4_bitunpack_i8_result(%packed: reg<llvmir.i32>) -> (reg<llvmir.i8 x4>) asm {
   %33 = const.i32 255
   %34 = and.i32 %packed, %33
   %35 = trunc.i32.i8 %34
@@ -184,7 +184,7 @@ func.def target(@target) @i8x2_to_u4x4_bitunpack_i8_result(%packed: vector<2xi8>
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i8x2_to_u4x4_bitunpack_i8_result(%packed: reg<llvmir.i8 x2>) -> (reg<llvmir.i8 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i8x2_to_u4x4_bitunpack_i8_result(%packed: reg<llvmir.i8 x2>) -> (reg<llvmir.i8 x4>) asm {
   %34 = extract.v2i8 %packed, 0
   %35 = zext.i8.i32 %34
   %36 = const.i32 15
@@ -215,7 +215,7 @@ func.def target(@target) @i8x2_to_s4x4_bitunpack_i8_result(%packed: vector<2xi8>
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i8x2_to_s4x4_bitunpack_i8_result(%packed: reg<llvmir.i8 x2>) -> (reg<llvmir.i8 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i8x2_to_s4x4_bitunpack_i8_result(%packed: reg<llvmir.i8 x2>) -> (reg<llvmir.i8 x4>) asm {
   %50 = extract.v2i8 %packed, 0
   %51 = zext.i8.i32 %50
   %52 = const.i32 15
@@ -241,4 +241,46 @@ low.func.def target(@target) abi(object_function) @i8x2_to_s4x4_bitunpack_i8_res
   %72 = trunc.i32.i8 %71
   %unpacked = from_elements.v4i8 %57, %62, %68, %72
   return %unpacked
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+kernel.def target(@target) @uniform_global_i32_to_u8x4_bitunpack_store() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%values: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %index = index.constant 0 : index
+  %values_noalias, %output_noalias = buffer.assume.noalias %values, %output : buffer, buffer
+  %values_view = buffer.view %values_noalias[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<4xi32>
+  %packed = vector.load %values_view[%index] : view<1xi32> -> vector<1xi32>
+  %unpacked = vector.bitunpacku<8> %packed : vector<1xi32> -> vector<4xi32>
+  vector.store %unpacked, %output_view[%index] : vector<4xi32>, view<4xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @uniform_global_i32_to_u8x4_bitunpack_store() asm {
+  %values_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
+  %37 = load.i32 %values_view, 0
+  %38 = const.i32 255
+  %39 = and.i32 %37, %38
+  %40 = const.i32 8
+  %41 = lshr.i32 %37, %40
+  %42 = and.i32 %41, %38
+  %43 = const.i32 16
+  %44 = lshr.i32 %37, %43
+  %45 = and.i32 %44, %38
+  %46 = const.i32 24
+  %47 = lshr.i32 %37, %46
+  %48 = and.i32 %47, %38
+  %unpacked = from_elements.v4i32 %39, %42, %45, %48
+  store.v4i32 %unpacked, %output_view, 0
+  return
 }

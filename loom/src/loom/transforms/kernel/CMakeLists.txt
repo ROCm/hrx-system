@@ -37,11 +37,32 @@ loom_cc_library(
     iree::base
     loom::ir
     loom::ops::buffer
-    loom::ops::func
     loom::ops::index
     loom::ops::op_defs
     loom::pass::types
     loom::pass::value_facts
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    resolve_launches
+  HDRS
+    "resolve_launches.h"
+  SRCS
+    "resolve_launches.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::symbol_references
+    loom::error::emitter
+    loom::error::error_defs
+    loom::ir
+    loom::ops::func
+    loom::ops::kernel
+    loom::ops::op_defs
+    loom::rewrite::remap
+    loom::rewrite::rewriter
   PUBLIC
 )
 
@@ -64,6 +85,40 @@ loom_cc_library(
     loom::pass::types
     loom::rewrite::rewriter
     loom::util::dominance
+    loom::util::walk
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    stage_loop_carried_fragments
+  HDRS
+    "stage_loop_carried_fragments.h"
+  SRCS
+    "stage_loop_carried_fragments.c"
+  DEPS
+    iree::base
+    iree::base::internal
+    iree::base::internal::arena
+    loom::analysis::control_uniformity
+    loom::codegen::low::pipeline::pass_environment
+    loom::ir
+    loom::ops::buffer
+    loom::ops::encoding
+    loom::ops::index
+    loom::ops::kernel
+    loom::ops::op_defs
+    loom::ops::scf
+    loom::ops::vector
+    loom::pass::types
+    loom::pass::value_facts
+    loom::rewrite::materialize
+    loom::rewrite::remap
+    loom::rewrite::rewriter
+    loom::target::facts
+    loom::target::launch
+    loom::target::pass_environment
+    loom::target::reporting::report
     loom::util::walk
   PUBLIC
 )

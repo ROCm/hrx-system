@@ -118,3 +118,39 @@ iree_hal_amdgpu_device_timestamp_harvest_dispatch_records(
 }
 
 #endif  // IREE_AMDGPU_TARGET_DEVICE
+
+//===----------------------------------------------------------------------===//
+// Queue timestamp capture
+//===----------------------------------------------------------------------===//
+
+void iree_hal_amdgpu_device_timestamp_emplace_queue_capture(
+    const iree_hal_amdgpu_device_kernel_args_t* IREE_AMDGPU_RESTRICT
+        capture_kernel_args,
+    iree_amdgpu_device_tick_t* target,
+    iree_hsa_kernel_dispatch_packet_t* IREE_AMDGPU_RESTRICT dispatch_packet,
+    void* IREE_AMDGPU_RESTRICT kernarg_ptr) {
+  iree_hal_amdgpu_queue_timestamp_capture_args_t* IREE_AMDGPU_RESTRICT
+      kernargs = (iree_hal_amdgpu_queue_timestamp_capture_args_t*)kernarg_ptr;
+  kernargs->target = target;
+
+  // The kernel is registered with a 1x1x1 workgroup size so this grid is one
+  // work-item; the capture must not be spread across lanes.
+  const uint32_t workgroup_count[3] = {1, 1, 1};
+  iree_hal_amdgpu_device_dispatch_emplace_packet(
+      capture_kernel_args, workgroup_count,
+      /*dynamic_workgroup_local_memory=*/0, dispatch_packet, kernarg_ptr);
+}
+
+#if defined(IREE_AMDGPU_TARGET_DEVICE)
+
+IREE_AMDGPU_ATTRIBUTE_KERNEL void
+iree_hal_amdgpu_device_timestamp_capture_queue_tick(
+    iree_amdgpu_device_tick_t* IREE_AMDGPU_RESTRICT target) {
+  // iree_amdgpu_device_timestamp samples the agent domain, so this tick is
+  // interchangeable with a PM4-captured tick on the same agent and comparable
+  // with a tick from no other agent. The store is published by the dispatch
+  // packet's release fence.
+  *target = iree_amdgpu_device_timestamp();
+}
+
+#endif  // IREE_AMDGPU_TARGET_DEVICE

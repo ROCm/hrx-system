@@ -82,9 +82,13 @@ static iree_status_t loom_scalar_emit_attribute_kind_mismatch(
                           IREE_ARRAYSIZE(params));
 }
 
-static bool loom_scalar_type_is_integer_payload(loom_type_t type) {
-  return loom_type_is_scalar(type) &&
-         loom_scalar_type_is_integer(loom_type_element_type(type));
+static bool loom_scalar_type_is_payload(loom_type_t type) {
+  if (!loom_type_is_scalar(type)) {
+    return false;
+  }
+  const loom_scalar_type_t scalar_type = loom_type_element_type(type);
+  return loom_scalar_type_is_integer(scalar_type) ||
+         loom_scalar_type_is_float(scalar_type);
 }
 
 iree_status_t loom_scalar_constant_verify(const loom_module_t* module,
@@ -113,25 +117,7 @@ iree_status_t loom_scalar_constant_verify(const loom_module_t* module,
     return iree_diagnostic_emit(emitter, &emission);
   }
 
-  loom_attribute_t value = loom_scalar_constant_value(op);
-  loom_attr_kind_t expected_kind = LOOM_ATTR_ANY;
-  if (loom_attr_matches_scalar_type(value, result_scalar_type,
-                                    &expected_kind)) {
-    return iree_ok_status();
-  }
-
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(IREE_SV("value")),
-      loom_param_u32(value.kind),
-      loom_param_u32(expected_kind),
-  };
-  loom_diagnostic_emission_t emission = {
-      .op = op,
-      .error = LOOM_ERR_TYPE_005,
-      .params = params,
-      .param_count = IREE_ARRAYSIZE(params),
-  };
-  return iree_diagnostic_emit(emitter, &emission);
+  return iree_ok_status();
 }
 
 iree_status_t loom_scalar_assume_verify(const loom_module_t* module,
@@ -146,9 +132,35 @@ iree_status_t loom_scalar_assume_verify(const loom_module_t* module,
   for (uint16_t i = 0; i < op->operand_count; ++i) {
     loom_type_t value_type = loom_module_value_type(module, values[i]);
     loom_type_t result_type = loom_module_value_type(module, results[i]);
-    if (!loom_scalar_type_is_integer_payload(value_type) ||
-        !loom_scalar_type_is_integer_payload(result_type)) {
-      continue;
+    if (!loom_scalar_type_is_payload(value_type)) {
+      char value_name[32];
+      loom_scalar_format_assume_field_name(value_name, sizeof(value_name),
+                                           "values", i);
+      loom_diagnostic_param_t params[] = {
+          loom_param_with_field_ref(
+              loom_param_string(iree_make_cstring_view(value_name)),
+              loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, i)),
+          loom_param_type(value_type),
+          loom_param_string(
+              IREE_SV("integer or floating-point scalar; use index.assume")),
+      };
+      return loom_scalar_emit(emitter, op, LOOM_ERR_TYPE_004, params,
+                              IREE_ARRAYSIZE(params));
+    }
+    if (!loom_scalar_type_is_payload(result_type)) {
+      char result_name[32];
+      loom_scalar_format_assume_field_name(result_name, sizeof(result_name),
+                                           "results", i);
+      loom_diagnostic_param_t params[] = {
+          loom_param_with_field_ref(
+              loom_param_string(iree_make_cstring_view(result_name)),
+              loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_RESULT, i)),
+          loom_param_type(result_type),
+          loom_param_string(
+              IREE_SV("integer or floating-point scalar; use index.assume")),
+      };
+      return loom_scalar_emit(emitter, op, LOOM_ERR_TYPE_004, params,
+                              IREE_ARRAYSIZE(params));
     }
     if (!loom_type_equal(value_type, result_type)) {
       return loom_scalar_emit_assume_type_mismatch(emitter, op, i, value_type,

@@ -2,14 +2,19 @@
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @structured_control_bytecode(%condition: reg<test.i32>, %lower: reg<test.i32>, %upper: reg<test.i32>, %step: reg<test.i32>, %init: reg<test.i32>, %then_value: reg<test.i32>, %else_value: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
-  %if_result = low.scf.if %condition -> (reg<test.i32>) {
-    low.scf.yield %then_value : reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @structured_control_bytecode(%condition: reg<test.i32 : i32>, %lower: reg<test.i32 : i32>, %upper: reg<test.i32 : i32>, %step: reg<test.i32 : i32>, %init: reg<test.i32 : i32>, %then_value: reg<test.i32 : i32>, %else_value: reg<test.i32 : i32>) -> (reg<test.i32 : i32>, reg<test.i32 : i32>, reg<test.i32 : i32>) {
+  %if_result = low.scf.if %condition -> (reg<test.i32 : i32>) {
+    low.scf.yield %then_value : reg<test.i32 : i32>
   } else {
-    low.scf.yield %else_value : reg<test.i32>
+    low.scf.yield %else_value : reg<test.i32 : i32>
   }
-  %for_result = low.scf.for [%lower to %upper step %step] iter_args(%init: reg<test.i32>) -> (reg<test.i32>) unroll do(%iv: reg<test.i32>, %acc: reg<test.i32>) {
-    low.scf.yield %acc : reg<test.i32>
+  %for_result = low.scf.for [%lower to %upper step %step] iter_args(%init: reg<test.i32 : i32>) -> (reg<test.i32 : i32>) unroll do(%iv: reg<test.i32 : i32>, %acc: reg<test.i32 : i32>) {
+    low.scf.yield %acc : reg<test.i32 : i32>
   }
-  low.return %if_result, %for_result : reg<test.i32>, reg<test.i32>
+  %while_result = low.scf.while(%before = %init : reg<test.i32 : i32>) -> (reg<test.i32 : i32>) {
+    low.scf.condition %condition, %before : reg<test.i32 : i32>, reg<test.i32 : i32>
+  } do(%body: reg<test.i32 : i32>) {
+    low.scf.yield %body : reg<test.i32 : i32>
+  }
+  low.return %if_result, %for_result, %while_result : reg<test.i32 : i32>, reg<test.i32 : i32>, reg<test.i32 : i32>
 }

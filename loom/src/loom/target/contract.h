@@ -28,6 +28,7 @@
 #include "loom/error/error_defs.h"
 #include "loom/ir/ir.h"
 #include "loom/ops/func/ops.h"
+#include "loom/target/facts.h"
 #include "loom/target/types.h"
 #include "loom/util/fact_table.h"
 
@@ -37,6 +38,8 @@ extern "C" {
 
 typedef struct loom_view_region_table_t loom_view_region_table_t;
 typedef struct loom_matrix_fragment_layout_t loom_matrix_fragment_layout_t;
+typedef struct loom_native_contraction_facts_t loom_native_contraction_facts_t;
+typedef struct loom_local_value_domain_t loom_local_value_domain_t;
 
 typedef enum loom_target_contract_query_outcome_e {
   // No linked contract fragment or provider has an opinion about the op.
@@ -79,6 +82,9 @@ typedef struct loom_target_contract_query_result_t {
   // Matrix-fragment lane/register layout selected with the source contract, or
   // NULL when the queried op is not a matrix-fragment contract.
   const loom_matrix_fragment_layout_t* selected_matrix_fragment_layout;
+  // Compact native contraction placement selected with the source contract,
+  // or NULL when the selected target primitive has no modeled native layout.
+  const loom_native_contraction_facts_t* selected_native_contraction_facts;
   // Compact target-independent rejection flags.
   uint32_t source_rejection_bits;
   // Optional target-independent rejection detail enum.
@@ -92,6 +98,17 @@ typedef struct loom_target_contract_query_result_t {
   // Optional rejection payload. Usually points into rodata or a scoped arena.
   const loom_target_contract_rejection_t* rejection;
 } loom_target_contract_query_result_t;
+
+typedef iree_status_t (*loom_target_contract_query_get_or_allocate_state_fn_t)(
+    void* user_data, const void* key, iree_host_size_t data_length,
+    void** out_data);
+
+typedef struct loom_target_contract_query_state_allocator_t {
+  // Callback invoked to find or allocate target-owned query state.
+  loom_target_contract_query_get_or_allocate_state_fn_t fn;
+  // Caller-owned payload passed to |fn|.
+  void* user_data;
+} loom_target_contract_query_state_allocator_t;
 
 typedef uint8_t loom_target_contract_system_t;
 
@@ -309,6 +326,7 @@ loom_target_contract_query_result_empty(void) {
       /*.matched_guard_count=*/0,
       /*.selected_descriptor=*/NULL,
       /*.selected_matrix_fragment_layout=*/NULL,
+      /*.selected_native_contraction_facts=*/NULL,
       /*.source_rejection_bits=*/0,
       /*.source_rejection_detail=*/0,
       /*.target_rejection_bits=*/0,
@@ -323,21 +341,34 @@ typedef struct loom_target_contract_query_environment_t {
   const loom_module_t* module;
   // Source function containing the queried op.
   loom_func_like_t function;
-  // Target bundle selected for this query.
-  const loom_target_bundle_t* bundle;
-  // Target-owned payload associated with |bundle|, or NULL.
-  const void* target_data;
-  // Module-local target record symbol selected for this query.
-  loom_symbol_ref_t target_ref;
+  // Borrowed immutable target facts selected for this query.
+  const loom_target_facts_t* target_facts;
   // Low descriptor set selected for this query.
   const loom_low_descriptor_set_t* descriptor_set;
   // Source value facts visible to the query.
   const loom_value_fact_table_t* fact_table;
+  // Optional active function-local value domain for ordinal-keyed analyses.
+  const loom_local_value_domain_t* value_domain;
   // Optional function-local view-region analysis visible to the query.
   const loom_view_region_table_t* view_regions;
   // Scoped arena available for rare query-side auxiliary records.
   iree_arena_allocator_t* arena;
+  // Optional scoped storage allocator for target-owned query analyses.
+  loom_target_contract_query_state_allocator_t target_state_allocator;
 } loom_target_contract_query_environment_t;
+
+// Returns the common target bundle selected for |environment|.
+static inline const loom_target_bundle_t*
+loom_target_contract_query_environment_bundle(
+    const loom_target_contract_query_environment_t* environment) {
+  return loom_target_facts_bundle(environment->target_facts);
+}
+
+// Returns scoped target-owned query state for |key|, or NULL when the query
+// environment has no state allocator.
+iree_status_t loom_target_contract_query_get_or_allocate_target_state(
+    const loom_target_contract_query_environment_t* environment,
+    const void* key, iree_host_size_t data_length, void** out_data);
 
 typedef iree_status_t (*loom_target_contract_query_op_fn_t)(
     void* user_data,

@@ -47,6 +47,9 @@ static iree_status_t EvaluateTargetPredicate(
   ++capture->evaluate_count;
   *out_match = iree_string_view_equal(PredicateContextSymbolName(context),
                                       capture->selected_symbol);
+  if (*out_match) {
+    capture->selected_function_version = context->function_version;
+  }
   return iree_ok_status();
 }
 
@@ -270,9 +273,11 @@ loom_pass_interpreter_options_t PassTestHarness::InterpreterOptions(
     loom_pass_predicate_provider_t predicate_provider) {
   return (loom_pass_interpreter_options_t){
       /*.block_pool=*/&block_pool_,
+      /*.function_selector=*/{},
       /*.predicate_provider=*/predicate_provider,
       /*.diagnostic_emitter=*/diagnostic_emitter,
       /*.environment=*/EnvironmentWithTrace(trace),
+      /*.function_versions=*/nullptr,
       /*.report=*/report,
   };
 }
@@ -284,6 +289,7 @@ loom_pass_tool_run_options_t PassTestHarness::ToolOptions(
   return (loom_pass_tool_run_options_t){
       /*.registry=*/loom_test_pass_registry(),
       /*.environment=*/EnvironmentWithTrace(trace, environment),
+      /*.function_versions=*/nullptr,
       /*.predicate_provider=*/predicate_provider,
       /*.block_pool=*/&block_pool_,
   };

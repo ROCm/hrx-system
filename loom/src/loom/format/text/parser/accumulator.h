@@ -51,6 +51,24 @@ typedef struct loom_parser_pending_successor_refs_t {
   iree_host_size_t capacity;
 } loom_parser_pending_successor_refs_t;
 
+// The first textual occurrence that created a module symbol table entry.
+typedef struct loom_parser_symbol_origin_t {
+  // Module-local symbol identity created for the occurrence.
+  loom_symbol_id_t symbol_id;
+  // Source token used to diagnose a symbol left unresolved after parsing.
+  loom_token_t token;
+} loom_parser_symbol_origin_t;
+
+// Growable scratch list of first textual module symbol occurrences.
+typedef struct loom_parser_symbol_origins_t {
+  // Origins indexed in symbol creation order.
+  loom_parser_symbol_origin_t* entries;
+  // Number of populated origins.
+  iree_host_size_t count;
+  // Number of origins available in |entries|.
+  iree_host_size_t capacity;
+} loom_parser_symbol_origins_t;
+
 #define LOOM_PARSED_OP_INLINE_OPERANDS 16
 #define LOOM_PARSED_OP_INLINE_SUCCESSORS 4
 #define LOOM_PARSED_OP_INLINE_RESULTS 8
@@ -86,6 +104,8 @@ struct loom_parsed_op_t {
   uint16_t tied_result_capacity;
   uint16_t field_span_count;
   uint16_t field_span_capacity;
+  // Effective traits resolved with a representation-scoped identity.
+  loom_trait_flags_t effective_traits;
   uint8_t attribute_count;
   uint8_t attribute_capacity;
   uint8_t region_count;
@@ -93,6 +113,10 @@ struct loom_parsed_op_t {
   uint8_t operand_segment_count;
   uint8_t operand_segment_capacity;
   uint8_t instance_flags;
+  // Non-semantic source presentation copied to the finalized operation.
+  loom_op_flags_t source_flags;
+  // True when |effective_traits| replaces the operation's static traits.
+  bool has_effective_traits;
 
   loom_value_id_t inline_operand_ids[LOOM_PARSED_OP_INLINE_OPERANDS];
   loom_block_t* inline_successors[LOOM_PARSED_OP_INLINE_SUCCESSORS];

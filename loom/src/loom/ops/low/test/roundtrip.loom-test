@@ -2,7 +2,7 @@
 
 test.target<low_core> @test_target
 
-low.kernel.def target(@test_target) export("entry") linkage(dso_local) workgroup_size(16, 4, 1) @entry(%buffer: reg<test.ptr>) {
+low.kernel.def target<test.low.core>(@test_target) export("entry") linkage(dso_local) workgroup_size(16, 4, 1) workgroup_count(8, 2, 1) cluster_size(1, 2, 1) @entry(%buffer: reg<test.ptr>) {
   low.return
 }
 
@@ -10,13 +10,22 @@ low.kernel.def target(@test_target) export("entry") linkage(dso_local) workgroup
 
 test.target<low_core> @test_target
 
-low.func.decl retain target(@test_target) @retained_decl(%value: reg<test.i32>) -> (reg<test.i32>)
+low.func.def target<test.low.core>(@test_target) @schedule_fence() {
+  low.schedule.fence
+  low.return
+}
 
-low.func.def retain target(@test_target) @retained_func(%value: reg<test.i32>) -> (reg<test.i32>) {
+// ====
+
+test.target<low_core> @test_target
+
+low.func.decl retain target<test.low.core>(@test_target) @retained_decl(%value: reg<test.i32>) -> (reg<test.i32>)
+
+low.func.def retain target<test.low.core>(@test_target) @retained_func(%value: reg<test.i32>) -> (reg<test.i32>) {
   low.return %value : reg<test.i32>
 }
 
-low.kernel.def retain target(@test_target) @retained_kernel(%value: reg<test.i32>) {
+low.kernel.def retain target<test.low.core>(@test_target) @retained_kernel(%value: reg<test.i32>) {
   low.return
 }
 
@@ -24,9 +33,9 @@ low.kernel.def retain target(@test_target) @retained_kernel(%value: reg<test.i32
 
 test.target<low_core> @test_target
 
-low.func.decl target(@test_target) @add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>)
+low.func.decl target<test.low.core>(@test_target) @add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>)
 
-low.kernel.def allocation(fixed) schedule(locked) target(@test_target) @helper_entry(%lhs: reg<test.i32>, %rhs: reg<test.i32>) {
+low.kernel.def allocation(fixed) schedule(locked) target<test.low.core>(@test_target) @helper_entry(%lhs: reg<test.i32>, %rhs: reg<test.i32>) {
   %sum = low.func.call @add(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> (reg<test.i32>)
   low.return
 }
@@ -35,11 +44,58 @@ low.kernel.def allocation(fixed) schedule(locked) target(@test_target) @helper_e
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @storage_view(%value: reg<test.i32>) -> (reg<test.i32>) {
+low.func.decl target<test.low.core>(@test_target) @typed_identity(%value: reg<test.i32 : i32>) -> (reg<test.i32 : i32>)
+
+low.func.def target<test.low.core>(@test_target) @typed_call_and_branch(%value: reg<test.i32 : i32>) -> (reg<test.i32 : i32>) {
+  %called = low.func.call @typed_identity(%value) : (reg<test.i32 : i32>) -> (reg<test.i32 : i32>)
+  low.br ^exit(%called: reg<test.i32 : i32>)
+^exit(%result: reg<test.i32 : i32>):
+  low.return %result : reg<test.i32 : i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @storage_view(%value: reg<test.i32>) -> (reg<test.i32>) {
   %storage = low.storage.reserve {byte_alignment = 16, byte_length = 64} : low.storage<scratch>
   %whole = low.storage.view %storage {byte_length = 64} : low.storage<scratch> -> low.storage<scratch>
   %tail = low.storage.view %whole {byte_length = 16, offset = 16} : low.storage<scratch> -> low.storage<scratch>
   low.spill %value, %tail : reg<test.i32>, low.storage<scratch>
   %reload = low.reload %tail : low.storage<scratch> -> reg<test.i32>
   low.return %reload : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @detached_copy(%value: reg<test.i32>) asm {
+  %copy = copy %value {detached = true} : reg<test.i32> -> reg<test.i32>
+  return
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @detached_copy(%value: reg<test.i32>) {
+  %copy = low.copy %value {detached = true} : reg<test.i32> -> reg<test.i32>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @detached_move(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %moved = move %value {detached = true} : reg<test.i32> -> reg<test.i32>
+  return %moved
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @detached_move(%value: reg<test.i32>) -> (reg<test.i32>) {
+  %moved = low.move %value {detached = true} : reg<test.i32> -> reg<test.i32>
+  low.return %moved : reg<test.i32>
 }

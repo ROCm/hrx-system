@@ -10,6 +10,8 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
+#include "iree/hal/drivers/amdgpu/device/atomic_pm4.h"
+#include "iree/hal/drivers/amdgpu/device/blit_pm4.h"
 #include "iree/hal/drivers/amdgpu/host_queue.h"
 #include "iree/hal/drivers/amdgpu/host_queue_staging.h"
 #include "iree/hal/drivers/amdgpu/physical_device_capabilities.h"
@@ -18,7 +20,7 @@
 #include "iree/hal/drivers/amdgpu/util/block_pool.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 #include "iree/hal/drivers/amdgpu/util/signal_pool.h"
-#include "iree/hal/drivers/amdgpu/util/target_id.h"
+#include "iree/hal/executable/amdgpu/target_id.h"
 #include "iree/hal/memory/slab_provider.h"
 #include "iree/hal/memory/tlsf_pool.h"
 #include "iree/hal/pool.h"
@@ -31,6 +33,8 @@ typedef struct iree_hal_amdgpu_pm4_command_buffer_resident_pool_t
 typedef struct iree_hal_amdgpu_asan_state_t iree_hal_amdgpu_asan_state_t;
 typedef struct iree_hal_amdgpu_feedback_state_t
     iree_hal_amdgpu_feedback_state_t;
+typedef struct iree_hal_amdgpu_hostcall_provider_state_t
+    iree_hal_amdgpu_hostcall_provider_state_t;
 
 //===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_physical_device_options_t
@@ -162,10 +166,6 @@ typedef struct iree_hal_amdgpu_physical_device_options_t {
   // optimal device-side strategy for the GPU ISA.
   uint32_t force_wait_barrier_defer : 1;
 
-  // Enables PM4 dispatch command-buffer capabilities on unvalidated gfx9-gfx12
-  // targets for hardware bring-up experiments.
-  uint32_t enable_experimental_pm4_command_buffers : 1;
-
   // Suppresses fine-grained GPU-local memory pools even if HSA reports them.
   uint32_t suppress_device_fine_memory : 1;
 } iree_hal_amdgpu_physical_device_options_t;
@@ -203,13 +203,8 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   uint32_t pci_function;
   // True when the PCI identity fields contain HSA-provided values.
   uint32_t has_pci_identity : 1;
-  // HSA ISA identity selected for this GPU agent.
-  struct {
-    // Storage backing |target_id.processor|.
-    char target_id_processor[64];
-    // Parsed target identity, including XNACK/SRAMECC support and mode.
-    iree_hal_amdgpu_target_id_t target_id;
-  } isa;
+  // Immutable system-owned target identity for |device_agent|.
+  const iree_hal_amdgpu_agent_target_t* agent_target;
   // Stable physical device UUID bytes reported by HSA when available.
   uint8_t physical_device_uuid[16];
   // True when |physical_device_uuid| contains a stable HSA device identifier.
@@ -220,20 +215,30 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   uint32_t compute_unit_count;
   // Native wavefront size reported by HSA for this GPU agent.
   uint32_t wavefront_size;
+  // Maximum resident wave count per compute unit reported by HSA.
+  uint32_t maximum_waves_per_compute_unit;
   // Maximum group segment byte length used for dispatch and sanitizer sizing.
   uint32_t group_segment_max_size;
+  // Device-side timestamp tick rate in hz, from
+  // HSA_AMD_AGENT_INFO_TIMESTAMP_FREQUENCY. Always nonzero.
+  uint64_t timestamp_frequency_hz;
   // HDP flush register descriptor reported by HSA for this GPU agent.
   hsa_amd_hdp_flush_t hdp_flush;
   // Host memory pools for the CPU agent nearest to |device_agent|.
   iree_hal_amdgpu_host_memory_pools_t host_memory_pools;
   // Cold memory-system facts used to derive conservative topology flags.
   iree_hal_amdgpu_memory_system_capabilities_t memory_system;
+  // Clustered-dispatch limits reported for this GPU agent.
+  iree_hal_amdgpu_workgroup_cluster_capabilities_t workgroup_cluster;
   // CPU-visible coarse-grained device-memory capability for this GPU.
   iree_hal_amdgpu_cpu_visible_device_coarse_memory_t
       cpu_visible_device_coarse_memory;
   // Prepublished command-buffer kernarg storage capability for this GPU.
   iree_hal_amdgpu_aql_prepublished_kernarg_storage_t
       prepublished_kernarg_storage;
+
+  // Optional opaque hostcall provider and its stable shared device address.
+  iree_hal_amdgpu_hostcall_provider_state_t* hostcall_provider_state;
 
   // Optional fine-grained block pools for host-coherent device memory.
   iree_hal_amdgpu_block_pools_t fine_block_pools;
@@ -288,8 +293,12 @@ typedef struct iree_hal_amdgpu_physical_device_t {
 
   // Builtin kernel table for this GPU agent.
   iree_hal_amdgpu_device_kernels_t device_kernels;
+  // PM4 launch metadata derived from the builtin atomic kernels.
+  iree_hal_amdgpu_device_atomic_pm4_context_t atomic_pm4_context;
   // Host/device-neutral transfer context that points into |device_kernels|.
   iree_hal_amdgpu_device_buffer_transfer_context_t buffer_transfer_context;
+  // PM4 launch metadata derived from the builtin transfer kernels.
+  iree_hal_amdgpu_device_buffer_transfer_pm4_context_t transfer_pm4_context;
 
   // Total number of host queue slots allocated in |host_queues|.
   iree_host_size_t host_queue_capacity;
@@ -302,6 +311,8 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   // Per-host-queue device-visible control upload ring capacity in bytes. Zero
   // disables the optional upload ring.
   uint32_t host_queue_upload_capacity;
+  // Component that consumes this GPU agent's AQL queue packets.
+  iree_hal_amdgpu_aql_queue_execution_mode_t aql_queue_execution_mode;
   // AMD vendor-packet capabilities selected from this GPU agent's ISA.
   iree_hal_amdgpu_vendor_packet_capability_flags_t vendor_packet_capabilities;
   // Hardware strategy selected for cross-queue epoch waits on this GPU agent.
@@ -331,6 +342,7 @@ iree_status_t iree_hal_amdgpu_physical_device_initialize(
     iree_async_proactor_t* proactor, iree_host_size_t host_ordinal,
     const iree_hal_amdgpu_host_memory_pools_t* host_memory_pools,
     iree_host_size_t device_ordinal, iree_hal_amdgpu_asan_state_t* asan_state,
+    const iree_hal_hostcall_provider_t* hostcall_provider,
     iree_allocator_t host_allocator,
     iree_hal_amdgpu_physical_device_t* out_physical_device);
 
@@ -358,6 +370,11 @@ void iree_hal_amdgpu_physical_device_deassign_frontier(
 // queues and joins failures.
 iree_status_t iree_hal_amdgpu_physical_device_set_hsa_profiling_enabled(
     iree_hal_amdgpu_physical_device_t* physical_device, bool enabled);
+
+// Returns the stable opaque hostcall device address provisioned for this
+// physical device, or NULL when the hosting layer did not opt into a provider.
+void* iree_hal_amdgpu_physical_device_hostcall_buffer(
+    const iree_hal_amdgpu_physical_device_t* physical_device);
 
 // Deinitializes a physical device and deallocates all device-specific
 // resources.

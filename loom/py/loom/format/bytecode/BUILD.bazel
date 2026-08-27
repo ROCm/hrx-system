@@ -48,3 +48,17 @@ iree_py_test(
         "//loom/py/loom/target/test:descriptors",
     ],
 )
+
+iree_py_test(
+    name = "c_interop_test",
+    srcs = ["c_interop_test.py"],
+    args = ["$(location //loom/src/loom/tools/loom-format:loom-format)"],
+    data = ["//loom/src/loom/tools/loom-format"],
+    main = "c_interop_test.py",
+    deps = [
+        ":bytecode",
+        "//loom/py/loom/dialect/low",
+        "//loom/py/loom/format/text",
+        "//loom/py/loom/target/test:descriptors",
+    ],
+)

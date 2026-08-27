@@ -11,9 +11,14 @@ from loom.importers.core import (
     create_kernel_module,
     kernel_module_ops,
     print_loom_module,
+    target_preset_amdgpu_matrix_profile,
     target_preset_amdgpu_subgroup_size,
 )
 from loom.ir import I32
+from loom.target.arch.amdgpu.target_info import (
+    AMDGPU_TARGET_INFOS,
+    amdgpu_processor_info_by_name,
+)
 from loom.verify import verify_module
 
 
@@ -116,59 +121,31 @@ kernel.def target(@hip_mcpu_gfx1100) export(\"kernel\") @kernel() {
     )
 
 
-def test_create_kernel_module_uses_gfx942_amdgpu_target_record() -> None:
-    shell = create_kernel_module(
-        KernelModuleSpec(
-            target_preset="hip -mcpu=gfx942",
-            export_symbol="kernel",
-            callee="kernel",
-            arguments=[],
-        )
-    )
-    with shell.builder.insertion_block(shell.body_block):
-        shell.builder.kernel.return_()
-
-    diagnostics = verify_module(
-        shell.module,
-        ops=kernel_module_ops("hip -mcpu=gfx942"),
-    )
-    diagnostics.raise_if_errors()
-    assert (
-        print_loom_module(
-            shell.module,
-            ops=kernel_module_ops("hip -mcpu=gfx942"),
-        )
-        == """amdgpu.target<gfx942> @hip_mcpu_gfx942
-
-kernel.def target(@hip_mcpu_gfx942) export(\"kernel\") @kernel() {
-  %wg_count_x = index.constant 1 : index
-  %wg_count_y = index.constant 1 : index
-  %wg_count_z = index.constant 1 : index
-  %wg_size_x = index.constant 1 : index
-  %wg_size_y = index.constant 1 : index
-  %wg_size_z = index.constant 1 : index
-  kernel.launch.config workgroups(%wg_count_x, %wg_count_y, %wg_count_z) workgroup_size(%wg_size_x, %wg_size_y, %wg_size_z) : index
-} launch() {
-  kernel.return
-}
-"""
-    )
-
-
-def test_create_kernel_module_uses_amdgpu_processor_override() -> None:
-    assert _printed_kernel_module_for_target_preset("hip -mcpu=gfx1101").startswith(
-        'amdgpu.target<gfx1100> @hip_mcpu_gfx1101 {processor = "gfx1101"}\n'
-    )
-
-
-def test_create_kernel_module_uses_generic_amdgpu_target_record() -> None:
-    assert _printed_kernel_module_for_target_preset(
-        "hip -mcpu=gfx11-generic"
-    ).startswith("amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic\n")
+def test_create_kernel_module_uses_every_amdgpu_target() -> None:
+    for target in AMDGPU_TARGET_INFOS:
+        symbol = target.target.replace("-", "_")
+        assert _printed_kernel_module_for_target_preset(
+            f"hip -mcpu={target.target}"
+        ).startswith(f"amdgpu.target<{target.target}> @hip_mcpu_{symbol}\n")
 
 
 def test_target_preset_amdgpu_subgroup_size_uses_processor_facts() -> None:
-    assert target_preset_amdgpu_subgroup_size("hip -mcpu=gfx1100") == 32
-    assert target_preset_amdgpu_subgroup_size("hip -mcpu=gfx942") == 64
-    assert target_preset_amdgpu_subgroup_size("hip -mcpu=gfx11-generic") == 32
+    for target in AMDGPU_TARGET_INFOS:
+        processor = amdgpu_processor_info_by_name(target.processor)
+        assert processor is not None
+        assert (
+            target_preset_amdgpu_subgroup_size(f"hip -mcpu={target.target}")
+            == processor.wavefront.default_size
+        )
     assert target_preset_amdgpu_subgroup_size("reference") is None
+
+
+def test_target_preset_amdgpu_matrix_profile_uses_processor_facts() -> None:
+    for target in AMDGPU_TARGET_INFOS:
+        processor = amdgpu_processor_info_by_name(target.processor)
+        assert processor is not None
+        assert (
+            target_preset_amdgpu_matrix_profile(f"hip -mcpu={target.target}")
+            == processor.features.matrix
+        )
+    assert target_preset_amdgpu_matrix_profile("reference") is None

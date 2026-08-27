@@ -8,7 +8,7 @@ load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
     "loom_cc_test",
-    "loom_generated_cc_library",
+    "loom_generated_file_family",
 )
 
 package(
@@ -54,6 +54,7 @@ loom_cc_library(
         ":op_defs",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/ir",
+        "//loom/src/loom/target:condition",
         "//loom/src/loom/target:types",
         "//runtime/src/iree/base",
     ],
@@ -68,6 +69,20 @@ loom_cc_library(
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
+        "//loom/src/loom/target:condition",
+        "//loom/src/loom/target:projection",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "callable_effects",
+    srcs = ["callable_effects.c"],
+    hdrs = ["callable_effects.h"],
+    deps = [
+        ":op_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/rewrite:rewriter",
         "//runtime/src/iree/base",
     ],
 )
@@ -79,8 +94,8 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/ir",
         "//loom/src/loom/util:fact_table",
-        "//loom/src/loom/util:math",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
     ],
 )
 
@@ -91,13 +106,17 @@ loom_cc_test(
         ":func_symbol_facts",
         ":op_registry",
         "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:low_descriptor_registry_core_test",
         "//loom/src/loom/target:types",
         "//loom/src/loom/testing:module_ptr",
         "//runtime/src/iree/base/internal:arena",
@@ -139,33 +158,47 @@ loom_cc_library(
     deps = ["//runtime/src/iree/base"],
 )
 
-loom_generated_cc_library(
-    name = "op_registry",
-    srcs = ["op_registry.c"],
-    hdrs = ["op_registry.h"],
+loom_generated_file_family(
+    name = "registry_tables_gen",
     args = ["--registry"],
-    generated_src_flags = [
+    generator = "//loom/py/loom/gen/ops:c_tables_generator",
+    output_flags = [
         "--op-registry-tables",
         "--op-registry-tables-header",
+        "--type-registry-tables",
+        "--type-registry-tables-header",
     ],
-    generated_srcs = [
+    outputs = [
         "op_registry_tables.c",
         "op_registry_tables.h",
+        "type_registry_tables.c",
+        "type_registry_tables.h",
     ],
-    generator = "//loom/py/loom/gen/ops:c_tables_generator",
+)
+
+loom_cc_library(
+    name = "op_registry",
+    srcs = [
+        "op_registry.c",
+        "op_registry_tables.c",
+    ],
+    hdrs = [
+        "op_registry.h",
+        "op_registry_tables.h",
+    ],
     deps = [
         ":op_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/buffer",
         "//loom/src/loom/ops/cfg",
         "//loom/src/loom/ops/check",
+        "//loom/src/loom/ops/command",
         "//loom/src/loom/ops/config",
         "//loom/src/loom/ops/encoding",
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/global",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/kernel",
-        "//loom/src/loom/ops/llvmir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/ops/pass",
         "//loom/src/loom/ops/pool",
@@ -173,6 +206,7 @@ loom_generated_cc_library(
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/scf",
         "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/ops/view",
         "//runtime/src/iree/base",
@@ -194,24 +228,21 @@ loom_cc_library(
     ],
 )
 
-loom_generated_cc_library(
+loom_cc_library(
     name = "type_registry",
-    srcs = ["type_registry.c"],
-    hdrs = ["type_registry.h"],
-    args = ["--registry"],
-    generated_src_flags = [
-        "--type-registry-tables",
-        "--type-registry-tables-header",
-    ],
-    generated_srcs = [
+    srcs = [
+        "type_registry.c",
         "type_registry_tables.c",
+    ],
+    hdrs = [
+        "type_registry.h",
         "type_registry_tables.h",
     ],
-    generator = "//loom/py/loom/gen/ops:c_tables_generator",
     deps = [
         ":op_defs",
         ":storage_facts",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/buffer",
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
@@ -224,8 +255,6 @@ loom_cc_test(
     deps = [
         ":op_defs",
         "//loom/src/loom/ir",
-        "//loom/src/loom/ops/scalar",
-        "//loom/src/loom/ops/scf",
         "//loom/src/loom/ops/test",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
@@ -243,6 +272,8 @@ loom_cc_test(
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/template",
+        "//loom/src/loom/ops/test",
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base/internal:arena",

@@ -30,27 +30,12 @@ loom_cc_library(
     hdrs = ["assembly.h"],
     visibility = _NATIVE_AMDGPU_VISIBILITY + _NATIVE_X86_VISIBILITY,
     deps = [
-        ":fragment",
-        "//loom/src/loom/codegen/low:move_sequence",
         "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
-    ],
-)
-
-loom_cc_library(
-    name = "fragment",
-    srcs = ["fragment.c"],
-    hdrs = ["fragment.h"],
-    visibility = _NATIVE_AMDGPU_VISIBILITY,
-    deps = [
-        "//loom/src/loom/codegen/low:packet",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/ops/low",
-        "//runtime/src/iree/base",
     ],
 )
 

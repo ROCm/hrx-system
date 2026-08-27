@@ -22,8 +22,8 @@ iree_status_t iree_benchmark_loom_write_profile_counter_request_json(
     const iree_benchmark_loom_benchmark_policy_t* policy,
     loom_output_stream_t* stream);
 
-// Appends decoded final-batch profile rows for |benchmark_result|.
-iree_status_t iree_benchmark_loom_append_profile_row(
+// Appends decoded final profile-replay rows for |benchmark_result|.
+iree_status_t iree_benchmark_loom_append_profile_replay_row(
     const iree_benchmark_loom_run_identity_t* run,
     const iree_benchmark_loom_candidate_identity_t* candidate,
     iree_host_size_t work_item_index, const loom_module_t* module,

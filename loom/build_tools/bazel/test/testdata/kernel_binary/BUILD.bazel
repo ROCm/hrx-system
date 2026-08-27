@@ -1,0 +1,88 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# bazel-to-cmake: skip
+
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load(
+    "//loom/build_tools/bazel:defs.bzl",
+    "loom_kernel_binary",
+    "loom_library",
+)
+
+package(default_visibility = ["//loom/build_tools/bazel/test:__pkg__"])
+
+loom_library(
+    name = "motif",
+    srcs = ["motif.loom"],
+    tags = ["manual"],
+)
+
+loom_library(
+    name = "implementation",
+    srcs = ["implementation.loom"],
+    tags = ["manual"],
+    deps = [":motif"],
+)
+
+loom_library(
+    name = "unused",
+    srcs = ["unused.loom"],
+    tags = ["manual"],
+)
+
+loom_library(
+    name = "interface",
+    srcs = ["interface.loom"],
+    tags = ["manual"],
+    deps = [
+        ":implementation",
+        ":unused",
+    ],
+)
+
+loom_kernel_binary(
+    name = "transitive_subject",
+    tags = ["manual"],
+    target = "//loom/target/amdgpu:gfx11-generic",
+    deps = [":interface"],
+)
+
+filegroup(
+    name = "transitive_subject_compile_report",
+    srcs = [":transitive_subject"],
+    output_group = "compile_reports",
+)
+
+filegroup(
+    name = "transitive_subject_linked_module",
+    srcs = [":transitive_subject"],
+    output_group = "linked_modules",
+)
+
+sh_test(
+    name = "transitive_link_test",
+    srcs = ["transitive_link_test.sh"],
+    args = [
+        "$(rootpath :transitive_subject)",
+        "$(rootpath :transitive_subject_compile_report)",
+        "$(rootpath :transitive_subject_linked_module)",
+        "$(rootpath //loom/src/loom/tools/loom-format)",
+    ],
+    data = [
+        ":transitive_subject",
+        ":transitive_subject_compile_report",
+        ":transitive_subject_linked_module",
+        "//loom/src/loom/tools/loom-format",
+    ],
+)
+
+test_suite(
+    name = "test",
+    tests = [
+        ":transitive_link_test",
+    ],
+)

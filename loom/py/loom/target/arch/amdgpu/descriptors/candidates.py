@@ -32,6 +32,8 @@ _ATOMIC_KIND = {
     "or.b32": (AmdgpuAtomicKind.ORI, AmdgpuAtomicValueKind.I32),
     "xor.b32": (AmdgpuAtomicKind.XORI, AmdgpuAtomicValueKind.I32),
     "exchange.b32": (AmdgpuAtomicKind.XCHGI, AmdgpuAtomicValueKind.I32),
+    "add.u64": (AmdgpuAtomicKind.ADDI, AmdgpuAtomicValueKind.I64),
+    "exchange.u64": (AmdgpuAtomicKind.XCHGI, AmdgpuAtomicValueKind.I64),
     "add.f32": (AmdgpuAtomicKind.ADDF, AmdgpuAtomicValueKind.F32),
     "minnum.f32": (AmdgpuAtomicKind.MINNUMF, AmdgpuAtomicValueKind.F32),
     "maxnum.f32": (AmdgpuAtomicKind.MAXNUMF, AmdgpuAtomicValueKind.F32),
@@ -116,6 +118,7 @@ _S = AmdgpuMemoryPayloadRegisterClass.SGPR
 _G = AmdgpuMemoryPayloadFormat.GENERIC
 _F16 = AmdgpuMemoryPayloadFormat.LOW_16BIT_FLOAT
 _I16 = AmdgpuMemoryPayloadFormat.SIGNED_16BIT_INTEGER
+_U8 = AmdgpuMemoryPayloadFormat.UNSIGNED_8BIT_INTEGER
 
 
 def _memory_candidate(
@@ -144,6 +147,7 @@ def _memory_candidate(
 # payload format, payload register count, descriptor ref suffix.
 _MEMORY_DESCRIPTOR_CANDIDATE_ROWS = (
     (_B, _AD, _LD, 1, _V, _G, 1, "BUFFER_LOAD_I8"),
+    (_B, _AD, _LD, 1, _V, _U8, 1, "BUFFER_LOAD_U8"),
     (_B, _AD, _ST, 1, _V, _G, 1, "BUFFER_STORE_B8"),
     (_B, _AD, _LD, 2, _V, _F16, 1, "BUFFER_LOAD_B16_D16"),
     (_B, _AD, _LD, 2, _V, _I16, 1, "BUFFER_LOAD_I16"),
@@ -179,6 +183,7 @@ _MEMORY_DESCRIPTOR_CANDIDATE_ROWS = (
     (_SM, _SMEM, _LD, 8, _S, _G, 2, "S_LOAD_DWORDX2"),
     (_SM, _SMEM, _LD, 16, _S, _G, 4, "S_LOAD_DWORDX4"),
     (_GS, _SA, _LD, 1, _V, _G, 1, "GLOBAL_LOAD_I8_SADDR"),
+    (_GS, _SA, _LD, 1, _V, _U8, 1, "GLOBAL_LOAD_U8_SADDR"),
     (_GS, _SA, _ST, 1, _V, _G, 1, "GLOBAL_STORE_B8_SADDR"),
     (_GS, _SA, _LD, 2, _V, _F16, 1, "GLOBAL_LOAD_B16_D16_SADDR"),
     (_GS, _SA, _LD, 2, _V, _I16, 1, "GLOBAL_LOAD_I16_SADDR"),
@@ -193,6 +198,7 @@ _MEMORY_DESCRIPTOR_CANDIDATE_ROWS = (
     (_GS, _SA, _ST, 12, _V, _G, 3, "GLOBAL_STORE_B96_SADDR"),
     (_GS, _SA, _ST, 16, _V, _G, 4, "GLOBAL_STORE_B128_SADDR"),
     (_GF, _FL, _LD, 1, _V, _G, 1, "GLOBAL_LOAD_I8"),
+    (_GF, _FL, _LD, 1, _V, _U8, 1, "GLOBAL_LOAD_U8"),
     (_GF, _FL, _ST, 1, _V, _G, 1, "GLOBAL_STORE_B8"),
     (_GF, _FL, _LD, 2, _V, _F16, 1, "GLOBAL_LOAD_B16_D16"),
     (_GF, _FL, _LD, 2, _V, _I16, 1, "GLOBAL_LOAD_I16"),
@@ -206,6 +212,9 @@ _MEMORY_DESCRIPTOR_CANDIDATE_ROWS = (
     (_GF, _FL, _ST, 8, _V, _G, 2, "GLOBAL_STORE_B64"),
     (_GF, _FL, _ST, 12, _V, _G, 3, "GLOBAL_STORE_B96"),
     (_GF, _FL, _ST, 16, _V, _G, 4, "GLOBAL_STORE_B128"),
+    (_L, _AD, _LD, 1, _V, _G, 1, "DS_READ_U8"),
+    (_L, _AD, _LD, 1, _V, _U8, 1, "DS_READ_U8"),
+    (_L, _AD, _ST, 1, _V, _G, 1, "DS_WRITE_B8"),
     (_L, _AD, _LD, 2, _V, _I16, 1, "DS_READ_U16"),
     (_L, _AD, _LD, 2, _V, _G, 1, "DS_READ_U16"),
     (_L, _AD, _LD, 4, _V, _G, 1, "DS_READ_B32"),
@@ -221,10 +230,14 @@ _MEMORY_DESCRIPTOR_CANDIDATE_ROWS = (
     (_L, _DS2, _ST, 8, _V, _G, 2, "DS_WRITE2_B32"),
     (_L, _DS2, _LD, 8, _V, _G, 2, "DS_READ2ST64_B32"),
     (_L, _DS2, _ST, 8, _V, _G, 2, "DS_WRITE2ST64_B32"),
+    (_L, _DS2, _LD, 16, _V, _G, 4, "DS_READ2_B64"),
+    (_L, _DS2, _ST, 16, _V, _G, 4, "DS_WRITE2_B64"),
+    (_L, _DS2, _LD, 16, _V, _G, 4, "DS_READ2ST64_B64"),
+    (_L, _DS2, _ST, 16, _V, _G, 4, "DS_WRITE2ST64_B64"),
     (_L, _ADT, _LD, 4, _V, _G, 1, "DS_READ_ADDTID_B32"),
     (_L, _ADT, _ST, 4, _V, _G, 1, "DS_WRITE_ADDTID_B32"),
     (_SC, _SV, _LD, 1, _V, _G, 1, "SCRATCH_LOAD_I8_VADDR"),
-    (_SC, _SV, _LD, 1, _V, _G, 1, "SCRATCH_LOAD_U8_VADDR"),
+    (_SC, _SV, _LD, 1, _V, _U8, 1, "SCRATCH_LOAD_U8_VADDR"),
     (_SC, _SV, _LD, 2, _V, _F16, 1, "SCRATCH_LOAD_U16_VADDR"),
     (_SC, _SV, _LD, 2, _V, _G, 1, "SCRATCH_LOAD_U16_VADDR"),
     (_SC, _SV, _LD, 2, _V, _I16, 1, "SCRATCH_LOAD_I16_VADDR"),
@@ -341,7 +354,16 @@ def _amdgpu_atomic_candidate_from_overlay(
             address_form=address_form,
             operation_kind=AmdgpuAtomicOperationKind.CMPXCHG,
             atomic_kind=AmdgpuAtomicKind.NONE,
-            value_kind=AmdgpuAtomicValueKind.I32,
+            value_kind=AmdgpuAtomicValueKind.B32,
+            descriptor_key=overlay.descriptor_key,
+        )
+    if semantic_parts == ("compare_exchange", "b64"):
+        return AmdgpuAtomicDescriptorCandidate(
+            memory_space=memory_space,
+            address_form=address_form,
+            operation_kind=AmdgpuAtomicOperationKind.CMPXCHG,
+            atomic_kind=AmdgpuAtomicKind.NONE,
+            value_kind=AmdgpuAtomicValueKind.B64,
             descriptor_key=overlay.descriptor_key,
         )
 
@@ -403,7 +425,7 @@ def amdgpu_atomic_descriptor_candidates() -> tuple[
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     ):
         for overlay in overlays:
             candidate = _amdgpu_atomic_candidate_from_overlay(overlay)
@@ -439,7 +461,7 @@ def amdgpu_async_gather_descriptor_candidates() -> tuple[
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     ):
         for overlay in overlays:
             candidate = _amdgpu_async_gather_candidate_from_overlay(overlay)

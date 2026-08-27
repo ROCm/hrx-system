@@ -1,0 +1,126 @@
+// RUN: verify
+
+command.program.def @decode(%token_count: index) launch(%parameters: buffer, %transient: buffer) {
+  command.return
+}
+
+command.program.def @valid_launch(%token_count: index) launch(%parameters: buffer, %transient: buffer) {
+  command.program.launch @decode[%token_count](%parameters, %transient) : [index](buffer, buffer)
+  command.return
+}
+
+// ====
+
+command.program.def @non_buffer_binding() launch(%binding: i32) {
+  // ERROR@-1: TYPE/003 "launch binding 0" "i32" "buffer"
+  command.return
+}
+
+// ====
+
+command.program.def @one_specialization(%token_count: index) launch(%parameters: buffer) {
+  command.return
+}
+
+command.program.def @missing_specialization() launch(%parameters: buffer) {
+  // ERROR@+1: STRUCTURE/013 "specialization" "0" "program specialization argument" "1"
+  command.program.launch @one_specialization(%parameters) : (buffer)
+  command.return
+}
+
+// ====
+
+command.program.def @index_specialization(%token_count: index) launch(%parameters: buffer) {
+  command.return
+}
+
+command.program.def @wrong_specialization_type(%token_count: i32) launch(%parameters: buffer) {
+  // ERROR@+1: TYPE/001 "specialization 0" "i32" "program specialization argument 0" "index"
+  command.program.launch @index_specialization[%token_count](%parameters) : [i32](buffer)
+  command.return
+}
+
+// ====
+
+command.program.def @two_bindings() launch(%parameters: buffer, %transient: buffer) {
+  command.return
+}
+
+command.program.def @missing_binding() launch(%parameters: buffer) {
+  // ERROR@+1: STRUCTURE/013 "binding" "1" "program launch binding" "2"
+  command.program.launch @two_bindings(%parameters) : (buffer)
+  command.return
+}
+
+// ====
+
+func.def @ordinary_function() {
+  func.return
+}
+
+command.program.def @wrong_symbol_kind() launch() {
+  // ERROR@+1: SYMBOL/003 {symbol_name="ordinary_function", actual_kind="function", expected_kind="command program"}
+  command.program.launch @ordinary_function() : ()
+  command.return
+}
+
+// ====
+
+command.program.def @invalid_parameter_patterns(%layer: index) launch(%parameters: buffer) {
+  // ERROR@+1: STRUCTURE/027 {attr_name="pattern", actual_value="", expected_constraint="a non-empty parameter key pattern"}
+  %empty = command.parameter %parameters, "" : view<16xi8>
+  // ERROR@+1: STRUCTURE/027 {attr_name="pattern", actual_value="blk.{.weight", expected_constraint="only complete '{}' index placeholders"}
+  %malformed = command.parameter %parameters, "blk.{.weight"[%layer] : view<16xi8>
+  // ERROR@+1: STRUCTURE/027 {attr_name="pattern", actual_value="blk.{}.{}.weight", expected_constraint="exactly 1 '{}' placeholders"}
+  %mismatch = command.parameter %parameters, "blk.{}.{}.weight"[%layer] : view<16xi8>
+  command.return
+}
+
+// ====
+
+func.decl pure @pure_command_extent(%value: index) -> (index)
+
+kernel.decl @command_effect_kernel(%element_count: index) launch(%scratch: buffer)
+
+command.program.def @pure_preparation_and_explicit_commands(%element_count: index) launch() {
+  %byte_length = index.constant 64 : offset
+  %scratch = buffer.alloca<global> align(64) %byte_length : buffer
+  %launch_count = func.call pure @pure_command_extent(%element_count) : (index) -> (index)
+  command.serial {
+    kernel.launch @command_effect_kernel[%launch_count](%scratch) : [index](buffer)
+  }
+  command.return
+}
+
+// ====
+
+func.decl @unknown_command_extent(%value: index) -> (index)
+
+command.program.def @nested_unknown_effect(%condition: i1, %value: index) launch() {
+  scf.if %condition {
+    // ERROR@+1: STRUCTURE/053 {op_name="func.call"}
+    %unused = func.call @unknown_command_extent(%value) : (index) -> (index)
+  }
+  command.return
+}
+
+// ====
+
+command.program.def @convergent_preparation(%value: index) launch() {
+  // ERROR@+1: STRUCTURE/053 {op_name="test.convergent"}
+  %unused = test.convergent %value : index
+  command.return
+}
+
+// ====
+
+command.program.def @memory_effects_are_not_preparation() launch(%storage: buffer) {
+  %base = index.constant 0 : offset
+  %element = index.constant 0 : index
+  %view = buffer.view %storage[%base] : buffer -> view<1xi32>
+  // ERROR@+1: STRUCTURE/053 {op_name="view.load"}
+  %value = view.load %view[%element] : view<1xi32> -> i32
+  // ERROR@+1: STRUCTURE/053 {op_name="view.store"}
+  view.store %value, %view[%element] : i32, view<1xi32>
+  command.return
+}

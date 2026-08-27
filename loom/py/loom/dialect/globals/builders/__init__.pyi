@@ -36,12 +36,12 @@ class GlobalBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> ValueRef: ...
-    def rodata(
+    def def_(
         self,
         *,
         symbol: str,
-        contents: Any,
         alignment: int | None = ...,
+        contents: Any,
         location_id: int | None = ...,
     ) -> None: ...
     def load(
@@ -59,5 +59,11 @@ class GlobalBuilder(DialectBuilder):
         *,
         value: ValueRef,
         global_: str,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def decl(
+        self,
+        *,
+        symbol: str,
         location_id: int | None = ...,
     ) -> None: ...

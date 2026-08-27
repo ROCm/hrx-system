@@ -179,7 +179,7 @@ iree_runtime_cc_library(
         ":webgpu_allocator",
         ":webgpu_builtins",
         ":webgpu_command_buffer",
-        ":webgpu_executable_cache",
+        ":webgpu_executable",
         ":webgpu_fd_file",
         ":webgpu_imports",
         ":webgpu_queue",
@@ -240,18 +240,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/utils:executable_header",
         "//runtime/src/iree/schemas:executable_debug_info_c_fbs",
         "//runtime/src/iree/schemas:webgpu_executable_def_c_fbs",
-    ],
-)
-
-iree_runtime_cc_library(
-    name = "webgpu_executable_cache",
-    srcs = ["webgpu_executable_cache.c"],
-    hdrs = ["webgpu_executable_cache.h"],
-    deps = [
-        ":handle_table",
-        ":webgpu_executable",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/hal",
     ],
 )
 

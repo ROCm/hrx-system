@@ -250,11 +250,23 @@ typedef struct iree_hal_amdgpu_logical_device_options_t {
     // together before publishing packets.
     uint32_t kernarg_capacity;
     // Device-visible control upload ring capacity in bytes for each host queue.
-    // Zero disables the optional upload ring; non-zero values must be powers of
-    // two. This carries queue-ordered metadata such as device-side
-    // command-buffer fixup inputs without using the file staging pool.
+    // Zero disables the optional upload ring in AQL mode. PM4 and automatic
+    // modes resolve zero to the capacity required for PM4 command buffers.
+    // Non-zero values must be powers of two. This carries queue-ordered
+    // metadata such as device-side command-buffer fixup inputs without using
+    // the file staging pool.
     uint32_t upload_capacity;
   } host_queues;
+
+  // Per-physical-device queue_read/queue_write file staging policy.
+  struct {
+    // Byte length of each staging slot. Must be a non-zero power of two.
+    iree_host_size_t slot_size;
+    // Number of staging slots. Must be non-zero and a power of two.
+    uint32_t slot_count;
+    // True to force fine-grained host memory instead of coarse-grained memory.
+    uint64_t force_fine_host_memory : 1;
+  } file_staging;
 
   // Optional device-side feedback channel support.
   struct {
@@ -328,11 +340,6 @@ typedef struct iree_hal_amdgpu_logical_device_options_t {
   // device-side strategy selected from the GPU ISA. Useful for testing the
   // conservative host-only fallback path.
   uint64_t force_wait_barrier_defer : 1;
-
-  // Enables PM4 dispatch command-buffer capabilities on unvalidated gfx9-gfx12
-  // targets. This is an explicit hardware bring-up override; automatic PM4
-  // selection remains limited to validated GPU ISAs when this is unset.
-  uint64_t enable_experimental_pm4_command_buffers : 1;
 
   // Suppresses fine-grained GPU-local memory pools even if the HSA agent
   // reports them. This is a hardware bring-up and compatibility testing

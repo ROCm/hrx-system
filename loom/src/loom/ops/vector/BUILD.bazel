@@ -4,7 +4,12 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_test", "loom_generated_cc_library")
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_test",
+    "loom_generated_cc_library",
+    "loom_generated_textual_header",
+)
 
 package(
     default_visibility = ["//visibility:public"],
@@ -12,23 +17,30 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
+loom_generated_textual_header(
+    name = "scalarization_rows_gen",
+    generator = "//loom/py/loom/gen/ops:c_vector_scalarization",
+    output = "scalarization_rows.inl",
+    output_flag = "--rows",
+)
+
 loom_generated_cc_library(
     name = "vector",
     srcs = [
         "canonicalize.c",
-        "encoding_auxiliary.c",
         "facts.c",
         "fragment.c",
         "memory.c",
+        "scalarization.c",
         "storage.c",
         "type_transfer.c",
         "verify.c",
     ],
     hdrs = [
-        "encoding_auxiliary.h",
         "fragment.h",
         "memory.h",
         "ops.h",
+        "scalarization.h",
         "storage.h",
         "tables.h",
     ],
@@ -70,6 +82,7 @@ loom_generated_cc_library(
         "tables/table.c",
     ],
     generator = "//loom/py/loom/gen/ops:c_tables_vector_generator",
+    textual_hdrs = [":scalarization_rows.inl"],
     deps = [
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
@@ -86,21 +99,10 @@ loom_generated_cc_library(
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/rewrite:type_propagation",
         "//loom/src/loom/util:fact_table",
-        "//loom/src/loom/util:math",
+        "//loom/src/loom/util:numeric_format",
         "//loom/src/loom/util:stable_id",
         "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_test(
-    name = "encoding_auxiliary_test",
-    srcs = ["encoding_auxiliary_test.cc"],
-    deps = [
-        ":vector",
-        "//loom/src/loom/ir",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/base/internal",
     ],
 )
 

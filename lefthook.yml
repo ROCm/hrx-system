@@ -8,10 +8,13 @@
 min_version: 2.1.9
 
 pre-commit:
+  # Presubmit commands already emit concise phase markers. Stream them so a
+  # cold build or static-analysis action remains distinguishable from a hang.
+  follow: true
   fail_on_changes: always
   commands:
     precommit:
-      run: python dev.py bazel precommit --profile paranoid --commit
+      run: python dev.py bazel precommit --profile paranoid --staged
 
 commit-msg:
   commands:
@@ -19,21 +22,25 @@ commit-msg:
       run: python build_tools/lefthook/commit_msg.py {1}
 
 fix:
+  follow: true
   commands:
     fix:
       run: python dev.py bazel fix
 
 precommit:
+  follow: true
   commands:
     precommit:
       run: python dev.py bazel precommit --profile paranoid
 
 presubmit:
+  follow: true
   commands:
     presubmit:
       run: python dev.py bazel presubmit --profile ci
 
 check:
+  follow: true
   commands:
     check:
       run: python dev.py bazel presubmit --profile ci

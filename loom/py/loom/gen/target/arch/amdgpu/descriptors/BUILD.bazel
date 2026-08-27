@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_test")
+load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_library", "iree_py_test")
 
 package(
     default_visibility = ["//loom/py/loom/gen:__subpackages__"],
@@ -17,15 +17,100 @@ GENERATOR_VISIBILITY = [
     "//loom/src/loom/target/arch/amdgpu:__subpackages__",
 ]
 
-iree_py_binary(
-    name = "descriptors",
-    srcs = [
-        "__init__.py",
-        "amdgpu_descriptors.py",
+iree_py_library(
+    name = "package_init",
+    srcs = ["__init__.py"],
+)
+
+iree_py_library(
+    name = "planning_table_inputs",
+    srcs = ["amdgpu_planning_table_inputs.py"],
+    deps = [
+        ":package_init",
+        "//loom/py/loom/target:low_descriptors",
+        "//loom/py/loom/target/arch/amdgpu:descriptors",
+        "//loom/py/loom/target/arch/amdgpu:isa_xml",
+        "//loom/py/loom/target/arch/amdgpu:target_info",
     ],
-    main = "amdgpu_descriptors.py",
+)
+
+iree_py_library(
+    name = "descriptors_module",
+    srcs = ["amdgpu_descriptors.py"],
     visibility = GENERATOR_VISIBILITY,
     deps = [
+        ":package_init",
+        "//loom/py/loom/gen/support",
+        "//loom/py/loom/gen/target/arch/amdgpu:target_table_family",
+        "//loom/py/loom/gen/target/low:low_descriptors",
+        "//loom/py/loom/target:low_descriptors",
+        "//loom/py/loom/target/arch/amdgpu:descriptors",
+        "//loom/py/loom/target/arch/amdgpu:isa_xml",
+        "//loom/py/loom/target/arch/amdgpu:target_info",
+    ],
+)
+
+iree_py_binary(
+    name = "descriptors",
+    main_module = "loom.gen.target.arch.amdgpu.descriptors.amdgpu_descriptors",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [":descriptors_module"],
+)
+
+iree_py_library(
+    name = "wait_packet_tables_module",
+    srcs = ["amdgpu_wait_packet_tables.py"],
+    deps = [
+        ":package_init",
+        ":planning_table_inputs",
+        "//loom/py/loom/gen/support",
+        "//loom/py/loom/target:low_descriptors",
+        "//loom/py/loom/target/arch/amdgpu:descriptors",
+        "//loom/py/loom/target/arch/amdgpu:target_info",
+    ],
+)
+
+iree_py_binary(
+    name = "wait_packet_tables",
+    main_module = "loom.gen.target.arch.amdgpu.descriptors.amdgpu_wait_packet_tables",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [":wait_packet_tables_module"],
+)
+
+iree_py_library(
+    name = "vopd_component_tables_module",
+    srcs = ["amdgpu_vopd_component_tables.py"],
+    deps = [
+        ":package_init",
+        ":planning_table_inputs",
+        "//loom/py/loom/gen/support",
+        "//loom/py/loom/gen/target/low:low_descriptors",
+        "//loom/py/loom/target:low_descriptors",
+        "//loom/py/loom/target/arch/amdgpu:descriptors",
+        "//loom/py/loom/target/arch/amdgpu:isa_xml",
+        "//loom/py/loom/target/arch/amdgpu:target_info",
+    ],
+)
+
+iree_py_binary(
+    name = "vopd_component_tables",
+    main_module = "loom.gen.target.arch.amdgpu.descriptors.amdgpu_vopd_component_tables",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [":vopd_component_tables_module"],
+)
+
+iree_py_binary(
+    name = "descriptor_tables",
+    srcs = ["amdgpu_descriptor_tables.py"],
+    main = "amdgpu_descriptor_tables.py",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        ":package_init",
+        ":planning_table_inputs",
+        ":vopd_component_tables_module",
+        ":wait_packet_tables_module",
+        "//loom/py/loom/gen/support",
+        "//loom/py/loom/gen/target/arch/amdgpu/refs:target_refs_module",
         "//loom/py/loom/gen/target/low:low_descriptors",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch/amdgpu:descriptors",
@@ -43,8 +128,35 @@ iree_py_test(
     args = ["loom.gen.target.arch.amdgpu.descriptors.amdgpu_descriptors_test"],
     main = "pytest_style_runner.py",
     deps = [
-        ":descriptors",
+        ":descriptors_module",
+        "//loom/py/loom/gen/target/arch/amdgpu:target_table_family",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch/amdgpu:target_info",
+    ],
+)
+
+iree_py_test(
+    name = "vopd_component_tables_test",
+    srcs = [
+        "amdgpu_vopd_component_tables_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.gen.target.arch.amdgpu.descriptors.amdgpu_vopd_component_tables_test"],
+    main = "pytest_style_runner.py",
+    deps = [":vopd_component_tables_module"],
+)
+
+iree_py_test(
+    name = "wait_packet_tables_test",
+    srcs = [
+        "amdgpu_wait_packet_tables_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.gen.target.arch.amdgpu.descriptors.amdgpu_wait_packet_tables_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":wait_packet_tables_module",
+        "//loom/py/loom/target:low_descriptors",
+        "//loom/py/loom/target/arch/amdgpu:descriptors",
     ],
 )

@@ -29,6 +29,10 @@ typedef enum iree_hal_amdgpu_pm4_barrier_flag_bits_e {
   // Makes shader-written PM4 IB dwords visible to a following command
   // processor IB fetch.
   IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_FIXUP_TO_IB = 1u << 1,
+  // The source memory access bypasses GL2 on the command processor.
+  IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_SOURCE_BYPASSES_GL2 = 1u << 2,
+  // The target memory access bypasses GL2 on the command processor.
+  IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_TARGET_BYPASSES_GL2 = 1u << 3,
 } iree_hal_amdgpu_pm4_barrier_flag_bits_t;
 
 typedef uint32_t iree_hal_amdgpu_pm4_barrier_flags_t;
@@ -75,6 +79,35 @@ static inline uint32_t iree_hal_amdgpu_pm4_barrier_gcr_cntl_for_scopes_gfx10(
                 IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GLM_INV |
                 IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GL2_INV |
                 IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GL2_WB;
+  }
+  return gcr_cntl;
+}
+
+// Returns GCR_CNTL bits for one gfx10+ PM4 command-buffer barrier.
+static inline uint32_t iree_hal_amdgpu_pm4_barrier_gcr_cntl_gfx10(
+    iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities,
+    iree_hal_amdgpu_pm4_barrier_flags_t barrier_flags,
+    iree_hsa_fence_scope_t acquire_scope,
+    iree_hsa_fence_scope_t release_scope) {
+  uint32_t gcr_cntl = iree_hal_amdgpu_pm4_barrier_gcr_cntl_for_scopes_gfx10(
+      acquire_scope, release_scope);
+  if (iree_any_bit_set(barrier_flags,
+                       IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_FIXUP_TO_IB)) {
+    return IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_CNTL_CONSERVATIVE;
+  }
+  if (!iree_any_bit_set(
+          capabilities,
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_CP_MEMORY_BYPASSES_GL2)) {
+    return gcr_cntl;
+  }
+  if (iree_any_bit_set(barrier_flags,
+                       IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_SOURCE_BYPASSES_GL2)) {
+    gcr_cntl |= IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GL2_WB |
+                IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GL2_INV;
+  }
+  if (iree_any_bit_set(barrier_flags,
+                       IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_TARGET_BYPASSES_GL2)) {
+    gcr_cntl |= IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GL2_WB;
   }
   return gcr_cntl;
 }
@@ -129,19 +162,17 @@ static inline uint32_t iree_hal_amdgpu_pm4_barrier_dword_count_gfx10(
   }
   const iree_hal_amdgpu_pm4_barrier_flags_t valid_barrier_flags =
       IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_EXECUTION |
-      IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_FIXUP_TO_IB;
+      IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_FIXUP_TO_IB |
+      IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_SOURCE_BYPASSES_GL2 |
+      IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_TARGET_BYPASSES_GL2;
   if ((barrier_flags & ~valid_barrier_flags) != 0) {
     return 0;
   }
   const bool has_execution_barrier = iree_any_bit_set(
       barrier_flags, IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_EXECUTION |
                          IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_FIXUP_TO_IB);
-  uint32_t gcr_cntl = iree_hal_amdgpu_pm4_barrier_gcr_cntl_for_scopes_gfx10(
-      acquire_scope, release_scope);
-  if (iree_any_bit_set(barrier_flags,
-                       IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_FIXUP_TO_IB)) {
-    gcr_cntl = IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_CNTL_CONSERVATIVE;
-  }
+  const uint32_t gcr_cntl = iree_hal_amdgpu_pm4_barrier_gcr_cntl_gfx10(
+      capabilities, barrier_flags, acquire_scope, release_scope);
   if (!has_execution_barrier) return 0;
   if (!iree_any_bit_set(
           capabilities,
@@ -173,7 +204,9 @@ static inline uint32_t iree_hal_amdgpu_pm4_barrier_dword_count_gfx9(
   }
   const iree_hal_amdgpu_pm4_barrier_flags_t valid_barrier_flags =
       IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_EXECUTION |
-      IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_FIXUP_TO_IB;
+      IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_FIXUP_TO_IB |
+      IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_SOURCE_BYPASSES_GL2 |
+      IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_TARGET_BYPASSES_GL2;
   if ((barrier_flags & ~valid_barrier_flags) != 0) {
     return 0;
   }
@@ -238,12 +271,8 @@ static inline bool iree_hal_amdgpu_pm4_barrier_emit_gfx10(
       capabilities, barrier_flags, acquire_scope, release_scope);
   if (dword_count == 0 || capacity < dword_count) return false;
 
-  uint32_t gcr_cntl = iree_hal_amdgpu_pm4_barrier_gcr_cntl_for_scopes_gfx10(
-      acquire_scope, release_scope);
-  if (iree_any_bit_set(barrier_flags,
-                       IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_FIXUP_TO_IB)) {
-    gcr_cntl = IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_CNTL_CONSERVATIVE;
-  }
+  const uint32_t gcr_cntl = iree_hal_amdgpu_pm4_barrier_gcr_cntl_gfx10(
+      capabilities, barrier_flags, acquire_scope, release_scope);
 
   uint32_t dword_index = 0;
   target_dwords[dword_index++] = iree_hal_amdgpu_pm4_make_header(

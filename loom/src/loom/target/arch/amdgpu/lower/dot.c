@@ -27,14 +27,6 @@ static bool loom_amdgpu_dotf_fastmath_allows_relaxed_forest(uint8_t fastmath) {
   return iree_all_bits_set(fastmath, required_flags);
 }
 
-static iree_status_t loom_amdgpu_dotf_descriptor_present(
-    loom_low_lower_context_t* context, loom_amdgpu_descriptor_ref_t ref,
-    bool* out_present) {
-  loom_low_lower_resolved_descriptor_t descriptor = {0};
-  return loom_amdgpu_resolve_descriptor_ref_if_present(
-      context, ref, &descriptor, out_present);
-}
-
 static iree_status_t loom_amdgpu_dotf_result_is_one_vgpr(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t result, bool* out_match) {
@@ -45,21 +37,21 @@ static iree_status_t loom_amdgpu_dotf_result_is_one_vgpr(
   if (loom_low_register_type_unit_count(low_result_type) != 1) {
     return iree_ok_status();
   }
-  return loom_amdgpu_low_type_register_class_is(
-      context, low_result_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR, out_match);
+  *out_match = loom_amdgpu_low_type_is_register_class(
+      context, low_result_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
+  return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_dotf_low_value_is_one_vgpr(
-    loom_low_lower_context_t* context, loom_value_id_t value, bool* out_match) {
-  *out_match = false;
+static bool loom_amdgpu_dotf_low_value_is_one_vgpr(
+    loom_low_lower_context_t* context, loom_value_id_t value) {
   const loom_type_t type =
       loom_module_value_type(loom_low_lower_context_module(context), value);
   if (!loom_low_type_is_register(type) ||
       loom_low_register_type_unit_count(type) != 1) {
-    return iree_ok_status();
+    return false;
   }
-  return loom_amdgpu_low_type_register_class_is(
-      context, type, LOOM_AMDGPU_REG_CLASS_ID_VGPR, out_match);
+  return loom_amdgpu_low_type_is_register_class(context, type,
+                                                LOOM_AMDGPU_REG_CLASS_ID_VGPR);
 }
 
 iree_status_t loom_amdgpu_select_vector_dotf_plan(
@@ -96,18 +88,16 @@ iree_status_t loom_amdgpu_select_vector_dotf_plan(
     return iree_ok_status();
   }
 
-  bool fma_present = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_dotf_descriptor_present(
-      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_FMA_F32, &fma_present));
-  if (!fma_present) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_low_lower_context_descriptor_set(context);
+  if (!loom_amdgpu_descriptor_set_has_ref(
+          descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_FMA_F32)) {
     return iree_ok_status();
   }
   loom_amdgpu_descriptor_ref_t tied_accumulate_descriptor_ref =
       LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
-  bool fmac_present = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_dotf_descriptor_present(
-      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_FMAC_F32, &fmac_present));
-  if (fmac_present) {
+  if (loom_amdgpu_descriptor_set_has_ref(
+          descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_FMAC_F32)) {
     tied_accumulate_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_FMAC_F32;
   }
 
@@ -115,13 +105,10 @@ iree_status_t loom_amdgpu_select_vector_dotf_plan(
       LOOM_AMDGPU_DOTF_ACCUMULATION_STRICT_CHAIN;
   if (loom_amdgpu_dotf_fastmath_allows_relaxed_forest(
           loom_vector_dotf_fastmath(source_op))) {
-    bool multiply_present = false;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_dotf_descriptor_present(
-        context, LOOM_AMDGPU_DESCRIPTOR_REF_V_MUL_F32, &multiply_present));
-    bool add_present = false;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_dotf_descriptor_present(
-        context, LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_F32, &add_present));
-    if (multiply_present && add_present) {
+    if (loom_amdgpu_descriptor_set_has_ref(
+            descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_MUL_F32) &&
+        loom_amdgpu_descriptor_set_has_ref(
+            descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_F32)) {
       accumulation_kind = LOOM_AMDGPU_DOTF_ACCUMULATION_RELAXED_FOREST;
     }
   }
@@ -226,17 +213,6 @@ static iree_status_t loom_amdgpu_dotf_materialize_init(
   return loom_low_lower_lookup_value(context, plan->init, out_low_init);
 }
 
-static iree_string_view_t loom_amdgpu_dotf_descriptor_set_key(
-    const loom_low_descriptor_set_t* descriptor_set) {
-  if (descriptor_set == NULL) {
-    return IREE_SV("<missing>");
-  }
-  const iree_string_view_t descriptor_set_key = loom_low_descriptor_set_string(
-      descriptor_set, descriptor_set->key_string_offset);
-  return iree_string_view_is_empty(descriptor_set_key) ? IREE_SV("<empty>")
-                                                       : descriptor_set_key;
-}
-
 static iree_status_t loom_amdgpu_dotf_emit_tied_accumulator_diagnostic(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_amdgpu_descriptor_ref_t descriptor_ref, uint32_t lane,
@@ -255,7 +231,7 @@ static iree_status_t loom_amdgpu_dotf_emit_tied_accumulator_diagnostic(
   const iree_string_view_t descriptor_name = loom_low_descriptor_set_string(
       descriptor_set, descriptor.descriptor->key_string_offset);
   const iree_string_view_t descriptor_set_name =
-      loom_amdgpu_dotf_descriptor_set_key(descriptor_set);
+      loom_amdgpu_descriptor_set_key(descriptor_set);
   const iree_string_view_t accumulator_kind =
       accumulator_is_dot_local ? IREE_SV("dot_local") : IREE_SV("incoming");
   const iree_string_view_t decision_key =
@@ -303,10 +279,7 @@ static iree_status_t loom_amdgpu_dotf_emit_accumulate(
                                      lane_type, out_result);
   }
 
-  bool rhs_is_one_vgpr = false;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_dotf_low_value_is_one_vgpr(context, rhs, &rhs_is_one_vgpr));
-  if (!rhs_is_one_vgpr) {
+  if (!loom_amdgpu_dotf_low_value_is_one_vgpr(context, rhs)) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_dotf_emit_tied_accumulator_diagnostic(
         context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_FMA_F32, lane,
         accumulator_is_dot_local, /*selected_tied_form=*/false,
@@ -337,11 +310,11 @@ static iree_status_t loom_amdgpu_dotf_extract_lane(
       loom_module_value_type(loom_low_lower_context_module(context), source);
   if (!loom_low_type_is_register(source_type) ||
       loom_low_register_type_unit_count(source_type) <= lane) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "invalid AMDGPU dotf lane source type");
+    IREE_ASSERT_UNREACHABLE("selected AMDGPU dotf lane source");
+    IREE_BUILTIN_UNREACHABLE();
   }
   const loom_type_t lane_type =
-      loom_low_register_type_with_unit_count(source_type, 1);
+      loom_low_register_carrier_type_with_unit_count(source_type, 1);
   return loom_amdgpu_emit_low_slice(context, source_op, source, lane, lane_type,
                                     out_lane);
 }
@@ -466,6 +439,13 @@ iree_status_t loom_amdgpu_lower_vector_dotf(
   IREE_RETURN_IF_ERROR(loom_amdgpu_dotf_materialize_init(
       context, source_op, plan, lane_type, &low_init));
 
+  loom_value_id_t sources[] = {low_lhs, low_rhs, low_init};
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_legalize_vop3_scalar_sources(context, source_op, sources));
+  low_lhs = sources[0];
+  low_rhs = sources[1];
+  low_init = sources[2];
+
   loom_value_id_t result = LOOM_VALUE_ID_INVALID;
   switch (plan->accumulation_kind) {
     case LOOM_AMDGPU_DOTF_ACCUMULATION_STRICT_CHAIN: {
@@ -481,8 +461,8 @@ iree_status_t loom_amdgpu_lower_vector_dotf(
       break;
     }
     default:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "unsupported AMDGPU dotf accumulation kind");
+      IREE_ASSERT_UNREACHABLE("selected AMDGPU dotf accumulation kind");
+      IREE_BUILTIN_UNREACHABLE();
   }
   return loom_low_lower_bind_value(context, plan->result, result);
 }

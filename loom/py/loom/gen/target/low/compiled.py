@@ -12,6 +12,8 @@ from dataclasses import dataclass
 
 from loom.gen.support.string_pool import CStringPool
 from loom.target.low_descriptors import (
+    AsmOperandSegmentDelimiter,
+    AsmResultValueType,
     Constraint,
     Descriptor,
     DescriptorSet,
@@ -22,6 +24,7 @@ from loom.target.low_descriptors import (
     Hazard,
     Immediate,
     ImmediateEncodingSlice,
+    InstructionClass,
     IssueUse,
     NativeAsmValueKind,
     Operand,
@@ -53,10 +56,24 @@ class GeneratedDescriptorSet:
     source: str
 
 
+@dataclass(frozen=True, slots=True)
+class GeneratedDescriptorSetFamily:
+    """C artifacts emitted from one compiled storage set and its views."""
+
+    # Shared C source implementing every descriptor-set view.
+    source: str
+    # Public C headers paired positionally with the requested view specs.
+    view_headers: tuple[str, ...]
+
+
 @dataclass(slots=True)
 class CompiledDescriptorSet:
     spec: DescriptorSet
+    # Selected, validated descriptors before compact runtime projections.
+    source_descriptors: list[Descriptor]
+    # Runtime projections paired positionally with `source_descriptors`.
     descriptors: list[Descriptor]
+    instruction_classes: list[tuple[InstructionClass, ...]]
     reg_classes: list[RegClass]
     register_parts: list[RegisterPart]
     resources: list[Resource]
@@ -70,7 +87,9 @@ class CompiledDescriptorSet:
     string_pool: CStringPool
     reg_class_alts: list[tuple[int | None, tuple[RegClassAltFlag, ...]]]
     operands: list[Operand]
+    operand_source_value_indices: list[int | None]
     operand_alt_starts: list[int]
+    operand_rematerializable: list[bool]
     immediates: list[Immediate]
     immediate_encoding_slices: list[ImmediateEncodingSlice]
     immediate_encoding_slice_starts: list[int]
@@ -93,6 +112,8 @@ class CompiledDescriptorSet:
     canonical_asm_form_ordinals: list[int | None]
     asm_forms: list[CompiledAsmForm]
     asm_operand_indices: list[int]
+    asm_operand_segments: list[CompiledAsmOperandSegment]
+    asm_result_value_types: list[AsmResultValueType | None]
     asm_immediates: list[CompiledAsmImmediate]
     native_asm_values: list[CompiledNativeAsmValue]
     schedule_rows: list[dict[str, int]]
@@ -102,6 +123,8 @@ class CompiledDescriptorSet:
 @dataclass(frozen=True, slots=True)
 class DescriptorSetView:
     spec: DescriptorSet
+    descriptors: tuple[Descriptor, ...]
+    instruction_classes: tuple[tuple[InstructionClass, ...], ...]
     descriptor_ordinals: tuple[int, ...]
     descriptor_refs: list[tuple[str, int]]
     descriptor_rows: list[dict[str, int]]
@@ -134,6 +157,13 @@ class CompiledNativeAsmValue:
     literal: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class CompiledAsmOperandSegment:
+    delimiter: AsmOperandSegmentDelimiter
+    operand_count: int
+    has_variadic_operand: bool
+
+
 @dataclass(slots=True)
 class CompiledAsmForm:
     descriptor_ordinal: int
@@ -143,10 +173,14 @@ class CompiledAsmForm:
     native_assembly_mnemonic: str | None
     result_indices: tuple[int, ...]
     operand_indices: tuple[int, ...]
+    operand_segments: tuple[CompiledAsmOperandSegment, ...]
+    result_value_types: tuple[AsmResultValueType | None, ...]
     immediates: tuple[CompiledAsmImmediate, ...]
     native_assembly_values: tuple[CompiledNativeAsmValue, ...]
     result_index_start: int = 0
+    result_value_type_start: int | None = None
     operand_index_start: int = 0
+    operand_segment_start: int = 0
     immediate_start: int = 0
     native_assembly_value_start: int = 0
 

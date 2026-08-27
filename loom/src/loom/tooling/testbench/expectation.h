@@ -80,7 +80,7 @@ typedef struct loom_testbench_expectation_options_t {
 } loom_testbench_expectation_options_t;
 
 typedef struct loom_testbench_case_sample_observations_t {
-  // Device events captured while executing the sample's actual invocations.
+  // Device events captured while executing the sample's kernel launches.
   const loom_testbench_device_event_list_t* device_events;
 } loom_testbench_case_sample_observations_t;
 

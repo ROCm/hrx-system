@@ -21,4 +21,5 @@ loom_amdgpu_target_selectors_flag(
 loom_amdgpu_target_config_settings(
     name = "target_selection",
     flag = "//loom/config/target/amdgpu:targets",
+    iree_hal_flag = "//runtime/src/iree/hal/drivers/amdgpu:targets",
 )

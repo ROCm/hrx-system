@@ -4,6 +4,11 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+set(IREE_PACKAGE_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+set(IREE_PACKAGE_ROOT_PREFIX "iree/build_tools/spirv")
+
+add_subdirectory(registry)
+
 if(IREE_BUILD_TESTS AND (IREE_HAL_DRIVER_VULKAN OR
     (LOOM_BUILD AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)))
   add_subdirectory(testdata)

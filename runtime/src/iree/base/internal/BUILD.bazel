@@ -60,6 +60,7 @@ iree_runtime_cc_test(
     name = "math_test",
     srcs = ["math_test.cc"],
     deps = [
+        ":fpu_state",
         ":internal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -197,7 +198,7 @@ iree_runtime_cc_library(
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
-        "//runtime/src/iree/schemas:cpu_data",
+        "//runtime/src/iree/base:cpu_data",
     ],
 )
 
@@ -230,8 +231,8 @@ iree_runtime_cc_library(
     deps = [
         ":internal",
         ":path",
-        "//build_tools:dl",
-        "//build_tools:pthreads",
+        "//build_tools/bazel:dl",
+        "//build_tools/bazel:pthreads",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
     ],
@@ -362,7 +363,7 @@ iree_runtime_cc_library(
     deps = [
         ":internal",
         ":memory",
-        "//build_tools:rt",
+        "//build_tools/bazel:rt",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
     ],

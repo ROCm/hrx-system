@@ -11,3 +11,12 @@ package(
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
 )
+
+loom_cc_library(
+    name = "low_repr",
+    hdrs = ["low_repr.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)

@@ -47,10 +47,10 @@ class ValueProjectKind(Enum):
     U32_DIVISOR_MAGIC_MULTIPLIER = "u32_divisor_magic_multiplier"
     U32_DIVISOR_MAGIC_SHIFT = "u32_divisor_magic_shift"
     I32_AS_U32_BITS = "i32_as_u32_bits"
-    F64_AS_F16_BITS = "f64_as_f16_bits"
-    F64_AS_BF16_BITS = "f64_as_bf16_bits"
-    F64_AS_F32_BITS = "f64_as_f32_bits"
-    F64_AS_F64_BITS = "f64_as_f64_bits"
+    FLOAT_AS_F16_BITS = "float_as_f16_bits"
+    FLOAT_AS_BF16_BITS = "float_as_bf16_bits"
+    FLOAT_AS_F32_BITS = "float_as_f32_bits"
+    FLOAT_AS_F64_BITS = "float_as_f64_bits"
 
 
 @unique
@@ -535,33 +535,41 @@ class ValueProject:
         )
 
     @classmethod
-    def f64_as_f16_bits(cls, source_value: str, *, target_bit_offset: int = 0) -> Self:
+    def float_as_f16_bits(
+        cls, source_value: str, *, target_bit_offset: int = 0
+    ) -> Self:
         return cls(
-            kind=ValueProjectKind.F64_AS_F16_BITS,
+            kind=ValueProjectKind.FLOAT_AS_F16_BITS,
             source_value=source_value,
             target_bit_offset=target_bit_offset,
         )
 
     @classmethod
-    def f64_as_bf16_bits(cls, source_value: str, *, target_bit_offset: int = 0) -> Self:
+    def float_as_bf16_bits(
+        cls, source_value: str, *, target_bit_offset: int = 0
+    ) -> Self:
         return cls(
-            kind=ValueProjectKind.F64_AS_BF16_BITS,
+            kind=ValueProjectKind.FLOAT_AS_BF16_BITS,
             source_value=source_value,
             target_bit_offset=target_bit_offset,
         )
 
     @classmethod
-    def f64_as_f32_bits(cls, source_value: str, *, target_bit_offset: int = 0) -> Self:
+    def float_as_f32_bits(
+        cls, source_value: str, *, target_bit_offset: int = 0
+    ) -> Self:
         return cls(
-            kind=ValueProjectKind.F64_AS_F32_BITS,
+            kind=ValueProjectKind.FLOAT_AS_F32_BITS,
             source_value=source_value,
             target_bit_offset=target_bit_offset,
         )
 
     @classmethod
-    def f64_as_f64_bits(cls, source_value: str, *, target_bit_offset: int = 0) -> Self:
+    def float_as_f64_bits(
+        cls, source_value: str, *, target_bit_offset: int = 0
+    ) -> Self:
         return cls(
-            kind=ValueProjectKind.F64_AS_F64_BITS,
+            kind=ValueProjectKind.FLOAT_AS_F64_BITS,
             source_value=source_value,
             target_bit_offset=target_bit_offset,
         )

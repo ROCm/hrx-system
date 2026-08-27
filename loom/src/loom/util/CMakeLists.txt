@@ -32,6 +32,27 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    adaptive_sort
+  HDRS
+    "adaptive_sort.h"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    adaptive_sort_test
+  SRCS
+    "adaptive_sort_test.cc"
+  DEPS
+    ::adaptive_sort
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_library(
+  NAME
     diff
   HDRS
     "diff.h"
@@ -75,19 +96,9 @@ loom_cc_test(
   DEPS
     ::json
     ::stream
+    iree::base::internal::json
     iree::testing::gtest
     iree::testing::gtest_main
-)
-
-loom_cc_library(
-  NAME
-    math
-  HDRS
-    "math.h"
-  DEPS
-    iree::base
-    iree::base::internal
-  PUBLIC
 )
 
 loom_cc_library(
@@ -95,18 +106,22 @@ loom_cc_library(
     numeric_format
   HDRS
     "numeric_format.h"
+  SRCS
+    "numeric_format.c"
   DEPS
     iree::base
+    iree::base::internal
+    loom::ir
   PUBLIC
 )
 
 loom_cc_test(
   NAME
-    math_test
+    numeric_format_test
   SRCS
-    "math_test.cc"
+    "numeric_format_test.cc"
   DEPS
-    ::math
+    ::numeric_format
     iree::testing::gtest
     iree::testing::gtest_main
 )
@@ -121,6 +136,30 @@ loom_cc_library(
   DEPS
     iree::base
   PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    segmented_storage
+  HDRS
+    "segmented_storage.h"
+  SRCS
+    "segmented_storage.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    segmented_storage_test
+  SRCS
+    "segmented_storage_test.cc"
+  DEPS
+    ::segmented_storage
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 loom_cc_test(
@@ -143,9 +182,9 @@ loom_cc_library(
     "fact_table.c"
   DEPS
     ::cfg_graph
-    ::math
     ::numeric_format
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::ir
     loom::ir::facts
@@ -160,6 +199,33 @@ loom_cc_test(
     "fact_table_test.cc"
   DEPS
     ::fact_table
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_library(
+  NAME
+    predicate_facts
+  HDRS
+    "predicate_facts.h"
+  SRCS
+    "predicate_facts.c"
+  DEPS
+    ::fact_table
+    iree::base::internal
+    iree::base::internal::arena
+    loom::ir::facts
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    predicate_facts_test
+  SRCS
+    "predicate_facts_test.cc"
+  DEPS
+    ::predicate_facts
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
@@ -229,6 +295,36 @@ loom_cc_test(
     "cfg_graph_test.cc"
   DEPS
     ::cfg_graph
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::ops::cfg
+    loom::ops::op_defs
+    loom::ops::test
+)
+
+loom_cc_library(
+  NAME
+    cfg_loop
+  HDRS
+    "cfg_loop.h"
+  SRCS
+    "cfg_loop.c"
+  DEPS
+    ::cfg_graph
+    iree::base
+    iree::base::internal::arena
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    cfg_loop_test
+  SRCS
+    "cfg_loop_test.cc"
+  DEPS
+    ::cfg_loop
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main

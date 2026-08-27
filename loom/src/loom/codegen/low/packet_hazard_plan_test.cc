@@ -112,13 +112,14 @@ class LowPacketHazardPlanTest : public ::testing::Test {
   PacketHazardPlanTestState state_;
 };
 
-iree_status_t EmitHazardEvent(
-    loom_low_packet_hazard_plan_emit_fn_t emit, void* emit_user_data,
-    loom_low_packet_hazard_plan_record_kind_t kind, uint16_t reason_id,
-    iree_string_view_t reason_name, uint32_t producer_node_index,
-    uint16_t progress_class_id, iree_string_view_t progress_class_name,
-    uint32_t required_progress, uint32_t observed_progress,
-    uint32_t residual_progress) {
+void EmitHazardEvent(loom_low_packet_hazard_plan_emit_fn_t emit,
+                     void* emit_user_data,
+                     loom_low_packet_hazard_plan_record_kind_t kind,
+                     uint16_t reason_id, iree_string_view_t reason_name,
+                     uint32_t producer_node_index, uint16_t progress_class_id,
+                     iree_string_view_t progress_class_name,
+                     uint32_t required_progress, uint32_t observed_progress,
+                     uint32_t residual_progress) {
   const uint16_t action_id =
       kind == LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION
           ? static_cast<uint16_t>(kSyntheticHazardActionPadding)
@@ -140,40 +141,41 @@ iree_status_t EmitHazardEvent(
       /*.observed_progress=*/observed_progress,
       /*.residual_progress=*/residual_progress,
   };
-  return emit(emit_user_data, &event);
+  emit(emit_user_data, &event);
 }
 
-iree_status_t EmitProgressEvent(loom_low_packet_progress_emit_fn_t emit,
-                                void* emit_user_data, uint32_t units) {
+void EmitProgressEvent(loom_low_packet_progress_emit_fn_t emit,
+                       void* emit_user_data, uint32_t units) {
   const loom_low_packet_progress_event_t event = {
       /*.progress_class_id=*/kSyntheticProgressPipe,
       /*.progress_class_name=*/IREE_SV("synthetic.pipe"),
       /*.action=*/LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE,
       /*.units=*/units,
   };
-  return emit(emit_user_data, &event);
+  emit(emit_user_data, &event);
 }
 
-iree_status_t SyntheticProgressQuery(
-    void* user_data, const loom_low_schedule_table_t* schedule,
-    const loom_low_allocation_table_t* allocation,
-    const loom_low_packet_view_t* packet,
-    loom_low_packet_progress_emit_fn_t emit, void* emit_user_data) {
+void SyntheticProgressQuery(void* user_data,
+                            const loom_low_schedule_table_t* schedule,
+                            const loom_low_allocation_table_t* allocation,
+                            const loom_low_packet_view_t* packet,
+                            loom_low_packet_progress_emit_fn_t emit,
+                            void* emit_user_data) {
   (void)user_data;
   (void)schedule;
   (void)allocation;
   if (packet->node_index == 1) {
-    return EmitProgressEvent(emit, emit_user_data, 1);
+    EmitProgressEvent(emit, emit_user_data, 1);
   }
-  return iree_ok_status();
 }
 
-iree_status_t EmptyResidualHazardQuery(
-    void* user_data, const loom_low_schedule_table_t* schedule,
-    const loom_low_allocation_table_t* allocation,
-    const loom_low_packet_progress_table_t* progress,
-    const loom_low_packet_view_t* packet,
-    loom_low_packet_hazard_plan_emit_fn_t emit, void* emit_user_data) {
+void EmptyResidualHazardQuery(void* user_data,
+                              const loom_low_schedule_table_t* schedule,
+                              const loom_low_allocation_table_t* allocation,
+                              const loom_low_packet_progress_table_t* progress,
+                              const loom_low_packet_view_t* packet,
+                              loom_low_packet_hazard_plan_emit_fn_t emit,
+                              void* emit_user_data) {
   (void)user_data;
   (void)schedule;
   (void)allocation;
@@ -181,10 +183,33 @@ iree_status_t EmptyResidualHazardQuery(
   (void)packet;
   (void)emit;
   (void)emit_user_data;
-  return iree_ok_status();
 }
 
-iree_status_t SyntheticResidualHazardQuery(
+struct HazardQueryAudit {
+  iree_host_size_t query_count = 0;
+  iree_host_size_t next_packet_index = 0;
+  uint32_t queried_packet_mask = 0;
+};
+
+void AuditEmptyResidualHazardQuery(
+    void* user_data, const loom_low_schedule_table_t* schedule,
+    const loom_low_allocation_table_t* allocation,
+    const loom_low_packet_progress_table_t* progress,
+    const loom_low_packet_view_t* packet,
+    loom_low_packet_hazard_plan_emit_fn_t emit, void* emit_user_data) {
+  (void)schedule;
+  (void)allocation;
+  (void)progress;
+  (void)emit;
+  (void)emit_user_data;
+  HazardQueryAudit* audit = static_cast<HazardQueryAudit*>(user_data);
+  EXPECT_EQ(packet->packet_index, audit->next_packet_index);
+  ++audit->query_count;
+  ++audit->next_packet_index;
+  audit->queried_packet_mask |= 1u << packet->packet_index;
+}
+
+void SyntheticResidualHazardQuery(
     void* user_data, const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_progress_table_t* progress,
@@ -194,7 +219,7 @@ iree_status_t SyntheticResidualHazardQuery(
   (void)schedule;
   (void)allocation;
   if (packet->node_index != 2) {
-    return iree_ok_status();
+    return;
   }
   uint32_t observed_progress = 0;
   for (iree_host_size_t i = 0; i < progress->record_count; ++i) {
@@ -207,17 +232,18 @@ iree_status_t SyntheticResidualHazardQuery(
     }
   }
   const uint32_t required_progress = 3;
-  return EmitHazardEvent(
-      emit, emit_user_data, LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION,
-      kSyntheticHazardLatency, IREE_SV("synthetic.latency"),
-      /*producer_node_index=*/0, kSyntheticProgressPipe,
-      IREE_SV("synthetic.pipe"), required_progress, observed_progress,
-      required_progress - observed_progress);
+  EmitHazardEvent(emit, emit_user_data,
+                  LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION,
+                  kSyntheticHazardLatency, IREE_SV("synthetic.latency"),
+                  /*producer_node_index=*/0, kSyntheticProgressPipe,
+                  IREE_SV("synthetic.pipe"), required_progress,
+                  observed_progress, required_progress - observed_progress);
 }
 
 TEST_F(LowPacketHazardPlanTest, RecordsResidualActionsWithPacketIdentity) {
   const loom_low_packet_progress_provider_t progress_provider = {
       /*.user_data=*/{},
+      /*.event_count=*/1,
       /*.query=*/SyntheticProgressQuery,
   };
   loom_low_packet_progress_table_t progress = {};
@@ -227,6 +253,7 @@ TEST_F(LowPacketHazardPlanTest, RecordsResidualActionsWithPacketIdentity) {
 
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       /*.user_data=*/{},
+      /*.event_count=*/1,
       /*.query=*/SyntheticResidualHazardQuery,
   };
   loom_low_packet_hazard_plan_t plan = {};
@@ -265,6 +292,7 @@ TEST_F(LowPacketHazardPlanTest,
        EmitsAllocatorStorageReleaseActionsWithObservedProgress) {
   const loom_low_packet_progress_provider_t progress_provider = {
       /*.user_data=*/{},
+      /*.event_count=*/1,
       /*.query=*/SyntheticProgressQuery,
   };
   loom_low_packet_progress_table_t progress = {};
@@ -319,6 +347,7 @@ TEST_F(LowPacketHazardPlanTest,
 
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       /*.user_data=*/{},
+      /*.event_count=*/0,
       /*.query=*/EmptyResidualHazardQuery,
   };
   loom_low_packet_hazard_plan_t plan = {};
@@ -345,7 +374,220 @@ TEST_F(LowPacketHazardPlanTest,
   EXPECT_EQ(record.residual_progress, 2u);
 }
 
-iree_status_t SyntheticAggregateResidualHazardQuery(
+TEST_F(LowPacketHazardPlanTest, SatisfiedStorageReleaseRetainsNoPlanStorage) {
+  const loom_low_packet_progress_provider_t progress_provider = {
+      /*.user_data=*/{},
+      /*.event_count=*/1,
+      /*.query=*/SyntheticProgressQuery,
+  };
+  loom_low_packet_progress_table_t progress = {};
+  IREE_ASSERT_OK(
+      loom_low_packet_progress_build(&state_.schedule, &state_.allocation,
+                                     &progress_provider, &arena_, &progress));
+
+  const loom_low_storage_lease_record_t storage_leases[1] = {
+      {
+          /*.packet_index=*/0,
+          /*.node_index=*/0,
+          /*.block_index=*/0,
+          /*.scheduled_ordinal=*/0,
+          /*.kind=*/{},
+          /*.attachment=*/{},
+          /*.attachment_index=*/{},
+          /*.unit_offset=*/{},
+          /*.unit_count=*/{},
+          /*.release_scope=*/{},
+          /*.release_class_id=*/kSyntheticProgressPipe,
+          /*.release_class_name=*/IREE_SV("synthetic.pipe"),
+          /*.release_action_id=*/kSyntheticHazardActionReleaseStorage,
+          /*.release_action_name=*/IREE_SV("synthetic.release-storage"),
+          /*.release_reason_id=*/kSyntheticHazardStorageRelease,
+          /*.release_reason_name=*/IREE_SV("synthetic.storage-release"),
+      },
+  };
+  const loom_low_storage_release_action_t storage_release_actions[1] = {
+      {
+          /*.insertion_packet_index=*/2,
+          /*.insertion_node_index=*/2,
+          /*.block_index=*/0,
+          /*.scheduled_ordinal=*/2,
+          /*.release_class_id=*/kSyntheticProgressPipe,
+          /*.release_class_name=*/IREE_SV("synthetic.pipe"),
+          /*.release_action_id=*/kSyntheticHazardActionReleaseStorage,
+          /*.release_action_name=*/IREE_SV("synthetic.release-storage"),
+          /*.release_reason_id=*/kSyntheticHazardStorageRelease,
+          /*.release_reason_name=*/IREE_SV("synthetic.storage-release"),
+          /*.required_progress=*/1,
+          /*.lease_record_index=*/0,
+      },
+  };
+  state_.allocation.storage_leases = {
+      /*.schedule=*/&state_.schedule,
+      /*.records=*/storage_leases,
+      /*.record_count=*/IREE_ARRAYSIZE(storage_leases),
+  };
+  state_.allocation.storage_release_actions = storage_release_actions;
+  state_.allocation.storage_release_action_count =
+      IREE_ARRAYSIZE(storage_release_actions);
+
+  const loom_low_packet_hazard_plan_provider_t hazard_provider = {
+      /*.user_data=*/{},
+      /*.event_count=*/0,
+      /*.query=*/EmptyResidualHazardQuery,
+  };
+  const iree_host_size_t retained_used_bytes_before =
+      arena_.used_allocation_size;
+  const iree_host_size_t retained_owned_bytes_before =
+      arena_.total_allocation_size;
+  loom_low_packet_hazard_plan_t plan = {};
+  IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(
+      &state_.schedule, &state_.allocation, &progress, &hazard_provider,
+      &arena_, &plan));
+
+  EXPECT_EQ(plan.record_count, 0u);
+  EXPECT_EQ(plan.records, nullptr);
+  EXPECT_EQ(arena_.used_allocation_size, retained_used_bytes_before);
+  EXPECT_EQ(arena_.total_allocation_size, retained_owned_bytes_before);
+}
+
+TEST_F(LowPacketHazardPlanTest,
+       PreservesStorageReleaseRowsWhenRangeIndexAmortizes) {
+  const loom_low_packet_progress_provider_t progress_provider = {
+      /*.user_data=*/{},
+      /*.event_count=*/1,
+      /*.query=*/SyntheticProgressQuery,
+  };
+  loom_low_packet_progress_table_t progress = {};
+  IREE_ASSERT_OK(
+      loom_low_packet_progress_build(&state_.schedule, &state_.allocation,
+                                     &progress_provider, &arena_, &progress));
+
+  const loom_low_storage_lease_record_t storage_leases[1] = {
+      {
+          /*.packet_index=*/0,
+          /*.node_index=*/0,
+          /*.block_index=*/0,
+          /*.scheduled_ordinal=*/0,
+          /*.kind=*/{},
+          /*.attachment=*/{},
+          /*.attachment_index=*/{},
+          /*.unit_offset=*/{},
+          /*.unit_count=*/{},
+          /*.release_scope=*/{},
+          /*.release_class_id=*/kSyntheticProgressPipe,
+          /*.release_class_name=*/IREE_SV("synthetic.pipe"),
+          /*.release_action_id=*/kSyntheticHazardActionReleaseStorage,
+          /*.release_action_name=*/IREE_SV("synthetic.release-storage"),
+          /*.release_reason_id=*/kSyntheticHazardStorageRelease,
+          /*.release_reason_name=*/IREE_SV("synthetic.storage-release"),
+      },
+  };
+  loom_low_storage_release_action_t storage_release_actions[6] = {};
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(storage_release_actions); ++i) {
+    storage_release_actions[i] = {
+        /*.insertion_packet_index=*/2,
+        /*.insertion_node_index=*/2,
+        /*.block_index=*/0,
+        /*.scheduled_ordinal=*/2,
+        /*.release_class_id=*/kSyntheticProgressPipe,
+        /*.release_class_name=*/IREE_SV("synthetic.pipe"),
+        /*.release_action_id=*/kSyntheticHazardActionReleaseStorage,
+        /*.release_action_name=*/IREE_SV("synthetic.release-storage"),
+        /*.release_reason_id=*/kSyntheticHazardStorageRelease,
+        /*.release_reason_name=*/IREE_SV("synthetic.storage-release"),
+        /*.required_progress=*/i + 2,
+        /*.lease_record_index=*/0,
+    };
+  }
+  state_.allocation.storage_leases = {
+      /*.schedule=*/&state_.schedule,
+      /*.records=*/storage_leases,
+      /*.record_count=*/IREE_ARRAYSIZE(storage_leases),
+  };
+  state_.allocation.storage_release_actions = storage_release_actions;
+  state_.allocation.storage_release_action_count =
+      IREE_ARRAYSIZE(storage_release_actions);
+
+  const loom_low_packet_hazard_plan_provider_t hazard_provider = {
+      /*.user_data=*/{},
+      /*.event_count=*/0,
+      /*.query=*/EmptyResidualHazardQuery,
+  };
+  loom_low_packet_hazard_plan_t plan = {};
+  IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(
+      &state_.schedule, &state_.allocation, &progress, &hazard_provider,
+      &arena_, &plan));
+
+  ASSERT_EQ(plan.record_count, IREE_ARRAYSIZE(storage_release_actions));
+  for (uint32_t i = 0; i < plan.record_count; ++i) {
+    EXPECT_EQ(plan.records[i].consumer_node_index, 2u);
+    EXPECT_EQ(plan.records[i].insertion_packet_index, 2u);
+    EXPECT_EQ(plan.records[i].required_progress, i + 2);
+    EXPECT_EQ(plan.records[i].observed_progress, 1u);
+    EXPECT_EQ(plan.records[i].residual_progress, i + 1);
+  }
+}
+
+TEST_F(LowPacketHazardPlanTest, RejectsCombinedEventCountOverflow) {
+  const loom_low_storage_lease_record_t storage_leases[1] = {
+      {
+          /*.packet_index=*/0,
+          /*.node_index=*/0,
+          /*.block_index=*/0,
+          /*.scheduled_ordinal=*/0,
+          /*.kind=*/{},
+          /*.attachment=*/{},
+          /*.attachment_index=*/{},
+          /*.unit_offset=*/{},
+          /*.unit_count=*/{},
+          /*.release_scope=*/{},
+          /*.release_class_id=*/kSyntheticProgressPipe,
+          /*.release_class_name=*/IREE_SV("synthetic.pipe"),
+          /*.release_action_id=*/kSyntheticHazardActionReleaseStorage,
+          /*.release_action_name=*/IREE_SV("synthetic.release-storage"),
+          /*.release_reason_id=*/kSyntheticHazardStorageRelease,
+          /*.release_reason_name=*/IREE_SV("synthetic.storage-release"),
+      },
+  };
+  const loom_low_storage_release_action_t storage_release_actions[1] = {
+      {
+          /*.insertion_packet_index=*/2,
+          /*.insertion_node_index=*/2,
+          /*.block_index=*/0,
+          /*.scheduled_ordinal=*/2,
+          /*.release_class_id=*/kSyntheticProgressPipe,
+          /*.release_class_name=*/IREE_SV("synthetic.pipe"),
+          /*.release_action_id=*/kSyntheticHazardActionReleaseStorage,
+          /*.release_action_name=*/IREE_SV("synthetic.release-storage"),
+          /*.release_reason_id=*/kSyntheticHazardStorageRelease,
+          /*.release_reason_name=*/IREE_SV("synthetic.storage-release"),
+          /*.required_progress=*/1,
+          /*.lease_record_index=*/0,
+      },
+  };
+  state_.allocation.storage_leases = {
+      /*.schedule=*/&state_.schedule,
+      /*.records=*/storage_leases,
+      /*.record_count=*/IREE_ARRAYSIZE(storage_leases),
+  };
+  state_.allocation.storage_release_actions = storage_release_actions;
+  state_.allocation.storage_release_action_count =
+      IREE_ARRAYSIZE(storage_release_actions);
+
+  const loom_low_packet_hazard_plan_provider_t hazard_provider = {
+      /*.user_data=*/{},
+      /*.event_count=*/IREE_HOST_SIZE_MAX,
+      /*.query=*/EmptyResidualHazardQuery,
+  };
+  loom_low_packet_hazard_plan_t plan = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_low_packet_hazard_plan_build(&state_.schedule, &state_.allocation,
+                                        /*progress=*/nullptr, &hazard_provider,
+                                        &arena_, &plan));
+}
+
+void SyntheticAggregateResidualHazardQuery(
     void* user_data, const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_progress_table_t* progress,
@@ -355,7 +597,7 @@ iree_status_t SyntheticAggregateResidualHazardQuery(
   (void)schedule;
   (void)allocation;
   if (packet->node_index != 1) {
-    return iree_ok_status();
+    return;
   }
   uint32_t observed_progress = 0;
   for (iree_host_size_t i = 0; i < progress->record_count; ++i) {
@@ -367,18 +609,19 @@ iree_status_t SyntheticAggregateResidualHazardQuery(
     }
   }
   const uint32_t required_progress = 3;
-  return EmitHazardEvent(
-      emit, emit_user_data, LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION,
-      kSyntheticHazardLatency, IREE_SV("synthetic.latency"),
-      LOOM_LOW_SCHEDULE_NODE_NONE, kSyntheticProgressPipe,
-      IREE_SV("synthetic.pipe"), required_progress, observed_progress,
-      required_progress - observed_progress);
+  EmitHazardEvent(emit, emit_user_data,
+                  LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION,
+                  kSyntheticHazardLatency, IREE_SV("synthetic.latency"),
+                  LOOM_LOW_SCHEDULE_NODE_NONE, kSyntheticProgressPipe,
+                  IREE_SV("synthetic.pipe"), required_progress,
+                  observed_progress, required_progress - observed_progress);
 }
 
 TEST_F(LowPacketHazardPlanTest,
        RecordsAggregateResidualActionsWithoutProducerIdentity) {
   const loom_low_packet_progress_provider_t progress_provider = {
       /*.user_data=*/{},
+      /*.event_count=*/1,
       /*.query=*/SyntheticProgressQuery,
   };
   loom_low_packet_progress_table_t progress = {};
@@ -388,6 +631,7 @@ TEST_F(LowPacketHazardPlanTest,
 
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       /*.user_data=*/{},
+      /*.event_count=*/1,
       /*.query=*/SyntheticAggregateResidualHazardQuery,
   };
   loom_low_packet_hazard_plan_t plan = {};
@@ -414,7 +658,7 @@ TEST_F(LowPacketHazardPlanTest,
   EXPECT_EQ(record.residual_progress, 3u);
 }
 
-iree_status_t SyntheticScheduleOnlyDiagnosticQuery(
+void SyntheticScheduleOnlyDiagnosticQuery(
     void* user_data, const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_progress_table_t* progress,
@@ -424,35 +668,36 @@ iree_status_t SyntheticScheduleOnlyDiagnosticQuery(
   (void)schedule;
   (void)progress;
   if (packet->node_index == 0) {
-    return EmitHazardEvent(
+    EmitHazardEvent(
         emit, emit_user_data,
         LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_MISSING_TARGET_DATA,
         kSyntheticHazardMissingData, IREE_SV("synthetic.missing-data"),
         LOOM_LOW_SCHEDULE_NODE_NONE, LOOM_LOW_PACKET_PROGRESS_CLASS_NONE,
         iree_string_view_empty(), 0, 0, 0);
+    return;
   }
   if (packet->node_index == 1 && allocation == NULL) {
-    return EmitHazardEvent(
+    EmitHazardEvent(
         emit, emit_user_data,
         LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_UNSUPPORTED_PRE_ALLOCATION,
         kSyntheticHazardRequiresAllocation,
         IREE_SV("synthetic.requires-allocation"), LOOM_LOW_SCHEDULE_NODE_NONE,
         LOOM_LOW_PACKET_PROGRESS_CLASS_NONE, iree_string_view_empty(), 0, 0, 0);
+    return;
   }
   if (packet->node_index == 2) {
-    return EmitHazardEvent(
-        emit, emit_user_data,
-        LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_IMPOSSIBLE_SATISFACTION,
-        kSyntheticHazardImpossible, IREE_SV("synthetic.impossible"),
-        /*producer_node_index=*/0, kSyntheticProgressPipe,
-        IREE_SV("synthetic.pipe"), 4, 1, 3);
+    EmitHazardEvent(emit, emit_user_data,
+                    LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_IMPOSSIBLE_SATISFACTION,
+                    kSyntheticHazardImpossible, IREE_SV("synthetic.impossible"),
+                    /*producer_node_index=*/0, kSyntheticProgressPipe,
+                    IREE_SV("synthetic.pipe"), 4, 1, 3);
   }
-  return iree_ok_status();
 }
 
 TEST_F(LowPacketHazardPlanTest, SupportsScheduleOnlyDiagnostics) {
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       /*.user_data=*/{},
+      /*.event_count=*/3,
       /*.query=*/SyntheticScheduleOnlyDiagnosticQuery,
   };
   loom_low_packet_hazard_plan_t plan = {};
@@ -481,150 +726,24 @@ TEST_F(LowPacketHazardPlanTest, SupportsScheduleOnlyDiagnostics) {
   EXPECT_EQ(plan.records[2].residual_progress, 3u);
 }
 
-iree_status_t InvalidResidualHazardQuery(
-    void* user_data, const loom_low_schedule_table_t* schedule,
-    const loom_low_allocation_table_t* allocation,
-    const loom_low_packet_progress_table_t* progress,
-    const loom_low_packet_view_t* packet,
-    loom_low_packet_hazard_plan_emit_fn_t emit, void* emit_user_data) {
-  (void)user_data;
-  (void)schedule;
-  (void)allocation;
-  (void)progress;
-  (void)packet;
-  return EmitHazardEvent(emit, emit_user_data,
-                         LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION,
-                         kSyntheticHazardLatency, IREE_SV("synthetic.latency"),
-                         /*producer_node_index=*/0, kSyntheticProgressPipe,
-                         IREE_SV("synthetic.pipe"), 3, 1, 1);
-}
-
-TEST_F(LowPacketHazardPlanTest, RejectsInvalidResidualProgress) {
+TEST_F(LowPacketHazardPlanTest, QueriesProviderExactlyOncePerPacket) {
+  HazardQueryAudit audit;
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
-      /*.user_data=*/{},
-      /*.query=*/InvalidResidualHazardQuery,
+      /*.user_data=*/&audit,
+      /*.event_count=*/0,
+      /*.query=*/AuditEmptyResidualHazardQuery,
   };
   loom_low_packet_hazard_plan_t plan = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_low_packet_hazard_plan_build(&state_.schedule, &state_.allocation,
-                                        /*progress=*/nullptr, &hazard_provider,
-                                        &arena_, &plan));
+  IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(
+      &state_.schedule, /*allocation=*/nullptr, /*progress=*/nullptr,
+      &hazard_provider, &arena_, &plan));
+
+  EXPECT_EQ(audit.query_count, state_.schedule.scheduled_node_count);
+  EXPECT_EQ(audit.next_packet_index, state_.schedule.scheduled_node_count);
+  EXPECT_EQ(audit.queried_packet_mask, 0b111u);
 }
 
-iree_status_t InvalidDiagnosticResidualHazardQuery(
-    void* user_data, const loom_low_schedule_table_t* schedule,
-    const loom_low_allocation_table_t* allocation,
-    const loom_low_packet_progress_table_t* progress,
-    const loom_low_packet_view_t* packet,
-    loom_low_packet_hazard_plan_emit_fn_t emit, void* emit_user_data) {
-  (void)user_data;
-  (void)schedule;
-  (void)allocation;
-  (void)progress;
-  (void)packet;
-  return EmitHazardEvent(emit, emit_user_data,
-                         LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_MISSING_TARGET_DATA,
-                         kSyntheticHazardMissingData,
-                         IREE_SV("synthetic.missing-data"),
-                         /*producer_node_index=*/0, kSyntheticProgressPipe,
-                         IREE_SV("synthetic.pipe"), 3, 1, 2);
-}
-
-TEST_F(LowPacketHazardPlanTest, RejectsDiagnosticResidualFields) {
-  const loom_low_packet_hazard_plan_provider_t hazard_provider = {
-      /*.user_data=*/{},
-      /*.query=*/InvalidDiagnosticResidualHazardQuery,
-  };
-  loom_low_packet_hazard_plan_t plan = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_low_packet_hazard_plan_build(&state_.schedule, &state_.allocation,
-                                        /*progress=*/nullptr, &hazard_provider,
-                                        &arena_, &plan));
-}
-
-iree_status_t MissingActionIdentityHazardQuery(
-    void* user_data, const loom_low_schedule_table_t* schedule,
-    const loom_low_allocation_table_t* allocation,
-    const loom_low_packet_progress_table_t* progress,
-    const loom_low_packet_view_t* packet,
-    loom_low_packet_hazard_plan_emit_fn_t emit, void* emit_user_data) {
-  (void)user_data;
-  (void)schedule;
-  (void)allocation;
-  (void)progress;
-  (void)packet;
-  const loom_low_packet_hazard_plan_event_t event = {
-      /*.kind=*/LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION,
-      /*.action_id=*/{},
-      /*.action_name=*/{},
-      /*.reason_id=*/kSyntheticHazardLatency,
-      /*.reason_name=*/IREE_SV("synthetic.latency"),
-      /*.producer_node_index=*/0,
-      /*.progress_class_id=*/kSyntheticProgressPipe,
-      /*.progress_class_name=*/IREE_SV("synthetic.pipe"),
-      /*.required_progress=*/3,
-      /*.observed_progress=*/1,
-      /*.residual_progress=*/2,
-  };
-  return emit(emit_user_data, &event);
-}
-
-TEST_F(LowPacketHazardPlanTest, RejectsMissingActionIdentity) {
-  const loom_low_packet_hazard_plan_provider_t hazard_provider = {
-      /*.user_data=*/{},
-      /*.query=*/MissingActionIdentityHazardQuery,
-  };
-  loom_low_packet_hazard_plan_t plan = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_low_packet_hazard_plan_build(&state_.schedule, &state_.allocation,
-                                        /*progress=*/nullptr, &hazard_provider,
-                                        &arena_, &plan));
-}
-
-iree_status_t InvalidDiagnosticActionHazardQuery(
-    void* user_data, const loom_low_schedule_table_t* schedule,
-    const loom_low_allocation_table_t* allocation,
-    const loom_low_packet_progress_table_t* progress,
-    const loom_low_packet_view_t* packet,
-    loom_low_packet_hazard_plan_emit_fn_t emit, void* emit_user_data) {
-  (void)user_data;
-  (void)schedule;
-  (void)allocation;
-  (void)progress;
-  (void)packet;
-  const loom_low_packet_hazard_plan_event_t event = {
-      /*.kind=*/LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_MISSING_TARGET_DATA,
-      /*.action_id=*/kSyntheticHazardActionPadding,
-      /*.action_name=*/IREE_SV("synthetic.padding"),
-      /*.reason_id=*/kSyntheticHazardMissingData,
-      /*.reason_name=*/IREE_SV("synthetic.missing-data"),
-      /*.producer_node_index=*/LOOM_LOW_SCHEDULE_NODE_NONE,
-      /*.progress_class_id=*/LOOM_LOW_PACKET_PROGRESS_CLASS_NONE,
-      /*.progress_class_name=*/{},
-      /*.required_progress=*/{},
-      /*.observed_progress=*/{},
-      /*.residual_progress=*/{},
-  };
-  return emit(emit_user_data, &event);
-}
-
-TEST_F(LowPacketHazardPlanTest, RejectsDiagnosticActionIdentity) {
-  const loom_low_packet_hazard_plan_provider_t hazard_provider = {
-      /*.user_data=*/{},
-      /*.query=*/InvalidDiagnosticActionHazardQuery,
-  };
-  loom_low_packet_hazard_plan_t plan = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_low_packet_hazard_plan_build(&state_.schedule, &state_.allocation,
-                                        /*progress=*/nullptr, &hazard_provider,
-                                        &arena_, &plan));
-}
-
-iree_status_t InvalidProducerOrderHazardQuery(
+void LoopCarriedProducerHazardQuery(
     void* user_data, const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_progress_table_t* progress,
@@ -635,26 +754,37 @@ iree_status_t InvalidProducerOrderHazardQuery(
   (void)allocation;
   (void)progress;
   if (packet->node_index != 1) {
-    return iree_ok_status();
+    return;
   }
-  return EmitHazardEvent(emit, emit_user_data,
-                         LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION,
-                         kSyntheticHazardLatency, IREE_SV("synthetic.latency"),
-                         /*producer_node_index=*/2, kSyntheticProgressPipe,
-                         IREE_SV("synthetic.pipe"), 3, 1, 2);
+  EmitHazardEvent(emit, emit_user_data,
+                  LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION,
+                  kSyntheticHazardLatency, IREE_SV("synthetic.latency"),
+                  /*producer_node_index=*/2, kSyntheticProgressPipe,
+                  IREE_SV("synthetic.pipe"), 3, 1, 2);
 }
 
-TEST_F(LowPacketHazardPlanTest, RejectsProducerAfterInsertion) {
+TEST_F(LowPacketHazardPlanTest, RecordsLoopCarriedProducerAfterInsertion) {
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       /*.user_data=*/{},
-      /*.query=*/InvalidProducerOrderHazardQuery,
+      /*.event_count=*/1,
+      /*.query=*/LoopCarriedProducerHazardQuery,
   };
   loom_low_packet_hazard_plan_t plan = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_low_packet_hazard_plan_build(&state_.schedule, &state_.allocation,
-                                        /*progress=*/nullptr, &hazard_provider,
-                                        &arena_, &plan));
+  IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(
+      &state_.schedule, &state_.allocation, /*progress=*/nullptr,
+      &hazard_provider, &arena_, &plan));
+
+  ASSERT_EQ(plan.record_count, 1u);
+  const loom_low_packet_hazard_plan_record_t& record = plan.records[0];
+  EXPECT_EQ(record.kind, LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION);
+  EXPECT_EQ(record.action_id, kSyntheticHazardActionPadding);
+  EXPECT_EQ(record.producer_node_index, 2u);
+  EXPECT_EQ(record.producer_packet_index, 2u);
+  EXPECT_EQ(record.consumer_node_index, 1u);
+  EXPECT_EQ(record.insertion_packet_index, 1u);
+  EXPECT_EQ(record.required_progress, 3u);
+  EXPECT_EQ(record.observed_progress, 1u);
+  EXPECT_EQ(record.residual_progress, 2u);
 }
 
 }  // namespace

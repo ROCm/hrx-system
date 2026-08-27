@@ -20,3 +20,18 @@ def iree_select(selector):
     if "//conditions:default" not in selector:
         fail("iree_select requires a //conditions:default branch")
     return select(selector)
+
+def defaulting_select(selector):
+    """Returns a Bazel `select()` whose non-Bazel fallback is explicit.
+
+    Bazel-to-CMake evaluates the default branch of this helper instead of
+    translating its conditions. This is reserved for sources or options whose
+    CMake implementation is intentionally expressed outside the generated
+    target, such as a build-system-specific assembler rule.
+
+    Args:
+      selector: Dictionary passed through to `select()`.
+    """
+    if "//conditions:default" not in selector:
+        fail("defaulting_select requires a //conditions:default branch")
+    return select(selector)

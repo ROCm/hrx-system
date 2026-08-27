@@ -81,11 +81,19 @@ iree_cc_library(
     "dump.h"
   SRCS
     "dump.c"
+    "dump_json.c"
+    "dump_json.h"
+    "dump_layout.c"
+    "dump_layout.h"
+    "dump_state.h"
+    "dump_text.c"
+    "dump_text.h"
   DEPS
     ::digest
     ::file_reader
     ::format
     iree::base
+    iree::hal
   PUBLIC
 )
 
@@ -96,6 +104,12 @@ iree_cc_library(
     "execute.h"
   SRCS
     "execute.c"
+    "execute_object.c"
+    "execute_object.h"
+    "execute_operation.c"
+    "execute_operation.h"
+    "execute_state.c"
+    "execute_state.h"
   DEPS
     ::digest
     ::file_reader
@@ -111,6 +125,7 @@ iree_cc_library(
     recorder
   HDRS
     "recorder.h"
+    "recorder_device.h"
   SRCS
     "recorder.c"
     "recorder_allocator.c"
@@ -119,8 +134,7 @@ iree_cc_library(
     "recorder_buffer.h"
     "recorder_command_buffer.c"
     "recorder_command_buffer.h"
-    "recorder_event.c"
-    "recorder_event.h"
+    "recorder_device.c"
     "recorder_executable.c"
     "recorder_executable.h"
     "recorder_file.c"
@@ -175,6 +189,25 @@ iree_cc_test(
     iree::testing::temp_file
 )
 
+iree_cc_test(
+  NAME
+    execute_atomic_test
+  SRCS
+    "execute_atomic_test.cc"
+    "execute_operation.h"
+    "execute_state.h"
+  DEPS
+    ::execute
+    ::file_reader
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::hal
+    iree::hal::drivers::local_sync::sync_driver
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 endif()
 
 iree_cc_test(
@@ -197,6 +230,7 @@ iree_cc_test(
   SRCS
     "recorder_test.cc"
   DEPS
+    ::execute
     ::file_reader
     ::recorder
     iree::async

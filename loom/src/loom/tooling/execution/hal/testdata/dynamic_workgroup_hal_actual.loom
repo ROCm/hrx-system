@@ -1,0 +1,29 @@
+kernel.def @dynamic_workgroup_fill(%workgroup_count: index) {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%workgroup_count: index, %output: buffer) {
+  %workgroup_count_bounded = index.assume %workgroup_count [range(%workgroup_count, 1, 4)] : index
+  %workgroup_id0 = kernel.workgroup.id<x> : index
+  %element_count = index.constant 4 : index
+  %workgroup_id = index.rem %workgroup_id0, %element_count : index
+  %base = index.constant 0 : offset
+  %value = scalar.constant 42 : i32
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %global_output = buffer.assume.memory_space<global> %output_aligned : buffer
+  %output_view = buffer.view %global_output[%base] : buffer -> view<4xi32>
+  scf.for %i = [%workgroup_id to %element_count step %workgroup_count_bounded] {
+    view.store %value, %output_view[%i] : i32, view<4xi32>
+  }
+  kernel.return
+}
+
+check.case @dynamic_workgroup_hal_actual_case {
+  %workgroup_count = check.param.choice values([1, 4]) name("workgroup_count") : index
+  %output = check.generate.fill value(0) : tensor<4xi32>
+  kernel.launch @dynamic_workgroup_fill[%workgroup_count](%workgroup_count, %output) : [index](index, tensor<4xi32>)
+  %expected = check.generate.fill value(42) : tensor<4xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<4xi32>
+  check.return
+}
+
+check.benchmark<@dynamic_workgroup_hal_actual_case>

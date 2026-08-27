@@ -209,9 +209,9 @@ TEST_F(AvailabilityTest, TypeAttrRejectsUnavailableDynamicDimension) {
       &dict));
 
   loom_op_t* attrs_op = nullptr;
-  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, input,
-                                       loom_attr_as_dict(dict), i32_type,
-                                       LOOM_LOCATION_UNKNOWN, &attrs_op));
+  IREE_ASSERT_OK(loom_test_attrs_build(
+      &builder_, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT, input,
+      loom_attr_as_dict(dict), i32_type, LOOM_LOCATION_UNKNOWN, &attrs_op));
 
   PrepareAvailabilityAnalysis();
 

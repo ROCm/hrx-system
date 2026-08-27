@@ -1,9 +1,9 @@
 // RUN: pass canonicalize
 
 func.def @addi_dynamic_identities(%x: i32) -> (i32, i32) {
-  %zero = scalar.constant 0 : i32
-  %lhs = scalar.addi %zero, %x : i32
-  %rhs = scalar.addi %x, %zero : i32
+  %c0 = scalar.constant 0 : i32
+  %lhs = scalar.addi %c0, %x : i32
+  %rhs = scalar.addi %x, %c0 : i32
   func.return %lhs, %rhs : i32, i32
 }
 
@@ -69,8 +69,8 @@ func.def @flagged_sub_add_cancellation_stays(%x: i32, %y: i32) -> (i32) {
 // ====
 
 func.def @subi_dynamic_identities(%x: i32, %y: i32) -> (i32, i32, i32) {
-  %zero = scalar.constant 0 : i32
-  %identity = scalar.subi %x, %zero : i32
+  %c0 = scalar.constant 0 : i32
+  %identity = scalar.subi %x, %c0 : i32
   %self = scalar.subi %x, %x : i32
   %sum = scalar.addi %x, %y : i32
   %cancel = scalar.subi %sum, %y : i32
@@ -101,11 +101,11 @@ func.def @subi_constant_to_add(%x: i32) -> (i32) {
 // ====
 
 func.def @muli_dynamic_identities(%x: i32) -> (i32, i32, i32) {
-  %zero = scalar.constant 0 : i32
-  %one = scalar.constant 1 : i32
-  %same = scalar.muli %x, %one : i32
-  %zeroed = scalar.muli %x, %zero : i32
-  %also_zero = scalar.muli %zero, %x : i32
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %same = scalar.muli %x, %c1 : i32
+  %zeroed = scalar.muli %x, %c0 : i32
+  %also_zero = scalar.muli %c0, %x : i32
   func.return %same, %zeroed, %also_zero : i32, i32, i32
 }
 
@@ -134,8 +134,8 @@ func.def @muli_power_of_two_to_shift(%x: i32) -> (i32) {
 // ====
 
 func.def @muli_negative_one_to_negi(%x: i32) -> (i32) {
-  %neg_one = scalar.constant -1 : i32
-  %r = scalar.muli %x, %neg_one : i32
+  %negation_factor = scalar.constant -1 : i32
+  %r = scalar.muli %x, %negation_factor : i32
   func.return %r : i32
 }
 
@@ -148,13 +148,13 @@ func.def @muli_negative_one_to_negi(%x: i32) -> (i32) {
 // ====
 
 func.def @div_dynamic_identities(%x: i32, %d: i32) -> (i32, i32, i32) {
-  %one = scalar.constant 1 : i32
-  %zero = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c0 = scalar.constant 0 : i32
   %x2 = scalar.assume %x [range(%x, 1, 1024)] : i32
   %d2 = scalar.assume %d [range(%d, 1, 1024)] : i32
   %self = scalar.divsi %x2, %x2 : i32
-  %zeroed = scalar.divsi %zero, %d2 : i32
-  %identity = scalar.divsi %x, %one : i32
+  %zeroed = scalar.divsi %c0, %d2 : i32
+  %identity = scalar.divsi %x, %c1 : i32
   func.return %self, %zeroed, %identity : i32, i32, i32
 }
 
@@ -183,13 +183,13 @@ func.def @divui_power_of_two_to_shift(%x: i32) -> (i32) {
 // ====
 
 func.def @rem_dynamic_identities(%x: i32, %d: i32) -> (i32, i32, i32) {
-  %one = scalar.constant 1 : i32
-  %zero = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c0 = scalar.constant 0 : i32
   %x2 = scalar.assume %x [range(%x, 1, 1024)] : i32
   %d2 = scalar.assume %d [range(%d, 1, 1024)] : i32
   %self = scalar.remsi %x2, %x2 : i32
-  %zeroed = scalar.remsi %zero, %d2 : i32
-  %by_one = scalar.remsi %x, %one : i32
+  %zeroed = scalar.remsi %c0, %d2 : i32
+  %by_one = scalar.remsi %x, %c1 : i32
   func.return %self, %zeroed, %by_one : i32, i32, i32
 }
 
@@ -219,13 +219,13 @@ func.def @remui_power_of_two_to_mask(%x: i32) -> (i32) {
 // ====
 
 func.def @ceil_floor_div_identities(%x: i32, %d: i32) -> (i32, i32, i32, i32) {
-  %one = scalar.constant 1 : i32
-  %zero = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c0 = scalar.constant 0 : i32
   %d2 = scalar.assume %d [range(%d, 1, 1024)] : i32
-  %ceil_identity = scalar.ceildivsi %x, %one : i32
-  %ceil_zero = scalar.ceildivui %zero, %d2 : i32
-  %floor_identity = scalar.floordivsi %x, %one : i32
-  %floor_zero = scalar.floordivsi %zero, %d2 : i32
+  %ceil_identity = scalar.ceildivsi %x, %c1 : i32
+  %ceil_zero = scalar.ceildivui %c0, %d2 : i32
+  %floor_identity = scalar.floordivsi %x, %c1 : i32
+  %floor_zero = scalar.floordivsi %c0, %d2 : i32
   func.return %ceil_identity, %ceil_zero, %floor_identity, %floor_zero : i32, i32, i32, i32
 }
 
@@ -239,11 +239,11 @@ func.def @ceil_floor_div_identities(%x: i32, %d: i32) -> (i32, i32, i32, i32) {
 // ====
 
 func.def @fmai_preserves_overflow_flags(%a: i32, %b: i32, %c: i32) -> (i32, i32, i32) {
-  %zero = scalar.constant 0 : i32
-  %one = scalar.constant 1 : i32
-  %to_mul = scalar.fmai<nuw> %a, %b, %zero : i32
-  %lhs_one = scalar.fmai<nsw> %one, %b, %c : i32
-  %rhs_one = scalar.fmai<nuw|nsw> %a, %one, %c : i32
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %to_mul = scalar.fmai<nuw> %a, %b, %c0 : i32
+  %lhs_one = scalar.fmai<nsw> %c1, %b, %c : i32
+  %rhs_one = scalar.fmai<nuw|nsw> %a, %c1, %c : i32
   func.return %to_mul, %lhs_one, %rhs_one : i32, i32, i32
 }
 
@@ -311,18 +311,37 @@ func.def @signed_minmax_extremes(%x: i32) -> (i32, i32, i32, i32, i32, i32) {
 // ====
 
 func.def @unsigned_minmax_extremes(%x: i32) -> (i32, i32, i32, i32) {
-  %zero = scalar.constant 0 : i32
-  %umax = scalar.constant 4294967295 : i32
-  %min_absorb = scalar.minui %x, %zero : i32
-  %min_identity = scalar.minui %x, %umax : i32
-  %max_identity = scalar.maxui %x, %zero : i32
-  %max_absorb = scalar.maxui %x, %umax : i32
+  %c0 = scalar.constant 0 : i32
+  %unsigned_max = scalar.constant -1 : i32
+  %min_absorb = scalar.minui %x, %c0 : i32
+  %min_identity = scalar.minui %x, %unsigned_max : i32
+  %max_identity = scalar.maxui %x, %c0 : i32
+  %max_absorb = scalar.maxui %x, %unsigned_max : i32
   func.return %min_absorb, %min_identity, %max_identity, %max_absorb : i32, i32, i32, i32
 }
 
 // ----
 func.def @unsigned_minmax_extremes(%x: i32) -> (i32, i32, i32, i32) {
-  %zero = scalar.constant 0 : i32
-  %umax = scalar.constant 4294967295 : i32
-  func.return %zero, %x, %x, %umax : i32, i32, i32, i32
+  %c0 = scalar.constant 0 : i32
+  %unsigned_max = scalar.constant -1 : i32
+  func.return %c0, %x, %x, %unsigned_max : i32, i32, i32, i32
+}
+
+// ====
+
+func.def @unsigned_i64_minmax_extremes(%x: i64) -> (i64, i64, i64, i64) {
+  %c0 = scalar.constant 0 : i64
+  %unsigned_max = scalar.constant -1 : i64
+  %min_absorb = scalar.minui %x, %c0 : i64
+  %min_identity = scalar.minui %x, %unsigned_max : i64
+  %max_identity = scalar.maxui %x, %c0 : i64
+  %max_absorb = scalar.maxui %x, %unsigned_max : i64
+  func.return %min_absorb, %min_identity, %max_identity, %max_absorb : i64, i64, i64, i64
+}
+
+// ----
+func.def @unsigned_i64_minmax_extremes(%x: i64) -> (i64, i64, i64, i64) {
+  %c0 = scalar.constant 0 : i64
+  %unsigned_max = scalar.constant -1 : i64
+  func.return %c0, %x, %x, %unsigned_max : i64, i64, i64, i64
 }

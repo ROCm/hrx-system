@@ -30,9 +30,9 @@ typedef struct loom_tool_process_result_t {
   // Platform exit code, including signal-derived POSIX codes when applicable.
   int exit_code;
   // Captured stdout bytes.
-  loom_tool_output_t stdout_text;
+  loom_tool_output_t stdout_bytes;
   // Captured stderr bytes.
-  loom_tool_output_t stderr_text;
+  loom_tool_output_t stderr_bytes;
 } loom_tool_process_result_t;
 
 typedef struct loom_tool_temp_file_t {
@@ -44,6 +44,12 @@ typedef struct loom_tool_temp_file_t {
 void loom_tool_output_deinitialize(loom_tool_output_t* output,
                                    iree_allocator_t allocator);
 
+// Converts Windows-style newline sequences in textual |output| to LF in place.
+// Repeated carriage returns before LF are collapsed because some tools emit
+// CRLF through a text-mode stdout that inserts a second carriage return. Other
+// bytes, including carriage returns not followed by LF, are preserved.
+void loom_tool_output_normalize_newlines(loom_tool_output_t* output);
+
 // Releases stdout/stderr bytes allocated by loom_tool_process_run.
 void loom_tool_process_result_deinitialize(loom_tool_process_result_t* result,
                                            iree_allocator_t allocator);
@@ -53,10 +59,12 @@ bool loom_tool_process_result_succeeded(
     const loom_tool_process_result_t* result);
 
 // Invokes |executable_path| with argv-style |arguments| and captures both
-// stdout and stderr.
+// stdout and stderr. The child reads stdin from the platform null device and
+// the spawn policy restricts inheritance to that stdin and the redirected
+// stdout/stderr handles or file descriptors.
 //
-// |search_path| controls PATH lookup on POSIX. On Windows, CreateProcessA with
-// a NULL application name applies the platform command search behavior.
+// |search_path| controls PATH lookup. Exact execution passes the executable as
+// the Win32 application name or uses posix_spawn instead of posix_spawnp.
 //
 // A nonzero child exit code is represented in |out_result| and still returns
 // OK: launch/capture failures are status failures, tool diagnostics are child
@@ -76,8 +84,9 @@ iree_status_t loom_tool_temp_file_initialize(iree_string_view_t stem,
 // Returns the current filesystem path for |file|.
 iree_string_view_t loom_tool_temp_file_path(const loom_tool_temp_file_t* file);
 
-// Deletes the temporary file if it still exists.
-void loom_tool_temp_file_deinitialize(loom_tool_temp_file_t* file);
+// Deletes the temporary file if it still exists and deinitializes |file|.
+// Returns a failure if the file could not be deleted.
+iree_status_t loom_tool_temp_file_deinitialize(loom_tool_temp_file_t* file);
 
 #ifdef __cplusplus
 }  // extern "C"

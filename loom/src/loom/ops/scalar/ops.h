@@ -168,7 +168,7 @@ typedef enum loom_scalar_cmpi_predicate_e {
   LOOM_SCALAR_CMPI_PREDICATE_COUNT_ = 10,
 } loom_scalar_cmpi_predicate_t;
 
-// Floating-point comparison predicates (IEEE 754 total order).
+// IEEE 754 ordered and unordered floating-point predicates.
 typedef enum loom_scalar_cmpf_predicate_e {
   LOOM_SCALAR_CMPF_PREDICATE_OEQ = 0,
   LOOM_SCALAR_CMPF_PREDICATE_OGT = 1,
@@ -704,10 +704,12 @@ LOOM_DEFINE_ISA(loom_scalar_copysignf_isa, LOOM_OP_SCALAR_COPYSIGNF)
 LOOM_DEFINE_OPERAND(loom_scalar_copysignf_lhs, 0)
 LOOM_DEFINE_OPERAND(loom_scalar_copysignf_rhs, 1)
 LOOM_DEFINE_RESULT(loom_scalar_copysignf_result, 0)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_scalar_copysignf_fastmath)
 iree_status_t loom_scalar_copysignf_build(
-    loom_builder_t* builder, loom_value_id_t lhs,
-    loom_value_id_t rhs, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op);
+    loom_builder_t* builder, uint8_t instance_flags,
+    loom_value_id_t lhs, loom_value_id_t rhs,
+    loom_type_t result_type, loom_location_id_t location,
+    loom_op_t** out_op);
 iree_status_t loom_scalar_copysignf_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_scalar_copysignf_facts(
     loom_fact_context_t* context,
@@ -926,7 +928,7 @@ iree_status_t loom_scalar_cosf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_SINTURNSF: Sine over turns: sin(2*pi*x), where 1.0 is one full revolution.
+// LOOM_OP_SCALAR_SINTURNSF: Sine over turns: sin(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinals. Non-finite inputs produce NaN.
 // %result = scalar.sinturnsf %input : f32
 LOOM_DEFINE_ISA(loom_scalar_sinturnsf_isa, LOOM_OP_SCALAR_SINTURNSF)
 LOOM_DEFINE_OPERAND(loom_scalar_sinturnsf_input, 0)
@@ -942,7 +944,7 @@ iree_status_t loom_scalar_sinturnsf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_COSTURNSF: Cosine over turns: cos(2*pi*x), where 1.0 is one full revolution.
+// LOOM_OP_SCALAR_COSTURNSF: Cosine over turns: cos(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinals. Non-finite inputs produce NaN.
 // %result = scalar.costurnsf %input : f32
 LOOM_DEFINE_ISA(loom_scalar_costurnsf_isa, LOOM_OP_SCALAR_COSTURNSF)
 LOOM_DEFINE_OPERAND(loom_scalar_costurnsf_input, 0)
@@ -1364,10 +1366,12 @@ LOOM_DEFINE_OPERAND(loom_scalar_cmpi_rhs, 1)
 LOOM_DEFINE_RESULT(loom_scalar_cmpi_result, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_scalar_cmpi_predicate, 0, loom_scalar_cmpi_predicate_t)
 iree_status_t loom_scalar_cmpi_build(
-    loom_builder_t* builder, uint8_t predicate,
-    loom_value_id_t lhs, loom_value_id_t rhs,
-    loom_type_t operand_type, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op);
+    loom_builder_t* builder,
+    loom_scalar_cmpi_predicate_t predicate,
+    loom_value_id_t lhs,
+    loom_value_id_t rhs,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 iree_status_t loom_scalar_cmpi_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_scalar_cmpi_facts(
     loom_fact_context_t* context,
@@ -1384,10 +1388,12 @@ LOOM_DEFINE_RESULT(loom_scalar_cmpf_result, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_scalar_cmpf_predicate, 0, loom_scalar_cmpf_predicate_t)
 LOOM_DEFINE_INSTANCE_FLAGS(loom_scalar_cmpf_fastmath)
 iree_status_t loom_scalar_cmpf_build(
-    loom_builder_t* builder, uint8_t instance_flags,
-    uint8_t predicate, loom_value_id_t lhs,
-    loom_value_id_t rhs, loom_type_t operand_type,
-    loom_type_t result_type, loom_location_id_t location,
+    loom_builder_t* builder,
+    uint8_t instance_flags,
+    loom_scalar_cmpf_predicate_t predicate,
+    loom_value_id_t lhs,
+    loom_value_id_t rhs,
+    loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_scalar_cmpf_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_scalar_cmpf_facts(
@@ -1402,8 +1408,9 @@ LOOM_DEFINE_ISA(loom_scalar_isnanf_isa, LOOM_OP_SCALAR_ISNANF)
 LOOM_DEFINE_OPERAND(loom_scalar_isnanf_input, 0)
 LOOM_DEFINE_RESULT(loom_scalar_isnanf_result, 0)
 iree_status_t loom_scalar_isnanf_build(
-    loom_builder_t* builder, loom_value_id_t input,
-    loom_type_t result_type, loom_location_id_t location,
+    loom_builder_t* builder,
+    loom_value_id_t input,
+    loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_scalar_isnanf_facts(
     loom_fact_context_t* context,
@@ -1417,8 +1424,9 @@ LOOM_DEFINE_ISA(loom_scalar_isinff_isa, LOOM_OP_SCALAR_ISINFF)
 LOOM_DEFINE_OPERAND(loom_scalar_isinff_input, 0)
 LOOM_DEFINE_RESULT(loom_scalar_isinff_result, 0)
 iree_status_t loom_scalar_isinff_build(
-    loom_builder_t* builder, loom_value_id_t input,
-    loom_type_t result_type, loom_location_id_t location,
+    loom_builder_t* builder,
+    loom_value_id_t input,
+    loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_scalar_isinff_facts(
     loom_fact_context_t* context,
@@ -1432,8 +1440,9 @@ LOOM_DEFINE_ISA(loom_scalar_isfinitef_isa, LOOM_OP_SCALAR_ISFINITEF)
 LOOM_DEFINE_OPERAND(loom_scalar_isfinitef_input, 0)
 LOOM_DEFINE_RESULT(loom_scalar_isfinitef_result, 0)
 iree_status_t loom_scalar_isfinitef_build(
-    loom_builder_t* builder, loom_value_id_t input,
-    loom_type_t result_type, loom_location_id_t location,
+    loom_builder_t* builder,
+    loom_value_id_t input,
+    loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_scalar_isfinitef_facts(
     loom_fact_context_t* context,
@@ -1531,7 +1540,7 @@ iree_status_t loom_scalar_fptoui_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_EXTF: Float precision extension (widen): e.g. f16 to f32.
+// LOOM_OP_SCALAR_EXTF: Float precision extension to a strictly wider format: e.g. f16 to f32.
 // %result = scalar.extf %input : f16 to f32
 LOOM_DEFINE_ISA(loom_scalar_extf_isa, LOOM_OP_SCALAR_EXTF)
 LOOM_DEFINE_OPERAND(loom_scalar_extf_input, 0)
@@ -1547,7 +1556,7 @@ iree_status_t loom_scalar_extf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_FPTRUNC: Float precision truncation (narrow): e.g. f32 to f16.
+// LOOM_OP_SCALAR_FPTRUNC: Float precision truncation using round-to-nearest, ties-to-even. The result format must be strictly narrower than the input format. Special values follow the destination format: f8E4M3 saturates finite overflow and infinities to its signed maximum finite value while preserving NaNs; IEEE formats preserve infinities and NaNs.
 // %result = scalar.fptrunc %input : f32 to f16
 LOOM_DEFINE_ISA(loom_scalar_fptrunc_isa, LOOM_OP_SCALAR_FPTRUNC)
 LOOM_DEFINE_OPERAND(loom_scalar_fptrunc_input, 0)
@@ -1563,7 +1572,7 @@ iree_status_t loom_scalar_fptrunc_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_EXTSI: Signed integer extension (sign-extend): e.g. i8 to i32.
+// LOOM_OP_SCALAR_EXTSI: Signed integer extension to a strictly wider type: e.g. i8 to i32.
 // %result = scalar.extsi %input : i8 to i32
 LOOM_DEFINE_ISA(loom_scalar_extsi_isa, LOOM_OP_SCALAR_EXTSI)
 LOOM_DEFINE_OPERAND(loom_scalar_extsi_input, 0)
@@ -1579,7 +1588,7 @@ iree_status_t loom_scalar_extsi_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_EXTUI: Unsigned integer extension (zero-extend): e.g. i8 to i32.
+// LOOM_OP_SCALAR_EXTUI: Unsigned integer extension to a strictly wider type: e.g. i8 to i32.
 // %result = scalar.extui %input : i8 to i32
 LOOM_DEFINE_ISA(loom_scalar_extui_isa, LOOM_OP_SCALAR_EXTUI)
 LOOM_DEFINE_OPERAND(loom_scalar_extui_input, 0)
@@ -1595,7 +1604,7 @@ iree_status_t loom_scalar_extui_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_TRUNCI: Integer truncation (narrow): e.g. i32 to i8.
+// LOOM_OP_SCALAR_TRUNCI: Integer truncation to a strictly narrower type: e.g. i32 to i8.
 // %result = scalar.trunci %input : i32 to i8
 LOOM_DEFINE_ISA(loom_scalar_trunci_isa, LOOM_OP_SCALAR_TRUNCI)
 LOOM_DEFINE_OPERAND(loom_scalar_trunci_input, 0)
@@ -1611,7 +1620,7 @@ iree_status_t loom_scalar_trunci_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_BITCAST: Bitwise reinterpretation: same bits, different type. No conversion.
+// LOOM_OP_SCALAR_BITCAST: Bitwise reinterpretation between scalar types with the same bit count. No numeric conversion is performed.
 // %result = scalar.bitcast %input : f32 to i32
 LOOM_DEFINE_ISA(loom_scalar_bitcast_isa, LOOM_OP_SCALAR_BITCAST)
 LOOM_DEFINE_OPERAND(loom_scalar_bitcast_input, 0)
@@ -1627,7 +1636,7 @@ iree_status_t loom_scalar_bitcast_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_CONSTANT: Materialize a compile-time integer or floating-point scalar value. Logical coordinate and byte-offset constants use index.constant.
+// LOOM_OP_SCALAR_CONSTANT: Materialize a compile-time integer or floating-point scalar value. Fixed-width integer literals use their signed value domain; unsigned operations interpret the resulting bit pattern. Logical coordinate and byte-offset constants use index.constant.
 // %c42 = scalar.constant 42 : i32
 LOOM_DEFINE_ISA(loom_scalar_constant_isa, LOOM_OP_SCALAR_CONSTANT)
 LOOM_DEFINE_RESULT(loom_scalar_constant_result, 0)
@@ -1882,7 +1891,7 @@ iree_status_t loom_scalar_bitfield_extracts_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_ASSUME: Identity with predicate constraints on integer payload results. Use index.assume for index or offset values.
+// LOOM_OP_SCALAR_ASSUME: Identity with predicate constraints on scalar payload results. Use index.assume for index or offset values.
 // %n2 = scalar.assume %n [mul(%n, 16)] : i64
 LOOM_DEFINE_ISA(loom_scalar_assume_isa, LOOM_OP_SCALAR_ASSUME)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_scalar_assume_values, 0)

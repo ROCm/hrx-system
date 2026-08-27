@@ -117,21 +117,22 @@ static std::vector<uint8_t> MakeSingleSiteTable(
   return table;
 }
 
-static iree_hal_amdgpu_source_context_t MakeContext(
-    iree_hal_amdgpu_loaded_code_object_range_t* ranges = nullptr,
-    iree_host_size_t range_count = 0) {
+static void InitializeContext(
+    iree_hal_amdgpu_loaded_code_object_range_t* ranges,
+    iree_host_size_t range_count,
+    iree_hal_amdgpu_source_context_t* out_context) {
   const uint64_t code_object_hash[2] = {0x1234u, 0x5678u};
-  iree_hal_amdgpu_source_context_t context;
   iree_hal_amdgpu_source_context_initialize(
       /*executable_id=*/0x123u, code_object_hash, range_count,
-      /*loaded_physical_device_mask=*/range_count ? 1u : 0u, ranges, &context);
-  return context;
+      /*loaded_physical_device_mask=*/range_count ? 1u : 0u, ranges,
+      out_context);
 }
 
 TEST(SourceContextTest, TranslatesLoadedCodeObjectDeviceSpans) {
   uint8_t host_storage[16] = {};
   iree_hal_amdgpu_loaded_code_object_range_t ranges[2] = {};
-  iree_hal_amdgpu_source_context_t context = MakeContext(ranges, 2);
+  iree_hal_amdgpu_source_context_t context;
+  InitializeContext(ranges, 2, &context);
 
   iree_hal_amdgpu_loaded_code_object_range_t range = {};
   range.host_pointer = host_storage;
@@ -154,11 +155,16 @@ TEST(SourceContextTest, TranslatesLoadedCodeObjectDeviceSpans) {
 
 TEST(SourceContextTest, ResolvesSanitizerSiteTableRecord) {
   std::vector<uint8_t> table = MakeSingleSiteTable();
-  iree_hal_amdgpu_source_context_t context = MakeContext();
+  iree_hal_amdgpu_source_context_t context;
+  InitializeContext(nullptr, 0, &context);
+
+  iree_hal_device_event_site_t site = iree_hal_device_event_site_default();
+  EXPECT_FALSE(iree_hal_amdgpu_source_context_try_resolve_sanitizer_site(
+      &context, /*site_id=*/0, &site));
+
   IREE_ASSERT_OK(iree_hal_amdgpu_source_context_set_sanitizer_site_table(
       &context, iree_make_const_byte_span(table.data(), table.size())));
 
-  iree_hal_device_event_site_t site = iree_hal_device_event_site_default();
   ASSERT_TRUE(iree_hal_amdgpu_source_context_try_resolve_sanitizer_site(
       &context, /*site_id=*/0, &site));
   EXPECT_EQ(site.record_length, sizeof(site));
@@ -182,7 +188,8 @@ TEST(SourceContextTest, ResolvesSanitizerSiteTableRecord) {
 
 TEST(SourceContextTest, ResolvesRaceSanitizerSiteName) {
   std::vector<uint8_t> table = MakeSingleSiteTable(kLoomOpSanitizerRaceAccess);
-  iree_hal_amdgpu_source_context_t context = MakeContext();
+  iree_hal_amdgpu_source_context_t context;
+  InitializeContext(nullptr, 0, &context);
   IREE_ASSERT_OK(iree_hal_amdgpu_source_context_set_sanitizer_site_table(
       &context, iree_make_const_byte_span(table.data(), table.size())));
 
@@ -197,7 +204,8 @@ TEST(SourceContextTest, RejectsMalformedSanitizerSiteTable) {
   std::vector<uint8_t> table = MakeSingleSiteTable();
   StoreU32(&table, kHeaderMagicOffset, 0xFFFFFFFFu);
 
-  iree_hal_amdgpu_source_context_t context = MakeContext();
+  iree_hal_amdgpu_source_context_t context;
+  InitializeContext(nullptr, 0, &context);
   EXPECT_THAT(
       Status(iree_hal_amdgpu_source_context_set_sanitizer_site_table(
           &context, iree_make_const_byte_span(table.data(), table.size()))),

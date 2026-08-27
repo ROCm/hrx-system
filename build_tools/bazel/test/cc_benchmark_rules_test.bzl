@@ -11,6 +11,8 @@ load("@rules_testing//lib:analysis_test.bzl", "analysis_test", "test_suite")
 load("@rules_testing//lib:util.bzl", "TestingAspectInfo", "util")
 load("//build_tools/bazel:cc_benchmark.bzl", "iree_cc_benchmark")
 
+_TEST_DYNAMIC_LIBRARY_ENVIRONMENT = "IREE_TEST_DYNAMIC_LIBRARY_PATH"
+
 def _all_compilation_paths(compilation_context):
     return [
         str(path)
@@ -56,6 +58,7 @@ def _test_cc_benchmark_smoke_test_args_and_tags(name, **kwargs):
         iree_cc_benchmark,
         name = name + "_subject",
         args = ["--benchmark_filter=BM_Thing"],
+        deps = [":dynamic_library_environment_library"],
         resource_group = "gpu",
         srcs = [name + "_subject.cc"],
         tags = [
@@ -88,6 +91,9 @@ def _test_cc_benchmark_smoke_test_args_and_tags_impl(env, target):
     ]:
         if expected_tag not in attrs.tags:
             env.fail("expected %r in smoke test tags %r" % (expected_tag, attrs.tags))
+    library_path = target[RunEnvironmentInfo].environment[_TEST_DYNAMIC_LIBRARY_ENVIRONMENT]
+    if not library_path.endswith("dynamic_library_root.so"):
+        env.fail("unexpected benchmark dynamic-library path %r" % library_path)
 
 def cc_benchmark_rules_test_suite(name):
     test_suite(

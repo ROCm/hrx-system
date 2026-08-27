@@ -46,7 +46,7 @@ iree_status_t loom_target_low_descriptor_registry_append_to_tables(
   return iree_ok_status();
 }
 
-iree_status_t loom_target_low_descriptor_set_select_for_bundle(
+iree_status_t loom_target_low_descriptor_set_select_for_source_lowering(
     const loom_low_descriptor_registry_t* registry,
     const loom_target_bundle_t* bundle,
     const loom_low_descriptor_set_t** out_descriptor_set) {

@@ -323,7 +323,7 @@ func.def @preserves_distinct_return_blocks(%cond: i1, %a: i32, %b: i32) -> (i32)
 
 test.target<low_core> @test_target
 
-low.kernel.def target(@test_target) @duplicates_low_return_after_br() {
+low.kernel.def target<test.low.core>(@test_target) @duplicates_low_return_after_br() {
   low.br ^return
 ^return:
   low.return
@@ -332,7 +332,7 @@ low.kernel.def target(@test_target) @duplicates_low_return_after_br() {
 // ----
 test.target<low_core> @test_target
 
-low.kernel.def target(@test_target) @duplicates_low_return_after_br() {
+low.kernel.def target<test.low.core>(@test_target) @duplicates_low_return_after_br() {
   low.return
 }
 
@@ -340,7 +340,7 @@ low.kernel.def target(@test_target) @duplicates_low_return_after_br() {
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @deduplicates_low_block_args(%cond: reg<test.i32>, %a: reg<test.i32>, %b: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {
+low.func.def target<test.low.core>(@test_target) @deduplicates_low_block_args(%cond: reg<test.i32>, %a: reg<test.i32>, %b: reg<test.i32>) -> (reg<test.i32>) asm {
   low.cond_br %cond, ^then, ^else : reg<test.i32>
 ^then:
   low.br ^join(%a: reg<test.i32>, %a: reg<test.i32>)
@@ -354,7 +354,7 @@ low.func.def target(@test_target) @deduplicates_low_block_args(%cond: reg<test.i
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @deduplicates_low_block_args(%cond: reg<test.i32>, %a: reg<test.i32>, %b: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @deduplicates_low_block_args(%cond: reg<test.i32>, %a: reg<test.i32>, %b: reg<test.i32>) -> (reg<test.i32>) {
   low.cond_br %cond, ^then, ^else : reg<test.i32>
 ^then:
   low.br ^join(%a: reg<test.i32>)
@@ -864,15 +864,15 @@ func.def @fuses_block_with_cond_terminator(%cond: i1, %a: i32, %b: i32) -> (i32)
 // ====
 
 func.def @preserves_loop_carried_args(%n: index, %seed: i32, %x: i32) -> (i32) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  cfg.br ^loop(%zero: index, %seed: i32)
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  cfg.br ^loop(%loop_begin: index, %seed: i32)
 ^loop(%i: index, %acc: i32):
   %keep_going = index.cmp slt, %i, %n : index
   cfg.cond_br %keep_going, ^body, ^exit
 ^body:
   %next = test.addi %acc, %x : i32
-  %next_i = index.add %i, %one : index
+  %next_i = index.add %i, %loop_step : index
   cfg.br ^loop(%next_i: index, %next: i32)
 ^exit:
   func.return %acc : i32

@@ -65,12 +65,12 @@ typedef enum loom_target_low_structural_legality_flag_bits_e {
 typedef uint32_t loom_target_low_structural_legality_flags_t;
 
 // Bitset of built-in dialect ids a target-low legality provider can handle.
-typedef uint32_t loom_target_low_legality_builtin_dialect_bits_t;
+typedef uint64_t loom_target_low_legality_builtin_dialect_bits_t;
 
 // Returns true if |bits| contains |dialect_id|.
 static inline bool loom_target_low_legality_builtin_dialect_bits_contain(
     loom_target_low_legality_builtin_dialect_bits_t bits, uint8_t dialect_id) {
-  return dialect_id < 32 && iree_any_bit_set(bits, 1u << dialect_id);
+  return dialect_id < 64 && iree_any_bit_set(bits, UINT64_C(1) << dialect_id);
 }
 
 typedef iree_status_t (*loom_target_low_legality_try_op_fn_t)(
@@ -132,12 +132,8 @@ static inline bool loom_target_low_legality_provider_list_is_empty(
 }
 
 typedef struct loom_target_low_legality_options_t {
-  // Target bundle selected for this source-to-low lowering attempt.
-  const loom_target_bundle_t* bundle;
-  // Target-owned payload associated with |bundle|, or NULL.
-  const void* target_data;
-  // Module-local target record symbol selected for this lowering attempt.
-  loom_symbol_ref_t target_ref;
+  // Borrowed immutable target facts selected for this legality check.
+  const loom_target_facts_t* target_facts;
   // Low descriptor registry linked into the current compiler binary.
   const loom_low_descriptor_registry_t* descriptor_registry;
   // Catalog resolving compact diagnostic refs emitted by target contract
@@ -153,11 +149,10 @@ typedef struct loom_target_low_legality_options_t {
   // verifier limited to target-independent low-compatible types and registered
   // type semantics.
   loom_target_low_legality_type_supported_callback_t type_supported;
-  // Caller-owned facts for |function|.
-  loom_value_fact_table_t* fact_table;
-  // Optional active value domain for |function|'s body. Providers can use this
-  // to request shared function-local analyses without acquiring module scratch.
-  const loom_local_value_domain_t* value_domain;
+  // Caller-owned function analysis shared with contract queries and lowering.
+  // The table carries the matching value domain and stable symbolic expression
+  // context, which owns the current facts.
+  const loom_view_region_table_t* view_regions;
   // Structural source forms permitted by the caller's current phase.
   loom_target_low_structural_legality_flags_t structural_legality_flags;
   // Optional target-specific feedback diagnostics to emit during source
@@ -176,8 +171,8 @@ typedef struct loom_target_low_legality_result_t {
   uint32_t error_count;
   // Number of remark diagnostics emitted.
   uint32_t remark_count;
-  // Descriptor set selected by options.bundle, or NULL when selection failed
-  // before verification started.
+  // Descriptor set selected by options.target_facts, or NULL when selection
+  // failed before verification started.
   const loom_low_descriptor_set_t* descriptor_set;
 } loom_target_low_legality_result_t;
 
@@ -210,9 +205,8 @@ iree_string_view_t loom_target_low_legality_function_name(
 const loom_target_bundle_t* loom_target_low_legality_bundle(
     const loom_target_low_legality_context_t* context);
 
-// Returns the module-local target record symbol selected for this legality
-// check.
-loom_symbol_ref_t loom_target_low_legality_target_ref(
+// Returns the typed target facts selected for this legality check.
+const loom_target_facts_t* loom_target_low_legality_target_facts(
     const loom_target_low_legality_context_t* context);
 
 // Returns the selected low descriptor set.
@@ -223,12 +217,29 @@ const loom_low_descriptor_set_t* loom_target_low_legality_descriptor_set(
 const loom_value_fact_table_t* loom_target_low_legality_fact_table(
     const loom_target_low_legality_context_t* context);
 
-// Returns a lazily analyzed view-region table when the caller supplied a value
-// domain for the checked function. Standalone legality callers that do not
-// provide a domain receive NULL.
-iree_status_t loom_target_low_legality_view_regions(
-    loom_target_low_legality_context_t* context,
-    const loom_view_region_table_t** out_view_regions);
+// Returns the active value domain owned by the shared function analysis.
+const loom_local_value_domain_t* loom_target_low_legality_value_domain(
+    const loom_target_low_legality_context_t* context);
+
+// Returns the shared analyzed view-region table.
+const loom_view_region_table_t* loom_target_low_legality_view_regions(
+    const loom_target_low_legality_context_t* context);
+
+// Returns the transient arena for the current legality verification. Storage
+// allocated from the arena remains valid until the current verification call
+// returns.
+iree_arena_allocator_t* loom_target_low_legality_scratch_arena(
+    loom_target_low_legality_context_t* context);
+
+// Returns function-local target state for |key|, allocating zeroed storage on
+// first use.
+//
+// Keys must be target-owned static addresses. Reusing a key with a different
+// data length is an internal legality-provider error. The returned storage
+// remains valid until the current legality verification call returns.
+iree_status_t loom_target_low_legality_get_or_allocate_target_state(
+    loom_target_low_legality_context_t* context, const void* key,
+    iree_host_size_t data_length, void** out_data);
 
 // Returns the optional feedback diagnostics requested by the caller.
 loom_target_low_legality_diagnostic_flags_t
@@ -249,9 +260,7 @@ iree_status_t loom_target_low_legality_record_memory_access(
     iree_string_view_t dynamic_term_kind, iree_string_view_t fallback_reason,
     iree_string_view_t decision, int64_t static_offset_bytes,
     uint32_t element_bytes, uint32_t vector_lanes,
-    uint32_t dynamic_stride_bytes, uint32_t vector_lane_stride_bytes,
-    uint32_t bank_stride_words, uint32_t bank_conflict_degree,
-    iree_string_view_t bank_conflict_kind);
+    uint32_t dynamic_stride_bytes, uint32_t vector_lane_stride_bytes);
 
 // Emits ERR_BACKEND_040 for a source memory cache-policy decision.
 iree_status_t loom_target_low_legality_record_memory_cache_policy(

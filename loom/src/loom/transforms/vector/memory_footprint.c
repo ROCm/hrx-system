@@ -9,6 +9,8 @@
 #include "loom/analysis/vector_memory_footprint.h"
 #include "loom/ops/op_defs.h"
 #include "loom/pass/value_facts.h"
+#include "loom/target/facts.h"
+#include "loom/target/pass_environment.h"
 
 #define LOOM_VECTOR_MEMORY_FOOTPRINT_STATISTICS(V, statistics_type) \
   V(statistics_type, ops_checked, "ops-checked",                    \
@@ -32,25 +34,47 @@ const loom_pass_info_t* loom_vector_memory_footprint_pass_info(void) {
   return &loom_vector_memory_footprint_pass_info_storage;
 }
 
+static iree_status_t loom_vector_memory_footprint_fact_scope(
+    loom_pass_t* pass, const loom_module_t* module, loom_func_like_t function,
+    loom_pass_value_fact_scope_t* out_scope) {
+  *out_scope = loom_pass_value_fact_scope_function(function);
+  const loom_target_facts_t* target_facts = NULL;
+  bool resolved = false;
+  IREE_RETURN_IF_ERROR(loom_target_pass_resolve_function_facts(
+      pass, module, function, &resolved, &target_facts));
+  if (resolved) {
+    *out_scope =
+        loom_pass_value_fact_scope_function_for_target(function, target_facts);
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_vector_memory_footprint_run(loom_pass_t* pass,
                                                loom_module_t* module,
                                                loom_func_like_t function) {
   if (!loom_func_like_body(function)) {
     return iree_ok_status();
   }
+  loom_pass_value_fact_scope_t fact_scope =
+      loom_pass_value_fact_scope_function(function);
+  IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_fact_scope(
+      pass, module, function, &fact_scope));
+
   loom_value_fact_table_t* fact_table = NULL;
-  IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
-      pass, module, loom_pass_value_fact_scope_function(function),
-      &fact_table));
+  IREE_RETURN_IF_ERROR(
+      loom_pass_value_facts_acquire(pass, module, fact_scope, &fact_table));
 
   loom_vector_memory_footprint_result_t result = {0};
   const loom_vector_memory_footprint_options_t options = {
-      .arena = pass->arena,
       .fact_table = fact_table,
       .emitter = pass->diagnostic_emitter,
   };
-  IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_verify_function(
-      module, function, &options, &result));
+  iree_status_t status = loom_vector_memory_footprint_verify_function(
+      module, function, &options, &result);
+  if (pass->value_facts != NULL) {
+    loom_pass_value_fact_owner_invalidate(pass->value_facts);
+  }
+  IREE_RETURN_IF_ERROR(status);
   loom_vector_memory_footprint_statistics(pass)->ops_checked +=
       result.checked_op_count;
   loom_vector_memory_footprint_statistics(pass)->ops_skipped +=

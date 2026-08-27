@@ -403,36 +403,35 @@ def detect_toolchain(args: argparse.Namespace) -> Toolchain:
 
 
 def expand_target_selections(selections: Sequence[str]) -> list[str]:
-    code_object_targets = []
-    all_exact_targets = set(amdgpu_target_map.exact_targets())
-    all_code_object_targets = set(amdgpu_target_map.code_object_targets())
-    exact_to_code_object = dict(amdgpu_target_map.EXACT_TARGET_CODE_OBJECTS)
-    family_map = {
-        family: amdgpu_target_map.family_targets(targets)
-        for family, targets in amdgpu_target_map.TARGET_FAMILIES
-    }
+    try:
+        return amdgpu_target_map.expand_device_binary_target_selections(selections)
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
 
-    def append_code_object(target: str):
-        if target not in code_object_targets:
-            code_object_targets.append(target)
 
-    for selection in selections:
-        if selection in all_code_object_targets:
-            append_code_object(selection)
-        elif selection in all_exact_targets:
-            append_code_object(exact_to_code_object[selection])
-        elif selection in family_map:
-            for exact_target in family_map[selection]:
-                append_code_object(exact_to_code_object[exact_target])
-        else:
-            available = sorted(
-                all_code_object_targets | all_exact_targets | set(family_map)
-            )
-            raise RuntimeError(
-                f"unknown AMDGPU target selector '{selection}'. "
-                f"Available selectors include: {', '.join(available)}"
-            )
-    return code_object_targets
+def resolve_device_binary_targets(
+    target_names: Sequence[str],
+) -> list[amdgpu_target_map.AmdgpuDeviceBinaryTarget]:
+    targets = []
+    seen = set()
+    unknown_targets = []
+    for target_name in target_names:
+        if target_name in seen:
+            continue
+        target = amdgpu_target_map.device_binary_target(target_name)
+        if target is None:
+            unknown_targets.append(target_name)
+            continue
+        seen.add(target_name)
+        targets.append(target)
+    if unknown_targets:
+        raise RuntimeError(
+            "unknown AMDGPU device binary target(s): "
+            + ", ".join(unknown_targets)
+            + ". Available: "
+            + ", ".join(amdgpu_target_map.device_binary_target_names())
+        )
+    return targets
 
 
 def default_target_selections() -> tuple[str, ...]:
@@ -594,7 +593,7 @@ def minimize_code_object(
 
 def build_target(
     *,
-    arch: str,
+    target: amdgpu_target_map.AmdgpuDeviceBinaryTarget,
     source_paths: Sequence[Path],
     repo_root: Path,
     binary_root: Path | None,
@@ -607,7 +606,7 @@ def build_target(
     verbose: bool,
     dry_run: bool,
 ) -> dict:
-    output_name = f"{TARGET_TRIPLE}--{arch}.so"
+    output_name = f"{TARGET_TRIPLE}--{target.name}.so"
     output_path = output_dir / output_name
     if dry_run:
         work_dir = output_dir / f"{output_name}.work"
@@ -632,17 +631,17 @@ def build_target(
             compile_source(
                 source_path=source_path,
                 output_path=object_path,
-                arch=arch,
+                arch=target.processor,
                 repo_root=repo_root,
                 binary_root=binary_root,
                 toolchain=toolchain,
-                extra_copts=extra_copts,
+                extra_copts=[*extra_copts, *target.compile_options],
                 verbose=verbose,
                 dry_run=dry_run,
             )
             object_paths.append(object_path)
 
-        archive_path = work_dir / f"{arch}.archive.bc"
+        archive_path = work_dir / f"{target.name}.archive.bc"
         link_bitcode(
             input_paths=object_paths,
             output_path=archive_path,
@@ -651,7 +650,7 @@ def build_target(
             dry_run=dry_run,
         )
 
-        linked_bitcode_path = work_dir / f"{arch}.linked.bc"
+        linked_bitcode_path = work_dir / f"{target.name}.linked.bc"
         internalize_bitcode(
             input_path=archive_path,
             output_path=linked_bitcode_path,
@@ -671,10 +670,10 @@ def build_target(
         link_code_object(
             input_path=linked_bitcode_path,
             output_path=linked_code_object_path,
-            arch=arch,
+            arch=target.processor,
             version_script=version_script,
             toolchain=toolchain,
-            linkopts=linkopts,
+            linkopts=[*linkopts, *target.link_options],
             verbose=verbose,
             dry_run=dry_run,
         )
@@ -692,7 +691,7 @@ def build_target(
             output_path.chmod(0o644)
         size = output_path.stat().st_size if output_path.exists() else 0
         return {
-            "target": arch,
+            "target": target.name,
             "path": output_name,
             "size": size,
         }
@@ -716,18 +715,18 @@ def supported_amdgpu_processors(clang: Path) -> set[str]:
     return processors
 
 
-def validate_toolchain_targets(
-    toolchain: Toolchain, code_object_targets: Sequence[str]
-):
+def validate_toolchain_targets(toolchain: Toolchain, architectures: Sequence[str]):
     supported_processors = supported_amdgpu_processors(toolchain.clang)
     if not supported_processors:
         return
     unsupported_targets = [
-        target for target in code_object_targets if target not in supported_processors
+        architecture
+        for architecture in architectures
+        if architecture not in supported_processors
     ]
     if unsupported_targets:
         raise RuntimeError(
-            "selected AMDGPU code-object target(s) are not reported by clang: "
+            "selected AMDGPU architecture(s) are not reported by clang: "
             f"{', '.join(unsupported_targets)}. Point --rocm-path/--tool-dir at "
             "a newer LLVM/ROCm toolchain or choose a smaller --targets set."
         )
@@ -760,7 +759,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         required=True,
         help="Directory to receive generated code objects.",
     )
-    parser.add_argument(
+    target_group = parser.add_mutually_exclusive_group()
+    target_group.add_argument(
         "--targets",
         default=None,
         help=(
@@ -769,10 +769,18 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
             f"{','.join(DEFAULT_TARGET_SELECTIONS)}."
         ),
     )
-    parser.add_argument(
+    target_group.add_argument(
+        "--device-binary-targets",
+        default=None,
+        help=(
+            "Comma/space separated final device-binary artifact targets. "
+            "Intended for build-system rules with already-declared outputs."
+        ),
+    )
+    target_group.add_argument(
         "--all-targets",
         action="store_true",
-        help="Build every known code-object target.",
+        help="Build every known device-binary target.",
     )
     parser.add_argument(
         "--tool-dir",
@@ -850,20 +858,27 @@ def main(argv: Sequence[str]) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if args.all_targets:
-        selections = amdgpu_target_map.code_object_targets()
+        device_binary_target_names = amdgpu_target_map.device_binary_target_names()
+    elif args.device_binary_targets:
+        device_binary_target_names = split_env_list(args.device_binary_targets)
     elif args.targets:
         selections = split_env_list(args.targets)
+        device_binary_target_names = expand_target_selections(selections)
     else:
         selections = default_target_selections()
-    code_object_targets = expand_target_selections(selections)
+        device_binary_target_names = expand_target_selections(selections)
+    device_binary_targets = resolve_device_binary_targets(device_binary_target_names)
     source_paths = load_device_source_paths(repo_root)
     toolchain = detect_toolchain(args)
-    validate_toolchain_targets(toolchain, code_object_targets)
+    processors = list(
+        dict.fromkeys(target.processor for target in device_binary_targets)
+    )
+    validate_toolchain_targets(toolchain, processors)
 
     eprint("AMDGPU device binary generator")
     eprint(f"  repo root: {repo_root}")
     eprint(f"  output dir: {output_dir}")
-    eprint(f"  targets: {', '.join(code_object_targets)}")
+    eprint(f"  targets: {', '.join(device_binary_target_names)}")
     eprint(
         "  sources: "
         + ", ".join(str(path.relative_to(repo_root)) for path in source_paths)
@@ -875,11 +890,11 @@ def main(argv: Sequence[str]) -> int:
     eprint(f"  clang resource include: {toolchain.clang_resource_include}")
 
     outputs = []
-    for arch in code_object_targets:
-        eprint(f"Building {arch}...")
+    for target in device_binary_targets:
+        eprint(f"Building {target.name} for {target.processor}...")
         outputs.append(
             build_target(
-                arch=arch,
+                target=target,
                 source_paths=source_paths,
                 repo_root=repo_root,
                 binary_root=args.binary_root.resolve() if args.binary_root else None,

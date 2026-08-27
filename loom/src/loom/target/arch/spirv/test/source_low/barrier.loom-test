@@ -1,14 +1,14 @@
-// RUN: emit source-low output=low
+// TEMPLATE: loom/src/loom/test/corpus/source_low/sync_barrier.loom-test
+// RUN: emit source-low output=low control-flow=structured-low
 
 spirv.target<vulkan1_3> @target
-
-func.def target(@target) @spirv_workgroup_barrier() {
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+func.def target(@target) @workgroup_barrier() {
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   func.return
 }
 
 // ----
-low.func.def target(@target) abi(shader_entry_point) @spirv_workgroup_barrier() asm<spirv.logical.core> {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @workgroup_barrier() asm {
   OpControlBarrier.workgroup.workgroup.acq_rel
   return
 }
@@ -16,14 +16,13 @@ low.func.def target(@target) abi(shader_entry_point) @spirv_workgroup_barrier() 
 // ====
 
 spirv.target<vulkan1_3> @target
-
-func.def target(@target) @spirv_subgroup_barrier() {
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
+func.def target(@target) @subgroup_shared_memory_barrier() {
+  kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
   func.return
 }
 
 // ----
-low.func.def target(@target) abi(shader_entry_point) @spirv_subgroup_barrier() asm<spirv.logical.core> {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @subgroup_shared_memory_barrier() asm {
   OpControlBarrier.subgroup.workgroup.acq_rel
   return
 }

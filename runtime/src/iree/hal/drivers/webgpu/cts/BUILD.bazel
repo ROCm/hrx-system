@@ -55,6 +55,4 @@ iree_runtime_hal_cts_test_suite(
     backends = ":backends",
     local = True,
     target_compatible_with = _WASM32_COMPATIBLE_WITH,
-    # No executable_formats yet: dispatch tests need a completion model that
-    # can service WebGPU promises while compiled wasm is waiting.
 )

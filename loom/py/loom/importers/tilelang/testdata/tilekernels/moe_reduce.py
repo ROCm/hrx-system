@@ -64,22 +64,22 @@ def _reduce_fused_input(tilelang: Any, T: Any, *, target: str) -> TileLangImport
 
 
 @tilelang_case(
-    name="tilekernels_reduce_fused_gfx1100",
+    name="tilekernels_reduce_fused_gfx11_generic",
     category="kernel",
     tags=("tilekernels", "moe", "reduce", "amdgpu"),
 )
-def tilekernels_reduce_fused_gfx1100(
+def tilekernels_reduce_fused_gfx11_generic(
     tilelang: Any,
     T: Any,
 ) -> TileLangImportInput:
-    return _reduce_fused_input(tilelang, T, target="hip -mcpu=gfx1100")
+    return _reduce_fused_input(tilelang, T, target="hip -mcpu=gfx11-generic")
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("reduce_fused_kernel") @reduce_fused_kernel(%num_tokens: i32) {
+kernel.def target(@hip_mcpu_gfx11_generic) export("reduce_fused_kernel") @reduce_fused_kernel(%num_tokens: i32) {
   %num_tokens_idx = index.cast %num_tokens : i32 to index
   %c1 = index.constant 1 : index
   %c128 = index.constant 128 : index
@@ -102,20 +102,20 @@ kernel.def target(@hip_mcpu_gfx1100) export("reduce_fused_kernel") @reduce_fused
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %reduced_fragment_bytes = index.constant 32 : offset
-  %reduced_fragment_buffer = buffer.alloca %reduced_fragment_bytes {base_alignment = 4, memory_space = private} : buffer
+  %reduced_fragment_buffer = buffer.alloca<private> align(4) %reduced_fragment_bytes : buffer
   %reduced_fragment = buffer.view %reduced_fragment_buffer[%c0_bytes] : buffer -> view<8xf32, %layout>
   %f32_zero = scalar.constant 0.0 : f32
   %reduced_fragment_state = vector.splat %f32_zero : vector<8xf32>
   %topk_weights_local_bytes = index.constant 8 : offset
-  %topk_weights_local_buffer = buffer.alloca %topk_weights_local_bytes {base_alignment = 4, memory_space = private} : buffer
+  %topk_weights_local_buffer = buffer.alloca<private> align(4) %topk_weights_local_bytes : buffer
   %topk_weights_local = buffer.view %topk_weights_local_buffer[%c0_bytes] : buffer -> view<2xf32, %layout>
   %topk_weights_local_state = vector.splat %f32_zero : vector<2xf32>
-  %topk_to_pos_local_buffer = buffer.alloca %topk_weights_local_bytes {base_alignment = 4, memory_space = private} : buffer
+  %topk_to_pos_local_buffer = buffer.alloca<private> align(4) %topk_weights_local_bytes : buffer
   %topk_to_pos_local = buffer.view %topk_to_pos_local_buffer[%c0_bytes] : buffer -> view<2xi32, %layout>
   %i32_zero = scalar.constant 0 : i32
   %topk_to_pos_local_state = vector.splat %i32_zero : vector<2xi32>
   %scale_bytes = index.constant 4 : offset
-  %scale_buffer = buffer.alloca %scale_bytes {base_alignment = 4, memory_space = private} : buffer
+  %scale_buffer = buffer.alloca<private> align(4) %scale_bytes : buffer
   %scale = buffer.view %scale_buffer[%c0_bytes] : buffer -> view<1xf32, %layout>
   %c0 = index.constant 0 : index
   %c8 = index.constant 8 : index

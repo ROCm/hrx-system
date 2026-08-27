@@ -6,6 +6,8 @@
 
 #include "loom/target/emit/native/amdgpu/metadata.h"
 
+#include <cstring>
+#include <initializer_list>
 #include <memory>
 #include <string>
 
@@ -25,6 +27,19 @@ std::string BuilderString(const iree_string_builder_t& builder) {
 
 bool Contains(const std::string& value, const char* substring) {
   return value.find(substring) != std::string::npos;
+}
+
+void ExpectOrderedSubstrings(
+    const std::string& value,
+    std::initializer_list<const char*> ordered_substrings) {
+  size_t offset = 0;
+  for (const char* substring : ordered_substrings) {
+    const size_t position = value.find(substring, offset);
+    ASSERT_NE(position, std::string::npos)
+        << "missing ordered substring after byte " << offset << ": "
+        << substring;
+    offset = position + strlen(substring);
+  }
 }
 
 using StreamPtr =
@@ -106,6 +121,9 @@ loom_amdgpu_metadata_kernel_t MinimalKernel() {
       /*.max_flat_workgroup_size=*/64,
       /*.required_workgroup_size=*/{/*.x=*/64, /*.y=*/1, /*.z=*/1},
       /*.has_required_workgroup_size=*/true,
+      /*.workgroup_cluster_size=*/{},
+      /*.has_workgroup_cluster_size=*/false,
+      /*.target_extensions=*/{},
       /*.arguments=*/nullptr,
       /*.argument_count=*/0,
   };
@@ -145,6 +163,7 @@ TEST(AmdgpuMetadataTest, AppendsAssemblyMetadataForNoArgumentKernel) {
   EXPECT_TRUE(Contains(text, "      .vgpr_count: 0\n")) << text;
   EXPECT_TRUE(Contains(text, "      .max_flat_workgroup_size: 64\n")) << text;
   EXPECT_TRUE(Contains(text, "      .reqd_workgroup_size:\n")) << text;
+  EXPECT_FALSE(Contains(text, "      .cluster_dims:\n")) << text;
   EXPECT_TRUE(Contains(text, "      .args: []\n")) << text;
   EXPECT_TRUE(Contains(text, ".end_amdgpu_metadata\n")) << text;
 }
@@ -174,6 +193,110 @@ TEST(AmdgpuMetadataTest, OmitsOptionalRequiredWorkgroupSize) {
 
   EXPECT_TRUE(Contains(bytes, ".max_flat_workgroup_size"));
   EXPECT_FALSE(Contains(bytes, ".reqd_workgroup_size"));
+  EXPECT_FALSE(Contains(bytes, ".cluster_dims"));
+}
+
+TEST(AmdgpuMetadataTest, AppendsWorkgroupClusterDimensions) {
+  loom_amdgpu_metadata_kernel_t kernel = MinimalKernel();
+  kernel.workgroup_cluster_size = {/*.x=*/1, /*.y=*/2, /*.z=*/1};
+  kernel.has_workgroup_cluster_size = true;
+  loom_amdgpu_code_object_metadata_t metadata = MetadataForKernel(&kernel);
+
+  iree_string_builder_t text_builder;
+  iree_string_builder_initialize(iree_allocator_system(), &text_builder);
+  IREE_ASSERT_OK(
+      loom_amdgpu_metadata_append_assembly(&metadata, &text_builder));
+  std::string text = BuilderString(text_builder);
+  iree_string_builder_deinitialize(&text_builder);
+
+  EXPECT_TRUE(Contains(text,
+                       "      .cluster_dims:\n"
+                       "        - 1\n"
+                       "        - 2\n"
+                       "        - 1\n"))
+      << text;
+
+  iree_string_builder_t msgpack_builder;
+  iree_string_builder_initialize(iree_allocator_system(), &msgpack_builder);
+  IREE_ASSERT_OK(
+      loom_amdgpu_metadata_append_msgpack(&metadata, &msgpack_builder));
+  std::string bytes = BuilderString(msgpack_builder);
+  iree_string_builder_deinitialize(&msgpack_builder);
+
+  std::string encoded_cluster_dims = ".cluster_dims";
+  encoded_cluster_dims.append("\x93\x01\x02\x01", 4);
+  EXPECT_NE(bytes.find(encoded_cluster_dims), std::string::npos);
+}
+
+TEST(AmdgpuMetadataTest, AppendsEveryGeneratedTargetMetadataProperty) {
+  iree_host_size_t property_count = 0;
+  for (iree_host_size_t target_ordinal = 0;
+       target_ordinal < loom_amdgpu_target_info_target_count();
+       ++target_ordinal) {
+    const loom_amdgpu_target_info_t* target =
+        loom_amdgpu_target_info_target_at(target_ordinal);
+    ASSERT_NE(target, nullptr);
+    loom_amdgpu_metadata_kernel_t kernel = MinimalKernel();
+    kernel.target_extensions = target->kernel_metadata_extensions;
+    loom_amdgpu_code_object_metadata_t metadata = MetadataForKernel(&kernel);
+
+    iree_string_builder_t text_builder;
+    iree_string_builder_initialize(iree_allocator_system(), &text_builder);
+    IREE_ASSERT_OK(
+        loom_amdgpu_metadata_append_assembly(&metadata, &text_builder));
+    const std::string text = BuilderString(text_builder);
+    iree_string_builder_deinitialize(&text_builder);
+
+    iree_string_builder_t msgpack_builder;
+    iree_string_builder_initialize(iree_allocator_system(), &msgpack_builder);
+    IREE_ASSERT_OK(
+        loom_amdgpu_metadata_append_msgpack(&metadata, &msgpack_builder));
+    const std::string bytes = BuilderString(msgpack_builder);
+    iree_string_builder_deinitialize(&msgpack_builder);
+
+    for (uint16_t property_ordinal = 0;
+         property_ordinal < target->kernel_metadata_extensions.count;
+         ++property_ordinal) {
+      const loom_amdgpu_metadata_string_property_t* property =
+          &target->kernel_metadata_extensions.entries[property_ordinal];
+      const std::string key(property->key.data, property->key.size);
+      const std::string value(property->value.data, property->value.size);
+      const std::string expected_text = "      " + key + ": " + value + "\n";
+      EXPECT_NE(text.find(expected_text), std::string::npos) << text;
+      EXPECT_NE(bytes.find(key), std::string::npos);
+      EXPECT_NE(bytes.find(value), std::string::npos);
+      ++property_count;
+    }
+  }
+  EXPECT_GT(property_count, 0u);
+}
+
+TEST(AmdgpuMetadataTest, RejectsInvalidWorkgroupClusterDimensions) {
+  struct ClusterDimensionsCase {
+    // Cluster dimensions supplied to the metadata writer.
+    loom_target_workgroup_cluster_size_t size;
+    // Presence marker supplied to the metadata writer.
+    bool is_present;
+  };
+  const ClusterDimensionsCase cases[] = {
+      {/*.size=*/{/*.x=*/1, /*.y=*/2, /*.z=*/1}, /*.is_present=*/false},
+      {/*.size=*/{/*.x=*/0, /*.y=*/2, /*.z=*/1}, /*.is_present=*/true},
+      {/*.size=*/{/*.x=*/1, /*.y=*/256, /*.z=*/1}, /*.is_present=*/true},
+      {/*.size=*/{/*.x=*/1, /*.y=*/1, /*.z=*/1}, /*.is_present=*/true},
+  };
+  for (const ClusterDimensionsCase& test_case : cases) {
+    loom_amdgpu_metadata_kernel_t kernel = MinimalKernel();
+    kernel.workgroup_cluster_size = test_case.size;
+    kernel.has_workgroup_cluster_size = test_case.is_present;
+    loom_amdgpu_code_object_metadata_t metadata = MetadataForKernel(&kernel);
+
+    iree_string_builder_t builder;
+    iree_string_builder_initialize(iree_allocator_system(), &builder);
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        loom_amdgpu_metadata_append_msgpack(&metadata, &builder));
+    iree_string_builder_deinitialize(&builder);
+  }
 }
 
 TEST(AmdgpuMetadataTest, AppendsMsgpackMetadataForNoArgumentKernel) {
@@ -196,6 +319,67 @@ TEST(AmdgpuMetadataTest, AppendsMsgpackMetadataForNoArgumentKernel) {
   EXPECT_TRUE(Contains(bytes, ".wavefront_size"));
   EXPECT_TRUE(Contains(bytes, ".args"));
   EXPECT_FALSE(Contains(bytes, ".amdgpu_metadata"));
+}
+
+TEST(AmdgpuMetadataTest, AppendsCanonicalMsgpackMapOrder) {
+  const loom_amdgpu_metadata_argument_t arguments[] = {{
+      /*.name=*/IREE_SV("input"),
+      /*.offset=*/0,
+      /*.size=*/8,
+      /*.alignment=*/8,
+      /*.kind=*/LOOM_AMDGPU_METADATA_ARGUMENT_GLOBAL_BUFFER,
+      /*.address_space=*/IREE_SV("global"),
+      /*.access=*/IREE_SV("read_write"),
+      /*.actual_access=*/IREE_SV("read_only"),
+  }};
+  loom_amdgpu_metadata_kernel_t kernel = MinimalKernel();
+  kernel.kernarg_segment_size = 8;
+  kernel.workgroup_cluster_size = {/*.x=*/1, /*.y=*/2, /*.z=*/1};
+  kernel.has_workgroup_cluster_size = true;
+  kernel.arguments = arguments;
+  kernel.argument_count = IREE_ARRAYSIZE(arguments);
+  loom_amdgpu_code_object_metadata_t metadata = MetadataForKernel(&kernel);
+  const loom_amdgpu_target_info_t* target = nullptr;
+  IREE_ASSERT_OK(
+      loom_amdgpu_target_info_lookup_target(IREE_SV("gfx1250"), &target));
+  ASSERT_NE(target, nullptr);
+  kernel.target_extensions = target->kernel_metadata_extensions;
+  metadata.target = IREE_SV("amdgcn-amd-amdhsa--gfx1250");
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  IREE_ASSERT_OK(loom_amdgpu_metadata_append_msgpack(&metadata, &builder));
+  std::string bytes = BuilderString(builder);
+  iree_string_builder_deinitialize(&builder);
+
+  // ROCr's loaded metadata uses this lexicographic map-key order. Matching it
+  // keeps every string at the same ELF virtual address across loader
+  // canonicalization so runtime metadata can safely borrow loaded bytes.
+  ExpectOrderedSubstrings(bytes, {"amdhsa.kernels",
+                                  ".args",
+                                  ".access",
+                                  ".actual_access",
+                                  ".address_space",
+                                  ".align",
+                                  ".name",
+                                  ".offset",
+                                  ".size",
+                                  ".value_kind",
+                                  ".cluster_dims",
+                                  ".gfx1250_revision",
+                                  ".group_segment_fixed_size",
+                                  ".kernarg_segment_align",
+                                  ".kernarg_segment_size",
+                                  ".max_flat_workgroup_size",
+                                  ".name",
+                                  ".private_segment_fixed_size",
+                                  ".reqd_workgroup_size",
+                                  ".sgpr_count",
+                                  ".symbol",
+                                  ".vgpr_count",
+                                  ".wavefront_size",
+                                  "amdhsa.target",
+                                  "amdhsa.version"});
 }
 
 TEST(AmdgpuMetadataTest, AppendsElfNoteMetadata) {

@@ -14,6 +14,7 @@
 #endif
 
 #if LOOM_LLVMIR_TEST_MODULE_ENABLE_TARGET_SCENARIOS
+#include "loom/target/arch/amdgpu/buffer_resource.h"
 #include "loom/target/emit/llvmir/amdgpu/intrinsics.h"
 #include "loom/target/emit/llvmir/amdgpu/target_env.h"
 #include "loom/target/emit/llvmir/x86/intrinsics.h"
@@ -1806,7 +1807,8 @@ static iree_status_t loom_llvmir_test_populate_amdgpu_intrinsics(
   IREE_RETURN_IF_ERROR(loom_llvmir_module_add_integer_constant(
       module, i64_type, resource_record_count, &records));
   IREE_RETURN_IF_ERROR(loom_llvmir_module_add_integer_constant(
-      module, i32_type, profile->kernel.binding_resource_flags, &flags));
+      module, i32_type, LOOM_AMDGPU_BUFFER_RESOURCE_BASE48_UNIFIED_RAW_WORD3,
+      &flags));
 
   loom_llvmir_block_t* entry = NULL;
   IREE_RETURN_IF_ERROR(
@@ -2170,13 +2172,13 @@ static const char kAmdgpuIntrinsicsText[] =
     "@llvm.amdgcn.workitem.id.x()\n"
     "  %x.rsrc = call ptr addrspace(7) "
     "@llvm.amdgcn.make.buffer.rsrc.p7.p1(ptr addrspace(1) %x, i16 0, "
-    "i64 64, i32 822243328)\n"
+    "i64 64, i32 822173696)\n"
     "  %y.rsrc = call ptr addrspace(7) "
     "@llvm.amdgcn.make.buffer.rsrc.p7.p1(ptr addrspace(1) %y, i16 0, "
-    "i64 64, i32 822243328)\n"
+    "i64 64, i32 822173696)\n"
     "  %z.rsrc = call ptr addrspace(7) "
     "@llvm.amdgcn.make.buffer.rsrc.p7.p1(ptr addrspace(1) %z, i16 0, "
-    "i64 64, i32 822243328)\n"
+    "i64 64, i32 822173696)\n"
     "  %x.ptr = getelementptr float, ptr addrspace(7) %x.rsrc, i32 "
     "%tid\n"
     "  %y.ptr = getelementptr float, ptr addrspace(7) %y.rsrc, i32 "

@@ -34,7 +34,8 @@ loom_value_fact_storage_schema_t ScaledEncodedTargetSchema() {
       LOOM_VALUE_FACT_NUMERIC_FORMAT_F4_E2M1;
   schema.encoded_operand.scale_topology =
       LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D;
-  schema.encoded_operand.scale_group_element_count = 32;
+  schema.encoded_operand.scale_group.element_count = 32;
+  schema.encoded_operand.scale_group.shape[0] = 32;
   schema.encoded_operand.scale_operand_count = 1;
   return schema;
 }
@@ -44,7 +45,12 @@ loom_contract_request_t CompletePackedDotRequest() {
   loom_contract_request_initialize(&request);
   request.kind = LOOM_CONTRACT_KIND_MATRIX_MULTIPLY;
   request.arithmetic = LOOM_CONTRACT_ARITHMETIC_FLOAT_DOT;
-  request.shape = {/*.m=*/8, /*.n=*/1, /*.k=*/16};
+  request.shape = {
+      /*.m=*/8,
+      /*.n=*/1,
+      /*.k=*/16,
+      /*.block_count=*/1,
+  };
   request.k_group_size = 2;
   request.lhs =
       Operand(LOOM_CONTRACT_OPERAND_ROLE_LHS, LOOM_CONTRACT_NUMERIC_BF16);
@@ -71,10 +77,12 @@ TEST(ContractTest, ValidatesCompletePackedDotRequest) {
 TEST(ContractTest, ValidatesDynamicShapeWithValueRefs) {
   loom_contract_request_t request = CompletePackedDotRequest();
   request.shape = {};
+  request.shape.block_count = 1;
   request.shape_value_refs = {
       /*.m=*/loom_contract_value_ref_from_value_id(10),
       /*.n=*/loom_contract_value_ref_from_value_id(11),
       /*.k=*/loom_contract_value_ref_from_value_id(12),
+      /*.block_count=*/loom_contract_value_ref_absent(),
       /*.k_group_size=*/loom_contract_value_ref_from_value_id(13),
   };
   request.k_group_size = 0;
@@ -185,7 +193,12 @@ TEST(ContractTest, RejectsMissingShapeRoleAndCapability) {
   loom_contract_request_initialize(&request);
   request.kind = LOOM_CONTRACT_KIND_MATRIX_MULTIPLY;
   request.arithmetic = LOOM_CONTRACT_ARITHMETIC_INTEGER_DOT;
-  request.shape = {/*.m=*/16, /*.n=*/16, /*.k=*/0};
+  request.shape = {
+      /*.m=*/16,
+      /*.n=*/16,
+      /*.k=*/0,
+      /*.block_count=*/1,
+  };
   request.k_group_size = 4;
   request.lhs =
       Operand(LOOM_CONTRACT_OPERAND_ROLE_LHS, LOOM_CONTRACT_NUMERIC_U8);
@@ -220,6 +233,22 @@ TEST(ContractTest, MapsScalarNumericTypes) {
   ASSERT_TRUE(loom_contract_numeric_type_from_scalar(LOOM_SCALAR_TYPE_BF16,
                                                      false, &numeric_type));
   EXPECT_EQ(numeric_type, LOOM_CONTRACT_NUMERIC_BF16);
+  ASSERT_TRUE(loom_contract_numeric_type_from_scalar(LOOM_SCALAR_TYPE_F8E4M3,
+                                                     false, &numeric_type));
+  EXPECT_EQ(numeric_type, LOOM_CONTRACT_NUMERIC_FP8);
+  ASSERT_TRUE(loom_contract_numeric_type_from_scalar(LOOM_SCALAR_TYPE_F8E5M2,
+                                                     false, &numeric_type));
+  EXPECT_EQ(numeric_type, LOOM_CONTRACT_NUMERIC_BF8);
+}
+
+TEST(ContractTest, ReportsNumericTypeBitWidths) {
+  EXPECT_EQ(loom_contract_numeric_bit_width(LOOM_CONTRACT_NUMERIC_UNKNOWN), 0);
+  EXPECT_EQ(loom_contract_numeric_bit_width(LOOM_CONTRACT_NUMERIC_I4), 4);
+  EXPECT_EQ(loom_contract_numeric_bit_width(LOOM_CONTRACT_NUMERIC_FP6), 6);
+  EXPECT_EQ(loom_contract_numeric_bit_width(LOOM_CONTRACT_NUMERIC_BF8), 8);
+  EXPECT_EQ(loom_contract_numeric_bit_width(LOOM_CONTRACT_NUMERIC_BF16), 16);
+  EXPECT_EQ(loom_contract_numeric_bit_width(LOOM_CONTRACT_NUMERIC_TF32), 32);
+  EXPECT_EQ(loom_contract_numeric_bit_width(LOOM_CONTRACT_NUMERIC_F64), 64);
 }
 
 }  // namespace

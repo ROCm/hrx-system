@@ -19,6 +19,7 @@ except ModuleNotFoundError:
 
 CI_DRY_RUN_COMMANDS = (
     ("iree-bazel-cpu",),
+    ("iree-bazel-repository-build",),
     ("iree-bazel-cpu-asan",),
     ("iree-bazel-cpu-msan",),
     ("iree-bazel-cpu-tsan",),
@@ -26,17 +27,11 @@ CI_DRY_RUN_COMMANDS = (
     ("iree-bazel-cpu-sanitizers",),
     ("iree-bazel-amdgpu",),
     ("iree-bazel-amdgpu-asan",),
-    ("iree-bazel-amdgpu-msan",),
     ("iree-bazel-amdgpu-tsan",),
     ("iree-bazel-amdgpu-ubsan",),
-    ("iree-bazel-amdgpu-sanitizers",),
     ("iree-bazel-vulkan",),
-    ("iree-bazel-vulkan-asan",),
-    ("iree-bazel-vulkan-msan",),
-    ("iree-bazel-vulkan-tsan",),
-    ("iree-bazel-vulkan-ubsan",),
-    ("iree-bazel-vulkan-sanitizers",),
     ("iree-cmake-cpu",),
+    ("iree-cmake-repository-build",),
     ("iree-cmake-cpu-asan",),
     ("iree-cmake-cpu-msan",),
     ("iree-cmake-cpu-tsan",),
@@ -83,6 +78,7 @@ def run_dry_run_scenario(checkout: Path) -> None:
     smoke_test_lib.run_dev_command(
         checkout, ["--dry-run", "bazel", "info", "execution_root"]
     )
+    smoke_test_lib.run_dev_command(checkout, ["--dry-run", "bazel", "shutdown"])
     smoke_test_lib.run_dev_command(
         checkout,
         [

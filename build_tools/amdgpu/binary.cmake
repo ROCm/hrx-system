@@ -22,7 +22,8 @@ function(_iree_amdgpu_bitcode_copts out_var target arch)
     "-fgpu-rdc"  # NOTE: may not be required for all targets
 
     # Header paths for builtins and our own includes.
-    "-isystem" "${IREE_CLANG_BUILTIN_HEADERS_PATH}"
+    "-isystem"
+      "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_CLANG_RESOURCE_INCLUDE}"
     "-I${IREE_SOURCE_DIR}/runtime/src"
     "-I${IREE_BINARY_DIR}/runtime/src"
 
@@ -49,6 +50,22 @@ function(_iree_amdgpu_abs_binary_path out_var path)
   else()
     set(${out_var} "${CMAKE_CURRENT_BINARY_DIR}/${path}" PARENT_SCOPE)
   endif()
+endfunction()
+
+function(_iree_amdgpu_add_generated_input_dependencies TARGET_NAME)
+  if(NOT TARGET "${TARGET_NAME}")
+    return()
+  endif()
+  set(_CONSUMER_TARGETS "${TARGET_NAME}")
+  if(TARGET "${TARGET_NAME}.objects")
+    list(APPEND _CONSUMER_TARGETS "${TARGET_NAME}.objects")
+  endif()
+  foreach(_INPUT IN LISTS ARGN)
+    foreach(_CONSUMER_TARGET IN LISTS _CONSUMER_TARGETS)
+      iree_generated_output_add_consumer(
+        "${_INPUT}" "${_CONSUMER_TARGET}")
+    endforeach()
+  endforeach()
 endfunction()
 
 function(_iree_amdgpu_resolve_bitcode_deps out_paths out_targets)
@@ -152,6 +169,10 @@ function(iree_amdgpu_library)
   if(NOT _RULE_SRCS)
     message(FATAL_ERROR "iree_amdgpu_library requires SRCS")
   endif()
+  if(NOT IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_AVAILABLE)
+    message(FATAL_ERROR
+      "iree_amdgpu_library requires an AMDGPU device toolchain")
+  endif()
 
   iree_package_name(_PACKAGE_NAME)
 
@@ -182,13 +203,13 @@ function(iree_amdgpu_library)
       OUTPUT
         "${_BITCODE_FILE}"
       COMMAND
-        "${IREE_CLANG_BINARY}"
+        "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_CLANG_BINARY}"
         ${_COPTS}
         "${_BITCODE_SRC_PATH}"
         "-o"
         "${_BITCODE_FILE}"
       DEPENDS
-        "${IREE_CLANG_BINARY}"
+        "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_CLANG_BINARY}"
         "${_BITCODE_SRC_PATH}"
         "${_RULE_INTERNAL_HDRS}"
       COMMENT
@@ -211,12 +232,12 @@ function(iree_amdgpu_library)
     COMMAND
       ${CMAKE_COMMAND} "-E" "rm" "-f" "${_OUT}"
     COMMAND
-      "${IREE_LLVM_AR_BINARY}"
+      "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_LLVM_AR_BINARY}"
       "rc"
       "${_OUT}"
       ${_BITCODE_FILES}
     DEPENDS
-      "${IREE_LLVM_AR_BINARY}"
+      "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_LLVM_AR_BINARY}"
       ${_BITCODE_FILES}
     COMMENT
       "Archiving bitcode to ${_OUT}"
@@ -227,7 +248,12 @@ function(iree_amdgpu_library)
   add_custom_target("${_TARGET_NAME}"
     DEPENDS "${_OUT}"
   )
+  _iree_amdgpu_add_generated_input_dependencies(
+    "${_TARGET_NAME}" ${_RULE_INTERNAL_HDRS})
   _iree_amdgpu_abs_binary_path(_OUT_PATH "${_OUT}")
+  iree_register_generated_output_producer("${_TARGET_NAME}"
+    OUTPUTS "${_OUT_PATH}"
+  )
   set_property(TARGET "${_TARGET_NAME}"
     PROPERTY IREE_AMDGPU_BITCODE_ARCHIVE_OUTPUT "${_OUT_PATH}")
 endfunction()
@@ -262,6 +288,23 @@ function(iree_amdgpu_binary)
     ${ARGN}
   )
 
+  if(NOT _RULE_NAME)
+    message(FATAL_ERROR "iree_amdgpu_binary requires NAME")
+  endif()
+  if(NOT _RULE_TARGET)
+    message(FATAL_ERROR "iree_amdgpu_binary requires TARGET")
+  endif()
+  if(NOT _RULE_ARCH)
+    message(FATAL_ERROR "iree_amdgpu_binary requires ARCH")
+  endif()
+  if(NOT _RULE_SRCS)
+    message(FATAL_ERROR "iree_amdgpu_binary requires SRCS")
+  endif()
+  if(NOT IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_AVAILABLE)
+    message(FATAL_ERROR
+      "iree_amdgpu_binary requires an AMDGPU device toolchain")
+  endif()
+
   iree_package_name(_PACKAGE_NAME)
 
   if(DEFINED _RULE_OUT)
@@ -291,13 +334,13 @@ function(iree_amdgpu_binary)
       OUTPUT
         "${_BITCODE_FILE}"
       COMMAND
-        "${IREE_CLANG_BINARY}"
+        "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_CLANG_BINARY}"
         ${_COPTS}
         "${_BITCODE_SRC_PATH}"
         "-o"
         "${_BITCODE_FILE}"
       DEPENDS
-        "${IREE_CLANG_BINARY}"
+        "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_CLANG_BINARY}"
         "${_BITCODE_SRC_PATH}"
         "${_RULE_INTERNAL_HDRS}"
       COMMENT
@@ -311,12 +354,12 @@ function(iree_amdgpu_binary)
     OUTPUT
       ${_SOURCE_BITCODE_FILE}
     COMMAND
-      ${IREE_LLVM_LINK_BINARY}
+      ${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_LLVM_LINK_BINARY}
       ${_BITCODE_FILES}
       "-o"
       "${_SOURCE_BITCODE_FILE}"
     DEPENDS
-      ${IREE_LLVM_LINK_BINARY}
+      ${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_LLVM_LINK_BINARY}
       ${_BITCODE_FILES}
     COMMENT
       "Linking source bitcode to ${_SOURCE_BITCODE_FILE}"
@@ -343,14 +386,14 @@ function(iree_amdgpu_binary)
     OUTPUT
       ${_LINKED_FILE}
     COMMAND
-      ${IREE_LLVM_LINK_BINARY}
+      ${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_LLVM_LINK_BINARY}
       ${_INTERNALIZE_ARGS}
       "-only-needed"
       "${_SOURCE_BITCODE_FILE}"
       ${_BITCODE_DEP_PATHS}
       "-o" "${_LINKED_FILE}"
     DEPENDS
-      "${IREE_LLVM_LINK_BINARY}"
+      "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_LLVM_LINK_BINARY}"
       "${_SOURCE_BITCODE_FILE}"
       ${_BITCODE_DEP_PATHS}
       ${_BITCODE_DEP_TARGETS}
@@ -362,9 +405,10 @@ function(iree_amdgpu_binary)
   set(_LINK_OUT "${_OUT}")
   set(_LINKOPTS ${_RULE_LINKOPTS})
   if(_RULE_MINIMIZE)
-    if(NOT IREE_LLVM_OBJCOPY_BINARY)
+    if(NOT IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_LLVM_OBJCOPY_BINARY)
       message(FATAL_ERROR
-        "iree_amdgpu_binary(MINIMIZE) requires IREE_LLVM_OBJCOPY_BINARY")
+        "iree_amdgpu_binary(MINIMIZE) requires llvm-objcopy in the AMDGPU "
+        "device toolchain")
     endif()
     set(_LINK_OUT "${_RULE_NAME}.linked.so")
     set(_VERSION_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_NAME}.local.version")
@@ -384,7 +428,7 @@ function(iree_amdgpu_binary)
       "${_LINK_OUT}"
     ${_LINK_OUT_MAKE_DIRECTORY_COMMAND}
     COMMAND
-      ${IREE_LLD_BINARY}
+      ${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_LLD_BINARY}
       "-flavor" "gnu"
       "-m" "elf64_amdgpu"
       "--build-id=none"
@@ -403,8 +447,7 @@ function(iree_amdgpu_binary)
       "-o" "${_LINK_OUT}"
     DEPENDS
       "${_LINKED_FILE}"
-      "${IREE_LLD_BINARY}"
-      "${IREE_LLD_TARGET}"
+      "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_LLD_BINARY}"
     COMMENT
       "Compiling binary to ${_LINK_OUT}"
     VERBATIM
@@ -422,7 +465,7 @@ function(iree_amdgpu_binary)
         "${_OUT}"
       ${_OUT_MAKE_DIRECTORY_COMMAND}
       COMMAND
-        ${IREE_LLVM_OBJCOPY_BINARY}
+        ${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_LLVM_OBJCOPY_BINARY}
         "-R" ".comment"
         "-R" ".AMDGPU.gpr_maximums"
         "--discard-all"
@@ -431,7 +474,7 @@ function(iree_amdgpu_binary)
         "${_OUT}"
       DEPENDS
         "${_LINK_OUT}"
-        "${IREE_LLVM_OBJCOPY_BINARY}"
+        "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_LLVM_OBJCOPY_BINARY}"
       COMMENT
         "Minimizing AMDGPU binary to ${_OUT}"
       VERBATIM
@@ -440,8 +483,15 @@ function(iree_amdgpu_binary)
 
   # Only add iree_${NAME} as custom target doesn't support aliasing to
   # iree::${NAME}.
-  add_custom_target("${_PACKAGE_NAME}_${_RULE_NAME}"
+  set(_TARGET_NAME "${_PACKAGE_NAME}_${_RULE_NAME}")
+  add_custom_target("${_TARGET_NAME}"
     DEPENDS "${_OUT}"
+  )
+  _iree_amdgpu_add_generated_input_dependencies(
+    "${_TARGET_NAME}" ${_RULE_INTERNAL_HDRS} ${_BITCODE_DEP_PATHS})
+  _iree_amdgpu_abs_binary_path(_OUT_PATH "${_OUT}")
+  iree_register_generated_output_producer("${_TARGET_NAME}"
+    OUTPUTS "${_OUT_PATH}"
   )
 endfunction()
 
@@ -479,6 +529,20 @@ function(iree_amdgpu_library_variants)
   endif()
 
   iree_package_name(_PACKAGE_NAME)
+
+  if(NOT IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_AVAILABLE)
+    add_custom_target("${_PACKAGE_NAME}_${_RULE_NAME}")
+    if(DEFINED _RULE_OUTPUTS_OUT)
+      set(${_RULE_OUTPUTS_OUT} "" PARENT_SCOPE)
+    endif()
+    if(DEFINED _RULE_OUTPUT_PATHS_OUT)
+      set(${_RULE_OUTPUT_PATHS_OUT} "" PARENT_SCOPE)
+    endif()
+    if(DEFINED _RULE_TARGETS_OUT)
+      set(${_RULE_TARGETS_OUT} "" PARENT_SCOPE)
+    endif()
+    return()
+  endif()
 
   if(DEFINED _RULE_LIBRARY_NAME_PREFIX)
     set(_LIBRARY_NAME_PREFIX "${_RULE_LIBRARY_NAME_PREFIX}")
@@ -546,6 +610,82 @@ function(iree_amdgpu_library_variants)
   endif()
 endfunction()
 
+# Builds one device-library-linked HIP code object.
+function(_iree_amdgpu_hip_binary)
+  cmake_parse_arguments(
+    _RULE
+    ""
+    "NAME;OUT;TARGET;ARCH"
+    "SRCS;COPTS"
+    ${ARGN}
+  )
+
+  if(NOT _RULE_TARGET STREQUAL "amdgcn-amd-amdhsa")
+    message(FATAL_ERROR
+      "HIP device sources require TARGET amdgcn-amd-amdhsa")
+  endif()
+  list(LENGTH _RULE_SRCS _SOURCE_COUNT)
+  if(NOT _SOURCE_COUNT EQUAL 1)
+    message(FATAL_ERROR "HIP device sources require exactly one source")
+  endif()
+  if(NOT IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_HIP_AVAILABLE)
+    message(FATAL_ERROR
+      "HIP device sources require ROCm device libraries and "
+      "clang-offload-bundler")
+  endif()
+
+  if(DEFINED _RULE_OUT)
+    set(_OUT "${_RULE_OUT}")
+  else()
+    set(_OUT "${_RULE_NAME}.so")
+  endif()
+  get_filename_component(_SOURCE_PATH "${_RULE_SRCS}" REALPATH)
+  set(_OFFLOAD_BUNDLE "${_RULE_NAME}.offload_bundle")
+  file(GLOB _DEVICE_LIBRARIES CONFIGURE_DEPENDS
+    "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_ROCM_DEVICE_LIB_PATH}/*.bc")
+
+  add_custom_command(
+    OUTPUT
+      "${_OUT}"
+    COMMAND
+      "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_CLANG_BINARY}"
+      "--cuda-device-only"
+      "-x" "hip"
+      "-nogpuinc"
+      "--rocm-device-lib-path=${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_ROCM_DEVICE_LIB_PATH}"
+      "--offload-arch=${_RULE_ARCH}"
+      "-fno-gpu-rdc"
+      "-fno-ident"
+      "-O3"
+      ${_RULE_COPTS}
+      "${_SOURCE_PATH}"
+      "-o" "${_OFFLOAD_BUNDLE}"
+    COMMAND
+      "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_CLANG_OFFLOAD_BUNDLER_BINARY}"
+      "--unbundle"
+      "--type=o"
+      "--targets=hipv4-amdgcn-amd-amdhsa--${_RULE_ARCH}"
+      "--input=${_OFFLOAD_BUNDLE}"
+      "--output=${_OUT}"
+    DEPENDS
+      "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_CLANG_BINARY}"
+      "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_RESOLVED_CLANG_OFFLOAD_BUNDLER_BINARY}"
+      "${_SOURCE_PATH}"
+      ${_DEVICE_LIBRARIES}
+    COMMENT
+      "Compiling HIP code object ${_RULE_NAME} for ${_RULE_ARCH}"
+    VERBATIM
+  )
+
+  iree_package_name(_PACKAGE_NAME)
+  set(_TARGET_NAME "${_PACKAGE_NAME}_${_RULE_NAME}")
+  add_custom_target("${_TARGET_NAME}" DEPENDS "${_OUT}")
+  _iree_amdgpu_abs_binary_path(_OUT_PATH "${_OUT}")
+  iree_register_generated_output_producer("${_TARGET_NAME}"
+    OUTPUTS "${_OUT_PATH}"
+  )
+endfunction()
+
 # Builds one AMDGPU binary per selected code-object target.
 #
 # Parameters:
@@ -565,11 +705,13 @@ endfunction()
 # INTERNALIZE: whether to internalize linked dependency symbols after lazy
 #              archive extraction. Defaults ON.
 # MINIMIZE: apply post-link symbol-table minimization.
+# SOURCE_FORMAT: source compilation pipeline. freestanding_c uses the HAL
+#                device build; hip links the ROCm device libraries.
 function(iree_amdgpu_binary_variants)
   cmake_parse_arguments(
     _RULE
     "MINIMIZE"
-    "NAME;TARGET;BINARY_NAME_PREFIX;OUTPUTS_OUT;OUTPUT_PATHS_OUT;TARGETS_OUT;INTERNALIZE"
+    "NAME;TARGET;BINARY_NAME_PREFIX;OUTPUTS_OUT;OUTPUT_PATHS_OUT;TARGETS_OUT;INTERNALIZE;SOURCE_FORMAT"
     "TARGETS;SRCS;DEPS;INTERNAL_HDRS;COPTS;LINKOPTS"
     ${ARGN}
   )
@@ -580,6 +722,20 @@ function(iree_amdgpu_binary_variants)
   if(NOT _RULE_TARGET)
     message(FATAL_ERROR "iree_amdgpu_binary_variants requires TARGET")
   endif()
+  if(NOT DEFINED _RULE_SOURCE_FORMAT)
+    set(_RULE_SOURCE_FORMAT "freestanding_c")
+  elseif(NOT _RULE_SOURCE_FORMAT STREQUAL "freestanding_c" AND
+         NOT _RULE_SOURCE_FORMAT STREQUAL "hip")
+    message(FATAL_ERROR
+      "Unsupported AMDGPU binary SOURCE_FORMAT: ${_RULE_SOURCE_FORMAT}")
+  endif()
+  if(_RULE_SOURCE_FORMAT STREQUAL "hip" AND
+     (_RULE_DEPS OR _RULE_INTERNAL_HDRS OR _RULE_LINKOPTS OR
+      _RULE_MINIMIZE OR DEFINED _RULE_INTERNALIZE))
+    message(FATAL_ERROR
+      "HIP device sources do not support DEPS, INTERNAL_HDRS, LINKOPTS, "
+      "MINIMIZE, or INTERNALIZE")
+  endif()
 
   iree_package_name(_PACKAGE_NAME)
 
@@ -589,11 +745,21 @@ function(iree_amdgpu_binary_variants)
     set(_BINARY_NAME_PREFIX "${_RULE_NAME}")
   endif()
 
-  iree_amdgpu_expand_target_selectors(
-    _CODE_OBJECT_TARGETS
-    "${IREE_AMDGPU_TARGET_EXPANSION_CODE_OBJECT}"
-    ${_RULE_TARGETS}
-  )
+  set(_DEVICE_SOURCE_AVAILABLE
+    "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_AVAILABLE}")
+  if(_RULE_SOURCE_FORMAT STREQUAL "hip")
+    set(_DEVICE_SOURCE_AVAILABLE
+      "${IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_HIP_AVAILABLE}")
+  endif()
+
+  set(_CODE_OBJECT_TARGETS)
+  if(_DEVICE_SOURCE_AVAILABLE)
+    iree_amdgpu_expand_target_selectors(
+      _CODE_OBJECT_TARGETS
+      "${IREE_AMDGPU_TARGET_EXPANSION_CODE_OBJECT}"
+      ${_RULE_TARGETS}
+    )
+  endif()
 
   set(_VARIANT_OUTPUTS)
   set(_VARIANT_OUTPUT_PATHS)
@@ -611,36 +777,53 @@ function(iree_amdgpu_binary_variants)
       ${_RULE_DEPS}
     )
 
-    set(_MINIMIZE)
-    if(_RULE_MINIMIZE)
-      set(_MINIMIZE MINIMIZE)
+    if(_RULE_SOURCE_FORMAT STREQUAL "hip")
+      _iree_amdgpu_hip_binary(
+        NAME
+          "${_VARIANT_NAME}"
+        OUT
+          "${_VARIANT_OUTPUT}"
+        TARGET
+          "${_RULE_TARGET}"
+        ARCH
+          "${_CODE_OBJECT_TARGET}"
+        SRCS
+          ${_RULE_SRCS}
+        COPTS
+          ${_RULE_COPTS}
+      )
+    else()
+      set(_MINIMIZE)
+      if(_RULE_MINIMIZE)
+        set(_MINIMIZE MINIMIZE)
+      endif()
+      set(_INTERNALIZE_ARG)
+      if(DEFINED _RULE_INTERNALIZE)
+        set(_INTERNALIZE_ARG INTERNALIZE "${_RULE_INTERNALIZE}")
+      endif()
+      iree_amdgpu_binary(
+        NAME
+          "${_VARIANT_NAME}"
+        OUT
+          "${_VARIANT_OUTPUT}"
+        TARGET
+          "${_RULE_TARGET}"
+        ARCH
+          "${_CODE_OBJECT_TARGET}"
+        SRCS
+          ${_RULE_SRCS}
+        DEPS
+          ${_VARIANT_DEPS}
+        INTERNAL_HDRS
+          ${_RULE_INTERNAL_HDRS}
+        COPTS
+          ${_RULE_COPTS}
+        LINKOPTS
+          ${_RULE_LINKOPTS}
+        ${_MINIMIZE}
+        ${_INTERNALIZE_ARG}
+      )
     endif()
-    set(_INTERNALIZE_ARG)
-    if(DEFINED _RULE_INTERNALIZE)
-      set(_INTERNALIZE_ARG INTERNALIZE "${_RULE_INTERNALIZE}")
-    endif()
-    iree_amdgpu_binary(
-      NAME
-        "${_VARIANT_NAME}"
-      OUT
-        "${_VARIANT_OUTPUT}"
-      TARGET
-        "${_RULE_TARGET}"
-      ARCH
-        "${_CODE_OBJECT_TARGET}"
-      SRCS
-        ${_RULE_SRCS}
-      DEPS
-        ${_VARIANT_DEPS}
-      INTERNAL_HDRS
-        ${_RULE_INTERNAL_HDRS}
-      COPTS
-        ${_RULE_COPTS}
-      LINKOPTS
-        ${_RULE_LINKOPTS}
-      ${_MINIMIZE}
-      ${_INTERNALIZE_ARG}
-    )
 
     list(APPEND _VARIANT_OUTPUTS "${_VARIANT_OUTPUT}")
     list(APPEND _VARIANT_OUTPUT_PATHS
@@ -686,11 +869,13 @@ endfunction()
 # MINIMIZE: apply post-link symbol-table minimization.
 # INTERNALIZE: whether to internalize linked dependency symbols after lazy
 #              archive extraction. Defaults ON.
+# SOURCE_FORMAT: source compilation pipeline. See
+#                iree_amdgpu_binary_variants.
 function(iree_amdgpu_binary_variants_embed_data)
   cmake_parse_arguments(
     _RULE
     "FLATTEN;PUBLIC;TESTONLY;MINIMIZE"
-    "NAME;TARGET;BINARY_NAME_PREFIX;C_FILE_OUTPUT;H_FILE_OUTPUT;IDENTIFIER;INTERNALIZE"
+    "NAME;TARGET;BINARY_NAME_PREFIX;C_FILE_OUTPUT;H_FILE_OUTPUT;IDENTIFIER;INTERNALIZE;SOURCE_FORMAT"
     "TARGETS;SRCS;INTERNAL_HDRS;COPTS;LINKOPTS;DEPS;INCLUDES"
     ${ARGN}
   )
@@ -727,6 +912,10 @@ function(iree_amdgpu_binary_variants_embed_data)
   if(DEFINED _RULE_INTERNALIZE)
     set(_INTERNALIZE_ARG INTERNALIZE "${_RULE_INTERNALIZE}")
   endif()
+  set(_SOURCE_FORMAT_ARG)
+  if(DEFINED _RULE_SOURCE_FORMAT)
+    set(_SOURCE_FORMAT_ARG SOURCE_FORMAT "${_RULE_SOURCE_FORMAT}")
+  endif()
   iree_amdgpu_binary_variants(
     NAME
       "${_BINARY_VARIANTS_NAME}"
@@ -747,6 +936,7 @@ function(iree_amdgpu_binary_variants_embed_data)
       ${_RULE_LINKOPTS}
     DEPS
       ${_RULE_DEPS}
+    ${_SOURCE_FORMAT_ARG}
     ${_MINIMIZE_ARG}
     ${_INTERNALIZE_ARG}
   )

@@ -8,9 +8,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #include "common/internal.h"
+#include "common/kernel_arguments.h"
 
 // Env-gated timing for launch-path investigation. This intentionally uses plain
 // counters because the current perf probes run single-threaded and we want the
@@ -47,9 +47,7 @@ static int g_hrx_direct_queue_dispatch_initialized = 0;
 static int g_hrx_direct_queue_dispatch_enabled = 0;
 
 static uint64_t hrx_launch_timing_now_ns(void) {
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+  return (uint64_t)iree_time_now();
 }
 
 static double hrx_launch_timing_avg_us(uint64_t total_ns, uint64_t count) {
@@ -184,6 +182,110 @@ static int hrx_direct_queue_dispatch_enabled(void) {
 static void iree_hal_streaming_stream_destroy(
     iree_hal_streaming_stream_t* stream);
 
+static iree_status_t iree_hal_streaming_stream_reserve_memory_reuse_dependency(
+    iree_hal_streaming_stream_t* stream, unsigned long long source_stream_id,
+    bool* out_was_added) {
+  *out_was_added = false;
+  iree_slim_mutex_lock(&stream->mutex);
+  for (iree_host_size_t i = 0; i < stream->memory_reuse_dependency_count; ++i) {
+    if (stream->memory_reuse_dependencies[i].source_stream_id ==
+        source_stream_id) {
+      iree_slim_mutex_unlock(&stream->mutex);
+      return iree_ok_status();
+    }
+  }
+
+  iree_status_t status = iree_ok_status();
+  if (stream->memory_reuse_dependency_count ==
+      stream->memory_reuse_dependency_capacity) {
+    // A stream may wait on many producer streams. Grow geometrically so
+    // recording those dependencies remains amortized constant time.
+    iree_host_size_t new_capacity =
+        stream->memory_reuse_dependency_capacity
+            ? stream->memory_reuse_dependency_capacity
+            : 4;
+    iree_host_size_t allocation_size = 0;
+    if (IREE_UNLIKELY(
+            !iree_host_size_checked_mul(new_capacity, 2, &new_capacity) ||
+            !iree_host_size_checked_mul(
+                new_capacity, sizeof(*stream->memory_reuse_dependencies),
+                &allocation_size))) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "stream dependency count overflow");
+    } else {
+      status =
+          iree_allocator_realloc(stream->host_allocator, allocation_size,
+                                 (void**)&stream->memory_reuse_dependencies);
+      if (iree_status_is_ok(status)) {
+        stream->memory_reuse_dependency_capacity = new_capacity;
+      }
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    stream->memory_reuse_dependencies[stream->memory_reuse_dependency_count++] =
+        (iree_hal_streaming_memory_reuse_dependency_t){
+            .source_stream_id = source_stream_id,
+            .source_timeline_value = 0,
+        };
+    *out_was_added = true;
+  }
+  iree_slim_mutex_unlock(&stream->mutex);
+  return status;
+}
+
+static void iree_hal_streaming_stream_record_memory_reuse_dependency(
+    iree_hal_streaming_stream_t* stream, unsigned long long source_stream_id,
+    uint64_t source_timeline_value) {
+  iree_slim_mutex_lock(&stream->mutex);
+  for (iree_host_size_t i = 0; i < stream->memory_reuse_dependency_count; ++i) {
+    iree_hal_streaming_memory_reuse_dependency_t* dependency =
+        &stream->memory_reuse_dependencies[i];
+    if (dependency->source_stream_id == source_stream_id) {
+      dependency->source_timeline_value =
+          iree_max(dependency->source_timeline_value, source_timeline_value);
+      break;
+    }
+  }
+  iree_slim_mutex_unlock(&stream->mutex);
+}
+
+static void
+iree_hal_streaming_stream_remove_uncommitted_memory_reuse_dependency(
+    iree_hal_streaming_stream_t* stream, unsigned long long source_stream_id) {
+  iree_slim_mutex_lock(&stream->mutex);
+  for (iree_host_size_t i = 0; i < stream->memory_reuse_dependency_count; ++i) {
+    iree_hal_streaming_memory_reuse_dependency_t* dependency =
+        &stream->memory_reuse_dependencies[i];
+    if (dependency->source_stream_id == source_stream_id &&
+        dependency->source_timeline_value == 0) {
+      --stream->memory_reuse_dependency_count;
+      stream->memory_reuse_dependencies[i] =
+          stream->memory_reuse_dependencies
+              [stream->memory_reuse_dependency_count];
+      break;
+    }
+  }
+  iree_slim_mutex_unlock(&stream->mutex);
+}
+
+bool iree_hal_streaming_stream_has_memory_reuse_dependency(
+    iree_hal_streaming_stream_t* stream, unsigned long long source_stream_id,
+    uint64_t source_timeline_value) {
+  bool has_dependency = false;
+  iree_slim_mutex_lock(&stream->mutex);
+  for (iree_host_size_t i = 0; i < stream->memory_reuse_dependency_count; ++i) {
+    const iree_hal_streaming_memory_reuse_dependency_t* dependency =
+        &stream->memory_reuse_dependencies[i];
+    if (dependency->source_stream_id == source_stream_id &&
+        dependency->source_timeline_value >= source_timeline_value) {
+      has_dependency = true;
+      break;
+    }
+  }
+  iree_slim_mutex_unlock(&stream->mutex);
+  return has_dependency;
+}
+
 iree_status_t iree_hal_streaming_stream_create(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_stream_flags_t flags, int priority,
@@ -200,22 +302,17 @@ iree_status_t iree_hal_streaming_stream_create(
   iree_atomic_ref_count_init(&stream->ref_count);
   stream->context = context;
   stream->flags = flags;
-  stream->synchronization_policy =
-      IREE_HAL_STREAMING_SYNCHRONIZATION_POLICY_AUTO;
   stream->priority = priority;
-  stream->cu_mask_count = 0;
-  stream->cu_mask = NULL;
   stream->stream_id = 0;
   stream->command_buffer = NULL;
   stream->pending_launch_count = 0;
   stream->timeline_semaphore = NULL;
   stream->pending_value = 0;
-  stream->submitted_value = 0;
   stream->completed_value = 0;
   stream->queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
-  stream->recorded_events = NULL;
-  stream->event_count = 0;
-  stream->event_capacity = 0;
+  stream->memory_reuse_dependencies = NULL;
+  stream->memory_reuse_dependency_count = 0;
+  stream->memory_reuse_dependency_capacity = 0;
 
   stream->capture_status = IREE_HAL_STREAMING_CAPTURE_STATUS_NONE;
   stream->capture_mode = IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL;
@@ -255,29 +352,26 @@ static void iree_hal_streaming_stream_destroy(
     iree_hal_streaming_stream_t* stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  iree_slim_mutex_lock(&stream->mutex);
   iree_hal_streaming_context_t* context = stream->context;
+  iree_slim_mutex_unlock(&stream->mutex);
   if (context) {
     iree_status_ignore(iree_hal_streaming_stream_synchronize(stream));
     if (stream->capture_status != IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
       iree_hal_streaming_stream_set_capture_status(
           stream, IREE_HAL_STREAMING_CAPTURE_STATUS_NONE);
     }
-    stream->context = NULL;
+    iree_slim_mutex_lock(&stream->mutex);
+    if (stream->context == context) stream->context = NULL;
+    iree_slim_mutex_unlock(&stream->mutex);
     iree_hal_streaming_context_unregister_stream(context, stream);
   }
 
-  // Clean up recorded events.
-  if (stream->recorded_events) {
-    for (iree_host_size_t i = 0; i < stream->event_count; ++i) {
-      iree_hal_streaming_event_release(stream->recorded_events[i]);
-    }
-    iree_allocator_free(stream->host_allocator, stream->recorded_events);
-  }
+  iree_allocator_free(stream->host_allocator,
+                      stream->memory_reuse_dependencies);
 
   // Release command buffer.
   iree_hal_command_buffer_release(stream->command_buffer);
-
-  iree_allocator_free(stream->host_allocator, stream->cu_mask);
 
   if (stream->capture_graph_owned) {
     iree_hal_streaming_graph_release(stream->capture_graph);
@@ -307,6 +401,21 @@ void iree_hal_streaming_stream_release(iree_hal_streaming_stream_t* stream) {
   if (stream && iree_atomic_ref_count_dec(&stream->ref_count) == 1) {
     iree_hal_streaming_stream_destroy(stream);
   }
+}
+
+bool iree_hal_streaming_stream_retain_context(
+    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_context_t** out_context) {
+  IREE_ASSERT_ARGUMENT(stream);
+  IREE_ASSERT_ARGUMENT(out_context);
+  *out_context = NULL;
+  iree_slim_mutex_lock(&stream->mutex);
+  iree_hal_streaming_context_t* context = stream->context;
+  if (iree_hal_streaming_context_try_retain(context)) {
+    *out_context = context;
+  }
+  iree_slim_mutex_unlock(&stream->mutex);
+  return *out_context != NULL;
 }
 
 iree_status_t iree_hal_streaming_stream_begin_locked(
@@ -369,12 +478,18 @@ iree_status_t iree_hal_streaming_stream_flush(
       return status;
     }
 
-    // Wait for the previous submission (pending_value before increment).
-    // This chains each flush after the one before it, so that operations
-    // split across multiple command buffers (e.g. by an intervening
-    // hipMemcpy) still execute in order.
-    uint64_t wait_value = stream->pending_value;
-    stream->pending_value++;
+    // Wait for the previous submission. This chains each flush after the one
+    // before it, so that operations split across multiple command buffers
+    // (e.g. by an intervening hipMemcpy) still execute in order.
+    uint64_t wait_value = 0;
+    uint64_t signal_value = 0;
+    status = iree_hal_streaming_stream_reserve_next_value_locked(
+        stream, &wait_value, &signal_value);
+    if (!iree_status_is_ok(status)) {
+      iree_slim_mutex_unlock(&stream->mutex);
+      IREE_TRACE_ZONE_END(z0);
+      return status;
+    }
 
     // Submit to device queue with timeline semaphore.
     // Wait for the previous submission to complete before executing.
@@ -389,7 +504,7 @@ iree_status_t iree_hal_streaming_stream_flush(
     iree_hal_semaphore_list_t signal_semaphores = {
         .count = 1,
         .semaphores = &stream->timeline_semaphore,
-        .payload_values = &stream->pending_value,
+        .payload_values = &signal_value,
     };
 
     timing_step_ns = timing_enabled ? hrx_launch_timing_now_ns() : 0;
@@ -398,20 +513,14 @@ iree_status_t iree_hal_streaming_stream_flush(
         signal_semaphores, stream->command_buffer,
         iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE);
     if (iree_status_is_ok(status)) {
+      // The accepted submission owns the value it signals, so the timeline
+      // advances here and stays advanced even when the flush below fails.
+      stream->pending_value = signal_value;
       status =
           iree_hal_device_queue_flush(stream->context->device, queue_affinity);
     }
     if (timing_enabled) {
       timing_execute_ns += hrx_launch_timing_now_ns() - timing_step_ns;
-    }
-
-    if (!iree_status_is_ok(status)) {
-      // Error will propagate via iree_status_t return.
-    }
-
-    // Track the submitted value for wait_submitted.
-    if (iree_status_is_ok(status)) {
-      stream->submitted_value = stream->pending_value;
     }
 
     // Release command buffer (we're done with it).
@@ -445,23 +554,222 @@ iree_status_t iree_hal_streaming_stream_query(
   IREE_RETURN_IF_ERROR(iree_hal_streaming_stream_flush(stream));
 
   uint64_t current_value = 0;
-  iree_status_t query_status =
-      iree_hal_semaphore_query(stream->timeline_semaphore, &current_value);
-  if (iree_status_is_unavailable(query_status)) {
-    iree_status_ignore(query_status);
-    *status = 1;  // Not complete
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(query_status);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_semaphore_query(stream->timeline_semaphore, &current_value));
 
-  if (current_value >= stream->pending_value) {
+  iree_slim_mutex_lock(&stream->mutex);
+  const uint64_t pending_value = stream->pending_value;
+  if (current_value >= pending_value) {
     *status = 0;  // Complete
-    stream->completed_value = current_value;
+    stream->completed_value = iree_max(stream->completed_value, current_value);
   } else {
     *status = 1;  // Not complete
   }
+  iree_slim_mutex_unlock(&stream->mutex);
 
   return iree_ok_status();
+}
+
+typedef struct iree_hal_streaming_wait_dependency_t {
+  iree_hal_streaming_stream_t* source_stream;
+  uint64_t source_timeline_value;
+  bool added_memory_reuse_dependency;
+} iree_hal_streaming_wait_dependency_t;
+
+enum { IREE_HAL_STREAMING_INLINE_WAIT_DEPENDENCY_COUNT = 8 };
+
+iree_status_t iree_hal_streaming_stream_wait_streams(
+    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_stream_t* const* source_streams,
+    iree_host_size_t source_stream_count) {
+  IREE_ASSERT_ARGUMENT(stream);
+  if (source_stream_count == 0) return iree_ok_status();
+  IREE_ASSERT_ARGUMENT(source_streams);
+
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_slim_mutex_lock(&stream->mutex);
+  const bool destination_is_capturing =
+      stream->capture_status != IREE_HAL_STREAMING_CAPTURE_STATUS_NONE;
+  iree_slim_mutex_unlock(&stream->mutex);
+  if (destination_is_capturing) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "destination stream is capturing");
+  }
+
+  iree_status_t status = iree_ok_status();
+  iree_hal_streaming_wait_dependency_t
+      inline_dependencies[IREE_HAL_STREAMING_INLINE_WAIT_DEPENDENCY_COUNT];
+  iree_hal_semaphore_t*
+      inline_wait_semaphores[IREE_HAL_STREAMING_INLINE_WAIT_DEPENDENCY_COUNT +
+                             1];
+  uint64_t
+      inline_wait_values[IREE_HAL_STREAMING_INLINE_WAIT_DEPENDENCY_COUNT + 1];
+  iree_hal_streaming_wait_dependency_t* dependencies = inline_dependencies;
+  iree_hal_semaphore_t** wait_semaphores_storage = inline_wait_semaphores;
+  uint64_t* wait_values_storage = inline_wait_values;
+  bool uses_heap_storage =
+      source_stream_count > IREE_HAL_STREAMING_INLINE_WAIT_DEPENDENCY_COUNT;
+  if (uses_heap_storage) {
+    iree_host_size_t wait_capacity = 0;
+    iree_host_size_t dependencies_size = 0;
+    iree_host_size_t semaphores_size = 0;
+    iree_host_size_t values_size = 0;
+    if (IREE_UNLIKELY(!iree_host_size_checked_add(source_stream_count, 1,
+                                                  &wait_capacity) ||
+                      !iree_host_size_checked_mul(
+                          source_stream_count,
+                          sizeof(iree_hal_streaming_wait_dependency_t),
+                          &dependencies_size) ||
+                      !iree_host_size_checked_mul(wait_capacity,
+                                                  sizeof(iree_hal_semaphore_t*),
+                                                  &semaphores_size) ||
+                      !iree_host_size_checked_mul(
+                          wait_capacity, sizeof(uint64_t), &values_size))) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "stream dependency count overflow");
+    }
+    dependencies = NULL;
+    wait_semaphores_storage = NULL;
+    wait_values_storage = NULL;
+    if (iree_status_is_ok(status)) {
+      status = iree_allocator_malloc(stream->host_allocator, dependencies_size,
+                                     (void**)&dependencies);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_allocator_malloc(stream->host_allocator, semaphores_size,
+                                     (void**)&wait_semaphores_storage);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_allocator_malloc(stream->host_allocator, values_size,
+                                     (void**)&wait_values_storage);
+    }
+  }
+
+  iree_host_size_t dependency_count = 0;
+  for (iree_host_size_t i = 0;
+       i < source_stream_count && iree_status_is_ok(status); ++i) {
+    iree_hal_streaming_stream_t* source_stream = source_streams[i];
+    if (!source_stream || source_stream == stream) continue;
+    if (source_stream->context != stream->context) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "stream dependency crosses contexts");
+      break;
+    }
+    iree_slim_mutex_lock(&source_stream->mutex);
+    const bool source_is_capturing =
+        source_stream->capture_status != IREE_HAL_STREAMING_CAPTURE_STATUS_NONE;
+    iree_slim_mutex_unlock(&source_stream->mutex);
+    if (source_is_capturing) {
+      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "source stream is capturing");
+      break;
+    }
+
+    // Flush first so the captured value names all source work preceding this
+    // operation. A source that has never submitted contributes no wait.
+    status = iree_hal_streaming_stream_flush(source_stream);
+    if (!iree_status_is_ok(status)) break;
+    iree_slim_mutex_lock(&source_stream->mutex);
+    const uint64_t source_timeline_value = source_stream->pending_value;
+    iree_slim_mutex_unlock(&source_stream->mutex);
+
+    status = iree_status_join(
+        status,
+        iree_hal_streaming_memory_release_completed_async_frees(source_stream));
+    if (!iree_status_is_ok(status) || source_timeline_value == 0) continue;
+
+    iree_hal_streaming_wait_dependency_t* dependency =
+        &dependencies[dependency_count];
+    dependency->source_stream = source_stream;
+    dependency->source_timeline_value = source_timeline_value;
+    dependency->added_memory_reuse_dependency = false;
+    status = iree_hal_streaming_stream_reserve_memory_reuse_dependency(
+        stream, source_stream->stream_id,
+        &dependency->added_memory_reuse_dependency);
+    if (iree_status_is_ok(status)) {
+      ++dependency_count;
+    }
+  }
+
+  // Submit prior destination work before appending a queue dependency. The
+  // barrier advances its timeline only after every captured source point.
+  bool submitted = false;
+  if (iree_status_is_ok(status) && dependency_count > 0) {
+    status = iree_hal_streaming_stream_flush(stream);
+  }
+  if (iree_status_is_ok(status) && dependency_count > 0) {
+    iree_slim_mutex_lock(&stream->mutex);
+    uint64_t destination_timeline_value = 0;
+    uint64_t signal_value = 0;
+    status = iree_hal_streaming_stream_reserve_next_value_locked(
+        stream, &destination_timeline_value, &signal_value);
+    if (iree_status_is_ok(status)) {
+      iree_host_size_t wait_count = 0;
+      if (destination_timeline_value > 0) {
+        wait_semaphores_storage[wait_count] = stream->timeline_semaphore;
+        wait_values_storage[wait_count] = destination_timeline_value;
+        ++wait_count;
+      }
+      for (iree_host_size_t i = 0; i < dependency_count; ++i) {
+        wait_semaphores_storage[wait_count] =
+            dependencies[i].source_stream->timeline_semaphore;
+        wait_values_storage[wait_count] = dependencies[i].source_timeline_value;
+        ++wait_count;
+      }
+      const iree_hal_semaphore_list_t wait_semaphores = {
+          .count = wait_count,
+          .semaphores = wait_semaphores_storage,
+          .payload_values = wait_values_storage,
+      };
+      const iree_hal_semaphore_list_t signal_semaphores = {
+          .count = 1,
+          .semaphores = &stream->timeline_semaphore,
+          .payload_values = &signal_value,
+      };
+      status = iree_hal_device_queue_barrier(
+          stream->context->device, stream->queue_affinity, wait_semaphores,
+          signal_semaphores, IREE_HAL_EXECUTE_FLAG_NONE);
+      if (iree_status_is_ok(status)) {
+        // The accepted barrier owns the value it signals, so the timeline
+        // advances here and stays advanced even when the flush below fails.
+        submitted = true;
+        stream->pending_value = signal_value;
+        status = iree_hal_device_queue_flush(stream->context->device,
+                                             stream->queue_affinity);
+      }
+    }
+    iree_slim_mutex_unlock(&stream->mutex);
+  }
+
+  for (iree_host_size_t i = 0; i < dependency_count; ++i) {
+    iree_hal_streaming_wait_dependency_t* dependency = &dependencies[i];
+    if (submitted) {
+      iree_hal_streaming_stream_record_memory_reuse_dependency(
+          stream, dependency->source_stream->stream_id,
+          dependency->source_timeline_value);
+    } else if (dependency->added_memory_reuse_dependency) {
+      iree_hal_streaming_stream_remove_uncommitted_memory_reuse_dependency(
+          stream, dependency->source_stream->stream_id);
+    }
+  }
+
+  if (uses_heap_storage) {
+    iree_allocator_free(stream->host_allocator, wait_values_storage);
+    iree_allocator_free(stream->host_allocator, wait_semaphores_storage);
+    iree_allocator_free(stream->host_allocator, dependencies);
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+iree_status_t iree_hal_streaming_stream_wait_stream(
+    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_stream_t* source_stream) {
+  IREE_ASSERT_ARGUMENT(source_stream);
+  return iree_hal_streaming_stream_wait_streams(stream, &source_stream, 1);
 }
 
 static iree_status_t iree_hal_streaming_stream_synchronize_impl(
@@ -489,16 +797,21 @@ static iree_status_t iree_hal_streaming_stream_synchronize_impl(
     IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, flush_status);
   }
 
+  // Snapshot the synchronization target under the same mutex used to reserve
+  // timeline values. Operations submitted after this point are not part of
+  // this synchronization operation.
+  iree_slim_mutex_lock(&stream->mutex);
+  const uint64_t target_value = stream->pending_value;
+  uint64_t completed_value = stream->completed_value;
+  iree_slim_mutex_unlock(&stream->mutex);
+
   timing_step_ns = timing_enabled ? hrx_launch_timing_now_ns() : 0;
   uint64_t current_value = 0;
   iree_status_t query_status =
       iree_hal_semaphore_query(stream->timeline_semaphore, &current_value);
-  if (iree_status_is_unavailable(query_status)) {
-    iree_status_ignore(query_status);
-    query_status = iree_ok_status();
-  } else if (iree_status_is_ok(query_status)) {
-    if (current_value >= stream->pending_value) {
-      stream->completed_value = current_value;
+  if (iree_status_is_ok(query_status)) {
+    if (current_value > completed_value) {
+      completed_value = current_value;
     }
   }
   if (timing_enabled) {
@@ -506,15 +819,12 @@ static iree_status_t iree_hal_streaming_stream_synchronize_impl(
   }
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, query_status);
 
-  // Wait for timeline semaphore to reach pending value.
-  if (stream->pending_value > stream->completed_value) {
-    // fprintf(stderr, "[STREAM] sync: waiting for semaphore pending=%"PRIu64"
-    // completed=%"PRIu64"\n",
-    //         stream->pending_value, stream->completed_value);
+  // Wait for the timeline semaphore to reach the captured target.
+  if (target_value > completed_value) {
     timing_step_ns = timing_enabled ? hrx_launch_timing_now_ns() : 0;
     iree_status_t wait_status = iree_hal_semaphore_wait(
-        stream->timeline_semaphore, stream->pending_value,
-        iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
+        stream->timeline_semaphore, target_value, iree_infinite_timeout(),
+        IREE_ASYNC_WAIT_FLAG_NONE);
     if (timing_enabled) {
       timing_wait_ns += hrx_launch_timing_now_ns() - timing_step_ns;
     }
@@ -522,9 +832,15 @@ static iree_status_t iree_hal_streaming_stream_synchronize_impl(
       IREE_TRACE_ZONE_END(z0);
       return wait_status;
     }
-    // fprintf(stderr, "[STREAM] sync: wait OK\n");
-    stream->completed_value = stream->pending_value;
+    completed_value = target_value;
   }
+
+  iree_slim_mutex_lock(&stream->mutex);
+  stream->completed_value = iree_max(stream->completed_value, completed_value);
+  iree_slim_mutex_unlock(&stream->mutex);
+
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_memory_release_completed_async_frees(stream));
 
   if (timing_enabled) {
     ++g_hrx_launch_timing.sync_count;
@@ -556,117 +872,235 @@ iree_status_t iree_hal_streaming_stream_wait_submitted(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Wait for already-submitted work to complete WITHOUT flushing.
-  // This is safe to call from other threads as it doesn't modify stream state.
-  // We wait for submitted_value (the last value that was actually submitted).
-  if (stream->submitted_value > 0) {
+  // Snapshot the tail of accepted work under the stream lock. New submissions
+  // after this point are outside this wait operation.
+  iree_slim_mutex_lock(&stream->mutex);
+  const uint64_t pending_value = stream->pending_value;
+  iree_slim_mutex_unlock(&stream->mutex);
+  if (pending_value > 0) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_semaphore_wait(
-                stream->timeline_semaphore, stream->submitted_value,
-                iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+        z0, iree_hal_semaphore_wait(stream->timeline_semaphore, pending_value,
+                                    iree_infinite_timeout(),
+                                    IREE_ASYNC_WAIT_FLAG_NONE));
   }
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_streaming_stream_wait_event(
-    iree_hal_streaming_stream_t* stream, iree_hal_streaming_event_t* event) {
-  IREE_ASSERT_ARGUMENT(stream);
-  IREE_ASSERT_ARGUMENT(event);
-  IREE_TRACE_ZONE_BEGIN(z0);
+// Joins |stream| to the capture |event|'s last capture-time record belongs to,
+// adopting |capture_graph| as |stream|'s own capture when the stream is not
+// already capturing and then adding the event's dependency frontier to the
+// stream's.
+//
+// |capture_graph| is borrowed for the call; a stream that adopts it takes its
+// own reference.
+static iree_status_t iree_hal_streaming_stream_wait_captured_event(
+    iree_hal_streaming_stream_t* stream, iree_hal_streaming_event_t* event,
+    iree_hal_streaming_graph_t* capture_graph) {
+  bool adopt_capture_graph = false;
+  iree_slim_mutex_lock(&stream->mutex);
+  if (stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
+    adopt_capture_graph = true;
+  } else if (stream->capture_graph != capture_graph) {
+    iree_slim_mutex_unlock(&stream->mutex);
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "event wait crosses different active capture graphs");
+  }
+  iree_slim_mutex_unlock(&stream->mutex);
 
-  // Check if we're capturing to a graph.
-  if (event->capture_graph) {
-    bool adopt_capture_graph = false;
+  if (adopt_capture_graph) {
+    IREE_RETURN_IF_ERROR(iree_hal_streaming_stream_flush(stream));
+
+    unsigned long long capture_id = 0;
+    if (!event->recording_stream) {
+      IREE_RETURN_IF_ERROR(iree_hal_streaming_context_allocate_capture_id(
+          stream->context, &capture_id));
+    }
+
     iree_slim_mutex_lock(&stream->mutex);
     if (stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
-      adopt_capture_graph = true;
-    } else if (stream->capture_graph != event->capture_graph) {
+      stream->capture_graph = capture_graph;
+      stream->capture_graph_owned = true;
+      stream->capture_origin = false;
+      stream->capture_joined_to_origin = false;
+      if (event->recording_stream) {
+        stream->capture_mode = event->recording_stream->capture_mode;
+        stream->capture_id = event->recording_stream->capture_id;
+        stream->capture_owner_thread_id =
+            event->recording_stream->capture_owner_thread_id;
+      } else {
+        stream->capture_mode = IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL;
+        stream->capture_id = capture_id;
+        stream->capture_owner_thread_id = 0;
+      }
+      iree_hal_streaming_graph_retain(stream->capture_graph);
+      iree_hal_streaming_stream_set_capture_status(
+          stream, IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE);
+    } else if (stream->capture_graph != capture_graph) {
       iree_slim_mutex_unlock(&stream->mutex);
-      IREE_TRACE_ZONE_END(z0);
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "event wait crosses different active capture graphs");
     }
     iree_slim_mutex_unlock(&stream->mutex);
+  }
 
-    if (adopt_capture_graph) {
-      IREE_RETURN_AND_END_ZONE_IF_ERROR(
-          z0, iree_hal_streaming_stream_flush(stream));
+  return iree_hal_streaming_update_capture_dependencies(
+      stream, event->capture_dependencies, event->capture_dependency_count,
+      IREE_HAL_STREAMING_CAPTURE_DEPENDENCIES_ADD);
+}
 
-      unsigned long long capture_id = 0;
-      if (!event->recording_stream) {
-        IREE_RETURN_AND_END_ZONE_IF_ERROR(
-            z0, iree_hal_streaming_context_allocate_capture_id(stream->context,
-                                                               &capture_id));
-      }
+iree_status_t iree_hal_streaming_stream_wait_event(
+    iree_hal_streaming_stream_t* stream, iree_hal_streaming_event_t* event,
+    bool capture_external_wait) {
+  IREE_ASSERT_ARGUMENT(stream);
+  IREE_ASSERT_ARGUMENT(event);
+  IREE_TRACE_ZONE_BEGIN(z0);
 
-      iree_slim_mutex_lock(&stream->mutex);
-      if (stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
-        stream->capture_graph = event->capture_graph;
-        stream->capture_graph_owned = true;
-        stream->capture_origin = false;
-        stream->capture_joined_to_origin = false;
-        if (event->recording_stream) {
-          stream->capture_mode = event->recording_stream->capture_mode;
-          stream->capture_id = event->recording_stream->capture_id;
-          stream->capture_owner_thread_id =
-              event->recording_stream->capture_owner_thread_id;
-        } else {
-          stream->capture_mode = IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL;
-          stream->capture_id = capture_id;
-          stream->capture_owner_thread_id = 0;
-        }
-        iree_hal_streaming_graph_retain(stream->capture_graph);
-        iree_hal_streaming_stream_set_capture_status(
-            stream, IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE);
-      } else if (stream->capture_graph != event->capture_graph) {
-        iree_slim_mutex_unlock(&stream->mutex);
-        IREE_TRACE_ZONE_END(z0);
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "event wait crosses different active capture graphs");
-      }
-      iree_slim_mutex_unlock(&stream->mutex);
-    }
-
+  // An external wait remains an explicit node so each graph launch resolves
+  // the event point supplied by the application at execution time.
+  if (capture_external_wait &&
+      stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
+    iree_hal_streaming_graph_node_t* node = NULL;
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_streaming_update_capture_dependencies(
-                stream, event->capture_dependencies,
-                event->capture_dependency_count,
-                IREE_HAL_STREAMING_CAPTURE_DEPENDENCIES_ADD));
+        z0, iree_hal_streaming_graph_add_event_node(
+                stream->capture_graph, stream->capture_dependencies,
+                stream->capture_dependency_count,
+                IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT, event, &node));
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_streaming_capture_set_last_node(stream, node));
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }
 
+  // A capture-time record leaves the event naming the graph it was captured
+  // into. A wait on such an event joins that capture and submits no timeline
+  // wait. The association is read once and held for the whole branch, so the
+  // graph the branch works from cannot be freed underneath it.
+  iree_hal_streaming_graph_t* capture_graph =
+      iree_hal_streaming_event_acquire_capture_graph(event);
+  if (capture_graph) {
+    const iree_status_t capture_status =
+        iree_hal_streaming_stream_wait_captured_event(stream, event,
+                                                      capture_graph);
+    // Released with no lock held: the last reference to a graph frees the
+    // allocations it owns, which synchronizes every context and relocks this
+    // stream.
+    iree_hal_streaming_graph_release(capture_graph);
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, capture_status);
+    IREE_TRACE_ZONE_END(z0);
+    return iree_ok_status();
+  }
+
+  // Read the point once. The barrier below waits on exactly the point whose
+  // stream ordering is filed as a reuse dependency, so a record landing on this
+  // event concurrently cannot make the filed dependency describe a point other
+  // than the one waited on.
+  iree_hal_streaming_recorded_point_t recorded_point;
+  iree_hal_streaming_event_acquire_recorded_point(event, &recorded_point);
+
+  // Waiting on the point orders every later submission on this stream behind
+  // it, and therefore behind the stream timeline point it follows. That is the
+  // ordering a deferred free on that stream needs before its allocation may be
+  // reused here. A point that follows no stream timeline point files nothing:
+  // there is no ordering to claim. A point on this stream's own timeline files
+  // nothing either, because same-stream ordering already covers it.
+  const unsigned long long source_stream_id =
+      recorded_point.ordered_after_stream_id;
+  const uint64_t source_timeline_value =
+      recorded_point.ordered_after_stream_value;
+  const bool files_memory_reuse_dependency =
+      source_stream_id != 0 && source_stream_id != stream->stream_id &&
+      source_timeline_value != 0;
+  bool added_memory_reuse_dependency = false;
+  // True once the queue has accepted the barrier that establishes the ordering.
+  bool submitted = false;
+  iree_status_t status = iree_ok_status();
+  if (files_memory_reuse_dependency) {
+    status = iree_hal_streaming_stream_reserve_memory_reuse_dependency(
+        stream, source_stream_id, &added_memory_reuse_dependency);
+  }
+
   // Flush the stream to ensure all prior operations are submitted.
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
-                                    iree_hal_streaming_stream_flush(stream));
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_stream_flush(stream);
+  }
 
-  // Get the current stream pending value to signal after waiting for the event.
-  uint64_t signal_value = stream->pending_value + 1;
-  stream->pending_value = signal_value;
+  if (iree_status_is_ok(status)) {
+    iree_slim_mutex_lock(&stream->mutex);
 
-  // Create a queue barrier that waits for the event and signals the stream.
-  // This ensures the stream continues only after the event is signaled.
-  iree_hal_semaphore_list_t wait_semaphores = {
-      .count = 1,
-      .semaphores = &event->semaphore,
-      .payload_values = &event->signal_value,
-  };
-  iree_hal_semaphore_list_t signal_semaphores = {
-      .count = 1,
-      .semaphores = &stream->timeline_semaphore,
-      .payload_values = &signal_value,
-  };
+    // Reserve the next stream timeline value and submit a barrier that
+    // completes only after the event is signaled. The value is submitted, not
+    // completed; query/synchronize advance completed_value after observing the
+    // semaphore.
+    uint64_t wait_value = 0;
+    uint64_t signal_value = 0;
+    status = iree_hal_streaming_stream_reserve_next_value_locked(
+        stream, &wait_value, &signal_value);
+    if (iree_status_is_ok(status)) {
+      // The barrier waits on the point the event was recorded at and on
+      // everything already on this stream, so the value it signals stays behind
+      // the value below it. Either wait is dropped when there is nothing behind
+      // it: a stream that has never submitted, or an event with no submitted
+      // record.
+      iree_hal_semaphore_t* wait_semaphore_storage[2];
+      uint64_t wait_value_storage[2];
+      iree_host_size_t wait_count = 0;
+      if (wait_value > 0) {
+        wait_semaphore_storage[wait_count] = stream->timeline_semaphore;
+        wait_value_storage[wait_count] = wait_value;
+        ++wait_count;
+      }
+      if (recorded_point.semaphore) {
+        wait_semaphore_storage[wait_count] = recorded_point.semaphore;
+        wait_value_storage[wait_count] = recorded_point.value;
+        ++wait_count;
+      }
+      iree_hal_semaphore_list_t wait_semaphores = {
+          .count = wait_count,
+          .semaphores = wait_semaphore_storage,
+          .payload_values = wait_value_storage,
+      };
+      iree_hal_semaphore_list_t signal_semaphores = {
+          .count = 1,
+          .semaphores = &stream->timeline_semaphore,
+          .payload_values = &signal_value,
+      };
 
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_device_queue_barrier(
-              stream->context->device, stream->queue_affinity, wait_semaphores,
-              signal_semaphores, IREE_HAL_EXECUTE_FLAG_NONE));
+      status = iree_hal_device_queue_barrier(
+          stream->context->device, stream->queue_affinity, wait_semaphores,
+          signal_semaphores, IREE_HAL_EXECUTE_FLAG_NONE);
+      if (iree_status_is_ok(status)) {
+        // The accepted barrier owns the value it signals, so the timeline
+        // advances here and stays advanced even when the flush below fails.
+        submitted = true;
+        stream->pending_value = signal_value;
+        status = iree_hal_device_queue_flush(stream->context->device,
+                                             stream->queue_affinity);
+      }
+    }
 
-  // Update completed value to track this barrier.
-  stream->completed_value = signal_value;
+    iree_slim_mutex_unlock(&stream->mutex);
+  }
+
+  iree_hal_streaming_event_release_recorded_point(&recorded_point);
+
+  // The reservation holds the dependency slot from before the submission so a
+  // concurrent reservation for the same source stream cannot displace it. It
+  // carries no value until the submission that establishes the ordering is
+  // accepted, and is withdrawn when that submission is not.
+  if (files_memory_reuse_dependency) {
+    if (submitted) {
+      iree_hal_streaming_stream_record_memory_reuse_dependency(
+          stream, source_stream_id, source_timeline_value);
+    } else if (added_memory_reuse_dependency) {
+      iree_hal_streaming_stream_remove_uncommitted_memory_reuse_dependency(
+          stream, source_stream_id);
+    }
+  }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
@@ -834,24 +1268,46 @@ iree_status_t iree_hal_streaming_unpack_parameters(
     iree_hal_buffer_ref_list_t* out_bindings) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(parameters);
-  if (parameters->buffer_size == 0) {
+  if (iree_hal_streaming_parameter_info_is_empty(parameters)) {
     return iree_ok_status();
   }
-  IREE_ASSERT_ARGUMENT(parameter_buffer_ptr);
+  const bool requires_parameter_storage = parameters->buffer_size > 0 ||
+                                          parameters->binding_count > 0 ||
+                                          parameters->copy_count > 0;
+  if (!requires_parameter_storage) {
+    return iree_ok_status();
+  }
+  if (!parameter_buffer_ptr) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kernel parameter buffer is required");
+  }
+  if (parameters->copy_count > 0 && !out_constants) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kernel constant storage is required");
+  }
   IREE_ASSERT_ARGUMENT(out_bindings);
+  if (!out_bindings) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kernel binding list is required");
+  }
+  if (parameters->binding_count > 0 && !out_bindings->values) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kernel binding storage is required");
+  }
 
   const uint8_t* parameter_buffer = (const uint8_t*)parameter_buffer_ptr;
 
-  // Copy constant data spans.
-  // Each copy represents one or more constants laid out contiguously and
-  // copied in order. Constants are placed at their ABI offsets (dst_offset)
-  // matching how they'll appear in the kernel argument buffer.
+  // Copy constant data spans into the HAL constants table. Native ABI packing
+  // uses a separate destination offset so dense constants do not imply ABI
+  // layout.
   uint8_t* constants = (uint8_t*)out_constants;
   const iree_hal_streaming_parameter_op_t* op = &parameters->ops[0];
   for (uint32_t i = 0; i < parameters->copy_count; ++i, ++op) {
     const iree_hal_streaming_parameter_copy_op_t copy_op = op->copy;
-    memcpy(constants + copy_op.dst_offset,
-           parameter_buffer + copy_op.src_offset, copy_op.size);
+    if (copy_op.size > 0) {
+      memcpy(constants + copy_op.constant_destination_offset,
+             parameter_buffer + copy_op.source_offset, copy_op.size);
+    }
   }
 
   // Resolve bindings, if any.
@@ -862,18 +1318,18 @@ iree_status_t iree_hal_streaming_unpack_parameters(
       (iree_hal_buffer_ref_t*)out_bindings->values;
   for (uint32_t i = 0; i < parameters->binding_count; ++i, ++op) {
     const iree_hal_streaming_parameter_resolve_op_t resolve_op = op->resolve;
-    void* device_ptr = *(void**)(parameter_buffer + resolve_op.src_offset);
+    void* device_ptr = *(void**)(parameter_buffer + resolve_op.source_offset);
     // Kernel metadata identifies pointer slots but not the dynamic object
     // extent. Resolve with an unknown length; the HAL buffer reference owns
     // the allocation for dispatch.
 
     if (!device_ptr) {
-      bindings[resolve_op.dst_ordinal] = (iree_hal_buffer_ref_t){0};
+      bindings[resolve_op.destination_ordinal] = (iree_hal_buffer_ref_t){0};
       continue;
     }
 
     iree_status_t lookup_status = iree_hal_streaming_lookup_kernel_buffer_ref(
-        context, device_ptr, &bindings[resolve_op.dst_ordinal]);
+        context, device_ptr, &bindings[resolve_op.destination_ordinal]);
     // If lookup fails, the kernel uses external device pointers.
     // Return NOT_FOUND to signal that this kernel needs raw argument passing.
     if (!iree_status_is_ok(lookup_status)) {
@@ -891,28 +1347,56 @@ iree_status_t iree_hal_streaming_unpack_parameter_list(
     iree_hal_buffer_ref_list_t* out_bindings) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(parameters);
-  if (parameters->buffer_size == 0) {
+  if (iree_hal_streaming_parameter_info_is_empty(parameters)) {
     return iree_ok_status();
   }
-  IREE_ASSERT_ARGUMENT(parameter_list);
+  const bool requires_parameter_storage = parameters->buffer_size > 0 ||
+                                          parameters->binding_count > 0 ||
+                                          parameters->copy_count > 0;
+  if (!requires_parameter_storage) {
+    return iree_ok_status();
+  }
+  if (!parameter_list) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kernel parameter list is required");
+  }
+  if (parameters->copy_count > 0 && !out_constants) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kernel constant storage is required");
+  }
   IREE_ASSERT_ARGUMENT(out_bindings);
+  if (!out_bindings) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kernel binding list is required");
+  }
+  if (parameters->binding_count > 0 && !out_bindings->values) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kernel binding storage is required");
+  }
 
   // When parameters are provided as an array of pointers, each element in the
   // array points to the actual parameter value. Metadata-described pointer
   // slots can be resolved to HAL bindings; arbitrary bytes stay raw.
 
-  // Copy constant data spans.
-  // For each copy operation, we read from the parameter list at the source
-  // ordinal and copy to the ABI offset in the constants buffer.
+  // Copy constant data spans into the HAL constants table. For pointer-array
+  // launches, the source ordinal selects the element that points at the value.
   uint8_t* constants = (uint8_t*)out_constants;
   const iree_hal_streaming_parameter_op_t* op = &parameters->ops[0];
   for (uint32_t i = 0; i < parameters->copy_count; ++i, ++op) {
     const iree_hal_streaming_parameter_copy_op_t copy_op = op->copy;
-    // In pointer array mode, src_ordinal is an index into the parameter_list
+    // In pointer array mode, source_ordinal is an index into the parameter_list
     // array. Each parameter_list[index] is a pointer to the actual value.
     // We need to dereference it to get the value.
-    void* param_ptr = parameter_list[copy_op.src_ordinal];
-    memcpy(constants + copy_op.dst_offset, param_ptr, copy_op.size);
+    void* param_ptr = parameter_list[copy_op.source_ordinal];
+    if (!param_ptr && copy_op.size > 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "kernel argument %" PRIu32 " is NULL",
+                              (uint32_t)copy_op.source_ordinal);
+    }
+    if (copy_op.size > 0) {
+      memcpy(constants + copy_op.constant_destination_offset, param_ptr,
+             copy_op.size);
+    }
   }
 
   // Resolve bindings, if any.
@@ -924,8 +1408,14 @@ iree_status_t iree_hal_streaming_unpack_parameter_list(
       (iree_hal_buffer_ref_t*)out_bindings->values;
   for (uint32_t i = 0; i < parameters->binding_count; ++i, ++op) {
     const iree_hal_streaming_parameter_resolve_op_t resolve_op = op->resolve;
-    // In pointer array mode, src_offset is an index into the parameter_list.
-    void* param_ptr = parameter_list[resolve_op.src_ordinal];
+    // In pointer array mode, source_ordinal is an index into the
+    // parameter_list.
+    void* param_ptr = parameter_list[resolve_op.source_ordinal];
+    if (!param_ptr) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "kernel argument %" PRIu32 " is NULL",
+                              (uint32_t)resolve_op.source_ordinal);
+    }
     // The parameter points to a device pointer (void*)
     void* device_ptr = *(void**)param_ptr;
     // Kernel metadata identifies pointer slots but not the dynamic object
@@ -933,12 +1423,12 @@ iree_status_t iree_hal_streaming_unpack_parameter_list(
     // the allocation for dispatch.
 
     if (!device_ptr) {
-      bindings[resolve_op.dst_ordinal] = (iree_hal_buffer_ref_t){0};
+      bindings[resolve_op.destination_ordinal] = (iree_hal_buffer_ref_t){0};
       continue;
     }
 
     iree_status_t lookup_status = iree_hal_streaming_lookup_kernel_buffer_ref(
-        context, device_ptr, &bindings[resolve_op.dst_ordinal]);
+        context, device_ptr, &bindings[resolve_op.destination_ordinal]);
     // If lookup fails, the kernel uses external device pointers.
     // Return NOT_FOUND to signal that this kernel needs raw argument passing.
     if (!iree_status_is_ok(lookup_status)) {
@@ -956,11 +1446,21 @@ static iree_status_t iree_hal_streaming_pack_raw_argument_list(
   IREE_ASSERT_ARGUMENT(parameters);
   IREE_ASSERT_ARGUMENT(out_constants_size);
 
+  if (iree_hal_streaming_parameter_info_is_empty(parameters)) {
+    *out_constants_size = 0;
+    return iree_ok_status();
+  }
+
   *out_constants_size = parameters->direct_arg_bytes
                             ? parameters->direct_arg_bytes
                             : parameters->constant_bytes;
+  if (*out_constants_size == 0) {
+    *out_constants_size = parameters->buffer_size;
+  }
   if (*out_constants_size == 0) return iree_ok_status();
-  if (!parameter_list || !out_constants) {
+  if (!out_constants || (!parameter_list && (parameters->buffer_size > 0 ||
+                                             parameters->binding_count > 0 ||
+                                             parameters->copy_count > 0))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "raw kernel arguments require parameter storage");
   }
@@ -969,36 +1469,41 @@ static iree_status_t iree_hal_streaming_pack_raw_argument_list(
   const iree_hal_streaming_parameter_op_t* op = &parameters->ops[0];
   for (uint32_t i = 0; i < parameters->copy_count; ++i, ++op) {
     const iree_hal_streaming_parameter_copy_op_t copy_op = op->copy;
-    void* param_ptr = parameter_list[copy_op.src_ordinal];
+    void* param_ptr = parameter_list[copy_op.source_ordinal];
     if (!param_ptr) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "kernel argument %" PRIu32 " is NULL",
-                              (uint32_t)copy_op.src_ordinal);
+                              (uint32_t)copy_op.source_ordinal);
     }
-    if ((iree_host_size_t)copy_op.direct_dst_offset > *out_constants_size ||
+    if ((iree_host_size_t)copy_op.native_abi_destination_offset >
+            *out_constants_size ||
         (iree_host_size_t)copy_op.size >
-            *out_constants_size - copy_op.direct_dst_offset) {
+            *out_constants_size - copy_op.native_abi_destination_offset) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "kernel argument copy exceeds kernarg size");
     }
-    memcpy(constants + copy_op.direct_dst_offset, param_ptr, copy_op.size);
+    memcpy(constants + copy_op.native_abi_destination_offset, param_ptr,
+           copy_op.size);
   }
 
   for (uint32_t i = 0; i < parameters->binding_count; ++i, ++op) {
     const iree_hal_streaming_parameter_resolve_op_t resolve_op = op->resolve;
-    void* param_ptr = parameter_list[resolve_op.src_ordinal];
+    void* param_ptr = parameter_list[resolve_op.source_ordinal];
     if (!param_ptr) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "kernel argument %" PRIu32 " is NULL",
-                              (uint32_t)resolve_op.src_ordinal);
+                              (uint32_t)resolve_op.source_ordinal);
     }
     void* device_ptr = *(void**)param_ptr;
-    if ((iree_host_size_t)resolve_op.dst_offset > *out_constants_size ||
-        sizeof(device_ptr) > *out_constants_size - resolve_op.dst_offset) {
+    if ((iree_host_size_t)resolve_op.native_abi_destination_offset >
+            *out_constants_size ||
+        sizeof(device_ptr) >
+            *out_constants_size - resolve_op.native_abi_destination_offset) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "kernel pointer argument exceeds kernarg size");
     }
-    memcpy(constants + resolve_op.dst_offset, &device_ptr, sizeof(void*));
+    memcpy(constants + resolve_op.native_abi_destination_offset, &device_ptr,
+           sizeof(void*));
   }
 
   return iree_ok_status();
@@ -1040,8 +1545,9 @@ iree_status_t iree_hal_streaming_launch_kernel(
         "cooperative kernel launch not yet implemented in HAL layer");
   }
 
-  // Verify parameter buffer. Native launches provide a parameter buffer
-  // without a trusted byte length; unpacking is bounded by symbol metadata.
+  // Verify parameter storage early for metadata-described launches. The
+  // concrete branch below decides whether the storage is a native byte image,
+  // a pointer array to pack, or a shared unflagged metadata buffer.
   if (!params->buffer && symbol->parameters.buffer_size > 0) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
@@ -1093,6 +1599,9 @@ iree_status_t iree_hal_streaming_launch_kernel(
   // Native kernels have no bindings and no copy operations.
   bool is_native_kernel = (symbol->parameters.binding_count == 0 &&
                            symbol->parameters.copy_count == 0);
+  const bool is_empty_native_kernel =
+      is_native_kernel &&
+      iree_hal_streaming_parameter_info_is_empty(&symbol->parameters);
 
   size_t constants_size = symbol->parameters.constant_bytes;
   // Track if we need to use raw argument passing (e.g., for external pointers).
@@ -1106,73 +1615,45 @@ iree_status_t iree_hal_streaming_launch_kernel(
 
   uint64_t timing_params_start_ns =
       timing_enabled ? hrx_launch_timing_now_ns() : 0;
-  if (is_pre_packed && params->buffer) {
-    // Pre-packed buffer: pass the raw buffer directly to the kernel.
-    // This is used for kernels launched via HIP_LAUNCH_PARAM_BUFFER_POINTER
-    // (e.g., hipBLASLt GEMM kernels) where the buffer is already packed.
-    if (params->buffer_size != 0) {
-      if (params->buffer_size < symbol->parameters.constant_bytes) {
-        constants_size = symbol->parameters.constant_bytes;
-        constants = iree_alloca(constants_size);
-        memset(constants, 0, constants_size);
-        memcpy(constants, params->buffer, params->buffer_size);
-      } else {
-        constants = params->buffer;
-        constants_size = params->buffer_size;
-      }
-    } else {
-      constants = params->buffer;
-    }
+  if (is_pre_packed) {
+    // Pre-packed buffers are already in native kernarg layout. They may
+    // contain device pointers either as formal pointer arguments or inside
+    // opaque data, so preserve the bytes exactly and rely on HIP lifetime
+    // ordering instead of trying to translate visible pointer slots.
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0,
+        iree_hal_streaming_validate_prepacked_kernel_arguments(symbol, params));
+    constants = params->buffer;
+    constants_size = params->buffer_size;
     binding_list.count = 0;  // No IREE bindings, using raw pointers.
     use_raw_arguments = true;
   } else if (params->flags & IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY) {
-    if (is_native_kernel && params->buffer) {
+    if (is_native_kernel && params->buffer && !is_empty_native_kernel) {
       IREE_TRACE_ZONE_END(z0);
       return iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,
-          "args-array kernel launch requires parameter metadata");
+          "non-empty args-array kernel launch requires parameter metadata");
     }
-    // Unpack parameters from array of pointers (void**).
-    iree_status_t unpack_status = iree_hal_streaming_unpack_parameter_list(
-        stream->context, &symbol->parameters, (void**)params->buffer, constants,
-        &binding_list);
-    if (!iree_status_is_ok(unpack_status)) {
-      // If unpack fails due to NULL or external device pointers, fall back
-      // to raw argument passing. This handles native kernels with optional
-      // parameters or external allocations.
-      if (iree_status_code(unpack_status) == IREE_STATUS_NOT_FOUND) {
-        iree_status_ignore(unpack_status);
-
-        // Convert void** to packed buffer format.
-        // Pack all parameters (copies + resolves) into a single constants
-        // buffer. For native kernels, we use the parameter metadata to know the
-        // layout.
-        const iree_hal_streaming_parameter_info_t* params_info =
-            &symbol->parameters;
-        void** args_array = (void**)params->buffer;
-
-        // Build a native direct-argument buffer from the args array. This is
-        // only for fallback cases where pointers cannot be represented as HAL
-        // bindings.
-        constants_size = params_info->direct_arg_bytes
-                             ? params_info->direct_arg_bytes
-                             : params_info->constant_bytes;
-        constants = iree_alloca(constants_size);
-        memset(constants, 0, constants_size);
-        iree_status_t pack_status = iree_hal_streaming_pack_raw_argument_list(
-            params_info, args_array, constants, &constants_size);
-        if (!iree_status_is_ok(pack_status)) {
-          IREE_TRACE_ZONE_END(z0);
-          return pack_status;
-        }
-
-        binding_list.count = 0;  // No IREE bindings, using raw pointers.
-        use_raw_arguments = true;
-      } else {
-        IREE_TRACE_ZONE_END(z0);
-        return unpack_status;
-      }
+    // Pointer-array launches are converted to native kernarg bytes. This keeps
+    // formal pointer arguments and pointers nested inside copied structs on the
+    // same device-pointer contract.
+    constants_size = symbol->parameters.direct_arg_bytes
+                         ? symbol->parameters.direct_arg_bytes
+                         : symbol->parameters.constant_bytes;
+    if (constants_size == 0) {
+      constants_size = symbol->parameters.buffer_size;
     }
+    constants = constants_size ? iree_alloca(constants_size) : NULL;
+    if (constants) memset(constants, 0, constants_size);
+    iree_status_t pack_status = iree_hal_streaming_pack_raw_argument_list(
+        &symbol->parameters, (void**)params->buffer, constants,
+        &constants_size);
+    if (!iree_status_is_ok(pack_status)) {
+      IREE_TRACE_ZONE_END(z0);
+      return pack_status;
+    }
+    binding_list.count = 0;
+    use_raw_arguments = true;
   } else if (is_native_kernel && params->buffer) {
     // Native kernel with pre-packed buffer: pass raw arguments directly. This
     // path is only valid when the caller did not declare the buffer as a HIP
@@ -1181,28 +1662,40 @@ iree_status_t iree_hal_streaming_launch_kernel(
     if (params->buffer_size > 0) {
       constants_size = params->buffer_size;
     }
+    binding_list.count = 0;
     use_raw_arguments = true;
-  } else {
-    // Unpack parameters from packed buffer.
+  } else if (params->buffer) {
+    // Unflagged launches use the shared metadata path. HIP entry points mark
+    // native kernarg bytes with PRE_PACKED or provide ARGS_ARRAY so device
+    // pointer values are preserved without depending on reflected pointer
+    // slots.
     iree_status_t unpack_status = iree_hal_streaming_unpack_parameters(
         stream->context, &symbol->parameters, params->buffer, constants,
         &binding_list);
     if (!iree_status_is_ok(unpack_status)) {
       // If unpack fails due to NULL or external device pointers, fall back
       // to raw argument passing. This handles native kernels with optional
-      // parameters or external allocations (e.g., hipBLASLt workspace).
+      // parameters or external allocations.
       if (iree_status_code(unpack_status) == IREE_STATUS_NOT_FOUND) {
         iree_status_ignore(unpack_status);
-        // Use the raw packed buffer directly.
         constants = params->buffer;
         constants_size = params->buffer_size;
-        binding_list.count = 0;  // No IREE bindings, using raw pointers.
+        binding_list.count = 0;
         use_raw_arguments = true;
       } else {
         IREE_TRACE_ZONE_END(z0);
         return unpack_status;
       }
     }
+  } else if (is_empty_native_kernel) {
+    constants = NULL;
+    constants_size = 0;
+    binding_list.count = 0;
+    use_raw_arguments = true;
+  } else {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kernel launch missing parameter storage");
   }
   if (timing_enabled) {
     timing_params_ns += hrx_launch_timing_now_ns() - timing_params_start_ns;
@@ -1246,10 +1739,9 @@ iree_status_t iree_hal_streaming_launch_kernel(
       .dynamic_workgroup_local_memory = params->shared_memory_bytes,
   };
 
-  // Use the metadata-described constants+bindings path whenever possible. The
-  // AMDGPU backend uses HSACO metadata on that path to synthesize HIP/OpenCL
-  // hidden kernargs such as group size and block count. CUSTOM_DIRECT_ARGUMENTS
-  // is reserved for callers that supply or require native kernarg bytes.
+  // HIP launches use native kernarg bytes. The AMDGPU queue code still
+  // populates the dispatch implicit arguments for CUSTOM_DIRECT_ARGUMENTS; this
+  // flag only says that the explicit argument payload is already native.
   iree_hal_dispatch_flags_t flags =
       (use_raw_arguments || is_pre_packed)
           ? IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS
@@ -1260,8 +1752,10 @@ iree_status_t iree_hal_streaming_launch_kernel(
   bool should_flush = false;
   iree_slim_mutex_lock(&stream->mutex);
   if (dispatch_directly) {
-    uint64_t wait_value = stream->pending_value;
-    uint64_t signal_value = wait_value + 1;
+    uint64_t wait_value = 0;
+    uint64_t signal_value = 0;
+    status = iree_hal_streaming_stream_reserve_next_value_locked(
+        stream, &wait_value, &signal_value);
     const iree_hal_semaphore_list_t wait_semaphores = {
         .count = wait_value > 0 ? 1 : 0,
         .semaphores = &stream->timeline_semaphore,
@@ -1272,19 +1766,20 @@ iree_status_t iree_hal_streaming_launch_kernel(
         .semaphores = &stream->timeline_semaphore,
         .payload_values = &signal_value,
     };
-    status = iree_hal_device_queue_dispatch(
-        stream->context->device, stream->queue_affinity, wait_semaphores,
-        signal_semaphores, symbol->executable,
-        iree_hal_executable_function_from_index(symbol->export_ordinal), config,
-        iree_make_const_byte_span(constants, constants_size), binding_list,
-        flags);
     if (iree_status_is_ok(status)) {
-      status = iree_hal_device_queue_flush(stream->context->device,
-                                           stream->queue_affinity);
+      status = iree_hal_device_queue_dispatch(
+          stream->context->device, stream->queue_affinity, wait_semaphores,
+          signal_semaphores, symbol->executable,
+          iree_hal_executable_function_from_index(symbol->export_ordinal),
+          config, iree_make_const_byte_span(constants, constants_size),
+          binding_list, flags);
     }
     if (iree_status_is_ok(status)) {
+      // The accepted dispatch owns the value it signals, so the timeline
+      // advances here and stays advanced even when the flush below fails.
       stream->pending_value = signal_value;
-      stream->submitted_value = signal_value;
+      status = iree_hal_device_queue_flush(stream->context->device,
+                                           stream->queue_affinity);
     }
   } else {
     uint64_t timing_begin_step_ns =
@@ -1311,11 +1806,9 @@ iree_status_t iree_hal_streaming_launch_kernel(
     // important: under the AMDGPU HAL backend it resolves to an AGENT-scoped
     // AQL release+acquire fence between this dispatch and the next, which
     // flushes the GPU L1/L2 caches so the next dispatch sees this dispatch's
-    // writes. A bare execution barrier with no memory_barriers (count=0)
-    // resolves to NONE/NONE scopes after upstream IREE commit 48af1651a1
-    // ("Preserve command-buffer barrier scopes") and lets later dispatches
-    // launch with stale cache state, producing garbage output (e.g. NaN
-    // logits in GPT-2 forward).
+    // writes. A bare execution barrier with no memory barriers does not publish
+    // dispatch memory side effects under backends that preserve empty barrier
+    // scopes, so later dispatches can observe stale device cache contents.
     if (iree_status_is_ok(status) && !hrx_disable_dispatch_barrier_enabled()) {
       static const iree_hal_memory_barrier_t memory_barrier = {
           .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
@@ -1385,6 +1878,49 @@ static iree_status_t iree_hal_streaming_host_callback_thunk(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_streaming_queue_host_call(
+    iree_hal_streaming_stream_t* stream, iree_hal_host_call_t call,
+    const uint64_t args[4], iree_hal_host_call_flags_t flags) {
+  IREE_ASSERT_ARGUMENT(stream);
+  IREE_ASSERT_ARGUMENT(call.fn);
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
+                                    iree_hal_streaming_stream_flush(stream));
+
+  iree_slim_mutex_lock(&stream->mutex);
+  uint64_t wait_value = 0;
+  uint64_t signal_value = 0;
+  iree_status_t status = iree_hal_streaming_stream_reserve_next_value_locked(
+      stream, &wait_value, &signal_value);
+  if (!iree_status_is_ok(status)) {
+    iree_slim_mutex_unlock(&stream->mutex);
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
+  iree_hal_semaphore_list_t wait_semaphores = {
+      .count = wait_value > 0 ? 1 : 0,
+      .semaphores = &stream->timeline_semaphore,
+      .payload_values = &wait_value,
+  };
+  iree_hal_semaphore_list_t signal_semaphores = {
+      .count = 1,
+      .semaphores = &stream->timeline_semaphore,
+      .payload_values = &signal_value,
+  };
+
+  status = iree_hal_device_queue_host_call(
+      stream->context->device, stream->queue_affinity, wait_semaphores,
+      signal_semaphores, call, args, flags);
+  if (iree_status_is_ok(status)) {
+    stream->pending_value = signal_value;
+  }
+  iree_slim_mutex_unlock(&stream->mutex);
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
 iree_status_t iree_hal_streaming_launch_host_function(
     iree_hal_streaming_stream_t* stream, void (*fn)(void*), void* user_data) {
   IREE_ASSERT_ARGUMENT(stream);
@@ -1405,11 +1941,6 @@ iree_status_t iree_hal_streaming_launch_host_function(
     return iree_ok_status();
   }
 
-  // Flush any pending command-buffer work so the host call can sit at a
-  // concrete point on the stream timeline.
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
-                                    iree_hal_streaming_stream_flush(stream));
-
   // Allocate a wrapper structure to hold the callback and user data.
   iree_hal_streaming_host_callback_t* callback = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -1422,28 +1953,8 @@ iree_status_t iree_hal_streaming_launch_host_function(
   iree_hal_host_call_t call =
       iree_hal_make_host_call(iree_hal_streaming_host_callback_thunk, callback);
 
-  iree_slim_mutex_lock(&stream->mutex);
-  uint64_t wait_value = stream->pending_value;
-  uint64_t signal_value = wait_value + 1;
-  iree_hal_semaphore_list_t wait_semaphores = {
-      .count = wait_value > 0 ? 1 : 0,
-      .semaphores = &stream->timeline_semaphore,
-      .payload_values = &wait_value,
-  };
-  iree_hal_semaphore_list_t signal_semaphores = {
-      .count = 1,
-      .semaphores = &stream->timeline_semaphore,
-      .payload_values = &signal_value,
-  };
-
-  iree_status_t status = iree_hal_device_queue_host_call(
-      stream->context->device, stream->queue_affinity, wait_semaphores,
-      signal_semaphores, call, args, /*flags=*/0);
-  if (iree_status_is_ok(status)) {
-    stream->pending_value = signal_value;
-    stream->submitted_value = signal_value;
-  }
-  iree_slim_mutex_unlock(&stream->mutex);
+  iree_status_t status = iree_hal_streaming_queue_host_call(
+      stream, call, args, IREE_HAL_HOST_CALL_FLAG_NONE);
 
   if (!iree_status_is_ok(status)) {
     iree_allocator_free(iree_allocator_system(), callback);

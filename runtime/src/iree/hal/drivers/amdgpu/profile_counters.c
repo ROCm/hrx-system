@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "iree/base/internal/debugging.h"
 #include "iree/hal/drivers/amdgpu/host_queue.h"
 #include "iree/hal/drivers/amdgpu/host_queue_profile.h"
 #include "iree/hal/drivers/amdgpu/host_queue_profile_events.h"
@@ -696,6 +697,19 @@ static bool iree_hal_amdgpu_profile_counter_events_equal(
          lhs.flags.raw == rhs.flags.raw && lhs.block_name == rhs.block_name;
 }
 
+static hsa_status_t iree_hal_amdgpu_profile_counter_validate_event(
+    const iree_hal_amdgpu_libaqlprofile_t* libaqlprofile,
+    iree_hal_amdgpu_aqlprofile_agent_handle_t agent,
+    const iree_hal_amdgpu_aqlprofile_pmc_event_t* event, bool* out_valid) {
+  // AQLProfile retains lazily initialized event metadata for the lifetime of
+  // the process and provides no API to release it.
+  IREE_LEAK_CHECK_DISABLE_PUSH();
+  const hsa_status_t status =
+      libaqlprofile->aqlprofile_validate_pmc_event(agent, event, out_valid);
+  IREE_LEAK_CHECK_DISABLE_POP();
+  return status;
+}
+
 static void iree_hal_amdgpu_profile_counter_select_default_descriptors(
     const iree_hal_amdgpu_logical_device_t* logical_device,
     const iree_hal_amdgpu_libaqlprofile_t* libaqlprofile,
@@ -715,7 +729,9 @@ static void iree_hal_amdgpu_profile_counter_select_default_descriptors(
           logical_device->physical_devices[j];
       uint32_t event_id = 0;
       if (!iree_hal_amdgpu_profile_counter_resolve_event_id(
-              descriptor, physical_device->isa.target_id.version, &event_id)) {
+              descriptor,
+              physical_device->agent_target->primary_isa.identity.version,
+              &event_id)) {
         supported_on_all_devices = false;
         break;
       }
@@ -726,8 +742,9 @@ static void iree_hal_amdgpu_profile_counter_select_default_descriptors(
       };
       bool valid = false;
       const hsa_status_t hsa_status =
-          libaqlprofile->aqlprofile_validate_pmc_event(
-              agent_handles[physical_device->device_ordinal], &event, &valid);
+          iree_hal_amdgpu_profile_counter_validate_event(
+              libaqlprofile, agent_handles[physical_device->device_ordinal],
+              &event, &valid);
       supported_on_all_devices = hsa_status == HSA_STATUS_SUCCESS && valid;
     }
     if (supported_on_all_devices) {
@@ -988,8 +1005,8 @@ static iree_status_t iree_hal_amdgpu_profile_counter_initialize_set(
       .name = iree_make_string_view(string_storage, set_name.size),
   };
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_profile_counter_initialize_selection(
-      selection, physical_device->isa.target_id.version, default_descriptors,
-      default_descriptor_count, out_counter_set));
+      selection, physical_device->agent_target->primary_isa.identity.version,
+      default_descriptors, default_descriptor_count, out_counter_set));
   *inout_counter_storage += out_counter_set->counter_count;
   *inout_event_storage += out_counter_set->counter_count;
   if (out_counter_set->counter_count == 0) {
@@ -1000,12 +1017,13 @@ static iree_status_t iree_hal_amdgpu_profile_counter_initialize_set(
     const iree_hal_amdgpu_profile_counter_t* counter =
         &out_counter_set->counters[i];
     bool valid = false;
-    IREE_RETURN_IF_AQLPROFILE_ERROR(
-        libaqlprofile,
-        libaqlprofile->aqlprofile_validate_pmc_event(
+    const hsa_status_t hsa_status =
+        iree_hal_amdgpu_profile_counter_validate_event(
+            libaqlprofile,
             session->agent_handles[physical_device->device_ordinal],
-            &counter->event, &valid),
-        "validating AMDGPU counter event");
+            &counter->event, &valid);
+    IREE_RETURN_IF_AQLPROFILE_ERROR(libaqlprofile, hsa_status,
+                                    "validating AMDGPU counter event");
     if (IREE_UNLIKELY(!valid)) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,

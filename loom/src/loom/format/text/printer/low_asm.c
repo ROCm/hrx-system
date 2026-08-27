@@ -20,6 +20,13 @@ typedef enum loom_print_low_asm_preflight_failure_kind_e {
   LOOM_PRINT_LOW_ASM_PREFLIGHT_FAILURE_OPERATION = 2,
 } loom_print_low_asm_preflight_failure_kind_t;
 
+typedef enum loom_print_low_asm_prefix_e {
+  // Nested region inheriting its parent's representation contract.
+  LOOM_PRINT_LOW_ASM_PREFIX_NONE = 0,
+  // Function body whose representation contract is carried by the function.
+  LOOM_PRINT_LOW_ASM_PREFIX_MARKER = 1,
+} loom_print_low_asm_prefix_t;
+
 typedef struct loom_print_low_asm_preflight_failure_t {
   // Reason the region cannot be printed as lossless low asm.
   loom_print_low_asm_preflight_failure_kind_t kind;
@@ -27,55 +34,67 @@ typedef struct loom_print_low_asm_preflight_failure_t {
   uint16_t block_index;
   // Canonical Loom operation name such as `low.op`.
   iree_string_view_t operation_name;
-  // Descriptor-backed packet opcode when the operation is `low.op`/`low.const`.
-  iree_string_view_t packet_opcode;
+  // Descriptor key when the operation is `low.op` or `low.const`.
+  iree_string_view_t packet_descriptor_key;
   // Number of SSA results on the failed operation.
   uint16_t result_count;
   // Number of SSA operands on the failed operation.
   uint16_t operand_count;
 } loom_print_low_asm_preflight_failure_t;
 
-static iree_status_t loom_print_low_asm_lookup_descriptor_set(
-    loom_print_context_t* ctx,
-    const loom_text_low_asm_descriptor_set_t** out_descriptor_set) {
-  *out_descriptor_set = NULL;
-  if (!loom_text_low_asm_environment_supports_printing(
-          &ctx->low_asm_environment)) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "low asm region printing requires a descriptor-backed print "
-        "environment");
-  }
-  if (iree_string_view_is_empty(ctx->low_asm_descriptor_set_key)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "low asm region printing requires a descriptor-set key");
-  }
-  IREE_RETURN_IF_ERROR(ctx->low_asm_environment.vtable->lookup_descriptor_set(
-      ctx->low_asm_environment.state, ctx->low_asm_descriptor_set_key,
-      out_descriptor_set));
-  if (*out_descriptor_set == NULL) {
-    return iree_make_status(IREE_STATUS_NOT_FOUND,
-                            "low asm descriptor set '%.*s' was not found",
-                            (int)ctx->low_asm_descriptor_set_key.size,
-                            ctx->low_asm_descriptor_set_key.data);
-  }
-  return iree_ok_status();
+static bool loom_print_low_asm_preserves_source(
+    const loom_print_context_t* ctx) {
+  return iree_any_bit_set(ctx->flags, LOOM_TEXT_PRINT_PRESERVE_LOW_ASM);
 }
 
-bool loom_print_low_asm_is_requested(loom_print_context_t* ctx) {
-  return !iree_string_view_is_empty(ctx->low_asm_descriptor_set_key);
+static bool loom_print_low_asm_source_is_marked(const loom_region_t* region) {
+  return region && iree_any_bit_set(region->source_flags,
+                                    LOOM_REGION_SOURCE_FLAG_EXPLICIT_LOW_ASM);
 }
 
-static bool loom_print_low_asm_allows_canonical_structural_op(
-    loom_print_context_t* ctx, const loom_op_t* op) {
+bool loom_print_low_asm_is_requested(loom_print_context_t* ctx,
+                                     const loom_region_t* region) {
+  if (ctx->low_repr.descriptor_set == NULL) return false;
+  if (ctx->low_asm_region_depth != 0) return true;
+  if (loom_print_low_asm_preserves_source(ctx)) {
+    return loom_print_low_asm_source_is_marked(region);
+  }
+  return iree_any_bit_set(ctx->flags, LOOM_TEXT_PRINT_PREFER_LOW_ASM |
+                                          LOOM_TEXT_PRINT_REQUIRE_LOW_ASM);
+}
+
+bool loom_print_low_asm_uses_marker(loom_print_context_t* ctx,
+                                    const loom_region_t* region) {
+  if (loom_print_low_asm_preserves_source(ctx)) {
+    return loom_print_low_asm_source_is_marked(region);
+  }
+  return ctx->low_asm_region_depth == 0;
+}
+
+static bool loom_print_low_asm_is_required(loom_print_context_t* ctx,
+                                           const loom_region_t* region) {
+  if (loom_print_low_asm_preserves_source(ctx)) {
+    return ctx->low_asm_region_depth != 0 ||
+           loom_print_low_asm_source_is_marked(region);
+  }
+  return iree_any_bit_set(ctx->flags, LOOM_TEXT_PRINT_REQUIRE_LOW_ASM);
+}
+
+static bool loom_print_low_asm_allows_canonical_op(loom_print_context_t* ctx,
+                                                   const loom_op_t* op) {
+  if (iree_any_bit_set(loom_op_effective_traits(ctx->module, op),
+                       LOOM_TRAIT_HINT | LOOM_TRAIT_COMPILE_TIME_ONLY)) {
+    return true;
+  }
   iree_string_view_t op_name = loom_op_name(ctx->module, op);
   return iree_string_view_equal(op_name, IREE_SV("low.br")) ||
          iree_string_view_equal(op_name, IREE_SV("low.cond_br")) ||
          iree_string_view_equal(op_name, IREE_SV("low.func.call")) ||
+         iree_string_view_equal(op_name, IREE_SV("low.scf.condition")) ||
          iree_string_view_equal(op_name, IREE_SV("low.scf.yield")) ||
          iree_string_view_equal(op_name, IREE_SV("low.scf.if")) ||
-         iree_string_view_equal(op_name, IREE_SV("low.scf.for"));
+         iree_string_view_equal(op_name, IREE_SV("low.scf.for")) ||
+         iree_string_view_equal(op_name, IREE_SV("low.scf.while"));
 }
 
 static iree_status_t loom_print_low_asm_region_preflight(
@@ -84,8 +103,10 @@ static iree_status_t loom_print_low_asm_region_preflight(
     bool entry_args_declared_by_parent,
     loom_print_low_asm_preflight_failure_t* out_failure, bool* out_available);
 
-static iree_string_view_t loom_print_low_asm_packet_opcode(
-    loom_print_context_t* ctx, const loom_op_t* op) {
+static iree_string_view_t loom_print_low_asm_packet_descriptor_key(
+    loom_print_context_t* ctx,
+    const loom_text_low_asm_descriptor_set_t* descriptor_set,
+    const loom_op_t* op) {
   iree_string_view_t op_name = loom_op_name(ctx->module, op);
   if (!iree_string_view_equal(op_name, IREE_SV("low.op")) &&
       !iree_string_view_equal(op_name, IREE_SV("low.const"))) {
@@ -94,14 +115,13 @@ static iree_string_view_t loom_print_low_asm_packet_opcode(
   if (op->attribute_count == 0) {
     return iree_string_view_empty();
   }
-  const loom_attribute_t opcode_attr = loom_op_const_attrs(op)[0];
-  if (opcode_attr.kind != LOOM_ATTR_STRING) {
+  const loom_attribute_t descriptor_attr = loom_op_const_attrs(op)[0];
+  if (descriptor_attr.kind != LOOM_ATTR_SCOPED_ENUM) {
     return iree_string_view_empty();
   }
-  const loom_string_id_t opcode_id = loom_attr_as_string_id(opcode_attr);
-  return opcode_id < ctx->module->strings.count
-             ? ctx->module->strings.entries[opcode_id]
-             : iree_string_view_empty();
+  return loom_low_repr_descriptor_key(
+      &ctx->low_asm_environment.low_repr, descriptor_set,
+      loom_attr_as_scoped_enum(descriptor_attr));
 }
 
 static void loom_print_low_asm_record_entry_args_failure(
@@ -117,6 +137,7 @@ static void loom_print_low_asm_record_entry_args_failure(
 
 static void loom_print_low_asm_record_operation_failure(
     loom_print_context_t* ctx,
+    const loom_text_low_asm_descriptor_set_t* descriptor_set,
     loom_print_low_asm_preflight_failure_t* out_failure, uint16_t block_index,
     const loom_op_t* op) {
   if (out_failure->kind != LOOM_PRINT_LOW_ASM_PREFLIGHT_FAILURE_NONE) {
@@ -126,7 +147,8 @@ static void loom_print_low_asm_record_operation_failure(
       .kind = LOOM_PRINT_LOW_ASM_PREFLIGHT_FAILURE_OPERATION,
       .block_index = block_index,
       .operation_name = loom_op_name(ctx->module, op),
-      .packet_opcode = loom_print_low_asm_packet_opcode(ctx, op),
+      .packet_descriptor_key =
+          loom_print_low_asm_packet_descriptor_key(ctx, descriptor_set, op),
       .result_count = op->result_count,
       .operand_count = op->operand_count,
   };
@@ -141,8 +163,8 @@ static iree_status_t loom_print_low_asm_preflight_canonical_structural_op(
   if (iree_string_view_equal(op_name, IREE_SV("low.scf.if"))) {
     if (op->region_count < 1 || loom_op_regions(op)[0] == NULL) {
       *out_available = false;
-      loom_print_low_asm_record_operation_failure(ctx, out_failure, block_index,
-                                                  op);
+      loom_print_low_asm_record_operation_failure(ctx, descriptor_set,
+                                                  out_failure, block_index, op);
       return iree_ok_status();
     }
     IREE_RETURN_IF_ERROR(loom_print_low_asm_region_preflight(
@@ -159,12 +181,29 @@ static iree_status_t loom_print_low_asm_preflight_canonical_structural_op(
   } else if (iree_string_view_equal(op_name, IREE_SV("low.scf.for"))) {
     if (op->region_count < 1 || loom_op_regions(op)[0] == NULL) {
       *out_available = false;
-      loom_print_low_asm_record_operation_failure(ctx, out_failure, block_index,
-                                                  op);
+      loom_print_low_asm_record_operation_failure(ctx, descriptor_set,
+                                                  out_failure, block_index, op);
       return iree_ok_status();
     }
     IREE_RETURN_IF_ERROR(loom_print_low_asm_region_preflight(
         ctx, loom_op_regions(op)[0], descriptor_set,
+        /*entry_args_declared_by_parent=*/true, out_failure, out_available));
+  } else if (iree_string_view_equal(op_name, IREE_SV("low.scf.while"))) {
+    if (op->region_count < 2 || loom_op_regions(op)[0] == NULL ||
+        loom_op_regions(op)[1] == NULL) {
+      *out_available = false;
+      loom_print_low_asm_record_operation_failure(ctx, descriptor_set,
+                                                  out_failure, block_index, op);
+      return iree_ok_status();
+    }
+    IREE_RETURN_IF_ERROR(loom_print_low_asm_region_preflight(
+        ctx, loom_op_regions(op)[0], descriptor_set,
+        /*entry_args_declared_by_parent=*/true, out_failure, out_available));
+    if (!*out_available) {
+      return iree_ok_status();
+    }
+    IREE_RETURN_IF_ERROR(loom_print_low_asm_region_preflight(
+        ctx, loom_op_regions(op)[1], descriptor_set,
         /*entry_args_declared_by_parent=*/true, out_failure, out_available));
   }
   return iree_ok_status();
@@ -213,12 +252,13 @@ static iree_status_t loom_print_low_asm_find_immediate_attr(
   if (out_immediate->has_default_value) {
     return iree_ok_status();
   }
-  return iree_make_status(
-      IREE_STATUS_INVALID_ARGUMENT,
-      "low asm packet '%.*s' is missing immediate "
-      "attribute '%.*s'",
-      (int)statement->packet.opcode_key.size, statement->packet.opcode_key.data,
-      (int)out_immediate->field_name.size, out_immediate->field_name.data);
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "low asm packet '%.*s' is missing immediate "
+                          "attribute '%.*s'",
+                          (int)statement->packet.descriptor_key.size,
+                          statement->packet.descriptor_key.data,
+                          (int)out_immediate->field_name.size,
+                          out_immediate->field_name.data);
 }
 
 static bool loom_print_low_asm_immediate_attr_is_default(
@@ -257,14 +297,14 @@ static iree_status_t loom_print_low_asm_result_types_require_annotation(
         ctx->low_asm_environment.vtable->result_type_annotation_required(
             ctx->low_asm_environment.state, &statement->packet,
             statement->operands, statement->operand_count, i, ctx->module,
-            ctx->module->values.entries[result].type, &annotation_required,
+            loom_module_value_type(ctx->module, result), &annotation_required,
             &diagnostic_detail));
     if (!iree_string_view_is_empty(diagnostic_detail)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "low asm packet '%.*s' result %u cannot be "
                               "printed: %.*s",
-                              (int)statement->packet.opcode_key.size,
-                              statement->packet.opcode_key.data, i,
+                              (int)statement->packet.descriptor_key.size,
+                              statement->packet.descriptor_key.data, i,
                               (int)diagnostic_detail.size,
                               diagnostic_detail.data);
     }
@@ -297,11 +337,10 @@ static iree_status_t loom_print_low_asm_region_preflight(
       IREE_RETURN_IF_ERROR(loom_print_low_asm_describe_operation(
           ctx, descriptor_set, current_op, &statement));
       if (statement.kind == LOOM_TEXT_LOW_ASM_STATEMENT_UNKNOWN) {
-        if (!loom_print_low_asm_allows_canonical_structural_op(ctx,
-                                                               current_op)) {
+        if (!loom_print_low_asm_allows_canonical_op(ctx, current_op)) {
           *out_available = false;
-          loom_print_low_asm_record_operation_failure(ctx, out_failure,
-                                                      block_index, current_op);
+          loom_print_low_asm_record_operation_failure(
+              ctx, descriptor_set, out_failure, block_index, current_op);
           return iree_ok_status();
         }
         IREE_RETURN_IF_ERROR(
@@ -347,6 +386,76 @@ static iree_status_t loom_print_low_asm_value_list(
   return iree_ok_status();
 }
 
+static iree_status_t loom_print_low_asm_value_span(
+    loom_print_context_t* ctx, const loom_value_id_t* values,
+    uint16_t value_start, uint16_t value_count,
+    loom_print_field_kind_t field_kind) {
+  for (uint16_t i = 0; i < value_count; ++i) {
+    if (i > 0) {
+      IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ",", false));
+    }
+    const uint16_t value_index = value_start + i;
+    IREE_RETURN_IF_ERROR(loom_print_value_name_with_field(
+        ctx, values[value_index],
+        loom_print_field_ref(field_kind, value_index)));
+  }
+  return iree_ok_status();
+}
+
+static void loom_print_low_asm_operand_segment_delimiters(
+    loom_text_low_asm_operand_segment_delimiter_t delimiter,
+    const char** out_open, const char** out_close) {
+  switch (delimiter) {
+    case LOOM_TEXT_LOW_ASM_OPERAND_SEGMENT_DELIMITER_ANGLE:
+      *out_open = "<";
+      *out_close = ">";
+      return;
+    case LOOM_TEXT_LOW_ASM_OPERAND_SEGMENT_DELIMITER_SQUARE:
+      *out_open = "[";
+      *out_close = "]";
+      return;
+    case LOOM_TEXT_LOW_ASM_OPERAND_SEGMENT_DELIMITER_PAREN:
+      *out_open = "(";
+      *out_close = ")";
+      return;
+    default:
+      IREE_ASSERT_UNREACHABLE("validated low asm operand segment delimiter");
+      *out_open = "";
+      *out_close = "";
+      return;
+  }
+}
+
+static iree_status_t loom_print_low_asm_operand_segments(
+    loom_print_context_t* ctx, const loom_text_low_asm_statement_t* statement) {
+  uint16_t operand_offset = 0;
+  for (uint16_t segment_index = 0;
+       segment_index < statement->packet.operand_segment_count;
+       ++segment_index) {
+    loom_text_low_asm_operand_segment_descriptor_t segment = {0};
+    IREE_RETURN_IF_ERROR(
+        ctx->low_asm_environment.vtable->operand_segment_descriptor(
+            ctx->low_asm_environment.state, &statement->packet, segment_index,
+            &segment));
+    const uint16_t segment_operand_count =
+        segment.is_variadic ? statement->operand_count - operand_offset
+                            : segment.fixed_operand_count;
+    const char* open = NULL;
+    const char* close = NULL;
+    loom_print_low_asm_operand_segment_delimiters(segment.delimiter, &open,
+                                                  &close);
+    IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, open, true));
+    loom_print_set_glue(ctx);
+    IREE_RETURN_IF_ERROR(loom_print_low_asm_value_span(
+        ctx, statement->operands, operand_offset, segment_operand_count,
+        LOOM_PRINT_FIELD_OPERAND));
+    IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, close, true));
+    operand_offset += segment_operand_count;
+  }
+  IREE_ASSERT_EQ(operand_offset, statement->operand_count);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_print_low_asm_named_immediates(
     loom_print_context_t* ctx, const loom_text_low_asm_statement_t* statement,
     uint16_t immediate_start, uint16_t immediate_end) {
@@ -383,8 +492,7 @@ static iree_status_t loom_print_low_asm_named_immediates(
     IREE_RETURN_IF_ERROR(
         loom_output_stream_write(ctx->stream, immediate.spelling));
     IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, " = "));
-    IREE_RETURN_IF_ERROR(
-        loom_print_attr(ctx->stream, &attr->value, ctx->module, NULL));
+    IREE_RETURN_IF_ERROR(loom_print_attr(ctx, &attr->value, NULL));
     ++printed_count;
   }
   IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '}'));
@@ -413,14 +521,13 @@ static iree_status_t loom_print_low_asm_positional_immediates(
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "low asm packet '%.*s' cannot omit positional immediate '%.*s'",
-          (int)statement->packet.opcode_key.size,
-          statement->packet.opcode_key.data, (int)immediate.field_name.size,
+          (int)statement->packet.descriptor_key.size,
+          statement->packet.descriptor_key.data, (int)immediate.field_name.size,
           immediate.field_name.data);
     }
     IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
     iree_host_size_t start = ctx->stream->offset;
-    IREE_RETURN_IF_ERROR(
-        loom_print_attr(ctx->stream, &attr->value, ctx->module, NULL));
+    IREE_RETURN_IF_ERROR(loom_print_attr(ctx, &attr->value, NULL));
     loom_print_did_write(ctx);
     if (statement->has_immediate_attribute_field) {
       loom_print_report_field(
@@ -470,7 +577,7 @@ static iree_status_t loom_print_low_asm_result_type_annotation(
     }
     IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
     IREE_RETURN_IF_ERROR(loom_print_type(
-        ctx, ctx->module->values.entries[statement->results[i]].type));
+        ctx, loom_module_value_type(ctx->module, statement->results[i])));
     loom_print_did_write(ctx);
   }
   return iree_ok_status();
@@ -480,9 +587,13 @@ static iree_status_t loom_print_low_asm_packet(
     loom_print_context_t* ctx, const loom_text_low_asm_statement_t* statement) {
   IREE_RETURN_IF_ERROR(loom_print_low_asm_result_list(ctx, statement));
   IREE_RETURN_IF_ERROR(loom_print_emit(ctx, statement->packet.mnemonic, false));
-  IREE_RETURN_IF_ERROR(loom_print_low_asm_value_list(ctx, statement->operands,
-                                                     statement->operand_count,
-                                                     LOOM_PRINT_FIELD_OPERAND));
+  if (statement->packet.operand_segment_count != 0) {
+    IREE_RETURN_IF_ERROR(loom_print_low_asm_operand_segments(ctx, statement));
+  } else {
+    IREE_RETURN_IF_ERROR(loom_print_low_asm_value_list(
+        ctx, statement->operands, statement->operand_count,
+        LOOM_PRINT_FIELD_OPERAND));
+  }
   IREE_RETURN_IF_ERROR(loom_print_low_asm_immediates(ctx, statement));
   IREE_RETURN_IF_ERROR(
       loom_print_low_asm_result_type_annotation(ctx, statement));
@@ -519,8 +630,7 @@ static iree_status_t loom_print_low_asm_structural_attr_dict(
     }
     IREE_RETURN_IF_ERROR(loom_output_stream_write(ctx->stream, attr->name));
     IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, " = "));
-    IREE_RETURN_IF_ERROR(loom_print_attr(ctx->stream, attr->value, ctx->module,
-                                         attr->descriptor));
+    IREE_RETURN_IF_ERROR(loom_print_attr(ctx, attr->value, attr->descriptor));
   }
   if (wrote_dict) {
     IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '}'));
@@ -530,14 +640,18 @@ static iree_status_t loom_print_low_asm_structural_attr_dict(
 }
 
 static iree_status_t loom_print_low_asm_named_attr_dict(
-    loom_print_context_t* ctx, loom_named_attr_slice_t attrs) {
-  if (attrs.count == 0) {
+    loom_print_context_t* ctx,
+    loom_text_low_asm_structural_build_flags_t build_flags,
+    loom_named_attr_slice_t attrs) {
+  if (!iree_any_bit_set(
+          build_flags,
+          LOOM_TEXT_LOW_ASM_STRUCTURAL_BUILD_FLAG_HAS_ATTRIBUTES)) {
     return iree_ok_status();
   }
   loom_attribute_t attr =
       loom_make_canonical_attr_dict(attrs.entries, attrs.count);
   IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
-  IREE_RETURN_IF_ERROR(loom_print_attr(ctx->stream, &attr, ctx->module, NULL));
+  IREE_RETURN_IF_ERROR(loom_print_attr(ctx, &attr, NULL));
   loom_print_did_write(ctx);
   return iree_ok_status();
 }
@@ -583,8 +697,8 @@ static iree_status_t loom_print_low_asm_structural_live_in(
   IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "<", true));
   IREE_RETURN_IF_ERROR(loom_print_emit(ctx, statement->structural_key, true));
   IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ">", true));
-  IREE_RETURN_IF_ERROR(
-      loom_print_low_asm_named_attr_dict(ctx, statement->attributes));
+  IREE_RETURN_IF_ERROR(loom_print_low_asm_named_attr_dict(
+      ctx, statement->structural_build_flags, statement->attributes));
   return loom_print_low_asm_structural_result_type(ctx, statement);
 }
 
@@ -630,12 +744,17 @@ static iree_status_t loom_print_low_asm_structural_slice(
   return iree_ok_status();
 }
 
-static iree_status_t loom_print_low_asm_structural_copy(
+static iree_status_t loom_print_low_asm_structural_transfer(
     loom_print_context_t* ctx, const loom_text_low_asm_statement_t* statement) {
-  IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "copy", false));
+  IREE_RETURN_IF_ERROR(loom_print_emit_cstr(
+      ctx,
+      statement->structural_kind == LOOM_TEXT_LOW_ASM_STRUCTURAL_MOVE ? "move"
+                                                                      : "copy",
+      false));
   IREE_RETURN_IF_ERROR(loom_print_low_asm_value_list(ctx, statement->operands,
                                                      statement->operand_count,
                                                      LOOM_PRINT_FIELD_OPERAND));
+  IREE_RETURN_IF_ERROR(loom_print_low_asm_structural_attr_dict(ctx, statement));
   IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ":", false));
   IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
   IREE_RETURN_IF_ERROR(loom_print_value_type(ctx, statement->operands[0]));
@@ -712,7 +831,8 @@ static iree_status_t loom_print_low_asm_structural(
     case LOOM_TEXT_LOW_ASM_STRUCTURAL_STORAGE_VIEW:
       return loom_print_low_asm_structural_storage_view(ctx, statement);
     case LOOM_TEXT_LOW_ASM_STRUCTURAL_COPY:
-      return loom_print_low_asm_structural_copy(ctx, statement);
+    case LOOM_TEXT_LOW_ASM_STRUCTURAL_MOVE:
+      return loom_print_low_asm_structural_transfer(ctx, statement);
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "unknown low asm structural kind %u",
@@ -738,6 +858,12 @@ static iree_status_t loom_print_low_asm_statement(
     case LOOM_TEXT_LOW_ASM_STATEMENT_STRUCTURAL: {
       IREE_RETURN_IF_ERROR(loom_print_low_asm_structural(ctx, statement));
       break;
+    }
+    case LOOM_TEXT_LOW_ASM_STATEMENT_CANONICAL: {
+      // The descriptor environment has proven that canonical register type
+      // spellings resolve in the selected asm descriptor set. loom_print_op
+      // owns the line terminator and optional location annotation.
+      return loom_print_op(ctx, statement->op);
     }
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -771,6 +897,9 @@ static iree_status_t loom_print_low_asm_region_body(
         loom_print_block_needs_synthetic_label(ctx, region, block) ||
         (block->arg_count != 0 && !block_args_declared_by_parent);
     if (needs_label) {
+      if (iree_any_bit_set(block->flags, LOOM_BLOCK_FLAG_LEADING_BLANK_LINE)) {
+        IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '\n'));
+      }
       IREE_RETURN_IF_ERROR(loom_print_block_label_line_with_options(
           ctx, region, block, !block_args_declared_by_parent));
     }
@@ -782,13 +911,16 @@ static iree_status_t loom_print_low_asm_region_body(
                                                       current_op)) {
         continue;
       }
+      if (iree_any_bit_set(current_op->flags,
+                           LOOM_OP_FLAG_LEADING_BLANK_LINE)) {
+        IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '\n'));
+      }
       IREE_RETURN_IF_ERROR(loom_print_op_comments(ctx, current_op));
       loom_text_low_asm_statement_t statement = {0};
       IREE_RETURN_IF_ERROR(loom_print_low_asm_describe_operation(
           ctx, descriptor_set, current_op, &statement));
       if (statement.kind == LOOM_TEXT_LOW_ASM_STATEMENT_UNKNOWN) {
-        if (loom_print_low_asm_allows_canonical_structural_op(ctx,
-                                                              current_op)) {
+        if (loom_print_low_asm_allows_canonical_op(ctx, current_op)) {
           IREE_RETURN_IF_ERROR(loom_print_indent(ctx));
           IREE_RETURN_IF_ERROR(loom_print_op(ctx, current_op));
           continue;
@@ -800,7 +932,9 @@ static iree_status_t loom_print_low_asm_region_body(
       }
       IREE_RETURN_IF_ERROR(loom_print_indent(ctx));
       IREE_RETURN_IF_ERROR(loom_print_low_asm_statement(ctx, &statement));
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '\n'));
+      if (statement.kind != LOOM_TEXT_LOW_ASM_STATEMENT_CANONICAL) {
+        IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '\n'));
+      }
     }
   }
   return iree_ok_status();
@@ -810,94 +944,85 @@ static iree_status_t loom_print_low_asm_prepare_region(
     loom_print_context_t* ctx, const loom_region_t* region,
     const loom_region_descriptor_t* region_descriptor,
     bool entry_args_declared_by_parent,
-    const loom_text_low_asm_descriptor_set_t** out_descriptor_set,
+    loom_text_low_repr_context_t* out_low_repr,
     loom_print_low_asm_preflight_failure_t* out_failure, bool* out_available) {
   (void)region_descriptor;
-  *out_descriptor_set = NULL;
   *out_failure = (loom_print_low_asm_preflight_failure_t){0};
   *out_available = true;
-  IREE_RETURN_IF_ERROR(
-      loom_print_low_asm_lookup_descriptor_set(ctx, out_descriptor_set));
+  *out_low_repr = ctx->low_repr;
 
   if (!iree_any_bit_set(ctx->flags, LOOM_TEXT_PRINT_SKIP_REGIONS)) {
     IREE_RETURN_IF_ERROR(loom_print_low_asm_region_preflight(
-        ctx, region, *out_descriptor_set, entry_args_declared_by_parent,
-        out_failure, out_available));
+        ctx, region, out_low_repr->descriptor_set,
+        entry_args_declared_by_parent, out_failure, out_available));
   }
   return iree_ok_status();
 }
 
 static iree_status_t loom_print_low_asm_make_unavailable_status(
-    loom_print_context_t* ctx,
+    iree_string_view_t repr_contract,
     const loom_print_low_asm_preflight_failure_t* failure) {
   switch (failure->kind) {
     case LOOM_PRINT_LOW_ASM_PREFLIGHT_FAILURE_ENTRY_ARGS:
       return iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,
-          "region has no lossless low asm spelling for descriptor set '%.*s': "
-          "entry block %u has arguments that are not declared by the parent",
-          (int)ctx->low_asm_descriptor_set_key.size,
-          ctx->low_asm_descriptor_set_key.data, failure->block_index);
+          "region has no lossless low asm spelling for representation "
+          "contract '%.*s': entry block %u has arguments that are not declared "
+          "by the parent",
+          (int)repr_contract.size, repr_contract.data, failure->block_index);
     case LOOM_PRINT_LOW_ASM_PREFLIGHT_FAILURE_OPERATION:
-      if (!iree_string_view_is_empty(failure->packet_opcode)) {
+      if (!iree_string_view_is_empty(failure->packet_descriptor_key)) {
         return iree_make_status(
             IREE_STATUS_UNIMPLEMENTED,
-            "region has no lossless low asm spelling for descriptor set "
-            "'%.*s': operation '%.*s' with packet opcode '%.*s' in block %u "
+            "region has no lossless low asm spelling for representation "
+            "contract "
+            "'%.*s': operation '%.*s' with packet descriptor '%.*s' in block "
+            "%u "
             "has no matching low asm packet form (%u results, %u operands)",
-            (int)ctx->low_asm_descriptor_set_key.size,
-            ctx->low_asm_descriptor_set_key.data,
+            (int)repr_contract.size, repr_contract.data,
             (int)failure->operation_name.size, failure->operation_name.data,
-            (int)failure->packet_opcode.size, failure->packet_opcode.data,
-            failure->block_index, failure->result_count,
-            failure->operand_count);
+            (int)failure->packet_descriptor_key.size,
+            failure->packet_descriptor_key.data, failure->block_index,
+            failure->result_count, failure->operand_count);
       }
       return iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,
-          "region has no lossless low asm spelling for descriptor set '%.*s': "
-          "operation '%.*s' in block %u has no matching low asm form (%u "
-          "results, %u operands)",
-          (int)ctx->low_asm_descriptor_set_key.size,
-          ctx->low_asm_descriptor_set_key.data,
+          "region has no lossless low asm spelling for representation "
+          "contract '%.*s': operation '%.*s' in block %u has no matching low "
+          "asm form (%u results, %u operands)",
+          (int)repr_contract.size, repr_contract.data,
           (int)failure->operation_name.size, failure->operation_name.data,
           failure->block_index, failure->result_count, failure->operand_count);
     case LOOM_PRINT_LOW_ASM_PREFLIGHT_FAILURE_NONE:
     default:
       return iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,
-          "region has no lossless low asm spelling for descriptor set '%.*s'",
-          (int)ctx->low_asm_descriptor_set_key.size,
-          ctx->low_asm_descriptor_set_key.data);
+          "region has no lossless low asm spelling for representation contract "
+          "'%.*s'",
+          (int)repr_contract.size, repr_contract.data);
   }
 }
 
-static iree_status_t loom_print_low_asm_region_with_descriptor_set(
+static iree_status_t loom_print_low_asm_region_with_repr(
     loom_print_context_t* ctx, const loom_region_t* region,
     const loom_region_descriptor_t* region_descriptor,
-    iree_string_view_t descriptor_set_key, bool entry_args_declared_by_parent,
-    const loom_text_low_asm_descriptor_set_t* descriptor_set,
-    bool print_descriptor_set_prefix) {
-  const loom_text_low_asm_descriptor_set_t* previous_descriptor_set =
-      ctx->low_register_descriptor_set;
+    bool entry_args_declared_by_parent, loom_text_low_repr_context_t low_repr,
+    loom_print_low_asm_prefix_t prefix) {
+  const loom_text_low_repr_context_t previous_low_repr = ctx->low_repr;
   const uint16_t previous_depth = ctx->low_asm_region_depth;
   if (previous_depth == UINT16_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "low asm region nesting exceeds uint16_t range");
   }
-  ctx->low_register_descriptor_set = descriptor_set;
+  ctx->low_repr = low_repr;
   ctx->low_asm_region_depth = (uint16_t)(previous_depth + 1);
   iree_status_t status = iree_ok_status();
-  if (print_descriptor_set_prefix) {
-    status = loom_print_emit_cstr(ctx, "asm", false);
-    if (iree_status_is_ok(status)) {
-      status = loom_print_emit_cstr(ctx, "<", true);
-    }
-    if (iree_status_is_ok(status)) {
-      status = loom_print_emit(ctx, descriptor_set_key, true);
-    }
-    if (iree_status_is_ok(status)) {
-      status = loom_print_emit_cstr(ctx, ">", true);
-    }
+  switch (prefix) {
+    case LOOM_PRINT_LOW_ASM_PREFIX_NONE:
+      break;
+    case LOOM_PRINT_LOW_ASM_PREFIX_MARKER:
+      status = loom_print_emit_cstr(ctx, "asm", false);
+      break;
   }
   if (iree_status_is_ok(status)) {
     status = loom_print_space_if_needed(ctx);
@@ -910,7 +1035,7 @@ static iree_status_t loom_print_low_asm_region_with_descriptor_set(
     ++ctx->indent;
     if (iree_status_is_ok(status)) {
       status = loom_print_low_asm_region_body(ctx, region, region_descriptor,
-                                              descriptor_set,
+                                              low_repr.descriptor_set,
                                               entry_args_declared_by_parent);
     }
     --ctx->indent;
@@ -921,7 +1046,7 @@ static iree_status_t loom_print_low_asm_region_with_descriptor_set(
       status = loom_output_stream_write_char(ctx->stream, '}');
     }
   }
-  ctx->low_register_descriptor_set = previous_descriptor_set;
+  ctx->low_repr = previous_low_repr;
   ctx->low_asm_region_depth = previous_depth;
   IREE_RETURN_IF_ERROR(status);
   ctx->has_previous_token = true;
@@ -930,42 +1055,30 @@ static iree_status_t loom_print_low_asm_region_with_descriptor_set(
   return iree_ok_status();
 }
 
-iree_status_t loom_print_low_asm_region(
-    loom_print_context_t* ctx, const loom_region_t* region,
-    const loom_region_descriptor_t* region_descriptor,
-    bool entry_args_declared_by_parent) {
-  const loom_text_low_asm_descriptor_set_t* descriptor_set = NULL;
-  loom_print_low_asm_preflight_failure_t failure = {0};
-  bool available = false;
-  IREE_RETURN_IF_ERROR(loom_print_low_asm_prepare_region(
-      ctx, region, region_descriptor, entry_args_declared_by_parent,
-      &descriptor_set, &failure, &available));
-  if (!available) {
-    return loom_print_low_asm_make_unavailable_status(ctx, &failure);
-  }
-  return loom_print_low_asm_region_with_descriptor_set(
-      ctx, region, region_descriptor, ctx->low_asm_descriptor_set_key,
-      entry_args_declared_by_parent, descriptor_set,
-      /*print_descriptor_set_prefix=*/true);
-}
-
 iree_status_t loom_print_low_asm_optional_region(
     loom_print_context_t* ctx, const loom_region_t* region,
     const loom_region_descriptor_t* region_descriptor,
     bool entry_args_declared_by_parent, bool* out_printed) {
   *out_printed = false;
-  const loom_text_low_asm_descriptor_set_t* descriptor_set = NULL;
+  loom_text_low_repr_context_t low_repr = {0};
   loom_print_low_asm_preflight_failure_t failure = {0};
   bool available = false;
   IREE_RETURN_IF_ERROR(loom_print_low_asm_prepare_region(
-      ctx, region, region_descriptor, entry_args_declared_by_parent,
-      &descriptor_set, &failure, &available));
+      ctx, region, region_descriptor, entry_args_declared_by_parent, &low_repr,
+      &failure, &available));
   if (!available) {
+    if (loom_print_low_asm_is_required(ctx, region)) {
+      return loom_print_low_asm_make_unavailable_status(low_repr.contract_key,
+                                                        &failure);
+    }
     return iree_ok_status();
   }
   *out_printed = true;
-  return loom_print_low_asm_region_with_descriptor_set(
-      ctx, region, region_descriptor, ctx->low_asm_descriptor_set_key,
-      entry_args_declared_by_parent, descriptor_set,
-      /*print_descriptor_set_prefix=*/ctx->low_asm_region_depth == 0);
+  const loom_print_low_asm_prefix_t prefix =
+      loom_print_low_asm_uses_marker(ctx, region)
+          ? LOOM_PRINT_LOW_ASM_PREFIX_MARKER
+          : LOOM_PRINT_LOW_ASM_PREFIX_NONE;
+  return loom_print_low_asm_region_with_repr(ctx, region, region_descriptor,
+                                             entry_args_declared_by_parent,
+                                             low_repr, prefix);
 }

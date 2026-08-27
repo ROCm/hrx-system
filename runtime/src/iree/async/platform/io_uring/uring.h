@@ -13,9 +13,10 @@
 //   - Ring teardown (munmap + close)
 //
 // Thread safety:
-//   SQ operations (get_sqe, fill, flush) are protected by an atomic spinlock
-//   (sq_lock). Callers must hold the lock during the entire get_sqe -> fill ->
-//   unlock sequence to prevent partially-filled SQEs from being flushed.
+//   SQ operations (get_sqe, fill, flush) are protected by a spinlock that polls
+//   read-only state between acquisition attempts. Callers must hold the lock
+//   during the entire get_sqe -> fill -> unlock sequence to prevent
+//   partially-filled SQEs from being flushed.
 //
 //   io_uring_enter is called OUTSIDE the lock and ONLY from the poll thread.
 //   This satisfies IORING_SETUP_SINGLE_ISSUER (only one thread may call
@@ -31,6 +32,7 @@
 #include "iree/async/platform/io_uring/defs.h"
 #include "iree/base/api.h"
 #include "iree/base/internal/atomics.h"
+#include "iree/base/threading/processor.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -85,8 +87,8 @@ typedef struct iree_io_uring_ring_t {
   // Protected by sq_lock.
   uint32_t sq_local_tail;
 
-  // Spinlock protecting SQ mutations (sq_local_tail, *sq_tail, SQE fills).
-  // 0 = unlocked, 1 = locked.
+  // Test-and-test-and-set lock protecting SQ mutations.
+  // Zero is unlocked and one is locked; waiters poll without modifying it.
   iree_atomic_int32_t sq_lock;
 
   // True if the ring was created with R_DISABLED and needs
@@ -98,20 +100,20 @@ typedef struct iree_io_uring_ring_t {
 } iree_io_uring_ring_t;
 
 //===----------------------------------------------------------------------===//
-// SQ spinlock
+// SQ lock
 //===----------------------------------------------------------------------===//
 
-// Acquires the SQ spinlock. Must be held during get_sqe, SQE fill, rollback,
-// and sq_flush sequences. The lock is NOT held during io_uring_enter.
+// Acquires the SQ lock. Must be held during get_sqe, SQE fill, rollback, and
+// sq_flush sequences. The lock is NOT held during io_uring_enter.
 static inline void iree_io_uring_ring_sq_lock(iree_io_uring_ring_t* ring) {
   while (iree_atomic_exchange(&ring->sq_lock, 1, iree_memory_order_acquire)) {
-    // Spin until unlocked. Contention is rare (cross-thread submit vs poll
-    // thread internal operations) and the critical section is short (SQE
-    // pointer bump + memcpy).
+    while (iree_atomic_load(&ring->sq_lock, iree_memory_order_relaxed)) {
+      iree_processor_yield();
+    }
   }
 }
 
-// Releases the SQ spinlock.
+// Releases the SQ lock.
 static inline void iree_io_uring_ring_sq_unlock(iree_io_uring_ring_t* ring) {
   iree_atomic_store(&ring->sq_lock, 0, iree_memory_order_release);
 }

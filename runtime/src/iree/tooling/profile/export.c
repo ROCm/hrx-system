@@ -14,7 +14,7 @@
 #include "iree/tooling/profile/model.h"
 #include "iree/tooling/profile/reader.h"
 
-#define IREE_PROFILE_EXPORT_SCHEMA_VERSION 15
+#define IREE_PROFILE_EXPORT_SCHEMA_VERSION 16
 
 static void iree_profile_export_print_prefix(FILE* file,
                                              const char* record_type,
@@ -117,6 +117,10 @@ typedef struct iree_profile_export_device_time_t {
   bool is_valid;
   // Raw device tick delta when the source tick pair is valid.
   uint64_t duration_ticks;
+  // True when |duration_ns| was converted through a device duration scale.
+  bool has_duration_ns;
+  // Provenance of the elapsed-duration scale.
+  iree_profile_model_duration_scale_source_t duration_scale_source;
   // True when the source ticks were mapped into the driver host CPU time
   // domain.
   bool has_derived_time;
@@ -128,7 +132,7 @@ typedef struct iree_profile_export_device_time_t {
   int64_t start_driver_host_cpu_time_ns;
   // Source end tick mapped to driver host CPU timestamp nanoseconds.
   int64_t end_driver_host_cpu_time_ns;
-  // Derived duration in nanoseconds when the clock mapping is available.
+  // Elapsed duration in nanoseconds when |has_duration_ns| is true.
   int64_t duration_ns;
 } iree_profile_export_device_time_t;
 
@@ -144,6 +148,18 @@ iree_profile_export_calculate_device_time(const iree_profile_model_t* model,
   if (!device_time.is_valid) return device_time;
 
   device_time.duration_ticks = end_tick - start_tick;
+  const iree_profile_model_device_t* device =
+      iree_profile_model_find_device(model, physical_device_ordinal);
+  iree_profile_model_duration_scale_t duration_scale;
+  if (iree_profile_model_device_try_resolve_duration_scale(device,
+                                                           &duration_scale)) {
+    device_time.has_duration_ns = iree_profile_model_duration_scale_ticks_to_ns(
+        &duration_scale, device_time.duration_ticks, &device_time.duration_ns);
+    if (device_time.has_duration_ns) {
+      device_time.duration_scale_source = duration_scale.source;
+    }
+  }
+
   iree_profile_model_clock_fit_t clock_fit;
   if (!iree_profile_export_try_get_driver_host_cpu_clock_fit(
           model, physical_device_ordinal, &clock_fit)) {
@@ -164,8 +180,6 @@ iree_profile_export_calculate_device_time(const iree_profile_model_t* model,
   device_time.clock_fit_last_sample_id = clock_fit.last_sample_id;
   device_time.start_driver_host_cpu_time_ns = start_driver_host_cpu_time_ns;
   device_time.end_driver_host_cpu_time_ns = end_driver_host_cpu_time_ns;
-  device_time.duration_ns =
-      end_driver_host_cpu_time_ns - start_driver_host_cpu_time_ns;
   return device_time;
 }
 
@@ -225,7 +239,7 @@ static iree_status_t iree_profile_export_process_device_records(
   (void)model;
   iree_profile_typed_record_iterator_t iterator;
   iree_profile_typed_record_iterator_initialize(
-      record, sizeof(iree_hal_profile_device_record_t), &iterator);
+      record, IREE_HAL_PROFILE_DEVICE_RECORD_MIN_LENGTH, &iterator);
   iree_status_t status = iree_ok_status();
   while (iree_status_is_ok(status)) {
     iree_profile_typed_record_t typed_record;
@@ -234,8 +248,10 @@ static iree_status_t iree_profile_export_process_device_records(
                                                      &has_record);
     if (!iree_status_is_ok(status) || !has_record) break;
 
-    iree_hal_profile_device_record_t device_record;
-    memcpy(&device_record, typed_record.contents.data, sizeof(device_record));
+    iree_hal_profile_device_record_t device_record =
+        iree_hal_profile_device_record_default();
+    memcpy(&device_record, typed_record.contents.data,
+           iree_min(typed_record.contents.data_length, sizeof(device_record)));
     const bool has_uuid = iree_all_bits_set(
         device_record.flags, IREE_HAL_PROFILE_DEVICE_FLAG_PHYSICAL_DEVICE_UUID);
     iree_profile_export_print_prefix(file, "device", record_index);
@@ -254,6 +270,13 @@ static iree_status_t iree_profile_export_process_device_records(
     } else {
       fprintf(file, "null");
     }
+    const bool has_timestamp_frequency = iree_all_bits_set(
+        device_record.flags, IREE_HAL_PROFILE_DEVICE_FLAG_TIMESTAMP_FREQUENCY);
+    fprintf(file,
+            ",\"timestamp_frequency_hz_present\":%s"
+            ",\"timestamp_frequency_hz\":%" PRIu64,
+            has_timestamp_frequency ? "true" : "false",
+            has_timestamp_frequency ? device_record.timestamp_frequency_hz : 0);
     fputs("}\n", file);
   }
   return status;
@@ -593,6 +616,8 @@ static iree_status_t iree_profile_export_process_dispatch_records(
           ",\"start_driver_host_cpu_time_ns\":%" PRId64
           ",\"end_driver_host_cpu_time_ns\":%" PRId64
           ",\"duration_time_domain\":\"device_tick_duration_ns\""
+          ",\"duration_scale_available\":%s"
+          ",\"duration_scale_source\":\"%s\""
           ",\"duration_ns\":%" PRId64 "}\n",
           dispatch_record.flags, dispatch_record.workgroup_count[0],
           dispatch_record.workgroup_count[1],
@@ -604,7 +629,11 @@ static iree_status_t iree_profile_export_process_dispatch_records(
           device_time.clock_fit_first_sample_id,
           device_time.clock_fit_last_sample_id,
           device_time.start_driver_host_cpu_time_ns,
-          device_time.end_driver_host_cpu_time_ns, device_time.duration_ns);
+          device_time.end_driver_host_cpu_time_ns,
+          device_time.has_duration_ns ? "true" : "false",
+          iree_profile_model_duration_scale_source_name(
+              device_time.duration_scale_source),
+          device_time.has_duration_ns ? device_time.duration_ns : 0);
     }
   }
   return status;
@@ -662,6 +691,8 @@ static iree_status_t iree_profile_export_process_queue_device_event_records(
             ",\"start_driver_host_cpu_time_ns\":%" PRId64
             ",\"end_driver_host_cpu_time_ns\":%" PRId64
             ",\"duration_time_domain\":\"device_tick_duration_ns\""
+            ",\"duration_scale_available\":%s"
+            ",\"duration_scale_source\":\"%s\""
             ",\"duration_ns\":%" PRId64 "}\n",
             queue_device_event.type, queue_device_event.flags,
             queue_device_event.payload_length,
@@ -672,7 +703,11 @@ static iree_status_t iree_profile_export_process_queue_device_event_records(
             device_time.clock_fit_first_sample_id,
             device_time.clock_fit_last_sample_id,
             device_time.start_driver_host_cpu_time_ns,
-            device_time.end_driver_host_cpu_time_ns, device_time.duration_ns);
+            device_time.end_driver_host_cpu_time_ns,
+            device_time.has_duration_ns ? "true" : "false",
+            iree_profile_model_duration_scale_source_name(
+                device_time.duration_scale_source),
+            device_time.has_duration_ns ? device_time.duration_ns : 0);
   }
   return status;
 }
@@ -1213,6 +1248,8 @@ static iree_status_t iree_profile_export_process_counter_sample_records(
           ",\"start_driver_host_cpu_time_ns\":%" PRId64
           ",\"end_driver_host_cpu_time_ns\":%" PRId64
           ",\"duration_time_domain\":\"device_tick_duration_ns\""
+          ",\"duration_scale_available\":%s"
+          ",\"duration_scale_source\":\"%s\""
           ",\"duration_ns\":%" PRId64 ",\"values\":[",
           sample_record.scope, sample_record.dispatch_event_id,
           sample_record.submission_id, sample_record.command_buffer_id,
@@ -1226,7 +1263,11 @@ static iree_status_t iree_profile_export_process_counter_sample_records(
           device_time.clock_fit_first_sample_id,
           device_time.clock_fit_last_sample_id,
           device_time.start_driver_host_cpu_time_ns,
-          device_time.end_driver_host_cpu_time_ns, device_time.duration_ns);
+          device_time.end_driver_host_cpu_time_ns,
+          device_time.has_duration_ns ? "true" : "false",
+          iree_profile_model_duration_scale_source_name(
+              device_time.duration_scale_source),
+          device_time.has_duration_ns ? device_time.duration_ns : 0);
       for (uint32_t i = 0; i < sample_record.sample_value_count; ++i) {
         if (i != 0) fputc(',', file);
         fprintf(file, "%" PRIu64, values[i]);
@@ -1685,7 +1726,11 @@ static iree_status_t iree_profile_export_ireeperf_jsonl_file(
             "\"driver-sampled system timestamp units scaled by "
             "host_system_frequency_hz\","
             "\"device_tick_duration_ns\":"
-            "\"duration nanoseconds derived from device_tick clock fit\"},"
+            "\"duration nanoseconds scaled from elapsed device ticks\"},"
+            "\"duration_scale\":{\"preferred_basis\":"
+            "\"device_metadata_timestamp_frequency\","
+            "\"legacy_basis\":\"aligned_clock_correlation\","
+            "\"rounding\":\"nearest_integer_nanosecond\"},"
             "\"clock_fit\":{\"basis\":\"first_last_clock_correlation\","
             "\"rounding\":\"nearest_integer_nanosecond\"}}\n",
             IREE_PROFILE_EXPORT_SCHEMA_VERSION,

@@ -3,7 +3,7 @@
 
 spirv.target<vulkan1_3> @target
 
-low.func.def target(@target) abi(shader_entry_point) @spirv_workgroup_storage_i32_roundtrip() asm<spirv.logical.core> {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_workgroup_storage_i32_roundtrip() asm {
   %storage = storage {byte_alignment = 4, byte_length = 16} : low.storage<workgroup>
   %base = storage_address %storage : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
   %index = OpConstant.i32 0

@@ -1,0 +1,34 @@
+// RUN: pass canonicalize
+
+// Static range sizes fold to an aligned dense layout. The final extent is
+// rounded to the greatest range alignment so it is a valid repeated stride.
+func.def @pack_static_ranges() -> (offset, offset, offset, offset) {
+  %header_bytes = index.constant 13 : offset
+  %payload_bytes = index.constant 20 : offset
+  %tail_bytes = index.constant 1 : offset
+  %total, %header_offset, %payload_offset, %tail_offset = buffer.pack [align(4) %header_bytes, align(16) %payload_bytes, align(1) %tail_bytes] : offset
+  func.return %total, %header_offset, %payload_offset, %tail_offset : offset, offset, offset, offset
+}
+// ----
+func.def @pack_static_ranges() -> (offset, offset, offset, offset) {
+  %total = index.constant 48 : offset
+  %header_offset = index.constant 0 : offset
+  %payload_offset = index.constant 16 : offset
+  %tail_offset = index.constant 36 : offset
+  func.return %total, %header_offset, %payload_offset, %tail_offset : offset, offset, offset, offset
+}
+
+// ====
+
+// Length queries reuse the physical extent carried by buffer-root facts.
+func.def @length_of_fixed_alloca() -> (offset) {
+  %byte_length = index.constant 48 : offset
+  %buffer = buffer.alloca<private> align(16) %byte_length : buffer
+  %actual_length = buffer.length %buffer
+  func.return %actual_length : offset
+}
+// ----
+func.def @length_of_fixed_alloca() -> (offset) {
+  %actual_length = index.constant 48 : offset
+  func.return %actual_length : offset
+}

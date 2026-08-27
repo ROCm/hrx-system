@@ -1,17 +1,17 @@
 // RUN: emit source-low output=low sanitizer=access
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @sanitizer_access_report_default(%input: buffer) {
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
-  %input_view = buffer.view %input_global[%base] : buffer -> view<1xi32, #dense>
-  sanitizer.assert.access<read> %input_view[0] : view<1xi32, #dense>
+  %input_view = buffer.view %input_global[%base] : buffer -> view<1xi32>
+  sanitizer.assert.access<read> %input_view[0] : view<1xi32>
   func.return
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @sanitizer_access_report_default() asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @sanitizer_access_report_default() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %5 = s_getpc_b64
   %6 = slice %5[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>

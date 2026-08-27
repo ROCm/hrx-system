@@ -17,29 +17,12 @@ loom_cc_library(
   SRCS
     "assembly.c"
   DEPS
-    ::fragment
     iree::base
     iree::base::internal::arena
-    loom::codegen::low::move_sequence
     loom::codegen::low::packet
     loom::ir
     loom::ops::low
     loom::ops::op_defs
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    fragment
-  HDRS
-    "fragment.h"
-  SRCS
-    "fragment.c"
-  DEPS
-    iree::base
-    loom::codegen::low::packet
-    loom::ir
-    loom::ops::low
   PUBLIC
 )
 

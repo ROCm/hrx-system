@@ -1,0 +1,565 @@
+// FP8 checkpoint storage with finite payload facts on the view.
+//
+// Model checkpoint importers that have validated FP8 weights as finite should
+// encode that contract in the physical storage schema. The element type still
+// names the logical payload type, while the storage schema tells the compiler
+// that loads from the view cannot produce NaN or infinity payloads.
+config.decl @finite_storage_decode.row_capacity : %value: index where [range(%value, 1, 4294967295)]
+
+config.decl @finite_storage_decode.input_capacity : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+
+config.decl @finite_storage_decode.output_capacity : %value: index where [range(%value, 16, 16384), mul(%value, 16)]
+
+kernel.def @fp8_finite_storage_decode(%row_count: index) {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %row_capacity = config.get @finite_storage_decode.row_capacity : index
+  %rounded_rows = index.add %row_capacity, %rounding : index
+  %workgroups = index.div %rounded_rows, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%row_count: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %row_capacity = config.get @finite_storage_decode.row_capacity : index
+  %bounded_row_count = index.assume %row_count [le(%row_count, %row_capacity)] : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size = index.constant 64 : index
+  %vector_column = index.constant 0 : index
+  %row = index.madd %workgroup, %workgroup_size, %lane : index
+  %in_bounds = index.cmp ult, %row, %bounded_row_count : index
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_layout = encoding.layout.strided [4, 1] : encoding<layout>
+  %input_schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=4, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %input_storage = encoding.define #encoding.storage {layout = %input_layout : encoding<layout>, schema = %input_schema : encoding<schema>} : encoding<storage>
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x4xf8E4M3, %input_storage>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x4xf32>
+  scf.if %in_bounds {
+    %packed = vector.load %input_view[%row, %vector_column] : view<[%bounded_row_count]x4xf8E4M3, %input_storage> -> vector<4xf8E4M3>
+    %decoded = vector.extf %packed : vector<4xf8E4M3> to vector<4xf32>
+    vector.store %decoded, %output_view[%row, %vector_column] : vector<4xf32>, view<[%bounded_row_count]x4xf32>
+  }
+  kernel.return
+}
+
+// Materialize finite FP8 checkpoint rows into BF16 values for BF16 GEMM paths.
+kernel.def @fp8_finite_storage_decode_bf16(%row_count: index) {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %row_capacity = config.get @finite_storage_decode.row_capacity : index
+  %rounded_rows = index.add %row_capacity, %rounding : index
+  %workgroups = index.div %rounded_rows, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%row_count: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %row_capacity = config.get @finite_storage_decode.row_capacity : index
+  %bounded_row_count = index.assume %row_count [le(%row_count, %row_capacity)] : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size = index.constant 64 : index
+  %vector_column = index.constant 0 : index
+  %row = index.madd %workgroup, %workgroup_size, %lane : index
+  %in_bounds = index.cmp ult, %row, %bounded_row_count : index
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_layout = encoding.layout.strided [4, 1] : encoding<layout>
+  %input_schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=4, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %input_storage = encoding.define #encoding.storage {layout = %input_layout : encoding<layout>, schema = %input_schema : encoding<schema>} : encoding<storage>
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x4xf8E4M3, %input_storage>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x4xbf16>
+  scf.if %in_bounds {
+    %packed = vector.load %input_view[%row, %vector_column] : view<[%bounded_row_count]x4xf8E4M3, %input_storage> -> vector<4xf8E4M3>
+    %decoded = vector.extf %packed : vector<4xf8E4M3> to vector<4xbf16>
+    vector.store %decoded, %output_view[%row, %vector_column] : vector<4xbf16>, view<[%bounded_row_count]x4xbf16>
+  }
+  kernel.return
+}
+
+// Materialize finite FP8 checkpoint rows into F16 values.
+kernel.def @fp8_finite_storage_decode_f16(%row_count: index) {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %row_capacity = config.get @finite_storage_decode.row_capacity : index
+  %rounded_rows = index.add %row_capacity, %rounding : index
+  %workgroups = index.div %rounded_rows, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%row_count: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %row_capacity = config.get @finite_storage_decode.row_capacity : index
+  %bounded_row_count = index.assume %row_count [le(%row_count, %row_capacity)] : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size = index.constant 64 : index
+  %vector_column = index.constant 0 : index
+  %row = index.madd %workgroup, %workgroup_size, %lane : index
+  %in_bounds = index.cmp ult, %row, %bounded_row_count : index
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_layout = encoding.layout.strided [4, 1] : encoding<layout>
+  %input_schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=4, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %input_storage = encoding.define #encoding.storage {layout = %input_layout : encoding<layout>, schema = %input_schema : encoding<schema>} : encoding<storage>
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x4xf8E4M3, %input_storage>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x4xf16>
+  scf.if %in_bounds {
+    %packed = vector.load %input_view[%row, %vector_column] : view<[%bounded_row_count]x4xf8E4M3, %input_storage> -> vector<4xf8E4M3>
+    %decoded = vector.extf %packed : vector<4xf8E4M3> to vector<4xf16>
+    vector.store %decoded, %output_view[%row, %vector_column] : vector<4xf16>, view<[%bounded_row_count]x4xf16>
+  }
+  kernel.return
+}
+
+// Materialize finite BF8 checkpoint rows into F16 values.
+kernel.def @bf8_finite_storage_decode_f16(%row_count: index) {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %row_capacity = config.get @finite_storage_decode.row_capacity : index
+  %rounded_rows = index.add %row_capacity, %rounding : index
+  %workgroups = index.div %rounded_rows, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%row_count: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %row_capacity = config.get @finite_storage_decode.row_capacity : index
+  %bounded_row_count = index.assume %row_count [le(%row_count, %row_capacity)] : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size = index.constant 64 : index
+  %vector_column = index.constant 0 : index
+  %row = index.madd %workgroup, %workgroup_size, %lane : index
+  %in_bounds = index.cmp ult, %row, %bounded_row_count : index
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_layout = encoding.layout.strided [4, 1] : encoding<layout>
+  %input_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=4, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %input_storage = encoding.define #encoding.storage {layout = %input_layout : encoding<layout>, schema = %input_schema : encoding<schema>} : encoding<storage>
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x4xf8E5M2, %input_storage>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x4xf16>
+  scf.if %in_bounds {
+    %packed = vector.load %input_view[%row, %vector_column] : view<[%bounded_row_count]x4xf8E5M2, %input_storage> -> vector<4xf8E5M2>
+    %decoded = vector.extf %packed : vector<4xf8E5M2> to vector<4xf16>
+    vector.store %decoded, %output_view[%row, %vector_column] : vector<4xf16>, view<[%bounded_row_count]x4xf16>
+  }
+  kernel.return
+}
+
+// Materialize finite FP8 checkpoint rows through per-row scales into BF16.
+kernel.def @fp8_finite_storage_scale_decode_bf16(%row_count: index) {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %row_capacity = config.get @finite_storage_decode.row_capacity : index
+  %rounded_rows = index.add %row_capacity, %rounding : index
+  %workgroups = index.div %rounded_rows, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%row_count: index, %input: buffer, %scale: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %row_capacity = config.get @finite_storage_decode.row_capacity : index
+  %bounded_row_count = index.assume %row_count [le(%row_count, %row_capacity)] : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size = index.constant 64 : index
+  %vector_column = index.constant 0 : index
+  %row = index.madd %workgroup, %workgroup_size, %lane : index
+  %in_bounds = index.cmp ult, %row, %bounded_row_count : index
+  %input_noalias, %scale_noalias, %output_noalias = buffer.assume.noalias %input, %scale, %output : buffer, buffer, buffer
+  %input_layout = encoding.layout.strided [4, 1] : encoding<layout>
+  %input_schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=4, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %input_storage = encoding.define #encoding.storage {layout = %input_layout : encoding<layout>, schema = %input_schema : encoding<schema>} : encoding<storage>
+  %decode_schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=4, rounding=finite_only, scale_format=f32, scale_group_elements=4, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x4xf8E4M3, %input_storage>
+  %scale_view = buffer.view %scale_noalias[%base] : buffer -> view<[%bounded_row_count]xf32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x4xbf16>
+  scf.if %in_bounds {
+    %packed = vector.load %input_view[%row, %vector_column] : view<[%bounded_row_count]x4xf8E4M3, %input_storage> -> vector<4xf8E4M3>
+    %row_scale = view.load %scale_view[%row] : view<[%bounded_row_count]xf32> -> f32
+    %scale_vector = vector.splat %row_scale : vector<1xf32>
+    %decoded = vector.decode %packed using %decode_schema {scale = %scale_vector : vector<1xf32>} : vector<4xf8E4M3>, encoding<schema> -> vector<4xbf16>
+    vector.store %decoded, %output_view[%row, %vector_column] : vector<4xbf16>, view<[%bounded_row_count]x4xbf16>
+  }
+  kernel.return
+}
+
+// Materialize finite BF8 checkpoint rows through per-row scales into BF16.
+kernel.def @bf8_finite_storage_scale_decode_bf16(%row_count: index) {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %row_capacity = config.get @finite_storage_decode.row_capacity : index
+  %rounded_rows = index.add %row_capacity, %rounding : index
+  %workgroups = index.div %rounded_rows, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%row_count: index, %input: buffer, %scale: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %row_capacity = config.get @finite_storage_decode.row_capacity : index
+  %bounded_row_count = index.assume %row_count [le(%row_count, %row_capacity)] : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size = index.constant 64 : index
+  %vector_column = index.constant 0 : index
+  %row = index.madd %workgroup, %workgroup_size, %lane : index
+  %in_bounds = index.cmp ult, %row, %bounded_row_count : index
+  %input_noalias, %scale_noalias, %output_noalias = buffer.assume.noalias %input, %scale, %output : buffer, buffer, buffer
+  %input_layout = encoding.layout.strided [4, 1] : encoding<layout>
+  %input_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=4, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %input_storage = encoding.define #encoding.storage {layout = %input_layout : encoding<layout>, schema = %input_schema : encoding<schema>} : encoding<storage>
+  %decode_schema = encoding.define #encoding.f8e5m2<affine=scale_only, payload_elements=4, rounding=finite_only, scale_format=f32, scale_group_elements=4, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x4xf8E5M2, %input_storage>
+  %scale_view = buffer.view %scale_noalias[%base] : buffer -> view<[%bounded_row_count]xf32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x4xbf16>
+  scf.if %in_bounds {
+    %packed = vector.load %input_view[%row, %vector_column] : view<[%bounded_row_count]x4xf8E5M2, %input_storage> -> vector<4xf8E5M2>
+    %row_scale = view.load %scale_view[%row] : view<[%bounded_row_count]xf32> -> f32
+    %scale_vector = vector.splat %row_scale : vector<1xf32>
+    %decoded = vector.decode %packed using %decode_schema {scale = %scale_vector : vector<1xf32>} : vector<4xf8E5M2>, encoding<schema> -> vector<4xbf16>
+    vector.store %decoded, %output_view[%row, %vector_column] : vector<4xbf16>, view<[%bounded_row_count]x4xbf16>
+  }
+  kernel.return
+}
+
+// Keep adjacent FP8 lanes independent when one finite lane is subnormal and the
+// paired lane is normal. This covers the packed repair path used before scaling
+// compact FP8 checkpoint payloads into BF16 GEMM inputs.
+kernel.def @fp8_finite_storage_zero_scale_mixed_pair_bf16() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %scale: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %vector_origin = index.constant 0 : index
+  %scale_index = index.constant 0 : index
+  %input_layout = encoding.layout.strided [1] : encoding<layout>
+  %input_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, rounding=finite_only> : encoding<schema>
+  %input_storage = encoding.define #encoding.storage {layout = %input_layout : encoding<layout>, schema = %input_schema : encoding<schema>} : encoding<storage>
+  %input_view = buffer.view %input[%base] : buffer -> view<8xf8E4M3, %input_storage>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<1xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<8xbf16>
+  %packed = vector.load %input_view[%vector_origin] : view<8xf8E4M3, %input_storage> -> vector<8xf8E4M3>
+  %wide = vector.extf %packed : vector<8xf8E4M3> to vector<8xf32>
+  %row_scale = view.load %scale_view[%scale_index] : view<1xf32> -> f32
+  %scale_vector = vector.splat %row_scale : vector<8xf32>
+  %scaled = vector.mulf %wide, %scale_vector : vector<8xf32>
+  %rounded = vector.fptrunc %scaled : vector<8xf32> to vector<8xbf16>
+  vector.store %rounded, %output_view[%vector_origin] : vector<8xbf16>, view<8xbf16>
+  kernel.return
+}
+
+kernel.def @bf8_finite_storage_zero_scale_mixed_pair_bf16() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %scale: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %vector_origin = index.constant 0 : index
+  %scale_index = index.constant 0 : index
+  %input_layout = encoding.layout.strided [1] : encoding<layout>
+  %input_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, rounding=finite_only> : encoding<schema>
+  %input_storage = encoding.define #encoding.storage {layout = %input_layout : encoding<layout>, schema = %input_schema : encoding<schema>} : encoding<storage>
+  %input_view = buffer.view %input[%base] : buffer -> view<8xf8E5M2, %input_storage>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<1xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<8xbf16>
+  %packed = vector.load %input_view[%vector_origin] : view<8xf8E5M2, %input_storage> -> vector<8xf8E5M2>
+  %wide = vector.extf %packed : vector<8xf8E5M2> to vector<8xf32>
+  %row_scale = view.load %scale_view[%scale_index] : view<1xf32> -> f32
+  %scale_vector = vector.splat %row_scale : vector<8xf32>
+  %scaled = vector.mulf %wide, %scale_vector : vector<8xf32>
+  %rounded = vector.fptrunc %scaled : vector<8xf32> to vector<8xbf16>
+  vector.store %rounded, %output_view[%vector_origin] : vector<8xbf16>, view<8xbf16>
+  kernel.return
+}
+
+// Prepare one compact RHS-tile row group through finite FP8 storage and a zero
+// row scale. The source values may require zero/subnormal repair before scale
+// application; multiplying by zero must still materialize exact BF16 zero.
+kernel.def @fp8_finite_storage_compact_rhs_tile_zero_scale_bf16(%output_size: index, %input_size: index) {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  %tile_extent = index.constant 16 : index
+  %input_capacity = config.get @finite_storage_decode.input_capacity : index
+  %output_capacity = config.get @finite_storage_decode.output_capacity : index
+  %input_tile_count = index.div %input_capacity, %tile_extent : index
+  %output_tile_count = index.div %output_capacity, %tile_extent : index
+  kernel.launch.config workgroups(%input_tile_count, %output_tile_count, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%output_size: index, %input_size: index, %weight: buffer, %scale: buffer, %target: buffer) {
+  %base = index.constant 0 : offset
+  %segments_per_output_row = index.constant 2 : index
+  %segment_extent = index.constant 8 : index
+  %tile_extent = index.constant 16 : index
+  %input_tile0 = kernel.workgroup.id<x> : index
+  %input_tile = index.assume %input_tile0 [range(%input_tile0, 0, 4095)] : index
+  %output_tile0 = kernel.workgroup.id<y> : index
+  %output_tile = index.assume %output_tile0 [range(%output_tile0, 0, 1023)] : index
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
+  %weight_noalias, %scale_noalias, %target_noalias = buffer.assume.noalias %weight, %scale, %target : buffer, buffer, buffer
+  %dense = encoding.layout.dense : encoding<layout>
+  %weight_schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, rounding=finite_only> : encoding<schema>
+  %weight_storage = encoding.define #encoding.storage {layout = %dense : encoding<layout>, schema = %weight_schema : encoding<schema>} : encoding<storage>
+  %input_capacity = config.get @finite_storage_decode.input_capacity : index
+  %output_capacity = config.get @finite_storage_decode.output_capacity : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 16, 65536), mul(%input_size, 16), le(%input_size, %input_capacity)] : index
+  %bounded_output_size = index.assume %output_size [range(%output_size, 16, 16384), mul(%output_size, 16), le(%output_size, %output_capacity)] : index
+  %input_tile_count = index.div %bounded_input_size, %tile_extent : index
+  %output_tile_count = index.div %bounded_output_size, %tile_extent : index
+  %weight_view = buffer.view %weight_noalias[%base] : buffer -> view<[%bounded_output_size]x[%input_tile_count]x16xf8E4M3, %weight_storage>
+  %scale_view = buffer.view %scale_noalias[%base] : buffer -> view<[%bounded_output_size]xf32>
+  %target_view = buffer.view %target_noalias[%base] : buffer -> view<[%output_tile_count]x[%input_tile_count]x16x16xbf16>
+  %segment = index.rem %lane, %segments_per_output_row : index
+  %output_lane0 = index.div %lane, %segments_per_output_row : index
+  %output_lane = index.assume %output_lane0 [range(%output_lane0, 0, 15)] : index
+  %segment_offset0 = index.mul %segment, %segment_extent : index
+  %segment_offset = index.assume %segment_offset0 [range(%segment_offset0, 0, 8)] : index
+  %output_row = index.madd %output_tile, %tile_extent, %output_lane : index
+  %input_tile_in_bounds = index.cmp ult, %input_tile, %input_tile_count : index
+  %output_tile_in_bounds = index.cmp ult, %output_tile, %output_tile_count : index
+  %output_in_bounds = index.cmp ult, %output_row, %bounded_output_size : index
+  scf.if %output_tile_in_bounds {
+    scf.if %input_tile_in_bounds {
+      scf.if %output_in_bounds {
+        %weight_fp8 = vector.load %weight_view[%output_row, %input_tile, %segment_offset] : view<[%bounded_output_size]x[%input_tile_count]x16xf8E4M3, %weight_storage> -> vector<8xf8E4M3>
+        %weight_f32 = vector.extf %weight_fp8 : vector<8xf8E4M3> to vector<8xf32>
+        %row_scale = view.load %scale_view[%output_row] : view<[%bounded_output_size]xf32> -> f32
+        %scale_vector = vector.splat %row_scale : vector<8xf32>
+        %scaled = vector.mulf<reassoc|nsz|contract> %weight_f32, %scale_vector : vector<8xf32>
+        %rounded = vector.fptrunc %scaled : vector<8xf32> to vector<8xbf16>
+        vector.store %rounded, %target_view[%output_tile, %input_tile, %output_lane, %segment_offset] : vector<8xbf16>, view<[%output_tile_count]x[%input_tile_count]x16x16xbf16>
+      }
+    }
+  }
+  kernel.return
+}
+
+check.case public @fp8_finite_storage_decode_case {
+  // Cover a single row and a tail row crossing the 64-workitem boundary.
+  %row_count = check.param.choice values([1, 65]) name("row_count") : index
+  %input = check.generate.fill value(1.0) : tensor<[%row_count]x4xf8E4M3>
+  %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xf32>
+  %expected = check.generate.fill value(1.0) : tensor<[%row_count]x4xf32>
+  kernel.launch @fp8_finite_storage_decode[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]x4xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xf32>
+  check.return
+}
+
+check.case public @fp8_finite_storage_decode_bf16_case {
+  // Cover a single row and a tail row crossing the 64-workitem boundary.
+  %row_count = check.param.choice values([1, 65]) name("row_count") : index
+  %input = check.generate.fill value(1.0) : tensor<[%row_count]x4xf8E4M3>
+  %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<[%row_count]x4xbf16>
+  kernel.launch @fp8_finite_storage_decode_bf16[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]x4xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xbf16>
+  check.return
+}
+
+check.case public @fp8_finite_storage_zero_decode_bf16_case {
+  // Zero is finite but still needs exact repair in the packed BF16 decode path.
+  %row_count = check.param.choice values([1, 65]) name("row_count") : index
+  %input = check.generate.fill value(0.0) : tensor<[%row_count]x4xf8E4M3>
+  %output = check.generate.fill value(1.0) : tensor<[%row_count]x4xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<[%row_count]x4xbf16>
+  kernel.launch @fp8_finite_storage_decode_bf16[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]x4xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xbf16>
+  check.return
+}
+
+check.case public @fp8_finite_storage_mixed_subnormal_decode_bf16_case {
+  // Span -7 through +7 subnormal units, zero, and the minimum normal value
+  // across adjacent packed lanes.
+  %row_count = check.param.choice values([4]) name("row_count") : index
+  %input = check.generate.iota offset(-0.013671875) step(0.001953125) : tensor<[%row_count]x4xf8E4M3>
+  %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xbf16>
+  %expected = check.generate.iota offset(-0.013671875) step(0.001953125) : tensor<[%row_count]x4xbf16>
+  kernel.launch @fp8_finite_storage_decode_bf16[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]x4xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xbf16>
+  check.return
+}
+
+check.case public @fp8_finite_storage_decode_f16_case {
+  // Cover a single row and a tail row crossing the 64-workitem boundary.
+  %row_count = check.param.choice values([1, 65]) name("row_count") : index
+  %input = check.generate.fill value(1.0) : tensor<[%row_count]x4xf8E4M3>
+  %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xf16>
+  %expected = check.generate.fill value(1.0) : tensor<[%row_count]x4xf16>
+  kernel.launch @fp8_finite_storage_decode_f16[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]x4xf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xf16>
+  check.return
+}
+
+check.case public @fp8_finite_storage_zero_decode_f16_case {
+  // Zero is finite but still needs exact repair in the packed F16 decode path.
+  %row_count = check.param.choice values([1, 65]) name("row_count") : index
+  %input = check.generate.fill value(0.0) : tensor<[%row_count]x4xf8E4M3>
+  %output = check.generate.fill value(1.0) : tensor<[%row_count]x4xf16>
+  %expected = check.generate.fill value(0.0) : tensor<[%row_count]x4xf16>
+  kernel.launch @fp8_finite_storage_decode_f16[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]x4xf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xf16>
+  check.return
+}
+
+check.case public @fp8_finite_storage_subnormal_decode_f16_case {
+  // FP8 0x01 is the smallest E4M3 finite subnormal and needs exact repair.
+  %row_count = check.param.choice values([1, 65]) name("row_count") : index
+  %input = check.generate.fill value(0.001953125) : tensor<[%row_count]x4xf8E4M3>
+  %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xf16>
+  %expected = check.generate.fill value(0.001953125) : tensor<[%row_count]x4xf16>
+  kernel.launch @fp8_finite_storage_decode_f16[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]x4xf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xf16>
+  check.return
+}
+
+check.case public @bf8_finite_storage_decode_f16_case {
+  // Cover a single row and a tail row crossing the 64-workitem boundary.
+  %row_count = check.param.choice values([1, 65]) name("row_count") : index
+  %input = check.generate.fill value(1.0) : tensor<[%row_count]x4xf8E5M2>
+  %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xf16>
+  %expected = check.generate.fill value(1.0) : tensor<[%row_count]x4xf16>
+  kernel.launch @bf8_finite_storage_decode_f16[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf8E5M2>, tensor<[%row_count]x4xf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xf16>
+  check.return
+}
+
+check.case public @bf8_finite_storage_zero_decode_f16_case {
+  // Zero is finite but still needs exact repair in the packed F16 decode path.
+  %row_count = check.param.choice values([1, 65]) name("row_count") : index
+  %input = check.generate.fill value(0.0) : tensor<[%row_count]x4xf8E5M2>
+  %output = check.generate.fill value(1.0) : tensor<[%row_count]x4xf16>
+  %expected = check.generate.fill value(0.0) : tensor<[%row_count]x4xf16>
+  kernel.launch @bf8_finite_storage_decode_f16[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf8E5M2>, tensor<[%row_count]x4xf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xf16>
+  check.return
+}
+
+check.case public @bf8_finite_storage_subnormal_decode_f16_case {
+  // BF8 0x01 is the smallest E5M2 finite subnormal and needs exact repair.
+  %row_count = check.param.choice values([1, 65]) name("row_count") : index
+  %input = check.generate.fill value(1.52587890625e-05) : tensor<[%row_count]x4xf8E5M2>
+  %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xf16>
+  %expected = check.generate.fill value(1.52587890625e-05) : tensor<[%row_count]x4xf16>
+  kernel.launch @bf8_finite_storage_decode_f16[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf8E5M2>, tensor<[%row_count]x4xf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xf16>
+  check.return
+}
+
+check.case public @fp8_finite_storage_scale_decode_bf16_case {
+  // Cover a single row and a tail row crossing the 64-workitem boundary.
+  %row_count = check.param.choice values([1, 65]) name("row_count") : index
+  %input = check.generate.fill value(1.0) : tensor<[%row_count]x4xf8E4M3>
+  %scale = check.generate.fill value(2.0) : tensor<[%row_count]xf32>
+  %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xbf16>
+  %expected = check.generate.fill value(2.0) : tensor<[%row_count]x4xbf16>
+  kernel.launch @fp8_finite_storage_scale_decode_bf16[%row_count](%row_count, %input, %scale, %output) : [index](index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]xf32>, tensor<[%row_count]x4xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xbf16>
+  check.return
+}
+
+check.case public @bf8_finite_storage_scale_decode_bf16_case {
+  // Cover a single row and a tail row crossing the 64-workitem boundary.
+  %row_count = check.param.choice values([1, 65]) name("row_count") : index
+  %input = check.generate.fill value(1.0) : tensor<[%row_count]x4xf8E5M2>
+  %scale = check.generate.fill value(2.0) : tensor<[%row_count]xf32>
+  %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xbf16>
+  %expected = check.generate.fill value(2.0) : tensor<[%row_count]x4xbf16>
+  kernel.launch @bf8_finite_storage_scale_decode_bf16[%row_count](%row_count, %input, %scale, %output) : [index](index, tensor<[%row_count]x4xf8E5M2>, tensor<[%row_count]xf32>, tensor<[%row_count]x4xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xbf16>
+  check.return
+}
+
+check.case public @fp8_finite_storage_zero_scale_mixed_pair_bf16_case {
+  // The first pair contains FP8 0x01 and a normal value after materialization.
+  %input = check.generate.iota offset(0.001953125) step(43.998046875) : tensor<8xf8E4M3>
+  %scale = check.generate.fill value(0.0) : tensor<1xf32>
+  %output = check.generate.fill value(1.0) : tensor<8xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<8xbf16>
+  kernel.launch @fp8_finite_storage_zero_scale_mixed_pair_bf16(%input, %scale, %output) : (tensor<8xf8E4M3>, tensor<1xf32>, tensor<8xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<8xbf16>
+  check.return
+}
+
+check.case public @bf8_finite_storage_zero_scale_mixed_pair_bf16_case {
+  // The first pair contains BF8 0x01 and a normal value after materialization.
+  %input = check.generate.iota offset(1.52587890625e-05) step(43.999984741210938) : tensor<8xf8E5M2>
+  %scale = check.generate.fill value(0.0) : tensor<1xf32>
+  %output = check.generate.fill value(1.0) : tensor<8xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<8xbf16>
+  kernel.launch @bf8_finite_storage_zero_scale_mixed_pair_bf16(%input, %scale, %output) : (tensor<8xf8E5M2>, tensor<1xf32>, tensor<8xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<8xbf16>
+  check.return
+}
+
+check.case public @fp8_finite_storage_compact_rhs_tile_zero_scale_bf16_k2048_case {
+  %output_size = check.param.choice values([16]) name("output_size") : index
+  %input_size = check.param.choice values([2048]) name("input_size") : index
+  %seed = check.param.seed base(19791451332629071) count(1) : i64
+  %weight = check.generate.random.uniform seed(%seed) range(-448.0 to 448.0) : tensor<[%output_size]x[%input_size]xf8E4M3>
+  %scale = check.generate.fill value(0.0) : tensor<[%output_size]xf32>
+  %target = check.generate.fill value(1.0) : tensor<[%output_size]x[%input_size]xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<[%output_size]x[%input_size]xbf16>
+  kernel.launch @fp8_finite_storage_compact_rhs_tile_zero_scale_bf16[%output_size, %input_size](%output_size, %input_size, %weight, %scale, %target) : [index, index](index, index, tensor<[%output_size]x[%input_size]xf8E4M3>, tensor<[%output_size]xf32>, tensor<[%output_size]x[%input_size]xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%output_size]x[%input_size]xbf16>
+  check.return
+}
+
+check.case public @fp8_finite_storage_compact_rhs_tile_zero_scale_bf16_k4608_case {
+  %output_size = check.param.choice values([16]) name("output_size") : index
+  %input_size = check.param.choice values([4608]) name("input_size") : index
+  %seed = check.param.seed base(19791451332629071) count(1) : i64
+  %weight = check.generate.random.uniform seed(%seed) range(-448.0 to 448.0) : tensor<[%output_size]x[%input_size]xf8E4M3>
+  %scale = check.generate.fill value(0.0) : tensor<[%output_size]xf32>
+  %target = check.generate.fill value(1.0) : tensor<[%output_size]x[%input_size]xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<[%output_size]x[%input_size]xbf16>
+  kernel.launch @fp8_finite_storage_compact_rhs_tile_zero_scale_bf16[%output_size, %input_size](%output_size, %input_size, %weight, %scale, %target) : [index, index](index, index, tensor<[%output_size]x[%input_size]xf8E4M3>, tensor<[%output_size]xf32>, tensor<[%output_size]x[%input_size]xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%output_size]x[%input_size]xbf16>
+  check.return
+}
+
+check.benchmark<@fp8_finite_storage_decode_case>
+
+check.benchmark<@fp8_finite_storage_decode_case> @fp8_finite_storage_decode_single {row_count = 1}
+
+check.benchmark<@fp8_finite_storage_decode_case> @fp8_finite_storage_decode_tail {row_count = 65}
+
+check.benchmark<@fp8_finite_storage_decode_bf16_case>
+
+check.benchmark<@fp8_finite_storage_decode_bf16_case> @fp8_finite_storage_decode_bf16_single {row_count = 1}
+
+check.benchmark<@fp8_finite_storage_decode_bf16_case> @fp8_finite_storage_decode_bf16_tail {row_count = 65}
+
+check.benchmark<@fp8_finite_storage_zero_decode_bf16_case>
+
+check.benchmark<@fp8_finite_storage_mixed_subnormal_decode_bf16_case>
+
+check.benchmark<@fp8_finite_storage_decode_f16_case>
+
+check.benchmark<@fp8_finite_storage_decode_f16_case> @fp8_finite_storage_decode_f16_single {row_count = 1}
+
+check.benchmark<@fp8_finite_storage_decode_f16_case> @fp8_finite_storage_decode_f16_tail {row_count = 65}
+
+check.benchmark<@fp8_finite_storage_zero_decode_f16_case>
+
+check.benchmark<@fp8_finite_storage_subnormal_decode_f16_case>
+
+check.benchmark<@bf8_finite_storage_decode_f16_case>
+
+check.benchmark<@bf8_finite_storage_decode_f16_case> @bf8_finite_storage_decode_f16_single {row_count = 1}
+
+check.benchmark<@bf8_finite_storage_decode_f16_case> @bf8_finite_storage_decode_f16_tail {row_count = 65}
+
+check.benchmark<@bf8_finite_storage_zero_decode_f16_case>
+
+check.benchmark<@bf8_finite_storage_subnormal_decode_f16_case>
+
+check.benchmark<@fp8_finite_storage_scale_decode_bf16_case>
+
+check.benchmark<@fp8_finite_storage_scale_decode_bf16_case> @fp8_finite_storage_scale_decode_bf16_single {row_count = 1}
+
+check.benchmark<@fp8_finite_storage_scale_decode_bf16_case> @fp8_finite_storage_scale_decode_bf16_tail {row_count = 65}
+
+check.benchmark<@bf8_finite_storage_scale_decode_bf16_case>
+
+check.benchmark<@bf8_finite_storage_scale_decode_bf16_case> @bf8_finite_storage_scale_decode_bf16_single {row_count = 1}
+
+check.benchmark<@bf8_finite_storage_scale_decode_bf16_case> @bf8_finite_storage_scale_decode_bf16_tail {row_count = 65}
+
+check.benchmark<@fp8_finite_storage_zero_scale_mixed_pair_bf16_case>
+
+check.benchmark<@bf8_finite_storage_zero_scale_mixed_pair_bf16_case>
+
+check.benchmark<@fp8_finite_storage_compact_rhs_tile_zero_scale_bf16_k2048_case>
+
+check.benchmark<@fp8_finite_storage_compact_rhs_tile_zero_scale_bf16_k4608_case>

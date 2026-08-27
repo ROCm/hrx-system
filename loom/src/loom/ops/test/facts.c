@@ -16,6 +16,7 @@
 
 #include <stdint.h>
 
+#include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/storage_facts.h"
@@ -47,8 +48,10 @@ iree_status_t loom_test_constant_facts(loom_fact_context_t* context,
   loom_attribute_t attr = loom_op_attrs(op)[0];
   loom_value_id_t result_id = loom_test_constant_result(op);
   loom_type_t result_type = loom_module_value_type(module, result_id);
-  if (loom_scalar_type_is_float(loom_type_element_type(result_type))) {
-    result_facts[0] = loom_value_facts_exact_f64(loom_attr_as_f64(attr));
+  loom_scalar_type_t result_element_type = loom_type_element_type(result_type);
+  if (loom_scalar_type_is_float(result_element_type)) {
+    result_facts[0] = loom_value_facts_exact_float(result_element_type,
+                                                   loom_attr_as_f64(attr));
   } else {
     result_facts[0] = loom_value_facts_exact_i64(loom_attr_as_i64(attr));
   }
@@ -161,12 +164,48 @@ iree_status_t loom_test_fact_power_of_two_facts(
   return iree_ok_status();
 }
 
-iree_status_t loom_test_fact_uniform_facts(
+iree_status_t loom_test_fact_finite_facts(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts) {
   result_facts[0] = loom_value_facts_exact_i64(
-      loom_value_facts_is_uniform(operand_facts[0]) ? 1 : 0);
+      loom_value_facts_is_finite(operand_facts[0]) ? 1 : 0);
+  return iree_ok_status();
+}
+
+iree_status_t loom_test_fact_not_subnormal_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  result_facts[0] = loom_value_facts_exact_i64(
+      loom_value_facts_is_not_subnormal(operand_facts[0]) ? 1 : 0);
+  return iree_ok_status();
+}
+
+iree_status_t loom_test_fact_subgroup_uniform_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  result_facts[0] = loom_value_facts_exact_i64(
+      loom_value_facts_is_subgroup_uniform(operand_facts[0]) ? 1 : 0);
+  return iree_ok_status();
+}
+
+iree_status_t loom_test_fact_workgroup_uniform_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  result_facts[0] = loom_value_facts_exact_i64(
+      loom_value_facts_is_workgroup_uniform(operand_facts[0]) ? 1 : 0);
+  return iree_ok_status();
+}
+
+iree_status_t loom_test_fact_cluster_uniform_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  result_facts[0] = loom_value_facts_exact_i64(
+      loom_value_facts_is_cluster_uniform(operand_facts[0]) ? 1 : 0);
   return iree_ok_status();
 }
 
@@ -264,7 +303,7 @@ static bool loom_test_string_id_equal(const loom_module_t* module,
   return iree_string_view_equal(module->strings.entries[string_id], expected);
 }
 
-iree_status_t loom_test_fact_encoding_matrix_field_facts(
+iree_status_t loom_test_fact_encoding_operand_field_facts(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts) {
@@ -272,7 +311,7 @@ iree_status_t loom_test_fact_encoding_matrix_field_facts(
       loom_test_encoding_summary_or_empty(context, operand_facts[0]);
   loom_value_fact_storage_schema_t schema = summary.storage_schema;
   loom_value_fact_encoded_operand_schema_t encoded = schema.encoded_operand;
-  loom_string_id_t field = loom_test_fact_encoding_matrix_field_field(op);
+  loom_string_id_t field = loom_test_fact_encoding_operand_field_field(op);
   int64_t value = INT64_MIN;
   if (loom_test_string_id_equal(module, field, IREE_SV("element_format"))) {
     value = (int64_t)encoded.element_format;
@@ -297,6 +336,12 @@ iree_status_t loom_test_fact_encoding_matrix_field_facts(
   } else if (loom_test_string_id_equal(module, field, IREE_SV("sparsity"))) {
     value = (int64_t)encoded.sparsity_policy;
   } else if (loom_test_string_id_equal(module, field,
+                                       IREE_SV("sparsity_group_elements"))) {
+    value = (int64_t)encoded.sparsity_group.element_count;
+  } else if (loom_test_string_id_equal(
+                 module, field, IREE_SV("sparsity_group_nonzero_elements"))) {
+    value = (int64_t)encoded.sparsity_group.nonzero_element_count;
+  } else if (loom_test_string_id_equal(module, field,
                                        IREE_SV("payload_registers"))) {
     value = (int64_t)encoded.payload_register_count;
   } else if (loom_test_string_id_equal(module, field,
@@ -304,7 +349,22 @@ iree_status_t loom_test_fact_encoding_matrix_field_facts(
     value = (int64_t)encoded.payload_element_count;
   } else if (loom_test_string_id_equal(module, field,
                                        IREE_SV("scale_group_elements"))) {
-    value = (int64_t)encoded.scale_group_element_count;
+    value = (int64_t)encoded.scale_group.element_count;
+  } else if (loom_test_string_id_equal(module, field,
+                                       IREE_SV("scale_group_rank"))) {
+    value = loom_value_fact_encoded_operand_scale_group_rank(&encoded);
+  } else if (loom_test_string_id_equal(module, field,
+                                       IREE_SV("scale_group_dim0"))) {
+    value = (int64_t)encoded.scale_group.shape[0];
+  } else if (loom_test_string_id_equal(module, field,
+                                       IREE_SV("scale_group_dim1"))) {
+    value = (int64_t)encoded.scale_group.shape[1];
+  } else if (loom_test_string_id_equal(module, field,
+                                       IREE_SV("scale_group_dim2"))) {
+    value = (int64_t)encoded.scale_group.shape[2];
+  } else if (loom_test_string_id_equal(module, field,
+                                       IREE_SV("scale_group_dim3"))) {
+    value = (int64_t)encoded.scale_group.shape[3];
   } else if (loom_test_string_id_equal(module, field,
                                        IREE_SV("scale_operands"))) {
     value = (int64_t)encoded.scale_operand_count;
@@ -396,7 +456,8 @@ iree_status_t loom_test_fact_view_root_matches_facts(
   loom_value_fact_view_reference_t other_view_reference = {0};
   if (loom_value_facts_query_buffer_reference(context, operand_facts[1],
                                               &buffer_reference)) {
-    root_value_id = buffer_reference.root_value_id;
+    root_value_id = loom_value_fact_buffer_reference_resolve_root_value(
+        buffer_reference, root_value_id);
   } else if (loom_value_facts_query_view_reference(context, operand_facts[1],
                                                    &other_view_reference)) {
     root_value_id = other_view_reference.root_value_id;

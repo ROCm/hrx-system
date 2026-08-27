@@ -1,41 +1,67 @@
 // RUN: pass select-templates
 
-func.template<demo.double> @double_template(%value: i32) -> (i32) {
+template.decl @demo.double(%value: i32) -> (i32)
+
+template.def<@demo.double> @double_template(%value: i32) -> (i32) {
   %doubled = test.addi %value, %value : i32
-  func.return %doubled : i32
+  template.return %doubled : i32
 }
 
 func.def public @entry(%arg: i32) -> (i32) {
-  %result = func.apply<demo.double>(%arg) : (i32) -> (i32)
+  %result = template.apply<@demo.double>(%arg) : (i32) -> (i32)
   func.return %result : i32
 }
 
 // ----
-func.template<demo.double> @double_template(%value: i32) -> (i32) {
+template.decl @demo.double(%value: i32) -> (i32)
+
+template.def<@demo.double> @double_template(%value: i32) -> (i32) {
   %doubled = test.addi %value, %value : i32
-  func.return %doubled : i32
+  template.return %doubled : i32
 }
 
 func.def public @entry(%arg: i32) -> (i32) {
-  %result = func.call inline @double_template(%arg) : (i32) -> (i32)
+  %result = template.call @double_template(%arg) : (i32) -> (i32)
   func.return %result : i32
+}
+
+// ====
+
+// Exact calls bypass ranking but not the family or provider applicability
+// contracts.
+// RUN: pass select-templates{mode=final}
+
+template.decl @demo.exact(%m: index) -> (index) where [mul(%m, 16)]
+
+template.def<@demo.exact> @exact_implementation(%m: index) -> (index) {
+  template.return %m : index
+}
+
+func.def public @entry(%m: index) -> (index) where [range(%m, 15, 15)] {
+  // ERROR@+1: LOWERING/045 {op_name="template.call", phase_name="select-templates", contract_key="demo.exact", failure_code="exact_call_rejected"}
+  %result = template.call @exact_implementation(%m) : (index) -> (index)
+  func.return %result : index
 }
 
 // ====
 
 // RUN: pass select-templates,inline-callables
 
-func.template<demo.double> @double_template(%value: i32) -> (i32) {
+template.decl @demo.double(%value: i32) -> (i32)
+
+template.def<@demo.double> @double_template(%value: i32) -> (i32) {
   %doubled = test.addi %value, %value : i32
-  func.return %doubled : i32
+  template.return %doubled : i32
 }
 
 func.def public @entry(%arg: i32) -> (i32) {
-  %result = func.apply<demo.double>(%arg) : (i32) -> (i32)
+  %result = template.apply<@demo.double>(%arg) : (i32) -> (i32)
   func.return %result : i32
 }
 
 // ----
+template.decl @demo.double(%value: i32) -> (i32)
+
 func.def public @entry(%arg: i32) -> (i32) {
   %doubled = test.addi %arg, %arg : i32
   func.return %doubled : i32
@@ -45,28 +71,32 @@ func.def public @entry(%arg: i32) -> (i32) {
 
 // RUN: pass select-templates
 
-func.template<demo.priority> priority(1) @slow(%value: i32) -> (i32) {
-  func.return %value : i32
+template.decl @demo.priority(%value: i32) -> (i32)
+
+template.def<@demo.priority> priority(1) @slow(%value: i32) -> (i32) {
+  template.return %value : i32
 }
 
-func.template<demo.priority> priority(10) @fast(%value: i32) -> (i32) {
+template.def<@demo.priority> priority(10) @fast(%value: i32) -> (i32) {
   %doubled = test.addi %value, %value : i32
-  func.return %doubled : i32
+  template.return %doubled : i32
 }
 
 func.def public @entry(%arg: i32) -> (i32) {
-  %result = func.apply<demo.priority>(%arg) : (i32) -> (i32)
+  %result = template.apply<@demo.priority>(%arg) : (i32) -> (i32)
   func.return %result : i32
 }
 
 // ----
-func.template<demo.priority> priority(10) @fast(%value: i32) -> (i32) {
+template.decl @demo.priority(%value: i32) -> (i32)
+
+template.def<@demo.priority> priority(10) @fast(%value: i32) -> (i32) {
   %doubled = test.addi %value, %value : i32
-  func.return %doubled : i32
+  template.return %doubled : i32
 }
 
 func.def public @entry(%arg: i32) -> (i32) {
-  %result = func.call inline @fast(%arg) : (i32) -> (i32)
+  %result = template.call @fast(%arg) : (i32) -> (i32)
   func.return %result : i32
 }
 
@@ -74,9 +104,11 @@ func.def public @entry(%arg: i32) -> (i32) {
 
 // RUN: pass select-templates{mode=final}
 
+template.decl @demo.missing(%arg: i32) -> (i32)
+
 func.def public @entry(%arg: i32) -> (i32) {
-  // ERROR@+1: LOWERING/045 {op_name="func.apply", phase_name="select-templates", contract_key="demo.missing", failure_code="no_provider"}
-  %result = func.apply<demo.missing>(%arg) : (i32) -> (i32)
+  // ERROR@+1: LOWERING/045 {op_name="template.apply", phase_name="select-templates", contract_key="demo.missing", failure_code="no_provider"}
+  %result = template.apply<@demo.missing>(%arg) : (i32) -> (i32)
   func.return %result : i32
 }
 
@@ -84,13 +116,38 @@ func.def public @entry(%arg: i32) -> (i32) {
 
 // RUN: pass select-templates{mode=final}
 
-func.template<demo.reject> @wrong_type(%value: f32) -> (f32) {
-  func.return %value : f32
+template.decl @demo.reject(%value: i32) -> (i32)
+
+template.def<@demo.reject> @rejected_value(%value: i32) -> (i32) where [eq(%value, 2)] {
+  template.return %value : i32
+}
+
+func.def public @entry() -> (i32) {
+  %arg = scalar.constant 1 : i32
+  // ERROR@+1: LOWERING/045 {op_name="template.apply", phase_name="select-templates", contract_key="demo.reject", failure_code="all_rejected"}
+  %result = template.apply<@demo.reject>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// Equal-priority providers remain distinct choices even when their bodies are
+// structurally identical. Only explicit provider metadata affects selection.
+// RUN: pass select-templates{mode=final}
+
+template.decl @demo.identical_tie(%value: i32) -> (i32)
+
+template.def<@demo.identical_tie> @provider_a(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+template.def<@demo.identical_tie> @provider_b(%value: i32) -> (i32) {
+  template.return %value : i32
 }
 
 func.def public @entry(%arg: i32) -> (i32) {
-  // ERROR@+1: LOWERING/045 {op_name="func.apply", phase_name="select-templates", contract_key="demo.reject", failure_code="all_rejected"}
-  %result = func.apply<demo.reject>(%arg) : (i32) -> (i32)
+  // ERROR@+1: LOWERING/045 {op_name="template.apply", phase_name="select-templates", contract_key="demo.identical_tie", failure_code="ambiguous"}
+  %result = template.apply<@demo.identical_tie>(%arg) : (i32) -> (i32)
   func.return %result : i32
 }
 
@@ -98,18 +155,30 @@ func.def public @entry(%arg: i32) -> (i32) {
 
 // RUN: pass select-templates{mode=final}
 
-func.template<demo.tie> priority(10) @lhs(%value: i32) -> (i32) {
+func.def @lhs_impl(%value: i32) -> (i32) {
   func.return %value : i32
 }
 
-func.template<demo.tie> priority(10) @rhs(%value: i32) -> (i32) {
+func.def @rhs_impl(%value: i32) -> (i32) {
   %doubled = test.addi %value, %value : i32
   func.return %doubled : i32
 }
 
+template.decl @demo.tie(%value: i32) -> (i32)
+
+template.def<@demo.tie> priority(10) @lhs(%value: i32) -> (i32) {
+  %result = func.call @lhs_impl(%value) : (i32) -> (i32)
+  template.return %result : i32
+}
+
+template.def<@demo.tie> priority(10) @rhs(%value: i32) -> (i32) {
+  %result = func.call @rhs_impl(%value) : (i32) -> (i32)
+  template.return %result : i32
+}
+
 func.def public @entry(%arg: i32) -> (i32) {
-  // ERROR@+1: LOWERING/045 {op_name="func.apply", phase_name="select-templates", contract_key="demo.tie", failure_code="ambiguous"}
-  %result = func.apply<demo.tie>(%arg) : (i32) -> (i32)
+  // ERROR@+1: LOWERING/045 {op_name="template.apply", phase_name="select-templates", contract_key="demo.tie", failure_code="ambiguous"}
+  %result = template.apply<@demo.tie>(%arg) : (i32) -> (i32)
   func.return %result : i32
 }
 
@@ -117,12 +186,14 @@ func.def public @entry(%arg: i32) -> (i32) {
 
 // RUN: pass select-templates
 
-func.template<demo.dead> @dead_provider(%value: i32) -> (i32) {
-  func.return %value : i32
+template.decl @demo.dead(%value: i32) -> (i32)
+
+template.def<@demo.dead> @dead_provider(%value: i32) -> (i32) {
+  template.return %value : i32
 }
 
 func.def @dead_user(%arg: i32) -> (i32) {
-  %result = func.apply<demo.dead>(%arg) : (i32) -> (i32)
+  %result = template.apply<@demo.dead>(%arg) : (i32) -> (i32)
   func.return %result : i32
 }
 
@@ -139,22 +210,26 @@ func.def public @entry(%arg: i32) -> (i32) {
 
 // RUN: pass select-templates
 
-func.template<demo.dynamic> @identity(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) {
-  func.return %arg : tensor<[%m]xf32>
+template.decl @demo.dynamic(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>)
+
+template.def<@demo.dynamic> @identity(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) {
+  template.return %arg : tensor<[%m]xf32>
 }
 
 func.def public @entry(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]xf32>) {
-  %result = func.apply<demo.dynamic>(%n, %arg) : (index, tensor<[%n]xf32>) -> (tensor<[%n]xf32>)
+  %result = template.apply<@demo.dynamic>(%n, %arg) : (index, tensor<[%n]xf32>) -> (tensor<[%n]xf32>)
   func.return %result : tensor<[%n]xf32>
 }
 
 // ----
-func.template<demo.dynamic> @identity(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) {
-  func.return %arg : tensor<[%m]xf32>
+template.decl @demo.dynamic(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>)
+
+template.def<@demo.dynamic> @identity(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) {
+  template.return %arg : tensor<[%m]xf32>
 }
 
 func.def public @entry(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]xf32>) {
-  %result = func.call inline @identity(%n, %arg) : (index, tensor<[%n]xf32>) -> (tensor<[%n]xf32>)
+  %result = template.call @identity(%n, %arg) : (index, tensor<[%n]xf32>) -> (tensor<[%n]xf32>)
   func.return %result : tensor<[%n]xf32>
 }
 
@@ -162,16 +237,18 @@ func.def public @entry(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]xf32>) 
 
 // RUN: pass select-templates
 
-func.template<demo.maybe> priority(10) @predicated(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) where [mul(%m, 16)] {
-  func.return %arg : tensor<[%m]xf32>
+template.decl @demo.maybe(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>)
+
+template.def<@demo.maybe> priority(10) @predicated(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) where [mul(%m, 16)] {
+  template.return %arg : tensor<[%m]xf32>
 }
 
-func.template<demo.maybe> priority(1) @fallback(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) {
-  func.return %arg : tensor<[%m]xf32>
+template.def<@demo.maybe> priority(1) @fallback(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) {
+  template.return %arg : tensor<[%m]xf32>
 }
 
 func.def public @entry(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]xf32>) {
-  %result = func.apply<demo.maybe>(%n, %arg) : (index, tensor<[%n]xf32>) -> (tensor<[%n]xf32>)
+  %result = template.apply<@demo.maybe>(%n, %arg) : (index, tensor<[%n]xf32>) -> (tensor<[%n]xf32>)
   func.return %result : tensor<[%n]xf32>
 }
 
@@ -179,57 +256,65 @@ func.def public @entry(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]xf32>) 
 
 // RUN: pass select-templates
 
-func.template<demo.predicates> priority(10) @aligned(%m: index) -> (index) where [range(%m, 64, 64), mul(%m, 16)] {
-  func.return %m : index
+template.decl @demo.predicates(%m: index) -> (index)
+
+template.def<@demo.predicates> priority(10) @aligned(%m: index) -> (index) where [range(%m, 64, 64), mul(%m, 16)] {
+  template.return %m : index
 }
 
-func.template<demo.predicates> priority(1) @fallback(%m: index) -> (index) {
-  func.return %m : index
+template.def<@demo.predicates> priority(1) @fallback(%m: index) -> (index) {
+  template.return %m : index
 }
 
 func.def public @entry(%n: index) -> (index) {
   %aligned = index.assume %n [range(%n, 64, 64), mul(%n, 16)] : index
-  %result = func.apply<demo.predicates>(%aligned) : (index) -> (index)
+  %result = template.apply<@demo.predicates>(%aligned) : (index) -> (index)
   func.return %result : index
 }
 
 // ----
-func.template<demo.predicates> priority(10) @aligned(%m: index) -> (index) where [range(%m, 64, 64), mul(%m, 16)] {
-  func.return %m : index
+template.decl @demo.predicates(%m: index) -> (index)
+
+template.def<@demo.predicates> priority(10) @aligned(%m: index) -> (index) where [range(%m, 64, 64), mul(%m, 16)] {
+  template.return %m : index
 }
 
 func.def public @entry(%n: index) -> (index) {
   %aligned = index.assume %n [range(%n, 64, 64), mul(%n, 16)] : index
-  %result = func.call inline @aligned(%aligned) : (index) -> (index)
+  %result = template.call @aligned(%aligned) : (index) -> (index)
   func.return %result : index
 }
 
 // ====
 
 // Function-level where predicates seed facts for entry block arguments, so
-// callers do not need a redundant index.assume before func.apply.
+// callers do not need a redundant index.assume before template.apply.
 // RUN: pass select-templates
 
-func.template<demo.function_where_fact_seed> priority(10) @aligned(%m: index) -> (index) where [mul(%m, 16)] {
-  func.return %m : index
+template.decl @demo.function_where_fact_seed(%m: index) -> (index)
+
+template.def<@demo.function_where_fact_seed> priority(10) @aligned(%m: index) -> (index) where [mul(%m, 16)] {
+  template.return %m : index
 }
 
-func.template<demo.function_where_fact_seed> priority(1) @fallback(%m: index) -> (index) {
-  func.return %m : index
+template.def<@demo.function_where_fact_seed> priority(1) @fallback(%m: index) -> (index) {
+  template.return %m : index
 }
 
 func.def public @entry(%n: index) -> (index) where [mul(%n, 16)] {
-  %result = func.apply<demo.function_where_fact_seed>(%n) : (index) -> (index)
+  %result = template.apply<@demo.function_where_fact_seed>(%n) : (index) -> (index)
   func.return %result : index
 }
 
 // ----
-func.template<demo.function_where_fact_seed> priority(10) @aligned(%m: index) -> (index) where [mul(%m, 16)] {
-  func.return %m : index
+template.decl @demo.function_where_fact_seed(%m: index) -> (index)
+
+template.def<@demo.function_where_fact_seed> priority(10) @aligned(%m: index) -> (index) where [mul(%m, 16)] {
+  template.return %m : index
 }
 
 func.def public @entry(%n: index) -> (index) where [mul(%n, 16)] {
-  %result = func.call inline @aligned(%n) : (index) -> (index)
+  %result = template.call @aligned(%n) : (index) -> (index)
   func.return %result : index
 }
 
@@ -237,28 +322,32 @@ func.def public @entry(%n: index) -> (index) where [mul(%n, 16)] {
 
 // RUN: pass select-templates
 
-func.template<demo.rejected_predicate> priority(10) @aligned(%m: index) -> (index) where [mul(%m, 16)] {
-  func.return %m : index
+template.decl @demo.rejected_predicate(%m: index) -> (index)
+
+template.def<@demo.rejected_predicate> priority(10) @aligned(%m: index) -> (index) where [mul(%m, 16)] {
+  template.return %m : index
 }
 
-func.template<demo.rejected_predicate> priority(1) @fallback(%m: index) -> (index) {
-  func.return %m : index
+template.def<@demo.rejected_predicate> priority(1) @fallback(%m: index) -> (index) {
+  template.return %m : index
 }
 
 func.def public @entry() -> (index) {
   %n = index.constant 15 : index
-  %result = func.apply<demo.rejected_predicate>(%n) : (index) -> (index)
+  %result = template.apply<@demo.rejected_predicate>(%n) : (index) -> (index)
   func.return %result : index
 }
 
 // ----
-func.template<demo.rejected_predicate> priority(1) @fallback(%m: index) -> (index) {
-  func.return %m : index
+template.decl @demo.rejected_predicate(%m: index) -> (index)
+
+template.def<@demo.rejected_predicate> priority(1) @fallback(%m: index) -> (index) {
+  template.return %m : index
 }
 
 func.def public @entry() -> (index) {
   %n = index.constant 15 : index
-  %result = func.call inline @fallback(%n) : (index) -> (index)
+  %result = template.call @fallback(%n) : (index) -> (index)
   func.return %result : index
 }
 
@@ -266,60 +355,124 @@ func.def public @entry() -> (index) {
 
 // RUN: pass select-templates
 
-func.template<demo.same_value> priority(10) @same(%m: index, %n: index) -> (index) where [eq(%m, %n)] {
-  func.return %m : index
+template.decl @demo.same_value(%m: index, %n: index) -> (index)
+
+template.def<@demo.same_value> priority(10) @same(%m: index, %n: index) -> (index) where [eq(%m, %n)] {
+  template.return %m : index
 }
 
-func.template<demo.same_value> priority(1) @fallback(%m: index, %n: index) -> (index) {
-  func.return %m : index
+template.def<@demo.same_value> priority(1) @fallback(%m: index, %n: index) -> (index) {
+  template.return %m : index
 }
 
 func.def public @entry(%n: index) -> (index) {
-  %result = func.apply<demo.same_value>(%n, %n) : (index, index) -> (index)
+  %result = template.apply<@demo.same_value>(%n, %n) : (index, index) -> (index)
   func.return %result : index
 }
 
 // ----
-func.template<demo.same_value> priority(10) @same(%m: index, %n: index) -> (index) where [eq(%m, %n)] {
-  func.return %m : index
+template.decl @demo.same_value(%m: index, %n: index) -> (index)
+
+template.def<@demo.same_value> priority(10) @same(%m: index, %n: index) -> (index) where [eq(%m, %n)] {
+  template.return %m : index
 }
 
 func.def public @entry(%n: index) -> (index) {
-  %result = func.call inline @same(%n, %n) : (index, index) -> (index)
+  %result = template.call @same(%n, %n) : (index, index) -> (index)
   func.return %result : index
+}
+
+// ====
+
+// Provider predicates consume facts at each application point. The true edge
+// proves the higher-priority equality while the false edge disproves it and
+// selects the fallback.
+// RUN: pass select-templates,inline-callables
+
+template.decl @demo.application_path(%m: index) -> (index)
+
+template.def<@demo.application_path> priority(10) @exact(%m: index) -> (index) where [eq(%m, 32)] {
+  %c1 = index.constant 1 : index
+  %adjusted = index.add %m, %c1 : index
+  template.return %adjusted : index
+}
+
+template.def<@demo.application_path> priority(1) @fallback(%m: index) -> (index) {
+  template.return %m : index
+}
+
+func.def public @entry(%n: index) -> (index) {
+  %c32 = index.constant 32 : index
+  %is32 = index.cmp eq, %n, %c32 : index
+  %result = scf.if %is32 -> (index) {
+    %matched = template.apply<@demo.application_path>(%n) : (index) -> (index)
+    scf.yield %matched : index
+  } else {
+    %fallback = template.apply<@demo.application_path>(%n) : (index) -> (index)
+    scf.yield %fallback : index
+  }
+  func.return %result : index
+}
+
+// ----
+template.decl @demo.application_path(%m: index) -> (index)
+
+func.def public @entry(%n: index) -> (index) {
+  %c32 = index.constant 32 : index
+  %is32 = index.cmp eq, %n, %c32 : index
+  %result = scf.if %is32 -> (index) {
+    %c1 = index.constant 1 : index
+    %adjusted = index.add %n, %c1 : index
+    scf.yield %adjusted : index
+  } else {
+    scf.yield %n : index
+  }
+  func.return %result : index
+}
+
+// ====
+
+// Final selection excludes an unproven higher-priority provider and selects a
+// lower-priority provider whose applicability is proven.
+// RUN: pass select-templates{mode=final},inline-callables
+
+template.decl @demo.final_maybe(%m: index) -> (index)
+
+template.def<@demo.final_maybe> priority(10) @large(%m: index) -> (index) where [ge(%m, 1024)] {
+  template.return %m : index
+}
+
+template.def<@demo.final_maybe> priority(1) @fallback(%m: index) -> (index) {
+  template.return %m : index
+}
+
+func.def public @entry(%n: index) -> (index) {
+  %result = template.apply<@demo.final_maybe>(%n) : (index) -> (index)
+  func.return %result : index
+}
+
+// ----
+template.decl @demo.final_maybe(%m: index) -> (index)
+
+func.def public @entry(%n: index) -> (index) {
+  func.return %n : index
 }
 
 // ====
 
 // RUN: pass select-templates{mode=final}
 
-func.template<demo.final_maybe> priority(10) @large(%m: index) -> (index) where [ge(%m, 1024)] {
-  func.return %m : index
-}
+template.decl @demo.ukernel(%value: i32) -> (i32)
 
-func.template<demo.final_maybe> priority(1) @fallback(%m: index) -> (index) {
-  func.return %m : index
-}
+template.ukernel<@demo.ukernel> priority(10) @opaque(%value: i32) -> (i32)
 
-func.def public @entry(%n: index) -> (index) {
-  // ERROR@+1: LOWERING/045 {op_name="func.apply", phase_name="select-templates", contract_key="demo.final_maybe", failure_code="missing_facts"}
-  %result = func.apply<demo.final_maybe>(%n) : (index) -> (index)
-  func.return %result : index
-}
-
-// ====
-
-// RUN: pass select-templates{mode=final}
-
-func.ukernel<demo.ukernel> priority(10) @opaque(%value: i32) -> (i32)
-
-func.template<demo.ukernel> priority(1) @fallback(%value: i32) -> (i32) {
-  func.return %value : i32
+template.def<@demo.ukernel> priority(1) @fallback(%value: i32) -> (i32) {
+  template.return %value : i32
 }
 
 func.def public @entry(%arg: i32) -> (i32) {
-  // ERROR@+1: LOWERING/045 {op_name="func.apply", phase_name="select-templates", contract_key="demo.ukernel", failure_code="materialization_blocked"}
-  %result = func.apply<demo.ukernel>(%arg) : (i32) -> (i32)
+  // ERROR@+1: LOWERING/045 {op_name="template.apply", phase_name="select-templates", contract_key="demo.ukernel", failure_code="materialization_blocked"}
+  %result = template.apply<@demo.ukernel>(%arg) : (i32) -> (i32)
   func.return %result : i32
 }
 
@@ -327,33 +480,37 @@ func.def public @entry(%arg: i32) -> (i32) {
 
 // RUN: pass select-templates,inline-callables
 
-test.target<low_core> @gfx11
-test.target<low_core> @gfx12
+test.target<low_core> @low_core
+test.target<quirky> @quirky
 
-func.template<demo.targeted> target(@gfx12) priority(20) @gfx12_provider(%value: i32) -> (i32) {
-  func.return %value : i32
+template.decl @demo.targeted(%value: i32) -> (i32)
+
+template.def<@demo.targeted> target(@quirky) priority(20) @quirky_provider(%value: i32) -> (i32) {
+  template.return %value : i32
 }
 
-func.template<demo.targeted> target(@gfx11) priority(10) @gfx11_provider(%value: i32) -> (i32) {
+template.def<@demo.targeted> target(@low_core) priority(10) @low_core_provider(%value: i32) -> (i32) {
   %doubled = test.addi %value, %value : i32
-  func.return %doubled : i32
+  template.return %doubled : i32
 }
 
-func.template<demo.targeted> priority(1) @fallback(%value: i32) -> (i32) {
-  func.return %value : i32
+template.def<@demo.targeted> priority(1) @fallback(%value: i32) -> (i32) {
+  template.return %value : i32
 }
 
-func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {
-  %result = func.apply<demo.targeted>(%arg) : (i32) -> (i32)
+func.def public target(@low_core) @entry(%arg: i32) -> (i32) {
+  %result = template.apply<@demo.targeted>(%arg) : (i32) -> (i32)
   func.return %result : i32
 }
 
 // ----
-test.target<low_core> @gfx11
+test.target<low_core> @low_core
 
-test.target<low_core> @gfx12
+test.target<quirky> @quirky
 
-func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {
+template.decl @demo.targeted(%value: i32) -> (i32)
+
+func.def public target(@low_core) @entry(%arg: i32) -> (i32) {
   %doubled = test.addi %arg, %arg : i32
   func.return %doubled : i32
 }
@@ -362,29 +519,33 @@ func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {
 
 // RUN: pass select-templates,inline-callables
 
-test.target<low_core> @gfx11
-test.target<low_core> @gfx12
+test.target<low_core> @low_core
+test.target<quirky> @quirky
 
-func.template<demo.target_fallback> target(@gfx12) priority(20) @gfx12_provider(%value: i32) -> (i32) {
+template.decl @demo.target_fallback(%value: i32) -> (i32)
+
+template.def<@demo.target_fallback> target(@quirky) priority(20) @quirky_provider(%value: i32) -> (i32) {
   %doubled = test.addi %value, %value : i32
-  func.return %doubled : i32
+  template.return %doubled : i32
 }
 
-func.template<demo.target_fallback> priority(1) @fallback(%value: i32) -> (i32) {
-  func.return %value : i32
+template.def<@demo.target_fallback> priority(1) @fallback(%value: i32) -> (i32) {
+  template.return %value : i32
 }
 
-func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {
-  %result = func.apply<demo.target_fallback>(%arg) : (i32) -> (i32)
+func.def public target(@low_core) @entry(%arg: i32) -> (i32) {
+  %result = template.apply<@demo.target_fallback>(%arg) : (i32) -> (i32)
   func.return %result : i32
 }
 
 // ----
-test.target<low_core> @gfx11
+test.target<low_core> @low_core
 
-test.target<low_core> @gfx12
+test.target<quirky> @quirky
 
-func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {
+template.decl @demo.target_fallback(%value: i32) -> (i32)
+
+func.def public target(@low_core) @entry(%arg: i32) -> (i32) {
   func.return %arg : i32
 }
 
@@ -392,26 +553,30 @@ func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {
 
 // RUN: pass select-templates,inline-callables
 
-test.target<low_core> @gfx11
-test.target<low_core> @gfx12
+test.target<low_core> @low_core
+test.target<quirky> @quirky
 
-func.ukernel<demo.ukernel_target> target(@gfx12) priority(20) @gfx12_opaque(%value: i32) -> (i32)
+template.decl @demo.ukernel_target(%value: i32) -> (i32)
 
-func.template<demo.ukernel_target> priority(1) @fallback(%value: i32) -> (i32) {
-  func.return %value : i32
+template.ukernel<@demo.ukernel_target> target(@quirky) priority(20) @quirky_opaque(%value: i32) -> (i32)
+
+template.def<@demo.ukernel_target> priority(1) @fallback(%value: i32) -> (i32) {
+  template.return %value : i32
 }
 
-func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {
-  %result = func.apply<demo.ukernel_target>(%arg) : (i32) -> (i32)
+func.def public target(@low_core) @entry(%arg: i32) -> (i32) {
+  %result = template.apply<@demo.ukernel_target>(%arg) : (i32) -> (i32)
   func.return %result : i32
 }
 
 // ----
-test.target<low_core> @gfx11
+test.target<low_core> @low_core
 
-test.target<low_core> @gfx12
+test.target<quirky> @quirky
 
-func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {
+template.decl @demo.ukernel_target(%value: i32) -> (i32)
+
+func.def public target(@low_core) @entry(%arg: i32) -> (i32) {
   func.return %arg : i32
 }
 
@@ -419,15 +584,17 @@ func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {
 
 // RUN: pass select-templates{mode=final}
 
-test.target<low_core> @gfx11
+test.target<low_core> @low_core
 
-func.template<demo.targetless_only> target(@gfx11) @gfx11_provider(%value: i32) -> (i32) {
-  func.return %value : i32
+template.decl @demo.targetless_only(%value: i32) -> (i32)
+
+template.def<@demo.targetless_only> target(@low_core) @low_core_provider(%value: i32) -> (i32) {
+  template.return %value : i32
 }
 
 func.def public @entry(%arg: i32) -> (i32) {
-  // ERROR@+1: LOWERING/045 {op_name="func.apply", phase_name="select-templates", contract_key="demo.targetless_only", failure_code="target_mismatch"}
-  %result = func.apply<demo.targetless_only>(%arg) : (i32) -> (i32)
+  // ERROR@+1: LOWERING/045 {op_name="template.apply", phase_name="select-templates", contract_key="demo.targetless_only", failure_code="missing_facts"}
+  %result = template.apply<@demo.targetless_only>(%arg) : (i32) -> (i32)
   func.return %result : i32
 }
 
@@ -450,4 +617,612 @@ test.target<low_core> @test_target
 
 func.def target(@test_target) @target_entry(%value: i32) -> (i32) {
   func.return %value : i32
+}
+
+// ====
+
+// RUN: pass select-templates,inline-callables
+
+template.decl @demo.workgroup_reduce(%value: f32) -> (f32)
+
+template.def<@demo.workgroup_reduce> @reduce_provider(%value: f32) -> (f32) {
+  %sum = kernel.workgroup.reduce<addf> %value : f32
+  template.return %sum : f32
+}
+
+kernel.def export("entry") @entry() {
+  %unit_extent = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit_extent, %unit_extent, %unit_extent) workgroup_size(%workgroup_size, %unit_extent, %unit_extent) : index
+} launch(%value: f32) {
+  %sum = template.apply<@demo.workgroup_reduce>(%value) : (f32) -> (f32)
+  kernel.return
+}
+
+// ----
+template.decl @demo.workgroup_reduce(%value: f32) -> (f32)
+
+kernel.def export("entry") @entry() {
+  %unit_extent = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit_extent, %unit_extent, %unit_extent) workgroup_size(%workgroup_size, %unit_extent, %unit_extent) : index
+} launch(%value: f32) {
+  %sum = kernel.workgroup.reduce<addf> %value : f32
+  kernel.return
+}
+
+// ====
+
+// Kernel entries export under their symbol name when export(...) is omitted.
+// RUN: pass select-templates{mode=final}
+
+kernel.def @implicit_export() {
+  %unit_extent = index.constant 1 : index
+  kernel.launch.config workgroups(%unit_extent, %unit_extent, %unit_extent) workgroup_size(%unit_extent, %unit_extent, %unit_extent) : index
+} launch() {
+  kernel.return
+}
+
+// ----
+kernel.def @implicit_export() {
+  %unit_extent = index.constant 1 : index
+  kernel.launch.config workgroups(%unit_extent, %unit_extent, %unit_extent) workgroup_size(%unit_extent, %unit_extent, %unit_extent) : index
+} launch() {
+  kernel.return
+}
+
+// ====
+
+// RUN: pass select-templates{mode=final},inline-callables
+
+template.decl @demo.workgroup_reduce(%value: f32) -> (f32)
+
+template.def<@demo.workgroup_reduce> @reduce_provider(%value: f32) -> (f32) {
+  // ERROR@+1: STRUCTURE/029 "kernel.workgroup.reduce" "required" "kernel.def" "func.def"
+  %sum = kernel.workgroup.reduce<addf> %value : f32
+  template.return %sum : f32
+}
+
+func.def public @entry(%value: f32) -> (f32) {
+  %sum = template.apply<@demo.workgroup_reduce>(%value) : (f32) -> (f32)
+  func.return %sum : f32
+}
+
+// ====
+
+// A target declaration preserves the target witness while target-neutral
+// specialization proceeds without inventing target facts.
+// RUN: pass select-templates,inline-callables
+
+target.decl @external
+
+template.decl @demo.partial_target(%value: i32) -> (i32)
+
+template.def<@demo.partial_target> @identity(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def public target(@external) @entry(%arg: i32) -> (i32) {
+  %result = template.apply<@demo.partial_target>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+target.decl @external
+
+template.decl @demo.partial_target(%value: i32) -> (i32)
+
+func.def public target(@external) @entry(%arg: i32) -> (i32) {
+  func.return %arg : i32
+}
+
+// ====
+
+// A targetless caller does not disprove a targeted provider. Early selection
+// preserves that unresolved choice when it can outrank the proven fallback.
+// RUN: pass select-templates
+
+test.target<low_core> @low_core
+
+template.decl @demo.identity_unbound_early(%value: i32) -> (i32)
+
+template.def<@demo.identity_unbound_early> target(@low_core) priority(10) @targeted(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  template.return %doubled : i32
+}
+
+template.def<@demo.identity_unbound_early> priority(1) @fallback(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = template.apply<@demo.identity_unbound_early>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<low_core> @low_core
+
+template.decl @demo.identity_unbound_early(%value: i32) -> (i32)
+
+template.def<@demo.identity_unbound_early> target(@low_core) priority(10) @targeted(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  template.return %doubled : i32
+}
+
+template.def<@demo.identity_unbound_early> priority(1) @fallback(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = template.apply<@demo.identity_unbound_early>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// At the final boundary, the same unproven target identity is excluded and a
+// target-independent provider remains a valid concrete fallback.
+// RUN: pass select-templates{mode=final},inline-callables
+
+test.target<low_core> @low_core
+
+template.decl @demo.identity_unbound_final(%value: i32) -> (i32)
+
+template.def<@demo.identity_unbound_final> target(@low_core) priority(10) @targeted(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  template.return %doubled : i32
+}
+
+template.def<@demo.identity_unbound_final> priority(1) @fallback(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = template.apply<@demo.identity_unbound_final>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<low_core> @low_core
+
+template.decl @demo.identity_unbound_final(%value: i32) -> (i32)
+
+func.def public @entry(%arg: i32) -> (i32) {
+  func.return %arg : i32
+}
+
+// ====
+
+// A normalized requirement reads the containing function's target facts and
+// selects the matching higher-priority provider.
+// RUN: pass select-templates,inline-callables
+
+test.target<quirky> @wave7
+
+template.decl @demo.condition_match(%value: i32) -> (i32)
+
+template.def<@demo.condition_match> requires [#target.subgroup.size<7>] priority(10) @wave7_impl(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  template.return %doubled : i32
+}
+
+template.def<@demo.condition_match> priority(1) @fallback(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def public target(@wave7) @entry(%arg: i32) -> (i32) {
+  %result = template.apply<@demo.condition_match>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<quirky> @wave7
+
+template.decl @demo.condition_match(%value: i32) -> (i32)
+
+func.def public target(@wave7) @entry(%arg: i32) -> (i32) {
+  %doubled = test.addi %arg, %arg : i32
+  func.return %doubled : i32
+}
+
+// ====
+
+// A family requirement is a coarse gate evaluated once before any provider.
+// RUN: pass select-templates,inline-callables
+
+test.target<quirky> @wave7
+
+template.decl requires [#target.subgroup.size<7>] @demo.family_condition_match(%value: i32) -> (i32)
+
+template.def<@demo.family_condition_match> @implementation(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  template.return %doubled : i32
+}
+
+func.def public target(@wave7) @entry(%arg: i32) -> (i32) {
+  %result = template.apply<@demo.family_condition_match>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<quirky> @wave7
+
+template.decl requires [#target.subgroup.size<7>] @demo.family_condition_match(%value: i32) -> (i32)
+
+func.def public target(@wave7) @entry(%arg: i32) -> (i32) {
+  %doubled = test.addi %arg, %arg : i32
+  func.return %doubled : i32
+}
+
+// ====
+
+// RUN: pass select-templates{mode=final}
+
+test.target<quirky> @wave7
+
+template.decl requires [#target.subgroup.size<64>] @demo.family_condition_reject(%value: i32) -> (i32)
+
+template.def<@demo.family_condition_reject> @implementation(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def public target(@wave7) @entry(%arg: i32) -> (i32) {
+  // ERROR@+1: LOWERING/045 {op_name="template.apply", phase_name="select-templates", contract_key="demo.family_condition_reject", failure_code="family_rejected"}
+  %result = template.apply<@demo.family_condition_reject>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// The same normalized requirement can be proven locally in targetless IR. The
+// dynamic query and static requirement share one fact family: the true edge
+// selects the specialized provider and the false edge disproves it.
+// RUN: pass select-templates,inline-callables
+
+template.decl @demo.condition_path(%value: i32) -> (i32)
+
+template.def<@demo.condition_path> requires [#target.subgroup.size<32>] priority(10) @wave32(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  template.return %doubled : i32
+}
+
+template.def<@demo.condition_path> priority(1) @fallback(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %subgroup_size = target.subgroup.size : index
+  %c32 = index.constant 32 : index
+  %is_wave32 = index.cmp eq, %subgroup_size, %c32 : index
+  %result = scf.if %is_wave32 -> (i32) {
+    %matched = template.apply<@demo.condition_path>(%arg) : (i32) -> (i32)
+    scf.yield %matched : i32
+  } else {
+    %fallback = template.apply<@demo.condition_path>(%arg) : (i32) -> (i32)
+    scf.yield %fallback : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+template.decl @demo.condition_path(%value: i32) -> (i32)
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %subgroup_size = target.subgroup.size : index
+  %c32 = index.constant 32 : index
+  %is_wave32 = index.cmp eq, %subgroup_size, %c32 : index
+  %result = scf.if %is_wave32 -> (i32) {
+    %doubled = test.addi %arg, %arg : i32
+    scf.yield %doubled : i32
+  } else {
+    scf.yield %arg : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+// Target-fact requirements and argument predicates consume the same composed
+// path facts. Neither the query value nor either boolean guard is threaded
+// through template.apply solely to make provider selection work.
+// RUN: pass select-templates,inline-callables
+
+template.decl @demo.condition_and_value(%tile_size: index, %value: i32) -> (i32)
+
+template.def<@demo.condition_and_value> requires [#target.subgroup.size<32>] priority(10) @wave32_tile64(%tile_size: index, %value: i32) -> (i32) where [eq(%tile_size, 64)] {
+  %doubled = test.addi %value, %value : i32
+  template.return %doubled : i32
+}
+
+template.def<@demo.condition_and_value> priority(1) @fallback(%tile_size: index, %value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def public @entry(%tile_size: index, %arg: i32) -> (i32) {
+  %subgroup_size = target.subgroup.size : index
+  %c32 = index.constant 32 : index
+  %is_wave32 = index.cmp eq, %subgroup_size, %c32 : index
+  %c64 = index.constant 64 : index
+  %is_tile64 = index.cmp eq, %tile_size, %c64 : index
+  %wave_result = scf.if %is_wave32 -> (i32) {
+    %tile_result = scf.if %is_tile64 -> (i32) {
+      %matched = template.apply<@demo.condition_and_value>(%tile_size, %arg) : (index, i32) -> (i32)
+      scf.yield %matched : i32
+    } else {
+      scf.yield %arg : i32
+    }
+    scf.yield %tile_result : i32
+  } else {
+    scf.yield %arg : i32
+  }
+  func.return %wave_result : i32
+}
+
+// ----
+template.decl @demo.condition_and_value(%tile_size: index, %value: i32) -> (i32)
+
+func.def public @entry(%tile_size: index, %arg: i32) -> (i32) {
+  %subgroup_size = target.subgroup.size : index
+  %c32 = index.constant 32 : index
+  %is_wave32 = index.cmp eq, %subgroup_size, %c32 : index
+  %c64 = index.constant 64 : index
+  %is_tile64 = index.cmp eq, %tile_size, %c64 : index
+  %wave_result = scf.if %is_wave32 -> (i32) {
+    %tile_result = scf.if %is_tile64 -> (i32) {
+      %doubled = test.addi %arg, %arg : i32
+      scf.yield %doubled : i32
+    } else {
+      scf.yield %arg : i32
+    }
+    scf.yield %tile_result : i32
+  } else {
+    scf.yield %arg : i32
+  }
+  func.return %wave_result : i32
+}
+
+// ====
+
+// A disproven requirement excludes the specialized provider and admits the
+// proven fallback without changing the caller's target facts.
+// RUN: pass select-templates,inline-callables
+
+test.target<low_core> @wave32 {subgroup_size = 32}
+
+template.decl @demo.condition_reject(%value: i32) -> (i32)
+
+template.def<@demo.condition_reject> requires [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  template.return %doubled : i32
+}
+
+template.def<@demo.condition_reject> priority(1) @fallback(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def public target(@wave32) @entry(%arg: i32) -> (i32) {
+  %result = template.apply<@demo.condition_reject>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<low_core> @wave32 {subgroup_size = 32}
+
+template.decl @demo.condition_reject(%value: i32) -> (i32)
+
+func.def public target(@wave32) @entry(%arg: i32) -> (i32) {
+  func.return %arg : i32
+}
+
+// ====
+
+// An unbound requirement remains unresolved during early selection, preserving
+// both the conditional choice and the proven lower-priority fallback.
+// RUN: pass select-templates
+
+template.decl @demo.condition_unbound(%value: i32) -> (i32)
+
+template.def<@demo.condition_unbound> requires [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+template.def<@demo.condition_unbound> priority(1) @fallback(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = template.apply<@demo.condition_unbound>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+template.decl @demo.condition_unbound(%value: i32) -> (i32)
+
+template.def<@demo.condition_unbound> requires [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+template.def<@demo.condition_unbound> priority(1) @fallback(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = template.apply<@demo.condition_unbound>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// Final selection excludes a higher-priority requirement that concrete target
+// facts cannot yet prove and selects the proven fallback.
+// RUN: pass select-templates{mode=final},inline-callables
+
+test.target<low_core> @unknown_wave
+
+template.decl @demo.condition_unknown_fallback(%value: i32) -> (i32)
+
+template.def<@demo.condition_unknown_fallback> requires [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  template.return %doubled : i32
+}
+
+template.def<@demo.condition_unknown_fallback> priority(1) @fallback(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def public target(@unknown_wave) @entry(%arg: i32) -> (i32) {
+  %result = template.apply<@demo.condition_unknown_fallback>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<low_core> @unknown_wave
+
+template.decl @demo.condition_unknown_fallback(%value: i32) -> (i32)
+
+func.def public target(@unknown_wave) @entry(%arg: i32) -> (i32) {
+  func.return %arg : i32
+}
+
+// ====
+
+// Without a proven fallback, final selection reports the authored requirement
+// whose target fact remains unknown.
+// RUN: pass select-templates{mode=final}
+
+test.target<low_core> @unknown_wave
+
+template.decl @demo.condition_unknown_only(%value: i32) -> (i32)
+
+template.def<@demo.condition_unknown_only> requires [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def public target(@unknown_wave) @entry(%arg: i32) -> (i32) {
+  // ERROR@+1: LOWERING/048 {op_name="template.apply", phase_name="select-templates", contract_key="demo.condition_unknown_only", constraint_owner_name="wave64", condition_name="target.subgroup.size"}
+  %result = template.apply<@demo.condition_unknown_only>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// An unresolved lower-priority requirement cannot delay a higher-priority
+// provider whose applicability is already proven.
+// RUN: pass select-templates,inline-callables
+
+test.target<low_core> @unknown_wave
+
+template.decl @demo.condition_lower_unknown(%value: i32) -> (i32)
+
+template.def<@demo.condition_lower_unknown> priority(10) @proven(%value: i32) -> (i32) {
+  %doubled = test.addi %value, %value : i32
+  template.return %doubled : i32
+}
+
+template.def<@demo.condition_lower_unknown> requires [#target.subgroup.size<64>] priority(1) @wave64(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def public target(@unknown_wave) @entry(%arg: i32) -> (i32) {
+  %result = template.apply<@demo.condition_lower_unknown>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<low_core> @unknown_wave
+
+template.decl @demo.condition_lower_unknown(%value: i32) -> (i32)
+
+func.def public target(@unknown_wave) @entry(%arg: i32) -> (i32) {
+  %doubled = test.addi %arg, %arg : i32
+  func.return %doubled : i32
+}
+
+// ====
+
+// Requirements gate opaque providers before materialization. A rejected ukernel
+// cannot block a proven template fallback.
+// RUN: pass select-templates,inline-callables
+
+test.target<quirky> @wave7
+
+template.decl @demo.condition_ukernel(%value: i32) -> (i32)
+
+template.ukernel<@demo.condition_ukernel> requires [#target.subgroup.size<64>] priority(10) @wave64_opaque(%value: i32) -> (i32)
+
+template.def<@demo.condition_ukernel> priority(1) @fallback(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def public target(@wave7) @entry(%arg: i32) -> (i32) {
+  %result = template.apply<@demo.condition_ukernel>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<quirky> @wave7
+
+template.decl @demo.condition_ukernel(%value: i32) -> (i32)
+
+func.def public target(@wave7) @entry(%arg: i32) -> (i32) {
+  func.return %arg : i32
+}
+
+// ====
+
+// An opaque provider cannot block materialization until its target requirement
+// is proven. Final selection therefore admits the concrete template fallback.
+// RUN: pass select-templates{mode=final},inline-callables
+
+test.target<low_core> @unknown_wave
+
+template.decl @demo.condition_unknown_ukernel(%value: i32) -> (i32)
+
+template.ukernel<@demo.condition_unknown_ukernel> requires [#target.subgroup.size<64>] priority(10) @wave64_opaque(%value: i32) -> (i32)
+
+template.def<@demo.condition_unknown_ukernel> priority(1) @fallback(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def public target(@unknown_wave) @entry(%arg: i32) -> (i32) {
+  %result = template.apply<@demo.condition_unknown_ukernel>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+test.target<low_core> @unknown_wave
+
+template.decl @demo.condition_unknown_ukernel(%value: i32) -> (i32)
+
+func.def public target(@unknown_wave) @entry(%arg: i32) -> (i32) {
+  func.return %arg : i32
+}
+
+// ====
+
+// The shared declaration identity is sufficient to specialize a provider that
+// names the same still-partial target contract.
+// RUN: pass select-templates,inline-callables
+
+target.decl @external
+
+template.decl @demo.partial_target_identity(%value: i32) -> (i32)
+
+template.def<@demo.partial_target_identity> target(@external) @identity(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def public target(@external) @entry(%arg: i32) -> (i32) {
+  %result = template.apply<@demo.partial_target_identity>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+target.decl @external
+
+template.decl @demo.partial_target_identity(%value: i32) -> (i32)
+
+func.def public target(@external) @entry(%arg: i32) -> (i32) {
+  func.return %arg : i32
 }

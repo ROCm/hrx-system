@@ -113,12 +113,8 @@ static iree_status_t loom_expand_template(const char* message_template,
     int param_index = loom_find_param_index(error, placeholder_name);
     if (param_index >= 0 && (iree_host_size_t)param_index < param_count) {
       if (params[param_index].kind != error->param_defs[param_index].kind) {
-        return iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "diagnostic param '%.*s' kind mismatch: runtime %d vs schema %d",
-            (int)placeholder_name.size, placeholder_name.data,
-            (int)params[param_index].kind,
-            (int)error->param_defs[param_index].kind);
+        IREE_ASSERT_UNREACHABLE("diagnostic param kind does not match schema");
+        IREE_BUILTIN_UNREACHABLE();
       }
       IREE_RETURN_IF_ERROR(
           loom_render_param(&params[param_index], type_formatter, stream));
@@ -199,8 +195,6 @@ iree_status_t loom_type_format_minimal(loom_type_t type, void* user_data,
       return loom_output_stream_write_cstring(stream, "reg<...>");
     case LOOM_TYPE_STORAGE:
       return loom_output_stream_write_cstring(stream, "low.storage<...>");
-    case LOOM_TYPE_GROUP:
-      return loom_output_stream_write_cstring(stream, "group<...>");
     case LOOM_TYPE_FUNCTION:
       return loom_output_stream_write_cstring(stream, "(...) -> (...)");
     case LOOM_TYPE_DIALECT:
@@ -210,15 +204,7 @@ iree_status_t loom_type_format_minimal(loom_type_t type, void* user_data,
       if (role == LOOM_ENCODING_ROLE_UNKNOWN) {
         return loom_output_stream_write_cstring(stream, "encoding");
       }
-      const char* role_name = loom_encoding_role_name(role);
-      if (role_name) {
-        IREE_RETURN_IF_ERROR(
-            loom_output_stream_write_cstring(stream, "encoding<"));
-        IREE_RETURN_IF_ERROR(
-            loom_output_stream_write_cstring(stream, role_name));
-        return loom_output_stream_write_cstring(stream, ">");
-      }
-      return loom_output_stream_write_cstring(stream, "encoding<?>");
+      return loom_output_stream_write_cstring(stream, "encoding<...>");
     }
     case LOOM_TYPE_POOL:
       return loom_output_stream_write_cstring(stream, "pool<...>");

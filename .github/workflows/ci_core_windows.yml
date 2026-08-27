@@ -1,0 +1,88 @@
+# Copyright 2026 The HRX Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+name: CI CMake Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        type: choice
+        options:
+          - nightly
+          - dev
+          - prerelease
+        default: nightly
+      run_id:
+        type: string
+        description: "TheRock artifact run id. Empty means latest complete Windows run."
+        default: ""
+      artifact_set:
+        type: choice
+        options:
+          - core
+          - core-with-llvm-dev
+          - core-with-upstream-hip
+        default: core
+  pull_request:
+  push:
+    branches:
+      - main
+      - main-staging
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  cmake_windows:
+    name: Windows / CMake / ${{ matrix.toolchain }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: windows-msvc
+            toolchain: msvc
+            assertions: false
+            run_tests: true
+            ctest_exclude_regex: ""
+            package: true
+          - variant: windows-clang-cl
+            toolchain: clang-cl
+            assertions: true
+            run_tests: true
+            ctest_exclude_regex: ""
+            package: false
+    uses: ./.github/workflows/build_core_windows.yml
+    permissions:
+      contents: read
+    with:
+      name: ${{ matrix.variant }}
+      windows_toolchain: ${{ matrix.toolchain }}
+      release_type: ${{ inputs.release_type || 'nightly' }}
+      run_id: ${{ inputs.run_id || '' }}
+      artifact_set: ${{ inputs.artifact_set || 'core' }}
+      build_type: RelWithDebInfo
+      assertions: ${{ matrix.assertions }}
+      run_tests: ${{ matrix.run_tests }}
+      ctest_exclude_regex: ${{ matrix.ctest_exclude_regex }}
+      ctest_label_exclude_regex: "runtime-resource=|manual"
+      package: ${{ matrix.package }}
+
+  summary:
+    name: Windows / CMake / CI / Summary
+    needs:
+      - cmake_windows
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check matrix result
+        run: |
+          result="${{ needs.cmake_windows.result }}"
+          echo "cmake_windows result: ${result}"
+          if [[ "${result}" != "success" ]]; then
+            exit 1
+          fi

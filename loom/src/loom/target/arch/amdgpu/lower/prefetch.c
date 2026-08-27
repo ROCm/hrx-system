@@ -189,9 +189,8 @@ static bool loom_amdgpu_prefetch_select_source(
   }
 
   loom_low_source_memory_access_diagnostic_t source_diagnostic = {0};
-  if (!loom_low_source_memory_access_plan_build_with_view_regions(
-          module, fact_table, view_regions, source_op, &out_plan->source,
-          &source_diagnostic)) {
+  if (!loom_low_source_memory_access_plan_build(
+          view_regions, source_op, &out_plan->source, &source_diagnostic)) {
     *out_decision_key = source_diagnostic.rejection_bits != 0
                             ? loom_low_source_memory_access_rejection_key(
                                   source_diagnostic.rejection_bits)
@@ -243,8 +242,7 @@ static iree_status_t loom_amdgpu_prefetch_select(
                                           &descriptor, &unused_decision_key)) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_low_lower_resolve_descriptor_row(
-      context, descriptor, &out_plan->descriptor));
+  out_plan->descriptor.descriptor = descriptor;
   IREE_RETURN_IF_ERROR(loom_amdgpu_intern(context, IREE_SV("offset"),
                                           &out_plan->offset_attr_name_id));
   IREE_RETURN_IF_ERROR(loom_amdgpu_intern(context, IREE_SV("count"),
@@ -262,9 +260,8 @@ iree_status_t loom_amdgpu_record_view_prefetch_diagnostic(
     return iree_ok_status();
   }
 
-  const loom_view_region_table_t* view_regions = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_target_low_legality_view_regions(context, &view_regions));
+  const loom_view_region_table_t* view_regions =
+      loom_target_low_legality_view_regions(context);
   loom_amdgpu_prefetch_plan_t plan = {0};
   const loom_low_descriptor_t* descriptor = NULL;
   iree_string_view_t decision_key = iree_string_view_empty();
@@ -300,7 +297,8 @@ iree_status_t loom_amdgpu_lower_view_prefetch(
     const loom_amdgpu_prefetch_plan_t* plan) {
   loom_value_id_t low_resource = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
-      context, plan->source.view_value_id, &low_resource));
+      context, loom_low_source_memory_access_base_view_value_id(&plan->source),
+      &low_resource));
 
   const loom_value_id_t dynamic_index =
       plan->dynamic_term_kind == LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_SOFFSET

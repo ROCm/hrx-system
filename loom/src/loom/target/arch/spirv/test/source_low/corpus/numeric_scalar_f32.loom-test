@@ -1,0 +1,12 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_f32.loom-test
+// RUN: emit source-low output=low control-flow=structured-low
+
+// XFAIL: SPIR-V fused multiply-add lowering is unsupported
+spirv.target<vulkan1_3> @target
+func.def target(@target) @scalar_f32_arith(%lhs: f32, %rhs: f32, %bias: f32) -> (f32) {
+  %sum = scalar.addf %lhs, %rhs : f32
+  %difference = scalar.subf %sum, %bias : f32
+  %product = scalar.mulf %difference, %rhs : f32
+  %result = scalar.fmaf %product, %rhs, %bias : f32
+  func.return %result : f32
+}

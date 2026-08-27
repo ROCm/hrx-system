@@ -17,29 +17,29 @@ kernel.def @shared_memory_vector_tile_roundtrip() {
   %scratch_bytes = index.constant 1024 : offset
 
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
-  %input_view = buffer.view %input_noalias[%base] : buffer -> view<64x4xi32, #dense>
-  %output_view = buffer.view %output_noalias[%base] : buffer -> view<64x4xi32, #dense>
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<64x4xi32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<64x4xi32>
 
   // HIP concept:
   //   __shared__ int4 scratch[64];
-  %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%base] : buffer -> view<64x4xi32, #dense>
+  %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<64x4xi32>
 
   // HIP concept:
   //   reinterpret_cast<int4 *>(scratch)[threadIdx.x] =
   //       reinterpret_cast<const int4 *>(input)[threadIdx.x];
-  %loaded = vector.load %input_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
-  vector.store %loaded, %scratch_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x4xi32> -> vector<4xi32>
+  vector.store %loaded, %scratch_view[%lane, 0] : vector<4xi32>, view<64x4xi32>
 
   // HIP concept:
   //   __syncthreads();
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 
   // HIP concept:
   //   reinterpret_cast<int4 *>(output)[threadIdx.x] =
   //       reinterpret_cast<const int4 *>(scratch)[threadIdx.x];
-  %roundtrip = vector.load %scratch_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
-  vector.store %roundtrip, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32, #dense>
+  %roundtrip = vector.load %scratch_view[%lane, 0] : view<64x4xi32> -> vector<4xi32>
+  vector.store %roundtrip, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32>
   kernel.return
 }
 
@@ -47,7 +47,7 @@ check.case @case_shared_memory_vector_tile_roundtrip {
   %input = check.generate.iota offset(1) step(1) : tensor<64x4xi32>
   %output = check.generate.fill value(0) : tensor<64x4xi32>
   %expected = check.generate.iota offset(1) step(1) : tensor<64x4xi32>
-  func.call @shared_memory_vector_tile_roundtrip(%input, %output) : (tensor<64x4xi32>, tensor<64x4xi32>)
+  kernel.launch @shared_memory_vector_tile_roundtrip(%input, %output) : (tensor<64x4xi32>, tensor<64x4xi32>)
   check.expect.equal actual(%output) expected(%expected) : tensor<64x4xi32>
   check.return
 }

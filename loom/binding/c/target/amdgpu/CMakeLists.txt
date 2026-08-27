@@ -22,6 +22,7 @@ loom_cc_library(
     "amdgpu.c"
   DEPS
     iree::base
+    iree::io::byte_sequence
     loom::binding::c::loomc
     loom::error::emitter
     loom::ir
@@ -29,6 +30,7 @@ loom_cc_library(
     loom::ops::op_defs
     loom::rewrite::rewriter
     loom::target::arch::amdgpu::ops
+    loom::target::arch::amdgpu::profile
     loom::target::arch::amdgpu::provider
     loom::target::arch::amdgpu::records::target_records
     loom::target::arch::amdgpu::target_info

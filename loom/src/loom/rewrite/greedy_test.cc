@@ -6,6 +6,8 @@
 
 #include "loom/rewrite/greedy.h"
 
+#include <cstdint>
+
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -13,10 +15,32 @@
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/test/ops.h"
+#include "loom/target/facts.h"
 #include "loom/target/types.h"
 
 namespace loom {
 namespace {
+
+static const loom_target_fact_type_t kTestTargetFactType = {
+    /*.name=*/IREE_SVL("test"),
+    /*.storage_size=*/sizeof(loom_target_facts_t),
+};
+
+static void InitializeTestTargetFacts(loom_target_facts_t* out_facts) {
+  *out_facts = {
+      /*.fact_type=*/&kTestTargetFactType,
+      /*.selector=*/0,
+      /*.explicit_fields=*/0,
+      /*.storage=*/
+      {
+          /*.snapshot=*/{/*.name=*/IREE_SVL("test")},
+          /*.export_plan=*/{/*.name=*/IREE_SVL("test")},
+          /*.config=*/{/*.name=*/IREE_SVL("test")},
+          /*.bundle=*/{/*.name=*/IREE_SVL("test")},
+      },
+  };
+  loom_target_bundle_storage_rebind(&out_facts->storage);
+}
 
 class GreedyRewriteTest : public ::testing::Test {
  protected:
@@ -184,21 +208,15 @@ TEST_F(GreedyRewriteTest, UnmatchedPatternsLeaveIrUntouched) {
   EXPECT_EQ(loom_attr_as_i64(loom_op_attrs(const_op)[0]), 42);
 }
 
-TEST_F(GreedyRewriteTest, SeedFactsPreserveTargetBundleScope) {
+TEST_F(GreedyRewriteTest, ExplicitTargetFactsSetAnalysisScope) {
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
   loom_op_t* const_op = NULL;
   IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(42), i32,
                                           LOOM_LOCATION_UNKNOWN, &const_op));
   ASSERT_NE(const_op, nullptr);
 
-  loom_target_bundle_t target_bundle = {};
-  iree_arena_allocator_t seed_arena;
-  iree_arena_initialize(&block_pool_, &seed_arena);
-  loom_value_fact_table_t seed_facts;
-  IREE_ASSERT_OK(loom_value_fact_table_initialize(&seed_facts, &seed_arena,
-                                                  module_->values.capacity));
-  seed_facts.context.target_bundle = &target_bundle;
-
+  loom_target_facts_t target_facts;
+  InitializeTestTargetFacts(&target_facts);
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool_, &arena);
   loom_pass_value_fact_owner_t fact_owner;
@@ -208,7 +226,8 @@ TEST_F(GreedyRewriteTest, SeedFactsPreserveTargetBundleScope) {
 
   const loom_greedy_rewrite_options_t options = {
       /*.max_iterations=*/{},
-      /*.seed_facts=*/&seed_facts,
+      /*.target_facts=*/&target_facts,
+      /*.seed_facts=*/NULL,
   };
   IREE_ASSERT_OK(loom_greedy_rewrite_run_region(
       &driver, function_, loom_func_like_body(function_), function_.op,
@@ -217,12 +236,46 @@ TEST_F(GreedyRewriteTest, SeedFactsPreserveTargetBundleScope) {
   const loom_value_fact_table_t* latest_facts =
       loom_greedy_rewrite_driver_fact_table(&driver);
   ASSERT_NE(latest_facts, nullptr);
-  EXPECT_EQ(latest_facts->context.target_bundle, &target_bundle);
+  EXPECT_EQ(latest_facts->context.target_facts, &target_facts);
 
   loom_greedy_rewrite_driver_deinitialize(&driver);
   loom_pass_value_fact_owner_deinitialize(&fact_owner);
   iree_arena_deinitialize(&arena);
-  iree_arena_deinitialize(&seed_arena);
+}
+
+TEST_F(GreedyRewriteTest, AttributeMutationRefreshesConstantFacts) {
+  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_op_t* constant_op = NULL;
+  IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(1), i32,
+                                          LOOM_LOCATION_UNKNOWN, &constant_op));
+  loom_value_id_t result = loom_test_constant_result(constant_op);
+
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool_, &arena);
+  loom_pass_value_fact_owner_t fact_owner;
+  loom_pass_value_fact_owner_initialize(&block_pool_, &fact_owner);
+  loom_value_fact_table_t* facts = NULL;
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_prepare(
+      &fact_owner, module_, loom_pass_value_fact_scope_function(function_),
+      &facts));
+  loom_rewriter_t rewriter;
+  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, module_, &arena));
+  IREE_ASSERT_OK(loom_rewriter_enable_analysis(&rewriter, function_, facts));
+
+  int64_t value = 0;
+  ASSERT_TRUE(loom_value_facts_as_exact_i64(
+      loom_rewriter_value_facts(&rewriter, result), &value));
+  EXPECT_EQ(value, 1);
+  IREE_ASSERT_OK(loom_rewriter_set_attr(&rewriter, constant_op,
+                                        loom_test_constant_value_ATTR_INDEX,
+                                        loom_attr_i64(7)));
+  ASSERT_TRUE(loom_value_facts_as_exact_i64(
+      loom_rewriter_value_facts(&rewriter, result), &value));
+  EXPECT_EQ(value, 7);
+
+  loom_rewriter_deinitialize(&rewriter);
+  loom_pass_value_fact_owner_deinitialize(&fact_owner);
+  iree_arena_deinitialize(&arena);
 }
 
 TEST_F(GreedyRewriteTest, NamePolicyCanDisableOptionalNames) {

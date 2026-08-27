@@ -16,24 +16,34 @@ loom_cc_library(
     "contract_query.h"
     "lower.h"
     "lower_internal.h"
+    "lower_rule_descriptor.h"
+    "lower_rule_source_memory.h"
     "lower_rules.h"
   SRCS
     "contract_query.c"
     "lower.c"
     "lower_context.c"
     "lower_policy.c"
+    "lower_report.c"
+    "lower_rule_descriptor.c"
+    "lower_rule_source_memory_match.c"
+    "lower_rule_source_memory_materialize.c"
     "lower_rules.c"
   DEPS
     iree::base
+    iree::base::internal
     iree::base::internal::arena
+    loom::analysis::condition_facts
     loom::analysis::contract_vector
     loom::analysis::kernel_async_legality
+    loom::analysis::native_layout
     loom::analysis::symbolic_expr
     loom::analysis::vector_memory_footprint
     loom::analysis::view_regions
     loom::codegen::low::builder
     loom::codegen::low::descriptors
     loom::codegen::low::memory_access
+    loom::codegen::low::memory_access_ir
     loom::codegen::low::source_memory_plan
     loom::error::emitter
     loom::error::error_defs
@@ -48,16 +58,18 @@ loom_cc_library(
     loom::ops::low
     loom::ops::op_defs
     loom::ops::scf
-    loom::ops::target
     loom::ops::vector
+    loom::rewrite::remap
     loom::sanitizer::options
     loom::target::contract
+    loom::target::facts
     loom::target::low_descriptor_registry
     loom::target::low_legality
     loom::target::registers
     loom::target::types
+    loom::util::cfg_graph
+    loom::util::cfg_loop
     loom::util::fact_table
-    loom::util::math
   PUBLIC
 )
 
@@ -80,6 +92,7 @@ loom_cc_library(
     loom::ops::func_symbol_facts
     loom::ops::target
     loom::target::function_contract
+    loom::target::function_version
     loom::target::types
   PUBLIC
 )
@@ -95,6 +108,7 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::analysis::view_regions
     loom::error::error_defs
     loom::ir
     loom::ops::buffer

@@ -61,6 +61,9 @@ _ROW_MACRO_SIGNATURES = {
     "STRUCTURAL_DIRECT_STORAGE_ROW": _RowMacroSignature(
         argument_count=5, storage_policy_argument=4
     ),
+    "STRUCTURAL_DATA_STORAGE_REPORT_KEY_ROW": _RowMacroSignature(
+        argument_count=7, storage_policy_argument=5, report_key_argument=6
+    ),
     "VALUE_STRUCTURAL_DIRECT_STORAGE_ROW": _RowMacroSignature(
         argument_count=5, storage_policy_argument=4
     ),
@@ -73,6 +76,9 @@ _ROW_MACRO_SIGNATURES = {
     "VALUE_DATA_STORAGE_ROW": _RowMacroSignature(
         argument_count=6, storage_policy_argument=5
     ),
+    "VALUE_DATA_STORAGE_REPORT_KEY_ROW": _RowMacroSignature(
+        argument_count=7, storage_policy_argument=5, report_key_argument=6
+    ),
     "VALUE_DATA_SOURCE_ROW": _RowMacroSignature(
         argument_count=6, source_count_argument=5
     ),
@@ -81,6 +87,9 @@ _ROW_MACRO_SIGNATURES = {
     ),
     "MEMORY_DATA_STORAGE_ROW": _RowMacroSignature(
         argument_count=6, storage_policy_argument=5
+    ),
+    "MEMORY_DATA_STORAGE_REPORT_KEY_ROW": _RowMacroSignature(
+        argument_count=7, storage_policy_argument=5, report_key_argument=6
     ),
     "RECIPE_DIRECT_STORAGE_ROW": _RowMacroSignature(
         argument_count=5, storage_policy_argument=4
@@ -112,22 +121,26 @@ _ROW_MACRO_SIGNATURES = {
 
 _STORAGE_POLICY_NAMES = frozenset(
     {
-        "LOOM_AMDGPU_STORAGE_STRUCTURAL_VALUE_PLAN",
+        "LOOM_AMDGPU_STORAGE_VALUE_PLAN",
         "LOOM_AMDGPU_STORAGE_VECTOR_REGISTER_MAP_PLAN",
         "LOOM_AMDGPU_STORAGE_MEMORY_PLAN",
         "LOOM_AMDGPU_STORAGE_ATOMIC",
         "LOOM_AMDGPU_STORAGE_PREFETCH",
         "LOOM_AMDGPU_STORAGE_FRAGMENT_MEMORY",
         "LOOM_AMDGPU_STORAGE_SUBGROUP_BROADCAST",
+        "LOOM_AMDGPU_STORAGE_SUBGROUP_SHUFFLE",
         "LOOM_AMDGPU_STORAGE_NONE",
         "LOOM_AMDGPU_STORAGE_ASYNC_GATHER",
+        "LOOM_AMDGPU_STORAGE_ASYNC_CLUSTER",
         "LOOM_AMDGPU_STORAGE_SANITIZER_ACCESS",
+        "LOOM_AMDGPU_STORAGE_VECTOR_CONSTRUCT_PLAN",
+        "LOOM_AMDGPU_STORAGE_ASYNC_TENSOR",
     }
 )
 
 _PRESELECT_POLICY_NAMES = frozenset(
     {
-        "LOOM_AMDGPU_PRESELECT_STRUCTURAL_VALUE_PLAN",
+        "LOOM_AMDGPU_PRESELECT_VECTOR_CONSTRUCT_PLAN",
         "LOOM_AMDGPU_PRESELECT_TARGET_PLAN",
         "LOOM_AMDGPU_PRESELECT_TARGET_PLAN_FMA_DIAGNOSTIC",
     }
@@ -135,9 +148,16 @@ _PRESELECT_POLICY_NAMES = frozenset(
 
 _REPORT_KEY_NAMES = frozenset(
     {
+        "LOOM_AMDGPU_REPORT_KEY_FRAGMENT_REPACK_STRATEGY",
+        "LOOM_AMDGPU_REPORT_KEY_FRAGMENT_MEMORY_STRATEGY",
         "LOOM_AMDGPU_REPORT_KEY_TABLE_LOOKUP_STRATEGY",
+        "LOOM_AMDGPU_REPORT_KEY_KERNEL_BARRIER_STRATEGY",
         "LOOM_AMDGPU_REPORT_KEY_SUBGROUP_REDUCE_STRATEGY",
+        "LOOM_AMDGPU_REPORT_KEY_SUBGROUP_BROADCAST_STRATEGY",
+        "LOOM_AMDGPU_REPORT_KEY_VECTOR_16BIT_FLOAT_CONVERSION_STRATEGY",
+        "LOOM_AMDGPU_REPORT_KEY_VECTOR_TRANSFORM_STRATEGY",
         "LOOM_AMDGPU_REPORT_KEY_WORKGROUP_REDUCE_PUBLICATION",
+        "LOOM_AMDGPU_REPORT_KEY_TENSOR_MEMORY_PACKET",
     }
 )
 

@@ -11,6 +11,7 @@
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/drivers/amdgpu/host_queue.h"
+#include "iree/hal/drivers/amdgpu/host_queue_policy.h"
 #include "iree/hal/drivers/amdgpu/host_queue_profile.h"
 #include "iree/hal/drivers/amdgpu/host_queue_profile_events.h"
 #include "iree/hal/drivers/amdgpu/host_queue_waits.h"
@@ -105,6 +106,125 @@ class TestLogicalDevice {
   iree_hal_device_group_t* device_group_ = NULL;
 };
 
+// Two independently-created logical devices assigned to one causal topology.
+class TestLogicalDeviceGroup {
+ public:
+  ~TestLogicalDeviceGroup() {
+    // The group keeps each device and its topology live while the test-owned
+    // references are released. Releasing the group last lets it destroy the
+    // devices before destroying their borrowed topology.
+    for (iree_hal_device_t* device : devices_) {
+      iree_hal_device_release(device);
+    }
+    iree_hal_device_group_release(device_group_);
+  }
+
+  iree_status_t Initialize(
+      const iree_hal_amdgpu_logical_device_options_t* options,
+      const iree_hal_amdgpu_libhsa_t* libhsa,
+      const iree_hal_amdgpu_topology_t* topology,
+      iree_allocator_t host_allocator) {
+    iree_status_t status = create_context_.Initialize(host_allocator);
+    for (iree_host_size_t i = 0;
+         i < IREE_ARRAYSIZE(devices_) && iree_status_is_ok(status); ++i) {
+      status = iree_hal_amdgpu_logical_device_create(
+          IREE_SV("amdgpu"), options, libhsa, topology,
+          create_context_.params(), host_allocator, &devices_[i]);
+    }
+    if (!iree_status_is_ok(status)) return status;
+
+    iree_hal_device_group_builder_t builder;
+    iree_hal_device_group_builder_initialize(
+        &builder, create_context_.frontier_tracker());
+    for (iree_hal_device_t* device : devices_) {
+      if (!iree_status_is_ok(status)) break;
+      status = iree_hal_device_group_builder_add_device(&builder, device);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_device_group_builder_finalize(&builder, host_allocator,
+                                                      &device_group_);
+    } else {
+      iree_hal_device_group_builder_deinitialize(&builder);
+    }
+    return status;
+  }
+
+  iree_hal_device_group_t* device_group() const { return device_group_; }
+
+  iree_hal_amdgpu_logical_device_t* logical_device(
+      iree_host_size_t index) const {
+    return (iree_hal_amdgpu_logical_device_t*)devices_[index];
+  }
+
+  iree_hal_amdgpu_host_queue_t* first_host_queue(iree_host_size_t index) const {
+    iree_hal_amdgpu_logical_device_t* logical_device =
+        this->logical_device(index);
+    if (logical_device->physical_device_count == 0) return NULL;
+    iree_hal_amdgpu_physical_device_t* physical_device =
+        logical_device->physical_devices[0];
+    if (physical_device->host_queue_count == 0) return NULL;
+    return &physical_device->host_queues[0];
+  }
+
+ private:
+  // Creation context supplying the group's shared causal frontier tracker.
+  iree::hal::cts::DeviceCreateContext create_context_;
+
+  // Test-owned device references released while the group still owns them.
+  iree_hal_device_t* devices_[2] = {NULL, NULL};
+
+  // Group owning the topology borrowed by both logical devices.
+  iree_hal_device_group_t* device_group_ = NULL;
+};
+
+TEST_F(HostQueueSubmissionTest, GroupedLogicalDeviceQueueFrontiersAreDistinct) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+
+  TestLogicalDeviceGroup test_group;
+  IREE_ASSERT_OK(
+      test_group.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+  ASSERT_EQ(iree_hal_device_group_device_count(test_group.device_group()), 2u);
+
+  iree_hal_amdgpu_logical_device_t* logical_device_a =
+      test_group.logical_device(0);
+  iree_hal_amdgpu_logical_device_t* logical_device_b =
+      test_group.logical_device(1);
+  iree_hal_amdgpu_host_queue_t* queue_a = test_group.first_host_queue(0);
+  iree_hal_amdgpu_host_queue_t* queue_b = test_group.first_host_queue(1);
+  ASSERT_NE(queue_a, nullptr);
+  ASSERT_NE(queue_b, nullptr);
+
+  EXPECT_NE(queue_a->axis, queue_b->axis);
+  EXPECT_EQ(iree_async_axis_session(queue_a->axis),
+            iree_async_axis_session(queue_b->axis));
+  EXPECT_EQ(iree_async_axis_machine(queue_a->axis),
+            iree_async_axis_machine(queue_b->axis));
+  EXPECT_EQ(iree_async_axis_device_index(queue_a->axis), 0u);
+  EXPECT_EQ(iree_async_axis_device_index(queue_b->axis), 1u);
+  EXPECT_EQ(iree_async_axis_queue_index(queue_a->axis), 0u);
+  EXPECT_EQ(iree_async_axis_queue_index(queue_b->axis), 0u);
+
+  iree_hal_amdgpu_host_queue_epoch_wait_t wait_state;
+  ASSERT_TRUE(iree_hal_amdgpu_logical_device_lookup_host_queue_epoch_wait(
+      logical_device_a, queue_a->axis, &wait_state));
+  EXPECT_EQ(wait_state.host_queue, queue_a);
+  ASSERT_TRUE(iree_hal_amdgpu_logical_device_lookup_host_queue_epoch_wait(
+      logical_device_b, queue_b->axis, &wait_state));
+  EXPECT_EQ(wait_state.host_queue, queue_b);
+  EXPECT_FALSE(iree_hal_amdgpu_logical_device_lookup_host_queue_epoch_wait(
+      logical_device_a, queue_b->axis, &wait_state));
+  EXPECT_FALSE(iree_hal_amdgpu_logical_device_lookup_host_queue_epoch_wait(
+      logical_device_b, queue_a->axis, &wait_state));
+
+  EXPECT_EQ(
+      iree_hal_amdgpu_host_queue_axis_acquire_scope(queue_a, queue_a->axis),
+      IREE_HSA_FENCE_SCOPE_AGENT);
+  EXPECT_EQ(
+      iree_hal_amdgpu_host_queue_axis_acquire_scope(queue_a, queue_b->axis),
+      IREE_HSA_FENCE_SCOPE_SYSTEM);
+}
+
 class HostQueueHsaProfilingScope {
  public:
   explicit HostQueueHsaProfilingScope(iree_hal_amdgpu_host_queue_t* queue)
@@ -185,6 +305,18 @@ static void NoopProfileSinkInitialize(NoopProfileSink* sink) {
 
 static iree_hal_profile_sink_t* NoopProfileSinkAsBase(NoopProfileSink* sink) {
   return reinterpret_cast<iree_hal_profile_sink_t*>(sink);
+}
+
+TEST(HostQueueSubmissionUnitTest, QueueOwnedKernargsRequireSystemAcquire) {
+  EXPECT_EQ(iree_hal_amdgpu_host_queue_kernarg_acquire_scope(
+                IREE_HSA_FENCE_SCOPE_NONE),
+            IREE_HSA_FENCE_SCOPE_SYSTEM);
+  EXPECT_EQ(iree_hal_amdgpu_host_queue_kernarg_acquire_scope(
+                IREE_HSA_FENCE_SCOPE_AGENT),
+            IREE_HSA_FENCE_SCOPE_SYSTEM);
+  EXPECT_EQ(iree_hal_amdgpu_host_queue_kernarg_acquire_scope(
+                IREE_HSA_FENCE_SCOPE_SYSTEM),
+            IREE_HSA_FENCE_SCOPE_SYSTEM);
 }
 
 TEST(HostQueueSubmissionUnitTest, WritesPersistentPm4IbPacketBody) {

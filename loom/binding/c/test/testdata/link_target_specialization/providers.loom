@@ -1,0 +1,18 @@
+test.target<low_core> @low_core
+
+test.target<quirky> @quirky
+
+template.decl @demo.profile_selected(%value: i32) -> (i32)
+
+template.def<@demo.profile_selected> target(@low_core) priority(20) @profile_provider(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  template.return %result : i32
+}
+
+template.def<@demo.profile_selected> target(@quirky) priority(30) @incompatible_provider(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+template.def<@demo.profile_selected> priority(1) @fallback_provider(%value: i32) -> (i32) {
+  template.return %value : i32
+}

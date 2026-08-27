@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from loom.dsl import Op
+from loom.dsl import FACT_IDENTITY, MemoryAccessInterface, Op
 from loom.target.contracts.descriptors import _require_descriptor
 from loom.target.contracts.emits import DescriptorEmitForm, EmitDescriptorOp
 from loom.target.contracts.guards import Guard
@@ -69,7 +69,45 @@ class DescriptorRule:
                 defined_temporaries,
             )
             defined_temporaries.update(produced_temporaries)
+        self._validate_source_memory_index_preservation()
         self._validate_per_lane_sequence()
+
+    def _validate_source_memory_index_preservation(self) -> None:
+        source_memories = tuple(
+            emit.source_memory for emit in self.emit if emit.source_memory is not None
+        )
+        if not source_memories:
+            return
+        memory_access = next(
+            (
+                interface
+                for interface in self.source_op.interfaces
+                if isinstance(interface, MemoryAccessInterface)
+            ),
+            None,
+        )
+        if memory_access is None or memory_access.indices is None:
+            return
+        source_index_used = any(
+            value_ref.kind == SourceValueKind.OPERAND
+            and value_ref.field == memory_access.indices
+            for emit in self.emit
+            for value_ref in emit.operands.values()
+        )
+        preserved_source_memory_count = sum(
+            source_memory.preserve_source_index for source_memory in source_memories
+        )
+        if source_index_used and preserved_source_memory_count != len(source_memories):
+            raise ValueError(
+                f"{self.source_op.name}: source-memory rules that consume the "
+                f"original '{memory_access.indices}' operand must preserve the "
+                "source index"
+            )
+        if preserved_source_memory_count != 0 and not source_index_used:
+            raise ValueError(
+                f"{self.source_op.name}: source-index preservation requires the "
+                f"original '{memory_access.indices}' operand"
+            )
 
     def _validate_per_lane_sequence(self) -> None:
         sequence_emit_count = sum(
@@ -159,6 +197,72 @@ class ValueAliasRule:
             raise ValueError(f"{self.source_op.name}: alias result must be a result")
         self.source.validate(self.source_op, "alias source")
         self.result.validate(self.source_op, "alias result")
+        for guard in self.guards:
+            guard.validate(self.source_op)
+
+
+@dataclass(frozen=True, slots=True)
+class OrdinalValueAliasRule:
+    """Contract case that aliases operand/result fields by ordinal."""
+
+    source_op: Op
+    source: ValueRef
+    result: ValueRef
+    guards: tuple[Guard, ...] = ()
+
+    def __init__(
+        self,
+        *,
+        source_op: Op,
+        source: ValueRef,
+        result: ValueRef,
+        guards: Sequence[Guard] = (),
+    ) -> None:
+        object.__setattr__(self, "source_op", source_op)
+        object.__setattr__(self, "source", source)
+        object.__setattr__(self, "result", result)
+        object.__setattr__(self, "guards", tuple(guards))
+
+    @property
+    def system(self) -> ContractSystem:
+        return ContractSystem.VALUE_ALIAS
+
+    def validate(self, descriptor_set: DescriptorSet) -> None:
+        del descriptor_set
+        if self.source.kind != SourceValueKind.OPERAND:
+            raise ValueError(f"{self.source_op.name}: alias source must be an operand")
+        if self.result.kind != SourceValueKind.RESULT:
+            raise ValueError(f"{self.source_op.name}: alias result must be a result")
+        source_operand = self.source_op.operand(self.source.field)
+        if source_operand is None:
+            raise ValueError(
+                f"{self.source_op.name}: alias source field "
+                f"'{self.source.field}' is not an operand"
+            )
+        if not source_operand.variadic:
+            raise ValueError(
+                f"{self.source_op.name}: ordinal alias source field "
+                f"'{self.source.field}' must be variadic"
+            )
+        result_field = self.source_op.result(self.result.field)
+        if result_field is None:
+            raise ValueError(
+                f"{self.source_op.name}: alias result field "
+                f"'{self.result.field}' is not a result"
+            )
+        if not result_field.variadic:
+            raise ValueError(
+                f"{self.source_op.name}: ordinal alias result field "
+                f"'{self.result.field}' must be variadic"
+            )
+        self.source.validate(self.source_op, "alias source")
+        self.result.validate(self.source_op, "alias result")
+        if FACT_IDENTITY not in self.source_op.traits:
+            raise ValueError(
+                f"{self.source_op.name}: ordinal alias from "
+                f"'{self.source.field}' to '{self.result.field}' requires the "
+                "FactIdentity trait"
+            )
         for guard in self.guards:
             guard.validate(self.source_op)
 
@@ -255,7 +359,12 @@ class DescriptorMatrixRule:
 
 
 type ContractCase = (
-    DescriptorRule | ValueAliasRule | ValueElideRule | RecipeRule | DescriptorMatrixRule
+    DescriptorRule
+    | ValueAliasRule
+    | OrdinalValueAliasRule
+    | ValueElideRule
+    | RecipeRule
+    | DescriptorMatrixRule
 )
 
 

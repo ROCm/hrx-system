@@ -8,6 +8,15 @@
 
 #include <stdint.h>
 
+const loom_target_fact_type_t loom_test_target_fact_type = {
+    .name = IREE_SVL("test"),
+    .storage_size = sizeof(loom_target_facts_t),
+    .satisfies_identity_requirement =
+        loom_target_facts_selector_satisfies_identity_requirement,
+    .satisfies_specialization_requirement =
+        loom_target_facts_structural_satisfy_specialization_requirement,
+};
+
 static const loom_target_snapshot_t kTestLowSnapshot = {
     .name = IREE_SVL("test-low"),
     .codegen_format = LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE,

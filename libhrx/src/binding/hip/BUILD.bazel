@@ -4,9 +4,17 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
+load(
+    "//build_tools/sanitizer:suppressions.bzl",
+    "hsa_suppressions",
+    "rocm_suppressions",
+)
 load(
     "//libhrx/build_tools/bazel:cc.bzl",
+    "hrx_cc_library",
     "hrx_cc_shared_library",
+    "hrx_cc_test",
 )
 
 package(
@@ -15,17 +23,114 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
+# The current shim implementation is ELF-specific. A Windows port must replace
+# its loader and symbol-export mechanisms before relaxing this constraint.
+_LINUX_COMPATIBILITY = ["@platforms//os:linux"]
+
+hrx_cc_library(
+    name = "printf_format",
+    srcs = ["printf_format.c"],
+    hdrs = ["printf_format.h"],
+    includes = ["../.."],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = ["//runtime/src/iree/base"],
+)
+
+hrx_cc_library(
+    name = "hostcall_packet",
+    hdrs = ["hostcall_packet.h"],
+    includes = ["../.."],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+    ],
+)
+
+hrx_cc_library(
+    name = "hostcall_message",
+    srcs = ["hostcall_message.c"],
+    hdrs = ["hostcall_message.h"],
+    includes = ["../.."],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        ":hostcall_packet",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+hrx_cc_library(
+    name = "blocking_printf_protocol",
+    srcs = ["blocking_printf_protocol.c"],
+    hdrs = ["blocking_printf_protocol.h"],
+    includes = ["../.."],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        ":hostcall_message",
+        ":printf_format",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+hrx_cc_library(
+    name = "blocking_printf_provider",
+    srcs = ["blocking_printf_provider.c"],
+    hdrs = ["blocking_printf_provider.h"],
+    includes = ["../.."],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        ":blocking_printf_protocol",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+hrx_cc_library(
+    name = "launch_params",
+    srcs = ["launch_params.c"],
+    hdrs = [
+        "api.h",
+        "launch_params.h",
+    ],
+    includes = [
+        "../..",
+        "../../../include",
+        "../../libhrx",
+    ],
+    deps = [
+        "//libhrx/src/binding/common",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+hrx_cc_library(
+    name = "handle_registry",
+    srcs = ["handle_registry.c"],
+    hdrs = ["handle_registry.h"],
+    includes = ["../.."],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+    ],
+)
+
 hrx_cc_shared_library(
     name = "amdhip64",
     srcs = [
         "abi_stubs.c",
         "api.c",
+        "api_metadata.c",
     ],
-    hdrs = ["api.h"],
+    hdrs = [
+        "api.h",
+        "binding_internal.h",
+    ],
     additional_linker_inputs = ["amdhip64.map"],
     copts = [
         "-DIREE_HAL_STREAMING_HIP_EXPORTS",
-        "-Wno-attributes",
         "-Wno-unused-variable",
     ],
     includes = [
@@ -37,10 +142,173 @@ hrx_cc_shared_library(
         "-Wl,--undefined-version",
         "-Wl,--version-script=$(location :amdhip64.map)",
     ],
+    target_compatible_with = _LINUX_COMPATIBILITY,
     deps = [
+        ":blocking_printf_provider",
+        ":handle_registry",
+        ":launch_params",
         "//libhrx/src/binding/common",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
+    ],
+)
+
+hrx_cc_test(
+    name = "handle_registry_test",
+    srcs = ["handle_registry_test.cc"],
+    deps = [
+        ":handle_registry",
+        "//build_tools/bazel:pthreads",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+# The installed-test registration runs while this file's generated CMake is
+# evaluated. Set the shared library's artifact name before the test records it
+# as data or expands its target-file environment value.
+iree_cmake_extra_content(
+    content = """
+if(TARGET libhrx_src_binding_hip_amdhip64)
+set_target_properties(libhrx_src_binding_hip_amdhip64 PROPERTIES
+  OUTPUT_NAME amdhip64
+  VERSION 7.9999.0
+  SOVERSION 7
+  POSITION_INDEPENDENT_CODE ON
+  INSTALL_RPATH "$ORIGIN"
+)
+endif()
+""",
+    inline = True,
+)
+
+hrx_cc_test(
+    name = "hip_api_name_test",
+    srcs = ["hip_api_name_test.cc"],
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        "//build_tools/bazel:dl",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "hip_get_proc_address_test",
+    srcs = ["hip_get_proc_address_test.cc"],
+    # The test dlopen()s the built libamdhip64 with RTLD_LOCAL to reproduce the
+    # consumer scenario (e.g. Triton). CMake injects the exact artifact path via
+    # HRX_TEST_LIBAMDHIP64_PATH; Bazel passes the shared object as test data.
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        # The test itself calls dlopen()/dlsym()/dlclose(); link libdl so the
+        # executable resolves them (glibc that ships dl separately, ld.lld).
+        "//build_tools/bazel:dl",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "hip_launch_validation_api_test",
+    srcs = ["hip_launch_validation_api_test.cc"],
+    # The test loads the built runtime through its public ABI and supplies a
+    # tagged function handle that reaches argument validation before dispatch.
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    sanitizer_suppressions = rocm_suppressions,
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        ":launch_params",
+        "//build_tools/bazel:dl",
+        "//build_tools/bazel:pthreads",
+        "//libhrx/src/binding/common",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "hip_memory_pool_api_test",
+    srcs = ["hip_memory_pool_api_test.cc"],
+    # The test loads the built runtime through its public ABI and exercises
+    # device-backed allocation and graph teardown.
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    sanitizer_suppressions = hsa_suppressions,
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        ":launch_params",
+        "//build_tools/bazel:dl",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "hostcall_message_test",
+    srcs = ["hostcall_message_test.cc"],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        ":hostcall_message",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "blocking_printf_protocol_test",
+    srcs = ["blocking_printf_protocol_test.cc"],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        ":blocking_printf_protocol",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "blocking_printf_provider_test",
+    srcs = ["blocking_printf_provider_test.cc"],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        ":blocking_printf_protocol",
+        ":blocking_printf_provider",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "launch_params_test",
+    srcs = ["launch_params_test.cc"],
+    deps = [
+        ":launch_params",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "printf_format_test",
+    srcs = ["printf_format_test.cc"],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        ":printf_format",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )

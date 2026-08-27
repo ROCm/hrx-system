@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Python DSL model loading for Loom C op table generation."""
+"""Loads the canonical Loom declaration model for generated artifacts."""
 
 from __future__ import annotations
 
@@ -12,21 +12,24 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from loom.dsl import Op
+from loom.dsl import EncodingFamilyDef, Op, ParameterizedAttrDef
 
 
 @dataclass(frozen=True)
 class DialectGeneration:
-    """Generated C metadata inputs for one dialect."""
+    """Canonical declaration inputs owned by one dialect."""
 
     dialect: Any
     ops: list[Op]
     table_shards: Sequence[tuple[Any, Sequence[Op]]] | None
+    parameterized_attrs: Sequence[ParameterizedAttrDef] = ()
+    encoding_families: Sequence[EncodingFamilyDef] = ()
+    types: Sequence[Any] = ()
 
 
 @dataclass(frozen=True)
 class GenerationModel:
-    """Complete op/type model consumed by C table generation."""
+    """Complete op/type model consumed by Loom generators."""
 
     dialects: list[DialectGeneration]
     types: list[Any]
@@ -36,9 +39,20 @@ DialectGenerationLoader = Callable[[], DialectGeneration]
 
 
 def _load_test_generation() -> DialectGeneration:
-    from loom.dialect.test import ALL_TEST_OPS, test_ops
+    from loom.dialect.test import (
+        ALL_TEST_OPS,
+        ALL_TEST_PARAMETERIZED_ATTRS,
+        ALL_TEST_TYPES,
+        test_ops,
+    )
 
-    return DialectGeneration(test_ops, list(ALL_TEST_OPS), None)
+    return DialectGeneration(
+        test_ops,
+        list(ALL_TEST_OPS),
+        None,
+        ALL_TEST_PARAMETERIZED_ATTRS,
+        types=ALL_TEST_TYPES,
+    )
 
 
 def _load_scalar_generation() -> DialectGeneration:
@@ -54,9 +68,20 @@ def _load_func_generation() -> DialectGeneration:
 
 
 def _load_encoding_generation() -> DialectGeneration:
-    from loom.dialect.encoding import ALL_ENCODING_OPS, encoding_ops
+    from loom.dialect.encoding import (
+        ALL_ENCODING_FAMILIES,
+        ALL_ENCODING_OPS,
+        ALL_ENCODING_PARAMETERIZED_ATTRS,
+        encoding_ops,
+    )
 
-    return DialectGeneration(encoding_ops, list(ALL_ENCODING_OPS), None)
+    return DialectGeneration(
+        encoding_ops,
+        list(ALL_ENCODING_OPS),
+        None,
+        parameterized_attrs=ALL_ENCODING_PARAMETERIZED_ATTRS,
+        encoding_families=ALL_ENCODING_FAMILIES,
+    )
 
 
 def _load_pool_generation() -> DialectGeneration:
@@ -87,6 +112,12 @@ def _load_check_generation() -> DialectGeneration:
     from loom.dialect.check import ALL_CHECK_OPS, check_ops
 
     return DialectGeneration(check_ops, list(ALL_CHECK_OPS), None)
+
+
+def _load_command_generation() -> DialectGeneration:
+    from loom.dialect.command import ALL_COMMAND_OPS, command_ops
+
+    return DialectGeneration(command_ops, list(ALL_COMMAND_OPS), None)
 
 
 def _load_buffer_generation() -> DialectGeneration:
@@ -126,15 +157,30 @@ def _load_llvmir_generation() -> DialectGeneration:
 
 
 def _load_target_generation() -> DialectGeneration:
-    from loom.dialect.target import ALL_TARGET_OPS, target_ops
+    from loom.dialect.target import (
+        ALL_TARGET_OPS,
+        ALL_TARGET_PARAMETERIZED_ATTRS,
+        target_ops,
+    )
 
-    return DialectGeneration(target_ops, list(ALL_TARGET_OPS), None)
+    return DialectGeneration(
+        target_ops,
+        list(ALL_TARGET_OPS),
+        None,
+        ALL_TARGET_PARAMETERIZED_ATTRS,
+    )
 
 
 def _load_low_generation() -> DialectGeneration:
     from loom.dialect.low import ALL_LOW_OPS, low_ops
 
     return DialectGeneration(low_ops, list(ALL_LOW_OPS), None)
+
+
+def _load_template_generation() -> DialectGeneration:
+    from loom.dialect.template import ALL_TEMPLATE_OPS, template_ops
+
+    return DialectGeneration(template_ops, list(ALL_TEMPLATE_OPS), None)
 
 
 def _load_pass_generation() -> DialectGeneration:
@@ -168,9 +214,9 @@ def _load_x86_generation() -> DialectGeneration:
 
 
 def _load_spirv_generation() -> DialectGeneration:
-    from loom.target.arch.spirv.dialect import ALL_SPIRV_OPS, spirv_ops
+    from loom.target.arch.spirv.dialect import ALL_SPIRV_OPS, ALL_SPIRV_TYPES, spirv_ops
 
-    return DialectGeneration(spirv_ops, list(ALL_SPIRV_OPS), None)
+    return DialectGeneration(spirv_ops, list(ALL_SPIRV_OPS), None, types=ALL_SPIRV_TYPES)
 
 
 def _load_wasm_generation() -> DialectGeneration:
@@ -180,9 +226,9 @@ def _load_wasm_generation() -> DialectGeneration:
 
 
 def _load_ireevm_generation() -> DialectGeneration:
-    from loom.target.arch.ireevm.dialect import ALL_IREEVM_OPS, ireevm_ops
+    from loom.target.arch.ireevm.dialect import ALL_IREEVM_OPS, ALL_IREEVM_TYPES, ireevm_ops
 
-    return DialectGeneration(ireevm_ops, list(ALL_IREEVM_OPS), None)
+    return DialectGeneration(ireevm_ops, list(ALL_IREEVM_OPS), None, types=ALL_IREEVM_TYPES)
 
 
 _DIALECT_GENERATION_LOADERS: tuple[tuple[str, DialectGenerationLoader], ...] = (
@@ -195,6 +241,7 @@ _DIALECT_GENERATION_LOADERS: tuple[tuple[str, DialectGenerationLoader], ...] = (
     ("scf", _load_scf_generation),
     ("cfg", _load_cfg_generation),
     ("check", _load_check_generation),
+    ("command", _load_command_generation),
     ("buffer", _load_buffer_generation),
     ("view", _load_view_generation),
     ("vector", _load_vector_generation),
@@ -203,6 +250,7 @@ _DIALECT_GENERATION_LOADERS: tuple[tuple[str, DialectGenerationLoader], ...] = (
     ("llvmir", _load_llvmir_generation),
     ("target", _load_target_generation),
     ("low", _load_low_generation),
+    ("template", _load_template_generation),
     ("pass", _load_pass_generation),
     ("config", _load_config_generation),
     ("sanitizer", _load_sanitizer_generation),
@@ -215,29 +263,27 @@ _DIALECT_GENERATION_LOADERS: tuple[tuple[str, DialectGenerationLoader], ...] = (
 
 
 def dialect_names() -> tuple[str, ...]:
-    """Returns dialect names accepted by selected C table generation."""
+    """Returns dialect names available to declaration-model consumers."""
     return tuple(name for name, _ in _DIALECT_GENERATION_LOADERS)
 
 
-def _load_all_types() -> list[Any]:
+def _load_core_types() -> list[Any]:
     from loom.builtin_types import ALL_BUILTIN_TYPES
     from loom.dialect.hal import ALL_HAL_TYPES
     from loom.dialect.kernel import ALL_KERNEL_TYPES
-    from loom.target.arch.ireevm.dialect import ALL_IREEVM_TYPES
 
     return [
         *ALL_BUILTIN_TYPES,
         *ALL_HAL_TYPES,
         *ALL_KERNEL_TYPES,
-        *ALL_IREEVM_TYPES,
     ]
 
 
 def load_generation_model() -> GenerationModel:
-    """Loads all Python DSL declarations needed for C table generation."""
+    """Loads all canonical Python DSL declarations."""
     return GenerationModel(
         dialects=[loader() for _, loader in _DIALECT_GENERATION_LOADERS],
-        types=_load_all_types(),
+        types=_load_core_types(),
     )
 
 

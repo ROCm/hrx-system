@@ -11,7 +11,9 @@
 
 #include "iree/async/notification.h"
 #include "iree/base/threading/mutex.h"
+#include "iree/hal/drivers/vulkan/atomic.h"
 #include "iree/hal/drivers/vulkan/buffer.h"
+#include "iree/hal/drivers/vulkan/device_plan.h"
 #include "iree/hal/drivers/vulkan/queue.h"
 #include "iree/hal/drivers/vulkan/slab_provider.h"
 #include "iree/hal/drivers/vulkan/sparse_buffer.h"
@@ -45,6 +47,18 @@ typedef struct iree_hal_vulkan_allocator_memory_placement_t {
   // HAL memory type exposed by allocated buffers.
   iree_hal_memory_type_t memory_type;
 } iree_hal_vulkan_allocator_memory_placement_t;
+
+typedef struct iree_hal_vulkan_allocator_buffer_sharing_t {
+  // Vulkan sharing mode derived from the buffer queue affinity.
+  VkSharingMode mode;
+
+  // Number of queue_family_indices entries passed to Vulkan. This is zero for
+  // exclusive sharing and greater than one for concurrent sharing.
+  uint32_t queue_family_index_count;
+
+  // Deduplicated Vulkan queue families used for concurrent sharing.
+  uint32_t queue_family_indices[IREE_HAL_VULKAN_MAX_QUEUE_LANES];
+} iree_hal_vulkan_allocator_buffer_sharing_t;
 
 typedef struct iree_hal_vulkan_allocator_pool_pair_t {
   // Slab provider acquiring whole Vulkan buffers for this memory type.
@@ -147,6 +161,13 @@ struct iree_hal_vulkan_allocator_t {
   // Queue affinity bits supported by this logical device.
   iree_hal_queue_affinity_t queue_affinity_mask;
 
+  // Number of initialized queue_families entries.
+  iree_host_size_t queue_family_count;
+
+  // Vulkan queue families addressable through HAL queue affinities.
+  iree_hal_vulkan_allocator_queue_family_t
+      queue_families[IREE_HAL_VULKAN_MAX_QUEUE_LANES];
+
   // Internal queue lane used to perform sparse memory binding. Borrowed.
   iree_hal_vulkan_queue_t* sparse_binding_queue;
 
@@ -212,6 +233,68 @@ static void iree_hal_vulkan_allocator_deinitialize_virtual_memory_registry(
   iree_slim_mutex_deinitialize(&allocator->virtual_memory_mutex);
 }
 
+static iree_status_t iree_hal_vulkan_allocator_validate_queue_family_mappings(
+    const iree_hal_vulkan_physical_device_snapshot_t* physical_device,
+    iree_hal_queue_affinity_t queue_affinity_mask,
+    iree_host_size_t queue_family_count,
+    const iree_hal_vulkan_allocator_queue_family_t* queue_families) {
+  if (queue_family_count == 0 ||
+      queue_family_count > IREE_HAL_VULKAN_MAX_QUEUE_LANES) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Vulkan allocator queue family mapping count %" PRIhsz
+        " is outside the supported range [1, %d]",
+        queue_family_count, IREE_HAL_VULKAN_MAX_QUEUE_LANES);
+  }
+  iree_hal_queue_affinity_t mapped_queue_affinity = 0;
+  for (iree_host_size_t i = 0; i < queue_family_count; ++i) {
+    const iree_hal_vulkan_allocator_queue_family_t* queue_family =
+        &queue_families[i];
+    if (iree_hal_queue_affinity_count(queue_family->queue_affinity) != 1) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "Vulkan allocator queue family mapping %" PRIhsz
+                              " must select exactly one HAL queue affinity bit",
+                              i);
+    }
+    if ((queue_family->queue_affinity & queue_affinity_mask) !=
+        queue_family->queue_affinity) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "Vulkan allocator queue family mapping %" PRIhsz
+                              " selects affinity 0x%016" PRIx64
+                              " outside the device mask 0x%016" PRIx64,
+                              i, queue_family->queue_affinity,
+                              queue_affinity_mask);
+    }
+    if (queue_family->family_index >= physical_device->queue_family_count) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "Vulkan allocator queue family mapping %" PRIhsz
+          " selects family %u but the physical device exposes %u families",
+          i, queue_family->family_index, physical_device->queue_family_count);
+    }
+    for (iree_host_size_t j = 0; j < i; ++j) {
+      if (queue_families[j].queue_affinity == queue_family->queue_affinity &&
+          queue_families[j].family_index != queue_family->family_index) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "Vulkan allocator queue affinity 0x%016" PRIx64
+                                " maps to conflicting families %u and %u",
+                                queue_family->queue_affinity,
+                                queue_families[j].family_index,
+                                queue_family->family_index);
+      }
+    }
+    mapped_queue_affinity |= queue_family->queue_affinity;
+  }
+  if (mapped_queue_affinity != queue_affinity_mask) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Vulkan allocator queue family mappings cover affinity 0x%016" PRIx64
+        " but the device exposes 0x%016" PRIx64,
+        mapped_queue_affinity, queue_affinity_mask);
+  }
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_vulkan_allocator_create(
     iree_hal_device_t* parent_device, const iree_hal_vulkan_device_syms_t* syms,
     VkDevice logical_device,
@@ -219,6 +302,8 @@ iree_status_t iree_hal_vulkan_allocator_create(
     iree_hal_vulkan_features_t enabled_features,
     iree_hal_vulkan_device_extensions_t enabled_extensions,
     iree_hal_queue_affinity_t queue_affinity_mask,
+    iree_host_size_t queue_family_count,
+    const iree_hal_vulkan_allocator_queue_family_t* queue_families,
     iree_hal_vulkan_queue_t* sparse_binding_queue,
     iree_async_proactor_t* proactor, iree_allocator_t host_allocator,
     iree_hal_allocator_t** out_allocator) {
@@ -226,9 +311,13 @@ iree_status_t iree_hal_vulkan_allocator_create(
   IREE_ASSERT_ARGUMENT(syms);
   IREE_ASSERT_ARGUMENT(logical_device);
   IREE_ASSERT_ARGUMENT(physical_device);
+  IREE_ASSERT_ARGUMENT(queue_families);
   IREE_ASSERT_ARGUMENT(proactor);
   IREE_ASSERT_ARGUMENT(out_allocator);
   *out_allocator = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_allocator_validate_queue_family_mappings(
+      physical_device, queue_affinity_mask, queue_family_count,
+      queue_families));
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_vulkan_allocator_t* allocator = NULL;
@@ -253,6 +342,9 @@ iree_status_t iree_hal_vulkan_allocator_create(
   allocator->enabled_features = enabled_features;
   allocator->enabled_extensions = enabled_extensions;
   allocator->queue_affinity_mask = queue_affinity_mask;
+  allocator->queue_family_count = queue_family_count;
+  memcpy(allocator->queue_families, queue_families,
+         queue_family_count * sizeof(queue_families[0]));
   allocator->sparse_binding_queue = sparse_binding_queue;
   iree_slim_mutex_initialize(&allocator->virtual_memory_mutex);
 
@@ -363,27 +455,12 @@ iree_hal_vulkan_allocator_max_allocation_size_for_type(
                      allocator, memory_type_index));
 }
 
-static iree_hal_memory_type_t iree_hal_vulkan_memory_type_from_vk(
-    VkMemoryPropertyFlags flags) {
-  iree_hal_memory_type_t memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
-  if (iree_all_bits_set(flags, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
-    memory_type |= IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  }
-  if (iree_all_bits_set(flags, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) {
-    memory_type |= IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
-  }
-  if (iree_all_bits_set(flags, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
-    memory_type |= IREE_HAL_MEMORY_TYPE_HOST_COHERENT;
-  }
-  if (iree_all_bits_set(flags, VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) {
-    memory_type |= IREE_HAL_MEMORY_TYPE_HOST_CACHED;
-  }
-  if (iree_all_bits_set(memory_type, IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
-                                         IREE_HAL_MEMORY_TYPE_HOST_COHERENT) &&
-      !iree_all_bits_set(memory_type, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL)) {
-    memory_type |= IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
-  }
-  return memory_type;
+static iree_hal_memory_type_t
+iree_hal_vulkan_allocator_memory_type_from_properties(
+    const iree_hal_vulkan_allocator_t* allocator,
+    VkMemoryPropertyFlags memory_property_flags) {
+  return iree_hal_vulkan_memory_type_from_properties(
+      allocator->properties2.properties.deviceType, memory_property_flags);
 }
 
 static iree_hal_buffer_usage_t iree_hal_vulkan_allowed_usage_from_memory_type(
@@ -401,6 +478,18 @@ static iree_hal_buffer_usage_t iree_hal_vulkan_allowed_usage_from_memory_type(
                      IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_SEQUENTIAL_WRITE;
   }
   return allowed_usage;
+}
+
+static iree_hal_atomic_operation_capabilities_t
+iree_hal_vulkan_allocator_atomic_operations(
+    const iree_hal_vulkan_allocator_t* allocator,
+    iree_hal_memory_type_t memory_type, iree_hal_buffer_usage_t allowed_usage) {
+  if (!iree_all_bits_set(memory_type, IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE) ||
+      !iree_all_bits_set(allowed_usage, IREE_HAL_BUFFER_USAGE_STORAGE)) {
+    return (iree_hal_atomic_operation_capabilities_t){0};
+  }
+  return iree_hal_vulkan_atomic_capabilities(allocator->enabled_features)
+      .operations;
 }
 
 static iree_device_size_t iree_hal_vulkan_allocator_default_pool_alignment(
@@ -474,9 +563,11 @@ static bool iree_hal_vulkan_allocator_memory_type_precedes(
   const VkMemoryType* right_memory_type =
       &memory_properties->memoryTypes[right_memory_type_index];
   const iree_hal_memory_type_t left_hal_memory_type =
-      iree_hal_vulkan_memory_type_from_vk(left_memory_type->propertyFlags);
+      iree_hal_vulkan_allocator_memory_type_from_properties(
+          allocator, left_memory_type->propertyFlags);
   const iree_hal_memory_type_t right_hal_memory_type =
-      iree_hal_vulkan_memory_type_from_vk(right_memory_type->propertyFlags);
+      iree_hal_vulkan_allocator_memory_type_from_properties(
+          allocator, right_memory_type->propertyFlags);
   const int32_t left_priority =
       iree_hal_vulkan_allocator_query_memory_heap_priority(
           left_hal_memory_type);
@@ -573,6 +664,8 @@ static iree_status_t iree_hal_vulkan_allocator_create_pool_pair(
       .memory_property_flags = memory_property_flags,
       .memory_type = memory_type,
       .supported_usage = supported_usage,
+      .atomic_operations = iree_hal_vulkan_allocator_atomic_operations(
+          allocator, memory_type, supported_usage),
       .queue_affinity_mask = allocator->queue_affinity_mask,
       .min_alignment = allocator->default_pool_alignment,
       .non_coherent_atom_size =
@@ -686,8 +779,8 @@ static iree_status_t iree_hal_vulkan_allocator_initialize_default_pools(
   int32_t best_host_cached_priority = INT32_MIN;
   for (uint32_t i = 0; i < memory_properties->memoryTypeCount; ++i) {
     const iree_hal_memory_type_t memory_type =
-        iree_hal_vulkan_memory_type_from_vk(
-            memory_properties->memoryTypes[i].propertyFlags);
+        iree_hal_vulkan_allocator_memory_type_from_properties(
+            allocator, memory_properties->memoryTypes[i].propertyFlags);
     if (iree_all_bits_set(memory_type, IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE)) {
       const int32_t priority =
           iree_hal_vulkan_allocator_memory_type_priority(memory_type);
@@ -733,7 +826,8 @@ static iree_status_t iree_hal_vulkan_allocator_initialize_default_pools(
     const uint32_t i = selected_indices[selected_ordinal];
     const VkMemoryType* vk_memory_type = &memory_properties->memoryTypes[i];
     const iree_hal_memory_type_t memory_type =
-        iree_hal_vulkan_memory_type_from_vk(vk_memory_type->propertyFlags);
+        iree_hal_vulkan_allocator_memory_type_from_properties(
+            allocator, vk_memory_type->propertyFlags);
     const iree_hal_buffer_usage_t supported_usage =
         iree_hal_vulkan_allowed_usage_from_memory_type(memory_type);
     iree_hal_vulkan_allocator_pool_pair_t pool_pair;
@@ -807,11 +901,15 @@ static iree_status_t iree_hal_vulkan_allocator_query_memory_heaps(
     const VkMemoryType* memory_type =
         &memory_properties->memoryTypes[memory_type_index];
     const iree_hal_memory_type_t hal_memory_type =
-        iree_hal_vulkan_memory_type_from_vk(memory_type->propertyFlags);
+        iree_hal_vulkan_allocator_memory_type_from_properties(
+            allocator, memory_type->propertyFlags);
+    const iree_hal_buffer_usage_t allowed_usage =
+        iree_hal_vulkan_allowed_usage_from_memory_type(hal_memory_type);
     heaps[i] = (iree_hal_allocator_memory_heap_t){
         .type = hal_memory_type,
-        .allowed_usage =
-            iree_hal_vulkan_allowed_usage_from_memory_type(hal_memory_type),
+        .allowed_usage = allowed_usage,
+        .atomic_operations = iree_hal_vulkan_allocator_atomic_operations(
+            allocator, hal_memory_type, allowed_usage),
         .max_allocation_size =
             iree_hal_vulkan_allocator_max_allocation_size_for_type(
                 allocator, memory_type_index),
@@ -914,7 +1012,8 @@ static bool iree_hal_vulkan_allocator_resolve_memory_placement(
     if (!iree_all_bits_set(allowed_memory_type_bits, 1u << i)) continue;
     const VkMemoryType* vk_memory_type = &memory_properties->memoryTypes[i];
     const iree_hal_memory_type_t memory_type =
-        iree_hal_vulkan_memory_type_from_vk(vk_memory_type->propertyFlags);
+        iree_hal_vulkan_allocator_memory_type_from_properties(
+            allocator, vk_memory_type->propertyFlags);
     if (!iree_all_bits_set(memory_type, required_type)) continue;
 
     iree_hal_buffer_params_t candidate_params = *params;
@@ -992,13 +1091,8 @@ static bool iree_hal_vulkan_allocator_supports_host_allocation_import(
   // Arbitrary host pointers only become usable Vulkan buffers when the device
   // and host share memory. Discrete devices may expose the extension while
   // still rejecting normal heap pointers for device-visible storage.
-  switch (allocator->properties2.properties.deviceType) {
-    case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
-    case VK_PHYSICAL_DEVICE_TYPE_CPU:
-      return true;
-    default:
-      return false;
-  }
+  return iree_hal_vulkan_physical_device_type_uses_unified_memory(
+      allocator->properties2.properties.deviceType);
 }
 
 static iree_status_t iree_hal_vulkan_allocator_prepare_sparse_buffer_params(
@@ -1166,7 +1260,7 @@ static VkBufferUsageFlags iree_hal_vulkan_buffer_usage_from_hal(
                        IREE_HAL_BUFFER_USAGE_DISPATCH_UNIFORM_READ)) {
     usage |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
   }
-  if (iree_any_bit_set(hal_usage, IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE)) {
+  if (iree_any_bit_set(hal_usage, IREE_HAL_BUFFER_USAGE_STORAGE)) {
     usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
   }
   if (iree_any_bit_set(hal_usage, IREE_HAL_BUFFER_USAGE_TRANSFER)) {
@@ -1187,6 +1281,49 @@ static VkBufferUsageFlags iree_hal_vulkan_buffer_usage_from_hal(
   return usage;
 }
 
+static iree_status_t iree_hal_vulkan_allocator_resolve_buffer_sharing(
+    const iree_hal_vulkan_allocator_t* allocator,
+    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_vulkan_allocator_buffer_sharing_t* out_sharing) {
+  memset(out_sharing, 0, sizeof(*out_sharing));
+  out_sharing->mode = VK_SHARING_MODE_EXCLUSIVE;
+
+  if (iree_hal_queue_affinity_is_any(queue_affinity)) {
+    queue_affinity = allocator->queue_affinity_mask;
+  } else {
+    iree_hal_queue_affinity_and_into(queue_affinity,
+                                     allocator->queue_affinity_mask);
+  }
+  uint32_t selected_family_count = 0;
+  for (iree_host_size_t i = 0; i < allocator->queue_family_count; ++i) {
+    const iree_hal_vulkan_allocator_queue_family_t* queue_family =
+        &allocator->queue_families[i];
+    if (!iree_any_bit_set(queue_affinity, queue_family->queue_affinity)) {
+      continue;
+    }
+    bool is_duplicate = false;
+    for (uint32_t j = 0; j < selected_family_count; ++j) {
+      if (out_sharing->queue_family_indices[j] == queue_family->family_index) {
+        is_duplicate = true;
+        break;
+      }
+    }
+    if (!is_duplicate) {
+      out_sharing->queue_family_indices[selected_family_count++] =
+          queue_family->family_index;
+    }
+  }
+  if (selected_family_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Vulkan buffer has no accessible queue family");
+  }
+  if (selected_family_count > 1) {
+    out_sharing->mode = VK_SHARING_MODE_CONCURRENT;
+    out_sharing->queue_family_index_count = selected_family_count;
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_vulkan_allocator_create_buffer_handle(
     iree_hal_vulkan_allocator_t* allocator,
     const iree_hal_buffer_params_t* params, iree_device_size_t allocation_size,
@@ -1194,13 +1331,21 @@ static iree_status_t iree_hal_vulkan_allocator_create_buffer_handle(
     VkBuffer* out_buffer) {
   *out_buffer = VK_NULL_HANDLE;
 
+  iree_hal_vulkan_allocator_buffer_sharing_t sharing;
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_allocator_resolve_buffer_sharing(
+      allocator, params->queue_affinity, &sharing));
+
   VkBufferCreateInfo create_info = {
       .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
       .pNext = create_info_pnext,
       .flags = create_flags,
       .size = (VkDeviceSize)allocation_size,
       .usage = iree_hal_vulkan_buffer_usage_from_hal(allocator, params->usage),
-      .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+      .sharingMode = sharing.mode,
+      .queueFamilyIndexCount = sharing.queue_family_index_count,
+      .pQueueFamilyIndices = sharing.queue_family_index_count
+                                 ? sharing.queue_family_indices
+                                 : NULL,
   };
   return iree_vkCreateBuffer(IREE_VULKAN_DEVICE(&allocator->syms),
                              allocator->logical_device, &create_info,
@@ -2023,11 +2168,12 @@ static iree_status_t iree_hal_vulkan_allocator_import_buffer(
   iree_hal_buffer_params_t compat_params = *params;
   iree_hal_vulkan_allocator_normalize_host_allocation_import_params(
       &compat_params);
+  iree_hal_buffer_params_t query_params = compat_params;
   iree_hal_buffer_compatibility_t compatibility =
       IREE_HAL_BUFFER_COMPATIBILITY_NONE;
   if (iree_status_is_ok(status)) {
     compatibility = iree_hal_vulkan_allocator_query_buffer_compatibility(
-        base_allocator, &compat_params, &allocation_size);
+        base_allocator, &query_params, &allocation_size);
     if (!iree_all_bits_set(compatibility,
                            IREE_HAL_BUFFER_COMPATIBILITY_IMPORTABLE)) {
 #if IREE_STATUS_MODE
@@ -2099,7 +2245,10 @@ static iree_status_t iree_hal_vulkan_allocator_import_buffer(
     status = iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "allocator cannot find a Vulkan memory type compatible with the "
-        "imported host pointer");
+        "imported host pointer; buffer memory type bits=0x%08" PRIx32
+        ", host pointer memory type bits=0x%08" PRIx32,
+        memory_requirements.memoryTypeBits,
+        host_pointer_properties.memoryTypeBits);
   }
 
   VkDeviceMemory device_memory = VK_NULL_HANDLE;

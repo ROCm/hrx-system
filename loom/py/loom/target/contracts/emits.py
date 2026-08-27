@@ -34,13 +34,17 @@ from loom.target.contracts.kinds import SourceValueKind
 from loom.target.contracts.patterns import TypePattern
 from loom.target.contracts.source import ValueRef
 from loom.target.contracts.source_memory import (
+    SourceMemoryAddressMaterializer,
     SourceMemoryByteOffsetMaterializer,
     SourceMemoryConstraint,
 )
 from loom.target.low_descriptors import (
     Descriptor,
+    DescriptorOpKind,
     DescriptorSet,
+    ImmediateKind,
     Operand,
+    OperandRole,
     RegClassAltFlag,
 )
 
@@ -108,6 +112,7 @@ class EmitDescriptorOp:
     source_memory_byte_offset_materializer: (
         SourceMemoryByteOffsetMaterializer | None
     ) = None
+    source_memory_address_materializer: SourceMemoryAddressMaterializer | None = None
 
     def __post_init__(self) -> None:
         operand_bindings = self.operands if self.operands is not None else {}
@@ -136,6 +141,29 @@ class EmitDescriptorOp:
         defined_temporaries: set[str],
     ) -> tuple[str, ...]:
         _require_descriptor(descriptor_set, self.descriptor)
+        if (
+            self.form == DescriptorEmitForm.CONST
+            and self.descriptor.op_kind is not DescriptorOpKind.CONST
+        ):
+            raise ValueError(
+                f"{source_op.name}: descriptor '{self.descriptor.key}' uses "
+                "low.op but the contract requests low.const"
+            )
+        if (
+            self.form
+            in (
+                DescriptorEmitForm.OP,
+                DescriptorEmitForm.FIRST_LANE,
+                DescriptorEmitForm.PER_LANE,
+                DescriptorEmitForm.PER_LANE_SEQUENCE,
+                DescriptorEmitForm.ACCUMULATE_LANES,
+            )
+            and self.descriptor.op_kind is not DescriptorOpKind.OP
+        ):
+            raise ValueError(
+                f"{source_op.name}: descriptor '{self.descriptor.key}' uses "
+                "low.const but the contract requests a low.op emission form"
+            )
         operand_bindings = dict(self.operands) if self.operands is not None else {}
         result_bindings = dict(self.results) if self.results is not None else {}
         result_type_bindings = (
@@ -201,10 +229,14 @@ class EmitDescriptorOp:
                 _require_descriptor_result_type_operand(source_op, operand)
                 continue
             if isinstance(binding, ValueRef):
-                if binding.kind == SourceValueKind.SOURCE_MEMORY_DYNAMIC_TERM:
+                if binding.kind in (
+                    SourceValueKind.SOURCE_MEMORY_DYNAMIC_TERM,
+                    SourceValueKind.SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET,
+                    SourceValueKind.SOURCE_MEMORY_ADDRESS,
+                ):
                     raise ValueError(
                         f"{source_op.name}: descriptor result type "
-                        f"'{descriptor_field}' cannot bind a source-memory term"
+                        f"'{descriptor_field}' cannot bind a source-memory value"
                     )
                 binding.validate(
                     source_op,
@@ -293,6 +325,11 @@ class EmitDescriptorOp:
         if self.source_memory is not None:
             self.source_memory.validate(source_op)
         if self.source_memory_byte_offset_materializer is not None:
+            if self.source_memory is None:
+                raise ValueError(
+                    f"{source_op.name}: source-memory byte-offset materializer "
+                    "needs a source-memory emit"
+                )
             materializer = self.source_memory_byte_offset_materializer
             for descriptor in (
                 materializer.const_i64,
@@ -302,6 +339,26 @@ class EmitDescriptorOp:
             ):
                 if descriptor is not None:
                     _require_descriptor(descriptor_set, descriptor)
+            _validate_byte_offset_materializer(source_op, materializer)
+        if self.source_memory_address_materializer is not None:
+            if self.source_memory is None:
+                raise ValueError(
+                    f"{source_op.name}: source-memory address materializer needs "
+                    "a source-memory emit"
+                )
+            materializer = self.source_memory_address_materializer
+            for descriptor in (
+                materializer.const_coordinate,
+                materializer.add_coordinate,
+                materializer.mul_coordinate,
+                materializer.shl_coordinate,
+                materializer.index_to_coordinate_input,
+                materializer.index_to_coordinate,
+                materializer.address,
+            ):
+                if descriptor is not None:
+                    _require_descriptor(descriptor_set, descriptor)
+            _validate_address_materializer(source_op, materializer)
         for descriptor_field, value_ref in operand_bindings.items():
             if value_ref.kind != SourceValueKind.SOURCE_MEMORY_DYNAMIC_TERM:
                 continue
@@ -332,12 +389,13 @@ class EmitDescriptorOp:
                     f"operand '{descriptor_field}' needs a source-memory emit"
                 )
             if self.source_memory.dynamic_term_count is None:
-                raise ValueError(
-                    f"{source_op.name}: descriptor '{self.descriptor.key}' "
-                    f"operand '{descriptor_field}' needs a fixed source-memory "
-                    "dynamic term count"
-                )
-            if self.source_memory.dynamic_term_count == 0:
+                if self.source_memory.dynamic_term_count_minimum == 0:
+                    raise ValueError(
+                        f"{source_op.name}: descriptor '{self.descriptor.key}' "
+                        f"operand '{descriptor_field}' needs dynamic source "
+                        "memory"
+                    )
+            elif self.source_memory.dynamic_term_count == 0:
                 raise ValueError(
                     f"{source_op.name}: descriptor '{self.descriptor.key}' "
                     f"operand '{descriptor_field}' needs dynamic source memory"
@@ -347,6 +405,20 @@ class EmitDescriptorOp:
                     f"{source_op.name}: descriptor '{self.descriptor.key}' "
                     f"operand '{descriptor_field}' needs a source-memory byte "
                     "offset materializer"
+                )
+        for descriptor_field, value_ref in operand_bindings.items():
+            if value_ref.kind != SourceValueKind.SOURCE_MEMORY_ADDRESS:
+                continue
+            if self.source_memory is None:
+                raise ValueError(
+                    f"{source_op.name}: descriptor '{self.descriptor.key}' "
+                    f"operand '{descriptor_field}' needs a source-memory emit"
+                )
+            if self.source_memory_address_materializer is None:
+                raise ValueError(
+                    f"{source_op.name}: descriptor '{self.descriptor.key}' "
+                    f"operand '{descriptor_field}' needs a source-memory address "
+                    "materializer"
                 )
 
     def _validate_immediates(
@@ -427,3 +499,206 @@ def _require_descriptor_result_type_operand(
             f"{source_op.name}: descriptor result '{operand.field_name}' cannot "
             "infer a descriptor result type with zero register units"
         )
+
+
+type _MaterializerCarrier = tuple[str, int]
+
+
+_MATERIALIZER_PACKET_ROLES = frozenset(
+    (OperandRole.OPERAND, OperandRole.PREDICATE, OperandRole.RESOURCE)
+)
+
+
+def _validate_materializer_descriptor(
+    source_op: Op,
+    descriptor: Descriptor,
+    *,
+    subject: str,
+    op_kind: DescriptorOpKind,
+    input_carriers: tuple[_MaterializerCarrier | None, ...],
+    result_carrier: _MaterializerCarrier | None = None,
+    bound_immediate: str | None = None,
+) -> _MaterializerCarrier:
+    if descriptor.op_kind is not op_kind:
+        expected_kind = "low.const" if op_kind is DescriptorOpKind.CONST else "low.op"
+        raise ValueError(
+            f"{source_op.name}: {subject} descriptor '{descriptor.key}' must use "
+            f"{expected_kind}"
+        )
+
+    results = tuple(
+        operand for operand in descriptor.operands if operand.role is OperandRole.RESULT
+    )
+    if (
+        len(results) != 1
+        or not descriptor.operands
+        or descriptor.operands[0] is not results[0]
+    ):
+        raise ValueError(
+            f"{source_op.name}: {subject} descriptor '{descriptor.key}' must "
+            "declare exactly one leading result"
+        )
+    unsupported = tuple(
+        operand
+        for operand in descriptor.operands
+        if operand.role not in _MATERIALIZER_PACKET_ROLES
+        and operand.role not in (OperandRole.RESULT, OperandRole.IMPLICIT)
+    )
+    if unsupported:
+        raise ValueError(
+            f"{source_op.name}: {subject} descriptor '{descriptor.key}' uses "
+            "an unsupported operand-result role"
+        )
+    inputs = tuple(
+        operand
+        for operand in descriptor.operands
+        if operand.role in _MATERIALIZER_PACKET_ROLES
+    )
+    if len(inputs) != len(input_carriers):
+        raise ValueError(
+            f"{source_op.name}: {subject} descriptor '{descriptor.key}' must "
+            f"declare exactly {len(input_carriers)} packet inputs"
+        )
+
+    result = results[0]
+    _require_descriptor_result_type_operand(source_op, result)
+    actual_result_carrier = (result.reg_alts[0].reg_class, result.unit_count)
+    if result_carrier is not None and actual_result_carrier != result_carrier:
+        raise ValueError(
+            f"{source_op.name}: {subject} descriptor '{descriptor.key}' result "
+            "does not use the materializer carrier"
+        )
+    for operand, input_carrier in zip(inputs, input_carriers, strict=True):
+        if input_carrier is None:
+            continue
+        reg_class, unit_count = input_carrier
+        accepts_carrier = operand.unit_count == unit_count and any(
+            alternative.reg_class == reg_class
+            and RegClassAltFlag.IMMEDIATE not in alternative.flags
+            for alternative in operand.reg_alts
+        )
+        if not accepts_carrier:
+            raise ValueError(
+                f"{source_op.name}: {subject} descriptor '{descriptor.key}' "
+                f"operand '{operand.field_name}' does not accept the "
+                "materializer carrier"
+            )
+
+    if bound_immediate is None:
+        unbound_immediates = tuple(
+            immediate.field_name
+            for immediate in descriptor.immediates
+            if not _immediate_has_default(immediate)
+        )
+    else:
+        immediate = _require_immediate(
+            descriptor,
+            bound_immediate,
+            f"{subject} immediate",
+        )
+        if immediate.kind not in (ImmediateKind.SIGNED, ImmediateKind.UNSIGNED):
+            raise ValueError(
+                f"{source_op.name}: {subject} descriptor '{descriptor.key}' "
+                f"immediate '{bound_immediate}' must be an integer"
+            )
+        unbound_immediates = tuple(
+            other.field_name
+            for other in descriptor.immediates
+            if other.field_name != bound_immediate and not _immediate_has_default(other)
+        )
+    if unbound_immediates:
+        raise ValueError(
+            f"{source_op.name}: {subject} descriptor '{descriptor.key}' has "
+            "additional required immediates"
+        )
+    return actual_result_carrier
+
+
+def _validate_byte_offset_materializer(
+    source_op: Op,
+    materializer: SourceMemoryByteOffsetMaterializer,
+) -> None:
+    carrier = _validate_materializer_descriptor(
+        source_op,
+        materializer.const_i64,
+        subject="source-memory byte-offset constant",
+        op_kind=DescriptorOpKind.CONST,
+        input_carriers=(),
+        bound_immediate=materializer.const_i64_immediate,
+    )
+    for subject, descriptor in (
+        ("source-memory byte-offset add", materializer.add_i64),
+        ("source-memory byte-offset multiply", materializer.mul_i64),
+        ("source-memory byte-offset shift", materializer.shl_i64),
+    ):
+        if descriptor is not None:
+            _validate_materializer_descriptor(
+                source_op,
+                descriptor,
+                subject=subject,
+                op_kind=DescriptorOpKind.OP,
+                input_carriers=(carrier, carrier),
+                result_carrier=carrier,
+            )
+
+
+def _validate_address_materializer(
+    source_op: Op,
+    materializer: SourceMemoryAddressMaterializer,
+) -> None:
+    carrier = _validate_materializer_descriptor(
+        source_op,
+        materializer.const_coordinate,
+        subject="source-memory address-coordinate constant",
+        op_kind=DescriptorOpKind.CONST,
+        input_carriers=(),
+        bound_immediate=materializer.const_coordinate_immediate,
+    )
+    for subject, descriptor in (
+        ("source-memory address-coordinate add", materializer.add_coordinate),
+        (
+            "source-memory address-coordinate multiply",
+            materializer.mul_coordinate,
+        ),
+        ("source-memory address-coordinate shift", materializer.shl_coordinate),
+    ):
+        if descriptor is not None:
+            _validate_materializer_descriptor(
+                source_op,
+                descriptor,
+                subject=subject,
+                op_kind=DescriptorOpKind.OP,
+                input_carriers=(carrier, carrier),
+                result_carrier=carrier,
+            )
+
+    index_input_carrier = None
+    if materializer.index_to_coordinate_input is not None:
+        index_input_carrier = _validate_materializer_descriptor(
+            source_op,
+            materializer.index_to_coordinate_input,
+            subject="source-memory address-coordinate index-input conversion",
+            op_kind=DescriptorOpKind.OP,
+            input_carriers=(None,),
+        )
+    if materializer.index_to_coordinate is not None:
+        _validate_materializer_descriptor(
+            source_op,
+            materializer.index_to_coordinate,
+            subject="source-memory address-coordinate index conversion",
+            op_kind=DescriptorOpKind.OP,
+            input_carriers=(index_input_carrier,),
+            result_carrier=carrier,
+        )
+    elif index_input_carrier is not None:
+        raise ValueError(
+            f"{source_op.name}: source-memory address-coordinate input "
+            "conversion needs a final index conversion descriptor"
+        )
+    _validate_materializer_descriptor(
+        source_op,
+        materializer.address,
+        subject="source-memory address",
+        op_kind=DescriptorOpKind.OP,
+        input_carriers=(None, carrier),
+    )

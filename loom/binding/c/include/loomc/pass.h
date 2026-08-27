@@ -77,9 +77,8 @@ extern "C" {
 /// Pass programs are separate from compilers so JITs and autotuners can cache
 /// common pipelines, choose among several prepared programs per invocation, or
 /// sweep pipeline configurations without constructing many compiler handles.
-/// Target selections may be supplied through creation option `next` chains when
-/// pass predicates or target pipeline builders need concrete target facts while
-/// preparing the program.
+/// Pass programs remain target-independent. Target-aware predicates resolve
+/// each function's durable target when the program executes.
 ///
 /// @thread_safety
 /// Pass programs are immutable after creation and may be shared across worker
@@ -99,8 +98,7 @@ typedef struct loomc_pass_program_options_t {
   /// Size of this structure in bytes.
   loomc_host_size_t structure_size;
 
-  /// Extension chain for pass-program options such as
-  /// `loomc_target_selection_options_t`.
+  /// Extension chain reserved for future pass-program options.
   const void* next;
 
   /// Stable identifier used in diagnostics and reports. Empty selects a
@@ -124,11 +122,6 @@ typedef struct loomc_pass_program_options_t {
 /// The returned pass program is immutable and may be shared across worker
 /// threads.
 ///
-/// @par Target Selection
-/// Attach `loomc_target_selection_options_t` to `options->next` when pass
-/// preparation should evaluate target-aware predicates against a concrete or
-/// partial target profile. Omitting the extension prepares the program without
-/// a concrete target overlay.
 LOOMC_API_EXPORT loomc_status_t loomc_pass_program_create_empty(
     loomc_context_t* context, const loomc_pass_program_options_t* options,
     loomc_allocator_t allocator, loomc_pass_program_t** out_pass_program);
@@ -171,10 +164,6 @@ LOOMC_API_EXPORT loomc_status_t loomc_pass_program_create_empty(
 /// The returned pass program is immutable and may be shared across worker
 /// threads.
 ///
-/// @par Target Selection
-/// Attach `loomc_target_selection_options_t` to `options->next` when textual
-/// pass preparation should evaluate target-aware predicates against a concrete
-/// or partial target profile.
 LOOMC_API_EXPORT loomc_status_t loomc_pass_program_create_from_pipeline_text(
     loomc_context_t* context, loomc_string_view_t pipeline_text,
     const loomc_pass_program_options_t* options, loomc_allocator_t allocator,
@@ -221,10 +210,6 @@ LOOMC_API_EXPORT loomc_status_t loomc_pass_program_create_from_pipeline_text(
 /// threads. The source module is read during creation and requires the caller
 /// to prevent concurrent mutation for the duration of this call.
 ///
-/// @par Target Selection
-/// Attach `loomc_target_selection_options_t` to `options->next` when pipeline
-/// symbol preparation should evaluate target-aware predicates against a
-/// concrete or partial target profile.
 LOOMC_API_EXPORT loomc_status_t loomc_pass_program_create_from_module_symbol(
     const loomc_module_t* module, loomc_string_view_t pipeline_symbol,
     const loomc_pass_program_options_t* options, loomc_allocator_t allocator,

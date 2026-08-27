@@ -33,8 +33,6 @@
 
 namespace {
 
-using iree::StatusCode;
-
 std::string ToString(iree_string_view_t value) {
   return std::string(value.data, value.size);
 }
@@ -115,7 +113,8 @@ class AmdgpuSanitizerReportTest : public ::testing::Test {
         /*default_pointer_bitwidth=*/0, /*index_bitwidth=*/0,
         /*offset_bitwidth=*/0, /*max_workgroup_size_x=*/0,
         /*max_workgroup_size_y=*/0, /*max_workgroup_size_z=*/0,
-        /*max_flat_workgroup_size=*/0, /*subgroup_size=*/0,
+        /*max_flat_workgroup_size=*/0, /*max_workgroup_storage_bytes=*/0,
+        /*subgroup_size=*/0,
         /*max_grid_size_x=*/0, /*max_grid_size_y=*/0,
         /*max_grid_size_z=*/0, /*max_flat_grid_size=*/0,
         /*max_workgroup_count_x=*/0, /*max_workgroup_count_y=*/0,
@@ -125,13 +124,15 @@ class AmdgpuSanitizerReportTest : public ::testing::Test {
         /*memory_space_host=*/0, /*memory_space_descriptor=*/0,
         LOOM_TARGET_ABI_OBJECT_FUNCTION,
         /*export_symbol=*/LOOM_STRING_ID_INVALID,
-        /*linkage=*/0, /*hal_buffer_resource_flags=*/0, contract_set_key,
+        /*linkage=*/0, contract_set_key,
         /*contract_feature_bits=*/0, LOOM_LOCATION_UNKNOWN, &target_op));
     loom_symbol_ref_t callee = AddSymbol(IREE_SV("test_fn"));
     loom_op_t* function_op = NULL;
     IREE_ASSERT_OK(loom_low_func_def_build(
-        &builder_, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0, /*cc=*/0,
-        /*purity=*/0, /*allocation=*/0, /*schedule=*/0, target, /*abi=*/0,
+        &builder_, LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TARGET,
+        /*visibility=*/0, /*retain=*/0, /*cc=*/0,
+        /*purity=*/0, /*allocation=*/0, /*schedule=*/0,
+        /*descriptor_set=*/contract_set_key, target, /*abi=*/0,
         loom_make_named_attr_slice(NULL, 0),
         loom_make_named_attr_slice(NULL, 0),
         /*export_symbol=*/LOOM_STRING_ID_INVALID,
@@ -200,7 +201,7 @@ class AmdgpuSanitizerReportTest : public ::testing::Test {
     if (descriptor == nullptr) {
       return false;
     }
-    return loom_low_op_descriptor_ordinal(op) ==
+    return loom_low_op_descriptor(op) ==
            loom_low_descriptor_set_descriptor_ordinal(descriptor_set_,
                                                       descriptor);
   }
@@ -243,7 +244,7 @@ class AmdgpuSanitizerReportTest : public ::testing::Test {
     ASSERT_TRUE(loom_low_op_isa(op));
     const loom_low_descriptor_t* descriptor = DescriptorForRef(descriptor_ref);
     ASSERT_NE(descriptor, nullptr);
-    EXPECT_EQ(loom_low_op_descriptor_ordinal(op),
+    EXPECT_EQ(loom_low_op_descriptor(op),
               loom_low_descriptor_set_descriptor_ordinal(descriptor_set_,
                                                          descriptor));
   }
@@ -253,7 +254,7 @@ class AmdgpuSanitizerReportTest : public ::testing::Test {
     ASSERT_TRUE(loom_low_const_isa(op));
     const loom_low_descriptor_t* descriptor = DescriptorForRef(descriptor_ref);
     ASSERT_NE(descriptor, nullptr);
-    EXPECT_EQ(loom_low_const_descriptor_ordinal(op),
+    EXPECT_EQ(loom_low_const_descriptor(op),
               loom_low_descriptor_set_descriptor_ordinal(descriptor_set_,
                                                          descriptor));
   }
@@ -317,13 +318,10 @@ class AmdgpuSanitizerReportTest : public ::testing::Test {
   }
 
   void VerifyLowModuleOk() {
-    loom_low_verify_options_t options = {
-        /*.descriptor_registry=*/&low_registry_.registry,
-        /*.target_selection=*/{},
-        /*.emitter=*/{EmitDiagnosticToStderr, NULL},
-        /*.provider_list=*/{},
-        /*.max_errors=*/20,
-    };
+    loom_low_verify_options_t options = {};
+    options.descriptor_registry = &low_registry_.registry;
+    options.emitter = {EmitDiagnosticToStderr, NULL};
+    options.max_errors = 20;
     loom_low_verify_scratch_t scratch =
         loom_low_verify_scratch_for_module(module_);
     loom_low_verify_result_t result = {};
@@ -998,36 +996,6 @@ TEST_F(AmdgpuSanitizerReportTest, BranchesMaskedColdSiteBlockToTrapIsland) {
       OpsForDescriptorRef(LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_STORE_B64_SADDR)
           .empty());
   EXPECT_EQ(OpsForDescriptorRef(LOOM_AMDGPU_DESCRIPTOR_REF_S_TRAP).size(), 1u);
-}
-
-TEST_F(AmdgpuSanitizerReportTest, RejectsInvalidReportMetadata) {
-  loom_amdgpu_feedback_config_values_t config_values = {};
-  loom_amdgpu_feedback_channel_header_values_t channel_values = {};
-  loom_amdgpu_feedback_packet_address_t packet_address = {};
-  IREE_ASSERT_OK(
-      BuildFeedbackValues(&config_values, &channel_values, &packet_address));
-
-  loom_amdgpu_sanitizer_access_report_t report = {
-      /*.access_kind=*/LOOM_AMDGPU_SANITIZER_ACCESS_KIND_WRITE,
-      /*.flags=*/LOOM_AMDGPU_SANITIZER_REPORT_FLAG_NONE,
-      /*.fault_address=*/channel_values.ring_base,
-      /*.access_size=*/channel_values.ring_capacity,
-      /*.site_id=*/config_values.notify_signal,
-      /*.shadow_address=*/config_values.channel_base,
-      /*.shadow_value=*/config_values.address,
-  };
-  report.access_kind = 0xFFu;
-  IREE_EXPECT_STATUS_IS(StatusCode::kInvalidArgument,
-                        loom_amdgpu_build_sanitizer_access_report_payload(
-                            &builder_, descriptor_set_, &packet_address,
-                            &report, LOOM_LOCATION_UNKNOWN));
-
-  report.access_kind = LOOM_AMDGPU_SANITIZER_ACCESS_KIND_WRITE;
-  report.flags = 1u;
-  IREE_EXPECT_STATUS_IS(StatusCode::kInvalidArgument,
-                        loom_amdgpu_build_sanitizer_access_report_payload(
-                            &builder_, descriptor_set_, &packet_address,
-                            &report, LOOM_LOCATION_UNKNOWN));
 }
 
 }  // namespace

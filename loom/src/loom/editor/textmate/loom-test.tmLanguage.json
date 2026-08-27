@@ -5,7 +5,7 @@
   "fileTypes": [
     "loom-test"
   ],
-  "comment": "GENERATED FILE: DO NOT EDIT. Generator: loom.gen.editor.textmate. Regenerate: python3 loom/py/loom/gen/run.py textmate",
+  "comment": "GENERATED FILE: DO NOT EDIT. Generator: loom.gen.editor.textmate. Regenerate: python3 loom/py/loom/gen/run.py textmate --in-place",
   "patterns": [
     {
       "include": "#loom-check"

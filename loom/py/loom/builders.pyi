@@ -11,6 +11,7 @@ from loom.builder import IRBuilder, ValueRef
 from loom.dialect.buffer.builders import BufferBuilder
 from loom.dialect.cfg.builders import CfgBuilder
 from loom.dialect.check.builders import CheckBuilder
+from loom.dialect.command.builders import CommandBuilder
 from loom.dialect.encoding.builders import EncodingBuilder
 from loom.dialect.func.builders import FuncBuilder
 from loom.dialect.globals.builders import GlobalBuilder
@@ -55,6 +56,8 @@ class LoomBuilder:
     def cfg(self) -> CfgBuilder: ...
     @property
     def check(self) -> CheckBuilder: ...
+    @property
+    def command(self) -> CommandBuilder: ...
     @property
     def encoding(self) -> EncodingBuilder: ...
     @property

@@ -16,6 +16,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/ops/storage_facts.h"
 #include "loom/util/fact_table.h"
+#include "loom/util/predicate_facts.h"
 
 //===----------------------------------------------------------------------===//
 // Helpers
@@ -80,6 +81,21 @@ static bool loom_low_const_attrs_as_uniform_i64(loom_named_attr_slice_t attrs,
 // Fact callbacks
 //===----------------------------------------------------------------------===//
 
+iree_status_t loom_low_assume_facts(loom_fact_context_t* context,
+                                    const loom_module_t* module,
+                                    const loom_op_t* op,
+                                    const loom_value_facts_t* operand_facts,
+                                    loom_value_facts_t* result_facts) {
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    result_facts[i] = operand_facts[i];
+  }
+  const loom_attribute_t predicates = loom_low_assume_predicates(op);
+  const loom_value_slice_t values = loom_low_assume_values(op);
+  return loom_value_fact_table_apply_alias_predicates(
+      context->table, values.values, values.count, predicates.predicate_list,
+      predicates.count, result_facts);
+}
+
 iree_status_t loom_low_const_facts(loom_fact_context_t* context,
                                    const loom_module_t* module,
                                    const loom_op_t* op,
@@ -96,6 +112,15 @@ iree_status_t loom_low_const_facts(loom_fact_context_t* context,
 }
 
 iree_status_t loom_low_copy_facts(loom_fact_context_t* context,
+                                  const loom_module_t* module,
+                                  const loom_op_t* op,
+                                  const loom_value_facts_t* operand_facts,
+                                  loom_value_facts_t* result_facts) {
+  result_facts[0] = operand_facts[0];
+  return iree_ok_status();
+}
+
+iree_status_t loom_low_move_facts(loom_fact_context_t* context,
                                   const loom_module_t* module,
                                   const loom_op_t* op,
                                   const loom_value_facts_t* operand_facts,

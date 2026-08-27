@@ -9,32 +9,18 @@
 #include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/storage.h"
 
-iree_status_t loom_low_allocation_assignment_unit_location(
-    const loom_low_allocation_assignment_t* assignment, uint32_t unit_index,
-    loom_low_allocation_unit_location_t* out_location) {
-  IREE_ASSERT_ARGUMENT(assignment);
-  IREE_ASSERT_ARGUMENT(out_location);
-  *out_location = (loom_low_allocation_unit_location_t){0};
-  if (unit_index >= assignment->location_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "allocation unit index exceeds assignment range");
-  }
-  if (assignment->location_base > UINT32_MAX - unit_index) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "allocation unit location exceeds uint32_t");
-  }
-  *out_location = (loom_low_allocation_unit_location_t){
+loom_low_move_location_t loom_low_allocation_assignment_unit_location(
+    const loom_low_allocation_assignment_t* assignment, uint32_t unit_index) {
+  return (loom_low_move_location_t){
       .location_kind = assignment->location_kind,
       .value_class = assignment->value_class,
       .descriptor_reg_class_id = assignment->descriptor_reg_class_id,
       .location = assignment->location_base + unit_index,
   };
-  return iree_ok_status();
 }
 
 bool loom_low_allocation_unit_locations_equal(
-    const loom_low_allocation_unit_location_t* lhs,
-    const loom_low_allocation_unit_location_t* rhs) {
+    const loom_low_move_location_t* lhs, const loom_low_move_location_t* rhs) {
   IREE_ASSERT_ARGUMENT(lhs);
   IREE_ASSERT_ARGUMENT(rhs);
   return lhs->location_kind == rhs->location_kind &&
@@ -43,8 +29,7 @@ bool loom_low_allocation_unit_locations_equal(
 }
 
 bool loom_low_allocation_unit_storage_classes_equal(
-    const loom_low_allocation_unit_location_t* lhs,
-    const loom_low_allocation_unit_location_t* rhs) {
+    const loom_low_move_location_t* lhs, const loom_low_move_location_t* rhs) {
   IREE_ASSERT_ARGUMENT(lhs);
   IREE_ASSERT_ARGUMENT(rhs);
   return lhs->location_kind == rhs->location_kind &&
@@ -53,8 +38,8 @@ bool loom_low_allocation_unit_storage_classes_equal(
 }
 
 bool loom_low_allocation_unit_locations_form_register_move(
-    const loom_low_allocation_unit_location_t* source,
-    const loom_low_allocation_unit_location_t* destination) {
+    const loom_low_move_location_t* source,
+    const loom_low_move_location_t* destination) {
   IREE_ASSERT_ARGUMENT(source);
   IREE_ASSERT_ARGUMENT(destination);
   return loom_low_allocation_location_kind_is_register_like(
@@ -67,10 +52,11 @@ bool loom_low_allocation_unit_locations_form_register_move(
 bool loom_low_allocation_unit_location_is_live_at_point(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_assignment_t* assignments,
-    iree_host_size_t assignment_count, const uint32_t* unit_end_points,
-    iree_host_size_t unit_end_point_count,
-    const loom_low_allocation_unit_location_t* location, uint32_t point) {
+    iree_host_size_t assignment_count,
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
+    const loom_low_move_location_t* location, uint32_t point) {
   IREE_ASSERT_ARGUMENT(descriptor_set);
+  IREE_ASSERT_ARGUMENT(unit_liveness);
   IREE_ASSERT_ARGUMENT(location);
   for (iree_host_size_t i = 0; i < assignment_count; ++i) {
     const loom_low_allocation_assignment_t* assignment = &assignments[i];
@@ -91,9 +77,15 @@ bool loom_low_allocation_unit_location_is_live_at_point(
     }
     const uint32_t unit_offset =
         (uint32_t)(location->location - assignment->location_base);
-    if (point <
+    const uint32_t unit_start_point =
+        loom_low_allocation_live_range_assignment_unit_start_point(
+            unit_liveness->start_points, unit_liveness->point_count, assignment,
+            unit_offset);
+    const uint32_t unit_end_point =
         loom_low_allocation_live_range_assignment_unit_end_point(
-            unit_end_points, unit_end_point_count, assignment, unit_offset)) {
+            unit_liveness->end_points, unit_liveness->point_count, assignment,
+            unit_offset);
+    if (point >= unit_start_point && point < unit_end_point) {
       return true;
     }
   }

@@ -1,0 +1,63 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1201> @target
+func.def target(@target) @vector_fptrunc_f32x4_to_bf8(%input: vector<4xf32>) -> (vector<4xf8E5M2>) {
+  %converted = vector.fptrunc %input : vector<4xf32> to vector<4xf8E5M2>
+  func.return %converted : vector<4xf8E5M2>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @vector_fptrunc_f32x4_to_bf8(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm {
+  %5 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %6 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %7 = slice %input[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %8 = slice %input[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %9 = v_cvt_pk_bf8_f32_low %5, %6
+  %10 = v_cvt_pk_bf8_f32_high %9, %7, %8
+  %11 = v_and_b32_lit %10, 2139062143
+  %12 = v_add_u32_lit %11, 50529027
+  %13 = v_and_b32_lit %12, 2155905152
+  %14 = v_lshrrev_b32_src0_inline %13, 7
+  %15 = v_or_b32 %11, %14
+  %16 = v_perm_b32_src2_lit %5, %6, 775
+  %17 = v_bfi_b32_src0_lit %16, %15, 32896
+  %18 = v_perm_b32_src2_lit %7, %8, 50790400
+  %converted = v_bfi_b32_src0_lit %18, %17, 2155872256
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx1201> @target
+func.def target(@target) @vector_fptrunc_f16x3_to_fp8(%input: vector<3xf16>) -> (vector<3xf8E4M3>) {
+  %converted = vector.fptrunc %input : vector<3xf16> to vector<3xf8E4M3>
+  func.return %converted : vector<3xf8E4M3>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @vector_fptrunc_f16x3_to_fp8(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %5 = v_mov_b32 1138753536
+  %6 = v_mov_b32 3286237184
+  %7 = slice %input[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %8 = v_cvt_f32_f16 %7
+  %10 = v_lshrrev_b32_src0_inline %7, 16
+  %11 = v_cvt_f32_f16 %10
+  %12 = slice %input[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %13 = v_cvt_f32_f16 %12
+  %14 = v_med3_num_f32 %8, %5, %6
+  %15 = v_cmp_u_f32 %8, %8
+  %16 = v_cndmask_b32 %14, %8, %15
+  %17 = v_med3_num_f32 %11, %5, %6
+  %18 = v_cmp_u_f32 %11, %11
+  %19 = v_cndmask_b32 %17, %11, %18
+  %20 = v_cvt_pk_fp8_f32_low %16, %19
+  %21 = v_med3_num_f32 %13, %5, %6
+  %22 = v_cmp_u_f32 %13, %13
+  %23 = v_cndmask_b32 %21, %13, %22
+  %27 = v_cvt_pk_fp8_f32_high %20, %23, %23
+  %28 = v_perm_b32_src2_lit %8, %11, 775
+  %29 = v_bfi_b32_src0_lit %28, %27, 32896
+  %30 = v_perm_b32_src2_lit %13, %13, 50790400
+  %converted = v_bfi_b32_src0_lit %30, %29, 2155872256
+  return %converted
+}

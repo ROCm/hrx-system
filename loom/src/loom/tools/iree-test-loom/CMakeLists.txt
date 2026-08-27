@@ -13,13 +13,17 @@ loom_cc_library(
   NAME
     main
   HDRS
+    "library_linker.h"
     "main.h"
   SRCS
+    "library_linker.c"
     "main.c"
   DEPS
     iree::base
+    iree::base::internal::path
     iree::base::tooling::flags
-    iree::io::file_handle
+    iree::io::stream
+    loom::link::linker
     loom::sanitizer::options
     loom::target::provider
     loom::tooling::cli::help
@@ -36,6 +40,7 @@ loom_cc_library(
     loom::tooling::testbench::requirements
     loom::util::json
     loom::util::stream
+    loom::verify
   PUBLIC
 )
 
@@ -43,7 +48,7 @@ set(_iree_test_loom_platform_copts "")
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
   list(APPEND _iree_test_loom_platform_copts "-DIREE_TEST_LOOM_HAVE_AMDGPU=1")
 endif()
-if(LOOM_EXECUTE_IREE_VM)
+if(LOOM_TARGET_ARCH_IREE_VM AND LOOM_EMIT_IREE_VM AND LOOM_EXECUTE_IREE_VM)
   list(APPEND _iree_test_loom_platform_copts "-DIREE_TEST_LOOM_HAVE_IREE_VM=1")
 endif()
 if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND IREE_HAL_DRIVER_VULKAN)
@@ -55,7 +60,7 @@ if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
   list(APPEND _iree_test_loom_platform_deps loom::tooling::target::amdgpu::artifact_provider)
   list(APPEND _iree_test_loom_platform_deps loom::tooling::target::amdgpu::testbench_requirements)
 endif()
-if(LOOM_EXECUTE_IREE_VM)
+if(LOOM_TARGET_ARCH_IREE_VM AND LOOM_EMIT_IREE_VM AND LOOM_EXECUTE_IREE_VM)
   list(APPEND _iree_test_loom_platform_deps loom::tooling::execution::ireevm::provider)
 endif()
 if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND IREE_HAL_DRIVER_VULKAN)
@@ -84,55 +89,15 @@ iree_execution_test_suite(
     "iree-test-loom.test.json"
   TOOLS
     "iree-test-loom=::iree-test-loom"
+    "loom-link=loom::tools::loom-link"
   DATA
-    "testdata/planning_issue_cases.loom"
-    "testdata/requirement_cases.loom"
-    "testdata/scalar_cases.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/library_cases.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/linked_input_cases.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/planning_issue_cases.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/requirement_cases.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/scalar_cases.loom"
   LABELS
     "hostonly"
 )
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_execution_test_suite(
-  NAME
-    amdgpu_execution_test
-  MANIFESTS
-    "iree-test-loom_amdgpu.test.json"
-  TOOLS
-    "iree-test-loom=::iree-test-loom"
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/sanitizer/amdgpu_asan_actual.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/sanitizer/amdgpu_tsan_actual.loom"
-    "testdata/amdgpu_hal_actual.loom"
-    "testdata/generated_tensor_cases.loom"
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
-iree_execution_test_suite(
-  NAME
-    spirv_vulkan_execution_test
-  MANIFESTS
-    "iree-test-loom_spirv_vulkan.test.json"
-  TOOLS
-    "iree-test-loom=::iree-test-loom"
-  DATA
-    "testdata/spirv_vulkan_coop_hal_actual.loom"
-    "testdata/spirv_vulkan_coop_u8_hal_actual.loom"
-    "testdata/spirv_vulkan_hal_actual.loom"
-    "testdata/spirv_vulkan_quantized_hal_actual.loom"
-  SANITIZER_SUPPRESSIONS
-    lsan
-    vulkan
-  LABELS
-    "iree-run-requirement=runtime.resource.vulkan_device"
-    "requires-gpu-vulkan"
-    "runtime-resource=vulkan-device"
-)
-endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

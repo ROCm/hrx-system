@@ -214,6 +214,12 @@ class BuilderTest : public ::testing::Test {
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
 
+  loom_value_id_t DefineValue(loom_type_t type) {
+    loom_value_id_t value_id = LOOM_VALUE_ID_INVALID;
+    IREE_CHECK_OK(loom_module_define_value(module_, type, &value_id));
+    return value_id;
+  }
+
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_;
   loom_module_t* module_ = nullptr;
@@ -292,6 +298,38 @@ TEST_F(BuilderTest, ResultAccessors) {
                                           0, 0, LOOM_LOCATION_UNKNOWN, &op));
   loom_op_results(op)[0] = 7;
   EXPECT_EQ(loom_test_addi_result(op), 7u);
+}
+
+TEST_F(BuilderTest, OperandRoleAndResultHelpers) {
+  loom_op_t* op = NULL;
+  IREE_ASSERT_OK(loom_builder_allocate_op(&builder_, LOOM_OP_TEST_BRANCH, 1, 2,
+                                          2, 0, 0, LOOM_LOCATION_UNKNOWN, &op));
+  loom_op_operands(op)[0] = 42;
+  loom_op_results(op)[0] = 7;
+  loom_op_results(op)[1] = 8;
+
+  EXPECT_EQ(loom_op_operand_role(module_, op, 0),
+            LOOM_OPERAND_ROLE_CONTROL_CONDITION);
+  EXPECT_TRUE(loom_op_operand_has_role(module_, op, 0,
+                                       LOOM_OPERAND_ROLE_CONTROL_CONDITION));
+  EXPECT_FALSE(loom_op_operand_has_role(module_, op, 0,
+                                        LOOM_OPERAND_ROLE_SELECT_CONDITION));
+  EXPECT_FALSE(
+      loom_op_operand_has_role(module_, op, 0, LOOM_OPERAND_ROLE_NONE));
+
+  loom_value_id_t operand = LOOM_VALUE_ID_INVALID;
+  EXPECT_TRUE(loom_op_first_operand_with_role(
+      module_, op, LOOM_OPERAND_ROLE_CONTROL_CONDITION, &operand));
+  EXPECT_EQ(operand, 42u);
+  EXPECT_FALSE(loom_op_first_operand_with_role(
+      module_, op, LOOM_OPERAND_ROLE_SELECT_PAYLOAD, &operand));
+  EXPECT_EQ(operand, LOOM_VALUE_ID_INVALID);
+
+  EXPECT_TRUE(loom_op_defines_value(op, 7));
+  EXPECT_TRUE(loom_op_defines_value(op, 8));
+  EXPECT_FALSE(loom_op_defines_value(op, 9));
+  EXPECT_FALSE(loom_op_defines_value(op, LOOM_VALUE_ID_INVALID));
+  EXPECT_FALSE(loom_op_defines_value(NULL, 7));
 }
 
 TEST_F(BuilderTest, IsaCheck) {
@@ -382,7 +420,7 @@ TEST_F(BuilderTest, NestedWriteEffectSummaryPropagatesToAncestors) {
   IREE_ASSERT_OK(loom_op_erase(module_, map_op));
   EXPECT_EQ(map_body->write_effect_count, 0u);
   EXPECT_EQ(module_->body->write_effect_count, 0u);
-  EXPECT_EQ(write_op->flags & LOOM_OP_FLAG_EFFECTS_COUNTED, 0u);
+  EXPECT_EQ(write_op->flags & LOOM_OP_FLAG_SUMMARIES_COUNTED, 0u);
 }
 
 TEST_F(BuilderTest, VariadicOperands) {
@@ -646,7 +684,7 @@ TEST_F(BuilderTest, ReplaceAllUsesWithUpdatesTypeAttrs) {
   };
   loom_op_t* attrs_op = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
-      &builder_, input,
+      &builder_, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT, input,
       loom_make_named_attr_slice(entries, IREE_ARRAYSIZE(entries)), f32,
       LOOM_LOCATION_UNKNOWN, &attrs_op));
 
@@ -711,15 +749,17 @@ TEST_F(BuilderTest, TrailingStorageAlignment) {
 
 TEST_F(BuilderTest, BinaryBuilder) {
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_value_id_t lhs = DefineValue(i32);
+  loom_value_id_t rhs = DefineValue(i32);
   loom_op_t* op = NULL;
-  IREE_ASSERT_OK(
-      loom_test_addi_build(&builder_, 42, 99, i32, LOOM_LOCATION_UNKNOWN, &op));
+  IREE_ASSERT_OK(loom_test_addi_build(&builder_, lhs, rhs, i32,
+                                      LOOM_LOCATION_UNKNOWN, &op));
   ASSERT_NE(op, nullptr);
   EXPECT_EQ(op->kind, LOOM_OP_TEST_ADDI);
   EXPECT_EQ(op->operand_count, 2);
   EXPECT_EQ(op->result_count, 1);
-  EXPECT_EQ(loom_test_addi_lhs(op), 42u);
-  EXPECT_EQ(loom_test_addi_rhs(op), 99u);
+  EXPECT_EQ(loom_test_addi_lhs(op), lhs);
+  EXPECT_EQ(loom_test_addi_rhs(op), rhs);
   // Result value was defined in the module's value table.
   loom_value_id_t result_id = loom_test_addi_result(op);
   EXPECT_NE(result_id, LOOM_VALUE_ID_INVALID);
@@ -729,37 +769,43 @@ TEST_F(BuilderTest, BinaryBuilder) {
 }
 
 TEST_F(BuilderTest, UnaryBuilder) {
+  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_value_id_t input = DefineValue(i32);
   loom_op_t* op = NULL;
-  IREE_ASSERT_OK(loom_test_neg_build(&builder_, 7, (loom_type_t){0},
-                                     LOOM_LOCATION_UNKNOWN, &op));
+  IREE_ASSERT_OK(
+      loom_test_neg_build(&builder_, input, i32, LOOM_LOCATION_UNKNOWN, &op));
   ASSERT_NE(op, nullptr);
   EXPECT_EQ(op->kind, LOOM_OP_TEST_NEG);
   EXPECT_EQ(op->operand_count, 1);
-  EXPECT_EQ(loom_test_neg_input(op), 7u);
+  EXPECT_EQ(loom_test_neg_input(op), input);
 }
 
 TEST_F(BuilderTest, ComparisonBuilder) {
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_value_id_t lhs = DefineValue(i32);
+  loom_value_id_t rhs = DefineValue(i32);
   loom_op_t* op = NULL;
-  IREE_ASSERT_OK(loom_test_cmp_build(&builder_, 2, 10, 20, i32, i32,
-                                     LOOM_LOCATION_UNKNOWN, &op));
+  IREE_ASSERT_OK(loom_test_cmp_build(&builder_, LOOM_TEST_CMP_PREDICATE_LT, lhs,
+                                     rhs, LOOM_LOCATION_UNKNOWN, &op));
   ASSERT_NE(op, nullptr);
   EXPECT_EQ(op->kind, LOOM_OP_TEST_CMP);
   EXPECT_EQ(op->attribute_count, 1);
-  EXPECT_EQ(loom_test_cmp_predicate(op), 2);
-  EXPECT_EQ(loom_test_cmp_lhs(op), 10u);
-  EXPECT_EQ(loom_test_cmp_rhs(op), 20u);
+  EXPECT_EQ(loom_test_cmp_predicate(op), LOOM_TEST_CMP_PREDICATE_LT);
+  EXPECT_EQ(loom_test_cmp_lhs(op), lhs);
+  EXPECT_EQ(loom_test_cmp_rhs(op), rhs);
   EXPECT_NE(loom_test_cmp_result(op), LOOM_VALUE_ID_INVALID);
 }
 
 TEST_F(BuilderTest, CastBuilder) {
+  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
+  loom_value_id_t input = DefineValue(i32);
   loom_op_t* op = NULL;
-  IREE_ASSERT_OK(loom_test_cast_build(&builder_, 5, (loom_type_t){0},
-                                      (loom_type_t){0}, LOOM_LOCATION_UNKNOWN,
-                                      &op));
+  IREE_ASSERT_OK(loom_test_cast_build(&builder_, input, i32, f32,
+                                      LOOM_LOCATION_UNKNOWN, &op));
   ASSERT_NE(op, nullptr);
   EXPECT_EQ(op->kind, LOOM_OP_TEST_CAST);
-  EXPECT_EQ(loom_test_cast_input(op), 5u);
+  EXPECT_EQ(loom_test_cast_input(op), input);
 }
 
 TEST_F(BuilderTest, ConstantBuilder) {
@@ -776,7 +822,12 @@ TEST_F(BuilderTest, ConstantBuilder) {
 }
 
 TEST_F(BuilderTest, YieldBuilder) {
-  loom_value_id_t values[] = {10, 20, 30};
+  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_value_id_t values[] = {
+      DefineValue(i32),
+      DefineValue(i32),
+      DefineValue(i32),
+  };
   loom_op_t* op = NULL;
   IREE_ASSERT_OK(
       loom_test_yield_build(&builder_, values, 3, LOOM_LOCATION_UNKNOWN, &op));
@@ -786,8 +837,8 @@ TEST_F(BuilderTest, YieldBuilder) {
   EXPECT_EQ(op->result_count, 0);
   loom_value_slice_t slice = loom_test_yield_values(op);
   EXPECT_EQ(slice.count, 3);
-  EXPECT_EQ(slice.values[0], 10u);
-  EXPECT_EQ(slice.values[2], 30u);
+  EXPECT_EQ(slice.values[0], values[0]);
+  EXPECT_EQ(slice.values[2], values[2]);
 }
 
 TEST_F(BuilderTest, MapBuilder) {
@@ -828,7 +879,11 @@ TEST_F(BuilderTest, MapBuilder) {
 TEST_F(BuilderTest, InvokeBuilder) {
   loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
   loom_type_t result_types[] = {f32, f32};
-  loom_value_id_t operands[] = {5, 6, 7};
+  loom_value_id_t operands[] = {
+      DefineValue(f32),
+      DefineValue(f32),
+      DefineValue(f32),
+  };
   loom_symbol_ref_t callee = {0, 1};
   loom_op_t* op = NULL;
   IREE_ASSERT_OK(loom_test_invoke_build(&builder_, callee, operands, 3,
@@ -858,11 +913,9 @@ TEST_F(BuilderTest, LoopBuilder) {
   IREE_ASSERT_OK(loom_module_define_value(module_, f32, &init));
 
   loom_value_id_t iter_args[] = {init};
-  loom_type_t loop_result_types[] = {f32};
   loom_op_t* op = NULL;
   IREE_ASSERT_OK(loom_test_loop_build(&builder_, lo, hi, step, iter_args, 1,
-                                      loop_result_types, 1, NULL, 0,
-                                      LOOM_LOCATION_UNKNOWN, &op));
+                                      NULL, 0, LOOM_LOCATION_UNKNOWN, &op));
   ASSERT_NE(op, nullptr);
   EXPECT_EQ(op->kind, LOOM_OP_TEST_LOOP);
   EXPECT_EQ(op->operand_count, 4);
@@ -916,20 +969,23 @@ TEST_F(BuilderTest, BranchBuilder) {
 }
 
 TEST_F(BuilderTest, SliceBuilder) {
-  loom_value_id_t offsets[] = {50};
+  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_type_t index = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_value_id_t source = DefineValue(i32);
+  loom_value_id_t offsets[] = {DefineValue(index)};
   int64_t static_offsets[] = {0};
   loom_op_t* op = NULL;
-  IREE_ASSERT_OK(loom_test_slice_build(&builder_, 1, offsets, 1, static_offsets,
-                                       1, (loom_type_t){0}, NULL, 0,
+  IREE_ASSERT_OK(loom_test_slice_build(&builder_, source, offsets, 1,
+                                       static_offsets, 1, i32, NULL, 0,
                                        LOOM_LOCATION_UNKNOWN, &op));
   ASSERT_NE(op, nullptr);
   EXPECT_EQ(op->kind, LOOM_OP_TEST_SLICE);
   EXPECT_EQ(op->operand_count, 2);
   EXPECT_EQ(op->attribute_count, 1);
-  EXPECT_EQ(loom_test_slice_source(op), 1u);
+  EXPECT_EQ(loom_test_slice_source(op), source);
   loom_value_slice_t offs = loom_test_slice_offsets(op);
   EXPECT_EQ(offs.count, 1);
-  EXPECT_EQ(offs.values[0], 50u);
+  EXPECT_EQ(offs.values[0], offsets[0]);
   // Verify static_offsets attr was stored.
   loom_attribute_t attr = loom_op_attrs(op)[0];
   EXPECT_EQ(attr.kind, LOOM_ATTR_I64_ARRAY);
@@ -938,22 +994,26 @@ TEST_F(BuilderTest, SliceBuilder) {
 }
 
 TEST_F(BuilderTest, UpdateBuilder) {
-  loom_value_id_t offsets[] = {50, 60};
+  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_type_t index = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_value_id_t source = DefineValue(i32);
+  loom_value_id_t target = DefineValue(i32);
+  loom_value_id_t offsets[] = {DefineValue(index), DefineValue(index)};
   int64_t static_offsets[] = {-1, 0};  // -1 = dynamic sentinel, 0 = static.
   loom_op_t* op = NULL;
-  IREE_ASSERT_OK(loom_test_update_build(&builder_, 1, 2, offsets, 2,
+  IREE_ASSERT_OK(loom_test_update_build(&builder_, source, target, offsets, 2,
                                         static_offsets, 2, (loom_type_t){0},
                                         LOOM_LOCATION_UNKNOWN, &op));
   ASSERT_NE(op, nullptr);
   EXPECT_EQ(op->kind, LOOM_OP_TEST_UPDATE);
   EXPECT_EQ(op->operand_count, 4);
   EXPECT_EQ(op->attribute_count, 1);
-  EXPECT_EQ(loom_test_update_source(op), 1u);
-  EXPECT_EQ(loom_test_update_target(op), 2u);
+  EXPECT_EQ(loom_test_update_source(op), source);
+  EXPECT_EQ(loom_test_update_target(op), target);
   loom_value_slice_t update_offs = loom_test_update_offsets(op);
   EXPECT_EQ(update_offs.count, 2);
-  EXPECT_EQ(update_offs.values[0], 50u);
-  EXPECT_EQ(update_offs.values[1], 60u);
+  EXPECT_EQ(update_offs.values[0], offsets[0]);
+  EXPECT_EQ(update_offs.values[1], offsets[1]);
   // Verify static_offsets attr.
   loom_attribute_t attr = loom_op_attrs(op)[0];
   EXPECT_EQ(attr.kind, LOOM_ATTR_I64_ARRAY);
@@ -1037,7 +1097,8 @@ TEST_F(BuilderTest, TargetLikeInterfaceReadsTargetRecordFields) {
       /*default_pointer_bitwidth=*/0, /*index_bitwidth=*/0,
       /*offset_bitwidth=*/0, /*max_workgroup_size_x=*/0,
       /*max_workgroup_size_y=*/0, /*max_workgroup_size_z=*/0,
-      /*max_flat_workgroup_size=*/0, /*subgroup_size=*/0,
+      /*max_flat_workgroup_size=*/0, /*max_workgroup_storage_bytes=*/0,
+      /*subgroup_size=*/0,
       /*max_grid_size_x=*/0, /*max_grid_size_y=*/0, /*max_grid_size_z=*/0,
       /*max_flat_grid_size=*/0,
       /*max_workgroup_count_x=*/0, /*max_workgroup_count_y=*/0,
@@ -1046,7 +1107,6 @@ TEST_F(BuilderTest, TargetLikeInterfaceReadsTargetRecordFields) {
       /*memory_space_constant=*/0, /*memory_space_private=*/0,
       /*memory_space_host=*/0, /*memory_space_descriptor=*/0, /*abi=*/0,
       /*export_symbol=*/LOOM_STRING_ID_INVALID, /*linkage=*/0,
-      /*hal_buffer_resource_flags=*/0,
       /*contract_set_key=*/LOOM_STRING_ID_INVALID, /*contract_feature_bits=*/0,
       LOOM_LOCATION_UNKNOWN, &op));
 
@@ -1063,15 +1123,16 @@ TEST_F(BuilderTest, TargetLikeInterfaceReadsTargetRecordFields) {
 
 TEST_F(BuilderTest, AttrsBuilder) {
   loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
+  loom_value_id_t input = DefineValue(f32);
   loom_op_t* op = NULL;
-  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, 42,
+  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, 0, input,
                                        loom_make_named_attr_slice(NULL, 0), f32,
                                        LOOM_LOCATION_UNKNOWN, &op));
   ASSERT_NE(op, nullptr);
   EXPECT_EQ(op->kind, LOOM_OP_TEST_ATTRS);
   EXPECT_EQ(op->operand_count, 1);
   EXPECT_EQ(op->result_count, 1);
-  EXPECT_EQ(loom_test_attrs_input(op), 42u);
+  EXPECT_EQ(loom_test_attrs_input(op), input);
   loom_named_attr_slice_t dict = loom_test_attrs_dict(op);
   EXPECT_EQ(dict.entries, nullptr);
   EXPECT_EQ(dict.count, 0u);
@@ -1079,6 +1140,7 @@ TEST_F(BuilderTest, AttrsBuilder) {
 
 TEST_F(BuilderTest, AttrsBuilderCanonicalizesDict) {
   loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
+  loom_value_id_t input = DefineValue(f32);
 
   loom_string_id_t zeta_id = LOOM_STRING_ID_INVALID;
   loom_string_id_t alpha_id = LOOM_STRING_ID_INVALID;
@@ -1092,7 +1154,7 @@ TEST_F(BuilderTest, AttrsBuilderCanonicalizesDict) {
   };
   loom_op_t* op = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
-      &builder_, 42,
+      &builder_, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT, input,
       loom_make_named_attr_slice(entries, IREE_ARRAYSIZE(entries)), f32,
       LOOM_LOCATION_UNKNOWN, &op));
 
@@ -1110,6 +1172,7 @@ TEST_F(BuilderTest, AttrsBuilderCanonicalizesDict) {
 
 TEST_F(BuilderTest, AttrsBuilderRejectsDuplicateDictKeys) {
   loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
+  loom_value_id_t input = DefineValue(f32);
 
   loom_string_id_t axis_id = LOOM_STRING_ID_INVALID;
   IREE_ASSERT_OK(loom_module_intern_string(module_, IREE_SV("axis"), &axis_id));
@@ -1122,31 +1185,36 @@ TEST_F(BuilderTest, AttrsBuilderRejectsDuplicateDictKeys) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       loom_test_attrs_build(
-          &builder_, 42,
+          &builder_, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT, input,
           loom_make_named_attr_slice(entries, IREE_ARRAYSIZE(entries)), f32,
           LOOM_LOCATION_UNKNOWN, &op));
 }
 
 TEST_F(BuilderTest, DeflateBuilder) {
+  loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
   loom_type_t tensor_dyn = loom_type_shaped_1d(
       LOOM_TYPE_TENSOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_dynamic(0), 0);
   loom_type_t index = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_value_id_t input = DefineValue(f32);
   loom_type_t result_types[] = {tensor_dyn, index};
   loom_op_t* op = NULL;
-  IREE_ASSERT_OK(loom_test_deflate_build(&builder_, 42, result_types, 2, NULL,
-                                         0, LOOM_LOCATION_UNKNOWN, &op));
+  IREE_ASSERT_OK(loom_test_deflate_build(&builder_, input, result_types, 2,
+                                         NULL, 0, LOOM_LOCATION_UNKNOWN, &op));
   ASSERT_NE(op, nullptr);
   EXPECT_EQ(op->kind, LOOM_OP_TEST_DEFLATE);
   EXPECT_EQ(op->operand_count, 1);
   EXPECT_EQ(op->result_count, 2);
-  EXPECT_EQ(loom_test_deflate_input(op), 42u);
+  EXPECT_EQ(loom_test_deflate_input(op), input);
   loom_value_slice_t results = loom_test_deflate_results(op);
   EXPECT_EQ(results.count, 2);
 }
 
 TEST_F(BuilderTest, OpErase) {
+  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_value_id_t lhs = DefineValue(i32);
+  loom_value_id_t rhs = DefineValue(i32);
   loom_op_t* op = NULL;
-  IREE_ASSERT_OK(loom_test_addi_build(&builder_, 1, 2, (loom_type_t){0},
+  IREE_ASSERT_OK(loom_test_addi_build(&builder_, lhs, rhs, i32,
                                       LOOM_LOCATION_UNKNOWN, &op));
   EXPECT_EQ(op->flags & LOOM_OP_FLAG_DEAD, 0u);
   loom_block_t* block = loom_module_block(module_);
@@ -1561,8 +1629,8 @@ TEST_F(BuilderTest, EraseWithTypeUsedResultFails) {
                         loom_op_erase(module_, dim_op));
 
   EXPECT_EQ(dim_op->flags & LOOM_OP_FLAG_DEAD, 0u);
-  EXPECT_TRUE(
-      loom_type_references_value(loom_module_value_type(module_, vector), dim));
+  EXPECT_TRUE(loom_type_references_value(
+      module_, loom_module_value_type(module_, vector), dim));
 }
 
 TEST_F(BuilderTest, ComputeUses) {
@@ -1886,13 +1954,16 @@ TEST_F(BuilderTest, DefOpConstant) {
 }
 
 TEST_F(BuilderTest, DefOpMultiResult) {
+  loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
   loom_type_t tensor_dyn = loom_type_shaped_1d(
       LOOM_TYPE_TENSOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_dynamic(0), 0);
   loom_type_t index = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_value_id_t input = DefineValue(f32);
   loom_type_t result_types[] = {tensor_dyn, index};
   loom_op_t* deflate = NULL;
-  IREE_ASSERT_OK(loom_test_deflate_build(&builder_, 42, result_types, 2, NULL,
-                                         0, LOOM_LOCATION_UNKNOWN, &deflate));
+  IREE_ASSERT_OK(loom_test_deflate_build(&builder_, input, result_types, 2,
+                                         NULL, 0, LOOM_LOCATION_UNKNOWN,
+                                         &deflate));
 
   loom_value_slice_t results = loom_test_deflate_results(deflate);
   ASSERT_EQ(results.count, 2);
@@ -2001,10 +2072,11 @@ TEST_F(BuilderTest, DefOpPatternMatch) {
 
 TEST_F(BuilderTest, OpHasTrait) {
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_value_id_t value = DefineValue(i32);
 
   loom_op_t* addi = NULL;
-  IREE_ASSERT_OK(
-      loom_test_addi_build(&builder_, 0, 0, i32, LOOM_LOCATION_UNKNOWN, &addi));
+  IREE_ASSERT_OK(loom_test_addi_build(&builder_, value, value, i32,
+                                      LOOM_LOCATION_UNKNOWN, &addi));
 
   EXPECT_TRUE(loom_op_has_trait(module_, addi, LOOM_TRAIT_PURE));
   EXPECT_TRUE(loom_op_has_trait(module_, addi, LOOM_TRAIT_COMMUTATIVE));
@@ -2065,8 +2137,9 @@ TEST_F(BuilderTest, ValueSingleUse) {
 TEST_F(BuilderTest, OpVtable) {
   loom_op_t* addi = NULL;
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
-  IREE_ASSERT_OK(
-      loom_test_addi_build(&builder_, 0, 0, i32, LOOM_LOCATION_UNKNOWN, &addi));
+  loom_value_id_t value = DefineValue(i32);
+  IREE_ASSERT_OK(loom_test_addi_build(&builder_, value, value, i32,
+                                      LOOM_LOCATION_UNKNOWN, &addi));
   const loom_op_vtable_t* vtable = loom_op_vtable(module_, addi);
   EXPECT_NE(vtable, nullptr);
 
@@ -2342,9 +2415,11 @@ TEST(AttributeHash, ShallowNestedDictConsistent) {
 TEST_F(BuilderTest, UpdateBuilderHasTiedResult) {
   loom_type_t tensor_f32 = loom_type_shaped_1d(
       LOOM_TYPE_TENSOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(256), 0);
+  loom_value_id_t source = DefineValue(tensor_f32);
+  loom_value_id_t target = DefineValue(tensor_f32);
   int64_t static_offsets[] = {0};
   loom_op_t* op = NULL;
-  IREE_ASSERT_OK(loom_test_update_build(&builder_, 1, 2, NULL, 0,
+  IREE_ASSERT_OK(loom_test_update_build(&builder_, source, target, NULL, 0,
                                         static_offsets, 1, tensor_f32,
                                         LOOM_LOCATION_UNKNOWN, &op));
   ASSERT_NE(op, nullptr);
@@ -2358,7 +2433,7 @@ TEST_F(BuilderTest, UpdateBuilderHasTiedResult) {
 TEST_F(BuilderTest, InvokeBuilderWithDynamicTied) {
   loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
   loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
-  loom_value_id_t operands[] = {5, 6};
+  loom_value_id_t operands[] = {DefineValue(f32), DefineValue(index_type)};
   loom_type_t result_types[] = {f32, index_type};
   loom_tied_result_t tied[] = {
       {/*.result_index=*/0, /*.operand_index=*/0, /*.has_type_change=*/false}};
@@ -2377,7 +2452,7 @@ TEST_F(BuilderTest, InvokeBuilderWithDynamicTied) {
 
 TEST_F(BuilderTest, InvokeBuilderNoTied) {
   loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
-  loom_value_id_t operands[] = {5};
+  loom_value_id_t operands[] = {DefineValue(f32)};
   loom_type_t result_types[] = {f32};
   loom_symbol_ref_t callee = {0, 1};
   loom_op_t* op = NULL;

@@ -1,0 +1,87 @@
+// RUN: pass target-legalize{mode=final,policy=require-native}
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @wide_conversion_unknown_alias() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<128xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<128xf16>
+  %input_values = vector.load %input_view[0] : view<128xf32> -> vector<128xf32>
+  %output_values = vector.fptrunc %input_values : vector<128xf32> to vector<128xf16>
+  vector.store %output_values, %output_view[0] : vector<128xf16>, view<128xf16>
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @wide_conversion_unknown_alias() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<128xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<128xf16>
+  %8 = index.constant 256 : offset
+  %9 = buffer.alloca<private> align(16) %8 : buffer
+  %10 = index.constant 0 : offset
+  %11 = buffer.view %9[%10] : buffer -> view<128xf16>
+  %12 = index.constant 0 : index
+  %13 = index.constant 128 : index
+  %14 = index.constant 4 : index
+  scf.for %15 = [%12 to %13 step %14] {
+    %16 = vector.load %input_view[%15] : view<128xf32> -> vector<4xf32>
+    %17 = vector.fptrunc %16 : vector<4xf32> to vector<4xf16>
+    vector.store %17, %11[%15] : vector<4xf16>, view<128xf16>
+  }
+  scf.for %18 = [%12 to %13 step %14] {
+    %19 = vector.load %11[%18] : view<128xf16> -> vector<4xf16>
+    vector.store %19, %output_view[%18] : vector<4xf16>, view<128xf16>
+  }
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @wide_shared_producer_noalias() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<128xf32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<128xf16>
+  %input_values = vector.load %input_view[0] : view<128xf32> -> vector<128xf32>
+  %sum = vector.addf %input_values, %input_values : vector<128xf32>
+  %output_values = vector.fptrunc %sum : vector<128xf32> to vector<128xf16>
+  vector.store %output_values, %output_view[0] : vector<128xf16>, view<128xf16>
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @wide_shared_producer_noalias() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<128xf32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<128xf16>
+  %11 = index.constant 0 : index
+  %12 = index.constant 128 : index
+  %13 = index.constant 4 : index
+  scf.for %14 = [%11 to %12 step %13] {
+    %15 = vector.load %input_view[%14] : view<128xf32> -> vector<4xf32>
+    %16 = vector.addf %15, %15 : vector<4xf32>
+    %17 = vector.fptrunc %16 : vector<4xf32> to vector<4xf16>
+    vector.store %17, %output_view[%14] : vector<4xf16>, view<128xf16>
+  }
+  kernel.return
+}

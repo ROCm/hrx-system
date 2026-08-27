@@ -107,7 +107,7 @@ static loom_token_t ExpectNextErrorToken(loom_tokenizer_t* tokenizer,
 //===----------------------------------------------------------------------===//
 
 TEST(Tokenizer, SingleCharPunctuation) {
-  ScopedTokenizer t("( ) { } [ ] < > = : ,");
+  ScopedTokenizer t("( ) { } [ ] < > = : , -");
   EXPECT_EQ(t.next().kind, LOOM_TOKEN_LPAREN);
   EXPECT_EQ(t.next().kind, LOOM_TOKEN_RPAREN);
   EXPECT_EQ(t.next().kind, LOOM_TOKEN_LBRACE);
@@ -119,6 +119,7 @@ TEST(Tokenizer, SingleCharPunctuation) {
   EXPECT_EQ(t.next().kind, LOOM_TOKEN_EQUALS);
   EXPECT_EQ(t.next().kind, LOOM_TOKEN_COLON);
   EXPECT_EQ(t.next().kind, LOOM_TOKEN_COMMA);
+  EXPECT_EQ(t.next().kind, LOOM_TOKEN_MINUS);
   EXPECT_EQ(t.next().kind, LOOM_TOKEN_EOF);
 }
 
@@ -157,11 +158,17 @@ TEST(Tokenizer, NegativeInteger) {
 }
 
 TEST(Tokenizer, HexInteger) {
-  ScopedTokenizer t("0xFF");
-  loom_token_t token = t.next();
-  EXPECT_EQ(token.kind, LOOM_TOKEN_INTEGER);
-  EXPECT_TRUE(iree_string_view_equal(token.text, IREE_SV("0xFF")));
-  EXPECT_TRUE(iree_string_view_equal(token.source_text, IREE_SV("0xFF")));
+  for (const char* spelling : {"0xFF", "0XdeadBEEF", "-0x1A"}) {
+    SCOPED_TRACE(spelling);
+    ScopedTokenizer t(spelling);
+    loom_token_t token = t.next();
+    EXPECT_EQ(token.kind, LOOM_TOKEN_INTEGER);
+    EXPECT_TRUE(
+        iree_string_view_equal(token.text, iree_make_cstring_view(spelling)));
+    EXPECT_TRUE(iree_string_view_equal(token.source_text,
+                                       iree_make_cstring_view(spelling)));
+    EXPECT_EQ(t.next().kind, LOOM_TOKEN_EOF);
+  }
 }
 
 TEST(Tokenizer, Float) {
@@ -186,6 +193,45 @@ TEST(Tokenizer, NegativeFloat) {
   EXPECT_TRUE(iree_string_view_equal(token.text, IREE_SV("-0.5")));
 }
 
+TEST(Tokenizer, HexadecimalFloat) {
+  for (const char* spelling : {"0x1p0", "0x1.p0", "0x.8p+1", "0X1.FP-4",
+                               "-0x0p+0", "0x1.fffffep+127"}) {
+    SCOPED_TRACE(spelling);
+    ScopedTokenizer t(spelling);
+    loom_token_t token = t.next();
+    EXPECT_EQ(token.kind, LOOM_TOKEN_FLOAT);
+    EXPECT_TRUE(
+        iree_string_view_equal(token.text, iree_make_cstring_view(spelling)));
+    EXPECT_TRUE(iree_string_view_equal(token.source_text,
+                                       iree_make_cstring_view(spelling)));
+    EXPECT_EQ(t.next().kind, LOOM_TOKEN_EOF);
+    ExpectNoInfrastructureStatus(t.get());
+  }
+}
+
+TEST(Tokenizer, MalformedNumber) {
+  struct TestCase {
+    const char* spelling;
+    uint16_t error_code;
+  };
+  const TestCase test_cases[] = {
+      {"0x", 15},   {"0x.", 16},   {"0x.p0", 16}, {"0x1.", 16}, {"0x1.2", 16},
+      {"0x1p", 16}, {"0x1p+", 16}, {"1e", 16},    {"1e-", 16},
+  };
+  for (const TestCase& test_case : test_cases) {
+    SCOPED_TRACE(test_case.spelling);
+    ScopedTokenizer t(test_case.spelling);
+    iree_string_view_t spelling = iree_make_cstring_view(test_case.spelling);
+    ExpectNextErrorToken(
+        t.get(),
+        loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, test_case.error_code),
+        spelling, 1, 1, (uint32_t)spelling.size + 1);
+    ExpectErrorStringParam(t.get()->error, 0, spelling);
+    EXPECT_EQ(t.next().kind, LOOM_TOKEN_EOF);
+    ExpectNoInfrastructureStatus(t.get());
+  }
+}
+
 TEST(Tokenizer, NegativeSpecialFloat) {
   ScopedTokenizer t("-inf -nan");
   loom_token_t inf_token = t.next();
@@ -200,6 +246,16 @@ TEST(Tokenizer, NegativeArrowDisambiguation) {
   ScopedTokenizer t("-> -1");
   EXPECT_EQ(t.next().kind, LOOM_TOKEN_ARROW);
   EXPECT_EQ(t.next().kind, LOOM_TOKEN_INTEGER);
+}
+
+TEST(Tokenizer, MinusBeforeIdentifier) {
+  ScopedTokenizer t("-feature");
+  loom_token_t minus = t.next();
+  EXPECT_EQ(minus.kind, LOOM_TOKEN_MINUS);
+  EXPECT_TRUE(iree_string_view_equal(minus.text, IREE_SV("-")));
+  loom_token_t feature = t.next();
+  EXPECT_EQ(feature.kind, LOOM_TOKEN_BARE_IDENT);
+  EXPECT_TRUE(iree_string_view_equal(feature.text, IREE_SV("feature")));
 }
 
 //===----------------------------------------------------------------------===//
@@ -372,6 +428,15 @@ TEST(Tokenizer, HashAttr) {
   EXPECT_TRUE(iree_string_view_equal(token.source_text, IREE_SV("#q8_0")));
 }
 
+TEST(Tokenizer, DottedHashAttr) {
+  ScopedTokenizer t("#test.options");
+  loom_token_t token = t.next();
+  EXPECT_EQ(token.kind, LOOM_TOKEN_HASH_ATTR);
+  EXPECT_TRUE(iree_string_view_equal(token.text, IREE_SV("test.options")));
+  EXPECT_TRUE(
+      iree_string_view_equal(token.source_text, IREE_SV("#test.options")));
+}
+
 TEST(Tokenizer, HashAttrRejectsNumericName) {
   ScopedTokenizer t("#0 #1");
   ExpectNextErrorToken(t.get(),
@@ -467,12 +532,94 @@ TEST(Tokenizer, CollectsPendingCommentsExactly) {
   EXPECT_EQ(token.kind, LOOM_TOKEN_INTEGER);
   const iree_string_view_t* comments = NULL;
   iree_host_size_t comment_count = 0;
-  loom_tokenizer_take_pending_comments(t.get(), &comments, &comment_count);
+  bool leading_blank_line = true;
+  loom_tokenizer_take_pending_comments(t.get(), &comments, &comment_count,
+                                       &leading_blank_line);
   ASSERT_EQ(comment_count, 2u);
-  EXPECT_TRUE(iree_string_view_equal(comments[0], IREE_SV(" first")));
+  EXPECT_FALSE(leading_blank_line);
+  EXPECT_TRUE(iree_string_view_equal(comments[0], IREE_SV("first")));
   EXPECT_TRUE(iree_string_view_equal(comments[1], IREE_SV("second")));
-  loom_tokenizer_take_pending_comments(t.get(), &comments, &comment_count);
+  loom_tokenizer_take_pending_comments(t.get(), &comments, &comment_count,
+                                       &leading_blank_line);
   EXPECT_EQ(comment_count, 0u);
+  EXPECT_FALSE(leading_blank_line);
+}
+
+TEST(Tokenizer, DistinguishesFileHeaderFromOperationComments) {
+  ScopedTokenizer adjacent("// declaration\n99");
+  EXPECT_EQ(adjacent.peek().kind, LOOM_TOKEN_INTEGER);
+  const iree_string_view_t* file_header = NULL;
+  iree_host_size_t file_header_line_count = 0;
+  loom_tokenizer_take_file_header(adjacent.get(), &file_header,
+                                  &file_header_line_count);
+  EXPECT_EQ(file_header_line_count, 0u);
+  const iree_string_view_t* comments = NULL;
+  iree_host_size_t comment_count = 0;
+  bool leading_blank_line = true;
+  loom_tokenizer_take_pending_comments(adjacent.get(), &comments,
+                                       &comment_count, &leading_blank_line);
+  EXPECT_EQ(comment_count, 1u);
+  EXPECT_FALSE(leading_blank_line);
+
+  ScopedTokenizer separated(
+      "// file header\n"
+      "\n"
+      "// declaration\n"
+      "99");
+  EXPECT_EQ(separated.peek().kind, LOOM_TOKEN_INTEGER);
+  loom_tokenizer_take_file_header(separated.get(), &file_header,
+                                  &file_header_line_count);
+  ASSERT_EQ(file_header_line_count, 1u);
+  EXPECT_TRUE(iree_string_view_equal(file_header[0], IREE_SV("file header")));
+  loom_tokenizer_take_pending_comments(separated.get(), &comments,
+                                       &comment_count, &leading_blank_line);
+  ASSERT_EQ(comment_count, 1u);
+  EXPECT_FALSE(leading_blank_line);
+  EXPECT_TRUE(iree_string_view_equal(comments[0], IREE_SV("declaration")));
+
+  ScopedTokenizer header_only("// file header");
+  EXPECT_EQ(header_only.peek().kind, LOOM_TOKEN_EOF);
+  loom_tokenizer_take_file_header(header_only.get(), &file_header,
+                                  &file_header_line_count);
+  ASSERT_EQ(file_header_line_count, 1u);
+  EXPECT_TRUE(iree_string_view_equal(file_header[0], IREE_SV("file header")));
+}
+
+TEST(Tokenizer, DetectsLeadingBlankLineBeforeCommentsOrToken) {
+  ScopedTokenizer t(
+      "0\n"
+      "1\n"
+      "\n"
+      "// grouped\n"
+      "2\n"
+      "\n"
+      "\n"
+      "3");
+  const iree_string_view_t* comments = NULL;
+  iree_host_size_t comment_count = 0;
+  bool leading_blank_line = false;
+
+  EXPECT_EQ(t.next().kind, LOOM_TOKEN_INTEGER);
+  EXPECT_EQ(t.peek().line, 2u);
+  loom_tokenizer_take_pending_comments(t.get(), &comments, &comment_count,
+                                       &leading_blank_line);
+  EXPECT_EQ(comment_count, 0u);
+  EXPECT_FALSE(leading_blank_line);
+
+  EXPECT_EQ(t.next().kind, LOOM_TOKEN_INTEGER);
+  EXPECT_EQ(t.peek().line, 5u);
+  loom_tokenizer_take_pending_comments(t.get(), &comments, &comment_count,
+                                       &leading_blank_line);
+  ASSERT_EQ(comment_count, 1u);
+  EXPECT_TRUE(leading_blank_line);
+  EXPECT_TRUE(iree_string_view_equal(comments[0], IREE_SV("grouped")));
+
+  EXPECT_EQ(t.next().kind, LOOM_TOKEN_INTEGER);
+  EXPECT_EQ(t.peek().line, 8u);
+  loom_tokenizer_take_pending_comments(t.get(), &comments, &comment_count,
+                                       &leading_blank_line);
+  EXPECT_EQ(comment_count, 0u);
+  EXPECT_TRUE(leading_blank_line);
 }
 
 TEST(Tokenizer, EmptyInput) {
@@ -1204,19 +1351,30 @@ TEST(Tokenizer, DimXZeroDimNotHex) {
   EXPECT_TRUE(iree_string_view_equal(t2.text, IREE_SV("f32")));
 }
 
-TEST(Tokenizer, DimXClearedBeforeElementType) {
-  // Simulates the parser lifecycle: set in_dim_list for dims, clear
-  // before scanning element type. Verifies that clearing mid-stream
-  // produces BARE_IDENT for the element type.
-  ScopedTokenizer t("4xf32");
+TEST(Tokenizer, DimXRemainsActiveWhileFindingElementType) {
+  // The parser cannot leave dimension mode until it has distinguished the
+  // next dimension from the element type. In particular, disabling it after
+  // the first separator would scan the second zero extent as hex integer
+  // literal "0x" instead of INTEGER(0) + DIM_X(x).
+  ScopedTokenizer t("4x0xi32");
   t.get()->in_dim_list = true;
   EXPECT_EQ(t.next().kind, LOOM_TOKEN_INTEGER);  // 4
   EXPECT_EQ(t.next().kind, LOOM_TOKEN_DIM_X);    // x
-  // Parser clears in_dim_list after consuming DIM_X.
+  loom_token_t zero_extent = t.next();
+  EXPECT_EQ(zero_extent.kind, LOOM_TOKEN_INTEGER);
+  EXPECT_TRUE(iree_string_view_equal(zero_extent.text, IREE_SV("0")));
+  EXPECT_EQ(t.next().kind, LOOM_TOKEN_DIM_X);  // x
+
+  // Peeking under dimension mode identifies the element type without changing
+  // its token kind. The parser can then leave dimension mode before consuming
+  // the cached token.
+  loom_token_t element = loom_tokenizer_peek(t.get());
+  EXPECT_EQ(element.kind, LOOM_TOKEN_BARE_IDENT);
+  EXPECT_TRUE(iree_string_view_equal(element.text, IREE_SV("i32")));
   t.get()->in_dim_list = false;
-  loom_token_t elem = t.next();  // f32
-  EXPECT_EQ(elem.kind, LOOM_TOKEN_BARE_IDENT);
-  EXPECT_TRUE(iree_string_view_equal(elem.text, IREE_SV("f32")));
+  element = t.next();
+  EXPECT_EQ(element.kind, LOOM_TOKEN_BARE_IDENT);
+  EXPECT_TRUE(iree_string_view_equal(element.text, IREE_SV("i32")));
 }
 
 }  // namespace

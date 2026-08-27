@@ -13,6 +13,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "hrx_runtime.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -45,6 +47,33 @@ typedef struct hipArray_st* hipArray_t;
 typedef const struct hipArray_st* hipArray_const_t;
 typedef void* hipDeviceptr_t;
 
+typedef enum hipArray_Format {
+  HIP_AD_FORMAT_UNSIGNED_INT8 = 0x01,
+  HIP_AD_FORMAT_UNSIGNED_INT16 = 0x02,
+  HIP_AD_FORMAT_UNSIGNED_INT32 = 0x03,
+  HIP_AD_FORMAT_SIGNED_INT8 = 0x08,
+  HIP_AD_FORMAT_SIGNED_INT16 = 0x09,
+  HIP_AD_FORMAT_SIGNED_INT32 = 0x0a,
+  HIP_AD_FORMAT_HALF = 0x10,
+  HIP_AD_FORMAT_FLOAT = 0x20,
+} hipArray_Format;
+
+typedef struct HIP_ARRAY_DESCRIPTOR {
+  size_t Width;              // Logical array width in elements.
+  size_t Height;             // Logical array height in elements.
+  hipArray_Format Format;    // Element format for each channel.
+  unsigned int NumChannels;  // Number of packed channels per element.
+} HIP_ARRAY_DESCRIPTOR;
+
+typedef struct HIP_ARRAY3D_DESCRIPTOR {
+  size_t Width;              // Logical array width in elements.
+  size_t Height;             // Logical array height in elements.
+  size_t Depth;              // Logical array depth in elements.
+  hipArray_Format Format;    // Element format for each channel.
+  unsigned int NumChannels;  // Number of packed channels per element.
+  unsigned int Flags;        // Creation flags.
+} HIP_ARRAY3D_DESCRIPTOR;
+
 // Dimension type.
 typedef struct dim3 {
   unsigned int x, y, z;
@@ -65,6 +94,12 @@ typedef struct hipExtent {
   size_t depth;   // Depth in elements.
 } hipExtent;
 
+#define hipArrayDefault 0x00
+#define hipArrayLayered 0x01
+#define hipArraySurfaceLoadStore 0x02
+#define hipArrayCubemap 0x04
+#define hipArrayTextureGather 0x08
+
 // Context scheduling flags (matching CUDA).
 #define hipDeviceScheduleAuto 0x00
 #define hipDeviceScheduleSpin 0x01
@@ -80,7 +115,15 @@ typedef struct hipExtent {
 #define hipMallocSignalMemory 0x2
 #define hipDeviceMallocUncached 0x3
 
-typedef enum __attribute__((annotate("HIP_nodiscard"))) hipError_t {
+// Warns C++17 callers when a HIP error result is discarded.
+#if defined(__cplusplus) && \
+    (__cplusplus >= 201703L || (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L))
+#define HRX_HIP_NODISCARD [[nodiscard]]
+#else
+#define HRX_HIP_NODISCARD
+#endif
+
+typedef enum HRX_HIP_NODISCARD hipError_t {
   hipSuccess = 0,
   hipErrorInvalidValue = 1,
   hipErrorOutOfMemory = 2,
@@ -158,6 +201,8 @@ typedef enum __attribute__((annotate("HIP_nodiscard"))) hipError_t {
   hipErrorRuntimeOther = 1053,
   hipErrorTbd = 9999  // Placeholder
 } hipError_t;
+
+#undef HRX_HIP_NODISCARD
 
 typedef enum hipDeviceAttribute_t {
   hipDeviceAttributeCudaCompatibleBegin = 0,
@@ -313,6 +358,8 @@ typedef enum hipStreamFlags {
   hipStreamNonBlocking = 0x01
 } hipStreamFlags_t;
 
+typedef union hipStreamBatchMemOpParams_union hipStreamBatchMemOpParams;
+
 #define hipStreamPerThread ((hipStream_t)2)
 #define hipStreamLegacy ((hipStream_t)1)
 
@@ -354,6 +401,9 @@ typedef enum hipEventFlags {
   hipEventReleaseToDevice = 0x40000000,
   hipEventReleaseToSystem = 0x80000000
 } hipEventFlags_t;
+
+#define hipEventWaitExternal 0x01
+#define hipEventDisableSystemFence 0x20000000u
 
 typedef enum hipDeviceP2PAttr {
   hipDevP2PAttrPerformanceRank = 0,
@@ -872,6 +922,8 @@ typedef enum hipMemAllocationHandleType {
 typedef enum hipMemAllocationType {
   hipMemAllocationTypeInvalid = 0,
   hipMemAllocationTypePinned = 1,
+  hipMemAllocationTypeManaged = 2,
+  hipMemAllocationTypeUncached = 0x40000000,
   hipMemAllocationTypeMax = 0x7FFFFFFF
 } hipMemAllocationType;
 
@@ -1025,6 +1077,16 @@ typedef union hipLaunchAttributeValue {
   const hipExtDynDataPrefetchConfig* dynDataPrefetch;
 } hipLaunchAttributeValue;
 
+#define hipStreamAttrID hipLaunchAttributeID
+#define hipStreamAttributeAccessPolicyWindow \
+  hipLaunchAttributeAccessPolicyWindow
+#define hipStreamAttributeSynchronizationPolicy \
+  hipLaunchAttributeSynchronizationPolicy
+#define hipStreamAttributeMemSyncDomainMap hipLaunchAttributeMemSyncDomainMap
+#define hipStreamAttributeMemSyncDomain hipLaunchAttributeMemSyncDomain
+#define hipStreamAttributePriority hipLaunchAttributePriority
+#define hipStreamAttrValue hipLaunchAttributeValue
+
 #define hipKernelNodeAttrID hipLaunchAttributeID
 #define hipKernelNodeAttributeAccessPolicyWindow \
   hipLaunchAttributeAccessPolicyWindow
@@ -1154,7 +1216,11 @@ typedef struct hipGraphNodeParams {
 
 // Initialization
 HIPAPI hipError_t hipInit(unsigned int flags);
-HIPAPI hipError_t hipHALDeinit(void);  // HAL extension
+// Deinitializes the embedded HRX runtime.
+HIPAPI hipError_t hipHALDeinit(void);
+// Sets the event sink used by the embedded HRX runtime. Must be called before
+// hipInit or after hipHALDeinit; otherwise returns hipErrorSetOnActiveProcess.
+HIPAPI hipError_t hipHRXSetDeviceEventSink(hrx_device_event_sink_t sink);
 HIPAPI hipError_t hipDriverGetVersion(int* driverVersion);
 HIPAPI hipError_t hipRuntimeGetVersion(int* runtimeVersion);
 HIPAPI hipError_t hipGetProcAddress(const char* symbol, void** pfn,
@@ -1270,6 +1336,19 @@ HIPAPI hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t* handle,
                                        hipEvent_t event);
 HIPAPI hipError_t hipIpcOpenEventHandle(hipEvent_t* event,
                                         hipIpcEventHandle_t handle);
+
+// Array management.
+HIPAPI hipError_t hipArrayCreate(hipArray_t* pHandle,
+                                 const HIP_ARRAY_DESCRIPTOR* pAllocateArray);
+HIPAPI hipError_t hipArray3DCreate(
+    hipArray_t* array, const HIP_ARRAY3D_DESCRIPTOR* pAllocateArray);
+HIPAPI hipError_t hipArrayDestroy(hipArray_t array);
+HIPAPI hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDescriptor,
+                                        hipArray_t array);
+HIPAPI hipError_t hipArray3DGetDescriptor(
+    HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hipArray_t array);
+HIPAPI hipError_t hipArrayGetInfo(hipChannelFormatDesc* desc, hipExtent* extent,
+                                  unsigned int* flags, hipArray_t array);
 
 // Memory transfers
 HIPAPI hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes,
@@ -1393,6 +1472,8 @@ HIPAPI hipError_t hipMemset3D(hipPitchedPtr pitchedDevPtr, int value,
                               hipExtent extent);
 HIPAPI hipError_t hipMemset3DAsync(hipPitchedPtr pitchedDevPtr, int value,
                                    hipExtent extent, hipStream_t stream);
+HIPAPI hipError_t hipGetChannelDesc(hipChannelFormatDesc* desc,
+                                    hipArray_const_t array);
 
 // Stream management
 HIPAPI hipError_t hipStreamCreate(hipStream_t* phStream);
@@ -1418,6 +1499,9 @@ HIPAPI hipError_t hipStreamWaitValue32(hipStream_t stream, void* ptr,
 HIPAPI hipError_t hipStreamWaitValue64(hipStream_t stream, void* ptr,
                                        uint64_t value, unsigned int flags,
                                        uint64_t mask);
+HIPAPI hipError_t hipStreamBatchMemOp(hipStream_t stream, unsigned int count,
+                                      hipStreamBatchMemOpParams* param_array,
+                                      unsigned int flags);
 HIPAPI hipError_t hipExtStreamCreateWithCUMask(hipStream_t* stream,
                                                uint32_t cuMaskSize,
                                                const uint32_t* cuMask);

@@ -6,6 +6,7 @@
 
 #include "loom/transforms/loop/loop_fusion.h"
 
+#include "loom/analysis/availability.h"
 #include "loom/analysis/loop_domain.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
@@ -118,9 +119,28 @@ typedef struct loom_loop_fusion_context_t {
   loom_rewriter_t* rewriter;
   // Per-candidate transient arena for remaps and temporary value arrays.
   iree_arena_allocator_t* fusion_arena;
+  // Lazily prepared analysis shared by topology-preserving body moves.
+  struct {
+    // Function body containing every fusion candidate.
+    loom_region_t* scope;
+    // Availability and CFG dominance state for scope.
+    loom_availability_analysis_t analysis;
+    // True after analysis has been initialized.
+    bool initialized;
+  } availability;
   // Region DFS stack for function traversal.
   loom_loop_fusion_region_stack_t region_stack;
 } loom_loop_fusion_context_t;
+
+static iree_status_t loom_loop_fusion_prepare_availability(
+    loom_loop_fusion_context_t* context) {
+  if (context->availability.initialized) return iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_availability_analysis_initialize_region(
+      context->module, context->availability.scope, context->pass->arena,
+      &context->availability.analysis));
+  context->availability.initialized = true;
+  return iree_ok_status();
+}
 
 //===----------------------------------------------------------------------===//
 // Structural queries
@@ -143,12 +163,9 @@ static bool loom_loop_fusion_block_is_under_op(const loom_op_t* root,
 static bool loom_loop_fusion_value_is_type_used_under_op(
     const loom_module_t* module, loom_value_id_t value_id,
     const loom_op_t* root) {
-  if (value_id >= module->values.count ||
-      value_id >= module->type_uses.value_capacity) {
-    return false;
-  }
+  if (value_id >= module->values.count) return false;
   loom_type_use_id_t use_id =
-      module->type_uses.value_heads[value_id].first_incoming_use_id;
+      loom_module_value_first_incoming_type_use(module, value_id);
   while (use_id != LOOM_TYPE_USE_ID_INVALID) {
     const loom_type_use_t* type_use = &module->type_uses.records[use_id];
     if (type_use->user_value_id >= module->values.count) return true;
@@ -418,24 +435,6 @@ static iree_status_t loom_loop_fusion_concat_iter_args(
   return iree_ok_status();
 }
 
-static iree_status_t loom_loop_fusion_make_placeholder_result_types(
-    iree_arena_allocator_t* arena, const loom_loop_fusion_for_info_t* first,
-    const loom_loop_fusion_for_info_t* second, loom_type_t** out_result_types,
-    uint16_t* out_count) {
-  uint32_t combined_count =
-      (uint32_t)first->results.count + (uint32_t)second->results.count;
-  *out_count = (uint16_t)combined_count;
-  *out_result_types = NULL;
-  if (combined_count == 0) return iree_ok_status();
-
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, combined_count, sizeof(loom_type_t), (void**)out_result_types));
-  for (uint16_t i = 0; i < combined_count; ++i) {
-    (*out_result_types)[i] = loom_type_none();
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_loop_fusion_map_old_results_to_fused(
     loom_ir_remap_t* remap, const loom_loop_fusion_for_info_t* first,
     const loom_loop_fusion_for_info_t* second, loom_op_t* fused_loop) {
@@ -539,8 +538,9 @@ static iree_status_t loom_loop_fusion_move_body_before_yield(
   loom_ir_move_block_options_t options = {
       .omit_terminators = true,
   };
-  return loom_ir_move_block_ops_before(context->rewriter, loop->block, yield_op,
-                                       remap, &options);
+  return loom_ir_move_block_ops_before(context->rewriter,
+                                       &context->availability.analysis,
+                                       loop->block, yield_op, remap, &options);
 }
 
 static iree_status_t loom_loop_fusion_clear_result_names(loom_module_t* module,
@@ -621,16 +621,14 @@ static iree_status_t loom_loop_fusion_fuse_pair(
   *out_fused_loop = NULL;
   iree_arena_allocator_t* scratch_arena = context->fusion_arena;
   iree_arena_reset(scratch_arena);
+  IREE_RETURN_IF_ERROR(loom_loop_fusion_prepare_availability(context));
 
   loom_value_id_t* iter_args = NULL;
   uint16_t iter_arg_count = 0;
   IREE_RETURN_IF_ERROR(loom_loop_fusion_concat_iter_args(
       scratch_arena, first, second, &iter_args, &iter_arg_count));
 
-  loom_type_t* result_types = NULL;
-  uint16_t result_count = 0;
-  IREE_RETURN_IF_ERROR(loom_loop_fusion_make_placeholder_result_types(
-      scratch_arena, first, second, &result_types, &result_count));
+  const uint16_t result_count = iter_arg_count;
 
   loom_value_id_t* provisional_yield_values = NULL;
   if (result_count > 0) {
@@ -677,9 +675,8 @@ static iree_status_t loom_loop_fusion_fuse_pair(
   iree_status_t status = loom_scf_for_build(
       builder, /*build_flags=*/0, first->domain.lower_bound,
       first->domain.upper_bound, first->domain.step, iter_args, iter_arg_count,
-      result_types, result_count, NULL, 0, LOOM_VALUE_ID_INVALID,
-      /*unroll_policy=*/0, /*unroll_schedule=*/0, first->op->location,
-      &fused_loop);
+      NULL, 0, LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0,
+      /*unroll_schedule=*/0, first->op->location, &fused_loop);
   if (iree_status_is_ok(status)) {
     status = loom_loop_fusion_copy_result_names(context->module, first, second,
                                                 fused_loop);
@@ -871,6 +868,10 @@ iree_status_t loom_loop_fusion_run(loom_pass_t* pass, loom_module_t* module,
       .module = module,
       .rewriter = &rewriter,
       .fusion_arena = &fusion_arena,
+      .availability =
+          {
+              .scope = loom_func_like_body(function),
+          },
   };
   if (iree_status_is_ok(status)) {
     status = loom_loop_fusion_region_stack_initialize(pass->arena,

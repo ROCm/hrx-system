@@ -16,6 +16,7 @@ loom_generated_cc_library(
     name = "llvmir",
     srcs = [
         "registry.c",
+        "target_projection.c",
         "target_records.c",
     ],
     hdrs = [
@@ -39,6 +40,7 @@ loom_generated_cc_library(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/target",
         "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/llvmir:facts",
         "//runtime/src/iree/base",
     ],
 )

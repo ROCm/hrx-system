@@ -6,6 +6,12 @@
 
 #include "iree/hal/drivers/amdgpu/transient_buffer.h"
 
+typedef enum iree_hal_amdgpu_transient_buffer_deallocation_state_e {
+  IREE_HAL_AMDGPU_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE = 0,
+  IREE_HAL_AMDGPU_TRANSIENT_BUFFER_DEALLOCATION_STATE_QUEUED = 1,
+  IREE_HAL_AMDGPU_TRANSIENT_BUFFER_DEALLOCATION_STATE_COMPLETE = 2,
+} iree_hal_amdgpu_transient_buffer_deallocation_state_t;
+
 struct iree_hal_amdgpu_transient_buffer_t {
   // Base HAL buffer resource returned to callers.
   iree_hal_buffer_t base;
@@ -37,10 +43,12 @@ struct iree_hal_amdgpu_transient_buffer_t {
   // Non-zero while |reservation| is valid and must be released.
   iree_atomic_int32_t reservation_armed;
 
-  // Set when one dealloca has been accepted for this wrapper. This is
-  // single-owner bookkeeping for reservation release/decommit, not a queue-use
-  // lifetime validator; queue operation order is expressed by semaphores.
-  iree_atomic_int32_t dealloca_queued;
+  // Current queue_dealloca lifecycle state.
+  //
+  // The queued state is single-owner bookkeeping, not a queue-use lifetime
+  // validator: older operations may still resolve backing through semaphore
+  // dependencies. The complete state is terminal until the wrapper is recycled.
+  iree_atomic_int32_t deallocation_state;
 
   // Profiling session id owning |profile_allocation_id|.
   uint64_t profile_session_id;
@@ -261,7 +269,9 @@ iree_status_t iree_hal_amdgpu_transient_buffer_create(
   buffer->reservation_pool = NULL;
   memset(&buffer->reservation, 0, sizeof(buffer->reservation));
   iree_atomic_store(&buffer->reservation_armed, 0, iree_memory_order_relaxed);
-  iree_atomic_store(&buffer->dealloca_queued, 0, iree_memory_order_relaxed);
+  iree_atomic_store(&buffer->deallocation_state,
+                    IREE_HAL_AMDGPU_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE,
+                    iree_memory_order_relaxed);
   buffer->profile_session_id = 0;
   buffer->profile_allocation_id = 0;
 
@@ -345,6 +355,20 @@ void iree_hal_amdgpu_transient_buffer_decommit(iree_hal_buffer_t* base_buffer) {
   iree_atomic_store(&buffer->committed_backing, 0, iree_memory_order_release);
   iree_hal_buffer_release(buffer->staged_backing);
   buffer->staged_backing = NULL;
+  iree_atomic_store(
+      &buffer->deallocation_state,
+      IREE_HAL_AMDGPU_TRANSIENT_BUFFER_DEALLOCATION_STATE_COMPLETE,
+      iree_memory_order_release);
+}
+
+bool iree_hal_amdgpu_transient_buffer_is_deallocated(
+    iree_hal_buffer_t* base_buffer) {
+  IREE_ASSERT_ARGUMENT(base_buffer);
+  iree_hal_amdgpu_transient_buffer_t* buffer =
+      iree_hal_amdgpu_transient_buffer_cast(base_buffer);
+  return iree_atomic_load(&buffer->deallocation_state,
+                          iree_memory_order_acquire) ==
+         IREE_HAL_AMDGPU_TRANSIENT_BUFFER_DEALLOCATION_STATE_COMPLETE;
 }
 
 bool iree_hal_amdgpu_transient_buffer_begin_dealloca(
@@ -352,10 +376,11 @@ bool iree_hal_amdgpu_transient_buffer_begin_dealloca(
   IREE_ASSERT_ARGUMENT(base_buffer);
   iree_hal_amdgpu_transient_buffer_t* buffer =
       iree_hal_amdgpu_transient_buffer_cast(base_buffer);
-  int32_t expected = 0;
+  int32_t expected = IREE_HAL_AMDGPU_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE;
   return iree_atomic_compare_exchange_strong(
-      &buffer->dealloca_queued, &expected, 1, iree_memory_order_acq_rel,
-      iree_memory_order_acquire);
+      &buffer->deallocation_state, &expected,
+      IREE_HAL_AMDGPU_TRANSIENT_BUFFER_DEALLOCATION_STATE_QUEUED,
+      iree_memory_order_acq_rel, iree_memory_order_acquire);
 }
 
 void iree_hal_amdgpu_transient_buffer_abort_dealloca(
@@ -363,7 +388,9 @@ void iree_hal_amdgpu_transient_buffer_abort_dealloca(
   IREE_ASSERT_ARGUMENT(base_buffer);
   iree_hal_amdgpu_transient_buffer_t* buffer =
       iree_hal_amdgpu_transient_buffer_cast(base_buffer);
-  iree_atomic_store(&buffer->dealloca_queued, 0, iree_memory_order_release);
+  iree_atomic_store(&buffer->deallocation_state,
+                    IREE_HAL_AMDGPU_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE,
+                    iree_memory_order_release);
 }
 
 bool iree_hal_amdgpu_transient_buffer_query_reservation(
@@ -420,12 +447,6 @@ iree_status_t iree_hal_amdgpu_transient_buffer_resolve_committed_backing(
   *out_backing_buffer = NULL;
   iree_hal_amdgpu_transient_buffer_t* buffer =
       iree_hal_amdgpu_transient_buffer_cast(base_buffer);
-  if (IREE_UNLIKELY(iree_atomic_load(&buffer->dealloca_queued,
-                                     iree_memory_order_acquire) != 0)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "transient buffer has been queued for deallocation");
-  }
   iree_hal_buffer_t* backing_buffer =
       iree_hal_amdgpu_transient_buffer_load_committed_backing(buffer);
   if (IREE_UNLIKELY(!backing_buffer)) {
@@ -449,7 +470,9 @@ static void iree_hal_amdgpu_transient_buffer_destroy(
   iree_hal_amdgpu_transient_buffer_release_reservation(base_buffer,
                                                        /*death_frontier=*/NULL);
 
-  iree_atomic_store(&buffer->dealloca_queued, 0, iree_memory_order_relaxed);
+  iree_atomic_store(&buffer->deallocation_state,
+                    IREE_HAL_AMDGPU_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE,
+                    iree_memory_order_relaxed);
   buffer->profile_session_id = 0;
   buffer->profile_allocation_id = 0;
   iree_hal_amdgpu_transient_buffer_pool_release(pool, buffer);
@@ -459,12 +482,6 @@ static void iree_hal_amdgpu_transient_buffer_destroy(
 static iree_status_t iree_hal_amdgpu_transient_buffer_load_host_backing(
     iree_hal_amdgpu_transient_buffer_t* buffer,
     iree_hal_buffer_t** out_backing_buffer) {
-  if (IREE_UNLIKELY(iree_atomic_load(&buffer->dealloca_queued,
-                                     iree_memory_order_acquire) != 0)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "transient buffer has been queued for deallocation");
-  }
   iree_hal_buffer_t* backing_buffer =
       iree_hal_amdgpu_transient_buffer_load_committed_backing(buffer);
   if (IREE_UNLIKELY(!backing_buffer)) {

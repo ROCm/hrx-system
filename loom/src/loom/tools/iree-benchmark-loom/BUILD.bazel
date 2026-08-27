@@ -4,7 +4,6 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/sanitizer:suppressions.bzl", "vulkan_suppressions")
 load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
@@ -12,7 +11,6 @@ load(
     "loom_cc_binary",
     "loom_cc_library",
     "loom_cc_test",
-    "loom_config_compatible_with",
 )
 
 package(
@@ -38,14 +36,14 @@ _AMDGPU_TARGET_DEPS = iree_select({
 })
 
 _IREE_VM_EXECUTION_COPTS = iree_select({
-    "//loom/config/execute:iree_vm": [
+    "//loom/config/execute:iree_vm_execution": [
         "-DIREE_BENCHMARK_LOOM_HAVE_IREE_VM=1",
     ],
     "//conditions:default": [],
 })
 
 _IREE_VM_EXECUTION_DEPS = iree_select({
-    "//loom/config/execute:iree_vm": [
+    "//loom/config/execute:iree_vm_execution": [
         "//loom/src/loom/tooling/execution/ireevm:provider",
     ],
     "//conditions:default": [],
@@ -79,14 +77,6 @@ _IREE_BENCHMARK_LOOM_TARGET_DEPS = (
     _SPIRV_VULKAN_TARGET_DEPS
 )
 
-_AMDGPU_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
-    "//loom/config/execute:amdgpu_hal",
-])
-
-_SPIRV_VULKAN_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
-    "//loom/config/execute:spirv_vulkan_hal",
-])
-
 loom_cc_library(
     name = "main",
     srcs = [
@@ -96,10 +86,12 @@ loom_cc_library(
         "device_spec_report.c",
         "diagnostics.c",
         "dispatch_benchmark.c",
-        "dispatch_setup.c",
         "event.c",
         "hal_actual.c",
+        "hal_setup.c",
         "help.c",
+        "input_ring.c",
+        "launch_evidence.c",
         "main.c",
         "manifest.c",
         "module_query.c",
@@ -124,10 +116,12 @@ loom_cc_library(
         "device_spec_report.h",
         "diagnostics.h",
         "dispatch_benchmark.h",
-        "dispatch_setup.h",
         "event.h",
         "hal_actual.h",
+        "hal_setup.h",
         "help.h",
+        "input_ring.h",
+        "launch_evidence.h",
         "main.h",
         "manifest.h",
         "model.h",
@@ -146,6 +140,7 @@ loom_cc_library(
         "work_plan.h",
     ],
     deps = [
+        "//loom/src/loom/analysis:kernel_launch_config",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/error:json_sink",
         "//loom/src/loom/error:renderer",
@@ -153,7 +148,7 @@ loom_cc_library(
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops:special_values",
         "//loom/src/loom/sanitizer:options",
-        "//loom/src/loom/target:artifact_manifest",
+        "//loom/src/loom/target/reporting:artifact_manifest",
         "//loom/src/loom/tooling/cli:help",
         "//loom/src/loom/tooling/compile:pipeline",
         "//loom/src/loom/tooling/config",
@@ -175,6 +170,7 @@ loom_cc_library(
         "//loom/src/loom/tooling/testbench:issue_report",
         "//loom/src/loom/tooling/testbench:reference",
         "//loom/src/loom/tooling/testbench:requirements",
+        "//loom/src/loom/tooling/testbench:value_materializer",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",
         "//loom/src/loom/verify",
@@ -184,6 +180,7 @@ loom_cc_library(
         "//runtime/src/iree/base/internal:path",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:byte_sequence",
         "//runtime/src/iree/io:stream",
         "//runtime/src/iree/tooling:device_util",
         "//runtime/src/iree/tooling/profile:counter",
@@ -222,6 +219,16 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "input_ring_test",
+    srcs = ["input_ring_test.cc"],
+    deps = [
+        ":main",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "work_plan_test",
     srcs = ["work_plan_test.cc"],
     deps = [
@@ -256,6 +263,7 @@ loom_cc_test(
         ":main",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/io:byte_sequence",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/testing:temp_file",
@@ -297,44 +305,6 @@ iree_execution_test_suite(
     ],
     manifests = ["iree-benchmark-loom.test.json"],
     tags = ["hostonly"],
-    tools = {
-        "iree-benchmark-loom": ":iree-benchmark-loom",
-    },
-)
-
-iree_execution_test_suite(
-    name = "amdgpu_execution_test",
-    data = [
-        "//loom/src/loom/tools/iree-test-loom:testdata/amdgpu_hal_actual.loom",
-    ],
-    manifests = ["iree-benchmark-loom_amdgpu.test.json"],
-    tags = [
-        "iree-run-requirement=runtime.resource.amd_gpu",
-        "manual",
-        "requires-gpu-amd",
-        "runtime-resource=amd-gpu",
-    ],
-    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
-    tools = {
-        "iree-benchmark-loom": ":iree-benchmark-loom",
-    },
-)
-
-iree_execution_test_suite(
-    name = "spirv_vulkan_execution_test",
-    data = [
-        "//loom/src/loom/tools/iree-test-loom:testdata/spirv_vulkan_coop_hal_actual.loom",
-        "//loom/src/loom/tools/iree-test-loom:testdata/spirv_vulkan_coop_u8_hal_actual.loom",
-        "//loom/src/loom/tools/iree-test-loom:testdata/spirv_vulkan_hal_actual.loom",
-        "//loom/src/loom/tools/iree-test-loom:testdata/spirv_vulkan_quantized_hal_actual.loom",
-    ],
-    manifests = ["iree-benchmark-loom_spirv_vulkan.test.json"],
-    sanitizer_suppressions = vulkan_suppressions,
-    tags = [
-        "manual",
-        "requires-gpu-vulkan",
-    ],
-    target_compatible_with = _SPIRV_VULKAN_HAL_COMPATIBLE_WITH,
     tools = {
         "iree-benchmark-loom": ":iree-benchmark-loom",
     },

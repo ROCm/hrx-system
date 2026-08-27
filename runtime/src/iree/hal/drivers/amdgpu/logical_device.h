@@ -64,7 +64,8 @@ typedef struct iree_hal_amdgpu_host_queue_epoch_wait_t {
   iree_atomic_intptr_t* error_status;
   // Producer host queue. Borrowed from the logical device.
   iree_hal_amdgpu_host_queue_t* host_queue;
-  // HSA timestamp ticks per second for wait-hint conversion.
+  // HSA system timestamp ticks per second, the domain hsa_signal_wait timeouts
+  // are expressed in.
   uint64_t timestamp_frequency;
   // Maximum HSA wait quantum in timestamp ticks before rechecking host state.
   uint64_t wait_timeout_hint;
@@ -203,6 +204,11 @@ typedef struct iree_hal_amdgpu_logical_device_t {
 
   // + trailing identifier string storage
 } iree_hal_amdgpu_logical_device_t;
+
+// Records an asynchronous child-subsystem failure on |logical_device|.
+// Consumes |status| and preserves only the first failure.
+void iree_hal_amdgpu_logical_device_error_handler(void* logical_device,
+                                                  iree_status_t status);
 
 // Creates a AMDGPU logical HAL device with the given |options| and |topology|.
 //

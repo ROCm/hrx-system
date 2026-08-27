@@ -51,65 +51,63 @@ typedef struct loom_pass_value_fact_scope_t {
   // Op that owns the region root for LOOM_PASS_VALUE_FACT_SCOPE_REGION.
   loom_op_t* parent_op;
 
-  // Optional target bundle for target-sensitive fact inference.
-  const loom_target_bundle_t* target_bundle;
+  // Optional immutable target facts for target-sensitive fact inference.
+  const loom_target_facts_t* target_facts;
 } loom_pass_value_fact_scope_t;
 
 static inline loom_pass_value_fact_scope_t loom_pass_value_fact_scope_none(
     void) {
-  return (loom_pass_value_fact_scope_t){
-      /*.kind=*/LOOM_PASS_VALUE_FACT_SCOPE_NONE,
-  };
+  loom_pass_value_fact_scope_t scope = {LOOM_PASS_VALUE_FACT_SCOPE_NONE};
+  scope.kind = LOOM_PASS_VALUE_FACT_SCOPE_NONE;
+  return scope;
 }
 
 static inline loom_pass_value_fact_scope_t loom_pass_value_fact_scope_function(
     loom_func_like_t function) {
-  return (loom_pass_value_fact_scope_t){
-      /*.kind=*/LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION,
-      /*.function=*/function,
-  };
+  loom_pass_value_fact_scope_t scope = {LOOM_PASS_VALUE_FACT_SCOPE_NONE};
+  scope.kind = LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION;
+  scope.function = function;
+  return scope;
 }
 
 static inline loom_pass_value_fact_scope_t
 loom_pass_value_fact_scope_function_for_target(
-    loom_func_like_t function, const loom_target_bundle_t* target_bundle) {
-  return (loom_pass_value_fact_scope_t){
-      /*.kind=*/LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION,
-      /*.function=*/function,
-      /*.region=*/{},
-      /*.parent_op=*/{},
-      /*.target_bundle=*/target_bundle,
-  };
+    loom_func_like_t function, const loom_target_facts_t* target_facts) {
+  loom_pass_value_fact_scope_t scope = {LOOM_PASS_VALUE_FACT_SCOPE_NONE};
+  scope.kind = LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION;
+  scope.function = function;
+  scope.target_facts = target_facts;
+  return scope;
 }
 
 static inline loom_pass_value_fact_scope_t loom_pass_value_fact_scope_region(
     loom_func_like_t function, loom_region_t* region, loom_op_t* parent_op) {
-  return (loom_pass_value_fact_scope_t){
-      /*.kind=*/LOOM_PASS_VALUE_FACT_SCOPE_REGION,
-      /*.function=*/function,
-      /*.region=*/region,
-      /*.parent_op=*/parent_op,
-  };
+  loom_pass_value_fact_scope_t scope = {LOOM_PASS_VALUE_FACT_SCOPE_NONE};
+  scope.kind = LOOM_PASS_VALUE_FACT_SCOPE_REGION;
+  scope.function = function;
+  scope.region = region;
+  scope.parent_op = parent_op;
+  return scope;
 }
 
 static inline loom_pass_value_fact_scope_t
 loom_pass_value_fact_scope_region_for_target(
     loom_func_like_t function, loom_region_t* region, loom_op_t* parent_op,
-    const loom_target_bundle_t* target_bundle) {
-  return (loom_pass_value_fact_scope_t){
-      /*.kind=*/LOOM_PASS_VALUE_FACT_SCOPE_REGION,
-      /*.function=*/function,
-      /*.region=*/region,
-      /*.parent_op=*/parent_op,
-      /*.target_bundle=*/target_bundle,
-  };
+    const loom_target_facts_t* target_facts) {
+  loom_pass_value_fact_scope_t scope = {LOOM_PASS_VALUE_FACT_SCOPE_NONE};
+  scope.kind = LOOM_PASS_VALUE_FACT_SCOPE_REGION;
+  scope.function = function;
+  scope.region = region;
+  scope.parent_op = parent_op;
+  scope.target_facts = target_facts;
+  return scope;
 }
 
 static inline loom_pass_value_fact_scope_t loom_pass_value_fact_scope_module(
     void) {
-  return (loom_pass_value_fact_scope_t){
-      /*.kind=*/LOOM_PASS_VALUE_FACT_SCOPE_MODULE,
-  };
+  loom_pass_value_fact_scope_t scope = {LOOM_PASS_VALUE_FACT_SCOPE_NONE};
+  scope.kind = LOOM_PASS_VALUE_FACT_SCOPE_MODULE;
+  return scope;
 }
 
 struct loom_pass_value_fact_owner_t {
@@ -120,7 +118,7 @@ struct loom_pass_value_fact_owner_t {
   // Arena for scope-local extension payloads and inference scratch.
   iree_arena_allocator_t transient_arena;
   // Module whose value table is addressed by table entries.
-  loom_module_t* module;
+  const loom_module_t* module;
   // Reusable value-id-addressed fact table.
   loom_value_fact_table_t table;
   // Active populated fact scope, or NONE when table entries are not valid.
@@ -149,14 +147,14 @@ void loom_pass_value_fact_owner_invalidate(loom_pass_value_fact_owner_t* owner);
 // maintain facts while they mutate IR. If population fails, the caller must
 // invalidate the owner before returning the failure.
 iree_status_t loom_pass_value_fact_owner_prepare(
-    loom_pass_value_fact_owner_t* owner, loom_module_t* module,
+    loom_pass_value_fact_owner_t* owner, const loom_module_t* module,
     loom_pass_value_fact_scope_t scope, loom_value_fact_table_t** out_table);
 
 // Acquires computed facts for |scope|. The returned table is borrowed and
 // remains valid until the owner is invalidated, prepared or acquired for
 // another scope, or deinitialized.
 iree_status_t loom_pass_value_fact_owner_acquire(
-    loom_pass_value_fact_owner_t* owner, loom_module_t* module,
+    loom_pass_value_fact_owner_t* owner, const loom_module_t* module,
     loom_pass_value_fact_scope_t scope, loom_value_fact_table_t** out_table);
 
 // Prepares scoped fact storage through a pass invocation.

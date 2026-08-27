@@ -17,6 +17,16 @@ func.def @simple_loop(%lo: index, %hi: index, %step: index) {
 
 // ====
 
+// Physical byte ranges use the offset domain without narrowing to index.
+func.def @offset_loop(%lo: offset, %hi: offset, %step: offset) {
+  scf.for %byte_offset = [%lo to %hi step %step] {
+    test.use %byte_offset : offset
+  }
+  func.return
+}
+
+// ====
+
 // scf.for with a single iter_arg accumulating a constant.
 func.def @sum_loop(%lo: index, %hi: index, %step: index, %init: f32) -> (f32) {
   %result = scf.for %iv = [%lo to %hi step %step](%acc = %init : f32) -> (f32) {
@@ -79,6 +89,25 @@ func.def @dynamic_unroll_interleaved_schedule(%lo: index, %hi: index, %step: ind
 func.def @dynamic_unroll_linear_schedule(%lo: index, %hi: index, %step: index, %factor: index) {
   scf.for %iv = [%lo to %hi step %step] unroll(%factor) schedule(linear) {
   }
+  func.return
+}
+
+// ====
+
+// scf.for with a recurrence-aware materialization schedule.
+func.def @dynamic_unroll_recurrence_schedule(%lo: index, %hi: index, %step: index, %factor: index, %init: f32) -> (f32) {
+  %result = scf.for %iv = [%lo to %hi step %step](%acc = %init : f32) -> (f32) unroll(%factor) schedule(recurrence) {
+    %next = scalar.addf %acc, %acc : f32
+    scf.yield %next : f32
+  }
+  func.return %result : f32
+}
+
+// ====
+
+// Compile-time scheduling fences round-trip without operands or attributes.
+func.def @schedule_fence() {
+  scf.schedule.fence
   func.return
 }
 

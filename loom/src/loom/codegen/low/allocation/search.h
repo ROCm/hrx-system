@@ -10,25 +10,32 @@
 #define LOOM_CODEGEN_LOW_ALLOCATION_SEARCH_H_
 
 #include "iree/base/api.h"
+#include "iree/base/bitmap.h"
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/allocation/active_set.h"
 #include "loom/codegen/low/allocation/assignment.h"
 #include "loom/codegen/low/allocation/assignment_map.h"
+#include "loom/codegen/low/allocation/spill_plan.h"
 #include "loom/codegen/low/allocation/storage_lease.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/allocation/unit_liveness.h"
 #include "loom/codegen/low/descriptors.h"
+#include "loom/codegen/low/placement.h"
 #include "loom/ir/ir.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+struct loom_target_residency_model_t;
+
 // Borrowed allocator facts used when probing physical storage.
 typedef struct loom_low_allocation_search_context_t {
   // Module containing the allocated low function.
   const loom_module_t* module;
+  // Function control-flow graph used to construct |liveness|.
+  const loom_cfg_graph_t* cfg_graph;
   // Descriptor set selected for the low function.
   const loom_low_descriptor_set_t* descriptor_set;
   // Liveness facts for the allocated low function body.
@@ -39,10 +46,20 @@ typedef struct loom_low_allocation_search_context_t {
   const loom_low_allocation_target_constraints_t* target_constraints;
   // Current assignment lookup table.
   const loom_low_allocation_assignment_map_t* assignment_map;
+  // Function-local structural and concrete-location placement relations.
+  const loom_low_placement_table_t* placement;
   // Active assignment window at the interval currently being assigned.
   loom_low_allocation_active_set_t* active_set;
   // Materialized storage leases and release eligibility.
   const loom_low_allocation_storage_lease_state_t* storage_leases;
+  // Cached predicted spill traffic, dense by liveness value ordinal. A
+  // store_count of UINT32_MAX means the entry is not computed yet.
+  loom_low_allocation_spill_plan_traffic_t* spill_traffic_by_value_ordinal;
+  // Optional target residency model used for physical extent decisions.
+  const struct loom_target_residency_model_t* residency_model;
+  // Borrowed bitmap indexed by module value ID. Set values require register
+  // storage throughout allocation.
+  iree_bitmap_t required_register_values;
 } loom_low_allocation_search_context_t;
 
 // Active assignment set selected for spilling before an interval is assigned.
@@ -56,6 +73,16 @@ typedef struct loom_low_allocation_search_spill_victim_set_t {
   // True when a legal victim set was found.
   bool found;
 } loom_low_allocation_search_spill_victim_set_t;
+
+// Returns true when |candidate| conflicts with active assignments, fixed
+// values, reserved ranges, or storage leases.
+bool loom_low_allocation_search_assignment_conflicts(
+    loom_low_allocation_search_context_t* context,
+    const loom_low_allocation_assignment_t* candidate,
+    const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count,
+    const loom_value_id_t* ignored_storage_lease_value_ids,
+    uint16_t ignored_storage_lease_value_count,
+    loom_low_allocation_storage_release_policy_t release_policy);
 
 // Returns true when the interval assignment candidate conflicts with active
 // assignments, fixed values, reserved ranges, or storage leases.

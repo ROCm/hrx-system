@@ -24,18 +24,22 @@ func.def @pure_calls_cse_after_canonicalize(%value: i32) -> (i32, i32) {
 
 // ====
 
-// func.apply is a contract demand. It has no direct callee to inspect, so pure
+// template.apply is a contract demand. It has no direct callee to inspect, so pure
 // apply sites must carry explicit purity until selection rewrites them.
 // RUN: pass canonicalize,cse
+template.decl @test.effect(%value: i32) -> (i32)
+
 func.def @pure_applies_cse_after_canonicalize(%value: i32) -> (i32, i32) {
-  %lhs = func.apply<test.effect>(%value) pure : (i32) -> (i32)
-  %rhs = func.apply<test.effect>(%value) pure : (i32) -> (i32)
+  %lhs = template.apply<@test.effect>(%value) pure : (i32) -> (i32)
+  %rhs = template.apply<@test.effect>(%value) pure : (i32) -> (i32)
   func.return %lhs, %rhs : i32, i32
 }
 
 // ----
+template.decl @test.effect(%value: i32) -> (i32)
+
 func.def @pure_applies_cse_after_canonicalize(%value: i32) -> (i32, i32) {
-  %lhs = func.apply<test.effect>(%value) pure : (i32) -> (i32)
+  %lhs = template.apply<@test.effect>(%value) pure : (i32) -> (i32)
   func.return %lhs, %lhs : i32, i32
 }
 
@@ -153,7 +157,7 @@ func.def @nested_while_write_blocks_outer_load_cse(%cond: i1, %buffer: buffer, %
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @descriptor_low_ops_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm<test.low.core> {
+low.func.def target<test.low.core>(@test_target) @descriptor_low_ops_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
   %a = test.add.i32 %lhs, %rhs
   %b = test.add.i32 %lhs, %rhs
   return %a, %b
@@ -162,7 +166,7 @@ low.func.def target(@test_target) @descriptor_low_ops_cse(%lhs: reg<test.i32>, %
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @descriptor_low_ops_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @descriptor_low_ops_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
   %a = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   low.return %a, %a : reg<test.i32>, reg<test.i32>
 }
@@ -175,7 +179,7 @@ low.func.def target(@test_target) @descriptor_low_ops_cse(%lhs: reg<test.i32>, %
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @descriptor_low_convergent_ops_do_not_cse(%value: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm<test.low.core> {
+low.func.def target<test.low.core>(@test_target) @descriptor_low_convergent_ops_do_not_cse(%value: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
   %a = test.convergent.i32 %value
   %b = test.convergent.i32 %value
   return %a, %b
@@ -184,7 +188,7 @@ low.func.def target(@test_target) @descriptor_low_convergent_ops_do_not_cse(%val
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @descriptor_low_convergent_ops_do_not_cse(%value: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @descriptor_low_convergent_ops_do_not_cse(%value: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
   %a = low.op<test.convergent.i32>(%value) : (reg<test.i32>) -> reg<test.i32>
   %b = low.op<test.convergent.i32>(%value) : (reg<test.i32>) -> reg<test.i32>
   low.return %a, %b : reg<test.i32>, reg<test.i32>
@@ -199,7 +203,7 @@ low.func.def target(@test_target) @descriptor_low_convergent_ops_do_not_cse(%val
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @descriptor_low_state_writes_do_not_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm<test.low.core> {
+low.func.def target<test.low.core>(@test_target) @descriptor_low_state_writes_do_not_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
   %a = test.state.add.i32 %lhs, %rhs
   %b = test.state.add.i32 %lhs, %rhs
   return %a, %b
@@ -208,7 +212,7 @@ low.func.def target(@test_target) @descriptor_low_state_writes_do_not_cse(%lhs: 
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @descriptor_low_state_writes_do_not_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @descriptor_low_state_writes_do_not_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
   %a = low.op<test.state.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   %b = low.op<test.state.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   low.return %a, %b : reg<test.i32>, reg<test.i32>
@@ -222,7 +226,7 @@ low.func.def target(@test_target) @descriptor_low_state_writes_do_not_cse(%lhs: 
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @descriptor_low_implicit_state_ops_do_not_cse_across_write(%lhs: reg<test.i32>, %rhs: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm<test.low.core> {
+low.func.def target<test.low.core>(@test_target) @descriptor_low_implicit_state_ops_do_not_cse_across_write(%lhs: reg<test.i32>, %rhs: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
   %a = test.state.add.i32 %lhs, %rhs
   %clobber = test.state.add.i32 %other, %rhs
   %b = test.state.add.i32 %lhs, %rhs
@@ -232,7 +236,7 @@ low.func.def target(@test_target) @descriptor_low_implicit_state_ops_do_not_cse_
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @descriptor_low_implicit_state_ops_do_not_cse_across_write(%lhs: reg<test.i32>, %rhs: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @descriptor_low_implicit_state_ops_do_not_cse_across_write(%lhs: reg<test.i32>, %rhs: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) {
   %a = low.op<test.state.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   %clobber = low.op<test.state.add.i32>(%other, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   %b = low.op<test.state.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
@@ -249,7 +253,7 @@ low.func.def target(@test_target) @descriptor_low_implicit_state_ops_do_not_cse_
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @descriptor_low_operand_form_implicit_state_ops_do_not_cse_across_write(%lhs: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm<test.low.core> {
+low.func.def target<test.low.core>(@test_target) @descriptor_low_operand_form_implicit_state_ops_do_not_cse_across_write(%lhs: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
   %zero0 = test.const.i32 0
   %a = test.state.add.i32 %lhs, %zero0
   %clobber = test.state.add.i32 %other, %lhs
@@ -261,7 +265,7 @@ low.func.def target(@test_target) @descriptor_low_operand_form_implicit_state_op
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @descriptor_low_operand_form_implicit_state_ops_do_not_cse_across_write(%lhs: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @descriptor_low_operand_form_implicit_state_ops_do_not_cse_across_write(%lhs: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) {
   %a = low.op<test.state.add.i32.rhs_zero>(%lhs) : (reg<test.i32>) -> reg<test.i32>
   %clobber = low.op<test.state.add.i32>(%other, %lhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   %b = low.op<test.state.add.i32.rhs_zero>(%lhs) : (reg<test.i32>) -> reg<test.i32>
@@ -292,7 +296,7 @@ func.def @convergent_barriers_pure_cse() -> (i32, i32, i32) {
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @consumed_results_do_not_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @consumed_results_do_not_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
   %lhs_copy = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   %rhs_copy = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   %lhs_tied = low.op<test.tied.any>(%lhs_copy) : (reg<test.i32>) -> %lhs_copy as reg<test.i32>
@@ -308,7 +312,7 @@ low.func.def target(@test_target) @consumed_results_do_not_cse(%lhs: reg<test.i3
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @descriptor_low_reads_cse(%ptr: reg<test.ptr>) -> (reg<test.i32 x4>) asm<test.low.core> {
+low.func.def target<test.low.core>(@test_target) @descriptor_low_reads_cse(%ptr: reg<test.ptr>) -> (reg<test.i32 x4>) asm {
   %a = test.load.v4i32 %ptr
   %b = test.load.v4i32 %ptr
   %out = test.add.v4i32 %a, %b
@@ -318,7 +322,7 @@ low.func.def target(@test_target) @descriptor_low_reads_cse(%ptr: reg<test.ptr>)
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @descriptor_low_reads_cse(%ptr: reg<test.ptr>) -> (reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @descriptor_low_reads_cse(%ptr: reg<test.ptr>) -> (reg<test.i32 x4>) {
   %a = low.op<test.load.v4i32>(%ptr) : (reg<test.ptr>) -> reg<test.i32 x4>
   %out = low.op<test.add.v4i32>(%a, %a) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
   low.return %out : reg<test.i32 x4>
@@ -331,7 +335,7 @@ low.func.def target(@test_target) @descriptor_low_reads_cse(%ptr: reg<test.ptr>)
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @descriptor_low_write_blocks_read_cse(%ptr: reg<test.ptr>, %value: reg<test.i32 x4>) -> (reg<test.i32 x4>) asm<test.low.core> {
+low.func.def target<test.low.core>(@test_target) @descriptor_low_write_blocks_read_cse(%ptr: reg<test.ptr>, %value: reg<test.i32 x4>) -> (reg<test.i32 x4>) asm {
   %before = test.load.v4i32 %ptr
   test.store.v4i32 %ptr, %value
   %after = test.load.v4i32 %ptr
@@ -342,7 +346,7 @@ low.func.def target(@test_target) @descriptor_low_write_blocks_read_cse(%ptr: re
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @descriptor_low_write_blocks_read_cse(%ptr: reg<test.ptr>, %value: reg<test.i32 x4>) -> (reg<test.i32 x4>) {
+low.func.def target<test.low.core>(@test_target) @descriptor_low_write_blocks_read_cse(%ptr: reg<test.ptr>, %value: reg<test.i32 x4>) -> (reg<test.i32 x4>) {
   %before = low.op<test.load.v4i32>(%ptr) : (reg<test.ptr>) -> reg<test.i32 x4>
   low.op<test.store.v4i32>(%ptr, %value) : (reg<test.ptr>, reg<test.i32 x4>)
   %after = low.op<test.load.v4i32>(%ptr) : (reg<test.ptr>) -> reg<test.i32 x4>
@@ -359,7 +363,7 @@ low.func.def target(@test_target) @descriptor_low_write_blocks_read_cse(%ptr: re
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @low_constants_cse() -> (reg<test.i32>, reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @low_constants_cse() -> (reg<test.i32>, reg<test.i32>) {
   %lhs = low.const<test.const.i32> {i32_value = 7} : reg<test.i32>
   %rhs = low.const<test.const.i32> {i32_value = 7} : reg<test.i32>
   %sum = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
@@ -369,7 +373,7 @@ low.func.def target(@test_target) @low_constants_cse() -> (reg<test.i32>, reg<te
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @low_constants_cse() -> (reg<test.i32>, reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @low_constants_cse() -> (reg<test.i32>, reg<test.i32>) {
   %lhs = low.const<test.const.i32> {i32_value = 7} : reg<test.i32>
   %sum = low.op<test.add.i32>(%lhs, %lhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   low.return %sum, %lhs : reg<test.i32>, reg<test.i32>
@@ -384,7 +388,7 @@ low.func.def target(@test_target) @low_constants_cse() -> (reg<test.i32>, reg<te
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @low_entry_constants_cse_into_cfg(%cond: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @low_entry_constants_cse_into_cfg(%cond: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
   %entry_zero = low.const<test.const.i32> {i32_value = 0} : reg<test.i32>
   low.cond_br %cond, ^then, ^else : reg<test.i32>
 ^then:
@@ -402,7 +406,7 @@ low.func.def target(@test_target) @low_entry_constants_cse_into_cfg(%cond: reg<t
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @low_entry_constants_cse_into_cfg(%cond: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @low_entry_constants_cse_into_cfg(%cond: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
   %entry_zero = low.const<test.const.i32> {i32_value = 0} : reg<test.i32>
   low.cond_br %cond, ^then, ^else : reg<test.i32>
 ^then:
@@ -424,7 +428,7 @@ low.func.def target(@test_target) @low_entry_constants_cse_into_cfg(%cond: reg<t
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @low_dominator_block_ops_cse_into_cfg(%cond: reg<test.i32>, %row: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm<test.low.core> {
+low.func.def target<test.low.core>(@test_target) @low_dominator_block_ops_cse_into_cfg(%cond: reg<test.i32>, %row: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
   low.cond_br %cond, ^then, ^exit : reg<test.i32>
 ^then:
   %row_bytes = test.add.i32 %row, %row
@@ -440,7 +444,7 @@ low.func.def target(@test_target) @low_dominator_block_ops_cse_into_cfg(%cond: r
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @low_dominator_block_ops_cse_into_cfg(%cond: reg<test.i32>, %row: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @low_dominator_block_ops_cse_into_cfg(%cond: reg<test.i32>, %row: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
   low.cond_br %cond, ^then, ^exit : reg<test.i32>
 ^then:
   %row_bytes = low.op<test.add.i32>(%row, %row) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
@@ -454,6 +458,31 @@ low.func.def target(@test_target) @low_dominator_block_ops_cse_into_cfg(%cond: r
 
 // ====
 
+// Results consumed by a moved-result operation retain distinct SSA ownership
+// identities. Folding the second borrowed result into the first would make the
+// later borrow of %lhs a use after move.
+// RUN: pass cse
+func.def @moved_result_consumption_blocks_cse(%resource: pool<16>) {
+  %lhs = test.resource.borrowed %resource : pool<16> -> pool<16>
+  %rhs = test.resource.borrowed %resource : pool<16> -> pool<16>
+  %moved = test.resource.move %rhs : pool<16> -> pool<16>
+  test.resource.borrow %lhs : pool<16>
+  test.resource.borrow %moved : pool<16>
+  func.return
+}
+
+// ----
+func.def @moved_result_consumption_blocks_cse(%resource: pool<16>) {
+  %lhs = test.resource.borrowed %resource : pool<16> -> pool<16>
+  %rhs = test.resource.borrowed %resource : pool<16> -> pool<16>
+  %moved = test.resource.move %rhs : pool<16> -> pool<16>
+  test.resource.borrow %lhs : pool<16>
+  test.resource.borrow %moved : pool<16>
+  func.return
+}
+
+// ====
+
 // low.copy and low.concat are virtual-register identity constructors. They may
 // look structurally identical, but each instance names distinct storage and
 // must not be folded by value CSE.
@@ -461,7 +490,7 @@ low.func.def target(@test_target) @low_dominator_block_ops_cse_into_cfg(%cond: r
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @low_structural_identities_do_not_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32 x2>, reg<test.i32 x2>) {
+low.func.def target<test.low.core>(@test_target) @low_structural_identities_do_not_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32 x2>, reg<test.i32 x2>) {
   %copy0 = low.copy %lhs : reg<test.i32> -> reg<test.i32>
   %copy1 = low.copy %lhs : reg<test.i32> -> reg<test.i32>
   %pair0 = low.concat(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
@@ -472,7 +501,7 @@ low.func.def target(@test_target) @low_structural_identities_do_not_cse(%lhs: re
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @low_structural_identities_do_not_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32 x2>, reg<test.i32 x2>) {
+low.func.def target<test.low.core>(@test_target) @low_structural_identities_do_not_cse(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32 x2>, reg<test.i32 x2>) {
   %copy0 = low.copy %lhs : reg<test.i32> -> reg<test.i32>
   %copy1 = low.copy %lhs : reg<test.i32> -> reg<test.i32>
   %pair0 = low.concat(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>

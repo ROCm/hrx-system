@@ -19,16 +19,37 @@ from loom.builder_model import (
     BuilderParam,
     BuilderParamKind,
     BuilderSignature,
-    python_name,
+    dialect_python_name,
+    fixed_result_type_constraints,
     signatures_for_ops,
 )
 from loom.builtin_types import ALL_BUILTIN_TYPES
-from loom.dsl import Op, TypeDef
+from loom.dsl import (
+    ATTR_TYPE_ENUM_ARRAY,
+    ATTR_TYPE_PARAMETERIZED_ARRAY,
+    ATTR_TYPE_SIGNED_ENUM_SET,
+    ATTR_TYPE_SYMBOL_ARRAY,
+    ATTR_TYPE_SYMBOL_SET,
+    AttrDef,
+    Op,
+    TypeConstraint,
+    TypeDef,
+)
 from loom.fields import compute_layout
 from loom.ir import (
+    I1,
+    I32,
+    INDEX,
+    OFFSET,
     Block,
+    EnumArrayAttr,
     Module,
+    ParameterizedAttrArray,
     Region,
+    SignedEnumSetAttr,
+    SymbolName,
+    SymbolNameArray,
+    SymbolNameSet,
     Type,
 )
 from loom.stable_id import stable_id_from_string
@@ -42,6 +63,13 @@ __all__ = [
 
 
 _STATIC_INDEX_SENTINEL = -(2**63)
+
+_FIXED_RESULT_TYPES: dict[TypeConstraint, Type] = {
+    TypeConstraint.I1: I1,
+    TypeConstraint.I32: I32,
+    TypeConstraint.INDEX: INDEX,
+    TypeConstraint.OFFSET: OFFSET,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,14 +207,16 @@ class OpCallable:
         values = _validate_and_normalize_kwargs(self._signature, kwargs)
         attributes: dict[str, Any] = {}
         operands: list[ValueRef | int] = []
-        operand_segment_counts: list[int] = []
         successors: list[Block] = []
         func_args: list[ValueRef | int] = []
         block_args_by_region: dict[str, Sequence[tuple[str, Type]]] = {}
         regions: list[Region] = []
 
         for param in self._signature.params:
-            if param.kind in _OPERAND_PARAM_KINDS:
+            if param.kind in _OPERAND_PARAM_KINDS or (
+                param.kind == BuilderParamKind.FUNC_ARGS
+                and param.operand_field is not None
+            ):
                 continue
             if param.kind == BuilderParamKind.RESULT_TYPES:
                 continue
@@ -194,21 +224,46 @@ class OpCallable:
             match param.kind:
                 case BuilderParamKind.ATTR:
                     if value is not None:
+                        if (
+                            param.attr_def is not None
+                            and param.attr_def.attr_type == ATTR_TYPE_ENUM_ARRAY
+                        ):
+                            value = _normalize_enum_array_attr(
+                                op.name, param.attr_def, value
+                            )
+                        elif (
+                            param.attr_def is not None
+                            and param.attr_def.attr_type == ATTR_TYPE_SIGNED_ENUM_SET
+                        ):
+                            value = _normalize_signed_enum_set_attr(
+                                op.name, param.attr_def, value
+                            )
+                        elif (
+                            param.attr_def is not None
+                            and param.attr_def.attr_type
+                            == ATTR_TYPE_PARAMETERIZED_ARRAY
+                        ):
+                            value = _normalize_parameterized_attr_array(
+                                op.name, param.attr_def, value
+                            )
+                        elif (
+                            param.attr_def is not None
+                            and param.attr_def.attr_type
+                            in (ATTR_TYPE_SYMBOL_ARRAY, ATTR_TYPE_SYMBOL_SET)
+                        ):
+                            value = _normalize_symbol_collection_attr(
+                                op.name, param.attr_def, value
+                            )
                         attributes[param.name] = value
-                case BuilderParamKind.DESCRIPTOR_REF:
+                case BuilderParamKind.STABLE_KEY_REF:
                     if value is not None:
                         attributes[param.name] = value
-                        if param.stable_id_field is not None:
-                            attributes[param.stable_id_field] = stable_id_from_string(
-                                value
-                            )
-                        elif param.ordinal_field is not None:
-                            attributes[param.ordinal_field] = -1
-                        else:
+                        if param.stable_id_field is None:
                             raise ValueError(
-                                f"descriptor ref builder parameter '{param.name}' "
-                                "has no hidden identity field"
+                                f"stable key builder parameter '{param.name}' "
+                                "has no stable ID field"
                             )
+                        attributes[param.stable_id_field] = stable_id_from_string(value)
                 case BuilderParamKind.FLAGS:
                     if value is not None:
                         attributes[param.name] = value
@@ -222,6 +277,8 @@ class OpCallable:
                     block_args_by_region[region_field] = value or []
                 case BuilderParamKind.FUNC_ARGS:
                     func_args.extend(value or [])
+                    if param.end_attr_field is not None:
+                        attributes[param.end_attr_field] = len(func_args)
                 case BuilderParamKind.PREDICATE_LIST:
                     if value:
                         attributes[param.name] = value
@@ -248,49 +305,15 @@ class OpCallable:
                         f"{param.kind.name}"
                     )
 
-        params_by_name = {param.name: param for param in self._signature.params}
-        layout = compute_layout(op)
-        if layout.segmented_operands:
-            for operand in op.operands:
-                operand_param = params_by_name.get(operand.name)
-                if operand_param is None:
-                    operand_segment_counts.append(0)
-                    continue
-                before_count = len(operands)
-                value = values.get(operand_param.name)
-                self._append_operand_param(
-                    op, operand_param, value, operands, attributes
-                )
-                operand_segment_counts.append(len(operands) - before_count)
-        else:
-            optional_operand_tail_closed = False
-            for operand in op.operands:
-                operand_param = params_by_name.get(operand.name)
-                if operand_param is None:
-                    continue
-                value = values.get(operand_param.name)
-                if (
-                    operand_param.kind == BuilderParamKind.OPERAND
-                    and value is None
-                    and not operand_param.required
-                ):
-                    optional_operand_tail_closed = True
-                    continue
-                if (
-                    operand_param.kind == BuilderParamKind.OPERAND
-                    and value is not None
-                    and optional_operand_tail_closed
-                ):
-                    raise ValueError(
-                        f"{op.name}: optional operand '{operand_param.name}' "
-                        "cannot be present after an earlier optional operand "
-                        "was omitted"
-                    )
-                self._append_operand_param(
-                    op, operand_param, value, operands, attributes
-                )
+        operand_segment_counts = self._append_operands(op, values, operands, attributes)
 
         results = values.get("results")
+        if results is None:
+            fixed_constraints = fixed_result_type_constraints(op)
+            if fixed_constraints is not None:
+                results = [
+                    _FIXED_RESULT_TYPES[constraint] for constraint in fixed_constraints
+                ]
         result_names = _normalize_result_names(
             op,
             results or [],
@@ -311,6 +334,73 @@ class OpCallable:
             location_id=values.get("location_id"),
         )
 
+    def _append_operands(
+        self,
+        op: Op,
+        values: dict[str, Any],
+        operands: list[ValueRef | int],
+        attributes: dict[str, Any],
+    ) -> list[int]:
+        """Appends operand fields in storage order and returns segment counts."""
+        params_by_field: dict[str, list[BuilderParam]] = {}
+        for param in self._signature.params:
+            field = param.operand_field or param.name
+            params_by_field.setdefault(field, []).append(param)
+        operand_segment_counts: list[int] = []
+        layout = compute_layout(op)
+        if layout.segmented_operands:
+            for operand in op.operands:
+                operand_params = params_by_field.get(operand.name, [])
+                if not operand_params:
+                    operand_segment_counts.append(0)
+                    continue
+                before_count = len(operands)
+                for operand_param in operand_params:
+                    value = values.get(operand_param.name)
+                    self._append_operand_param(
+                        op, operand_param, value, operands, attributes
+                    )
+                    if operand_param.end_attr_field is not None:
+                        attributes[operand_param.end_attr_field] = (
+                            len(operands) - before_count
+                        )
+                operand_segment_counts.append(len(operands) - before_count)
+        else:
+            optional_operand_tail_closed = False
+            for operand in op.operands:
+                operand_params = params_by_field.get(operand.name, [])
+                if not operand_params:
+                    continue
+                before_count = len(operands)
+                for operand_param in operand_params:
+                    value = values.get(operand_param.name)
+                    if (
+                        operand_param.kind == BuilderParamKind.OPERAND
+                        and value is None
+                        and not operand_param.required
+                    ):
+                        optional_operand_tail_closed = True
+                        continue
+                    if (
+                        operand_param.kind == BuilderParamKind.OPERAND
+                        and value is not None
+                        and optional_operand_tail_closed
+                    ):
+                        raise ValueError(
+                            f"{op.name}: optional operand "
+                            f"'{operand_param.name}' cannot be present after an "
+                            "earlier optional operand was omitted"
+                        )
+                    self._append_operand_param(
+                        op, operand_param, value, operands, attributes
+                    )
+                    if operand_param.end_attr_field is not None:
+                        attributes[operand_param.end_attr_field] = (
+                            len(operands) - before_count
+                        )
+
+        return operand_segment_counts
+
     def _append_operand_param(
         self,
         op: Op,
@@ -324,6 +414,8 @@ class OpCallable:
                 if value is not None:
                     operands.append(cast(ValueRef | int, value))
             case BuilderParamKind.OPERAND_VARIADIC:
+                operands.extend(value or [])
+            case BuilderParamKind.FUNC_ARGS:
                 operands.extend(value or [])
             case BuilderParamKind.INDEX_LIST:
                 static_offsets: list[int] = []
@@ -418,6 +510,171 @@ def _default_value(param: BuilderParam) -> Any:
             return []
         case _:
             return None
+
+
+def _normalize_enum_array_attr(
+    op_name: str, attr_def: AttrDef, value: Any
+) -> EnumArrayAttr:
+    """Resolves symbolic enum-array builder values to stable byte values."""
+    if isinstance(value, EnumArrayAttr):
+        values = value.values
+    else:
+        if isinstance(value, str) or not isinstance(value, Iterable):
+            raise TypeError(
+                f"{op_name}: enum array '{attr_def.name}' must be an iterable "
+                "of enum keywords or byte values"
+            )
+        values = tuple(value)
+
+    assert attr_def.enum_def is not None
+    value_by_keyword = {case.keyword: case.value for case in attr_def.enum_def.cases}
+    declared_values = frozenset(value_by_keyword.values())
+    normalized_values: list[int] = []
+    for index, element in enumerate(values):
+        if isinstance(element, str):
+            stable_value = value_by_keyword.get(element)
+            if stable_value is None:
+                raise ValueError(
+                    f"{op_name}: enum array '{attr_def.name}' element {index} "
+                    f"has unknown keyword {element!r}"
+                )
+        elif type(element) is int and 0 <= element <= 0xFF:
+            stable_value = element
+            if not attr_def.open_enum and stable_value not in declared_values:
+                raise ValueError(
+                    f"{op_name}: enum array '{attr_def.name}' element {index} "
+                    f"has undeclared value {stable_value}"
+                )
+        else:
+            raise TypeError(
+                f"{op_name}: enum array '{attr_def.name}' element {index} "
+                f"must be an enum keyword or byte value, got {element!r}"
+            )
+        normalized_values.append(stable_value)
+    return EnumArrayAttr(normalized_values)
+
+
+def _normalize_signed_enum_set_attr(
+    op_name: str, attr_def: AttrDef, value: Any
+) -> SignedEnumSetAttr:
+    """Resolves signed enum-set assertions to stable byte values."""
+    if isinstance(value, SignedEnumSetAttr):
+        assertions: Mapping[str | int, bool] = {
+            **{ordinal: True for ordinal in value.positive_values},
+            **{ordinal: False for ordinal in value.negative_values},
+        }
+    elif isinstance(value, Mapping):
+        assertions = value
+    else:
+        raise TypeError(
+            f"{op_name}: signed enum set '{attr_def.name}' must be a mapping "
+            "of enum keywords or byte values to Booleans"
+        )
+
+    assert attr_def.enum_def is not None
+    value_by_keyword = {case.keyword: case.value for case in attr_def.enum_def.cases}
+    declared_values = frozenset(value_by_keyword.values())
+    positive_values: list[int] = []
+    negative_values: list[int] = []
+    resolved_values: set[int] = set()
+    for enum_value, assertion in assertions.items():
+        if type(assertion) is not bool:
+            raise TypeError(
+                f"{op_name}: signed enum set '{attr_def.name}' assertion "
+                f"for {enum_value!r} must be a Boolean, got {assertion!r}"
+            )
+        if isinstance(enum_value, str):
+            stable_value = value_by_keyword.get(enum_value)
+            if stable_value is None:
+                raise ValueError(
+                    f"{op_name}: signed enum set '{attr_def.name}' has "
+                    f"unknown keyword {enum_value!r}"
+                )
+        elif type(enum_value) is int and 0 <= enum_value <= 0xFF:
+            stable_value = enum_value
+            if stable_value not in declared_values:
+                raise ValueError(
+                    f"{op_name}: signed enum set '{attr_def.name}' has "
+                    f"undeclared value {stable_value}"
+                )
+        else:
+            raise TypeError(
+                f"{op_name}: signed enum set '{attr_def.name}' key must be "
+                f"an enum keyword or byte value, got {enum_value!r}"
+            )
+        if stable_value in resolved_values:
+            raise ValueError(
+                f"{op_name}: signed enum set '{attr_def.name}' names stable "
+                f"value {stable_value} more than once"
+            )
+        resolved_values.add(stable_value)
+        (positive_values if assertion else negative_values).append(stable_value)
+    return SignedEnumSetAttr(positive_values, negative_values)
+
+
+def _normalize_parameterized_attr_array(
+    op_name: str, attr_def: AttrDef, value: Any
+) -> ParameterizedAttrArray:
+    """Canonicalizes and validates a parameterized-attribute array field."""
+    if isinstance(value, ParameterizedAttrArray):
+        array = value
+    else:
+        if isinstance(value, str | bytes | bytearray) or not isinstance(
+            value, Iterable
+        ):
+            raise TypeError(
+                f"{op_name}: parameterized attribute array '{attr_def.name}' "
+                "must be an iterable of ParameterizedAttr values"
+            )
+        array = ParameterizedAttrArray(value)
+
+    expected_family = attr_def.parameterized_attr
+    if expected_family is not None:
+        for index, element in enumerate(array):
+            if element.family_name != expected_family.name:
+                raise ValueError(
+                    f"{op_name}: parameterized attribute array "
+                    f"'{attr_def.name}' element {index} has family "
+                    f"'{element.family_name}', expected "
+                    f"'{expected_family.name}'"
+                )
+    return array
+
+
+def _normalize_symbol_collection_attr(
+    op_name: str, attr_def: AttrDef, value: Any
+) -> SymbolNameArray | SymbolNameSet:
+    """Normalizes an ordered symbol array or symbol set."""
+    values = (
+        value.values if isinstance(value, SymbolNameArray | SymbolNameSet) else value
+    )
+    if isinstance(values, str | bytes | bytearray) or not isinstance(values, Iterable):
+        raise TypeError(
+            f"{op_name}: {attr_def.attr_type.replace('_', ' ')} "
+            f"'{attr_def.name}' must be an iterable "
+            "of symbol names"
+        )
+    names: list[SymbolName] = []
+    for index, element in enumerate(values):
+        if not isinstance(element, str):
+            raise TypeError(
+                f"{op_name}: {attr_def.attr_type.replace('_', ' ')} "
+                f"'{attr_def.name}' element {index} "
+                f"must be a symbol name, got {element!r}"
+            )
+        if element.startswith("@"):
+            raise ValueError(
+                f"{op_name}: {attr_def.attr_type.replace('_', ' ')} "
+                f"'{attr_def.name}' element {index} "
+                "must not include '@'"
+            )
+        names.append(SymbolName(element))
+    if attr_def.attr_type == ATTR_TYPE_SYMBOL_ARRAY:
+        return SymbolNameArray(names)
+    try:
+        return SymbolNameSet(names)
+    except ValueError as exc:
+        raise ValueError(f"{op_name}: symbol set '{attr_def.name}' {exc}") from exc
 
 
 def _normalize_result_names(
@@ -528,7 +785,7 @@ def _build_dialect_registries(ops: Sequence[Op]) -> dict[str, _DialectRegistry]:
         grouped_ops.setdefault(dialect_name, []).append(op)
     registries: dict[str, _DialectRegistry] = {}
     for dialect_name, dialect_ops in sorted(grouped_ops.items()):
-        attr_name = python_name(dialect_name)
+        attr_name = dialect_python_name(dialect_name)
         registries[attr_name] = _DialectRegistry(
             attr_name=attr_name,
             ir_name=dialect_name,
@@ -542,6 +799,7 @@ def default_ops() -> tuple[Op, ...]:
     from loom.dialect.buffer import ALL_BUFFER_OPS
     from loom.dialect.cfg import ALL_CFG_OPS
     from loom.dialect.check import ALL_CHECK_OPS
+    from loom.dialect.command import ALL_COMMAND_OPS
     from loom.dialect.encoding import ALL_ENCODING_OPS
     from loom.dialect.func import ALL_FUNC_OPS
     from loom.dialect.globals import ALL_GLOBAL_OPS
@@ -563,6 +821,7 @@ def default_ops() -> tuple[Op, ...]:
         *ALL_BUFFER_OPS,
         *ALL_CFG_OPS,
         *ALL_CHECK_OPS,
+        *ALL_COMMAND_OPS,
         *ALL_ENCODING_OPS,
         *ALL_FUNC_OPS,
         *ALL_GLOBAL_OPS,

@@ -10,7 +10,8 @@ Dialect declarations carry target-independent semantic phase and contract
 metadata. This module derives the target-low lowering-stage policy from those
 facts: target-low accepts executable ops directly, requires a target provider
 for declared target contracts, and rejects source structure that must lower away
-before executable code reaches this stage.
+and compile-time queries that must resolve before executable code reaches this
+stage.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ class TargetLowLegality(Enum):
     PROVIDER = "LOOM_TARGET_LOW_LEGALITY_PROVIDER"
     SOURCE_ONLY = "LOOM_TARGET_LOW_LEGALITY_SOURCE_ONLY"
     MODULE_METADATA = "LOOM_TARGET_LOW_LEGALITY_MODULE_METADATA"
+    COMPILE_TIME_QUERY = "LOOM_TARGET_LOW_LEGALITY_COMPILE_TIME_QUERY"
 
 
 def target_low_legality_for_op(dialect: Dialect, op: Op) -> TargetLowLegality:
@@ -37,7 +39,11 @@ def target_low_legality_for_op(dialect: Dialect, op: Op) -> TargetLowLegality:
 
     phase = op.phase if op.phase is not None else dialect.default_phase
     if op.contracts:
-        if phase in (OpPhase.SOURCE_STRUCTURE, OpPhase.MODULE_METADATA):
+        if phase in (
+            OpPhase.SOURCE_STRUCTURE,
+            OpPhase.MODULE_METADATA,
+            OpPhase.COMPILE_TIME_QUERY,
+        ):
             raise ValueError(
                 f"op '{op.name}' cannot combine target contracts with "
                 f"{phase.name.lower()} phase"
@@ -49,6 +55,8 @@ def target_low_legality_for_op(dialect: Dialect, op: Op) -> TargetLowLegality:
         return TargetLowLegality.SOURCE_ONLY
     if phase == OpPhase.MODULE_METADATA:
         return TargetLowLegality.MODULE_METADATA
+    if phase == OpPhase.COMPILE_TIME_QUERY:
+        return TargetLowLegality.COMPILE_TIME_QUERY
     return TargetLowLegality.UNSUPPORTED
 
 

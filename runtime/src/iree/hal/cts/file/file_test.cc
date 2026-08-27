@@ -196,6 +196,37 @@ class FileTest : public CtsTestBase<> {
     return buffer;
   }
 
+  Ref<iree_hal_buffer_t> CreateBufferWithAccess(iree_hal_memory_access_t access,
+                                                iree_device_size_t length) {
+    iree_hal_buffer_params_t params = {0};
+    params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+    params.access = access;
+    params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+    Ref<iree_hal_buffer_t> buffer;
+    IREE_CHECK_OK(iree_hal_allocator_allocate_buffer(device_allocator_, params,
+                                                     length, buffer.out()));
+    return buffer;
+  }
+
+  iree_status_t CreateBorrowedMemoryTestFile(iree_hal_memory_access_t access,
+                                             iree_byte_span_t contents,
+                                             TestFile* out_file) {
+    out_file->Reset();
+    iree_io_file_handle_t* handle = nullptr;
+    IREE_RETURN_IF_ERROR(iree_io_file_handle_wrap_host_allocation(
+        IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE, contents,
+        iree_io_file_handle_release_callback_null(), iree_allocator_system(),
+        &handle));
+    iree_status_t status = iree_hal_file_import(
+        device_, IREE_HAL_QUEUE_AFFINITY_ANY, access, handle,
+        IREE_HAL_EXTERNAL_FILE_FLAG_NONE, out_file->out_file());
+    iree_io_file_handle_release(handle);
+    if (iree_status_is_ok(status)) {
+      out_file->SetMemoryContents(contents.data);
+    }
+    return status;
+  }
+
   void QueueReadAndWait(iree_hal_file_t* source_file,
                         iree_device_size_t source_offset,
                         iree_hal_buffer_t* target_buffer,
@@ -344,6 +375,8 @@ class FileTest : public CtsTestBase<> {
   }
 };
 
+class AsyncFileTest : public FileTest {};
+
 TEST_P(FileTest, ReadEntireFile) {
   ForEachProvider([&](const FileProvider& provider) {
     const iree_device_size_t file_length = 128;
@@ -361,6 +394,342 @@ TEST_P(FileTest, ReadEntireFile) {
     EXPECT_THAT(ReadBufferBytes(target_buffer.get(), /*offset=*/0, file_length),
                 ContainerEq(file_contents));
   });
+}
+
+TEST_P(FileTest, ImportRejectsUnknownFlags) {
+  std::vector<uint8_t> contents(16, 0);
+  iree_io_file_handle_t* handle = nullptr;
+  IREE_ASSERT_OK(iree_io_file_handle_wrap_host_allocation(
+      IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE,
+      iree_make_byte_span(contents.data(), contents.size()),
+      iree_io_file_handle_release_callback_null(), iree_allocator_system(),
+      &handle));
+
+  iree_hal_file_t* file = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_file_import(
+          device_, IREE_HAL_QUEUE_AFFINITY_ANY, IREE_HAL_MEMORY_ACCESS_READ,
+          handle, static_cast<iree_hal_external_file_flags_t>(1u), &file));
+  EXPECT_EQ(file, nullptr);
+  iree_io_file_handle_release(handle);
+}
+
+TEST_P(FileTest, ReadRejectsFileRangeOverflow) {
+  const FileProvider provider = {"memory_file", FileProviderKind::kMemory};
+  TestFile file;
+  ASSERT_TRUE(TryCreateTestFile(provider, IREE_HAL_MEMORY_ACCESS_READ,
+                                std::vector<uint8_t>(16, 0), &file));
+  Ref<iree_hal_buffer_t> target_buffer = CreateZeroedBuffer(16);
+
+  SemaphoreList signal(device_, {0}, {1});
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      iree_hal_device_queue_read(
+          device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
+          signal, file.get(), UINT64_MAX - 3, target_buffer.get(),
+          /*target_offset=*/0, /*length=*/8, IREE_HAL_READ_FLAG_NONE));
+}
+
+TEST_P(FileTest, ReadRejectsRangePastBufferEnd) {
+  const FileProvider provider = {"memory_file", FileProviderKind::kMemory};
+  TestFile file;
+  ASSERT_TRUE(TryCreateTestFile(provider, IREE_HAL_MEMORY_ACCESS_READ,
+                                std::vector<uint8_t>(16, 0), &file));
+  Ref<iree_hal_buffer_t> target_buffer = CreateZeroedBuffer(16);
+
+  SemaphoreList signal(device_, {0}, {1});
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      iree_hal_device_queue_read(
+          device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
+          signal, file.get(),
+          /*source_offset=*/0, target_buffer.get(), /*target_offset=*/15,
+          /*length=*/2, IREE_HAL_READ_FLAG_NONE));
+}
+
+TEST_P(FileTest, WriteRejectsRangePastFileEnd) {
+  const FileProvider provider = {"memory_file", FileProviderKind::kMemory};
+  TestFile file;
+  ASSERT_TRUE(TryCreateTestFile(provider, IREE_HAL_MEMORY_ACCESS_WRITE,
+                                std::vector<uint8_t>(16, 0), &file));
+  Ref<iree_hal_buffer_t> source_buffer = CreateZeroedBuffer(16);
+
+  SemaphoreList signal(device_, {0}, {1});
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      iree_hal_device_queue_write(
+          device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
+          signal, source_buffer.get(),
+          /*source_offset=*/0, file.get(), /*target_offset=*/15, /*length=*/2,
+          IREE_HAL_WRITE_FLAG_NONE));
+}
+
+TEST_P(FileTest, WriteRejectsRangePastBufferEnd) {
+  const FileProvider provider = {"memory_file", FileProviderKind::kMemory};
+  TestFile file;
+  ASSERT_TRUE(TryCreateTestFile(provider, IREE_HAL_MEMORY_ACCESS_WRITE,
+                                std::vector<uint8_t>(16, 0), &file));
+  Ref<iree_hal_buffer_t> source_buffer = CreateZeroedBuffer(16);
+
+  SemaphoreList signal(device_, {0}, {1});
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      iree_hal_device_queue_write(
+          device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
+          signal, source_buffer.get(),
+          /*source_offset=*/15, file.get(), /*target_offset=*/0, /*length=*/2,
+          IREE_HAL_WRITE_FLAG_NONE));
+}
+
+TEST_P(FileTest, ReadRejectsIncompatibleBufferAccess) {
+  const FileProvider provider = {"memory_file", FileProviderKind::kMemory};
+  TestFile file;
+  ASSERT_TRUE(TryCreateTestFile(provider, IREE_HAL_MEMORY_ACCESS_READ,
+                                std::vector<uint8_t>(16, 0), &file));
+
+  Ref<iree_hal_buffer_t> read_only_buffer =
+      CreateBufferWithAccess(IREE_HAL_MEMORY_ACCESS_READ, 16);
+  SemaphoreList access_signal(device_, {0}, {1});
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_PERMISSION_DENIED,
+      iree_hal_device_queue_read(device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+                                 iree_hal_semaphore_list_empty(), access_signal,
+                                 file.get(), /*source_offset=*/0,
+                                 read_only_buffer.get(), /*target_offset=*/0,
+                                 /*length=*/1, IREE_HAL_READ_FLAG_NONE));
+}
+
+TEST_P(FileTest, WriteRejectsIncompatibleBufferAccess) {
+  const FileProvider provider = {"memory_file", FileProviderKind::kMemory};
+  TestFile file;
+  ASSERT_TRUE(TryCreateTestFile(provider, IREE_HAL_MEMORY_ACCESS_WRITE,
+                                std::vector<uint8_t>(16, 0), &file));
+
+  Ref<iree_hal_buffer_t> write_only_buffer =
+      CreateBufferWithAccess(IREE_HAL_MEMORY_ACCESS_WRITE, 16);
+  SemaphoreList access_signal(device_, {0}, {1});
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_PERMISSION_DENIED,
+      iree_hal_device_queue_write(
+          device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
+          access_signal, write_only_buffer.get(), /*source_offset=*/0,
+          file.get(), /*target_offset=*/0, /*length=*/1,
+          IREE_HAL_WRITE_FLAG_NONE));
+}
+
+TEST_P(FileTest, ReadRejectsWriteOnlyFile) {
+  const FileProvider provider = {"memory_file", FileProviderKind::kMemory};
+  TestFile file;
+  ASSERT_TRUE(TryCreateTestFile(provider, IREE_HAL_MEMORY_ACCESS_WRITE,
+                                std::vector<uint8_t>(16, 0), &file));
+  Ref<iree_hal_buffer_t> target_buffer = CreateZeroedBuffer(16);
+
+  SemaphoreList signal(device_, {0}, {1});
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_PERMISSION_DENIED,
+      iree_hal_device_queue_read(
+          device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
+          signal, file.get(),
+          /*source_offset=*/0, target_buffer.get(), /*target_offset=*/0,
+          /*length=*/1, IREE_HAL_READ_FLAG_NONE));
+}
+
+TEST_P(FileTest, WriteRejectsReadOnlyFile) {
+  const FileProvider provider = {"memory_file", FileProviderKind::kMemory};
+  TestFile file;
+  ASSERT_TRUE(TryCreateTestFile(provider, IREE_HAL_MEMORY_ACCESS_READ,
+                                std::vector<uint8_t>(16, 0), &file));
+  Ref<iree_hal_buffer_t> source_buffer = CreateZeroedBuffer(16);
+
+  SemaphoreList signal(device_, {0}, {1});
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_PERMISSION_DENIED,
+      iree_hal_device_queue_write(
+          device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
+          signal, source_buffer.get(),
+          /*source_offset=*/0, file.get(), /*target_offset=*/0, /*length=*/1,
+          IREE_HAL_WRITE_FLAG_NONE));
+}
+
+TEST_P(FileTest, ReadRejectsUnknownFlags) {
+  const FileProvider provider = {"memory_file", FileProviderKind::kMemory};
+  TestFile file;
+  ASSERT_TRUE(TryCreateTestFile(provider, IREE_HAL_MEMORY_ACCESS_READ,
+                                std::vector<uint8_t>(16, 0), &file));
+  Ref<iree_hal_buffer_t> target_buffer = CreateZeroedBuffer(16);
+
+  SemaphoreList signal(device_, {0}, {1});
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_device_queue_read(
+          device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
+          signal, file.get(),
+          /*source_offset=*/0, target_buffer.get(), /*target_offset=*/0,
+          /*length=*/1, (iree_hal_read_flags_t)1u));
+}
+
+TEST_P(FileTest, WriteRejectsUnknownFlags) {
+  const FileProvider provider = {"memory_file", FileProviderKind::kMemory};
+  TestFile file;
+  ASSERT_TRUE(TryCreateTestFile(provider, IREE_HAL_MEMORY_ACCESS_WRITE,
+                                std::vector<uint8_t>(16, 0), &file));
+  Ref<iree_hal_buffer_t> source_buffer = CreateZeroedBuffer(16);
+
+  SemaphoreList signal(device_, {0}, {1});
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_device_queue_write(
+          device_, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
+          signal, source_buffer.get(),
+          /*source_offset=*/0, file.get(), /*target_offset=*/0, /*length=*/1,
+          (iree_hal_write_flags_t)1u));
+}
+
+TEST_P(FileTest, SynchronousReadRejectsRangePastFileEnd) {
+  const FileProvider provider = {"memory_file", FileProviderKind::kMemory};
+  TestFile file;
+  ASSERT_TRUE(TryCreateTestFile(provider, IREE_HAL_MEMORY_ACCESS_READ,
+                                std::vector<uint8_t>(16, 0), &file));
+  Ref<iree_hal_buffer_t> target_buffer = CreateZeroedBuffer(16);
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      iree_hal_file_read(file.get(), /*file_offset=*/15, target_buffer.get(),
+                         /*buffer_offset=*/0, /*length=*/2));
+}
+
+TEST_P(FileTest, SynchronousWriteRejectsReadOnlyFile) {
+  const FileProvider provider = {"memory_file", FileProviderKind::kMemory};
+  TestFile file;
+  ASSERT_TRUE(TryCreateTestFile(provider, IREE_HAL_MEMORY_ACCESS_READ,
+                                std::vector<uint8_t>(16, 0), &file));
+  Ref<iree_hal_buffer_t> source_buffer = CreateZeroedBuffer(16);
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_PERMISSION_DENIED,
+      iree_hal_file_write(file.get(), /*file_offset=*/0, source_buffer.get(),
+                          /*buffer_offset=*/0, /*length=*/1));
+}
+
+TEST_P(AsyncFileTest, ZeroLengthReadForwardsDependencies) {
+  const FileProvider provider = {"memory_file", FileProviderKind::kMemory};
+  TestFile file;
+  ASSERT_TRUE(TryCreateTestFile(provider, IREE_HAL_MEMORY_ACCESS_READ,
+                                std::vector<uint8_t>(16, 0), &file));
+  Ref<iree_hal_buffer_t> target_buffer = CreateZeroedBuffer(16);
+
+  SemaphoreList wait_signal(device_, {0}, {1});
+  SemaphoreList read_signal(device_, {0}, {1});
+  IREE_ASSERT_OK(iree_hal_device_queue_read(
+      device_, IREE_HAL_QUEUE_AFFINITY_ANY, wait_signal, read_signal,
+      file.get(),
+      /*source_offset=*/16, target_buffer.get(), /*target_offset=*/16,
+      /*length=*/0, IREE_HAL_READ_FLAG_NONE));
+
+  uint64_t read_value = 0;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_query(read_signal.semaphores[0], &read_value));
+  EXPECT_EQ(read_value, 0u);
+
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(wait_signal.semaphores[0], 1,
+                                           /*frontier=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+      read_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+}
+
+TEST_P(AsyncFileTest, ZeroLengthWriteForwardsDependencies) {
+  const FileProvider provider = {"memory_file", FileProviderKind::kMemory};
+  TestFile file;
+  ASSERT_TRUE(TryCreateTestFile(provider, IREE_HAL_MEMORY_ACCESS_WRITE,
+                                std::vector<uint8_t>(16, 0), &file));
+  Ref<iree_hal_buffer_t> source_buffer = CreateZeroedBuffer(16);
+
+  SemaphoreList wait_signal(device_, {0}, {1});
+  SemaphoreList write_signal(device_, {0}, {1});
+  IREE_ASSERT_OK(iree_hal_device_queue_write(
+      device_, IREE_HAL_QUEUE_AFFINITY_ANY, wait_signal, write_signal,
+      source_buffer.get(), /*source_offset=*/16, file.get(),
+      /*target_offset=*/16, /*length=*/0, IREE_HAL_WRITE_FLAG_NONE));
+
+  uint64_t write_value = 0;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_query(write_signal.semaphores[0], &write_value));
+  EXPECT_EQ(write_value, 0u);
+
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(wait_signal.semaphores[0], 1,
+                                           /*frontier=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+      write_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+}
+
+TEST_P(AsyncFileTest, MemoryFileChainRetainsDeferredResources) {
+  const iree_device_size_t allocation_length = 640;
+  const iree_device_size_t subspan_offset = 73;
+  const iree_device_size_t subspan_length = 400;
+  const iree_device_size_t buffer_offset = 31;
+  const iree_device_size_t transfer_length = 257;
+  const iree_device_size_t source_offset = 19;
+  const iree_device_size_t target_offset = 29;
+  const iree_device_size_t file_length = 512;
+
+  std::vector<uint8_t> source_contents(file_length, 0x11);
+  std::vector<uint8_t> target_contents(file_length, 0xC7);
+  TestFile source_file;
+  IREE_ASSERT_OK(CreateBorrowedMemoryTestFile(
+      IREE_HAL_MEMORY_ACCESS_READ,
+      iree_make_byte_span(source_contents.data(), source_contents.size()),
+      &source_file));
+  TestFile target_file;
+  IREE_ASSERT_OK(CreateBorrowedMemoryTestFile(
+      IREE_HAL_MEMORY_ACCESS_WRITE,
+      iree_make_byte_span(target_contents.data(), target_contents.size()),
+      &target_file));
+
+  Ref<iree_hal_buffer_t> allocation = CreateZeroedBuffer(allocation_length);
+  Ref<iree_hal_buffer_t> subspan;
+  IREE_ASSERT_OK(
+      iree_hal_buffer_subspan(allocation.get(), subspan_offset, subspan_length,
+                              iree_allocator_system(), subspan.out()));
+
+  SemaphoreList host_producer_signal(device_, {0}, {1});
+  SemaphoreList read_signal(device_, {0}, {1});
+  SemaphoreList write_signal(device_, {0}, {1});
+  IREE_ASSERT_OK(iree_hal_device_queue_read(
+      device_, IREE_HAL_QUEUE_AFFINITY_ANY, host_producer_signal, read_signal,
+      source_file.get(), source_offset, subspan.get(), buffer_offset,
+      transfer_length, IREE_HAL_READ_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_device_queue_write(
+      device_, IREE_HAL_QUEUE_AFFINITY_ANY, read_signal, write_signal,
+      subspan.get(), buffer_offset, target_file.get(), target_offset,
+      transfer_length, IREE_HAL_WRITE_FLAG_NONE));
+
+  uint64_t write_value = 0;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_query(write_signal.semaphores[0], &write_value));
+  EXPECT_EQ(write_value, 0u);
+
+  const std::vector<uint8_t> produced_contents =
+      MakeDeterministicBytes(transfer_length);
+  std::memcpy(source_contents.data() + source_offset, produced_contents.data(),
+              produced_contents.size());
+
+  // Accepted operations retain every resource they need until terminal
+  // completion. Keep only the externally owned host allocations and fences.
+  source_file.Reset();
+  target_file.Reset();
+  subspan.reset();
+  allocation.reset();
+
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(host_producer_signal.semaphores[0],
+                                           1, /*frontier=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+      write_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+
+  std::vector<uint8_t> expected(file_length, 0xC7);
+  std::copy(produced_contents.begin(), produced_contents.end(),
+            expected.begin() + target_offset);
+  EXPECT_THAT(target_contents, ContainerEq(expected));
 }
 
 TEST_P(FileTest, ReadSubrangeWithOffsets) {
@@ -487,5 +856,7 @@ TEST_P(FileTest, LargeRangeRoundTrip) {
 }
 
 CTS_REGISTER_TEST_SUITE_WITH_TAGS(FileTest, {"file_io"}, {});
+CTS_REGISTER_TEST_SUITE_WITH_TAGS(
+    AsyncFileTest, (std::vector<std::string>{"async_queue", "file_io"}), {});
 
 }  // namespace iree::hal::cts

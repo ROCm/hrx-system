@@ -1,5 +1,7 @@
-// Targetless root workload that asks a linked provider library for the i32
-// scaling implementation.
+// Targetless root workload that asks the active template library universe for
+// an i32 scaling implementation.
+template.decl @authoring.link.scale_i32(%value: i32) -> (i32)
+
 kernel.def export("scale_i32_buffer") @scale_i32_buffer(%element_count: index) {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -11,15 +13,15 @@ kernel.def export("scale_i32_buffer") @scale_i32_buffer(%element_count: index) {
   %workgroup = kernel.workgroup.id<x> : index
   %lane = kernel.workitem.id<x> : index
   %workgroup_size = index.constant 64 : index
-  %zero_offset = index.constant 0 : offset
+  %base = index.constant 0 : offset
   %element_index = index.madd %workgroup, %workgroup_size, %lane : index
   %in_bounds = index.cmp ult, %element_index, %element_count : index
-  %input_view = buffer.view %input[%zero_offset] : buffer -> view<[%element_count]xi32, #dense>
-  %output_view = buffer.view %output[%zero_offset] : buffer -> view<[%element_count]xi32, #dense>
+  %input_view = buffer.view %input[%base] : buffer -> view<[%element_count]xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%element_count]xi32>
   scf.if %in_bounds {
-    %value = view.load %input_view[%element_index] : view<[%element_count]xi32, #dense> -> i32
-    %scaled = func.apply<authoring.link.scale_i32>(%value) : (i32) -> (i32)
-    view.store %scaled, %output_view[%element_index] : i32, view<[%element_count]xi32, #dense>
+    %value = view.load %input_view[%element_index] : view<[%element_count]xi32> -> i32
+    %scaled = template.apply<@authoring.link.scale_i32>(%value) : (i32) -> (i32)
+    view.store %scaled, %output_view[%element_index] : i32, view<[%element_count]xi32>
   }
   kernel.return
 }

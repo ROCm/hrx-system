@@ -1,0 +1,169 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1250> @target
+kernel.def target(@target) @tensor_load_to_lds_d4() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %bytes = index.constant 16384 : offset
+  %d0 = vector.constant 0 : vector<4xi32>
+  %d1 = vector.constant 0 : vector<8xi32>
+  %descriptor = kernel.tensor.lds.descriptor dgroups(%d0, %d1, %d0, %d0) : vector<4xi32>, vector<8xi32>, vector<4xi32>, vector<4xi32> -> kernel.tensor.lds.descriptor
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %global[%buffer_base] : buffer -> view<64x64xf32>
+  %scratch = buffer.alloca<workgroup> align(256) %bytes : buffer
+  %dest = buffer.view %scratch[%buffer_base] : buffer -> view<64x64xf32>
+  %copy = kernel.async.tensor.load.to.lds %source to %dest using %descriptor {cache_scope = cu, cache_temporal = regular} : view<64x64xf32> to view<64x64xf32>, kernel.tensor.lds.descriptor -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @tensor_load_to_lds_d4() asm {
+  %15 = storage {byte_alignment = 256, byte_length = 16384} : low.storage<workgroup>
+  %16 = v_mov_b32 0
+  %32 = v_readfirstlane_b32 %16
+  %34 = v_readfirstlane_b32 %16
+  %36 = v_readfirstlane_b32 %16
+  %38 = v_readfirstlane_b32 %16
+  %39 = concat(%32, %34, %36, %38) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %41 = v_readfirstlane_b32 %16
+  %43 = v_readfirstlane_b32 %16
+  %45 = v_readfirstlane_b32 %16
+  %47 = v_readfirstlane_b32 %16
+  %49 = v_readfirstlane_b32 %16
+  %51 = v_readfirstlane_b32 %16
+  %53 = v_readfirstlane_b32 %16
+  %55 = v_readfirstlane_b32 %16
+  %56 = concat(%41, %43, %45, %47, %49, %51, %53, %55) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x8>
+  %58 = v_readfirstlane_b32 %16
+  %60 = v_readfirstlane_b32 %16
+  %62 = v_readfirstlane_b32 %16
+  %64 = v_readfirstlane_b32 %16
+  %65 = concat(%58, %60, %62, %64) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %67 = v_readfirstlane_b32 %16
+  %69 = v_readfirstlane_b32 %16
+  %71 = v_readfirstlane_b32 %16
+  %73 = v_readfirstlane_b32 %16
+  %74 = concat(%67, %69, %71, %73) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  tensor_load_to_lds_d4 %39, %56, %65, %74
+  s_wait_tensorcnt {tensorcnt = 0}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+kernel.def target(@target) @tensor_load_to_lds_d2() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %bytes = index.constant 16384 : offset
+  %d0 = vector.constant 0 : vector<4xi32>
+  %d1 = vector.constant 0 : vector<8xi32>
+  %descriptor = kernel.tensor.lds.descriptor dgroups(%d0, %d1) : vector<4xi32>, vector<8xi32> -> kernel.tensor.lds.descriptor
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %global[%buffer_base] : buffer -> view<64x64xf32>
+  %scratch = buffer.alloca<workgroup> align(256) %bytes : buffer
+  %dest = buffer.view %scratch[%buffer_base] : buffer -> view<64x64xf32>
+  %copy = kernel.async.tensor.load.to.lds %source to %dest using %descriptor {cache_scope = cu, cache_temporal = regular} : view<64x64xf32> to view<64x64xf32>, kernel.tensor.lds.descriptor -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @tensor_load_to_lds_d2() asm {
+  %15 = storage {byte_alignment = 256, byte_length = 16384} : low.storage<workgroup>
+  %16 = v_mov_b32 0
+  %32 = v_readfirstlane_b32 %16
+  %34 = v_readfirstlane_b32 %16
+  %36 = v_readfirstlane_b32 %16
+  %38 = v_readfirstlane_b32 %16
+  %39 = concat(%32, %34, %36, %38) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %41 = v_readfirstlane_b32 %16
+  %43 = v_readfirstlane_b32 %16
+  %45 = v_readfirstlane_b32 %16
+  %47 = v_readfirstlane_b32 %16
+  %49 = v_readfirstlane_b32 %16
+  %51 = v_readfirstlane_b32 %16
+  %53 = v_readfirstlane_b32 %16
+  %55 = v_readfirstlane_b32 %16
+  %56 = concat(%41, %43, %45, %47, %49, %51, %53, %55) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x8>
+  tensor_load_to_lds_d2 %39, %56
+  s_wait_tensorcnt {tensorcnt = 0}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+kernel.def target(@target) @tensor_load_two_stage_wait_depth() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %bytes = index.constant 16384 : offset
+  %d0 = vector.constant 0 : vector<4xi32>
+  %d1 = vector.constant 0 : vector<8xi32>
+  %descriptor = kernel.tensor.lds.descriptor dgroups(%d0, %d1) : vector<4xi32>, vector<8xi32> -> kernel.tensor.lds.descriptor
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %global[%buffer_base] : buffer -> view<64x64xf32>
+  %scratch0 = buffer.alloca<workgroup> align(256) %bytes : buffer
+  %dest0 = buffer.view %scratch0[%buffer_base] : buffer -> view<64x64xf32>
+  %copy0 = kernel.async.tensor.load.to.lds %source to %dest0 using %descriptor {cache_scope = cu, cache_temporal = regular} : view<64x64xf32> to view<64x64xf32>, kernel.tensor.lds.descriptor -> kernel.async.token
+  %group0 = kernel.async.group %copy0 : kernel.async.token -> kernel.async.group
+  %scratch1 = buffer.alloca<workgroup> align(256) %bytes : buffer
+  %dest1 = buffer.view %scratch1[%buffer_base] : buffer -> view<64x64xf32>
+  %copy1 = kernel.async.tensor.load.to.lds %source to %dest1 using %descriptor {cache_scope = cu, cache_temporal = regular} : view<64x64xf32> to view<64x64xf32>, kernel.tensor.lds.descriptor -> kernel.async.token
+  %group1 = kernel.async.group %copy1 : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group0 {newer_groups = 1} : kernel.async.group
+  kernel.async.wait %group1 {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @tensor_load_two_stage_wait_depth() asm {
+  %19 = storage {byte_alignment = 256, byte_length = 16384} : low.storage<workgroup>
+  %20 = storage {byte_alignment = 256, byte_length = 16384} : low.storage<workgroup>
+  %21 = v_mov_b32 0
+  %37 = v_readfirstlane_b32 %21
+  %39 = v_readfirstlane_b32 %21
+  %41 = v_readfirstlane_b32 %21
+  %43 = v_readfirstlane_b32 %21
+  %44 = concat(%37, %39, %41, %43) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %46 = v_readfirstlane_b32 %21
+  %48 = v_readfirstlane_b32 %21
+  %50 = v_readfirstlane_b32 %21
+  %52 = v_readfirstlane_b32 %21
+  %54 = v_readfirstlane_b32 %21
+  %56 = v_readfirstlane_b32 %21
+  %58 = v_readfirstlane_b32 %21
+  %60 = v_readfirstlane_b32 %21
+  %61 = concat(%46, %48, %50, %52, %54, %56, %58, %60) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x8>
+  tensor_load_to_lds_d2 %44, %61
+  %64 = v_readfirstlane_b32 %21
+  %66 = v_readfirstlane_b32 %21
+  %68 = v_readfirstlane_b32 %21
+  %70 = v_readfirstlane_b32 %21
+  %71 = concat(%64, %66, %68, %70) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %73 = v_readfirstlane_b32 %21
+  %75 = v_readfirstlane_b32 %21
+  %77 = v_readfirstlane_b32 %21
+  %79 = v_readfirstlane_b32 %21
+  %81 = v_readfirstlane_b32 %21
+  %83 = v_readfirstlane_b32 %21
+  %85 = v_readfirstlane_b32 %21
+  %87 = v_readfirstlane_b32 %21
+  %88 = concat(%73, %75, %77, %79, %81, %83, %85, %87) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x8>
+  tensor_load_to_lds_d2 %71, %88
+  s_wait_tensorcnt {tensorcnt = 1}
+  s_wait_tensorcnt {tensorcnt = 0}
+  return
+}

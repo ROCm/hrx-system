@@ -36,8 +36,12 @@ iree_runtime_cc_library(
 
 iree_runtime_hal_cts_test_suite(
     backends = ":backends",
+    resource_group = "iree-hal-drivers-amdxdna-tests",
     tags = [
         "driver=amdxdna",
+        "iree-build-requirement=runtime.hal.amdxdna",
+        "iree-run-requirement=runtime.resource.amd_npu",
+        "runtime-resource=amd-npu",
     ],
     target_compatible_with = _AMDXDNA_COMPATIBLE_WITH,
 )

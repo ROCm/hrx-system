@@ -51,6 +51,7 @@ loom_cc_library(
     iree::base
     loom::analysis::symbol_facts
     loom::ir
+    loom::target::condition
     loom::target::types
   PUBLIC
 )
@@ -68,6 +69,23 @@ loom_cc_library(
     loom::error::emitter
     loom::error::error_defs
     loom::ir
+    loom::target::condition
+    loom::target::projection
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    callable_effects
+  HDRS
+    "callable_effects.h"
+  SRCS
+    "callable_effects.c"
+  DEPS
+    ::op_defs
+    iree::base
+    loom::ir
+    loom::rewrite::rewriter
   PUBLIC
 )
 
@@ -80,9 +98,9 @@ loom_cc_library(
     "storage_facts.c"
   DEPS
     iree::base
+    iree::base::internal
     loom::ir
     loom::util::fact_table
-    loom::util::math
   PUBLIC
 )
 
@@ -98,13 +116,17 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::analysis::symbol_facts
+    loom::codegen::low::text_asm
     loom::format::text::parser
     loom::ir
     loom::ops::func
     loom::ops::index
     loom::ops::kernel
     loom::ops::low
+    loom::ops::target
+    loom::ops::template
     loom::ops::test
+    loom::target::low_descriptor_registry_core_test
     loom::target::types
     loom::testing::module_ptr
 )
@@ -160,23 +182,34 @@ loom_cc_library(
   PUBLIC
 )
 
-loom_generated_cc_library(
+loom_generated_file_family(
   NAME
-    op_registry
+    registry_tables_gen
   GENERATOR
     loom::py::loom::gen::ops::c_tables_generator
-  SRCS
-    "op_registry.c"
-  GENERATED_SRC_FLAGS
-    "--op-registry-tables"
-    "--op-registry-tables-header"
-  GENERATED_SRCS
+  OUTPUTS
     "op_registry_tables.c"
     "op_registry_tables.h"
-  HDRS
-    "op_registry.h"
+    "type_registry_tables.c"
+    "type_registry_tables.h"
+  OUTPUT_FLAGS
+    "--op-registry-tables"
+    "--op-registry-tables-header"
+    "--type-registry-tables"
+    "--type-registry-tables-header"
   ARGS
     "--registry"
+)
+
+loom_cc_library(
+  NAME
+    op_registry
+  HDRS
+    "op_registry.h"
+    "op_registry_tables.h"
+  SRCS
+    "op_registry.c"
+    "op_registry_tables.c"
   DEPS
     ::op_defs
     iree::base
@@ -184,13 +217,13 @@ loom_generated_cc_library(
     loom::ops::buffer
     loom::ops::cfg
     loom::ops::check
+    loom::ops::command
     loom::ops::config
     loom::ops::encoding
     loom::ops::func
     loom::ops::global
     loom::ops::index
     loom::ops::kernel
-    loom::ops::llvmir
     loom::ops::low
     loom::ops::pass
     loom::ops::pool
@@ -198,8 +231,10 @@ loom_generated_cc_library(
     loom::ops::scalar
     loom::ops::scf
     loom::ops::target
+    loom::ops::template
     loom::ops::vector
     loom::ops::view
+  PUBLIC
 )
 
 loom_cc_library(
@@ -220,30 +255,24 @@ loom_cc_library(
   PUBLIC
 )
 
-loom_generated_cc_library(
+loom_cc_library(
   NAME
     type_registry
-  GENERATOR
-    loom::py::loom::gen::ops::c_tables_generator
-  SRCS
-    "type_registry.c"
-  GENERATED_SRC_FLAGS
-    "--type-registry-tables"
-    "--type-registry-tables-header"
-  GENERATED_SRCS
-    "type_registry_tables.c"
-    "type_registry_tables.h"
   HDRS
     "type_registry.h"
-  ARGS
-    "--registry"
+    "type_registry_tables.h"
+  SRCS
+    "type_registry.c"
+    "type_registry_tables.c"
   DEPS
     ::op_defs
     ::storage_facts
     iree::base
     loom::ir
+    loom::ops::buffer
     loom::ops::vector
     loom::util::fact_table
+  PUBLIC
 )
 
 loom_cc_test(
@@ -257,8 +286,6 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::ir
-    loom::ops::scalar
-    loom::ops::scf
     loom::ops::test
 )
 
@@ -277,6 +304,8 @@ loom_cc_test(
     loom::ops::func
     loom::ops::index
     loom::ops::kernel
+    loom::ops::template
+    loom::ops::test
     loom::ops::vector
     loom::util::fact_table
 )

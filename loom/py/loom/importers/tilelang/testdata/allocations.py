@@ -58,15 +58,15 @@ def shared_block_alloc(tir: Any) -> TileLangImportInput:
         buffer_map={dst: dst_buffer},
     )
     return TileLangImportInput(
-        source=prim_func, target="hip -mcpu=gfx1100", name="shared_block_alloc"
+        source=prim_func, target="hip -mcpu=gfx11-generic", name="shared_block_alloc"
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("shared_block_alloc") @shared_block_alloc() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("shared_block_alloc") @shared_block_alloc() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%dst: buffer) {
@@ -75,7 +75,7 @@ kernel.def target(@hip_mcpu_gfx1100) export("shared_block_alloc") @shared_block_
   %layout = encoding.layout.dense : encoding<layout>
   %dst_view = buffer.view %dst_noalias[%c0_bytes] : buffer -> view<4xf32, %layout>
   %scratch_bytes = index.constant 16 : offset
-  %scratch_buffer = buffer.alloca %scratch_bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %scratch_buffer = buffer.alloca<workgroup> align(4) %scratch_bytes : buffer
   %scratch = buffer.view %scratch_buffer[%c0_bytes] : buffer -> view<4xf32, %layout>
   %const = scalar.constant 1.0 : f32
   %c0 = index.constant 0 : index
@@ -122,15 +122,15 @@ def private_block_alloc(tir: Any) -> TileLangImportInput:
         buffer_map={dst: dst_buffer},
     )
     return TileLangImportInput(
-        source=prim_func, target="hip -mcpu=gfx1100", name="private_block_alloc"
+        source=prim_func, target="hip -mcpu=gfx11-generic", name="private_block_alloc"
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("private_block_alloc") @private_block_alloc() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("private_block_alloc") @private_block_alloc() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%dst: buffer) {
@@ -139,7 +139,7 @@ kernel.def target(@hip_mcpu_gfx1100) export("private_block_alloc") @private_bloc
   %layout = encoding.layout.dense : encoding<layout>
   %dst_view = buffer.view %dst_noalias[%c0_bytes] : buffer -> view<4xi32, %layout>
   %scratch_bytes = index.constant 16 : offset
-  %scratch_buffer = buffer.alloca %scratch_bytes {base_alignment = 4, memory_space = private} : buffer
+  %scratch_buffer = buffer.alloca<private> align(4) %scratch_bytes : buffer
   %scratch = buffer.view %scratch_buffer[%c0_bytes] : buffer -> view<4xi32, %layout>
   %const = scalar.constant 7 : i32
   %c0 = index.constant 0 : index

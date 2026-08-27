@@ -18,10 +18,13 @@
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/encoding/families.h"
+#include "loom/ops/encoding/ops.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
+#include "loom/ops/test/registry.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/pass/value_facts.h"
 #include "loom/rewrite/rewriter.h"
@@ -39,11 +42,20 @@ class VectorToScalarTest : public ::testing::Test {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(),
                                      &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
+    RegisterDialect(LOOM_DIALECT_ENCODING, loom_encoding_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_INDEX, loom_index_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_KERNEL, loom_kernel_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_SCALAR, loom_scalar_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_SCF, loom_scf_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_VECTOR, loom_vector_dialect_vtables);
+    iree_host_size_t parameterized_attr_count = 0;
+    const loom_parameterized_attr_descriptor_t* parameterized_attrs =
+        loom_encoding_dialect_parameterized_attrs(&parameterized_attr_count);
+    IREE_ASSERT_OK(loom_context_register_parameterized_attrs(
+        &context_, LOOM_DIALECT_ENCODING, parameterized_attrs,
+        parameterized_attr_count));
+    IREE_ASSERT_OK(loom_test_dialect_register(&context_));
+    IREE_ASSERT_OK(loom_context_register_builtin_encoding_vtables(&context_));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
   }
 
@@ -81,12 +93,70 @@ class VectorToScalarTest : public ::testing::Test {
   std::vector<loom_module_t*> modules_;
 };
 
+static const loom_matrix_fragment_coordinate_projection_term_t
+    kTinyDistributedMmaLhsTerms[] = {
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW, 1, 0, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_REDUCTION, 1, 0, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT, 1, 0, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_REDUCTION,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE, 1, 0, 1},
+};
+
+static const loom_matrix_fragment_coordinate_projection_plan_t
+    kTinyDistributedMmaLhsPlan = {
+        /*.terms=*/kTinyDistributedMmaLhsTerms,
+        /*.forward_term_count=*/2,
+        /*.inverse_term_count=*/2,
+};
+
+static const loom_matrix_fragment_coordinate_projection_term_t
+    kTinyDistributedMmaRhsTerms[] = {
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN, 1, 0, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_REDUCTION, 1, 0, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT, 1, 0, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_REDUCTION,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE, 1, 0, 1},
+};
+
+static const loom_matrix_fragment_coordinate_projection_plan_t
+    kTinyDistributedMmaRhsPlan = {
+        /*.terms=*/kTinyDistributedMmaRhsTerms,
+        /*.forward_term_count=*/2,
+        /*.inverse_term_count=*/2,
+};
+
+static const loom_matrix_fragment_coordinate_projection_term_t
+    kTinyDistributedMmaResultTerms[] = {
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN, 1, 0, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW, 1, 0, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE, 1, 0, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT, 1, 0, 1},
+};
+
+static const loom_matrix_fragment_coordinate_projection_plan_t
+    kTinyDistributedMmaResultPlan = {
+        /*.terms=*/kTinyDistributedMmaResultTerms,
+        /*.forward_term_count=*/2,
+        /*.inverse_term_count=*/2,
+};
+
 static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
     /*.kind=*/1,
     /*.name=*/IREE_SVL("test.tiny.distributed.mma"),
     /*.wave_size=*/2,
     /*.tile_shape=*/
     {
+        /*.block_count=*/1,
         /*.result_row_count=*/2,
         /*.result_column_count=*/2,
         /*.reduction_count=*/2,
@@ -94,43 +164,68 @@ static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
     /*.lhs=*/
     {
         /*.role=*/LOOM_CONTRACT_OPERAND_ROLE_LHS,
-        /*.map_kind=*/LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_PACKED_REDUCTION,
-        /*.register_count=*/2,
-        /*.elements_per_register=*/1,
+        /*.register_count=*/1,
         /*.element_bit_count=*/16,
+        /*.payload_element_count=*/2,
+        /*.coordinate_element_count=*/2,
+        /*.coordinate_element_offset=*/0,
+        /*.coordinate_element_stride=*/1,
+        /*.flags=*/0,
         /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
             LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
+        /*.packed_element_coordinate_flag=*/
+        LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
+        /*.reduction_group=*/{},
+        /*.coordinate_projection_plan=*/&kTinyDistributedMmaLhsPlan,
     },
     /*.rhs=*/
     {
         /*.role=*/LOOM_CONTRACT_OPERAND_ROLE_RHS,
-        /*.map_kind=*/
-        LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_PACKED_REDUCTION,
-        /*.register_count=*/2,
-        /*.elements_per_register=*/1,
+        /*.register_count=*/1,
         /*.element_bit_count=*/16,
+        /*.payload_element_count=*/2,
+        /*.coordinate_element_count=*/2,
+        /*.coordinate_element_offset=*/0,
+        /*.coordinate_element_stride=*/1,
+        /*.flags=*/0,
         /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN |
             LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
+        /*.packed_element_coordinate_flag=*/
+        LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
+        /*.reduction_group=*/{},
+        /*.coordinate_projection_plan=*/&kTinyDistributedMmaRhsPlan,
     },
     /*.accumulator=*/
     {
         /*.role=*/LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
-        /*.map_kind=*/LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN,
         /*.register_count=*/2,
-        /*.elements_per_register=*/1,
         /*.element_bit_count=*/32,
+        /*.payload_element_count=*/2,
+        /*.coordinate_element_count=*/2,
+        /*.coordinate_element_offset=*/0,
+        /*.coordinate_element_stride=*/1,
+        /*.flags=*/0,
         /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
             LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN,
+        /*.packed_element_coordinate_flag=*/0,
+        /*.reduction_group=*/{},
+        /*.coordinate_projection_plan=*/&kTinyDistributedMmaResultPlan,
     },
     /*.result=*/
     {
         /*.role=*/LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-        /*.map_kind=*/LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN,
         /*.register_count=*/2,
-        /*.elements_per_register=*/1,
         /*.element_bit_count=*/32,
+        /*.payload_element_count=*/2,
+        /*.coordinate_element_count=*/2,
+        /*.coordinate_element_offset=*/0,
+        /*.coordinate_element_stride=*/1,
+        /*.flags=*/0,
         /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
             LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN,
+        /*.packed_element_coordinate_flag=*/0,
+        /*.reduction_group=*/{},
+        /*.coordinate_projection_plan=*/&kTinyDistributedMmaResultPlan,
     },
 };
 
@@ -262,6 +357,53 @@ TEST_F(VectorToScalarTest, TargetFragmentLayoutEnablesDistributedMmaFallback) {
   ExpectModuleVerifies(module);
 
   loom_rewriter_deinitialize(&rewriter);
+  loom_pass_value_fact_owner_deinitialize(&value_fact_owner);
+  iree_arena_deinitialize(&pass_arena);
+}
+
+TEST_F(VectorToScalarTest, HadamardUsesButterflyComplexity) {
+  loom_module_t* module =
+      Parse(IREE_SV("kernel.def @hadamard() {\n"
+                    "  %one = index.constant 1 : index\n"
+                    "  kernel.launch.config workgroups(%one, %one, %one) "
+                    "workgroup_size(%one, %one, %one) : index\n"
+                    "} launch(%v: vector<128xf32>) {\n"
+                    "  %xf = encoding.define #transform.hadamard : "
+                    "encoding<transform>\n"
+                    "  %r = vector.transform %v, %xf : vector<128xf32>, "
+                    "encoding<transform> -> vector<128xf32>\n"
+                    "  test.use %r : vector<128xf32>\n"
+                    "  kernel.return\n"
+                    "}\n"));
+  ExpectModuleVerifies(module);
+
+  loom_op_t* function_op = loom_block_op(loom_module_block(module), 0);
+  ASSERT_NE(function_op, nullptr);
+  ASSERT_TRUE(loom_kernel_def_isa(function_op));
+  loom_func_like_t function = loom_func_like_cast(module, function_op);
+
+  iree_arena_allocator_t pass_arena;
+  iree_arena_initialize(&block_pool_, &pass_arena);
+  loom_pass_value_fact_owner_t value_fact_owner = {};
+  loom_pass_value_fact_owner_initialize(&block_pool_, &value_fact_owner);
+  const loom_pass_info_t* pass_info = loom_vector_to_scalar_pass_info();
+  std::vector<uint8_t> statistic_storage(
+      pass_info->statistic_layout->storage_size, 0);
+  loom_pass_t pass = {};
+  pass.info = pass_info;
+  pass.arena = &pass_arena;
+  pass.statistic_storage = statistic_storage.data();
+  pass.value_facts = &value_fact_owner;
+
+  IREE_ASSERT_OK(loom_vector_to_scalar_run(&pass, module, function));
+  EXPECT_EQ(pass.error_diagnostic_count, 0u);
+  EXPECT_EQ(CountOps(module->body, LOOM_OP_VECTOR_TRANSFORM), 0u);
+  EXPECT_EQ(CountOps(module->body, LOOM_OP_VECTOR_EXTRACT), 128u);
+  EXPECT_EQ(CountOps(module->body, LOOM_OP_SCALAR_ADDF), 448u);
+  EXPECT_EQ(CountOps(module->body, LOOM_OP_SCALAR_SUBF), 448u);
+  EXPECT_EQ(CountOps(module->body, LOOM_OP_VECTOR_FROM_ELEMENTS), 1u);
+  ExpectModuleVerifies(module);
+
   loom_pass_value_fact_owner_deinitialize(&value_fact_owner);
   iree_arena_deinitialize(&pass_arena);
 }

@@ -1,0 +1,12 @@
+// RUN: format bytecode
+
+command.program.decl @decode(%token_count: index) launch(%parameters: buffer, %transient: buffer)
+
+command.program.def @driver(%token_count: index) launch(%parameters: buffer, %transient: buffer) {
+  command.serial {
+    command.concurrent {
+      command.program.launch @decode[%token_count](%parameters, %transient) : [index](buffer, buffer)
+    }
+  }
+  command.return
+}

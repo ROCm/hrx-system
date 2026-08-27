@@ -1,26 +1,26 @@
 // RUN: emit source-low output=low
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @adjacent_f16_scalar_loads_pack() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %one = index.constant 1 : index
-  %input_view = buffer.view %input[%zero] : buffer -> view<64xf16, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xf16, #dense>
-  %next = index.add %lane, %one : index
-  %a = view.load %input_view[%lane] : view<64xf16, #dense> -> f16
-  %b = view.load %input_view[%next] : view<64xf16, #dense> -> f16
-  view.store %a, %output_view[%lane] : f16, view<64xf16, #dense>
-  view.store %b, %output_view[%next] : f16, view<64xf16, #dense>
+  %buffer_base = index.constant 0 : offset
+  %next_element_offset = index.constant 1 : index
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xf16>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf16>
+  %next = index.add %lane, %next_element_offset : index
+  %a = view.load %input_view[%lane] : view<64xf16> -> f16
+  %b = view.load %input_view[%next] : view<64xf16> -> f16
+  view.store %a, %output_view[%lane] : f16, view<64xf16>
+  view.store %b, %output_view[%next] : f16, view<64xf16>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @adjacent_f16_scalar_loads_pack() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @adjacent_f16_scalar_loads_pack() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>

@@ -93,6 +93,7 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
   ASSERT_NE(queues, nullptr);
   ASSERT_EQ(queues->family_count, 1);
   EXPECT_EQ(queues->families[0].queue_count, 1);
+  EXPECT_EQ(queues->families[0].queue_affinity, 1u);
   EXPECT_EQ(queues->families[0].timestamp_frequency_hz, 1000000000ull);
   ASSERT_EQ(queues->external_timepoint_handle_count, 1);
   const iree_hal_external_timepoint_handle_spec_t* hip_event_timepoint =
@@ -130,17 +131,30 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
   const iree_hal_device_executable_spec_t* executables =
       iree_hal_device_spec_executables(device_spec);
   ASSERT_NE(executables, nullptr);
-  ASSERT_EQ(executables->format_count, 2);
-  EXPECT_TRUE(iree_string_view_equal(executables->formats[0].format,
-                                     IREE_SV("rocm-hsaco-fb")));
-  ASSERT_EQ(executables->target_count, 1);
-  EXPECT_TRUE(iree_string_view_equal(executables->targets[0].family,
-                                     IREE_SV("amdgpu")));
-  EXPECT_TRUE(iree_string_view_equal(executables->targets[0].processor,
-                                     IREE_SV("gfx1100")));
-  EXPECT_TRUE(iree_string_view_equal(executables->targets[0].loader_target,
-                                     IREE_SV("gfx1100")));
-  EXPECT_EQ(executables->targets[0].physical_device_affinity, 1ull);
+  ASSERT_EQ(executables->target_count, 2);
+
+  iree_hal_executable_target_selection_t selection = {
+      /*.family=*/IREE_SV("amdgpu"),
+      /*.target_key=*/IREE_SV("gfx1100"),
+      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
+      /*.physical_device_affinity=*/0,
+  };
+  iree_hal_executable_target_selection_result_t exact_result =
+      iree_hal_device_spec_select_executable_target(device_spec, &selection);
+  ASSERT_EQ(exact_result.outcome,
+            IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED);
+  ASSERT_NE(exact_result.target, nullptr);
+  EXPECT_EQ(exact_result.target->physical_device_affinity, 1ull);
+
+  selection.target_key = IREE_SV("gfx11-generic");
+  selection.kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC;
+  const iree_hal_executable_target_selection_result_t generic_result =
+      iree_hal_device_spec_select_executable_target(device_spec, &selection);
+  ASSERT_EQ(generic_result.outcome,
+            IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED);
+  ASSERT_NE(generic_result.target, nullptr);
+  EXPECT_LT(generic_result.target->priority, exact_result.target->priority);
+  EXPECT_EQ(generic_result.target->physical_device_affinity, 1ull);
 
   iree_hal_device_spec_release(device_spec);
   iree_hal_allocator_release(allocator);

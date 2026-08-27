@@ -40,11 +40,8 @@ typedef struct iree_hal_fixed_block_pool_t {
   // Stable named-memory stream for logical reservations from this pool.
   iree_hal_memory_trace_t trace;
 
-  // Memory type properties provided by |slab_provider|.
-  iree_hal_memory_type_t memory_type;
-
-  // Buffer usages supported by |slab_provider|.
-  iree_hal_buffer_usage_t supported_usage;
+  // Immutable memory properties provided by |slab_provider|.
+  iree_hal_slab_provider_properties_t slab_properties;
 
   // User-visible byte capacity of each fixed block.
   iree_device_size_t user_block_size;
@@ -371,8 +368,8 @@ IREE_API_EXPORT iree_status_t iree_hal_fixed_block_pool_create(
   pool->slab_provider = slab_provider;
   iree_async_notification_retain(notification);
   pool->notification = notification;
-  iree_hal_slab_provider_query_properties(slab_provider, &pool->memory_type,
-                                          &pool->supported_usage);
+  iree_hal_slab_provider_query_properties(slab_provider,
+                                          &pool->slab_properties);
 
   iree_status_t status = iree_hal_memory_trace_initialize_pool(
       options.trace_name, IREE_HAL_FIXED_BLOCK_POOL_TRACE_ID, host_allocator,
@@ -644,8 +641,9 @@ static void iree_hal_fixed_block_pool_query_capabilities(
     iree_hal_pool_capabilities_t* out_capabilities) {
   const iree_hal_fixed_block_pool_t* pool =
       (const iree_hal_fixed_block_pool_t*)base_pool;
-  out_capabilities->memory_type = pool->memory_type;
-  out_capabilities->supported_usage = pool->supported_usage;
+  out_capabilities->memory_type = pool->slab_properties.memory_type;
+  out_capabilities->supported_usage = pool->slab_properties.supported_usage;
+  out_capabilities->atomic_operations = pool->slab_properties.atomic_operations;
   out_capabilities->min_allocation_size = 1;
   out_capabilities->max_allocation_size = pool->user_block_size;
 }

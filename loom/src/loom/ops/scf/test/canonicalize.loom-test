@@ -29,9 +29,9 @@ func.def @if_false_keeps_selected_store(%buffer: buffer, %offset: offset, %value
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%offset] : buffer -> view<1xf32, %layout>
   %cond = scalar.constant false : i1
-  %zero = scalar.constant 0.0 : f32
+  %c0 = scalar.constant 0.0 : f32
   scf.if %cond {
-    view.store %zero, %view[0] : f32, view<1xf32, %layout>
+    view.store %c0, %view[0] : f32, view<1xf32, %layout>
     scf.yield
   } else {
     view.store %value, %view[0] : f32, view<1xf32, %layout>
@@ -57,19 +57,19 @@ func.def @if_prunes_from_signed_index_range(%x: index, %y: index) -> (index) {
   %hi = index.assume %y [range(%y, 8, 16)] : index
   %cond = index.cmp slt, %lo, %hi : index
   %result = scf.if %cond -> (index) {
-    %one = index.constant 1 : index
-    scf.yield %one : index
+    %c1 = index.constant 1 : index
+    scf.yield %c1 : index
   } else {
-    %two = index.constant 2 : index
-    scf.yield %two : index
+    %c2 = index.constant 2 : index
+    scf.yield %c2 : index
   }
   func.return %result : index
 }
 
 // ----
 func.def @if_prunes_from_signed_index_range(%x: index, %y: index) -> (index) {
-  %one = index.constant 1 : index
-  func.return %one : index
+  %c1 = index.constant 1 : index
+  func.return %c1 : index
 }
 
 // ====
@@ -81,19 +81,19 @@ func.def @if_prunes_from_unsigned_index_range(%x: index, %y: index) -> (index) {
   %hi = index.assume %y [range(%y, 8, 16)] : index
   %cond = index.cmp ugt, %lo, %hi : index
   %result = scf.if %cond -> (index) {
-    %one = index.constant 1 : index
-    scf.yield %one : index
+    %c1 = index.constant 1 : index
+    scf.yield %c1 : index
   } else {
-    %two = index.constant 2 : index
-    scf.yield %two : index
+    %c2 = index.constant 2 : index
+    scf.yield %c2 : index
   }
   func.return %result : index
 }
 
 // ----
 func.def @if_prunes_from_unsigned_index_range(%x: index, %y: index) -> (index) {
-  %two = index.constant 2 : index
-  func.return %two : index
+  %c2 = index.constant 2 : index
+  func.return %c2 : index
 }
 
 // ====
@@ -105,11 +105,11 @@ func.def @if_preserves_inconclusive_unsigned_cmp(%x: index, %y: index) -> (index
   %positive = index.assume %y [range(%y, 8, 16)] : index
   %cond = index.cmp ult, %maybe_negative, %positive : index
   %result = scf.if %cond -> (index) {
-    %one = index.constant 1 : index
-    scf.yield %one : index
+    %c1 = index.constant 1 : index
+    scf.yield %c1 : index
   } else {
-    %two = index.constant 2 : index
-    scf.yield %two : index
+    %c2 = index.constant 2 : index
+    scf.yield %c2 : index
   }
   func.return %result : index
 }
@@ -119,10 +119,59 @@ func.def @if_preserves_inconclusive_unsigned_cmp(%x: index, %y: index) -> (index
   %maybe_negative = index.assume %x [range(%x, -4, 4)] : index
   %positive = index.assume %y [range(%y, 8, 16)] : index
   %cond = index.cmp ult, %maybe_negative, %positive : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %result = scf.select %cond, %one, %two : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %result = scf.select %cond, %c1, %c2 : index
   func.return %result : index
+}
+
+// ====
+
+// Dialect-owned condition refinements use generic branch analysis and only
+// materialize when the selected source is consumed inside the region.
+func.def @if_materializes_dialect_condition_refinement(%value: index) {
+  %condition = test.condition_refines_positive %value : index
+  scf.if %condition {
+    test.use %value : index
+  }
+  func.return
+}
+
+// ----
+func.def @if_materializes_dialect_condition_refinement(%value: index) {
+  %condition = test.condition_refines_positive %value : index
+  scf.if %condition {
+    %2 = index.assume %value [gt(%value, 0)] : index
+    test.use %2 : index
+  }
+  func.return
+}
+
+// ====
+
+// Multiple semantic conditions on one source form one edge-local refinement
+// chain. The final replacement dominates ordinary region uses.
+func.def @if_chains_dialect_condition_refinements(%value: index) {
+  %first = test.condition_refines_positive %value : index
+  %second = test.condition_refines_positive %value : index
+  %condition = scalar.andi %first, %second : i1
+  scf.if %condition {
+    test.use %value : index
+  }
+  func.return
+}
+
+// ----
+func.def @if_chains_dialect_condition_refinements(%value: index) {
+  %first = test.condition_refines_positive %value : index
+  %second = test.condition_refines_positive %value : index
+  %condition = scalar.andi %first, %second : i1
+  scf.if %condition {
+    %4 = index.assume %value [gt(%value, 0)] : index
+    %5 = index.assume %4 [gt(%4, 0)] : index
+    test.use %5 : index
+  }
+  func.return
 }
 
 // ====
@@ -227,8 +276,8 @@ func.def @if_edge_rewrites_view_type_reference(%buffer: buffer, %offset: offset,
     %loaded = view.load %view[0] : view<[%n]xf32, %layout> -> f32
     scf.yield %loaded : f32
   } else {
-    %zero = scalar.constant 0.0 : f32
-    scf.yield %zero : f32
+    %c0 = scalar.constant 0.0 : f32
+    scf.yield %c0 : f32
   }
   func.return %result : f32
 }
@@ -243,8 +292,8 @@ func.def @if_edge_rewrites_view_type_reference(%buffer: buffer, %offset: offset,
     %loaded = view.load %view[0] : view<[%11]xf32, %layout> -> f32
     scf.yield %loaded : f32
   } else {
-    %zero = scalar.constant 0.0 : f32
-    scf.yield %zero : f32
+    %c0 = scalar.constant 0.0 : f32
+    scf.yield %c0 : f32
   }
   func.return %result : f32
 }
@@ -286,8 +335,8 @@ func.def @if_edge_rewrites_precast_index_reference(%buffer: buffer, %offset: off
   %layout = encoding.layout.dense : encoding<layout>
   %row_idx = index.cast %row : i32 to index
   %n_idx = index.cast %n : i32 to index
-  %zero = scalar.constant 0 : i32
-  %nonnegative = scalar.cmpi sge, %row, %zero : i32
+  %c0 = scalar.constant 0 : i32
+  %nonnegative = scalar.cmpi sge, %row, %c0 : i32
   %below = scalar.cmpi slt, %row, %n : i32
   %guard = scalar.andi %nonnegative, %below : i1
   scf.if %guard {
@@ -306,8 +355,8 @@ func.def @if_edge_rewrites_precast_index_reference(%buffer: buffer, %offset: off
   %layout = encoding.layout.dense : encoding<layout>
   %row_idx = index.cast %row : i32 to index
   %n_idx = index.cast %n : i32 to index
-  %zero = scalar.constant 0 : i32
-  %nonnegative = scalar.cmpi sge, %row, %zero : i32
+  %c0 = scalar.constant 0 : i32
+  %nonnegative = scalar.cmpi sge, %row, %c0 : i32
   %below = scalar.cmpi slt, %row, %n : i32
   %guard = scalar.andi %nonnegative, %below : i1
   scf.if %guard {
@@ -621,6 +670,46 @@ func.def @if_factors_common_pure_tail(%cond: i1, %a: i32, %b: i32) -> (i32) {
   %10 = scf.select %cond, %a, %b : i32
   %11 = scf.select %cond, %b, %a : i32
   %result = test.addi %10, %11 : i32
+  func.return %result : i32
+}
+
+// ====
+
+// Factoring a segmented tail preserves its independent operand field spans.
+func.def @if_factors_common_segmented_tail(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  %result = scf.if %cond -> (i32) {
+    %then = test.segmented %a base %b values %a, %b expected %a : i32 -> i32
+    scf.yield %then : i32
+  } else {
+    %else = test.segmented %b base %a values %b, %a expected %b : i32 -> i32
+    scf.yield %else : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @if_factors_common_segmented_tail(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  %13 = scf.select %cond, %a, %b : i32
+  %14 = scf.select %cond, %b, %a : i32
+  %15 = scf.select %cond, %a, %b : i32
+  %16 = scf.select %cond, %b, %a : i32
+  %17 = scf.select %cond, %a, %b : i32
+  %result = test.segmented %13 base %14 values %15, %16 expected %17 : i32 -> i32
+  func.return %result : i32
+}
+
+// ====
+
+// Equal flat operand counts do not make different segmented field partitions
+// equivalent.
+func.def @if_preserves_mismatched_segmented_tail_partitions(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  %result = scf.if %cond -> (i32) {
+    %then = test.segmented %a base %b values %a, %b expected %a : i32 -> i32
+    scf.yield %then : i32
+  } else {
+    %else = test.segmented %b values %a, %b expected %a, %b : i32 -> i32
+    scf.yield %else : i32
+  }
   func.return %result : i32
 }
 
@@ -953,9 +1042,9 @@ func.def @for_single_trip_resultless_inlines_effect(%buffer: buffer, %offset: of
   %lo = index.constant 3 : index
   %hi = index.constant 4 : index
   %step = index.constant 1 : index
-  %zero = index.constant 0 : index
+  %c0 = index.constant 0 : index
   scf.for %iv = [%lo to %hi step %step] {
-    %addr = index.add %iv, %zero : index
+    %addr = index.add %iv, %c0 : index
     view.store %value, %view[%addr] : f32, view<16xf32, %layout>
     scf.yield
   }
@@ -1402,8 +1491,8 @@ func.def @switch_with_body_preserved(%variant: index, %a: index, %b: index, %fal
 func.def @switch_case_edge_relation_folds_inside_region(%variant: index) -> (i1) {
   %result = scf.switch %variant -> (i1) {
     case 0 {
-      %zero = index.constant 0 : index
-      %known = index.cmp eq, %variant, %zero : index
+      %c0 = index.constant 0 : index
+      %known = index.cmp eq, %variant, %c0 : index
       scf.yield %known : i1
     }
     default {
@@ -1440,8 +1529,8 @@ func.def @switch_default_edge_relations_fold_inside_region(%variant: index) -> (
       scf.yield %false : i1
     }
     default {
-      %zero = index.constant 0 : index
-      %known = index.cmp ne, %variant, %zero : index
+      %c0 = index.constant 0 : index
+      %known = index.cmp ne, %variant, %c0 : index
       scf.yield %known : i1
     }
   }

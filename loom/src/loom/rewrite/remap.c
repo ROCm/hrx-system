@@ -137,7 +137,31 @@ iree_status_t loom_ir_remap_initialize(const loom_module_t* source_module,
       .allow_unmapped_values = options ? options->allow_unmapped_values : false,
       .remap_symbol = options ? options->remap_symbol
                               : loom_ir_remap_symbol_callback_empty(),
+      .remap_same_module_symbols =
+          options ? options->remap_same_module_symbols : false,
   };
+
+  const loom_ir_remap_value_map_kind_t value_map_kind =
+      options ? options->value_map_kind : LOOM_IR_REMAP_VALUE_MAP_SPARSE;
+  switch (value_map_kind) {
+    case LOOM_IR_REMAP_VALUE_MAP_SPARSE:
+      break;
+    case LOOM_IR_REMAP_VALUE_MAP_SOURCE_INDEXED:
+      if (remap.source_value_snapshot_count > 0) {
+        IREE_RETURN_IF_ERROR(
+            iree_arena_allocate_array(arena, remap.source_value_snapshot_count,
+                                      sizeof(*remap.target_values_by_source),
+                                      (void**)&remap.target_values_by_source));
+        for (iree_host_size_t i = 0; i < remap.source_value_snapshot_count;
+             ++i) {
+          remap.target_values_by_source[i] = LOOM_VALUE_ID_INVALID;
+        }
+      }
+      break;
+    default:
+      IREE_ASSERT_UNREACHABLE("unknown remap value map kind");
+      IREE_BUILTIN_UNREACHABLE();
+  }
 
   *out_remap = remap;
   return iree_ok_status();
@@ -164,6 +188,15 @@ iree_status_t loom_ir_remap_map_value(loom_ir_remap_t* remap,
         IREE_STATUS_INVALID_ARGUMENT,
         "target value %%%u out of range (target module has %" PRIhsz " values)",
         (unsigned)target_value, remap->target_module->values.count);
+  }
+  if (remap->target_values_by_source != NULL) {
+    loom_value_id_t* mapped_value =
+        &remap->target_values_by_source[source_value];
+    if (*mapped_value == LOOM_VALUE_ID_INVALID) {
+      ++remap->mapped_value_count;
+    }
+    *mapped_value = target_value;
+    return iree_ok_status();
   }
   loom_ir_remap_value_entry_t* entry = NULL;
   if (remap->value_map_entry_capacity > 0) {
@@ -212,6 +245,17 @@ bool loom_ir_remap_try_lookup_value(const loom_ir_remap_t* remap,
   }
   if (!remap || source_value >= remap->source_value_snapshot_count) {
     return false;
+  }
+  if (remap->target_values_by_source != NULL) {
+    const loom_value_id_t target_value =
+        remap->target_values_by_source[source_value];
+    if (target_value == LOOM_VALUE_ID_INVALID) {
+      return false;
+    }
+    if (out_target_value) {
+      *out_target_value = target_value;
+    }
+    return true;
   }
   const loom_ir_remap_value_entry_t* entry =
       loom_ir_remap_find_const_value_map_slot(remap, source_value);
@@ -542,9 +586,9 @@ iree_status_t loom_ir_remap_location_id(
                                   out_target_location_id);
 }
 
-static iree_status_t loom_ir_remap_symbol_ref(
-    loom_ir_remap_t* remap, loom_symbol_ref_t source_ref,
-    loom_symbol_ref_t* out_target_ref) {
+iree_status_t loom_ir_remap_symbol_ref(loom_ir_remap_t* remap,
+                                       loom_symbol_ref_t source_ref,
+                                       loom_symbol_ref_t* out_target_ref) {
   *out_target_ref = loom_symbol_ref_null();
   if (!loom_symbol_ref_is_valid(source_ref)) {
     *out_target_ref = source_ref;
@@ -557,14 +601,15 @@ static iree_status_t loom_ir_remap_symbol_ref(
         "source symbol ref {module=%u, symbol=%u} is out of range",
         (unsigned)source_ref.module_id, (unsigned)source_ref.symbol_id);
   }
-  if (remap->source_module == remap->target_module) {
+  if (remap->source_module == remap->target_module &&
+      !remap->remap_same_module_symbols) {
     *out_target_ref = source_ref;
     return iree_ok_status();
   }
   if (!remap->remap_symbol.fn) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
-        "cross-module symbol reference remapping requires a symbol policy");
+        "symbol reference remapping requires a symbol policy");
   }
   loom_symbol_ref_t target_ref = loom_symbol_ref_null();
   IREE_RETURN_IF_ERROR(remap->remap_symbol.fn(
@@ -621,6 +666,11 @@ static iree_status_t loom_ir_remap_type_id(loom_ir_remap_t* remap,
                                     out_target_type_id);
 }
 
+static iree_status_t loom_ir_remap_attribute_impl(
+    loom_ir_remap_t* remap, loom_attribute_t source_attr,
+    iree_host_size_t aggregate_depth, iree_arena_allocator_t* payload_arena,
+    loom_attribute_t* out_target_attr);
+
 iree_status_t loom_ir_remap_type(loom_ir_remap_t* remap,
                                  loom_type_t source_type,
                                  loom_type_t* out_target_type) {
@@ -670,6 +720,45 @@ iree_status_t loom_ir_remap_type(loom_ir_remap_t* remap,
             : loom_type_dialect(target_name_id, param_count, target_params);
     return loom_module_intern_type(remap->target_module, target_type,
                                    out_target_type);
+  }
+
+  if (kind == LOOM_TYPE_PARAMETERIZED) {
+    const loom_parameterized_type_descriptor_t* descriptor =
+        loom_type_parameterized_descriptor(source_type);
+    uint8_t parameter_count =
+        loom_type_parameterized_parameter_count(source_type);
+    const loom_attribute_t* source_parameters =
+        loom_type_parameterized_parameters(source_type);
+    loom_attribute_t* target_parameters = NULL;
+    if (parameter_count > 0) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          remap->arena, parameter_count, sizeof(*target_parameters),
+          (void**)&target_parameters));
+      for (uint8_t i = 0; i < parameter_count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_ir_remap_attribute_impl(
+            remap, source_parameters[i], /*aggregate_depth=*/1, remap->arena,
+            &target_parameters[i]));
+      }
+    }
+    return loom_module_make_parameterized_type(
+        remap->target_module, descriptor, target_parameters, parameter_count,
+        out_target_type);
+  }
+
+  if (kind == LOOM_TYPE_REGISTER) {
+    const loom_type_t* source_value_type =
+        loom_type_register_value_type(source_type);
+    if (!source_value_type) {
+      *out_target_type = source_type;
+      return iree_ok_status();
+    }
+    loom_type_t target_value_type = {};
+    IREE_RETURN_IF_ERROR(
+        loom_ir_remap_type(remap, *source_value_type, &target_value_type));
+    return loom_module_intern_register_type(
+        remap->target_module, loom_type_register_payload0(source_type),
+        loom_type_register_payload1(source_type), target_value_type,
+        out_target_type);
   }
 
   loom_type_t target_type = source_type;
@@ -833,7 +922,7 @@ iree_status_t loom_ir_remap_predicate_list(
 
 static iree_status_t loom_ir_remap_attribute_impl(
     loom_ir_remap_t* remap, loom_attribute_t source_attr,
-    iree_host_size_t dict_depth, iree_arena_allocator_t* payload_arena,
+    iree_host_size_t aggregate_depth, iree_arena_allocator_t* payload_arena,
     loom_attribute_t* out_target_attr) {
   *out_target_attr = source_attr;
 
@@ -843,6 +932,7 @@ static iree_status_t loom_ir_remap_attribute_impl(
     case LOOM_ATTR_F64:
     case LOOM_ATTR_BOOL:
     case LOOM_ATTR_ENUM:
+    case LOOM_ATTR_SCOPED_ENUM:
       return iree_ok_status();
 
     case LOOM_ATTR_STRING:
@@ -853,6 +943,43 @@ static iree_status_t loom_ir_remap_attribute_impl(
     case LOOM_ATTR_SYMBOL:
       return loom_ir_remap_symbol_ref(remap, source_attr.symbol,
                                       &out_target_attr->symbol);
+
+    case LOOM_ATTR_SYMBOL_ARRAY:
+    case LOOM_ATTR_SYMBOL_SET: {
+      if (source_attr.count == 0) {
+        *out_target_attr = source_attr.kind == LOOM_ATTR_SYMBOL_SET
+                               ? loom_attr_symbol_set(NULL, 0)
+                               : loom_attr_symbol_array(NULL, 0);
+        return iree_ok_status();
+      }
+      loom_symbol_ref_t* target_refs = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          payload_arena, source_attr.count, sizeof(*target_refs),
+          (void**)&target_refs));
+      for (uint16_t i = 0; i < source_attr.count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_ir_remap_symbol_ref(
+            remap, source_attr.symbol_refs[i], &target_refs[i]));
+      }
+      if (source_attr.kind == LOOM_ATTR_SYMBOL_SET) {
+        loom_symbol_ref_t duplicate_ref = loom_module_canonicalize_symbol_set(
+            remap->target_module, target_refs, source_attr.count);
+        if (loom_symbol_ref_is_valid(duplicate_ref)) {
+          const loom_symbol_t* duplicate_symbol =
+              &remap->target_module->symbols.entries[duplicate_ref.symbol_id];
+          iree_string_view_t duplicate_name =
+              remap->target_module->strings.entries[duplicate_symbol->name_id];
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "remapped symbol set contains duplicate '@%.*s'",
+              (int)duplicate_name.size, duplicate_name.data);
+        }
+        *out_target_attr = loom_attr_symbol_set(target_refs, source_attr.count);
+      } else {
+        *out_target_attr =
+            loom_attr_symbol_array(target_refs, source_attr.count);
+      }
+      return iree_ok_status();
+    }
 
     case LOOM_ATTR_TYPE:
       return loom_ir_remap_type_id(remap, source_attr.type_id,
@@ -892,6 +1019,63 @@ static iree_status_t loom_ir_remap_attribute_impl(
       return iree_ok_status();
     }
 
+    case LOOM_ATTR_ENUM_ARRAY: {
+      if (source_attr.count == 0) {
+        out_target_attr->enum_array = NULL;
+        return iree_ok_status();
+      }
+      if (!source_attr.enum_array) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "non-empty enum array attribute has a NULL payload");
+      }
+      uint8_t* target_values = NULL;
+      IREE_RETURN_IF_ERROR(
+          iree_arena_allocate_array(payload_arena, source_attr.count,
+                                    sizeof(uint8_t), (void**)&target_values));
+      memcpy(target_values, source_attr.enum_array, source_attr.count);
+      out_target_attr->enum_array = target_values;
+      return iree_ok_status();
+    }
+
+    case LOOM_ATTR_SIGNED_ENUM_SET: {
+      if (source_attr.count == 0) {
+        out_target_attr->signed_enum_set_words = NULL;
+        return iree_ok_status();
+      }
+      if (!source_attr.signed_enum_set_words) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "non-empty signed enum-set attribute has a NULL payload");
+      }
+      uint64_t* target_words = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          payload_arena, (iree_host_size_t)source_attr.count * 2,
+          sizeof(*target_words), (void**)&target_words));
+      memcpy(target_words, source_attr.signed_enum_set_words,
+             (iree_host_size_t)source_attr.count * 2 * sizeof(*target_words));
+      out_target_attr->signed_enum_set_words = target_words;
+      return iree_ok_status();
+    }
+
+    case LOOM_ATTR_BYTES: {
+      const uint32_t byte_length = source_attr.reserved_1;
+      if (byte_length == 0) {
+        out_target_attr->bytes = NULL;
+        return iree_ok_status();
+      }
+      if (!source_attr.bytes) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "non-empty bytes attribute has a NULL payload");
+      }
+      uint8_t* target_bytes = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(payload_arena, byte_length,
+                                               (void**)&target_bytes));
+      memcpy(target_bytes, source_attr.bytes, byte_length);
+      out_target_attr->bytes = target_bytes;
+      return iree_ok_status();
+    }
+
     case LOOM_ATTR_PREDICATE_LIST: {
       loom_predicate_t* target_predicates = NULL;
       IREE_RETURN_IF_ERROR(loom_ir_remap_predicate_list_into(
@@ -902,10 +1086,11 @@ static iree_status_t loom_ir_remap_attribute_impl(
     }
 
     case LOOM_ATTR_DICT: {
-      if (dict_depth >= LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "dict attribute nesting exceeds max depth %u",
-                                (unsigned)LOOM_ATTR_DICT_MAX_NESTING_DEPTH);
+      if (aggregate_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "dict attribute nesting exceeds max depth %u",
+            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
       }
       if (source_attr.count == 0) {
         *out_target_attr = loom_make_canonical_attr_dict(NULL, 0);
@@ -926,13 +1111,71 @@ static iree_status_t loom_ir_remap_attribute_impl(
             remap, source_attr.dict_entries[i].name_id,
             /*allow_invalid=*/false, &target_entries[i].name_id));
         IREE_RETURN_IF_ERROR(loom_ir_remap_attribute_impl(
-            remap, source_attr.dict_entries[i].value, dict_depth + 1,
+            remap, source_attr.dict_entries[i].value, aggregate_depth + 1,
             remap->arena, &target_entries[i].value));
       }
       return loom_module_make_canonical_attr_dict(
           remap->target_module,
           loom_make_named_attr_slice(target_entries, source_attr.count),
           out_target_attr);
+    }
+
+    case LOOM_ATTR_PARAMETERIZED: {
+      if (aggregate_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "aggregate attribute nesting exceeds max depth %u",
+            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
+      }
+      loom_attribute_t* target_slots = NULL;
+      if (source_attr.count > 0) {
+        if (!source_attr.parameterized_slots) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "non-empty parameterized attribute has a NULL slot pointer");
+        }
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            payload_arena, source_attr.count, sizeof(*target_slots),
+            (void**)&target_slots));
+        for (uint16_t i = 0; i < source_attr.count; ++i) {
+          IREE_RETURN_IF_ERROR(loom_ir_remap_attribute_impl(
+              remap, source_attr.parameterized_slots[i], aggregate_depth + 1,
+              payload_arena, &target_slots[i]));
+        }
+      }
+      *out_target_attr = loom_make_parameterized_attr(
+          (loom_parameterized_attr_kind_t)source_attr.reserved_1, target_slots,
+          source_attr.count);
+      return iree_ok_status();
+    }
+
+    case LOOM_ATTR_PARAMETERIZED_ARRAY: {
+      if (aggregate_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "aggregate attribute nesting exceeds max depth %u",
+            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
+      }
+      loom_attribute_t* target_attributes = NULL;
+      if (source_attr.count > 0) {
+        if (!source_attr.parameterized_array) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "non-empty parameterized attribute array has a NULL element "
+              "pointer");
+        }
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            payload_arena, source_attr.count, sizeof(*target_attributes),
+            (void**)&target_attributes));
+        for (uint16_t i = 0; i < source_attr.count; ++i) {
+          IREE_RETURN_IF_ERROR(loom_ir_remap_attribute_impl(
+              remap, source_attr.parameterized_array[i], aggregate_depth + 1,
+              payload_arena, &target_attributes[i]));
+        }
+      }
+      *out_target_attr =
+          loom_attr_parameterized_array(target_attributes, source_attr.count);
+      return iree_ok_status();
     }
 
     default:
@@ -948,7 +1191,7 @@ iree_status_t loom_ir_remap_attribute(loom_ir_remap_t* remap,
   iree_arena_allocator_t* payload_arena =
       loom_ir_remap_is_initialized(remap) ? &remap->target_module->arena : NULL;
   return loom_ir_remap_attribute_impl(remap, source_attr,
-                                      /*dict_depth=*/0, payload_arena,
+                                      /*aggregate_depth=*/0, payload_arena,
                                       out_target_attr);
 }
 
@@ -1017,7 +1260,7 @@ iree_status_t loom_ir_remap_encoding_id(loom_ir_remap_t* remap,
         /*allow_invalid=*/false, &target_attrs[i].name_id);
     if (!iree_status_is_ok(status)) continue;
     status = loom_ir_remap_attribute_impl(
-        remap, source_encoding->attributes[i].value, /*dict_depth=*/0,
+        remap, source_encoding->attributes[i].value, /*aggregate_depth=*/0,
         remap->arena, &target_attrs[i].value);
   }
 

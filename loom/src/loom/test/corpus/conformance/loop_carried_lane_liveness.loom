@@ -1,0 +1,144 @@
+// A loop-carried induction value initialized from the lane id must not clobber
+// the original lane id while that value is still live after the loop.
+kernel.def @loop_carried_lane_liveness() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %row_stride = index.constant 16 : index
+  %workgroup_stride = index.constant 32 : index
+  %scratch_bytes = index.constant 1024 : offset
+  %lane = kernel.workitem.id<x> : index
+  %layout = encoding.layout.strided [1, %row_stride] : encoding<layout>
+  %input_view = buffer.view %input[%base] : buffer -> view<16x32xbf16, %layout>
+  %output_view = buffer.view %output[%base] : buffer -> view<32xbf16>
+  %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<16x32xbf16, %layout>
+
+  %element_count = index.constant 512 : index
+  scf.for %linear = [%lane to %element_count step %workgroup_stride] {
+    %mask = index.constant 15 : index
+    %shift = index.constant 4 : index
+    %column = index.andi %linear, %mask : index
+    %row = index.shrui %linear, %shift : index
+    %value = view.load %input_view[%column, %row] : view<16x32xbf16, %layout> -> bf16
+    view.store %value, %scratch_view[%column, %row] : bf16, view<16x32xbf16, %layout>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+
+  %mask = index.constant 15 : index
+  %shift = index.constant 4 : index
+  %column = index.andi %lane, %mask : index
+  %row = index.shrui %lane, %shift : index
+  %loaded = view.load %scratch_view[%column, %row] : view<16x32xbf16, %layout> -> bf16
+  view.store %loaded, %output_view[%lane] : bf16, view<32xbf16>
+  kernel.return
+}
+
+check.case public @loop_carried_lane_liveness_case {
+  %input = check.generate.fill value(1.0) : tensor<32x16xbf16>
+  %output = check.generate.fill value(0.0) : tensor<32xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<32xbf16>
+  kernel.launch @loop_carried_lane_liveness(%input, %output) : (tensor<32x16xbf16>, tensor<32xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32xbf16>
+  check.return
+}
+
+// The loop-carried value and the workitem id may be storage-related across the
+// loop entry edge, but the workitem id remains live after the loop and cannot be
+// clobbered by the final backedge value.
+kernel.def @loop_carried_lane_store_after_loop() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %limit = index.constant 64 : index
+  %step = index.constant 32 : index
+  %current_lane_value = scalar.constant 0 : i32
+  %next_lane_value = scalar.constant 2 : i32
+  %output_view = buffer.view %output[%base] : buffer -> view<96xi32>
+
+  scf.for %linear = [%lane to %limit step %step] {
+    view.store %next_lane_value, %output_view[%linear] : i32, view<96xi32>
+  }
+
+  view.store %current_lane_value, %output_view[%lane] : i32, view<96xi32>
+  kernel.return
+}
+
+kernel.def @loop_carried_lane_store_reference() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %step = index.constant 32 : index
+  %next = index.add %lane, %step : index
+  %current_lane_value = scalar.constant 0 : i32
+  %next_lane_value = scalar.constant 2 : i32
+  %output_view = buffer.view %output[%base] : buffer -> view<96xi32>
+
+  view.store %next_lane_value, %output_view[%next] : i32, view<96xi32>
+  view.store %current_lane_value, %output_view[%lane] : i32, view<96xi32>
+  kernel.return
+}
+
+check.case public @loop_carried_lane_store_after_loop_case {
+  %actual = check.generate.fill value(1) : tensor<96xi32>
+  %expected = check.generate.fill value(1) : tensor<96xi32>
+  kernel.launch @loop_carried_lane_store_after_loop(%actual) : (tensor<96xi32>)
+  kernel.launch @loop_carried_lane_store_reference(%expected) : (tensor<96xi32>)
+  check.expect.equal actual(%actual) expected(%expected) : tensor<96xi32>
+  check.return
+}
+
+// A backedge update may reuse the induction value's physical register only
+// after every address calculation in the current iteration has read it.
+kernel.def @loop_edge_exact_extent() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input0: buffer, %input1: buffer, %input2: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %element_count = index.constant 128 : index
+  %step = index.constant 32 : index
+  %sum_initial = scalar.constant 0.0 : f32
+  %input0_view = buffer.view %input0[%base] : buffer -> view<128xf32>
+  %input1_view = buffer.view %input1[%base] : buffer -> view<128xf32>
+  %input2_view = buffer.view %input2[%base] : buffer -> view<128xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<32xf32>
+
+  %sum = scf.for %index = [%lane to %element_count step %step](%acc = %sum_initial : f32) -> (f32) {
+    %value0 = view.load %input0_view[%index] : view<128xf32> -> f32
+    %value1 = view.load %input1_view[%index] : view<128xf32> -> f32
+    %value2 = view.load %input2_view[%index] : view<128xf32> -> f32
+    %sum01 = scalar.addf %value0, %value1 : f32
+    %sum012 = scalar.addf %sum01, %value2 : f32
+    %next = scalar.addf %acc, %sum012 : f32
+    scf.yield %next : f32
+  }
+  view.store %sum, %output_view[%lane] : f32, view<32xf32>
+  kernel.return
+}
+
+check.case public @loop_edge_exact_extent_case {
+  %input0 = check.generate.fill value(1.0) : tensor<128xf32>
+  %input1 = check.generate.fill value(2.0) : tensor<128xf32>
+  %input2 = check.generate.fill value(3.0) : tensor<128xf32>
+  %output = check.generate.fill value(0.0) : tensor<32xf32>
+  %expected = check.generate.fill value(24.0) : tensor<32xf32>
+  kernel.launch @loop_edge_exact_extent(%input0, %input1, %input2, %output) : (tensor<128xf32>, tensor<128xf32>, tensor<128xf32>, tensor<32xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32xf32>
+  check.return
+}
+
+check.benchmark<@loop_carried_lane_liveness_case>
+
+check.benchmark<@loop_carried_lane_store_after_loop_case>
+
+check.benchmark<@loop_edge_exact_extent_case>

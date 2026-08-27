@@ -410,22 +410,12 @@ iree_status_t iree_benchmark_loom_jsonl_sink_initialize(
 
   iree_status_t status =
       iree_benchmark_loom_create_parent_directory(path, allocator);
-  char* storage = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_benchmark_loom_dup_string_view(path, allocator, &storage);
+    status = iree_io_stdio_file_open(path, "wb", allocator, &out_sink->file);
   }
   if (iree_status_is_ok(status)) {
-    out_sink->file = fopen(storage, "wb");
-    if (out_sink->file == NULL) {
-      status = iree_make_status(IREE_STATUS_UNAVAILABLE,
-                                "failed to open JSONL output `%s`: %s", storage,
-                                strerror(errno));
-    } else {
-      out_sink->owns_file = true;
-    }
-  }
-  iree_allocator_free(allocator, storage);
-  if (!iree_status_is_ok(status)) {
+    out_sink->owns_file = true;
+  } else {
     iree_string_builder_deinitialize(&out_sink->row_builder);
     memset(out_sink, 0, sizeof(*out_sink));
   }

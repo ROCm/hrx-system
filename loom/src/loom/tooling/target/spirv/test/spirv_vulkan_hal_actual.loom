@@ -1,0 +1,223 @@
+spirv.target<vulkan1_3> @target {abi = hal_kernel}
+
+kernel.def target(@target) @double_i32_at_byte_offset() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %byte_offset: offset) {
+  %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 4)] : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<1xi32>
+  %loaded = view.load %input_view[0] : view<1xi32> -> i32
+  %doubled = scalar.addi %loaded, %loaded : i32
+  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xi32>
+  view.store %doubled, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+check.case @double_i32_at_byte_offset_case {
+  %input = check.generate.iota offset(7) step(3) : tensor<2xi32>
+  %output = check.generate.fill value(0) : tensor<2xi32>
+  %byte_offset = check.literal value(4) : offset
+  kernel.launch @double_i32_at_byte_offset(%input, %output, %byte_offset) : (tensor<2xi32>, tensor<2xi32>, offset)
+  %expected = check.generate.iota offset(0) step(20) : tensor<2xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<2xi32>
+  check.return
+}
+
+check.benchmark<@double_i32_at_byte_offset_case>
+
+kernel.def target(@target) @increment_i32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<1xi32>
+  %value = view.load %input_view[0] : view<1xi32> -> i32
+  %increment = scalar.constant 1 : i32
+  %incremented = scalar.addi %value, %increment : i32
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<1xi32>
+  view.store %incremented, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+kernel.def target(@target) @double_i32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<1xi32>
+  %value = view.load %input_view[0] : view<1xi32> -> i32
+  %doubled = scalar.addi %value, %value : i32
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<1xi32>
+  view.store %doubled, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+check.case @ordered_dispatch_aba_case {
+  %input = check.generate.fill value(7) : tensor<1xi32>
+  %intermediate = check.generate.fill value(-4) : tensor<1xi32>
+  // If the B-to-A visibility edge is missing, A observes -19 and emits -18.
+  %output = check.generate.fill value(-19) : tensor<1xi32>
+  %terminal = check.generate.fill value(-99) : tensor<1xi32>
+  kernel.launch @increment_i32(%input, %intermediate) : (tensor<1xi32>, tensor<1xi32>)
+  kernel.launch @double_i32(%intermediate, %output) : (tensor<1xi32>, tensor<1xi32>)
+  kernel.launch @increment_i32(%output, %terminal) : (tensor<1xi32>, tensor<1xi32>)
+  %expected = check.generate.fill value(17) : tensor<1xi32>
+  check.expect.equal actual(%terminal) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.benchmark<@ordered_dispatch_aba_case>
+
+kernel.def target(@target) @scalar_addressing_i32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %base: offset, %element: index, %mixed_row: index, %column: index, %stride_row: index, %columns: index, %subview_element: index) {
+  %buffer_base = index.constant 0 : offset
+  %static_base = index.constant 8 : offset
+  %subview_base = index.constant 40 : offset
+  %base_bias = index.constant 4 : offset
+  %base_aligned = index.assume %base [range(%base, 0, 124), mul(%base, 4)] : offset
+  %biased_base = index.add %base_aligned, %base_bias : offset
+  %element_bounded = index.assume %element [range(%element, 0, 15)] : index
+  %mixed_row_bounded = index.assume %mixed_row [range(%mixed_row, 0, 3)] : index
+  %column_bounded = index.assume %column [range(%column, 0, 7)] : index
+  %stride_row_bounded = index.assume %stride_row [range(%stride_row, 0, 3)] : index
+  %columns_bounded = index.assume %columns [range(%columns, 1, 8)] : index
+  %stride_column_bounded = index.assume %column_bounded [lt(%column_bounded, %columns_bounded)] : index
+  %subview_element_bounded = index.assume %subview_element [range(%subview_element, 0, 3)] : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %static_view = buffer.view %input_aligned[%static_base] : buffer -> view<2x4xi32>
+  %dynamic_base_view = buffer.view %input_aligned[%base_aligned] : buffer -> view<4xi32>
+  %dynamic_index_view = buffer.view %input_aligned[%buffer_base] : buffer -> view<16xi32>
+  %mixed_view = buffer.view %input_aligned[%base_aligned] : buffer -> view<4x8xi32>
+  %dynamic_stride_view = buffer.view %input_aligned[%buffer_base] : buffer -> view<4x[%columns_bounded]xi32>
+  %subview_source = buffer.view %input_aligned[%subview_base] : buffer -> view<8xi32>
+  %subview = view.subview %subview_source[1] : view<8xi32> -> view<4xi32>
+  %materialized_base_view = buffer.view %input_aligned[%biased_base] : buffer -> view<8xi32>
+  %output_view = buffer.view %output_aligned[%buffer_base] : buffer -> view<7xi32>
+  %static_value = view.load %static_view[1, 2] : view<2x4xi32> -> i32
+  %dynamic_base_value = view.load %dynamic_base_view[2] : view<4xi32> -> i32
+  %dynamic_index_value = view.load %dynamic_index_view[%element_bounded] : view<16xi32> -> i32
+  %mixed_value = view.load %mixed_view[%mixed_row_bounded, %column_bounded] : view<4x8xi32> -> i32
+  %dynamic_stride_value = view.load %dynamic_stride_view[%stride_row_bounded, %stride_column_bounded] : view<4x[%columns_bounded]xi32> -> i32
+  %subview_value = view.load %subview[%subview_element_bounded] : view<4xi32> -> i32
+  %materialized_base_value = view.load %materialized_base_view[6] : view<8xi32> -> i32
+  view.store %static_value, %output_view[0] : i32, view<7xi32>
+  view.store %dynamic_base_value, %output_view[1] : i32, view<7xi32>
+  view.store %dynamic_index_value, %output_view[2] : i32, view<7xi32>
+  view.store %mixed_value, %output_view[3] : i32, view<7xi32>
+  view.store %dynamic_stride_value, %output_view[4] : i32, view<7xi32>
+  view.store %subview_value, %output_view[5] : i32, view<7xi32>
+  view.store %materialized_base_value, %output_view[6] : i32, view<7xi32>
+  kernel.return
+}
+
+check.case @scalar_addressing_i32_case {
+  %input = check.generate.iota offset(100) step(1) : tensor<32xi32>
+  %output = check.generate.fill value(-1) : tensor<7xi32>
+  %base = check.literal value(28) : offset
+  %element = check.literal value(10) : index
+  %mixed_row = check.literal value(0) : index
+  %column = check.literal value(4) : index
+  %stride_row = check.literal value(1) : index
+  %columns = check.literal value(8) : index
+  %subview_element = check.literal value(2) : index
+  kernel.launch @scalar_addressing_i32(%input, %output, %base, %element, %mixed_row, %column, %stride_row, %columns, %subview_element) : (tensor<32xi32>, tensor<7xi32>, offset, index, index, index, index, index, index)
+  %expected = check.generate.iota offset(108) step(1) : tensor<7xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<7xi32>
+  check.return
+}
+
+kernel.def target(@target) @workgroup_addressing_i32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %scratch_base = index.constant 4 : offset
+  %scratch_byte_length = index.constant 32 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<4xi32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<4xi32>
+  %scratch = buffer.alloca<workgroup> align(4) %scratch_byte_length : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<6xi32>
+  %scratch_subview = view.subview %scratch_view[1] : view<6xi32> -> view<4xi32>
+  %input_value = view.load %input_view[%lane] : view<4xi32> -> i32
+  view.store %input_value, %scratch_subview[%lane] : i32, view<4xi32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %workgroup_value = view.load %scratch_subview[%lane] : view<4xi32> -> i32
+  view.store %workgroup_value, %output_view[%lane] : i32, view<4xi32>
+  kernel.return
+}
+
+check.case @workgroup_addressing_i32_case {
+  %input = check.generate.iota offset(10) step(3) : tensor<4xi32>
+  %output = check.generate.fill value(-1) : tensor<4xi32>
+  kernel.launch @workgroup_addressing_i32(%input, %output) : (tensor<4xi32>, tensor<4xi32>)
+  %expected = check.generate.iota offset(10) step(3) : tensor<4xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<4xi32>
+  check.return
+}
+
+kernel.def target(@target) @ordinary_vector_structure_i32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base_byte_offset = index.constant 0 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%base_byte_offset] : buffer -> view<4xi32>
+  %output_view = buffer.view %output_aligned[%base_byte_offset] : buffer -> view<4xi32>
+  %a = view.load %input_view[0] : view<4xi32> -> i32
+  %b = view.load %input_view[1] : view<4xi32> -> i32
+  %c = view.load %input_view[2] : view<4xi32> -> i32
+  %d = view.load %input_view[3] : view<4xi32> -> i32
+  %condition = scalar.cmpi sgt, %a, %b : i32
+  %singleton_from = vector.from_elements %b : vector<1xi32>
+  %singleton_splat = vector.splat %a : vector<1xi32>
+  %singleton_constant = vector.constant 10 : vector<1xi32>
+  %singleton_selected = scf.select %condition, %singleton_splat, %singleton_from : vector<1xi32>
+  %singleton_inserted = vector.insert %a into %singleton_selected[0] : i32, vector<1xi32>
+  %singleton_value = vector.extract %singleton_inserted[0] : vector<1xi32> -> i32
+  %singleton_constant_value = vector.extract %singleton_constant[0] : vector<1xi32> -> i32
+  %from = vector.from_elements %a, %b, %c, %d : vector<4xi32>
+  %constant = vector.constant 10 : vector<4xi32>
+  %splat = vector.splat %singleton_value : vector<4xi32>
+  %candidate = scf.select %condition, %from, %constant : vector<4xi32>
+  %selected = scf.if %condition -> (vector<4xi32>) {
+    view.store %a, %output_view[0] : i32, view<4xi32>
+    scf.yield %candidate : vector<4xi32>
+  } else {
+    view.store %b, %output_view[0] : i32, view<4xi32>
+    scf.yield %splat : vector<4xi32>
+  }
+  %inserted = vector.insert %singleton_constant_value into %selected[2] : i32, vector<4xi32>
+  %final = scf.select %condition, %selected, %inserted : vector<4xi32>
+  %result0 = vector.extract %final[0] : vector<4xi32> -> i32
+  %result1 = vector.extract %final[1] : vector<4xi32> -> i32
+  %result2 = vector.extract %final[2] : vector<4xi32> -> i32
+  %result3 = vector.extract %final[3] : vector<4xi32> -> i32
+  view.store %result0, %output_view[0] : i32, view<4xi32>
+  view.store %result1, %output_view[1] : i32, view<4xi32>
+  view.store %result2, %output_view[2] : i32, view<4xi32>
+  view.store %result3, %output_view[3] : i32, view<4xi32>
+  kernel.return
+}
+
+check.case @ordinary_vector_structure_i32_case {
+  %input = check.generate.iota offset(10) step(3) : tensor<4xi32>
+  %output = check.generate.fill value(-1) : tensor<4xi32>
+  kernel.launch @ordinary_vector_structure_i32(%input, %output) : (tensor<4xi32>, tensor<4xi32>)
+  %expected = check.generate.fill value(10) : tensor<4xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<4xi32>
+  check.return
+}

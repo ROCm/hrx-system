@@ -11,6 +11,7 @@
 #include "loom/codegen/low/target_binding.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/target/function_version.h"
 #include "loom/transforms/cleanup/dce.h"
 
 static const loom_pass_statistic_field_t kLowDceStatisticFields[] = {
@@ -46,9 +47,9 @@ static iree_status_t loom_low_dce_deadness_query(void* user_data,
       (loom_low_dce_deadness_context_t*)user_data;
   *out_is_dead = false;
 
-  loom_low_resolved_descriptor_packet_t packet = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_low_resolve_descriptor_packet(module, context->target, op, &packet));
+  loom_low_descriptor_packet_t packet = {0};
+  loom_low_descriptor_packet_initialize(context->target->descriptor_set, op,
+                                        &packet);
   if (packet.kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
     *out_is_dead = loom_op_is_trivially_dead(module, op);
     return iree_ok_status();
@@ -58,9 +59,6 @@ static iree_status_t loom_low_dce_deadness_query(void* user_data,
     return iree_ok_status();
   }
 
-  if (packet.descriptor == NULL) {
-    return iree_ok_status();
-  }
   *out_is_dead = iree_any_bit_set(packet.descriptor->flags,
                                   LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE);
   return iree_ok_status();
@@ -69,13 +67,15 @@ static iree_status_t loom_low_dce_deadness_query(void* user_data,
 static iree_status_t loom_low_dce_function(
     loom_pass_t* pass, loom_module_t* module, loom_func_like_t function,
     const loom_low_descriptor_registry_t* descriptor_registry,
-    loom_target_selection_t target_selection,
     iree_diagnostic_emitter_t emitter) {
   loom_op_t* low_func_op = function.op;
+  loom_symbol_fact_table_t symbol_facts = {0};
+  loom_symbol_fact_table_initialize(&symbol_facts, pass->arena);
   loom_low_resolved_target_t target = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_low_resolve_function_target(module, low_func_op, descriptor_registry,
-                                       target_selection, emitter, &target));
+  IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
+      module, &symbol_facts, low_func_op,
+      loom_target_function_version_target_facts(pass->function_version),
+      descriptor_registry, emitter, &target));
   if (!target.descriptor_set) {
     return iree_ok_status();
   }
@@ -101,11 +101,6 @@ iree_status_t loom_low_dce_run(loom_pass_t* pass, loom_module_t* module,
       loom_low_pass_capability_from_pass(pass);
   const loom_low_descriptor_registry_t* descriptor_registry =
       loom_low_pass_capability_descriptor_registry(low_capability);
-  const loom_target_pass_capability_t* target_capability =
-      loom_target_pass_capability_from_pass(pass);
-  const loom_target_selection_t target_selection =
-      loom_target_pass_capability_target_selection(target_capability);
-
   return loom_low_dce_function(pass, module, function, descriptor_registry,
-                               target_selection, pass->diagnostic_emitter);
+                               pass->diagnostic_emitter);
 }

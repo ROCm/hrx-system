@@ -1,0 +1,95 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx950> @target
+
+func.def target(@target) @decode_mxfp4_group_to_bf16(%payload: vector<4xi32>, %scale: vector<1xi32>) -> (vector<32xbf16>) {
+  %schema = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=32, payload_packing=little_endian_nibbles, payload_registers=4, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xi32>} : vector<4xi32>, encoding<schema> -> vector<32xbf16>
+  func.return %decoded : vector<32xbf16>
+}
+
+// ----
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @decode_mxfp4_group_to_bf16(%payload: reg<amdgpu.vgpr x4>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x16>) asm {
+  %8 = slice %payload[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %9 = v_and_b32_lit %scale, 255
+  %10 = v_lshlrev_b32_src0_inline %9, 23
+  %11 = v_cvt_scalef32_pk_bf16_fp4 %8, %10
+  %12 = v_cvt_scalef32_pk_bf16_fp4_byte1 %8, %10
+  %13 = v_cvt_scalef32_pk_bf16_fp4_byte2 %8, %10
+  %14 = v_cvt_scalef32_pk_bf16_fp4_byte3 %8, %10
+  %15 = slice %payload[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %16 = v_cvt_scalef32_pk_bf16_fp4 %15, %10
+  %17 = v_cvt_scalef32_pk_bf16_fp4_byte1 %15, %10
+  %18 = v_cvt_scalef32_pk_bf16_fp4_byte2 %15, %10
+  %19 = v_cvt_scalef32_pk_bf16_fp4_byte3 %15, %10
+  %20 = slice %payload[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %21 = v_cvt_scalef32_pk_bf16_fp4 %20, %10
+  %22 = v_cvt_scalef32_pk_bf16_fp4_byte1 %20, %10
+  %23 = v_cvt_scalef32_pk_bf16_fp4_byte2 %20, %10
+  %24 = v_cvt_scalef32_pk_bf16_fp4_byte3 %20, %10
+  %25 = slice %payload[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %26 = v_cvt_scalef32_pk_bf16_fp4 %25, %10
+  %27 = v_cvt_scalef32_pk_bf16_fp4_byte1 %25, %10
+  %28 = v_cvt_scalef32_pk_bf16_fp4_byte2 %25, %10
+  %29 = v_cvt_scalef32_pk_bf16_fp4_byte3 %25, %10
+  %decoded = concat(%11, %12, %13, %14, %16, %17, %18, %19, %21, %22, %23, %24, %26, %27, %28, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x16>
+  return %decoded
+}
+
+// ====
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1250> @target
+
+func.def target(@target) @decode_mxfp4_group_to_bf16(%payload: vector<4xi32>, %scale: vector<1xi32>) -> (vector<32xbf16>) {
+  %schema = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=32, payload_packing=little_endian_nibbles, payload_registers=4, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xi32>} : vector<4xi32>, encoding<schema> -> vector<32xbf16>
+  func.return %decoded : vector<32xbf16>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @decode_mxfp4_group_to_bf16(%payload: reg<amdgpu.vgpr x4>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x16>) asm {
+  %8 = slice %payload[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %9 = v_cvt_scale_pk8_bf16_fp4 %8, %scale
+  %10 = slice %payload[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %11 = v_cvt_scale_pk8_bf16_fp4 %10, %scale
+  %12 = slice %payload[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %13 = v_cvt_scale_pk8_bf16_fp4 %12, %scale
+  %14 = slice %payload[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %15 = v_cvt_scale_pk8_bf16_fp4 %14, %scale
+  %decoded = concat(%9, %11, %13, %15) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x16>
+  return %decoded
+}
+
+// ====
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1250> @target
+
+func.def target(@target) @decode_two_mxfp4_groups_to_bf16(%payload: vector<8xi32>, %scale: vector<1xi32>) -> (vector<64xbf16>) {
+  %schema = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=64, payload_packing=little_endian_nibbles, payload_registers=8, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xi32>} : vector<8xi32>, encoding<schema> -> vector<64xbf16>
+  func.return %decoded : vector<64xbf16>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @decode_two_mxfp4_groups_to_bf16(%payload: reg<amdgpu.vgpr x8>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x32>) asm {
+  %8 = slice %payload[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %9 = v_cvt_scale_pk8_bf16_fp4 %8, %scale
+  %10 = slice %payload[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %11 = v_cvt_scale_pk8_bf16_fp4 %10, %scale
+  %12 = slice %payload[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %13 = v_cvt_scale_pk8_bf16_fp4 %12, %scale
+  %14 = slice %payload[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %15 = v_cvt_scale_pk8_bf16_fp4 %14, %scale
+  %16 = slice %payload[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %17 = v_cvt_scale_pk8_bf16_fp4 %16, %scale {scale_sel = 1}
+  %18 = slice %payload[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %19 = v_cvt_scale_pk8_bf16_fp4 %18, %scale {scale_sel = 1}
+  %20 = slice %payload[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %21 = v_cvt_scale_pk8_bf16_fp4 %20, %scale {scale_sel = 1}
+  %22 = slice %payload[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %23 = v_cvt_scale_pk8_bf16_fp4 %22, %scale {scale_sel = 1}
+  %decoded = concat(%9, %11, %13, %15, %17, %19, %21, %23) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x32>
+  return %decoded
+}

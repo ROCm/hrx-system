@@ -262,32 +262,30 @@ TEST_P(ManualAsanExecutableTest, ReportsCompatibleHooksThroughFeedback) {
   }
   IREE_ASSERT_OK(status);
 
-  Ref<iree_hal_executable_cache_t> executable_cache;
-  IREE_ASSERT_OK(iree_hal_executable_cache_create(
-      asan_device.device(), iree_make_cstring_view("default"),
-      executable_cache.out()));
-
   iree_const_byte_span_t executable_data = GetParam().executable_data(
       iree_make_cstring_view("manual_asan_test.bin"));
   ASSERT_FALSE(iree_const_byte_span_is_empty(executable_data));
 
-  Ref<iree_hal_executable_t> executable;
-  iree_hal_executable_params_t executable_params;
-  iree_hal_executable_params_initialize(&executable_params);
-  executable_params.caching_mode =
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-  executable_params.executable_format =
-      iree_make_cstring_view(GetParam().executable_format);
-  executable_params.executable_data = executable_data;
-  status = iree_hal_executable_cache_prepare_executable(
-      executable_cache, &executable_params, executable.out());
-  if (iree_status_is_incompatible(status)) {
-    iree_status_free(status);
-    GTEST_SKIP() << "Executable format '" << GetParam().executable_format
-                 << "' is incompatible with CTS backend/device '"
+  iree_hal_executable_target_selection_result_t target_result;
+  IREE_ASSERT_OK(SelectBackendExecutableTarget(asan_device.device(), GetParam(),
+                                               &target_result));
+  if (target_result.outcome ==
+      IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
+    GTEST_SKIP() << "Executable target '" << GetParam().executable_target_family
+                 << ":" << GetParam().executable_target_key
+                 << "' is unavailable on CTS backend/device '"
                  << GetParam().name << "'";
   }
-  IREE_ASSERT_OK(status);
+  ASSERT_EQ(IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED,
+            target_result.outcome);
+
+  Ref<iree_hal_executable_t> executable;
+  iree_hal_executable_load_params_t load_params;
+  iree_hal_executable_load_params_initialize(&load_params);
+  load_params.executable_data = executable_data;
+  IREE_ASSERT_OK(iree_hal_device_load_executable(
+      asan_device.device(), IREE_HAL_QUEUE_AFFINITY_ANY, target_result.target,
+      &load_params, executable.out()));
 
   Ref<iree_hal_buffer_t> output_buffer;
   IREE_ASSERT_OK(SanitizerCreateDeviceBuffer(

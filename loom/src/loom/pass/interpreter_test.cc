@@ -45,6 +45,16 @@ class PassInterpreterTest : public PassTestHarness {
     }
     return iree_ok_status();
   }
+
+  static bool SelectNamedFunction(void* user_data, const loom_module_t* module,
+                                  const loom_symbol_t* symbol,
+                                  loom_func_like_t function) {
+    (void)function;
+    const iree_string_view_t* selected_name =
+        static_cast<const iree_string_view_t*>(user_data);
+    return iree_string_view_equal(module->strings.entries[symbol->name_id],
+                                  *selected_name);
+  }
 };
 
 TEST_F(PassInterpreterTest, RunsModuleAndFunctionPasses) {
@@ -70,6 +80,42 @@ TEST_F(PassInterpreterTest, RunsModuleAndFunctionPasses) {
   EXPECT_EQ(trace.noop_invocation_count, 2);
 }
 
+TEST_F(PassInterpreterTest, SelectsFunctionsEnteredByModuleProgram) {
+  loom_module_t* module =
+      Parse(IREE_SV("pass.pipeline<module> @pipeline pipeline {\n"
+                    "  test.module-noop\n"
+                    "  for func {\n"
+                    "    test.noop\n"
+                    "  }\n"
+                    "}\n"
+                    "test.func @first() {\n"
+                    "  test.yield\n"
+                    "}\n"
+                    "test.func @second() {\n"
+                    "  test.yield\n"
+                    "}\n"));
+  ASSERT_NE(module, nullptr);
+
+  PassProgramStorage storage;
+  IREE_ASSERT_OK(Compile(module, Pipeline(module, 0), &storage.program));
+  loom_test_pass_trace_t trace = {};
+  iree_string_view_t selected_name = IREE_SV("second");
+  loom_pass_interpreter_options_t options = InterpreterOptions(&trace);
+  options.function_selector = {
+      /*.select=*/SelectNamedFunction,
+      /*.user_data=*/&selected_name,
+  };
+  loom_pass_run_result_t result = {};
+  IREE_ASSERT_OK(loom_pass_interpreter_run_module(&storage.program, module,
+                                                  &options, &result));
+
+  EXPECT_EQ(trace.module_noop_invocation_count, 1);
+  ASSERT_EQ(trace.event_count, 2u);
+  EXPECT_TRUE(
+      iree_string_view_equal(trace.events[1].symbol_name, IREE_SV("second")));
+  EXPECT_EQ(trace.noop_invocation_count, 1);
+}
+
 TEST_F(PassInterpreterTest, RunsFunctionRootProgram) {
   loom_module_t* module =
       Parse(IREE_SV("pass.pipeline<func> @pipeline pipeline {\n"
@@ -83,10 +129,31 @@ TEST_F(PassInterpreterTest, RunsFunctionRootProgram) {
                     "}\n"));
   ASSERT_NE(module, nullptr);
 
+  loom_function_version_type_t version_type = {
+      /*.name=*/IREE_SVL("test"),
+  };
+  loom_function_version_t version = {
+      /*.type=*/&version_type,
+      /*.function=*/Function(module, 1),
+  };
+  loom_function_version_t* version_values[] = {&version};
+  const loom_function_version_list_t versions = {
+      /*.values=*/version_values,
+      /*.count=*/IREE_ARRAYSIZE(version_values),
+  };
+
+  PassProgramStorage storage;
+  IREE_ASSERT_OK(Compile(module, Pipeline(module, 0), &storage.program));
   loom_test_pass_trace_t trace = {};
-  IREE_ASSERT_OK(RunFunctionPipeline(module, 0, 1, &trace));
+  loom_pass_interpreter_options_t options = InterpreterOptions(&trace);
+  options.function_versions = &versions;
+  loom_pass_run_result_t result = {};
+  IREE_ASSERT_OK(loom_pass_interpreter_run_function(
+      &storage.program, module, version.function, &options, &result));
 
   EXPECT_EQ(trace.noop_invocation_count, 1);
+  ASSERT_EQ(trace.event_count, 1u);
+  EXPECT_EQ(trace.events[0].function_version, &version);
 }
 
 TEST_F(PassInterpreterTest, AppendsExecutionReportRecords) {
@@ -261,18 +328,151 @@ TEST_F(PassInterpreterTest, AppliesProviderPredicateToCurrentFunction) {
       /*.verify_count=*/{},
       /*.evaluate_count=*/{},
       /*.selected_symbol=*/IREE_SV("selected"),
+      /*.selected_function_version=*/nullptr,
   };
   loom_pass_predicate_provider_t predicate_provider =
       PassTestTargetPredicateProvider(&predicate_capture);
 
+  loom_function_version_type_t version_type = {
+      /*.name=*/IREE_SVL("test"),
+  };
+  loom_function_version_t selected_version = {
+      /*.type=*/&version_type,
+      /*.function=*/Function(module, 1),
+  };
+  loom_function_version_t skipped_version = {
+      /*.type=*/&version_type,
+      /*.function=*/Function(module, 2),
+  };
+  loom_function_version_t* version_values[] = {
+      &selected_version,
+      &skipped_version,
+  };
+  const loom_function_version_list_t versions = {
+      /*.values=*/version_values,
+      /*.count=*/IREE_ARRAYSIZE(version_values),
+  };
+
+  PassProgramStorage storage;
+  IREE_ASSERT_OK(Compile(module, Pipeline(module, 0), &storage.program,
+                         predicate_provider));
   loom_test_pass_trace_t trace = {};
-  IREE_ASSERT_OK(RunModulePipeline(module, 0, &trace, predicate_provider));
+  loom_pass_interpreter_options_t options =
+      InterpreterOptions(&trace, {}, nullptr, predicate_provider);
+  options.function_versions = &versions;
+  loom_pass_run_result_t result = {};
+  IREE_ASSERT_OK(loom_pass_interpreter_run_module(&storage.program, module,
+                                                  &options, &result));
 
   EXPECT_EQ(predicate_capture.verify_count, 1);
   EXPECT_EQ(predicate_capture.evaluate_count, 2);
+  EXPECT_EQ(predicate_capture.selected_function_version, &selected_version);
   ASSERT_EQ(trace.event_count, 1u);
   EXPECT_TRUE(
       iree_string_view_equal(trace.events[0].symbol_name, IREE_SV("selected")));
+  EXPECT_EQ(trace.events[0].function_version, &selected_version);
+}
+
+TEST_F(PassInterpreterTest, RunsIfChangedForEachMutatedAnchor) {
+  loom_module_t* module =
+      Parse(IREE_SV("pass.pipeline<module> @pipeline pipeline {\n"
+                    "  for func {\n"
+                    "    where name(value = \"first\") {\n"
+                    "      test.mark-changed\n"
+                    "    }\n"
+                    "    if changed {\n"
+                    "      test.noop\n"
+                    "    }\n"
+                    "  }\n"
+                    "}\n"
+                    "test.func @first() {\n"
+                    "  test.yield\n"
+                    "}\n"
+                    "test.func @second() {\n"
+                    "  test.yield\n"
+                    "}\n"));
+  ASSERT_NE(module, nullptr);
+
+  loom_test_pass_trace_t trace = {};
+  IREE_ASSERT_OK(RunModulePipeline(module, 0, &trace));
+
+  EXPECT_EQ(trace.mark_changed_invocation_count, 1);
+  EXPECT_EQ(trace.noop_invocation_count, 1);
+  ASSERT_EQ(trace.event_count, 2u);
+  EXPECT_TRUE(
+      iree_string_view_equal(trace.events[1].symbol_name, IREE_SV("first")));
+}
+
+TEST_F(PassInterpreterTest, SkipsIfChangedAfterNoop) {
+  loom_module_t* module =
+      Parse(IREE_SV("pass.pipeline<module> @pipeline pipeline {\n"
+                    "  for func {\n"
+                    "    test.noop\n"
+                    "    if changed {\n"
+                    "      test.mark-changed\n"
+                    "    }\n"
+                    "  }\n"
+                    "}\n"
+                    "test.func @main() {\n"
+                    "  test.yield\n"
+                    "}\n"));
+  ASSERT_NE(module, nullptr);
+
+  loom_test_pass_trace_t trace = {};
+  IREE_ASSERT_OK(RunModulePipeline(module, 0, &trace));
+
+  EXPECT_EQ(trace.noop_invocation_count, 1);
+  EXPECT_EQ(trace.mark_changed_invocation_count, 0);
+}
+
+TEST_F(PassInterpreterTest, IfChangedReportsOnlyNestedBodyMutation) {
+  loom_module_t* module =
+      Parse(IREE_SV("pass.pipeline<module> @pipeline pipeline {\n"
+                    "  for func {\n"
+                    "    test.mark-changed\n"
+                    "    if changed {\n"
+                    "      test.noop\n"
+                    "    }\n"
+                    "    if changed {\n"
+                    "      test.mark-changed\n"
+                    "    }\n"
+                    "  }\n"
+                    "}\n"
+                    "test.func @main() {\n"
+                    "  test.yield\n"
+                    "}\n"));
+  ASSERT_NE(module, nullptr);
+
+  loom_test_pass_trace_t trace = {};
+  IREE_ASSERT_OK(RunModulePipeline(module, 0, &trace));
+
+  EXPECT_EQ(trace.mark_changed_invocation_count, 1);
+  EXPECT_EQ(trace.noop_invocation_count, 1);
+}
+
+TEST_F(PassInterpreterTest, IfChangedObservesCalledPipelineMutation) {
+  loom_module_t* module =
+      Parse(IREE_SV("pass.pipeline<module> @callee pipeline {\n"
+                    "  for func {\n"
+                    "    test.mark-changed\n"
+                    "  }\n"
+                    "}\n"
+                    "pass.pipeline<module> @pipeline pipeline {\n"
+                    "  call @callee\n"
+                    "  if changed {\n"
+                    "    test.module-noop\n"
+                    "  }\n"
+                    "}\n"
+                    "test.func @main() {\n"
+                    "  test.yield\n"
+                    "}\n"));
+  ASSERT_NE(module, nullptr);
+
+  loom_test_pass_trace_t trace = {};
+  IREE_ASSERT_OK(RunModulePipeline(module, 1, &trace));
+
+  EXPECT_EQ(trace.mark_changed_invocation_count, 1);
+  EXPECT_EQ(trace.module_noop_invocation_count, 1);
 }
 
 TEST_F(PassInterpreterTest, ExecutesFixedRepeat) {

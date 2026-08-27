@@ -274,7 +274,7 @@ TEST_F(CSETest, CanonicalAttrDictOrderDoesNotBlockCSE) {
   };
   loom_op_t* attrs0 = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
-      &builder_, input,
+      &builder_, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT, input,
       loom_make_named_attr_slice(label_first_entries,
                                  IREE_ARRAYSIZE(label_first_entries)),
       f32, LOOM_LOCATION_UNKNOWN, &attrs0));
@@ -286,7 +286,7 @@ TEST_F(CSETest, CanonicalAttrDictOrderDoesNotBlockCSE) {
   };
   loom_op_t* attrs1 = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
-      &builder_, input,
+      &builder_, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT, input,
       loom_make_named_attr_slice(axis_first_entries,
                                  IREE_ARRAYSIZE(axis_first_entries)),
       f32, LOOM_LOCATION_UNKNOWN, &attrs1));
@@ -314,7 +314,7 @@ TEST_F(CSETest, RewriterReplaceAttrDictBuildsFreshCanonicalDict) {
       &builder_, loom_region_entry_block(body_), f32, &input));
 
   loom_op_t* attrs_op = NULL;
-  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, input,
+  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, 0, input,
                                        loom_make_named_attr_slice(NULL, 0), f32,
                                        LOOM_LOCATION_UNKNOWN, &attrs_op));
 
@@ -367,7 +367,7 @@ TEST_F(CSETest, RewriterReplaceAttrDictRecordsTypeValueRefs) {
       &builder_, loom_region_entry_block(body_), f32, &input));
 
   loom_op_t* attrs_op = NULL;
-  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, input,
+  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, 0, input,
                                        loom_make_named_attr_slice(NULL, 0), f32,
                                        LOOM_LOCATION_UNKNOWN, &attrs_op));
 
@@ -421,7 +421,7 @@ TEST_F(CSETest, RewriterSetAttrRejectsMalformedDictAttr) {
       &builder_, loom_region_entry_block(body_), f32, &input));
 
   loom_op_t* attrs_op = NULL;
-  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, input,
+  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, 0, input,
                                        loom_make_named_attr_slice(NULL, 0), f32,
                                        LOOM_LOCATION_UNKNOWN, &attrs_op));
 
@@ -446,7 +446,7 @@ TEST_F(CSETest, RewriterSetAttrRejectsNonCanonicalDictAttrOrder) {
       &builder_, loom_region_entry_block(body_), f32, &input));
 
   loom_op_t* attrs_op = NULL;
-  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, input,
+  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, 0, input,
                                        loom_make_named_attr_slice(NULL, 0), f32,
                                        LOOM_LOCATION_UNKNOWN, &attrs_op));
 
@@ -486,7 +486,7 @@ TEST_F(CSETest, RewriterSetAttrRejectsDuplicateDictAttrKeys) {
       &builder_, loom_region_entry_block(body_), f32, &input));
 
   loom_op_t* attrs_op = NULL;
-  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, input,
+  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, 0, input,
                                        loom_make_named_attr_slice(NULL, 0), f32,
                                        LOOM_LOCATION_UNKNOWN, &attrs_op));
 
@@ -821,6 +821,108 @@ TEST_F(CSETest, NestedCFGRegionUsesEntryBlockDominance) {
   EXPECT_EQ(count_all_live_ops(body_), before - 1);
   EXPECT_EQ(loom_test_use_values(use).values[0],
             loom_test_constant_result(entry_const));
+}
+
+TEST_F(CSETest, StatefulReadCSEAcrossStraightLineCFGEdge) {
+  loom_type_t pool_type = loom_type_pool(loom_dim_pack_static(4096));
+  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+
+  loom_block_t* entry_block = loom_region_entry_block(body_);
+  loom_value_id_t pool = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_builder_define_block_arg(&builder_, entry_block, pool_type, &pool));
+
+  loom_op_t* entry_read = NULL;
+  IREE_ASSERT_OK(loom_test_read_resource_build(
+      &builder_, pool, i32, LOOM_LOCATION_UNKNOWN, &entry_read));
+
+  loom_block_t* exit_block = NULL;
+  IREE_ASSERT_OK(loom_region_append_block(module_, body_, &exit_block));
+  loom_op_t* entry_branch = NULL;
+  IREE_ASSERT_OK(loom_test_br_build(&builder_, exit_block,
+                                    LOOM_LOCATION_UNKNOWN, &entry_branch));
+
+  loom_builder_set_block(&builder_, exit_block);
+  loom_op_t* exit_read = NULL;
+  IREE_ASSERT_OK(loom_test_read_resource_build(
+      &builder_, pool, i32, LOOM_LOCATION_UNKNOWN, &exit_read));
+  loom_value_id_t values[] = {
+      loom_test_read_resource_result(entry_read),
+      loom_test_read_resource_result(exit_read),
+  };
+  loom_op_t* use = NULL;
+  IREE_ASSERT_OK(loom_test_use_build(&builder_, values, IREE_ARRAYSIZE(values),
+                                     LOOM_LOCATION_UNKNOWN, &use));
+
+  int before = count_live_ops();
+  IREE_ASSERT_OK(run_cse());
+  EXPECT_EQ(count_live_ops(), before - 1);
+  EXPECT_EQ(loom_test_use_values(use).values[0],
+            loom_test_use_values(use).values[1]);
+}
+
+TEST_F(CSETest, StatefulReadNotCSEdAcrossLoopHeader) {
+  loom_type_t pool_type = loom_type_pool(loom_dim_pack_static(4096));
+  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+
+  loom_block_t* entry_block = loom_region_entry_block(body_);
+  loom_value_id_t pool = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_builder_define_block_arg(&builder_, entry_block, pool_type, &pool));
+
+  loom_op_t* entry_read = NULL;
+  IREE_ASSERT_OK(loom_test_read_resource_build(
+      &builder_, pool, i32, LOOM_LOCATION_UNKNOWN, &entry_read));
+  loom_op_t* entry_constant = NULL;
+  IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(42), i32,
+                                          LOOM_LOCATION_UNKNOWN,
+                                          &entry_constant));
+
+  loom_block_t* header_block = NULL;
+  IREE_ASSERT_OK(loom_region_append_block(module_, body_, &header_block));
+  loom_block_t* loop_body_block = NULL;
+  IREE_ASSERT_OK(loom_region_append_block(module_, body_, &loop_body_block));
+  loom_op_t* entry_branch = NULL;
+  IREE_ASSERT_OK(loom_test_br_build(&builder_, header_block,
+                                    LOOM_LOCATION_UNKNOWN, &entry_branch));
+
+  loom_builder_set_block(&builder_, header_block);
+  loom_op_t* header_read = NULL;
+  IREE_ASSERT_OK(loom_test_read_resource_build(
+      &builder_, pool, i32, LOOM_LOCATION_UNKNOWN, &header_read));
+  loom_op_t* header_constant = NULL;
+  IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(42), i32,
+                                          LOOM_LOCATION_UNKNOWN,
+                                          &header_constant));
+  loom_value_id_t observed_values[] = {
+      loom_test_read_resource_result(entry_read),
+      loom_test_read_resource_result(header_read),
+      loom_test_constant_result(entry_constant),
+      loom_test_constant_result(header_constant),
+  };
+  loom_op_t* use = NULL;
+  IREE_ASSERT_OK(loom_test_use_build(&builder_, observed_values,
+                                     IREE_ARRAYSIZE(observed_values),
+                                     LOOM_LOCATION_UNKNOWN, &use));
+  loom_op_t* header_branch = NULL;
+  IREE_ASSERT_OK(loom_test_br_build(&builder_, loop_body_block,
+                                    LOOM_LOCATION_UNKNOWN, &header_branch));
+
+  loom_builder_set_block(&builder_, loop_body_block);
+  loom_op_t* write = NULL;
+  IREE_ASSERT_OK(loom_test_write_resource_build(
+      &builder_, pool, loom_test_constant_result(entry_constant),
+      LOOM_LOCATION_UNKNOWN, &write));
+  loom_op_t* backedge = NULL;
+  IREE_ASSERT_OK(loom_test_br_build(&builder_, header_block,
+                                    LOOM_LOCATION_UNKNOWN, &backedge));
+
+  int before = count_live_ops();
+  IREE_ASSERT_OK(run_cse());
+  EXPECT_EQ(count_live_ops(), before - 1);
+  loom_value_slice_t observed = loom_test_use_values(use);
+  EXPECT_NE(observed.values[0], observed.values[1]);
+  EXPECT_EQ(observed.values[2], observed.values[3]);
 }
 
 TEST_F(CSETest, IsolatedRegionBlocksCrossScope) {

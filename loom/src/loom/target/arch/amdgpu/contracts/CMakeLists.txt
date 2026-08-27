@@ -10,27 +10,34 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_target_table_cc_library(
+loom_target_contract_file_family(
   NAME
-    arithmetic
+    contract_tables_gen
   GENERATOR
-    loom::py::loom::gen::target::contracts::amdgpu_contract_fragment
-  ARGS
-    "--contract-fragment=amdgpu.arithmetic"
-  DEPS
-    loom::target::contract
+    loom::py::loom::gen::target::contracts::amdgpu_contract_table_family
+  FRAGMENTS
+    "arithmetic=amdgpu.arithmetic"
+    "async=amdgpu.async"
+    "buffer=amdgpu.buffer"
+    "compare=amdgpu.compare"
+    "config=amdgpu.config"
+    "dot=amdgpu.dot"
+    "integer=amdgpu.integer"
+    "reduce=amdgpu.reduce"
+    "sanitizer=amdgpu.sanitizer"
+    "view=amdgpu.view"
+  COMMENT
+    "Generating AMDGPU contract table families"
 )
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_target_table_cc_library(
+loom_target_contract_cc_libraries(
   NAME
-    arithmetic_lower_rules
-  GENERATOR
-    loom::py::loom::gen::target::contracts::amdgpu_lower_rule_shard
-  ARGS
-    "--contract-fragment=amdgpu.arithmetic"
-  DEPS
+    arithmetic
+  CONTRACT_DEPS
+    loom::target::contract
+  LOWER_RULE_DEPS
     loom::codegen::low::lower
     loom::ops::index
     loom::ops::scalar
@@ -41,108 +48,48 @@ loom_target_table_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_target_table_cc_library(
+loom_target_contract_cc_libraries(
   NAME
     async
-  GENERATOR
-    loom::py::loom::gen::target::contracts::amdgpu_contract_fragment
-  ARGS
-    "--contract-fragment=amdgpu.async"
-  DEPS
+  CONTRACT_DEPS
     loom::target::contract
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_target_table_cc_library(
-  NAME
-    async_lower_rules
-  GENERATOR
-    loom::py::loom::gen::target::contracts::amdgpu_lower_rule_shard
-  ARGS
-    "--contract-fragment=amdgpu.async"
-  DEPS
+  LOWER_RULE_DEPS
     loom::codegen::low::lower
     loom::ops::kernel
 )
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_target_table_cc_library(
+loom_target_contract_cc_libraries(
   NAME
     buffer
-  GENERATOR
-    loom::py::loom::gen::target::contracts::amdgpu_contract_fragment
-  ARGS
-    "--contract-fragment=amdgpu.buffer"
-  DEPS
+  CONTRACT_DEPS
     loom::target::contract
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_target_table_cc_library(
-  NAME
-    buffer_lower_rules
-  GENERATOR
-    loom::py::loom::gen::target::contracts::amdgpu_lower_rule_shard
-  ARGS
-    "--contract-fragment=amdgpu.buffer"
-  DEPS
+  LOWER_RULE_DEPS
     loom::codegen::low::lower
     loom::ops::buffer
 )
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_target_table_cc_library(
+loom_target_contract_cc_libraries(
   NAME
     config
-  GENERATOR
-    loom::py::loom::gen::target::contracts::amdgpu_contract_fragment
-  ARGS
-    "--contract-fragment=amdgpu.config"
-  DEPS
+  CONTRACT_DEPS
     loom::target::contract
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_target_table_cc_library(
-  NAME
-    config_lower_rules
-  GENERATOR
-    loom::py::loom::gen::target::contracts::amdgpu_lower_rule_shard
-  ARGS
-    "--contract-fragment=amdgpu.config"
-  DEPS
+  LOWER_RULE_DEPS
     loom::codegen::low::lower
     loom::ops::config
 )
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_target_table_cc_library(
+loom_target_contract_cc_libraries(
   NAME
     compare
-  GENERATOR
-    loom::py::loom::gen::target::contracts::amdgpu_contract_fragment
-  ARGS
-    "--contract-fragment=amdgpu.compare"
-  DEPS
+  CONTRACT_DEPS
     loom::target::contract
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_target_table_cc_library(
-  NAME
-    compare_lower_rules
-  GENERATOR
-    loom::py::loom::gen::target::contracts::amdgpu_lower_rule_shard
-  ARGS
-    "--contract-fragment=amdgpu.compare"
-  DEPS
+  LOWER_RULE_DEPS
     loom::codegen::low::lower
     loom::ops::index
     loom::ops::scalar
@@ -151,27 +98,12 @@ loom_target_table_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_target_table_cc_library(
+loom_target_contract_cc_libraries(
   NAME
     dot
-  GENERATOR
-    loom::py::loom::gen::target::contracts::amdgpu_contract_fragment
-  ARGS
-    "--contract-fragment=amdgpu.dot"
-  DEPS
+  CONTRACT_DEPS
     loom::target::contract
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_target_table_cc_library(
-  NAME
-    dot_lower_rules
-  GENERATOR
-    loom::py::loom::gen::target::contracts::amdgpu_lower_rule_shard
-  ARGS
-    "--contract-fragment=amdgpu.dot"
-  DEPS
+  LOWER_RULE_DEPS
     loom::codegen::low::lower
     loom::ops::vector
     loom::target::arch::amdgpu::lower::kinds
@@ -179,27 +111,12 @@ loom_target_table_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_target_table_cc_library(
+loom_target_contract_cc_libraries(
   NAME
     integer
-  GENERATOR
-    loom::py::loom::gen::target::contracts::amdgpu_contract_fragment
-  ARGS
-    "--contract-fragment=amdgpu.integer"
-  DEPS
+  CONTRACT_DEPS
     loom::target::contract
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_target_table_cc_library(
-  NAME
-    integer_lower_rules
-  GENERATOR
-    loom::py::loom::gen::target::contracts::amdgpu_lower_rule_shard
-  ARGS
-    "--contract-fragment=amdgpu.integer"
-  DEPS
+  LOWER_RULE_DEPS
     loom::codegen::low::lower
     loom::ops::index
     loom::ops::scalar
@@ -221,27 +138,12 @@ loom_target_table_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_target_table_cc_library(
+loom_target_contract_cc_libraries(
   NAME
     reduce
-  GENERATOR
-    loom::py::loom::gen::target::contracts::amdgpu_contract_fragment
-  ARGS
-    "--contract-fragment=amdgpu.reduce"
-  DEPS
+  CONTRACT_DEPS
     loom::target::contract
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_target_table_cc_library(
-  NAME
-    reduce_lower_rules
-  GENERATOR
-    loom::py::loom::gen::target::contracts::amdgpu_lower_rule_shard
-  ARGS
-    "--contract-fragment=amdgpu.reduce"
-  DEPS
+  LOWER_RULE_DEPS
     loom::codegen::low::lower
     loom::ops::vector
     loom::target::arch::amdgpu::lower::kinds
@@ -250,54 +152,24 @@ loom_target_table_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_target_table_cc_library(
+loom_target_contract_cc_libraries(
   NAME
     sanitizer
-  GENERATOR
-    loom::py::loom::gen::target::contracts::amdgpu_contract_fragment
-  ARGS
-    "--contract-fragment=amdgpu.sanitizer"
-  DEPS
+  CONTRACT_DEPS
     loom::target::contract
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_target_table_cc_library(
-  NAME
-    sanitizer_lower_rules
-  GENERATOR
-    loom::py::loom::gen::target::contracts::amdgpu_lower_rule_shard
-  ARGS
-    "--contract-fragment=amdgpu.sanitizer"
-  DEPS
+  LOWER_RULE_DEPS
     loom::codegen::low::lower
     loom::ops::sanitizer
 )
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_target_table_cc_library(
+loom_target_contract_cc_libraries(
   NAME
     view
-  GENERATOR
-    loom::py::loom::gen::target::contracts::amdgpu_contract_fragment
-  ARGS
-    "--contract-fragment=amdgpu.view"
-  DEPS
+  CONTRACT_DEPS
     loom::target::contract
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_target_table_cc_library(
-  NAME
-    view_lower_rules
-  GENERATOR
-    loom::py::loom::gen::target::contracts::amdgpu_lower_rule_shard
-  ARGS
-    "--contract-fragment=amdgpu.view"
-  DEPS
+  LOWER_RULE_DEPS
     loom::codegen::low::lower
     loom::ops::view
 )

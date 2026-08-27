@@ -9,22 +9,23 @@
 from __future__ import annotations
 
 from loom.assembly import (
+    AlignedRefs,
     Attr,
     AttrDict,
+    AttrParams,
     AttrTable,
     BindingList,
     BlockArgs,
     BlockRef,
     Clause,
-    DescriptorRef,
     Flags,
     FormatElement,
     FuncArgs,
     Glue,
     IndexList,
+    KeyRef,
     Keyword,
     OperandDict,
-    OpRef,
     OptionalGroup,
     PredicateList,
     Ref,
@@ -33,6 +34,7 @@ from loom.assembly import (
     ResultType,
     ResultTypeList,
     Scope,
+    ScopedEnumRef,
     StableKeyRef,
     SymbolRef,
     TemplateParam,
@@ -100,6 +102,27 @@ def translate_format_elements(op: Op) -> list[tuple[str, int, str]]:
                         raise ValueError(f"Op '{op.name}': Refs('{name}') references {kind.name}, expected OPERAND")
                     elements.append(("LOOM_FORMAT_KIND_OPERAND_REFS", index, "0"))
 
+                case AlignedRefs(refs=refs_field, alignments=alignments_field):
+                    refs_kind, refs_index = resolve_field(refs_field)
+                    alignments_kind, alignments_index = resolve_field(alignments_field)
+                    if refs_kind != FieldKind.OPERAND:
+                        raise ValueError(f"Op '{op.name}': AlignedRefs refs field '{refs_field}' is not an operand field")
+                    refs_desc = layout.fields[refs_field]
+                    if not refs_desc.variadic:
+                        raise ValueError(f"Op '{op.name}': AlignedRefs refs field '{refs_field}' must be variadic")
+                    if alignments_kind != FieldKind.ATTR:
+                        raise ValueError(f"Op '{op.name}': AlignedRefs alignments field '{alignments_field}' is not an attr field")
+                    alignments_attr = op.attr(alignments_field)
+                    if alignments_attr is None or alignments_attr.attr_type != "i64_array":
+                        raise ValueError(f"Op '{op.name}': AlignedRefs alignments field '{alignments_field}' must be an i64_array attr")
+                    elements.append(
+                        (
+                            "LOOM_FORMAT_KIND_ALIGNED_REFS",
+                            refs_index,
+                            str(alignments_index),
+                        )
+                    )
+
                 case TypedRefs(field=name):
                     kind, index = resolve_field(name)
                     if kind != FieldKind.OPERAND:
@@ -148,11 +171,16 @@ def translate_format_elements(op: Op) -> list[tuple[str, int, str]]:
                         raise ValueError(f"Op '{op.name}': ResultType('{name}') references {kind.name}, expected RESULT")
                     elements.append(("LOOM_FORMAT_KIND_RESULT_TYPE_SINGLE", index, "0"))
 
-                case ResultTypeList(field=name, parens=parens):
+                case ResultTypeList(field=name, parens=parens, uniform=uniform):
                     kind, index = resolve_field(name)
                     if kind != FieldKind.RESULT:
                         raise ValueError(f"Op '{op.name}': ResultTypeList('{name}') references {kind.name}, expected RESULT")
-                    payload = "LOOM_RESULT_TYPE_LIST_PARENS" if parens else "0"
+                    flags: list[str] = []
+                    if parens:
+                        flags.append("LOOM_RESULT_TYPE_LIST_PARENS")
+                    if uniform:
+                        flags.append("LOOM_RESULT_TYPE_LIST_UNIFORM")
+                    payload = " | ".join(flags) if flags else "0"
                     elements.append(("LOOM_FORMAT_KIND_RESULT_TYPE_LIST", index, payload))
 
                 case Clause(name=name, elements=inner):
@@ -258,8 +286,18 @@ def translate_format_elements(op: Op) -> list[tuple[str, int, str]]:
                         raise ValueError(f"Op '{op.name}': BlockArgs region field '{name}' is not a region field")
                     elements.append(("LOOM_FORMAT_KIND_BLOCK_ARGS", index, "0"))
 
-                case FuncArgs(field=name):
-                    elements.append(("LOOM_FORMAT_KIND_FUNC_ARGS", 0, "0"))
+                case FuncArgs(
+                    field=name,
+                    start_attr=start_attr,
+                    end_attr=end_attr,
+                ):
+                    field_index = c_queries.resolve_func_args_operand_index(op, name)
+                    start_attr_index = c_queries.resolve_attr_index(op, start_attr, "FuncArgs")
+                    end_attr_index = c_queries.resolve_attr_index(op, end_attr, "FuncArgs")
+                    data = "0"
+                    if start_attr is not None or end_attr is not None:
+                        data = f"LOOM_FORMAT_FUNC_ARGS_DATA({start_attr_index}, {end_attr_index})"
+                    elements.append(("LOOM_FORMAT_KIND_FUNC_ARGS", field_index, data))
 
                 case PredicateList(field=name):
                     _field_kind, index = resolve_field(name)
@@ -313,28 +351,22 @@ def translate_format_elements(op: Op) -> list[tuple[str, int, str]]:
                 case Flags(field=name):
                     elements.append(("LOOM_FORMAT_KIND_FLAGS", 0, "0"))
 
-                case OpRef(field=name):
+                case KeyRef(field=name):
                     kind, index = resolve_field(name)
-                    elements.append(("LOOM_FORMAT_KIND_OP_REF", index, "0"))
+                    elements.append(("LOOM_FORMAT_KIND_KEY_REF", index, "0"))
 
-                case DescriptorRef(key=key_name, ordinal=ordinal_name):
-                    key_kind, key_index = resolve_field(key_name)
-                    ordinal_kind, ordinal_index = resolve_field(ordinal_name)
-                    key_attr = op.attr(key_name)
-                    ordinal_attr = op.attr(ordinal_name)
-                    if key_kind != FieldKind.ATTR:
-                        raise ValueError(f"Op '{op.name}': DescriptorRef key field '{key_name}' is not an attr field")
-                    if key_attr is None or key_attr.attr_type != "string":
-                        raise ValueError(f"Op '{op.name}': DescriptorRef key field '{key_name}' must be a string attr")
-                    if ordinal_kind != FieldKind.ATTR:
-                        raise ValueError(f"Op '{op.name}': DescriptorRef ordinal field '{ordinal_name}' is not an attr field")
-                    if ordinal_attr is None or ordinal_attr.attr_type != "i64":
-                        raise ValueError(f"Op '{op.name}': DescriptorRef ordinal field '{ordinal_name}' must be an i64 attr")
+                case ScopedEnumRef(field=name):
+                    kind, index = resolve_field(name)
+                    attr = op.attr(name)
+                    if kind != FieldKind.ATTR:
+                        raise ValueError(f"Op '{op.name}': ScopedEnumRef field '{name}' is not an attr field")
+                    if attr is None or attr.attr_type != "scoped_enum":
+                        raise ValueError(f"Op '{op.name}': ScopedEnumRef field '{name}' must be a scoped_enum attr")
                     elements.append(
                         (
-                            "LOOM_FORMAT_KIND_DESCRIPTOR_REF",
-                            key_index,
-                            str(ordinal_index),
+                            "LOOM_FORMAT_KIND_SCOPED_ENUM_REF",
+                            index,
+                            "0",
                         )
                     )
 
@@ -362,6 +394,15 @@ def translate_format_elements(op: Op) -> list[tuple[str, int, str]]:
                 case TemplateParam(field=name):
                     kind, index = resolve_field(name)
                     elements.append(("LOOM_FORMAT_KIND_TEMPLATE_PARAM", index, "0"))
+
+                case AttrParams(field=name):
+                    kind, index = resolve_field(name)
+                    attr = op.attr(name)
+                    if kind != FieldKind.ATTR:
+                        raise ValueError(f"Op '{op.name}': AttrParams field '{name}' is not an attr field")
+                    if attr is None or attr.attr_type != "parameterized" or attr.parameterized_attr is None:
+                        raise ValueError(f"Op '{op.name}': AttrParams field '{name}' must be a parameterized attr constrained to one exact family")
+                    elements.append(("LOOM_FORMAT_KIND_ATTR_PARAMS", index, "0"))
 
                 case TemplateParamFlags(param=param_name, flags=flags_name):
                     kind, index = resolve_field(param_name)

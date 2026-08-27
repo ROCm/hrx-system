@@ -7,13 +7,13 @@ llvmir.target<object> @target {
 }
 func.def target(@target) @prefetch_static(%input: buffer) {
   %base = index.constant 16 : offset
-  %input_view = buffer.view %input[%base] : buffer -> view<64xi32, #dense>
-  view.prefetch %input_view[4] {intent = read, locality = l1} : view<64xi32, #dense>
+  %input_view = buffer.view %input[%base] : buffer -> view<64xi32>
+  view.prefetch %input_view[4] {intent = read, locality = l1} : view<64xi32>
   func.return
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @prefetch_static(%input: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @prefetch_static(%input: reg<llvmir.ptr>) asm {
   return
 }
 
@@ -28,14 +28,14 @@ kernel.def target(@target) @prefetch_workgroup_id() {
   kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%input: buffer) {
   %workgroup = kernel.workgroup.id<x> : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<1025xi32, #dense>
-  view.prefetch %input_view[%workgroup] {intent = read, locality = l2} : view<1025xi32, #dense>
+  %input_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%input_base] : buffer -> view<1025xi32>
+  view.prefetch %input_view[%workgroup] {intent = read, locality = l2} : view<1025xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @prefetch_workgroup_id() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1025, 1, 1) @prefetch_workgroup_id() asm {
   return
 }
 
@@ -58,14 +58,14 @@ kernel.def target(@target) @prefetch_fixed_query_offset() {
   %offset0 = index.add %workgroup_size_x, %workgroup_size_y : index
   %offset1 = index.add %offset0, %subgroup_size : index
   %offset = index.add %offset1, %subgroup_count : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
-  view.prefetch %input_view[%offset] {intent = read, locality = l1} : view<64xi32, #dense>
+  %input_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%input_base] : buffer -> view<64xi32>
+  view.prefetch %input_view[%offset] {intent = read, locality = l1} : view<64xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(8, 4, 1) @prefetch_fixed_query_offset() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) @prefetch_fixed_query_offset() asm {
   return
 }
 
@@ -81,13 +81,13 @@ kernel.def target(@target) @prefetch_workitem_dropped() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
-  view.prefetch %input_view[%lane] {intent = read, locality = l1} : view<64xi32, #dense>
+  %input_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%input_base] : buffer -> view<64xi32>
+  view.prefetch %input_view[%lane] {intent = read, locality = l1} : view<64xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @prefetch_workitem_dropped() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @prefetch_workitem_dropped() asm {
   return
 }

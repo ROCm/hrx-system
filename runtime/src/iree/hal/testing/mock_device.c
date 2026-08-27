@@ -14,9 +14,6 @@
 // Mock executable support
 //===----------------------------------------------------------------------===//
 
-static const iree_string_view_t iree_hal_mock_executable_format =
-    IREE_SVL("mock-executable");
-
 typedef struct iree_hal_mock_executable_function_record_t {
   // Number of 32-bit constant words reflected for the function.
   uint8_t constant_count;
@@ -28,16 +25,38 @@ typedef struct iree_hal_mock_executable_function_record_t {
   uint8_t workgroup_size[3];
   // Byte length of the function name in the trailing name storage.
   uint8_t name_length;
-  // Reserved byte; must be zero.
-  uint8_t reserved;
+  // Native ABI byte offset for one optional reflected buffer binding.
+  uint8_t native_abi_offset;
+  // Native ABI byte size for the optional reflected buffer binding.
+  uint16_t parameter_size;
 } iree_hal_mock_executable_function_record_t;
+
+static_assert(sizeof(iree_hal_mock_executable_function_record_t) == 10,
+              "mock executable metadata must have a stable byte layout");
+
+typedef struct iree_hal_mock_executable_parameter_metadata_t {
+  // Native ABI byte offset for the reflected buffer binding.
+  uint8_t native_abi_offset;
+  // Native ABI byte size for the reflected buffer binding.
+  uint16_t size;
+} iree_hal_mock_executable_parameter_metadata_t;
 
 typedef struct iree_hal_mock_executable_t {
   iree_hal_resource_t resource;
   iree_allocator_t host_allocator;
   iree_host_size_t function_count;
+  // Function metadata records indexed by executable function ordinal.
   iree_hal_executable_function_info_t functions[];
 } iree_hal_mock_executable_t;
+
+static iree_hal_mock_executable_parameter_metadata_t*
+iree_hal_mock_executable_parameter_metadata(
+    iree_hal_mock_executable_t* executable) {
+  return (
+      iree_hal_mock_executable_parameter_metadata_t*)(executable->functions +
+                                                      executable
+                                                          ->function_count);
+}
 
 static const iree_hal_executable_vtable_t iree_hal_mock_executable_vtable;
 
@@ -48,30 +67,23 @@ static iree_hal_mock_executable_t* iree_hal_mock_executable_cast(
 }
 
 static iree_status_t iree_hal_mock_executable_create(
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_load_params_t* load_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
-  IREE_ASSERT_ARGUMENT(executable_params);
+  IREE_ASSERT_ARGUMENT(load_params);
   IREE_ASSERT_ARGUMENT(out_executable);
   *out_executable = NULL;
 
-  if (!iree_string_view_equal(executable_params->executable_format,
-                              iree_hal_mock_executable_format)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unsupported mock executable format '%.*s'",
-                            (int)executable_params->executable_format.size,
-                            executable_params->executable_format.data);
-  }
-  if (IREE_UNLIKELY(executable_params->executable_data.data_length <
+  if (IREE_UNLIKELY(load_params->executable_data.data_length <
                     sizeof(uint32_t))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "mock executable data is too short");
   }
   uint32_t function_count = 0;
-  memcpy(&function_count, executable_params->executable_data.data,
+  memcpy(&function_count, load_params->executable_data.data,
          sizeof(function_count));
   iree_const_byte_span_t function_data = iree_make_const_byte_span(
-      executable_params->executable_data.data + sizeof(function_count),
-      executable_params->executable_data.data_length - sizeof(function_count));
+      load_params->executable_data.data + sizeof(function_count),
+      load_params->executable_data.data_length - sizeof(function_count));
   iree_host_size_t function_record_data_length = 0;
   if (IREE_UNLIKELY(!iree_host_size_checked_mul(
                         function_count,
@@ -92,11 +104,6 @@ static iree_status_t iree_hal_mock_executable_create(
   for (iree_host_size_t i = 0; i < function_count; ++i) {
     const iree_hal_mock_executable_function_record_t* record =
         &function_records[i];
-    if (IREE_UNLIKELY(record->reserved != 0)) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "mock executable function metadata reserved byte "
-                              "must be zero");
-    }
     if (IREE_UNLIKELY(!iree_host_size_checked_add(
             expected_name_storage_length, record->name_length,
             &expected_name_storage_length))) {
@@ -110,13 +117,20 @@ static iree_status_t iree_hal_mock_executable_create(
   }
 
   iree_host_size_t function_info_size = 0;
+  iree_host_size_t parameter_metadata_size = 0;
   iree_host_size_t total_size = 0;
   if (IREE_UNLIKELY(
           !iree_host_size_checked_mul(
               function_count, sizeof(iree_hal_executable_function_info_t),
               &function_info_size) ||
+          !iree_host_size_checked_mul(
+              function_count,
+              sizeof(iree_hal_mock_executable_parameter_metadata_t),
+              &parameter_metadata_size) ||
           !iree_host_size_checked_add(sizeof(iree_hal_mock_executable_t),
                                       function_info_size, &total_size) ||
+          !iree_host_size_checked_add(total_size, parameter_metadata_size,
+                                      &total_size) ||
           !iree_host_size_checked_add(total_size, name_storage.data_length,
                                       &total_size))) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -131,8 +145,8 @@ static iree_status_t iree_hal_mock_executable_create(
   executable->host_allocator = host_allocator;
   executable->function_count = function_count;
 
-  char* executable_name_storage =
-      (char*)executable + sizeof(*executable) + function_info_size;
+  char* executable_name_storage = (char*)executable + sizeof(*executable) +
+                                  function_info_size + parameter_metadata_size;
   if (name_storage.data_length != 0) {
     memcpy(executable_name_storage, name_storage.data,
            name_storage.data_length);
@@ -148,10 +162,15 @@ static iree_status_t iree_hal_mock_executable_create(
     executable->functions[i].constant_byte_length =
         record->constant_count * sizeof(uint32_t);
     executable->functions[i].binding_count = record->binding_count;
-    executable->functions[i].parameter_count = 0;
+    executable->functions[i].parameter_count = record->parameter_size ? 1 : 0;
     executable->functions[i].workgroup_size[0] = record->workgroup_size[0];
     executable->functions[i].workgroup_size[1] = record->workgroup_size[1];
     executable->functions[i].workgroup_size[2] = record->workgroup_size[2];
+    iree_hal_mock_executable_parameter_metadata(executable)[i] =
+        (iree_hal_mock_executable_parameter_metadata_t){
+            .native_abi_offset = record->native_abi_offset,
+            .size = record->parameter_size,
+        };
   }
 
   *out_executable = (iree_hal_executable_t*)executable;
@@ -193,10 +212,30 @@ static iree_status_t iree_hal_mock_executable_function_parameters(
     iree_hal_executable_t* base_executable,
     iree_hal_executable_function_t function, iree_host_size_t capacity,
     iree_hal_executable_function_parameter_t* out_parameters) {
-  (void)base_executable;
-  (void)function;
-  (void)capacity;
-  (void)out_parameters;
+  iree_hal_mock_executable_t* executable =
+      iree_hal_mock_executable_cast(base_executable);
+  if (!iree_hal_executable_function_is_index_in_range(
+          function, executable->function_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE);
+  }
+  const uint32_t function_ordinal =
+      iree_hal_executable_function_index(function);
+  const iree_hal_mock_executable_parameter_metadata_t* parameter_metadata =
+      &iree_hal_mock_executable_parameter_metadata(
+          executable)[function_ordinal];
+  if (!parameter_metadata->size) return iree_ok_status();
+  if (capacity < 1 || !out_parameters) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "mock executable parameter output too small");
+  }
+  out_parameters[0] = (iree_hal_executable_function_parameter_t){
+      .type = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BINDING,
+      .flags = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NATIVE_ABI_OFFSET,
+      .size = parameter_metadata->size,
+      .offset = 0,
+      .native_abi_offset = parameter_metadata->native_abi_offset,
+      .name = iree_string_view_empty(),
+  };
   return iree_ok_status();
 }
 
@@ -256,92 +295,6 @@ static const iree_hal_executable_vtable_t iree_hal_mock_executable_vtable = {
     .global_buffer = iree_hal_mock_executable_global_buffer,
 };
 
-typedef struct iree_hal_mock_executable_cache_t {
-  iree_hal_resource_t resource;
-  iree_allocator_t host_allocator;
-} iree_hal_mock_executable_cache_t;
-
-static const iree_hal_executable_cache_vtable_t
-    iree_hal_mock_executable_cache_vtable;
-
-static iree_hal_mock_executable_cache_t* iree_hal_mock_executable_cache_cast(
-    iree_hal_executable_cache_t* base_executable_cache) {
-  IREE_HAL_ASSERT_TYPE(base_executable_cache,
-                       &iree_hal_mock_executable_cache_vtable);
-  return (iree_hal_mock_executable_cache_t*)base_executable_cache;
-}
-
-static iree_status_t iree_hal_mock_executable_cache_create(
-    iree_allocator_t host_allocator,
-    iree_hal_executable_cache_t** out_executable_cache) {
-  IREE_ASSERT_ARGUMENT(out_executable_cache);
-  *out_executable_cache = NULL;
-  iree_hal_mock_executable_cache_t* executable_cache = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      host_allocator, sizeof(*executable_cache), (void**)&executable_cache));
-  memset(executable_cache, 0, sizeof(*executable_cache));
-  iree_hal_resource_initialize(&iree_hal_mock_executable_cache_vtable,
-                               &executable_cache->resource);
-  executable_cache->host_allocator = host_allocator;
-  *out_executable_cache = (iree_hal_executable_cache_t*)executable_cache;
-  return iree_ok_status();
-}
-
-static void iree_hal_mock_executable_cache_destroy(
-    iree_hal_executable_cache_t* base_executable_cache) {
-  iree_hal_mock_executable_cache_t* executable_cache =
-      iree_hal_mock_executable_cache_cast(base_executable_cache);
-  iree_allocator_t host_allocator = executable_cache->host_allocator;
-  iree_allocator_free(host_allocator, executable_cache);
-}
-
-static iree_status_t iree_hal_mock_executable_cache_infer_format(
-    iree_hal_executable_cache_t* base_executable_cache,
-    iree_hal_executable_caching_mode_t caching_mode,
-    iree_const_byte_span_t executable_data,
-    iree_host_size_t executable_format_capacity, char* executable_format,
-    iree_host_size_t* out_inferred_size) {
-  (void)base_executable_cache;
-  (void)caching_mode;
-  (void)executable_data;
-  if (iree_hal_mock_executable_format.size >= executable_format_capacity) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "executable format buffer too small");
-  }
-  memcpy(executable_format, iree_hal_mock_executable_format.data,
-         iree_hal_mock_executable_format.size + /*NUL*/ 1);
-  *out_inferred_size = executable_data.data_length;
-  return iree_ok_status();
-}
-
-static bool iree_hal_mock_executable_cache_can_prepare_format(
-    iree_hal_executable_cache_t* base_executable_cache,
-    iree_hal_executable_caching_mode_t caching_mode,
-    iree_string_view_t executable_format) {
-  (void)base_executable_cache;
-  (void)caching_mode;
-  return iree_string_view_equal(executable_format,
-                                iree_hal_mock_executable_format);
-}
-
-static iree_status_t iree_hal_mock_executable_cache_prepare_executable(
-    iree_hal_executable_cache_t* base_executable_cache,
-    const iree_hal_executable_params_t* executable_params,
-    iree_hal_executable_t** out_executable) {
-  iree_hal_mock_executable_cache_t* executable_cache =
-      iree_hal_mock_executable_cache_cast(base_executable_cache);
-  return iree_hal_mock_executable_create(
-      executable_params, executable_cache->host_allocator, out_executable);
-}
-
-static const iree_hal_executable_cache_vtable_t
-    iree_hal_mock_executable_cache_vtable = {
-        .destroy = iree_hal_mock_executable_cache_destroy,
-        .infer_format = iree_hal_mock_executable_cache_infer_format,
-        .can_prepare_format = iree_hal_mock_executable_cache_can_prepare_format,
-        .prepare_executable = iree_hal_mock_executable_cache_prepare_executable,
-};
-
 //===----------------------------------------------------------------------===//
 // iree_hal_mock_device_t
 //===----------------------------------------------------------------------===//
@@ -356,8 +309,8 @@ typedef struct iree_hal_mock_device_t {
   // Status returned by assign_topology_info.
   iree_status_code_t assign_topology_info_status_code;
 
-  // True when create_executable_cache returns mock executable caches.
-  bool executable_cache_enabled;
+  // True when metadata-only mock executable loading is enabled.
+  bool executable_loading_enabled;
 
   // Immutable device facts captured at creation time.
   iree_hal_device_spec_t* device_spec;
@@ -380,6 +333,51 @@ void iree_hal_mock_device_options_initialize(
   memset(out_options, 0, sizeof(*out_options));
 }
 
+static iree_status_t iree_hal_mock_device_default_spec_create(
+    const iree_hal_mock_device_options_t* options,
+    iree_allocator_t host_allocator, iree_hal_device_spec_t** out_spec) {
+  const iree_hal_physical_device_spec_t physical_device = {
+      .identity =
+          {
+              .display_name = options->identifier,
+              .backend_path = options->identifier,
+          },
+      .partition_count = 1,
+      .physical_device_affinity = 1ull,
+  };
+  const iree_hal_device_identity_spec_t identity = {
+      .logical_device_id = options->identifier,
+      .display_name = options->identifier,
+      .driver_id = IREE_SV("mock"),
+      .backend_id = IREE_SV("mock"),
+      .physical_device_count = 1,
+      .physical_devices = &physical_device,
+      .flags = IREE_HAL_DEVICE_IDENTITY_FLAG_NONE,
+  };
+  const iree_hal_executable_target_t executable_target = {
+      .family = IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_FAMILY),
+      .target_key = IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_KEY),
+      .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_VIRTUAL,
+      .priority = 100,
+      .physical_device_affinity = 1ull,
+      .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+  };
+
+  iree_hal_device_spec_builder_t builder;
+  iree_hal_device_spec_builder_initialize(host_allocator, &builder);
+  iree_status_t status =
+      iree_hal_device_spec_builder_set_identity(&builder, &identity);
+  if (iree_status_is_ok(status) && options->executable_loading_enabled) {
+    status = iree_hal_device_spec_builder_add_executable_target(
+        &builder, &executable_target);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_spec_builder_finalize(&builder, out_spec);
+  }
+  iree_hal_device_spec_builder_deinitialize(&builder);
+  return status;
+}
+
 iree_status_t iree_hal_mock_device_create(
     const iree_hal_mock_device_options_t* options,
     iree_allocator_t host_allocator, iree_hal_device_t** out_device) {
@@ -396,7 +394,7 @@ iree_status_t iree_hal_mock_device_create(
   device->host_allocator = host_allocator;
   device->assign_topology_info_status_code =
       options->assign_topology_info_status_code;
-  device->executable_cache_enabled = options->executable_cache_enabled;
+  device->executable_loading_enabled = options->executable_loading_enabled;
 
   // Copy identifier into trailing storage.
   iree_string_view_append_to_buffer(
@@ -408,9 +406,8 @@ iree_status_t iree_hal_mock_device_create(
     device->device_spec = options->device_spec;
     iree_hal_device_spec_retain(device->device_spec);
   } else {
-    status = iree_hal_device_spec_create_minimal(
-        device->identifier, device->identifier, IREE_SV("mock"),
-        IREE_SV("mock"), host_allocator, &device->device_spec);
+    status = iree_hal_mock_device_default_spec_create(options, host_allocator,
+                                                      &device->device_spec);
   }
   if (!iree_status_is_ok(status)) {
     iree_hal_device_release((iree_hal_device_t*)device);
@@ -529,22 +526,29 @@ static iree_status_t iree_hal_mock_device_create_command_buffer(
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED);
 }
 
-static iree_status_t iree_hal_mock_device_create_event(
+static iree_status_t iree_hal_mock_device_load_executable(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_event_flags_t flags, iree_hal_event_t** out_event) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED);
-}
-
-static iree_status_t iree_hal_mock_device_create_executable_cache(
-    iree_hal_device_t* base_device, iree_string_view_t identifier,
-    iree_hal_executable_cache_t** out_executable_cache) {
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
+    iree_hal_executable_t** out_executable) {
   iree_hal_mock_device_t* device = iree_hal_mock_device_cast(base_device);
-  if (device->executable_cache_enabled) {
-    (void)identifier;
-    return iree_hal_mock_executable_cache_create(device->host_allocator,
-                                                 out_executable_cache);
+  if (!device->executable_loading_enabled) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "mock executable loading is not enabled");
   }
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED);
+  if (!iree_string_view_equal(
+          target->family, IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_FAMILY)) ||
+      !iree_string_view_equal(target->target_key,
+                              IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_KEY)) ||
+      target->kind != IREE_HAL_EXECUTABLE_TARGET_KIND_VIRTUAL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported mock executable target `%.*s:%.*s`",
+                            (int)target->family.size, target->family.data,
+                            (int)target->target_key.size,
+                            target->target_key.data);
+  }
+  return iree_hal_mock_executable_create(load_params, device->host_allocator,
+                                         out_executable);
 }
 
 static iree_status_t iree_hal_mock_device_import_file(
@@ -671,6 +675,46 @@ static iree_status_t iree_hal_mock_device_queue_execute(
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED);
 }
 
+static iree_status_t iree_hal_mock_device_queue_atomic_wait(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_wait_params_t params) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "mock devices do not support atomic waits");
+}
+
+static iree_status_t iree_hal_mock_device_queue_atomic_store(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_store_params_t params) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "mock devices do not support atomic stores");
+}
+
+static iree_status_t iree_hal_mock_device_queue_atomic_rmw(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_rmw_params_t params) {
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "mock devices do not support atomic read-modify-write");
+}
+
+static iree_status_t iree_hal_mock_device_queue_timestamp(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_timestamp_flags_t flags) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED);
+}
+
 static iree_status_t iree_hal_mock_device_queue_flush(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED);
@@ -725,8 +769,7 @@ static const iree_hal_device_vtable_t iree_hal_mock_device_vtable = {
     .assign_topology_info = iree_hal_mock_device_assign_topology_info,
     .create_channel = iree_hal_mock_device_create_channel,
     .create_command_buffer = iree_hal_mock_device_create_command_buffer,
-    .create_event = iree_hal_mock_device_create_event,
-    .create_executable_cache = iree_hal_mock_device_create_executable_cache,
+    .load_executable = iree_hal_mock_device_load_executable,
     .import_file = iree_hal_mock_device_import_file,
     .create_semaphore = iree_hal_mock_device_create_semaphore,
     .query_semaphore_compatibility =
@@ -742,6 +785,10 @@ static const iree_hal_device_vtable_t iree_hal_mock_device_vtable = {
     .queue_host_call = iree_hal_mock_device_queue_host_call,
     .queue_dispatch = iree_hal_mock_device_queue_dispatch,
     .queue_execute = iree_hal_mock_device_queue_execute,
+    .queue_atomic_wait = iree_hal_mock_device_queue_atomic_wait,
+    .queue_atomic_store = iree_hal_mock_device_queue_atomic_store,
+    .queue_atomic_rmw = iree_hal_mock_device_queue_atomic_rmw,
+    .queue_timestamp = iree_hal_mock_device_queue_timestamp,
     .queue_flush = iree_hal_mock_device_queue_flush,
     .profiling_begin = iree_hal_mock_device_profiling_begin,
     .profiling_flush = iree_hal_mock_device_profiling_flush,

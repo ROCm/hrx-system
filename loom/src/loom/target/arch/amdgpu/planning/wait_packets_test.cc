@@ -9,7 +9,6 @@
 #include <string>
 
 #include "iree/testing/gtest.h"
-#include "iree/testing/status_matchers.h"
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
@@ -73,7 +72,7 @@ class AmdgpuWaitPacketTest : public ::testing::Test {
                    << ToString(expected.descriptor_set_key);
     }
     loom_amdgpu_wait_packet_selection_t selection = {};
-    IREE_ASSERT_OK(loom_amdgpu_wait_packet_select_counter_mask(
+    ASSERT_TRUE(loom_amdgpu_wait_packet_try_select_counter_mask(
         descriptor_set, expected.counter_mask, /*target_count=*/0, &selection));
 
     EXPECT_EQ(selection.counter_mask, expected.counter_mask);
@@ -152,7 +151,7 @@ TEST_F(AmdgpuWaitPacketTest, ClampsTargetCountToNoWaitEncoding) {
   ASSERT_NE(descriptor_set, nullptr);
 
   loom_amdgpu_wait_packet_selection_t selection = {};
-  IREE_ASSERT_OK(loom_amdgpu_wait_packet_select_counter_mask(
+  ASSERT_TRUE(loom_amdgpu_wait_packet_try_select_counter_mask(
       descriptor_set, LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD,
       /*target_count=*/UINT16_MAX, &selection));
 
@@ -193,6 +192,24 @@ TEST_F(AmdgpuWaitPacketTest, SelectsRdna4SplitWaits) {
     SCOPED_TRACE(ToString(expected.descriptor_set_key));
     ExpectSelection(expected);
   }
+}
+
+TEST_F(AmdgpuWaitPacketTest, SelectsGfx125xTranslationWait) {
+  ExpectSelection({
+      /*.descriptor_set_key=*/IREE_SV("amdgpu.rdna4.gfx125x.core"),
+      /*.counter_mask=*/LOOM_AMDGPU_WAIT_COUNTER_MASK_X,
+      /*.descriptor_ref=*/LOOM_AMDGPU_DESCRIPTOR_REF_S_WAIT_XCNT,
+      /*.immediate=*/{IREE_SV("xcnt"), 0},
+  });
+
+  const loom_low_descriptor_set_t* rdna4_descriptor_set =
+      loom_low_descriptor_registry_lookup(&low_registry_.registry,
+                                          IREE_SV("amdgpu.rdna4.core"));
+  ASSERT_NE(rdna4_descriptor_set, nullptr);
+  loom_amdgpu_wait_packet_selection_t selection = {};
+  EXPECT_FALSE(loom_amdgpu_wait_packet_try_select_counter_mask(
+      rdna4_descriptor_set, LOOM_AMDGPU_WAIT_COUNTER_MASK_X,
+      /*target_count=*/0, &selection));
 }
 
 }  // namespace

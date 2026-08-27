@@ -25,6 +25,7 @@ BAZEL_WRAPPERS = (
     "iree-bazel-query",
     "iree-bazel-cquery",
     "iree-bazel-info",
+    "iree-bazel-shutdown",
     "iree-bazel-run",
     "iree-bazel-try",
     "iree-bazel-fuzz",
@@ -42,6 +43,7 @@ def run_dry_run_scenario(checkout: Path) -> None:
     smoke_test_lib.run_bin_wrapper(
         checkout, "iree-bazel-build", ["-n", "--", "--dry-run"]
     )
+    smoke_test_lib.run_bin_wrapper(checkout, "iree-bazel-shutdown", ["-n"])
     smoke_test_lib.assert_absent(checkout / ".bazelrc.configured")
     smoke_test_lib.assert_absent(checkout / ".venv")
     smoke_test_lib.assert_absent(checkout / ".iree")

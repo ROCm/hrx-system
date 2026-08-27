@@ -64,12 +64,12 @@ static const char kSourceText[] =
     "  %output_aligned = buffer.assume.alignment %output {minimum_alignment = "
     "4} : buffer\n"
     "  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : "
-    "buffer -> view<1xi32, #dense>\n"
-    "  %loaded = view.load %input_view[0] : view<1xi32, #dense> -> i32\n"
+    "buffer -> view<1xi32>\n"
+    "  %loaded = view.load %input_view[0] : view<1xi32> -> i32\n"
     "  %doubled = scalar.addi %loaded, %loaded : i32\n"
     "  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : "
-    "buffer -> view<1xi32, #dense>\n"
-    "  view.store %doubled, %output_view[0] : i32, view<1xi32, #dense>\n"
+    "buffer -> view<1xi32>\n"
+    "  view.store %doubled, %output_view[0] : i32, view<1xi32>\n"
     "  kernel.return\n"
     "}\n";
 
@@ -100,9 +100,6 @@ typedef struct emit_spirv_vulkaninfo_state_t {
 
   // Imported SPIR-V target profile.
   loomc_target_profile_t* target_profile;
-
-  // Invocation-ready target selection derived from the imported profile.
-  loomc_target_selection_t* target_selection;
 
   // Immutable prepared compiler handle.
   loomc_compiler_t* compiler;
@@ -148,7 +145,6 @@ static void emit_spirv_vulkaninfo_state_deinitialize(
   loomc_result_release(state->result);
   loomc_pass_program_release(state->pass_program);
   loomc_compiler_release(state->compiler);
-  loomc_target_selection_release(state->target_selection);
   loomc_target_profile_release(state->target_profile);
   loomc_module_release(state->module);
   loomc_source_release(state->module_source);
@@ -281,9 +277,6 @@ static loomc_status_t import_target_profile(
   }
   if (loomc_status_is_ok(status)) {
     emit_spirv_vulkaninfo_state_reset_result(state);
-    status = loomc_target_selection_create_from_profile(
-        state->target_profile, loomc_allocator_system(),
-        &state->target_selection);
   }
   return status;
 }
@@ -328,15 +321,9 @@ static loomc_status_t create_compiler_and_target_pipeline(
     emit_spirv_vulkaninfo_state_t* state) {
   loomc_status_t status = loomc_compiler_create(
       state->context, NULL, loomc_allocator_system(), &state->compiler);
-  loomc_target_selection_options_t target_options = {
-      .type = LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      .structure_size = sizeof(target_options),
-      .target_selection = state->target_selection,
-  };
   loomc_target_pipeline_options_t pipeline_options = {
       .type = LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
       .structure_size = sizeof(pipeline_options),
-      .next = &target_options,
       .identifier = loomc_make_cstring_view("vulkaninfo-spirv-prepared-low"),
       .kind = LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
       .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
@@ -390,10 +377,15 @@ static loomc_status_t deserialize_source(emit_spirv_vulkaninfo_state_t* state) {
 
 static loomc_status_t compile_module_to_prepared_low(
     emit_spirv_vulkaninfo_state_t* state) {
-  loomc_target_selection_options_t target_options = {
-      .type = LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
+  const loomc_target_specialization_t specialization = {
+      .function_symbol = loomc_make_cstring_view("double_i32_at_byte_offset"),
+      .target_profile = state->target_profile,
+  };
+  loomc_target_specialization_options_t target_options = {
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
       .structure_size = sizeof(target_options),
-      .target_selection = state->target_selection,
+      .specializations = &specialization,
+      .specialization_count = 1,
   };
   loomc_compile_options_t compile_options = {
       .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
@@ -415,15 +407,9 @@ static loomc_status_t compile_module_to_prepared_low(
 
 static loomc_status_t emit_spirv_artifact(
     emit_spirv_vulkaninfo_state_t* state) {
-  loomc_target_selection_options_t target_options = {
-      .type = LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      .structure_size = sizeof(target_options),
-      .target_selection = state->target_selection,
-  };
   loomc_spirv_emit_options_t spirv_options = {
       .type = LOOMC_STRUCTURE_TYPE_SPIRV_EMIT_OPTIONS,
       .structure_size = sizeof(spirv_options),
-      .next = &target_options,
   };
   const loomc_option_entry_t emit_entries[] = {
       {

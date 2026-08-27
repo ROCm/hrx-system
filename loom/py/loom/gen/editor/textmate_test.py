@@ -9,11 +9,17 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterator
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+from unittest import mock
+
+import pytest
 
 from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.dialect.buffer import ALL_BUFFER_OPS
 from loom.dialect.check import ALL_CHECK_OPS
+from loom.dialect.command import ALL_COMMAND_OPS
 from loom.dialect.config import ALL_CONFIG_OPS
 from loom.dialect.encoding import ALL_ENCODING_OPS
 from loom.dialect.func import ALL_FUNC_OPS
@@ -29,6 +35,7 @@ from loom.dialect.scf import ALL_SCF_OPS
 from loom.dialect.test import ALL_TEST_OPS
 from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.view import ALL_VIEW_OPS
+from loom.gen.editor import textmate
 from loom.gen.editor.textmate import (
     generate_all_grammars,
     generate_loom_grammar,
@@ -45,6 +52,7 @@ ALL_OPS = (
     *ALL_GLOBAL_OPS,
     *ALL_SCF_OPS,
     *ALL_CHECK_OPS,
+    *ALL_COMMAND_OPS,
     *ALL_CONFIG_OPS,
     *ALL_BUFFER_OPS,
     *ALL_VIEW_OPS,
@@ -82,6 +90,8 @@ def test_loom_grammar_uses_generated_op_and_type_metadata() -> None:
     assert "addi" in serialized
     assert "func" in serialized
     assert "return" in serialized
+    assert "command" in serialized
+    assert "program\\\\.launch" in serialized
     type_pattern = grammar["repository"]["types"]["patterns"][0]["match"]  # type: ignore[index]
     assert "hal\\.buffer" in type_pattern
     assert "tile" in serialized
@@ -137,3 +147,44 @@ def test_regexes_stay_line_local_for_editor_tokenization() -> None:
         for regex in _walk_regexes(grammar):
             for fragment in forbidden_fragments:
                 assert fragment not in regex
+
+
+def test_checked_in_file_set_owns_only_generated_grammars(tmp_path: Path) -> None:
+    expected_path = "loom/src/loom/editor/textmate/loom.tmLanguage.json"
+    expected_file = tmp_path / expected_path
+    expected_file.parent.mkdir(parents=True)
+    expected_file.write_text("expected\n", encoding="utf-8")
+    obsolete_path = "loom/src/loom/editor/textmate/obsolete.tmLanguage.json"
+    (tmp_path / obsolete_path).write_text("obsolete\n", encoding="utf-8")
+    neighbor_path = expected_file.parent / "README.md"
+    neighbor_path.write_text("authored\n", encoding="utf-8")
+    with mock.patch.object(
+        textmate,
+        "_output_files",
+        return_value={expected_path: "expected\n"},
+    ):
+        generated_file_set = textmate.checked_in_file_set(tmp_path)
+
+    assert generated_file_set.output_paths == (expected_path,)
+    assert generated_file_set.obsolete_paths == (obsolete_path,)
+    assert neighbor_path.is_file()
+
+
+def test_main_requires_explicit_maintenance_mode() -> None:
+    with pytest.raises(SystemExit, match="2"):
+        textmate.main([])
+
+
+def test_main_selects_check_and_update_modes() -> None:
+    with mock.patch.object(
+        textmate,
+        "maintain_checked_in_files",
+        return_value=SimpleNamespace(ok=True),
+    ) as maintain_checked_in_files:
+        assert textmate.main(["--check"]) == 0
+        assert textmate.main(["--in-place"]) == 0
+
+    assert maintain_checked_in_files.call_args_list == [
+        mock.call("check"),
+        mock.call("update"),
+    ]

@@ -52,7 +52,7 @@ typedef size_t loomc_host_size_t;
 /// Small status codes are encoded directly in the pointer value. Rich status
 /// modes may allocate storage behind the handle and require
 /// `loomc_status_free` or `loomc_status_consume_code`.
-typedef struct loomc_status_handle_t* loomc_status_t;
+typedef struct iree_status_handle_t* loomc_status_t;
 
 /// Non-owning string view over bytes that need not be NUL-terminated.
 ///
@@ -161,6 +161,18 @@ static inline loomc_byte_span_t loomc_make_byte_span(
   return value;
 }
 
+/// Three-dimensional unsigned extent used by Loom C API structs.
+typedef struct loomc_dimension3_t {
+  /// Extent along the x dimension.
+  uint32_t x;
+
+  /// Extent along the y dimension.
+  uint32_t y;
+
+  /// Extent along the z dimension.
+  uint32_t z;
+} loomc_dimension3_t;
+
 /// Structure type values used by extensible public descriptors.
 ///
 /// Extensible descriptors store one of these values in their `type` field and
@@ -212,11 +224,8 @@ typedef enum loomc_structure_type_e {
   /// `loomc_spirv_emit_options_t`.
   LOOMC_STRUCTURE_TYPE_SPIRV_EMIT_OPTIONS = 14,
 
-  /// `loomc_target_profile_options_t`.
-  LOOMC_STRUCTURE_TYPE_TARGET_PROFILE_OPTIONS = 15,
-
-  /// `loomc_target_selection_options_t`.
-  LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS = 16,
+  /// `loomc_target_specialization_options_t`.
+  LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS = 16,
 
   /// `loomc_spirv_profile_options_t`.
   LOOMC_STRUCTURE_TYPE_SPIRV_PROFILE_OPTIONS = 17,
@@ -266,11 +275,14 @@ typedef enum loomc_structure_type_e {
   /// `loomc_sanitizer_options_t`.
   LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS = 32,
 
-  /// `loomc_launch_config_eval_options_t`.
-  LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG_EVAL_OPTIONS = 33,
-
   /// `loomc_launch_config_t`.
   LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG = 34,
+
+  /// `loomc_amdgpu_iree_hal_profile_options_t`.
+  LOOMC_STRUCTURE_TYPE_AMDGPU_IREE_HAL_PROFILE_OPTIONS = 35,
+
+  /// `loomc_link_dependency_analysis_options_t`.
+  LOOMC_STRUCTURE_TYPE_LINK_DEPENDENCY_ANALYSIS_OPTIONS = 36,
 } loomc_structure_type_t;
 
 /// One loose string option entry.
@@ -315,7 +327,8 @@ typedef struct loomc_option_dict_t {
 } loomc_option_dict_t;
 
 /// Controls the behavior of a `loomc_allocator_ctl_fn_t` callback.
-typedef enum loomc_allocator_command_e {
+typedef uint32_t loomc_allocator_command_t;
+enum {
   /// Allocates memory without requiring zero initialization.
   LOOMC_ALLOCATOR_COMMAND_MALLOC = 0,
 
@@ -327,13 +340,20 @@ typedef enum loomc_allocator_command_e {
 
   /// Frees an existing allocation.
   LOOMC_ALLOCATOR_COMMAND_FREE = 3,
-} loomc_allocator_command_t;
+};
 
+#if !defined(IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_)
+/// Indicates that the shared allocator parameter structure has been declared.
+#define IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_
 /// Allocation parameters passed to `loomc_allocator_ctl_fn_t` callbacks.
-typedef struct loomc_allocator_alloc_params_t {
+typedef struct iree_allocator_alloc_params_t {
   /// Minimum allocation size in bytes.
   loomc_host_size_t byte_length;
 } loomc_allocator_alloc_params_t;
+#else
+/// Allocation parameters passed to `loomc_allocator_ctl_fn_t` callbacks.
+typedef struct iree_allocator_alloc_params_t loomc_allocator_alloc_params_t;
+#endif  // !IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_
 
 /// Host allocation control callback.
 ///

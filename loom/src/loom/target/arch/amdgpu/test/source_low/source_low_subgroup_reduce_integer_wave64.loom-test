@@ -1,0 +1,191 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
+kernel.def target(@target) @subgroup_reduce_integer_wave64() {
+  %c1 = index.constant 1 : index
+  %wave_size = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%wave_size, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.subgroup.lane.id : index
+  %c0 = index.constant 0 : index
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<64xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<9xi32>
+  %value = view.load %input_view[%lane] : view<64xi32> -> i32
+  %sum = kernel.subgroup.reduce<addi> %value : i32
+  %product = kernel.subgroup.reduce<muli> %value : i32
+  %signed_minimum = kernel.subgroup.reduce<minsi> %value : i32
+  %signed_maximum = kernel.subgroup.reduce<maxsi> %value : i32
+  %unsigned_minimum = kernel.subgroup.reduce<minui> %value : i32
+  %unsigned_maximum = kernel.subgroup.reduce<maxui> %value : i32
+  %bitwise_and = kernel.subgroup.reduce<andi> %value : i32
+  %bitwise_or = kernel.subgroup.reduce<ori> %value : i32
+  %bitwise_xor = kernel.subgroup.reduce<xori> %value : i32
+  %is_leader = index.cmp eq, %lane, %c0 : index
+  scf.if %is_leader {
+    view.store %sum, %output_view[0] : i32, view<9xi32>
+    view.store %product, %output_view[1] : i32, view<9xi32>
+    view.store %signed_minimum, %output_view[2] : i32, view<9xi32>
+    view.store %signed_maximum, %output_view[3] : i32, view<9xi32>
+    view.store %unsigned_minimum, %output_view[4] : i32, view<9xi32>
+    view.store %unsigned_maximum, %output_view[5] : i32, view<9xi32>
+    view.store %bitwise_and, %output_view[6] : i32, view<9xi32>
+    view.store %bitwise_or, %output_view[7] : i32, view<9xi32>
+    view.store %bitwise_xor, %output_view[8] : i32, view<9xi32>
+  }
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_reduce_integer_wave64() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 36} : reg<amdgpu.sgpr x2>
+  %23 = v_lshlrev_b32_src0_inline %lane, 2
+  %value = global_load_b32_saddr %23, %input_view
+  %25 = v_mov_b32_dpp16 %value {dpp_ctrl = 177}
+  %26 = v_add_u32 %value, %25
+  %27 = v_mov_b32_dpp16 %26 {dpp_ctrl = 78}
+  %28 = v_add_u32 %26, %27
+  %29 = v_mov_b32_dpp16 %28 {dpp_ctrl = 321}
+  %30 = v_add_u32 %28, %29
+  %31 = v_mov_b32_dpp16 %30 {dpp_ctrl = 320}
+  %32 = v_add_u32 %30, %31
+  %33 = v_permlanex16_b32_src12_inline %32, 0, 0
+  %34 = v_add_u32 %32, %33
+  %35 = v_readlane_b32_src1_inline %34, 0
+  %36 = v_add_u32 %35, %34
+  %37 = v_readlane_b32_src1_inline %36, 63
+  %sum = v_mov_b32_copy %37
+  %39 = v_mov_b32_dpp16 %value {dpp_ctrl = 177}
+  %40 = v_mul_lo_u32 %value, %39
+  %41 = v_mov_b32_dpp16 %40 {dpp_ctrl = 78}
+  %42 = v_mul_lo_u32 %40, %41
+  %43 = v_mov_b32_dpp16 %42 {dpp_ctrl = 321}
+  %44 = v_mul_lo_u32 %42, %43
+  %45 = v_mov_b32_dpp16 %44 {dpp_ctrl = 320}
+  %46 = v_mul_lo_u32 %44, %45
+  %47 = v_permlanex16_b32_src12_inline %46, 0, 0
+  %48 = v_mul_lo_u32 %46, %47
+  %49 = v_readlane_b32_src1_inline %48, 0
+  %50 = v_mul_lo_u32 %49, %48
+  %51 = v_readlane_b32_src1_inline %50, 63
+  %product = v_mov_b32_copy %51
+  %53 = v_mov_b32_dpp16 %value {dpp_ctrl = 177}
+  %54 = v_min_i32 %value, %53
+  %55 = v_mov_b32_dpp16 %54 {dpp_ctrl = 78}
+  %56 = v_min_i32 %54, %55
+  %57 = v_mov_b32_dpp16 %56 {dpp_ctrl = 321}
+  %58 = v_min_i32 %56, %57
+  %59 = v_mov_b32_dpp16 %58 {dpp_ctrl = 320}
+  %60 = v_min_i32 %58, %59
+  %61 = v_permlanex16_b32_src12_inline %60, 0, 0
+  %62 = v_min_i32 %60, %61
+  %63 = v_readlane_b32_src1_inline %62, 0
+  %64 = v_min_i32 %63, %62
+  %65 = v_readlane_b32_src1_inline %64, 63
+  %signed_minimum = v_mov_b32_copy %65
+  %67 = v_mov_b32_dpp16 %value {dpp_ctrl = 177}
+  %68 = v_max_i32 %value, %67
+  %69 = v_mov_b32_dpp16 %68 {dpp_ctrl = 78}
+  %70 = v_max_i32 %68, %69
+  %71 = v_mov_b32_dpp16 %70 {dpp_ctrl = 321}
+  %72 = v_max_i32 %70, %71
+  %73 = v_mov_b32_dpp16 %72 {dpp_ctrl = 320}
+  %74 = v_max_i32 %72, %73
+  %75 = v_permlanex16_b32_src12_inline %74, 0, 0
+  %76 = v_max_i32 %74, %75
+  %77 = v_readlane_b32_src1_inline %76, 0
+  %78 = v_max_i32 %77, %76
+  %79 = v_readlane_b32_src1_inline %78, 63
+  %signed_maximum = v_mov_b32_copy %79
+  %81 = v_mov_b32_dpp16 %value {dpp_ctrl = 177}
+  %82 = v_min_u32 %value, %81
+  %83 = v_mov_b32_dpp16 %82 {dpp_ctrl = 78}
+  %84 = v_min_u32 %82, %83
+  %85 = v_mov_b32_dpp16 %84 {dpp_ctrl = 321}
+  %86 = v_min_u32 %84, %85
+  %87 = v_mov_b32_dpp16 %86 {dpp_ctrl = 320}
+  %88 = v_min_u32 %86, %87
+  %89 = v_permlanex16_b32_src12_inline %88, 0, 0
+  %90 = v_min_u32 %88, %89
+  %91 = v_readlane_b32_src1_inline %90, 0
+  %92 = v_min_u32 %91, %90
+  %93 = v_readlane_b32_src1_inline %92, 63
+  %unsigned_minimum = v_mov_b32_copy %93
+  %95 = v_mov_b32_dpp16 %value {dpp_ctrl = 177}
+  %96 = v_max_u32 %value, %95
+  %97 = v_mov_b32_dpp16 %96 {dpp_ctrl = 78}
+  %98 = v_max_u32 %96, %97
+  %99 = v_mov_b32_dpp16 %98 {dpp_ctrl = 321}
+  %100 = v_max_u32 %98, %99
+  %101 = v_mov_b32_dpp16 %100 {dpp_ctrl = 320}
+  %102 = v_max_u32 %100, %101
+  %103 = v_permlanex16_b32_src12_inline %102, 0, 0
+  %104 = v_max_u32 %102, %103
+  %105 = v_readlane_b32_src1_inline %104, 0
+  %106 = v_max_u32 %105, %104
+  %107 = v_readlane_b32_src1_inline %106, 63
+  %unsigned_maximum = v_mov_b32_copy %107
+  %109 = v_mov_b32_dpp16 %value {dpp_ctrl = 177}
+  %110 = v_and_b32 %value, %109
+  %111 = v_mov_b32_dpp16 %110 {dpp_ctrl = 78}
+  %112 = v_and_b32 %110, %111
+  %113 = v_mov_b32_dpp16 %112 {dpp_ctrl = 321}
+  %114 = v_and_b32 %112, %113
+  %115 = v_mov_b32_dpp16 %114 {dpp_ctrl = 320}
+  %116 = v_and_b32 %114, %115
+  %117 = v_permlanex16_b32_src12_inline %116, 0, 0
+  %118 = v_and_b32 %116, %117
+  %119 = v_readlane_b32_src1_inline %118, 0
+  %120 = v_and_b32 %119, %118
+  %121 = v_readlane_b32_src1_inline %120, 63
+  %bitwise_and = v_mov_b32_copy %121
+  %123 = v_mov_b32_dpp16 %value {dpp_ctrl = 177}
+  %124 = v_or_b32 %value, %123
+  %125 = v_mov_b32_dpp16 %124 {dpp_ctrl = 78}
+  %126 = v_or_b32 %124, %125
+  %127 = v_mov_b32_dpp16 %126 {dpp_ctrl = 321}
+  %128 = v_or_b32 %126, %127
+  %129 = v_mov_b32_dpp16 %128 {dpp_ctrl = 320}
+  %130 = v_or_b32 %128, %129
+  %131 = v_permlanex16_b32_src12_inline %130, 0, 0
+  %132 = v_or_b32 %130, %131
+  %133 = v_readlane_b32_src1_inline %132, 0
+  %134 = v_or_b32 %133, %132
+  %135 = v_readlane_b32_src1_inline %134, 63
+  %bitwise_or = v_mov_b32_copy %135
+  %137 = v_mov_b32_dpp16 %value {dpp_ctrl = 177}
+  %138 = v_xor_b32 %value, %137
+  %139 = v_mov_b32_dpp16 %138 {dpp_ctrl = 78}
+  %140 = v_xor_b32 %138, %139
+  %141 = v_mov_b32_dpp16 %140 {dpp_ctrl = 321}
+  %142 = v_xor_b32 %140, %141
+  %143 = v_mov_b32_dpp16 %142 {dpp_ctrl = 320}
+  %144 = v_xor_b32 %142, %143
+  %145 = v_permlanex16_b32_src12_inline %144, 0, 0
+  %146 = v_xor_b32 %144, %145
+  %147 = v_readlane_b32_src1_inline %146, 0
+  %148 = v_xor_b32 %147, %146
+  %149 = v_readlane_b32_src1_inline %148, 63
+  %bitwise_xor = v_mov_b32_copy %149
+  %is_leader = v_cmp_eq_i32_src1_inline %lane {rhs = 0}
+  %152, %153 = s_and_saveexec_b64 %is_leader
+  low.cond_br %153, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+^_bb1:
+  %154 = v_mov_b32 0
+  global_store_b32_saddr %154, %sum, %output_view
+  global_store_b32_saddr %154, %product, %output_view {offset = 4}
+  global_store_b32_saddr %154, %signed_minimum, %output_view {offset = 8}
+  global_store_b32_saddr %154, %signed_maximum, %output_view {offset = 12}
+  global_store_b32_saddr %154, %unsigned_minimum, %output_view {offset = 16}
+  global_store_b32_saddr %154, %unsigned_maximum, %output_view {offset = 20}
+  global_store_b32_saddr %154, %bitwise_and, %output_view {offset = 24}
+  global_store_b32_saddr %154, %bitwise_or, %output_view {offset = 28}
+  global_store_b32_saddr %154, %bitwise_xor, %output_view {offset = 32}
+  low.br ^_bb2
+^_bb2:
+  s_mov_b64_exec %152
+  return
+}

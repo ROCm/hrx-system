@@ -14,6 +14,12 @@ extern "C" {
 #define HRX_AMDXDNA_EXECUTABLE_ENTRY_POINT_ABI_VERSION_0 0u
 #define HRX_AMDXDNA_EXECUTABLE_CREATE_PARAMS_ABI_VERSION_0 0u
 
+// HAL executable target advertised by amdxdna devices. Pass these to
+// hrx_executable_load_data / hrx_executable_load_file. This is the device
+// target identity, not the XADX/PDI container format string.
+#define HRX_AMDXDNA_EXECUTABLE_TARGET_FAMILY "amdxdna"
+#define HRX_AMDXDNA_EXECUTABLE_TARGET_KEY "amdxdna"
+
 typedef uint32_t hrx_amdxdna_context_mode_t;
 enum hrx_amdxdna_context_mode_bits_t {
   HRX_AMDXDNA_CONTEXT_MODE_CREATE = 0u,
@@ -102,7 +108,8 @@ hrx_amdxdna_xadx_serialize(const hrx_amdxdna_executable_create_params_t* params,
 
 // Creates and loads an amdxdna executable while keeping the backend package
 // representation private to HRX. All input storage is borrowed for the
-// duration of the call and may be released after it returns.
+// duration of the call and may be released after it returns. The load uses
+// HRX_AMDXDNA_EXECUTABLE_TARGET_FAMILY/KEY.
 HRX_API hrx_status_t hrx_amdxdna_executable_create(
     hrx_device_t device, const hrx_amdxdna_executable_create_params_t* params,
     hrx_executable_t* executable);

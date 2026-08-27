@@ -108,12 +108,6 @@ static iree_status_t loom_func_symbol_apply_direct_export_attrs(
   return iree_ok_status();
 }
 
-static bool loom_func_symbol_is_kernel_entry(loom_func_like_t func) {
-  const loom_op_kind_t kernel_def = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 0);
-  const loom_op_kind_t low_kernel_def = LOOM_OP_KIND(LOOM_DIALECT_LOW, 1);
-  return func.op->kind == kernel_def || func.op->kind == low_kernel_def;
-}
-
 static iree_status_t loom_func_symbol_apply_imports(
     const loom_module_t* module, loom_func_like_t func,
     loom_func_symbol_facts_t* facts) {
@@ -136,6 +130,32 @@ static iree_status_t loom_func_symbol_apply_imports(
   return iree_ok_status();
 }
 
+static iree_status_t loom_func_symbol_resolve_target_conditions(
+    loom_symbol_fact_context_t* context, const loom_module_t* module,
+    loom_func_like_t func, loom_func_symbol_facts_t* facts) {
+  const loom_parameterized_attr_array_t authored_requirements =
+      loom_func_like_requires(func);
+  facts->target_condition_count = (uint16_t)authored_requirements.count;
+  if (authored_requirements.count == 0) return iree_ok_status();
+
+  loom_target_condition_t* target_conditions = NULL;
+  IREE_RETURN_IF_ERROR(loom_symbol_fact_context_allocate(
+      context, authored_requirements.count * sizeof(*target_conditions),
+      (void**)&target_conditions));
+  for (iree_host_size_t i = 0; i < authored_requirements.count; ++i) {
+    const loom_attribute_t value = authored_requirements.values[i];
+    const loom_target_condition_descriptor_t* descriptor = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_target_condition_resolve(module->context, value, &descriptor));
+    target_conditions[i] = (loom_target_condition_t){
+        .descriptor = descriptor,
+        .value = value,
+    };
+  }
+  facts->target_conditions = target_conditions;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_func_symbol_fact_compute(
     const loom_symbol_fact_domain_t* domain,
     loom_symbol_fact_context_t* context, const loom_module_t* module,
@@ -145,9 +165,9 @@ static iree_status_t loom_func_symbol_fact_compute(
 
   loom_func_like_t func = loom_func_like_cast(module, symbol->defining_op);
   if (!loom_func_like_isa(func)) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
+    IREE_ASSERT_UNREACHABLE(
         "func symbol fact domain attached to a non-FuncLike op");
+    IREE_BUILTIN_UNREACHABLE();
   }
 
   loom_func_symbol_facts_t* facts = NULL;
@@ -170,17 +190,21 @@ static iree_status_t loom_func_symbol_fact_compute(
   facts->temperature = loom_func_like_temperature(func);
   facts->inline_policy = loom_func_like_inline_policy(func);
   facts->has_body = loom_func_like_body(func) != NULL;
-  facts->implements_id = loom_func_like_implements(func);
-  if (facts->implements_id != LOOM_STRING_ID_INVALID) {
+  facts->template_family = loom_func_like_template_family(func);
+  if (loom_symbol_ref_is_valid(facts->template_family)) {
+    const loom_symbol_t* family_symbol =
+        &module->symbols.entries[facts->template_family.symbol_id];
     IREE_RETURN_IF_ERROR(loom_func_symbol_string_from_id(
-        module, facts->implements_id, IREE_SV("implements"),
-        &facts->implements));
+        module, family_symbol->name_id, IREE_SV("template family"),
+        &facts->template_family_name));
   }
   facts->priority = loom_func_like_priority(func);
   facts->argument_ids = loom_func_like_arg_ids(func, &facts->argument_count);
   facts->result_ids = loom_op_const_results(func.op);
   facts->result_count = func.op->result_count;
   facts->predicates = loom_func_like_predicates(func, &facts->predicate_count);
+  IREE_RETURN_IF_ERROR(
+      loom_func_symbol_resolve_target_conditions(context, module, func, facts));
   IREE_RETURN_IF_ERROR(loom_func_symbol_apply_imports(module, func, facts));
   facts->target_symbol = loom_func_like_target(func);
 
@@ -189,7 +213,7 @@ static iree_status_t loom_func_symbol_fact_compute(
   if (has_abi_attr) {
     facts->has_abi = true;
     facts->abi_kind = (loom_target_abi_kind_t)loom_func_like_abi(func);
-  } else if (loom_func_symbol_is_kernel_entry(func)) {
+  } else if (loom_func_like_is_kernel_entry(func)) {
     facts->has_abi = true;
     facts->abi_kind = LOOM_TARGET_ABI_HAL_KERNEL;
   }
@@ -206,7 +230,7 @@ static iree_status_t loom_func_symbol_fact_compute(
   IREE_RETURN_IF_ERROR(
       loom_func_symbol_apply_export_attrs(module, export_attrs, facts));
   IREE_RETURN_IF_ERROR(loom_func_symbol_apply_direct_export_attrs(func, facts));
-  if (export_attrs.count > 0 || loom_func_symbol_is_kernel_entry(func)) {
+  if (export_attrs.count > 0 || loom_func_like_is_kernel_entry(func)) {
     facts->exports = true;
   }
 

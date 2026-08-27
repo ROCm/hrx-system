@@ -83,7 +83,7 @@ struct LoopbackContext {
     auto* ctx = static_cast<LoopbackContext*>(user_data);
     ctx->completed = true;
     ctx->status_code = iree_status_code(status);
-    iree_status_ignore(status);
+    iree_status_free(status);
   }
 
   static void RecvCallback(void* user_data, iree_async_operation_t* operation,
@@ -128,44 +128,35 @@ struct LoopbackContext {
 
   void ResetZCTracking() { zc_achieved_count = 0; }
 
-  // Polls until the completed flag is set or timeout.
-  bool PollUntilComplete(iree_duration_t budget_ns = 5000000000LL) {
-    iree_time_t deadline = iree_time_now() + budget_ns;
+  // Polls until the completed flag is set.
+  bool PollUntilComplete() {
     while (!completed) {
-      if (iree_time_now() >= deadline) return false;
       iree_host_size_t count = 0;
       iree_status_t status =
-          iree_async_proactor_poll(proactor, iree_make_timeout_ms(100), &count);
-      if (!iree_status_is_ok(status) &&
-          !iree_status_is_deadline_exceeded(status)) {
-        iree_status_ignore(status);
+          iree_async_proactor_poll(proactor, iree_infinite_timeout(), &count);
+      if (!iree_status_is_ok(status)) {
+        iree_status_free(status);
         return false;
       }
-      iree_status_ignore(status);
     }
     return status_code == IREE_STATUS_OK;
   }
 
-  // Polls until at least |target| completions have been observed or timeout.
+  // Polls until at least |target| completions have been observed.
   // Completion count comes from iree_async_proactor_poll which counts user
   // callback invocations. Operations that fail to submit never produce
   // callbacks, so callers must check submit_one return values before calling
   // this.
-  bool PollForCompletions(int target,
-                          iree_duration_t budget_ns = 5000000000LL) {
-    iree_time_t deadline = iree_time_now() + budget_ns;
+  bool PollForCompletions(int target) {
     int completions = 0;
     while (completions < target) {
-      if (iree_time_now() >= deadline) return false;
       iree_host_size_t count = 0;
       iree_status_t status =
-          iree_async_proactor_poll(proactor, iree_make_timeout_ms(100), &count);
-      if (!iree_status_is_ok(status) &&
-          !iree_status_is_deadline_exceeded(status)) {
-        iree_status_ignore(status);
+          iree_async_proactor_poll(proactor, iree_infinite_timeout(), &count);
+      if (!iree_status_is_ok(status)) {
+        iree_status_free(status);
         return false;
       }
-      iree_status_ignore(status);
       completions += (int)count;
     }
     return true;
@@ -173,15 +164,14 @@ struct LoopbackContext {
 
   // Submits a single operation and polls until its callback fires.
   // Resets completion state before submission.
-  bool SubmitAndWait(iree_async_operation_t* operation,
-                     iree_duration_t budget_ns = 5000000000LL) {
+  bool SubmitAndWait(iree_async_operation_t* operation) {
     Reset();
     iree_status_t status = iree_async_proactor_submit_one(proactor, operation);
     if (!iree_status_is_ok(status)) {
       iree_status_ignore(status);
       return false;
     }
-    return PollUntilComplete(budget_ns);
+    return PollUntilComplete();
   }
 };
 
@@ -294,22 +284,19 @@ static LoopbackContext* CreateLoopbackContext(
 
   // Wait for both to complete.
   int completions = 0;
-  iree_time_t deadline = iree_time_now() + 5000000000LL;
   while (completions < 2) {
-    if (iree_time_now() >= deadline) {
-      state.SkipWithError("Connect/accept timeout");
+    ctx->completed = false;
+    iree_host_size_t count = 0;
+    status = iree_async_proactor_poll(ctx->proactor, iree_infinite_timeout(),
+                                      &count);
+    if (!iree_status_is_ok(status)) {
+      state.SkipWithError("Connect/accept poll failed");
+      iree_status_free(status);
       iree_async_socket_release(ctx->client);
       iree_async_socket_release(ctx->listener);
       iree_async_proactor_release(ctx->proactor);
       delete ctx;
       return nullptr;
-    }
-    ctx->completed = false;
-    iree_host_size_t count = 0;
-    status = iree_async_proactor_poll(ctx->proactor, iree_make_timeout_ms(100),
-                                      &count);
-    if (!iree_status_is_ok(status)) {
-      iree_status_ignore(status);
     }
     completions += (int)count;
   }
@@ -442,7 +429,7 @@ static void BM_Throughput(::benchmark::State& state,
       break;
     }
     if (!ctx->PollForCompletions(2)) {
-      state.SkipWithError("Completion timeout");
+      state.SkipWithError("Completion failed");
       break;
     }
   }
@@ -533,7 +520,7 @@ static void BM_AcceptRate(::benchmark::State& state,
       break;
     }
     if (!ctx_data.PollForCompletions(2)) {
-      state.SkipWithError("Accept/connect timeout");
+      state.SkipWithError("Accept/connect completion failed");
       iree_async_socket_release(accept_op.accepted_socket);
       iree_async_socket_release(client);
       break;
@@ -684,7 +671,7 @@ static void BM_ThroughputZC(::benchmark::State& state,
       break;
     }
     if (!ctx->PollForCompletions(2)) {
-      state.SkipWithError("Completion timeout");
+      state.SkipWithError("Completion failed");
       break;
     }
   }

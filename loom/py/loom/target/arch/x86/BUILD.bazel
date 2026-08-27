@@ -12,22 +12,29 @@ package(
 )
 
 iree_py_library(
-    name = "target_info",
-    srcs = [
-        "__init__.py",
-        "packed_dot_data.py",
-        "target_info.py",
-    ],
+    name = "package_init",
+    srcs = ["__init__.py"],
     deps = ["//loom/py/loom/target/arch:package_init"],
 )
 
 iree_py_library(
-    name = "dialect",
+    name = "target_info",
     srcs = [
-        "__init__.py",
-        "dialect.py",
+        "packed_dot_data.py",
+        "target_info.py",
     ],
     deps = [
+        ":package_init",
+        "//loom/py/loom/target:native_contraction_layout",
+        "//loom/py/loom/target:native_layout_facts",
+    ],
+)
+
+iree_py_library(
+    name = "dialect",
+    srcs = ["dialect.py"],
+    deps = [
+        ":package_init",
         "//loom/py/loom:core",
         "//loom/py/loom/dialect/target",
     ],
@@ -36,7 +43,6 @@ iree_py_library(
 iree_py_library(
     name = "descriptors",
     srcs = [
-        "__init__.py",
         "descriptors/__init__.py",
         "descriptors/avx2.py",
         "descriptors/avx512.py",
@@ -45,7 +51,6 @@ iree_py_library(
         "descriptors/packed_dot.py",
         "descriptors/scalar.py",
         "descriptors/simd128.py",
-        "packed_dot_data.py",
     ],
     deps = [
         ":target_info",
@@ -64,5 +69,21 @@ iree_py_test(
     main = "pytest_style_runner.py",
     deps = [
         ":target_info",
+    ],
+)
+
+iree_py_test(
+    name = "packed_dot_data_test",
+    srcs = [
+        "packed_dot_data_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.x86.packed_dot_data_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":target_info",
+        "//loom/py/loom/target:native_contraction_layout",
+        "//loom/py/loom/target:native_coordinate_projection",
+        "//loom/py/loom/target:native_layout_facts",
     ],
 )

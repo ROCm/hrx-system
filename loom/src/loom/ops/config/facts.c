@@ -8,8 +8,10 @@
 
 #include "loom/ir/facts.h"
 
+#include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/config/ops.h"
+#include "loom/ops/encoding/facts.h"
 
 static const loom_op_t* loom_config_get_definition(const loom_module_t* module,
                                                    const loom_op_t* op) {
@@ -52,10 +54,27 @@ static bool loom_config_scalar_value_facts(loom_type_t type,
     return true;
   }
   if (loom_scalar_type_is_float(scalar_type)) {
-    *out_facts = loom_value_facts_exact_f64(loom_attr_as_f64(value));
+    *out_facts =
+        loom_value_facts_exact_float(scalar_type, loom_attr_as_f64(value));
     return true;
   }
   return false;
+}
+
+static iree_status_t loom_config_value_facts(loom_fact_context_t* context,
+                                             const loom_module_t* module,
+                                             loom_type_t type,
+                                             loom_attribute_t value,
+                                             loom_value_facts_t* out_facts) {
+  *out_facts = loom_value_facts_unknown();
+  if (loom_config_scalar_value_facts(type, value, out_facts)) {
+    return iree_ok_status();
+  }
+  if (loom_type_is_encoding(type) && value.kind == LOOM_ATTR_ENCODING) {
+    return loom_encoding_static_value_facts(
+        context, module, loom_attr_as_encoding_id(value), type, out_facts);
+  }
+  return iree_ok_status();
 }
 
 static bool loom_config_predicate_facts_support_type(loom_type_t type) {
@@ -104,7 +123,6 @@ iree_status_t loom_config_def_facts(loom_fact_context_t* context,
                                     const loom_op_t* op,
                                     const loom_value_facts_t* operand_facts,
                                     loom_value_facts_t* result_facts) {
-  (void)context;
   (void)operand_facts;
 
   loom_value_id_t result_value = loom_config_def_type(op);
@@ -113,13 +131,9 @@ iree_status_t loom_config_def_facts(loom_fact_context_t* context,
     return iree_ok_status();
   }
 
-  loom_value_facts_t value_facts = loom_value_facts_unknown();
-  if (loom_config_scalar_value_facts(
-          loom_module_value_type(module, result_value),
-          loom_config_def_value(op), &value_facts)) {
-    result_facts[0] = value_facts;
-  }
-  return iree_ok_status();
+  return loom_config_value_facts(context, module,
+                                 loom_module_value_type(module, result_value),
+                                 loom_config_def_value(op), &result_facts[0]);
 }
 
 iree_status_t loom_config_get_facts(loom_fact_context_t* context,
@@ -127,30 +141,23 @@ iree_status_t loom_config_get_facts(loom_fact_context_t* context,
                                     const loom_op_t* op,
                                     const loom_value_facts_t* operand_facts,
                                     loom_value_facts_t* result_facts) {
-  (void)context;
   (void)operand_facts;
 
   result_facts[0] = loom_value_facts_unknown();
   const loom_op_t* definition_op = loom_config_get_definition(module, op);
-  if (!definition_op) return iree_ok_status();
-
   if (loom_config_def_isa(definition_op)) {
     loom_value_id_t result_value = loom_config_get_result(op);
-    if (result_value >= module->values.count) {
-      return iree_ok_status();
+    if (result_value < module->values.count) {
+      IREE_RETURN_IF_ERROR(loom_config_value_facts(
+          context, module, loom_module_value_type(module, result_value),
+          loom_config_def_value(definition_op), &result_facts[0]));
     }
-    loom_value_facts_t value_facts = loom_value_facts_unknown();
-    if (loom_config_scalar_value_facts(
-            loom_module_value_type(module, result_value),
-            loom_config_def_value(definition_op), &value_facts)) {
-      result_facts[0] = value_facts;
-    }
-    return iree_ok_status();
-  }
-
-  if (loom_config_decl_isa(definition_op)) {
+  } else if (loom_config_decl_isa(definition_op)) {
     loom_config_get_apply_decl_predicates(module, op, definition_op,
                                           &result_facts[0]);
   }
+  // Compile-time configuration is constant across every workitem even while
+  // its numerical value remains unresolved until specialization.
+  loom_value_facts_mark_cluster_uniform(&result_facts[0]);
   return iree_ok_status();
 }

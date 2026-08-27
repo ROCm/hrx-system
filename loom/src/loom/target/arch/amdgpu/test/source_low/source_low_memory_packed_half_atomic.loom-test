@@ -1,24 +1,24 @@
 // RUN: emit source-low output=low
 
-amdgpu.target<gfx942> @target
+amdgpu.target<gfx9-4-generic> @target
 kernel.def target(@target) @lds_packed_f16_atomic_add() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%value: vector<2xf16>) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 0 : offset
   %bytes = index.constant 64 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<32xf16, #dense>
+  %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xf16>
   %offsets = vector.iota %c0 step %c1 : vector<2xindex>
-  vector.atomic.reduce<addf> %value, %scratch_view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xf16>, view<32xf16, #dense>, vector<2xindex>
-  %old = vector.atomic.rmw<addf> %value, %scratch_view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xf16>, view<32xf16, #dense>, vector<2xindex>
+  vector.atomic.reduce<addf> %value, %scratch_view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xf16>, view<32xf16>, vector<2xindex>
+  %old = vector.atomic.rmw<addf> %value, %scratch_view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xf16>, view<32xf16>, vector<2xindex>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @lds_packed_f16_atomic_add(%value: reg<amdgpu.vgpr>) asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.gfx9_4.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_packed_f16_atomic_add(%value: reg<amdgpu.vgpr>) asm {
   %14 = storage {byte_alignment = 4, byte_length = 64} : low.storage<workgroup>
   %scratch_view = storage_address %14 : low.storage<workgroup> -> reg<amdgpu.vgpr>
   ds_pk_add_f16 %scratch_view, %value
@@ -28,25 +28,25 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @lds_packed_f16_atomic_ad
 
 // ====
 
-amdgpu.target<gfx942> @target
+amdgpu.target<gfx9-4-generic> @target
 kernel.def target(@target) @lds_packed_f16_atomic_add_from_elements_offsets() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%value: vector<2xf16>) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 0 : offset
   %bytes = index.constant 64 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<32xf16, #dense>
+  %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xf16>
   %offsets = vector.from_elements %c0, %c1 : vector<2xindex>
-  vector.atomic.reduce<addf> %value, %scratch_view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xf16>, view<32xf16, #dense>, vector<2xindex>
-  %old = vector.atomic.rmw<addf> %value, %scratch_view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xf16>, view<32xf16, #dense>, vector<2xindex>
+  vector.atomic.reduce<addf> %value, %scratch_view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xf16>, view<32xf16>, vector<2xindex>
+  %old = vector.atomic.rmw<addf> %value, %scratch_view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xf16>, view<32xf16>, vector<2xindex>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @lds_packed_f16_atomic_add_from_elements_offsets(%value: reg<amdgpu.vgpr>) asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.gfx9_4.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_packed_f16_atomic_add_from_elements_offsets(%value: reg<amdgpu.vgpr>) asm {
   %11 = storage {byte_alignment = 4, byte_length = 64} : low.storage<workgroup>
   %scratch_view = storage_address %11 : low.storage<workgroup> -> reg<amdgpu.vgpr>
   ds_pk_add_f16 %scratch_view, %value
@@ -56,25 +56,25 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @lds_packed_f16_atomic_ad
 
 // ====
 
-amdgpu.target<gfx942> @target
+amdgpu.target<gfx9-4-generic> @target
 kernel.def target(@target) @lds_packed_bf16_atomic_add() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%value: vector<2xbf16>) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 0 : offset
   %bytes = index.constant 64 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<32xbf16, #dense>
+  %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xbf16>
   %offsets = vector.iota %c0 step %c1 : vector<2xindex>
-  vector.atomic.reduce<addf> %value, %scratch_view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xbf16>, view<32xbf16, #dense>, vector<2xindex>
-  %old = vector.atomic.rmw<addf> %value, %scratch_view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xbf16>, view<32xbf16, #dense>, vector<2xindex>
+  vector.atomic.reduce<addf> %value, %scratch_view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xbf16>, view<32xbf16>, vector<2xindex>
+  %old = vector.atomic.rmw<addf> %value, %scratch_view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xbf16>, view<32xbf16>, vector<2xindex>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @lds_packed_bf16_atomic_add(%value: reg<amdgpu.vgpr>) asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.gfx9_4.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_packed_bf16_atomic_add(%value: reg<amdgpu.vgpr>) asm {
   %14 = storage {byte_alignment = 4, byte_length = 64} : low.storage<workgroup>
   %scratch_view = storage_address %14 : low.storage<workgroup> -> reg<amdgpu.vgpr>
   ds_pk_add_bf16 %scratch_view, %value
@@ -84,25 +84,25 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @lds_packed_bf16_atomic_a
 
 // ====
 
-amdgpu.target<gfx1200> @target
+amdgpu.target<gfx12-generic> @target
 kernel.def target(@target) @global_packed_f16_atomic_add() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%input: buffer, %value: vector<2xf16>) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  %zero = index.constant 0 : offset
+  %input_base = index.constant 0 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
   %global_aligned = buffer.assume.alignment %global {minimum_alignment = 4} : buffer
-  %view = buffer.view %global_aligned[%zero] : buffer -> view<64xf16, #dense>
+  %view = buffer.view %global_aligned[%input_base] : buffer -> view<64xf16>
   %offsets = vector.iota %c0 step %c1 : vector<2xindex>
-  vector.atomic.reduce<addf> %value, %view[0][%offsets] {ordering = relaxed, scope = device} : vector<2xf16>, view<64xf16, #dense>, vector<2xindex>
-  %old = vector.atomic.rmw<addf> %value, %view[0][%offsets] {ordering = relaxed, scope = device} : vector<2xf16>, view<64xf16, #dense>, vector<2xindex>
+  vector.atomic.reduce<addf> %value, %view[0][%offsets] {ordering = relaxed, scope = device} : vector<2xf16>, view<64xf16>, vector<2xindex>
+  %old = vector.atomic.rmw<addf> %value, %view[0][%offsets] {ordering = relaxed, scope = device} : vector<2xf16>, view<64xf16>, vector<2xindex>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_packed_f16_atomic_add(%value: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.core> {
+low.kernel.def target<amdgpu.gfx12.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_packed_f16_atomic_add(%value: reg<amdgpu.vgpr>) asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
   %16 = v_mov_b32 0
   global_atomic_pk_add_f16_saddr %16, %value, %view {scope = 2}
@@ -112,22 +112,22 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_packed_f16_atomic
 
 // ====
 
-amdgpu.target<gfx1200> @target
+amdgpu.target<gfx12-generic> @target
 func.def target(@target) @generic_packed_f16_atomic_add(%input: buffer, %value: vector<2xf16>) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  %zero = index.constant 0 : offset
+  %input_base = index.constant 0 : offset
   %generic = buffer.assume.memory_space<generic> %input : buffer
   %generic_aligned = buffer.assume.alignment %generic {minimum_alignment = 4} : buffer
-  %view = buffer.view %generic_aligned[%zero] : buffer -> view<64xf16, #dense>
+  %view = buffer.view %generic_aligned[%input_base] : buffer -> view<64xf16>
   %offsets = vector.iota %c0 step %c1 : vector<2xindex>
-  vector.atomic.reduce<addf> %value, %view[0][%offsets] {ordering = relaxed, scope = device} : vector<2xf16>, view<64xf16, #dense>, vector<2xindex>
-  %old = vector.atomic.rmw<addf> %value, %view[0][%offsets] {ordering = relaxed, scope = device} : vector<2xf16>, view<64xf16, #dense>, vector<2xindex>
+  vector.atomic.reduce<addf> %value, %view[0][%offsets] {ordering = relaxed, scope = device} : vector<2xf16>, view<64xf16>, vector<2xindex>
+  %old = vector.atomic.rmw<addf> %value, %view[0][%offsets] {ordering = relaxed, scope = device} : vector<2xf16>, view<64xf16>, vector<2xindex>
   func.return
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @generic_packed_f16_atomic_add(%value: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.core> {
+low.func.def target<amdgpu.gfx12.generic.core>(@target) abi(hal_kernel) @generic_packed_f16_atomic_add(%value: reg<amdgpu.vgpr>) asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
   %15 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %16 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -142,95 +142,95 @@ low.func.def target(@target) abi(hal_kernel) @generic_packed_f16_atomic_add(%val
 
 // ====
 
-amdgpu.target<gfx942> @target
+amdgpu.target<gfx9-4-generic> @target
 kernel.def target(@target) @lds_half4_atomic_rejected() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%value: vector<4xf16>) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 0 : offset
   %bytes = index.constant 64 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<32xf16, #dense>
+  %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xf16>
   %offsets = vector.iota %c0 step %c1 : vector<4xindex>
   // ERROR@+1: AMDGPU/023 {constraint_key="atomic.shape"}
-  vector.atomic.reduce<addf> %value, %scratch_view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<4xf16>, view<32xf16, #dense>, vector<4xindex>
+  vector.atomic.reduce<addf> %value, %scratch_view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<4xf16>, view<32xf16>, vector<4xindex>
   kernel.return
 }
 
 // ====
 
-amdgpu.target<gfx942> @target
+amdgpu.target<gfx9-4-generic> @target
 kernel.def target(@target) @lds_packed_f16_atomic_non_adjacent_rejected() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%value: vector<2xf16>) {
   %c0 = index.constant 0 : index
   %c2 = index.constant 2 : index
-  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 0 : offset
   %bytes = index.constant 64 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<32xf16, #dense>
+  %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xf16>
   %offsets = vector.iota %c0 step %c2 : vector<2xindex>
   // ERROR@+1: AMDGPU/023 {constraint_key="atomic.shape"}
-  vector.atomic.reduce<addf> %value, %scratch_view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xf16>, view<32xf16, #dense>, vector<2xindex>
+  vector.atomic.reduce<addf> %value, %scratch_view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xf16>, view<32xf16>, vector<2xindex>
   kernel.return
 }
 
 // ====
 
-amdgpu.target<gfx942> @target
+amdgpu.target<gfx9-4-generic> @target
 kernel.def target(@target) @lds_packed_f16_atomic_misaligned_rejected() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%value: vector<2xf16>) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 0 : offset
   %bytes = index.constant 64 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<32xf16, #dense>
+  %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xf16>
   %offsets = vector.iota %c0 step %c1 : vector<2xindex>
   // ERROR@+1: AMDGPU/023 {constraint_key="atomic.shape"}
-  vector.atomic.reduce<addf> %value, %scratch_view[1][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xf16>, view<32xf16, #dense>, vector<2xindex>
+  vector.atomic.reduce<addf> %value, %scratch_view[1][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xf16>, view<32xf16>, vector<2xindex>
   kernel.return
 }
 
 // ====
 
-amdgpu.target<gfx942> @target
+amdgpu.target<gfx9-4-generic> @target
 kernel.def target(@target) @lds_packed_f16_atomic_device_scope_rejected() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%value: vector<2xf16>) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 0 : offset
   %bytes = index.constant 64 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<32xf16, #dense>
+  %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xf16>
   %offsets = vector.iota %c0 step %c1 : vector<2xindex>
   // ERROR@+1: AMDGPU/023 {constraint_key="atomic.scope"}
-  vector.atomic.reduce<addf> %value, %scratch_view[0][%offsets] {ordering = relaxed, scope = device} : vector<2xf16>, view<32xf16, #dense>, vector<2xindex>
+  vector.atomic.reduce<addf> %value, %scratch_view[0][%offsets] {ordering = relaxed, scope = device} : vector<2xf16>, view<32xf16>, vector<2xindex>
   kernel.return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @lds_packed_f16_atomic_unsupported_target_rejected() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%value: vector<2xf16>) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 0 : offset
   %bytes = index.constant 64 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<32xf16, #dense>
+  %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xf16>
   %offsets = vector.iota %c0 step %c1 : vector<2xindex>
   // ERROR@+1: AMDGPU/023 {constraint_key="atomic.descriptor_missing"}
-  vector.atomic.reduce<addf> %value, %scratch_view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xf16>, view<32xf16, #dense>, vector<2xindex>
+  vector.atomic.reduce<addf> %value, %scratch_view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xf16>, view<32xf16>, vector<2xindex>
   kernel.return
 }

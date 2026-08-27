@@ -10,7 +10,7 @@
 // The ring caches hot pointers from iree_amd_queue_t at initialization:
 // ring base, mask, doorbell MMIO pointer, and the atomic write/read dispatch
 // IDs. All hot-path operations are inline with zero libhsa indirection except
-// ringing a non-DOORBELL-kind doorbell, which goes through HSA signal-store.
+// when the queue execution mode or signal kind requires HSA signal-store.
 //
 // Thread safety:
 //   reserve() is multi-producer safe (atomic_fetch_add on write_dispatch_id).
@@ -48,6 +48,7 @@ extern "C" {
 // packet is cache-line aligned at every access point.
 typedef union iree_alignas(64) iree_hal_amdgpu_aql_packet_t {
   iree_hsa_kernel_dispatch_packet_t dispatch;
+  iree_hsa_amd_ext_kernel_dispatch_packet_t extended_dispatch;
   iree_hsa_barrier_and_packet_t barrier_and;
   iree_hsa_barrier_or_packet_t barrier_or;
   iree_hsa_amd_aql_pm4_ib_packet_t pm4_ib;
@@ -60,6 +61,19 @@ static_assert(sizeof(iree_hal_amdgpu_aql_packet_t) == 64,
 //===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_aql_ring_t
 //===----------------------------------------------------------------------===//
+
+// Identifies the component that consumes an agent's AQL queue packets.
+typedef enum iree_hal_amdgpu_aql_queue_execution_mode_e {
+  // The GPU scheduler consumes AQL packets directly.
+  IREE_HAL_AMDGPU_AQL_QUEUE_EXECUTION_MODE_NATIVE = 0,
+  // A ROCr host worker translates supported AQL packets into PM4 submissions.
+  IREE_HAL_AMDGPU_AQL_QUEUE_EXECUTION_MODE_PM4_EMULATED = 1,
+} iree_hal_amdgpu_aql_queue_execution_mode_t;
+
+// Queries the AQL queue execution mode reported for |device_agent|.
+iree_status_t iree_hal_amdgpu_query_aql_queue_execution_mode(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
+    iree_hal_amdgpu_aql_queue_execution_mode_t* out_execution_mode);
 
 // Cached hardware AQL ring buffer state. Initialized once from iree_amd_queue_t
 // and used for all subsequent packet operations. The cached pointers avoid
@@ -79,11 +93,11 @@ typedef struct iree_hal_amdgpu_aql_ring_t {
   // How the doorbell gets rung; both fields represent the queue's doorbell
   // signal.
   struct {
-    // Cached hardware doorbell MMIO pointer, or NULL when the queue's doorbell
-    // signal is not DOORBELL-kind (then ring via |signal| below). When
-    // non-NULL, writing a packet ID here wakes the CP to process new packets
-    // via a direct atomic store to MMIO — no libhsa indirection. Resolved at
-    // init from the doorbell signal's iree_amd_signal_t.hardware_doorbell_ptr.
+    // Cached hardware doorbell MMIO pointer, or NULL when the queue must be
+    // rung through |signal| below. When non-NULL, writing a packet ID here
+    // wakes the CP to process new packets via a direct atomic store to MMIO.
+    // PM4-emulated queues always use the signal path because ROCr must notify
+    // its host translation worker in addition to updating the exposed value.
     volatile int64_t* ptr;
     // Doorbell signal handle, used when |ptr| is NULL (non-DOORBELL-kind
     // doorbell signals, e.g. interrupt-backed USER-kind): ring through the HSA
@@ -104,11 +118,12 @@ typedef struct iree_hal_amdgpu_aql_ring_t {
   const volatile int64_t* read_dispatch_id;
 } iree_hal_amdgpu_aql_ring_t;
 
-// Initializes the AQL ring from a hardware queue descriptor.
-// Resolves the doorbell pointer from the signal's iree_amd_signal_t and
-// caches all hot pointers for zero-indirection access.
+// Initializes the AQL ring from a hardware queue descriptor. Resolves the
+// doorbell notification strategy from |execution_mode| and the signal's
+// iree_amd_signal_t, then caches all hot pointers for zero-indirection access.
 static inline void iree_hal_amdgpu_aql_ring_initialize(
     const iree_hal_amdgpu_libhsa_t* libhsa, iree_amd_queue_t* hardware_queue,
+    iree_hal_amdgpu_aql_queue_execution_mode_t execution_mode,
     iree_hal_amdgpu_aql_ring_t* out_ring) {
   out_ring->base =
       (iree_hal_amdgpu_aql_packet_t*)hardware_queue->hsa_queue.base_address;
@@ -118,17 +133,18 @@ static inline void iree_hal_amdgpu_aql_ring_initialize(
   //
   // Only DOORBELL-kind signals expose a directly-writable hardware_doorbell_ptr
   // (a memory-mapped doorbell register); writing a packet ID there wakes the CP
-  // with zero libhsa indirection. Other signal kinds — e.g. the
-  // interrupt-backed USER-kind doorbells some ROCm builds hand back for AQL
-  // queues — store a signal value in that same union slot rather than an MMIO
-  // pointer, so the raw write would fault. For those we leave |doorbell.ptr|
-  // NULL and ring via the HSA signal-store API using the cached handle +
-  // libhsa.
+  // with zero libhsa indirection. Other signal kinds store a signal value in
+  // that same union slot rather than an MMIO pointer, so the raw write would
+  // fault. A PM4-emulated queue may also expose a DOORBELL-kind signal whose
+  // pointer names a software value; the HSA signal store must additionally
+  // notify ROCr's host translation worker. Those cases ring through the public
+  // HSA signal API.
   out_ring->libhsa = libhsa;
   out_ring->doorbell.signal = hardware_queue->hsa_queue.doorbell_signal;
   iree_amd_signal_t* doorbell_signal =
       (iree_amd_signal_t*)hardware_queue->hsa_queue.doorbell_signal.handle;
-  if (doorbell_signal &&
+  if (execution_mode == IREE_HAL_AMDGPU_AQL_QUEUE_EXECUTION_MODE_NATIVE &&
+      doorbell_signal &&
       doorbell_signal->kind == IREE_AMD_SIGNAL_KIND_DOORBELL) {
     out_ring->doorbell.ptr =
         (volatile int64_t*)doorbell_signal->hardware_doorbell_ptr;
@@ -152,6 +168,11 @@ static inline void iree_hal_amdgpu_aql_ring_initialize(
 //
 // IMPORTANT: The returned packet slots have INVALID headers from the CP's
 // perspective. The CP will not process them until a valid header is published.
+// Callers must leave the entire first dword untouched while populating the
+// packet body. In particular, never clear or assign a whole packet slot: AQL
+// packet type zero is VENDOR_SPECIFIC, not INVALID, and exposes a partially
+// populated packet to the CP. Publish the header and setup together only with
+// iree_hal_amdgpu_aql_ring_commit().
 // Normal host submissions commit every reserved slot before ringing the
 // doorbell; device-side patching may intentionally leave a later slot invalid
 // only when an earlier packet is guaranteed to publish it before the CP reaches
@@ -208,9 +229,9 @@ static inline bool iree_hal_amdgpu_aql_ring_try_reserve(
   }
 }
 
-// Returns a pointer to the packet slot for |packet_id|. The caller
-// populates the packet fields (all except the header) and then commits
-// the header via iree_hal_amdgpu_aql_ring_commit().
+// Returns a pointer to the packet slot for |packet_id|. The caller populates
+// the packet body without writing or clearing the first dword and then commits
+// the header and setup via iree_hal_amdgpu_aql_ring_commit().
 static inline iree_hal_amdgpu_aql_packet_t* iree_hal_amdgpu_aql_ring_packet(
     iree_hal_amdgpu_aql_ring_t* ring, uint64_t packet_id) {
   return &ring->base[packet_id & ring->mask];

@@ -9,7 +9,7 @@
 
 iree_add_all_subdirs()
 
-if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
     intrinsics
@@ -24,7 +24,7 @@ loom_cc_library(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
     target_env
@@ -34,14 +34,13 @@ loom_cc_library(
     "target_env.c"
   DEPS
     iree::base
-    loom::target::arch::amdgpu::target_info_defs
     loom::target::emit::llvmir::target_presets
     loom::target::types
   PUBLIC
 )
 endif()
 
-if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_test(
   NAME
     target_env_test
@@ -57,6 +56,22 @@ loom_cc_test(
   LABELS
     "iree-build-requirement=loom.target.arch.llvmir"
     "iree-build-requirement=loom.emit.llvmir"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_AMDGPU)
+iree_execution_test_suite(
+  NAME
+    loom_compile_execution_test
+  MANIFESTS
+    "test/loom-compile.test.json"
+  TOOLS
+    "loom-compile=loom::tools::loom-compile"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/emit/llvmir/amdgpu/test/amdgcn_kernel.loom"
+  LABELS
+    "hostonly"
 )
 endif()
 

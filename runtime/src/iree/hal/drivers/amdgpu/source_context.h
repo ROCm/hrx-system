@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "iree/base/api.h"
+#include "iree/base/internal/atomics.h"
 #include "iree/hal/device_event.h"
 #include "iree/hal/drivers/amdgpu/util/loaded_code_object.h"
 
@@ -54,6 +55,8 @@ typedef struct iree_hal_amdgpu_source_context_t {
   iree_hal_amdgpu_loaded_code_object_range_t* loaded_code_object_ranges;
   // Optional parsed Loom sanitizer site-table descriptor.
   iree_hal_amdgpu_source_context_site_table_t sanitizer_site_table;
+  // Non-zero after |sanitizer_site_table| has been release-published.
+  iree_atomic_int32_t sanitizer_site_table_published;
 } iree_hal_amdgpu_source_context_t;
 
 // Initializes |out_context| with executable-owned storage.
@@ -82,11 +85,12 @@ bool iree_hal_amdgpu_source_context_try_translate_device_span(
     iree_host_size_t physical_device_ordinal, uint64_t device_pointer,
     uint64_t byte_length, iree_const_byte_span_t* out_host_span);
 
-// Attaches and validates a borrowed Loom sanitizer site table.
+// Validates and release-publishes a borrowed Loom sanitizer site table.
+// May be called at most once for a source context.
 iree_status_t iree_hal_amdgpu_source_context_set_sanitizer_site_table(
     iree_hal_amdgpu_source_context_t* context, iree_const_byte_span_t table);
 
-// Tries to resolve |site_id| through the attached sanitizer site table.
+// Acquire-observes the published table and tries to resolve |site_id|.
 bool iree_hal_amdgpu_source_context_try_resolve_sanitizer_site(
     const iree_hal_amdgpu_source_context_t* context, uint64_t site_id,
     iree_hal_device_event_site_t* out_site);

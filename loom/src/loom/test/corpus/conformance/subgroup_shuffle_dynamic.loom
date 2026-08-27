@@ -1,0 +1,147 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// Bounded dynamic source lanes use the general cross-lane path while keeping
+// the cluster width static. These cases cover both lane selection and the
+// validity result of relative shuffles.
+kernel.def @subgroup_shuffle_dynamic_index() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer) {
+  %workitem0 = kernel.workitem.id<x> : index
+  %lane0 = kernel.subgroup.lane.id : index
+  %c16 = index.constant 16 : index
+  %c0 = index.constant 0 : offset
+  %workitem = index.assume %workitem0 [range(%workitem0, 0, 63)] : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %source_lane0 = index.rem %lane, %c16 : index
+  %source_lane = index.assume %source_lane0 [range(%source_lane0, 0, 15)] : index
+  %source_lane_i32 = index.cast %source_lane : index to i32
+  %width = scalar.constant 16 : i32
+  %input_view = buffer.view %input[%c0] : buffer -> view<64xi32>
+  %output_view = buffer.view %output[%c0] : buffer -> view<64xi32>
+  %value = view.load %input_view[%workitem] : view<64xi32> -> i32
+  %shuffled, %valid = kernel.subgroup.shuffle<index> %value, %source_lane_i32, %width : i32, i32, i32
+  scf.if %valid {
+    view.store %shuffled, %output_view[%workitem] : i32, view<64xi32>
+  }
+  kernel.return
+}
+
+kernel.def @subgroup_shuffle_dynamic_xor() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer) {
+  %workitem0 = kernel.workitem.id<x> : index
+  %lane0 = kernel.subgroup.lane.id : index
+  %c16 = index.constant 16 : index
+  %c0 = index.constant 0 : offset
+  %workitem = index.assume %workitem0 [range(%workitem0, 0, 63)] : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %source_lane0 = index.rem %lane, %c16 : index
+  %source_lane = index.assume %source_lane0 [range(%source_lane0, 0, 15)] : index
+  %source_lane_i32 = index.cast %source_lane : index to i32
+  %width = scalar.constant 16 : i32
+  %input_view = buffer.view %input[%c0] : buffer -> view<64xi32>
+  %output_view = buffer.view %output[%c0] : buffer -> view<64xi32>
+  %value = view.load %input_view[%workitem] : view<64xi32> -> i32
+  %shuffled, %valid = kernel.subgroup.shuffle<xor> %value, %source_lane_i32, %width : i32, i32, i32
+  scf.if %valid {
+    view.store %shuffled, %output_view[%workitem] : i32, view<64xi32>
+  }
+  kernel.return
+}
+
+kernel.def @subgroup_shuffle_dynamic_up() {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer) {
+  %workitem0 = kernel.workitem.id<x> : index
+  %lane0 = kernel.subgroup.lane.id : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c0 = index.constant 0 : offset
+  %workitem = index.assume %workitem0 [range(%workitem0, 0, 63)] : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %relative_lane = index.rem %lane, %c2 : index
+  %source_lane0 = index.sub %c1, %relative_lane : index
+  %source_lane = index.assume %source_lane0 [range(%source_lane0, 0, 1)] : index
+  %source_lane_i32 = index.cast %source_lane : index to i32
+  %width = scalar.constant 2 : i32
+  %input_view = buffer.view %input[%c0] : buffer -> view<64xi32>
+  %output_view = buffer.view %output[%c0] : buffer -> view<64xi32>
+  %value = view.load %input_view[%workitem] : view<64xi32> -> i32
+  %shuffled, %valid = kernel.subgroup.shuffle<up> %value, %source_lane_i32, %width : i32, i32, i32
+  scf.if %valid {
+    view.store %shuffled, %output_view[%workitem] : i32, view<64xi32>
+  }
+  kernel.return
+}
+
+kernel.def @subgroup_shuffle_dynamic_down() {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %output: buffer) {
+  %workitem0 = kernel.workitem.id<x> : index
+  %lane0 = kernel.subgroup.lane.id : index
+  %c2 = index.constant 2 : index
+  %c0 = index.constant 0 : offset
+  %workitem = index.assume %workitem0 [range(%workitem0, 0, 63)] : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %source_lane0 = index.rem %lane, %c2 : index
+  %source_lane = index.assume %source_lane0 [range(%source_lane0, 0, 1)] : index
+  %source_lane_i32 = index.cast %source_lane : index to i32
+  %width = scalar.constant 2 : i32
+  %input_view = buffer.view %input[%c0] : buffer -> view<64xi32>
+  %output_view = buffer.view %output[%c0] : buffer -> view<64xi32>
+  %value = view.load %input_view[%workitem] : view<64xi32> -> i32
+  %shuffled, %valid = kernel.subgroup.shuffle<down> %value, %source_lane_i32, %width : i32, i32, i32
+  scf.if %valid {
+    view.store %shuffled, %output_view[%workitem] : i32, view<64xi32>
+  }
+  kernel.return
+}
+
+check.case public @subgroup_shuffle_dynamic_index_case {
+  %input = check.generate.iota offset(0) step(1) period(16) : tensor<64xi32>
+  %output = check.generate.fill value(-1) : tensor<64xi32>
+  %expected = check.generate.iota offset(0) step(1) period(16) : tensor<64xi32>
+  kernel.launch @subgroup_shuffle_dynamic_index(%input, %output) : (tensor<64xi32>, tensor<64xi32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<64xi32>
+  check.return
+}
+
+check.case public @subgroup_shuffle_dynamic_xor_case {
+  %input = check.generate.iota offset(0) step(1) period(16) : tensor<64xi32>
+  %output = check.generate.fill value(-1) : tensor<64xi32>
+  %expected = check.generate.fill value(0) : tensor<64xi32>
+  kernel.launch @subgroup_shuffle_dynamic_xor(%input, %output) : (tensor<64xi32>, tensor<64xi32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<64xi32>
+  check.return
+}
+
+check.case public @subgroup_shuffle_dynamic_up_case {
+  %input = check.generate.fill value(1) : tensor<64xi32>
+  %output = check.generate.fill value(0) : tensor<64xi32>
+  %expected = check.generate.iota offset(0) step(1) period(2) : tensor<64xi32>
+  kernel.launch @subgroup_shuffle_dynamic_up(%input, %output) : (tensor<64xi32>, tensor<64xi32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<64xi32>
+  check.return
+}
+
+check.case public @subgroup_shuffle_dynamic_down_case {
+  %input = check.generate.fill value(1) : tensor<64xi32>
+  %output = check.generate.fill value(0) : tensor<64xi32>
+  %expected = check.generate.iota offset(1) step(-1) period(2) : tensor<64xi32>
+  kernel.launch @subgroup_shuffle_dynamic_down(%input, %output) : (tensor<64xi32>, tensor<64xi32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<64xi32>
+  check.return
+}

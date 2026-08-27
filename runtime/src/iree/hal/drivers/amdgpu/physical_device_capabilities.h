@@ -10,15 +10,64 @@
 #include "iree/base/api.h"
 #include "iree/hal/device.h"
 #include "iree/hal/drivers/amdgpu/aql_prepublished_kernarg_storage.h"
+#include "iree/hal/drivers/amdgpu/util/aql_ring.h"
 #include "iree/hal/drivers/amdgpu/util/kernarg_ring.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_capabilities.h"
-#include "iree/hal/drivers/amdgpu/util/target_id.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
+#include "iree/hal/executable/amdgpu/target_id.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
+
+// Per-axis and flat limits for one three-dimensional dispatch quantity.
+typedef struct iree_hal_amdgpu_dispatch_dimension_limits_t {
+  // Maximum value in the X dimension.
+  uint64_t x;
+  // Maximum value in the Y dimension.
+  uint64_t y;
+  // Maximum value in the Z dimension.
+  uint64_t z;
+  // Maximum product across all three dimensions.
+  uint64_t total;
+} iree_hal_amdgpu_dispatch_dimension_limits_t;
+
+// Physical-device limits for clustered kernel dispatches.
+typedef struct iree_hal_amdgpu_workgroup_cluster_capabilities_t {
+  // True when the agent supports nontrivial workgroup clusters.
+  uint32_t supported : 1;
+  // Maximum cluster count in one kernel dispatch.
+  iree_hal_amdgpu_dispatch_dimension_limits_t cluster_count;
+  // Maximum workgroup count in one cluster.
+  iree_hal_amdgpu_dispatch_dimension_limits_t workgroups_per_cluster;
+} iree_hal_amdgpu_workgroup_cluster_capabilities_t;
+
+// Queries and validates clustered-dispatch limits for |device_agent|.
+//
+// An older HSA runtime that recognizes none of the four cluster attributes and
+// an agent that reports a 1x1x1 workgroup-per-cluster ceiling both produce a
+// zeroed unsupported capability. Partial query support and malformed limits
+// fail instead of inventing architecture-derived limits.
+iree_status_t iree_hal_amdgpu_query_workgroup_cluster_capabilities(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t device_agent,
+    iree_hal_amdgpu_workgroup_cluster_capabilities_t* out_capabilities);
+
+// Validates a metadata-declared workgroup cluster size against one physical
+// device. An all-zero size denotes ordinary dispatch and is always accepted.
+iree_status_t iree_hal_amdgpu_validate_workgroup_cluster_size(
+    iree_string_view_t kernel_name, const uint8_t cluster_size[3],
+    iree_host_size_t physical_device_ordinal,
+    const iree_hal_amdgpu_workgroup_cluster_capabilities_t* capabilities);
+
+// Validates a direct dispatch workgroup count against one physical device's
+// clustered-dispatch limits. |cluster_size| must already have passed
+// iree_hal_amdgpu_validate_workgroup_cluster_size. An all-zero cluster size
+// denotes ordinary dispatch and is always accepted.
+iree_status_t iree_hal_amdgpu_validate_workgroup_cluster_dispatch(
+    const uint8_t cluster_size[3], const uint32_t workgroup_count[3],
+    iree_host_size_t physical_device_ordinal,
+    const iree_hal_amdgpu_dispatch_dimension_limits_t* cluster_count_limits);
 
 typedef enum iree_hal_amdgpu_cpu_visible_device_coarse_memory_flag_bits_e {
   IREE_HAL_AMDGPU_CPU_VISIBLE_DEVICE_COARSE_MEMORY_FLAG_NONE = 0u,
@@ -136,6 +185,10 @@ typedef struct iree_hal_amdgpu_physical_topology_edge_t {
 
   // HSA link-hop facts collapsed into strategy-friendly topology values.
   struct {
+    // Physical interconnect technology for the first HSA-reported hop.
+    iree_hal_topology_link_type_t link_type;
+    // Physical path length recovered from the HSA link representation.
+    uint8_t path_hop_count;
     // Worst physical link class across HSA-reported link hops.
     iree_hal_topology_link_class_t link_class;
     // Conservative copy-cost class derived from |link_class|.
@@ -222,13 +275,6 @@ iree_hal_amdgpu_pm4_timestamp_strategy_t
 iree_hal_amdgpu_select_pm4_timestamp_strategy(
     iree_hal_amdgpu_gfxip_version_t version);
 
-// Selects unvalidated PM4 dispatch command-buffer capabilities for explicit
-// hardware bring-up on known PM4 gfx families. Production automatic selection
-// must use iree_hal_amdgpu_select_vendor_packet_capabilities alone.
-iree_hal_amdgpu_vendor_packet_capability_flags_t
-iree_hal_amdgpu_select_experimental_pm4_command_buffer_capabilities(
-    iree_hal_amdgpu_gfxip_version_t version);
-
 // AMDGPU memory-system facts used to derive conservative HAL topology flags.
 typedef struct iree_hal_amdgpu_memory_system_capabilities_t {
   // HSA SVM/HMM process and agent facts.
@@ -245,6 +291,8 @@ typedef struct iree_hal_amdgpu_memory_system_capabilities_t {
 
   // Device-local memory placement facts.
   struct {
+    // Host and device allocations share one local memory system.
+    uint32_t unified_memory : 1;
     // A host-coherent fine-grained device memory pool is available.
     uint32_t fine_host_visible : 1;
     // A CPU-visible coarse-grained device memory pool is usable by the driver.
@@ -268,6 +316,8 @@ typedef struct iree_hal_amdgpu_memory_system_capabilities_selection_t {
 
   // Device-local memory placement facts.
   struct {
+    // Whether HSA identifies the GPU agent as an integrated APU.
+    uint32_t agent_is_apu : 1;
     // Fine-grained global memory pool considered for host-visible device data.
     hsa_amd_memory_pool_t fine_memory_pool;
     // Selected CPU-visible coarse-grained device-memory capability.
@@ -291,6 +341,15 @@ bool iree_hal_amdgpu_memory_system_requires_svm_access_attributes(
 iree_hal_amdgpu_aql_prepublished_kernarg_storage_t
 iree_hal_amdgpu_select_prepublished_kernarg_storage(
     hsa_amd_memory_pool_t fine_block_memory_pool, bool direct_host_access);
+
+// Selects storage for raw dispatch-profiling completion signals.
+// PM4-emulated queues may retire completion signals from a ROCr host worker and
+// therefore use the shared host pool. Native queues use the device-local pool.
+hsa_amd_memory_pool_t
+iree_hal_amdgpu_select_profiling_completion_signal_memory_pool(
+    hsa_amd_memory_pool_t device_memory_pool,
+    hsa_amd_memory_pool_t host_memory_pool,
+    iree_hal_amdgpu_aql_queue_execution_mode_t execution_mode);
 
 // Selects AMD vendor AQL packet and PM4 packet-family capabilities from the
 // parsed gfx IP version.

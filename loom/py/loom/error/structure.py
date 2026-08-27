@@ -134,30 +134,30 @@ ERR_STRUCTURE_009 = ErrorDef(
     ),
 )
 
-# ERR_STRUCTURE_010: Enum attribute value out of range.
+# ERR_STRUCTURE_010: Undeclared enum attribute value.
 ERR_STRUCTURE_010 = ErrorDef(
     domain=ErrorDomain.STRUCTURE,
     code=10,
     severity=Severity.ERROR,
-    summary="Enum attribute value out of range.",
-    message="attribute '{attr_name}' has enum value {actual_value}, "
-    "but only {enum_case_count} values are defined",
+    summary="Undeclared enum attribute value.",
+    message="attribute '{attr_name}' has undeclared enum value {actual_value}",
     params=(
         ErrorParam("attr_name", ParamKind.STRING),
         ErrorParam("actual_value", ParamKind.U32),
-        ErrorParam("enum_case_count", ParamKind.U32),
     ),
-    fix_hint="'{attr_name}' must have a value in range [0, {enum_case_count})",
+    fix_hint="'{attr_name}' must use one of its declared enum values",
 )
 
-# ERR_STRUCTURE_011: Non-symbol op at module level.
+# ERR_STRUCTURE_011: Operation not permitted at module level.
 ERR_STRUCTURE_011 = ErrorDef(
     domain=ErrorDomain.STRUCTURE,
     code=11,
     severity=Severity.ERROR,
-    summary="Non-symbol-defining op at module level.",
-    message="'{op_name}' cannot appear at module level (only symbol-defining "
-    "ops like func.def and func.decl are allowed here)",
+    summary="Operation is not permitted at module level.",
+    message=(
+        "'{op_name}' cannot appear at module level (only symbol-defining or "
+        "module-scope operations are allowed here)"
+    ),
     params=(ErrorParam("op_name", ParamKind.STRING),),
     fix_hint="Move '{op_name}' inside a function body",
 )
@@ -601,49 +601,288 @@ ERR_STRUCTURE_036 = ErrorDef(
     ),
 )
 
-# ERR_STRUCTURE_037: Low packet descriptor ordinal conflicts with target.
-ERR_STRUCTURE_037 = ErrorDef(
-    domain=ErrorDomain.STRUCTURE,
-    code=37,
-    severity=Severity.ERROR,
-    summary="Low packet descriptor ordinal conflicts with target.",
-    message=(
-        "low function '{function_name}' packet '{packet_key}' stores descriptor "
-        "ordinal {descriptor_ordinal}, which resolves to '{descriptor_key}' in "
-        "target contract '{descriptor_set_key}'"
-    ),
-    params=(
-        ErrorParam("function_name", ParamKind.STRING),
-        ErrorParam("packet_key", ParamKind.STRING),
-        ErrorParam("descriptor_ordinal", ParamKind.U32),
-        ErrorParam("descriptor_key", ParamKind.STRING),
-        ErrorParam("descriptor_set_key", ParamKind.STRING),
-    ),
-    fix_hint=(
-        "Regenerate the packet for the selected target contract or leave the "
-        "descriptor ordinal unresolved so the verifier can resolve the key"
-    ),
-)
-
-# ERR_STRUCTURE_038: Workgroup barrier is under divergent control.
+# ERR_STRUCTURE_038: Barrier control is not uniform at its execution scope.
 ERR_STRUCTURE_038 = ErrorDef(
     domain=ErrorDomain.STRUCTURE,
     code=38,
     severity=Severity.ERROR,
-    summary="Workgroup barrier is under divergent control.",
+    summary="Barrier control is not uniform at its execution scope.",
     message=(
-        "'{op_name}' with workgroup scope is control-dependent on "
-        "lane-varying {control_kind} '{control_value}' from '{control_op_name}'"
+        "'{op_name}' requires {required_uniform_scope}-uniform "
+        "{control_kind} '{control_value}' "
+        "from '{control_op_name}', but its control distribution is "
+        "{control_distribution}"
     ),
     params=(
         ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("required_uniform_scope", ParamKind.STRING),
         ErrorParam("control_kind", ParamKind.STRING),
         ErrorParam("control_value", ParamKind.STRING),
         ErrorParam("control_op_name", ParamKind.STRING),
+        ErrorParam("control_distribution", ParamKind.STRING),
     ),
     fix_hint=(
-        "Move the workgroup barrier outside lane-varying control and guard "
-        "only the memory access or final store"
+        "Move the barrier outside insufficiently uniform control or make every "
+        "invocation in the barrier scope take the same control path"
+    ),
+)
+
+# ERR_STRUCTURE_039: Low packet operation conflicts with descriptor form.
+ERR_STRUCTURE_039 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=39,
+    severity=Severity.ERROR,
+    summary="Low packet operation conflicts with descriptor form.",
+    message=(
+        "low function '{function_name}' packet '{packet_key}' uses "
+        "'{actual_op_name}', but its descriptor requires '{expected_op_name}'"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("packet_key", ParamKind.STRING),
+        ErrorParam("actual_op_name", ParamKind.STRING),
+        ErrorParam("expected_op_name", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Represent '{packet_key}' with '{expected_op_name}' or select a "
+        "descriptor whose canonical form is '{actual_op_name}'"
+    ),
+)
+
+# ERR_STRUCTURE_040: Aggregate attribute count and payload disagree.
+ERR_STRUCTURE_040 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=40,
+    severity=Severity.ERROR,
+    summary="Aggregate attribute count and payload disagree.",
+    message=(
+        "attribute '{attr_name}' has {element_count} elements and payload "
+        "presence {payload_present}"
+    ),
+    params=(
+        ErrorParam("attr_name", ParamKind.STRING),
+        ErrorParam("element_count", ParamKind.U32),
+        ErrorParam("payload_present", ParamKind.BOOL),
+    ),
+    fix_hint=(
+        "Use a non-null payload for a non-empty aggregate and a null payload "
+        "for an empty aggregate"
+    ),
+)
+
+# ERR_STRUCTURE_041: Parameterized attribute family is not registered.
+ERR_STRUCTURE_041 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=41,
+    severity=Severity.ERROR,
+    summary="Parameterized attribute family is not registered.",
+    message=(
+        "attribute '{attr_name}' references unregistered parameterized family "
+        "kind {family_kind}"
+    ),
+    params=(
+        ErrorParam("attr_name", ParamKind.STRING),
+        ErrorParam("family_kind", ParamKind.U32),
+    ),
+    fix_hint="Construct '{attr_name}' from a family registered in the active context",
+)
+
+# ERR_STRUCTURE_042: Parameterized attribute family mismatch.
+ERR_STRUCTURE_042 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=42,
+    severity=Severity.ERROR,
+    summary="Parameterized attribute family mismatch.",
+    message=(
+        "attribute '{attr_name}' has family '{actual_family}', expected "
+        "'{expected_family}'"
+    ),
+    params=(
+        ErrorParam("attr_name", ParamKind.STRING),
+        ErrorParam("actual_family", ParamKind.STRING),
+        ErrorParam("expected_family", ParamKind.STRING),
+    ),
+    fix_hint="Construct '{attr_name}' with the declared parameterized family",
+)
+
+# ERR_STRUCTURE_043: Parameterized attribute slot count mismatch.
+ERR_STRUCTURE_043 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=43,
+    severity=Severity.ERROR,
+    summary="Parameterized attribute slot count mismatch.",
+    message=(
+        "attribute '{attr_name}' has {actual_count} parameter slots, expected "
+        "{expected_count}"
+    ),
+    params=(
+        ErrorParam("attr_name", ParamKind.STRING),
+        ErrorParam("actual_count", ParamKind.U32),
+        ErrorParam("expected_count", ParamKind.U32),
+    ),
+    fix_hint="Construct '{attr_name}' through its generated family builder",
+)
+
+# ERR_STRUCTURE_044: Required parameterized attribute parameter is absent.
+ERR_STRUCTURE_044 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=44,
+    severity=Severity.ERROR,
+    summary="Required parameterized attribute parameter is absent.",
+    message="required parameter '{attr_name}' is absent",
+    params=(ErrorParam("attr_name", ParamKind.STRING),),
+    fix_hint="Provide a value for required parameter '{attr_name}'",
+)
+
+# ERR_STRUCTURE_045: Aggregate attribute nesting is too deep.
+ERR_STRUCTURE_045 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=45,
+    severity=Severity.ERROR,
+    summary="Aggregate attribute nesting is too deep.",
+    message=(
+        "attribute '{attr_name}' exceeds the maximum aggregate nesting depth "
+        "of {max_depth}"
+    ),
+    params=(
+        ErrorParam("attr_name", ParamKind.STRING),
+        ErrorParam("max_depth", ParamKind.U32),
+    ),
+    fix_hint="Flatten nested dictionary and parameterized attribute values",
+)
+
+# ERR_STRUCTURE_046: Signed enum-set word count exceeds its stable domain.
+ERR_STRUCTURE_046 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=46,
+    severity=Severity.ERROR,
+    summary="Signed enum-set word count exceeds its stable domain.",
+    message=(
+        "attribute '{attr_name}' has {word_count} words per polarity, max "
+        "{max_word_count}"
+    ),
+    params=(
+        ErrorParam("attr_name", ParamKind.STRING),
+        ErrorParam("word_count", ParamKind.U32),
+        ErrorParam("max_word_count", ParamKind.U32),
+    ),
+    fix_hint="Remove assertions outside the stable byte enum domain",
+)
+
+# ERR_STRUCTURE_047: Signed enum-set value has contradictory assertions.
+ERR_STRUCTURE_047 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=47,
+    severity=Severity.ERROR,
+    summary="Signed enum-set value has contradictory assertions.",
+    message=(
+        "attribute '{attr_name}' asserts stable enum value {enum_value} both "
+        "positively and negatively"
+    ),
+    params=(
+        ErrorParam("attr_name", ParamKind.STRING),
+        ErrorParam("enum_value", ParamKind.U32),
+    ),
+    fix_hint="Keep exactly one polarity for each explicitly asserted value",
+)
+
+# ERR_STRUCTURE_048: Signed enum-set payload is not canonically trimmed.
+ERR_STRUCTURE_048 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=48,
+    severity=Severity.ERROR,
+    summary="Signed enum-set payload is not canonically trimmed.",
+    message=(
+        "attribute '{attr_name}' has {word_count} words per polarity but "
+        "canonical form requires {canonical_word_count}"
+    ),
+    params=(
+        ErrorParam("attr_name", ParamKind.STRING),
+        ErrorParam("word_count", ParamKind.U32),
+        ErrorParam("canonical_word_count", ParamKind.U32),
+    ),
+    fix_hint="Remove trailing word pairs with no positive or negative assertions",
+)
+
+# ERR_STRUCTURE_049: Module-scope operation is nested.
+ERR_STRUCTURE_049 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=49,
+    severity=Severity.ERROR,
+    summary="Module-scope operation is nested.",
+    message="'{op_name}' may appear only as a direct child of the module body",
+    params=(ErrorParam("op_name", ParamKind.STRING),),
+    fix_hint="Move '{op_name}' to the module body",
+)
+
+# ERR_STRUCTURE_050: Symbol set is not strictly ordered.
+ERR_STRUCTURE_050 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=50,
+    severity=Severity.ERROR,
+    summary="Symbol set is not strictly ordered.",
+    message=(
+        "attribute '{attr_name}' symbol set places '@{current_name}' "
+        "after '@{previous_name}'"
+    ),
+    params=(
+        ErrorParam("attr_name", ParamKind.STRING),
+        ErrorParam("current_name", ParamKind.STRING),
+        ErrorParam("previous_name", ParamKind.STRING),
+    ),
+    fix_hint="Sort symbol names and remove duplicate entries",
+)
+
+# ERR_STRUCTURE_051: Duplicate keyed module record.
+ERR_STRUCTURE_051 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=51,
+    severity=Severity.ERROR,
+    summary="Duplicate keyed module record.",
+    message="duplicate '{op_name}' module record with key '{record_key}'",
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("record_key", ParamKind.STRING),
+    ),
+    fix_hint="Merge the duplicate records or give each record a unique key",
+)
+
+# ERR_STRUCTURE_052: Launch configuration has observable effects.
+ERR_STRUCTURE_052 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=52,
+    severity=Severity.ERROR,
+    summary="Launch configuration has observable effects.",
+    message=(
+        "'{op_name}' launch configuration has {read_count} read-like, "
+        "{write_count} write-like, and {convergent_count} convergent effect(s)"
+    ),
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("read_count", ParamKind.U32),
+        ErrorParam("write_count", ParamKind.U32),
+        ErrorParam("convergent_count", ParamKind.U32),
+    ),
+    fix_hint=(
+        "Express launch configuration as a pure function of workload arguments "
+        "and immutable compilation inputs"
+    ),
+)
+
+# ERR_STRUCTURE_053: Non-command effect in a command program.
+ERR_STRUCTURE_053 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=53,
+    severity=Severity.ERROR,
+    summary="Non-command effect in a command program.",
+    message=(
+        "'{op_name}' has observable effects in a command-program body but "
+        "does not represent an explicit command"
+    ),
+    params=(ErrorParam("op_name", ParamKind.STRING),),
+    fix_hint=(
+        "Use an explicit command operation or declare the computation pure "
+        "when it has no observable effects"
     ),
 )
 
@@ -684,6 +923,20 @@ ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_034,
     ERR_STRUCTURE_035,
     ERR_STRUCTURE_036,
-    ERR_STRUCTURE_037,
     ERR_STRUCTURE_038,
+    ERR_STRUCTURE_039,
+    ERR_STRUCTURE_040,
+    ERR_STRUCTURE_041,
+    ERR_STRUCTURE_042,
+    ERR_STRUCTURE_043,
+    ERR_STRUCTURE_044,
+    ERR_STRUCTURE_045,
+    ERR_STRUCTURE_046,
+    ERR_STRUCTURE_047,
+    ERR_STRUCTURE_048,
+    ERR_STRUCTURE_049,
+    ERR_STRUCTURE_050,
+    ERR_STRUCTURE_051,
+    ERR_STRUCTURE_052,
+    ERR_STRUCTURE_053,
 )

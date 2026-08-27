@@ -63,6 +63,26 @@ func.def @assume_divisibility(%x: i64) -> (i64) {
 
 // ====
 
+// scalar.assume consumes relational bounds from predicate values outside its
+// checked alias list, including relations where the external value is first.
+func.def @assume_relational_external_bounds(%value: i32, %upper0: i32, %lower0: i32) -> (i64, i64) {
+  %upper = scalar.assume %upper0 [range(%upper0, 32, 2048)] : i32
+  %lower = scalar.assume %lower0 [range(%lower0, -128, -32)] : i32
+  %below = scalar.assume %value [lt(%value, %upper)] : i32
+  %above = scalar.assume %value [lt(%lower, %value)] : i32
+  %below_hi = test.fact_range_hi %below : i32 -> i64
+  %above_lo = test.fact_range_lo %above : i32 -> i64
+  func.return %below_hi, %above_lo : i64, i64
+}
+// ----
+func.def @assume_relational_external_bounds(%value: i32, %upper0: i32, %lower0: i32) -> (i64, i64) {
+  %below_hi = scalar.constant 2047 : i64
+  %above_lo = scalar.constant -127 : i64
+  func.return %below_hi, %above_lo : i64, i64
+}
+
+// ====
+
 // remui is bounded by the non-negative dividend as well as by the dynamic
 // divisor range.
 func.def @remui_dynamic_divisor_uses_dividend_bound(%x0: i32, %d0: i32) -> (i64, i64) {

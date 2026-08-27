@@ -17,6 +17,26 @@ package(
 )
 
 loom_cc_library(
+    name = "bank_sroa",
+    srcs = ["bank_sroa.c"],
+    hdrs = ["bank_sroa.h"],
+    deps = [
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/rewrite:materialize",
+        "//loom/src/loom/rewrite:remap",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "memory_footprint",
     srcs = ["memory_footprint.c"],
     hdrs = ["memory_footprint.h"],
@@ -26,6 +46,22 @@ loom_cc_library(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/pass:types",
         "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/target:facts",
+        "//loom/src/loom/target:pass_environment",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "sink_single_use_reads",
+    srcs = ["sink_single_use_reads.c"],
+    hdrs = ["sink_single_use_reads.h"],
+    deps = [
+        "//loom/src/loom/analysis:motion",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/rewrite:rewriter",
         "//runtime/src/iree/base",
     ],
 )
@@ -65,6 +101,7 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/analysis:contract",
         "//loom/src/loom/analysis:matrix_fragment_layout",
+        "//loom/src/loom/analysis:motion",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:combining",
@@ -79,8 +116,9 @@ loom_cc_library(
         "//loom/src/loom/pass:types",
         "//loom/src/loom/pass:value_facts",
         "//loom/src/loom/rewrite:rewriter",
-        "//loom/src/loom/util:math",
+        "//loom/src/loom/util:numeric_format",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
     ],
 )
 
@@ -107,10 +145,12 @@ loom_cc_test(
         "//loom/src/loom/analysis:matrix_fragment_layout",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/encoding",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/test",
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/pass:types",
         "//loom/src/loom/pass:value_facts",

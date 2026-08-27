@@ -17,7 +17,7 @@
 #include "iree/base/api.h"
 #include "iree/hal/drivers/amdgpu/abi/kernel_descriptor.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_emitter.h"
-#include "iree/hal/drivers/amdgpu/util/target_id.h"
+#include "iree/hal/executable/amdgpu/target_id.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -59,6 +59,8 @@ typedef struct iree_hal_amdgpu_pm4_dispatch_launch_state_t {
   // Number of COMPUTE_USER_DATA_N dwords seeded for this dispatch, including
   // compiler-required padding dwords that are zero-filled by the emitter.
   uint32_t user_data_dword_count;
+  // User-data dword offset of the two-dword kernarg segment pointer.
+  uint32_t kernarg_user_data_offset;
   // Kernarg dword offset copied into preloaded user-data SGPRs.
   uint32_t kernarg_preload_dword_offset;
   // Kernarg dword count copied into preloaded user-data SGPRs.

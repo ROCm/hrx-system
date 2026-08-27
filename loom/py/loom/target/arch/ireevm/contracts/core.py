@@ -187,9 +187,9 @@ def _const_float_rule(result_type: TypePattern, descriptor_key: str) -> Descript
     descriptor = _descriptor(descriptor_key)
     bits_immediate = "f32_bits" if result_type == _F32 else "f64_bits"
     bits_project = (
-        ValueProject.f64_as_f32_bits("result")
+        ValueProject.float_as_f32_bits("result")
         if result_type == _F32
-        else ValueProject.f64_as_f64_bits("result")
+        else ValueProject.float_as_f64_bits("result")
     )
     return DescriptorRule(
         source_op=scalar_conversion.scalar_constant,
@@ -197,7 +197,7 @@ def _const_float_rule(result_type: TypePattern, descriptor_key: str) -> Descript
         guards=(
             Guard.attr_kind("value", "f64", diagnostic=_F64_ATTR_DIAGNOSTIC),
             _value_type_guard("result", result_type),
-            Guard.value_exact_f64(
+            Guard.value_exact_float(
                 "result",
                 diagnostic=_FLOAT_CONSTANT_EXACT_DIAGNOSTIC,
             ),

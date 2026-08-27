@@ -9,9 +9,55 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Any
 
+from loom.dsl import SymbolReference, SymbolReferenceRole
+
 _C_SYMBOL_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*$")
+
+_SYMBOL_INTERFACE_MAP: dict[str, str] = {
+    "func_like": "LOOM_SYMBOL_INTERFACE_FUNC_LIKE",
+    "callable": "LOOM_SYMBOL_INTERFACE_CALLABLE",
+    "global": "LOOM_SYMBOL_INTERFACE_GLOBAL",
+    "executable": "LOOM_SYMBOL_INTERFACE_EXECUTABLE",
+    "record": "LOOM_SYMBOL_INTERFACE_RECORD",
+    "rodata": "LOOM_SYMBOL_INTERFACE_RODATA",
+    "target": "LOOM_SYMBOL_INTERFACE_TARGET",
+    "config": "LOOM_SYMBOL_INTERFACE_CONFIG",
+    "kernel": "LOOM_SYMBOL_INTERFACE_KERNEL",
+    "kernel_entry": "LOOM_SYMBOL_INTERFACE_KERNEL_ENTRY",
+    "command_program": "LOOM_SYMBOL_INTERFACE_COMMAND_PROGRAM",
+    "template_family": "LOOM_SYMBOL_INTERFACE_TEMPLATE_FAMILY",
+    "template_provider": "LOOM_SYMBOL_INTERFACE_TEMPLATE_PROVIDER",
+}
+
+_SYMBOL_REFERENCE_ROLE_MAP: dict[SymbolReferenceRole, str] = {
+    SymbolReferenceRole.DEPENDENCY: "LOOM_SYMBOL_REFERENCE_ROLE_DEPENDENCY",
+    SymbolReferenceRole.AVAILABILITY: "LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY",
+}
+
+
+def symbol_interface_flags(interfaces: Sequence[str]) -> str:
+    """Returns the C flag expression for a symbol-reference contract."""
+
+    flags = [_SYMBOL_INTERFACE_MAP[interface] for interface in interfaces]
+    return " | ".join(flags) if flags else "0"
+
+
+def append_symbol_reference_descriptor(
+    lines: list[str],
+    descriptor_name: str,
+    reference: SymbolReference,
+    name_expr: str,
+) -> None:
+    """Appends one generated symbol-reference descriptor definition."""
+
+    lines.append(f"static const loom_symbol_reference_descriptor_t {descriptor_name} = {{")
+    lines.append(f"    .name = {name_expr},")
+    lines.append(f"    .interfaces = {symbol_interface_flags(reference.interfaces)},")
+    lines.append(f"    .role = {_SYMBOL_REFERENCE_ROLE_MAP[reference.role]},")
+    lines.append("};")
 
 
 def symbol_fact_domain_symbol(op: Any) -> str | None:

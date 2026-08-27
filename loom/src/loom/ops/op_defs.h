@@ -20,8 +20,10 @@
 #define LOOM_OPS_OP_DEFS_H_
 
 #include "iree/base/api.h"
+#include "loom/ir/attribute_schema.h"
 #include "loom/ir/ir.h"
 #include "loom/ir/semantics.h"
+#include "loom/ir/type_constraint.h"
 #include "loom/ir/types.h"
 #include "loom/util/bstring.h"
 
@@ -162,6 +164,9 @@ enum loom_format_kind_e {
   // data = binding kind (CAPTURE or ELEMENT).
   LOOM_FORMAT_KIND_BINDING_LIST = 12,
   // Function argument definitions: (%a: type, %b: type).
+  // data = optional start/end i64 attribute indices packed by
+  // LOOM_FORMAT_FUNC_ARGS_DATA. The boundaries project a contiguous slice
+  // from a body-backed function signature.
   LOOM_FORMAT_KIND_FUNC_ARGS = 13,
   // Where-clause predicates: [mul(%M, 16), ...].
   LOOM_FORMAT_KIND_PREDICATE_LIST = 14,
@@ -176,10 +181,10 @@ enum loom_format_kind_e {
   // the vtable's instance_flags_case_names. Reads/writes op->instance_flags.
   LOOM_FORMAT_KIND_FLAGS = 17,
 
-  // Op kind reference in angle brackets: <tile.contract>.
-  // Glued to the preceding token (op name). The field_index references
-  // a string attribute storing the op name.
-  LOOM_FORMAT_KIND_OP_REF = 18,
+  // Bare symbolic key in angle brackets: <tile.contract>.
+  // Glued to the preceding token. The field_index references a string
+  // attribute storing the canonical key spelling.
+  LOOM_FORMAT_KIND_KEY_REF = 18,
 
   // Single result type without parentheses: type.
   // For ops with exactly one non-variadic result where parenthesized
@@ -234,21 +239,31 @@ enum loom_format_kind_e {
   // field_index = successor index whose target block is printed or parsed.
   LOOM_FORMAT_KIND_SUCCESSOR_REF = 27,
 
-  // Descriptor key reference in angle brackets: <amdgpu.v_add_u32>. The
-  // field_index references the diagnostic string attribute and data references
-  // the descriptor-set-local ordinal attribute. Text parsing stores -1 because
-  // descriptor refs are resolved after target binding selects a descriptor set.
-  LOOM_FORMAT_KIND_DESCRIPTOR_REF = 28,
+  // Representation-scoped enum in angle brackets: <amdgpu.v_add_u32>. The
+  // field_index references one SCOPED_ENUM attribute. Text parsing resolves the
+  // stable spelling to a dense ordinal in the enclosing function contract.
+  LOOM_FORMAT_KIND_SCOPED_ENUM_REF = 28,
 
   // Stable symbolic key reference in angle brackets: <source.key>. The
   // field_index references the diagnostic string attribute and data references
   // the derived i64 stable-key attribute. This is for non-descriptor symbolic
-  // domains; descriptor-backed packets use LOOM_FORMAT_KIND_DESCRIPTOR_REF.
+  // domains; descriptor-backed packets use LOOM_FORMAT_KIND_SCOPED_ENUM_REF.
   LOOM_FORMAT_KIND_STABLE_KEY_REF = 29,
 
   // Variadic operand references with adjacent type annotations:
   // %a: type, %b: type.
   LOOM_FORMAT_KIND_OPERAND_TYPED_REFS = 30,
+
+  // Known-family parameterized attribute payload in angle brackets:
+  // <mode = fast, scopes = [workgroup]>. The field_index references a
+  // PARAMETERIZED attribute constrained to one exact family. The family name
+  // is carried by the descriptor and omitted from text.
+  LOOM_FORMAT_KIND_ATTR_PARAMS = 31,
+
+  // Variadic byte-length operands paired with static alignments:
+  // [align(16) %a, align(256) %b]. field_index references the variadic
+  // operand field and data references its i64 array alignment attribute.
+  LOOM_FORMAT_KIND_ALIGNED_REFS = 32,
 };
 typedef uint8_t loom_format_kind_t;
 
@@ -268,6 +283,20 @@ enum loom_format_index_list_data_bits_e {
 #define LOOM_FORMAT_INDEX_LIST_HAS_LEADING_GLUE(data) \
   (!iree_any_bit_set((data), LOOM_FORMAT_INDEX_LIST_DATA_NO_LEADING_GLUE))
 
+// Packs optional start/end attribute indices for a FUNC_ARGS element. Each
+// byte stores index + 1 so zero remains the absent sentinel.
+#define LOOM_FORMAT_FUNC_ARGS_ATTR_BYTE(attr_index) \
+  ((uint16_t)((attr_index) == LOOM_ATTR_INDEX_NONE  \
+                  ? 0u                              \
+                  : ((uint16_t)(attr_index) + 1u)))
+#define LOOM_FORMAT_FUNC_ARGS_DATA(start_attr_index, end_attr_index)     \
+  ((uint16_t)((LOOM_FORMAT_FUNC_ARGS_ATTR_BYTE(start_attr_index) << 8) | \
+              LOOM_FORMAT_FUNC_ARGS_ATTR_BYTE(end_attr_index)))
+#define LOOM_FORMAT_FUNC_ARGS_START_ATTR_INDEX(data) \
+  ((uint8_t)(((data) >> 8) - 1u))
+#define LOOM_FORMAT_FUNC_ARGS_END_ATTR_INDEX(data) \
+  ((uint8_t)(((data) & 0xFFu) - 1u))
+
 // Surface syntax selected by a REGION format element. This affects only text
 // parsing/printing; the in-memory representation is always an ordinary
 // loom_region_t.
@@ -276,13 +305,11 @@ typedef enum loom_region_syntax_e {
   LOOM_REGION_SYNTAX_DEFAULT = 0,
   // Test-only alternate region syntax: do { block+ }.
   LOOM_REGION_SYNTAX_TEST_DO = 1,
-  // Descriptor-backed target-low assembly syntax: asm<descriptor.set> { ... }.
-  LOOM_REGION_SYNTAX_LOW_ASM = 2,
   // Canonical braced region by default, with optional target-low asm syntax.
-  LOOM_REGION_SYNTAX_LOW_ASM_OPTIONAL = 3,
+  LOOM_REGION_SYNTAX_LOW_ASM_OPTIONAL = 2,
   // Pass pipeline syntax. Currently canonical braced form; the friendly
   // parser/printer selects the same in-memory pass.* operations.
-  LOOM_REGION_SYNTAX_PIPELINE = 4,
+  LOOM_REGION_SYNTAX_PIPELINE = 3,
 } loom_region_syntax_t;
 
 #define LOOM_FORMAT_REGION_TABLE_DATA(keys_attr_index, default_region_index) \
@@ -306,6 +333,7 @@ typedef enum loom_region_syntax_e {
 //   REGION_TABLE:   packed keys attr index and fixed default region index.
 //   REGION:         loom_region_syntax_t parser/printer selector.
 //   BINDING_LIST:   binding kind (CAPTURE=0, ELEMENT=1).
+//   FUNC_ARGS:      packed optional start/end i64 attribute indices.
 //   OPTIONAL_GROUP: (skip_count << 2) | anchor_category.
 typedef struct loom_format_element_t {
   loom_format_kind_t kind;
@@ -322,6 +350,8 @@ enum loom_result_type_list_flag_bits_e {
   // Wrap result types in parentheses: (type, type).
   // When clear, result types are bare: type, type.
   LOOM_RESULT_TYPE_LIST_PARENS = 1u << 0,
+  // Print and parse one type shared by every result.
+  LOOM_RESULT_TYPE_LIST_UNIFORM = 1u << 1,
 };
 
 // Data field flags for ATTR_DICT elements. Stored in the element's data field.
@@ -362,79 +392,6 @@ typedef enum loom_keyword_id_e {
 loom_bstring_t loom_keyword_bstring(loom_keyword_id_t keyword_id);
 
 //===----------------------------------------------------------------------===//
-// Type constraints, traits, and binding kinds
-//===----------------------------------------------------------------------===//
-
-// Abstract type categories for operand/result descriptors. The verifier
-// checks that the actual type of a value satisfies the constraint.
-typedef enum loom_type_constraint_e {
-  LOOM_TYPE_CONSTRAINT_TILE = 0,
-  LOOM_TYPE_CONSTRAINT_TENSOR,
-  LOOM_TYPE_CONSTRAINT_INTEGER,
-  LOOM_TYPE_CONSTRAINT_FLOAT,
-  LOOM_TYPE_CONSTRAINT_SCALAR,
-  LOOM_TYPE_CONSTRAINT_INDEX,
-  LOOM_TYPE_CONSTRAINT_OFFSET,
-  LOOM_TYPE_CONSTRAINT_ADDRESS,
-  LOOM_TYPE_CONSTRAINT_ANY,
-  LOOM_TYPE_CONSTRAINT_GROUP,
-  LOOM_TYPE_CONSTRAINT_ANY_ENCODING,
-  LOOM_TYPE_CONSTRAINT_POOL,
-  LOOM_TYPE_CONSTRAINT_REGISTER,
-  // Exactly i1. Used for comparison results and boolean predicates.
-  // Unlike INTEGER (which accepts any integer width), this requires
-  // the type to be specifically i1.
-  LOOM_TYPE_CONSTRAINT_I1,
-  LOOM_TYPE_CONSTRAINT_VECTOR,
-  // Vector type with rank 1.
-  LOOM_TYPE_CONSTRAINT_RANK_ONE_VECTOR,
-  // Vector type with an all-static shape.
-  LOOM_TYPE_CONSTRAINT_ALL_STATIC_VECTOR,
-  // Vector type with an all-static rank-1 shape.
-  LOOM_TYPE_CONSTRAINT_ALL_STATIC_RANK_ONE_VECTOR,
-  LOOM_TYPE_CONSTRAINT_VIEW,
-  LOOM_TYPE_CONSTRAINT_BUFFER,
-  // Shaped type with an integer element type.
-  LOOM_TYPE_CONSTRAINT_INTEGER_ELEMENT,
-  // Shaped type with a floating-point element type.
-  LOOM_TYPE_CONSTRAINT_FLOAT_ELEMENT,
-  // Scalar index type or non-i1 integer type.
-  LOOM_TYPE_CONSTRAINT_INDEX_OR_NON_I1_INTEGER_SCALAR,
-  // Shaped type with index or non-i1 integer element type.
-  LOOM_TYPE_CONSTRAINT_INDEX_OR_NON_I1_INTEGER_ELEMENT,
-  // Shaped type with element type i1.
-  LOOM_TYPE_CONSTRAINT_I1_ELEMENT,
-  // Shaped type with element type i8.
-  LOOM_TYPE_CONSTRAINT_I8_ELEMENT,
-  // Shaped type with element type i32.
-  LOOM_TYPE_CONSTRAINT_I32_ELEMENT,
-  // Shaped type with element type f16 or bf16.
-  LOOM_TYPE_CONSTRAINT_F16_OR_BF16_ELEMENT,
-  // Shaped type with element type f32.
-  LOOM_TYPE_CONSTRAINT_F32_ELEMENT,
-  // Encoding type with address-layout role.
-  LOOM_TYPE_CONSTRAINT_ENCODING_LAYOUT,
-  // Encoding type with storage-schema role.
-  LOOM_TYPE_CONSTRAINT_ENCODING_SCHEMA,
-  // Encoding type with physical-storage role.
-  LOOM_TYPE_CONSTRAINT_ENCODING_STORAGE,
-  // Encoding type with numeric-transform role.
-  LOOM_TYPE_CONSTRAINT_ENCODING_TRANSFORM,
-  // Function-local byte storage handle.
-  LOOM_TYPE_CONSTRAINT_STORAGE,
-  LOOM_TYPE_CONSTRAINT_COUNT_,
-} loom_type_constraint_t;
-
-// Returns the display name for a type constraint (e.g., "tile", "integer").
-const char* loom_type_constraint_name(loom_type_constraint_t constraint);
-
-// Returns true if |type| satisfies the abstract |constraint|.
-// Used by the verifier for operand/result type checking and by
-// builders for debug-mode assertions.
-bool loom_type_satisfies_constraint(loom_type_t type,
-                                    loom_type_constraint_t constraint);
-
-//===----------------------------------------------------------------------===//
 // Semantic constraints
 //===----------------------------------------------------------------------===//
 //
@@ -442,9 +399,8 @@ bool loom_type_satisfies_constraint(loom_type_t type,
 // verifier checks. Each op's vtable points to an array of constraint
 // entries. The verifier walks the array, interpreting each by kind.
 //
-// Per-op cost: 16 bytes .rodata per constraint, zero .text. The
-// interpreter is one switch statement (~12 cases). Adding constraint
-// kinds adds a case to the switch, not code per op.
+// Per-op cost: 10 bytes .rodata per constraint, zero .text. Adding constraint
+// kinds extends one shared interpreter, not every op's generated code.
 //
 // Field reference categories.
 enum loom_field_category_e {
@@ -553,6 +509,22 @@ enum loom_constraint_relation_e {
   // the same position. Args: (region field, variadic value field | region
   // field). Used by BlockArgsMatchTypes and BlockArgsMatchElementTypes.
   LOOM_RELATION_REGION_ARG_MATCH,
+
+  // The number of values forwarded after a condition region terminator's
+  // leading predicate matches another region's entry block argument count.
+  // The third arg names the value field that validates the target block args;
+  // malformed target args are diagnosed by their own region constraints.
+  // Args: (condition region field, target region field, target variadic value
+  // field). Used by ConditionForwardedCountMatchesBlockArgs.
+  LOOM_RELATION_CONDITION_FORWARD_COUNT,
+
+  // Each value forwarded after a condition region terminator's leading
+  // predicate has the same type as the corresponding entry block argument of
+  // another region. The third arg names the value field that validates the
+  // target block args. Args: (condition region field, target region field,
+  // target variadic value field). Used by
+  // ConditionForwardedTypesMatchBlockArgs.
+  LOOM_RELATION_CONDITION_FORWARD_MATCH,
 
   // A region's terminator (yield) operand count matches the element
   // count of a variadic value field. Args: (region field, variadic
@@ -712,6 +684,8 @@ enum loom_result_ownership_effect_e {
   LOOM_RESULT_OWNERSHIP_ALIAS = 4,
   // Result receives ownership from a tied operand.
   LOOM_RESULT_OWNERSHIP_TIED = 5,
+  // Result receives the exact ownership state of a consumed operand.
+  LOOM_RESULT_OWNERSHIP_MOVED = 6,
 };
 typedef uint8_t loom_result_ownership_effect_t;
 
@@ -727,23 +701,53 @@ enum loom_operand_flag_bits_e {
 };
 typedef uint8_t loom_operand_flags_t;
 
+// Semantic role of an operand field independent of its author-facing name.
+enum loom_operand_role_e {
+  // Operand has no special cross-op semantic role.
+  LOOM_OPERAND_ROLE_NONE = 0,
+  // Operand controls a branch or region transfer.
+  LOOM_OPERAND_ROLE_CONTROL_CONDITION = 1,
+  // Operand selects between value payloads.
+  LOOM_OPERAND_ROLE_SELECT_CONDITION = 2,
+  // Operand is one arm of a value-selecting operation.
+  LOOM_OPERAND_ROLE_SELECT_PAYLOAD = 3,
+  // Operand is broadcast into every element of a composite result.
+  LOOM_OPERAND_ROLE_BROADCAST_SOURCE = 4,
+  // Operand contributes one logical element to a composite result.
+  LOOM_OPERAND_ROLE_COMPOSITE_ELEMENT = 5,
+  // Operand is widened by a floating-point precision extension.
+  LOOM_OPERAND_ROLE_FLOAT_EXTENSION_SOURCE = 6,
+};
+typedef uint8_t loom_operand_role_t;
+
+enum loom_operand_role_mask_bits_e {
+  LOOM_OPERAND_ROLE_MASK_CONTROL_CONDITION =
+      1u << LOOM_OPERAND_ROLE_CONTROL_CONDITION,
+  LOOM_OPERAND_ROLE_MASK_SELECT_CONDITION =
+      1u << LOOM_OPERAND_ROLE_SELECT_CONDITION,
+  LOOM_OPERAND_ROLE_MASK_SELECT_PAYLOAD = 1u
+                                          << LOOM_OPERAND_ROLE_SELECT_PAYLOAD,
+  LOOM_OPERAND_ROLE_MASK_BROADCAST_SOURCE =
+      1u << LOOM_OPERAND_ROLE_BROADCAST_SOURCE,
+  LOOM_OPERAND_ROLE_MASK_COMPOSITE_ELEMENT =
+      1u << LOOM_OPERAND_ROLE_COMPOSITE_ELEMENT,
+  LOOM_OPERAND_ROLE_MASK_FLOAT_EXTENSION_SOURCE =
+      1u << LOOM_OPERAND_ROLE_FLOAT_EXTENSION_SOURCE,
+};
+typedef uint8_t loom_operand_role_mask_t;
+
+static inline loom_operand_role_mask_t loom_operand_role_mask_bit(
+    loom_operand_role_t role) {
+  return role == LOOM_OPERAND_ROLE_NONE || role >= 8
+             ? 0
+             : (loom_operand_role_mask_t)(1u << role);
+}
+
 enum loom_result_flag_bits_e {
   LOOM_RESULT_VARIADIC = 1u << 0,
   LOOM_RESULT_ALLOCATES = 1u << 1,
 };
 typedef uint8_t loom_result_flags_t;
-
-enum loom_attr_flag_bits_e {
-  LOOM_ATTR_OPTIONAL = 1u << 0,
-  // Enum values are ordinal-preserving across bytecode and generic
-  // verification. Op-specific verifiers still own sentinel and consumer
-  // support checks.
-  LOOM_ATTR_OPEN_ENUM = 1u << 1,
-  // Text formats may omit this required scalar attribute when the present
-  // value equals the zero/false default. Parsers restore the explicit value.
-  LOOM_ATTR_ELIDE_DEFAULT = 1u << 2,
-};
-typedef uint8_t loom_attr_flags_t;
 
 enum loom_region_flag_bits_e {
   // Region must contain exactly one block.
@@ -758,6 +762,15 @@ enum loom_region_flag_bits_e {
   // This is a region signature contract, not a property of the generic buffer
   // type.
   LOOM_REGION_GLOBAL_BUFFER_ARGS = 1u << 3,
+  // Scalar entry block arguments are identical across the workgroup. This is
+  // a region signature contract and does not apply to nested region arguments.
+  LOOM_REGION_WORKGROUP_UNIFORM_ARGS = 1u << 4,
+  // Scalar entry block arguments are identical across every workgroup in a
+  // workgroup cluster. This implies workgroup uniformity.
+  LOOM_REGION_CLUSTER_UNIFORM_ARGS = 1u << 5,
+  // Every directly observable effect in this region or a nested region must
+  // be represented by an op carrying LOOM_TRAIT_COMMAND_EFFECT.
+  LOOM_REGION_COMMAND_EFFECTS_ONLY = 1u << 6,
 };
 typedef uint8_t loom_region_flags_t;
 
@@ -773,6 +786,8 @@ typedef struct loom_operand_descriptor_t {
   loom_operand_ownership_effect_t ownership_effect;
   // Carrier mode for the operand ownership action.
   loom_ownership_carrier_t ownership_carrier;
+  // Semantic role of this operand field.
+  loom_operand_role_t role;
 } loom_operand_descriptor_t;
 
 static_assert(sizeof(loom_operand_descriptor_t) == 16,
@@ -795,56 +810,54 @@ typedef struct loom_result_descriptor_t {
 static_assert(sizeof(loom_result_descriptor_t) == 16,
               "loom_result_descriptor_t must be 16 bytes");
 
-typedef uint32_t loom_symbol_interface_flags_t;
+typedef uint16_t loom_symbol_definition_flags_t;
 
-enum loom_symbol_interface_bits_e {
-  // Symbol implements the generated function-like interface.
-  LOOM_SYMBOL_INTERFACE_FUNC_LIKE = 1u << 0,
-  // Symbol implements the generated global-like contract.
-  LOOM_SYMBOL_INTERFACE_GLOBAL = 1u << 1,
-  // Symbol names a target executable/package-like entity.
-  LOOM_SYMBOL_INTERFACE_EXECUTABLE = 1u << 2,
-  // Symbol names a generic module-level record.
-  LOOM_SYMBOL_INTERFACE_RECORD = 1u << 3,
-  // Symbol names a target environment record.
-  LOOM_SYMBOL_INTERFACE_TARGET = 1u << 4,
-  // Symbol names a compile/link-time configuration value.
-  LOOM_SYMBOL_INTERFACE_CONFIG = 1u << 5,
+enum loom_symbol_definition_flag_bits_e {
+  // Symbol op declares a contract that a provider definition may satisfy.
+  LOOM_SYMBOL_DEFINITION_FLAG_DECLARATION = 1u << 0,
+  // Symbol exists only for test or benchmark tooling.
+  LOOM_SYMBOL_DEFINITION_FLAG_TEST_ONLY = 1u << 1,
 };
 
 // Generated metadata for an op that defines a module symbol.
 typedef struct loom_symbol_definition_descriptor_t {
   // Human-readable symbol class used in diagnostics.
   loom_bstring_t name;
-  // Attribute index of the symbol identity field on the defining op.
-  uint8_t name_attr_index;
-  // Attribute index plus one for the optional retain marker, or 0 if absent.
-  uint8_t retain_attr_index_plus_one;
   // Structural symbol interfaces implemented by this definition.
   loom_symbol_interface_flags_t interfaces;
+  // Definition roles such as declaration status.
+  loom_symbol_definition_flags_t flags;
+  // Attribute index of the symbol identity field on the defining op.
+  uint8_t name_attr_index;
+  // Attribute index plus one for optional public visibility, or 0 if absent.
+  uint8_t visibility_attr_index_plus_one;
+  // Attribute index plus one for the optional retain marker, or 0 if absent.
+  uint8_t retain_attr_index_plus_one;
+  // Result index plus one for a typed-value contract, or 0 if absent.
+  uint8_t value_contract_result_index_plus_one;
+  // Attribute index plus one for an exact contract value, or 0 if absent.
+  uint8_t value_contract_value_attr_index_plus_one;
+  // Attribute index plus one for contract predicates, or 0 if absent.
+  uint8_t value_contract_predicates_attr_index_plus_one;
   // Existing bytecode payload kind, or LOOM_SYMBOL_NONE if not serializable
   // through the current SYMBOLS section.
   loom_symbol_kind_t bytecode_kind;
+  // Region index plus one containing a kernel workload signature, or 0 when
+  // the signature is stored as operands or the symbol is not a kernel.
+  uint8_t kernel_workload_region_index_plus_one;
+  // Operand field index plus one containing a kernel workload signature, or 0
+  // when the signature is stored in a region or the symbol is not a kernel.
+  uint8_t kernel_workload_operand_field_index_plus_one;
   // Optional domain that computes typed facts for symbols defined by this op.
   const loom_symbol_fact_domain_t* fact_domain;
 } loom_symbol_definition_descriptor_t;
 
-// Generated metadata for a symbol-reference attribute.
-typedef struct loom_symbol_reference_descriptor_t {
-  // Human-readable expected symbol class used in diagnostics.
-  loom_bstring_t name;
-  // Structural symbol interfaces accepted by this reference.
-  loom_symbol_interface_flags_t interfaces;
-} loom_symbol_reference_descriptor_t;
+static_assert(sizeof(loom_symbol_definition_descriptor_t) == 32,
+              "loom_symbol_definition_descriptor_t must be 32 bytes");
 
 static inline iree_string_view_t loom_symbol_definition_descriptor_name(
     const loom_symbol_definition_descriptor_t* descriptor) {
   return descriptor ? loom_bstring_view(descriptor->name) : IREE_SV("unknown");
-}
-
-static inline iree_string_view_t loom_symbol_reference_descriptor_name(
-    const loom_symbol_reference_descriptor_t* descriptor) {
-  return descriptor ? loom_bstring_view(descriptor->name) : IREE_SV("symbol");
 }
 
 static inline bool loom_symbol_definition_implements(
@@ -852,6 +865,60 @@ static inline bool loom_symbol_definition_implements(
     loom_symbol_interface_flags_t interfaces) {
   return descriptor && interfaces &&
          iree_any_bit_set(descriptor->interfaces, interfaces);
+}
+
+static inline bool loom_symbol_definition_satisfies(
+    const loom_symbol_definition_descriptor_t* descriptor,
+    loom_symbol_interface_flags_t required_interfaces) {
+  return descriptor &&
+         iree_all_bits_set(descriptor->interfaces, required_interfaces);
+}
+
+static inline bool loom_symbol_definition_is_declaration(
+    const loom_symbol_definition_descriptor_t* descriptor) {
+  return descriptor &&
+         iree_any_bit_set(descriptor->flags,
+                          LOOM_SYMBOL_DEFINITION_FLAG_DECLARATION);
+}
+
+static inline bool loom_symbol_definition_is_test_only(
+    const loom_symbol_definition_descriptor_t* descriptor) {
+  return descriptor && iree_any_bit_set(descriptor->flags,
+                                        LOOM_SYMBOL_DEFINITION_FLAG_TEST_ONLY);
+}
+
+static inline uint8_t loom_symbol_definition_visibility_attr_index(
+    const loom_symbol_definition_descriptor_t* descriptor) {
+  return descriptor && descriptor->visibility_attr_index_plus_one
+             ? descriptor->visibility_attr_index_plus_one - 1
+             : LOOM_ATTR_INDEX_NONE;
+}
+
+static inline bool loom_symbol_definition_has_value_contract(
+    const loom_symbol_definition_descriptor_t* descriptor) {
+  return descriptor && descriptor->value_contract_result_index_plus_one != 0;
+}
+
+static inline uint8_t loom_symbol_definition_value_contract_result_index(
+    const loom_symbol_definition_descriptor_t* descriptor) {
+  return descriptor && descriptor->value_contract_result_index_plus_one
+             ? descriptor->value_contract_result_index_plus_one - 1
+             : LOOM_RESULT_INDEX_NONE;
+}
+
+static inline uint8_t loom_symbol_definition_value_contract_value_attr_index(
+    const loom_symbol_definition_descriptor_t* descriptor) {
+  return descriptor && descriptor->value_contract_value_attr_index_plus_one
+             ? descriptor->value_contract_value_attr_index_plus_one - 1
+             : LOOM_ATTR_INDEX_NONE;
+}
+
+static inline uint8_t
+loom_symbol_definition_value_contract_predicates_attr_index(
+    const loom_symbol_definition_descriptor_t* descriptor) {
+  return descriptor && descriptor->value_contract_predicates_attr_index_plus_one
+             ? descriptor->value_contract_predicates_attr_index_plus_one - 1
+             : LOOM_ATTR_INDEX_NONE;
 }
 
 static inline bool loom_symbol_implements(
@@ -864,53 +931,6 @@ static inline loom_symbol_kind_t loom_symbol_bytecode_kind(
     const loom_symbol_t* symbol) {
   if (!symbol) return LOOM_SYMBOL_NONE;
   return symbol->definition ? symbol->definition->bytecode_kind : symbol->kind;
-}
-
-// Per-attribute metadata in the op vtable.
-typedef struct loom_attr_descriptor_t {
-  // Author-facing DSL attribute field name used in diagnostics.
-  loom_bstring_t name;
-  // Runtime attribute payload kind.
-  loom_attr_kind_t attr_kind;
-  // Attribute structural flags such as optional.
-  loom_attr_flags_t flags;
-  // Number of enum keyword slots in |enum_case_names|.
-  uint8_t enum_case_count;
-  // Dense enum value to keyword table, or NULL for non-enum attrs.
-  const loom_bstring_t* enum_case_names;
-  // Expected symbol target contract, or NULL for non-symbol-reference attrs.
-  const loom_symbol_reference_descriptor_t* symbol_ref;
-} loom_attr_descriptor_t;
-
-// Returns the attribute name as a string view.
-static inline iree_string_view_t loom_attr_descriptor_name(
-    const loom_attr_descriptor_t* descriptor) {
-  return loom_bstring_view(descriptor->name);
-}
-
-// Returns the explicit zero/false scalar value implied by ELIDE_DEFAULT.
-static inline loom_attribute_t loom_attr_descriptor_default_value(
-    const loom_attr_descriptor_t* descriptor) {
-  switch ((loom_attr_kind_t)descriptor->attr_kind) {
-    case LOOM_ATTR_I64:
-      return loom_attr_i64(0);
-    case LOOM_ATTR_BOOL:
-      return loom_attr_bool(false);
-    default:
-      return loom_attr_absent();
-  }
-}
-
-// Returns true when |attr| is the elidable text default for |descriptor|.
-static inline bool loom_attr_descriptor_elides_value(
-    const loom_attr_descriptor_t* descriptor, const loom_attribute_t* attr) {
-  if (!iree_any_bit_set(descriptor->flags, LOOM_ATTR_ELIDE_DEFAULT)) {
-    return false;
-  }
-  loom_attribute_t default_value =
-      loom_attr_descriptor_default_value(descriptor);
-  return !loom_attr_is_absent(default_value) &&
-         loom_attribute_equal(attr, &default_value);
 }
 
 // Per-region metadata in the op vtable.
@@ -973,12 +993,12 @@ loom_op_semantics_t loom_dialect_semantics_lookup(
 const loom_region_descriptor_t* loom_op_vtable_region_descriptor(
     const loom_op_vtable_t* vtable, uint8_t region_index);
 
-// Returns the module-local symbol reference defined by |op|. Returns false for
-// non-symbol ops, malformed symbol attributes, cross-module refs, or refs
-// outside the module symbol table.
-bool loom_op_defining_symbol_ref(const loom_module_t* module,
-                                 const loom_op_t* op,
-                                 loom_symbol_ref_t* out_ref);
+// Returns the module-local symbol ID defined by |op| using its already-resolved
+// |vtable| metadata. Returns LOOM_SYMBOL_ID_INVALID for non-symbol ops,
+// cross-module refs, or refs outside the module symbol table.
+loom_symbol_id_t loom_op_defining_symbol_id(const loom_module_t* module,
+                                            const loom_op_t* op,
+                                            const loom_op_vtable_t* vtable);
 
 // Returns true when operand descriptors name independent operand segments
 // stored over the op's flat operand array.
@@ -1009,6 +1029,12 @@ loom_value_slice_t loom_op_operand_field_span(const loom_op_vtable_t* vtable,
 bool loom_op_operand_field_present(const loom_op_vtable_t* vtable,
                                    const loom_op_t* op, uint8_t field_index);
 
+// Resolves an author-facing result field to its flat result span. For
+// variadic result fields the returned span covers the trailing variadic tail.
+loom_value_slice_t loom_op_result_field_span(const loom_op_vtable_t* vtable,
+                                             const loom_op_t* op,
+                                             uint8_t field_index);
+
 // Maps a flat operand index back to the operand descriptor that owns it.
 // Returns false if the index is out of range or the op kind has no descriptor
 // metadata.
@@ -1016,6 +1042,32 @@ bool loom_op_operand_descriptor_at(
     const loom_op_vtable_t* vtable, const loom_op_t* op, uint16_t operand_index,
     const loom_operand_descriptor_t** out_descriptor, uint8_t* out_field_index,
     uint16_t* out_element_index);
+
+// Returns the semantic role for a flat operand index, or
+// LOOM_OPERAND_ROLE_NONE when the op has no descriptor metadata or the operand
+// has no declared role.
+loom_operand_role_t loom_op_operand_role_at(const loom_op_vtable_t* vtable,
+                                            const loom_op_t* op,
+                                            uint16_t operand_index);
+
+// Returns the semantic role for a flat operand index using the op's module
+// vtable, or LOOM_OPERAND_ROLE_NONE when unavailable.
+loom_operand_role_t loom_op_operand_role(const loom_module_t* module,
+                                         const loom_op_t* op,
+                                         uint16_t operand_index);
+
+// Returns true when the op operand at |operand_index| has |role|.
+bool loom_op_operand_has_role(const loom_module_t* module, const loom_op_t* op,
+                              uint16_t operand_index, loom_operand_role_t role);
+
+// Returns the first operand value with |role|, if present.
+bool loom_op_first_operand_with_role(const loom_module_t* module,
+                                     const loom_op_t* op,
+                                     loom_operand_role_t role,
+                                     loom_value_id_t* out_value_id);
+
+// Returns true when |op| defines |value_id| as one of its results.
+bool loom_op_defines_value(const loom_op_t* op, loom_value_id_t value_id);
 
 // Binding kind for BindingList format elements.
 typedef enum loom_binding_kind_e {
@@ -1040,8 +1092,7 @@ static inline loom_value_t* loom_op_operand_value(const loom_module_t* module,
                                                   uint16_t index) {
   IREE_ASSERT(index < op->operand_count);
   loom_value_id_t value_id = loom_op_operands(op)[index];
-  IREE_ASSERT(value_id < module->values.count);
-  return &module->values.entries[value_id];
+  return loom_module_value(module, value_id);
 }
 
 // Resolves an op's result value ID to the value struct in the module's
@@ -1055,8 +1106,7 @@ static inline loom_value_t* loom_op_result_value(const loom_module_t* module,
                                                  uint16_t index) {
   IREE_ASSERT(index < op->result_count);
   loom_value_id_t value_id = loom_op_results(op)[index];
-  IREE_ASSERT(value_id < module->values.count);
-  return &module->values.entries[value_id];
+  return loom_module_value(module, value_id);
 }
 
 // Returns a pointer to the single use entry if the value has exactly
@@ -1103,10 +1153,13 @@ bool loom_op_may_write(const loom_module_t* module, const loom_op_t* op);
 bool loom_op_regions_have_hints(const loom_module_t* module,
                                 const loom_op_t* op);
 
-// Returns true if |value_id| is referenced by a live predicate-list attribute.
-// Type attributes are tracked by the module type-use table instead.
-bool loom_module_value_has_predicate_attribute_uses(const loom_module_t* module,
-                                                    loom_value_id_t value_id);
+// Replaces SSA references to |old_id| in attributes on live operations nested
+// under |region| with |new_id|. Operand and type references are unchanged.
+// Rewritten operations have their effective traits and direct effects
+// refreshed.
+iree_status_t loom_region_replace_attribute_value_references(
+    loom_module_t* module, loom_region_t* region, loom_value_id_t old_id,
+    loom_value_id_t new_id);
 
 // Returns true if every result of |op| has zero operand uses, no live
 // predicate-list attribute uses, and no external value type references. Type
@@ -1150,15 +1203,23 @@ loom_call_like_t loom_call_like_cast(const loom_module_t* module,
 // Returns the direct callee symbol ref, or {0, 0} if |call| is not valid.
 loom_symbol_ref_t loom_call_like_callee(loom_call_like_t call);
 
+// Retargets a verified direct call to |callee|.
+//
+// The call and symbol reference must belong to |module|. This refreshes
+// callback-backed effective traits and transitive effect summaries;
+// callers remain responsible for invalidating any higher-level analyses.
+void loom_call_like_set_callee(loom_module_t* module, loom_call_like_t call,
+                               loom_symbol_ref_t callee);
+
 // Returns the trailing call argument slice, or an empty slice if |call| is not
-// valid or the recorded offset is malformed for the op instance.
+// valid or the recorded field is malformed for the op instance.
 loom_value_slice_t loom_call_like_operands(loom_call_like_t call);
 
 // Returns the trailing call result slice, or an empty slice if |call| is not
 // valid or the recorded offset is malformed for the op instance.
 loom_value_slice_t loom_call_like_results(loom_call_like_t call);
 
-// Returns the operand offset where call arguments begin.
+// Resolves the flat operand offset where call arguments begin.
 uint16_t loom_call_like_operand_offset(loom_call_like_t call);
 
 // Returns the result offset where call results begin.
@@ -1170,8 +1231,8 @@ uint8_t loom_call_like_purity(loom_call_like_t call);
 // Returns the temperature attr value (0 = unspecified).
 uint8_t loom_call_like_temperature(loom_call_like_t call);
 
-// Returns the inline policy attr value (0 = unspecified).
-uint8_t loom_call_like_inline_policy(loom_call_like_t call);
+// Returns the authored inline policy.
+loom_inline_policy_t loom_call_like_inline_policy(loom_call_like_t call);
 
 // Returns the semantic class of the call-like op.
 loom_call_like_kind_t loom_call_like_kind(loom_call_like_t call);
@@ -1196,7 +1257,7 @@ loom_func_like_t loom_func_like_cast(const loom_module_t* module,
                                      loom_op_t* op);
 
 // Returns the body region of a func-like op, or NULL for bodyless ops
-// (func.decl, func.ukernel) or if |func| is not valid.
+// (func.decl, template.ukernel) or if |func| is not valid.
 loom_region_t* loom_func_like_body(loom_func_like_t func);
 
 // Returns the body region index, or LOOM_REGION_INDEX_NONE for bodyless ops or
@@ -1225,8 +1286,8 @@ uint8_t loom_func_like_purity(loom_func_like_t func);
 // Returns the temperature attr value (0 = unspecified).
 uint8_t loom_func_like_temperature(loom_func_like_t func);
 
-// Returns the inline policy attr value (0 = unspecified).
-uint8_t loom_func_like_inline_policy(loom_func_like_t func);
+// Returns the authored inline policy.
+loom_inline_policy_t loom_func_like_inline_policy(loom_func_like_t func);
 
 // Returns the visibility attr value (0 = private, nonzero = public).
 uint8_t loom_func_like_visibility(loom_func_like_t func);
@@ -1250,6 +1311,25 @@ loom_string_id_t loom_func_like_import_symbol(loom_func_like_t func);
 // |func| has no target contract.
 loom_symbol_ref_t loom_func_like_target(loom_func_like_t func);
 
+// Retargets a verified target-assignable function to |target|.
+//
+// The function and symbol reference must belong to |module|. This refreshes
+// callback-backed effective traits and transitive effect summaries; callers
+// remain responsible for invalidating any higher-level analyses.
+void loom_func_like_set_target(loom_module_t* module, loom_func_like_t func,
+                               loom_symbol_ref_t target);
+
+// Sets whether |func| survives symbol pruning as a module-boundary root.
+//
+// The function must define a symbol with a retain attribute. This updates both
+// the operation contract and the module's maintained symbol flags.
+void loom_func_like_set_retained(loom_module_t* module, loom_func_like_t func,
+                                 bool retained);
+
+// Returns the authored representation-contract key for a func-like op, or
+// LOOM_STRING_ID_INVALID when none is present.
+loom_string_id_t loom_func_like_repr_contract(loom_func_like_t func);
+
 // Returns the target ABI enum value, or 0 if |func| has no explicit ABI.
 uint8_t loom_func_like_abi(loom_func_like_t func);
 
@@ -1262,6 +1342,16 @@ loom_string_id_t loom_func_like_export_symbol(loom_func_like_t func);
 // Returns the export payload attrs, or an empty slice if absent.
 loom_named_attr_slice_t loom_func_like_export_attrs(loom_func_like_t func);
 
+// Returns true when |func| is a source-level or target-low kernel entry.
+// Kernel entries are exported by symbol name even without an explicit export
+// symbol attribute.
+bool loom_func_like_is_kernel_entry(loom_func_like_t func);
+
+// Returns true when all possible callers and references to |func| are owned by
+// the current module. Imports, public functions, explicit exports, and kernel
+// entries are externally reachable.
+bool loom_func_like_is_module_internal(loom_func_like_t func);
+
 // Returns true and assigns the export linkage enum value when present.
 bool loom_func_like_export_linkage(loom_func_like_t func, uint8_t* out_linkage);
 
@@ -1272,20 +1362,35 @@ bool loom_func_like_export_linkage(loom_func_like_t func, uint8_t* out_linkage);
 const loom_value_id_t* loom_func_like_arg_ids(loom_func_like_t func,
                                               uint16_t* out_count);
 
+// Returns the workload signature value IDs for a kernel definition or
+// declaration. Definitions source the signature from their configuration
+// region and declarations source it from their designated operand field.
+// Returns an empty slice for non-kernel symbols.
+loom_value_slice_t loom_kernel_workload_arg_ids(const loom_module_t* module,
+                                                const loom_op_t* op);
+
 // Returns the predicate list and count for a func-like op. Sets |out_count|
 // to 0 and returns NULL for ops with no predicate list attr or if |func| is
 // not valid.
 const loom_predicate_t* loom_func_like_predicates(loom_func_like_t func,
                                                   uint16_t* out_count);
 
-// Returns the implements string ID for template/ukernel ops — the name of the
-// op kind this function provides an implementation for. Returns
-// LOOM_STRING_ID_INVALID for def/decl ops, ops with no implements attr, or
-// if |func| is not valid.
-loom_string_id_t loom_func_like_implements(loom_func_like_t func);
+// Returns the authored proof requirements for a provider function. Returns an
+// empty slice for non-provider function kinds and providers without
+// requirements.
+loom_parameterized_attr_array_t loom_func_like_requires(loom_func_like_t func);
 
-// Returns the dispatch priority for template/ukernel ops. Returns 0 for
-// def/decl ops, ops with no priority attr, or if |func| is not valid.
+// Returns the number of leading function arguments consumed while
+// materializing the function-like artifact. Returns zero when the function
+// has no distinct specialization arguments or |func| is invalid.
+int64_t loom_func_like_specialization_count(loom_func_like_t func);
+
+// Returns the template family implemented by |func|, or an invalid reference
+// when the function-like symbol is not a template provider.
+loom_symbol_ref_t loom_func_like_template_family(loom_func_like_t func);
+
+// Returns the dispatch priority for concrete providers. Returns 0 for ops with
+// no priority attr or if |func| is not valid.
 int64_t loom_func_like_priority(loom_func_like_t func);
 
 //===----------------------------------------------------------------------===//
@@ -1421,9 +1526,10 @@ bool loom_region_branch_region_yield_only_operands(
 //===----------------------------------------------------------------------===//
 
 // Returns true if |access| refers to a valid memory-access op. All accessor
-// helpers below tolerate a NULL vtable and return safe defaults.
+// helpers below tolerate a NULL op vtable and return safe defaults.
 static inline bool loom_memory_access_isa(loom_memory_access_t access) {
-  return access.op != NULL;
+  return access.op != NULL && access.op_vtable != NULL &&
+         access.op_vtable->memory_access != NULL;
 }
 
 // Casts |op| to loom_memory_access_t if it implements the MemoryAccess
@@ -1433,8 +1539,20 @@ static inline bool loom_memory_access_isa(loom_memory_access_t access) {
 loom_memory_access_t loom_memory_access_cast(const loom_module_t* module,
                                              const loom_op_t* op);
 
+// Returns the memory operation family represented by the op shape.
+loom_memory_access_operation_kind_t loom_memory_access_operation_kind(
+    loom_memory_access_t access);
+
+// Returns true when the operand at |operand_index| is a written value,
+// compare-exchange expected value, or compare-exchange replacement value.
+bool loom_memory_access_operand_index_is_payload(loom_memory_access_t access,
+                                                 uint16_t operand_index);
+
 // Returns the accessed view or memory-object operand.
 loom_value_id_t loom_memory_access_view(loom_memory_access_t access);
+
+// Returns the physical byte-offset operand, or INVALID for logical accesses.
+loom_value_id_t loom_memory_access_byte_offset(loom_memory_access_t access);
 
 // Returns the written value or atomic update contribution operand.
 loom_value_id_t loom_memory_access_value(loom_memory_access_t access);
@@ -1669,11 +1787,46 @@ loom_attribute_t loom_memory_access_atomic_scope(loom_memory_access_t access);
     return (enum_type)loom_attr_as_enum(loom_op_attrs(op)[(index)]); \
   }
 
+// Defines a function that reads an enum array attribute by index.
+#define LOOM_DEFINE_ATTR_ENUM_ARRAY(func_name, index)              \
+  enum { func_name##_ATTR_INDEX = (index) };                       \
+  static inline loom_enum_array_t func_name(const loom_op_t* op) { \
+    return loom_attr_as_enum_array(loom_op_attrs(op)[(index)]);    \
+  }
+
+// Defines a function that reads a signed enum-set attribute by index.
+#define LOOM_DEFINE_ATTR_SIGNED_ENUM_SET(func_name, index)              \
+  enum { func_name##_ATTR_INDEX = (index) };                            \
+  static inline loom_signed_enum_set_t func_name(const loom_op_t* op) { \
+    return loom_attr_as_signed_enum_set(loom_op_attrs(op)[(index)]);    \
+  }
+
+// Defines a function that reads a representation-scoped enum by index.
+#define LOOM_DEFINE_ATTR_SCOPED_ENUM(func_name, index)           \
+  enum { func_name##_ATTR_INDEX = (index) };                     \
+  static inline uint32_t func_name(const loom_op_t* op) {        \
+    return loom_attr_as_scoped_enum(loom_op_attrs(op)[(index)]); \
+  }
+
 // Defines a function that reads a symbol attribute by index.
 #define LOOM_DEFINE_ATTR_SYMBOL(func_name, index)                  \
   enum { func_name##_ATTR_INDEX = (index) };                       \
   static inline loom_symbol_ref_t func_name(const loom_op_t* op) { \
     return loom_attr_as_symbol(loom_op_attrs(op)[(index)]);        \
+  }
+
+// Defines a function that reads a symbol-array attribute by index.
+#define LOOM_DEFINE_ATTR_SYMBOL_ARRAY(func_name, index)                  \
+  enum { func_name##_ATTR_INDEX = (index) };                             \
+  static inline loom_symbol_ref_array_t func_name(const loom_op_t* op) { \
+    return loom_attr_as_symbol_array(loom_op_attrs(op)[(index)]);        \
+  }
+
+// Defines a function that reads a symbol-set attribute by index.
+#define LOOM_DEFINE_ATTR_SYMBOL_SET(func_name, index)                    \
+  enum { func_name##_ATTR_INDEX = (index) };                             \
+  static inline loom_symbol_ref_array_t func_name(const loom_op_t* op) { \
+    return loom_attr_as_symbol_set(loom_op_attrs(op)[(index)]);          \
   }
 
 // Defines a function that reads a string attribute by index.
@@ -1732,6 +1885,21 @@ loom_attribute_t loom_memory_access_atomic_scope(loom_memory_access_t access);
     return loom_attr_as_dict(loom_op_attrs(op)[(index)]);                \
   }
 
+// Defines a function that reads a parameterized attribute by index.
+#define LOOM_DEFINE_ATTR_PARAMETERIZED(func_name, index)          \
+  enum { func_name##_ATTR_INDEX = (index) };                      \
+  static inline loom_attribute_t func_name(const loom_op_t* op) { \
+    return loom_op_attrs(op)[(index)];                            \
+  }
+
+// Defines a function that reads a parameterized attribute array by index.
+#define LOOM_DEFINE_ATTR_PARAMETERIZED_ARRAY(func_name, index)           \
+  enum { func_name##_ATTR_INDEX = (index) };                             \
+  static inline loom_parameterized_attr_array_t func_name(               \
+      const loom_op_t* op) {                                             \
+    return loom_attr_as_parameterized_array(loom_op_attrs(op)[(index)]); \
+  }
+
 // Defines a function that reads a generic attribute payload by index.
 #define LOOM_DEFINE_ATTR_ANY(func_name, index)                    \
   enum { func_name##_ATTR_INDEX = (index) };                      \
@@ -1765,8 +1933,10 @@ typedef struct loom_builder_ip_t {
   loom_op_t* before_op;
 } loom_builder_ip_t;
 
-// Callback invoked when an op is fully constructed (after finalize_op).
-// Used by the rewriter to add newly created ops to its worklist.
+// Callback invoked after an op's direct fields are finalized. Region-owning op
+// builders create their regions before invoking this callback, but callers may
+// populate those regions afterward. Used by the rewriter to add newly created
+// ops to its worklist.
 typedef iree_status_t (*loom_builder_op_fn_t)(void* user_data, loom_op_t* op);
 typedef struct loom_builder_callback_t {
   loom_builder_op_fn_t fn;
@@ -1785,8 +1955,9 @@ typedef struct loom_builder_callback_t {
 // control storage lifetime: linking into a fresh arena, per-thread
 // arenas during parallel compilation, etc.
 //
-// The optional on_op_finalized callback fires after finalize_op
-// completes (uses registered, def pointers set). NULL when unused.
+// The optional on_op_finalized callback fires after finalize_op completes
+// (uses registered, def pointers set). Nested regions may still be empty at
+// this point. NULL when unused.
 typedef struct loom_builder_t {
   loom_module_t* module;
   iree_arena_allocator_t* arena;
@@ -1905,6 +2076,23 @@ iree_status_t loom_builder_copy_i64_array_attr_storage(loom_builder_t* builder,
                                                        iree_host_size_t count,
                                                        iree_string_view_t label,
                                                        int64_t** out_storage);
+
+// Copies an enum-array attribute payload into the builder arena.
+iree_status_t loom_builder_copy_enum_array_attr_storage(
+    loom_builder_t* builder, loom_enum_array_t values, iree_string_view_t label,
+    const uint8_t** out_storage);
+
+// Validates, canonicalizes, and copies a signed enum-set attribute payload into
+// the builder arena.
+iree_status_t loom_builder_copy_signed_enum_set_attr_storage(
+    loom_builder_t* builder, loom_signed_enum_set_t set,
+    iree_string_view_t label, const uint64_t** out_storage,
+    uint16_t* out_word_count);
+
+// Copies a symbol-array attribute payload into the builder arena.
+iree_status_t loom_builder_copy_symbol_array_attr_storage(
+    loom_builder_t* builder, loom_symbol_ref_array_t values,
+    iree_string_view_t label, const loom_symbol_ref_t** out_storage);
 
 // Copies a predicate-list attribute payload into the builder arena.
 iree_status_t loom_builder_copy_predicate_list_attr_storage(

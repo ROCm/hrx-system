@@ -4,12 +4,12 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "iree/base/internal/math.h"
 #include "loom/error/emitter.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/global/ops.h"
-#include "loom/util/math.h"
 
 static loom_type_t loom_global_symbol_type(const loom_module_t* module,
                                            const loom_symbol_t* symbol) {
@@ -265,17 +265,17 @@ static iree_status_t loom_global_verify_initializer(
   return iree_ok_status();
 }
 
-iree_status_t loom_global_rodata_verify(const loom_module_t* module,
-                                        const loom_op_t* op,
-                                        iree_diagnostic_emitter_t emitter) {
+iree_status_t loom_global_rodata_def_verify(const loom_module_t* module,
+                                            const loom_op_t* op,
+                                            iree_diagnostic_emitter_t emitter) {
   (void)module;
   loom_attribute_t alignment =
-      loom_op_attrs(op)[loom_global_rodata_alignment_ATTR_INDEX];
+      loom_op_attrs(op)[loom_global_rodata_def_alignment_ATTR_INDEX];
   if (loom_attr_is_absent(alignment)) {
     return iree_ok_status();
   }
   int64_t value = loom_attr_as_i64(alignment);
-  if (loom_is_power_of_two_i64(value)) {
+  if (iree_math_is_power_of_two_i64(value)) {
     return iree_ok_status();
   }
 
@@ -316,6 +316,12 @@ iree_status_t loom_global_load_verify(const loom_module_t* module,
   const loom_symbol_t* symbol = &module->symbols.entries[ref.symbol_id];
   if (symbol->definition == NULL || symbol->defining_op == NULL) {
     return iree_ok_status();
+  }
+  if (loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_RODATA)) {
+    IREE_RETURN_IF_ERROR(loom_global_verify_load_results(module, op, emitter));
+    return loom_global_verify_result_type(
+        module, op, emitter, loom_global_load_result(op), /*result_index=*/0,
+        LOOM_TYPE_CONSTRAINT_BUFFER);
   }
   if (!loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_GLOBAL)) {
     return iree_ok_status();

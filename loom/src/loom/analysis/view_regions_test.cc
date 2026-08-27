@@ -128,6 +128,14 @@ class ViewRegionsTest : public ::testing::Test {
     return op;
   }
 
+  loom_op_t* BuildIndexConstant(int64_t value) {
+    loom_op_t* op = nullptr;
+    IREE_CHECK_OK(loom_index_constant_build(
+        &builder_, loom_attr_i64(value),
+        loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), LOOM_LOCATION_UNKNOWN, &op));
+    return op;
+  }
+
   loom_value_id_t BuildDenseLayout() {
     loom_op_t* op = nullptr;
     IREE_CHECK_OK(loom_encoding_layout_dense_build(
@@ -231,8 +239,10 @@ class ViewRegionsTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_local_value_domain_acquire_for_region(
         module_, loom_func_like_body(function_), &analysis_arena_,
         &value_domain_));
+    loom_symbolic_expr_context_initialize(module_, facts, &analysis_arena_,
+                                          &expression_context_);
     IREE_ASSERT_OK(loom_view_region_table_initialize(
-        facts, &value_domain_, &analysis_arena_, out_table));
+        &value_domain_, &expression_context_, out_table));
     IREE_ASSERT_OK(loom_view_region_table_analyze(out_table));
   }
 
@@ -242,6 +252,7 @@ class ViewRegionsTest : public ::testing::Test {
   loom_module_t* module_ = nullptr;
   loom_func_like_t function_;
   loom_local_value_domain_t value_domain_ = {};
+  loom_symbolic_expr_context_t expression_context_ = {};
   loom_builder_t builder_;
 };
 
@@ -306,6 +317,64 @@ TEST_F(ViewRegionsTest, ProvesDisjointReadAndWriteViewsInOneSlab) {
   EXPECT_EQ(write_region->access_flags, LOOM_VIEW_ACCESS_WRITE);
   EXPECT_EQ(loom_view_region_table_root_access_flags(&table, buffer),
             LOOM_VIEW_ACCESS_READ | LOOM_VIEW_ACCESS_WRITE);
+}
+
+TEST_F(ViewRegionsTest, PrecomputesReusedMemoryIndexExpression) {
+  loom_value_id_t buffer = DefineBufferArg();
+  loom_value_id_t source_index = DefineIndexArg();
+  loom_value_id_t unrelated_index = DefineIndexArg();
+  loom_value_id_t layout = BuildDenseLayout();
+  loom_value_id_t zero = loom_index_constant_result(BuildOffsetConstant(0));
+  loom_value_id_t one = loom_index_constant_result(BuildIndexConstant(1));
+
+  loom_op_t* view_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, zero,
+                                        ViewType1D(4096, layout),
+                                        LOOM_LOCATION_UNKNOWN, &view_op));
+
+  loom_value_id_t deep_index = source_index;
+  for (int i = 0; i < 40; ++i) {
+    loom_op_t* add_op = nullptr;
+    IREE_ASSERT_OK(loom_index_add_build(
+        &builder_, deep_index, one, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+        LOOM_LOCATION_UNKNOWN, &add_op));
+    deep_index = loom_index_add_result(add_op);
+  }
+
+  const loom_value_id_t dynamic_indices[] = {deep_index};
+  const int64_t static_indices[] = {INT64_MIN};
+  loom_op_t* load_op = nullptr;
+  IREE_ASSERT_OK(loom_vector_load_build(
+      &builder_, 0, loom_buffer_view_result(view_op), dynamic_indices,
+      IREE_ARRAYSIZE(dynamic_indices), static_indices,
+      IREE_ARRAYSIZE(static_indices), 0, 0, VectorType1D(1),
+      LOOM_LOCATION_UNKNOWN, &load_op));
+  loom_op_t* store_op = nullptr;
+  IREE_ASSERT_OK(loom_vector_store_build(
+      &builder_, 0, loom_vector_load_result(load_op),
+      loom_buffer_view_result(view_op), dynamic_indices,
+      IREE_ARRAYSIZE(dynamic_indices), static_indices,
+      IREE_ARRAYSIZE(static_indices), 0, 0, LOOM_LOCATION_UNKNOWN, &store_op));
+
+  loom_value_fact_table_t facts = {0};
+  ComputeFacts(&facts);
+  loom_view_region_table_t table = {0};
+  Analyze(&facts, &table);
+
+  loom_symbolic_expr_summary_t summary = {};
+  ASSERT_TRUE(loom_symbolic_expr_context_try_lookup_summary(
+      table.expression_context, deep_index, &summary));
+  ASSERT_TRUE(loom_symbolic_expr_is_linear(&summary.expression));
+  EXPECT_EQ(summary.expression.constant, 40);
+  ASSERT_EQ(summary.expression.term_count, 1u);
+  EXPECT_EQ(summary.expression.terms[0].value_id, source_index);
+  loom_symbolic_expr_summary_t repeated_summary = {};
+  EXPECT_TRUE(loom_symbolic_expr_context_try_lookup_summary(
+      table.expression_context, deep_index, &repeated_summary));
+  EXPECT_EQ(repeated_summary.expression.terms, summary.expression.terms);
+  loom_symbolic_expr_summary_t unrelated_summary = {};
+  EXPECT_FALSE(loom_symbolic_expr_context_try_lookup_summary(
+      table.expression_context, unrelated_index, &unrelated_summary));
 }
 
 TEST_F(ViewRegionsTest, ProvesSymbolicOffsetCancellation) {
@@ -406,6 +475,55 @@ TEST_F(ViewRegionsTest, KeepsOverlappingAndDifferentRootViewsConservative) {
   EXPECT_FALSE(no_overlap);
 }
 
+TEST_F(ViewRegionsTest, ProvesDistinctComparableRootsDisjoint) {
+  loom_value_id_t first_buffer = DefineBufferArg();
+  loom_value_id_t second_buffer = DefineBufferArg();
+  loom_value_id_t buffers[] = {first_buffer, second_buffer};
+  loom_type_t buffer_types[] = {loom_type_buffer(), loom_type_buffer()};
+  loom_op_t* noalias_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_assume_noalias_build(
+      &builder_, buffers, IREE_ARRAYSIZE(buffers), buffer_types,
+      IREE_ARRAYSIZE(buffer_types), LOOM_LOCATION_UNKNOWN, &noalias_op));
+  loom_value_slice_t noalias_buffers =
+      loom_buffer_assume_noalias_results(noalias_op);
+  ASSERT_EQ(noalias_buffers.count, 2);
+
+  loom_value_id_t layout = BuildDenseLayout();
+  loom_value_id_t zero = loom_index_constant_result(BuildOffsetConstant(0));
+  loom_op_t* first_view_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, noalias_buffers.values[0],
+                                        zero, ViewType1D(16, layout),
+                                        LOOM_LOCATION_UNKNOWN, &first_view_op));
+  loom_op_t* second_view_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_view_build(
+      &builder_, noalias_buffers.values[1], zero, ViewType1D(16, layout),
+      LOOM_LOCATION_UNKNOWN, &second_view_op));
+
+  loom_value_fact_table_t facts = {0};
+  ComputeFacts(&facts);
+  loom_view_region_table_t table = {0};
+  Analyze(&facts, &table);
+
+  const loom_view_region_t* first_region = nullptr;
+  IREE_ASSERT_OK(loom_view_region_table_get(
+      &table, loom_buffer_view_result(first_view_op), &first_region));
+  const loom_view_region_t* second_region = nullptr;
+  IREE_ASSERT_OK(loom_view_region_table_get(
+      &table, loom_buffer_view_result(second_view_op), &second_region));
+
+  ASSERT_NE(first_region, nullptr);
+  ASSERT_NE(second_region, nullptr);
+  EXPECT_EQ(first_region->root_value_id, first_buffer);
+  EXPECT_EQ(first_region->alias_scope_id, first_buffer);
+  EXPECT_EQ(second_region->root_value_id, second_buffer);
+  EXPECT_EQ(second_region->alias_scope_id, second_buffer);
+
+  bool no_overlap = false;
+  IREE_ASSERT_OK(loom_view_regions_prove_no_overlap(
+      &table, first_region, second_region, &no_overlap));
+  EXPECT_TRUE(no_overlap);
+}
+
 TEST_F(ViewRegionsTest, SubviewPreservesRootAndAddsLogicalOffset) {
   loom_value_id_t buffer = DefineBufferArg();
   loom_value_id_t base_offset = DefineOffsetArg();
@@ -434,6 +552,7 @@ TEST_F(ViewRegionsTest, SubviewPreservesRootAndAddsLogicalOffset) {
 
   ASSERT_NE(region, nullptr);
   EXPECT_EQ(region->root_value_id, buffer);
+  EXPECT_EQ(region->alias_scope_id, LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE);
   EXPECT_TRUE(loom_symbolic_expr_is_linear(&region->begin_byte_offset));
   ASSERT_EQ(region->begin_byte_offset.term_count, 1);
   EXPECT_EQ(region->begin_byte_offset.terms[0].value_id, base_offset);

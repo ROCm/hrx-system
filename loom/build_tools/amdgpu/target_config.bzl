@@ -29,7 +29,6 @@ LOOM_AMDGPU_SUPPORTED_EXACT_PROCESSORS = [
     "gfx1200",
     "gfx1201",
     "gfx1250",
-    "gfx1251",
     "gfx1150",
     "gfx1151",
     "gfx1152",
@@ -37,9 +36,11 @@ LOOM_AMDGPU_SUPPORTED_EXACT_PROCESSORS = [
     "gfx1170",
     "gfx1171",
     "gfx1172",
+    "gfx1251",
 ]
 
 LOOM_AMDGPU_SUPPORTED_CODE_OBJECT_PROCESSORS = [
+    "gfx9-4-generic",
     "gfx11-generic",
     "gfx12-generic",
     "gfx12-5-generic",
@@ -50,17 +51,13 @@ LOOM_AMDGPU_SUPPORTED_DESCRIPTOR_BACKED_PROCESSORS = [
     "gfx941",
     "gfx942",
     "gfx950",
-    "gfx11-generic",
     "gfx1100",
     "gfx1101",
     "gfx1102",
     "gfx1103",
-    "gfx12-generic",
     "gfx1200",
     "gfx1201",
-    "gfx12-5-generic",
     "gfx1250",
-    "gfx1251",
     "gfx1150",
     "gfx1151",
     "gfx1152",
@@ -68,7 +65,67 @@ LOOM_AMDGPU_SUPPORTED_DESCRIPTOR_BACKED_PROCESSORS = [
     "gfx1170",
     "gfx1171",
     "gfx1172",
+    "gfx1251",
+    "gfx9-4-generic",
+    "gfx11-generic",
+    "gfx12-generic",
+    "gfx12-5-generic",
 ]
+
+LOOM_AMDGPU_SUPPORTED_TARGETS = [
+    "gfx942",
+    "gfx950",
+    "gfx1100",
+    "gfx1200",
+    "gfx1250",
+    "gfx1150",
+    "gfx11-generic",
+    "gfx12-generic",
+    "gfx12-5-generic",
+    "gfx940",
+    "gfx941",
+    "gfx1101",
+    "gfx1102",
+    "gfx1103",
+    "gfx1151",
+    "gfx1152",
+    "gfx1153",
+    "gfx1170",
+    "gfx1171",
+    "gfx1172",
+    "gfx1201",
+    "gfx1251",
+    "gfx9-4-generic",
+    "gfx1250-a0",
+]
+
+# buildifier: disable=unsorted-dict-items
+LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET = {
+    "gfx942": "descriptor_set_cdna3_core",
+    "gfx950": "descriptor_set_cdna4_core",
+    "gfx1100": "descriptor_set_rdna3_core",
+    "gfx1200": "descriptor_set_rdna4_core",
+    "gfx1250": "descriptor_set_rdna4_gfx125x_core",
+    "gfx1150": "descriptor_set_rdna3_5_core",
+    "gfx11-generic": "descriptor_set_gfx11_generic_core",
+    "gfx12-generic": "descriptor_set_gfx12_generic_core",
+    "gfx12-5-generic": "descriptor_set_gfx12_5_generic_core",
+    "gfx940": "descriptor_set_cdna3_core",
+    "gfx941": "descriptor_set_cdna3_core",
+    "gfx1101": "descriptor_set_rdna3_core",
+    "gfx1102": "descriptor_set_rdna3_core",
+    "gfx1103": "descriptor_set_rdna3_core",
+    "gfx1151": "descriptor_set_rdna3_5_core",
+    "gfx1152": "descriptor_set_rdna3_5_core",
+    "gfx1153": "descriptor_set_rdna3_5_core",
+    "gfx1170": "descriptor_set_rdna4m_core",
+    "gfx1171": "descriptor_set_rdna4m_core",
+    "gfx1172": "descriptor_set_rdna4m_core",
+    "gfx1201": "descriptor_set_rdna4_core",
+    "gfx1251": "descriptor_set_rdna4_gfx1251_core",
+    "gfx9-4-generic": "descriptor_set_gfx9_4_generic_core",
+    "gfx1250-a0": "descriptor_set_rdna4_gfx1250_a0_core",
+}
 
 LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES = [
     "descriptor_set_cdna3_core",
@@ -77,6 +134,13 @@ LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES = [
     "descriptor_set_rdna4_core",
     "descriptor_set_rdna4_gfx125x_core",
     "descriptor_set_rdna3_5_core",
+    "descriptor_set_rdna4m_core",
+    "descriptor_set_rdna4_gfx1251_core",
+    "descriptor_set_gfx9_4_generic_core",
+    "descriptor_set_gfx11_generic_core",
+    "descriptor_set_gfx12_generic_core",
+    "descriptor_set_gfx12_5_generic_core",
+    "descriptor_set_rdna4_gfx1250_a0_core",
 ]
 
 # buildifier: disable=unsorted-dict-items
@@ -87,6 +151,13 @@ LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY = {
     "amdgpu.rdna4.core": "descriptor_set_rdna4_core",
     "amdgpu.rdna4.gfx125x.core": "descriptor_set_rdna4_gfx125x_core",
     "amdgpu.rdna3_5.core": "descriptor_set_rdna3_5_core",
+    "amdgpu.rdna4m.core": "descriptor_set_rdna4m_core",
+    "amdgpu.rdna4.gfx1251.core": "descriptor_set_rdna4_gfx1251_core",
+    "amdgpu.gfx9_4.generic.core": "descriptor_set_gfx9_4_generic_core",
+    "amdgpu.gfx11.generic.core": "descriptor_set_gfx11_generic_core",
+    "amdgpu.gfx12.generic.core": "descriptor_set_gfx12_generic_core",
+    "amdgpu.gfx12_5.generic.core": "descriptor_set_gfx12_5_generic_core",
+    "amdgpu.rdna4.gfx1250_a0.core": "descriptor_set_rdna4_gfx1250_a0_core",
 }
 
 # buildifier: disable=unsorted-dict-items
@@ -107,19 +178,41 @@ LOOM_AMDGPU_DESCRIPTOR_SET_EXACT_PROCESSORS = {
         "gfx1200",
         "gfx1201",
     ],
-    "descriptor_set_rdna4_gfx125x_core": [
-        "gfx1250",
-        "gfx1251",
-    ],
+    "descriptor_set_rdna4_gfx125x_core": ["gfx1250"],
     "descriptor_set_rdna3_5_core": [
         "gfx1150",
         "gfx1151",
         "gfx1152",
         "gfx1153",
+    ],
+    "descriptor_set_rdna4m_core": [
         "gfx1170",
         "gfx1171",
         "gfx1172",
     ],
+    "descriptor_set_rdna4_gfx1251_core": ["gfx1251"],
+    "descriptor_set_gfx9_4_generic_core": [],
+    "descriptor_set_gfx11_generic_core": [],
+    "descriptor_set_gfx12_generic_core": [],
+    "descriptor_set_gfx12_5_generic_core": [],
+    "descriptor_set_rdna4_gfx1250_a0_core": ["gfx1250"],
+}
+
+# buildifier: disable=unsorted-dict-items
+LOOM_AMDGPU_DESCRIPTOR_SET_GENERIC_PROCESSORS = {
+    "descriptor_set_cdna3_core": [],
+    "descriptor_set_cdna4_core": [],
+    "descriptor_set_rdna3_core": [],
+    "descriptor_set_rdna4_core": [],
+    "descriptor_set_rdna4_gfx125x_core": [],
+    "descriptor_set_rdna3_5_core": [],
+    "descriptor_set_rdna4m_core": [],
+    "descriptor_set_rdna4_gfx1251_core": [],
+    "descriptor_set_gfx9_4_generic_core": ["gfx9-4-generic"],
+    "descriptor_set_gfx11_generic_core": ["gfx11-generic"],
+    "descriptor_set_gfx12_generic_core": ["gfx12-generic"],
+    "descriptor_set_gfx12_5_generic_core": ["gfx12-5-generic"],
+    "descriptor_set_rdna4_gfx1250_a0_core": [],
 }
 
 # buildifier: disable=unsorted-dict-items
@@ -130,6 +223,38 @@ LOOM_AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS = {
     "descriptor_set_rdna4_core": "rdna4",
     "descriptor_set_rdna4_gfx125x_core": "rdna4_gfx125x",
     "descriptor_set_rdna3_5_core": "rdna3_5",
+    "descriptor_set_rdna4m_core": "rdna4m",
+    "descriptor_set_rdna4_gfx1251_core": "rdna4_gfx1251",
+    "descriptor_set_gfx9_4_generic_core": "gfx9_4_generic",
+    "descriptor_set_gfx11_generic_core": "gfx11_generic",
+    "descriptor_set_gfx12_generic_core": "gfx12_generic",
+    "descriptor_set_gfx12_5_generic_core": "gfx12_5_generic",
+    "descriptor_set_rdna4_gfx1250_a0_core": "rdna4_gfx1250_a0",
+}
+
+# buildifier: disable=unsorted-dict-items
+LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES_BY_STORAGE_GENERATOR_TARGET = {
+    "cdna3": [
+        "descriptor_set_cdna3_core",
+        "descriptor_set_gfx9_4_generic_core",
+    ],
+    "cdna4": ["descriptor_set_cdna4_core"],
+    "rdna3": [
+        "descriptor_set_rdna3_core",
+        "descriptor_set_gfx11_generic_core",
+    ],
+    "rdna3_5": ["descriptor_set_rdna3_5_core"],
+    "rdna4": [
+        "descriptor_set_rdna4_core",
+        "descriptor_set_gfx12_generic_core",
+    ],
+    "rdna4_gfx125x": [
+        "descriptor_set_rdna4_gfx125x_core",
+        "descriptor_set_rdna4_gfx1251_core",
+        "descriptor_set_gfx12_5_generic_core",
+        "descriptor_set_rdna4_gfx1250_a0_core",
+    ],
+    "rdna4m": ["descriptor_set_rdna4m_core"],
 }
 
 # buildifier: disable=unsorted-dict-items
@@ -140,6 +265,13 @@ LOOM_AMDGPU_LOW_DESCRIPTOR_HEADERS = {
     "descriptor_set_rdna4_core": "loom/target/arch/amdgpu/descriptors/rdna4_descriptors.h",
     "descriptor_set_rdna4_gfx125x_core": "loom/target/arch/amdgpu/descriptors/rdna4_gfx125x_descriptors.h",
     "descriptor_set_rdna3_5_core": "loom/target/arch/amdgpu/descriptors/rdna3_5_descriptors.h",
+    "descriptor_set_rdna4m_core": "loom/target/arch/amdgpu/descriptors/rdna4m_descriptors.h",
+    "descriptor_set_rdna4_gfx1251_core": "loom/target/arch/amdgpu/descriptors/rdna4_gfx1251_descriptors.h",
+    "descriptor_set_gfx9_4_generic_core": "loom/target/arch/amdgpu/descriptors/gfx9_4_generic_descriptors.h",
+    "descriptor_set_gfx11_generic_core": "loom/target/arch/amdgpu/descriptors/gfx11_generic_descriptors.h",
+    "descriptor_set_gfx12_generic_core": "loom/target/arch/amdgpu/descriptors/gfx12_generic_descriptors.h",
+    "descriptor_set_gfx12_5_generic_core": "loom/target/arch/amdgpu/descriptors/gfx12_5_generic_descriptors.h",
+    "descriptor_set_rdna4_gfx1250_a0_core": "loom/target/arch/amdgpu/descriptors/rdna4_gfx1250_a0_descriptors.h",
 }
 
 # buildifier: disable=unsorted-dict-items
@@ -150,6 +282,13 @@ LOOM_AMDGPU_LOW_DESCRIPTOR_PROVIDER_SYMBOLS = {
     "descriptor_set_rdna4_core": "loom_amdgpu_rdna4_core_descriptor_set",
     "descriptor_set_rdna4_gfx125x_core": "loom_amdgpu_rdna4_gfx125x_core_descriptor_set",
     "descriptor_set_rdna3_5_core": "loom_amdgpu_rdna3_5_core_descriptor_set",
+    "descriptor_set_rdna4m_core": "loom_amdgpu_rdna4m_core_descriptor_set",
+    "descriptor_set_rdna4_gfx1251_core": "loom_amdgpu_rdna4_gfx1251_core_descriptor_set",
+    "descriptor_set_gfx9_4_generic_core": "loom_amdgpu_gfx9_4_generic_core_descriptor_set",
+    "descriptor_set_gfx11_generic_core": "loom_amdgpu_gfx11_generic_core_descriptor_set",
+    "descriptor_set_gfx12_generic_core": "loom_amdgpu_gfx12_generic_core_descriptor_set",
+    "descriptor_set_gfx12_5_generic_core": "loom_amdgpu_gfx12_5_generic_core_descriptor_set",
+    "descriptor_set_rdna4_gfx1250_a0_core": "loom_amdgpu_rdna4_gfx1250_a0_core_descriptor_set",
 }
 
 # buildifier: disable=unsorted-dict-items
@@ -160,4 +299,11 @@ LOOM_AMDGPU_DESCRIPTOR_SET_DEFINES = {
     "descriptor_set_rdna4_core": "LOOM_AMDGPU_DESCRIPTOR_SET_RDNA4_CORE",
     "descriptor_set_rdna4_gfx125x_core": "LOOM_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX125X_CORE",
     "descriptor_set_rdna3_5_core": "LOOM_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE",
+    "descriptor_set_rdna4m_core": "LOOM_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE",
+    "descriptor_set_rdna4_gfx1251_core": "LOOM_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1251_CORE",
+    "descriptor_set_gfx9_4_generic_core": "LOOM_AMDGPU_DESCRIPTOR_SET_GFX9_4_GENERIC_CORE",
+    "descriptor_set_gfx11_generic_core": "LOOM_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE",
+    "descriptor_set_gfx12_generic_core": "LOOM_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE",
+    "descriptor_set_gfx12_5_generic_core": "LOOM_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE",
+    "descriptor_set_rdna4_gfx1250_a0_core": "LOOM_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1250_A0_CORE",
 }

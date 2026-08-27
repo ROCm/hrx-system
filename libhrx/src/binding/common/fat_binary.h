@@ -15,31 +15,35 @@
 #define IREE_HAL_STREAMING_FAT_BINARY_H_
 
 #include "iree/base/api.h"
+#include "iree/hal/api.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
 
 enum {
-  IREE_HAL_STREAMING_FAT_BINARY_FORMAT_CAPACITY = 64,
+  IREE_HAL_STREAMING_FAT_BINARY_TARGET_KEY_CAPACITY = 64,
 };
 
 // One ELF image matched out of a fat-binary / offload bundle.
-// The span's lifetime is owned by iree_hal_streaming_fat_binary_extract_t
-// and remains valid until that object is reset/deinitialized.
+// The span's lifetime is managed by iree_hal_streaming_fat_binary_extract_t
+// and remains valid until that object is reset.
 typedef struct iree_hal_streaming_fat_binary_elf_t {
-  // Raw AMD HSACO ELF bytes ready to hand to the HAL executable cache.
+  // Raw AMD HSACO ELF bytes ready to load on the selected HAL target.
   iree_const_byte_span_t data;
   // Bundle entry triple (empty for raw-ELF inputs). Borrowed.
   iree_string_view_t triple;
-  // NUL-terminated HAL AMDGPU executable format derived from the ELF header.
-  char executable_format[IREE_HAL_STREAMING_FAT_BINARY_FORMAT_CAPACITY];
+  // Selected target borrowed from the source HAL device spec.
+  const iree_hal_executable_target_t* executable_target;
+  // NUL-terminated AMDGPU code-object target key derived from the ELF header.
+  char
+      code_object_target_key[IREE_HAL_STREAMING_FAT_BINARY_TARGET_KEY_CAPACITY];
 } iree_hal_streaming_fat_binary_elf_t;
 
 // Ranked fat-binary target candidate.
 typedef struct iree_hal_streaming_fat_binary_target_t {
-  // Target string to match against bundle entries.
-  iree_string_view_t value;
+  // Executable target borrowed from a HAL device spec.
+  const iree_hal_executable_target_t* executable_target;
 } iree_hal_streaming_fat_binary_target_t;
 
 // Owns the ELFs produced by a single fat-binary unpack.
@@ -48,15 +52,20 @@ typedef struct iree_hal_streaming_fat_binary_target_t {
 // caller-supplied input or an internally-owned decompressed buffer — never
 // keep them past the matching reset.
 typedef struct iree_hal_streaming_fat_binary_extract_t {
+  // Host allocator used for owned storage.
   iree_allocator_t host_allocator;
 
-  // Decompressed buffer backing store (non-NULL only for CCOB inputs).
+  // Decompressed/resolved buffer backing store (non-NULL for CCOB inputs and
+  // for HIPK out-of-band kpack inputs; the matched ELF spans point into it).
   void* owned_buffer;
+  // Size of |owned_buffer| in bytes.
   iree_host_size_t owned_buffer_size;
 
   // Heap-allocated array of matched ELFs.
   iree_hal_streaming_fat_binary_elf_t* matches;
+  // Number of populated entries in |matches|.
   iree_host_size_t match_count;
+  // Allocated entry capacity of |matches|.
   iree_host_size_t match_capacity;
 } iree_hal_streaming_fat_binary_extract_t;
 
@@ -65,24 +74,23 @@ typedef struct iree_hal_streaming_fat_binary_extract_t {
 // Raw ELF also counts as "supported" (trivially passthrough).
 bool iree_hal_streaming_fat_binary_is_supported(iree_const_byte_span_t data);
 
-// Validates a raw AMDGPU HSACO ELF and derives the HAL AMDGPU executable
-// format string from its code-object target metadata.
+// Validates a raw AMDGPU HSACO ELF and derives the HAL AMDGPU target key from
+// its code-object target metadata.
 iree_status_t iree_hal_streaming_fat_binary_describe_amdgpu_elf(
-    iree_const_byte_span_t elf_data,
-    iree_host_size_t executable_format_capacity, char* executable_format,
-    iree_host_size_t* out_elf_size);
+    iree_const_byte_span_t elf_data, iree_host_size_t target_key_capacity,
+    char* target_key, iree_host_size_t* out_elf_size);
 
 // Unwraps a fat-binary / offload-bundle / CCOB / raw ELF blob and returns
-// every contained ELF whose bundle triple matches the best-ranked target
-// candidate. For a raw-ELF input the ELF itself is returned as a single match
-// with an empty triple.
+// every contained ELF compatible with the best-ranked target candidate. For a
+// raw-ELF input the ELF itself is returned as a single match with an empty
+// triple.
 //
 // |targets| must be ordered from most-specific to least-specific. Each target
-// value is matched against the bundle-entry triple's trailing gfx component
-// (after the final "--" or final "-" separator, or the entire string for bare
-// gfx targets), with feature specifiers such as ":sramecc+" or ":xnack-"
-// stripped from both sides before comparison. If the bundle contains matches
-// for several candidates, only matches for the earliest candidate are returned.
+// key is matched against the bundle-entry triple's trailing gfx component and
+// validated against the code-object target derived from the ELF header. If the
+// input contains matches for several candidates, only matches for the earliest
+// compatible candidate are returned. Incompatible feature-specialized images
+// are skipped.
 //
 // On error |out_extract| is left empty (safe to reset).
 // On success the caller owns |out_extract| and must call

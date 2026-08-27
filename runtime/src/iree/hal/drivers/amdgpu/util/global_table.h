@@ -11,7 +11,6 @@
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/amdgpu/queue_affinity.h"
-#include "iree/hal/drivers/amdgpu/util/libhsa.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -53,35 +52,10 @@ typedef struct iree_hal_amdgpu_global_table_params_t {
   // Number of physical devices in the owning AMDGPU logical device.
   iree_host_size_t physical_device_count;
 
-  // Backend resolver used for HSA symbol verification and buffer creation.
+  // Backend resolver used for symbol verification and buffer creation.
+  // Callback state must remain valid until the table is deinitialized.
   iree_hal_amdgpu_global_table_resolver_t resolver;
 } iree_hal_amdgpu_global_table_params_t;
-
-typedef struct iree_hal_amdgpu_global_table_hsa_params_t {
-  // Host allocator used for table storage and cached buffer wrappers.
-  iree_allocator_t host_allocator;
-
-  // Queue affinity domain of the owning AMDGPU logical device.
-  iree_hal_amdgpu_queue_affinity_domain_t queue_affinity_domain;
-
-  // Bitmask of physical device ordinals this executable was loaded on.
-  uint64_t loaded_physical_device_mask;
-
-  // Borrowed HSA dynamic symbol table.
-  const iree_hal_amdgpu_libhsa_t* libhsa;
-
-  // Borrowed logical device used in global buffer placements.
-  iree_hal_device_t* device;
-
-  // Borrowed HSA executable containing variable symbols.
-  hsa_executable_t executable;
-
-  // Number of physical device agents in |device_agents|.
-  iree_host_size_t device_agent_count;
-
-  // Borrowed physical device agent table owned by the executable.
-  const hsa_agent_t* device_agents;
-} iree_hal_amdgpu_global_table_hsa_params_t;
 
 typedef struct iree_hal_amdgpu_global_table_t {
   // True when the table has been initialized and must be deinitialized.
@@ -99,26 +73,9 @@ typedef struct iree_hal_amdgpu_global_table_t {
   // Number of physical devices in the owning logical device.
   iree_host_size_t physical_device_count;
 
-  // Backend resolver used for HSA symbol verification and buffer creation.
+  // Backend resolver used for symbol verification and buffer creation.
+  // Callback state must remain valid until the table is deinitialized.
   iree_hal_amdgpu_global_table_resolver_t resolver;
-
-  // HSA-backed resolver state used by the production AMDGPU executable path.
-  struct {
-    // Borrowed HSA dynamic symbol table.
-    const iree_hal_amdgpu_libhsa_t* libhsa;
-
-    // Borrowed logical device used in global buffer placements.
-    iree_hal_device_t* device;
-
-    // Borrowed HSA executable containing variable symbols.
-    hsa_executable_t executable;
-
-    // Number of physical device agents in |device_agents|.
-    iree_host_size_t device_agent_count;
-
-    // Borrowed physical device agent table owned by the executable.
-    const hsa_agent_t* device_agents;
-  } hsa;
 
   // Guards entry publication and cached buffer publication.
   iree_slim_mutex_t mutex;
@@ -136,11 +93,6 @@ typedef struct iree_hal_amdgpu_global_table_t {
 // Initializes |out_table| for executable global resolution.
 iree_status_t iree_hal_amdgpu_global_table_initialize(
     const iree_hal_amdgpu_global_table_params_t* params,
-    iree_hal_amdgpu_global_table_t* out_table);
-
-// Initializes |out_table| with the built-in HSA executable global resolver.
-iree_status_t iree_hal_amdgpu_global_table_initialize_hsa(
-    const iree_hal_amdgpu_global_table_hsa_params_t* params,
     iree_hal_amdgpu_global_table_t* out_table);
 
 // Releases cached buffer aliases and table storage.

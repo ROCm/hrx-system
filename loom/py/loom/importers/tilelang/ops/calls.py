@@ -394,7 +394,6 @@ def _convert_float_predicate_call(
         ValueRef,
         getattr(context.builder.scalar, builder_name)(
             input=input_value,
-            results=[I1],
             name=context.fresh_name(builder_name),
         ),
     )
@@ -462,17 +461,24 @@ def _convert_unary_integer_call(
             node_text(expr), f"call `{op_name}` operand is not mapped"
         )
         return None
-    index_like = str(input_value.type) == "index"
-    dialect = context.builder.index if index_like else context.builder.scalar
-    result_type = INDEX if index_like else context.type_converter.map_dtype(dtype(expr))
-    result = cast(
-        ValueRef,
-        getattr(dialect, builder_name)(
-            input=input_value,
-            results=[result_type],
-            name=context.fresh_name(builder_name),
-        ),
-    )
+    if str(input_value.type) == "index":
+        result = cast(
+            ValueRef,
+            getattr(context.builder.index, builder_name)(
+                input=input_value,
+                name=context.fresh_name(builder_name),
+            ),
+        )
+    else:
+        result_type = context.type_converter.map_dtype(dtype(expr))
+        result = cast(
+            ValueRef,
+            getattr(context.builder.scalar, builder_name)(
+                input=input_value,
+                results=[result_type],
+                name=context.fresh_name(builder_name),
+            ),
+        )
     _map_call_result(expr, context, result, op_name)
     return result
 
@@ -505,7 +511,6 @@ def _convert_bitwise_not_call(
         result = context.builder.index.xori(
             lhs=input_value,
             rhs=all_ones,
-            results=[input_value.type],
             name=context.fresh_name("noti"),
         )
         _map_call_result(expr, context, result, op_name, value_type=input_type)
@@ -561,7 +566,6 @@ def _convert_binary_integer_call(
             getattr(context.builder.index, index_builder_name)(
                 lhs=lhs,
                 rhs=rhs,
-                results=[INDEX],
                 name=context.fresh_name(index_builder_name),
             ),
         )
@@ -652,7 +656,6 @@ def _convert_ceildiv_call(
     result = context.builder.index.div(
         lhs=adjusted,
         rhs=rhs,
-        results=[INDEX],
         name=context.fresh_name("ceildiv"),
     )
     _map_call_result(expr, context, result, op_name, value_type="index")
@@ -1546,7 +1549,6 @@ def _tvm_mfma_accumulator_chunk_origin(
         chunk_offset = context.builder.index.mul(
             lhs=access.indices[0],
             rhs=context.ensure_constant(str(chunk_lanes), "index", f"c{chunk_lanes}"),
-            results=[INDEX],
             name=context.fresh_name("acc_offset"),
         )
         return (chunk_offset,)
@@ -1584,19 +1586,16 @@ def _tvm_mfma_accumulator_chunk_origin(
     row = context.builder.index.div(
         lhs=access.indices[0],
         rhs=chunks_per_row_value,
-        results=[INDEX],
         name=context.fresh_name("acc_row"),
     )
     chunk = context.builder.index.rem(
         lhs=access.indices[0],
         rhs=chunks_per_row_value,
-        results=[INDEX],
         name=context.fresh_name("acc_chunk"),
     )
     column = context.builder.index.mul(
         lhs=chunk,
         rhs=context.ensure_constant(str(chunk_lanes), "index", f"c{chunk_lanes}"),
-        results=[INDEX],
         name=context.fresh_name("acc_column"),
     )
     return (row, column)
@@ -1630,7 +1629,7 @@ def _tvm_mfma_matrix_schema(
 ) -> ValueRef:
     return context.storage_schema_value(
         EncodingInstance(
-            name="matrix_operand",
+            name="encoding.operand",
             params=(
                 ("element_format", operand_format.element_format),
                 ("payload_elements", operand_format.lane_count),

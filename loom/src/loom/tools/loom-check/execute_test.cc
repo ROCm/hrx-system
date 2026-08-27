@@ -9,6 +9,7 @@
 #include <string>
 
 #include "iree/base/internal/arena.h"
+#include "iree/base/internal/json.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/error/error_defs.h"
@@ -22,6 +23,29 @@
 
 namespace loom {
 namespace {
+
+static iree_string_view_t ParseJsonDocument(const std::string& json) {
+  iree_string_view_t cursor = iree_make_string_view(json.data(), json.size());
+  iree_string_view_t value = iree_string_view_empty();
+  IREE_EXPECT_OK(iree_json_consume_value(&cursor, &value));
+  IREE_EXPECT_OK(iree_json_consume_insignificant(&cursor));
+  EXPECT_TRUE(iree_string_view_is_empty(cursor));
+  return value;
+}
+
+static iree_string_view_t LookupObject(iree_string_view_t object,
+                                       iree_string_view_t key) {
+  iree_string_view_t value = iree_string_view_empty();
+  IREE_EXPECT_OK(iree_json_lookup_object_value(object, key, &value));
+  return value;
+}
+
+static iree_string_view_t LookupArrayElement(iree_string_view_t array,
+                                             iree_host_size_t index) {
+  iree_string_view_t value = iree_string_view_empty();
+  IREE_EXPECT_OK(iree_json_array_get(array, index, &value));
+  return value;
+}
 
 iree_status_t RegisterTestContext(void* user_data, loom_context_t* context) {
   (void)user_data;
@@ -56,7 +80,10 @@ void InitializeTestLowLowerPolicyRegistryForProvider(
 }
 
 const loom_target_provider_t kTestTargetProvider = {
-    /*.register_context=*/{}, /*.initialize_low_descriptor_registry=*/
+    /*.profile_type=*/{},
+    /*.materialize_definition=*/{},
+    /*.register_context=*/{},
+    /*.initialize_low_descriptor_registry=*/
     InitializeTestLowDescriptorRegistryForProvider,
     /*.initialize_low_lower_policy_registry=*/
     InitializeTestLowLowerPolicyRegistryForProvider,
@@ -287,8 +314,7 @@ class ExecuteTest : public ::testing::Test {
   }
 
   std::string DiffJsonString(const loom_check_result_t& result) {
-    return std::string(result.diff_hunk_json.buffer,
-                       result.diff_hunk_json.size);
+    return JsonObjectListString(result.diff_hunks);
   }
 
   std::string ActualOutputString(const loom_check_result_t& result) {
@@ -296,13 +322,22 @@ class ExecuteTest : public ::testing::Test {
   }
 
   std::string AnnotationEditJsonString(const loom_check_result_t& result) {
-    return std::string(result.annotation_edits.json.buffer,
-                       result.annotation_edits.json.size);
+    return JsonObjectListString(result.annotation_edits);
   }
 
   std::string DiagnosticJsonString(const loom_check_result_t& result) {
-    return std::string(result.diagnostic_json.buffer,
-                       result.diagnostic_json.size);
+    return JsonObjectListString(result.diagnostics);
+  }
+
+  std::string JsonObjectListString(const loom_json_value_list_t& list) {
+    iree_string_builder_t builder;
+    iree_string_builder_initialize(iree_allocator_system(), &builder);
+    loom_output_stream_t stream;
+    loom_output_stream_for_builder(&builder, &stream);
+    IREE_EXPECT_OK(loom_json_value_list_write_array(&list, &stream));
+    std::string json(builder.buffer, builder.size);
+    iree_string_builder_deinitialize(&builder);
+    return json;
   }
 
   iree_arena_block_pool_t block_pool_;
@@ -354,11 +389,17 @@ TEST_F(ExecuteTest, RoundtripMismatch) {
                    &result));
   EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL);
   EXPECT_FALSE(DetailString(result).empty()) << "expected diff output";
-  EXPECT_GT(result.diff_hunk_count, 0u);
-  EXPECT_NE(DiffJsonString(result).find("\"kind\": \"delete\""),
-            std::string::npos);
-  EXPECT_NE(DiffJsonString(result).find("\"kind\": \"insert\""),
-            std::string::npos);
+  EXPECT_GT(result.diff_hunks.count, 0u);
+  const std::string diff_json = DiffJsonString(result);
+  const iree_string_view_t hunk =
+      LookupArrayElement(ParseJsonDocument(diff_json), 0);
+  const iree_string_view_t lines = LookupObject(hunk, IREE_SV("lines"));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(LookupArrayElement(lines, 0), IREE_SV("kind")),
+      IREE_SV("delete")));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(LookupArrayElement(lines, 1), IREE_SV("kind")),
+      IREE_SV("insert")));
   loom_check_result_deinitialize(&result);
 }
 
@@ -372,7 +413,7 @@ TEST_F(ExecuteTest, RoundtripParseError) {
   // Diagnostics are collected in the detail string.
   EXPECT_EQ(result.raw_outcome, LOOM_CHECK_FAIL);
   EXPECT_FALSE(DetailString(result).empty()) << "expected parse diagnostics";
-  EXPECT_GT(result.diagnostic_count, 0u);
+  EXPECT_GT(result.diagnostics.count, 0u);
   EXPECT_NE(DiagnosticJsonString(result).find("\"error_id\":\"ERR_PARSE_"),
             std::string::npos);
   loom_check_result_deinitialize(&result);
@@ -453,16 +494,16 @@ static const char kVerifyTestLowTarget[] =
 
 TEST_F(ExecuteTest, VerifyRunsLowDescriptorVerifier) {
   loom_check_result_t result;
-  std::string source =
-      std::string("// RUN: verify\n") + kVerifyTestLowTarget +
-      "low.func.def target(@test_target) @constant() -> (reg<test.i32>) {\n"
-      "  %c0 = low.const<test.const.i32> : reg<test.i32>\n"
-      "  low.return %c0 : reg<test.i32>\n"
-      "}\n";
+  std::string source = std::string("// RUN: verify\n") + kVerifyTestLowTarget +
+                       "low.func.def target<test.low.core>(@test_target) "
+                       "@constant() -> (reg<test.i32>) {\n"
+                       "  %c0 = low.const<test.const.i32> : reg<test.i32>\n"
+                       "  low.return %c0 : reg<test.i32>\n"
+                       "}\n";
   IREE_ASSERT_OK(ExecuteFirst(source.c_str(), &result));
   EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL)
       << "detail: " << DetailString(result);
-  EXPECT_EQ(result.diagnostic_count, 1u);
+  EXPECT_EQ(result.diagnostics.count, 1u);
   const std::string diagnostic_json = DiagnosticJsonString(result);
   EXPECT_NE(diagnostic_json.find("\"domain\":\"TARGET\""), std::string::npos);
   EXPECT_NE(diagnostic_json.find("\"error_id\":\"ERR_TARGET_047\""),
@@ -508,9 +549,11 @@ TEST_F(ExecuteTest, VerifyUnmatchedAnnotation) {
               std::string::npos)
       << "detail: " << DetailString(result);
   EXPECT_EQ(result.annotation_edits.count, 1u);
-  EXPECT_NE(AnnotationEditJsonString(result).find(
-                "\"kind\": \"delete_diagnostic_annotation\""),
-            std::string::npos);
+  const std::string edit_json = AnnotationEditJsonString(result);
+  const iree_string_view_t edit =
+      LookupArrayElement(ParseJsonDocument(edit_json), 0);
+  EXPECT_TRUE(iree_string_view_equal(LookupObject(edit, IREE_SV("kind")),
+                                     IREE_SV("delete_diagnostic_annotation")));
   loom_check_result_deinitialize(&result);
 }
 
@@ -526,9 +569,18 @@ TEST_F(ExecuteTest, VerifyAnnotationDeleteEditConsumesCrlf) {
   EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL)
       << "detail: " << DetailString(result);
   EXPECT_EQ(result.annotation_edits.count, 1u);
-  EXPECT_NE(AnnotationEditJsonString(result).find(
-                "\"range\": {\"start_byte\": 16, \"end_byte\": 40}"),
-            std::string::npos);
+  const std::string edit_json = AnnotationEditJsonString(result);
+  const iree_string_view_t edit =
+      LookupArrayElement(ParseJsonDocument(edit_json), 0);
+  const iree_string_view_t range = LookupObject(edit, IREE_SV("range"));
+  uint64_t start_byte = 0;
+  uint64_t end_byte = 0;
+  IREE_ASSERT_OK(iree_json_parse_uint64(
+      LookupObject(range, IREE_SV("start_byte")), &start_byte));
+  IREE_ASSERT_OK(iree_json_parse_uint64(
+      LookupObject(range, IREE_SV("end_byte")), &end_byte));
+  EXPECT_EQ(start_byte, 16u);
+  EXPECT_EQ(end_byte, 40u);
   loom_check_result_deinitialize(&result);
 }
 
@@ -542,18 +594,19 @@ TEST_F(ExecuteTest, VerifyUnexpectedDiagnostic) {
   EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL);
   EXPECT_TRUE(DetailString(result).find("unexpected") != std::string::npos)
       << "detail: " << DetailString(result);
-  EXPECT_EQ(result.diagnostic_count, 1u);
+  EXPECT_EQ(result.diagnostics.count, 1u);
   EXPECT_NE(DiagnosticJsonString(result).find("\"domain\":\"PARSE\""),
             std::string::npos);
   EXPECT_NE(DiagnosticJsonString(result).find("\"error_id\":\"ERR_PARSE_006\""),
             std::string::npos);
   EXPECT_EQ(result.annotation_edits.count, 1u);
-  EXPECT_NE(AnnotationEditJsonString(result).find(
-                "\"kind\": \"insert_diagnostic_annotations\""),
-            std::string::npos);
-  EXPECT_NE(AnnotationEditJsonString(result).find(
-                "\"text\": \"// ERROR@+1: PARSE/006\\n\""),
-            std::string::npos);
+  const std::string edit_json = AnnotationEditJsonString(result);
+  const iree_string_view_t edit =
+      LookupArrayElement(ParseJsonDocument(edit_json), 0);
+  EXPECT_TRUE(iree_string_view_equal(LookupObject(edit, IREE_SV("kind")),
+                                     IREE_SV("insert_diagnostic_annotations")));
+  EXPECT_TRUE(iree_string_view_equal(LookupObject(edit, IREE_SV("text")),
+                                     IREE_SV("// ERROR@+1: PARSE/006\\n")));
   loom_check_result_deinitialize(&result);
 }
 
@@ -764,12 +817,14 @@ TEST_F(ExecuteTest, VerifyLineMismatch) {
   EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL)
       << "detail: " << DetailString(result);
   EXPECT_EQ(result.annotation_edits.count, 2u);
-  EXPECT_NE(AnnotationEditJsonString(result).find(
-                "\"kind\": \"delete_diagnostic_annotation\""),
-            std::string::npos);
-  EXPECT_NE(AnnotationEditJsonString(result).find(
-                "\"kind\": \"insert_diagnostic_annotations\""),
-            std::string::npos);
+  const std::string edits_json = AnnotationEditJsonString(result);
+  const iree_string_view_t edits = ParseJsonDocument(edits_json);
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(LookupArrayElement(edits, 0), IREE_SV("kind")),
+      IREE_SV("delete_diagnostic_annotation")));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(LookupArrayElement(edits, 1), IREE_SV("kind")),
+      IREE_SV("insert_diagnostic_annotations")));
   loom_check_result_deinitialize(&result);
 }
 
@@ -811,10 +866,13 @@ TEST_F(ExecuteTest, VerifyTypeErrorAnnotationEditOffsets) {
   EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL)
       << "detail: " << DetailString(result);
   EXPECT_EQ(result.annotation_edits.count, 1u);
-  std::string edits = AnnotationEditJsonString(result);
-  EXPECT_NE(edits.find("\"text\": \"  // ERROR@+3: TYPE/003\\n  // ERROR@+2: "
-                       "TYPE/003\\n  // ERROR@+1: TYPE/004\\n\""),
-            std::string::npos);
+  const std::string edits_json = AnnotationEditJsonString(result);
+  const iree_string_view_t edit =
+      LookupArrayElement(ParseJsonDocument(edits_json), 0);
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(edit, IREE_SV("text")),
+      IREE_SV("  // ERROR@+3: TYPE/003\\n  // ERROR@+2: TYPE/003\\n  // "
+              "ERROR@+1: TYPE/004\\n")));
   loom_check_result_deinitialize(&result);
 }
 
@@ -961,7 +1019,7 @@ TEST_F(ExecuteTest, PassModeVerifiesTransformedModule) {
                    "}\n",
                    &result));
   EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL);
-  EXPECT_GT(result.diagnostic_count, 0u);
+  EXPECT_GT(result.diagnostics.count, 0u);
   EXPECT_NE(DiagnosticJsonString(result).find("\"emitter\":\"verifier\""),
             std::string::npos);
   EXPECT_NE(DetailString(result).find("TYPE/"), std::string::npos);
@@ -981,7 +1039,7 @@ TEST_F(ExecuteTest, PassModeCapturesPassDiagnostic) {
       "}\n",
       &result));
   EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL);
-  EXPECT_GT(result.diagnostic_count, 0u);
+  EXPECT_GT(result.diagnostics.count, 0u);
   EXPECT_NE(DiagnosticJsonString(result).find("\"emitter\":\"pass\""),
             std::string::npos);
   EXPECT_NE(
@@ -1289,8 +1347,9 @@ TEST_F(ExecuteTest, EmitSourceLowLowersEveryTargetedFunction) {
   EXPECT_EQ(result.raw_outcome, LOOM_CHECK_FAIL);
   EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL);
   const std::string actual_output = ActualOutputString(result);
-  EXPECT_NE(actual_output.find("low.func.def target(@test_target)"),
-            std::string::npos);
+  EXPECT_NE(
+      actual_output.find("low.func.def target<test.low.core>(@test_target)"),
+      std::string::npos);
   EXPECT_NE(actual_output.find("@first()"), std::string::npos);
   EXPECT_NE(actual_output.find("@second()"), std::string::npos);
   EXPECT_EQ(actual_output.find("\nfunc.def target(@test_target) @first"),
@@ -1300,47 +1359,21 @@ TEST_F(ExecuteTest, EmitSourceLowLowersEveryTargetedFunction) {
   loom_check_result_deinitialize(&result);
 }
 
-TEST_F(ExecuteTest, EmitLowScheduleJsonAnchorsLiveInPreamble) {
-  loom_check_result_t result;
-  IREE_ASSERT_OK(
-      ExecuteFirst("// RUN: emit low-schedule-json @livein\n"
-                   "test.target<low_core> @test_target\n"
-                   "low.func.def target(@test_target) @livein() -> "
-                   "(reg<test.i32>) {\n"
-                   "  %arg0 = low.live_in<test.arg0> : reg<test.i32>\n"
-                   "  %copy = low.copy %arg0 : reg<test.i32> -> "
-                   "reg<test.i32>\n"
-                   "  low.return %copy : reg<test.i32>\n"
-                   "}\n",
-                   &result));
-  EXPECT_EQ(result.raw_outcome, LOOM_CHECK_FAIL);
-  EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL);
-  const std::string actual_output = ActualOutputString(result);
-  EXPECT_NE(actual_output.find("\"format\":\"loom.low.schedule.v0\""),
-            std::string::npos);
-  EXPECT_NE(actual_output.find("\"op\":\"low.live_in\""), std::string::npos);
-  EXPECT_NE(actual_output.find("\"kind\":\"anchor\""), std::string::npos);
-  EXPECT_NE(actual_output.find("\"from\":0,\"to\":1,\"kind\":\"anchor\""),
-            std::string::npos);
-  EXPECT_NE(actual_output.find("\"from\":0,\"to\":2,\"kind\":\"anchor\""),
-            std::string::npos);
-  loom_check_result_deinitialize(&result);
-}
-
 TEST_F(ExecuteTest, EmitLivenessJsonReportsPressureSummary) {
   loom_check_result_t result;
-  IREE_ASSERT_OK(ExecuteFirst(
-      "// RUN: emit liveness-json @pressure\n"
-      "test.target<low_core> @test_target\n"
-      "low.func.def target(@test_target) @pressure(%a: reg<test.i32>, "
-      "%b: reg<test.i32>, %c: reg<test.i32>) -> "
-      "(reg<test.i32>) {\n"
-      "  %ab = low.copy %a : reg<test.i32> -> reg<test.i32>\n"
-      "  %bc = low.copy %b : reg<test.i32> -> reg<test.i32>\n"
-      "  %cc = low.copy %c : reg<test.i32> -> reg<test.i32>\n"
-      "  low.return %ab : reg<test.i32>\n"
-      "}\n",
-      &result));
+  IREE_ASSERT_OK(
+      ExecuteFirst("// RUN: emit liveness-json @pressure\n"
+                   "test.target<low_core> @test_target\n"
+                   "low.func.def target<test.low.core>(@test_target) "
+                   "@pressure(%a: reg<test.i32>, "
+                   "%b: reg<test.i32>, %c: reg<test.i32>) -> "
+                   "(reg<test.i32>) {\n"
+                   "  %ab = low.copy %a : reg<test.i32> -> reg<test.i32>\n"
+                   "  %bc = low.copy %b : reg<test.i32> -> reg<test.i32>\n"
+                   "  %cc = low.copy %c : reg<test.i32> -> reg<test.i32>\n"
+                   "  low.return %ab : reg<test.i32>\n"
+                   "}\n",
+                   &result));
   EXPECT_EQ(result.raw_outcome, LOOM_CHECK_FAIL);
   EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL);
   const std::string actual_output = ActualOutputString(result);
@@ -1365,7 +1398,7 @@ TEST_F(ExecuteTest, EmitLivenessJsonReportsUnknownFunction) {
                    &result));
   EXPECT_EQ(result.raw_outcome, LOOM_CHECK_FAIL);
   EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL);
-  EXPECT_EQ(result.diagnostic_count, 1u);
+  EXPECT_EQ(result.diagnostics.count, 1u);
   const std::string diagnostic_json = DiagnosticJsonString(result);
   EXPECT_NE(diagnostic_json.find("\"domain\":\"SYMBOL\""), std::string::npos);
   EXPECT_NE(diagnostic_json.find("\"error_id\":\"ERR_SYMBOL_002\""),
@@ -1380,9 +1413,11 @@ TEST_F(ExecuteTest, FormatModeBytecodeRoundTrips) {
   IREE_ASSERT_OK(
       ExecuteFirst("// RUN: format bytecode\n"
                    "func.def @f() {\n"
+                   "  func.return\n"
                    "}\n"
                    "// ----\n"
                    "func.def @f() {\n"
+                   "  func.return\n"
                    "}\n",
                    &result));
   EXPECT_EQ(result.raw_outcome, LOOM_CHECK_PASS);

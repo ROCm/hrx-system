@@ -29,6 +29,17 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    compile_report
+  SRCS
+    "__init__.py"
+    "compile_report.py"
+  DEPS
+    loom::py::loom::reporting::reporting
+    loom::py::loom::target::arch::compile_report_suggestions
+)
+
+iree_py_library(
+  NAME
     loom_opt
   SRCS
     "__init__.py"
@@ -36,6 +47,36 @@ iree_py_library(
   DEPS
     loom::py::loom::core
     loom::py::loom::error::error
+)
+
+iree_py_library(
+  NAME
+    source_lint
+  SRCS
+    "__init__.py"
+    "source_lint.py"
+)
+
+iree_py_library(
+  NAME
+    loom-compile-report
+  MAIN
+    "compile_report.py"
+  SRCS
+    "compile_report.py"
+  DEPS
+    loom::py::loom::tools::compile_report
+)
+
+iree_py_library(
+  NAME
+    loom-lint
+  MAIN
+    "source_lint.py"
+  SRCS
+    "source_lint.py"
+  DEPS
+    loom::py::loom::tools::source_lint
 )
 
 iree_py_library(
@@ -50,19 +91,31 @@ iree_py_library(
 iree_py_test(
   NAME
     tools_test
-  SRCS
+  MAIN
     "pytest_style_runner.py"
+  SRCS
+    "amdgpu_asm_test.py"
+    "compile_report_test.py"
+    "loom_opt_test.py"
+    "pytest_style_runner.py"
+    "source_lint_test.py"
+    "source_surface_test.py"
   ARGS
     "loom.tools.amdgpu_asm_test"
+    "loom.tools.compile_report_test"
     "loom.tools.loom_opt_test"
     "loom.tools.source_surface_test"
+    "loom.tools.source_lint_test"
   DEPS
     loom::py::loom::tools::amdgpu_asm
+    loom::py::loom::tools::compile_report
     loom::py::loom::tools::loom_opt
+    loom::py::loom::tools::source_lint
     loom::py::loom::tools::tools
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

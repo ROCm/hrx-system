@@ -16,11 +16,10 @@ namespace {
 
 static iree_hal_amdgpu_gfxip_version_t GfxIpFromProcessor(
     iree_string_view_t processor) {
-  iree_hal_amdgpu_target_id_t target_id = {};
-  IREE_EXPECT_OK(iree_hal_amdgpu_target_id_parse(
-      processor, IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_ARCH_ONLY,
-      &target_id));
-  return target_id.version;
+  iree_hal_amdgpu_target_identity_t identity = {};
+  IREE_EXPECT_OK(
+      iree_hal_amdgpu_target_identity_parse_artifact_key(processor, &identity));
+  return identity.version;
 }
 
 static iree_hal_amdgpu_aqlprofile_pmc_event_t ResolveCounter(

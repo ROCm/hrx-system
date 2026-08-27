@@ -70,6 +70,22 @@ IREE_AMDGPU_CODE_OBJECT_TARGETS = [
     "gfx12-5-generic",
 ]
 
+IREE_AMDGPU_DEVICE_BINARY_TARGETS = [
+    "gfx9-generic",
+    "gfx908",
+    "gfx90a",
+    "gfx9-4-generic",
+    "gfx10-1-generic",
+    "gfx10-3-generic",
+    "gfx11-generic",
+    "gfx1170",
+    "gfx1171",
+    "gfx1172",
+    "gfx12-generic",
+    "gfx1250-a0",
+    "gfx12-5-generic",
+]
+
 # buildifier: disable=unsorted-dict-items
 IREE_AMDGPU_EXACT_TARGET_CODE_OBJECTS = {
     "gfx900": "gfx9-generic",
@@ -110,6 +126,11 @@ IREE_AMDGPU_EXACT_TARGET_CODE_OBJECTS = {
     "gfx1201": "gfx12-generic",
     "gfx1250": "gfx12-5-generic",
     "gfx1251": "gfx12-5-generic",
+}
+
+# buildifier: disable=unsorted-dict-items
+IREE_AMDGPU_EXACT_TARGET_DEVICE_BINARY_VARIANTS = {
+    "gfx1250": ["gfx1250-a0"],
 }
 
 IREE_AMDGPU_TARGET_FAMILY_NAMES = [

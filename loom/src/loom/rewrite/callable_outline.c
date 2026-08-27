@@ -227,7 +227,7 @@ static iree_status_t loom_callable_outline_add_capture(
       .arena = state->arena,
   };
   IREE_RETURN_IF_ERROR(loom_type_walk_value_refs(
-      loom_module_value_type(state->module, value_id),
+      state->module, loom_module_value_type(state->module, value_id),
       loom_callable_outline_pending_refs_append, &refs));
   for (iree_host_size_t i = 0; i < refs.count; ++i) {
     IREE_RETURN_IF_ERROR(
@@ -247,7 +247,7 @@ static iree_status_t loom_callable_outline_collect_type_captures(
       .arena = state->arena,
   };
   IREE_RETURN_IF_ERROR(loom_type_walk_value_refs(
-      type, loom_callable_outline_pending_refs_append, &refs));
+      state->module, type, loom_callable_outline_pending_refs_append, &refs));
   for (iree_host_size_t i = 0; i < refs.count; ++i) {
     IREE_RETURN_IF_ERROR(
         loom_callable_outline_add_capture(state, captures, refs.values[i]));
@@ -260,72 +260,35 @@ static iree_status_t loom_callable_outline_collect_attr_captures(
     loom_callable_outline_value_list_t* captures, const loom_attribute_t* attr,
     uint8_t depth) {
   if (!attr) return iree_ok_status();
-  if (depth > LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
+  if (depth > LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "attribute nesting exceeds maximum depth");
   }
-  switch ((loom_attr_kind_t)attr->kind) {
-    case LOOM_ATTR_TYPE:
-      if (attr->type_id == LOOM_TYPE_ID_INVALID ||
-          attr->type_id >= state->module->types.count) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "type attribute id %u is invalid",
-                                (unsigned)attr->type_id);
-      }
-      return loom_callable_outline_collect_type_captures(
-          state, captures, state->module->types.entries[attr->type_id]);
-    case LOOM_ATTR_PREDICATE_LIST:
-      if (attr->count > 0 && !attr->predicate_list) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "predicate-list attribute payload is NULL");
-      }
-      for (uint16_t i = 0; i < attr->count; ++i) {
-        const loom_predicate_t* predicate = &attr->predicate_list[i];
-        for (uint8_t j = 0; j < IREE_ARRAYSIZE(predicate->arg_tags); ++j) {
-          if (predicate->arg_tags[j] != LOOM_PRED_ARG_VALUE) continue;
-          if (predicate->args[j] < 0 ||
-              (uint64_t)predicate->args[j] >= state->module->values.count) {
-            return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                    "predicate value argument is invalid");
-          }
-          IREE_RETURN_IF_ERROR(loom_callable_outline_add_capture(
-              state, captures, (loom_value_id_t)predicate->args[j]));
-        }
-      }
-      return iree_ok_status();
-    case LOOM_ATTR_DICT:
-      if (attr->count > 0 && !attr->dict_entries) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "dict attribute payload is NULL");
-      }
-      for (uint16_t i = 0; i < attr->count; ++i) {
-        IREE_RETURN_IF_ERROR(loom_callable_outline_collect_attr_captures(
-            state, captures, &attr->dict_entries[i].value,
-            (uint8_t)(depth + 1)));
-      }
-      return iree_ok_status();
-    case LOOM_ATTR_ENCODING: {
-      const loom_encoding_t* encoding =
-          loom_module_encoding(state->module, attr->encoding_id);
-      if (!encoding) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "encoding attribute id %u is invalid",
-                                (unsigned)attr->encoding_id);
-      }
-      if (encoding->attribute_count > 0 && !encoding->attributes) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "encoding attribute payload is NULL");
-      }
-      for (uint8_t i = 0; i < encoding->attribute_count; ++i) {
-        IREE_RETURN_IF_ERROR(loom_callable_outline_collect_attr_captures(
-            state, captures, &encoding->attributes[i].value,
-            (uint8_t)(depth + 1)));
-      }
-      return iree_ok_status();
-    }
-    default:
-      return iree_ok_status();
+  loom_callable_outline_pending_refs_t refs = {
+      .arena = state->arena,
+  };
+  IREE_RETURN_IF_ERROR(loom_module_walk_attribute_value_refs(
+      state->module, *attr, loom_callable_outline_pending_refs_append, &refs));
+  for (iree_host_size_t i = 0; i < refs.count; ++i) {
+    IREE_RETURN_IF_ERROR(
+        loom_callable_outline_add_capture(state, captures, refs.values[i]));
   }
+
+  if (attr->kind == LOOM_ATTR_ENCODING) {
+    const loom_encoding_t* encoding =
+        loom_module_encoding(state->module, attr->encoding_id);
+    if (!encoding) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "encoding attribute id %u is invalid",
+                              (unsigned)attr->encoding_id);
+    }
+    for (uint8_t i = 0; i < encoding->attribute_count; ++i) {
+      IREE_RETURN_IF_ERROR(loom_callable_outline_collect_attr_captures(
+          state, captures, &encoding->attributes[i].value,
+          (uint8_t)(depth + 1)));
+    }
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_callable_outline_collect_op_captures(
@@ -395,9 +358,8 @@ static bool loom_callable_outline_value_has_use_outside_range(
     }
   }
 
-  if (value_id >= state->module->type_uses.value_capacity) return false;
   loom_type_use_id_t use_id =
-      state->module->type_uses.value_heads[value_id].first_incoming_use_id;
+      loom_module_value_first_incoming_type_use(state->module, value_id);
   while (use_id != LOOM_TYPE_USE_ID_INVALID) {
     const loom_type_use_t* type_use = &state->module->type_uses.records[use_id];
     const loom_value_t* user_value =
@@ -443,7 +405,7 @@ static iree_status_t loom_callable_outline_add_live_out(
       .arena = state->arena,
   };
   IREE_RETURN_IF_ERROR(loom_type_walk_value_refs(
-      loom_module_value_type(state->module, value_id),
+      state->module, loom_module_value_type(state->module, value_id),
       loom_callable_outline_pending_refs_append, &refs));
   for (iree_host_size_t i = 0; i < refs.count; ++i) {
     if (loom_callable_outline_value_is_defined_inside_range(state,
@@ -509,6 +471,18 @@ static iree_status_t loom_callable_outline_validate_range(
   if (!first_op->parent_op) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "cannot outline module-scope operations");
+  }
+  for (loom_op_t* parent = first_op->parent_op; parent;
+       parent = parent->parent_op) {
+    loom_func_like_t function = loom_func_like_cast(rewriter->module, parent);
+    if (!loom_func_like_isa(function)) continue;
+    if (loom_func_like_repr_contract(function) != LOOM_STRING_ID_INVALID) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "cannot outline operations from a representation-bound function "
+          "into a generic func.def");
+    }
+    break;
   }
 
   loom_callable_outline_range_state_t state = {
@@ -781,7 +755,8 @@ static iree_status_t loom_callable_outline_build_call(
         .valid = true,
     };
     IREE_RETURN_IF_ERROR(loom_type_walk_value_refs(
-        result_type, loom_callable_outline_check_no_selected_type_ref, &check));
+        state->module, result_type,
+        loom_callable_outline_check_no_selected_type_ref, &check));
     if (!check.valid) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,

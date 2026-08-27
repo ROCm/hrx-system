@@ -11,6 +11,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from loom.target.arch.amdgpu.descriptors import (
+    AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS,
+    amdgpu_core_descriptor_set_overlay_rows,
+)
+
 _AMDGPU_DESCRIPTOR_PREFIX = "amdgpu."
 
 
@@ -91,6 +96,13 @@ AMDGPU_BLOCKED_LOW_ALIASES = (
         replacement_descriptor_key="amdgpu.v_fmac_f32",
         replacement_mnemonic="v_fmac_f32",
     ),
+    AmdgpuBlockedLowAlias(
+        descriptor_key="amdgpu.v_mul_dx9_zero_f32",
+        asm_mnemonic="v_mul_dx9_zero_f32",
+        alias_semantics="dx9_zero",
+        replacement_descriptor_key="amdgpu.v_mul_f32",
+        replacement_mnemonic="v_mul_f32",
+    ),
 )
 
 
@@ -107,6 +119,40 @@ def validate_amdgpu_blocked_low_aliases(
     ]
     if len(lookup_names) != len(set(lookup_names)):
         raise ValueError("AMDGPU blocked low alias lookup names must be unique")
+
+
+def validate_amdgpu_blocked_low_alias_descriptor_contracts(
+    aliases: Sequence[AmdgpuBlockedLowAlias],
+) -> None:
+    """Validates blocked aliases against every authored descriptor target."""
+
+    blocked_descriptor_keys = {alias.descriptor_key for alias in aliases}
+    for target in AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS:
+        descriptors = {
+            descriptor.descriptor_key: descriptor
+            for descriptor in amdgpu_core_descriptor_set_overlay_rows(target)
+        }
+        authored_aliases = blocked_descriptor_keys & descriptors.keys()
+        if authored_aliases:
+            formatted_aliases = ", ".join(sorted(authored_aliases))
+            raise ValueError(
+                f"AMDGPU descriptor target {target} authors blocked low aliases: "
+                f"{formatted_aliases}"
+            )
+        for alias in aliases:
+            descriptor = descriptors.get(alias.replacement_descriptor_key)
+            if descriptor is None:
+                raise ValueError(
+                    f"AMDGPU descriptor target {target} lacks replacement "
+                    f"descriptor {alias.replacement_descriptor_key}"
+                )
+            if descriptor.mnemonic != alias.replacement_mnemonic:
+                raise ValueError(
+                    f"AMDGPU descriptor target {target} replacement descriptor "
+                    f"{alias.replacement_descriptor_key} has mnemonic "
+                    f"{descriptor.mnemonic!r}, expected "
+                    f"{alias.replacement_mnemonic!r}"
+                )
 
 
 def sorted_amdgpu_blocked_low_aliases() -> tuple[AmdgpuBlockedLowAlias, ...]:

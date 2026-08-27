@@ -631,18 +631,16 @@ static iree_status_t iree_hal_amdxdna_kernel_params_allocate_runlists(
 }
 
 static iree_status_t iree_hal_amdxdna_pdi_executable_create(
-    const iree_hal_executable_params_t* executable_params,
-    iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
+    iree_const_byte_span_t executable_data, iree_allocator_t host_allocator,
+    iree_hal_executable_t** out_executable) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   *out_executable = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
-                                    iree_hal_amdxdna_pdi_flatbuffer_verify(
-                                        executable_params->executable_data));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_amdxdna_pdi_flatbuffer_verify(executable_data));
 
   iree_hal_amdxdna_ExecutableDef_table_t executable_def =
-      iree_hal_amdxdna_ExecutableDef_as_root(
-          executable_params->executable_data.data);
+      iree_hal_amdxdna_ExecutableDef_as_root(executable_data.data);
   iree_hal_amdxdna_PdiDef_vec_t pdis_vec =
       iree_hal_amdxdna_ExecutableDef_pdis_get(executable_def);
   iree_hal_amdxdna_EntryPointDef_vec_t entry_points_vec =
@@ -733,18 +731,16 @@ static iree_status_t iree_hal_amdxdna_pdi_executable_create(
 }
 
 static iree_status_t iree_hal_amdxdna_xclbin_executable_create(
-    const iree_hal_executable_params_t* executable_params,
-    iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
+    iree_const_byte_span_t executable_data, iree_allocator_t host_allocator,
+    iree_hal_executable_t** out_executable) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   *out_executable = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
-                                    iree_hal_amdxdna_xclbin_flatbuffer_verify(
-                                        executable_params->executable_data));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_amdxdna_xclbin_flatbuffer_verify(executable_data));
 
   iree_hal_amdxdna_xclbin_ExecutableDef_table_t executable_def =
-      iree_hal_amdxdna_xclbin_ExecutableDef_as_root(
-          executable_params->executable_data.data);
+      iree_hal_amdxdna_xclbin_ExecutableDef_as_root(executable_data.data);
   iree_hal_amdxdna_xclbin_XclbinDef_vec_t xclbins_vec =
       iree_hal_amdxdna_xclbin_ExecutableDef_xclbins_get(executable_def);
   iree_hal_amdxdna_xclbin_EntryPointDef_vec_t entry_points_vec =
@@ -854,21 +850,29 @@ static iree_status_t iree_hal_amdxdna_xclbin_executable_create(
 
 iree_status_t iree_hal_amdxdna_native_executable_create(
     iree_hal_amdxdna_native_device_t* native_device,
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_load_params_t* load_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
   (void)native_device;
-  IREE_ASSERT_ARGUMENT(executable_params);
+  IREE_ASSERT_ARGUMENT(load_params);
   IREE_ASSERT_ARGUMENT(out_executable);
 
-  if (iree_string_view_equal(executable_params->executable_format,
-                             kAmdxdnaXclbinExecutableFormat) ||
-      iree_string_view_equal(executable_params->executable_format,
-                             kAmdxdnaXclbinExecutableCompatFormat)) {
-    return iree_hal_amdxdna_xclbin_executable_create(
-        executable_params, host_allocator, out_executable);
+  iree_status_t pdi_status =
+      iree_hal_amdxdna_pdi_flatbuffer_verify(load_params->executable_data);
+  if (iree_status_is_ok(pdi_status)) {
+    return iree_hal_amdxdna_pdi_executable_create(
+        load_params->executable_data, host_allocator, out_executable);
   }
-  return iree_hal_amdxdna_pdi_executable_create(executable_params,
-                                                host_allocator, out_executable);
+  iree_status_free(pdi_status);
+
+  iree_status_t xclbin_status =
+      iree_hal_amdxdna_xclbin_flatbuffer_verify(load_params->executable_data);
+  if (iree_status_is_ok(xclbin_status)) {
+    return iree_hal_amdxdna_xclbin_executable_create(
+        load_params->executable_data, host_allocator, out_executable);
+  }
+  iree_status_free(xclbin_status);
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "unrecognized amdxdna executable image");
 }
 
 static void iree_hal_amdxdna_native_executable_destroy(

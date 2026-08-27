@@ -15,6 +15,7 @@ iree_cc_library(
   HDRS
     "allocator.h"
     "api.h"
+    "atomic.h"
     "buffer.h"
     "buffer_transfer.h"
     "buffer_view.h"
@@ -28,9 +29,7 @@ iree_cc_library(
     "device_spec.h"
     "driver.h"
     "driver_registry.h"
-    "event.h"
     "executable.h"
-    "executable_cache.h"
     "fence.h"
     "file.h"
     "pool.h"
@@ -50,6 +49,7 @@ iree_cc_library(
   SRCS
     "allocator.c"
     "allocator_heap.c"
+    "atomic.c"
     "buffer.c"
     "buffer_heap.c"
     "buffer_heap_impl.h"
@@ -66,11 +66,11 @@ iree_cc_library(
     "device_event.c"
     "device_group.c"
     "device_spec.c"
+    "device_spec_serialization.c"
+    "device_spec_serialization.h"
     "driver.c"
     "driver_registry.c"
-    "event.c"
     "executable.c"
-    "executable_cache.c"
     "fence.c"
     "file.c"
     "pool.c"
@@ -93,6 +93,40 @@ iree_cc_library(
     iree::hal::utils::platform_topology
     iree::io::file_handle
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    atomic_test
+  SRCS
+    "atomic_test.cc"
+  DEPS
+    ::hal
+    iree::base::internal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    allocator_heap_test
+  SRCS
+    "allocator_heap_test.cc"
+  DEPS
+    ::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    buffer_test
+  SRCS
+    "buffer_test.cc"
+  DEPS
+    ::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 iree_cc_test(
@@ -121,6 +155,16 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
+iree_cc_fuzz(
+  NAME
+    device_spec_fuzz
+  SRCS
+    "device_spec_fuzz.cc"
+  DEPS
+    ::hal
+    iree::base
+)
+
 iree_cc_test(
   NAME
     profile_metrics_test
@@ -141,6 +185,7 @@ iree_cc_test(
   DEPS
     ::hal
     iree::base
+    iree::base::internal::fpu_state
     iree::base::internal::span
     iree::testing::gtest
     iree::testing::gtest_main

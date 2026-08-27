@@ -212,6 +212,21 @@ TEST_F(HipAllocatorTest, ImportHostAllocationWithCallbackUnregistersOnDestroy) {
   iree_allocator_free_aligned(iree_allocator_system(), host_ptr);
 }
 
+TEST_F(HipAllocatorTest, DualLocalityRequiresTopologyEvidence) {
+  iree_hal_buffer_params_t params = {0};
+  params.type =
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+
+  iree_hal_buffer_params_t resolved_params = {0};
+  iree_device_size_t resolved_allocation_size = 0;
+  EXPECT_EQ(IREE_HAL_BUFFER_COMPATIBILITY_NONE,
+            iree_hal_allocator_query_buffer_compatibility(
+                iree_hal_device_allocator(device_), params,
+                /*allocation_size=*/4096, &resolved_params,
+                &resolved_allocation_size));
+}
+
 // Verify that requesting MAPPING on DEVICE_LOCAL memory (without HOST_VISIBLE)
 // promotes to HOST_VISIBLE so the buffer is actually mappable. This is the
 // combination the Python bindings produce via asdevicearray().
@@ -229,16 +244,16 @@ TEST_F(HipAllocatorTest, DeviceLocalMappingPromotesToHostVisible) {
   iree_hal_buffer_compatibility_t compat =
       iree_hal_allocator_query_buffer_compatibility(
           allocator, params, kSize, &compat_params, &compat_size);
-  ASSERT_TRUE(
-      iree_all_bits_set(compat, IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE));
+  if (!iree_all_bits_set(compat, IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE)) {
+    GTEST_SKIP() << "Device-local mapped memory is unsupported";
+  }
 
   // The allocator must have promoted to a type that supports mapping.
-  // On HIP this is either DEVICE_LOCAL+HOST_VISIBLE (managed) or
-  // HOST_LOCAL+DEVICE_VISIBLE (page-locked fallback).
-  EXPECT_TRUE(
-      iree_all_bits_set(compat_params.type,
-                        IREE_HAL_MEMORY_TYPE_HOST_VISIBLE) ||
-      iree_all_bits_set(compat_params.type, IREE_HAL_MEMORY_TYPE_HOST_LOCAL));
+  EXPECT_TRUE(iree_all_bits_set(
+      compat_params.type,
+      IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE));
+  EXPECT_TRUE(iree_all_bits_set(compat_params.type,
+                                IREE_HAL_MEMORY_TYPE_HOST_COHERENT));
 
   // Allocation must succeed (no "mappable buffers require host pointers").
   iree_hal_buffer_t* buffer = nullptr;

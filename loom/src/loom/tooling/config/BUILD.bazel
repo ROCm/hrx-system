@@ -17,6 +17,7 @@ loom_cc_library(
     srcs = ["config.c"],
     hdrs = ["config.h"],
     deps = [
+        "//loom/src/loom/analysis:symbol_value_constraints",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/format/text:printer",
         "//loom/src/loom/ir",

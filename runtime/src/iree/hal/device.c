@@ -232,6 +232,42 @@ IREE_API_EXPORT iree_status_t iree_hal_device_query_queue_pool_backend(
       device, queue_affinity, out_backend);
 }
 
+IREE_API_EXPORT iree_status_t iree_hal_device_load_executable(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* params,
+    iree_hal_executable_t** out_executable) {
+  IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(params);
+  IREE_ASSERT_ARGUMENT(out_executable);
+  *out_executable = NULL;
+  if (IREE_UNLIKELY(iree_hal_device_spec_executable_target_ordinal(
+                        iree_hal_device_spec(device), target) ==
+                    IREE_HOST_SIZE_MAX)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "executable target must be borrowed from the device spec");
+  }
+  if (IREE_UNLIKELY(iree_const_byte_span_is_empty(params->executable_data))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "executable data must not be empty");
+  }
+  if (IREE_UNLIKELY(!params->executable_data.data)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "executable data pointer must not be NULL");
+  }
+  if (IREE_UNLIKELY(params->constant_count != 0 && !params->constants)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "executable constants are required when constant count is nonzero");
+  }
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_status_t status = _VTABLE_DISPATCH(device, load_executable)(
+      device, queue_affinity, target, params, out_executable);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
 IREE_API_EXPORT iree_status_t iree_hal_device_queue_alloca(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -395,9 +431,50 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_read(
   IREE_ASSERT_ARGUMENT(source_file);
   IREE_ASSERT_ARGUMENT(target_buffer);
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_status_t status = _VTABLE_DISPATCH(device, queue_read)(
-      device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
-      source_file, source_offset, target_buffer, target_offset, length, flags);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)length);
+  if (IREE_UNLIKELY(flags != IREE_HAL_READ_FLAG_NONE)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported queue read flags: 0x%016" PRIx64,
+                            flags);
+  }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_hal_file_validate_access(source_file, IREE_HAL_MEMORY_ACCESS_READ));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_file_validate_range(source_file, source_offset, length));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_buffer_validate_range(target_buffer, target_offset, length));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_buffer_validate_access(
+              iree_hal_buffer_allowed_access(target_buffer),
+              IREE_HAL_MEMORY_ACCESS_WRITE));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_buffer_validate_usage(
+              iree_hal_buffer_allowed_usage(target_buffer),
+              IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET));
+
+  iree_hal_buffer_t* source_storage_buffer =
+      iree_hal_file_storage_buffer(source_file);
+  iree_status_t status = iree_ok_status();
+  if (length == 0) {
+    status = iree_hal_device_queue_barrier(
+        device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+        IREE_HAL_EXECUTE_FLAG_NONE);
+  } else if (source_storage_buffer &&
+             iree_all_bits_set(
+                 iree_hal_buffer_memory_type(source_storage_buffer),
+                 IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE)) {
+    status = iree_hal_device_queue_copy(
+        device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+        source_storage_buffer, (iree_device_size_t)source_offset, target_buffer,
+        target_offset, length, IREE_HAL_COPY_FLAG_NONE);
+  } else {
+    status = _VTABLE_DISPATCH(device, queue_read)(
+        device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+        source_file, source_offset, target_buffer, target_offset, length,
+        flags);
+  }
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -419,9 +496,50 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_write(
   IREE_ASSERT_ARGUMENT(source_buffer);
   IREE_ASSERT_ARGUMENT(target_file);
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_status_t status = _VTABLE_DISPATCH(device, queue_write)(
-      device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
-      source_buffer, source_offset, target_file, target_offset, length, flags);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)length);
+  if (IREE_UNLIKELY(flags != IREE_HAL_WRITE_FLAG_NONE)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported queue write flags: 0x%016" PRIx64,
+                            flags);
+  }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_buffer_validate_range(source_buffer, source_offset, length));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_buffer_validate_access(
+              iree_hal_buffer_allowed_access(source_buffer),
+              IREE_HAL_MEMORY_ACCESS_READ));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_buffer_validate_usage(
+              iree_hal_buffer_allowed_usage(source_buffer),
+              IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_hal_file_validate_access(target_file, IREE_HAL_MEMORY_ACCESS_WRITE));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_file_validate_range(target_file, target_offset, length));
+
+  iree_hal_buffer_t* target_storage_buffer =
+      iree_hal_file_storage_buffer(target_file);
+  iree_status_t status = iree_ok_status();
+  if (length == 0) {
+    status = iree_hal_device_queue_barrier(
+        device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+        IREE_HAL_EXECUTE_FLAG_NONE);
+  } else if (target_storage_buffer &&
+             iree_all_bits_set(
+                 iree_hal_buffer_memory_type(target_storage_buffer),
+                 IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE)) {
+    status = iree_hal_device_queue_copy(
+        device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+        source_buffer, source_offset, target_storage_buffer,
+        (iree_device_size_t)target_offset, length, IREE_HAL_COPY_FLAG_NONE);
+  } else {
+    status = _VTABLE_DISPATCH(device, queue_write)(
+        device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+        source_buffer, source_offset, target_file, target_offset, length,
+        flags);
+  }
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -520,6 +638,151 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_execute(
       device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
       command_buffer, binding_table, flags);
 
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+static iree_status_t iree_hal_device_validate_atomic_target(
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_width_t width, iree_hal_buffer_usage_t usage,
+    iree_hal_memory_access_t access) {
+  const iree_device_size_t byte_count = iree_hal_atomic_width_byte_count(width);
+  if (IREE_UNLIKELY(target_offset > IREE_DEVICE_SIZE_MAX - byte_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "atomic target range overflows device size");
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_hal_buffer_validate_range(target_buffer, target_offset, byte_count));
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_usage(
+      iree_hal_buffer_allowed_usage(target_buffer), usage));
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_access(
+      iree_hal_buffer_allowed_access(target_buffer), access));
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_memory_type(
+      iree_hal_buffer_memory_type(target_buffer),
+      IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE));
+  const iree_device_size_t absolute_offset =
+      iree_hal_buffer_byte_offset(target_buffer) + target_offset;
+  if (IREE_UNLIKELY((absolute_offset % byte_count) != 0)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "atomic target address is not naturally aligned "
+                            "(absolute_offset=%" PRIdsz ", alignment=%" PRIdsz
+                            ")",
+                            absolute_offset, byte_count);
+  }
+  return iree_ok_status();
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_device_queue_atomic_wait(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_wait_params_t params) {
+  IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(
+      !wait_semaphore_list.count ||
+      (wait_semaphore_list.semaphores && wait_semaphore_list.payload_values));
+  IREE_ASSERT_ARGUMENT(!signal_semaphore_list.count ||
+                       (signal_semaphore_list.semaphores &&
+                        signal_semaphore_list.payload_values));
+  IREE_ASSERT_ARGUMENT(target_buffer);
+  IREE_TRACE_ZONE_BEGIN(z0);
+  if (IREE_UNLIKELY(iree_hal_queue_affinity_count(queue_affinity) != 1)) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "atomic waits require exactly one queue affinity "
+                             "bit (affinity=0x%016" PRIx64 ")",
+                             queue_affinity));
+  }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_atomic_wait_params_validate(params));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_device_validate_atomic_target(
+              target_buffer, target_offset, params.width,
+              IREE_HAL_BUFFER_USAGE_STORAGE_READ, IREE_HAL_MEMORY_ACCESS_READ));
+  iree_status_t status = _VTABLE_DISPATCH(device, queue_atomic_wait)(
+      device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+      target_buffer, target_offset, params);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_device_queue_atomic_store(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_store_params_t params) {
+  IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(
+      !wait_semaphore_list.count ||
+      (wait_semaphore_list.semaphores && wait_semaphore_list.payload_values));
+  IREE_ASSERT_ARGUMENT(!signal_semaphore_list.count ||
+                       (signal_semaphore_list.semaphores &&
+                        signal_semaphore_list.payload_values));
+  IREE_ASSERT_ARGUMENT(target_buffer);
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_atomic_store_params_validate(params));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_hal_device_validate_atomic_target(
+          target_buffer, target_offset, params.width,
+          IREE_HAL_BUFFER_USAGE_STORAGE_WRITE, IREE_HAL_MEMORY_ACCESS_WRITE));
+  iree_status_t status = _VTABLE_DISPATCH(device, queue_atomic_store)(
+      device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+      target_buffer, target_offset, params);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_device_queue_atomic_rmw(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_rmw_params_t params) {
+  IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(
+      !wait_semaphore_list.count ||
+      (wait_semaphore_list.semaphores && wait_semaphore_list.payload_values));
+  IREE_ASSERT_ARGUMENT(!signal_semaphore_list.count ||
+                       (signal_semaphore_list.semaphores &&
+                        signal_semaphore_list.payload_values));
+  IREE_ASSERT_ARGUMENT(target_buffer);
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_atomic_rmw_params_validate(params));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_device_validate_atomic_target(
+              target_buffer, target_offset, params.width,
+              IREE_HAL_BUFFER_USAGE_STORAGE,
+              IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE));
+  iree_status_t status = _VTABLE_DISPATCH(device, queue_atomic_rmw)(
+      device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+      target_buffer, target_offset, params);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_device_queue_timestamp(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_timestamp_flags_t flags) {
+  IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(
+      !wait_semaphore_list.count ||
+      (wait_semaphore_list.semaphores && wait_semaphore_list.payload_values));
+  IREE_ASSERT_ARGUMENT(!signal_semaphore_list.count ||
+                       (signal_semaphore_list.semaphores &&
+                        signal_semaphore_list.payload_values));
+  IREE_ASSERT_ARGUMENT(target_buffer);
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_status_t status = _VTABLE_DISPATCH(device, queue_timestamp)(
+      device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+      target_buffer, target_offset, flags);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }

@@ -25,13 +25,10 @@ extern "C" {
 // Initializes a benchmark-owned HAL actual provider for one candidate.
 iree_status_t iree_benchmark_loom_hal_actual_provider_initialize(
     iree_benchmark_loom_hal_context_t* context, loom_run_session_t* session,
-    iree_string_view_t filename, iree_string_view_t source,
-    iree_string_view_t pipeline, loom_sanitizer_options_t sanitizer,
-    const loom_module_t* test_module,
-    const loom_testbench_invocation_plan_t* actual_invocation,
-    iree_string_view_t sample_compilation,
-    const loom_testbench_case_plan_t* sample_constant_case_plan,
-    iree_host_size_t sample_constant_ordinal, bool has_sample_constant_ordinal,
+    const loom_run_module_t* run_module, iree_string_view_t pipeline,
+    loom_sanitizer_options_t sanitizer,
+    const loom_testbench_invocation_plan_t* kernel_launch,
+    iree_string_view_t artifact_path_suffix,
     const loom_run_compile_report_capture_options_t* compile_report_options,
     const loom_run_candidate_artifact_manifest_options_t*
         artifact_manifest_options,
@@ -40,6 +37,21 @@ iree_status_t iree_benchmark_loom_hal_actual_provider_initialize(
 // Releases provider-owned compile, diagnostic, and artifact path state.
 void iree_benchmark_loom_hal_actual_provider_deinitialize(
     iree_benchmark_loom_hal_actual_provider_t* provider);
+
+// Initializes benchmark-owned HAL actual providers for a multi-actual case.
+iree_status_t iree_benchmark_loom_hal_actual_sequence_initialize(
+    iree_benchmark_loom_hal_context_t* context, loom_run_session_t* session,
+    const loom_run_module_t* run_module, iree_string_view_t pipeline,
+    loom_sanitizer_options_t sanitizer,
+    const loom_testbench_case_plan_t* case_plan,
+    const loom_run_compile_report_capture_options_t* compile_report_options,
+    const loom_run_candidate_artifact_manifest_options_t*
+        artifact_manifest_options,
+    iree_benchmark_loom_hal_actual_sequence_t* out_sequence);
+
+// Releases storage owned by |sequence|.
+void iree_benchmark_loom_hal_actual_sequence_deinitialize(
+    iree_benchmark_loom_hal_actual_sequence_t* sequence);
 
 // Compiles the candidate owned by |provider|.
 iree_status_t iree_benchmark_loom_hal_actual_provider_compile(
@@ -52,18 +64,12 @@ void iree_benchmark_loom_benchmark_result_set_compile_rejection(
 
 // Compiles every provider in a multi-actual sequence.
 iree_status_t iree_benchmark_loom_hal_actual_sequence_compile(
-    loom_run_hal_testbench_actual_sequence_t* sequence);
+    iree_benchmark_loom_hal_actual_sequence_t* sequence);
 
 // Returns the first rejected provider in |sequence|, or NULL when none failed.
-const loom_run_hal_testbench_actual_provider_t*
+const iree_benchmark_loom_hal_actual_provider_t*
 iree_benchmark_loom_hal_actual_sequence_first_rejection(
-    const loom_run_hal_testbench_actual_sequence_t* sequence);
-
-// Projects a sequence-provider compile rejection into a benchmark result.
-void iree_benchmark_loom_benchmark_result_set_sequence_compile_rejection(
-    const loom_run_hal_testbench_actual_provider_t* provider,
-    iree_string_view_t sample_compilation,
-    iree_benchmark_loom_benchmark_result_t* out_result);
+    const iree_benchmark_loom_hal_actual_sequence_t* sequence);
 
 #ifdef __cplusplus
 }  // extern "C"

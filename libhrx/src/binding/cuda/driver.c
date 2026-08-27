@@ -189,6 +189,23 @@ static CUresult iree_status_to_cu_result(iree_status_t status) {
   }
 }
 
+// Maps the status of an event record. A record refused because its stream
+// belongs to a context other than the event's names two handles that do not go
+// together, which is a handle error and not a bad value. The mapping is local
+// because IREE_STATUS_INCOMPATIBLE says nothing on its own about which handle
+// is at fault - code object loading raises it for an unsupported container
+// version, which cuModuleLoadDataEx reports through iree_status_to_cu_result -
+// so the code can only be read by a caller that knows what it asked for.
+static CUresult iree_event_record_status_to_cu_result(iree_status_t status) {
+  if (iree_status_is_ok(status)) return CUDA_SUCCESS;
+  const iree_status_code_t code = iree_status_code(status);
+  if (code == IREE_STATUS_INCOMPATIBLE) {
+    iree_status_free(status);
+    return CUDA_ERROR_INVALID_HANDLE;
+  }
+  return iree_status_to_cu_result(status);
+}
+
 //===----------------------------------------------------------------------===//
 // Initialization
 //===----------------------------------------------------------------------===//
@@ -196,7 +213,7 @@ static CUresult iree_status_to_cu_result(iree_status_t status) {
 CUDAAPI CUresult cuInit(unsigned int Flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_status_t status = iree_hal_streaming_init_global(
-      IREE_HAL_STREAMING_INIT_FLAG_NONE, iree_allocator_system());
+      /*device_extensions=*/NULL, iree_allocator_system());
   CUresult result = iree_status_to_cu_result(status);
   IREE_TRACE_ZONE_END(z0);
   return result;
@@ -722,8 +739,11 @@ CUDAAPI CUresult cuDeviceGetAttribute(int* pi, CUdevice_attribute attrib,
     case CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR:
       *pi = device->compute_capability_minor;
       break;
-    case CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN:
+    case CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK:
       *pi = device->max_shared_memory_per_block;
+      break;
+    case CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN:
+      *pi = device->max_shared_memory_per_block_optin;
       break;
     case CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR:
       *pi = device->max_shared_memory_per_multiprocessor;
@@ -1108,7 +1128,7 @@ CUDAAPI CUresult cuEventRecord(CUevent hEvent, CUstream hStream) {
   iree_status_t status =
       iree_hal_streaming_event_record((iree_hal_streaming_event_t*)hEvent,
                                       (iree_hal_streaming_stream_t*)hStream);
-  CUresult result = iree_status_to_cu_result(status);
+  CUresult result = iree_event_record_status_to_cu_result(status);
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -1145,10 +1165,46 @@ CUDAAPI CUresult cuEventElapsedTime(float* pMilliseconds, CUevent hStart,
   if (!pMilliseconds) {
     return CUDA_ERROR_INVALID_VALUE;
   }
+  if (!hStart || !hEnd) {
+    return CUDA_ERROR_INVALID_HANDLE;
+  }
+
+  iree_hal_streaming_event_t* start_event = (iree_hal_streaming_event_t*)hStart;
+  iree_hal_streaming_event_t* end_event = (iree_hal_streaming_event_t*)hEnd;
+
+  // Each device counts ticks on its own clock, so a pair spanning two contexts
+  // names no interval; cuEventElapsedTime compares contexts for the same
+  // reason hipEventElapsedTime does.
+  if (start_event->context != end_event->context) {
+    return CUDA_ERROR_INVALID_HANDLE;
+  }
+
+  iree_hal_streaming_event_timing_t timing =
+      IREE_HAL_STREAMING_EVENT_TIMING_UNTIMED;
   iree_status_t status = iree_hal_streaming_event_elapsed_time(
-      pMilliseconds, (iree_hal_streaming_event_t*)hStart,
-      (iree_hal_streaming_event_t*)hEnd);
-  CUresult result = iree_status_to_cu_result(status);
+      pMilliseconds, start_event, end_event, &timing);
+  if (!iree_status_is_ok(status)) {
+    // The timeline a record names has failed; the event handles are fine.
+    return iree_status_to_cu_result(status);
+  }
+  CUresult result = CUDA_ERROR_INVALID_VALUE;
+  switch (timing) {
+    case IREE_HAL_STREAMING_EVENT_TIMING_MEASURED:
+      result = CUDA_SUCCESS;
+      break;
+    case IREE_HAL_STREAMING_EVENT_TIMING_INCOMPLETE:
+      result = CUDA_ERROR_NOT_READY;
+      break;
+    case IREE_HAL_STREAMING_EVENT_TIMING_UNTIMED:
+      result = CUDA_ERROR_INVALID_VALUE;
+      break;
+    case IREE_HAL_STREAMING_EVENT_TIMING_CAPTURED:
+      result = CUDA_ERROR_CAPTURED_EVENT;
+      break;
+    case IREE_HAL_STREAMING_EVENT_TIMING_UNSUPPORTED:
+      result = CUDA_ERROR_NOT_SUPPORTED;
+      break;
+  }
   return result;
 }
 
@@ -1961,12 +2017,11 @@ CUDAAPI CUresult cuModuleLoad(CUmodule* module, const char* fname) {
     return CUDA_ERROR_INVALID_CONTEXT;
   }
 
-  iree_hal_executable_caching_mode_t caching_mode =
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_PERSISTENT_CACHING |
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_OPTIMIZATION;
+  iree_hal_executable_load_flags_t load_flags =
+      IREE_HAL_EXECUTABLE_LOAD_FLAG_ALLOW_OPTIMIZATION;
   iree_hal_streaming_module_t* stream_module = NULL;
   iree_status_t status = iree_hal_streaming_module_create_from_file(
-      context, caching_mode, iree_make_cstring_view(fname),
+      context, load_flags, iree_make_cstring_view(fname),
       context->host_allocator, &stream_module);
 
   if (iree_status_is_ok(status)) {
@@ -2073,14 +2128,13 @@ CUDAAPI CUresult cuModuleLoadDataEx(CUmodule* module, const void* image,
     }
   }
 
-  // TODO: Determine caching mode from JIT options if available.
-  iree_hal_executable_caching_mode_t caching_mode =
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA |
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_OPTIMIZATION;
+  // TODO: Determine load flags from JIT options if available.
+  iree_hal_executable_load_flags_t load_flags =
+      IREE_HAL_EXECUTABLE_LOAD_FLAG_ALLOW_OPTIMIZATION;
 
   iree_hal_streaming_module_t* stream_module = NULL;
   iree_status_t status = iree_hal_streaming_module_create_from_memory(
-      context, caching_mode, iree_make_const_byte_span(image, 0),
+      context, load_flags, iree_make_const_byte_span(image, 0),
       context->host_allocator, &stream_module);
 
   if (iree_status_is_ok(status)) {
@@ -2181,25 +2235,26 @@ CUDAAPI CUresult cuFuncGetAttribute(int* pi, CUfunction_attribute attrib,
   if (symbol->type != IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION) {
     return CUDA_ERROR_INVALID_HANDLE;
   }
+  iree_hal_streaming_function_attributes_t* attributes =
+      &symbol->function_attributes;
 
   // Return attribute value based on what we have cached.
   switch (attrib) {
     case CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK:
-      *pi = symbol->max_threads_per_block;
+      *pi = attributes->maximum_threads_per_block;
       break;
     case CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES:
-      *pi = symbol->shared_size_bytes;
+      *pi = attributes->fixed_shared_memory_size;
       break;
     case CU_FUNC_ATTRIBUTE_CONST_SIZE_BYTES:
       // We don't track constant memory usage.
       *pi = 0;
       break;
     case CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES:
-      // Local memory is typically 0 for modern GPUs.
-      *pi = 0;
+      *pi = attributes->fixed_local_memory_size;
       break;
     case CU_FUNC_ATTRIBUTE_NUM_REGS:
-      *pi = symbol->num_regs;
+      *pi = attributes->register_count;
       break;
     case CU_FUNC_ATTRIBUTE_PTX_VERSION:
       // Return a default PTX version.
@@ -2214,8 +2269,8 @@ CUDAAPI CUresult cuFuncGetAttribute(int* pi, CUfunction_attribute attrib,
       *pi = 0;
       break;
     case CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES:
-      // Return the kernel's maximum dynamic shared memory size.
-      *pi = symbol->max_dynamic_shared_size_bytes;
+      *pi = iree_hal_streaming_function_attributes_dynamic_shared_memory_size(
+          attributes);
       break;
     case CU_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT:
       // Carveout percentage not tracked.
@@ -2252,15 +2307,18 @@ CUDAAPI CUresult cuFuncSetAttribute(CUfunction hfunc,
     IREE_TRACE_ZONE_END(z0);
     return CUDA_ERROR_INVALID_HANDLE;
   }
+  iree_hal_streaming_function_attributes_t* attributes =
+      &symbol->function_attributes;
 
   // Only certain attributes can be set.
   CUresult result = CUDA_SUCCESS;
   switch (attrib) {
     case CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES:
-      // Store the maximum dynamic shared memory size for this function.
-      // This is used by kernels that need more than 48KB shared memory.
-      // Note that this is not actually used for anything but queries.
-      symbol->max_dynamic_shared_size_bytes = (uint32_t)value;
+      if (value < 0 ||
+          !iree_hal_streaming_function_attributes_try_set_dynamic_shared_memory_size(
+              attributes, (uint32_t)value)) {
+        result = CUDA_ERROR_INVALID_VALUE;
+      }
       break;
     case CU_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT:
       // This controls the L1/shared memory split.
@@ -2737,6 +2795,14 @@ CUDAAPI CUresult cuStreamWaitEvent(CUstream hStream, CUevent hEvent,
                                    unsigned int Flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  // The wait forwards this flag as its answer to whether a capture-time wait
+  // becomes an explicit node, so an unrecognized value would silently pass for
+  // CU_EVENT_WAIT_DEFAULT and record the wrong graph.
+  if (Flags != CU_EVENT_WAIT_DEFAULT && Flags != CU_EVENT_WAIT_EXTERNAL) {
+    IREE_TRACE_ZONE_END(z0);
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+
   // Resolve NULL stream to default stream.
   if (!hStream) {
     iree_hal_streaming_context_t* context =
@@ -2750,7 +2816,7 @@ CUDAAPI CUresult cuStreamWaitEvent(CUstream hStream, CUevent hEvent,
 
   iree_status_t status = iree_hal_streaming_stream_wait_event(
       (iree_hal_streaming_stream_t*)hStream,
-      (iree_hal_streaming_event_t*)hEvent);
+      (iree_hal_streaming_event_t*)hEvent, Flags == CU_EVENT_WAIT_EXTERNAL);
   CUresult result = iree_status_to_cu_result(status);
   IREE_TRACE_ZONE_END(z0);
   return result;
@@ -3435,7 +3501,7 @@ CUDAAPI CUresult cuGraphAddMemcpyNode(CUgraphNode* phGraphNode, CUgraph hGraph,
 
   // Add memcpy node to graph.
   iree_hal_streaming_graph_node_t* node = NULL;
-  iree_status_t status = iree_hal_streaming_graph_add_memcpy_node(
+  iree_status_t status = iree_hal_streaming_graph_add_copy_ptr_node(
       graph, deps, numDependencies, dst, src, size, &node);
   if (!iree_status_is_ok(status)) {
     iree_status_ignore(status);
@@ -3471,7 +3537,7 @@ CUDAAPI CUresult cuGraphAddMemsetNode(CUgraphNode* phGraphNode, CUgraph hGraph,
 
   // Add memset node to graph.
   iree_hal_streaming_graph_node_t* node = NULL;
-  iree_status_t status = iree_hal_streaming_graph_add_memset_node(
+  iree_status_t status = iree_hal_streaming_graph_add_fill_ptr_node(
       graph, deps, numDependencies, (iree_hal_streaming_deviceptr_t)params->dst,
       params->value, params->elementSize, params->width * params->height,
       &node);
@@ -4069,7 +4135,7 @@ CUDAAPI const char* cuGetErrorName(CUresult error) {
 }
 
 // Thread-local error state.
-static iree_thread_local CUresult iree_cuda_thread_error = CUDA_SUCCESS;
+static IREE_THREAD_LOCAL CUresult iree_cuda_thread_error = CUDA_SUCCESS;
 
 static void iree_cuda_thread_error_set(CUresult error) {
   iree_cuda_thread_error = error;

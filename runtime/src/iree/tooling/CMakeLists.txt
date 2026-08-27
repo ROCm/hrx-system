@@ -266,6 +266,8 @@ iree_cc_library(
     "parameter_util.c"
   DEPS
     iree::base
+    iree::base::internal::json
+    iree::base::internal::path
     iree::base::tooling::flags
     iree::hal
     iree::io::file_handle
@@ -277,6 +279,24 @@ iree_cc_library(
     iree::modules::io::parameters
     iree::vm
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    parameter_util_test
+  SRCS
+    "parameter_util_test.cc"
+  DEPS
+    ::parameter_util
+    iree::base
+    iree::base::internal::path
+    iree::io::file_handle
+    iree::io::parameter_index
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::testing::temp_file
+  LABELS
+    "requires-filesystem"
 )
 
 iree_cc_library(

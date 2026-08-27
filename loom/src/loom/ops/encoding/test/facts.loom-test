@@ -1,5 +1,171 @@
 // RUN: pass canonicalize
 
+// Exact encoding queries fold when the producer carries a complete static
+// specification.
+func.def @exact_static_spec_query() -> (i1, i1) {
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
+  %same = encoding.isa<#ggml.q4_0> %schema : encoding<schema>
+  %different = encoding.isa<#ggml.q8_0> %schema : encoding<schema>
+  func.return %same, %different : i1, i1
+}
+// ----
+func.def @exact_static_spec_query() -> (i1, i1) {
+  %same = scalar.constant true : i1
+  %different = scalar.constant false : i1
+  func.return %same, %different : i1, i1
+}
+
+// ====
+
+// A dynamic encoding argument has no exact static specification to compare;
+// the query remains executable instead of becoming an assumed result.
+func.def @dynamic_static_spec_query(%schema: encoding<schema>) -> (i1) {
+  %is_q4 = encoding.isa<#ggml.q4_0> %schema : encoding<schema>
+  func.return %is_q4 : i1
+}
+// ----
+func.def @dynamic_static_spec_query(%schema: encoding<schema>) -> (i1) {
+  %is_q4 = encoding.isa<#ggml.q4_0> %schema : encoding<schema>
+  func.return %is_q4 : i1
+}
+
+// ====
+
+// Typed semantic predicates fold independently for each authored property.
+func.def @static_semantic_queries() -> (i1, i1, i1, i1) {
+  %schema = encoding.define #encoding.u4<affine=scale_plus_min, payload_elements=256, payload_packing=multi_stream, payload_registers=8> : encoding<schema>
+  %all = encoding.matches<element_format = u4, payload_packing = multi_stream, affine = scale_plus_min> %schema : encoding<schema>
+  %partial = encoding.matches<element_format = u4> %schema : encoding<schema>
+  %wrong_format = encoding.matches<element_format = u6> %schema : encoding<schema>
+  %wrong_affine = encoding.matches<affine = scale_only> %schema : encoding<schema>
+  func.return %all, %partial, %wrong_format, %wrong_affine : i1, i1, i1, i1
+}
+// ----
+func.def @static_semantic_queries() -> (i1, i1, i1, i1) {
+  %all = scalar.constant true : i1
+  %partial = scalar.constant true : i1
+  %wrong_format = scalar.constant false : i1
+  %wrong_affine = scalar.constant false : i1
+  func.return %all, %partial, %wrong_format, %wrong_affine : i1, i1, i1, i1
+}
+
+// ====
+
+// A complete static schema proves that omitted affine behavior is `none`.
+func.def @static_semantic_absence() -> (i1) {
+  %schema = encoding.define #encoding.f16<payload_elements=16, payload_registers=8> : encoding<schema>
+  %unscaled = encoding.matches<affine = none> %schema : encoding<schema>
+  func.return %unscaled : i1
+}
+// ----
+func.def @static_semantic_absence() -> (i1) {
+  %unscaled = scalar.constant true : i1
+  func.return %unscaled : i1
+}
+
+// ====
+
+// Unknown schema facts keep semantic predicates executable.
+func.def @dynamic_semantic_query(%schema: encoding<schema>) -> (i1) {
+  %is_u4 = encoding.matches<element_format = u4> %schema : encoding<schema>
+  func.return %is_u4 : i1
+}
+// ----
+func.def @dynamic_semantic_query(%schema: encoding<schema>) -> (i1) {
+  %is_u4 = encoding.matches<element_format = u4> %schema : encoding<schema>
+  func.return %is_u4 : i1
+}
+
+// ====
+
+// Semantic assumptions refine only authored fields and make repeated queries
+// fold without requiring an exact static family.
+func.def @assume_semantic_match(%schema: encoding<schema>) -> (i1, i1, i1) {
+  %schema2 = encoding.assume.match<element_format = u4, affine = scale_plus_min> %schema : encoding<schema>
+  %format = encoding.matches<element_format = u4> %schema2 : encoding<schema>
+  %affine = encoding.matches<affine = scale_plus_min> %schema2 : encoding<schema>
+  %packing = encoding.matches<payload_packing = multi_stream> %schema2 : encoding<schema>
+  func.return %format, %affine, %packing : i1, i1, i1
+}
+// ----
+func.def @assume_semantic_match(%schema: encoding<schema>) -> (i1, i1, i1) {
+  %schema2 = encoding.assume.match<element_format = u4, affine = scale_plus_min> %schema : encoding<schema>
+  %format = scalar.constant true : i1
+  %affine = scalar.constant true : i1
+  %packing = encoding.matches<payload_packing = multi_stream> %schema2 : encoding<schema>
+  func.return %format, %affine, %packing : i1, i1, i1
+}
+
+// ====
+
+// Explicit semantic absence remains distinct from an unknown zero-valued fact.
+func.def @assume_semantic_absence(%schema: encoding<schema>) -> (i1, i1, i1, i1) {
+  %schema2 = encoding.assume.match<element_format = none, affine = none> %schema : encoding<schema>
+  %format_none = encoding.matches<element_format = none> %schema2 : encoding<schema>
+  %format_u4 = encoding.matches<element_format = u4> %schema2 : encoding<schema>
+  %affine_none = encoding.matches<affine = none> %schema2 : encoding<schema>
+  %affine_scale = encoding.matches<affine = scale_only> %schema2 : encoding<schema>
+  func.return %format_none, %format_u4, %affine_none, %affine_scale : i1, i1, i1, i1
+}
+// ----
+func.def @assume_semantic_absence(%schema: encoding<schema>) -> (i1, i1, i1, i1) {
+  %format_none = scalar.constant true : i1
+  %format_u4 = scalar.constant false : i1
+  %affine_none = scalar.constant true : i1
+  %affine_scale = scalar.constant false : i1
+  func.return %format_none, %format_u4, %affine_none, %affine_scale : i1, i1, i1, i1
+}
+
+// ====
+
+// Exact predicates refine their source on the true branch, allowing a repeated
+// query to fold without specializing the function argument.
+func.def @exact_query_refines_true_branch(%schema: encoding<schema>) {
+  %is_q4 = encoding.isa<#ggml.q4_0> %schema : encoding<schema>
+  scf.if %is_q4 {
+    %known = encoding.isa<#ggml.q4_0> %schema : encoding<schema>
+    test.use %known : i1
+  }
+  func.return
+}
+// ----
+func.def @exact_query_refines_true_branch(%schema: encoding<schema>) {
+  %is_q4 = encoding.isa<#ggml.q4_0> %schema : encoding<schema>
+  scf.if %is_q4 {
+    %known = scalar.constant true : i1
+    test.use %known : i1
+  }
+  func.return
+}
+
+// ====
+
+// Independent semantic predicates chain their edge-local assumptions. Both
+// facts are available to a combined query in the selected region.
+func.def @semantic_queries_refine_true_branch(%schema: encoding<schema>) {
+  %is_u4 = encoding.matches<element_format = u4> %schema : encoding<schema>
+  %has_min = encoding.matches<affine = scale_plus_min> %schema : encoding<schema>
+  %condition = scalar.andi %is_u4, %has_min : i1
+  scf.if %condition {
+    %known = encoding.matches<element_format = u4, affine = scale_plus_min> %schema : encoding<schema>
+    test.use %known : i1
+  }
+  func.return
+}
+// ----
+func.def @semantic_queries_refine_true_branch(%schema: encoding<schema>) {
+  %is_u4 = encoding.matches<element_format = u4> %schema : encoding<schema>
+  %has_min = encoding.matches<affine = scale_plus_min> %schema : encoding<schema>
+  %condition = scalar.andi %is_u4, %has_min : i1
+  scf.if %condition {
+    %known = scalar.constant true : i1
+    test.use %known : i1
+  }
+  func.return
+}
+
+// ====
+
 // Dense layout ops seed address-layout summary facts.
 func.def @dense_layout_summary() -> (i64) {
   %layout = encoding.layout.dense : encoding<layout>
@@ -64,13 +230,13 @@ func.def @assume_strided_layout_summary(%layout: encoding<layout>) -> (i64, i64)
 
 // Exact static-spec assumptions expose static physical-storage layout facts
 // for schema/storage arguments selected by a specialization thunk.
-func.def @assume_spec_physical_storage_layout_summary(%storage: encoding<storage>) -> (i64) {
-  %storage2 = encoding.assume.spec %storage, #physical_storage<layout=#dense, schema=#ggml_q4_0<block_elems=32, storage_bytes=18>> : encoding<storage>
+func.def @assume_spec_storage_layout_summary(%storage: encoding<storage>) -> (i64) {
+  %storage2 = encoding.assume.spec %storage, #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0> : encoding<storage>
   %kind = test.fact_encoding_layout_kind %storage2 : encoding<storage> -> i64
   func.return %kind : i64
 }
 // ----
-func.def @assume_spec_physical_storage_layout_summary(%storage: encoding<storage>) -> (i64) {
+func.def @assume_spec_storage_layout_summary(%storage: encoding<storage>) -> (i64) {
   %kind = scalar.constant 1 : i64
   func.return %kind : i64
 }
@@ -80,7 +246,7 @@ func.def @assume_spec_physical_storage_layout_summary(%storage: encoding<storage
 // Static strided specs expose exact per-axis stride facts through the shared
 // static layout decoder.
 func.def @assume_spec_static_strided_layout_summary(%layout: encoding<layout>) -> (i64, i64) {
-  %layout2 = encoding.assume.spec %layout, #strided<stride=64> : encoding<layout>
+  %layout2 = encoding.assume.spec %layout, #encoding.layout.strided<strides=[64]> : encoding<layout>
   %kind = test.fact_encoding_layout_kind %layout2 : encoding<layout> -> i64
   %stride_hi = test.fact_encoding_layout_stride_hi %layout2[0] : encoding<layout> -> i64
   func.return %kind, %stride_hi : i64, i64
@@ -95,18 +261,19 @@ func.def @assume_spec_static_strided_layout_summary(%layout: encoding<layout>) -
 // ====
 
 // Physical-storage encodings carry the nested address-layout summary through
-// the storage value.
-func.def @physical_storage_layout_summary(%stride: index) -> (i64, i64) {
+// the storage value even when authored operand order differs from descriptor
+// order.
+func.def @storage_layout_summary(%stride: index) -> (i64, i64) {
   %stride2 = index.assume %stride [range(%stride, 8, 16), mul(%stride, 8)] : index
   %layout = encoding.layout.strided [%stride2, 1] : encoding<layout>
-  %schema = encoding.define #ggml_q4_0<block_elems=32, storage_bytes=18> : encoding<schema>
-  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %schema = encoding.define #ggml.q4_0 : encoding<schema>
+  %storage = encoding.define #encoding.storage {schema = %schema : encoding<schema>, layout = %layout : encoding<layout>} : encoding<storage>
   %kind = test.fact_encoding_layout_kind %storage : encoding<storage> -> i64
   %stride_hi = test.fact_encoding_layout_stride_hi %storage[0] : encoding<storage> -> i64
   func.return %kind, %stride_hi : i64, i64
 }
 // ----
-func.def @physical_storage_layout_summary(%stride: index) -> (i64, i64) {
+func.def @storage_layout_summary(%stride: index) -> (i64, i64) {
   %kind = scalar.constant 2 : i64
   %stride_hi = scalar.constant 16 : i64
   func.return %kind, %stride_hi : i64, i64
@@ -116,13 +283,13 @@ func.def @physical_storage_layout_summary(%stride: index) -> (i64, i64) {
 
 // Static physical-storage parameters can seed the same summary when their
 // nested layout is static.
-func.def @static_physical_storage_layout_summary() -> (i64) {
-  %storage = encoding.define #physical_storage<layout=#dense, schema=#ggml_q4_0<block_elems=32, storage_bytes=18>> : encoding<storage>
+func.def @static_storage_layout_summary() -> (i64) {
+  %storage = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#ggml.q4_0> : encoding<storage>
   %kind = test.fact_encoding_layout_kind %storage : encoding<storage> -> i64
   func.return %kind : i64
 }
 // ----
-func.def @static_physical_storage_layout_summary() -> (i64) {
+func.def @static_storage_layout_summary() -> (i64) {
   %kind = scalar.constant 1 : i64
   func.return %kind : i64
 }
@@ -130,14 +297,14 @@ func.def @static_physical_storage_layout_summary() -> (i64) {
 // ====
 
 // Static physical-storage summaries recurse through static strided layouts too.
-func.def @static_strided_physical_storage_layout_summary() -> (i64, i64) {
-  %storage = encoding.define #physical_storage<layout=#strided<stride=64>, schema=#ggml_q4_0<block_elems=32, storage_bytes=18>> : encoding<storage>
+func.def @static_strided_storage_layout_summary() -> (i64, i64) {
+  %storage = encoding.define #encoding.storage<layout=#encoding.layout.strided<strides=[64]>, schema=#ggml.q4_0> : encoding<storage>
   %kind = test.fact_encoding_layout_kind %storage : encoding<storage> -> i64
   %stride_hi = test.fact_encoding_layout_stride_hi %storage[0] : encoding<storage> -> i64
   func.return %kind, %stride_hi : i64, i64
 }
 // ----
-func.def @static_strided_physical_storage_layout_summary() -> (i64, i64) {
+func.def @static_strided_storage_layout_summary() -> (i64, i64) {
   %kind = scalar.constant 2 : i64
   %stride_hi = scalar.constant 64 : i64
   func.return %kind, %stride_hi : i64, i64
@@ -145,20 +312,20 @@ func.def @static_strided_physical_storage_layout_summary() -> (i64, i64) {
 
 // ====
 
-// Matrix operand storage schemas seed target-independent encoded payload facts
-// without adding fp6/fp4 scalar types.
-func.def @matrix_operand_schema_summary() -> (i64, i64, i64, i64, i64, i64) {
-  %schema = encoding.define #matrix_operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
-  %format = test.fact_encoding_matrix_field %schema["element_format"] : encoding<schema> -> i64
-  %packing = test.fact_encoding_matrix_field %schema["payload_packing"] : encoding<schema> -> i64
-  %scale = test.fact_encoding_matrix_field %schema["scale_topology"] : encoding<schema> -> i64
-  %group = test.fact_encoding_matrix_field %schema["scale_group_elements"] : encoding<schema> -> i64
-  %registers = test.fact_encoding_matrix_field %schema["payload_registers"] : encoding<schema> -> i64
-  %fallback = test.fact_encoding_matrix_field %schema["zero_scale_fallback"] : encoding<schema> -> i64
+// Encoded operand storage schemas seed target-independent payload facts without
+// adding fp6/fp4 scalar types.
+func.def @operand_schema_summary() -> (i64, i64, i64, i64, i64, i64) {
+  %schema = encoding.define #encoding.operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %format = test.fact_encoding_operand_field %schema["element_format"] : encoding<schema> -> i64
+  %packing = test.fact_encoding_operand_field %schema["payload_packing"] : encoding<schema> -> i64
+  %scale = test.fact_encoding_operand_field %schema["scale_topology"] : encoding<schema> -> i64
+  %group = test.fact_encoding_operand_field %schema["scale_group_elements"] : encoding<schema> -> i64
+  %registers = test.fact_encoding_operand_field %schema["payload_registers"] : encoding<schema> -> i64
+  %fallback = test.fact_encoding_operand_field %schema["zero_scale_fallback"] : encoding<schema> -> i64
   func.return %format, %packing, %scale, %group, %registers, %fallback : i64, i64, i64, i64, i64, i64
 }
 // ----
-func.def @matrix_operand_schema_summary() -> (i64, i64, i64, i64, i64, i64) {
+func.def @operand_schema_summary() -> (i64, i64, i64, i64, i64, i64) {
   %format = scalar.constant 1073741824 : i64
   %packing = scalar.constant 256 : i64
   %scale = scalar.constant 32 : i64
@@ -170,17 +337,69 @@ func.def @matrix_operand_schema_summary() -> (i64, i64, i64, i64, i64, i64) {
 
 // ====
 
+// Exact logical scale-group shapes distinguish groups with the same element
+// count but different axis boundaries.
+func.def @operand_scale_group_shapes() -> (i64, i64, i64, i64, i64, i64, i64, i64, i64) {
+  %square = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=256, payload_packing=separate_scale_payload, scale_format=f8e4m3fn, scale_group_shape=[16, 16], scale_operands=1, scale_topology=block_2d> : encoding<schema>
+  %row = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=16, payload_packing=separate_scale_payload, scale_format=f8e4m3fn, scale_group_shape=[1, 16], scale_operands=1, scale_topology=block_2d> : encoding<schema>
+  %linear = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=32, payload_packing=separate_scale_payload, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %square_rank = test.fact_encoding_operand_field %square["scale_group_rank"] : encoding<schema> -> i64
+  %square_dim0 = test.fact_encoding_operand_field %square["scale_group_dim0"] : encoding<schema> -> i64
+  %square_dim1 = test.fact_encoding_operand_field %square["scale_group_dim1"] : encoding<schema> -> i64
+  %row_rank = test.fact_encoding_operand_field %row["scale_group_rank"] : encoding<schema> -> i64
+  %row_dim0 = test.fact_encoding_operand_field %row["scale_group_dim0"] : encoding<schema> -> i64
+  %row_dim1 = test.fact_encoding_operand_field %row["scale_group_dim1"] : encoding<schema> -> i64
+  %linear_rank = test.fact_encoding_operand_field %linear["scale_group_rank"] : encoding<schema> -> i64
+  %linear_dim0 = test.fact_encoding_operand_field %linear["scale_group_dim0"] : encoding<schema> -> i64
+  %linear_dim1 = test.fact_encoding_operand_field %linear["scale_group_dim1"] : encoding<schema> -> i64
+  func.return %square_rank, %square_dim0, %square_dim1, %row_rank, %row_dim0, %row_dim1, %linear_rank, %linear_dim0, %linear_dim1 : i64, i64, i64, i64, i64, i64, i64, i64, i64
+}
+// ----
+func.def @operand_scale_group_shapes() -> (i64, i64, i64, i64, i64, i64, i64, i64, i64) {
+  %square_rank = scalar.constant 2 : i64
+  %square_dim0 = scalar.constant 16 : i64
+  %square_dim1 = scalar.constant 16 : i64
+  %row_rank = scalar.constant 2 : i64
+  %row_dim0 = scalar.constant 1 : i64
+  %row_dim1 = scalar.constant 16 : i64
+  %linear_rank = scalar.constant 1 : i64
+  %linear_dim0 = scalar.constant 32 : i64
+  %linear_dim1 = scalar.constant 0 : i64
+  func.return %square_rank, %square_dim0, %square_dim1, %row_rank, %row_dim0, %row_dim1, %linear_rank, %linear_dim0, %linear_dim1 : i64, i64, i64, i64, i64, i64, i64, i64, i64
+}
+
+// ====
+
+// Structured-sparsity facts preserve both the logical group extent and the
+// number of physically stored nonzero elements.
+func.def @operand_structured_sparsity_summary() -> (i64, i64, i64) {
+  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %policy = test.fact_encoding_operand_field %schema["sparsity"] : encoding<schema> -> i64
+  %elements = test.fact_encoding_operand_field %schema["sparsity_group_elements"] : encoding<schema> -> i64
+  %nonzero = test.fact_encoding_operand_field %schema["sparsity_group_nonzero_elements"] : encoding<schema> -> i64
+  func.return %policy, %elements, %nonzero : i64, i64, i64
+}
+// ----
+func.def @operand_structured_sparsity_summary() -> (i64, i64, i64) {
+  %policy = scalar.constant 2 : i64
+  %elements = scalar.constant 4 : i64
+  %nonzero = scalar.constant 2 : i64
+  func.return %policy, %elements, %nonzero : i64, i64, i64
+}
+
+// ====
+
 // GGML Q8_0 is a concrete block-quant schema: dense signed i8 payload lanes
 // with one f16 block scale covering 32 logical elements.
 func.def @ggml_q8_0_schema_summary() -> (i64, i64, i64, i64, i64, i64, i64) {
-  %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
-  %format = test.fact_encoding_matrix_field %schema["element_format"] : encoding<schema> -> i64
-  %scale_format = test.fact_encoding_matrix_field %schema["scale_format"] : encoding<schema> -> i64
-  %packing = test.fact_encoding_matrix_field %schema["payload_packing"] : encoding<schema> -> i64
-  %scale = test.fact_encoding_matrix_field %schema["scale_topology"] : encoding<schema> -> i64
-  %affine = test.fact_encoding_matrix_field %schema["affine"] : encoding<schema> -> i64
-  %elements = test.fact_encoding_matrix_field %schema["payload_elements"] : encoding<schema> -> i64
-  %operands = test.fact_encoding_matrix_field %schema["scale_operands"] : encoding<schema> -> i64
+  %schema = encoding.define #ggml.q8_0 : encoding<schema>
+  %format = test.fact_encoding_operand_field %schema["element_format"] : encoding<schema> -> i64
+  %scale_format = test.fact_encoding_operand_field %schema["scale_format"] : encoding<schema> -> i64
+  %packing = test.fact_encoding_operand_field %schema["payload_packing"] : encoding<schema> -> i64
+  %scale = test.fact_encoding_operand_field %schema["scale_topology"] : encoding<schema> -> i64
+  %affine = test.fact_encoding_operand_field %schema["affine"] : encoding<schema> -> i64
+  %elements = test.fact_encoding_operand_field %schema["payload_elements"] : encoding<schema> -> i64
+  %operands = test.fact_encoding_operand_field %schema["scale_operands"] : encoding<schema> -> i64
   func.return %format, %scale_format, %packing, %scale, %affine, %elements, %operands : i64, i64, i64, i64, i64, i64, i64
 }
 // ----
@@ -197,20 +416,67 @@ func.def @ggml_q8_0_schema_summary() -> (i64, i64, i64, i64, i64, i64, i64) {
 
 // ====
 
+// Generic FP8 operand schemas expose their target-independent numeric format
+// and dense one-byte payload contract.
+func.def @operand_fp8_schema_summary() -> (i64, i64, i64, i64, i64, i64) {
+  %ieee_e4m3 = encoding.define #encoding.f8e4m3 : encoding<schema>
+  %ieee_e5m2 = encoding.define #encoding.f8e5m2 : encoding<schema>
+  %fn = encoding.define #encoding.f8e4m3fn : encoding<schema>
+  %finite_fn = encoding.define #encoding.f8e4m3fn<rounding=finite_only> : encoding<schema>
+  %fnuz = encoding.define #encoding.f8e4m3fnuz : encoding<schema>
+  %e5m2fnuz = encoding.define #encoding.f8e5m2fnuz : encoding<schema>
+  %ieee_e4m3_format = test.fact_encoding_operand_field %ieee_e4m3["element_format"] : encoding<schema> -> i64
+  %ieee_e5m2_format = test.fact_encoding_operand_field %ieee_e5m2["element_format"] : encoding<schema> -> i64
+  %fn_format = test.fact_encoding_operand_field %fn["element_format"] : encoding<schema> -> i64
+  %finite_fn_rounding = test.fact_encoding_operand_field %finite_fn["rounding"] : encoding<schema> -> i64
+  %fnuz_packing = test.fact_encoding_operand_field %fnuz["payload_packing"] : encoding<schema> -> i64
+  %e5m2fnuz_elements = test.fact_encoding_operand_field %e5m2fnuz["payload_elements"] : encoding<schema> -> i64
+  func.return %ieee_e4m3_format, %ieee_e5m2_format, %fn_format, %finite_fn_rounding, %fnuz_packing, %e5m2fnuz_elements : i64, i64, i64, i64, i64, i64
+}
+// ----
+func.def @operand_fp8_schema_summary() -> (i64, i64, i64, i64, i64, i64) {
+  %ieee_e4m3_format = scalar.constant 8388608 : i64
+  %ieee_e5m2_format = scalar.constant 16777216 : i64
+  %fn_format = scalar.constant 33554432 : i64
+  %finite_fn_rounding = scalar.constant 4096 : i64
+  %fnuz_packing = scalar.constant 1 : i64
+  %e5m2fnuz_elements = scalar.constant 1 : i64
+  func.return %ieee_e4m3_format, %ieee_e5m2_format, %fn_format, %finite_fn_rounding, %fnuz_packing, %e5m2fnuz_elements : i64, i64, i64, i64, i64, i64
+}
+
+// ====
+
+// Operand schemas can state combined finite and subnormal-flushing storage
+// policy facts with one text symbol.
+func.def @operand_finite_flush_subnormal_summary() -> (i64, i64) {
+  %schema = encoding.define #encoding.operand<element_format=f8e4m3, payload_elements=16, payload_registers=4, rounding=finite_flush_subnormal> : encoding<schema>
+  %format = test.fact_encoding_operand_field %schema["element_format"] : encoding<schema> -> i64
+  %rounding = test.fact_encoding_operand_field %schema["rounding"] : encoding<schema> -> i64
+  func.return %format, %rounding : i64, i64
+}
+// ----
+func.def @operand_finite_flush_subnormal_summary() -> (i64, i64) {
+  %format = scalar.constant 8388608 : i64
+  %rounding = scalar.constant 4608 : i64
+  func.return %format, %rounding : i64, i64
+}
+
+// ====
+
 // Dynamic physical-storage composition carries nested schema facts along with
 // layout facts, giving consumers one encoding value to query.
-func.def @physical_storage_matrix_schema_summary() -> (i64, i64, i64, i64) {
+func.def @storage_matrix_schema_summary() -> (i64, i64, i64, i64) {
   %layout = encoding.layout.dense : encoding<layout>
-  %schema = encoding.define #matrix_operand<element_format=f4e2m1, payload_elements=128, payload_registers=16, scale_format=f8e4m3, scale_group_elements=16, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
-  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
-  %format = test.fact_encoding_matrix_field %storage["element_format"] : encoding<storage> -> i64
-  %scale_format = test.fact_encoding_matrix_field %storage["scale_format"] : encoding<storage> -> i64
-  %group = test.fact_encoding_matrix_field %storage["scale_group_elements"] : encoding<storage> -> i64
-  %elements = test.fact_encoding_matrix_field %storage["payload_elements"] : encoding<storage> -> i64
+  %schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=128, payload_registers=16, scale_format=f8e4m3, scale_group_elements=16, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %format = test.fact_encoding_operand_field %storage["element_format"] : encoding<storage> -> i64
+  %scale_format = test.fact_encoding_operand_field %storage["scale_format"] : encoding<storage> -> i64
+  %group = test.fact_encoding_operand_field %storage["scale_group_elements"] : encoding<storage> -> i64
+  %elements = test.fact_encoding_operand_field %storage["payload_elements"] : encoding<storage> -> i64
   func.return %format, %scale_format, %group, %elements : i64, i64, i64, i64
 }
 // ----
-func.def @physical_storage_matrix_schema_summary() -> (i64, i64, i64, i64) {
+func.def @storage_matrix_schema_summary() -> (i64, i64, i64, i64) {
   %format = scalar.constant 8589934592 : i64
   %scale_format = scalar.constant 8388608 : i64
   %group = scalar.constant 16 : i64
@@ -221,14 +487,14 @@ func.def @physical_storage_matrix_schema_summary() -> (i64, i64, i64, i64) {
 // ====
 
 // Static physical-storage specs recurse through their nested schema too.
-func.def @static_physical_storage_matrix_schema_summary() -> (i64, i64) {
-  %storage = encoding.define #physical_storage<layout=#dense, schema=#matrix_operand<element_format=bf6, payload_elements=32, payload_registers=6>> : encoding<storage>
-  %format = test.fact_encoding_matrix_field %storage["element_format"] : encoding<storage> -> i64
-  %registers = test.fact_encoding_matrix_field %storage["payload_registers"] : encoding<storage> -> i64
+func.def @static_storage_matrix_schema_summary() -> (i64, i64) {
+  %storage = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.operand<element_format=bf6, payload_elements=32, payload_registers=6>> : encoding<storage>
+  %format = test.fact_encoding_operand_field %storage["element_format"] : encoding<storage> -> i64
+  %registers = test.fact_encoding_operand_field %storage["payload_registers"] : encoding<storage> -> i64
   func.return %format, %registers : i64, i64
 }
 // ----
-func.def @static_physical_storage_matrix_schema_summary() -> (i64, i64) {
+func.def @static_storage_matrix_schema_summary() -> (i64, i64) {
   %format = scalar.constant 4294967296 : i64
   %registers = scalar.constant 6 : i64
   func.return %format, %registers : i64, i64
@@ -239,9 +505,9 @@ func.def @static_physical_storage_matrix_schema_summary() -> (i64, i64) {
 // Exact static-spec assumptions can seed matrix schema facts for encoding
 // arguments that cross function or kernel boundaries.
 func.def @assume_spec_matrix_schema_summary(%schema: encoding<schema>) -> (i64, i64) {
-  %schema2 = encoding.assume.spec %schema, #matrix_operand<element_format=bf8, payload_elements=32, payload_registers=8, scale_format=f8e5m2, scale_group_elements=32, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %format = test.fact_encoding_matrix_field %schema2["element_format"] : encoding<schema> -> i64
-  %scale_format = test.fact_encoding_matrix_field %schema2["scale_format"] : encoding<schema> -> i64
+  %schema2 = encoding.assume.spec %schema, #encoding.operand<element_format=bf8, payload_elements=32, payload_registers=8, scale_format=f8e5m2, scale_group_elements=32, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %format = test.fact_encoding_operand_field %schema2["element_format"] : encoding<schema> -> i64
+  %scale_format = test.fact_encoding_operand_field %schema2["scale_format"] : encoding<schema> -> i64
   func.return %format, %scale_format : i64, i64
 }
 // ----

@@ -6,8 +6,6 @@
 
 #include "loom/verify/verify_constraints.h"
 
-#include <string.h>
-
 #include "loom/error/error_catalog.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/target/registers.h"
@@ -18,7 +16,7 @@ static bool loom_constraint_property_equals(
     loom_type_t a, loom_type_t b, loom_constraint_property_t property) {
   switch ((enum loom_constraint_property_e)property) {
     case LOOM_PROPERTY_TYPE:
-      return memcmp(&a, &b, sizeof(loom_type_t)) == 0;
+      return loom_type_equal(a, b);
     case LOOM_PROPERTY_KIND:
       return loom_type_kind(a) == loom_type_kind(b);
     case LOOM_PROPERTY_ELEMENT_TYPE:
@@ -30,14 +28,9 @@ static bool loom_constraint_property_equals(
     case LOOM_PROPERTY_RANK:
       return loom_type_rank(a) == loom_type_rank(b);
     case LOOM_PROPERTY_REGISTER_CLASS:
-      return loom_type_is_register(a) && loom_type_is_register(b) &&
-             loom_type_register_payload0(a) == loom_type_register_payload0(b) &&
-             loom_low_register_type_class_id(a) ==
-                 loom_low_register_type_class_id(b);
+      return loom_low_register_type_same_class(a, b);
     case LOOM_PROPERTY_REGISTER_UNIT_COUNT:
-      return loom_type_is_register(a) && loom_type_is_register(b) &&
-             loom_low_register_type_unit_count(a) ==
-                 loom_low_register_type_unit_count(b);
+      return loom_low_register_type_same_unit_count(a, b);
     default:
       return false;
   }
@@ -212,7 +205,7 @@ static void loom_verify_emit_indexed_pairwise_mismatch(
 //   3. Add a handler here following the same pattern.
 //   4. Add the handler to kVerifyRelationFns below.
 //   5. Add the corresponding Constraint constructor in dsl.py and the
-//      mapping in c_tables.py CONSTRAINT_MAP.
+//      mapping in c_enums.py CONSTRAINT_MAP.
 
 // PAIRWISE_EQ: every element of every listed field has the same
 // property as the first element of the first field. Variadic fields
@@ -449,6 +442,76 @@ static bool loom_verify_region_entry_args(const loom_op_t* op,
   loom_block_t* entry = loom_region_entry_block(region);
   out_span->values = entry->arg_ids;
   out_span->count = entry->arg_count;
+  return true;
+}
+
+typedef struct loom_verify_condition_forward_t {
+  const loom_op_t* terminator;
+  const loom_op_vtable_t* vtable;
+  const loom_value_id_t* values;
+  uint16_t count;
+} loom_verify_condition_forward_t;
+
+// Resolves the values following the leading predicate of a condition-shaped
+// region terminator. The terminator must declare one fixed predicate operand
+// followed by one variadic forwarding field.
+static bool loom_verify_region_condition_forward(
+    loom_verify_state_t* state, const loom_op_t* op,
+    const loom_op_vtable_t* vtable, loom_field_ref_t region_ref,
+    loom_verify_condition_forward_t* out_forward) {
+  *out_forward = (loom_verify_condition_forward_t){0};
+  if (LOOM_FIELD_REF_CATEGORY(region_ref) != LOOM_FIELD_REGION) return false;
+  uint8_t region_index = LOOM_FIELD_REF_INDEX(region_ref);
+  uint16_t operand_count = 0;
+  const loom_value_id_t* operands = NULL;
+  if (!loom_verify_region_entry_yield(state, op, vtable, region_index,
+                                      &operand_count, &operands) ||
+      operand_count == 0) {
+    return false;
+  }
+  loom_region_t* region = loom_op_regions(op)[region_index];
+  const loom_block_t* entry = loom_region_const_entry_block(region);
+  const loom_op_t* terminator = entry->last_op;
+  const loom_op_vtable_t* terminator_vtable =
+      loom_verify_lookup_vtable(state, terminator->kind);
+  if (!terminator_vtable || terminator_vtable->fixed_operand_count != 1 ||
+      !iree_any_bit_set(terminator_vtable->vtable_flags,
+                        LOOM_OP_VTABLE_VARIADIC_OPERANDS)) {
+    return false;
+  }
+  out_forward->terminator = terminator;
+  out_forward->vtable = terminator_vtable;
+  out_forward->values = operand_count > 1 ? operands + 1 : NULL;
+  out_forward->count = operand_count - 1;
+  return true;
+}
+
+// Returns true when target region args have already satisfied their declared
+// count/type relationship with the reference value field. Forwarding checks
+// defer to those diagnostics when the target region itself is malformed.
+static bool loom_verify_region_args_match_field(
+    loom_verify_state_t* state, const loom_op_t* op,
+    const loom_op_vtable_t* vtable, const loom_verify_value_span_t* region_args,
+    loom_field_ref_t reference_ref) {
+  uint8_t reference_category = LOOM_FIELD_REF_CATEGORY(reference_ref);
+  if ((reference_category != LOOM_FIELD_OPERAND &&
+       reference_category != LOOM_FIELD_RESULT) ||
+      !loom_verify_is_variadic_field(vtable, reference_ref)) {
+    return false;
+  }
+  uint16_t reference_count = 0;
+  const loom_value_id_t* reference_values = loom_verify_resolve_variadic_field(
+      op, vtable, reference_ref, &reference_count);
+  if (region_args->count != reference_count ||
+      (reference_count > 0 && !reference_values)) {
+    return false;
+  }
+  for (uint16_t i = 0; i < reference_count; ++i) {
+    if (!loom_type_equal(loom_verify_value_type(state, region_args->values[i]),
+                         loom_verify_value_type(state, reference_values[i]))) {
+      return false;
+    }
+  }
   return true;
 }
 
@@ -1357,6 +1420,98 @@ static void loom_verify_relation_region_arg_match(
   }
 }
 
+// CONDITION_FORWARD_COUNT: the number of values after a condition region
+// terminator's leading predicate matches a target region's entry block arg
+// count. Args: (condition region field, target region field, target value
+// field).
+static void loom_verify_relation_condition_forward_count(
+    loom_verify_state_t* state, const loom_op_t* op,
+    const loom_op_vtable_t* vtable, const loom_constraint_t* constraint) {
+  if (constraint->arg_count < 3) return;
+  loom_verify_condition_forward_t forward = {0};
+  if (!loom_verify_region_condition_forward(state, op, vtable,
+                                            constraint->args[0], &forward)) {
+    return;
+  }
+  loom_verify_value_span_t target_args = {0};
+  if (!loom_verify_region_entry_args(op, constraint->args[1], &target_args) ||
+      !loom_verify_region_args_match_field(state, op, vtable, &target_args,
+                                           constraint->args[2])) {
+    return;
+  }
+  if (forward.count == target_args.count) return;
+
+  loom_field_ref_t forwarded_ref =
+      LOOM_FIELD_REF(LOOM_FIELD_OPERAND, forward.vtable->fixed_operand_count);
+  char forwarded_name_buffer[32];
+  iree_string_view_t forwarded_name = loom_verify_field_name(
+      forward.vtable, forwarded_ref, forwarded_name_buffer,
+      sizeof(forwarded_name_buffer));
+  const loom_error_def_t* error =
+      loom_verify_constraint_error_or(constraint, LOOM_ERR_STRUCTURE_013);
+  loom_diagnostic_param_t params[] = {
+      loom_verify_param_string_for_field(forwarded_name, forwarded_ref),
+      loom_param_u32(forward.count),
+      loom_param_string(IREE_SV("target block args")),
+      loom_param_u32(target_args.count),
+  };
+  loom_verify_emit_structured(state, forward.terminator, error, params,
+                              error->param_count < 4 ? error->param_count : 4);
+}
+
+// CONDITION_FORWARD_MATCH: each value after a condition region terminator's
+// leading predicate has the same type as the corresponding target region entry
+// block arg. Args: (condition region field, target region field, target value
+// field).
+static void loom_verify_relation_condition_forward_match(
+    loom_verify_state_t* state, const loom_op_t* op,
+    const loom_op_vtable_t* vtable, const loom_constraint_t* constraint) {
+  if (constraint->arg_count < 3) return;
+  loom_verify_condition_forward_t forward = {0};
+  if (!loom_verify_region_condition_forward(state, op, vtable,
+                                            constraint->args[0], &forward)) {
+    return;
+  }
+  loom_verify_value_span_t target_args = {0};
+  if (!loom_verify_region_entry_args(op, constraint->args[1], &target_args) ||
+      !loom_verify_region_args_match_field(state, op, vtable, &target_args,
+                                           constraint->args[2]) ||
+      forward.count != target_args.count) {
+    return;
+  }
+
+  const loom_error_def_t* error =
+      loom_verify_constraint_error_or(constraint, LOOM_ERR_TYPE_001);
+  loom_field_ref_t forwarded_ref =
+      LOOM_FIELD_REF(LOOM_FIELD_OPERAND, forward.vtable->fixed_operand_count);
+  for (uint16_t i = 0; i < forward.count; ++i) {
+    loom_type_t forwarded_type =
+        loom_verify_value_type(state, forward.values[i]);
+    loom_type_t target_type =
+        loom_verify_value_type(state, target_args.values[i]);
+    if (loom_type_equal(forwarded_type, target_type)) continue;
+
+    char forwarded_name_buffer[32];
+    iree_string_view_t forwarded_name = loom_verify_value_field_name(
+        forward.vtable, forward.terminator, LOOM_FIELD_OPERAND,
+        (uint16_t)(i + 1), forwarded_name_buffer,
+        sizeof(forwarded_name_buffer));
+    char target_name_buffer[32];
+    iree_snprintf(target_name_buffer, sizeof(target_name_buffer), "target[%u]",
+                  i);
+    loom_diagnostic_param_t params[] = {
+        loom_verify_param_string_for_indexed_field(forwarded_name,
+                                                   forwarded_ref, i),
+        loom_param_type(forwarded_type),
+        loom_param_string(iree_make_cstring_view(target_name_buffer)),
+        loom_param_type(target_type),
+    };
+    loom_verify_emit_structured(
+        state, forward.terminator, error, params,
+        error->param_count < 4 ? error->param_count : 4);
+  }
+}
+
 // YIELD_COUNT: a region's terminator (yield) operand count matches
 // the element count of a variadic value field. Args: (region field,
 // variadic value field).
@@ -1422,11 +1577,12 @@ static void loom_verify_relation_yield_match(
   for (uint16_t i = 0; i < check_count; ++i) {
     loom_type_t yield_type = loom_verify_value_type(state, yield_operands[i]);
     loom_type_t result_type = loom_verify_value_type(state, result_values[i]);
-    bool matched = constraint->property == LOOM_PROPERTY_TYPE
-                       ? loom_type_equal_after_value_remap(
-                             result_type, yield_type, &yield_remap)
-                       : loom_constraint_property_equals(
-                             yield_type, result_type, constraint->property);
+    bool matched =
+        constraint->property == LOOM_PROPERTY_TYPE
+            ? loom_type_equal_after_value_remap(state->module, result_type,
+                                                yield_type, &yield_remap)
+            : loom_constraint_property_equals(yield_type, result_type,
+                                              constraint->property);
     if (matched) {
       continue;
     }
@@ -1499,11 +1655,11 @@ static void loom_verify_relation_variadic_match(
   for (uint16_t i = 0; i < count_a; ++i) {
     loom_type_t type_a = loom_verify_value_type(state, values_a[i]);
     loom_type_t type_b = loom_verify_value_type(state, values_b[i]);
-    bool matched =
-        constraint->property == LOOM_PROPERTY_TYPE
-            ? loom_type_equal_after_value_remap(type_b, type_a, &value_remap)
-            : loom_constraint_property_equals(type_a, type_b,
-                                              constraint->property);
+    bool matched = constraint->property == LOOM_PROPERTY_TYPE
+                       ? loom_type_equal_after_value_remap(
+                             state->module, type_b, type_a, &value_remap)
+                       : loom_constraint_property_equals(type_a, type_b,
+                                                         constraint->property);
     if (matched) {
       continue;
     }
@@ -1605,6 +1761,10 @@ static const loom_verify_relation_fn_t kVerifyRelationFns[] = {
         loom_verify_relation_attr_in_range_rank,
     [LOOM_RELATION_REGION_ARG_COUNT] = loom_verify_relation_region_arg_count,
     [LOOM_RELATION_REGION_ARG_MATCH] = loom_verify_relation_region_arg_match,
+    [LOOM_RELATION_CONDITION_FORWARD_COUNT] =
+        loom_verify_relation_condition_forward_count,
+    [LOOM_RELATION_CONDITION_FORWARD_MATCH] =
+        loom_verify_relation_condition_forward_match,
     [LOOM_RELATION_YIELD_COUNT] = loom_verify_relation_yield_count,
     [LOOM_RELATION_YIELD_MATCH] = loom_verify_relation_yield_match,
     [LOOM_RELATION_VARIADIC_MATCH] = loom_verify_relation_variadic_match,

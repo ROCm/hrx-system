@@ -17,4 +17,5 @@ py_test(
         "presubmit.py",
         "presubmit_test.py",
     ],
+    deps = ["//build_tools/devtools"],
 )

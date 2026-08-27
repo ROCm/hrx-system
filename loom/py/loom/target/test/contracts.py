@@ -32,6 +32,7 @@ from loom.target.contracts import (
     PredicateDescriptorCase,
     Scalar,
     SelectDescriptorCase,
+    SourceMemoryByteOffsetMaterializer,
     SourceMemoryConstraint,
     SourceMemoryDynamicIndexSource,
     SourceMemoryOperation,
@@ -219,14 +220,21 @@ def _source_memory_constraint(
         vector_lane_count=4,
         vector_lane_byte_stride=4,
         static_byte_offset=0,
-        dynamic_term_count=1 if dynamic else 0,
-        dynamic_index_source=(
-            SourceMemoryDynamicIndexSource.VALUE
-            if dynamic
-            else SourceMemoryDynamicIndexSource.NONE
-        ),
-        dynamic_byte_stride=4 if dynamic else 0,
+        dynamic_term_count=None if dynamic else 0,
+        dynamic_term_count_minimum=1 if dynamic else 0,
+        dynamic_index_source=SourceMemoryDynamicIndexSource.NONE,
+        dynamic_byte_stride=0,
         diagnostic=_TEST_LOW_SOURCE_MEMORY_DIAGNOSTIC,
+    )
+
+
+def _source_memory_byte_offset_materializer() -> SourceMemoryByteOffsetMaterializer:
+    return SourceMemoryByteOffsetMaterializer(
+        const_i64=TEST_LOW_CONST_I32_DESCRIPTOR,
+        add_i64=TEST_LOW_ADD_I32_DESCRIPTOR,
+        mul_i64=TEST_LOW_MUL_I32_DESCRIPTOR,
+        shl_i64=None,
+        const_i64_immediate="i32_value",
     )
 
 
@@ -238,7 +246,7 @@ def _vector_load_rule(
 ) -> DescriptorRule:
     operands = {"address": ValueRef.operand("view")}
     if dynamic:
-        operands["index"] = ValueRef.operand("indices")
+        operands["index"] = ValueRef.source_memory_dynamic_byte_offset()
     return DescriptorRule(
         source_op=vector.vector_load,
         descriptor=descriptor,
@@ -254,6 +262,9 @@ def _vector_load_rule(
                 source_memory=_source_memory_constraint(
                     SourceMemoryOperation.LOAD,
                     dynamic=dynamic,
+                ),
+                source_memory_byte_offset_materializer=(
+                    _source_memory_byte_offset_materializer() if dynamic else None
                 ),
             ),
         ),
@@ -271,7 +282,7 @@ def _vector_store_rule(
         "value": ValueRef.operand("value"),
     }
     if dynamic:
-        operands["index"] = ValueRef.operand("indices")
+        operands["index"] = ValueRef.source_memory_dynamic_byte_offset()
     return DescriptorRule(
         source_op=vector.vector_store,
         descriptor=descriptor,
@@ -286,6 +297,9 @@ def _vector_store_rule(
                 source_memory=_source_memory_constraint(
                     SourceMemoryOperation.STORE,
                     dynamic=dynamic,
+                ),
+                source_memory_byte_offset_materializer=(
+                    _source_memory_byte_offset_materializer() if dynamic else None
                 ),
             ),
         ),

@@ -8,18 +8,18 @@ kernel.def target(@target) @cache_device_non_temporal_load_store() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64x4xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64x4xi32, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32>
   // REMARK@+1: BACKEND/040 "selected cache policy 'device/non_temporal'" "decision 'memory_cache_policy.gfx950_nt_sc0_sc1'" "scope_attr present false value 0" "nt_attr present true value 1"
-  %loaded = vector.load %input_view[%lane, 0] {cache_scope = device, cache_temporal = non_temporal} : view<64x4xi32, #dense> -> vector<4xi32>
+  %loaded = vector.load %input_view[%lane, 0] {cache_scope = device, cache_temporal = non_temporal} : view<64x4xi32> -> vector<4xi32>
   // REMARK@+1: BACKEND/040 "selected cache policy 'device/non_temporal'" "decision 'memory_cache_policy.gfx950_nt_sc0_sc1'" "th_attr present false value 0" "nt_attr present true value 1"
-  vector.store %loaded, %output_view[%lane, 0] {cache_scope = device, cache_temporal = non_temporal} : vector<4xi32>, view<64x4xi32, #dense>
+  vector.store %loaded, %output_view[%lane, 0] {cache_scope = device, cache_temporal = non_temporal} : vector<4xi32>, view<64x4xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @cache_device_non_temporal_load_store() asm<amdgpu.cdna4.core> {
+low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @cache_device_non_temporal_load_store() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>

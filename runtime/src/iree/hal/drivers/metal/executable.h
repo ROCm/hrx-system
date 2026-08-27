@@ -83,14 +83,6 @@ typedef struct iree_hal_metal_pipeline_t {
   IREE_TRACE(iree_hal_metal_source_location_t source_location;)
 } iree_hal_metal_pipeline_t;
 
-// Infers the format of the executable and calculates its total size.
-// If executable_data.data_length is 0 attempts to infer size from the data.
-// Returns the canonical format string and total size of the executable data.
-iree_status_t iree_hal_metal_executable_infer_format(
-    iree_const_byte_span_t executable_data,
-    iree_host_size_t executable_format_capacity, char* executable_format,
-    iree_host_size_t* out_inferred_size);
-
 // Creates a Metal kernel library as an IREE executable. The Metal library may
 // contain several kernel functions that can be extracted along with the
 // associated block size.
@@ -104,7 +96,7 @@ iree_status_t iree_hal_metal_executable_infer_format(
 // |out_executable| must be released by the caller (see
 // iree_hal_executable_release).
 iree_status_t iree_hal_metal_executable_create(
-    id<MTLDevice> device, const iree_hal_executable_params_t* executable_params,
+    id<MTLDevice> device, const iree_hal_executable_load_params_t* load_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable);
 
 // Returns the function launch parameters for the given |entry_point|.

@@ -12,7 +12,15 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from loom.assembly import Attr, FormatElement, Keyword, Ref, TemplateParam, TypeOf
+from loom.assembly import (
+    Attr,
+    AttrParams,
+    FormatElement,
+    Keyword,
+    Ref,
+    TemplateParam,
+    TypeOf,
+)
 from loom.diagnostics import DiagnosticSeverity
 from loom.format.text.tokenizer import ParseError, Token, Tokenizer, TokenKind
 from loom.migration.source import (
@@ -245,7 +253,7 @@ def _match_format_element(
         return _match_attr(document, tokens, index, element)
     if isinstance(element, TypeOf):
         return _match_type(document, tokens, index, element)
-    if isinstance(element, TemplateParam):
+    if isinstance(element, AttrParams | TemplateParam):
         return _match_template_param(document, tokens, index, element)
     return None
 
@@ -321,7 +329,7 @@ def _match_template_param(
     document: SourceDocument,
     tokens: tuple[Token, ...],
     index: int,
-    element: TemplateParam,
+    element: AttrParams | TemplateParam,
 ) -> _ElementMatch | None:
     open_token = _token_at(tokens, index)
     if open_token is None or open_token.kind != TokenKind.LANGLE:
@@ -408,7 +416,7 @@ def _render_current_element(
         return _field_value(field_values, element.field), False
     if isinstance(element, TypeOf):
         return _field_value(field_values, element.field), False
-    if isinstance(element, TemplateParam):
+    if isinstance(element, AttrParams | TemplateParam):
         return f"<{_field_value(field_values, element.field)}>", True
     raise TypeError(
         f"unsupported structural migration element: {type(element).__name__}"
@@ -499,6 +507,7 @@ _STRUCTURAL_ELEMENTS = (
     Keyword,
     Ref,
     Attr,
+    AttrParams,
     TypeOf,
     TemplateParam,
 )

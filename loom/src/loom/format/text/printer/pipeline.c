@@ -107,12 +107,13 @@ static bool loom_print_pipeline_enum_attr(const loom_op_t* op,
   const loom_attribute_t* attr =
       loom_print_pipeline_find_attr(op, vtable, attr_name, &descriptor);
   if (!attr || attr->kind != LOOM_ATTR_ENUM || !descriptor ||
-      descriptor->attr_kind != LOOM_ATTR_ENUM || !descriptor->enum_case_names ||
-      attr->raw >= descriptor->enum_case_count) {
+      descriptor->attr_kind != LOOM_ATTR_ENUM) {
     return false;
   }
-  *out_value =
-      loom_bstring_view(descriptor->enum_case_names[(uint8_t)attr->raw]);
+  loom_bstring_t case_name =
+      loom_attr_descriptor_enum_case_name(descriptor, (uint8_t)attr->raw);
+  if (!case_name) return false;
+  *out_value = loom_bstring_view(case_name);
   return true;
 }
 
@@ -137,12 +138,61 @@ static bool loom_print_pipeline_symbol_attr(const loom_print_context_t* ctx,
 
 static bool loom_print_pipeline_attr_value_is_printable(
     const loom_print_context_t* ctx, const loom_attribute_t* attr,
-    uint8_t nesting_depth) {
+    const loom_attr_descriptor_t* descriptor, uint8_t nesting_depth) {
   switch ((loom_attr_kind_t)attr->kind) {
     case LOOM_ATTR_I64:
     case LOOM_ATTR_F64:
     case LOOM_ATTR_BOOL:
       return true;
+    case LOOM_ATTR_SCOPED_ENUM:
+      // Representation-scoped enums require their enclosing contract and are
+      // printed only by the owning operation's declarative format.
+      return false;
+    case LOOM_ATTR_ENUM:
+      return descriptor && descriptor->attr_kind == LOOM_ATTR_ENUM &&
+             (loom_attr_descriptor_has_enum_case(descriptor,
+                                                 loom_attr_as_enum(*attr)) ||
+              iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM));
+    case LOOM_ATTR_ENUM_ARRAY: {
+      if (!descriptor || descriptor->attr_kind != LOOM_ATTR_ENUM_ARRAY ||
+          (attr->count > 0 && !attr->enum_array)) {
+        return false;
+      }
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        if (!loom_attr_descriptor_has_enum_case(descriptor,
+                                                attr->enum_array[i]) &&
+            !iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM)) {
+          return false;
+        }
+      }
+      return true;
+    }
+    case LOOM_ATTR_SIGNED_ENUM_SET: {
+      if (!descriptor || descriptor->attr_kind != LOOM_ATTR_SIGNED_ENUM_SET ||
+          iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM) ||
+          attr->count > LOOM_SIGNED_ENUM_SET_MAX_WORD_COUNT ||
+          ((attr->count > 0) != (attr->signed_enum_set_words != NULL))) {
+        return false;
+      }
+      if (attr->count > 0 &&
+          attr->signed_enum_set_words[attr->count - 1] == 0 &&
+          attr->signed_enum_set_words[attr->count * 2 - 1] == 0) {
+        return false;
+      }
+      loom_signed_enum_set_t set = loom_attr_as_signed_enum_set(*attr);
+      for (iree_host_size_t value = 0; value < 256; ++value) {
+        bool positive =
+            loom_signed_enum_set_contains_positive(set, (uint8_t)value);
+        bool negative =
+            loom_signed_enum_set_contains_negative(set, (uint8_t)value);
+        if (positive && negative) return false;
+        if ((positive || negative) &&
+            !loom_attr_descriptor_has_enum_case(descriptor, (uint8_t)value)) {
+          return false;
+        }
+      }
+      return true;
+    }
     case LOOM_ATTR_STRING:
       return attr->string_id < ctx->module->strings.count;
     case LOOM_ATTR_I64_ARRAY:
@@ -160,13 +210,34 @@ static bool loom_print_pipeline_attr_value_is_printable(
              loom_print_pipeline_is_printable_name(
                  ctx->module->strings.entries[name_id], /*allow_dot=*/false);
     }
+    case LOOM_ATTR_SYMBOL_ARRAY:
+    case LOOM_ATTR_SYMBOL_SET: {
+      if (!descriptor || descriptor->attr_kind != attr->kind ||
+          (attr->count > 0 && !attr->symbol_refs)) {
+        return false;
+      }
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        loom_symbol_ref_t ref = attr->symbol_refs[i];
+        if (ref.module_id != 0 || ref.symbol_id >= ctx->module->symbols.count) {
+          return false;
+        }
+        loom_string_id_t name_id =
+            ctx->module->symbols.entries[ref.symbol_id].name_id;
+        if (name_id >= ctx->module->strings.count ||
+            !loom_print_pipeline_is_printable_name(
+                ctx->module->strings.entries[name_id], /*allow_dot=*/false)) {
+          return false;
+        }
+      }
+      return true;
+    }
     case LOOM_ATTR_TYPE:
       return attr->type_id < ctx->module->types.count;
     case LOOM_ATTR_ENCODING:
       return attr->encoding_id > 0 &&
              attr->encoding_id <= ctx->module->encodings.count;
     case LOOM_ATTR_DICT: {
-      if (nesting_depth >= LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
+      if (nesting_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
         return false;
       }
       if (attr->count > 0 && !attr->dict_entries) {
@@ -179,14 +250,70 @@ static bool loom_print_pipeline_attr_value_is_printable(
                 ctx->module->strings.entries[entry->name_id],
                 /*allow_dot=*/false) ||
             !loom_print_pipeline_attr_value_is_printable(
-                ctx, &entry->value, (uint8_t)(nesting_depth + 1))) {
+                ctx, &entry->value, /*descriptor=*/NULL,
+                (uint8_t)(nesting_depth + 1))) {
+          return false;
+        }
+      }
+      return true;
+    }
+    case LOOM_ATTR_PARAMETERIZED: {
+      if (nesting_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          !ctx->module->context) {
+        return false;
+      }
+      const loom_parameterized_attr_descriptor_t* family_descriptor =
+          loom_context_resolve_parameterized_attr(
+              ctx->module->context, loom_attr_as_parameterized_kind(*attr));
+      if (!family_descriptor ||
+          (descriptor && descriptor->attr_kind != LOOM_ATTR_PARAMETERIZED) ||
+          (descriptor &&
+           descriptor->reference.parameterized_attr_kind !=
+               LOOM_PARAMETERIZED_ATTR_KIND_ANY &&
+           descriptor->reference.parameterized_attr_kind !=
+               family_descriptor->kind) ||
+          attr->count != family_descriptor->parameter_count ||
+          (attr->count > 0 && !attr->parameterized_slots)) {
+        return false;
+      }
+      for (uint8_t i = 0; i < family_descriptor->parameter_count; ++i) {
+        const loom_attr_descriptor_t* parameter_descriptor =
+            &family_descriptor->parameter_descriptors[i];
+        const loom_attribute_t* parameter = &attr->parameterized_slots[i];
+        if (loom_attr_is_absent(*parameter)) {
+          if (!iree_any_bit_set(parameter_descriptor->flags,
+                                LOOM_ATTR_OPTIONAL)) {
+            return false;
+          }
+          continue;
+        }
+        if (!loom_print_pipeline_attr_value_is_printable(
+                ctx, parameter, parameter_descriptor,
+                (uint8_t)(nesting_depth + 1))) {
+          return false;
+        }
+      }
+      return true;
+    }
+    case LOOM_ATTR_PARAMETERIZED_ARRAY: {
+      if (!descriptor ||
+          descriptor->attr_kind != LOOM_ATTR_PARAMETERIZED_ARRAY ||
+          nesting_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          (attr->count > 0 && !attr->parameterized_array)) {
+        return false;
+      }
+      loom_attr_descriptor_t element_descriptor = *descriptor;
+      element_descriptor.attr_kind = LOOM_ATTR_PARAMETERIZED;
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        if (!loom_print_pipeline_attr_value_is_printable(
+                ctx, &attr->parameterized_array[i], &element_descriptor,
+                (uint8_t)(nesting_depth + 1))) {
           return false;
         }
       }
       return true;
     }
     case LOOM_ATTR_ABSENT:
-    case LOOM_ATTR_ENUM:
     case LOOM_ATTR_PREDICATE_LIST:
     case LOOM_ATTR_ANY:
     case LOOM_ATTR_COUNT_:
@@ -209,7 +336,7 @@ static bool loom_print_pipeline_dict_attr(const loom_print_context_t* ctx,
   }
   if (!descriptor || descriptor->attr_kind != LOOM_ATTR_DICT ||
       attr->kind != LOOM_ATTR_DICT ||
-      !loom_print_pipeline_attr_value_is_printable(ctx, attr,
+      !loom_print_pipeline_attr_value_is_printable(ctx, attr, descriptor,
                                                    /*nesting_depth=*/0)) {
     return false;
   }
@@ -299,6 +426,14 @@ static bool loom_print_pipeline_statement_is_friendly(
                                                   body_descriptor);
   }
 
+  vtable = loom_print_pipeline_op_vtable(ctx, op, IREE_SV("pass.if_changed"));
+  if (vtable) {
+    const loom_region_descriptor_t* body_descriptor =
+        loom_print_pipeline_body_region_descriptor(vtable);
+    return body_descriptor && loom_print_pipeline_region_is_friendly(
+                                  ctx, loom_op_regions(op)[0], body_descriptor);
+  }
+
   vtable = loom_print_pipeline_op_vtable(ctx, op, IREE_SV("pass.call"));
   if (vtable) {
     return loom_print_pipeline_symbol_attr(ctx, op, vtable, IREE_SV("callee"));
@@ -364,8 +499,7 @@ static iree_status_t loom_print_pipeline_attr_parens(
     IREE_RETURN_IF_ERROR(loom_output_stream_write(
         ctx->stream, ctx->module->strings.entries[entry->name_id]));
     IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, " = "));
-    IREE_RETURN_IF_ERROR(
-        loom_print_attr(ctx->stream, &entry->value, ctx->module, NULL));
+    IREE_RETURN_IF_ERROR(loom_print_attr(ctx, &entry->value, NULL));
   }
   return loom_output_stream_write_char(ctx->stream, ')');
 }
@@ -381,7 +515,7 @@ static iree_status_t loom_print_pipeline_string_attr_value(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "missing pass pipeline string attribute");
   }
-  return loom_print_attr(ctx->stream, attr, ctx->module, NULL);
+  return loom_print_attr(ctx, attr, NULL);
 }
 
 static iree_status_t loom_print_pipeline_symbol_attr_value(
@@ -395,7 +529,7 @@ static iree_status_t loom_print_pipeline_symbol_attr_value(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "missing pass pipeline symbol attribute");
   }
-  return loom_print_attr(ctx->stream, attr, ctx->module, NULL);
+  return loom_print_attr(ctx, attr, NULL);
 }
 
 static iree_status_t loom_print_pipeline_nested_region(
@@ -467,8 +601,7 @@ static iree_status_t loom_print_pipeline_statement(loom_print_context_t* ctx,
       if (count_attr) {
         IREE_RETURN_IF_ERROR(
             loom_output_stream_write_cstring(ctx->stream, "count = "));
-        IREE_RETURN_IF_ERROR(
-            loom_print_attr(ctx->stream, count_attr, ctx->module, NULL));
+        IREE_RETURN_IF_ERROR(loom_print_attr(ctx, count_attr, NULL));
         wrote_attr = true;
       }
       if (max_iterations_attr) {
@@ -478,12 +611,21 @@ static iree_status_t loom_print_pipeline_statement(loom_print_context_t* ctx,
         }
         IREE_RETURN_IF_ERROR(
             loom_output_stream_write_cstring(ctx->stream, "max_iterations = "));
-        IREE_RETURN_IF_ERROR(loom_print_attr(ctx->stream, max_iterations_attr,
-                                             ctx->module, NULL));
+        IREE_RETURN_IF_ERROR(loom_print_attr(ctx, max_iterations_attr, NULL));
       }
       IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, ')'));
     }
     IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, ' '));
+    return loom_print_pipeline_nested_region(ctx, loom_op_regions(op)[0],
+                                             body_descriptor);
+  }
+
+  vtable = loom_print_pipeline_op_vtable(ctx, op, IREE_SV("pass.if_changed"));
+  if (vtable) {
+    const loom_region_descriptor_t* body_descriptor =
+        loom_print_pipeline_body_region_descriptor(vtable);
+    IREE_RETURN_IF_ERROR(
+        loom_output_stream_write_cstring(ctx->stream, "if changed "));
     return loom_print_pipeline_nested_region(ctx, loom_op_regions(op)[0],
                                              body_descriptor);
   }
@@ -525,6 +667,9 @@ static iree_status_t loom_print_pipeline_nested_region(
     if (op == block->last_op &&
         loom_print_pipeline_is_elidable_terminator(region_descriptor, op)) {
       continue;
+    }
+    if (iree_any_bit_set(op->flags, LOOM_OP_FLAG_LEADING_BLANK_LINE)) {
+      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '\n'));
     }
     IREE_RETURN_IF_ERROR(loom_print_op_comments(ctx, op));
     IREE_RETURN_IF_ERROR(loom_print_indent(ctx));

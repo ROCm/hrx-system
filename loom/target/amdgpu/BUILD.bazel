@@ -1,0 +1,26 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# bazel-to-cmake: skip
+
+load(
+    "//loom/build_tools/amdgpu:target_config.bzl",
+    "LOOM_AMDGPU_SUPPORTED_TARGETS",
+)
+load(
+    "//loom/build_tools/bazel:defs.bzl",
+    "loom_amdgpu_target_profile",
+)
+
+package(default_visibility = ["//visibility:public"])
+
+[
+    loom_amdgpu_target_profile(
+        name = target,
+        target = target,
+    )
+    for target in LOOM_AMDGPU_SUPPORTED_TARGETS
+]

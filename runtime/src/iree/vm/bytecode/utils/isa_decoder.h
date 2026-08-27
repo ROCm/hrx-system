@@ -40,7 +40,7 @@ static inline uint8_t iree_vm_isa_decode_u8(
 static inline uint16_t iree_vm_isa_decode_u16(
     const uint8_t* IREE_RESTRICT data,
     iree_vm_source_offset_t* IREE_RESTRICT pc) {
-  const uint16_t v = iree_unaligned_load_le((const uint16_t*)&data[*pc]);
+  const uint16_t v = iree_unaligned_load_le_u16(&data[*pc]);
   *pc += 2;
   return v;
 }
@@ -48,7 +48,7 @@ static inline uint16_t iree_vm_isa_decode_u16(
 static inline uint32_t iree_vm_isa_decode_u32(
     const uint8_t* IREE_RESTRICT data,
     iree_vm_source_offset_t* IREE_RESTRICT pc) {
-  const uint32_t v = iree_unaligned_load_le((const uint32_t*)&data[*pc]);
+  const uint32_t v = iree_unaligned_load_le_u32(&data[*pc]);
   *pc += 4;
   return v;
 }
@@ -56,7 +56,7 @@ static inline uint32_t iree_vm_isa_decode_u32(
 static inline uint64_t iree_vm_isa_decode_u64(
     const uint8_t* IREE_RESTRICT data,
     iree_vm_source_offset_t* IREE_RESTRICT pc) {
-  const uint64_t v = iree_unaligned_load_le((const uint64_t*)&data[*pc]);
+  const uint64_t v = iree_unaligned_load_le_u64(&data[*pc]);
   *pc += 8;
   return v;
 }
@@ -64,7 +64,7 @@ static inline uint64_t iree_vm_isa_decode_u64(
 static inline float iree_vm_isa_decode_f32(
     const uint8_t* IREE_RESTRICT data,
     iree_vm_source_offset_t* IREE_RESTRICT pc) {
-  const float v = iree_unaligned_load_le((const float*)&data[*pc]);
+  const float v = iree_unaligned_load_le_f32(&data[*pc]);
   *pc += 4;
   return v;
 }
@@ -72,7 +72,7 @@ static inline float iree_vm_isa_decode_f32(
 static inline double iree_vm_isa_decode_f64(
     const uint8_t* IREE_RESTRICT data,
     iree_vm_source_offset_t* IREE_RESTRICT pc) {
-  const double v = iree_unaligned_load_le((const double*)&data[*pc]);
+  const double v = iree_unaligned_load_le_f64(&data[*pc]);
   *pc += 8;
   return v;
 }

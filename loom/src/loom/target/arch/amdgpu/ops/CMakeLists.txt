@@ -16,6 +16,7 @@ loom_generated_cc_library(
   GENERATOR
     loom::py::loom::gen::ops::c_tables_amdgpu_generator
   SRCS
+    "fact_projection.c"
     "registry.c"
     "target.c"
   GENERATED_SRC_FLAGS
@@ -37,8 +38,11 @@ loom_generated_cc_library(
     loom::ops::op_defs
     loom::ops::target
     loom::target::arch::amdgpu::error_defs
+    loom::target::arch::amdgpu::facts
+    loom::target::arch::amdgpu::profile
     loom::target::arch::amdgpu::records::target_records
     loom::target::arch::amdgpu::target_info
+    loom::target::resolved_target
     loom::target::types
 )
 endif()

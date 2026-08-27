@@ -14,6 +14,7 @@ set(IREE_DEPENDENCY_IDS
   "google_benchmark"
   "googletest"
   "libbacktrace"
+  "zstd"
   "catch2"
   "spirv_headers"
   "spirv_tools"
@@ -65,6 +66,20 @@ set(IREE_DEP_LIBBACKTRACE_SHA256 "858b1225351052234f7e71f0f36622fc9ad33aac947db7
 set(IREE_DEP_LIBBACKTRACE_STRIP_PREFIX "libbacktrace-793921876c981ce49759114d7bb89bb89b2d3a2d")
 set(IREE_DEP_LIBBACKTRACE_BUILD_FILE "")
 
+set(IREE_DEP_ZSTD_KIND "bazel_dep")
+set(IREE_DEP_ZSTD_OWNER "shared")
+set(IREE_DEP_ZSTD_MODULE_NAME "zstd")
+set(IREE_DEP_ZSTD_REPO_NAME "zstd")
+set(IREE_DEP_ZSTD_VERSION "1.5.7.bcr.1")
+set(IREE_DEP_ZSTD_DEV_DEPENDENCY "FALSE")
+set(IREE_DEP_ZSTD_SOURCE_URL "https://bcr.bazel.build/modules/zstd/1.5.7.bcr.1/source.json")
+set(IREE_DEP_ZSTD_URLS
+  "https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz"
+)
+set(IREE_DEP_ZSTD_SHA256 "eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3")
+set(IREE_DEP_ZSTD_STRIP_PREFIX "zstd-1.5.7")
+set(IREE_DEP_ZSTD_BUILD_FILE "")
+
 set(IREE_DEP_CATCH2_KIND "bazel_dep")
 set(IREE_DEP_CATCH2_OWNER "shared")
 set(IREE_DEP_CATCH2_MODULE_NAME "catch2")
@@ -87,10 +102,10 @@ set(IREE_DEP_SPIRV_HEADERS_VERSION "")
 set(IREE_DEP_SPIRV_HEADERS_DEV_DEPENDENCY "FALSE")
 set(IREE_DEP_SPIRV_HEADERS_SOURCE_URL "")
 set(IREE_DEP_SPIRV_HEADERS_URLS
-  "https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/vulkan-sdk-1.4.341.0.tar.gz"
+  "https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/vulkan-sdk-1.4.357.0.tar.gz"
 )
-set(IREE_DEP_SPIRV_HEADERS_SHA256 "cab0a654c4917e16367483296b44cdb1d614e3120c721beafcd37e3a8580486c")
-set(IREE_DEP_SPIRV_HEADERS_STRIP_PREFIX "SPIRV-Headers-vulkan-sdk-1.4.341.0")
+set(IREE_DEP_SPIRV_HEADERS_SHA256 "4d703067a7e06331ccb37bdfed3f9b7879cc61969a2689ae95c95db34a47ff07")
+set(IREE_DEP_SPIRV_HEADERS_STRIP_PREFIX "SPIRV-Headers-vulkan-sdk-1.4.357.0")
 set(IREE_DEP_SPIRV_HEADERS_BUILD_FILE "//build_tools/third_party/spirv_tools:spirv_headers.BUILD.bazel")
 
 set(IREE_DEP_SPIRV_TOOLS_KIND "http_archive")
@@ -101,10 +116,10 @@ set(IREE_DEP_SPIRV_TOOLS_VERSION "")
 set(IREE_DEP_SPIRV_TOOLS_DEV_DEPENDENCY "FALSE")
 set(IREE_DEP_SPIRV_TOOLS_SOURCE_URL "")
 set(IREE_DEP_SPIRV_TOOLS_URLS
-  "https://github.com/KhronosGroup/SPIRV-Tools/archive/refs/tags/v2026.1.tar.gz"
+  "https://github.com/KhronosGroup/SPIRV-Tools/archive/refs/tags/vulkan-sdk-1.4.357.0.tar.gz"
 )
-set(IREE_DEP_SPIRV_TOOLS_SHA256 "35dc16cf2dc64be5b6bbbe86d210e6f4a82b070cffd751605a3365cd8bce2d7e")
-set(IREE_DEP_SPIRV_TOOLS_STRIP_PREFIX "SPIRV-Tools-2026.1")
+set(IREE_DEP_SPIRV_TOOLS_SHA256 "d31e7109b6ef3559067e53e520870eafed7c9534d00db9728814b6df03fa4a5e")
+set(IREE_DEP_SPIRV_TOOLS_STRIP_PREFIX "SPIRV-Tools-vulkan-sdk-1.4.357.0")
 set(IREE_DEP_SPIRV_TOOLS_BUILD_FILE "//build_tools/third_party/spirv_tools:spirv_tools.BUILD.bazel")
 
 set(IREE_DEP_VULKAN_HEADERS_KIND "http_archive")
@@ -115,10 +130,10 @@ set(IREE_DEP_VULKAN_HEADERS_VERSION "")
 set(IREE_DEP_VULKAN_HEADERS_DEV_DEPENDENCY "FALSE")
 set(IREE_DEP_VULKAN_HEADERS_SOURCE_URL "")
 set(IREE_DEP_VULKAN_HEADERS_URLS
-  "https://github.com/KhronosGroup/Vulkan-Headers/archive/df60f0316899460eeaaefa06d2dd7e4e300c1604.tar.gz"
+  "https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/vulkan-sdk-1.4.357.0.tar.gz"
 )
-set(IREE_DEP_VULKAN_HEADERS_SHA256 "70de3ec1eec289552052dfb886a49a4578b65d84fd536da3254731c8165cb3e6")
-set(IREE_DEP_VULKAN_HEADERS_STRIP_PREFIX "Vulkan-Headers-df60f0316899460eeaaefa06d2dd7e4e300c1604")
+set(IREE_DEP_VULKAN_HEADERS_SHA256 "e87dce08116151f6b6d7de6b6faf41498e87e6cf848ff16fa3bd5402190ad4a3")
+set(IREE_DEP_VULKAN_HEADERS_STRIP_PREFIX "Vulkan-Headers-vulkan-sdk-1.4.357.0")
 set(IREE_DEP_VULKAN_HEADERS_BUILD_FILE "//build_tools/third_party/vulkan_headers:vulkan_headers.BUILD.bazel")
 
 set(IREE_DEP_FLATCC_KIND "http_archive")
@@ -143,10 +158,10 @@ set(IREE_DEP_HSA_RUNTIME_HEADERS_VERSION "")
 set(IREE_DEP_HSA_RUNTIME_HEADERS_DEV_DEPENDENCY "FALSE")
 set(IREE_DEP_HSA_RUNTIME_HEADERS_SOURCE_URL "")
 set(IREE_DEP_HSA_RUNTIME_HEADERS_URLS
-  "https://github.com/iree-org/hsa-runtime-headers/archive/cc2b5f429de4d1cb2be96ed10e6f45246e408d0e.tar.gz"
+  "https://github.com/iree-org/hsa-runtime-headers/archive/4285513114a70f7cf4830c89279c8cfa57b901bb.tar.gz"
 )
-set(IREE_DEP_HSA_RUNTIME_HEADERS_SHA256 "66bd23285a3886c9b9983ac6de5efe4a828a2a293fd898d7fd75ab6c500741fb")
-set(IREE_DEP_HSA_RUNTIME_HEADERS_STRIP_PREFIX "hsa-runtime-headers-cc2b5f429de4d1cb2be96ed10e6f45246e408d0e")
+set(IREE_DEP_HSA_RUNTIME_HEADERS_SHA256 "a906b35e77b9cee074995d144cf7718a0069eba08ba7bc741ee7576950fde923")
+set(IREE_DEP_HSA_RUNTIME_HEADERS_STRIP_PREFIX "hsa-runtime-headers-4285513114a70f7cf4830c89279c8cfa57b901bb")
 set(IREE_DEP_HSA_RUNTIME_HEADERS_BUILD_FILE "//build_tools/third_party/rocm:hsa_runtime_headers.BUILD.bazel")
 
 set(IREE_DEP_HIP_API_HEADERS_KIND "rocm_repository")

@@ -13,101 +13,50 @@
 #include "iree/hal/drivers/vulkan/spirv.h"
 
 //===----------------------------------------------------------------------===//
-// Executable Format
-//===----------------------------------------------------------------------===//
-
-enum {
-  IREE_HAL_VULKAN_SPIRV_MAGIC = 0x07230203u,
-};
-
-iree_status_t iree_hal_vulkan_executable_infer_format(
-    iree_const_byte_span_t executable_data,
-    iree_host_size_t executable_format_capacity, char* executable_format,
-    iree_host_size_t* out_inferred_size) {
-  IREE_ASSERT_ARGUMENT(executable_format);
-  IREE_ASSERT_ARGUMENT(out_inferred_size);
-  *out_inferred_size = 0;
-
-  if (executable_data.data_length < sizeof(uint32_t)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Vulkan executable data is too small for SPIR-V");
-  }
-  uint32_t magic = 0;
-  memcpy(&magic, executable_data.data, sizeof(magic));
-  if (magic != IREE_HAL_VULKAN_SPIRV_MAGIC) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Vulkan executable data is not SPIR-V");
-  }
-
-  static const iree_string_view_t format =
-      iree_string_view_literal("vulkan-spirv-bda");
-  if (format.size >= executable_format_capacity) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "executable format buffer too small");
-  }
-  memcpy(executable_format, format.data, format.size);
-  executable_format[format.size] = 0;
-
-  *out_inferred_size = executable_data.data_length;
-  return iree_ok_status();
-}
-
-bool iree_hal_vulkan_executable_format_supported(
-    iree_hal_vulkan_features_t enabled_features,
-    iree_string_view_t executable_format) {
-  return iree_string_view_equal(executable_format,
-                                IREE_SV("vulkan-spirv-bda")) &&
-         iree_all_bits_set(
-             enabled_features,
-             IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES);
-}
-
-//===----------------------------------------------------------------------===//
 // Vulkan Object Creation
 //===----------------------------------------------------------------------===//
 
 static iree_status_t iree_hal_vulkan_create_specialization_info(
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_load_params_t* load_params,
     iree_allocator_t host_allocator, VkSpecializationInfo* out_info,
     VkSpecializationMapEntry** out_map_entries) {
   memset(out_info, 0, sizeof(*out_info));
   *out_map_entries = NULL;
-  if (executable_params->constant_count == 0) return iree_ok_status();
-  if (!executable_params->constants) {
+  if (load_params->constant_count == 0) return iree_ok_status();
+  if (!load_params->constants) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "executable declares %" PRIhsz
                             " specialization constants but no value storage",
-                            executable_params->constant_count);
+                            load_params->constant_count);
   }
-  if (executable_params->constant_count > UINT32_MAX) {
+  if (load_params->constant_count > UINT32_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "executable declares %" PRIhsz
                             " specialization constants, exceeding Vulkan "
                             "limit %u",
-                            executable_params->constant_count, UINT32_MAX);
+                            load_params->constant_count, UINT32_MAX);
   }
-  if (executable_params->constant_count >
-      IREE_HOST_SIZE_MAX / sizeof(uint32_t)) {
+  if (load_params->constant_count > IREE_HOST_SIZE_MAX / sizeof(uint32_t)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "executable specialization constant data size "
                             "overflows");
   }
   const iree_host_size_t max_constant_offset_count =
       (iree_host_size_t)UINT32_MAX / sizeof(uint32_t) + 1;
-  if (executable_params->constant_count > max_constant_offset_count) {
+  if (load_params->constant_count > max_constant_offset_count) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "executable declares %" PRIhsz
                             " specialization constants, exceeding Vulkan "
                             "constant offset limit %" PRIhsz,
-                            executable_params->constant_count,
+                            load_params->constant_count,
                             max_constant_offset_count);
   }
 
   VkSpecializationMapEntry* map_entries = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      host_allocator, executable_params->constant_count, sizeof(map_entries[0]),
+      host_allocator, load_params->constant_count, sizeof(map_entries[0]),
       (void**)&map_entries));
-  for (iree_host_size_t i = 0; i < executable_params->constant_count; ++i) {
+  for (iree_host_size_t i = 0; i < load_params->constant_count; ++i) {
     map_entries[i] = (VkSpecializationMapEntry){
         .constantID = (uint32_t)i,
         .offset = (uint32_t)(i * sizeof(uint32_t)),
@@ -116,10 +65,10 @@ static iree_status_t iree_hal_vulkan_create_specialization_info(
   }
 
   *out_info = (VkSpecializationInfo){
-      .mapEntryCount = (uint32_t)executable_params->constant_count,
+      .mapEntryCount = (uint32_t)load_params->constant_count,
       .pMapEntries = map_entries,
-      .dataSize = executable_params->constant_count * sizeof(uint32_t),
-      .pData = executable_params->constants,
+      .dataSize = load_params->constant_count * sizeof(uint32_t),
+      .pData = load_params->constants,
   };
   *out_map_entries = map_entries;
   return iree_ok_status();
@@ -281,12 +230,12 @@ static iree_status_t iree_hal_vulkan_allocate_executable(
 static iree_status_t iree_hal_vulkan_create_bda_executable(
     const iree_hal_vulkan_device_syms_t* syms, VkDevice logical_device,
     VkPipelineCache pipeline_cache,
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_load_params_t* load_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
   *out_executable = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  if (executable_params->executable_data.data_length % sizeof(uint32_t) != 0) {
+  if (load_params->executable_data.data_length % sizeof(uint32_t) != 0) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                              "Vulkan SPIR-V executable byte length must be a "
@@ -294,18 +243,18 @@ static iree_status_t iree_hal_vulkan_create_bda_executable(
   }
 
   const iree_host_size_t spirv_word_count =
-      executable_params->executable_data.data_length / sizeof(uint32_t);
+      load_params->executable_data.data_length / sizeof(uint32_t);
   const uint32_t* spirv_words =
-      (const uint32_t*)executable_params->executable_data.data;
+      (const uint32_t*)load_params->executable_data.data;
   uint32_t* aligned_spirv_words = NULL;
-  if (executable_params->executable_data.data_length != 0 &&
+  if (load_params->executable_data.data_length != 0 &&
       !iree_host_ptr_has_alignment(spirv_words, sizeof(uint32_t))) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_allocator_malloc(
-                host_allocator, executable_params->executable_data.data_length,
-                (void**)&aligned_spirv_words));
-    memcpy(aligned_spirv_words, executable_params->executable_data.data,
-           executable_params->executable_data.data_length);
+        z0, iree_allocator_malloc(host_allocator,
+                                  load_params->executable_data.data_length,
+                                  (void**)&aligned_spirv_words));
+    memcpy(aligned_spirv_words, load_params->executable_data.data,
+           load_params->executable_data.data_length);
     spirv_words = aligned_spirv_words;
   }
 
@@ -348,9 +297,8 @@ static iree_status_t iree_hal_vulkan_create_bda_executable(
 
   iree_hal_vulkan_spirv_bda_verification_flags_t verification_flags =
       IREE_HAL_VULKAN_SPIRV_BDA_VERIFICATION_FLAG_REQUIRE_PUSH_CONSTANT_ROOT;
-  if (iree_all_bits_set(
-          executable_params->caching_mode,
-          IREE_HAL_EXECUTABLE_CACHING_MODE_DISABLE_VERIFICATION)) {
+  if (iree_all_bits_set(load_params->flags,
+                        IREE_HAL_EXECUTABLE_LOAD_FLAG_DISABLE_VERIFICATION)) {
     verification_flags = IREE_HAL_VULKAN_SPIRV_BDA_VERIFICATION_FLAG_NONE;
   }
   if (iree_status_is_ok(status)) {
@@ -369,7 +317,7 @@ static iree_status_t iree_hal_vulkan_create_bda_executable(
   if (iree_status_is_ok(status)) {
     VkShaderModuleCreateInfo create_info = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .codeSize = executable_params->executable_data.data_length,
+        .codeSize = load_params->executable_data.data_length,
         .pCode = spirv_words,
     };
     IREE_LEAK_CHECK_DISABLE_PUSH();
@@ -410,7 +358,7 @@ static iree_status_t iree_hal_vulkan_create_bda_executable(
   VkSpecializationMapEntry* specialization_map_entries = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_hal_vulkan_create_specialization_info(
-        executable_params, host_allocator, &specialization_info,
+        load_params, host_allocator, &specialization_info,
         &specialization_map_entries);
   }
 
@@ -447,9 +395,8 @@ static iree_status_t iree_hal_vulkan_create_bda_executable(
         .stage = stage_create_info,
         .layout = pipeline->layout,
     };
-    if (!iree_all_bits_set(
-            executable_params->caching_mode,
-            IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_OPTIMIZATION)) {
+    if (!iree_all_bits_set(load_params->flags,
+                           IREE_HAL_EXECUTABLE_LOAD_FLAG_ALLOW_OPTIMIZATION)) {
       create_info.flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
     }
     IREE_LEAK_CHECK_DISABLE_PUSH();
@@ -487,31 +434,17 @@ static iree_status_t iree_hal_vulkan_create_bda_executable(
 
 iree_status_t iree_hal_vulkan_executable_create(
     const iree_hal_vulkan_device_syms_t* syms, VkDevice logical_device,
-    const iree_hal_vulkan_physical_device_snapshot_t* physical_device,
-    iree_hal_vulkan_features_t enabled_features,
-    iree_hal_vulkan_device_extensions_t enabled_extensions,
     VkPipelineCache pipeline_cache,
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_load_params_t* load_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
   IREE_ASSERT_ARGUMENT(syms);
   IREE_ASSERT_ARGUMENT(logical_device);
-  IREE_ASSERT_ARGUMENT(physical_device);
-  IREE_ASSERT_ARGUMENT(executable_params);
+  IREE_ASSERT_ARGUMENT(load_params);
   IREE_ASSERT_ARGUMENT(out_executable);
-  (void)physical_device;
-  (void)enabled_extensions;
   *out_executable = NULL;
-
-  if (!iree_hal_vulkan_executable_format_supported(
-          enabled_features, executable_params->executable_format)) {
-    return iree_make_status(IREE_STATUS_NOT_FOUND,
-                            "unsupported Vulkan executable format '%.*s'",
-                            (int)executable_params->executable_format.size,
-                            executable_params->executable_format.data);
-  }
-  return iree_hal_vulkan_create_bda_executable(
-      syms, logical_device, pipeline_cache, executable_params, host_allocator,
-      out_executable);
+  return iree_hal_vulkan_create_bda_executable(syms, logical_device,
+                                               pipeline_cache, load_params,
+                                               host_allocator, out_executable);
 }
 
 static void iree_hal_vulkan_executable_destroy(

@@ -156,6 +156,7 @@ void InitializeRequirementTables(RequirementTables* tables) {
   tables->descriptors[0].operand_start = 0;
   tables->descriptors[0].operand_count = 3;
   tables->descriptors[0].result_count = 1;
+  tables->descriptors[0].minimum_packet_operand_count = 2;
   tables->descriptors[0].schedule_class_id = 0;
   tables->descriptors[0].flags = LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE;
 

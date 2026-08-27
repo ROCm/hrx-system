@@ -17,13 +17,18 @@ extern "C" {
 // Populates a builtin dispatch packet and kernargs that initializes queue-local
 // TSAN state before user work can consume it.
 //
+// |max_workgroup_count| bounds the resident clear grid. The kernel covers
+// larger shadow allocations with a grid-stride loop.
+//
 // |dispatch_packet| and |kernarg_ptr| must point to reserved queue storage.
 // The caller owns packet header commit and barrier placement.
+// |max_workgroup_count| must be non-zero.
 void iree_hal_amdgpu_device_tsan_emplace_queue_initialize(
     const iree_hal_amdgpu_device_kernel_args_t* IREE_AMDGPU_RESTRICT
         queue_initialize_kernel_args,
     const iree_hal_amdgpu_tsan_queue_initialize_args_t* IREE_AMDGPU_RESTRICT
         queue_initialize_args,
+    uint32_t max_workgroup_count,
     iree_hsa_kernel_dispatch_packet_t* IREE_AMDGPU_RESTRICT dispatch_packet,
     void* IREE_AMDGPU_RESTRICT kernarg_ptr);
 

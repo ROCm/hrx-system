@@ -6,11 +6,9 @@
 
 """Runtime HAL CTS Bazel macros.
 
-The CTS composition boundary is intentionally narrower than the old monorepo
-helper: it links runtime CTS binaries against a driver-provided backend library
-and optional prebuilt executable testdata libraries. Producing those testdata
-libraries from compiler inputs belongs to a separate rule because the runtime
-repository cannot assume an in-tree compiler.
+CTS binaries link a driver-provided backend library and optional prebuilt
+executable testdata registration libraries. Device artifact production is
+backend-owned and remains outside this runtime composition rule.
 """
 
 load("//build_tools/bazel:cc_attrs.bzl", "cc_attrs")
@@ -102,8 +100,6 @@ def _hal_cts_test(
 
 def iree_runtime_hal_cts_test_suite(
         backends,
-        executable_formats = None,
-        testdata = None,
         testdata_libs = None,
         name = "",
         args = None,
@@ -119,11 +115,6 @@ def iree_runtime_hal_cts_test_suite(
 
     Args:
       backends: Driver-specific library that registers CTS backends.
-      executable_formats: Compiler-driven executable testdata configuration
-        from the old monorepo rule. This runtime macro rejects it so callsites
-        cannot accidentally depend on an in-tree compiler.
-      testdata: Compiler input sources paired with `executable_formats`.
-        Rejected for the same reason as `executable_formats`.
       testdata_libs: Prebuilt executable testdata registration libraries.
       name: Optional prefix for generated test targets.
       args: Command-line arguments passed to each generated test.
@@ -134,19 +125,6 @@ def iree_runtime_hal_cts_test_suite(
         attributes such as `data`, `env`, `size`, and `timeout` apply only to
         the generated test wrapper.
     """
-    if executable_formats:
-        fail(
-            "iree_runtime_hal_cts_test_suite cannot compile CTS executable " +
-            "testdata from executable_formats; generate explicit testdata " +
-            "libraries and pass them via testdata_libs",
-        )
-    if testdata != None:
-        fail(
-            "iree_runtime_hal_cts_test_suite does not consume compiler " +
-            "testdata sources; pass prebuilt registration libraries via " +
-            "testdata_libs",
-        )
-
     policy_attrs = dict(kwargs)
     policy_attrs["resource_group"] = resource_group
     policy_attrs["tags"] = tags

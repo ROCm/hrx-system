@@ -11,25 +11,44 @@ and exact-target to code-object mapping. Loom's target-info table owns the
 compiler-supported processors and their descriptor-set assignments. This script
 joins those facts into small Bazel/CMake fragments consumed by Loom config and
 target packages.
+
+Usage:
+    python3 loom/build_tools/amdgpu/target_config.py --check
+    python3 loom/build_tools/amdgpu/target_config.py --in-place
 """
 
 from __future__ import annotations
 
 import argparse
-import difflib
 import importlib.util
 import sys
 from pathlib import Path
+
+_LOOM_PY_ROOT = Path(__file__).resolve().parents[2] / "py"
+if str(_LOOM_PY_ROOT) not in sys.path:
+    sys.path.insert(0, str(_LOOM_PY_ROOT))
+
+from loom.gen.support.generated_file import (
+    GeneratedFileMaintenanceMode,
+    GeneratedFileMaintenanceResult,
+    GeneratedFileSet,
+    maintain_generated_file_set,
+)
 
 TARGET_SOURCE_LOOM_DEFAULTS = "loom_defaults"
 TARGET_SOURCE_IREE_HAL = "iree_hal"
 _AMDGPU_NAMES = None
 
+DESCRIPTION = "AMDGPU target configuration"
+REGENERATE_COMMAND = "python3 loom/build_tools/amdgpu/target_config.py --in-place"
+
 
 def find_repo_root() -> Path:
     current = Path(__file__).resolve()
     while current != current.parent:
-        if (current / "runtime" / "src" / "iree").exists():
+        if (current / "loom" / "py" / "loom").is_dir() and (
+            current / "build_tools" / "amdgpu" / "target_map.py"
+        ).is_file():
             return current
         current = current.parent
     print("error: could not find IREE repository root", file=sys.stderr)
@@ -52,6 +71,17 @@ def configure_name_helpers(repo_root: Path) -> None:
         "loom_amdgpu_names",
         repo_root / "loom/py/loom/target/arch/amdgpu/names.py",
     )
+
+
+def configure_python_paths(repo_root: Path) -> None:
+    for path in (
+        repo_root,
+        repo_root / "loom/py",
+        repo_root / "build_tools/amdgpu",
+    ):
+        path_string = str(path)
+        if path_string not in sys.path:
+            sys.path.insert(0, path_string)
 
 
 def name_helpers():
@@ -108,16 +138,28 @@ class TargetConfig:
         self._descriptor_set_infos = {
             info.key: info for info in target_info.AMDGPU_DESCRIPTOR_SET_INFOS
         }
-        self._target_records = target_info.sorted_target_record_infos()
+        self._targets = target_info.sorted_target_infos()
         self._validate()
         self._supported_processor_infos = self._compute_supported_processor_infos()
         self._supported_exact_processor_infos = [
             info for info in self._supported_processor_infos if is_exact_processor(info)
         ]
+        code_object_order = {
+            processor: ordinal
+            for ordinal, processor in enumerate(
+                self._root_target_map.code_object_targets()
+            )
+        }
         self._supported_code_object_processor_infos = [
             info
-            for info in self._supported_processor_infos
-            if is_generic_processor(info)
+            for info in sorted(
+                (
+                    info
+                    for info in self._supported_processor_infos
+                    if is_generic_processor(info)
+                ),
+                key=lambda info: code_object_order[info.processor],
+            )
         ]
 
     def _validate(self) -> None:
@@ -126,8 +168,14 @@ class TargetConfig:
         descriptor_backed_keys = self._validate_processor_infos(
             exact_targets, code_object_targets
         )
-        self._validate_target_records(exact_targets, code_object_targets)
+        self._validate_generic_descriptor_membership()
+        descriptor_backed_keys.update(self._validate_targets())
         self._validate_descriptor_set_defaults(descriptor_backed_keys)
+
+    def _target_descriptor_set_key(self, target) -> str:
+        return self._target_info.amdgpu_target_descriptor_set_key(
+            target, self._processor_infos[target.processor]
+        )
 
     def _validate_processor_infos(
         self, exact_targets: set[str], code_object_targets: set[str]
@@ -184,51 +232,105 @@ class TargetConfig:
             )
         return descriptor_backed_keys
 
-    def _validate_target_records(
-        self, exact_targets: set[str], code_object_targets: set[str]
-    ) -> None:
-        seen_processors: set[str] = set()
-        for record in self._target_records:
-            if record.processor in seen_processors:
-                raise ValueError(f"duplicate target record for {record.processor}")
-            seen_processors.add(record.processor)
-            if is_generic_processor(record):
-                if record.processor not in code_object_targets:
-                    raise ValueError(
-                        f"Loom AMDGPU target record {record.processor} is absent "
-                        "from the shared AMDGPU code-object target map"
-                    )
-            elif record.processor not in exact_targets:
-                raise ValueError(
-                    f"Loom AMDGPU target record {record.processor} is absent from "
-                    "the shared AMDGPU exact target map"
+    def _validate_generic_descriptor_membership(self) -> None:
+        for descriptor_set_info in self._descriptor_set_infos.values():
+            if not descriptor_set_info.member_generator_targets:
+                continue
+            generic_processors = [
+                info
+                for info in self._processor_infos.values()
+                if (
+                    is_generic_processor(info)
+                    and processor_descriptor_set_key(info) == descriptor_set_info.key
                 )
-            processor_info = self._processor_infos.get(record.processor)
+            ]
+            if len(generic_processors) != 1:
+                raise ValueError(
+                    f"Loom AMDGPU generic descriptor set "
+                    f"{descriptor_set_info.key} must be assigned to one generic "
+                    "processor"
+                )
+            generic_processor = generic_processors[0]
+            exact_members = [
+                compatibility_info.exact_processor
+                for compatibility_info in (
+                    self._root_target_map.AMDGPU_EXACT_TARGET_INFOS
+                )
+                if (
+                    compatibility_info.code_object_processor
+                    == generic_processor.processor
+                    and compatibility_info.generic_introduction_version
+                    <= generic_processor.elf.generic_version
+                )
+            ]
+            member_generator_targets = tuple(
+                sorted(
+                    {
+                        self._descriptor_set_infos[
+                            processor_descriptor_set_key(
+                                self._processor_infos[exact_processor]
+                            )
+                        ].generator_target
+                        for exact_processor in exact_members
+                    }
+                )
+            )
+            if member_generator_targets != descriptor_set_info.member_generator_targets:
+                raise ValueError(
+                    f"Loom AMDGPU generic descriptor set "
+                    f"{descriptor_set_info.key} members "
+                    f"{descriptor_set_info.member_generator_targets} do not "
+                    f"match {generic_processor.processor} code-object members "
+                    f"{member_generator_targets}"
+                )
+
+    def _validate_targets(self) -> set[str]:
+        seen_targets: set[str] = set()
+        descriptor_set_keys: set[str] = set()
+        for target in self._targets:
+            if target.target in seen_targets:
+                raise ValueError(f"duplicate target row for {target.target}")
+            seen_targets.add(target.target)
+            canonical_processor = self._root_target_map.target_processor(target.target)
+            if canonical_processor is None:
+                raise ValueError(
+                    f"Loom AMDGPU target {target.target} is absent from the "
+                    "shared AMDGPU target map"
+                )
+            if canonical_processor != target.processor:
+                raise ValueError(
+                    f"Loom AMDGPU target {target.target} selects processor "
+                    f"{target.processor}, expected {canonical_processor}"
+                )
+            processor_info = self._processor_infos.get(target.processor)
             if processor_info is None:
                 raise ValueError(
-                    f"Loom AMDGPU target record {record.processor} has no processor row"
+                    f"Loom AMDGPU target {target.target} has no processor row "
+                    f"{target.processor}"
                 )
-            descriptor_set_key = processor_descriptor_set_key(processor_info)
+            descriptor_set_key = self._target_descriptor_set_key(target)
             if not descriptor_set_key:
                 raise ValueError(
-                    f"Loom AMDGPU target record {record.processor} has no "
-                    "descriptor-set key"
+                    f"Loom AMDGPU target {target.target} has no descriptor-set key"
                 )
             if descriptor_set_key not in self._descriptor_set_infos:
                 raise ValueError(
-                    f"Loom AMDGPU target record {record.processor} references "
+                    f"Loom AMDGPU target {target.target} references "
                     f"unknown descriptor set {descriptor_set_key}"
                 )
+            descriptor_set_keys.add(descriptor_set_key)
+        return descriptor_set_keys
 
     def _validate_descriptor_set_defaults(
         self, descriptor_backed_keys: set[str]
     ) -> None:
-        target_record_descriptor_set_keys = {
-            processor_descriptor_set_key(self._processor_infos[record.processor])
-            for record in self._target_records
+        default_target_descriptor_set_keys = {
+            self._target_descriptor_set_key(target)
+            for target in self._targets
+            if target.default_for_descriptor_set
         }
         missing_defaults = sorted(
-            descriptor_backed_keys - target_record_descriptor_set_keys
+            descriptor_backed_keys - default_target_descriptor_set_keys
         )
         if missing_defaults:
             raise ValueError(
@@ -255,6 +357,20 @@ class TargetConfig:
         return [info.processor for info in self._supported_processor_infos]
 
     @property
+    def supported_targets(self) -> list[str]:
+        return [info.target for info in self._targets]
+
+    @property
+    def descriptor_set_capabilities_by_target(self) -> list[tuple[str, str]]:
+        return [
+            (
+                target.target,
+                descriptor_set_capability(self._target_descriptor_set_key(target)),
+            )
+            for target in self._targets
+        ]
+
+    @property
     def supported_exact_processors(self) -> list[str]:
         return [info.processor for info in self._supported_exact_processor_infos]
 
@@ -269,15 +385,42 @@ class TargetConfig:
     @property
     def descriptor_set_keys(self) -> list[str]:
         keys: list[str] = []
-        for record in self._target_records:
-            key = processor_descriptor_set_key(self._processor_infos[record.processor])
+        for target in self._targets:
+            if target.target != target.processor or is_generic_processor(target):
+                continue
+            key = processor_descriptor_set_key(self._processor_infos[target.processor])
+            if key not in keys:
+                keys.append(key)
+        for processor_name in self._root_target_map.code_object_targets():
+            processor_info = self._processor_infos[processor_name]
+            key = processor_descriptor_set_key(processor_info)
+            if key and key not in keys:
+                keys.append(key)
+        for target in self._targets:
+            key = self._target_descriptor_set_key(target)
             if key not in keys:
                 keys.append(key)
         return keys
 
     def exact_processors_for_descriptor_set(self, key: str) -> list[str]:
+        processors = [
+            processor_info.processor
+            for processor_info in self._supported_exact_processor_infos
+            if processor_descriptor_set_key(processor_info) == key
+        ]
+        for target in self._targets:
+            if (
+                is_generic_processor(self._processor_infos[target.processor])
+                or self._target_descriptor_set_key(target) != key
+                or target.processor in processors
+            ):
+                continue
+            processors.append(target.processor)
+        return processors
+
+    def generic_processors_for_descriptor_set(self, key: str) -> list[str]:
         processors: list[str] = []
-        for processor_info in self._supported_exact_processor_infos:
+        for processor_info in self._supported_code_object_processor_infos:
             if processor_descriptor_set_key(processor_info) == key:
                 processors.append(processor_info.processor)
         return processors
@@ -310,7 +453,9 @@ def bzl_list_dict(name: str, values: list[tuple[str, list[str]]]) -> str:
         f"{name} = {{",
     ]
     for key, items in values:
-        if len(items) == 1:
+        if not items:
+            lines.append(f'    "{key}": [],')
+        elif len(items) == 1:
             lines.append(f'    "{key}": ["{items[0]}"],')
         else:
             lines.append(f'    "{key}": [')
@@ -332,6 +477,15 @@ def render_bzl(config: TargetConfig) -> str:
         )
         for key in config.descriptor_set_keys
     ]
+    storage_capabilities: dict[str, list[str]] = {}
+    for key in config.descriptor_set_keys:
+        info = config.descriptor_set_info(key)
+        storage_generator_target = (
+            info.storage_generator_target or info.generator_target
+        )
+        storage_capabilities.setdefault(storage_generator_target, []).append(
+            descriptor_set_capability(key)
+        )
     low_descriptor_header_pairs = [
         (
             descriptor_set_capability(key),
@@ -357,6 +511,13 @@ def render_bzl(config: TargetConfig) -> str:
         (
             descriptor_set_capability(key),
             config.exact_processors_for_descriptor_set(key),
+        )
+        for key in config.descriptor_set_keys
+    ]
+    generic_processor_pairs = [
+        (
+            descriptor_set_capability(key),
+            config.generic_processors_for_descriptor_set(key),
         )
         for key in config.descriptor_set_keys
     ]
@@ -388,6 +549,14 @@ def render_bzl(config: TargetConfig) -> str:
                     config.supported_processors,
                 ),
                 bzl_list(
+                    "LOOM_AMDGPU_SUPPORTED_TARGETS",
+                    config.supported_targets,
+                ),
+                bzl_string_dict(
+                    "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET",
+                    config.descriptor_set_capabilities_by_target,
+                ),
+                bzl_list(
                     "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES",
                     config.descriptor_set_capabilities,
                 ),
@@ -399,9 +568,17 @@ def render_bzl(config: TargetConfig) -> str:
                     "LOOM_AMDGPU_DESCRIPTOR_SET_EXACT_PROCESSORS",
                     processor_pairs,
                 ),
+                bzl_list_dict(
+                    "LOOM_AMDGPU_DESCRIPTOR_SET_GENERIC_PROCESSORS",
+                    generic_processor_pairs,
+                ),
                 bzl_string_dict(
                     "LOOM_AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS",
                     generator_target_pairs,
+                ),
+                bzl_list_dict(
+                    "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES_BY_STORAGE_GENERATOR_TARGET",
+                    sorted(storage_capabilities.items()),
                 ),
                 bzl_string_dict(
                     "LOOM_AMDGPU_LOW_DESCRIPTOR_HEADERS",
@@ -468,6 +645,11 @@ def render_cmake(config: TargetConfig) -> str:
         ),
         "",
         cmake_list(
+            "_LOOM_AMDGPU_SUPPORTED_TARGETS",
+            config.supported_targets,
+        ),
+        "",
+        cmake_list(
             "_LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES",
             config.descriptor_set_capabilities,
         ),
@@ -485,6 +667,10 @@ def render_cmake(config: TargetConfig) -> str:
                 cmake_list(
                     f"_LOOM_AMDGPU_DESCRIPTOR_SET_EXACT_PROCESSORS_{capability}",
                     config.exact_processors_for_descriptor_set(key),
+                ),
+                cmake_list(
+                    f"_LOOM_AMDGPU_DESCRIPTOR_SET_GENERIC_PROCESSORS_{capability}",
+                    config.generic_processors_for_descriptor_set(key),
                 ),
                 cmake_set(
                     f"_LOOM_AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGET_{capability}",
@@ -508,66 +694,25 @@ def render_cmake(config: TargetConfig) -> str:
     return "\n".join(lines)
 
 
-def generated_outputs(repo_root: Path, config: TargetConfig) -> dict[Path, str]:
-    output_dir = repo_root / "loom/build_tools/amdgpu"
+def generated_outputs(config: TargetConfig) -> dict[str, str]:
+    output_dir = Path("loom/build_tools/amdgpu")
     return {
-        output_dir / "target_config.bzl": render_bzl(config),
-        output_dir / "target_config.cmake": render_cmake(config),
+        (output_dir / "target_config.bzl").as_posix(): render_bzl(config),
+        (output_dir / "target_config.cmake").as_posix(): render_cmake(config),
     }
 
 
-def check_outputs(repo_root: Path, outputs: dict[Path, str]) -> int:
-    failed = False
-    for path, content in outputs.items():
-        if not path.exists():
-            print(
-                f"error: {path.relative_to(repo_root)} does not exist", file=sys.stderr
-            )
-            failed = True
-            continue
-        existing = path.read_text()
-        if existing == content:
-            continue
-        rel_path = path.relative_to(repo_root)
-        print(f"error: {rel_path} is out of date", file=sys.stderr)
-        diff = difflib.unified_diff(
-            existing.splitlines(keepends=True),
-            content.splitlines(keepends=True),
-            fromfile=str(rel_path),
-            tofile=str(rel_path) + " (generated)",
-        )
-        sys.stderr.writelines(diff)
-        failed = True
-    if failed:
-        print(
-            "Run 'python loom/build_tools/amdgpu/target_config.py' to regenerate.",
-            file=sys.stderr,
-        )
-        return 1
-    print("Loom AMDGPU target config generated files are up to date.")
-    return 0
+def checked_in_file_set(config: TargetConfig | None = None) -> GeneratedFileSet:
+    """Returns the complete checked-in target-configuration ownership set."""
+    if config is None:
+        repo_root = find_repo_root()
+        config = load_target_config(repo_root)
+    return GeneratedFileSet.from_mapping(generated_outputs(config))
 
 
-def write_outputs(outputs: dict[Path, str]) -> int:
-    for path, content in outputs.items():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content)
-        print(f"Wrote {path}")
-    return 0
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Generate Loom AMDGPU target configuration fragments."
-    )
-    parser.add_argument(
-        "--check",
-        action="store_true",
-        help="Check that generated files are up to date without modifying them.",
-    )
-    args = parser.parse_args()
-
-    repo_root = find_repo_root()
+def load_target_config(repo_root: Path) -> TargetConfig:
+    """Loads and validates the source models for target configuration."""
+    configure_python_paths(repo_root)
     configure_name_helpers(repo_root)
     target_info = load_module(
         "loom_amdgpu_target_info",
@@ -578,11 +723,42 @@ def main() -> int:
         repo_root / "build_tools/amdgpu/target_map.py",
     )
     root_target_map.validate_target_map()
-    config = TargetConfig(target_info, root_target_map)
-    outputs = generated_outputs(repo_root, config)
-    if args.check:
-        return check_outputs(repo_root, outputs)
-    return write_outputs(outputs)
+    return TargetConfig(target_info, root_target_map)
+
+
+def maintain_checked_in_files(
+    mode: GeneratedFileMaintenanceMode,
+) -> GeneratedFileMaintenanceResult:
+    """Checks or updates the checked-in AMDGPU target configuration."""
+    repo_root = find_repo_root()
+    return maintain_generated_file_set(
+        repo_root,
+        checked_in_file_set(load_target_config(repo_root)),
+        mode=mode,
+        description=DESCRIPTION,
+        regenerate_command=REGENERATE_COMMAND,
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Maintain Loom AMDGPU target configuration fragments."
+    )
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument(
+        "--check",
+        action="store_true",
+        help="Check that generated files are up to date without modifying them.",
+    )
+    mode.add_argument(
+        "--in-place",
+        action="store_true",
+        help="Regenerate checked-in generated files.",
+    )
+    args = parser.parse_args(argv)
+
+    result = maintain_checked_in_files("update" if args.in_place else "check")
+    return 0 if result.ok else 1
 
 
 if __name__ == "__main__":

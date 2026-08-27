@@ -25,6 +25,7 @@ extern "C" {
 #define LOOM_TESTBENCH_CASE_INDEX_INVALID IREE_HOST_SIZE_MAX
 #define LOOM_TESTBENCH_BENCHMARK_INDEX_INVALID IREE_HOST_SIZE_MAX
 #define LOOM_TESTBENCH_PARAMETER_SAMPLE_ORDINAL_ALL IREE_HOST_SIZE_MAX
+#define LOOM_TESTBENCH_EXECUTION_EPOCH_INVALID IREE_HOST_SIZE_MAX
 
 enum {
   // Default cap for the number of concrete samples executed per check.case.
@@ -79,15 +80,19 @@ typedef enum loom_testbench_value_source_kind_e {
   LOOM_TESTBENCH_VALUE_SOURCE_RANDOM_UNIFORM = 4,
   // Fixture file input from check.file.read.npy.
   LOOM_TESTBENCH_VALUE_SOURCE_FILE_READ_NPY = 5,
+  // Dense typed alias from check.tensor.view.
+  LOOM_TESTBENCH_VALUE_SOURCE_TENSOR_VIEW = 6,
 } loom_testbench_value_source_kind_t;
 
 typedef enum loom_testbench_invocation_kind_e {
   // Invalid or uninitialized invocation slot.
   LOOM_TESTBENCH_INVOCATION_NONE = 0,
-  // Semantic call-like op that invokes the function under test.
-  LOOM_TESTBENCH_INVOCATION_ACTUAL = 1,
+  // Semantic call-like op that invokes an ordinary function.
+  LOOM_TESTBENCH_INVOCATION_FUNCTION_CALL = 1,
+  // kernel.launch op that dispatches a device kernel.
+  LOOM_TESTBENCH_INVOCATION_KERNEL_LAUNCH = 2,
   // check.oracle.call op that invokes a reference provider.
-  LOOM_TESTBENCH_INVOCATION_ORACLE = 2,
+  LOOM_TESTBENCH_INVOCATION_ORACLE = 3,
 } loom_testbench_invocation_kind_t;
 
 typedef enum loom_testbench_expectation_kind_e {
@@ -153,6 +158,8 @@ typedef struct loom_testbench_iota_source_plan_t {
   loom_attribute_t offset;
   // Additive step between generated elements.
   loom_attribute_t step;
+  // Positive element period, or zero when the sequence does not repeat.
+  iree_host_size_t period;
 } loom_testbench_iota_source_plan_t;
 
 typedef struct loom_testbench_fill_source_plan_t {
@@ -175,6 +182,13 @@ typedef struct loom_testbench_file_source_plan_t {
   // Borrowed fixture path text.
   iree_string_view_t path;
 } loom_testbench_file_source_plan_t;
+
+typedef struct loom_testbench_tensor_view_source_plan_t {
+  // SSA value providing the source tensor storage.
+  loom_value_id_t source_value_id;
+  // Static byte offset from the beginning of the source tensor.
+  iree_device_size_t byte_offset;
+} loom_testbench_tensor_view_source_plan_t;
 
 typedef struct loom_testbench_parameter_plan_t {
   // Parameter kind and payload discriminator.
@@ -221,6 +235,8 @@ typedef struct loom_testbench_value_source_plan_t {
     loom_testbench_random_uniform_source_plan_t random_uniform;
     // Payload for check.file.read.npy.
     loom_testbench_file_source_plan_t file;
+    // Payload for check.tensor.view.
+    loom_testbench_tensor_view_source_plan_t tensor_view;
   };
 } loom_testbench_value_source_plan_t;
 
@@ -254,6 +270,17 @@ typedef struct loom_testbench_invocation_plan_t {
   iree_string_view_t provider;
   // Provider-specific attributes for oracle invocations.
   loom_named_attr_slice_t attrs;
+  // Execution epoch for kernel launches, or INVALID for other invocations.
+  // Adjacent launches in the same epoch may execute concurrently; increasing
+  // epochs require an execution and visibility edge.
+  iree_host_size_t execution_epoch;
+  // Number of enclosing kernel launch schedule operations. Direct check.case
+  // launches have depth zero.
+  iree_host_size_t launch_schedule_depth;
+  // Borrowed SSA value IDs used as kernel launch workload inputs.
+  const loom_value_id_t* workload_value_ids;
+  // Number of entries in |workload_value_ids|.
+  iree_host_size_t workload_count;
   // Borrowed SSA value IDs used as invocation inputs.
   const loom_value_id_t* input_value_ids;
   // Number of entries in |input_value_ids|.
@@ -365,6 +392,10 @@ typedef struct loom_testbench_case_plan_t {
   const loom_testbench_invocation_plan_t* invocations;
   // Number of entries in |invocations|.
   iree_host_size_t invocation_count;
+  // First kernel launch in |invocations|, or NULL when none are present.
+  const loom_testbench_invocation_plan_t* first_kernel_launch;
+  // Number of kernel launch entries in |invocations|.
+  iree_host_size_t kernel_launch_count;
   // Expectation plans in source order.
   const loom_testbench_expectation_plan_t* expectations;
   // Number of entries in |expectations|.

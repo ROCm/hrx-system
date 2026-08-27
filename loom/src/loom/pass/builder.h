@@ -49,6 +49,7 @@ iree_status_t loom_pass_ir_build_pipeline(
 // Appends a pass.run with the canonical pass |key| and typed option attrs.
 // |options| must already be owned by |builder->module|.
 iree_status_t loom_pass_ir_build_run(loom_builder_t* builder,
+                                     loom_pass_run_build_flags_t build_flags,
                                      iree_string_view_t key,
                                      loom_named_attr_slice_t options,
                                      loom_op_t** out_run_op);
@@ -67,18 +68,17 @@ iree_status_t loom_pass_ir_build_for(loom_builder_t* builder,
 
 // Appends a pass.where and enters its body region. The caller must eventually
 // call loom_pass_ir_end_scope.
-iree_status_t loom_pass_ir_begin_where(loom_builder_t* builder,
-                                       iree_string_view_t predicate,
-                                       loom_named_attr_slice_t attrs,
-                                       loom_pass_ir_scope_t* out_scope);
+iree_status_t loom_pass_ir_begin_where(
+    loom_builder_t* builder, loom_pass_where_build_flags_t build_flags,
+    iree_string_view_t predicate, loom_named_attr_slice_t attrs,
+    loom_pass_ir_scope_t* out_scope);
 
 // Appends a pass.where and invokes |build_body| inside the body region.
-iree_status_t loom_pass_ir_build_where(loom_builder_t* builder,
-                                       iree_string_view_t predicate,
-                                       loom_named_attr_slice_t attrs,
-                                       loom_pass_ir_body_build_fn_t build_body,
-                                       void* user_data,
-                                       loom_op_t** out_where_op);
+iree_status_t loom_pass_ir_build_where(
+    loom_builder_t* builder, loom_pass_where_build_flags_t build_flags,
+    iree_string_view_t predicate, loom_named_attr_slice_t attrs,
+    loom_pass_ir_body_build_fn_t build_body, void* user_data,
+    loom_op_t** out_where_op);
 
 // Appends a pass.repeat and enters its body region. The caller must eventually
 // call loom_pass_ir_end_scope.
@@ -93,6 +93,16 @@ iree_status_t loom_pass_ir_build_repeat(
     loom_pass_repeat_mode_t mode, int64_t count, int64_t max_iterations,
     loom_pass_ir_body_build_fn_t build_body, void* user_data,
     loom_op_t** out_repeat_op);
+
+// Appends a pass.if_changed and enters its body region. The caller must
+// eventually call loom_pass_ir_end_scope.
+iree_status_t loom_pass_ir_begin_if_changed(loom_builder_t* builder,
+                                            loom_pass_ir_scope_t* out_scope);
+
+// Appends a pass.if_changed and invokes |build_body| inside the body region.
+iree_status_t loom_pass_ir_build_if_changed(
+    loom_builder_t* builder, loom_pass_ir_body_build_fn_t build_body,
+    void* user_data, loom_op_t** out_if_changed_op);
 
 // Appends a pass.call to |callee|.
 iree_status_t loom_pass_ir_build_call(loom_builder_t* builder,

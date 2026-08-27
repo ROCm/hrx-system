@@ -8,6 +8,7 @@
 
 from loom.dialect.target.defs import (
     ALL_TARGET_OPS,
+    ALL_TARGET_PARAMETERIZED_ATTRS,
     TARGET_COMMON_OVERRIDE_ATTRS,
     ArtifactFormatAttr,
     ExportAbiKind,
@@ -17,10 +18,12 @@ from loom.dialect.target.defs import (
     target_generic,
     target_ops,
     target_record_attrs,
+    target_subgroup_size_attr,
 )
 
 __all__ = [
     "ALL_TARGET_OPS",
+    "ALL_TARGET_PARAMETERIZED_ATTRS",
     "ArtifactFormatAttr",
     "ExportAbiKind",
     "ExportLinkage",
@@ -30,4 +33,5 @@ __all__ = [
     "target_generic",
     "target_ops",
     "target_record_attrs",
+    "target_subgroup_size_attr",
 ]

@@ -4,10 +4,12 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Shared cache-policy vocabulary used by kernel async copies, view scalar
-// memory operations, and vector memory operations. Generated dialect APIs alias
-// these enum types directly so verification, lowering, and builders use one
-// semantic domain.
+// Shared advisory cache-policy vocabulary used by kernel async copies, view
+// scalar memory operations, and vector memory operations. Cache policies may
+// improve locality or reduce pollution but do not alter memory ordering or
+// coherence semantics; targets may ignore policies they cannot encode.
+// Generated dialect APIs alias these enum types directly so verification,
+// lowering, and builders use one semantic domain.
 
 #ifndef LOOM_OPS_CACHE_H_
 #define LOOM_OPS_CACHE_H_
@@ -18,7 +20,7 @@
 extern "C" {
 #endif
 
-// Cache/coherency scope for memory operations.
+// Cache hierarchy scope at which an advisory policy applies.
 typedef enum loom_cache_scope_e {
   // Cache/coherency scope is the compute unit.
   LOOM_CACHE_SCOPE_CU = 0,

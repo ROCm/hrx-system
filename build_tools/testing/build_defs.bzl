@@ -7,6 +7,7 @@
 """Bazel rules for JSON execution tests."""
 
 load("@rules_python//python:defs.bzl", "py_test")
+load("//build_tools/bazel:cc_attrs.bzl", "cc_attrs")
 load(
     "//build_tools/sanitizer:suppressions.bzl",
     "iree_sanitizer_suppression_data",
@@ -19,6 +20,7 @@ def iree_execution_test_suite(
         tools,
         data = None,
         args = None,
+        resource_group = None,
         sanitizer_suppressions = None,
         **kwargs):
     """Declares a JSON execution test suite.
@@ -29,16 +31,19 @@ def iree_execution_test_suite(
       tools: Dictionary mapping manifest tool names to executable labels.
       data: Additional runtime data files made available to manifests.
       args: Additional runner arguments.
+      resource_group: Local resource name used to serialize competing tests.
       sanitizer_suppressions: Sanitizer suppression files keyed by sanitizer
         name.
       **kwargs: Extra py_test attributes.
     """
     env = kwargs.pop("env", None)
+    tags = kwargs.pop("tags", None)
     data = iree_sanitizer_suppression_data(data, sanitizer_suppressions)
     data = list(data or [])
     env = iree_sanitizer_suppression_env(env, sanitizer_suppressions)
     if env:
         kwargs["env"] = env
+    kwargs["tags"] = cc_attrs.with_resource_group_tags(tags, resource_group)
     args = list(args or [])
     tool_labels = []
     runner_args = []

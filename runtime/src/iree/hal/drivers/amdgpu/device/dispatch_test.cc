@@ -78,7 +78,8 @@ TEST(DispatchTest, EmplaceImplicitArgsWritesSuffix) {
 
   iree_hal_amdgpu_device_dispatch_emplace_implicit_args(
       &kernel_args, workgroup_count, /*dynamic_workgroup_local_memory=*/13,
-      &layout, kernargs.data());
+      /*hostcall_buffer=*/reinterpret_cast<void*>(0x12345678u), &layout,
+      kernargs.data());
 
   EXPECT_EQ(kernargs[31], 0xFDu);
 
@@ -101,12 +102,17 @@ TEST(DispatchTest, EmplaceImplicitArgsWritesSuffix) {
   EXPECT_EQ(implicit_args->global_offset[2], 0u);
   EXPECT_EQ(implicit_args->grid_dims, 3u);
   EXPECT_EQ(implicit_args->printf_buffer, nullptr);
-  EXPECT_EQ(implicit_args->hostcall_buffer, nullptr);
+  EXPECT_EQ(implicit_args->hostcall_buffer,
+            reinterpret_cast<void*>(0x12345678u));
   EXPECT_EQ(implicit_args->deprecated_multigrid_sync_arg, 0u);
   EXPECT_EQ(implicit_args->unused_heap_v1, 0u);
   EXPECT_EQ(implicit_args->unused_default_queue, 0u);
   EXPECT_EQ(implicit_args->unused_completion_action, 0u);
   EXPECT_EQ(implicit_args->dynamic_lds_size, 13u);
+  for (size_t i = layout.total_kernarg_size; i < kernargs.size(); ++i) {
+    EXPECT_EQ(kernargs[i], 0xFDu)
+        << "implicit args writer exceeded its fixed suffix at byte " << i;
+  }
 }
 
 TEST(DispatchTest, EmplaceCustomKernargsCopiesRawBlob) {
@@ -125,6 +131,82 @@ TEST(DispatchTest, EmplaceCustomKernargsCopiesRawBlob) {
                         custom_kernargs.size()),
             0);
   for (size_t i = custom_kernargs.size(); i < kernargs.size(); ++i) {
+    EXPECT_EQ(kernargs[i], 0xFD);
+  }
+}
+
+TEST(DispatchTest, EmplaceCustomKernargsCopiesFixedExplicitPrefix) {
+  iree_hal_amdgpu_device_dispatch_kernarg_layout_t layout = {
+      /*.explicit_kernarg_size=*/16,
+      /*.implicit_args_offset=*/0,
+      /*.total_kernarg_size=*/32,
+      /*.has_implicit_args=*/false,
+  };
+  std::array<uint8_t, 24> custom_kernargs = {};
+  for (size_t i = 0; i < custom_kernargs.size(); ++i) {
+    custom_kernargs[i] = (uint8_t)i;
+  }
+  alignas(16) std::array<uint8_t, 40> kernargs = {};
+  kernargs.fill(0xFD);
+
+  iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
+      &layout, custom_kernargs.data(), custom_kernargs.size(), kernargs.data());
+
+  EXPECT_EQ(0, std::memcmp(kernargs.data(), custom_kernargs.data(),
+                           layout.explicit_kernarg_size));
+  for (size_t i = layout.explicit_kernarg_size; i < kernargs.size(); ++i) {
+    EXPECT_EQ(kernargs[i], 0xFD);
+  }
+}
+
+TEST(DispatchTest, EmplaceCustomKernargsZeroesImplicitArgsGap) {
+  constexpr size_t kImplicitArgsOffset = 16;
+  iree_hal_amdgpu_device_dispatch_kernarg_layout_t layout = {
+      /*.explicit_kernarg_size=*/0,
+      /*.implicit_args_offset=*/kImplicitArgsOffset,
+      /*.total_kernarg_size=*/kImplicitArgsOffset +
+          IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE,
+      /*.has_implicit_args=*/true,
+  };
+  const std::array<uint8_t, 8> custom_kernargs = {
+      0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7,
+  };
+  alignas(16) std::array<uint8_t, 64> kernargs = {};
+  kernargs.fill(0xFD);
+
+  iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
+      &layout, custom_kernargs.data(), custom_kernargs.size(), kernargs.data());
+
+  EXPECT_EQ(0, std::memcmp(kernargs.data(), custom_kernargs.data(),
+                           custom_kernargs.size()));
+  for (size_t i = custom_kernargs.size(); i < kImplicitArgsOffset; ++i) {
+    EXPECT_EQ(kernargs[i], 0u);
+  }
+  for (size_t i = kImplicitArgsOffset; i < kernargs.size(); ++i) {
+    EXPECT_EQ(kernargs[i], 0xFD);
+  }
+}
+
+TEST(DispatchTest, EmplaceCustomKernargsClampsCopyToTotalSize) {
+  iree_hal_amdgpu_device_dispatch_kernarg_layout_t layout = {
+      /*.explicit_kernarg_size=*/0,
+      /*.implicit_args_offset=*/0,
+      /*.total_kernarg_size=*/16,
+      /*.has_implicit_args=*/false,
+  };
+  std::array<uint8_t, 24> custom_kernargs = {};
+  for (size_t i = 0; i < custom_kernargs.size(); ++i) {
+    custom_kernargs[i] = (uint8_t)(0x80u + i);
+  }
+  alignas(16) std::array<uint8_t, 32> kernargs = {};
+  kernargs.fill(0xFD);
+
+  iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
+      &layout, custom_kernargs.data(), custom_kernargs.size(), kernargs.data());
+
+  EXPECT_EQ(0, std::memcmp(kernargs.data(), custom_kernargs.data(),
+                           layout.total_kernarg_size));
+  for (size_t i = layout.total_kernarg_size; i < kernargs.size(); ++i) {
     EXPECT_EQ(kernargs[i], 0xFD);
   }
 }

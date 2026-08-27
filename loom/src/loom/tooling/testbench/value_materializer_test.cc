@@ -182,6 +182,8 @@ check.case @generated {
   %i8 = check.generate.iota offset(-2) step(1) : tensor<4xi8>
   %i8_down = check.generate.iota offset(2) step(-1) : tensor<4xi8>
   %iota = check.generate.iota offset(0) step(1) : tensor<[%m]xi32>
+  %periodic_iota = check.generate.iota offset(-1) step(2) period(4) : tensor<10xi32>
+  %periodic_f32 = check.generate.iota offset(0.5) step(-1.5) period(2) : tensor<5xf32>
   %f16 = check.generate.fill value(0.5) : tensor<2xf16>
   %fill = check.generate.fill value(1.5) : tensor<3xf32>
   %bf16 = check.generate.fill value(0.25) : tensor<2xbf16>
@@ -203,7 +205,7 @@ check.case @generated {
       &options, &case_plan, /*sample_ordinal=*/1, &table));
 
   ASSERT_EQ(case_plan.parameter_count, 2u);
-  ASSERT_EQ(case_plan.value_source_count, 8u);
+  ASSERT_EQ(case_plan.value_source_count, 10u);
   loom_testbench_value_t scalar = {};
   IREE_ASSERT_OK(loom_testbench_value_table_lookup_retain(
       &table, case_plan.value_sources[0].value_id, &scalar));
@@ -233,9 +235,25 @@ check.case @generated {
                                     IREE_HAL_ELEMENT_TYPE_SINT_32, {0, 1, 2});
   loom_testbench_value_deinitialize(&iota);
 
+  loom_testbench_value_t periodic_iota = {};
+  iree_hal_buffer_view_t* periodic_iota_view = LookupBufferView(
+      &table, case_plan.value_sources[4].value_id, &periodic_iota);
+  ExpectBufferViewContents<int32_t>(periodic_iota_view, {10},
+                                    IREE_HAL_ELEMENT_TYPE_SINT_32,
+                                    {-1, 1, 3, 5, -1, 1, 3, 5, -1, 1});
+  loom_testbench_value_deinitialize(&periodic_iota);
+
+  loom_testbench_value_t periodic_f32 = {};
+  iree_hal_buffer_view_t* periodic_f32_view = LookupBufferView(
+      &table, case_plan.value_sources[5].value_id, &periodic_f32);
+  ExpectBufferViewContents<float>(periodic_f32_view, {5},
+                                  IREE_HAL_ELEMENT_TYPE_FLOAT_32,
+                                  {0.5f, -1.0f, 0.5f, -1.0f, 0.5f});
+  loom_testbench_value_deinitialize(&periodic_f32);
+
   loom_testbench_value_t f16 = {};
   iree_hal_buffer_view_t* f16_view =
-      LookupBufferView(&table, case_plan.value_sources[4].value_id, &f16);
+      LookupBufferView(&table, case_plan.value_sources[6].value_id, &f16);
   ExpectBufferViewContents<uint16_t>(
       f16_view, {2}, IREE_HAL_ELEMENT_TYPE_FLOAT_16,
       {iree_math_f32_to_f16(0.5f), iree_math_f32_to_f16(0.5f)});
@@ -243,14 +261,14 @@ check.case @generated {
 
   loom_testbench_value_t fill = {};
   iree_hal_buffer_view_t* fill_view =
-      LookupBufferView(&table, case_plan.value_sources[5].value_id, &fill);
+      LookupBufferView(&table, case_plan.value_sources[7].value_id, &fill);
   ExpectBufferViewContents<float>(
       fill_view, {3}, IREE_HAL_ELEMENT_TYPE_FLOAT_32, {1.5f, 1.5f, 1.5f});
   loom_testbench_value_deinitialize(&fill);
 
   loom_testbench_value_t bf16 = {};
   iree_hal_buffer_view_t* bf16_view =
-      LookupBufferView(&table, case_plan.value_sources[6].value_id, &bf16);
+      LookupBufferView(&table, case_plan.value_sources[8].value_id, &bf16);
   ExpectBufferViewContents<uint16_t>(
       bf16_view, {2}, IREE_HAL_ELEMENT_TYPE_BFLOAT_16,
       {iree_math_f32_to_bf16(0.25f), iree_math_f32_to_bf16(0.25f)});
@@ -258,7 +276,7 @@ check.case @generated {
 
   loom_testbench_value_t uniform = {};
   iree_hal_buffer_view_t* uniform_view =
-      LookupBufferView(&table, case_plan.value_sources[7].value_id, &uniform);
+      LookupBufferView(&table, case_plan.value_sources[9].value_id, &uniform);
   ASSERT_EQ(iree_hal_buffer_view_shape_rank(uniform_view), 1u);
   EXPECT_EQ(iree_hal_buffer_view_shape_dim(uniform_view, 0), 4);
   EXPECT_EQ(iree_hal_buffer_view_element_type(uniform_view),
@@ -272,6 +290,76 @@ check.case @generated {
     EXPECT_LE(value, 1.0f);
   }
   loom_testbench_value_deinitialize(&uniform);
+
+  loom_testbench_value_table_deinitialize(&table);
+  loom_module_free(module);
+}
+
+TEST_F(ValueMaterializerTest, MaterializesTypedTensorSubspanViews) {
+  loom_module_t* module = ParseModule(R"(
+check.case @tensor_view {
+  %length = check.param.choice values([2, 3]) : index
+  %source = check.generate.iota offset(1) step(1) : tensor<4xi32>
+  %tail = check.tensor.view %source offset(4) : tensor<4xi32> -> tensor<[%length]xi32>
+  check.return
+}
+)");
+  ASSERT_NE(module, nullptr);
+  loom_testbench_module_plan_t plan = PlanModule(module);
+  ASSERT_EQ(plan.case_count, 1u);
+  ASSERT_EQ(plan.issue_count, 0u);
+  const loom_testbench_case_plan_t& case_plan = plan.cases[0];
+
+  loom_testbench_value_table_t table = {};
+  IREE_ASSERT_OK(loom_testbench_value_table_initialize(
+      module, &case_plan, host_allocator_, &table));
+  loom_testbench_value_materializer_options_t options = MaterializerOptions();
+  IREE_ASSERT_OK(loom_testbench_materialize_case_sample(
+      &options, &case_plan, /*sample_ordinal=*/1, &table));
+
+  ASSERT_EQ(case_plan.value_source_count, 2u);
+  loom_testbench_value_t source = {};
+  iree_hal_buffer_view_t* source_view =
+      LookupBufferView(&table, case_plan.value_sources[0].value_id, &source);
+  loom_testbench_value_t tail = {};
+  iree_hal_buffer_view_t* tail_view =
+      LookupBufferView(&table, case_plan.value_sources[1].value_id, &tail);
+  ExpectBufferViewContents<int32_t>(tail_view, {3},
+                                    IREE_HAL_ELEMENT_TYPE_SINT_32, {2, 3, 4});
+  EXPECT_EQ(iree_hal_buffer_test_overlap(
+                iree_hal_buffer_view_buffer(source_view), /*lhs_offset=*/0,
+                IREE_HAL_WHOLE_BUFFER, iree_hal_buffer_view_buffer(tail_view),
+                /*rhs_offset=*/0, IREE_HAL_WHOLE_BUFFER),
+            IREE_HAL_BUFFER_OVERLAP_PARTIAL);
+
+  loom_testbench_value_deinitialize(&tail);
+  loom_testbench_value_deinitialize(&source);
+  loom_testbench_value_table_deinitialize(&table);
+  loom_module_free(module);
+}
+
+TEST_F(ValueMaterializerTest, RejectsTensorViewOutsideSourceRange) {
+  loom_module_t* module = ParseModule(R"(
+check.case @tensor_view_out_of_range {
+  %source = check.generate.fill value(0) : tensor<4xi32>
+  %outside = check.tensor.view %source offset(8) : tensor<4xi32> -> tensor<3xi32>
+  check.return
+}
+)");
+  ASSERT_NE(module, nullptr);
+  loom_testbench_module_plan_t plan = PlanModule(module);
+  ASSERT_EQ(plan.case_count, 1u);
+  ASSERT_EQ(plan.issue_count, 0u);
+  const loom_testbench_case_plan_t& case_plan = plan.cases[0];
+
+  loom_testbench_value_table_t table = {};
+  IREE_ASSERT_OK(loom_testbench_value_table_initialize(
+      module, &case_plan, host_allocator_, &table));
+  loom_testbench_value_materializer_options_t options = MaterializerOptions();
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      loom_testbench_materialize_case_sample(&options, &case_plan,
+                                             /*sample_ordinal=*/0, &table));
 
   loom_testbench_value_table_deinitialize(&table);
   loom_module_free(module);

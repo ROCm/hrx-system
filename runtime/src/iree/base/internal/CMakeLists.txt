@@ -45,6 +45,7 @@ iree_cc_test(
   SRCS
     "math_test.cc"
   DEPS
+    ::fpu_state
     ::internal
     iree::testing::gtest
     iree::testing::gtest_main
@@ -205,7 +206,7 @@ iree_cc_library(
   DEPS
     iree::base
     iree::base::core_headers
-    iree::schemas::cpu_data
+    iree::base::cpu_data
   PUBLIC
 )
 

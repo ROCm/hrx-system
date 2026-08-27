@@ -1,42 +1,42 @@
 // RUN: emit source-low diagnostics=memory output=low
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @lds_b32_diagnostics() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch(%output: buffer) {
   %tid = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %bytes = index.constant 256 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xi32, #dense>
-  %one = vector.constant 1 : vector<1xi32>
-  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="4", bank_conflict_kind="bank-conflict-free"}
-  vector.store %one, %scratch_view[%tid] : vector<1xi32>, view<64xi32, #dense>
-  // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="4", bank_conflict_kind="bank-conflict-free"}
-  %loaded = vector.load %scratch_view[%tid] : view<64xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %output_view[%tid] : vector<1xi32>, view<64xi32, #dense>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32>
+  %stored_value = vector.constant 1 : vector<1xi32>
+  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="4"}
+  vector.store %stored_value, %scratch_view[%tid] : vector<1xi32>, view<64xi32>
+  // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="4"}
+  %loaded = vector.load %scratch_view[%tid] : view<64xi32> -> vector<1xi32>
+  vector.store %loaded, %output_view[%tid] : vector<1xi32>, view<64xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @lds_b32_diagnostics() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_b32_diagnostics() asm {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %13 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
-  %one = v_mov_b32 1
+  %stored_value = v_mov_b32 1
   %16 = v_lshlrev_b32_src0_inline %tid, 2
-  ds_write_b32 %16, %one
-  %loaded = ds_read_b32 %16
+  low.op<amdgpu.ds_write_b32>(%16, %stored_value) {offset = 0} memory_access([0, 3, 6, -1, 43, 4, 0, 4, 3, 0, 252, 4, 256]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %loaded = low.op<amdgpu.ds_read_b32>(%16) {offset = 0} memory_access([0, 3, 6, -1, 43, 4, 0, 4, 3, 0, 252, 4, 256]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
   global_store_b32_saddr %16, %loaded, %output_view
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @lds_padded_diagnostics() {
   %c1 = index.constant 1 : index
@@ -44,32 +44,32 @@ kernel.def target(@target) @lds_padded_diagnostics() {
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch(%output: buffer) {
   %tid = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %bytes = index.constant 2048 : offset
   %layout = encoding.layout.strided [5, 1] : encoding<layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64x4xi32, %layout>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64x4xi32, #dense>
-  %one = vector.constant 1 : vector<4xi32>
-  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b128", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="20", bank_conflict_kind="padded-bank-conflict-free"}
-  vector.store %one, %scratch_view[%tid, 0] : vector<4xi32>, view<64x4xi32, %layout>
-  // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read_b128", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="20", bank_conflict_kind="padded-bank-conflict-free"}
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xi32, %layout>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32>
+  %stored_value = vector.constant 1 : vector<4xi32>
+  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b128", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="20"}
+  vector.store %stored_value, %scratch_view[%tid, 0] : vector<4xi32>, view<64x4xi32, %layout>
+  // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read_b128", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="20"}
   %loaded = vector.load %scratch_view[%tid, 0] : view<64x4xi32, %layout> -> vector<4xi32>
-  vector.store %loaded, %output_view[%tid, 0] : vector<4xi32>, view<64x4xi32, #dense>
+  vector.store %loaded, %output_view[%tid, 0] : vector<4xi32>, view<64x4xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @lds_padded_diagnostics() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_padded_diagnostics() asm {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %14 = storage {byte_alignment = 16, byte_length = 2048} : low.storage<workgroup>
   %16 = v_mov_b32 1
-  %one = concat(%16, %16, %16, %16) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %stored_value = concat(%16, %16, %16, %16) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
   %21 = v_mov_b32 20
   %22 = v_mul_lo_u32 %tid, %21
-  ds_write_b128 %22, %one
-  %loaded = ds_read_b128 %22
+  low.op<amdgpu.ds_write_b128>(%22, %stored_value) {offset = 0} memory_access([0, 3, 7, -1, 43, 20, 0, 16, 3, 0, 1260, 16, 1276]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>)
+  %loaded = low.op<amdgpu.ds_read_b128>(%22) {offset = 0} memory_access([0, 3, 7, -1, 43, 20, 0, 16, 3, 0, 1260, 16, 1276]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
   %26 = v_lshlrev_b32_src0_inline %tid, 4
   global_store_b128_saddr %26, %loaded, %output_view
   return
@@ -77,7 +77,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @lds_padded_diagnostics(
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @lds_read2_write2_diagnostics() {
   %c1 = index.constant 1 : index
@@ -85,30 +85,30 @@ kernel.def target(@target) @lds_read2_write2_diagnostics() {
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch(%output: buffer) {
   %tid = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %bytes = index.constant 2048 : offset
   %layout = encoding.layout.strided [8, 2] : encoding<layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64x4xi32, %layout>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64x2xi32, #dense>
-  %one = vector.constant 1 : vector<2xi32>
-  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write2_b32", address_form="ds_2addr", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="32", bank_conflict_kind="bank-conflict-risk"}
-  vector.store %one, %scratch_view[%tid, 0] : vector<2xi32>, view<64x4xi32, %layout>
-  // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read2_b32", address_form="ds_2addr", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="32", bank_conflict_kind="bank-conflict-risk"}
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xi32, %layout>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x2xi32>
+  %stored_value = vector.constant 1 : vector<2xi32>
+  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write2_b32", address_form="ds_2addr", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="32"}
+  vector.store %stored_value, %scratch_view[%tid, 0] : vector<2xi32>, view<64x4xi32, %layout>
+  // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read2_b32", address_form="ds_2addr", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="32"}
   %loaded = vector.load %scratch_view[%tid, 0] : view<64x4xi32, %layout> -> vector<2xi32>
-  vector.store %loaded, %output_view[%tid, 0] : vector<2xi32>, view<64x2xi32, #dense>
+  vector.store %loaded, %output_view[%tid, 0] : vector<2xi32>, view<64x2xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @lds_read2_write2_diagnostics() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_read2_write2_diagnostics() asm {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %14 = storage {byte_alignment = 16, byte_length = 2048} : low.storage<workgroup>
   %16 = v_mov_b32 1
   %19 = v_lshlrev_b32_src0_inline %tid, 5
-  ds_write2_b32 %19, %16, %16 {offset1 = 2}
-  %loaded = ds_read2_b32 %19 {offset1 = 2}
+  low.op<amdgpu.ds_write2_b32>(%19, %16, %16) {offset0 = 0, offset1 = 2} memory_access([0, 3, 7, -1, 43, 32, 0, 12, 3, 0, 2016, 12, 2028]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %loaded = low.op<amdgpu.ds_read2_b32>(%19) {offset0 = 0, offset1 = 2} memory_access([0, 3, 7, -1, 43, 32, 0, 12, 3, 0, 2016, 12, 2028]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   %24 = v_lshlrev_b32_src0_inline %tid, 3
   global_store_b64_saddr %24, %loaded, %output_view
   return
@@ -116,45 +116,45 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @lds_read2_write2_diagno
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
-kernel.def target(@target) @lds_conflict_risk_diagnostics() {
+kernel.def target(@target) @lds_dense_b128_diagnostics() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch(%output: buffer) {
   %tid = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %bytes = index.constant 1024 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64x4xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64x4xi32, #dense>
-  %one = vector.constant 1 : vector<4xi32>
-  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b128", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="16", bank_conflict_kind="bank-conflict-risk"}
-  vector.store %one, %scratch_view[%tid, 0] : vector<4xi32>, view<64x4xi32, #dense>
-  // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read_b128", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="16", bank_conflict_kind="bank-conflict-risk"}
-  %loaded = vector.load %scratch_view[%tid, 0] : view<64x4xi32, #dense> -> vector<4xi32>
-  vector.store %loaded, %output_view[%tid, 0] : vector<4xi32>, view<64x4xi32, #dense>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32>
+  %stored_value = vector.constant 1 : vector<4xi32>
+  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b128", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="16"}
+  vector.store %stored_value, %scratch_view[%tid, 0] : vector<4xi32>, view<64x4xi32>
+  // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read_b128", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="16"}
+  %loaded = vector.load %scratch_view[%tid, 0] : view<64x4xi32> -> vector<4xi32>
+  vector.store %loaded, %output_view[%tid, 0] : vector<4xi32>, view<64x4xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @lds_conflict_risk_diagnostics() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_dense_b128_diagnostics() asm {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %13 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
   %15 = v_mov_b32 1
-  %one = concat(%15, %15, %15, %15) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %stored_value = concat(%15, %15, %15, %15) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
   %20 = v_lshlrev_b32_src0_inline %tid, 4
-  ds_write_b128 %20, %one
-  %loaded = ds_read_b128 %20
+  low.op<amdgpu.ds_write_b128>(%20, %stored_value) {offset = 0} memory_access([0, 3, 6, -1, 43, 16, 0, 16, 3, 0, 1008, 16, 1024]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>)
+  %loaded = low.op<amdgpu.ds_read_b128>(%20) {offset = 0} memory_access([0, 3, 6, -1, 43, 16, 0, 16, 3, 0, 1008, 16, 1024]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
   global_store_b128_saddr %20, %loaded, %output_view
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @lds_f16_subword_stride_diagnostics() {
   %unit = index.constant 1 : index
@@ -162,60 +162,60 @@ kernel.def target(@target) @lds_f16_subword_stride_diagnostics() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %bytes = index.constant 256 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
-  %input_view = buffer.view %input[%zero] : buffer -> view<128xf16, #dense>
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<128xf16, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<128xf16, #dense>
-  %loaded = vector.load %input_view[%lane] : view<128xf16, #dense> -> vector<2xf16>
-  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="2", bank_conflict_kind="subword-bank-conflict-risk"}
-  vector.store %loaded, %scratch_view[%lane] : vector<2xf16>, view<128xf16, #dense>
-  // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="2", bank_conflict_kind="subword-bank-conflict-risk"}
-  %roundtrip = vector.load %scratch_view[%lane] : view<128xf16, #dense> -> vector<2xf16>
-  vector.store %roundtrip, %output_view[%lane] : vector<2xf16>, view<128xf16, #dense>
+  %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<128xf16>
+  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<128xf16>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<128xf16>
+  %loaded = vector.load %input_view[%lane] : view<128xf16> -> vector<2xf16>
+  // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="2"}
+  vector.store %loaded, %scratch_view[%lane] : vector<2xf16>, view<128xf16>
+  // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="2"}
+  %roundtrip = vector.load %scratch_view[%lane] : view<128xf16> -> vector<2xf16>
+  vector.store %roundtrip, %output_view[%lane] : vector<2xf16>, view<128xf16>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @lds_f16_subword_stride_diagnostics() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_f16_subword_stride_diagnostics() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %16 = storage {byte_alignment = 4, byte_length = 256} : low.storage<workgroup>
   %18 = v_lshlrev_b32_src0_inline %lane, 1
   %loaded = global_load_b32_saddr %18, %input_view
-  ds_write_b32 %18, %loaded
-  %roundtrip = ds_read_b32 %18
+  low.op<amdgpu.ds_write_b32>(%18, %loaded) {offset = 0} memory_access([0, 3, 7, -1, 11, 0, 0, 0, 3, 0, 126, 4, 130]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %roundtrip = low.op<amdgpu.ds_read_b32>(%18) {offset = 0} memory_access([0, 3, 7, -1, 11, 0, 0, 0, 3, 0, 126, 4, 130]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
   global_store_b32_saddr %18, %roundtrip, %output_view
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @buffer_view_i1_rejected(%input: buffer) {
-  %zero = index.constant 0 : offset
+  %input_base = index.constant 0 : offset
   // ERROR@+1: AMDGPU/001 {field_name="result", required_storage="byte-addressable scalar elements"}
-  %input_view = buffer.view %input[%zero] : buffer -> view<8xi1, #dense>
+  %input_view = buffer.view %input[%input_base] : buffer -> view<8xi1>
   func.return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @dynamic_scaled_index_large_extent_flat_load(%input: buffer, %index: index) -> (i32) {
-  %zero = index.constant 0 : offset
+  %input_base = index.constant 0 : offset
   %bounded_index = index.assume %index [range(%index, 0, 1073741823)] : index
-  %input_view = buffer.view %input[%zero] : buffer -> view<1073741824xi32, #dense>
-  %loaded = view.load %input_view[%bounded_index] : view<1073741824xi32, #dense> -> i32
+  %input_view = buffer.view %input[%input_base] : buffer -> view<1073741824xi32>
+  %loaded = view.load %input_view[%bounded_index] : view<1073741824xi32> -> i32
   func.return %loaded : i32
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @dynamic_scaled_index_large_extent_flat_load(%bounded_index: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dynamic_scaled_index_large_extent_flat_load(%bounded_index: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4294967296} : reg<amdgpu.sgpr x2>
   %10 = v_mov_b32 0
   %11 = s_lshl_b32_rhs_inline %bounded_index, 2
@@ -231,68 +231,113 @@ low.func.def target(@target) abi(hal_kernel) @dynamic_scaled_index_large_extent_
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @dynamic_view_base_b128_alignment_rejected(%input: buffer, %offset: offset) -> (vector<4xi32>) {
   %base = index.assume %offset [range(%offset, 0, 4096)] : offset
   %input_descriptor = buffer.assume.memory_space<descriptor> %input : buffer
-  %input_view = buffer.view %input_descriptor[%base] : buffer -> view<4xi32, #dense>
+  %input_view = buffer.view %input_descriptor[%base] : buffer -> view<4xi32>
   // ERROR@+1: AMDGPU/023 {constraint_key="memory_access.b128_dynamic_alignment"}
-  %loaded = vector.load %input_view[0] : view<4xi32, #dense> -> vector<4xi32>
+  %loaded = vector.load %input_view[0] : view<4xi32> -> vector<4xi32>
   func.return %loaded : vector<4xi32>
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @oversized_f32x64_store_rejected(%output: buffer, %value: vector<64xf32>) {
-  %zero = index.constant 0 : offset
+func.def target(@target) @fragment_store_tail_footprint_rejected(%output: buffer, %value: vector<8xf32>) {
+  %output_base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %output_global[%zero] : buffer -> view<64xf32, #dense>
-  // ERROR@+1: AMDGPU/040 {vector_type="vector<64xf32>", vector_lane_count="64", element_byte_count="4", required_32bit_lane_count="64", native_max_32bit_lane_count="4", native_max_vector_lane_count="4", scalarized_max_32bit_lane_count="32", scalarized_max_vector_lane_count="32"}
-  vector.store %value, %output_view[0] : vector<64xf32>, view<64xf32, #dense>
+  %output_view = buffer.view %output_global[%output_base] : buffer -> view<17x32xf32>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.fragment.store", view_axis="0", vector_axis="0", vector_extent="16", view_bound="17", required_origin_upper_bound="1", constraint_key="vector_footprint.full_vector_upper_bound"}
+  vector.fragment.store<result> %value, %output_view[16, 0] shape [%m, %n] : vector<8xf32>, view<17x32xf32>
   func.return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @oversized_bf16x128_store_rejected(%output: buffer, %value: vector<128xbf16>) {
-  %zero = index.constant 0 : offset
+kernel.def target(@target) @fragment_store_launch_subgroup_footprint() {
+  %unit = index.constant 1 : index
+  %workgroup_count = index.constant 64 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%output: buffer) {
+  %output_base = index.constant 0 : offset
+  %column = index.constant 0 : index
+  %subgroup_row_shift = index.constant 4 : index
+  %workgroup_row_shift = index.constant 6 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %subgroup = kernel.subgroup.id : index
+  %workgroup_base = index.shli %workgroup, %workgroup_row_shift : index
+  %subgroup_base = index.shli %subgroup, %subgroup_row_shift : index
+  %row = index.add %workgroup_base, %subgroup_base : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %output_global[%zero] : buffer -> view<128xbf16, #dense>
-  // ERROR@+1: AMDGPU/040 {vector_type="vector<128xbf16>", vector_lane_count="128", element_byte_count="2", required_32bit_lane_count="64", native_max_32bit_lane_count="4", native_max_vector_lane_count="8", scalarized_max_32bit_lane_count="32", scalarized_max_vector_lane_count="64"}
-  vector.store %value, %output_view[0] : vector<128xbf16>, view<128xbf16, #dense>
-  func.return
-}
-
-// ====
-
-amdgpu.target<gfx1100> @target
-
-kernel.def target(@target) @workgroup_dynamic_byte_offset_range_rejected() {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
-} launch(%output: buffer, %lane_i32: i32) {
-  %lane0 = index.cast %lane_i32 : i32 to index
-  %lane = index.assume %lane0 [range(%lane0, 0, 1073741824)] : index
-  %zero = index.constant 0 : offset
-  %bytes = index.constant 4 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<1073741825xi32, #dense>
-  %output_global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %output_global[%zero] : buffer -> view<1xi32, #dense>
-  // ERROR@+1: AMDGPU/034 {operation_kind="load", memory_space="workgroup", byte_offset_range_hi="4294967296", dynamic_term_index="0", dynamic_term_byte_stride="4", dynamic_term_byte_shift="2", static_byte_offset="0", constraint_key="memory_access.dynamic_offset_range"}
-  %loaded = view.load %scratch_view[%lane] : view<1073741825xi32, #dense> -> i32
-  view.store %loaded, %output_view[0] : i32, view<1xi32, #dense>
+  %output_view = buffer.view %output_global[%output_base] : buffer -> view<4096x16xf32>
+  %value = vector.constant 0.0 : vector<8xf32>
+  vector.fragment.store<result> %value, %output_view[%row, %column] shape [%m, %n] : vector<8xf32>, view<4096x16xf32>
   kernel.return
 }
 
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(64, 1, 1) @fragment_store_launch_subgroup_footprint() asm {
+  %workgroup = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
+  %19 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 262144} : reg<amdgpu.sgpr x2>
+  %subgroup = v_lshrrev_b32_src0_inline %19, 5
+  %22 = v_mov_b32 0
+  %31 = v_and_b32_src0_inline %19, 31
+  %32 = s_lshl_b32_rhs_inline %workgroup, 12
+  %33 = v_lshlrev_b32_src0_inline %subgroup, 10
+  %34 = v_add_u32 %32, %33
+  %35 = v_lshlrev_b32_src0_inline %31, 2
+  %36 = v_add_u32 %34, %35
+  global_store_b32_saddr %36, %22, %output_view
+  global_store_b32_saddr %36, %22, %output_view {offset = 128}
+  global_store_b32_saddr %36, %22, %output_view {offset = 256}
+  global_store_b32_saddr %36, %22, %output_view {offset = 384}
+  global_store_b32_saddr %36, %22, %output_view {offset = 512}
+  global_store_b32_saddr %36, %22, %output_view {offset = 640}
+  global_store_b32_saddr %36, %22, %output_view {offset = 768}
+  global_store_b32_saddr %36, %22, %output_view {offset = 896}
+  return
+}
+
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @oversized_f32x64_store_rejected(%output: buffer, %value: vector<64xf32>) {
+  %output_base = index.constant 0 : offset
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %output_view = buffer.view %output_global[%output_base] : buffer -> view<64xf32>
+  // ERROR@+1: AMDGPU/040 {vector_type="vector<64xf32>", vector_lane_count="64", element_byte_count="4", required_32bit_lane_count="64", native_max_32bit_lane_count="4", native_max_vector_lane_count="4", scalarized_max_32bit_lane_count="32", scalarized_max_vector_lane_count="32"}
+  vector.store %value, %output_view[0] : vector<64xf32>, view<64xf32>
+  func.return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @oversized_bf16x128_store_rejected(%output: buffer, %value: vector<128xbf16>) {
+  %output_base = index.constant 0 : offset
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %output_view = buffer.view %output_global[%output_base] : buffer -> view<128xbf16>
+  // ERROR@+1: AMDGPU/040 {vector_type="vector<128xbf16>", vector_lane_count="128", element_byte_count="2", required_32bit_lane_count="64", native_max_32bit_lane_count="4", native_max_vector_lane_count="8", scalarized_max_32bit_lane_count="32", scalarized_max_vector_lane_count="64"}
+  vector.store %value, %output_view[0] : vector<128xbf16>, view<128xbf16>
+  func.return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @workgroup_dependent_lds_index_rejected() {
   %unit = index.constant 1 : index
@@ -305,30 +350,30 @@ kernel.def target(@target) @workgroup_dependent_lds_index_rejected() {
   %span = index.constant 32 : index
   %base = index.mul %workgroup, %span : index
   %element_index = index.add %base, %lane : index
-  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 0 : offset
   %bytes = index.constant 256 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xi32, #dense>
-  %one = vector.constant 1 : vector<1xi32>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi32>
+  %stored_value = vector.constant 1 : vector<1xi32>
   // ERROR@+1: AMDGPU/023 {constraint_key="memory_access.workgroup_dynamic_index_source"}
-  vector.store %one, %scratch_view[%element_index] : vector<1xi32>, view<64xi32, #dense>
+  vector.store %stored_value, %scratch_view[%element_index] : vector<1xi32>, view<64xi32>
   kernel.return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @lds_i8x8_strided_load_rejected() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch() {
   %tid = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 0 : offset
   %bytes = index.constant 4096 : offset
   %layout = encoding.layout.strided [8, 2] : encoding<layout>
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64x8xi8, %layout>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64x8xi8, %layout>
   // ERROR@+1: AMDGPU/023 {constraint_key="memory_access.vector_axis_stride"}
   %loaded = vector.load %scratch_view[%tid, 0] : view<64x8xi8, %layout> -> vector<8xi8>
   kernel.return
@@ -336,62 +381,45 @@ kernel.def target(@target) @lds_i8x8_strided_load_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
-
-kernel.def target(@target) @cache_policy_non_temporal_load_rejected() {
-  %c1 = index.constant 1 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
-} launch(%input: buffer) {
-  %tid = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64x4xi32, #dense>
-  // REMARK@+2: BACKEND/040 "rejected cache policy 'device/non_temporal'" "decision 'memory_cache_policy.descriptor_encoding'" "encoding 'gfx9_11_glc_slc_dlc'"
-  // ERROR@+1: AMDGPU/024 {constraint_key="memory_cache_policy.descriptor_encoding", memory_space="global", cache_scope="device", cache_temporal="non_temporal", descriptor_set_key="amdgpu.rdna3.core"}
-  %loaded = vector.load %input_view[%tid, 0] {cache_scope = device, cache_temporal = non_temporal} : view<64x4xi32, #dense> -> vector<4xi32>
-  kernel.return
-}
-
-// ====
-
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @cache_policy_workgroup_store_rejected() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch() {
   %tid = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 0 : offset
   %bytes = index.constant 1024 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64x4xi32, #dense>
-  %one = vector.constant 1 : vector<4xi32>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64x4xi32>
+  %stored_value = vector.constant 1 : vector<4xi32>
   // REMARK@+2: BACKEND/040 "rejected cache policy 'device/non_temporal'" "decision 'memory_cache_policy.workgroup'" "store in workgroup"
-  // ERROR@+1: AMDGPU/024 {constraint_key="memory_cache_policy.workgroup", memory_space="workgroup", cache_scope="device", cache_temporal="non_temporal", descriptor_set_key="amdgpu.rdna3.core"}
-  vector.store %one, %scratch_view[%tid, 0] {cache_scope = device, cache_temporal = non_temporal} : vector<4xi32>, view<64x4xi32, #dense>
+  // ERROR@+1: AMDGPU/024 {constraint_key="memory_cache_policy.workgroup", memory_space="workgroup", cache_scope="device", cache_temporal="non_temporal", descriptor_set_key="amdgpu.gfx11.generic.core"}
+  vector.store %stored_value, %scratch_view[%tid, 0] {cache_scope = device, cache_temporal = non_temporal} : vector<4xi32>, view<64x4xi32>
   kernel.return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @global_atomic_system_scope_rejected() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%input: buffer) {
   %tid = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
+  %input_base = index.constant 0 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
-  %view = buffer.view %global[%zero] : buffer -> view<64xi32, #dense>
-  %one = scalar.constant 1 : i32
+  %view = buffer.view %global[%input_base] : buffer -> view<64xi32>
+  %atomic_increment = scalar.constant 1 : i32
   // ERROR@+1: AMDGPU/023 {constraint_key="atomic.scope"}
-  view.atomic.reduce<addi> %one, %view[%tid] {ordering = release, scope = system} : i32, view<64xi32, #dense>
+  view.atomic.reduce<addi> %atomic_increment, %view[%tid] {ordering = release, scope = system} : i32, view<64xi32>
   kernel.return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @global_dynamic_offset_sum_flat() {
   %c1 = index.constant 1 : index
@@ -405,21 +433,21 @@ kernel.def target(@target) @global_dynamic_offset_sum_flat() {
   %lane_y = kernel.workitem.id<y> : index
   %base_y = index.constant 2000 : index
   %y = index.add %lane_y, %base_y : index
-  %zero = index.constant 0 : offset
+  %input_base = index.constant 0 : offset
   %layout = encoding.layout.strided [1, 1] : encoding<layout>
-  %input_view = buffer.view %input[%zero] : buffer -> view<4294967296x4096xi8, %layout>
+  %input_view = buffer.view %input[%input_base] : buffer -> view<4294967296x4096xi8, %layout>
   %loaded = vector.load %input_view[%x, %y] : view<4294967296x4096xi8, %layout> -> vector<4xi8>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 4, 1) @global_dynamic_offset_sum_flat() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 4, 1) workgroup_count(1, 1, 1) @global_dynamic_offset_sum_flat() asm {
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @workgroup_count_dynamic_workgroup_size_rejected(%workgroups: index, %size: index) {
   %c1 = index.constant 1 : index
@@ -432,7 +460,7 @@ kernel.def target(@target) @workgroup_count_dynamic_workgroup_size_rejected(%wor
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @workgroup_count_non_power_of_two_workgroup_size_rejected(%workgroups: index) {
   %c1 = index.constant 1 : index
@@ -446,7 +474,7 @@ kernel.def target(@target) @workgroup_count_non_power_of_two_workgroup_size_reje
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_id_rejected(%size: index) {
   %c1 = index.constant 1 : index
@@ -458,13 +486,13 @@ kernel.def target(@target) @subgroup_id_rejected(%size: index) {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @subgroup_id_rejected() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) @subgroup_id_rejected() asm {
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @subgroup_lane_id_rejected(%size: index) {
   %c1 = index.constant 1 : index
@@ -476,13 +504,13 @@ kernel.def target(@target) @subgroup_lane_id_rejected(%size: index) {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @subgroup_lane_id_rejected() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) @subgroup_lane_id_rejected() asm {
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @workgroup_vote_count_rejected() {
   %c1 = index.constant 1 : index
@@ -495,7 +523,7 @@ kernel.def target(@target) @workgroup_vote_count_rejected() {
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @vector_transpose_dynamic_shape_rejected(%n: index) {
   // ERROR@+1: TARGET/031 {type_constraint="vector.static"}
@@ -507,25 +535,7 @@ func.def target(@target) @vector_transpose_dynamic_shape_rejected(%n: index) {
 
 // ====
 
-amdgpu.target<gfx1100> @target
-
-kernel.def target(@target) @fragment_rhs_dense_layout_rejected() {
-  %c1 = index.constant 1 : index
-  %c32 = index.constant 32 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index
-} launch(%rhs_buffer: buffer) {
-  %base = index.constant 0 : offset
-  %k = index.constant 16 : index
-  %n = index.constant 16 : index
-  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x16xf16, #dense>
-  // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.packed_axis_stride"}
-  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xf16, #dense> -> vector<16xf16>
-  kernel.return
-}
-
-// ====
-
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @fragment_payload_rejected() {
   %c1 = index.constant 1 : index
@@ -535,15 +545,15 @@ kernel.def target(@target) @fragment_payload_rejected() {
   %base = index.constant 0 : offset
   %m = index.constant 16 : index
   %k = index.constant 16 : index
-  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xf16, #dense>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xf16>
   // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.payload_layout"}
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16, #dense> -> vector<8xf16>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16> -> vector<8xf16>
   kernel.return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 kernel.def target(@target) @fragment_wave64_result_wide_f32_payload_rejected() {
   %unit = index.constant 1 : index
@@ -553,17 +563,17 @@ kernel.def target(@target) @fragment_wave64_result_wide_f32_payload_rejected() {
   %base = index.constant 0 : offset
   %m = index.constant 16 : index
   %n = index.constant 16 : index
-  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32, #dense>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32>
   %values = vector.constant 0.0 : vector<8xf32>
   %fragment = vector.fragment<result> %values shape [%m, %n] : vector<8xf32>
   // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.payload_layout"}
-  vector.fragment.store<result> %fragment, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %fragment, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
   kernel.return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 kernel.def target(@target) @fragment_wave64_result_ordinary_f16_storage_rejected() {
   %unit = index.constant 1 : index
@@ -573,18 +583,18 @@ kernel.def target(@target) @fragment_wave64_result_ordinary_f16_storage_rejected
   %base = index.constant 0 : offset
   %m = index.constant 16 : index
   %n = index.constant 16 : index
-  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32, #dense>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32>
   %wide = vector.constant 0.0 : vector<8xf32>
   %narrow = vector.fptrunc %wide : vector<8xf32> to vector<8xf16>
   %fragment = vector.fragment<result> %narrow shape [%m, %n] : vector<8xf16>
   // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.payload_storage"}
-  vector.fragment.store<result> %fragment, %out_view[0, 0] shape [%m, %n] : vector<8xf16>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %fragment, %out_view[0, 0] shape [%m, %n] : vector<8xf16>, view<16x16xf32>
   kernel.return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target {subgroup_size = 64}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 kernel.def target(@target) @fragment_store_conversion_rejected() {
   %unit = index.constant 1 : index
@@ -596,16 +606,16 @@ kernel.def target(@target) @fragment_store_conversion_rejected() {
   %n = index.constant 16 : index
   %k = index.constant 16 : index
   %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
-  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xbf16, #dense>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xbf16>
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x16xbf16, %rhs_layout>
-  %init_view = buffer.view %init_buffer[%base] : buffer -> view<16x16xbf16, #dense>
-  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32, #dense>
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xbf16, #dense> -> vector<16xbf16>
+  %init_view = buffer.view %init_buffer[%base] : buffer -> view<16x16xbf16>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xbf16> -> vector<16xbf16>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xbf16, %rhs_layout> -> vector<16xbf16>
-  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xbf16, #dense> -> vector<8xbf16>
+  %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xbf16> -> vector<8xbf16>
   %result = vector.mma %lhs, %rhs, %init : vector<16xbf16>, vector<16xbf16>, vector<8xbf16>
   // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.store_conversion"}
-  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<8xbf16>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<8xbf16>, view<16x16xf32>
   kernel.return
 }
 
@@ -621,15 +631,86 @@ kernel.def target(@target) @fragment_target_layout_rejected() {
   %base = index.constant 0 : offset
   %m = index.constant 16 : index
   %k = index.constant 16 : index
-  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xf64, #dense>
-  // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.target_layout"}
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf64, #dense> -> vector<1xf64>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xf64>
+  // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.shape"}
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf64> -> vector<1xf64>
   kernel.return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @fragment_tf32_schema_required() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%lhs_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %k = index.constant 8 : index
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x8xf32>
+  // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.payload_layout"}
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x8xf32> -> vector<2xf32>
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @cdna_legacy_mfma_fragment_layout_rejected() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %out_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 4 : index
+  %rhs_layout = encoding.layout.strided [1, 4] : encoding<layout>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x4xf16>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<4x16xf16, %rhs_layout>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32>
+  // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.payload_layout"}
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x4xf16> -> vector<4xf16>
+  // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.payload_layout"}
+  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<4x16xf16, %rhs_layout> -> vector<4xf16>
+  %zero_acc = vector.constant 0.0 : vector<16xf32>
+  %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<16xf32>
+  // ERROR@+1: AMDGPU/021 {matrix_constraint="payload_shape"}
+  %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<16xf32>
+  // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.payload_layout"}
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<16xf32>, view<16x16xf32>
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @fragment_sparse_density_layout_rejected() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%lhs_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %k = index.constant 64 : index
+  %lhs_schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=8, payload_registers=2, sparsity=n_m_structured, sparsity_group_elements=8, sparsity_group_nonzero_elements=2> : encoding<schema>
+  %lhs_layout = encoding.layout.dense : encoding<layout>
+  %lhs_storage = encoding.define #encoding.storage {layout = %lhs_layout : encoding<layout>, schema = %lhs_schema : encoding<schema>} : encoding<storage>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x64xf8E5M2, %lhs_storage>
+  %metadata_value = scalar.constant 0 : i32
+  %metadata = vector.splat %metadata_value : vector<1xi32>
+  // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.sparsity_layout"}
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] using {sparsity = %metadata : vector<1xi32>} : view<16x64xf8E5M2, %lhs_storage> -> vector<2xi32>
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @fragment_private_memory_rejected() {
   %c1 = index.constant 1 : index
@@ -640,16 +721,79 @@ kernel.def target(@target) @fragment_private_memory_rejected() {
   %bytes = index.constant 512 : offset
   %m = index.constant 16 : index
   %k = index.constant 16 : index
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = private} : buffer
-  %lhs_view = buffer.view %scratch[%base] : buffer -> view<16x16xf16, #dense>
+  %scratch = buffer.alloca<private> align(16) %bytes : buffer
+  %lhs_view = buffer.view %scratch[%base] : buffer -> view<16x16xf16>
   // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.memory_space"}
-  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16, #dense> -> vector<16xf16>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16> -> vector<16xf16>
   kernel.return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @fragment_static_vaddr_offset_range_rejected() {
+  %c1 = index.constant 1 : index
+  %c32 = index.constant 32 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index
+} launch(%lhs_buffer: buffer) {
+  %base = index.constant 4294967296 : offset
+  %m = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xf16>
+  // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.base_offset"}
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16> -> vector<16xf16>
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @fragment_repack_result_to_lhs_rejected(%payload: vector<8xf32>) -> (vector<16xf16>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %fragment = vector.fragment<result> %payload shape [%m, %n] : vector<8xf32>
+  // ERROR@+1: AMDGPU/041 {source_role_key="accumulator_result", result_role_key="lhs", source_type="vector<8xf32>", result_type="vector<16xf16>", strategy_key="amdgpu.fragment_repack.strategy.diagnostic", reason_key="layout_strategy"}
+  %repacked = vector.fragment.repack<lhs> %fragment shape [%m, %n] : vector<8xf32> -> vector<16xf16>
+  func.return %repacked : vector<16xf16>
+}
+
+// ====
+
+// RUN: emit source-low diagnostics=all output=low
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @fragment_repack_rejection_stops_multiblock_emission(%payload: vector<8xf32>, %value: f32) -> (vector<16xbf16>, f32) {
+  %m = index.constant 16 : index
+  %k = index.constant 16 : index
+  // ERROR@+1: AMDGPU/041 {source_role_key="unknown", result_role_key="lhs", source_type="vector<8xf32>", result_type="vector<16xbf16>", strategy_key="amdgpu.fragment_repack.strategy.diagnostic", reason_key="source_fragment_facts"}
+  %repacked = vector.fragment.repack<lhs> %payload shape [%m, %k] : vector<8xf32> -> vector<16xbf16>
+  %after_rejection = scalar.addf %value, %value : f32
+  cfg.br ^next
+^next:
+  %next = scalar.mulf %after_rejection, %value : f32
+  func.return %repacked, %next : vector<16xbf16>, f32
+}
+
+// ====
+
+amdgpu.target<gfx950> @target
+
+func.def target(@target) @fragment_repack_result_to_lhs_shape_rejected(%payload: vector<16xf32>) -> (vector<8xbf16>) {
+  %m = index.constant 32 : index
+  %n = index.constant 32 : index
+  %k = index.constant 16 : index
+  %fragment = vector.fragment<result> %payload shape [%m, %n] : vector<16xf32>
+  // ERROR@+1: AMDGPU/041 {source_role_key="accumulator_result", result_role_key="lhs", source_type="vector<16xf32>", result_type="vector<8xbf16>", strategy_key="amdgpu.fragment_repack.strategy.diagnostic", reason_key="fragment_shape"}
+  %repacked = vector.fragment.repack<lhs> %fragment shape [%m, %k] : vector<16xf32> -> vector<8xbf16>
+  func.return %repacked : vector<8xbf16>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @packed_select_requires_uniform_mask(%mask: vector<4xi1>, %true_value: vector<4xbf16>, %false_value: vector<4xbf16>) -> (vector<4xbf16>) {
   // ERROR@+1: AMDGPU/023 {constraint_key="select.packed_mask_uniform"}

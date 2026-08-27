@@ -74,6 +74,7 @@ loom_cc_library(
     loom::codegen::low::diagnostics
     loom::codegen::low::frame
     loom::codegen::low::function
+    loom::codegen::low::function_model
     loom::codegen::low::lower
     loom::codegen::low::packet_json
     loom::codegen::low::pipeline::pass_environment
@@ -99,7 +100,6 @@ loom_cc_library(
     loom::pass::registry
     loom::pass::tooling
     loom::sanitizer::options
-    loom::target::compile_report_format
     loom::target::entry_selection
     loom::target::legalization
     loom::target::low_asm_diagnostics
@@ -109,6 +109,7 @@ loom_cc_library(
     loom::target::math_policy
     loom::target::pipeline
     loom::target::predicate
+    loom::target::reporting::format
     loom::target::types
     loom::tooling::compile::pipeline
     loom::tools::loom-format::convert
@@ -177,6 +178,7 @@ loom_cc_test(
     ::report
     iree::base
     iree::base::internal::arena
+    iree::base::internal::json
     iree::testing::gtest
     iree::testing::gtest_main
     loom::error::error_defs
@@ -214,6 +216,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::format::text::parser
     loom::ir
+    loom::link::linker
     loom::ops::op_defs
   TESTONLY
   PUBLIC
@@ -246,6 +249,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::ir
+    loom::ops::config
     loom::ops::func
     loom::ops::index
     loom::ops::kernel
@@ -313,6 +317,23 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    file_test
+  SRCS
+    "file_test.cc"
+  DEPS
+    ::file
+    iree::base
+    iree::base::internal::arena
+    iree::io::file_handle
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::testing::temp_file
+    loom::ir
+    loom::testing::context
+)
+
 loom_cc_library(
   NAME
     main
@@ -349,9 +370,25 @@ loom_cc_library(
   PUBLIC
 )
 
+set(_llvmir_provider_platform_copts "")
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_AMDGPU)
+  list(APPEND _llvmir_provider_platform_copts "-DLOOM_CHECK_HAVE_LLVMIR_AMDGPU_TARGET_ENV=1")
+endif()
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_X86)
+  list(APPEND _llvmir_provider_platform_copts "-DLOOM_CHECK_HAVE_LLVMIR_X86_TARGET_ENV=1")
+endif()
+set(_llvmir_provider_platform_deps "")
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_AMDGPU)
+  list(APPEND _llvmir_provider_platform_deps loom::target::emit::llvmir::amdgpu::target_env)
+endif()
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_X86)
+  list(APPEND _llvmir_provider_platform_deps loom::target::emit::llvmir::x86::target_env)
+endif()
 loom_cc_library(
   NAME
     llvmir_provider
+  COPTS
+    ${_llvmir_provider_platform_copts}
   HDRS
     "llvmir_provider.h"
   SRCS
@@ -359,9 +396,8 @@ loom_cc_library(
   DEPS
     ::provider
     iree::base
-    loom::target::emit::llvmir::amdgpu::target_env
     loom::target::emit::llvmir::loom_check
-    loom::target::emit::llvmir::x86::target_env
+    ${_llvmir_provider_platform_deps}
   TESTONLY
   PUBLIC
 )
@@ -399,6 +435,7 @@ loom_cc_test(
     ::report
     iree::base
     iree::base::internal::arena
+    iree::base::internal::json
     iree::testing::gtest
     iree::testing::gtest_main
     loom::util::stream
@@ -471,6 +508,7 @@ loom_cc_binary(
     ::provider
     ::test_provider
     iree::base
+    loom::target::arch::cmd::check::check_provider
     ${_loom_check_platform_deps}
   TESTONLY
 )

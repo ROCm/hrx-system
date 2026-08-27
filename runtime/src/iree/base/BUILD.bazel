@@ -90,10 +90,40 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "alignment_test",
+    srcs = ["alignment_test.cc"],
+    deps = [
+        ":core_headers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "bitfield_test",
     srcs = ["bitfield_test.cc"],
     deps = [
         ":base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "cpu_data",
+    srcs = ["cpu_data.c"],
+    hdrs = ["cpu_data.h"],
+    deps = [
+        ":base",
+        "//runtime/src/iree/schemas:cpu_data",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "cpu_data_test",
+    srcs = ["cpu_data_test.cc"],
+    deps = [
+        ":cpu_data",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

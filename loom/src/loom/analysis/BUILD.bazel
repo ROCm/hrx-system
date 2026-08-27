@@ -4,12 +4,46 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_benchmark", "loom_cc_library", "loom_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "control_uniformity",
+    srcs = ["control_uniformity.c"],
+    hdrs = ["control_uniformity.h"],
+    deps = [
+        ":scc",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "control_uniformity_test",
+    srcs = ["control_uniformity_test.cc"],
+    deps = [
+        ":control_uniformity",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
 )
 
 loom_cc_library(
@@ -21,6 +55,27 @@ loom_cc_library(
         "//loom/src/loom/util:dominance",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "symbol_value_constraints",
+    srcs = ["symbol_value_constraints.c"],
+    hdrs = ["symbol_value_constraints.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "symbol_value_constraints_test",
+    srcs = ["symbol_value_constraints_test.cc"],
+    deps = [
+        ":symbol_value_constraints",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -50,6 +105,7 @@ loom_cc_library(
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 
@@ -65,6 +121,19 @@ loom_cc_test(
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "condition_facts_benchmark",
+    srcs = ["condition_facts_benchmark.cc"],
+    deps = [
+        ":condition_facts",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:benchmark_main",
     ],
 )
 
@@ -103,29 +172,33 @@ loom_cc_test(
 )
 
 loom_cc_library(
-    name = "func_provider_catalog",
-    srcs = ["func_provider_catalog.c"],
-    hdrs = ["func_provider_catalog.h"],
+    name = "template_provider_catalog",
+    srcs = ["template_provider_catalog.c"],
+    hdrs = ["template_provider_catalog.h"],
     deps = [
         ":symbol_facts",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:func_symbol_facts",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/target:facts",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
 
 loom_cc_test(
-    name = "func_provider_catalog_test",
-    srcs = ["func_provider_catalog_test.cc"],
+    name = "template_provider_catalog_test",
+    srcs = ["template_provider_catalog_test.cc"],
     deps = [
-        ":func_provider_catalog",
         ":symbol_facts",
+        ":template_provider_catalog",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/testing:module_ptr",
         "//runtime/src/iree/base/internal:arena",
@@ -135,11 +208,21 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "native_layout",
+    hdrs = ["native_layout.h"],
+    deps = [
+        ":contract_roles",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "matrix_fragment_layout",
     srcs = ["matrix_fragment_layout.c"],
     hdrs = ["matrix_fragment_layout.h"],
     deps = [
         ":contract_roles",
+        ":native_layout",
         "//runtime/src/iree/base",
     ],
 )
@@ -221,6 +304,7 @@ loom_cc_library(
     srcs = ["kernel_async_legality.c"],
     hdrs = ["kernel_async_legality.h"],
     deps = [
+        ":control_uniformity",
         ":movement",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
@@ -245,6 +329,7 @@ loom_cc_library(
         "//loom/src/loom/ops:func_symbol_facts",
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/target:facts",
         "//loom/src/loom/target:function_contract",
         "//loom/src/loom/target:types",
         "//runtime/src/iree/base",
@@ -259,6 +344,8 @@ loom_cc_test(
         ":kernel_launch_config",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
+        "//loom/src/loom/target:facts",
+        "//loom/src/loom/target:types",
         "//loom/src/loom/testing:context",
         "//loom/src/loom/testing:module_ptr",
         "//runtime/src/iree/base",
@@ -270,8 +357,16 @@ loom_cc_test(
 
 loom_cc_library(
     name = "vector_memory_footprint",
-    srcs = ["vector_memory_footprint.c"],
-    hdrs = ["vector_memory_footprint.h"],
+    srcs = [
+        "memory_root_bounds.c",
+        "vector_memory_footprint.c",
+        "vector_memory_mask_bounds.c",
+    ],
+    hdrs = [
+        "memory_root_bounds.h",
+        "vector_memory_footprint.h",
+        "vector_memory_mask_bounds.h",
+    ],
     deps = [
         ":cfg_condition_facts",
         ":condition_facts",
@@ -288,8 +383,8 @@ loom_cc_library(
         "//loom/src/loom/util:cfg_graph",
         "//loom/src/loom/util:dominance",
         "//loom/src/loom/util:fact_table",
-        "//loom/src/loom/util:math",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
@@ -335,6 +430,7 @@ loom_cc_library(
         ":contract",
         "//loom/src/loom/ops/encoding",
         "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:numeric_format",
         "//runtime/src/iree/base",
     ],
 )
@@ -378,6 +474,7 @@ loom_cc_library(
         ":contract",
         ":contract_storage",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/encoding",
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
@@ -411,7 +508,9 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/ir",
         "//loom/src/loom/target:registers",
+        "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:segmented_storage",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
@@ -498,8 +597,8 @@ loom_cc_library(
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/util:fact_table",
-        "//loom/src/loom/util:math",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
@@ -516,6 +615,7 @@ loom_cc_test(
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/ops/vector",
+        "//loom/src/loom/ops/view",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -530,6 +630,8 @@ loom_cc_library(
     hdrs = ["motion.h"],
     deps = [
         ":availability",
+        ":loop_domain",
+        ":movement",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//runtime/src/iree/base",
@@ -574,29 +676,34 @@ loom_cc_test(
 )
 
 loom_cc_library(
-    name = "symbol_dependencies",
-    srcs = ["symbol_dependencies.c"],
-    hdrs = ["symbol_dependencies.h"],
+    name = "symbol_references",
+    srcs = ["symbol_references.c"],
+    hdrs = ["symbol_references.h"],
     deps = [
         ":scc",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/template",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
 
 loom_cc_test(
-    name = "symbol_dependencies_test",
-    srcs = ["symbol_dependencies_test.cc"],
+    name = "symbol_references_test",
+    srcs = ["symbol_references_test.cc"],
     deps = [
-        ":symbol_dependencies",
+        ":symbol_references",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/config",
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/global",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/testing:module_ptr",
         "//runtime/src/iree/base/internal:arena",
@@ -637,7 +744,7 @@ loom_cc_library(
     srcs = ["symbol_liveness.c"],
     hdrs = ["symbol_liveness.h"],
     deps = [
-        ":symbol_dependencies",
+        ":symbol_references",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//runtime/src/iree/base",
@@ -649,12 +756,14 @@ loom_cc_test(
     name = "symbol_liveness_test",
     srcs = ["symbol_liveness_test.cc"],
     deps = [
-        ":symbol_dependencies",
         ":symbol_liveness",
+        ":symbol_references",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/template",
+        "//loom/src/loom/ops/test",
         "//loom/src/loom/testing:module_ptr",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
@@ -664,8 +773,16 @@ loom_cc_test(
 
 loom_cc_library(
     name = "symbolic_expr",
-    srcs = ["symbolic_expr.c"],
-    hdrs = ["symbolic_expr.h"],
+    srcs = [
+        "symbolic_expr.c",
+        "symbolic_expr_proof.c",
+        "symbolic_value.c",
+        "symbolic_value.h",
+    ],
+    hdrs = [
+        "symbolic_expr.h",
+        "symbolic_expr_proof.h",
+    ],
     deps = [
         ":condition_facts",
         ":integer_relation",
@@ -675,10 +792,27 @@ loom_cc_library(
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/scf",
+        "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:fact_table",
-        "//loom/src/loom/util:math",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "symbolic_expr_test_fixture",
+    testonly = True,
+    hdrs = ["symbolic_expr_test_fixture.h"],
+    deps = [
+        ":symbolic_expr",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
     ],
 )
 
@@ -701,6 +835,7 @@ loom_cc_test(
     deps = [
         ":type_refinement",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
         "//loom/src/loom/ir:type_refinement",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base/internal:arena",
@@ -722,8 +857,8 @@ loom_cc_library(
         "//loom/src/loom/ops/encoding",
         "//loom/src/loom/ops/view",
         "//loom/src/loom/util:fact_table",
-        "//loom/src/loom/util:math",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
@@ -751,8 +886,24 @@ loom_cc_test(
     name = "symbolic_expr_test",
     srcs = ["symbolic_expr_test.cc"],
     deps = [
+        ":symbolic_expr",
+        ":symbolic_expr_test_fixture",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "symbolic_expr_proof_test",
+    srcs = ["symbolic_expr_proof_test.cc"],
+    deps = [
         ":condition_facts",
         ":symbolic_expr",
+        ":symbolic_expr_test_fixture",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/index",

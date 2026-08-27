@@ -59,10 +59,11 @@ python dev.py importers env tilelang --format=shell
 python dev.py importers env mlir --format=shell
 ```
 
-`setup` materializes the environment under `.tmp/importers/<name>/` from a
-checked-in lock file named `requirements-importers-<name>.lock.txt`. `doctor`
-re-runs the import probes and updates the environment manifest. `env` prints
-the manifest or shell-style `PYTHONPATH` value.
+`setup` resolves the Python 3.12 ABI shared with Bazel and materializes the
+environment under `.tmp/importers/<name>/venv-3.12/` from a checked-in lock file
+named `requirements-importers-<name>.lock.txt`. `doctor` re-runs the import
+probes and updates the environment manifest. `env` prints the manifest or
+shell-style `PYTHONPATH` value.
 
 Build-system commands accept `--importer-env <name>`, which selects both the
 build toggle and the locked Python environment:

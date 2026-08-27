@@ -1,4 +1,4 @@
-global.constant @weights : tile<[%m]x[%k]xi8, #q8_0<block=32>> where [mul(%m, 16)]
+global.constant @weights : tile<[%m]x[%k]xi8, #encoding.i8<payload_elements=32>> where [mul(%m, 16)]
 
 global.variable @state : f32 = 0.0
 
@@ -12,8 +12,8 @@ func.def initializer @init_state(%value: f32) {
 }
 
 func.def @load_weights() {
-  %tile, %m, %k = global.load @weights : tile<[%m]x[%k]xi8, #q8_0<block=32>>
-  test.use %tile, %m, %k : tile<[%m]x[%k]xi8, #q8_0<block=32>>, index, index
+  %tile, %m, %k = global.load @weights : tile<[%m]x[%k]xi8, #encoding.i8<payload_elements=32>>
+  test.use %tile, %m, %k : tile<[%m]x[%k]xi8, #encoding.i8<payload_elements=32>>, index, index
   func.return
 }
 

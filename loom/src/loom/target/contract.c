@@ -9,6 +9,22 @@
 #include <stddef.h>
 #include <stdint.h>
 
+iree_status_t loom_target_contract_query_get_or_allocate_target_state(
+    const loom_target_contract_query_environment_t* environment,
+    const void* key, iree_host_size_t data_length, void** out_data) {
+  IREE_ASSERT_ARGUMENT(environment);
+  IREE_ASSERT_ARGUMENT(key);
+  IREE_ASSERT_GT(data_length, 0);
+  IREE_ASSERT_ARGUMENT(out_data);
+  *out_data = NULL;
+  if (environment->target_state_allocator.fn == NULL) {
+    return iree_ok_status();
+  }
+  return environment->target_state_allocator.fn(
+      environment->target_state_allocator.user_data, key, data_length,
+      out_data);
+}
+
 static iree_status_t loom_target_contract_index_count_fragment_rows(
     const loom_target_contract_binding_t* bindings, uint16_t binding_count,
     uint16_t* dialect_op_counts, uint8_t* out_dialect_base_id,

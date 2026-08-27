@@ -28,27 +28,63 @@ function(_loom_cc_args_with_project_deps OUTPUT_ARGS)
   set(${OUTPUT_ARGS} ${_ARGS} PARENT_SCOPE)
 endfunction()
 
+function(_loom_cc_add_generated_compile_input_dependencies)
+  cmake_parse_arguments(
+    _RULE
+    ""
+    "PACKAGE;NAME"
+    "HDRS;TEXTUAL_HDRS;SRCS"
+    ${ARGN}
+  )
+
+  if(_RULE_PACKAGE)
+    string(REPLACE "::" "_" _PACKAGE_NAME "${_RULE_PACKAGE}")
+  else()
+    iree_package_name(_PACKAGE_NAME)
+  endif()
+  set(_TARGET_NAME "${_PACKAGE_NAME}_${_RULE_NAME}")
+  if(NOT TARGET "${_TARGET_NAME}")
+    return()
+  endif()
+  set(_CONSUMER_TARGETS "${_TARGET_NAME}")
+  if(TARGET "${_TARGET_NAME}.objects")
+    list(APPEND _CONSUMER_TARGETS "${_TARGET_NAME}.objects")
+  endif()
+
+  foreach(_INPUT IN LISTS _RULE_SRCS _RULE_HDRS _RULE_TEXTUAL_HDRS)
+    foreach(_CONSUMER_TARGET IN LISTS _CONSUMER_TARGETS)
+      iree_generated_output_add_consumer(
+        "${_INPUT}" "${_CONSUMER_TARGET}")
+    endforeach()
+  endforeach()
+endfunction()
+
 function(loom_cc_library)
   _loom_cc_args_with_project_deps(_ARGS ${ARGN})
   iree_cc_library(${_ARGS})
+  _loom_cc_add_generated_compile_input_dependencies(${_ARGS})
 endfunction()
 
 function(loom_cc_binary)
   _loom_cc_args_with_project_deps(_ARGS ${ARGN})
   iree_cc_binary(${_ARGS})
+  _loom_cc_add_generated_compile_input_dependencies(${_ARGS})
 endfunction()
 
 function(loom_cc_test)
   _loom_cc_args_with_project_deps(_ARGS ${ARGN})
   iree_cc_test(${_ARGS})
+  _loom_cc_add_generated_compile_input_dependencies(${_ARGS})
 endfunction()
 
 function(loom_cc_benchmark)
   _loom_cc_args_with_project_deps(_ARGS ${ARGN})
   iree_cc_binary_benchmark(${_ARGS})
+  _loom_cc_add_generated_compile_input_dependencies(${_ARGS})
 endfunction()
 
 function(loom_cc_fuzz)
   _loom_cc_args_with_project_deps(_ARGS ${ARGN})
   iree_cc_fuzz(${_ARGS})
+  _loom_cc_add_generated_compile_input_dependencies(${_ARGS})
 endfunction()

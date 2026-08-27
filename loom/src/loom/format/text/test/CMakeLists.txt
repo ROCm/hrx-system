@@ -29,7 +29,6 @@ loom_cc_test(
     loom::ops::global
     loom::ops::index
     loom::ops::kernel
-    loom::ops::llvmir
     loom::ops::pool
     loom::ops::scalar
     loom::ops::scf

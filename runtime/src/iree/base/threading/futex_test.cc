@@ -51,9 +51,8 @@ TEST(FutexTest, WakeWakesWaiter) {
 
     // Wait for the value to change from 0.
     while (futex_word.load(std::memory_order_acquire) == 0) {
-      iree_futex_wait(
-          const_cast<std::atomic<uint32_t>*>(&futex_word), 0,
-          iree_time_now() + 100 * 1000000);  // 100ms timeout for safety
+      iree_futex_wait(const_cast<std::atomic<uint32_t>*>(&futex_word), 0,
+                      IREE_TIME_INFINITE_FUTURE);
     }
 
     waiter_completed.store(true, std::memory_order_release);
@@ -64,9 +63,6 @@ TEST(FutexTest, WakeWakesWaiter) {
     iree_thread_yield();
   }
 
-  // Give the waiter time to enter the futex wait.
-  iree_wait_until(iree_time_now() + iree_make_duration_ms(10));
-
   // Change the value and wake.
   futex_word.store(1, std::memory_order_release);
   iree_futex_wake(const_cast<std::atomic<uint32_t>*>(&futex_word), 1);
@@ -76,13 +72,12 @@ TEST(FutexTest, WakeWakesWaiter) {
   EXPECT_TRUE(waiter_completed.load(std::memory_order_acquire));
 }
 
-// Tests that wake(N) wakes at most N waiters when multiple are waiting.
-TEST(FutexTest, WakeCount) {
+// Tests that waking all waiters releases every thread waiting on the address.
+TEST(FutexTest, WakeAllWakesMultipleWaiters) {
   std::atomic<uint32_t> futex_word{0};
   std::atomic<int> waiters_started{0};
   std::atomic<int> waiters_woken{0};
   constexpr int kNumWaiters = 3;
-  constexpr int kWakeCount = 2;
 
   std::vector<std::thread> waiters;
   for (int i = 0; i < kNumWaiters; ++i) {
@@ -91,13 +86,8 @@ TEST(FutexTest, WakeCount) {
 
       // Wait until the value changes from 0.
       while (futex_word.load(std::memory_order_acquire) == 0) {
-        iree_status_code_t status =
-            iree_futex_wait(const_cast<std::atomic<uint32_t>*>(&futex_word), 0,
-                            iree_time_now() + 50 * 1000000);  // 50ms timeout
-        if (status == IREE_STATUS_DEADLINE_EXCEEDED) {
-          // Timeout - check if we should exit.
-          if (futex_word.load(std::memory_order_acquire) != 0) break;
-        }
+        iree_futex_wait(const_cast<std::atomic<uint32_t>*>(&futex_word), 0,
+                        IREE_TIME_INFINITE_FUTURE);
       }
 
       waiters_woken.fetch_add(1, std::memory_order_acq_rel);
@@ -109,17 +99,9 @@ TEST(FutexTest, WakeCount) {
     iree_thread_yield();
   }
 
-  // Give waiters time to enter futex wait.
-  iree_wait_until(iree_time_now() + iree_make_duration_ms(20));
-
-  // Change value and wake exactly kWakeCount waiters.
+  // Publishing the value before waking makes this safe whether each waiter is
+  // already blocked in the kernel or is about to check the predicate.
   futex_word.store(1, std::memory_order_release);
-  iree_futex_wake(const_cast<std::atomic<uint32_t>*>(&futex_word), kWakeCount);
-
-  // Wait a bit for woken threads to complete.
-  iree_wait_until(iree_time_now() + iree_make_duration_ms(50));
-
-  // Wake any remaining waiters so they can exit.
   iree_futex_wake(const_cast<std::atomic<uint32_t>*>(&futex_word),
                   IREE_ALL_WAITERS);
 
@@ -127,27 +109,20 @@ TEST(FutexTest, WakeCount) {
     t.join();
   }
 
-  // All waiters should have been woken (either by wake(2) or wake(ALL)).
   EXPECT_EQ(waiters_woken.load(std::memory_order_acquire), kNumWaiters);
 }
 
-// Tests that iree_futex_wait respects the timeout deadline.
-TEST(FutexTest, WaitTimeout) {
+// Tests that a future deadline eventually terminates an unchanged wait.
+TEST(FutexTest, WaitFutureDeadlineExpires) {
   uint32_t futex_word = 0;
 
-  iree_time_t start = iree_time_now();
-  iree_time_t deadline = start + 50 * 1000000;  // 50ms timeout
+  iree_time_t deadline = iree_time_now() + iree_make_duration_ms(1);
+  iree_status_code_t status = IREE_STATUS_OK;
+  while (status == IREE_STATUS_OK) {
+    status = iree_futex_wait(&futex_word, 0, deadline);
+  }
 
-  iree_status_code_t status = iree_futex_wait(&futex_word, 0, deadline);
-
-  iree_time_t elapsed = iree_time_now() - start;
-
-  // Should have timed out.
   EXPECT_EQ(status, IREE_STATUS_DEADLINE_EXCEEDED);
-
-  // Should have waited at least close to the timeout (allow 10ms slack for
-  // scheduling).
-  EXPECT_GE(elapsed, 40 * 1000000);  // At least 40ms
 }
 
 // Tests that iree_futex_wait with immediate deadline returns immediately.

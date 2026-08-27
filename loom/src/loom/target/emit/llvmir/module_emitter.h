@@ -21,6 +21,7 @@
 #include "loom/ir/ir.h"
 #include "loom/target/emit/llvmir/module.h"
 #include "loom/target/emit/llvmir/target_presets.h"
+#include "loom/target/function_version.h"
 #include "loom/target/low_descriptor_registry.h"
 #include "loom/target/types.h"
 
@@ -35,6 +36,9 @@ typedef struct loom_llvmir_emit_low_module_options_t {
   // Number of entries in |entry_ops|. Zero keeps the default all-entry
   // behavior.
   iree_host_size_t entry_count;
+  // Optional compiler-owned function versions participating in emission. The
+  // list and its version objects are borrowed for the call.
+  const loom_function_version_list_t* function_versions;
   // Optional registry of linked target profiles for non-object ABI projection.
   const loom_llvmir_target_profile_registry_t* target_profile_registry;
 } loom_llvmir_emit_low_module_options_t;
@@ -51,7 +55,6 @@ void loom_llvmir_emit_low_module_options_initialize(
 iree_status_t loom_llvmir_emit_low_module(
     loom_module_t* module,
     const loom_low_descriptor_registry_t* descriptor_registry,
-    loom_target_selection_t target_selection,
     iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_allocator_t* scratch_arena,
     const loom_llvmir_emit_low_module_options_t* options,

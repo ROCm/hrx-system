@@ -67,19 +67,37 @@ iree_runtime_cc_library(
 
 iree_runtime_cc_library(
     name = "dump",
-    srcs = ["dump.c"],
+    srcs = [
+        "dump.c",
+        "dump_json.c",
+        "dump_json.h",
+        "dump_layout.c",
+        "dump_layout.h",
+        "dump_state.h",
+        "dump_text.c",
+        "dump_text.h",
+    ],
     hdrs = ["dump.h"],
     deps = [
         ":digest",
         ":file_reader",
         ":format",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
     ],
 )
 
 iree_runtime_cc_library(
     name = "execute",
-    srcs = ["execute.c"],
+    srcs = [
+        "execute.c",
+        "execute_object.c",
+        "execute_object.h",
+        "execute_operation.c",
+        "execute_operation.h",
+        "execute_state.c",
+        "execute_state.h",
+    ],
     hdrs = ["execute.h"],
     deps = [
         ":digest",
@@ -101,15 +119,17 @@ iree_runtime_cc_library(
         "recorder_buffer.h",
         "recorder_command_buffer.c",
         "recorder_command_buffer.h",
-        "recorder_event.c",
-        "recorder_event.h",
+        "recorder_device.c",
         "recorder_executable.c",
         "recorder_executable.h",
         "recorder_file.c",
         "recorder_file.h",
         "recorder_record.h",
     ],
-    hdrs = ["recorder.h"],
+    hdrs = [
+        "recorder.h",
+        "recorder_device.h",
+    ],
     deps = [
         ":digest",
         ":file_writer",
@@ -162,6 +182,26 @@ iree_runtime_cc_test(
     ],
 )
 
+iree_runtime_cc_test(
+    name = "execute_atomic_test",
+    srcs = [
+        "execute_atomic_test.cc",
+        "execute_operation.h",
+        "execute_state.h",
+    ],
+    deps = [
+        ":execute",
+        ":file_reader",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/local_sync:sync_driver",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_cmake_extra_content(
     content = """
 endif()
@@ -191,6 +231,7 @@ iree_runtime_cc_test(
     name = "recorder_test",
     srcs = ["recorder_test.cc"],
     deps = [
+        ":execute",
         ":file_reader",
         ":recorder",
         "//runtime/src/iree/async",

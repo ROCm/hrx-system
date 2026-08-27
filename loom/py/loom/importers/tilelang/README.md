@@ -30,8 +30,9 @@ python dev.py importers doctor tilelang
 python dev.py importers env tilelang --format=shell
 ```
 
-The setup command installs from the hash-locked requirements into
-`.tmp/importers/tilelang/venv/` and writes a manifest under
+The setup command resolves the Python 3.12 ABI shared with Bazel, installs from
+the hash-locked requirements into `.tmp/importers/tilelang/venv-3.12/`, and
+writes a manifest under
 `.tmp/importers/tilelang/environment.json`.
 
 ## Bazel

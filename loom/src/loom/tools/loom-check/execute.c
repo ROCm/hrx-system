@@ -18,8 +18,8 @@
 #include "loom/ir/module.h"
 #include "loom/pass/builtin_registry.h"
 #include "loom/pass/tooling.h"
-#include "loom/target/compile_report_format.h"
 #include "loom/target/predicate.h"
+#include "loom/target/reporting/format.h"
 #include "loom/tools/loom-check/diagnostics.h"
 #include "loom/tools/loom-check/requirements.h"
 #include "loom/tools/loom-format/convert.h"
@@ -32,19 +32,19 @@ void loom_check_result_initialize(iree_allocator_t allocator,
                                   loom_check_result_t* out_result) {
   memset(out_result, 0, sizeof(*out_result));
   iree_string_builder_initialize(allocator, &out_result->detail);
-  iree_string_builder_initialize(allocator, &out_result->diff_hunk_json);
+  loom_json_value_list_initialize(allocator, &out_result->diff_hunks);
   iree_string_builder_initialize(allocator, &out_result->actual_output);
   iree_string_builder_initialize(allocator, &out_result->update_edit.text);
-  iree_string_builder_initialize(allocator, &out_result->annotation_edits.json);
-  iree_string_builder_initialize(allocator, &out_result->diagnostic_json);
+  loom_json_value_list_initialize(allocator, &out_result->annotation_edits);
+  loom_json_value_list_initialize(allocator, &out_result->diagnostics);
 }
 
 void loom_check_result_deinitialize(loom_check_result_t* result) {
-  iree_string_builder_deinitialize(&result->diagnostic_json);
-  iree_string_builder_deinitialize(&result->annotation_edits.json);
+  loom_json_value_list_deinitialize(&result->diagnostics);
+  loom_json_value_list_deinitialize(&result->annotation_edits);
   iree_string_builder_deinitialize(&result->update_edit.text);
   iree_string_builder_deinitialize(&result->actual_output);
-  iree_string_builder_deinitialize(&result->diff_hunk_json);
+  loom_json_value_list_deinitialize(&result->diff_hunks);
   iree_string_builder_deinitialize(&result->detail);
 }
 
@@ -71,43 +71,44 @@ const loom_check_emit_provider_t* loom_check_environment_lookup_emit_provider(
 static iree_status_t loom_check_write_diff_hunk_json(
     const loom_diff_result_t* diff, const loom_diff_hunk_t* hunk,
     loom_output_stream_t* stream) {
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream,
-      "\"expected_start_line\": %zu, \"expected_line_count\": %zu, "
-      "\"actual_start_line\": %zu, \"actual_line_count\": %zu, \"lines\": [",
-      hunk->expected_start_line, hunk->expected_line_count,
-      hunk->actual_start_line, hunk->actual_line_count));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("expected_start_line"), hunk->expected_start_line));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("expected_line_count"), hunk->expected_line_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("actual_start_line"), hunk->actual_start_line));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("actual_line_count"), hunk->actual_line_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(&object, IREE_SV("lines")));
+  loom_json_array_writer_t lines;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &lines));
   for (iree_host_size_t i = 0; i < hunk->line_count; ++i) {
-    if (i > 0) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ", "));
-    }
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&lines));
     const loom_diff_hunk_line_t* line = &diff->lines[hunk->line_offset + i];
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, "{\"kind\": "));
-    IREE_RETURN_IF_ERROR(loom_json_write_escaped_cstring(
-        stream, loom_diff_hunk_line_kind_name(line->kind)));
-    IREE_RETURN_IF_ERROR(
-        loom_output_stream_write_cstring(stream, ", \"text\": "));
-    IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(stream, line->text));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "}"));
+    loom_json_object_writer_t line_object;
+    IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &line_object));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &line_object, IREE_SV("kind"),
+        iree_make_cstring_view(loom_diff_hunk_line_kind_name(line->kind))));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &line_object, IREE_SV("text"), line->text));
+    IREE_RETURN_IF_ERROR(loom_json_object_end(&line_object));
   }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "]}"));
-  return iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&lines));
+  return loom_json_object_end(&object);
 }
 
 static iree_status_t loom_check_write_diff_json_hunks(
     const loom_diff_result_t* diff, loom_check_result_t* result) {
   loom_output_stream_t stream;
-  loom_output_stream_for_builder(&result->diff_hunk_json, &stream);
   for (iree_host_size_t i = 0; i < diff->hunk_count; ++i) {
-    if (i > 0) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, ",\n"));
-    }
+    IREE_RETURN_IF_ERROR(
+        loom_json_value_list_begin_value(&result->diff_hunks, &stream));
     IREE_RETURN_IF_ERROR(
         loom_check_write_diff_hunk_json(diff, &diff->hunks[i], &stream));
   }
-  result->diff_hunk_count = diff->hunk_count;
   return iree_ok_status();
 }
 
@@ -140,14 +141,38 @@ static iree_status_t loom_check_append_diagnostic_json(
     loom_check_result_t* result, const loom_diagnostic_t* diagnostic,
     loom_type_formatter_t type_formatter) {
   loom_output_stream_t stream;
-  loom_output_stream_for_builder(&result->diagnostic_json, &stream);
-  if (result->diagnostic_count > 0) {
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, ",\n"));
-  }
+  IREE_RETURN_IF_ERROR(
+      loom_json_value_list_begin_value(&result->diagnostics, &stream));
   IREE_RETURN_IF_ERROR(
       loom_diagnostic_json_write_object(&stream, diagnostic, type_formatter));
-  ++result->diagnostic_count;
   return iree_ok_status();
+}
+
+iree_status_t loom_check_result_append_annotation_edit(
+    loom_check_result_t* result, loom_check_update_edit_kind_t kind,
+    loom_check_source_range_t range, iree_host_size_t target_line,
+    iree_string_view_t text) {
+  loom_output_stream_t stream;
+  IREE_RETURN_IF_ERROR(
+      loom_json_value_list_begin_value(&result->annotation_edits, &stream));
+  loom_json_object_writer_t object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(&stream, &object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("kind"),
+      iree_make_cstring_view(loom_check_update_edit_kind_name(kind))));
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(&object, IREE_SV("range")));
+  loom_json_object_writer_t range_object;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(&stream, &range_object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &range_object, IREE_SV("start_byte"), range.start_byte));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &range_object, IREE_SV("end_byte"), range.end_byte));
+  IREE_RETURN_IF_ERROR(loom_json_object_end(&range_object));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+      &object, IREE_SV("target_line"), target_line));
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_write_string_field(&object, IREE_SV("text"), text));
+  return loom_json_object_end(&object);
 }
 
 iree_status_t loom_check_diagnostic_capture_sink(
@@ -466,13 +491,16 @@ static iree_status_t loom_check_execute_pass_with_output(
         LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ROWS |
         LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ORIGIN_ROWS |
         LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_ROWS |
+        LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS |
         LOOM_TARGET_COMPILE_REPORT_DETAIL_SPILL_ROWS |
         LOOM_TARGET_COMPILE_REPORT_DETAIL_ALLOCATION_FAILURE_ROWS |
         LOOM_TARGET_COMPILE_REPORT_DETAIL_ALLOCATION_HIGH_WATER_ROWS |
         LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS |
         LOOM_TARGET_COMPILE_REPORT_DETAIL_MATH_LEGALIZATION_ROWS |
         LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_LEGALIZATION_ROWS |
-        LOOM_TARGET_COMPILE_REPORT_DETAIL_WAIT_PLAN;
+        LOOM_TARGET_COMPILE_REPORT_DETAIL_WAIT_PLAN |
+        LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_CAPABILITY_ROWS |
+        LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS;
     compile_report_ref = &compile_report;
   }
   if (iree_status_is_ok(status)) {
@@ -524,8 +552,8 @@ static iree_status_t loom_check_execute_pass_with_output(
             environment ? &environment->low_legality_provider_list : NULL,
             environment ? &environment->legalizer_provider_list : NULL,
             math_policy_registry_ref, compile_report_ref,
-            loom_target_selection_empty(), loom_symbol_ref_null(),
-            &low_pass_environment_storage),
+            environment ? environment->target_environment : NULL,
+            /*function_versions=*/NULL, &low_pass_environment_storage),
         .predicate_provider =
             loom_target_pass_predicate_provider(&predicate_storage),
         .block_pool = block_pool,

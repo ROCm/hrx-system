@@ -12,9 +12,9 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from loom.ir import ScalarTypeKind
 from loom.stable_id import stable_id_from_string
 
-LOW_DESCRIPTOR_SET_ABI_VERSION = 26
 LOW_DESCRIPTOR_ENCODING_ID_NONE = (2**16) - 1
 LOW_DESCRIPTOR_SET_ORDINAL_NONE = (2**16) - 1
 
@@ -50,6 +50,37 @@ class OperandRole(CEnum):
     IMPLICIT = "LOOM_LOW_OPERAND_ROLE_IMPLICIT"
 
 
+class OperandSourceBinding(CEnum):
+    NONE = "LOOM_LOW_OPERAND_SOURCE_BINDING_NONE"
+    LHS = "LOOM_LOW_OPERAND_SOURCE_BINDING_LHS"
+    RHS = "LOOM_LOW_OPERAND_SOURCE_BINDING_RHS"
+    ACCUMULATOR = "LOOM_LOW_OPERAND_SOURCE_BINDING_ACCUMULATOR"
+    SPARSE_METADATA = "LOOM_LOW_OPERAND_SOURCE_BINDING_SPARSE_METADATA"
+    LHS_SCALE = "LOOM_LOW_OPERAND_SOURCE_BINDING_LHS_SCALE"
+    RHS_SCALE = "LOOM_LOW_OPERAND_SOURCE_BINDING_RHS_SCALE"
+
+
+_OPERAND_SOURCE_BINDINGS = {
+    "lhs": OperandSourceBinding.LHS,
+    "rhs": OperandSourceBinding.RHS,
+    "acc": OperandSourceBinding.ACCUMULATOR,
+    "sparse_metadata": OperandSourceBinding.SPARSE_METADATA,
+    "lhs_scale": OperandSourceBinding.LHS_SCALE,
+    "rhs_scale": OperandSourceBinding.RHS_SCALE,
+}
+
+
+def operand_source_binding(field_name: str, role: OperandRole) -> OperandSourceBinding:
+    """Returns the canonical dynamic source binding for an input operand."""
+    if role not in (
+        OperandRole.OPERAND,
+        OperandRole.PREDICATE,
+        OperandRole.RESOURCE,
+    ):
+        return OperandSourceBinding.NONE
+    return _OPERAND_SOURCE_BINDINGS.get(field_name, OperandSourceBinding.NONE)
+
+
 class OperandAddressMapKind(CEnum):
     DIRECT = "LOOM_LOW_OPERAND_ADDRESS_MAP_DIRECT"
     LOW_SUBSET = "LOOM_LOW_OPERAND_ADDRESS_MAP_LOW_SUBSET"
@@ -64,6 +95,8 @@ class OperandFlag(CEnum):
     STATE_READ = "LOOM_LOW_OPERAND_FLAG_STATE_READ"
     STATE_WRITE = "LOOM_LOW_OPERAND_FLAG_STATE_WRITE"
     SCHEDULE_ONLY_STATE = "LOOM_LOW_OPERAND_FLAG_SCHEDULE_ONLY_STATE"
+    STORAGE_CONTINUATION = "LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION"
+    VARIADIC = "LOOM_LOW_OPERAND_FLAG_VARIADIC"
 
 
 class RegClassAltFlag(CEnum):
@@ -184,6 +217,11 @@ class ResourceKind(CEnum):
     ADDRESS = "LOOM_LOW_RESOURCE_KIND_ADDRESS"
 
 
+class ResourceFlag(CEnum):
+    VECTOR_ISSUE = "LOOM_LOW_RESOURCE_FLAG_VECTOR_ISSUE"
+    MATRIX_COEXECUTION_SOURCE = "LOOM_LOW_RESOURCE_FLAG_MATRIX_COEXECUTION_SOURCE"
+
+
 class HazardKind(CEnum):
     MIN_DISTANCE = "LOOM_LOW_HAZARD_KIND_MIN_DISTANCE"
     WAIT_COUNTER = "LOOM_LOW_HAZARD_KIND_WAIT_COUNTER"
@@ -202,6 +240,48 @@ class DescriptorFlag(CEnum):
     TERMINATOR = "LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR"
     DEAD_REMOVABLE = "LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE"
     PSEUDO = "LOOM_LOW_DESCRIPTOR_FLAG_PSEUDO"
+    BARRIER = "LOOM_LOW_DESCRIPTOR_FLAG_BARRIER"
+    EARLY_CLOBBER = "LOOM_LOW_DESCRIPTOR_FLAG_EARLY_CLOBBER"
+    VARIADIC_OPERANDS = "LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS"
+
+
+class DescriptorOpKind(CEnum):
+    """Canonical low IR operation used to represent a descriptor packet."""
+
+    OP = "LOOM_LOW_DESCRIPTOR_OP_KIND_OP"
+    CONST = "LOOM_LOW_DESCRIPTOR_OP_KIND_CONST"
+
+
+class InstructionClass(CEnum):
+    """Target-neutral semantic classes for generated low descriptors."""
+
+    OTHER = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_OTHER"
+    SCALAR_ALU = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_SCALAR_ALU"
+    VECTOR_ALU = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_VECTOR_ALU"
+    MATRIX = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_MATRIX"
+    MFMA = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_MFMA"
+    SMFMAC = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_SMFMAC"
+    WMMA = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_WMMA"
+    SWMMAC = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_SWMMAC"
+    DOT = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_DOT"
+    GLOBAL_MEMORY = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_GLOBAL_MEMORY"
+    GLOBAL_LOAD = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_GLOBAL_LOAD"
+    GLOBAL_STORE = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_GLOBAL_STORE"
+    BUFFER_LOAD = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_BUFFER_LOAD"
+    BUFFER_STORE = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_BUFFER_STORE"
+    FLAT_MEMORY = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_FLAT_MEMORY"
+    LOCAL_MEMORY = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_LOCAL_MEMORY"
+    SCALAR_MEMORY = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_SCALAR_MEMORY"
+    PRIVATE_MEMORY = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_PRIVATE_MEMORY"
+    GENERIC_MEMORY = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_GENERIC_MEMORY"
+    ATOMIC = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_ATOMIC"
+    BRANCH = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_BRANCH"
+    BARRIER = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_BARRIER"
+    CONTROL = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_CONTROL"
+    CONVERSION = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_CONVERSION"
+    CACHE = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_CACHE"
+    REGISTER_MOVE = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_REGISTER_MOVE"
+    LDSDMA = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_LDSDMA"
 
 
 class DescriptorAsmSurface(Enum):
@@ -236,6 +316,14 @@ class NativeAsmValueKind(CEnum):
     IMMEDIATE_I64 = "LOOM_LOW_NATIVE_ASM_VALUE_KIND_IMMEDIATE_I64"
     IMMEDIATE_UNSIGNED_HEX = "LOOM_LOW_NATIVE_ASM_VALUE_KIND_IMMEDIATE_UNSIGNED_HEX"
     IMMEDIATE_TARGET_FORMAT = "LOOM_LOW_NATIVE_ASM_VALUE_KIND_IMMEDIATE_TARGET_FORMAT"
+    REGISTER_PART = "LOOM_LOW_NATIVE_ASM_VALUE_KIND_REGISTER_PART"
+    MODIFIER_LITERAL = "LOOM_LOW_NATIVE_ASM_VALUE_KIND_MODIFIER_LITERAL"
+
+
+class AsmOperandSegmentDelimiter(CEnum):
+    ANGLE = "LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_ANGLE"
+    SQUARE = "LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_SQUARE"
+    PAREN = "LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_PAREN"
 
 
 @dataclass(frozen=True, slots=True)
@@ -262,6 +350,8 @@ class RegClass:
     flags: tuple[RegClassFlag, ...] = ()
     target_bank_id: int = 0
     allocatable_count: int = 0
+    fixed_location_base: int = 0
+    fixed_location_count: int = 0
     alias_set_id: int = 0
     spill_class: str | None = None
     full_register_part_mask: int = 1
@@ -289,6 +379,7 @@ class Operand:
     unit_count: int = 1
     address_map_kind: OperandAddressMapKind = OperandAddressMapKind.DIRECT
     addressable_unit_count: int = 0
+    address_state_slot: int = 0
     encoding_field_id: int = 0
     data_format_id: int = 0
     register_part: str | None = None
@@ -340,13 +431,41 @@ class NativeAsmValue:
 
 
 @dataclass(frozen=True, slots=True)
+class AsmResultValueType:
+    """Exact semantic result type reconstructed by target asm.
+
+    A zero vector lane count denotes a scalar. A positive lane count denotes
+    a static rank-1 vector of the same scalar element type.
+    """
+
+    element_type: ScalarTypeKind
+    vector_lane_count: int = 0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.element_type, ScalarTypeKind):
+            raise ValueError("asm result element type must be a ScalarTypeKind")
+        if self.vector_lane_count < 0 or self.vector_lane_count > (2**16) - 1:
+            raise ValueError("asm result vector lane count must fit u16")
+
+
+@dataclass(frozen=True, slots=True)
+class AsmOperandSegment:
+    """Delimited group of operands in a compact Low asm form."""
+
+    delimiter: AsmOperandSegmentDelimiter
+    operands: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class AsmForm:
     mnemonic: str | None = None
     native_assembly_mnemonic: str | None = None
     results: tuple[str, ...] = ()
     operands: tuple[str, ...] = ()
+    operand_segments: tuple[AsmOperandSegment, ...] = ()
     immediates: tuple[AsmImmediate, ...] = ()
     native_assembly_values: tuple[NativeAsmValue, ...] = ()
+    result_value_types: tuple[AsmResultValueType | None, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -458,7 +577,7 @@ class Resource:
     name: str
     capacity_per_cycle: int
     kind: ResourceKind
-    flags: tuple[CEnum, ...] = ()
+    flags: tuple[ResourceFlag, ...] = ()
     contention_group_id: int = 0
 
 
@@ -480,10 +599,12 @@ class ScheduleClass:
     latency_kind: LatencyKind
     model_quality: ModelQuality
     latency_cycles: int = 0
+    schedule_distance_cycles: int = 0
     issue_uses: tuple[IssueUse, ...] = ()
     hazards: tuple[Hazard, ...] = ()
     flags: tuple[ScheduleClassFlag, ...] = ()
     pressure_deltas: tuple[PressureDelta, ...] = ()
+    instruction_classes: tuple[InstructionClass, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -493,6 +614,7 @@ class Descriptor:
     semantic_tag: str | None
     operands: tuple[Operand, ...]
     schedule_class: str
+    op_kind: DescriptorOpKind = DescriptorOpKind.OP
     immediates: tuple[Immediate, ...] = ()
     encoding_field_values: tuple[EncodingFieldValue, ...] = ()
     asm_forms: tuple[AsmForm, ...] = ()
@@ -505,6 +627,7 @@ class Descriptor:
     encoding_format_id: int = 0
     encoding_id: int = 0
     flags: tuple[DescriptorFlag, ...] = ()
+    instruction_classes: tuple[InstructionClass, ...] = ()
     operand_forms: tuple[OperandForm, ...] = ()
     category: DescriptorCategory | None = None
 
@@ -532,8 +655,43 @@ class DescriptorSet:
     categories: tuple[DescriptorCategory, ...] = ()
     default_category: DescriptorCategory | None = None
     requires_explicit_asm_surface: bool = False
+    supported_target_contract_keys: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        canonical_target_contract_keys = tuple(
+            sorted(set(self.supported_target_contract_keys))
+        )
+        if self.supported_target_contract_keys != canonical_target_contract_keys:
+            raise ValueError(
+                f"DescriptorSet '{self.key}': supported target contract keys "
+                "must be sorted and unique"
+            )
+        if len(self.supported_target_contract_keys) > (2**16) - 1:
+            raise ValueError(
+                f"DescriptorSet '{self.key}': supported target contract count "
+                "does not fit the generated u16 table field"
+            )
+        descriptor_set_stable_id = descriptor_stable_id(self.key)
+        supported_target_contract_stable_ids: set[int] = set()
+        for target_contract_key in self.supported_target_contract_keys:
+            _validate_metadata_key("target contract", target_contract_key)
+            if target_contract_key == self.key:
+                raise ValueError(
+                    f"DescriptorSet '{self.key}': support for its own target "
+                    "contract is implicit"
+                )
+            target_contract_stable_id = descriptor_stable_id(target_contract_key)
+            if target_contract_stable_id == descriptor_set_stable_id:
+                raise ValueError(
+                    f"DescriptorSet '{self.key}': supported target contract "
+                    f"'{target_contract_key}' has the same stable ID"
+                )
+            if target_contract_stable_id in supported_target_contract_stable_ids:
+                raise ValueError(
+                    f"DescriptorSet '{self.key}': supported target contract "
+                    f"'{target_contract_key}' has a colliding stable ID"
+                )
+            supported_target_contract_stable_ids.add(target_contract_stable_id)
         if (
             self.default_category is not None
             and self.default_category not in self.categories

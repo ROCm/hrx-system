@@ -78,3 +78,19 @@ selects.config_setting_group(
         "//loom/config/emit:llvmir",
     ],
 )
+
+selects.config_setting_group(
+    name = "llvmir_amdgpu_target_env",
+    match_all = [
+        ":llvmir_artifacts",
+        "//loom/config/target/arch:amdgpu",
+    ],
+)
+
+selects.config_setting_group(
+    name = "llvmir_x86_target_env",
+    match_all = [
+        ":llvmir_artifacts",
+        "//loom/config/target/arch:x86",
+    ],
+)

@@ -13,6 +13,7 @@ from typing import Any
 from loom.dsl import (
     CallLikeKind,
     OperandOwnershipEffectKind,
+    OperandRole,
     OwnershipCarrier,
     ResultOwnershipEffectKind,
     TypeConstraint,
@@ -31,9 +32,12 @@ TYPE_CONSTRAINT_MAP: dict[TypeConstraint, str] = {
     TypeConstraint.BUFFER: "LOOM_TYPE_CONSTRAINT_BUFFER",
     TypeConstraint.INTEGER: "LOOM_TYPE_CONSTRAINT_INTEGER",
     TypeConstraint.FLOAT: "LOOM_TYPE_CONSTRAINT_FLOAT",
+    TypeConstraint.BITWISE_SCALAR: "LOOM_TYPE_CONSTRAINT_BITWISE_SCALAR",
+    TypeConstraint.BYTE_PATTERN_SCALAR: "LOOM_TYPE_CONSTRAINT_BYTE_PATTERN_SCALAR",
     TypeConstraint.INDEX_OR_NON_I1_INTEGER_SCALAR: "LOOM_TYPE_CONSTRAINT_INDEX_OR_NON_I1_INTEGER_SCALAR",
     TypeConstraint.INTEGER_ELEMENT: "LOOM_TYPE_CONSTRAINT_INTEGER_ELEMENT",
     TypeConstraint.FLOAT_ELEMENT: "LOOM_TYPE_CONSTRAINT_FLOAT_ELEMENT",
+    TypeConstraint.BITWISE_ELEMENT: "LOOM_TYPE_CONSTRAINT_BITWISE_ELEMENT",
     TypeConstraint.INDEX_OR_NON_I1_INTEGER_ELEMENT: "LOOM_TYPE_CONSTRAINT_INDEX_OR_NON_I1_INTEGER_ELEMENT",
     TypeConstraint.I1_ELEMENT: "LOOM_TYPE_CONSTRAINT_I1_ELEMENT",
     TypeConstraint.I8_ELEMENT: "LOOM_TYPE_CONSTRAINT_I8_ELEMENT",
@@ -45,7 +49,6 @@ TYPE_CONSTRAINT_MAP: dict[TypeConstraint, str] = {
     TypeConstraint.OFFSET: "LOOM_TYPE_CONSTRAINT_OFFSET",
     TypeConstraint.ADDRESS: "LOOM_TYPE_CONSTRAINT_ADDRESS",
     TypeConstraint.ANY: "LOOM_TYPE_CONSTRAINT_ANY",
-    TypeConstraint.GROUP: "LOOM_TYPE_CONSTRAINT_GROUP",
     TypeConstraint.ANY_ENCODING: "LOOM_TYPE_CONSTRAINT_ANY_ENCODING",
     TypeConstraint.ENCODING_LAYOUT: "LOOM_TYPE_CONSTRAINT_ENCODING_LAYOUT",
     TypeConstraint.ENCODING_SCHEMA: "LOOM_TYPE_CONSTRAINT_ENCODING_SCHEMA",
@@ -55,12 +58,15 @@ TYPE_CONSTRAINT_MAP: dict[TypeConstraint, str] = {
     TypeConstraint.REGISTER: "LOOM_TYPE_CONSTRAINT_REGISTER",
     TypeConstraint.STORAGE: "LOOM_TYPE_CONSTRAINT_STORAGE",
     TypeConstraint.I1: "LOOM_TYPE_CONSTRAINT_I1",
+    TypeConstraint.I32: "LOOM_TYPE_CONSTRAINT_I32",
 }
 
 CALL_LIKE_KIND_MAP: dict[CallLikeKind, str] = {
     CallLikeKind.SEMANTIC: "LOOM_CALL_LIKE_KIND_SEMANTIC",
     CallLikeKind.LOW_INTERNAL: "LOOM_CALL_LIKE_KIND_LOW_INTERNAL",
     CallLikeKind.LOW_INVOKE: "LOOM_CALL_LIKE_KIND_LOW_INVOKE",
+    CallLikeKind.COMMAND_PROGRAM: "LOOM_CALL_LIKE_KIND_COMMAND_PROGRAM",
+    CallLikeKind.TEMPLATE: "LOOM_CALL_LIKE_KIND_TEMPLATE",
 }
 
 OWNERSHIP_CARRIER_MAP: dict[OwnershipCarrier, str] = {
@@ -77,11 +83,31 @@ OPERAND_OWNERSHIP_EFFECT_MAP: dict[OperandOwnershipEffectKind, str] = {
     OperandOwnershipEffectKind.ESCAPE: "LOOM_OPERAND_OWNERSHIP_ESCAPE",
 }
 
+OPERAND_ROLE_MAP: dict[OperandRole, str] = {
+    OperandRole.NONE: "LOOM_OPERAND_ROLE_NONE",
+    OperandRole.CONTROL_CONDITION: "LOOM_OPERAND_ROLE_CONTROL_CONDITION",
+    OperandRole.SELECT_CONDITION: "LOOM_OPERAND_ROLE_SELECT_CONDITION",
+    OperandRole.SELECT_PAYLOAD: "LOOM_OPERAND_ROLE_SELECT_PAYLOAD",
+    OperandRole.BROADCAST_SOURCE: "LOOM_OPERAND_ROLE_BROADCAST_SOURCE",
+    OperandRole.COMPOSITE_ELEMENT: "LOOM_OPERAND_ROLE_COMPOSITE_ELEMENT",
+    OperandRole.FLOAT_EXTENSION_SOURCE: "LOOM_OPERAND_ROLE_FLOAT_EXTENSION_SOURCE",
+}
+
+OPERAND_ROLE_MASK_MAP: dict[OperandRole, str] = {
+    OperandRole.CONTROL_CONDITION: "LOOM_OPERAND_ROLE_MASK_CONTROL_CONDITION",
+    OperandRole.SELECT_CONDITION: "LOOM_OPERAND_ROLE_MASK_SELECT_CONDITION",
+    OperandRole.SELECT_PAYLOAD: "LOOM_OPERAND_ROLE_MASK_SELECT_PAYLOAD",
+    OperandRole.BROADCAST_SOURCE: "LOOM_OPERAND_ROLE_MASK_BROADCAST_SOURCE",
+    OperandRole.COMPOSITE_ELEMENT: "LOOM_OPERAND_ROLE_MASK_COMPOSITE_ELEMENT",
+    OperandRole.FLOAT_EXTENSION_SOURCE: "LOOM_OPERAND_ROLE_MASK_FLOAT_EXTENSION_SOURCE",
+}
+
 RESULT_OWNERSHIP_EFFECT_MAP: dict[ResultOwnershipEffectKind, str] = {
     ResultOwnershipEffectKind.FRESH: "LOOM_RESULT_OWNERSHIP_FRESH",
     ResultOwnershipEffectKind.BORROWED: "LOOM_RESULT_OWNERSHIP_BORROWED",
     ResultOwnershipEffectKind.RETAINED: "LOOM_RESULT_OWNERSHIP_RETAINED",
     ResultOwnershipEffectKind.ALIAS: "LOOM_RESULT_OWNERSHIP_ALIAS",
+    ResultOwnershipEffectKind.MOVED: "LOOM_RESULT_OWNERSHIP_MOVED",
 }
 
 _ERROR_REF_CODE_BITS = 10
@@ -106,12 +132,17 @@ TRAIT_MAP: dict[str, str] = {
     "Involution": "LOOM_TRAIT_INVOLUTION",
     "Terminator": "LOOM_TRAIT_TERMINATOR",
     "ConstantLike": "LOOM_TRAIT_CONSTANT_LIKE",
+    "Poison": "LOOM_TRAIT_POISON",
     "Elementwise": "LOOM_TRAIT_ELEMENTWISE",
     "Decomposable": "LOOM_TRAIT_DECOMPOSABLE",
     "SymbolDefine": "LOOM_TRAIT_SYMBOL_DEFINE",
+    "ModuleScope": "LOOM_TRAIT_MODULE_SCOPE",
     "IsolatedFromAbove": "LOOM_TRAIT_ISOLATED_FROM_ABOVE",
     "NonDeterministic": "LOOM_TRAIT_NON_DETERMINISTIC",
     "UnknownEffects": "LOOM_TRAIT_UNKNOWN_EFFECTS",
+    "CommandEffect": "LOOM_TRAIT_COMMAND_EFFECT",
+    "MemoryFence": "LOOM_TRAIT_MEMORY_FENCE",
+    "CompileTimeOnly": "LOOM_TRAIT_COMPILE_TIME_ONLY",
     "Convergent": "LOOM_TRAIT_CONVERGENT",
     "UniqueIdentity": "LOOM_TRAIT_UNIQUE_IDENTITY",
     "Hint": "LOOM_TRAIT_HINT",
@@ -143,6 +174,14 @@ CONSTRAINT_MAP: dict[str, tuple[str, str]] = {
     "HasFloatElement": (
         "LOOM_RELATION_FIELD_SATISFIES",
         "LOOM_TYPE_CONSTRAINT_FLOAT_ELEMENT",
+    ),
+    "HasBitwiseScalar": (
+        "LOOM_RELATION_FIELD_SATISFIES",
+        "LOOM_TYPE_CONSTRAINT_BITWISE_SCALAR",
+    ),
+    "HasBitwiseElement": (
+        "LOOM_RELATION_FIELD_SATISFIES",
+        "LOOM_TYPE_CONSTRAINT_BITWISE_ELEMENT",
     ),
     "HasIndexOrNonI1IntegerScalar": (
         "LOOM_RELATION_FIELD_SATISFIES",
@@ -256,6 +295,14 @@ CONSTRAINT_MAP: dict[str, tuple[str, str]] = {
         "LOOM_RELATION_REGION_ARG_MATCH",
         "LOOM_PROPERTY_ELEMENT_TYPE",
     ),
+    "ConditionForwardedCountMatchesBlockArgs": (
+        "LOOM_RELATION_CONDITION_FORWARD_COUNT",
+        "LOOM_PROPERTY_TYPE",
+    ),
+    "ConditionForwardedTypesMatchBlockArgs": (
+        "LOOM_RELATION_CONDITION_FORWARD_MATCH",
+        "LOOM_PROPERTY_TYPE",
+    ),
     "YieldCountMatchesResults": ("LOOM_RELATION_YIELD_COUNT", "LOOM_PROPERTY_TYPE"),
     "YieldTypesMatchResults": ("LOOM_RELATION_YIELD_MATCH", "LOOM_PROPERTY_TYPE"),
     "YieldElementTypesMatchResults": (
@@ -292,12 +339,19 @@ ATTR_KIND_MAP: dict[str, str] = {
     "string": "LOOM_ATTR_STRING",
     "bool": "LOOM_ATTR_BOOL",
     "enum": "LOOM_ATTR_ENUM",
+    "enum_array": "LOOM_ATTR_ENUM_ARRAY",
+    "signed_enum_set": "LOOM_ATTR_SIGNED_ENUM_SET",
+    "scoped_enum": "LOOM_ATTR_SCOPED_ENUM",
     "i64_array": "LOOM_ATTR_I64_ARRAY",
     "bytes": "LOOM_ATTR_BYTES",
     "symbol": "LOOM_ATTR_SYMBOL",
+    "symbol_array": "LOOM_ATTR_SYMBOL_ARRAY",
+    "symbol_set": "LOOM_ATTR_SYMBOL_SET",
     "type": "LOOM_ATTR_TYPE",
     "encoding": "LOOM_ATTR_ENCODING",
     "predicate_list": "LOOM_ATTR_PREDICATE_LIST",
     "dict": "LOOM_ATTR_DICT",
     "any": "LOOM_ATTR_ANY",
+    "parameterized": "LOOM_ATTR_PARAMETERIZED",
+    "parameterized_array": "LOOM_ATTR_PARAMETERIZED_ARRAY",
 }

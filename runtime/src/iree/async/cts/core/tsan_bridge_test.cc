@@ -84,7 +84,7 @@ struct OperationPool {
     // accesses that race without proper submit→complete ordering visible
     // to TSAN.
     IREE_ASSERT_EQ(operation->type, IREE_ASYNC_OPERATION_TYPE_NOP);
-    IREE_ASSERT_EQ(operation->completion_fn, CompletionCallback);
+    IREE_ASSERT_EQ(operation->completion_fn, &CompletionCallback);
     IREE_ASSERT_EQ(operation->user_data, pool);
 
     // Find which slot this is by pointer arithmetic.
@@ -160,8 +160,7 @@ TEST_P(TsanBridgeTest, SingleThreadReuse) {
                                     OperationPool::CompletionCallback, &pool);
 
     IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &nop->base));
-    PollUntil(/*min_completions=*/1,
-              /*total_budget=*/iree_make_duration_ms(500));
+    PollUntil(/*min_completions=*/1);
   }
 
   EXPECT_EQ(pool.completions.load(), kIterations);
@@ -223,21 +222,14 @@ static void SenderThreadFn(SenderArgs args) {
   }
 }
 
-// Polls until the expected number of completions arrive or timeout.
+// Polls until the expected number of completions arrive.
 static void PollUntilComplete(iree_async_proactor_t* proactor,
                               std::atomic<int>& completions,
                               int expected_total) {
-  iree_time_t deadline_ns = iree_time_now() + iree_make_duration_ms(30000);
   while (completions.load(std::memory_order_relaxed) < expected_total) {
-    if (iree_time_now() >= deadline_ns) break;
     iree_host_size_t completed = 0;
-    iree_status_t status = iree_async_proactor_poll(
-        proactor, iree_make_timeout_ms(10), &completed);
-    if (!iree_status_is_deadline_exceeded(status)) {
-      IREE_ASSERT_OK(status);
-    } else {
-      iree_status_ignore(status);
-    }
+    IREE_ASSERT_OK(iree_async_proactor_poll(proactor, iree_infinite_timeout(),
+                                            &completed));
   }
 }
 
@@ -273,7 +265,6 @@ TEST_P(TsanBridgeTest, MultiThreadReuse) {
   for (auto& sender : senders) {
     sender.join();
   }
-  DrainPending();
 
   EXPECT_EQ(pool.completions.load(), kTotalSends);
 }
@@ -305,7 +296,6 @@ TEST_P(TsanBridgeTest, TwoThreadsTwoSlots) {
   stop.store(true, std::memory_order_relaxed);
   sender_a.join();
   sender_b.join();
-  DrainPending();
 
   EXPECT_EQ(pool.completions.load(), kTotalSends);
 }

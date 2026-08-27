@@ -9,4 +9,15 @@
 
 iree_add_all_subdirs()
 
+loom_cc_library(
+  NAME
+    low_repr
+  HDRS
+    "low_repr.h"
+  DEPS
+    iree::base
+    loom::ir
+  PUBLIC
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

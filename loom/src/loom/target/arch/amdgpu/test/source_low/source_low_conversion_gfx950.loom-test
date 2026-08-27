@@ -7,7 +7,7 @@ func.def target(@target) @vector_fptrunc_bf16x3(%input: vector<3xf32>) -> (vecto
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_fptrunc_bf16x3(%input: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.cdna4.core> {
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @vector_fptrunc_bf16x3(%input: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr x2>) asm {
   %5 = slice %input[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
   %6 = slice %input[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
   %7 = v_cvt_pk_bf16_f32 %5, %6
@@ -15,5 +15,99 @@ low.func.def target(@target) abi(hal_kernel) @vector_fptrunc_bf16x3(%input: reg<
   %9 = v_mov_b32 0
   %10 = v_cvt_pk_bf16_f32 %8, %9
   %converted = concat(%7, %10) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx950> @target
+func.def target(@target) @vector_uitofp_i8x4(%input: vector<4xi8>) -> (vector<4xf32>) {
+  %converted = vector.uitofp %input : vector<4xi8> to vector<4xf32>
+  func.return %converted : vector<4xf32>
+}
+
+// ----
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @vector_uitofp_i8x4(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm {
+  %5 = v_cvt_f32_ubyte0 %input
+  %6 = v_cvt_f32_ubyte1 %input
+  %7 = v_cvt_f32_ubyte2 %input
+  %8 = v_cvt_f32_ubyte3 %input
+  %converted = concat(%5, %6, %7, %8) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx950> @target
+func.def target(@target) @vector_fptosi_i8x8(%input: vector<8xf32>) -> (vector<8xi8>) {
+  %converted = vector.fptosi %input : vector<8xf32> to vector<8xi8>
+  func.return %converted : vector<8xi8>
+}
+
+// ----
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @vector_fptosi_i8x8(%input: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x2>) asm {
+  %5 = slice %input[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %6 = v_cvt_i32_f32 %5
+  %7 = slice %input[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %8 = v_cvt_i32_f32 %7
+  %9 = slice %input[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %10 = v_cvt_i32_f32 %9
+  %11 = slice %input[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %12 = v_cvt_i32_f32 %11
+  %13 = slice %input[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %14 = v_cvt_i32_f32 %13
+  %15 = slice %input[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %16 = v_cvt_i32_f32 %15
+  %17 = slice %input[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %18 = v_cvt_i32_f32 %17
+  %19 = slice %input[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %20 = v_cvt_i32_f32 %19
+  %21 = s_mov_b32 4
+  %22 = s_mov_b32 16778500
+  %23 = v_perm_b32 %6, %8, %21
+  %24 = v_perm_b32 %10, %12, %21
+  %25 = v_perm_b32 %23, %24, %22
+  %26 = v_perm_b32 %14, %16, %21
+  %27 = v_perm_b32 %18, %20, %21
+  %28 = v_perm_b32 %26, %27, %22
+  %converted = concat(%25, %28) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx950> @target
+func.def target(@target) @vector_fptoui_i8x8(%input: vector<8xf32>) -> (vector<8xi8>) {
+  %converted = vector.fptoui %input : vector<8xf32> to vector<8xi8>
+  func.return %converted : vector<8xi8>
+}
+
+// ----
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @vector_fptoui_i8x8(%input: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x2>) asm {
+  %5 = slice %input[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %6 = v_cvt_u32_f32 %5
+  %7 = slice %input[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %8 = v_cvt_u32_f32 %7
+  %9 = slice %input[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %10 = v_cvt_u32_f32 %9
+  %11 = slice %input[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %12 = v_cvt_u32_f32 %11
+  %13 = slice %input[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %14 = v_cvt_u32_f32 %13
+  %15 = slice %input[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %16 = v_cvt_u32_f32 %15
+  %17 = slice %input[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %18 = v_cvt_u32_f32 %17
+  %19 = slice %input[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %20 = v_cvt_u32_f32 %19
+  %21 = s_mov_b32 4
+  %22 = s_mov_b32 16778500
+  %23 = v_perm_b32 %6, %8, %21
+  %24 = v_perm_b32 %10, %12, %21
+  %25 = v_perm_b32 %23, %24, %22
+  %26 = v_perm_b32 %14, %16, %21
+  %27 = v_perm_b32 %18, %20, %21
+  %28 = v_perm_b32 %26, %27, %22
+  %converted = concat(%25, %28) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %converted
 }

@@ -8,6 +8,7 @@
 #define LOOM_FORMAT_TEXT_PRINTER_CONTEXT_H_
 
 #include "iree/base/api.h"
+#include "loom/format/text/printer/name_plan.h"
 #include "loom/format/text/printer/printer.h"
 #include "loom/ir/ir.h"
 #include "loom/util/stream.h"
@@ -21,14 +22,14 @@ typedef struct loom_print_context_t {
   loom_output_stream_t* stream;
   // Module whose string, type, value, and location tables are printed.
   const loom_module_t* module;
+  // Canonical module value-name resolutions.
+  const loom_print_name_plan_t* name_plan;
   // Flag bitset controlling layout and optional annotations.
   loom_text_print_flags_t flags;
-  // Optional descriptor-backed environment for low asm region syntax.
+  // Representation codec and assembly interface for Low functions.
   loom_text_low_asm_environment_t low_asm_environment;
-  // Descriptor-set context used for printing target-low register types.
-  const loom_text_low_asm_descriptor_set_t* low_register_descriptor_set;
-  // Descriptor-set key selected for low asm region syntax.
-  iree_string_view_t low_asm_descriptor_set_key;
+  // Representation context used for printing target-low types and regions.
+  loom_text_low_repr_context_t low_repr;
   // Nesting depth of active descriptor-backed low asm region bodies.
   uint16_t low_asm_region_depth;
   // True when the current logical line already contains a printed token.

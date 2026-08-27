@@ -41,16 +41,12 @@ IREE_API_EXPORT const char* iree_hal_replay_object_type_string(
       return "buffer";
     case IREE_HAL_REPLAY_OBJECT_TYPE_COMMAND_BUFFER:
       return "command_buffer";
-    case IREE_HAL_REPLAY_OBJECT_TYPE_EXECUTABLE_CACHE:
-      return "executable_cache";
     case IREE_HAL_REPLAY_OBJECT_TYPE_EXECUTABLE:
       return "executable";
     case IREE_HAL_REPLAY_OBJECT_TYPE_SEMAPHORE:
       return "semaphore";
     case IREE_HAL_REPLAY_OBJECT_TYPE_FILE:
       return "file";
-    case IREE_HAL_REPLAY_OBJECT_TYPE_EVENT:
-      return "event";
     case IREE_HAL_REPLAY_OBJECT_TYPE_CHANNEL:
       return "channel";
     case IREE_HAL_REPLAY_OBJECT_TYPE_HOST_CALL:
@@ -79,10 +75,8 @@ IREE_API_EXPORT const char* iree_hal_replay_operation_code_string(
       return "device.create_channel";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_COMMAND_BUFFER:
       return "device.create_command_buffer";
-    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_EVENT:
-      return "device.create_event";
-    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_EXECUTABLE_CACHE:
-      return "device.create_executable_cache";
+    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_LOAD_EXECUTABLE:
+      return "device.load_executable";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_IMPORT_FILE:
       return "device.import_file";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_CREATE_SEMAPHORE:
@@ -109,6 +103,14 @@ IREE_API_EXPORT const char* iree_hal_replay_operation_code_string(
       return "device.queue_dispatch";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_EXECUTE:
       return "device.queue_execute";
+    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_TIMESTAMP:
+      return "device.queue_timestamp";
+    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_WAIT:
+      return "device.queue_atomic_wait";
+    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_STORE:
+      return "device.queue_atomic_store";
+    case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_ATOMIC_RMW:
+      return "device.queue_atomic_rmw";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_QUEUE_FLUSH:
       return "device.queue_flush";
     case IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_PROFILING_BEGIN:
@@ -167,12 +169,6 @@ IREE_API_EXPORT const char* iree_hal_replay_operation_code_string(
       return "command_buffer.end_debug_group";
     case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_EXECUTION_BARRIER:
       return "command_buffer.execution_barrier";
-    case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_SIGNAL_EVENT:
-      return "command_buffer.signal_event";
-    case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_RESET_EVENT:
-      return "command_buffer.reset_event";
-    case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_WAIT_EVENTS:
-      return "command_buffer.wait_events";
     case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ADVISE_BUFFER:
       return "command_buffer.advise_buffer";
     case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_FILL_BUFFER:
@@ -185,12 +181,12 @@ IREE_API_EXPORT const char* iree_hal_replay_operation_code_string(
       return "command_buffer.collective";
     case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_DISPATCH:
       return "command_buffer.dispatch";
-    case IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_CACHE_INFER_FORMAT:
-      return "executable_cache.infer_format";
-    case IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_CACHE_CAN_PREPARE_FORMAT:
-      return "executable_cache.can_prepare_format";
-    case IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_CACHE_PREPARE_EXECUTABLE:
-      return "executable_cache.prepare_executable";
+    case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_WAIT:
+      return "command_buffer.atomic_wait";
+    case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_STORE:
+      return "command_buffer.atomic_store";
+    case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_RMW:
+      return "command_buffer.atomic_rmw";
     case IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_FUNCTION_COUNT:
       return "executable.function_count";
     case IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_FUNCTION_INFO:
@@ -223,10 +219,8 @@ IREE_API_EXPORT const char* iree_hal_replay_payload_type_string(
       return "buffer_range_data";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_OBJECT:
       return "command_buffer_object";
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_EXECUTABLE_CACHE_OBJECT:
-      return "executable_cache_object";
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_EXECUTABLE_PREPARE:
-      return "executable_prepare";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_EXECUTABLE_LOAD:
+      return "executable_load";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_DISPATCH:
       return "dispatch";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_EXECUTE:
@@ -251,18 +245,24 @@ IREE_API_EXPORT const char* iree_hal_replay_payload_type_string(
       return "command_buffer_fill_buffer";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_UPDATE_BUFFER:
       return "command_buffer_update_buffer";
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_EVENT_OBJECT:
-      return "event_object";
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_EVENT:
-      return "command_buffer_event";
-    case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_WAIT_EVENTS:
-      return "command_buffer_wait_events";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_FILE_OBJECT:
       return "file_object";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_READ:
       return "device_queue_read";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_WRITE:
       return "device_queue_write";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_WAIT:
+      return "command_buffer_atomic_wait";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_STORE:
+      return "command_buffer_atomic_store";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_RMW:
+      return "command_buffer_atomic_rmw";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_WAIT:
+      return "device_queue_atomic_wait";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_STORE:
+      return "device_queue_atomic_store";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_DEVICE_QUEUE_ATOMIC_RMW:
+      return "device_queue_atomic_rmw";
     default:
       return "unknown";
   }

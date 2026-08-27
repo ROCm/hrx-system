@@ -17,6 +17,7 @@ loom_cc_library(
     srcs = ["branch_fusion.c"],
     hdrs = ["branch_fusion.h"],
     deps = [
+        "//loom/src/loom/analysis:availability",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/scf",

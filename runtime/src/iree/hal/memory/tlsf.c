@@ -684,6 +684,31 @@ void iree_hal_memory_tlsf_query_stats(const iree_hal_memory_tlsf_t* tlsf,
   out_stats->tainted_coalesce_count = tlsf->tainted_coalesce_count;
 }
 
+bool iree_hal_memory_tlsf_query_full_free_block(
+    const iree_hal_memory_tlsf_t* tlsf,
+    const iree_async_frontier_t** out_death_frontier,
+    iree_hal_memory_tlsf_block_flags_t* out_block_flags) {
+  IREE_ASSERT_ARGUMENT(tlsf);
+  IREE_ASSERT_ARGUMENT(out_death_frontier);
+  IREE_ASSERT_ARGUMENT(out_block_flags);
+  *out_death_frontier = NULL;
+  *out_block_flags = IREE_HAL_MEMORY_TLSF_BLOCK_FLAG_NONE;
+
+  if (tlsf->allocation_count != 0 || tlsf->free_block_count != 1 ||
+      tlsf->bytes_free != tlsf->range_length) {
+    return false;
+  }
+
+  const iree_hal_memory_tlsf_block_t* block =
+      iree_hal_memory_tlsf_block_at(tlsf, 0);
+  IREE_ASSERT(block->offset == 0);
+  IREE_ASSERT(block->length == tlsf->range_length);
+  IREE_ASSERT(block->flags & IREE_HAL_MEMORY_TLSF_BLOCK_FLAG_FREE);
+  *out_death_frontier = iree_hal_memory_tlsf_block_death_frontier(tlsf, 0);
+  *out_block_flags = block->flags;
+  return true;
+}
+
 iree_device_size_t iree_hal_memory_tlsf_largest_free_block(
     const iree_hal_memory_tlsf_t* tlsf) {
   IREE_ASSERT_ARGUMENT(tlsf);

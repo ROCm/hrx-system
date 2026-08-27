@@ -1,0 +1,88 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
+kernel.def target(@target) @workgroup_scan_wave64_native_partitions() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %thread = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32>
+  %value = view.load %input_view[%thread] : view<64xi32> -> i32
+  %prefix = kernel.workgroup.scan<addi> %value {direction = forward, mode = exclusive} : i32
+  view.store %prefix, %output_view[%thread] : i32, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_scan_wave64_native_partitions() asm {
+  %thread = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %13 = v_lshlrev_b32_src0_inline %thread, 2
+  %value = global_load_b32_saddr %13, %input_view
+  %15 = v_and_b32_src0_inline %thread, 31
+  %16 = storage {byte_alignment = 4, byte_length = 8} : low.storage<workgroup>
+  %17 = storage_address %16 : low.storage<workgroup> -> reg<amdgpu.vgpr>
+  %18 = v_mov_b32 1
+  %19 = v_sub_nc_u32 %15, %18
+  %20 = v_cmp_ge_u32 %15, %18
+  %21 = v_lshlrev_b32_src0_inline %19, 2
+  %22 = v_mov_b32 2
+  %23 = v_sub_nc_u32 %15, %22
+  %24 = v_cmp_ge_u32 %15, %22
+  %25 = v_lshlrev_b32_src0_inline %23, 2
+  %26 = v_mov_b32 4
+  %27 = v_sub_nc_u32 %15, %26
+  %28 = v_cmp_ge_u32 %15, %26
+  %29 = v_lshlrev_b32_src0_inline %27, 2
+  %30 = v_mov_b32 8
+  %31 = v_sub_nc_u32 %15, %30
+  %32 = v_cmp_ge_u32 %15, %30
+  %33 = v_lshlrev_b32_src0_inline %31, 2
+  %34 = v_mov_b32 16
+  %35 = v_sub_nc_u32 %15, %34
+  %36 = v_cmp_ge_u32 %15, %34
+  %37 = v_lshlrev_b32_src0_inline %35, 2
+  %38 = ds_bpermute_b32 %21, %value
+  %39 = v_add_u32 %value, %38
+  %40 = v_cndmask_b32 %value, %39, %20
+  %41 = ds_bpermute_b32 %25, %40
+  %42 = v_add_u32 %40, %41
+  %43 = v_cndmask_b32 %40, %42, %24
+  %44 = ds_bpermute_b32 %29, %43
+  %45 = v_add_u32 %43, %44
+  %46 = v_cndmask_b32 %43, %45, %28
+  %47 = ds_bpermute_b32 %33, %46
+  %48 = v_add_u32 %46, %47
+  %49 = v_cndmask_b32 %46, %48, %32
+  %50 = ds_bpermute_b32 %37, %49
+  %51 = v_add_u32 %49, %50
+  %52 = v_cndmask_b32 %49, %51, %36
+  %53 = ds_bpermute_b32 %21, %52
+  %54 = v_mov_b32 0
+  %55 = v_cndmask_b32 %54, %53, %20
+  %56 = v_add_u32 %55, %value
+  %57 = v_lshrrev_b32_src0_inline %thread, 5
+  %58 = v_lshlrev_b32_src0_inline %57, 2
+  %59 = v_mov_b32 31
+  %60 = v_cmp_ge_u32 %15, %59
+  %61, %62 = s_and_saveexec_b64 %60
+  %63 = v_add_u32 %17, %58
+  ds_write_b32 %63, %56
+  s_mov_b64_exec %61
+  s_barrier
+  %64 = v_mov_b32 32
+  %65 = v_cmp_lt_u32 %thread, %64
+  %66 = v_mov_b32 0
+  %68 = v_add_u32 %17, %66
+  %69 = ds_read_b32 %68
+  %70 = v_cndmask_b32 %69, %66, %65
+  %prefix = v_add_u32 %55, %70
+  %72 = v_lshlrev_b32_src0_inline %thread, 2
+  global_store_b32_saddr %72, %prefix, %output_view
+  return
+}

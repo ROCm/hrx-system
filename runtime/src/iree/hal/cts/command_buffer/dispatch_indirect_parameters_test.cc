@@ -31,15 +31,11 @@ class DispatchIndirectParametersTest : public CtsTestBase<> {
     CtsTestBase::SetUp();
     if (HasFatalFailure() || IsSkipped()) return;
 
-    IREE_ASSERT_OK(iree_hal_executable_cache_create(
-        device_, iree_make_cstring_view("default"), &executable_cache_));
-
-    PrepareExecutableOrSkipUnsupported(
-        executable_cache_, "command_buffer_dispatch_multi_workgroup_test.bin",
+    LoadExecutableOrSkipUnsupported(
+        "command_buffer_dispatch_multi_workgroup_test.bin",
         &workgroup_id_executable_);
     if (HasFatalFailure() || IsSkipped()) return;
-    PrepareExecutableOrSkipUnsupported(
-        executable_cache_,
+    LoadExecutableOrSkipUnsupported(
         "command_buffer_dispatch_indirect_parameters_test.bin",
         &parameter_producer_executable_);
   }
@@ -49,8 +45,6 @@ class DispatchIndirectParametersTest : public CtsTestBase<> {
     parameter_producer_executable_ = nullptr;
     iree_hal_executable_release(workgroup_id_executable_);
     workgroup_id_executable_ = nullptr;
-    iree_hal_executable_cache_release(executable_cache_);
-    executable_cache_ = nullptr;
     CtsTestBase::TearDown();
   }
 
@@ -58,7 +52,7 @@ class DispatchIndirectParametersTest : public CtsTestBase<> {
     iree_hal_buffer_params_t params = {0};
     params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
     params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS |
-                   IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
+                   IREE_HAL_BUFFER_USAGE_STORAGE |
                    IREE_HAL_BUFFER_USAGE_TRANSFER;
     return iree_hal_allocator_allocate_buffer(device_allocator_, params,
                                               kParameterByteLength, out_buffer);
@@ -181,7 +175,6 @@ class DispatchIndirectParametersTest : public CtsTestBase<> {
     EXPECT_THAT(output_data, ContainerEq(expected));
   }
 
-  iree_hal_executable_cache_t* executable_cache_ = nullptr;
   iree_hal_executable_t* workgroup_id_executable_ = nullptr;
   iree_hal_executable_t* parameter_producer_executable_ = nullptr;
 };

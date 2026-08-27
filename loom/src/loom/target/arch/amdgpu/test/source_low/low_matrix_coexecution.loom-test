@@ -1,0 +1,659 @@
+// RUN: emit amdgpu-assembly @gfx1250_fast_wmma_result_to_valu strategy=source fixed=%lhs:physical_register:0:8 fixed=%rhs:physical_register:8:8 fixed=%acc:physical_register:16:8 fixed=%result:physical_register:16:8 fixed=%addend:physical_register:24:1 fixed=%sum:physical_register:25:1
+
+amdgpu.target<gfx1250> @gfx1250_target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_fast_wmma_result_to_valu(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm {
+  %result = v_wmma_f32_16x16x64_fp8_fp8 %lhs, %rhs, %acc
+  %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum = v_add_f32 %lane, %addend
+  return
+}
+
+// ----
+  v_wmma_f32_16x16x64_fp8_fp8 v[16:23], v[0:7], v[8:15], v[16:23]
+  v_nop
+  s_delay_alu instid0(VALU_DEP_2)
+  v_add_f32 v25, v16, v24
+  s_endpgm
+
+// ====
+
+// Transcendental VALU participates in the same coexecution consumer class as
+// ordinary vector arithmetic.
+// RUN: emit amdgpu-assembly @gfx1250_wmma_result_to_transcendental strategy=source fixed=%lhs:physical_register:0:8 fixed=%rhs:physical_register:8:8 fixed=%acc:physical_register:16:8 fixed=%result:physical_register:16:8 fixed=%exp:physical_register:24:1
+
+amdgpu.target<gfx1250> @gfx1250_target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_wmma_result_to_transcendental(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>) asm {
+  %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %acc
+  %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %exp = v_exp_f32 %lane
+  return
+}
+
+// ----
+  v_wmma_f32_16x16x32_bf16 v[16:23], v[0:7], v[8:15], v[16:23]
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_exp_f32 v24, v16
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1250_fast_wmma_result_to_wmma_source strategy=source fixed=%lhs:physical_register:0:8 fixed=%rhs0:physical_register:8:8 fixed=%acc0:physical_register:16:8 fixed=%first:physical_register:16:8 fixed=%rhs1:physical_register:24:8 fixed=%acc1:physical_register:32:8 fixed=%second:physical_register:32:8
+
+amdgpu.target<gfx1250> @gfx1250_target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_fast_wmma_result_to_wmma_source(%lhs: reg<amdgpu.vgpr x8>, %rhs0: reg<amdgpu.vgpr x8>, %acc0: reg<amdgpu.vgpr x8>, %rhs1: reg<amdgpu.vgpr x8>, %acc1: reg<amdgpu.vgpr x8>) asm {
+  %first = v_wmma_f32_16x16x64_fp8_fp8 %lhs, %rhs0, %acc0
+  %second = v_wmma_f32_16x16x64_fp8_fp8 %first, %rhs1, %acc1
+  return
+}
+
+// ----
+  v_wmma_f32_16x16x64_fp8_fp8 v[16:23], v[0:7], v[8:15], v[16:23]
+  v_nop
+  v_nop
+  s_delay_alu instid0(VALU_DEP_3)
+  v_wmma_f32_16x16x64_fp8_fp8 v[32:39], v[16:23], v[24:31], v[32:39]
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1250_vopd_pair_advances_one_vector_issue strategy=source fixed=%lhs:physical_register:0:8 fixed=%rhs:physical_register:8:8 fixed=%acc:physical_register:16:8 fixed=%result:physical_register:16:8 fixed=%gap_lhs:physical_register:24:1 fixed=%gap_rhs:physical_register:25:1 fixed=%gap0:physical_register:26:1 fixed=%gap1:physical_register:27:1 fixed=%addend:physical_register:28:1 fixed=%sum:physical_register:29:1
+
+amdgpu.target<gfx1250> @gfx1250_target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_vopd_pair_advances_one_vector_issue(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %gap_lhs: reg<amdgpu.vgpr>, %gap_rhs: reg<amdgpu.vgpr>, %addend: reg<amdgpu.vgpr>) asm {
+  %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %acc
+  %gap0 = v_add_f32 %gap_lhs, %gap_rhs
+  %gap1 = v_sub_f32 %gap_lhs, %gap_rhs
+  %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum = v_add_f32 %lane, %addend
+  return
+}
+
+// ----
+  v_wmma_f32_16x16x32_bf16 v[16:23], v[0:7], v[8:15], v[16:23]
+  v_dual_add_f32 v26, v25, v24 :: v_dual_sub_f32 v27, v24, v25
+  v_nop
+  v_nop
+  v_nop
+  v_add_f32 v29, v16, v28
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1250_salu_does_not_advance_vector_issue strategy=source fixed=%lhs:physical_register:0:8 fixed=%rhs:physical_register:8:8 fixed=%acc:physical_register:16:8 fixed=%result:physical_register:16:8 fixed=%scalar_lhs:physical_register:0:1 fixed=%scalar_rhs:physical_register:1:1 fixed=%gap0:physical_register:2:1 fixed=%gap1:physical_register:3:1 fixed=%addend:physical_register:24:1 fixed=%sum:physical_register:25:1
+
+amdgpu.target<gfx1250> @gfx1250_target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_salu_does_not_advance_vector_issue(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %scalar_lhs: reg<amdgpu.sgpr>, %scalar_rhs: reg<amdgpu.sgpr>, %addend: reg<amdgpu.vgpr>) asm {
+  %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %acc
+  %gap0 = s_add_u32 %scalar_lhs, %scalar_rhs
+  %gap1 = s_sub_u32 %scalar_lhs, %scalar_rhs
+  %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum = v_add_f32 %lane, %addend
+  return
+}
+
+// ----
+  v_wmma_f32_16x16x32_bf16 v[16:23], v[0:7], v[8:15], v[16:23]
+  s_add_u32 s2, s0, s1
+  s_sub_u32 s3, s0, s1
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_add_f32 v25, v16, v24
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1250_wmma_result_crosses_block strategy=source fixed=%lhs:physical_register:0:8 fixed=%rhs:physical_register:8:8 fixed=%acc:physical_register:16:8 fixed=%result:physical_register:16:8 fixed=%addend:physical_register:24:1 fixed=%sum:physical_register:25:1
+
+amdgpu.target<gfx1250> @gfx1250_target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_wmma_result_crosses_block(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm {
+  %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %acc
+  low.br ^consume
+^consume:
+  %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum = v_add_f32 %lane, %addend
+  return
+}
+
+// ----
+  v_wmma_f32_16x16x32_bf16 v[16:23], v[0:7], v[8:15], v[16:23]
+.Lbb1:
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_add_f32 v25, v16, v24
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1250_integer_wmma_uses_sixteen_cycle_rule strategy=source fixed=%lhs:physical_register:0:8 fixed=%rhs:physical_register:8:8 fixed=%acc:physical_register:16:8 fixed=%result:physical_register:16:8 fixed=%addend:physical_register:24:1 fixed=%sum:physical_register:25:1
+
+amdgpu.target<gfx1250> @gfx1250_target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_integer_wmma_uses_sixteen_cycle_rule(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm {
+  %result = v_wmma_i32_16x16x64_iu8 %lhs, %rhs, %acc
+  %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum = v_add_u32 %lane, %addend
+  return
+}
+
+// ----
+  v_wmma_i32_16x16x64_iu8 v[16:23], v[0:7], v[8:15], v[16:23]
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_add_u32 v25, v16, v24
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1250_sparse_float_wmma_uses_eight_cycle_rule strategy=source fixed=%acc:physical_register:0:8 fixed=%lhs:physical_register:8:8 fixed=%rhs:physical_register:16:16 fixed=%index:physical_register:32:1 fixed=%result:physical_register:0:8 fixed=%addend:physical_register:33:1 fixed=%sum:physical_register:34:1
+
+amdgpu.target<gfx1250> @gfx1250_target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_sparse_float_wmma_uses_eight_cycle_rule(%acc: reg<amdgpu.vgpr x8>, %lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x16>, %index: reg<amdgpu.vgpr>, %addend: reg<amdgpu.vgpr>) asm {
+  %result = v_swmmac_f32_16x16x64_f16 %acc, %lhs, %rhs, %index
+  %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum = v_add_f32 %lane, %addend
+  return
+}
+
+// ----
+  v_swmmac_f32_16x16x64_f16 v[0:7], v[8:15], v[16:31], v32
+  v_nop
+  v_nop
+  s_delay_alu instid0(VALU_DEP_3)
+  v_add_f32 v34, v0, v33
+  s_endpgm
+
+// ====
+
+// A scalar sparse index has no VGPR release channel. The matrix result and
+// vector matrix sources must still publish their release windows normally.
+// RUN: emit amdgpu-assembly @gfx1250_sparse_scalar_index strategy=source fixed=%acc:physical_register:0:8 fixed=%lhs:physical_register:8:8 fixed=%rhs:physical_register:16:16 fixed=%index:physical_register:0:1 fixed=%result:physical_register:0:8 fixed=%addend:physical_register:33:1 fixed=%sum:physical_register:34:1
+
+amdgpu.target<gfx1250> @gfx1250_target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_sparse_scalar_index(%acc: reg<amdgpu.vgpr x8>, %lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x16>, %index: reg<amdgpu.sgpr>, %addend: reg<amdgpu.vgpr>) asm {
+  %result = v_swmmac_f32_16x16x64_f16 %acc, %lhs, %rhs, %index
+  %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum = v_add_f32 %lane, %addend
+  return
+}
+
+// ----
+  v_swmmac_f32_16x16x64_f16 v[0:7], v[8:15], v[16:31], s0
+  v_nop
+  v_nop
+  s_delay_alu instid0(VALU_DEP_3)
+  v_add_f32 v34, v0, v33
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1250_sparse_integer_wmma_uses_sixteen_cycle_rule strategy=source fixed=%acc:physical_register:0:8 fixed=%lhs:physical_register:8:8 fixed=%rhs:physical_register:16:16 fixed=%index:physical_register:32:2 fixed=%result:physical_register:0:8 fixed=%addend:physical_register:34:1 fixed=%sum:physical_register:35:1
+
+amdgpu.target<gfx1250> @gfx1250_target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_sparse_integer_wmma_uses_sixteen_cycle_rule(%acc: reg<amdgpu.vgpr x8>, %lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x16>, %index: reg<amdgpu.vgpr x2>, %addend: reg<amdgpu.vgpr>) asm {
+  %result = v_swmmac_i32_16x16x128_iu8 %acc, %lhs, %rhs, %index
+  %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum = v_add_u32 %lane, %addend
+  return
+}
+
+// ----
+  v_swmmac_i32_16x16x128_iu8 v[0:7], v[8:15], v[16:31], v[32:33]
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_add_u32 v35, v0, v34
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1250_scaled_fp4_uses_category_six_release_rule strategy=source fixed=%lhs:physical_register:0:8 fixed=%rhs:physical_register:8:8 fixed=%acc:physical_register:16:8 fixed=%result:physical_register:16:8 fixed=%scale_a:physical_register:24:1 fixed=%scale_b:physical_register:25:1 fixed=%addend:physical_register:26:1 fixed=%sum:physical_register:27:1
+
+amdgpu.target<gfx1250> @gfx1250_target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_scaled_fp4_uses_category_six_release_rule(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %scale_a: reg<amdgpu.vgpr>, %scale_b: reg<amdgpu.vgpr>, %addend: reg<amdgpu.vgpr>) asm {
+  %result = v_wmma_scale_f32_16x16x128_f8f6f4_f4_f4 %lhs, %rhs, %acc, %scale_a, %scale_b {matrix_a_fmt = 4, matrix_b_fmt = 4, matrix_a_scale = 0, matrix_b_scale = 0, matrix_a_scale_fmt = 0, matrix_b_scale_fmt = 0, matrix_a_reuse = 0, matrix_b_reuse = 0}
+  %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum = v_add_f32 %lane, %addend
+  return
+}
+
+// ----
+  v_wmma_scale_f32_16x16x128_f8f6f4 v[16:23], v[0:7], v[8:15], v[16:23], v24, v25 matrix_a_fmt:4 matrix_b_fmt:4
+  v_nop
+  s_delay_alu instid0(VALU_DEP_2)
+  v_add_f32 v27, v16, v26
+  s_endpgm
+
+// ====
+
+// The B0-only category-six release distance must not leak into the A0
+// descriptor view. Both-f4 f8f6f4 WMMA remains an eight-cycle category-zero
+// instruction on A0.
+// RUN: emit amdgpu-assembly @gfx1250_a0_fp4_uses_category_zero_release_rule strategy=source fixed=%lhs:physical_register:0:8 fixed=%rhs:physical_register:8:8 fixed=%acc:physical_register:16:8 fixed=%result:physical_register:16:8 fixed=%addend:physical_register:24:1 fixed=%sum:physical_register:25:1
+
+amdgpu.target<gfx1250-a0> @gfx1250_a0_target
+
+low.func.def target<amdgpu.rdna4.gfx1250_a0.core>(@gfx1250_a0_target) @gfx1250_a0_fp4_uses_category_zero_release_rule(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm {
+  %result = v_wmma_f32_16x16x128_f8f6f4_f4_f4 %lhs, %rhs, %acc {matrix_a_fmt = 4, matrix_b_fmt = 4}
+  %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum = v_add_f32 %lane, %addend
+  return
+}
+
+// ----
+  v_wmma_f32_16x16x128_f8f6f4 v[16:23], v[0:7], v[8:15], v[16:23] matrix_a_fmt:4 matrix_b_fmt:4
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_add_f32 v25, v16, v24
+  s_endpgm
+
+// ====
+
+// The same gfx1250 processor selects the A0 scheduling descriptor contract
+// through its structured target profile. An f8f6f4 WMMA with either input in
+// f8 therefore uses the A0 16-cycle category-one release rule.
+// RUN: emit amdgpu-assembly @gfx1250_a0_f8f6f4_result_to_valu strategy=source fixed=%lhs:physical_register:0:16 fixed=%rhs:physical_register:16:8 fixed=%acc:physical_register:24:8 fixed=%result:physical_register:24:8 fixed=%addend:physical_register:32:1 fixed=%sum:physical_register:33:1
+
+amdgpu.target<gfx1250-a0> @gfx1250_a0_target
+
+low.func.def target<amdgpu.rdna4.gfx1250_a0.core>(@gfx1250_a0_target) @gfx1250_a0_f8f6f4_result_to_valu(%lhs: reg<amdgpu.vgpr x16>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm {
+  %result = v_wmma_f32_16x16x128_f8f6f4_f8_f4 %lhs, %rhs, %acc {matrix_a_fmt = 1, matrix_b_fmt = 4}
+  %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum = v_add_f32 %lane, %addend
+  return
+}
+
+// ----
+  v_wmma_f32_16x16x128_f8f6f4 v[24:31], v[0:15], v[16:23], v[24:31] matrix_a_fmt:1 matrix_b_fmt:4
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_add_f32 v33, v24, v32
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1250_tensor_load_advances_vector_issue strategy=source fixed=%lhs:physical_register:0:8 fixed=%rhs:physical_register:8:8 fixed=%acc:physical_register:16:8 fixed=%result:physical_register:16:8 fixed=%addend:physical_register:24:1 fixed=%sum:physical_register:25:1 fixed=%d0:physical_register:0:4 fixed=%d1:physical_register:8:8
+
+amdgpu.target<gfx1250> @gfx1250_target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_tensor_load_advances_vector_issue(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>, %d0: reg<amdgpu.sgpr x4>, %d1: reg<amdgpu.sgpr x8>) asm {
+  %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %acc
+  tensor_load_to_lds_d2 %d0, %d1
+  %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum = v_add_f32 %lane, %addend
+  return
+}
+
+// ----
+  v_wmma_f32_16x16x32_bf16 v[16:23], v[0:7], v[8:15], v[16:23]
+  tensor_load_to_lds s[0:3], s[8:15]
+  v_nop
+  v_nop
+  v_nop
+  s_delay_alu instid0(VALU_DEP_4)
+  v_add_f32 v25, v16, v24
+  s_endpgm
+
+// ====
+
+// Cluster direct-to-LDS DMA advances vector issue without becoming a
+// coexecution consumer itself.
+// RUN: emit amdgpu-assembly @gfx1250_cluster_load_advances_vector_issue strategy=source fixed=%lhs:physical_register:0:8 fixed=%rhs:physical_register:8:8 fixed=%acc:physical_register:16:8 fixed=%result:physical_register:16:8 fixed=%addend:physical_register:24:1 fixed=%sum:physical_register:25:1 fixed=%lds:physical_register:32:1 fixed=%addr:physical_register:33:1 fixed=%saddr:physical_register:0:2
+
+amdgpu.target<gfx1250> @gfx1250_target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_cluster_load_advances_vector_issue(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>, %lds: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>) asm {
+  %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %acc
+  %m0 = s_mov_b32_m0_imm 0
+  cluster_load_async_to_lds_b32 %lds, %addr, %saddr, %m0
+  %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum = v_add_f32 %lane, %addend
+  return
+}
+
+// ----
+  v_wmma_f32_16x16x32_bf16 v[16:23], v[0:7], v[8:15], v[16:23]
+  s_mov_b32 m0, 0
+  cluster_load_async_to_lds_b32 v32, v33, s[0:1]
+  v_nop
+  v_nop
+  v_nop
+  v_add_f32 v25, v16, v24
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1250_wmma_source_release_protects_overwrite strategy=source fixed=%lhs:physical_register:0:8 fixed=%rhs:physical_register:8:8 fixed=%acc:physical_register:16:8 fixed=%result:physical_register:16:8 fixed=%value_lhs:physical_register:24:1 fixed=%value_rhs:physical_register:25:1 fixed=%overwrite:physical_register:0:1
+
+amdgpu.target<gfx1250> @gfx1250_target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_wmma_source_release_protects_overwrite(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %value_lhs: reg<amdgpu.vgpr>, %value_rhs: reg<amdgpu.vgpr>) asm {
+  %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %acc
+  %overwrite = v_add_f32 %value_lhs, %value_rhs
+  return
+}
+
+// ----
+  v_wmma_f32_16x16x32_bf16 v[16:23], v[0:7], v[8:15], v[16:23]
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_add_f32 v0, v24, v25
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1251_wmma_16_cycle_result_to_valu strategy=source fixed=%lhs:physical_register:0:8 fixed=%rhs:physical_register:8:8 fixed=%acc:physical_register:16:8 fixed=%result:physical_register:16:8 fixed=%addend:physical_register:24:1 fixed=%sum:physical_register:25:1
+
+amdgpu.target<gfx1251> @gfx1251_target
+
+low.func.def target<amdgpu.rdna4.gfx1251.core>(@gfx1251_target) @gfx1251_wmma_16_cycle_result_to_valu(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm {
+  %result = v_wmma_f32_16x16x64_fp8_fp8 %lhs, %rhs, %acc
+  %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum = v_add_f32 %lane, %addend
+  return
+}
+
+// ----
+  v_wmma_f32_16x16x64_fp8_fp8 v[16:23], v[0:7], v[8:15], v[16:23]
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_add_f32 v25, v16, v24
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1251_wmma_32_cycle_result_to_valu strategy=source fixed=%lhs:physical_register:0:16 fixed=%rhs:physical_register:16:16 fixed=%acc:physical_register:32:8 fixed=%result:physical_register:32:8 fixed=%addend:physical_register:40:1 fixed=%sum:physical_register:41:1
+
+amdgpu.target<gfx1251> @gfx1251_target
+
+low.func.def target<amdgpu.rdna4.gfx1251.core>(@gfx1251_target) @gfx1251_wmma_32_cycle_result_to_valu(%lhs: reg<amdgpu.vgpr x16>, %rhs: reg<amdgpu.vgpr x16>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm {
+  %result = v_wmma_f32_16x16x128_fp8_fp8 %lhs, %rhs, %acc
+  %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum = v_add_f32 %lane, %addend
+  return
+}
+
+// ----
+  v_wmma_f32_16x16x128_fp8_fp8 v[32:39], v[0:15], v[16:31], v[32:39]
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_add_f32 v41, v32, v40
+  s_endpgm
+
+// ====
+
+// The generic target deliberately uses gfx1251's conservative hazard model.
+// RUN: emit amdgpu-assembly @gfx12_5_generic_wmma_result_to_valu strategy=source fixed=%lhs:physical_register:0:8 fixed=%rhs:physical_register:8:8 fixed=%acc:physical_register:16:8 fixed=%result:physical_register:16:8 fixed=%addend:physical_register:24:1 fixed=%sum:physical_register:25:1
+
+amdgpu.target<gfx12-5-generic> @gfx12_5_generic_target
+
+low.func.def target<amdgpu.gfx12_5.generic.core>(@gfx12_5_generic_target) @gfx12_5_generic_wmma_result_to_valu(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm {
+  %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %acc
+  %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum = v_add_f32 %lane, %addend
+  return
+}
+
+// ----
+  v_wmma_f32_16x16x32_bf16 v[16:23], v[0:7], v[8:15], v[16:23]
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_add_f32 v25, v16, v24
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-wait-state-plan @gfx1250_matrix_coexecution_plan strategy=source fixed=%lhs:physical_register:0:8 fixed=%rhs:physical_register:8:8 fixed=%acc:physical_register:16:8 fixed=%result:physical_register:16:8 fixed=%addend:physical_register:24:1 fixed=%sum:physical_register:25:1
+
+amdgpu.target<gfx1250> @gfx1250_target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_matrix_coexecution_plan(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm {
+  %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %acc
+  %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum = v_add_f32 %lane, %addend
+  return
+}
+
+// ----
+amdgpu.wait_state_plan states=1 progress=3 hazards=1
+state[0] reason=matrix_coexecution_valu_use action=amdgpu.v_nop at=b0:n2/o2 producer=n0 consumer=n2 required=4 observed=0 residual=4
+
+// ====
+
+// The planned V_NOP sequence must pass through the native encoder, not only
+// assembly formatting.
+// RUN: emit amdgpu-native @gfx1250_matrix_coexecution_native strategy=source fixed=%lhs:physical_register:0:8 fixed=%rhs:physical_register:8:8 fixed=%acc:physical_register:16:8 fixed=%result:physical_register:16:8 fixed=%addend:physical_register:24:1 fixed=%sum:physical_register:25:1
+
+amdgpu.target<gfx1250> @gfx1250_target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_matrix_coexecution_native(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm {
+  %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %acc
+  %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum = v_add_f32 %lane, %addend
+  return
+}
+
+// ----
+
+// ====
+
+// A join must preserve a live matrix release frontier when only one incoming
+// path issued the source.
+// RUN: emit amdgpu-assembly @gfx1250_matrix_source_reaches_join strategy=source fixed=%lhs:physical_register:0:8 fixed=%rhs:physical_register:8:8 fixed=%acc:physical_register:16:8 fixed=%result:physical_register:16:8 fixed=%joined:physical_register:16:8 fixed=%addend:physical_register:24:1 fixed=%sum:physical_register:25:1
+
+amdgpu.target<gfx1250> @gfx1250_target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_matrix_source_reaches_join(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>, %cond: reg<amdgpu.scc>) asm {
+  low.cond_br %cond, ^matrix, ^plain : reg<amdgpu.scc>
+^matrix:
+  %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %acc
+  low.br ^join(%result: reg<amdgpu.vgpr x8>)
+^plain:
+  low.br ^join(%acc: reg<amdgpu.vgpr x8>)
+^join(%joined: reg<amdgpu.vgpr x8>):
+  %lane = slice %joined[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum = v_add_f32 %lane, %addend
+  return
+}
+
+// ----
+s_cbranch_scc0 .Lbb2
+.Lbb1:
+  v_wmma_f32_16x16x32_bf16 v[16:23], v[0:7], v[8:15], v[16:23]
+  s_branch .Lbb3
+.Lbb2:
+.Lbb3:
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_add_f32 v25, v16, v24
+  s_endpgm
+
+// ====
+
+// A source on a loop backedge must protect the header consumer on the next
+// dynamic iteration even though the backedge is unresolved when the header is
+// planned.
+// RUN: emit amdgpu-assembly @gfx1250_matrix_source_reaches_loop_header strategy=source fixed=%lhs:physical_register:0:8 fixed=%rhs:physical_register:8:8 fixed=%acc:physical_register:16:8 fixed=%carried:physical_register:16:8 fixed=%next:physical_register:16:8 fixed=%addend:physical_register:24:1 fixed=%sum:physical_register:25:1
+
+amdgpu.target<gfx1250> @gfx1250_target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_matrix_source_reaches_loop_header(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>, %limit: reg<amdgpu.sgpr>) asm {
+  %zero = s_mov_b32 0
+  low.br ^loop(%acc: reg<amdgpu.vgpr x8>, %zero: reg<amdgpu.sgpr>)
+^loop(%carried: reg<amdgpu.vgpr x8>, %iteration: reg<amdgpu.sgpr>):
+  %lane = slice %carried[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum = v_add_f32 %lane, %addend
+  %next = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %carried
+  %one = s_mov_b32 1
+  %next_iteration = s_add_u32 %iteration, %one
+  %again = s_cmp_lt_i32 %next_iteration, %limit
+  low.cond_br %again, ^backedge, ^exit : reg<amdgpu.scc>
+^backedge:
+  low.br ^loop(%next: reg<amdgpu.vgpr x8>, %next_iteration: reg<amdgpu.sgpr>)
+^exit:
+  return
+}
+
+// ----
+s_mov_b32 s1, 0
+.Lbb1:
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_add_f32 v25, v16, v24
+  v_wmma_f32_16x16x32_bf16 v[16:23], v[0:7], v[8:15], v[16:23]
+  s_mov_b32 s2, 1
+  s_add_u32 s1, s1, s2
+  s_cmp_lt_i32 s1, s0
+  s_delay_alu instid0(SALU_CYCLE_1)
+  s_cbranch_scc0 .Lbb3
+.Lbb2:
+  s_branch .Lbb1
+.Lbb3:
+  s_endpgm
+
+// ====
+
+// Edge-copy moves are real vector issues and must consume a matrix result only
+// after its release window.
+// RUN: emit amdgpu-assembly @gfx1250_matrix_result_edge_copy strategy=source fixed=%lhs:physical_register:0:8 fixed=%rhs:physical_register:8:8 fixed=%acc:physical_register:16:8 fixed=%result:physical_register:16:8 fixed=%joined:physical_register:32:8 fixed=%addend:physical_register:40:1 fixed=%sum:physical_register:41:1
+
+amdgpu.target<gfx1250> @gfx1250_target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_matrix_result_edge_copy(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm {
+  %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %acc
+  low.br ^join(%result: reg<amdgpu.vgpr x8>)
+^join(%joined: reg<amdgpu.vgpr x8>):
+  %lane = slice %joined[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum = v_add_f32 %lane, %addend
+  return
+}
+
+// ----
+v_wmma_f32_16x16x32_bf16 v[16:23], v[0:7], v[8:15], v[16:23]
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_mov_b32 v32, v16
+  v_mov_b32 v33, v17
+  v_mov_b32 v34, v18
+  v_mov_b32 v35, v19
+  v_mov_b32 v36, v20
+  v_mov_b32 v37, v21
+  v_mov_b32 v38, v22
+  v_mov_b32 v39, v23
+.Lbb1:
+  v_add_f32 v41, v32, v40
+  s_endpgm
+
+// ====
+
+// A same-iteration consumer discharges the release window. The loop summary
+// must not carry that consumed window back to an earlier header access.
+// RUN: emit amdgpu-assembly @gfx1250_consumed_matrix_window_does_not_escape_loop strategy=source fixed=%lhs:physical_register:0:8 fixed=%rhs:physical_register:8:8 fixed=%acc:physical_register:32:8 fixed=%carried:physical_register:32:8 fixed=%header_rhs:physical_register:40:1 fixed=%header:physical_register:41:1 fixed=%result:physical_register:32:8 fixed=%addend:physical_register:48:1 fixed=%sum:physical_register:49:1
+
+amdgpu.target<gfx1250> @gfx1250_target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_consumed_matrix_window_does_not_escape_loop(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %header_rhs: reg<amdgpu.vgpr>, %addend: reg<amdgpu.vgpr>, %limit: reg<amdgpu.sgpr>) asm {
+  %zero = s_mov_b32 0
+  low.br ^loop(%acc: reg<amdgpu.vgpr x8>, %zero: reg<amdgpu.sgpr>)
+^loop(%carried: reg<amdgpu.vgpr x8>, %iteration: reg<amdgpu.sgpr>):
+  %header_lane = slice %carried[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %header = v_add_f32 %header_lane, %header_rhs
+  %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %carried
+  %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %sum = v_add_f32 %lane, %addend
+  %one = s_mov_b32 1
+  %next_iteration = s_add_u32 %iteration, %one
+  %again = s_cmp_lt_i32 %next_iteration, %limit
+  low.cond_br %again, ^backedge, ^exit : reg<amdgpu.scc>
+^backedge:
+  low.br ^loop(%result: reg<amdgpu.vgpr x8>, %next_iteration: reg<amdgpu.sgpr>)
+^exit:
+  return
+}
+
+// ----
+s_mov_b32 s1, 0
+.Lbb1:
+  v_add_f32 v41, v32, v40
+  v_wmma_f32_16x16x32_bf16 v[32:39], v[0:7], v[8:15], v[32:39]
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_mov_b32 v16, v32
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_f32 v49, v16, v48
+  s_mov_b32 s2, 1
+  s_add_u32 s1, s1, s2
+  s_cmp_lt_i32 s1, s0
+  s_delay_alu instid0(SALU_CYCLE_1)
+  s_cbranch_scc0 .Lbb3
+.Lbb2:
+  s_branch .Lbb1
+.Lbb3:
+  s_endpgm

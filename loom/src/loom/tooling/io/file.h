@@ -12,6 +12,7 @@
 #include <stdio.h>
 
 #include "iree/base/api.h"
+#include "iree/io/byte_sequence.h"
 #include "iree/io/file_contents.h"
 #include "loom/util/stream.h"
 
@@ -53,6 +54,13 @@ iree_string_view_t loom_tooling_file_contents_string_view(
 iree_status_t loom_tooling_write_output_file(iree_string_view_t path,
                                              iree_string_view_t contents,
                                              iree_allocator_t allocator);
+
+// Writes |contents| to |path| in logical order without flattening it, treating
+// empty and "-" paths as stdout. Enumeration is synchronous and segment views
+// never escape the call.
+iree_status_t loom_tooling_write_output_byte_sequence(
+    iree_string_view_t path, const iree_io_byte_sequence_t* contents,
+    iree_allocator_t allocator);
 
 // Writes |contents| to stdout and flushes the stream.
 iree_status_t loom_tooling_write_stdout(iree_string_view_t contents);

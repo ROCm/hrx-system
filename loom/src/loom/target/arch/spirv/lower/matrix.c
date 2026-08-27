@@ -11,9 +11,9 @@
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
 #include "loom/target/arch/spirv/cooperative_properties.h"
-#include "loom/target/arch/spirv/profile.h"
+#include "loom/target/arch/spirv/facts.h"
 
-static bool loom_spirv_contract_numeric_scalar_type(
+bool loom_spirv_matrix_component_type(
     loom_contract_numeric_type_t numeric_type,
     loom_spirv_scalar_type_t* out_scalar_type) {
   *out_scalar_type = LOOM_SPIRV_SCALAR_TYPE_UNKNOWN;
@@ -51,6 +51,10 @@ static bool loom_spirv_contract_numeric_scalar_type(
     default:
       return false;
   }
+}
+
+loom_spirv_scope_t loom_spirv_matrix_scope(void) {
+  return LOOM_SPIRV_SCOPE_SUBGROUP;
 }
 
 static bool loom_spirv_contract_numeric_is_signed_integer(
@@ -181,12 +185,14 @@ static void loom_spirv_matrix_diagnostic_make_context_params(
     const loom_target_contract_query_environment_t* environment,
     const loom_op_t* source_op, iree_string_view_t matrix_constraint,
     loom_diagnostic_param_t* params) {
-  params[0] = loom_param_string(loom_spirv_matrix_diagnostic_nonempty(
-      environment->bundle->name, IREE_SV("<empty>")));
+  const loom_target_bundle_t* bundle =
+      loom_target_contract_query_environment_bundle(environment);
+  params[0] = loom_param_string(
+      loom_spirv_matrix_diagnostic_nonempty(bundle->name, IREE_SV("<empty>")));
   params[1] = loom_param_string(loom_spirv_matrix_diagnostic_nonempty(
-      environment->bundle->export_plan->name, IREE_SV("<empty>")));
+      bundle->export_plan->name, IREE_SV("<empty>")));
   params[2] = loom_param_string(loom_spirv_matrix_diagnostic_nonempty(
-      environment->bundle->config->name, IREE_SV("<empty>")));
+      bundle->config->name, IREE_SV("<empty>")));
   params[3] = loom_param_string(
       loom_spirv_matrix_diagnostic_function_name(environment));
   params[4] = loom_param_string(loom_op_name(environment->module, source_op));
@@ -239,7 +245,8 @@ static bool loom_spirv_cooperative_matrix_query_from_contract(
     return false;
   }
 
-  if (!loom_spirv_contract_dimension_u16(contract_request->shape.m,
+  if (contract_request->shape.block_count != 1 ||
+      !loom_spirv_contract_dimension_u16(contract_request->shape.m,
                                          &out_query->m_size) ||
       !loom_spirv_contract_dimension_u16(contract_request->shape.n,
                                          &out_query->n_size) ||
@@ -249,20 +256,20 @@ static bool loom_spirv_cooperative_matrix_query_from_contract(
     return false;
   }
 
-  if (!loom_spirv_contract_numeric_scalar_type(
-          contract_request->lhs.numeric_type, &out_query->lhs_type) ||
-      !loom_spirv_contract_numeric_scalar_type(
-          contract_request->rhs.numeric_type, &out_query->rhs_type) ||
-      !loom_spirv_contract_numeric_scalar_type(
+  if (!loom_spirv_matrix_component_type(contract_request->lhs.numeric_type,
+                                        &out_query->lhs_type) ||
+      !loom_spirv_matrix_component_type(contract_request->rhs.numeric_type,
+                                        &out_query->rhs_type) ||
+      !loom_spirv_matrix_component_type(
           contract_request->accumulator.numeric_type,
           &out_query->accumulator_type) ||
-      !loom_spirv_contract_numeric_scalar_type(
-          contract_request->result.numeric_type, &out_query->result_type)) {
+      !loom_spirv_matrix_component_type(contract_request->result.numeric_type,
+                                        &out_query->result_type)) {
     out_diagnostic->rejection_bits = LOOM_CONTRACT_REJECTION_NUMERIC;
     return false;
   }
 
-  out_query->scope = LOOM_SPIRV_SCOPE_SUBGROUP;
+  out_query->scope = loom_spirv_matrix_scope();
   out_query->layout = LOOM_SPIRV_COOPERATIVE_MATRIX_LAYOUT_ROW_MAJOR_KHR;
   out_query->storage_class = LOOM_SPIRV_STORAGE_CLASS_PHYSICAL_STORAGE_BUFFER;
   out_query->operand_flags =
@@ -274,19 +281,11 @@ static bool loom_spirv_cooperative_matrix_query_from_contract(
 static void loom_spirv_matrix_prepare_properties(
     const loom_target_contract_query_environment_t* environment,
     loom_spirv_cooperative_property_set_t* out_property_set) {
-  const loom_spirv_target_profile_t* profile =
-      loom_spirv_target_profile_from_data(environment->target_data);
-  if (profile != NULL && profile->cooperative_properties != NULL) {
-    *out_property_set = *profile->cooperative_properties;
-    return;
-  }
-  // Cooperative property selection only needs feature atom membership; full
-  // SPIR-V capability/extension preparation is emission-owned.
-  const loom_spirv_feature_set_t feature_set = {
-      .atom_bits = (loom_spirv_feature_bits_t)
-                       environment->bundle->config->contract_feature_bits,
-  };
-  loom_spirv_cooperative_property_set_prepare(&feature_set, out_property_set);
+  const loom_spirv_target_facts_t* target_facts =
+      loom_spirv_target_facts_cast(environment->target_facts);
+  IREE_ASSERT(target_facts != NULL,
+              "SPIR-V matrix lowering requires SPIR-V target facts");
+  *out_property_set = target_facts->cooperative_properties;
 }
 
 static iree_status_t loom_spirv_matrix_query_select_descriptor(

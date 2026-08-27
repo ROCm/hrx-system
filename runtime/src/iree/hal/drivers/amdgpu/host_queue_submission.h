@@ -172,6 +172,10 @@ typedef struct iree_hal_amdgpu_host_queue_pm4_ib_submission_t {
   const uint32_t* persistent_ib_dwords;
   // Number of PM4 dwords referenced by |pm4_ib_packet_slot|.
   uint32_t ib_dword_count;
+  // Minimum acquire fence scope required by operation-local data visibility.
+  iree_hsa_fence_scope_t minimum_acquire_scope;
+  // Minimum release fence scope required by operation-local data visibility.
+  iree_hsa_fence_scope_t minimum_release_scope;
 } iree_hal_amdgpu_host_queue_pm4_ib_submission_t;
 
 // Returns the number of retained resources required for a submission with
@@ -208,20 +212,14 @@ static inline void iree_hal_amdgpu_host_queue_publish_submission_kernargs(
 }
 
 // Returns the acquire scope required for device execution to observe
-// host-populated queue-owned kernargs. Device-local rings need SYSTEM acquire
-// here because publish_submission_kernargs() only drains host writes before
-// packet publication; shader-visible memory may otherwise retain stale
-// contents across ring-slot reuse.
+// host-populated queue-owned kernargs. CPU-side publication and device-side
+// acquisition are independent: coherent host memory needs no explicit
+// publication step but still crosses from the host agent to the GPU agent.
 static inline iree_hsa_fence_scope_t
 iree_hal_amdgpu_host_queue_kernarg_acquire_scope(
-    const iree_hal_amdgpu_host_queue_t* queue,
     iree_hsa_fence_scope_t minimum_acquire_scope) {
-  if (iree_hal_amdgpu_kernarg_ring_requires_host_write_publication(
-          &queue->kernarg_ring)) {
-    return iree_hal_amdgpu_host_queue_max_fence_scope(
-        minimum_acquire_scope, IREE_HSA_FENCE_SCOPE_SYSTEM);
-  }
-  return minimum_acquire_scope;
+  return iree_hal_amdgpu_host_queue_max_fence_scope(
+      minimum_acquire_scope, IREE_HSA_FENCE_SCOPE_SYSTEM);
 }
 
 // Attempts to begin one barrier-shaped packet submission without waiting for

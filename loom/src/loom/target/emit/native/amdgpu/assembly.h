@@ -14,6 +14,8 @@
 #include "iree/base/string_builder.h"
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/schedule/types.h"
+#include "loom/target/emit/native/amdgpu/branch_layout.h"
+#include "loom/target/emit/native/amdgpu/storage_layout.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,18 +24,25 @@ extern "C" {
 typedef struct loom_amdgpu_assembly_fragment_options_t {
   // Optional target-owned packet plan applied during assembly emission.
   const struct loom_amdgpu_packet_plan_t* packet_plan;
+  // Optional function-local storage layout shared with kernel metadata.
+  const loom_amdgpu_storage_layout_t* storage_layout;
+  // Optional exact branch-island layout shared with native encoding.
+  const loom_amdgpu_branch_layout_t* branch_layout;
 } loom_amdgpu_assembly_fragment_options_t;
 
 // Emits an AMDGPU assembly fragment for one scheduled and allocated AMDGPU
-// target-low function. The fragment assumes exact physical-register inputs and
-// outputs; it does not emit kernel metadata, PAL metadata, or an ELF code
-// object envelope. Values must be physically allocated and unspilled.
+// target-low function from an addressability-accepted emission frame. The
+// fragment assumes exact physical-register inputs and outputs; it does not emit
+// kernel metadata, PAL metadata, or an ELF code object envelope. Values must be
+// physically allocated and unspilled. This entry emits no packet-plan
+// insertions; frames that require them use the options form below.
 iree_status_t loom_amdgpu_emit_assembly_fragment(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     iree_string_builder_t* builder, iree_arena_allocator_t* scratch_arena);
 
-// Emits an AMDGPU assembly fragment with target-owned insertion plans.
+// Emits an AMDGPU assembly fragment with target-owned insertion plans built
+// from the same emission frame.
 iree_status_t loom_amdgpu_emit_assembly_fragment_with_options(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,

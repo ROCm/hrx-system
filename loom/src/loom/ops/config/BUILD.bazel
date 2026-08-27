@@ -15,12 +15,10 @@ package(
 loom_generated_cc_library(
     name = "config",
     srcs = [
-        "contract.c",
         "facts.c",
         "verify.c",
     ],
     hdrs = [
-        "contract.h",
         "ops.h",
     ],
     args = ["--dialect=config"],
@@ -39,6 +37,7 @@ loom_generated_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/encoding",
         "//runtime/src/iree/base",
     ],
 )

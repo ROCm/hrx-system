@@ -13,10 +13,21 @@
 iree_status_t loom_availability_analysis_initialize(
     const loom_module_t* module, iree_arena_allocator_t* arena,
     loom_availability_analysis_t* out_analysis) {
+  if (!module) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "availability analysis requires a module");
+  }
+  return loom_availability_analysis_initialize_region(module, module->body,
+                                                      arena, out_analysis);
+}
+
+iree_status_t loom_availability_analysis_initialize_region(
+    const loom_module_t* module, const loom_region_t* region,
+    iree_arena_allocator_t* arena, loom_availability_analysis_t* out_analysis) {
   out_analysis->module = module;
   out_analysis->arena = arena;
-  IREE_RETURN_IF_ERROR(
-      loom_dominance_info_initialize(module, arena, &out_analysis->dominance));
+  IREE_RETURN_IF_ERROR(loom_dominance_info_initialize_region(
+      module, region, arena, &out_analysis->dominance));
   return iree_ok_status();
 }
 
@@ -175,7 +186,7 @@ iree_status_t loom_availability_type_is_available_before_op(
       .available = true,
   };
   IREE_RETURN_IF_ERROR(loom_type_walk_value_refs(
-      type, loom_availability_check_type_ref, &query));
+      analysis->module, type, loom_availability_check_type_ref, &query));
   *out_available = query.available;
   return iree_ok_status();
 }
@@ -225,7 +236,7 @@ static iree_status_t loom_availability_attr_is_available_before_op_impl(
   if (!loom_availability_query_is_valid(analysis, before_op) || !attr) {
     return iree_ok_status();
   }
-  if (depth > LOOM_ATTR_DICT_MAX_NESTING_DEPTH) return iree_ok_status();
+  if (depth > LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) return iree_ok_status();
   switch (attr->kind) {
     case LOOM_ATTR_ABSENT:
     case LOOM_ATTR_I64:
@@ -233,8 +244,14 @@ static iree_status_t loom_availability_attr_is_available_before_op_impl(
     case LOOM_ATTR_STRING:
     case LOOM_ATTR_BOOL:
     case LOOM_ATTR_ENUM:
+    case LOOM_ATTR_SCOPED_ENUM:
     case LOOM_ATTR_I64_ARRAY:
+    case LOOM_ATTR_ENUM_ARRAY:
+    case LOOM_ATTR_SIGNED_ENUM_SET:
     case LOOM_ATTR_SYMBOL:
+    case LOOM_ATTR_SYMBOL_ARRAY:
+    case LOOM_ATTR_SYMBOL_SET:
+    case LOOM_ATTR_BYTES:
       *out_available = true;
       return iree_ok_status();
     case LOOM_ATTR_TYPE:
@@ -261,6 +278,30 @@ static iree_status_t loom_availability_attr_is_available_before_op_impl(
       for (uint16_t i = 0; i < attr->count; ++i) {
         IREE_RETURN_IF_ERROR(loom_availability_attr_is_available_before_op_impl(
             analysis, moving_root_op, before_op, &attr->dict_entries[i].value,
+            (uint8_t)(depth + 1), out_available));
+        if (!*out_available) return iree_ok_status();
+      }
+      *out_available = true;
+      return iree_ok_status();
+    case LOOM_ATTR_PARAMETERIZED:
+      if (attr->count > 0 && !attr->parameterized_slots) {
+        return iree_ok_status();
+      }
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_availability_attr_is_available_before_op_impl(
+            analysis, moving_root_op, before_op, &attr->parameterized_slots[i],
+            (uint8_t)(depth + 1), out_available));
+        if (!*out_available) return iree_ok_status();
+      }
+      *out_available = true;
+      return iree_ok_status();
+    case LOOM_ATTR_PARAMETERIZED_ARRAY:
+      if (attr->count > 0 && !attr->parameterized_array) {
+        return iree_ok_status();
+      }
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_availability_attr_is_available_before_op_impl(
+            analysis, moving_root_op, before_op, &attr->parameterized_array[i],
             (uint8_t)(depth + 1), out_available));
         if (!*out_available) return iree_ok_status();
       }

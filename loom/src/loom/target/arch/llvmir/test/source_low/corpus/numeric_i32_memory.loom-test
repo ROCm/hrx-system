@@ -5,35 +5,36 @@ llvmir.target<object> @target {
   triple = "amdgcn-amd-amdhsa"
 }
 kernel.def target(@target) @i32_bitwise() {
-  %c1 = index.constant 1 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
-  %tid0 = kernel.workitem.id<x> : index
-  %tid = index.assume %tid0 [range(%tid0, 0, 63)] : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xi32, #dense>
-  %loaded = vector.load %input_view[%tid] : view<64xi32, #dense> -> vector<1xi32>
+  %lane = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32>
+  %loaded = vector.load %input_view[%lane] : view<64xi32> -> vector<1xi32>
   %mask = vector.constant 15 : vector<1xi32>
   %masked = vector.andi %loaded, %mask : vector<1xi32>
   %tag = vector.constant 240 : vector<1xi32>
   %with_tag = vector.ori %masked, %tag : vector<1xi32>
   %result = vector.xori %with_tag, %loaded : vector<1xi32>
-  vector.store %result, %output_view[%tid] : vector<1xi32>, view<64xi32, #dense>
+  vector.store %result, %output_view[%lane] : vector<1xi32>, view<64xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @i32_bitwise() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @i32_bitwise() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
-  %loaded = load.i32 %input_view, 0
+  %lane = kernel.workitem_id.x
+  %loaded = load.indexed.i32 %input_view, %lane, 0, 4
   %mask = const.i32 15
   %masked = and.i32 %loaded, %mask
   %tag = const.i32 240
   %with_tag = or.i32 %masked, %tag
   %result = xor.i32 %with_tag, %loaded
-  store.i32 %result, %output_view, 0
+  store.indexed.i32 %result, %output_view, %lane, 0, 4
   return
 }
 
@@ -43,37 +44,38 @@ llvmir.target<object> @target {
   triple = "amdgcn-amd-amdhsa"
 }
 kernel.def target(@target) @i32_shift() {
-  %c1 = index.constant 1 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
-  %tid0 = kernel.workitem.id<x> : index
-  %tid = index.assume %tid0 [range(%tid0, 0, 63)] : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xi32, #dense>
-  %loaded = vector.load %input_view[%tid] : view<64xi32, #dense> -> vector<1xi32>
+  %lane = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32>
+  %loaded = vector.load %input_view[%lane] : view<64xi32> -> vector<1xi32>
   %shift = vector.constant 3 : vector<1xi32>
   %left = vector.shli %loaded, %shift : vector<1xi32>
   %logical = vector.shrui %loaded, %shift : vector<1xi32>
   %arithmetic = vector.shrsi %loaded, %shift : vector<1xi32>
   %joined = vector.ori %left, %logical : vector<1xi32>
   %result = vector.xori %joined, %arithmetic : vector<1xi32>
-  vector.store %result, %output_view[%tid] : vector<1xi32>, view<64xi32, #dense>
+  vector.store %result, %output_view[%lane] : vector<1xi32>, view<64xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @i32_shift() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @i32_shift() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
-  %loaded = load.i32 %input_view, 0
+  %lane = kernel.workitem_id.x
+  %loaded = load.indexed.i32 %input_view, %lane, 0, 4
   %shift = const.i32 3
   %left = shl.i32 %loaded, %shift
   %logical = lshr.i32 %loaded, %shift
   %arithmetic = ashr.i32 %loaded, %shift
   %joined = or.i32 %left, %logical
   %result = xor.i32 %joined, %arithmetic
-  store.i32 %result, %output_view, 0
+  store.indexed.i32 %result, %output_view, %lane, 0, 4
   return
 }
 
@@ -83,29 +85,30 @@ llvmir.target<object> @target {
   triple = "amdgcn-amd-amdhsa"
 }
 kernel.def target(@target) @i32_negative_literal() {
-  %c1 = index.constant 1 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
-  %tid0 = kernel.workitem.id<x> : index
-  %tid = index.assume %tid0 [range(%tid0, 0, 63)] : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xi32, #dense>
-  %loaded = vector.load %input_view[%tid] : view<64xi32, #dense> -> vector<1xi32>
+  %lane = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32>
+  %loaded = vector.load %input_view[%lane] : view<64xi32> -> vector<1xi32>
   %mask = vector.constant -1 : vector<1xi32>
   %result = vector.xori %loaded, %mask : vector<1xi32>
-  vector.store %result, %output_view[%tid] : vector<1xi32>, view<64xi32, #dense>
+  vector.store %result, %output_view[%lane] : vector<1xi32>, view<64xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @i32_negative_literal() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @i32_negative_literal() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
-  %loaded = load.i32 %input_view, 0
+  %lane = kernel.workitem_id.x
+  %loaded = load.indexed.i32 %input_view, %lane, 0, 4
   %mask = const.i32 -1
   %result = xor.i32 %loaded, %mask
-  store.i32 %result, %output_view, 0
+  store.indexed.i32 %result, %output_view, %lane, 0, 4
   return
 }
 
@@ -115,15 +118,15 @@ llvmir.target<object> @target {
   triple = "amdgcn-amd-amdhsa"
 }
 kernel.def target(@target) @i32_scalarized() {
-  %c1 = index.constant 1 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
-  %tid0 = kernel.workitem.id<x> : index
-  %tid = index.assume %tid0 [range(%tid0, 0, 63)] : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64x4xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64x4xi32, #dense>
-  %loaded = vector.load %input_view[%tid, 0] : view<64x4xi32, #dense> -> vector<4xi32>
+  %lane = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x4xi32> -> vector<4xi32>
   %lane0 = vector.extract %loaded[0] : vector<4xi32> -> i32
   %lane1 = vector.extract %loaded[1] : vector<4xi32> -> i32
   %mask = scalar.constant 255 : i32
@@ -138,15 +141,16 @@ kernel.def target(@target) @i32_scalarized() {
   %lane2 = vector.extract %loaded[2] : vector<4xi32> -> i32
   %lane3 = vector.extract %loaded[3] : vector<4xi32> -> i32
   %result = vector.from_elements %mixed, %logical, %lane2, %lane3 : vector<4xi32>
-  vector.store %result, %output_view[%tid, 0] : vector<4xi32>, view<64x4xi32, #dense>
+  vector.store %result, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @i32_scalarized() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @i32_scalarized() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
-  %loaded = load.v4i32 %input_view, 0
+  %lane = kernel.workitem_id.x
+  %loaded = load.indexed.v4i32 %input_view, %lane, 0, 16
   %lane0 = extract.v4i32 %loaded, 0
   %lane1 = extract.v4i32 %loaded, 1
   %mask = const.i32 255
@@ -161,6 +165,6 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @i32_scalarized() asm<llv
   %lane2 = extract.v4i32 %loaded, 2
   %lane3 = extract.v4i32 %loaded, 3
   %result = from_elements.v4i32 %mixed, %logical, %lane2, %lane3
-  store.v4i32 %result, %output_view, 0
+  store.indexed.v4i32 %result, %output_view, %lane, 0, 16
   return
 }

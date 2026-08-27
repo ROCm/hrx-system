@@ -1,0 +1,38 @@
+// RUN: emit amdgpu-assembly @gfx942_destination_selected_result_use strategy=source fixed=%a:physical_register:0:1 fixed=%b:physical_register:1:1 fixed=%c:physical_register:2:1 fixed=%d:physical_register:3:1 fixed=%signs:physical_register:6:1 fixed=%mask:physical_register:0:1 fixed=%low:physical_register:4:1 fixed=%high:physical_register:4:1 fixed=%result:physical_register:5:1
+
+amdgpu.target<gfx942> @target
+low.func.def target<amdgpu.cdna3.core>(@target) @gfx942_destination_selected_result_use(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>, %d: reg<amdgpu.vgpr>, %signs: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %low = v_cvt_pk_fp8_f32_low %a, %b
+  %high = v_cvt_pk_fp8_f32_high %low, %c, %d
+  %result = v_bfi_b32 %mask, %signs, %high
+  return %result
+}
+
+// The high-half conversion writes through destination-selection forwarding.
+// CDNA3 requires one instruction slot before a dependent ordinary VALU.
+// ----
+  v_cvt_pk_fp8_f32 v4, v0, v1
+  v_cvt_pk_fp8_f32 v4, v2, v3, op_sel:[0,0,1]
+  s_nop 0
+  v_bfi_b32 v5, s0, v6, v4
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @gfx942_independent_slot_satisfies_destination_wait strategy=source fixed=%a:physical_register:0:1 fixed=%b:physical_register:1:1 fixed=%c:physical_register:2:1 fixed=%d:physical_register:3:1 fixed=%gap_lhs:physical_register:6:1 fixed=%gap_rhs:physical_register:7:1 fixed=%signs:physical_register:8:1 fixed=%mask:physical_register:0:1 fixed=%low:physical_register:4:1 fixed=%high:physical_register:4:1 fixed=%gap:physical_register:5:1 fixed=%result:physical_register:9:1
+
+amdgpu.target<gfx942> @target
+low.func.def target<amdgpu.cdna3.core>(@target) @gfx942_independent_slot_satisfies_destination_wait(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>, %d: reg<amdgpu.vgpr>, %gap_lhs: reg<amdgpu.vgpr>, %gap_rhs: reg<amdgpu.vgpr>, %signs: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %low = v_cvt_pk_fp8_f32_low %a, %b
+  %high = v_cvt_pk_fp8_f32_high %low, %c, %d
+  %gap = v_add_u32 %gap_lhs, %gap_rhs
+  %result = v_bfi_b32 %mask, %signs, %high
+  return %gap, %result
+}
+
+// One independent VALU supplies the required slot without a residual wait.
+// ----
+  v_cvt_pk_fp8_f32 v4, v0, v1
+  v_cvt_pk_fp8_f32 v4, v2, v3, op_sel:[0,0,1]
+  v_add_u32 v5, v6, v7
+  v_bfi_b32 v9, s0, v8, v4
+  s_endpgm

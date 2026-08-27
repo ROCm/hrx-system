@@ -1,0 +1,17 @@
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @fragment_repack_lane_preamble() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %tile_extent = index.constant 16 : index
+  %input_view = buffer.view %input[%base] : buffer -> view<8xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xbf16>
+  %values = vector.load %input_view[0] : view<8xf32> -> vector<8xf32>
+  %result = vector.fragment<result> %values shape [%tile_extent, %tile_extent] : vector<8xf32>
+  %lhs = vector.fragment.repack<lhs> %result shape [%tile_extent, %tile_extent] : vector<8xf32> -> vector<16xbf16>
+  vector.store %lhs, %output_view[0] : vector<16xbf16>, view<16xbf16>
+  kernel.return
+}

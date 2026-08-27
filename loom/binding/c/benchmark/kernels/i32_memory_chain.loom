@@ -1,0 +1,27 @@
+// A compact target-independent source that expands into a configurable
+// arithmetic chain during specialization and required full unrolling.
+config.decl @benchmark.workgroup_size : %value: index where [range(%value, 1, 256)]
+
+config.decl @benchmark.operation_count : %value: index where [range(%value, 1, 4096)]
+
+kernel.def export("i32_memory_chain") @i32_memory_chain() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = config.get @benchmark.workgroup_size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %byte_offset: offset) {
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %operation_count = config.get @benchmark.operation_count : index
+  %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 4)] : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<1xi32>
+  %loaded = view.load %input_view[0] : view<1xi32> -> i32
+  %acc = scf.for %i = [%loop_begin to %operation_count step %loop_step](%iter = %loaded : i32) -> (i32) unroll {
+    %next = scalar.addi %iter, %loaded : i32
+    scf.yield %next : i32
+  }
+  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xi32>
+  view.store %acc, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}

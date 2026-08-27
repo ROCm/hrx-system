@@ -160,6 +160,8 @@ class ContractVectorTest : public ::testing::Test {
 
   loom_contract_vector_mma_options_t GpuMatrixMmaOptions() {
     return (loom_contract_vector_mma_options_t){
+        /*.fragment_projection=*/
+        LOOM_CONTRACT_VECTOR_MMA_FRAGMENT_PROJECTION_EXPLICIT,
         /*.k_group_size=*/1,
         /*.fragment=*/
         (loom_contract_fragment_t){
@@ -170,6 +172,17 @@ class ContractVectorTest : public ::testing::Test {
             /*.subgroup_size=*/64,
         },
         /*.capability_class=*/LOOM_CONTRACT_CAPABILITY_CLASS_GPU_MATRIX,
+        /*.policy=*/LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
+    };
+  }
+
+  loom_contract_vector_mma_options_t PackedVectorMmaOptions() {
+    return (loom_contract_vector_mma_options_t){
+        /*.fragment_projection=*/
+        LOOM_CONTRACT_VECTOR_MMA_FRAGMENT_PROJECTION_PACKED_VECTOR,
+        /*.k_group_size=*/0,
+        /*.fragment=*/{},
+        /*.capability_class=*/LOOM_CONTRACT_CAPABILITY_CLASS_CPU_PACKED_DOT,
         /*.policy=*/LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
     };
   }
@@ -202,6 +215,7 @@ func.def @u8s8_dot4(%lhs: vector<32xi8>, %rhs: vector<32xi8>, %acc: vector<8xi32
   EXPECT_EQ(request.shape.m, 8);
   EXPECT_EQ(request.shape.n, 1);
   EXPECT_EQ(request.shape.k, 32);
+  EXPECT_EQ(request.shape.block_count, 1);
   EXPECT_EQ(request.k_group_size, 4);
   EXPECT_EQ(request.lhs.numeric_type, LOOM_CONTRACT_NUMERIC_U8);
   EXPECT_EQ(request.rhs.numeric_type, LOOM_CONTRACT_NUMERIC_I8);
@@ -297,6 +311,7 @@ func.def @dense_mma(%lhs_data: vector<8xf16>, %rhs_data: vector<8xf16>, %init_da
   EXPECT_EQ(request.shape.m, 16);
   EXPECT_EQ(request.shape.n, 16);
   EXPECT_EQ(request.shape.k, 16);
+  EXPECT_EQ(request.shape.block_count, 1);
   EXPECT_EQ(request.lhs.numeric_type, LOOM_CONTRACT_NUMERIC_F16);
   EXPECT_EQ(request.lhs.payload_register_count, 4);
   EXPECT_EQ(request.lhs.payload_element_count, 8);
@@ -320,6 +335,92 @@ func.def @dense_mma(%lhs_data: vector<8xf16>, %rhs_data: vector<8xf16>, %init_da
             LOOM_CONTRACT_CAPABILITY_CLASS_GPU_MATRIX);
   EXPECT_EQ(request.fragment.atom_bits, LOOM_CONTRACT_FRAGMENT_SUBGROUP_LANE);
   EXPECT_EQ(request.fragment.subgroup_size, 64);
+  loom_pass_value_fact_owner_deinitialize(&value_facts);
+}
+
+TEST_F(ContractVectorTest, DerivesPackedVectorMmaFragmentFromPayloads) {
+  static const char kSource[] = R"(
+func.def @packed_bf16_mma(%lhs_data: vector<16xbf16>, %rhs_data: vector<16xbf16>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
+  %blocks = index.constant 8 : index
+  %m = index.constant 1 : index
+  %n = index.constant 1 : index
+  %k = index.constant 2 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [blocks(%blocks), %m, %k] : vector<16xbf16>
+  %rhs = vector.fragment<rhs> %rhs_data shape [blocks(%blocks), %k, %n] : vector<16xbf16>
+  %init = vector.fragment<init> %init_data shape [blocks(%blocks), %m, %n] : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+)";
+
+  loom_module_t* module = nullptr;
+  IREE_ASSERT_OK(ParseAndVerify(kSource, &module));
+  ModulePtr module_ptr(module);
+
+  loom_pass_value_fact_owner_t value_facts = {};
+  loom_pass_value_fact_owner_initialize(module->arena.block_pool, &value_facts);
+  loom_value_fact_table_t* fact_table = nullptr;
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
+      &value_facts, module_ptr.get(),
+      loom_pass_value_fact_scope_function(FirstFunction(module_ptr.get())),
+      &fact_table));
+
+  const loom_op_t* op = FirstVectorMmaOp(module_ptr.get());
+  ASSERT_NE(op, nullptr);
+  const loom_contract_vector_mma_options_t options = PackedVectorMmaOptions();
+  loom_contract_request_t request = {};
+  ASSERT_TRUE(loom_contract_request_from_vector_mma_op(
+      module_ptr.get(), fact_table, op, &options, &request, nullptr));
+
+  EXPECT_EQ(request.shape.block_count, 8);
+  EXPECT_EQ(request.shape.m, 1);
+  EXPECT_EQ(request.shape.n, 1);
+  EXPECT_EQ(request.shape.k, 2);
+  EXPECT_EQ(request.k_group_size, 2);
+  EXPECT_EQ(request.fragment.atom_bits, LOOM_CONTRACT_FRAGMENT_VECTOR_LANE);
+  EXPECT_EQ(request.fragment.vector_bit_width, 256);
+  EXPECT_EQ(request.fragment.source_lane_count, 16);
+  EXPECT_EQ(request.fragment.result_lane_count, 8);
+  EXPECT_EQ(request.capability_class,
+            LOOM_CONTRACT_CAPABILITY_CLASS_CPU_PACKED_DOT);
+  loom_pass_value_fact_owner_deinitialize(&value_facts);
+}
+
+TEST_F(ContractVectorTest, RejectsUnequalPackedVectorRegisterWidths) {
+  static const char kSource[] = R"(
+func.def @packed_bf16_mma(%lhs_data: vector<8xbf16>, %rhs_data: vector<8xbf16>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
+  %blocks = index.constant 8 : index
+  %m = index.constant 1 : index
+  %n = index.constant 1 : index
+  %k = index.constant 1 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [blocks(%blocks), %m, %k] : vector<8xbf16>
+  %rhs = vector.fragment<rhs> %rhs_data shape [blocks(%blocks), %k, %n] : vector<8xbf16>
+  %init = vector.fragment<init> %init_data shape [blocks(%blocks), %m, %n] : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<8xbf16>, vector<8xbf16>, vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+)";
+
+  loom_module_t* module = nullptr;
+  IREE_ASSERT_OK(ParseAndVerify(kSource, &module));
+  ModulePtr module_ptr(module);
+
+  loom_pass_value_fact_owner_t value_facts = {};
+  loom_pass_value_fact_owner_initialize(module->arena.block_pool, &value_facts);
+  loom_value_fact_table_t* fact_table = nullptr;
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
+      &value_facts, module_ptr.get(),
+      loom_pass_value_fact_scope_function(FirstFunction(module_ptr.get())),
+      &fact_table));
+
+  const loom_op_t* op = FirstVectorMmaOp(module_ptr.get());
+  ASSERT_NE(op, nullptr);
+  const loom_contract_vector_mma_options_t options = PackedVectorMmaOptions();
+  loom_contract_request_t request = {};
+  loom_contract_diagnostic_t diagnostic = {};
+  EXPECT_FALSE(loom_contract_request_from_vector_mma_op(
+      module_ptr.get(), fact_table, op, &options, &request, &diagnostic));
+  EXPECT_EQ(diagnostic.rejection_bits, LOOM_CONTRACT_REJECTION_FRAGMENT);
   loom_pass_value_fact_owner_deinitialize(&value_facts);
 }
 
@@ -387,7 +488,7 @@ func.def @encoded_mma(%lhs_data: vector<6xi32>, %rhs_data: vector<6xi32>, %init_
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 128 : index
-  %schema = encoding.define #matrix_operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {scale = %scale : vector<1xf16>, schema = %schema : encoding<schema>} : vector<6xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {scale = %scale : vector<1xf16>, schema = %schema : encoding<schema>} : vector<6xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
@@ -435,7 +536,7 @@ func.def @encoded_mma(%lhs_data: vector<6xi32>, %rhs_data: vector<6xi32>, %init_
       loom_contract_value_ref_value_id(
           request.lhs.encoded
               .auxiliary_value_refs[LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_SCALE]),
-      lhs_fragment.auxiliary.values[LOOM_VECTOR_ENCODING_AUXILIARY_KEY_SCALE]);
+      lhs_fragment.auxiliary.values[LOOM_ENCODING_AUXILIARY_KEY_SCALE]);
   EXPECT_EQ(loom_contract_value_ref_value_id(
                 request.lhs.encoded.auxiliary_value_refs
                     [LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_CODEBOOK_TABLE]),
@@ -447,7 +548,7 @@ func.def @encoded_mma(%lhs_data: vector<6xi32>, %rhs_data: vector<6xi32>, %init_
       loom_contract_value_ref_value_id(
           request.rhs.encoded
               .auxiliary_value_refs[LOOM_CONTRACT_AUXILIARY_OPERAND_KEY_SCALE]),
-      rhs_fragment.auxiliary.values[LOOM_VECTOR_ENCODING_AUXILIARY_KEY_SCALE]);
+      rhs_fragment.auxiliary.values[LOOM_ENCODING_AUXILIARY_KEY_SCALE]);
   EXPECT_EQ(request.shape.k, 128);
   loom_pass_value_fact_owner_deinitialize(&value_facts);
 }
@@ -458,7 +559,7 @@ func.def @fp8_mma(%lhs_data: vector<2xi32>, %rhs_data: vector<2xi32>, %init_data
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 32 : index
-  %schema = encoding.define #matrix_operand<element_format=f8e4m3fnuz, payload_elements=8, payload_registers=2> : encoding<schema>
+  %schema = encoding.define #encoding.operand<element_format=f8e4m3fnuz, payload_elements=8, payload_registers=2> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {schema = %schema : encoding<schema>} : vector<2xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {schema = %schema : encoding<schema>} : vector<2xi32>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>

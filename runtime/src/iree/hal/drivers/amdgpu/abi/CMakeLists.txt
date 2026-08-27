@@ -28,6 +28,10 @@ add_custom_command(OUTPUT amdgpu_abi_bitcode_hdrs.stamp
 add_custom_target(amdgpu_abi_bitcode_hdrs
     DEPENDS amdgpu_abi_bitcode_hdrs.stamp
 )
+iree_register_generated_compile_input(amdgpu_abi_bitcode_hdrs
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/amdgpu_abi_bitcode_hdrs.stamp"
+)
 
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_library(

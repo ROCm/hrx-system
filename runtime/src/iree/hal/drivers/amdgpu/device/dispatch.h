@@ -28,7 +28,8 @@ extern "C" {
 // packet/kernarg storage. Host recording/submission code must validate kernel
 // metadata and user-provided arguments before passing a layout here.
 typedef struct iree_hal_amdgpu_device_dispatch_kernarg_layout_t {
-  // Size in bytes of the explicitly provided dispatch arguments.
+  // Fixed size in bytes of explicitly provided dispatch arguments, or zero
+  // when the caller-provided byte count is dynamic.
   size_t explicit_kernarg_size;
   // Offset in bytes of the implicit HIP/OpenCL suffix, if present.
   size_t implicit_args_offset;
@@ -38,6 +39,23 @@ typedef struct iree_hal_amdgpu_device_dispatch_kernarg_layout_t {
   // |implicit_args_offset| and must be populated during emplace.
   bool has_implicit_args;
 } iree_hal_amdgpu_device_dispatch_kernarg_layout_t;
+
+// Returns the number of caller-provided custom kernarg bytes to copy into the
+// explicit argument prefix.
+static inline IREE_AMDGPU_ATTRIBUTE_ALWAYS_INLINE size_t
+iree_hal_amdgpu_device_dispatch_custom_kernarg_copy_length(
+    const iree_hal_amdgpu_device_dispatch_kernarg_layout_t* layout,
+    size_t custom_kernarg_length) {
+  const size_t explicit_kernarg_size = layout->explicit_kernarg_size
+                                           ? layout->explicit_kernarg_size
+                                           : custom_kernarg_length;
+  size_t copy_length =
+      IREE_AMDGPU_MIN(custom_kernarg_length, explicit_kernarg_size);
+  if (layout->total_kernarg_size) {
+    copy_length = IREE_AMDGPU_MIN(copy_length, layout->total_kernarg_size);
+  }
+  return copy_length;
+}
 
 //===----------------------------------------------------------------------===//
 // Dispatch Packet/Kernarg Emission
@@ -97,6 +115,36 @@ void iree_hal_amdgpu_device_dispatch_emplace_packet(
     iree_hsa_kernel_dispatch_packet_t* IREE_AMDGPU_RESTRICT dispatch_packet,
     void* IREE_AMDGPU_RESTRICT kernarg_ptr);
 
+// Initializes the fixed HIP/OpenCL implicit-argument suffix.
+//
+// Only IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE bytes are reserved by executable
+// metadata and initialized here. The backing struct also declares deprecated
+// pre-GFX9 fields beyond that suffix and must not be cleared with sizeof.
+//
+// Preconditions:
+//   - |kernel_args|, |workgroup_count|, and |implicit_args| are non-NULL.
+//   - |implicit_args| points to at least
+//     IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE bytes of writable storage.
+static inline IREE_AMDGPU_ATTRIBUTE_ALWAYS_INLINE void
+iree_hal_amdgpu_device_dispatch_initialize_implicit_args(
+    const iree_hal_amdgpu_device_kernel_args_t* IREE_AMDGPU_RESTRICT
+        kernel_args,
+    const uint32_t workgroup_count[3], uint32_t dynamic_workgroup_local_memory,
+    void* hostcall_buffer,
+    iree_amdgpu_kernel_implicit_args_t* IREE_AMDGPU_RESTRICT implicit_args) {
+  iree_amdgpu_memset(implicit_args, 0, IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE);
+  implicit_args->block_count[0] = workgroup_count[0];
+  implicit_args->block_count[1] = workgroup_count[1];
+  implicit_args->block_count[2] = workgroup_count[2];
+  implicit_args->group_size[0] = kernel_args->workgroup_size[0];
+  implicit_args->group_size[1] = kernel_args->workgroup_size[1];
+  implicit_args->group_size[2] = kernel_args->workgroup_size[2];
+  implicit_args->grid_dims = 3;
+  implicit_args->printf_buffer = NULL;
+  implicit_args->hostcall_buffer = hostcall_buffer;
+  implicit_args->dynamic_lds_size = dynamic_workgroup_local_memory;
+}
+
 // Populates the HIP/OpenCL implicit args suffix in already-reserved storage.
 //
 // This must be called after explicit HAL/custom kernargs have been populated
@@ -112,15 +160,19 @@ void iree_hal_amdgpu_device_dispatch_emplace_implicit_args(
     const iree_hal_amdgpu_device_kernel_args_t* IREE_AMDGPU_RESTRICT
         kernel_args,
     const uint32_t workgroup_count[3], uint32_t dynamic_workgroup_local_memory,
+    void* hostcall_buffer,
     const iree_hal_amdgpu_device_dispatch_kernarg_layout_t* IREE_AMDGPU_RESTRICT
         layout,
     void* IREE_AMDGPU_RESTRICT kernarg_ptr);
 
 // Populates custom direct explicit kernargs in already-reserved storage.
 //
-// |custom_kernarg_ptr| provides up to |layout->total_kernarg_size| bytes in the
-// final kernel ABI shape expected by the target kernel. Missing trailing
-// padding bytes remain zeroed.
+// |custom_kernarg_ptr| provides caller-supplied bytes in the final kernel ABI
+// shape expected by the target kernel. Fixed layouts copy at most
+// |layout->explicit_kernarg_size| bytes, bounded by
+// |layout->total_kernarg_size| when it is known. Dynamic layouts use
+// |custom_kernarg_length| as both the explicit and total reservation size.
+// Missing bytes before an implicit-args suffix remain zeroed.
 //
 // Preconditions:
 //   - |layout| and |kernarg_ptr| are non-NULL.

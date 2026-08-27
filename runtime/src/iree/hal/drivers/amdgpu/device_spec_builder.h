@@ -9,7 +9,8 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/allocator.h"
-#include "iree/hal/drivers/amdgpu/util/target_id.h"
+#include "iree/hal/drivers/amdgpu/util/pm4_capabilities.h"
+#include "iree/hal/executable/amdgpu/target_id.h"
 #include "iree/hal/utils/device_spec_builder.h"
 
 #ifdef __cplusplus
@@ -30,11 +31,14 @@ typedef enum iree_hal_amdgpu_device_spec_physical_device_flag_bits_e {
 // Immutable AMDGPU physical-device facts used to create a device spec.
 typedef struct iree_hal_amdgpu_device_spec_physical_device_params_t {
   // Parsed target identity for this physical device.
-  iree_hal_amdgpu_target_id_t target_id;
+  iree_hal_amdgpu_target_identity_t identity;
   // Stable physical device UUID bytes.
   iree_hal_uuid_t uuid;
   // PCI address.
   iree_hal_pci_address_t pci;
+  // Device-side timestamp tick rate in hz, from
+  // HSA_AMD_AGENT_INFO_TIMESTAMP_FREQUENCY. Must be nonzero.
+  uint64_t timestamp_frequency_hz;
   // Host NUMA node nearest this physical device.
   iree_hal_numa_node_t numa;
   // Physical device ordinal within the AMDGPU topology.
@@ -45,8 +49,12 @@ typedef struct iree_hal_amdgpu_device_spec_physical_device_params_t {
   uint32_t compute_unit_count;
   // Native wavefront size in lanes.
   uint32_t wavefront_size;
+  // Maximum resident wave count per compute unit.
+  uint32_t maximum_waves_per_compute_unit;
   // Maximum workgroup local-memory byte length.
   uint32_t maximum_workgroup_local_memory_size;
+  // Immutable vendor packet capabilities available on this physical device.
+  iree_hal_amdgpu_vendor_packet_capability_flags_t vendor_packet_capabilities;
   // Optional physical-device parameter flags.
   iree_hal_amdgpu_device_spec_physical_device_flags_t flags;
 } iree_hal_amdgpu_device_spec_physical_device_params_t;
@@ -66,8 +74,6 @@ typedef struct iree_hal_amdgpu_device_spec_params_t {
   iree_string_view_t logical_device_id;
   // Human-readable logical device name.
   iree_string_view_t display_name;
-  // HSA timestamp frequency in ticks per second.
-  uint64_t timestamp_frequency_hz;
   // Number of physical devices in |physical_devices|.
   iree_host_size_t physical_device_count;
   // Physical devices covered by the logical device.

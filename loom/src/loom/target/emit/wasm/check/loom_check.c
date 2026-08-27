@@ -285,7 +285,7 @@ static iree_status_t loom_wasm_loom_check_emit_provider_execute(
 
   loom_wasm_toolchain_t toolchain;
   loom_wasm_toolchain_initialize_from_environment(&toolchain);
-  loom_wasm_tool_output_t disassembly = {0};
+  loom_tool_output_t disassembly = {0};
   if (iree_status_is_ok(status)) {
     status = loom_wasm_tool_disassemble_binary(
         &toolchain, iree_make_const_byte_span(module.data, module.data_length),
@@ -297,7 +297,7 @@ static iree_status_t loom_wasm_loom_check_emit_provider_execute(
         &request->result->actual_output);
   }
 
-  loom_wasm_tool_output_deinitialize(&disassembly, request->host_allocator);
+  loom_tool_output_deinitialize(&disassembly, request->host_allocator);
   loom_wasm_module_binary_deinitialize(&module, request->host_allocator);
   return status;
 }
@@ -325,10 +325,10 @@ static iree_status_t loom_wasm_loom_check_requirement_provider_query(
   }
   loom_wasm_toolchain_t toolchain;
   loom_wasm_toolchain_initialize_from_environment(&toolchain);
-  loom_wasm_tool_output_t version_text = {0};
+  loom_tool_output_t version_text = {0};
   iree_status_t status = loom_wasm_tool_query_version(
       &toolchain, LOOM_WASM_TOOL_LLVM_OBJDUMP, allocator, &version_text);
-  loom_wasm_tool_output_deinitialize(&version_text, allocator);
+  loom_tool_output_deinitialize(&version_text, allocator);
   return status;
 }
 

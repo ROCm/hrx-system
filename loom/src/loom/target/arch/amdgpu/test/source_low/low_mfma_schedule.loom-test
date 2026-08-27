@@ -1,0 +1,320 @@
+// RUN: emit amdgpu-assembly @gfx950_fp8_materialized_bf16_two_k_block_schedule
+
+amdgpu.target<gfx950> @target
+low.func.def target<amdgpu.cdna4.core>(@target) @gfx950_fp8_materialized_bf16_two_k_block_schedule(%workitem_id: reg<amdgpu.vgpr>, %lhs_view: reg<amdgpu.sgpr x2>, %rhs_view: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>, %out_view: reg<amdgpu.sgpr x2>) asm {
+  %lane = v_and_b32_src0_inline %workitem_id, 15
+  %lhs_byte_offset = v_lshlrev_b32_src0_inline %lane, 6
+  %rhs_byte_offset = v_lshlrev_b32_src0_inline %lane, 5
+  %m0 = s_mov_b32_m0_imm 0
+  %lhs0 = global_load_dwordx4_saddr %lhs_byte_offset, %lhs_view, %m0
+  %rhs0_raw = global_load_dwordx2_saddr %rhs_byte_offset, %rhs_view, %m0
+  %rhs0_raw0 = slice %rhs0_raw[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %rhs0_bf16_0 = v_cvt_scalef32_pk_bf16_fp8 %rhs0_raw0, %scale
+  %rhs0_raw0_high = v_lshrrev_b32_src0_inline %rhs0_raw0, 16
+  %rhs0_bf16_1 = v_cvt_scalef32_pk_bf16_fp8 %rhs0_raw0_high, %scale
+  %rhs0_raw1 = slice %rhs0_raw[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %rhs0_bf16_2 = v_cvt_scalef32_pk_bf16_fp8 %rhs0_raw1, %scale
+  %rhs0_raw1_high = v_lshrrev_b32_src0_inline %rhs0_raw1, 16
+  %rhs0_bf16_3 = v_cvt_scalef32_pk_bf16_fp8 %rhs0_raw1_high, %scale
+  %rhs0 = concat(%rhs0_bf16_0, %rhs0_bf16_1, %rhs0_bf16_2, %rhs0_bf16_3) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %zero = v_mov_b32 0
+  %zero_acc = concat(%zero, %zero, %zero, %zero) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %zero_acc_copy = copy %zero_acc : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %partial = v_mfma_f32_16x16x32_bf16 %lhs0, %rhs0, %zero_acc_copy
+  %lhs1 = global_load_dwordx4_saddr %lhs_byte_offset, %lhs_view, %m0 {offset = 16}
+  %rhs1_raw = global_load_dwordx2_saddr %rhs_byte_offset, %rhs_view, %m0 {offset = 8}
+  %rhs1_raw0 = slice %rhs1_raw[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %rhs1_bf16_0 = v_cvt_scalef32_pk_bf16_fp8 %rhs1_raw0, %scale
+  %rhs1_raw0_high = v_lshrrev_b32_src0_inline %rhs1_raw0, 16
+  %rhs1_bf16_1 = v_cvt_scalef32_pk_bf16_fp8 %rhs1_raw0_high, %scale
+  %rhs1_raw1 = slice %rhs1_raw[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %rhs1_bf16_2 = v_cvt_scalef32_pk_bf16_fp8 %rhs1_raw1, %scale
+  %rhs1_raw1_high = v_lshrrev_b32_src0_inline %rhs1_raw1, 16
+  %rhs1_bf16_3 = v_cvt_scalef32_pk_bf16_fp8 %rhs1_raw1_high, %scale
+  %rhs1 = concat(%rhs1_bf16_0, %rhs1_bf16_1, %rhs1_bf16_2, %rhs1_bf16_3) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %partial_copy = copy %partial : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %result = v_mfma_f32_16x16x32_bf16 %lhs1, %rhs1, %partial_copy
+  %out_offset = v_lshlrev_b32_src0_inline %workitem_id, 2
+  %result0 = slice %result[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  global_store_dword_saddr %out_offset, %result0, %out_view, %m0
+  return
+}
+
+// Raw memory for both K blocks should issue before the first MFMA, while the
+// second decoded BF16 payload stays out of the live set until after the first
+// matrix packet.
+// ----
+  v_mov_b32 v4, 0
+  v_and_b32 v2, 15, v0
+  v_lshlrev_b32 v0, 2, v0
+  s_mov_b32 m0, 0
+  v_lshlrev_b32 v3, 6, v2
+  global_load_dwordx4 v[8:11], v3, s[0:1] offset:0
+  v_lshlrev_b32 v2, 5, v2
+  global_load_dwordx2 v[12:13], v2, s[2:3] offset:0
+  global_load_dwordx4 v[16:19], v3, s[0:1] offset:16
+  global_load_dwordx2 v[2:3], v2, s[2:3] offset:8
+  v_mov_b32 v5, v4
+  v_mov_b32 v6, v4
+  v_mov_b32 v7, v4
+  s_waitcnt vmcnt(2) lgkmcnt(15)
+  v_cvt_scalef32_pk_bf16_fp8 v20, v12, v1
+  v_lshrrev_b32 v12, 16, v12
+  v_cvt_scalef32_pk_bf16_fp8 v21, v12, v1
+  v_cvt_scalef32_pk_bf16_fp8 v22, v13, v1
+  v_lshrrev_b32 v12, 16, v13
+  v_cvt_scalef32_pk_bf16_fp8 v23, v12, v1
+  s_nop 1
+  v_mfma_f32_16x16x32_bf16 v[4:7], v[8:11], v[20:23], v[4:7]
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  v_cvt_scalef32_pk_bf16_fp8 v8, v2, v1
+  v_lshrrev_b32 v2, 16, v2
+  v_cvt_scalef32_pk_bf16_fp8 v9, v2, v1
+  v_cvt_scalef32_pk_bf16_fp8 v10, v3, v1
+  v_lshrrev_b32 v2, 16, v3
+  v_cvt_scalef32_pk_bf16_fp8 v11, v2, v1
+  s_nop 1
+  v_mfma_f32_16x16x32_bf16 v[4:7], v[16:19], v[8:11], v[4:7]
+  s_nop 7
+  global_store_dword v0, v4, s[4:5] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @gfx942_fp8_materialized_bf16_two_k_block_schedule
+
+amdgpu.target<gfx942> @target
+low.func.def target<amdgpu.cdna3.core>(@target) @gfx942_fp8_materialized_bf16_two_k_block_schedule(%workitem_id: reg<amdgpu.vgpr>, %lhs_view: reg<amdgpu.sgpr x2>, %rhs_view: reg<amdgpu.sgpr x2>, %out_view: reg<amdgpu.sgpr x2>) asm {
+  %lane = v_and_b32_src0_inline %workitem_id, 15
+  %lhs_byte_offset = v_lshlrev_b32_src0_inline %lane, 5
+  %rhs_byte_offset = v_lshlrev_b32_src0_inline %lane, 4
+  %m0 = s_mov_b32_m0_imm 0
+  %lhs0 = global_load_dwordx2_saddr %lhs_byte_offset, %lhs_view, %m0
+  %rhs0_raw = global_load_dword_saddr %rhs_byte_offset, %rhs_view, %m0
+  %rhs0_f32_0 = v_cvt_pk_f32_fp8 %rhs0_raw
+  %rhs0_f32_0_low = slice %rhs0_f32_0[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %rhs0_f32_0_high = slice %rhs0_f32_0[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %rhs0_f32_0_low_round = v_lshrrev_b32_src0_inline %rhs0_f32_0_low, 16
+  %rhs0_f32_0_low_lsb = v_and_b32_src0_inline %rhs0_f32_0_low_round, 1
+  %rhs0_f32_0_low_bias = v_add_u32_lit %rhs0_f32_0_low_lsb, 32767
+  %rhs0_f32_0_low_biased = v_add_u32 %rhs0_f32_0_low, %rhs0_f32_0_low_bias
+  %rhs0_f32_0_low_bf16 = v_lshrrev_b32_src0_inline %rhs0_f32_0_low_biased, 16
+  %rhs0_f32_0_high_round = v_lshrrev_b32_src0_inline %rhs0_f32_0_high, 16
+  %rhs0_f32_0_high_lsb = v_and_b32_src0_inline %rhs0_f32_0_high_round, 1
+  %rhs0_f32_0_high_bias = v_add_u32_lit %rhs0_f32_0_high_lsb, 32767
+  %rhs0_f32_0_high_biased = v_add_u32 %rhs0_f32_0_high, %rhs0_f32_0_high_bias
+  %rhs0_f32_0_high_bf16 = v_lshrrev_b32_src0_inline %rhs0_f32_0_high_biased, 16
+  %rhs0_bf16_0 = v_cvt_pk_u16_u32 %rhs0_f32_0_low_bf16, %rhs0_f32_0_high_bf16
+  %rhs0_raw_high = v_lshrrev_b32_src0_inline %rhs0_raw, 16
+  %rhs0_f32_1 = v_cvt_pk_f32_fp8 %rhs0_raw_high
+  %rhs0_f32_1_low = slice %rhs0_f32_1[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %rhs0_f32_1_high = slice %rhs0_f32_1[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %rhs0_f32_1_low_round = v_lshrrev_b32_src0_inline %rhs0_f32_1_low, 16
+  %rhs0_f32_1_low_lsb = v_and_b32_src0_inline %rhs0_f32_1_low_round, 1
+  %rhs0_f32_1_low_bias = v_add_u32_lit %rhs0_f32_1_low_lsb, 32767
+  %rhs0_f32_1_low_biased = v_add_u32 %rhs0_f32_1_low, %rhs0_f32_1_low_bias
+  %rhs0_f32_1_low_bf16 = v_lshrrev_b32_src0_inline %rhs0_f32_1_low_biased, 16
+  %rhs0_f32_1_high_round = v_lshrrev_b32_src0_inline %rhs0_f32_1_high, 16
+  %rhs0_f32_1_high_lsb = v_and_b32_src0_inline %rhs0_f32_1_high_round, 1
+  %rhs0_f32_1_high_bias = v_add_u32_lit %rhs0_f32_1_high_lsb, 32767
+  %rhs0_f32_1_high_biased = v_add_u32 %rhs0_f32_1_high, %rhs0_f32_1_high_bias
+  %rhs0_f32_1_high_bf16 = v_lshrrev_b32_src0_inline %rhs0_f32_1_high_biased, 16
+  %rhs0_bf16_1 = v_cvt_pk_u16_u32 %rhs0_f32_1_low_bf16, %rhs0_f32_1_high_bf16
+  %rhs0 = concat(%rhs0_bf16_0, %rhs0_bf16_1) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %zero = v_mov_b32 0
+  %zero_acc = concat(%zero, %zero, %zero, %zero) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %zero_acc_copy = copy %zero_acc : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %partial = v_mfma_f32_16x16x16_bf16 %lhs0, %rhs0, %zero_acc_copy
+  %lhs1 = global_load_dwordx2_saddr %lhs_byte_offset, %lhs_view, %m0 {offset = 8}
+  %rhs1_raw = global_load_dword_saddr %rhs_byte_offset, %rhs_view, %m0 {offset = 4}
+  %rhs1_f32_0 = v_cvt_pk_f32_fp8 %rhs1_raw
+  %rhs1_f32_0_low = slice %rhs1_f32_0[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %rhs1_f32_0_high = slice %rhs1_f32_0[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %rhs1_f32_0_low_round = v_lshrrev_b32_src0_inline %rhs1_f32_0_low, 16
+  %rhs1_f32_0_low_lsb = v_and_b32_src0_inline %rhs1_f32_0_low_round, 1
+  %rhs1_f32_0_low_bias = v_add_u32_lit %rhs1_f32_0_low_lsb, 32767
+  %rhs1_f32_0_low_biased = v_add_u32 %rhs1_f32_0_low, %rhs1_f32_0_low_bias
+  %rhs1_f32_0_low_bf16 = v_lshrrev_b32_src0_inline %rhs1_f32_0_low_biased, 16
+  %rhs1_f32_0_high_round = v_lshrrev_b32_src0_inline %rhs1_f32_0_high, 16
+  %rhs1_f32_0_high_lsb = v_and_b32_src0_inline %rhs1_f32_0_high_round, 1
+  %rhs1_f32_0_high_bias = v_add_u32_lit %rhs1_f32_0_high_lsb, 32767
+  %rhs1_f32_0_high_biased = v_add_u32 %rhs1_f32_0_high, %rhs1_f32_0_high_bias
+  %rhs1_f32_0_high_bf16 = v_lshrrev_b32_src0_inline %rhs1_f32_0_high_biased, 16
+  %rhs1_bf16_0 = v_cvt_pk_u16_u32 %rhs1_f32_0_low_bf16, %rhs1_f32_0_high_bf16
+  %rhs1_raw_high = v_lshrrev_b32_src0_inline %rhs1_raw, 16
+  %rhs1_f32_1 = v_cvt_pk_f32_fp8 %rhs1_raw_high
+  %rhs1_f32_1_low = slice %rhs1_f32_1[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %rhs1_f32_1_high = slice %rhs1_f32_1[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %rhs1_f32_1_low_round = v_lshrrev_b32_src0_inline %rhs1_f32_1_low, 16
+  %rhs1_f32_1_low_lsb = v_and_b32_src0_inline %rhs1_f32_1_low_round, 1
+  %rhs1_f32_1_low_bias = v_add_u32_lit %rhs1_f32_1_low_lsb, 32767
+  %rhs1_f32_1_low_biased = v_add_u32 %rhs1_f32_1_low, %rhs1_f32_1_low_bias
+  %rhs1_f32_1_low_bf16 = v_lshrrev_b32_src0_inline %rhs1_f32_1_low_biased, 16
+  %rhs1_f32_1_high_round = v_lshrrev_b32_src0_inline %rhs1_f32_1_high, 16
+  %rhs1_f32_1_high_lsb = v_and_b32_src0_inline %rhs1_f32_1_high_round, 1
+  %rhs1_f32_1_high_bias = v_add_u32_lit %rhs1_f32_1_high_lsb, 32767
+  %rhs1_f32_1_high_biased = v_add_u32 %rhs1_f32_1_high, %rhs1_f32_1_high_bias
+  %rhs1_f32_1_high_bf16 = v_lshrrev_b32_src0_inline %rhs1_f32_1_high_biased, 16
+  %rhs1_bf16_1 = v_cvt_pk_u16_u32 %rhs1_f32_1_low_bf16, %rhs1_f32_1_high_bf16
+  %rhs1 = concat(%rhs1_bf16_0, %rhs1_bf16_1) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %partial_copy = copy %partial : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %result = v_mfma_f32_16x16x16_bf16 %lhs1, %rhs1, %partial_copy
+  %out_offset = v_lshlrev_b32_src0_inline %workitem_id, 2
+  %result0 = slice %result[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  global_store_dword_saddr %out_offset, %result0, %out_view, %m0
+  return
+}
+
+// Raw memory for both K blocks should issue before the first MFMA on CDNA3
+// even when the RHS needs native FP8-to-F32 conversion and manual BF16 packing.
+// ----
+  v_mov_b32 v4, 0
+  v_and_b32 v1, 15, v0
+  v_lshlrev_b32 v0, 2, v0
+  s_mov_b32 m0, 0
+  v_lshlrev_b32 v2, 5, v1
+  global_load_dwordx2 v[8:9], v2, s[0:1] offset:0
+  v_lshlrev_b32 v1, 4, v1
+  global_load_dword v3, v1, s[2:3] offset:0
+  global_load_dwordx2 v[10:11], v2, s[0:1] offset:8
+  global_load_dword v1, v1, s[2:3] offset:4
+  v_mov_b32 v5, v4
+  v_mov_b32 v6, v4
+  v_mov_b32 v7, v4
+  s_waitcnt vmcnt(2) lgkmcnt(15)
+  v_lshrrev_b32 v2, 16, v3
+  v_cvt_pk_f32_fp8 v[12:13], v2
+  v_lshrrev_b32 v2, 16, v12
+  v_and_b32 v2, 1, v2
+  v_add_u32 v2, 32767, v2
+  v_add_u32 v2, v12, v2
+  v_lshrrev_b32 v2, 16, v2
+  v_lshrrev_b32 v12, 16, v13
+  v_and_b32 v12, 1, v12
+  v_add_u32 v12, 32767, v12
+  v_add_u32 v12, v13, v12
+  v_lshrrev_b32 v12, 16, v12
+  v_cvt_pk_u16_u32 v13, v2, v12
+  v_cvt_pk_f32_fp8 v[2:3], v3
+  v_lshrrev_b32 v12, 16, v2
+  v_and_b32 v12, 1, v12
+  v_add_u32 v12, 32767, v12
+  v_add_u32 v2, v2, v12
+  v_lshrrev_b32 v2, 16, v2
+  v_lshrrev_b32 v12, 16, v3
+  v_and_b32 v12, 1, v12
+  v_add_u32 v12, 32767, v12
+  v_add_u32 v3, v3, v12
+  v_lshrrev_b32 v3, 16, v3
+  v_cvt_pk_u16_u32 v12, v2, v3
+  s_nop 1
+  v_mfma_f32_16x16x16_bf16 v[4:7], v[8:9], v[12:13], v[4:7]
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  v_lshrrev_b32 v2, 16, v1
+  v_cvt_pk_f32_fp8 v[2:3], v2
+  v_lshrrev_b32 v8, 16, v2
+  v_and_b32 v8, 1, v8
+  v_add_u32 v8, 32767, v8
+  v_add_u32 v2, v2, v8
+  v_lshrrev_b32 v2, 16, v2
+  v_lshrrev_b32 v8, 16, v3
+  v_and_b32 v8, 1, v8
+  v_add_u32 v8, 32767, v8
+  v_add_u32 v3, v3, v8
+  v_lshrrev_b32 v3, 16, v3
+  v_cvt_pk_u16_u32 v3, v2, v3
+  v_cvt_pk_f32_fp8 v[8:9], v1
+  v_lshrrev_b32 v1, 16, v8
+  v_and_b32 v1, 1, v1
+  v_add_u32 v1, 32767, v1
+  v_add_u32 v1, v8, v1
+  v_lshrrev_b32 v1, 16, v1
+  v_lshrrev_b32 v2, 16, v9
+  v_and_b32 v2, 1, v2
+  v_add_u32 v2, 32767, v2
+  v_add_u32 v2, v9, v2
+  v_lshrrev_b32 v2, 16, v2
+  v_cvt_pk_u16_u32 v2, v1, v2
+  s_nop 1
+  v_mfma_f32_16x16x16_bf16 v[4:7], v[10:11], v[2:3], v[4:7]
+  s_nop 6
+  global_store_dword v0, v4, s[4:5] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @gfx942_f32_mfma_32_register_result_wait
+
+amdgpu.target<gfx942> @target
+low.func.def target<amdgpu.cdna3.core>(@target) @gfx942_f32_mfma_32_register_result_wait(%lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>, %init: reg<amdgpu.vgpr x32>, %out_view: reg<amdgpu.sgpr x2>) asm {
+  %acc0 = copy %init : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr x32>
+  %partial = v_mfma_f32_32x32x1_2b_f32 %lhs0, %rhs0, %acc0
+  %acc1 = copy %partial : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr x32>
+  %result = v_mfma_f32_32x32x1_2b_f32 %lhs1, %rhs1, %acc1
+  %lane0 = slice %result[0] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %m0 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %lhs0, %lane0, %out_view, %m0
+  return
+}
+
+// A 32-register MFMA result should use the 32-pass wait-state rows instead of
+// tripping an internal wait-table precondition failure.
+// ----
+  s_mov_b32 m0, 0
+  v_mfma_f32_32x32x1_2b_f32 v[0:31], v35, v32, v[0:31]
+  v_mfma_f32_32x32x1_2b_f32 v[0:31], v33, v34, v[0:31]
+  s_nop 15
+  s_nop 15
+  s_nop 2
+  global_store_dword v35, v0, s[0:1] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @gfx942_bf16_two_k_block_loads_schedule_before_mfma
+
+amdgpu.target<gfx942> @target
+low.func.def target<amdgpu.cdna3.core>(@target) @gfx942_bf16_two_k_block_loads_schedule_before_mfma(%workitem_id: reg<amdgpu.vgpr>, %lhs_view: reg<amdgpu.sgpr x2>, %rhs_view: reg<amdgpu.sgpr x2>, %out_view: reg<amdgpu.sgpr x2>) asm {
+  %lane = v_and_b32_src0_inline %workitem_id, 15
+  %byte_offset = v_lshlrev_b32_src0_inline %lane, 5
+  %m0 = s_mov_b32_m0_imm 0
+  %lhs0 = global_load_dwordx2_saddr %byte_offset, %lhs_view, %m0
+  %rhs0 = global_load_dwordx2_saddr %byte_offset, %rhs_view, %m0
+  %zero = v_mov_b32 0
+  %zero_acc = concat(%zero, %zero, %zero, %zero) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %zero_acc_copy = copy %zero_acc : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %partial = v_mfma_f32_16x16x16_bf16 %lhs0, %rhs0, %zero_acc_copy
+  %lhs1 = global_load_dwordx2_saddr %byte_offset, %lhs_view, %m0 {offset = 8}
+  %rhs1 = global_load_dwordx2_saddr %byte_offset, %rhs_view, %m0 {offset = 8}
+  %partial_copy = copy %partial : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %result = v_mfma_f32_16x16x16_bf16 %lhs1, %rhs1, %partial_copy
+  %out_offset = v_lshlrev_b32_src0_inline %workitem_id, 2
+  %result0 = slice %result[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  global_store_dword_saddr %out_offset, %result0, %out_view, %m0
+  return
+}
+
+// Raw memory for both K blocks should issue before the first MFMA on CDNA3 as
+// well as CDNA4, preserving VMEM latency hiding for BF16 GEMM schedules.
+// ----
+  v_mov_b32 v4, 0
+  v_and_b32 v1, 15, v0
+  v_lshlrev_b32 v0, 2, v0
+  s_mov_b32 m0, 0
+  v_lshlrev_b32 v1, 5, v1
+  global_load_dwordx2 v[2:3], v1, s[0:1] offset:0
+  global_load_dwordx2 v[8:9], v1, s[2:3] offset:0
+  global_load_dwordx2 v[10:11], v1, s[0:1] offset:8
+  global_load_dwordx2 v[12:13], v1, s[2:3] offset:8
+  v_mov_b32 v5, v4
+  v_mov_b32 v6, v4
+  v_mov_b32 v7, v4
+  s_waitcnt vmcnt(2) lgkmcnt(15)
+  s_nop 1
+  v_mfma_f32_16x16x16_bf16 v[4:7], v[2:3], v[8:9], v[4:7]
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  v_mfma_f32_16x16x16_bf16 v[4:7], v[10:11], v[12:13], v[4:7]
+  s_nop 6
+  global_store_dword v0, v4, s[4:5] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  s_endpgm

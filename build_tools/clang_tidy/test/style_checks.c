@@ -12,9 +12,20 @@
 #define IREE_LIKELY(x) (x)
 #endif  // IREE_LIKELY
 
+#ifndef IREE_ASSERT
+#define IREE_ASSERT(condition, ...) \
+  while (0 && (condition)) {        \
+  }
+#endif  // IREE_ASSERT
 #ifndef IREE_ASSERT_ARGUMENT
-#define IREE_ASSERT_ARGUMENT(x) ((void)(x))
+#define IREE_ASSERT_ARGUMENT(x) IREE_ASSERT(x)
 #endif  // IREE_ASSERT_ARGUMENT
+#ifndef IREE_ASSERT_TRUE
+#define IREE_ASSERT_TRUE(x, ...) IREE_ASSERT(!!(x), __VA_ARGS__)
+#endif  // IREE_ASSERT_TRUE
+#ifndef IREE_ASSERT_EQ
+#define IREE_ASSERT_EQ(x, y, ...) IREE_ASSERT((x) == (y), __VA_ARGS__)
+#endif  // IREE_ASSERT_EQ
 
 int iree_clang_tidy_style_direct_goto(int flag) {
   if (flag) goto cleanup;
@@ -49,6 +60,46 @@ typedef struct iree_clang_tidy_style_resource_t
 typedef struct iree_clang_tidy_style_pool_t iree_clang_tidy_style_pool_t;
 typedef unsigned long iree_clang_tidy_style_handle_t;
 typedef int iree_status_t;
+
+int iree_clang_tidy_style_query(int input, int* out_output);
+int iree_clang_tidy_style_const_query(const int* input);
+int iree_clang_tidy_style_mutable_query(int* state);
+
+int iree_clang_tidy_style_assert_output_call(int input) {
+  int output = 0;
+  IREE_ASSERT(iree_clang_tidy_style_query(input, &output));
+  IREE_ASSERT_TRUE(iree_clang_tidy_style_query(input, &output));
+  IREE_ASSERT_EQ(iree_clang_tidy_style_query(input, &output), 1);
+  return output;
+}
+
+int iree_clang_tidy_style_assert_caller_output_call(int input,
+                                                    int* out_output) {
+  IREE_ASSERT_TRUE(iree_clang_tidy_style_query(input, out_output));
+  return *out_output;
+}
+
+int iree_clang_tidy_style_assert_after_output_call(int input) {
+  int output = 0;
+  int matched = iree_clang_tidy_style_query(input, &output);
+  IREE_ASSERT_TRUE(matched);
+  return output;
+}
+
+int iree_clang_tidy_style_assert_const_call(int input) {
+  IREE_ASSERT_TRUE(iree_clang_tidy_style_const_query(&input));
+  return input;
+}
+
+int iree_clang_tidy_style_assert_mutable_non_output_call(int state) {
+  IREE_ASSERT_TRUE(iree_clang_tidy_style_mutable_query(&state));
+  return state;
+}
+
+int iree_clang_tidy_style_assert_null_output_call(int input) {
+  IREE_ASSERT_TRUE(iree_clang_tidy_style_query(input, NULL));
+  return input;
+}
 
 typedef struct {
   int value;

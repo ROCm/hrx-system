@@ -1,6 +1,6 @@
 // RUN: pass-report legalize-math,dce,canonicalize,source-to-low,low-dce
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @report_scalar_round_away_recipe(%input: f32) -> (f32) {
   %rounded = scalar.roundf %input : f32
@@ -12,18 +12,18 @@ COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- ex
 COMPILE-REPORT: math_legalization rewritten=1 rejected=0 missing_policy=0 missing_recipe=0 rows=1
 COMPILE-REPORT: source_low selected_ops=8 emitted_ops=7 rows=8
 COMPILE-REPORT: math_legalization[0] function=report_scalar_round_away_recipe source_op=scalar.roundf action=rewritten policy=amdgpu-math math_op=roundf domain=scalar element=f32 recipe=round-away-f32 constraint=math.recipe.round_away_f32 bundle=target config=target source_fastmath=0x00 recipe_fastmath=0x00 created_ops=8 erased_ops=1
-COMPILE-REPORT: source_low[0] function=report_scalar_round_away_recipe source_op=scalar.constant selection=plan plan=597 descriptor=0 emitted_ops=0
-COMPILE-REPORT: source_low[1] function=report_scalar_round_away_recipe source_op=scalar.constant selection=plan plan=597 descriptor=0 emitted_ops=1
-COMPILE-REPORT: source_low[2] function=report_scalar_round_away_recipe source_op=scalar.absf selection=rule rule_set=0 rule=387 descriptor=1747636869416133384 emitted_ops=1
-COMPILE-REPORT: source_low[3] function=report_scalar_round_away_recipe source_op=scalar.cmpf selection=plan plan=581 descriptor=0 emitted_ops=1
-COMPILE-REPORT: source_low[4] function=report_scalar_round_away_recipe source_op=scalar.addf selection=rule rule_set=0 rule=278 descriptor=2493415658881486753 emitted_ops=1
-COMPILE-REPORT: source_low[5] function=report_scalar_round_away_recipe source_op=scalar.truncf selection=rule rule_set=0 rule=423 descriptor=3641742240926975688 emitted_ops=1
-COMPILE-REPORT: source_low[6] function=report_scalar_round_away_recipe source_op=scalar.copysignf selection=rule rule_set=0 rule=388 descriptor=4489095985271686921 emitted_ops=1
-COMPILE-REPORT: source_low[7] function=report_scalar_round_away_recipe source_op=scf.select selection=plan plan=1284 descriptor=0 emitted_ops=1
+COMPILE-REPORT: source_low[0] function=report_scalar_round_away_recipe source_op=scalar.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_scalar_round_away_recipe source_op=scalar.constant selection=plan emitted_ops=1
+COMPILE-REPORT: source_low[2] function=report_scalar_round_away_recipe source_op=scalar.absf selection=rule descriptor_key=amdgpu.v_and_b32.lit descriptor_semantic_tag=integer.and.u32 emitted_ops=1
+COMPILE-REPORT: source_low[3] function=report_scalar_round_away_recipe source_op=scalar.cmpf selection=rule descriptor_key=amdgpu.v_cmp_olt_f32 descriptor_semantic_tag=cmp.f32.olt emitted_ops=1
+COMPILE-REPORT: source_low[4] function=report_scalar_round_away_recipe source_op=scalar.addf selection=rule descriptor_key=amdgpu.v_add_f32.src0_inline descriptor_semantic_tag=float.add.f32 emitted_ops=1
+COMPILE-REPORT: source_low[5] function=report_scalar_round_away_recipe source_op=scalar.truncf selection=rule descriptor_key=amdgpu.v_trunc_f32 descriptor_semantic_tag=float.trunc.f32 emitted_ops=1
+COMPILE-REPORT: source_low[6] function=report_scalar_round_away_recipe source_op=scalar.copysignf selection=rule descriptor_key=amdgpu.v_bfi_b32.src0_lit descriptor_semantic_tag=integer.bitfield.insert.u32 emitted_ops=1
+COMPILE-REPORT: source_low[7] function=report_scalar_round_away_recipe source_op=scf.select selection=plan emitted_ops=1
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @report_vector_round_away_recipe(%input: vector<2xf32>) -> (vector<2xf32>) {
   %rounded = vector.roundf %input : vector<2xf32>
@@ -35,18 +35,18 @@ COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- ex
 COMPILE-REPORT: math_legalization rewritten=1 rejected=0 missing_policy=0 missing_recipe=0 rows=1
 COMPILE-REPORT: source_low selected_ops=8 emitted_ops=41 rows=8
 COMPILE-REPORT: math_legalization[0] function=report_vector_round_away_recipe source_op=vector.roundf action=rewritten policy=amdgpu-math math_op=roundf domain=vector element=f32 recipe=round-away-f32 constraint=math.recipe.round_away_f32 bundle=target config=target source_fastmath=0x00 recipe_fastmath=0x00 created_ops=8 erased_ops=1
-COMPILE-REPORT: source_low[0] function=report_vector_round_away_recipe source_op=vector.constant selection=plan plan=3584 descriptor=0 emitted_ops=0
-COMPILE-REPORT: source_low[1] function=report_vector_round_away_recipe source_op=vector.constant selection=plan plan=3584 descriptor=0 emitted_ops=3
-COMPILE-REPORT: source_low[2] function=report_vector_round_away_recipe source_op=vector.absf selection=rule rule_set=0 rule=105 descriptor=1747636869416133384 emitted_ops=5
-COMPILE-REPORT: source_low[3] function=report_vector_round_away_recipe source_op=vector.cmpf selection=plan plan=3622 descriptor=0 emitted_ops=7
-COMPILE-REPORT: source_low[4] function=report_vector_round_away_recipe source_op=vector.addf selection=rule rule_set=0 rule=3 descriptor=2493415658881486753 emitted_ops=5
-COMPILE-REPORT: source_low[5] function=report_vector_round_away_recipe source_op=vector.truncf selection=rule rule_set=0 rule=158 descriptor=3641742240926975688 emitted_ops=5
-COMPILE-REPORT: source_low[6] function=report_vector_round_away_recipe source_op=vector.copysignf selection=rule rule_set=0 rule=106 descriptor=4489095985271686921 emitted_ops=7
-COMPILE-REPORT: source_low[7] function=report_vector_round_away_recipe source_op=vector.select selection=plan plan=3620 descriptor=0 emitted_ops=9
+COMPILE-REPORT: source_low[0] function=report_vector_round_away_recipe source_op=vector.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_vector_round_away_recipe source_op=vector.constant selection=plan emitted_ops=3
+COMPILE-REPORT: source_low[2] function=report_vector_round_away_recipe source_op=vector.absf selection=rule descriptor_key=amdgpu.v_and_b32.lit descriptor_semantic_tag=integer.and.u32 emitted_ops=5
+COMPILE-REPORT: source_low[3] function=report_vector_round_away_recipe source_op=vector.cmpf selection=plan emitted_ops=7
+COMPILE-REPORT: source_low[4] function=report_vector_round_away_recipe source_op=vector.addf selection=rule descriptor_key=amdgpu.v_add_f32.src0_inline descriptor_semantic_tag=float.add.f32 emitted_ops=5
+COMPILE-REPORT: source_low[5] function=report_vector_round_away_recipe source_op=vector.truncf selection=rule descriptor_key=amdgpu.v_trunc_f32 descriptor_semantic_tag=float.trunc.f32 emitted_ops=5
+COMPILE-REPORT: source_low[6] function=report_vector_round_away_recipe source_op=vector.copysignf selection=rule descriptor_key=amdgpu.v_bfi_b32.src0_lit descriptor_semantic_tag=integer.bitfield.insert.u32 emitted_ops=7
+COMPILE-REPORT: source_low[7] function=report_vector_round_away_recipe source_op=vector.select selection=plan emitted_ops=9
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @report_vector_roundeven_native(%input: vector<2xf32>) -> (vector<2xf32>) {
   %rounded = vector.roundevenf %input : vector<2xf32>
@@ -56,11 +56,11 @@ func.def target(@target) @report_vector_roundeven_native(%input: vector<2xf32>) 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=1 emitted_ops=5 rows=1
-COMPILE-REPORT: source_low[0] function=report_vector_roundeven_native source_op=vector.roundevenf selection=rule rule_set=0 rule=157 plan_key=amdgpu.vector_roundevenf.strategy.rndne descriptor=5149499237128073059 emitted_ops=5
+COMPILE-REPORT: source_low[0] function=report_vector_roundeven_native source_op=vector.roundevenf selection=rule plan_key=amdgpu.vector_roundevenf.strategy.rndne descriptor_key=amdgpu.v_rndne_f32 descriptor_semantic_tag=float.round_even.f32 emitted_ops=5
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @report_vector_round_afn_native(%input: vector<2xf32>) -> (vector<2xf32>) {
   %rounded = vector.roundf<afn> %input : vector<2xf32>
@@ -70,4 +70,4 @@ func.def target(@target) @report_vector_round_afn_native(%input: vector<2xf32>) 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=1 emitted_ops=5 rows=1
-COMPILE-REPORT: source_low[0] function=report_vector_round_afn_native source_op=vector.roundf selection=rule rule_set=0 rule=156 plan_key=amdgpu.vector_roundf.strategy.afn_rndne descriptor=5149499237128073059 emitted_ops=5
+COMPILE-REPORT: source_low[0] function=report_vector_round_afn_native source_op=vector.roundf selection=rule plan_key=amdgpu.vector_roundf.strategy.afn_rndne descriptor_key=amdgpu.v_rndne_f32 descriptor_semantic_tag=float.round_even.f32 emitted_ops=5

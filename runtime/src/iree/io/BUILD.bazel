@@ -14,6 +14,27 @@ package(
 )
 
 iree_runtime_cc_library(
+    name = "byte_sequence",
+    srcs = ["byte_sequence.c"],
+    hdrs = ["byte_sequence.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "byte_sequence_test",
+    srcs = ["byte_sequence_test.cc"],
+    deps = [
+        ":byte_sequence",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "file_handle",
     srcs = [
         "file_contents.c",
@@ -27,6 +48,7 @@ iree_runtime_cc_library(
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:path",
     ],
 )
 
@@ -36,8 +58,10 @@ iree_runtime_cc_test(
     tags = ["requires-filesystem"],
     deps = [
         ":file_handle",
+        ":stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/base/internal:path",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/testing:temp_file",
@@ -80,6 +104,24 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_test(
+    name = "parameter_index_provider_test",
+    srcs = ["parameter_index_provider_test.cc"],
+    deps = [
+        ":file_handle",
+        ":parameter_index",
+        ":parameter_index_provider",
+        ":parameter_provider",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/local_sync:sync_driver",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_runtime_cc_library(
     name = "parameter_provider",
     srcs = ["parameter_provider.c"],
@@ -116,9 +158,11 @@ iree_runtime_cc_library(
         "vec_stream.h",
     ],
     deps = [
+        ":byte_sequence",
         ":file_handle",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:path",
     ],
 )
 
@@ -126,6 +170,7 @@ iree_runtime_cc_test(
     name = "vec_stream_test",
     srcs = ["vec_stream_test.cc"],
     deps = [
+        ":byte_sequence",
         ":stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",

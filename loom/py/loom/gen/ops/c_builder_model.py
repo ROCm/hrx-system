@@ -11,22 +11,23 @@ from __future__ import annotations
 from typing import Any
 
 from loom.assembly import (
+    AlignedRefs,
     Attr,
     AttrDict,
+    AttrParams,
     AttrTable,
     BindingList,
     BlockArgs,
     BlockRef,
     Clause,
-    DescriptorRef,
     Flags,
     FormatElement,
     FuncArgs,
     Glue,
     IndexList,
+    KeyRef,
     Keyword,
     OperandDict,
-    OpRef,
     OptionalGroup,
     PredicateList,
     Ref,
@@ -35,6 +36,7 @@ from loom.assembly import (
     ResultType,
     ResultTypeList,
     Scope,
+    ScopedEnumRef,
     StableKeyRef,
     SymbolRef,
     TemplateParam,
@@ -44,11 +46,13 @@ from loom.assembly import (
     TypesOf,
 )
 from loom.assembly import Region as RegionFmt
-from loom.dsl import ATTR_TYPE_FLAGS, AttrDef, FuncLikeInterface, Op, RegionDef, TiedResult
+from loom.builder_model import fixed_result_type_constraints
+from loom.dsl import ATTR_TYPE_FLAGS, AttrDef, FuncLikeInterface, Op, RegionDef, TiedResult, TypeConstraint
 from loom.fields import FieldKind, FieldLayout, compute_layout
 from loom.gen.ops import c_queries
 from loom.gen.ops.c_enum_attrs import SharedEnumMap
 from loom.gen.ops.c_enum_attrs import enum_c_type as _enum_c_type
+from loom.gen.support.c import c_identifier as _c_identifier
 
 
 def detect_builder_pattern(op: Op) -> str | None:
@@ -56,10 +60,17 @@ def detect_builder_pattern(op: Op) -> str | None:
 
     Returns the macro name suffix or None for complex ops.
     """
+    # The shared macros accept caller-provided result types. Exact result
+    # constraints instead use the general generator so the public builder
+    # signature cannot contradict the op declaration.
+    has_explicit_result_type = any(isinstance(element, ResultType | ResultTypeList) for element in flatten_format(op.format))
+    if fixed_result_type_constraints(op) is not None and not has_explicit_result_type:
+        return None
+
     layout = compute_layout(op)
     non_flags = c_queries.non_flags_attrs(op)
     has_flags = c_queries.has_flags_attr(op)
-    has_template_param = any(isinstance(e, TemplateParam | TemplateParamFlags) for e in flatten_format(op.format))
+    has_template_param = any(isinstance(e, AttrParams | TemplateParam | TemplateParamFlags) for e in flatten_format(op.format))
     operand_names = tuple(operand.name for operand in op.operands)
 
     # Binary: 2 fixed operands, 1 fixed result, no real attrs/regions.
@@ -121,12 +132,18 @@ _C_ATTR_TYPE_MAP: dict[str, str] = {
     "string": "loom_string_id_t",
     "bool": "bool",
     "enum": "uint8_t",
+    "enum_array": "loom_enum_array_t",
+    "signed_enum_set": "loom_signed_enum_set_t",
     "symbol": "loom_symbol_ref_t",
+    "symbol_array": "loom_symbol_ref_array_t",
+    "symbol_set": "loom_symbol_ref_array_t",
     "i64_array": "const int64_t*",
     "bytes": "iree_const_byte_span_t",
     "type": "uint32_t",
     "encoding": "uint16_t",
     "dict": "loom_named_attr_slice_t",
+    "parameterized": "loom_attribute_t",
+    "parameterized_array": "loom_parameterized_attr_array_t",
     "any": "loom_attribute_t",
 }
 
@@ -139,6 +156,15 @@ IMPLICIT_ARG_TYPE_MAP: dict[str, str] = {
     "f64": "LOOM_SCALAR_TYPE_F64",
 }
 
+_FIXED_RESULT_TYPE_CONSTRAINTS = frozenset(
+    {
+        TypeConstraint.I1,
+        TypeConstraint.I32,
+        TypeConstraint.INDEX,
+        TypeConstraint.OFFSET,
+    }
+)
+
 _BUILD_FLAG_OPTIONAL_ATTR_TYPES = frozenset(
     {
         "i64",
@@ -146,11 +172,35 @@ _BUILD_FLAG_OPTIONAL_ATTR_TYPES = frozenset(
         "string",
         "bool",
         "enum",
+        "enum_array",
+        "signed_enum_set",
         "symbol",
+        "symbol_array",
+        "symbol_set",
+        "i64_array",
+        "bytes",
         "type",
         "encoding",
+        "dict",
+        "parameterized_array",
     }
 )
+
+_TRAILING_BUILD_FLAG_OPTIONAL_ATTR_TYPES = frozenset(
+    {
+        "i64_array",
+        "symbol_array",
+        "symbol_set",
+        "bytes",
+        "dict",
+        "parameterized_array",
+    }
+)
+
+
+def c_parameter_name(name: object) -> str:
+    """Projects a semantic op field name to a C/C++ parameter identifier."""
+    return _c_identifier(str(name))
 
 
 def flatten_format(
@@ -181,6 +231,48 @@ def static_tied_results(op: Op) -> list[tuple[int, int]]:
     return ties
 
 
+def inferred_variadic_result_type_source(op: Op) -> str | None:
+    """Returns the operand field defining the complete variadic result list.
+
+    IterArgsMatchResults makes both the result count and each result type a
+    function of the corresponding iter operand. Builders for that exact shape
+    should preserve the schema contract instead of accepting a redundant
+    parallel type array from every caller.
+    """
+    if len(op.results) != 1 or not op.results[0].variadic:
+        return None
+    result_name = op.results[0].name
+    matches = [constraint for constraint in op.constraints if constraint.name == "IterArgsMatchResults" and len(constraint.args) == 2 and constraint.args[1] == result_name]
+    if not matches:
+        return None
+    if len(matches) != 1:
+        raise ValueError(f"Op '{op.name}': result field '{result_name}' has multiple IterArgsMatchResults constraints")
+    source_name = matches[0].args[0]
+    source = next((operand for operand in op.operands if operand.name == source_name), None)
+    if source is None or not source.variadic or source.optional:
+        raise ValueError(f"Op '{op.name}': IterArgsMatchResults source '{source_name}' must be a required variadic operand field")
+    return source_name
+
+
+def fixed_result_types_fit_single_builder_type(op: Op) -> bool:
+    """Returns true when fixed results can be built from one dynamic type.
+
+    Fixed non-variadic ResultTypeList builders expose a compact C signature
+    with one caller-provided result_type when at most one result type is not
+    statically known from the op declaration. Remaining results must be
+    concrete scalar constraints that the generated builder can synthesize.
+    """
+    layout = compute_layout(op)
+    if layout.variadic_result or layout.fixed_result_count <= 1:
+        return True
+    dynamic_result_count = 0
+    for result in op.results:
+        if result.type_constraint in _FIXED_RESULT_TYPE_CONSTRAINTS:
+            continue
+        dynamic_result_count += 1
+    return dynamic_result_count <= 1
+
+
 def _c_attr_param_type(
     op: Op,
     attr_def: AttrDef,
@@ -199,9 +291,12 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
     Each param has: name, kind, c_type, and kind-specific extras.
     """
     layout = compute_layout(op)
+    inferred_result_source = inferred_variadic_result_type_source(op)
     params: list[dict[str, Any]] = []
     implicit_fields = {"iv", "args"}
-    covered_attrs: set[str] = set()
+    covered_attrs: set[str] = {
+        boundary_attr for element in flatten_format(op.format) if isinstance(element, FuncArgs) for boundary_attr in (element.start_attr, element.end_attr) if boundary_attr is not None
+    }
 
     def append_attr_param(name: str) -> None:
         attr_def = op.attr(name)
@@ -244,11 +339,12 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
 
     # Track the most recent BindingList for association with the next Region.
     _pending_binding: dict[str, Any] | None = None
-    # Track whether FuncArgs was seen (entry block args come from arg_types).
-    _pending_func_args: bool = False
+    # Track body-backed FuncArgs groups available to projected/body regions.
+    _pending_func_args: list[dict[str, Any]] = []
+    _body_func_args: list[dict[str, Any]] = []
     # Region fields whose explicit block args are not derivable from operands.
     explicit_block_args_by_region: dict[str, str] = {}
-    func_args_field_name = c_queries.func_args_field_name(op)
+    func_args_field_names = c_queries.func_args_field_names(op)
     func_like_body_region_name: str | None = None
     for interface in op.interfaces:
         if isinstance(interface, FuncLikeInterface):
@@ -262,7 +358,7 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
         return None
 
     def walk(elements: tuple[FormatElement, ...]) -> None:
-        nonlocal _pending_binding, _pending_func_args
+        nonlocal _pending_binding
         for element in elements:
             match element:
                 case Ref(field=name):
@@ -290,6 +386,22 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
                             "may_consume": has_result_type_list,
                         }
                     )
+
+                case AlignedRefs(refs=refs_field, alignments=alignments_field):
+                    refs_desc = layout.fields.get(refs_field)
+                    if refs_desc is None or refs_desc.kind != FieldKind.OPERAND:
+                        raise ValueError(f"Op '{op.name}': AlignedRefs refs field '{refs_field}' is not an operand field")
+                    if not refs_desc.variadic:
+                        raise ValueError(f"Op '{op.name}': AlignedRefs refs field '{refs_field}' must be variadic")
+                    params.append(
+                        {
+                            "name": refs_field,
+                            "kind": "operand_variadic",
+                            "c_type": "const loom_value_id_t*",
+                            "may_consume": has_result_type_list,
+                        }
+                    )
+                    append_attr_param(alignments_field)
 
                 case BlockRef(field=name):
                     desc = layout.fields.get(name)
@@ -438,12 +550,13 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
                         )
 
                 case ResultTypeList(field=name):
-                    params.append(
-                        {
-                            "name": "result_types",
-                            "kind": "result_types",
-                        }
-                    )
+                    if inferred_result_source is None:
+                        params.append(
+                            {
+                                "name": "result_types",
+                                "kind": "result_types",
+                            }
+                        )
                     if has_dynamic_ties:
                         params.append(
                             {
@@ -457,9 +570,12 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
                     binding = _pending_binding
                     _pending_binding = None
                     arg_source = region_def.arg_source if region_def else None
-                    func_args = _pending_func_args or arg_source == func_args_field_name or name == func_like_body_region_name
-                    _pending_func_args = False
-                    if arg_source == func_args_field_name:
+                    if arg_source in func_args_field_names or name == func_like_body_region_name:
+                        func_args = tuple(_body_func_args)
+                    else:
+                        func_args = tuple(_pending_func_args)
+                    _pending_func_args.clear()
+                    if arg_source in func_args_field_names:
                         arg_source = None
                     params.append(
                         {
@@ -489,6 +605,9 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
                 case TemplateParam(field=name):
                     append_attr_param(name)
 
+                case AttrParams(field=name):
+                    append_attr_param(name)
+
                 case TemplateParamFlags(param=param_name, flags=flags_name):
                     append_attr_param(param_name)
                     params.append(
@@ -510,14 +629,36 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
                 case Clause(elements=inner):
                     walk(inner)
 
-                case FuncArgs():
-                    params.append(
-                        {
-                            "name": "arg_types",
-                            "kind": "func_args",
-                        }
-                    )
-                    _pending_func_args = True
+                case FuncArgs(
+                    field=name,
+                    group=group,
+                    start_attr=start_attr,
+                    end_attr=end_attr,
+                ):
+                    field_desc = layout.fields.get(name)
+                    operand_field = bool(field_desc is not None and field_desc.kind == FieldKind.OPERAND)
+                    if group is not None:
+                        param_name = f"{group}_types"
+                    elif len(func_args_field_names) == 1:
+                        param_name = "arg_types"
+                    else:
+                        param_name = f"{name}_types"
+                    param = {
+                        "name": param_name,
+                        "kind": "func_args",
+                        "field": name,
+                        "operand_field": operand_field,
+                        "start_attr_index": c_queries.resolve_attr_index(op, start_attr, "FuncArgs"),
+                        "end_attr_index": c_queries.resolve_attr_index(op, end_attr, "FuncArgs"),
+                    }
+                    params.append(param)
+                    if not operand_field:
+                        _pending_func_args.append(param)
+                        _body_func_args.append(param)
+                    if start_attr is not None:
+                        covered_attrs.add(start_attr)
+                    if end_attr is not None:
+                        covered_attrs.add(end_attr)
 
                 case PredicateList(field=name):
                     attr_def = op.attr(name)
@@ -543,25 +684,11 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
                                 continue
                             append_attr_param(attr_def.name)
 
-                case OpRef(field=name):
+                case KeyRef(field=name):
                     append_attr_param(name)
 
-                case DescriptorRef(key=name, ordinal=ordinal):
-                    attr_def = op.attr(name)
-                    if attr_def is None:
-                        continue
-                    params.append(
-                        {
-                            "name": name,
-                            "kind": "descriptor_ref",
-                            "c_type": _c_attr_param_type(op, attr_def, shared_enums),
-                            "attr_type": attr_def.attr_type,
-                            "attr_index": c_queries.resolve_attr_index(op, name, "builder"),
-                            "ordinal_attr_index": c_queries.resolve_attr_index(op, ordinal, "builder"),
-                        }
-                    )
-                    covered_attrs.add(name)
-                    covered_attrs.add(ordinal)
+                case ScopedEnumRef(field=name):
+                    raise ValueError(f"Op '{op.name}': scoped enum field '{name}' requires a domain-aware handwritten C builder")
 
                 case StableKeyRef(key=name, stable_id=stable_id):
                     attr_def = op.attr(name)
@@ -585,11 +712,11 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
 
     walk(op.format)
 
-    # If the op has results but no ResultType/ResultTypeList was encountered
-    # in the format spec, we still need a result type parameter so the
-    # builder can define result values.
+    # Results not spelled by the assembly format normally require explicit
+    # builder parameters. Exact fixed result constraints are synthesized by
+    # the generated implementation instead.
     has_result_param = any(p["kind"] in ("result_type", "result_types") for p in params)
-    if not has_result_param and len(op.results) > 0:
+    if not has_result_param and len(op.results) > 0 and inferred_result_source is None and fixed_result_type_constraints(op) is None:
         if layout.variadic_result:
             params.append(
                 {
@@ -618,6 +745,8 @@ def optional_param_uses_build_flag(param: dict[str, object]) -> bool:
         return True
     if param["kind"] == "auto_region":
         return True
+    if param["kind"] == "predicate_list":
+        return True
     if param["kind"] != "attr":
         return False
     return param.get("attr_type") in _BUILD_FLAG_OPTIONAL_ATTR_TYPES
@@ -625,7 +754,18 @@ def optional_param_uses_build_flag(param: dict[str, object]) -> bool:
 
 def build_flag_params(params: list[dict[str, object]]) -> list[dict[str, object]]:
     """Returns optional builder parameters controlled by build_flags."""
-    return [param for param in params if optional_param_uses_build_flag(param)]
+    flagged_params = [param for param in params if optional_param_uses_build_flag(param)]
+    existing_params: list[dict[str, object]] = []
+    aggregate_params: list[dict[str, object]] = []
+    for param in flagged_params:
+        is_aggregate = param["kind"] == "predicate_list" or (param["kind"] == "attr" and param.get("attr_type") in _TRAILING_BUILD_FLAG_OPTIONAL_ATTR_TYPES)
+        # Newly flag-controlled aggregates trail fields with established public
+        # bit ordinals so enabling explicit presence does not renumber them.
+        if is_aggregate:
+            aggregate_params.append(param)
+        else:
+            existing_params.append(param)
+    return existing_params + aggregate_params
 
 
 def build_flags_type_name(prefix: str) -> str:
@@ -650,7 +790,7 @@ def build_flag_bit_name(prefix: str, param: dict[str, object]) -> str:
     return f"{prefix.upper()}_BUILD_FLAG_HAS_{str(param['name']).upper()}"
 
 
-def build_c_param_list(params: list[dict[str, object]], layout: FieldLayout, prefix: str) -> list[str]:
+def build_c_param_list(op: Op, params: list[dict[str, object]], layout: FieldLayout, prefix: str) -> list[str]:
     """Builds the C parameter string list from extracted params.
 
     Adds loom_optional annotations for optional attrs and regions.
@@ -661,55 +801,60 @@ def build_c_param_list(params: list[dict[str, object]], layout: FieldLayout, pre
     for param in params:
         opt = "loom_optional " if param.get("optional") else ""
         consume = "loom_may_consume " if param.get("may_consume") else ""
+        name = c_parameter_name(param["name"])
         match param["kind"]:
             case "operand":
-                c_params.append(f"{opt}{consume}loom_value_id_t {param['name']}")
+                c_params.append(f"{opt}{consume}loom_value_id_t {name}")
             case "successor":
-                c_params.append(f"loom_block_t* {param['name']}")
+                c_params.append(f"loom_block_t* {name}")
             case "operand_variadic":
-                c_params.append(f"{consume}const loom_value_id_t* {param['name']}")
-                c_params.append(f"iree_host_size_t {param['name']}_count")
+                c_params.append(f"{consume}const loom_value_id_t* {name}")
+                c_params.append(f"iree_host_size_t {name}_count")
             case "operand_dict":
-                c_params.append(f"{consume}const loom_named_value_t* {param['name']}")
-                c_params.append(f"iree_host_size_t {param['name']}_count")
+                c_params.append(f"{consume}const loom_named_value_t* {name}")
+                c_params.append(f"iree_host_size_t {name}_count")
             case "attr":
-                c_params.append(f"{opt}{param['c_type']} {param['name']}")
+                c_params.append(f"{opt}{param['c_type']} {name}")
                 if param["attr_type"] == "i64_array":
-                    c_params.append(f"iree_host_size_t {param['name']}_count")
-            case "descriptor_ref" | "stable_key_ref":
-                c_params.append(f"{param['c_type']} {param['name']}")
+                    c_params.append(f"iree_host_size_t {name}_count")
+            case "stable_key_ref":
+                c_params.append(f"{param['c_type']} {name}")
             case "symbol":
-                c_params.append(f"{opt}loom_symbol_ref_t {param['name']}")
+                c_params.append(f"{opt}loom_symbol_ref_t {name}")
             case "index_list":
-                c_params.append(f"const loom_value_id_t* {param['dynamic_field']}")
-                c_params.append(f"iree_host_size_t {param['dynamic_field']}_count")
-                c_params.append(f"const int64_t* {param['static_field']}")
-                c_params.append(f"iree_host_size_t {param['static_field']}_count")
+                dynamic_name = c_parameter_name(param["dynamic_field"])
+                static_name = c_parameter_name(param["static_field"])
+                c_params.append(f"const loom_value_id_t* {dynamic_name}")
+                c_params.append(f"iree_host_size_t {dynamic_name}_count")
+                c_params.append(f"const int64_t* {static_name}")
+                c_params.append(f"iree_host_size_t {static_name}_count")
             case "binding_list":
-                c_params.append(f"{consume}const loom_value_id_t* {param['name']}")
-                c_params.append(f"iree_host_size_t {param['name']}_count")
+                c_params.append(f"{consume}const loom_value_id_t* {name}")
+                c_params.append(f"iree_host_size_t {name}_count")
             case "result_type":
                 c_params.append("loom_type_t result_type")
             case "result_types":
                 if layout.variadic_result:
                     c_params.append("const loom_type_t* result_types")
                     c_params.append("iree_host_size_t result_count")
-                else:
+                elif fixed_result_types_fit_single_builder_type(op):
                     c_params.append("loom_type_t result_type")
+                else:
+                    c_params.append("const loom_type_t* result_types")
             case "tied_results":
                 c_params.append("const loom_tied_result_t* tied_results")
                 c_params.append("iree_host_size_t tied_result_count")
             case "predicate_list":
-                c_params.append(f"{opt}const loom_predicate_t* {param['name']}")
-                c_params.append(f"iree_host_size_t {param['name']}_count")
+                c_params.append(f"{opt}const loom_predicate_t* {name}")
+                c_params.append(f"iree_host_size_t {name}_count")
             case "instance_flags":
-                c_params.append(f"uint8_t {param['name']}")
+                c_params.append(f"uint8_t {name}")
             case "func_args":
-                c_params.append(f"const loom_type_t* {param['name']}")
-                c_params.append(f"iree_host_size_t {param['name']}_count")
+                c_params.append(f"const loom_type_t* {name}")
+                c_params.append(f"iree_host_size_t {name}_count")
             case "block_args":
-                c_params.append(f"const loom_type_t* {param['name']}")
-                c_params.append(f"iree_host_size_t {param['name']}_count")
+                c_params.append(f"const loom_type_t* {name}")
+                c_params.append(f"iree_host_size_t {name}_count")
             case "auto_region":
                 pass  # Auto-created by builder, no parameter.
     c_params.append("loom_location_id_t location")

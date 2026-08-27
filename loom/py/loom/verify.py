@@ -13,7 +13,14 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from loom.diagnostics import DiagnosticEngine
-from loom.dsl import Op, TypeConstraint, type_constraint_name
+from loom.dsl import (
+    FuncLikeInterface,
+    InlinePolicy,
+    Op,
+    SymbolReferenceRole,
+    TypeConstraint,
+    type_constraint_name,
+)
 from loom.fields import FieldKind, FieldLayout, compute_layout, resolve_fields
 from loom.ir import (
     Block,
@@ -22,18 +29,21 @@ from loom.ir import (
     DynamicEncoding,
     EncodingRole,
     EncodingType,
-    GroupType,
     Module,
     Operation,
     PoolType,
+    Region,
     RegisterType,
     ScalarType,
     ScalarTypeKind,
     ShapedType,
     StorageType,
     Symbol,
+    SymbolNameArray,
+    SymbolNameSet,
     Type,
     TypeKind,
+    Value,
 )
 
 __all__ = [
@@ -79,6 +89,14 @@ class VerifierRegistry:
         return self.layout_by_name[op_decl.name]
 
 
+@dataclass(frozen=True, slots=True)
+class _ConstraintRegionValue:
+    """Resolved region data consumed by declarative constraint predicates."""
+
+    entry_args: tuple[Value | None, ...] | None
+    terminator_operands: tuple[Value | None, ...] | None
+
+
 @dataclass(slots=True)
 class ModuleVerifier:
     """Verifies one in-memory Loom module against op declarations."""
@@ -91,15 +109,15 @@ class ModuleVerifier:
     def verify(self) -> None:
         """Verify the module and append diagnostics for every detected error."""
         self._verify_symbol_table()
-        for symbol_index, symbol in enumerate(self.module.symbols):
-            path = f"symbol[{symbol_index}] @{symbol.name}"
-            if symbol.op is None:
-                self.diagnostics.error(
-                    "symbol has no defining operation",
-                    source=path,
-                )
-                continue
-            self._verify_operation(symbol.op, path, parent_stack=())
+        self._verify_top_level_operation_ownership()
+        for operation_index, operation in enumerate(self.module.body.ops):
+            self._verify_operation(
+                operation,
+                f"module operation[{operation_index}]",
+                parent_stack=(),
+            )
+        if not self.diagnostics.has_errors:
+            self._verify_keyed_module_records()
 
     def _verify_symbol_table(self) -> None:
         seen: dict[str, int] = {}
@@ -118,6 +136,78 @@ class ModuleVerifier:
                 continue
             seen[symbol.name] = symbol_index
             self._symbols_by_name[symbol.name] = symbol
+
+    def _verify_top_level_operation_ownership(self) -> None:
+        body_operation_ids = {id(operation) for operation in self.module.body.ops}
+        indexed_operation_ids: dict[int, int] = {}
+        for symbol_index, symbol in enumerate(self.module.symbols):
+            path = f"symbol[{symbol_index}] @{symbol.name}"
+            if symbol.op is None:
+                self.diagnostics.error(
+                    "symbol has no defining operation",
+                    source=path,
+                )
+                continue
+            operation_id = id(symbol.op)
+            if operation_id not in body_operation_ids:
+                self.diagnostics.error(
+                    "symbol defining operation is not owned by the module body",
+                    source=path,
+                )
+            previous_symbol_index = indexed_operation_ids.get(operation_id)
+            if previous_symbol_index is not None:
+                self.diagnostics.error(
+                    "symbol defining operation has multiple symbol-table entries",
+                    source=path,
+                    details=(
+                        f"operation is also indexed by symbol[{previous_symbol_index}]",
+                    ),
+                )
+                continue
+            indexed_operation_ids[operation_id] = symbol_index
+
+        for operation_index, operation in enumerate(self.module.body.ops):
+            op_decl = self.registry.op(operation.name)
+            if op_decl is None:
+                continue
+            if not (
+                op_decl.has_trait("SymbolDefine") or op_decl.has_trait("ModuleScope")
+            ):
+                self.diagnostics.error(
+                    "op is not permitted at module scope",
+                    source=f"module operation[{operation_index}] {operation.name}",
+                )
+                continue
+            if not op_decl.has_trait("SymbolDefine"):
+                continue
+            if id(operation) not in indexed_operation_ids:
+                self.diagnostics.error(
+                    "module body symbol definition is missing from the symbol table",
+                    source=f"module operation[{operation_index}] {operation.name}",
+                )
+
+    def _verify_keyed_module_records(self) -> None:
+        seen: dict[tuple[str, str], int] = {}
+        for operation_index, operation in enumerate(self.module.body.ops):
+            if operation.is_dead:
+                continue
+            declaration = self.registry.op(operation.name)
+            if declaration is None or declaration.keyed_module_record_attr is None:
+                continue
+            key = operation.attributes[declaration.keyed_module_record_attr]
+            identity = (operation.name, key)
+            previous_index = seen.get(identity)
+            if previous_index is not None:
+                self.diagnostics.error(
+                    "duplicate keyed module record",
+                    source=f"module operation[{operation_index}] {operation.name}",
+                    details=(
+                        f"key is {key!r}",
+                        f"previous record is module operation[{previous_index}]",
+                    ),
+                )
+                continue
+            seen[identity] = operation_index
 
     def _verify_operation(
         self,
@@ -529,11 +619,18 @@ class ModuleVerifier:
                     case FieldKind.ATTR:
                         values[field_name] = operation.attributes.get(field_name)
                     case FieldKind.REGION:
-                        values[field_name] = (
-                            resolved.regions(field_name)
-                            if field_desc.variadic
-                            else resolved.region(field_name)
-                        )
+                        region_decl = op_decl.regions[field_desc.index]
+                        if field_desc.variadic:
+                            values[field_name] = [
+                                self._constraint_region_value(
+                                    region, region_decl.terminator
+                                )
+                                for region in resolved.regions(field_name)
+                            ]
+                        else:
+                            values[field_name] = self._constraint_region_value(
+                                resolved.region(field_name), region_decl.terminator
+                            )
                     case FieldKind.SUCCESSOR:
                         values[field_name] = (
                             resolved.successors(field_name)
@@ -549,6 +646,42 @@ class ModuleVerifier:
             return None
         return values
 
+    def _constraint_region_value(
+        self,
+        region: Region | None,
+        expected_terminator: str | None,
+    ) -> _ConstraintRegionValue:
+        """Resolves a region without hiding structural failures from its owner."""
+        if region is None or not region.blocks:
+            return _ConstraintRegionValue(None, None)
+        entry_block = region.blocks[0]
+        entry_args = tuple(
+            self.module.values[value_id]
+            if 0 <= value_id < len(self.module.values)
+            else None
+            for value_id in entry_block.arg_ids
+        )
+        if not entry_block.ops:
+            return _ConstraintRegionValue(entry_args, None)
+        terminator = entry_block.ops[-1]
+        terminator_decl = self.registry.op(terminator.name)
+        if (
+            terminator_decl is None
+            or not terminator_decl.is_terminator
+            or (
+                expected_terminator is not None
+                and terminator.name != expected_terminator
+            )
+        ):
+            return _ConstraintRegionValue(entry_args, None)
+        terminator_operands = tuple(
+            self.module.values[value_id]
+            if 0 <= value_id < len(self.module.values)
+            else None
+            for value_id in terminator.operands
+        )
+        return _ConstraintRegionValue(entry_args, terminator_operands)
+
     def _verify_symbol_refs(
         self,
         op_decl: Op,
@@ -559,45 +692,73 @@ class ModuleVerifier:
             symbol_ref = attr_def.symbol_ref
             if symbol_ref is None or attr_def.name not in operation.attributes:
                 continue
-            target_name = operation.attributes[attr_def.name]
-            if not isinstance(target_name, str):
+            value = operation.attributes[attr_def.name]
+            if attr_def.attr_type == "symbol_array":
+                if not isinstance(value, SymbolNameArray):
+                    self.diagnostics.error(
+                        "symbol reference array attribute must be a SymbolNameArray",
+                        source=path,
+                        details=(f"attribute '{attr_def.name}' has value {value!r}",),
+                    )
+                    continue
+                target_names = tuple(value)
+            elif attr_def.attr_type == "symbol_set":
+                if not isinstance(value, SymbolNameSet):
+                    self.diagnostics.error(
+                        "symbol reference set attribute must be a SymbolNameSet",
+                        source=path,
+                        details=(f"attribute '{attr_def.name}' has value {value!r}",),
+                    )
+                    continue
+                target_names = tuple(value)
+            elif isinstance(value, str):
+                target_names = (value,)
+            else:
                 self.diagnostics.error(
                     "symbol reference attribute must be a string",
                     source=path,
-                    details=(f"attribute '{attr_def.name}' has value {target_name!r}",),
+                    details=(f"attribute '{attr_def.name}' has value {value!r}",),
                 )
                 continue
-            target_symbol = self._symbols_by_name.get(target_name)
-            if target_symbol is None:
+            for index, target_name in enumerate(target_names):
+                field = f"attribute '{attr_def.name}'"
+                if attr_def.attr_type in ("symbol_array", "symbol_set"):
+                    field += f" element {index}"
+                target_symbol = self._symbols_by_name.get(target_name)
+                if target_symbol is None:
+                    if symbol_ref.role is SymbolReferenceRole.AVAILABILITY:
+                        continue
+                    self.diagnostics.error(
+                        "unresolved symbol reference",
+                        source=path,
+                        details=(f"{field} references @{target_name}",),
+                    )
+                    continue
+                target_decl = (
+                    self.registry.op(target_symbol.op.name)
+                    if target_symbol.op is not None
+                    else None
+                )
+                target_symbol_def = target_decl.symbol_def if target_decl else None
+                if target_symbol_def is None:
+                    continue
+                if not symbol_ref.interfaces:
+                    continue
+                if any(
+                    interface in target_symbol_def.interfaces
+                    for interface in symbol_ref.interfaces
+                ):
+                    continue
                 self.diagnostics.error(
-                    "unresolved symbol reference",
+                    "symbol reference target has wrong interface",
                     source=path,
-                    details=(f"attribute '{attr_def.name}' references @{target_name}",),
+                    details=(
+                        f"{field} references @{target_name}",
+                        "expected one of "
+                        f"{', '.join(symbol_ref.interfaces)} for {symbol_ref.name}",
+                        f"target provides {', '.join(target_symbol_def.interfaces)}",
+                    ),
                 )
-                continue
-            target_decl = (
-                self.registry.op(target_symbol.op.name)
-                if target_symbol.op is not None
-                else None
-            )
-            target_symbol_def = target_decl.symbol_def if target_decl else None
-            if target_symbol_def is None:
-                continue
-            if any(
-                interface in target_symbol_def.interfaces
-                for interface in symbol_ref.interfaces
-            ):
-                continue
-            self.diagnostics.error(
-                "symbol reference target has wrong interface",
-                source=path,
-                details=(
-                    f"attribute '{attr_def.name}' references @{target_name}",
-                    "expected one of "
-                    f"{', '.join(symbol_ref.interfaces)} for {symbol_ref.name}",
-                    f"target provides {', '.join(target_symbol_def.interfaces)}",
-                ),
-            )
 
     def _verify_traits(
         self,
@@ -607,6 +768,15 @@ class ModuleVerifier:
     ) -> None:
         for trait in op_decl.traits:
             match trait.name:
+                case "ModuleScope":
+                    if parent_stack:
+                        self.diagnostics.error(
+                            "module-scope op is nested",
+                            source=path,
+                            details=(
+                                "operation must be a direct child of the module body",
+                            ),
+                        )
                 case "HasParent":
                     parent_name = parent_stack[-1].name if parent_stack else None
                     if not trait.args or parent_name == trait.args[0]:
@@ -620,6 +790,10 @@ class ModuleVerifier:
                     if trait.args and any(
                         operation.name == trait.args[0] for operation in parent_stack
                     ):
+                        continue
+                    # Templates and required-inline functions are verified
+                    # before their final placement context is known.
+                    if self._has_deferred_required_ancestor(parent_stack):
                         continue
                     expected = trait.args[0] if trait.args else "<missing>"
                     self.diagnostics.error(
@@ -638,6 +812,30 @@ class ModuleVerifier:
                             source=path,
                             details=(f"forbidden ancestor op '{trait.args[0]}'",),
                         )
+
+    def _has_deferred_required_ancestor(
+        self, parent_stack: tuple[Operation, ...]
+    ) -> bool:
+        for operation in reversed(parent_stack):
+            declaration = self.registry.op(operation.name)
+            if operation.name == "template.def":
+                return True
+            if declaration:
+                for interface in declaration.interfaces:
+                    if not isinstance(interface, FuncLikeInterface):
+                        continue
+                    inline_policy = interface.inline_policy
+                    if (
+                        inline_policy
+                        and operation.attributes.get(inline_policy)
+                        == InlinePolicy.INLINE.value
+                    ):
+                        return True
+            if declaration and any(
+                trait.name == "IsolatedFromAbove" for trait in declaration.traits
+            ):
+                return False
+        return False
 
     def _verify_regions(
         self,
@@ -874,8 +1072,6 @@ def type_satisfies_constraint(value_type: Type, constraint: TypeConstraint) -> b
         return True
     if constraint == TypeConstraint.BUFFER:
         return isinstance(value_type, BufferType)
-    if constraint == TypeConstraint.GROUP:
-        return isinstance(value_type, GroupType)
     if constraint == TypeConstraint.POOL:
         return isinstance(value_type, PoolType)
     if constraint == TypeConstraint.REGISTER:
@@ -894,6 +1090,8 @@ def type_satisfies_constraint(value_type: Type, constraint: TypeConstraint) -> b
         return _encoding_role_is(value_type, EncodingRole.TRANSFORM)
     if constraint == TypeConstraint.I1:
         return _scalar_kind_is(value_type, ScalarTypeKind.I1)
+    if constraint == TypeConstraint.I32:
+        return _scalar_kind_is(value_type, ScalarTypeKind.I32)
 
     if isinstance(value_type, ScalarType):
         return _scalar_satisfies_constraint(value_type.kind, constraint)
@@ -926,6 +1124,10 @@ def _scalar_satisfies_constraint(
         return scalar_kind in _INTEGER_SCALAR_KINDS
     if constraint == TypeConstraint.FLOAT:
         return scalar_kind in _FLOAT_SCALAR_KINDS
+    if constraint == TypeConstraint.BITWISE_SCALAR:
+        return scalar_kind in _BITWISE_SCALAR_KINDS
+    if constraint == TypeConstraint.BYTE_PATTERN_SCALAR:
+        return scalar_kind in _BYTE_PATTERN_SCALAR_KINDS
     if constraint == TypeConstraint.INDEX_OR_NON_I1_INTEGER_SCALAR:
         return scalar_kind in _INDEX_OR_NON_I1_INTEGER_SCALAR_KINDS
     return False
@@ -957,6 +1159,8 @@ def _shaped_satisfies_constraint(
         return shaped_type.element_type.kind in _INTEGER_SCALAR_KINDS
     if constraint == TypeConstraint.FLOAT_ELEMENT:
         return shaped_type.element_type.kind in _FLOAT_SCALAR_KINDS
+    if constraint == TypeConstraint.BITWISE_ELEMENT:
+        return shaped_type.element_type.kind in _BITWISE_SCALAR_KINDS
     if constraint == TypeConstraint.INDEX_OR_NON_I1_INTEGER_ELEMENT:
         return shaped_type.element_type.kind in _INDEX_OR_NON_I1_INTEGER_SCALAR_KINDS
     if constraint == TypeConstraint.I1_ELEMENT:
@@ -995,6 +1199,23 @@ _FLOAT_SCALAR_KINDS = frozenset(
         ScalarTypeKind.F64,
     }
 )
+
+_BYTE_PATTERN_SCALAR_KINDS = frozenset(
+    {
+        ScalarTypeKind.I8,
+        ScalarTypeKind.I16,
+        ScalarTypeKind.I32,
+        ScalarTypeKind.I64,
+        ScalarTypeKind.F8E4M3,
+        ScalarTypeKind.F8E5M2,
+        ScalarTypeKind.F16,
+        ScalarTypeKind.BF16,
+        ScalarTypeKind.F32,
+        ScalarTypeKind.F64,
+    }
+)
+
+_BITWISE_SCALAR_KINDS = frozenset({ScalarTypeKind.INDEX, *_BYTE_PATTERN_SCALAR_KINDS})
 
 _INDEX_OR_NON_I1_INTEGER_SCALAR_KINDS = frozenset(
     {

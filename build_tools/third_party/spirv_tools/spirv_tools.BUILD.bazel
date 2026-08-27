@@ -56,9 +56,11 @@ genrule(
     srcs = [
         "@spirv_headers//:spirv_core_grammar_unified1",
         "@spirv_headers//:spirv_ext_inst_arm_motion_engine_100",
+        "@spirv_headers//:spirv_ext_inst_arm_experimental_ml_operations",
         "@spirv_headers//:spirv_ext_inst_debuginfo_grammar_unified1",
+        "@spirv_headers//:spirv_ext_inst_non_semantic_graph_debuginfo_grammar_unified1",
         "@spirv_headers//:spirv_ext_inst_nonsemantic_clspvreflection_grammar_unified1",
-        "@spirv_headers//:spirv_ext_inst_nonsemantic_shader_debuginfo_100_grammar_unified1",
+        "@spirv_headers//:spirv_ext_inst_nonsemantic_shader_debuginfo_grammar_unified1",
         "@spirv_headers//:spirv_ext_inst_nonsemantic_vkspreflection_grammar_unified1",
         "@spirv_headers//:spirv_ext_inst_opencl_debuginfo_100_grammar_unified1",
         "@spirv_headers//:spirv_ext_inst_spv_amd_gcn_shader_grammar_unified1",
@@ -81,9 +83,11 @@ genrule(
         " --extinst=,$(location @spirv_headers//:spirv_glsl_grammar_unified1)" +
         " --extinst=,$(location @spirv_headers//:spirv_opencl_grammar_unified1)" +
         " --extinst=CLDEBUG100_,$(location @spirv_headers//:spirv_ext_inst_opencl_debuginfo_100_grammar_unified1)" +
-        " --extinst=SHDEBUG100_,$(location @spirv_headers//:spirv_ext_inst_nonsemantic_shader_debuginfo_100_grammar_unified1)" +
+        " --extinst=SHDEBUG100_,$(location @spirv_headers//:spirv_ext_inst_nonsemantic_shader_debuginfo_grammar_unified1)" +
         " --extinst=TOSA_,$(location @spirv_headers//:spirv_ext_inst_tosa_001000_1)" +
         " --extinst=,$(location @spirv_headers//:spirv_ext_inst_arm_motion_engine_100)" +
+        " --extinst=,$(location @spirv_headers//:spirv_ext_inst_non_semantic_graph_debuginfo_grammar_unified1)" +
+        " --extinst=,$(location @spirv_headers//:spirv_ext_inst_arm_experimental_ml_operations)" +
         " --extinst=,$(location @spirv_headers//:spirv_ext_inst_spv_amd_shader_explicit_vertex_parameter_grammar_unified1)" +
         " --extinst=,$(location @spirv_headers//:spirv_ext_inst_spv_amd_shader_trinary_minmax_grammar_unified1)" +
         " --extinst=,$(location @spirv_headers//:spirv_ext_inst_spv_amd_gcn_shader_grammar_unified1)" +

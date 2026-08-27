@@ -18,25 +18,25 @@ kernel.def @q8_packed_word_global_dequant_dot4_kernel() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%weights: buffer, %rhs_buffer: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %four = index.constant 4 : index
-  %four_bytes = index.constant 4 : offset
-  %eight = index.constant 8 : index
+  %packed_word_index = index.constant 0 : index
+  %rhs_elements_per_lane = index.constant 4 : index
+  %packed_word_bytes = index.constant 4 : offset
+  %lanes_per_scale = index.constant 8 : index
   %lane = kernel.workitem.id<x> : index
   %weights_global = buffer.assume.memory_space<global> %weights : buffer
   %rhs_global = buffer.assume.memory_space<global> %rhs_buffer : buffer
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %weights_noalias, %rhs_noalias, %output_noalias = buffer.assume.noalias %weights_global, %rhs_global, %output_global : buffer, buffer, buffer
-  %q_byte_offset = index.scale %lane, %four_bytes : index, offset -> offset
-  %scale_index = index.div %lane, %eight : index
-  %rhs_index = index.mul %lane, %four : index
-  %q_word_view = buffer.view %weights_noalias[%q_byte_offset] : buffer -> view<1xi32, #dense>
-  %scale_view = buffer.view %weights_noalias[%base] : buffer -> view<1024xf16, #dense>
-  %rhs_view = buffer.view %rhs_noalias[%base] : buffer -> view<1024xf32, #dense>
-  %output_view = buffer.view %output_noalias[%base] : buffer -> view<64xf32, #dense>
-  %packed = vector.load %q_word_view[%zero] : view<1xi32, #dense> -> vector<1xi32>
-  %scale = view.load %scale_view[%scale_index] : view<1024xf16, #dense> -> f16
-  %rhs = vector.load %rhs_view[%rhs_index] : view<1024xf32, #dense> -> vector<4xf32>
+  %q_byte_offset = index.scale %lane, %packed_word_bytes : index, offset -> offset
+  %scale_index = index.div %lane, %lanes_per_scale : index
+  %rhs_index = index.mul %lane, %rhs_elements_per_lane : index
+  %q_word_view = buffer.view %weights_noalias[%q_byte_offset] : buffer -> view<1xi32>
+  %scale_view = buffer.view %weights_noalias[%base] : buffer -> view<1024xf16>
+  %rhs_view = buffer.view %rhs_noalias[%base] : buffer -> view<1024xf32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<64xf32>
+  %packed = vector.load %q_word_view[%packed_word_index] : view<1xi32> -> vector<1xi32>
+  %scale = view.load %scale_view[%scale_index] : view<1024xf16> -> f16
+  %rhs = vector.load %rhs_view[%rhs_index] : view<1024xf32> -> vector<4xf32>
   %q_i32 = vector.bitunpacks<8> %packed : vector<1xi32> -> vector<4xi32>
   %q_f32 = vector.sitofp %q_i32 : vector<4xi32> to vector<4xf32>
   %scale_f32 = scalar.extf %scale : f16 to f32
@@ -44,7 +44,7 @@ kernel.def @q8_packed_word_global_dequant_dot4_kernel() {
   %scaled_q = vector.mulf<reassoc|nnan|ninf|nsz|contract> %q_f32, %scale_vector : vector<4xf32>
   %acc = scalar.constant 0.0 : f32
   %dot = vector.dotf %scaled_q, %rhs, %acc : vector<4xf32>, vector<4xf32>, f32
-  view.store %dot, %output_view[%lane] : f32, view<64xf32, #dense>
+  view.store %dot, %output_view[%lane] : f32, view<64xf32>
   kernel.return
 }
 

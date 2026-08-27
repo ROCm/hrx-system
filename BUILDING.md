@@ -10,6 +10,11 @@ This repository has two supported build systems:
 CMake, CTest, and project scripts. Anything `dev.py` does must also be possible
 with the underlying tools directly.
 
+Build-system integration follows the same ownership boundary. Tests that
+configure or drive CMake are registered only in CTest; the Bazel build and test
+graphs neither invoke CMake nor require it to be installed. Bazel-to-CMake
+conversion is an explicit source-generation and presubmit step.
+
 ## Quick Start
 
 Bazel source-tree build:
@@ -73,6 +78,15 @@ iree-cmake-configure -DIREE_HAL_DRIVER_AMDGPU=ON
 iree-cmake-test -R hrx
 ```
 
+CMake build and run commands also accept a unique executable output name, such
+as `loom-compile`. If two packages emit the same filename, use the qualified
+generated alias so the selection remains explicit.
+
+`iree-cmake-test` asks CTest for the exact selected records, builds the
+concrete CMake roots declared by those records, and then runs the same
+selection. A filtered test run therefore needs no separate matching
+`iree-cmake-build` invocation, and source-only selections perform no build.
+
 PATH aliases are also the stable spelling for launcher-backed commands:
 
 ```bash
@@ -113,37 +127,73 @@ PATH aliases above. Command names are
 `iree-<build-system>-<target-group>[-<configuration>]`. Bazel jobs take explicit
 target patterns. CMake jobs use generated CTest names and labels directly.
 
+The CI compiler matrix assigns each compiler a deliberate role. Host compiler
+selection is explicit through `CC`, `CXX`, and `AR`; fetching ROCm never changes
+the host compiler through `PATH`. AMDGPU device actions receive the ROCm LLVM
+root independently through build configuration.
+
+| Workflow surface | Host compiler | AMDGPU device compiler | Coverage intent |
+| --- | --- | --- | --- |
+| Presubmit | Fetched ROCm Clang 23 | None | Runs repository policy checks and clang-tidy with the newest supported LLVM APIs. |
+| IREE Bazel/CMake CPU and importers | Ubuntu Clang 18 | None | Primary source build, test, sanitizer, and importer coverage. |
+| IREE Bazel/CMake Vulkan | Fetched ROCm Clang 23 | None | Vulkan source build and execution coverage on self-hosted runners that do not currently provision a generic Clang toolchain. |
+| IREE Bazel/CMake AMDGPU | Fetched ROCm Clang 23 | Fetched ROCm Clang 23 | Compiles and runs AMDGPU host and device code in the ROCm toolchain environment. |
+| IREE Bazel repository build | GCC 13 system toolchain | Fetched ROCm Clang 23 | Builds every supported Linux HAL driver, Loom target/importer, and build-compatible target under `//...`; it does not duplicate test execution. |
+| libHRX Bazel | Fetched ROCm Clang 23 | Fetched ROCm Clang 23 | Validates the source HRX product against its shipping ROCm compiler environment. |
+| Installed CMake/package CI | Fetched ROCm Clang 23 | Fetched ROCm Clang 23 | Builds, installs, packages, and tests the composed HRX distribution. |
+
+The repository-wide GCC lane intentionally uses the complete `//...` pattern,
+not a hand-maintained project list or exclusions. Platform-incompatible targets
+remain incompatible through their declared Bazel constraints; CUDA and Metal
+join this lane when their Linux Bazel dependency surfaces are enabled. The
+lane does not override GCC's linker selection; Bazel uses the GNU binutils
+provided by the system toolchain. The copyable build-shape command is:
+
+```bash
+CC=gcc CXX=g++ AR=ar \
+  python build_tools/devtools/ci.py iree-bazel-repository-build --keep-going
+```
+
 ```bash
 python build_tools/devtools/ci.py iree-bazel-cpu --target //runtime/... --keep-going
 python build_tools/devtools/ci.py iree-bazel-cpu-sanitizers --target //runtime/... --keep-going
 python build_tools/devtools/ci.py iree-bazel-vulkan --target //runtime/... --keep-going
-python build_tools/devtools/ci.py iree-bazel-vulkan-sanitizers --target //runtime/... --keep-going
-python build_tools/devtools/ci.py iree-bazel-amdgpu --target //runtime/... --keep-going
-python build_tools/devtools/ci.py iree-bazel-amdgpu-sanitizers --target //runtime/... --keep-going
+python build_tools/devtools/ci.py iree-bazel-amdgpu --amdgpu-target gfx942 --keep-going
+python build_tools/devtools/ci.py iree-bazel-amdgpu-asan --amdgpu-target gfx942 --keep-going
+python build_tools/devtools/ci.py iree-bazel-amdgpu-tsan --amdgpu-target gfx942 --keep-going
+python build_tools/devtools/ci.py iree-bazel-amdgpu-ubsan --amdgpu-target gfx942 --keep-going
 
 python build_tools/devtools/ci.py iree-cmake-cpu --keep-going
 python build_tools/devtools/ci.py iree-cmake-cpu-sanitizers --keep-going
 python build_tools/devtools/ci.py iree-cmake-vulkan --keep-going
 python build_tools/devtools/ci.py iree-cmake-vulkan-sanitizers --keep-going
-python build_tools/devtools/ci.py iree-cmake-amdgpu --keep-going
-python build_tools/devtools/ci.py iree-cmake-amdgpu-sanitizers --keep-going
+python build_tools/devtools/ci.py iree-cmake-amdgpu --amdgpu-target gfx942 --keep-going
+python build_tools/devtools/ci.py iree-cmake-amdgpu-sanitizers --amdgpu-target gfx942 --keep-going
 ```
 
-The aggregate `*-sanitizers` commands batch sanitizer configurations for CI
-scheduling. Individual sanitizer commands are the targeted reproduction form:
+AMDGPU commands default to `gfx942`. `--amdgpu-target` accepts an exact target
+or family selector and applies it to both the runtime HAL target set and Loom's
+`iree_hal`-derived compiler target set. Bazel AMDGPU commands build both source
+trees, then run the union of tests that require the AMDGPU HAL at build time or
+an AMD GPU at execution time.
+
+AMDGPU Bazel sanitizer configurations are separate CI jobs so they build and
+test independently. Aggregate CPU Bazel and CMake commands remain available as
+local batch commands. Individual sanitizer commands are the targeted
+reproduction form:
 
 ```bash
 python build_tools/devtools/ci.py iree-bazel-cpu-asan --target //runtime/... --keep-going
-python build_tools/devtools/ci.py iree-bazel-vulkan-asan --target //runtime/... --keep-going
-python build_tools/devtools/ci.py iree-bazel-amdgpu-tsan --target //runtime/... --keep-going
+python build_tools/devtools/ci.py iree-bazel-amdgpu-tsan --amdgpu-target gfx942 --keep-going
 python build_tools/devtools/ci.py iree-cmake-cpu-ubsan --keep-going
 python build_tools/devtools/ci.py iree-cmake-vulkan-ubsan --keep-going
-python build_tools/devtools/ci.py iree-cmake-amdgpu-tsan --keep-going
+python build_tools/devtools/ci.py iree-cmake-amdgpu-tsan --amdgpu-target gfx942 --keep-going
 ```
 
-Sanitizer CI tests ASAN, UBSAN, and TSAN. MSAN is build-only until the CI host
-dependency stack is MSAN-instrumented enough for test execution to produce
-runtime signal instead of dependency instrumentation noise.
+AMDGPU Bazel CI tests ASAN, UBSAN, and TSAN. It does not publish an MSAN lane:
+the CI host dependency stack is not MSAN-instrumented enough for execution to
+produce useful runtime signal. CPU Bazel and CMake retain their explicit
+build-only MSAN configurations.
 
 ## Shared Project Configuration
 
@@ -242,21 +292,39 @@ descriptor-backed AMDGPU processors are compiled into that capability. The
 default selector is `loom_defaults`, which expands to every descriptor-backed
 processor Loom currently supports:
 
-| Descriptor set | Exact processors |
+| Descriptor set | Processor targets |
 | --- | --- |
 | `amdgpu.cdna3.core` | `gfx940`, `gfx941`, `gfx942` |
 | `amdgpu.cdna4.core` | `gfx950` |
-| `amdgpu.rdna3.core` | `gfx1100`, `gfx1101`, `gfx1102`, `gfx1103`, `gfx1150`, `gfx1151`, `gfx1152`, `gfx1153` |
-| `amdgpu.rdna3_5.core` | `gfx1170`, `gfx1171`, `gfx1172` |
+| `amdgpu.gfx9_4.generic.core` | `gfx9-4-generic` |
+| `amdgpu.rdna3.core` | `gfx1100`, `gfx1101`, `gfx1102`, `gfx1103` |
+| `amdgpu.rdna3_5.core` | `gfx1150`, `gfx1151`, `gfx1152`, `gfx1153` |
+| `amdgpu.gfx11.generic.core` | `gfx11-generic` |
+| `amdgpu.rdna4m.core` | `gfx1170`, `gfx1171`, `gfx1172` |
 | `amdgpu.rdna4.core` | `gfx1200`, `gfx1201` |
+| `amdgpu.gfx12.generic.core` | `gfx12-generic` |
 | `amdgpu.rdna4.gfx125x.core` | `gfx1250`, `gfx1251` |
+| `amdgpu.gfx12_5.generic.core` | `gfx12-5-generic` |
+
+Every generic processor is a compiler target in its own right with a distinct
+descriptor and encoding contract. A generic contract may share immutable
+generated storage with an exact-family contract when their current contents
+match, but it never selects that exact contract as an implementation alias.
+`gfx11-generic` is the common GFX11 surface validated against both the RDNA 3
+and RDNA 3.5 ISA descriptions, and its code objects cover `gfx1100`-`gfx1103`
+and `gfx1150`-`gfx1153`. The `gfx1170`-`gfx1172` targets remain exact-only
+because the pinned device toolchain does not yet expose LLVM's distinct
+`gfx11-7-generic` code-object target.
+`gfx9-4-generic` is the common CDNA 3/CDNA 4 surface for `gfx940`, `gfx941`,
+`gfx942`, and `gfx950`; its instruction, matrix, resource, scheduling, ABI,
+limit, and occupancy facts are portable member intersections.
 
 The accepted Loom AMDGPU selector vocabulary is the intersection of the shared
 AMDGPU target map and Loom's descriptor-backed compiler support. It accepts:
 
 - Source selectors: `loom_defaults`, `iree_hal`.
 - Exact processors listed in the descriptor-set table above.
-- Generic code-object selectors: `gfx9-4-generic`, `gfx11-generic`,
+- Generic compiler targets: `gfx9-4-generic`, `gfx11-generic`,
   `gfx12-generic`, `gfx12-5-generic`.
 - Fully covered family selectors: `gfx94X-all`, `gfx94X-dcgpu`,
   `gfx950-all`, `gfx950-dcgpu`, `gfx110X-all`, `gfx110X-dgpu`,
@@ -264,13 +332,14 @@ AMDGPU target map and Loom's descriptor-backed compiler support. It accepts:
   `gfx120X-all`, `gfx125X-all`.
 
 Older shared selectors such as `gfx9-generic`, `gfx90a`, `gfx908`,
-`gfx10-1-generic`, and `gfx10-3-generic` are still valid for runtime-side
-AMDGPU tooling, but they are not Loom compiler targets until matching Loom
-descriptor sets exist. The `iree_hal` source selector narrows Loom AMDGPU
-support to the descriptor-backed subset requested by the runtime
-`IREE_HAL_AMDGPU_TARGETS` setting. That is useful for executable-cache builds
-that want Loom linked with exactly the runtime HAL target horizon, while normal
-compiler and `loom-compile` builds should usually keep `loom_defaults`.
+`gfx10-1-generic`, and
+`gfx10-3-generic` are still valid for runtime-side AMDGPU tooling, but they are
+not Loom compiler targets until matching Loom descriptor sets exist. The
+`iree_hal` source selector narrows Loom AMDGPU support to the descriptor-backed
+subset requested by the runtime `IREE_HAL_AMDGPU_TARGETS` setting. That is
+useful for runtime-integrated JIT builds that want Loom linked with exactly the
+runtime HAL target horizon, while normal compiler and `loom-compile` builds
+should usually keep `loom_defaults`.
 
 | Option | Values | CMake | Bazel portable | Bazel native |
 | --- | --- | --- | --- | --- |
@@ -362,6 +431,15 @@ target set plus explicit debug emitters and execution substrates.
 
 Other Bazel-native overrides belong in `.bazelrc.local`.
 
+## Optional Local NativeLink Execution
+
+NativeLink can provide one shared Bazel action cache and execution limit across
+multiple local worktrees. The repository provides an inert named Bazel config
+and a loopback-only local server configuration; ordinary builds remain
+unchanged until `--config=nativelink` is selected. See the
+[local NativeLink guide](build_tools/nativelink/README.md) for installation,
+startup, verification, capacity, and trust-boundary details.
+
 ## Loom Importers
 
 Importer frontends are optional dependency lanes. Start with the importer-local
@@ -434,5 +512,158 @@ cmake --build build/cmake --target hrx
 
 ```bash
 python dev.py cmake test -R hrx
+ctest --test-dir build/cmake -R hrx --show-only=json-v1
+cmake --build build/cmake --target selected-root-a selected-root-b
 ctest --test-dir build/cmake --output-on-failure -R hrx
+```
+
+In the raw pipeline, `selected-root-a selected-root-b` stands for the stable
+union produced by joining the selected CTest names with the validated
+`iree_ctest_build_targets.json` catalog generated beside the CTest files.
+
+## Platform-Specific Host Builds
+
+### Windows
+
+Windows builds require an x64 MSVC ABI environment even when `clang-cl` is the
+host compiler. Install Python 3.12, Visual Studio 2022 Build Tools with the x64
+C++ tools and a Windows SDK, and Ninja. Install LLVM separately when building
+with `clang-cl`. The CI CMake version is 3.31.6; using that version locally
+removes an otherwise unhelpful source of generator differences.
+
+Start from an x64 Visual Studio developer shell so `INCLUDE`, `LIB`, the SDK
+tools, and the MSVC linker are available. Git for Windows also ships a Unix
+program named `link.exe`, so compiler activation order is load-bearing:
+
+```powershell
+where.exe cl
+where.exe link
+```
+
+The first `link.exe` must be the MSVC linker, not Git's `usr\bin\link.exe`.
+Create the repository tool environment and add the CI-pinned CMake plus Ninja:
+
+```powershell
+python dev.py cmake setup --venv
+.\.venv\Scripts\python.exe -m pip install --upgrade cmake==3.31.6 ninja
+python dev.py cmake doctor
+```
+
+Keep Windows build trees short and keep one tree per compiler. The `C:\b` CMake
+trees below remain within the legacy Win32 path limit and do not require the
+machine-wide `LongPathsEnabled` policy. Bazel has a different host contract:
+its managed Python runfiles exceed the legacy limit and use symbolic links, so
+Windows Bazel hosts require `LongPathsEnabled` plus Developer Mode or an
+equivalent symbolic-link policy. Provision both policies in the base image for
+CI runners that cannot elevate during a job. `python dev.py bazel configure`
+and `python dev.py bazel doctor` diagnose those capabilities.
+
+Windows Firewall displays an interactive approval prompt when a newly built
+executable begins listening for inbound connections. Approving one executable
+is not durable because build output paths change across configurations and
+rebuilds. On an unattended development or CI host, disable listening
+notifications for every network profile from a normal PowerShell session with
+one elevated command:
+
+```powershell
+Start-Process powershell.exe -Verb RunAs -Wait -ArgumentList '-NoProfile','-Command','Set-NetFirewallProfile -Profile Domain,Private,Public -NotifyOnListen False'
+```
+
+This leaves Windows Firewall enabled and does not add an inbound allow rule;
+remote connections remain subject to the active firewall policy. Verify the
+effective setting with:
+
+```powershell
+Get-NetFirewallProfile | Select-Object Name, Enabled, NotifyOnListen
+```
+
+Restore the interactive notifications with the same command and
+`-NotifyOnListen True`.
+
+Windows Bazel builds use `clang-cl` by default and require `BAZEL_LLVM` to name
+the LLVM installation root. The MSVC ABI tools and SDK still come from the
+active Visual Studio developer environment. Configure once, then build the
+normal Loom tool surface:
+
+```powershell
+$env:BAZEL_LLVM = 'C:\Program Files\LLVM'
+python dev.py bazel setup --venv
+python dev.py bazel configure
+python dev.py bazel build `
+  //loom/src/loom/tools/iree-run-loom `
+  //loom/src/loom/tools/loom-compile `
+  //loom/binding/c:loomc
+```
+
+Use the explicit MSVC lane when checking both host compilers. It clears the
+clang-cl execution-platform selection while preserving the same configured
+feature and dependency graph:
+
+```powershell
+python dev.py bazel build `
+  //loom/src/loom/tools/iree-run-loom `
+  //loom/src/loom/tools/loom-compile `
+  //loom/binding/c:loomc `
+  --config=windows-msvc
+```
+
+The following is the host-only Loom baseline: it builds the VM and x86 target
+paths without requiring ROCm, Vulkan, WebGPU, or libHRX.
+
+```powershell
+$baseOptions = @(
+  '-GNinja'
+  '-DCMAKE_BUILD_TYPE=RelWithDebInfo'
+  '-DIREE_BUILD_TESTS=ON'
+  '-DIREE_BUILD_BENCHMARKS=ON'
+  '-DLIBHRX_BUILD=OFF'
+  '-DIREE_DEPENDENCY_MODE=pinned'
+  '-DIREE_HAL_DRIVER_AMDGPU=OFF'
+  '-DIREE_HAL_DRIVER_HIP=OFF'
+  '-DIREE_HAL_DRIVER_VULKAN=OFF'
+  '-DIREE_HAL_DRIVER_WEBGPU=OFF'
+  '-DLOOM_TARGET_AMDGPU=OFF'
+  '-DLOOM_TARGET_SPIRV=OFF'
+  '-DLOOM_TARGET_WASM=OFF'
+)
+
+$llvmBin = 'C:\Program Files\LLVM\bin'
+$env:PATH = "$llvmBin;$env:PATH"
+$env:CC = "$llvmBin\clang-cl.exe"
+$env:CXX = "$llvmBin\clang-cl.exe"
+$env:AR = "$llvmBin\llvm-lib.exe"
+python dev.py --cmake-build-dir C:\b\hrx-clang cmake configure @baseOptions
+python dev.py --cmake-build-dir C:\b\hrx-clang cmake build `
+  loom-compile iree-run-loom loom-check loom-format loom-opt loom-link `
+  iree-test-loom iree-benchmark-loom --parallel 8
+python dev.py --cmake-build-dir C:\b\hrx-clang cmake test `
+  -R '^loom/tools/(.*execution_test|loom-check/test/.*)$' -j 8
+```
+
+Reset the compiler selection for the distinct MSVC tree. The separate build
+directory, rather than shell state, keeps compiler identities from leaking
+across configurations:
+
+```powershell
+$env:CC = 'cl.exe'
+$env:CXX = 'cl.exe'
+$env:AR = 'lib.exe'
+python dev.py --cmake-build-dir C:\b\hrx-msvc cmake configure @baseOptions
+python dev.py --cmake-build-dir C:\b\hrx-msvc cmake build `
+  loom-compile iree-run-loom loom-check loom-format loom-opt loom-link `
+  iree-test-loom iree-benchmark-loom --parallel 8
+python dev.py --cmake-build-dir C:\b\hrx-msvc cmake test `
+  -R '^loom/tools/(.*execution_test|loom-check/test/.*)$' -j 8
+```
+
+Repository-wide Loom hygiene has a broader compiler-capability contract than
+the host-only smoke: `loom-format` verifies every tracked standalone module
+with the AMDGPU, IREE VM, LLVM IR, SPIR-V, and x86 target descriptors. A CMake
+tree used for `cmake precommit` therefore needs AMDGPU and SPIR-V target support
+even when their HAL drivers remain disabled:
+
+```powershell
+python dev.py --cmake-build-dir C:\b\hrx-clang-presubmit cmake configure `
+  @baseOptions -DLOOM_TARGET_AMDGPU=ON -DLOOM_TARGET_SPIRV=ON
+python dev.py --cmake-build-dir C:\b\hrx-clang-presubmit cmake precommit
 ```

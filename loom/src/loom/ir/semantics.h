@@ -31,6 +31,8 @@ typedef enum loom_op_phase_e {
   LOOM_OP_PHASE_SOURCE_STRUCTURE = 2,
   // Module metadata consumed by compilation/configuration rather than emitted.
   LOOM_OP_PHASE_MODULE_METADATA = 3,
+  // Compile-time query that must resolve or become dead before target-low IR.
+  LOOM_OP_PHASE_COMPILE_TIME_QUERY = 4,
 } loom_op_phase_e;
 
 // Bitset of target-contract families represented by an op or type.
@@ -73,9 +75,15 @@ static inline bool loom_contract_family_set_has_all(
 typedef struct loom_op_semantics_t {
   // Source-level placement phase.
   loom_op_phase_t phase;
+  // One-based index into the dialect's sparse condition-refinement table, or
+  // zero when the op does not refine an operand on a control-flow edge.
+  uint8_t condition_refinement_index;
   // Target-contract families required to preserve this op's semantics.
   loom_contract_family_set_t contract_families;
 } loom_op_semantics_t;
+
+static_assert(sizeof(loom_op_semantics_t) == 8,
+              "op semantic rows must remain eight bytes");
 
 // Returns the default empty semantic metadata row.
 static inline loom_op_semantics_t loom_op_semantics_empty(void) {
@@ -92,6 +100,8 @@ typedef enum loom_type_semantic_e {
   LOOM_TYPE_SEMANTIC_CONTROL_TOKEN = 1,
   // Opaque value whose payload represents a target contract.
   LOOM_TYPE_SEMANTIC_TARGET_CONTRACT_VALUE = 2,
+  // Reference-counted resource requiring ownership-aware lowering.
+  LOOM_TYPE_SEMANTIC_MANAGED_REFERENCE = 3,
 } loom_type_semantic_e;
 
 // Generated semantic metadata for one registered type declaration.

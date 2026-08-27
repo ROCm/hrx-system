@@ -2,7 +2,6 @@
 // RUN: emit source-low output=low
 
 x86.target<avx512> @target
-
 func.def target(@target) @scalar_f32_arith(%lhs: f32, %rhs: f32, %bias: f32) -> (f32) {
   %sum = scalar.addf %lhs, %rhs : f32
   %difference = scalar.subf %sum, %bias : f32
@@ -12,7 +11,7 @@ func.def target(@target) @scalar_f32_arith(%lhs: f32, %rhs: f32, %bias: f32) -> 
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scalar_f32_arith(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>, %bias: reg<x86.xmm>) -> (reg<x86.xmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) @scalar_f32_arith(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>, %bias: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %sum = vaddss.xmm %lhs, %rhs
   %difference = vsubss.xmm %sum, %bias
   %product = vmulss.xmm %difference, %rhs

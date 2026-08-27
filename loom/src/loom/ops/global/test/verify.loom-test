@@ -85,7 +85,39 @@ global.variable @bad_flag : i1 = 2
 
 // Read-only artifact alignment must be either absent or a positive power of two.
 // ERROR@+1: STRUCTURE/014 "alignment" "3" "positive power-of-two byte alignment"
-global.rodata @bad_rodata_alignment = bytes("00"), align 3
+global.rodata.def @bad_rodata_alignment = align(3) bytes("00")
+
+// ====
+
+// Read-only data materializes as exactly one buffer root.
+global.rodata.def @message = bytes("6c6f6f6d")
+
+func.def @load_rodata_wrong_type() {
+  // ERROR@+1: TYPE/004 "result 0" "f32" "buffer"
+  %message = global.load @message : f32
+  func.return
+}
+
+// ====
+
+global.rodata.def @message_with_extra_result = bytes("6c6f6f6d")
+
+func.def @load_rodata_extra_result() {
+  // ERROR@+1: STRUCTURE/002
+  %message, %extra = global.load @message_with_extra_result : buffer
+  func.return
+}
+
+// ====
+
+// Read-only data is not a value-global store target.
+global.rodata.def @immutable_message = bytes("6c6f6f6d")
+
+func.def @store_rodata(%value: buffer) {
+  // ERROR@+1: SYMBOL/003 "expected global"
+  global.store %value, @immutable_message : buffer
+  func.return
+}
 
 // ====
 

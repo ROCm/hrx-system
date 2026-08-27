@@ -9,12 +9,29 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 #include "iree/hal/drivers/amdgpu/abi/profile.h"
 #include "iree/testing/gtest.h"
 
 namespace iree::hal::amdgpu {
 namespace {
+
+// One builtin kernel as registered in the device kernel table.
+struct KernelTableEntry {
+  // Kernel symbol name without the ".kd" suffix the loader appends.
+  const char* name;
+  // Registered workgroup size in work-items per dimension.
+  uint32_t workgroup_size[3];
+};
+
+static constexpr KernelTableEntry kKernelTable[] = {
+#define IREE_HAL_AMDGPU_DEVICE_KERNEL(kernel_name, workgroup_size_x,      \
+                                      workgroup_size_y, workgroup_size_z) \
+  {#kernel_name, {workgroup_size_x, workgroup_size_y, workgroup_size_z}},
+#include "iree/hal/drivers/amdgpu/device/kernel_tables.h"  // IWYU pragma: keep
+#undef IREE_HAL_AMDGPU_DEVICE_KERNEL
+};
 
 static iree_hal_amdgpu_device_kernel_args_t MakeTimestampKernelArgs() {
   iree_hal_amdgpu_device_kernel_args_t kernel_args = {};
@@ -34,6 +51,7 @@ TEST(TimestampTest, AbiRecordLayoutIsFixed) {
   EXPECT_EQ(sizeof(iree_hal_amdgpu_dispatch_timestamp_record_t), 64u);
   EXPECT_EQ(sizeof(iree_hal_amdgpu_dispatch_timestamp_signal_initialize_args_t),
             16u);
+  EXPECT_EQ(sizeof(iree_hal_amdgpu_queue_timestamp_capture_args_t), 8u);
   EXPECT_EQ(offsetof(iree_hal_amdgpu_command_buffer_timestamp_record_t, ticks),
             32u);
   EXPECT_EQ(offsetof(iree_hal_amdgpu_dispatch_timestamp_record_t, ticks), 48u);
@@ -140,6 +158,54 @@ TEST(TimestampTest, EmplacesSignalInitializationPacketAndKernargs) {
   EXPECT_EQ(packet.workgroup_size[1], 1u);
   EXPECT_EQ(packet.workgroup_size[2], 1u);
   EXPECT_EQ(packet.grid_size[0], 32u);
+  EXPECT_EQ(packet.grid_size[1], 1u);
+  EXPECT_EQ(packet.grid_size[2], 1u);
+  EXPECT_EQ(packet.kernel_object, 0x12345678ull);
+  EXPECT_EQ(packet.kernarg_address, kernargs.data());
+  EXPECT_EQ(packet.completion_signal.handle, iree_hsa_signal_null().handle);
+}
+
+// The emplace helper asks for one workgroup of the kernel's registered size, so
+// the single-work-item property the capture depends on lives in the kernel
+// table entry rather than the helper.
+TEST(TimestampTest, QueueCaptureKernelIsRegisteredAsOneWorkItem) {
+  const KernelTableEntry* capture_entry = nullptr;
+  for (const KernelTableEntry& entry : kKernelTable) {
+    if (std::strcmp(entry.name,
+                    "iree_hal_amdgpu_device_timestamp_capture_queue_tick") ==
+        0) {
+      capture_entry = &entry;
+      break;
+    }
+  }
+  ASSERT_NE(capture_entry, nullptr)
+      << "the queue capture kernel is no longer in the device kernel table";
+  EXPECT_EQ(capture_entry->workgroup_size[0], 1u);
+  EXPECT_EQ(capture_entry->workgroup_size[1], 1u);
+  EXPECT_EQ(capture_entry->workgroup_size[2], 1u);
+}
+
+TEST(TimestampTest, EmplacesQueueCapturePacketAndKernargs) {
+  iree_hal_amdgpu_device_kernel_args_t kernel_args = MakeTimestampKernelArgs();
+  kernel_args.workgroup_size[0] = 1;
+  iree_hsa_kernel_dispatch_packet_t packet = {};
+  packet.header = 0xFFFFu;
+  alignas(16) std::array<uint8_t, 64> kernargs = {};
+  uint64_t target = 0;
+
+  iree_hal_amdgpu_device_timestamp_emplace_queue_capture(
+      &kernel_args, &target, &packet, kernargs.data());
+  const auto* args =
+      reinterpret_cast<const iree_hal_amdgpu_queue_timestamp_capture_args_t*>(
+          kernargs.data());
+
+  EXPECT_EQ(args->target, &target);
+  EXPECT_EQ(packet.header, 0xFFFFu);
+  EXPECT_EQ(packet.setup, 2u);
+  EXPECT_EQ(packet.workgroup_size[0], 1u);
+  EXPECT_EQ(packet.workgroup_size[1], 1u);
+  EXPECT_EQ(packet.workgroup_size[2], 1u);
+  EXPECT_EQ(packet.grid_size[0], 1u);
   EXPECT_EQ(packet.grid_size[1], 1u);
   EXPECT_EQ(packet.grid_size[2], 1u);
   EXPECT_EQ(packet.kernel_object, 0x12345678ull);

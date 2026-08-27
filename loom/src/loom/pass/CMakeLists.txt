@@ -224,6 +224,21 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    trace_test
+  SRCS
+    "trace_test.cc"
+  DEPS
+    ::trace
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::ops::test
+    loom::testing::module_ptr
+)
+
 loom_cc_library(
   NAME
     interpreter
@@ -281,12 +296,16 @@ loom_cc_library(
     loom::codegen::low::pipeline::pass_environment
     loom::codegen::low::pipeline::pass_requirements
     loom::codegen::low::transforms::allocation
+    loom::codegen::low::transforms::cfg_tuple_decomposition
     loom::codegen::low::transforms::dce
     loom::codegen::low::transforms::operand_forms
     loom::codegen::low::transforms::pipeline::source_to_low
     loom::codegen::low::transforms::pipeline::target_legalize
     loom::sanitizer::pipeline_passes
     loom::sanitizer::race_insertion
+    loom::target::callgraph_specialization
+    loom::target::pass_environment
+    loom::target::pass_requirements
     loom::transforms::cfg::branch_fusion
     loom::transforms::cfg::branch_sink
     loom::transforms::cfg::cfg_simplify
@@ -297,6 +316,7 @@ loom_cc_library(
     loom::transforms::kernel::kernel_async_legality
     loom::transforms::kernel::kernel_resources
     loom::transforms::kernel::promote_private_fragments
+    loom::transforms::kernel::stage_loop_carried_fragments
     loom::transforms::loop::licm
     loom::transforms::loop::loop_fusion
     loom::transforms::math::legalize
@@ -307,7 +327,9 @@ loom_cc_library(
     loom::transforms::symbol::refine_boundaries
     loom::transforms::symbol::symbol_dce
     loom::transforms::symbol::template_selection
+    loom::transforms::vector::bank_sroa
     loom::transforms::vector::memory_footprint
+    loom::transforms::vector::sink_single_use_reads
     loom::transforms::vector::to_scalar
     loom::transforms::view::linearize_view_accesses
   PUBLIC
@@ -368,6 +390,7 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::ops::test
     loom::pass::test::harness
+    loom::target::facts
 )
 
 loom_cc_test(
@@ -407,6 +430,8 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::codegen::low::pipeline::pass_environment
     loom::pass::testing::registry_verify
+    loom::target::pass_environment
+    loom::target::pass_requirements
 )
 
 loom_cc_test(

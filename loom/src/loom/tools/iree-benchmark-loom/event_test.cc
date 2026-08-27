@@ -79,8 +79,7 @@ TEST(BenchmarkEventSinkTest, EmitsTypedLifecycleEvents) {
   iree_benchmark_loom_artifact_bundle_t artifact_bundle = {};
 
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_run(
-      &sink, &run, /*dry_run=*/true,
-      IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE, &kNoSanitizer));
+      &sink, &run, /*dry_run=*/true, &kNoSanitizer));
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_work_plan(
       &sink, &run, &module, &work_plan));
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_summary(
@@ -89,7 +88,7 @@ TEST(BenchmarkEventSinkTest, EmitsTypedLifecycleEvents) {
       /*logical_sample_count=*/4, /*work_item_count=*/2,
       /*failure_count=*/0, /*failed_benchmark_count=*/0,
       /*correctness_sample_count=*/5, /*correctness_failed_sample_count=*/0,
-      /*dry_run=*/true, IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE));
+      /*dry_run=*/true));
 
   ASSERT_EQ(collector.event_count, 3u);
   EXPECT_EQ(collector.events[0].kind, IREE_BENCHMARK_LOOM_EVENT_RUN);
@@ -144,14 +143,14 @@ TEST(BenchmarkEventSinkTest, EmitsTypedOutputRowEvents) {
       &sink, &run, &candidate, &benchmark_plan, &case_plan, &provider));
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_sample(
       &sink, &run, &candidate, /*work_item_index=*/7, &module, &benchmark_plan,
-      &case_plan, IREE_SV("once"), /*benchmark_sample_ordinal=*/1,
+      &case_plan, /*benchmark_sample_ordinal=*/1,
       /*case_sample_ordinal=*/2, &sample_result));
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_benchmark_result(
       &sink, &run, &candidate, /*work_item_index=*/7, &module, &benchmark_plan,
       &case_plan, &policy, &benchmark_result,
       /*correctness_sample_count=*/3,
       /*correctness_failed_sample_count=*/4));
-  IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_profile(
+  IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_profile_replay(
       &sink, &run, &candidate, /*work_item_index=*/7, &module, &benchmark_plan,
       &case_plan, &policy, &benchmark_result));
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_failure(
@@ -179,8 +178,8 @@ TEST(BenchmarkEventSinkTest, EmitsTypedOutputRowEvents) {
   EXPECT_EQ(collector.events[3].benchmark_result.correctness_sample_count, 3u);
   EXPECT_EQ(
       collector.events[3].benchmark_result.correctness_failed_sample_count, 4u);
-  EXPECT_EQ(collector.events[4].kind, IREE_BENCHMARK_LOOM_EVENT_PROFILE);
-  EXPECT_EQ(collector.events[4].profile.work_item_index, 7u);
+  EXPECT_EQ(collector.events[4].kind, IREE_BENCHMARK_LOOM_EVENT_PROFILE_REPLAY);
+  EXPECT_EQ(collector.events[4].profile_replay.work_item_index, 7u);
   EXPECT_EQ(collector.events[5].kind, IREE_BENCHMARK_LOOM_EVENT_FAILURE);
   EXPECT_EQ(collector.events[5].failure.diagnostics, &diagnostics);
   EXPECT_EQ(collector.events[6].kind,
@@ -200,11 +199,9 @@ TEST(BenchmarkEventSinkTest, PropagatesSinkStatus) {
   run.source = IREE_SV("input.loom");
   run.results_path = IREE_SV("-");
 
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_ABORTED,
-      iree_benchmark_loom_event_sink_emit_run(
-          &sink, &run, /*dry_run=*/false,
-          IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_PER_SAMPLE, &kNoSanitizer));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
+                        iree_benchmark_loom_event_sink_emit_run(
+                            &sink, &run, /*dry_run=*/false, &kNoSanitizer));
 }
 
 TEST(BenchmarkEventSinkTest, JsonlAdapterWritesLifecycleRows) {
@@ -223,15 +220,14 @@ TEST(BenchmarkEventSinkTest, JsonlAdapterWritesLifecycleRows) {
   run.results_path = output_path.path_view();
   iree_benchmark_loom_artifact_bundle_t artifact_bundle = {};
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_run(
-      &event_sink, &run, /*dry_run=*/false,
-      IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE, &kNoSanitizer));
+      &event_sink, &run, /*dry_run=*/false, &kNoSanitizer));
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_summary(
       &event_sink, &run, &artifact_bundle, /*planned_case_count=*/1,
       /*planned_benchmark_count=*/2, /*selected_benchmark_count=*/2,
       /*logical_sample_count=*/4, /*work_item_count=*/2,
       /*failure_count=*/0, /*failed_benchmark_count=*/0,
       /*correctness_sample_count=*/4, /*correctness_failed_sample_count=*/0,
-      /*dry_run=*/false, IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE));
+      /*dry_run=*/false));
   IREE_ASSERT_OK(iree_benchmark_loom_jsonl_sink_close(&jsonl_sink));
   iree_benchmark_loom_jsonl_event_sink_deinitialize(&adapter);
   iree_benchmark_loom_jsonl_sink_deinitialize(&jsonl_sink);

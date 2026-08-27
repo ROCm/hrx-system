@@ -1,0 +1,113 @@
+kernel.def export("unused_kernargs") @unused_kernargs() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%unused_buffer: buffer, %unused_scalar: i32) {
+  kernel.return
+}
+
+check.case @unused_kernargs_case {
+  %actual = check.generate.fill value(17) : tensor<4xi32>
+  %unused_scalar = check.literal value(42) : i32
+  kernel.launch @unused_kernargs(%actual, %unused_scalar) : (tensor<4xi32>, i32)
+  %expected = check.generate.fill value(17) : tensor<4xi32>
+  check.expect.equal actual(%actual) expected(%expected) : tensor<4xi32>
+  check.return
+}
+
+// Public binding ordinals remain part of the HAL ABI after internal dead-code
+// elimination removes an unused resource in the middle of the signature.
+kernel.def @unused_middle_binding() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %unused: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %value = view.load %input_view[0] : view<1xi32> -> i32
+  view.store %value, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+check.case @unused_middle_binding_case {
+  %input = check.generate.fill value(29) : tensor<1xi32>
+  %unused = check.generate.fill value(-1) : tensor<1xi32>
+  %output = check.generate.fill value(0) : tensor<1xi32>
+  kernel.launch @unused_middle_binding(%input, %unused, %output) : (tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
+  check.expect.equal actual(%output) expected(%input) : tensor<1xi32>
+  check.return
+}
+
+// A runtime-uniform condition selects one of two HAL binding descriptors while
+// retaining the declared binding ordinals in the exported ABI.
+kernel.def @selected_buffer(%select_rhs: index) {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%select_rhs: index, %lhs: buffer, %rhs: buffer, %output: buffer) {
+  %rhs_selector = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %use_rhs = index.cmp eq, %select_rhs, %rhs_selector : index
+  %selected = scf.if %use_rhs -> (buffer) {
+    scf.yield %rhs : buffer
+  } else {
+    scf.yield %lhs : buffer
+  }
+  %selected_view = buffer.view %selected[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %value = view.load %selected_view[0] : view<1xi32> -> i32
+  view.store %value, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+check.case @selected_lhs_case {
+  %select_lhs = check.literal value(0) : index
+  %lhs = check.generate.fill value(17) : tensor<1xi32>
+  %rhs = check.generate.fill value(42) : tensor<1xi32>
+  %output = check.generate.fill value(0) : tensor<1xi32>
+  kernel.launch @selected_buffer[%select_lhs](%select_lhs, %lhs, %rhs, %output) : [index](index, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
+  check.expect.equal actual(%output) expected(%lhs) : tensor<1xi32>
+  check.return
+}
+
+check.case @selected_rhs_case {
+  %select_rhs = check.literal value(1) : index
+  %lhs = check.generate.fill value(17) : tensor<1xi32>
+  %rhs = check.generate.fill value(42) : tensor<1xi32>
+  %output = check.generate.fill value(0) : tensor<1xi32>
+  kernel.launch @selected_buffer[%select_rhs](%select_rhs, %lhs, %rhs, %output) : [index](index, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
+  check.expect.equal actual(%output) expected(%rhs) : tensor<1xi32>
+  check.return
+}
+
+// Workgroup-uniform runtime conditions select among three nested descriptors
+// within one dispatch, preventing check-case specialization from folding the
+// choices.
+kernel.def @selected_buffer_per_workgroup() {
+  %workgroup_count = index.constant 3 : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%lhs: buffer, %middle: buffer, %rhs: buffer, %output: buffer) {
+  %workgroup = kernel.workgroup.id<x> : index
+  %lhs_workgroup = index.constant 0 : index
+  %rhs_workgroup = index.constant 2 : index
+  %base = index.constant 0 : offset
+  %use_lhs = index.cmp eq, %workgroup, %lhs_workgroup : index
+  %use_rhs = index.cmp eq, %workgroup, %rhs_workgroup : index
+  %middle_or_rhs = scf.select %use_rhs, %rhs, %middle : buffer
+  %selected = scf.select %use_lhs, %lhs, %middle_or_rhs : buffer
+  %selected_view = buffer.view %selected[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<3xi32>
+  %value = view.load %selected_view[0] : view<1xi32> -> i32
+  view.store %value, %output_view[%workgroup] : i32, view<3xi32>
+  kernel.return
+}
+
+check.case @selected_buffer_per_workgroup_case {
+  %lhs = check.generate.fill value(17) : tensor<1xi32>
+  %middle = check.generate.fill value(42) : tensor<1xi32>
+  %rhs = check.generate.fill value(67) : tensor<1xi32>
+  %output = check.generate.fill value(0) : tensor<3xi32>
+  kernel.launch @selected_buffer_per_workgroup(%lhs, %middle, %rhs, %output) : (tensor<1xi32>, tensor<1xi32>, tensor<1xi32>, tensor<3xi32>)
+  %expected = check.generate.iota offset(17) step(25) : tensor<3xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<3xi32>
+  check.return
+}

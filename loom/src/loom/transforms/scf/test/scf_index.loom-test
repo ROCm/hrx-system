@@ -5,9 +5,9 @@
 func.def @tail_branch_pruned_by_divisibility(%n: index) -> (index) {
   %n_aligned = index.assume %n [range(%n, 16, 4096), mul(%n, 16)] : index
   %tile = index.constant 16 : index
-  %zero = index.constant 0 : index
+  %no_remainder = index.constant 0 : index
   %remainder = index.rem %n_aligned, %tile : index
-  %has_tail = index.cmp ne, %remainder, %zero : index
+  %has_tail = index.cmp ne, %remainder, %no_remainder : index
   %result = scf.if %has_tail -> (index) {
     %tail = index.add %remainder, %tile : index
     scf.yield %tail : index
@@ -32,9 +32,9 @@ func.def @tail_branch_pruned_by_divisibility(%n: index) -> (index) {
 // instead of forcing frontends to avoid emitting the structurally valid path.
 func.def @zero_extent_loop_erases(%features: index, %init: f32) -> (f32) {
   %disabled = index.assume %features [range(%features, 0, 0)] : index
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %result = scf.for %iv = [%zero to %disabled step %one](%acc = %init : f32) -> (f32) {
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %result = scf.for %iv = [%loop_begin to %disabled step %loop_step](%acc = %init : f32) -> (f32) {
     %next = test.neg %acc : f32
     scf.yield %next : f32
   }
@@ -52,9 +52,9 @@ func.def @zero_extent_loop_erases(%features: index, %init: f32) -> (f32) {
 // proves the loop trip count.
 func.def @single_tile_loop_inlines(%tiles: index, %init: i32) -> (i32) {
   %one_tile = index.assume %tiles [range(%tiles, 1, 1)] : index
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %result = scf.for %iv = [%zero to %one_tile step %one](%acc = %init : i32) -> (i32) {
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %result = scf.for %iv = [%loop_begin to %one_tile step %loop_step](%acc = %init : i32) -> (i32) {
     %next = test.addi %acc, %acc : i32
     scf.yield %next : i32
   }
@@ -99,25 +99,25 @@ func.def @layout_guard_pruned_by_symbolic_address_order(%row: index, %lane: inde
 // after the derived value's defining op. Inserting the index.assume at the
 // branch entry would create a use-before-def when source-to-low binds aliases.
 func.def @guarded_i32_cast_inside_branch_keeps_assume_after_cast(%row: i32, %row_count: i32) -> (index) {
-  %zero_i32 = scalar.constant 0 : i32
-  %zero_idx = index.constant 0 : index
-  %nonnegative = scalar.cmpi sge, %row, %zero_i32 : i32
+  %minimum_row = scalar.constant 0 : i32
+  %fallback_row = index.constant 0 : index
+  %nonnegative = scalar.cmpi sge, %row, %minimum_row : i32
   %below = scalar.cmpi slt, %row, %row_count : i32
   %guard = scalar.andi %nonnegative, %below : i1
   %result = scf.if %guard -> (index) {
     %row_idx = index.cast %row : i32 to index
     scf.yield %row_idx : index
   } else {
-    scf.yield %zero_idx : index
+    scf.yield %fallback_row : index
   }
   func.return %result : index
 }
 
 // ----
 func.def @guarded_i32_cast_inside_branch_keeps_assume_after_cast(%row: i32, %row_count: i32) -> (index) {
-  %zero_i32 = scalar.constant 0 : i32
-  %zero_idx = index.constant 0 : index
-  %nonnegative = scalar.cmpi sge, %row, %zero_i32 : i32
+  %minimum_row = scalar.constant 0 : i32
+  %fallback_row = index.constant 0 : index
+  %nonnegative = scalar.cmpi sge, %row, %minimum_row : i32
   %below = scalar.cmpi slt, %row, %row_count : i32
   %guard = scalar.andi %nonnegative, %below : i1
   %result = scf.if %guard -> (index) {
@@ -126,7 +126,7 @@ func.def @guarded_i32_cast_inside_branch_keeps_assume_after_cast(%row: i32, %row
     %11 = index.assume %row_idx [ge(%row_idx, 0), lt(%row_idx, %row_count)] : index
     scf.yield %11 : index
   } else {
-    scf.yield %zero_idx : index
+    scf.yield %fallback_row : index
   }
   func.return %result : index
 }

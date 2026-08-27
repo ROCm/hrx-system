@@ -106,13 +106,13 @@ func.def @effectful_exact_facts_do_not_erase_producer() -> (i64) {
 // Function-level canonicalization runs over every root region. Projected
 // regions keep distinct SSA values, but use the same logical signature facts.
 test.split_func @split_func_all_regions_canonicalize(%arg: i32) {
-  %cfg_zero = test.constant 0 : i32
-  %cfg_sum = test.addi %arg, %cfg_zero : i32
+  %cfg_identity = test.constant 0 : i32
+  %cfg_sum = test.addi %arg, %cfg_identity : i32
   test.use %cfg_sum : i32
   test.yield
 } launch {
-  %zero = test.constant 0 : i32
-  %sum = test.addi %arg, %zero : i32
+  %launch_identity = test.constant 0 : i32
+  %sum = test.addi %arg, %launch_identity : i32
   test.use %sum : i32
   test.yield
 }

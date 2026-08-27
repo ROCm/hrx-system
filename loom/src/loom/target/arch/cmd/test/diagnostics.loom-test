@@ -1,0 +1,126 @@
+// RUN: emit command-program @entry
+
+// ERROR@+1: LOWERING/049 {program_name="recursive"}
+command.program.def @recursive() launch() {
+  command.program.launch @recursive() : ()
+  command.return
+}
+
+command.program.def public @entry() launch() {
+  command.program.launch @recursive() : ()
+  command.return
+}
+
+// ====
+
+// RUN: emit command-program @external_entry
+
+// ERROR@+1: LOWERING/050 {kernel_name="external_kernel"}
+kernel.decl @external_kernel(%workgroup_count_x: index) launch()
+
+command.program.def public @external_entry(%workgroup_count_x: index) launch() {
+  kernel.launch @external_kernel[%workgroup_count_x]() : [index]()
+  command.return
+}
+
+// ====
+
+// RUN: emit command-program @dynamic_dispatch
+
+kernel.entry.decl @configured()
+
+command.program.def public @dynamic_dispatch(%workgroup_count_x: index) launch() {
+  // ERROR@+1: LOWERING/051 {kernel_name="configured", dimension="0", requirement="an exact unsigned 32-bit value"}
+  kernel.dispatch @configured[%workgroup_count_x]() : [index]()
+  command.return
+}
+
+// ====
+
+// RUN: emit command-program @dynamic_launch
+
+kernel.def @configured_from_workload(%workgroup_count_x: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroup_count_x, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+command.program.def public @dynamic_launch(%workgroup_count_x: index) launch() {
+  // ERROR@+1: LOWERING/051 {kernel_name="configured_from_workload", dimension="0", requirement="an exact unsigned 32-bit value"}
+  kernel.launch @configured_from_workload[%workgroup_count_x]() : [index]()
+  command.return
+}
+
+// ====
+
+// RUN: emit command-program @invalid_dispatch
+
+kernel.entry.decl @range_checked()
+
+command.program.def public @invalid_dispatch() launch() {
+  %negative = index.constant -1 : index
+  // ERROR@+1: LOWERING/051 {kernel_name="range_checked", dimension="0", requirement="within the unsigned 32-bit range"}
+  kernel.dispatch @range_checked[%negative]() : [index]()
+  command.return
+}
+
+// ====
+
+// RUN: emit command-program @workgroup_size_override
+
+kernel.entry.decl @overridden_entry()
+
+command.program.def public @workgroup_size_override(%size_x: index, %size_y: index, %size_z: index) launch() {
+  %c1 = index.constant 1 : index
+  // ERROR@+1: LOWERING/055 {kernel_name="overridden_entry"}
+  kernel.dispatch @overridden_entry[%c1]() workgroup_size(%size_x, %size_y, %size_z) : [index]()
+  command.return
+}
+
+// ====
+
+// RUN: emit command-program @dynamic_argument
+
+kernel.entry.decl @scalar_entry(%scale: i32)
+
+command.program.def public @dynamic_argument(%scale: i32) launch() {
+  %c1 = index.constant 1 : index
+  // ERROR@+1: LOWERING/052 {kernel_name="scalar_entry", argument_index="0", actual_type="i32", requirement="an exact scalar bit pattern"}
+  kernel.dispatch @scalar_entry[%c1](%scale) : [index](i32)
+  command.return
+}
+
+// ====
+
+// RUN: emit command-program @unordered_indirect_dispatch
+
+kernel.entry.decl @write_counts(%counts: view<3xi32>)
+kernel.entry.decl @use_counts()
+
+command.program.def public @unordered_indirect_dispatch() launch() {
+  %c0 = index.constant 0 : offset
+  %c1 = index.constant 1 : index
+  %count_bytes = index.constant 12 : offset
+  %count_storage = buffer.alloca<global> align(4) %count_bytes : buffer
+  %counts = buffer.view %count_storage[%c0] : buffer -> view<3xi32>
+  command.concurrent {
+    kernel.dispatch @write_counts[%c1](%counts) : [index](view<3xi32>)
+    // ERROR@+1: LOWERING/053 {kernel_name="use_counts"}
+    kernel.dispatch @use_counts[%counts]() : [view<3xi32>]()
+  }
+  command.return
+}
+
+// ====
+
+// RUN: emit command-program @unplaced_indirect_dispatch
+
+kernel.entry.decl @unplaced_counts()
+
+command.program.def public @unplaced_indirect_dispatch(%byte_offset: offset) launch(%count_storage: buffer) {
+  %counts = buffer.view %count_storage[%byte_offset] : buffer -> view<3xi32>
+  // ERROR@+1: LOWERING/054 {kernel_name="unplaced_counts", requirement="an exact aligned buffer range"}
+  kernel.dispatch @unplaced_counts[%counts]() : [view<3xi32>]()
+  command.return
+}

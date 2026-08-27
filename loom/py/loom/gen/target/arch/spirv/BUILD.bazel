@@ -4,7 +4,20 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_test")
+load(
+    "//build_tools/bazel:python.bzl",
+    "iree_py_binary",
+    "iree_py_library",
+    "iree_py_test",
+)
+load(
+    "//build_tools/spirv:registry_sources.bzl",
+    "loom_spirv_registry_sources",
+)
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_config_compatible_with",
+)
 
 package(
     default_visibility = ["//loom/py/loom/gen:__subpackages__"],
@@ -16,6 +29,15 @@ GENERATOR_VISIBILITY = [
     "//loom/src/loom/target/arch/spirv:__pkg__",
 ]
 
+_SPIRV_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target/arch:spirv",
+])
+
+loom_spirv_registry_sources(
+    name = "registry_sources",
+    target_compatible_with = _SPIRV_COMPATIBLE_WITH,
+)
+
 iree_py_binary(
     name = "features",
     srcs = [
@@ -25,13 +47,26 @@ iree_py_binary(
     main = "spirv_features.py",
     visibility = GENERATOR_VISIBILITY,
     deps = [
+        ":feature_catalog_validation",
         "//loom/py/loom/gen/support",
+        "//loom/py/loom/target/arch/spirv:features",
+    ],
+)
+
+iree_py_library(
+    name = "feature_catalog_validation",
+    srcs = ["feature_catalog_validation.py"],
+    deps = [
+        "//build_tools/spirv/registry:registry_source",
+        "//build_tools/spirv/registry:spirv_core_grammar",
+        "//build_tools/spirv/registry:vulkan_spirv_availability",
         "//loom/py/loom/target/arch/spirv:features",
     ],
 )
 
 iree_py_test(
     name = "features_test",
+    size = "small",
     srcs = [
         "spirv_features_test.py",
         "//loom/py/loom/tools:pytest_style_runner.py",
@@ -40,6 +75,30 @@ iree_py_test(
     main = "pytest_style_runner.py",
     deps = [
         ":features",
+        "//loom/py/loom/target/arch/spirv:features",
+    ],
+)
+
+iree_py_test(
+    name = "feature_catalog_validation_test",
+    size = "small",
+    srcs = ["feature_catalog_validation_test.py"],
+    args = [
+        "$(location //loom/src/loom/target/arch/spirv:isa.h)",
+        "$(location @spirv_headers//:spirv_core_grammar_unified1)",
+        "$(location @vulkan_headers//:vulkan_xml_registry)",
+    ],
+    data = [
+        "//loom/src/loom/target/arch/spirv:isa.h",
+        "@spirv_headers//:spirv_core_grammar_unified1",
+        "@vulkan_headers//:vulkan_xml_registry",
+    ],
+    target_compatible_with = _SPIRV_COMPATIBLE_WITH,
+    deps = [
+        ":feature_catalog_validation",
+        ":features",
+        "//build_tools/spirv/registry:spirv_core_grammar",
+        "//build_tools/spirv/registry:vulkan_spirv_availability",
         "//loom/py/loom/target/arch/spirv:features",
     ],
 )
@@ -58,7 +117,12 @@ iree_py_binary(
         "//loom/py/loom/target/arch/spirv:builtins",
         "//loom/py/loom/target/arch/spirv:cooperative_matrix",
         "//loom/py/loom/target/arch/spirv:descriptors",
+        "//loom/py/loom/target/arch/spirv:ordinary_vector",
+        "//loom/py/loom/target/arch/spirv:ordinary_vector_bit_layout",
+        "//loom/py/loom/target/arch/spirv:ordinary_vector_integer",
+        "//loom/py/loom/target/arch/spirv:ordinary_vector_integer_conversion",
         "//loom/py/loom/target/arch/spirv:scalar_alu",
+        "//loom/py/loom/target/arch/spirv:scalar_constant",
         "//loom/py/loom/target/arch/spirv:scalar_conversion",
         "//loom/py/loom/target/arch/spirv:scalar_memory",
     ],

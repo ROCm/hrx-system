@@ -11,6 +11,31 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    byte_sequence
+  HDRS
+    "byte_sequence.h"
+  SRCS
+    "byte_sequence.c"
+  DEPS
+    iree::base
+    iree::base::internal
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    byte_sequence_test
+  SRCS
+    "byte_sequence_test.cc"
+  DEPS
+    ::byte_sequence
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_library(
+  NAME
     file_handle
   HDRS
     "file_contents.h"
@@ -22,6 +47,7 @@ iree_cc_library(
   DEPS
     iree::base
     iree::base::internal
+    iree::base::internal::path
   PUBLIC
 )
 
@@ -32,8 +58,10 @@ iree_cc_test(
     "file_contents_test.cc"
   DEPS
     ::file_handle
+    ::stream
     iree::base
     iree::base::core_headers
+    iree::base::internal::path
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file
@@ -84,6 +112,25 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_test(
+  NAME
+    parameter_index_provider_test
+  SRCS
+    "parameter_index_provider_test.cc"
+  DEPS
+    ::file_handle
+    ::parameter_index
+    ::parameter_index_provider
+    ::parameter_provider
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::hal
+    iree::hal::drivers::local_sync::sync_driver
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 iree_cc_library(
   NAME
     parameter_provider
@@ -125,9 +172,11 @@ iree_cc_library(
     "stream.c"
     "vec_stream.c"
   DEPS
+    ::byte_sequence
     ::file_handle
     iree::base
     iree::base::internal
+    iree::base::internal::path
   PUBLIC
 )
 
@@ -137,6 +186,7 @@ iree_cc_test(
   SRCS
     "vec_stream_test.cc"
   DEPS
+    ::byte_sequence
     ::stream
     iree::base
     iree::testing::gtest

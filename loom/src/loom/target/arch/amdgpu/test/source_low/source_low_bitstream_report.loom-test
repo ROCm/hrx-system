@@ -1,6 +1,6 @@
 // RUN: pass-report target-legalize{mode=final,policy=reference-only},dce,canonicalize
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @report_i32_to_u4x8_bitunpack(%packed: vector<1xi32>) -> (vector<8xi32>) {
   %unpacked = vector.bitunpacku<4> %packed : vector<1xi32> -> vector<8xi32>
   func.return %unpacked : vector<8xi32>
@@ -9,11 +9,11 @@ func.def target(@target) @report_i32_to_u4x8_bitunpack(%packed: vector<1xi32>) -
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: target_legalization legal=0 rewritten=1 target_rewritten=0 reference_rewritten=1 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1
-COMPILE-REPORT: target_legalization[0] function=report_i32_to_u4x8_bitunpack source_op=vector.bitunpacku mode=final policy=reference-only action=rewritten outcome=reference-fallback contract=legal legalizer=vector strategy=reference bundle=target config=target binding=0 case=566 rule_set=0 rule=271 diagnostic=65535 descriptor=18446744073709551615 source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=48 erased_ops=1
+COMPILE-REPORT: target_legalization[0] function=report_i32_to_u4x8_bitunpack source_op=vector.bitunpacku mode=final policy=reference-only action=rewritten outcome=reference-fallback contract=legal legalizer=vector strategy=reference bundle=target config=target source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=48 erased_ops=1
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @report_i32x3_to_i8x3_bitpack_reference_fallback(%codes: vector<3xi32>) -> (vector<3xi8>) {
   %packed = vector.bitpack<8> %codes : vector<3xi32> -> vector<3xi8>
   func.return %packed : vector<3xi8>
@@ -22,11 +22,11 @@ func.def target(@target) @report_i32x3_to_i8x3_bitpack_reference_fallback(%codes
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: target_legalization legal=0 rewritten=1 target_rewritten=0 reference_rewritten=1 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1
-COMPILE-REPORT: target_legalization[0] function=report_i32x3_to_i8x3_bitpack_reference_fallback source_op=vector.bitpack mode=final policy=reference-only action=rewritten outcome=reference-fallback contract=unsupported legalizer=vector strategy=reference bundle=target config=target binding=0 case=565 rule_set=0 rule=65535 diagnostic=112 descriptor=18446744073709551615 source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=19 erased_ops=1
+COMPILE-REPORT: target_legalization[0] function=report_i32x3_to_i8x3_bitpack_reference_fallback source_op=vector.bitpack mode=final policy=reference-only action=rewritten outcome=reference-fallback contract=unsupported legalizer=vector strategy=reference bundle=target config=target source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=19 erased_ops=1
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @report_i8x3_to_u3x8_bitunpack_reference_fallback(%packed: vector<3xi8>) -> (vector<8xi32>) {
   %unpacked = vector.bitunpacku<3> %packed : vector<3xi8> -> vector<8xi32>
   func.return %unpacked : vector<8xi32>
@@ -35,11 +35,11 @@ func.def target(@target) @report_i8x3_to_u3x8_bitunpack_reference_fallback(%pack
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: target_legalization legal=0 rewritten=1 target_rewritten=0 reference_rewritten=1 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1
-COMPILE-REPORT: target_legalization[0] function=report_i8x3_to_u3x8_bitunpack_reference_fallback source_op=vector.bitunpacku mode=final policy=reference-only action=rewritten outcome=reference-fallback contract=unsupported legalizer=vector strategy=reference bundle=target config=target binding=0 case=566 rule_set=0 rule=65535 diagnostic=113 descriptor=18446744073709551615 source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=63 erased_ops=1
+COMPILE-REPORT: target_legalization[0] function=report_i8x3_to_u3x8_bitunpack_reference_fallback source_op=vector.bitunpacku mode=final policy=reference-only action=rewritten outcome=reference-fallback contract=unsupported legalizer=vector strategy=reference bundle=target config=target source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=63 erased_ops=1
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @report_i8x3_to_s3x8_bitunpack_reference_fallback(%packed: vector<3xi8>) -> (vector<8xi32>) {
   %unpacked = vector.bitunpacks<3> %packed : vector<3xi8> -> vector<8xi32>
   func.return %unpacked : vector<8xi32>
@@ -48,4 +48,4 @@ func.def target(@target) @report_i8x3_to_s3x8_bitunpack_reference_fallback(%pack
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: target_legalization legal=0 rewritten=1 target_rewritten=0 reference_rewritten=1 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1
-COMPILE-REPORT: target_legalization[0] function=report_i8x3_to_s3x8_bitunpack_reference_fallback source_op=vector.bitunpacks mode=final policy=reference-only action=rewritten outcome=reference-fallback contract=unsupported legalizer=vector strategy=reference bundle=target config=target binding=0 case=568 rule_set=0 rule=65535 diagnostic=113 descriptor=18446744073709551615 source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=95 erased_ops=1
+COMPILE-REPORT: target_legalization[0] function=report_i8x3_to_s3x8_bitunpack_reference_fallback source_op=vector.bitunpacks mode=final policy=reference-only action=rewritten outcome=reference-fallback contract=unsupported legalizer=vector strategy=reference bundle=target config=target source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=95 erased_ops=1

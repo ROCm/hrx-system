@@ -6,9 +6,8 @@
 
 // Shared native assembly-fragment formatting over low packet tables.
 //
-// This layer is intentionally small: it owns native-fragment contract
-// validation, scheduled packet iteration, block labels, and
-// descriptor/attribute lookup helpers.
+// This layer is intentionally small: it owns scheduled packet iteration, block
+// labels, and descriptor/attribute lookup helpers.
 // Target packages own instruction syntax, register spelling, ABI/prologue
 // policy, and any future handoff to assemblers or external validators.
 
@@ -18,7 +17,6 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "iree/base/string_builder.h"
-#include "loom/codegen/low/move_sequence.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/ops/op_defs.h"
 
@@ -35,8 +33,6 @@ typedef struct loom_native_assembly_packet_context_t {
   const loom_low_packet_view_t* packet;
   // Text destination for the fragment.
   iree_string_builder_t* builder;
-  // Reusable scratch for structural parallel-copy sequencing.
-  loom_low_move_sequence_scratch_t* move_scratch;
 } loom_native_assembly_packet_context_t;
 
 typedef iree_status_t (*loom_native_assembly_append_packet_fn_t)(
@@ -87,10 +83,10 @@ iree_status_t loom_native_assembly_make_unsupported_structural_packet_status(
 iree_string_view_t loom_native_assembly_module_string(
     const loom_module_t* module, loom_string_id_t string_id);
 
-// Resolves a required string from |descriptor_set|.
-iree_status_t loom_native_assembly_descriptor_string(
+// Returns a verified string from |descriptor_set|.
+iree_string_view_t loom_native_assembly_descriptor_string(
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_bstring_table_offset_t string_offset, iree_string_view_t* out_string);
+    loom_bstring_table_offset_t string_offset);
 
 // Finds a named attribute by textual key in |attrs|.
 const loom_named_attr_t* loom_native_assembly_find_attr(

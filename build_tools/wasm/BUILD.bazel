@@ -8,6 +8,8 @@ load("@rules_python//python:defs.bzl", "py_binary", "py_test")
 
 exports_files(
     [
+        "wasi_sdk_repo.bzl",
+        "wasi_sdk_version.bzl",
         "wasm_node_test_runner.sh",
         "wasm_test_main.mjs",
     ],

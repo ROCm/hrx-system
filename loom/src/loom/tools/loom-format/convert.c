@@ -15,6 +15,7 @@
 #include "loom/format/text/parser.h"
 #include "loom/format/text/printer.h"
 #include "loom/ir/module.h"
+#include "loom/verify/verify.h"
 
 //===----------------------------------------------------------------------===//
 // Format parsing and detection
@@ -94,12 +95,14 @@ static iree_status_t loom_format_read_text_module(
 static iree_status_t loom_format_read_bytecode_module(
     iree_const_byte_span_t input, iree_string_view_t filename,
     loom_context_t* context, iree_arena_block_pool_t* block_pool,
-    loom_diagnostic_sink_t diagnostic_sink, loom_module_t** out_module,
-    iree_allocator_t allocator) {
+    loom_diagnostic_sink_t diagnostic_sink,
+    loom_text_low_asm_environment_t low_asm_environment,
+    loom_module_t** out_module, iree_allocator_t allocator) {
   loom_bytecode_read_options_t read_options = {
       .diagnostic_sink = diagnostic_sink,
       .verify_module = false,
       .verify_max_errors = 0,
+      .low_repr_environment = low_asm_environment.low_repr,
   };
   loom_bytecode_read_result_t read_result = {0};
   IREE_RETURN_IF_ERROR(loom_bytecode_read_module(
@@ -129,9 +132,9 @@ static iree_status_t loom_format_read_module(
                                           diagnostic_sink, low_asm_environment,
                                           out_module);
     case LOOM_MODULE_FORMAT_BYTECODE:
-      return loom_format_read_bytecode_module(input, filename, context,
-                                              block_pool, diagnostic_sink,
-                                              out_module, allocator);
+      return loom_format_read_bytecode_module(
+          input, filename, context, block_pool, diagnostic_sink,
+          low_asm_environment, out_module, allocator);
     case LOOM_MODULE_FORMAT_AUTO:
       break;
   }
@@ -148,7 +151,7 @@ static iree_status_t loom_format_write_text_output(
   iree_string_builder_initialize(allocator, &builder);
 
   const loom_text_print_options_t print_options = {
-      .flags = LOOM_TEXT_PRINT_DEFAULT,
+      .flags = LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_PRESERVE_LOW_ASM,
       .low_asm_environment = low_asm_environment,
   };
   iree_status_t status = loom_text_print_module_to_builder_with_options(
@@ -164,6 +167,7 @@ static iree_status_t loom_format_write_text_output(
 
 static iree_status_t loom_format_write_bytecode_output(
     const loom_module_t* module, iree_arena_block_pool_t* block_pool,
+    loom_text_low_asm_environment_t low_asm_environment,
     loom_format_output_t* out_output, iree_allocator_t allocator) {
   iree_io_stream_t* stream = NULL;
   iree_status_t status = iree_io_vec_stream_create(
@@ -174,6 +178,7 @@ static iree_status_t loom_format_write_bytecode_output(
   loom_bytecode_write_options_t write_options = {
       .producer = IREE_SV("loom-format"),
       .location_mode = LOOM_BYTECODE_LOCATION_MODE_SOURCE_LOCATIONS,
+      .low_repr_environment = low_asm_environment.low_repr,
   };
   if (iree_status_is_ok(status)) {
     status =
@@ -222,8 +227,8 @@ static iree_status_t loom_format_write_output(
       return loom_format_write_text_output(module, low_asm_environment,
                                            out_output, allocator);
     case LOOM_MODULE_FORMAT_BYTECODE:
-      return loom_format_write_bytecode_output(module, block_pool, out_output,
-                                               allocator);
+      return loom_format_write_bytecode_output(
+          module, block_pool, low_asm_environment, out_output, allocator);
     case LOOM_MODULE_FORMAT_AUTO:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "output format must be explicit");
@@ -231,6 +236,46 @@ static iree_status_t loom_format_write_output(
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                           "unsupported output format '%s'",
                           loom_module_format_name(output_format));
+}
+
+// Verifies the complete module after parsing or reading and before any output
+// formatter observes it. Parsing must permit forward references, so unresolved
+// symbols and other cross-operation errors become visible only at this point.
+static iree_status_t loom_format_verify_input_module(
+    iree_const_byte_span_t input, iree_string_view_t filename,
+    loom_module_format_t input_format, const loom_module_t* module,
+    loom_diagnostic_sink_t diagnostic_sink) {
+  loom_source_entry_t source_entry = {
+      .source_id = 0,
+      .source =
+          iree_make_string_view((const char*)input.data, input.data_length),
+      .filename = filename,
+  };
+  loom_source_table_resolver_t source_table = {
+      .entries = &source_entry,
+      .count = 1,
+  };
+  loom_verify_options_t verify_options = {
+      .sink = diagnostic_sink,
+      .max_errors = 100,
+  };
+  if (input_format == LOOM_MODULE_FORMAT_TEXT) {
+    verify_options.source_resolver = (loom_source_resolver_t){
+        .fn = loom_source_table_resolve,
+        .user_data = &source_table,
+    };
+  }
+
+  loom_verify_result_t verify_result = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_verify_module(module, &verify_options, &verify_result));
+  if (verify_result.error_count > 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "module verification failed with %u error%s",
+                            verify_result.error_count,
+                            verify_result.error_count == 1 ? "" : "s");
+  }
+  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//
@@ -246,12 +291,9 @@ iree_status_t loom_format_convert(iree_const_byte_span_t input,
                                   iree_allocator_t allocator) {
   *out_output = (loom_format_output_t){0};
 
-  loom_format_convert_options_t resolved_options = {
-      .input_format = LOOM_MODULE_FORMAT_AUTO,
-      .output_format = LOOM_MODULE_FORMAT_TEXT,
-      .diagnostic_sink = {0},
-      .low_asm_environment = {0},
-  };
+  loom_format_convert_options_t resolved_options = {0};
+  resolved_options.input_format = LOOM_MODULE_FORMAT_AUTO;
+  resolved_options.output_format = LOOM_MODULE_FORMAT_TEXT;
   if (options != NULL) {
     resolved_options = *options;
   }
@@ -261,11 +303,21 @@ iree_status_t loom_format_convert(iree_const_byte_span_t input,
                             "output format must be explicit");
   }
 
+  loom_module_format_t input_format = resolved_options.input_format;
+  if (input_format == LOOM_MODULE_FORMAT_AUTO) {
+    input_format = loom_module_format_detect_input(input);
+  }
+
   loom_module_t* module = NULL;
   iree_status_t status = loom_format_read_module(
-      input, filename, resolved_options.input_format, context, block_pool,
+      input, filename, input_format, context, block_pool,
       resolved_options.diagnostic_sink, resolved_options.low_asm_environment,
       &module, allocator);
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_format_verify_input_module(input, filename, input_format, module,
+                                        resolved_options.diagnostic_sink);
+  }
   if (iree_status_is_ok(status)) {
     status = loom_format_write_output(
         module, resolved_options.output_format, block_pool,

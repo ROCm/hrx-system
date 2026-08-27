@@ -4,32 +4,511 @@
 llvmir.target<object> @target {
   triple = "amdgcn-amd-amdhsa"
 }
-kernel.def target(@target) @workgroup_memory_workitem_x_b32() {
-  %c1 = index.constant 1 : index
-  %c64 = index.constant 64 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+kernel.def target(@target) @wave_sized_workgroup_memory_workitem_x_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch() {
-  %tid0 = kernel.workitem.id<x> : index
-  %tid = index.assume %tid0 [range(%tid0, 0, 63)] : index
-  %zero = index.constant 0 : offset
-  %bytes = index.constant 256 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xi32, #dense>
-  %one = vector.constant 1 : vector<1xi32>
-  vector.store %one, %scratch_view[%tid] : vector<1xi32>, view<64xi32, #dense>
-  %loaded = vector.load %scratch_view[%tid] : view<64xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %scratch_view[%tid] : vector<1xi32>, view<64xi32, #dense>
+  %lane = kernel.workitem.id<x> : index
+  %scratch_base = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xi32>
+  %stored_value = vector.constant 1 : vector<1xi32>
+  vector.store %stored_value, %scratch_view[%lane] : vector<1xi32>, view<32xi32>
+  %loaded = vector.load %scratch_view[%lane] : view<32xi32> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<32xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @workgroup_memory_workitem_x_b32() asm<llvmir.generic.core> {
-  %tid = kernel.workitem_id.x
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_workitem_x_b32() asm {
+  %lane = kernel.workitem_id.x
+  %bytes = const.i64 128
+  %scratch_view = alloca.workgroup.i8 %bytes, 16
+  %stored_value = const.i32 1
+  store.indexed.i32 %stored_value, %scratch_view, %lane, 0, 4
+  %loaded = load.indexed.i32 %scratch_view, %lane, 0, 4
+  store.indexed.i32 %loaded, %scratch_view, %lane, 0, 4
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @wave_sized_workgroup_memory_workitem_x_i8x4() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %scratch_base = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi8>
+  %stored_value = vector.constant 1 : vector<4xi8>
+  vector.store %stored_value, %scratch_view[%lane] : vector<4xi8>, view<64xi8>
+  %loaded = vector.load %scratch_view[%lane] : view<64xi8> -> vector<4xi8>
+  vector.store %loaded, %scratch_view[%lane] : vector<4xi8>, view<64xi8>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_workitem_x_i8x4() asm {
+  %lane = kernel.workitem_id.x
+  %bytes = const.i64 64
+  %scratch_view = alloca.workgroup.i8 %bytes, 16
+  %stored_value = const.v4i8 1
+  store.indexed.v4i8 %stored_value, %scratch_view, %lane, 0, 1
+  %loaded = load.indexed.v4i8 %scratch_view, %lane, 0, 1
+  store.indexed.v4i8 %loaded, %scratch_view, %lane, 0, 1
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @cross_wave_workgroup_memory_workitem_x_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %scratch_base = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi32>
+  %stored_value = vector.constant 1 : vector<1xi32>
+  vector.store %stored_value, %scratch_view[%lane] : vector<1xi32>, view<64xi32>
+  %loaded = vector.load %scratch_view[%lane] : view<64xi32> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @cross_wave_workgroup_memory_workitem_x_b32() asm {
+  %lane = kernel.workitem_id.x
   %bytes = const.i64 256
   %scratch_view = alloca.workgroup.i8 %bytes, 16
-  %one = const.i32 1
-  store.indexed.i32 %one, %scratch_view, %tid, 0, 4
-  %loaded = load.indexed.i32 %scratch_view, %tid, 0, 4
-  store.indexed.i32 %loaded, %scratch_view, %tid, 0, 4
+  %stored_value = const.i32 1
+  store.indexed.i32 %stored_value, %scratch_view, %lane, 0, 4
+  %loaded = load.indexed.i32 %scratch_view, %lane, 0, 4
+  store.indexed.i32 %loaded, %scratch_view, %lane, 0, 4
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @workgroup_memory_scalar_loop_index_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 8 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %scratch_base = index.constant 0 : offset
+  %bytes = index.constant 32 : offset
+  %loop_begin = index.constant 0 : index
+  %loop_end = index.constant 8 : index
+  %loop_step = index.constant 1 : index
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<8xi32>
+  %stored_value = vector.constant 1 : vector<1xi32>
+  scf.for %i = [%loop_begin to %loop_end step %loop_step] {
+    vector.store %stored_value, %scratch_view[%i] : vector<1xi32>, view<8xi32>
+    %loaded = vector.load %scratch_view[%i] : view<8xi32> -> vector<1xi32>
+    vector.store %loaded, %scratch_view[%i] : vector<1xi32>, view<8xi32>
+  }
+  kernel.return
+}
+
+// ----
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(8, 1, 1) workgroup_count(1, 1, 1) @workgroup_memory_scalar_loop_index_b32() asm {
+  %bytes = const.i64 32
+  %loop_begin = const.i64 0
+  %loop_end = const.i64 8
+  %loop_step = const.i64 1
+  %scratch_view = alloca.workgroup.i8 %bytes, 16
+  %stored_value = const.i32 1
+  low.br ^_bb1(%loop_begin: reg<llvmir.i64>)
+^_bb1(%i: reg<llvmir.i64>):
+  %23 = cmp.slt.i64 %i, %loop_end
+  low.cond_br %23, ^_bb2, ^_bb3 : reg<llvmir.i1>
+^_bb2:
+  store.indexed.i32 %stored_value, %scratch_view, %i, 0, 4
+  %loaded = load.indexed.i32 %scratch_view, %i, 0, 4
+  store.indexed.i32 %loaded, %scratch_view, %i, 0, 4
+  %25 = add.i64 %i, %loop_step
+  low.br ^_bb1(%25: reg<llvmir.i64>)
+^_bb3:
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @wave_sized_workgroup_memory_workitem_x_b32_static_offset() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %element_offset = index.constant 4 : index
+  %element_index = index.add %lane, %element_offset : index
+  %scratch_base = index.constant 0 : offset
+  %bytes = index.constant 160 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<40xi32>
+  %stored_value = vector.constant 1 : vector<1xi32>
+  vector.store %stored_value, %scratch_view[%element_index] : vector<1xi32>, view<40xi32>
+  %loaded = vector.load %scratch_view[%element_index] : view<40xi32> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%element_index] : vector<1xi32>, view<40xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_workitem_x_b32_static_offset() asm {
+  %lane = kernel.workitem_id.x
+  %bytes = const.i64 160
+  %scratch_view = alloca.workgroup.i8 %bytes, 16
+  %stored_value = const.i32 1
+  store.indexed.i32 %stored_value, %scratch_view, %lane, 16, 4
+  %loaded = load.indexed.i32 %scratch_view, %lane, 16, 4
+  store.indexed.i32 %loaded, %scratch_view, %lane, 16, 4
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @wave_sized_workgroup_memory_second_allocation_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %scratch_base = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %first_scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %second_scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %first_view = buffer.view %first_scratch[%scratch_base] : buffer -> view<32xi32>
+  %second_view = buffer.view %second_scratch[%scratch_base] : buffer -> view<32xi32>
+  %first_value = vector.constant 1 : vector<1xi32>
+  %second_value = vector.constant 2 : vector<1xi32>
+  vector.store %first_value, %first_view[%lane] : vector<1xi32>, view<32xi32>
+  vector.store %second_value, %second_view[%lane] : vector<1xi32>, view<32xi32>
+  %loaded = vector.load %second_view[%lane] : view<32xi32> -> vector<1xi32>
+  vector.store %loaded, %first_view[%lane] : vector<1xi32>, view<32xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_second_allocation_b32() asm {
+  %lane = kernel.workitem_id.x
+  %bytes = const.i64 128
+  %first_view = alloca.workgroup.i8 %bytes, 16
+  %second_view = alloca.workgroup.i8 %bytes, 16
+  %first_value = const.i32 1
+  %second_value = const.i32 2
+  store.indexed.i32 %first_value, %first_view, %lane, 0, 4
+  store.indexed.i32 %second_value, %second_view, %lane, 0, 4
+  %loaded = load.indexed.i32 %second_view, %lane, 0, 4
+  store.indexed.i32 %loaded, %first_view, %lane, 0, 4
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @wave_sized_workgroup_memory_view_base_and_element_offset_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %element_offset = index.constant 4 : index
+  %element_index = index.add %lane, %element_offset : index
+  %base = index.constant 32 : offset
+  %bytes = index.constant 224 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<40xi32>
+  %stored_value = vector.constant 1 : vector<1xi32>
+  vector.store %stored_value, %scratch_view[%element_index] : vector<1xi32>, view<40xi32>
+  %loaded = vector.load %scratch_view[%element_index] : view<40xi32> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%element_index] : vector<1xi32>, view<40xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_view_base_and_element_offset_b32() asm {
+  %lane = kernel.workitem_id.x
+  %bytes = const.i64 224
+  %scratch_view = alloca.workgroup.i8 %bytes, 16
+  %stored_value = const.i32 1
+  store.indexed.i32 %stored_value, %scratch_view, %lane, 48, 4
+  %loaded = load.indexed.i32 %scratch_view, %lane, 48, 4
+  store.indexed.i32 %loaded, %scratch_view, %lane, 48, 4
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @wave_sized_workgroup_memory_interleaved_addtid_and_vaddr_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %lane_scale = index.constant 2 : index
+  %scaled_lane = index.mul %lane, %lane_scale : index
+  %scratch_base = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi32>
+  %lane_value = vector.constant 1 : vector<1xi32>
+  %other = vector.constant 2 : vector<1xi32>
+  vector.store %lane_value, %scratch_view[%lane] : vector<1xi32>, view<64xi32>
+  vector.store %other, %scratch_view[%scaled_lane] : vector<1xi32>, view<64xi32>
+  %loaded = vector.load %scratch_view[%lane] : view<64xi32> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%scaled_lane] : vector<1xi32>, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_interleaved_addtid_and_vaddr_b32() asm {
+  %lane = kernel.workitem_id.x
+  %bytes = const.i64 256
+  %scratch_view = alloca.workgroup.i8 %bytes, 16
+  %lane_value = const.i32 1
+  %other = const.i32 2
+  store.indexed.i32 %lane_value, %scratch_view, %lane, 0, 4
+  store.indexed.i32 %other, %scratch_view, %lane, 0, 8
+  %loaded = load.indexed.i32 %scratch_view, %lane, 0, 4
+  store.indexed.i32 %loaded, %scratch_view, %lane, 0, 8
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @wave_sized_workgroup_memory_roundtrip_lane_cast_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %lane_i32 = index.cast %lane : index to i32
+  %lane_index = index.cast %lane_i32 : i32 to index
+  %scratch_base = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xi32>
+  %stored_value = vector.constant 1 : vector<1xi32>
+  vector.store %stored_value, %scratch_view[%lane_index] : vector<1xi32>, view<32xi32>
+  %loaded = vector.load %scratch_view[%lane_index] : view<32xi32> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%lane_index] : vector<1xi32>, view<32xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_roundtrip_lane_cast_b32() asm {
+  %lane = kernel.workitem_id.x
+  %lane_i32 = trunc.i64.i32 %lane
+  %lane_index = sext.i32.i64 %lane_i32
+  %bytes = const.i64 128
+  %scratch_view = alloca.workgroup.i8 %bytes, 16
+  %stored_value = const.i32 1
+  store.indexed.i32 %stored_value, %scratch_view, %lane_index, 0, 4
+  %loaded = load.indexed.i32 %scratch_view, %lane_index, 0, 4
+  store.indexed.i32 %loaded, %scratch_view, %lane_index, 0, 4
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @wave_sized_workgroup_memory_select_same_lane_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %limit = index.constant 32 : index
+  %inside = index.cmp ult, %lane, %limit : index
+  %selected_lane = scf.select %inside, %lane, %lane : index
+  %scratch_base = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xi32>
+  %stored_value = vector.constant 1 : vector<1xi32>
+  vector.store %stored_value, %scratch_view[%selected_lane] : vector<1xi32>, view<32xi32>
+  %loaded = vector.load %scratch_view[%selected_lane] : view<32xi32> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%selected_lane] : vector<1xi32>, view<32xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_select_same_lane_b32() asm {
+  %lane = kernel.workitem_id.x
+  %bytes = const.i64 128
+  %scratch_view = alloca.workgroup.i8 %bytes, 16
+  %stored_value = const.i32 1
+  store.indexed.i32 %stored_value, %scratch_view, %lane, 0, 4
+  %loaded = load.indexed.i32 %scratch_view, %lane, 0, 4
+  store.indexed.i32 %loaded, %scratch_view, %lane, 0, 4
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @wave_sized_workgroup_memory_select_scaled_lane_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %lane_scale = index.constant 2 : index
+  %scaled_lane = index.mul %lane, %lane_scale : index
+  %limit = index.constant 16 : index
+  %inside = index.cmp ult, %lane, %limit : index
+  %element_index = scf.select %inside, %lane, %scaled_lane : index
+  %scratch_base = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi32>
+  %stored_value = vector.constant 1 : vector<1xi32>
+  vector.store %stored_value, %scratch_view[%element_index] : vector<1xi32>, view<64xi32>
+  %loaded = vector.load %scratch_view[%element_index] : view<64xi32> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%element_index] : vector<1xi32>, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_select_scaled_lane_b32() asm {
+  %lane = kernel.workitem_id.x
+  %17 = const.i64 1
+  %scaled_lane = shl.i64 %lane, %17
+  %limit = const.i64 16
+  %inside = cmp.ult.i64 %lane, %limit
+  %element_index = select.i64 %inside, %lane, %scaled_lane
+  %bytes = const.i64 256
+  %scratch_view = alloca.workgroup.i8 %bytes, 16
+  %stored_value = const.i32 1
+  store.indexed.i32 %stored_value, %scratch_view, %element_index, 0, 4
+  %loaded = load.indexed.i32 %scratch_view, %element_index, 0, 4
+  store.indexed.i32 %loaded, %scratch_view, %element_index, 0, 4
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @wave_sized_workgroup_memory_guarded_lane_store_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %limit = index.constant 16 : index
+  %inside = index.cmp ult, %lane, %limit : index
+  %scratch_base = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xi32>
+  %initial = vector.constant 0 : vector<1xi32>
+  %replacement = vector.constant 1 : vector<1xi32>
+  vector.store %initial, %scratch_view[%lane] : vector<1xi32>, view<32xi32>
+  scf.if %inside {
+    vector.store %replacement, %scratch_view[%lane] : vector<1xi32>, view<32xi32>
+  }
+  %loaded = vector.load %scratch_view[%lane] : view<32xi32> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<32xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_guarded_lane_store_b32() asm {
+  %lane = kernel.workitem_id.x
+  %limit = const.i64 16
+  %bytes = const.i64 128
+  %scratch_view = alloca.workgroup.i8 %bytes, 16
+  %initial = const.i32 0
+  %replacement = const.i32 1
+  store.indexed.i32 %initial, %scratch_view, %lane, 0, 4
+  %inside = cmp.ult.i64 %lane, %limit
+  low.cond_br %inside, ^_bb1, ^_bb2 : reg<llvmir.i1>
+^_bb1:
+  store.indexed.i32 %replacement, %scratch_view, %lane, 0, 4
+  low.br ^_bb2
+^_bb2:
+  %loaded = load.indexed.i32 %scratch_view, %lane, 0, 4
+  store.indexed.i32 %loaded, %scratch_view, %lane, 0, 4
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @wave_sized_workgroup_memory_guarded_lane_load_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %limit = index.constant 16 : index
+  %inside = index.cmp ult, %lane, %limit : index
+  %scratch_base = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xi32>
+  %stored_value = vector.constant 1 : vector<1xi32>
+  vector.store %stored_value, %scratch_view[%lane] : vector<1xi32>, view<32xi32>
+  scf.if %inside {
+    %loaded = vector.load %scratch_view[%lane] : view<32xi32> -> vector<1xi32>
+    vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<32xi32>
+  }
+  kernel.return
+}
+
+// ----
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_guarded_lane_load_b32() asm {
+  %lane = kernel.workitem_id.x
+  %limit = const.i64 16
+  %bytes = const.i64 128
+  %scratch_view = alloca.workgroup.i8 %bytes, 16
+  %stored_value = const.i32 1
+  store.indexed.i32 %stored_value, %scratch_view, %lane, 0, 4
+  %inside = cmp.ult.i64 %lane, %limit
+  low.cond_br %inside, ^_bb1, ^_bb2 : reg<llvmir.i1>
+^_bb1:
+  %loaded = load.indexed.i32 %scratch_view, %lane, 0, 4
+  store.indexed.i32 %loaded, %scratch_view, %lane, 0, 4
+  low.br ^_bb2
+^_bb2:
   return
 }

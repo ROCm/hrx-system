@@ -12,17 +12,70 @@ package(
 )
 
 iree_py_library(
+    name = "target_map_data",
+    srcs = ["//build_tools/amdgpu:target_map_data.py"],
+    imports = ["../../../../../.."],
+)
+
+iree_py_library(
     name = "target_info",
     srcs = [
         "__init__.py",
+        "lds_bank_service.py",
         "names.py",
         "target_info.py",
     ],
     deps = [
+        ":target_map_data",
         "//loom/py/loom/dialect:shared",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch:package_init",
     ],
+)
+
+iree_py_library(
+    name = "target_identity",
+    srcs = ["target_identity.py"],
+    deps = [
+        ":target_info",
+        ":target_map_data",
+    ],
+)
+
+iree_py_test(
+    name = "target_identity_test",
+    srcs = [
+        "target_identity_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.amdgpu.target_identity_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":target_identity",
+        ":target_info",
+        ":target_map_data",
+    ],
+)
+
+iree_py_library(
+    name = "compile_report_suggestions",
+    srcs = ["compile_report_suggestions.py"],
+    deps = [
+        ":target_identity",
+        ":target_info",
+        "//loom/py/loom/reporting",
+    ],
+)
+
+iree_py_test(
+    name = "compile_report_suggestions_test",
+    srcs = [
+        "compile_report_suggestions_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.amdgpu.compile_report_suggestions_test"],
+    main = "pytest_style_runner.py",
+    deps = [":compile_report_suggestions"],
 )
 
 iree_py_library(
@@ -38,7 +91,6 @@ iree_py_library(
 iree_py_library(
     name = "dialect",
     srcs = [
-        "__init__.py",
         "dialect.py",
     ],
     deps = [
@@ -51,17 +103,55 @@ iree_py_library(
 iree_py_library(
     name = "low_aliases",
     srcs = ["low_aliases.py"],
+    deps = [":descriptors"],
 )
 
 iree_py_library(
     name = "matrix_contracts",
     srcs = ["matrix_contracts.py"],
+    deps = [
+        ":matrix_formats",
+        ":matrix_fragment_layouts",
+        "//loom/py/loom/target/arch:package",
+    ],
+)
+
+iree_py_library(
+    name = "matrix_formats",
+    srcs = ["matrix_formats.py"],
+)
+
+iree_py_library(
+    name = "matrix_fragment_layouts",
+    srcs = ["matrix_fragment_layouts.py"],
+    deps = [
+        ":matrix_formats",
+        "//loom/py/loom/target:native_contraction_layout",
+        "//loom/py/loom/target:native_coordinate_projection",
+        "//loom/py/loom/target:native_layout_facts",
+        "//loom/py/loom/target/arch:package",
+    ],
+)
+
+iree_py_test(
+    name = "matrix_fragment_layouts_test",
+    srcs = [
+        "matrix_fragment_layouts_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.amdgpu.matrix_fragment_layouts_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":matrix_fragment_layouts",
+        "//loom/py/loom/target:native_contraction_layout",
+        "//loom/py/loom/target:native_coordinate_projection",
+        "//loom/py/loom/target:native_layout_facts",
+    ],
 )
 
 iree_py_library(
     name = "descriptors",
     srcs = [
-        "__init__.py",
         "descriptor_overlay.py",
         "descriptors/__init__.py",
         "descriptors/alu.py",
@@ -70,20 +160,26 @@ iree_py_library(
         "descriptors/candidates.py",
         "descriptors/categories.py",
         "descriptors/cdna.py",
+        "descriptors/cluster.py",
         "descriptors/common.py",
         "descriptors/contracts.py",
         "descriptors/control.py",
         "descriptors/matrix.py",
+        "descriptors/matrix_schedule.py",
         "descriptors/memory.py",
         "descriptors/rdna3.py",
+        "descriptors/rdna35.py",
         "descriptors/rdna4.py",
+        "descriptors/rdna4m.py",
+        "descriptors/scalar_float.py",
         "descriptors/sets.py",
+        "descriptors/tensor.py",
         "descriptors/workgroup.py",
-        "target_info.py",
     ],
     deps = [
         ":encoding_info",
         ":isa_xml",
+        ":matrix_formats",
         ":target_info",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch:package",
@@ -105,6 +201,7 @@ iree_py_test(
     deps = [
         ":isa_xml",
         ":target_info",
+        ":target_map_data",
     ],
 )
 
@@ -112,6 +209,9 @@ iree_py_test(
     name = "descriptors_test",
     srcs = [
         "descriptor_overlay_test.py",
+        "descriptors/rdna35_test.py",
+        "descriptors/rdna4_test.py",
+        "descriptors/rdna4m_test.py",
         "descriptors_test.py",
         "isa_xml_test.py",
         "low_aliases_test.py",
@@ -119,6 +219,9 @@ iree_py_test(
     ],
     args = [
         "loom.target.arch.amdgpu.descriptor_overlay_test",
+        "loom.target.arch.amdgpu.descriptors.rdna4_test",
+        "loom.target.arch.amdgpu.descriptors.rdna35_test",
+        "loom.target.arch.amdgpu.descriptors.rdna4m_test",
         "loom.target.arch.amdgpu.descriptors_test",
         "loom.target.arch.amdgpu.low_aliases_test",
     ],

@@ -40,18 +40,10 @@ class AmdgpuSignalTest : public ::testing::Test {
                                      &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
-    IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"),
-                                        &block_pool_, NULL,
-                                        iree_allocator_system(), &module_));
     loom_amdgpu_low_descriptor_registry_initialize(&low_registry_);
-    descriptor_set_ = loom_low_descriptor_registry_lookup(
-        &low_registry_.registry, IREE_SV("amdgpu.rdna3.core"));
-    if (descriptor_set_ == NULL) {
+    if (!ResetModuleForDescriptorSet(IREE_SV("amdgpu.rdna3.core"))) {
       GTEST_SKIP() << "RDNA3 descriptor set is not linked.";
     }
-    loom_builder_initialize(module_, &module_->arena,
-                            loom_module_block(module_), &builder_);
-    BuildFunctionBody();
   }
 
   void TearDown() override {
@@ -73,21 +65,43 @@ class AmdgpuSignalTest : public ::testing::Test {
     };
   }
 
-  void UseDescriptorSet(iree_string_view_t key) {
-    descriptor_set_ =
+  bool ResetModuleForDescriptorSet(iree_string_view_t key) {
+    const loom_low_descriptor_set_t* descriptor_set =
         loom_low_descriptor_registry_lookup(&low_registry_.registry, key);
-    if (descriptor_set_ == NULL) {
-      GTEST_SKIP() << "AMDGPU descriptor set is not linked: " << ToString(key);
+    if (descriptor_set == NULL) {
+      return false;
     }
+    if (module_ != NULL) {
+      loom_module_free(module_);
+    }
+    module_ = NULL;
+    body_block_ = NULL;
+    builder_ = {};
+    descriptor_set_ = descriptor_set;
+    IREE_CHECK_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                       NULL, iree_allocator_system(),
+                                       &module_));
+    loom_builder_initialize(module_, &module_->arena,
+                            loom_module_block(module_), &builder_);
+    BuildFunctionBody();
+    return true;
   }
 
   void BuildFunctionBody() {
     loom_symbol_ref_t target = AddSymbol(IREE_SV("gfx_target"));
     loom_symbol_ref_t callee = AddSymbol(IREE_SV("test_fn"));
+    loom_string_id_t representation_contract = LOOM_STRING_ID_INVALID;
+    IREE_CHECK_OK(loom_builder_intern_string(
+        &builder_,
+        loom_low_descriptor_set_string(descriptor_set_,
+                                       descriptor_set_->key_string_offset),
+        &representation_contract));
     loom_op_t* function_op = NULL;
-    IREE_ASSERT_OK(loom_low_func_def_build(
-        &builder_, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0, /*cc=*/0,
-        /*purity=*/0, /*allocation=*/0, /*schedule=*/0, target, /*abi=*/0,
+    IREE_CHECK_OK(loom_low_func_def_build(
+        &builder_, LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TARGET,
+        /*visibility=*/0, /*retain=*/0, /*cc=*/0,
+        /*purity=*/0, /*allocation=*/0, /*schedule=*/0,
+        /*descriptor_set=*/representation_contract, target, /*abi=*/0,
         loom_make_named_attr_slice(NULL, 0),
         loom_make_named_attr_slice(NULL, 0),
         /*export_symbol=*/LOOM_STRING_ID_INVALID,
@@ -141,12 +155,9 @@ class AmdgpuSignalTest : public ::testing::Test {
     ASSERT_TRUE(loom_low_op_isa(op));
     const loom_low_descriptor_t* descriptor = DescriptorForRef(descriptor_ref);
     ASSERT_NE(descriptor, nullptr);
-    EXPECT_EQ(loom_low_op_descriptor_ordinal(op),
+    EXPECT_EQ(loom_low_op_descriptor(op),
               loom_low_descriptor_set_descriptor_ordinal(descriptor_set_,
                                                          descriptor));
-    EXPECT_EQ(ToString(String(loom_low_op_opcode(op))),
-              ToString(loom_low_descriptor_set_string(
-                  descriptor_set_, descriptor->key_string_offset)));
   }
 
   bool LowOpHasDescriptorRef(
@@ -158,7 +169,7 @@ class AmdgpuSignalTest : public ::testing::Test {
     if (descriptor == nullptr) {
       return false;
     }
-    return loom_low_op_descriptor_ordinal(op) ==
+    return loom_low_op_descriptor(op) ==
            loom_low_descriptor_set_descriptor_ordinal(descriptor_set_,
                                                       descriptor);
   }
@@ -179,12 +190,9 @@ class AmdgpuSignalTest : public ::testing::Test {
     ASSERT_TRUE(loom_low_const_isa(op));
     const loom_low_descriptor_t* descriptor = DescriptorForRef(descriptor_ref);
     ASSERT_NE(descriptor, nullptr);
-    EXPECT_EQ(loom_low_const_descriptor_ordinal(op),
+    EXPECT_EQ(loom_low_const_descriptor(op),
               loom_low_descriptor_set_descriptor_ordinal(descriptor_set_,
                                                          descriptor));
-    EXPECT_EQ(ToString(String(loom_low_const_opcode(op))),
-              ToString(loom_low_descriptor_set_string(
-                  descriptor_set_, descriptor->key_string_offset)));
   }
 
   void ExpectAttrI64(loom_named_attr_slice_t attrs, iree_string_view_t name,
@@ -414,7 +422,7 @@ class AmdgpuSignalTest : public ::testing::Test {
   loom_target_low_descriptor_registry_t low_registry_ = {};
   const loom_low_descriptor_set_t* descriptor_set_ = nullptr;
   loom_block_t* body_block_ = nullptr;
-  loom_builder_t builder_;
+  loom_builder_t builder_ = {};
 };
 
 TEST_F(AmdgpuSignalTest, LoadsSignalNotificationValues) {
@@ -459,7 +467,9 @@ TEST_F(AmdgpuSignalTest, AddsOneWithRdnaReleaseOrdering) {
 }
 
 TEST_F(AmdgpuSignalTest, AddsOneWithCdnaM0AndWriteback) {
-  UseDescriptorSet(IREE_SV("amdgpu.cdna3.core"));
+  if (!ResetModuleForDescriptorSet(IREE_SV("amdgpu.cdna3.core"))) {
+    GTEST_SKIP() << "CDNA3 descriptor set is not linked.";
+  }
   const loom_value_id_t signal_address = BuildSignalAddress();
   IREE_ASSERT_OK(loom_amdgpu_build_signal_add_one_release(
       &builder_, descriptor_set_, signal_address, LOOM_LOCATION_UNKNOWN));
@@ -480,7 +490,9 @@ TEST_F(AmdgpuSignalTest, AddsOneWithCdnaM0AndWriteback) {
 }
 
 TEST_F(AmdgpuSignalTest, AddsOneWithGfx12SystemScope) {
-  UseDescriptorSet(IREE_SV("amdgpu.rdna4.core"));
+  if (!ResetModuleForDescriptorSet(IREE_SV("amdgpu.rdna4.core"))) {
+    GTEST_SKIP() << "RDNA4 descriptor set is not linked.";
+  }
   const loom_value_id_t signal_address = BuildSignalAddress();
   IREE_ASSERT_OK(loom_amdgpu_build_signal_add_one_release(
       &builder_, descriptor_set_, signal_address, LOOM_LOCATION_UNKNOWN));
@@ -564,7 +576,9 @@ TEST_F(AmdgpuSignalTest, PokesMailboxWithRdnaReleaseStoreAndSendMessage) {
 }
 
 TEST_F(AmdgpuSignalTest, PokesMailboxWithCdnaM0Store) {
-  UseDescriptorSet(IREE_SV("amdgpu.cdna3.core"));
+  if (!ResetModuleForDescriptorSet(IREE_SV("amdgpu.cdna3.core"))) {
+    GTEST_SKIP() << "CDNA3 descriptor set is not linked.";
+  }
   const loom_value_id_t signal_address = BuildSignalAddress();
   loom_amdgpu_signal_values_t values = {};
   IREE_ASSERT_OK(loom_amdgpu_build_signal_values(
@@ -590,7 +604,9 @@ TEST_F(AmdgpuSignalTest, PokesMailboxWithCdnaM0Store) {
 }
 
 TEST_F(AmdgpuSignalTest, PokesMailboxWithGfx12SystemScope) {
-  UseDescriptorSet(IREE_SV("amdgpu.rdna4.core"));
+  if (!ResetModuleForDescriptorSet(IREE_SV("amdgpu.rdna4.core"))) {
+    GTEST_SKIP() << "RDNA4 descriptor set is not linked.";
+  }
   const loom_value_id_t signal_address = BuildSignalAddress();
   loom_amdgpu_signal_values_t values = {};
   IREE_ASSERT_OK(loom_amdgpu_build_signal_values(

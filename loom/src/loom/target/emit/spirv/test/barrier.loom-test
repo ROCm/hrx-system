@@ -3,7 +3,7 @@
 
 spirv.target<vulkan1_3> @target
 
-low.func.def target(@target) abi(shader_entry_point) @spirv_barriers() asm<spirv.logical.core> {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_barriers() asm {
   OpControlBarrier.subgroup.workgroup.acq_rel
   OpControlBarrier.workgroup.workgroup.acq_rel
   return

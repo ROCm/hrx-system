@@ -6,11 +6,12 @@
 
 // Template synchronization for loom-check target expectation suites.
 //
-// A target suite may declare a file-level `// TEMPLATE: <path>` directive. In
-// --update mode, loom-check uses the template's cases as the authoritative case
-// list while preserving the target suite's file-level RUN directive and any
-// case-local REQUIRES/XFAIL directives that already exist in the target file.
-// Case identity is the single func-like definition in each case body.
+// A target suite may declare a file-level `// TEMPLATE: <path>` directive.
+// Every loom-check run uses the template's cases as the authoritative case list
+// and verifies that the concrete target file is current. --update materializes
+// that list while preserving the target suite's file-level RUN directive and
+// any case-local REQUIRES/XFAIL directives already in the target file. Case
+// identity is the single func-like definition in each case body.
 
 #ifndef LOOM_TOOLS_LOOM_CHECK_TEMPLATE_SYNC_H_
 #define LOOM_TOOLS_LOOM_CHECK_TEMPLATE_SYNC_H_

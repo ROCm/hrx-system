@@ -74,10 +74,6 @@ iree_status_t loom_run_hal_runtime_initialize(
         &out_runtime->device_group);
   }
   iree_async_frontier_tracker_release(frontier_tracker);
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_executable_cache_create(
-        out_runtime->device, IREE_SV("loom"), &out_runtime->executable_cache);
-  }
   if (!iree_status_is_ok(status)) {
     loom_run_hal_runtime_deinitialize(out_runtime);
   }
@@ -88,7 +84,6 @@ void loom_run_hal_runtime_deinitialize(loom_run_hal_runtime_t* runtime) {
   if (runtime == NULL) {
     return;
   }
-  iree_hal_executable_cache_release(runtime->executable_cache);
   iree_hal_device_group_release(runtime->device_group);
   iree_hal_device_release(runtime->device);
   *runtime = (loom_run_hal_runtime_t){0};

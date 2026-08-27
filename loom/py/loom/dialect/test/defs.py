@@ -29,6 +29,7 @@ from loom.assembly import (
     RPAREN,
     Attr,
     AttrDict,
+    AttrParams,
     AttrTable,
     BindingList,
     BlockArgs,
@@ -38,6 +39,7 @@ from loom.assembly import (
     IndexList,
     OperandDict,
     OptionalGroup,
+    Param,
     PredicateList,
     Ref,
     Refs,
@@ -58,8 +60,16 @@ from loom.dialect.target import target_record_attrs
 from loom.dsl import (
     ANY,
     ANY_ENCODING,
+    ATTR_TYPE_ENUM,
+    ATTR_TYPE_ENUM_ARRAY,
     ATTR_TYPE_FLAGS,
     ATTR_TYPE_I64_ARRAY,
+    ATTR_TYPE_PARAMETERIZED,
+    ATTR_TYPE_PARAMETERIZED_ARRAY,
+    ATTR_TYPE_SIGNED_ENUM_SET,
+    ATTR_TYPE_SYMBOL,
+    ATTR_TYPE_SYMBOL_ARRAY,
+    ATTR_TYPE_SYMBOL_SET,
     BY_REFERENCE,
     CONSTANT_LIKE,
     CONVERGENT,
@@ -70,6 +80,7 @@ from loom.dsl import (
     INTEGER,
     INVOLUTION,
     ISOLATED_FROM_ABOVE,
+    MODULE_SCOPE,
     POISON_BOUNDARY,
     POOL,
     PURE,
@@ -89,6 +100,8 @@ from loom.dsl import (
     BorrowedResult,
     CallLikeInterface,
     CallLikeKind,
+    ConditionRefinement,
+    ConditionRefinementTruth,
     Consume,
     Dialect,
     DimIndexInBounds,
@@ -99,12 +112,18 @@ from loom.dsl import (
     FreshResult,
     FuncLikeInterface,
     ImplicitTerminator,
+    IterArgsMatchResults,
     LiteralMatchesElementType,
+    LoopLikeInterface,
+    MovedResult,
     OffsetCountMatchesRank,
     Op,
     Operand,
+    OperandRole,
+    ParameterizedAttrDef,
     Reads,
     ReadWrites,
+    RegionBranchInterface,
     RegionDef,
     Release,
     Result,
@@ -115,11 +134,14 @@ from loom.dsl import (
     Successor,
     SymbolDefinition,
     SymbolReference,
+    SymbolReferenceRole,
     TargetLikeInterface,
     TiedResult,
+    TypeDef,
     Writes,
     YieldCountMatchesResults,
     YieldElementTypesMatchResults,
+    YieldTypesMatchResults,
     binary_op,
     cast_op,
     comparison_op,
@@ -180,6 +202,254 @@ _TemplateFlags = EnumDef(
         EnumCase("trace", 2, doc="Synthetic trace flag."),
     ],
     doc="Synthetic flags for TemplateParamFlags parser/printer coverage.",
+)
+
+_ArrayElement = EnumDef(
+    "ArrayElement",
+    [
+        EnumCase("low", 1, doc="Sparse low value."),
+        EnumCase("middle", 7, doc="Sparse middle value."),
+        EnumCase("high", 255, doc="Maximum stable byte value."),
+    ],
+    doc="Synthetic sparse enum for descriptor-backed aggregate coverage.",
+)
+
+_ParameterizedMode = EnumDef(
+    "ParameterizedMode",
+    [
+        EnumCase("fast", 1, doc="Synthetic fast mode."),
+        EnumCase("precise", 2, doc="Synthetic precise mode."),
+    ],
+    doc="Synthetic mode for parameterized attribute coverage.",
+)
+
+_ParameterizedScope = EnumDef(
+    "ParameterizedScope",
+    [
+        EnumCase("workgroup", 1, doc="Synthetic workgroup scope."),
+        EnumCase("subgroup", 2, doc="Synthetic subgroup scope."),
+    ],
+    doc="Synthetic scope for parameterized value coverage.",
+)
+
+test_tile_attr = ParameterizedAttrDef(
+    "test.tile",
+    group=test_ops,
+    parameters=[
+        AttrDef("width", "i64", doc="Tile width in elements."),
+    ],
+    doc="Minimal parameterized attribute family.",
+)
+
+test_options_attr = ParameterizedAttrDef(
+    "test.options",
+    group=test_ops,
+    parameters=[
+        AttrDef(
+            "mode",
+            ATTR_TYPE_ENUM,
+            enum_def=_ParameterizedMode,
+            doc="Required execution mode.",
+        ),
+        AttrDef(
+            "scopes",
+            ATTR_TYPE_ENUM_ARRAY,
+            enum_def=_ParameterizedScope,
+            optional=True,
+            open_enum=True,
+            doc="Optional ordered scopes.",
+        ),
+        AttrDef("element_type", "type", optional=True),
+        AttrDef(
+            "tile",
+            ATTR_TYPE_PARAMETERIZED,
+            optional=True,
+            parameterized_attr=test_tile_attr,
+        ),
+        AttrDef(
+            "target",
+            ATTR_TYPE_SYMBOL,
+            optional=True,
+            symbol_ref=SymbolReference("record", ["record"], role=SymbolReferenceRole.AVAILABILITY),
+            doc="Optional record symbol availability anchor.",
+        ),
+        AttrDef(
+            "tiles",
+            ATTR_TYPE_PARAMETERIZED_ARRAY,
+            optional=True,
+            parameterized_attr=test_tile_attr,
+            doc="Optional ordered tile alternatives.",
+        ),
+    ],
+    doc="Structured parameterized attribute lifecycle witness.",
+)
+
+test_compact_attr = ParameterizedAttrDef(
+    "test.compact",
+    group=test_ops,
+    parameters=[
+        AttrDef("label", "string", optional=True, doc="Optional display label."),
+        AttrDef("value", "i64", doc="Primary compact value."),
+    ],
+    primary_parameter="value",
+    doc="Compact primary parameter lifecycle witness.",
+)
+
+test_node_attr = ParameterizedAttrDef(
+    "test.node",
+    group=test_ops,
+    parameters=[
+        AttrDef("value", "i64", doc="Synthetic node value."),
+        AttrDef(
+            "children",
+            ATTR_TYPE_PARAMETERIZED_ARRAY,
+            optional=True,
+            doc="Ordered child nodes or other registered attributes.",
+        ),
+    ],
+    primary_parameter="value",
+    doc="Recursive open-family parameterized-array witness.",
+)
+
+test_feature_set_attr = ParameterizedAttrDef(
+    "test.feature_set",
+    group=test_ops,
+    parameters=[
+        AttrDef(
+            "features",
+            ATTR_TYPE_SIGNED_ENUM_SET,
+            enum_def=_ArrayElement,
+            doc="Explicitly enabled and disabled synthetic features.",
+        ),
+    ],
+    primary_parameter="features",
+    doc="Signed enum-set parameter lifecycle witness.",
+)
+
+ALL_TEST_PARAMETERIZED_ATTRS = (
+    test_tile_attr,
+    test_options_attr,
+    test_compact_attr,
+    test_node_attr,
+    test_feature_set_attr,
+)
+
+test_scope_type = TypeDef(
+    "test.scope",
+    params=[
+        AttrDef("scope", ATTR_TYPE_ENUM, enum_def=_ParameterizedScope),
+    ],
+    format=[Param("scope")],
+    doc="Positional descriptor-backed type parameter witness.",
+)
+
+test_matrix_type = TypeDef(
+    "test.matrix",
+    params=[
+        AttrDef("element_type", "type"),
+        AttrDef("scope", ATTR_TYPE_ENUM, enum_def=_ParameterizedScope),
+        AttrDef("rows", "i64"),
+        AttrDef(
+            "target",
+            ATTR_TYPE_SYMBOL,
+            optional=True,
+            symbol_ref=SymbolReference("record", ["record"], role=SymbolReferenceRole.AVAILABILITY),
+        ),
+    ],
+    format=[
+        Param("element_type"),
+        COMMA,
+        kw("scope"),
+        EQUALS,
+        Param("scope"),
+        COMMA,
+        kw("rows"),
+        EQUALS,
+        Param("rows"),
+        OptionalGroup(
+            [COMMA, kw("target"), EQUALS, Param("target")],
+            anchor="target",
+        ),
+    ],
+    doc="Mixed positional and keyed descriptor-backed type witness.",
+)
+
+test_compact_matrix_type = TypeDef(
+    "test.compact_matrix",
+    params=[
+        AttrDef("rows", "i64"),
+        AttrDef("columns", "i64"),
+        AttrDef("element_type", "type"),
+        AttrDef("scope", ATTR_TYPE_ENUM, enum_def=_ParameterizedScope),
+    ],
+    format=[
+        Param("rows"),
+        GLUE,
+        kw("x"),
+        GLUE,
+        Param("columns"),
+        GLUE,
+        kw("x"),
+        GLUE,
+        Param("element_type"),
+        COMMA,
+        Param("scope"),
+    ],
+    doc="Compact shape syntax witness for descriptor-backed type parsing.",
+)
+
+test_array_type = TypeDef(
+    "test.array",
+    params=[
+        AttrDef("element_type", "type"),
+        AttrDef("alignment", "i64", optional=True),
+        AttrDef("metadata", "dict", optional=True),
+    ],
+    format=[
+        Param("element_type"),
+        OptionalGroup(
+            [COMMA, kw("alignment"), EQUALS, Param("alignment")],
+            anchor="alignment",
+        ),
+        OptionalGroup(
+            [COMMA, kw("metadata"), EQUALS, Param("metadata")],
+            anchor="metadata",
+        ),
+    ],
+    doc="Optional and nested descriptor-backed type parameter witness.",
+)
+
+test_variant_set_type = TypeDef(
+    "test.variant_set",
+    params=[
+        AttrDef(
+            "values",
+            ATTR_TYPE_PARAMETERIZED_ARRAY,
+            doc="Ordered parameterized values from any registered family.",
+        ),
+        AttrDef(
+            "alternatives",
+            ATTR_TYPE_PARAMETERIZED_ARRAY,
+            optional=True,
+            doc="Optional ordered values from any registered family.",
+        ),
+    ],
+    format=[
+        Param("values"),
+        OptionalGroup(
+            [COMMA, kw("alternatives"), EQUALS, Param("alternatives")],
+            anchor="alternatives",
+        ),
+    ],
+    doc="Parameterized-array type-parameter lifecycle witness.",
+)
+
+ALL_TEST_TYPES = (
+    test_scope_type,
+    test_matrix_type,
+    test_compact_matrix_type,
+    test_array_type,
+    test_variant_set_type,
 )
 
 cmp_predicates = EnumDef(
@@ -503,16 +773,64 @@ test_fact_power_of_two = Op(
     examples=["%p2 = test.fact_power_of_two %x : index -> i1"],
 )
 
-test_fact_uniform = Op(
-    "test.fact_uniform",
+test_fact_finite = Op(
+    "test.fact_finite",
     group=test_ops,
-    doc="Returns 1 if the input is provably uniform across active lanes, 0 otherwise.",
+    doc="Returns 1 if the input is provably finite, 0 otherwise.",
     operands=[Operand("value", ANY)],
     results=[Result("result", I1)],
     traits=[PURE],
-    facts="loom_test_fact_uniform_facts",
+    facts="loom_test_fact_finite_facts",
     format=[Ref("value"), COLON, TypeOf("value"), ARROW, ResultType("result")],
-    examples=["%uniform = test.fact_uniform %x : index -> i1"],
+    examples=["%finite = test.fact_finite %x : f32 -> i1"],
+)
+
+test_fact_not_subnormal = Op(
+    "test.fact_not_subnormal",
+    group=test_ops,
+    doc="Returns 1 if the input is provably not subnormal, 0 otherwise.",
+    operands=[Operand("value", ANY)],
+    results=[Result("result", I1)],
+    traits=[PURE],
+    facts="loom_test_fact_not_subnormal_facts",
+    format=[Ref("value"), COLON, TypeOf("value"), ARROW, ResultType("result")],
+    examples=["%not_subnormal = test.fact_not_subnormal %x : f32 -> i1"],
+)
+
+test_fact_subgroup_uniform = Op(
+    "test.fact_subgroup_uniform",
+    group=test_ops,
+    doc="Returns 1 if the input is provably uniform across a subgroup, 0 otherwise.",
+    operands=[Operand("value", ANY)],
+    results=[Result("result", I1)],
+    traits=[PURE],
+    facts="loom_test_fact_subgroup_uniform_facts",
+    format=[Ref("value"), COLON, TypeOf("value"), ARROW, ResultType("result")],
+    examples=["%uniform = test.fact_subgroup_uniform %x : index -> i1"],
+)
+
+test_fact_workgroup_uniform = Op(
+    "test.fact_workgroup_uniform",
+    group=test_ops,
+    doc="Returns 1 if the input is provably uniform across a workgroup, 0 otherwise.",
+    operands=[Operand("value", ANY)],
+    results=[Result("result", I1)],
+    traits=[PURE],
+    facts="loom_test_fact_workgroup_uniform_facts",
+    format=[Ref("value"), COLON, TypeOf("value"), ARROW, ResultType("result")],
+    examples=["%uniform = test.fact_workgroup_uniform %x : index -> i1"],
+)
+
+test_fact_cluster_uniform = Op(
+    "test.fact_cluster_uniform",
+    group=test_ops,
+    doc=("Returns 1 if the input is provably uniform across every workgroup in a workgroup cluster, 0 otherwise."),
+    operands=[Operand("value", ANY)],
+    results=[Result("result", I1)],
+    traits=[PURE],
+    facts="loom_test_fact_cluster_uniform_facts",
+    format=[Ref("value"), COLON, TypeOf("value"), ARROW, ResultType("result")],
+    examples=["%uniform = test.fact_cluster_uniform %x : index -> i1"],
 )
 
 test_fact_lane_varying = Op(
@@ -611,22 +929,24 @@ test_fact_encoding_layout_stride_hi = Op(
     ],
 )
 
-test_fact_encoding_matrix_field = Op(
-    "test.fact_encoding_matrix_field",
+test_fact_encoding_operand_field = Op(
+    "test.fact_encoding_operand_field",
     group=test_ops,
     doc=(
         "Exposes an encoded-operand storage-schema summary field as an i64 "
         "constant. Supported fields are element_format, payload_packing, "
         "scale_topology, scale_format, secondary_scale_format, affine, "
-        "rounding, codebook, sparsity, payload_registers, payload_elements, "
-        "scale_group_elements, scale_operands, zero_scale_fallback, and "
-        "static_spec."
+        "rounding, codebook, sparsity, sparsity_group_elements, "
+        "sparsity_group_nonzero_elements, payload_registers, "
+        "payload_elements, scale_group_elements, scale_group_rank, "
+        "scale_group_dim0 through scale_group_dim3, scale_operands, "
+        "zero_scale_fallback, and static_spec."
     ),
     operands=[Operand("value", ANY_ENCODING)],
-    attrs=[AttrDef("field", "string", doc="Matrix schema field to inspect.")],
+    attrs=[AttrDef("field", "string", doc="Encoded operand field to inspect.")],
     results=[Result("result", INTEGER)],
     traits=[PURE],
-    facts="loom_test_fact_encoding_matrix_field_facts",
+    facts="loom_test_fact_encoding_operand_field_facts",
     format=[
         Ref("value"),
         LBRACKET,
@@ -638,7 +958,7 @@ test_fact_encoding_matrix_field = Op(
         ResultType("result"),
     ],
     examples=[
-        '%format = test.fact_encoding_matrix_field %schema["element_format"] : encoding<schema> -> i64',
+        '%format = test.fact_encoding_operand_field %schema["element_format"] : encoding<schema> -> i64',
     ],
 )
 
@@ -1075,7 +1395,7 @@ test_invoke = Op(
         AttrDef(
             "callee",
             "symbol",
-            symbol_ref=SymbolReference("function", ["func_like"]),
+            symbol_ref=SymbolReference("function", ["callable"]),
         ),
     ],
     results=[Result("results", ANY, variadic=True)],
@@ -1124,7 +1444,7 @@ test_low_call = Op(
         AttrDef(
             "callee",
             "symbol",
-            symbol_ref=SymbolReference("function", ["func_like"]),
+            symbol_ref=SymbolReference("function", ["callable"]),
         ),
     ],
     results=[Result("results", ANY, variadic=True)],
@@ -1169,7 +1489,7 @@ test_low_invoke = Op(
         AttrDef(
             "callee",
             "symbol",
-            symbol_ref=SymbolReference("function", ["func_like"]),
+            symbol_ref=SymbolReference("function", ["callable"]),
         ),
     ],
     results=[Result("results", ANY, variadic=True)],
@@ -1200,6 +1520,67 @@ test_low_invoke = Op(
     ],
     examples=[
         "test.low_invoke @callee() : ()",
+    ],
+)
+
+# ============================================================================
+# test.partitioned_call — call-like operand partitions
+# ============================================================================
+
+test_partitioned_call = Op(
+    "test.partitioned_call",
+    group=test_ops,
+    doc="Test call-like op spanning trailing operand partitions after an unrelated prefix.",
+    operands=[
+        Operand("prefix", ANY, variadic=True),
+        Operand("specializations", ANY, variadic=True),
+        Operand("bindings", ANY, variadic=True),
+    ],
+    attrs=[
+        AttrDef(
+            "callee",
+            "symbol",
+            symbol_ref=SymbolReference("function", ["callable"]),
+        ),
+    ],
+    traits=[UNKNOWN_EFFECTS],
+    interfaces=[
+        CallLikeInterface(
+            callee="callee",
+            operands="specializations",
+            results=None,
+            kind=CallLikeKind.COMMAND_PROGRAM,
+        ),
+    ],
+    format=[
+        SymbolRef("callee"),
+        GLUE,
+        LBRACKET,
+        Refs("prefix"),
+        RBRACKET,
+        GLUE,
+        LBRACKET,
+        Refs("specializations"),
+        RBRACKET,
+        GLUE,
+        LPAREN,
+        Refs("bindings"),
+        RPAREN,
+        COLON,
+        LBRACKET,
+        TypesOf("prefix"),
+        RBRACKET,
+        GLUE,
+        LBRACKET,
+        TypesOf("specializations"),
+        RBRACKET,
+        GLUE,
+        LPAREN,
+        TypesOf("bindings"),
+        RPAREN,
+    ],
+    examples=[
+        "test.partitioned_call @callee[%prefix][%specialization](%binding) : [index][index](i32)",
     ],
 )
 
@@ -1284,8 +1665,24 @@ test_loop = Op(
             doc="Loop body.",
             single_block=True,
             terminator="test.yield",
-            implicit_args=(("iv", "index"),),
+            implicit_args=(("iv", "type_of:lower_bound"),),
+            arg_source="iter_args",
         )
+    ],
+    interfaces=[
+        LoopLikeInterface(
+            body="body",
+            iter_args="iter_args",
+            iv="iv",
+            lower_bound="lower_bound",
+            upper_bound="upper_bound",
+            step="step",
+        ),
+    ],
+    constraints=[
+        IterArgsMatchResults("iter_args", "results"),
+        YieldCountMatchesResults("body", "results"),
+        YieldTypesMatchResults("body", "results"),
     ],
     traits=[ImplicitTerminator("test.implicit_yield")],
     format=[
@@ -1355,7 +1752,9 @@ test_branch = Op(
     "test.branch",
     group=test_ops,
     doc="Test if/else with both regions always present.",
-    operands=[Operand("condition", INTEGER)],
+    operands=[
+        Operand("condition", INTEGER, role=OperandRole.CONTROL_CONDITION),
+    ],
     results=[Result("results", ANY, variadic=True)],
     regions=[
         RegionDef(
@@ -1371,6 +1770,7 @@ test_branch = Op(
             terminator="test.yield",
         ),
     ],
+    interfaces=[RegionBranchInterface(selector="condition")],
     traits=[ImplicitTerminator("test.implicit_yield")],
     format=[
         Ref("condition"),
@@ -1492,7 +1892,7 @@ test_func = Op(
     symbol_def=SymbolDefinition(
         field="callee",
         name="function",
-        interfaces=["func_like"],
+        interfaces=["func_like", "callable"],
         bytecode_kind="LOOM_SYMBOL_FUNC_DEF",
     ),
     attrs=[
@@ -1547,7 +1947,7 @@ test_split_func = Op(
     symbol_def=SymbolDefinition(
         field="callee",
         name="function",
-        interfaces=["func_like"],
+        interfaces=["func_like", "callable"],
         bytecode_kind="LOOM_SYMBOL_FUNC_DEF",
     ),
     attrs=[
@@ -1588,18 +1988,19 @@ test_decl = Op(
     group=test_ops,
     doc="Test function declaration with no body and signature arguments stored as op operands.",
     traits=[SYMBOL_DEFINE],
+    operands=[Operand("args", ANY, variadic=True)],
     interfaces=[
         FuncLikeInterface(
             callee="callee",
             visibility="visibility",
             cc="cc",
-            args_as_operands=True,
+            args="args",
         )
     ],
     symbol_def=SymbolDefinition(
         field="callee",
         name="function",
-        interfaces=["func_like"],
+        interfaces=["func_like", "callable"],
         bytecode_kind="LOOM_SYMBOL_FUNC_DEF",
     ),
     attrs=[
@@ -1670,7 +2071,7 @@ test_template_param_symbol = Op(
         AttrDef(
             "target",
             "symbol",
-            symbol_ref=SymbolReference("record", ["record"]),
+            symbol_ref=SymbolReference("record", ["record"], role=SymbolReferenceRole.AVAILABILITY),
         ),
     ],
     format=[
@@ -1723,6 +2124,247 @@ test_attrs = Op(
     examples=[
         '%result = test.attrs %input {axis = 0, label = "foo"} : f32',
     ],
+)
+
+# ============================================================================
+# test.parameterized_attr — descriptor-backed parameterized attribute
+# ============================================================================
+
+test_parameterized_attr = Op(
+    "test.parameterized_attr",
+    group=test_ops,
+    doc="Test op carrying an exact descriptor-backed attribute family.",
+    attrs=[
+        AttrDef(
+            "options",
+            ATTR_TYPE_PARAMETERIZED,
+            parameterized_attr=test_options_attr,
+        ),
+    ],
+    format=[Attr("options")],
+    examples=[
+        "test.parameterized_attr #test.options<mode = fast>",
+    ],
+)
+
+# ============================================================================
+# test.attr_params — exact-family parameter payload syntax
+# ============================================================================
+
+test_attr_params = Op(
+    "test.attr_params",
+    group=test_ops,
+    doc="Test op carrying a known-family parameter payload in angle brackets.",
+    attrs=[
+        AttrDef(
+            "options",
+            ATTR_TYPE_PARAMETERIZED,
+            parameterized_attr=test_options_attr,
+        ),
+    ],
+    format=[AttrParams("options")],
+    examples=[
+        "test.attr_params<mode = fast, scopes = [workgroup]>",
+    ],
+)
+
+# ============================================================================
+# test.parameterized_attr_array — ordered parameterized attributes
+# ============================================================================
+
+test_parameterized_attr_array = Op(
+    "test.parameterized_attr_array",
+    group=test_ops,
+    doc="Test op carrying open- and exact-family parameterized arrays.",
+    attrs=[
+        AttrDef(
+            "values",
+            ATTR_TYPE_PARAMETERIZED_ARRAY,
+            doc="Ordered parameterized attributes from any registered family.",
+        ),
+        AttrDef(
+            "tiles",
+            ATTR_TYPE_PARAMETERIZED_ARRAY,
+            optional=True,
+            parameterized_attr=test_tile_attr,
+            doc="Optional ordered attributes from the tile family.",
+        ),
+    ],
+    format=[
+        Attr("values"),
+        OptionalGroup([kw("using"), Attr("tiles")], anchor="tiles"),
+    ],
+    examples=[
+        "test.parameterized_attr_array [#test.tile<width = 8>, #test.options<mode = fast>, #test.tile<width = 16>] using [#test.tile<width = 4>]",
+    ],
+)
+
+# ============================================================================
+# test.compact_parameterized_attr — compact parameterized attribute
+# ============================================================================
+
+test_compact_parameterized_attr = Op(
+    "test.compact_parameterized_attr",
+    group=test_ops,
+    doc="Test op carrying a compact descriptor-backed attribute family.",
+    attrs=[
+        AttrDef(
+            "value",
+            ATTR_TYPE_PARAMETERIZED,
+            parameterized_attr=test_compact_attr,
+        ),
+    ],
+    format=[Attr("value")],
+    examples=[
+        'test.compact_parameterized_attr #test.compact<64, label = "wave">',
+    ],
+)
+
+# ============================================================================
+# test.enum_array_attrs — descriptor-backed enum-array attributes
+# ============================================================================
+
+test_enum_array_attrs = Op(
+    "test.enum_array_attrs",
+    group=test_ops,
+    doc="Test op with closed and open descriptor-backed enum arrays.",
+    attrs=[
+        AttrDef(
+            "required_values",
+            ATTR_TYPE_ENUM_ARRAY,
+            enum_def=_ArrayElement,
+            doc="Required ordered enum values.",
+        ),
+        AttrDef(
+            "optional_values",
+            ATTR_TYPE_ENUM_ARRAY,
+            enum_def=_ArrayElement,
+            optional=True,
+            open_enum=True,
+            doc="Optional ordered enum values admitting unknown bytes.",
+        ),
+        AttrDef("dict", "dict", optional=True),
+    ],
+    format=[
+        Attr("required_values"),
+        OptionalGroup(
+            [kw("using"), Attr("optional_values")],
+            anchor="optional_values",
+        ),
+        AttrDict("dict"),
+    ],
+    examples=[
+        "test.enum_array_attrs [low, high] using [middle, <42>]",
+    ],
+)
+
+# ============================================================================
+# test.signed_enum_set_attrs — descriptor-backed signed enum-set attributes
+# ============================================================================
+
+test_signed_enum_set_attrs = Op(
+    "test.signed_enum_set_attrs",
+    group=test_ops,
+    doc="Test op with required and optional signed enum sets.",
+    attrs=[
+        AttrDef(
+            "required_features",
+            ATTR_TYPE_SIGNED_ENUM_SET,
+            enum_def=_ArrayElement,
+            doc="Required positive and negative feature assertions.",
+        ),
+        AttrDef(
+            "optional_features",
+            ATTR_TYPE_SIGNED_ENUM_SET,
+            enum_def=_ArrayElement,
+            optional=True,
+            doc="Optional positive and negative feature assertions.",
+        ),
+        AttrDef("dict", "dict", optional=True),
+    ],
+    format=[
+        Attr("required_features"),
+        OptionalGroup(
+            [kw("using"), Attr("optional_features")],
+            anchor="optional_features",
+        ),
+        AttrDict("dict"),
+    ],
+    examples=[
+        "test.signed_enum_set_attrs [low, -middle, high] using []",
+    ],
+)
+
+# ============================================================================
+# test.symbol_array_attrs — descriptor-backed symbol-array attributes
+# ============================================================================
+
+test_symbol_array_attrs = Op(
+    "test.symbol_array_attrs",
+    group=test_ops,
+    doc="Test op with dependency and availability symbol arrays.",
+    attrs=[
+        AttrDef(
+            "dependencies",
+            ATTR_TYPE_SYMBOL_ARRAY,
+            symbol_ref=SymbolReference("record", ["record"]),
+            doc="Ordered record dependencies.",
+        ),
+        AttrDef(
+            "available",
+            ATTR_TYPE_SYMBOL_ARRAY,
+            symbol_ref=SymbolReference(
+                "symbol",
+                [],
+                role=SymbolReferenceRole.AVAILABILITY,
+            ),
+            optional=True,
+            doc="Ordered symbols available from an external provider.",
+        ),
+    ],
+    format=[
+        Attr("dependencies"),
+        OptionalGroup(
+            [kw("using"), Attr("available")],
+            anchor="available",
+        ),
+    ],
+    examples=[
+        "test.symbol_array_attrs [@b, @a, @b] using [@a]",
+    ],
+)
+
+# ============================================================================
+# test.symbol_set_attrs — self-describing symbol-set attributes
+# ============================================================================
+
+test_symbol_set_attrs = Op(
+    "test.symbol_set_attrs",
+    group=test_ops,
+    doc="Test op with a canonical symbol set.",
+    attrs=[
+        AttrDef(
+            "symbols",
+            ATTR_TYPE_SYMBOL_SET,
+            symbol_ref=SymbolReference("record", ["record"]),
+            doc="Sorted unique record references.",
+        ),
+    ],
+    format=[Attr("symbols")],
+    examples=["test.symbol_set_attrs [@a, @b]"],
+)
+
+# ============================================================================
+# test.module_metadata — module-scope operation placement
+# ============================================================================
+
+test_module_metadata = Op(
+    "test.module_metadata",
+    group=test_ops,
+    doc="Test non-symbol metadata owned directly by a module body.",
+    traits=[MODULE_SCOPE],
+    format=[],
+    examples=["test.module_metadata"],
 )
 
 # ============================================================================
@@ -1822,6 +2464,7 @@ test_region_table = Op(
             terminator="test.yield",
         ),
     ],
+    interfaces=[RegionBranchInterface(selector="selector")],
     format=[
         Ref("selector"),
         RegionTable("case_keys", "case_regions", "default_region"),
@@ -1877,6 +2520,28 @@ test_assume = Op(
     examples=[
         "%M2 = test.assume %M [mul(%M, 16)] : index",
         "%M2, %K2 = test.assume %M, %K [mul(%M, 16), lt(%K, 1024)] : index, index",
+    ],
+)
+
+# ============================================================================
+# test.condition_refines_positive — generic condition-refinement metadata
+# ============================================================================
+
+test_condition_refines_positive = Op(
+    "test.condition_refines_positive",
+    group=test_ops,
+    doc="Test a boolean query that refines its source on the true edge.",
+    operands=[Operand("value", INDEX)],
+    results=[Result("result", I1)],
+    traits=[PURE],
+    condition_refinement=ConditionRefinement(
+        source="value",
+        truth=ConditionRefinementTruth.TRUE,
+        materialize="loom_test_condition_refines_positive_materialize",
+    ),
+    format=[Ref("value"), COLON, TypeOf("value")],
+    examples=[
+        "%positive = test.condition_refines_positive %value : index",
     ],
 )
 
@@ -2189,6 +2854,26 @@ test_resource_borrowed = Op(
     ],
 )
 
+test_resource_move = Op(
+    "test.resource.move",
+    group=test_ops,
+    doc="Test moving the exact ownership state of a resource.",
+    operands=[Operand("source", POOL, doc="Resource state to move.")],
+    results=[Result("result", POOL, doc="Moved resource state.")],
+    constraints=[SameType("source", "result")],
+    ownership_effects=[MovedResult("result", "source")],
+    format=[
+        Ref("source"),
+        COLON,
+        TypeOf("source"),
+        ARROW,
+        ResultType("result"),
+    ],
+    examples=[
+        "%moved = test.resource.move %resource : pool<[%BS]> -> pool<[%BS]>",
+    ],
+)
+
 # ============================================================================
 # test.isolated_region — isolated single-block region (for CSE testing)
 # ============================================================================
@@ -2292,27 +2977,6 @@ test_region_syntax = Op(
 )
 
 # ============================================================================
-# test.low_asm_region — descriptor-backed low asm parser surface
-# ============================================================================
-
-test_low_asm_region = Op(
-    "test.low_asm_region",
-    group=test_ops,
-    doc="Test op whose body uses descriptor-backed target-low assembly syntax while preserving ordinary region storage.",
-    regions=[
-        RegionDef(
-            "body",
-            doc="Body parsed through the target-low asm region syntax.",
-            single_block=True,
-        )
-    ],
-    format=[Region("body", syntax="low.asm")],
-    examples=[
-        "test.low_asm_region asm<test.low.core> {\n  return\n}",
-    ],
-)
-
-# ============================================================================
 # test.target — target-like symbol record
 # ============================================================================
 
@@ -2326,6 +2990,7 @@ test_target = Op(
             symbol="symbol",
             selector="kind",
             bundle_table="loom_test_target_bundles",
+            fact_type="loom_test_target_fact_type",
         )
     ],
     symbol_def=SymbolDefinition(
@@ -2401,7 +3066,8 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_fact_non_zero,
     test_fact_positive,
     test_fact_power_of_two,
-    test_fact_uniform,
+    test_fact_subgroup_uniform,
+    test_fact_workgroup_uniform,
     test_fact_lane_varying,
     test_fact_lane_predicate,
     test_fact_subgroup_lane_mask,
@@ -2409,7 +3075,7 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_fact_is_vector_prefix_mask,
     test_fact_encoding_layout_kind,
     test_fact_encoding_layout_stride_hi,
-    test_fact_encoding_matrix_field,
+    test_fact_encoding_operand_field,
     test_fact_is_buffer_reference,
     test_fact_is_view_reference,
     test_fact_buffer_memory_space,
@@ -2435,7 +3101,6 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_fact_storage_min_alignment,
     test_fact_storage_space,
     test_region_syntax,
-    test_low_asm_region,
     test_clause_constant,
     test_clause_copy,
     test_typed_use,
@@ -2451,7 +3116,22 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_resource_escape,
     test_resource_alias,
     test_resource_borrowed,
+    test_resource_move,
     test_segmented,
     test_template_param_symbol,
     test_template_param_symbol_flags,
+    test_fact_finite,
+    test_fact_not_subnormal,
+    test_fact_cluster_uniform,
+    test_enum_array_attrs,
+    test_signed_enum_set_attrs,
+    test_symbol_array_attrs,
+    test_symbol_set_attrs,
+    test_parameterized_attr,
+    test_compact_parameterized_attr,
+    test_parameterized_attr_array,
+    test_attr_params,
+    test_condition_refines_positive,
+    test_partitioned_call,
+    test_module_metadata,
 )

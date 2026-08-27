@@ -28,14 +28,28 @@ static bool iree_profile_projection_try_fit_driver_host_cpu_clock(
       out_clock_fit);
 }
 
+static bool iree_profile_projection_try_resolve_duration_scale(
+    const iree_profile_dispatch_context_t* context,
+    uint32_t physical_device_ordinal,
+    iree_profile_model_duration_scale_t* out_duration_scale) {
+  const iree_profile_model_device_t* device =
+      iree_profile_model_find_device(&context->model, physical_device_ordinal);
+  return iree_profile_model_device_try_resolve_duration_scale(
+      device, out_duration_scale);
+}
+
 typedef struct iree_profile_projection_dispatch_timing_t {
   // True when the aggregate's device has a host CPU clock fit.
   bool has_clock_fit;
+  // True when the aggregate's device has an elapsed-duration scale.
+  bool has_duration_scale;
+  // Provenance of the elapsed-duration scale.
+  iree_profile_model_duration_scale_source_t duration_scale_source;
   // True when min/max/total tick values were converted to nanoseconds.
   bool has_time_ns;
   // Average dispatch duration in device ticks.
   double average_ticks;
-  // Nanoseconds per device tick when |has_clock_fit| is true.
+  // Nanoseconds per device tick when |has_duration_scale| is true.
   double ns_per_tick;
   // Minimum dispatch duration in nanoseconds when |has_time_ns| is true.
   int64_t minimum_ns;
@@ -58,29 +72,38 @@ iree_profile_projection_calculate_dispatch_timing(
   iree_profile_model_clock_fit_t clock_fit;
   timing.has_clock_fit = iree_profile_projection_try_fit_driver_host_cpu_clock(
       context, aggregate->physical_device_ordinal, &clock_fit);
+  iree_profile_model_duration_scale_t duration_scale;
+  timing.has_duration_scale =
+      iree_profile_projection_try_resolve_duration_scale(
+          context, aggregate->physical_device_ordinal, &duration_scale);
+  timing.duration_scale_source = duration_scale.source;
   timing.ns_per_tick =
-      timing.has_clock_fit
-          ? iree_profile_model_clock_fit_ns_per_tick(&clock_fit)
+      timing.has_duration_scale
+          ? iree_profile_model_duration_scale_ns_per_tick(&duration_scale)
           : 0.0;
   timing.has_time_ns =
-      timing.has_clock_fit && aggregate->valid_count != 0 &&
-      iree_profile_model_clock_fit_scale_ticks_to_ns(
-          &clock_fit, aggregate->minimum_ticks, &timing.minimum_ns) &&
-      iree_profile_model_clock_fit_scale_ticks_to_ns(
-          &clock_fit, aggregate->maximum_ticks, &timing.maximum_ns) &&
-      iree_profile_model_clock_fit_scale_ticks_to_ns(
-          &clock_fit, aggregate->total_ticks, &timing.total_ns);
+      timing.has_duration_scale && aggregate->valid_count != 0 &&
+      iree_profile_model_duration_scale_ticks_to_ns(
+          &duration_scale, aggregate->minimum_ticks, &timing.minimum_ns) &&
+      iree_profile_model_duration_scale_ticks_to_ns(
+          &duration_scale, aggregate->maximum_ticks, &timing.maximum_ns) &&
+      iree_profile_model_duration_scale_ticks_to_ns(
+          &duration_scale, aggregate->total_ticks, &timing.total_ns);
   return timing;
 }
 
 typedef struct iree_profile_projection_submission_timing_t {
   // True when the aggregate's device has a host CPU clock fit.
   bool has_clock_fit;
+  // True when the aggregate's device has an elapsed-duration scale.
+  bool has_duration_scale;
+  // Provenance of the elapsed-duration scale.
+  iree_profile_model_duration_scale_source_t duration_scale_source;
   // True when |total_dispatch_ticks| was converted to nanoseconds.
   bool has_total_dispatch_ns;
   // Span from earliest dispatch start to latest dispatch end in device ticks.
   double span_ticks;
-  // Nanoseconds per device tick when |has_clock_fit| is true.
+  // Nanoseconds per device tick when |has_duration_scale| is true.
   double ns_per_tick;
   // Total dispatch duration in nanoseconds when |has_total_dispatch_ns| is
   // true.
@@ -100,14 +123,19 @@ iree_profile_projection_calculate_submission_timing(
   iree_profile_model_clock_fit_t clock_fit;
   timing.has_clock_fit = iree_profile_projection_try_fit_driver_host_cpu_clock(
       context, physical_device_ordinal, &clock_fit);
+  iree_profile_model_duration_scale_t duration_scale;
+  timing.has_duration_scale =
+      iree_profile_projection_try_resolve_duration_scale(
+          context, physical_device_ordinal, &duration_scale);
+  timing.duration_scale_source = duration_scale.source;
   timing.ns_per_tick =
-      timing.has_clock_fit
-          ? iree_profile_model_clock_fit_ns_per_tick(&clock_fit)
+      timing.has_duration_scale
+          ? iree_profile_model_duration_scale_ns_per_tick(&duration_scale)
           : 0.0;
   timing.has_total_dispatch_ns =
-      timing.has_clock_fit && valid_count != 0 &&
-      iree_profile_model_clock_fit_scale_ticks_to_ns(
-          &clock_fit, total_dispatch_ticks, &timing.total_dispatch_ns);
+      timing.has_duration_scale && valid_count != 0 &&
+      iree_profile_model_duration_scale_ticks_to_ns(
+          &duration_scale, total_dispatch_ticks, &timing.total_dispatch_ns);
   return timing;
 }
 
@@ -139,9 +167,9 @@ static void iree_profile_dispatch_print_event_jsonl(
       is_valid ? event->end_tick - event->start_tick : 0;
   int64_t duration_ns = 0;
   const bool has_duration_ns =
-      row->has_clock_fit && is_valid &&
-      iree_profile_model_clock_fit_scale_ticks_to_ns(
-          row->clock_fit, duration_ticks, &duration_ns);
+      row->has_duration_scale && is_valid &&
+      iree_profile_model_duration_scale_ticks_to_ns(
+          &row->duration_scale, duration_ticks, &duration_ns);
 
   fprintf(file,
           "{\"type\":\"dispatch_event\",\"physical_device_ordinal\":%u"
@@ -171,6 +199,14 @@ static void iree_profile_dispatch_print_event_jsonl(
           is_valid ? "true" : "false");
   fprintf(file, ",\"clock_fit_available\":%s",
           row->has_clock_fit ? "true" : "false");
+  fprintf(file, ",\"duration_scale_available\":%s,\"duration_scale_source\":",
+          row->has_duration_scale ? "true" : "false");
+  iree_profile_fprint_json_string(
+      file,
+      iree_make_cstring_view(iree_profile_model_duration_scale_source_name(
+          row->has_duration_scale
+              ? row->duration_scale.source
+              : IREE_PROFILE_MODEL_DURATION_SCALE_SOURCE_NONE)));
   fprintf(file,
           ",\"device_tick_domain\":\"device_tick\""
           ",\"duration_time_domain\":\"device_tick_duration_ns\""
@@ -332,7 +368,13 @@ static iree_status_t iree_profile_command_print_operation_text(
             operation->workgroup_size[1], operation->workgroup_size[2]);
   } else if (operation->type == IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_FILL ||
              operation->type ==
-                 IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_UPDATE) {
+                 IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_UPDATE ||
+             operation->type ==
+                 IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_WAIT ||
+             operation->type ==
+                 IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_STORE ||
+             operation->type ==
+                 IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_RMW) {
     fprintf(file, " target=%u target_offset=%" PRIu64 " length=%" PRIu64,
             operation->target_ordinal, operation->target_offset,
             operation->length);
@@ -588,10 +630,15 @@ static void iree_profile_dispatch_print_jsonl_group(
   fprintf(file, ",\"clock_fit_available\":%s",
           timing.has_clock_fit ? "true" : "false");
   fprintf(file,
+          ",\"duration_scale_available\":%s"
+          ",\"duration_scale_source\":\"%s\""
           ",\"time_ns_available\":%s"
           ",\"min_ns\":%" PRId64
           ",\"avg_ns\":%.3f"
           ",\"stddev_ns\":%.3f,\"max_ns\":%" PRId64 ",\"total_ns\":%" PRId64,
+          timing.has_duration_scale ? "true" : "false",
+          iree_profile_model_duration_scale_source_name(
+              timing.duration_scale_source),
           timing.has_time_ns ? "true" : "false",
           timing.has_time_ns ? timing.minimum_ns : 0,
           timing.has_time_ns ? aggregate->mean_ticks * timing.ns_per_tick : 0.0,
@@ -1322,6 +1369,8 @@ static void iree_profile_executable_print_jsonl_dispatch_group(
           ",\"avg_ticks\":%.3f,\"max_ticks\":%" PRIu64
           ",\"total_ticks\":%" PRIu64
           ",\"clock_fit_available\":%s"
+          ",\"duration_scale_available\":%s"
+          ",\"duration_scale_source\":\"%s\""
           ",\"time_ns_available\":%s"
           ",\"min_ns\":%" PRId64
           ",\"avg_ns\":%.3f"
@@ -1332,6 +1381,9 @@ static void iree_profile_executable_print_jsonl_dispatch_group(
           timing.average_ticks,
           aggregate->valid_count ? aggregate->maximum_ticks : 0,
           aggregate->total_ticks, timing.has_clock_fit ? "true" : "false",
+          timing.has_duration_scale ? "true" : "false",
+          iree_profile_model_duration_scale_source_name(
+              timing.duration_scale_source),
           timing.has_time_ns ? "true" : "false",
           timing.has_time_ns ? timing.minimum_ns : 0,
           timing.has_time_ns ? timing.average_ticks * timing.ns_per_tick : 0.0,
@@ -1709,26 +1761,31 @@ static void iree_profile_command_print_jsonl_execution(
           context, aggregate->physical_device_ordinal,
           aggregate->earliest_start_tick, aggregate->latest_end_tick,
           aggregate->valid_count, aggregate->total_ticks);
-  fprintf(file,
-          "{\"type\":\"command_execution\",\"command_buffer_id\":%" PRIu64
-          ",\"submission_id\":%" PRIu64
-          ",\"physical_device_ordinal\":%u"
-          ",\"queue_ordinal\":%u,\"stream_id\":%" PRIu64
-          ",\"dispatches\":%" PRIu64 ",\"valid\":%" PRIu64
-          ",\"invalid\":%" PRIu64
-          ",\"span_ticks\":%.3f"
-          ",\"total_dispatch_ticks\":%" PRIu64
-          ",\"clock_fit_available\":%s"
-          ",\"total_dispatch_time_ns_available\":%s"
-          ",\"span_ns\":%.3f,\"total_dispatch_ns\":%" PRId64 "}\n",
-          aggregate->command_buffer_id, aggregate->submission_id,
-          aggregate->physical_device_ordinal, aggregate->queue_ordinal,
-          aggregate->stream_id, aggregate->dispatch_count,
-          aggregate->valid_count, aggregate->invalid_count, timing.span_ticks,
-          aggregate->total_ticks, timing.has_clock_fit ? "true" : "false",
-          timing.has_total_dispatch_ns ? "true" : "false",
-          timing.has_clock_fit ? timing.span_ticks * timing.ns_per_tick : 0.0,
-          timing.has_total_dispatch_ns ? timing.total_dispatch_ns : 0);
+  fprintf(
+      file,
+      "{\"type\":\"command_execution\",\"command_buffer_id\":%" PRIu64
+      ",\"submission_id\":%" PRIu64
+      ",\"physical_device_ordinal\":%u"
+      ",\"queue_ordinal\":%u,\"stream_id\":%" PRIu64 ",\"dispatches\":%" PRIu64
+      ",\"valid\":%" PRIu64 ",\"invalid\":%" PRIu64
+      ",\"span_ticks\":%.3f"
+      ",\"total_dispatch_ticks\":%" PRIu64
+      ",\"clock_fit_available\":%s"
+      ",\"duration_scale_available\":%s"
+      ",\"duration_scale_source\":\"%s\""
+      ",\"total_dispatch_time_ns_available\":%s"
+      ",\"span_ns\":%.3f,\"total_dispatch_ns\":%" PRId64 "}\n",
+      aggregate->command_buffer_id, aggregate->submission_id,
+      aggregate->physical_device_ordinal, aggregate->queue_ordinal,
+      aggregate->stream_id, aggregate->dispatch_count, aggregate->valid_count,
+      aggregate->invalid_count, timing.span_ticks, aggregate->total_ticks,
+      timing.has_clock_fit ? "true" : "false",
+      timing.has_duration_scale ? "true" : "false",
+      iree_profile_model_duration_scale_source_name(
+          timing.duration_scale_source),
+      timing.has_total_dispatch_ns ? "true" : "false",
+      timing.has_duration_scale ? timing.span_ticks * timing.ns_per_tick : 0.0,
+      timing.has_total_dispatch_ns ? timing.total_dispatch_ns : 0);
 }
 
 static void iree_profile_command_print_jsonl_executions(
@@ -1895,14 +1952,15 @@ static void iree_profile_queue_print_text_device_event(
                         event->end_tick >= event->start_tick;
   const uint64_t duration_ticks =
       is_valid ? event->end_tick - event->start_tick : 0;
-  iree_profile_model_clock_fit_t clock_fit;
-  const bool has_clock_fit =
-      iree_profile_projection_try_fit_driver_host_cpu_clock(
-          context, event->physical_device_ordinal, &clock_fit);
+  iree_profile_model_duration_scale_t duration_scale;
+  const bool has_duration_scale =
+      iree_profile_projection_try_resolve_duration_scale(
+          context, event->physical_device_ordinal, &duration_scale);
   int64_t duration_ns = 0;
-  const bool has_duration_ns = is_valid && has_clock_fit &&
-                               iree_profile_model_clock_fit_scale_ticks_to_ns(
-                                   &clock_fit, duration_ticks, &duration_ns);
+  const bool has_duration_ns =
+      is_valid && has_duration_scale &&
+      iree_profile_model_duration_scale_ticks_to_ns(
+          &duration_scale, duration_ticks, &duration_ns);
   fprintf(file,
           "  device_event=%" PRIu64 " type=%s submission=%" PRIu64
           " command_buffer=%" PRIu64 " allocation=%" PRIu64
@@ -2099,6 +2157,8 @@ static void iree_profile_queue_print_jsonl_submissions(
             ",\"valid\":%" PRIu64 ",\"invalid\":%" PRIu64
             ",\"span_ticks\":%.3f,\"total_dispatch_ticks\":%" PRIu64
             ",\"clock_fit_available\":%s"
+            ",\"duration_scale_available\":%s"
+            ",\"duration_scale_source\":\"%s\""
             ",\"total_dispatch_time_ns_available\":%s"
             ",\"span_ns\":%.3f,\"total_dispatch_ns\":%" PRId64 "}\n",
             aggregate->submission_id, aggregate->physical_device_ordinal,
@@ -2106,8 +2166,12 @@ static void iree_profile_queue_print_jsonl_submissions(
             aggregate->dispatch_count, aggregate->valid_count,
             aggregate->invalid_count, timing.span_ticks, aggregate->total_ticks,
             timing.has_clock_fit ? "true" : "false",
+            timing.has_duration_scale ? "true" : "false",
+            iree_profile_model_duration_scale_source_name(
+                timing.duration_scale_source),
             timing.has_total_dispatch_ns ? "true" : "false",
-            timing.has_clock_fit ? timing.span_ticks * timing.ns_per_tick : 0.0,
+            timing.has_duration_scale ? timing.span_ticks * timing.ns_per_tick
+                                      : 0.0,
             timing.has_total_dispatch_ns ? timing.total_dispatch_ns : 0);
   }
 }
@@ -2130,29 +2194,39 @@ static void iree_profile_queue_print_jsonl_device_events(
     const bool has_clock_fit =
         iree_profile_projection_try_fit_driver_host_cpu_clock(
             context, event->physical_device_ordinal, &clock_fit);
+    iree_profile_model_duration_scale_t duration_scale;
+    const bool has_duration_scale =
+        iree_profile_projection_try_resolve_duration_scale(
+            context, event->physical_device_ordinal, &duration_scale);
     int64_t duration_ns = 0;
-    const bool has_duration_ns = is_valid && has_clock_fit &&
-                                 iree_profile_model_clock_fit_scale_ticks_to_ns(
-                                     &clock_fit, duration_ticks, &duration_ns);
-    fprintf(file,
-            "{\"type\":\"queue_device_event\",\"event_id\":%" PRIu64
-            ",\"op\":\"%s\",\"flags\":%u,\"submission_id\":%" PRIu64
-            ",\"command_buffer_id\":%" PRIu64 ",\"allocation_id\":%" PRIu64
-            ",\"physical_device_ordinal\":%u,\"queue_ordinal\":%u"
-            ",\"stream_id\":%" PRIu64
-            ",\"operation_count\":%u"
-            ",\"payload_length\":%" PRIu64 ",\"start_tick\":%" PRIu64
-            ",\"end_tick\":%" PRIu64 ",\"duration_ticks\":%" PRIu64
-            ",\"valid\":%s"
-            ",\"clock_fit_available\":%s,\"duration_ns\":%" PRId64 "}\n",
-            event->event_id, iree_profile_queue_event_type_name(event->type),
-            event->flags, event->submission_id, event->command_buffer_id,
-            event->allocation_id, event->physical_device_ordinal,
-            event->queue_ordinal, event->stream_id, event->operation_count,
-            event->payload_length, event->start_tick, event->end_tick,
-            duration_ticks, is_valid ? "true" : "false",
-            has_clock_fit ? "true" : "false",
-            has_duration_ns ? duration_ns : 0);
+    const bool has_duration_ns =
+        is_valid && has_duration_scale &&
+        iree_profile_model_duration_scale_ticks_to_ns(
+            &duration_scale, duration_ticks, &duration_ns);
+    fprintf(
+        file,
+        "{\"type\":\"queue_device_event\",\"event_id\":%" PRIu64
+        ",\"op\":\"%s\",\"flags\":%u,\"submission_id\":%" PRIu64
+        ",\"command_buffer_id\":%" PRIu64 ",\"allocation_id\":%" PRIu64
+        ",\"physical_device_ordinal\":%u,\"queue_ordinal\":%u"
+        ",\"stream_id\":%" PRIu64
+        ",\"operation_count\":%u"
+        ",\"payload_length\":%" PRIu64 ",\"start_tick\":%" PRIu64
+        ",\"end_tick\":%" PRIu64 ",\"duration_ticks\":%" PRIu64
+        ",\"valid\":%s"
+        ",\"clock_fit_available\":%s"
+        ",\"duration_scale_available\":%s"
+        ",\"duration_scale_source\":\"%s\""
+        ",\"duration_ns\":%" PRId64 "}\n",
+        event->event_id, iree_profile_queue_event_type_name(event->type),
+        event->flags, event->submission_id, event->command_buffer_id,
+        event->allocation_id, event->physical_device_ordinal,
+        event->queue_ordinal, event->stream_id, event->operation_count,
+        event->payload_length, event->start_tick, event->end_tick,
+        duration_ticks, is_valid ? "true" : "false",
+        has_clock_fit ? "true" : "false", has_duration_scale ? "true" : "false",
+        iree_profile_model_duration_scale_source_name(duration_scale.source),
+        has_duration_ns ? duration_ns : 0);
   }
 }
 

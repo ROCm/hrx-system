@@ -7,34 +7,177 @@
 #include <string.h>
 
 #include "loom/error/error_catalog.h"
+#include "loom/ir/module_record.h"
 #include "loom/verify/verify_constraints.h"
 #include "loom/verify/verify_diagnostics.h"
 #include "loom/verify/verify_ownership.h"
 #include "loom/verify/verify_state.h"
 #include "loom/verify/verify_structure.h"
 
-static iree_status_t loom_verify_op(loom_verify_state_t* state,
-                                    const loom_op_t* op);
+// Static structural contract for one op-owned region traversal.
+typedef struct loom_verify_region_contract_t {
+  // Operation owning the region.
+  const loom_op_t* op;
+  // Vtable describing the owning operation.
+  const loom_op_vtable_t* vtable;
+  // Generated structural requirements for the region.
+  const loom_region_descriptor_t* descriptor;
+  // Region ordinal within the owning operation.
+  uint8_t region_index;
+} loom_verify_region_contract_t;
 
-static iree_status_t loom_verify_region(loom_verify_state_t* state,
-                                        loom_region_t* region) {
-  if (!region) return iree_ok_status();
-  const loom_region_t* saved_region = state->current_region;
-  loom_consumption_region_query_t* saved_consumption_query =
-      state->current_consumption_query;
-  loom_consumption_region_query_t consumption_query;
-  state->current_region = region;
-  iree_status_t status = loom_consumption_region_query_initialize(
-      state->module, region, &state->arena, &consumption_query);
-  if (!iree_status_is_ok(status)) {
-    state->current_region = saved_region;
-    state->current_consumption_query = saved_consumption_query;
-    return status;
+// Operation verification is part of the recursive region loop. An out-of-line
+// call here is paid for every operation and prevents the compiler from
+// scheduling region bookkeeping with the operation checks.
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t loom_verify_op(
+    loom_verify_state_t* state, const loom_op_t* op,
+    const loom_op_vtable_t* vtable);
+
+static iree_string_view_t loom_verify_region_op_kind_name(
+    loom_verify_state_t* state, loom_op_kind_t kind) {
+  const loom_op_vtable_t* vtable = loom_verify_lookup_vtable(state, kind);
+  return vtable ? loom_op_vtable_name(vtable) : IREE_SV("<unknown op>");
+}
+
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static iree_status_t
+loom_verify_emit_op_after_terminator(loom_verify_state_t* state,
+                                     const loom_op_t* op,
+                                     const loom_op_vtable_t* vtable,
+                                     const loom_op_t* terminator_op) {
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(vtable ? loom_op_vtable_name(vtable)
+                               : IREE_SV("<unknown op>")),
+  };
+  loom_diagnostic_related_op_t related_ops[] = {{
+      .label = IREE_SV("terminator here"),
+      .op = terminator_op,
+  }};
+  loom_diagnostic_emission_t emission = {
+      .op = op,
+      .error = LOOM_ERR_STRUCTURE_012,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+      .related_ops = related_ops,
+      .related_op_count = IREE_ARRAYSIZE(related_ops),
+  };
+  loom_verify_emit_diagnostic(state, &emission);
+  return loom_verify_pending_diagnostic_status(state);
+}
+
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static iree_status_t
+loom_verify_emit_missing_region(loom_verify_state_t* state,
+                                const loom_verify_region_contract_t* contract) {
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_op_vtable_name(contract->vtable)),
+      loom_param_u32(contract->op->region_count),
+      loom_param_u32(contract->vtable->region_count),
+  };
+  loom_verify_emit_structured(state, contract->op, LOOM_ERR_STRUCTURE_004,
+                              params, IREE_ARRAYSIZE(params));
+  return loom_verify_pending_diagnostic_status(state);
+}
+
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static iree_status_t
+loom_verify_emit_single_block_region(
+    loom_verify_state_t* state, const loom_verify_region_contract_t* contract,
+    uint16_t block_count) {
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_op_vtable_name(contract->vtable)),
+      loom_param_u32(contract->region_index),
+      loom_param_u32(block_count),
+  };
+  loom_verify_emit_structured(state, contract->op, LOOM_ERR_STRUCTURE_006,
+                              params, IREE_ARRAYSIZE(params));
+  return loom_verify_pending_diagnostic_status(state);
+}
+
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static iree_status_t
+loom_verify_emit_missing_terminator(
+    loom_verify_state_t* state, const loom_verify_region_contract_t* contract) {
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_op_vtable_name(contract->vtable)),
+      loom_param_u32(contract->region_index),
+  };
+  loom_verify_emit_structured(state, contract->op, LOOM_ERR_STRUCTURE_005,
+                              params, IREE_ARRAYSIZE(params));
+  return loom_verify_pending_diagnostic_status(state);
+}
+
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static iree_status_t
+loom_verify_emit_wrong_terminator(loom_verify_state_t* state,
+                                  const loom_verify_region_contract_t* contract,
+                                  const loom_op_t* terminator_op) {
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_op_vtable_name(contract->vtable)),
+      loom_param_u32(contract->region_index),
+      loom_param_string(loom_verify_region_op_kind_name(
+          state, contract->descriptor->terminator)),
+      loom_param_string(
+          loom_verify_region_op_kind_name(state, terminator_op->kind)),
+  };
+  loom_verify_emit_structured(state, contract->op, LOOM_ERR_STRUCTURE_018,
+                              params, IREE_ARRAYSIZE(params));
+  return loom_verify_pending_diagnostic_status(state);
+}
+
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static void
+loom_verify_emit_non_command_effect(loom_verify_state_t* state,
+                                    const loom_op_t* op,
+                                    const loom_op_vtable_t* vtable) {
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_op_vtable_name(vtable)),
+  };
+  loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_053, params,
+                              IREE_ARRAYSIZE(params));
+}
+
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline void
+loom_verify_command_effect_scope(loom_verify_state_t* state,
+                                 const loom_op_t* op,
+                                 const loom_op_vtable_t* vtable,
+                                 loom_trait_flags_t traits) {
+  if (!state->region_scope.command_effects_only) return;
+  if (!loom_traits_may_read(traits) && !loom_traits_may_write(traits) &&
+      !loom_traits_are_convergent(traits)) {
+    return;
   }
-  state->current_consumption_query = &consumption_query;
+  if (iree_any_bit_set(vtable->traits, LOOM_TRAIT_COMMAND_EFFECT)) return;
+  loom_verify_emit_non_command_effect(state, op, vtable);
+}
+
+static iree_status_t loom_verify_region(
+    loom_verify_state_t* state, loom_region_t* region,
+    const loom_verify_region_contract_t* contract) {
+  if (!region) {
+    if (contract &&
+        !iree_any_bit_set(contract->descriptor->flags, LOOM_REGION_OPTIONAL)) {
+      return loom_verify_emit_missing_region(state, contract);
+    }
+    return iree_ok_status();
+  }
+  if (contract &&
+      iree_any_bit_set(contract->descriptor->flags, LOOM_REGION_SINGLE_BLOCK) &&
+      region->block_count != 1) {
+    IREE_RETURN_IF_ERROR(loom_verify_emit_single_block_region(
+        state, contract, region->block_count));
+  }
+  const loom_region_t* saved_region = state->region_scope.current;
+  loom_consumption_region_query_t* saved_consumption_query =
+      state->region_scope.consumption_query;
+  const bool saved_command_effects_only =
+      state->region_scope.command_effects_only;
+  loom_consumption_region_query_t consumption_query;
+  state->region_scope.current = region;
+  loom_consumption_region_query_initialize(state->module, region, &state->arena,
+                                           &consumption_query);
+  state->region_scope.consumption_query = &consumption_query;
+  if (contract && iree_any_bit_set(contract->descriptor->flags,
+                                   LOOM_REGION_COMMAND_EFFECTS_ONLY)) {
+    state->region_scope.command_effects_only = true;
+  }
 
   bool scope_pushed = false;
-  status = loom_verify_push_scope(state);
+  iree_status_t status = loom_verify_push_scope(state);
   if (iree_status_is_ok(status)) {
     scope_pushed = true;
   }
@@ -49,35 +192,66 @@ static iree_status_t loom_verify_region(loom_verify_state_t* state,
          ++a) {
       status = loom_verify_define_value(state, loom_block_arg_id(block, a));
     }
-    if (iree_status_is_ok(status)) {
+    if (iree_status_is_ok(status) && !state->type_summary.all_well_formed) {
       loom_verify_block_arg_type_well_formedness(state, block);
       status = loom_verify_pending_diagnostic_status(state);
     }
-    if (iree_status_is_ok(status)) {
+    if (iree_status_is_ok(status) && state->static_encodings.diagnosed_bits) {
+      loom_verify_block_arg_static_encoding_refs(state, block);
+      status = loom_verify_pending_diagnostic_status(state);
+    }
+    if (iree_status_is_ok(status) && state->type_summary.may_reference_values) {
       loom_verify_block_arg_encoding_refs(state, block);
       status = loom_verify_pending_diagnostic_status(state);
     }
+    const loom_op_t* terminator_op = NULL;
     loom_op_t* current = NULL;
     loom_block_for_each_op(block, current) {
       if (!iree_status_is_ok(status) || loom_verify_at_error_limit(state)) {
         break;
       }
-      status = loom_verify_op(state, current);
+      const loom_op_vtable_t* vtable =
+          loom_verify_lookup_vtable(state, current->kind);
+      if (contract) {
+        if (terminator_op) {
+          status = loom_verify_emit_op_after_terminator(state, current, vtable,
+                                                        terminator_op);
+          if (!iree_status_is_ok(status)) break;
+        } else if (vtable &&
+                   iree_any_bit_set(vtable->traits, LOOM_TRAIT_TERMINATOR)) {
+          terminator_op = current;
+        }
+      }
+      status = loom_verify_op(state, current, vtable);
+    }
+    if (contract && iree_status_is_ok(status) &&
+        !loom_verify_at_error_limit(state)) {
+      const bool is_cfg =
+          iree_any_bit_set(region->flags, LOOM_REGION_INSTANCE_FLAG_CFG);
+      if (!terminator_op && !is_cfg) {
+        status = loom_verify_emit_missing_terminator(state, contract);
+      } else if (terminator_op && !is_cfg &&
+                 contract->descriptor->terminator != LOOM_OP_KIND_UNKNOWN &&
+                 terminator_op->kind != contract->descriptor->terminator) {
+        status =
+            loom_verify_emit_wrong_terminator(state, contract, terminator_op);
+      }
     }
   }
 
   if (scope_pushed) {
     loom_verify_pop_scope(state);
   }
-  state->current_region = saved_region;
-  state->current_consumption_query = saved_consumption_query;
+  state->region_scope.current = saved_region;
+  state->region_scope.consumption_query = saved_consumption_query;
+  state->region_scope.command_effects_only = saved_command_effects_only;
   return status;
 }
 
-static iree_status_t loom_verify_op(loom_verify_state_t* state,
-                                    const loom_op_t* op) {
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t loom_verify_op(
+    loom_verify_state_t* state, const loom_op_t* op,
+    const loom_op_vtable_t* vtable) {
   const uint32_t initial_error_count = state->result->error_count;
-  const loom_op_vtable_t* vtable = loom_verify_lookup_vtable(state, op->kind);
   if (!vtable) {
     // Unknown op kind — emit structured diagnostic.
     char kind_buffer[16];
@@ -97,19 +271,28 @@ static iree_status_t loom_verify_op(loom_verify_state_t* state,
     return iree_ok_status();
   }
 
-  loom_verify_op_declared_trait_consistency(state, op, vtable);
-  IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
   loom_verify_op_placement(state, op, vtable);
   IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
 
   const bool has_signature_scope = loom_verify_has_func_signature_scope(vtable);
   if (has_signature_scope) {
     IREE_RETURN_IF_ERROR(loom_verify_push_scope(state));
-    uint16_t arg_count = 0;
-    const loom_value_id_t* arg_ids =
-        loom_verify_func_signature_arg_ids(op, vtable, &arg_count);
-    for (uint16_t i = 0; i < arg_count; ++i) {
-      IREE_RETURN_IF_ERROR(loom_verify_define_value(state, arg_ids[i]));
+    if (loom_verify_func_args_use_operand_field(vtable)) {
+      const loom_value_id_t* operands = loom_op_const_operands(op);
+      for (uint16_t i = 0; i < op->operand_count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_verify_define_value(state, operands[i]));
+      }
+    } else {
+      uint16_t arg_count = 0;
+      const loom_value_id_t* arg_ids = loom_func_like_arg_ids(
+          (loom_func_like_t){
+              .op = (loom_op_t*)op,
+              .vtable = vtable->func_like,
+          },
+          &arg_count);
+      for (uint16_t i = 0; i < arg_count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_verify_define_value(state, arg_ids[i]));
+      }
     }
   }
 
@@ -132,18 +315,35 @@ static iree_status_t loom_verify_op(loom_verify_state_t* state,
   // must preserve the same effect and optimization invariants as declared
   // traits. Run this after structural checks so callbacks can safely inspect
   // attributes.
-  loom_verify_op_effective_trait_consistency(state, op, vtable);
+  const loom_trait_flags_t effective_traits =
+      loom_verify_op_effective_trait_consistency(state, op, vtable);
+  IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
+
+  // Command programs may perform observable work only through explicit
+  // command operations. This consumes the effective trait word already cached
+  // on the op while the ordinary verifier traversal is visiting it.
+  loom_verify_command_effect_scope(state, op, vtable, effective_traits);
   IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
 
   // Operand and result type payloads must satisfy core representation
   // invariants before table-driven constraints interpret them.
-  loom_verify_op_type_well_formedness(state, op, vtable);
-  IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
+  if (!state->type_summary.all_well_formed) {
+    loom_verify_op_type_well_formedness(state, op, vtable);
+    IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
+  }
 
   // Per-field type constraint checks (operand/result types satisfy
   // the type category declared in the vtable descriptors).
   loom_verify_type_constraints(state, op, vtable);
   IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
+
+  // Static encoding records are classified when constructed. Only malformed
+  // modules pay for use-site diagnostics, preserving exact source locations
+  // without rescanning valid records on every use.
+  if (state->static_encodings.diagnosed_bits) {
+    loom_verify_static_encoding_refs(state, op);
+    IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
+  }
 
   // OperandDict format elements are stored as ordinary variadic operands plus
   // a key -> operand-ordinal DICT attribute. Verify that field metadata is
@@ -156,8 +356,10 @@ static iree_status_t loom_verify_op(loom_verify_state_t* state,
   // valid LOOM_TYPE_ENCODING values. Ordinary references must be in scope;
   // result co-references and global declaration placeholders have explicit
   // rules in loom_verify_encoding_ref.
-  loom_verify_encoding_refs(state, op, vtable);
-  IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
+  if (state->type_summary.may_reference_values) {
+    loom_verify_encoding_refs(state, op, vtable);
+    IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
+  }
 
   // Poison may flow through pure SSA computation, but it must not be consumed
   // by an operation that observes values outside ordinary use-def propagation.
@@ -170,18 +372,16 @@ static iree_status_t loom_verify_op(loom_verify_state_t* state,
   loom_verify_semantic_constraints(state, op, vtable);
   IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
 
-  // Tied result validation and linear ownership consume marking.
+  // Tied result validation and linear tied/moved source consume marking.
   IREE_RETURN_IF_ERROR(loom_verify_tied_results(state, op, vtable));
+  IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
+  IREE_RETURN_IF_ERROR(loom_verify_moved_results(state, op));
   IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
 
   // Symbol reference attributes must point to valid symbol table entries.
   IREE_RETURN_IF_ERROR(loom_verify_symbol_definition(state, op, vtable));
   IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
   loom_verify_symbol_references(state, op, vtable);
-  IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
-
-  // Region structure: single-block invariants, terminator presence.
-  loom_verify_region_structure(state, op, vtable);
   IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
 
   // Define result values. Must happen after all checks on this op
@@ -200,7 +400,16 @@ static iree_status_t loom_verify_op(loom_verify_state_t* state,
   loom_region_t** regions = loom_op_regions(op);
   for (uint8_t i = 0; i < op->region_count; ++i) {
     if (loom_verify_at_error_limit(state)) break;
-    IREE_RETURN_IF_ERROR(loom_verify_region(state, regions[i]));
+    const loom_region_descriptor_t* descriptor =
+        loom_op_vtable_region_descriptor(vtable, i);
+    loom_verify_region_contract_t contract = {
+        .op = op,
+        .vtable = vtable,
+        .descriptor = descriptor,
+        .region_index = i,
+    };
+    IREE_RETURN_IF_ERROR(
+        loom_verify_region(state, regions[i], descriptor ? &contract : NULL));
   }
   loom_verify_func_purity_body_effects(state, op, vtable);
   IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
@@ -277,6 +486,7 @@ static iree_status_t loom_verify_state_initialize(
   memset(state, 0, sizeof(*state));
   state->module = module;
   state->result = out_result;
+  state->type_summary.may_reference_values = true;
   out_result->error_count = 0;
   out_result->warning_count = 0;
 
@@ -343,6 +553,40 @@ static void loom_verify_state_deinitialize(loom_verify_state_t* state) {
   iree_arena_deinitialize(&state->arena);
 }
 
+static iree_status_t loom_verify_keyed_module_records(
+    loom_verify_state_t* state) {
+  loom_module_record_plan_t plan;
+  IREE_RETURN_IF_ERROR(
+      loom_module_record_plan_initialize(state->module, &plan));
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 1;
+       iree_status_is_ok(status) && i < plan.record_count; ++i) {
+    const loom_module_record_t* previous = &plan.records[i - 1];
+    const loom_module_record_t* current = &plan.records[i];
+    if (!loom_module_record_identity_equal(previous, current)) continue;
+    loom_diagnostic_param_t params[] = {
+        loom_param_string(loom_op_vtable_name(current->vtable)),
+        loom_param_string(current->key),
+    };
+    loom_diagnostic_related_op_t related_ops[] = {{
+        .label = IREE_SV("previous record here"),
+        .op = previous->op,
+    }};
+    loom_diagnostic_emission_t emission = {
+        .op = current->op,
+        .error = LOOM_ERR_STRUCTURE_051,
+        .params = params,
+        .param_count = IREE_ARRAYSIZE(params),
+        .related_ops = related_ops,
+        .related_op_count = IREE_ARRAYSIZE(related_ops),
+    };
+    loom_verify_emit_diagnostic(state, &emission);
+    status = loom_verify_pending_diagnostic_status(state);
+  }
+  loom_module_record_plan_deinitialize(&plan);
+  return status;
+}
+
 iree_status_t loom_verify_module(const loom_module_t* module,
                                  const loom_verify_options_t* options,
                                  loom_verify_result_t* out_result) {
@@ -359,11 +603,32 @@ iree_status_t loom_verify_module(const loom_module_t* module,
   IREE_RETURN_IF_ERROR(
       loom_verify_state_initialize(&state, module, options, out_result));
 
+  iree_status_t diagnostic_status =
+      loom_verify_prepare_static_encodings(&state);
+  if (!iree_status_is_ok(diagnostic_status)) {
+    loom_verify_state_deinitialize(&state);
+    return diagnostic_status;
+  }
+  diagnostic_status = loom_verify_prepare_available_symbols(&state);
+  if (!iree_status_is_ok(diagnostic_status)) {
+    loom_verify_state_deinitialize(&state);
+    return diagnostic_status;
+  }
+
+  // Interned parameterized types are module-level values. Verify their symbol
+  // parameters once instead of rediscovering the same type graph from every
+  // SSA value that carries one of the types.
+  loom_verify_module_type_symbol_references(&state);
+  diagnostic_status = loom_verify_pending_diagnostic_status(&state);
+  if (!iree_status_is_ok(diagnostic_status)) {
+    loom_verify_state_deinitialize(&state);
+    return diagnostic_status;
+  }
+
   // Walk the module body.
   if (module->body) {
-    // Module-level invariant: only symbol-defining ops (func.def,
-    // func.decl, etc.) are allowed at the top level. Ops without
-    // LOOM_TRAIT_SYMBOL_DEFINE belong inside function bodies.
+    // Module-level invariant: top-level operations either define a symbol or
+    // explicitly declare module-scope ownership.
     if (module->body->block_count > 0) {
       loom_block_t* entry = loom_region_entry_block(module->body);
       const loom_op_t* op = NULL;
@@ -371,15 +636,15 @@ iree_status_t loom_verify_module(const loom_module_t* module,
         const loom_op_vtable_t* vtable =
             loom_verify_lookup_vtable(&state, op->kind);
         if (vtable &&
-            !iree_any_bit_set(vtable->traits, LOOM_TRAIT_SYMBOL_DEFINE)) {
+            !iree_any_bit_set(vtable->traits, LOOM_TRAIT_SYMBOL_DEFINE |
+                                                  LOOM_TRAIT_MODULE_SCOPE)) {
           iree_string_view_t op_name = loom_op_vtable_name(vtable);
           loom_diagnostic_param_t params[] = {
               loom_param_string(op_name),
           };
           loom_verify_emit_structured(&state, op, LOOM_ERR_STRUCTURE_011,
                                       params, IREE_ARRAYSIZE(params));
-          iree_status_t diagnostic_status =
-              loom_verify_pending_diagnostic_status(&state);
+          diagnostic_status = loom_verify_pending_diagnostic_status(&state);
           if (!iree_status_is_ok(diagnostic_status)) {
             loom_verify_state_deinitialize(&state);
             return diagnostic_status;
@@ -388,11 +653,32 @@ iree_status_t loom_verify_module(const loom_module_t* module,
       }
     }
 
-    iree_status_t walk_status = loom_verify_region(&state, module->body);
+    iree_status_t walk_status =
+        loom_verify_region(&state, module->body, /*contract=*/NULL);
     if (!iree_status_is_ok(walk_status)) {
       loom_verify_state_deinitialize(&state);
       return walk_status;
     }
+
+    // The record plan consumes generated key descriptors and verified string
+    // attributes directly. Structural errors suppress this dependent check.
+    if (out_result->error_count == 0) {
+      diagnostic_status = loom_verify_keyed_module_records(&state);
+      if (!iree_status_is_ok(diagnostic_status)) {
+        loom_verify_state_deinitialize(&state);
+        return diagnostic_status;
+      }
+    }
+  }
+
+  // Static encoding aliases may be authored without an operation or type use.
+  // Diagnose only those malformed records not already attributed during the
+  // operation walk.
+  loom_verify_remaining_static_encodings(&state);
+  diagnostic_status = loom_verify_pending_diagnostic_status(&state);
+  if (!iree_status_is_ok(diagnostic_status)) {
+    loom_verify_state_deinitialize(&state);
+    return diagnostic_status;
   }
 
   loom_verify_state_deinitialize(&state);
@@ -417,7 +703,20 @@ iree_status_t loom_verify_function(const loom_module_t* module,
   IREE_RETURN_IF_ERROR(
       loom_verify_state_initialize(&state, module, options, out_result));
 
-  iree_status_t verify_status = loom_verify_op(&state, function.op);
+  iree_status_t verify_status = loom_verify_prepare_static_encodings(&state);
+  if (!iree_status_is_ok(verify_status)) {
+    loom_verify_state_deinitialize(&state);
+    return verify_status;
+  }
+  verify_status = loom_verify_prepare_available_symbols(&state);
+  if (!iree_status_is_ok(verify_status)) {
+    loom_verify_state_deinitialize(&state);
+    return verify_status;
+  }
+
+  const loom_op_vtable_t* vtable =
+      loom_verify_lookup_vtable(&state, function.op->kind);
+  verify_status = loom_verify_op(&state, function.op, vtable);
   if (!iree_status_is_ok(verify_status)) {
     loom_verify_state_deinitialize(&state);
     return verify_status;

@@ -8,6 +8,8 @@
 
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/symbolic_expr.h"
+#include "loom/analysis/view_regions.h"
+#include "loom/codegen/low/lower/lower_rule_source_memory.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
 #include "loom/ops/vector/ops.h"
@@ -128,7 +130,7 @@ loom_low_lower_descriptor_matrix_source_constraint_key(
 static iree_status_t loom_low_lower_descriptor_matrix_make_rejection(
     const loom_target_contract_query_environment_t* environment,
     const loom_target_contract_descriptor_matrix_rule_t* rule,
-    const loom_op_t* source_op, const loom_contract_diagnostic_t* diagnostic,
+    const loom_op_t* source_op, iree_string_view_t constraint,
     const loom_target_contract_rejection_t** out_rejection) {
   *out_rejection = NULL;
   loom_target_contract_rejection_t* rejection = NULL;
@@ -137,20 +139,20 @@ static iree_status_t loom_low_lower_descriptor_matrix_make_rejection(
   loom_diagnostic_param_t* params = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       environment->arena, 7, sizeof(*params), (void**)&params));
-  params[0] = loom_param_string(loom_low_lower_contract_query_nonempty(
-      environment->bundle->name, IREE_SV("<empty>")));
+  const loom_target_bundle_t* bundle =
+      loom_target_contract_query_environment_bundle(environment);
+  params[0] = loom_param_string(
+      loom_low_lower_contract_query_nonempty(bundle->name, IREE_SV("<empty>")));
   params[1] = loom_param_string(loom_low_lower_contract_query_nonempty(
-      environment->bundle->export_plan->name, IREE_SV("<empty>")));
+      bundle->export_plan->name, IREE_SV("<empty>")));
   params[2] = loom_param_string(loom_low_lower_contract_query_nonempty(
-      environment->bundle->config->name, IREE_SV("<empty>")));
+      bundle->config->name, IREE_SV("<empty>")));
   params[3] = loom_param_string(
       loom_low_lower_contract_query_function_name(environment));
   params[4] = loom_param_string(loom_op_name(environment->module, source_op));
   params[5] = loom_param_string(
       loom_low_lower_descriptor_matrix_source_key(rule->source));
-  params[6] =
-      loom_param_string(loom_low_lower_descriptor_matrix_source_constraint_key(
-          rule->source, *diagnostic));
+  params[6] = loom_param_string(constraint);
   *rejection = (loom_target_contract_rejection_t){
       .error_ref = LOOM_ERR_TARGET_039_REF,
       .params = params,
@@ -160,28 +162,47 @@ static iree_status_t loom_low_lower_descriptor_matrix_make_rejection(
   return iree_ok_status();
 }
 
+iree_status_t loom_low_lower_descriptor_matrix_reject(
+    const loom_target_contract_query_environment_t* environment,
+    const loom_target_contract_descriptor_matrix_rule_t* rule,
+    const loom_op_t* source_op, iree_string_view_t constraint,
+    loom_contract_rejection_bits_t source_rejection_bits,
+    uint32_t target_rejection_bits, uint32_t missing_feature_bits,
+    loom_target_contract_query_result_t* out_result) {
+  const loom_target_contract_rejection_t* rejection = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_descriptor_matrix_make_rejection(
+      environment, rule, source_op, constraint, &rejection));
+  *out_result = loom_target_contract_query_result_empty();
+  out_result->outcome = LOOM_TARGET_CONTRACT_QUERY_UNSUPPORTED;
+  out_result->source_rejection_bits = source_rejection_bits;
+  out_result->target_rejection_bits = target_rejection_bits;
+  out_result->missing_feature_bits = missing_feature_bits;
+  out_result->rejection = rejection;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_lower_descriptor_matrix_make_unsupported(
     const loom_target_contract_query_environment_t* environment,
     const loom_target_contract_descriptor_matrix_rule_t* rule,
     const loom_op_t* source_op, const loom_contract_diagnostic_t* diagnostic,
     loom_target_contract_query_result_t* out_result) {
-  const loom_target_contract_rejection_t* rejection = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_descriptor_matrix_make_rejection(
-      environment, rule, source_op, diagnostic, &rejection));
-  *out_result = loom_target_contract_query_result_empty();
-  out_result->outcome = LOOM_TARGET_CONTRACT_QUERY_UNSUPPORTED;
-  out_result->source_rejection_bits = diagnostic->rejection_bits;
-  out_result->rejection = rejection;
-  return iree_ok_status();
+  return loom_low_lower_descriptor_matrix_reject(
+      environment, rule, source_op,
+      loom_low_lower_descriptor_matrix_source_constraint_key(rule->source,
+                                                             *diagnostic),
+      diagnostic->rejection_bits, 0, 0, out_result);
 }
 
 iree_status_t loom_low_lower_query_descriptor_matrix_contract(
     const loom_target_contract_query_environment_t* environment,
     const loom_low_lower_descriptor_matrix_t* descriptor_matrix,
     const loom_target_contract_descriptor_matrix_rule_t* rule,
-    const loom_op_t* source_op,
+    const loom_op_t* source_op, loom_contract_request_t* out_request,
     loom_target_contract_query_result_t* out_result) {
   *out_result = loom_target_contract_query_result_empty();
+  if (out_request != NULL) {
+    *out_request = (loom_contract_request_t){0};
+  }
   if (descriptor_matrix->options == NULL || descriptor_matrix->query == NULL) {
     return iree_ok_status();
   }
@@ -206,8 +227,12 @@ iree_status_t loom_low_lower_query_descriptor_matrix_contract(
     }
     case LOOM_TARGET_CONTRACT_DESCRIPTOR_MATRIX_SOURCE_NONE:
     default:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "unknown descriptor-matrix source");
+      IREE_ASSERT_UNREACHABLE("unknown descriptor-matrix source");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+
+  if (out_request != NULL) {
+    *out_request = request;
   }
 
   return descriptor_matrix->query(descriptor_matrix->user_data, environment,
@@ -247,7 +272,7 @@ static iree_status_t loom_low_lower_query_target_contract_index(
           &binding->fragment->descriptor_matrices[contract_case->row_index];
       IREE_RETURN_IF_ERROR(loom_low_lower_query_descriptor_matrix_contract(
           environment, &options->descriptor_matrix, matrix_rule, source_op,
-          out_result));
+          /*out_request=*/NULL, out_result));
       if (out_result->outcome != LOOM_TARGET_CONTRACT_QUERY_UNHANDLED) {
         loom_low_lower_contract_query_adopt_case(contract_case, case_index,
                                                  out_result);
@@ -273,15 +298,9 @@ static iree_status_t loom_low_lower_query_target_contract_index(
       if (descriptor_ref != LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE) {
         IREE_RETURN_IF_ERROR(loom_low_lower_rule_resolve_descriptor_ref(
             match_context, rule_set, descriptor_ref, &selected_descriptor));
-        if (selected_descriptor == NULL) {
-          const iree_string_view_t key =
-              rule_set->descriptor_refs[descriptor_ref].key;
-          return iree_make_status(
-              IREE_STATUS_INTERNAL,
-              "generated target-low contract selected missing descriptor "
-              "'%.*s'",
-              (int)key.size, key.data);
-        }
+        IREE_ASSERT(
+            selected_descriptor != NULL,
+            "generated target-low contract selected a missing descriptor");
       }
       *out_result = (loom_target_contract_query_result_t){
           .outcome = LOOM_TARGET_CONTRACT_QUERY_LEGAL,
@@ -301,8 +320,13 @@ static iree_status_t loom_low_lower_query_target_contract_index(
       return iree_ok_status();
     }
     if (selection.has_source_op_span &&
-        (failed_rule_set == NULL || selection.matched_guard_count >
-                                        failed_selection.matched_guard_count)) {
+        (failed_rule_set == NULL ||
+         (selection.source_memory_compatible &&
+          !failed_selection.source_memory_compatible) ||
+         (selection.source_memory_compatible ==
+              failed_selection.source_memory_compatible &&
+          selection.matched_guard_count >
+              failed_selection.matched_guard_count))) {
       failed_rule_set = rule_set;
       failed_selection = selection;
       failed_binding_index = contract_case->binding_index;
@@ -354,23 +378,34 @@ iree_status_t loom_low_lower_query_target_contract(
 
   loom_symbolic_expr_context_t expression_context;
   loom_symbolic_expr_context_t* expression_context_ptr = NULL;
-  if (environment->arena && environment->fact_table) {
+  if (environment->view_regions != NULL) {
+    expression_context_ptr = environment->view_regions->expression_context;
+  } else if (environment->arena && environment->fact_table) {
     loom_symbolic_expr_context_initialize(
         environment->module, environment->fact_table, environment->arena,
         &expression_context);
     expression_context_ptr = &expression_context;
   }
 
+  const loom_target_bundle_t* bundle =
+      loom_target_contract_query_environment_bundle(environment);
+
+  loom_low_source_memory_access_plan_t source_memory_access;
+  loom_low_lower_rule_source_memory_state_t source_memory_state;
+  loom_low_lower_rule_source_memory_state_initialize(
+      source_op, &source_memory_access, &source_memory_state);
   const loom_low_lower_rule_match_context_t match_context = {
       .module = environment->module,
       .function = environment->function,
-      .bundle = environment->bundle,
+      .bundle = bundle,
       .descriptor_set = environment->descriptor_set,
-      .feature_bits = environment->bundle->config->contract_feature_bits,
+      .feature_bits = bundle->config->contract_feature_bits,
       .map_value = options->map_value,
       .can_materialize = options->can_materialize,
       .descriptor_ref = options->descriptor_ref,
       .fact_table = environment->fact_table,
+      .view_regions = environment->view_regions,
+      .source_memory_state = &source_memory_state,
       .symbolic_expr_context = expression_context_ptr,
       .flags = LOOM_LOW_LOWER_RULE_MATCH_FLAG_CONTRACT_ONLY,
   };

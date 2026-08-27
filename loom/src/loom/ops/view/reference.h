@@ -8,7 +8,7 @@
 //
 // These helpers summarize view-producing ops into root identity, byte-base,
 // byte-footprint, and alignment facts. They resolve layouts through encoding
-// facts so direct `encoding.layout.*` values and composed `#physical_storage`
+// facts so direct `encoding.layout.*` values and composed `#encoding.storage`
 // values share one interpretation path.
 
 #ifndef LOOM_OPS_VIEW_REFERENCE_H_

@@ -25,21 +25,32 @@ extern "C" {
 //  iree_io_parameter_archive_builder_add_data_entry(&builder, ...);
 //  iree_io_parameter_archive_builder_add_data_entry(&builder, ...);
 //  iree_io_parameter_archive_builder_add_data_entry(&builder, ...);
-//  total_size = iree_io_parameter_archive_builder_total_size(&builder);
+//  iree_io_parameter_archive_builder_total_size(&builder, &total_size);
 //  << create file of total_size, map into memory >>
-//  iree_io_parameter_archive_builder_write(&builder, file, &target_index);
+//  iree_io_parameter_archive_builder_write(&builder, file, 0, stream,
+//                                          target_index);
 //  << file now contains the full archive header >>
 //  << target_index now references the ranges in the file >>
 //  << write parameter contents, or don't if leaving uninitialized >>
 //  iree_io_parameter_archive_builder_deinitialize(&builder);
 typedef struct iree_io_parameter_archive_builder_t {
+  // Allocator used for builder-owned state.
   iree_allocator_t host_allocator;
+  // Builder-owned entry templates in archive order.
   iree_io_parameter_index_t* index;
+  // Alignment applied to the final archive size, or zero for no alignment.
   iree_io_physical_size_t file_alignment;
-  iree_io_physical_size_t entry_segment_size;
-  iree_io_physical_size_t metadata_segment_size;
-  iree_io_physical_size_t storage_segment_size;
-  iree_io_physical_size_t storage_alignment;
+  // Serialized segment extent state updated atomically with the index.
+  struct {
+    // Bytes occupied by serialized entry records and their padding.
+    iree_io_physical_size_t entry;
+    // Bytes occupied by entry names and metadata.
+    iree_io_physical_size_t metadata;
+    // Bytes reserved for file-backed parameter data and its padding.
+    iree_io_physical_size_t storage;
+    // Strongest alignment required by any file-backed parameter.
+    iree_io_physical_size_t storage_alignment;
+  } segments;
 } iree_io_parameter_archive_builder_t;
 
 // Initializes a new parameter builder in |out_builder| for use.
@@ -57,25 +68,32 @@ IREE_API_EXPORT void iree_io_parameter_archive_builder_deinitialize(
 IREE_API_EXPORT bool iree_io_parameter_archive_builder_is_empty(
     const iree_io_parameter_archive_builder_t* builder);
 
-// Returns the size required to store the parameter archive header and
-// associated metadata (excluding parameters). Adding new parameters will
-// invalidate this value.
-IREE_API_EXPORT iree_io_physical_size_t
-iree_io_parameter_archive_builder_header_size(
-    const iree_io_parameter_archive_builder_t* builder);
+// Calculates the size required to store the parameter archive header and
+// associated metadata (excluding parameters). Returns
+// IREE_STATUS_INVALID_ARGUMENT for an invalid configured alignment or
+// IREE_STATUS_OUT_OF_RANGE if the layout is not representable by the IRPA
+// physical offset type.
+IREE_API_EXPORT iree_status_t iree_io_parameter_archive_builder_header_size(
+    const iree_io_parameter_archive_builder_t* builder,
+    iree_io_physical_size_t* out_header_size);
 
-// Returns the total file size required to store the parameter archive header
-// and contents of all added parameters. Adding new parameters will invalidate
-// this value.
-IREE_API_EXPORT iree_io_physical_size_t
-iree_io_parameter_archive_builder_total_size(
-    const iree_io_parameter_archive_builder_t* builder);
+// Calculates the total file size required to store the parameter archive
+// header and contents of all added parameters. Returns
+// IREE_STATUS_INVALID_ARGUMENT for an invalid configured alignment or
+// IREE_STATUS_OUT_OF_RANGE if the layout is not representable by the IRPA
+// physical offset type.
+IREE_API_EXPORT iree_status_t iree_io_parameter_archive_builder_total_size(
+    const iree_io_parameter_archive_builder_t* builder,
+    iree_io_physical_size_t* out_total_size);
 
 // Writes the parameter archive to the given |file_handle|. The file must have
-// at least enough storage to fit iree_io_parameter_archive_builder_total_size.
-// The archive will be written starting at the given |file_offset|.
-// If an optional |target_index| is provided entries for all parameters will be
-// appended to the index referencing the given |file_handle|.
+// at least enough storage to fit the size calculated by
+// iree_io_parameter_archive_builder_total_size.
+// The archive will be written starting at the exact |file_offset|, which must
+// satisfy the header and storage alignment requirements. |stream| must already
+// be positioned at that location in |file_handle|. Entries for all parameters
+// will be appended to |target_index| with offsets relative to the base of
+// |file_handle|.
 IREE_API_EXPORT iree_status_t iree_io_parameter_archive_builder_write(
     const iree_io_parameter_archive_builder_t* builder,
     iree_io_file_handle_t* file_handle, iree_io_physical_offset_t file_offset,
@@ -84,7 +102,8 @@ IREE_API_EXPORT iree_status_t iree_io_parameter_archive_builder_write(
 // Adds a new splat entry to |builder|.
 // Splat entries have no physical storage and exist only in the header.
 // |pattern| and |metadata| (if provided) are copied prior to returning.
-// |pattern_length| must be <= 16 (enough for complex<f64>).
+// |pattern_length| must be 1, 2, 4, 8, or 16 and must evenly divide
+// |data_length|.
 IREE_API_EXPORT iree_status_t iree_io_parameter_archive_builder_add_splat_entry(
     iree_io_parameter_archive_builder_t* builder, iree_string_view_t name,
     iree_const_byte_span_t metadata, const void* pattern,
@@ -93,7 +112,8 @@ IREE_API_EXPORT iree_status_t iree_io_parameter_archive_builder_add_splat_entry(
 // Adds a new data entry to |builder|.
 // |metadata| (if provided) is copied prior to returning.
 // Physical storage will be allocated for |data_length| and it will be aligned
-// to at least |minimum_alignment|.
+// to at least |minimum_alignment|. Zero specifies no additional alignment;
+// nonzero alignments must be powers of two.
 IREE_API_EXPORT iree_status_t iree_io_parameter_archive_builder_add_data_entry(
     iree_io_parameter_archive_builder_t* builder, iree_string_view_t name,
     iree_const_byte_span_t metadata, iree_io_physical_size_t minimum_alignment,
@@ -121,6 +141,9 @@ typedef struct {
 // |target_file_open| callback will be used to acquire a handle to a writeable
 // file with enough capacity to fit the whole archive. All parameter contents
 // will be written and flushed to the file prior to returning.
+// |target_file_offset| is the minimum placement offset. The archive may be
+// advanced to satisfy its header and storage alignment requirements; the
+// callback receives the resolved archive offset.
 IREE_API_EXPORT iree_status_t iree_io_build_parameter_archive(
     iree_io_parameter_index_t* source_index,
     iree_io_parameter_index_t* target_index,

@@ -59,18 +59,23 @@ const char* loom_emitter_name(loom_emitter_t emitter) {
 const loom_error_def_t* loom_error_catalog_lookup(
     const loom_error_catalog_t* catalog, loom_error_domain_t domain,
     uint16_t code) {
-  if (catalog == NULL || domain >= LOOM_ERROR_DOMAIN_COUNT_) {
+  if (domain >= LOOM_ERROR_DOMAIN_COUNT_) {
     return NULL;
   }
-  const loom_error_domain_catalog_t* domain_catalog = catalog->domains[domain];
-  if (domain_catalog == NULL || code >= domain_catalog->code_count) {
-    return loom_error_catalog_lookup(catalog->fallback_catalog, domain, code);
+  for (const loom_error_catalog_t* current_catalog = catalog;
+       current_catalog != NULL;
+       current_catalog = current_catalog->fallback_catalog) {
+    const loom_error_domain_catalog_t* domain_catalog =
+        current_catalog->domains[domain];
+    if (domain_catalog == NULL || code >= domain_catalog->code_count) {
+      continue;
+    }
+    const loom_error_def_t* error = domain_catalog->errors_by_code[code];
+    if (error != NULL) {
+      return error;
+    }
   }
-  const loom_error_def_t* error = domain_catalog->errors_by_code[code];
-  if (error != NULL) {
-    return error;
-  }
-  return loom_error_catalog_lookup(catalog->fallback_catalog, domain, code);
+  return NULL;
 }
 
 const loom_error_def_t* loom_error_catalog_lookup_ref(

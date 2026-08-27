@@ -5,7 +5,7 @@
   "fileTypes": [
     "loom"
   ],
-  "comment": "GENERATED FILE: DO NOT EDIT. Generator: loom.gen.editor.textmate. Regenerate: python3 loom/py/loom/gen/run.py textmate",
+  "comment": "GENERATED FILE: DO NOT EDIT. Generator: loom.gen.editor.textmate. Regenerate: python3 loom/py/loom/gen/run.py textmate --in-place",
   "patterns": [
     {
       "include": "#strings"
@@ -77,7 +77,7 @@
       "patterns": [
         {
           "name": "meta.operation-name.loom",
-          "match": "\\b(buffer)\\.(assume\\.memory_space|assume\\.alignment|assume\\.same_root|assume\\.noalias|alloca|view)\\b",
+          "match": "\\b(buffer)\\.(assume\\.memory_space|assume\\.alignment|assume\\.same_root|assume\\.noalias|load\\.i8\\.u|store\\.i8|compare|alloca|length|copy|fill|pack|view)\\b",
           "captures": {
             "1": {
               "name": "support.namespace.dialect.loom"
@@ -89,7 +89,19 @@
         },
         {
           "name": "meta.operation-name.loom",
-          "match": "\\b(check)\\.(generate\\.random\\.uniform|expect\\.bitwise|file\\.write\\.npy|file\\.read\\.npy|generate\\.fill|generate\\.iota|expect\\.close|expect\\.equal|expect\\.event|expect\\.shape|param\\.choice|oracle\\.call|param\\.range|param\\.seed|benchmark|requires|literal|skip_if|expect|return|case)\\b",
+          "match": "\\b(check)\\.(generate\\.random\\.uniform|expect\\.bitwise|file\\.write\\.npy|file\\.read\\.npy|generate\\.fill|generate\\.iota|expect\\.close|expect\\.equal|expect\\.event|expect\\.shape|param\\.choice|oracle\\.call|param\\.range|tensor\\.view|param\\.seed|benchmark|requires|literal|skip_if|expect|return|case)\\b",
+          "captures": {
+            "1": {
+              "name": "support.namespace.dialect.loom"
+            },
+            "2": {
+              "name": "entity.name.function.operation.loom"
+            }
+          }
+        },
+        {
+          "name": "meta.operation-name.loom",
+          "match": "\\b(command)\\.(program\\.launch|program\\.decl|program\\.def|concurrent|parameter|return|serial|yield)\\b",
           "captures": {
             "1": {
               "name": "support.namespace.dialect.loom"
@@ -113,7 +125,7 @@
         },
         {
           "name": "meta.operation-name.loom",
-          "match": "\\b(encoding)\\.(layout\\.assume\\.strided|layout\\.assume\\.dense|layout\\.strided|layout\\.dense|assume\\.spec|define|isa)\\b",
+          "match": "\\b(encoding)\\.(layout\\.assume\\.strided|layout\\.assume\\.dense|layout\\.strided|assume\\.match|layout\\.dense|assume\\.spec|matches|define|isa)\\b",
           "captures": {
             "1": {
               "name": "support.namespace.dialect.loom"
@@ -125,7 +137,7 @@
         },
         {
           "name": "meta.operation-name.loom",
-          "match": "\\b(func)\\.(template|ukernel|return|apply|call|decl|def)\\b",
+          "match": "\\b(func)\\.(return|call|decl|def)\\b",
           "captures": {
             "1": {
               "name": "support.namespace.dialect.loom"
@@ -137,7 +149,7 @@
         },
         {
           "name": "meta.operation-name.loom",
-          "match": "\\b(global)\\.(constant|variable|rodata|store|load)\\b",
+          "match": "\\b(global)\\.(rodata\\.decl|rodata\\.def|constant|variable|store|load)\\b",
           "captures": {
             "1": {
               "name": "support.namespace.dialect.loom"
@@ -161,7 +173,7 @@
         },
         {
           "name": "meta.operation-name.loom",
-          "match": "\\b(kernel)\\.(async\\.tensor\\.store\\.from\\.lds|async\\.cluster\\.gather\\.mask|async\\.tensor\\.load\\.to\\.lds|subgroup\\.broadcast\\.first|tensor\\.lds\\.descriptor|async\\.cluster\\.gather|subgroup\\.active\\.mask|subgroup\\.vote\\.ballot|workgroup\\.vote\\.count|workitem\\.dispatch\\.id|subgroup\\.broadcast|subgroup\\.match\\.all|subgroup\\.match\\.any|workgroup\\.vote\\.all|workgroup\\.vote\\.any|async\\.gather\\.mask|subgroup\\.vote\\.all|subgroup\\.vote\\.any|subgroup\\.lane\\.id|subgroup\\.shuffle|workgroup\\.reduce|async\\.copy\\.mask|subgroup\\.reduce|workgroup\\.count|subgroup\\.count|workgroup\\.scan|workgroup\\.size|launch\\.config|subgroup\\.scan|subgroup\\.size|async\\.gather|workgroup\\.id|async\\.group|subgroup\\.id|workitem\\.id|async\\.copy|async\\.wait|barrier|assert|return|exit|def)\\b",
+          "match": "\\b(kernel)\\.(async\\.tensor\\.store\\.from\\.lds|async\\.cluster\\.gather\\.mask|cluster\\.workgroup\\.flat_id|async\\.tensor\\.load\\.to\\.lds|subgroup\\.broadcast\\.first|tensor\\.lds\\.descriptor|async\\.cluster\\.gather|cluster\\.workgroup\\.id|subgroup\\.active\\.mask|subgroup\\.vote\\.ballot|workgroup\\.vote\\.count|workitem\\.dispatch\\.id|subgroup\\.broadcast|subgroup\\.match\\.all|subgroup\\.match\\.any|workgroup\\.vote\\.all|workgroup\\.vote\\.any|async\\.gather\\.mask|launch\\.concurrent|subgroup\\.vote\\.all|subgroup\\.vote\\.any|subgroup\\.lane\\.id|subgroup\\.shuffle|workgroup\\.reduce|async\\.copy\\.mask|subgroup\\.reduce|workgroup\\.count|subgroup\\.count|workgroup\\.scan|workgroup\\.size|cluster\\.count|launch\\.config|launch\\.serial|subgroup\\.scan|subgroup\\.size|async\\.gather|cluster\\.size|launch\\.yield|workgroup\\.id|async\\.group|subgroup\\.id|workitem\\.id|async\\.copy|async\\.wait|cluster\\.id|entry\\.decl|dispatch|barrier|assert|launch|return|decl|exit|def)\\b",
           "captures": {
             "1": {
               "name": "support.namespace.dialect.loom"
@@ -197,7 +209,7 @@
         },
         {
           "name": "meta.operation-name.loom",
-          "match": "\\b(sanitizer)\\.(assert\\.access|assert\\.layout|assert\\.value|race\\.access|assert\\.op|race\\.sync)\\b",
+          "match": "\\b(sanitizer)\\.(assert\\.accesses|assert\\.access|assert\\.layout|assert\\.value|race\\.access|assert\\.op|race\\.sync)\\b",
           "captures": {
             "1": {
               "name": "support.namespace.dialect.loom"
@@ -221,7 +233,7 @@
         },
         {
           "name": "meta.operation-name.loom",
-          "match": "\\b(scf)\\.(condition|lookup|select|switch|while|yield|for|if)\\b",
+          "match": "\\b(scf)\\.(schedule\\.fence|condition|lookup|select|switch|while|yield|for|if)\\b",
           "captures": {
             "1": {
               "name": "support.namespace.dialect.loom"
@@ -233,7 +245,7 @@
         },
         {
           "name": "meta.operation-name.loom",
-          "match": "\\b(test)\\.(fact_storage_byte_offset_divisor|fact_encoding_layout_stride_hi|fact_view_root_min_alignment|fact_storage_byte_length_hi|fact_storage_byte_length_lo|fact_storage_byte_offset_hi|fact_storage_byte_offset_lo|template_param_symbol_flags|fact_encoding_matrix_field|fact_is_vector_prefix_mask|fact_storage_min_alignment|fact_buffer_min_alignment|fact_encoding_layout_kind|fact_is_storage_reference|fact_storage_same_backing|fact_alias_scope_matches|fact_buffer_memory_space|fact_is_buffer_reference|fact_view_byte_length_hi|fact_view_byte_length_lo|fact_view_byte_offset_hi|fact_view_byte_offset_lo|fact_all_equal_range_hi|fact_all_equal_range_lo|fact_subgroup_lane_mask|fact_view_element_bytes|fact_view_min_alignment|fact_alias_scope_known|fact_is_view_reference|fact_view_memory_space|fact_view_root_matches|template_param_symbol|fact_is_vector_iota|fact_lane_predicate|resource\\.borrow_ref|effectful_constant|fact_storage_space|fact_lane_varying|fact_non_negative|fact_power_of_two|resource\\.borrowed|resource\\.consume|resource\\.discard|resource\\.release|clause_constant|isolated_region|mutate_resource|optional_region|resource\\.borrow|resource\\.escape|resource\\.retain|implicit_yield|low_asm_region|resource\\.alias|resource\\.alloc|write_resource|fact_non_zero|fact_positive|fact_range_hi|fact_range_lo|read_resource|region_syntax|fact_divisor|fact_uniform|operand_dict|region_table|clause_copy|attr_table|block_args|convergent|low_invoke|split_func|segmented|typed_use|constant|low_call|convert|counter|deflate|assume|branch|invoke|record|reduce|target|update|alloc|attrs|shape|slice|yield|addi|cast|decl|func|loop|cmp|dim|map|neg|use|br)\\b",
+          "match": "\\b(test)\\.(fact_storage_byte_offset_divisor|fact_encoding_layout_stride_hi|fact_view_root_min_alignment|fact_encoding_operand_field|fact_storage_byte_length_hi|fact_storage_byte_length_lo|fact_storage_byte_offset_hi|fact_storage_byte_offset_lo|template_param_symbol_flags|compact_parameterized_attr|condition_refines_positive|fact_is_vector_prefix_mask|fact_storage_min_alignment|fact_buffer_min_alignment|fact_encoding_layout_kind|fact_is_storage_reference|fact_storage_same_backing|fact_alias_scope_matches|fact_buffer_memory_space|fact_is_buffer_reference|fact_view_byte_length_hi|fact_view_byte_length_lo|fact_view_byte_offset_hi|fact_view_byte_offset_lo|parameterized_attr_array|fact_all_equal_range_hi|fact_all_equal_range_lo|fact_subgroup_lane_mask|fact_view_element_bytes|fact_view_min_alignment|fact_alias_scope_known|fact_is_view_reference|fact_view_memory_space|fact_view_root_matches|fact_workgroup_uniform|fact_subgroup_uniform|signed_enum_set_attrs|template_param_symbol|fact_cluster_uniform|fact_is_vector_iota|fact_lane_predicate|resource\\.borrow_ref|effectful_constant|fact_not_subnormal|fact_storage_space|parameterized_attr|symbol_array_attrs|fact_lane_varying|fact_non_negative|fact_power_of_two|resource\\.borrowed|enum_array_attrs|partitioned_call|resource\\.consume|resource\\.discard|resource\\.release|symbol_set_attrs|clause_constant|isolated_region|module_metadata|mutate_resource|optional_region|resource\\.borrow|resource\\.escape|resource\\.retain|implicit_yield|resource\\.alias|resource\\.alloc|write_resource|fact_non_zero|fact_positive|fact_range_hi|fact_range_lo|read_resource|region_syntax|resource\\.move|fact_divisor|operand_dict|region_table|attr_params|clause_copy|fact_finite|attr_table|block_args|convergent|low_invoke|split_func|segmented|typed_use|constant|low_call|convert|counter|deflate|assume|branch|invoke|record|reduce|target|update|alloc|attrs|shape|slice|yield|addi|cast|decl|func|loop|cmp|dim|map|neg|use|br)\\b",
           "captures": {
             "1": {
               "name": "support.namespace.dialect.loom"
@@ -245,7 +257,7 @@
         },
         {
           "name": "meta.operation-name.loom",
-          "match": "\\b(vector)\\.(atomic\\.reduce\\.mask|bitfield\\.extracts|bitfield\\.extractu|atomic\\.rmw\\.mask|bitfield\\.insert|atomic\\.cmpxchg|fragment\\.store|store\\.compress|table\\.quantize|atomic\\.reduce|fragment\\.load|from_elements|deinterleave|scatter\\.mask|table\\.lookup|gather\\.mask|load\\.expand|reduce\\.axes|atomic\\.rmw|bitunpacks|bitunpacku|floordivsi|interleave|mask\\.range|roundevenf|store\\.mask|broadcast|ceildivsi|ceildivui|copysignf|costurnsf|isfinitef|load\\.mask|logisticf|sinturnsf|softplusf|transform|transpose|constant|fragment|maximumf|minimumf|bitcast|bitpack|extract|fptrunc|maxnumf|minnumf|scatter|shuffle|acoshf|asinhf|atan2f|atanhf|clampf|concat|ctpopi|decode|dot4f8|dot8i4|encode|expm1f|floorf|fptosi|fptoui|gather|insert|isinff|isnanf|log10f|log1pf|poison|reduce|roundf|rsqrtf|select|sitofp|truncf|trunci|uitofp|acosf|asinf|atanf|cbrtf|ceilf|coshf|ctlzi|cttzi|divsi|divui|dot2f|dot4i|empty|erfcf|exp2f|extsi|extui|geluf|log2f|maxsi|maxui|minsi|minui|remsi|remui|rotli|rotri|shrsi|shrui|signf|signi|siluf|sinhf|slice|splat|sqrtf|store|tanhf|absf|absi|addf|addi|andi|cmpf|cmpi|cosf|divf|dotf|erff|expf|extf|fmaf|fmai|iota|load|logf|mulf|muli|negf|negi|powf|remf|shli|sinf|subf|subi|tanf|xori|mma|ori)\\b",
+          "match": "\\b(vector)\\.(atomic\\.reduce\\.mask|bitfield\\.extracts|bitfield\\.extractu|atomic\\.rmw\\.mask|bitfield\\.insert|fragment\\.repack|atomic\\.cmpxchg|fragment\\.store|store\\.compress|table\\.quantize|atomic\\.reduce|fragment\\.load|from_elements|deinterleave|scatter\\.mask|table\\.lookup|gather\\.mask|load\\.expand|reduce\\.axes|atomic\\.rmw|bitunpacks|bitunpacku|floordivsi|interleave|mask\\.range|roundevenf|store\\.mask|broadcast|ceildivsi|ceildivui|copysignf|costurnsf|isfinitef|load\\.mask|logisticf|sinturnsf|softplusf|transform|transpose|constant|fragment|maximumf|minimumf|bitcast|bitpack|extract|fptrunc|maxnumf|minnumf|scatter|shuffle|acoshf|asinhf|atan2f|atanhf|clampf|concat|ctpopi|decode|dot4f8|dot8i4|encode|expm1f|floorf|fptosi|fptoui|gather|insert|isinff|isnanf|log10f|log1pf|poison|reduce|roundf|rsqrtf|select|sitofp|truncf|trunci|uitofp|acosf|asinf|atanf|cbrtf|ceilf|coshf|ctlzi|cttzi|divsi|divui|dot2f|dot4i|empty|erfcf|exp2f|extsi|extui|geluf|log2f|maxsi|maxui|minsi|minui|remsi|remui|rotli|rotri|shrsi|shrui|signf|signi|siluf|sinhf|slice|splat|sqrtf|store|tanhf|absf|absi|addf|addi|andi|cmpf|cmpi|cosf|divf|dotf|erff|expf|extf|fmaf|fmai|iota|load|logf|mulf|muli|negf|negi|powf|remf|shli|sinf|subf|subi|tanf|xori|mma|ori)\\b",
           "captures": {
             "1": {
               "name": "support.namespace.dialect.loom"
@@ -333,7 +345,7 @@
       "patterns": [
         {
           "name": "support.type.loom",
-          "match": "\\b(?:kernel\\.tensor\\.lds\\.descriptor|kernel\\.async\\.group|kernel\\.async\\.token|ireevm\\.buffer|ireevm\\.list|low\\.storage|hal\\.buffer|ireevm\\.ref|buffer|f8E4M3|f8E5M2|offset|tensor|vector|group|index|bf16|pool|tile|view|f16|f32|f64|i16|i32|i64|i1|i8)\\b"
+          "match": "\\b(?:kernel\\.tensor\\.lds\\.descriptor|spirv\\.cooperative_matrix|kernel\\.async\\.group|kernel\\.async\\.token|ireevm\\.buffer|ireevm\\.list|low\\.storage|hal\\.buffer|ireevm\\.ref|encoding|buffer|f8E4M3|f8E5M2|offset|tensor|vector|index|bf16|pool|tile|view|f16|f32|f64|i16|i32|i64|i1|i8)\\b"
         }
       ]
     },
@@ -341,7 +353,7 @@
       "patterns": [
         {
           "name": "keyword.other.loom",
-          "match": "\\b(?:workgroup_size|abi_layout|allocation|workgroups|iter_args|artifact|expected|priority|schedule|default|dgroups|linkage|ordinal|actual|bounds|callee|config|device|export|extent|import|inputs|launch|layout|module|offset|public|reason|source|symbol|target|unroll|values|align|attrs|count|range|shape|using|value|where|atol|axes|base|case|else|from|host|into|mode|name|path|rtol|seed|step|abi|for|nan|as|do|to|x)\\b"
+          "match": "\\b(?:workgroup_count|workgroup_size|memory_access|cluster_size|abi_layout|allocation|workgroups|iter_args|artifact|expected|ordering|priority|requires|schedule|default|dgroups|linkage|ordinal|actual|blocks|bounds|callee|config|device|export|extent|import|inputs|launch|layout|module|offset|period|public|reason|source|symbol|target|unroll|values|align|attrs|count|range|scope|shape|using|value|where|atol|axes|base|case|else|from|host|into|mode|name|path|rtol|seed|step|abi|for|nan|as|do|to|x)\\b"
         },
         {
           "name": "constant.language.boolean.loom",

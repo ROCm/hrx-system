@@ -9,19 +9,160 @@
 
 iree_add_all_subdirs()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
+    printf_format
+  HDRS
+    "printf_format.h"
+  SRCS
+    "printf_format.c"
+  DEPS
+    iree::base
+    libhrx_defs
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
+    hostcall_packet
+  HDRS
+    "hostcall_packet.h"
+  DEPS
+    iree::base
+    iree::base::internal
+    libhrx_defs
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
+    hostcall_message
+  HDRS
+    "hostcall_message.h"
+  SRCS
+    "hostcall_message.c"
+  DEPS
+    ::hostcall_packet
+    iree::base
+    iree::base::internal::arena
+    libhrx_defs
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
+    blocking_printf_protocol
+  HDRS
+    "blocking_printf_protocol.h"
+  SRCS
+    "blocking_printf_protocol.c"
+  DEPS
+    ::hostcall_message
+    ::printf_format
+    iree::base
+    iree::hal
+    libhrx_defs
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
+    blocking_printf_provider
+  HDRS
+    "blocking_printf_provider.h"
+  SRCS
+    "blocking_printf_provider.c"
+  DEPS
+    ::blocking_printf_protocol
+    iree::base
+    iree::hal
+    libhrx_defs
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+  PUBLIC
+)
+endif()
+
+iree_cc_library(
+  NAME
+    launch_params
+  HDRS
+    "api.h"
+    "launch_params.h"
+  SRCS
+    "launch_params.c"
+  DEPS
+    iree::base
+    iree::hal
+    libhrx::src::binding::common
+    libhrx_defs
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../libhrx>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../libhrx>"
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    handle_registry
+  HDRS
+    "handle_registry.h"
+  SRCS
+    "handle_registry.c"
+  DEPS
+    iree::base
+    iree::base::threading
+    libhrx_defs
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+  PUBLIC
+)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
     amdhip64
   COPTS
     "-DIREE_HAL_STREAMING_HIP_EXPORTS"
-    "-Wno-attributes"
     "-Wno-unused-variable"
   HDRS
     "api.h"
+    "binding_internal.h"
   SRCS
     "abi_stubs.c"
     "api.c"
+    "api_metadata.c"
   DEPS
+    ::blocking_printf_provider
+    ::handle_registry
+    ::launch_params
     iree::base
     iree::base::threading
     iree::hal
@@ -40,12 +181,21 @@ iree_cc_library(
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../libhrx>"
   PUBLIC
 )
+endif()
 
-### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
+iree_cc_test(
+  NAME
+    handle_registry_test
+  SRCS
+    "handle_registry_test.cc"
+  DEPS
+    ::handle_registry
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
 
-# The symbol version script and --undefined-version are applied through the
-# generated LINKOPTS above (from linkopts in BUILD.bazel). Keep them out of
-# LINK_FLAGS here so the version script is not applied twice.
+if(TARGET libhrx_src_binding_hip_amdhip64)
 set_target_properties(libhrx_src_binding_hip_amdhip64 PROPERTIES
   OUTPUT_NAME amdhip64
   VERSION 7.9999.0
@@ -53,12 +203,188 @@ set_target_properties(libhrx_src_binding_hip_amdhip64 PROPERTIES
   POSITION_INDEPENDENT_CODE ON
   INSTALL_RPATH "$ORIGIN"
 )
+endif()
 
-install(TARGETS libhrx_src_binding_hip_amdhip64
-  LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-    COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
-    NAMELINK_COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
-  ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-    COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
-  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
-    COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    hip_api_name_test
+  SRCS
+    "hip_api_name_test.cc"
+  DATA
+    ::amdhip64
+  DEPS
+    ${CMAKE_DL_LIBS}
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    hip_get_proc_address_test
+  SRCS
+    "hip_get_proc_address_test.cc"
+  DATA
+    ::amdhip64
+  DEPS
+    ${CMAKE_DL_LIBS}
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    hip_launch_validation_api_test
+  SRCS
+    "hip_launch_validation_api_test.cc"
+  DATA
+    ::amdhip64
+  DEPS
+    ${CMAKE_DL_LIBS}
+    ::launch_params
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx::src::binding::common
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
+  SANITIZER_SUPPRESSIONS
+    lsan
+    rocm
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    hip_memory_pool_api_test
+  SRCS
+    "hip_memory_pool_api_test.cc"
+  DATA
+    ::amdhip64
+  DEPS
+    ${CMAKE_DL_LIBS}
+    ::launch_params
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
+  SANITIZER_SUPPRESSIONS
+    lsan
+    hsa
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    hostcall_message_test
+  SRCS
+    "hostcall_message_test.cc"
+  DEPS
+    ::hostcall_message
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    blocking_printf_protocol_test
+  SRCS
+    "blocking_printf_protocol_test.cc"
+  DEPS
+    ::blocking_printf_protocol
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    blocking_printf_provider_test
+  SRCS
+    "blocking_printf_provider_test.cc"
+  DEPS
+    ::blocking_printf_protocol
+    ::blocking_printf_provider
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+endif()
+
+iree_cc_test(
+  NAME
+    launch_params_test
+  SRCS
+    "launch_params_test.cc"
+  DEPS
+    ::launch_params
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    printf_format_test
+  SRCS
+    "printf_format_test.cc"
+  DEPS
+    ::printf_format
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+endif()
+
+### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
+
+# Point HIP DSO tests at the shared object built in this tree so they dlopen()
+# the exact artifact under test, and make sure that artifact is built first.
+# The build-tree path is only valid for the in-tree CTest run.
+foreach(_hrx_hip_dso_test
+    libhrx_src_binding_hip_hip_api_name_test
+    libhrx_src_binding_hip_hip_get_proc_address_test
+    libhrx_src_binding_hip_hip_launch_validation_api_test)
+  if(TARGET ${_hrx_hip_dso_test})
+    target_compile_definitions(${_hrx_hip_dso_test}
+      PRIVATE
+        "HRX_TEST_LIBAMDHIP64_PATH=\"$<TARGET_FILE:libhrx_src_binding_hip_amdhip64>\""
+    )
+    add_dependencies(${_hrx_hip_dso_test}
+      libhrx_src_binding_hip_amdhip64
+    )
+  endif()
+endforeach()
+
+# The symbol version script and --undefined-version are applied through the
+# generated LINKOPTS above (from linkopts in BUILD.bazel). Keep them out of
+# LINK_FLAGS here so the version script is not applied twice.
+if(TARGET libhrx_src_binding_hip_amdhip64)
+  install(TARGETS libhrx_src_binding_hip_amdhip64
+    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+      COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
+      NAMELINK_COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
+    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+      COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}"
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+      COMPONENT "${HRX_PUBLIC_DIST_COMPONENT}")
+endif()

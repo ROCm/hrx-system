@@ -1,0 +1,28 @@
+// RUN: verify
+
+ireevm.target<core> @vm_target
+
+low.func.def target<ireevm.core>(@vm_target) @reject_reference_copy(%resource: reg<ireevm.ref>) -> (reg<ireevm.ref>) asm {
+  // ERROR@+1: TARGET/071 {op_name="low.copy", actual_type="reg<ireevm.ref>"}
+  %copy = copy %resource : reg<ireevm.ref> -> reg<ireevm.ref>
+  return %copy
+}
+
+// ====
+
+ireevm.target<core> @vm_target
+
+low.func.def target<ireevm.core>(@vm_target) @allow_reference_move(%resource: reg<ireevm.ref>) -> (reg<ireevm.ref>) asm {
+  %moved = move %resource : reg<ireevm.ref> -> reg<ireevm.ref>
+  return %moved
+}
+
+// ====
+
+ireevm.target<core> @vm_target
+
+low.func.def target<ireevm.core>(@vm_target) @reject_move_source_reuse(%resource: reg<ireevm.ref>) -> (reg<ireevm.ref>) asm {
+  %moved = move %resource : reg<ireevm.ref> -> reg<ireevm.ref>
+  // ERROR@+1: DOMINANCE/002 {value_name="resource"}
+  return %resource
+}

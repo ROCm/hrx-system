@@ -50,16 +50,16 @@ func.def @i8x2_to_s4x4_bitunpack_i8_result(%packed: vector<2xi8>) -> (vector<4xi
 // ====
 
 kernel.def @uniform_global_i32_to_u8x4_bitunpack_store() {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%values: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %index = index.constant 0 : index
   %values_noalias, %output_noalias = buffer.assume.noalias %values, %output : buffer, buffer
-  %values_view = buffer.view %values_noalias[%base] : buffer -> view<1xi32, #dense>
-  %output_view = buffer.view %output_noalias[%base] : buffer -> view<4xi32, #dense>
-  %packed = vector.load %values_view[%index] : view<1xi32, #dense> -> vector<1xi32>
+  %values_view = buffer.view %values_noalias[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<4xi32>
+  %packed = vector.load %values_view[%index] : view<1xi32> -> vector<1xi32>
   %unpacked = vector.bitunpacku<8> %packed : vector<1xi32> -> vector<4xi32>
-  vector.store %unpacked, %output_view[%index] : vector<4xi32>, view<4xi32, #dense>
+  vector.store %unpacked, %output_view[%index] : vector<4xi32>, view<4xi32>
   kernel.return
 }

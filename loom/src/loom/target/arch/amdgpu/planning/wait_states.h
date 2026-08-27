@@ -10,9 +10,10 @@
 // packets need fixed scalar no-op cycles both after matrix results before
 // ordinary VGPR consumers and after legacy VALU writes before matrix source,
 // DPP, or fixed-lane VGPR-to-SGPR reads. GFX940-family transcendental VALU
-// results and sub-DWORD SDWA destination writes also need fixed waits before
-// dependent VALU consumers, and nearby VALU or VMEM reads of VALU-written SGPRs
-// need fixed waits because the hardware does not interlock those dependencies.
+// results and destination-selected sub-DWORD writes also need fixed waits
+// before dependent VALU consumers, and nearby VALU or VMEM reads of
+// VALU-written SGPRs need fixed waits because the hardware does not interlock
+// those dependencies.
 // RDNA3+ processors can use `s_delay_alu` for short ALU dependency windows.
 // This table records target-owned insertion points after scheduling and
 // allocation, where physical register identity is known.
@@ -24,13 +25,17 @@
 #include "iree/base/internal/arena.h"
 #include "iree/base/string_builder.h"
 #include "loom/codegen/low/allocation.h"
+#include "loom/codegen/low/packet.h"
 #include "loom/codegen/low/packet_hazard_plan.h"
-#include "loom/codegen/low/schedule/types.h"
 #include "loom/target/arch/amdgpu/planning/matrix_wait_states.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+struct loom_amdgpu_vopd_plan_t;
+struct loom_amdgpu_matrix_coexecution_t;
+struct loom_amdgpu_processor_info_t;
 
 // Maximum number of cycles a single `s_nop` packet can wait. The SOPP SIMM16
 // operand is encoded as wait_cycles - 1, and current AMDGPU targets use a
@@ -59,8 +64,13 @@ typedef enum loom_amdgpu_wait_state_reason_e {
   LOOM_AMDGPU_WAIT_STATE_REASON_DST_SEL_FORWARDING_USE = 7,
   // An RDNA3+ ALU packet consumes storage written by a recent ALU packet.
   LOOM_AMDGPU_WAIT_STATE_REASON_DELAY_ALU_DEPENDENCY = 8,
+  // A matrix packet reads a result retained by matrix/vector coexecution.
+  LOOM_AMDGPU_WAIT_STATE_REASON_MATRIX_COEXECUTION_MATRIX_USE = 9,
+  // An ordinary VALU packet reads or overwrites storage retained by
+  // matrix/vector coexecution.
+  LOOM_AMDGPU_WAIT_STATE_REASON_MATRIX_COEXECUTION_VALU_USE = 10,
   // Number of wait-state reasons, including UNKNOWN.
-  LOOM_AMDGPU_WAIT_STATE_REASON_COUNT_ = 9,
+  LOOM_AMDGPU_WAIT_STATE_REASON_COUNT_ = 11,
 } loom_amdgpu_wait_state_reason_t;
 
 typedef enum loom_amdgpu_wait_state_action_e {
@@ -70,6 +80,8 @@ typedef enum loom_amdgpu_wait_state_action_e {
   LOOM_AMDGPU_WAIT_STATE_ACTION_S_NOP = 1,
   // Scalar delay packet with a packed S_DELAY_ALU dependency immediate.
   LOOM_AMDGPU_WAIT_STATE_ACTION_S_DELAY_ALU = 2,
+  // Vector no-op packet contributing one vector issue slot.
+  LOOM_AMDGPU_WAIT_STATE_ACTION_V_NOP = 3,
 } loom_amdgpu_wait_state_action_t;
 
 // One fixed wait-state action in scheduled packet order.
@@ -120,6 +132,8 @@ typedef struct loom_amdgpu_wait_state_plan_t {
   iree_host_size_t state_count;
 } loom_amdgpu_wait_state_plan_t;
 
+struct loom_amdgpu_processor_properties_t;
+
 // Returns the stable spelling for a wait-state reason.
 iree_string_view_t loom_amdgpu_wait_state_reason_name(
     loom_amdgpu_wait_state_reason_t reason);
@@ -128,13 +142,18 @@ iree_string_view_t loom_amdgpu_wait_state_reason_name(
 iree_string_view_t loom_amdgpu_wait_state_action_name(
     loom_amdgpu_wait_state_action_t action);
 
-// Builds fixed AMDGPU wait-state insertions from a scheduled and allocated low
-// function. The caller must keep |schedule| and |allocation| immutable and
-// |arena| alive for as long as |out_plan| is used.
+// Builds fixed AMDGPU wait-state insertions from the final scheduled,
+// allocated, and VOPD-packetized low function. |vopd_plan| may be NULL when
+// the target has no native packetization. The caller must keep the input plans
+// immutable and |arena| alive for as long as |out_plan| is used.
 iree_status_t loom_amdgpu_wait_state_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
-    iree_arena_allocator_t* arena, loom_amdgpu_wait_state_plan_t* out_plan);
+    const struct loom_amdgpu_processor_properties_t* processor_properties,
+    const struct loom_amdgpu_vopd_plan_t* vopd_plan,
+    struct loom_amdgpu_matrix_coexecution_t* matrix_coexecution,
+    iree_arena_allocator_t* arena, iree_arena_allocator_t* transient_arena,
+    loom_amdgpu_wait_state_plan_t* out_plan);
 
 // Formats the wait-state plan as compact deterministic text for loom-check
 // fixtures.

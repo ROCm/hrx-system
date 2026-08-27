@@ -1,143 +1,143 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_workgroup_indexed.loom-test
 // RUN: emit source-low output=low
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @wave_sized_workgroup_memory_workitem_x_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch() {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 0 : offset
   %bytes = index.constant 128 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<32xi32, #dense>
-  %one = vector.constant 1 : vector<1xi32>
-  vector.store %one, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #dense>
-  %loaded = vector.load %scratch_view[%lane] : view<32xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #dense>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xi32>
+  %stored_value = vector.constant 1 : vector<1xi32>
+  vector.store %stored_value, %scratch_view[%lane] : vector<1xi32>, view<32xi32>
+  %loaded = vector.load %scratch_view[%lane] : view<32xi32> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<32xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @wave_sized_workgroup_memory_workitem_x_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_workitem_x_b32() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %10 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
-  %one = v_mov_b32 1
+  %stored_value = v_mov_b32 1
   %13 = v_lshlrev_b32_src0_inline %lane, 2
-  ds_write_b32 %13, %one
-  %loaded = ds_read_b32 %13
-  ds_write_b32 %13, %loaded
+  low.op<amdgpu.ds_write_b32>(%13, %stored_value) {offset = 0} memory_access([0, 3, 5, -1, 43, 4, 0, 4, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %loaded = low.op<amdgpu.ds_read_b32>(%13) {offset = 0} memory_access([0, 3, 5, -1, 43, 4, 0, 4, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.op<amdgpu.ds_write_b32>(%13, %loaded) {offset = 0} memory_access([0, 3, 5, -1, 43, 4, 0, 4, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @wave_sized_workgroup_memory_workitem_x_i8x4() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch() {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 0 : offset
   %bytes = index.constant 64 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xi8, #dense>
-  %one = vector.constant 1 : vector<4xi8>
-  vector.store %one, %scratch_view[%lane] : vector<4xi8>, view<64xi8, #dense>
-  %loaded = vector.load %scratch_view[%lane] : view<64xi8, #dense> -> vector<4xi8>
-  vector.store %loaded, %scratch_view[%lane] : vector<4xi8>, view<64xi8, #dense>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi8>
+  %stored_value = vector.constant 1 : vector<4xi8>
+  vector.store %stored_value, %scratch_view[%lane] : vector<4xi8>, view<64xi8>
+  %loaded = vector.load %scratch_view[%lane] : view<64xi8> -> vector<4xi8>
+  vector.store %loaded, %scratch_view[%lane] : vector<4xi8>, view<64xi8>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @wave_sized_workgroup_memory_workitem_x_i8x4() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_workitem_x_i8x4() asm {
   %10 = storage {byte_alignment = 16, byte_length = 64} : low.storage<workgroup>
-  %one = v_mov_b32 16843009
+  %stored_value = v_mov_b32 16843009
   %13 = s_mov_b32_m0_imm 0
-  ds_write_addtid_b32 %one, %13
+  low.op<amdgpu.ds_write_addtid_b32>(%stored_value, %13) {offset = 0} memory_access([0, 3, 5, -1, 11, 0, 0, 0, 3, 0, 31, 4, 35]) : (reg<amdgpu.vgpr>, reg<amdgpu.m0>)
   %14 = s_mov_b32_m0_imm 0
-  %loaded = ds_read_addtid_b32 %14
+  %loaded = low.op<amdgpu.ds_read_addtid_b32>(%14) {offset = 0} memory_access([0, 3, 5, -1, 11, 0, 0, 0, 3, 0, 31, 4, 35]) : (reg<amdgpu.m0>) -> reg<amdgpu.vgpr>
   %16 = s_mov_b32_m0_imm 0
-  ds_write_addtid_b32 %loaded, %16
+  low.op<amdgpu.ds_write_addtid_b32>(%loaded, %16) {offset = 0} memory_access([0, 3, 5, -1, 11, 0, 0, 0, 3, 0, 31, 4, 35]) : (reg<amdgpu.vgpr>, reg<amdgpu.m0>)
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @cross_wave_workgroup_memory_workitem_x_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch() {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 0 : offset
   %bytes = index.constant 256 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xi32, #dense>
-  %one = vector.constant 1 : vector<1xi32>
-  vector.store %one, %scratch_view[%lane] : vector<1xi32>, view<64xi32, #dense>
-  %loaded = vector.load %scratch_view[%lane] : view<64xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<64xi32, #dense>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi32>
+  %stored_value = vector.constant 1 : vector<1xi32>
+  vector.store %stored_value, %scratch_view[%lane] : vector<1xi32>, view<64xi32>
+  %loaded = vector.load %scratch_view[%lane] : view<64xi32> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<64xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @cross_wave_workgroup_memory_workitem_x_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @cross_wave_workgroup_memory_workitem_x_b32() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %10 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
-  %one = v_mov_b32 1
+  %stored_value = v_mov_b32 1
   %13 = v_lshlrev_b32_src0_inline %lane, 2
-  ds_write_b32 %13, %one
-  %loaded = ds_read_b32 %13
-  ds_write_b32 %13, %loaded
+  low.op<amdgpu.ds_write_b32>(%13, %stored_value) {offset = 0} memory_access([0, 3, 5, -1, 43, 4, 0, 4, 3, 0, 252, 4, 256]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %loaded = low.op<amdgpu.ds_read_b32>(%13) {offset = 0} memory_access([0, 3, 5, -1, 43, 4, 0, 4, 3, 0, 252, 4, 256]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.op<amdgpu.ds_write_b32>(%13, %loaded) {offset = 0} memory_access([0, 3, 5, -1, 43, 4, 0, 4, 3, 0, 252, 4, 256]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @workgroup_memory_scalar_loop_index_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 8 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch() {
-  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 0 : offset
   %bytes = index.constant 32 : offset
-  %zero_index = index.constant 0 : index
-  %eight = index.constant 8 : index
-  %one_index = index.constant 1 : index
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<8xi32, #dense>
-  %one = vector.constant 1 : vector<1xi32>
-  scf.for %i = [%zero_index to %eight step %one_index] {
-    vector.store %one, %scratch_view[%i] : vector<1xi32>, view<8xi32, #dense>
-    %loaded = vector.load %scratch_view[%i] : view<8xi32, #dense> -> vector<1xi32>
-    vector.store %loaded, %scratch_view[%i] : vector<1xi32>, view<8xi32, #dense>
+  %loop_begin = index.constant 0 : index
+  %loop_end = index.constant 8 : index
+  %loop_step = index.constant 1 : index
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<8xi32>
+  %stored_value = vector.constant 1 : vector<1xi32>
+  scf.for %i = [%loop_begin to %loop_end step %loop_step] {
+    vector.store %stored_value, %scratch_view[%i] : vector<1xi32>, view<8xi32>
+    %loaded = vector.load %scratch_view[%i] : view<8xi32> -> vector<1xi32>
+    vector.store %loaded, %scratch_view[%i] : vector<1xi32>, view<8xi32>
   }
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(8, 1, 1) @workgroup_memory_scalar_loop_index_b32() asm<amdgpu.rdna3.core> {
-  %zero_index = s_mov_b32 0
-  %eight = s_mov_b32 8
-  %one_index = s_mov_b32 1
-  %20 = storage {byte_alignment = 16, byte_length = 32} : low.storage<workgroup>
-  %one = v_mov_b32 1
-  low.br ^_bb1(%zero_index: reg<amdgpu.sgpr>)
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(8, 1, 1) workgroup_count(1, 1, 1) @workgroup_memory_scalar_loop_index_b32() asm {
+  %17 = storage {byte_alignment = 16, byte_length = 32} : low.storage<workgroup>
+  %loop_begin = s_mov_b32 0
+  %loop_end = s_mov_b32 8
+  %loop_step = s_mov_b32 1
+  %stored_value = v_mov_b32 1
+  low.br ^_bb1(%loop_begin: reg<amdgpu.sgpr>)
 ^_bb1(%i: reg<amdgpu.sgpr>):
-  %23 = s_cmp_lt_i32 %i, %eight
+  %23 = s_cmp_lt_i32 %i, %loop_end
   low.cond_br %23, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
   %24 = v_mov_b32_copy %i
   %25 = v_lshlrev_b32_src0_inline %24, 2
-  ds_write_b32 %25, %one
-  %loaded = ds_read_b32 %25
-  ds_write_b32 %25, %loaded
-  %31 = s_add_u32 %i, %one_index
+  low.op<amdgpu.ds_write_b32>(%25, %stored_value) {offset = 0} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 0, 28, 4, 32]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %loaded = low.op<amdgpu.ds_read_b32>(%25) {offset = 0} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 0, 28, 4, 32]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.op<amdgpu.ds_write_b32>(%25, %loaded) {offset = 0} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 0, 28, 4, 32]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %31 = s_add_u32 %i, %loop_step
   low.br ^_bb1(%31: reg<amdgpu.sgpr>)
 ^_bb3:
   return
@@ -145,153 +145,153 @@ low.kernel.def target(@target) workgroup_size(8, 1, 1) @workgroup_memory_scalar_
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @wave_sized_workgroup_memory_workitem_x_b32_static_offset() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch() {
   %lane = kernel.workitem.id<x> : index
-  %four = index.constant 4 : index
-  %element_index = index.add %lane, %four : index
-  %zero = index.constant 0 : offset
+  %element_offset = index.constant 4 : index
+  %element_index = index.add %lane, %element_offset : index
+  %scratch_base = index.constant 0 : offset
   %bytes = index.constant 160 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<40xi32, #dense>
-  %one = vector.constant 1 : vector<1xi32>
-  vector.store %one, %scratch_view[%element_index] : vector<1xi32>, view<40xi32, #dense>
-  %loaded = vector.load %scratch_view[%element_index] : view<40xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %scratch_view[%element_index] : vector<1xi32>, view<40xi32, #dense>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<40xi32>
+  %stored_value = vector.constant 1 : vector<1xi32>
+  vector.store %stored_value, %scratch_view[%element_index] : vector<1xi32>, view<40xi32>
+  %loaded = vector.load %scratch_view[%element_index] : view<40xi32> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%element_index] : vector<1xi32>, view<40xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @wave_sized_workgroup_memory_workitem_x_b32_static_offset() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_workitem_x_b32_static_offset() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %12 = storage {byte_alignment = 16, byte_length = 160} : low.storage<workgroup>
-  %one = v_mov_b32 1
+  %stored_value = v_mov_b32 1
   %15 = v_lshlrev_b32_src0_inline %lane, 2
-  ds_write_b32 %15, %one {offset = 16}
-  %loaded = ds_read_b32 %15 {offset = 16}
-  ds_write_b32 %15, %loaded {offset = 16}
+  low.op<amdgpu.ds_write_b32>(%15, %stored_value) {offset = 16} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 16, 140, 20, 144]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %loaded = low.op<amdgpu.ds_read_b32>(%15) {offset = 16} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 16, 140, 20, 144]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.op<amdgpu.ds_write_b32>(%15, %loaded) {offset = 16} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 16, 140, 20, 144]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @wave_sized_workgroup_memory_second_allocation_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch() {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 0 : offset
   %bytes = index.constant 128 : offset
-  %first_scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %second_scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %first_view = buffer.view %first_scratch[%zero] : buffer -> view<32xi32, #dense>
-  %second_view = buffer.view %second_scratch[%zero] : buffer -> view<32xi32, #dense>
-  %one = vector.constant 1 : vector<1xi32>
-  %two = vector.constant 2 : vector<1xi32>
-  vector.store %one, %first_view[%lane] : vector<1xi32>, view<32xi32, #dense>
-  vector.store %two, %second_view[%lane] : vector<1xi32>, view<32xi32, #dense>
-  %loaded = vector.load %second_view[%lane] : view<32xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %first_view[%lane] : vector<1xi32>, view<32xi32, #dense>
+  %first_scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %second_scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %first_view = buffer.view %first_scratch[%scratch_base] : buffer -> view<32xi32>
+  %second_view = buffer.view %second_scratch[%scratch_base] : buffer -> view<32xi32>
+  %first_value = vector.constant 1 : vector<1xi32>
+  %second_value = vector.constant 2 : vector<1xi32>
+  vector.store %first_value, %first_view[%lane] : vector<1xi32>, view<32xi32>
+  vector.store %second_value, %second_view[%lane] : vector<1xi32>, view<32xi32>
+  %loaded = vector.load %second_view[%lane] : view<32xi32> -> vector<1xi32>
+  vector.store %loaded, %first_view[%lane] : vector<1xi32>, view<32xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @wave_sized_workgroup_memory_second_allocation_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_second_allocation_b32() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %13 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
-  %15 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
-  %one = v_mov_b32 1
-  %two = v_mov_b32 2
+  %14 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
+  %first_value = v_mov_b32 1
+  %second_value = v_mov_b32 2
   %19 = v_lshlrev_b32_src0_inline %lane, 2
-  ds_write_b32 %19, %one
-  ds_write_b32 %19, %two {offset = 128}
-  %loaded = ds_read_b32 %19 {offset = 128}
-  ds_write_b32 %19, %loaded
+  low.op<amdgpu.ds_write_b32>(%19, %first_value) {offset = 0} memory_access([0, 3, 5, -1, 43, 4, 0, 4, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  low.op<amdgpu.ds_write_b32>(%19, %second_value) {offset = 128} memory_access([0, 3, 6, -1, 43, 4, 0, 4, 3, 128, 252, 132, 256]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %loaded = low.op<amdgpu.ds_read_b32>(%19) {offset = 128} memory_access([0, 3, 6, -1, 43, 4, 0, 4, 3, 128, 252, 132, 256]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.op<amdgpu.ds_write_b32>(%19, %loaded) {offset = 0} memory_access([0, 3, 5, -1, 43, 4, 0, 4, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @wave_sized_workgroup_memory_view_base_and_element_offset_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch() {
   %lane = kernel.workitem.id<x> : index
-  %four = index.constant 4 : index
-  %element_index = index.add %lane, %four : index
+  %element_offset = index.constant 4 : index
+  %element_index = index.add %lane, %element_offset : index
   %base = index.constant 32 : offset
   %bytes = index.constant 224 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%base] : buffer -> view<40xi32, #dense>
-  %one = vector.constant 1 : vector<1xi32>
-  vector.store %one, %scratch_view[%element_index] : vector<1xi32>, view<40xi32, #dense>
-  %loaded = vector.load %scratch_view[%element_index] : view<40xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %scratch_view[%element_index] : vector<1xi32>, view<40xi32, #dense>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<40xi32>
+  %stored_value = vector.constant 1 : vector<1xi32>
+  vector.store %stored_value, %scratch_view[%element_index] : vector<1xi32>, view<40xi32>
+  %loaded = vector.load %scratch_view[%element_index] : view<40xi32> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%element_index] : vector<1xi32>, view<40xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @wave_sized_workgroup_memory_view_base_and_element_offset_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_view_base_and_element_offset_b32() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %12 = storage {byte_alignment = 16, byte_length = 224} : low.storage<workgroup>
-  %one = v_mov_b32 1
+  %stored_value = v_mov_b32 1
   %15 = v_lshlrev_b32_src0_inline %lane, 2
-  ds_write_b32 %15, %one {offset = 48}
-  %loaded = ds_read_b32 %15 {offset = 48}
-  ds_write_b32 %15, %loaded {offset = 48}
+  low.op<amdgpu.ds_write_b32>(%15, %stored_value) {offset = 48} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 48, 172, 52, 176]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %loaded = low.op<amdgpu.ds_read_b32>(%15) {offset = 48} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 48, 172, 52, 176]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.op<amdgpu.ds_write_b32>(%15, %loaded) {offset = 48} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 48, 172, 52, 176]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @wave_sized_workgroup_memory_interleaved_addtid_and_vaddr_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch() {
   %lane = kernel.workitem.id<x> : index
-  %two = index.constant 2 : index
-  %scaled_lane = index.mul %lane, %two : index
-  %zero = index.constant 0 : offset
+  %lane_scale = index.constant 2 : index
+  %scaled_lane = index.mul %lane, %lane_scale : index
+  %scratch_base = index.constant 0 : offset
   %bytes = index.constant 256 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xi32, #dense>
-  %one = vector.constant 1 : vector<1xi32>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi32>
+  %lane_value = vector.constant 1 : vector<1xi32>
   %other = vector.constant 2 : vector<1xi32>
-  vector.store %one, %scratch_view[%lane] : vector<1xi32>, view<64xi32, #dense>
-  vector.store %other, %scratch_view[%scaled_lane] : vector<1xi32>, view<64xi32, #dense>
-  %loaded = vector.load %scratch_view[%lane] : view<64xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %scratch_view[%scaled_lane] : vector<1xi32>, view<64xi32, #dense>
+  vector.store %lane_value, %scratch_view[%lane] : vector<1xi32>, view<64xi32>
+  vector.store %other, %scratch_view[%scaled_lane] : vector<1xi32>, view<64xi32>
+  %loaded = vector.load %scratch_view[%lane] : view<64xi32> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%scaled_lane] : vector<1xi32>, view<64xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @wave_sized_workgroup_memory_interleaved_addtid_and_vaddr_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_interleaved_addtid_and_vaddr_b32() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %15 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
-  %one = v_mov_b32 1
+  %lane_value = v_mov_b32 1
   %other = v_mov_b32 2
   %19 = v_lshlrev_b32_src0_inline %lane, 2
-  ds_write_b32 %19, %one
+  low.op<amdgpu.ds_write_b32>(%19, %lane_value) {offset = 0} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   %20 = v_lshlrev_b32_src0_inline %lane, 3
-  ds_write_b32 %20, %other
-  %loaded = ds_read_b32 %19
-  ds_write_b32 %20, %loaded
+  low.op<amdgpu.ds_write_b32>(%20, %other) {offset = 0} memory_access([0, 3, 7, -1, 43, 8, 0, 4, 3, 0, 248, 4, 252]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %loaded = low.op<amdgpu.ds_read_b32>(%19) {offset = 0} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.op<amdgpu.ds_write_b32>(%20, %loaded) {offset = 0} memory_access([0, 3, 7, -1, 43, 8, 0, 4, 3, 0, 248, 4, 252]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @wave_sized_workgroup_memory_roundtrip_lane_cast_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
@@ -300,32 +300,32 @@ kernel.def target(@target) @wave_sized_workgroup_memory_roundtrip_lane_cast_b32(
   %lane = kernel.workitem.id<x> : index
   %lane_i32 = index.cast %lane : index to i32
   %lane_index = index.cast %lane_i32 : i32 to index
-  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 0 : offset
   %bytes = index.constant 128 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<32xi32, #dense>
-  %one = vector.constant 1 : vector<1xi32>
-  vector.store %one, %scratch_view[%lane_index] : vector<1xi32>, view<32xi32, #dense>
-  %loaded = vector.load %scratch_view[%lane_index] : view<32xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %scratch_view[%lane_index] : vector<1xi32>, view<32xi32, #dense>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xi32>
+  %stored_value = vector.constant 1 : vector<1xi32>
+  vector.store %stored_value, %scratch_view[%lane_index] : vector<1xi32>, view<32xi32>
+  %loaded = vector.load %scratch_view[%lane_index] : view<32xi32> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%lane_index] : vector<1xi32>, view<32xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @wave_sized_workgroup_memory_roundtrip_lane_cast_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_roundtrip_lane_cast_b32() asm {
   %lane_index = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %12 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
-  %one = v_mov_b32 1
+  %stored_value = v_mov_b32 1
   %15 = v_lshlrev_b32_src0_inline %lane_index, 2
-  ds_write_b32 %15, %one
-  %loaded = ds_read_b32 %15
-  ds_write_b32 %15, %loaded
+  low.op<amdgpu.ds_write_b32>(%15, %stored_value) {offset = 0} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %loaded = low.op<amdgpu.ds_read_b32>(%15) {offset = 0} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.op<amdgpu.ds_write_b32>(%15, %loaded) {offset = 0} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @wave_sized_workgroup_memory_select_same_lane_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
@@ -335,72 +335,72 @@ kernel.def target(@target) @wave_sized_workgroup_memory_select_same_lane_b32() {
   %limit = index.constant 32 : index
   %inside = index.cmp ult, %lane, %limit : index
   %selected_lane = scf.select %inside, %lane, %lane : index
-  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 0 : offset
   %bytes = index.constant 128 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<32xi32, #dense>
-  %one = vector.constant 1 : vector<1xi32>
-  vector.store %one, %scratch_view[%selected_lane] : vector<1xi32>, view<32xi32, #dense>
-  %loaded = vector.load %scratch_view[%selected_lane] : view<32xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %scratch_view[%selected_lane] : vector<1xi32>, view<32xi32, #dense>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xi32>
+  %stored_value = vector.constant 1 : vector<1xi32>
+  vector.store %stored_value, %scratch_view[%selected_lane] : vector<1xi32>, view<32xi32>
+  %loaded = vector.load %scratch_view[%selected_lane] : view<32xi32> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%selected_lane] : vector<1xi32>, view<32xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @wave_sized_workgroup_memory_select_same_lane_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_select_same_lane_b32() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %13 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
-  %one = v_mov_b32 1
+  %stored_value = v_mov_b32 1
   %16 = v_lshlrev_b32_src0_inline %lane, 2
-  ds_write_b32 %16, %one
-  %loaded = ds_read_b32 %16
-  ds_write_b32 %16, %loaded
+  low.op<amdgpu.ds_write_b32>(%16, %stored_value) {offset = 0} memory_access([0, 3, 8, -1, 43, 4, 0, 4, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %loaded = low.op<amdgpu.ds_read_b32>(%16) {offset = 0} memory_access([0, 3, 8, -1, 43, 4, 0, 4, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.op<amdgpu.ds_write_b32>(%16, %loaded) {offset = 0} memory_access([0, 3, 8, -1, 43, 4, 0, 4, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @wave_sized_workgroup_memory_select_scaled_lane_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch() {
   %lane = kernel.workitem.id<x> : index
-  %two = index.constant 2 : index
-  %scaled_lane = index.mul %lane, %two : index
+  %lane_scale = index.constant 2 : index
+  %scaled_lane = index.mul %lane, %lane_scale : index
   %limit = index.constant 16 : index
   %inside = index.cmp ult, %lane, %limit : index
   %element_index = scf.select %inside, %lane, %scaled_lane : index
-  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 0 : offset
   %bytes = index.constant 256 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xi32, #dense>
-  %one = vector.constant 1 : vector<1xi32>
-  vector.store %one, %scratch_view[%element_index] : vector<1xi32>, view<64xi32, #dense>
-  %loaded = vector.load %scratch_view[%element_index] : view<64xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %scratch_view[%element_index] : vector<1xi32>, view<64xi32, #dense>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi32>
+  %stored_value = vector.constant 1 : vector<1xi32>
+  vector.store %stored_value, %scratch_view[%element_index] : vector<1xi32>, view<64xi32>
+  %loaded = vector.load %scratch_view[%element_index] : view<64xi32> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%element_index] : vector<1xi32>, view<64xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @wave_sized_workgroup_memory_select_scaled_lane_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_select_scaled_lane_b32() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %17 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
   %scaled_lane = v_lshlrev_b32_lit %lane, 1
   %inside = v_cmp_lt_u32_src1_inline %lane {rhs = 16}
   %element_index = v_cndmask_b32 %scaled_lane, %lane, %inside
-  %20 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
-  %one = v_mov_b32 1
+  %stored_value = v_mov_b32 1
   %23 = v_lshlrev_b32_src0_inline %element_index, 2
-  ds_write_b32 %23, %one
-  %loaded = ds_read_b32 %23
-  ds_write_b32 %23, %loaded
+  low.op<amdgpu.ds_write_b32>(%23, %stored_value) {offset = 0} memory_access([0, 3, 10, -1, 43, 4, 0, 4, 3, 0, 248, 4, 252]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %loaded = low.op<amdgpu.ds_read_b32>(%23) {offset = 0} memory_access([0, 3, 10, -1, 43, 4, 0, 4, 3, 0, 248, 4, 252]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.op<amdgpu.ds_write_b32>(%23, %loaded) {offset = 0} memory_access([0, 3, 10, -1, 43, 4, 0, 4, 3, 0, 248, 4, 252]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @wave_sized_workgroup_memory_guarded_lane_store_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
@@ -409,40 +409,40 @@ kernel.def target(@target) @wave_sized_workgroup_memory_guarded_lane_store_b32()
   %lane = kernel.workitem.id<x> : index
   %limit = index.constant 16 : index
   %inside = index.cmp ult, %lane, %limit : index
-  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 0 : offset
   %bytes = index.constant 128 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<32xi32, #dense>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xi32>
   %initial = vector.constant 0 : vector<1xi32>
   %replacement = vector.constant 1 : vector<1xi32>
-  vector.store %initial, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #dense>
+  vector.store %initial, %scratch_view[%lane] : vector<1xi32>, view<32xi32>
   scf.if %inside {
-    vector.store %replacement, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #dense>
+    vector.store %replacement, %scratch_view[%lane] : vector<1xi32>, view<32xi32>
   }
-  %loaded = vector.load %scratch_view[%lane] : view<32xi32, #dense> -> vector<1xi32>
-  vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #dense>
+  %loaded = vector.load %scratch_view[%lane] : view<32xi32> -> vector<1xi32>
+  vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<32xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @wave_sized_workgroup_memory_guarded_lane_store_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_guarded_lane_store_b32() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %14 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
   %initial = v_mov_b32 0
   %replacement = v_mov_b32 1
   %18 = v_lshlrev_b32_src0_inline %lane, 2
-  ds_write_b32 %18, %initial
+  low.op<amdgpu.ds_write_b32>(%18, %initial) {offset = 0} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   %inside = v_cmp_lt_u32_src1_inline %lane {rhs = 16}
   %20, %21 = s_and_saveexec_b64 %inside
   low.cond_br %21, ^_bb1, ^_bb3 : reg<amdgpu.scc>
 ^_bb1:
   %22 = v_lshlrev_b32_src0_inline %lane, 2
-  ds_write_b32 %22, %replacement
+  low.op<amdgpu.ds_write_b32>(%22, %replacement) {offset = 0} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 0, 60, 4, 64]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   low.br ^_bb3
 ^_bb2:
   %23 = v_lshlrev_b32_src0_inline %lane, 2
-  %loaded = ds_read_b32 %23
-  ds_write_b32 %23, %loaded
+  %loaded = low.op<amdgpu.ds_read_b32>(%23) {offset = 0} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.op<amdgpu.ds_write_b32>(%23, %loaded) {offset = 0} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   return
 ^_bb3:
   s_mov_b64_exec %20
@@ -451,7 +451,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @wave_sized_workgroup_me
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @wave_sized_workgroup_memory_guarded_lane_load_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
@@ -460,33 +460,33 @@ kernel.def target(@target) @wave_sized_workgroup_memory_guarded_lane_load_b32() 
   %lane = kernel.workitem.id<x> : index
   %limit = index.constant 16 : index
   %inside = index.cmp ult, %lane, %limit : index
-  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 0 : offset
   %bytes = index.constant 128 : offset
-  %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<32xi32, #dense>
-  %one = vector.constant 1 : vector<1xi32>
-  vector.store %one, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #dense>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<32xi32>
+  %stored_value = vector.constant 1 : vector<1xi32>
+  vector.store %stored_value, %scratch_view[%lane] : vector<1xi32>, view<32xi32>
   scf.if %inside {
-    %loaded = vector.load %scratch_view[%lane] : view<32xi32, #dense> -> vector<1xi32>
-    vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<32xi32, #dense>
+    %loaded = vector.load %scratch_view[%lane] : view<32xi32> -> vector<1xi32>
+    vector.store %loaded, %scratch_view[%lane] : vector<1xi32>, view<32xi32>
   }
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @wave_sized_workgroup_memory_guarded_lane_load_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_guarded_lane_load_b32() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %13 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
-  %one = v_mov_b32 1
+  %stored_value = v_mov_b32 1
   %16 = v_lshlrev_b32_src0_inline %lane, 2
-  ds_write_b32 %16, %one
+  low.op<amdgpu.ds_write_b32>(%16, %stored_value) {offset = 0} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   %inside = v_cmp_lt_u32_src1_inline %lane {rhs = 16}
   %18, %19 = s_and_saveexec_b64 %inside
   low.cond_br %19, ^_bb1, ^_bb2 : reg<amdgpu.scc>
 ^_bb1:
   %20 = v_lshlrev_b32_src0_inline %lane, 2
-  %loaded = ds_read_b32 %20
-  ds_write_b32 %20, %loaded
+  %loaded = low.op<amdgpu.ds_read_b32>(%20) {offset = 0} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 0, 60, 4, 64]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.op<amdgpu.ds_write_b32>(%20, %loaded) {offset = 0} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 0, 60, 4, 64]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   low.br ^_bb2
 ^_bb2:
   s_mov_b64_exec %18

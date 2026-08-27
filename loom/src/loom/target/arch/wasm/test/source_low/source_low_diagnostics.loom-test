@@ -44,9 +44,19 @@ wasm.target<simd128> @target
 
 func.def target(@target) @rejects_wasm32_address_overflow(%input: buffer, %i: index) -> (vector<4xi32>) {
   %bounded_i = index.assume %i [range(%i, 0, 1073741824)] : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<1073741828xi32, #dense>
+  %input_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%input_base] : buffer -> view<1073741828xi32>
   // ERROR@+1: WASM/006 {bit_count="32"}
-  %loaded = vector.load %input_view[%bounded_i] : view<1073741828xi32, #dense> -> vector<4xi32>
+  %loaded = vector.load %input_view[%bounded_i] : view<1073741828xi32> -> vector<4xi32>
   func.return %loaded : vector<4xi32>
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @fp8_bits_do_not_imply_fp8_arithmetic(%lhs: f8E4M3, %rhs: f8E4M3) -> (f8E4M3) {
+  // ERROR@+1: LOWERING/036 {op_name="scalar.addf", element_type="f8E4M3"}
+  %result = scalar.addf %lhs, %rhs : f8E4M3
+  func.return %result : f8E4M3
 }

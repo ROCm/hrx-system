@@ -26,8 +26,6 @@ using TargetEnvironmentPtr =
     HandlePtr<loomc_target_environment_t, loomc_target_environment_release>;
 using TargetProfilePtr =
     HandlePtr<loomc_target_profile_t, loomc_target_profile_release>;
-using TargetSelectionPtr =
-    HandlePtr<loomc_target_selection_t, loomc_target_selection_release>;
 
 struct MockVulkanDevice {
   VkPhysicalDevice handle =
@@ -370,13 +368,6 @@ TEST(TargetSpirvVulkanTest, CreatesProfileFromRawVulkanDevice) {
       profile.get(), LOOMC_SPIRV_ENVIRONMENT_MAX_SPIRV_VERSION, &environment));
   EXPECT_EQ(environment.state, LOOMC_TARGET_FACT_STATE_TRUE);
   EXPECT_EQ(environment.value, LOOMC_SPIRV_VERSION_1_6);
-
-  loomc_target_selection_t* selection = nullptr;
-  loomc_status_t status = loomc_target_selection_create_from_profile(
-      profile.get(), loomc_allocator_system(), &selection);
-  LOOMC_EXPECT_OK(status);
-  TargetSelectionPtr selection_ptr(selection);
-  EXPECT_NE(selection_ptr.get(), nullptr);
 }
 
 TEST(TargetSpirvVulkanTest, UsesExtensionFeatureStructsBeforeCorePromotion) {

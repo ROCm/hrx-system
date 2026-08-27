@@ -41,42 +41,33 @@ class MessageTest : public SocketTestBase<> {
   }
 
   void TearDown() override {
-    if (target_proactor_) {
-      DrainTarget();
-      iree_async_proactor_release(target_proactor_);
-      target_proactor_ = nullptr;
-    }
+    iree_async_proactor_release(target_proactor_);
+    target_proactor_ = nullptr;
     CtsTestBase::TearDown();
   }
 
-  // Polls the target proactor until the budget expires.
-  // Continues polling even on DEADLINE_EXCEEDED to ensure all completions
-  // have a chance to arrive (async systems don't guarantee timing).
-  void PollTarget(iree_duration_t budget = iree_make_duration_ms(100)) {
-    iree_time_t deadline_ns = iree_time_now() + budget;
-    while (iree_time_now() < deadline_ns) {
+  // Polls the target proactor until |predicate| returns true.
+  template <typename Predicate>
+  void PollTargetUntilCondition(Predicate predicate,
+                                const char* description = "condition") {
+    SCOPED_TRACE(description);
+    while (!predicate()) {
       iree_host_size_t completed = 0;
-      iree_status_t status = iree_async_proactor_poll(
-          target_proactor_, iree_make_timeout_ms(10), &completed);
-      if (iree_status_is_deadline_exceeded(status)) {
-        iree_status_ignore(status);
-        continue;  // Keep polling until deadline.
-      }
-      IREE_ASSERT_OK(status);
+      IREE_ASSERT_OK(iree_async_proactor_poll(
+          target_proactor_, iree_infinite_timeout(), &completed));
     }
   }
 
-  void DrainTarget(iree_duration_t budget = iree_make_duration_ms(100)) {
-    iree_time_t deadline_ns = iree_time_now() + budget;
-    while (iree_time_now() < deadline_ns) {
-      iree_host_size_t completed = 0;
-      iree_status_t status = iree_async_proactor_poll(
-          target_proactor_, iree_immediate_timeout(), &completed);
-      if (iree_status_is_deadline_exceeded(status)) {
-        iree_status_ignore(status);
-        break;
-      }
-      iree_status_ignore(status);
+  // Runs one nonblocking source poll to flush submissions owned by the poll
+  // thread. Backends may report DEADLINE_EXCEEDED when the progress turn has
+  // no user-visible completion.
+  void PollSourceImmediate() {
+    iree_status_t status = iree_async_proactor_poll(
+        proactor_, iree_immediate_timeout(), /*out_completed_count=*/nullptr);
+    if (iree_status_is_deadline_exceeded(status)) {
+      IREE_ASSERT_STATUS_IS(IREE_STATUS_DEADLINE_EXCEEDED, status);
+    } else {
+      IREE_ASSERT_OK(status);
     }
   }
 
@@ -120,12 +111,12 @@ TEST_P(MessageTest, BasicSend) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &message.base));
 
   // Poll source to send the message.
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(100));
+  PollUntil(/*min_completions=*/1);
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
 
-  // Poll target to receive the message.
-  PollTarget(iree_make_duration_ms(100));
+  PollTargetUntilCondition([&] { return receiver.count.load() == 1; },
+                           "basic message delivery");
   EXPECT_EQ(receiver.count.load(), 1);
   EXPECT_EQ(receiver.last_data, kTestValue);
 }
@@ -160,24 +151,12 @@ TEST_P(MessageTest, SkipSourceCompletion) {
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &message.base));
 
-  // With SKIP_SOURCE_COMPLETION, there's no source CQE. But we still need to
-  // ensure the kernel processes the SQE. Poll the source with a brief timeout
-  // to trigger any deferred processing.
-  iree_status_t status =
-      iree_async_proactor_poll(proactor_, iree_make_timeout_ms(50), nullptr);
-  iree_status_ignore(status);  // DEADLINE_EXCEEDED is expected.
+  // io_uring submissions are flushed by the source poll owner. This exact
+  // nonblocking progress turn replaces the former fixed-duration drain.
+  PollSourceImmediate();
 
-  // Poll target until the message callback fires.
-  iree_time_t deadline = iree_time_now() + iree_make_duration_ms(100);
-  while (receiver.count.load() == 0 && iree_time_now() < deadline) {
-    status = iree_async_proactor_poll(target_proactor_,
-                                      iree_make_timeout_ms(10), nullptr);
-    if (iree_status_is_deadline_exceeded(status)) {
-      iree_status_ignore(status);
-    } else {
-      IREE_ASSERT_OK(status);
-    }
-  }
+  PollTargetUntilCondition([&] { return receiver.count.load() == 1; },
+                           "fire-and-forget message delivery");
   EXPECT_EQ(receiver.count.load(), 1);
 }
 
@@ -228,14 +207,14 @@ TEST_P(MessageTest, LinkChainTimerThenMessage) {
   IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
 
   // Poll source - timer should fire, then message should be sent.
-  PollUntil(/*min_completions=*/2, /*total_budget=*/iree_make_duration_ms(500));
+  PollUntil(/*min_completions=*/2);
   EXPECT_EQ(timer_tracker.call_count, 1);
   EXPECT_EQ(message_tracker.call_count, 1);
   IREE_EXPECT_OK(timer_tracker.ConsumeStatus());
   IREE_EXPECT_OK(message_tracker.ConsumeStatus());
 
-  // Poll target to receive.
-  PollTarget(iree_make_duration_ms(100));
+  PollTargetUntilCondition([&] { return receiver.count.load() == 1; },
+                           "linked message delivery");
   EXPECT_EQ(receiver.count.load(), 1);
   EXPECT_EQ(receiver.last_data, 0x1234ABCD);
 }
@@ -274,22 +253,12 @@ TEST_P(MessageTest, SelfMessage) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &message.base));
 
   // Poll until the send completion arrives.
-  PollUntil(/*min_completions=*/1, /*total_budget=*/iree_make_duration_ms(100));
+  PollUntil(/*min_completions=*/1);
   EXPECT_EQ(tracker.call_count, 1);
   IREE_EXPECT_OK(tracker.ConsumeStatus());
 
-  // Poll until the message callback fires. In an async system, there's no
-  // guarantee that all completions arrive in the same poll iteration.
-  iree_time_t deadline = iree_time_now() + iree_make_duration_ms(100);
-  while (receiver.count.load() == 0 && iree_time_now() < deadline) {
-    iree_status_t status =
-        iree_async_proactor_poll(proactor_, iree_make_timeout_ms(10), nullptr);
-    if (iree_status_is_deadline_exceeded(status)) {
-      iree_status_ignore(status);
-    } else {
-      IREE_ASSERT_OK(status);
-    }
-  }
+  PollUntilCondition([&] { return receiver.count.load() == 1; },
+                     "self-message delivery");
   EXPECT_EQ(receiver.count.load(), 1);
   EXPECT_EQ(receiver.last_data, 0xAAAABBBBCCCCDDDDULL);
 }
@@ -338,8 +307,10 @@ TEST_P(MessageTest, Bidirectional) {
   message_to_b.base.user_data = &tracker_to_b;
 
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &message_to_b.base));
-  PollUntil(1, iree_make_duration_ms(100));
-  PollTarget(iree_make_duration_ms(100));
+  PollUntil(1);
+  IREE_EXPECT_OK(tracker_to_b.ConsumeStatus());
+  PollTargetUntilCondition([&] { return target_receiver.count.load() == 1; },
+                           "A-to-B message delivery");
   EXPECT_EQ(target_receiver.count.load(), 1);
   EXPECT_EQ(target_receiver.last_data, 0x1111);
 
@@ -358,21 +329,12 @@ TEST_P(MessageTest, Bidirectional) {
   IREE_ASSERT_OK(
       iree_async_proactor_submit_one(target_proactor_, &message_to_a.base));
 
-  // Poll target to get the B→A source completion.
-  PollTarget(iree_make_duration_ms(100));
+  PollTargetUntilCondition([&] { return tracker_to_a.call_count == 1; },
+                           "B-to-A source completion");
+  IREE_EXPECT_OK(tracker_to_a.ConsumeStatus());
 
-  // Poll source until the message callback fires. Message delivery happens via
-  // callback, not via a user completion (the receiver didn't submit anything).
-  iree_time_t deadline = iree_time_now() + iree_make_duration_ms(100);
-  while (source_receiver.count.load() == 0 && iree_time_now() < deadline) {
-    iree_status_t status =
-        iree_async_proactor_poll(proactor_, iree_make_timeout_ms(10), nullptr);
-    if (iree_status_is_deadline_exceeded(status)) {
-      iree_status_ignore(status);
-    } else {
-      IREE_ASSERT_OK(status);
-    }
-  }
+  PollUntilCondition([&] { return source_receiver.count.load() == 1; },
+                     "B-to-A message delivery");
 
   EXPECT_EQ(source_receiver.count.load(), 1);
   EXPECT_EQ(source_receiver.last_data, 0x2222);
@@ -422,13 +384,14 @@ TEST_P(MessageTest, MultipleInFlight) {
   IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
 
   // Poll source to send all messages.
-  PollUntil(kMessageCount, iree_make_duration_ms(5000));
+  PollUntil(kMessageCount);
 
-  // Poll target to receive all messages.
-  iree_time_t deadline = iree_time_now() + iree_make_duration_ms(5000);
-  while (receiver.count.load() < kMessageCount && iree_time_now() < deadline) {
-    PollTarget(iree_make_duration_ms(100));
+  for (auto& tracker : trackers) {
+    IREE_EXPECT_OK(tracker.ConsumeStatus());
   }
+  PollTargetUntilCondition(
+      [&] { return receiver.count.load() == kMessageCount; },
+      "all in-flight message deliveries");
 
   EXPECT_EQ(receiver.count.load(), kMessageCount);
   EXPECT_EQ(receiver.sum.load(), expected_sum);
@@ -459,17 +422,8 @@ TEST_P(MessageTest, SendMessage) {
   IREE_ASSERT_OK(
       iree_async_proactor_send_message(target_proactor_, kTestValue));
 
-  // Poll target until message arrives.
-  iree_time_t deadline = iree_time_now() + iree_make_duration_ms(100);
-  while (receiver.count.load() == 0 && iree_time_now() < deadline) {
-    iree_status_t status = iree_async_proactor_poll(
-        target_proactor_, iree_make_timeout_ms(10), nullptr);
-    if (iree_status_is_deadline_exceeded(status)) {
-      iree_status_ignore(status);
-    } else {
-      IREE_ASSERT_OK(status);
-    }
-  }
+  PollTargetUntilCondition([&] { return receiver.count.load() == 1; },
+                           "direct message delivery");
 
   EXPECT_EQ(receiver.count.load(), 1);
   EXPECT_EQ(receiver.last_data, kTestValue);
@@ -520,18 +474,10 @@ TEST_P(MessageTest, SendMessageFromMultipleThreads) {
   // Start all threads simultaneously.
   start_flag.store(true, std::memory_order_release);
 
-  // Poll target while threads are sending.
   constexpr int kTotalMessages = kThreadCount * kMessagesPerThread;
-  iree_time_t deadline = iree_time_now() + iree_make_duration_ms(5000);
-  while (receiver.count.load() < kTotalMessages && iree_time_now() < deadline) {
-    iree_status_t status = iree_async_proactor_poll(
-        target_proactor_, iree_make_timeout_ms(10), nullptr);
-    if (iree_status_is_deadline_exceeded(status)) {
-      iree_status_ignore(status);
-    } else {
-      IREE_ASSERT_OK(status);
-    }
-  }
+  PollTargetUntilCondition(
+      [&] { return receiver.count.load() == kTotalMessages; },
+      "all concurrent message deliveries");
 
   // Wait for all threads to complete.
   for (auto& thread : threads) {

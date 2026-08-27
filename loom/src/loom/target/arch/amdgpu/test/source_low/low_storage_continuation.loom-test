@@ -1,0 +1,58 @@
+// RUN: emit amdgpu-wait-counter-plan-json @lds_d16_storage_continuation
+
+amdgpu.target<gfx1100> @target
+low.func.def target<amdgpu.rdna3.core>(@target) @lds_d16_storage_continuation(%addr: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %low = ds_load_u16_d16 %addr
+  %full = ds_load_u16_d16_hi %low, %addr
+  %sum = v_add_u32 %full, %rhs
+  return %sum
+}
+
+// The high-half load continues the low-half result in the same VGPR without
+// consuming or clobbering it. Both loads may remain outstanding until the
+// first full-register consumer.
+
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"lds_d16_storage_continuation","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":2,"hazard_count":1,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":1,"consumer_node":2,"insertion_packet":2,"block":0,"scheduled_ordinal":2,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":2,"observed":0,"residual":2}]}
+
+// ====
+// RUN: emit amdgpu-assembly @lds_d16_storage_continuation_assembly
+
+amdgpu.target<gfx1100> @target
+low.func.def target<amdgpu.rdna3.core>(@target) @lds_d16_storage_continuation_assembly(%addr: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
+  %low = ds_load_u16_d16 %addr
+  %full = ds_load_u16_d16_hi %low, %addr
+  %sum = v_add_u32 %full, %rhs
+  global_store_b32_saddr %addr, %sum, %output
+  return
+}
+
+// The paired D16 loads must issue back-to-back with no intervening wait. The
+// full-register addition still waits for both partial writes to complete.
+
+// ----
+  ds_load_u16_d16 v2, v1 offset:0
+  ds_load_u16_d16_hi v2, v1 offset:0
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  v_add_u32 v0, v2, v0
+  global_store_b32 v1, v0, s[0:1] offset:0
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-wait-counter-plan-json @vmem_d16_storage_continuation
+
+amdgpu.target<gfx1100> @target
+low.func.def target<amdgpu.rdna3.core>(@target) @vmem_d16_storage_continuation(%addr: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %low = global_load_d16_b16_saddr %addr, %input
+  %full = global_load_d16_hi_b16_saddr %low, %addr, %input
+  %sum = v_add_u32 %full, %rhs
+  return %sum
+}
+
+// VMEM uses the same continuation contract: the high-half packet carries
+// storage identity and issue order, while the full-register consumer owns the
+// completion wait.
+
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"vmem_d16_storage_continuation","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":2,"hazard_count":1,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":1,"consumer_node":2,"insertion_packet":2,"block":0,"scheduled_ordinal":2,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":2,"observed":0,"residual":2}]}

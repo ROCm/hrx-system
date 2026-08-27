@@ -6,7 +6,6 @@
 
 #include "iree/hal/drivers/amdgpu/system.h"
 
-#include "iree/hal/drivers/amdgpu/executable.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
 
 //===----------------------------------------------------------------------===//
@@ -215,6 +214,51 @@ static iree_status_t iree_hal_amdgpu_system_populate_host_regions(
 // iree_hal_amdgpu_system_t
 //===----------------------------------------------------------------------===//
 
+static iree_status_t iree_hal_amdgpu_system_query_gpu_agent_targets(
+    const iree_hal_amdgpu_libhsa_t* libhsa,
+    const iree_hal_amdgpu_topology_t* topology, iree_allocator_t host_allocator,
+    iree_hal_amdgpu_agent_target_t* out_targets) {
+  for (iree_host_size_t i = 0; i < topology->gpu_agent_count; ++i) {
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_agent_target_query(
+        libhsa, topology->gpu_agents[i], host_allocator, &out_targets[i]));
+  }
+
+  for (iree_host_size_t i = 1; i < topology->gpu_agent_count; ++i) {
+    if (out_targets[i].isa_count != out_targets[0].isa_count) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "runtime currently requires homogeneous GPU targets; agent[%" PRIhsz
+          "] reports %" PRIhsz " ISAs but agent[0] reports %" PRIhsz,
+          i, out_targets[i].isa_count, out_targets[0].isa_count);
+    }
+    for (iree_host_size_t j = 0; j < out_targets[0].isa_count; ++j) {
+      const iree_hal_amdgpu_agent_isa_target_t* expected_isa =
+          iree_hal_amdgpu_agent_target_isa_at(&out_targets[0], j);
+      const iree_hal_amdgpu_agent_isa_target_t* actual_isa =
+          iree_hal_amdgpu_agent_target_isa_at(&out_targets[i], j);
+      if (iree_hal_amdgpu_target_identity_equal(&expected_isa->identity,
+                                                &actual_isa->identity)) {
+        continue;
+      }
+      char expected_target[128] = {0};
+      IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_identity_format_artifact_key(
+          &expected_isa->identity, sizeof(expected_target), expected_target,
+          /*out_buffer_length=*/NULL));
+      char actual_target[128] = {0};
+      IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_identity_format_artifact_key(
+          &actual_isa->identity, sizeof(actual_target), actual_target,
+          /*out_buffer_length=*/NULL));
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "runtime currently requires homogeneous GPU targets; agent[%" PRIhsz
+          "] ISA[%" PRIhsz "] target `%s` does not match agent[0] ISA[%" PRIhsz
+          "] target `%s`",
+          i, j, actual_target, j, expected_target);
+    }
+  }
+  return iree_ok_status();
+}
+
 static void iree_hal_amdgpu_system_deinitialize(
     iree_hal_amdgpu_system_t* system);
 
@@ -228,12 +272,6 @@ static iree_status_t iree_hal_amdgpu_system_initialize(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   out_system->host_allocator = host_allocator;
-
-  // Ensure all GPU agents in the topology support compatible ISAs. They should
-  // all be the same today but in the future if we start allowing heterogeneous
-  // (even if just lightly) we'll want to catch issues here.
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_amdgpu_verify_device_isa_commonality(libhsa, topology));
 
   // Query and validate the system information.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -258,11 +296,21 @@ static iree_status_t iree_hal_amdgpu_system_initialize(
   // Preserved as the information may be used by components of the system.
   out_system->options = options;
 
+  // Query physical target identity once for each GPU agent. All later
+  // consumers share these immutable records instead of independently
+  // rediscovering ISA features and ASIC revision.
+  iree_status_t status = iree_hal_amdgpu_system_query_gpu_agent_targets(
+      &out_system->libhsa, &out_system->topology, out_system->host_allocator,
+      out_system->gpu_agent_targets);
+
   // Initialize the device library, which will load the builtin executable and
   // fail if we don't have a supported arch.
-  iree_status_t status = iree_hal_amdgpu_device_library_initialize(
-      &out_system->libhsa, topology, host_allocator,
-      &out_system->device_library);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amdgpu_device_library_initialize(
+        &out_system->libhsa, &out_system->topology,
+        out_system->gpu_agent_targets, host_allocator,
+        &out_system->device_library);
+  }
 
   // Find common/shared memory pools.
   if (iree_status_is_ok(status)) {
@@ -294,6 +342,10 @@ static void iree_hal_amdgpu_system_deinitialize(
 
   // Unload the device library - no references to it should remain.
   iree_hal_amdgpu_device_library_deinitialize(&system->device_library);
+
+  for (iree_host_size_t i = 0; i < system->topology.gpu_agent_count; ++i) {
+    iree_hal_amdgpu_agent_target_deinitialize(&system->gpu_agent_targets[i]);
+  }
 
   // Release platform clock-sampling state before unloading HSA.
   iree_hal_amdgpu_device_clock_source_deinitialize(

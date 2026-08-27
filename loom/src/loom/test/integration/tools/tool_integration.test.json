@@ -24,8 +24,7 @@
           "stderr": {
             "contains": [
               "\"artifact_kind\":\"vm-archive\"",
-              "\"status_code\":0",
-              "\"status\":\"OK\""
+              "\"status\":{\"code\":0,\"name\":\"OK\"}"
             ]
           },
           "files": [
@@ -97,8 +96,7 @@
           "stderr": {
             "contains": [
               "\"artifact_kind\":\"vm-archive\"",
-              "\"status_code\":0",
-              "\"status\":\"OK\""
+              "\"status\":{\"code\":0,\"name\":\"OK\"}"
             ]
           },
           "files": [

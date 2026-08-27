@@ -51,8 +51,9 @@ iree_status_t loom_amdgpu_build_sanitizer_access_config(
 // Emits the hot-path AMDGPU ASAN-style failure predicate for one static access
 // range.
 //
-// |fault_address| must be a 64-bit SGPR or VGPR register range. |access_size|
-// is packetized into <=8 byte chunks so every touched shadow byte is covered.
+// |fault_address| must be a 64-bit SGPR or VGPR register range. Full shadow
+// granules use exact-width shadow loads; partial ranges use precise endpoint
+// checks so every touched shadow byte is covered.
 // |wavefront_size| must be 32 or 64 and controls whether the returned SGPRx2
 // |out_failure_mask| needs wave32 zero-extension before it is consumed as an
 // EXEC-width lane mask. This helper only returns the assertion predicate and

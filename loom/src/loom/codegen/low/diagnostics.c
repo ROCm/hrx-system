@@ -7,6 +7,7 @@
 #include "loom/codegen/low/diagnostics.h"
 
 #include "loom/codegen/low/function.h"
+#include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 
@@ -37,15 +38,17 @@ iree_string_view_t loom_low_diagnostic_target_key(
 iree_string_view_t loom_low_diagnostic_export_name(
     const loom_low_resolved_target_t* target) {
   if (!target) return IREE_SV("<empty>");
-  return loom_low_diagnostic_string_or_placeholder(
-      target->bundle_storage.export_plan.name, IREE_SV("<empty>"));
+  const loom_target_bundle_t* bundle = loom_low_resolved_target_bundle(target);
+  return loom_low_diagnostic_string_or_placeholder(bundle->export_plan->name,
+                                                   IREE_SV("<empty>"));
 }
 
 iree_string_view_t loom_low_diagnostic_config_key(
     const loom_low_resolved_target_t* target) {
   if (!target) return IREE_SV("<empty>");
-  return loom_low_diagnostic_string_or_placeholder(
-      target->bundle_storage.config.name, IREE_SV("<empty>"));
+  const loom_target_bundle_t* bundle = loom_low_resolved_target_bundle(target);
+  return loom_low_diagnostic_string_or_placeholder(bundle->config->name,
+                                                   IREE_SV("<empty>"));
 }
 
 iree_string_view_t loom_low_diagnostic_function_name(
@@ -63,6 +66,12 @@ iree_string_view_t loom_low_diagnostic_function_name(
         module, loom_low_func_decl_callee(function_op));
   }
   return IREE_SV("<unnamed>");
+}
+
+iree_string_view_t loom_low_diagnostic_operation_name(
+    const loom_module_t* module, const loom_op_t* op) {
+  if (!module || !op) return IREE_SV("<unknown>");
+  return loom_op_name(module, op);
 }
 
 iree_string_view_t loom_low_diagnostic_value_name(const loom_module_t* module,
@@ -105,4 +114,17 @@ const loom_op_t* loom_low_diagnostic_value_origin_op(
   if (loom_value_is_block_arg(value)) return fallback_op;
   const loom_op_t* defining_op = loom_def_op(value->def);
   return defining_op ? defining_op : fallback_op;
+}
+
+iree_string_view_t loom_low_diagnostic_value_origin_operation_name(
+    const loom_module_t* module, loom_value_id_t value_id,
+    const loom_op_t* fallback_op) {
+  if (!module || value_id >= module->values.count) {
+    return loom_low_diagnostic_operation_name(module, fallback_op);
+  }
+  const loom_value_t* value = loom_module_value(module, value_id);
+  if (loom_value_is_block_arg(value)) return IREE_SV("<block-argument>");
+  const loom_op_t* defining_op = loom_def_op(value->def);
+  return loom_low_diagnostic_operation_name(
+      module, defining_op ? defining_op : fallback_op);
 }

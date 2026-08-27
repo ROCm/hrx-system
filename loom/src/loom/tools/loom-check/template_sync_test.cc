@@ -12,6 +12,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/ir/context.h"
+#include "loom/ops/config/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
@@ -37,6 +38,8 @@ class TemplateSyncTest : public ::testing::Test {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(),
                                      &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
+    IREE_ASSERT_OK(RegisterDialect(&context_, LOOM_DIALECT_CONFIG,
+                                   loom_config_dialect_vtables));
     IREE_ASSERT_OK(RegisterDialect(&context_, LOOM_DIALECT_FUNC,
                                    loom_func_dialect_vtables));
     IREE_ASSERT_OK(RegisterDialect(&context_, LOOM_DIALECT_INDEX,
@@ -343,6 +346,163 @@ TEST_F(TemplateSyncTest, AppliesDefaultOverlayToNewTargetCases) {
                         "func.def target(@target) @beta() {\n"),
             std::string::npos);
   EXPECT_NE(result.find("old target evidence\n"), std::string::npos);
+}
+
+TEST_F(TemplateSyncTest, PreservesMaterializedTemplatePreludeOnce) {
+  const char* target_source =
+      "// TEMPLATE: loom/src/loom/test/corpus/source_low/example.loom-test\n"
+      "// RUN: emit source-low output=low\n"
+      "\n"
+      "func.decl @target()\n"
+      "func.decl @shared()\n"
+      "func.def target(@target) @entry() {\n"
+      "}\n";
+  const char* template_source =
+      "// RUN: roundtrip\n"
+      "\n"
+      "func.decl @shared()\n"
+      "func.def @entry() {\n"
+      "}\n";
+
+  std::string result;
+  bool changed = true;
+  IREE_ASSERT_OK(Build(target_source, template_source, &result, &changed));
+
+  EXPECT_FALSE(changed);
+  EXPECT_EQ(result, target_source);
+}
+
+TEST_F(TemplateSyncTest, ReplacesSatisfiedTemplateDeclaration) {
+  const char* target_source =
+      "// TEMPLATE: loom/src/loom/test/corpus/source_low/example.loom-test\n"
+      "// RUN: emit source-low output=low\n"
+      "\n"
+      "config.def @batch_size = 8 : index\n"
+      "func.def @entry() {\n"
+      "}\n";
+  const char* template_source =
+      "// RUN: roundtrip\n"
+      "\n"
+      "config.decl @batch_size : %value: index where "
+      "[range(%value, 1, 16)]\n"
+      "func.def @entry() {\n"
+      "  %value = index.constant 0 : index\n"
+      "}\n";
+
+  std::string first_result;
+  bool first_changed = false;
+  IREE_ASSERT_OK(
+      Build(target_source, template_source, &first_result, &first_changed));
+  EXPECT_TRUE(first_changed);
+  EXPECT_NE(first_result.find("config.def @batch_size = 8 : index\n"),
+            std::string::npos);
+  EXPECT_EQ(first_result.find("config.decl @batch_size"), std::string::npos);
+  EXPECT_NE(first_result.find("  %value = index.constant 0 : index\n"),
+            std::string::npos);
+
+  std::string second_result;
+  bool second_changed = true;
+  IREE_ASSERT_OK(Build(first_result.c_str(), template_source, &second_result,
+                       &second_changed));
+  EXPECT_FALSE(second_changed);
+  EXPECT_EQ(second_result, first_result);
+}
+
+TEST_F(TemplateSyncTest, RejectsIncompatibleTemplateDeclaration) {
+  std::string result;
+  bool changed = false;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      Build("// TEMPLATE: "
+            "loom/src/loom/test/corpus/source_low/example.loom-test\n"
+            "// RUN: emit source-low output=low\n"
+            "\n"
+            "config.def @batch_size = 32 : index\n"
+            "func.def @entry() {\n"
+            "}\n",
+            "// RUN: roundtrip\n"
+            "\n"
+            "config.decl @batch_size : %value: index where "
+            "[range(%value, 1, 16)]\n"
+            "func.def @entry() {\n"
+            "}\n",
+            &result, &changed));
+}
+
+TEST_F(TemplateSyncTest, RepairsRepeatedMaterializedTemplatePrelude) {
+  const char* target_source =
+      "// TEMPLATE: loom/src/loom/test/corpus/source_low/example.loom-test\n"
+      "// RUN: emit source-low output=low\n"
+      "\n"
+      "func.decl @target()\n"
+      "func.decl @shared()\n"
+      "func.decl @shared()\n"
+      "func.decl @shared()\n"
+      "func.def target(@target) @entry() {\n"
+      "}\n";
+  const char* expected_source =
+      "// TEMPLATE: loom/src/loom/test/corpus/source_low/example.loom-test\n"
+      "// RUN: emit source-low output=low\n"
+      "\n"
+      "func.decl @target()\n"
+      "func.decl @shared()\n"
+      "func.def target(@target) @entry() {\n"
+      "}\n";
+  const char* template_source =
+      "// RUN: roundtrip\n"
+      "\n"
+      "func.decl @shared()\n"
+      "func.def @entry() {\n"
+      "}\n";
+
+  std::string result;
+  bool changed = false;
+  IREE_ASSERT_OK(Build(target_source, template_source, &result, &changed));
+
+  EXPECT_TRUE(changed);
+  EXPECT_EQ(result, expected_source);
+}
+
+TEST_F(TemplateSyncTest, KeepsDistinctTargetPreludeForNewCases) {
+  const char* target_source =
+      "// TEMPLATE: loom/src/loom/test/corpus/source_low/example.loom-test\n"
+      "// RUN: emit source-low output=low\n"
+      "\n"
+      "func.decl @target()\n"
+      "func.decl @target_helper()\n"
+      "func.decl @shared()\n"
+      "func.def target(@target) @alpha() {\n"
+      "}\n";
+  const char* template_source =
+      "// RUN: roundtrip\n"
+      "\n"
+      "func.decl @shared()\n"
+      "func.def @alpha() {\n"
+      "}\n"
+      "\n"
+      "// ====\n"
+      "\n"
+      "func.decl @shared()\n"
+      "func.def @beta() {\n"
+      "}\n";
+
+  std::string first_result;
+  bool first_changed = false;
+  IREE_ASSERT_OK(
+      Build(target_source, template_source, &first_result, &first_changed));
+  EXPECT_TRUE(first_changed);
+  EXPECT_NE(first_result.find("func.decl @target()\n"
+                              "func.decl @target_helper()\n"
+                              "func.decl @shared()\n"
+                              "func.def target(@target) @beta()"),
+            std::string::npos);
+
+  std::string second_result;
+  bool second_changed = true;
+  IREE_ASSERT_OK(Build(first_result.c_str(), template_source, &second_result,
+                       &second_changed));
+  EXPECT_FALSE(second_changed);
+  EXPECT_EQ(second_result, first_result);
 }
 
 TEST_F(TemplateSyncTest, PreservesAnnotationLineOccurrence) {

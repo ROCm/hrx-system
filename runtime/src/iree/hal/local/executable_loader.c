@@ -72,25 +72,13 @@ void iree_hal_executable_loader_release(
   }
 }
 
-iree_status_t iree_hal_executable_loader_infer_format(
+bool iree_hal_executable_loader_query_target_support(
     iree_hal_executable_loader_t* executable_loader,
-    iree_hal_executable_caching_mode_t caching_mode,
-    iree_const_byte_span_t executable_data,
-    iree_host_size_t executable_format_capacity, char* executable_format,
-    iree_host_size_t* out_inferred_size) {
+    const iree_hal_executable_target_t* target) {
   IREE_ASSERT_ARGUMENT(executable_loader);
-  return executable_loader->vtable->infer_format(
-      executable_loader, caching_mode, executable_data,
-      executable_format_capacity, executable_format, out_inferred_size);
-}
-
-bool iree_hal_executable_loader_query_support(
-    iree_hal_executable_loader_t* executable_loader,
-    iree_hal_executable_caching_mode_t caching_mode,
-    iree_string_view_t executable_format) {
-  IREE_ASSERT_ARGUMENT(executable_loader);
-  return executable_loader->vtable->query_support(
-      executable_loader, caching_mode, executable_format);
+  IREE_ASSERT_ARGUMENT(target);
+  return executable_loader->vtable->query_target_support(executable_loader,
+                                                         target);
 }
 
 void iree_hal_executable_loader_query_spec(
@@ -101,29 +89,84 @@ void iree_hal_executable_loader_query_spec(
   executable_loader->vtable->query_spec(executable_loader, out_executable_spec);
 }
 
-bool iree_hal_query_any_executable_loader_support(
+bool iree_hal_query_any_executable_loader_target_support(
     iree_host_size_t loader_count, iree_hal_executable_loader_t** loaders,
-    iree_hal_executable_caching_mode_t caching_mode,
-    iree_string_view_t executable_format) {
-  IREE_ASSERT_ARGUMENT(loaders);
+    const iree_hal_executable_target_t* target) {
+  IREE_ASSERT_ARGUMENT(!loader_count || loaders);
+  IREE_ASSERT_ARGUMENT(target);
   for (iree_host_size_t i = 0; i < loader_count; ++i) {
-    if (iree_hal_executable_loader_query_support(loaders[i], caching_mode,
-                                                 executable_format)) {
+    if (iree_hal_executable_loader_query_target_support(loaders[i], target)) {
       return true;
     }
   }
   return false;
 }
 
-iree_status_t iree_hal_executable_loader_try_load(
+bool iree_hal_executable_loader_claims_executable(
     iree_hal_executable_loader_t* executable_loader,
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params) {
+  IREE_ASSERT_ARGUMENT(executable_loader);
+  IREE_ASSERT_ARGUMENT(target);
+  IREE_ASSERT_ARGUMENT(load_params);
+  return executable_loader->vtable->claims_executable(executable_loader, target,
+                                                      load_params);
+}
+
+iree_status_t iree_hal_executable_loader_load(
+    iree_hal_executable_loader_t* executable_loader,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
     iree_host_size_t worker_capacity, iree_hal_executable_t** out_executable) {
   IREE_ASSERT_ARGUMENT(executable_loader);
-  IREE_ASSERT_ARGUMENT(executable_params);
-  IREE_ASSERT_ARGUMENT(!executable_params->executable_data.data_length ||
-                       executable_params->executable_data.data);
+  IREE_ASSERT_ARGUMENT(target);
+  IREE_ASSERT_ARGUMENT(load_params);
+  IREE_ASSERT_ARGUMENT(load_params->executable_data.data &&
+                       load_params->executable_data.data_length);
   IREE_ASSERT_ARGUMENT(out_executable);
-  return executable_loader->vtable->try_load(
-      executable_loader, executable_params, worker_capacity, out_executable);
+  return executable_loader->vtable->load(executable_loader, target, load_params,
+                                         worker_capacity, out_executable);
+}
+
+iree_status_t iree_hal_executable_loader_select_and_load(
+    iree_host_size_t loader_count, iree_hal_executable_loader_t** loaders,
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
+    iree_host_size_t worker_capacity, iree_hal_executable_t** out_executable) {
+  IREE_ASSERT_ARGUMENT(!loader_count || loaders);
+  IREE_ASSERT_ARGUMENT(target);
+  IREE_ASSERT_ARGUMENT(load_params);
+  IREE_ASSERT_ARGUMENT(out_executable);
+  *out_executable = NULL;
+
+  iree_hal_executable_loader_t* selected_loader = NULL;
+  iree_host_size_t selected_loader_ordinal = IREE_HOST_SIZE_MAX;
+  for (iree_host_size_t i = 0; i < loader_count; ++i) {
+    iree_hal_executable_loader_t* loader = loaders[i];
+    if (!iree_hal_executable_loader_query_target_support(loader, target) ||
+        !iree_hal_executable_loader_claims_executable(loader, target,
+                                                      load_params)) {
+      continue;
+    }
+    if (IREE_UNLIKELY(selected_loader)) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "local executable loaders %" PRIhsz " and %" PRIhsz
+          " both claim target `%.*s:%.*s` artifact bytes",
+          selected_loader_ordinal, i, (int)target->family.size,
+          target->family.data, (int)target->target_key.size,
+          target->target_key.data);
+    }
+    selected_loader = loader;
+    selected_loader_ordinal = i;
+  }
+  if (IREE_UNLIKELY(!selected_loader)) {
+    return iree_make_status(
+        IREE_STATUS_NOT_FOUND,
+        "no local executable loader claims target `%.*s:%.*s` artifact bytes",
+        (int)target->family.size, target->family.data,
+        (int)target->target_key.size, target->target_key.data);
+  }
+  return iree_hal_executable_loader_load(selected_loader, target, load_params,
+                                         worker_capacity, out_executable);
 }

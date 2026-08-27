@@ -12,6 +12,23 @@ iree_add_all_subdirs()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 loom_cc_library(
   NAME
+    bank_service
+  HDRS
+    "bank_service.h"
+  SRCS
+    "bank_service.c"
+  DEPS
+    iree::base
+    loom::target::reporting::report
+    loom::tools::loom-check::execute
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+loom_cc_library(
+  NAME
     occupancy
   HDRS
     "occupancy.h"
@@ -37,6 +54,7 @@ loom_cc_library(
   SRCS
     "provider.c"
   DEPS
+    ::bank_service
     ::occupancy
     iree::base
     loom::target::arch::amdgpu::provider

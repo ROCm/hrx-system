@@ -1,6 +1,6 @@
 // RUN: emit source-low output=low
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @computed_launch_config_workgroup_size() {
   %c1 = index.constant 1 : index
@@ -12,13 +12,134 @@ kernel.def target(@target) @computed_launch_config_workgroup_size() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @computed_launch_config_workgroup_size() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @computed_launch_config_workgroup_size() asm {
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx1200> @target
+
+kernel.def target(@target) @ordinary_gfx1200_workgroup_identity() {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c4, %c3, %c2) workgroup_size(%c64, %c1, %c1) : index
+} launch(%output: buffer) {
+  %workgroup_x = kernel.workgroup.id<x> : index
+  %workgroup_y = kernel.workgroup.id<y> : index
+  %workgroup_z = kernel.workgroup.id<z> : index
+  %x = index.cast %workgroup_x : index to i32
+  %y = index.cast %workgroup_y : index to i32
+  %z = index.cast %workgroup_z : index to i32
+  %xy = scalar.addi %x, %y : i32
+  %xyz = scalar.addi %xy, %z : i32
+  %result = vector.from_elements %xyz : vector<1xi32>
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.core>(@target) workgroup_size(64, 1, 1) workgroup_count(4, 3, 2) @ordinary_gfx1200_workgroup_identity() asm {
+  %18 = live_in<amdgpu.cluster_id_yz> : reg<amdgpu.sgpr>
+  %x = live_in<amdgpu.cluster_id_x> : reg<amdgpu.sgpr>
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %y = s_and_b32_lit %18, 65535
+  %z = s_lshr_b32_rhs_inline %18, 16
+  %xy = s_add_u32 %x, %y
+  %xyz = s_add_u32 %xy, %z
+  %result = v_mov_b32_copy %xyz
+  %26 = v_mov_b32 0
+  global_store_b32_saddr %26, %result, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @static_cluster_size_uses_facts() {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c32 = index.constant 32 : index
+  %cluster_y = index.mul %c1, %c2 : index
+  kernel.launch.config workgroups(%c4, %c4, %c1) workgroup_size(%c32, %c1, %c1) cluster_size(%c1, %cluster_y, %c1) : index
+} launch() {
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(32, 1, 1) workgroup_count(4, 4, 1) cluster_size(1, 2, 1) @static_cluster_size_uses_facts() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @trivial_cluster_size_canonicalizes() {
+  %c1 = index.constant 1 : index
+  %c32 = index.constant 32 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c32, %c1, %c1) cluster_size(%c1, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @trivial_cluster_size_canonicalizes() asm {
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @dynamic_cluster_size_rejected(%cluster_y: index) {
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %c32 = index.constant 32 : index
+  // ERROR@+1: TARGET/062
+  kernel.launch.config workgroups(%c4, %c4, %c1) workgroup_size(%c32, %c1, %c1) cluster_size(%c1, %cluster_y, %c1) : index
+} launch() {
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @overflowing_cluster_size_rejected() {
+  %c1 = index.constant 1 : index
+  %c65536 = index.constant 65536 : index
+  // ERROR@+1: TARGET/063 {cluster_size_x="65536", cluster_size_y="65536", cluster_size_z="65536"}
+  kernel.launch.config workgroups(%c65536, %c65536, %c1) workgroup_size(%c1, %c1, %c1) cluster_size(%c65536, %c65536, %c65536) : index
+} launch() {
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @partial_cluster_grid_rejected() {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  // ERROR@+1: TARGET/064 {axis="y", workgroup_count="3", cluster_size="2"}
+  kernel.launch.config workgroups(%c4, %c3, %c1) workgroup_size(%c1, %c1, %c1) cluster_size(%c1, %c2, %c1) : index
+} launch() {
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @exact_workgroup_count_uses_facts() {
   %c1 = index.constant 1 : index
@@ -34,14 +155,14 @@ kernel.def target(@target) @exact_workgroup_count_uses_facts() {
   %count_xyz = index.add %count_xy, %count_z : index
   %count_i32 = index.cast %count_xyz : index to i32
   %result = vector.from_elements %count_i32 : vector<1xi32>
-  %zero = index.constant 0 : offset
-  %output_view = buffer.view %output[%zero] : buffer -> view<1xi32, #dense>
-  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32, #dense>
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(3, 5, 1) @exact_workgroup_count_uses_facts() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(3, 5, 1) workgroup_count(2, 3, 1) @exact_workgroup_count_uses_facts() asm {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %result = v_mov_b32 6
   %17 = v_mov_b32 0
@@ -51,7 +172,7 @@ low.kernel.def target(@target) workgroup_size(3, 5, 1) @exact_workgroup_count_us
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @unused_exact_workgroup_count_elides() {
   %c1 = index.constant 1 : index
@@ -63,13 +184,13 @@ kernel.def target(@target) @unused_exact_workgroup_count_elides() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(3, 1, 1) @unused_exact_workgroup_count_elides() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(3, 1, 1) workgroup_count(1, 1, 1) @unused_exact_workgroup_count_elides() asm {
   return
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @dynamic_workgroup_count(%workgroups_x: index, %workgroups_y: index, %workgroups_z: index) {
   %c4 = index.constant 4 : index
@@ -86,14 +207,14 @@ kernel.def target(@target) @dynamic_workgroup_count(%workgroups_x: index, %workg
   %count = index.add %count_xyz, %count_x_again : index
   %count_i32 = index.cast %count : index to i32
   %result = vector.from_elements %count_i32 : vector<1xi32>
-  %zero = index.constant 0 : offset
-  %output_view = buffer.view %output[%zero] : buffer -> view<1xi32, #dense>
-  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32, #dense>
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32>
   kernel.return
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 4, 1) @dynamic_workgroup_count() asm<amdgpu.rdna3.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 4, 1) @dynamic_workgroup_count() asm {
   %19 = live_in<amdgpu.dispatch_ptr> : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %21 = s_load_dword_offset_only %19 {offset = 12}
@@ -114,7 +235,36 @@ low.kernel.def target(@target) workgroup_size(64, 4, 1) @dynamic_workgroup_count
 
 // ====
 
-amdgpu.target<gfx1100> @target {max_workgroup_size_x = 16}
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
+kernel.def target(@target) @target_subgroup_queries_use_wavefront_size() {
+  %c1 = index.constant 1 : index
+  %c128 = index.constant 128 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c128, %c1, %c1) : index
+} launch(%output: buffer) {
+  %subgroup_size = kernel.subgroup.size : index
+  %subgroup_count = kernel.subgroup.count : index
+  %sum = index.add %subgroup_size, %subgroup_count : index
+  %sum_i32 = index.cast %sum : index to i32
+  %value = vector.splat %sum_i32 : vector<1xi32>
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %value, %output_view[0] : vector<1xi32>, view<1xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(128, 1, 1) workgroup_count(1, 1, 1) @target_subgroup_queries_use_wavefront_size() asm {
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %value = v_mov_b32 66
+  %13 = v_mov_b32 0
+  global_store_b32_saddr %13, %value, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target {max_workgroup_size_x = 16}
 
 // ERROR@+1: TARGET/024 {axis="x"}
 kernel.def target(@target) @workgroup_x_exceeds_target() {
@@ -127,7 +277,7 @@ kernel.def target(@target) @workgroup_x_exceeds_target() {
 
 // ====
 
-amdgpu.target<gfx1100> @target {max_flat_workgroup_size = 16}
+amdgpu.target<gfx11-generic> @target {max_flat_workgroup_size = 16}
 
 // ERROR@+1: TARGET/025 {constraint_key="required_flat_workgroup_size.target_limit"}
 kernel.def target(@target) @flat_workgroup_size_exceeds_target() {
@@ -135,5 +285,346 @@ kernel.def target(@target) @flat_workgroup_size_exceeds_target() {
   %c64 = index.constant 64 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch() {
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @clustered_launch_queries(%workgroups_x: index, %workgroups_y: index, %workgroups_z: index) {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%workgroups_x, %workgroups_y, %workgroups_z) workgroup_size(%c64, %c1, %c1) cluster_size(%c2, %c2, %c2) : index
+} launch(%output: buffer) {
+  %workgroup_x = kernel.workgroup.id<x> : index
+  %workgroup_y = kernel.workgroup.id<y> : index
+  %workgroup_z = kernel.workgroup.id<z> : index
+  %cluster_x = kernel.cluster.id<x> : index
+  %cluster_y = kernel.cluster.id<y> : index
+  %cluster_z = kernel.cluster.id<z> : index
+  %cluster_workgroup_x = kernel.cluster.workgroup.id<x> : index
+  %cluster_workgroup_y = kernel.cluster.workgroup.id<y> : index
+  %cluster_workgroup_z = kernel.cluster.workgroup.id<z> : index
+  %cluster_workgroup_flat = kernel.cluster.workgroup.flat_id : index
+  %cluster_size_x = kernel.cluster.size<x> : index
+  %cluster_size_y = kernel.cluster.size<y> : index
+  %cluster_size_z = kernel.cluster.size<z> : index
+  %cluster_count_x = kernel.cluster.count<x> : index
+  %cluster_count_y = kernel.cluster.count<y> : index
+  %cluster_count_z = kernel.cluster.count<z> : index
+  %workgroup_count_x = kernel.workgroup.count<x> : index
+  %workgroup_count_y = kernel.workgroup.count<y> : index
+  %workgroup_count_z = kernel.workgroup.count<z> : index
+  %sum0 = index.add %workgroup_x, %workgroup_y : index
+  %sum1 = index.add %sum0, %workgroup_z : index
+  %sum2 = index.add %sum1, %cluster_x : index
+  %sum3 = index.add %sum2, %cluster_y : index
+  %sum4 = index.add %sum3, %cluster_z : index
+  %sum5 = index.add %sum4, %cluster_workgroup_x : index
+  %sum6 = index.add %sum5, %cluster_workgroup_y : index
+  %sum7 = index.add %sum6, %cluster_workgroup_z : index
+  %sum8 = index.add %sum7, %cluster_workgroup_flat : index
+  %sum9 = index.add %sum8, %cluster_size_x : index
+  %sum10 = index.add %sum9, %cluster_size_y : index
+  %sum11 = index.add %sum10, %cluster_size_z : index
+  %sum12 = index.add %sum11, %cluster_count_x : index
+  %sum13 = index.add %sum12, %cluster_count_y : index
+  %sum14 = index.add %sum13, %cluster_count_z : index
+  %sum15 = index.add %sum14, %workgroup_count_x : index
+  %sum16 = index.add %sum15, %workgroup_count_y : index
+  %sum = index.add %sum16, %workgroup_count_z : index
+  %sum_i32 = index.cast %sum : index to i32
+  %result = vector.from_elements %sum_i32 : vector<1xi32>
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @clustered_launch_queries() asm {
+  %52 = live_in<amdgpu.cluster_workgroup_info> : reg<amdgpu.sgpr>
+  %53 = live_in<amdgpu.cluster_id_yz> : reg<amdgpu.sgpr>
+  %cluster_x = live_in<amdgpu.cluster_id_x> : reg<amdgpu.sgpr>
+  %55 = live_in<amdgpu.dispatch_ptr> : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %cluster_workgroup_x = s_and_b32_rhs_inline %52, 15
+  %workgroup_x = s_lshl1_add_u32 %cluster_x, %cluster_workgroup_x
+  %cluster_y = s_and_b32_lit %53, 65535
+  %cluster_workgroup_y = s_bfe_u32_lit %52, 262148
+  %workgroup_y = s_lshl1_add_u32 %cluster_y, %cluster_workgroup_y
+  %cluster_z = s_lshr_b32_rhs_inline %53, 16
+  %cluster_workgroup_z = s_bfe_u32_lit %52, 262152
+  %workgroup_z = s_lshl1_add_u32 %cluster_z, %cluster_workgroup_z
+  %cluster_workgroup_flat = s_getreg_b32_cluster_workgroup_flat_id
+  %cluster_count_x = s_load_dword_offset_only %55 {offset = 12}
+  %workgroup_count_x = s_lshl_b32_rhs_inline %cluster_count_x, 1
+  %68 = s_load_dword_offset_only %55 {offset = 16}
+  %cluster_count_y = s_and_b32_lit %68, 65535
+  %workgroup_count_y = s_lshl_b32_rhs_inline %cluster_count_y, 1
+  %cluster_count_z = s_lshr_b32_rhs_inline %68, 16
+  %workgroup_count_z = s_lshl_b32_rhs_inline %cluster_count_z, 1
+  %cluster_size_x = s_mov_b32 2
+  %sum0 = s_add_u32 %workgroup_x, %workgroup_y
+  %sum1 = s_add_u32 %sum0, %workgroup_z
+  %sum2 = s_add_u32 %sum1, %cluster_x
+  %sum3 = s_add_u32 %sum2, %cluster_y
+  %sum4 = s_add_u32 %sum3, %cluster_z
+  %sum5 = s_add_u32 %sum4, %cluster_workgroup_x
+  %sum6 = s_add_u32 %sum5, %cluster_workgroup_y
+  %sum7 = s_add_u32 %sum6, %cluster_workgroup_z
+  %sum8 = s_add_u32 %sum7, %cluster_workgroup_flat
+  %sum9 = s_add_u32 %sum8, %cluster_size_x
+  %sum10 = s_add_u32 %sum9, %cluster_size_x
+  %sum11 = s_add_u32 %sum10, %cluster_size_x
+  %sum12 = s_add_u32 %sum11, %cluster_count_x
+  %sum13 = s_add_u32 %sum12, %cluster_count_y
+  %sum14 = s_add_u32 %sum13, %cluster_count_z
+  %sum15 = s_add_u32 %sum14, %workgroup_count_x
+  %sum16 = s_add_u32 %sum15, %workgroup_count_y
+  %sum_i32 = s_add_u32 %sum16, %workgroup_count_z
+  %result = v_mov_b32_copy %sum_i32
+  %93 = v_mov_b32 0
+  global_store_b32_saddr %93, %result, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @ordinary_gfx1250_workgroup_identity() {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c4, %c3, %c2) workgroup_size(%c64, %c1, %c1) : index
+} launch(%output: buffer) {
+  %workgroup_x = kernel.workgroup.id<x> : index
+  %workgroup_y = kernel.workgroup.id<y> : index
+  %workgroup_z = kernel.workgroup.id<z> : index
+  %x = index.cast %workgroup_x : index to i32
+  %y = index.cast %workgroup_y : index to i32
+  %z = index.cast %workgroup_z : index to i32
+  %xy = scalar.addi %x, %y : i32
+  %xyz = scalar.addi %xy, %z : i32
+  %result = vector.from_elements %xyz : vector<1xi32>
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) workgroup_count(4, 3, 2) @ordinary_gfx1250_workgroup_identity() asm {
+  %18 = live_in<amdgpu.cluster_id_yz> : reg<amdgpu.sgpr>
+  %x = live_in<amdgpu.cluster_id_x> : reg<amdgpu.sgpr>
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %y = s_and_b32_lit %18, 65535
+  %z = s_lshr_b32_rhs_inline %18, 16
+  %xy = s_add_u32 %x, %y
+  %xyz = s_add_u32 %xy, %z
+  %result = v_mov_b32_copy %xyz
+  %26 = v_mov_b32 0
+  global_store_b32_saddr %26, %result, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @ordinary_gfx1250_workgroup_y() {
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c3, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%output: buffer) {
+  %workgroup_y = kernel.workgroup.id<y> : index
+  %value = index.cast %workgroup_y : index to i32
+  %result = vector.from_elements %value : vector<1xi32>
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 3, 1) @ordinary_gfx1250_workgroup_y() asm {
+  %10 = live_in<amdgpu.cluster_id_y> : reg<amdgpu.sgpr>
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %value = s_and_b32_lit %10, 65535
+  %result = v_mov_b32_copy %value
+  %14 = v_mov_b32 0
+  global_store_b32_saddr %14, %result, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @ordinary_gfx1250_workgroup_z() {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c2) workgroup_size(%c64, %c1, %c1) : index
+} launch(%output: buffer) {
+  %workgroup_z = kernel.workgroup.id<z> : index
+  %value = index.cast %workgroup_z : index to i32
+  %result = vector.from_elements %value : vector<1xi32>
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 2) @ordinary_gfx1250_workgroup_z() asm {
+  %10 = live_in<amdgpu.cluster_id_z> : reg<amdgpu.sgpr>
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %value = s_lshr_b32_rhs_inline %10, 16
+  %result = v_mov_b32_copy %value
+  %14 = v_mov_b32 0
+  global_store_b32_saddr %14, %result, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @cluster_local_workgroup_y() {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c4, %c4, %c4) workgroup_size(%c64, %c1, %c1) cluster_size(%c2, %c2, %c2) : index
+} launch(%output: buffer) {
+  %local_y = kernel.cluster.workgroup.id<y> : index
+  %value = index.cast %local_y : index to i32
+  %result = vector.from_elements %value : vector<1xi32>
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) workgroup_count(4, 4, 4) cluster_size(2, 2, 2) @cluster_local_workgroup_y() asm {
+  %11 = live_in<amdgpu.cluster_workgroup_info.xy> : reg<amdgpu.sgpr>
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %value = s_bfe_u32_lit %11, 262148
+  %result = v_mov_b32_copy %value
+  %15 = v_mov_b32 0
+  global_store_b32_saddr %15, %result, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @cluster_local_workgroup_z() {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c4, %c4, %c4) workgroup_size(%c64, %c1, %c1) cluster_size(%c2, %c2, %c2) : index
+} launch(%output: buffer) {
+  %local_z = kernel.cluster.workgroup.id<z> : index
+  %value = index.cast %local_z : index to i32
+  %result = vector.from_elements %value : vector<1xi32>
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) workgroup_count(4, 4, 4) cluster_size(2, 2, 2) @cluster_local_workgroup_z() asm {
+  %11 = live_in<amdgpu.cluster_workgroup_info.xz> : reg<amdgpu.sgpr>
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %value = s_bfe_u32_lit %11, 262152
+  %result = v_mov_b32_copy %value
+  %15 = v_mov_b32 0
+  global_store_b32_saddr %15, %result, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @ordinary_gfx1250_workgroup_counts(%workgroups_y: index, %workgroups_z: index) {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %workgroups_y, %workgroups_z) workgroup_size(%c64, %c1, %c1) : index
+} launch(%output: buffer) {
+  %count_y = kernel.workgroup.count<y> : index
+  %count_z = kernel.workgroup.count<z> : index
+  %sum = index.add %count_y, %count_z : index
+  %value = index.cast %sum : index to i32
+  %result = vector.from_elements %value : vector<1xi32>
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) @ordinary_gfx1250_workgroup_counts() asm {
+  %13 = live_in<amdgpu.dispatch_ptr> : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %count_y = s_load_dword_offset_only %13 {offset = 16}
+  %count_z = s_load_dword_offset_only %13 {offset = 20}
+  %value = s_add_u32 %count_y, %count_z
+  %result = v_mov_b32_copy %value
+  %19 = v_mov_b32 0
+  global_store_b32_saddr %19, %result, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @unsupported_cluster_workgroup_identity() {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c2, %c2, %c1) workgroup_size(%c64, %c1, %c1) cluster_size(%c2, %c1, %c1) : index
+} launch(%output: buffer) {
+  // ERROR@+1: AMDGPU/023 {constraint_key="launch.cluster_state_unsupported"}
+  %workgroup_x = kernel.workgroup.id<x> : index
+  %value = index.cast %workgroup_x : index to i32
+  %result = vector.from_elements %value : vector<1xi32>
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32>
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx12-5-generic> @target
+
+kernel.def target(@target) @unmodeled_cluster_revision_identity() {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c4, %c2, %c1) workgroup_size(%c64, %c1, %c1) cluster_size(%c2, %c1, %c1) : index
+} launch(%output: buffer) {
+  // ERROR@+1: AMDGPU/023 {constraint_key="launch.cluster_state_unsupported"}
+  %cluster_x = kernel.cluster.id<x> : index
+  %value = index.cast %cluster_x : index to i32
+  %result = vector.from_elements %value : vector<1xi32>
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32>
   kernel.return
 }

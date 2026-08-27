@@ -9,17 +9,21 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/analysis/symbol_facts.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/error/error_catalog.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/target/facts.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/test/ops.h"
+#include "loom/target/function_contract.h"
+#include "loom/target/function_version.h"
 #include "loom/target/test/low_registry.h"
-#include "loom/target/test/target_records.h"
 #include "loom/testing/diagnostic_matchers.h"
 #include "loom/testing/module_ptr.h"
 
@@ -42,9 +46,11 @@ class LowVerifyTest : public ::testing::Test {
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     loom_test_low_descriptor_registry_initialize(&registry_);
+    iree_arena_initialize(&block_pool_, &analysis_arena_);
   }
 
   void TearDown() override {
+    iree_arena_deinitialize(&analysis_arena_);
     loom_context_deinitialize(&context_);
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
@@ -71,23 +77,22 @@ class LowVerifyTest : public ::testing::Test {
     return ModulePtr(module);
   }
 
-  static loom_target_bundle_storage_t CopyTargetBundle(
-      const loom_target_bundle_t* bundle) {
-    loom_target_bundle_storage_t storage = {};
-    storage.snapshot = *bundle->snapshot;
-    storage.export_plan = *bundle->export_plan;
-    storage.config = *bundle->config;
-    storage.bundle = *bundle;
-    loom_target_bundle_storage_rebind(&storage);
-    return storage;
+  loom_symbol_id_t FindSymbol(const loom_module_t* module,
+                              iree_string_view_t name) {
+    const loom_string_id_t name_id = loom_module_lookup_string(module, name);
+    IREE_ASSERT(name_id != LOOM_STRING_ID_INVALID);
+    const loom_symbol_id_t symbol_id = loom_module_find_symbol(module, name_id);
+    IREE_ASSERT(symbol_id != LOOM_SYMBOL_ID_INVALID);
+    return symbol_id;
   }
 
-  void VerifyModule(loom_module_t* module, loom_target_selection_t selection,
-                    DiagnosticEmissionCapture* capture,
-                    loom_low_verify_result_t* out_result) {
+  void VerifyModule(
+      loom_module_t* module, DiagnosticEmissionCapture* capture,
+      loom_low_verify_result_t* out_result,
+      const loom_function_version_list_t* function_versions = nullptr) {
     loom_low_verify_options_t options = {};
     options.descriptor_registry = &registry_.registry;
-    options.target_selection = selection;
+    options.function_versions = function_versions;
     options.emitter = capture->emitter();
     options.provider_list = loom_low_verify_provider_list_empty();
     options.max_errors = 20;
@@ -99,45 +104,37 @@ class LowVerifyTest : public ::testing::Test {
 
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_;
+  iree_arena_allocator_t analysis_arena_;
   loom_target_low_descriptor_registry_t registry_ = {};
 };
 
 TEST_F(LowVerifyTest, AcceptsWorkgroupStorageWithoutTargetLimit) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @target
-low.func.def target(@target) @uses_workgroup_storage() {
+low.func.def target<test.low.core>(@target) @uses_workgroup_storage() {
   %storage = low.storage.reserve {byte_alignment = 16, byte_length = 80} : low.storage<workgroup>
   low.return
 }
 )");
   DiagnosticEmissionCapture capture;
   loom_low_verify_result_t result = {};
-  VerifyModule(module.get(), loom_target_selection_empty(), &capture, &result);
+  VerifyModule(module.get(), &capture, &result);
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_TRUE(capture.emissions.empty());
 }
 
-TEST_F(LowVerifyTest, RejectsWorkgroupStorageAboveSelectedTargetLimit) {
+TEST_F(LowVerifyTest, RejectsWorkgroupStorageAboveDurableTargetLimit) {
   ModulePtr module = ParseModule(R"(
-test.target<low_core> @target
-low.func.def target(@target) @uses_workgroup_storage() {
+test.target<low_core> @target {max_workgroup_storage_bytes = 64}
+low.func.def target<test.low.core>(@target) @uses_workgroup_storage() {
   %storage = low.storage.reserve {byte_alignment = 16, byte_length = 80} : low.storage<workgroup>
   low.return
 }
 )");
-  ASSERT_GT(loom_test_target_bundles.count, 1u);
-  loom_target_bundle_storage_t selected_storage =
-      CopyTargetBundle(loom_test_target_bundles.values[1]);
-  selected_storage.snapshot.max_workgroup_storage_bytes = 64;
-  loom_target_bundle_storage_rebind(&selected_storage);
-  const loom_target_selection_t selection = {
-      /*.bundle=*/&selected_storage.bundle,
-      /*.data=*/nullptr,
-  };
 
   DiagnosticEmissionCapture capture;
   loom_low_verify_result_t result = {};
-  VerifyModule(module.get(), selection, &capture, &result);
+  VerifyModule(module.get(), &capture, &result);
   EXPECT_EQ(result.error_count, 1u);
   ASSERT_EQ(capture.emissions.size(), 1u);
 
@@ -152,54 +149,72 @@ low.func.def target(@target) @uses_workgroup_storage() {
   EXPECT_EQ(emission.u64_params[1], 64u);
 }
 
-TEST_F(LowVerifyTest, RejectsDescriptorOrdinalKeyMismatch) {
+TEST_F(LowVerifyTest, UsesFunctionTargetFactsForTargetlessFunction) {
   ModulePtr module = ParseModule(R"(
-test.target<low_core> @target
-low.func.def target(@target) @ordinal_key_mismatch(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
-  %sum = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %sum : reg<test.i32>
+test.target<low_core> @exact {max_workgroup_storage_bytes = 64}
+low.func.def target<test.low.core> @uses_workgroup_storage() {
+  %storage = low.storage.reserve {byte_alignment = 16, byte_length = 80} : low.storage<workgroup>
+  low.return
 }
 )");
-  loom_op_t* packet_op = nullptr;
-  loom_block_t* module_block = loom_region_entry_block(module->body);
-  loom_op_t* module_op = nullptr;
-  loom_block_for_each_op(module_block, module_op) {
-    if (!loom_low_func_def_isa(module_op)) {
-      continue;
-    }
-    loom_block_t* body_block =
-        loom_region_entry_block(loom_low_func_def_body(module_op));
-    loom_op_t* body_op = nullptr;
-    loom_block_for_each_op(body_block, body_op) {
-      if (loom_low_op_isa(body_op)) {
-        packet_op = body_op;
-      }
-    }
-  }
-  ASSERT_NE(packet_op, nullptr);
 
-  loom_op_attrs(packet_op)[loom_low_op_descriptor_ordinal_ATTR_INDEX] =
-      loom_attr_i64(0);
+  loom_symbol_fact_table_t symbol_facts = {};
+  loom_symbol_fact_table_initialize(&symbol_facts, &analysis_arena_);
+
+  const loom_symbol_id_t function_symbol_id =
+      FindSymbol(module.get(), IREE_SV("uses_workgroup_storage"));
+  const loom_symbol_facts_base_t* base_function_facts = nullptr;
+  IREE_ASSERT_OK(loom_symbol_fact_table_lookup(
+      &symbol_facts, module.get(), function_symbol_id, &base_function_facts));
+  const loom_func_symbol_facts_t* function_facts =
+      loom_func_symbol_facts_cast(base_function_facts);
+  ASSERT_NE(function_facts, nullptr);
+
+  const loom_symbol_facts_base_t* base_target_facts = nullptr;
+  IREE_ASSERT_OK(loom_symbol_fact_table_lookup(
+      &symbol_facts, module.get(), FindSymbol(module.get(), IREE_SV("exact")),
+      &base_target_facts));
+  const loom_target_symbol_facts_t* target_facts =
+      loom_target_symbol_facts_cast(base_target_facts);
+  ASSERT_NE(target_facts, nullptr);
+
+  bool contract_valid = false;
+  const loom_target_facts_t* function_target_facts = nullptr;
+  IREE_ASSERT_OK(loom_target_function_contract_refine_facts(
+      module.get(), function_facts, target_facts->name,
+      target_facts->projection, iree_diagnostic_emitter_t{}, &analysis_arena_,
+      &contract_valid, &function_target_facts));
+  ASSERT_TRUE(contract_valid);
+  ASSERT_NE(function_target_facts, nullptr);
+
+  loom_target_function_version_t function_version = {};
+  function_version.base.type = &loom_target_function_version_type;
+  function_version.base.function =
+      loom_func_like_cast(module.get(), function_facts->func_op);
+  ASSERT_TRUE(loom_func_like_isa(function_version.base.function));
+  function_version.function_target_facts = function_target_facts;
+  loom_function_version_t* version_values[] = {
+      &function_version.base,
+  };
+  const loom_function_version_list_t function_versions = {
+      /*.values=*/version_values,
+      /*.count=*/IREE_ARRAYSIZE(version_values),
+  };
 
   DiagnosticEmissionCapture capture;
   loom_low_verify_result_t result = {};
-  VerifyModule(module.get(), loom_target_selection_empty(), &capture, &result);
+  VerifyModule(module.get(), &capture, &result, &function_versions);
   EXPECT_EQ(result.error_count, 1u);
   ASSERT_EQ(capture.emissions.size(), 1u);
 
   const CapturedDiagnosticEmission& emission = capture.emissions[0];
-  EXPECT_EQ(emission.error, LOOM_ERR_STRUCTURE_037);
-  ASSERT_EQ(emission.string_params.size(), 4u);
-  EXPECT_EQ(emission.string_params[0], "ordinal_key_mismatch");
-  EXPECT_EQ(emission.string_params[1], "test.add.i32");
-  EXPECT_EQ(emission.string_params[2], "test.const.i32");
-  EXPECT_EQ(emission.string_params[3], "test.low.core");
-  ASSERT_EQ(emission.u32_params.size(), 1u);
-  EXPECT_EQ(emission.u32_params[0], 0u);
-  ASSERT_EQ(emission.field_refs.size(), 5u);
-  EXPECT_EQ(emission.field_refs[1].kind, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE);
-  EXPECT_EQ(emission.field_refs[1].index, loom_low_op_opcode_ATTR_INDEX);
-  EXPECT_EQ(emission.related_count, 1u);
+  EXPECT_EQ(emission.error, LOOM_ERR_TARGET_051);
+  ASSERT_EQ(emission.string_params.size(), 2u);
+  EXPECT_EQ(emission.string_params[0], "uses_workgroup_storage");
+  EXPECT_EQ(emission.string_params[1], "exact");
+  ASSERT_EQ(emission.u64_params.size(), 2u);
+  EXPECT_EQ(emission.u64_params[0], 80u);
+  EXPECT_EQ(emission.u64_params[1], 64u);
 }
 
 }  // namespace

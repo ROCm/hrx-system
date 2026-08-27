@@ -265,12 +265,14 @@ static iree_status_t loom_spirv_loom_check_run_source_low_pipeline(
   compile_options.source_resolver = request->source_resolver;
   compile_options.max_errors = 20;
 
-  loom_pass_run_result_t run_result = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_compile_run_pipeline(request->module, &compile_options,
-                                request->case_arena->block_pool, &run_result));
-  if (run_result.error_count != 0 &&
-      request->diagnostic_collector->count == 0) {
+  loom_compile_pipeline_result_t pipeline_result = {0};
+  iree_status_t status = loom_compile_run_pipeline(
+      request->module, &compile_options, request->case_arena->block_pool,
+      &pipeline_result);
+  const uint32_t error_count = pipeline_result.pass.error_count;
+  loom_compile_pipeline_result_deinitialize(&pipeline_result);
+  IREE_RETURN_IF_ERROR(status);
+  if (error_count != 0 && request->diagnostic_collector->count == 0) {
     return iree_make_status(
         IREE_STATUS_INTERNAL,
         "source-low pipeline reported errors without diagnostics");
@@ -307,9 +309,8 @@ static iree_status_t loom_spirv_loom_check_verify_low_module(
   loom_low_verify_scratch_t low_verify_scratch =
       loom_low_verify_scratch_for_module(request->module);
   IREE_RETURN_IF_ERROR(loom_target_entry_verify_low_module(
-      request->module, request->low_registry, &verifier_emitter,
-      loom_target_selection_empty(), 20,
-      request->environment->low_verify_provider_list, &low_verify_scratch,
+      request->module, request->low_registry, &entry_options, &verifier_emitter,
+      20, request->environment->low_verify_provider_list, &low_verify_scratch,
       &low_verify_result));
   if (low_verify_result.error_count != 0 &&
       request->diagnostic_collector->count == 0) {
@@ -352,9 +353,8 @@ static iree_status_t loom_spirv_loom_check_emit_provider_execute(
 
   loom_spirv_module_binary_t module = {0};
   iree_status_t status = loom_spirv_emit_low_module(
-      request->module, &request->low_registry->registry,
-      loom_target_selection_empty(), diagnostic_emitter, request->case_arena,
-      /*options=*/NULL, &module, request->host_allocator);
+      request->module, &request->low_registry->registry, diagnostic_emitter,
+      request->case_arena, /*options=*/NULL, &module, request->host_allocator);
 
   loom_spirv_toolchain_t toolchain;
   loom_spirv_toolchain_initialize_from_environment(&toolchain);
@@ -366,7 +366,7 @@ static iree_status_t loom_spirv_loom_check_emit_provider_execute(
         request->host_allocator);
   }
 
-  loom_spirv_tool_output_t disassembly = {0};
+  loom_tool_output_t disassembly = {0};
   if (iree_status_is_ok(status)) {
     status = loom_spirv_tool_disassemble_binary(
         &toolchain, loom_spirv_module_binary_byte_span(&module),
@@ -378,7 +378,7 @@ static iree_status_t loom_spirv_loom_check_emit_provider_execute(
         &request->result->actual_output);
   }
 
-  loom_spirv_tool_output_deinitialize(&disassembly, request->host_allocator);
+  loom_tool_output_deinitialize(&disassembly, request->host_allocator);
   loom_spirv_module_binary_deinitialize(&module, request->host_allocator);
   return status;
 }
@@ -401,10 +401,10 @@ static iree_status_t loom_spirv_loom_check_query_spirv_tool(
     loom_spirv_tool_kind_t tool_kind, iree_allocator_t allocator) {
   loom_spirv_toolchain_t toolchain;
   loom_spirv_toolchain_initialize_from_environment(&toolchain);
-  loom_spirv_tool_output_t version_text = {0};
+  loom_tool_output_t version_text = {0};
   iree_status_t status = loom_spirv_tool_query_version(
       &toolchain, tool_kind, allocator, &version_text);
-  loom_spirv_tool_output_deinitialize(&version_text, allocator);
+  loom_tool_output_deinitialize(&version_text, allocator);
   return status;
 }
 

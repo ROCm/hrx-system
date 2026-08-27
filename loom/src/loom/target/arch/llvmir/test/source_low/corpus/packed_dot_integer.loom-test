@@ -11,7 +11,7 @@ func.def target(@target) @dot4i_s8s8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %ac
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @dot4i_s8s8(%lhs: reg<llvmir.i8 x4>, %rhs: reg<llvmir.i8 x4>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot4i_s8s8(%lhs: reg<llvmir.i8 x4>, %rhs: reg<llvmir.i8 x4>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm {
   %36 = extract.v4i8 %lhs, 0
   %37 = extract.v4i8 %rhs, 0
   %38 = sext.i8.i32 %36
@@ -51,7 +51,7 @@ func.def target(@target) @dot4i_u8u8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %ac
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @dot4i_u8u8(%lhs: reg<llvmir.i8 x4>, %rhs: reg<llvmir.i8 x4>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot4i_u8u8(%lhs: reg<llvmir.i8 x4>, %rhs: reg<llvmir.i8 x4>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm {
   %36 = extract.v4i8 %lhs, 0
   %37 = extract.v4i8 %rhs, 0
   %38 = zext.i8.i32 %36
@@ -91,7 +91,7 @@ func.def target(@target) @dot8i4_u4u4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, 
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @dot8i4_u4u4(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot8i4_u4u4(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm {
   %68 = const.i32 15
   %69 = const.i32 4
   %70 = const.i32 8
@@ -161,7 +161,7 @@ func.def target(@target) @dot4i_u8s8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %ac
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @dot4i_u8s8(%lhs: reg<llvmir.i8 x4>, %rhs: reg<llvmir.i8 x4>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot4i_u8s8(%lhs: reg<llvmir.i8 x4>, %rhs: reg<llvmir.i8 x4>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm {
   %36 = extract.v4i8 %lhs, 0
   %37 = extract.v4i8 %rhs, 0
   %38 = zext.i8.i32 %36
@@ -201,7 +201,7 @@ func.def target(@target) @dot4i_s8u8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %ac
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @dot4i_s8u8(%lhs: reg<llvmir.i8 x4>, %rhs: reg<llvmir.i8 x4>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot4i_s8u8(%lhs: reg<llvmir.i8 x4>, %rhs: reg<llvmir.i8 x4>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm {
   %36 = extract.v4i8 %lhs, 0
   %37 = extract.v4i8 %rhs, 0
   %38 = sext.i8.i32 %36
@@ -241,7 +241,7 @@ func.def target(@target) @dot8i4_s4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, 
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @dot8i4_s4s4(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot8i4_s4s4(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm {
   %100 = const.i32 15
   %101 = const.i32 4
   %102 = const.i32 8
@@ -343,7 +343,7 @@ func.def target(@target) @dot8i4_u4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, 
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @dot8i4_u4s4(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot8i4_u4s4(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm {
   %84 = const.i32 15
   %85 = const.i32 4
   %86 = const.i32 8
@@ -429,7 +429,7 @@ func.def target(@target) @dot8i4_s4u4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, 
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @dot8i4_s4u4(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot8i4_s4u4(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm {
   %84 = const.i32 15
   %85 = const.i32 4
   %86 = const.i32 8
@@ -501,4 +501,109 @@ low.func.def target(@target) abi(object_function) @dot8i4_s4u4(%lhs: reg<llvmir.
   %152 = mul.i32 %149, %151
   %dot = add.i32 %145, %152
   return %dot
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @dot8i4_s4u4_q4_offset_binary(%rows: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %offset_to_signed_mask = vector.constant -2004318072 : vector<1xi32>
+  %signed_rows = vector.xori %rows, %offset_to_signed_mask : vector<1xi32>
+  %dot = vector.dot8i4<s4u4> %signed_rows, %rhs, %acc : vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot8i4_s4u4_q4_offset_binary(%rows: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %acc: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm {
+  %88 = const.i32 -2004318072
+  %89 = xor.i32 %rows, %88
+  %90 = const.i32 15
+  %91 = const.i32 4
+  %92 = const.i32 8
+  %93 = const.i32 12
+  %94 = const.i32 16
+  %95 = const.i32 20
+  %96 = const.i32 24
+  %97 = const.i32 28
+  %98 = and.i32 %89, %90
+  %99 = shl.i32 %98, %97
+  %100 = ashr.i32 %99, %97
+  %101 = and.i32 %rhs, %90
+  %102 = mul.i32 %100, %101
+  %103 = add.i32 %acc, %102
+  %104 = lshr.i32 %89, %91
+  %105 = and.i32 %104, %90
+  %106 = shl.i32 %105, %97
+  %107 = ashr.i32 %106, %97
+  %108 = lshr.i32 %rhs, %91
+  %109 = and.i32 %108, %90
+  %110 = mul.i32 %107, %109
+  %111 = add.i32 %103, %110
+  %112 = lshr.i32 %89, %92
+  %113 = and.i32 %112, %90
+  %114 = shl.i32 %113, %97
+  %115 = ashr.i32 %114, %97
+  %116 = lshr.i32 %rhs, %92
+  %117 = and.i32 %116, %90
+  %118 = mul.i32 %115, %117
+  %119 = add.i32 %111, %118
+  %120 = lshr.i32 %89, %93
+  %121 = and.i32 %120, %90
+  %122 = shl.i32 %121, %97
+  %123 = ashr.i32 %122, %97
+  %124 = lshr.i32 %rhs, %93
+  %125 = and.i32 %124, %90
+  %126 = mul.i32 %123, %125
+  %127 = add.i32 %119, %126
+  %128 = lshr.i32 %89, %94
+  %129 = and.i32 %128, %90
+  %130 = shl.i32 %129, %97
+  %131 = ashr.i32 %130, %97
+  %132 = lshr.i32 %rhs, %94
+  %133 = and.i32 %132, %90
+  %134 = mul.i32 %131, %133
+  %135 = add.i32 %127, %134
+  %136 = lshr.i32 %89, %95
+  %137 = and.i32 %136, %90
+  %138 = shl.i32 %137, %97
+  %139 = ashr.i32 %138, %97
+  %140 = lshr.i32 %rhs, %95
+  %141 = and.i32 %140, %90
+  %142 = mul.i32 %139, %141
+  %143 = add.i32 %135, %142
+  %144 = lshr.i32 %89, %96
+  %145 = and.i32 %144, %90
+  %146 = shl.i32 %145, %97
+  %147 = ashr.i32 %146, %97
+  %148 = lshr.i32 %rhs, %96
+  %149 = and.i32 %148, %90
+  %150 = mul.i32 %147, %149
+  %151 = add.i32 %143, %150
+  %152 = lshr.i32 %89, %97
+  %153 = and.i32 %152, %90
+  %154 = shl.i32 %153, %97
+  %155 = ashr.i32 %154, %97
+  %156 = lshr.i32 %rhs, %97
+  %157 = and.i32 %156, %90
+  %158 = mul.i32 %155, %157
+  %dot = add.i32 %151, %158
+  return %dot
+}
+
+// ====
+
+// XFAIL: LLVMIR narrow integer vector arithmetic is unsupported
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @dot4i_s8s8_q6_offset_binary(%codes: vector<1xi32>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %offset_to_signed_bias = vector.constant -32 : vector<4xi8>
+  %bytes = vector.bitcast %codes : vector<1xi32> to vector<4xi8>
+  %signed_bytes = vector.addi %bytes, %offset_to_signed_bias : vector<4xi8>
+  %dot = vector.dot4i<s8s8> %signed_bytes, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  func.return %dot : vector<1xi32>
 }

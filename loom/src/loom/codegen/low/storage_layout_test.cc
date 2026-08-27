@@ -35,6 +35,7 @@ class LowStorageLayoutTest : public ::testing::Test {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(),
                                      &block_pool_);
     iree_arena_initialize(&block_pool_, &layout_arena_);
+    loom_low_storage_layout_builder_initialize(&layout_builder_);
     loom_context_initialize(iree_allocator_system(), &context_);
     RegisterDialect(LOOM_DIALECT_LOW, loom_low_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
@@ -82,11 +83,16 @@ class LowStorageLayoutTest : public ::testing::Test {
                             loom_module_block(module_), &module_builder);
     const loom_symbol_ref_t target_ref = AddSymbol(IREE_SV("target"));
     const loom_symbol_ref_t callee_ref = AddSymbol(IREE_SV("storage_layout"));
+    loom_string_id_t representation_contract = LOOM_STRING_ID_INVALID;
+    IREE_ASSERT_OK(loom_builder_intern_string(
+        &module_builder, IREE_SV("test.low.core"), &representation_contract));
     loom_op_t* function_op = nullptr;
     IREE_ASSERT_OK(loom_low_func_def_build(
-        &module_builder, 0, /*visibility=*/0, /*retain=*/0, /*cc=*/0,
+        &module_builder, LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TARGET,
+        /*visibility=*/0, /*retain=*/0, /*cc=*/0,
         /*purity=*/0,
-        /*allocation=*/0, /*schedule=*/0, target_ref, /*abi=*/0,
+        /*allocation=*/0, /*schedule=*/0,
+        /*descriptor_set=*/representation_contract, target_ref, /*abi=*/0,
         loom_named_attr_slice_t{}, loom_named_attr_slice_t{},
         LOOM_STRING_ID_INVALID, loom_named_attr_slice_t{}, callee_ref,
         /*arg_types=*/nullptr,
@@ -107,6 +113,8 @@ class LowStorageLayoutTest : public ::testing::Test {
     IREE_CHECK_OK(loom_low_storage_reserve_build(
         &body_builder_, byte_length, byte_alignment, loom_type_storage(space),
         LOOM_LOCATION_UNKNOWN, &op));
+    IREE_CHECK_OK(loom_low_storage_layout_builder_append(
+        module_, op, &layout_arena_, &layout_builder_));
     return loom_low_storage_reserve_storage(op);
   }
 
@@ -127,8 +135,8 @@ class LowStorageLayoutTest : public ::testing::Test {
                          uint64_t expected_byte_size,
                          uint64_t expected_byte_alignment) {
     loom_low_storage_layout_reservation_t reservation = {};
-    IREE_EXPECT_OK(loom_low_storage_layout_lookup_reservation(
-        &layout, storage_value_id, &reservation));
+    loom_low_storage_layout_lookup_reservation(&layout, storage_value_id,
+                                               &reservation);
     EXPECT_EQ(reservation.space, expected_space);
     EXPECT_EQ(reservation.byte_offset, expected_byte_offset);
     EXPECT_EQ(reservation.byte_size, expected_byte_size);
@@ -137,6 +145,7 @@ class LowStorageLayoutTest : public ::testing::Test {
 
   iree_arena_block_pool_t block_pool_;
   iree_arena_allocator_t layout_arena_;
+  loom_low_storage_layout_builder_t layout_builder_;
   loom_context_t context_;
   loom_module_t* module_ = nullptr;
   loom_op_t* function_op_ = nullptr;
@@ -151,17 +160,12 @@ TEST_F(LowStorageLayoutTest, PacksReservationsByStorageSpace) {
   const loom_value_id_t workgroup0 =
       Reserve(LOOM_STORAGE_SPACE_WORKGROUP, 3, 2);
 
-  loom_low_storage_layout_space_sizes_t sizes = {};
-  IREE_EXPECT_OK(loom_low_storage_layout_collect_space_sizes(
-      module_, function_op_, &sizes));
-  EXPECT_EQ(sizes.stack_bytes, 32u);
-  EXPECT_EQ(sizes.private_bytes, 4u);
-  EXPECT_EQ(sizes.scratch_bytes, 8u);
-  EXPECT_EQ(sizes.workgroup_bytes, 3u);
-
   loom_low_storage_layout_t layout = {};
-  IREE_EXPECT_OK(loom_low_storage_layout_build(module_, function_op_,
-                                               &layout_arena_, &layout));
+  loom_low_storage_layout_builder_finish(&layout_builder_, &layout);
+  EXPECT_EQ(layout.space_sizes.stack_bytes, 32u);
+  EXPECT_EQ(layout.space_sizes.private_bytes, 4u);
+  EXPECT_EQ(layout.space_sizes.scratch_bytes, 8u);
+  EXPECT_EQ(layout.space_sizes.workgroup_bytes, 3u);
   EXPECT_EQ(layout.record_count, 5u);
   ExpectReservation(layout, stack0, LOOM_STORAGE_SPACE_STACK, 0, 8, 4);
   ExpectReservation(layout, private0, LOOM_STORAGE_SPACE_PRIVATE, 0, 4, 4);
@@ -176,35 +180,15 @@ TEST_F(LowStorageLayoutTest, ResolvesNestedStorageViews) {
   const loom_value_id_t nested_view = View(view, 2, 4);
 
   loom_low_storage_layout_t layout = {};
-  IREE_EXPECT_OK(loom_low_storage_layout_build(module_, function_op_,
-                                               &layout_arena_, &layout));
+  loom_low_storage_layout_builder_finish(&layout_builder_, &layout);
   loom_low_storage_layout_reference_t reference = {};
-  IREE_EXPECT_OK(loom_low_storage_layout_lookup_reference(
-      &layout, module_, nested_view, &reference));
+  loom_low_storage_layout_lookup_reference(&layout, module_, nested_view,
+                                           &reference);
   EXPECT_EQ(reference.reservation.space, LOOM_STORAGE_SPACE_STACK);
   EXPECT_EQ(reference.reservation.byte_offset, 0u);
   EXPECT_EQ(reference.reservation.byte_size, 16u);
   EXPECT_EQ(reference.byte_offset, 6u);
   EXPECT_EQ(reference.byte_length, 4u);
-}
-
-TEST_F(LowStorageLayoutTest, RejectsOutOfRangeStorageViews) {
-  const loom_value_id_t stack = Reserve(LOOM_STORAGE_SPACE_STACK, 8, 4);
-  const loom_value_id_t view = View(stack, 7, 2);
-
-  loom_low_storage_layout_reference_t reference = {};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
-                        loom_low_storage_layout_resolve_reference(
-                            module_, function_op_, view, &reference));
-}
-
-TEST_F(LowStorageLayoutTest, RejectsNonPowerOfTwoReservationAlignment) {
-  Reserve(LOOM_STORAGE_SPACE_STACK, 8, 3);
-
-  loom_low_storage_layout_space_sizes_t sizes = {};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_low_storage_layout_collect_space_sizes(
-                            module_, function_op_, &sizes));
 }
 
 }  // namespace

@@ -63,16 +63,11 @@ static bool webgpu_registered_ =
          {
              "webgpu",
              CreateWebGPUDevice,
-             /*executable_format=*/nullptr,
+             /*executable_target_family=*/nullptr,
+             /*executable_target_key=*/nullptr,
              /*executable_data=*/nullptr,
              RecordingMode::kDirect,
-             /*unsupported_tests=*/
-             {
-                 {"EventTest.*",
-                  "WebGPU does not support HAL "
-                  "events; commands within a "
-                  "queue have implicit ordering"},
-             },
+             /*unsupported_tests=*/{},
              /*expected_failures=*/
              {
                  {"CommandBufferBasicTest."

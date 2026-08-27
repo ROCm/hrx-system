@@ -1,11 +1,10 @@
-#include "iree/hal/pool.h"
-
 #include <string.h>
 
 #include "hrx_internal.h"
 #include "iree/async/notification.h"
 #include "iree/async/util/proactor_pool.h"
-#include "iree/hal/resource.h"
+#include "iree/base/alignment.h"
+#include "iree/hal/api.h"
 
 typedef struct hrx_iree_exact_pool_t {
   iree_hal_resource_t resource;
@@ -90,7 +89,6 @@ static iree_status_t hrx_iree_exact_pool_acquire_reservation(
     iree_hal_pool_acquire_info_t* out_info,
     iree_hal_pool_acquire_result_t* out_result) {
   hrx_iree_exact_pool_t* pool = hrx_iree_exact_pool_cast(base_pool);
-  (void)alignment;
   (void)requester_frontier;
   (void)flags;
   IREE_ASSERT_ARGUMENT(out_reservation);
@@ -101,6 +99,20 @@ static iree_status_t hrx_iree_exact_pool_acquire_reservation(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "pool reservations must be non-empty");
   }
+  if (alignment == 0 || !iree_device_size_is_power_of_two(alignment)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "reservation alignment (%" PRIdsz
+                            ") must be a power of two > 0",
+                            alignment);
+  }
+  const iree_device_size_t pool_alignment =
+      pool->params.min_alignment ? pool->params.min_alignment : 1;
+  if (alignment > pool_alignment) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "reservation alignment %" PRIdsz
+                            " exceeds exact pool alignment %" PRIdsz,
+                            alignment, pool_alignment);
+  }
 
   memset(out_reservation, 0, sizeof(*out_reservation));
   memset(out_info, 0, sizeof(*out_info));
@@ -109,6 +121,11 @@ static iree_status_t hrx_iree_exact_pool_acquire_reservation(
       pool->allocator, pool->params, size, &buffer));
   out_reservation->byte_length = iree_hal_buffer_byte_length(buffer);
   out_reservation->block_handle = (uint64_t)(uintptr_t)buffer;
+  // Queue allocation returns a transient HAL buffer whose reservation may
+  // outlive the HRX buffer wrapper that submitted it. Keep the pool alive
+  // until the reservation is either transferred to a synchronous allocation
+  // or explicitly released by queue retirement.
+  iree_hal_pool_retain(base_pool);
   *out_result = IREE_HAL_POOL_ACQUIRE_OK_FRESH;
   return iree_ok_status();
 }
@@ -124,6 +141,7 @@ static void hrx_iree_exact_pool_release_reservation(
     iree_hal_buffer_release(buffer);
     iree_async_notification_signal(pool->notification, /*wake_count=*/1);
   }
+  iree_hal_pool_release(base_pool);
 }
 
 static iree_status_t hrx_iree_exact_pool_materialize_reservation(
@@ -148,9 +166,14 @@ static iree_status_t hrx_iree_exact_pool_materialize_reservation(
                             "reservation has no backing buffer");
   }
 
-  if ((flags & IREE_HAL_POOL_MATERIALIZE_FLAG_TRANSFER_RESERVATION_OWNERSHIP) ==
-      0) {
+  if (!iree_all_bits_set(
+          flags,
+          IREE_HAL_POOL_MATERIALIZE_FLAG_TRANSFER_RESERVATION_OWNERSHIP)) {
     iree_hal_buffer_retain(buffer);
+  } else {
+    // The backing buffer directly owns the allocation after transfer and no
+    // longer calls through the pool when destroyed.
+    iree_hal_pool_release(base_pool);
   }
   *out_buffer = buffer;
   return iree_ok_status();

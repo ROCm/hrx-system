@@ -1,0 +1,176 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @fp4_e4m3_scale16_wmma_global_scale_epilogue() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %lhs_block_scale_buffer: buffer, %rhs_block_scale_buffer: buffer, %lhs_global_scale_buffer: buffer, %rhs_global_scale_buffer: buffer, %out_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 128 : index
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<8xi32>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<8xi32>
+  %lhs_block_scale_view = buffer.view %lhs_block_scale_buffer[%base] : buffer -> view<2xi32>
+  %rhs_block_scale_view = buffer.view %rhs_block_scale_buffer[%base] : buffer -> view<2xi32>
+  %lhs_global_scale_view = buffer.view %lhs_global_scale_buffer[%base] : buffer -> view<1xf32>
+  %rhs_global_scale_view = buffer.view %rhs_global_scale_buffer[%base] : buffer -> view<1xf32>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32>
+  %lhs_data = vector.load %lhs_view[0] : view<8xi32> -> vector<8xi32>
+  %rhs_data = vector.load %rhs_view[0] : view<8xi32> -> vector<8xi32>
+  %lhs_block_scale = vector.load %lhs_block_scale_view[0] : view<2xi32> -> vector<2xi32>
+  %rhs_block_scale = vector.load %rhs_block_scale_view[0] : view<2xi32> -> vector<2xi32>
+  %schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=64, payload_registers=8, scale_format=f8e4m3, scale_group_elements=16, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {scale = %lhs_block_scale : vector<2xi32>, schema = %schema : encoding<schema>} : vector<8xi32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {scale = %rhs_block_scale : vector<2xi32>, schema = %schema : encoding<schema>} : vector<8xi32>
+  %zero_acc = vector.constant 0.0 : vector<8xf32>
+  %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %local_result = vector.mma %lhs, %rhs, %init : vector<8xi32>, vector<8xi32>, vector<8xf32>
+  %lhs_global_scale = view.load %lhs_global_scale_view[0] : view<1xf32> -> f32
+  %rhs_global_scale = view.load %rhs_global_scale_view[0] : view<1xf32> -> f32
+  %global_scale = scalar.mulf %lhs_global_scale, %rhs_global_scale : f32
+  %global_scale_vector = vector.splat %global_scale : vector<8xf32>
+  %result = vector.mulf %local_result, %global_scale_vector : vector<8xf32>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @fp4_e4m3_scale16_wmma_global_scale_epilogue() asm {
+  %35 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 32} : reg<amdgpu.sgpr x2>
+  %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 32} : reg<amdgpu.sgpr x2>
+  %lhs_block_scale_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 8} : reg<amdgpu.sgpr x2>
+  %rhs_block_scale_view = resource<hal_binding> {index = 3, source_type = hal.buffer, extent = 8} : reg<amdgpu.sgpr x2>
+  %lhs_global_scale_view = resource<hal_binding> {index = 4, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %rhs_global_scale_view = resource<hal_binding> {index = 5, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %out_view = resource<hal_binding> {index = 6, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %43 = v_mov_b32 0
+  %44 = global_load_b128_saddr %43, %lhs_view
+  %46 = global_load_b128_saddr %43, %lhs_view {offset = 16}
+  %lhs = concat(%44, %46) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  %49 = global_load_b128_saddr %43, %rhs_view
+  %51 = global_load_b128_saddr %43, %rhs_view {offset = 16}
+  %rhs = concat(%49, %51) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  %lhs_block_scale = global_load_b64_saddr %43, %lhs_block_scale_view
+  %rhs_block_scale = global_load_b64_saddr %43, %rhs_block_scale_view
+  %init = concat(%43, %43, %43, %43, %43, %43, %43, %43) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  %66 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %local_result = v_wmma_scale16_f32_16x16x128_f8f6f4_f4_f4 %lhs, %rhs, %66, %lhs_block_scale, %rhs_block_scale {matrix_a_fmt = 4, matrix_b_fmt = 4, matrix_a_scale_fmt = 2, matrix_b_scale_fmt = 2}
+  %lhs_global_scale = global_load_b32_saddr %43, %lhs_global_scale_view
+  %rhs_global_scale = global_load_b32_saddr %43, %rhs_global_scale_view
+  %global_scale = v_mul_f32 %lhs_global_scale, %rhs_global_scale
+  %74 = slice %local_result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %76 = v_mul_f32 %74, %global_scale
+  %77 = slice %local_result[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %79 = v_mul_f32 %77, %global_scale
+  %80 = slice %local_result[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %82 = v_mul_f32 %80, %global_scale
+  %83 = slice %local_result[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %85 = v_mul_f32 %83, %global_scale
+  %86 = slice %local_result[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %88 = v_mul_f32 %86, %global_scale
+  %89 = slice %local_result[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %91 = v_mul_f32 %89, %global_scale
+  %92 = slice %local_result[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %94 = v_mul_f32 %92, %global_scale
+  %95 = slice %local_result[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %97 = v_mul_f32 %95, %global_scale
+  %99 = v_and_b32_src0_inline %35, 15
+  %100 = v_lshlrev_b32_src0_inline %99, 2
+  %101 = v_lshrrev_b32_src0_inline %35, 4
+  %102 = v_lshlrev_b32_src0_inline %101, 9
+  %103 = v_add_u32 %100, %102
+  global_store_b32_saddr %103, %76, %out_view
+  global_store_b32_saddr %103, %79, %out_view {offset = 64}
+  global_store_b32_saddr %103, %82, %out_view {offset = 128}
+  global_store_b32_saddr %103, %85, %out_view {offset = 192}
+  global_store_b32_saddr %103, %88, %out_view {offset = 256}
+  global_store_b32_saddr %103, %91, %out_view {offset = 320}
+  global_store_b32_saddr %103, %94, %out_view {offset = 384}
+  global_store_b32_saddr %103, %97, %out_view {offset = 448}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+func.def target(@target) @fp4_e4m3_scale16_wmma_k_loop_final_domain_accumulator(%lhs_data: vector<8xi32>, %rhs_data: vector<8xi32>, %lhs_block_scale: vector<2xi32>, %rhs_block_scale: vector<2xi32>, %final_domain_accumulator: vector<8xf32>, %lhs_global_scale: f32, %rhs_global_scale: f32) -> (vector<8xf32>) {
+  %k_tile_begin = index.constant 0 : index
+  %k_tile_step = index.constant 1 : index
+  %k_tile_end = index.constant 2 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 128 : index
+  %schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=64, payload_registers=8, scale_format=f8e4m3, scale_group_elements=16, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {scale = %lhs_block_scale : vector<2xi32>, schema = %schema : encoding<schema>} : vector<8xi32>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {scale = %rhs_block_scale : vector<2xi32>, schema = %schema : encoding<schema>} : vector<8xi32>
+  %zero_acc = vector.constant 0.0 : vector<8xf32>
+  %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %local_result = scf.for %k_tile = [%k_tile_begin to %k_tile_end step %k_tile_step](%local_accumulator = %init : vector<8xf32>) -> (vector<8xf32>) {
+    %next = vector.mma %lhs, %rhs, %local_accumulator : vector<8xi32>, vector<8xi32>, vector<8xf32>
+    scf.yield %next : vector<8xf32>
+  }
+  %global_scale = scalar.mulf %lhs_global_scale, %rhs_global_scale : f32
+  %global_scale_vector = vector.splat %global_scale : vector<8xf32>
+  %scaled_product = vector.mulf %local_result, %global_scale_vector : vector<8xf32>
+  %result = vector.addf %final_domain_accumulator, %scaled_product : vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @fp4_e4m3_scale16_wmma_k_loop_final_domain_accumulator(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %lhs_block_scale: reg<amdgpu.vgpr x2>, %rhs_block_scale: reg<amdgpu.vgpr x2>, %final_domain_accumulator: reg<amdgpu.vgpr x8>, %lhs_global_scale: reg<amdgpu.vgpr>, %rhs_global_scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>) asm {
+  %k_tile_begin = s_mov_b32 0
+  %k_tile_step = s_mov_b32 1
+  %k_tile_end = s_mov_b32 2
+  %46 = v_mov_b32 0
+  %init = concat(%46, %46, %46, %46, %46, %46, %46, %46) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  low.br ^_bb1(%k_tile_begin: reg<amdgpu.sgpr>, %init: reg<amdgpu.vgpr x8>)
+^_bb1(%k_tile: reg<amdgpu.sgpr>, %local_accumulator: reg<amdgpu.vgpr x8>):
+  %55 = s_cmp_lt_i32 %k_tile, %k_tile_end
+  low.cond_br %55, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %56 = copy %local_accumulator : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %next = v_wmma_scale16_f32_16x16x128_f8f6f4_f4_f4 %lhs, %rhs, %56, %lhs_block_scale, %rhs_block_scale {matrix_a_fmt = 4, matrix_b_fmt = 4, matrix_a_scale_fmt = 2, matrix_b_scale_fmt = 2}
+  %58 = s_add_u32 %k_tile, %k_tile_step
+  low.br ^_bb1(%58: reg<amdgpu.sgpr>, %next: reg<amdgpu.vgpr x8>)
+^_bb3:
+  %global_scale = v_mul_f32 %lhs_global_scale, %rhs_global_scale
+  %61 = slice %local_accumulator[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %63 = v_mul_f32 %61, %global_scale
+  %64 = slice %local_accumulator[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %66 = v_mul_f32 %64, %global_scale
+  %67 = slice %local_accumulator[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %69 = v_mul_f32 %67, %global_scale
+  %70 = slice %local_accumulator[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %72 = v_mul_f32 %70, %global_scale
+  %73 = slice %local_accumulator[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %75 = v_mul_f32 %73, %global_scale
+  %76 = slice %local_accumulator[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %78 = v_mul_f32 %76, %global_scale
+  %79 = slice %local_accumulator[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %81 = v_mul_f32 %79, %global_scale
+  %82 = slice %local_accumulator[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %84 = v_mul_f32 %82, %global_scale
+  %86 = slice %final_domain_accumulator[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %88 = v_add_f32 %86, %63
+  %89 = slice %final_domain_accumulator[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %91 = v_add_f32 %89, %66
+  %92 = slice %final_domain_accumulator[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %94 = v_add_f32 %92, %69
+  %95 = slice %final_domain_accumulator[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %97 = v_add_f32 %95, %72
+  %98 = slice %final_domain_accumulator[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %100 = v_add_f32 %98, %75
+  %101 = slice %final_domain_accumulator[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %103 = v_add_f32 %101, %78
+  %104 = slice %final_domain_accumulator[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %106 = v_add_f32 %104, %81
+  %107 = slice %final_domain_accumulator[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %109 = v_add_f32 %107, %84
+  %result = concat(%88, %91, %94, %97, %100, %103, %106, %109) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  return %result
+}

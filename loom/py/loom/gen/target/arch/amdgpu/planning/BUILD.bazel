@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_test")
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
 
 package(
     default_visibility = ["//loom/py/loom/gen:__subpackages__"],
@@ -17,33 +17,17 @@ GENERATOR_VISIBILITY = [
     "//loom/src/loom/target/arch/amdgpu:__subpackages__",
 ]
 
-iree_py_binary(
+iree_py_library(
     name = "occupancy_tables",
     srcs = [
         "__init__.py",
         "amdgpu_occupancy_tables.py",
     ],
-    main = "amdgpu_occupancy_tables.py",
-    visibility = GENERATOR_VISIBILITY,
-    deps = [
-        "//loom/py/loom/gen/support",
-        "//loom/py/loom/target/arch/amdgpu:target_info",
-    ],
-)
-
-iree_py_binary(
-    name = "wait_packet_tables",
-    srcs = [
-        "__init__.py",
-        "amdgpu_wait_packet_tables.py",
-    ],
-    main = "amdgpu_wait_packet_tables.py",
     visibility = GENERATOR_VISIBILITY,
     deps = [
         "//loom/py/loom/gen/support",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch/amdgpu:descriptors",
-        "//loom/py/loom/target/arch/amdgpu:isa_xml",
         "//loom/py/loom/target/arch/amdgpu:target_info",
     ],
 )
@@ -59,20 +43,5 @@ iree_py_test(
     deps = [
         ":occupancy_tables",
         "//loom/py/loom/target/arch/amdgpu:target_info",
-    ],
-)
-
-iree_py_test(
-    name = "wait_packet_tables_test",
-    srcs = [
-        "amdgpu_wait_packet_tables_test.py",
-        "//loom/py/loom/tools:pytest_style_runner.py",
-    ],
-    args = ["loom.gen.target.arch.amdgpu.planning.amdgpu_wait_packet_tables_test"],
-    main = "pytest_style_runner.py",
-    deps = [
-        ":wait_packet_tables",
-        "//loom/py/loom/target:low_descriptors",
-        "//loom/py/loom/target/arch/amdgpu:descriptors",
     ],
 )

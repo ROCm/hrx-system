@@ -210,6 +210,27 @@ ERR_TYPE_016 = ErrorDef(
     ),
 )
 
+# ERR_TYPE_017: Register carrier transform lacks a semantic value relation.
+ERR_TYPE_017 = ErrorDef(
+    domain=ErrorDomain.TYPE,
+    code=17,
+    severity=Severity.ERROR,
+    summary="Register carrier transform lacks a semantic value relation.",
+    message=(
+        "{op_name} cannot derive result register type {result_type} from "
+        "source register type {source_type}"
+    ),
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("source_type", ParamKind.TYPE),
+        ErrorParam("result_type", ParamKind.TYPE),
+    ),
+    fix_hint=(
+        "Use an exact identity transform or a target-defined operation that "
+        "specifies the semantic value-type relation"
+    ),
+)
+
 # ERR_TYPE_009: Yield type does not match result type.
 ERR_TYPE_009 = ErrorDef(
     domain=ErrorDomain.TYPE,
@@ -289,4 +310,5 @@ ALL_TYPE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_TYPE_014,
     ERR_TYPE_015,
     ERR_TYPE_016,
+    ERR_TYPE_017,
 )

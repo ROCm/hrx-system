@@ -19,6 +19,8 @@
 #include "loom/codegen/low/verify.h"
 #include "loom/error/diagnostic.h"
 #include "loom/ir/ir.h"
+#include "loom/target/facts.h"
+#include "loom/target/function_version.h"
 #include "loom/target/low_descriptor_registry.h"
 #include "loom/target/types.h"
 #include "loom/verify/verify.h"
@@ -32,6 +34,9 @@ typedef struct loom_target_entry_options_t {
   // with a target record. A leading '@' is accepted for command-line
   // ergonomics.
   iree_string_view_t entry_symbol;
+  // Optional concrete compiler function versions participating in this
+  // emission. The list and its version objects are borrowed for selection.
+  const loom_function_version_list_t* function_versions;
   // Diagnostic sink used for verification, lowering, scheduling, and
   // allocation diagnostics. A NULL callback still counts diagnostics.
   loom_diagnostic_sink_t diagnostic_sink;
@@ -40,10 +45,6 @@ typedef struct loom_target_entry_options_t {
   // Maximum diagnostics to emit before the active subsystem stops walking.
   // Zero lets callers use a backend-defined default.
   uint32_t max_errors;
-  // Optional device- or environment-selected bundle used after the entry's
-  // module target record has passed compatibility checks. Function-local ABI
-  // contracts are re-applied to this bundle before the entry is returned.
-  const loom_target_bundle_t* effective_target_bundle;
 } loom_target_entry_options_t;
 
 typedef struct loom_target_entry_t {
@@ -53,16 +54,17 @@ typedef struct loom_target_entry_t {
   iree_string_view_t func_name;
   // Module-local symbol reference for |func|.
   loom_symbol_ref_t func_ref;
-  // Module-local target record symbol referenced by |func|.
-  loom_symbol_ref_t target_ref;
-  // Borrowed target record symbol entry referenced by |target_ref|.
-  const loom_symbol_t* target_symbol;
-  // Borrowed target record op referenced by |target_ref|.
-  loom_op_t* target_op;
-  // Materialized target bundle selected by |func|. The export plan is the
-  // func-owned effective export plan, not a shared target-record backreference.
-  loom_target_bundle_storage_t bundle_storage;
+  // Concrete target-refined function version, or NULL when unrefined.
+  const loom_target_function_version_t* function_version;
+  // Immutable function target facts selected for this function.
+  const loom_target_facts_t* target_facts;
 } loom_target_entry_t;
+
+// Returns the common target bundle projected into |entry->target_facts|.
+static inline const loom_target_bundle_t* loom_target_entry_bundle(
+    const loom_target_entry_t* entry) {
+  return entry ? loom_target_facts_bundle(entry->target_facts) : NULL;
+}
 
 typedef struct loom_target_entry_list_t {
   // Arena-owned entry descriptors in module order.
@@ -128,13 +130,15 @@ iree_status_t loom_target_entry_verify_module(
     const loom_module_t* module, const loom_target_entry_options_t* options,
     uint32_t default_max_errors, loom_verify_result_t* out_result);
 
-// Runs target-low semantic verification. Status is reserved for infrastructure
-// failures; verification errors are reported through |out_result|.
+// Runs target-low semantic verification using function versions and diagnostic
+// policy from |options|. Status is reserved for infrastructure failures;
+// verification errors are reported through |out_result|.
 iree_status_t loom_target_entry_verify_low_module(
     const loom_module_t* module,
     const loom_target_low_descriptor_registry_t* low_registry,
+    const loom_target_entry_options_t* options,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
-    loom_target_selection_t target_selection, uint32_t max_errors,
+    uint32_t default_max_errors,
     loom_low_verify_provider_list_t low_verify_provider_list,
     loom_low_verify_scratch_t* scratch, loom_low_verify_result_t* out_result);
 

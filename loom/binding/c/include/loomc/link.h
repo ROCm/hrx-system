@@ -45,6 +45,7 @@
 ///     .type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
 ///     .structure_size = sizeof(loomc_link_options_t),
 ///     .link_index = library_index,
+///     .mode = LOOMC_LINK_MODE_LINK,
 ///     .root_symbols = roots,
 ///     .root_symbol_count = 1,
 /// };
@@ -98,30 +99,46 @@ typedef struct loomc_linker_options_t {
 
 /// Link operation flags.
 typedef enum loomc_link_flag_bits_e {
-  /// Select exported symbols as roots and compute their dependency closure.
-  LOOMC_LINK_FLAG_INCLUDE_EXPORTED_ROOTS = 1u << 0,
+  /// Select exported INPUT-provider symbols as roots and compute their closure.
+  LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS = 1u << 0,
 
-  /// Leave unresolved references for later verification or specialization.
+  /// Preserve reachable unresolved references for a later link or
+  /// specialization step.
   LOOMC_LINK_FLAG_ALLOW_UNRESOLVED_SYMBOLS = 1u << 1,
 
-  /// Strip check dialect testbench symbols before materialization.
-  LOOMC_LINK_FLAG_STRIP_CHECK_SYMBOLS = 1u << 2,
+  /// Strip symbols used only by test or benchmark tooling.
+  LOOMC_LINK_FLAG_STRIP_TEST_SYMBOLS = 1u << 2,
 } loomc_link_flag_bits_t;
 
 /// Bitmask of `loomc_link_flag_bits_t` values.
 typedef uint32_t loomc_link_flags_t;
 
+/// Link product selection mode.
+typedef enum loomc_link_mode_e {
+  /// Merge every primary-input symbol into one relocatable module. Library
+  /// providers are not materialized.
+  LOOMC_LINK_MODE_MERGE = 0,
+
+  /// Retain explicit roots or exported primary-input roots and their reachable
+  /// closure through the complete supplied library universe. Selected root
+  /// providers contribute all of their exported symbols as roots without
+  /// changing provider visibility.
+  LOOMC_LINK_MODE_LINK = 1,
+} loomc_link_mode_t;
+
 /// Link invocation options.
 ///
 /// A link invocation consumes a frozen index and returns either a retained
-/// module or a failed result with diagnostics. Supplying roots or
-/// `LOOMC_LINK_FLAG_INCLUDE_EXPORTED_ROOTS` selects a dependency closure.
-/// Supplying neither performs archive-style linking and materializes all
-/// linkable symbols in stable index order. Target selections can be supplied
-/// through `loomc_target_selection_options_t` on `next` so target-aware linking
-/// policy has a stable place in the invocation contract as it grows. Config
-/// options materialize on the linked output for this invocation; frozen indexes
-/// and reusable input/library modules are never mutated by link-time config.
+/// module or a failed result with diagnostics. Merge mode materializes only
+/// primary INPUT providers and preserves unresolved contracts. Link mode
+/// selects a dependency closure from explicit roots or exported primary roots
+/// plus the exports of selected root providers across the complete supplied
+/// library universe. Linking preserves every target carried by the selected
+/// symbols. Target-specialization extensions participate in template-provider
+/// selection and project exact target facts into the standalone linked output.
+/// Config options materialize on the linked output for this invocation; frozen
+/// indexes and reusable input/library modules are never mutated by link-time
+/// specialization.
 typedef struct loomc_link_options_t {
   /// Structure type. Must be `LOOMC_STRUCTURE_TYPE_LINK_OPTIONS` when nonzero.
   loomc_structure_type_t type;
@@ -129,8 +146,8 @@ typedef struct loomc_link_options_t {
   /// Size of this structure in bytes.
   loomc_host_size_t structure_size;
 
-  /// Extension chain for link invocation options such as
-  /// `loomc_target_selection_options_t`.
+  /// Optional invocation extensions such as
+  /// `loomc_target_specialization_options_t`.
   const void* next;
 
   /// Frozen provider index to link.
@@ -139,7 +156,11 @@ typedef struct loomc_link_options_t {
   /// Output module name for this invocation. Empty uses the linker's default.
   loomc_string_view_t module_name;
 
-  /// Root symbol names for selective linking.
+  /// Product selection mode. Zero defaults to `LOOMC_LINK_MODE_MERGE`.
+  loomc_link_mode_t mode;
+
+  /// Root symbol names for link mode. Function-like roots are retained as
+  /// module-boundary entries in the linked output.
   const loomc_string_view_t* root_symbols;
 
   /// Number of entries in `root_symbols`.
@@ -150,6 +171,14 @@ typedef struct loomc_link_options_t {
 
   /// Per-invocation config bindings materialized into the linked output module.
   loomc_config_options_t config;
+
+  /// Provider ordinals whose exported symbols are roots in link mode. This
+  /// selects public API surfaces without changing provider linkage roles or
+  /// making private symbols visible across provider boundaries.
+  const loomc_host_size_t* root_provider_ordinals;
+
+  /// Number of entries in `root_provider_ordinals`.
+  loomc_host_size_t root_provider_count;
 } loomc_link_options_t;
 
 /// Creates a prepared immutable linker.
@@ -195,11 +224,6 @@ LOOMC_API_EXPORT loomc_status_t loomc_linker_create(
 /// Calls using the same linker may run concurrently when each call uses a
 /// distinct workspace. The same workspace requires external synchronization.
 ///
-/// @par Target Selection
-/// `loomc_target_selection_options_t` may be attached to
-/// `loomc_link_options_t::next`. The selected profile must be compatible with
-/// the linker's context. The current linker validates the selection and leaves
-/// target-specific link policy to later target package integrations.
 LOOMC_API_EXPORT loomc_status_t
 loomc_link_module(loomc_linker_t* linker, loomc_workspace_t* workspace,
                   const loomc_link_options_t* options,

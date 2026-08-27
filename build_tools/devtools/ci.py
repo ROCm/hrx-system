@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -27,17 +28,65 @@ CMAKE_SANITIZER_OPTIONS = {
     "tsan": ("-DIREE_ENABLE_TSAN=ON",),
     "ubsan": ("-DIREE_ENABLE_UBSAN=ON",),
 }
-CI_HAL_DRIVER_DEFINES = (
+BAZEL_HAL_DRIVER_DEFINES = (
     ("amdgpu", "IREE_HAL_DRIVER_AMDGPU"),
+    ("hip", "IREE_HAL_DRIVER_HIP"),
+    ("local-sync", "IREE_HAL_DRIVER_LOCAL_SYNC"),
+    ("local-task", "IREE_HAL_DRIVER_LOCAL_TASK"),
+    ("null", "IREE_HAL_DRIVER_NULL"),
     ("vulkan", "IREE_HAL_DRIVER_VULKAN"),
+    ("webgpu", "IREE_HAL_DRIVER_WEBGPU"),
 )
+CMAKE_HAL_DRIVER_DEFINES = (
+    ("amdgpu", "IREE_HAL_DRIVER_AMDGPU"),
+    ("hip", "IREE_HAL_DRIVER_HIP"),
+    ("vulkan", "IREE_HAL_DRIVER_VULKAN"),
+    ("webgpu", "IREE_HAL_DRIVER_WEBGPU"),
+)
+CMAKE_LOOM_TARGET_DEFINES = (
+    ("amdgpu", "LOOM_TARGET_AMDGPU"),
+    ("iree_vm", "LOOM_TARGET_IREE_VM"),
+    ("llvmir", "LOOM_TARGET_LLVMIR"),
+    ("spirv", "LOOM_TARGET_SPIRV"),
+    ("wasm", "LOOM_TARGET_WASM"),
+    ("x86", "LOOM_TARGET_X86"),
+)
+CMAKE_LOOM_IMPORTER_DEFINES = (
+    ("mlir", "LOOM_IMPORT_MLIR"),
+    ("tilelang", "LOOM_IMPORT_TILELANG"),
+)
+CI_SUPPORTED_HAL_DRIVERS = frozenset(driver for driver, _ in BAZEL_HAL_DRIVER_DEFINES)
+REPOSITORY_BUILD_HAL_DRIVERS = (
+    "amdgpu",
+    "hip",
+    "local-sync",
+    "local-task",
+    "null",
+    "vulkan",
+    "webgpu",
+)
+REPOSITORY_BUILD_LOOM_TARGETS = (
+    "amdgpu",
+    "iree_vm",
+    "llvmir",
+    "spirv",
+    "wasm",
+    "x86",
+)
+REPOSITORY_BUILD_LOOM_IMPORTERS = ("mlir", "tilelang")
 ROCM_PINNED_DEPENDENCY_MODE_OPTION = "-DIREE_ROCM_DEPENDENCY_MODE=pinned"
 AMDGPU_DEVICE_BINARY_SOURCE_OPTIONS = (
     "-DIREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE=source",
     "-DIREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm",
 )
+AMDGPU_DEVICE_BINARY_PREBUILT_OPTIONS = (
+    "-DIREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE=prebuilt",
+    "-DIREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none",
+)
 BAZEL_COMMANDS = {
     "iree-bazel-cpu": ("cpu", None),
+    "iree-bazel-repository-build": ("repository-build", None),
+    "iree-bazel-repository-integration": ("repository-integration", None),
     "iree-bazel-cpu-asan": ("cpu", "asan"),
     "iree-bazel-cpu-msan": ("cpu", "msan"),
     "iree-bazel-cpu-tsan": ("cpu", "tsan"),
@@ -45,20 +94,14 @@ BAZEL_COMMANDS = {
     "iree-bazel-cpu-sanitizers": ("cpu", "all"),
     "iree-bazel-amdgpu": ("amdgpu", None),
     "iree-bazel-amdgpu-asan": ("amdgpu", "asan"),
-    "iree-bazel-amdgpu-msan": ("amdgpu", "msan"),
     "iree-bazel-amdgpu-tsan": ("amdgpu", "tsan"),
     "iree-bazel-amdgpu-ubsan": ("amdgpu", "ubsan"),
-    "iree-bazel-amdgpu-sanitizers": ("amdgpu", "all"),
     "iree-bazel-loom-amdgpu": ("loom-amdgpu", None),
     "iree-bazel-vulkan": ("vulkan", None),
-    "iree-bazel-vulkan-asan": ("vulkan", "asan"),
-    "iree-bazel-vulkan-msan": ("vulkan", "msan"),
-    "iree-bazel-vulkan-tsan": ("vulkan", "tsan"),
-    "iree-bazel-vulkan-ubsan": ("vulkan", "ubsan"),
-    "iree-bazel-vulkan-sanitizers": ("vulkan", "all"),
 }
 CMAKE_COMMANDS = {
     "iree-cmake-cpu": ("cpu", None),
+    "iree-cmake-repository-build": ("repository-build", None),
     "iree-cmake-cpu-asan": ("cpu", "asan"),
     "iree-cmake-cpu-msan": ("cpu", "msan"),
     "iree-cmake-cpu-tsan": ("cpu", "tsan"),
@@ -127,6 +170,10 @@ def dev_command(*args: str) -> tuple[str, ...]:
     return (os.environ.get("IREE_CI_PYTHON", "python3"), "dev.py", *args)
 
 
+def python_command(path: str, *args: str) -> tuple[str, ...]:
+    return (os.environ.get("IREE_CI_PYTHON", "python3"), path, *args)
+
+
 def sanitizer_env(config: str | None) -> tuple[tuple[str, str], ...]:
     if config != "tsan":
         return ()
@@ -139,7 +186,12 @@ def amdgpu_libhsa_test_env() -> tuple[tuple[str, str], ...]:
         rocm_root = os.environ.get("HRX_ROCM_ROOT")
         if not rocm_root:
             return ()
-        libhsa_path = str(Path(rocm_root) / "lib" / "libhsa-runtime64.so.1")
+        relative_path = (
+            Path("bin/hsa-runtime64.dll")
+            if sys.platform == "win32"
+            else Path("lib/libhsa-runtime64.so.1")
+        )
+        libhsa_path = str(Path(rocm_root) / relative_path)
     return (("IREE_HAL_AMDGPU_LIBHSA_PATH", libhsa_path),)
 
 
@@ -169,9 +221,8 @@ def cmake_dev_command(command_name: str, *args: str) -> tuple[str, ...]:
 
 
 def validate_enabled_drivers(enabled_drivers: tuple[str, ...]) -> frozenset[str]:
-    supported_drivers = frozenset(driver for driver, _ in CI_HAL_DRIVER_DEFINES)
     enabled_driver_set = frozenset(enabled_drivers)
-    unsupported_drivers = enabled_driver_set.difference(supported_drivers)
+    unsupported_drivers = enabled_driver_set.difference(CI_SUPPORTED_HAL_DRIVERS)
     if unsupported_drivers:
         raise ValueError(
             "unsupported CI HAL driver(s): " + ", ".join(sorted(unsupported_drivers))
@@ -179,14 +230,37 @@ def validate_enabled_drivers(enabled_drivers: tuple[str, ...]) -> frozenset[str]
     return enabled_driver_set
 
 
-def bazel_configure_step(enabled_drivers: tuple[str, ...] = ()) -> CiStep:
+def amdgpu_bazel_options(target_selector: str) -> tuple[str, ...]:
+    return (
+        "--//runtime/src/iree/hal/drivers/amdgpu:targets=" + target_selector,
+        "--//loom/config/target/amdgpu:targets=iree_hal",
+    )
+
+
+def bazel_configure_step(
+    enabled_drivers: tuple[str, ...] = (),
+    *,
+    enabled_loom_targets: tuple[str, ...] | None = None,
+    enabled_loom_importers: tuple[str, ...] | None = None,
+) -> CiStep:
     enabled_driver_set = validate_enabled_drivers(enabled_drivers)
     command = ["bazel", "configure"]
-    for driver, define in CI_HAL_DRIVER_DEFINES:
+    for driver, define in BAZEL_HAL_DRIVER_DEFINES:
         if driver in enabled_driver_set:
             command.append(f"-D{define}=ON")
-    if "amdgpu" in enabled_driver_set:
+    if enabled_driver_set.intersection(("amdgpu", "hip")):
         command.append(ROCM_PINNED_DEPENDENCY_MODE_OPTION)
+        rocm_root = os.environ.get("HRX_ROCM_ROOT")
+        if rocm_root:
+            command.append(f"-DIREE_ROCM_PATH={rocm_root}")
+    if enabled_loom_targets is not None:
+        command.append(
+            "--//loom/config/target:enable=" + ",".join(enabled_loom_targets)
+        )
+    if enabled_loom_importers is not None:
+        command.append(
+            "--//loom/config/import:enable=" + ",".join(enabled_loom_importers)
+        )
     return CiStep("Configure Bazel", dev_command(*command))
 
 
@@ -194,10 +268,12 @@ def bazel_build_step(
     name: str,
     targets: tuple[str, ...],
     config: str | None = None,
+    bazel_options: tuple[str, ...] = (),
 ) -> CiStep:
     command = ["bazel", "build"]
     if config is not None:
         command.append(f"--config={config}")
+    command.extend(bazel_options)
     if any(target.startswith("-") for target in targets):
         command.append("--")
     command.extend(targets)
@@ -210,6 +286,7 @@ def bazel_test_step(
     config: str | None = None,
     test_tag_filters: tuple[str, ...] = (),
     test_env: tuple[tuple[str, str], ...] = (),
+    bazel_options: tuple[str, ...] = (),
 ) -> CiStep:
     options = []
     if config is not None:
@@ -218,6 +295,7 @@ def bazel_test_step(
         options.append("--test_tag_filters=" + ",".join(test_tag_filters))
     for key, value in sanitizer_env(config) + test_env:
         options.append(f"--test_env={key}={value}")
+    options.extend(bazel_options)
     command = ["bazel", "test", *options]
     if any(target.startswith("-") for target in targets):
         command.append("--")
@@ -225,10 +303,26 @@ def bazel_test_step(
     return CiStep(name, dev_command(*command))
 
 
+def bazel_run_step(
+    name: str,
+    target: str,
+    program_args: tuple[str, ...] = (),
+    bazel_options: tuple[str, ...] = (),
+) -> CiStep:
+    command = ["bazel", "run", *bazel_options, target]
+    if program_args:
+        command.extend(("--", *program_args))
+    return CiStep(name, dev_command(*command))
+
+
 def cmake_configure_step(
     command_name: str,
     *,
     enabled_drivers: tuple[str, ...] = (),
+    enabled_loom_targets: tuple[str, ...] | None = None,
+    enabled_loom_importers: tuple[str, ...] | None = None,
+    amdgpu_target_selector: str | None = ci_config.DEFAULT_AMDGPU_TARGET_SELECTOR,
+    amdgpu_device_binary_mode: str = "source",
     sanitizer: str | None = None,
     build_tests: bool | None = None,
 ) -> CiStep:
@@ -246,12 +340,33 @@ def cmake_configure_step(
         "-DIREE_ENABLE_LIBBACKTRACE=OFF",
         "-DLIBHRX_BUILD=OFF",
     ]
-    for driver, define in CI_HAL_DRIVER_DEFINES:
+    for driver, define in CMAKE_HAL_DRIVER_DEFINES:
         command.append(f"-D{define}={'ON' if driver in enabled_driver_set else 'OFF'}")
+    if enabled_loom_targets is not None:
+        enabled_loom_target_set = frozenset(enabled_loom_targets)
+        for target, define in CMAKE_LOOM_TARGET_DEFINES:
+            command.append(
+                f"-D{define}={'ON' if target in enabled_loom_target_set else 'OFF'}"
+            )
+    if enabled_loom_importers is not None:
+        enabled_loom_importer_set = frozenset(enabled_loom_importers)
+        for importer, define in CMAKE_LOOM_IMPORTER_DEFINES:
+            command.append(
+                f"-D{define}={'ON' if importer in enabled_loom_importer_set else 'OFF'}"
+            )
     if "amdgpu" in enabled_driver_set:
         command.append(ROCM_PINNED_DEPENDENCY_MODE_OPTION)
-        command.append(f"-DIREE_HAL_AMDGPU_TARGETS={ci_config.AMDGPU_TARGET_SELECTOR}")
-        command.extend(cmake_amdgpu_device_binary_options())
+        if amdgpu_target_selector is not None:
+            command.append(f"-DIREE_HAL_AMDGPU_TARGETS={amdgpu_target_selector}")
+            command.append("-DLOOM_TARGET_AMDGPU_TARGETS=iree_hal")
+        if amdgpu_device_binary_mode == "source":
+            command.extend(cmake_amdgpu_device_binary_options())
+        elif amdgpu_device_binary_mode == "prebuilt":
+            command.extend(AMDGPU_DEVICE_BINARY_PREBUILT_OPTIONS)
+        else:
+            raise ValueError(
+                f"unsupported AMDGPU device binary mode: {amdgpu_device_binary_mode}"
+            )
     if sanitizer is not None:
         command.append("-DIREE_ENABLE_ASSERTIONS=ON")
         command.extend(CMAKE_SANITIZER_OPTIONS[sanitizer])
@@ -320,6 +435,51 @@ def cpu_steps(targets: tuple[str, ...]) -> list[CiStep]:
     ]
 
 
+def repository_build_steps() -> list[CiStep]:
+    return [
+        bazel_configure_step(
+            enabled_drivers=REPOSITORY_BUILD_HAL_DRIVERS,
+            enabled_loom_targets=REPOSITORY_BUILD_LOOM_TARGETS,
+            enabled_loom_importers=REPOSITORY_BUILD_LOOM_IMPORTERS,
+        ),
+        bazel_build_step("Build repository", ("//...",)),
+    ]
+
+
+def repository_integration_steps(amdgpu_target_selector: str) -> list[CiStep]:
+    if not os.environ.get("HRX_ROCM_ROOT"):
+        raise ValueError(
+            "iree-bazel-repository-integration requires HRX_ROCM_ROOT so the "
+            "AMDGPU device compiler is exercised"
+        )
+    amdgpu_options = amdgpu_bazel_options(amdgpu_target_selector)
+    return [
+        *repository_build_steps(),
+        bazel_build_step(
+            "Build AMDGPU device toolchain smoke",
+            ci_config.BAZEL_REPOSITORY_INTEGRATION_DEVICE_TARGETS,
+            bazel_options=amdgpu_options,
+        ),
+        bazel_test_step(
+            "Test Bazel repository integration",
+            ci_config.BAZEL_REPOSITORY_INTEGRATION_TEST_TARGETS,
+        ),
+        CiStep(
+            "Test lock-free Bazel launch",
+            python_command("build_tools/devtools/bazel_launcher_integration_test.py"),
+        ),
+        bazel_run_step(
+            "Run dynamic library environment smoke",
+            ci_config.BAZEL_REPOSITORY_INTEGRATION_DYNAMIC_LIBRARY_TARGET,
+        ),
+        bazel_run_step(
+            "Run executable alias smoke",
+            ci_config.BAZEL_REPOSITORY_INTEGRATION_ALIAS_TARGET,
+            program_args=("--help",),
+        ),
+    ]
+
+
 def cpu_sanitizer_steps(targets: tuple[str, ...]) -> list[CiStep]:
     steps = [bazel_configure_step()]
     for config in ci_config.SANITIZER_TEST_CONFIGS:
@@ -351,84 +511,49 @@ def cpu_config_steps(targets: tuple[str, ...], config: str) -> list[CiStep]:
     raise ValueError(f"unknown Bazel sanitizer config: {config}")
 
 
-def amdgpu_test_steps(
+def amdgpu_build_and_test_steps(
     targets: tuple[str, ...],
+    target_selector: str,
     config: str | None = None,
     xfail_targets: tuple[str, ...] = (),
 ) -> list[CiStep]:
-    config_name = f" and {config.upper()}" if config is not None else ""
-    steps = []
-    for (
-        slice_name,
-        target_prefix,
-        default_target,
-        resource_tag,
-    ) in ci_config.AMDGPU_BAZEL_RESOURCE_SLICES:
-        slice_targets = resource_slice_targets(
-            targets + xfail_targets,
-            target_prefix=target_prefix,
-            default_target=default_target,
-        )
-        if not slice_targets:
-            continue
-        steps.append(
-            bazel_test_step(
-                f"Test IREE AMDGPU {slice_name} resources{config_name}",
-                slice_targets,
-                config=config,
-                test_tag_filters=(resource_tag,),
-                test_env=amdgpu_libhsa_test_env(),
-            )
-        )
-    return steps
-
-
-def resource_slice_targets(
-    targets: tuple[str, ...],
-    *,
-    target_prefix: str,
-    default_target: str,
-) -> tuple[str, ...]:
-    positive_targets = []
-    negative_targets = []
-    seen_targets = set()
-    for target in targets:
-        is_negative = target.startswith("-")
-        raw_target = target[1:] if is_negative else target
-        if raw_target in ("//...", "..."):
-            selected_target = "-" + default_target if is_negative else default_target
-        elif target_in_prefix(raw_target, target_prefix):
-            selected_target = target
-        else:
-            continue
-        if selected_target in seen_targets:
-            continue
-        if is_negative:
-            negative_targets.append(selected_target)
-        else:
-            positive_targets.append(selected_target)
-        seen_targets.add(selected_target)
-    if not positive_targets:
-        return ()
-    return tuple(positive_targets + negative_targets)
-
-
-def target_in_prefix(target: str, target_prefix: str) -> bool:
-    return (
-        target == target_prefix
-        or target.startswith(target_prefix + "/")
-        or target.startswith(target_prefix + ":")
+    config_name = f" / {config.upper()}" if config is not None else ""
+    scoped_targets = targets + ci_config.AMDGPU_BAZEL_TARGET_EXCLUDES
+    bazel_options = amdgpu_bazel_options(target_selector)
+    host_sanitizer_tag_filters = (
+        (f"-{ci_config.HOST_TSAN_INCOMPATIBLE_TEST_LABEL}",) if config == "tsan" else ()
     )
+    return [
+        bazel_build_step(
+            f"Build IREE / AMDGPU{config_name}",
+            scoped_targets,
+            config=config,
+            bazel_options=bazel_options,
+        ),
+        bazel_test_step(
+            f"Test IREE / AMDGPU{config_name}",
+            scoped_targets + xfail_targets,
+            config=config,
+            test_tag_filters=(
+                ci_config.AMDGPU_BAZEL_TEST_TAG_FILTERS + host_sanitizer_tag_filters
+            ),
+            test_env=amdgpu_libhsa_test_env(),
+            bazel_options=bazel_options,
+        ),
+    ]
 
 
-def amdgpu_steps(targets: tuple[str, ...]) -> list[CiStep]:
+def amdgpu_steps(targets: tuple[str, ...], target_selector: str) -> list[CiStep]:
     return [
         bazel_configure_step(enabled_drivers=("amdgpu",)),
-        bazel_build_step(
-            "Build IREE with AMDGPU",
-            ci_config.AMDGPU_BAZEL_DRIVER_TARGETS,
+        *amdgpu_build_and_test_steps(
+            targets,
+            target_selector,
+            xfail_targets=(
+                ci_config.AMDGPU_XFAIL_TARGETS
+                + ci_config.amdgpu_bazel_xfail_targets(target_selector)
+            ),
         ),
-        *amdgpu_test_steps(targets, xfail_targets=ci_config.AMDGPU_XFAIL_TARGETS),
     ]
 
 
@@ -443,115 +568,38 @@ def loom_amdgpu_bazel_steps() -> list[CiStep]:
     ]
 
 
-def amdgpu_sanitizer_steps(targets: tuple[str, ...]) -> list[CiStep]:
-    steps = [bazel_configure_step(enabled_drivers=("amdgpu",))]
-    for config in ci_config.SANITIZER_TEST_CONFIGS:
-        steps.extend(amdgpu_config_steps(targets, config))
-    for config in ci_config.SANITIZER_BUILD_CONFIGS:
-        steps.extend(amdgpu_config_steps(targets, config))
-    return steps
-
-
-def amdgpu_config_steps(targets: tuple[str, ...], config: str) -> list[CiStep]:
-    if config in ci_config.SANITIZER_TEST_CONFIGS:
-        xfail_targets = (
-            ci_config.AMDGPU_TSAN_SANITIZERS_XFAIL_TARGETS
-            if config == "tsan"
-            else ci_config.AMDGPU_SANITIZERS_XFAIL_TARGETS
-        )
-        return amdgpu_test_steps(
-            targets,
-            config=config,
-            xfail_targets=xfail_targets,
-        )
-    if config in ci_config.SANITIZER_BUILD_CONFIGS:
-        return [
-            bazel_build_step(
-                f"Build IREE with AMDGPU and {config.upper()}",
-                ci_config.AMDGPU_BAZEL_DRIVER_TARGETS,
-                config=config,
-            )
-        ]
-    raise ValueError(f"unknown Bazel AMDGPU sanitizer config: {config}")
-
-
-def vulkan_test_steps(
-    targets: tuple[str, ...],
-    config: str | None = None,
+def amdgpu_config_steps(
+    targets: tuple[str, ...], target_selector: str, config: str
 ) -> list[CiStep]:
-    config_name = f" with {config.upper()}" if config is not None else ""
-    steps = [
-        bazel_test_step(
-            f"Test IREE Vulkan package tests{config_name}",
-            ci_config.VULKAN_BAZEL_DRIVER_TARGETS + ci_config.VULKAN_XFAIL_TARGETS,
-            config=config,
+    xfail_targets = (
+        ci_config.AMDGPU_TSAN_SANITIZERS_XFAIL_TARGETS
+        if config == "tsan"
+        else ci_config.AMDGPU_SANITIZERS_XFAIL_TARGETS
+    )
+    return amdgpu_build_and_test_steps(
+        targets,
+        target_selector,
+        config=config,
+        xfail_targets=(
+            xfail_targets + ci_config.amdgpu_bazel_xfail_targets(target_selector)
         ),
-    ]
-    for (
-        slice_name,
-        target_prefix,
-        default_target,
-        resource_tag,
-    ) in ci_config.VULKAN_BAZEL_RESOURCE_SLICES:
-        slice_targets = resource_slice_targets(
-            targets,
-            target_prefix=target_prefix,
-            default_target=default_target,
-        )
-        if not slice_targets:
-            continue
-        steps.append(
-            bazel_test_step(
-                f"Test IREE Vulkan {slice_name} resources{config_name}",
-                slice_targets,
-                config=config,
-                test_tag_filters=(resource_tag,),
-            )
-        )
-    return steps
+    )
 
 
 def vulkan_steps(targets: tuple[str, ...]) -> list[CiStep]:
+    scoped_targets = targets + ci_config.VULKAN_BAZEL_TARGET_EXCLUDES
     return [
         bazel_configure_step(enabled_drivers=("vulkan",)),
         bazel_build_step(
-            "Build IREE with Vulkan",
-            ci_config.VULKAN_BAZEL_DRIVER_TARGETS,
+            "Build IREE / Vulkan",
+            scoped_targets,
         ),
-        *vulkan_test_steps(targets),
+        bazel_test_step(
+            "Test IREE / Vulkan",
+            scoped_targets + ci_config.VULKAN_XFAIL_TARGETS,
+            test_tag_filters=ci_config.VULKAN_BAZEL_TEST_TAG_FILTERS,
+        ),
     ]
-
-
-def vulkan_sanitizer_steps(targets: tuple[str, ...]) -> list[CiStep]:
-    steps = [bazel_configure_step(enabled_drivers=("vulkan",))]
-    for config in ci_config.SANITIZER_TEST_CONFIGS:
-        steps.extend(vulkan_config_steps(targets, config))
-    for config in ci_config.SANITIZER_BUILD_CONFIGS:
-        steps.extend(vulkan_config_steps(targets, config))
-    return steps
-
-
-def vulkan_config_steps(targets: tuple[str, ...], config: str) -> list[CiStep]:
-    # Vulkan hardware tests execute the system loader and ICD in-process. Keep
-    # sanitizer coverage to compile-time checks here; the unsanitized Vulkan
-    # lane owns execution on real devices.
-    if config in ci_config.SANITIZER_TEST_CONFIGS:
-        return [
-            bazel_build_step(
-                f"Build IREE with Vulkan and {config.upper()}",
-                ci_config.VULKAN_BAZEL_DRIVER_TARGETS,
-                config=config,
-            )
-        ]
-    if config in ci_config.SANITIZER_BUILD_CONFIGS:
-        return [
-            bazel_build_step(
-                f"Build IREE with Vulkan and {config.upper()}",
-                ci_config.VULKAN_BAZEL_DRIVER_TARGETS,
-                config=config,
-            )
-        ]
-    raise ValueError(f"unknown Bazel Vulkan sanitizer config: {config}")
 
 
 def cmake_cpu_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
@@ -586,7 +634,33 @@ def cmake_cpu_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
     return steps
 
 
-def cmake_amdgpu_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
+def cmake_repository_build_steps(command_name: str) -> list[CiStep]:
+    return [
+        cmake_configure_step(
+            command_name,
+            enabled_drivers=REPOSITORY_BUILD_HAL_DRIVERS,
+            enabled_loom_targets=REPOSITORY_BUILD_LOOM_TARGETS,
+            enabled_loom_importers=REPOSITORY_BUILD_LOOM_IMPORTERS,
+            amdgpu_target_selector=None,
+            amdgpu_device_binary_mode="prebuilt",
+        ),
+        cmake_build_step(command_name, "Build repository"),
+        cmake_test_step(
+            command_name,
+            "Test repository smoke",
+            regex=combine_ctest_regex(*ci_config.CMAKE_REPOSITORY_SMOKE_CTEST_REGEXES),
+            label_exclude_regex=combine_ctest_regex(
+                ci_config.CTEST_RESOURCE_LABEL_EXCLUDE_REGEX,
+                ci_config.CTEST_MANUAL_LABEL_EXCLUDE_REGEX,
+            ),
+            parallelism=2,
+        ),
+    ]
+
+
+def cmake_amdgpu_steps(
+    command_name: str, sanitizer: str | None, target_selector: str
+) -> list[CiStep]:
     sanitizer_name = f" with {sanitizer.upper()}" if sanitizer is not None else ""
     tests_enabled = cmake_tests_enabled(sanitizer)
     if sanitizer == "tsan":
@@ -606,6 +680,7 @@ def cmake_amdgpu_steps(command_name: str, sanitizer: str | None) -> list[CiStep]
         cmake_configure_step(
             command_name,
             enabled_drivers=("amdgpu",),
+            amdgpu_target_selector=target_selector,
             sanitizer=sanitizer,
         ),
         cmake_build_step(
@@ -623,7 +698,7 @@ def cmake_amdgpu_steps(command_name: str, sanitizer: str | None) -> list[CiStep]
             f"Test IREE CMake AMDGPU package tests{sanitizer_name}",
             regex="^iree/hal/drivers/amdgpu/",
             exclude_regex=xfail_regex,
-            env=sanitizer_env(sanitizer),
+            env=sanitizer_env(sanitizer) + amdgpu_libhsa_test_env(),
             parallelism=1,
         )
     )
@@ -631,14 +706,19 @@ def cmake_amdgpu_steps(command_name: str, sanitizer: str | None) -> list[CiStep]
         "^iree/hal/drivers/amdgpu/",
         xfail_regex,
     )
+    resource_label_exclude_regex = ci_config.CTEST_MANUAL_LABEL_EXCLUDE_REGEX
+    if sanitizer == "tsan":
+        resource_label_exclude_regex = combine_ctest_regex(
+            resource_label_exclude_regex, ci_config.HOST_TSAN_INCOMPATIBLE_TEST_LABEL
+        )
     steps.append(
         cmake_test_step(
             command_name,
             f"Test IREE CMake AMDGPU resource tests{sanitizer_name}",
             label_regex=ci_config.AMDGPU_CTEST_RESOURCE_LABEL_REGEX,
-            label_exclude_regex=ci_config.CTEST_MANUAL_LABEL_EXCLUDE_REGEX,
+            label_exclude_regex=resource_label_exclude_regex,
             exclude_regex=resource_exclude_regex,
-            env=sanitizer_env(sanitizer),
+            env=sanitizer_env(sanitizer) + amdgpu_libhsa_test_env(),
             parallelism=1,
         )
     )
@@ -709,12 +789,19 @@ def cmake_vulkan_steps(command_name: str, sanitizer: str | None) -> list[CiStep]
 
 
 def cmake_target_steps(
-    command_name: str, target_group: str, sanitizer: str | None
+    command_name: str,
+    target_group: str,
+    sanitizer: str | None,
+    amdgpu_target_selector: str = ci_config.DEFAULT_AMDGPU_TARGET_SELECTOR,
 ) -> list[CiStep]:
     if target_group == "cpu":
         return cmake_cpu_steps(command_name, sanitizer)
+    if target_group == "repository-build":
+        if sanitizer is not None:
+            raise ValueError("CMake repository builds do not support sanitizers")
+        return cmake_repository_build_steps(command_name)
     if target_group == "amdgpu":
-        return cmake_amdgpu_steps(command_name, sanitizer)
+        return cmake_amdgpu_steps(command_name, sanitizer, amdgpu_target_selector)
     if target_group == "loom-amdgpu":
         if sanitizer is not None:
             raise ValueError("Loom AMDGPU CMake CI does not support sanitizers")
@@ -724,14 +811,26 @@ def cmake_target_steps(
     raise ValueError(f"unknown CMake CI target: {target_group}")
 
 
-def cmake_sanitizer_steps(prefix: str, target_group: str) -> list[CiStep]:
+def cmake_sanitizer_steps(
+    prefix: str,
+    target_group: str,
+    amdgpu_target_selector: str = ci_config.DEFAULT_AMDGPU_TARGET_SELECTOR,
+) -> list[CiStep]:
     steps = []
     for config in ci_config.SANITIZER_TEST_CONFIGS:
         command_name = f"{prefix}-{config}"
-        steps.extend(cmake_target_steps(command_name, target_group, config))
+        steps.extend(
+            cmake_target_steps(
+                command_name, target_group, config, amdgpu_target_selector
+            )
+        )
     for config in ci_config.SANITIZER_BUILD_CONFIGS:
         command_name = f"{prefix}-{config}"
-        steps.extend(cmake_target_steps(command_name, target_group, config))
+        steps.extend(
+            cmake_target_steps(
+                command_name, target_group, config, amdgpu_target_selector
+            )
+        )
     return steps
 
 
@@ -746,11 +845,6 @@ def cmake_sanitizer_smoke_steps() -> list[CiStep]:
                     command_name,
                     sanitizer=config,
                     build_tests=True,
-                ),
-                cmake_build_step(
-                    command_name,
-                    f"Build IREE CMake sanitizer smoke with {config.upper()}",
-                    ci_config.CMAKE_SANITIZER_SMOKE_TEST_BUILD_TARGETS,
                 ),
                 cmake_test_step(
                     command_name,
@@ -802,7 +896,6 @@ def tilelang_importer_steps(command_name: str) -> list[CiStep]:
             dev_command(
                 "bazel",
                 "test",
-                "--config=asan",
                 "--importer-env",
                 "tilelang",
                 *ci_config.IMPORTER_TILELANG_BAZEL_TEST_TARGETS,
@@ -847,7 +940,26 @@ def tilelang_importer_steps(command_name: str) -> list[CiStep]:
     ]
 
 
-def steps_from_args(args: argparse.Namespace) -> list[CiStep]:
+def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
+    bazel_target_group = BAZEL_COMMANDS.get(args.command, (None, None))[0]
+    cmake_target_group = CMAKE_COMMANDS.get(args.command, (None, None))[0]
+    amdgpu_target_bazel_groups = (
+        "amdgpu",
+        "repository-integration",
+    )
+    accepts_amdgpu_target = (
+        bazel_target_group in amdgpu_target_bazel_groups
+        or cmake_target_group == "amdgpu"
+    )
+    if args.amdgpu_target is not None and not accepts_amdgpu_target:
+        raise ValueError(
+            "--amdgpu-target is only supported for AMDGPU and "
+            "repository-integration CI commands"
+        )
+    amdgpu_target_selector = (
+        args.amdgpu_target or ci_config.DEFAULT_AMDGPU_TARGET_SELECTOR
+    )
+
     if args.command == CMAKE_SANITIZER_SMOKE_COMMAND:
         if args.target:
             raise ValueError("--target is only supported for Bazel CI commands")
@@ -864,8 +976,10 @@ def steps_from_args(args: argparse.Namespace) -> list[CiStep]:
         target_group, sanitizer = CMAKE_COMMANDS[args.command]
         if sanitizer == "all":
             prefix = args.command.removesuffix("-sanitizers")
-            return cmake_sanitizer_steps(prefix, target_group)
-        return cmake_target_steps(args.command, target_group, sanitizer)
+            return cmake_sanitizer_steps(prefix, target_group, amdgpu_target_selector)
+        return cmake_target_steps(
+            args.command, target_group, sanitizer, amdgpu_target_selector
+        )
 
     bazel_target, sanitizer = BAZEL_COMMANDS[args.command]
     if bazel_target == "loom-amdgpu":
@@ -874,6 +988,18 @@ def steps_from_args(args: argparse.Namespace) -> list[CiStep]:
         if sanitizer is not None:
             raise ValueError("Loom AMDGPU Bazel CI does not support sanitizers")
         return loom_amdgpu_bazel_steps()
+    if bazel_target == "repository-build":
+        if args.target:
+            raise ValueError(
+                "--target is not supported by the repository-wide build command"
+            )
+        return repository_build_steps()
+    if bazel_target == "repository-integration":
+        if args.target:
+            raise ValueError(
+                "--target is not supported by the repository-wide integration command"
+            )
+        return repository_integration_steps(amdgpu_target_selector)
     targets = command_targets(args.target)
     if bazel_target == "cpu":
         if sanitizer == "all":
@@ -882,24 +1008,69 @@ def steps_from_args(args: argparse.Namespace) -> list[CiStep]:
             return [bazel_configure_step(), *cpu_config_steps(targets, sanitizer)]
         return cpu_steps(targets)
     if bazel_target == "amdgpu":
-        if sanitizer == "all":
-            return amdgpu_sanitizer_steps(targets)
         if sanitizer is not None:
             return [
                 bazel_configure_step(enabled_drivers=("amdgpu",)),
-                *amdgpu_config_steps(targets, sanitizer),
+                *amdgpu_config_steps(targets, amdgpu_target_selector, sanitizer),
             ]
-        return amdgpu_steps(targets)
+        return amdgpu_steps(targets, amdgpu_target_selector)
     if bazel_target == "vulkan":
-        if sanitizer == "all":
-            return vulkan_sanitizer_steps(targets)
-        if sanitizer is not None:
-            return [
-                bazel_configure_step(enabled_drivers=("vulkan",)),
-                *vulkan_config_steps(targets, sanitizer),
-            ]
         return vulkan_steps(targets)
     raise ValueError(f"unknown Bazel CI target: {bazel_target}")
+
+
+def add_bazel_profiles(steps: list[CiStep], profile_dir: Path) -> list[CiStep]:
+    profiled_steps = []
+    profile_owners = {}
+    for step in steps:
+        if step.argv[1:4] not in (
+            ("dev.py", "bazel", "build"),
+            ("dev.py", "bazel", "run"),
+            ("dev.py", "bazel", "test"),
+        ):
+            profiled_steps.append(step)
+            continue
+
+        if any(
+            arg == "--profile" or arg.startswith("--profile=") for arg in step.argv[4:]
+        ):
+            raise ValueError(f"{step.name} already configures a Bazel profile")
+        profile_stem = "-".join(
+            token.lower() for token in re.findall(r"[A-Za-z0-9]+", step.name)
+        )
+        if not profile_stem:
+            raise ValueError(f"cannot derive a Bazel profile name from {step.name!r}")
+        profile_path = profile_dir / f"{profile_stem}.profile.gz"
+        if previous_owner := profile_owners.get(profile_path):
+            raise ValueError(
+                f"Bazel profile path collision between {previous_owner!r} and "
+                f"{step.name!r}: {profile_path}"
+            )
+        profile_owners[profile_path] = step.name
+        profiled_steps.append(
+            CiStep(
+                step.name,
+                step.argv[:4] + (f"--profile={profile_path}",) + step.argv[4:],
+                step.env,
+            )
+        )
+    return profiled_steps
+
+
+def bazel_profile_dir(args: argparse.Namespace) -> Path | None:
+    if args.bazel_profile_dir is None:
+        return None
+    return args.bazel_profile_dir.expanduser().resolve()
+
+
+def steps_from_args(args: argparse.Namespace) -> list[CiStep]:
+    profile_dir = bazel_profile_dir(args)
+    if profile_dir is not None and args.command not in BAZEL_COMMANDS:
+        raise ValueError("--bazel-profile-dir is only supported for Bazel CI commands")
+    steps = _steps_from_args(args)
+    if profile_dir is not None:
+        steps = add_bazel_profiles(steps, profile_dir)
+    return steps
 
 
 def github_actions_enabled() -> bool:
@@ -1029,6 +1200,22 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         help="Print each underlying command before running it.",
     )
     parser.add_argument(
+        "--amdgpu-target",
+        help=(
+            "Exact AMDGPU target or family selector for AMDGPU and "
+            "repository-integration CI commands. "
+            f"Defaults to {ci_config.DEFAULT_AMDGPU_TARGET_SELECTOR}."
+        ),
+    )
+    parser.add_argument(
+        "--bazel-profile-dir",
+        type=Path,
+        help=(
+            "Write one compressed Bazel execution profile per build/test/run phase "
+            "to this directory. Only supported for Bazel CI commands."
+        ),
+    )
+    parser.add_argument(
         "--target",
         action="append",
         help=(
@@ -1041,8 +1228,12 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_arguments(argv)
+    steps = steps_from_args(args)
+    profile_dir = bazel_profile_dir(args)
+    if profile_dir is not None and not args.dry_run:
+        profile_dir.mkdir(parents=True, exist_ok=True)
     return run_steps(
-        steps_from_args(args),
+        steps,
         dry_run=args.dry_run,
         keep_going=args.keep_going,
         verbose=args.verbose,

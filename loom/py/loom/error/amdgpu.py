@@ -40,54 +40,6 @@ ERR_AMDGPU_001 = ErrorDef(
     ),
 )
 
-# ERR_AMDGPU_003: AMDGPU processor override is unknown.
-ERR_AMDGPU_003 = ErrorDef(
-    domain=ErrorDomain.AMDGPU,
-    code=3,
-    severity=Severity.ERROR,
-    summary="AMDGPU processor override is unknown.",
-    message="AMDGPU processor override '{processor}' is not known",
-    params=(ErrorParam("processor", ParamKind.STRING),),
-    fix_hint="Use a known AMDGPU processor name such as gfx942, gfx950, or gfx1100",
-)
-
-# ERR_AMDGPU_004: AMDGPU processor override has no native descriptor set.
-ERR_AMDGPU_004 = ErrorDef(
-    domain=ErrorDomain.AMDGPU,
-    code=4,
-    severity=Severity.ERROR,
-    summary="AMDGPU processor override has no native descriptor set.",
-    message=(
-        "AMDGPU processor override '{processor}' is known but has no "
-        "native target-low descriptor set"
-    ),
-    params=(ErrorParam("processor", ParamKind.STRING),),
-    fix_hint="Use an AMDGPU processor with native target-low descriptor coverage",
-)
-
-# ERR_AMDGPU_005: AMDGPU processor override changes descriptor set.
-ERR_AMDGPU_005 = ErrorDef(
-    domain=ErrorDomain.AMDGPU,
-    code=5,
-    severity=Severity.ERROR,
-    summary="AMDGPU processor override changes descriptor set.",
-    message=(
-        "AMDGPU processor override '{processor}' selects descriptor set "
-        "'{target_descriptor_set}' but target record '@{target_name}' uses "
-        "descriptor set '{record_descriptor_set}'"
-    ),
-    params=(
-        ErrorParam("processor", ParamKind.STRING),
-        ErrorParam("target_descriptor_set", ParamKind.STRING),
-        ErrorParam("target_name", ParamKind.STRING),
-        ErrorParam("record_descriptor_set", ParamKind.STRING),
-    ),
-    fix_hint=(
-        "Select a target record from the same AMDGPU descriptor-set family as "
-        "the requested processor"
-    ),
-)
-
 # ERR_AMDGPU_006: AMDGPU HAL-kernel ABI resource count overflows.
 ERR_AMDGPU_006 = ErrorDef(
     domain=ErrorDomain.AMDGPU,
@@ -96,13 +48,13 @@ ERR_AMDGPU_006 = ErrorDef(
     summary="AMDGPU HAL-kernel ABI resource count overflows.",
     message=(
         "AMDGPU HAL-kernel ABI has {resource_count} HAL binding resources, "
-        "but at most {max_resource_count} fit in the kernarg segment"
+        "but at most {max_resource_count} fit in the ABI layout snapshot"
     ),
     params=(
         ErrorParam("resource_count", ParamKind.U64),
         ErrorParam("max_resource_count", ParamKind.U64),
     ),
-    fix_hint="Split the kernel ABI or reduce the number of HAL binding resources",
+    fix_hint=("Split the kernel ABI or reduce the number of HAL binding resources"),
 )
 
 # ERR_AMDGPU_007: AMDGPU HAL-kernel ABI resource import kind is unsupported.
@@ -925,11 +877,213 @@ ERR_AMDGPU_040 = ErrorDef(
     ),
 )
 
+# ERR_AMDGPU_041: AMDGPU fragment repack strategy is unsupported.
+ERR_AMDGPU_041 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=41,
+    severity=Severity.ERROR,
+    summary="AMDGPU fragment repack strategy is unsupported.",
+    message=(
+        "AMDGPU target '{target_key}' export '{export_name}' config "
+        "'{config_key}' rejected fragment repack '{op_name}' in "
+        "'@{function_name}': source role {source_role_key} with type "
+        "{source_type} cannot produce result role {result_role_key} with type "
+        "{result_type} using strategy '{strategy_key}' for reason "
+        "'{reason_key}'"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("source_role_key", ParamKind.STRING),
+        ErrorParam("result_role_key", ParamKind.STRING),
+        ErrorParam("source_type", ParamKind.TYPE),
+        ErrorParam("result_type", ParamKind.TYPE),
+        ErrorParam("strategy_key", ParamKind.STRING),
+        ErrorParam("reason_key", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Use memory-backed fragment store/load until the target reports a "
+        "native fragment repack strategy for this role and type transition"
+    ),
+)
+
+# ERR_AMDGPU_042: AMDGPU sanitizer site table is too large.
+ERR_AMDGPU_042 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=42,
+    severity=Severity.ERROR,
+    summary="AMDGPU sanitizer site table is too large.",
+    message=(
+        "AMDGPU target '{target_key}' export '{export_name}' config "
+        "'{config_key}' rejected sanitizer metadata for '{op_name}' in "
+        "'@{function_name}': current table has {current_site_count} site row(s) "
+        "and this function contributes {function_site_count}, but the maximum "
+        "encodable site id is {max_site_id}"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("current_site_count", ParamKind.U64),
+        ErrorParam("function_site_count", ParamKind.U64),
+        ErrorParam("max_site_id", ParamKind.U64),
+    ),
+    fix_hint=(
+        "Split the sanitizer-instrumented module or reduce the number of "
+        "sanitizer assertion sites before AMDGPU lowering"
+    ),
+)
+
+# ERR_AMDGPU_043: AMDGPU sanitizer site table symbol is reserved.
+ERR_AMDGPU_043 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=43,
+    severity=Severity.ERROR,
+    summary="AMDGPU sanitizer site table symbol is reserved.",
+    message=(
+        "AMDGPU target '{target_key}' export '{export_name}' config "
+        "'{config_key}' rejected sanitizer metadata for '{op_name}' in "
+        "'@{function_name}': module symbol '{symbol_name}' is already defined"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("symbol_name", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Rename the user-defined symbol so AMDGPU sanitizer lowering can "
+        "materialize its reserved site table"
+    ),
+)
+
+# ERR_AMDGPU_044: AMDGPU DPP control encoding is reserved.
+ERR_AMDGPU_044 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=44,
+    severity=Severity.ERROR,
+    summary="AMDGPU DPP control encoding is reserved.",
+    message=(
+        "AMDGPU descriptor '{descriptor_name}' in '@{function_name}' uses "
+        "reserved DPP control value {immediate_value} for immediate "
+        "'{immediate_name}' in descriptor set '{descriptor_set_name}' "
+        "under contract '{constraint_key}' for reason '{reason_key}'"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("descriptor_name", ParamKind.STRING),
+        ErrorParam("descriptor_set_name", ParamKind.STRING),
+        ErrorParam("immediate_name", ParamKind.STRING),
+        ErrorParam("immediate_value", ParamKind.U32),
+        ErrorParam("constraint_key", ParamKind.STRING),
+        ErrorParam("reason_key", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Use a legal quad, row, or wave DPP lane-control encoding for the "
+        "selected descriptor"
+    ),
+)
+
+# ERR_AMDGPU_045: AMDGPU HAL-kernel ABI fixed live-ins overlap.
+ERR_AMDGPU_045 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=45,
+    severity=Severity.ERROR,
+    summary="AMDGPU HAL-kernel ABI fixed live-ins overlap.",
+    message=(
+        "AMDGPU HAL-kernel ABI live-in source '{source_name}' and "
+        "'{conflicting_source_name}' both require fixed SGPR {fixed_location}"
+    ),
+    params=(
+        ErrorParam("source_name", ParamKind.STRING),
+        ErrorParam("conflicting_source_name", ParamKind.STRING),
+        ErrorParam("fixed_location", ParamKind.U32),
+    ),
+    fix_hint=(
+        "Use one live-in source that represents all fields imported from the "
+        "fixed register"
+    ),
+)
+
+# ERR_AMDGPU_047: target instruction constraint requires legalization.
+ERR_AMDGPU_047 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=47,
+    severity=Severity.ERROR,
+    summary="AMDGPU instruction constraint requires legalization.",
+    message=(
+        "AMDGPU descriptor '{descriptor_name}' in '@{function_name}' violates "
+        "{constraint_kind} constraint '{constraint_key}' for target "
+        "'{target}' in descriptor set "
+        "'{descriptor_set_name}' and requires legalization "
+        "'{legalization_key}'"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("descriptor_name", ParamKind.STRING),
+        ErrorParam("descriptor_set_name", ParamKind.STRING),
+        ErrorParam("target", ParamKind.STRING),
+        ErrorParam("constraint_kind", ParamKind.STRING),
+        ErrorParam("constraint_key", ParamKind.STRING),
+        ErrorParam("legalization_key", ParamKind.STRING),
+    ),
+    fix_hint=("Apply the named target legalization before native emission"),
+)
+
+# ERR_AMDGPU_048: target feature requirement is unsupported by the processor.
+ERR_AMDGPU_048 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=48,
+    severity=Severity.ERROR,
+    summary="AMDGPU target feature requirement is unsupported by the processor.",
+    message=(
+        "AMDGPU target '@{target_name}' requires target feature '{feature}' "
+        "{required_state}, but processor '{processor}' does not support the "
+        "feature"
+    ),
+    params=(
+        ErrorParam("target_name", ParamKind.STRING),
+        ErrorParam("feature", ParamKind.STRING),
+        ErrorParam("required_state", ParamKind.STRING),
+        ErrorParam("processor", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Select an enabled or disabled state only for processor-supported "
+        "target features"
+    ),
+)
+
+# ERR_AMDGPU_049: AMDGPU storage address result type is unsupported.
+ERR_AMDGPU_049 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=49,
+    severity=Severity.ERROR,
+    summary="AMDGPU storage address result type is unsupported.",
+    message=(
+        "AMDGPU target '{target_key}' export '{export_name}' config "
+        "'{config_key}' rejected '{op_name}' in '@{function_name}': result "
+        "'{result_name}' has type {actual_type}, but native storage addresses "
+        "require descriptor register-class ID {expected_reg_class_id} with "
+        "{expected_unit_count} unit"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("result_name", ParamKind.STRING),
+        ErrorParam("actual_type", ParamKind.TYPE),
+        ErrorParam("expected_reg_class_id", ParamKind.U32),
+        ErrorParam("expected_unit_count", ParamKind.U32),
+    ),
+    fix_hint="Materialize AMDGPU storage addresses as one VGPR",
+)
+
+# ERR_AMDGPU_050: target feature assertion set is vacuous.
+ERR_AMDGPU_050 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=50,
+    severity=Severity.ERROR,
+    summary="AMDGPU target feature assertion set is empty.",
+    message="AMDGPU target '@{target_name}' has an empty feature assertion set",
+    params=(ErrorParam("target_name", ParamKind.STRING),),
+    fix_hint="Omit the optional features field when no assertions are required",
+)
+
 ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_001,
-    ERR_AMDGPU_003,
-    ERR_AMDGPU_004,
-    ERR_AMDGPU_005,
     ERR_AMDGPU_006,
     ERR_AMDGPU_007,
     ERR_AMDGPU_008,
@@ -965,4 +1119,13 @@ ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_038,
     ERR_AMDGPU_039,
     ERR_AMDGPU_040,
+    ERR_AMDGPU_041,
+    ERR_AMDGPU_042,
+    ERR_AMDGPU_043,
+    ERR_AMDGPU_044,
+    ERR_AMDGPU_045,
+    ERR_AMDGPU_047,
+    ERR_AMDGPU_048,
+    ERR_AMDGPU_049,
+    ERR_AMDGPU_050,
 )

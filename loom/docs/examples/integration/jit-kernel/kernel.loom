@@ -1,0 +1,12 @@
+// The workload determines launch geometry without becoming a device argument.
+// The empty body keeps this example focused on the embedding lifecycle.
+kernel.def export("workload_grid") @workload_grid(%element_count: index) {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %rounded_count = index.add %element_count, %rounding : index
+  %workgroup_count = index.div %rounded_count, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  kernel.return
+}

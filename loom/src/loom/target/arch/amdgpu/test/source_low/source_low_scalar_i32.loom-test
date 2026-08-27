@@ -1,7 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_i32.loom-test
 // RUN: emit source-low output=low
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @scalar_i32_uniform_sgpr(%lhs: i32, %rhs: i32, %shift: i32) -> (i32) {
   %add = scalar.addi %lhs, %rhs : i32
   %sub = scalar.subi %add, %rhs : i32
@@ -16,7 +16,7 @@ func.def target(@target) @scalar_i32_uniform_sgpr(%lhs: i32, %rhs: i32, %shift: 
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_i32_uniform_sgpr(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %shift: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_i32_uniform_sgpr(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %shift: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
   %product = s_mul_i32 %lhs, %rhs
   %and = s_and_b32 %product, %lhs
   %or = s_or_b32 %and, %rhs
@@ -29,7 +29,7 @@ low.func.def target(@target) abi(hal_kernel) @scalar_i32_uniform_sgpr(%lhs: reg<
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @scalar_i32_bitfield_sgpr(%word: i32) -> (i32, i32, i32, i32) {
   %unsigned_byte = scalar.bitfield.extractu %word {offset = 8, width = 8} : i32 -> i32
   %signed_byte = scalar.bitfield.extracts %word {offset = 16, width = 8} : i32 -> i32
@@ -39,7 +39,7 @@ func.def target(@target) @scalar_i32_bitfield_sgpr(%word: i32) -> (i32, i32, i32
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_i32_bitfield_sgpr(%word: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_i32_bitfield_sgpr(%word: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
   %unsigned_byte = s_bfe_u32_lit %word, 2056
   %signed_byte = s_bfe_i32_lit %word, 2064
   %unsigned_nibble = s_bfe_u32_lit %word, 1028
@@ -49,21 +49,21 @@ low.func.def target(@target) abi(hal_kernel) @scalar_i32_bitfield_sgpr(%word: re
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @scalar_i32_compare_scc(%lhs: i32, %rhs: i32) -> (i1) {
   %cmp = scalar.cmpi slt, %lhs, %rhs : i32
   func.return %cmp : i1
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_i32_compare_scc(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.scc>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_i32_compare_scc(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.scc>) asm {
   %cmp = s_cmp_lt_i32 %lhs, %rhs
   return %cmp
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @scalar_i1_constants_scc() -> (i1, i1) {
   %true = scalar.constant true : i1
   %false = scalar.constant false : i1
@@ -71,7 +71,7 @@ func.def target(@target) @scalar_i1_constants_scc() -> (i1, i1) {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_i1_constants_scc() -> (reg<amdgpu.scc>, reg<amdgpu.scc>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_i1_constants_scc() -> (reg<amdgpu.scc>, reg<amdgpu.scc>) asm {
   %6 = s_mov_b32 0
   %true = s_cmp_eq_i32 %6, %6
   %false = s_cmp_lg_i32 %6, %6
@@ -80,11 +80,11 @@ low.func.def target(@target) abi(hal_kernel) @scalar_i1_constants_scc() -> (reg<
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @scalar_i1_bitwise_scc(%lhs: i32, %rhs: i32) -> (i1) {
-  %zero = scalar.constant 0 : i32
-  %lhs_nonzero = scalar.cmpi ne, %lhs, %zero : i32
-  %rhs_nonzero = scalar.cmpi ne, %rhs, %zero : i32
+  %inactive_condition = scalar.constant 0 : i32
+  %lhs_nonzero = scalar.cmpi ne, %lhs, %inactive_condition : i32
+  %rhs_nonzero = scalar.cmpi ne, %rhs, %inactive_condition : i32
   %both_nonzero = scalar.andi %lhs_nonzero, %rhs_nonzero : i1
   %either_nonzero = scalar.ori %lhs_nonzero, %rhs_nonzero : i1
   %one_nonzero = scalar.xori %both_nonzero, %either_nonzero : i1
@@ -92,20 +92,20 @@ func.def target(@target) @scalar_i1_bitwise_scc(%lhs: i32, %rhs: i32) -> (i1) {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_i1_bitwise_scc(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.scc>) asm<amdgpu.rdna3.core> {
-  %zero = s_mov_b32 0
-  %lhs_nonzero = s_cmp_lg_i32 %lhs, %zero
-  %rhs_nonzero = s_cmp_lg_i32 %rhs, %zero
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_i1_bitwise_scc(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.scc>) asm {
+  %inactive_condition = s_mov_b32 0
+  %lhs_nonzero = s_cmp_lg_i32 %lhs, %inactive_condition
+  %rhs_nonzero = s_cmp_lg_i32 %rhs, %inactive_condition
   %16 = s_mov_b32 1
-  %17 = s_cselect_b32 %16, %zero, %lhs_nonzero
-  %18 = s_cselect_b32 %16, %zero, %rhs_nonzero
+  %17 = s_cselect_b32 %16, %inactive_condition, %lhs_nonzero
+  %18 = s_cselect_b32 %16, %inactive_condition, %rhs_nonzero
   %19 = s_and_b32 %17, %18
-  %both_nonzero = s_cmp_lg_i32 %19, %zero
+  %both_nonzero = s_cmp_lg_i32 %19, %inactive_condition
   %25 = s_or_b32 %17, %18
-  %either_nonzero = s_cmp_lg_i32 %25, %zero
-  %29 = s_cselect_b32 %16, %zero, %both_nonzero
-  %30 = s_cselect_b32 %16, %zero, %either_nonzero
+  %either_nonzero = s_cmp_lg_i32 %25, %inactive_condition
+  %29 = s_cselect_b32 %16, %inactive_condition, %both_nonzero
+  %30 = s_cselect_b32 %16, %inactive_condition, %either_nonzero
   %31 = s_xor_b32 %29, %30
-  %one_nonzero = s_cmp_lg_i32 %31, %zero
+  %one_nonzero = s_cmp_lg_i32 %31, %inactive_condition
   return %one_nonzero
 }

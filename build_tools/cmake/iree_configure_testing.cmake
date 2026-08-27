@@ -9,38 +9,60 @@
 # directories.
 
 enable_testing(iree)
+
+# Empty root used to refresh the generated build graph before selecting CTests.
+# Every generated target participates in CMake's normal regeneration check, so
+# this is a no-op when the graph is current and regenerates stale CTest metadata
+# before the selective test runner reads it.
+add_custom_target(iree-ctest-refresh)
+
 # A property is apparently the only way to get an uncached global variable.
 set_property(GLOBAL PROPERTY IREE_TEST_TMPDIRS "")
-set_property(GLOBAL PROPERTY IREE_TEST_TARGET_DEPENDENCIES "")
 set_property(GLOBAL PROPERTY IREE_TEST_RESOURCE_BUILD_TARGETS "")
+set_property(GLOBAL PROPERTY IREE_TEST_BUILD_METADATA_KEYS "")
 set(IREE_TEST_TMPDIR_ROOT "${IREE_BINARY_DIR}/test_tmpdir")
 set(IREE_RUNTIME_RESOURCE_LABEL_PREFIX "runtime-resource=")
+set(IREE_CTEST_BUILD_TARGETS_FILE
+  "${CMAKE_BINARY_DIR}/iree_ctest_build_targets.json")
 
-# iree_register_test_target_dependency
+# iree_register_test_build_targets
 #
-# Records a build dependency to resolve after all repository targets have been
-# declared. Test helpers use this when a test in an early package depends on a
-# tool target declared by a later package.
+# Records concrete build roots for a CTest record. An empty TARGETS list is an
+# explicit source-only closure and remains distinct from a test that never
+# joined this contract. Finalization writes the validated catalog beside the
+# generated CTest files so test runners can join CTest's selected names to the
+# corresponding build roots without relying on custom-property serialization.
+#
+# Rule owners must provide concrete, buildable target names. Targets are
+# validated after all repository directories have been processed.
 #
 # Parameters:
-#   TARGET: CMake target that should receive the dependency.
-#   DEPENDENCY: CMake target required before TARGET is complete.
-function(iree_register_test_target_dependency)
-  cmake_parse_arguments(
-    _RULE
-    ""
-    "TARGET;DEPENDENCY"
-    ""
-    ${ARGN}
-  )
+#   TEST_NAME: CTest test receiving the metadata.
+#   TARGETS: CMake targets whose transitive closure makes TEST_NAME runnable.
+function(iree_register_test_build_targets TEST_NAME)
+  cmake_parse_arguments(_RULE "" "" "TARGETS" ${ARGN})
 
-  if(NOT _RULE_TARGET OR NOT _RULE_DEPENDENCY)
+  if(NOT TEST "${TEST_NAME}")
     message(FATAL_ERROR
-      "iree_register_test_target_dependency requires TARGET and DEPENDENCY")
+      "cannot register build targets for missing CTest test: ${TEST_NAME}")
   endif()
 
-  set_property(GLOBAL APPEND PROPERTY IREE_TEST_TARGET_DEPENDENCIES
-    "${_RULE_TARGET}|${_RULE_DEPENDENCY}")
+  string(SHA256 _TEST_KEY "${TEST_NAME}")
+  get_property(_EXISTING_TEST_NAME
+    GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_NAME_${_TEST_KEY}")
+  if(_EXISTING_TEST_NAME)
+    message(FATAL_ERROR
+      "CTest test has duplicate IREE_BUILD_TARGETS metadata: ${TEST_NAME}")
+  endif()
+
+  set(_BUILD_TARGETS ${_RULE_TARGETS})
+  list(REMOVE_DUPLICATES _BUILD_TARGETS)
+  set_property(GLOBAL APPEND PROPERTY IREE_TEST_BUILD_METADATA_KEYS
+    "${_TEST_KEY}")
+  set_property(GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_NAME_${_TEST_KEY}"
+    "${TEST_NAME}")
+  set_property(GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_TARGETS_${_TEST_KEY}"
+    "${_BUILD_TARGETS}")
 endfunction()
 
 # iree_register_test_resource_build_target
@@ -77,44 +99,98 @@ function(iree_register_test_resource_build_target)
   endforeach()
 endfunction()
 
-function(_iree_resolve_test_build_target OUTPUT_TARGET_NAME TARGET_NAME)
-  set(_TARGET_NAME "${TARGET_NAME}")
-  if(TARGET "${_TARGET_NAME}")
-    get_target_property(_ALIASED_TARGET "${_TARGET_NAME}" ALIASED_TARGET)
-    if(_ALIASED_TARGET)
-      set(_TARGET_NAME "${_ALIASED_TARGET}")
+function(_iree_collect_repository_ctests SOURCE_DIRECTORY OUTPUT_TESTS)
+  get_property(_TESTS DIRECTORY "${SOURCE_DIRECTORY}" PROPERTY TESTS)
+  get_property(_SUBDIRECTORIES
+    DIRECTORY "${SOURCE_DIRECTORY}"
+    PROPERTY SUBDIRECTORIES)
+  foreach(_SUBDIRECTORY IN LISTS _SUBDIRECTORIES)
+    string(FIND
+      "${_SUBDIRECTORY}/"
+      "${PROJECT_SOURCE_DIR}/"
+      _PROJECT_SOURCE_PREFIX_INDEX)
+    if(NOT _PROJECT_SOURCE_PREFIX_INDEX EQUAL 0)
+      continue()
     endif()
-  elseif("${_TARGET_NAME}" MATCHES "::")
-    string(REPLACE "::" "_" _CANDIDATE_TARGET_NAME "${_TARGET_NAME}")
-    if(TARGET "${_CANDIDATE_TARGET_NAME}")
-      set(_TARGET_NAME "${_CANDIDATE_TARGET_NAME}")
-    endif()
-  endif()
-
-  if(NOT TARGET "${_TARGET_NAME}")
-    message(FATAL_ERROR
-      "IREE test build target does not exist: ${TARGET_NAME}")
-  endif()
-  set(${OUTPUT_TARGET_NAME} "${_TARGET_NAME}" PARENT_SCOPE)
+    _iree_collect_repository_ctests("${_SUBDIRECTORY}" _SUBDIRECTORY_TESTS)
+    list(APPEND _TESTS ${_SUBDIRECTORY_TESTS})
+  endforeach()
+  set(${OUTPUT_TESTS} "${_TESTS}" PARENT_SCOPE)
 endfunction()
 
 function(iree_finalize_test_build_targets)
-  get_property(_TARGET_DEPENDENCIES
-    GLOBAL PROPERTY IREE_TEST_TARGET_DEPENDENCIES)
-  foreach(_ENTRY IN LISTS _TARGET_DEPENDENCIES)
-    if(NOT _ENTRY MATCHES "^([^|]+)[|](.+)$")
+  get_property(_TEST_METADATA_KEYS
+    GLOBAL PROPERTY IREE_TEST_BUILD_METADATA_KEYS)
+  set(_TESTS_WITH_BUILD_METADATA)
+  foreach(_TEST_KEY IN LISTS _TEST_METADATA_KEYS)
+    get_property(_TEST_NAME
+      GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_NAME_${_TEST_KEY}")
+    get_property(_BUILD_TARGETS
+      GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_TARGETS_${_TEST_KEY}")
+    list(APPEND _TESTS_WITH_BUILD_METADATA "${_TEST_NAME}")
+    foreach(_BUILD_TARGET IN LISTS _BUILD_TARGETS)
+      if(NOT TARGET "${_BUILD_TARGET}")
+        message(FATAL_ERROR
+          "CTest test ${_TEST_NAME} has missing IREE_BUILD_TARGETS target: "
+          "${_BUILD_TARGET}")
+      endif()
+      get_target_property(_BUILD_TARGET_ALIASED
+        "${_BUILD_TARGET}"
+        ALIASED_TARGET)
+      if(_BUILD_TARGET_ALIASED)
+        message(FATAL_ERROR
+          "CTest test ${_TEST_NAME} has non-buildable alias "
+          "IREE_BUILD_TARGETS target: ${_BUILD_TARGET}")
+      endif()
+      get_target_property(_BUILD_TARGET_IMPORTED
+        "${_BUILD_TARGET}"
+        IMPORTED)
+      if(_BUILD_TARGET_IMPORTED)
+        message(FATAL_ERROR
+          "CTest test ${_TEST_NAME} has non-buildable imported "
+          "IREE_BUILD_TARGETS target: ${_BUILD_TARGET}")
+      endif()
+      get_target_property(_BUILD_TARGET_TYPE "${_BUILD_TARGET}" TYPE)
+      if(_BUILD_TARGET_TYPE STREQUAL "INTERFACE_LIBRARY")
+        message(FATAL_ERROR
+          "CTest test ${_TEST_NAME} has non-buildable interface library "
+          "IREE_BUILD_TARGETS target: ${_BUILD_TARGET}")
+      endif()
+    endforeach()
+  endforeach()
+
+  _iree_collect_repository_ctests("${PROJECT_SOURCE_DIR}" _REPOSITORY_TESTS)
+  foreach(_TEST_NAME IN LISTS _REPOSITORY_TESTS)
+    if(NOT _TEST_NAME IN_LIST _TESTS_WITH_BUILD_METADATA)
       message(FATAL_ERROR
-        "IREE test target dependency entry is malformed: ${_ENTRY}")
-    endif()
-    _iree_resolve_test_build_target(_TARGET_NAME "${CMAKE_MATCH_1}")
-    _iree_resolve_test_build_target(_DEPENDENCY_TARGET_NAME "${CMAKE_MATCH_2}")
-    get_target_property(_DEPENDENCY_IMPORTED
-      "${_DEPENDENCY_TARGET_NAME}"
-      IMPORTED)
-    if(NOT _DEPENDENCY_IMPORTED)
-      add_dependencies("${_TARGET_NAME}" "${_DEPENDENCY_TARGET_NAME}")
+        "repository CTest test is missing IREE_BUILD_TARGETS metadata: "
+        "${_TEST_NAME}")
     endif()
   endforeach()
+
+  set(_BUILD_TARGET_CATALOG
+    "{\"kind\":\"ireeCtestBuildTargets\",\"version\":1,\"tests\":{}}")
+  foreach(_TEST_KEY IN LISTS _TEST_METADATA_KEYS)
+    get_property(_TEST_NAME
+      GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_NAME_${_TEST_KEY}")
+    get_property(_BUILD_TARGETS
+      GLOBAL PROPERTY "IREE_TEST_BUILD_METADATA_TARGETS_${_TEST_KEY}")
+    set(_BUILD_TARGETS_JSON "[]")
+    set(_BUILD_TARGET_INDEX 0)
+    foreach(_BUILD_TARGET IN LISTS _BUILD_TARGETS)
+      string(JSON _BUILD_TARGETS_JSON
+        SET "${_BUILD_TARGETS_JSON}"
+        ${_BUILD_TARGET_INDEX}
+        "\"${_BUILD_TARGET}\"")
+      math(EXPR _BUILD_TARGET_INDEX "${_BUILD_TARGET_INDEX} + 1")
+    endforeach()
+    string(JSON _BUILD_TARGET_CATALOG
+      SET "${_BUILD_TARGET_CATALOG}"
+      tests "${_TEST_NAME}" "${_BUILD_TARGETS_JSON}")
+  endforeach()
+  file(WRITE
+    "${IREE_CTEST_BUILD_TARGETS_FILE}"
+    "${_BUILD_TARGET_CATALOG}\n")
 
   get_property(_RESOURCE_BUILD_TARGETS
     GLOBAL PROPERTY IREE_TEST_RESOURCE_BUILD_TARGETS)
@@ -124,7 +200,11 @@ function(iree_finalize_test_build_targets)
         "IREE test resource build target entry is malformed: ${_ENTRY}")
     endif()
     set(_RESOURCE_NAME "${CMAKE_MATCH_1}")
-    _iree_resolve_test_build_target(_TEST_BUILD_TARGET "${CMAKE_MATCH_2}")
+    _iree_resolve_target(_TEST_BUILD_TARGET "${CMAKE_MATCH_2}")
+    if(NOT _TEST_BUILD_TARGET)
+      message(FATAL_ERROR
+        "IREE test build target does not exist: ${CMAKE_MATCH_2}")
+    endif()
     get_target_property(_TEST_BUILD_TARGET_IMPORTED
       "${_TEST_BUILD_TARGET}"
       IMPORTED)

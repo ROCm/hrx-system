@@ -32,16 +32,16 @@ func.def @cmpi_literal_rhs(%x: i32) -> (i1) {
 
 // Unsigned comparisons against zero collapse to constants or equality tests.
 func.def @cmpi_unsigned_zero(%x: i32) -> (i1, i1) {
-  %zero = scalar.constant 0 : i32
-  %lt = scalar.cmpi ult, %x, %zero : i32
-  %gt = scalar.cmpi ugt, %x, %zero : i32
+  %c0 = scalar.constant 0 : i32
+  %lt = scalar.cmpi ult, %x, %c0 : i32
+  %gt = scalar.cmpi ugt, %x, %c0 : i32
   func.return %lt, %gt : i1, i1
 }
 // ----
 func.def @cmpi_unsigned_zero(%x: i32) -> (i1, i1) {
-  %zero = scalar.constant 0 : i32
+  %c0 = scalar.constant 0 : i32
   %lt = scalar.constant false : i1
-  %gt = scalar.cmpi ne, %x, %zero : i32
+  %gt = scalar.cmpi ne, %x, %c0 : i32
   func.return %lt, %gt : i1, i1
 }
 

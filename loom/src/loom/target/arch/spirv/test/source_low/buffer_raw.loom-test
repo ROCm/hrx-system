@@ -1,0 +1,23 @@
+// RUN: emit source-low output=low control-flow=structured-low
+
+// Vulkan shader plus StorageBuffer8BitAccess, deliberately without Int8.
+spirv.target<vulkan1_3> @target {contract_feature_bits = 130}
+
+func.def target(@target) @raw_byte_roundtrip(%source: buffer, %source_offset: offset, %target: buffer, %target_offset: offset) -> (i32) {
+  %byte = buffer.load.i8.u %source[%source_offset]
+  buffer.store.i8 %byte, %target[%target_offset]
+  func.return %byte : i32
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @raw_byte_roundtrip(%source: reg<spirv.ptr.storage_buffer>, %source_offset: reg<spirv.offset64>, %target: reg<spirv.ptr.storage_buffer>, %target_offset: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
+  %11 = OpPtrAccessChain.storage_buffer.raw_u8.byte_offset %source, %source_offset
+  %12 = OpLoad.storage_buffer.raw_u8 %11
+  %13 = OpUConvert.raw_u8.u32 %12
+  %byte = OpBitcast.u32.i32 %13
+  %15 = OpPtrAccessChain.storage_buffer.raw_u8.byte_offset %target, %target_offset
+  %16 = OpBitcast.i32.u32 %byte
+  %17 = OpUConvert.u32.raw_u8 %16
+  OpStore.storage_buffer.raw_u8 %15, %17
+  return %byte
+}

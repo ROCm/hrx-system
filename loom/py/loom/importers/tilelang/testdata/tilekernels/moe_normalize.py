@@ -59,22 +59,22 @@ def _normalize_weight_input(
 
 
 @tilelang_case(
-    name="tilekernels_normalize_weight_gfx1100",
+    name="tilekernels_normalize_weight_gfx11_generic",
     category="kernel",
     tags=("tilekernels", "moe", "normalize", "amdgpu"),
 )
-def tilekernels_normalize_weight_gfx1100(
+def tilekernels_normalize_weight_gfx11_generic(
     tilelang: Any,
     T: Any,
 ) -> TileLangImportInput:
-    return _normalize_weight_input(tilelang, T, target="hip -mcpu=gfx1100")
+    return _normalize_weight_input(tilelang, T, target="hip -mcpu=gfx11-generic")
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("normalize_weight_kernel") @normalize_weight_kernel(%num_tokens: i32) {
+kernel.def target(@hip_mcpu_gfx11_generic) export("normalize_weight_kernel") @normalize_weight_kernel(%num_tokens: i32) {
   %num_tokens_idx = index.cast %num_tokens : i32 to index
   %c128 = index.constant 128 : index
   %add = index.add %num_tokens_idx, %c128 : index
@@ -97,10 +97,10 @@ kernel.def target(@hip_mcpu_gfx1100) export("normalize_weight_kernel") @normaliz
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %weights_local_bytes = index.constant 8 : offset
-  %weights_local_buffer = buffer.alloca %weights_local_bytes {base_alignment = 4, memory_space = private} : buffer
+  %weights_local_buffer = buffer.alloca<private> align(4) %weights_local_bytes : buffer
   %weights_local = buffer.view %weights_local_buffer[%c0_bytes] : buffer -> view<2xf32, %layout>
   %total_bytes = index.constant 4 : offset
-  %total_buffer = buffer.alloca %total_bytes {base_alignment = 4, memory_space = private} : buffer
+  %total_buffer = buffer.alloca<private> align(4) %total_bytes : buffer
   %total = buffer.view %total_buffer[%c0_bytes] : buffer -> view<1xf32, %layout>
   %c128 = index.constant 128 : index
   %madd = index.madd %bx, %c128, %tid : index

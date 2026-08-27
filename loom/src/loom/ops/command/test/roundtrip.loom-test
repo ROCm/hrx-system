@@ -1,0 +1,56 @@
+// RUN: roundtrip
+
+command.program.def @static_program() launch(%parameters: buffer) {
+  %embedding = command.parameter %parameters, "token_embd.weight" : view<1024xi8>
+  command.return
+}
+
+// ====
+
+test.target<low_core> @gfx1100
+
+command.program.def public target(@gfx1100) @decode(%token_count: index) launch(%parameters: buffer, %transient: buffer) {
+  command.return
+}
+
+command.program.def @driver(%token_count: index) launch(%parameters: buffer, %transient: buffer) {
+  command.program.launch @decode[%token_count](%parameters, %transient) : [index](buffer, buffer)
+  command.return
+}
+
+// ====
+
+command.program.decl retain @decode(%token_count: index) launch(%parameters: buffer, %transient: buffer)
+
+// ====
+
+command.program.def @bounded(%token_count: index) launch(%parameters: buffer) where [range(%token_count, 1, 1024)] {
+  %weight = command.parameter %parameters, "blk.{}.weight"[%token_count] : view<256xi8>
+  command.return
+}
+
+// ====
+
+command.program.def @scheduled() launch(%parameters: buffer) {
+  command.serial {
+    command.concurrent {
+      command.program.launch @leaf(%parameters) : (buffer)
+    }
+  }
+  command.return
+}
+
+command.program.def @leaf() launch(%parameters: buffer) {
+  command.return
+}
+
+// ====
+
+kernel.decl @leaf_kernel(%element_count: index) launch(%parameters: buffer)
+
+command.program.def @kernel_schedule(%element_count: index) launch(%parameters: buffer) {
+  command.concurrent {
+    kernel.launch @leaf_kernel[%element_count](%parameters) : [index](buffer)
+  }
+  command.return
+}

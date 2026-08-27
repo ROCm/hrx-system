@@ -1,0 +1,41 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "lds_bank_service",
+    srcs = ["lds_bank_service.c"],
+    hdrs = ["lds_bank_service.h"],
+    textual_hdrs = ["//loom/src/loom/target/arch/amdgpu:lds_bank_service_model_rows.inl"],
+    visibility = ["//loom/src/loom/target/arch/amdgpu/lower:__pkg__"],
+    deps = [
+        "//loom/src/loom/target/arch/amdgpu:target_info_defs",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "lds_bank_service_test",
+    srcs = ["lds_bank_service_test.cc"],
+    deps = [
+        ":lds_bank_service",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

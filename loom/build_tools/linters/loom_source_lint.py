@@ -13,9 +13,10 @@ function-local compiler phases: allocating or resetting scratch sized by
 `module->values.count`/`capacity` instead of using function-local domains,
 maintained facts, or reviewed module-owned structures.
 
-It also protects the Loom execution package boundary. Optional production
-targets may project device/environment facts and emit artifacts, but they must
-not grow private runner/execution stacks under `loom/src/loom/target/**`.
+It also protects the Loom execution mechanism boundary. Target-owned
+qualification programs and manifests may invoke shared tools, but production
+targets must not include execution internals or grow private runner/provider
+stacks under `loom/src/loom/target/**`.
 
 The core Loom compiler must stay independent from command-line flag machinery.
 Only tools, tooling helpers, and tests may include `iree/base/tooling/flags.h`
@@ -27,17 +28,17 @@ large hand-maintained emitter. Backend source files must stay below the reviewed
 size ceiling and must not introduce broad `internal.h` umbrella headers as a
 cosmetic split.
 
-The authoring corpus is a user-facing reference surface. It rejects stale
-boundary-proof boilerplate that agents are likely to copy into generated
-kernels: redundant kernel-buffer memory-space assumes, sentinel-sized views,
-late index-to-offset byte-address casts, and ggml-style byte strides typed as
-logical indices.
+The authoring corpus additionally rejects stale boundary-proof boilerplate that
+agents are likely to copy into generated kernels: redundant kernel-buffer
+memory-space assumes, sentinel-sized views, late index-to-offset byte-address
+casts, and ggml-style byte strides typed as logical indices.
 """
 
 from __future__ import annotations
 
 import re
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -45,7 +46,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 LOOM_SOURCE_ROOT = REPO_ROOT / "loom" / "src" / "loom"
 AUTHORING_CORPUS_ROOT = LOOM_SOURCE_ROOT / "test" / "corpus" / "authoring"
 SOURCE_SUFFIXES = {".c", ".cc", ".h"}
-TARGET_SOURCE_ROOT = LOOM_SOURCE_ROOT / "target"
 SPIRV_BACKEND_RELATIVE_ROOTS = (
     "loom/src/loom/target/arch/spirv",
     "loom/src/loom/target/emit/spirv",
@@ -63,7 +63,14 @@ MODULE_VALUE_CARDINALITY_PATTERN = re.compile(
 STORAGE_OR_RESET_PATTERNS = [
     re.compile(r"\biree_arena_allocate(?:_array)?\s*\("),
     re.compile(r"\biree_arena_grow_array\s*\("),
-    re.compile(r"\biree_allocator_(?:malloc|realloc|calloc|malloc_aligned)\s*\("),
+    re.compile(
+        r"\biree_allocator_(?:"
+        r"malloc(?:_array)?(?:_uninitialized)?|"
+        r"realloc(?:_array)?|"
+        r"(?:malloc|realloc)_aligned|"
+        r"calloc|malloc_with_trailing|malloc_struct_array|grow_array"
+        r")\s*\("
+    ),
     re.compile(r"\bmemset\s*\("),
     re.compile(r"\biree_bitfield_[A-Za-z0-9_]*\s*\("),
 ]
@@ -77,9 +84,24 @@ CARDINALITY_ALIAS_PATTERN = re.compile(
     r"\s*(?:=|\+=)"
 )
 
-TARGET_EXECUTION_INCLUDE_OR_DEP_PATTERN = re.compile(
-    r"(?:#\s*include\s+\"loom/tooling/execution/(?:hal|ireevm)/)"
-    r"|(?://loom/src/loom/tooling/execution/(?:hal|ireevm)(?::|/))"
+TARGET_EXECUTION_INCLUDE_PATTERN = re.compile(
+    r'#\s*include\s+"loom/tooling/execution/(?:hal|ireevm)/'
+)
+TARGET_EXECUTION_DEP_LABEL_PATTERN = re.compile(
+    r"//loom/src/loom/tooling/execution/(?:hal|ireevm)(?::|/)"
+)
+TARGET_PHYSICAL_TEST_SRC_PATTERN = re.compile(
+    r'\bsrc\s*=\s*"(?P<label>//loom/src/loom/tools/'
+    r'(?:iree-test-loom|iree-benchmark-loom)(?::[^"]*)?)"'
+)
+TARGET_EXECUTION_BAZEL_TOOLS_PATTERN = re.compile(
+    r"\btools\s*=\s*\{(?P<body>.*?)\}", re.DOTALL
+)
+TARGET_PHYSICAL_TEST_TOOL_LABEL_PATTERN = re.compile(
+    r"//loom/src/loom/tools/(?:iree-test-loom|iree-benchmark-loom)(?::|\")"
+)
+TARGET_EXECUTION_BAZEL_DEPS_PATTERN = re.compile(
+    r"\b(?:deps|implementation_deps)\s*=\s*\[(?P<body>.*?)\]", re.DOTALL
 )
 
 TARGET_PRIVATE_EXECUTION_SYMBOL_PATTERN = re.compile(
@@ -127,6 +149,23 @@ APPROVED_STATEMENTS = [
         "loom/src/loom/ir/module.c",
         re.compile(r"\bmodule->values\.capacity\b"),
         "core module value-table and module-owned scratch storage",
+    ),
+    ApprovedStatement(
+        "loom/src/loom/format/text/printer/name_plan.c",
+        re.compile(
+            r"\biree_arena_allocate_array\s*\(\s*&out_plan->arena,\s*"
+            r"module->values\.count,\s*sizeof\(\*out_plan->resolutions\)"
+        ),
+        "canonical per-print SSA name resolution indexed by value ID",
+    ),
+    ApprovedStatement(
+        "loom/src/loom/format/text/printer/name_plan.c",
+        re.compile(
+            r"\bmemset\s*\(\s*out_plan->resolutions,\s*0,\s*"
+            r"module->values\.count\s*\*\s*"
+            r"sizeof\(\*out_plan->resolutions\)"
+        ),
+        "canonical per-print SSA name resolution initialization",
     ),
     ApprovedStatement(
         "loom/src/loom/pass/interpreter.c",
@@ -184,11 +223,15 @@ def _strip_line_comments(statement: str) -> str:
     return "\n".join(line.split("//", 1)[0] for line in statement.splitlines())
 
 
+def _read_source_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
 def _iter_statements(path: Path) -> list[tuple[int, str]]:
     statements: list[tuple[int, str]] = []
     start_line = 0
     pending: list[str] = []
-    for line_number, line in enumerate(path.read_text().splitlines(), start=1):
+    for line_number, line in enumerate(_read_source_text(path).splitlines(), start=1):
         if not pending:
             start_line = line_number
         pending.append(line.rstrip())
@@ -363,14 +406,6 @@ def _scan_spirv_backend_text(
     return findings
 
 
-def _target_path_has_execution_package(path: Path) -> bool:
-    try:
-        target_relative_path = path.relative_to(TARGET_SOURCE_ROOT)
-    except ValueError:
-        return False
-    return "execution" in target_relative_path.parts[:-1]
-
-
 def _iter_lint_files() -> list[Path]:
     return sorted(
         path
@@ -463,58 +498,107 @@ def _scan_authoring_text(path: Path, text: str) -> list[Finding]:
 
 
 def _scan_authoring_corpus(path: Path) -> list[Finding]:
-    return _scan_authoring_text(path, path.read_text())
+    return _scan_authoring_text(path, _read_source_text(path))
 
 
-def _scan_target_execution_boundaries(path: Path) -> list[Finding]:
-    if not path.is_relative_to(TARGET_SOURCE_ROOT):
+def _scan_target_execution_text(
+    relative_path: str, text: str
+) -> list[tuple[int, str, str]]:
+    path = PurePosixPath(relative_path)
+    if len(path.parts) < 4 or path.parts[:4] != (
+        "loom",
+        "src",
+        "loom",
+        "target",
+    ):
+        return []
+    if path.suffix in SOURCE_SUFFIXES and _is_test_source_name(path.name):
         return []
 
-    findings: list[Finding] = []
-    if _target_path_has_execution_package(path):
-        findings.append(
-            Finding(
-                path=path,
-                line=1,
-                message="target packages must not own execution subpackages",
-                context=(
-                    "move runner/backend/provider/invocation code under "
-                    "loom/src/loom/tooling/execution/<mechanism>"
-                ),
-            )
-        )
-    if path.suffix in SOURCE_SUFFIXES and _is_test_source_name(path.name):
+    findings: list[tuple[int, str, str]] = []
+    if path.suffix in SOURCE_SUFFIXES:
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            stripped_line = _strip_line_comments(line).strip()
+            if TARGET_EXECUTION_INCLUDE_PATTERN.search(stripped_line):
+                findings.append(
+                    (
+                        line_number,
+                        (
+                            "target packages must not include or depend on "
+                            "execution mechanism internals"
+                        ),
+                        stripped_line,
+                    )
+                )
+            if TARGET_PRIVATE_EXECUTION_SYMBOL_PATTERN.search(stripped_line):
+                findings.append(
+                    (
+                        line_number,
+                        (
+                            "target packages must not define private Loom "
+                            "execution backend/provider stacks"
+                        ),
+                        stripped_line,
+                    )
+                )
         return findings
 
-    for line_number, line in enumerate(path.read_text().splitlines(), start=1):
-        stripped_line = _strip_line_comments(line).strip()
-        if TARGET_EXECUTION_INCLUDE_OR_DEP_PATTERN.search(stripped_line):
+    if path.name != "BUILD.bazel":
+        return findings
+    lines = text.splitlines()
+    bazel_text = "\n".join(line.split("#", 1)[0] for line in lines)
+    for src_match in TARGET_PHYSICAL_TEST_SRC_PATTERN.finditer(bazel_text):
+        line_number = bazel_text.count("\n", 0, src_match.start("label")) + 1
+        findings.append(
+            (
+                line_number,
+                "target packages must not own physical execution tests",
+                lines[line_number - 1].strip(),
+            )
+        )
+    for tools_match in TARGET_EXECUTION_BAZEL_TOOLS_PATTERN.finditer(bazel_text):
+        body = tools_match.group("body")
+        for label_match in TARGET_PHYSICAL_TEST_TOOL_LABEL_PATTERN.finditer(body):
+            offset = tools_match.start("body") + label_match.start()
+            line_number = bazel_text.count("\n", 0, offset) + 1
             findings.append(
-                Finding(
-                    path=path,
-                    line=line_number,
-                    message=(
+                (
+                    line_number,
+                    "target packages must not own physical execution tests",
+                    lines[line_number - 1].strip(),
+                )
+            )
+    for deps_match in TARGET_EXECUTION_BAZEL_DEPS_PATTERN.finditer(bazel_text):
+        body = deps_match.group("body")
+        for label_match in TARGET_EXECUTION_DEP_LABEL_PATTERN.finditer(body):
+            offset = deps_match.start("body") + label_match.start()
+            line_number = bazel_text.count("\n", 0, offset) + 1
+            findings.append(
+                (
+                    line_number,
+                    (
                         "target packages must not include or depend on "
                         "execution mechanism internals"
                     ),
-                    context=stripped_line,
+                    lines[line_number - 1].strip(),
                 )
             )
-        if (
-            path.suffix in SOURCE_SUFFIXES
-            and TARGET_PRIVATE_EXECUTION_SYMBOL_PATTERN.search(stripped_line)
-        ):
-            findings.append(
-                Finding(
-                    path=path,
-                    line=line_number,
-                    message=(
-                        "target packages must not define private Loom "
-                        "execution backend/provider stacks"
-                    ),
-                    context=stripped_line,
-                )
+    return findings
+
+
+def _scan_target_execution_guardrails(path: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    for line, message, context in _scan_target_execution_text(
+        _relative_path(path), _read_source_text(path)
+    ):
+        findings.append(
+            Finding(
+                path=path,
+                line=line,
+                message=message,
+                context=context,
             )
+        )
     return findings
 
 
@@ -522,7 +606,7 @@ def _scan_spirv_backend_guardrails(path: Path) -> list[Finding]:
     relative_path = _relative_path(path)
     findings: list[Finding] = []
     for line, message, context in _scan_spirv_backend_text(
-        relative_path, path.read_text()
+        relative_path, _read_source_text(path)
     ):
         findings.append(
             Finding(
@@ -539,7 +623,7 @@ def _scan_core_tooling_flags_guardrails(path: Path) -> list[Finding]:
     relative_path = _relative_path(path)
     findings: list[Finding] = []
     for line, message, context in _scan_core_tooling_flags_text(
-        relative_path, path.read_text()
+        relative_path, _read_source_text(path)
     ):
         findings.append(
             Finding(
@@ -580,6 +664,20 @@ def _expect_core_tooling_flags_self_test(
     return False
 
 
+def _expect_target_execution_self_test(
+    name: str, relative_path: str, text: str, expected_messages: tuple[str, ...]
+) -> bool:
+    findings = _scan_target_execution_text(relative_path, text)
+    messages = tuple(finding[1] for finding in findings)
+    if messages == expected_messages:
+        print(f"  PASS  {name}")
+        return True
+    print(f"  FAIL  {name}")
+    print(f"        expected: {expected_messages!r}")
+    print(f"        actual:   {messages!r}")
+    return False
+
+
 def _expect_authoring_self_test(
     name: str, text: str, expected_messages: tuple[str, ...]
 ) -> bool:
@@ -595,9 +693,25 @@ def _expect_authoring_self_test(
     return False
 
 
+def _expect_utf8_source_read_self_test() -> bool:
+    expected_text = '// UTF-8 source: "λ".\n'
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        source_path = Path(temporary_directory) / "utf8_source.c"
+        source_path.write_bytes(expected_text.encode("utf-8"))
+        actual_text = _read_source_text(source_path)
+    if actual_text == expected_text:
+        print("  PASS  UTF-8 source reading is host-locale independent")
+        return True
+    print("  FAIL  UTF-8 source reading is host-locale independent")
+    print(f"        expected: {expected_text!r}")
+    print(f"        actual:   {actual_text!r}")
+    return False
+
+
 def _run_self_tests() -> int:
     ok = True
     print("loom-source-lint: self-test")
+    ok &= _expect_utf8_source_read_self_test()
     ok &= _expect_spirv_self_test(
         "SPIR-V small source passes",
         "loom/src/loom/target/emit/spirv/packet_rows.c",
@@ -652,18 +766,94 @@ def _run_self_tests() -> int:
         '#include "iree/base/tooling/flags.h"\n',
         (),
     )
-    ok &= _expect_authoring_self_test(
-        "authoring happy-path source passes",
-        """
+    ok &= _expect_target_execution_self_test(
+        "provider-owned qualification package passes",
+        "loom/src/loom/tooling/target/amdgpu/test/corpus/BUILD.bazel",
+        'src = "//loom/src/loom/tools/iree-test-loom"\n',
+        (),
+    )
+    ok &= _expect_target_execution_self_test(
+        "target-owned qualification package fails",
+        "loom/src/loom/target/arch/amdgpu/test/BUILD.bazel",
+        'src = "//loom/src/loom/tools/iree-test-loom"\n',
+        ("target packages must not own physical execution tests",),
+    )
+    ok &= _expect_target_execution_self_test(
+        "target-owned qualification tool fails",
+        "loom/src/loom/target/arch/amdgpu/test/BUILD.bazel",
+        ('tools = {"iree-test-loom": "//loom/src/loom/tools/iree-test-loom"}\n'),
+        ("target packages must not own physical execution tests",),
+    )
+    ok &= _expect_target_execution_self_test(
+        "physical tool visibility grant passes",
+        "loom/src/loom/target/arch/amdgpu/BUILD.bazel",
+        (
+            "_PROVIDER_VISIBILITY = [\n    "
+            '"//loom/src/loom/tools/iree-test-loom:__pkg__",\n]\n'
+        ),
+        (),
+    )
+    ok &= _expect_target_execution_self_test(
+        "execution package visibility grant passes",
+        "loom/src/loom/target/arch/ireevm/BUILD.bazel",
+        (
+            "_EXECUTION_VISIBILITY = ["
+            '"//loom/src/loom/tooling/execution/ireevm:__pkg__"]\n'
+        ),
+        (),
+    )
+    ok &= _expect_target_execution_self_test(
+        "commented execution dependency passes",
+        "loom/src/loom/target/arch/amdgpu/BUILD.bazel",
+        ('# deps = [\n#     "//loom/src/loom/tooling/execution/hal:runtime",\n# ]\n'),
+        (),
+    )
+    ok &= _expect_target_execution_self_test(
+        "target execution-internal dependency fails",
+        "loom/src/loom/target/arch/amdgpu/BUILD.bazel",
+        ('deps = [\n    "//loom/src/loom/tooling/execution/hal:runtime",\n]\n'),
+        (
+            "target packages must not include or depend on execution "
+            "mechanism internals",
+        ),
+    )
+    ok &= _expect_target_execution_self_test(
+        "target execution-internal include fails",
+        "loom/src/loom/target/arch/amdgpu/run.c",
+        '#include "loom/tooling/execution/hal/runtime.h"\n',
+        (
+            "target packages must not include or depend on execution "
+            "mechanism internals",
+        ),
+    )
+    ok &= _expect_target_execution_self_test(
+        "target private execution stack fails",
+        "loom/src/loom/target/arch/amdgpu/run.c",
+        "void loom_run_hal_backend(void) {}\n",
+        (
+            "target packages must not define private Loom execution "
+            "backend/provider stacks",
+        ),
+    )
+    checked_loom_happy_path = """
 kernel.def @copy(%n: index) {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%n: index, %input: buffer, %output: buffer) {
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<[%n]xf32, #dense>
+  %base = index.constant 0 : offset
+  %batch_size = index.constant 512 : index
+  %c2 = index.constant 2 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %zero_point = scalar.constant 128 : i32
+  %fourth_word_ordinal = scalar.constant 4 : i32
+  %input_view = buffer.view %input[%base] : buffer -> view<[%n]xf32>
+  test.use %batch_size, %c2, %c0_i32, %zero_point, %fourth_word_ordinal : index, index, i32, i32, i32
   kernel.return
 }
-""",
+"""
+    ok &= _expect_authoring_self_test(
+        "authoring happy-path source passes",
+        checked_loom_happy_path,
         (),
     )
     ok &= _expect_authoring_self_test(
@@ -673,7 +863,7 @@ kernel.def @copy(%n: index) {
     )
     ok &= _expect_authoring_self_test(
         "authoring sentinel extent fails",
-        "%view = buffer.view %input[%zero] : buffer -> view<2147483647xi8, #dense>\n",
+        "%view = buffer.view %input[%zero] : buffer -> view<2147483647xi8>\n",
         ("authoring corpus must not use sentinel-sized view extents",),
     )
     ok &= _expect_authoring_self_test(
@@ -701,7 +891,7 @@ def main() -> int:
         findings.extend(_scan_file(path))
     for path in _iter_lint_files():
         findings.extend(_scan_core_tooling_flags_guardrails(path))
-        findings.extend(_scan_target_execution_boundaries(path))
+        findings.extend(_scan_target_execution_guardrails(path))
         findings.extend(_scan_spirv_backend_guardrails(path))
     for path in _iter_authoring_loom_files():
         findings.extend(_scan_authoring_corpus(path))

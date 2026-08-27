@@ -1,0 +1,88 @@
+// RUN: emit amdgpu-assembly @gfx1250_vcc_dpp_fanout
+
+amdgpu.target<gfx1250> @target
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_vcc_dpp_fanout(%lane: reg<amdgpu.vgpr>, %false0: reg<amdgpu.vgpr>, %true0: reg<amdgpu.vgpr>, %false1: reg<amdgpu.vgpr>, %true1: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
+  %condition = v_and_b32_src0_inline %lane, 1
+  %mask = v_cmp_eq_i32_src0_inline_vcc %condition {lhs = 0}
+  %selected0 = v_cndmask_b32_dpp16 %false0, %true0, %mask {dpp_ctrl = 78}
+  %selected1 = v_cndmask_b32_dpp16 %false1, %true1, %mask {dpp_ctrl = 78}
+  %fixed_mask = s_mov_b32_vcc_imm 3435973836
+  %fixed_selected = v_cndmask_b32_dpp16 %selected0, %selected1, %fixed_mask {dpp_ctrl = 78}
+  %masked = v_mov_b32_dpp16_masked %selected1, %fixed_selected {dpp_ctrl = 356, bank_mask = 5}
+  %quad = v_mov_b32_dpp16 %masked {dpp_ctrl = 177}
+  %row_shl = v_mov_b32_dpp16 %quad {dpp_ctrl = 257}
+  %row_shr = v_mov_b32_dpp16 %row_shl {dpp_ctrl = 273}
+  %row_ror = v_mov_b32_dpp16 %row_shr {dpp_ctrl = 289}
+  %row_mirror = v_mov_b32_dpp16 %row_ror {dpp_ctrl = 320}
+  %row_half_mirror = v_mov_b32_dpp16 %row_mirror {dpp_ctrl = 321}
+  %row_share = v_mov_b32_dpp16 %row_half_mirror {dpp_ctrl = 336}
+  %row_xmask = v_mov_b32_dpp16 %row_share {dpp_ctrl = 356}
+  %sum = v_add_f32_dpp16 %row_xmask, %masked {dpp_ctrl = 360}
+  %packed_u16 = v_cvt_pk_u16_u32_dpp16 %false0, %false0 {dpp_ctrl = 177}
+  %packed_bf16 = v_cvt_pk_bf16_f32_dpp16 %true0, %true0 {dpp_ctrl = 177}
+  %offset = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %offset, %sum, %output
+  global_store_b32_saddr %offset, %packed_u16, %output {offset = 4}
+  global_store_b32_saddr %offset, %packed_bf16, %output {offset = 8}
+  return
+}
+
+// ----
+  v_and_b32 v5, 1, v4
+  s_delay_alu instid0(VALU_DEP_1)
+  v_cmp_eq_i32 vcc, 0, v5
+  v_cndmask_b32_dpp v5, v2, v3, vcc, quad_perm:[2,3,0,1], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  v_cndmask_b32_dpp v0, v0, v1, vcc, quad_perm:[2,3,0,1], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  s_mov_b32 vcc_lo, 3435973836
+  s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
+  v_cndmask_b32_dpp v1, v5, v0, vcc, quad_perm:[2,3,0,1], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  s_delay_alu instid0(VALU_DEP_1)
+  v_mov_b32_dpp v0, v1, row_xmask:4, row_mask:0xf, bank_mask:0x5, bound_ctrl:1
+  s_delay_alu instid0(VALU_DEP_1)
+  v_mov_b32_dpp v1, v0, quad_perm:[1,0,3,2], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  s_delay_alu instid0(VALU_DEP_1)
+  v_mov_b32_dpp v1, v1, row_shl:1, row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  s_delay_alu instid0(VALU_DEP_1)
+  v_mov_b32_dpp v1, v1, row_shr:1, row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  s_delay_alu instid0(VALU_DEP_1)
+  v_mov_b32_dpp v1, v1, row_ror:1, row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  s_delay_alu instid0(VALU_DEP_1)
+  v_mov_b32_dpp v1, v1, row_mirror, row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  s_delay_alu instid0(VALU_DEP_1)
+  v_mov_b32_dpp v1, v1, row_half_mirror, row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  s_delay_alu instid0(VALU_DEP_1)
+  v_mov_b32_dpp v1, v1, row_share:0, row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  s_delay_alu instid0(VALU_DEP_1)
+  v_mov_b32_dpp v1, v1, row_xmask:4, row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_f32_dpp v0, v1, v0, row_xmask:8, row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  v_cvt_pk_u16_u32_e64_dpp v1, v2, v2, quad_perm:[1,0,3,2], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  v_cvt_pk_bf16_f32_e64_dpp v2, v3, v3, quad_perm:[1,0,3,2], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  v_lshlrev_b32 v3, 2, v4
+  global_store_b32 v3, v0, s[0:1] offset:0
+  global_store_b32 v3, v1, s[0:1] offset:4
+  global_store_b32 v3, v2, s[0:1] offset:8
+  s_wait_storecnt storecnt(0)
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1250_vcc_compact_forms
+
+amdgpu.target<gfx1250> @target
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_vcc_compact_forms(%lane: reg<amdgpu.vgpr>, %true_value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
+  %mask = v_cmp_eq_i32_src1_inline_vcc %lane {rhs = 0}
+  %inline = v_cndmask_b32_src0_inline_vcc %true_value, %mask {false_value = 0}
+  %literal = v_cndmask_b32_src0_lit_vcc %inline, %mask, 305419896
+  global_store_b32_saddr %lane, %literal, %output
+  return
+}
+
+// ----
+  v_cmp_eq_i32 vcc, 0, v1
+  v_cndmask_b32 v0, 0, v0, vcc
+  s_delay_alu instid0(VALU_DEP_1)
+  v_cndmask_b32 v0, 305419896, v0, vcc
+  global_store_b32 v1, v0, s[0:1] offset:0
+  s_wait_storecnt storecnt(0)
+  s_endpgm

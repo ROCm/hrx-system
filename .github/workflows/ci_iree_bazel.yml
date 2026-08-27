@@ -52,31 +52,76 @@ on:
       - "third_party/**"
       - "tools/**"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   linux_bazel_cpu:
     name: ${{ matrix.name }}
-    runs-on: aws-linux-scale-rocm-prod
+    runs-on: azure-linux-scale-rocm
     timeout-minutes: 45
     container:
-      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
+      image: ${{ matrix.container_image }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: Linux / CPU
             command: iree-bazel-cpu
+            container_image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+            host_ar: ar
+            host_cc: clang
+            host_cxx: clang++
+            install_compiler_rt: false
+            setup_python: true
           - name: Linux / CPU / ASAN
             command: iree-bazel-cpu-asan
+            container_image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+            host_ar: ar
+            host_cc: clang
+            host_cxx: clang++
+            install_compiler_rt: true
+            setup_python: true
           - name: Linux / CPU / MSAN
             command: iree-bazel-cpu-msan
+            container_image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+            host_ar: ar
+            host_cc: clang
+            host_cxx: clang++
+            install_compiler_rt: true
+            setup_python: true
           - name: Linux / CPU / TSAN
             command: iree-bazel-cpu-tsan
+            container_image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+            host_ar: ar
+            host_cc: clang
+            host_cxx: clang++
+            install_compiler_rt: true
+            setup_python: true
           - name: Linux / CPU / UBSAN
             command: iree-bazel-cpu-ubsan
+            container_image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+            host_ar: ar
+            host_cc: clang
+            host_cxx: clang++
+            install_compiler_rt: true
+            setup_python: true
+          - name: Linux / Repository / GCC Build
+            command: iree-bazel-repository-build
+            container_image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
+            host_ar: ar
+            host_cc: gcc
+            host_cxx: g++
+            install_compiler_rt: false
+            setup_python: false
     env:
+      AR: ${{ matrix.host_ar }}
+      CC: ${{ matrix.host_cc }}
+      CXX: ${{ matrix.host_cxx }}
       HRX_ARTIFACT_SET: core
       HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/iree-bazel/downloads
       HRX_OUTPUT_DIR: ${{ github.workspace }}/build/iree-bazel
@@ -91,6 +136,18 @@ jobs:
       - name: Adjust git config
         run: git config --global --add safe.directory "$PWD"
 
+      - name: Set up Python
+        if: matrix.setup_python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Clang sanitizer runtimes
+        if: matrix.install_compiler_rt
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libclang-rt-18-dev
+
       - name: Fetch ROCm toolchain
         run: bash .github/scripts/fetch_rocm_toolchain.sh
 
@@ -103,28 +160,113 @@ jobs:
       - name: Check tool versions
         run: |
           bazel --version
-          clang --version
-          "$CC" --version
+          bash .github/scripts/check_host_toolchain.sh
+          bash .github/scripts/check_rocm_device_toolchain.sh
           test -d "${HRX_ROCM_ROOT}/include"
 
       - name: Run IREE Bazel CI
+        id: iree_bazel_ci
         run: |
-          echo "python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going"
-          python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going
+          echo "python3 build_tools/devtools/ci.py ${{ matrix.command }} --bazel-profile-dir ${RUNNER_TEMP}/bazel-profiles --keep-going"
+          python3 build_tools/devtools/ci.py ${{ matrix.command }} \
+            --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles" --keep-going
 
-  linux_bazel_vulkan:
+      - name: Upload Bazel profiles
+        if: ${{ always() && steps.iree_bazel_ci.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-profiles-${{ matrix.command }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bazel-profiles/*.profile.gz
+          if-no-files-found: error
+          compression-level: 0
+
+  windows_bazel:
     name: ${{ matrix.name }}
-    runs-on: [self-hosted, Linux, X64, gpu_navi4x]
-    timeout-minutes: 45
+    runs-on: azure-windows-scale-rocm
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: Linux / Vulkan
-            command: iree-bazel-vulkan
-          - name: Linux / Vulkan / Sanitizers
-            command: iree-bazel-vulkan-sanitizers
+          - name: Windows / Repository / clang-cl + ROCm
+            host_toolchain: clang-cl
+          - name: Windows / Repository / MSVC + ROCm
+            host_toolchain: msvc
     env:
+      BAZEL_LLVM: ${{ github.workspace }}\build\iree-bazel-windows\rocm-root\lib\llvm
+      HRX_ARTIFACT_SET: core
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}\build\iree-bazel-windows\downloads
+      HRX_OUTPUT_DIR: ${{ github.workspace }}\build\iree-bazel-windows
+      HRX_RELEASE_TYPE: nightly
+      HRX_ROCM_ROOT: ${{ github.workspace }}\build\iree-bazel-windows\rocm-root
+      IREE_CI_PYTHON: python
+      PIP_CACHE_DIR: ${{ github.workspace }}\build\iree-bazel-windows\caches\pip
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Fetch ROCm toolchain
+        run: |
+          python -m pip install --upgrade boto3 zstandard
+          python build_tools/ci/ci_core_windows.py fetch-rocm
+
+      - name: Install developer tools
+        shell: pwsh
+        run: |
+          $bazelOutputRoot = (Join-Path $env:SystemDrive "b").Replace('\', '/')
+          "startup --output_user_root=$bazelOutputRoot" |
+            Out-File -FilePath .bazelrc.local -Encoding ascii -Append
+          if ("${{ matrix.host_toolchain }}" -eq "msvc") {
+            "build --config=windows-msvc" |
+              Out-File -FilePath .bazelrc.local -Encoding ascii -Append
+          }
+          python --version
+          python dev.py bazel setup --venv
+          "$PWD\.venv\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Run IREE Bazel CI
+        id: iree_bazel_ci
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS_INSTALL=%%i"
+          if not defined VS_INSTALL exit /b 1
+          call "%VS_INSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+          if "${{ matrix.host_toolchain }}"=="msvc" (
+            set "CC=cl.exe"
+            set "CXX=cl.exe"
+            set "AR=lib.exe"
+          ) else (
+            if not exist "%BAZEL_LLVM%\bin\clang-cl.exe" exit /b 1
+            if not exist "%BAZEL_LLVM%\bin\lld-link.exe" exit /b 1
+            if not exist "%BAZEL_LLVM%\bin\llvm-lib.exe" exit /b 1
+            set "CC=%BAZEL_LLVM%\bin\clang-cl.exe"
+            set "CXX=%BAZEL_LLVM%\bin\clang-cl.exe"
+            set "AR=%BAZEL_LLVM%\bin\llvm-lib.exe"
+          )
+          python build_tools/devtools/ci.py iree-bazel-repository-integration --amdgpu-target gfx11-generic --bazel-profile-dir "%RUNNER_TEMP%\bazel-profiles" --keep-going
+
+      - name: Upload Bazel profiles
+        if: ${{ always() && steps.iree_bazel_ci.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-profiles-iree-bazel-repository-integration-${{ matrix.host_toolchain }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}\bazel-profiles\*.profile.gz
+          if-no-files-found: error
+          compression-level: 0
+
+  linux_bazel_vulkan:
+    name: Linux / Vulkan
+    runs-on: [self-hosted, Linux, X64, gpu_navi4x]
+    timeout-minutes: 45
+    env:
+      AR: ${{ github.workspace }}/build/iree-bazel-vulkan/rocm-root/lib/llvm/bin/llvm-ar
+      CC: ${{ github.workspace }}/build/iree-bazel-vulkan/rocm-root/lib/llvm/bin/clang
+      CXX: ${{ github.workspace }}/build/iree-bazel-vulkan/rocm-root/lib/llvm/bin/clang++
       HRX_ARTIFACT_SET: core
       HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/iree-bazel-vulkan/downloads
       HRX_OUTPUT_DIR: ${{ github.workspace }}/build/iree-bazel-vulkan
@@ -158,28 +300,93 @@ jobs:
       - name: Check tool versions
         run: |
           bazel --version
-          clang --version
-          "$CC" --version
+          bash .github/scripts/check_host_toolchain.sh --expect-rocm
+          bash .github/scripts/check_rocm_device_toolchain.sh
           test -d "${HRX_ROCM_ROOT}/include"
 
       - name: Run IREE Bazel CI
+        id: iree_bazel_ci
         run: |
-          echo "python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going"
-          python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going
+          echo "python3 build_tools/devtools/ci.py iree-bazel-vulkan --bazel-profile-dir ${RUNNER_TEMP}/bazel-profiles --keep-going"
+          python3 build_tools/devtools/ci.py iree-bazel-vulkan \
+            --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles" --keep-going
+
+      - name: Upload Bazel profiles
+        if: ${{ always() && steps.iree_bazel_ci.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-profiles-iree-bazel-vulkan-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bazel-profiles/*.profile.gz
+          if-no-files-found: error
+          compression-level: 0
 
   linux_bazel_amdgpu:
     name: ${{ matrix.name }}
-    runs-on: linux-gfx942-1gpu-core42-ossci-rocm
-    timeout-minutes: 60
+    runs-on: ${{ matrix.runner_label }}
+    continue-on-error: ${{ matrix.optional }}
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: >-
+        --ipc host
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --group-add 993
+        --group-add 992
+        --group-add 110
+        --ulimit memlock=-1:-1
+        --security-opt seccomp=unconfined
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+        --user 0:0
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: Linux / AMDGPU
+          - name: Linux / AMDGPU / gfx942
             command: iree-bazel-amdgpu
-          - name: Linux / AMDGPU / Sanitizers
-            command: iree-bazel-amdgpu-sanitizers
+            optional: false
+            runner_label: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+            target_selector: gfx942
+          - name: Linux / AMDGPU / gfx110X
+            command: iree-bazel-amdgpu
+            optional: false
+            runner_label: linux-gfx110X-gpu-rocm
+            target_selector: gfx110X-all
+          - name: Linux / AMDGPU / gfx1150
+            command: iree-bazel-amdgpu
+            optional: true
+            runner_label: linux-gfx1150-gpu-rocm
+            target_selector: gfx1150
+          - name: Linux / AMDGPU / gfx1151
+            command: iree-bazel-amdgpu
+            optional: true
+            runner_label: linux-gfx1151-gpu-rocm
+            target_selector: gfx1151
+          - name: Linux / AMDGPU / gfx120X
+            command: iree-bazel-amdgpu
+            optional: false
+            runner_label: linux-gfx120X-gpu-rocm
+            target_selector: gfx120X-all
+          - name: Linux / AMDGPU / gfx942 / ASAN
+            command: iree-bazel-amdgpu-asan
+            optional: false
+            runner_label: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+            target_selector: gfx942
+          - name: Linux / AMDGPU / gfx942 / TSAN
+            command: iree-bazel-amdgpu-tsan
+            optional: false
+            runner_label: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+            target_selector: gfx942
+          - name: Linux / AMDGPU / gfx942 / UBSAN
+            command: iree-bazel-amdgpu-ubsan
+            optional: false
+            runner_label: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+            target_selector: gfx942
     env:
+      AR: ${{ github.workspace }}/build/iree-bazel-gpu/rocm-root/lib/llvm/bin/llvm-ar
+      CC: ${{ github.workspace }}/build/iree-bazel-gpu/rocm-root/lib/llvm/bin/clang
+      CXX: ${{ github.workspace }}/build/iree-bazel-gpu/rocm-root/lib/llvm/bin/clang++
       HRX_ARTIFACT_SET: core
       HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/iree-bazel-gpu/downloads
       HRX_OUTPUT_DIR: ${{ github.workspace }}/build/iree-bazel-gpu
@@ -193,7 +400,14 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Adjust git config
-        run: git config --global --add safe.directory "$PWD"
+        run: |
+          mkdir -p "$HOME"
+          git config --global --add safe.directory "$PWD"
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
 
       - name: Fetch ROCm toolchain
         run: bash .github/scripts/fetch_rocm_toolchain.sh
@@ -207,14 +421,26 @@ jobs:
       - name: Check tool versions
         run: |
           bazel --version
-          clang --version
-          "$CC" --version
+          bash .github/scripts/check_host_toolchain.sh --expect-rocm
+          bash .github/scripts/check_rocm_device_toolchain.sh
           test -d "${HRX_ROCM_ROOT}/include"
 
       - name: Report ROCm environment
         run: bash .github/scripts/check_rocm_environment.sh
 
       - name: Run IREE Bazel CI
+        id: iree_bazel_ci
         run: |
-          echo "python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going"
-          python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going
+          echo "python3 build_tools/devtools/ci.py ${{ matrix.command }} --amdgpu-target ${{ matrix.target_selector }} --bazel-profile-dir ${RUNNER_TEMP}/bazel-profiles --keep-going"
+          python3 build_tools/devtools/ci.py ${{ matrix.command }} \
+            --amdgpu-target "${{ matrix.target_selector }}" \
+            --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles" --keep-going
+
+      - name: Upload Bazel profiles
+        if: ${{ always() && steps.iree_bazel_ci.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-profiles-${{ matrix.command }}-${{ matrix.target_selector }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bazel-profiles/*.profile.gz
+          if-no-files-found: error
+          compression-level: 0

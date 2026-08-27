@@ -14,9 +14,7 @@ from loom.assembly import Clause, FormatElement, FuncArgs, OptionalGroup, Scope
 from loom.dsl import (
     ATTR_TYPE_FLAGS,
     AttrDef,
-    FuncLikeInterface,
     Op,
-    Operand,
     RegionDef,
     TypeConstraint,
 )
@@ -30,31 +28,6 @@ def find_interface[T](op: Op, iface_class: type[T]) -> T | None:
         if isinstance(iface, iface_class):
             return iface
     return None
-
-
-def func_args_are_operands(op: Op) -> bool:
-    """Returns true if FuncArgs should be stored in the op's operand array."""
-    func_like_iface = find_interface(op, FuncLikeInterface)
-    return bool(func_like_iface and func_like_iface.args_as_operands)
-
-
-def func_args_field_name(op: Op) -> str:
-    """Returns the FuncArgs field name declared by a func-like op format."""
-
-    def walk(elements: Sequence[FormatElement]) -> str | None:
-        for element in elements:
-            match element:
-                case FuncArgs(field=name):
-                    return name
-                case OptionalGroup(elements=inner) | Scope(elements=inner) | Clause(elements=inner):
-                    nested = walk(inner)
-                    if nested is not None:
-                        return nested
-                case _:
-                    continue
-        return None
-
-    return walk(op.format) or "args"
 
 
 def func_args_field_names(op: Op) -> set[str]:
@@ -75,18 +48,17 @@ def func_args_field_names(op: Op) -> set[str]:
     return names
 
 
-def explicit_func_args_operand(op: Op) -> Operand | None:
-    """Returns the operand descriptor that backs FuncArgs, if declared."""
-    if not func_args_are_operands(op):
-        return None
-    field_name = func_args_field_name(op)
-    for operand in op.operands:
-        if operand.name != field_name:
-            continue
-        if not operand.variadic:
-            raise ValueError(f"Op '{op.name}': FuncArgs field '{field_name}' must be a variadic operand when declared explicitly")
-        return operand
-    return None
+def resolve_func_args_operand_index(op: Op, field_name: str) -> int:
+    """Resolves an operand-backed FuncArgs field or returns the none sentinel."""
+    operand = next(
+        (candidate for candidate in op.operands if candidate.name == field_name),
+        None,
+    )
+    if operand is None:
+        return 0xFF
+    if not operand.variadic:
+        raise ValueError(f"Op '{op.name}': FuncArgs field '{field_name}' must be variadic")
+    return resolve_operand_index(op, field_name, "FuncArgs")
 
 
 def has_flags_attr(op: Op) -> bool:
@@ -277,8 +249,6 @@ def _op_value_type_constraints(op: Op) -> dict[str, TypeConstraint]:
     constraints: dict[str, TypeConstraint] = {}
     for operand in op.operands:
         constraints[operand.name] = operand.type_constraint
-    if func_args_are_operands(op) and explicit_func_args_operand(op) is None:
-        constraints[func_args_field_name(op)] = TypeConstraint.ANY
     for result in op.results:
         constraints[result.name] = result.type_constraint
     return constraints

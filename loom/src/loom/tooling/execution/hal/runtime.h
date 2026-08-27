@@ -23,8 +23,6 @@ typedef struct loom_run_hal_runtime_t {
   iree_hal_device_t* device;
   // Topology group assigning frontier state to |device|.
   iree_hal_device_group_t* device_group;
-  // Executable cache owned by |device| and used for target probing/loading.
-  iree_hal_executable_cache_t* executable_cache;
 } loom_run_hal_runtime_t;
 
 typedef struct loom_run_hal_runtime_options_t {

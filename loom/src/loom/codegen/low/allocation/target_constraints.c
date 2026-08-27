@@ -79,16 +79,6 @@ static iree_string_view_t loom_low_allocation_target_constraints_reg_class_name(
                                         reg_class->name_string_offset);
 }
 
-static iree_string_view_t
-loom_low_allocation_target_constraints_string_or_empty(
-    const loom_module_t* module, loom_string_id_t string_id) {
-  if (string_id == LOOM_STRING_ID_INVALID ||
-      string_id >= module->strings.count) {
-    return iree_string_view_empty();
-  }
-  return module->strings.entries[string_id];
-}
-
 static iree_status_t loom_low_allocation_target_constraints_emit(
     loom_low_allocation_target_constraints_t* constraints, const loom_op_t* op,
     const loom_error_def_t* error, const loom_diagnostic_param_t* params,
@@ -211,8 +201,9 @@ iree_status_t loom_low_allocation_target_constraints_reg_class_capacity(
     is_bounded = true;
   }
 
-  const bool is_spillable =
-      !iree_any_bit_set(reg_class->flags, LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE);
+  const bool is_spillable = !iree_any_bit_set(
+      reg_class->flags,
+      LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE | LOOM_LOW_REG_CLASS_FLAG_REFERENCE);
   *out_capacity = (loom_low_allocation_class_capacity_t){
       .descriptor_reg_class_id = reg_class_id,
       .location_kind =
@@ -260,27 +251,9 @@ loom_low_allocation_target_constraints_defining_result_operand(
     IREE_ASSERT_LT(result_index, defining_op->result_count);
     return NULL;
   }
-  uint32_t descriptor_ordinal = LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
-  const int64_t packet_descriptor_ordinal =
-      loom_low_op_descriptor_ordinal(defining_op);
-  if (packet_descriptor_ordinal >= 0) {
-    if ((uint64_t)packet_descriptor_ordinal >=
-        constraints->target->descriptor_set->descriptor_count) {
-      return NULL;
-    }
-    descriptor_ordinal = (uint32_t)packet_descriptor_ordinal;
-  } else {
-    const iree_string_view_t descriptor_key =
-        loom_low_allocation_target_constraints_string_or_empty(
-            module, loom_low_op_opcode(defining_op));
-    descriptor_ordinal = loom_low_descriptor_set_lookup_descriptor(
-        constraints->target->descriptor_set, descriptor_key);
-  }
-  if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
-    return NULL;
-  }
   const loom_low_descriptor_t* descriptor =
-      &constraints->target->descriptor_set->descriptors[descriptor_ordinal];
+      &constraints->target->descriptor_set
+           ->descriptors[loom_low_op_descriptor(defining_op)];
   if (result_index >= descriptor->result_count) {
     return NULL;
   }
@@ -556,7 +529,14 @@ loom_low_allocation_target_constraints_validate_register_location_capacity(
         capacity.location_kind);
   }
   const uint64_t location_end = (uint64_t)location_base + location_count;
-  if (capacity.is_bounded && location_end > capacity.max_units) {
+  const loom_low_reg_class_t* reg_class =
+      loom_low_allocation_target_constraints_reg_class_at(
+          constraints->target->descriptor_set, reg_class_id);
+  const bool fits_fixed_location_window =
+      loom_low_reg_class_fixed_location_range_contains(reg_class, location_base,
+                                                       location_count);
+  if (capacity.is_bounded && location_end > capacity.max_units &&
+      !fits_fixed_location_window) {
     IREE_RETURN_IF_ERROR(
         loom_low_allocation_target_constraints_emit_capacity_failure(
             constraints, diagnostic_op, reg_class_id, subject, location_base,
@@ -999,36 +979,60 @@ loom_low_allocation_target_constraints_fixed_value_for_value(
   return NULL;
 }
 
-static uint32_t loom_low_allocation_target_constraints_assignment_location_end(
-    const loom_low_allocation_assignment_t* assignment) {
-  const uint64_t location_end =
-      (uint64_t)assignment->location_base + assignment->location_count;
+static uint32_t loom_low_allocation_target_constraints_location_end(
+    uint32_t location_base, uint32_t location_count) {
+  const uint64_t location_end = (uint64_t)location_base + location_count;
   return location_end > UINT32_MAX ? UINT32_MAX : (uint32_t)location_end;
 }
 
-void loom_low_allocation_target_constraints_record_assignment_location_end(
+void loom_low_allocation_target_constraints_record_location_extent(
     loom_low_allocation_target_constraints_t* constraints,
-    const loom_low_allocation_assignment_t* assignment) {
+    uint16_t descriptor_reg_class_id,
+    loom_low_allocation_location_kind_t location_kind, uint32_t location_base,
+    uint32_t location_count) {
   IREE_ASSERT_ARGUMENT(constraints);
-  IREE_ASSERT_ARGUMENT(assignment);
-  const uint16_t reg_class_id = assignment->descriptor_reg_class_id;
-  IREE_ASSERT(reg_class_id != LOOM_LOW_REG_CLASS_NONE &&
-              reg_class_id <
+  IREE_ASSERT(descriptor_reg_class_id != LOOM_LOW_REG_CLASS_NONE &&
+              descriptor_reg_class_id <
                   constraints->target->descriptor_set->reg_class_count);
   const loom_low_reg_class_t* reg_class =
       loom_low_allocation_target_constraints_reg_class_at(
-          constraints->target->descriptor_set, reg_class_id);
-  if (assignment->location_kind !=
+          constraints->target->descriptor_set, descriptor_reg_class_id);
+  if (location_kind !=
       loom_low_allocation_storage_reg_class_location_kind(reg_class)) {
     return;
   }
+  if (loom_low_reg_class_fixed_location_range_contains(reg_class, location_base,
+                                                       location_count)) {
+    return;
+  }
   const uint32_t location_end =
-      loom_low_allocation_target_constraints_assignment_location_end(
-          assignment);
-  if (constraints->max_assigned_location_end_by_reg_class[reg_class_id] <
-      location_end) {
-    constraints->max_assigned_location_end_by_reg_class[reg_class_id] =
-        location_end;
+      loom_low_allocation_target_constraints_location_end(location_base,
+                                                          location_count);
+  uint32_t* current_end =
+      &constraints
+           ->max_assigned_location_end_by_reg_class[descriptor_reg_class_id];
+  if (*current_end < location_end) {
+    *current_end = location_end;
+  }
+}
+
+void loom_low_allocation_target_constraints_rebuild_assignment_location_ends(
+    loom_low_allocation_target_constraints_t* constraints,
+    const loom_low_allocation_assignment_t* assignments,
+    iree_host_size_t assignment_count) {
+  const iree_host_size_t reg_class_count =
+      constraints->target->descriptor_set->reg_class_count;
+  if (reg_class_count != 0) {
+    memset(constraints->max_assigned_location_end_by_reg_class, 0,
+           reg_class_count *
+               sizeof(*constraints->max_assigned_location_end_by_reg_class));
+  }
+  for (iree_host_size_t i = 0; i < assignment_count; ++i) {
+    const loom_low_allocation_assignment_t* assignment = &assignments[i];
+    loom_low_allocation_target_constraints_record_location_extent(
+        constraints, assignment->descriptor_reg_class_id,
+        assignment->location_kind, assignment->location_base,
+        assignment->location_count);
   }
 }
 
@@ -1126,24 +1130,33 @@ bool loom_low_allocation_target_constraints_fixed_value_conflicts(
             candidate->descriptor_reg_class_id)) {
       continue;
     }
-    const loom_low_allocation_assignment_t fixed_assignment = {
+    const loom_liveness_segment_range_t segment_range =
+        loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(
+            unit_liveness, liveness, fixed_value->value_ordinal);
+    loom_low_allocation_assignment_t fixed_assignment = {
         .value_id = fixed_value->value_id,
         .value_class = fixed_value->interval->value_class,
         .descriptor_reg_class_id = fixed_value->descriptor_reg_class_id,
         .start_point = fixed_value->interval->start_point,
         .end_point = loom_low_allocation_live_range_interval_storage_end_point(
             fixed_value->interval),
+        .liveness_segments = segment_range,
         .unit_count = fixed_value->interval->unit_count,
         .location_kind = fixed_value->location_kind,
         .location_base = fixed_value->location_base,
         .location_count = fixed_value->location_count,
-        .unit_end_point_start =
-            loom_low_allocation_unit_liveness_end_point_start_for_value_ordinal(
+        .unit_point_start =
+            loom_low_allocation_unit_liveness_point_start_for_value_ordinal(
                 unit_liveness, liveness, fixed_value->value_ordinal),
     };
+    fixed_assignment.end_point =
+        loom_low_allocation_live_range_assignment_max_unit_end_point(
+            unit_liveness->end_points, unit_liveness->point_count,
+            &fixed_assignment);
     if (loom_low_allocation_live_range_assignments_conflict(
-            descriptor_set, unit_liveness->end_points,
-            unit_liveness->end_point_count, &fixed_assignment, candidate)) {
+            descriptor_set, liveness, unit_liveness->start_points,
+            unit_liveness->end_points, unit_liveness->point_count,
+            &fixed_assignment, candidate)) {
       return true;
     }
   }

@@ -9,14 +9,11 @@
 // (wasm, bare-metal) can run the single-threaded semaphore tests without
 // pulling in <thread>.
 
-#include <chrono>
 #include <thread>
 
 #include "iree/hal/cts/util/test_base.h"
 
 namespace iree::hal::cts {
-
-using namespace std::chrono_literals;
 
 class SemaphoreThreadTest : public CtsTestBase<> {};
 
@@ -28,7 +25,6 @@ TEST_P(SemaphoreThreadTest, WaitLaterSignaledBeyond) {
                                 IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
 
   std::thread thread([&]() {
-    std::this_thread::sleep_for(100ms);
     // Signal beyond the desired value.
     IREE_ASSERT_OK(
         iree_hal_semaphore_signal(semaphore, 10ull, /*frontier=*/NULL));
@@ -58,7 +54,6 @@ TEST_P(SemaphoreThreadTest, WaitAnyLaterSignaled) {
                                               semaphore_ptrs, payload_values};
 
   std::thread thread([&]() {
-    std::this_thread::sleep_for(100ms);
     IREE_ASSERT_OK(
         iree_hal_semaphore_signal(semaphore_b, 1ull, /*frontier=*/NULL));
   });

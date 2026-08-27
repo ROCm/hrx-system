@@ -12,9 +12,18 @@
 #include "iree/hal/local/executable_library.h"
 #include "iree/hal/local/executable_loader.h"
 
-// Verifies the |library| matches the |executable_params|.
+#ifdef __cplusplus
+extern "C" {
+#endif  // __cplusplus
+
+// Validates |query_result| and returns the selected v0 library.
+iree_status_t iree_hal_executable_library_validate_query_result(
+    const iree_hal_executable_library_header_t* const* query_result,
+    const iree_hal_executable_library_v0_t** out_library);
+
+// Verifies the |library| matches the |load_params|.
 iree_status_t iree_hal_executable_library_verify(
-    const iree_hal_executable_params_t* executable_params,
+    const iree_hal_executable_load_params_t* load_params,
     const iree_hal_executable_library_v0_t* library);
 
 // Allocates and resolves import function and context storage on |environment|
@@ -111,5 +120,9 @@ static inline void iree_hal_executable_library_publish_source_files(
   iree_zone_id_t zone_id = 0;                              \
   (void)zone_id;
 #endif  // IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_INSTRUMENTATION
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif  // __cplusplus
 
 #endif  // IREE_HAL_LOCAL_EXECUTABLE_LIBRARY_UTIL_H_

@@ -172,56 +172,32 @@ static iree_status_t iree_hal_null_command_buffer_execution_barrier(
   return status;
 }
 
-static iree_status_t iree_hal_null_command_buffer_signal_event(
-    iree_hal_command_buffer_t* base_command_buffer, iree_hal_event_t* event,
-    iree_hal_execution_stage_t source_stage_mask) {
-  iree_hal_null_command_buffer_t* command_buffer =
-      iree_hal_null_command_buffer_cast(base_command_buffer);
-
-  // TODO(null): WIP API and may change; signals the given event allowing
-  // waiters to proceed.
-  (void)command_buffer;
-  iree_status_t status =
-      iree_make_status(IREE_STATUS_UNIMPLEMENTED, "events not implemented");
-
-  return status;
-}
-
-static iree_status_t iree_hal_null_command_buffer_reset_event(
-    iree_hal_command_buffer_t* base_command_buffer, iree_hal_event_t* event,
-    iree_hal_execution_stage_t source_stage_mask) {
-  iree_hal_null_command_buffer_t* command_buffer =
-      iree_hal_null_command_buffer_cast(base_command_buffer);
-
-  // TODO(null): WIP API and may change; resets the given event to unsignaled.
-  (void)command_buffer;
-  iree_status_t status =
-      iree_make_status(IREE_STATUS_UNIMPLEMENTED, "events not implemented");
-
-  return status;
-}
-
-static iree_status_t iree_hal_null_command_buffer_wait_events(
+static iree_status_t iree_hal_null_command_buffer_atomic_wait(
     iree_hal_command_buffer_t* base_command_buffer,
-    iree_host_size_t event_count, const iree_hal_event_t** events,
     iree_hal_execution_stage_t source_stage_mask,
     iree_hal_execution_stage_t target_stage_mask,
-    iree_host_size_t memory_barrier_count,
-    const iree_hal_memory_barrier_t* memory_barriers,
-    iree_host_size_t buffer_barrier_count,
-    const iree_hal_buffer_barrier_t* buffer_barriers) {
-  iree_hal_null_command_buffer_t* command_buffer =
-      iree_hal_null_command_buffer_cast(base_command_buffer);
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_wait_params_t params) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "null command buffers do not support atomic waits");
+}
 
-  // TODO(null): WIP API and may change; waits on the list of events and enacts
-  // the specified set of barriers. Implementations without fine-grained
-  // tracking can treat this as an execution_barrier and ignore the
-  // memory/buffer barriers provided.
-  (void)command_buffer;
-  iree_status_t status =
-      iree_make_status(IREE_STATUS_UNIMPLEMENTED, "events not implemented");
+static iree_status_t iree_hal_null_command_buffer_atomic_store(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_store_params_t params) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "null command buffers do not support atomic stores");
+}
 
-  return status;
+static iree_status_t iree_hal_null_command_buffer_atomic_rmw(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_atomic_rmw_params_t params) {
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "null command buffers do not support atomic read-modify-write");
 }
 
 static iree_status_t iree_hal_null_command_buffer_advise_buffer(
@@ -354,9 +330,9 @@ static const iree_hal_command_buffer_vtable_t
         .begin_debug_group = iree_hal_null_command_buffer_begin_debug_group,
         .end_debug_group = iree_hal_null_command_buffer_end_debug_group,
         .execution_barrier = iree_hal_null_command_buffer_execution_barrier,
-        .signal_event = iree_hal_null_command_buffer_signal_event,
-        .reset_event = iree_hal_null_command_buffer_reset_event,
-        .wait_events = iree_hal_null_command_buffer_wait_events,
+        .atomic_wait = iree_hal_null_command_buffer_atomic_wait,
+        .atomic_store = iree_hal_null_command_buffer_atomic_store,
+        .atomic_rmw = iree_hal_null_command_buffer_atomic_rmw,
         .advise_buffer = iree_hal_null_command_buffer_advise_buffer,
         .fill_buffer = iree_hal_null_command_buffer_fill_buffer,
         .update_buffer = iree_hal_null_command_buffer_update_buffer,

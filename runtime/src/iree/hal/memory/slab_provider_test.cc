@@ -20,6 +20,36 @@ static iree_hal_asan_pool_options_t ShadowOptions() {
   return options;
 }
 
+TEST(SlabProviderTest, CPUPropertiesDescribeAtomicStorage) {
+  iree_hal_slab_provider_t* provider = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_cpu_slab_provider_create(iree_allocator_system(), &provider));
+
+  iree_hal_slab_provider_properties_t properties;
+  iree_hal_slab_provider_query_properties(provider, &properties);
+  EXPECT_EQ(properties.memory_type, IREE_HAL_CPU_SLAB_PROVIDER_MEMORY_TYPE);
+  EXPECT_TRUE(iree_all_bits_set(properties.memory_type,
+                                IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                                    IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
+                                    IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL));
+  EXPECT_TRUE(iree_all_bits_set(properties.supported_usage,
+                                IREE_HAL_BUFFER_USAGE_STORAGE));
+
+  const iree_hal_atomic_operation_flags_t expected_32 =
+      iree_atomic_int32_is_lock_free() ? IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL
+                                       : 0;
+  EXPECT_EQ(properties.atomic_operations.device_scope_32, expected_32);
+  EXPECT_EQ(properties.atomic_operations.system_scope_32, expected_32);
+
+  const iree_hal_atomic_operation_flags_t expected_64 =
+      iree_atomic_int64_is_lock_free() ? IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL
+                                       : 0;
+  EXPECT_EQ(properties.atomic_operations.device_scope_64, expected_64);
+  EXPECT_EQ(properties.atomic_operations.system_scope_64, expected_64);
+
+  iree_hal_slab_provider_release(provider);
+}
+
 TEST(SlabProviderASANTest, DisabledOptionsAreAlwaysValid) {
   iree_hal_slab_provider_t* provider = nullptr;
   IREE_ASSERT_OK(

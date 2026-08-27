@@ -4,9 +4,9 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:executable.bzl", "iree_executable_test")
 load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:defs.bzl", "loom_module")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -14,186 +14,69 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-exports_files([
+_GFX11_CASES = [
+    "template_math_legalization.loom",
+    "wave64_reductions.loom",
+]
+
+_GFX1250_CASES = [
+    "cluster_b128_multicast.loom",
+]
+
+_AMDGPU_SELECTION_CASES = [
+    "target_provider_selection.loom",
+]
+
+_NON_EXECUTION_EXAMPLES = [
     "lane_distribution.loom",
     "packed_field_contracts.loom",
-    "q8_block_unroll.loom",
     "q8_hip_shaped_unroll_unresolved.loom",
-    "q8_load_width.loom",
-    "q8_q4_signedness.loom",
-    "shared_memory_tile.loom",
-    "shared_memory_transpose.loom",
-    "shared_memory_vector_tile.loom",
-    "shared_memory_wave_tile.loom",
-    "target_provider_selection.loom",
-    "wave64_reductions.loom",
-])
+]
 
-_AMDGPU_ARTIFACTS_COMPATIBLE_WITH = loom_config_compatible_with([
-    "//loom/config/target:amdgpu_artifacts",
-])
+_PORTABLE_CASES = glob(
+    ["*.loom"],
+    exclude = _AMDGPU_SELECTION_CASES + _GFX11_CASES + _GFX1250_CASES + _NON_EXECUTION_EXAMPLES,
+)
 
-_AMDGPU_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
-    "//loom/config/execute:amdgpu_hal",
-])
+exports_files(glob(["*.loom"]))
 
+loom_module(
+    name = "portable_cases",
+    srcs = _PORTABLE_CASES,
+    output_format = "bc",
+)
+
+loom_module(
+    name = "amdgpu_selection_cases",
+    srcs = _AMDGPU_SELECTION_CASES,
+    output_format = "bc",
+)
+
+loom_module(
+    name = "gfx11_cases",
+    srcs = _GFX11_CASES,
+    output_format = "bc",
+)
+
+loom_module(
+    name = "gfx1250_cases",
+    srcs = _GFX1250_CASES,
+    output_format = "bc",
+)
+
+# Authoring diagnostics and transform examples exercise CLI contracts rather
+# than physical execution. Semantic cases above are executed by target
+# providers through their normal iree-test-loom suites.
 iree_execution_test_suite(
     name = "execution_test",
-    data = [
-        "lane_distribution.loom",
-        "packed_field_contracts.loom",
-        "q8_block_unroll.loom",
-        "q8_hip_shaped_unroll_unresolved.loom",
-        "q8_load_width.loom",
-        "q8_q4_signedness.loom",
-        "shared_memory_tile.loom",
-        "shared_memory_transpose.loom",
-        "shared_memory_vector_tile.loom",
-        "shared_memory_wave_tile.loom",
-        "target_provider_selection.loom",
-        "wave64_reductions.loom",
-    ],
+    data = glob(["*.loom"]),
     manifests = ["hip_authoring.test.json"],
     tags = ["hostonly"],
-    target_compatible_with = _AMDGPU_ARTIFACTS_COMPATIBLE_WITH,
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target:amdgpu_artifacts",
+    ]),
     tools = {
-        "iree-benchmark-loom": "//loom/src/loom/tools/iree-benchmark-loom",
         "loom-compile": "//loom/src/loom/tools/loom-compile",
         "loom-opt": "//loom/src/loom/tools/loom-opt",
     },
-)
-
-iree_executable_test(
-    name = "wave64_reductions_amdgpu_test",
-    src = "//loom/src/loom/tools/iree-benchmark-loom",
-    args = [
-        "$(location wave64_reductions.loom)",
-        "--device=amdgpu",
-        "--measure=dispatch_complete",
-        "--sample-compilation=per_sample",
-        "--iterations=1",
-        "--warmup-iterations=0",
-        "--batch-size=1",
-        "--min-time-ms=0",
-        "--max-batches=1",
-        "--input-ring-count=1",
-    ],
-    data = [
-        "wave64_reductions.loom",
-    ],
-    tags = [
-        "iree-run-requirement=runtime.resource.amd_gpu",
-        "manual",
-        "requires-gpu-amd",
-        "runtime-resource=amd-gpu",
-    ],
-    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
-)
-
-iree_executable_test(
-    name = "shared_memory_tile_amdgpu_test",
-    src = "//loom/src/loom/tools/iree-benchmark-loom",
-    args = [
-        "$(location shared_memory_tile.loom)",
-        "--device=amdgpu",
-        "--measure=dispatch_complete",
-        "--sample-compilation=per_sample",
-        "--iterations=1",
-        "--warmup-iterations=0",
-        "--batch-size=1",
-        "--min-time-ms=0",
-        "--max-batches=1",
-        "--input-ring-count=1",
-    ],
-    data = [
-        "shared_memory_tile.loom",
-    ],
-    tags = [
-        "iree-run-requirement=runtime.resource.amd_gpu",
-        "manual",
-        "requires-gpu-amd",
-        "runtime-resource=amd-gpu",
-    ],
-    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
-)
-
-iree_executable_test(
-    name = "shared_memory_wave_tile_amdgpu_test",
-    src = "//loom/src/loom/tools/iree-benchmark-loom",
-    args = [
-        "$(location shared_memory_wave_tile.loom)",
-        "--device=amdgpu",
-        "--measure=dispatch_complete",
-        "--sample-compilation=per_sample",
-        "--iterations=1",
-        "--warmup-iterations=0",
-        "--batch-size=1",
-        "--min-time-ms=0",
-        "--max-batches=1",
-        "--input-ring-count=1",
-    ],
-    data = [
-        "shared_memory_wave_tile.loom",
-    ],
-    tags = [
-        "iree-run-requirement=runtime.resource.amd_gpu",
-        "manual",
-        "requires-gpu-amd",
-        "runtime-resource=amd-gpu",
-    ],
-    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
-)
-
-iree_executable_test(
-    name = "shared_memory_transpose_amdgpu_test",
-    src = "//loom/src/loom/tools/iree-benchmark-loom",
-    args = [
-        "$(location shared_memory_transpose.loom)",
-        "--device=amdgpu",
-        "--measure=dispatch_complete",
-        "--sample-compilation=per_sample",
-        "--iterations=1",
-        "--warmup-iterations=0",
-        "--batch-size=1",
-        "--min-time-ms=0",
-        "--max-batches=1",
-        "--input-ring-count=1",
-    ],
-    data = [
-        "shared_memory_transpose.loom",
-    ],
-    tags = [
-        "iree-run-requirement=runtime.resource.amd_gpu",
-        "manual",
-        "requires-gpu-amd",
-        "runtime-resource=amd-gpu",
-    ],
-    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
-)
-
-iree_executable_test(
-    name = "shared_memory_vector_tile_amdgpu_test",
-    src = "//loom/src/loom/tools/iree-benchmark-loom",
-    args = [
-        "$(location shared_memory_vector_tile.loom)",
-        "--device=amdgpu",
-        "--measure=dispatch_complete",
-        "--sample-compilation=per_sample",
-        "--iterations=1",
-        "--warmup-iterations=0",
-        "--batch-size=1",
-        "--min-time-ms=0",
-        "--max-batches=1",
-        "--input-ring-count=1",
-    ],
-    data = [
-        "shared_memory_vector_tile.loom",
-    ],
-    tags = [
-        "iree-run-requirement=runtime.resource.amd_gpu",
-        "manual",
-        "requires-gpu-amd",
-        "runtime-resource=amd-gpu",
-    ],
-    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
 )

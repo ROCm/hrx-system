@@ -60,10 +60,11 @@ typedef enum loom_token_kind_e {
   LOOM_TOKEN_ARROW = 20,
   LOOM_TOKEN_DIM_X = 21,  // 'x' dimension separator (only when in_dim_list).
   LOOM_TOKEN_PIPE = 22,
+  LOOM_TOKEN_MINUS = 23,
 
   // Special.
-  LOOM_TOKEN_EOF = 23,
-  LOOM_TOKEN_ERROR = 24,
+  LOOM_TOKEN_EOF = 24,
+  LOOM_TOKEN_ERROR = 25,
   LOOM_TOKEN_COUNT_,
 
   // Sentinel for "no token" (uninitialized lookahead).
@@ -144,6 +145,14 @@ typedef struct loom_tokenizer_t {
   iree_host_size_t pending_comment_count;
   // Allocated capacity of pending_comments.
   iree_host_size_t pending_comment_capacity;
+  // Source line containing the first pending comment, or zero when none.
+  uint32_t pending_comment_start_line;
+  // Source line containing the most recent pending comment, or zero when none.
+  uint32_t pending_comment_end_line;
+  // Number of initial line-1 comment lines forming a separated file header.
+  iree_host_size_t pending_file_header_line_count;
+  // True when an empty source line precedes the pending comments or token.
+  bool pending_leading_blank_line;
   iree_status_t status;
 
   // Position of the most recently consumed token's end. Updated on
@@ -152,10 +161,10 @@ typedef struct loom_tokenizer_t {
   uint32_t consumed_end_line;
   uint32_t consumed_end_column;
 
-  // When true, 'x' at identifier-start position produces DIM_X instead
-  // of starting an identifier. Set by the shaped type parser during
-  // dimension list parsing (e.g., "4x[%M]xf32") and cleared before
-  // scanning element types or encoding parameters.
+  // When true, 'x' at identifier-start position produces DIM_X instead of
+  // starting an identifier. Set by the shaped type parser while scanning the
+  // dimension list and its element-type lookahead (e.g., "4x[%M]xf32"), then
+  // cleared before consuming the element type or encoding parameters.
   bool in_dim_list;
 } loom_tokenizer_t;
 
@@ -175,12 +184,27 @@ void loom_tokenizer_deinitialize(loom_tokenizer_t* tokenizer);
 // tokens plus |tokenizer->error| metadata.
 iree_status_t loom_tokenizer_consume_status(loom_tokenizer_t* tokenizer);
 
-// Returns pending line comments collected while scanning leading whitespace and
-// clears the tokenizer's pending list. The returned array is tokenizer-scratch
-// storage; comment payloads are slices into the original source buffer.
+// Takes a file header from pending source trivia. A file header is the
+// contiguous comment block beginning on source line 1 when an empty line
+// separates it from following source, or when no source follows it. Adjacent
+// line-1 comments remain pending for the first operation. The returned line
+// array is tokenizer-scratch storage; payloads are normalized slices into the
+// original source buffer that omit // and its conventional single separator
+// space.
+void loom_tokenizer_take_file_header(loom_tokenizer_t* tokenizer,
+                                     const iree_string_view_t** out_lines,
+                                     iree_host_size_t* out_line_count);
+
+// Returns pending source trivia collected while scanning leading whitespace
+// and clears it. |out_leading_blank_line| is true when at least one empty line
+// separates the previously consumed token from the first pending comment, or
+// from the lookahead token when there are no comments. File-leading whitespace
+// does not set it. The returned comment array is tokenizer-scratch storage;
+// payloads are normalized slices into the original source buffer that omit //
+// and its conventional single separator space.
 void loom_tokenizer_take_pending_comments(
     loom_tokenizer_t* tokenizer, const iree_string_view_t** out_comments,
-    iree_host_size_t* out_comment_count);
+    iree_host_size_t* out_comment_count, bool* out_leading_blank_line);
 
 // Clears pending line comments that were collected before a delimiter and do
 // not attach to any operation or block.

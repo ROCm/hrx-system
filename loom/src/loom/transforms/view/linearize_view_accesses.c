@@ -22,7 +22,6 @@
 #include "loom/pass/value_facts.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/util/fact_table.h"
-#include "loom/util/math.h"
 #include "loom/util/walk.h"
 
 //===----------------------------------------------------------------------===//
@@ -215,7 +214,7 @@ static bool loom_linearize_view_accesses_static_dense_view_type(
   uint8_t rank = loom_type_rank(view_type);
   for (uint8_t axis = 0; axis < rank; ++axis) {
     int64_t dim = loom_type_dim_static_size_at(view_type, axis);
-    if (dim <= 0 || !loom_checked_mul_i64(length, dim, &length)) {
+    if (dim <= 0 || !iree_checked_mul_i64(length, dim, &length)) {
       return false;
     }
   }
@@ -342,8 +341,8 @@ static bool loom_linearize_view_accesses_add_static_linear_contribution(
     return true;
   }
   int64_t contribution = 0;
-  if (!loom_checked_mul_i64(axis_index, stride, &contribution) ||
-      !loom_checked_add_i64(*static_offset, contribution, static_offset)) {
+  if (!iree_checked_mul_i64(axis_index, stride, &contribution) ||
+      !iree_checked_add_i64(*static_offset, contribution, static_offset)) {
     return false;
   }
   loom_value_facts_t contribution_facts =
@@ -388,7 +387,7 @@ static iree_status_t loom_linearize_view_accesses_build_linear_index(
     if (reverse_axis != 0) {
       int64_t next_dim =
           loom_type_dim_static_size_at(view_type, (iree_host_size_t)(axis + 1));
-      if (!loom_checked_mul_i64(stride, next_dim, &stride)) {
+      if (!iree_checked_mul_i64(stride, next_dim, &stride)) {
         return iree_ok_status();
       }
     }
@@ -403,7 +402,7 @@ static iree_status_t loom_linearize_view_accesses_build_linear_index(
         axis_static_offsets ? axis_static_offsets[axis] : 0;
     if (dynamic_axis_indices[axis] == LOOM_VALUE_ID_INVALID) {
       int64_t effective_static_index = 0;
-      if (!loom_checked_add_i64(static_axis_indices[axis], axis_static_offset,
+      if (!iree_checked_add_i64(static_axis_indices[axis], axis_static_offset,
                                 &effective_static_index) ||
           effective_static_index < 0 ||
           effective_static_index >= axis_origin_count) {
@@ -430,8 +429,8 @@ static iree_status_t loom_linearize_view_accesses_build_linear_index(
         dynamic_exact >= 0 && dynamic_exact < axis_origin_count) {
       if (dynamic_exact == 0) continue;
       int64_t contribution = 0;
-      if (!loom_checked_mul_i64(dynamic_exact, stride, &contribution) ||
-          !loom_checked_add_i64(static_offset, contribution, &static_offset)) {
+      if (!iree_checked_mul_i64(dynamic_exact, stride, &contribution) ||
+          !iree_checked_add_i64(static_offset, contribution, &static_offset)) {
         return iree_ok_status();
       }
       loom_value_facts_t contribution_facts =
@@ -470,14 +469,12 @@ static iree_status_t loom_linearize_view_accesses_build_linear_index(
     } else if (accumulator == LOOM_VALUE_ID_INVALID) {
       loom_op_t* mul_op = NULL;
       IREE_RETURN_IF_ERROR(loom_index_mul_build(
-          builder, axis_index, stride_index,
-          loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), location, &mul_op));
+          builder, axis_index, stride_index, location, &mul_op));
       accumulator = loom_index_mul_result(mul_op);
     } else {
       loom_op_t* madd_op = NULL;
       IREE_RETURN_IF_ERROR(loom_index_madd_build(
-          builder, axis_index, stride_index, accumulator,
-          loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), location, &madd_op));
+          builder, axis_index, stride_index, accumulator, location, &madd_op));
       accumulator = loom_index_madd_result(madd_op);
     }
   }
@@ -750,7 +747,7 @@ static bool loom_linearize_view_accesses_tile_static_bounds_valid(
       continue;
     }
     int64_t highest_index = 0;
-    if (!loom_checked_add_i64(static_axis_indices[axis], max_axis_offsets[axis],
+    if (!iree_checked_add_i64(static_axis_indices[axis], max_axis_offsets[axis],
                               &highest_index) ||
         static_axis_indices[axis] < 0 ||
         highest_index >= loom_type_dim_static_size_at(view_type, axis)) {

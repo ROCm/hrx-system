@@ -20,14 +20,17 @@ loom_cc_library(
   DEPS
     ::vulkan_profile
     iree::base
+    iree::io::byte_sequence
     loom::target::arch::spirv::descriptors::low_registry
+    loom::target::arch::spirv::facts
     loom::target::arch::spirv::low_verify
-    loom::target::artifact_manifest_collect
-    loom::target::compile_report
     loom::target::emit::spirv::module_builder
     loom::target::emit::spirv::module_emitter
     loom::target::entry_selection
+    loom::target::function_contract
     loom::target::low_descriptor_registry
+    loom::target::reporting::artifact_manifest_collect
+    loom::target::reporting::report
     loom::target::types
     loom::tooling::execution::compile_options
     loom::tooling::execution::hal::artifact
@@ -101,10 +104,48 @@ loom_cc_test(
     loom::ops::op_registry
     loom::target::arch::spirv::descriptors::low_registry
     loom::target::arch::spirv::ops
+    loom::target::arch::spirv::profile
     loom::target::types
+    loom::testing::byte_sequence
     loom::testing::module_ptr
     loom::tooling::execution::hal::artifact
     loom::tooling::execution::hal::runtime
+  LABELS
+    "iree-build-requirement=loom.target.arch.spirv"
+    "iree-build-requirement=loom.emit.spirv"
+)
+endif()
+
+if(IREE_HAL_DRIVER_VULKAN AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
+loom_cc_test(
+  NAME
+    module_emitter_test
+  SRCS
+    "module_emitter_test.cc"
+  DEPS
+    ::vulkan_profile
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::analysis::symbol_facts
+    loom::codegen::low::text_asm
+    loom::format::text::parser
+    loom::ir
+    loom::ops::func_symbol_facts
+    loom::ops::op_defs
+    loom::ops::op_registry
+    loom::ops::target
+    loom::target::arch::spirv::descriptors::low_registry
+    loom::target::arch::spirv::features
+    loom::target::arch::spirv::ops
+    loom::target::arch::spirv::profile
+    loom::target::emit::spirv::module_emitter
+    loom::target::facts_builder
+    loom::target::function_contract
+    loom::target::function_version
+    loom::target::profile
+    loom::target::types
+    loom::testing::module_ptr
   LABELS
     "iree-build-requirement=loom.target.arch.spirv"
     "iree-build-requirement=loom.emit.spirv"
@@ -133,6 +174,62 @@ loom_cc_test(
   LABELS
     "iree-build-requirement=loom.target.arch.spirv"
     "iree-build-requirement=loom.emit.spirv"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
+iree_execution_test_suite(
+  NAME
+    iree_test_loom_execution_test
+  MANIFESTS
+    "test/iree-test-loom_spirv_vulkan.test.json"
+  TOOLS
+    "iree-test-loom=loom::tools::iree-test-loom"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/buffer_bulk_hal_actual.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/dynamic_workgroup_hal_actual.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/launch_schedule_hal_actual.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_coop_hal_actual.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_coop_u8_hal_actual.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_hal_actual.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_integer_hal_actual.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_quantized_hal_actual.loom"
+  SANITIZER_SUPPRESSIONS
+    lsan
+    vulkan
+  LABELS
+    "iree-run-requirement=runtime.resource.vulkan_device"
+    "requires-gpu-vulkan"
+    "runtime-resource=vulkan-device"
+  RESOURCE_GROUP
+    loom-vulkan-tests
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
+iree_execution_test_suite(
+  NAME
+    iree_benchmark_loom_execution_test
+  MANIFESTS
+    "test/iree-benchmark-loom_spirv_vulkan.test.json"
+  TOOLS
+    "iree-benchmark-loom=loom::tools::iree-benchmark-loom"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/launch_schedule_hal_actual.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_coop_hal_actual.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_coop_u8_hal_actual.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_hal_actual.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_quantized_hal_actual.loom"
+  SANITIZER_SUPPRESSIONS
+    lsan
+    vulkan
+  LABELS
+    "iree-run-requirement=runtime.resource.vulkan_device"
+    "requires-gpu-vulkan"
+    "runtime-resource=vulkan-device"
+    "manual"
+  RESOURCE_GROUP
+    loom-vulkan-tests
 )
 endif()
 

@@ -1,55 +1,55 @@
 // RUN: emit source-low output=low
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @scalar_i8_constant_sign_extend() -> (i8) {
   %value = scalar.constant -2 : i8
   func.return %value : i8
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_i8_constant_sign_extend() -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_i8_constant_sign_extend() -> (reg<amdgpu.vgpr>) asm {
   %value = v_mov_b32 4294967294
   return %value
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @scalar_i16_constant_sign_extend() -> (i16) {
   %value = scalar.constant -32768 : i16
   func.return %value : i16
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_i16_constant_sign_extend() -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_i16_constant_sign_extend() -> (reg<amdgpu.vgpr>) asm {
   %value = v_mov_b32 4294934528
   return %value
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @i8x4_vector_constant() -> (vector<4xi8>) {
   %value = vector.constant -1 : vector<4xi8>
   func.return %value : vector<4xi8>
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i8x4_vector_constant() -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x4_vector_constant() -> (reg<amdgpu.vgpr>) asm {
   %value = v_mov_b32 4294967295
   return %value
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @i16x4_vector_constant() -> (vector<4xi16>) {
   %value = vector.constant 4660 : vector<4xi16>
   func.return %value : vector<4xi16>
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i16x4_vector_constant() -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x4_vector_constant() -> (reg<amdgpu.vgpr x2>) asm {
   %3 = v_mov_b32 305402420
   %value = concat(%3, %3) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %value
@@ -57,21 +57,21 @@ low.func.def target(@target) abi(hal_kernel) @i16x4_vector_constant() -> (reg<am
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @i16x2_vector_constant() -> (vector<2xi16>) {
   %value = vector.constant -2 : vector<2xi16>
   func.return %value : vector<2xi16>
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i16x2_vector_constant() -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x2_vector_constant() -> (reg<amdgpu.vgpr>) asm {
   %value = v_mov_b32 4294901758
   return %value
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @i8x4_from_elements_exact() -> (vector<4xi8>) {
   %c0 = scalar.constant 0 : i8
   %c1 = scalar.constant 1 : i8
@@ -82,14 +82,14 @@ func.def target(@target) @i8x4_from_elements_exact() -> (vector<4xi8>) {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i8x4_from_elements_exact() -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x4_from_elements_exact() -> (reg<amdgpu.vgpr>) asm {
   %value = v_mov_b32 50462976
   return %value
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @i16x4_from_elements_exact() -> (vector<4xi16>) {
   %c0 = scalar.constant 4660 : i16
   %c1 = scalar.constant -2 : i16
@@ -100,7 +100,7 @@ func.def target(@target) @i16x4_from_elements_exact() -> (vector<4xi16>) {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i16x4_from_elements_exact() -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x4_from_elements_exact() -> (reg<amdgpu.vgpr x2>) asm {
   %7 = v_mov_b32 4294840884
   %8 = v_mov_b32 4286578943
   %value = concat(%7, %8) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
@@ -109,14 +109,14 @@ low.func.def target(@target) abi(hal_kernel) @i16x4_from_elements_exact() -> (re
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @i8x4_from_elements_dynamic(%a: i8, %b: i8, %c: i8, %d: i8) -> (vector<4xi8>) {
   %value = vector.from_elements %a, %b, %c, %d : vector<4xi8>
   func.return %value : vector<4xi8>
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i8x4_from_elements_dynamic(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>, %d: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x4_from_elements_dynamic(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>, %d: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %11 = v_and_b32_lit %a, 255
   %12 = v_and_b32_lit %b, 255
   %13 = v_lshlrev_b32_src0_inline %12, 8
@@ -132,14 +132,14 @@ low.func.def target(@target) abi(hal_kernel) @i8x4_from_elements_dynamic(%a: reg
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @i16x4_from_elements_dynamic(%a: i16, %b: i16, %c: i16, %d: i16) -> (vector<4xi16>) {
   %value = vector.from_elements %a, %b, %c, %d : vector<4xi16>
   func.return %value : vector<4xi16>
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i16x4_from_elements_dynamic(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>, %d: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x4_from_elements_dynamic(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>, %d: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
   %11 = v_and_b32_lit %a, 65535
   %12 = v_and_b32_lit %b, 65535
   %13 = v_lshlrev_b32_src0_inline %12, 16
@@ -154,42 +154,42 @@ low.func.def target(@target) abi(hal_kernel) @i16x4_from_elements_dynamic(%a: re
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @i8x1_extract_static(%bytes: vector<1xi8>) -> (i8) {
   %lane = vector.extract %bytes[0] : vector<1xi8> -> i8
   func.return %lane : i8
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i8x1_extract_static(%bytes: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x1_extract_static(%bytes: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %lane = v_bfe_i32_offset_width_inline %bytes {offset = 0, width = 8}
   return %lane
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @i8x4_extract_static(%bytes: vector<4xi8>) -> (i8) {
   %lane = vector.extract %bytes[2] : vector<4xi8> -> i8
   func.return %lane : i8
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i8x4_extract_static(%bytes: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x4_extract_static(%bytes: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %lane = v_bfe_i32_offset_width_inline %bytes {offset = 16, width = 8}
   return %lane
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @i8x4_extract_dynamic(%bytes: vector<4xi8>, %lane_index: index) -> (i8) {
   %lane = vector.extract %bytes[%lane_index] : vector<4xi8> -> i8
   func.return %lane : i8
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i8x4_extract_dynamic(%bytes: reg<amdgpu.vgpr>, %lane_index: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x4_extract_dynamic(%bytes: reg<amdgpu.vgpr>, %lane_index: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
   %7 = v_bfe_i32_offset_width_inline %bytes {offset = 0, width = 8}
   %8 = v_mov_b32_copy %lane_index
   %9 = v_mov_b32 1
@@ -202,43 +202,43 @@ low.func.def target(@target) abi(hal_kernel) @i8x4_extract_dynamic(%bytes: reg<a
   %16 = v_cndmask_b32 %12, %15, %14
   %17 = v_mov_b32 3
   %18 = v_cmp_eq_i32 %8, %17
-  %19 = v_bfe_i32_offset_width_inline %bytes {offset = 24, width = 8}
+  %19 = v_ashrrev_i32_src0_inline %bytes, 24
   %lane = v_cndmask_b32 %16, %19, %18
   return %lane
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @i16x1_extract_static(%word: vector<1xi16>) -> (i16) {
   %lane = vector.extract %word[0] : vector<1xi16> -> i16
   func.return %lane : i16
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i16x1_extract_static(%word: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x1_extract_static(%word: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %lane = v_bfe_i32_offset_width_inline %word {offset = 0, width = 16}
   return %lane
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @i16x4_extract_static(%words: vector<4xi16>) -> (i16) {
   %lane = vector.extract %words[3] : vector<4xi16> -> i16
   func.return %lane : i16
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i16x4_extract_static(%words: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x4_extract_static(%words: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %5 = slice %words[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %lane = v_bfe_i32_offset_width_inline %5 {offset = 16, width = 16}
+  %lane = v_ashrrev_i32_src0_inline %5, 16
   return %lane
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @i8x4_splat_exact() -> (vector<4xi8>) {
   %scalar = scalar.constant -1 : i8
   %value = vector.splat %scalar : vector<4xi8>
@@ -246,14 +246,14 @@ func.def target(@target) @i8x4_splat_exact() -> (vector<4xi8>) {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i8x4_splat_exact() -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x4_splat_exact() -> (reg<amdgpu.vgpr>) asm {
   %value = v_mov_b32 4294967295
   return %value
 }
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @i16x4_splat_exact() -> (vector<4xi16>) {
   %scalar = scalar.constant 7 : i16
   %value = vector.splat %scalar : vector<4xi16>
@@ -261,7 +261,7 @@ func.def target(@target) @i16x4_splat_exact() -> (vector<4xi16>) {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i16x4_splat_exact() -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x4_splat_exact() -> (reg<amdgpu.vgpr x2>) asm {
   %5 = v_mov_b32 458759
   %value = concat(%5, %5) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %value
@@ -269,7 +269,7 @@ low.func.def target(@target) abi(hal_kernel) @i16x4_splat_exact() -> (reg<amdgpu
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @i8x4_insert_static(%bytes: vector<4xi8>) -> (vector<4xi8>) {
   %value = scalar.constant -1 : i8
   %updated = vector.insert %value into %bytes[2] : i8, vector<4xi8>
@@ -277,7 +277,7 @@ func.def target(@target) @i8x4_insert_static(%bytes: vector<4xi8>) -> (vector<4x
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i8x4_insert_static(%bytes: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x4_insert_static(%bytes: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %value = v_mov_b32 4294967295
   %7 = v_and_b32_lit %value, 255
   %8 = v_and_b32_lit %bytes, 4278255615
@@ -288,7 +288,7 @@ low.func.def target(@target) abi(hal_kernel) @i8x4_insert_static(%bytes: reg<amd
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @i8x4_insert_dynamic(%bytes: vector<4xi8>, %lane: index) -> (vector<4xi8>) {
   %value = scalar.constant 7 : i8
   %updated = vector.insert %value into %bytes[%lane] : i8, vector<4xi8>
@@ -296,7 +296,7 @@ func.def target(@target) @i8x4_insert_dynamic(%bytes: vector<4xi8>, %lane: index
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i8x4_insert_dynamic(%bytes: reg<amdgpu.vgpr>, %lane: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x4_insert_dynamic(%bytes: reg<amdgpu.vgpr>, %lane: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
   %value = v_mov_b32 7
   %9 = v_mov_b32_copy %lane
   %10 = v_and_b32_lit %value, 255
@@ -328,7 +328,7 @@ low.func.def target(@target) abi(hal_kernel) @i8x4_insert_dynamic(%bytes: reg<am
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @i16x4_insert_static(%words: vector<4xi16>) -> (vector<4xi16>) {
   %value = scalar.constant -2 : i16
   %updated = vector.insert %value into %words[3] : i16, vector<4xi16>
@@ -336,7 +336,7 @@ func.def target(@target) @i16x4_insert_static(%words: vector<4xi16>) -> (vector<
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i16x4_insert_static(%words: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x4_insert_static(%words: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %value = v_mov_b32 4294967294
   %7 = v_and_b32_lit %value, 65535
   %8 = slice %words[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
@@ -350,14 +350,14 @@ low.func.def target(@target) abi(hal_kernel) @i16x4_insert_static(%words: reg<am
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @i16x4_insert_dynamic(%words: vector<4xi16>, %value: i16, %lane: index) -> (vector<4xi16>) {
   %updated = vector.insert %value into %words[%lane] : i16, vector<4xi16>
   func.return %updated : vector<4xi16>
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i16x4_insert_dynamic(%words: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>, %lane: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x4_insert_dynamic(%words: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>, %lane: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x2>) asm {
   %9 = v_mov_b32_copy %lane
   %10 = v_and_b32_lit %value, 65535
   %11 = slice %words[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
@@ -389,14 +389,14 @@ low.func.def target(@target) abi(hal_kernel) @i16x4_insert_dynamic(%words: reg<a
 
 // ====
 
-amdgpu.target<gfx1100> @target
+amdgpu.target<gfx11-generic> @target
 func.def target(@target) @i8x1_insert_masks_value(%old: vector<1xi8>, %value: i8) -> (vector<1xi8>) {
   %updated = vector.insert %value into %old[0] : i8, vector<1xi8>
   func.return %updated : vector<1xi8>
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i8x1_insert_masks_value(%old: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x1_insert_masks_value(%old: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %updated = v_and_b32_lit %value, 255
   return %updated
 }

@@ -7,6 +7,26 @@ func.def @semantic() {
 
 // ====
 
+kernel.decl @launch_only() launch()
+
+func.def @ordinary_calls_require_callable_symbols() {
+  // ERROR@+1: SYMBOL/003 {symbol_name="launch_only", actual_kind="kernel", expected_kind="function"}
+  func.call @launch_only() : ()
+  func.return
+}
+
+// ====
+
+template.decl @provider_only(%value: i32) -> (i32)
+
+func.def @template_families_are_not_runtime_callable(%value: i32) -> (i32) {
+  // ERROR@+1: SYMBOL/003 {symbol_name="provider_only", actual_kind="template family", expected_kind="function"}
+  %result = func.call @provider_only(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
 // ABI contracts can remain target-independent until invocation selection.
 func.def abi(object_function) @targetless_abi() {
   func.return
@@ -20,3 +40,58 @@ test.target<low_core> @test_target
 func.def target(@test_target) abi(object_function) export("semantic") @targeted_semantic() {
   func.return
 }
+
+// ====
+
+// Ordinary functions may author target-local execution choices.
+target.generic<reference> @wave64_target {subgroup_size = 64}
+
+func.def target(@wave64_target) @wave64_function() {
+  func.return
+}
+
+// ====
+
+target.generic<reference> @wave64_target {subgroup_size = 64}
+
+template.decl @test.wave64()
+
+// ERROR@+1: TARGET/067 {provider_name="wave64_template", target_name="wave64_target", field_name="subgroup_size"}
+template.def<@test.wave64> target(@wave64_target) @wave64_template() {
+  template.return
+}
+
+// ====
+
+target.generic<reference> @large_target {max_workgroup_size_x = 1024}
+
+template.decl @test.large()
+
+// ERROR@+1: TARGET/067 {provider_name="large_ukernel", target_name="large_target", field_name="max_workgroup_size_x"}
+template.ukernel<@test.large> target(@large_target) @large_ukernel()
+
+// ====
+
+// Only parameterized attribute families with target-condition semantics are
+// valid as typed provider requirements.
+template.decl @test.invalid_condition()
+
+// ERROR@+1: TARGET/068 {function_name="not_a_condition", condition_index="0", reason="parameterized attribute family 'test.tile' is not a target condition"}
+template.def<@test.invalid_condition> requires [#test.tile<width = 8>] @not_a_condition() {
+  template.return
+}
+
+// ====
+
+// Target condition values are validated at the authored provider boundary.
+template.decl @test.invalid_condition()
+
+// ERROR@+1: TARGET/068 {function_name="invalid_size", condition_index="0", reason="target.subgroup.size requires a nonzero unsigned 32-bit size; got 0"}
+template.ukernel<@test.invalid_condition> requires [#target.subgroup.size<0>] @invalid_size()
+
+// ====
+
+// Family requirements use the same typed target-condition boundary as
+// provider requirements.
+// ERROR@+1: TARGET/068 {function_name="invalid_family_condition", condition_index="0", reason="parameterized attribute family 'test.tile' is not a target condition"}
+template.decl requires [#test.tile<width = 8>] @invalid_family_condition()

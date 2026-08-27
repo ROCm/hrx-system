@@ -10,6 +10,7 @@
 
 #include "iree/base/api.h"
 #include "loom/error/emitter.h"
+#include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/provider.h"
 #include "loom/target/arch/amdgpu/records/target_records.h"
 #include "loom/target/arch/amdgpu/target_info.h"
@@ -17,12 +18,10 @@
 #include "loomc/iree.h"
 #include "target.h"
 
-static char loomc_amdgpu_profile_payload_type;
-
-static void loomc_amdgpu_profile_payload_deinitialize(
-    void* payload, loomc_allocator_t allocator) {
-  (void)payload;
-  (void)allocator;
+static void loomc_amdgpu_target_profile_deinitialize(
+    loom_target_profile_t* target_profile, loomc_allocator_t allocator) {
+  loomc_allocator_free(allocator,
+                       (loom_amdgpu_target_profile_t*)target_profile);
 }
 
 static loomc_status_t loomc_amdgpu_validate_string_view(
@@ -58,23 +57,102 @@ static loomc_status_t loomc_amdgpu_profile_options_validate(
         "AMDGPU profile option extensions are not supported");
   }
   LOOMC_RETURN_IF_ERROR(loomc_amdgpu_validate_string_view(options->identifier));
-  LOOMC_RETURN_IF_ERROR(loomc_amdgpu_validate_string_view(options->processor));
-  if (loomc_string_view_is_empty(options->processor)) {
+  LOOMC_RETURN_IF_ERROR(
+      loomc_amdgpu_validate_string_view(options->identity.target));
+  if (loomc_string_view_is_empty(options->identity.target)) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
-                             "AMDGPU profile options require processor");
+                             "AMDGPU profile options require target");
+  }
+  switch (options->identity.amdhsa_features.sramecc) {
+    case LOOMC_AMDGPU_TARGET_FEATURE_ANY:
+    case LOOMC_AMDGPU_TARGET_FEATURE_UNSUPPORTED:
+    case LOOMC_AMDGPU_TARGET_FEATURE_OFF:
+    case LOOMC_AMDGPU_TARGET_FEATURE_ON:
+      break;
+    default:
+      return loomc_make_status(
+          LOOMC_STATUS_INVALID_ARGUMENT,
+          "AMDGPU profile options contain an unknown sramecc state");
+  }
+  switch (options->identity.amdhsa_features.xnack) {
+    case LOOMC_AMDGPU_TARGET_FEATURE_ANY:
+    case LOOMC_AMDGPU_TARGET_FEATURE_UNSUPPORTED:
+    case LOOMC_AMDGPU_TARGET_FEATURE_OFF:
+    case LOOMC_AMDGPU_TARGET_FEATURE_ON:
+      break;
+    default:
+      return loomc_make_status(
+          LOOMC_STATUS_INVALID_ARGUMENT,
+          "AMDGPU profile options contain an unknown xnack state");
   }
   return loomc_ok_status();
 }
 
-static void loomc_amdgpu_emit_artifact_release(void* storage,
-                                               iree_allocator_t allocator) {
-  iree_allocator_free(allocator, storage);
+static loom_amdgpu_target_feature_state_t
+loomc_amdgpu_target_feature_state_to_internal(
+    loomc_amdgpu_target_feature_state_t state) {
+  switch (state) {
+    case LOOMC_AMDGPU_TARGET_FEATURE_UNSUPPORTED:
+      return LOOM_AMDGPU_TARGET_FEATURE_UNSUPPORTED;
+    case LOOMC_AMDGPU_TARGET_FEATURE_OFF:
+      return LOOM_AMDGPU_TARGET_FEATURE_OFF;
+    case LOOMC_AMDGPU_TARGET_FEATURE_ON:
+      return LOOM_AMDGPU_TARGET_FEATURE_ON;
+    default:
+      return LOOM_AMDGPU_TARGET_FEATURE_ANY;
+  }
 }
 
-typedef struct loomc_amdgpu_emit_library_storage_t {
-  // AMDGPU kernel library storage.
-  loom_amdgpu_hal_kernel_library_t library;
-} loomc_amdgpu_emit_library_storage_t;
+static loomc_amdgpu_target_feature_state_t
+loomc_amdgpu_target_feature_state_from_internal(
+    loom_amdgpu_target_feature_state_t state) {
+  switch (state) {
+    case LOOM_AMDGPU_TARGET_FEATURE_UNSUPPORTED:
+      return LOOMC_AMDGPU_TARGET_FEATURE_UNSUPPORTED;
+    case LOOM_AMDGPU_TARGET_FEATURE_OFF:
+      return LOOMC_AMDGPU_TARGET_FEATURE_OFF;
+    case LOOM_AMDGPU_TARGET_FEATURE_ON:
+      return LOOMC_AMDGPU_TARGET_FEATURE_ON;
+    default:
+      return LOOMC_AMDGPU_TARGET_FEATURE_ANY;
+  }
+}
+
+static void loomc_amdgpu_target_identity_to_internal(
+    const loomc_amdgpu_target_identity_t* identity,
+    const loom_amdgpu_target_info_t* target,
+    loom_amdgpu_target_identity_t* out_identity) {
+  loom_amdgpu_target_identity_initialize(target, out_identity);
+  out_identity->amdhsa_features = (loom_amdgpu_amdhsa_feature_states_t){
+      .sramecc = loomc_amdgpu_target_feature_state_to_internal(
+          identity->amdhsa_features.sramecc),
+      .xnack = loomc_amdgpu_target_feature_state_to_internal(
+          identity->amdhsa_features.xnack),
+  };
+}
+
+static void loomc_amdgpu_target_identity_from_internal(
+    const loom_amdgpu_target_identity_t* identity,
+    loomc_amdgpu_target_identity_t* out_identity) {
+  *out_identity = (loomc_amdgpu_target_identity_t){
+      .target = loomc_string_view_from_iree(identity->target->name),
+      .amdhsa_features =
+          {
+              .sramecc = loomc_amdgpu_target_feature_state_from_internal(
+                  identity->amdhsa_features.sramecc),
+              .xnack = loomc_amdgpu_target_feature_state_from_internal(
+                  identity->amdhsa_features.xnack),
+          },
+  };
+}
+
+typedef struct loomc_amdgpu_emit_artifact_storage_t {
+  // Allocator owning this storage.
+  iree_allocator_t allocator;
+
+  // Artifact manifest sidecar descriptor.
+  loom_target_emit_sidecar_artifact_t artifact_manifest;
+} loomc_amdgpu_emit_artifact_storage_t;
 
 typedef struct loomc_amdgpu_emit_option_prefix_t {
   // Structure type identifying the descriptor.
@@ -87,13 +165,10 @@ typedef struct loomc_amdgpu_emit_option_prefix_t {
   const void* next;
 } loomc_amdgpu_emit_option_prefix_t;
 
-static void loomc_amdgpu_emit_library_release(void* storage,
-                                              iree_allocator_t allocator) {
-  loomc_amdgpu_emit_library_storage_t* library_storage =
-      (loomc_amdgpu_emit_library_storage_t*)storage;
-  loom_amdgpu_hal_kernel_library_deinitialize(&library_storage->library,
-                                              allocator);
-  iree_allocator_free(allocator, library_storage);
+static void loomc_amdgpu_emit_artifact_storage_release(void* storage) {
+  loomc_amdgpu_emit_artifact_storage_t* artifact_storage =
+      (loomc_amdgpu_emit_artifact_storage_t*)storage;
+  iree_allocator_free(artifact_storage->allocator, artifact_storage);
 }
 
 static iree_status_t loomc_amdgpu_forward_diagnostic(
@@ -183,16 +258,13 @@ static iree_status_t loomc_amdgpu_emit_module_artifact(
     loom_target_emit_artifact_t* out_artifact) {
   *out_artifact = (loom_target_emit_artifact_t){0};
 
-  const loom_amdgpu_processor_info_t* processor =
-      (const loom_amdgpu_processor_info_t*)request->target_selection.data;
   loom_amdgpu_runtime_global_flags_t runtime_globals =
       LOOM_AMDGPU_RUNTIME_GLOBAL_NONE;
   IREE_RETURN_IF_ERROR(loomc_amdgpu_emit_resolve_runtime_globals(
       request->option_chain, &runtime_globals));
   iree_diagnostic_emitter_t diagnostic_emitter = request->diagnostic_emitter;
   const loom_amdgpu_hal_kernel_library_options_t library_options = {
-      .processor = processor ? processor->name : iree_string_view_empty(),
-      .target_selection = request->target_selection,
+      .function_versions = request->function_versions,
       .runtime_globals = runtime_globals,
       .diagnostic_sink =
           {
@@ -218,31 +290,28 @@ static iree_status_t loomc_amdgpu_emit_module_artifact(
         iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                          "AMDGPU HSACO emission produced no executable bytes");
   }
-  if (iree_status_is_ok(status) &&
-      library.artifact_manifest.contents.data == NULL) {
+  if (iree_status_is_ok(status) && library.artifact_manifest.contents == NULL) {
     out_artifact->target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF;
-    out_artifact->contents = iree_make_const_byte_span(
-        library.hsaco_data, library.hsaco_data_length);
-    out_artifact->storage = library.hsaco_data;
-    out_artifact->release = loomc_amdgpu_emit_artifact_release;
+    out_artifact->contents = library.hsaco_data;
     library.hsaco_data = NULL;
-    library.hsaco_data_length = 0;
   } else if (iree_status_is_ok(status)) {
-    loomc_amdgpu_emit_library_storage_t* storage = NULL;
+    loomc_amdgpu_emit_artifact_storage_t* storage = NULL;
     status = iree_allocator_malloc(request->allocator, sizeof(*storage),
                                    (void**)&storage);
     if (iree_status_is_ok(status)) {
-      *storage = (loomc_amdgpu_emit_library_storage_t){
-          .library = library,
+      *storage = (loomc_amdgpu_emit_artifact_storage_t){
+          .allocator = request->allocator,
+          .artifact_manifest = library.artifact_manifest,
       };
       out_artifact->target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF;
-      out_artifact->contents = iree_make_const_byte_span(
-          storage->library.hsaco_data, storage->library.hsaco_data_length);
-      out_artifact->sidecars = &storage->library.artifact_manifest;
+      out_artifact->contents = library.hsaco_data;
+      out_artifact->sidecars = &storage->artifact_manifest;
       out_artifact->sidecar_count = 1;
       out_artifact->storage = storage;
-      out_artifact->release = loomc_amdgpu_emit_library_release;
-      library = (loom_amdgpu_hal_kernel_library_t){0};
+      out_artifact->release_storage =
+          loomc_amdgpu_emit_artifact_storage_release;
+      library.hsaco_data = NULL;
+      library.artifact_manifest = (loom_target_emit_sidecar_artifact_t){0};
     }
   }
   loom_amdgpu_hal_kernel_library_deinitialize(&library, request->allocator);
@@ -302,66 +371,85 @@ loomc_status_t loomc_target_profile_create_amdgpu(
   }
   LOOMC_RETURN_IF_ERROR(loomc_amdgpu_profile_options_validate(options));
 
-  const loom_amdgpu_processor_info_t* processor = NULL;
+  const loom_amdgpu_target_info_t* target = NULL;
   LOOMC_RETURN_IF_ERROR(
-      loomc_status_from_iree(loom_amdgpu_target_info_lookup_processor(
-          iree_string_view_from_loomc(options->processor), &processor)));
-  bool hsaco_supported = false;
-  LOOMC_RETURN_IF_ERROR(
-      loomc_status_from_iree(loom_amdgpu_target_info_processor_supports_hsaco(
-          processor, &hsaco_supported)));
-  if (!hsaco_supported) {
-    return loomc_make_status(LOOMC_STATUS_UNAVAILABLE,
-                             "AMDGPU processor cannot be emitted as HSACO");
-  }
-  const loom_target_bundle_t* target_bundle =
-      loom_amdgpu_target_bundle_for_descriptor_set(
-          processor->descriptor_set.ordinal);
-  if (target_bundle == NULL) {
-    return loomc_make_status(
-        LOOMC_STATUS_UNAVAILABLE,
-        "AMDGPU processor has no Loom target bundle for its descriptor set");
-  }
-
-  const loom_target_selection_t selection = {
-      .bundle = target_bundle,
-      .data = (void*)processor,
-  };
-  const loomc_target_profile_options_t profile_options = {
-      .type = LOOMC_STRUCTURE_TYPE_TARGET_PROFILE_OPTIONS,
-      .structure_size = sizeof(profile_options),
-      .identifier = loomc_string_view_is_empty(options->identifier)
-                        ? options->processor
-                        : options->identifier,
-  };
-  return loomc_target_profile_create_from_selection(
-      target_environment, &profile_options, selection,
-      &loomc_amdgpu_profile_payload_type, (void*)processor,
-      loomc_amdgpu_profile_payload_deinitialize, allocator, out_profile);
-}
-
-loomc_string_view_t loomc_amdgpu_target_profile_processor(
-    const loomc_target_profile_t* profile) {
+      loomc_status_from_iree(loom_amdgpu_target_info_lookup_target(
+          iree_string_view_from_loomc(options->identity.target), &target)));
   const loom_amdgpu_processor_info_t* processor =
-      (const loom_amdgpu_processor_info_t*)loomc_target_profile_payload(
-          profile, &loomc_amdgpu_profile_payload_type);
-  return processor ? loomc_string_view_from_iree(processor->name)
-                   : loomc_string_view_empty();
+      loom_amdgpu_target_info_target_processor(target);
+  IREE_ASSERT(processor != NULL);
+  if (!loom_amdgpu_processor_properties_support_hsaco(&processor->properties)) {
+    return loomc_make_status(LOOMC_STATUS_UNAVAILABLE,
+                             "AMDGPU target cannot be emitted as HSACO");
+  }
+
+  loom_amdgpu_target_profile_t* target_profile = NULL;
+  LOOMC_RETURN_IF_ERROR(loomc_allocator_malloc(
+      allocator, sizeof(*target_profile), (void**)&target_profile));
+  loom_amdgpu_target_identity_t identity = {0};
+  loomc_amdgpu_target_identity_to_internal(&options->identity, target,
+                                           &identity);
+  loomc_status_t status = loomc_status_from_iree(
+      loom_amdgpu_target_profile_initialize(&identity, target_profile));
+  if (!loomc_status_is_ok(status)) {
+    loomc_allocator_free(allocator, target_profile);
+    return status;
+  }
+
+  const loomc_string_view_t identifier =
+      loomc_string_view_is_empty(options->identifier) ? options->identity.target
+                                                      : options->identifier;
+  return loomc_target_profile_create(
+      target_environment, identifier, &target_profile->base,
+      loomc_amdgpu_target_profile_deinitialize, allocator, out_profile);
 }
 
-loomc_status_t loomc_amdgpu_processor_from_hsa_isa_name(
-    loomc_string_view_t hsa_isa_name, loomc_string_view_t* out_processor) {
-  if (out_processor == NULL) {
+loomc_status_t loomc_amdgpu_target_profile_query_identity(
+    const loomc_target_profile_t* profile,
+    loomc_amdgpu_target_identity_t* out_identity) {
+  if (out_identity == NULL) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
-                             "out_processor must not be NULL");
+                             "out_identity must not be NULL");
   }
-  *out_processor = loomc_string_view_empty();
+  *out_identity = (loomc_amdgpu_target_identity_t){0};
+  if (profile == NULL) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "profile must not be NULL");
+  }
+  const loom_amdgpu_target_profile_t* target_profile =
+      loom_amdgpu_target_profile_cast(
+          loomc_target_profile_loom_target_profile(profile));
+  if (target_profile == NULL) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "profile is not an AMDGPU profile");
+  }
+  loomc_amdgpu_target_identity_from_internal(&target_profile->identity,
+                                             out_identity);
+  return loomc_ok_status();
+}
+
+loomc_status_t loomc_amdgpu_target_identity_from_hsa_isa_name(
+    loomc_string_view_t hsa_isa_name, uint32_t asic_revision,
+    loomc_amdgpu_target_identity_t* out_identity) {
+  if (out_identity == NULL) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "out_identity must not be NULL");
+  }
+  *out_identity = (loomc_amdgpu_target_identity_t){0};
   LOOMC_RETURN_IF_ERROR(loomc_amdgpu_validate_string_view(hsa_isa_name));
 
   loom_amdgpu_amdhsa_target_id_t target_id = {0};
   LOOMC_RETURN_IF_ERROR(
       loomc_status_from_iree(loom_amdgpu_target_info_parse_amdhsa_target_id(
           iree_string_view_from_loomc(hsa_isa_name), &target_id)));
-  *out_processor = loomc_string_view_from_iree(target_id.processor->name);
+  const loom_amdgpu_target_info_t* target = NULL;
+  LOOMC_RETURN_IF_ERROR(
+      loomc_status_from_iree(loom_amdgpu_target_info_lookup_physical_target(
+          target_id.processor, asic_revision, &target)));
+  const loom_amdgpu_target_identity_t internal_identity = {
+      .target = target,
+      .amdhsa_features = target_id.features,
+  };
+  loomc_amdgpu_target_identity_from_internal(&internal_identity, out_identity);
   return loomc_ok_status();
 }

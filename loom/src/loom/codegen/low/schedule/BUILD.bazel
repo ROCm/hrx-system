@@ -7,6 +7,7 @@
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
+    "loom_cc_test",
 )
 
 package(
@@ -16,8 +17,44 @@ package(
 )
 
 loom_cc_library(
+    name = "dependency_index",
+    srcs = ["dependency_index.c"],
+    hdrs = ["dependency_index.h"],
+    deps = [
+        ":dependencies",
+        "//loom/src/loom/util:segmented_storage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "dependencies",
+    srcs = ["dependencies.c"],
+    hdrs = ["dependencies.h"],
+    deps = [
+        "//loom/src/loom/util:segmented_storage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "ready_frontier",
+    srcs = ["ready_frontier.c"],
+    hdrs = ["ready_frontier.h"],
+    deps = [
+        "//loom/src/loom/util:segmented_storage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "schedule",
     srcs = [
+        "candidate_policy.c",
+        "candidate_policy.h",
         "context.h",
         "descriptor_rows.c",
         "descriptor_rows.h",
@@ -26,7 +63,17 @@ loom_cc_library(
         "graph.c",
         "graph.h",
         "json.c",
+        "pressure.c",
+        "pressure.h",
+        "pressure_alias.c",
+        "pressure_alias.h",
+        "ready_policy.c",
+        "ready_policy.h",
         "run.c",
+        "storage_relation_index.c",
+        "storage_relation_index.h",
+        "target_pressure.c",
+        "target_pressure.h",
     ],
     hdrs = [
         "json.h",
@@ -34,23 +81,68 @@ loom_cc_library(
         "types.h",
     ],
     deps = [
+        ":dependencies",
+        ":dependency_index",
+        ":ready_frontier",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/analysis:liveness_json",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:function_model",
         "//loom/src/loom/codegen/low:memory_access",
+        "//loom/src/loom/codegen/low:placement",
+        "//loom/src/loom/codegen/low:storage_layout",
+        "//loom/src/loom/codegen/low:storage_relation",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/codegen/low/allocation:storage",
+        "//loom/src/loom/codegen/low/allocation:target_constraints",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:registers",
+        "//loom/src/loom/target:residency",
+        "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:cfg_loop",
         "//loom/src/loom/util:json",
+        "//loom/src/loom/util:segmented_storage",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "dependency_index_test",
+    srcs = ["dependency_index_test.cc"],
+    deps = [
+        ":dependencies",
+        ":dependency_index",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "ready_frontier_test",
+    srcs = ["ready_frontier_test.cc"],
+    deps = [
+        ":ready_frontier",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "dependencies_test",
+    srcs = ["dependencies_test.cc"],
+    deps = [
+        ":dependencies",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )

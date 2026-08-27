@@ -1,0 +1,144 @@
+// Exact group-scaled E2M1-to-BF16 decoding through generic vector operations.
+//
+// One E8M0 byte scales 32 consecutive packed E2M1 values. Integer outputs
+// preserve the BF16 payloads so minimum scales, signed zero, overflow, and the
+// E8M0 NaN encoding are checked without host floating-point conversions.
+func.def inline @decode_mxfp4_group_bits_impl(%payload: vector<4xi32>, %scale: vector<1xi32>) -> (vector<16xi32>) {
+  %schema = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=32, payload_packing=little_endian_nibbles, payload_registers=4, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xi32>} : vector<4xi32>, encoding<schema> -> vector<32xbf16>
+  %bits = vector.bitcast %decoded : vector<32xbf16> to vector<16xi32>
+  func.return %bits : vector<16xi32>
+}
+
+// Returns the second of two consecutive MXFP4 groups. This distinguishes the
+// second encoded scale byte from the first while keeping the expected payload
+// uniform and exact.
+func.def inline @decode_mxfp4_second_group_bits_impl(%payload: vector<8xi32>, %scale: vector<1xi32>) -> (vector<16xi32>) {
+  %schema = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=64, payload_packing=little_endian_nibbles, payload_registers=8, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xi32>} : vector<8xi32>, encoding<schema> -> vector<64xbf16>
+  %second_group = vector.slice %decoded[32] : vector<64xbf16> -> vector<32xbf16>
+  %bits = vector.bitcast %second_group : vector<32xbf16> to vector<16xi32>
+  func.return %bits : vector<16xi32>
+}
+
+kernel.def @decode_mxfp4_group_bits() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%payload_buffer: buffer, %scale_buffer: buffer, %out_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %payload_view = buffer.view %payload_buffer[%base] : buffer -> view<4xi32>
+  %scale_view = buffer.view %scale_buffer[%base] : buffer -> view<1xi32>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16xi32>
+  %payload = vector.load %payload_view[0] : view<4xi32> -> vector<4xi32>
+  %scale = vector.load %scale_view[0] : view<1xi32> -> vector<1xi32>
+  %bits = func.call @decode_mxfp4_group_bits_impl(%payload, %scale) : (vector<4xi32>, vector<1xi32>) -> (vector<16xi32>)
+  vector.store %bits, %out_view[0] : vector<16xi32>, view<16xi32>
+  kernel.return
+}
+
+kernel.def @decode_mxfp4_second_group_bits() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%payload_buffer: buffer, %scale_buffer: buffer, %out_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %payload_view = buffer.view %payload_buffer[%base] : buffer -> view<8xi32>
+  %scale_view = buffer.view %scale_buffer[%base] : buffer -> view<1xi32>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16xi32>
+  %payload = vector.load %payload_view[0] : view<8xi32> -> vector<8xi32>
+  %scale = vector.load %scale_view[0] : view<1xi32> -> vector<1xi32>
+  %bits = func.call @decode_mxfp4_second_group_bits_impl(%payload, %scale) : (vector<8xi32>, vector<1xi32>) -> (vector<16xi32>)
+  vector.store %bits, %out_view[0] : vector<16xi32>, view<16xi32>
+  kernel.return
+}
+
+check.case public @decode_mxfp4_group_bits_edges_case {
+  %positive_zero_payload = check.generate.fill value(0) : tensor<4xi32>
+  %identity_scale = check.generate.fill value(127) : tensor<1xi32>
+  %positive_zero_output = check.generate.fill value(1) : tensor<16xi32>
+  %positive_zero_expected = check.generate.fill value(0) : tensor<16xi32>
+  kernel.launch @decode_mxfp4_group_bits(%positive_zero_payload, %identity_scale, %positive_zero_output) : (tensor<4xi32>, tensor<1xi32>, tensor<16xi32>)
+  check.expect.equal actual(%positive_zero_output) expected(%positive_zero_expected) : tensor<16xi32>
+
+  %negative_zero_payload = check.generate.fill value(-2004318072) : tensor<4xi32>
+  %negative_zero_output = check.generate.fill value(0) : tensor<16xi32>
+  %negative_zero_expected = check.generate.fill value(-2147450880) : tensor<16xi32>
+  kernel.launch @decode_mxfp4_group_bits(%negative_zero_payload, %identity_scale, %negative_zero_output) : (tensor<4xi32>, tensor<1xi32>, tensor<16xi32>)
+  check.expect.equal actual(%negative_zero_output) expected(%negative_zero_expected) : tensor<16xi32>
+
+  %positive_half_payload = check.generate.fill value(286331153) : tensor<4xi32>
+  %identity_half_output = check.generate.fill value(0) : tensor<16xi32>
+  %identity_half_expected = check.generate.fill value(1056980736) : tensor<16xi32>
+  kernel.launch @decode_mxfp4_group_bits(%positive_half_payload, %identity_scale, %identity_half_output) : (tensor<4xi32>, tensor<1xi32>, tensor<16xi32>)
+  check.expect.equal actual(%identity_half_output) expected(%identity_half_expected) : tensor<16xi32>
+
+  %minimum_scale = check.generate.fill value(0) : tensor<1xi32>
+  %minimum_half_output = check.generate.fill value(0) : tensor<16xi32>
+  %minimum_half_expected = check.generate.fill value(2097184) : tensor<16xi32>
+  kernel.launch @decode_mxfp4_group_bits(%positive_half_payload, %minimum_scale, %minimum_half_output) : (tensor<4xi32>, tensor<1xi32>, tensor<16xi32>)
+  check.expect.equal actual(%minimum_half_output) expected(%minimum_half_expected) : tensor<16xi32>
+
+  %positive_one_half_payload = check.generate.fill value(858993459) : tensor<4xi32>
+  %minimum_one_half_output = check.generate.fill value(0) : tensor<16xi32>
+  %minimum_one_half_expected = check.generate.fill value(6291552) : tensor<16xi32>
+  kernel.launch @decode_mxfp4_group_bits(%positive_one_half_payload, %minimum_scale, %minimum_one_half_output) : (tensor<4xi32>, tensor<1xi32>, tensor<16xi32>)
+  check.expect.equal actual(%minimum_one_half_output) expected(%minimum_one_half_expected) : tensor<16xi32>
+
+  %positive_six_payload = check.generate.fill value(2004318071) : tensor<4xi32>
+  %minimum_six_output = check.generate.fill value(0) : tensor<16xi32>
+  %minimum_six_expected = check.generate.fill value(20971840) : tensor<16xi32>
+  kernel.launch @decode_mxfp4_group_bits(%positive_six_payload, %minimum_scale, %minimum_six_output) : (tensor<4xi32>, tensor<1xi32>, tensor<16xi32>)
+  check.expect.equal actual(%minimum_six_output) expected(%minimum_six_expected) : tensor<16xi32>
+
+  %next_scale = check.generate.fill value(1) : tensor<1xi32>
+  %next_half_output = check.generate.fill value(0) : tensor<16xi32>
+  %next_half_expected = check.generate.fill value(4194368) : tensor<16xi32>
+  kernel.launch @decode_mxfp4_group_bits(%positive_half_payload, %next_scale, %next_half_output) : (tensor<4xi32>, tensor<1xi32>, tensor<16xi32>)
+  check.expect.equal actual(%next_half_output) expected(%next_half_expected) : tensor<16xi32>
+
+  %normal_low_scale = check.generate.fill value(2) : tensor<1xi32>
+  %normal_low_output = check.generate.fill value(0) : tensor<16xi32>
+  %normal_low_expected = check.generate.fill value(8388736) : tensor<16xi32>
+  kernel.launch @decode_mxfp4_group_bits(%positive_half_payload, %normal_low_scale, %normal_low_output) : (tensor<4xi32>, tensor<1xi32>, tensor<16xi32>)
+  check.expect.equal actual(%normal_low_output) expected(%normal_low_expected) : tensor<16xi32>
+
+  %maximum_scale = check.generate.fill value(254) : tensor<1xi32>
+  %maximum_half_output = check.generate.fill value(0) : tensor<16xi32>
+  %maximum_half_expected = check.generate.fill value(2122350208) : tensor<16xi32>
+  kernel.launch @decode_mxfp4_group_bits(%positive_half_payload, %maximum_scale, %maximum_half_output) : (tensor<4xi32>, tensor<1xi32>, tensor<16xi32>)
+  check.expect.equal actual(%maximum_half_output) expected(%maximum_half_expected) : tensor<16xi32>
+
+  %maximum_one_half_output = check.generate.fill value(0) : tensor<16xi32>
+  %maximum_one_half_expected = check.generate.fill value(2134933312) : tensor<16xi32>
+  kernel.launch @decode_mxfp4_group_bits(%positive_one_half_payload, %maximum_scale, %maximum_one_half_output) : (tensor<4xi32>, tensor<1xi32>, tensor<16xi32>)
+  check.expect.equal actual(%maximum_one_half_output) expected(%maximum_one_half_expected) : tensor<16xi32>
+
+  %positive_two_payload = check.generate.fill value(1145324612) : tensor<4xi32>
+  %positive_infinity_output = check.generate.fill value(0) : tensor<16xi32>
+  %positive_infinity_expected = check.generate.fill value(2139127680) : tensor<16xi32>
+  kernel.launch @decode_mxfp4_group_bits(%positive_two_payload, %maximum_scale, %positive_infinity_output) : (tensor<4xi32>, tensor<1xi32>, tensor<16xi32>)
+  check.expect.equal actual(%positive_infinity_output) expected(%positive_infinity_expected) : tensor<16xi32>
+
+  %negative_two_payload = check.generate.fill value(-858993460) : tensor<4xi32>
+  %negative_infinity_output = check.generate.fill value(0) : tensor<16xi32>
+  %negative_infinity_expected = check.generate.fill value(-8323200) : tensor<16xi32>
+  kernel.launch @decode_mxfp4_group_bits(%negative_two_payload, %maximum_scale, %negative_infinity_output) : (tensor<4xi32>, tensor<1xi32>, tensor<16xi32>)
+  check.expect.equal actual(%negative_infinity_output) expected(%negative_infinity_expected) : tensor<16xi32>
+
+  // NaN sign is not part of the numeric contract. Positive input keeps the
+  // portable and native routes on the same canonical BF16 payload.
+  %nan_scale = check.generate.fill value(255) : tensor<1xi32>
+  %positive_nan_output = check.generate.fill value(0) : tensor<16xi32>
+  %positive_nan_expected = check.generate.fill value(2143322048) : tensor<16xi32>
+  kernel.launch @decode_mxfp4_group_bits(%positive_zero_payload, %nan_scale, %positive_nan_output) : (tensor<4xi32>, tensor<1xi32>, tensor<16xi32>)
+  check.expect.equal actual(%positive_nan_output) expected(%positive_nan_expected) : tensor<16xi32>
+
+  // Low scale byte 127 is identity; the second byte 128 doubles the selected
+  // second group's positive halves to BF16 one.
+  %two_group_half_payload = check.generate.fill value(286331153) : tensor<8xi32>
+  %distinct_group_scales = check.generate.fill value(32895) : tensor<1xi32>
+  %second_group_output = check.generate.fill value(0) : tensor<16xi32>
+  %second_group_expected = check.generate.fill value(1065369472) : tensor<16xi32>
+  kernel.launch @decode_mxfp4_second_group_bits(%two_group_half_payload, %distinct_group_scales, %second_group_output) : (tensor<8xi32>, tensor<1xi32>, tensor<16xi32>)
+  check.expect.equal actual(%second_group_output) expected(%second_group_expected) : tensor<16xi32>
+  check.return
+}

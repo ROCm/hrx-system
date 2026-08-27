@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/hal/api.h"
+#include "iree/hal/local/device_spec_builder.h"
 #include "iree/hal/local/executable_library.h"
 #include "iree/hal/local/executable_loader.h"
 #include "iree/hal/local/loaders/registration/init.h"
@@ -20,8 +21,8 @@
 #include "iree/io/file_contents.h"
 #include "iree/testing/benchmark.h"
 
-IREE_FLAG(string, executable_format, "",
-          "Format of the executable file being loaded.");
+IREE_FLAG(string, executable_loader, "",
+          "Name of the executable loader to use.");
 IREE_FLAG(string, executable_file, "",
           "Path to the executable library file to load.");
 
@@ -136,20 +137,38 @@ static iree_status_t iree_hal_executable_library_run(
   // Register the loader used to load (or find) the executable.
   iree_hal_executable_loader_t* executable_loader = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_create_executable_loader_by_name(
-      iree_make_cstring_view(FLAG_executable_format), plugin_manager,
+      iree_make_cstring_view(FLAG_executable_loader), plugin_manager,
       host_allocator, &executable_loader));
 
-  // Setup the specification used to perform the executable load.
-  // This information is normally used to select the appropriate loader but in
-  // this benchmark we only have a single one.
-  iree_hal_executable_params_t executable_params;
-  iree_hal_executable_params_initialize(&executable_params);
-  executable_params.caching_mode =
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_OPTIMIZATION |
-      IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA |
-      IREE_HAL_EXECUTABLE_CACHING_MODE_DISABLE_VERIFICATION;
-  executable_params.executable_format =
-      iree_make_cstring_view(FLAG_executable_format);
+  // Build the same target set a local HAL device would advertise for the
+  // selected loader and choose its highest-priority target.
+  iree_hal_local_device_spec_params_t device_spec_params = {
+      .logical_device_id = IREE_SV("executable-library-benchmark"),
+      .display_name = IREE_SV("Executable Library Benchmark"),
+      .driver_id = IREE_SV("local-benchmark"),
+      .backend_id = IREE_SV("local"),
+      .queue_count = 1,
+      .default_queue_worker_count = 1,
+      .loader_count = 1,
+      .loaders = &executable_loader,
+  };
+  iree_hal_device_spec_t* device_spec = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_local_device_spec_create(
+      &device_spec_params, host_allocator, &device_spec));
+  const iree_hal_executable_target_selection_t target_selection = {0};
+  const iree_hal_executable_target_selection_result_t target_result =
+      iree_hal_device_spec_select_executable_target(device_spec,
+                                                    &target_selection);
+  if (target_result.outcome !=
+      IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "selected executable loader did not advertise a unique target");
+  }
+
+  iree_hal_executable_load_params_t executable_params;
+  iree_hal_executable_load_params_initialize(&executable_params);
+  executable_params.flags |= IREE_HAL_EXECUTABLE_LOAD_FLAG_DISABLE_VERIFICATION;
 
   // Load the executable data.
   iree_io_file_contents_t* file_contents = NULL;
@@ -161,9 +180,9 @@ static iree_status_t iree_hal_executable_library_run(
   // Perform the load, which will fail if the executable cannot be loaded or
   // there was an issue with the layouts.
   iree_hal_executable_t* executable = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_executable_loader_try_load(executable_loader, &executable_params,
-                                          /*worker_capacity=*/1, &executable));
+  IREE_RETURN_IF_ERROR(iree_hal_executable_loader_select_and_load(
+      /*loader_count=*/1, &executable_loader, target_result.target,
+      &executable_params, /*worker_capacity=*/1, &executable));
   iree_hal_local_executable_t* local_executable =
       iree_hal_local_executable_cast(executable);
 
@@ -252,6 +271,7 @@ static iree_status_t iree_hal_executable_library_run(
 
   // Unload.
   iree_hal_executable_release(executable);
+  iree_hal_device_spec_release(device_spec);
   iree_hal_executable_loader_release(executable_loader);
   iree_io_file_contents_free(file_contents);
 
@@ -276,7 +296,7 @@ int main(int argc, char** argv) {
       "etc).\n"
       "\n"
       "Example --flagfile:\n"
-      "  --executable_format=embedded-elf\n"
+      "  --executable_loader=embedded-elf\n"
       "  --executable_file=iree/hal/local/elf/testdata/"
       "elementwise_mul_x86_64.so\n"
       "  --export_ordinal=0\n"

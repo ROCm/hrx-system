@@ -12,9 +12,8 @@ iree_add_all_subdirs()
 iree_py_library(
   NAME
     package
-  SRCS
-    "__init__.py"
   DEPS
+    loom::py::loom::target::arch::package_init
     loom::py::loom::target::package
 )
 
@@ -29,10 +28,21 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    compile_report_suggestions
+  SRCS
+    "compile_report_suggestions.py"
+  DEPS
+    loom::py::loom::reporting::reporting
+    loom::py::loom::target::arch::amdgpu::compile_report_suggestions
+)
+
+iree_py_library(
+  NAME
     all_targets
   DEPS
     loom::py::loom::target::arch::amdgpu::descriptors
     loom::py::loom::target::arch::amdgpu::dialect
+    loom::py::loom::target::arch::cmd::descriptors
     loom::py::loom::target::arch::ireevm::descriptors
     loom::py::loom::target::arch::ireevm::dialect
     loom::py::loom::target::arch::llvmir::contracts

@@ -20,11 +20,18 @@
 #include "iree/vm/bytecode/module.h"
 #include "iree/vm/native_module.h"
 #include "iree/vm/shims.h"
+#include "loom/analysis/symbol_facts.h"
+#include "loom/ops/func_symbol_facts.h"
+#include "loom/ops/op_defs.h"
 #include "loom/ops/op_registry.h"
+#include "loom/ops/target/facts.h"
 #include "loom/target/arch/ireevm/descriptors/descriptors.h"
 #include "loom/target/arch/ireevm/ops/registry.h"
 #include "loom/target/arch/ireevm/provider.h"
 #include "loom/target/emit/ireevm/function_bytecode.h"
+#include "loom/target/facts_builder.h"
+#include "loom/target/function_contract.h"
+#include "loom/target/function_version.h"
 #include "loom/target/provider.h"
 #include "loom/tooling/compile/pipeline.h"
 #include "loom/tooling/execution/ireevm/invocation.h"
@@ -50,14 +57,14 @@ iree_status_t InitializeLowDescriptorRegistry(
 constexpr char kPreparedVmSource[] =
     "ireevm.target<core> @vm_target\n"
     "\n"
-    "low.func.def target(@vm_target) abi(vm_module_function) "
+    "low.func.def target<ireevm.core>(@vm_target) abi(vm_module_function) "
     "@double(%value: reg<ireevm.i32>) -> (reg<ireevm.i32>) {\n"
     "  %sum = low.op<ireevm.add.i32>(%value, %value) : "
     "(reg<ireevm.i32>, reg<ireevm.i32>) -> reg<ireevm.i32>\n"
     "  low.return %sum : reg<ireevm.i32>\n"
     "}\n"
     "\n"
-    "low.func.def target(@vm_target) abi(vm_module_function) "
+    "low.func.def target<ireevm.core>(@vm_target) abi(vm_module_function) "
     "export(\"branchy\") "
     "@branchy(%lhs: reg<ireevm.i32>, %rhs: reg<ireevm.i32>) -> "
     "(reg<ireevm.i32>) {\n"
@@ -78,11 +85,12 @@ constexpr char kPreparedVmSource[] =
 constexpr char kPreparedVmImportSource[] =
     "ireevm.target<core> @vm_target\n"
     "\n"
-    "low.func.decl import(vm, \"hal.buffer.length\") target(@vm_target) "
+    "low.func.decl import(vm, \"hal.buffer.length\") "
+    "target<ireevm.core>(@vm_target) "
     "abi(vm_module_function) "
     "@hal_buffer_length(%value: reg<ireevm.i32>) -> (reg<ireevm.i32>)\n"
     "\n"
-    "low.func.def target(@vm_target) abi(vm_module_function) "
+    "low.func.def target<ireevm.core>(@vm_target) abi(vm_module_function) "
     "export(\"length_identity\") "
     "@length_identity(%value: reg<ireevm.i32>) -> (reg<ireevm.i32>) {\n"
     "  %length = low.func.call @hal_buffer_length(%value) : "
@@ -93,7 +101,7 @@ constexpr char kPreparedVmImportSource[] =
 constexpr char kPreparedVmWideSource[] =
     "ireevm.target<core> @vm_target\n"
     "\n"
-    "low.func.def target(@vm_target) abi(vm_module_function) "
+    "low.func.def target<ireevm.core>(@vm_target) abi(vm_module_function) "
     "export(\"wide_numeric\") "
     "@wide_numeric(%lhs: reg<ireevm.i64 x2>, %rhs: reg<ireevm.i64 x2>, "
     "%x: reg<ireevm.f32>, %y: reg<ireevm.f32>, "
@@ -118,7 +126,7 @@ constexpr char kPreparedVmWideSource[] =
 constexpr char kPreparedVmWideAbiLayoutSource[] =
     "ireevm.target<core> @vm_target\n"
     "\n"
-    "low.func.def target(@vm_target) abi(vm_module_function) "
+    "low.func.def target<ireevm.core>(@vm_target) abi(vm_module_function) "
     "export(\"wide_abi_layout\") "
     "@wide_abi_layout(%wide0: reg<ireevm.i64 x2>, "
     "%narrow: reg<ireevm.i32>, %wide1: reg<ireevm.i64 x2>, "
@@ -133,7 +141,7 @@ constexpr char kPreparedVmWideAbiLayoutSource[] =
 constexpr char kPreparedVmRefSource[] =
     "ireevm.target<core> @vm_target\n"
     "\n"
-    "low.func.def target(@vm_target) abi(vm_module_function) "
+    "low.func.def target<ireevm.core>(@vm_target) abi(vm_module_function) "
     "export(\"retain_release\") "
     "@retain_release(%value: reg<ireevm.ref>) -> (reg<ireevm.ref>) {\n"
     "  %owned = low.op<ireevm.ref.retain>(%value) : "
@@ -142,10 +150,21 @@ constexpr char kPreparedVmRefSource[] =
     "  low.return %value : reg<ireevm.ref>\n"
     "}\n";
 
+constexpr char kPreparedVmRefMoveSource[] =
+    "ireevm.target<core> @vm_target\n"
+    "\n"
+    "low.func.def target<ireevm.core>(@vm_target) abi(vm_module_function) "
+    "export(\"move_ref\") "
+    "@move_ref(%value: reg<ireevm.ref>) -> (reg<ireevm.ref>) {\n"
+    "  %moved = low.move %value {detached = true} : "
+    "reg<ireevm.ref> -> reg<ireevm.ref>\n"
+    "  low.return %moved : reg<ireevm.ref>\n"
+    "}\n";
+
 constexpr char kPreparedVmRefBranchSource[] =
     "ireevm.target<core> @vm_target\n"
     "\n"
-    "low.func.def target(@vm_target) abi(vm_module_function) "
+    "low.func.def target<ireevm.core>(@vm_target) abi(vm_module_function) "
     "export(\"ref_branch\") "
     "@ref_branch(%value: reg<ireevm.ref>) {\n"
     "  low.br ^join(%value: reg<ireevm.ref>)\n"
@@ -157,7 +176,7 @@ constexpr char kPreparedVmRefBranchSource[] =
 constexpr char kPreparedVmBufferSource[] =
     "ireevm.target<core> @vm_target\n"
     "\n"
-    "low.func.def target(@vm_target) abi(vm_module_function) "
+    "low.func.def target<ireevm.core>(@vm_target) abi(vm_module_function) "
     "export(\"buffer_ops\") "
     "@buffer_ops(%buffer: reg<ireevm.ref>, "
     "%offset: reg<ireevm.i64 x2>, "
@@ -205,7 +224,7 @@ constexpr char kPreparedVmBufferSource[] =
 constexpr char kPreparedVmBufferExecutionSource[] =
     "ireevm.target<core> @vm_target\n"
     "\n"
-    "low.func.def target(@vm_target) abi(vm_module_function) "
+    "low.func.def target<ireevm.core>(@vm_target) abi(vm_module_function) "
     "export(\"buffer_execute\") "
     "@buffer_execute(%buffer: reg<ireevm.ref>, "
     "%i32_value: reg<ireevm.i32>, "
@@ -562,14 +581,17 @@ class IreeVmCandidateTest : public ::testing::Test {
         loom_run_session_low_descriptor_registry(&session_);
     options.source_resolver = loom_run_module_source_resolver(run_module);
 
-    loom_pass_run_result_t run_result = {};
-    IREE_RETURN_IF_ERROR(loom_compile_run_pipeline(
+    loom_compile_pipeline_result_t pipeline_result = {};
+    iree_status_t status = loom_compile_run_pipeline(
         run_module->module, &options, loom_run_session_block_pool(&session_),
-        &run_result));
-    if (run_result.error_count != 0) {
+        &pipeline_result);
+    const uint32_t error_count = pipeline_result.pass.error_count;
+    loom_compile_pipeline_result_deinitialize(&pipeline_result);
+    IREE_RETURN_IF_ERROR(status);
+    if (error_count != 0) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "source-to-low pipeline emitted %u errors",
-                              run_result.error_count);
+                              error_count);
     }
     return iree_ok_status();
   }
@@ -685,6 +707,123 @@ TEST_F(IreeVmCandidateTest, EmitVmArchiveCandidate) {
 
   loom_ireevm_run_candidate_deinitialize(&candidate);
   loom_target_compile_report_deinitialize(&report);
+  loom_run_module_deinitialize(&run_module);
+}
+
+TEST_F(IreeVmCandidateTest, EmitsFromFunctionTargetFacts) {
+  loom_run_module_t run_module = {};
+  IREE_ASSERT_OK(Parse(IREE_SV(kPreparedVmSource), &run_module));
+  loom_module_t* module = run_module.module;
+
+  iree_arena_allocator_t version_arena;
+  iree_arena_initialize(loom_run_session_block_pool(&session_), &version_arena);
+  loom_symbol_fact_table_t symbol_facts = {};
+  loom_symbol_fact_table_initialize(&symbol_facts, &version_arena);
+  const loom_string_id_t target_name_id =
+      loom_module_lookup_string(module, IREE_SV("vm_target"));
+  ASSERT_NE(target_name_id, LOOM_STRING_ID_INVALID);
+  const loom_symbol_id_t target_symbol_id =
+      loom_module_find_symbol(module, target_name_id);
+  ASSERT_NE(target_symbol_id, LOOM_SYMBOL_ID_INVALID);
+  const loom_symbol_facts_base_t* base_target_facts = nullptr;
+  IREE_ASSERT_OK(loom_symbol_fact_table_lookup(
+      &symbol_facts, module, target_symbol_id, &base_target_facts));
+  const loom_target_symbol_facts_t* target_requirement_symbol_facts =
+      loom_target_symbol_facts_cast(base_target_facts);
+  ASSERT_NE(target_requirement_symbol_facts, nullptr);
+
+  loom_target_facts_t* exact_target_facts = nullptr;
+  IREE_ASSERT_OK(loom_target_facts_builder_clone(
+      target_requirement_symbol_facts->projection, &version_arena,
+      &exact_target_facts));
+  loom_target_bundle_storage_t exact_target_storage =
+      exact_target_facts->storage;
+  loom_target_bundle_storage_rebind(&exact_target_storage);
+  // Give the exact facts an observable identity without changing the VM
+  // representation.
+  exact_target_storage.bundle.name = IREE_SV("iree-vm-specialized");
+  loom_target_facts_builder_replace_bundle(&exact_target_storage.bundle,
+                                           exact_target_facts);
+
+  const iree_string_view_t function_names[] = {
+      IREE_SV("double"),
+      IREE_SV("branchy"),
+  };
+  loom_target_function_version_t
+      target_versions[IREE_ARRAYSIZE(function_names)] = {};
+  loom_function_version_t* version_values[IREE_ARRAYSIZE(function_names)] = {};
+  loom_func_like_t functions[IREE_ARRAYSIZE(function_names)] = {};
+  loom_symbol_ref_t authored_targets[IREE_ARRAYSIZE(function_names)] = {};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(function_names); ++i) {
+    const loom_string_id_t function_name_id =
+        loom_module_lookup_string(module, function_names[i]);
+    ASSERT_NE(function_name_id, LOOM_STRING_ID_INVALID);
+    const loom_symbol_id_t function_symbol_id =
+        loom_module_find_symbol(module, function_name_id);
+    ASSERT_NE(function_symbol_id, LOOM_SYMBOL_ID_INVALID);
+    const loom_symbol_facts_base_t* base_function_facts = nullptr;
+    IREE_ASSERT_OK(loom_symbol_fact_table_lookup(
+        &symbol_facts, module, function_symbol_id, &base_function_facts));
+    const loom_func_symbol_facts_t* function_facts =
+        loom_func_symbol_facts_cast(base_function_facts);
+    ASSERT_NE(function_facts, nullptr);
+    bool contract_valid = false;
+    const loom_target_facts_t* function_target_facts = nullptr;
+    IREE_ASSERT_OK(loom_target_function_contract_refine_facts(
+        module, function_facts,
+        loom_target_facts_identity_name(exact_target_facts), exact_target_facts,
+        iree_diagnostic_emitter_t{}, &version_arena, &contract_valid,
+        &function_target_facts));
+    ASSERT_TRUE(contract_valid);
+    ASSERT_NE(function_target_facts, nullptr);
+    ASSERT_TRUE(iree_string_view_equal(
+        loom_target_facts_bundle(function_target_facts)->name,
+        IREE_SV("iree-vm-specialized")));
+
+    functions[i] = loom_func_like_cast(module, function_facts->func_op);
+    ASSERT_TRUE(loom_func_like_isa(functions[i]));
+    authored_targets[i] = loom_func_like_target(functions[i]);
+    target_versions[i].base.type = &loom_target_function_version_type;
+    target_versions[i].base.function = functions[i];
+    target_versions[i].authored_target_name =
+        target_requirement_symbol_facts->name;
+    target_versions[i].target_requirement_facts =
+        target_requirement_symbol_facts->projection;
+    target_versions[i].function_target_facts = function_target_facts;
+    version_values[i] = &target_versions[i].base;
+  }
+  const iree_host_size_t authored_symbol_count = module->symbols.count;
+  loom_function_version_list_t function_versions = {};
+  function_versions.values = version_values;
+  function_versions.count = IREE_ARRAYSIZE(version_values);
+
+  loom_run_candidate_compile_options_t options = {};
+  InitializeCandidateOptions(&run_module, &options);
+  options.function_versions = &function_versions;
+  loom_target_compile_report_t report = {};
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  options.report = &report;
+  loom_ireevm_run_candidate_t candidate = {};
+  IREE_ASSERT_OK(loom_ireevm_run_candidate_emit(
+      &run_module, &options, iree_allocator_system(), &candidate));
+
+  EXPECT_GT(candidate.archive.data_length, 0u);
+  EXPECT_TRUE(
+      iree_string_view_equal(candidate.compile_report.target_bundle_name,
+                             IREE_SV("iree-vm-specialized")));
+  EXPECT_TRUE(iree_string_view_equal(report.target_bundle_name,
+                                     IREE_SV("iree-vm-specialized")));
+  EXPECT_EQ(module->symbols.count, authored_symbol_count);
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(functions); ++i) {
+    const loom_symbol_ref_t emitted_target =
+        loom_func_like_target(functions[i]);
+    EXPECT_EQ(emitted_target.module_id, authored_targets[i].module_id);
+    EXPECT_EQ(emitted_target.symbol_id, authored_targets[i].symbol_id);
+  }
+
+  loom_ireevm_run_candidate_deinitialize(&candidate);
+  loom_target_compile_report_deinitialize(&report);
+  iree_arena_deinitialize(&version_arena);
   loom_run_module_deinitialize(&run_module);
 }
 
@@ -890,6 +1029,34 @@ TEST_F(IreeVmCandidateTest, EmitVmArchiveCandidateWithRefs) {
   EXPECT_TRUE(FlatbufferStringEquals(
       iree_vm_FunctionSignatureDef_calling_convention(signature_def),
       IREE_SV("0r_r")));
+
+  loom_ireevm_run_candidate_deinitialize(&candidate);
+  loom_run_module_deinitialize(&run_module);
+}
+
+TEST_F(IreeVmCandidateTest, EmitVmArchiveCandidateWithDetachedRefMove) {
+  loom_run_module_t run_module = {};
+  IREE_ASSERT_OK(Parse(IREE_SV(kPreparedVmRefMoveSource), &run_module));
+
+  loom_run_candidate_compile_options_t options = {};
+  InitializeCandidateOptions(&run_module, &options);
+
+  loom_ireevm_run_candidate_t candidate = {};
+  IREE_ASSERT_OK(loom_ireevm_run_candidate_emit(
+      &run_module, &options, iree_allocator_system(), &candidate));
+  EXPECT_GT(candidate.archive.data_length, 0u);
+
+  iree_vm_BytecodeModuleDef_table_t module_def = nullptr;
+  ParseArchive(&candidate.archive, &module_def);
+  iree_vm_FunctionDescriptor_vec_t function_descriptors =
+      iree_vm_BytecodeModuleDef_function_descriptors(module_def);
+  ASSERT_EQ(iree_vm_FunctionDescriptor_vec_len(function_descriptors), 1u);
+  iree_vm_FunctionDescriptor_struct_t function_descriptor =
+      iree_vm_FunctionDescriptor_vec_at(function_descriptors, 0);
+  EXPECT_EQ(function_descriptor->i32_register_count, 0);
+  EXPECT_EQ(function_descriptor->ref_register_count, 2);
+  ExpectFunctionBytecodeContainsOpcodes(module_def, function_descriptor,
+                                        {0x86, 0x5A});
 
   loom_ireevm_run_candidate_deinitialize(&candidate);
   loom_run_module_deinitialize(&run_module);

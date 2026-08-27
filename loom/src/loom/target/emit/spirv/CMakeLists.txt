@@ -126,7 +126,6 @@ loom_cc_library(
     loom::codegen::low::target_binding
     loom::ir
     loom::ops::low
-    loom::target::arch::spirv::abi
     loom::target::arch::spirv::descriptors::descriptors_ids
     loom::target::arch::spirv::registers
     loom::target::arch::spirv::scalar_types
@@ -170,6 +169,10 @@ loom_cc_library(
   HDRS
     "module_emitter.h"
   SRCS
+    "function_control.c"
+    "function_control.h"
+    "function_emitter.c"
+    "function_emitter.h"
     "module_emitter.c"
   DEPS
     ::binary_format
@@ -191,6 +194,7 @@ loom_cc_library(
     loom::target::arch::spirv::features
     loom::target::arch::spirv::module_contract
     loom::target::arch::spirv::packet_rows
+    loom::target::function_version
     loom::target::low_descriptor_registry
     loom::target::types
   PUBLIC
@@ -282,9 +286,27 @@ loom_check_test_suite(
     loom_check_file_test
   SRCS
     "test/barrier.loom-test"
+    "test/buffer_raw.loom-test"
     "test/emit.loom-test"
+    "test/index_conversion.loom-test"
+    "test/index_numeric.loom-test"
+    "test/integer_boolean.loom-test"
+    "test/memory_scalar_addressing.loom-test"
+    "test/memory_workgroup_scalar_addressing.loom-test"
+    "test/ordinary_vector_bit_layout.loom-test"
+    "test/ordinary_vector_integer.loom-test"
+    "test/ordinary_vector_integer_conversion.loom-test"
+    "test/ordinary_vector_structure.loom-test"
+    "test/source_ordinary_vector_structure.loom-test"
     "test/source_structured_control.loom-test"
     "test/workgroup_storage.loom-test"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/memory_scalar_addressing.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/memory_workgroup_scalar_addressing.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_index.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/ordinary_vector_structure.loom-test"
+    "iree::third_party::spirv_dis"
+    "iree::third_party::spirv_val"
   ENV
     "LOOM_SPIRV_DIS=$<TARGET_FILE:iree::third_party::spirv_dis>"
     "LOOM_SPIRV_VAL=$<TARGET_FILE:iree::third_party::spirv_val>"

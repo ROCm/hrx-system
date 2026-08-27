@@ -84,7 +84,6 @@ static const iree_test_role_t kDataExchangeRoles[] = {
 static const iree_coordinated_test_config_t kDataExchangeConfig = {
     /*.roles=*/kDataExchangeRoles,
     /*.role_count=*/2,
-    /*.timeout_ms=*/10000,
 };
 
 // A role that exits with a nonzero code.
@@ -94,7 +93,15 @@ static const iree_test_role_t kFailingRoles[] = {
 static const iree_coordinated_test_config_t kFailingConfig = {
     /*.roles=*/kFailingRoles,
     /*.role_count=*/1,
-    /*.timeout_ms=*/10000,
+};
+
+// A role that exits before publishing the readiness condition.
+static const iree_test_role_t kFailsBeforeReadyRoles[] = {
+    {"failing", failing_role, /*signals_ready=*/true},
+};
+static const iree_coordinated_test_config_t kFailsBeforeReadyConfig = {
+    /*.roles=*/kFailsBeforeReadyRoles,
+    /*.role_count=*/1,
 };
 
 // Register the data exchange config as the default (used by
@@ -113,7 +120,6 @@ static const iree_test_role_t kAllRoles[] = {
 static const iree_coordinated_test_config_t kAllRolesConfig = {
     /*.roles=*/kAllRoles,
     /*.role_count=*/3,
-    /*.timeout_ms=*/10000,
 };
 IREE_COORDINATED_TEST_REGISTER(kAllRolesConfig);
 
@@ -133,4 +139,10 @@ TEST(CoordinatedTest, FailingRolePropagatesExitCode) {
   ASSERT_NE(0, iree_coordinated_test_run(iree_coordinated_test_argc(),
                                          iree_coordinated_test_argv(),
                                          &kFailingConfig));
+}
+
+TEST(CoordinatedTest, ExitBeforeReadyFailsWithoutDeadline) {
+  ASSERT_NE(0, iree_coordinated_test_run(iree_coordinated_test_argc(),
+                                         iree_coordinated_test_argv(),
+                                         &kFailsBeforeReadyConfig));
 }

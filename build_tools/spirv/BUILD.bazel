@@ -10,12 +10,18 @@ package(
 )
 
 exports_files(
-    ["iree_spirv_asm_module.cmake"],
+    [
+        "iree_spirv_asm_module.cmake",
+        "registry_sources.bzl",
+    ],
     visibility = ["//:__subpackages__"],
 )
 
 test_suite(
     name = "spirv_tests",
     tags = ["manual"],
-    tests = ["//build_tools/spirv/testdata:spirv_rules_tests"],
+    tests = [
+        "//build_tools/spirv/registry:registry_tests",
+        "//build_tools/spirv/testdata:spirv_rules_tests",
+    ],
 )

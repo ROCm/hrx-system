@@ -6,8 +6,13 @@
 
 #include "iree/base/internal/path.h"
 
+#include <limits.h>
 #include <stddef.h>
 #include <string.h>
+
+#if defined(IREE_PLATFORM_WINDOWS)
+#include <windows.h>
+#endif  // IREE_PLATFORM_WINDOWS
 
 static iree_status_t iree_string_view_dup(iree_string_view_t value,
                                           iree_allocator_t allocator,
@@ -174,16 +179,26 @@ iree_status_t iree_file_path_join(iree_string_view_t lhs,
 void iree_file_path_split(iree_string_view_t path,
                           iree_string_view_t* out_dirname,
                           iree_string_view_t* out_basename) {
-  iree_host_size_t pos = iree_string_view_find_last_of(
-      path, iree_make_cstring_view("/"), IREE_STRING_VIEW_NPOS);
+#if defined(IREE_PLATFORM_WINDOWS)
+  const iree_string_view_t separators = IREE_SV("/\\");
+#else
+  const iree_string_view_t separators = IREE_SV("/");
+#endif  // IREE_PLATFORM_WINDOWS
+  iree_host_size_t pos =
+      iree_string_view_find_last_of(path, separators, IREE_STRING_VIEW_NPOS);
+  bool is_root_separator = pos == 0;
+#if defined(IREE_PLATFORM_WINDOWS)
+  is_root_separator |= pos == 2 && path.size >= 3 && path.data[1] == ':';
+#endif  // IREE_PLATFORM_WINDOWS
   if (pos == IREE_STRING_VIEW_NPOS) {
-    // No '/' in path.
+    // No platform path separator in |path|.
     *out_dirname = iree_string_view_empty();
     *out_basename = path;
-  } else if (pos == 0) {
-    // Single leading '/' in path.
-    *out_dirname = iree_string_view_substr(path, 0, 1);
-    *out_basename = iree_string_view_substr(path, 1, IREE_STRING_VIEW_NPOS);
+  } else if (is_root_separator) {
+    // Preserve a leading POSIX separator or Windows drive root.
+    *out_dirname = iree_string_view_substr(path, 0, pos + 1);
+    *out_basename =
+        iree_string_view_substr(path, pos + 1, IREE_STRING_VIEW_NPOS);
   } else {
     *out_dirname = iree_string_view_substr(path, 0, pos);
     *out_basename =
@@ -270,6 +285,235 @@ bool iree_file_path_is_dynamic_library(iree_string_view_t path) {
          iree_string_view_equal(ext, IREE_SV("sos")) ||
          iree_file_path_has_versioned_so_suffix(path);
 }
+
+#if defined(IREE_PLATFORM_WINDOWS)
+
+#define IREE_FILE_PATH_WIN32_MAX_UTF16_LENGTH 32767
+#define IREE_FILE_PATH_WIN32_PREFIX_RESERVE 6
+
+static bool iree_file_path_has_win32_namespace_prefix(iree_string_view_t path) {
+  return path.size >= 4 && path.data[0] == '\\' && path.data[1] == '\\' &&
+         (path.data[2] == '?' || path.data[2] == '.') && path.data[3] == '\\';
+}
+
+static bool iree_file_path_has_win32_drive_designator(iree_string_view_t path) {
+  if (path.size < 2 || path.data[1] != ':') return false;
+  const char drive = path.data[0];
+  return (drive >= 'A' && drive <= 'Z') || (drive >= 'a' && drive <= 'z');
+}
+
+static bool iree_file_path_is_win32_separator(char value) {
+  return value == '\\' || value == '/';
+}
+
+static bool iree_file_path_is_win32_fully_qualified(iree_string_view_t path) {
+  if (path.size >= 2 && path.data[0] == '\\' && path.data[1] == '\\') {
+    return true;
+  }
+  return iree_file_path_has_win32_drive_designator(path) && path.size >= 3 &&
+         iree_file_path_is_win32_separator(path.data[2]);
+}
+
+static iree_status_t iree_file_path_convert_utf8_to_utf16(
+    iree_string_view_t path, int utf16_length, wchar_t* out_path) {
+  int converted_length =
+      MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.data,
+                          (int)path.size, out_path, utf16_length);
+  if (converted_length == 0) {
+    DWORD error = GetLastError();
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "file path is not valid UTF-8 (Win32 error %lu)",
+                            (unsigned long)error);
+  }
+  if (IREE_UNLIKELY(converted_length != utf16_length)) {
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "UTF-8 path length changed during conversion");
+  }
+  out_path[utf16_length] = L'\0';
+  return iree_ok_status();
+}
+
+iree_status_t iree_file_path_to_win32(iree_string_view_t path,
+                                      iree_allocator_t allocator,
+                                      wchar_t** out_path) {
+  IREE_ASSERT_ARGUMENT(out_path);
+  *out_path = NULL;
+
+  if (iree_string_view_is_empty(path)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "file path must not be empty");
+  }
+  if (!path.data) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "file path storage must not be NULL");
+  }
+  if (path.size > INT_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "UTF-8 path length exceeds the Win32 API limit");
+  }
+  if (memchr(path.data, 0, path.size) != NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "file path contains an embedded NUL character");
+  }
+
+  int utf16_length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                                         path.data, (int)path.size,
+                                         /*lpWideCharStr=*/NULL,
+                                         /*cchWideChar=*/0);
+  if (utf16_length == 0) {
+    DWORD error = GetLastError();
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "file path is not valid UTF-8 (Win32 error %lu)",
+                            (unsigned long)error);
+  }
+  if (utf16_length > IREE_FILE_PATH_WIN32_MAX_UTF16_LENGTH) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "UTF-16 path length %d exceeds the Win32 limit of %d", utf16_length,
+        IREE_FILE_PATH_WIN32_MAX_UTF16_LENGTH);
+  }
+
+  // Win32 namespace paths already carry their intended interpretation. In
+  // particular, \\.\ names devices and must not be made filesystem-absolute.
+  if (iree_file_path_has_win32_namespace_prefix(path)) {
+    iree_host_size_t allocation_size = 0;
+    if (!iree_host_size_checked_mul((iree_host_size_t)utf16_length + 1,
+                                    sizeof(wchar_t), &allocation_size)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "Win32 path allocation size overflow");
+    }
+    wchar_t* native_path = NULL;
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc(allocator, allocation_size,
+                                               (void**)&native_path));
+    iree_status_t status =
+        iree_file_path_convert_utf8_to_utf16(path, utf16_length, native_path);
+    if (iree_status_is_ok(status)) {
+      *out_path = native_path;
+    } else {
+      iree_allocator_free(allocator, native_path);
+    }
+    return status;
+  }
+
+  // Extended-length paths must be absolute. Ask Windows to resolve drive-
+  // relative, root-relative, and ordinary relative paths using its native
+  // rules before adding the namespace prefix. Query only the applicable base
+  // directory so the input path itself is resolved exactly once.
+  const bool is_fully_qualified = iree_file_path_is_win32_fully_qualified(path);
+  iree_host_size_t absolute_capacity = (iree_host_size_t)utf16_length + 1;
+  if (!is_fully_qualified) {
+    const wchar_t* base_path = L".";
+    wchar_t drive_path[3] = {0};
+    if (iree_file_path_has_win32_drive_designator(path)) {
+      drive_path[0] = (wchar_t)path.data[0];
+      drive_path[1] = L':';
+      base_path = drive_path;
+    }
+    DWORD base_capacity = GetFullPathNameW(base_path, 0, NULL, NULL);
+    if (base_capacity == 0) {
+      DWORD error = GetLastError();
+      return iree_make_status(iree_status_code_from_win32_error(error),
+                              "failed to query Win32 base path (error %lu)",
+                              (unsigned long)error);
+    }
+    if (!iree_host_size_checked_add((iree_host_size_t)base_capacity,
+                                    (iree_host_size_t)utf16_length + 1,
+                                    &absolute_capacity)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "Win32 path capacity overflow");
+    }
+    absolute_capacity =
+        iree_min(absolute_capacity,
+                 (iree_host_size_t)IREE_FILE_PATH_WIN32_MAX_UTF16_LENGTH + 1);
+  }
+
+  // The returned allocation also holds the UTF-16 input after the output
+  // capacity. This keeps conversion to one allocation without a path-sized
+  // stack buffer. Six spare code units accommodate the longer UNC prefix
+  // transformation: `\\server\share` becomes `\\?\UNC\server\share`.
+  iree_host_size_t native_capacity = 0;
+  iree_host_size_t scratch_capacity = (iree_host_size_t)utf16_length + 1;
+  iree_host_size_t total_capacity = 0;
+  iree_host_size_t allocation_size = 0;
+  if (!iree_host_size_checked_add(absolute_capacity,
+                                  IREE_FILE_PATH_WIN32_PREFIX_RESERVE,
+                                  &native_capacity) ||
+      !iree_host_size_checked_add(native_capacity, scratch_capacity,
+                                  &total_capacity) ||
+      !iree_host_size_checked_mul(total_capacity, sizeof(wchar_t),
+                                  &allocation_size)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Win32 path allocation size overflow");
+  }
+
+  wchar_t* native_path = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(allocator, allocation_size, (void**)&native_path));
+  wchar_t* absolute_path = native_path + IREE_FILE_PATH_WIN32_PREFIX_RESERVE;
+  wchar_t* utf16_path = native_path + native_capacity;
+
+  iree_status_t status =
+      iree_file_path_convert_utf8_to_utf16(path, utf16_length, utf16_path);
+  DWORD absolute_length = 0;
+  if (iree_status_is_ok(status)) {
+    absolute_length = GetFullPathNameW(utf16_path, (DWORD)absolute_capacity,
+                                       absolute_path, NULL);
+    if (absolute_length == 0) {
+      DWORD error = GetLastError();
+      status = iree_make_status(iree_status_code_from_win32_error(error),
+                                "failed to resolve Win32 file path (error %lu)",
+                                (unsigned long)error);
+    } else if (absolute_length >= absolute_capacity) {
+      if (absolute_length > IREE_FILE_PATH_WIN32_MAX_UTF16_LENGTH + /*NUL=*/1) {
+        status = iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "resolved Win32 path exceeds the maximum length of %d",
+            IREE_FILE_PATH_WIN32_MAX_UTF16_LENGTH);
+      } else if (is_fully_qualified) {
+        status = iree_make_status(
+            IREE_STATUS_INTERNAL,
+            "fully qualified Win32 path expanded beyond its input length");
+      } else {
+        status = iree_make_status(
+            IREE_STATUS_ABORTED,
+            "current directory changed while resolving a relative file path");
+      }
+    }
+  }
+
+  if (iree_status_is_ok(status)) {
+    const bool is_unc = absolute_length >= 2 && absolute_path[0] == L'\\' &&
+                        absolute_path[1] == L'\\';
+    const iree_host_size_t prefix_growth = is_unc ? 6 : 4;
+    if ((iree_host_size_t)absolute_length >
+        IREE_FILE_PATH_WIN32_MAX_UTF16_LENGTH - prefix_growth) {
+      status = iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "extended Win32 path exceeds the maximum length of %d",
+          IREE_FILE_PATH_WIN32_MAX_UTF16_LENGTH);
+    } else if (is_unc) {
+      // The UNC payload already begins at offset 8 because |absolute_path|
+      // begins at offset 6 and its two leading separators are discarded.
+      static const wchar_t kUncPrefix[] = L"\\\\?\\UNC\\";
+      memcpy(native_path, kUncPrefix,
+             (IREE_ARRAYSIZE(kUncPrefix) - 1) * sizeof(wchar_t));
+    } else {
+      static const wchar_t kExtendedPrefix[] = L"\\\\?\\";
+      memmove(native_path + IREE_ARRAYSIZE(kExtendedPrefix) - 1, absolute_path,
+              ((iree_host_size_t)absolute_length + 1) * sizeof(wchar_t));
+      memcpy(native_path, kExtendedPrefix,
+             (IREE_ARRAYSIZE(kExtendedPrefix) - 1) * sizeof(wchar_t));
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    *out_path = native_path;
+  } else {
+    iree_allocator_free(allocator, native_path);
+  }
+  return status;
+}
+
+#endif  // IREE_PLATFORM_WINDOWS
 
 void iree_uri_split(iree_string_view_t uri, iree_string_view_t* out_schema,
                     iree_string_view_t* out_path,

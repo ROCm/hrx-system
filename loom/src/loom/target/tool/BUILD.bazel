@@ -7,6 +7,7 @@
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
+    "loom_cc_test",
 )
 
 package(
@@ -27,10 +28,28 @@ _WASM_TOOL_VISIBILITY = ["//loom/src/loom/target/emit/wasm:__pkg__"]
 
 loom_cc_library(
     name = "process",
-    srcs = ["process.c"],
+    srcs = [
+        "process.c",
+        "process_darwin.c",
+        "process_linux.c",
+        "process_platform.h",
+        "process_posix.c",
+        "process_posix.h",
+        "process_stub.c",
+        "process_win32.c",
+    ],
     hdrs = ["process.h"],
     deps = [
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "process_test",
+    srcs = ["process_test.cc"],
+    deps = [
+        ":process",
+        "//runtime/src/iree/testing:gtest",
     ],
 )
 
@@ -40,6 +59,7 @@ loom_cc_library(
     hdrs = ["llvm.h"],
     visibility = _LLVM_TOOL_VISIBILITY,
     deps = [
+        ":process",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:path",
         "//runtime/src/iree/io:file_handle",

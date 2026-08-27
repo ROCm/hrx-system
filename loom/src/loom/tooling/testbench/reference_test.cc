@@ -139,11 +139,13 @@ class ReferenceTest : public ::testing::Test {
 
   loom_named_attr_slice_t MakeMatmulContractAttrs(
       iree_string_view_t lhs, iree_string_view_t rhs,
-      iree_string_view_t accumulator, iree_string_view_t result) {
+      iree_string_view_t accumulator, iree_string_view_t result,
+      bool rhs_transposed = false) {
     loom_string_id_t lhs_name = LOOM_STRING_ID_INVALID;
     loom_string_id_t rhs_name = LOOM_STRING_ID_INVALID;
     loom_string_id_t accumulator_name = LOOM_STRING_ID_INVALID;
     loom_string_id_t result_name = LOOM_STRING_ID_INVALID;
+    loom_string_id_t rhs_transposed_name = LOOM_STRING_ID_INVALID;
     loom_string_id_t lhs_value = LOOM_STRING_ID_INVALID;
     loom_string_id_t rhs_value = LOOM_STRING_ID_INVALID;
     loom_string_id_t accumulator_value = LOOM_STRING_ID_INVALID;
@@ -156,6 +158,8 @@ class ReferenceTest : public ::testing::Test {
                                             &accumulator_name));
     IREE_CHECK_OK(
         loom_module_intern_string(module_, IREE_SV("result"), &result_name));
+    IREE_CHECK_OK(loom_module_intern_string(module_, IREE_SV("rhs_transposed"),
+                                            &rhs_transposed_name));
     IREE_CHECK_OK(loom_module_intern_string(module_, lhs, &lhs_value));
     IREE_CHECK_OK(loom_module_intern_string(module_, rhs, &rhs_value));
     IREE_CHECK_OK(
@@ -170,6 +174,23 @@ class ReferenceTest : public ::testing::Test {
          /*.reserved=*/{}, /*.value=*/loom_attr_string(accumulator_value)},
         {/*.name_id=*/result_name, /*.reserved=*/{},
          /*.value=*/loom_attr_string(result_value)},
+        {/*.name_id=*/rhs_transposed_name, /*.reserved=*/{},
+         /*.value=*/loom_attr_bool(true)},
+    };
+    const iree_host_size_t attr_count = rhs_transposed ? 5 : 4;
+    loom_attribute_t attr = {};
+    IREE_CHECK_OK(loom_module_make_canonical_attr_dict(
+        module_, loom_make_named_attr_slice(attrs, attr_count), &attr));
+    return loom_attr_as_dict(attr);
+  }
+
+  loom_named_attr_slice_t MakeRhsTransposedAttr() {
+    loom_string_id_t name = LOOM_STRING_ID_INVALID;
+    IREE_CHECK_OK(
+        loom_module_intern_string(module_, IREE_SV("rhs_transposed"), &name));
+    const loom_named_attr_t attrs[] = {
+        {/*.name_id=*/name, /*.reserved=*/{},
+         /*.value=*/loom_attr_bool(true)},
     };
     loom_attribute_t attr = {};
     IREE_CHECK_OK(loom_module_make_canonical_attr_dict(
@@ -217,12 +238,68 @@ TEST_F(ReferenceTest, ComputesF16MatmulWithF32Accumulator) {
       /*.kind=*/{},
       /*.module=*/module_,
   };
-  IREE_ASSERT_OK(provider.invoke.fn(provider.invoke.user_data, &invocation,
-                                    IREE_ARRAYSIZE(inputs), inputs,
-                                    IREE_ARRAYSIZE(results), results));
+  IREE_ASSERT_OK(provider.provider.invoke(
+      provider.provider.user_data, &invocation, /*workload_count=*/0,
+      /*workloads=*/nullptr, IREE_ARRAYSIZE(inputs), inputs,
+      IREE_ARRAYSIZE(results), results));
   ExpectF32BufferView(results[0], {2, 2}, {58.5f, 65.0f, 140.5f, 156.0f});
 
   loom_testbench_value_deinitialize(&results[0]);
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(inputs); ++i) {
+    loom_testbench_value_deinitialize(&inputs[i]);
+  }
+}
+
+TEST_F(ReferenceTest, ComputesF16MatmulWithTransposedRhs) {
+  std::vector<uint16_t> lhs_values = {
+      iree_math_f32_to_f16(1.0f), iree_math_f32_to_f16(2.0f),
+      iree_math_f32_to_f16(3.0f), iree_math_f32_to_f16(4.0f),
+      iree_math_f32_to_f16(5.0f), iree_math_f32_to_f16(6.0f),
+  };
+  std::vector<uint16_t> rhs_values = {
+      iree_math_f32_to_f16(7.0f),  iree_math_f32_to_f16(9.0f),
+      iree_math_f32_to_f16(11.0f), iree_math_f32_to_f16(8.0f),
+      iree_math_f32_to_f16(10.0f), iree_math_f32_to_f16(12.0f),
+  };
+  std::vector<float> init_values = {0.5f, 1.0f, 1.5f, 2.0f};
+
+  loom_testbench_value_t inputs[3] = {
+      MakeBufferView<uint16_t>({2, 3}, IREE_HAL_ELEMENT_TYPE_FLOAT_16,
+                               lhs_values),
+      MakeBufferView<uint16_t>({2, 3}, IREE_HAL_ELEMENT_TYPE_FLOAT_16,
+                               rhs_values),
+      MakeBufferView<float>({2, 2}, IREE_HAL_ELEMENT_TYPE_FLOAT_32,
+                            init_values),
+  };
+
+  loom_testbench_oracle_provider_t provider = {};
+  loom_testbench_reference_matmul_oracle_provider_initialize(
+      &reference_options_, &provider);
+
+  const loom_named_attr_slice_t attrs[] = {
+      MakeRhsTransposedAttr(),
+      MakeMatmulContractAttrs(IREE_SV("f16"), IREE_SV("f16"), IREE_SV("f32"),
+                              IREE_SV("f32"), /*rhs_transposed=*/true),
+  };
+  for (const loom_named_attr_slice_t invocation_attrs : attrs) {
+    loom_testbench_value_t results[1] = {};
+    loom_testbench_invocation_plan_t invocation = {
+        /*.kind=*/{},
+        /*.module=*/module_,
+        /*.op=*/{},
+        /*.callee_ref=*/{},
+        /*.provider_id=*/{},
+        /*.provider=*/{},
+        /*.attrs=*/invocation_attrs,
+    };
+    IREE_ASSERT_OK(provider.provider.invoke(
+        provider.provider.user_data, &invocation, /*workload_count=*/0,
+        /*workloads=*/nullptr, IREE_ARRAYSIZE(inputs), inputs,
+        IREE_ARRAYSIZE(results), results));
+    ExpectF32BufferView(results[0], {2, 2}, {58.5f, 65.0f, 140.5f, 156.0f});
+    loom_testbench_value_deinitialize(&results[0]);
+  }
+
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(inputs); ++i) {
     loom_testbench_value_deinitialize(&inputs[i]);
   }
@@ -256,9 +333,10 @@ TEST_F(ReferenceTest, ComputesU8MatmulWithF32Accumulator) {
       MakeMatmulContractAttrs(IREE_SV("u8"), IREE_SV("u8"), IREE_SV("f32"),
                               IREE_SV("f32")),
   };
-  IREE_ASSERT_OK(provider.invoke.fn(provider.invoke.user_data, &invocation,
-                                    IREE_ARRAYSIZE(inputs), inputs,
-                                    IREE_ARRAYSIZE(results), results));
+  IREE_ASSERT_OK(provider.provider.invoke(
+      provider.provider.user_data, &invocation, /*workload_count=*/0,
+      /*workloads=*/nullptr, IREE_ARRAYSIZE(inputs), inputs,
+      IREE_ARRAYSIZE(results), results));
   ExpectF32BufferView(results[0], {2, 2}, {1531.5f, 2043.0f, 1281.5f, 1542.0f});
 
   loom_testbench_value_deinitialize(&results[0]);
@@ -300,9 +378,10 @@ TEST_F(ReferenceTest, ComputesTilePackedF16MatmulWithF32Accumulator) {
       /*.kind=*/{},
       /*.module=*/module_,
   };
-  IREE_ASSERT_OK(provider.invoke.fn(provider.invoke.user_data, &invocation,
-                                    IREE_ARRAYSIZE(inputs), inputs,
-                                    IREE_ARRAYSIZE(results), results));
+  IREE_ASSERT_OK(provider.provider.invoke(
+      provider.provider.user_data, &invocation, /*workload_count=*/0,
+      /*workloads=*/nullptr, IREE_ARRAYSIZE(inputs), inputs,
+      IREE_ARRAYSIZE(results), results));
   ExpectF32BufferView(results[0], {1, 1, 2, 2},
                       {186.5f, 201.0f, 283.5f, 306.0f});
 
@@ -345,9 +424,10 @@ TEST_F(ReferenceTest, ComputesTilePackedBF16MatmulWithF32Accumulator) {
       /*.kind=*/{},
       /*.module=*/module_,
   };
-  IREE_ASSERT_OK(provider.invoke.fn(provider.invoke.user_data, &invocation,
-                                    IREE_ARRAYSIZE(inputs), inputs,
-                                    IREE_ARRAYSIZE(results), results));
+  IREE_ASSERT_OK(provider.provider.invoke(
+      provider.provider.user_data, &invocation, /*workload_count=*/0,
+      /*workloads=*/nullptr, IREE_ARRAYSIZE(inputs), inputs,
+      IREE_ARRAYSIZE(results), results));
   ExpectF32BufferView(results[0], {1, 1, 2, 2}, {19.5f, 23.0f, 44.5f, 52.0f});
 
   loom_testbench_value_deinitialize(&results[0]);
@@ -386,9 +466,10 @@ TEST_F(ReferenceTest, ComputesTilePackedU8MatmulWithI32Accumulator) {
       MakeMatmulContractAttrs(IREE_SV("u8"), IREE_SV("u8"), IREE_SV("i32"),
                               IREE_SV("i32")),
   };
-  IREE_ASSERT_OK(provider.invoke.fn(provider.invoke.user_data, &invocation,
-                                    IREE_ARRAYSIZE(inputs), inputs,
-                                    IREE_ARRAYSIZE(results), results));
+  IREE_ASSERT_OK(provider.provider.invoke(
+      provider.provider.user_data, &invocation, /*workload_count=*/0,
+      /*workloads=*/nullptr, IREE_ARRAYSIZE(inputs), inputs,
+      IREE_ARRAYSIZE(results), results));
   ExpectS32BufferView(results[0], {1, 1, 2, 2}, {2062, 2586, 2082, 2606});
 
   loom_testbench_value_deinitialize(&results[0]);
@@ -429,9 +510,10 @@ TEST_F(ReferenceTest, RejectsIntegerAccumulatorOverflow) {
   };
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,
-      provider.invoke.fn(provider.invoke.user_data, &invocation,
-                         IREE_ARRAYSIZE(inputs), inputs,
-                         IREE_ARRAYSIZE(results), results));
+      provider.provider.invoke(provider.provider.user_data, &invocation,
+                               /*workload_count=*/0, /*workloads=*/nullptr,
+                               IREE_ARRAYSIZE(inputs), inputs,
+                               IREE_ARRAYSIZE(results), results));
 
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(inputs); ++i) {
     loom_testbench_value_deinitialize(&inputs[i]);

@@ -22,16 +22,15 @@
 #include "iree/hal/drivers/cuda/event_semaphore.h"
 #include "iree/hal/drivers/cuda/graph_command_buffer.h"
 #include "iree/hal/drivers/cuda/memory_pools.h"
+#include "iree/hal/drivers/cuda/native_executable.h"
 #include "iree/hal/drivers/cuda/nccl_channel.h"
 #include "iree/hal/drivers/cuda/nccl_dynamic_symbols.h"
-#include "iree/hal/drivers/cuda/nop_executable_cache.h"
 #include "iree/hal/drivers/cuda/stream_command_buffer.h"
 #include "iree/hal/drivers/cuda/timepoint_pool.h"
 #include "iree/hal/utils/deferred_command_buffer.h"
 #include "iree/hal/utils/deferred_work_queue.h"
 #include "iree/hal/utils/device_spec_builder.h"
-#include "iree/hal/utils/file_registry.h"
-#include "iree/hal/utils/file_transfer.h"
+#include "iree/hal/utils/memory_file.h"
 #include "iree/hal/utils/queue_emulation.h"
 #include "iree/hal/utils/queue_host_call_emulation.h"
 #include "iree/hal/utils/stream_tracing.h"
@@ -957,29 +956,42 @@ static iree_status_t iree_hal_cuda_device_create_command_buffer(
   }
 }
 
-static iree_status_t iree_hal_cuda_device_create_event(
+static iree_status_t iree_hal_cuda_device_load_executable(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_event_flags_t flags, iree_hal_event_t** out_event) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "event not yet implemented");
-}
-
-static iree_status_t iree_hal_cuda_device_create_executable_cache(
-    iree_hal_device_t* base_device, iree_string_view_t identifier,
-    iree_hal_executable_cache_t** out_executable_cache) {
+    const iree_hal_executable_target_t* target,
+    const iree_hal_executable_load_params_t* load_params,
+    iree_hal_executable_t** out_executable) {
   iree_hal_cuda_device_t* device = iree_hal_cuda_device_cast(base_device);
-  return iree_hal_cuda_nop_executable_cache_create(
-      base_device, identifier, device->cuda_symbols, device->cu_device,
-      device->cu_context, device->host_allocator, out_executable_cache);
+
+  const iree_hal_device_identity_spec_t* identity =
+      iree_hal_device_spec_identity(device->device_spec);
+  IREE_ASSERT_EQ(identity->physical_device_count, 1);
+  const iree_hal_physical_device_affinity_t physical_device_affinity =
+      identity->physical_devices[0].physical_device_affinity;
+  if (!iree_all_bits_set(target->physical_device_affinity,
+                         physical_device_affinity)) {
+    return iree_make_status(
+        IREE_STATUS_INCOMPATIBLE,
+        "CUDA executable target `%.*s` physical-device affinity 0x%016" PRIx64
+        " does not cover device affinity 0x%016" PRIx64,
+        (int)target->target_key.size, target->target_key.data,
+        target->physical_device_affinity, physical_device_affinity);
+  }
+
+  return iree_hal_cuda_native_executable_create(
+      base_device, device->cuda_symbols, device->cu_device, device->cu_context,
+      load_params, device->host_allocator, out_executable);
 }
 
 static iree_status_t iree_hal_cuda_device_import_file(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
     iree_hal_memory_access_t access, iree_io_file_handle_t* handle,
     iree_hal_external_file_flags_t flags, iree_hal_file_t** out_file) {
-  return iree_hal_file_from_handle(
+  (void)flags;
+  return iree_hal_memory_file_wrap(
       iree_hal_device_allocator(base_device), queue_affinity, access, handle,
-      /*proactor=*/NULL, iree_hal_device_host_allocator(base_device), out_file);
+      IREE_HAL_MEMORY_FILE_FLAG_REQUIRE_DEVICE_VISIBLE_STORAGE,
+      iree_hal_device_host_allocator(base_device), out_file);
 }
 
 static iree_status_t iree_hal_cuda_device_create_semaphore(
@@ -1113,14 +1125,18 @@ static iree_status_t iree_hal_cuda_device_queue_read(
     iree_hal_file_t* source_file, uint64_t source_offset,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, iree_hal_read_flags_t flags) {
-  iree_hal_file_transfer_options_t options = {
-      .chunk_count = IREE_HAL_FILE_TRANSFER_CHUNK_COUNT_DEFAULT,
-      .chunk_size = IREE_HAL_FILE_TRANSFER_CHUNK_SIZE_DEFAULT,
-  };
-  return iree_hal_device_queue_read_streaming(
-      base_device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
-      source_file, source_offset, target_buffer, target_offset, length, flags,
-      options);
+  (void)base_device;
+  (void)queue_affinity;
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)source_file;
+  (void)source_offset;
+  (void)target_buffer;
+  (void)target_offset;
+  (void)length;
+  (void)flags;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "CUDA native file queue reads not implemented");
 }
 
 static iree_status_t iree_hal_cuda_device_queue_write(
@@ -1130,14 +1146,18 @@ static iree_status_t iree_hal_cuda_device_queue_write(
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     iree_hal_file_t* target_file, uint64_t target_offset,
     iree_device_size_t length, iree_hal_write_flags_t flags) {
-  iree_hal_file_transfer_options_t options = {
-      .chunk_count = IREE_HAL_FILE_TRANSFER_CHUNK_COUNT_DEFAULT,
-      .chunk_size = IREE_HAL_FILE_TRANSFER_CHUNK_SIZE_DEFAULT,
-  };
-  return iree_hal_device_queue_write_streaming(
-      base_device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
-      source_buffer, source_offset, target_file, target_offset, length, flags,
-      options);
+  (void)base_device;
+  (void)queue_affinity;
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)source_buffer;
+  (void)source_offset;
+  (void)target_file;
+  (void)target_offset;
+  (void)length;
+  (void)flags;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "CUDA native file queue writes not implemented");
 }
 
 static void iree_hal_cuda_device_collect_tracing_context(void* user_data) {
@@ -1173,6 +1193,47 @@ static iree_status_t iree_hal_cuda_device_queue_execute(
 
   IREE_TRACE_ZONE_END(z0);
   return status;
+}
+
+static iree_status_t iree_hal_cuda_device_queue_atomic_wait(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_wait_params_t params) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "CUDA devices do not support atomic waits");
+}
+
+static iree_status_t iree_hal_cuda_device_queue_atomic_store(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_store_params_t params) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "CUDA devices do not support atomic stores");
+}
+
+static iree_status_t iree_hal_cuda_device_queue_atomic_rmw(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_rmw_params_t params) {
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "CUDA devices do not support atomic read-modify-write");
+}
+
+static iree_status_t iree_hal_cuda_device_queue_timestamp(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_timestamp_flags_t flags) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "CUDA device-side timestamps not implemented");
 }
 
 static iree_status_t iree_hal_cuda_device_queue_flush(
@@ -1237,8 +1298,7 @@ static const iree_hal_device_vtable_t iree_hal_cuda_device_vtable = {
     .assign_topology_info = iree_hal_cuda_device_assign_topology_info,
     .create_channel = iree_hal_cuda_device_create_channel,
     .create_command_buffer = iree_hal_cuda_device_create_command_buffer,
-    .create_event = iree_hal_cuda_device_create_event,
-    .create_executable_cache = iree_hal_cuda_device_create_executable_cache,
+    .load_executable = iree_hal_cuda_device_load_executable,
     .import_file = iree_hal_cuda_device_import_file,
     .create_semaphore = iree_hal_cuda_device_create_semaphore,
     .query_semaphore_compatibility =
@@ -1254,6 +1314,10 @@ static const iree_hal_device_vtable_t iree_hal_cuda_device_vtable = {
     .queue_host_call = iree_hal_device_queue_emulated_host_call,
     .queue_dispatch = iree_hal_device_queue_emulated_dispatch,
     .queue_execute = iree_hal_cuda_device_queue_execute,
+    .queue_atomic_wait = iree_hal_cuda_device_queue_atomic_wait,
+    .queue_atomic_store = iree_hal_cuda_device_queue_atomic_store,
+    .queue_atomic_rmw = iree_hal_cuda_device_queue_atomic_rmw,
+    .queue_timestamp = iree_hal_cuda_device_queue_timestamp,
     .queue_flush = iree_hal_cuda_device_queue_flush,
     .profiling_begin = iree_hal_cuda_device_profiling_begin,
     .profiling_flush = iree_hal_cuda_device_profiling_flush,

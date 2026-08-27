@@ -1,0 +1,6 @@
+template.decl @demo.bytecode(%x: i32) -> (i32)
+
+func.def public @entry(%x: i32) -> (i32) {
+  %y = template.apply<@demo.bytecode>(%x) : (i32) -> (i32)
+  func.return %y : i32
+}

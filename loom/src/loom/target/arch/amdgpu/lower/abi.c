@@ -10,7 +10,6 @@
 
 #include "loom/ir/context.h"
 #include "loom/ops/buffer/ops.h"
-#include "loom/ops/encoding/storage.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
@@ -46,55 +45,15 @@ static uint32_t loom_amdgpu_hal_binding_index(loom_low_lower_context_t* context,
 typedef struct loom_amdgpu_buffer_argument_extent_t {
   // Module containing the source function being inspected.
   const loom_module_t* module;
+  // Source function facts used to resolve SSA layout and view footprint facts.
+  const loom_value_fact_table_t* fact_table;
   // True once a buffer.view derived from the source argument is found.
   bool found_view;
-  // True when a derived view has no exact static dense byte extent.
+  // True when a derived view has no exact byte range.
   bool found_unbounded_view;
   // Maximum byte extent required by all statically boundable derived views.
   int64_t extent;
 } loom_amdgpu_buffer_argument_extent_t;
-
-static bool loom_amdgpu_view_static_dense_byte_extent(
-    const loom_module_t* module, loom_type_t view_type,
-    int64_t* out_byte_extent) {
-  *out_byte_extent = 0;
-  if (!loom_type_is_view(view_type)) {
-    return false;
-  }
-
-  loom_value_facts_t stride_storage[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK] = {
-      0};
-  loom_value_fact_address_layout_t layout = {0};
-  if (!loom_encoding_query_type_address_layout(
-          /*context=*/NULL, module, view_type, stride_storage,
-          IREE_ARRAYSIZE(stride_storage), &layout) ||
-      layout.kind != LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE) {
-    return false;
-  }
-
-  const int32_t element_bit_count =
-      loom_scalar_type_bitwidth(loom_type_element_type(view_type));
-  if (element_bit_count <= 0 || (element_bit_count % 8) != 0) {
-    return false;
-  }
-
-  int64_t element_count = 1;
-  const uint8_t rank = loom_type_rank(view_type);
-  for (uint8_t i = 0; i < rank; ++i) {
-    if (loom_type_dim_is_dynamic_at(view_type, i)) {
-      return false;
-    }
-    const int64_t dim_size = loom_type_dim_static_size_at(view_type, i);
-    if (dim_size < 0 ||
-        !iree_checked_mul_i64(element_count, dim_size, &element_count)) {
-      return false;
-    }
-  }
-
-  const int64_t element_byte_count = element_bit_count / 8;
-  return iree_checked_mul_i64(element_count, element_byte_count,
-                              out_byte_extent);
-}
 
 static void loom_amdgpu_buffer_argument_extent_include_view(
     loom_amdgpu_buffer_argument_extent_t* state,
@@ -106,15 +65,16 @@ static void loom_amdgpu_buffer_argument_extent_include_view(
   int64_t base_byte_offset = 0;
   int64_t view_byte_extent = 0;
   int64_t extent = 0;
-  if (!loom_amdgpu_module_value_as_exact_index_constant(
-          state->module, loom_buffer_view_byte_offset(buffer_view_op),
-          &base_byte_offset) ||
+  loom_value_fact_view_reference_t view_reference = {0};
+  loom_value_facts_t view_facts = loom_value_fact_table_lookup(
+      state->fact_table, loom_buffer_view_result(buffer_view_op));
+  if (!loom_value_facts_query_view_reference(&state->fact_table->context,
+                                             view_facts, &view_reference) ||
+      !loom_value_facts_as_exact_i64(view_reference.base_byte_offset,
+                                     &base_byte_offset) ||
       base_byte_offset < 0 ||
-      !loom_amdgpu_view_static_dense_byte_extent(
-          state->module,
-          loom_module_value_type(state->module,
-                                 loom_buffer_view_result(buffer_view_op)),
-          &view_byte_extent) ||
+      !loom_value_facts_as_exact_i64(view_reference.footprint_byte_length,
+                                     &view_byte_extent) ||
       !iree_checked_add_i64(base_byte_offset, view_byte_extent, &extent)) {
     state->found_unbounded_view = true;
     return;
@@ -151,7 +111,11 @@ static bool loom_amdgpu_source_buffer_argument_extent(
   const loom_module_t* module = loom_low_lower_context_module(context);
   loom_amdgpu_buffer_argument_extent_t state = {
       .module = module,
+      .fact_table = loom_low_lower_context_fact_table(context),
   };
+  if (!state.fact_table) {
+    return false;
+  }
   loom_amdgpu_buffer_argument_extent_include_uses(&state, source_argument_id);
   if (!state.found_view || state.found_unbounded_view) {
     return false;
@@ -216,7 +180,7 @@ static iree_string_view_t loom_amdgpu_argument_value_name(
   if (value_id == LOOM_VALUE_ID_INVALID || value_id >= module->values.count) {
     return iree_string_view_empty();
   }
-  const loom_string_id_t name_id = module->values.entries[value_id].name_id;
+  const loom_string_id_t name_id = loom_module_value(module, value_id)->name_id;
   if (name_id == LOOM_STRING_ID_INVALID || name_id >= module->strings.count) {
     return iree_string_view_empty();
   }
@@ -224,42 +188,36 @@ static iree_string_view_t loom_amdgpu_argument_value_name(
 }
 
 static uint32_t loom_amdgpu_direct_arg_byte_count(loom_type_t abi_type) {
-  return loom_low_register_type_unit_count(abi_type) *
-         LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_SCALAR_KERNARG_SIZE;
+  const uint64_t byte_count =
+      (uint64_t)loom_low_register_type_unit_count(abi_type) *
+      LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_SCALAR_KERNARG_SIZE;
+  IREE_ASSERT_LE(byte_count, UINT32_MAX);
+  return (uint32_t)byte_count;
 }
 
-static iree_status_t loom_amdgpu_align_kernarg_offset(uint64_t* inout_offset,
-                                                      uint32_t alignment) {
+static void loom_amdgpu_align_kernarg_offset(uint64_t* inout_offset,
+                                             uint32_t alignment) {
   *inout_offset = iree_align_uint64(*inout_offset, alignment);
-  if (*inout_offset > UINT32_MAX) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU HAL ABI kernarg offset exceeds metadata capacity");
-  }
-  return iree_ok_status();
+  IREE_ASSERT_LE(*inout_offset, UINT32_MAX);
 }
 
-static iree_status_t loom_amdgpu_assign_hal_resource_layout(
+static void loom_amdgpu_assign_hal_resource_layout(
     const loom_low_lower_abi_argument_t* argument, uint16_t parameter_index,
     uint64_t* inout_kernarg_offset,
     loom_amdgpu_hal_kernarg_resource_t* resources,
     iree_host_size_t resource_count) {
-  if (argument->resource_index < 0 ||
-      (uint64_t)argument->resource_index >= resource_count) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL ABI argument mapping produced an invalid resource index");
-  }
-  IREE_RETURN_IF_ERROR(loom_amdgpu_align_kernarg_offset(
+  IREE_ASSERT(argument->resource_index >= 0 &&
+                  (uint64_t)argument->resource_index < resource_count,
+              "AMDGPU HAL ABI argument mapping produced an invalid resource "
+              "index");
+  loom_amdgpu_align_kernarg_offset(
       inout_kernarg_offset,
-      LOOM_AMDGPU_HAL_KERNEL_ABI_GLOBAL_BUFFER_KERNARG_ALIGNMENT));
+      LOOM_AMDGPU_HAL_KERNEL_ABI_GLOBAL_BUFFER_KERNARG_ALIGNMENT);
   const iree_host_size_t binding_index =
       (iree_host_size_t)argument->resource_index;
-  if (resources[binding_index].kernarg_size != 0) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL ABI argument mapping produced duplicate resource indexes");
-  }
+  IREE_ASSERT(resources[binding_index].kernarg_size == 0,
+              "AMDGPU HAL ABI argument mapping produced duplicate resource "
+              "indexes");
   resources[binding_index] = (loom_amdgpu_hal_kernarg_resource_t){
       .resource_op = NULL,
       .name = iree_string_view_empty(),
@@ -274,18 +232,18 @@ static iree_status_t loom_amdgpu_assign_hal_resource_layout(
   };
   *inout_kernarg_offset +=
       LOOM_AMDGPU_HAL_KERNEL_ABI_GLOBAL_BUFFER_KERNARG_SIZE;
-  return iree_ok_status();
+  IREE_ASSERT_LE(*inout_kernarg_offset, UINT32_MAX);
 }
 
-static iree_status_t loom_amdgpu_assign_hal_direct_arg_layout(
+static void loom_amdgpu_assign_hal_direct_arg_layout(
     const loom_module_t* module, const loom_value_id_t* source_arguments,
     const loom_low_lower_abi_argument_t* argument, uint16_t parameter_index,
     uint16_t direct_argument_index, uint64_t* inout_kernarg_offset,
     uint64_t* inout_constant_count,
     loom_amdgpu_hal_kernarg_direct_arg_t* direct_args) {
-  IREE_RETURN_IF_ERROR(loom_amdgpu_align_kernarg_offset(
+  loom_amdgpu_align_kernarg_offset(
       inout_kernarg_offset,
-      LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_SCALAR_KERNARG_ALIGNMENT));
+      LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_SCALAR_KERNARG_ALIGNMENT);
   const uint32_t kernarg_size =
       loom_amdgpu_direct_arg_byte_count(argument->abi_type);
   direct_args[direct_argument_index] = (loom_amdgpu_hal_kernarg_direct_arg_t){
@@ -303,7 +261,8 @@ static iree_status_t loom_amdgpu_assign_hal_direct_arg_layout(
   *inout_kernarg_offset += kernarg_size;
   *inout_constant_count +=
       kernarg_size / LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_SCALAR_KERNARG_SIZE;
-  return iree_ok_status();
+  IREE_ASSERT_LE(*inout_kernarg_offset, UINT32_MAX);
+  IREE_ASSERT_LE(*inout_constant_count, UINT32_MAX);
 }
 
 iree_status_t loom_amdgpu_map_abi_layout(
@@ -322,14 +281,12 @@ iree_status_t loom_amdgpu_map_abi_layout(
   }
   loom_func_like_t source_function =
       loom_low_lower_context_source_function(context);
-  if (loom_func_like_export_symbol(source_function) == LOOM_STRING_ID_INVALID) {
+  if (loom_func_like_export_symbol(source_function) == LOOM_STRING_ID_INVALID &&
+      !loom_low_lower_context_source_is_retained(context)) {
     return iree_ok_status();
   }
-  if (result_count != 0) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL ABI layout mapping reached a kernel with results");
-  }
+  IREE_ASSERT_EQ(result_count, 0,
+                 "AMDGPU HAL ABI layout mapping reached a kernel with results");
 
   uint16_t parameter_count = 0;
   const loom_low_lower_abi_argument_t* argument_map =
@@ -340,11 +297,9 @@ iree_status_t loom_amdgpu_map_abi_layout(
   uint16_t source_argument_count = 0;
   const loom_value_id_t* source_arguments =
       loom_func_like_arg_ids(source_function, &source_argument_count);
-  if (source_argument_count != parameter_count) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL ABI layout mapping reached an inconsistent argument map");
-  }
+  IREE_ASSERT(source_argument_count == parameter_count,
+              "AMDGPU HAL ABI layout mapping reached an inconsistent argument "
+              "map");
 
   iree_host_size_t resource_count = 0;
   iree_host_size_t direct_arg_count = 0;
@@ -355,21 +310,19 @@ iree_status_t loom_amdgpu_map_abi_layout(
       ++direct_arg_count;
     }
   }
-  if (arg_count != direct_arg_count) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL ABI layout mapping reached an inconsistent low signature");
-  }
+  IREE_ASSERT(
+      arg_count == direct_arg_count,
+      "AMDGPU HAL ABI layout mapping reached an inconsistent low signature");
 
   loom_amdgpu_hal_kernarg_resource_t* resources = NULL;
   if (resource_count != 0) {
-    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
         context, resource_count, sizeof(*resources), (void**)&resources));
     memset(resources, 0, resource_count * sizeof(*resources));
   }
   loom_amdgpu_hal_kernarg_direct_arg_t* direct_args = NULL;
   if (direct_arg_count != 0) {
-    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
         context, direct_arg_count, sizeof(*direct_args), (void**)&direct_args));
     memset(direct_args, 0, direct_arg_count * sizeof(*direct_args));
   }
@@ -382,24 +335,21 @@ iree_status_t loom_amdgpu_map_abi_layout(
     const loom_low_lower_abi_argument_t* argument =
         &argument_map[parameter_index];
     if (argument->kind == LOOM_LOW_LOWER_ABI_ARGUMENT_RESOURCE) {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_assign_hal_resource_layout(
-          argument, parameter_index, &kernarg_offset, resources,
-          resource_count));
+      loom_amdgpu_assign_hal_resource_layout(argument, parameter_index,
+                                             &kernarg_offset, resources,
+                                             resource_count);
       continue;
     }
-    IREE_RETURN_IF_ERROR(loom_amdgpu_assign_hal_direct_arg_layout(
+    loom_amdgpu_assign_hal_direct_arg_layout(
         loom_low_lower_context_module(context), source_arguments, argument,
         parameter_index, direct_argument_index, &kernarg_offset,
-        &constant_count, direct_args));
+        &constant_count, direct_args);
     ++direct_argument_index;
   }
-  kernarg_offset = iree_align_uint64(
-      kernarg_offset,
+  loom_amdgpu_align_kernarg_offset(
+      &kernarg_offset,
       LOOM_AMDGPU_HAL_KERNEL_ABI_GLOBAL_BUFFER_KERNARG_ALIGNMENT);
-  if (kernarg_offset > UINT32_MAX || constant_count > UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU HAL ABI layout exceeds metadata capacity");
-  }
+  IREE_ASSERT_LE(constant_count, UINT32_MAX);
 
   const loom_amdgpu_hal_kernel_abi_layout_t layout = {
       .function_op = NULL,
@@ -417,7 +367,7 @@ iree_status_t loom_amdgpu_map_abi_layout(
   loom_attribute_t attr = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_make_layout_attr(
       loom_low_lower_context_module(context), &layout,
-      loom_low_lower_context_scratch_arena(context), &attr));
+      loom_low_lower_context_emission_arena(context), &attr));
   *out_abi_layout = loom_attr_as_dict(attr);
   return iree_ok_status();
 }

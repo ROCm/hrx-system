@@ -117,7 +117,7 @@ static void iree_hal_amdgpu_profile_hash64_append(
     }
     if (state->tail_length == sizeof(state->tail)) {
       iree_hal_amdgpu_profile_hash64_compress(
-          state, iree_unaligned_load_le_u64((const uint64_t*)state->tail));
+          state, iree_unaligned_load_le_u64(state->tail));
       state->tail_length = 0;
     }
   }
@@ -126,8 +126,8 @@ static void iree_hal_amdgpu_profile_hash64_append(
   const uint8_t* const word_end =
       cursor + remaining_length - (remaining_length % sizeof(uint64_t));
   for (; cursor < word_end; cursor += sizeof(uint64_t)) {
-    iree_hal_amdgpu_profile_hash64_compress(
-        state, iree_unaligned_load_le_u64((const uint64_t*)cursor));
+    iree_hal_amdgpu_profile_hash64_compress(state,
+                                            iree_unaligned_load_le_u64(cursor));
   }
 
   while (cursor < end) {

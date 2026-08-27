@@ -217,8 +217,12 @@ static iree_status_t loom_low_packet_asm_append_asm_form_value(
         IREE_STATUS_INVALID_ARGUMENT,
         "low packet asm operand field unexpectedly names a descriptor result");
   }
-  const uint16_t operand_index =
-      descriptor_operand_index - descriptor->result_count;
+  const loom_low_descriptor_set_t* descriptor_set =
+      state->schedule->target.descriptor_set;
+  const loom_low_operand_t* descriptor_operand =
+      &descriptor_set
+           ->operands[descriptor->operand_start + descriptor_operand_index];
+  const uint16_t operand_index = descriptor_operand->source_value_index;
   if (operand_index >= operand_count) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -273,11 +277,7 @@ static iree_status_t loom_low_packet_asm_append_descriptor_packet(
   const iree_host_size_t result_count = op->result_count;
   const iree_host_size_t operand_count = op->operand_count;
   loom_named_attr_slice_t attrs = loom_make_named_attr_slice(NULL, 0);
-  if (loom_low_op_isa(op)) {
-    attrs = loom_low_op_attrs(op);
-  } else if (loom_low_const_isa(op)) {
-    attrs = loom_low_const_attrs(op);
-  } else {
+  if (!loom_low_packet_try_op_attrs(op, &attrs, NULL)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low packet asm descriptor node is not low.op or "
                             "low.const");
@@ -325,6 +325,15 @@ static iree_status_t loom_low_packet_asm_append_copy(
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(state->builder, " = copy "));
   return loom_low_packet_asm_append_value(state, loom_low_copy_source(op));
+}
+
+static iree_status_t loom_low_packet_asm_append_move(
+    loom_low_packet_asm_state_t* state, const loom_op_t* op) {
+  IREE_RETURN_IF_ERROR(
+      loom_low_packet_asm_append_value(state, loom_low_move_result(op)));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(state->builder, " = move "));
+  return loom_low_packet_asm_append_value(state, loom_low_move_source(op));
 }
 
 static iree_status_t loom_low_packet_asm_append_concat(
@@ -403,6 +412,7 @@ static const loom_low_packet_asm_structural_dispatch_t
     kLoomLowPacketAsmStructuralDispatch[] = {
         {LOOM_OP_LOW_RETURN, loom_low_packet_asm_append_return},
         {LOOM_OP_LOW_COPY, loom_low_packet_asm_append_copy},
+        {LOOM_OP_LOW_MOVE, loom_low_packet_asm_append_move},
         {LOOM_OP_LOW_SLICE, loom_low_packet_asm_append_slice},
         {LOOM_OP_LOW_CONCAT, loom_low_packet_asm_append_concat},
         {LOOM_OP_LOW_BR, loom_low_packet_asm_append_br},
@@ -449,9 +459,11 @@ static iree_status_t loom_low_packet_asm_append_block(
   for (uint32_t i = 0; i < block->scheduled_node_count; ++i) {
     const iree_host_size_t packet_index =
         (iree_host_size_t)block->scheduled_node_start + i;
-    loom_low_packet_view_t packet = {0};
-    IREE_RETURN_IF_ERROR(loom_low_packet_view_at(schedule, state->allocation,
-                                                 packet_index, &packet));
+    const loom_low_packet_view_t packet =
+        loom_low_packet_at(schedule, packet_index);
+    if (loom_low_packet_is_compile_time_only(&packet)) {
+      continue;
+    }
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "  "));
     IREE_RETURN_IF_ERROR(loom_low_packet_asm_append_packet(state, &packet));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
@@ -464,7 +476,6 @@ iree_status_t loom_low_packet_asm_format(
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_asm_options_t* options,
     iree_string_builder_t* builder) {
-  IREE_RETURN_IF_ERROR(loom_low_packet_validate_tables(schedule, allocation));
   if (options->selected_asm_forms != NULL) {
     IREE_RETURN_IF_ERROR(loom_low_packet_validate_asm_form_table(
         schedule, options->selected_asm_forms));

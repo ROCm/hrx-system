@@ -4,10 +4,12 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
     "loom_cc_test",
+    "loom_config_compatible_with",
 )
 
 package(
@@ -24,6 +26,10 @@ _LLVMIR_VISIBILITY = [
 _LLVMIR_TARGET_ENV_VISIBILITY = _LLVMIR_VISIBILITY + [
     "//loom/src/loom/tools/loom-check:__pkg__",
 ]
+
+_LLVMIR_AMDGPU_TARGET_ENV_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target:llvmir_amdgpu_target_env",
+])
 
 loom_cc_library(
     name = "intrinsics",
@@ -43,7 +49,6 @@ loom_cc_library(
     visibility = _LLVMIR_TARGET_ENV_VISIBILITY,
     deps = [
         "//loom/src/loom/target:types",
-        "//loom/src/loom/target/arch/amdgpu:target_info_defs",
         "//loom/src/loom/target/emit/llvmir:target_presets",
         "//runtime/src/iree/base",
     ],
@@ -60,4 +65,15 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
+)
+
+iree_execution_test_suite(
+    name = "loom_compile_execution_test",
+    data = ["test/amdgcn_kernel.loom"],
+    manifests = ["test/loom-compile.test.json"],
+    tags = ["hostonly"],
+    target_compatible_with = _LLVMIR_AMDGPU_TARGET_ENV_COMPATIBLE_WITH,
+    tools = {
+        "loom-compile": "//loom/src/loom/tools/loom-compile",
+    },
 )

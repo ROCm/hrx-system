@@ -87,12 +87,15 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   liveness.value_count = IREE_ARRAYSIZE(value_ids);
   liveness.value_interval_indices = interval_indices;
 
-  uint32_t unit_end_point_start[] = {0};
+  uint32_t unit_point_start[] = {0};
   uint32_t unit_end_points[] = {8, 8};
+  uint64_t edge_handoff_words[] = {0};
   loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.end_point_starts_by_value_ordinal = unit_end_point_start;
+  unit_liveness.point_starts_by_value_ordinal = unit_point_start;
   unit_liveness.end_points = unit_end_points;
-  unit_liveness.end_point_count = IREE_ARRAYSIZE(unit_end_points);
+  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
+  unit_liveness.values_with_incomplete_storage_segments = {liveness.value_count,
+                                                           edge_handoff_words};
 
   loom_low_placement_relation_range_t placement_ranges[] = {
       {
@@ -133,6 +136,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       /*.function_op=*/&function_op,
       /*.target=*/&target,
       /*.liveness=*/&liveness,
+      /*.schedule=*/nullptr,
       /*.placement=*/&placement,
       /*.target_constraints=*/&target_constraints,
       /*.unit_liveness=*/&unit_liveness,
@@ -152,7 +156,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
             LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER);
   EXPECT_EQ(result.assignments[0].location_base, 0u);
   EXPECT_EQ(result.assignments[0].location_count, 2u);
-  EXPECT_EQ(result.assignments[0].unit_end_point_start, 0u);
+  EXPECT_EQ(result.assignments[0].unit_point_start, 0u);
   EXPECT_EQ(result.assignments[0].end_point, 8u);
 
   loom_module_value_ordinal_scratch_clear(module, value);
@@ -199,12 +203,15 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   liveness.value_count = IREE_ARRAYSIZE(value_ids);
   liveness.value_interval_indices = interval_indices;
 
-  uint32_t unit_end_point_starts[] = {0, 1};
+  uint32_t unit_point_starts[] = {0, 1};
   uint32_t unit_end_points[] = {6, 6};
+  uint64_t edge_handoff_words[] = {0};
   loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.end_point_starts_by_value_ordinal = unit_end_point_starts;
+  unit_liveness.point_starts_by_value_ordinal = unit_point_starts;
   unit_liveness.end_points = unit_end_points;
-  unit_liveness.end_point_count = IREE_ARRAYSIZE(unit_end_points);
+  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
+  unit_liveness.values_with_incomplete_storage_segments = {liveness.value_count,
+                                                           edge_handoff_words};
 
   const uint32_t relation_indices_by_source[] = {0};
   loom_low_placement_relation_t relation = {};
@@ -292,6 +299,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       /*.function_op=*/&function_op,
       /*.target=*/&target,
       /*.liveness=*/&liveness,
+      /*.schedule=*/nullptr,
       /*.placement=*/&placement,
       /*.target_constraints=*/&target_constraints,
       /*.unit_liveness=*/&unit_liveness,

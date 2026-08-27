@@ -10,11 +10,20 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from loom.gen import bootstrap as _bootstrap
-from loom.gen.support.generated_file import line_comment_header
+from loom.gen.support.generated_file import (
+    GeneratedFileMaintenanceMode,
+    GeneratedFileMaintenanceResult,
+    GeneratedFileSet,
+    line_comment_header,
+    maintain_generated_file_set,
+)
+
+DESCRIPTION = "Python package initializers"
+REGENERATE_COMMAND = "python3 loom/py/loom/gen/run.py package_inits --in-place"
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,7 +115,7 @@ def _generate_package_init(package_init: PackageInit) -> str:
         line_comment_header(
             "#",
             generator="loom.gen.python.package_inits",
-            regenerate="python3 loom/py/loom/gen/run.py package_inits --in-place",
+            regenerate=REGENERATE_COMMAND,
         )
     )
     lines.extend(
@@ -118,29 +127,22 @@ def _generate_package_init(package_init: PackageInit) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _write_files(files: Mapping[str, str]) -> None:
-    for rel_path, content in sorted(files.items()):
-        path = _bootstrap.REPO_ROOT / rel_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-        print(f"  {rel_path}")
+def checked_in_file_set() -> GeneratedFileSet:
+    """Returns the complete checked-in package-initializer ownership set."""
+    return GeneratedFileSet.from_mapping(generate_package_init_files())
 
 
-def _check_files(files: Mapping[str, str]) -> int:
-    stale_or_changed: list[str] = []
-    for rel_path, expected in sorted(files.items()):
-        path = _bootstrap.REPO_ROOT / rel_path
-        if not path.exists() or path.read_text(encoding="utf-8") != expected:
-            stale_or_changed.append(rel_path)
-    if stale_or_changed:
-        print(
-            "error: generated package init files are stale; regenerate with python3 loom/py/loom/gen/run.py package_inits --in-place",
-            file=sys.stderr,
-        )
-        for rel_path in stale_or_changed:
-            print(f"  {rel_path}", file=sys.stderr)
-        return 1
-    return 0
+def maintain_checked_in_files(
+    mode: GeneratedFileMaintenanceMode,
+) -> GeneratedFileMaintenanceResult:
+    """Checks or updates all checked-in package initializers."""
+    return maintain_generated_file_set(
+        _bootstrap.find_repo_root(),
+        checked_in_file_set(),
+        mode=mode,
+        description=DESCRIPTION,
+        regenerate_command=REGENERATE_COMMAND,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -150,11 +152,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     mode.add_argument("--in-place", action="store_true")
     args = parser.parse_args(argv)
 
-    files = generate_package_init_files()
-    if args.in_place:
-        _write_files(files)
-        return 0
-    return _check_files(files)
+    result = maintain_checked_in_files("update" if args.in_place else "check")
+    return 0 if result.ok else 1
 
 
 if __name__ == "__main__":

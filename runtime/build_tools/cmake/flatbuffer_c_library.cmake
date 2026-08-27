@@ -117,7 +117,9 @@ function(flatbuffer_c_library)
     DEPENDS
       ${_OUTS}
   )
-  iree_register_generated_compile_input(${_GEN_TARGET})
+  iree_register_generated_compile_input(${_GEN_TARGET}
+    OUTPUTS ${_OUTS}
+  )
 
   add_library(${_NAME} INTERFACE)
   add_dependencies(${_NAME} ${_GEN_TARGET})

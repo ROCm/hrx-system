@@ -13,6 +13,7 @@ package(
 
 GENERATOR_VISIBILITY = [
     "//loom/py/loom/gen:__subpackages__",
+    "//loom/src/loom/target/arch/cmd/descriptors:__pkg__",
     "//loom/src/loom/target/arch/ireevm/descriptors:__pkg__",
     "//loom/src/loom/target/arch/llvmir/descriptors:__pkg__",
     "//loom/src/loom/target/arch/spirv/descriptors:__pkg__",
@@ -49,20 +50,23 @@ LOW_DESCRIPTOR_SHARD_DEPS = [
 
 iree_py_library(
     name = "low_descriptor_shard",
-    srcs = [
-        "__init__.py",
-        "low_descriptor_shard.py",
-    ],
+    srcs = ["low_descriptor_shard.py"],
     deps = LOW_DESCRIPTOR_SHARD_DEPS,
 )
 
 iree_py_binary(
-    name = "ireevm_low_descriptor_shard",
-    srcs = [
-        "__init__.py",
-        "low_descriptor_shard.py",
+    name = "cmd_low_descriptor_shard",
+    main_module = "loom.gen.target.low.low_descriptor_shard",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        ":low_descriptor_shard",
+        "//loom/py/loom/target/arch/cmd:descriptors",
     ],
-    main = "low_descriptor_shard.py",
+)
+
+iree_py_binary(
+    name = "ireevm_low_descriptor_shard",
+    main_module = "loom.gen.target.low.low_descriptor_shard",
     visibility = GENERATOR_VISIBILITY,
     deps = [
         ":low_descriptor_shard",
@@ -72,11 +76,7 @@ iree_py_binary(
 
 iree_py_binary(
     name = "llvmir_low_descriptor_shard",
-    srcs = [
-        "__init__.py",
-        "low_descriptor_shard.py",
-    ],
-    main = "low_descriptor_shard.py",
+    main_module = "loom.gen.target.low.low_descriptor_shard",
     visibility = GENERATOR_VISIBILITY,
     deps = [
         ":low_descriptor_shard",
@@ -86,11 +86,7 @@ iree_py_binary(
 
 iree_py_binary(
     name = "spirv_low_descriptor_shard",
-    srcs = [
-        "__init__.py",
-        "low_descriptor_shard.py",
-    ],
-    main = "low_descriptor_shard.py",
+    main_module = "loom.gen.target.low.low_descriptor_shard",
     visibility = GENERATOR_VISIBILITY,
     deps = [
         ":low_descriptor_shard",
@@ -100,11 +96,7 @@ iree_py_binary(
 
 iree_py_binary(
     name = "wasm_low_descriptor_shard",
-    srcs = [
-        "__init__.py",
-        "low_descriptor_shard.py",
-    ],
-    main = "low_descriptor_shard.py",
+    main_module = "loom.gen.target.low.low_descriptor_shard",
     visibility = GENERATOR_VISIBILITY,
     deps = [
         ":low_descriptor_shard",
@@ -114,11 +106,7 @@ iree_py_binary(
 
 iree_py_binary(
     name = "test_low_descriptor_shard",
-    srcs = [
-        "__init__.py",
-        "low_descriptor_shard.py",
-    ],
-    main = "low_descriptor_shard.py",
+    main_module = "loom.gen.target.low.low_descriptor_shard",
     visibility = GENERATOR_VISIBILITY,
     deps = [
         ":low_descriptor_shard",
@@ -131,11 +119,13 @@ iree_py_test(
     srcs = [
         "low_descriptor_shard_test.py",
         "low_descriptors_test.py",
+        "physical_validation_test.py",
         "//loom/py/loom/tools:pytest_style_runner.py",
     ],
     args = [
         "loom.gen.target.low.low_descriptor_shard_test",
         "loom.gen.target.low.low_descriptors_test",
+        "loom.gen.target.low.physical_validation_test",
     ],
     main = "pytest_style_runner.py",
     deps = [

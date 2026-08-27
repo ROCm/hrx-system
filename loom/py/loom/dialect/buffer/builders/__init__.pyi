@@ -14,9 +14,9 @@ class BufferBuilder(DialectBuilder):
     def alloca(
         self,
         *,
-        byte_length: ValueRef,
-        base_alignment: int,
         memory_space: str,
+        base_alignment: int,
+        byte_length: ValueRef,
         results: list[Type | TiedResultSpec],
         name: str | None = ...,
         names: Sequence[str] | None = ...,
@@ -72,6 +72,76 @@ class BufferBuilder(DialectBuilder):
         buffer: ValueRef,
         byte_offset: ValueRef,
         results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def pack(
+        self,
+        *,
+        byte_lengths: list[ValueRef] = ...,
+        minimum_alignments: list[int],
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> list[ValueRef]: ...
+    def length(
+        self,
+        *,
+        buffer: ValueRef,
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def load_i8_u(
+        self,
+        *,
+        source: ValueRef,
+        byte_offset: ValueRef,
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def store_i8(
+        self,
+        *,
+        value: ValueRef,
+        target: ValueRef,
+        byte_offset: ValueRef,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def copy(
+        self,
+        *,
+        source: ValueRef,
+        source_offset: ValueRef,
+        target: ValueRef,
+        target_offset: ValueRef,
+        byte_length: ValueRef,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def fill(
+        self,
+        *,
+        pattern: ValueRef,
+        target: ValueRef,
+        target_offset: ValueRef,
+        byte_length: ValueRef,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def compare(
+        self,
+        *,
+        lhs: ValueRef,
+        lhs_offset: ValueRef,
+        rhs: ValueRef,
+        rhs_offset: ValueRef,
+        byte_length: ValueRef,
         name: str | None = ...,
         names: Sequence[str] | None = ...,
         result_names: Sequence[str] | None = ...,

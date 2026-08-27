@@ -12,4 +12,4 @@ func.def @caller(%lhs: i32, %rhs: i32) -> (i32) {
   func.return %sum : i32
 }
 
-low.func.decl target(@test_target) @test_add_i32(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>)
+low.func.decl target<test.low.core>(@test_target) @test_add_i32(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>)

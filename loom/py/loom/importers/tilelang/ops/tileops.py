@@ -13,7 +13,11 @@ from dataclasses import dataclass
 from typing import cast
 
 from loom.builder import ValueRef
-from loom.importers.core import sanitize_identifier, target_preset_amdgpu_kind
+from loom.importers.core import (
+    sanitize_identifier,
+    target_preset_amdgpu_kind,
+    target_preset_amdgpu_matrix_profile,
+)
 from loom.importers.tilelang.buffers import (
     TileLangBufferAccess,
     TileLangBufferRegion,
@@ -51,6 +55,9 @@ from loom.ir import (
     StaticDim,
     Type,
     TypeKind,
+)
+from loom.target.arch.amdgpu.target_info import (
+    AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11,
 )
 
 
@@ -1492,10 +1499,16 @@ def _decode_dense_gemm_spec(
             ),
         )
         return None
-    if target_preset_amdgpu_kind(context.target_preset) != "gfx1100":
+    if (
+        target_preset_amdgpu_matrix_profile(context.target_preset)
+        != AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11
+    ):
         context.record_blocked(
             node_text(expr),
-            "tl.tileop.gemm vector.fragment bridge requires AMDGPU gfx1100",
+            (
+                "tl.tileop.gemm vector.fragment bridge requires an AMDGPU "
+                "GFX11 WMMA target"
+            ),
         )
         return None
     transpose_lhs = _static_bool(args[3])
@@ -1957,7 +1970,7 @@ def _cdna_fp8_matrix_schema(
 ) -> ValueRef:
     return context.storage_schema_value(
         EncodingInstance(
-            name="matrix_operand",
+            name="encoding.operand",
             params=(
                 ("element_format", element_format),
                 ("payload_elements", 8),
@@ -2006,7 +2019,6 @@ def _index_mul_const(
     return context.builder.index.mul(
         lhs=lhs,
         rhs=_index_const(context, rhs),
-        results=[INDEX],
         name=context.fresh_name(name),
     )
 
@@ -2020,7 +2032,6 @@ def _index_div_const(
     return context.builder.index.div(
         lhs=lhs,
         rhs=_index_const(context, rhs),
-        results=[INDEX],
         name=context.fresh_name(name),
     )
 
@@ -2034,7 +2045,6 @@ def _index_rem_const(
     return context.builder.index.rem(
         lhs=lhs,
         rhs=_index_const(context, rhs),
-        results=[INDEX],
         name=context.fresh_name(name),
     )
 
@@ -2838,13 +2848,11 @@ def _unflatten_loop_indices(
         indices[position] = context.builder.index.rem(
             lhs=running,
             rhs=extent,
-            results=[INDEX],
             name=context.fresh_name("i_rem"),
         )
         running = context.builder.index.div(
             lhs=running,
             rhs=extent,
-            results=[INDEX],
             name=context.fresh_name("i_div"),
         )
     indices[0] = running
@@ -2868,7 +2876,6 @@ def _unflatten_vector_chunk_indices(
     indices[-1] = context.builder.index.mul(
         lhs=indices[-1],
         rhs=lane_count_value,
-        results=[INDEX],
         name=context.fresh_name("i_offset"),
     )
     return tuple(indices)

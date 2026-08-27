@@ -12,13 +12,16 @@ load(
     "//build_tools/amdgpu:target_map.bzl",
     "IREE_AMDGPU_CODE_OBJECT_TARGETS",
     "IREE_AMDGPU_DEFAULT_TARGET_SELECTORS",
+    "IREE_AMDGPU_DEVICE_BINARY_TARGETS",
     "IREE_AMDGPU_EXACT_TARGETS",
     "IREE_AMDGPU_EXACT_TARGET_CODE_OBJECTS",
+    "IREE_AMDGPU_EXACT_TARGET_DEVICE_BINARY_VARIANTS",
     "IREE_AMDGPU_TARGET_FAMILIES",
     "IREE_AMDGPU_TARGET_FAMILY_NAMES",
 )
 
 IREE_AMDGPU_TARGET_EXPANSION_CODE_OBJECT = "code-object"
+IREE_AMDGPU_TARGET_EXPANSION_DEVICE_BINARY = "device-binary"
 IREE_AMDGPU_TARGET_EXPANSION_EXACT = "exact"
 
 def _append_unique(values, new_values):
@@ -87,6 +90,22 @@ def _expand_exact_target_selector(selector):
         return IREE_AMDGPU_TARGET_FAMILIES[selector]
     return _unknown_selector_error(selector)
 
+def _expand_device_binary_target_selector(selector):
+    expanded_targets = []
+    for exact_target in _expand_exact_target_selector(selector):
+        _append_unique(
+            expanded_targets,
+            IREE_AMDGPU_EXACT_TARGET_DEVICE_BINARY_VARIANTS.get(
+                exact_target,
+                [],
+            ),
+        )
+        _append_unique(
+            expanded_targets,
+            [_code_object_target_for_exact(exact_target)],
+        )
+    return expanded_targets
+
 def iree_amdgpu_expand_target_selectors(
         targets,
         mode = IREE_AMDGPU_TARGET_EXPANSION_CODE_OBJECT):
@@ -95,8 +114,9 @@ def iree_amdgpu_expand_target_selectors(
     Args:
       targets: List of exact targets, code-object targets, or selector families.
       mode: Expansion mode. `code-object` expands to the smallest known set of
-        compatible code-object targets. `exact` expands to exact HSA ISA target
-        names.
+        compatible code-object targets. `device-binary` includes any
+        exact-target artifact variants required before compatible code-object
+        fallbacks. `exact` expands to exact HSA ISA target names.
 
     Returns:
       Deduplicated list of expanded targets in target-map order.
@@ -105,12 +125,15 @@ def iree_amdgpu_expand_target_selectors(
     for target in targets:
         if mode == IREE_AMDGPU_TARGET_EXPANSION_CODE_OBJECT:
             _append_unique(expanded_targets, _expand_code_object_target_selector(target))
+        elif mode == IREE_AMDGPU_TARGET_EXPANSION_DEVICE_BINARY:
+            _append_unique(expanded_targets, _expand_device_binary_target_selector(target))
         elif mode == IREE_AMDGPU_TARGET_EXPANSION_EXACT:
             _append_unique(expanded_targets, _expand_exact_target_selector(target))
         else:
-            fail("Unknown AMDGPU target expansion mode '{}'. Available: {}, {}".format(
+            fail("Unknown AMDGPU target expansion mode '{}'. Available: {}, {}, {}".format(
                 mode,
                 IREE_AMDGPU_TARGET_EXPANSION_CODE_OBJECT,
+                IREE_AMDGPU_TARGET_EXPANSION_DEVICE_BINARY,
                 IREE_AMDGPU_TARGET_EXPANSION_EXACT,
             ))
     return expanded_targets
@@ -156,6 +179,35 @@ def iree_amdgpu_selectors_for_exact_target(exact_target):
             mode = IREE_AMDGPU_TARGET_EXPANSION_EXACT,
         ):
             _append_unique(selectors, [family])
+    return selectors
+
+def iree_amdgpu_selectors_for_device_binary_target(device_binary_target):
+    """Returns every selector that requests a device-binary target.
+
+    Args:
+      device_binary_target: Code-object fallback or target-overlay artifact.
+
+    Returns:
+      Public target selectors that require the device-binary artifact.
+    """
+    if device_binary_target not in IREE_AMDGPU_DEVICE_BINARY_TARGETS:
+        fail("Unknown AMDGPU device-binary target '{}'. Available: {}".format(
+            device_binary_target,
+            ", ".join(IREE_AMDGPU_DEVICE_BINARY_TARGETS),
+        ))
+    if device_binary_target in IREE_AMDGPU_CODE_OBJECT_TARGETS:
+        return iree_amdgpu_selectors_for_code_object_target(device_binary_target)
+
+    selectors = []
+    for exact_target in IREE_AMDGPU_EXACT_TARGETS:
+        if device_binary_target in IREE_AMDGPU_EXACT_TARGET_DEVICE_BINARY_VARIANTS.get(
+            exact_target,
+            [],
+        ):
+            _append_unique(
+                selectors,
+                iree_amdgpu_selectors_for_exact_target(exact_target),
+            )
     return selectors
 
 def _target_selectors_flag_impl(ctx):

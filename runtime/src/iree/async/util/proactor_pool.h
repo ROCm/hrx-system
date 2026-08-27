@@ -76,6 +76,11 @@ typedef struct iree_async_proactor_pool_options_t {
   // Options applied to each proactor created by the pool.
   iree_async_proactor_options_t proactor_options;
 
+  // Optional proactor creator. NULL selects the platform-optimal creator.
+  // A caller can provide an existing backend creator when its workload has a
+  // stronger execution-policy requirement than the platform default.
+  iree_async_proactor_pool_proactor_create_fn_t proactor_create;
+
   // Optional runner factory for creating poll runners that drive proactors.
   // When create is non-NULL, the pool calls it for each proactor during
   // pool_get(). When create is NULL (zero-initialized), proactors are created

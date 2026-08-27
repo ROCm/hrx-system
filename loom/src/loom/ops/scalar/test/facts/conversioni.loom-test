@@ -97,3 +97,68 @@ func.def @trunci_value_preserving_range(%x: i32) -> (i64, i64) {
   %hi = scalar.constant 100 : i64
   func.return %lo, %hi : i64, i64
 }
+
+// ====
+
+// Float-to-integer validity is determined after truncation toward zero.
+func.def @fptosi_truncates_before_checking_range() -> (i8) {
+  %c = scalar.constant -128.75 : f32
+  %r = scalar.fptosi %c : f32 to i8
+  func.return %r : i8
+}
+// ----
+func.def @fptosi_truncates_before_checking_range() -> (i8) {
+  %r = scalar.constant -128 : i8
+  func.return %r : i8
+}
+
+// ====
+
+// Negative fractions truncate to zero before unsigned range checking.
+func.def @fptoui_negative_fraction_is_zero() -> (i16) {
+  %c = scalar.constant -0.75 : f64
+  %r = scalar.fptoui %c : f64 to i16
+  func.return %r : i16
+}
+// ----
+func.def @fptoui_negative_fraction_is_zero() -> (i16) {
+  %r = scalar.constant 0 : i16
+  func.return %r : i16
+}
+
+// ====
+
+// Unsigned conversion facts preserve destination bits in the signed literal
+// representation used by scalar constants.
+func.def @fptoui_preserves_high_destination_bit() -> (i8, i64) {
+  %byte = scalar.constant 200.75 : f32
+  %byte_result = scalar.fptoui %byte : f32 to i8
+  %wide = scalar.constant 9223372036854775808.0 : f64
+  %wide_result = scalar.fptoui %wide : f64 to i64
+  func.return %byte_result, %wide_result : i8, i64
+}
+// ----
+func.def @fptoui_preserves_high_destination_bit() -> (i8, i64) {
+  %byte_result = scalar.constant -56 : i8
+  %wide_result = scalar.constant -9223372036854775808 : i64
+  func.return %byte_result, %wide_result : i8, i64
+}
+
+// ====
+
+// Invalid exact conversions remain non-exact instead of manufacturing a
+// host-dependent integer fact.
+func.def @fptosi_nan_is_unknown() -> (i64, i64) {
+  %negative = scalar.constant -1.0 : f32
+  %nan = scalar.sqrtf %negative : f32
+  %r = scalar.fptosi %nan : f32 to i8
+  %lo = test.fact_range_lo %r : i8 -> i64
+  %hi = test.fact_range_hi %r : i8 -> i64
+  func.return %lo, %hi : i64, i64
+}
+// ----
+func.def @fptosi_nan_is_unknown() -> (i64, i64) {
+  %lo = scalar.constant -9223372036854775808 : i64
+  %hi = scalar.constant 9223372036854775807 : i64
+  func.return %lo, %hi : i64, i64
+}

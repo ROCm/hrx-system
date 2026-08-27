@@ -1,0 +1,221 @@
+// RUN: emit amdgpu-assembly @gfx1100_same_class_vmem_waw_backedge strategy=source
+
+amdgpu.target<gfx1100> @target
+low.func.def target<amdgpu.rdna3.core>(@target) @gfx1100_same_class_vmem_waw_backedge(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %limit: reg<amdgpu.sgpr>) asm {
+  %zero = s_mov_b32 0
+  low.br ^loop(%zero: reg<amdgpu.sgpr>)
+^loop(%iteration: reg<amdgpu.sgpr>):
+  %unused = global_load_b32_saddr %address, %input
+  %one = s_mov_b32 1
+  %next = s_add_u32 %iteration, %one
+  %again = s_cmp_lt_i32 %next, %limit
+  low.cond_br %again, ^backedge, ^exit : reg<amdgpu.scc>
+^backedge:
+  low.br ^loop(%next: reg<amdgpu.sgpr>)
+^exit:
+  return
+}
+
+// GFX11 completes no-sampler VMEM result writes in issue order. Reusing the
+// dead load destination on the loop backedge therefore needs no header wait.
+// ----
+  s_mov_b32 s3, 0
+.Lbb1:
+  global_load_b32 v1, v0, s[0:1] offset:0
+  s_mov_b32 s4, 1
+  s_add_u32 s3, s3, s4
+  s_cmp_lt_i32 s3, s2
+  s_delay_alu instid0(SALU_CYCLE_1)
+  s_cbranch_scc0 .Lbb3
+.Lbb2:
+  s_branch .Lbb1
+.Lbb3:
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @gfx1100_vmem_to_valu_waw_cross_block strategy=source
+
+amdgpu.target<gfx1100> @target
+low.func.def target<amdgpu.rdna3.core>(@target) @gfx1100_vmem_to_valu_waw_cross_block(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm {
+  %unused = global_load_b32_saddr %address, %input
+  low.br ^overwrite
+^overwrite:
+  %value = v_mov_b32 42
+  global_store_b32_saddr %address, %value, %output
+  return
+}
+
+// Ordered VMEM writers do not exempt a VALU overwrite reached through a CFG
+// edge. The load result must complete before its physical VGPR is reused.
+// ----
+  global_load_b32 v1, v0, s[0:1] offset:0
+.Lbb1:
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_mov_b32 v1, 42
+  global_store_b32 v0, v1, s[2:3] offset:0
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @gfx1100_same_class_vmem_waw_linear strategy=source
+
+amdgpu.target<gfx1100> @target
+low.func.def target<amdgpu.rdna3.core>(@target) @gfx1100_same_class_vmem_waw_linear(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>) asm {
+  %unused0 = global_load_b32_saddr %address, %input
+  %unused1 = global_load_b32_saddr %address, %input {offset = 4}
+  %unused2 = global_load_b32_saddr %address, %input {offset = 8}
+  return
+}
+
+// Same-class ordering also permits linear dead-result reuse without a wait.
+// ----
+  global_load_b32 v1, v0, s[0:1] offset:0
+  global_load_b32 v1, v0, s[0:1] offset:4
+  global_load_b32 v0, v0, s[0:1] offset:8
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @gfx1200_same_class_vmem_waw_linear strategy=source
+
+amdgpu.target<gfx1200> @target {subgroup_size = 64}
+low.func.def target<amdgpu.rdna4.core>(@target) @gfx1200_same_class_vmem_waw_linear(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>) asm {
+  %unused0 = global_load_b32_saddr %address, %input
+  %unused1 = global_load_b32_saddr %address, %input {offset = 4}
+  %unused2 = global_load_b32_saddr %address, %input {offset = 8}
+  return
+}
+
+// GFX12 must drain the first result before a second load reuses its VGPR.
+// ----
+  global_load_b32 v1, v0, s[0:1] offset:0
+  s_wait_loadcnt loadcnt(0)
+  global_load_b32 v1, v0, s[0:1] offset:4
+  global_load_b32 v0, v0, s[0:1] offset:8
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @gfx1100_vmem_to_valu_waw strategy=source
+
+amdgpu.target<gfx1100> @target
+low.func.def target<amdgpu.rdna3.core>(@target) @gfx1100_vmem_to_valu_waw(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm {
+  %unused = global_load_b32_saddr %address, %input
+  %value = v_mov_b32 42
+  global_store_b32_saddr %address, %value, %output
+  return
+}
+
+// Ordered VMEM writes do not exempt a following VALU write to the same VGPR.
+// ----
+  global_load_b32 v1, v0, s[0:1] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_mov_b32 v1, 42
+  global_store_b32 v0, v1, s[2:3] offset:0
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @gfx1200_explicit_wait_clears_backedge strategy=source
+
+amdgpu.target<gfx1200> @target {subgroup_size = 64}
+low.func.def target<amdgpu.rdna4.core>(@target) @gfx1200_explicit_wait_clears_backedge(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %limit: reg<amdgpu.sgpr>) asm {
+  %zero = s_mov_b32 0
+  low.br ^loop(%zero: reg<amdgpu.sgpr>)
+^loop(%iteration: reg<amdgpu.sgpr>):
+  %unused = global_load_b32_saddr %address, %input
+  s_wait_loadcnt {loadcnt = 0}
+  %one = s_mov_b32 1
+  %next = s_add_u32 %iteration, %one
+  %again = s_cmp_lt_i32 %next, %limit
+  low.cond_br %again, ^backedge, ^exit : reg<amdgpu.scc>
+^backedge:
+  low.br ^loop(%next: reg<amdgpu.sgpr>)
+^exit:
+  return
+}
+
+// An explicit full drain prevents a duplicate wait at the loop header.
+// ----
+  s_mov_b32 s3, 0
+.Lbb1:
+  global_load_b32 v1, v0, s[0:1] offset:0
+  s_wait_loadcnt loadcnt(0)
+  s_mov_b32 s4, 1
+  s_add_u32 s3, s3, s4
+  s_cmp_lt_i32 s3, s2
+  s_delay_alu instid0(SALU_CYCLE_1)
+  s_cbranch_scc0 .Lbb3
+.Lbb2:
+  s_branch .Lbb1
+.Lbb3:
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @gfx942_same_class_vmem_waw_backedge strategy=source
+
+amdgpu.target<gfx942> @target {subgroup_size = 64}
+low.func.def target<amdgpu.cdna3.core>(@target) @gfx942_same_class_vmem_waw_backedge(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %limit: reg<amdgpu.sgpr>) asm {
+  %m0 = s_mov_b32_m0_imm 0
+  %zero = s_mov_b32 0
+  low.br ^loop(%zero: reg<amdgpu.sgpr>)
+^loop(%iteration: reg<amdgpu.sgpr>):
+  %unused = global_load_dword_saddr %address, %input, %m0
+  %one = s_mov_b32 1
+  %next = s_add_u32 %iteration, %one
+  %again = s_cmp_lt_i32 %next, %limit
+  low.cond_br %again, ^backedge, ^exit : reg<amdgpu.scc>
+^backedge:
+  low.br ^loop(%next: reg<amdgpu.sgpr>)
+^exit:
+  return
+}
+
+// CDNA3 has the same no-sampler VMEM result-ordering contract as GFX11.
+// ----
+  s_mov_b32 m0, 0
+  s_mov_b32 s3, 0
+.Lbb1:
+  global_load_dword v1, v0, s[0:1] offset:0
+  s_mov_b32 s4, 1
+  s_add_u32 s3, s3, s4
+  s_cmp_lt_i32 s3, s2
+  s_cbranch_scc0 .Lbb3
+.Lbb2:
+  s_branch .Lbb1
+.Lbb3:
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @gfx1200_same_class_vmem_waw_backedge strategy=source
+
+amdgpu.target<gfx1200> @target {subgroup_size = 64}
+low.func.def target<amdgpu.rdna4.core>(@target) @gfx1200_same_class_vmem_waw_backedge(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %limit: reg<amdgpu.sgpr>) asm {
+  %zero = s_mov_b32 0
+  low.br ^loop(%zero: reg<amdgpu.sgpr>)
+^loop(%iteration: reg<amdgpu.sgpr>):
+  %unused = global_load_b32_saddr %address, %input
+  %one = s_mov_b32 1
+  %next = s_add_u32 %iteration, %one
+  %again = s_cmp_lt_i32 %next, %limit
+  low.cond_br %again, ^backedge, ^exit : reg<amdgpu.scc>
+^backedge:
+  low.br ^loop(%next: reg<amdgpu.sgpr>)
+^exit:
+  return
+}
+
+// GFX12 does not guarantee ordered VMEM result writes. The first load must
+// complete before the next iteration reuses its destination VGPR.
+// ----
+  s_mov_b32 s3, 0
+.Lbb1:
+  s_wait_loadcnt loadcnt(0)
+  global_load_b32 v1, v0, s[0:1] offset:0
+  s_mov_b32 s4, 1
+  s_add_u32 s3, s3, s4
+  s_cmp_lt_i32 s3, s2
+  s_delay_alu instid0(SALU_CYCLE_1)
+  s_cbranch_scc0 .Lbb3
+.Lbb2:
+  s_branch .Lbb1
+.Lbb3:
+  s_endpgm

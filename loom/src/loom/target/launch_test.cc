@@ -150,20 +150,27 @@ TEST(TargetLaunchTest, ValidatesDispatchCountAgainstCountLimits) {
       /*.y=*/1,
       /*.z=*/1,
   };
-  loom_target_dispatch_workgroup_count_t partial = {
-      /*.x=*/0,
-      /*.y=*/1,
-      /*.z=*/1,
-  };
-
   IREE_EXPECT_OK(loom_target_validate_hal_dispatch_workgroup_count(
       &snapshot, &hal_kernel, &valid));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                         loom_target_validate_hal_dispatch_workgroup_count(
                             &snapshot, &hal_kernel, &exceeds_x));
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_target_validate_hal_dispatch_workgroup_count(
-                            &snapshot, &hal_kernel, &partial));
+}
+
+TEST(TargetLaunchTest, AllowsEmptyDispatchInAnyCountDimension) {
+  loom_target_snapshot_t snapshot = TestSnapshot();
+  loom_target_hal_kernel_abi_t hal_kernel =
+      TestHalKernelAbi({/*.x=*/64, /*.y=*/2, /*.z=*/1});
+  const loom_target_dispatch_workgroup_count_t empty_counts[] = {
+      {/*.x=*/0, /*.y=*/1, /*.z=*/1},
+      {/*.x=*/1, /*.y=*/0, /*.z=*/1},
+      {/*.x=*/1, /*.y=*/1, /*.z=*/0},
+  };
+
+  for (const auto& empty_count : empty_counts) {
+    IREE_EXPECT_OK(loom_target_validate_hal_dispatch_workgroup_count(
+        &snapshot, &hal_kernel, &empty_count));
+  }
 }
 
 TEST(TargetLaunchTest, DynamicLocalWorkgroupChecksGridLowerBoundOnly) {

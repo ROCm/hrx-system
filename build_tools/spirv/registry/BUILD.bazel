@@ -1,0 +1,123 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],
+)
+
+iree_py_library(
+    name = "dependency_expression",
+    srcs = [
+        "__init__.py",
+        "dependency_expression.py",
+    ],
+    imports = ["../../.."],
+)
+
+iree_py_library(
+    name = "registry_source",
+    srcs = [
+        "__init__.py",
+        "registry_source.py",
+    ],
+    imports = ["../../.."],
+)
+
+iree_py_library(
+    name = "spirv_core_grammar",
+    srcs = ["spirv_core_grammar.py"],
+    imports = ["../../.."],
+    deps = [":registry_source"],
+)
+
+iree_py_library(
+    name = "vulkan_spirv_availability",
+    srcs = [
+        "vulkan_spirv_availability.py",
+        "vulkan_spirv_availability_model.py",
+    ],
+    imports = ["../../.."],
+    deps = [
+        ":dependency_expression",
+        ":registry_source",
+    ],
+)
+
+iree_py_test(
+    name = "dependency_expression_test",
+    size = "small",
+    srcs = ["dependency_expression_test.py"],
+    deps = [":dependency_expression"],
+)
+
+iree_py_test(
+    name = "dependency_expression_registry_test",
+    size = "small",
+    srcs = ["dependency_expression_registry_test.py"],
+    args = ["$(location @vulkan_headers//:vulkan_xml_registry)"],
+    data = ["@vulkan_headers//:vulkan_xml_registry"],
+    tags = ["skip-bazel_to_cmake"],
+    deps = [":dependency_expression"],
+)
+
+iree_py_test(
+    name = "spirv_core_grammar_test",
+    size = "small",
+    srcs = ["spirv_core_grammar_test.py"],
+    deps = [
+        ":registry_source",
+        ":spirv_core_grammar",
+    ],
+)
+
+iree_py_test(
+    name = "spirv_core_grammar_registry_test",
+    size = "small",
+    srcs = ["spirv_core_grammar_registry_test.py"],
+    args = ["$(location @spirv_headers//:spirv_core_grammar_unified1)"],
+    data = ["@spirv_headers//:spirv_core_grammar_unified1"],
+    tags = ["skip-bazel_to_cmake"],
+    deps = [":spirv_core_grammar"],
+)
+
+iree_py_test(
+    name = "vulkan_spirv_availability_test",
+    size = "small",
+    srcs = ["vulkan_spirv_availability_test.py"],
+    deps = [
+        ":dependency_expression",
+        ":registry_source",
+        ":vulkan_spirv_availability",
+    ],
+)
+
+iree_py_test(
+    name = "vulkan_spirv_availability_registry_test",
+    size = "small",
+    srcs = ["vulkan_spirv_availability_registry_test.py"],
+    args = ["$(location @vulkan_headers//:vulkan_xml_registry)"],
+    data = ["@vulkan_headers//:vulkan_xml_registry"],
+    tags = ["skip-bazel_to_cmake"],
+    deps = [
+        ":dependency_expression",
+        ":vulkan_spirv_availability",
+    ],
+)
+
+test_suite(
+    name = "registry_tests",
+    tests = [
+        ":dependency_expression_registry_test",
+        ":dependency_expression_test",
+        ":spirv_core_grammar_registry_test",
+        ":spirv_core_grammar_test",
+        ":vulkan_spirv_availability_registry_test",
+        ":vulkan_spirv_availability_test",
+    ],
+)

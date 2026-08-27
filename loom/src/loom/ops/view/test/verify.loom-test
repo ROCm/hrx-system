@@ -2,7 +2,7 @@
 
 func.def @buffer_alloca_rejects_index_size(%size: index) {
   // ERROR@+1: TYPE/003 "byte_length" "index" "offset"
-  %scratch = buffer.alloca %size {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %size : buffer
   func.return
 }
 
@@ -10,7 +10,7 @@ func.def @buffer_alloca_rejects_index_size(%size: index) {
 
 func.def @buffer_alloca_rejects_zero_alignment(%size: offset) {
   // ERROR@+1: STRUCTURE/014 "base_alignment" "0" "positive power-of-two byte alignment"
-  %scratch = buffer.alloca %size {base_alignment = 0, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(0) %size : buffer
   func.return
 }
 
@@ -18,23 +18,30 @@ func.def @buffer_alloca_rejects_zero_alignment(%size: offset) {
 
 func.def @buffer_alloca_rejects_non_power_of_two_alignment(%size: offset) {
   // ERROR@+1: STRUCTURE/014 "base_alignment" "96" "positive power-of-two byte alignment"
-  %scratch = buffer.alloca %size {base_alignment = 96, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(96) %size : buffer
   func.return
 }
 
 // ====
 
 func.def @buffer_alloca_rejects_unknown_memory_space(%size: offset) {
-  // ERROR@+1: STRUCTURE/014 "memory_space" "0" "workgroup or private memory space"
-  %scratch = buffer.alloca %size {base_alignment = 64, memory_space = unknown} : buffer
+  // ERROR@+1: STRUCTURE/014 "memory_space" "0" "global, workgroup, private, host, or generic memory space"
+  %scratch = buffer.alloca<unknown> align(64) %size : buffer
   func.return
 }
 
 // ====
 
-func.def @buffer_alloca_rejects_global_memory_space(%size: offset) {
-  // ERROR@+1: STRUCTURE/014 "memory_space" "1" "workgroup or private memory space"
-  %scratch = buffer.alloca %size {base_alignment = 64, memory_space = global} : buffer
+func.def @buffer_alloca_accepts_global_memory_space(%size: offset) {
+  %scratch = buffer.alloca<global> align(64) %size : buffer
+  func.return
+}
+
+// ====
+
+func.def @buffer_alloca_rejects_constant_memory_space(%size: offset) {
+  // ERROR@+1: STRUCTURE/014 "memory_space" "4" "global, workgroup, private, host, or generic memory space"
+  %scratch = buffer.alloca<constant> align(64) %size : buffer
   func.return
 }
 
@@ -49,7 +56,7 @@ func.def @buffer_assume_rejects_unknown_memory_space(%buffer: buffer) {
 // ====
 
 func.def @buffer_assume_rejects_contradictory_memory_space(%size: offset) {
-  %scratch = buffer.alloca %size {base_alignment = 64, memory_space = workgroup} : buffer
+  %scratch = buffer.alloca<workgroup> align(64) %size : buffer
   // ERROR@+1: STRUCTURE/014 "memory_space" "3" "existing memory-space fact 2"
   %private = buffer.assume.memory_space<private> %scratch : buffer
   func.return
@@ -77,10 +84,8 @@ func.def @buffer_view_rejects_integer_offset(%buffer: buffer, %byte_count: i64) 
 
 // ====
 
-// buffer.view result types must carry the address layout in their encoding slot
-// so the root-to-view relationship remains explicit in the IR.
-func.def @buffer_view_missing_layout(%buffer: buffer, %offset: offset) {
-  // ERROR@+1: ENCODING/001 "result type layout" "view result type"
+// An omitted view attachment denotes the native dense address layout.
+func.def @buffer_view_native_dense_layout(%buffer: buffer, %offset: offset) {
   %view = buffer.view %buffer[%offset] : buffer -> view<4xf32>
   func.return
 }
@@ -110,12 +115,11 @@ func.def @refine_static_dimension_mismatch(%buffer: buffer, %offset: offset) {
 
 // ====
 
-// view.refine result types still need an explicit layout/encoding attachment;
-// otherwise later memory math would have to guess.
-func.def @refine_missing_result_layout(%buffer: buffer, %offset: offset, %m: index) {
+// view.refine can strengthen a dynamic layout known to be dense to the native
+// dense representation.
+func.def @refine_native_dense_result_layout(%buffer: buffer, %offset: offset, %m: index) {
   %layout = encoding.layout.dense : encoding<layout>
   %source = buffer.view %buffer[%offset] : buffer -> view<[%m]xf32, %layout>
-  // ERROR@+1: ENCODING/001 "result type layout" "view type"
   %refined = view.refine %source : view<[%m]xf32, %layout> -> view<16xf32>
   func.return
 }
@@ -125,7 +129,7 @@ func.def @refine_missing_result_layout(%buffer: buffer, %offset: offset, %m: ind
 // A static strided layout must provide one stride per result view rank.
 func.def @buffer_view_stride_rank_mismatch(%buffer: buffer, %offset: offset) {
   // ERROR@+1: SHAPE/001 "result type" "2" "layout stride list" "1"
-  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xf32, #strided<stride=1>>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4x4xf32, #encoding.layout.strided<strides=[1]>>
   func.return
 }
 

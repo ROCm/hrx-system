@@ -15,9 +15,10 @@
 
 #include "iree/base/api.h"
 #include "loom/error/diagnostic.h"
+#include "loom/ir/function_version.h"
 #include "loom/ir/ir.h"
-#include "loom/target/compile_report.h"
 #include "loom/target/emit/ireevm/module_archive.h"
+#include "loom/target/reporting/report.h"
 #include "loom/verify/verify.h"
 
 #ifdef __cplusplus
@@ -27,6 +28,9 @@ extern "C" {
 typedef struct loom_ireevm_archive_emit_options_t {
   // VM module name stored in the emitted archive. Empty uses "loom".
   iree_string_view_t module_name;
+  // Optional compiler-owned function versions participating in emission. The
+  // list and its version objects are borrowed for the call.
+  const loom_function_version_list_t* function_versions;
   // Diagnostic sink used for verification, lowering, scheduling, and
   // allocation diagnostics. A NULL callback still counts diagnostics.
   loom_diagnostic_sink_t diagnostic_sink;
@@ -42,11 +46,12 @@ typedef struct loom_ireevm_archive_emit_options_t {
 // Emits |module| into an allocator-owned IREE VM bytecode module archive.
 //
 // |module| must already contain prepared target-low VM function definitions and
-// imports. Target records are resolved from the IR and VM-compatible symbols
-// are emitted as one module. |out_emitted| is false when verification or target
-// diagnostics rejected the module; status remains reserved for infrastructure
-// failures and API contract violations. The caller owns |out_archive| when
-// |out_emitted| is true and must release it with
+// imports. Functions with compiler-owned versions use their immutable effective
+// target facts; all other functions resolve their authored target witnesses.
+// VM-compatible symbols are emitted as one module. |out_emitted| is false when
+// verification or target diagnostics rejected the module; status remains
+// reserved for infrastructure failures and API contract violations. The caller
+// owns |out_archive| when |out_emitted| is true and must release it with
 // loom_ireevm_module_archive_deinitialize.
 iree_status_t loom_ireevm_emit_module_archive_from_ir(
     loom_module_t* module, const loom_ireevm_archive_emit_options_t* options,

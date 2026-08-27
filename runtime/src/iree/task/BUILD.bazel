@@ -90,6 +90,7 @@ iree_runtime_cc_test(
     deps = [
         ":task",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

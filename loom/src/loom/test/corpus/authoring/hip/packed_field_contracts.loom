@@ -9,7 +9,6 @@
 // or bias, and any regrouping needed by a target dot instruction. There is no
 // portable scalar `q4` type, and a target should not have to rediscover decode
 // intent from unrelated shifts and masks.
-
 // Q2-style fields fit a regular bitunpack. The raw codes here are packed in
 // least-significant-field order as 0, 1, 2, 3. Subtracting 2 makes the logical
 // signed lanes -2, -1, 0, 1.
@@ -73,14 +72,14 @@ func.def @packed_q4_repack_to_dot8i4() -> (i32, i32) {
 // another stream. Keep the side stream explicit: unpack the high bits, insert
 // them into the low nibble payload, then apply the logical signed bias.
 func.def @packed_q5_split_high_bit_chunk() -> (i32, i32, i32, i32) {
-  %l0 = scalar.constant 0x10 : i8
-  %l1 = scalar.constant 0x32 : i8
+  %l0 = scalar.constant 16 : i8
+  %l1 = scalar.constant 50 : i8
   %low_packed = vector.from_elements %l0, %l1 : vector<2xi8>
   %lo = vector.bitfield.extractu %low_packed {offset = 0, width = 4} : vector<2xi8> -> vector<2xi8>
   %hi = vector.bitfield.extractu %low_packed {offset = 4, width = 4} : vector<2xi8> -> vector<2xi8>
   %low_codes = vector.concat<0> %lo, %hi : vector<2xi8>, vector<2xi8> -> vector<4xi8>
 
-  %h0 = scalar.constant 0x0a : i8
+  %h0 = scalar.constant 10 : i8
   %high_packed = vector.from_elements %h0 : vector<1xi8>
   %high8 = vector.bitunpacku<1> %high_packed : vector<1xi8> -> vector<8xi8>
   %high4 = vector.slice %high8[0] : vector<8xi8> -> vector<4xi8>
@@ -102,13 +101,13 @@ func.def @packed_q5_split_high_bit_chunk() -> (i32, i32, i32, i32) {
 // lane. This shape matches the q6_K register assembly pattern without pulling
 // the entire model block format into a tiny authoring recipe.
 func.def @packed_q6_split_high_bits_chunk() -> (i32, i32, i32, i32) {
-  %l0 = scalar.constant 0x10 : i8
-  %l1 = scalar.constant 0x32 : i8
-  %l2 = scalar.constant 0x54 : i8
-  %l3 = scalar.constant 0x76 : i8
+  %l0 = scalar.constant 16 : i8
+  %l1 = scalar.constant 50 : i8
+  %l2 = scalar.constant 84 : i8
+  %l3 = scalar.constant 118 : i8
   %low_packed = vector.from_elements %l0, %l1, %l2, %l3 : vector<4xi8>
-  %h0 = scalar.constant 0x24 : i8
-  %h1 = scalar.constant 0x1b : i8
+  %h0 = scalar.constant 36 : i8
+  %h1 = scalar.constant 27 : i8
   %high_packed = vector.from_elements %h0, %h1 : vector<2xi8>
 
   %lo4 = vector.bitfield.extractu %low_packed {offset = 0, width = 4} : vector<4xi8> -> vector<4xi8>
@@ -136,8 +135,8 @@ func.def @packed_q6_split_high_bits_chunk() -> (i32, i32, i32, i32) {
 // per-block grid. The grid is ordinary SSA data; it is not a hidden property of
 // the load or a target-specific memory operation.
 func.def @packed_u4_table_decode_chunk() -> (i32, i32, i32, i32) {
-  %p0 = scalar.constant 0x10 : i8
-  %p1 = scalar.constant 0x32 : i8
+  %p0 = scalar.constant 16 : i8
+  %p1 = scalar.constant 50 : i8
   %packed = vector.from_elements %p0, %p1 : vector<2xi8>
   %codes = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>
   %g0 = scalar.constant -8 : i8

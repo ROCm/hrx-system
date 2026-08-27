@@ -86,7 +86,8 @@ static iree_status_t FakeCreateBuffer(
       /*.user_data=*/storage,
   };
   iree_status_t status = iree_hal_heap_buffer_wrap(
-      placement, IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+      placement,
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_COHERENT,
       IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
       IREE_HAL_BUFFER_USAGE_DEFAULT, expected_byte_length,
       iree_make_byte_span(storage, expected_byte_length), release_callback,

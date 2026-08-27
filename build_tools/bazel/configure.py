@@ -13,14 +13,17 @@ import argparse
 import os
 import shlex
 import sys
+import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePath
 
 LOOM_EXECUTE_SUBSTRATES = ("iree_hal", "iree_vm")
 LOOM_IMPORTERS = ("mlir", "tilelang")
 LOOM_TARGETS = ("amdgpu", "iree_vm", "llvmir", "spirv", "wasm", "x86")
 LOOM_EMITTERS = ("amdgpu", "iree_vm", "llvmir", "spirv", "wasm")
 HOST_DRIVERS = ("local-sync", "local-task", "null")
+NPU_DRIVERS = ("amdxdna",)
 DEFAULT_LOOM_EXECUTE = LOOM_EXECUTE_SUBSTRATES
 DEFAULT_LOOM_TARGETS = ("amdgpu", "iree_vm", "llvmir", "spirv", "x86")
 
@@ -62,11 +65,12 @@ SDK_DRIVER_PACKAGES = {
 ROCM_DRIVERS = frozenset(("amdgpu", "hip"))
 DEPENDENCY_MODES = frozenset(("pinned", "package", "auto"))
 SUPPORTED_ENABLE_DRIVERS = frozenset(
-    (*HOST_DRIVERS, "amdgpu", "hip", "vulkan", "webgpu")
+    (*HOST_DRIVERS, *NPU_DRIVERS, "amdgpu", "hip", "vulkan", "webgpu")
 )
-ALL_DRIVERS = tuple(HOST_DRIVERS) + tuple(SDK_DRIVER_PACKAGES)
+ALL_DRIVERS = tuple(HOST_DRIVERS) + NPU_DRIVERS + tuple(SDK_DRIVER_PACKAGES)
 DRIVER_DEFINES = {
     "IREE_HAL_DRIVER_AMDGPU": "amdgpu",
+    "IREE_HAL_DRIVER_AMDXDNA": "amdxdna",
     "IREE_HAL_DRIVER_HIP": "hip",
     "IREE_HAL_DRIVER_LOCAL_SYNC": "local-sync",
     "IREE_HAL_DRIVER_LOCAL_TASK": "local-task",
@@ -108,6 +112,12 @@ NATIVE_LOOM_IMPORT_FLAG = "--//loom/config/import:enable"
 NATIVE_REPO_ENV_PREFIX = "--repo_env="
 TRUE_VALUES = frozenset(("1", "ON", "TRUE", "YES"))
 FALSE_VALUES = frozenset(("0", "OFF", "FALSE", "NO"))
+WINDOWS_LONG_PATHS_REGISTRY_PATH = r"SYSTEM\CurrentControlSet\Control\FileSystem"
+WINDOWS_LONG_PATHS_REGISTRY_VALUE = "LongPathsEnabled"
+WINDOWS_LONG_PATHS_POWERSHELL_COMMAND = (
+    'New-ItemProperty -Path "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\FileSystem" '
+    '-Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force'
+)
 
 
 @dataclass
@@ -303,6 +313,83 @@ class ConfigRequest:
         return self.dependency_mode
 
 
+def windows_long_paths_enabled() -> bool:
+    """Returns whether this Windows host has opted into long Win32 paths."""
+    import winreg
+
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            WINDOWS_LONG_PATHS_REGISTRY_PATH,
+        ) as key:
+            value, value_type = winreg.QueryValueEx(
+                key, WINDOWS_LONG_PATHS_REGISTRY_VALUE
+            )
+    except OSError:
+        return False
+    return value_type == winreg.REG_DWORD and value == 1
+
+
+def windows_symbolic_links_available() -> bool:
+    """Returns whether this process can create Windows symbolic links."""
+    with tempfile.TemporaryDirectory(prefix="hrx-bazel-symlink-") as temp_directory:
+        directory = Path(temp_directory)
+        target = directory / "target"
+        link = directory / "link"
+        target.write_text("", encoding="utf-8")
+        try:
+            link.symlink_to(target)
+        except OSError:
+            return False
+        return link.is_symlink()
+
+
+def require_windows_bazel_host(
+    *,
+    platform_name: str | None = None,
+    long_paths_reader: Callable[[], bool] | None = None,
+    symbolic_link_probe: Callable[[], bool] | None = None,
+) -> None:
+    """Fails with setup instructions for missing Windows Bazel capabilities."""
+    platform_name = sys.platform if platform_name is None else platform_name
+    if platform_name != "win32":
+        return
+    if long_paths_reader is None:
+        long_paths_reader = windows_long_paths_enabled
+    if symbolic_link_probe is None:
+        symbolic_link_probe = windows_symbolic_links_available
+
+    failures = []
+    if not long_paths_reader():
+        failures.append(
+            "Long Win32 paths are disabled. Deeply nested rules_python "
+            "runfiles exceed the legacy MAX_PATH limit even when the checkout "
+            "and Bazel output roots are short. Open PowerShell as "
+            "Administrator and run:\n"
+            f"  {WINDOWS_LONG_PATHS_POWERSHELL_COMMAND}"
+        )
+    if not symbolic_link_probe():
+        failures.append(
+            "Symbolic-link creation is unavailable. rules_python constructs "
+            "Windows runfiles and runtime virtual environments with symbolic "
+            "links. Enable Windows Developer Mode or grant this account the "
+            "'Create symbolic links' user right."
+        )
+    if not failures:
+        return
+    raise SystemExit(
+        "Windows Bazel host requirements are not satisfied:\n\n"
+        + "\n\n".join(failures)
+        + "\n\nCI jobs without administrator rights must use a base image where "
+        "these machine policies are already provisioned. After changing host "
+        "policy, run:\n"
+        "  python dev.py bazel shutdown\n\n"
+        "Start a new terminal so new processes observe the policy. Windows "
+        "may require a reboot when an existing process has cached the old "
+        "value."
+    )
+
+
 def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -337,6 +424,11 @@ overrides belong in .bazelrc.local.""",
         dest="defines",
         metavar="NAME=VALUE",
         help="Portable project configuration option documented in BUILDING.md.",
+    )
+    parser.add_argument(
+        "--check-windows-host",
+        action="store_true",
+        help=argparse.SUPPRESS,
     )
     args, native_bazel_args = parser.parse_known_args(argv)
     args.native_bazel_args = native_bazel_args
@@ -381,6 +473,11 @@ def parse_define(define: str) -> tuple[str, str]:
     return name, value
 
 
+def as_bazel_path(path: PurePath) -> str:
+    """Returns a filesystem path in Bazel's platform-neutral spelling."""
+    return path.as_posix()
+
+
 def resolve_rocm_path(path: str) -> str:
     if not path:
         raise SystemExit("IREE_ROCM_PATH must not be empty.")
@@ -389,7 +486,7 @@ def resolve_rocm_path(path: str) -> str:
         raise SystemExit(f"IREE_ROCM_PATH does not exist: {resolved}")
     if not (resolved / "include").is_dir():
         raise SystemExit(f"IREE_ROCM_PATH has no include directory: {resolved}")
-    return str(resolved)
+    return as_bazel_path(resolved)
 
 
 def apply_define(request: ConfigRequest, define: str) -> None:
@@ -650,6 +747,9 @@ def generate_config(args: argparse.Namespace) -> str:
 
 def main() -> int:
     args = parse_arguments()
+    require_windows_bazel_host()
+    if args.check_windows_host:
+        return 0
     config = generate_config(args)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(config, encoding="utf-8")

@@ -69,7 +69,7 @@ typedef enum loom_amdgpu_kernel_descriptor_bits_e {
 typedef uint32_t loom_amdgpu_kernel_descriptor_flags_t;
 
 typedef struct loom_amdgpu_kernel_descriptor_t {
-  // Processor name such as `gfx1100`.
+  // Exact or generic processor name such as `gfx1151` or `gfx11-generic`.
   iree_string_view_t processor;
   // Fixed LDS/group segment size in bytes.
   uint32_t group_segment_fixed_size;

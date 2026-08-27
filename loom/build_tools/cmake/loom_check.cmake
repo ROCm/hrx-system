@@ -101,6 +101,7 @@ function(loom_check_test_suite)
       ARGS
         "--source-prefix-map=${IREE_ROOT_DIR}/="
         "--source-prefix-map=${_ABS_SRC}=${_LOGICAL_SRC}"
+        "--template-root=${IREE_ROOT_DIR}"
         "${_ABS_SRC}"
       SRC
         ${_RULE_RUNNER}

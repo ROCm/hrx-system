@@ -13,6 +13,7 @@
 #include "loom/ir/local_value_domain.h"
 #include "loom/ir/module.h"
 #include "loom/ir/type_refinement.h"
+#include "loom/target/registers.h"
 
 #define LOOM_TYPE_PROPAGATION_INITIAL_ORDINAL_CAPACITY 64
 #define LOOM_TYPE_PROPAGATION_INITIAL_LIST_CAPACITY 32
@@ -353,17 +354,21 @@ bool loom_type_propagator_may_apply_op(const loom_type_propagator_t* propagator,
                                        const loom_op_t* op,
                                        const loom_op_vtable_t* vtable) {
   if (!propagator || !op) return false;
-  const bool facts_enabled = rewriter && rewriter->fact_table;
+  // Facts refine dynamic dimensions and SSA encoding attachments. Both are
+  // represented by the module's incrementally maintained type-use table.
+  const bool facts_can_refine =
+      rewriter && rewriter->fact_table &&
+      loom_module_has_active_type_uses(propagator->module);
   const bool vtable_can_refine =
       vtable && iree_any_bit_set(vtable->vtable_flags,
                                  LOOM_OP_VTABLE_TYPE_PROPAGATION_CANDIDATE);
 
   bool values_have_refinement_surface = false;
-  if (facts_enabled || vtable_can_refine) {
+  if (facts_can_refine || vtable_can_refine) {
     values_have_refinement_surface =
         loom_type_propagator_op_values_have_refinement_surface(propagator, op);
   }
-  if (facts_enabled && values_have_refinement_surface) return true;
+  if (facts_can_refine && values_have_refinement_surface) return true;
   if (!vtable_can_refine) return false;
 
   if (vtable->type_transfer || op->region_count > 0) return true;
@@ -491,23 +496,17 @@ static iree_status_t loom_type_propagator_refine_property_with_candidate(
       return iree_ok_status();
     case LOOM_PROPERTY_REGISTER_CLASS:
       *out_type = current_type;
-      *out_result = loom_type_is_register(current_type) &&
-                            loom_type_is_register(candidate_type) &&
-                            loom_type_register_payload0(current_type) ==
-                                loom_type_register_payload0(candidate_type) &&
-                            loom_type_register_payload1(current_type) ==
-                                loom_type_register_payload1(candidate_type)
-                        ? LOOM_TYPE_REFINEMENT_UNCHANGED
-                        : LOOM_TYPE_REFINEMENT_CONFLICT;
+      *out_result =
+          loom_low_register_type_same_class(current_type, candidate_type)
+              ? LOOM_TYPE_REFINEMENT_UNCHANGED
+              : LOOM_TYPE_REFINEMENT_CONFLICT;
       return iree_ok_status();
     case LOOM_PROPERTY_REGISTER_UNIT_COUNT:
       *out_type = current_type;
-      *out_result = loom_type_is_register(current_type) &&
-                            loom_type_is_register(candidate_type) &&
-                            loom_type_register_payload1(current_type) ==
-                                loom_type_register_payload1(candidate_type)
-                        ? LOOM_TYPE_REFINEMENT_UNCHANGED
-                        : LOOM_TYPE_REFINEMENT_CONFLICT;
+      *out_result =
+          loom_low_register_type_same_unit_count(current_type, candidate_type)
+              ? LOOM_TYPE_REFINEMENT_UNCHANGED
+              : LOOM_TYPE_REFINEMENT_CONFLICT;
       return iree_ok_status();
     default:
       *out_type = current_type;
@@ -1120,12 +1119,8 @@ static iree_status_t loom_type_propagator_process_value_adjacency(
     if (propagator->conflict) return iree_ok_status();
   }
 
-  if ((iree_host_size_t)value_id >=
-      propagator->module->type_uses.value_capacity) {
-    return iree_ok_status();
-  }
   loom_type_use_id_t type_use_id =
-      propagator->module->type_uses.value_heads[value_id].first_incoming_use_id;
+      loom_module_value_first_incoming_type_use(propagator->module, value_id);
   while (type_use_id != LOOM_TYPE_USE_ID_INVALID) {
     const loom_type_use_t* type_use =
         &propagator->module->type_uses.records[type_use_id];
@@ -1180,9 +1175,9 @@ static iree_status_t loom_type_propagator_commit(
         current_type, candidate_type, &propagator->module->arena,
         &committed_type, &result));
     if (result == LOOM_TYPE_REFINEMENT_CONFLICT) {
-      return iree_make_status(
-          IREE_STATUS_INTERNAL,
+      IREE_ASSERT_UNREACHABLE(
           "accepted type propagation transaction conflicted during commit");
+      IREE_BUILTIN_UNREACHABLE();
     }
     if (result == LOOM_TYPE_REFINEMENT_UNCHANGED ||
         loom_type_equal(current_type, committed_type)) {

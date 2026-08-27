@@ -1,0 +1,12 @@
+kernel.decl @scale() launch(%input: buffer, %output: buffer)
+
+check.case public @scale_case {
+  %input = check.generate.fill value(7) : tensor<4xi32>
+  %output = check.generate.fill value(0) : tensor<4xi32>
+  %expected = check.generate.fill value(14) : tensor<4xi32>
+  kernel.launch @scale(%input, %output) : (tensor<4xi32>, tensor<4xi32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<4xi32>
+  check.return
+}
+
+check.benchmark<@scale_case> @scale_benchmark

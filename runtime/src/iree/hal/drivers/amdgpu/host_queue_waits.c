@@ -84,9 +84,9 @@ static bool iree_hal_amdgpu_host_queue_append_wait_barrier(
 // barriers appended), false if deferral is needed.
 //
 // Tier 0: timeline_value >= value -> already completed.
-// Tier 1a: signal submitted by this queue -> elide directly from last_signal
-//   under this strategy's current all-barrier AQL policy, no semaphore-frontier
-//   mutex/copy.
+// Tier 1a: signal submitted by this queue -> append one barrier directly from
+//   last_signal. Same-queue submission order is not a user-visible ordering
+//   contract; the semaphore wait must observe completion of the producer epoch.
 // Tier 1b: signal submitted by a producer epoch that exactly covers the
 //   semaphore frontier, and this queue already dominates that producer epoch
 //   -> elide directly from last_signal.
@@ -141,19 +141,20 @@ static bool iree_hal_amdgpu_host_queue_resolve_wait(
     return false;
   }
 
-  // Tier 1a: same-queue elision from the last_signal cache alone.
-  // HAL queues are not FIFO: user-visible order comes from semaphore edges.
-  // This shortcut is valid only because AMDGPU queue submissions represent
-  // inline waits on the first payload packet with AQL BARRIER set, so
-  // submission order under submission_mutex creates a single in-queue
-  // dependency chain. If that policy is relaxed for independent HIP streams,
-  // this branch must emit an explicit same-queue dependency edge instead of
-  // returning purely from producer axis identity.
+  // Tier 1a: same-queue dependency from the last_signal cache alone.
+  // HAL queues are not FIFO: user-visible order comes from semaphore edges. A
+  // submitted signal only proves that the producer epoch is known; it does not
+  // prove that packets for the producer epoch have completed. Emit a real
+  // device-side wait on the queue epoch signal.
   if (signal_axis == queue->axis) {
-    resolution->inline_acquire_scope =
-        iree_hal_amdgpu_host_queue_max_fence_scope(
-            resolution->inline_acquire_scope, acquire_scope);
-    return true;
+    hsa_signal_t epoch_signal;
+    if (!iree_hal_amdgpu_epoch_signal_table_lookup(
+            queue->epoch_table, signal_axis, &epoch_signal)) {
+      return false;
+    }
+    return iree_hal_amdgpu_host_queue_append_wait_barrier(
+        queue, resolution, signal_axis, epoch_signal, signal_epoch,
+        acquire_scope);
   }
 
   // Tier 1b/2a: when the semaphore cache says the producer queue's epoch

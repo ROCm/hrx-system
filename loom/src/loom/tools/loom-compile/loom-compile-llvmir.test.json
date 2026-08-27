@@ -35,8 +35,8 @@
               "contains": [
                 "\"artifact_kind\":\"target-artifact\"",
                 "\"backend\":\"llvmir-text\"",
-                "\"executable_format\":\"llvmir-text\"",
-                "\"status_code\":0"
+                "\"artifact_format\":\"llvmir_text\"",
+                "\"status\":{\"code\":0,\"name\":\"OK\"}"
               ]
             }
           ]
@@ -79,7 +79,7 @@
           "name": "write-source",
           "write": {
             "path": "{tmp}/low_add.loom",
-            "text": "llvmir.target<object> @target {\n  triple = \"loom-direct64-unknown-none\",\n  data_layout = \"e-p:64:64-i64:64-n8:16:32:64-S128\"\n}\n\nlow.func.def target(@target) abi(object_function) @low_add(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {\n  %sum = add.i32 %lhs, %rhs\n  return %sum\n}\n"
+            "text": "llvmir.target<object> @target {\n  triple = \"loom-direct64-unknown-none\",\n  data_layout = \"e-p:64:64-i64:64-n8:16:32:64-S128\"\n}\n\nlow.func.def target<llvmir.generic.core>(@target) abi(object_function) @low_add(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm {\n  %sum = add.i32 %lhs, %rhs\n  return %sum\n}\n"
           }
         },
         {
@@ -97,37 +97,6 @@
             "contains": [
               "define dso_local i32 @low_add(i32 %lhs, i32 %rhs)",
               "%sum = add i32 %lhs, %rhs"
-            ]
-          }
-        }
-      ]
-    },
-    {
-      "name": "emits textual LLVMIR for AMDGCN kernel low IR",
-      "steps": [
-        {
-          "name": "write-source",
-          "write": {
-            "path": "{tmp}/amdgcn_kernel.loom",
-            "text": "llvmir.target<object> @target {\n  triple = \"amdgcn-amd-amdhsa\"\n}\n\nlow.kernel.def target(@target) workgroup_size(64, 1, 1) @dispatch() asm<llvmir.generic.core> {\n  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>\n  %value = load.i32 %input, 4\n  return\n}\n"
-          }
-        },
-        {
-          "name": "compile",
-          "run": {
-            "tool": "loom-compile",
-            "args": [
-              "{tmp}/amdgcn_kernel.loom",
-              "--backend=llvmir-text",
-              "--pipeline=none",
-              "--output=-"
-            ]
-          },
-          "stdout": {
-            "contains": [
-              "target triple = \"amdgcn-amd-amdhsa\"",
-              "define amdgpu_kernel void @dispatch(ptr addrspace(1) inreg noundef %input)",
-              "\"amdgpu-flat-work-group-size\"=\"1,1024\""
             ]
           }
         }

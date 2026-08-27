@@ -20,7 +20,8 @@ extern "C" {
 
 // Cached information about the system.
 typedef struct iree_hal_amdgpu_system_info_t {
-  // Timestamp value increase rate in hz.
+  // HSA system timestamp rate in hz, the domain hsa_signal_wait timeouts are
+  // expressed in. Device-side timestamp ticks use the per-agent rate instead.
   // Query of HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY.
   uint64_t timestamp_frequency;
   // HSA SVM/HMM process-wide capability facts.

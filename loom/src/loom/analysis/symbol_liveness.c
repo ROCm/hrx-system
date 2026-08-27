@@ -9,10 +9,9 @@
 #include <string.h>
 
 #include "loom/ir/module.h"
-#include "loom/ops/op_defs.h"
 
 typedef struct loom_symbol_liveness_worklist_t {
-  // Symbol ids still waiting for defining-op traversal.
+  // Symbol ids still waiting for dependency expansion.
   loom_symbol_id_t* entries;
 
   // Number of queued symbol ids.
@@ -26,8 +25,8 @@ typedef struct loom_symbol_liveness_state_t {
   // Module being analyzed.
   const loom_module_t* module;
 
-  // Concrete symbol dependency table for module.
-  const loom_symbol_dependency_table_t* dependencies;
+  // Concrete symbol reference table for module.
+  const loom_symbol_reference_table_t* references;
 
   // Analysis options with NULL-safe defaults.
   loom_symbol_liveness_options_t options;
@@ -112,46 +111,55 @@ static iree_status_t loom_symbol_liveness_mark_concrete_symbol_id(
 
 static iree_status_t loom_symbol_liveness_seed_roots(
     loom_symbol_liveness_state_t* state) {
-  if (!state->options.root_query) return iree_ok_status();
-  const loom_symbol_t* symbol = NULL;
-  loom_module_for_each_symbol(state->module, symbol) {
-    if (!symbol->defining_op) continue;
-    loom_symbol_id_t symbol_id =
-        (loom_symbol_id_t)(symbol - state->module->symbols.entries);
-    if (!state->options.root_query(state->options.root_query_user_data,
-                                   state->module, symbol_id, symbol)) {
-      continue;
+  for (iree_host_size_t i = 0; i < state->options.root_symbol_ids.count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_symbol_liveness_mark_concrete_symbol_id(
+        state, state->options.root_symbol_ids.values[i]));
+  }
+  if (state->options.root_query) {
+    const loom_symbol_t* symbol = NULL;
+    loom_module_for_each_symbol(state->module, symbol) {
+      if (!symbol->defining_op) continue;
+      loom_symbol_id_t symbol_id =
+          (loom_symbol_id_t)(symbol - state->module->symbols.entries);
+      if (!state->options.root_query(state->options.root_query_user_data,
+                                     state->module, symbol_id, symbol)) {
+        continue;
+      }
+      IREE_RETURN_IF_ERROR(
+          loom_symbol_liveness_mark_concrete_symbol_id(state, symbol_id));
     }
-    IREE_RETURN_IF_ERROR(
-        loom_symbol_liveness_mark_concrete_symbol_id(state, symbol_id));
   }
   return iree_ok_status();
 }
 
 static iree_status_t loom_symbol_liveness_mark_module_root_edges(
     loom_symbol_liveness_state_t* state) {
-  loom_symbol_dependency_edge_id_t edge_id =
-      state->dependencies->first_module_edge_id;
-  while (edge_id != LOOM_SYMBOL_DEPENDENCY_EDGE_ID_INVALID) {
-    const loom_symbol_dependency_edge_t* edge =
-        &state->dependencies->edges[edge_id];
+  loom_symbol_reference_occurrence_id_t edge_id =
+      state->references->first_module_occurrence_id;
+  while (edge_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
+    const loom_symbol_reference_occurrence_t* edge =
+        &state->references->occurrences[edge_id];
+    if (!loom_symbol_reference_occurrence_is_dependency(edge)) {
+      edge_id = edge->next_outgoing_occurrence_id;
+      continue;
+    }
     ++state->concrete_edge_count;
     IREE_RETURN_IF_ERROR(loom_symbol_liveness_mark_concrete_symbol_id(
         state, edge->target_symbol_id));
-    edge_id = edge->next_outgoing_edge_id;
+    edge_id = edge->next_outgoing_occurrence_id;
   }
   return iree_ok_status();
 }
 
 static iree_status_t loom_symbol_liveness_visit_contributors(
     loom_symbol_liveness_state_t* state, loom_symbol_id_t source_symbol_id,
-    const loom_symbol_t* source_symbol, const loom_op_t* op) {
+    const loom_symbol_t* source_symbol, const loom_template_demand_t* demand) {
   if (!state->has_contributors) {
     return iree_ok_status();
   }
   loom_symbol_liveness_contributor_context_t context = {
       .module = state->module,
-      .dependencies = state->dependencies,
+      .references = state->references,
       .arena = state->arena,
       .source_symbol_id = source_symbol_id,
       .source_symbol = source_symbol,
@@ -160,64 +168,45 @@ static iree_status_t loom_symbol_liveness_visit_contributors(
   for (iree_host_size_t i = 0; i < state->options.contributor_count; ++i) {
     const loom_symbol_liveness_contributor_t* contributor =
         &state->options.contributors[i];
-    if (!contributor->visit_op) continue;
-    IREE_RETURN_IF_ERROR(
-        contributor->visit_op(contributor->user_data, &context, op));
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_symbol_liveness_scan_op(
-    loom_symbol_liveness_state_t* state, loom_symbol_id_t source_symbol_id,
-    const loom_symbol_t* source_symbol, const loom_op_t* op) {
-  if (!op || iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) {
-    return iree_ok_status();
-  }
-
-  loom_symbol_ref_t nested_symbol_ref = loom_symbol_ref_null();
-  if (loom_op_defining_symbol_ref(state->module, op, &nested_symbol_ref) &&
-      nested_symbol_ref.symbol_id != source_symbol_id) {
-    return iree_ok_status();
-  }
-
-  IREE_RETURN_IF_ERROR(loom_symbol_liveness_visit_contributors(
-      state, source_symbol_id, source_symbol, op));
-
-  loom_region_t** regions = loom_op_regions(op);
-  for (uint8_t i = 0; i < op->region_count; ++i) {
-    const loom_region_t* region = regions[i];
-    if (!region) continue;
-    const loom_block_t* block = NULL;
-    loom_region_for_each_block(region, block) {
-      const loom_op_t* nested_op = NULL;
-      loom_block_for_each_op(block, nested_op) {
-        IREE_RETURN_IF_ERROR(loom_symbol_liveness_scan_op(
-            state, source_symbol_id, source_symbol, nested_op));
-      }
+    if (!contributor->visit_template_demand) {
+      continue;
     }
+    IREE_RETURN_IF_ERROR(contributor->visit_template_demand(
+        contributor->user_data, &context, demand));
   }
   return iree_ok_status();
 }
 
 static iree_status_t loom_symbol_liveness_traverse_symbol(
     loom_symbol_liveness_state_t* state, loom_symbol_id_t symbol_id) {
-  if (symbol_id >= state->dependencies->symbol_count) return iree_ok_status();
+  if (symbol_id >= state->references->symbol_count) return iree_ok_status();
 
-  loom_symbol_dependency_edge_id_t edge_id =
-      state->dependencies->symbols[symbol_id].first_outgoing_edge_id;
-  while (edge_id != LOOM_SYMBOL_DEPENDENCY_EDGE_ID_INVALID) {
-    const loom_symbol_dependency_edge_t* edge =
-        &state->dependencies->edges[edge_id];
+  loom_symbol_reference_occurrence_id_t edge_id =
+      state->references->symbols[symbol_id].first_outgoing_occurrence_id;
+  while (edge_id != LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID) {
+    const loom_symbol_reference_occurrence_t* edge =
+        &state->references->occurrences[edge_id];
+    if (!loom_symbol_reference_occurrence_is_dependency(edge)) {
+      edge_id = edge->next_outgoing_occurrence_id;
+      continue;
+    }
     ++state->concrete_edge_count;
     IREE_RETURN_IF_ERROR(loom_symbol_liveness_mark_concrete_symbol_id(
         state, edge->target_symbol_id));
-    edge_id = edge->next_outgoing_edge_id;
+    edge_id = edge->next_outgoing_occurrence_id;
   }
 
   if (!state->has_contributors) return iree_ok_status();
   const loom_symbol_t* symbol = &state->module->symbols.entries[symbol_id];
-  IREE_RETURN_IF_ERROR(loom_symbol_liveness_scan_op(state, symbol_id, symbol,
-                                                    symbol->defining_op));
+  loom_template_demand_id_t demand_id =
+      state->references->symbols[symbol_id].first_template_demand_id;
+  while (demand_id != LOOM_TEMPLATE_DEMAND_ID_INVALID) {
+    const loom_template_demand_t* demand =
+        &state->references->template_demands.values[demand_id];
+    IREE_RETURN_IF_ERROR(loom_symbol_liveness_visit_contributors(
+        state, symbol_id, symbol, demand));
+    demand_id = demand->next_source_demand_id;
+  }
   return iree_ok_status();
 }
 
@@ -227,14 +216,16 @@ static bool loom_symbol_liveness_options_have_contributors(
     return false;
   }
   for (iree_host_size_t i = 0; i < options->contributor_count; ++i) {
-    if (options->contributors[i].visit_op) return true;
+    if (options->contributors[i].visit_template_demand) {
+      return true;
+    }
   }
   return false;
 }
 
 static iree_status_t loom_symbol_liveness_validate(
     const loom_module_t* module,
-    const loom_symbol_dependency_table_t* dependencies,
+    const loom_symbol_reference_table_t* references,
     iree_arena_allocator_t* arena, loom_symbol_liveness_t* out_liveness) {
   if (!out_liveness) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -245,28 +236,28 @@ static iree_status_t loom_symbol_liveness_validate(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "symbol liveness module is NULL");
   }
-  if (!dependencies) {
+  if (!references) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "symbol liveness dependency table is NULL");
+                            "symbol liveness reference table is NULL");
   }
-  if (dependencies->module != module) {
+  if (references->module != module) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "symbol liveness dependency table is for a "
+                            "symbol liveness reference table is for a "
                             "different module");
   }
-  if (dependencies->symbol_count != module->symbols.count) {
+  if (references->symbol_count != module->symbols.count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "symbol liveness dependency table has %" PRIhsz
+                            "symbol liveness reference table has %" PRIhsz
                             " symbols but module has %" PRIhsz " symbols",
-                            dependencies->symbol_count, module->symbols.count);
+                            references->symbol_count, module->symbols.count);
   }
-  if (dependencies->symbol_count > 0 && !dependencies->symbols) {
+  if (references->symbol_count > 0 && !references->symbols) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "symbol liveness dependency symbols are NULL");
+                            "symbol liveness reference symbols are NULL");
   }
-  if (dependencies->edge_count > 0 && !dependencies->edges) {
+  if (references->occurrence_count > 0 && !references->occurrences) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "symbol liveness dependency edges are NULL");
+                            "symbol liveness reference occurrences are NULL");
   }
   if (!arena) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -277,15 +268,15 @@ static iree_status_t loom_symbol_liveness_validate(
 
 iree_status_t loom_symbol_liveness_compute(
     const loom_module_t* module,
-    const loom_symbol_dependency_table_t* dependencies,
+    const loom_symbol_reference_table_t* references,
     const loom_symbol_liveness_options_t* options,
     iree_arena_allocator_t* arena, loom_symbol_liveness_t* out_liveness) {
   IREE_RETURN_IF_ERROR(
-      loom_symbol_liveness_validate(module, dependencies, arena, out_liveness));
+      loom_symbol_liveness_validate(module, references, arena, out_liveness));
 
   loom_symbol_liveness_state_t state = {
       .module = module,
-      .dependencies = dependencies,
+      .references = references,
       .options = options ? *options : (loom_symbol_liveness_options_t){0},
       .arena = arena,
       .has_contributors =
@@ -314,7 +305,7 @@ iree_status_t loom_symbol_liveness_compute(
 
   *out_liveness = (loom_symbol_liveness_t){
       .module = module,
-      .dependencies = dependencies,
+      .references = references,
       .live_symbols = state.live_symbols,
       .symbol_count = module->symbols.count,
       .concrete_edge_count = state.concrete_edge_count,

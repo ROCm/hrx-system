@@ -11,7 +11,33 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
+from loom.target.arch.amdgpu.matrix_formats import (
+    AMDGPU_CDNA4_MATRIX_FORMAT_ENUM_DOMAIN_NAMES,
+    AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS,
+)
+from loom.target.low_descriptors import DescriptorSet
+
 from .common import *
+
+
+def _with_matrix_timings(
+    descriptor_set: DescriptorSet,
+    timings: Mapping[str, _AmdgpuMatrixTiming],
+) -> DescriptorSet:
+    return replace(
+        descriptor_set,
+        schedule_classes=(
+            *(
+                schedule_class
+                for schedule_class in descriptor_set.schedule_classes
+                if not schedule_class.name.startswith(_SCHEDULE_MFMA_QUALIFIED_PREFIX)
+            ),
+            *_amdgpu_mfma_schedule_classes(timings),
+        ),
+    )
+
 
 _AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
     key="amdgpu.cdna4.core",
@@ -69,6 +95,20 @@ _AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
         ),
     ),
     register_parts=_AMDGPU_REGISTER_PARTS,
+    enum_domains=(
+        _AMDGPU_SOURCE_INLINE_F32_ENUM_DOMAIN,
+        _AMDGPU_SOURCE_INLINE_U32_16_ENUM_DOMAIN,
+        *(
+            EnumDomain(
+                AMDGPU_CDNA4_MATRIX_FORMAT_ENUM_DOMAIN_NAMES[physical_format.token],
+                values=tuple(
+                    EnumValue(token, value)
+                    for token, value in physical_format.selector_values
+                ),
+            )
+            for physical_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS
+        ),
+    ),
     resources=(
         *_common_scalar_vector_memory_resources(),
         Resource(_RESOURCE_MFMA, capacity_per_cycle=1, kind=ResourceKind.MATRIX),
@@ -115,6 +155,10 @@ _AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
             model_quality=ModelQuality.FALLBACK,
         ),
     ),
+)
+_AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE = _with_matrix_timings(
+    _AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_GFX950_MATRIX_TIMINGS,
 )
 
 
@@ -177,9 +221,28 @@ _AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
     resources=_AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE.resources,
     schedule_classes=_AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE.schedule_classes,
 )
+_AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE = _with_matrix_timings(
+    _AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_GFX942_MATRIX_TIMINGS,
+)
+
+_AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE = (
+    _amdgpu_core_descriptor_set_intersection(
+        key="amdgpu.gfx9_4.generic.core",
+        members=(
+            _AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE,
+            _AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE,
+        ),
+    )
+)
+_AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE = _with_matrix_timings(
+    _AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_GFX9_4_GENERIC_MATRIX_TIMINGS,
+)
 
 
 __all__ = (
     "_AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE",
+    "_AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE",
 )

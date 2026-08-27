@@ -21,6 +21,8 @@ extern "C" {
 typedef struct iree_hal_hip_device_architecture_facts_t {
   // NUL-terminated HIP GCN architecture name.
   char gcn_arch_name[IREE_HAL_HIP_MAX_GCN_ARCH_NAME_LENGTH];
+  // Physical HSA ASIC revision.
+  uint32_t asic_revision;
 } iree_hal_hip_device_architecture_facts_t;
 
 // HIP launch-limit facts used while populating common HAL specs.

@@ -38,12 +38,12 @@ static const char kSourceText[] =
     "  %output_aligned = buffer.assume.alignment %output {minimum_alignment = "
     "4} : buffer\n"
     "  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : "
-    "buffer -> view<1xi32, #dense>\n"
-    "  %loaded = view.load %input_view[0] : view<1xi32, #dense> -> i32\n"
+    "buffer -> view<1xi32>\n"
+    "  %loaded = view.load %input_view[0] : view<1xi32> -> i32\n"
     "  %doubled = scalar.addi %loaded, %loaded : i32\n"
     "  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : "
-    "buffer -> view<1xi32, #dense>\n"
-    "  view.store %doubled, %output_view[0] : i32, view<1xi32, #dense>\n"
+    "buffer -> view<1xi32>\n"
+    "  view.store %doubled, %output_view[0] : i32, view<1xi32>\n"
     "  kernel.return\n"
     "}\n";
 
@@ -66,9 +66,6 @@ typedef struct emit_spirv_iree_hal_state_t {
   // Live IREE HAL device used as the source of target facts.
   iree_hal_device_t* device;
 
-  // Live IREE HAL executable cache used to validate SPIR-V loadability.
-  iree_hal_executable_cache_t* executable_cache;
-
   // SPIR-V target package linked into this embedding binary.
   loomc_target_environment_t* target_environment;
 
@@ -86,9 +83,6 @@ typedef struct emit_spirv_iree_hal_state_t {
 
   // Live IREE HAL-derived SPIR-V target profile.
   loomc_target_profile_t* target_profile;
-
-  // Invocation-ready target selection derived from the profile.
-  loomc_target_selection_t* target_selection;
 
   // Immutable prepared compiler handle.
   loomc_compiler_t* compiler;
@@ -148,14 +142,12 @@ static void emit_spirv_iree_hal_state_deinitialize(
   loomc_result_release(state->result);
   loomc_pass_program_release(state->pass_program);
   loomc_compiler_release(state->compiler);
-  loomc_target_selection_release(state->target_selection);
   loomc_target_profile_release(state->target_profile);
   loomc_module_release(state->module);
   loomc_source_release(state->source);
   loomc_workspace_release(state->workspace);
   loomc_context_release(state->context);
   loomc_target_environment_release(state->target_environment);
-  iree_hal_executable_cache_release(state->executable_cache);
   iree_hal_device_release(state->device);
   iree_async_proactor_pool_release(state->proactor_pool);
 }
@@ -209,8 +201,7 @@ static const loomc_artifact_t* find_result_artifact(
   return NULL;
 }
 
-static loomc_status_t create_hal_device_and_cache(
-    emit_spirv_iree_hal_state_t* state) {
+static loomc_status_t create_hal_device(emit_spirv_iree_hal_state_t* state) {
   iree_allocator_t host_allocator = iree_allocator_system();
   iree_status_t iree_status = iree_hal_register_all_available_drivers(
       iree_hal_driver_registry_default());
@@ -244,12 +235,6 @@ static loomc_status_t create_hal_device_and_cache(
     return loomc_status_from_iree(iree_status);
   }
 
-  iree_status = iree_hal_executable_cache_create(
-      state->device, iree_make_cstring_view("loomc-example"),
-      &state->executable_cache);
-  if (!iree_status_is_ok(iree_status)) {
-    return loomc_status_from_iree(iree_status);
-  }
   return loomc_ok_status();
 }
 
@@ -293,7 +278,7 @@ static loomc_status_t create_workspace_and_source(
   return status;
 }
 
-static loomc_status_t create_target_profile_and_selection(
+static loomc_status_t create_target_profile(
     emit_spirv_iree_hal_state_t* state) {
   const loomc_iree_hal_profile_provider_t* providers[] = {
       loomc_spirv_iree_hal_profile_provider(),
@@ -303,7 +288,7 @@ static loomc_status_t create_target_profile_and_selection(
       .structure_size = sizeof(profile_options),
       .identifier = loomc_make_cstring_view("iree-hal-device"),
       .device = state->device,
-      .executable_cache = state->executable_cache,
+      .physical_device_affinity = 0,
       .providers = providers,
       .provider_count = 1,
   };
@@ -318,9 +303,6 @@ static loomc_status_t create_target_profile_and_selection(
   }
   if (loomc_status_is_ok(status) && !state->skipped) {
     emit_spirv_iree_hal_state_reset_result(state);
-    status = loomc_target_selection_create_from_profile(
-        state->target_profile, loomc_allocator_system(),
-        &state->target_selection);
   }
   return status;
 }
@@ -389,15 +371,9 @@ static loomc_status_t create_compiler_and_target_pipeline(
     emit_spirv_iree_hal_state_t* state) {
   loomc_status_t status = loomc_compiler_create(
       state->context, NULL, loomc_allocator_system(), &state->compiler);
-  loomc_target_selection_options_t target_options = {
-      .type = LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      .structure_size = sizeof(target_options),
-      .target_selection = state->target_selection,
-  };
   loomc_target_pipeline_options_t pipeline_options = {
       .type = LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
       .structure_size = sizeof(pipeline_options),
-      .next = &target_options,
       .identifier = loomc_make_cstring_view("iree-hal-spirv-prepared-low"),
       .kind = LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
       .control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
@@ -424,7 +400,7 @@ static loomc_status_t create_resources(emit_spirv_iree_hal_state_t* state) {
     status = create_workspace_and_source(state);
   }
   if (loomc_status_is_ok(status)) {
-    status = create_target_profile_and_selection(state);
+    status = create_target_profile(state);
   }
   if (loomc_status_is_ok(status) && !state->skipped) {
     status = check_live_profile_support(state);
@@ -454,10 +430,15 @@ static loomc_status_t deserialize_source(emit_spirv_iree_hal_state_t* state) {
 
 static loomc_status_t compile_module_to_prepared_low(
     emit_spirv_iree_hal_state_t* state) {
-  loomc_target_selection_options_t target_options = {
-      .type = LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
+  const loomc_target_specialization_t specialization = {
+      .function_symbol = loomc_make_cstring_view("double_i32_at_byte_offset"),
+      .target_profile = state->target_profile,
+  };
+  loomc_target_specialization_options_t target_options = {
+      .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
       .structure_size = sizeof(target_options),
-      .target_selection = state->target_selection,
+      .specializations = &specialization,
+      .specialization_count = 1,
   };
   loomc_compile_options_t compile_options = {
       .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
@@ -478,15 +459,9 @@ static loomc_status_t compile_module_to_prepared_low(
 }
 
 static loomc_status_t emit_spirv_artifact(emit_spirv_iree_hal_state_t* state) {
-  loomc_target_selection_options_t target_options = {
-      .type = LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      .structure_size = sizeof(target_options),
-      .target_selection = state->target_selection,
-  };
   loomc_spirv_emit_options_t spirv_options = {
       .type = LOOMC_STRUCTURE_TYPE_SPIRV_EMIT_OPTIONS,
       .structure_size = sizeof(spirv_options),
-      .next = &target_options,
   };
   const loomc_option_entry_t emit_entries[] = {
       {
@@ -556,7 +531,7 @@ static loomc_status_t run_emit_spirv_iree_hal_example(const char* device_uri,
   emit_spirv_iree_hal_state_t state;
   emit_spirv_iree_hal_state_initialize(&state, device_uri, output_path);
 
-  loomc_status_t status = create_hal_device_and_cache(&state);
+  loomc_status_t status = create_hal_device(&state);
   if (loomc_status_is_ok(status) && !state.skipped) {
     status = create_resources(&state);
   }

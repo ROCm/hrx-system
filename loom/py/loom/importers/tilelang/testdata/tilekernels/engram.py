@@ -94,22 +94,22 @@ def _engram_hash_input(tilelang: Any, T: Any, *, target: str) -> TileLangImportI
 
 
 @tilelang_case(
-    name="tilekernels_engram_hash_gfx1100",
+    name="tilekernels_engram_hash_gfx11_generic",
     category="kernel",
     tags=("tilekernels", "engram", "hash", "amdgpu"),
 )
-def tilekernels_engram_hash_gfx1100(
+def tilekernels_engram_hash_gfx11_generic(
     tilelang: Any,
     T: Any,
 ) -> TileLangImportInput:
-    return _engram_hash_input(tilelang, T, target="hip -mcpu=gfx1100")
+    return _engram_hash_input(tilelang, T, target="hip -mcpu=gfx11-generic")
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("engram_hash_kernel") @engram_hash_kernel(%num_tokens: i32) {
+kernel.def target(@hip_mcpu_gfx11_generic) export("engram_hash_kernel") @engram_hash_kernel(%num_tokens: i32) {
   %c2 = index.constant 2 : index
   %num_tokens_idx = index.cast %num_tokens : i32 to index
   %c32 = index.constant 32 : index
@@ -138,7 +138,7 @@ kernel.def target(@hip_mcpu_gfx1100) export("engram_hash_kernel") @engram_hash_k
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %hash_local_bytes = index.constant 8 : offset
-  %hash_local_buffer = buffer.alloca %hash_local_bytes {base_alignment = 8, memory_space = private} : buffer
+  %hash_local_buffer = buffer.alloca<private> align(8) %hash_local_bytes : buffer
   %hash_local = buffer.view %hash_local_buffer[%c0_bytes] : buffer -> view<1xi64, %layout>
   %c32 = index.constant 32 : index
   %madd = index.madd %by, %c32, %tid : index

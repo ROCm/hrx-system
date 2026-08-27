@@ -34,6 +34,8 @@ typedef enum loom_pass_program_instruction_kind_e {
   LOOM_PASS_PROGRAM_INSTRUCTION_REPEAT = 3,
   LOOM_PASS_PROGRAM_INSTRUCTION_FAIL = 4,
   LOOM_PASS_PROGRAM_INSTRUCTION_HALT = 5,
+  LOOM_PASS_PROGRAM_INSTRUCTION_CALL = 6,
+  LOOM_PASS_PROGRAM_INSTRUCTION_IF_CHANGED = 7,
 } loom_pass_program_instruction_kind_t;
 
 typedef enum loom_pass_program_symbol_snapshot_kind_e {
@@ -62,8 +64,15 @@ typedef struct loom_pass_program_attr_value_t {
     uint8_t enum_value;
     // Program-owned array payload for LOOM_ATTR_I64_ARRAY.
     const int64_t* i64_array;
+    // Program-owned stable value payload for LOOM_ATTR_ENUM_ARRAY.
+    const uint8_t* enum_array;
+    // Program-owned polarity words for LOOM_ATTR_SIGNED_ENUM_SET.
+    const uint64_t* signed_enum_set_words;
     // Source-module symbol reference payload for LOOM_ATTR_SYMBOL.
     loom_symbol_ref_t symbol_value;
+    // Program-owned payload for LOOM_ATTR_SYMBOL_ARRAY and
+    // LOOM_ATTR_SYMBOL_SET.
+    const loom_symbol_ref_t* symbol_refs;
     // Source-module type table index for LOOM_ATTR_TYPE.
     loom_type_id_t type_id;
     // Source-module encoding table index for LOOM_ATTR_ENCODING.
@@ -148,6 +157,13 @@ typedef struct loom_pass_program_repeat_t {
   iree_host_size_t body_end;
 } loom_pass_program_repeat_t;
 
+typedef struct loom_pass_program_nested_body_t {
+  // First instruction in the nested body.
+  iree_host_size_t body_start;
+  // One-past-last instruction in the nested body.
+  iree_host_size_t body_end;
+} loom_pass_program_nested_body_t;
+
 typedef struct loom_pass_program_message_t {
   // Program-owned message text.
   iree_string_view_t message;
@@ -170,6 +186,10 @@ typedef struct loom_pass_program_instruction_t {
     loom_pass_program_where_t where;
     // Payload for LOOM_PASS_PROGRAM_INSTRUCTION_REPEAT.
     loom_pass_program_repeat_t repeat;
+    // Payload for LOOM_PASS_PROGRAM_INSTRUCTION_CALL.
+    loom_pass_program_nested_body_t call;
+    // Payload for LOOM_PASS_PROGRAM_INSTRUCTION_IF_CHANGED.
+    loom_pass_program_nested_body_t if_changed;
     // Payload for LOOM_PASS_PROGRAM_INSTRUCTION_FAIL/HALT.
     loom_pass_program_message_t message;
   };

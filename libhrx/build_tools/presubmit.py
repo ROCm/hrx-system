@@ -32,20 +32,7 @@ GLOBAL_TEST_TRIGGERS = (
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run libhrx project presubmit.")
-    mutation = parser.add_mutually_exclusive_group()
-    mutation.add_argument("--fix", action="store_true", help="Accepted for symmetry.")
-    mutation.add_argument("--check", action="store_true", help="Accepted for symmetry.")
-    parser.add_argument(
-        "--lane",
-        choices=("bazel", "cmake"),
-        default="bazel",
-        help="Build-system lane used for tests. Defaults to bazel.",
-    )
-    parser.add_argument("--tests", action="store_true", help="Run libhrx tests.")
-    parser.add_argument(
-        "--files-from",
-        help="Path to a newline-separated repo-relative changed-file list.",
-    )
+    project_presubmit.add_common_arguments(parser, project_name=PROJECT_NAME)
     return parser.parse_args()
 
 

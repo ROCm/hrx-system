@@ -227,11 +227,12 @@ static iree_status_t loom_pipeline_set_enum_attr(loom_parser_t* parser,
         (int)loom_op_vtable_name(vtable).size, loom_op_vtable_name(vtable).data,
         (int)attr_name.size, attr_name.data);
   }
-  for (uint8_t i = 0; i < descriptor->enum_case_count; ++i) {
-    if (iree_string_view_equal(
-            value_token.text,
-            loom_bstring_view(descriptor->enum_case_names[i]))) {
-      loom_op_attrs(op)[attr_index] = loom_attr_enum(i);
+  iree_host_size_t case_span = loom_attr_descriptor_enum_case_span(descriptor);
+  for (iree_host_size_t i = 0; i < case_span; ++i) {
+    loom_bstring_t case_name = descriptor->enum_case_names[i];
+    if (case_name && iree_string_view_equal(value_token.text,
+                                            loom_bstring_view(case_name))) {
+      loom_op_attrs(op)[attr_index] = loom_attr_enum((uint8_t)i);
       return iree_ok_status();
     }
   }
@@ -284,7 +285,8 @@ static iree_status_t loom_pipeline_alloc_op(
 
 static iree_status_t loom_pipeline_finalize_statement(
     loom_parser_t* parser, loom_op_t* op, const iree_string_view_t* comments,
-    iree_host_size_t comment_count) {
+    iree_host_size_t comment_count, loom_op_flags_t source_flags) {
+  op->flags |= source_flags;
   IREE_RETURN_IF_ERROR(loom_builder_finalize_op(&parser->builder, op));
   return loom_module_attach_op_comments(parser->module, op, comments,
                                         comment_count);
@@ -357,8 +359,11 @@ static iree_status_t loom_parse_pipeline_statement(loom_parser_t* parser) {
   loom_token_t start_token = loom_tokenizer_peek(&parser->tokenizer);
   const iree_string_view_t* comments = NULL;
   iree_host_size_t comment_count = 0;
+  bool leading_blank_line = false;
   loom_tokenizer_take_pending_comments(&parser->tokenizer, &comments,
-                                       &comment_count);
+                                       &comment_count, &leading_blank_line);
+  const loom_op_flags_t source_flags =
+      leading_blank_line ? LOOM_OP_FLAG_LEADING_BLANK_LINE : 0;
 
   loom_location_id_t location = LOOM_LOCATION_UNKNOWN;
   IREE_RETURN_IF_ERROR(
@@ -378,8 +383,8 @@ static iree_status_t loom_parse_pipeline_statement(loom_parser_t* parser) {
     IREE_RETURN_IF_ERROR(loom_pipeline_set_enum_attr(
         parser, op, vtable, IREE_SV("anchor"), anchor_token));
     if (parser->error_count > errors_before) return iree_ok_status();
-    IREE_RETURN_IF_ERROR(
-        loom_pipeline_finalize_statement(parser, op, comments, comment_count));
+    IREE_RETURN_IF_ERROR(loom_pipeline_finalize_statement(
+        parser, op, comments, comment_count, source_flags));
     return loom_parse_pipeline_nested_region(
         parser, loom_pipeline_body_region_descriptor(vtable), op,
         loom_op_regions(op)[0]);
@@ -403,8 +408,8 @@ static iree_status_t loom_parse_pipeline_statement(loom_parser_t* parser) {
         parser, op, vtable, IREE_SV("predicate"), predicate_token));
     IREE_RETURN_IF_ERROR(loom_pipeline_set_dict_attr(parser, op, vtable,
                                                      IREE_SV("attrs"), attrs));
-    IREE_RETURN_IF_ERROR(
-        loom_pipeline_finalize_statement(parser, op, comments, comment_count));
+    IREE_RETURN_IF_ERROR(loom_pipeline_finalize_statement(
+        parser, op, comments, comment_count, source_flags));
     return loom_parse_pipeline_nested_region(
         parser, loom_pipeline_body_region_descriptor(vtable), op,
         loom_op_regions(op)[0]);
@@ -429,8 +434,32 @@ static iree_status_t loom_parse_pipeline_statement(loom_parser_t* parser) {
     IREE_RETURN_IF_ERROR(loom_parse_pipeline_repeat_options(parser, start_token,
                                                             attrs, op, vtable));
     if (parser->error_count > errors_before) return iree_ok_status();
+    IREE_RETURN_IF_ERROR(loom_pipeline_finalize_statement(
+        parser, op, comments, comment_count, source_flags));
+    return loom_parse_pipeline_nested_region(
+        parser, loom_pipeline_body_region_descriptor(vtable), op,
+        loom_op_regions(op)[0]);
+  }
+
+  if (loom_pipeline_token_is_keyword(start_token, IREE_SV("if"))) {
+    loom_tokenizer_next(&parser->tokenizer);
+    loom_token_t condition_token = loom_token_none();
+    IREE_RETURN_IF_ERROR(loom_parse_pipeline_name(
+        parser, IREE_SV("pipeline condition"), &condition_token));
+    if (!iree_string_view_equal(condition_token.text, IREE_SV("changed"))) {
+      IREE_RETURN_IF_ERROR(loom_parser_emit_unexpected_token(
+          parser, condition_token, IREE_SV("'changed'")));
+    }
+    if (parser->error_count > errors_before) return iree_ok_status();
+
+    loom_op_t* op = NULL;
+    const loom_op_vtable_t* vtable = NULL;
     IREE_RETURN_IF_ERROR(
-        loom_pipeline_finalize_statement(parser, op, comments, comment_count));
+        loom_pipeline_alloc_op(parser, IREE_SV("pass.if_changed"), start_token,
+                               location, &op, &vtable));
+    if (parser->error_count > errors_before) return iree_ok_status();
+    IREE_RETURN_IF_ERROR(loom_pipeline_finalize_statement(
+        parser, op, comments, comment_count, source_flags));
     return loom_parse_pipeline_nested_region(
         parser, loom_pipeline_body_region_descriptor(vtable), op,
         loom_op_regions(op)[0]);
@@ -449,8 +478,8 @@ static iree_status_t loom_parse_pipeline_statement(loom_parser_t* parser) {
     if (parser->error_count > errors_before) return iree_ok_status();
     IREE_RETURN_IF_ERROR(loom_pipeline_set_symbol_attr(
         op, vtable, IREE_SV("callee"), callee_attr));
-    return loom_pipeline_finalize_statement(parser, op, comments,
-                                            comment_count);
+    return loom_pipeline_finalize_statement(parser, op, comments, comment_count,
+                                            source_flags);
   }
 
   if (loom_pipeline_token_is_keyword(start_token, IREE_SV("fail")) ||
@@ -470,8 +499,8 @@ static iree_status_t loom_parse_pipeline_statement(loom_parser_t* parser) {
     if (parser->error_count > errors_before) return iree_ok_status();
     IREE_RETURN_IF_ERROR(loom_pipeline_set_string_attr(
         parser, op, vtable, IREE_SV("message"), message_token));
-    return loom_pipeline_finalize_statement(parser, op, comments,
-                                            comment_count);
+    return loom_pipeline_finalize_statement(parser, op, comments, comment_count,
+                                            source_flags);
   }
 
   loom_token_t key_token = loom_token_none();
@@ -490,7 +519,8 @@ static iree_status_t loom_parse_pipeline_statement(loom_parser_t* parser) {
       parser, op, vtable, IREE_SV("key"), key_token));
   IREE_RETURN_IF_ERROR(loom_pipeline_set_dict_attr(
       parser, op, vtable, IREE_SV("options"), options));
-  return loom_pipeline_finalize_statement(parser, op, comments, comment_count);
+  return loom_pipeline_finalize_statement(parser, op, comments, comment_count,
+                                          source_flags);
 }
 
 static iree_status_t loom_parse_pipeline_region_contents(

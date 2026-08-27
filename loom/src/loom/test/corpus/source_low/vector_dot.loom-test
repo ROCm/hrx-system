@@ -8,8 +8,8 @@ func.def @f32_dotf(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %acc: f32) -> (f32)
 // ====
 
 func.def @f32_dotf_zero_seed(%lhs: vector<4xf32>, %rhs: vector<4xf32>) -> (f32) {
-  %zero = scalar.constant 0.0 : f32
-  %dot = vector.dotf %lhs, %rhs, %zero : vector<4xf32>, vector<4xf32>, f32
+  %initial_accumulator = scalar.constant 0.0 : f32
+  %dot = vector.dotf %lhs, %rhs, %initial_accumulator : vector<4xf32>, vector<4xf32>, f32
   func.return %dot : f32
 }
 
@@ -49,9 +49,9 @@ func.def @f32_uniform_smem_vector_operands(%lhs: vector<4xf32>, %weights: buffer
   %base = index.constant 0 : offset
   %weights_global = buffer.assume.memory_space<global> %weights : buffer
   %weights_noalias = buffer.assume.noalias %weights_global : buffer
-  %weights_view = buffer.view %weights_noalias[%base] : buffer -> view<2x4xf32, #dense>
-  %rhs = vector.load %weights_view[0, 0] : view<2x4xf32, #dense> -> vector<4xf32>
-  %bias_vector = vector.load %weights_view[1, 0] : view<2x4xf32, #dense> -> vector<4xf32>
+  %weights_view = buffer.view %weights_noalias[%base] : buffer -> view<2x4xf32>
+  %rhs = vector.load %weights_view[0, 0] : view<2x4xf32> -> vector<4xf32>
+  %bias_vector = vector.load %weights_view[1, 0] : view<2x4xf32> -> vector<4xf32>
   %bias = vector.extract %bias_vector[0] : vector<4xf32> -> f32
   %scaled = vector.mulf %lhs, %rhs : vector<4xf32>
   %dot = vector.dotf %scaled, %rhs, %bias : vector<4xf32>, vector<4xf32>, f32

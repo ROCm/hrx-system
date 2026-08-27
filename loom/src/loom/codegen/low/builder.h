@@ -26,28 +26,36 @@ iree_status_t loom_low_build_register_type(
     const loom_low_descriptor_set_t* descriptor_set, uint16_t reg_class_id,
     uint32_t unit_count, loom_type_t* out_type);
 
+// Creates a reg<... : value_type> selected by descriptor-set register-class
+// ID and interns its recursively structural value type into |module|.
+iree_status_t loom_low_build_typed_register_type(
+    loom_module_t* module, const loom_low_descriptor_set_t* descriptor_set,
+    uint16_t reg_class_id, uint32_t unit_count, loom_type_t value_type,
+    loom_type_t* out_type);
+
+// Builds the register type for a descriptor's first implicit resource operand.
+// The descriptor must provide at least one non-immediate register-class form.
+iree_status_t loom_low_build_descriptor_implicit_resource_type(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor, loom_type_t* out_type);
+
 // Emits a descriptor-backed low.op from a descriptor row resolved earlier in
 // the pipeline.
 //
-// |opcode_id| must be the module string ID for |descriptor|'s key. Supplying it
-// lets source-to-low selection resolve the descriptor spelling once and lets
-// emission construct the packet without another descriptor lookup.
 iree_status_t loom_low_build_resolved_descriptor_op(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, loom_string_id_t opcode_id,
-    const loom_value_id_t* operands, iree_host_size_t operand_count,
-    loom_named_attr_slice_t attrs, const loom_type_t* result_types,
-    iree_host_size_t result_count, const loom_tied_result_t* tied_results,
-    iree_host_size_t tied_result_count, loom_location_id_t location,
-    loom_op_t** out_op);
+    const loom_low_descriptor_t* descriptor, const loom_value_id_t* operands,
+    iree_host_size_t operand_count, loom_named_attr_slice_t attrs,
+    const loom_type_t* result_types, iree_host_size_t result_count,
+    const loom_tied_result_t* tied_results, iree_host_size_t tied_result_count,
+    loom_location_id_t location, loom_op_t** out_op);
 
 // Emits a descriptor-backed low.const from a descriptor row resolved earlier in
 // the pipeline.
 iree_status_t loom_low_build_resolved_descriptor_const(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, loom_string_id_t opcode_id,
-    loom_named_attr_slice_t attrs, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op);
+    const loom_low_descriptor_t* descriptor, loom_named_attr_slice_t attrs,
+    loom_type_t result_type, loom_location_id_t location, loom_op_t** out_op);
 
 #ifdef __cplusplus
 }  // extern "C"

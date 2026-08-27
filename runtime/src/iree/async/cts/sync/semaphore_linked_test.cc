@@ -116,16 +116,17 @@ TEST_P(SemaphoreLinkedTest, LinkedWaitThenNop) {
   iree_async_operation_list_t list = {ops, 2};
   IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
 
-  // Signal the semaphore after a short delay.
+  iree_async_proactor_wake(proactor_);
+  PollOneProgressEvent();
+  EXPECT_TRUE(tracker.order.empty());
+
   std::thread signaler([semaphore]() {
-    iree_wait_until(iree_time_now() + iree_make_duration_ms(50));
     iree_status_t status = iree_async_semaphore_signal(semaphore, 10, NULL);
     IREE_CHECK_OK(status);
   });
 
   // Poll until both complete.
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   signaler.join();
 
@@ -197,8 +198,7 @@ TEST_P(SemaphoreLinkedTest, LinkedSignalThenNop) {
   iree_async_operation_list_t list = {ops, 2};
   IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   // Verify order.
   ASSERT_EQ(tracker.order.size(), 2u);
@@ -288,8 +288,7 @@ TEST_P(SemaphoreLinkedTest, LinkedRecvThenSignal) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send_op.base));
 
   // Poll until all complete (send + recv + signal).
-  PollUntil(/*min_completions=*/3,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/3);
 
   // Verify order: RECV first, then SIGNAL.
   ASSERT_EQ(tracker.order.size(), 2u);
@@ -380,16 +379,18 @@ TEST_P(SemaphoreLinkedTest, LinkedWaitThenSend) {
                     CompletionTracker::Callback, &recv_tracker);
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &recv_op.base));
 
-  // Signal the semaphore after delay.
+  iree_async_proactor_wake(proactor_);
+  PollOneProgressEvent();
+  EXPECT_TRUE(tracker.order.empty());
+  EXPECT_EQ(recv_tracker.call_count, 0);
+
   std::thread signaler([semaphore]() {
-    iree_wait_until(iree_time_now() + iree_make_duration_ms(50));
     iree_status_t status = iree_async_semaphore_signal(semaphore, 1, NULL);
     IREE_CHECK_OK(status);
   });
 
   // Poll until all complete (wait + send + recv).
-  PollUntil(/*min_completions=*/3,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/3);
 
   signaler.join();
 
@@ -447,16 +448,19 @@ TEST_P(SemaphoreLinkedTest, LinkedWaitFailureCancelsChain) {
   iree_async_operation_list_t list = {ops, 2};
   IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
 
+  iree_async_proactor_wake(proactor_);
+  PollOneProgressEvent();
+  EXPECT_EQ(wait_tracker.call_count, 0);
+  EXPECT_EQ(nop_tracker.call_count, 0);
+
   // Fail the semaphore.
   std::thread failure([semaphore]() {
-    iree_wait_until(iree_time_now() + iree_make_duration_ms(50));
     iree_async_semaphore_fail(
         semaphore, iree_make_status(IREE_STATUS_ABORTED, "device lost"));
   });
 
   // Poll until both complete.
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   failure.join();
 
@@ -510,8 +514,7 @@ TEST_P(SemaphoreLinkedTest, LinkedSignalFailureCancelsChain) {
   IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
 
   // Poll until both complete.
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   // SIGNAL should complete with INVALID_ARGUMENT (non-monotonic signal).
   EXPECT_EQ(signal_tracker.call_count, 1);
@@ -594,8 +597,7 @@ TEST_P(SemaphoreLinkedTest, IndependentChains) {
   IREE_ASSERT_OK(iree_async_semaphore_signal(sem1, 1, NULL));
 
   // Poll until chain1 completes.
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   // Chain1 should be complete.
   EXPECT_EQ(wait1_tracker.call_count, 1);
@@ -610,8 +612,7 @@ TEST_P(SemaphoreLinkedTest, IndependentChains) {
   // Signal sem2 to complete chain2.
   IREE_ASSERT_OK(iree_async_semaphore_signal(sem2, 1, NULL));
 
-  PollUntil(/*min_completions=*/2,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/2);
 
   EXPECT_EQ(wait2_tracker.call_count, 1);
   EXPECT_EQ(nop2_tracker.call_count, 1);
@@ -746,8 +747,7 @@ TEST_P(SemaphoreLinkedTest, LinkedRecvThenSignalThenSend) {
 
   // Poll until chain completes (trigger send + recv + signal + chain send +
   // recv2).
-  PollUntil(/*min_completions=*/5,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/5);
 
   // Verify callback order: RECV → SIGNAL → SEND.
   ASSERT_EQ(tracker.order.size(), 3u);
@@ -860,8 +860,7 @@ TEST_P(SemaphoreLinkedTest, LinkedSignalThenRecv) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send_op.base));
 
   // Poll until chain completes (send + signal + recv).
-  PollUntil(/*min_completions=*/3,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/3);
 
   // Verify order: SIGNAL first, then RECV.
   ASSERT_EQ(tracker.order.size(), 2u);
@@ -961,8 +960,7 @@ TEST_P(SemaphoreLinkedTest, LinkedSignalSignalNop) {
   iree_async_operation_list_t list = {ops, 3};
   IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
 
-  PollUntil(/*min_completions=*/3,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/3);
 
   // Verify order: SIGNAL1 → SIGNAL2 → NOP.
   ASSERT_EQ(tracker.order.size(), 3u);
@@ -1051,8 +1049,7 @@ TEST_P(SemaphoreLinkedTest, LinkedRecvThenSignalTimingCheck) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send_op.base));
 
   // Poll until chain completes (send + recv + signal).
-  PollUntil(/*min_completions=*/3,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/3);
 
   // Both completed successfully.
   EXPECT_EQ(recv_tracker.call_count, 1);
@@ -1176,8 +1173,7 @@ TEST_P(SemaphoreLinkedTest, LinkedWaitRecvSignal) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &send_op.base));
 
   // Wait for the send to complete (data is now in the socket buffer).
-  PollUntil(/*min_completions=*/1,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/1);
 
   // Chain should still be pending (WAIT blocks it).
   EXPECT_EQ(tracker.order.size(), 0u);
@@ -1187,8 +1183,7 @@ TEST_P(SemaphoreLinkedTest, LinkedWaitRecvSignal) {
   IREE_ASSERT_OK(iree_async_semaphore_signal(wait_semaphore, 1, NULL));
 
   // Poll until chain completes (wait + recv + signal).
-  PollUntil(/*min_completions=*/3,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/3);
 
   // Verify order: WAIT → RECV → SIGNAL.
   ASSERT_EQ(tracker.order.size(), 3u);
@@ -1286,16 +1281,20 @@ TEST_P(SemaphoreLinkedTest, LinkedFailureCancelsMixedChain) {
   iree_async_operation_list_t list = {ops, 3};
   IREE_ASSERT_OK(iree_async_proactor_submit(proactor_, list));
 
+  iree_async_proactor_wake(proactor_);
+  PollOneProgressEvent();
+  EXPECT_EQ(wait_tracker.call_count, 0);
+  EXPECT_EQ(signal_tracker.call_count, 0);
+  EXPECT_EQ(send_tracker.call_count, 0);
+
   // Fail the wait semaphore to break the chain.
   std::thread failure([wait_semaphore]() {
-    iree_wait_until(iree_time_now() + iree_make_duration_ms(50));
     iree_async_semaphore_fail(
         wait_semaphore, iree_make_status(IREE_STATUS_ABORTED, "device lost"));
   });
 
   // Poll until all three complete.
-  PollUntil(/*min_completions=*/3,
-            /*total_budget=*/iree_make_duration_ms(5000));
+  PollUntil(/*min_completions=*/3);
 
   failure.join();
 

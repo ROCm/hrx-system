@@ -6,6 +6,14 @@
 #                                                                              #
 # To disable autogeneration for this file entirely, delete this header.        #
 ################################################################################
+if(LOOM_TARGET_ARCH_SPIRV)
+
+iree_get_spirv_registry_sources(
+  _LOOM_SPIRV_CORE_GRAMMAR
+  _LOOM_VULKAN_XML_REGISTRY
+)
+
+endif()
 
 iree_add_all_subdirs()
 
@@ -18,14 +26,30 @@ iree_py_library(
     "__init__.py"
     "spirv_features.py"
   DEPS
+    loom::py::loom::gen::target::arch::spirv::feature_catalog_validation
     loom::py::loom::gen::support::support
+    loom::py::loom::target::arch::spirv::features
+)
+
+iree_py_library(
+  NAME
+    feature_catalog_validation
+  SRCS
+    "feature_catalog_validation.py"
+  DEPS
+    iree::build_tools::spirv::registry::registry_source
+    iree::build_tools::spirv::registry::spirv_core_grammar
+    iree::build_tools::spirv::registry::vulkan_spirv_availability
     loom::py::loom::target::arch::spirv::features
 )
 
 iree_py_test(
   NAME
     features_test
+  MAIN
+    "../../../../tools/pytest_style_runner.py"
   SRCS
+    "spirv_features_test.py"
     "../../../../tools/pytest_style_runner.py"
   ARGS
     "loom.gen.target.arch.spirv.spirv_features_test"
@@ -35,7 +59,37 @@ iree_py_test(
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
 )
+
+if(LOOM_TARGET_ARCH_SPIRV)
+iree_py_test(
+  NAME
+    feature_catalog_validation_test
+  MAIN
+    "feature_catalog_validation_test.py"
+  SRCS
+    "feature_catalog_validation_test.py"
+  ARGS
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/spirv/isa.h"
+    "${_LOOM_SPIRV_CORE_GRAMMAR}"
+    "${_LOOM_VULKAN_XML_REGISTRY}"
+  DEPS
+    loom::py::loom::gen::target::arch::spirv::feature_catalog_validation
+    loom::py::loom::gen::target::arch::spirv::features
+    iree::build_tools::spirv::registry::spirv_core_grammar
+    iree::build_tools::spirv::registry::vulkan_spirv_availability
+    loom::py::loom::target::arch::spirv::features
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
+)
+endif()
 
 iree_py_library(
   NAME
@@ -51,7 +105,12 @@ iree_py_library(
     loom::py::loom::target::arch::spirv::builtins
     loom::py::loom::target::arch::spirv::cooperative_matrix
     loom::py::loom::target::arch::spirv::descriptors
+    loom::py::loom::target::arch::spirv::ordinary_vector
+    loom::py::loom::target::arch::spirv::ordinary_vector_bit_layout
+    loom::py::loom::target::arch::spirv::ordinary_vector_integer
+    loom::py::loom::target::arch::spirv::ordinary_vector_integer_conversion
     loom::py::loom::target::arch::spirv::scalar_alu
+    loom::py::loom::target::arch::spirv::scalar_constant
     loom::py::loom::target::arch::spirv::scalar_conversion
     loom::py::loom::target::arch::spirv::scalar_memory
 )
@@ -59,7 +118,10 @@ iree_py_library(
 iree_py_test(
   NAME
     packet_rows_test
+  MAIN
+    "../../../../tools/pytest_style_runner.py"
   SRCS
+    "spirv_packet_rows_test.py"
     "../../../../tools/pytest_style_runner.py"
   ARGS
     "loom.gen.target.arch.spirv.spirv_packet_rows_test"
@@ -68,6 +130,7 @@ iree_py_test(
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 iree_py_library(
@@ -89,7 +152,10 @@ iree_py_library(
 iree_py_test(
   NAME
     cooperative_properties_test
+  MAIN
+    "../../../../tools/pytest_style_runner.py"
   SRCS
+    "spirv_cooperative_properties_test.py"
     "../../../../tools/pytest_style_runner.py"
   ARGS
     "loom.gen.target.arch.spirv.spirv_cooperative_properties_test"
@@ -98,6 +164,7 @@ iree_py_test(
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

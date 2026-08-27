@@ -28,6 +28,7 @@ loom_cc_library(
     "include/loomc/iree.h"
     "include/loomc/launch_config.h"
     "include/loomc/link.h"
+    "include/loomc/link_dependency.h"
     "include/loomc/link_index.h"
     "include/loomc/loomc.h"
     "include/loomc/module.h"
@@ -63,6 +64,7 @@ loom_cc_library(
     "src/emit.c"
     "src/launch_config.c"
     "src/link.c"
+    "src/link_dependency.c"
     "src/link_index.c"
     "src/module.c"
     "src/module_function.c"
@@ -78,24 +80,32 @@ loom_cc_library(
     iree::base
     iree::base::internal
     iree::base::internal::arena
+    iree::io::byte_sequence
     iree::io::file_handle
     iree::io::stream
-    loom::analysis::kernel_launch_config
+    loom::analysis::symbol_value_constraints
+    loom::codegen::low::launch_config_program
     loom::codegen::low::pipeline::pass_environment
+    loom::codegen::low::repr
     loom::codegen::low::target_binding
     loom::codegen::low::text_asm
     loom::error::diagnostic
     loom::error::error_defs
     loom::error::renderer
     loom::format::bytecode::format
+    loom::format::bytecode::index
     loom::format::bytecode::reader
+    loom::format::bytecode::selected_reader
     loom::format::bytecode::writer
     loom::format::text::parser
     loom::format::text::printer
     loom::ir
+    loom::ir::facts
+    loom::link::dependency_analysis
+    loom::link::dependency_report
+    loom::link::index_materializer
     loom::link::linker
     loom::link::module_index
-    loom::link::planner
     loom::ops::func
     loom::ops::global
     loom::ops::kernel
@@ -109,14 +119,21 @@ loom_cc_library(
     loom::pass::program
     loom::pass::registry
     loom::pass::tooling
+    loom::pass::value_facts
     loom::sanitizer::options
-    loom::target::artifact_manifest
-    loom::target::compile_report
-    loom::target::compile_report_format
+    loom::target::function_version
+    loom::target::function_version_projection
+    loom::target::module_specialization
     loom::target::pipeline
     loom::target::predicate
+    loom::target::profile
     loom::target::provider
+    loom::target::reporting::artifact_manifest
+    loom::target::reporting::format
+    loom::target::reporting::report
+    loom::target::specialization
     loom::target::types
+    loom::tooling::compile::pipeline
     loom::tooling::config
     loom::util::json
     loom::util::stream
@@ -148,6 +165,7 @@ loom_cc_library(
     "include/loomc/iree.h"
     "include/loomc/launch_config.h"
     "include/loomc/link.h"
+    "include/loomc/link_dependency.h"
     "include/loomc/link_index.h"
     "include/loomc/loomc.h"
     "include/loomc/module.h"
@@ -297,12 +315,46 @@ set_target_properties(loomc_shared PROPERTIES
   POSITION_INDEPENDENT_CODE ON
   LINKER_LANGUAGE CXX
   INTERFACE_LINK_LIBRARIES "")
+if(WIN32 AND CMAKE_GENERATOR STREQUAL "Ninja" AND
+    CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+  if(NOT Python3_EXECUTABLE)
+    message(FATAL_ERROR
+      "The loomc MSVC-compatible Ninja build requires a Python interpreter.")
+  endif()
+  # CMake appends the resolved library closure to one physical response-file
+  # line. Keep each argument on its own line so link.exe can consume large
+  # target configurations without exceeding its response-line limit.
+  set(_loomc_msvc_response_file_tool
+    "${IREE_ROOT_DIR}/build_tools/cmake/msvc_response_file.py")
+  add_custom_command(TARGET loomc_shared PRE_LINK
+    COMMAND "${Python3_EXECUTABLE}"
+      "${_loomc_msvc_response_file_tool}"
+      "${CMAKE_BINARY_DIR}/CMakeFiles/loomc_shared.rsp"
+    COMMENT "Rewrapping the loomc MSVC linker response file"
+    VERBATIM)
+  set_property(TARGET loomc_shared APPEND PROPERTY LINK_DEPENDS
+    "${_loomc_msvc_response_file_tool}")
+endif()
 if(NOT WIN32)
   set_target_properties(loomc_shared PROPERTIES
     C_VISIBILITY_PRESET hidden
     CXX_VISIBILITY_PRESET hidden
-    VISIBILITY_INLINES_HIDDEN ON
-    LINK_FLAGS "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/cmake/loomc_exports.lds")
+    VISIBILITY_INLINES_HIDDEN ON)
+endif()
+if(APPLE)
+  set_target_properties(loomc_shared PROPERTIES
+    BUILD_RPATH "@loader_path"
+    INSTALL_RPATH "@loader_path")
+elseif(UNIX)
+  set_target_properties(loomc_shared PROPERTIES
+    BUILD_RPATH "$ORIGIN"
+    INSTALL_RPATH "$ORIGIN")
+  set(_loomc_export_file
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/loomc_exports.lds")
+  target_link_options(loomc_shared PRIVATE
+    "-Wl,--version-script=${_loomc_export_file}")
+  set_property(TARGET loomc_shared APPEND PROPERTY
+    LINK_DEPENDS "${_loomc_export_file}")
 endif()
 
 if(NOT TARGET loomc::loomc)

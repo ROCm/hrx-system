@@ -209,7 +209,7 @@
       }
     },
     {
-      "name": "rejects dispatch measurement without actual invocation",
+      "name": "rejects dispatch measurement without kernel launch",
       "run": {
         "tool": "iree-benchmark-loom",
         "args": [
@@ -224,7 +224,7 @@
       },
       "stderr": {
         "contains": [
-          "HAL actual invocations require exactly one actual invocation"
+          "HAL execution requires exactly one kernel launch"
         ]
       }
     },
@@ -259,17 +259,36 @@
         "args": ["--agents_md"]
       },
       "stdout": {
-        "contains": [
-          "## iree-benchmark-loom",
-          "default output is a compact JSON snapshot",
-          "work_items",
-          "--output-format=jsonl",
-          "compile_report",
-          ".compile_report.entries.rows[]",
-          "compile_report_path",
-          "artifact_manifest_path",
-          "target_artifact_path"
-        ],
+        "contains": {
+          "unordered": [
+            "## iree-benchmark-loom",
+            "default output is a compact JSON snapshot",
+            "work_items",
+            "ordered, typed `workload`",
+            "`launch_config`",
+            "failure.entry",
+            "select(.failure)",
+            "--output-format=jsonl",
+            "compile_report",
+            ".compile_report.entries.rows[]",
+            ".compile_report.schedule_band_summary_rows.rows[]",
+            "dynamic_instruction_mix",
+            "max_band_node_count",
+            ".compile_report.wait_reason_summary_rows.rows[]",
+            ".compile_report.wait_action_rows.rows[]",
+            "materialized_spill_storage",
+            "group_by",
+            "full_drains",
+            "semantic_tag",
+            "compile_report_path",
+            "artifact_manifest_path",
+            "target_artifact_path",
+            "rounding=finite_only",
+            "fp8_packed_bf16_decode_repair_zero_subnormal",
+            ".compile_report.target_capability_rows.rows[]",
+            "matrix_fp8_native_kind"
+          ]
+        },
         "not_contains": ["static_summary"]
       }
     },

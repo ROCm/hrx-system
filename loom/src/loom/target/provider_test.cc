@@ -59,7 +59,7 @@ static iree_status_t ContributeMaterialization(
     return iree_ok_status();
   }
   loom_op_t* run_op = nullptr;
-  return loom_pass_ir_build_run(contribution->builder,
+  return loom_pass_ir_build_run(contribution->builder, 0,
                                 IREE_SV("target-materialize"),
                                 loom_named_attr_slice_empty(), &run_op);
 }
@@ -71,7 +71,7 @@ static iree_status_t ContributePreparation(
     return iree_ok_status();
   }
   loom_op_t* run_op = nullptr;
-  return loom_pass_ir_build_run(contribution->builder,
+  return loom_pass_ir_build_run(contribution->builder, 0,
                                 IREE_SV("target-prepare"),
                                 loom_named_attr_slice_empty(), &run_op);
 }
@@ -89,7 +89,7 @@ static iree_status_t BuildContributedPipeline(loom_builder_t* builder,
       loom_pass_environment_empty(), builder));
   loom_op_t* run_op = nullptr;
   IREE_RETURN_IF_ERROR(
-      loom_pass_ir_build_run(builder, IREE_SV("driver-cleanup"),
+      loom_pass_ir_build_run(builder, 0, IREE_SV("driver-cleanup"),
                              loom_named_attr_slice_empty(), &run_op));
   return loom_target_environment_contribute_pipeline(
       data->environment, LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_PREPARATION,
@@ -131,6 +131,8 @@ class TargetProviderTest : public ::testing::Test {
 
 TEST_F(TargetProviderTest, ContributesPassIrByPhase) {
   static const loom_target_provider_t materialization_provider = {
+      /*.profile_type=*/{},
+      /*.materialize_definition=*/{},
       /*.register_context=*/{},
       /*.initialize_low_descriptor_registry=*/{},
       /*.initialize_low_lower_policy_registry=*/{},
@@ -145,6 +147,8 @@ TEST_F(TargetProviderTest, ContributesPassIrByPhase) {
       /*.contribute_pipeline=*/ContributeMaterialization,
   };
   static const loom_target_provider_t preparation_provider = {
+      /*.profile_type=*/{},
+      /*.materialize_definition=*/{},
       /*.register_context=*/{},
       /*.initialize_low_descriptor_registry=*/{},
       /*.initialize_low_lower_policy_registry=*/{},
@@ -218,6 +222,8 @@ TEST_F(TargetProviderTest, ComposesTargetPassRegistries) {
       /*.descriptor_count=*/IREE_ARRAYSIZE(second_descriptors),
   };
   static const loom_target_provider_t first_provider = {
+      /*.profile_type=*/{},
+      /*.materialize_definition=*/{},
       /*.register_context=*/{},
       /*.initialize_low_descriptor_registry=*/{},
       /*.initialize_low_lower_policy_registry=*/{},
@@ -231,6 +237,8 @@ TEST_F(TargetProviderTest, ComposesTargetPassRegistries) {
       /*.pass_registry=*/&first_registry,
   };
   static const loom_target_provider_t second_provider = {
+      /*.profile_type=*/{},
+      /*.materialize_definition=*/{},
       /*.register_context=*/{},
       /*.initialize_low_descriptor_registry=*/{},
       /*.initialize_low_lower_policy_registry=*/{},
@@ -265,7 +273,36 @@ TEST_F(TargetProviderTest, ComposesTargetPassRegistries) {
   IREE_ASSERT_OK(
       loom_pass_registry_lookup(registry, IREE_SV("target-beta"), &descriptor));
   ASSERT_NE(descriptor, nullptr);
-  EXPECT_EQ(descriptor->info, TargetBetaPassInfo);
+  EXPECT_EQ(descriptor->info, &TargetBetaPassInfo);
+
+  loom_target_environment_deinitialize(&environment);
+}
+
+TEST_F(TargetProviderTest, LooksUpProfileProvider) {
+  static const loom_target_profile_type_t kOwnedProfileType = {
+      /*.name=*/IREE_SVL("owned"),
+  };
+  static const loom_target_profile_type_t kUnownedProfileType = {
+      /*.name=*/IREE_SVL("unowned"),
+  };
+  static const loom_target_provider_t provider = {
+      /*.profile_type=*/&kOwnedProfileType,
+  };
+  static const loom_target_provider_t* const providers[] = {
+      &provider,
+  };
+  const loom_target_provider_set_t provider_set =
+      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
+  loom_target_environment_t environment = {};
+  IREE_ASSERT_OK(
+      loom_target_environment_initialize(&provider_set, &environment));
+
+  EXPECT_EQ(loom_target_environment_lookup_profile_provider(&environment,
+                                                            &kOwnedProfileType),
+            &provider);
+  EXPECT_EQ(loom_target_environment_lookup_profile_provider(
+                &environment, &kUnownedProfileType),
+            nullptr);
 
   loom_target_environment_deinitialize(&environment);
 }

@@ -16,6 +16,7 @@ from loom.dsl import (
     Op,
     OpPhase,
     SymbolDefinition,
+    TargetFactSpecialization,
     TargetLikeInterface,
 )
 
@@ -49,6 +50,7 @@ wasm_target = Op(
             symbol="symbol",
             selector="kind",
             bundle_table="loom_wasm_target_bundles",
+            fact_specialization=TargetFactSpecialization.STRUCTURAL,
         )
     ],
     symbol_def=SymbolDefinition(

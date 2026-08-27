@@ -12,7 +12,7 @@ func.def target(@target) @i32x16_arith(%lhs: vector<16xi32>, %rhs: vector<16xi32
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32x16_arith(%lhs: reg<llvmir.i32 x16>, %rhs: reg<llvmir.i32 x16>) -> (reg<llvmir.i32 x16>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32x16_arith(%lhs: reg<llvmir.i32 x16>, %rhs: reg<llvmir.i32 x16>) -> (reg<llvmir.i32 x16>) asm {
   %sum = add.v16i32 %lhs, %rhs
   %diff = sub.v16i32 %sum, %rhs
   return %diff
@@ -36,7 +36,7 @@ func.def target(@target) @i32x16_minmax_logic(%lhs: vector<16xi32>, %rhs: vector
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32x16_minmax_logic(%lhs: reg<llvmir.i32 x16>, %rhs: reg<llvmir.i32 x16>) -> (reg<llvmir.i32 x16>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32x16_minmax_logic(%lhs: reg<llvmir.i32 x16>, %rhs: reg<llvmir.i32 x16>) -> (reg<llvmir.i32 x16>) asm {
   %13 = cmp.slt.v16i32 %lhs, %rhs
   %min_s = select.v16i32 %13, %lhs, %rhs
   %15 = cmp.sgt.v16i32 %lhs, %rhs
@@ -65,7 +65,7 @@ func.def target(@target) @i32x16_variable_shift(%value: vector<16xi32>, %amount:
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32x16_variable_shift(%value: reg<llvmir.i32 x16>, %amount: reg<llvmir.i32 x16>) -> (reg<llvmir.i32 x16>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32x16_variable_shift(%value: reg<llvmir.i32 x16>, %amount: reg<llvmir.i32 x16>) -> (reg<llvmir.i32 x16>) asm {
   %left = shl.v16i32 %value, %amount
   %signed = ashr.v16i32 %left, %amount
   %result = lshr.v16i32 %signed, %amount
@@ -85,7 +85,7 @@ func.def target(@target) @i32x16_splat_add(%value: i32, %rhs: vector<16xi32>) ->
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32x16_splat_add(%value: reg<llvmir.i32>, %rhs: reg<llvmir.i32 x16>) -> (reg<llvmir.i32 x16>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32x16_splat_add(%value: reg<llvmir.i32>, %rhs: reg<llvmir.i32 x16>) -> (reg<llvmir.i32 x16>) asm {
   %splat = splat.v16i32 %value
   %sum = add.v16i32 %splat, %rhs
   return %sum
@@ -106,7 +106,7 @@ func.def target(@target) @i32x16_compare_select(%lhs: vector<16xi32>, %rhs: vect
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32x16_compare_select(%lhs: reg<llvmir.i32 x16>, %rhs: reg<llvmir.i32 x16>, %fallback: reg<llvmir.i32 x16>) -> (reg<llvmir.i32 x16>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32x16_compare_select(%lhs: reg<llvmir.i32 x16>, %rhs: reg<llvmir.i32 x16>, %fallback: reg<llvmir.i32 x16>) -> (reg<llvmir.i32 x16>) asm {
   %signed = cmp.sgt.v16i32 %lhs, %rhs
   %unsigned = cmp.ugt.v16i32 %lhs, %rhs
   %selected = select.v16i32 %signed, %lhs, %rhs
@@ -131,7 +131,7 @@ func.def target(@target) @i32x16_mask_and_select(%lhs: vector<16xi32>, %rhs: vec
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32x16_mask_and_select(%lhs: reg<llvmir.i32 x16>, %rhs: reg<llvmir.i32 x16>, %fallback: reg<llvmir.i32 x16>) -> (reg<llvmir.i32 x16>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32x16_mask_and_select(%lhs: reg<llvmir.i32 x16>, %rhs: reg<llvmir.i32 x16>, %fallback: reg<llvmir.i32 x16>) -> (reg<llvmir.i32 x16>) asm {
   %greater = cmp.sgt.v16i32 %lhs, %rhs
   %less = cmp.slt.v16i32 %lhs, %rhs
   %either = or.v16i1 %greater, %less
@@ -156,7 +156,7 @@ func.def target(@target) @f32x16_arith(%lhs: vector<16xf32>, %rhs: vector<16xf32
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32x16_arith(%lhs: reg<llvmir.f32 x16>, %rhs: reg<llvmir.f32 x16>) -> (reg<llvmir.f32 x16>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32x16_arith(%lhs: reg<llvmir.f32 x16>, %rhs: reg<llvmir.f32 x16>) -> (reg<llvmir.f32 x16>) asm {
   %sum = add.v16f32 %lhs, %rhs
   %difference = sub.v16f32 %sum, %lhs
   %product = mul.v16f32 %difference, %rhs
@@ -177,7 +177,7 @@ func.def target(@target) @f32x16_splat_add(%value: f32, %rhs: vector<16xf32>) ->
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32x16_splat_add(%value: reg<llvmir.f32>, %rhs: reg<llvmir.f32 x16>) -> (reg<llvmir.f32 x16>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32x16_splat_add(%value: reg<llvmir.f32>, %rhs: reg<llvmir.f32 x16>) -> (reg<llvmir.f32 x16>) asm {
   %splat = splat.v16f32 %value
   %sum = add.v16f32 %splat, %rhs
   return %sum
@@ -195,7 +195,7 @@ func.def target(@target) @f32x16_reduce_add(%v: vector<16xf32>, %init: f32) -> (
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32x16_reduce_add(%v: reg<llvmir.f32 x16>, %init: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32x16_reduce_add(%v: reg<llvmir.f32 x16>, %init: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
   %39 = extract.v16f32 %v, 0
   %40 = add.f32 %init, %39
   %41 = extract.v16f32 %v, 1
@@ -246,7 +246,7 @@ func.def target(@target) @f32x16_compare_select(%lhs: vector<16xf32>, %rhs: vect
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32x16_compare_select(%lhs: reg<llvmir.f32 x16>, %rhs: reg<llvmir.f32 x16>, %fallback: reg<llvmir.f32 x16>) -> (reg<llvmir.f32 x16>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32x16_compare_select(%lhs: reg<llvmir.f32 x16>, %rhs: reg<llvmir.f32 x16>, %fallback: reg<llvmir.f32 x16>) -> (reg<llvmir.f32 x16>) asm {
   %ordered_lt = cmp.olt.v16f32 %lhs, %rhs
   %unordered_ne = cmp.une.v16f32 %lhs, %rhs
   %selected = select.v16f32 %ordered_lt, %lhs, %rhs
@@ -263,15 +263,15 @@ llvmir.target<object> @target {
 func.def target(@target) @f32x16_static_memory(%input: buffer, %output: buffer) {
   %input_base = index.constant 16 : offset
   %output_base = index.constant 32 : offset
-  %input_view = buffer.view %input[%input_base] : buffer -> view<32xf32, #dense>
-  %output_view = buffer.view %output[%output_base] : buffer -> view<32xf32, #dense>
-  %loaded = vector.load %input_view[4] : view<32xf32, #dense> -> vector<16xf32>
-  vector.store %loaded, %output_view[8] : vector<16xf32>, view<32xf32, #dense>
+  %input_view = buffer.view %input[%input_base] : buffer -> view<32xf32>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<32xf32>
+  %loaded = vector.load %input_view[4] : view<32xf32> -> vector<16xf32>
+  vector.store %loaded, %output_view[8] : vector<16xf32>, view<32xf32>
   func.return
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32x16_static_memory(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32x16_static_memory(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm {
   %loaded = load.v16f32 %input_view, 32
   store.v16f32 %loaded, %output_view, 64
   return
@@ -287,15 +287,15 @@ func.def target(@target) @f32x16_dynamic_memory(%input: buffer, %output: buffer,
   %input_base = index.constant 16 : offset
   %output_base = index.constant 32 : offset
   %bounded_i = index.assume %i [range(%i, 0, 16)] : index
-  %input_view = buffer.view %input[%input_base] : buffer -> view<32xf32, #dense>
-  %output_view = buffer.view %output[%output_base] : buffer -> view<32xf32, #dense>
-  %loaded = vector.load %input_view[%bounded_i] : view<32xf32, #dense> -> vector<16xf32>
-  vector.store %loaded, %output_view[%bounded_i] : vector<16xf32>, view<32xf32, #dense>
+  %input_view = buffer.view %input[%input_base] : buffer -> view<32xf32>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<32xf32>
+  %loaded = vector.load %input_view[%bounded_i] : view<32xf32> -> vector<16xf32>
+  vector.store %loaded, %output_view[%bounded_i] : vector<16xf32>, view<32xf32>
   func.return
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32x16_dynamic_memory(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>, %bounded_i: reg<llvmir.i64>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32x16_dynamic_memory(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>, %bounded_i: reg<llvmir.i64>) asm {
   %loaded = load.indexed.v16f32 %input_view, %bounded_i, 16, 4
   store.indexed.v16f32 %loaded, %output_view, %bounded_i, 32, 4
   return
@@ -308,21 +308,23 @@ llvmir.target<object> @target {
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
 func.def target(@target) @f32x16_index_add_memory(%input: buffer, %output: buffer, %i: index, %j: index) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %sum = index.add %i, %j : index
   %bounded_sum = index.assume %sum [range(%sum, 0, 16)] : index
-  %input_view = buffer.view %input[%zero] : buffer -> view<32xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<32xf32, #dense>
-  %loaded = vector.load %input_view[%bounded_sum] : view<32xf32, #dense> -> vector<16xf32>
-  vector.store %loaded, %output_view[%bounded_sum] : vector<16xf32>, view<32xf32, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<32xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<32xf32>
+  %loaded = vector.load %input_view[%bounded_sum] : view<32xf32> -> vector<16xf32>
+  vector.store %loaded, %output_view[%bounded_sum] : vector<16xf32>, view<32xf32>
   func.return
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32x16_index_add_memory(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>, %i: reg<llvmir.i64>, %j: reg<llvmir.i64>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32x16_index_add_memory(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>, %i: reg<llvmir.i64>, %j: reg<llvmir.i64>) asm {
   %bounded_sum = add.i64 %i, %j
-  %loaded = load.indexed.v16f32 %input_view, %bounded_sum, 0, 4
-  store.indexed.v16f32 %loaded, %output_view, %bounded_sum, 0, 4
+  %15 = const.i64 2
+  %16 = shl.i64 %bounded_sum, %15
+  %loaded = load.indexed.v16f32 %input_view, %16, 0, 1
+  store.indexed.v16f32 %loaded, %output_view, %16, 0, 1
   return
 }
 
@@ -333,18 +335,18 @@ llvmir.target<object> @target {
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
 func.def target(@target) @f32x16_index_madd_memory(%input: buffer, %output: buffer, %row: index, %stride: index, %col: index) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %linear = index.madd %row, %stride, %col : index
   %bounded_linear = index.assume %linear [range(%linear, 0, 16)] : index
-  %input_view = buffer.view %input[%zero] : buffer -> view<32xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<32xf32, #dense>
-  %loaded = vector.load %input_view[%bounded_linear] : view<32xf32, #dense> -> vector<16xf32>
-  vector.store %loaded, %output_view[%bounded_linear] : vector<16xf32>, view<32xf32, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<32xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<32xf32>
+  %loaded = vector.load %input_view[%bounded_linear] : view<32xf32> -> vector<16xf32>
+  vector.store %loaded, %output_view[%bounded_linear] : vector<16xf32>, view<32xf32>
   func.return
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32x16_index_madd_memory(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>, %row: reg<llvmir.i64>, %stride: reg<llvmir.i64>, %col: reg<llvmir.i64>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32x16_index_madd_memory(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>, %row: reg<llvmir.i64>, %stride: reg<llvmir.i64>, %col: reg<llvmir.i64>) asm {
   %16 = mul.i64 %row, %stride
   %bounded_linear = add.i64 %16, %col
   %loaded = load.indexed.v16f32 %input_view, %bounded_linear, 0, 4

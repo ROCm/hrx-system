@@ -104,12 +104,35 @@ class LivenessTest : public ::testing::Test {
     return analysis;
   }
 
+  loom_liveness_analysis_t AnalyzeBodyRegionTree(loom_module_t* module,
+                                                 loom_func_like_t func) {
+    loom_local_value_domain_t value_domain = {};
+    IREE_CHECK_OK(loom_local_value_domain_acquire_for_region_tree(
+        module, loom_func_like_body(func), &analysis_arena_, &value_domain));
+    loom_liveness_analysis_t analysis;
+    IREE_CHECK_OK(loom_liveness_analyze_local_value_domain(
+        &value_domain, loom_liveness_order_empty(), &analysis_arena_,
+        &analysis));
+    loom_local_value_domain_release(&value_domain);
+    return analysis;
+  }
+
   static bool ContainsValue(const loom_value_id_t* values,
                             iree_host_size_t count, loom_value_id_t value) {
     for (iree_host_size_t i = 0; i < count; ++i) {
       if (values[i] == value) return true;
     }
     return false;
+  }
+
+  static loom_value_ordinal_t FindValueOrdinal(
+      const loom_liveness_analysis_t& analysis, loom_value_id_t value_id) {
+    for (iree_host_size_t i = 0; i < analysis.value_count; ++i) {
+      if (analysis.value_ids[i] == value_id) {
+        return static_cast<loom_value_ordinal_t>(i);
+      }
+    }
+    return LOOM_VALUE_ORDINAL_INVALID;
   }
 
   static const loom_liveness_pressure_summary_t* FindRegisterPressure(
@@ -121,6 +144,19 @@ class LivenessTest : public ::testing::Test {
           summary->value_class.register_descriptor_set_stable_id ==
               descriptor_set_stable_id &&
           summary->value_class.register_class_id == class_id) {
+        return summary;
+      }
+    }
+    return nullptr;
+  }
+
+  static const loom_liveness_pressure_summary_t* FindScalarPressure(
+      const loom_liveness_analysis_t& analysis,
+      loom_scalar_type_t scalar_type) {
+    for (iree_host_size_t i = 0; i < analysis.pressure_summary_count; ++i) {
+      const auto* summary = &analysis.pressure_summaries[i];
+      if (summary->value_class.type_kind == LOOM_TYPE_SCALAR &&
+          summary->value_class.element_type == scalar_type) {
         return summary;
       }
     }
@@ -172,6 +208,86 @@ func.def @linear(%a: i32, %b: i32) -> (i32) {
   EXPECT_EQ(sum_interval->end_point, 3u);
   EXPECT_EQ(dead_interval->start_point, 2u);
   EXPECT_EQ(dead_interval->end_point, 2u);
+
+  ASSERT_EQ(analysis.operation_count, 3u);
+  EXPECT_EQ(analysis.operation_points[0].op, add);
+  EXPECT_EQ(analysis.operation_points[0].parent_operation_index, UINT32_MAX);
+  EXPECT_EQ(analysis.operation_points[0].start_point, 0u);
+  EXPECT_EQ(analysis.operation_points[0].end_point, 1u);
+  EXPECT_EQ(analysis.operation_points[0].direct_use_count, 2u);
+  EXPECT_EQ(analysis.operation_points[0].use_count, 2u);
+  EXPECT_EQ(analysis.operation_points[1].op, dead_add);
+  EXPECT_EQ(analysis.operation_points[2].op, loom_block_const_op(entry, 2));
+  EXPECT_EQ(analysis.operation_use_count, 5u);
+  EXPECT_EQ(loom_liveness_operation_use_ordinal(&analysis, 0),
+            FindValueOrdinal(analysis, args[0]));
+  EXPECT_EQ(loom_liveness_operation_use_ordinal(&analysis, 1),
+            FindValueOrdinal(analysis, args[1]));
+  EXPECT_EQ(loom_liveness_operation_use_ordinal(&analysis, 2),
+            FindValueOrdinal(analysis, args[0]));
+  EXPECT_EQ(loom_liveness_operation_use_ordinal(&analysis, 3),
+            FindValueOrdinal(analysis, args[1]));
+  EXPECT_EQ(loom_liveness_operation_use_ordinal(&analysis, 4),
+            FindValueOrdinal(analysis, sum));
+}
+
+TEST_F(LivenessTest, OperationRowsFollowAcceptedOrder) {
+  ModulePtr module = ParseModule(R"(
+func.def @ordered(%a: i32, %b: i32) -> (i32) {
+  %first = scalar.addi %a, %b : i32
+  %second = scalar.addi %a, %b : i32
+  func.return %a : i32
+}
+)");
+  loom_func_like_t func = FindFunction(module.get(), IREE_SV("ordered"));
+  const loom_region_t* body = loom_func_like_body(func);
+  const loom_block_t* entry = loom_region_const_entry_block(body);
+  const loom_op_t* const ordered_ops[] = {
+      loom_block_const_op(entry, 1),
+      loom_block_const_op(entry, 0),
+      loom_block_const_op(entry, 2),
+  };
+  const loom_liveness_block_order_t block_order = {
+      /*.block=*/entry,
+      /*.ops=*/ordered_ops,
+      /*.op_count=*/IREE_ARRAYSIZE(ordered_ops),
+  };
+  const loom_liveness_order_t order = {
+      /*.blocks=*/&block_order,
+      /*.block_count=*/1,
+  };
+  loom_local_value_domain_t value_domain = {};
+  IREE_ASSERT_OK(loom_local_value_domain_acquire_for_region(
+      module.get(), body, &analysis_arena_, &value_domain));
+  loom_liveness_analysis_t analysis = {};
+  IREE_ASSERT_OK(loom_liveness_analyze_local_value_domain(
+      &value_domain, order, &analysis_arena_, &analysis));
+  loom_local_value_domain_release(&value_domain);
+
+  ASSERT_EQ(analysis.operation_count, IREE_ARRAYSIZE(ordered_ops));
+  ASSERT_EQ(analysis.blocks[0].operation_start, 0u);
+  ASSERT_EQ(analysis.blocks[0].operation_count, IREE_ARRAYSIZE(ordered_ops));
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(ordered_ops); ++i) {
+    EXPECT_EQ(analysis.operation_points[i].op, ordered_ops[i]);
+    EXPECT_EQ(analysis.operation_points[i].start_point, i);
+    EXPECT_EQ(analysis.operation_points[i].end_point, i + 1u);
+  }
+}
+
+TEST_F(LivenessTest, OperationUseRangesContainDistinctValues) {
+  ModulePtr module = ParseModule(R"(
+func.def @distinct_uses(%a: i32) -> (i32) {
+  %sum = scalar.addi %a, %a : i32
+  func.return %sum : i32
+}
+)");
+  loom_func_like_t func = FindFunction(module.get(), IREE_SV("distinct_uses"));
+  loom_liveness_analysis_t analysis = AnalyzeBody(module.get(), func);
+
+  ASSERT_EQ(analysis.operation_count, 2u);
+  EXPECT_EQ(analysis.operation_points[0].direct_use_count, 1u);
+  EXPECT_EQ(analysis.operation_points[0].use_count, 1u);
+  EXPECT_EQ(analysis.operation_use_count, 2u);
 }
 
 TEST_F(LivenessTest, RegionLocalOrdinalsHandleSparseModuleValueIds) {
@@ -272,6 +388,30 @@ func.def @cfg_loop(%cond: i1, %x: i32) -> (i32) {
   EXPECT_TRUE(ContainsValue(loop.live_in_values, loop.live_in_count, args[1]));
   EXPECT_TRUE(ContainsValue(body.live_in_values, body.live_in_count, args[1]));
   EXPECT_EQ(exit.live_in_count, 1u);
+
+  const loom_value_id_t iter = loom_block_arg_id(loop.block, 0);
+  const loom_op_t* add = loom_block_const_op(body.block, 0);
+  const loom_value_id_t next = loom_op_const_results(add)[0];
+  const loom_liveness_segment_range_t iter_segments =
+      loom_liveness_segment_range_for_value_ordinal(
+          &analysis, FindValueOrdinal(analysis, iter));
+  const loom_liveness_segment_range_t next_segments =
+      loom_liveness_segment_range_for_value_ordinal(
+          &analysis, FindValueOrdinal(analysis, next));
+  const loom_liveness_segment_range_t invariant_segments =
+      loom_liveness_segment_range_for_value_ordinal(
+          &analysis, FindValueOrdinal(analysis, args[1]));
+  EXPECT_EQ(iter_segments.count, 3u);
+  EXPECT_EQ(next_segments.count, 1u);
+  EXPECT_FALSE(loom_liveness_segment_ranges_overlap(&analysis, iter_segments,
+                                                    next_segments));
+  EXPECT_TRUE(loom_liveness_segment_ranges_overlap(
+      &analysis, invariant_segments, next_segments));
+
+  const loom_liveness_pressure_summary_t* pressure =
+      FindScalarPressure(analysis, LOOM_SCALAR_TYPE_I32);
+  ASSERT_NE(pressure, nullptr);
+  EXPECT_EQ(pressure->peak_live_units, 2u);
 }
 
 TEST_F(LivenessTest, OperandTypeReferencesKeepDynamicDimsLive) {
@@ -293,6 +433,18 @@ func.def @type_ref(%N: index, %v: vector<[%N]xi32>) -> (vector<[%N]xi32>) {
   ASSERT_NE(dim_interval, nullptr);
   ASSERT_NE(vector_interval, nullptr);
   EXPECT_EQ(dim_interval->end_point, vector_interval->end_point);
+
+  ASSERT_EQ(analysis.operation_count, 1u);
+  const loom_liveness_operation_point_t& return_point =
+      analysis.operation_points[0];
+  ASSERT_EQ(return_point.direct_use_count, 2u);
+  ASSERT_EQ(return_point.use_count, 2u);
+  EXPECT_EQ(
+      loom_liveness_operation_use_ordinal(&analysis, return_point.use_start),
+      FindValueOrdinal(analysis, args[1]));
+  EXPECT_EQ(loom_liveness_operation_use_ordinal(&analysis,
+                                                return_point.use_start + 1u),
+            FindValueOrdinal(analysis, args[0]));
 }
 
 TEST_F(LivenessTest, TiedResultOperandIsLiveThroughConsumingOp) {
@@ -317,7 +469,7 @@ func.def @tied_update(%tile: tile<4xf32>, %tensor: tensor<4xf32>, %off: index) -
 TEST_F(LivenessTest, RegisterPressureGroupsByRegisterClassUnits) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @test_target
-low.func.def target(@test_target) @register_pressure(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @register_pressure(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
   %ab = low.copy %a : reg<test.i32> -> reg<test.i32>
   %bc = low.copy %b : reg<test.i32> -> reg<test.i32>
   %cc = low.copy %c : reg<test.i32> -> reg<test.i32>
@@ -341,10 +493,56 @@ low.func.def target(@test_target) @register_pressure(%a: reg<test.i32>, %b: reg<
   EXPECT_EQ(pressure->peak_point, 1u);
 }
 
+TEST_F(LivenessTest, RegionTreePressureIncludesNestedOperations) {
+  ModulePtr module = ParseModule(R"(
+func.def @region_tree_pressure(%input: tile<4xf32>, %bias: f32) -> (tile<4xf32>) {
+  %mapped = test.map(%element = %input : tile<4xf32>) {
+    %biased = scalar.addf %element, %bias : f32
+    %biased_again = scalar.addf %biased, %bias : f32
+    %neg0 = test.neg %biased_again : f32
+    %neg1 = test.neg %neg0 : f32
+    test.yield %neg1 : f32
+  } -> (tile<4xf32>)
+  func.return %mapped : tile<4xf32>
+}
+)");
+  loom_func_like_t func =
+      FindFunction(module.get(), IREE_SV("region_tree_pressure"));
+  loom_liveness_analysis_t analysis = AnalyzeBodyRegionTree(module.get(), func);
+
+  EXPECT_TRUE(loom_liveness_analysis_includes_region_tree(&analysis));
+  const loom_liveness_pressure_summary_t* pressure =
+      FindScalarPressure(analysis, LOOM_SCALAR_TYPE_F32);
+  ASSERT_NE(pressure, nullptr);
+  EXPECT_GE(pressure->peak_live_units, 1u);
+  EXPECT_GE(pressure->peak_live_values, 1u);
+
+  ASSERT_EQ(analysis.operation_count, 7u);
+  const loom_liveness_operation_point_t& map_point =
+      analysis.operation_points[0];
+  EXPECT_EQ(map_point.parent_operation_index, UINT32_MAX);
+  ASSERT_GT(map_point.use_count, map_point.direct_use_count);
+  uint16_t arg_count = 0;
+  const loom_value_id_t* args = loom_func_like_arg_ids(func, &arg_count);
+  ASSERT_EQ(arg_count, 2u);
+  const loom_value_ordinal_t bias_ordinal = FindValueOrdinal(analysis, args[1]);
+  uint32_t bias_capture_count = 0;
+  for (uint32_t i = map_point.direct_use_count; i < map_point.use_count; ++i) {
+    bias_capture_count +=
+        loom_liveness_operation_use_ordinal(
+            &analysis, map_point.use_start + i) == bias_ordinal;
+  }
+  EXPECT_EQ(bias_capture_count, 1u);
+  for (uint32_t i = 1; i < 6; ++i) {
+    EXPECT_EQ(analysis.operation_points[i].parent_operation_index, 0u);
+  }
+  EXPECT_EQ(analysis.operation_points[6].parent_operation_index, UINT32_MAX);
+}
+
 TEST_F(LivenessTest, PressureBudgetReportsHighUnrolledRegisterUse) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @test_target
-low.func.def target(@test_target) @high_pressure(%a0: reg<test.i32>, %a1: reg<test.i32>, %a2: reg<test.i32>, %a3: reg<test.i32>, %a4: reg<test.i32>, %a5: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @high_pressure(%a0: reg<test.i32>, %a1: reg<test.i32>, %a2: reg<test.i32>, %a3: reg<test.i32>, %a4: reg<test.i32>, %a5: reg<test.i32>) -> (reg<test.i32>) {
   %r0 = low.copy %a0 : reg<test.i32> -> reg<test.i32>
   %r1 = low.copy %a1 : reg<test.i32> -> reg<test.i32>
   %r2 = low.copy %a2 : reg<test.i32> -> reg<test.i32>
@@ -384,7 +582,7 @@ low.func.def target(@test_target) @high_pressure(%a0: reg<test.i32>, %a1: reg<te
 TEST_F(LivenessTest, FormatsMachineReadableJsonSummary) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @test_target
-low.func.def target(@test_target) @json_pressure(%a: reg<test.i32>, %b: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @json_pressure(%a: reg<test.i32>, %b: reg<test.i32>) -> (reg<test.i32>) {
   %r = low.copy %a : reg<test.i32> -> reg<test.i32>
   %dead = low.copy %b : reg<test.i32> -> reg<test.i32>
   low.return %r : reg<test.i32>

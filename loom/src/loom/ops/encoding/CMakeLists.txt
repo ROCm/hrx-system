@@ -15,12 +15,16 @@ loom_generated_cc_library(
   GENERATOR
     loom::py::loom::gen::ops::c_tables_encoding_generator
   SRCS
+    "auxiliary.c"
+    "condition_refinement.c"
     "facts.c"
     "families.c"
-    "matrix_operand.c"
-    "numeric_transform.c"
+    "hadamard.c"
+    "operand.c"
+    "params.c"
     "roles.c"
     "storage.c"
+    "summary.c"
     "verify.c"
   GENERATED_SRC_FLAGS
     "--builders"
@@ -29,13 +33,16 @@ loom_generated_cc_library(
     "builders.c"
     "tables.c"
   HDRS
+    "auxiliary.h"
+    "facts.h"
     "families.h"
-    "matrix_operand.h"
-    "numeric_transform.h"
+    "hadamard.h"
+    "operand.h"
     "ops.h"
     "params.h"
     "roles.h"
     "storage.h"
+    "summary.h"
   ARGS
     "--dialect=encoding"
   DEPS
@@ -44,8 +51,54 @@ loom_generated_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ops::op_defs
+    loom::rewrite::rewriter
     loom::util::fact_table
+    loom::util::numeric_format
     loom::util::stable_id
+)
+
+loom_cc_test(
+  NAME
+    auxiliary_test
+  SRCS
+    "auxiliary_test.cc"
+  DEPS
+    ::encoding
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+)
+
+loom_cc_benchmark(
+  NAME
+    encoding_benchmark
+  SRCS
+    "encoding_benchmark.cc"
+  DEPS
+    ::encoding
+    iree::base
+    iree::base::internal::arena
+    iree::io::stream
+    iree::testing::benchmark_main
+    loom::format::bytecode::reader
+    loom::format::bytecode::writer
+    loom::format::text::parser
+    loom::format::text::printer
+    loom::ir
+    loom::ops::func
+    loom::ops::scalar
+    loom::ops::scf
+    loom::ops::test
+    loom::ops::vector
+    loom::pass::value_facts
+    loom::transforms::cleanup::canonicalize
+    loom::util::fact_table
+    loom::util::stream
+    loom::verify
+  ARGS
+    "--benchmark_filter=BM_.*Encoding.*/32"
+  TESTONLY
 )
 
 loom_cc_test(
@@ -68,16 +121,16 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
-    facts_test
+    storage_test
   SRCS
-    "facts_test.cc"
+    "storage_test.cc"
   DEPS
     ::encoding
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::format::text::parser
     loom::ir
-    loom::util::fact_table
 )
 
 loom_cc_test(

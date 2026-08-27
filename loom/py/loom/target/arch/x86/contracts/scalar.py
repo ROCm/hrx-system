@@ -19,6 +19,8 @@ from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scalar import bitwise as scalar_bitwise
 from loom.dialect.scalar import comparison as scalar_comparison
 from loom.dialect.scalar import conversion as scalar_conversion
+from loom.dialect.scf import ALL_SCF_OPS
+from loom.dialect.scf import defs as scf
 from loom.dialect.view import ALL_VIEW_OPS
 from loom.dialect.view import defs as view
 from loom.dsl import Op
@@ -48,8 +50,14 @@ from loom.target.contracts import (
 from loom.target.low_descriptors import Descriptor
 
 _I1 = Scalar("i1")
+_I8 = Scalar("i8")
+_I16 = Scalar("i16")
 _I32 = Scalar("i32")
 _I64 = Scalar("i64")
+_F8E4M3 = Scalar("f8E4M3")
+_F8E5M2 = Scalar("f8E5M2")
+_F16 = Scalar("f16")
+_BF16 = Scalar("bf16")
 _INDEX = Scalar("index")
 _OFFSET = Scalar("offset")
 
@@ -187,6 +195,58 @@ def _binary_rule(
     )
 
 
+def _select_rule(
+    type_pattern: TypePattern,
+    descriptor_key: str,
+    descriptor_lookup: _DescriptorLookup,
+) -> DescriptorRule:
+    descriptor = descriptor_lookup(descriptor_key)
+    return DescriptorRule(
+        source_op=scf.scf_select,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("condition", _I1),
+            *_typed_guards(("true_value", "false_value", "result"), type_pattern),
+        ),
+        emit=(
+            _op_emit(
+                descriptor=descriptor,
+                operands={
+                    "condition": ValueRef.operand("condition"),
+                    "true_value": ValueRef.operand("true_value"),
+                    "false_value": ValueRef.operand("false_value"),
+                },
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _conversion_rule(
+    source_op: Op,
+    source_type: TypePattern,
+    result_type: TypePattern,
+    descriptor_key: str,
+    descriptor_lookup: _DescriptorLookup,
+) -> DescriptorRule:
+    descriptor = descriptor_lookup(descriptor_key)
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("input", source_type),
+            Guard.value_type("result", result_type),
+        ),
+        emit=(
+            _op_emit(
+                descriptor=descriptor,
+                operands={"src": ValueRef.operand("input")},
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
 def _index_const_i64_rule(
     result_type: TypePattern,
     descriptor_lookup: _DescriptorLookup,
@@ -289,7 +349,8 @@ def _shift_imm_rule(
     )
 
 
-def _cmpi_rule(
+def _integer_compare_rule(
+    source_op: Op,
     predicate: str,
     type_pattern: TypePattern,
     descriptor_suffix: str,
@@ -297,7 +358,7 @@ def _cmpi_rule(
 ) -> DescriptorRule:
     descriptor = descriptor_lookup(f"x86.scalar.cmp.{predicate}.{descriptor_suffix}")
     return DescriptorRule(
-        source_op=scalar_comparison.scalar_cmpi,
+        source_op=source_op,
         descriptor=descriptor,
         guards=(
             Guard.enum_attr_equals("predicate", predicate),
@@ -324,7 +385,9 @@ def _source_memory_constraint(
     element_byte_count: int,
     dynamic_byte_stride_factor: int = 1,
     materialize_byte_offset: bool = False,
+    preserve_source_index: bool = False,
 ) -> SourceMemoryConstraint:
+    accepts_any_dynamic_terms = materialize_byte_offset or preserve_source_index
     return SourceMemoryConstraint(
         operation=operation,
         root_kind=SourceMemoryRootKind.BLOCK_ARGUMENT,
@@ -334,19 +397,24 @@ def _source_memory_constraint(
         vector_lane_byte_stride=element_byte_count,
         static_byte_offset_minimum=_DISP32_MIN,
         static_byte_offset_maximum=_DISP32_MAX,
-        dynamic_term_count=1 if dynamic else 0,
+        dynamic_term_count=(
+            None if dynamic and accepts_any_dynamic_terms else 1 if dynamic else 0
+        ),
+        dynamic_term_count_minimum=(1 if dynamic and accepts_any_dynamic_terms else 0),
+        dynamic_view_base_term_count=None if materialize_byte_offset else 0,
         dynamic_index_source=(
             SourceMemoryDynamicIndexSource.VALUE
-            if dynamic
+            if dynamic and not accepts_any_dynamic_terms
             else SourceMemoryDynamicIndexSource.NONE
         ),
         dynamic_byte_stride=(
-            None
-            if dynamic and materialize_byte_offset
+            0
+            if dynamic and accepts_any_dynamic_terms
             else element_byte_count * dynamic_byte_stride_factor
         )
         if dynamic
         else 0,
+        preserve_source_index=preserve_source_index,
         diagnostic=_SOURCE_MEMORY_DIAGNOSTIC,
     )
 
@@ -364,14 +432,20 @@ def x86_factored_memory_immediates(
 def _memory_immediates(
     dynamic: bool,
     *,
+    element_byte_count: int,
     materialize_byte_offset: bool = False,
+    preserve_source_index: bool = False,
 ) -> dict[str, SourceMemoryProject | int]:
     immediates: dict[str, SourceMemoryProject | int] = {
         "disp32": SourceMemoryProject.static_byte_offset()
     }
     if dynamic:
         immediates["scale"] = (
-            1 if materialize_byte_offset else SourceMemoryProject.dynamic_byte_stride()
+            1
+            if materialize_byte_offset
+            else element_byte_count
+            if preserve_source_index
+            else SourceMemoryProject.dynamic_byte_stride()
         )
     return immediates
 
@@ -407,6 +481,7 @@ def _view_load_rule(
     descriptor_lookup: _DescriptorLookup,
     dynamic_byte_stride_factor: int = 1,
     materialize_byte_offset: bool = False,
+    preserve_source_index: bool = False,
 ) -> DescriptorRule:
     descriptor = descriptor_lookup(descriptor_key)
     operands = {"base": ValueRef.operand("view")}
@@ -415,14 +490,17 @@ def _view_load_rule(
             operands["index"] = ValueRef.source_memory_dynamic_byte_offset()
         elif dynamic_byte_stride_factor != 1:
             operands["index"] = ValueRef.temporary("factored_index")
-        else:
+        elif preserve_source_index:
             operands["index"] = ValueRef.operand("indices")
+        else:
+            operands["index"] = ValueRef.source_memory_dynamic_term()
     source_memory = _source_memory_constraint(
         SourceMemoryOperation.LOAD,
         dynamic=dynamic,
         element_byte_count=element_byte_count,
         dynamic_byte_stride_factor=dynamic_byte_stride_factor,
         materialize_byte_offset=materialize_byte_offset,
+        preserve_source_index=preserve_source_index,
     )
     emit: tuple[EmitDescriptorOp, ...]
     memory_emit = _op_emit(
@@ -434,7 +512,9 @@ def _view_load_rule(
             if dynamic and dynamic_byte_stride_factor != 1
             else _memory_immediates(
                 dynamic,
+                element_byte_count=element_byte_count,
                 materialize_byte_offset=materialize_byte_offset,
+                preserve_source_index=preserve_source_index,
             )
         ),
         source_memory=source_memory,
@@ -460,7 +540,11 @@ def _view_load_rule(
         source_op=view.view_load,
         descriptor=descriptor,
         guards=(
-            Guard.operand_segment_count("indices", 1 if dynamic else 0),
+            *(
+                ()
+                if materialize_byte_offset
+                else (Guard.operand_segment_count("indices", 1 if dynamic else 0),)
+            ),
             Guard.value_type("result", result_type),
         ),
         emit=emit,
@@ -476,6 +560,7 @@ def _view_store_rule(
     descriptor_lookup: _DescriptorLookup,
     dynamic_byte_stride_factor: int = 1,
     materialize_byte_offset: bool = False,
+    preserve_source_index: bool = False,
 ) -> DescriptorRule:
     descriptor = descriptor_lookup(descriptor_key)
     operands = {
@@ -487,14 +572,17 @@ def _view_store_rule(
             operands["index"] = ValueRef.source_memory_dynamic_byte_offset()
         elif dynamic_byte_stride_factor != 1:
             operands["index"] = ValueRef.temporary("factored_index")
-        else:
+        elif preserve_source_index:
             operands["index"] = ValueRef.operand("indices")
+        else:
+            operands["index"] = ValueRef.source_memory_dynamic_term()
     source_memory = _source_memory_constraint(
         SourceMemoryOperation.STORE,
         dynamic=dynamic,
         element_byte_count=element_byte_count,
         dynamic_byte_stride_factor=dynamic_byte_stride_factor,
         materialize_byte_offset=materialize_byte_offset,
+        preserve_source_index=preserve_source_index,
     )
     memory_emit = _op_emit(
         descriptor=descriptor,
@@ -504,7 +592,9 @@ def _view_store_rule(
             if dynamic and dynamic_byte_stride_factor != 1
             else _memory_immediates(
                 dynamic,
+                element_byte_count=element_byte_count,
                 materialize_byte_offset=materialize_byte_offset,
+                preserve_source_index=preserve_source_index,
             )
         ),
         source_memory=source_memory,
@@ -530,7 +620,11 @@ def _view_store_rule(
         source_op=view.view_store,
         descriptor=descriptor,
         guards=(
-            Guard.operand_segment_count("indices", 1 if dynamic else 0),
+            *(
+                ()
+                if materialize_byte_offset
+                else (Guard.operand_segment_count("indices", 1 if dynamic else 0),)
+            ),
             Guard.value_type("value", value_type),
         ),
         emit=emit,
@@ -589,6 +683,16 @@ def _memory_rules(
                         element_byte_count=element_byte_count,
                         descriptor_key=descriptor_key,
                         descriptor_lookup=descriptor_lookup,
+                        preserve_source_index=True,
+                    )
+                )
+                rules.append(
+                    _view_load_rule(
+                        value_type,
+                        dynamic=True,
+                        element_byte_count=element_byte_count,
+                        descriptor_key=descriptor_key,
+                        descriptor_lookup=descriptor_lookup,
                         materialize_byte_offset=True,
                     )
                 )
@@ -625,6 +729,16 @@ def _memory_rules(
                         element_byte_count=element_byte_count,
                         descriptor_key=descriptor_key,
                         descriptor_lookup=descriptor_lookup,
+                        preserve_source_index=True,
+                    )
+                )
+                rules.append(
+                    _view_store_rule(
+                        value_type,
+                        dynamic=True,
+                        element_byte_count=element_byte_count,
+                        descriptor_key=descriptor_key,
+                        descriptor_lookup=descriptor_lookup,
                         materialize_byte_offset=True,
                     )
                 )
@@ -636,6 +750,56 @@ def _buffer_view_rule() -> ValueAliasRule:
         source_op=buffer.buffer_view,
         source=ValueRef.operand("buffer"),
         result=ValueRef.result("result"),
+    )
+
+
+def _buffer_load_i8_u_rule(
+    descriptor_lookup: _DescriptorLookup,
+) -> DescriptorRule:
+    descriptor = descriptor_lookup("x86.scalar.movzx.load.indexed.u8.gpr32")
+    return DescriptorRule(
+        source_op=buffer.buffer_load_i8_u,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("byte_offset", _OFFSET),
+            Guard.value_type("result", _I32),
+        ),
+        emit=(
+            _op_emit(
+                descriptor=descriptor,
+                operands={
+                    "base": ValueRef.operand("source"),
+                    "index": ValueRef.operand("byte_offset"),
+                },
+                results={"dst": ValueRef.result("result")},
+                immediates={"disp32": 0, "scale": 1},
+            ),
+        ),
+    )
+
+
+def _buffer_store_i8_rule(
+    descriptor_lookup: _DescriptorLookup,
+) -> DescriptorRule:
+    descriptor = descriptor_lookup("x86.scalar.mov.store.indexed.u8.gpr32")
+    return DescriptorRule(
+        source_op=buffer.buffer_store_i8,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("value", _I32),
+            Guard.value_type("byte_offset", _OFFSET),
+        ),
+        emit=(
+            _op_emit(
+                descriptor=descriptor,
+                operands={
+                    "value": ValueRef.operand("value"),
+                    "base": ValueRef.operand("target"),
+                    "index": ValueRef.operand("byte_offset"),
+                },
+                immediates={"disp32": 0, "scale": 1},
+            ),
+        ),
     )
 
 
@@ -654,6 +818,56 @@ def _index_cast_alias_rule(
     )
 
 
+def _conversion_alias_rule(
+    source_op: Op,
+    input_type: TypePattern,
+    result_type: TypePattern,
+) -> ValueAliasRule:
+    return ValueAliasRule(
+        source_op=source_op,
+        source=ValueRef.operand("input"),
+        result=ValueRef.result("result"),
+        guards=(
+            Guard.value_type("input", input_type),
+            Guard.value_type("result", result_type),
+        ),
+    )
+
+
+def _masked_extui_rule(
+    input_type: TypePattern,
+    mask: int,
+    descriptor_lookup: _DescriptorLookup,
+) -> DescriptorRule:
+    move = descriptor_lookup("x86.scalar.movimm.gpr32")
+    bitwise_and = descriptor_lookup("x86.scalar.and.gpr32")
+    return DescriptorRule(
+        source_op=scalar_conversion.scalar_extui,
+        descriptor=bitwise_and,
+        guards=(
+            Guard.value_type("input", input_type),
+            Guard.value_type("result", _I32),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=move,
+                results={"dst": ValueRef.temporary("mask")},
+                result_types={"dst": _I32},
+                immediates={"imm32": mask},
+                form=DescriptorEmitForm.CONST,
+            ),
+            _op_emit(
+                descriptor=bitwise_and,
+                operands={
+                    "lhs": ValueRef.operand("input"),
+                    "rhs": ValueRef.temporary("mask"),
+                },
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
 def _index_cast_i32_extend_rule(
     descriptor_key: str,
     descriptor_lookup: _DescriptorLookup,
@@ -661,12 +875,14 @@ def _index_cast_i32_extend_rule(
     unsigned: bool,
 ) -> DescriptorRule:
     descriptor = descriptor_lookup(descriptor_key)
-    value_guard = (
-        Guard.value_unsigned_bit_count("input", 32, diagnostic=_INDEX_CAST_DIAGNOSTIC)
-        if unsigned
-        else Guard.value_signed_bit_count(
-            "input", 32, diagnostic=_INDEX_CAST_DIAGNOSTIC
+    value_guards = (
+        (
+            Guard.value_unsigned_bit_count(
+                "input", 32, diagnostic=_INDEX_CAST_DIAGNOSTIC
+            ),
         )
+        if unsigned
+        else ()
     )
     return DescriptorRule(
         source_op=index.index_cast,
@@ -674,7 +890,7 @@ def _index_cast_i32_extend_rule(
         guards=(
             Guard.value_type("input", _I32),
             Guard.value_type("result", _INDEX),
-            value_guard,
+            *value_guards,
         ),
         emit=(
             _op_emit(
@@ -1025,6 +1241,8 @@ def x86_scalar_core_cases(
 ) -> Sequence[ContractCase]:
     return (
         _buffer_view_rule(),
+        _buffer_load_i8_u_rule(descriptor_lookup),
+        _buffer_store_i8_rule(descriptor_lookup),
         _binary_rule(
             scalar_arithmetic.scalar_addi,
             _I32,
@@ -1115,6 +1333,7 @@ def x86_scalar_core_cases(
             "x86.scalar.xor.gpr32",
             descriptor_lookup,
         ),
+        _select_rule(_I32, "x86.scalar.select.gpr32", descriptor_lookup),
         _shift_imm_rule(
             scalar_bitwise.scalar_shli,
             _I32,
@@ -1158,7 +1377,13 @@ def x86_scalar_core_cases(
             maximum=63,
         ),
         *(
-            _cmpi_rule(predicate, _I32, "gpr32", descriptor_lookup)
+            _integer_compare_rule(
+                scalar_comparison.scalar_cmpi,
+                predicate,
+                _I32,
+                "gpr32",
+                descriptor_lookup,
+            )
             for predicate in (
                 "eq",
                 "ne",
@@ -1173,7 +1398,13 @@ def x86_scalar_core_cases(
             )
         ),
         *(
-            _cmpi_rule(predicate, _I64, "gpr64", descriptor_lookup)
+            _integer_compare_rule(
+                scalar_comparison.scalar_cmpi,
+                predicate,
+                _I64,
+                "gpr64",
+                descriptor_lookup,
+            )
             for predicate in (
                 "eq",
                 "ne",
@@ -1192,6 +1423,12 @@ def x86_scalar_core_cases(
         _const_scalar_i64_rule(descriptor_lookup),
         _index_const_i64_rule(_INDEX, descriptor_lookup),
         _index_const_i64_rule(_OFFSET, descriptor_lookup),
+        _integer_compare_rule(
+            index.index_cmp, "ult", _INDEX, "gpr64", descriptor_lookup
+        ),
+        _integer_compare_rule(
+            index.index_cmp, "ult", _OFFSET, "gpr64", descriptor_lookup
+        ),
         _index_cast_i32_extend_rule(
             "x86.scalar.movzx.gpr64.gpr32",
             descriptor_lookup,
@@ -1203,6 +1440,20 @@ def x86_scalar_core_cases(
             unsigned=False,
         ),
         _index_cast_alias_rule(_I64, _INDEX),
+        _conversion_alias_rule(scalar_conversion.scalar_bitcast, _F8E4M3, _I8),
+        _conversion_alias_rule(scalar_conversion.scalar_bitcast, _F8E5M2, _I8),
+        _conversion_alias_rule(scalar_conversion.scalar_bitcast, _F16, _I16),
+        _conversion_alias_rule(scalar_conversion.scalar_bitcast, _BF16, _I16),
+        _conversion_alias_rule(scalar_conversion.scalar_extui, _I1, _I32),
+        _masked_extui_rule(_I8, 0xFF, descriptor_lookup),
+        _masked_extui_rule(_I16, 0xFFFF, descriptor_lookup),
+        _conversion_rule(
+            scalar_conversion.scalar_trunci,
+            _I64,
+            _I32,
+            "x86.scalar.mov.trunc.gpr32.gpr64",
+            descriptor_lookup,
+        ),
         _add_disp_rule(
             _INDEX,
             base_field="lhs",
@@ -1248,6 +1499,7 @@ X86_SCALAR_CONTRACT_DIALECT_OPS = {
     "buffer": ALL_BUFFER_OPS,
     "index": ALL_INDEX_OPS,
     "scalar": ALL_SCALAR_OPS,
+    "scf": ALL_SCF_OPS,
     "view": ALL_VIEW_OPS,
 }
 

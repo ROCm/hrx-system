@@ -1,0 +1,181 @@
+// RUN: emit command-program @attention
+
+kernel.def @prepare() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%parameters: buffer, %input: buffer, %scratch: buffer) {
+  kernel.return
+}
+
+kernel.def @query() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%parameters: buffer, %scratch: buffer, %output: buffer) {
+  kernel.return
+}
+
+kernel.def @key() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%parameters: buffer, %scratch: buffer, %output: buffer) {
+  kernel.return
+}
+
+kernel.def @value() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%parameters: buffer, %scratch: buffer, %output: buffer) {
+  kernel.return
+}
+
+command.program.def public @attention() launch(%parameters: buffer, %input: buffer, %scratch: buffer, %query_output: buffer, %key_output: buffer, %value_output: buffer) {
+  kernel.launch @prepare(%parameters, %input, %scratch) : (buffer, buffer, buffer)
+  command.concurrent {
+    kernel.launch @query(%parameters, %scratch, %query_output) : (buffer, buffer, buffer)
+    kernel.launch @key(%parameters, %scratch, %key_output) : (buffer, buffer, buffer)
+    kernel.launch @value(%parameters, %scratch, %value_output) : (buffer, buffer, buffer)
+  }
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 4, executable_count = 4, fixed_buffer_count = 0, rebindable_binding_count = 6}) @attention() asm {
+  %58 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %59 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
+  %60 = resource<command_input> {index = 2, source_type = buffer} : reg<cmd.binding>
+  %61 = resource<command_input> {index = 3, source_type = buffer} : reg<cmd.binding>
+  %62 = resource<command_input> {index = 4, source_type = buffer} : reg<cmd.binding>
+  %63 = resource<command_input> {index = 5, source_type = buffer} : reg<cmd.binding>
+  %64 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %65 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
+  %66 = resource<command_input> {index = 2, source_type = index} : reg<cmd.executable>
+  %67 = resource<command_input> {index = 3, source_type = index} : reg<cmd.executable>
+  %68 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %69 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
+  %70 = resource<command_input> {index = 2, source_type = index} : reg<cmd.entry>
+  %71 = resource<command_input> {index = 3, source_type = index} : reg<cmd.entry>
+  %72 = cmd.constant.u64 0
+  %73 = cmd.constant.u64 -1
+  %74 = cmd.constant.u32 1
+  cmd.dispatch.direct<%64, %68>[%74, %74, %74](%58, %72, %73, %59, %72, %73, %60, %72, %73)
+  cmd.dispatch.direct.barrier<%65, %69>[%74, %74, %74](%58, %72, %73, %60, %72, %73, %61, %72, %73)
+  cmd.dispatch.direct<%66, %70>[%74, %74, %74](%58, %72, %73, %60, %72, %73, %62, %72, %73)
+  cmd.dispatch.direct<%67, %71>[%74, %74, %74](%58, %72, %73, %60, %72, %73, %63, %72, %73)
+  return
+}
+
+// ====
+
+// RUN: emit command-program @nested
+
+kernel.def @a() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def @b() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def @c() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def @d() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def @e() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+command.program.def public @nested() launch() {
+  command.concurrent {
+    command.serial {
+      kernel.launch @a() : ()
+      kernel.launch @b() : ()
+    }
+    command.serial {
+      kernel.launch @c() : ()
+      kernel.launch @d() : ()
+      kernel.launch @e() : ()
+    }
+  }
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 5, executable_count = 5, fixed_buffer_count = 0, rebindable_binding_count = 0}) @nested() asm {
+  %35 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %36 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
+  %37 = resource<command_input> {index = 2, source_type = index} : reg<cmd.executable>
+  %38 = resource<command_input> {index = 3, source_type = index} : reg<cmd.executable>
+  %39 = resource<command_input> {index = 4, source_type = index} : reg<cmd.executable>
+  %40 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %41 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
+  %42 = resource<command_input> {index = 2, source_type = index} : reg<cmd.entry>
+  %43 = resource<command_input> {index = 3, source_type = index} : reg<cmd.entry>
+  %44 = resource<command_input> {index = 4, source_type = index} : reg<cmd.entry>
+  %45 = cmd.constant.u32 1
+  cmd.dispatch.direct<%35, %40>[%45, %45, %45]()
+  cmd.dispatch.direct<%36, %41>[%45, %45, %45]()
+  cmd.dispatch.direct.barrier<%37, %42>[%45, %45, %45]()
+  cmd.dispatch.direct<%38, %43>[%45, %45, %45]()
+  cmd.dispatch.direct.barrier<%39, %44>[%45, %45, %45]()
+  return
+}
+
+// ====
+
+// RUN: emit command-program @kernel_schedule
+
+kernel.entry.decl @left(%storage: buffer)
+kernel.entry.decl @right(%storage: buffer)
+
+command.program.def public @kernel_schedule() launch(%count_storage: buffer, %storage: buffer) {
+  %c0 = index.constant 0 : offset
+  %c1 = index.constant 1 : index
+  %counts = buffer.view %count_storage[%c0] : buffer -> view<3xi32>
+  kernel.launch.serial {
+    kernel.launch.concurrent {
+      kernel.dispatch @left[%counts](%storage) : [view<3xi32>](buffer)
+      kernel.dispatch @right[%counts](%storage) : [view<3xi32>](buffer)
+    }
+    kernel.dispatch @left[%c1](%storage) : [index](buffer)
+  }
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 2, executable_count = 2, fixed_buffer_count = 0, rebindable_binding_count = 2}) @kernel_schedule() asm {
+  %7 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %8 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
+  %9 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %10 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
+  %11 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %12 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
+  %13 = cmd.constant.u64 0
+  %14 = cmd.constant.u64 -1
+  %15 = cmd.constant.u64 12
+  %16 = cmd.buffer.ref.binding %7, %13, %15
+  cmd.dispatch.indirect.static<%9, %11>[%16](%8, %13, %14)
+  %17 = cmd.buffer.ref.binding %7, %13, %15
+  cmd.dispatch.indirect.static<%10, %12>[%17](%8, %13, %14)
+  %18 = cmd.constant.u32 1
+  cmd.dispatch.direct.barrier<%9, %11>[%18, %18, %18](%8, %13, %14)
+  return
+}

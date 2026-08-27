@@ -10,6 +10,7 @@
 #define IREE_HAL_API_H_
 
 #include "iree/hal/allocator.h"         // IWYU pragma: export
+#include "iree/hal/atomic.h"            // IWYU pragma: export
 #include "iree/hal/buffer.h"            // IWYU pragma: export
 #include "iree/hal/buffer_transfer.h"   // IWYU pragma: export
 #include "iree/hal/buffer_view.h"       // IWYU pragma: export
@@ -23,9 +24,7 @@
 #include "iree/hal/device_spec.h"       // IWYU pragma: export
 #include "iree/hal/driver.h"            // IWYU pragma: export
 #include "iree/hal/driver_registry.h"   // IWYU pragma: export
-#include "iree/hal/event.h"             // IWYU pragma: export
 #include "iree/hal/executable.h"        // IWYU pragma: export
-#include "iree/hal/executable_cache.h"  // IWYU pragma: export
 #include "iree/hal/fence.h"             // IWYU pragma: export
 #include "iree/hal/file.h"              // IWYU pragma: export
 #include "iree/hal/pool.h"              // IWYU pragma: export

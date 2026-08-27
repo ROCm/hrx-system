@@ -8,92 +8,30 @@
 
 from loom.errors import ErrorDef, ErrorDomain, ErrorParam, ParamKind, Severity
 
-# ERR_SPIRV_001: SPIR-V ABI value type metadata is malformed.
-ERR_SPIRV_001 = ErrorDef(
-    domain=ErrorDomain.SPIRV,
-    code=1,
-    severity=Severity.ERROR,
-    summary="Malformed SPIR-V ABI value type metadata.",
-    message=(
-        "SPIR-V ABI metadata '{attr_name}' for '@{function_name}' must be an "
-        "i64 array with {expected_count} element(s)"
-    ),
-    params=(
-        ErrorParam("function_name", ParamKind.STRING),
-        ErrorParam("attr_name", ParamKind.STRING),
-        ErrorParam("expected_count", ParamKind.U32),
-    ),
+_TARGET_CONTEXT_PARAMS = (
+    ErrorParam("target_key", ParamKind.STRING),
+    ErrorParam("export_name", ParamKind.STRING),
+    ErrorParam("config_key", ParamKind.STRING),
+    ErrorParam("function_name", ParamKind.STRING),
+    ErrorParam("op_name", ParamKind.STRING),
 )
 
-# ERR_SPIRV_002: SPIR-V ABI metadata is missing for a typed SSA ID.
-ERR_SPIRV_002 = ErrorDef(
-    domain=ErrorDomain.SPIRV,
-    code=2,
-    severity=Severity.ERROR,
-    summary="Missing SPIR-V ABI value type metadata.",
-    message=(
-        "SPIR-V ABI metadata '{attr_name}' for '@{function_name}' is missing "
-        "the payload type for '{value_name}'"
-    ),
-    params=(
-        ErrorParam("function_name", ParamKind.STRING),
-        ErrorParam("attr_name", ParamKind.STRING),
-        ErrorParam("value_name", ParamKind.STRING),
-    ),
-)
-
-# ERR_SPIRV_003: SPIR-V ABI metadata annotates a non-id register.
-ERR_SPIRV_003 = ErrorDef(
-    domain=ErrorDomain.SPIRV,
-    code=3,
-    severity=Severity.ERROR,
-    summary="SPIR-V ABI metadata annotates a non-id register.",
-    message=(
-        "SPIR-V ABI metadata '{attr_name}' for '@{function_name}' gives "
-        "non-zero payload type code {value_code} for non-spirv.id value "
-        "'{value_name}'"
-    ),
-    params=(
-        ErrorParam("function_name", ParamKind.STRING),
-        ErrorParam("attr_name", ParamKind.STRING),
-        ErrorParam("value_name", ParamKind.STRING),
-        ErrorParam("value_code", ParamKind.I64),
-    ),
-)
-
-# ERR_SPIRV_004: SPIR-V ABI value type code is invalid.
-ERR_SPIRV_004 = ErrorDef(
-    domain=ErrorDomain.SPIRV,
-    code=4,
-    severity=Severity.ERROR,
-    summary="Invalid SPIR-V ABI value type code.",
-    message=(
-        "SPIR-V ABI metadata '{attr_name}' for '@{function_name}' gives "
-        "invalid payload type code {value_code} for '{value_name}'"
-    ),
-    params=(
-        ErrorParam("function_name", ParamKind.STRING),
-        ErrorParam("attr_name", ParamKind.STRING),
-        ErrorParam("value_name", ParamKind.STRING),
-        ErrorParam("value_code", ParamKind.I64),
-    ),
-)
-
-# ERR_SPIRV_005: SPIR-V low register class is not representable by emission.
+# ERR_SPIRV_005: SPIR-V Low register type has no exact value representation.
 ERR_SPIRV_005 = ErrorDef(
     domain=ErrorDomain.SPIRV,
     code=5,
     severity=Severity.ERROR,
-    summary="Unsupported SPIR-V low register class.",
+    summary="Unsupported SPIR-V Low register type.",
     message=(
-        "SPIR-V low value '{value_name}' in '@{function_name}' has register "
-        "type {actual_type}, which is not part of the binary SPIR-V ABI"
+        "SPIR-V Low value '{value_name}' in '@{function_name}' has register "
+        "type {actual_type}, which has no exact SPIR-V value representation"
     ),
     params=(
         ErrorParam("function_name", ParamKind.STRING),
         ErrorParam("value_name", ParamKind.STRING),
         ErrorParam("actual_type", ParamKind.TYPE),
     ),
+    fix_hint="Attach the exact public value type to the SPIR-V Low register",
 )
 
 # ERR_SPIRV_006: SPIR-V raw-BDA HAL kernels cannot return values.
@@ -422,11 +360,128 @@ ERR_SPIRV_025 = ErrorDef(
     ),
 )
 
+# ERR_SPIRV_026: SPIR-V address conversion range is not proven.
+ERR_SPIRV_026 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=26,
+    severity=Severity.ERROR,
+    summary="SPIR-V address conversion range is not proven.",
+    message=(
+        "SPIR-V target '{target_key}' export '{export_name}' config "
+        "'{config_key}' rejected '{op_name}' in '@{function_name}': "
+        "conversion from {source_type} to {result_type} requires the source "
+        "value to be proven in [{required_range_lo}, {required_range_hi}]; "
+        "constraint '{constraint_key}' is not satisfied"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("source_type", ParamKind.TYPE),
+        ErrorParam("result_type", ParamKind.TYPE),
+        ErrorParam("required_range_lo", ParamKind.I64),
+        ErrorParam("required_range_hi", ParamKind.I64),
+        ErrorParam("constraint_key", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Establish the value range at its producer or with an assumption "
+        "after the corresponding runtime guard"
+    ),
+)
+
+# ERR_SPIRV_027: SPIR-V index numeric operand range is not proven.
+ERR_SPIRV_027 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=27,
+    severity=Severity.ERROR,
+    summary="SPIR-V index numeric operand range is not proven.",
+    message=(
+        "SPIR-V target '{target_key}' export '{export_name}' config "
+        "'{config_key}' rejected '{op_name}' field '{field_name}' in "
+        "'@{function_name}': {value_type} value must be proven in "
+        "[{required_range_lo}, {required_range_hi}]; constraint "
+        "'{constraint_key}' is not satisfied"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("field_name", ParamKind.STRING),
+        ErrorParam("value_type", ParamKind.TYPE),
+        ErrorParam("required_range_lo", ParamKind.I64),
+        ErrorParam("required_range_hi", ParamKind.I64),
+        ErrorParam("constraint_key", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Establish the operand range at its producer or with an assumption "
+        "after the corresponding runtime guard"
+    ),
+)
+
+# ERR_SPIRV_028: SPIR-V source-memory address index range is not proven.
+ERR_SPIRV_028 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=28,
+    severity=Severity.ERROR,
+    summary="SPIR-V source-memory address index range is not proven.",
+    message=(
+        "SPIR-V target '{target_key}' export '{export_name}' config "
+        "'{config_key}' rejected '{op_name}' in '@{function_name}': every "
+        "index contributing to the source-memory address must be proven in "
+        "[{required_range_lo}, {required_range_hi}]; constraint "
+        "'{constraint_key}' is not satisfied"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("required_range_lo", ParamKind.I64),
+        ErrorParam("required_range_hi", ParamKind.I64),
+        ErrorParam("constraint_key", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Establish the index range at its producer or with an assumption "
+        "after the corresponding runtime guard"
+    ),
+)
+
+# ERR_SPIRV_029: SPIR-V Workgroup element address is not proven.
+ERR_SPIRV_029 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=29,
+    severity=Severity.ERROR,
+    summary="SPIR-V Workgroup element address is not proven.",
+    message=(
+        "SPIR-V target '{target_key}' export '{export_name}' config "
+        "'{config_key}' rejected '{op_name}' in '@{function_name}': the "
+        "complete root-relative byte address must be exactly divisible by "
+        "the {element_byte_count}-byte element size and its element index "
+        "must be proven in [{required_range_lo}, {required_range_hi}]; "
+        "constraint '{constraint_key}' is not satisfied"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("element_byte_count", ParamKind.U32),
+        ErrorParam("required_range_lo", ParamKind.I64),
+        ErrorParam("required_range_hi", ParamKind.I64),
+        ErrorParam("constraint_key", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Establish aligned, non-negative element addressing at the view or "
+        "index producer and prove the complete address range"
+    ),
+)
+
+# ERR_SPIRV_030: SPIR-V low boundary carries target-specific ABI layout state.
+ERR_SPIRV_030 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=30,
+    severity=Severity.ERROR,
+    summary="SPIR-V low boundary has target-specific ABI layout metadata.",
+    message=(
+        "SPIR-V low function '@{function_name}' cannot carry target-specific "
+        "abi_layout metadata; boundary value meaning must be encoded in "
+        "structural register types"
+    ),
+    params=(ErrorParam("function_name", ParamKind.STRING),),
+    fix_hint="Attach the exact public value type to each SPIR-V Low register",
+)
+
 ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
-    ERR_SPIRV_001,
-    ERR_SPIRV_002,
-    ERR_SPIRV_003,
-    ERR_SPIRV_004,
     ERR_SPIRV_005,
     ERR_SPIRV_006,
     ERR_SPIRV_007,
@@ -447,4 +502,9 @@ ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_023,
     ERR_SPIRV_024,
     ERR_SPIRV_025,
+    ERR_SPIRV_026,
+    ERR_SPIRV_027,
+    ERR_SPIRV_028,
+    ERR_SPIRV_029,
+    ERR_SPIRV_030,
 )

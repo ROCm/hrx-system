@@ -1,0 +1,9 @@
+template.decl @demo.left(%x: i32) -> (i32)
+
+template.decl @demo.right(%x: i32) -> (i32)
+
+func.def public @entry(%x: i32) -> (i32) {
+  %left = template.apply<@demo.left>(%x) : (i32) -> (i32)
+  %right = template.apply<@demo.right>(%left) : (i32) -> (i32)
+  func.return %right : i32
+}

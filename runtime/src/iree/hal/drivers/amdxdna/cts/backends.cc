@@ -50,7 +50,8 @@ static bool amdxdna_registered_ =
          "amdxdna",
          {"amdxdna",
           CreateAmdxdnaDevice,
-          /*executable_format=*/nullptr,
+          /*executable_target_family=*/nullptr,
+          /*executable_target_key=*/nullptr,
           /*executable_data=*/nullptr,
           RecordingMode::kDirect,
           /*unsupported_tests=*/

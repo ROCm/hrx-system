@@ -9,6 +9,7 @@
 # build_tools/third_party/README.md for dependency ownership and update policy.
 
 load("@bazel_skylib//lib:selects.bzl", "selects")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 
 package(default_visibility = ["//visibility:private"])
 
@@ -110,6 +111,17 @@ alias(
     name = "libbacktrace",
     actual = "//build_tools/third_party/libbacktrace",
     visibility = [":runtime_users"],
+)
+
+cc_library(
+    name = "zstd",
+    hdrs = [
+        "@zstd//:lib/zstd.h",
+        "@zstd//:lib/zstd_errors.h",
+    ],
+    defines = ["IREE_HAVE_ZSTD=1"],
+    visibility = [":libhrx_users"],
+    deps = ["@zstd"],
 )
 
 filegroup(

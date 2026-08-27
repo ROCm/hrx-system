@@ -1,0 +1,97 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/ordinary_vector_structure.loom-test
+// RUN: emit source-low output=low control-flow=structured-low
+
+spirv.target<vulkan1_3> @target {abi = hal_kernel}
+kernel.def target(@target) @ordinary_vector_structure_i32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base_byte_offset = index.constant 0 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%base_byte_offset] : buffer -> view<4xi32>
+  %output_view = buffer.view %output_aligned[%base_byte_offset] : buffer -> view<4xi32>
+  %a = view.load %input_view[0] : view<4xi32> -> i32
+  %b = view.load %input_view[1] : view<4xi32> -> i32
+  %c = view.load %input_view[2] : view<4xi32> -> i32
+  %d = view.load %input_view[3] : view<4xi32> -> i32
+  %condition = scalar.cmpi sgt, %a, %b : i32
+  %singleton_from = vector.from_elements %b : vector<1xi32>
+  %singleton_splat = vector.splat %a : vector<1xi32>
+  %singleton_constant = vector.constant 10 : vector<1xi32>
+  %singleton_selected = scf.select %condition, %singleton_splat, %singleton_from : vector<1xi32>
+  %singleton_inserted = vector.insert %a into %singleton_selected[0] : i32, vector<1xi32>
+  %singleton_value = vector.extract %singleton_inserted[0] : vector<1xi32> -> i32
+  %singleton_constant_value = vector.extract %singleton_constant[0] : vector<1xi32> -> i32
+  %from = vector.from_elements %a, %b, %c, %d : vector<4xi32>
+  %constant = vector.constant 10 : vector<4xi32>
+  %splat = vector.splat %singleton_value : vector<4xi32>
+  %candidate = scf.select %condition, %from, %constant : vector<4xi32>
+  %selected = scf.if %condition -> (vector<4xi32>) {
+    view.store %a, %output_view[0] : i32, view<4xi32>
+    scf.yield %candidate : vector<4xi32>
+  } else {
+    view.store %b, %output_view[0] : i32, view<4xi32>
+    scf.yield %splat : vector<4xi32>
+  }
+  %inserted = vector.insert %singleton_constant_value into %selected[2] : i32, vector<4xi32>
+  %final = scf.select %condition, %selected, %inserted : vector<4xi32>
+  %result0 = vector.extract %final[0] : vector<4xi32> -> i32
+  %result1 = vector.extract %final[1] : vector<4xi32> -> i32
+  %result2 = vector.extract %final[2] : vector<4xi32> -> i32
+  %result3 = vector.extract %final[3] : vector<4xi32> -> i32
+  view.store %result0, %output_view[0] : i32, view<4xi32>
+  view.store %result1, %output_view[1] : i32, view<4xi32>
+  view.store %result2, %output_view[2] : i32, view<4xi32>
+  view.store %result3, %output_view[3] : i32, view<4xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @ordinary_vector_structure_i32() asm {
+  %input_aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %36 = OpConstant.offset64 0
+  %37 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %36
+  %a = OpLoad.storage_buffer.i32 %37
+  %39 = OpConstant.offset64 4
+  %40 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %39
+  %b = OpLoad.storage_buffer.i32 %40
+  %42 = OpConstant.offset64 8
+  %43 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %42
+  %c = OpLoad.storage_buffer.i32 %43
+  %45 = OpConstant.offset64 12
+  %46 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %45
+  %d = OpLoad.storage_buffer.i32 %46
+  %condition = OpSGreaterThan %a, %b
+  %singleton_constant_value = OpConstant.i32 10
+  %from = OpCompositeConstruct.v4i32 %a, %b, %c, %d
+  %constant = OpCompositeConstruct.v4i32 %singleton_constant_value, %singleton_constant_value, %singleton_constant_value, %singleton_constant_value
+  %splat = OpCompositeConstruct.v4i32 %a, %a, %a, %a
+  %54 = OpCompositeConstruct.v4bool %condition, %condition, %condition, %condition
+  %candidate = OpSelect.v4i32 %54, %from, %constant
+  %selected = low.scf.if %condition -> (reg<spirv.id : vector<4xi32>>) {
+    %58 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %36
+    OpStore.storage_buffer.i32 %58, %a
+    low.scf.yield %candidate : reg<spirv.id : vector<4xi32>>
+  } else {
+    %60 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %36
+    OpStore.storage_buffer.i32 %60, %b
+    low.scf.yield %splat : reg<spirv.id : vector<4xi32>>
+  }
+  %inserted = OpCompositeInsert.i32.v4i32 %singleton_constant_value, %selected, 2
+  %final = OpSelect.v4i32 %54, %selected, %inserted
+  %result0 = OpCompositeExtract.v4i32.i32 %final, 0
+  %result1 = OpCompositeExtract.v4i32.i32 %final, 1
+  %result2 = OpCompositeExtract.v4i32.i32 %final, 2
+  %result3 = OpCompositeExtract.v4i32.i32 %final, 3
+  %69 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %36
+  OpStore.storage_buffer.i32 %69, %result0
+  %71 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %39
+  OpStore.storage_buffer.i32 %71, %result1
+  %73 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %42
+  OpStore.storage_buffer.i32 %73, %result2
+  %75 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %45
+  OpStore.storage_buffer.i32 %75, %result3
+  return
+}

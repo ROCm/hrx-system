@@ -23,8 +23,18 @@ namespace {
 using ModulePtr = ::loom::testing::ModulePtr;
 
 typedef struct PipelineRunCounts {
+  // Number of final template-selection pass runs.
+  int final_template_selection = 0;
+  // Lexical pass-run ordinal of final template selection.
+  int final_template_selection_ordinal = 0;
+  // Number of retained call-graph specialization pass runs.
+  int target_callgraph_specialization = 0;
+  // Lexical pass-run ordinal of retained call-graph specialization.
+  int target_callgraph_specialization_ordinal = 0;
   // Number of source-to-low pass runs.
   int source_to_low = 0;
+  // Lexical pass-run ordinal of source-to-low.
+  int source_to_low_ordinal = 0;
   // Diagnostics option on the source-to-low pass.
   iree_string_view_t source_to_low_diagnostics = iree_string_view_empty();
   // Sanitizer reporting option on the source-to-low pass.
@@ -49,6 +59,8 @@ typedef struct PipelineRunCountContext {
   loom_module_t* module;
   // Counts updated while walking pass.run operations.
   PipelineRunCounts counts;
+  // One-based lexical ordinal of the current pass.run operation.
+  int current_run_ordinal;
 } PipelineRunCountContext;
 
 iree_string_view_t FindStringOption(loom_module_t* module,
@@ -64,9 +76,9 @@ iree_string_view_t FindStringOption(loom_module_t* module,
   return iree_string_view_empty();
 }
 
-iree_status_t CountSanitizerRun(void* user_data, loom_op_t* op,
-                                const loom_walk_context_t* context,
-                                loom_walk_result_t* out_result) {
+iree_status_t InspectPipelineRun(void* user_data, loom_op_t* op,
+                                 const loom_walk_context_t* context,
+                                 loom_walk_result_t* out_result) {
   (void)context;
   *out_result = LOOM_WALK_CONTINUE;
   if (!loom_pass_run_isa(op)) {
@@ -75,11 +87,26 @@ iree_status_t CountSanitizerRun(void* user_data, loom_op_t* op,
 
   PipelineRunCountContext* count_context =
       static_cast<PipelineRunCountContext*>(user_data);
+  ++count_context->current_run_ordinal;
   PipelineRunCounts* counts = &count_context->counts;
   iree_string_view_t key =
       count_context->module->strings.entries[loom_pass_run_key(op)];
-  if (iree_string_view_equal(key, IREE_SV("source-to-low"))) {
+  if (iree_string_view_equal(key, IREE_SV("select-templates")) &&
+      iree_string_view_equal(
+          FindStringOption(count_context->module, loom_pass_run_options(op),
+                           IREE_SV("mode")),
+          IREE_SV("final"))) {
+    ++counts->final_template_selection;
+    counts->final_template_selection_ordinal =
+        count_context->current_run_ordinal;
+  } else if (iree_string_view_equal(key,
+                                    IREE_SV("specialize-target-callgraph"))) {
+    ++counts->target_callgraph_specialization;
+    counts->target_callgraph_specialization_ordinal =
+        count_context->current_run_ordinal;
+  } else if (iree_string_view_equal(key, IREE_SV("source-to-low"))) {
     ++counts->source_to_low;
+    counts->source_to_low_ordinal = count_context->current_run_ordinal;
     counts->source_to_low_diagnostics =
         FindStringOption(count_context->module, loom_pass_run_options(op),
                          IREE_SV("diagnostics"));
@@ -143,7 +170,7 @@ class TargetPipelineTest : public ::testing::Test {
     loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
     IREE_EXPECT_OK(loom_walk_region(
         module, loom_pass_pipeline_body(pipeline_op), LOOM_WALK_PRE_ORDER,
-        (loom_walk_callback_t){CountSanitizerRun, &count_context}, &arena,
+        (loom_walk_callback_t){InspectPipelineRun, &count_context}, &arena,
         &walk_result));
     EXPECT_EQ(walk_result, LOOM_WALK_CONTINUE);
     counts = count_context.counts;
@@ -171,7 +198,13 @@ TEST_F(TargetPipelineTest, ZeroChecksBuildsNoSanitizerPassSlots) {
       loom_pass_environment_empty(), &pipeline_op));
 
   const PipelineRunCounts counts = CountPipelineRuns(module.get(), pipeline_op);
+  EXPECT_EQ(counts.final_template_selection, 1);
+  EXPECT_EQ(counts.target_callgraph_specialization, 1);
   EXPECT_EQ(counts.source_to_low, 1);
+  EXPECT_LT(counts.final_template_selection_ordinal,
+            counts.target_callgraph_specialization_ordinal);
+  EXPECT_LT(counts.target_callgraph_specialization_ordinal,
+            counts.source_to_low_ordinal);
   EXPECT_TRUE(iree_string_view_is_empty(counts.source_to_low_diagnostics));
   EXPECT_TRUE(
       iree_string_view_is_empty(counts.source_to_low_sanitizer_reporting));
@@ -179,6 +212,34 @@ TEST_F(TargetPipelineTest, ZeroChecksBuildsNoSanitizerPassSlots) {
   EXPECT_EQ(counts.sanitizer_insert_race_observations, 0);
   EXPECT_EQ(counts.sanitizer_materialize_assertions, 0);
   EXPECT_EQ(counts.other_sanitizer_runs, 0);
+}
+
+TEST_F(TargetPipelineTest, ExpandedSourceStopsBeforeCallgraphSpecialization) {
+  ModulePtr module = AllocateModule(IREE_SV("pipeline"));
+
+  loom_op_t* pipeline_op = nullptr;
+  IREE_ASSERT_OK(loom_target_pipeline_build_to_expanded_source(
+      module.get(), IREE_SV("compile"), /*options=*/nullptr, &environment_,
+      loom_pass_environment_empty(), &pipeline_op));
+
+  const PipelineRunCounts counts = CountPipelineRuns(module.get(), pipeline_op);
+  EXPECT_EQ(counts.final_template_selection, 1);
+  EXPECT_EQ(counts.target_callgraph_specialization, 0);
+  EXPECT_EQ(counts.source_to_low, 0);
+}
+
+TEST_F(TargetPipelineTest, DiagnosticArtifactsPreserveRawSourceBoundary) {
+  ModulePtr module = AllocateModule(IREE_SV("pipeline"));
+
+  loom_op_t* pipeline_op = nullptr;
+  IREE_ASSERT_OK(loom_target_pipeline_build_to_source_low_diagnostic_artifacts(
+      module.get(), IREE_SV("compile"), /*options=*/nullptr, &environment_,
+      loom_pass_environment_empty(), &pipeline_op));
+
+  const PipelineRunCounts counts = CountPipelineRuns(module.get(), pipeline_op);
+  EXPECT_EQ(counts.final_template_selection, 0);
+  EXPECT_EQ(counts.target_callgraph_specialization, 0);
+  EXPECT_EQ(counts.source_to_low, 1);
 }
 
 TEST_F(TargetPipelineTest, OperandFormDiagnosticsBuildsSourceToLowOption) {

@@ -6,18 +6,14 @@
 
 """Func dialect op definitions.
 
-Seven ops for program structure:
+Four ops for runtime program structure:
 
 Top-level (module-level symbols):
   func.def       — Function definition (has body, callable by name).
   func.decl      — External function declaration (no body, callable by name).
-
-Body ops (inside function/template bodies):
+Body ops:
   func.call      — Runtime function call.
-  func.apply     — Compile-time contract-key implementation demand.
   func.return    — Return values from function body.
-
-func.template<T> and func.ukernel<T> provide implementation contract keys.
 """
 
 from typing import Any
@@ -33,7 +29,6 @@ from loom.assembly import (
     AttrDict,
     FormatElement,
     FuncArgs,
-    OpRef,
     OptionalGroup,
     PredicateList,
     Refs,
@@ -59,12 +54,14 @@ from loom.dsl import (
     EnumCase,
     EnumDef,
     FuncLikeInterface,
+    InlinePolicy,
     Op,
     Operand,
     OpPhase,
     RegionDef,
     Result,
     SymbolDefinition,
+    SymbolDefinitionFlag,
     SymbolReference,
 )
 
@@ -121,13 +118,24 @@ Temperature = EnumDef(
     doc="Execution temperature hint. Absent (0) means unspecified.",
 )
 
-InlinePolicy = EnumDef(
+InlinePolicyAttr = EnumDef(
     "InlinePolicy",
     [
-        EnumCase("inline", 1, doc="Require inlining at the current IR stage."),
-        EnumCase("noinline", 2, doc="Preserve the callable boundary."),
+        EnumCase(
+            "inline",
+            InlinePolicy.INLINE.value,
+            doc="Require inlining at the current IR stage.",
+        ),
+        EnumCase(
+            "noinline",
+            InlinePolicy.NOINLINE.value,
+            doc="Preserve the callable boundary.",
+        ),
     ],
     doc="Author inline policy. Absent (0) leaves the edge to the current pass.",
+    c_type="loom_inline_policy_t",
+    c_const_prefix="LOOM_INLINE_POLICY",
+    c_include="loom/ir/ir.h",
 )
 
 _RETAIN_ATTR = AttrDef("retain", "enum", enum_def=Retain, optional=True)
@@ -232,7 +240,7 @@ _MODIFIER_ATTRS = [
     AttrDef("cc", "enum", enum_def=CallingConv, optional=True),
     AttrDef("purity", "enum", enum_def=Purity, optional=True),
     AttrDef("temperature", "enum", enum_def=Temperature, optional=True),
-    AttrDef("inline_policy", "enum", enum_def=InlinePolicy, optional=True),
+    AttrDef("inline_policy", "enum", enum_def=InlinePolicyAttr, optional=True),
     AttrDef("predicates", "predicate_list", optional=True),
 ]
 
@@ -255,15 +263,6 @@ _CONTRACT_ATTRS = [
     AttrDef("export_attrs", "dict", optional=True),
 ]
 
-_PROVIDER_ATTRS = [
-    AttrDef(
-        "target",
-        "symbol",
-        optional=True,
-        symbol_ref=SymbolReference("target", ["target"]),
-    ),
-]
-
 # func.decl adds import attrs to the shared modifier set.
 _DECL_ATTRS = [
     AttrDef("callee", "symbol"),
@@ -273,7 +272,7 @@ _DECL_ATTRS = [
     AttrDef("cc", "enum", enum_def=CallingConv, optional=True),
     AttrDef("purity", "enum", enum_def=Purity, optional=True),
     AttrDef("temperature", "enum", enum_def=Temperature, optional=True),
-    AttrDef("inline_policy", "enum", enum_def=InlinePolicy, optional=True),
+    AttrDef("inline_policy", "enum", enum_def=InlinePolicyAttr, optional=True),
     *_CONTRACT_ATTRS,
     AttrDef("predicates", "predicate_list", optional=True),
     _RETAIN_ATTR,
@@ -309,11 +308,6 @@ _FUNC_LIKE_DECL_CONTRACT: dict[str, Any] = dict(
     import_symbol="import_symbol",
 )
 
-_FUNC_LIKE_PROVIDER: dict[str, Any] = dict(
-    **_FUNC_LIKE_COMMON,
-    target="target",
-)
-
 # ============================================================================
 # func.def — function definition
 # ============================================================================
@@ -328,7 +322,7 @@ func_def = Op(
     symbol_def=SymbolDefinition(
         field="callee",
         name="function",
-        interfaces=["func_like"],
+        interfaces=["func_like", "callable"],
         bytecode_kind="LOOM_SYMBOL_FUNC_DEF",
         fact_domain="loom_func_symbol_fact_domain",
         retain="retain",
@@ -363,17 +357,19 @@ func_decl = Op(
     phase=OpPhase.EXECUTABLE,
     doc="External function declaration. Callable by name via func.call.",
     traits=[SYMBOL_DEFINE],
+    operands=[Operand("args", ANY, variadic=True)],
     attrs=list(_DECL_ATTRS),
     symbol_def=SymbolDefinition(
         field="callee",
         name="function",
-        interfaces=["func_like"],
+        interfaces=["func_like", "callable"],
         bytecode_kind="LOOM_SYMBOL_FUNC_DECL",
         fact_domain="loom_func_symbol_fact_domain",
         retain="retain",
+        flags=[SymbolDefinitionFlag.DECLARATION],
     ),
     results=[Result("results", ANY, variadic=True)],
-    interfaces=[FuncLikeInterface(**_FUNC_LIKE_DECL_CONTRACT, args_as_operands=True)],
+    interfaces=[FuncLikeInterface(**_FUNC_LIKE_DECL_CONTRACT, args="args")],
     verify="loom_func_decl_verify",
     format=[
         OptionalGroup([Attr("visibility")], anchor="visibility"),
@@ -398,107 +394,6 @@ func_decl = Op(
 )
 
 # ============================================================================
-# func.template<T> — constraint-matched visible implementation
-# ============================================================================
-
-func_template = Op(
-    "func.template",
-    group=func_ops,
-    doc="Constraint-matched visible implementation of an abstract op.",
-    traits=[SYMBOL_DEFINE, ISOLATED_FROM_ABOVE],
-    attrs=[
-        AttrDef("implements", "string"),
-        *_MODIFIER_ATTRS,
-        *_PROVIDER_ATTRS,
-        AttrDef("priority", "i64", optional=True),
-        _RETAIN_ATTR,
-    ],
-    symbol_def=SymbolDefinition(
-        field="callee",
-        name="function",
-        interfaces=["func_like"],
-        bytecode_kind="LOOM_SYMBOL_FUNC_TEMPLATE",
-        fact_domain="loom_func_symbol_fact_domain",
-        retain="retain",
-    ),
-    results=[Result("results", ANY, variadic=True)],
-    regions=[RegionDef("body", doc="Template body.", terminator="func.return")],
-    interfaces=[
-        FuncLikeInterface(
-            **_FUNC_LIKE_PROVIDER,
-            body="body",
-            implements="implements",
-            priority="priority",
-        )
-    ],
-    format=[
-        OpRef("implements"),
-        *_MODIFIER_FORMAT,
-        *_TARGET_FORMAT,
-        OptionalGroup(
-            [kw("priority"), GLUE, LPAREN, GLUE, Attr("priority"), GLUE, RPAREN],
-            anchor="priority",
-        ),
-        *_SIGNATURE_FORMAT,
-        Region("body"),
-    ],
-    examples=[
-        "func.template<tile.contract> device @vnni_q8(%w: tensor<[%M]xi8>, %x: tensor<[%K]xf32>) -> (tensor<[%M]xf32>) where [mul(%M, 16)] {\n  func.return %x : tensor<[%K]xf32>\n}",
-        "func.template<tile.contract> target(@gfx1100) priority(20) @gfx11_q8(%a: tile<4xf32>) -> (tile<4xf32>) {\n  func.return %a : tile<4xf32>\n}",
-        "func.template<tile.contract> priority(10) @high_priority(%a: tile<4xf32>) -> (tile<4xf32>) {\n  func.return %a : tile<4xf32>\n}",
-    ],
-)
-
-# ============================================================================
-# func.ukernel<T> — constraint-matched opaque implementation
-# ============================================================================
-
-func_ukernel = Op(
-    "func.ukernel",
-    group=func_ops,
-    doc="Constraint-matched opaque implementation of an abstract op.",
-    traits=[SYMBOL_DEFINE],
-    attrs=[
-        AttrDef("implements", "string"),
-        *_MODIFIER_ATTRS,
-        *_PROVIDER_ATTRS,
-        AttrDef("priority", "i64", optional=True),
-        _RETAIN_ATTR,
-    ],
-    symbol_def=SymbolDefinition(
-        field="callee",
-        name="function",
-        interfaces=["func_like"],
-        bytecode_kind="LOOM_SYMBOL_FUNC_UKERNEL",
-        fact_domain="loom_func_symbol_fact_domain",
-        retain="retain",
-    ),
-    results=[Result("results", ANY, variadic=True)],
-    interfaces=[
-        FuncLikeInterface(
-            **_FUNC_LIKE_PROVIDER,
-            implements="implements",
-            priority="priority",
-            args_as_operands=True,
-        )
-    ],
-    format=[
-        OpRef("implements"),
-        *_MODIFIER_FORMAT,
-        *_TARGET_FORMAT,
-        OptionalGroup(
-            [kw("priority"), GLUE, LPAREN, GLUE, Attr("priority"), GLUE, RPAREN],
-            anchor="priority",
-        ),
-        *_SIGNATURE_FORMAT,
-    ],
-    examples=[
-        "func.ukernel<tile.contract> device @vnni_q8_asm(%w: tensor<[%M]xi8>, %x: tensor<[%K]xf32>) -> (tensor<[%M]xf32>) where [mul(%M, 16)]",
-        "func.ukernel<tile.contract> target(@gfx1100) priority(20) @gfx11_q8_asm(%a: tile<4xf32>) -> (tile<4xf32>)",
-    ],
-)
-
-# ============================================================================
 # func.call — function-like symbol call
 # ============================================================================
 
@@ -514,11 +409,11 @@ func_call = Op(
         AttrDef(
             "callee",
             "symbol",
-            symbol_ref=SymbolReference("function", ["func_like"]),
+            symbol_ref=SymbolReference("function", ["callable"]),
         ),
         AttrDef("purity", "enum", enum_def=Purity, optional=True),
         AttrDef("temperature", "enum", enum_def=Temperature, optional=True),
-        AttrDef("inline_policy", "enum", enum_def=InlinePolicy, optional=True),
+        AttrDef("inline_policy", "enum", enum_def=InlinePolicyAttr, optional=True),
     ],
     results=[Result("results", ANY, variadic=True)],
     traits=[UNKNOWN_EFFECTS],
@@ -533,6 +428,7 @@ func_call = Op(
             kind=CallLikeKind.SEMANTIC,
         ),
     ],
+    verify="loom_func_call_verify",
     canonicalize="loom_func_call_canonicalize",
     effective_traits="loom_func_call_effective_traits",
     format=[
@@ -559,50 +455,6 @@ func_call = Op(
         "%r = func.call hot inline @add(%a, %b) : (f32, f32) -> (f32)",
         "%r = func.call inline @specific_template(%a, %b) : (f32, f32) -> (f32)",
         "%out, %count = func.call @process(%a, %b) : (tensor<[%M]xf32>, index) -> (%a as tensor<[%M]xf32>, index)",
-    ],
-)
-
-# ============================================================================
-# func.apply — compile-time contract-key implementation demand
-# ============================================================================
-
-func_apply = Op(
-    "func.apply",
-    group=func_ops,
-    doc="Compile-time implementation demand. Contract key must be selected before executable lowering.",
-    operands=[
-        Operand("operands", ANY, variadic=True),
-    ],
-    attrs=[
-        AttrDef("contract", "string"),
-        AttrDef("purity", "enum", enum_def=Purity, optional=True),
-        AttrDef("temperature", "enum", enum_def=Temperature, optional=True),
-    ],
-    results=[Result("results", ANY, variadic=True)],
-    traits=[UNKNOWN_EFFECTS],
-    canonicalize="loom_func_apply_canonicalize",
-    effective_traits="loom_func_apply_effective_traits",
-    format=[
-        OpRef("contract"),
-        GLUE,
-        LPAREN,
-        Refs("operands"),
-        RPAREN,
-        OptionalGroup([Attr("purity")], anchor="purity"),
-        OptionalGroup([Attr("temperature")], anchor="temperature"),
-        COLON,
-        LPAREN,
-        TypesOf("operands"),
-        RPAREN,
-        OptionalGroup(
-            [ARROW, ResultTypeList("results")],
-            anchor="results",
-        ),
-    ],
-    examples=[
-        "%r = func.apply<qwen.q4.matmul>(%w, %x) : (tensor<16x32xi8>, tensor<32xf32>) -> (tensor<16xf32>)",
-        "%r = func.apply<qwen.q4.matmul>(%w, %x) pure : (tensor<16x32xi8>, tensor<32xf32>) -> (tensor<16xf32>)",
-        "%r = func.apply<qwen.q4.matmul>(%w, %x) hot : (tensor<16x32xi8>, tensor<32xf32>) -> (tensor<16xf32>)",
     ],
 )
 
@@ -637,9 +489,6 @@ func_return = Op(
 ALL_FUNC_OPS: tuple[Op, ...] = (
     func_def,
     func_decl,
-    func_template,
-    func_ukernel,
     func_call,
-    func_apply,
     func_return,
 )

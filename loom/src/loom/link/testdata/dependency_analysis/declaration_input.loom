@@ -1,0 +1,6 @@
+func.decl @interface_only(%x: i32) -> (i32)
+
+func.def public @declaration_entry(%x: i32) -> (i32) {
+  %result = func.call @interface_only(%x) : (i32) -> (i32)
+  func.return %result : i32
+}

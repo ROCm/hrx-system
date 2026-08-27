@@ -56,23 +56,6 @@ typedef struct loom_native_elf64le_layout_t {
   uint64_t section_header_offset;
 } loom_native_elf64le_layout_t;
 
-static bool loom_native_elf64le_checked_add_uint64(uint64_t lhs, uint64_t rhs,
-                                                   uint64_t* out_result) {
-  *out_result = lhs + rhs;
-  return *out_result >= lhs;
-}
-
-static bool loom_native_elf64le_checked_align_uint64(uint64_t value,
-                                                     uint64_t alignment,
-                                                     uint64_t* out_result) {
-  if (!loom_native_elf64le_checked_add_uint64(value, alignment - 1u,
-                                              out_result)) {
-    return false;
-  }
-  *out_result &= ~(alignment - 1u);
-  return true;
-}
-
 static iree_status_t loom_native_elf64le_validate_alignment(
     uint64_t alignment, iree_string_view_t field_name) {
   if (alignment == 0) {
@@ -282,8 +265,7 @@ static iree_status_t loom_native_elf64le_build_layout(
     } else {
       program_header_size =
           (uint64_t)file->segment_count * LOOM_NATIVE_ELF64LE_PHDR_SIZE;
-      if (!loom_native_elf64le_checked_add_uint64(offset, program_header_size,
-                                                  &offset)) {
+      if (!iree_checked_add_u64(offset, program_header_size, &offset)) {
         status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                                   "ELF file layout overflow");
       }
@@ -296,16 +278,14 @@ static iree_status_t loom_native_elf64le_build_layout(
     loom_native_elf64le_section_layout_t* section_layout = &sections[i + 1];
     section_layout->alignment =
         section->alignment == 0 ? 1u : section->alignment;
-    if (!loom_native_elf64le_checked_align_uint64(
-            offset, section_layout->alignment, &offset)) {
+    if (!iree_checked_align_u64(offset, section_layout->alignment, &offset)) {
       status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                                 "ELF file layout overflow");
       break;
     }
     section_layout->file_offset = offset;
     section_layout->file_size = (uint64_t)section->contents.data_length;
-    if (!loom_native_elf64le_checked_add_uint64(
-            offset, section_layout->file_size, &offset)) {
+    if (!iree_checked_add_u64(offset, section_layout->file_size, &offset)) {
       status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                                 "ELF file layout overflow");
     }
@@ -317,15 +297,15 @@ static iree_status_t loom_native_elf64le_build_layout(
     string_table_layout->alignment = 1u;
     string_table_layout->file_offset = offset;
     string_table_layout->file_size = string_table.data_length;
-    if (!loom_native_elf64le_checked_add_uint64(
-            offset, string_table_layout->file_size, &offset)) {
+    if (!iree_checked_add_u64(offset, string_table_layout->file_size,
+                              &offset)) {
       status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                                 "ELF file layout overflow");
     }
   }
 
   if (iree_status_is_ok(status)) {
-    status = loom_native_elf64le_checked_align_uint64(offset, 8u, &offset)
+    status = iree_checked_align_u64(offset, 8u, &offset)
                  ? iree_ok_status()
                  : iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                                     "ELF file layout overflow");
@@ -463,8 +443,8 @@ static iree_status_t loom_native_elf64le_segment_range(
 
   *out_offset = first_section->file_offset;
   uint64_t end_offset = 0;
-  if (!loom_native_elf64le_checked_add_uint64(
-          last_section->file_offset, last_section->file_size, &end_offset) ||
+  if (!iree_checked_add_u64(last_section->file_offset, last_section->file_size,
+                            &end_offset) ||
       end_offset < first_section->file_offset) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "ELF segment file range overflow");

@@ -15,6 +15,15 @@
 // TODO(benvanik): prune this to what we actually use - it's quite exhaustive
 // today to reduce friction during bringup.
 
+// HSA entry points marked as leak-check disabled may synchronously allocate
+// runtime-owned bookkeeping that remains live after matching resource
+// destruction and shutdown. Their thunks disable leak checking only while
+// inside the external call so allocations made by IREE callers remain checked.
+#if !defined(IREE_HAL_AMDGPU_LIBHSA_LEAK_CHECK_DISABLED_PFN)
+#define IREE_HAL_AMDGPU_LIBHSA_LEAK_CHECK_DISABLED_PFN \
+  IREE_HAL_AMDGPU_LIBHSA_PFN
+#endif  // !IREE_HAL_AMDGPU_LIBHSA_LEAK_CHECK_DISABLED_PFN
+
 //===----------------------------------------------------------------------===//
 // Library/System Management
 //===----------------------------------------------------------------------===//
@@ -111,12 +120,12 @@ IREE_HAL_AMDGPU_LIBHSA_PFN(TRACE_ALWAYS, hsa_status_t,
                                 const uint32_t* flags, const void* ptr),
                            ARGS(num_agents, agents, flags, ptr))
 
-IREE_HAL_AMDGPU_LIBHSA_PFN(TRACE_ALWAYS, hsa_status_t, hsa_memory_copy,
-                           DECL(void* dst, const void* src, size_t size),
-                           ARGS(dst, src, size))
-IREE_HAL_AMDGPU_LIBHSA_PFN(TRACE_ALWAYS, hsa_status_t, hsa_amd_memory_fill,
-                           DECL(void* ptr, uint32_t value, size_t count),
-                           ARGS(ptr, value, count))
+IREE_HAL_AMDGPU_LIBHSA_LEAK_CHECK_DISABLED_PFN(
+    TRACE_ALWAYS, hsa_status_t, hsa_memory_copy,
+    DECL(void* dst, const void* src, size_t size), ARGS(dst, src, size))
+IREE_HAL_AMDGPU_LIBHSA_LEAK_CHECK_DISABLED_PFN(
+    TRACE_ALWAYS, hsa_status_t, hsa_amd_memory_fill,
+    DECL(void* ptr, uint32_t value, size_t count), ARGS(ptr, value, count))
 IREE_HAL_AMDGPU_LIBHSA_PFN(
     TRACE_ALWAYS, hsa_status_t, hsa_amd_memory_async_copy,
     DECL(void* dst, hsa_agent_t dst_agent, const void* src,
@@ -149,7 +158,7 @@ IREE_HAL_AMDGPU_LIBHSA_PFN(TRACE_ALWAYS, hsa_status_t, hsa_amd_memory_unlock,
 IREE_HAL_AMDGPU_LIBHSA_PFN(TRACE_ALWAYS, hsa_status_t,
                            hsa_amd_interop_map_buffer,
                            DECL(uint32_t num_agents, hsa_agent_t* agents,
-                                int interop_handle, uint32_t flags,
+                                hsa_handle_t interop_handle, uint32_t flags,
                                 size_t* size, void** ptr, size_t* metadata_size,
                                 const void** metadata),
                            ARGS(num_agents, agents, interop_handle, flags, size,
@@ -419,7 +428,7 @@ IREE_HAL_AMDGPU_LIBHSA_PFN(TRACE_ALWAYS, hsa_status_t,
 // Queues
 //===----------------------------------------------------------------------===//
 
-IREE_HAL_AMDGPU_LIBHSA_PFN(
+IREE_HAL_AMDGPU_LIBHSA_LEAK_CHECK_DISABLED_PFN(
     TRACE_ALWAYS, hsa_status_t, hsa_queue_create,
     DECL(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
          void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data),
@@ -543,18 +552,18 @@ IREE_HAL_AMDGPU_LIBHSA_PFN(TRACE_ALWAYS, hsa_status_t, hsa_isa_get_info_alt,
                                 void* value),
                            ARGS(isa, attribute, value))
 
-IREE_HAL_AMDGPU_LIBHSA_PFN(TRACE_ALWAYS, hsa_status_t,
-                           hsa_code_object_reader_create_from_memory,
-                           DECL(const void* code_object, size_t size,
-                                hsa_code_object_reader_t* code_object_reader),
-                           ARGS(code_object, size, code_object_reader))
+IREE_HAL_AMDGPU_LIBHSA_LEAK_CHECK_DISABLED_PFN(
+    TRACE_ALWAYS, hsa_status_t, hsa_code_object_reader_create_from_memory,
+    DECL(const void* code_object, size_t size,
+         hsa_code_object_reader_t* code_object_reader),
+    ARGS(code_object, size, code_object_reader))
 
 IREE_HAL_AMDGPU_LIBHSA_PFN(TRACE_ALWAYS, hsa_status_t,
                            hsa_code_object_reader_destroy,
                            DECL(hsa_code_object_reader_t code_object_reader),
                            ARGS(code_object_reader))
 
-IREE_HAL_AMDGPU_LIBHSA_PFN(
+IREE_HAL_AMDGPU_LIBHSA_LEAK_CHECK_DISABLED_PFN(
     TRACE_ALWAYS, hsa_status_t, hsa_executable_create_alt,
     DECL(hsa_profile_t profile,
          hsa_default_float_rounding_mode_t default_float_rounding_mode,
@@ -564,17 +573,18 @@ IREE_HAL_AMDGPU_LIBHSA_PFN(
 IREE_HAL_AMDGPU_LIBHSA_PFN(TRACE_ALWAYS, hsa_status_t, hsa_executable_destroy,
                            DECL(hsa_executable_t executable), ARGS(executable))
 
-IREE_HAL_AMDGPU_LIBHSA_PFN(
+IREE_HAL_AMDGPU_LIBHSA_LEAK_CHECK_DISABLED_PFN(
     TRACE_ALWAYS, hsa_status_t, hsa_executable_load_agent_code_object,
     DECL(hsa_executable_t executable, hsa_agent_t agent,
          hsa_code_object_reader_t code_object_reader, const char* options,
          hsa_loaded_code_object_t* loaded_code_object),
     ARGS(executable, agent, code_object_reader, options, loaded_code_object))
 
-IREE_HAL_AMDGPU_LIBHSA_PFN(TRACE_ALWAYS, hsa_status_t, hsa_executable_freeze,
-                           DECL(hsa_executable_t executable,
-                                const char* options),
-                           ARGS(executable, options))
+IREE_HAL_AMDGPU_LIBHSA_LEAK_CHECK_DISABLED_PFN(TRACE_ALWAYS, hsa_status_t,
+                                               hsa_executable_freeze,
+                                               DECL(hsa_executable_t executable,
+                                                    const char* options),
+                                               ARGS(executable, options))
 
 IREE_HAL_AMDGPU_LIBHSA_PFN(TRACE_ALWAYS, hsa_status_t,
                            hsa_executable_validate_alt,
@@ -596,5 +606,6 @@ IREE_HAL_AMDGPU_LIBHSA_PFN(TRACE_ALWAYS, hsa_status_t,
                            ARGS(executable_symbol, attribute, value))
 
 #undef IREE_HAL_AMDGPU_LIBHSA_PFN
+#undef IREE_HAL_AMDGPU_LIBHSA_LEAK_CHECK_DISABLED_PFN
 #undef DECL
 #undef ARGS

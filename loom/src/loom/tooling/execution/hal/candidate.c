@@ -6,6 +6,8 @@
 
 #include "loom/tooling/execution/hal/candidate.h"
 
+#include "iree/io/byte_sequence.h"
+
 static iree_status_t loom_run_hal_candidate_publish_compile_report(
     const loom_run_candidate_compile_options_t* options,
     const loom_run_hal_candidate_t* candidate) {
@@ -57,10 +59,14 @@ static void loom_run_hal_candidate_record_report_status(
   report->backend_name = candidate->provider->name;
   report->target_family_name = candidate->provider->target_family_name;
   if (candidate->compiled) {
-    report->target_key = candidate->device_target.target_key;
-    report->executable_format = candidate->artifact.executable_format;
-    loom_target_compile_report_record_artifact_size(
-        report, candidate->artifact.executable_data.data_length);
+    report->target_key = candidate->artifact.target_key;
+    report->artifact_format = loom_target_artifact_format_name(
+        candidate->artifact.target_artifact_format);
+    if (candidate->artifact.executable_data != NULL) {
+      loom_target_compile_report_record_artifact_size(
+          report,
+          iree_io_byte_sequence_length(candidate->artifact.executable_data));
+    }
   }
   loom_target_compile_report_record_status(report, status_code);
 }
@@ -79,15 +85,22 @@ static iree_status_t loom_run_hal_candidate_emit_selected_target(
 
   loom_target_compile_report_t* report =
       options->report != NULL ? &candidate->compile_report : NULL;
+  loom_run_candidate_compile_options_t provider_options = *options;
+  provider_options.report = report;
   iree_status_t status = provider->emit_artifact(
       provider, run_module->module, &candidate->device_target,
-      options->diagnostic_sink, options->source_resolver, options->max_errors,
-      &options->target_pipeline_options, options->artifact_flags,
-      &options->artifact_manifest, report, allocator, &candidate->compiled,
-      &candidate->artifact);
-  if (iree_status_is_ok(status) && candidate->compiled &&
-      candidate->artifact.target_bundle == NULL) {
-    candidate->artifact.target_bundle = candidate->device_target.target_bundle;
+      &provider_options, allocator, &candidate->compiled, &candidate->artifact);
+  if (iree_status_is_ok(status) && candidate->compiled) {
+    IREE_ASSERT(candidate->artifact.target_bundle != NULL);
+    IREE_ASSERT(candidate->artifact.target_artifact_data != NULL);
+    IREE_ASSERT_GT(
+        iree_io_byte_sequence_length(candidate->artifact.target_artifact_data),
+        0);
+    IREE_ASSERT(candidate->artifact.executable_data != NULL);
+    IREE_ASSERT_GT(
+        iree_io_byte_sequence_length(candidate->artifact.executable_data), 0);
+    IREE_ASSERT(candidate->artifact.sidecar_count == 0 ||
+                candidate->artifact.sidecars != NULL);
   }
   return status;
 }
@@ -95,22 +108,15 @@ static iree_status_t loom_run_hal_candidate_emit_selected_target(
 iree_status_t loom_run_hal_candidate_compile(
     const loom_run_hal_artifact_provider_t* provider,
     const loom_run_hal_runtime_t* runtime, loom_run_module_t* run_module,
+    const loom_target_facts_t* target_requirement,
     const loom_run_candidate_compile_options_t* options,
     iree_allocator_t allocator, loom_run_hal_candidate_t* out_candidate) {
   iree_status_t status = loom_run_hal_candidate_initialize(
       provider, options, allocator, out_candidate);
-  if (provider->select_device_target == NULL) {
-    status = iree_status_join(
-        status,
-        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                         "HAL artifact provider '%.*s' is missing required "
-                         "device target selection hook",
-                         (int)provider->name.size, provider->name.data));
-  }
-
   if (iree_status_is_ok(status)) {
-    status = provider->select_device_target(provider, runtime, allocator,
-                                            &out_candidate->device_target);
+    status = loom_run_hal_artifact_provider_select_compatible_device_target(
+        provider, runtime, target_requirement, allocator,
+        &out_candidate->device_target);
     if (iree_status_is_ok(status)) {
       out_candidate->owns_device_target = true;
     }

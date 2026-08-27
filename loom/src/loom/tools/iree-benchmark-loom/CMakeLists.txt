@@ -20,10 +20,12 @@ loom_cc_library(
     "device_spec_report.h"
     "diagnostics.h"
     "dispatch_benchmark.h"
-    "dispatch_setup.h"
     "event.h"
     "hal_actual.h"
+    "hal_setup.h"
     "help.h"
+    "input_ring.h"
+    "launch_evidence.h"
     "main.h"
     "manifest.h"
     "model.h"
@@ -47,10 +49,12 @@ loom_cc_library(
     "device_spec_report.c"
     "diagnostics.c"
     "dispatch_benchmark.c"
-    "dispatch_setup.c"
     "event.c"
     "hal_actual.c"
+    "hal_setup.c"
     "help.c"
+    "input_ring.c"
+    "launch_evidence.c"
     "main.c"
     "manifest.c"
     "module_query.c"
@@ -73,10 +77,12 @@ loom_cc_library(
     iree::base::internal::path
     iree::base::tooling::flags
     iree::hal
+    iree::io::byte_sequence
     iree::io::stream
     iree::tooling::device_util
     iree::tooling::profile::counter
     iree::tooling::profile::summary
+    loom::analysis::kernel_launch_config
     loom::error::diagnostic
     loom::error::json_sink
     loom::error::renderer
@@ -84,7 +90,7 @@ loom_cc_library(
     loom::ir::facts
     loom::ops::special_values
     loom::sanitizer::options
-    loom::target::artifact_manifest
+    loom::target::reporting::artifact_manifest
     loom::tooling::cli::help
     loom::tooling::compile::pipeline
     loom::tooling::config
@@ -106,6 +112,7 @@ loom_cc_library(
     loom::tooling::testbench::issue_report
     loom::tooling::testbench::reference
     loom::tooling::testbench::requirements
+    loom::tooling::testbench::value_materializer
     loom::util::json
     loom::util::stream
     loom::verify
@@ -142,6 +149,17 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file
+)
+
+loom_cc_test(
+  NAME
+    input_ring_test
+  SRCS
+    "input_ring_test.cc"
+  DEPS
+    ::main
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 loom_cc_test(
@@ -183,6 +201,7 @@ loom_cc_test(
     ::main
     iree::base
     iree::base::internal::json
+    iree::io::byte_sequence
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file
@@ -207,7 +226,7 @@ set(_iree_benchmark_loom_platform_copts "")
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
   list(APPEND _iree_benchmark_loom_platform_copts "-DIREE_BENCHMARK_LOOM_HAVE_AMDGPU=1")
 endif()
-if(LOOM_EXECUTE_IREE_VM)
+if(LOOM_TARGET_ARCH_IREE_VM AND LOOM_EMIT_IREE_VM AND LOOM_EXECUTE_IREE_VM)
   list(APPEND _iree_benchmark_loom_platform_copts "-DIREE_BENCHMARK_LOOM_HAVE_IREE_VM=1")
 endif()
 if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND IREE_HAL_DRIVER_VULKAN)
@@ -219,7 +238,7 @@ if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
   list(APPEND _iree_benchmark_loom_platform_deps loom::tooling::target::amdgpu::artifact_provider)
   list(APPEND _iree_benchmark_loom_platform_deps loom::tooling::target::amdgpu::testbench_requirements)
 endif()
-if(LOOM_EXECUTE_IREE_VM)
+if(LOOM_TARGET_ARCH_IREE_VM AND LOOM_EMIT_IREE_VM AND LOOM_EXECUTE_IREE_VM)
   list(APPEND _iree_benchmark_loom_platform_deps loom::tooling::execution::ireevm::provider)
 endif()
 if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND IREE_HAL_DRIVER_VULKAN)
@@ -250,51 +269,11 @@ iree_execution_test_suite(
   TOOLS
     "iree-benchmark-loom=::iree-benchmark-loom"
   DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-benchmark-loom/testdata/duplicate_symbol.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-benchmark-loom/testdata/scalar_benchmarks.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/planning_issue_cases.loom"
-    "testdata/duplicate_symbol.loom"
-    "testdata/scalar_benchmarks.loom"
   LABELS
     "hostonly"
 )
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_execution_test_suite(
-  NAME
-    amdgpu_execution_test
-  MANIFESTS
-    "iree-benchmark-loom_amdgpu.test.json"
-  TOOLS
-    "iree-benchmark-loom=::iree-benchmark-loom"
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/amdgpu_hal_actual.loom"
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
-iree_execution_test_suite(
-  NAME
-    spirv_vulkan_execution_test
-  MANIFESTS
-    "iree-benchmark-loom_spirv_vulkan.test.json"
-  TOOLS
-    "iree-benchmark-loom=::iree-benchmark-loom"
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/spirv_vulkan_coop_hal_actual.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/spirv_vulkan_coop_u8_hal_actual.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/spirv_vulkan_hal_actual.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/spirv_vulkan_quantized_hal_actual.loom"
-  SANITIZER_SUPPRESSIONS
-    lsan
-    vulkan
-  LABELS
-    "manual"
-    "requires-gpu-vulkan"
-)
-endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -7,8 +7,8 @@ global.constant @answer : index = 40
 
 func.def @load_scalar_constant_global() -> (index) {
   %value = global.load @answer : index
-  %two = index.constant 2 : index
-  %result = index.add %value, %two : index
+  %c2 = index.constant 2 : index
+  %result = index.add %value, %c2 : index
   func.return %result : index
 }
 
@@ -49,8 +49,8 @@ global.constant @threshold : f32 = 1.5
 
 func.def @load_float_constant_global() -> (i32) {
   %value = global.load @threshold : f32
-  %one = scalar.constant 1.0 : f32
-  %cond = scalar.cmpf ogt, %value, %one : f32
+  %c1 = scalar.constant 1.0 : f32
+  %cond = scalar.cmpf ogt, %value, %c1 : f32
   %high = scalar.constant 1 : i32
   %low = scalar.constant 0 : i32
   %result = scf.select %cond, %high, %low : i32
@@ -73,8 +73,8 @@ global.variable @mutable_default : index = 40
 
 func.def @mutable_default_does_not_fold() -> (index) {
   %value = global.load @mutable_default : index
-  %two = index.constant 2 : index
-  %result = index.add %value, %two : index
+  %c2 = index.constant 2 : index
+  %result = index.add %value, %c2 : index
   func.return %result : index
 }
 
@@ -88,8 +88,8 @@ global.constant @weights : tile<[%n]xf32> where [mul(%n, 16)]
 func.def @load_global_predicate() -> (index) {
   %tile, %m = global.load @weights : tile<[%m]xf32>
   test.use %tile : tile<[%m]xf32>
-  %sixteen = index.constant 16 : index
-  %remainder = index.rem %m, %sixteen : index
+  %c16 = index.constant 16 : index
+  %remainder = index.rem %m, %c16 : index
   func.return %remainder : index
 }
 

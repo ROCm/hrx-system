@@ -18,7 +18,7 @@
 #include "iree/base/api.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/module.h"
-#include "loom/ops/vector/encoding_auxiliary.h"
+#include "loom/ops/encoding/auxiliary.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/util/fact_table.h"
 
@@ -73,11 +73,12 @@ typedef struct loom_vector_fragment_fact_t {
   // Number of logical matrix shape values stored in shape_value_ids.
   uint16_t shape_rank;
 
-  // Logical row and column count SSA value IDs for the fragment role.
-  loom_value_id_t shape_value_ids[2];
+  // Logical shape SSA value IDs in source order. Rank-2 fragments use
+  // [row, column]; rank-3 fragments use [block, row, column].
+  loom_value_id_t shape_value_ids[3];
 
   // Explicit auxiliary SSA values keyed by vector auxiliary enum bits.
-  loom_vector_encoding_auxiliary_view_t auxiliary;
+  loom_encoding_auxiliary_view_t auxiliary;
 
   // Static target-independent encoded operand facts when the schema is known.
   loom_value_fact_encoded_operand_schema_t encoded_operand;
@@ -98,7 +99,7 @@ typedef struct loom_vector_fragment_parameter_view_t {
   uint16_t schema_parameter_ordinal;
 
   // Auxiliary SSA values keyed by vector auxiliary enum bits.
-  loom_vector_encoding_auxiliary_view_t auxiliary;
+  loom_encoding_auxiliary_view_t auxiliary;
 } loom_vector_fragment_parameter_view_t;
 
 // Returns the flag bit corresponding to |role|, or zero for invalid values.
@@ -118,9 +119,36 @@ void loom_vector_fragment_fact_initialize(
 // Returns true when no fragment facts are known.
 bool loom_vector_fragment_fact_is_unknown(loom_vector_fragment_fact_t fact);
 
+// Returns true when |fact| describes an init/result matrix accumulator.
+bool loom_vector_fragment_fact_is_accumulator_like(
+    loom_vector_fragment_fact_t fact);
+
+// Returns true when |fact| describes any matrix fragment role.
+bool loom_vector_fragment_fact_has_matrix_shape(
+    loom_vector_fragment_fact_t fact);
+
+// Returns the optional leading block extent, or LOOM_VALUE_ID_INVALID for a
+// rank-2 fragment or unsupported shape rank.
+loom_value_id_t loom_vector_fragment_fact_block_value(
+    loom_vector_fragment_fact_t fact);
+
+// Returns the logical row extent, or LOOM_VALUE_ID_INVALID when the fragment
+// shape rank is unsupported.
+loom_value_id_t loom_vector_fragment_fact_row_value(
+    loom_vector_fragment_fact_t fact);
+
+// Returns the logical column/reduction extent, or LOOM_VALUE_ID_INVALID when
+// the fragment shape rank is unsupported.
+loom_value_id_t loom_vector_fragment_fact_column_value(
+    loom_vector_fragment_fact_t fact);
+
 // Returns true when fragment facts are byte-identical.
 bool loom_vector_fragment_fact_equal(loom_vector_fragment_fact_t lhs,
                                      loom_vector_fragment_fact_t rhs);
+
+// Returns true when two fragment facts share the same accumulator contract.
+bool loom_vector_fragment_facts_match_accumulator_contract(
+    loom_vector_fragment_fact_t lhs, loom_vector_fragment_fact_t rhs);
 
 // Creates value facts carrying |fact| as a compact raw payload.
 iree_status_t loom_vector_fragment_fact_make_value_facts(

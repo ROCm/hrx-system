@@ -7,7 +7,6 @@
 #include "loom/tools/loom-check/file.h"
 
 #include <stdio.h>
-#include <stdlib.h>
 
 #include "iree/io/file_contents.h"
 #include "loom/tooling/io/file.h"
@@ -48,6 +47,62 @@ static iree_status_t loom_check_write_updates(
   return status;
 }
 
+// Builds the source dictated by a fixture's TEMPLATE declaration. The parser
+// has already established that the declared path is neither absolute nor
+// parent-relative.
+static iree_status_t loom_check_build_template_source(
+    iree_string_view_t path, iree_string_view_t filename,
+    iree_string_view_t source, const loom_check_file_t* file,
+    const loom_check_process_options_t* options, loom_context_t* context,
+    iree_arena_block_pool_t* block_pool, iree_arena_allocator_t* arena,
+    iree_allocator_t allocator, iree_string_builder_t* new_source,
+    bool* out_changed) {
+  *out_changed = false;
+
+  char* resolved_template_path = NULL;
+  iree_status_t status =
+      loom_tooling_file_path_join(options->template_root, file->template_path,
+                                  allocator, &resolved_template_path);
+
+  iree_io_file_contents_t* template_contents = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_io_file_contents_read(
+        iree_make_cstring_view(resolved_template_path), allocator,
+        &template_contents);
+    if (!iree_status_is_ok(status)) {
+      status = iree_status_annotate_f(
+          status, "reading TEMPLATE '%.*s' for fixture '%.*s'",
+          (int)file->template_path.size, file->template_path.data,
+          (int)filename.size, filename.data);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_check_template_sync_build_source(
+        source, file, filename,
+        loom_tooling_file_contents_string_view(template_contents),
+        file->template_path, context, block_pool, arena, allocator, new_source,
+        out_changed);
+  }
+  if (iree_status_is_ok(status) && *out_changed && !options->update) {
+    const iree_string_view_t update_root =
+        iree_string_view_is_empty(options->template_root)
+            ? IREE_SV(".")
+            : options->template_root;
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "template-backed fixture '%.*s' is stale relative to '%.*s'; "
+        "synchronize it with: loom-check --template-root=\"%.*s\" --update "
+        "\"%.*s\"",
+        (int)filename.size, filename.data, (int)file->template_path.size,
+        file->template_path.data, (int)update_root.size, update_root.data,
+        (int)path.size, path.data);
+  }
+
+  iree_io_file_contents_free(template_contents);
+  iree_allocator_free(allocator, resolved_template_path);
+  return status;
+}
+
 static iree_status_t loom_check_process_file(
     iree_string_view_t path, iree_string_view_t filename,
     iree_string_view_t source, bool is_stdin,
@@ -62,33 +117,24 @@ static iree_status_t loom_check_process_file(
   loom_check_file_t file = {0};
   iree_status_t status = loom_check_parse(source, &arena, &file);
 
+  if (iree_status_is_ok(status) && options->update && is_stdin) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "--update cannot be used with stdin");
+  }
+
   iree_string_builder_t template_synced_source;
   iree_string_builder_initialize(allocator, &template_synced_source);
   bool template_sync_changed = false;
-  if (iree_status_is_ok(status) && options->update &&
-      file.has_template_directive) {
-    if (is_stdin) {
-      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "--update cannot be used with stdin");
-    } else {
-      iree_io_file_contents_t* template_contents = NULL;
-      status = iree_io_file_contents_read(file.template_path, allocator,
-                                          &template_contents);
-      if (iree_status_is_ok(status)) {
-        status = loom_check_template_sync_build_source(
-            source, &file, filename,
-            loom_tooling_file_contents_string_view(template_contents),
-            file.template_path, context, block_pool, &arena, allocator,
-            &template_synced_source, &template_sync_changed);
-      }
-      iree_io_file_contents_free(template_contents);
-      if (iree_status_is_ok(status) && template_sync_changed) {
-        iree_arena_deinitialize(&arena);
-        iree_arena_initialize(block_pool, &arena);
-        source = iree_string_builder_view(&template_synced_source);
-        file = (loom_check_file_t){0};
-        status = loom_check_parse(source, &arena, &file);
-      }
+  if (iree_status_is_ok(status) && file.has_template_directive) {
+    status = loom_check_build_template_source(
+        path, filename, source, &file, options, context, block_pool, &arena,
+        allocator, &template_synced_source, &template_sync_changed);
+    if (iree_status_is_ok(status) && template_sync_changed) {
+      iree_arena_deinitialize(&arena);
+      iree_arena_initialize(block_pool, &arena);
+      source = iree_string_builder_view(&template_synced_source);
+      file = (loom_check_file_t){0};
+      status = loom_check_parse(source, &arena, &file);
     }
   }
 
@@ -98,27 +144,15 @@ static iree_status_t loom_check_process_file(
   }
 
   loom_check_case_update_t* updates = NULL;
-  if (iree_status_is_ok(status) && options->update) {
-    if (is_stdin) {
-      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "--update cannot be used with stdin");
-    } else {
-      updates =
-          (loom_check_case_update_t*)calloc(file.case_count, sizeof(*updates));
-      if (!updates) {
-        status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                  "failed to allocate update tracking");
-      }
-    }
+  if (iree_status_is_ok(status) && options->update && file.case_count > 0) {
+    status = iree_allocator_malloc_array(allocator, file.case_count,
+                                         sizeof(*updates), (void**)&updates);
   }
 
   loom_check_result_t* results = NULL;
   if (iree_status_is_ok(status) && file.case_count > 0) {
-    results = (loom_check_result_t*)calloc(file.case_count, sizeof(*results));
-    if (!results) {
-      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                "failed to allocate result array");
-    }
+    status = iree_allocator_malloc_array(allocator, file.case_count,
+                                         sizeof(*results), (void**)&results);
   }
 
   iree_host_size_t initialized_result_count = 0;
@@ -219,9 +253,9 @@ static iree_status_t loom_check_process_file(
     for (iree_host_size_t i = 0; i < initialized_result_count; ++i) {
       loom_check_result_deinitialize(&results[i]);
     }
-    free(results);
+    iree_allocator_free(allocator, results);
   }
-  free(updates);
+  iree_allocator_free(allocator, updates);
   iree_string_builder_deinitialize(&template_synced_source);
   iree_arena_deinitialize(&arena);
   return status;

@@ -4,15 +4,15 @@
 #ifndef HRX_INTERNAL_H_
 #define HRX_INTERNAL_H_
 
+#include <assert.h>
+
 #include "buffer_table.h"
 #include "hrx_runtime.h"
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "iree/base/tracing.h"
 #include "iree/hal/api.h"
-#include "iree/hal/device_group.h"
 #include "iree/hal/local/loaders/registration/init.h"
-#include "iree/hal/pool.h"
 #include "iree/hal/utils/resource_set.h"
 #include "iree/modules/hal/module.h"
 #include "iree/modules/hal/types.h"
@@ -21,9 +21,6 @@
 
 #ifdef __cplusplus
 extern "C" {
-#ifndef _Static_assert
-#define _Static_assert static_assert
-#endif
 #endif
 
 //===----------------------------------------------------------------------===//
@@ -74,79 +71,79 @@ extern "C" {
 // HRX enums match IREE values by convention. These asserts guarantee it.
 //===----------------------------------------------------------------------===//
 
-#define HRX_STATIC_ASSERT_ENUM_EQ(lhs, rhs, message) \
-  _Static_assert((int)(lhs) == (int)(rhs), message)
-
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_OK, IREE_STATUS_OK, "status mismatch");
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_CANCELLED, IREE_STATUS_CANCELLED,
-                          "status mismatch");
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_UNKNOWN, IREE_STATUS_UNKNOWN,
-                          "status mismatch");
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_INVALID_ARGUMENT,
-                          IREE_STATUS_INVALID_ARGUMENT, "status mismatch");
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_DEADLINE_EXCEEDED,
-                          IREE_STATUS_DEADLINE_EXCEEDED, "status mismatch");
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_NOT_FOUND, IREE_STATUS_NOT_FOUND,
-                          "status mismatch");
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_ALREADY_EXISTS, IREE_STATUS_ALREADY_EXISTS,
-                          "status mismatch");
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_OUT_OF_MEMORY,
-                          IREE_STATUS_RESOURCE_EXHAUSTED, "status mismatch");
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_FAILED_PRECONDITION,
-                          IREE_STATUS_FAILED_PRECONDITION, "status mismatch");
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_OUT_OF_RANGE, IREE_STATUS_OUT_OF_RANGE,
-                          "status mismatch");
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_UNIMPLEMENTED, IREE_STATUS_UNIMPLEMENTED,
-                          "status mismatch");
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_INTERNAL, IREE_STATUS_INTERNAL,
-                          "status mismatch");
-HRX_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_UNAVAILABLE, IREE_STATUS_UNAVAILABLE,
-                          "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_OK, IREE_STATUS_OK, "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_CANCELLED, IREE_STATUS_CANCELLED,
+                           "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_UNKNOWN, IREE_STATUS_UNKNOWN,
+                           "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_INVALID_ARGUMENT,
+                           IREE_STATUS_INVALID_ARGUMENT, "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_DEADLINE_EXCEEDED,
+                           IREE_STATUS_DEADLINE_EXCEEDED, "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_NOT_FOUND, IREE_STATUS_NOT_FOUND,
+                           "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_ALREADY_EXISTS,
+                           IREE_STATUS_ALREADY_EXISTS, "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_PERMISSION_DENIED,
+                           IREE_STATUS_PERMISSION_DENIED, "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_OUT_OF_MEMORY,
+                           IREE_STATUS_RESOURCE_EXHAUSTED, "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_FAILED_PRECONDITION,
+                           IREE_STATUS_FAILED_PRECONDITION, "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_ABORTED, IREE_STATUS_ABORTED,
+                           "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_OUT_OF_RANGE, IREE_STATUS_OUT_OF_RANGE,
+                           "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_UNIMPLEMENTED, IREE_STATUS_UNIMPLEMENTED,
+                           "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_INTERNAL, IREE_STATUS_INTERNAL,
+                           "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_UNAVAILABLE, IREE_STATUS_UNAVAILABLE,
+                           "status mismatch");
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_STATUS_DATA_LOSS, IREE_STATUS_DATA_LOSS,
+                           "status mismatch");
 
 // Memory type bitfield.
-_Static_assert(HRX_MEMORY_TYPE_NONE == IREE_HAL_MEMORY_TYPE_NONE,
-               "memory type mismatch");
-_Static_assert(HRX_MEMORY_TYPE_OPTIMAL == IREE_HAL_MEMORY_TYPE_OPTIMAL,
-               "memory type mismatch");
-_Static_assert(HRX_MEMORY_TYPE_HOST_VISIBLE ==
-                   IREE_HAL_MEMORY_TYPE_HOST_VISIBLE,
-               "memory type mismatch");
-_Static_assert(HRX_MEMORY_TYPE_HOST_COHERENT ==
-                   IREE_HAL_MEMORY_TYPE_HOST_COHERENT,
-               "memory type mismatch");
-_Static_assert(HRX_MEMORY_TYPE_HOST_CACHED == IREE_HAL_MEMORY_TYPE_HOST_CACHED,
-               "memory type mismatch");
-_Static_assert(HRX_MEMORY_TYPE_HOST_LOCAL == IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
-               "memory type mismatch");
-_Static_assert(HRX_MEMORY_TYPE_DEVICE_VISIBLE ==
-                   IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-               "memory type mismatch");
-_Static_assert(HRX_MEMORY_TYPE_DEVICE_LOCAL ==
-                   IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-               "memory type mismatch");
+static_assert(HRX_MEMORY_TYPE_NONE == IREE_HAL_MEMORY_TYPE_NONE,
+              "memory type mismatch");
+static_assert(HRX_MEMORY_TYPE_OPTIMAL == IREE_HAL_MEMORY_TYPE_OPTIMAL,
+              "memory type mismatch");
+static_assert(HRX_MEMORY_TYPE_HOST_VISIBLE == IREE_HAL_MEMORY_TYPE_HOST_VISIBLE,
+              "memory type mismatch");
+static_assert(HRX_MEMORY_TYPE_HOST_COHERENT ==
+                  IREE_HAL_MEMORY_TYPE_HOST_COHERENT,
+              "memory type mismatch");
+static_assert(HRX_MEMORY_TYPE_HOST_CACHED == IREE_HAL_MEMORY_TYPE_HOST_CACHED,
+              "memory type mismatch");
+static_assert(HRX_MEMORY_TYPE_HOST_LOCAL == IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+              "memory type mismatch");
+static_assert(HRX_MEMORY_TYPE_DEVICE_VISIBLE ==
+                  IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+              "memory type mismatch");
+static_assert(HRX_MEMORY_TYPE_DEVICE_LOCAL == IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+              "memory type mismatch");
 
 // Memory access bitfield.
-_Static_assert(HRX_MEMORY_ACCESS_NONE == IREE_HAL_MEMORY_ACCESS_NONE,
-               "memory access mismatch");
-_Static_assert(HRX_MEMORY_ACCESS_READ == IREE_HAL_MEMORY_ACCESS_READ,
-               "memory access mismatch");
-_Static_assert(HRX_MEMORY_ACCESS_WRITE == IREE_HAL_MEMORY_ACCESS_WRITE,
-               "memory access mismatch");
-_Static_assert(HRX_MEMORY_ACCESS_DISCARD == IREE_HAL_MEMORY_ACCESS_DISCARD,
-               "memory access mismatch");
-_Static_assert(HRX_MEMORY_ACCESS_ALL == IREE_HAL_MEMORY_ACCESS_ALL,
-               "memory access mismatch");
+static_assert(HRX_MEMORY_ACCESS_NONE == IREE_HAL_MEMORY_ACCESS_NONE,
+              "memory access mismatch");
+static_assert(HRX_MEMORY_ACCESS_READ == IREE_HAL_MEMORY_ACCESS_READ,
+              "memory access mismatch");
+static_assert(HRX_MEMORY_ACCESS_WRITE == IREE_HAL_MEMORY_ACCESS_WRITE,
+              "memory access mismatch");
+static_assert(HRX_MEMORY_ACCESS_DISCARD == IREE_HAL_MEMORY_ACCESS_DISCARD,
+              "memory access mismatch");
+static_assert(HRX_MEMORY_ACCESS_ALL == IREE_HAL_MEMORY_ACCESS_ALL,
+              "memory access mismatch");
 
 // Buffer usage bitfield.
-_Static_assert(HRX_BUFFER_USAGE_NONE == IREE_HAL_BUFFER_USAGE_NONE,
-               "buffer usage mismatch");
-_Static_assert(HRX_BUFFER_USAGE_TRANSFER == IREE_HAL_BUFFER_USAGE_TRANSFER,
-               "buffer usage mismatch");
-_Static_assert(HRX_BUFFER_USAGE_DISPATCH_STORAGE ==
-                   IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
-               "buffer usage mismatch");
-_Static_assert(HRX_BUFFER_USAGE_DEFAULT == IREE_HAL_BUFFER_USAGE_DEFAULT,
-               "buffer usage mismatch");
+static_assert(HRX_BUFFER_USAGE_NONE == IREE_HAL_BUFFER_USAGE_NONE,
+              "buffer usage mismatch");
+static_assert(HRX_BUFFER_USAGE_TRANSFER == IREE_HAL_BUFFER_USAGE_TRANSFER,
+              "buffer usage mismatch");
+static_assert(HRX_BUFFER_USAGE_STORAGE == IREE_HAL_BUFFER_USAGE_STORAGE,
+              "buffer usage mismatch");
+static_assert(HRX_BUFFER_USAGE_DEFAULT == IREE_HAL_BUFFER_USAGE_DEFAULT,
+              "buffer usage mismatch");
 
 // HRX dispatch flags intentionally use their own bit assignments. Translate
 // them instead of casting into IREE HAL dispatch flags.
@@ -169,63 +166,61 @@ static inline hrx_status_t hrx_iree_dispatch_flags_from_hrx(
 }
 
 // Buffer view metadata.
-_Static_assert(HRX_ELEMENT_TYPE_NONE == IREE_HAL_ELEMENT_TYPE_NONE,
-               "element type mismatch");
-_Static_assert(HRX_ELEMENT_TYPE_OPAQUE_8 == IREE_HAL_ELEMENT_TYPE_OPAQUE_8,
-               "element type mismatch");
-_Static_assert(HRX_ELEMENT_TYPE_BOOL_8 == IREE_HAL_ELEMENT_TYPE_BOOL_8,
-               "element type mismatch");
-_Static_assert(HRX_ELEMENT_TYPE_INT_16 == IREE_HAL_ELEMENT_TYPE_INT_16,
-               "element type mismatch");
-_Static_assert(HRX_ELEMENT_TYPE_UINT_8 == IREE_HAL_ELEMENT_TYPE_UINT_8,
-               "element type mismatch");
-_Static_assert(HRX_ELEMENT_TYPE_INT_32 == IREE_HAL_ELEMENT_TYPE_INT_32,
-               "element type mismatch");
-_Static_assert(HRX_ELEMENT_TYPE_INT_64 == IREE_HAL_ELEMENT_TYPE_INT_64,
-               "element type mismatch");
-_Static_assert(HRX_ELEMENT_TYPE_SINT_8 == IREE_HAL_ELEMENT_TYPE_SINT_8,
-               "element type mismatch");
-_Static_assert(HRX_ELEMENT_TYPE_SINT_16 == IREE_HAL_ELEMENT_TYPE_SINT_16,
-               "element type mismatch");
-_Static_assert(HRX_ELEMENT_TYPE_SINT_32 == IREE_HAL_ELEMENT_TYPE_SINT_32,
-               "element type mismatch");
-_Static_assert(HRX_ELEMENT_TYPE_SINT_64 == IREE_HAL_ELEMENT_TYPE_SINT_64,
-               "element type mismatch");
-_Static_assert(HRX_ELEMENT_TYPE_FLOAT_16 == IREE_HAL_ELEMENT_TYPE_FLOAT_16,
-               "element type mismatch");
-_Static_assert(HRX_ELEMENT_TYPE_FLOAT_32 == IREE_HAL_ELEMENT_TYPE_FLOAT_32,
-               "element type mismatch");
-_Static_assert(HRX_ELEMENT_TYPE_FLOAT_64 == IREE_HAL_ELEMENT_TYPE_FLOAT_64,
-               "element type mismatch");
-_Static_assert(HRX_ELEMENT_TYPE_BFLOAT_16 == IREE_HAL_ELEMENT_TYPE_BFLOAT_16,
-               "element type mismatch");
-_Static_assert(HRX_ENCODING_TYPE_OPAQUE == IREE_HAL_ENCODING_TYPE_OPAQUE,
-               "encoding type mismatch");
-_Static_assert(HRX_ENCODING_TYPE_DENSE_ROW_MAJOR ==
-                   IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-               "encoding type mismatch");
+static_assert(HRX_ELEMENT_TYPE_NONE == IREE_HAL_ELEMENT_TYPE_NONE,
+              "element type mismatch");
+static_assert(HRX_ELEMENT_TYPE_OPAQUE_8 == IREE_HAL_ELEMENT_TYPE_OPAQUE_8,
+              "element type mismatch");
+static_assert(HRX_ELEMENT_TYPE_BOOL_8 == IREE_HAL_ELEMENT_TYPE_BOOL_8,
+              "element type mismatch");
+static_assert(HRX_ELEMENT_TYPE_INT_16 == IREE_HAL_ELEMENT_TYPE_INT_16,
+              "element type mismatch");
+static_assert(HRX_ELEMENT_TYPE_UINT_8 == IREE_HAL_ELEMENT_TYPE_UINT_8,
+              "element type mismatch");
+static_assert(HRX_ELEMENT_TYPE_INT_32 == IREE_HAL_ELEMENT_TYPE_INT_32,
+              "element type mismatch");
+static_assert(HRX_ELEMENT_TYPE_INT_64 == IREE_HAL_ELEMENT_TYPE_INT_64,
+              "element type mismatch");
+static_assert(HRX_ELEMENT_TYPE_SINT_8 == IREE_HAL_ELEMENT_TYPE_SINT_8,
+              "element type mismatch");
+static_assert(HRX_ELEMENT_TYPE_SINT_16 == IREE_HAL_ELEMENT_TYPE_SINT_16,
+              "element type mismatch");
+static_assert(HRX_ELEMENT_TYPE_SINT_32 == IREE_HAL_ELEMENT_TYPE_SINT_32,
+              "element type mismatch");
+static_assert(HRX_ELEMENT_TYPE_SINT_64 == IREE_HAL_ELEMENT_TYPE_SINT_64,
+              "element type mismatch");
+static_assert(HRX_ELEMENT_TYPE_FLOAT_16 == IREE_HAL_ELEMENT_TYPE_FLOAT_16,
+              "element type mismatch");
+static_assert(HRX_ELEMENT_TYPE_FLOAT_32 == IREE_HAL_ELEMENT_TYPE_FLOAT_32,
+              "element type mismatch");
+static_assert(HRX_ELEMENT_TYPE_FLOAT_64 == IREE_HAL_ELEMENT_TYPE_FLOAT_64,
+              "element type mismatch");
+static_assert(HRX_ELEMENT_TYPE_BFLOAT_16 == IREE_HAL_ELEMENT_TYPE_BFLOAT_16,
+              "element type mismatch");
+static_assert(HRX_ENCODING_TYPE_OPAQUE == IREE_HAL_ENCODING_TYPE_OPAQUE,
+              "encoding type mismatch");
+static_assert(HRX_ENCODING_TYPE_DENSE_ROW_MAJOR ==
+                  IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
+              "encoding type mismatch");
 
 // Memory protection bitfield.
-_Static_assert(HRX_MEMORY_PROTECTION_NONE == IREE_HAL_MEMORY_PROTECTION_NONE,
-               "memory protection mismatch");
-_Static_assert(HRX_MEMORY_PROTECTION_READ == IREE_HAL_MEMORY_PROTECTION_READ,
-               "memory protection mismatch");
-_Static_assert(HRX_MEMORY_PROTECTION_WRITE == IREE_HAL_MEMORY_PROTECTION_WRITE,
-               "memory protection mismatch");
+static_assert(HRX_MEMORY_PROTECTION_NONE == IREE_HAL_MEMORY_PROTECTION_NONE,
+              "memory protection mismatch");
+static_assert(HRX_MEMORY_PROTECTION_READ == IREE_HAL_MEMORY_PROTECTION_READ,
+              "memory protection mismatch");
+static_assert(HRX_MEMORY_PROTECTION_WRITE == IREE_HAL_MEMORY_PROTECTION_WRITE,
+              "memory protection mismatch");
 
 // Map flags reuse memory access values.
-_Static_assert(HRX_MAP_READ == IREE_HAL_MEMORY_ACCESS_READ,
-               "map flags mismatch");
-_Static_assert(HRX_MAP_WRITE == IREE_HAL_MEMORY_ACCESS_WRITE,
-               "map flags mismatch");
-_Static_assert(HRX_MAP_DISCARD == IREE_HAL_MEMORY_ACCESS_DISCARD,
-               "map flags mismatch");
-_Static_assert(HRX_MAPPING_MODE_SCOPED == IREE_HAL_MAPPING_MODE_SCOPED,
-               "mapping mode mismatch");
-_Static_assert(HRX_MAPPING_MODE_PERSISTENT == IREE_HAL_MAPPING_MODE_PERSISTENT,
-               "mapping mode mismatch");
-
-#undef HRX_STATIC_ASSERT_ENUM_EQ
+static_assert(HRX_MAP_READ == IREE_HAL_MEMORY_ACCESS_READ,
+              "map flags mismatch");
+static_assert(HRX_MAP_WRITE == IREE_HAL_MEMORY_ACCESS_WRITE,
+              "map flags mismatch");
+static_assert(HRX_MAP_DISCARD == IREE_HAL_MEMORY_ACCESS_DISCARD,
+              "map flags mismatch");
+static_assert(HRX_MAPPING_MODE_SCOPED == IREE_HAL_MAPPING_MODE_SCOPED,
+              "mapping mode mismatch");
+static_assert(HRX_MAPPING_MODE_PERSISTENT == IREE_HAL_MAPPING_MODE_PERSISTENT,
+              "mapping mode mismatch");
 
 //===----------------------------------------------------------------------===//
 // Internal types backing opaque handles
@@ -421,6 +416,15 @@ typedef struct hrx_graph_schedule_t {
   iree_host_size_t block_count;
 } hrx_graph_schedule_t;
 
+// Tracks commands recorded since the most recent graph command-buffer
+// barrier. Exposed internally so the barrier planner can be tested without
+// depending on backend command scheduling behavior.
+typedef struct hrx_graph_barrier_state_t {
+  uint32_t values[8];
+  uint32_t count : 31;
+  uint32_t invalid : 1;
+} hrx_graph_barrier_state_t;
+
 typedef struct hrx_graph_exec_s {
   iree_atomic_ref_count_t ref_count;
   hrx_device_t device;
@@ -447,6 +451,13 @@ iree_status_t hrx_graph_schedule_nodes(hrx_graph_node_block_t* node_blocks,
                                        iree_arena_allocator_t* arena,
                                        hrx_graph_schedule_t* out_schedule);
 
+void hrx_graph_barrier_state_reset(hrx_graph_barrier_state_t* state);
+iree_status_t hrx_graph_record_node_barrier(
+    hrx_graph_barrier_state_t* state, const hrx_graph_node_s* node,
+    const hrx_graph_edge_t* additional_edges, const uint32_t* node_index_map,
+    uint32_t sorted_index, iree_hal_command_buffer_t* command_buffer,
+    bool* out_did_barrier);
+
 // Internal graph exec APIs (implemented in graph_exec.c).
 iree_status_t hrx_graph_exec_instantiate_locked(
     hrx_graph_exec_t exec, hrx_graph_node_block_t* node_blocks,
@@ -458,19 +469,43 @@ iree_status_t hrx_graph_exec_instantiate_locked(
 
 // Buffer allocation.
 typedef struct hrx_buffer_s {
+  // References held by callers of the public buffer handle.
   iree_atomic_ref_count_t ref_count;
+
+  // HAL buffer owning the underlying allocation.
   iree_hal_buffer_t* hal_buffer;
+
+  // HAL pool that materialized |hal_buffer|.
   iree_hal_pool_t* hal_pool;
+
+  // Device associated with the buffer's allocation.
   hrx_device_t device;
+
+  // Memory properties selected for the allocation.
   hrx_memory_type_t mem_type;
+
+  // User-visible allocation length in bytes.
   size_t size;
+
+  // Optional bounded pool that charged |allocation_budget_size|.
+  hrx_mem_pool_t allocation_budget_pool;
+
+  // Bytes charged against |allocation_budget_pool|.
+  size_t allocation_budget_size;
+
+  // Active scoped mapping, valid only while |is_mapped| is true.
   iree_hal_buffer_mapping_t mapping;
+
+  // True when |mapping| currently owns an active mapping.
   bool is_mapped;
+
+  // Cached host pointer for the active mapping.
   void* mapped_ptr;
 } hrx_buffer_s;
 
 // Memory pool (stream-ordered memory management).
 typedef struct hrx_mem_pool_s {
+  // References held by public handles and bounded allocations.
   iree_atomic_ref_count_t ref_count;
 
   // Device whose HAL pool backend supplies this pool's backing storage.
@@ -479,11 +514,23 @@ typedef struct hrx_mem_pool_s {
   // HIP/CUDA-style creation properties used for attribute queries.
   hrx_mem_pool_props_t props;
 
-  // HAL pool lazily created on first allocation.
+  // TLSF HAL pool serving allocations up to |suballocation_max_size|.
   iree_hal_pool_t* hal_pool;
+
+  // Pass-through HAL pool serving allocations larger than the TLSF slab size.
+  iree_hal_pool_t* oversized_hal_pool;
+
+  // Largest request routed to |hal_pool| rather than |oversized_hal_pool|.
+  iree_device_size_t suballocation_max_size;
+
+  // Bytes charged to the immutable |props.max_size| allocation limit.
+  size_t allocation_budget_current;
 
   // HIP/CUDA release threshold attribute in bytes.
   uint64_t release_threshold;
+
+  // Allocations that have retained the HAL pool but have not reserved from it.
+  uint32_t inflight_allocation_count;
 
   // True when internal dependency insertion is allowed for reuse.
   bool reuse_allow_internal_dependencies;
@@ -511,15 +558,6 @@ typedef struct hrx_mem_pool_s {
 
   // Guards mutable pool attributes and lazy HAL pool creation.
   iree_slim_mutex_t mutex;
-
-  // True when the device allocator exposes HAL virtual-memory operations.
-  bool supports_virtual_memory;
-
-  // Minimum virtual-memory page size reported by the HAL allocator.
-  iree_device_size_t vm_page_size_min;
-
-  // Recommended virtual-memory page size reported by the HAL allocator.
-  iree_device_size_t vm_page_size_recommended;
 } hrx_mem_pool_s;
 
 // Loaded VM module with a context containing HAL + bytecode modules.
@@ -560,11 +598,9 @@ typedef struct hrx_buffer_view_s {
 typedef struct hrx_executable_s {
   // Reference count for the executable wrapper.
   iree_atomic_ref_count_t ref_count;
-  // Retained executable cache used to prepare the HAL executable.
-  iree_hal_executable_cache_t* hal_executable_cache;
   // Retained HAL executable containing the native functions.
   iree_hal_executable_t* hal_executable;
-  // Retained device that owns the executable cache and HAL executable.
+  // Retained device that owns the HAL executable.
   hrx_device_t device;
   // Number of NUL-terminated export names snapshotted at load time.
   iree_host_size_t export_count;
@@ -605,6 +641,18 @@ typedef struct hrx_shared_state_t {
 hrx_shared_state_t* hrx_get_shared_state(void);
 hrx_gpu_state_t* hrx_get_gpu_state(void);
 hrx_cpu_state_t* hrx_get_cpu_state(void);
+
+// Returns the configured application event sink translated to the HAL event
+// ABI. Returns false when HRX would otherwise discard device events.
+bool hrx_runtime_try_get_hal_device_event_sink(
+    iree_hal_device_event_sink_t* out_sink);
+
+// Initializes GPU devices with one immutable HAL device-creation extension
+// chain. The chain and all transitively referenced provider data must remain
+// valid until hrx_gpu_shutdown().
+hrx_status_t hrx_gpu_initialize_with_device_extensions(
+    uint32_t flags,
+    const iree_hal_device_create_params_extension_t* device_extensions);
 
 // Ensure shared infrastructure is created (idempotent).
 hrx_status_t hrx_ensure_shared_state(void);

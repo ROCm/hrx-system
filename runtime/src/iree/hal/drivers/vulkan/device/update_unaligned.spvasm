@@ -1,0 +1,117 @@
+; Copyright 2026 The IREE Authors
+;
+; Licensed under the Apache License v2.0 with LLVM Exceptions.
+; See https://llvm.org/LICENSE.txt for license information.
+; SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+;
+; SPIR-V
+; Version: 1.0
+; Generator: Khronos SPIR-V Tools Assembler; 0
+; Bound: 104
+; Schema: 0
+               OpCapability Shader
+          %1 = OpExtInstImport "GLSL.std.450"
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint GLCompute %main "main"
+               OpExecutionMode %main LocalSize 1 1 1
+               OpSource GLSL 450
+               OpName %main "main"
+               OpName %PushConstants "PushConstants"
+               OpMemberName %PushConstants 0 "update_word"
+               OpMemberName %PushConstants 1 "target_word_index"
+               OpMemberName %PushConstants 2 "target_word_byte_offset"
+               OpMemberName %PushConstants 3 "update_length_bytes"
+               OpName %pc "pc"
+               OpName %Target "Target"
+               OpMemberName %Target 0 "words"
+               OpName %target "target"
+               OpDecorate %PushConstants Block
+               OpMemberDecorate %PushConstants 0 Offset 0
+               OpMemberDecorate %PushConstants 1 Offset 4
+               OpMemberDecorate %PushConstants 2 Offset 8
+               OpMemberDecorate %PushConstants 3 Offset 12
+               OpDecorate %_runtimearr_uint ArrayStride 4
+               OpDecorate %Target BufferBlock
+               OpMemberDecorate %Target 0 Offset 0
+               OpDecorate %target Binding 0
+               OpDecorate %target DescriptorSet 0
+               OpDecorate %gl_WorkGroupSize BuiltIn WorkgroupSize
+       %void = OpTypeVoid
+         %18 = OpTypeFunction %void
+       %uint = OpTypeInt 32 0
+     %uint_0 = OpConstant %uint 0
+%PushConstants = OpTypeStruct %uint %uint %uint %uint
+%_ptr_PushConstant_PushConstants = OpTypePointer PushConstant %PushConstants
+         %pc = OpVariable %_ptr_PushConstant_PushConstants PushConstant
+        %int = OpTypeInt 32 1
+      %int_3 = OpConstant %int 3
+%_ptr_PushConstant_uint = OpTypePointer PushConstant %uint
+       %bool = OpTypeBool
+     %uint_8 = OpConstant %uint 8
+      %int_2 = OpConstant %int 2
+      %int_0 = OpConstant %int 0
+   %uint_255 = OpConstant %uint 255
+    %int_255 = OpConstant %int 255
+      %int_1 = OpConstant %int 1
+%_runtimearr_uint = OpTypeRuntimeArray %uint
+     %Target = OpTypeStruct %_runtimearr_uint
+%_ptr_Uniform_Target = OpTypePointer Uniform %Target
+     %target = OpVariable %_ptr_Uniform_Target Uniform
+%_ptr_Uniform_uint = OpTypePointer Uniform %uint
+     %uint_1 = OpConstant %uint 1
+     %v3uint = OpTypeVector %uint 3
+%gl_WorkGroupSize = OpConstantComposite %v3uint %uint_1 %uint_1 %uint_1
+       %main = OpFunction %void None %18
+         %38 = OpLabel
+               OpBranch %39
+         %39 = OpLabel
+        %103 = OpPhi %uint %uint_0 %38 %68 %47
+        %101 = OpPhi %uint %uint_0 %38 %63 %47
+         %98 = OpPhi %uint %uint_0 %38 %70 %47
+         %44 = OpAccessChain %_ptr_PushConstant_uint %pc %int_3
+         %45 = OpLoad %uint %44
+         %46 = OpULessThan %bool %98 %45
+               OpLoopMerge %40 %47 None
+               OpBranchConditional %46 %47 %40
+         %47 = OpLabel
+         %48 = OpAccessChain %_ptr_PushConstant_uint %pc %int_2
+         %49 = OpLoad %uint %48
+         %51 = OpIAdd %uint %49 %98
+         %52 = OpIMul %uint %uint_8 %51
+         %53 = OpAccessChain %_ptr_PushConstant_uint %pc %int_0
+         %54 = OpLoad %uint %53
+         %56 = OpIMul %uint %uint_8 %98
+         %57 = OpShiftRightLogical %uint %54 %56
+         %58 = OpBitwiseAnd %uint %57 %uint_255
+         %60 = OpShiftLeftLogical %int %int_255 %52
+         %61 = OpBitcast %uint %60
+         %63 = OpBitwiseOr %uint %101 %61
+         %66 = OpShiftLeftLogical %uint %58 %52
+         %68 = OpBitwiseOr %uint %103 %66
+         %70 = OpIAdd %uint %98 %int_1
+               OpBranch %39
+         %40 = OpLabel
+         %71 = OpAccessChain %_ptr_PushConstant_uint %pc %int_1
+         %72 = OpLoad %uint %71
+         %73 = OpAccessChain %_ptr_Uniform_uint %target %int_0 %72
+         %74 = OpAtomicIAdd %uint %73 %uint_1 %uint_0 %uint_0
+               OpBranch %75
+         %75 = OpLabel
+         %99 = OpPhi %uint %74 %40 %91 %77
+               OpLoopMerge %96 %77 None
+               OpBranch %79
+         %79 = OpLabel
+         %82 = OpNot %uint %101
+         %83 = OpBitwiseAnd %uint %99 %82
+         %85 = OpBitwiseOr %uint %83 %103
+         %91 = OpAtomicCompareExchange %uint %73 %uint_1 %uint_0 %uint_0 %85 %99
+         %94 = OpIEqual %bool %91 %99
+               OpSelectionMerge %95 None
+               OpBranchConditional %94 %96 %95
+         %96 = OpLabel
+               OpReturn
+         %95 = OpLabel
+               OpBranch %77
+         %77 = OpLabel
+               OpBranch %75
+               OpFunctionEnd

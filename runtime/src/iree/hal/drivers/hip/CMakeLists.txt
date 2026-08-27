@@ -45,8 +45,6 @@ iree_cc_library(
     "memory_pools.h"
     "native_executable.c"
     "native_executable.h"
-    "nop_executable_cache.c"
-    "nop_executable_cache.h"
     "per_device_information.h"
     "rccl_channel.c"
     "rccl_channel.h"
@@ -71,7 +69,6 @@ iree_cc_library(
     iree::hal::utils::deferred_command_buffer
     iree::hal::utils::executable_debug_info
     iree::hal::utils::executable_header
-    iree::hal::utils::file_transfer
     iree::hal::utils::files
     iree::hal::utils::queue_emulation
     iree::hal::utils::queue_host_call_emulation
@@ -97,6 +94,7 @@ iree_cc_library(
     iree::base
     iree::base::core_headers
     iree::hal
+    iree::hal::executable::amdgpu::executable_target
     iree::hal::utils::device_spec_builder
   PUBLIC
 )

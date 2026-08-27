@@ -1,0 +1,104 @@
+// RUN: emit amdgpu-bank-service
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @gfx1250_b128_bank_service() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %bytes = index.constant 4096 : offset
+  %stride16 = encoding.layout.strided [4, 1] : encoding<layout>
+  %stride64 = encoding.layout.strided [16, 1] : encoding<layout>
+  %stride80 = encoding.layout.strided [20, 1] : encoding<layout>
+  %stride96 = encoding.layout.strided [24, 1] : encoding<layout>
+  %scratch16 = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch64 = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch80 = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %scratch96 = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<32x16xi32>
+  %view16 = buffer.view %scratch16[%buffer_base] : buffer -> view<32x4xi32, %stride16>
+  %view64 = buffer.view %scratch64[%buffer_base] : buffer -> view<32x4xi32, %stride64>
+  %view80 = buffer.view %scratch80[%buffer_base] : buffer -> view<32x4xi32, %stride80>
+  %view96 = buffer.view %scratch96[%buffer_base] : buffer -> view<32x4xi32, %stride96>
+  %value = vector.constant 1 : vector<4xi32>
+  vector.store %value, %view16[%lane, 0] : vector<4xi32>, view<32x4xi32, %stride16>
+  vector.store %value, %view64[%lane, 0] : vector<4xi32>, view<32x4xi32, %stride64>
+  vector.store %value, %view80[%lane, 0] : vector<4xi32>, view<32x4xi32, %stride80>
+  vector.store %value, %view96[%lane, 0] : vector<4xi32>, view<32x4xi32, %stride96>
+  %loaded16 = vector.load %view16[%lane, 0] : view<32x4xi32, %stride16> -> vector<4xi32>
+  %loaded64 = vector.load %view64[%lane, 0] : view<32x4xi32, %stride64> -> vector<4xi32>
+  %loaded80 = vector.load %view80[%lane, 0] : view<32x4xi32, %stride80> -> vector<4xi32>
+  %loaded96 = vector.load %view96[%lane, 0] : view<32x4xi32, %stride96> -> vector<4xi32>
+  vector.store %loaded16, %output_view[%lane, 0] : vector<4xi32>, view<32x16xi32>
+  vector.store %loaded64, %output_view[%lane, 4] : vector<4xi32>, view<32x16xi32>
+  vector.store %loaded80, %output_view[%lane, 8] : vector<4xi32>, view<32x16xi32>
+  vector.store %loaded96, %output_view[%lane, 12] : vector<4xi32>, view<32x16xi32>
+  kernel.return
+}
+
+// ----
+bank-service function=gfx1250_b128_bank_service source-op=vector.store root=scratch16 packet=amdgpu.ds_write_b128 model=amdgpu.lds.wave32.b128.quad-phases.write.count-each proof=exact lane-address=affine-workitem-x-byte-stride active-lanes=subgroup-uniform-control-full-wave base-residue=all-bank-word-residues-common-translation classification=conflict-free required-rounds=8 uncontended-rounds=8 extra-rounds=0 maximum-multiplicity=1
+bank-service function=gfx1250_b128_bank_service source-op=vector.store root=scratch64 packet=amdgpu.ds_write_b128 model=amdgpu.lds.wave32.b128.quad-phases.write.count-each proof=exact lane-address=affine-workitem-x-byte-stride active-lanes=subgroup-uniform-control-full-wave base-residue=all-bank-word-residues-common-translation classification=conflicted required-rounds=16 uncontended-rounds=8 extra-rounds=8 maximum-multiplicity=2
+bank-service function=gfx1250_b128_bank_service source-op=vector.store root=scratch80 packet=amdgpu.ds_write_b128 model=amdgpu.lds.wave32.b128.quad-phases.write.count-each proof=exact lane-address=affine-workitem-x-byte-stride active-lanes=subgroup-uniform-control-full-wave base-residue=all-bank-word-residues-common-translation classification=conflict-free required-rounds=8 uncontended-rounds=8 extra-rounds=0 maximum-multiplicity=1
+bank-service function=gfx1250_b128_bank_service source-op=vector.store root=scratch96 packet=amdgpu.ds_write_b128 model=amdgpu.lds.wave32.b128.quad-phases.write.count-each proof=exact lane-address=affine-workitem-x-byte-stride active-lanes=subgroup-uniform-control-full-wave base-residue=all-bank-word-residues-common-translation classification=conflict-free required-rounds=8 uncontended-rounds=8 extra-rounds=0 maximum-multiplicity=1
+bank-service function=gfx1250_b128_bank_service source-op=vector.load root=scratch16 packet=amdgpu.ds_read_b128 model=amdgpu.lds.wave32.b128.quad-phases.read.count-each proof=exact lane-address=affine-workitem-x-byte-stride active-lanes=subgroup-uniform-control-full-wave base-residue=all-bank-word-residues-common-translation classification=conflict-free required-rounds=8 uncontended-rounds=8 extra-rounds=0 maximum-multiplicity=1
+bank-service function=gfx1250_b128_bank_service source-op=vector.load root=scratch64 packet=amdgpu.ds_read_b128 model=amdgpu.lds.wave32.b128.quad-phases.read.count-each proof=exact lane-address=affine-workitem-x-byte-stride active-lanes=subgroup-uniform-control-full-wave base-residue=all-bank-word-residues-common-translation classification=conflicted required-rounds=16 uncontended-rounds=8 extra-rounds=8 maximum-multiplicity=2
+bank-service function=gfx1250_b128_bank_service source-op=vector.load root=scratch80 packet=amdgpu.ds_read_b128 model=amdgpu.lds.wave32.b128.quad-phases.read.count-each proof=exact lane-address=affine-workitem-x-byte-stride active-lanes=subgroup-uniform-control-full-wave base-residue=all-bank-word-residues-common-translation classification=conflict-free required-rounds=8 uncontended-rounds=8 extra-rounds=0 maximum-multiplicity=1
+bank-service function=gfx1250_b128_bank_service source-op=vector.load root=scratch96 packet=amdgpu.ds_read_b128 model=amdgpu.lds.wave32.b128.quad-phases.read.count-each proof=exact lane-address=affine-workitem-x-byte-stride active-lanes=subgroup-uniform-control-full-wave base-residue=all-bank-word-residues-common-translation classification=conflict-free required-rounds=8 uncontended-rounds=8 extra-rounds=0 maximum-multiplicity=1
+
+// ====
+
+// RUN: emit amdgpu-bank-service
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @unknown_divergent_active_lanes() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %half_wave = index.constant 16 : index
+  %active = index.cmp ult, %lane, %half_wave : index
+  %scratch_base = index.constant 0 : offset
+  %bytes = index.constant 2048 : offset
+  %layout = encoding.layout.strided [16, 1] : encoding<layout>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %view = buffer.view %scratch[%scratch_base] : buffer -> view<32x4xi32, %layout>
+  %value = vector.constant 1 : vector<4xi32>
+  scf.if %active {
+    vector.store %value, %view[%lane, 0] : vector<4xi32>, view<32x4xi32, %layout>
+  }
+  kernel.return
+}
+
+// ----
+bank-service function=unknown_divergent_active_lanes source-op=vector.store root=scratch packet=amdgpu.ds_write_b128 model=amdgpu.lds.wave32.b128.quad-phases.write.count-each proof=unknown lane-address=affine-workitem-x-byte-stride active-lanes=unproven base-residue=all-bank-word-residues-common-translation unknown-reason=active-lane-control-not-uniform
+
+// ====
+
+// RUN: emit amdgpu-bank-service
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @unknown_address_alignment() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %scratch_base = index.constant 0 : offset
+  %bytes = index.constant 2048 : offset
+  %layout = encoding.layout.strided [16, 1] : encoding<layout>
+  %scratch = buffer.alloca<workgroup> align(1) %bytes : buffer
+  %view = buffer.view %scratch[%scratch_base] : buffer -> view<32x4xi32, %layout>
+  %value = vector.constant 1 : vector<4xi32>
+  vector.store %value, %view[%lane, 0] : vector<4xi32>, view<32x4xi32, %layout>
+  kernel.return
+}
+
+// ----
+bank-service function=unknown_address_alignment source-op=vector.store root=scratch packet=amdgpu.ds_write_b128 model=amdgpu.lds.wave32.b128.quad-phases.write.count-each proof=unknown lane-address=unproven active-lanes=unproven base-residue=unproven unknown-reason=address-bank-word-alignment-unproven

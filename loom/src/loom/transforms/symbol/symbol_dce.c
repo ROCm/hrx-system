@@ -6,10 +6,10 @@
 
 #include "loom/transforms/symbol/symbol_dce.h"
 
-#include "loom/analysis/symbol_dependencies.h"
 #include "loom/analysis/symbol_liveness.h"
+#include "loom/analysis/symbol_references.h"
 #include "loom/ir/module.h"
-#include "loom/target/selection.h"
+#include "loom/target/pass_environment.h"
 #include "loom/transforms/symbol/symbol_pruning.h"
 
 //===----------------------------------------------------------------------===//
@@ -28,7 +28,7 @@ LOOM_PASS_STATISTICS_DEFINE(loom_symbol_dce_statistics,
 
 static const loom_pass_info_t loom_symbol_dce_pass_info_storage = {
     .name = IREE_SVL("symbol-dce"),
-    .description = IREE_SVL("Remove unreachable private symbol definitions."),
+    .description = IREE_SVL("Remove unreachable private symbols."),
     .kind = LOOM_PASS_MODULE,
     .statistic_layout = &loom_symbol_dce_statistics_layout,
 };
@@ -44,8 +44,8 @@ typedef struct loom_symbol_dce_state_t {
   loom_symbol_dce_statistics_t* statistics;
   // Module being rewritten.
   loom_module_t* module;
-  // Rebuilt module symbol dependency table.
-  loom_symbol_dependency_table_t dependencies;
+  // Rebuilt module symbol reference table.
+  loom_symbol_reference_table_t references;
   // Computed live symbol set.
   loom_symbol_liveness_t liveness;
 } loom_symbol_dce_state_t;
@@ -56,15 +56,15 @@ typedef struct loom_symbol_dce_state_t {
 
 static iree_status_t loom_symbol_dce_compute_live_symbols(
     loom_symbol_dce_state_t* state) {
-  IREE_RETURN_IF_ERROR(loom_symbol_dependency_table_build(
-      state->module, state->pass->arena, &state->dependencies));
+  IREE_RETURN_IF_ERROR(loom_symbol_reference_table_build(
+      state->module, state->pass->arena, &state->references));
   loom_symbol_liveness_options_t options = {
       // Encodings are module-table records that serialize with the module.
       // Until there is encoding-table DCE, their symbol refs are roots.
       .flags = LOOM_SYMBOL_LIVENESS_INCLUDE_MODULE_EDGES,
       .root_query = loom_symbol_pruning_symbol_is_root,
   };
-  return loom_symbol_liveness_compute(state->module, &state->dependencies,
+  return loom_symbol_liveness_compute(state->module, &state->references,
                                       &options, state->pass->arena,
                                       &state->liveness);
 }
@@ -92,6 +92,5 @@ iree_status_t loom_symbol_dce_run(loom_pass_t* pass, loom_module_t* module) {
   };
   IREE_RETURN_IF_ERROR(loom_symbol_dce_compute_live_symbols(&state));
   IREE_RETURN_IF_ERROR(loom_symbol_dce_erase_unreachable_symbols(&state));
-  return loom_target_pass_compact_symbols_preserving_target_ref(
-      pass, module, pass->arena, NULL);
+  return loom_module_compact_symbols(module, pass->arena, NULL);
 }

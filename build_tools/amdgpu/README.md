@@ -5,10 +5,13 @@ used by runtime, libhrx, and future runtime-side consumers that need AMDGPU
 code objects. The center of gravity is target selection, not any one runtime
 package:
 
-- `target_map.py` is the source of truth for exact GPU architectures,
-  code-object targets, and family selectors.
+- `target_map_data.py` is the source of truth for exact GPU architectures,
+  code-object targets, target-ID feature support, and qualified device-binary
+  artifacts. `target_map.py` owns family selectors and generates the consumer
+  projections.
 - `selectors.bzl` and `selectors.cmake` validate selectors and expand them to
-  either exact HSA ISA targets or compatible code-object targets.
+  exact HSA ISA targets, compatible code-object targets, or the complete
+  device-binary artifact set.
 - `binary.bzl` and `binary.cmake` build C sources into AMDGPU ELF shared
   objects with clang, `llvm-link`, `lld`, and optionally `llvm-objcopy`.
 
@@ -22,11 +25,15 @@ Selectors accepted by the shared helpers fall into three groups:
 | Code-object target | `gfx9-4-generic` | LLVM `-march` value used to build one compatible code object. |
 | Family selector | `gfx94X-all`, `dgpu-all`, `igpu-all` | TheRock-style selector that expands through exact targets. |
 
-There are two expansion modes:
+There are three expansion modes:
 
 - `code-object` expands any selector to the smallest known compatible set of
   code-object targets. Runtime builtin blobs and libhrx CTS HSACOs use this
   mode so `gfx942` and `gfx94X-all` both select `gfx9-4-generic`.
+- `device-binary` preserves the code-object fallback set and prepends any
+  exact-target artifacts required for safe runtime selection. This is the mode
+  for embedded support libraries whose codegen requirements can vary within a
+  code-object family.
 - `exact` expands selectors to exact HSA ISA targets. This mode is for tools or
   tests that must name precise device architectures.
 
@@ -43,11 +50,13 @@ The current generic-family map is:
 | `gfx12` RDNA | `gfx1200`, `gfx1201` | `gfx12-generic` |
 | `gfx12.5` RDNA | `gfx1250`, `gfx1251` | `gfx12-5-generic` |
 
-`gfx11.7` processors are available as explicit exact selectors, but they are
-not folded into `gfx11-generic` because LLVM models them as separate processors
-outside the `gfx11-generic` compatibility set today. `gfx12-5-generic` is
+`gfx11.7` processors are not folded into `gfx11-generic` because LLVM models
+them as a separate compatible family that the pinned device toolchain does not
+yet expose. `gfx12-5-generic` is
 available as an explicit selector, but consumers decide whether it belongs in
-their default checked-in artifact sets.
+their default checked-in artifact sets. The `device-binary` expansion also
+includes `gfx1250-a0` because the generic gfx12.5 artifact is B0-qualified and
+cannot safely serve that physical revision.
 
 ## Generated Files
 
@@ -59,24 +68,27 @@ Running `target_map.py` emits generated fragments consumed by multiple layers:
 | `build_tools/amdgpu/target_map.cmake` | CMake selector helpers. |
 | `build_tools/amdgpu/elf_machine_map.inl` | C/C++ ELF machine decode tables for runtime, libhrx, and Loom. |
 | `build_tools/amdgpu/target_map.h` | C/C++ tests that need exact-to-code-object lookup. |
-| `runtime/src/iree/hal/drivers/amdgpu/util/target_id_map.inl` | Runtime AMDGPU device-library lookup. |
+| `runtime/src/iree/hal/executable/amdgpu/target_id_map.inl` | Runtime target-ID mappings and processor facts. |
+| `runtime/src/iree/hal/drivers/amdgpu/util/device_library_target_map.inl` | Runtime qualified device-library artifact lookup. |
 
 The generated files are checked in. The presubmit check runs:
 
 ```bash
-python build_tools/amdgpu/target_map.py --check
+python3 build_tools/amdgpu/target_map.py --check
 ```
 
-Architecture updates start in `EXACT_TARGET_CODE_OBJECTS` and
-`TARGET_FAMILIES` in `target_map.py`. The evidence to check before changing the
-map is TheRock's `cmake/therock_amdgpu_targets.cmake` for selector and family
-membership, and LLVM AMDGPU generic processor documentation/tablegen data for
-generic code-object compatibility.
+Architecture updates start in `AMDGPU_EXACT_TARGET_INFOS`,
+`AMDGPU_GENERIC_CODE_OBJECT_INFOS`, or `AMDGPU_DEVICE_BINARY_VARIANTS` in
+`target_map_data.py`, and in `TARGET_FAMILIES` in `target_map.py`. The evidence
+to check before changing the map is TheRock's
+`cmake/therock_amdgpu_targets.cmake` for selector and family membership, and
+LLVM AMDGPU generic processor documentation/tablegen data for generic
+code-object compatibility and variant codegen options.
 
 After editing the map:
 
 ```bash
-python build_tools/amdgpu/target_map.py
+python3 build_tools/amdgpu/target_map.py
 buildifier build_tools/amdgpu/BUILD.bazel build_tools/amdgpu/*.bzl
 ```
 
@@ -128,14 +140,37 @@ repository. It is inert by default. A real producer is selected with:
 
 Useful path overrides include `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH`,
 `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_LLVM_TOOLS_DIR`, `IREE_ROCM_PATH`, and
-per-tool overrides such as `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_BINARY`.
-ROCm distributions may expose `clang`/`amdclang` launcher shims that exec a
-versioned driver next to their observed `argv[0]` path. The repository resolves
-those shims to the matching versioned driver before exposing a Bazel executable
-target, because Bazel wraps local tools through generated symlinks and must not
-change the driver's sibling lookup behavior.
+`IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_CLANG_BINARY`. `auto` retains the same search
+surface and additionally checks `PATH` after configured tool and ROCm roots. If
+that search does not find one complete coherent toolchain, source-built targets
+remain incompatible while unrelated targets continue to configure. Explicit
+`rocm` and `llvm-tools` modes reject incomplete configurations.
+
+The selected Clang is the toolchain anchor. The repository canonicalizes it,
+verifies AMDGPU target support, and asks that executable for `llvm-ar`,
+`llvm-link`, `ld.lld`, `llvm-objcopy`, the Clang resource directory, and the
+optional offload bundler. Compatibility paths may participate in discovery,
+but only Clang-reported canonical files are exposed to Bazel; tools from
+different LLVM installations are never mixed.
+
+On ELF hosts, local tools run with their exact non-glibc dynamic-library
+closure. The repository inspects only the selected executables and does not
+import an LLVM or ROCm library tree. Ambient loader variables are replaced
+during discovery and execution, so the closure does not depend on the shell
+that configured the worktree. Windows tools retain their native `.exe` names
+and execute directly from the selected installation; no POSIX launcher or ELF
+inspection participates in Windows repository setup.
+
 When the toolchain repository is inert, selected source-built binaries are
 incompatible instead of referencing missing tool labels.
+
+`iree_amdgpu_binary_variants[_embed_data]` accepts `source_format = "hip"` for
+device-only HIP fixtures that need ROCm device libraries such as `ocml.bc` and
+`ockl.bc`. HIP fixture generation is an optional extension of the base AMDGPU
+toolchain and is enabled only when both those device libraries and the matching
+Clang offload bundler are available. Missing HIP pieces do not disable base
+AMDGPU device compilation. Host C and C++ compilation continues to use the
+configured host compiler.
 
 ## CMake Integration
 
@@ -173,10 +208,13 @@ the consuming C/C++ code a generated table of contents. Test-owned HSACOs should
 use the embed-data form so installed tests, Bazel runfiles, and local CMake
 builds all consume the same in-process bytes.
 
-These rules require configured LLVM/ROCm tools through the existing CMake
-variables: `IREE_CLANG_BINARY`, `IREE_LLVM_LINK_BINARY`, `IREE_LLD_BINARY`, and
-`IREE_CLANG_BUILTIN_HEADERS_PATH`, with `IREE_LLVM_OBJCOPY_BINARY` required when
-`MINIMIZE` is used.
+These rules consume the resolved
+`IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_*` capability configured by the containing
+project. The device clang, llvm-ar, llvm-link, lld, llvm-objcopy, and clang
+resource headers form one tool set independent of `CMAKE_C_COMPILER`. Direct
+source-producing rules fail when that capability is unavailable. Variant and
+CTS aggregates expose no source-built artifacts, allowing normal builds to use
+checked-in device binaries without discovering LLVM or ROCm tools.
 
 ## Consumer Shape
 
@@ -185,7 +223,7 @@ mechanics. Runtime, libhrx, and future Loom code should own their policy:
 
 - default selector lists;
 - whether a selector enables a test suite or only provides data;
-- artifact naming and installation layout;
+- artifact installation and packaging layout;
 - whether source-built artifacts are required or optional.
 
 That split keeps this package usable by several products without turning it

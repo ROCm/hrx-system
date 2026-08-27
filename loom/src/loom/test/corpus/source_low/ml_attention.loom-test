@@ -9,14 +9,115 @@ func.def @online_softmax_update(%old_max: f32, %old_sum: f32, %old_acc: vector<4
   %score_delta = scalar.subf %score, %new_max : f32
   %old_scale = scalar.expf<afn> %old_delta : f32
   %score_weight = scalar.expf<afn> %score_delta : f32
-  %scaled_sum = scalar.mulf<reassoc|nnan|nsz|contract> %old_sum, %old_scale : f32
-  %new_sum = scalar.addf<reassoc|nnan|nsz> %scaled_sum, %score_weight : f32
+  %new_sum = scalar.fmaf<reassoc|nnan|nsz|contract> %old_sum, %old_scale, %score_weight : f32
   %old_scale_vector = vector.splat %old_scale : vector<4xf32>
   %score_weight_vector = vector.splat %score_weight : vector<4xf32>
-  %rescaled_acc = vector.mulf<reassoc|nnan|nsz|contract> %old_acc, %old_scale_vector : vector<4xf32>
   %weighted_value = vector.mulf<reassoc|nnan|nsz|contract> %value, %score_weight_vector : vector<4xf32>
-  %new_acc = vector.addf<reassoc|nnan|nsz> %rescaled_acc, %weighted_value : vector<4xf32>
+  %new_acc = vector.fmaf<reassoc|nnan|nsz|contract> %old_acc, %old_scale_vector, %weighted_value : vector<4xf32>
   func.return %new_max, %new_sum, %new_acc : f32, f32, vector<4xf32>
+}
+
+// ====
+
+// Flash-style attention feeds the QK probability/result tile into the PV MMA.
+// The direct result-to-LHS repack avoids a workgroup-memory round trip while
+// preserving the same BF16 operand contract expected by the second MMA.
+kernel.def @attention_probability_value_mma_repack() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%probabilities: vector<8xf32>, %values: vector<16xbf16>, %init_accumulator: vector<8xf32>, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %output_origin = index.constant 0 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %output_global = buffer.assume.memory_space<global> %output_buffer : buffer
+  %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32>
+  %probability_fragment = vector.fragment<result> %probabilities shape [%m, %k] : vector<8xf32>
+  %lhs = vector.fragment.repack<lhs> %probability_fragment shape [%m, %k] : vector<8xf32> -> vector<16xbf16>
+  %rhs = vector.fragment<rhs> %values shape [%k, %n] : vector<16xbf16>
+  %init = vector.fragment<init> %init_accumulator shape [%m, %n] : vector<8xf32>
+  %output = vector.mma %lhs, %rhs, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  vector.fragment.store<result> %output, %output_view[%output_origin, %output_origin] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
+  kernel.return
+}
+
+// ====
+
+// Online attention can keep a matrix accumulator payload live across the
+// probability-scratch barrier instead of materializing it through LDS.
+kernel.def @attention_loop_carried_accumulator_barrier() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%lhs_values: vector<16xbf16>, %rhs_values0: vector<16xbf16>, %rhs_values1: vector<16xbf16>, %init_accumulator: vector<8xf32>, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %loop_begin = index.constant 0 : index
+  %loop_end = index.constant 1 : index
+  %loop_step = index.constant 1 : index
+  %output_origin = index.constant 0 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %output_global = buffer.assume.memory_space<global> %output_buffer : buffer
+  %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32>
+  %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
+  %rhs0 = vector.fragment<rhs> %rhs_values0 shape [%k, %n] : vector<16xbf16>
+  %rhs1 = vector.fragment<rhs> %rhs_values1 shape [%k, %n] : vector<16xbf16>
+  %carried = scf.for %tile = [%loop_begin to %loop_end step %loop_step](%accumulator = %init_accumulator : vector<8xf32>) -> (vector<8xf32>) {
+    %init = vector.fragment<init> %accumulator shape [%m, %n] : vector<8xf32>
+    %next = vector.mma %lhs, %rhs0, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    scf.yield %next : vector<8xf32>
+  }
+  %carried_init = vector.fragment<init> %carried shape [%m, %n] : vector<8xf32>
+  %output = vector.mma %lhs, %rhs1, %carried_init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  vector.fragment.store<result> %output, %output_view[%output_origin, %output_origin] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
+  kernel.return
+}
+
+// ====
+
+// A peeled tail block in online attention applies one final score/value tile to
+// the loop-carried accumulator when the dynamic sequence has a tail tile.
+kernel.def @attention_tail_peel_accumulator_merge() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%lhs_values: vector<16xbf16>, %rhs_values0: vector<16xbf16>, %rhs_values1: vector<16xbf16>, %init_accumulator: vector<8xf32>, %tail_tile_count: i32, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %loop_begin = index.constant 0 : index
+  %loop_end = index.constant 1 : index
+  %loop_step = index.constant 1 : index
+  %output_origin = index.constant 0 : index
+  %no_tail_tiles = scalar.constant 0 : i32
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %has_tail_tile = scalar.cmpi ne, %tail_tile_count, %no_tail_tiles : i32
+  %output_global = buffer.assume.memory_space<global> %output_buffer : buffer
+  %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32>
+  %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
+  %rhs0 = vector.fragment<rhs> %rhs_values0 shape [%k, %n] : vector<16xbf16>
+  %rhs1 = vector.fragment<rhs> %rhs_values1 shape [%k, %n] : vector<16xbf16>
+  %carried = scf.for %tile = [%loop_begin to %loop_end step %loop_step](%accumulator = %init_accumulator : vector<8xf32>) -> (vector<8xf32>) {
+    %init = vector.fragment<init> %accumulator shape [%m, %n] : vector<8xf32>
+    %next = vector.mma %lhs, %rhs0, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next : vector<8xf32>
+  }
+  %output_accumulator = scf.if %has_tail_tile -> (vector<8xf32>) {
+    %tail_init = vector.fragment<init> %carried shape [%m, %n] : vector<8xf32>
+    %tail = vector.mma %lhs, %rhs1, %tail_init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %tail : vector<8xf32>
+  } else {
+    scf.yield %carried : vector<8xf32>
+  }
+  vector.fragment.store<result> %output_accumulator, %output_view[%output_origin, %output_origin] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
+  kernel.return
 }
 
 // ====
@@ -32,10 +133,10 @@ func.def @tail_masked_score_block(%scores: vector<4xf32>, %valid_count: i32) -> 
   %sentinels = vector.splat %negative_large : vector<4xf32>
   %masked_scores = vector.select %valid, %scores, %sentinels : vector<4xf32>
   %block_max = vector.reduce<maxnumf, reassoc|nnan|nsz> %masked_scores, %negative_large : vector<4xf32>, f32
-  %zero = scalar.constant 0.0 : f32
-  %zeros = vector.splat %zero : vector<4xf32>
-  %sum_scores = vector.select %valid, %scores, %zeros : vector<4xf32>
-  %block_sum = vector.reduce<addf, reassoc|nnan|nsz> %sum_scores, %zero : vector<4xf32>, f32
+  %sum_identity = scalar.constant 0.0 : f32
+  %sum_identity_vector = vector.splat %sum_identity : vector<4xf32>
+  %sum_scores = vector.select %valid, %scores, %sum_identity_vector : vector<4xf32>
+  %block_sum = vector.reduce<addf, reassoc|nnan|nsz> %sum_scores, %sum_identity : vector<4xf32>, f32
   func.return %block_max, %block_sum : f32, f32
 }
 
@@ -54,16 +155,16 @@ func.def @paged_kv_cache_block_load(%page_table: buffer, %page_pool: buffer, %se
   %block_entry_offset = index.scale %block, %page_entry_byte_stride : index, offset -> offset
   %page_entry_offset = index.add %row_base, %block_entry_offset : offset
   %page_table_global = buffer.assume.memory_space<global> %page_table : buffer
-  %page_entry_view = buffer.view %page_table_global[%page_entry_offset] : buffer -> view<1xi32, #dense>
-  %page_i32 = view.load %page_entry_view[0] : view<1xi32, #dense> -> i32
+  %page_entry_view = buffer.view %page_table_global[%page_entry_offset] : buffer -> view<1xi32>
+  %page_i32 = view.load %page_entry_view[0] : view<1xi32> -> i32
   %page0 = index.cast %page_i32 : i32 to index
   %page = index.assume %page0 [range(%page0, 0, 4095)] : index
   %page_base = index.scale %page, %page_byte_stride : index, offset -> offset
   %lane_offset = index.scale %lane, %lane_byte_stride : index, offset -> offset
   %kv_offset = index.add %page_base, %lane_offset : offset
   %page_pool_global = buffer.assume.memory_space<global> %page_pool : buffer
-  %kv_view = buffer.view %page_pool_global[%kv_offset] : buffer -> view<4xbf16, #dense>
-  %key_values = vector.load %kv_view[0] : view<4xbf16, #dense> -> vector<4xbf16>
+  %kv_view = buffer.view %page_pool_global[%kv_offset] : buffer -> view<4xbf16>
+  %key_values = vector.load %kv_view[0] : view<4xbf16> -> vector<4xbf16>
   func.return %page_i32, %key_values : i32, vector<4xbf16>
 }
 

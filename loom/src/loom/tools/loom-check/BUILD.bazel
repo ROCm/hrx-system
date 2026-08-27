@@ -68,6 +68,34 @@ _EMIT_LLVMIR_CHECK_DEPS = iree_select({
     "//conditions:default": [],
 })
 
+_LLVMIR_AMDGPU_TARGET_ENV_COPTS = iree_select({
+    "//loom/config/target:llvmir_amdgpu_target_env": [
+        "-DLOOM_CHECK_HAVE_LLVMIR_AMDGPU_TARGET_ENV=1",
+    ],
+    "//conditions:default": [],
+})
+
+_LLVMIR_AMDGPU_TARGET_ENV_DEPS = iree_select({
+    "//loom/config/target:llvmir_amdgpu_target_env": [
+        "//loom/src/loom/target/emit/llvmir/amdgpu:target_env",
+    ],
+    "//conditions:default": [],
+})
+
+_LLVMIR_X86_TARGET_ENV_COPTS = iree_select({
+    "//loom/config/target:llvmir_x86_target_env": [
+        "-DLOOM_CHECK_HAVE_LLVMIR_X86_TARGET_ENV=1",
+    ],
+    "//conditions:default": [],
+})
+
+_LLVMIR_X86_TARGET_ENV_DEPS = iree_select({
+    "//loom/config/target:llvmir_x86_target_env": [
+        "//loom/src/loom/target/emit/llvmir/x86:target_env",
+    ],
+    "//conditions:default": [],
+})
+
 _TARGET_SPIRV_CHECK_COPTS = iree_select({
     "//loom/config/target/arch:spirv": [
         "-DLOOM_CHECK_HAVE_TARGET_SPIRV=1",
@@ -219,6 +247,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:frame",
         "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:function_model",
         "//loom/src/loom/codegen/low:packet_json",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/codegen/low:text_asm",
@@ -244,7 +273,6 @@ loom_cc_library(
         "//loom/src/loom/pass:registry",
         "//loom/src/loom/pass:tooling",
         "//loom/src/loom/sanitizer:options",
-        "//loom/src/loom/target:compile_report_format",
         "//loom/src/loom/target:entry_selection",
         "//loom/src/loom/target:legalization",
         "//loom/src/loom/target:low_asm_diagnostics",
@@ -255,6 +283,7 @@ loom_cc_library(
         "//loom/src/loom/target:pipeline",
         "//loom/src/loom/target:predicate",
         "//loom/src/loom/target:types",
+        "//loom/src/loom/target/reporting:format",
         "//loom/src/loom/tooling/compile:pipeline",
         "//loom/src/loom/tools/loom-format:convert",
         "//loom/src/loom/util:diff",
@@ -322,6 +351,7 @@ loom_cc_test(
         "//loom/src/loom/testing:context",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -347,6 +377,7 @@ loom_cc_library(
         ":check",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
+        "//loom/src/loom/link:linker",
         "//loom/src/loom/ops:op_defs",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -373,6 +404,7 @@ loom_cc_test(
         ":check",
         ":template_sync",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/config",
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/kernel",
@@ -436,6 +468,22 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "file_test",
+    srcs = ["file_test.cc"],
+    deps = [
+        ":file",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/testing:context",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
+    ],
+)
+
 loom_cc_library(
     name = "main",
     testonly = True,
@@ -471,13 +519,12 @@ loom_cc_library(
     testonly = True,
     srcs = ["llvmir_provider.c"],
     hdrs = ["llvmir_provider.h"],
+    copts = _LLVMIR_AMDGPU_TARGET_ENV_COPTS + _LLVMIR_X86_TARGET_ENV_COPTS,
     deps = [
         ":provider",
         "//loom/src/loom/target/emit/llvmir:loom_check",
-        "//loom/src/loom/target/emit/llvmir/amdgpu:target_env",
-        "//loom/src/loom/target/emit/llvmir/x86:target_env",
         "//runtime/src/iree/base",
-    ],
+    ] + _LLVMIR_AMDGPU_TARGET_ENV_DEPS + _LLVMIR_X86_TARGET_ENV_DEPS,
 )
 
 loom_cc_library(
@@ -509,6 +556,7 @@ loom_cc_test(
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -522,6 +570,7 @@ loom_cc_binary(
     deps = [
         ":provider",
         ":test_provider",
+        "//loom/src/loom/target/arch/cmd/check:check_provider",
         "//runtime/src/iree/base",
     ] + _LOOM_CHECK_PROVIDER_DEPS,
 )

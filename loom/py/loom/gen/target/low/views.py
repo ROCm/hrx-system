@@ -18,7 +18,13 @@ from loom.gen.target.low.compiled import (
     CompiledOperandForm,
     DescriptorSetView,
 )
-from loom.target.low_descriptors import Descriptor, DescriptorSet
+from loom.target.low_descriptors import (
+    Descriptor,
+    DescriptorSet,
+    InstructionClass,
+    Resource,
+    ScheduleClass,
+)
 
 
 def _descriptor_refs_for_ordinals(
@@ -93,22 +99,90 @@ def _validate_view_descriptors_match_storage(
     compiled: CompiledDescriptorSet,
     view_spec: DescriptorSet,
     descriptor_ordinals: Sequence[int],
-) -> None:
+) -> tuple[Descriptor, ...]:
+    projected_descriptors: list[Descriptor] = []
     for view_descriptor, storage_descriptor_ordinal in zip(view_spec.descriptors, descriptor_ordinals, strict=True):
+        source_descriptor = compiled.source_descriptors[storage_descriptor_ordinal]
         storage_descriptor = compiled.descriptors[storage_descriptor_ordinal]
+        if view_descriptor == source_descriptor:
+            projected_descriptors.append(storage_descriptor)
+            continue
         if (
             replace(
                 view_descriptor,
-                asm_forms=storage_descriptor.asm_forms,
-                asm_surface=storage_descriptor.asm_surface,
-                asm_surface_reason=storage_descriptor.asm_surface_reason,
+                asm_forms=source_descriptor.asm_forms,
+                asm_surface=source_descriptor.asm_surface,
+                asm_surface_reason=source_descriptor.asm_surface_reason,
+                schedule_class=source_descriptor.schedule_class,
             )
-            == storage_descriptor
+            != source_descriptor
         ):
-            continue
-        raise ValueError(
-            f"descriptor set view '{view_spec.key}' descriptor '{view_descriptor.key}' differs from storage descriptor '{storage_descriptor.key}' outside of asm forms or asm surface policy"
+            raise ValueError(
+                f"descriptor set view '{view_spec.key}' descriptor '{view_descriptor.key}' differs from storage descriptor '{storage_descriptor.key}' outside of asm forms, asm surface policy, or schedule class"
+            )
+        projected_descriptors.append(
+            replace(
+                storage_descriptor,
+                asm_forms=view_descriptor.asm_forms,
+                asm_surface=view_descriptor.asm_surface,
+                asm_surface_reason=view_descriptor.asm_surface_reason,
+                schedule_class=view_descriptor.schedule_class,
+            )
         )
+    return tuple(projected_descriptors)
+
+
+def _view_instruction_classes(
+    compiled: CompiledDescriptorSet,
+    view_spec: DescriptorSet,
+    descriptors: Sequence[Descriptor],
+    descriptor_ordinals: Sequence[int],
+) -> tuple[tuple[InstructionClass, ...], ...]:
+    schedule_context: (
+        tuple[
+            dict[str, ScheduleClass],
+            dict[str, ScheduleClass],
+            dict[str, Resource],
+        ]
+        | None
+    ) = None
+    result: list[tuple[InstructionClass, ...]] = []
+    for descriptor, storage_descriptor_ordinal in zip(descriptors, descriptor_ordinals, strict=True):
+        storage_descriptor = compiled.descriptors[storage_descriptor_ordinal]
+        if descriptor.schedule_class == storage_descriptor.schedule_class:
+            result.append(compiled.instruction_classes[storage_descriptor_ordinal])
+            continue
+        if schedule_context is None:
+            schedule_context = (
+                {schedule_class.name: schedule_class for schedule_class in compiled.schedule_classes},
+                {schedule_class.name: schedule_class for schedule_class in view_spec.schedule_classes},
+                {resource.name: resource for resource in compiled.resources},
+            )
+        storage_schedule_classes, view_schedule_classes, resources = schedule_context
+        view_schedule_class = view_schedule_classes.get(descriptor.schedule_class)
+        if view_schedule_class is None:
+            raise ValueError(f"descriptor set view '{view_spec.key}' descriptor '{descriptor.key}' references unknown schedule class '{descriptor.schedule_class}'")
+        storage_schedule_class = storage_schedule_classes.get(descriptor.schedule_class)
+        if storage_schedule_class is None:
+            raise ValueError(f"descriptor set view '{view_spec.key}' schedule class '{descriptor.schedule_class}' is absent from storage set '{compiled.spec.key}'")
+        if view_schedule_class != storage_schedule_class:
+            raise ValueError(f"descriptor set view '{view_spec.key}' schedule class '{descriptor.schedule_class}' differs from storage set '{compiled.spec.key}'")
+        result.append(
+            compiler.derive_instruction_classes(
+                descriptor,
+                storage_schedule_class,
+                resources,
+            )
+        )
+    return tuple(result)
+
+
+def _view_descriptors_match_storage(
+    compiled: CompiledDescriptorSet,
+    descriptors: Sequence[Descriptor],
+    descriptor_ordinals: Sequence[int],
+) -> bool:
+    return all(descriptor == compiled.descriptors[storage_descriptor_ordinal] for descriptor, storage_descriptor_ordinal in zip(descriptors, descriptor_ordinals, strict=True))
 
 
 def _view_asm_forms_match_storage(
@@ -150,6 +224,8 @@ def _compile_view_asm_forms(
     compiler.append_asm_form_table_spans(
         asm_forms,
         compiled.asm_operand_indices,
+        compiled.asm_operand_segments,
+        compiled.asm_result_value_types,
         compiled.asm_immediates,
         compiled.native_asm_values,
     )
@@ -176,9 +252,15 @@ def descriptor_set_view_for_spec(
         view_spec.descriptors,
         surface_name="descriptor set view",
     )
-    _validate_view_descriptors_match_storage(
+    descriptors = _validate_view_descriptors_match_storage(
         compiled,
         view_spec,
+        descriptor_ordinal_tuple,
+    )
+    instruction_classes = _view_instruction_classes(
+        compiled,
+        view_spec,
+        descriptors,
         descriptor_ordinal_tuple,
     )
     _validate_view_operand_forms_closed(
@@ -188,12 +270,19 @@ def descriptor_set_view_for_spec(
     )
     if (
         descriptor_ordinal_tuple == tuple(range(len(descriptor_ordinal_tuple)))
+        and _view_descriptors_match_storage(
+            compiled,
+            descriptors,
+            descriptor_ordinal_tuple,
+        )
         and _view_asm_forms_match_storage(compiled, view_spec, descriptor_ordinal_tuple)
         and not _asm_forms_have_duplicate_mnemonics(compiled.asm_forms)
     ):
         descriptor_count = len(descriptor_ordinal_tuple)
         return DescriptorSetView(
             spec=view_spec,
+            descriptors=descriptors,
+            instruction_classes=instruction_classes,
             descriptor_ordinals=descriptor_ordinal_tuple,
             descriptor_refs=_descriptor_refs_for_ordinals(
                 compiled.descriptors,
@@ -208,43 +297,66 @@ def descriptor_set_view_for_spec(
             uses_storage_operand_form_tables=True,
         )
 
-    storage_to_view_ordinals = {descriptor_ordinal: view_ordinal for view_ordinal, descriptor_ordinal in enumerate(descriptor_ordinal_tuple)}
-    asm_forms = _compile_view_asm_forms(compiled, view_spec)
-    _validate_view_asm_forms_unique(view_spec, asm_forms)
+    covers_storage_descriptors = descriptor_ordinal_tuple == tuple(range(len(compiled.descriptors)))
+    uses_storage_asm_form_tables = (
+        covers_storage_descriptors
+        and _view_asm_forms_match_storage(
+            compiled,
+            view_spec,
+            descriptor_ordinal_tuple,
+        )
+        and not _asm_forms_have_duplicate_mnemonics(compiled.asm_forms)
+    )
+    uses_storage_operand_form_tables = covers_storage_descriptors
+    if uses_storage_asm_form_tables:
+        asm_forms = compiled.asm_forms
+        canonical_asm_form_ordinals = compiled.canonical_asm_form_ordinals
+    else:
+        asm_forms = _compile_view_asm_forms(compiled, view_spec)
+        _validate_view_asm_forms_unique(view_spec, asm_forms)
+        canonical_asm_form_ordinals = _canonical_asm_form_ordinals(
+            len(descriptor_ordinal_tuple),
+            asm_forms,
+        )
 
-    descriptor_rows = []
-    operand_forms: list[CompiledOperandForm] = []
-    for storage_descriptor_ordinal in descriptor_ordinal_tuple:
-        storage_row = compiled.descriptor_rows[storage_descriptor_ordinal]
-        descriptor_row = dict(storage_row)
-        descriptor_row["operand_form_start"] = len(operand_forms)
-        operand_form_start = storage_row["operand_form_start"]
-        operand_form_count = storage_row["operand_form_count"]
-        for form_ordinal in range(operand_form_count):
-            operand_form = compiled.operand_forms[operand_form_start + form_ordinal]
-            operand_forms.append(
-                _clone_operand_form_for_view(
-                    operand_form,
-                    storage_to_view_ordinals[operand_form.replacement_descriptor_ordinal],
+    descriptor_rows = [dict(compiled.descriptor_rows[storage_descriptor_ordinal]) for storage_descriptor_ordinal in descriptor_ordinal_tuple]
+    if uses_storage_operand_form_tables:
+        operand_forms = compiled.operand_forms
+    else:
+        storage_to_view_ordinals = {descriptor_ordinal: view_ordinal for view_ordinal, descriptor_ordinal in enumerate(descriptor_ordinal_tuple)}
+        operand_forms = []
+        for descriptor_row, storage_descriptor_ordinal in zip(
+            descriptor_rows,
+            descriptor_ordinal_tuple,
+            strict=True,
+        ):
+            storage_row = compiled.descriptor_rows[storage_descriptor_ordinal]
+            descriptor_row["operand_form_start"] = len(operand_forms)
+            operand_form_start = storage_row["operand_form_start"]
+            operand_form_count = storage_row["operand_form_count"]
+            for form_ordinal in range(operand_form_count):
+                operand_form = compiled.operand_forms[operand_form_start + form_ordinal]
+                operand_forms.append(
+                    _clone_operand_form_for_view(
+                        operand_form,
+                        storage_to_view_ordinals[operand_form.replacement_descriptor_ordinal],
+                    )
                 )
-            )
-        descriptor_rows.append(descriptor_row)
 
     return DescriptorSetView(
         spec=view_spec,
+        descriptors=descriptors,
+        instruction_classes=instruction_classes,
         descriptor_ordinals=descriptor_ordinal_tuple,
         descriptor_refs=_descriptor_refs_for_ordinals(
             compiled.descriptors,
             descriptor_ordinal_tuple,
         ),
         descriptor_rows=descriptor_rows,
-        canonical_asm_form_ordinals=_canonical_asm_form_ordinals(
-            len(descriptor_ordinal_tuple),
-            asm_forms,
-        ),
+        canonical_asm_form_ordinals=canonical_asm_form_ordinals,
         asm_forms=asm_forms,
         operand_forms=operand_forms,
         uses_storage_descriptor_tables=False,
-        uses_storage_asm_form_tables=False,
-        uses_storage_operand_form_tables=False,
+        uses_storage_asm_form_tables=uses_storage_asm_form_tables,
+        uses_storage_operand_form_tables=uses_storage_operand_form_tables,
     )

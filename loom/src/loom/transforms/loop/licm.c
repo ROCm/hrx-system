@@ -8,8 +8,10 @@
 
 #include "loom/analysis/motion.h"
 #include "loom/ir/context.h"
+#include "loom/ir/local_value_domain.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
+#include "loom/pass/value_facts.h"
 #include "loom/rewrite/rewriter.h"
 
 #define LOOM_LICM_STATISTICS(V, statistics_type)     \
@@ -23,7 +25,8 @@ LOOM_PASS_STATISTICS_DEFINE(loom_licm_statistics, loom_licm_statistics_t,
 
 static const loom_pass_info_t loom_licm_pass_info_storage = {
     .name = IREE_SVL("licm"),
-    .description = IREE_SVL("Hoist loop-invariant pure operations."),
+    .description =
+        IREE_SVL("Hoist loop-invariant operations with proven legality."),
     .kind = LOOM_PASS_FUNCTION,
     .statistic_layout = &loom_licm_statistics_layout,
 };
@@ -84,6 +87,10 @@ typedef struct loom_licm_context_t {
   loom_rewriter_t* rewriter;
   // Shared motion legality analysis.
   loom_motion_analysis_t motion;
+  // Function-local value domain backing symbolic movement analysis.
+  loom_local_value_domain_t value_domain;
+  // Function facts used for counted-loop and alias proofs.
+  loom_value_fact_table_t* fact_table;
   // Region DFS stack for finding loop-like ops in the function.
   loom_licm_region_stack_t function_stack;
   // Region DFS stack for scanning one loop body for hoistable ops.
@@ -98,8 +105,12 @@ static iree_status_t loom_licm_op_is_hoistable(loom_licm_context_t* context,
                                                loom_op_t* loop_op,
                                                loom_op_t* candidate_op,
                                                bool* out_hoistable) {
-  return loom_motion_subtree_can_relocate_before(&context->motion, candidate_op,
-                                                 loop_op, out_hoistable);
+  const loom_loop_like_t loop = loom_loop_like_cast(context->module, loop_op);
+  loom_motion_loop_hoist_result_t result = {0};
+  IREE_RETURN_IF_ERROR(loom_motion_subtree_evaluate_hoist_before_loop(
+      &context->motion, loop, candidate_op, &result));
+  *out_hoistable = loom_motion_loop_hoist_result_is_legal(&result);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_licm_push_child_regions(
@@ -220,8 +231,19 @@ iree_status_t loom_licm_run(loom_pass_t* pass, loom_module_t* module,
         loom_licm_region_stack_initialize(pass->arena, &context.loop_stack);
   }
   if (iree_status_is_ok(status)) {
-    status =
-        loom_motion_analysis_initialize(module, pass->arena, &context.motion);
+    status = loom_local_value_domain_acquire_for_region_tree(
+        module, loom_func_like_body(function), pass->arena,
+        &context.value_domain);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_pass_value_facts_acquire(
+        pass, module, loom_pass_value_fact_scope_function(function),
+        &context.fact_table);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_motion_analysis_initialize(module, context.fact_table,
+                                             &context.value_domain, pass->arena,
+                                             &context.motion);
   }
 
   bool changed = true;
@@ -235,6 +257,7 @@ iree_status_t loom_licm_run(loom_pass_t* pass, loom_module_t* module,
   if (iree_status_is_ok(status) && any_changed) {
     loom_pass_mark_changed(pass);
   }
+  loom_local_value_domain_release(&context.value_domain);
   loom_rewriter_deinitialize(&rewriter);
   return status;
 }

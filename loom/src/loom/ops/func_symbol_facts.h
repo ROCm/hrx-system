@@ -17,6 +17,7 @@
 #include "iree/base/api.h"
 #include "loom/analysis/symbol_facts.h"
 #include "loom/ir/ir.h"
+#include "loom/target/condition.h"
 #include "loom/target/types.h"
 
 #ifdef __cplusplus
@@ -52,37 +53,43 @@ typedef struct loom_func_symbol_facts_t {
   uint8_t temperature;
 
   // Inline policy enum value from the func interface.
-  uint8_t inline_policy;
+  loom_inline_policy_t inline_policy;
 
   // True when the func op owns an implementation body.
   bool has_body;
 
-  // Implementation contract string ID for provider funcs, or invalid.
-  loom_string_id_t implements_id;
+  // Module-local template family symbol, or null for non-provider functions.
+  loom_symbol_ref_t template_family;
 
-  // Borrowed implementation contract key, or empty for non-providers.
-  iree_string_view_t implements;
+  // Borrowed template family symbol name, or empty when absent.
+  iree_string_view_t template_family_name;
 
-  // Provider priority for funcs with an implementation contract.
+  // Concrete provider priority, or zero when not applicable.
   int64_t priority;
 
   // Borrowed argument value IDs in signature order.
   const loom_value_id_t* argument_ids;
 
-  // Number of argument value IDs.
-  uint16_t argument_count;
-
   // Borrowed result value IDs in signature order.
   const loom_value_id_t* result_ids;
-
-  // Number of result value IDs.
-  uint16_t result_count;
 
   // Borrowed predicate list for provider or callable selection.
   const loom_predicate_t* predicates;
 
+  // Borrowed resolved target conditions for implementation providers.
+  const loom_target_condition_t* target_conditions;
+
+  // Number of argument value IDs.
+  uint16_t argument_count;
+
+  // Number of result value IDs.
+  uint16_t result_count;
+
   // Number of predicate entries.
   uint16_t predicate_count;
+
+  // Number of resolved target conditions.
+  uint16_t target_condition_count;
 
   // True when the func is an external import declaration.
   bool imports;

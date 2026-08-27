@@ -9,6 +9,29 @@
 
 iree_add_all_subdirs()
 
+loom_cc_library(
+  NAME
+    command_backend
+  HDRS
+    "command_backend.h"
+  SRCS
+    "command_backend.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::error::diagnostic
+    loom::link::module_index
+    loom::ops::command
+    loom::ops::op_defs
+    loom::pass::builtin_registry
+    loom::target::arch::cmd::artifact_set
+    loom::target::arch::cmd::lower::program_plan_index
+    loom::target::entry_selection
+    loom::tooling::execution::session
+    loom::tooling::io::file
+  PUBLIC
+)
+
 set(_loom_compile_platform_copts "")
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
   list(APPEND _loom_compile_platform_copts "-DLOOM_COMPILE_HAVE_AMDGPU=1")
@@ -21,6 +44,12 @@ if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND IREE_HAL_DRIVER_VULKAN)
 endif()
 if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
   list(APPEND _loom_compile_platform_copts "-DLOOM_COMPILE_HAVE_LLVMIR=1")
+endif()
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_AMDGPU)
+  list(APPEND _loom_compile_platform_copts "-DLOOM_COMPILE_HAVE_LLVMIR_AMDGPU_TARGET_ENV=1")
+endif()
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_X86)
+  list(APPEND _loom_compile_platform_copts "-DLOOM_COMPILE_HAVE_LLVMIR_X86_TARGET_ENV=1")
 endif()
 set(_loom_compile_platform_deps "")
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
@@ -37,8 +66,12 @@ if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND IREE_HAL_DRIVER_VULKAN)
 endif()
 if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
   list(APPEND _loom_compile_platform_deps loom::target::arch::llvmir::provider)
-  list(APPEND _loom_compile_platform_deps loom::target::emit::llvmir::amdgpu::target_env)
   list(APPEND _loom_compile_platform_deps loom::target::emit::llvmir::artifact_emitter)
+endif()
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_AMDGPU)
+  list(APPEND _loom_compile_platform_deps loom::target::emit::llvmir::amdgpu::target_env)
+endif()
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_X86)
   list(APPEND _loom_compile_platform_deps loom::target::emit::llvmir::x86::target_env)
 endif()
 loom_cc_binary(
@@ -49,8 +82,10 @@ loom_cc_binary(
   COPTS
     ${_loom_compile_platform_copts}
   DEPS
+    ::command_backend
     iree::base
     iree::base::tooling::flags
+    iree::io::byte_sequence
     iree::io::file_handle
     loom::codegen::low::text_asm
     loom::error::diagnostic
@@ -60,9 +95,12 @@ loom_cc_binary(
     loom::ops::kernel
     loom::ops::op_defs
     loom::sanitizer::options
-    loom::target::artifact_manifest
+    loom::target::arch::cmd::artifact_set
+    loom::target::arch::cmd::provider
     loom::target::entry_selection
     loom::target::low_descriptor_registry
+    loom::target::module_specialization
+    loom::target::reporting::artifact_manifest
     loom::tooling::cli::help
     loom::tooling::compile::pipeline
     loom::tooling::config
@@ -88,25 +126,12 @@ iree_execution_test_suite(
     "loom-compile=::loom-compile"
     "loom-format=loom::tools::loom-format"
   DATA
-    "rooted_template_provider.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/command_artifacts.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/rooted_template_provider.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/target_profile_template_selection.loom"
   LABELS
     "hostonly"
 )
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-iree_execution_test_suite(
-  NAME
-    amdgpu_execution_test
-  MANIFESTS
-    "loom-compile-amdgpu.test.json"
-  TOOLS
-    "loom-compile=::loom-compile"
-  DATA
-    "selected_root_amdgpu.loom"
-  LABELS
-    "hostonly"
-)
-endif()
 
 if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
 iree_execution_test_suite(

@@ -30,6 +30,8 @@ extern "C" {
 typedef struct loom_amdgpu_hal_binding_materialization_result_t {
   // ABI layout captured before low.resource ops are rewritten.
   loom_amdgpu_hal_kernel_abi_layout_t abi_layout;
+  // True when materialization changed the function IR.
+  bool changed;
   // Number of low.resource<hal_binding> ops expanded into pointer loads.
   iree_host_size_t materialized_binding_count;
   // Number of direct entry block arguments expanded into scalar loads.
@@ -44,9 +46,9 @@ typedef struct loom_amdgpu_hal_binding_materialization_result_t {
 // pseudos in
 // |function_op|.
 //
-// |descriptor_set| must be the target-low descriptor set selected for
-// |target_bundle|. Materialized packets are selected by stable descriptor ref
-// and verified against that concrete set.
+// |descriptor_set| must be the target-low descriptor set selected for the
+// function. Materialized packets are selected by stable descriptor ref and
+// verified against that concrete set.
 //
 // The expansion inserts or reuses a low.live_in<amdgpu.kernarg_segment_ptr>
 // value, loads one 64-bit binding pointer from each kernarg slot assigned by
@@ -55,11 +57,13 @@ typedef struct loom_amdgpu_hal_binding_materialization_result_t {
 // imports with reg<amdgpu.sgpr x2>. One semantic direct argument may consume
 // multiple 32-bit HAL constants; adjacent 32-bit arguments may be packed into
 // wider SMEM loads when the target-low descriptor set supports the packet.
-// Separate amdgpu.hal.buffer_descriptor pseudos materialize range, flags, and
+// Function predicates over materialized direct arguments become zero-cost
+// low.assume identities before the signature values are removed, preserving
+// their facts for target-low consumers without retaining stale ABI metadata.
+// Separate amdgpu.hal.buffer_descriptor pseudos materialize range, control, and
 // pointer-high descriptor bits only for selected descriptor-consuming packets.
 iree_status_t loom_amdgpu_hal_binding_materialize(
     loom_module_t* module, loom_op_t* function_op,
-    const loom_target_bundle_t* target_bundle,
     const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_hal_binding_materialization_result_t* out_result,
     iree_arena_allocator_t* scratch_arena);
@@ -73,7 +77,6 @@ iree_status_t loom_amdgpu_hal_binding_materialize(
 // segment pointer.
 iree_status_t loom_amdgpu_hal_binding_materialize_buffer_descriptors(
     loom_module_t* module, loom_op_t* function_op,
-    const loom_target_bundle_t* target_bundle,
     const loom_low_descriptor_set_t* descriptor_set,
     iree_host_size_t* out_materialized_count,
     iree_arena_allocator_t* scratch_arena);

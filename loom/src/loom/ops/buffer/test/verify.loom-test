@@ -1,0 +1,55 @@
+// RUN: verify
+
+func.def @pack_requires_one_or_more_ranges() {
+  // ERROR@+1: STRUCTURE/014 "byte_lengths" "0" "at least one physical byte range"
+  %total = buffer.pack [] : offset
+  func.return
+}
+
+// ====
+
+func.def @pack_requires_power_of_two_alignments(%byte_length: offset) {
+  // ERROR@+1: STRUCTURE/014 "minimum_alignments[0]" "24" "positive power-of-two byte alignment"
+  %total, %byte_offset = buffer.pack [align(24) %byte_length] : offset
+  func.return
+}
+
+// ====
+
+func.def @fill_rejects_i1_pattern(%target: buffer, %target_offset: offset, %byte_length: offset, %pattern: i1) {
+  // ERROR@+1: TYPE/003 "pattern" "i1" "8/16/32/64-bit scalar pattern"
+  buffer.fill %pattern, %target[%target_offset], %byte_length : i1
+  func.return
+}
+
+// ====
+
+func.def @fill_rejects_index_pattern(%target: buffer, %target_offset: offset, %byte_length: offset, %pattern: index) {
+  // ERROR@+1: TYPE/003 "pattern" "index" "8/16/32/64-bit scalar pattern"
+  buffer.fill %pattern, %target[%target_offset], %byte_length : index
+  func.return
+}
+
+// ====
+
+func.def @fill_rejects_offset_pattern(%target: buffer, %target_offset: offset, %byte_length: offset, %pattern: offset) {
+  // ERROR@+1: TYPE/003 "pattern" "offset" "8/16/32/64-bit scalar pattern"
+  buffer.fill %pattern, %target[%target_offset], %byte_length : offset
+  func.return
+}
+
+// ====
+
+func.def @load_i8_u_requires_offset(%source: buffer, %byte_offset: index) -> (i32) {
+  // ERROR@+1: TYPE/003 "byte_offset" "index" "offset"
+  %byte = buffer.load.i8.u %source[%byte_offset]
+  func.return %byte : i32
+}
+
+// ====
+
+func.def @store_i8_requires_i32(%value: i8, %target: buffer, %byte_offset: offset) {
+  // ERROR@+1: TYPE/003 "value" "i8" "i32"
+  buffer.store.i8 %value, %target[%byte_offset]
+  func.return
+}

@@ -230,9 +230,8 @@ TEST(ExecutableTest, ParsesSharedPdiAndRunDefinitions) {
       },
       &executable_data));
 
-  iree_hal_executable_params_t executable_params;
-  iree_hal_executable_params_initialize(&executable_params);
-  executable_params.executable_format = IREE_SV("amdxdna-pdi-fb");
+  iree_hal_executable_load_params_t executable_params;
+  iree_hal_executable_load_params_initialize(&executable_params);
   executable_params.executable_data =
       iree_make_const_byte_span(executable_data.data(), executable_data.size());
 
@@ -393,9 +392,8 @@ TEST(ExecutableTest, DispatchPlanPrecomputesEntryPointPolicy) {
       }},
       &executable_data));
 
-  iree_hal_executable_params_t executable_params;
-  iree_hal_executable_params_initialize(&executable_params);
-  executable_params.executable_format = IREE_SV("amdxdna-pdi-fb");
+  iree_hal_executable_load_params_t executable_params;
+  iree_hal_executable_load_params_initialize(&executable_params);
   executable_params.executable_data =
       iree_make_const_byte_span(executable_data.data(), executable_data.size());
 

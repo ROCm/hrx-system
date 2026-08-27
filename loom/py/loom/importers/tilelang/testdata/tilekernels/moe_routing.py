@@ -76,22 +76,22 @@ def _mask_indices_by_tp_input(
 
 
 @tilelang_case(
-    name="tilekernels_mask_indices_by_tp_gfx1100",
+    name="tilekernels_mask_indices_by_tp_gfx11_generic",
     category="kernel",
     tags=("tilekernels", "moe", "routing", "amdgpu"),
 )
-def tilekernels_mask_indices_by_tp_gfx1100(
+def tilekernels_mask_indices_by_tp_gfx11_generic(
     tilelang: Any,
     T: Any,
 ) -> TileLangImportInput:
-    return _mask_indices_by_tp_input(tilelang, T, target="hip -mcpu=gfx1100")
+    return _mask_indices_by_tp_input(tilelang, T, target="hip -mcpu=gfx11-generic")
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("mask_indices_by_tp_kernel") @mask_indices_by_tp_kernel(%num_tokens: i32) {
+kernel.def target(@hip_mcpu_gfx11_generic) export("mask_indices_by_tp_kernel") @mask_indices_by_tp_kernel(%num_tokens: i32) {
   %num_tokens_idx = index.cast %num_tokens : i32 to index
   %c2 = index.constant 2 : index
   %c128 = index.constant 128 : index
@@ -113,7 +113,7 @@ kernel.def target(@hip_mcpu_gfx1100) export("mask_indices_by_tp_kernel") @mask_i
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %value_bytes = index.constant 8 : offset
-  %value_buffer = buffer.alloca %value_bytes {base_alignment = 8, memory_space = private} : buffer
+  %value_buffer = buffer.alloca<private> align(8) %value_bytes : buffer
   %value = buffer.view %value_buffer[%c0_bytes] : buffer -> view<1xi64, %layout>
   %c128 = index.constant 128 : index
   %madd = index.madd %bx, %c128, %thread_idx : index
@@ -230,26 +230,26 @@ def _inplace_unique_group_indices_input(
 
 
 @tilelang_case(
-    name="tilekernels_inplace_unique_group_indices_gfx1100",
+    name="tilekernels_inplace_unique_group_indices_gfx11_generic",
     category="kernel",
     tags=("tilekernels", "moe", "dedupe", "amdgpu"),
 )
-def tilekernels_inplace_unique_group_indices_gfx1100(
+def tilekernels_inplace_unique_group_indices_gfx11_generic(
     tilelang: Any,
     T: Any,
 ) -> TileLangImportInput:
     return _inplace_unique_group_indices_input(
         tilelang,
         T,
-        target="hip -mcpu=gfx1100",
+        target="hip -mcpu=gfx11-generic",
     )
 
 
 # ----
 r"""
-amdgpu.target<gfx1100> @hip_mcpu_gfx1100
+amdgpu.target<gfx11-generic> @hip_mcpu_gfx11_generic
 
-kernel.def target(@hip_mcpu_gfx1100) export("inplace_unique_group_indices_kernel") @inplace_unique_group_indices_kernel() {
+kernel.def target(@hip_mcpu_gfx11_generic) export("inplace_unique_group_indices_kernel") @inplace_unique_group_indices_kernel() {
   %c8 = index.constant 8 : index
   %c1 = index.constant 1 : index
   %c128 = index.constant 128 : index
@@ -265,7 +265,7 @@ kernel.def target(@hip_mcpu_gfx1100) export("inplace_unique_group_indices_kernel
   %ty = kernel.workitem.id<y> : index
   %tz = kernel.workitem.id<z> : index
   %group_sel_bytes = index.constant 16 : offset
-  %group_sel_buffer = buffer.alloca %group_sel_bytes {base_alignment = 8, memory_space = private} : buffer
+  %group_sel_buffer = buffer.alloca<private> align(8) %group_sel_bytes : buffer
   %group_sel = buffer.view %group_sel_buffer[%c0_bytes] : buffer -> view<2xi64, %layout>
   %c128 = index.constant 128 : index
   %madd = index.madd %bx, %c128, %thread_idx : index

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shlex
 import subprocess
 import sys
@@ -23,10 +24,14 @@ def parse_arguments(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
     parser.add_argument("--plugin", required=True, type=Path)
     parser.add_argument("--source", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--checks", required=True)
+    parser.add_argument("--config-file", required=True, type=Path)
+    parser.add_argument("--vfsoverlay", required=True, type=Path)
+    parser.add_argument("--checks")
     parser.add_argument("--warnings-as-errors")
     parser.add_argument("--export-fixes", type=Path)
     parser.add_argument("--line-filter")
+    parser.add_argument("--recursion-summary", type=Path)
+    parser.add_argument("--suppress-recursion-diagnostics", action="store_true")
     parser.add_argument(
         "--allow-diagnostics",
         action="store_true",
@@ -53,9 +58,12 @@ def main(argv: list[str]) -> int:
     command = [
         str(args.clang_tidy),
         f"--load={args.plugin}",
-        f"--checks={args.checks}",
-        str(args.source),
+        f"--config-file={args.config_file}",
+        f"--vfsoverlay={args.vfsoverlay}",
     ]
+    if args.checks:
+        command.append(f"--checks={args.checks}")
+    command.append(str(args.source))
     if args.warnings_as_errors:
         command.append(f"--warnings-as-errors={args.warnings_as_errors}")
     if args.export_fixes:
@@ -63,8 +71,14 @@ def main(argv: list[str]) -> int:
     if args.line_filter:
         command.append(f"--line-filter={args.line_filter}")
     command += ["--", *compile_args]
+    environment = os.environ.copy()
+    if args.recursion_summary:
+        environment["IREE_CLANG_TIDY_RECURSION_SUMMARY"] = str(args.recursion_summary)
+    if args.suppress_recursion_diagnostics:
+        environment["IREE_CLANG_TIDY_RECURSION_DIAGNOSTICS"] = "0"
     completed = subprocess.run(
         command,
+        env=environment,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -84,6 +98,14 @@ def main(argv: list[str]) -> int:
         print(shlex.join(command), file=sys.stderr)
         if output:
             print(output, file=sys.stderr, end="" if output.endswith("\n") else "\n")
+        return completed.returncode
+    if args.recursion_summary and not args.recursion_summary.is_file():
+        print(
+            "clang-tidy did not produce the requested recursion summary: "
+            f"{args.recursion_summary}",
+            file=sys.stderr,
+        )
+        return 1
     return completed.returncode
 
 

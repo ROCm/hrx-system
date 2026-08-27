@@ -82,30 +82,36 @@ extern const loom_amdgpu_packed_ternary_descriptor_candidate_t
     kLoomAmdgpuPackedFmafF16DescriptorCandidates[];
 
 // Number of packed f16 vector.fmaf descriptor candidates.
-extern const uint32_t kLoomAmdgpuPackedFmafF16DescriptorCandidateCount;
+enum {
+  kLoomAmdgpuPackedFmafF16DescriptorCandidateCount = 2u,
+};
 
 // Descriptor candidates for packed f32 vector.fmaf packets.
 extern const loom_amdgpu_packed_ternary_descriptor_candidate_t
     kLoomAmdgpuPackedFmafF32DescriptorCandidates[];
 
 // Number of packed f32 vector.fmaf descriptor candidates.
-extern const uint32_t kLoomAmdgpuPackedFmafF32DescriptorCandidateCount;
+enum {
+  kLoomAmdgpuPackedFmafF32DescriptorCandidateCount = 1u,
+};
 
 // Descriptor candidates for packed i16 vector.fmai with signed preference.
 extern const loom_amdgpu_packed_ternary_descriptor_candidate_t
     kLoomAmdgpuPackedFmaiSignedPreferenceDescriptorCandidates[];
 
 // Number of packed i16 vector.fmai candidates with signed preference.
-extern const uint32_t
-    kLoomAmdgpuPackedFmaiSignedPreferenceDescriptorCandidateCount;
+enum {
+  kLoomAmdgpuPackedFmaiSignedPreferenceDescriptorCandidateCount = 2u,
+};
 
 // Descriptor candidates for packed i16 vector.fmai with unsigned preference.
 extern const loom_amdgpu_packed_ternary_descriptor_candidate_t
     kLoomAmdgpuPackedFmaiUnsignedPreferenceDescriptorCandidates[];
 
 // Number of packed i16 vector.fmai candidates with unsigned preference.
-extern const uint32_t
-    kLoomAmdgpuPackedFmaiUnsignedPreferenceDescriptorCandidateCount;
+enum {
+  kLoomAmdgpuPackedFmaiUnsignedPreferenceDescriptorCandidateCount = 2u,
+};
 
 #ifdef __cplusplus
 }  // extern "C"

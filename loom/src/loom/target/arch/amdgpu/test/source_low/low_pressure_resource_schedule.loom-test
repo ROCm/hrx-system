@@ -1,0 +1,33 @@
+// RUN: emit amdgpu-packet-json @combined_pressure strategy=resource-stall diagnostics=candidates
+
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @combined_pressure(
+    %old0: reg<amdgpu.vgpr>, %old1: reg<amdgpu.vgpr>,
+    %selector: reg<amdgpu.vgpr>, %source_address: reg<amdgpu.sgpr x2>,
+    %m0: reg<amdgpu.m0>, %accumulators: reg<amdgpu.agpr x60>) ->
+    (reg<amdgpu.vgpr x4>, reg<amdgpu.agpr x60>) asm {
+  %old = v_perm_b32 %old0, %old1, %selector
+  %address = v_add_u32 %old, %old
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="amdgpu.ds_write_b32", rejected_packet="amdgpu.global_load_b128_saddr", chosen_pressure_cliff_penalty="1", rejected_pressure_cliff_source="amdgpu.vgpr_agpr", rejected_pressure_cliff_units="65", rejected_pressure_cliff_penalty="1"}
+  ds_write_b32 %address, %old
+  %loaded = global_load_dwordx4_saddr %address, %source_address, %m0
+  return %loaded, %accumulators : reg<amdgpu.vgpr x4>, reg<amdgpu.agpr x60>
+}
+
+// ====
+
+amdgpu.target<gfx950> @target
+
+low.func.def target<amdgpu.cdna4.core>(@target) @combined_pressure(
+    %old0: reg<amdgpu.vgpr>, %old1: reg<amdgpu.vgpr>,
+    %selector: reg<amdgpu.vgpr>, %source_address: reg<amdgpu.sgpr x2>,
+    %m0: reg<amdgpu.m0>, %accumulators: reg<amdgpu.agpr x60>) ->
+    (reg<amdgpu.vgpr x4>, reg<amdgpu.agpr x60>) asm {
+  %old = v_perm_b32 %old0, %old1, %selector
+  %address = v_add_u32 %old, %old
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="amdgpu.ds_write_b32", rejected_packet="amdgpu.global_load_b128_saddr", chosen_pressure_cliff_penalty="1", rejected_pressure_cliff_source="amdgpu.vgpr_agpr", rejected_pressure_cliff_units="65", rejected_pressure_cliff_penalty="1"}
+  ds_write_b32 %address, %old
+  %loaded = global_load_dwordx4_saddr %address, %source_address, %m0
+  return %loaded, %accumulators : reg<amdgpu.vgpr x4>, reg<amdgpu.agpr x60>
+}

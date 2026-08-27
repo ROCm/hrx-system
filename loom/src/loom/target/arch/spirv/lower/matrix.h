@@ -11,10 +11,23 @@
 
 #include "loom/analysis/contract_vector.h"
 #include "loom/codegen/low/lower/lower.h"
+#include "loom/target/arch/spirv/isa.h"
+#include "loom/target/arch/spirv/scalar_types.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Maps a target-independent matrix component type to the exact SPIR-V scalar
+// type used by cooperative-matrix declarations and packet descriptors.
+bool loom_spirv_matrix_component_type(
+    loom_contract_numeric_type_t numeric_type,
+    loom_spirv_scalar_type_t* out_scalar_type);
+
+// Returns the SPIR-V scope selected for the current subgroup-fragment policy.
+// Source value typing and descriptor selection share this policy boundary so
+// their independently constructed matrix types cannot drift.
+loom_spirv_scope_t loom_spirv_matrix_scope(void);
 
 // Supplies SPIR-V options for shared descriptor-matrix source adapters.
 iree_status_t loom_spirv_descriptor_matrix_options(

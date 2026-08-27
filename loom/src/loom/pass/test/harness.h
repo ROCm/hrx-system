@@ -56,6 +56,8 @@ struct PassTestPredicateCapture {
   int evaluate_count = 0;
   // Function symbol selected by the synthetic target predicate.
   iree_string_view_t selected_symbol = iree_string_view_empty();
+  // Function version observed for |selected_symbol|, or NULL.
+  const loom_function_version_t* selected_function_version = nullptr;
 };
 
 // Returns a provider for `where target(...)` predicates that selects functions

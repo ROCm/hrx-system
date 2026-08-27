@@ -6,6 +6,7 @@
 
 #include <math.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/error/emitter.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/attribute.h"
@@ -15,12 +16,12 @@
 #include "loom/ops/atomic.h"
 #include "loom/ops/cache.h"
 #include "loom/ops/combining.h"
-#include "loom/ops/encoding/numeric_transform.h"
-#include "loom/ops/encoding/params.h"
+#include "loom/ops/encoding/auxiliary.h"
+#include "loom/ops/encoding/hadamard.h"
+#include "loom/ops/encoding/ops.h"
 #include "loom/ops/encoding/roles.h"
 #include "loom/ops/encoding/storage.h"
 #include "loom/ops/scalar/ops.h"
-#include "loom/ops/vector/encoding_auxiliary.h"
 #include "loom/ops/vector/fragment.h"
 #include "loom/ops/vector/memory.h"
 #include "loom/ops/vector/ops.h"
@@ -554,7 +555,7 @@ static iree_status_t loom_vector_verify_memory_access(
 static iree_status_t loom_vector_verify_fragment_memory_origin(
     iree_diagnostic_emitter_t emitter, const loom_op_t* op,
     loom_type_t view_type, loom_attribute_t static_indices,
-    uint16_t dynamic_index_count) {
+    uint16_t dynamic_index_count, uint8_t fragment_rank) {
   if (!loom_type_is_view(view_type)) {
     return iree_ok_status();
   }
@@ -563,9 +564,11 @@ static iree_status_t loom_vector_verify_fragment_memory_origin(
       emitter, op, static_indices, dynamic_index_count));
 
   uint8_t view_rank = loom_type_rank(view_type);
-  if (view_rank == 0) {
+  if (view_rank < fragment_rank) {
     return loom_vector_emit_operand_constraint(
-        emitter, op, IREE_SV("view"), view_type, IREE_SV("rank >= 1 view"));
+        emitter, op, IREE_SV("view"), view_type,
+        fragment_rank == 3 ? IREE_SV("rank >= 3 view")
+                           : IREE_SV("rank >= 2 view"));
   }
   if (static_indices.count != view_rank) {
     return loom_vector_emit_offset_count_mismatch(
@@ -766,28 +769,16 @@ iree_status_t loom_vector_store_verify(const loom_module_t* module,
       LOOM_CACHE_POLICY_ACCESS_STORE);
 }
 
-iree_status_t loom_vector_fragment_load_verify(
-    const loom_module_t* module, const loom_op_t* op,
-    iree_diagnostic_emitter_t emitter) {
-  loom_type_t view_type =
-      loom_module_value_type(module, loom_vector_fragment_load_view(op));
-  IREE_RETURN_IF_ERROR(loom_vector_verify_fragment_memory_origin(
-      emitter, op, view_type, loom_vector_fragment_load_static_indices(op),
-      loom_vector_fragment_load_indices(op).count));
-  return loom_vector_verify_optional_cache_policy(
-      emitter, op, loom_vector_fragment_load_cache_scope_ATTR_INDEX,
-      loom_vector_fragment_load_cache_temporal_ATTR_INDEX,
-      LOOM_CACHE_POLICY_ACCESS_LOAD);
-}
-
 iree_status_t loom_vector_fragment_store_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter) {
   loom_type_t view_type =
       loom_module_value_type(module, loom_vector_fragment_store_view(op));
+  const uint8_t fragment_rank =
+      loom_vector_fragment_store_blocks_is_present(op) ? 3 : 2;
   IREE_RETURN_IF_ERROR(loom_vector_verify_fragment_memory_origin(
       emitter, op, view_type, loom_vector_fragment_store_static_indices(op),
-      loom_vector_fragment_store_indices(op).count));
+      loom_vector_fragment_store_indices(op).count, fragment_rank));
   return loom_vector_verify_optional_cache_policy(
       emitter, op, loom_vector_fragment_store_cache_scope_ATTR_INDEX,
       loom_vector_fragment_store_cache_temporal_ATTR_INDEX,
@@ -1615,48 +1606,6 @@ iree_status_t loom_vector_table_quantize_verify(
                                                    thresholds_value);
 }
 
-static iree_string_view_t loom_vector_transform_input_elems_param_name(void) {
-  return IREE_SV("input_elems");
-}
-
-static iree_string_view_t loom_vector_transform_output_elems_param_name(void) {
-  return IREE_SV("output_elems");
-}
-
-static iree_string_view_t loom_vector_transform_signs_param_name(void) {
-  return IREE_SV("signs");
-}
-
-static iree_string_view_t loom_vector_transform_permutation_param_name(void) {
-  return IREE_SV("permutation");
-}
-
-static iree_string_view_t loom_vector_transform_matrix_param_name(void) {
-  return IREE_SV("matrix");
-}
-
-static bool loom_vector_string_id_equal(const loom_module_t* module,
-                                        loom_string_id_t string_id,
-                                        iree_string_view_t expected) {
-  if (string_id == LOOM_STRING_ID_INVALID ||
-      string_id >= module->strings.count) {
-    return false;
-  }
-  return iree_string_view_equal(module->strings.entries[string_id], expected);
-}
-
-static const loom_named_attr_t* loom_vector_find_named_attr(
-    const loom_module_t* module, loom_named_attr_slice_t attrs,
-    iree_string_view_t name) {
-  for (iree_host_size_t i = 0; i < attrs.count; ++i) {
-    const loom_named_attr_t* entry = &attrs.entries[i];
-    if (loom_vector_string_id_equal(module, entry->name_id, name)) {
-      return entry;
-    }
-  }
-  return NULL;
-}
-
 static iree_status_t loom_vector_emit_auxiliary_key_error(
     const loom_module_t* module, iree_diagnostic_emitter_t emitter,
     const loom_op_t* op, const loom_error_def_t* error,
@@ -1707,28 +1656,25 @@ static bool loom_vector_query_static_storage_schema_for_schema_value(
 
 static iree_status_t loom_vector_verify_required_auxiliary_key(
     const loom_module_t* module, iree_diagnostic_emitter_t emitter,
-    const loom_op_t* op,
-    loom_vector_encoding_auxiliary_key_flags_t present_keys,
-    loom_vector_encoding_auxiliary_key_t key) {
-  loom_vector_encoding_auxiliary_key_flags_t required_key =
-      loom_vector_encoding_auxiliary_key_flag(key);
+    const loom_op_t* op, loom_encoding_auxiliary_key_flags_t present_keys,
+    loom_encoding_auxiliary_key_t key) {
+  loom_encoding_auxiliary_key_flags_t required_key =
+      loom_encoding_auxiliary_key_flag(key);
   if (required_key != 0 && iree_any_bit_set(present_keys, required_key)) {
     return iree_ok_status();
   }
-  iree_string_view_t key_name = loom_vector_encoding_auxiliary_key_name(key);
+  iree_string_view_t key_name = loom_encoding_auxiliary_key_name(key);
   return loom_vector_emit_missing_auxiliary_key(module, emitter, op, key_name);
 }
 
 static iree_status_t loom_vector_verify_required_auxiliary_keys(
     const loom_module_t* module, iree_diagnostic_emitter_t emitter,
-    const loom_op_t* op,
-    loom_vector_encoding_auxiliary_key_flags_t present_keys,
-    loom_vector_encoding_auxiliary_key_flags_t required_keys) {
-  for (uint8_t i = 0; i < LOOM_VECTOR_ENCODING_AUXILIARY_KEY_COUNT_; ++i) {
-    loom_vector_encoding_auxiliary_key_t key =
-        (loom_vector_encoding_auxiliary_key_t)i;
-    loom_vector_encoding_auxiliary_key_flags_t key_flag =
-        loom_vector_encoding_auxiliary_key_flag(key);
+    const loom_op_t* op, loom_encoding_auxiliary_key_flags_t present_keys,
+    loom_encoding_auxiliary_key_flags_t required_keys) {
+  for (uint8_t i = 0; i < LOOM_ENCODING_AUXILIARY_KEY_COUNT_; ++i) {
+    loom_encoding_auxiliary_key_t key = (loom_encoding_auxiliary_key_t)i;
+    loom_encoding_auxiliary_key_flags_t key_flag =
+        loom_encoding_auxiliary_key_flag(key);
     if (!iree_any_bit_set(required_keys, key_flag)) {
       continue;
     }
@@ -1743,11 +1689,11 @@ static iree_status_t loom_vector_verify_encoded_auxiliary(
     iree_diagnostic_emitter_t emitter, loom_value_id_t schema_value,
     loom_value_slice_t auxiliary_values,
     loom_named_attr_slice_t auxiliary_names) {
-  loom_vector_encoding_auxiliary_view_t auxiliary_view;
+  loom_encoding_auxiliary_view_t auxiliary_view;
   iree_string_view_t unknown_key = iree_string_view_empty();
-  if (!loom_vector_encoding_auxiliary_view_resolve(
-          module, auxiliary_values, auxiliary_names, &auxiliary_view,
-          &unknown_key)) {
+  if (!loom_encoding_auxiliary_view_resolve(module, auxiliary_values,
+                                            auxiliary_names, &auxiliary_view,
+                                            &unknown_key)) {
     return loom_vector_emit_unknown_auxiliary_key(module, emitter, op,
                                                   unknown_key);
   }
@@ -1761,8 +1707,8 @@ static iree_status_t loom_vector_verify_encoded_auxiliary(
           storage_schema.encoded_operand)) {
     return iree_ok_status();
   }
-  loom_vector_encoding_auxiliary_key_flags_t required_keys = 0;
-  if (!loom_vector_encoding_auxiliary_required_keys_from_schema(
+  loom_encoding_auxiliary_key_flags_t required_keys = 0;
+  if (!loom_encoding_auxiliary_required_keys_from_schema(
           storage_schema.encoded_operand, &required_keys, NULL)) {
     return loom_vector_emit_missing_auxiliary_key(module, emitter, op,
                                                   IREE_SV("scale"));
@@ -1808,12 +1754,11 @@ static iree_status_t loom_vector_verify_fragment_schema_type(
 static iree_status_t loom_vector_verify_fragment_auxiliary_types(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter,
-    loom_vector_encoding_auxiliary_view_t auxiliary) {
-  for (uint8_t i = 0; i < LOOM_VECTOR_ENCODING_AUXILIARY_KEY_COUNT_; ++i) {
-    loom_vector_encoding_auxiliary_key_t key =
-        (loom_vector_encoding_auxiliary_key_t)i;
-    loom_vector_encoding_auxiliary_key_flags_t key_flag =
-        loom_vector_encoding_auxiliary_key_flag(key);
+    loom_encoding_auxiliary_view_t auxiliary) {
+  for (uint8_t i = 0; i < LOOM_ENCODING_AUXILIARY_KEY_COUNT_; ++i) {
+    loom_encoding_auxiliary_key_t key = (loom_encoding_auxiliary_key_t)i;
+    loom_encoding_auxiliary_key_flags_t key_flag =
+        loom_encoding_auxiliary_key_flag(key);
     if (!iree_any_bit_set(auxiliary.present_keys, key_flag)) {
       continue;
     }
@@ -1827,11 +1772,58 @@ static iree_status_t loom_vector_verify_fragment_auxiliary_types(
       continue;
     }
     return loom_vector_emit_operand_constraint(
-        emitter, op, loom_vector_encoding_auxiliary_key_name(key), value_type,
+        emitter, op, loom_encoding_auxiliary_key_name(key), value_type,
         iree_make_cstring_view(
             loom_type_constraint_name(LOOM_TYPE_CONSTRAINT_VECTOR)));
   }
   return iree_ok_status();
+}
+
+iree_status_t loom_vector_fragment_load_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter) {
+  loom_type_t view_type =
+      loom_module_value_type(module, loom_vector_fragment_load_view(op));
+  const uint8_t fragment_rank =
+      loom_vector_fragment_load_blocks_is_present(op) ? 3 : 2;
+  IREE_RETURN_IF_ERROR(loom_vector_verify_fragment_memory_origin(
+      emitter, op, view_type, loom_vector_fragment_load_static_indices(op),
+      loom_vector_fragment_load_indices(op).count, fragment_rank));
+  IREE_RETURN_IF_ERROR(loom_vector_verify_optional_cache_policy(
+      emitter, op, loom_vector_fragment_load_cache_scope_ATTR_INDEX,
+      loom_vector_fragment_load_cache_temporal_ATTR_INDEX,
+      LOOM_CACHE_POLICY_ACCESS_LOAD));
+
+  loom_encoding_auxiliary_view_t auxiliary;
+  iree_string_view_t unknown_key = iree_string_view_empty();
+  if (!loom_encoding_auxiliary_view_resolve(
+          module, loom_vector_fragment_load_auxiliary(op),
+          loom_vector_fragment_load_auxiliary_names(op), &auxiliary,
+          &unknown_key)) {
+    return loom_vector_emit_unknown_auxiliary_key(module, emitter, op,
+                                                  unknown_key);
+  }
+  IREE_RETURN_IF_ERROR(loom_vector_verify_fragment_auxiliary_types(
+      module, op, emitter, auxiliary));
+
+  loom_value_fact_storage_schema_t storage_schema = {0};
+  if (!loom_encoding_query_type_storage_schema(
+          /*context=*/NULL, module, view_type, &storage_schema)) {
+    return iree_ok_status();
+  }
+  if (loom_value_fact_encoded_operand_schema_is_unknown(
+          storage_schema.encoded_operand)) {
+    return iree_ok_status();
+  }
+
+  loom_encoding_auxiliary_key_flags_t required_keys = 0;
+  if (!loom_encoding_auxiliary_required_keys_from_schema(
+          storage_schema.encoded_operand, &required_keys, NULL)) {
+    return loom_vector_emit_missing_auxiliary_key(module, emitter, op,
+                                                  IREE_SV("scale"));
+  }
+  return loom_vector_verify_required_auxiliary_keys(
+      module, emitter, op, auxiliary.present_keys, required_keys);
 }
 
 iree_status_t loom_vector_fragment_verify(const loom_module_t* module,
@@ -1870,8 +1862,8 @@ iree_status_t loom_vector_fragment_verify(const loom_module_t* module,
     return iree_ok_status();
   }
 
-  loom_vector_encoding_auxiliary_key_flags_t required_keys = 0;
-  if (!loom_vector_encoding_auxiliary_required_keys_from_schema(
+  loom_encoding_auxiliary_key_flags_t required_keys = 0;
+  if (!loom_encoding_auxiliary_required_keys_from_schema(
           storage_schema.encoded_operand, &required_keys, NULL)) {
     return loom_vector_emit_missing_auxiliary_key(module, emitter, op,
                                                   IREE_SV("scale"));
@@ -1880,324 +1872,27 @@ iree_status_t loom_vector_fragment_verify(const loom_module_t* module,
       module, emitter, op, parameters.auxiliary.present_keys, required_keys);
 }
 
-static iree_status_t loom_vector_emit_encoding_dynamic_type_error(
-    const loom_module_t* module, iree_diagnostic_emitter_t emitter,
-    const loom_op_t* op, iree_string_view_t encoding_name,
-    iree_string_view_t param_name, loom_value_id_t value_id,
-    iree_string_view_t expected_type) {
-  loom_type_t actual_type = loom_module_value_type(module, value_id);
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(encoding_name),
-      loom_param_string(param_name),
-      loom_param_type(actual_type),
-      loom_param_string(expected_type),
-  };
-  return loom_vector_emit(emitter, op, LOOM_ERR_ENCODING_009, params,
-                          IREE_ARRAYSIZE(params));
-}
-
-static bool loom_vector_i64_is_power_of_two(int64_t value) {
-  if (value <= 0) return false;
-  return (value & (value - 1)) == 0;
-}
-
-static iree_status_t loom_vector_transform_verify_extent_param(
-    const loom_module_t* module, iree_diagnostic_emitter_t emitter,
-    const loom_op_t* op, const loom_encoding_define_param_view_t* params,
-    iree_string_view_t param_name, iree_string_view_t field_name,
-    loom_type_t field_type, uint8_t axis, bool field_is_result) {
-  const loom_named_attr_t* static_param =
-      loom_vector_find_named_attr(module, params->static_attrs, param_name);
-  const loom_named_attr_t* dynamic_param =
-      loom_vector_find_named_attr(module, params->dynamic_names, param_name);
-  if (!static_param && !dynamic_param) return iree_ok_status();
-
-  if (static_param) {
-    if (static_param->value.kind != LOOM_ATTR_I64) {
-      return iree_ok_status();
-    }
-    int64_t expected_extent = loom_attr_as_i64(static_param->value);
-    if (expected_extent <= 0) {
-      return iree_ok_status();
-    }
-    if (loom_type_dim_is_dynamic_at(field_type, axis)) {
-      return loom_vector_emit_field_constraint(
-          emitter, op, field_is_result, field_name, field_type,
-          IREE_SV("last axis matching static transform extent"));
-    }
-    int64_t actual_extent = loom_type_dim_static_size_at(field_type, axis);
-    if (actual_extent == expected_extent) return iree_ok_status();
-    return loom_vector_emit_field_constraint(
-        emitter, op, field_is_result, field_name, field_type,
-        IREE_SV("last axis matching static transform extent"));
-  }
-
-  loom_value_id_t value_id = LOOM_VALUE_ID_INVALID;
-  if (!loom_encoding_define_dynamic_param_value(params, dynamic_param,
-                                                &value_id)) {
-    return iree_ok_status();
-  }
-  if (!loom_type_equal(loom_module_value_type(module, value_id),
-                       loom_type_scalar(LOOM_SCALAR_TYPE_INDEX))) {
-    return iree_ok_status();
-  }
-  if (!loom_type_dim_is_dynamic_at(field_type, axis) ||
-      loom_type_dim_value_id_at(field_type, axis) != value_id) {
-    return loom_vector_emit_field_constraint(
-        emitter, op, field_is_result, field_name, field_type,
-        IREE_SV("last axis matching dynamic transform extent"));
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_vector_transform_verify_permutation_lane(
-    iree_diagnostic_emitter_t emitter, const loom_op_t* op, uint8_t source_axis,
-    int64_t permutation_lane, int64_t source_lane_count) {
-  if (permutation_lane >= 0 && permutation_lane < source_lane_count) {
-    return iree_ok_status();
-  }
-  return loom_vector_emit_static_index_out_of_bounds(
-      emitter, op, source_axis, permutation_lane, source_lane_count);
-}
-
-static iree_status_t loom_vector_transform_verify_static_permutation_values(
-    const loom_module_t* module, iree_diagnostic_emitter_t emitter,
-    const loom_op_t* op, loom_type_t source_type,
-    loom_value_id_t permutation_value) {
-  uint8_t last_axis = (uint8_t)(loom_type_rank(source_type) - 1);
-  if (loom_type_dim_is_dynamic_at(source_type, last_axis)) {
-    return iree_ok_status();
-  }
-  int64_t source_lane_count =
-      loom_type_dim_static_size_at(source_type, last_axis);
-  const loom_value_t* value = loom_module_value(module, permutation_value);
-  if (loom_value_is_block_arg(value)) return iree_ok_status();
-  const loom_op_t* def_op = loom_value_def_op(value);
-  if (!def_op) return iree_ok_status();
-
-  if (loom_vector_constant_isa(def_op)) {
-    loom_attribute_t attr = loom_vector_constant_value(def_op);
-    if (attr.kind != LOOM_ATTR_I64) return iree_ok_status();
-    int64_t permutation_lane = loom_attr_as_i64(attr);
-    IREE_RETURN_IF_ERROR(loom_vector_transform_verify_permutation_lane(
-        emitter, op, last_axis, permutation_lane, source_lane_count));
-    if (source_lane_count <= 1) return iree_ok_status();
-    return loom_vector_emit_attribute_value_constraint(
-        emitter, op, IREE_SV("permutation"), permutation_lane,
-        IREE_SV("unique lane indices"));
-  }
-
-  if (!loom_vector_from_elements_isa(def_op)) return iree_ok_status();
-  loom_value_slice_t elements = loom_vector_from_elements_elements(def_op);
-  for (uint16_t i = 0; i < elements.count; ++i) {
-    int64_t permutation_lane = 0;
-    if (!loom_vector_try_get_scalar_i64_constant(module, elements.values[i],
-                                                 &permutation_lane)) {
-      return iree_ok_status();
-    }
-    IREE_RETURN_IF_ERROR(loom_vector_transform_verify_permutation_lane(
-        emitter, op, last_axis, permutation_lane, source_lane_count));
-    for (uint16_t j = 0; j < i; ++j) {
-      int64_t previous_lane = 0;
-      if (!loom_vector_try_get_scalar_i64_constant(module, elements.values[j],
-                                                   &previous_lane)) {
-        return iree_ok_status();
-      }
-      if (previous_lane != permutation_lane) continue;
-      return loom_vector_emit_attribute_value_constraint(
-          emitter, op, IREE_SV("permutation"), permutation_lane,
-          IREE_SV("unique lane indices"));
-    }
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_vector_transform_verify_dynamic_param_shapes(
-    const loom_module_t* module, iree_diagnostic_emitter_t emitter,
-    const loom_op_t* op, const loom_op_t* define_op,
-    const loom_encoding_define_param_view_t* params,
-    iree_string_view_t encoding_name, loom_type_t source_type,
-    loom_type_t result_type) {
-  const loom_named_attr_t* signs_param = loom_vector_find_named_attr(
-      module, params->dynamic_names, loom_vector_transform_signs_param_name());
-  if (signs_param) {
-    loom_value_id_t signs_value = LOOM_VALUE_ID_INVALID;
-    if (!loom_encoding_define_dynamic_param_value(params, signs_param,
-                                                  &signs_value)) {
-      return iree_ok_status();
-    }
-    loom_type_t signs_type = loom_module_value_type(module, signs_value);
-    if (loom_type_is_vector(signs_type) &&
-        loom_type_element_type(signs_type) == LOOM_SCALAR_TYPE_I1 &&
-        !loom_vector_shapes_match(signs_type, source_type)) {
-      return loom_vector_emit_encoding_dynamic_type_error(
-          module, emitter, define_op, encoding_name,
-          loom_vector_transform_signs_param_name(), signs_value,
-          IREE_SV("i1 vector with source shape"));
-    }
-  }
-
-  const loom_named_attr_t* permutation_param = loom_vector_find_named_attr(
-      module, params->dynamic_names,
-      loom_vector_transform_permutation_param_name());
-  if (permutation_param) {
-    loom_value_id_t permutation_value = LOOM_VALUE_ID_INVALID;
-    if (!loom_encoding_define_dynamic_param_value(params, permutation_param,
-                                                  &permutation_value)) {
-      return iree_ok_status();
-    }
-    loom_type_t permutation_type =
-        loom_module_value_type(module, permutation_value);
-    if (loom_type_is_vector(permutation_type) &&
-        loom_type_satisfies_constraint(
-            permutation_type,
-            LOOM_TYPE_CONSTRAINT_INDEX_OR_NON_I1_INTEGER_ELEMENT) &&
-        !loom_vector_shapes_match(permutation_type, source_type)) {
-      return loom_vector_emit_encoding_dynamic_type_error(
-          module, emitter, define_op, encoding_name,
-          loom_vector_transform_permutation_param_name(), permutation_value,
-          IREE_SV("index or non-i1 integer vector with source shape"));
-    }
-    IREE_RETURN_IF_ERROR(loom_vector_transform_verify_static_permutation_values(
-        module, emitter, op, source_type, permutation_value));
-  }
-
-  const loom_named_attr_t* matrix_param = loom_vector_find_named_attr(
-      module, params->dynamic_names, loom_vector_transform_matrix_param_name());
-  if (!matrix_param) return iree_ok_status();
-
-  loom_value_id_t matrix_value = LOOM_VALUE_ID_INVALID;
-  if (!loom_encoding_define_dynamic_param_value(params, matrix_param,
-                                                &matrix_value)) {
-    return iree_ok_status();
-  }
-  loom_type_t matrix_type = loom_module_value_type(module, matrix_value);
-  if (!loom_type_is_vector(matrix_type) ||
-      !loom_scalar_type_is_float(loom_type_element_type(matrix_type))) {
-    return iree_ok_status();
-  }
-
-  loom_encoding_numeric_transform_read_t read =
-      loom_encoding_numeric_transform_read_descriptor(
-          module, loom_encoding_define_result(define_op));
-  if (read.code != LOOM_ENCODING_NUMERIC_TRANSFORM_READ_OK) {
-    return iree_ok_status();
-  }
-  if (read.descriptor.family !=
-      LOOM_ENCODING_NUMERIC_TRANSFORM_FAMILY_JL_DENSE) {
-    return iree_ok_status();
-  }
-
-  uint8_t matrix_rank = loom_type_rank(matrix_type);
-  uint8_t source_last_axis = (uint8_t)(loom_type_rank(source_type) - 1);
-  uint8_t result_last_axis = (uint8_t)(loom_type_rank(result_type) - 1);
-  if (matrix_rank == 2 &&
-      loom_vector_dim_equals(matrix_type, 0, result_type, result_last_axis) &&
-      loom_vector_dim_equals(matrix_type, 1, source_type, source_last_axis)) {
-    return iree_ok_status();
-  }
-  return loom_vector_emit_encoding_dynamic_type_error(
-      module, emitter, define_op, encoding_name,
-      loom_vector_transform_matrix_param_name(), matrix_value,
-      IREE_SV("rank-2 floating-point matrix matching output x input extents"));
-}
-
-static iree_status_t loom_vector_transform_verify_family(
-    const loom_module_t* module, const loom_op_t* op,
-    iree_diagnostic_emitter_t emitter, loom_type_t source_type,
-    loom_type_t result_type) {
-  loom_encoding_numeric_transform_read_t read =
-      loom_encoding_numeric_transform_read_descriptor(
-          module, loom_vector_transform_transform(op));
-  if (read.code != LOOM_ENCODING_NUMERIC_TRANSFORM_READ_OK) {
-    return iree_ok_status();
-  }
-
-  if (!loom_encoding_numeric_transform_family_is_hadamard_like(
-          read.descriptor.family)) {
-    return iree_ok_status();
-  }
-  if (!loom_vector_shapes_match(source_type, result_type)) {
-    return loom_vector_emit_shape_mismatch(emitter, op, IREE_SV("result"),
-                                           IREE_SV("source"));
-  }
-
-  uint8_t last_axis = (uint8_t)(loom_type_rank(source_type) - 1);
-  if (loom_type_dim_is_dynamic_at(source_type, last_axis)) {
-    return iree_ok_status();
-  }
-  int64_t last_axis_size = loom_type_dim_static_size_at(source_type, last_axis);
-  if (loom_vector_i64_is_power_of_two(last_axis_size)) return iree_ok_status();
-  return loom_vector_emit_operand_constraint(
-      emitter, op, IREE_SV("source"), source_type,
-      IREE_SV("power-of-two last axis extent for Hadamard transform"));
-}
-
 iree_status_t loom_vector_transform_verify(const loom_module_t* module,
                                            const loom_op_t* op,
                                            iree_diagnostic_emitter_t emitter) {
-  loom_value_id_t source_value = loom_vector_transform_source(op);
-  loom_value_id_t transform_value = loom_vector_transform_transform(op);
-  loom_value_id_t result_value = loom_vector_transform_result(op);
-  loom_type_t source_type = loom_module_value_type(module, source_value);
-  loom_type_t transform_type = loom_module_value_type(module, transform_value);
-  loom_type_t result_type = loom_module_value_type(module, result_value);
-  if (!loom_type_is_vector(source_type) || !loom_type_is_vector(result_type) ||
-      !loom_type_is_encoding(transform_type)) {
+  const loom_value_id_t source_value = loom_vector_transform_source(op);
+  const loom_value_id_t transform_value = loom_vector_transform_transform(op);
+  const loom_type_t source_type = loom_module_value_type(module, source_value);
+  if (!loom_type_is_vector(source_type) || loom_type_rank(source_type) == 0 ||
+      !loom_encoding_hadamard_isa(module, transform_value)) {
     return iree_ok_status();
   }
 
-  if (loom_type_encoding_role(transform_type) !=
-      LOOM_ENCODING_ROLE_NUMERIC_TRANSFORM) {
+  const uint8_t last_axis = (uint8_t)(loom_type_rank(source_type) - 1);
+  if (loom_type_dim_is_dynamic_at(source_type, last_axis)) {
     return iree_ok_status();
   }
-
-  uint8_t source_rank = loom_type_rank(source_type);
-  uint8_t result_rank = loom_type_rank(result_type);
-  if (source_rank == 0 || result_rank == 0) return iree_ok_status();
-  if (source_rank != result_rank) {
-    return loom_vector_emit_rank_mismatch(emitter, op, IREE_SV("result"),
-                                          result_rank, IREE_SV("source"),
-                                          source_rank);
-  }
-
-  uint8_t last_axis = (uint8_t)(source_rank - 1);
-  for (uint8_t axis = 0; axis < last_axis; ++axis) {
-    if (loom_vector_dim_equals(source_type, axis, result_type, axis)) continue;
-    return loom_vector_emit_shape_mismatch(emitter, op, IREE_SV("result"),
-                                           IREE_SV("source leading axes"));
-  }
-
-  const loom_value_t* transform = loom_module_value(module, transform_value);
-  if (loom_value_is_block_arg(transform)) return iree_ok_status();
-  const loom_op_t* define_op = loom_value_def_op(transform);
-  if (!define_op || !loom_encoding_define_isa(define_op)) {
-    return iree_ok_status();
-  }
-
-  loom_encoding_define_param_view_t params =
-      loom_encoding_define_param_view(module, define_op);
-  if (!params.spec || params.spec->name_id == LOOM_STRING_ID_INVALID ||
-      params.spec->name_id >= module->strings.count) {
-    return iree_ok_status();
-  }
-  iree_string_view_t encoding_name =
-      module->strings.entries[params.spec->name_id];
-
-  IREE_RETURN_IF_ERROR(loom_vector_transform_verify_extent_param(
-      module, emitter, op, &params,
-      loom_vector_transform_input_elems_param_name(), IREE_SV("source"),
-      source_type, last_axis, /*field_is_result=*/false));
-  IREE_RETURN_IF_ERROR(loom_vector_transform_verify_extent_param(
-      module, emitter, op, &params,
-      loom_vector_transform_output_elems_param_name(), IREE_SV("result"),
-      result_type, last_axis, /*field_is_result=*/true));
-  IREE_RETURN_IF_ERROR(loom_vector_transform_verify_dynamic_param_shapes(
-      module, emitter, op, define_op, &params, encoding_name, source_type,
-      result_type));
-
-  return loom_vector_transform_verify_family(module, op, emitter, source_type,
-                                             result_type);
+  const int64_t last_axis_size =
+      loom_type_dim_static_size_at(source_type, last_axis);
+  if (iree_math_is_power_of_two_i64(last_axis_size)) return iree_ok_status();
+  return loom_vector_emit_operand_constraint(
+      emitter, op, IREE_SV("source"), source_type,
+      IREE_SV("power-of-two last axis extent for Hadamard transform"));
 }
 
 iree_status_t loom_vector_geluf_verify(const loom_module_t* module,

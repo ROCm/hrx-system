@@ -37,21 +37,20 @@ int main(int argc, char** argv) {
   // Query the library header at the requested version.
   // The query call in this example is going into the handwritten demo code
   // but could be targeted at generated files or runtime-loaded shared objects.
-  union {
-    const iree_hal_executable_library_header_t** header;
-    const iree_hal_executable_library_v0_t* v0;
-  } library;
-  library.header = demo_executable_library_query(
-      IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST, &environment);
-  IREE_ASSERT_NE(library.header, NULL, "version may not have matched");
-  const iree_hal_executable_library_header_t* header = *library.header;
+  const iree_hal_executable_library_header_t* const* query_result =
+      demo_executable_library_query(IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST,
+                                    &environment);
+  IREE_ASSERT_NE(query_result, NULL, "version may not have matched");
+  const iree_hal_executable_library_header_t* header = *query_result;
   IREE_ASSERT_NE(header, NULL, "version may not have matched");
   IREE_ASSERT_LE(
       header->version, IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST,
       "expecting the library to have the same or older version as us");
   IREE_ASSERT(strcmp(header->name, "demo_library") == 0,
               "library name can be used to rendezvous in a registry");
-  IREE_ASSERT_GT(library.v0->exports.count, 0,
+  const iree_hal_executable_library_v0_t* library =
+      iree_hal_executable_library_v0_from_query_result(query_result);
+  IREE_ASSERT_GT(library->exports.count, 0,
                  "expected at least one entry point");
 
   // Push constants are an array of 4-byte values that are much more efficient
@@ -79,7 +78,7 @@ int main(int argc, char** argv) {
 
   // Resolve the entry point by ordinal.
   const iree_hal_executable_dispatch_v0_t entry_fn_ptr =
-      library.v0->exports.ptrs[0];
+      library->exports.ptrs[0];
 
   // Dispatch each workgroup with the same state.
   const iree_hal_executable_dispatch_state_v0_t dispatch_state = {

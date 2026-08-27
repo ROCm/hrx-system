@@ -13,10 +13,9 @@
 #include "loom/ir/module.h"
 #include "loom/target/registers.h"
 
-iree_status_t loom_low_build_register_type(
+static iree_status_t loom_low_validate_register_type_parts(
     const loom_low_descriptor_set_t* descriptor_set, uint16_t reg_class_id,
-    uint32_t unit_count, loom_type_t* out_type) {
-  *out_type = loom_type_none();
+    uint32_t unit_count) {
   if (unit_count == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "register type unit count must be non-zero");
@@ -27,41 +26,69 @@ iree_status_t loom_low_build_register_type(
                             " is not present in the selected descriptor set",
                             reg_class_id);
   }
+  return iree_ok_status();
+}
+
+iree_status_t loom_low_build_register_type(
+    const loom_low_descriptor_set_t* descriptor_set, uint16_t reg_class_id,
+    uint32_t unit_count, loom_type_t* out_type) {
+  *out_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_low_validate_register_type_parts(
+      descriptor_set, reg_class_id, unit_count));
   *out_type = loom_low_register_type(descriptor_set->stable_id, reg_class_id,
                                      unit_count);
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_build_resolved_descriptor_opcode_id(
-    loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, loom_string_id_t* out_opcode_id) {
-  *out_opcode_id = LOOM_STRING_ID_INVALID;
-  iree_string_view_t key = loom_low_descriptor_set_string(
-      descriptor_set, descriptor->key_string_offset);
-  if (iree_string_view_is_empty(key)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "target-low descriptor has no descriptor key");
+iree_status_t loom_low_build_typed_register_type(
+    loom_module_t* module, const loom_low_descriptor_set_t* descriptor_set,
+    uint16_t reg_class_id, uint32_t unit_count, loom_type_t value_type,
+    loom_type_t* out_type) {
+  *out_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_low_validate_register_type_parts(
+      descriptor_set, reg_class_id, unit_count));
+  return loom_module_intern_register_type(
+      module, descriptor_set->stable_id,
+      loom_low_register_type_pack_payload1(reg_class_id, unit_count),
+      value_type, out_type);
+}
+
+iree_status_t loom_low_build_descriptor_implicit_resource_type(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor, loom_type_t* out_type) {
+  *out_type = loom_type_none();
+  const loom_low_operand_t* operand =
+      loom_low_descriptor_implicit_resource_operand(descriptor_set, descriptor);
+  IREE_ASSERT(operand != NULL,
+              "low descriptor must provide an implicit resource operand");
+  for (uint16_t i = 0; i < operand->reg_class_alt_count; ++i) {
+    const loom_low_reg_class_alt_t* alternative =
+        &descriptor_set
+             ->reg_class_alts[operand->reg_class_alt_start + (uint32_t)i];
+    if (iree_any_bit_set(alternative->flags,
+                         LOOM_LOW_REG_CLASS_ALT_FLAG_IMMEDIATE)) {
+      continue;
+    }
+    return loom_low_build_register_type(descriptor_set,
+                                        alternative->reg_class_id,
+                                        operand->unit_count, out_type);
   }
-  return loom_module_intern_string(builder->module, key, out_opcode_id);
+  IREE_ASSERT_UNREACHABLE(
+      "low descriptor implicit resource has no register-class form");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
 iree_status_t loom_low_build_resolved_descriptor_op(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, loom_string_id_t opcode_id,
-    const loom_value_id_t* operands, iree_host_size_t operand_count,
-    loom_named_attr_slice_t attrs, const loom_type_t* result_types,
-    iree_host_size_t result_count, const loom_tied_result_t* tied_results,
-    iree_host_size_t tied_result_count, loom_location_id_t location,
-    loom_op_t** out_op) {
-  IREE_ASSERT(opcode_id != LOOM_STRING_ID_INVALID);
+    const loom_low_descriptor_t* descriptor, const loom_value_id_t* operands,
+    iree_host_size_t operand_count, loom_named_attr_slice_t attrs,
+    const loom_type_t* result_types, iree_host_size_t result_count,
+    const loom_tied_result_t* tied_results, iree_host_size_t tied_result_count,
+    loom_location_id_t location, loom_op_t** out_op) {
   *out_op = NULL;
   const uint32_t descriptor_ordinal =
       loom_low_descriptor_set_descriptor_ordinal(descriptor_set, descriptor);
-  if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "low descriptor row does not belong to the "
-                            "selected descriptor set");
-  }
+  IREE_ASSERT_NE(descriptor_ordinal, LOOM_LOW_DESCRIPTOR_ORDINAL_NONE);
   if (operand_count > UINT16_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "low.op operand count exceeds uint16_t range");
@@ -85,10 +112,8 @@ iree_status_t loom_low_build_resolved_descriptor_op(
     memcpy(loom_op_operands(*out_op), operands,
            operand_count * sizeof(loom_value_id_t));
   }
-  loom_op_attrs(*out_op)[loom_low_op_opcode_ATTR_INDEX] =
-      loom_attr_string(opcode_id);
-  loom_op_attrs(*out_op)[loom_low_op_descriptor_ordinal_ATTR_INDEX] =
-      loom_attr_i64((int64_t)descriptor_ordinal);
+  loom_op_attrs(*out_op)[loom_low_op_descriptor_ATTR_INDEX] =
+      loom_attr_scoped_enum(descriptor_ordinal);
   if (attrs.count > 0) {
     IREE_RETURN_IF_ERROR(loom_module_make_canonical_attr_dict(
         builder->module, attrs,
@@ -109,29 +134,21 @@ iree_status_t loom_low_build_resolved_descriptor_op(
 
 iree_status_t loom_low_build_resolved_descriptor_const(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, loom_string_id_t opcode_id,
-    loom_named_attr_slice_t attrs, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op) {
-  IREE_ASSERT(opcode_id != LOOM_STRING_ID_INVALID);
+    const loom_low_descriptor_t* descriptor, loom_named_attr_slice_t attrs,
+    loom_type_t result_type, loom_location_id_t location, loom_op_t** out_op) {
   *out_op = NULL;
   const uint32_t descriptor_ordinal =
       loom_low_descriptor_set_descriptor_ordinal(descriptor_set, descriptor);
-  if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "low descriptor row does not belong to the "
-                            "selected descriptor set");
-  }
+  IREE_ASSERT_NE(descriptor_ordinal, LOOM_LOW_DESCRIPTOR_ORDINAL_NONE);
 
   IREE_RETURN_IF_ERROR(loom_builder_allocate_op(
       builder, LOOM_OP_LOW_CONST, /*operand_count=*/0, /*result_count=*/1,
-      /*region_count=*/0, /*tied_result_count=*/0, /*attribute_count=*/3,
+      /*region_count=*/0, /*tied_result_count=*/0, /*attribute_count=*/2,
       location, out_op));
   (*out_op)->traits =
       loom_low_descriptor_effective_traits(descriptor_set, descriptor);
-  loom_op_attrs(*out_op)[loom_low_const_opcode_ATTR_INDEX] =
-      loom_attr_string(opcode_id);
-  loom_op_attrs(*out_op)[loom_low_const_descriptor_ordinal_ATTR_INDEX] =
-      loom_attr_i64((int64_t)descriptor_ordinal);
+  loom_op_attrs(*out_op)[loom_low_const_descriptor_ATTR_INDEX] =
+      loom_attr_scoped_enum(descriptor_ordinal);
   if (attrs.count > 0) {
     IREE_RETURN_IF_ERROR(loom_module_make_canonical_attr_dict(
         builder->module, attrs,

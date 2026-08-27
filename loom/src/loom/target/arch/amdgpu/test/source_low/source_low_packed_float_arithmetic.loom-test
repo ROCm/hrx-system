@@ -1,0 +1,87 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx11-generic> @target
+func.def target(@target) @packed_f16_binary_arithmetic(%lhs: vector<4xf16>, %rhs: vector<4xf16>) -> (vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>) {
+  %sum = vector.addf %lhs, %rhs : vector<4xf16>
+  %product = vector.mulf %lhs, %rhs : vector<4xf16>
+  %minimum = vector.minnumf %lhs, %rhs : vector<4xf16>
+  %maximum = vector.maxnumf %lhs, %rhs : vector<4xf16>
+  func.return %sum, %product, %minimum, %maximum : vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @packed_f16_binary_arithmetic(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %16 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %17 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %18 = v_pk_add_f16 %16, %17
+  %19 = slice %lhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %20 = slice %rhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %21 = v_pk_add_f16 %19, %20
+  %sum = concat(%18, %21) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %25 = v_pk_mul_f16 %16, %17
+  %28 = v_pk_mul_f16 %19, %20
+  %product = concat(%25, %28) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %32 = v_pk_min_f16 %16, %17
+  %35 = v_pk_min_f16 %19, %20
+  %minimum = concat(%32, %35) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %39 = v_pk_max_f16 %16, %17
+  %42 = v_pk_max_f16 %19, %20
+  %maximum = concat(%39, %42) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %sum, %product, %minimum, %maximum
+}
+
+// ====
+
+amdgpu.target<gfx12-generic> @target
+func.def target(@target) @packed_f16_ieee_minmax(%lhs: vector<4xf16>, %rhs: vector<4xf16>) -> (vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>) {
+  %minnum = vector.minnumf %lhs, %rhs : vector<4xf16>
+  %maxnum = vector.maxnumf %lhs, %rhs : vector<4xf16>
+  %minimum = vector.minimumf %lhs, %rhs : vector<4xf16>
+  %maximum = vector.maximumf %lhs, %rhs : vector<4xf16>
+  func.return %minnum, %maxnum, %minimum, %maximum : vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>
+}
+
+// ----
+low.func.def target<amdgpu.gfx12.generic.core>(@target) abi(hal_kernel) @packed_f16_ieee_minmax(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %16 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %17 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %18 = v_pk_min_num_f16 %16, %17
+  %19 = slice %lhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %20 = slice %rhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %21 = v_pk_min_num_f16 %19, %20
+  %minnum = concat(%18, %21) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %25 = v_pk_max_num_f16 %16, %17
+  %28 = v_pk_max_num_f16 %19, %20
+  %maxnum = concat(%25, %28) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %32 = v_pk_minimum_f16 %16, %17
+  %35 = v_pk_minimum_f16 %19, %20
+  %minimum = concat(%32, %35) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %39 = v_pk_maximum_f16 %16, %17
+  %42 = v_pk_maximum_f16 %19, %20
+  %maximum = concat(%39, %42) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %minnum, %maxnum, %minimum, %maximum
+}
+
+// ====
+
+amdgpu.target<gfx9-4-generic> @target
+func.def target(@target) @packed_f32_binary_arithmetic(%lhs: vector<4xf32>, %rhs: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
+  %sum = vector.addf %lhs, %rhs : vector<4xf32>
+  %product = vector.mulf %lhs, %rhs : vector<4xf32>
+  func.return %sum, %product : vector<4xf32>, vector<4xf32>
+}
+
+// ----
+low.func.def target<amdgpu.gfx9_4.generic.core>(@target) abi(hal_kernel) @packed_f32_binary_arithmetic(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm {
+  %10 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %11 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %12 = v_pk_add_f32 %10, %11
+  %13 = slice %lhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %14 = slice %rhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %15 = v_pk_add_f32 %13, %14
+  %sum = concat(%12, %15) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %19 = v_pk_mul_f32 %10, %11
+  %22 = v_pk_mul_f32 %13, %14
+  %product = concat(%19, %22) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  return %sum, %product
+}

@@ -1,0 +1,76 @@
+config.decl @test.fragment_bank.m_fragments : %value: index where [range(%value, 1, 8)]
+
+config.decl @test.fragment_bank.n_fragments : %value: index where [range(%value, 1, 8)]
+
+config.decl @test.fragment_bank.k_fragments : %value: index where [range(%value, 1, 8)]
+
+config.decl @test.fragment_bank.workgroup_size : %value: index where [range(%value, 1, 2048)]
+
+config.decl @test.fragment_bank.scratch_elements : %value: index where [range(%value, 1, 100000)]
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) export("configured_fragment_bank") @configured_fragment_bank() {
+  %unit = index.constant 1 : index
+  %workgroup_size = config.get @test.fragment_bank.workgroup_size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %stage_count = index.constant 2 : index
+  %element_bytes = index.constant 4 : index
+  %tile_extent = index.constant 16 : index
+  %matrix_m = index.constant 16 : index
+  %matrix_n = index.constant 16 : index
+  %matrix_k = index.constant 32 : index
+  %m_fragments = config.get @test.fragment_bank.m_fragments : index
+  %n_fragments = config.get @test.fragment_bank.n_fragments : index
+  %k_fragments = config.get @test.fragment_bank.k_fragments : index
+  %scratch_elements = config.get @test.fragment_bank.scratch_elements : index
+  %m_extent = index.mul %m_fragments, %tile_extent : index
+  %n_extent = index.mul %n_fragments, %tile_extent : index
+  %scratch_bytes_index = index.mul %scratch_elements, %element_bytes : index
+  %scratch_bytes = index.cast %scratch_bytes_index : index to offset
+  %lane = kernel.workitem.id<x> : index
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%m_extent]x[%n_extent]xf32>
+  %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<[%scratch_elements]xi32>
+  %marker = vector.constant 0 : vector<1xi32>
+  vector.store %marker, %scratch_view[%lane] : vector<1xi32>, view<[%scratch_elements]xi32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %lhs_payload = vector.constant 1.0 : vector<16xbf16>
+  %rhs_payload = vector.constant 1.0 : vector<16xbf16>
+  %lhs = vector.fragment<lhs> %lhs_payload shape [%matrix_m, %matrix_k] : vector<16xbf16>
+  %rhs = vector.fragment<rhs> %rhs_payload shape [%matrix_k, %matrix_n] : vector<16xbf16>
+  %zero_payload = vector.constant 0.0 : vector<8xf32>
+  %zero_fragment = vector.fragment<init> %zero_payload shape [%matrix_m, %matrix_n] : vector<8xf32>
+  %initial_bank = vector.broadcast %zero_fragment : vector<8xf32> -> vector<[%m_fragments]x[%n_fragments]x8xf32>
+  %result_bank = scf.for %stage = [%loop_begin to %stage_count step %loop_step](%stage_bank = %initial_bank : vector<[%m_fragments]x[%n_fragments]x8xf32>) -> (vector<[%m_fragments]x[%n_fragments]x8xf32>) {
+    %after_k = scf.for %k_fragment = [%loop_begin to %k_fragments step %loop_step](%k_bank = %stage_bank : vector<[%m_fragments]x[%n_fragments]x8xf32>) -> (vector<[%m_fragments]x[%n_fragments]x8xf32>) unroll {
+      %after_m = scf.for %m_fragment = [%loop_begin to %m_fragments step %loop_step](%m_bank = %k_bank : vector<[%m_fragments]x[%n_fragments]x8xf32>) -> (vector<[%m_fragments]x[%n_fragments]x8xf32>) unroll {
+        %after_n = scf.for %n_fragment = [%loop_begin to %n_fragments step %loop_step](%n_bank = %m_bank : vector<[%m_fragments]x[%n_fragments]x8xf32>) -> (vector<[%m_fragments]x[%n_fragments]x8xf32>) unroll {
+          %accumulator_payload = vector.extract %n_bank[%m_fragment, %n_fragment] : vector<[%m_fragments]x[%n_fragments]x8xf32> -> vector<8xf32>
+          %accumulator = vector.fragment<init> %accumulator_payload shape [%matrix_m, %matrix_n] : vector<8xf32>
+          %next_accumulator = vector.mma %lhs, %rhs, %accumulator : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+          %next_bank = vector.insert %next_accumulator into %n_bank[%m_fragment, %n_fragment] : vector<8xf32>, vector<[%m_fragments]x[%n_fragments]x8xf32>
+          scf.yield %next_bank : vector<[%m_fragments]x[%n_fragments]x8xf32>
+        }
+        scf.yield %after_n : vector<[%m_fragments]x[%n_fragments]x8xf32>
+      }
+      scf.yield %after_m : vector<[%m_fragments]x[%n_fragments]x8xf32>
+    }
+    scf.yield %after_k : vector<[%m_fragments]x[%n_fragments]x8xf32>
+  }
+  scf.for %store_m = [%loop_begin to %m_fragments step %loop_step] unroll {
+    %store_m_offset = index.mul %store_m, %tile_extent : index
+    scf.for %store_n = [%loop_begin to %n_fragments step %loop_step] unroll {
+      %store_n_offset = index.mul %store_n, %tile_extent : index
+      %store_payload = vector.extract %result_bank[%store_m, %store_n] : vector<[%m_fragments]x[%n_fragments]x8xf32> -> vector<8xf32>
+      %store_fragment = vector.fragment<result> %store_payload shape [%matrix_m, %matrix_n] : vector<8xf32>
+      vector.fragment.store<result> %store_fragment, %output_view[%store_m_offset, %store_n_offset] shape [%matrix_m, %matrix_n] : vector<8xf32>, view<[%m_extent]x[%n_extent]xf32>
+    }
+  }
+  kernel.return
+}

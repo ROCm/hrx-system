@@ -1,0 +1,41 @@
+// A loop with a lane-varying bound must preserve each lane's final carried
+// value while inactive lanes wait for the remaining lanes to finish.
+amdgpu.target<gfx11-generic> @divergent_loop_carry_gfx11_wave64 {subgroup_size = 64}
+
+kernel.def target(@divergent_loop_carry_gfx11_wave64) @divergent_loop_carry() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%upper_bounds: buffer, %values: buffer, %output: buffer) {
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %initial_count = scalar.constant 0 : i32
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %upper_bound_view = buffer.view %upper_bounds[%base] : buffer -> view<64xi32>
+  %value_view = buffer.view %values[%base] : buffer -> view<64xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xi32>
+  %upper_bound_i32 = view.load %upper_bound_view[%lane] : view<64xi32> -> i32
+  %upper_bound0 = index.cast %upper_bound_i32 : i32 to index
+  %upper_bound = index.assume %upper_bound0 [range(%upper_bound0, 0, 64)] : index
+  %count = scf.for %position = [%loop_begin to %upper_bound step %loop_step](%running_count = %initial_count : i32) -> (i32) {
+    %bounded_position = index.assume %position [range(%position, 0, 63)] : index
+    %value = view.load %value_view[%bounded_position] : view<64xi32> -> i32
+    %next_count = scalar.addi %running_count, %value : i32
+    scf.yield %next_count : i32
+  }
+  view.store %count, %output_view[%lane] : i32, view<64xi32>
+  kernel.return
+}
+
+check.case public @divergent_loop_carry_case {
+  %upper_bounds = check.generate.iota offset(0) step(1) : tensor<64xi32>
+  %values = check.generate.fill value(1) : tensor<64xi32>
+  %actual = check.generate.fill value(-1) : tensor<64xi32>
+  %expected = check.generate.iota offset(0) step(1) : tensor<64xi32>
+  kernel.launch @divergent_loop_carry(%upper_bounds, %values, %actual) : (tensor<64xi32>, tensor<64xi32>, tensor<64xi32>)
+  check.expect.equal actual(%actual) expected(%expected) : tensor<64xi32>
+  check.return
+}
+
+check.benchmark<@divergent_loop_carry_case>

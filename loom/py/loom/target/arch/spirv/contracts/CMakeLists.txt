@@ -14,7 +14,9 @@ iree_py_library(
     contracts
   SRCS
     "__init__.py"
+    "index.py"
     "logical_core.py"
+    "ordinary_vector.py"
   DEPS
     loom::py::loom::core
     loom::py::loom::dialect::buffer::buffer
@@ -24,13 +26,52 @@ iree_py_library(
     loom::py::loom::dialect::scf::scf
     loom::py::loom::dialect::vector::vector
     loom::py::loom::dialect::view::view
+    loom::py::loom::error::error
     loom::py::loom::target::arch::spirv::builtins
     loom::py::loom::target::arch::spirv::cooperative_matrix
     loom::py::loom::target::arch::spirv::descriptors
+    loom::py::loom::target::arch::spirv::ordinary_vector
     loom::py::loom::target::arch::spirv::scalar_alu
+    loom::py::loom::target::arch::spirv::scalar_constant
     loom::py::loom::target::arch::spirv::scalar_conversion
     loom::py::loom::target::arch::spirv::scalar_memory
     loom::py::loom::target::contracts::contracts
+)
+
+iree_py_test(
+  NAME
+    ordinary_vector_test
+  MAIN
+    "../../../../tools/pytest_style_runner.py"
+  SRCS
+    "ordinary_vector_test.py"
+    "../../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.spirv.contracts.ordinary_vector_test"
+  DEPS
+    loom::py::loom::target::arch::spirv::contracts::contracts
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+)
+
+iree_py_test(
+  NAME
+    contracts_test
+  MAIN
+    "../../../../tools/pytest_style_runner.py"
+  SRCS
+    "index_test.py"
+    "../../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.spirv.contracts.index_test"
+  DEPS
+    loom::py::loom::target::arch::spirv::contracts::contracts
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

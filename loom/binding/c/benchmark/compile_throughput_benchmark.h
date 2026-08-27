@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "iree/base/api.h"
+#include "loom/binding/c/benchmark/util/benchmark_support.h"
 #include "loomc/iree.h"
 
 namespace benchmark {
@@ -22,45 +23,25 @@ class State;
 
 namespace loomc::bench {
 
-template <typename T, void (*Release)(T*)>
-struct HandleDeleter {
-  void operator()(T* handle) const { Release(handle); }
-};
-
-template <typename T, void (*Release)(T*)>
-using HandlePtr = std::unique_ptr<T, HandleDeleter<T, Release>>;
-
-using CompilerPtr = HandlePtr<loomc_compiler_t, loomc_compiler_release>;
-using ContextPtr = HandlePtr<loomc_context_t, loomc_context_release>;
-using LinkIndexBuilderPtr =
-    HandlePtr<loomc_link_index_builder_t, loomc_link_index_builder_release>;
-using LinkIndexPtr = HandlePtr<loomc_link_index_t, loomc_link_index_release>;
-using LinkerPtr = HandlePtr<loomc_linker_t, loomc_linker_release>;
-using ModulePtr = HandlePtr<loomc_module_t, loomc_module_release>;
-using PassProgramPtr =
-    HandlePtr<loomc_pass_program_t, loomc_pass_program_release>;
-using ResultPtr = HandlePtr<loomc_result_t, loomc_result_release>;
-using SourcePtr = HandlePtr<loomc_source_t, loomc_source_release>;
-using TargetEnvironmentPtr =
-    HandlePtr<loomc_target_environment_t, loomc_target_environment_release>;
-using TargetProfilePtr =
-    HandlePtr<loomc_target_profile_t, loomc_target_profile_release>;
-using TargetSelectionPtr =
-    HandlePtr<loomc_target_selection_t, loomc_target_selection_release>;
-using WorkspacePtr = HandlePtr<loomc_workspace_t, loomc_workspace_release>;
-
 struct WorkerSlot {
   // Invocation-local scratch workspace used by one compile-pool worker.
   WorkspacePtr workspace;
+  // Workspace allocation counters captured after benchmark warmup.
+  loomc_workspace_statistics_t allocation_baseline = {};
 };
 
 class CompileScenario {
  public:
+  explicit CompileScenario(iree_host_size_t workspace_block_size = 0);
+
   virtual ~CompileScenario();
 
   virtual iree_status_t SetUp(iree_host_size_t worker_count);
 
   virtual iree_host_size_t job_count() const = 0;
+
+  // Prepares every worker-owned state and workload shape needed by timed jobs.
+  virtual iree_status_t WarmUp(iree_host_size_t worker_count);
 
   virtual iree_status_t RunJob(iree_host_size_t worker_ordinal,
                                iree_host_size_t job_ordinal) = 0;
@@ -70,6 +51,9 @@ class CompileScenario {
   void ResetCounters();
 
   int64_t artifact_bytes() const;
+
+  void SetWorkspaceAllocationCounters(::benchmark::State& state,
+                                      int64_t total_jobs) const;
 
  protected:
   iree_status_t SetUpWorkerSlots(iree_host_size_t worker_count);
@@ -91,27 +75,58 @@ class CompileScenario {
   std::vector<WorkerSlot> workers_;
 
  private:
+  // Total block size requested for each worker workspace. Zero selects the
+  // production default.
+  iree_host_size_t workspace_block_size_ = 0;
+
   // Total result artifact bytes observed by timed benchmark iterations.
   std::atomic<int64_t> artifact_bytes_{0};
 };
 
+// Shared production target setup for compile-and-emit benchmark scenarios.
+class TargetCompileScenario : public CompileScenario {
+ public:
+  explicit TargetCompileScenario(iree_host_size_t workspace_block_size = 0);
+
+ protected:
+  iree_status_t SetUpTarget(iree_host_size_t worker_count,
+                            TargetEnvironmentPtr target_environment,
+                            TargetProfilePtr target_profile,
+                            loomc_string_view_t pipeline_identifier);
+
+  iree_status_t CompileModuleToPreparedLow(WorkspacePtr& workspace,
+                                           ModulePtr& module,
+                                           loomc_string_view_t function_symbol,
+                                           loomc_string_view_t module_name,
+                                           loomc_config_options_t config);
+
+  loomc_target_environment_t* target_environment() const {
+    return target_environment_.get();
+  }
+
+ private:
+  // Target provider set shared by all jobs in the scenario.
+  TargetEnvironmentPtr target_environment_;
+
+  // Concrete immutable target facts shared by all jobs in the scenario.
+  TargetProfilePtr target_profile_;
+};
+
 using CompileScenarioFactory = std::unique_ptr<CompileScenario> (*)(
-    const ::benchmark::State& state, void* user_data);
-
-iree_allocator_t host_allocator();
-
-loomc_allocator_t loom_allocator();
-
-iree_status_t to_iree_status(loomc_status_t status);
+    const ::benchmark::State& state, const void* user_data);
 
 void RunCompileBenchmark(::benchmark::State& state,
-                         CompileScenarioFactory factory, void* user_data);
+                         CompileScenarioFactory factory, const void* user_data);
 
 void RunCompileBenchmarkDirect(::benchmark::State& state,
-                               CompileScenarioFactory factory, void* user_data);
+                               CompileScenarioFactory factory,
+                               const void* user_data);
 
-iree_status_t RequireSucceededResult(const loomc_result_t* result,
-                                     const char* operation);
+// Runs without compile warmup. Registrations must use Iterations(1) so the
+// counters and timing describe first growth rather than a cold/warm mixture.
+void RunCompileBenchmarkDirectCold(::benchmark::State& state,
+                                   CompileScenarioFactory factory,
+                                   const void* user_data);
 
 const loomc_artifact_t* FindArtifact(const loomc_result_t* result,
                                      loomc_artifact_kind_t kind,
@@ -133,7 +148,8 @@ iree_status_t CreateTextSource(const std::string& identifier,
 iree_status_t CreateBenchmarkKernelSource(loomc_string_view_t identifier,
                                           SourcePtr* out_source);
 
-iree_status_t CreateWorkspace(WorkspacePtr* out_workspace);
+iree_status_t CreateWorkspace(iree_host_size_t block_size,
+                              WorkspacePtr* out_workspace);
 
 iree_status_t DeserializeSource(loomc_context_t* context,
                                 loomc_workspace_t* workspace,

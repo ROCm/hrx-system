@@ -89,6 +89,10 @@ iree_select_compiler_opts(IREE_DEFAULT_COPTS
     "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>"
 
   MSVC_OR_CLANG_CL
+    # Interpret source files as UTF-8 and use UTF-8 for narrow literals. This
+    # keeps the checked-in source encoding independent of the host code page.
+    "/utf-8"
+
     # Exclude a bunch of rarely-used APIs, such as crypto/DDE/shell.
     # https://docs.microsoft.com/en-us/windows/win32/winprog/using-the-windows-headers
     # NOTE: this is not really required anymore for build performance but does
@@ -234,6 +238,7 @@ iree_select_compiler_opts(IREE_DEFAULT_COPTS
     # Note that we set CMake policy CMP0092 (if found), making this explicit:
     # https://cmake.org/cmake/help/v3.15/policy/CMP0092.html
     "/W3"
+    "$<$<BOOL:${IREE_ENABLE_WERROR_FLAG}>:/WX>"
 
     # "nonstandard extension used : zero-sized array in struct/union"
     # This happens with unsized or zero-length arrays at the end of structs,
@@ -281,6 +286,15 @@ iree_select_compiler_opts(IREE_DEFAULT_COPTS
     "/wd4244"  # possible loss of data
     "/wd4267"  # initializing: possible loss of data
     "/wd5105"  # allow: macro expansion producing 'defined' has undefined behavior
+
+  CLANG_CL
+    # clang-cl reports Clang unused diagnostics for generated code and macro
+    # wrappers even when using the MSVC-style warning level above. Keep these in
+    # line with the existing Clang/GCC suppressions.
+    $<$<COMPILE_LANGUAGE:CXX>:-Wno-invalid-offsetof>
+    "-Wno-unused-function"
+    "-Wno-unused-lambda-capture"
+    "-Wno-unused-variable"
 )
 
 # Set some things back to warnings that are really annoying as build errors

@@ -14,6 +14,7 @@ from pathlib import Path
 
 from loom.dsl import Op
 from loom.gen.support.c import c_identifier as _c_identifier
+from loom.gen.support.files import write_text_file
 from loom.gen.support.generated_file import line_comment_header
 from loom.gen.target.contracts import lower_rule_rows, lower_rule_spelling
 from loom.target.contracts import (
@@ -58,6 +59,16 @@ def generate_lower_rule_set(
     """Generates C/H text for a generated target-low lower-rule set."""
 
     compiled = compile_lower_rule_set(table, dialect_ops=dialect_ops)
+    return generate_lower_rule_set_from_compiled(table, compiled=compiled)
+
+
+def generate_lower_rule_set_from_compiled(
+    table: ContractFragment,
+    *,
+    compiled: CompiledLowerRuleSet,
+) -> GeneratedLowerRuleSet:
+    """Generates C/H text from compiled target-low lower-rule rows."""
+
     public_header = lower_rule_spelling.generated_public_header(table)
     symbol_name = lower_rule_spelling.generated_symbol_name(table)
     c_table_prefix = _c_identifier(lower_rule_spelling.generated_table_prefix(table))
@@ -87,10 +98,8 @@ def write_lower_rule_set_to_paths(
     """Writes generated C/H contents for one generated lower-rule set."""
 
     generated = generate_lower_rule_set(table, dialect_ops=dialect_ops)
-    header_path.parent.mkdir(parents=True, exist_ok=True)
-    source_path.parent.mkdir(parents=True, exist_ok=True)
-    header_path.write_text(generated.header, encoding="utf-8")
-    source_path.write_text(generated.source, encoding="utf-8")
+    write_text_file(header_path, generated.header)
+    write_text_file(source_path, generated.source)
 
 
 def _generate_header(*, header_guard: str, symbol_name: str) -> str:
@@ -403,6 +412,7 @@ def _validate_c_table_shape(
     for index, row in enumerate(table.value_refs):
         row_subject = f"{subject} value-ref {index}"
         _require_u16(row.index, f"{row_subject} index")
+        _require_u16(row.element_index, f"{row_subject} element index")
         _require_u16(row.materializer_index, f"{row_subject} materializer index")
         if row.materializer_index:
             _require_one_based_table_index(
@@ -444,6 +454,15 @@ def _validate_c_table_shape(
             _require_u8_not_reserved_any(
                 dynamic_term_count,
                 f"{row_subject} dynamic term count",
+            )
+        _require_u8_not_reserved_any(
+            constraint.dynamic_term_count_minimum,
+            f"{row_subject} minimum dynamic term count",
+        )
+        if constraint.dynamic_view_base_term_count is not None:
+            _require_u8_not_reserved_any(
+                constraint.dynamic_view_base_term_count,
+                f"{row_subject} dynamic view-base term count",
             )
         if constraint.dynamic_byte_stride is not None:
             _require_i64(
@@ -703,11 +722,13 @@ def _validate_c_table_shape(
 
 
 def _validate_type_pattern_c_shape(subject: str, type_pattern: TypePattern) -> None:
-    if type_pattern.kind != "vector":
+    if type_pattern.kind not in {"vector", "view"}:
         return
     _require_u8(len(type_pattern.dims), f"{subject} rank")
     for index, dim in enumerate(type_pattern.dims):
         _require_i64(dim, f"{subject} static dim {index}")
+    if type_pattern.kind == "view":
+        return
     if type_pattern.lanes is not None:
         _require_i64(type_pattern.lanes, f"{subject} static lanes")
     if isinstance(type_pattern.minimum_lanes, int):

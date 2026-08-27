@@ -8,10 +8,14 @@
 
 load(
     "@iree_amdgpu_device_toolchain//:paths.bzl",
+    "AMDGPU_CLANG_OFFLOAD_BUNDLER_TOOL",
     "AMDGPU_CLANG_RESOURCE_HEADERS",
     "AMDGPU_CLANG_RESOURCE_MARKER",
     "AMDGPU_CLANG_TOOL",
     "AMDGPU_DEVICE_TOOLCHAIN_AVAILABLE",
+    "AMDGPU_HIP_DEVICE_LIBRARIES",
+    "AMDGPU_HIP_DEVICE_LIBRARIES_AVAILABLE",
+    "AMDGPU_HIP_DEVICE_LIBRARIES_MARKER",
     "AMDGPU_LLD_TOOL",
     "AMDGPU_LLVM_AR_TOOL",
     "AMDGPU_LLVM_LINK_TOOL",
@@ -428,6 +432,75 @@ def iree_amdgpu_binary(
         **kwargs
     )
 
+def _iree_amdgpu_hip_binary(
+        name,
+        target,
+        arch,
+        srcs,
+        copts = [],
+        clang_tool = AMDGPU_CLANG_TOOL,
+        offload_bundler_tool = AMDGPU_CLANG_OFFLOAD_BUNDLER_TOOL,
+        objcopy_tool = AMDGPU_LLVM_OBJCOPY_TOOL,
+        device_libraries_dep = AMDGPU_HIP_DEVICE_LIBRARIES,
+        device_libraries_marker = AMDGPU_HIP_DEVICE_LIBRARIES_MARKER,
+        out = None,
+        **kwargs):
+    """Builds one device-library-linked HIP code object."""
+    if not AMDGPU_HIP_DEVICE_LIBRARIES_AVAILABLE:
+        _incompatible_filegroup(name, kwargs)
+        return
+    if target != "amdgcn-amd-amdhsa":
+        fail("HIP device sources require target amdgcn-amd-amdhsa")
+    if len(srcs) != 1:
+        fail("HIP device sources require exactly one source")
+
+    out = out or ("%s.so" % (name))
+    offload_bundle = "$(@D)/%s.offload_bundle" % (name,)
+    native.genrule(
+        name = name,
+        srcs = srcs + [
+            device_libraries_dep,
+            device_libraries_marker,
+        ],
+        outs = [out],
+        cmd = " && ".join([
+            "set -e",
+            " ".join([
+                "$(location %s)" % (clang_tool),
+                "--cuda-device-only",
+                "-x hip",
+                "-nogpuinc",
+                "--rocm-device-lib-path=$$(dirname $(location %s))" % (
+                    device_libraries_marker,
+                ),
+                "--offload-arch=%s" % (arch,),
+                "-fno-gpu-rdc",
+                "-fno-ident",
+                "-O3",
+                " ".join(copts),
+                "$(location %s)" % (srcs[0],),
+                "-o \"%s\"" % (offload_bundle,),
+            ]),
+            " ".join([
+                "PATH=\"$$(dirname $(location %s)):$${PATH}\"" % (objcopy_tool,),
+                "$(location %s)" % (offload_bundler_tool,),
+                "--unbundle",
+                "--type=o",
+                "--targets=hipv4-amdgcn-amd-amdhsa--%s" % (arch,),
+                "--input=\"%s\"" % (offload_bundle,),
+                "--output=$(location %s)" % (out,),
+            ]),
+        ]),
+        tools = [
+            clang_tool,
+            offload_bundler_tool,
+            objcopy_tool,
+        ],
+        message = "Compiling HIP code object %s for %s..." % (name, arch),
+        output_to_bindir = 1,
+        **kwargs
+    )
+
 def iree_amdgpu_binary_variants(
         name,
         target,
@@ -437,6 +510,7 @@ def iree_amdgpu_binary_variants(
         deps = [],
         code_object_targets = IREE_AMDGPU_CODE_OBJECT_TARGETS,
         minimize = False,
+        source_format = "freestanding_c",
         tags = [],
         **kwargs):
     """Builds code-object variants and exposes the selected outputs.
@@ -456,10 +530,16 @@ def iree_amdgpu_binary_variants(
       code_object_targets: Code-object targets to build variants for.
       minimize: Whether generated binaries should apply post-link
         symbol-table minimization.
+      source_format: Source compilation pipeline. `freestanding_c` uses the HAL
+        device build, while `hip` links the ROCm device libraries.
       tags: Tags applied to generated binary targets and the aggregate
         filegroup.
       **kwargs: Additional attributes forwarded to `iree_amdgpu_binary`.
     """
+    if source_format not in ["freestanding_c", "hip"]:
+        fail("unsupported AMDGPU binary source format: %s" % (source_format,))
+    if source_format == "hip" and (deps or minimize):
+        fail("HIP device sources do not support deps or minimize")
     if binary_name_prefix == None:
         binary_name_prefix = name
 
@@ -475,23 +555,30 @@ def iree_amdgpu_binary_variants(
             binary_name_prefix,
             iree_amdgpu_target_label_fragment(code_object_target),
         )
-        iree_amdgpu_binary(
-            name = binary_name,
-            target = target,
-            arch = code_object_target,
-            srcs = srcs,
-            deps = _code_object_target_deps(deps, code_object_target),
-            minimize = minimize,
-            tags = tags,
-            **kwargs
-        )
-        if AMDGPU_DEVICE_TOOLCHAIN_AVAILABLE:
-            # Keep no-toolchain aggregates empty while per-variant targets stay
-            # incompatible for direct requests.
-            selected_srcs += select({
-                target_selection.requested[code_object_target]: [":" + binary_name],
-                "//conditions:default": [],
-            })
+        if source_format == "hip":
+            _iree_amdgpu_hip_binary(
+                name = binary_name,
+                target = target,
+                arch = code_object_target,
+                srcs = srcs,
+                tags = tags,
+                **kwargs
+            )
+        else:
+            iree_amdgpu_binary(
+                name = binary_name,
+                target = target,
+                arch = code_object_target,
+                srcs = srcs,
+                deps = _code_object_target_deps(deps, code_object_target),
+                minimize = minimize,
+                tags = tags,
+                **kwargs
+            )
+        selected_srcs += select({
+            target_selection.requested[code_object_target]: [":" + binary_name],
+            "//conditions:default": [],
+        })
 
     filegroup_kwargs = {}
     if "visibility" in kwargs:
@@ -516,6 +603,7 @@ def iree_amdgpu_binary_variants_embed_data(
         flatten = True,
         code_object_targets = IREE_AMDGPU_CODE_OBJECT_TARGETS,
         minimize = False,
+        source_format = "freestanding_c",
         tags = [],
         **kwargs):
     """Builds selected AMDGPU binaries and embeds them into a C library.
@@ -537,6 +625,8 @@ def iree_amdgpu_binary_variants_embed_data(
       code_object_targets: Code-object targets to build variants for.
       minimize: Whether generated binaries should apply post-link
         symbol-table minimization.
+      source_format: Source compilation pipeline. See
+        `iree_amdgpu_binary_variants`.
       tags: Tags applied to generated targets.
       **kwargs: Additional attributes forwarded to `iree_amdgpu_binary`.
     """
@@ -549,6 +639,7 @@ def iree_amdgpu_binary_variants_embed_data(
         binary_name_prefix = binary_name_prefix,
         code_object_targets = code_object_targets,
         minimize = minimize,
+        source_format = source_format,
         tags = tags,
         **kwargs
     )

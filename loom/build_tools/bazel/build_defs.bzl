@@ -79,6 +79,42 @@ def _loom_output_args(flags, outputs):
         output_args[_loom_output_basename(outputs[i])] = _loom_output_arg(flags[i])
     return output_args
 
+def _loom_generated_files(
+        name,
+        generator,
+        outputs,
+        output_flags,
+        args = [],
+        inputs = [],
+        tags = [],
+        target_compatible_with = None,
+        visibility = None,
+        comment = None):
+    if not outputs:
+        fail("generated file actions require at least one output")
+    if len(output_flags) != len(outputs):
+        fail("generated file output flags and outputs must be paired")
+
+    rule_kwargs = {}
+    if visibility != None:
+        rule_kwargs["visibility"] = visibility
+    if comment != None:
+        rule_kwargs["progress_message"] = comment
+    if target_compatible_with != None:
+        rule_kwargs["target_compatible_with"] = target_compatible_with
+    rule_kwargs["tags"] = tags + ["skip-bazel_to_cmake"]
+    rule_kwargs = apply_loom_target_policy(rule_kwargs)
+
+    iree_generated_files(
+        name = name,
+        srcs = inputs,
+        outs = outputs,
+        args = _loom_bazel_generator_args(args),
+        output_args = _loom_output_args(output_flags, outputs),
+        tool = generator,
+        **rule_kwargs
+    )
+
 def loom_generated_textual_header(
         name,
         generator,
@@ -87,6 +123,7 @@ def loom_generated_textual_header(
         args = [],
         inputs = [],
         tags = [],
+        target_compatible_with = None,
         visibility = None,
         comment = None):
     """Generates one textual header consumed by a Loom C/C++ target.
@@ -99,26 +136,66 @@ def loom_generated_textual_header(
       args: Generator arguments before the output flag.
       inputs: Source data labels consumed by the generator.
       tags: Additional Bazel tags for the generator action.
+      target_compatible_with: Optional target compatibility constraints.
       visibility: Passed through to the generator action.
       comment: Optional progress message for the generator action.
     """
 
-    rule_kwargs = {}
-    if visibility != None:
-        rule_kwargs["visibility"] = visibility
-    if comment != None:
-        rule_kwargs["progress_message"] = comment
-    rule_kwargs["tags"] = tags + ["skip-bazel_to_cmake"]
-    rule_kwargs = apply_loom_target_policy(rule_kwargs)
-
-    iree_generated_files(
+    _loom_generated_files(
         name = name,
-        srcs = inputs,
-        outs = [output],
-        args = _loom_bazel_generator_args(args),
-        output_args = _loom_output_args([output_flag], [output]),
-        tool = generator,
-        **rule_kwargs
+        generator = generator,
+        outputs = [output],
+        output_flags = [output_flag],
+        args = args,
+        inputs = inputs,
+        tags = tags,
+        target_compatible_with = target_compatible_with,
+        visibility = visibility,
+        comment = comment,
+    )
+
+def loom_generated_file_family(
+        name,
+        generator,
+        outputs,
+        output_flags,
+        args = [],
+        inputs = [],
+        tags = [],
+        target_compatible_with = None,
+        visibility = None,
+        comment = None):
+    """Generates a coherent family of files in one action.
+
+    The generator must derive all outputs from the same materialized source
+    model. Outputs that can be generated independently belong in separate
+    singular actions so their invalidation and scheduling remain precise.
+
+    Args:
+      name: Generator action target name.
+      generator: Executable label that writes every output.
+      outputs: Generated filenames.
+      output_flags: Generator flags paired positionally with outputs.
+      args: Generator arguments before the output flags.
+      inputs: Source data labels consumed by the generator.
+      tags: Additional Bazel tags for the generator action.
+      target_compatible_with: Optional target compatibility constraints.
+      visibility: Passed through to the generator action.
+      comment: Optional progress message for the generator action.
+    """
+    if len(outputs) < 2:
+        fail("generated file families require at least two outputs")
+    _loom_generated_files(
+        name = name,
+        generator = generator,
+        outputs = outputs,
+        output_flags = output_flags,
+        args = args,
+        inputs = inputs,
+        tags = tags,
+        target_compatible_with = target_compatible_with,
+        visibility = visibility,
+        comment = comment,
     )
 
 def loom_low_descriptor_data_archive(
@@ -156,7 +233,6 @@ def loom_target_table_cc_library(
         args = [],
         inputs = [],
         deps = [],
-        exclude_from_cmake_all = False,
         tags = [],
         testonly = False,
         visibility = None,
@@ -189,7 +265,6 @@ def loom_target_table_cc_library(
         paths.
       inputs: Source/vendor data labels consumed by the generator.
       deps: Runtime C library dependencies.
-      exclude_from_cmake_all: Excludes the generated C library from CMake all.
       tags: Additional Bazel tags for the internal generator action.
       testonly: Passed through to the runtime C library.
       visibility: Passed through to the generator action and runtime library.
@@ -197,7 +272,6 @@ def loom_target_table_cc_library(
     """
     if len(generated_hdr_flags) != len(generated_hdrs):
         fail("generated_hdr_flags and generated_hdrs must have the same length")
-    _ = exclude_from_cmake_all  # @unused
 
     package_name = native.package_name()
     header = header or (name + ".h")
@@ -263,11 +337,182 @@ def loom_target_table_cc_library(
         **kwargs
     )
 
+def loom_target_contract_cc_libraries(
+        name,
+        contract_deps = [],
+        lower_rule_deps = [],
+        testonly = False,
+        visibility = None,
+        **kwargs):
+    """Wraps one generated contract and lower-rule table pair in C libraries.
+
+    Args:
+      name: Contract C library name and generated file stem. The lower-rule
+        library and files use the same stem with a _lower_rules suffix.
+      contract_deps: Runtime dependencies of the contract C library.
+      lower_rule_deps: Runtime dependencies of the lower-rule C library.
+      testonly: Passed through to both runtime C libraries.
+      visibility: Passed through to both runtime C libraries.
+      **kwargs: Additional arguments passed through to both C libraries.
+    """
+    package_name = native.package_name()
+    loom_cc_library(
+        name = name,
+        srcs = ["//%s:%s.c" % (package_name, name)],
+        hdrs = ["//%s:%s.h" % (package_name, name)],
+        deps = contract_deps,
+        testonly = testonly,
+        visibility = visibility,
+        **kwargs
+    )
+    loom_cc_library(
+        name = name + "_lower_rules",
+        srcs = ["//%s:%s_lower_rules.c" % (package_name, name)],
+        hdrs = ["//%s:%s_lower_rules.h" % (package_name, name)],
+        deps = lower_rule_deps,
+        testonly = testonly,
+        visibility = visibility,
+        **kwargs
+    )
+
+def loom_target_contract_table_cc_libraries(
+        name,
+        generator,
+        args = [],
+        inputs = [],
+        contract_deps = [],
+        lower_rule_deps = [],
+        tags = [],
+        testonly = False,
+        visibility = None,
+        **kwargs):
+    """Generates one contract fragment and its lower rules in one action.
+
+    The contract and lower-rule tables share one materialized Python fragment
+    but remain separate C libraries with independent runtime dependencies.
+
+    Args:
+      name: Contract C library name and generated file stem. The lower-rule
+        library and files use the same stem with a _lower_rules suffix.
+      generator: Python executable that writes both C/H output pairs.
+      args: Generator arguments before the four output flags.
+      inputs: Source data labels consumed by the generator.
+      contract_deps: Runtime dependencies of the contract C library.
+      lower_rule_deps: Runtime dependencies of the lower-rule C library.
+      tags: Additional Bazel tags for the generator action.
+      testonly: Passed through to both runtime C libraries.
+      visibility: Passed through to the generator and runtime C libraries.
+      **kwargs: Additional arguments passed through to both C libraries.
+    """
+    rule_kwargs = {}
+    if visibility != None:
+        rule_kwargs["visibility"] = visibility
+    rule_kwargs["tags"] = tags + ["skip-bazel_to_cmake"]
+    rule_kwargs = apply_loom_target_policy(rule_kwargs)
+
+    contract_source = name + ".c"
+    contract_header = name + ".h"
+    lower_rule_source = name + "_lower_rules.c"
+    lower_rule_header = name + "_lower_rules.h"
+    outputs = [
+        contract_source,
+        contract_header,
+        lower_rule_source,
+        lower_rule_header,
+    ]
+    output_flags = [
+        "--contract-source",
+        "--contract-header",
+        "--lower-rule-source",
+        "--lower-rule-header",
+    ]
+    iree_generated_files(
+        name = name + "_gen",
+        srcs = inputs,
+        outs = outputs,
+        args = _loom_bazel_generator_args(args),
+        output_args = _loom_output_args(output_flags, outputs),
+        tool = generator,
+        **rule_kwargs
+    )
+
+    loom_target_contract_cc_libraries(
+        name = name,
+        contract_deps = contract_deps,
+        lower_rule_deps = lower_rule_deps,
+        testonly = testonly,
+        visibility = visibility,
+        **kwargs
+    )
+
+def loom_target_contract_file_family(
+        name,
+        generator,
+        fragments,
+        args = [],
+        inputs = [],
+        tags = [],
+        target_compatible_with = None,
+        visibility = None,
+        comment = None):
+    """Generates several contract and lower-rule table pairs in one action.
+
+    Every fragment must belong to the same generator source and invalidation
+    domain. Runtime C libraries remain separate so consumers retain precise
+    dependency surfaces.
+
+    Args:
+      name: Generator action target name.
+      generator: Python executable that writes every contract table family.
+      fragments: Mapping from output file stem to contract fragment key.
+      args: Common generator arguments before fragment and output arguments.
+      inputs: Source data labels consumed by the generator.
+      tags: Additional Bazel tags for the generator action.
+      target_compatible_with: Optional target compatibility constraints.
+      visibility: Passed through to the generator action.
+      comment: Optional progress message for the generator action.
+    """
+    if len(fragments) < 2:
+        fail("contract file families require at least two fragments")
+
+    generator_args = list(args)
+    outputs = []
+    output_flags = []
+    for stem in sorted(fragments.keys()):
+        fragment_key = fragments[stem]
+        generator_args.append("--contract-fragment=" + fragment_key)
+        outputs.extend([
+            stem + ".c",
+            stem + ".h",
+            stem + "_lower_rules.c",
+            stem + "_lower_rules.h",
+        ])
+        output_flags.extend([
+            "--contract-source",
+            "--contract-header",
+            "--lower-rule-source",
+            "--lower-rule-header",
+        ])
+
+    _loom_generated_files(
+        name = name,
+        generator = generator,
+        outputs = outputs,
+        output_flags = output_flags,
+        args = generator_args,
+        inputs = inputs,
+        tags = tags,
+        target_compatible_with = target_compatible_with,
+        visibility = visibility,
+        comment = comment,
+    )
+
 def loom_generated_cc_library(
         name,
         generator,
         source = None,
         srcs = [],
+        textual_hdrs = [],
         generated_src_flags = [],
         generated_srcs = [],
         hdrs = [],
@@ -295,6 +540,7 @@ def loom_generated_cc_library(
       source: Generated C source filename. Defaults to <name>.c when no
         generated_srcs are specified.
       srcs: Checked-in C source filenames compiled into the same library.
+      textual_hdrs: Checked-in or separately generated textual includes.
       generated_src_flags: Generator flags paired with generated_srcs.
       generated_srcs: Additional generated C source filenames.
       hdrs: Checked-in public/private headers for the C library.
@@ -363,6 +609,7 @@ def loom_generated_cc_library(
         name = name,
         srcs = srcs + generated_sources,
         hdrs = hdrs + generated_headers,
+        textual_hdrs = textual_hdrs,
         deps = deps,
         testonly = testonly,
         visibility = visibility,
@@ -382,7 +629,6 @@ def loom_low_descriptor_cc_library(
         deps = [],
         ids_deps = None,
         ids_visibility = None,
-        exclude_from_cmake_all = False,
         tags = [],
         testonly = False,
         visibility = None,
@@ -406,7 +652,6 @@ def loom_low_descriptor_cc_library(
         Defaults to deps.
       ids_visibility: Visibility for the generated _ids target. Defaults to
         visibility.
-      exclude_from_cmake_all: Excludes the generated C library from CMake all.
       tags: Additional Bazel tags for the internal generator action.
       testonly: Passed through to the runtime C libraries.
       visibility: Passed through to the generator action and runtime libraries.
@@ -426,7 +671,6 @@ def loom_low_descriptor_cc_library(
         args = args,
         inputs = inputs,
         deps = deps,
-        exclude_from_cmake_all = exclude_from_cmake_all,
         tags = tags,
         testonly = testonly,
         visibility = visibility,
@@ -442,19 +686,3 @@ def loom_low_descriptor_cc_library(
         testonly = testonly,
         visibility = ids_visibility if ids_visibility != None else visibility,
     )
-
-def loom_low_descriptor_exclude_from_cmake_all(
-        cc_libraries = [],
-        targets = []):
-    """Excludes descriptor-dependent CMake targets from the default all target.
-
-    Descriptor registries and backend-specific tests often depend on large
-    target tables. Keeping those targets declared but outside CMake all lets
-    explicit builds and tests work without making every default build fetch and
-    compile every backend descriptor package.
-
-    Args:
-      cc_libraries: iree_cc_library names in the current package.
-      targets: Other CMake target names in the current package, usually tests.
-    """
-    _ = (cc_libraries, targets)  # @unused

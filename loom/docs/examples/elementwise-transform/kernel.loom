@@ -1,0 +1,28 @@
+// This reusable source kernel owns portable physical launch geometry and
+// applies the transform contract without naming one provider.
+template.decl @guide.elementwise_transform(%value: f32) -> (f32)
+
+kernel.def export("elementwise_transform_f32") @elementwise_transform_f32(%element_count: index) {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  %rounding = index.sub %workgroup_size, %unit : index
+  %rounded_count = index.add %element_count, %rounding : index
+  %workgroups = index.div %rounded_count, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%element_count: index, %input: buffer, %output: buffer) {
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size = kernel.workgroup.size<x> : index
+  %element_index = index.madd %workgroup, %workgroup_size, %lane : index
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%element_count]xf32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%element_count]xf32>
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+  scf.if %in_bounds {
+    %value = view.load %input_view[%element_index] : view<[%element_count]xf32> -> f32
+    %result = template.apply<@guide.elementwise_transform>(%value) : (f32) -> (f32)
+    view.store %result, %output_view[%element_index] : f32, view<[%element_count]xf32>
+  }
+  kernel.return
+}

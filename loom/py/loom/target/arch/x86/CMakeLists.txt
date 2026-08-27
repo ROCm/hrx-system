@@ -11,22 +11,32 @@ iree_add_all_subdirs()
 
 iree_py_library(
   NAME
-    target_info
+    package_init
   SRCS
     "__init__.py"
-    "packed_dot_data.py"
-    "target_info.py"
   DEPS
     loom::py::loom::target::arch::package_init
 )
 
 iree_py_library(
   NAME
+    target_info
+  SRCS
+    "packed_dot_data.py"
+    "target_info.py"
+  DEPS
+    loom::py::loom::target::arch::x86::package_init
+    loom::py::loom::target::native_contraction_layout
+    loom::py::loom::target::native_layout_facts
+)
+
+iree_py_library(
+  NAME
     dialect
   SRCS
-    "__init__.py"
     "dialect.py"
   DEPS
+    loom::py::loom::target::arch::x86::package_init
     loom::py::loom::core
     loom::py::loom::dialect::target::target
 )
@@ -35,7 +45,6 @@ iree_py_library(
   NAME
     descriptors
   SRCS
-    "__init__.py"
     "descriptors/__init__.py"
     "descriptors/avx2.py"
     "descriptors/avx512.py"
@@ -44,7 +53,6 @@ iree_py_library(
     "descriptors/packed_dot.py"
     "descriptors/scalar.py"
     "descriptors/simd128.py"
-    "packed_dot_data.py"
   DEPS
     loom::py::loom::target::arch::x86::target_info
     loom::py::loom::target::low_descriptors
@@ -54,7 +62,10 @@ iree_py_library(
 iree_py_test(
   NAME
     target_info_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
   SRCS
+    "target_info_test.py"
     "../../../tools/pytest_style_runner.py"
   ARGS
     "loom.target.arch.x86.target_info_test"
@@ -63,6 +74,28 @@ iree_py_test(
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+)
+
+iree_py_test(
+  NAME
+    packed_dot_data_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
+  SRCS
+    "packed_dot_data_test.py"
+    "../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.x86.packed_dot_data_test"
+  DEPS
+    loom::py::loom::target::arch::x86::target_info
+    loom::py::loom::target::native_contraction_layout
+    loom::py::loom::target::native_coordinate_projection
+    loom::py::loom::target::native_layout_facts
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

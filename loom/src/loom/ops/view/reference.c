@@ -7,7 +7,6 @@
 #include "loom/ops/view/reference.h"
 
 #include "loom/ops/encoding/storage.h"
-#include "loom/util/math.h"
 
 static loom_value_facts_t loom_view_nonnegative_unknown_facts(void) {
   return loom_value_facts_make(0, INT64_MAX, 1);
@@ -366,6 +365,9 @@ iree_status_t loom_view_reference_make_buffer_view(
       loom_view_default_buffer_reference(buffer_value_id);
   (void)loom_value_facts_query_buffer_reference(context, buffer_facts,
                                                 &buffer_reference);
+  buffer_reference.root_value_id =
+      loom_value_fact_buffer_reference_resolve_root_value(buffer_reference,
+                                                          buffer_value_id);
 
   loom_value_fact_view_reference_t view_reference = {0};
   view_reference.base_byte_offset =

@@ -1,0 +1,55 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1250> @target
+func.def target(@target) @gfx1250_dot4f8_fp8bf8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xf32>) -> (vector<1xf32>) {
+  %dot = vector.dot4f8<fp8bf8> %lhs, %rhs, %acc : vector<1xi32>, vector<1xf32>
+  func.return %dot : vector<1xf32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @gfx1250_dot4f8_fp8bf8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %dot = v_dot4_f32_fp8_bf8 %lhs, %rhs, %acc
+  return %dot
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+func.def target(@target) @gfx1250_dot4f8_bf8fp8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xf32>) -> (vector<1xf32>) {
+  %dot = vector.dot4f8<bf8fp8> %lhs, %rhs, %acc : vector<1xi32>, vector<1xf32>
+  func.return %dot : vector<1xf32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @gfx1250_dot4f8_bf8fp8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %dot = v_dot4_f32_bf8_fp8 %lhs, %rhs, %acc
+  return %dot
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+func.def target(@target) @gfx1250_dot4f8_fp8fp8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xf32>) -> (vector<1xf32>) {
+  %dot = vector.dot4f8<fp8fp8> %lhs, %rhs, %acc : vector<1xi32>, vector<1xf32>
+  func.return %dot : vector<1xf32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @gfx1250_dot4f8_fp8fp8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %dot = v_dot4_f32_fp8_fp8 %lhs, %rhs, %acc
+  return %dot
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+func.def target(@target) @gfx1250_dot4f8_bf8bf8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xf32>) -> (vector<1xf32>) {
+  %dot = vector.dot4f8<bf8bf8> %lhs, %rhs, %acc : vector<1xi32>, vector<1xf32>
+  func.return %dot : vector<1xf32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @gfx1250_dot4f8_bf8bf8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %dot = v_dot4_f32_bf8_bf8 %lhs, %rhs, %acc
+  return %dot
+}

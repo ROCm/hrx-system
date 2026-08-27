@@ -6,8 +6,6 @@
 
 #include "loom/ir/local_value_domain.h"
 
-#include "loom/ir/types.h"
-
 typedef iree_status_t (*loom_local_value_domain_value_fn_t)(
     void* user_data, loom_value_id_t value_id);
 
@@ -86,17 +84,26 @@ static iree_status_t loom_local_value_domain_register_value_callback(
                                                 value_id, &value_ordinal);
 }
 
-static iree_status_t loom_local_value_domain_type_ref_callback(
-    loom_value_id_t value_id, void* user_data) {
-  loom_local_value_domain_value_callback_t* visitor =
-      (loom_local_value_domain_value_callback_t*)user_data;
-  return visitor->fn(visitor->user_data, value_id);
-}
+static iree_status_t loom_local_value_domain_for_each_value_type_ref(
+    const loom_module_t* module, loom_value_id_t user_value_id,
+    loom_local_value_domain_value_callback_t visitor) {
+  loom_type_use_id_t use_id =
+      loom_module_value_first_outgoing_type_use(module, user_value_id);
+  if (use_id == LOOM_TYPE_USE_ID_INVALID) return iree_ok_status();
 
-static iree_status_t loom_local_value_domain_for_each_type_ref(
-    loom_type_t type, loom_local_value_domain_value_callback_t visitor) {
-  return loom_type_walk_value_refs(
-      type, loom_local_value_domain_type_ref_callback, &visitor);
+  // Records are inserted at the adjacency head, so find the oldest record and
+  // walk back toward the head to retain the type walk's structural order.
+  while (module->type_uses.records[use_id].next_outgoing_use_id !=
+         LOOM_TYPE_USE_ID_INVALID) {
+    use_id = module->type_uses.records[use_id].next_outgoing_use_id;
+  }
+  while (use_id != LOOM_TYPE_USE_ID_INVALID) {
+    const loom_type_use_t* type_use = &module->type_uses.records[use_id];
+    IREE_RETURN_IF_ERROR(
+        visitor.fn(visitor.user_data, type_use->referenced_value_id));
+    use_id = type_use->previous_outgoing_use_id;
+  }
+  return iree_ok_status();
 }
 
 static bool loom_local_value_domain_region_is_nested_in_op(
@@ -181,8 +188,8 @@ static iree_status_t loom_local_value_domain_for_each_region_external_use(
   const loom_block_t* block = NULL;
   loom_region_for_each_block(region, block) {
     for (uint16_t i = 0; i < block->arg_count; ++i) {
-      IREE_RETURN_IF_ERROR(loom_local_value_domain_for_each_type_ref(
-          loom_block_arg_type(state->module, block, i),
+      IREE_RETURN_IF_ERROR(loom_local_value_domain_for_each_value_type_ref(
+          state->module, loom_block_arg_id(block, i),
           loom_local_value_domain_value_callback_make(
               loom_local_value_domain_external_value_callback, state)));
     }
@@ -193,15 +200,15 @@ static iree_status_t loom_local_value_domain_for_each_region_external_use(
         const loom_value_id_t value_id = operands[i];
         IREE_RETURN_IF_ERROR(
             loom_local_value_domain_external_value_callback(state, value_id));
-        IREE_RETURN_IF_ERROR(loom_local_value_domain_for_each_type_ref(
-            loom_module_value_type(state->module, value_id),
+        IREE_RETURN_IF_ERROR(loom_local_value_domain_for_each_value_type_ref(
+            state->module, value_id,
             loom_local_value_domain_value_callback_make(
                 loom_local_value_domain_external_value_callback, state)));
       }
       const loom_value_id_t* results = loom_op_const_results(op);
       for (uint16_t i = 0; i < op->result_count; ++i) {
-        IREE_RETURN_IF_ERROR(loom_local_value_domain_for_each_type_ref(
-            loom_module_value_type(state->module, results[i]),
+        IREE_RETURN_IF_ERROR(loom_local_value_domain_for_each_value_type_ref(
+            state->module, results[i],
             loom_local_value_domain_value_callback_make(
                 loom_local_value_domain_external_value_callback, state)));
       }
@@ -238,13 +245,13 @@ static iree_status_t loom_local_value_domain_for_each_op_use(
   const loom_value_id_t* operands = loom_op_const_operands(op);
   for (uint16_t i = 0; i < op->operand_count; ++i) {
     IREE_RETURN_IF_ERROR(visitor.fn(visitor.user_data, operands[i]));
-    IREE_RETURN_IF_ERROR(loom_local_value_domain_for_each_type_ref(
-        loom_module_value_type(module, operands[i]), visitor));
+    IREE_RETURN_IF_ERROR(loom_local_value_domain_for_each_value_type_ref(
+        module, operands[i], visitor));
   }
   const loom_value_id_t* results = loom_op_const_results(op);
   for (uint16_t i = 0; i < op->result_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_local_value_domain_for_each_type_ref(
-        loom_module_value_type(module, results[i]), visitor));
+    IREE_RETURN_IF_ERROR(loom_local_value_domain_for_each_value_type_ref(
+        module, results[i], visitor));
   }
   return loom_local_value_domain_for_each_nested_external_use(module, op,
                                                               visitor);
@@ -265,8 +272,8 @@ static iree_status_t loom_local_value_domain_register_region_values(
       loom_value_ordinal_t value_ordinal = LOOM_VALUE_ORDINAL_INVALID;
       IREE_RETURN_IF_ERROR(loom_local_value_domain_register_value(
           domain, arena, loom_block_arg_id(block, i), &value_ordinal));
-      IREE_RETURN_IF_ERROR(loom_local_value_domain_for_each_type_ref(
-          loom_block_arg_type(domain->module, block, i), visitor));
+      IREE_RETURN_IF_ERROR(loom_local_value_domain_for_each_value_type_ref(
+          domain->module, loom_block_arg_id(block, i), visitor));
     }
     const loom_op_t* op = NULL;
     loom_block_for_each_op(block, op) {
@@ -302,8 +309,8 @@ static iree_status_t loom_local_value_domain_register_region_tree_values(
       loom_value_ordinal_t value_ordinal = LOOM_VALUE_ORDINAL_INVALID;
       IREE_RETURN_IF_ERROR(loom_local_value_domain_register_value(
           domain, arena, loom_block_arg_id(block, i), &value_ordinal));
-      IREE_RETURN_IF_ERROR(loom_local_value_domain_for_each_type_ref(
-          loom_block_arg_type(domain->module, block, i), visitor));
+      IREE_RETURN_IF_ERROR(loom_local_value_domain_for_each_value_type_ref(
+          domain->module, loom_block_arg_id(block, i), visitor));
     }
     const loom_op_t* op = NULL;
     loom_block_for_each_op(block, op) {
@@ -312,16 +319,16 @@ static iree_status_t loom_local_value_domain_register_region_tree_values(
         loom_value_ordinal_t value_ordinal = LOOM_VALUE_ORDINAL_INVALID;
         IREE_RETURN_IF_ERROR(loom_local_value_domain_register_value(
             domain, arena, operands[i], &value_ordinal));
-        IREE_RETURN_IF_ERROR(loom_local_value_domain_for_each_type_ref(
-            loom_module_value_type(domain->module, operands[i]), visitor));
+        IREE_RETURN_IF_ERROR(loom_local_value_domain_for_each_value_type_ref(
+            domain->module, operands[i], visitor));
       }
       const loom_value_id_t* results = loom_op_const_results(op);
       for (uint16_t i = 0; i < op->result_count; ++i) {
         loom_value_ordinal_t value_ordinal = LOOM_VALUE_ORDINAL_INVALID;
         IREE_RETURN_IF_ERROR(loom_local_value_domain_register_value(
             domain, arena, results[i], &value_ordinal));
-        IREE_RETURN_IF_ERROR(loom_local_value_domain_for_each_type_ref(
-            loom_module_value_type(domain->module, results[i]), visitor));
+        IREE_RETURN_IF_ERROR(loom_local_value_domain_for_each_value_type_ref(
+            domain->module, results[i], visitor));
       }
       loom_region_t* const* regions = loom_op_regions(op);
       for (uint8_t i = 0; i < op->region_count; ++i) {

@@ -1,0 +1,24 @@
+template.decl @demo.left(%x: i32) -> (i32)
+
+template.decl @demo.right(%x: i32) -> (i32)
+
+template.decl @demo.shared(%x: i32) -> (i32)
+
+template.def<@demo.left> @left_provider(%x: i32) -> (i32) {
+  %y = template.apply<@demo.shared>(%x) : (i32) -> (i32)
+  template.return %y : i32
+}
+
+template.def<@demo.right> @right_provider(%x: i32) -> (i32) {
+  %y = template.apply<@demo.shared>(%x) : (i32) -> (i32)
+  template.return %y : i32
+}
+
+template.def<@demo.shared> @shared_provider(%x: i32) -> (i32) {
+  %y = func.call @helper(%x) : (i32) -> (i32)
+  template.return %y : i32
+}
+
+func.def @helper(%x: i32) -> (i32) {
+  func.return %x : i32
+}

@@ -56,6 +56,11 @@ iree_status_t loom_vector_dotf_to_scalar_rewrite_op(loom_pass_t* pass,
                                                     loom_op_t* op,
                                                     bool* out_rewritten);
 
+// Rewrites one vector.transform op using scalar reference semantics.
+iree_status_t loom_vector_transform_to_scalar_rewrite_op(
+    loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
+    bool* out_rewritten);
+
 // Rewrites one descriptor-backed vector op using scalar reference semantics.
 // This is the generic lane-by-lane expansion used by the standalone pass for
 // arithmetic, bitwise, structural, and packed vector ops represented in the
@@ -63,6 +68,17 @@ iree_status_t loom_vector_dotf_to_scalar_rewrite_op(loom_pass_t* pass,
 iree_status_t loom_vector_descriptor_to_scalar_rewrite_op(
     loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
     bool* out_rewritten);
+
+// Rewrites one vector.decode op using scalar reference semantics.
+iree_status_t loom_vector_decode_to_scalar_rewrite_op(loom_pass_t* pass,
+                                                      loom_rewriter_t* rewriter,
+                                                      loom_op_t* op,
+                                                      bool* out_rewritten);
+
+// Returns target-independent rejection flags explaining why the scalar
+// reference lowering would refuse one vector.decode op.
+uint32_t loom_vector_decode_to_scalar_reference_rejection_bits(
+    loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op);
 
 // Rewrites one vector.mma op using scalar reference semantics. Dense logical
 // fragments lower directly; target-shaped physical fragments require options
@@ -101,15 +117,6 @@ iree_status_t loom_vector_fragment_store_to_scalar_rewrite_op(
     loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
     bool* out_rewritten);
 
-// Rewrites one target-shaped result fragment store into a scalar loop over
-// physical result payload registers. The store address still uses logical
-// row/column coordinates derived from |matrix_fragment_layout|.
-iree_status_t
-loom_vector_fragment_store_to_scalar_physical_result_loop_rewrite_op(
-    loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
-    const loom_matrix_fragment_layout_t* matrix_fragment_layout,
-    uint16_t register_count, bool* out_rewritten);
-
 // Rewrites adjacent target-shaped result fragment stores into one shared
 // scalar loop over physical result payload registers.
 iree_status_t
@@ -117,7 +124,8 @@ loom_vector_fragment_store_to_scalar_physical_result_loop_rewrite_ops(
     loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* const* ops,
     iree_host_size_t op_count,
     const loom_matrix_fragment_layout_t* matrix_fragment_layout,
-    uint16_t register_count, bool* out_rewritten);
+    uint16_t register_count, loom_vector_to_scalar_flags_t flags,
+    bool* out_rewritten);
 
 // Returns target-independent rejection flags explaining why the scalar
 // reference lowering would refuse one vector.fragment.store op.

@@ -15,6 +15,7 @@ from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scalar import bitwise as scalar_bitwise
 from loom.dsl import Op
 from loom.target.arch.amdgpu.contracts.materializers import (
+    ADDRESS_SGPR_MATERIALIZER,
     ADDRESS_VGPR_MATERIALIZER,
     I1_NATIVE_MASK_MATERIALIZER,
     I32_VGPR_MATERIALIZER,
@@ -61,6 +62,8 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.s_lshl_b32",
     "amdgpu.s_lshr_b32",
     "amdgpu.s_ashr_i32",
+    "amdgpu.s_bcnt1_i32_b32",
+    "amdgpu.s_bcnt1_i32_b64",
     "amdgpu.s_bfe_i32.lit",
     "amdgpu.s_bfe_u32.lit",
     "amdgpu.v_mov_b32",
@@ -83,6 +86,8 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.v_lshlrev_b32.vop3_imm",
     "amdgpu.v_lshrrev_b32",
     "amdgpu.v_lshrrev_b32.lit",
+    "amdgpu.v_bcnt_u32_b32",
+    "amdgpu.v_bcnt_u32_b32.src1_zero",
     "amdgpu.v_ashrrev_i32",
     "amdgpu.v_ashrrev_i32.lit",
     "amdgpu.v_bfe_i32.offset_width_inline",
@@ -106,6 +111,11 @@ _ADDRESS_U32_DIAGNOSTIC = GuardDiagnostic(
     subject_role="address-width",
     subject_name="u32",
     constraint_key="amdgpu.address.u32",
+)
+_ADDRESS_I32_DIAGNOSTIC = GuardDiagnostic(
+    subject_role="address-width",
+    subject_name="i32",
+    constraint_key="amdgpu.address.i32",
 )
 _BYTE_OFFSET_U32_DIAGNOSTIC = GuardDiagnostic(
     subject_role="byte-offset-width",
@@ -153,6 +163,8 @@ def _descriptor_available_guards(*descriptors: Descriptor) -> tuple[Guard, ...]:
 def _typed_binary_guards(
     type_pattern: TypePattern,
     *,
+    signed_bit_count: int | None = None,
+    signed_diagnostic: GuardDiagnostic | None = None,
     unsigned_bit_count: int | None = None,
     unsigned_diagnostic: GuardDiagnostic | None = None,
 ) -> tuple[Guard, ...]:
@@ -161,6 +173,14 @@ def _typed_binary_guards(
         Guard.value_type("rhs", type_pattern),
         Guard.value_type("result", type_pattern),
     ]
+    if signed_bit_count is not None:
+        guards.append(
+            Guard.value_signed_bit_count(
+                "result",
+                signed_bit_count,
+                diagnostic=signed_diagnostic,
+            )
+        )
     if unsigned_bit_count is not None:
         guards.append(
             Guard.value_unsigned_bit_count(
@@ -177,21 +197,39 @@ def _sgpr_binary_rule(
     type_pattern: TypePattern,
     descriptor: Descriptor,
     *,
+    signed_bit_count: int | None = None,
+    signed_diagnostic: GuardDiagnostic | None = None,
     unsigned_bit_count: int | None = None,
     unsigned_diagnostic: GuardDiagnostic | None = None,
+    register_unit_count: int | None = None,
 ) -> DescriptorRule:
+    register_shape_guards = (
+        (
+            Guard.low_value_register_unit_count("result", register_unit_count),
+            Guard.low_value_register_unit_count("lhs", register_unit_count),
+            Guard.low_value_register_unit_count("rhs", register_unit_count),
+        )
+        if register_unit_count is not None
+        else (
+            Guard.low_value_register_unit_count_eq("result", "lhs"),
+            Guard.low_value_register_unit_count_eq("result", "rhs"),
+        )
+    )
     return DescriptorRule(
         source_op=source_op,
         descriptor=descriptor,
         guards=(
             *_typed_binary_guards(
                 type_pattern,
+                signed_bit_count=signed_bit_count,
+                signed_diagnostic=signed_diagnostic,
                 unsigned_bit_count=unsigned_bit_count,
                 unsigned_diagnostic=unsigned_diagnostic,
             ),
             Guard.low_value_register_class("result", "amdgpu.sgpr"),
             Guard.low_value_register_class("lhs", "amdgpu.sgpr"),
             Guard.low_value_register_class("rhs", "amdgpu.sgpr"),
+            *register_shape_guards,
             Guard.descriptor_available(descriptor),
         ),
         emit=(
@@ -218,6 +256,58 @@ def _vgpr_binary_rule(
     descriptor_rhs: str = "rhs",
     source_lhs: str = "lhs",
     source_rhs: str = "rhs",
+    signed_bit_count: int | None = None,
+    signed_diagnostic: GuardDiagnostic | None = None,
+    unsigned_bit_count: int | None = None,
+    unsigned_diagnostic: GuardDiagnostic | None = None,
+    register_unit_count: int | None = None,
+) -> DescriptorRule:
+    register_shape_guards = (
+        (
+            Guard.low_value_register_unit_count("result", register_unit_count),
+            Guard.low_value_register_unit_count("lhs", register_unit_count),
+            Guard.low_value_register_unit_count("rhs", register_unit_count),
+        )
+        if register_unit_count is not None
+        else ()
+    )
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=descriptor,
+        guards=(
+            *_typed_binary_guards(
+                type_pattern,
+                signed_bit_count=signed_bit_count,
+                signed_diagnostic=signed_diagnostic,
+                unsigned_bit_count=unsigned_bit_count,
+                unsigned_diagnostic=unsigned_diagnostic,
+            ),
+            Guard.low_value_register_class("result", "amdgpu.vgpr"),
+            Guard.value_materializable("lhs", materializer.name),
+            Guard.value_materializable("rhs", materializer.name),
+            *register_shape_guards,
+            Guard.descriptor_available(descriptor),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={
+                    descriptor_lhs: _materialized_operand(source_lhs, materializer),
+                    descriptor_rhs: _materialized_operand(source_rhs, materializer),
+                },
+                results={"dst": _RESULT},
+            ),
+        ),
+    )
+
+
+def _narrow_address_sgpr_binary_rule(
+    source_op: Op,
+    type_pattern: TypePattern,
+    descriptor: Descriptor,
+    *,
+    signed_bit_count: int | None = None,
+    signed_diagnostic: GuardDiagnostic | None = None,
     unsigned_bit_count: int | None = None,
     unsigned_diagnostic: GuardDiagnostic | None = None,
 ) -> DescriptorRule:
@@ -227,20 +317,63 @@ def _vgpr_binary_rule(
         guards=(
             *_typed_binary_guards(
                 type_pattern,
+                signed_bit_count=signed_bit_count,
+                signed_diagnostic=signed_diagnostic,
                 unsigned_bit_count=unsigned_bit_count,
                 unsigned_diagnostic=unsigned_diagnostic,
             ),
-            Guard.low_value_register_class("result", "amdgpu.vgpr"),
-            Guard.value_materializable("lhs", materializer.name),
-            Guard.value_materializable("rhs", materializer.name),
+            Guard.low_value_register_class("result", "amdgpu.sgpr"),
+            Guard.low_value_register_unit_count("result", 1),
+            Guard.value_materializable("lhs", ADDRESS_SGPR_MATERIALIZER.name),
+            Guard.value_materializable("rhs", ADDRESS_SGPR_MATERIALIZER.name),
             Guard.descriptor_available(descriptor),
         ),
         emit=(
             EmitDescriptorOp(
                 descriptor=descriptor,
                 operands={
-                    descriptor_lhs: _materialized_operand(source_lhs, materializer),
-                    descriptor_rhs: _materialized_operand(source_rhs, materializer),
+                    "lhs": _materialized_operand("lhs", ADDRESS_SGPR_MATERIALIZER),
+                    "rhs": _materialized_operand("rhs", ADDRESS_SGPR_MATERIALIZER),
+                },
+                results={"dst": _RESULT},
+            ),
+        ),
+    )
+
+
+def _narrow_address_vgpr_binary_rule(
+    source_op: Op,
+    type_pattern: TypePattern,
+    descriptor: Descriptor,
+    *,
+    signed_bit_count: int | None = None,
+    signed_diagnostic: GuardDiagnostic | None = None,
+    unsigned_bit_count: int | None = None,
+    unsigned_diagnostic: GuardDiagnostic | None = None,
+) -> DescriptorRule:
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=descriptor,
+        guards=(
+            *_typed_binary_guards(
+                type_pattern,
+                signed_bit_count=signed_bit_count,
+                signed_diagnostic=signed_diagnostic,
+                unsigned_bit_count=unsigned_bit_count,
+                unsigned_diagnostic=unsigned_diagnostic,
+            ),
+            Guard.low_value_register_class("result", "amdgpu.vgpr"),
+            Guard.low_value_register_unit_count("result", 1),
+            Guard.value_materializable("lhs", ADDRESS_VGPR_MATERIALIZER.name),
+            Guard.value_materializable("rhs", ADDRESS_VGPR_MATERIALIZER.name),
+            Guard.descriptor_available(descriptor),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={
+                    "lhs": _materialized_operand("lhs", ADDRESS_VGPR_MATERIALIZER),
+                    "rhs": _materialized_operand("rhs", ADDRESS_VGPR_MATERIALIZER),
                 },
                 results={"dst": _RESULT},
             ),
@@ -288,11 +421,20 @@ def _vgpr_literal_shift_rule(
     preserve_source_register: bool = False,
     unsigned_bit_count: int | None = None,
     unsigned_diagnostic: GuardDiagnostic | None = None,
+    register_unit_count: int | None = None,
 ) -> DescriptorRule:
-    value_guard = (
-        Guard.low_value_register_class("lhs", "amdgpu.sgpr")
+    register_shape_guards = (
+        (
+            Guard.low_value_register_unit_count("result", register_unit_count),
+            Guard.low_value_register_unit_count("lhs", register_unit_count),
+        )
+        if register_unit_count is not None
+        else ()
+    )
+    value_guards = (
+        (Guard.low_value_register_class("lhs", "amdgpu.sgpr"),)
         if preserve_source_register
-        else Guard.value_materializable("lhs", materializer.name)
+        else (Guard.value_materializable("lhs", materializer.name),)
     )
     value_operand = (
         ValueRef.operand("lhs")
@@ -309,7 +451,8 @@ def _vgpr_literal_shift_rule(
                 unsigned_diagnostic=unsigned_diagnostic,
             ),
             Guard.low_value_register_class("result", "amdgpu.vgpr"),
-            value_guard,
+            *value_guards,
+            *register_shape_guards,
             Guard.value_exact_i64("rhs", diagnostic=_SHIFT_AMOUNT_DIAGNOSTIC),
             Guard.value_i64_range(
                 "rhs",
@@ -689,32 +832,96 @@ def _i32_bitfield_extract_rules(
     )
 
 
-def _address_rules(
+def _narrow_address_binary_rules(
+    source_op: Op,
+    type_pattern: TypePattern,
+    sgpr_descriptor_key: str,
+    vgpr_descriptor_key: str,
+    *,
+    unsigned_bit_count: int | None = None,
+    unsigned_diagnostic: GuardDiagnostic | None = None,
+) -> tuple[DescriptorRule, ...]:
+    sgpr_descriptor = _descriptor(sgpr_descriptor_key)
+    vgpr_descriptor = _descriptor(vgpr_descriptor_key)
+    return (
+        _narrow_address_sgpr_binary_rule(
+            source_op,
+            type_pattern,
+            sgpr_descriptor,
+            unsigned_bit_count=unsigned_bit_count,
+            unsigned_diagnostic=unsigned_diagnostic,
+        ),
+        _narrow_address_vgpr_binary_rule(
+            source_op,
+            type_pattern,
+            vgpr_descriptor,
+            unsigned_bit_count=unsigned_bit_count,
+            unsigned_diagnostic=unsigned_diagnostic,
+        ),
+    )
+
+
+def _address_binary_rules(
+    source_op: Op,
+    sgpr_descriptor_key: str,
+    vgpr_descriptor_key: str,
+) -> tuple[DescriptorRule, ...]:
+    return (
+        *_narrow_address_binary_rules(
+            source_op,
+            _INDEX,
+            sgpr_descriptor_key,
+            vgpr_descriptor_key,
+        ),
+        *_narrow_address_binary_rules(
+            source_op,
+            _OFFSET,
+            sgpr_descriptor_key,
+            vgpr_descriptor_key,
+            unsigned_bit_count=32,
+            unsigned_diagnostic=_ADDRESS_U32_DIAGNOSTIC,
+        ),
+    )
+
+
+def _index_binary_rules(
+    source_op: Op,
+    sgpr_descriptor_key: str,
+    vgpr_descriptor_key: str,
+) -> tuple[DescriptorRule, ...]:
+    return _narrow_address_binary_rules(
+        source_op,
+        _INDEX,
+        sgpr_descriptor_key,
+        vgpr_descriptor_key,
+    )
+
+
+def _signed_index_minmax_rules(
     source_op: Op,
     sgpr_descriptor_key: str,
     vgpr_descriptor_key: str,
 ) -> tuple[DescriptorRule, ...]:
     sgpr_descriptor = _descriptor(sgpr_descriptor_key)
     vgpr_descriptor = _descriptor(vgpr_descriptor_key)
-    return tuple(
+    return (
         _sgpr_binary_rule(
             source_op,
-            type_pattern,
+            _INDEX,
             sgpr_descriptor,
-            unsigned_bit_count=32,
-            unsigned_diagnostic=_ADDRESS_U32_DIAGNOSTIC,
-        )
-        for type_pattern in (_INDEX, _OFFSET)
-    ) + tuple(
+            signed_bit_count=32,
+            signed_diagnostic=_ADDRESS_I32_DIAGNOSTIC,
+            register_unit_count=1,
+        ),
         _vgpr_binary_rule(
             source_op,
-            type_pattern,
+            _INDEX,
             vgpr_descriptor,
             ADDRESS_VGPR_MATERIALIZER,
-            unsigned_bit_count=32,
-            unsigned_diagnostic=_ADDRESS_U32_DIAGNOSTIC,
-        )
-        for type_pattern in (_INDEX, _OFFSET)
+            signed_bit_count=32,
+            signed_diagnostic=_ADDRESS_I32_DIAGNOSTIC,
+            register_unit_count=1,
+        ),
     )
 
 
@@ -735,16 +942,21 @@ def _address_scale_rules() -> tuple[DescriptorRule, ...]:
                     diagnostic=_BYTE_OFFSET_U32_DIAGNOSTIC,
                 ),
                 Guard.low_value_register_class("result", "amdgpu.sgpr"),
-                Guard.low_value_register_class("index", "amdgpu.sgpr"),
-                Guard.low_value_register_class("stride", "amdgpu.sgpr"),
+                Guard.low_value_register_unit_count("result", 1),
+                Guard.value_materializable("index", ADDRESS_SGPR_MATERIALIZER.name),
+                Guard.value_materializable("stride", ADDRESS_SGPR_MATERIALIZER.name),
                 Guard.descriptor_available(sgpr_descriptor),
             ),
             emit=(
                 EmitDescriptorOp(
                     descriptor=sgpr_descriptor,
                     operands={
-                        "lhs": ValueRef.operand("index"),
-                        "rhs": ValueRef.operand("stride"),
+                        "lhs": _materialized_operand(
+                            "index", ADDRESS_SGPR_MATERIALIZER
+                        ),
+                        "rhs": _materialized_operand(
+                            "stride", ADDRESS_SGPR_MATERIALIZER
+                        ),
                     },
                     results={"dst": _RESULT},
                 ),
@@ -785,7 +997,7 @@ def _address_scale_rules() -> tuple[DescriptorRule, ...]:
     )
 
 
-def _address_shift_rules(
+def _index_shift_rules(
     source_op: Op,
     sgpr_descriptor_key: str,
     vgpr_descriptor_key: str,
@@ -801,53 +1013,47 @@ def _address_shift_rules(
         if preserve_descriptor_key is not None
         else None
     )
-    rules: list[DescriptorRule] = []
-    for type_pattern in (_INDEX, _OFFSET):
-        rules.append(
-            _sgpr_binary_rule(
-                source_op,
-                type_pattern,
-                sgpr_descriptor,
-                unsigned_bit_count=32,
-                unsigned_diagnostic=_ADDRESS_U32_DIAGNOSTIC,
-            )
+    rules: list[DescriptorRule] = [
+        _sgpr_binary_rule(
+            source_op,
+            _INDEX,
+            sgpr_descriptor,
+            register_unit_count=1,
         )
-        if preserve_descriptor is not None:
-            rules.append(
-                _vgpr_literal_shift_rule(
-                    source_op,
-                    type_pattern,
-                    preserve_descriptor,
-                    ADDRESS_VGPR_MATERIALIZER,
-                    preserve_source_register=True,
-                    unsigned_bit_count=32,
-                    unsigned_diagnostic=_ADDRESS_U32_DIAGNOSTIC,
-                )
-            )
+    ]
+    if preserve_descriptor is not None:
         rules.append(
             _vgpr_literal_shift_rule(
                 source_op,
-                type_pattern,
-                literal_descriptor,
+                _INDEX,
+                preserve_descriptor,
                 ADDRESS_VGPR_MATERIALIZER,
-                unsigned_bit_count=32,
-                unsigned_diagnostic=_ADDRESS_U32_DIAGNOSTIC,
+                preserve_source_register=True,
+                register_unit_count=1,
             )
         )
-        rules.append(
-            _vgpr_binary_rule(
-                source_op,
-                type_pattern,
-                vgpr_descriptor,
-                ADDRESS_VGPR_MATERIALIZER,
-                descriptor_lhs="shift",
-                descriptor_rhs="value",
-                source_lhs="rhs",
-                source_rhs="lhs",
-                unsigned_bit_count=32,
-                unsigned_diagnostic=_ADDRESS_U32_DIAGNOSTIC,
-            )
+    rules.append(
+        _vgpr_literal_shift_rule(
+            source_op,
+            _INDEX,
+            literal_descriptor,
+            ADDRESS_VGPR_MATERIALIZER,
+            register_unit_count=1,
         )
+    )
+    rules.append(
+        _vgpr_binary_rule(
+            source_op,
+            _INDEX,
+            vgpr_descriptor,
+            ADDRESS_VGPR_MATERIALIZER,
+            descriptor_lhs="shift",
+            descriptor_rhs="value",
+            source_lhs="rhs",
+            source_rhs="lhs",
+            register_unit_count=1,
+        )
+    )
     return tuple(rules)
 
 
@@ -1441,6 +1647,53 @@ def _index_madd_sgpr_rule() -> DescriptorRule:
     )
 
 
+def _scalar_ctpopi_i32_rules() -> tuple[DescriptorRule, ...]:
+    scalar_descriptor = _descriptor("amdgpu.s_bcnt1_i32_b32")
+    vector_descriptor = _descriptor("amdgpu.v_bcnt_u32_b32.src1_zero")
+    typed_guards = (
+        Guard.value_type("input", _I32),
+        Guard.value_type("result", _I32),
+    )
+    return (
+        DescriptorRule(
+            source_op=scalar_bitwise.scalar_ctpopi,
+            descriptor=scalar_descriptor,
+            guards=(
+                *typed_guards,
+                Guard.low_value_register_class("input", "amdgpu.sgpr"),
+                Guard.low_value_register_class("result", "amdgpu.sgpr"),
+                Guard.descriptor_available(scalar_descriptor),
+            ),
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=scalar_descriptor,
+                    operands={"input": ValueRef.operand("input")},
+                    results={"dst": ValueRef.result("result")},
+                ),
+            ),
+        ),
+        DescriptorRule(
+            source_op=scalar_bitwise.scalar_ctpopi,
+            descriptor=vector_descriptor,
+            guards=(
+                *typed_guards,
+                Guard.low_value_register_class("result", "amdgpu.vgpr"),
+                Guard.value_materializable("input", I32_VGPR_MATERIALIZER.name),
+                Guard.descriptor_available(vector_descriptor),
+            ),
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=vector_descriptor,
+                    operands={
+                        "input": _materialized_operand("input", I32_VGPR_MATERIALIZER)
+                    },
+                    results={"dst": ValueRef.result("result")},
+                ),
+            ),
+        ),
+    )
+
+
 def _rules() -> tuple[DescriptorRule, ...]:
     rules: list[DescriptorRule] = []
     rules.extend(
@@ -1603,13 +1856,13 @@ def _rules() -> tuple[DescriptorRule, ...]:
         )
     )
     rules.extend(
-        _address_rules(index.index_add, "amdgpu.s_add_u32", "amdgpu.v_add_u32")
+        _address_binary_rules(index.index_add, "amdgpu.s_add_u32", "amdgpu.v_add_u32")
     )
     rules.extend(
-        _address_rules(index.index_sub, "amdgpu.s_sub_u32", "amdgpu.v_sub_u32")
+        _address_binary_rules(index.index_sub, "amdgpu.s_sub_u32", "amdgpu.v_sub_u32")
     )
     rules.extend(
-        _address_rules(
+        _index_binary_rules(
             index.index_mul,
             "amdgpu.s_mul_i32",
             "amdgpu.v_mul_lo_u32",
@@ -1634,20 +1887,26 @@ def _rules() -> tuple[DescriptorRule, ...]:
             )
         )
     rules.extend(
-        _address_rules(index.index_min, "amdgpu.s_min_i32", "amdgpu.v_min_i32")
+        _signed_index_minmax_rules(
+            index.index_min, "amdgpu.s_min_i32", "amdgpu.v_min_i32"
+        )
     )
     rules.extend(
-        _address_rules(index.index_max, "amdgpu.s_max_i32", "amdgpu.v_max_i32")
+        _signed_index_minmax_rules(
+            index.index_max, "amdgpu.s_max_i32", "amdgpu.v_max_i32"
+        )
     )
     rules.extend(
-        _address_rules(index.index_andi, "amdgpu.s_and_b32", "amdgpu.v_and_b32")
-    )
-    rules.extend(_address_rules(index.index_ori, "amdgpu.s_or_b32", "amdgpu.v_or_b32"))
-    rules.extend(
-        _address_rules(index.index_xori, "amdgpu.s_xor_b32", "amdgpu.v_xor_b32")
+        _index_binary_rules(index.index_andi, "amdgpu.s_and_b32", "amdgpu.v_and_b32")
     )
     rules.extend(
-        _address_shift_rules(
+        _index_binary_rules(index.index_ori, "amdgpu.s_or_b32", "amdgpu.v_or_b32")
+    )
+    rules.extend(
+        _index_binary_rules(index.index_xori, "amdgpu.s_xor_b32", "amdgpu.v_xor_b32")
+    )
+    rules.extend(
+        _index_shift_rules(
             index.index_shli,
             "amdgpu.s_lshl_b32",
             "amdgpu.v_lshlrev_b32",
@@ -1656,7 +1915,7 @@ def _rules() -> tuple[DescriptorRule, ...]:
         )
     )
     rules.extend(
-        _address_shift_rules(
+        _index_shift_rules(
             index.index_shrsi,
             "amdgpu.s_ashr_i32",
             "amdgpu.v_ashrrev_i32",
@@ -1664,7 +1923,7 @@ def _rules() -> tuple[DescriptorRule, ...]:
         )
     )
     rules.extend(
-        _address_shift_rules(
+        _index_shift_rules(
             index.index_shrui,
             "amdgpu.s_lshr_b32",
             "amdgpu.v_lshrrev_b32",
@@ -1672,6 +1931,7 @@ def _rules() -> tuple[DescriptorRule, ...]:
         )
     )
     rules.append(_index_madd_sgpr_rule())
+    rules.extend(_scalar_ctpopi_i32_rules())
     return tuple(rules)
 
 
@@ -1685,6 +1945,7 @@ AMDGPU_INTEGER_CONTRACT_FRAGMENT = ContractFragment(
     descriptor_set=_DESCRIPTOR_SET,
     public_header="loom/target/arch/amdgpu/contracts/integer.h",
     materializers=(
+        ADDRESS_SGPR_MATERIALIZER,
         I32_VGPR_MATERIALIZER,
         I64_VGPR_MATERIALIZER,
         ADDRESS_VGPR_MATERIALIZER,

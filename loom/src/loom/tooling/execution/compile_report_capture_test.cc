@@ -56,18 +56,20 @@ TEST(CompileReportCaptureTest, ConfiguresDetailedReportRequest) {
       LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ROWS |
           LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ORIGIN_ROWS |
           LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_ROWS |
+          LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS |
           LOOM_TARGET_COMPILE_REPORT_DETAIL_SPILL_ROWS |
           LOOM_TARGET_COMPILE_REPORT_DETAIL_ALLOCATION_FAILURE_ROWS |
           LOOM_TARGET_COMPILE_REPORT_DETAIL_ALLOCATION_HIGH_WATER_ROWS |
           LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS |
           LOOM_TARGET_COMPILE_REPORT_DETAIL_MATH_LEGALIZATION_ROWS |
-          LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_LEGALIZATION_ROWS));
+          LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_LEGALIZATION_ROWS |
+          LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS));
 
   loom_run_compile_report_capture_deinitialize(&capture);
 }
 
 TEST(CompileReportCaptureTest,
-     SummaryReportDoesNotRequestSourceLowDiagnostics) {
+     SummaryReportRequestsEconomicsWithoutSourceLowDiagnostics) {
   loom_run_compile_report_capture_options_t options = {};
   loom_run_compile_report_capture_options_initialize(&options);
   options.sink_format = LOOM_RUN_COMPILE_REPORT_SINK_FORMAT_JSON;
@@ -84,6 +86,10 @@ TEST(CompileReportCaptureTest,
   EXPECT_EQ(compile_options.target_pipeline_options
                 .source_to_low_legality_diagnostic_flags,
             0u);
+  EXPECT_EQ(capture.report.requested_detail_flags,
+            LOOM_TARGET_COMPILE_REPORT_DETAIL_CONFIG_BINDING_ROWS |
+                LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS |
+                LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS);
 
   loom_run_compile_report_capture_deinitialize(&capture);
 }
@@ -208,8 +214,9 @@ TEST(CompileReportCaptureTest, TextReportsDoNotSerializeDiagnosticJson) {
       &capture, &diagnostic,
       (loom_type_formatter_t){loom_type_format_minimal, nullptr}));
 
-  EXPECT_EQ(capture.diagnostic_count, 1u);
-  EXPECT_EQ(iree_string_builder_size(&capture.diagnostic_json_objects), 0u);
+  EXPECT_EQ(capture.diagnostics.count, 1u);
+  EXPECT_TRUE(iree_string_view_is_empty(
+      loom_json_value_list_body(&capture.diagnostics.json_values)));
 
   loom_run_compile_report_capture_deinitialize(&capture);
 }
@@ -287,7 +294,12 @@ TEST(CompileReportCaptureTest, AppendsConfiguredJsonOutput) {
 
   iree_string_view_t output = iree_string_builder_view(&builder);
   EXPECT_NE(
-      iree_string_view_find(output, IREE_SV("output\n{\"artifact_kind\""), 0),
+      iree_string_view_find(
+          output, IREE_SV("output\n{\"kind\":\"loom.compile_report\""), 0),
+      IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(
+      iree_string_view_find(
+          output, IREE_SV("\"schema_version\":0,\"mode\":\"summary\""), 0),
       IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
                 output, IREE_SV("\"artifact_kind\":\"vm-archive\""), 0),

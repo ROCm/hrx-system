@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+#include "iree/hal/executable/amdgpu/executable_target.h"
+
 static iree_status_t iree_hal_hip_device_spec_verify_params(
     const iree_hal_hip_device_spec_params_t* params) {
   IREE_ASSERT_ARGUMENT(params);
@@ -16,11 +18,13 @@ static iree_status_t iree_hal_hip_device_spec_verify_params(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "HIP device spec requires physical devices");
   }
-  if (IREE_UNLIKELY(params->physical_device_count > 64)) {
+  if (IREE_UNLIKELY(params->physical_device_count >
+                    IREE_HAL_PHYSICAL_DEVICE_AFFINITY_BIT_COUNT)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "HIP device spec physical device count %" PRIhsz
-                            " exceeds the 64-bit affinity mask capacity",
-                            params->physical_device_count);
+                            " exceeds physical-device affinity capacity %d",
+                            params->physical_device_count,
+                            IREE_HAL_PHYSICAL_DEVICE_AFFINITY_BIT_COUNT);
   }
   if (IREE_UNLIKELY(params->queue_count == 0)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -39,10 +43,12 @@ static iree_status_t iree_hal_hip_device_spec_verify_params(
   return iree_ok_status();
 }
 
-static uint64_t iree_hal_hip_device_spec_all_physical_device_affinity(
+static iree_hal_physical_device_affinity_t
+iree_hal_hip_device_spec_all_physical_device_affinity(
     iree_host_size_t physical_device_count) {
-  return physical_device_count == 64 ? UINT64_MAX
-                                     : ((1ull << physical_device_count) - 1ull);
+  return physical_device_count == IREE_HAL_PHYSICAL_DEVICE_AFFINITY_BIT_COUNT
+             ? UINT64_MAX
+             : ((1ull << physical_device_count) - 1ull);
 }
 
 static iree_status_t iree_hal_hip_device_spec_populate_identity(
@@ -303,6 +309,7 @@ static iree_status_t iree_hal_hip_device_spec_populate_queues(
         .timestamp_valid_bits = timestamp_frequency_hz ? 32 : 0,
         .timestamp_frequency_hz = timestamp_frequency_hz,
         .physical_device_affinity = 1ull << i,
+        .queue_affinity = (iree_hal_queue_affinity_t)1 << i,
         .role_flags = role_flags,
         .flags = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_NONE,
     };
@@ -477,63 +484,32 @@ static iree_status_t iree_hal_hip_device_spec_populate_timing(
 static iree_status_t iree_hal_hip_device_spec_populate_executables(
     const iree_hal_hip_device_spec_params_t* params,
     iree_hal_device_spec_builder_t* builder) {
-  iree_hal_executable_target_t executable_targets[64] = {{0}};
-  iree_host_size_t target_count = 0;
   for (iree_host_size_t i = 0; i < params->physical_device_count; ++i) {
     const iree_string_view_t gcn_arch_name = iree_make_cstring_view(
         params->physical_devices[i].facts.architecture.gcn_arch_name);
-    if (iree_string_view_is_empty(gcn_arch_name)) continue;
-    const uint64_t physical_device_affinity = 1ull << i;
-    iree_host_size_t existing_target_index = target_count;
-    for (iree_host_size_t j = 0; j < target_count; ++j) {
-      if (iree_string_view_equal(executable_targets[j].loader_target,
-                                 gcn_arch_name)) {
-        existing_target_index = j;
-        break;
-      }
+    if (iree_string_view_is_empty(gcn_arch_name)) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "HIP physical device %" PRIhsz
+                              " did not report a GCN architecture",
+                              i);
     }
-    if (existing_target_index < target_count) {
-      executable_targets[existing_target_index].physical_device_affinity |=
-          physical_device_affinity;
-      continue;
-    }
-    executable_targets[target_count++] = (iree_hal_executable_target_t){
-        .family = IREE_SV("amdgpu"),
-        .architecture = IREE_SV("gfxip"),
-        .processor = gcn_arch_name,
-        .features = iree_string_view_empty(),
-        .artifact_format = IREE_SV("rocm-hsaco-fb"),
-        .runtime_abi = IREE_SV("hip"),
-        .loader_namespace = IREE_SV("hip"),
-        .loader_target = gcn_arch_name,
-        .metadata_schema = IREE_SV("iree.hal.hip.executable"),
-        .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
-        .priority = 100,
-        .physical_device_affinity = physical_device_affinity,
-        .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
-    };
+    iree_hal_amdgpu_target_identity_t exact_identity;
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_identity_parse_artifact_key(
+                             gcn_arch_name, &exact_identity),
+                         "parsing HIP physical device %" PRIhsz
+                         " target ID '%.*s'",
+                         i, (int)gcn_arch_name.size, gcn_arch_name.data);
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_target_identity_resolve_physical_target(
+            params->physical_devices[i].facts.architecture.asic_revision,
+            &exact_identity),
+        "qualifying HIP physical device %" PRIhsz " ASIC revision", i);
+    const iree_hal_physical_device_affinity_t target_affinity = 1ull << i;
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_device_spec_builder_add_executable_targets(
+            builder, &exact_identity, target_affinity));
   }
-
-  iree_hal_executable_format_spec_t executable_formats[2] = {
-      {
-          .format = IREE_SV("rocm-hsaco-fb"),
-          .caching_modes = IREE_HAL_EXECUTABLE_CACHING_MODE_NONE,
-          .flags = IREE_HAL_EXECUTABLE_FORMAT_SPEC_FLAG_NONE,
-      },
-      {
-          .format = IREE_SV("rocm-spirv-fb"),
-          .caching_modes = IREE_HAL_EXECUTABLE_CACHING_MODE_NONE,
-          .flags = IREE_HAL_EXECUTABLE_FORMAT_SPEC_FLAG_NONE,
-      },
-  };
-  iree_hal_device_executable_spec_t executables = {
-      .format_count = IREE_ARRAYSIZE(executable_formats),
-      .formats = executable_formats,
-      .target_count = target_count,
-      .targets = target_count ? executable_targets : NULL,
-      .flags = IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
-  };
-  return iree_hal_device_spec_builder_set_executables(builder, &executables);
+  return iree_ok_status();
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_hip_device_spec_create(

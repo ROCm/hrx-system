@@ -40,6 +40,7 @@ from loom.target.low_descriptors import (
     Descriptor,
     DescriptorAsmSurface,
     DescriptorFlag,
+    DescriptorOpKind,
     Effect,
     EncodingFieldValue,
     Immediate,
@@ -108,6 +109,8 @@ class AmdgpuIgnoredOperandOverlay:
 
 @dataclass(frozen=True, slots=True)
 class AmdgpuImplicitOperandOverlay:
+    """Loom decision for an architectural operand outside packet fields."""
+
     operand_type: str
     descriptor_operand: Operand | None = None
     ignore_reason: str | None = None
@@ -140,9 +143,18 @@ class AmdgpuDescriptorOverlay:
     operand_forms: tuple[OperandForm, ...] = ()
     feature_mask_words: tuple[int, ...] = ()
     flags: tuple[DescriptorFlag, ...] = ()
+    op_kind: DescriptorOpKind = DescriptorOpKind.OP
     asm_forms: tuple[AsmForm, ...] | None = None
     asm_surface: DescriptorAsmSurface = DescriptorAsmSurface.AUTHORABLE
     asm_surface_reason: str = ""
+
+    def __post_init__(self) -> None:
+        if self.immediate_fields and len(self.immediate_fields) != len(self.immediates):
+            raise AmdgpuDescriptorOverlayError(
+                f"descriptor overlay '{self.descriptor_key}' maps "
+                f"{len(self.immediate_fields)} immediate encoding fields for "
+                f"{len(self.immediates)} immediates"
+            )
 
 
 def _asm_forms_for_overlay(overlay: AmdgpuDescriptorOverlay) -> tuple[AsmForm, ...]:
@@ -216,6 +228,7 @@ def materialize_amdgpu_descriptor_overlay(
         else overlay.encoding_id,
         schedule_class=overlay.schedule_class,
         flags=overlay.flags,
+        op_kind=overlay.op_kind,
     )
 
 
@@ -273,13 +286,13 @@ def _materialize_operand_overlay(operand_overlay: AmdgpuOperandOverlay) -> Opera
 def _materialize_immediates(
     overlay: AmdgpuDescriptorOverlay,
 ) -> tuple[Immediate, ...]:
-    if len(overlay.immediate_fields) != len(overlay.immediates):
+    if not overlay.immediate_fields:
         return overlay.immediates
     try:
         return tuple(
             replace(immediate, encoding_field_id=amdgpu_encoding_field_id(field_name))
             for field_name, immediate in zip(
-                overlay.immediate_fields, overlay.immediates, strict=False
+                overlay.immediate_fields, overlay.immediates, strict=True
             )
         )
     except KeyError as exc:
@@ -287,6 +300,31 @@ def _materialize_immediates(
             f"descriptor overlay '{overlay.descriptor_key}' references unmapped "
             "immediate encoding field"
         ) from exc
+
+
+def _mapped_immediate_field_names(
+    overlay: AmdgpuDescriptorOverlay,
+) -> tuple[str, ...]:
+    if overlay.immediate_fields:
+        return overlay.immediate_fields
+    field_names: list[str] = []
+    for immediate in overlay.immediates:
+        field_ids = (
+            (immediate.encoding_field_id,) if immediate.encoding_field_id else ()
+        ) + tuple(
+            encoding_slice.encoding_field_id
+            for encoding_slice in immediate.encoding_slices
+        )
+        try:
+            field_names.extend(
+                amdgpu_encoding_field_name(field_id) for field_id in field_ids
+            )
+        except KeyError as exc:
+            raise AmdgpuDescriptorOverlayError(
+                f"descriptor overlay '{overlay.descriptor_key}' immediate "
+                f"'{immediate.field_name}' references unmapped encoding field"
+            ) from exc
+    return tuple(field_names)
 
 
 def _materialize_encoding_field_values(
@@ -551,7 +589,7 @@ def _validate_operand_overlay(
             )
         covered_fields.add(ignored_operand.xml_field_name)
 
-    for immediate_field in overlay.immediate_fields:
+    for immediate_field in _mapped_immediate_field_names(overlay):
         xml_operand = xml_operands.get(immediate_field)
         if xml_operand is not None:
             if not xml_operand.is_input or xml_operand.is_output:
@@ -624,6 +662,12 @@ def _validate_operand_overlay(
     _validate_implicit_operand_overlays(overlay, instruction, encoding)
 
 
+def _xml_operand_requires_implicit_overlay(xml_operand: AmdgpuIsaOperand) -> bool:
+    # Some vendor XML revisions mark architectural operands such as VCC as
+    # explicit despite providing no packet field for them.
+    return xml_operand.is_implicit or xml_operand.field_name is None
+
+
 def _validate_implicit_operand_overlays(
     overlay: AmdgpuDescriptorOverlay,
     instruction: AmdgpuIsaInstruction,
@@ -634,15 +678,17 @@ def _validate_implicit_operand_overlays(
         for implicit_overlay in overlay.implicit_operands
         if implicit_overlay.xml_operand_required
     )
-    implicit_xml_operands = tuple(
-        xml_operand for xml_operand in encoding.operands if xml_operand.is_implicit
+    architectural_xml_operands = tuple(
+        xml_operand
+        for xml_operand in encoding.operands
+        if _xml_operand_requires_implicit_overlay(xml_operand)
     )
-    if not implicit_xml_operands:
+    if not architectural_xml_operands:
         if xml_backed_overlays:
             raise AmdgpuDescriptorOverlayError(
                 f"descriptor overlay '{overlay.descriptor_key}' has implicit "
                 f"operand decision(s), but instruction '{instruction.name}' "
-                f"encoding '{encoding.encoding_name}' has no implicit operands"
+                f"encoding '{encoding.encoding_name}' has no architectural operands"
             )
         return
 
@@ -650,20 +696,21 @@ def _validate_implicit_operand_overlays(
     for implicit_overlay in xml_backed_overlays:
         matches = tuple(
             xml_operand
-            for xml_operand in implicit_xml_operands
+            for xml_operand in architectural_xml_operands
             if _implicit_overlay_matches_xml_operand(implicit_overlay, xml_operand)
         )
         if not matches:
             raise AmdgpuDescriptorOverlayError(
                 f"descriptor overlay '{overlay.descriptor_key}' references "
-                "missing implicit XML operand "
+                "missing architectural XML operand "
                 f"'{_format_implicit_overlay_key(implicit_overlay)}' on "
                 f"instruction '{instruction.name}' encoding "
                 f"'{encoding.encoding_name}'"
             )
         if len(matches) > 1:
             match_text = ", ".join(
-                _format_implicit_xml_operand(xml_operand) for xml_operand in matches
+                _format_architectural_xml_operand(xml_operand)
+                for xml_operand in matches
             )
             raise AmdgpuDescriptorOverlayError(
                 f"descriptor overlay '{overlay.descriptor_key}' implicit "
@@ -674,24 +721,25 @@ def _validate_implicit_operand_overlays(
         if xml_operand.order in covered_orders:
             raise AmdgpuDescriptorOverlayError(
                 f"descriptor overlay '{overlay.descriptor_key}' repeats "
-                f"implicit XML operand {_format_implicit_xml_operand(xml_operand)}"
+                "architectural XML operand "
+                f"{_format_architectural_xml_operand(xml_operand)}"
             )
         covered_orders.add(xml_operand.order)
         _validate_implicit_operand_decision(overlay, implicit_overlay, xml_operand)
 
     missing_operands = tuple(
         xml_operand
-        for xml_operand in implicit_xml_operands
+        for xml_operand in architectural_xml_operands
         if xml_operand.order not in covered_orders
     )
     if missing_operands:
         missing_text = ", ".join(
-            _format_implicit_xml_operand(xml_operand)
+            _format_architectural_xml_operand(xml_operand)
             for xml_operand in missing_operands
         )
         raise AmdgpuDescriptorOverlayError(
             f"descriptor overlay '{overlay.descriptor_key}' does not cover "
-            f"implicit XML operand(s): {missing_text}"
+            f"architectural XML operand(s): {missing_text}"
         )
 
 
@@ -736,15 +784,16 @@ def _validate_implicit_operand_decision(
         ):
             raise AmdgpuDescriptorOverlayError(
                 f"descriptor overlay '{overlay.descriptor_key}' ignores "
-                f"implicit XML operand {_format_implicit_xml_operand(xml_operand)} "
+                "architectural XML operand "
+                f"{_format_architectural_xml_operand(xml_operand)} "
                 "without a named reason"
             )
         return
 
     if implicit_overlay.ignore_reason is not None:
         raise AmdgpuDescriptorOverlayError(
-            f"descriptor overlay '{overlay.descriptor_key}' maps implicit XML "
-            f"operand {_format_implicit_xml_operand(xml_operand)} and also "
+            f"descriptor overlay '{overlay.descriptor_key}' maps architectural "
+            f"XML operand {_format_architectural_xml_operand(xml_operand)} and also "
             "provides an ignore reason"
         )
     descriptor_operand = implicit_overlay.descriptor_operand
@@ -757,14 +806,16 @@ def _validate_implicit_operand_decision(
     )
     if descriptor_operand.role not in mapped_low_roles:
         raise AmdgpuDescriptorOverlayError(
-            f"descriptor overlay '{overlay.descriptor_key}' maps implicit XML "
-            f"operand {_format_implicit_xml_operand(xml_operand)} to low operand "
+            f"descriptor overlay '{overlay.descriptor_key}' maps architectural "
+            f"XML operand {_format_architectural_xml_operand(xml_operand)} "
+            "to low operand "
             f"'{descriptor_operand.field_name}' with invalid low role"
         )
     if descriptor_operand.role is OperandRole.RESULT and not xml_operand.is_output:
         raise AmdgpuDescriptorOverlayError(
             f"descriptor overlay '{overlay.descriptor_key}' maps input-only "
-            f"implicit XML operand {_format_implicit_xml_operand(xml_operand)} "
+            "architectural XML operand "
+            f"{_format_architectural_xml_operand(xml_operand)} "
             f"to result '{descriptor_operand.field_name}'"
         )
     if (
@@ -778,13 +829,15 @@ def _validate_implicit_operand_decision(
     ):
         raise AmdgpuDescriptorOverlayError(
             f"descriptor overlay '{overlay.descriptor_key}' maps output-only "
-            f"implicit XML operand {_format_implicit_xml_operand(xml_operand)} "
+            "architectural XML operand "
+            f"{_format_architectural_xml_operand(xml_operand)} "
             f"to packet operand '{descriptor_operand.field_name}'"
         )
     if OperandFlag.IMPLICIT not in descriptor_operand.flags:
         raise AmdgpuDescriptorOverlayError(
-            f"descriptor overlay '{overlay.descriptor_key}' maps implicit XML "
-            f"operand {_format_implicit_xml_operand(xml_operand)} to low operand "
+            f"descriptor overlay '{overlay.descriptor_key}' maps architectural "
+            f"XML operand {_format_architectural_xml_operand(xml_operand)} "
+            "to low operand "
             f"'{descriptor_operand.field_name}' without implicit flag"
         )
 
@@ -804,7 +857,7 @@ def _format_implicit_overlay_key(
     return ",".join(parts)
 
 
-def _format_implicit_xml_operand(xml_operand: AmdgpuIsaOperand) -> str:
+def _format_architectural_xml_operand(xml_operand: AmdgpuIsaOperand) -> str:
     format_name = (
         "<none>"
         if xml_operand.data_format_name is None
@@ -841,7 +894,7 @@ def _validate_unique_overlay_fields(overlay: AmdgpuDescriptorOverlay) -> None:
                 "operands"
             )
         covered_fields.add(ignored_operand.xml_field_name)
-    for immediate_field in overlay.immediate_fields:
+    for immediate_field in _mapped_immediate_field_names(overlay):
         if immediate_field in covered_fields:
             raise AmdgpuDescriptorOverlayError(
                 f"descriptor overlay '{overlay.descriptor_key}' repeats XML field "
@@ -863,13 +916,9 @@ def _explicit_xml_operands_by_field_name(
 ) -> dict[str, AmdgpuIsaOperand]:
     operands: dict[str, AmdgpuIsaOperand] = {}
     for xml_operand in encoding.operands:
-        if xml_operand.is_implicit:
+        if _xml_operand_requires_implicit_overlay(xml_operand):
             continue
-        if xml_operand.field_name is None:
-            raise AmdgpuDescriptorOverlayError(
-                f"descriptor overlay '{overlay.descriptor_key}' found explicit "
-                "XML operand without a field name"
-            )
+        assert xml_operand.field_name is not None
         if xml_operand.field_name in operands:
             raise AmdgpuDescriptorOverlayError(
                 f"descriptor overlay '{overlay.descriptor_key}' found duplicate "

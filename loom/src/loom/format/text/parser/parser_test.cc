@@ -6,6 +6,8 @@
 
 #include "loom/format/text/parser/parser.h"
 
+#include <cmath>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -21,6 +23,8 @@
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/test/ops.h"
+#include "loom/ops/test/registry.h"
+#include "loom/ops/test/types.h"
 #include "loom/testing/diagnostic_matchers.h"
 #include "loom/util/stream.h"
 
@@ -35,21 +39,51 @@ using ::loom::testing::ExpectU32Param;
 using ::loom::testing::FindDiagnostic;
 using ::loom::testing::GetStringParam;
 
-static const loom_encoding_vtable_t kDenseEncodingVtable = {
-    /*.name=*/IREE_SV("dense"),
+static const loom_encoding_family_descriptor_t kDenseEncodingDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(5, "dense"),
     /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
 };
+static const loom_encoding_vtable_t kDenseEncodingVtable = {
+    /*.descriptor=*/&kDenseEncodingDescriptor,
+};
 
+static const loom_attr_descriptor_t kQ8_0EncodingParameters[] = {{
+    /*.name=*/LOOM_BSTRING_REF(5, "block"),
+    /*.attr_kind=*/LOOM_ATTR_I64,
+    /*.flags=*/LOOM_ATTR_OPTIONAL,
+}};
+static const loom_encoding_family_descriptor_t kQ8_0EncodingDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(4, "q8_0"),
+    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    /*.family_flags=*/{},
+    /*.parameter_count=*/IREE_ARRAYSIZE(kQ8_0EncodingParameters),
+    /*.parameter_descriptors=*/kQ8_0EncodingParameters,
+};
 static const loom_encoding_vtable_t kQ8_0EncodingVtable = {
-    /*.name=*/IREE_SV("q8_0"),
+    /*.descriptor=*/&kQ8_0EncodingDescriptor,
 };
 
+static const loom_encoding_family_descriptor_t kQ6KEncodingDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(4, "q6_k"),
+    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+};
 static const loom_encoding_vtable_t kQ6KEncodingVtable = {
-    /*.name=*/IREE_SV("q6_k"),
+    /*.descriptor=*/&kQ6KEncodingDescriptor,
 };
 
+static const loom_attr_descriptor_t kQuantizationEncodingParameters[] = {{
+    /*.name=*/LOOM_BSTRING_REF(4, "bits"),
+    /*.attr_kind=*/LOOM_ATTR_I64,
+}};
+static const loom_encoding_family_descriptor_t kQuantizationDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(12, "quantization"),
+    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    /*.family_flags=*/{},
+    /*.parameter_count=*/IREE_ARRAYSIZE(kQuantizationEncodingParameters),
+    /*.parameter_descriptors=*/kQuantizationEncodingParameters,
+};
 static const loom_encoding_vtable_t kQuantizationEncodingVtable = {
-    /*.name=*/IREE_SV("quantization"),
+    /*.descriptor=*/&kQuantizationDescriptor,
 };
 
 class ParserTest : public ::testing::Test {
@@ -58,13 +92,7 @@ class ParserTest : public ::testing::Test {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(),
                                      &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
-    {
-      iree_host_size_t count = 0;
-      const loom_op_vtable_t* const* vtables =
-          loom_test_dialect_vtables(&count);
-      IREE_ASSERT_OK(loom_context_register_dialect(&context_, LOOM_DIALECT_TEST,
-                                                   vtables, (uint16_t)count));
-    }
+    IREE_ASSERT_OK(loom_test_dialect_register(&context_));
     IREE_ASSERT_OK(loom_context_register_encoding_vtable(
         &context_, &kDenseEncodingVtable));
     IREE_ASSERT_OK(
@@ -541,39 +569,11 @@ TEST_F(ParserTest, FunctionTypeScratchAndModulePayloadAreReusedOnInternHits) {
                                       /*hints=*/nullptr,
                                       iree_allocator_system(), &module));
   loom_parser_scope_t root_scope = {};
-  loom_parser_t parser = {
-      /*.tokenizer=*/{},
-      /*.module=*/module,
-      /*.context=*/&context_,
-      /*.parser_arena=*/{},
-      /*.builder=*/{},
-      /*.scope=*/&root_scope,
-      /*.scope_free_list=*/{},
-      /*.result_scope=*/{},
-      /*.parsed_op_free_list=*/{},
-      /*.encoding_params_free_list=*/{},
-      /*.type_list_free_list=*/{},
-      /*.aliases=*/{},
-      /*.symbol_lookup=*/{},
-      /*.diagnostic_sink=*/{},
-      /*.low_asm_environment=*/{},
-      /*.low_register_descriptor_set=*/{},
-      /*.low_asm_region_depth=*/{},
-      /*.error_count=*/{},
-      /*.max_errors=*/{},
-      /*.filename=*/{},
-      /*.source=*/{},
-      /*.source_id=*/{},
-      /*.cached_location=*/{},
-      /*.pending_func_args=*/{},
-      /*.pending_block_args=*/{},
-      /*.pending_successor_refs=*/{},
-      /*.unresolved_placeholders=*/{}, /*.definition_scope=*/
-      {
-          /*.placeholder_start=*/{},
-          /*.pop_at=*/UINT16_MAX,
-      },
-  };
+  loom_parser_t parser = {};
+  parser.module = module;
+  parser.context = &context_;
+  parser.scope = &root_scope;
+  parser.definition_scope.pop_at = UINT16_MAX;
   iree_arena_initialize(&block_pool_, &parser.parser_arena);
 
   loom_tokenizer_initialize(
@@ -626,39 +626,11 @@ TEST_F(ParserTest, RegisterTypeRequiresTargetLowDescriptorContext) {
                                       /*hints=*/nullptr,
                                       iree_allocator_system(), &module));
   loom_parser_scope_t root_scope = {};
-  loom_parser_t parser = {
-      /*.tokenizer=*/{},
-      /*.module=*/module,
-      /*.context=*/&context_,
-      /*.parser_arena=*/{},
-      /*.builder=*/{},
-      /*.scope=*/&root_scope,
-      /*.scope_free_list=*/{},
-      /*.result_scope=*/{},
-      /*.parsed_op_free_list=*/{},
-      /*.encoding_params_free_list=*/{},
-      /*.type_list_free_list=*/{},
-      /*.aliases=*/{},
-      /*.symbol_lookup=*/{},
-      /*.diagnostic_sink=*/{},
-      /*.low_asm_environment=*/{},
-      /*.low_register_descriptor_set=*/{},
-      /*.low_asm_region_depth=*/{},
-      /*.error_count=*/{},
-      /*.max_errors=*/{},
-      /*.filename=*/{},
-      /*.source=*/{},
-      /*.source_id=*/{},
-      /*.cached_location=*/{},
-      /*.pending_func_args=*/{},
-      /*.pending_block_args=*/{},
-      /*.pending_successor_refs=*/{},
-      /*.unresolved_placeholders=*/{}, /*.definition_scope=*/
-      {
-          /*.placeholder_start=*/{},
-          /*.pop_at=*/UINT16_MAX,
-      },
-  };
+  loom_parser_t parser = {};
+  parser.module = module;
+  parser.context = &context_;
+  parser.scope = &root_scope;
+  parser.definition_scope.pop_at = UINT16_MAX;
   iree_arena_initialize(&block_pool_, &parser.parser_arena);
   loom_tokenizer_initialize(IREE_SV("reg<test.ptr x4>"), IREE_SV("test.loom"),
                             &parser.parser_arena, &parser.tokenizer);
@@ -714,6 +686,100 @@ TEST_F(ParserTest, OperationAndBlockCommentsRoundTrip) {
             "}\n");
 }
 
+TEST_F(ParserTest, FileHeaderRoundTrip) {
+  const char* source =
+      "// File-level overview.\n"
+      "//  Indented header detail.\n"
+      "\n"
+      "// Declaration documentation.\n"
+      "test.decl @documented()\n";
+  loom_module_t* module = ParseOk(source);
+  iree_host_size_t line_count = 0;
+  const iree_string_view_t* file_header =
+      loom_module_file_header(module, &line_count);
+  ASSERT_EQ(line_count, 2u);
+  EXPECT_TRUE(
+      iree_string_view_equal(file_header[0], IREE_SV("File-level overview.")));
+  EXPECT_TRUE(iree_string_view_equal(file_header[1],
+                                     IREE_SV(" Indented header detail.")));
+  loom_op_t* declaration = GetFirstFunctionOp(module);
+  ASSERT_NE(declaration, nullptr);
+  const iree_string_view_t* declaration_comments =
+      loom_module_op_comments(module, declaration, &line_count);
+  ASSERT_EQ(line_count, 1u);
+  EXPECT_TRUE(iree_string_view_equal(declaration_comments[0],
+                                     IREE_SV("Declaration documentation.")));
+  EXPECT_FALSE(
+      iree_any_bit_set(declaration->flags, LOOM_OP_FLAG_LEADING_BLANK_LINE));
+  loom_module_free(module);
+
+  EXPECT_EQ(RoundTrip(source), source);
+}
+
+TEST_F(ParserTest, FileHeaderPrecedesEncodingAliases) {
+  std::string text = RoundTrip(
+      "// File-level overview.\n"
+      "\n"
+      "#enc = #quantization<bits=8>\n"
+      "test.decl @uses_alias(%arg0: tile<4xf32, #enc>)\n");
+  EXPECT_EQ(text,
+            "// File-level overview.\n"
+            "\n"
+            "#enc = #quantization<bits=8>\n"
+            "test.decl @uses_alias(%arg0: tile<4xf32, #enc>)\n");
+}
+
+TEST_F(ParserTest, FileHeaderOnlyRoundTrip) {
+  EXPECT_EQ(RoundTrip("// File-level overview.\n"),
+            "// File-level overview.\n");
+}
+
+TEST_F(ParserTest, CanonicalizesCommentSeparatorSpace) {
+  EXPECT_EQ(RoundTrip("//documentation\n"
+                      "//  indented detail\n"
+                      "test.decl @documented()\n"),
+            "// documentation\n"
+            "//  indented detail\n"
+            "test.decl @documented()\n");
+}
+
+TEST_F(ParserTest, CanonicalizesVerticalSourceGrouping) {
+  std::string text = RoundTrip(
+      "test.func @grouped() {\n"
+      "\n"
+      "\n"
+      "  // explicit entry block\n"
+      "  ^entry:\n"
+      "  %zero = test.constant 0 : i32\n"
+      "  %one = test.constant 1 : i32\n"
+      "\n"
+      "\n"
+      "  // final value\n"
+      "  %two = test.constant 2 : i32\n"
+      "\n"
+      "\n"
+      "  test.yield\n"
+      "}\n"
+      "\n"
+      "\n"
+      "test.decl @after()\n");
+  EXPECT_EQ(text,
+            "test.func @grouped() {\n"
+            "\n"
+            "// explicit entry block\n"
+            "^entry:\n"
+            "  %zero = test.constant 0 : i32\n"
+            "  %one = test.constant 1 : i32\n"
+            "\n"
+            "  // final value\n"
+            "  %two = test.constant 2 : i32\n"
+            "\n"
+            "  test.yield\n"
+            "}\n"
+            "\n"
+            "test.decl @after()\n");
+}
+
 TEST_F(ParserTest, Constant) {
   std::string text = RoundTrip("%c = test.constant 42 : i32\n");
   EXPECT_NE(text.find("test.constant 42 : i32"), std::string::npos);
@@ -727,6 +793,65 @@ TEST_F(ParserTest, ConstantNegative) {
 TEST_F(ParserTest, ConstantZero) {
   std::string text = RoundTrip("%c = test.constant 0 : index\n");
   EXPECT_NE(text.find("test.constant 0 : index"), std::string::npos);
+}
+
+TEST_F(ParserTest, HexadecimalFloatConstantsRoundTripCanonically) {
+  const char* source =
+      "%f16 = test.constant 0x1.ffcp+15 : f16\n"
+      "%f16_min = test.constant 0x1p-14 : f16\n"
+      "%bf16 = test.constant 0x1.fep+127 : bf16\n"
+      "%f32 = test.constant 0x1.fffffep+127 : f32\n"
+      "%f64 = test.constant 0x1.fffffffffffffp+1023 : f64\n"
+      "%f64_min = test.constant 0x0.0000000000001p-1022 : f64\n"
+      "%negative_f64 = test.constant -0x1.fffffffffffffp+1023 : f64\n"
+      "%overflow = test.constant 0x1p+999999 : f64\n"
+      "%negative_overflow = test.constant -0x1p+999999 : f64\n"
+      "%underflow = test.constant 0x1p-999999 : f64\n"
+      "%negative_underflow = test.constant -0x1p-999999 : f64\n";
+  std::string text = RoundTrip(source);
+  EXPECT_EQ(text.find("0x"), std::string::npos);
+  for (const char* expected : {
+           "%f16 = test.constant 65504.0 : f16",
+           "%f16_min = test.constant 6.103515625e-05 : f16",
+           "%bf16 = test.constant 3.3895313892515355e+38 : bf16",
+           "%f32 = test.constant 3.4028234663852886e+38 : f32",
+           "%f64 = test.constant 1.7976931348623157e+308 : f64",
+           "%f64_min = test.constant 4.9406564584124654e-324 : f64",
+           "%negative_f64 = test.constant -1.7976931348623157e+308 : f64",
+           "%overflow = test.constant inf : f64",
+           "%negative_overflow = test.constant -inf : f64",
+           "%underflow = test.constant 0.0 : f64",
+           "%negative_underflow = test.constant -0.0 : f64",
+       }) {
+    EXPECT_NE(text.find(expected), std::string::npos) << expected;
+  }
+
+  loom_module_t* module = ParseOk(text.c_str());
+  if (!module) return;
+  loom_block_t* body = loom_module_block(module);
+  ASSERT_NE(body, nullptr);
+  ASSERT_EQ(body->op_count, 11u);
+  const double expected_values[] = {
+      0x1.ffcp+15,
+      0x1p-14,
+      0x1.fep+127,
+      0x1.fffffep+127,
+      0x1.fffffffffffffp+1023,
+      0x0.0000000000001p-1022,
+      -0x1.fffffffffffffp+1023,
+      INFINITY,
+      -INFINITY,
+      0.0,
+      -0.0,
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(expected_values); ++i) {
+    loom_op_t* op = loom_block_op(body, i);
+    ASSERT_NE(op, nullptr);
+    loom_attribute_t value = loom_test_constant_value(op);
+    ASSERT_EQ(value.kind, LOOM_ATTR_F64);
+    EXPECT_EQ(loom_attr_as_f64(value), expected_values[i]);
+  }
+  loom_module_free(module);
 }
 
 TEST_F(ParserTest, FunctionTypeConstantSupportsThousandArgsAndResults) {
@@ -821,6 +946,467 @@ TEST_F(ParserTest, AttrDictStringEscapesRoundTripDecodedPayload) {
       std::string::npos);
 }
 
+TEST_F(ParserTest, EnumArraysRoundTripStableValuesAndPresentEmpty) {
+  std::string text = RoundTrip(
+      "test.enum_array_attrs [low, high, low] "
+      "using [middle, <42>, middle]\n"
+      "test.enum_array_attrs [] using []\n"
+      "test.enum_array_attrs [] {}\n"
+      "test.enum_array_attrs []\n");
+  EXPECT_NE(text.find("test.enum_array_attrs [low, high, low] "
+                      "using [middle, <42>, middle]"),
+            std::string::npos);
+  EXPECT_NE(text.find("test.enum_array_attrs [] using []"), std::string::npos);
+  EXPECT_NE(text.find("test.enum_array_attrs [] {}"), std::string::npos);
+
+  loom_module_t* module = ParseOk(
+      "test.enum_array_attrs [low, high, low] "
+      "using [middle, <42>, middle]\n");
+  ASSERT_NE(module, nullptr);
+  loom_block_t* body = loom_module_block(module);
+  ASSERT_NE(body, nullptr);
+  ASSERT_EQ(body->op_count, 1u);
+  loom_op_t* op = loom_block_op(body, 0);
+  ASSERT_TRUE(loom_test_enum_array_attrs_isa(op));
+  loom_enum_array_t required = loom_test_enum_array_attrs_required_values(op);
+  ASSERT_EQ(required.count, 3u);
+  EXPECT_EQ(required.values[0], LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_LOW);
+  EXPECT_EQ(required.values[1],
+            LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_HIGH);
+  EXPECT_EQ(required.values[2], LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_LOW);
+  loom_enum_array_t optional = loom_test_enum_array_attrs_optional_values(op);
+  ASSERT_EQ(optional.count, 3u);
+  EXPECT_EQ(optional.values[0],
+            LOOM_TEST_ENUM_ARRAY_ATTRS_OPTIONAL_VALUES_MIDDLE);
+  EXPECT_EQ(optional.values[1], 42u);
+  EXPECT_EQ(optional.values[2],
+            LOOM_TEST_ENUM_ARRAY_ATTRS_OPTIONAL_VALUES_MIDDLE);
+  loom_module_free(module);
+}
+
+TEST_F(ParserTest, SignedEnumSetsRoundTripCanonicalStableValues) {
+  std::string text = RoundTrip(
+      "test.signed_enum_set_attrs [high, -middle, low] using [-high]\n"
+      "test.signed_enum_set_attrs [] using []\n"
+      "test.signed_enum_set_attrs []\n");
+  EXPECT_NE(text.find("test.signed_enum_set_attrs [low, -middle, high] "
+                      "using [-high]"),
+            std::string::npos);
+  EXPECT_NE(text.find("test.signed_enum_set_attrs [] using []"),
+            std::string::npos);
+
+  loom_module_t* module = ParseOk(
+      "test.signed_enum_set_attrs [high, -middle, low] using [-high]\n");
+  ASSERT_NE(module, nullptr);
+  loom_block_t* body = loom_module_block(module);
+  ASSERT_NE(body, nullptr);
+  ASSERT_EQ(body->op_count, 1u);
+  loom_op_t* op = loom_block_op(body, 0);
+  ASSERT_TRUE(loom_test_signed_enum_set_attrs_isa(op));
+  loom_signed_enum_set_t required =
+      loom_test_signed_enum_set_attrs_required_features(op);
+  EXPECT_TRUE(loom_signed_enum_set_contains_positive(required, 1));
+  EXPECT_TRUE(loom_signed_enum_set_contains_negative(required, 7));
+  EXPECT_TRUE(loom_signed_enum_set_contains_positive(required, 255));
+  loom_signed_enum_set_t optional =
+      loom_test_signed_enum_set_attrs_optional_features(op);
+  EXPECT_TRUE(loom_signed_enum_set_contains_negative(optional, 255));
+  loom_module_free(module);
+}
+
+TEST_F(ParserTest, SymbolArraysRoundTripOrderDuplicatesAndPresentEmpty) {
+  std::string text = RoundTrip(
+      "test.record @a\n"
+      "test.record @b\n"
+      "test.symbol_array_attrs [@b, @a, @b] using [@a]\n"
+      "test.symbol_array_attrs [] using []\n"
+      "test.symbol_array_attrs []\n");
+  EXPECT_NE(text.find("test.symbol_array_attrs [@b, @a, @b] using [@a]"),
+            std::string::npos);
+  EXPECT_NE(text.find("test.symbol_array_attrs [] using []"),
+            std::string::npos);
+
+  loom_module_t* module = ParseOk(
+      "test.record @a\n"
+      "test.record @b\n"
+      "test.symbol_array_attrs [@b, @a, @b] using [@a]\n"
+      "test.symbol_array_attrs [] using []\n"
+      "test.symbol_array_attrs []\n");
+  loom_block_t* body = loom_module_block(module);
+  ASSERT_EQ(body->op_count, 5u);
+  loom_op_t* mixed_op = loom_block_op(body, 2);
+  ASSERT_TRUE(loom_test_symbol_array_attrs_isa(mixed_op));
+  loom_symbol_ref_array_t dependencies =
+      loom_test_symbol_array_attrs_dependencies(mixed_op);
+  ASSERT_EQ(dependencies.count, 3u);
+  EXPECT_EQ(dependencies.values[0].symbol_id, dependencies.values[2].symbol_id);
+  EXPECT_NE(dependencies.values[0].symbol_id, dependencies.values[1].symbol_id);
+  loom_symbol_ref_array_t available =
+      loom_test_symbol_array_attrs_available(mixed_op);
+  ASSERT_EQ(available.count, 1u);
+  EXPECT_EQ(available.values[0].symbol_id, dependencies.values[1].symbol_id);
+
+  loom_op_t* present_empty_op = loom_block_op(body, 3);
+  EXPECT_FALSE(loom_attr_is_absent(loom_op_attrs(present_empty_op)[1]));
+  EXPECT_EQ(loom_test_symbol_array_attrs_available(present_empty_op).count, 0u);
+  loom_op_t* absent_op = loom_block_op(body, 4);
+  EXPECT_TRUE(loom_attr_is_absent(loom_op_attrs(absent_op)[1]));
+  loom_module_free(module);
+}
+
+TEST_F(ParserTest, ModuleScopeMetadataRoundTrips) {
+  EXPECT_EQ(RoundTrip("test.module_metadata\n"), "test.module_metadata\n");
+}
+
+TEST_F(ParserTest, AvailabilityOnlyUnresolvedSymbolIsAccepted) {
+  loom_module_t* module = ParseOk(
+      "test.func @main() {\n"
+      "  test.symbol_array_attrs [] using [@provider]\n"
+      "  test.yield\n"
+      "}\n");
+  ASSERT_NE(module, nullptr);
+  const loom_string_id_t provider_name_id =
+      loom_module_lookup_string(module, IREE_SV("provider"));
+  ASSERT_NE(provider_name_id, LOOM_STRING_ID_INVALID);
+  const loom_symbol_id_t provider_id =
+      loom_module_find_symbol(module, provider_name_id);
+  ASSERT_NE(provider_id, LOOM_SYMBOL_ID_INVALID);
+  EXPECT_EQ(module->symbols.entries[provider_id].defining_op, nullptr);
+  loom_module_free(module);
+}
+
+TEST_F(ParserTest, ReturnsSymbolReferencesFromParsedSnapshot) {
+  const char* source =
+      "test.func @main() {\n"
+      "  test.symbol_array_attrs [@dependency] using [@provider]\n"
+      "  test.yield\n"
+      "}\n"
+      "test.record @dependency\n";
+  capture_.Reset();
+  loom_text_parse_options_t options = {
+      /*.diagnostic_sink=*/capture_.sink(),
+      /*.max_errors=*/100,
+  };
+  iree_arena_allocator_t symbol_reference_arena;
+  iree_arena_initialize(&block_pool_, &symbol_reference_arena);
+  loom_symbol_reference_table_t symbol_references = {0};
+  loom_module_t* module = nullptr;
+  IREE_ASSERT_OK(loom_text_parse_with_symbol_references(
+      iree_make_cstring_view(source), IREE_SV("test.loom"), &context_,
+      &block_pool_, &options, &symbol_reference_arena, &symbol_references,
+      &module));
+  ASSERT_TRUE(capture_.diagnostics.empty());
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(symbol_references.module, module);
+  EXPECT_EQ(symbol_references.symbol_count, module->symbols.count);
+
+  const loom_symbol_id_t dependency_id = loom_module_find_symbol(
+      module, loom_module_lookup_string(module, IREE_SV("dependency")));
+  const loom_symbol_id_t provider_id = loom_module_find_symbol(
+      module, loom_module_lookup_string(module, IREE_SV("provider")));
+  ASSERT_NE(dependency_id, LOOM_SYMBOL_ID_INVALID);
+  ASSERT_NE(provider_id, LOOM_SYMBOL_ID_INVALID);
+
+  const loom_symbol_reference_occurrence_id_t dependency_occurrence_id =
+      symbol_references.symbols[dependency_id].first_incoming_occurrence_id;
+  const loom_symbol_reference_occurrence_id_t availability_occurrence_id =
+      symbol_references.symbols[provider_id].first_incoming_occurrence_id;
+  ASSERT_NE(dependency_occurrence_id,
+            LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID);
+  ASSERT_NE(availability_occurrence_id,
+            LOOM_SYMBOL_REFERENCE_OCCURRENCE_ID_INVALID);
+  const loom_symbol_reference_occurrence_t* dependency =
+      &symbol_references.occurrences[dependency_occurrence_id];
+  const loom_symbol_reference_occurrence_t* availability =
+      &symbol_references.occurrences[availability_occurrence_id];
+  EXPECT_EQ(dependency->role, LOOM_SYMBOL_REFERENCE_ROLE_DEPENDENCY);
+  EXPECT_EQ(availability->role, LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY);
+
+  iree_arena_deinitialize(&symbol_reference_arena);
+  loom_module_free(module);
+}
+
+TEST_F(ParserTest, ParameterizedAttrsRoundTripInDeclarationOrder) {
+  std::string text = RoundTrip(
+      "test.record @target\n"
+      "test.parameterized_attr "
+      "#test.options<tile = #test.tile<width = 16>, element_type = bf16, "
+      "scopes = [subgroup, <254>], target = @target, mode = fast>\n");
+  EXPECT_NE(text.find("test.parameterized_attr "
+                      "#test.options<mode = fast, scopes = [subgroup, <254>], "
+                      "element_type = bf16, tile = #test.tile<width = 16>, "
+                      "target = @target>"),
+            std::string::npos);
+
+  loom_module_t* module = ParseOk(
+      "test.record @target\n"
+      "test.parameterized_attr "
+      "#test.options<mode = fast, scopes = [subgroup, <254>], "
+      "element_type = bf16, tile = #test.tile<width = 16>, "
+      "target = @target>\n");
+  loom_block_t* body = loom_module_block(module);
+  ASSERT_EQ(body->op_count, 2u);
+  loom_op_t* op = loom_block_op(body, 1);
+  ASSERT_TRUE(loom_test_parameterized_attr_isa(op));
+  loom_attribute_t options = loom_test_parameterized_attr_options(op);
+  ASSERT_TRUE(loom_test_options_attr_isa(options));
+  EXPECT_EQ(loom_test_options_attr_mode(options), LOOM_TEST_OPTIONS_MODE_FAST);
+  ASSERT_TRUE(loom_test_options_attr_has_scopes(options));
+  loom_enum_array_t scopes = loom_test_options_attr_scopes(options);
+  ASSERT_EQ(scopes.count, 2u);
+  EXPECT_EQ(scopes.values[0], LOOM_TEST_OPTIONS_SCOPES_SUBGROUP);
+  EXPECT_EQ(scopes.values[1], 254u);
+  ASSERT_TRUE(loom_test_options_attr_has_element_type(options));
+  ASSERT_TRUE(loom_test_options_attr_has_tile(options));
+  loom_attribute_t tile = loom_test_options_attr_tile(options);
+  ASSERT_TRUE(loom_test_tile_attr_isa(tile));
+  EXPECT_EQ(loom_test_tile_attr_width(tile), 16);
+  ASSERT_TRUE(loom_test_options_attr_has_target(options));
+  loom_symbol_ref_t target = loom_test_options_attr_target(options);
+  ASSERT_LT(target.symbol_id, module->symbols.count);
+  EXPECT_TRUE(iree_string_view_equal(
+      module->strings
+          .entries[module->symbols.entries[target.symbol_id].name_id],
+      IREE_SV("target")));
+  loom_module_free(module);
+}
+
+TEST_F(ParserTest, CompactParameterizedAttrsCanonicalizePrimaryFirst) {
+  std::string text = RoundTrip(
+      "test.compact_parameterized_attr "
+      "#test.compact<label = \"wave\", value = 64>\n");
+  EXPECT_NE(text.find("test.compact_parameterized_attr "
+                      "#test.compact<64, label = \"wave\">"),
+            std::string::npos);
+
+  loom_module_t* module = ParseOk(
+      "test.compact_parameterized_attr "
+      "#test.compact<64, label = \"wave\">\n");
+  loom_op_t* op = loom_block_op(loom_module_block(module), 0);
+  ASSERT_TRUE(loom_test_compact_parameterized_attr_isa(op));
+  loom_attribute_t compact = loom_test_compact_parameterized_attr_value(op);
+  ASSERT_TRUE(loom_test_compact_attr_isa(compact));
+  EXPECT_EQ(loom_test_compact_attr_value(compact), 64);
+  ASSERT_TRUE(loom_test_compact_attr_has_label(compact));
+  loom_string_id_t label_id = loom_test_compact_attr_label(compact);
+  ASSERT_LT(label_id, module->strings.count);
+  EXPECT_TRUE(iree_string_view_equal(module->strings.entries[label_id],
+                                     IREE_SV("wave")));
+  loom_module_free(module);
+
+  text = RoundTrip("test.compact_parameterized_attr #test.compact<64>\n");
+  EXPECT_NE(text.find("test.compact_parameterized_attr #test.compact<64>"),
+            std::string::npos);
+  module = ParseOk(
+      "test.compact_parameterized_attr "
+      "#test.compact<64>\n");
+  op = loom_block_op(loom_module_block(module), 0);
+  ASSERT_TRUE(loom_test_compact_parameterized_attr_isa(op));
+  compact = loom_test_compact_parameterized_attr_value(op);
+  ASSERT_TRUE(loom_test_compact_attr_isa(compact));
+  EXPECT_EQ(loom_test_compact_attr_value(compact), 64);
+  EXPECT_FALSE(loom_test_compact_attr_has_label(compact));
+  loom_module_free(module);
+}
+
+TEST_F(ParserTest, ParameterizedAttrsPreservePresentEmptyAndGenericNesting) {
+  loom_module_t* module = ParseOk(
+      "test.parameterized_attr "
+      "#test.options<mode = fast, scopes = []>\n"
+      "test.parameterized_attr #test.options<mode = fast>\n"
+      "test.enum_array_attrs [] "
+      "{options = #test.options<mode = precise>}\n");
+  loom_block_t* body = loom_module_block(module);
+  ASSERT_EQ(body->op_count, 3u);
+
+  loom_attribute_t present =
+      loom_test_parameterized_attr_options(loom_block_op(body, 0));
+  ASSERT_TRUE(loom_test_options_attr_has_scopes(present));
+  EXPECT_EQ(loom_test_options_attr_scopes(present).count, 0u);
+  loom_attribute_t absent =
+      loom_test_parameterized_attr_options(loom_block_op(body, 1));
+  EXPECT_FALSE(loom_test_options_attr_has_scopes(absent));
+
+  std::string text = PrintModule(module);
+  EXPECT_NE(text.find("{options = #test.options<mode = precise>}"),
+            std::string::npos);
+  loom_module_free(module);
+}
+
+TEST_F(ParserTest, ParameterizedAttrArraysPreserveOrderFamiliesAndPresence) {
+  std::string text = RoundTrip(
+      "test.parameterized_attr_array "
+      "[#test.tile<width = 8>, #test.options<mode = fast>, "
+      "#test.tile<width = 8>] using [#test.tile<width = 4>]\n"
+      "test.parameterized_attr_array [] using []\n"
+      "test.parameterized_attr_array []\n"
+      "test.parameterized_attr "
+      "#test.options<mode = precise, "
+      "tiles = [#test.tile<width = 4>, #test.tile<width = 8>]>\n"
+      "test.parameterized_attr_array "
+      "[#test.node<0, children = [#test.node<1>]>]\n");
+  EXPECT_NE(text.find("test.parameterized_attr_array "
+                      "[#test.tile<width = 8>, "
+                      "#test.options<mode = fast>, "
+                      "#test.tile<width = 8>] using "
+                      "[#test.tile<width = 4>]"),
+            std::string::npos);
+  EXPECT_NE(text.find("test.parameterized_attr_array [] using []"),
+            std::string::npos);
+  EXPECT_NE(text.find("tiles = [#test.tile<width = 4>, "
+                      "#test.tile<width = 8>]"),
+            std::string::npos);
+
+  loom_module_t* module = ParseOk(
+      "test.parameterized_attr_array "
+      "[#test.tile<width = 8>, #test.options<mode = fast>, "
+      "#test.tile<width = 8>] using [#test.tile<width = 4>]\n"
+      "test.parameterized_attr_array [] using []\n"
+      "test.parameterized_attr_array []\n");
+  ASSERT_NE(module, nullptr);
+  loom_block_t* body = loom_module_block(module);
+  ASSERT_EQ(body->op_count, 3u);
+
+  loom_op_t* mixed_op = loom_block_op(body, 0);
+  ASSERT_TRUE(loom_test_parameterized_attr_array_isa(mixed_op));
+  loom_parameterized_attr_array_t values =
+      loom_test_parameterized_attr_array_values(mixed_op);
+  ASSERT_EQ(values.count, 3u);
+  EXPECT_TRUE(loom_test_tile_attr_isa(values.values[0]));
+  EXPECT_TRUE(loom_test_options_attr_isa(values.values[1]));
+  EXPECT_TRUE(loom_test_tile_attr_isa(values.values[2]));
+  EXPECT_TRUE(loom_attribute_equal(&values.values[0], &values.values[2]));
+  loom_parameterized_attr_array_t tiles =
+      loom_test_parameterized_attr_array_tiles(mixed_op);
+  ASSERT_EQ(tiles.count, 1u);
+  EXPECT_TRUE(loom_test_tile_attr_isa(tiles.values[0]));
+
+  loom_op_t* present_empty_op = loom_block_op(body, 1);
+  EXPECT_FALSE(loom_attr_is_absent(loom_op_attrs(present_empty_op)[1]));
+  EXPECT_EQ(loom_test_parameterized_attr_array_tiles(present_empty_op).count,
+            0u);
+  loom_op_t* absent_op = loom_block_op(body, 2);
+  EXPECT_TRUE(loom_attr_is_absent(loom_op_attrs(absent_op)[1]));
+
+  loom_module_free(module);
+}
+
+TEST_F(ParserTest, ParameterizedAttrArraysRejectMalformedInput) {
+  const char* cases[] = {
+      "test.parameterized_attr_array [42]\n",
+      "test.parameterized_attr_array "
+      "[#test.tile<width = 8>,]\n",
+      "test.parameterized_attr_array [] using "
+      "[#test.options<mode = fast>]\n",
+      "test.parameterized_attr_array [#test.unknown<value = 1>]\n",
+  };
+  for (const char* source : cases) {
+    SCOPED_TRACE(source);
+    EXPECT_FALSE(ParseExpectErrors(source).empty());
+  }
+}
+
+TEST_F(ParserTest, ParameterizedAttrsRejectMalformedInput) {
+  struct MalformedCase {
+    const char* source;
+    const char* actual_token;
+    const char* expected;
+  } cases[] = {
+      {
+          "test.parameterized_attr #test.unknown<mode = fast>\n",
+          "#test.unknown",
+          "a registered parameterized attribute family",
+      },
+      {
+          "test.parameterized_attr "
+          "#test.options<mode = fast, nope = 1>\n",
+          "nope",
+          "a parameter declared by '#test.options'",
+      },
+      {
+          "test.parameterized_attr "
+          "#test.options<mode = fast, mode = precise>\n",
+          "mode",
+          "each parameter at most once",
+      },
+      {
+          "test.parameterized_attr #test.options<scopes = []>\n",
+          ">",
+          "required parameter 'mode'",
+      },
+      {
+          "test.parameterized_attr #test.options<mode = <42>>\n",
+          "<",
+          "a declared enum keyword",
+      },
+      {
+          "test.parameterized_attr "
+          "#test.options<mode = fast, "
+          "tile = #test.options<mode = precise>>\n",
+          "#test.options",
+          "'#test.tile'",
+      },
+      {
+          "test.compact_parameterized_attr "
+          "#test.compact<label = \"wave\">\n",
+          ">",
+          "required parameter 'value'",
+      },
+      {
+          "test.compact_parameterized_attr "
+          "#test.compact<64, value = 32>\n",
+          "value",
+          "each parameter at most once",
+      },
+  };
+  for (const MalformedCase& test_case : cases) {
+    SCOPED_TRACE(test_case.source);
+    const auto& diagnostics = ParseExpectErrors(test_case.source);
+    ASSERT_FALSE(diagnostics.empty());
+    ExpectError(diagnostics.front(),
+                loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 3));
+    EXPECT_EQ(GetStringParam(diagnostics.front(), 0), test_case.actual_token);
+    EXPECT_EQ(GetStringParam(diagnostics.front(), 1), test_case.expected);
+  }
+}
+
+TEST_F(ParserTest, OptionalPredicateListPreservesPresentEmpty) {
+  std::string text = RoundTrip(
+      "test.func @empty_predicates() where [] {\n"
+      "  test.yield\n"
+      "}\n");
+  EXPECT_NE(text.find("test.func @empty_predicates() where []"),
+            std::string::npos);
+}
+
+TEST_F(ParserTest, OpenScalarEnumRawValueRoundTrips) {
+  EXPECT_NE(
+      RoundTrip("test.record <42> @target\n").find("test.record <42> @target"),
+      std::string::npos);
+}
+
+TEST_F(ParserTest, ClosedEnumArrayRejectsRawValue) {
+  const auto& diagnostics = ParseExpectErrors("test.enum_array_attrs [<42>]\n");
+  ASSERT_EQ(diagnostics.size(), 1u);
+  ExpectError(diagnostics[0],
+              loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 3));
+}
+
+TEST_F(ParserTest, SignedEnumSetRejectsRepeatedAndUnknownValues) {
+  EXPECT_FALSE(
+      ParseExpectErrors("test.signed_enum_set_attrs [low, -low]\n").empty());
+  EXPECT_FALSE(
+      ParseExpectErrors("test.signed_enum_set_attrs [other]\n").empty());
+}
+
+TEST_F(ParserTest, OpenEnumArrayRejectsValueOutsideByteDomain) {
+  const auto& diagnostics =
+      ParseExpectErrors("test.enum_array_attrs [] using [<256>]\n");
+  ASSERT_EQ(diagnostics.size(), 1u);
+  ExpectError(diagnostics[0],
+              loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 3));
+}
+
 TEST_F(ParserTest, AttrDictUnsortedKeysRoundTripInCanonicalOrder) {
   std::string text = RoundTrip(
       "%c = test.constant 0 : f32\n"
@@ -840,6 +1426,48 @@ TEST_F(ParserTest, AttrDictSymbolRefRoundTrip) {
             std::string::npos)
       << "symbol references in generic dictionaries should round-trip: "
       << text;
+}
+
+TEST_F(ParserTest, SymbolForwardReferenceResolvesToLaterDefinition) {
+  std::string text = RoundTrip(
+      "test.template_param_symbol<@target>\n"
+      "test.record @target {}\n");
+  EXPECT_NE(text.find("test.template_param_symbol<@target>"),
+            std::string::npos);
+  EXPECT_NE(text.find("test.record @target"), std::string::npos);
+}
+
+TEST_F(ParserTest, UnresolvedSymbolReferenceIsParseError) {
+  const char* source =
+      "test.template_param_symbol_flags<@missing>\n"
+      "test.template_param_symbol_flags<@missing>\n";
+  const auto& diagnostics = ParseExpectErrors(source);
+  ASSERT_EQ(diagnostics.size(), 1u);
+  ExpectError(diagnostics[0],
+              loom_error_def_lookup(LOOM_ERROR_DOMAIN_SYMBOL, 2));
+  EXPECT_EQ(GetStringParam(diagnostics[0], 0), "missing");
+  EXPECT_EQ(diagnostics[0].origin_line, 1u);
+  EXPECT_EQ(diagnostics[0].origin_column,
+            static_cast<uint32_t>(std::strchr(source, '@') - source + 1));
+  EXPECT_EQ(diagnostics[0].emitter, LOOM_EMITTER_PARSER);
+}
+
+TEST_F(ParserTest, AvailabilityAuthorizesUnresolvedDependencies) {
+  loom_module_t* module = ParseOk(
+      "test.func @main() {\n"
+      "  test.symbol_array_attrs [] using [@missing]\n"
+      "  test.symbol_array_attrs [@missing]\n"
+      "  test.yield\n"
+      "}\n");
+  ASSERT_NE(module, nullptr);
+  const loom_string_id_t missing_name_id =
+      loom_module_lookup_string(module, IREE_SV("missing"));
+  ASSERT_NE(missing_name_id, LOOM_STRING_ID_INVALID);
+  const loom_symbol_id_t missing_id =
+      loom_module_find_symbol(module, missing_name_id);
+  ASSERT_NE(missing_id, LOOM_SYMBOL_ID_INVALID);
+  EXPECT_EQ(module->symbols.entries[missing_id].defining_op, nullptr);
+  loom_module_free(module);
 }
 
 TEST_F(ParserTest, AttrDictNestedDictRoundTripInCanonicalOrder) {
@@ -882,6 +1510,41 @@ TEST_F(ParserTest, AttrDictEmptyArrayPayloadIsCanonical) {
   std::string text = PrintModule(module);
   EXPECT_NE(text.find("test.attrs %c {shape = []} : f32"), std::string::npos)
       << "empty i64 array dict values should round-trip canonically: " << text;
+  loom_module_free(module);
+}
+
+TEST_F(ParserTest, AttrDictArrayPayloadMayExceedInlineParserCapacity) {
+  std::string source =
+      "%c = test.constant 0 : f32\n"
+      "%s = test.attrs %c {shape = [";
+  for (int64_t i = 0; i < 40; ++i) {
+    if (i > 0) source += ", ";
+    source += std::to_string(i);
+  }
+  source += "]} : f32\n";
+
+  loom_module_t* module = ParseOk(source.c_str());
+  if (!module) return;
+
+  loom_block_t* body = loom_module_block(module);
+  ASSERT_NE(body, nullptr);
+  ASSERT_GE(body->op_count, 2u);
+  loom_op_t* attrs_op = loom_block_op(body, 1);
+  ASSERT_NE(attrs_op, nullptr);
+  ASSERT_TRUE(loom_test_attrs_isa(attrs_op));
+
+  loom_attribute_t dict_attr = loom_op_attrs(attrs_op)[0];
+  ASSERT_EQ(dict_attr.kind, LOOM_ATTR_DICT);
+  ASSERT_EQ(dict_attr.count, 1u);
+  loom_attribute_t array_attr = dict_attr.dict_entries[0].value;
+  ASSERT_EQ(array_attr.kind, LOOM_ATTR_I64_ARRAY);
+  ASSERT_EQ(array_attr.count, 40u);
+  ASSERT_NE(array_attr.i64_array, nullptr);
+  for (int64_t i = 0; i < 40; ++i) {
+    EXPECT_EQ(array_attr.i64_array[i], i);
+  }
+
+  EXPECT_NE(PrintModule(module).find("shape = [0, 1, 2, 3"), std::string::npos);
   loom_module_free(module);
 }
 
@@ -956,6 +1619,18 @@ TEST_F(ParserTest, EmptyPredicateListPayloadRoundTripsExplicitly) {
       << "explicit empty predicate lists should round-trip canonically: "
       << text;
   loom_module_free(module);
+}
+
+TEST_F(ParserTest, PredicateListBeyondInlineCapacityRoundTrips) {
+  std::string text = RoundTrip(
+      "%x = test.constant 0 : index\n"
+      "%y = test.assume %x ["
+      "eq(%x, 0), eq(%x, 0), eq(%x, 0), eq(%x, 0), eq(%x, 0), "
+      "eq(%x, 0), eq(%x, 0), eq(%x, 0), eq(%x, 0), eq(%x, 0), "
+      "eq(%x, 0), eq(%x, 0), eq(%x, 0), eq(%x, 0), eq(%x, 0), "
+      "eq(%x, 0), eq(%x, 0)] : index\n");
+  EXPECT_NE(text.find("eq(%x, 0), eq(%x, 0)]"), std::string::npos)
+      << "predicate lists should grow beyond inline storage: " << text;
 }
 
 TEST_F(ParserTest, PredicateArityMismatchEmitsStructuredDiagnostic) {
@@ -1183,6 +1858,141 @@ TEST_F(ParserTest, EncodingRoleTypeRoundTrip) {
                       "%transform: encoding<transform>)"),
             std::string::npos)
       << "encoding role types should round-trip: " << text;
+}
+
+TEST_F(ParserTest, DescriptorBackedTypesRoundTripAndPreserveParameters) {
+  const char* source =
+      "test.record @target\n"
+      "%scope = test.constant 0 : test.scope<subgroup>\n"
+      "%matrix = test.constant 0 : "
+      "test.matrix<bf16, scope = workgroup, rows = 16, target = @target>\n"
+      "%packed = test.constant 0 : test.array<bf16>\n"
+      "%aligned = test.constant 0 : "
+      "test.array<bf16, alignment = 32>\n"
+      "%metadata = test.constant 0 : "
+      "test.array<bf16, metadata = {tile = #test.tile<width = 8>}>\n"
+      "%variants = test.constant 0 : "
+      "test.variant_set<"
+      "[#test.tile<width = 8>, #test.options<mode = fast>, "
+      "#test.tile<width = 8>], alternatives = []>\n"
+      "%variants_absent = test.constant 0 : test.variant_set<[]>\n";
+  std::string text = RoundTrip(source);
+  loom_module_t* module = ParseOk(text.c_str());
+  ASSERT_NE(module, nullptr);
+  loom_block_t* block = loom_module_block(module);
+  ASSERT_NE(block, nullptr);
+  ASSERT_EQ(block->op_count, 8u);
+
+  loom_type_t scope_type = loom_module_value_type(
+      module, loom_test_constant_result(loom_block_op(block, 1)));
+  ASSERT_TRUE(loom_test_scope_type_isa(scope_type));
+  EXPECT_EQ(loom_test_scope_type_scope(scope_type),
+            LOOM_TEST_SCOPE_TYPE_SCOPE_SUBGROUP);
+
+  loom_type_t matrix_type = loom_module_value_type(
+      module, loom_test_constant_result(loom_block_op(block, 2)));
+  ASSERT_TRUE(loom_test_matrix_type_isa(matrix_type));
+  EXPECT_EQ(loom_test_matrix_type_scope(matrix_type),
+            LOOM_TEST_MATRIX_TYPE_SCOPE_WORKGROUP);
+  EXPECT_EQ(loom_test_matrix_type_rows(matrix_type), 16);
+  ASSERT_TRUE(loom_test_matrix_type_has_target(matrix_type));
+  loom_symbol_ref_t target = loom_test_matrix_type_target(matrix_type);
+  ASSERT_LT(target.symbol_id, module->symbols.count);
+  EXPECT_TRUE(iree_string_view_equal(
+      module->strings
+          .entries[module->symbols.entries[target.symbol_id].name_id],
+      IREE_SV("target")));
+  loom_type_id_t element_type_id =
+      loom_test_matrix_type_element_type(matrix_type);
+  ASSERT_LT(element_type_id, module->types.count);
+  EXPECT_TRUE(loom_type_equal(module->types.entries[element_type_id],
+                              loom_type_scalar(LOOM_SCALAR_TYPE_BF16)));
+
+  loom_type_t packed_type = loom_module_value_type(
+      module, loom_test_constant_result(loom_block_op(block, 3)));
+  ASSERT_TRUE(loom_test_array_type_isa(packed_type));
+  EXPECT_FALSE(loom_test_array_type_has_alignment(packed_type));
+  loom_type_t aligned_type = loom_module_value_type(
+      module, loom_test_constant_result(loom_block_op(block, 4)));
+  ASSERT_TRUE(loom_test_array_type_isa(aligned_type));
+  EXPECT_TRUE(loom_test_array_type_has_alignment(aligned_type));
+  EXPECT_EQ(loom_test_array_type_alignment(aligned_type), 32);
+
+  loom_type_t metadata_type = loom_module_value_type(
+      module, loom_test_constant_result(loom_block_op(block, 5)));
+  ASSERT_TRUE(loom_test_array_type_isa(metadata_type));
+  ASSERT_TRUE(loom_test_array_type_has_metadata(metadata_type));
+  loom_named_attr_slice_t metadata =
+      loom_test_array_type_metadata(metadata_type);
+  ASSERT_EQ(metadata.count, 1u);
+  ASSERT_TRUE(loom_test_tile_attr_isa(metadata.entries[0].value));
+  EXPECT_EQ(loom_test_tile_attr_width(metadata.entries[0].value), 8);
+
+  loom_type_t variants_type = loom_module_value_type(
+      module, loom_test_constant_result(loom_block_op(block, 6)));
+  ASSERT_TRUE(loom_test_variant_set_type_isa(variants_type));
+  loom_parameterized_attr_array_t variants =
+      loom_test_variant_set_type_values(variants_type);
+  ASSERT_EQ(variants.count, 3u);
+  EXPECT_TRUE(loom_test_tile_attr_isa(variants.values[0]));
+  EXPECT_TRUE(loom_test_options_attr_isa(variants.values[1]));
+  EXPECT_TRUE(loom_test_tile_attr_isa(variants.values[2]));
+  EXPECT_TRUE(loom_attribute_equal(&variants.values[0], &variants.values[2]));
+  ASSERT_TRUE(loom_test_variant_set_type_has_alternatives(variants_type));
+  EXPECT_EQ(loom_test_variant_set_type_alternatives(variants_type).count, 0u);
+
+  loom_type_t variants_absent_type = loom_module_value_type(
+      module, loom_test_constant_result(loom_block_op(block, 7)));
+  ASSERT_TRUE(loom_test_variant_set_type_isa(variants_absent_type));
+  EXPECT_FALSE(
+      loom_test_variant_set_type_has_alternatives(variants_absent_type));
+
+  loom_module_free(module);
+}
+
+TEST_F(ParserTest, DescriptorBackedTypeRoundTripsCompactShape) {
+  const char* source =
+      "%matrix = test.constant 0 : "
+      "test.compact_matrix<16x32xbf16, subgroup>\n";
+  std::string text = RoundTrip(source);
+  EXPECT_NE(text.find("test.compact_matrix<16x32xbf16, subgroup>"),
+            std::string::npos)
+      << "compact shape payload should round-trip without spacing: " << text;
+
+  loom_module_t* module = ParseOk(text.c_str());
+  ASSERT_NE(module, nullptr);
+  loom_block_t* block = loom_module_block(module);
+  ASSERT_NE(block, nullptr);
+  ASSERT_EQ(block->op_count, 1u);
+  loom_type_t matrix_type = loom_module_value_type(
+      module, loom_test_constant_result(loom_block_op(block, 0)));
+  ASSERT_TRUE(loom_test_compact_matrix_type_isa(matrix_type));
+  EXPECT_EQ(loom_test_compact_matrix_type_rows(matrix_type), 16);
+  EXPECT_EQ(loom_test_compact_matrix_type_columns(matrix_type), 32);
+  loom_type_id_t bf16_type_id = LOOM_TYPE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_type_id(
+      module, loom_type_scalar(LOOM_SCALAR_TYPE_BF16), &bf16_type_id));
+  EXPECT_EQ(loom_test_compact_matrix_type_element_type(matrix_type),
+            bf16_type_id);
+  EXPECT_EQ(loom_test_compact_matrix_type_scope(matrix_type),
+            LOOM_TEST_COMPACT_MATRIX_TYPE_SCOPE_SUBGROUP);
+  loom_module_free(module);
+}
+
+TEST_F(ParserTest, DescriptorBackedTypeRejectsInvalidParameterValue) {
+  const auto& diagnostics =
+      ParseExpectErrors("%v = test.constant 0 : test.scope<cluster>\n");
+  ASSERT_GE(diagnostics.size(), 1u);
+  ExpectError(diagnostics[0],
+              loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 17));
+}
+
+TEST_F(ParserTest, DescriptorBackedTypeRejectsMissingRequiredParameter) {
+  const auto& diagnostics = ParseExpectErrors(
+      "%v = test.constant 0 : test.matrix<bf16, scope = subgroup>\n");
+  ASSERT_GE(diagnostics.size(), 1u);
+  ExpectError(diagnostics[0],
+              loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 3));
 }
 
 TEST_F(ParserTest, FuncDeclNamedResultCanReferenceSignatureArg) {
@@ -1520,6 +2330,43 @@ TEST_F(ParserTest, SliceAllStatic) {
     EXPECT_NE(text.find("test.slice"), std::string::npos);
     loom_module_free(module);
   }
+}
+
+TEST_F(ParserTest, IndexListMayExceedInlineParserCapacity) {
+  std::string source =
+      "test.func @wide_update(%source: tile<1xf32>, "
+      "%target: tensor<1xf32>) -> (tensor<1xf32>) {\n"
+      "  %result = test.update %source, %target[";
+  for (int64_t i = 0; i < 40; ++i) {
+    if (i > 0) source += ", ";
+    source += std::to_string(i);
+  }
+  source +=
+      "] : tile<1xf32> -> (%target as tensor<1xf32>)\n"
+      "  test.yield %result : tensor<1xf32>\n"
+      "}\n";
+
+  loom_module_t* module = ParseOk(source.c_str());
+  if (!module) return;
+
+  loom_op_t* func_op = GetFirstFunctionOp(module);
+  ASSERT_NE(func_op, nullptr);
+  loom_block_t* body = GetEntryBlock(loom_op_regions(func_op)[0]);
+  ASSERT_NE(body, nullptr);
+  ASSERT_GE(body->op_count, 2u);
+  loom_op_t* update_op = loom_block_op(body, 0);
+  ASSERT_NE(update_op, nullptr);
+  ASSERT_TRUE(loom_test_update_isa(update_op));
+  loom_attribute_t static_offsets = loom_test_update_static_offsets(update_op);
+  ASSERT_EQ(static_offsets.kind, LOOM_ATTR_I64_ARRAY);
+  ASSERT_EQ(static_offsets.count, 40u);
+  ASSERT_NE(static_offsets.i64_array, nullptr);
+  for (int64_t i = 0; i < 40; ++i) {
+    EXPECT_EQ(static_offsets.i64_array[i], i);
+  }
+
+  EXPECT_NE(PrintModule(module).find("%target[0, 1, 2, 3"), std::string::npos);
+  loom_module_free(module);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1993,11 +2840,13 @@ TEST_F(ParserTest, AttrDictTooDeep) {
   std::string source =
       "%c = test.constant 0 : f32\n"
       "%s = test.attrs %c ";
-  for (uint32_t depth = 0; depth <= LOOM_ATTR_DICT_MAX_NESTING_DEPTH; ++depth) {
+  for (uint32_t depth = 0; depth <= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH;
+       ++depth) {
     source += "{k" + std::to_string(depth) + " = ";
   }
   source += "0";
-  for (uint32_t depth = 0; depth <= LOOM_ATTR_DICT_MAX_NESTING_DEPTH; ++depth) {
+  for (uint32_t depth = 0; depth <= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH;
+       ++depth) {
     source += "}";
   }
   source += " : f32\n";
@@ -2006,7 +2855,7 @@ TEST_F(ParserTest, AttrDictTooDeep) {
   ASSERT_GE(diagnostics.size(), 1u);
   ExpectError(diagnostics[0],
               loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 21));
-  ExpectU32Param(diagnostics[0], 0, LOOM_ATTR_DICT_MAX_NESTING_DEPTH);
+  ExpectU32Param(diagnostics[0], 0, LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
 }
 
 TEST_F(ParserTest, UnexpectedTokenInFuncSignature) {
@@ -2031,13 +2880,13 @@ TEST_F(ParserTest, UnknownTypeName) {
   EXPECT_EQ(GetStringParam(diagnostics[0], 0), "foobar");
 }
 
-TEST_F(ParserTest, UnknownEncodingRole) {
+TEST_F(ParserTest, UndeclaredEncodingRole) {
   const auto& diagnostics =
       ParseExpectErrors("%c = test.constant 0 : encoding<address>\n");
   ASSERT_GE(diagnostics.size(), 1u);
   ExpectError(diagnostics[0],
-              loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 18));
-  EXPECT_EQ(GetStringParam(diagnostics[0], 0), "encoding role");
+              loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 17));
+  EXPECT_EQ(GetStringParam(diagnostics[0], 0), "role");
   EXPECT_EQ(GetStringParam(diagnostics[0], 1), "address");
 }
 
@@ -2073,8 +2922,10 @@ TEST_F(ParserTest, VectorRequiresRank) {
 
 TEST_F(ParserTest, VectorZeroExtentIsNotRankZero) {
   loom_module_t* module = ParseOk(
-      "test.func @empty(%v: vector<0xf32>, %m: vector<4x0xi32>) {\n"
-      "  test.use %v, %m : vector<0xf32>, vector<4x0xi32>\n"
+      "test.func @empty(%v: vector<0xf32>, %m: vector<4x0xi32>, "
+      "%f: vector<4x0xf32>) {\n"
+      "  test.use %v, %m, %f : vector<0xf32>, vector<4x0xi32>, "
+      "vector<4x0xf32>\n"
       "  test.yield\n"
       "}\n");
   loom_module_free(module);
@@ -2119,24 +2970,31 @@ TEST_F(ParserTest, InvalidEncodingAliasReportsAliasToken) {
 TEST_F(ParserTest, InlineEncoding) {
   // Inline encoding definition directly in a tile type.
   loom_module_t* module = ParseOk(
-      "test.func @test_enc(%x: tile<4xf32, #dense<block=32>>) -> "
-      "(tile<4xf32, #dense<block=32>>) {\n"
-      "  test.yield %x : tile<4xf32, #dense<block=32>>\n"
+      "test.func @test_enc(%x: tile<4xf32, #q8_0<block=32>>) -> "
+      "(tile<4xf32, #q8_0<block=32>>) {\n"
+      "  test.yield %x : tile<4xf32, #q8_0<block=32>>\n"
       "}\n");
   if (module) {
     std::string text = PrintModule(module);
-    EXPECT_NE(text.find("#dense<block=32>"), std::string::npos);
+    EXPECT_NE(text.find("#q8_0<block=32>"), std::string::npos);
     loom_module_free(module);
   }
 }
 
-TEST_F(ParserTest, EncodingAliasCannotShadowRegisteredFamily) {
-  const auto& diagnostics = ParseExpectErrors("#q8_0 = #dense\n");
-  ASSERT_GE(diagnostics.size(), 1u);
-  ExpectError(diagnostics[0],
-              loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 14));
-  EXPECT_EQ(GetStringParam(diagnostics[0], 0),
-            "alias name shadows a registered encoding family");
+TEST_F(ParserTest, EncodingAliasCannotShadowRegisteredAttributeFamily) {
+  const char* sources[] = {
+      "#q8_0 = #dense\n",
+      "#test.options = #dense\n",
+  };
+  for (const char* source : sources) {
+    SCOPED_TRACE(source);
+    const auto& diagnostics = ParseExpectErrors(source);
+    ASSERT_GE(diagnostics.size(), 1u);
+    ExpectError(diagnostics[0],
+                loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 14));
+    EXPECT_EQ(GetStringParam(diagnostics[0], 0),
+              "alias name shadows a registered attribute family");
+  }
 }
 
 TEST_F(ParserTest, DuplicateEncodingAliasDefinitionFails) {
@@ -2446,20 +3304,6 @@ TEST_F(ParserTest, PoolDimReportsRealPosition) {
   EXPECT_EQ(diagnostics[0].origin_column, 26u);
 }
 
-TEST_F(ParserTest, GroupScopeReportsRealPosition) {
-  // group<bad> — BARE_IDENT "bad" at column 27 (after "group<").
-  // Line 2: %r = test.cast %x : group<bad> to i32
-  //                              21    2627
-  const auto& diagnostics = ParseExpectErrors(
-      "%x = test.constant 0 : i32\n"
-      "%r = test.cast %x : group<bad> to i32\n");
-  ASSERT_GE(diagnostics.size(), 1u);
-  ExpectError(diagnostics[0],
-              loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 18));
-  EXPECT_EQ(diagnostics[0].origin_line, 2u);
-  EXPECT_EQ(diagnostics[0].origin_column, 27u);
-}
-
 //===----------------------------------------------------------------------===//
 // Error recovery
 //===----------------------------------------------------------------------===//
@@ -2475,6 +3319,16 @@ TEST_F(ParserTest, RecoverySkipsToNextOp) {
   EXPECT_NE(FindDiagnostic(capture_,
                            loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 6)),
             nullptr);
+}
+
+TEST_F(ParserTest, ShapedTypeRecoveryRestoresIntegerTokenization) {
+  const auto& diagnostics = ParseExpectErrors(
+      "%bad = test.constant 0 : vector<[%missing]xf32>\n"
+      "%good = test.constant 0xf32 : i32\n");
+  ASSERT_GE(diagnostics.size(), 1u);
+  for (const auto& diagnostic : diagnostics) {
+    EXPECT_EQ(diagnostic.origin_line, 1u);
+  }
 }
 
 TEST_F(ParserTest, MaxErrorsLimit) {

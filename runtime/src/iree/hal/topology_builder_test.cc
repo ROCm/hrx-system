@@ -23,7 +23,8 @@ using ::testing::Ne;
 
 static iree_hal_device_spec_t* CreateTestDeviceSpec(
     const char* driver_id, uint32_t logical_ordinal, uint32_t physical_ordinal,
-    uint32_t numa_node, uint64_t physical_device_affinity) {
+    uint32_t numa_node,
+    iree_hal_physical_device_affinity_t physical_device_affinity) {
   iree_hal_physical_device_spec_t physical_device = {
       /*.identity=*/
       {
@@ -92,7 +93,7 @@ TEST(TopologyBuilder, Initialize) {
   }
 
   // Verify self-edges require no external semaphore handles and retain native
-  // buffer handles in the interop word.
+  // buffer handles in the cold word.
   for (uint32_t i = 0; i < 4; ++i) {
     uint32_t idx = i * 4 + i;
     EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(
@@ -133,6 +134,9 @@ TEST(TopologyBuilder, SetEdges) {
       cross_edge.hi, IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_ASYNC_PRIMITIVE);
   cross_edge.hi = iree_hal_topology_edge_set_buffer_import_types(
       cross_edge.hi, IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF);
+  cross_edge.hi = iree_hal_topology_edge_set_link_type(
+      cross_edge.hi, IREE_HAL_TOPOLOGY_LINK_TYPE_PCIE);
+  cross_edge.hi = iree_hal_topology_edge_set_path_hop_count(cross_edge.hi, 2);
 
   IREE_ASSERT_OK(
       iree_hal_topology_builder_set_edge(&builder, 0, 1, cross_edge));
@@ -151,13 +155,17 @@ TEST(TopologyBuilder, SetEdges) {
   EXPECT_EQ(iree_hal_topology_edge_wait_mode(topology->device_edges[1].lo),
             IREE_HAL_TOPOLOGY_INTEROP_MODE_COPY);
 
-  // Check the interop word survived the finalize copy.
+  // Check the cold word survived the finalize copy.
   EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(
                 topology->device_edges[1].hi),
             IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_ASYNC_PRIMITIVE);
   EXPECT_EQ(
       iree_hal_topology_edge_buffer_import_types(topology->device_edges[1].hi),
       IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF);
+  EXPECT_EQ(iree_hal_topology_edge_link_type(topology->device_edges[1].hi),
+            IREE_HAL_TOPOLOGY_LINK_TYPE_PCIE);
+  EXPECT_EQ(iree_hal_topology_edge_path_hop_count(topology->device_edges[1].hi),
+            2);
   iree_hal_topology_destroy(topology, iree_allocator_system());
 }
 
@@ -293,6 +301,9 @@ TEST(TopologyBuilder, FullEdgePreservation) {
   edge.hi = iree_hal_topology_edge_set_buffer_export_types(
       edge.hi, IREE_HAL_TOPOLOGY_HANDLE_TYPE_RDMA_MR |
                    IREE_HAL_TOPOLOGY_HANDLE_TYPE_SHM);
+  edge.hi = iree_hal_topology_edge_set_link_type(
+      edge.hi, IREE_HAL_TOPOLOGY_LINK_TYPE_INFINIBAND);
+  edge.hi = iree_hal_topology_edge_set_path_hop_count(edge.hi, 4);
 
   IREE_ASSERT_OK(iree_hal_topology_builder_set_edge(&builder, 0, 1, edge));
   IREE_ASSERT_OK(iree_hal_topology_builder_set_edge(&builder, 1, 0, edge));
@@ -315,7 +326,7 @@ TEST(TopologyBuilder, FullEdgePreservation) {
   EXPECT_EQ(iree_hal_topology_edge_link_class(result.lo),
             IREE_HAL_TOPOLOGY_LINK_CLASS_FABRIC);
 
-  // Verify the entire interop word survived.
+  // Verify the entire cold word survived.
   EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(result.hi),
             IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_CUDA_EVENT);
   EXPECT_EQ(iree_hal_topology_edge_semaphore_export_timepoint_types(result.hi),
@@ -326,6 +337,9 @@ TEST(TopologyBuilder, FullEdgePreservation) {
   EXPECT_EQ(iree_hal_topology_edge_buffer_export_types(result.hi),
             IREE_HAL_TOPOLOGY_HANDLE_TYPE_RDMA_MR |
                 IREE_HAL_TOPOLOGY_HANDLE_TYPE_SHM);
+  EXPECT_EQ(iree_hal_topology_edge_link_type(result.hi),
+            IREE_HAL_TOPOLOGY_LINK_TYPE_INFINIBAND);
+  EXPECT_EQ(iree_hal_topology_edge_path_hop_count(result.hi), 4);
   iree_hal_topology_destroy(topology, iree_allocator_system());
 }
 

@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/allocation/assignment.h"
+#include "loom/codegen/low/allocation/unit_liveness.h"
 #include "loom/codegen/low/descriptors.h"
 
 #ifdef __cplusplus
@@ -68,10 +69,12 @@ iree_host_size_t loom_low_allocation_active_unit_index_unindexed_count(
     const loom_low_allocation_active_unit_index_t* index);
 
 // Returns true when |candidate| conflicts with an indexed active assignment.
+// Assignment sparse segment ranges, when present, must belong to |liveness|.
 bool loom_low_allocation_active_unit_index_conflicts(
     loom_low_allocation_active_unit_index_t* index,
     const loom_low_descriptor_set_t* descriptor_set,
-    const uint32_t* unit_end_points, iree_host_size_t unit_end_point_count,
+    const loom_liveness_analysis_t* liveness,
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
     const loom_low_allocation_assignment_t* assignments,
     iree_host_size_t assignment_count,
     const loom_low_allocation_assignment_t* candidate,
@@ -79,11 +82,13 @@ bool loom_low_allocation_active_unit_index_conflicts(
 
 // Appends indexed active assignments that conflict with |candidate| to
 // |assignment_indices|. Duplicate range hits for the same assignment are
-// suppressed.
+// suppressed. Assignment sparse segment ranges, when present, must belong to
+// |liveness|.
 iree_status_t loom_low_allocation_active_unit_index_collect_conflicts(
     loom_low_allocation_active_unit_index_t* index,
     const loom_low_descriptor_set_t* descriptor_set,
-    const uint32_t* unit_end_points, iree_host_size_t unit_end_point_count,
+    const loom_liveness_analysis_t* liveness,
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
     const loom_low_allocation_assignment_t* assignments,
     iree_host_size_t assignment_count,
     const loom_low_allocation_assignment_t* candidate,

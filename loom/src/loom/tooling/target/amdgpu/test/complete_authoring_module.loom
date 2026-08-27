@@ -1,0 +1,21 @@
+kernel.def @complete_authoring_copy_i32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %value = view.load %input_view[0] : view<1xi32> -> i32
+  view.store %value, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+check.case @complete_authoring_copy_i32_case {
+  %input = check.generate.fill value(29) : tensor<1xi32>
+  %output = check.generate.fill value(0) : tensor<1xi32>
+  kernel.launch @complete_authoring_copy_i32(%input, %output) : (tensor<1xi32>, tensor<1xi32>)
+  check.expect.equal actual(%output) expected(%input) : tensor<1xi32>
+  check.return
+}
+
+check.benchmark<@complete_authoring_copy_i32_case>

@@ -1,0 +1,6 @@
+// This library satisfies the exact contract retained in the partial artifact.
+func.def public pure @scale(%value: i32) -> (i32) {
+  %factor = scalar.constant 2 : i32
+  %result = scalar.muli %value, %factor : i32
+  func.return %result : i32
+}

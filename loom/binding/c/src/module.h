@@ -8,6 +8,7 @@
 #define LOOMC_MODULE_STORAGE_H_
 
 #include "iree/base/internal/arena.h"
+#include "loom/ir/function_version.h"
 #include "loom/ir/module.h"
 #include "loomc/context.h"
 #include "loomc/module.h"
@@ -46,6 +47,30 @@ LOOMC_API_PRIVATE loom_module_t* loomc_module_loom_module(
 // Returns the internal module owned by a public module handle.
 LOOMC_API_PRIVATE const loom_module_t* loomc_module_const_loom_module(
     const loomc_module_t* module);
+
+// Serializes |internal_module| with the context and representation providers
+// owned by |module| into an in-memory Loom bytecode source.
+LOOMC_API_PRIVATE loomc_status_t
+loomc_module_serialize_internal_bytecode_to_source(
+    const loomc_module_t* module, const loom_module_t* internal_module,
+    loomc_string_view_t identifier, loomc_allocator_t allocator,
+    loomc_source_t** out_source);
+
+// Clears prior compiler products and returns their module-owned arena.
+//
+// The returned arena remains live until the next compilation or module
+// destruction. Compilation uses it for function versions and their facts so a
+// later loomc_emit_module call can consume the exact specialized targets.
+LOOMC_API_PRIVATE iree_arena_allocator_t*
+loomc_module_prepare_function_versions(loomc_module_t* module);
+
+// Publishes function versions produced by a successful compilation.
+LOOMC_API_PRIVATE void loomc_module_publish_function_versions(
+    loomc_module_t* module, loom_function_version_owner_t function_versions);
+
+// Returns function versions from the last successful compilation, or NULL.
+LOOMC_API_PRIVATE const loom_function_version_list_t*
+loomc_module_function_versions(const loomc_module_t* module);
 
 #ifdef __cplusplus
 }  // extern "C"

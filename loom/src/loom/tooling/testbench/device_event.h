@@ -6,7 +6,7 @@
 
 // Sample-scoped HAL device event capture for check testbench execution.
 //
-// HAL device events are side effects of actual invocations rather than SSA
+// HAL device events are side effects of kernel launches rather than SSA
 // values. This recorder provides a reusable sink that copies event envelopes
 // and fixed-layout payload bytes so check expectations can match structured
 // reports without scraping stderr.

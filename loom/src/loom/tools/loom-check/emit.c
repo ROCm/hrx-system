@@ -15,6 +15,7 @@
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/frame.h"
 #include "loom/codegen/low/function.h"
+#include "loom/codegen/low/function_model.h"
 #include "loom/codegen/low/packet_json.h"
 #include "loom/codegen/low/schedule/json.h"
 #include "loom/codegen/low/schedule/run.h"
@@ -216,30 +217,8 @@ static iree_status_t loom_check_emit_parse_low_allocation_option(
                             "duplicate %.*s option 'diagnostics'",
                             (int)target_name.size, target_name.data);
   }
-  if (iree_string_view_equal(value, IREE_SV("none"))) {
-    request->low_allocation_diagnostic_flags = 0;
-  } else if (iree_string_view_equal(value, IREE_SV("predicted-spills"))) {
-    request->low_allocation_diagnostic_flags =
-        LOOM_LOW_ALLOCATION_DIAGNOSTIC_PREDICTED_SPILLS;
-  } else if (iree_string_view_equal(value, IREE_SV("copy-decisions"))) {
-    request->low_allocation_diagnostic_flags =
-        LOOM_LOW_ALLOCATION_DIAGNOSTIC_COPY_DECISIONS;
-  } else if (iree_string_view_equal(value, IREE_SV("placement-decisions"))) {
-    request->low_allocation_diagnostic_flags =
-        LOOM_LOW_ALLOCATION_DIAGNOSTIC_PLACEMENT_DECISIONS;
-  } else if (iree_string_view_equal(value, IREE_SV("all"))) {
-    request->low_allocation_diagnostic_flags =
-        LOOM_LOW_ALLOCATION_DIAGNOSTIC_PREDICTED_SPILLS |
-        LOOM_LOW_ALLOCATION_DIAGNOSTIC_COPY_DECISIONS |
-        LOOM_LOW_ALLOCATION_DIAGNOSTIC_PLACEMENT_DECISIONS;
-  } else {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "%.*s option 'diagnostics' expected 'none' or "
-        "'predicted-spills', 'copy-decisions', 'placement-decisions', or "
-        "'all', got '%.*s'",
-        (int)target_name.size, target_name.data, (int)value.size, value.data);
-  }
+  IREE_RETURN_IF_ERROR(loom_check_low_emit_parse_allocation_diagnostics(
+      value, target_name, &request->low_allocation_diagnostic_flags));
   request->has_low_allocation_diagnostics_option = true;
   return iree_ok_status();
 }
@@ -460,45 +439,18 @@ static iree_status_t loom_check_emit_parse_low_schedule_option(
     return iree_ok_status();
   }
   if (!iree_string_view_equal(name, IREE_SV("diagnostics"))) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unknown low-schedule-json option '%.*s'",
-                            (int)name.size, name.data);
+    return loom_check_low_emit_parse_allocation_budget(
+        token, IREE_SV("low-schedule-json"), request->low_allocation_budgets,
+        IREE_ARRAYSIZE(request->low_allocation_budgets),
+        &request->low_allocation_budget_count);
   }
   if (request->has_low_schedule_diagnostics_option) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "duplicate low-schedule-json option 'diagnostics'");
   }
-  if (iree_string_view_equal(value, IREE_SV("none"))) {
-    request->low_schedule_diagnostic_flags = 0;
-  } else if (iree_string_view_equal(value, IREE_SV("pressure"))) {
-    request->low_schedule_diagnostic_flags =
-        LOOM_LOW_SCHEDULE_DIAGNOSTIC_PRESSURE_PEAKS;
-  } else if (iree_string_view_equal(value, IREE_SV("resources"))) {
-    request->low_schedule_diagnostic_flags =
-        LOOM_LOW_SCHEDULE_DIAGNOSTIC_RESOURCE_BOTTLENECKS;
-  } else if (iree_string_view_equal(value, IREE_SV("hazards"))) {
-    request->low_schedule_diagnostic_flags =
-        LOOM_LOW_SCHEDULE_DIAGNOSTIC_HAZARD_GAPS;
-  } else if (iree_string_view_equal(value, IREE_SV("candidates"))) {
-    request->low_schedule_diagnostic_flags =
-        LOOM_LOW_SCHEDULE_DIAGNOSTIC_CANDIDATE_DECISIONS;
-  } else if (iree_string_view_equal(value, IREE_SV("model"))) {
-    request->low_schedule_diagnostic_flags =
-        LOOM_LOW_SCHEDULE_DIAGNOSTIC_MODEL_QUALITY;
-  } else if (iree_string_view_equal(value, IREE_SV("all"))) {
-    request->low_schedule_diagnostic_flags =
-        LOOM_LOW_SCHEDULE_DIAGNOSTIC_PRESSURE_PEAKS |
-        LOOM_LOW_SCHEDULE_DIAGNOSTIC_RESOURCE_BOTTLENECKS |
-        LOOM_LOW_SCHEDULE_DIAGNOSTIC_HAZARD_GAPS |
-        LOOM_LOW_SCHEDULE_DIAGNOSTIC_CANDIDATE_DECISIONS |
-        LOOM_LOW_SCHEDULE_DIAGNOSTIC_MODEL_QUALITY;
-  } else {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "low-schedule-json option 'diagnostics' expected 'none', 'pressure', "
-        "'resources', 'hazards', 'candidates', 'model', or 'all', got '%.*s'",
-        (int)value.size, value.data);
-  }
+  IREE_RETURN_IF_ERROR(loom_check_low_emit_parse_schedule_diagnostics(
+      value, IREE_SV("low-schedule-json"),
+      &request->low_schedule_diagnostic_flags));
   request->has_low_schedule_diagnostics_option = true;
   return iree_ok_status();
 }
@@ -958,6 +910,97 @@ static iree_status_t loom_check_emit_write_liveness_json(
   return loom_liveness_format_json(&analysis, NULL, &result->actual_output);
 }
 
+static iree_status_t loom_check_emit_index_pressure_cliffs(
+    const loom_target_residency_cliff_t* values, iree_host_size_t count,
+    const loom_low_descriptor_set_t* descriptor_set,
+    iree_arena_allocator_t* arena,
+    loom_target_residency_direct_resource_table_t* out_table,
+    uint32_t* out_best_tier) {
+  *out_table = (loom_target_residency_direct_resource_table_t){0};
+  *out_best_tier = 0;
+  const iree_host_size_t descriptor_reg_class_count =
+      descriptor_set->reg_class_count;
+  loom_target_residency_cliff_range_t* ranges = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, descriptor_reg_class_count, sizeof(*ranges), (void**)&ranges));
+  memset(ranges, 0, descriptor_reg_class_count * sizeof(*ranges));
+  iree_string_view_t* names = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, descriptor_reg_class_count, sizeof(*names), (void**)&names));
+  for (uint16_t reg_class_id = 0; reg_class_id < descriptor_reg_class_count;
+       ++reg_class_id) {
+    names[reg_class_id] = loom_low_descriptor_set_string(
+        descriptor_set,
+        descriptor_set->reg_classes[reg_class_id].name_string_offset);
+  }
+
+  uint16_t previous_reg_class_id = LOOM_LOW_REG_CLASS_NONE;
+  uint32_t previous_cliff_units = 0;
+  uint32_t previous_tier_after = 0;
+  const uint32_t best_tier = values[0].tier_before;
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    const loom_target_residency_cliff_t* cliff = &values[i];
+    if (cliff->resource_id >= descriptor_reg_class_count) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low-schedule-json pressure cliff references an invalid register "
+          "class");
+    }
+    if (cliff->cliff_units == 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low-schedule-json pressure cliff units must be nonzero");
+    }
+    if (cliff->tier_after >= cliff->tier_before) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low-schedule-json pressure cliff must lower the target tier");
+    }
+    if (i != 0 && (cliff->resource_id < previous_reg_class_id ||
+                   (cliff->resource_id == previous_reg_class_id &&
+                    cliff->cliff_units <= previous_cliff_units))) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low-schedule-json pressure cliffs must be sorted by register "
+          "class and units");
+    }
+    if ((cliff->resource_id != previous_reg_class_id &&
+         cliff->tier_before != best_tier) ||
+        (cliff->resource_id == previous_reg_class_id &&
+         cliff->tier_before != previous_tier_after)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low-schedule-json pressure cliffs must form contiguous tier "
+          "chains from one best tier");
+    }
+    previous_reg_class_id = cliff->resource_id;
+    previous_cliff_units = cliff->cliff_units;
+    previous_tier_after = cliff->tier_after;
+  }
+
+  iree_host_size_t cliff_index = 0;
+  for (uint16_t reg_class_id = 0; reg_class_id < descriptor_reg_class_count;
+       ++reg_class_id) {
+    loom_target_residency_cliff_range_t* range = &ranges[reg_class_id];
+    range->start = (uint32_t)cliff_index;
+    while (cliff_index < count &&
+           values[cliff_index].resource_id == reg_class_id) {
+      ++range->count;
+      ++cliff_index;
+    }
+  }
+
+  *out_table = (loom_target_residency_direct_resource_table_t){
+      .names = names,
+      .cliffs = values,
+      .cliff_count = count,
+      .cliff_ranges = ranges,
+      .resource_count = (uint16_t)descriptor_reg_class_count,
+  };
+  *out_best_tier = best_tier;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_check_emit_write_low_schedule_json(
     loom_module_t* module, iree_string_view_t symbol_name,
     const loom_low_descriptor_registry_t* descriptor_registry,
@@ -965,6 +1008,7 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
     loom_check_diagnostic_collector_t* diagnostic_collector,
     const loom_check_emit_pressure_cliff_spec_t* pressure_cliff_specs,
     iree_host_size_t pressure_cliff_spec_count,
+    const loom_low_allocation_budget_t* budgets, iree_host_size_t budget_count,
     loom_low_schedule_diagnostic_flags_t diagnostic_flags,
     loom_low_schedule_strategy_t strategy, iree_diagnostic_emitter_t emitter,
     iree_arena_allocator_t* analysis_arena, loom_check_result_t* result) {
@@ -975,18 +1019,21 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
   if (!low_function) {
     return iree_ok_status();
   }
-  const loom_low_schedule_pressure_cliff_t* pressure_cliffs = NULL;
+  loom_target_residency_direct_resource_table_t pressure_cliffs = {0};
+  uint32_t best_tier = 0;
   if (pressure_cliff_spec_count != 0) {
+    loom_symbol_fact_table_t symbol_facts = {0};
+    loom_symbol_fact_table_initialize(&symbol_facts, analysis_arena);
     loom_low_resolved_target_t target = {0};
     IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-        module, low_function, descriptor_registry,
-        loom_target_selection_empty(), emitter, &target));
+        module, &symbol_facts, low_function,
+        /*function_target_facts=*/NULL, descriptor_registry, emitter, &target));
     if (!target.descriptor_set) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
           "low-schedule-json target did not resolve descriptor set");
     }
-    loom_low_schedule_pressure_cliff_t* resolved_cliffs = NULL;
+    loom_target_residency_cliff_t* resolved_cliffs = NULL;
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         analysis_arena, pressure_cliff_spec_count, sizeof(*resolved_cliffs),
         (void**)&resolved_cliffs));
@@ -1017,8 +1064,8 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
         pressure_cliffs_resolved = false;
         continue;
       }
-      resolved_cliffs[i] = (loom_low_schedule_pressure_cliff_t){
-          .descriptor_reg_class_id = reg_class_id,
+      resolved_cliffs[i] = (loom_target_residency_cliff_t){
+          .resource_id = reg_class_id,
           .cliff_units = spec->cliff_units,
           .tier_before = spec->tier_before,
           .tier_after = spec->tier_after,
@@ -1027,24 +1074,40 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
     if (!pressure_cliffs_resolved) {
       return iree_ok_status();
     }
-    pressure_cliffs = resolved_cliffs;
+    IREE_RETURN_IF_ERROR(loom_check_emit_index_pressure_cliffs(
+        resolved_cliffs, pressure_cliff_spec_count, target.descriptor_set,
+        analysis_arena, &pressure_cliffs, &best_tier));
   }
+  const loom_target_residency_model_t residency_model = {
+      .best_tier = best_tier,
+      .direct_resources = pressure_cliffs,
+  };
   loom_low_schedule_options_t options = {
-      .descriptor_registry = descriptor_registry,
-      .pressure_cliffs =
-          {
-              .values = pressure_cliffs,
-              .count = pressure_cliff_spec_count,
-          },
+      .residency_model =
+          pressure_cliff_spec_count != 0 ? &residency_model : NULL,
+      .allocation_budgets = budgets,
+      .allocation_budget_count = budget_count,
       .emitter = emitter,
       .diagnostic_flags = diagnostic_flags,
-      .flags = LOOM_LOW_SCHEDULE_FLAG_RETAIN_LIVENESS,
+      .flags = LOOM_LOW_SCHEDULE_FLAG_RETAIN_LIVENESS |
+               LOOM_LOW_SCHEDULE_FLAG_RETAIN_PRESSURE_STEPS,
       .strategy = strategy,
   };
+  loom_low_function_model_t model = {0};
   loom_low_schedule_table_t table = {0};
-  IREE_RETURN_IF_ERROR(loom_low_schedule_function(
-      module, low_function, &options, analysis_arena, &table));
-  return loom_low_schedule_format_json(&table, &result->actual_output);
+  iree_status_t status = loom_low_function_model_initialize(
+      module, low_function,
+      /*function_target_facts=*/NULL, descriptor_registry, emitter,
+      /*flags=*/0, analysis_arena, &model);
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_low_schedule_function(&model, &options, analysis_arena, &table);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_low_schedule_format_json(&table, &result->actual_output);
+  }
+  loom_low_function_model_deinitialize(&model);
+  return status;
 }
 
 static const char* loom_check_emit_low_allocation_mode_name(
@@ -1126,7 +1189,6 @@ static iree_status_t loom_check_emit_build_low_allocation_table(
     return iree_ok_status();
   }
   loom_low_allocation_options_t options = {
-      .descriptor_registry = descriptor_registry,
       .budgets = budgets,
       .budget_count = budget_count,
       .fixed_values = fixed_values,
@@ -1134,10 +1196,18 @@ static iree_status_t loom_check_emit_build_low_allocation_table(
       .emitter = emitter,
       .diagnostic_flags = diagnostic_flags,
   };
-  IREE_RETURN_IF_ERROR(loom_low_allocate_function(
-      module, low_function, &options, analysis_arena, out_table));
-  *out_built = true;
-  return iree_ok_status();
+  loom_low_function_model_t model = {0};
+  iree_status_t status = loom_low_function_model_initialize(
+      module, low_function,
+      /*function_target_facts=*/NULL, descriptor_registry, emitter,
+      LOOM_LOW_FUNCTION_MODEL_FLAG_REGION_TREE, analysis_arena, &model);
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_low_allocate_function(&model, &options, analysis_arena, out_table);
+  }
+  if (iree_status_is_ok(status)) *out_built = true;
+  loom_low_function_model_deinitialize(&model);
+  return status;
 }
 
 static iree_status_t loom_check_emit_write_low_allocation_json(
@@ -1317,7 +1387,6 @@ static iree_status_t loom_check_emit_write_low_packet_json(
 
 static void loom_check_emit_initialize_source_low_print_options(
     const loom_low_descriptor_registry_t* descriptor_registry,
-    iree_string_view_t descriptor_set_key,
     loom_text_low_asm_environment_t* low_asm_environment,
     loom_text_print_options_t* print_options) {
   loom_low_descriptor_text_asm_environment_initialize(descriptor_registry,
@@ -1325,24 +1394,17 @@ static void loom_check_emit_initialize_source_low_print_options(
   *print_options = (loom_text_print_options_t){
       .flags = LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_REQUIRE_LOW_ASM,
       .low_asm_environment = *low_asm_environment,
-      .low_asm_descriptor_set_key = descriptor_set_key,
   };
 }
 
 static iree_status_t loom_check_emit_write_source_low_artifacts(
     const loom_module_t* module,
     const loom_low_descriptor_registry_t* descriptor_registry,
-    iree_string_view_t descriptor_set_key, iree_string_builder_t* output) {
-  if (iree_string_view_is_empty(descriptor_set_key)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "source-low low output requires a selected descriptor-set key");
-  }
+    iree_string_builder_t* output) {
   loom_text_low_asm_environment_t low_asm_environment = {0};
   loom_text_print_options_t print_options = {0};
   loom_check_emit_initialize_source_low_print_options(
-      descriptor_registry, descriptor_set_key, &low_asm_environment,
-      &print_options);
+      descriptor_registry, &low_asm_environment, &print_options);
   bool has_artifact = false;
   const loom_block_t* block = loom_region_const_entry_block(module->body);
   const loom_op_t* op = NULL;
@@ -1368,42 +1430,13 @@ static bool loom_check_emit_is_low_function_op(const loom_op_t* op) {
   return loom_low_func_def_isa(op) || loom_low_kernel_def_isa(op);
 }
 
-static iree_status_t loom_check_emit_select_single_low_descriptor_set_key(
-    const loom_module_t* module,
-    const loom_low_descriptor_registry_t* descriptor_registry,
-    iree_diagnostic_emitter_t emitter,
-    iree_string_view_t* out_descriptor_set_key, bool* out_found) {
-  *out_descriptor_set_key = iree_string_view_empty();
-  *out_found = false;
-
+static bool loom_check_emit_has_low_function(const loom_module_t* module) {
   const loom_block_t* block = loom_region_const_entry_block(module->body);
   const loom_op_t* op = NULL;
   loom_block_for_each_op(block, op) {
-    if (!loom_check_emit_is_low_function_op(op)) {
-      continue;
-    }
-    loom_low_resolved_target_t target = {0};
-    IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-        module, op, descriptor_registry, loom_target_selection_empty(), emitter,
-        &target));
-    if (target.descriptor_set == NULL) {
-      continue;
-    }
-    if (iree_string_view_is_empty(*out_descriptor_set_key)) {
-      *out_descriptor_set_key = target.descriptor_set_key;
-      *out_found = true;
-      continue;
-    }
-    if (!iree_string_view_equal(*out_descriptor_set_key,
-                                target.descriptor_set_key)) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "source-low output=low requires all lowered funcs to use the same "
-          "target-low descriptor set");
-    }
+    if (loom_check_emit_is_low_function_op(op)) return true;
   }
-
-  return iree_ok_status();
+  return false;
 }
 
 static iree_string_view_t loom_check_emit_diagnostic_source_low_pipeline(
@@ -1501,32 +1534,30 @@ iree_status_t loom_check_prepare_source_low_module(
                                .user_data = diagnostic_collector};
   compile_options.source_resolver = source_resolver;
   compile_options.max_errors = 20;
+  compile_options.report = options->report;
 
-  loom_pass_run_result_t run_result = {0};
-  IREE_RETURN_IF_ERROR(loom_compile_run_pipeline(module, &compile_options,
-                                                 block_pool, &run_result));
-  if (run_result.error_count != 0 ||
-      loom_check_diagnostic_collector_has_error(diagnostic_collector)) {
-    return iree_ok_status();
+  loom_compile_pipeline_result_t pipeline_result = {0};
+  iree_status_t status = loom_compile_run_pipeline(
+      module, &compile_options, block_pool, &pipeline_result);
+  if (iree_status_is_ok(status) && pipeline_result.pass.error_count == 0 &&
+      !loom_check_diagnostic_collector_has_error(diagnostic_collector)) {
+    status = loom_target_entry_verify_module(module, &entry_options, 20,
+                                             &verify_result);
+    if (iree_status_is_ok(status) && verify_result.error_count == 0) {
+      loom_target_entry_diagnostic_emitter_t verifier_emitter = {0};
+      loom_target_entry_diagnostic_emitter_initialize(
+          module, &entry_options, LOOM_EMITTER_VERIFIER, &verifier_emitter);
+      loom_low_verify_result_t low_verify_result = {0};
+      loom_low_verify_scratch_t low_verify_scratch =
+          loom_low_verify_scratch_for_module(module);
+      status = loom_target_entry_verify_low_module(
+          module, low_registry, &entry_options, &verifier_emitter, 20,
+          environment->low_verify_provider_list, &low_verify_scratch,
+          &low_verify_result);
+    }
   }
-
-  IREE_RETURN_IF_ERROR(loom_target_entry_verify_module(module, &entry_options,
-                                                       20, &verify_result));
-  if (verify_result.error_count != 0) {
-    return iree_ok_status();
-  }
-
-  loom_target_entry_diagnostic_emitter_t verifier_emitter = {0};
-  loom_target_entry_diagnostic_emitter_initialize(
-      module, &entry_options, LOOM_EMITTER_VERIFIER, &verifier_emitter);
-  loom_low_verify_result_t low_verify_result = {0};
-  loom_low_verify_scratch_t low_verify_scratch =
-      loom_low_verify_scratch_for_module(module);
-  IREE_RETURN_IF_ERROR(loom_target_entry_verify_low_module(
-      module, low_registry, &verifier_emitter, loom_target_selection_empty(),
-      20, environment->low_verify_provider_list, &low_verify_scratch,
-      &low_verify_result));
-  return iree_ok_status();
+  loom_compile_pipeline_result_deinitialize(&pipeline_result);
+  return status;
 }
 
 static iree_status_t loom_check_emit_write_source_low_pipeline_text(
@@ -1643,16 +1674,7 @@ static iree_status_t loom_check_emit_write_source_low_text(
   loom_target_entry_diagnostic_emitter_t pass_emitter = {0};
   loom_target_entry_diagnostic_emitter_initialize(
       module, &entry_options, LOOM_EMITTER_PASS, &pass_emitter);
-  iree_string_view_t selected_descriptor_set_key = iree_string_view_empty();
-  bool has_low_artifacts = false;
-  iree_status_t status = loom_check_emit_select_single_low_descriptor_set_key(
-      module, &low_registry->registry, loom_target_entry_emitter(&pass_emitter),
-      &selected_descriptor_set_key, &has_low_artifacts);
-  IREE_RETURN_IF_ERROR(status);
-  if (loom_check_diagnostic_collector_has_error(diagnostic_collector)) {
-    return iree_ok_status();
-  }
-  if (!has_low_artifacts) {
+  if (!loom_check_emit_has_low_function(module)) {
     const loom_diagnostic_param_t params[] = {
         loom_param_string(IREE_SV("source-to-low")),
     };
@@ -1667,17 +1689,15 @@ static iree_status_t loom_check_emit_write_source_low_text(
 
   if (request->source_low_output == LOOM_CHECK_EMIT_SOURCE_LOW_OUTPUT_LOW) {
     iree_status_t status = loom_check_emit_write_source_low_artifacts(
-        module, &low_registry->registry, selected_descriptor_set_key,
-        &result->actual_output);
+        module, &low_registry->registry, &result->actual_output);
     if (iree_status_is_ok(status)) result->has_actual_output = true;
     return status;
   }
   loom_text_low_asm_environment_t low_asm_environment = {0};
   loom_text_print_options_t print_options = {0};
   loom_check_emit_initialize_source_low_print_options(
-      &low_registry->registry, selected_descriptor_set_key,
-      &low_asm_environment, &print_options);
-  status = loom_text_print_module_to_builder_with_options(
+      &low_registry->registry, &low_asm_environment, &print_options);
+  iree_status_t status = loom_text_print_module_to_builder_with_options(
       module, &result->actual_output, &print_options);
   if (iree_status_is_ok(status)) result->has_actual_output = true;
   return status;
@@ -1709,8 +1729,8 @@ static iree_status_t loom_check_emit_verify_provider_module(
   loom_low_verify_scratch_t low_verify_scratch =
       loom_low_verify_scratch_for_module(module);
   IREE_RETURN_IF_ERROR(loom_target_entry_verify_low_module(
-      module, low_registry, &verifier_emitter, loom_target_selection_empty(),
-      20, low_verify_provider_list, &low_verify_scratch, &low_verify_result));
+      module, low_registry, &entry_options, &verifier_emitter, 20,
+      low_verify_provider_list, &low_verify_scratch, &low_verify_result));
   return iree_ok_status();
 }
 
@@ -2054,6 +2074,7 @@ iree_status_t loom_check_execute_emit(
             test_case, filename, &diagnostic_collector,
             request.low_schedule_pressure_cliff_specs,
             request.low_schedule_pressure_cliff_spec_count,
+            request.low_allocation_budgets, request.low_allocation_budget_count,
             request.low_schedule_diagnostic_flags,
             request.low_schedule_strategy,
             (iree_diagnostic_emitter_t){

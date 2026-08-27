@@ -35,13 +35,13 @@ typedef enum loom_amdgpu_matrix_feature_flag_bits_e {
   LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX90A_BF16_1K = UINT64_C(1) << 2,
   // Processor supports gfx90a F64 MFMA variants.
   LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX90A_F64 = UINT64_C(1) << 3,
-  // Processor supports gfx940 FP8/BF8 and XF32 MFMA variants.
+  // Processor supports gfx940 FP8/BF8 MFMA variants.
   LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_FP8 = UINT64_C(1) << 4,
   // Processor supports gfx950 F16/BF16/I8 MFMA shape variants.
   LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950 = UINT64_C(1) << 5,
   // Processor supports gfx950 scaled F8/F6/F4 MFMA variants.
   LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950_SCALE_F8F6F4 = UINT64_C(1) << 6,
-  // Processor supports gfx940 sparse MFMA accumulate variants.
+  // Processor supports gfx940 F16/BF16/I8 sparse MFMA variants.
   LOOM_AMDGPU_MATRIX_FEATURE_SMFMAC_GFX940 = UINT64_C(1) << 7,
   // Processor supports gfx950 sparse MFMA accumulate variants.
   LOOM_AMDGPU_MATRIX_FEATURE_SMFMAC_GFX950 = UINT64_C(1) << 8,
@@ -57,10 +57,23 @@ typedef enum loom_amdgpu_matrix_feature_flag_bits_e {
   LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250_SCALE_F8F6F4 = UINT64_C(1) << 13,
   // Processor supports gfx1250 SWMMAC modifier/reuse variants.
   LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX1250 = UINT64_C(1) << 14,
+  // Processor supports gfx940 XF32 MFMA variants.
+  LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_XF32 = UINT64_C(1) << 15,
+  // Processor supports gfx940 FP8/BF8 sparse MFMA variants.
+  LOOM_AMDGPU_MATRIX_FEATURE_SMFMAC_GFX940_FP8 = UINT64_C(1) << 16,
+  // Processor supports gfx940 I8 MFMA shape variants.
+  LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_I8 = UINT64_C(1) << 17,
 } loom_amdgpu_matrix_feature_flag_bits_t;
 
 // Bitset of loom_amdgpu_matrix_feature_flag_bits_t values.
 typedef uint64_t loom_amdgpu_matrix_feature_bits_t;
+
+typedef struct loom_amdgpu_matrix_feature_info_t {
+  // Single matrix feature bit represented by |name|.
+  loom_amdgpu_matrix_feature_bits_t feature_bit;
+  // Stable capability/report name for |feature_bit|.
+  iree_string_view_t name;
+} loom_amdgpu_matrix_feature_info_t;
 
 enum loom_amdgpu_matrix_wave_size_bits_e {
   // Contract may be selected for wave32 code generation.
@@ -121,8 +134,12 @@ typedef enum loom_amdgpu_matrix_numeric_type_e {
   LOOM_AMDGPU_MATRIX_NUMERIC_BF6 = 14,
   // AMD FP4 payload.
   LOOM_AMDGPU_MATRIX_NUMERIC_FP4 = 15,
+  // Selector-driven 8-bit AMD FP8/BF8 payload family.
+  LOOM_AMDGPU_MATRIX_NUMERIC_F8 = 16,
+  // Selector-driven 6-bit AMD FP6/BF6 payload family.
+  LOOM_AMDGPU_MATRIX_NUMERIC_F6 = 17,
   // Selector-driven AMD F8/F6/F4 payload family.
-  LOOM_AMDGPU_MATRIX_NUMERIC_F8F6F4 = 16,
+  LOOM_AMDGPU_MATRIX_NUMERIC_F8F6F4 = 18,
 } loom_amdgpu_matrix_numeric_type_t;
 
 typedef enum loom_amdgpu_matrix_scale_kind_e {
@@ -154,7 +171,13 @@ typedef enum loom_amdgpu_matrix_scale_format_selector_e {
   LOOM_AMDGPU_MATRIX_SCALE_FORMAT_SELECTOR_FP8_E4M3 = 2,
 } loom_amdgpu_matrix_scale_format_selector_t;
 
+// Bitset of loom_amdgpu_matrix_scale_format_selector_t values.
+typedef uint8_t loom_amdgpu_matrix_scale_format_selector_bits_t;
+
 typedef enum loom_amdgpu_matrix_fragment_coordinate_flag_bits_e {
+  // Coordinate carries an independent block or batch value.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_COORDINATE_BLOCK =
+      LOOM_MATRIX_FRAGMENT_COORDINATE_BLOCK,
   // Coordinate carries an M/result-row value.
   LOOM_AMDGPU_MATRIX_FRAGMENT_COORDINATE_ROW =
       LOOM_MATRIX_FRAGMENT_COORDINATE_ROW,
@@ -213,42 +236,172 @@ typedef enum loom_amdgpu_matrix_fragment_layout_kind_e {
   LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_F32_16X16X32_BF16 = 19,
   // RDNA4 gfx1250 WMMA 16x16x4 f32 input, f32 accumulator/result layout.
   LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_F32_16X16X4_F32 = 20,
+  // CDNA MFMA 16x16x32 packed fp8/bf8 input, f32 accumulator/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_16X16X32_PACKED8 = 21,
+  // RDNA4 WMMA 16x16x16 packed fp8/bf8 input, f32 accumulator/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_F32_16X16X16_PACKED8 = 22,
+  // RDNA4 gfx1250 WMMA 16x16x64 packed fp8/bf8 input, f32
+  // accumulator/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_F32_16X16X64_PACKED8 = 23,
+  // RDNA4 gfx1250 WMMA 16x16x128 packed fp8/bf8 input, f32
+  // accumulator/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_F32_16X16X128_PACKED8 = 24,
+  // CDNA4 MFMA 16x16x32 f16 input, f32 accumulator/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_16X16X32_F16 = 25,
+  // CDNA4 MFMA 16x16x32 bf16 input, f32 accumulator/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_16X16X32_BF16 = 26,
+  // CDNA4 MFMA 32x32x16 f16 input, f32 accumulator/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X16_F16 = 27,
+  // CDNA4 MFMA 32x32x16 bf16 input, f32 accumulator/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X16_BF16 = 28,
+  // CDNA MFMA 32x32x16 packed fp8/bf8 input, f32 accumulator/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X16_PACKED8 = 29,
+  // CDNA MFMA 16x16x8 packed 16-bit input, f32 accumulator/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_16X16X8_PACKED16 = 30,
+  // CDNA MFMA 16x16x8 xf32 input, f32 accumulator/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_16X16X8_XF32 = 31,
+  // CDNA MFMA 32x32x4 packed 16-bit input, f32 accumulator/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X4_PACKED16 = 32,
+  // CDNA MFMA 32x32x8 packed 16-bit input, f32 accumulator/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X8_PACKED16 = 33,
+  // CDNA MFMA 32x32x4 xf32 input, f32 accumulator/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X4_XF32 = 34,
+  // CDNA MFMA 32x32x2 f32 input, f32 accumulator/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X2_F32 = 35,
+  // CDNA SMFMAC 16x16x32 packed 16-bit input, 32-bit result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_SMFMAC_32BIT_16X16X32_PACKED16 = 36,
+  // CDNA SMFMAC 16x16x64 packed 8-bit input, 32-bit result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_SMFMAC_32BIT_16X16X64_PACKED8 = 37,
+  // CDNA SMFMAC 16x16x64 packed 16-bit input, 32-bit result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_SMFMAC_32BIT_16X16X64_PACKED16 = 38,
+  // CDNA SMFMAC 16x16x128 packed 8-bit input, 32-bit result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_SMFMAC_32BIT_16X16X128_PACKED8 = 39,
+  // CDNA SMFMAC 32x32x16 packed 16-bit input, 32-bit result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_SMFMAC_32BIT_32X32X16_PACKED16 = 40,
+  // CDNA SMFMAC 32x32x32 packed 8-bit input, 32-bit result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_SMFMAC_32BIT_32X32X32_PACKED8 = 41,
+  // CDNA SMFMAC 32x32x32 packed 16-bit input, 32-bit result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_SMFMAC_32BIT_32X32X32_PACKED16 = 42,
+  // CDNA SMFMAC 32x32x64 packed 8-bit input, 32-bit result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_SMFMAC_32BIT_32X32X64_PACKED8 = 43,
+  // RDNA4 SWMMAC 16x16x32 packed 16-bit input, 32-bit result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_SWMMAC_32BIT_16X16X32_PACKED16 = 44,
+  // RDNA4 SWMMAC 16x16x32 packed 16-bit input/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_SWMMAC_16BIT_16X16X32_PACKED16 = 45,
+  // RDNA4 SWMMAC 16x16x32 packed 8-bit input, 32-bit result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_SWMMAC_32BIT_16X16X32_PACKED8 = 46,
+  // RDNA4 SWMMAC 16x16x32 packed 4-bit input, 32-bit result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_SWMMAC_32BIT_16X16X32_PACKED4 = 47,
+  // RDNA4 SWMMAC 16x16x64 packed 4-bit input, 32-bit result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_SWMMAC_32BIT_16X16X64_PACKED4 = 48,
+  // GFX1250 SWMMAC 16x16x64 packed 16-bit input, 32-bit result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX1250_SWMMAC_32BIT_16X16X64_PACKED16 =
+      49,
+  // GFX1250 SWMMAC 16x16x64 packed 16-bit input/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX1250_SWMMAC_16BIT_16X16X64_PACKED16 =
+      50,
+  // GFX1250 SWMMAC 16x16x128 packed 8-bit input, 32-bit result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX1250_SWMMAC_32BIT_16X16X128_PACKED8 =
+      51,
+  // GFX1250 SWMMAC 16x16x128 packed 8-bit input, 16-bit result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX1250_SWMMAC_16BIT_16X16X128_PACKED8 =
+      52,
+  // CDNA MFMA 16 independent 4x4x1 f32-input, f32-result blocks.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_4X4X1_F32_16B = 53,
+  // CDNA MFMA 16 independent 4x4x2 bf16-input, f32-result blocks.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_4X4X2_BF16_16B = 54,
+  // CDNA MFMA 16 independent 4x4x4 packed-16-input, f32-result blocks.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_4X4X4_PACKED16_16B = 55,
+  // CDNA MFMA 16 independent 4x4x4 i8-input, i32-result blocks.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_I32_4X4X4_I8_16B = 56,
+  // CDNA MFMA 4 independent 16x16x1 f32-input, f32-result blocks.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_16X16X1_F32_4B = 57,
+  // CDNA MFMA 4 independent 16x16x2 bf16-input, f32-result blocks.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_16X16X2_BF16_4B = 58,
+  // CDNA MFMA 4 independent 16x16x4 packed-16-input, f32-result blocks.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_16X16X4_PACKED16_4B = 59,
+  // CDNA MFMA 4 independent 16x16x4 i8-input, i32-result blocks.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_I32_16X16X4_I8_4B = 60,
+  // CDNA MFMA 2 independent 32x32x1 f32-input, f32-result blocks.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X1_F32_2B = 61,
+  // CDNA MFMA 2 independent 32x32x2 bf16-input, f32-result blocks.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X2_BF16_2B = 62,
+  // CDNA MFMA 2 independent 32x32x4 packed-16-input, f32-result blocks.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X4_PACKED16_2B = 63,
+  // CDNA MFMA 2 independent 32x32x4 i8-input, i32-result blocks.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_I32_32X32X4_I8_2B = 64,
+  // CDNA MFMA 4 independent 4x4x4 f64-input/result blocks.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F64_4X4X4_F64_4B = 65,
+  // RDNA3 WMMAR3 wave32 16x16x16 packed iu8 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_I32_16X16X16_IU8 = 66,
+  // RDNA3 WMMAR3 wave64 16x16x16 packed iu8 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_I32_16X16X16_IU8_W64 = 67,
+  // RDNA3 WMMAR3 wave32 16x16x16 packed iu4 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_I32_16X16X16_IU4 = 68,
+  // RDNA3 WMMAR3 wave64 16x16x16 packed iu4 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_I32_16X16X16_IU4_W64 = 69,
+  // RDNA4 WMMA 16x16x16 packed iu8 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_I32_16X16X16_IU8 = 70,
+  // RDNA4 WMMA 16x16x16 packed iu4 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_I32_16X16X16_IU4 = 71,
+  // RDNA4 WMMA 16x16x32 packed iu4 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_I32_16X16X32_IU4 = 72,
+  // RDNA4 WMMA 16x16x64 packed iu8 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_I32_16X16X64_IU8 = 73,
+  // CDNA MFMA 16x16x4 f64 input, f64 accumulator/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F64_16X16X4_F64 = 74,
+  // GFX12.5 WMMA 16x16x128 f8/f8 input, f32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX125X_WMMA_F32_16X16X128_F8_F8 = 75,
+  // GFX12.5 WMMA 16x16x128 f8/f6 input, f32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX125X_WMMA_F32_16X16X128_F8_F6 = 76,
+  // GFX12.5 WMMA 16x16x128 f8/f4 input, f32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX125X_WMMA_F32_16X16X128_F8_F4 = 77,
+  // GFX12.5 WMMA 16x16x128 f6/f8 input, f32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX125X_WMMA_F32_16X16X128_F6_F8 = 78,
+  // GFX12.5 WMMA 16x16x128 f6/f6 input, f32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX125X_WMMA_F32_16X16X128_F6_F6 = 79,
+  // GFX12.5 WMMA 16x16x128 f6/f4 input, f32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX125X_WMMA_F32_16X16X128_F6_F4 = 80,
+  // GFX12.5 WMMA 16x16x128 f4/f8 input, f32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX125X_WMMA_F32_16X16X128_F4_F8 = 81,
+  // GFX12.5 WMMA 16x16x128 f4/f6 input, f32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX125X_WMMA_F32_16X16X128_F4_F6 = 82,
+  // GFX12.5 WMMA 16x16x128 f4/f4 input, f32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_GFX125X_WMMA_F32_16X16X128_F4_F4 = 83,
+  // RDNA4 wave64 WMMA 16x16x16 f16 input, f32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_F32_16X16X16_F16_W64 = 84,
+  // RDNA4 wave64 WMMA 16x16x16 bf16 input, f32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_F32_16X16X16_BF16_W64 = 85,
+  // RDNA4 wave64 WMMA 16x16x16 f16 input/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_F16_16X16X16_F16_W64 = 86,
+  // RDNA4 wave64 WMMA 16x16x16 bf16 input/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_BF16_16X16X16_BF16_W64 = 87,
+  // RDNA4 wave64 WMMA 16x16x16 packed fp8/bf8 input, f32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_F32_16X16X16_PACKED8_W64 = 88,
+  // RDNA4 wave64 WMMA 16x16x16 packed iu8 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_I32_16X16X16_IU8_W64 = 89,
+  // RDNA4 wave64 WMMA 16x16x16 packed iu4 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_I32_16X16X16_IU4_W64 = 90,
+  // RDNA4 wave64 WMMA 16x16x32 packed iu4 input, i32 result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_I32_16X16X32_IU4_W64 = 91,
+  // RDNA4 wave64 SWMMAC 16x16x32 packed 16-bit input, 32-bit result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_SWMMAC_32BIT_16X16X32_PACKED16_W64 =
+      92,
+  // RDNA4 wave64 SWMMAC 16x16x32 packed 16-bit input/result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_SWMMAC_16BIT_16X16X32_PACKED16_W64 =
+      93,
+  // RDNA4 wave64 SWMMAC 16x16x32 packed 8-bit input, 32-bit result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_SWMMAC_32BIT_16X16X32_PACKED8_W64 =
+      94,
+  // RDNA4 wave64 SWMMAC 16x16x32 packed 4-bit input, 32-bit result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_SWMMAC_32BIT_16X16X32_PACKED4_W64 =
+      95,
+  // RDNA4 wave64 SWMMAC 16x16x64 packed 4-bit input, 32-bit result layout.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_SWMMAC_32BIT_16X16X64_PACKED4_W64 =
+      96,
+  // Total number of fragment layout table slots, including UNKNOWN.
+  LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_COUNT = 97,
 } loom_amdgpu_matrix_fragment_layout_kind_t;
-
-typedef enum loom_amdgpu_matrix_fragment_map_kind_e {
-  // No lane/register coordinate formula is defined.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_UNKNOWN = LOOM_MATRIX_FRAGMENT_MAP_UNKNOWN,
-  // Row is lane mod M; reduction is packed by register element.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_PACKED_REDUCTION =
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_PACKED_REDUCTION,
-  // Column is lane mod N; reduction is packed by register element.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_PACKED_REDUCTION =
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_PACKED_REDUCTION,
-  // Row is register-interleaved by the lane group; column is lane mod N.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN =
-      LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN,
-  // Row is lane mod M; reduction is packed by lane group and register element.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_LANE_GROUP_PACKED_REDUCTION =
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_LANE_GROUP_PACKED_REDUCTION,
-  // Column is lane mod N; reduction is packed by lane group and register
-  // element.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_LANE_GROUP_PACKED_REDUCTION =
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_LANE_GROUP_PACKED_REDUCTION,
-  // Row is register-local within a lane group; column is lane mod N.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN =
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN,
-  // Row is register-interleaved by the lane group; column is lane mod N; only
-  // the low packed subword element carries a logical coordinate.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN_LOW_SUBWORD =
-      LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN_LOW_SUBWORD,
-  // Row is register-local within a lane group; column is lane mod N; only the
-  // low packed subword element carries a logical coordinate.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN_LOW_SUBWORD =
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN_LOW_SUBWORD,
-  // Row is packed by lane group, register, and element; column is lane mod N.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_MAP_LANE_GROUP_PACKED_ROW_COLUMN =
-      LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_PACKED_ROW_COLUMN,
-} loom_amdgpu_matrix_fragment_map_kind_t;
 
 typedef enum loom_amdgpu_matrix_contract_flag_bits_e {
   // Contract consumes an explicit sparse index operand.
@@ -290,7 +443,7 @@ typedef uint32_t loom_amdgpu_matrix_contract_source_requirement_flags_t;
 #define LOOM_AMDGPU_MATRIX_LOW_DESCRIPTOR_REF_NONE \
   LOOM_AMDGPU_DESCRIPTOR_REF_NONE
 
-// AMDGPU descriptors use the generic M/N/K matrix tile shape record.
+// AMDGPU descriptors use the generic block/M/N/K matrix tile shape record.
 typedef loom_matrix_fragment_tile_shape_t loom_amdgpu_matrix_tile_shape_t;
 
 typedef struct loom_amdgpu_matrix_payload_shape_t {
@@ -346,6 +499,11 @@ typedef struct loom_amdgpu_matrix_contract_descriptor_t {
   loom_amdgpu_matrix_payload_shape_t result_payload;
   // Explicit scale operand kind.
   loom_amdgpu_matrix_scale_kind_t scale_kind;
+  // Fixed scale-format selector bits accepted when the descriptor ABI has no
+  // scale-format selector immediates. Zero means unconstrained or selector
+  // driven.
+  loom_amdgpu_matrix_scale_format_selector_bits_t
+      implicit_scale_format_selector_bits;
   // Target-owned fragment lane/register layout kind.
   loom_amdgpu_matrix_fragment_layout_kind_t fragment_layout_kind;
 } loom_amdgpu_matrix_contract_descriptor_t;
@@ -392,11 +550,13 @@ enum loom_amdgpu_matrix_contract_rejection_bits_e {
   LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_MISSING_OPSEL = 1u << 17,
   // A candidate required scale-format selectors that were unavailable.
   LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_MISSING_SCALE_FORMATS = 1u << 18,
+  // A candidate has fixed scale-format semantics that do not match the source.
+  LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_SCALE_FORMAT = 1u << 19,
   // The request required target flags that the remaining candidates do not
   // carry.
-  LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_REQUIRED_FLAGS = 1u << 19,
+  LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_REQUIRED_FLAGS = 1u << 20,
   // The request itself was invalid or absent.
-  LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_INVALID_REQUEST = 1u << 20,
+  LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_INVALID_REQUEST = 1u << 21,
 };
 
 // Bitset of loom_amdgpu_matrix_contract_rejection_bits_e values.
@@ -418,6 +578,12 @@ typedef struct loom_amdgpu_matrix_contract_match_request_t {
   loom_amdgpu_matrix_payload_shape_t result_payload;
   // Required scale operand kind.
   loom_amdgpu_matrix_scale_kind_t scale_kind;
+  // LHS scale-format selector bit proven by the source schema, or zero.
+  loom_amdgpu_matrix_scale_format_selector_bits_t
+      lhs_scale_format_selector_bits;
+  // RHS scale-format selector bit proven by the source schema, or zero.
+  loom_amdgpu_matrix_scale_format_selector_bits_t
+      rhs_scale_format_selector_bits;
   // Processor feature bits available to the target.
   loom_amdgpu_matrix_feature_bits_t feature_bits;
   // Concrete wave size selected for the target. Use 0 when not yet selected.
@@ -444,6 +610,8 @@ typedef struct loom_amdgpu_matrix_contract_match_diagnostic_t {
   iree_host_size_t scale_candidate_count;
   // Number of scale-compatible descriptors that matched flag requirements.
   iree_host_size_t flag_candidate_count;
+  // Number of flag-compatible descriptors that matched scale-format facts.
+  iree_host_size_t scale_format_candidate_count;
   // Number of flag-compatible descriptors available for the target features.
   iree_host_size_t feature_candidate_count;
   // Number of feature-compatible descriptors legal for the selected wave size.

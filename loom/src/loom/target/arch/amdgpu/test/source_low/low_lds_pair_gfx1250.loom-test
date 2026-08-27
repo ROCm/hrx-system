@@ -1,0 +1,26 @@
+// RUN: emit amdgpu-assembly @gfx1250_ds_pair_family waits=none strategy=source fixed=%address:physical_register:0:1 fixed=%data32_0:physical_register:1:1 fixed=%data32_1:physical_register:2:1 fixed=%data64_0:physical_register:4:2 fixed=%data64_1:physical_register:6:2 fixed=%regular_b32:physical_register:8:2 fixed=%stride64_b32:physical_register:10:2 fixed=%regular_b64:physical_register:12:4 fixed=%stride64_b64:physical_register:16:4
+
+amdgpu.target<gfx1250> @target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_ds_pair_family(%address: reg<amdgpu.vgpr>, %data32_0: reg<amdgpu.vgpr>, %data32_1: reg<amdgpu.vgpr>, %data64_0: reg<amdgpu.vgpr x2>, %data64_1: reg<amdgpu.vgpr x2>) asm {
+  %regular_b32 = ds_read2_b32 %address {offset0 = 0, offset1 = 2}
+  ds_write2_b32 %address, %data32_0, %data32_1 {offset0 = 0, offset1 = 2}
+  %regular_b64 = ds_read2_b64 %address {offset0 = 0, offset1 = 2}
+  ds_write2_b64 %address, %data64_0, %data64_1 {offset0 = 0, offset1 = 2}
+  %stride64_b32 = ds_read2st64_b32 %address {offset0 = 0, offset1 = 4}
+  ds_write2st64_b32 %address, %data32_0, %data32_1 {offset0 = 0, offset1 = 4}
+  %stride64_b64 = ds_read2st64_b64 %address {offset0 = 0, offset1 = 4}
+  ds_write2st64_b64 %address, %data64_0, %data64_1 {offset0 = 0, offset1 = 4}
+  return
+}
+
+// ----
+  ds_read2_b32 v[8:9], v0 offset0:0 offset1:2
+  ds_write2_b32 v0, v1, v2 offset0:0 offset1:2
+  ds_read2_b64 v[12:15], v0 offset0:0 offset1:2
+  ds_write2_b64 v0, v[4:5], v[6:7] offset0:0 offset1:2
+  ds_read2st64_b32 v[10:11], v0 offset0:0 offset1:4
+  ds_write2st64_b32 v0, v1, v2 offset0:0 offset1:4
+  ds_read2st64_b64 v[16:19], v0 offset0:0 offset1:4
+  ds_write2st64_b64 v0, v[4:5], v[6:7] offset0:0 offset1:4
+  s_endpgm

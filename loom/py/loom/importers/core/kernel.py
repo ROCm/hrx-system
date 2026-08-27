@@ -85,7 +85,6 @@ class KernelModuleShell:
 @dataclass(frozen=True, slots=True)
 class _AmdgpuTargetSelection:
     kind: str
-    processor: str | None = None
 
 
 def create_kernel_module(spec: KernelModuleSpec) -> KernelModuleShell:
@@ -253,15 +252,40 @@ def target_preset_amdgpu_kind(target_preset: str) -> str | None:
     return selection.kind if selection is not None else None
 
 
+def target_preset_amdgpu_matrix_profile(target_preset: str) -> str | None:
+    """Return the AMDGPU matrix feature profile selected by a target preset."""
+    selection = _amdgpu_target_selection(target_preset)
+    if selection is None:
+        return None
+    from loom.target.arch.amdgpu.target_info import (
+        amdgpu_processor_info_by_name,
+        amdgpu_target_info_by_name,
+    )
+
+    target_info = amdgpu_target_info_by_name(selection.kind)
+    processor_info = (
+        amdgpu_processor_info_by_name(target_info.processor)
+        if target_info is not None
+        else None
+    )
+    return processor_info.features.matrix if processor_info is not None else None
+
+
 def target_preset_amdgpu_subgroup_size(target_preset: str) -> int | None:
     """Return the fixed AMDGPU subgroup size selected by a target preset."""
     selection = _amdgpu_target_selection(target_preset)
     if selection is None:
         return None
-    from loom.target.arch.amdgpu.target_info import amdgpu_processor_info_by_name
+    from loom.target.arch.amdgpu.target_info import (
+        amdgpu_processor_info_by_name,
+        amdgpu_target_info_by_name,
+    )
 
-    processor_info = amdgpu_processor_info_by_name(
-        selection.processor or selection.kind
+    target_info = amdgpu_target_info_by_name(selection.kind)
+    processor_info = (
+        amdgpu_processor_info_by_name(target_info.processor)
+        if target_info is not None
+        else None
     )
     return processor_info.wavefront.default_size if processor_info is not None else None
 
@@ -276,8 +300,6 @@ def _build_target_record(
         from loom.target.arch.amdgpu.dialect import amdgpu_target
 
         attributes = {"symbol": target_symbol, "kind": amdgpu_selection.kind}
-        if amdgpu_selection.processor is not None:
-            attributes["processor"] = amdgpu_selection.processor
         builder.ir.build(
             amdgpu_target.name,
             attributes=attributes,
@@ -291,30 +313,14 @@ def _amdgpu_target_selection(target_preset: str) -> _AmdgpuTargetSelection | Non
     if target_cpu is None:
         return None
     from loom.target.arch.amdgpu.dialect import AmdgpuTargetKind
-    from loom.target.arch.amdgpu.target_info import (
-        amdgpu_default_target_record_info_for_descriptor_set,
-        amdgpu_processor_info_by_name,
-        amdgpu_target_record_info_for_processor,
-    )
+    from loom.target.arch.amdgpu.target_info import amdgpu_target_info_by_name
 
     available_kinds = {case.keyword for case in AmdgpuTargetKind.cases}
 
-    target_record = amdgpu_target_record_info_for_processor(target_cpu)
-    if target_record is not None and target_record.processor in available_kinds:
-        return _AmdgpuTargetSelection(kind=target_record.processor)
-
-    processor_info = amdgpu_processor_info_by_name(target_cpu)
-    if processor_info is None or not processor_info.descriptor_set.key:
-        return None
-    target_record = amdgpu_default_target_record_info_for_descriptor_set(
-        processor_info.descriptor_set.key
-    )
-    if target_record is None or target_record.processor not in available_kinds:
-        return None
-    return _AmdgpuTargetSelection(
-        kind=target_record.processor,
-        processor=target_cpu,
-    )
+    target_info = amdgpu_target_info_by_name(target_cpu)
+    if target_info is not None and target_info.target in available_kinds:
+        return _AmdgpuTargetSelection(kind=target_info.target)
+    return None
 
 
 def _target_cpu(target_preset: str) -> str | None:

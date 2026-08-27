@@ -1,0 +1,627 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_scalar_addressing.loom-test
+// RUN: emit spirv-dis input=source-low validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @target
+func.def target(@target) @scalar_static_rank2_i32(%input: buffer, %output: buffer) -> (i32) {
+  %input_base = index.constant 8 : offset
+  %output_base = index.constant 12 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%input_base] : buffer -> view<2x4xi32>
+  %output_view = buffer.view %output_aligned[%output_base] : buffer -> view<2x4xi32>
+  %loaded = view.load %input_view[1, 2] : view<2x4xi32> -> i32
+  view.store %loaded, %output_view[0, 3] : i32, view<2x4xi32>
+  func.return %loaded : i32
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %scalar_static_rank2_i32 "scalar_static_rank2_i32"
+               OpExecutionMode %scalar_static_rank2_i32 LocalSize 1 1 1
+               OpName %scalar_static_rank2_i32 "scalar_static_rank2_i32"
+               OpName %input_aligned "input_aligned"
+               OpName %output_aligned "output_aligned"
+               OpName %loaded "loaded"
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpDecorate %_struct_6 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %9 DescriptorSet 0
+               OpDecorate %9 Binding 1
+               OpMemberDecorate %_struct_11 0 Offset 0
+               OpDecorate %_struct_11 Block
+               OpDecorate %10 DescriptorSet 0
+               OpDecorate %10 Binding 2
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+      %ulong = OpTypeInt 64 0
+  %_struct_6 = OpTypeStruct %ulong
+%_ptr_StorageBuffer__struct_6 = OpTypePointer StorageBuffer %_struct_6
+%_ptr_StorageBuffer_ulong = OpTypePointer StorageBuffer %ulong
+          %4 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+          %9 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+ %_struct_11 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_11 = OpTypePointer StorageBuffer %_struct_11
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+         %10 = OpVariable %_ptr_StorageBuffer__struct_11 StorageBuffer
+       %void = OpTypeVoid
+         %15 = OpTypeFunction %void
+   %ulong_32 = OpConstant %ulong 32
+%_ptr_PhysicalStorageBuffer_int = OpTypePointer PhysicalStorageBuffer %int
+   %ulong_24 = OpConstant %ulong 24
+%scalar_static_rank2_i32 = OpFunction %void None %15
+         %16 = OpLabel
+         %17 = OpAccessChain %_ptr_StorageBuffer_ulong %4 %int_0
+%input_aligned = OpLoad %ulong %17 Aligned 8
+         %19 = OpAccessChain %_ptr_StorageBuffer_ulong %9 %int_0
+%output_aligned = OpLoad %ulong %19 Aligned 8
+         %23 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input_aligned
+         %24 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %23 %ulong_32
+     %loaded = OpLoad %int %24 Aligned 4
+         %27 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output_aligned
+         %28 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %27 %ulong_24
+               OpStore %28 %loaded Aligned 4
+         %29 = OpAccessChain %_ptr_StorageBuffer_int %10 %int_0
+               OpStore %29 %loaded Aligned 4
+               OpReturn
+               OpFunctionEnd
+
+// ====
+
+spirv.target<vulkan1_3> @target
+func.def target(@target) @scalar_dynamic_view_base_i32(%input: buffer, %output: buffer, %base: offset) -> (i32) {
+  %base_aligned = index.assume %base [range(%base, 0, 4092), mul(%base, 4)] : offset
+  %output_base = index.constant 0 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%base_aligned] : buffer -> view<4xi32>
+  %output_view = buffer.view %output_aligned[%output_base] : buffer -> view<1xi32>
+  %loaded = view.load %input_view[2] : view<4xi32> -> i32
+  view.store %loaded, %output_view[0] : i32, view<1xi32>
+  func.return %loaded : i32
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %scalar_dynamic_view_base_i32 "scalar_dynamic_view_base_i32"
+               OpExecutionMode %scalar_dynamic_view_base_i32 LocalSize 1 1 1
+               OpName %scalar_dynamic_view_base_i32 "scalar_dynamic_view_base_i32"
+               OpName %input_aligned "input_aligned"
+               OpName %output_aligned "output_aligned"
+               OpName %base_aligned "base_aligned"
+               OpName %loaded "loaded"
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpDecorate %_struct_6 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %9 DescriptorSet 0
+               OpDecorate %9 Binding 1
+               OpDecorate %10 DescriptorSet 0
+               OpDecorate %10 Binding 2
+               OpMemberDecorate %_struct_12 0 Offset 0
+               OpDecorate %_struct_12 Block
+               OpDecorate %11 DescriptorSet 0
+               OpDecorate %11 Binding 3
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+      %ulong = OpTypeInt 64 0
+  %_struct_6 = OpTypeStruct %ulong
+%_ptr_StorageBuffer__struct_6 = OpTypePointer StorageBuffer %_struct_6
+%_ptr_StorageBuffer_ulong = OpTypePointer StorageBuffer %ulong
+          %4 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+          %9 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+         %10 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+ %_struct_12 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_12 = OpTypePointer StorageBuffer %_struct_12
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+         %11 = OpVariable %_ptr_StorageBuffer__struct_12 StorageBuffer
+       %void = OpTypeVoid
+         %16 = OpTypeFunction %void
+    %ulong_8 = OpConstant %ulong 8
+%_ptr_PhysicalStorageBuffer_int = OpTypePointer PhysicalStorageBuffer %int
+    %ulong_0 = OpConstant %ulong 0
+%scalar_dynamic_view_base_i32 = OpFunction %void None %16
+         %17 = OpLabel
+         %18 = OpAccessChain %_ptr_StorageBuffer_ulong %4 %int_0
+%input_aligned = OpLoad %ulong %18 Aligned 8
+         %20 = OpAccessChain %_ptr_StorageBuffer_ulong %9 %int_0
+%output_aligned = OpLoad %ulong %20 Aligned 8
+         %22 = OpAccessChain %_ptr_StorageBuffer_ulong %10 %int_0
+%base_aligned = OpLoad %ulong %22 Aligned 8
+         %25 = OpIAdd %ulong %base_aligned %ulong_8
+         %27 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input_aligned
+         %28 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %27 %25
+     %loaded = OpLoad %int %28 Aligned 4
+         %31 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output_aligned
+         %32 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %31 %ulong_0
+               OpStore %32 %loaded Aligned 4
+         %33 = OpAccessChain %_ptr_StorageBuffer_int %11 %int_0
+               OpStore %33 %loaded Aligned 4
+               OpReturn
+               OpFunctionEnd
+
+// ====
+
+spirv.target<vulkan1_3> @target
+func.def target(@target) @scalar_materialized_view_base_suffix_i32(%input: buffer, %output: buffer, %base: offset) -> (i32) {
+  %base_aligned = index.assume %base [range(%base, 0, 4056), mul(%base, 4)] : offset
+  %bias = index.constant 4 : offset
+  %biased_base = index.add %base_aligned, %bias : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%biased_base] : buffer -> view<8xi32>
+  %output_view = buffer.view %output_aligned[%biased_base] : buffer -> view<8xi32>
+  %loaded = view.load %input_view[2] : view<8xi32> -> i32
+  view.store %loaded, %output_view[3] : i32, view<8xi32>
+  func.return %loaded : i32
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %scalar_materialized_view_base_suffix_i32 "scalar_materialized_view_base_suffix_i32"
+               OpExecutionMode %scalar_materialized_view_base_suffix_i32 LocalSize 1 1 1
+               OpName %scalar_materialized_view_base_suffix_i32 "scalar_materialized_view_base_suffix_i32"
+               OpName %input_aligned "input_aligned"
+               OpName %output_aligned "output_aligned"
+               OpName %base_aligned "base_aligned"
+               OpName %bias "bias"
+               OpName %biased_base "biased_base"
+               OpName %loaded "loaded"
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpDecorate %_struct_6 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %9 DescriptorSet 0
+               OpDecorate %9 Binding 1
+               OpDecorate %10 DescriptorSet 0
+               OpDecorate %10 Binding 2
+               OpMemberDecorate %_struct_12 0 Offset 0
+               OpDecorate %_struct_12 Block
+               OpDecorate %11 DescriptorSet 0
+               OpDecorate %11 Binding 3
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+      %ulong = OpTypeInt 64 0
+  %_struct_6 = OpTypeStruct %ulong
+%_ptr_StorageBuffer__struct_6 = OpTypePointer StorageBuffer %_struct_6
+%_ptr_StorageBuffer_ulong = OpTypePointer StorageBuffer %ulong
+          %4 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+          %9 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+         %10 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+ %_struct_12 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_12 = OpTypePointer StorageBuffer %_struct_12
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+         %11 = OpVariable %_ptr_StorageBuffer__struct_12 StorageBuffer
+       %void = OpTypeVoid
+         %16 = OpTypeFunction %void
+       %bias = OpConstant %ulong 4
+    %ulong_8 = OpConstant %ulong 8
+%_ptr_PhysicalStorageBuffer_int = OpTypePointer PhysicalStorageBuffer %int
+   %ulong_12 = OpConstant %ulong 12
+%scalar_materialized_view_base_suffix_i32 = OpFunction %void None %16
+         %17 = OpLabel
+         %18 = OpAccessChain %_ptr_StorageBuffer_ulong %4 %int_0
+%input_aligned = OpLoad %ulong %18 Aligned 8
+         %20 = OpAccessChain %_ptr_StorageBuffer_ulong %9 %int_0
+%output_aligned = OpLoad %ulong %20 Aligned 8
+         %22 = OpAccessChain %_ptr_StorageBuffer_ulong %10 %int_0
+%base_aligned = OpLoad %ulong %22 Aligned 8
+%biased_base = OpIAdd %ulong %base_aligned %bias
+         %27 = OpIAdd %ulong %biased_base %ulong_8
+         %29 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input_aligned
+         %30 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %29 %27
+     %loaded = OpLoad %int %30 Aligned 4
+         %33 = OpIAdd %ulong %biased_base %ulong_12
+         %34 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output_aligned
+         %35 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %34 %33
+               OpStore %35 %loaded Aligned 4
+         %36 = OpAccessChain %_ptr_StorageBuffer_int %11 %int_0
+               OpStore %36 %loaded Aligned 4
+               OpReturn
+               OpFunctionEnd
+
+// ====
+
+spirv.target<vulkan1_3> @target
+func.def target(@target) @scalar_dynamic_index_i32(%input: buffer, %output: buffer, %element: index) -> (i32) {
+  %buffer_base = index.constant 0 : offset
+  %element_bounded = index.assume %element [range(%element, 0, 7)] : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%buffer_base] : buffer -> view<8xi32>
+  %output_view = buffer.view %output_aligned[%buffer_base] : buffer -> view<8xi32>
+  %loaded = view.load %input_view[%element_bounded] : view<8xi32> -> i32
+  view.store %loaded, %output_view[%element_bounded] : i32, view<8xi32>
+  func.return %loaded : i32
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %scalar_dynamic_index_i32 "scalar_dynamic_index_i32"
+               OpExecutionMode %scalar_dynamic_index_i32 LocalSize 1 1 1
+               OpName %scalar_dynamic_index_i32 "scalar_dynamic_index_i32"
+               OpName %input_aligned "input_aligned"
+               OpName %output_aligned "output_aligned"
+               OpName %element_bounded "element_bounded"
+               OpName %loaded "loaded"
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpDecorate %_struct_6 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %9 DescriptorSet 0
+               OpDecorate %9 Binding 1
+               OpMemberDecorate %_struct_11 0 Offset 0
+               OpDecorate %_struct_11 Block
+               OpDecorate %10 DescriptorSet 0
+               OpDecorate %10 Binding 2
+               OpDecorate %14 DescriptorSet 0
+               OpDecorate %14 Binding 3
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+      %ulong = OpTypeInt 64 0
+  %_struct_6 = OpTypeStruct %ulong
+%_ptr_StorageBuffer__struct_6 = OpTypePointer StorageBuffer %_struct_6
+%_ptr_StorageBuffer_ulong = OpTypePointer StorageBuffer %ulong
+          %4 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+          %9 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+ %_struct_11 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_11 = OpTypePointer StorageBuffer %_struct_11
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+         %10 = OpVariable %_ptr_StorageBuffer__struct_11 StorageBuffer
+         %14 = OpVariable %_ptr_StorageBuffer__struct_11 StorageBuffer
+       %void = OpTypeVoid
+         %16 = OpTypeFunction %void
+       %uint = OpTypeInt 32 0
+    %ulong_4 = OpConstant %ulong 4
+%_ptr_PhysicalStorageBuffer_int = OpTypePointer PhysicalStorageBuffer %int
+%scalar_dynamic_index_i32 = OpFunction %void None %16
+         %17 = OpLabel
+         %18 = OpAccessChain %_ptr_StorageBuffer_ulong %4 %int_0
+%input_aligned = OpLoad %ulong %18 Aligned 8
+         %20 = OpAccessChain %_ptr_StorageBuffer_ulong %9 %int_0
+%output_aligned = OpLoad %ulong %20 Aligned 8
+         %22 = OpAccessChain %_ptr_StorageBuffer_int %10 %int_0
+%element_bounded = OpLoad %int %22 Aligned 4
+         %25 = OpBitcast %uint %element_bounded
+         %26 = OpUConvert %ulong %25
+         %28 = OpIMul %ulong %26 %ulong_4
+         %30 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input_aligned
+         %31 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %30 %28
+     %loaded = OpLoad %int %31 Aligned 4
+         %33 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output_aligned
+         %34 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %33 %28
+               OpStore %34 %loaded Aligned 4
+         %35 = OpAccessChain %_ptr_StorageBuffer_int %14 %int_0
+               OpStore %35 %loaded Aligned 4
+               OpReturn
+               OpFunctionEnd
+
+// ====
+
+spirv.target<vulkan1_3> @target
+func.def target(@target) @scalar_mixed_rank2_i32(%input: buffer, %output: buffer, %base: offset, %row: index, %column: index) -> (i32) {
+  %base_aligned = index.assume %base [range(%base, 0, 4092), mul(%base, 4)] : offset
+  %row_bounded = index.assume %row [range(%row, 0, 3)] : index
+  %column_bounded = index.assume %column [range(%column, 0, 7)] : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%base_aligned] : buffer -> view<4x8xi32>
+  %output_view = buffer.view %output_aligned[%base_aligned] : buffer -> view<4x8xi32>
+  %loaded = view.load %input_view[%row_bounded, %column_bounded] : view<4x8xi32> -> i32
+  view.store %loaded, %output_view[%row_bounded, %column_bounded] : i32, view<4x8xi32>
+  func.return %loaded : i32
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %scalar_mixed_rank2_i32 "scalar_mixed_rank2_i32"
+               OpExecutionMode %scalar_mixed_rank2_i32 LocalSize 1 1 1
+               OpName %scalar_mixed_rank2_i32 "scalar_mixed_rank2_i32"
+               OpName %input_aligned "input_aligned"
+               OpName %output_aligned "output_aligned"
+               OpName %base_aligned "base_aligned"
+               OpName %row_bounded "row_bounded"
+               OpName %column_bounded "column_bounded"
+               OpName %loaded "loaded"
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpDecorate %_struct_6 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %9 DescriptorSet 0
+               OpDecorate %9 Binding 1
+               OpDecorate %10 DescriptorSet 0
+               OpDecorate %10 Binding 2
+               OpMemberDecorate %_struct_12 0 Offset 0
+               OpDecorate %_struct_12 Block
+               OpDecorate %11 DescriptorSet 0
+               OpDecorate %11 Binding 3
+               OpDecorate %15 DescriptorSet 0
+               OpDecorate %15 Binding 4
+               OpDecorate %16 DescriptorSet 0
+               OpDecorate %16 Binding 5
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+      %ulong = OpTypeInt 64 0
+  %_struct_6 = OpTypeStruct %ulong
+%_ptr_StorageBuffer__struct_6 = OpTypePointer StorageBuffer %_struct_6
+%_ptr_StorageBuffer_ulong = OpTypePointer StorageBuffer %ulong
+          %4 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+          %9 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+         %10 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+ %_struct_12 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_12 = OpTypePointer StorageBuffer %_struct_12
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+         %11 = OpVariable %_ptr_StorageBuffer__struct_12 StorageBuffer
+         %15 = OpVariable %_ptr_StorageBuffer__struct_12 StorageBuffer
+         %16 = OpVariable %_ptr_StorageBuffer__struct_12 StorageBuffer
+       %void = OpTypeVoid
+         %18 = OpTypeFunction %void
+       %uint = OpTypeInt 32 0
+   %ulong_32 = OpConstant %ulong 32
+    %ulong_4 = OpConstant %ulong 4
+%_ptr_PhysicalStorageBuffer_int = OpTypePointer PhysicalStorageBuffer %int
+%scalar_mixed_rank2_i32 = OpFunction %void None %18
+         %19 = OpLabel
+         %20 = OpAccessChain %_ptr_StorageBuffer_ulong %4 %int_0
+%input_aligned = OpLoad %ulong %20 Aligned 8
+         %22 = OpAccessChain %_ptr_StorageBuffer_ulong %9 %int_0
+%output_aligned = OpLoad %ulong %22 Aligned 8
+         %24 = OpAccessChain %_ptr_StorageBuffer_ulong %10 %int_0
+%base_aligned = OpLoad %ulong %24 Aligned 8
+         %26 = OpAccessChain %_ptr_StorageBuffer_int %11 %int_0
+%row_bounded = OpLoad %int %26 Aligned 4
+         %28 = OpAccessChain %_ptr_StorageBuffer_int %15 %int_0
+%column_bounded = OpLoad %int %28 Aligned 4
+         %31 = OpBitcast %uint %row_bounded
+         %32 = OpUConvert %ulong %31
+         %34 = OpIMul %ulong %32 %ulong_32
+         %35 = OpIAdd %ulong %base_aligned %34
+         %36 = OpBitcast %uint %column_bounded
+         %37 = OpUConvert %ulong %36
+         %39 = OpIMul %ulong %37 %ulong_4
+         %40 = OpIAdd %ulong %35 %39
+         %42 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input_aligned
+         %43 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %42 %40
+     %loaded = OpLoad %int %43 Aligned 4
+         %45 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output_aligned
+         %46 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %45 %40
+               OpStore %46 %loaded Aligned 4
+         %47 = OpAccessChain %_ptr_StorageBuffer_int %16 %int_0
+               OpStore %47 %loaded Aligned 4
+               OpReturn
+               OpFunctionEnd
+
+// ====
+
+spirv.target<vulkan1_3> @target
+func.def target(@target) @scalar_dynamic_stride_i32(%input: buffer, %output: buffer, %columns: index, %row: index, %column: index) -> (i32) {
+  %buffer_base = index.constant 0 : offset
+  %columns_bounded = index.assume %columns [range(%columns, 1, 8)] : index
+  %row_bounded = index.assume %row [range(%row, 0, 3)] : index
+  %column_bounded = index.assume %column [range(%column, 0, 7), lt(%column, %columns_bounded)] : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%buffer_base] : buffer -> view<4x[%columns_bounded]xi32>
+  %output_view = buffer.view %output_aligned[%buffer_base] : buffer -> view<4x[%columns_bounded]xi32>
+  %loaded = view.load %input_view[%row_bounded, %column_bounded] : view<4x[%columns_bounded]xi32> -> i32
+  view.store %loaded, %output_view[%row_bounded, %column_bounded] : i32, view<4x[%columns_bounded]xi32>
+  func.return %loaded : i32
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %scalar_dynamic_stride_i32 "scalar_dynamic_stride_i32"
+               OpExecutionMode %scalar_dynamic_stride_i32 LocalSize 1 1 1
+               OpName %scalar_dynamic_stride_i32 "scalar_dynamic_stride_i32"
+               OpName %input_aligned "input_aligned"
+               OpName %output_aligned "output_aligned"
+               OpName %columns_bounded "columns_bounded"
+               OpName %row_bounded "row_bounded"
+               OpName %column_bounded "column_bounded"
+               OpName %loaded "loaded"
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpDecorate %_struct_6 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %9 DescriptorSet 0
+               OpDecorate %9 Binding 1
+               OpMemberDecorate %_struct_11 0 Offset 0
+               OpDecorate %_struct_11 Block
+               OpDecorate %10 DescriptorSet 0
+               OpDecorate %10 Binding 2
+               OpDecorate %14 DescriptorSet 0
+               OpDecorate %14 Binding 3
+               OpDecorate %15 DescriptorSet 0
+               OpDecorate %15 Binding 4
+               OpDecorate %16 DescriptorSet 0
+               OpDecorate %16 Binding 5
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+      %ulong = OpTypeInt 64 0
+  %_struct_6 = OpTypeStruct %ulong
+%_ptr_StorageBuffer__struct_6 = OpTypePointer StorageBuffer %_struct_6
+%_ptr_StorageBuffer_ulong = OpTypePointer StorageBuffer %ulong
+          %4 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+          %9 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+ %_struct_11 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_11 = OpTypePointer StorageBuffer %_struct_11
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+         %10 = OpVariable %_ptr_StorageBuffer__struct_11 StorageBuffer
+         %14 = OpVariable %_ptr_StorageBuffer__struct_11 StorageBuffer
+         %15 = OpVariable %_ptr_StorageBuffer__struct_11 StorageBuffer
+         %16 = OpVariable %_ptr_StorageBuffer__struct_11 StorageBuffer
+       %void = OpTypeVoid
+         %18 = OpTypeFunction %void
+       %uint = OpTypeInt 32 0
+    %ulong_4 = OpConstant %ulong 4
+%_ptr_PhysicalStorageBuffer_int = OpTypePointer PhysicalStorageBuffer %int
+%scalar_dynamic_stride_i32 = OpFunction %void None %18
+         %19 = OpLabel
+         %20 = OpAccessChain %_ptr_StorageBuffer_ulong %4 %int_0
+%input_aligned = OpLoad %ulong %20 Aligned 8
+         %22 = OpAccessChain %_ptr_StorageBuffer_ulong %9 %int_0
+%output_aligned = OpLoad %ulong %22 Aligned 8
+         %24 = OpAccessChain %_ptr_StorageBuffer_int %10 %int_0
+%columns_bounded = OpLoad %int %24 Aligned 4
+         %26 = OpAccessChain %_ptr_StorageBuffer_int %14 %int_0
+%row_bounded = OpLoad %int %26 Aligned 4
+         %28 = OpAccessChain %_ptr_StorageBuffer_int %15 %int_0
+%column_bounded = OpLoad %int %28 Aligned 4
+         %31 = OpBitcast %uint %row_bounded
+         %32 = OpUConvert %ulong %31
+         %33 = OpBitcast %uint %columns_bounded
+         %34 = OpUConvert %ulong %33
+         %35 = OpIMul %ulong %32 %34
+         %37 = OpIMul %ulong %35 %ulong_4
+         %38 = OpBitcast %uint %column_bounded
+         %39 = OpUConvert %ulong %38
+         %40 = OpIMul %ulong %39 %ulong_4
+         %41 = OpIAdd %ulong %37 %40
+         %43 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input_aligned
+         %44 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %43 %41
+     %loaded = OpLoad %int %44 Aligned 4
+         %46 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output_aligned
+         %47 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %46 %41
+               OpStore %47 %loaded Aligned 4
+         %48 = OpAccessChain %_ptr_StorageBuffer_int %16 %int_0
+               OpStore %48 %loaded Aligned 4
+               OpReturn
+               OpFunctionEnd
+
+// ====
+
+spirv.target<vulkan1_3> @target
+func.def target(@target) @scalar_subview_dynamic_index_i32(%input: buffer, %output: buffer, %base: offset, %element: index) -> (i32) {
+  %base_aligned = index.assume %base [range(%base, 0, 4064), mul(%base, 4)] : offset
+  %element_bounded = index.assume %element [range(%element, 0, 3)] : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%base_aligned] : buffer -> view<8xi32>
+  %output_view = buffer.view %output_aligned[%base_aligned] : buffer -> view<8xi32>
+  %input_subview = view.subview %input_view[1] : view<8xi32> -> view<4xi32>
+  %output_subview = view.subview %output_view[1] : view<8xi32> -> view<4xi32>
+  %input_refined = view.refine %input_subview : view<4xi32> -> view<4xi32>
+  %output_refined = view.refine %output_subview : view<4xi32> -> view<4xi32>
+  %loaded = view.load %input_refined[%element_bounded] : view<4xi32> -> i32
+  view.store %loaded, %output_refined[%element_bounded] : i32, view<4xi32>
+  func.return %loaded : i32
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %scalar_subview_dynamic_index_i32 "scalar_subview_dynamic_index_i32"
+               OpExecutionMode %scalar_subview_dynamic_index_i32 LocalSize 1 1 1
+               OpName %scalar_subview_dynamic_index_i32 "scalar_subview_dynamic_index_i32"
+               OpName %input_aligned "input_aligned"
+               OpName %output_aligned "output_aligned"
+               OpName %base_aligned "base_aligned"
+               OpName %element_bounded "element_bounded"
+               OpName %loaded "loaded"
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpDecorate %_struct_6 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %9 DescriptorSet 0
+               OpDecorate %9 Binding 1
+               OpDecorate %10 DescriptorSet 0
+               OpDecorate %10 Binding 2
+               OpMemberDecorate %_struct_12 0 Offset 0
+               OpDecorate %_struct_12 Block
+               OpDecorate %11 DescriptorSet 0
+               OpDecorate %11 Binding 3
+               OpDecorate %15 DescriptorSet 0
+               OpDecorate %15 Binding 4
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+      %ulong = OpTypeInt 64 0
+  %_struct_6 = OpTypeStruct %ulong
+%_ptr_StorageBuffer__struct_6 = OpTypePointer StorageBuffer %_struct_6
+%_ptr_StorageBuffer_ulong = OpTypePointer StorageBuffer %ulong
+          %4 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+          %9 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+         %10 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+ %_struct_12 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_12 = OpTypePointer StorageBuffer %_struct_12
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+         %11 = OpVariable %_ptr_StorageBuffer__struct_12 StorageBuffer
+         %15 = OpVariable %_ptr_StorageBuffer__struct_12 StorageBuffer
+       %void = OpTypeVoid
+         %17 = OpTypeFunction %void
+       %uint = OpTypeInt 32 0
+    %ulong_4 = OpConstant %ulong 4
+%_ptr_PhysicalStorageBuffer_int = OpTypePointer PhysicalStorageBuffer %int
+%scalar_subview_dynamic_index_i32 = OpFunction %void None %17
+         %18 = OpLabel
+         %19 = OpAccessChain %_ptr_StorageBuffer_ulong %4 %int_0
+%input_aligned = OpLoad %ulong %19 Aligned 8
+         %21 = OpAccessChain %_ptr_StorageBuffer_ulong %9 %int_0
+%output_aligned = OpLoad %ulong %21 Aligned 8
+         %23 = OpAccessChain %_ptr_StorageBuffer_ulong %10 %int_0
+%base_aligned = OpLoad %ulong %23 Aligned 8
+         %25 = OpAccessChain %_ptr_StorageBuffer_int %11 %int_0
+%element_bounded = OpLoad %int %25 Aligned 4
+         %28 = OpBitcast %uint %element_bounded
+         %29 = OpUConvert %ulong %28
+         %31 = OpIMul %ulong %29 %ulong_4
+         %32 = OpIAdd %ulong %base_aligned %31
+         %33 = OpIAdd %ulong %32 %ulong_4
+         %35 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input_aligned
+         %36 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %35 %33
+     %loaded = OpLoad %int %36 Aligned 4
+         %38 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output_aligned
+         %39 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %38 %33
+               OpStore %39 %loaded Aligned 4
+         %40 = OpAccessChain %_ptr_StorageBuffer_int %15 %int_0
+               OpStore %40 %loaded Aligned 4
+               OpReturn
+               OpFunctionEnd

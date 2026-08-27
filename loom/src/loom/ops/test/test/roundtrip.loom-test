@@ -23,6 +23,7 @@ test.record @template_param_target
 test.func @template_param_symbol() {
   test.template_param_symbol<@template_param_target>
   test.template_param_symbol_flags<@template_param_target, debug|trace>
+  test.attr_params<mode = fast, scopes = [workgroup]>
   test.yield
 }
 

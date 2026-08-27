@@ -462,9 +462,10 @@ hrx_status_t hrx_amdxdna_executable_create(
   hrx_status_t status = hrx_amdxdna_xadx_serialize(
       params, host_allocator, &executable_data, &executable_data_size);
   if (hrx_status_is_ok(status)) {
-    status =
-        hrx_executable_load_data(device, executable_data, executable_data_size,
-                                 "amdxdna-xclbin-fb", executable);
+    status = hrx_executable_load_data(
+        device, executable_data, executable_data_size,
+        HRX_AMDXDNA_EXECUTABLE_TARGET_FAMILY, HRX_AMDXDNA_EXECUTABLE_TARGET_KEY,
+        executable);
   }
   hrx_host_allocator_free(host_allocator, executable_data);
   return status;

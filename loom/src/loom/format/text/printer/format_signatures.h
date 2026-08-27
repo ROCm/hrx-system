@@ -36,7 +36,8 @@ iree_status_t loom_print_block_args(loom_print_context_t* ctx,
 // Prints func-like signature arguments.
 iree_status_t loom_print_func_args(loom_print_context_t* ctx,
                                    const loom_op_t* op,
-                                   const loom_op_vtable_t* vtable);
+                                   const loom_op_vtable_t* vtable,
+                                   const loom_format_element_t* element);
 
 #ifdef __cplusplus
 }  // extern "C"

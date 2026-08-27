@@ -82,6 +82,8 @@ struct TestTables {
   loom_low_descriptor_ref_t descriptor_refs[2];
   loom_low_asm_form_t asm_forms[2];
   uint16_t asm_operand_indices[4];
+  loom_low_asm_operand_segment_t asm_operand_segments[1];
+  loom_low_asm_result_value_type_t asm_result_value_types[2];
   loom_low_asm_immediate_t asm_immediates[1];
   loom_low_operand_t operands[4];
   loom_low_immediate_t immediates[1];
@@ -91,6 +93,7 @@ struct TestTables {
   loom_low_effect_t effects[1];
   loom_low_constraint_t constraints[1];
   loom_low_reg_class_t reg_classes[1];
+  loom_low_register_part_t register_parts[2];
   loom_low_reg_class_alt_t reg_class_alts[1];
   loom_low_schedule_class_t schedule_classes[2];
   loom_low_issue_use_t issue_uses[1];
@@ -120,18 +123,21 @@ void InitializeTestTables(TestTables* tables) {
   tables->reg_class_alts[0].flags = LOOM_LOW_REG_CLASS_ALT_FLAG_PREFERRED;
 
   tables->operands[0].field_name_string_offset = TEST_STRING_OFFSET(field_dst);
+  tables->operands[0].source_value_index = 0;
   tables->operands[0].role = LOOM_LOW_OPERAND_ROLE_RESULT;
   tables->operands[0].reg_class_alt_start = 0;
   tables->operands[0].reg_class_alt_count = 1;
   tables->operands[0].unit_count = 1;
 
   tables->operands[1].field_name_string_offset = TEST_STRING_OFFSET(field_dst);
+  tables->operands[1].source_value_index = 0;
   tables->operands[1].role = LOOM_LOW_OPERAND_ROLE_RESULT;
   tables->operands[1].reg_class_alt_start = 0;
   tables->operands[1].reg_class_alt_count = 1;
   tables->operands[1].unit_count = 1;
 
   tables->operands[2].field_name_string_offset = TEST_STRING_OFFSET(field_lhs);
+  tables->operands[2].source_value_index = 0;
   tables->operands[2].role = LOOM_LOW_OPERAND_ROLE_OPERAND;
   tables->operands[2].reg_class_alt_start = 0;
   tables->operands[2].reg_class_alt_count = 1;
@@ -139,6 +145,7 @@ void InitializeTestTables(TestTables* tables) {
   tables->operands[2].read_stage = 0;
 
   tables->operands[3].field_name_string_offset = TEST_STRING_OFFSET(field_rhs);
+  tables->operands[3].source_value_index = 1;
   tables->operands[3].role = LOOM_LOW_OPERAND_ROLE_OPERAND;
   tables->operands[3].reg_class_alt_start = 0;
   tables->operands[3].reg_class_alt_count = 1;
@@ -210,6 +217,7 @@ void InitializeTestTables(TestTables* tables) {
   tables->descriptors[0].immediate_count = 1;
   tables->descriptors[0].schedule_class_id = 0;
   tables->descriptors[0].flags = LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE;
+  tables->descriptors[0].op_kind = LOOM_LOW_DESCRIPTOR_OP_KIND_CONST;
   tables->descriptors[0].canonical_asm_form_ordinal =
       LOOM_LOW_ASM_FORM_ORDINAL_NONE;
 
@@ -225,6 +233,7 @@ void InitializeTestTables(TestTables* tables) {
   tables->descriptors[1].operand_start = 1;
   tables->descriptors[1].operand_count = 3;
   tables->descriptors[1].result_count = 1;
+  tables->descriptors[1].minimum_packet_operand_count = 2;
   tables->descriptors[1].schedule_class_id = 1;
   tables->descriptors[1].flags = LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE;
   tables->descriptors[1].canonical_asm_form_ordinal =
@@ -254,6 +263,8 @@ void InitializeTestTables(TestTables* tables) {
   tables->set.descriptor_ref_count = IREE_ARRAYSIZE(tables->descriptor_refs);
   tables->set.asm_forms = tables->asm_forms;
   tables->set.asm_operand_indices = tables->asm_operand_indices;
+  tables->set.asm_operand_segments = tables->asm_operand_segments;
+  tables->set.asm_result_value_types = tables->asm_result_value_types;
   tables->set.asm_immediates = tables->asm_immediates;
   tables->set.operands = tables->operands;
   tables->set.operand_count = IREE_ARRAYSIZE(tables->operands);
@@ -297,6 +308,8 @@ void AddAsmForms(TestTables* tables) {
       LOOM_LOW_STRING_OFFSET_NONE;
   tables->asm_forms[0].descriptor_ordinal = 1;
   tables->asm_forms[0].result_operand_index_start = 0;
+  tables->asm_forms[0].result_value_type_start =
+      LOOM_LOW_ASM_RESULT_VALUE_TYPE_START_NONE;
   tables->asm_forms[0].result_operand_index_count = 1;
   tables->asm_forms[0].operand_index_start = 1;
   tables->asm_forms[0].operand_index_count = 2;
@@ -309,6 +322,8 @@ void AddAsmForms(TestTables* tables) {
       LOOM_LOW_STRING_OFFSET_NONE;
   tables->asm_forms[1].descriptor_ordinal = 0;
   tables->asm_forms[1].result_operand_index_start = 3;
+  tables->asm_forms[1].result_value_type_start =
+      LOOM_LOW_ASM_RESULT_VALUE_TYPE_START_NONE;
   tables->asm_forms[1].result_operand_index_count = 1;
   tables->asm_forms[1].operand_index_start = 4;
   tables->asm_forms[1].operand_index_count = 0;
@@ -323,6 +338,21 @@ void AddAsmForms(TestTables* tables) {
   tables->descriptors[1].canonical_asm_form_ordinal = 0;
 }
 
+void AddAsmResultValueTypes(TestTables* tables) {
+  AddAsmForms(tables);
+  tables->asm_forms[0].result_value_type_start = 0;
+  tables->asm_forms[1].result_value_type_start = 1;
+  tables->asm_result_value_types[0].kind =
+      LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_SCALAR;
+  tables->asm_result_value_types[0].element_type = LOOM_SCALAR_TYPE_I32;
+  tables->asm_result_value_types[1].kind =
+      LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_VECTOR;
+  tables->asm_result_value_types[1].element_type = LOOM_SCALAR_TYPE_F32;
+  tables->asm_result_value_types[1].vector_lane_count = 4;
+  tables->set.asm_result_value_type_count =
+      IREE_ARRAYSIZE(tables->asm_result_value_types);
+}
+
 void AddAddDescriptorConstraint(TestTables* tables,
                                 loom_low_constraint_kind_t kind,
                                 uint16_t lhs_operand_index,
@@ -333,6 +363,27 @@ void AddAddDescriptorConstraint(TestTables* tables,
   tables->descriptors[1].constraint_start = 0;
   tables->descriptors[1].constraint_count = 1;
   tables->set.constraint_count = 1;
+}
+
+void ConfigureAddStorageContinuation(TestTables* tables) {
+  tables->reg_classes[0].full_register_part_mask = 0x3;
+  tables->register_parts[0].name_string_offset = TEST_STRING_OFFSET(field_lhs);
+  tables->register_parts[0].reg_class_id = 0;
+  tables->register_parts[0].mask = 0x1;
+  tables->register_parts[1].name_string_offset = TEST_STRING_OFFSET(field_rhs);
+  tables->register_parts[1].reg_class_id = 0;
+  tables->register_parts[1].mask = 0x2;
+  tables->set.register_parts = tables->register_parts;
+  tables->set.register_part_count = IREE_ARRAYSIZE(tables->register_parts);
+
+  tables->operands[1].flags =
+      LOOM_LOW_OPERAND_FLAG_TIED | LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION;
+  tables->operands[1].register_part_id = 1;
+  tables->operands[2].flags = LOOM_LOW_OPERAND_FLAG_IMPLICIT |
+                              LOOM_LOW_OPERAND_FLAG_TIED |
+                              LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION;
+  tables->operands[2].register_part_id = 0;
+  AddAddDescriptorConstraint(tables, LOOM_LOW_CONSTRAINT_KIND_TIED, 0, 1);
 }
 
 void AddAddDescriptorEffect(TestTables* tables, loom_low_effect_kind_t kind,
@@ -604,6 +655,25 @@ TEST(LowDescriptorsTest, VerifiesAndLooksUpDescriptors) {
   EXPECT_EQ(descriptor_ordinal, LOOM_LOW_DESCRIPTOR_ORDINAL_NONE);
 }
 
+TEST(LowDescriptorsTest, RepresentationSupportsOwnAndDeclaredTargetContracts) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  const uint64_t supported_target_contract_stable_ids[] = {
+      loom_low_descriptor_stable_id_from_key(IREE_SV("test.exact")),
+  };
+  tables.set.supported_target_contract_stable_ids =
+      supported_target_contract_stable_ids;
+  tables.set.supported_target_contract_count =
+      IREE_ARRAYSIZE(supported_target_contract_stable_ids);
+
+  EXPECT_TRUE(loom_low_descriptor_set_supports_target_contract(
+      &tables.set, IREE_SV("test.core")));
+  EXPECT_TRUE(loom_low_descriptor_set_supports_target_contract(
+      &tables.set, IREE_SV("test.exact")));
+  EXPECT_FALSE(loom_low_descriptor_set_supports_target_contract(
+      &tables.set, IREE_SV("test.other")));
+}
+
 TEST(LowDescriptorsTest, ProviderBackedRegistryVerifiesAndLooksUpDescriptors) {
   TestTables tables;
   InitializeTestTables(&tables);
@@ -696,6 +766,24 @@ TEST(LowDescriptorsTest, RejectsResultRoleAfterResultPrefix) {
                         loom_low_descriptor_set_verify(&tables.set));
 }
 
+TEST(LowDescriptorsTest, RejectsInvalidResultSourceValueIndex) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operands[1].source_value_index = 1;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsInvalidPacketOperandSourceValueIndex) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operands[3].source_value_index = 0;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
 TEST(LowDescriptorsTest, RejectsOperandResultRows) {
   TestTables tables;
   InitializeTestTables(&tables);
@@ -705,10 +793,31 @@ TEST(LowDescriptorsTest, RejectsOperandResultRows) {
                         loom_low_descriptor_set_verify(&tables.set));
 }
 
+TEST(LowDescriptorsTest, AcceptsAssemblyImplicitPacketOperand) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operands[2].flags = LOOM_LOW_OPERAND_FLAG_IMPLICIT;
+
+  IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
 TEST(LowDescriptorsTest, RejectsImplicitRowsWithoutImplicitFlag) {
   TestTables tables;
   InitializeTestTables(&tables);
   tables.operands[2].role = LOOM_LOW_OPERAND_ROLE_IMPLICIT;
+  tables.operands[2].source_value_index = LOOM_LOW_ID_NONE;
+  tables.operands[3].source_value_index = 0;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsImplicitSourceValueIndex) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operands[2].role = LOOM_LOW_OPERAND_ROLE_IMPLICIT;
+  tables.operands[2].flags = LOOM_LOW_OPERAND_FLAG_IMPLICIT;
+  tables.operands[3].source_value_index = 0;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));
@@ -718,7 +827,10 @@ TEST(LowDescriptorsTest, AcceptsImplicitRowsWithImplicitFlag) {
   TestTables tables;
   InitializeTestTables(&tables);
   tables.operands[2].role = LOOM_LOW_OPERAND_ROLE_IMPLICIT;
+  tables.operands[2].source_value_index = LOOM_LOW_ID_NONE;
   tables.operands[2].flags = LOOM_LOW_OPERAND_FLAG_IMPLICIT;
+  tables.operands[3].source_value_index = 0;
+  tables.descriptors[1].minimum_packet_operand_count = 1;
 
   IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
 }
@@ -773,7 +885,9 @@ TEST(LowDescriptorsTest, RejectsBoundedOperandAddressMapOnImplicitOperand) {
   TestTables tables;
   InitializeTestTables(&tables);
   tables.operands[2].role = LOOM_LOW_OPERAND_ROLE_IMPLICIT;
+  tables.operands[2].source_value_index = LOOM_LOW_ID_NONE;
   tables.operands[2].flags = LOOM_LOW_OPERAND_FLAG_IMPLICIT;
+  tables.operands[3].source_value_index = 0;
   tables.operands[2].address_map_kind = LOOM_LOW_OPERAND_ADDRESS_MAP_LOW_SUBSET;
   tables.operands[2].addressable_unit_count = 1;
 
@@ -819,6 +933,34 @@ TEST(LowDescriptorsTest, AcceptsTiedResultOperandConstraint) {
   AddAddDescriptorConstraint(&tables, LOOM_LOW_CONSTRAINT_KIND_TIED, 0, 1);
 
   IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, AcceptsStorageContinuationConstraint) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  ConfigureAddStorageContinuation(&tables);
+
+  IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsUnprojectedStorageContinuationConstraint) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  ConfigureAddStorageContinuation(&tables);
+  tables.operands[1].flags &= ~LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsOverlappingStorageContinuationParts) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  ConfigureAddStorageContinuation(&tables);
+  tables.register_parts[1].mask = tables.register_parts[0].mask;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
 }
 
 TEST(LowDescriptorsTest, AcceptsTiedDuplicateOperandEncodingField) {
@@ -1027,6 +1169,62 @@ TEST(LowDescriptorsTest, RejectsUnknownOperandFlagBits) {
                         loom_low_descriptor_set_verify(&tables.set));
 }
 
+TEST(LowDescriptorsTest, AcceptsTrailingVariadicOperandSegment) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAsmForms(&tables);
+  tables.operands[3].flags = LOOM_LOW_OPERAND_FLAG_VARIADIC;
+  tables.descriptors[1].minimum_packet_operand_count = 1;
+  tables.descriptors[1].flags |= LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS;
+  tables.asm_operand_segments[0].operand_count = 2;
+  tables.asm_operand_segments[0].delimiter =
+      LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_PAREN;
+  tables.asm_operand_segments[0].flags =
+      LOOM_LOW_ASM_OPERAND_SEGMENT_FLAG_VARIADIC;
+  tables.asm_forms[0].operand_segment_start = 0;
+  tables.asm_forms[0].operand_segment_count = 1;
+  tables.set.asm_operand_segment_count = 1;
+
+  IREE_EXPECT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsIncorrectMinimumPacketOperandCount) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptors[1].minimum_packet_operand_count = 1;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsVariadicDescriptorFlagWithoutOperand) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptors[1].flags |= LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsVariadicOperandWithoutDescriptorFlag) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operands[3].flags = LOOM_LOW_OPERAND_FLAG_VARIADIC;
+  tables.descriptors[1].minimum_packet_operand_count = 1;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsNonTrailingVariadicOperand) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operands[2].flags = LOOM_LOW_OPERAND_FLAG_VARIADIC;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
 TEST(LowDescriptorsTest, RejectsUnknownRegisterClassFlagBits) {
   TestTables tables;
   InitializeTestTables(&tables);
@@ -1146,6 +1344,18 @@ TEST(LowDescriptorsTest, RejectsDefaultOutsideUnsignedImmediateRange) {
                         loom_low_descriptor_set_verify(&tables.set));
 }
 
+TEST(LowDescriptorsTest, AcceptsFullWidthUnsignedDefaultBitPattern) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.immediates[0].kind = LOOM_LOW_IMMEDIATE_KIND_UNSIGNED;
+  tables.immediates[0].flags = LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE;
+  tables.immediates[0].bit_width = 64;
+  tables.immediates[0].unsigned_max = UINT64_MAX;
+  tables.immediates[0].default_value = INT64_MIN;
+
+  IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
 TEST(LowDescriptorsTest, RejectsUnknownEffectFlagBits) {
   TestTables tables;
   InitializeTestTables(&tables);
@@ -1171,6 +1381,25 @@ TEST(LowDescriptorsTest, RejectsInvalidOperandRole) {
   TestTables tables;
   InitializeTestTables(&tables);
   tables.operands[2].role = static_cast<loom_low_operand_role_t>(99);
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsInvalidOperandSourceBinding) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operands[2].source_binding =
+      static_cast<loom_low_operand_source_binding_t>(99);
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsResultOperandSourceBinding) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operands[0].source_binding = LOOM_LOW_OPERAND_SOURCE_BINDING_LHS;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));
@@ -1371,6 +1600,62 @@ TEST(LowDescriptorsTest, RejectsIncompleteDescriptorReferences) {
                         loom_low_descriptor_set_verify(&tables.set));
 }
 
+TEST(LowDescriptorsTest, RejectsInvalidDescriptorOperationKind) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptors[0].op_kind = static_cast<loom_low_descriptor_op_kind_t>(2);
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsConstDescriptorWithoutOneResult) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptors[0].result_count = 0;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsConstDescriptorPacketOperands) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptors[0].operand_count = 2;
+  tables.operands[1].role = LOOM_LOW_OPERAND_ROLE_OPERAND;
+  tables.operands[1].source_value_index = 0;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, AcceptsConstDescriptorImplicitOperands) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptors[0].operand_count = 2;
+  tables.operands[1].role = LOOM_LOW_OPERAND_ROLE_IMPLICIT;
+  tables.operands[1].source_value_index = LOOM_LOW_ID_NONE;
+  tables.operands[1].flags = LOOM_LOW_OPERAND_FLAG_IMPLICIT |
+                             LOOM_LOW_OPERAND_FLAG_STATE_READ |
+                             LOOM_LOW_OPERAND_FLAG_SCHEDULE_ONLY_STATE;
+  tables.set.descriptor_count = 1;
+  tables.descriptor_refs[0] = tables.descriptor_refs[1];
+  tables.set.descriptor_ref_count = 1;
+
+  IREE_EXPECT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsEffectfulConstDescriptor) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.effects[0].kind = LOOM_LOW_EFFECT_KIND_CONVERGENT;
+  tables.descriptors[0].effect_count = 1;
+  tables.set.effect_count = 1;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
 TEST(LowDescriptorsTest, AcceptsAsmFormsAndLookup) {
   TestTables tables;
   InitializeTestTables(&tables);
@@ -1398,6 +1683,95 @@ TEST(LowDescriptorsTest, AcceptsAsmFormsAndLookup) {
   asm_form_ordinal =
       loom_low_descriptor_set_lookup_asm_form(&tables.set, IREE_SV("missing"));
   EXPECT_EQ(asm_form_ordinal, LOOM_LOW_ASM_FORM_ORDINAL_NONE);
+}
+
+TEST(LowDescriptorsTest, AcceptsAsmResultValueTypes) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAsmResultValueTypes(&tables);
+
+  IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsAsmResultValueTypeSpanOutOfRange) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAsmResultValueTypes(&tables);
+  tables.asm_forms[1].result_value_type_start = 2;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsUnknownAsmResultValueTypeKind) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAsmResultValueTypes(&tables);
+  tables.asm_result_value_types[0].kind = 3;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsScalarAsmResultValueTypeWithLanes) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAsmResultValueTypes(&tables);
+  tables.asm_result_value_types[0].vector_lane_count = 1;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsInvalidAsmResultValueElementType) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAsmResultValueTypes(&tables);
+  tables.asm_result_value_types[0].element_type = LOOM_SCALAR_TYPE_COUNT_;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsVectorAsmResultValueTypeWithoutLanes) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAsmResultValueTypes(&tables);
+  tables.asm_result_value_types[1].vector_lane_count = 0;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsAbsentOnlyAsmResultValueTypeSpan) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAsmResultValueTypes(&tables);
+  tables.asm_result_value_types[0] = {};
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsOperandInferredAsmResultValueType) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAsmResultValueTypes(&tables);
+  AddAddDescriptorConstraint(&tables, LOOM_LOW_CONSTRAINT_KIND_TIED, 0, 1);
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsConstAsmFormWithOperands) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAsmForms(&tables);
+  tables.asm_forms[1].operand_index_start = 1;
+  tables.asm_forms[1].operand_index_count = 1;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
 }
 
 TEST(LowDescriptorsTest, AcceptsAsmFormNativeAssemblyMnemonic) {
@@ -1558,6 +1932,38 @@ TEST(LowDescriptorsTest, AcceptsPhysicalRegisterClassWithPhysicalCount) {
   InitializeTestTables(&tables);
   tables.reg_classes[0].flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL;
   tables.reg_classes[0].allocatable_count = 32;
+
+  IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsVirtualRegisterClassWithFixedLocations) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.reg_classes[0].fixed_location_count = 1;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsPhysicalRegisterClassFixedLocationOverlap) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.reg_classes[0].flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL;
+  tables.reg_classes[0].allocatable_count = 32;
+  tables.reg_classes[0].fixed_location_base = 31;
+  tables.reg_classes[0].fixed_location_count = 2;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, AcceptsPhysicalRegisterClassFixedLocationWindow) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.reg_classes[0].flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL;
+  tables.reg_classes[0].allocatable_count = 32;
+  tables.reg_classes[0].fixed_location_base = 36;
+  tables.reg_classes[0].fixed_location_count = 4;
 
   IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
 }
@@ -1759,6 +2165,15 @@ TEST(LowDescriptorsTest, RejectsZeroIssueUseUnits) {
   TestTables tables;
   InitializeTestTables(&tables);
   tables.issue_uses[0].units = 0;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsIssueUseUnitsAboveResourceCapacity) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.issue_uses[0].units = 2;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));

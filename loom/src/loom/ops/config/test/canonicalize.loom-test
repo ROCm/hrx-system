@@ -6,8 +6,8 @@ config.def @answer = 40 : index
 
 func.def @read_scalar_config() -> (index) {
   %value = config.get @answer : index
-  %two = index.constant 2 : index
-  %result = index.add %value, %two : index
+  %c2 = index.constant 2 : index
+  %result = index.add %value, %c2 : index
   func.return %result : index
 }
 
@@ -42,14 +42,35 @@ func.def @read_boolean_config() -> (i32) {
 
 // ====
 
+// Encoding config definitions seed the same typed facts as encoding.define.
+config.def @weight_schema = #ggml.q4_0 : encoding<schema>
+
+func.def @read_encoding_config() -> (i1, i1) {
+  %schema = config.get @weight_schema : encoding<schema>
+  %is_q4 = encoding.isa<#ggml.q4_0> %schema : encoding<schema>
+  %is_q8 = encoding.isa<#ggml.q8_0> %schema : encoding<schema>
+  func.return %is_q4, %is_q8 : i1, i1
+}
+
+// ----
+config.def @weight_schema = #ggml.q4_0 : encoding<schema>
+
+func.def @read_encoding_config() -> (i1, i1) {
+  %is_q4 = scalar.constant true : i1
+  %is_q8 = scalar.constant false : i1
+  func.return %is_q4, %is_q8 : i1, i1
+}
+
+// ====
+
 // Declarations do not invent exact values. The unresolved read stays visible
 // for specialization/linking.
 config.decl @runtime_batch_size : index
 
 func.def @read_decl_config() -> (index) {
   %value = config.get @runtime_batch_size : index
-  %zero = index.constant 0 : index
-  %result = index.add %value, %zero : index
+  %c0 = index.constant 0 : index
+  %result = index.add %value, %c0 : index
   func.return %result : index
 }
 
@@ -63,6 +84,28 @@ func.def @read_decl_config() -> (index) {
 
 // ====
 
+// Unresolved compile-time configuration has a workgroup-uniform value even
+// though specialization has not supplied its exact numerical value.
+config.decl @runtime_sequence_length : index
+
+func.def @decl_config_is_workgroup_uniform() {
+  %value = config.get @runtime_sequence_length : index
+  %uniform = test.fact_workgroup_uniform %value : index -> i1
+  test.use %uniform : i1
+  func.return
+}
+
+// ----
+config.decl @runtime_sequence_length : index
+
+func.def @decl_config_is_workgroup_uniform() {
+  %uniform = scalar.constant true : i1
+  test.use %uniform : i1
+  func.return
+}
+
+// ====
+
 // Declaration predicates apply to config.get results until specialization
 // replaces the declaration with an exact definition.
 config.decl @runtime_chunk_size : %value: index where [range(%value, 0, 131072), mul(%value, 16)]
@@ -70,8 +113,8 @@ config.decl @runtime_chunk_size : %value: index where [range(%value, 0, 131072),
 func.def @read_decl_config_predicate() -> (index) {
   %value = config.get @runtime_chunk_size : index
   test.use %value : index
-  %sixteen = index.constant 16 : index
-  %remainder = index.rem %value, %sixteen : index
+  %c16 = index.constant 16 : index
+  %remainder = index.rem %value, %c16 : index
   func.return %remainder : index
 }
 

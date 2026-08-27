@@ -66,7 +66,7 @@ TEST_P(AllocatorTest, BaselineBufferCompatibility) {
   // Need to be able to use some type of buffer as dispatch inputs or outputs.
   iree_hal_buffer_params_t dispatch_params = {0};
   dispatch_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  dispatch_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+  dispatch_params.usage = IREE_HAL_BUFFER_USAGE_STORAGE;
   iree_device_size_t dispatch_allocation_size = 0;
   iree_hal_buffer_compatibility_t dispatch_compatibility =
       iree_hal_allocator_query_buffer_compatibility(

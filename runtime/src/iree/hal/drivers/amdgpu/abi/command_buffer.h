@@ -38,6 +38,9 @@ typedef enum iree_hal_amdgpu_command_buffer_opcode_e {
   IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_BRANCH = 7,
   IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_COND_BRANCH = 8,
   IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_RETURN = 9,
+  IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_ATOMIC_WAIT = 10,
+  IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_ATOMIC_STORE = 11,
+  IREE_HAL_AMDGPU_COMMAND_BUFFER_OPCODE_ATOMIC_RMW = 12,
 } iree_hal_amdgpu_command_buffer_opcode_t;
 
 // Command flags shared by all command records.
@@ -79,6 +82,8 @@ typedef enum iree_hal_amdgpu_command_buffer_dispatch_flag_bits_e {
   // object. Used when executable globals are queue scoped.
   IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_QUEUE_SCOPED_KERNEL_OBJECT =
       1u << 1,
+  // The dispatch uses the AMD extended packet with |workgroup_cluster_size|.
+  IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_WORKGROUP_CLUSTER = 1u << 2,
 } iree_hal_amdgpu_command_buffer_dispatch_flag_bits_t;
 
 // Kernarg storage mode for a dispatch command.
@@ -270,6 +275,88 @@ IREE_AMDGPU_STATIC_ASSERT(
     sizeof(iree_hal_amdgpu_command_buffer_barrier_command_t) == 16,
     "barrier command size must remain qword aligned");
 
+// Static or dynamic target reference shared by atomic command records.
+typedef struct IREE_AMDGPU_ALIGNAS(8)
+    iree_hal_amdgpu_command_buffer_atomic_target_t {
+  // Byte offset into the target buffer reference.
+  uint64_t offset;
+  // Static buffer ordinal or dynamic binding-table slot.
+  uint32_t ordinal;
+  // Target reference kind from iree_hal_amdgpu_command_buffer_binding_kind_t.
+  iree_hal_amdgpu_command_buffer_binding_kind_t kind;
+  // Reserved bytes that must be zero in version 0.
+  uint8_t reserved0[3];
+} iree_hal_amdgpu_command_buffer_atomic_target_t;
+IREE_AMDGPU_STATIC_ASSERT(
+    sizeof(iree_hal_amdgpu_command_buffer_atomic_target_t) == 16,
+    "atomic target size is part of the command-buffer ABI");
+
+// Atomic predicate wait command record.
+typedef struct IREE_AMDGPU_ALIGNAS(8)
+    iree_hal_amdgpu_command_buffer_atomic_wait_command_t {
+  // Common command record header.
+  iree_hal_amdgpu_command_buffer_command_header_t header;
+  // Static or dynamic atomic target.
+  iree_hal_amdgpu_command_buffer_atomic_target_t target;
+  // Unsigned value compared against the masked observed word.
+  uint64_t value;
+  // Mask applied to each observed word before comparison.
+  uint64_t mask;
+  // Ordering and visibility flags from iree_hal_atomic_flag_bits_e.
+  uint32_t atomic_flags;
+  // Width from iree_hal_atomic_width_e.
+  uint8_t width;
+  // Predicate from iree_hal_atomic_wait_condition_e.
+  uint8_t condition;
+  // Reserved bytes that must be zero in version 0.
+  uint8_t reserved0[2];
+} iree_hal_amdgpu_command_buffer_atomic_wait_command_t;
+IREE_AMDGPU_STATIC_ASSERT(
+    sizeof(iree_hal_amdgpu_command_buffer_atomic_wait_command_t) == 48,
+    "atomic wait command size must remain qword aligned");
+
+// Atomic store command record.
+typedef struct IREE_AMDGPU_ALIGNAS(8)
+    iree_hal_amdgpu_command_buffer_atomic_store_command_t {
+  // Common command record header.
+  iree_hal_amdgpu_command_buffer_command_header_t header;
+  // Static or dynamic atomic target.
+  iree_hal_amdgpu_command_buffer_atomic_target_t target;
+  // Unsigned value stored to the target word.
+  uint64_t value;
+  // Ordering and visibility flags from iree_hal_atomic_flag_bits_e.
+  uint32_t atomic_flags;
+  // Width from iree_hal_atomic_width_e.
+  uint8_t width;
+  // Reserved bytes that must be zero in version 0.
+  uint8_t reserved0[3];
+} iree_hal_amdgpu_command_buffer_atomic_store_command_t;
+IREE_AMDGPU_STATIC_ASSERT(
+    sizeof(iree_hal_amdgpu_command_buffer_atomic_store_command_t) == 40,
+    "atomic store command size must remain qword aligned");
+
+// Atomic read-modify-write command record.
+typedef struct IREE_AMDGPU_ALIGNAS(8)
+    iree_hal_amdgpu_command_buffer_atomic_rmw_command_t {
+  // Common command record header.
+  iree_hal_amdgpu_command_buffer_command_header_t header;
+  // Static or dynamic atomic target.
+  iree_hal_amdgpu_command_buffer_atomic_target_t target;
+  // Unsigned right-hand operand applied to the target word.
+  uint64_t operand;
+  // Ordering and visibility flags from iree_hal_atomic_flag_bits_e.
+  uint32_t atomic_flags;
+  // Width from iree_hal_atomic_width_e.
+  uint8_t width;
+  // Operation from iree_hal_atomic_rmw_operation_e.
+  uint8_t operation;
+  // Reserved bytes that must be zero in version 0.
+  uint8_t reserved0[2];
+} iree_hal_amdgpu_command_buffer_atomic_rmw_command_t;
+IREE_AMDGPU_STATIC_ASSERT(
+    sizeof(iree_hal_amdgpu_command_buffer_atomic_rmw_command_t) == 40,
+    "atomic RMW command size must remain qword aligned");
+
 // Dispatch command record.
 typedef struct IREE_AMDGPU_ALIGNAS(8)
     iree_hal_amdgpu_command_buffer_dispatch_command_t {
@@ -302,16 +389,18 @@ typedef struct IREE_AMDGPU_ALIGNAS(8)
   uint8_t kernarg_storage_mode;
   // Dispatch flags from iree_hal_amdgpu_command_buffer_dispatch_flag_bits_t.
   uint8_t dispatch_flags;
-  // AQL dispatch packet setup field.
-  uint16_t setup;
+  // Immutable workgroup cluster size, or zeroes for ordinary dispatch.
+  uint8_t workgroup_cluster_size[3];
+  // Reserved byte that must be zero in version 0.
+  uint8_t reserved1;
   // Executable export ordinal used for profiling and diagnostics.
   uint32_t export_ordinal;
   // AQL dispatch packet workgroup size fields.
   uint16_t workgroup_size[3];
   // Kernarg qword offset of implicit args, or UINT16_MAX when absent.
   uint16_t implicit_args_offset_qwords;
-  // AQL dispatch packet grid size fields.
-  uint32_t grid_size[3];
+  // Direct dispatch size in workgroups.
+  uint32_t workgroup_count[3];
   // AQL dispatch packet private segment size field.
   uint32_t private_segment_size;
   // AQL dispatch packet group segment size field.

@@ -1,0 +1,23 @@
+template.decl @demo.targeted(%x: i32) -> (i32)
+
+template.decl @demo.unused(%x: i32) -> (i32)
+
+test.target<low_core> @gfx11
+
+test.target<low_core> @gfx12
+
+template.def<@demo.targeted> target(@gfx11) priority(20) @gfx11_provider(%x: i32) -> (i32) {
+  template.return %x : i32
+}
+
+template.def<@demo.targeted> target(@gfx12) priority(20) @gfx12_provider(%x: i32) -> (i32) {
+  template.return %x : i32
+}
+
+template.def<@demo.targeted> priority(1) @fallback_provider(%x: i32) -> (i32) {
+  template.return %x : i32
+}
+
+template.def<@demo.unused> @unused_provider(%x: i32) -> (i32) {
+  template.return %x : i32
+}

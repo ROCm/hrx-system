@@ -1,0 +1,141 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "runs amdgpu store benchmark",
+      "run": {
+        "tool": "iree-benchmark-loom",
+        "args": [
+          "{srcdir}/amdgpu_hal_actual.loom",
+          "--benchmark=@store_i32_latency",
+          "--device=amdgpu",
+          "--measure=dispatch_complete",
+          "--iterations=1",
+          "--warmup-iterations=0",
+          "--batch-size=1",
+          "--min-time-ms=0",
+          "--max-batches=1",
+          "--input-ring-count=1",
+          "--output-format=jsonl"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"row\":\"plan\"",
+          "\"benchmark\":\"store_i32_latency\"",
+          { "regex": "\"case\":\"store_i32_case\"" },
+          "\"measure\":\"dispatch_complete\"",
+          "\"driver\":\"amdgpu\"",
+          "\"provider\":\"amdgpu-hal\"",
+          "\"row\":\"benchmark\"",
+          "\"state\":\"ok\"",
+          "\"correctness\":{\"sample_count\":1,\"failed_sample_count\":0}",
+          "\"failures\":{\"row_count\":0,\"failed_benchmark_count\":0}"
+        ]
+      }
+    },
+    {
+      "name": "runs amdgpu dependent store benchmark",
+      "run": {
+        "tool": "iree-benchmark-loom",
+        "args": [
+          "{srcdir}/amdgpu_hal_actual.loom",
+          "--benchmark=@store_then_double_i32_latency",
+          "--device=amdgpu",
+          "--measure=dispatch_complete",
+          "--iterations=1",
+          "--warmup-iterations=0",
+          "--batch-size=1",
+          "--min-time-ms=0",
+          "--max-batches=1",
+          "--input-ring-count=1",
+          "--profile-final-batch=true",
+          "--output-format=jsonl"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"row\":\"plan\"",
+          "\"benchmark\":\"store_then_double_i32_latency\"",
+          { "regex": "\"case\":\"store_then_double_i32_case\"" },
+          "\"kernel_launch_count\":2",
+          "\"driver\":\"amdgpu\"",
+          "\"provider\":\"amdgpu-hal\"",
+          "\"row\":\"benchmark\"",
+          "\"state\":\"ok\"",
+          "\"correctness\":{\"sample_count\":1,\"failed_sample_count\":0}",
+          { "regex": "\"type\":\"dispatch_command_operation\".*\"command_index\":0,\"function_name\":\"store_i32\"" },
+          { "regex": "\"type\":\"dispatch_command_operation\".*\"command_index\":2,\"function_name\":\"double_i32\"" },
+          "\"failures\":{\"row_count\":0,\"failed_benchmark_count\":0}"
+        ]
+      }
+    },
+    {
+      "name": "runs explicit serial amdgpu dispatch benchmark",
+      "run": {
+        "tool": "iree-benchmark-loom",
+        "args": [
+          "{srcdir}/../../../execution/hal/testdata/launch_schedule_hal_actual.loom",
+          "--benchmark=@launch_schedule_serial",
+          "--device=amdgpu",
+          "--measure=dispatch_complete",
+          "--iterations=1",
+          "--warmup-iterations=0",
+          "--batch-size=1",
+          "--min-time-ms=0",
+          "--max-batches=1",
+          "--input-ring-count=1",
+          "--profile-final-batch=true",
+          "--output-format=jsonl"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"row\":\"plan\"",
+          "\"benchmark\":\"launch_schedule_serial\"",
+          "\"case\":\"launch_schedule_serial_case\"",
+          "\"kernel_launch_count\":3",
+          "\"correctness\":{\"sample_count\":1,\"failed_sample_count\":0}",
+          "\"physical_dispatches_per_logical_operation\":3",
+          { "regex": "\"type\":\"dispatch_command_operation\".*\"command_index\":0,\"function_name\":\"launch_schedule_increment_i32\"" },
+          { "regex": "\"type\":\"dispatch_command_operation\".*\"command_index\":2,\"function_name\":\"launch_schedule_double_i32\"" },
+          { "regex": "\"type\":\"dispatch_command_operation\".*\"command_index\":4,\"function_name\":\"launch_schedule_increment_i32\"" },
+          "\"failures\":{\"row_count\":0,\"failed_benchmark_count\":0}"
+        ]
+      }
+    },
+    {
+      "name": "runs concurrent amdgpu dispatch benchmark without an edge",
+      "run": {
+        "tool": "iree-benchmark-loom",
+        "args": [
+          "{srcdir}/../../../execution/hal/testdata/launch_schedule_hal_actual.loom",
+          "--benchmark=@launch_schedule_concurrent",
+          "--device=amdgpu",
+          "--measure=dispatch_complete",
+          "--iterations=1",
+          "--warmup-iterations=0",
+          "--batch-size=1",
+          "--min-time-ms=0",
+          "--max-batches=1",
+          "--input-ring-count=1",
+          "--profile-final-batch=true",
+          "--output-format=jsonl"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"row\":\"plan\"",
+          "\"benchmark\":\"launch_schedule_concurrent\"",
+          "\"case\":\"launch_schedule_concurrent_case\"",
+          "\"kernel_launch_count\":2",
+          "\"correctness\":{\"sample_count\":1,\"failed_sample_count\":0}",
+          "\"physical_dispatches_per_logical_operation\":2",
+          { "regex": "\"type\":\"dispatch_command_operation\".*\"command_index\":0,\"function_name\":\"launch_schedule_increment_i32\"" },
+          { "regex": "\"type\":\"dispatch_command_operation\".*\"command_index\":1,\"function_name\":\"launch_schedule_double_i32\"" },
+          "\"failures\":{\"row_count\":0,\"failed_benchmark_count\":0}"
+        ]
+      }
+    }
+  ]
+}

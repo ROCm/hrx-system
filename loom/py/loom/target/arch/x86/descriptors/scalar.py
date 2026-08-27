@@ -11,12 +11,16 @@ from __future__ import annotations
 from pathlib import Path
 
 from loom.target.low_descriptors import (
+    Constraint,
+    ConstraintKind,
     Descriptor,
     DescriptorFlag,
+    DescriptorOpKind,
     DescriptorSet,
     EnumDomain,
     EnumValue,
     Immediate,
+    InstructionClass,
     IssueUse,
     LatencyKind,
     ModelQuality,
@@ -211,6 +215,47 @@ def _gpr32_to_gpr64_extend_descriptor(
     )
 
 
+def _gpr64_to_gpr32_truncate_descriptor() -> Descriptor:
+    return Descriptor(
+        key="x86.scalar.mov.trunc.gpr32.gpr64",
+        mnemonic="mov.trunc",
+        semantic_tag="integer.trunc.i64.i32",
+        operands=(_gpr32_result(), _gpr64_operand("src")),
+        asm_forms=_asm(
+            mnemonic="mov.trunc.gpr32.gpr64",
+            results=("dst",),
+            operands=("src",),
+        ),
+        schedule_class=_SCHEDULE_SCALAR,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _gpr32_select_descriptor() -> Descriptor:
+    return Descriptor(
+        key="x86.scalar.select.gpr32",
+        mnemonic="select.cmovne",
+        semantic_tag="integer.select.i32",
+        operands=(
+            _gpr32_result(),
+            _gpr32_operand("condition"),
+            _gpr32_operand("true_value"),
+            _gpr32_operand("false_value"),
+        ),
+        constraints=(
+            Constraint(ConstraintKind.TIED, 0, 3),
+            Constraint(ConstraintKind.DESTRUCTIVE, 0, 3),
+        ),
+        asm_forms=_asm(
+            mnemonic="select.gpr32",
+            results=("dst",),
+            operands=("condition", "true_value", "false_value"),
+        ),
+        schedule_class=_SCHEDULE_SCALAR,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 def _gpr32_compare_descriptor(
     *,
     predicate: str,
@@ -379,6 +424,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         mnemonic="shr",
         semantic_tag="integer.shru.i64",
     ),
+    _gpr64_to_gpr32_truncate_descriptor(),
+    _gpr32_select_descriptor(),
     *(
         _gpr32_compare_descriptor(
             predicate=predicate,
@@ -400,6 +447,7 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         mnemonic="mov",
         semantic_tag="integer.const.i32",
         operands=(_gpr32_result(),),
+        op_kind=DescriptorOpKind.CONST,
         immediates=(_IMM32_IMMEDIATE,),
         asm_forms=_asm(
             mnemonic="mov.imm32",
@@ -408,6 +456,47 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         ),
         schedule_class=_SCHEDULE_SCALAR,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    ),
+    Descriptor(
+        key="x86.scalar.movzx.load.indexed.u8.gpr32",
+        mnemonic="movzx",
+        semantic_tag="memory.load.indexed.u8.i32",
+        operands=(
+            _gpr32_result(),
+            _gpr64_resource("base"),
+            _gpr64_resource("index"),
+        ),
+        immediates=(_DISP32_IMMEDIATE, _ADDRESS_SCALE_IMMEDIATE),
+        asm_forms=_asm(
+            mnemonic="movzx.load.indexed.u8.gpr32",
+            results=("dst",),
+            operands=("base", "index"),
+            immediates=("disp32", "scale"),
+            named_immediates=True,
+        ),
+        effects=(_load_effect(8),),
+        schedule_class=_SCHEDULE_MEMORY_LOAD_GPR32,
+        flags=(DescriptorFlag.SIDE_EFFECTING,),
+    ),
+    Descriptor(
+        key="x86.scalar.mov.store.indexed.u8.gpr32",
+        mnemonic="mov",
+        semantic_tag="memory.store.indexed.i8",
+        operands=(
+            _gpr32_operand("value"),
+            _gpr64_resource("base"),
+            _gpr64_resource("index"),
+        ),
+        immediates=(_DISP32_IMMEDIATE, _ADDRESS_SCALE_IMMEDIATE),
+        asm_forms=_asm(
+            mnemonic="mov.store.indexed.u8.gpr32",
+            operands=("value", "base", "index"),
+            immediates=("disp32", "scale"),
+            named_immediates=True,
+        ),
+        effects=(_store_effect(8),),
+        schedule_class=_SCHEDULE_MEMORY_STORE_GPR32,
+        flags=(DescriptorFlag.SIDE_EFFECTING,),
     ),
     Descriptor(
         key="x86.scalar.mov.load.gpr32",
@@ -583,6 +672,7 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         mnemonic="mov",
         semantic_tag="integer.const.i64",
         operands=(_gpr64_result(),),
+        op_kind=DescriptorOpKind.CONST,
         immediates=(_IMM64_IMMEDIATE,),
         asm_forms=_asm(
             mnemonic="mov.imm64",
@@ -739,6 +829,7 @@ X86_SCALAR_DESCRIPTOR_SET = DescriptorSet(
             latency_cycles=1,
             issue_uses=(IssueUse(_RESOURCE_ADDRESS, cycles=1, units=1),),
             model_quality=ModelQuality.ESTIMATED,
+            instruction_classes=(InstructionClass.SCALAR_ALU,),
         ),
         ScheduleClass(
             _SCHEDULE_MEMORY_LOAD_GPR32,

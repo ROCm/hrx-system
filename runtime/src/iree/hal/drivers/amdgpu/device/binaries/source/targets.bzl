@@ -20,13 +20,14 @@ load(
 )
 load(
     "//build_tools/amdgpu:target_map.bzl",
-    "IREE_AMDGPU_CODE_OBJECT_TARGETS",
+    "IREE_AMDGPU_DEVICE_BINARY_TARGETS",
 )
 
 _GENERATOR_SCRIPT = "//build_tools/scripts:amdgpu_device_binaries.py"
 _GENERATOR_SCRIPT_DEPS = [
     _GENERATOR_SCRIPT,
     "//build_tools/amdgpu:target_map.py",
+    "//build_tools/amdgpu:target_map_data.py",
 ]
 
 _GENERATOR_INPUTS = [
@@ -59,7 +60,7 @@ def _generator_tools():
             tools.append(AMDGPU_CLANG_RESOURCE_MARKER)
     return tools
 
-def _generator_command(code_object_target):
+def _generator_command(device_binary_target):
     if not AMDGPU_DEVICE_TOOLCHAIN_AVAILABLE:
         return "echo '{}' >&2; false".format(AMDGPU_DEVICE_TOOLCHAIN_ERROR)
 
@@ -68,7 +69,7 @@ def _generator_command(code_object_target):
         "--repo-root .",
         "--binary-root $(BINDIR)",
         "--output-dir $(@D)",
-        "--targets %s" % (code_object_target,),
+        "--device-binary-targets %s" % (device_binary_target,),
         "--clang $(location %s)" % (AMDGPU_CLANG_TOOL,),
         "--llvm-link $(location %s)" % (AMDGPU_LLVM_LINK_TOOL,),
         "--lld $(location %s)" % (AMDGPU_LLD_TOOL,),
@@ -83,18 +84,18 @@ def iree_hal_amdgpu_source_device_binaries(name):
     """
     target_compatible_with = [] if AMDGPU_DEVICE_TOOLCHAIN_AVAILABLE else _INCOMPATIBLE_TARGET
     binary_srcs = []
-    for code_object_target in IREE_AMDGPU_CODE_OBJECT_TARGETS:
-        binary_name = "amdgcn-amd-amdhsa--%s" % (code_object_target,)
+    for device_binary_target in IREE_AMDGPU_DEVICE_BINARY_TARGETS:
+        binary_name = "amdgcn-amd-amdhsa--%s" % (device_binary_target,)
         binary_srcs.append(":%s.so" % (binary_name,))
         native.genrule(
             name = binary_name,
             srcs = _generator_srcs(),
             outs = ["%s.so" % (binary_name,)],
-            cmd = _generator_command(code_object_target),
+            cmd = _generator_command(device_binary_target),
             tags = ["manual"],
             target_compatible_with = target_compatible_with,
             tools = _generator_tools(),
-            message = "Generating AMDGPU builtin device binary for %s..." % (code_object_target,),
+            message = "Generating AMDGPU builtin device binary for %s..." % (device_binary_target,),
         )
     native.filegroup(
         name = name,

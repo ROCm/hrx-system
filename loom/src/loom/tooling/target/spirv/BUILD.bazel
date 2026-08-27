@@ -4,6 +4,8 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/sanitizer:suppressions.bzl", "vulkan_suppressions")
+load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
@@ -21,6 +23,16 @@ LOOM_SPIRV_VULKAN_COMPATIBLE_WITH = loom_config_compatible_with([
     "//runtime/config/hal:driver_vulkan",
 ])
 
+_SPIRV_VULKAN_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/execute:spirv_vulkan_hal",
+])
+
+_SPIRV_VULKAN_EXECUTION_TEST_TAGS = [
+    "iree-run-requirement=runtime.resource.vulkan_device",
+    "requires-gpu-vulkan",
+    "runtime-resource=vulkan-device",
+]
+
 loom_cc_library(
     name = "artifact_provider",
     srcs = ["artifact_provider.c"],
@@ -28,19 +40,22 @@ loom_cc_library(
     target_compatible_with = LOOM_SPIRV_VULKAN_COMPATIBLE_WITH,
     deps = [
         ":vulkan_profile",
-        "//loom/src/loom/target:artifact_manifest_collect",
-        "//loom/src/loom/target:compile_report",
         "//loom/src/loom/target:entry_selection",
+        "//loom/src/loom/target:function_contract",
         "//loom/src/loom/target:low_descriptor_registry",
         "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/spirv:facts",
         "//loom/src/loom/target/arch/spirv:low_verify",
         "//loom/src/loom/target/arch/spirv/descriptors:low_registry",
         "//loom/src/loom/target/emit/spirv:module_builder",
         "//loom/src/loom/target/emit/spirv:module_emitter",
+        "//loom/src/loom/target/reporting:artifact_manifest_collect",
+        "//loom/src/loom/target/reporting:report",
         "//loom/src/loom/tooling/execution:compile_options",
         "//loom/src/loom/tooling/execution/hal:artifact",
         "//loom/src/loom/tooling/execution/hal:runtime",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/io:byte_sequence",
     ],
 )
 
@@ -89,8 +104,10 @@ loom_cc_test(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_registry",
         "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/spirv:profile",
         "//loom/src/loom/target/arch/spirv/descriptors:low_registry",
         "//loom/src/loom/target/arch/spirv/ops",
+        "//loom/src/loom/testing:byte_sequence",
         "//loom/src/loom/testing:module_ptr",
         "//loom/src/loom/tooling/execution/hal:artifact",
         "//loom/src/loom/tooling/execution/hal:runtime",
@@ -101,6 +118,37 @@ loom_cc_test(
         "//runtime/src/iree/hal/drivers/vulkan:device_spec",
         "//runtime/src/iree/hal/drivers/vulkan:headers",
         "//runtime/src/iree/hal/utils:device_spec_builder",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "module_emitter_test",
+    srcs = ["module_emitter_test.cc"],
+    target_compatible_with = LOOM_SPIRV_VULKAN_COMPATIBLE_WITH,
+    deps = [
+        ":vulkan_profile",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/target:facts_builder",
+        "//loom/src/loom/target:function_contract",
+        "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target:profile",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/spirv:features",
+        "//loom/src/loom/target/arch/spirv:profile",
+        "//loom/src/loom/target/arch/spirv/descriptors:low_registry",
+        "//loom/src/loom/target/arch/spirv/ops",
+        "//loom/src/loom/target/emit/spirv:module_emitter",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -124,4 +172,45 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
+)
+
+iree_execution_test_suite(
+    name = "iree_test_loom_execution_test",
+    data = [
+        "test/spirv_vulkan_coop_hal_actual.loom",
+        "test/spirv_vulkan_coop_u8_hal_actual.loom",
+        "test/spirv_vulkan_hal_actual.loom",
+        "test/spirv_vulkan_integer_hal_actual.loom",
+        "test/spirv_vulkan_quantized_hal_actual.loom",
+        "//loom/src/loom/tooling/execution/hal:testdata/buffer_bulk_hal_actual.loom",
+        "//loom/src/loom/tooling/execution/hal:testdata/dynamic_workgroup_hal_actual.loom",
+        "//loom/src/loom/tooling/execution/hal:testdata/launch_schedule_hal_actual.loom",
+    ],
+    manifests = ["test/iree-test-loom_spirv_vulkan.test.json"],
+    resource_group = "loom-vulkan-tests",
+    sanitizer_suppressions = vulkan_suppressions,
+    tags = _SPIRV_VULKAN_EXECUTION_TEST_TAGS,
+    target_compatible_with = _SPIRV_VULKAN_HAL_COMPATIBLE_WITH,
+    tools = {
+        "iree-test-loom": "//loom/src/loom/tools/iree-test-loom",
+    },
+)
+
+iree_execution_test_suite(
+    name = "iree_benchmark_loom_execution_test",
+    data = [
+        "test/spirv_vulkan_coop_hal_actual.loom",
+        "test/spirv_vulkan_coop_u8_hal_actual.loom",
+        "test/spirv_vulkan_hal_actual.loom",
+        "test/spirv_vulkan_quantized_hal_actual.loom",
+        "//loom/src/loom/tooling/execution/hal:testdata/launch_schedule_hal_actual.loom",
+    ],
+    manifests = ["test/iree-benchmark-loom_spirv_vulkan.test.json"],
+    resource_group = "loom-vulkan-tests",
+    sanitizer_suppressions = vulkan_suppressions,
+    tags = _SPIRV_VULKAN_EXECUTION_TEST_TAGS + ["manual"],
+    target_compatible_with = _SPIRV_VULKAN_HAL_COMPATIBLE_WITH,
+    tools = {
+        "iree-benchmark-loom": "//loom/src/loom/tools/iree-benchmark-loom",
+    },
 )

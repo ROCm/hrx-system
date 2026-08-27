@@ -73,3 +73,9 @@ class PassBuilder(DialectBuilder):
         *,
         location_id: int | None = ...,
     ) -> None: ...
+    def if_changed(
+        self,
+        *,
+        body: Region | None = ...,
+        location_id: int | None = ...,
+    ) -> None: ...

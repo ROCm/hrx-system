@@ -93,7 +93,7 @@ iree_status_t loom_ops_verify_successor_args(
     }
     loom_type_t actual_type = loom_module_value_type(module, actual_id);
     loom_type_t expected_type = loom_module_value_type(module, expected_id);
-    if (!loom_type_equal_after_value_remap(expected_type, actual_type,
+    if (!loom_type_equal_after_value_remap(module, expected_type, actual_type,
                                            &type_remap)) {
       return loom_ops_successor_emit_arg_type_mismatch(
           emitter, op, op_name, successor_index, i, actual_type, expected_type);

@@ -219,9 +219,9 @@ static std::string MakeTestShmName(const char* suffix) {
   // process. Include the process id so concurrent or previously failed CI jobs
   // do not collide on fixed names.
 #if defined(IREE_PLATFORM_WINDOWS)
-  return "iree_shm_test_" + std::to_string(_getpid()) + "_" + suffix;
+  return "iree_" + std::to_string(_getpid()) + "_" + suffix;
 #else
-  return "/iree_shm_test_" + std::to_string(getpid()) + "_" + suffix;
+  return "/iree_" + std::to_string(getpid()) + "_" + suffix;
 #endif  // IREE_PLATFORM_WINDOWS
 }
 

@@ -131,24 +131,34 @@ static void loom_spirv_vulkan_hal_profile_project_feature_flag(
 }
 
 iree_status_t loom_spirv_vulkan_hal_profile_query(
-    iree_hal_device_t* device, iree_hal_executable_cache_t* executable_cache,
+    iree_hal_device_t* device,
     loom_spirv_vulkan_hal_profile_facts_t* out_facts) {
   IREE_ASSERT_ARGUMENT(device);
-  IREE_ASSERT_ARGUMENT(executable_cache);
   IREE_ASSERT_ARGUMENT(out_facts);
 
   *out_facts = (loom_spirv_vulkan_hal_profile_facts_t){0};
-  if (iree_hal_executable_cache_can_prepare_format(
-          executable_cache, IREE_HAL_EXECUTABLE_CACHING_MODE_ALLOW_OPTIMIZATION,
-          IREE_SV("vulkan-spirv-bda"))) {
-    out_facts->flags |= LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_RAW_BDA_EXECUTABLE;
-  }
-
   const iree_hal_device_spec_t* device_spec = iree_hal_device_spec(device);
   if (device_spec == NULL) {
     return iree_make_status(
         IREE_STATUS_UNAVAILABLE,
         "HAL device does not expose immutable device facts");
+  }
+  const iree_hal_executable_target_selection_t target_selection = {
+      .family = IREE_SV("spirv"),
+      .target_key = IREE_SV("vulkan1.3+bda"),
+      .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC,
+  };
+  const iree_hal_executable_target_selection_result_t target_result =
+      iree_hal_device_spec_select_executable_target(device_spec,
+                                                    &target_selection);
+  if (target_result.outcome ==
+      IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "HAL device reports ambiguous Vulkan SPIR-V executable targets");
+  } else if (target_result.outcome ==
+             IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED) {
+    out_facts->flags |= LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_RAW_BDA_EXECUTABLE;
   }
   const iree_hal_device_dispatch_spec_t* dispatch =
       iree_hal_device_spec_dispatch(device_spec);
@@ -203,27 +213,41 @@ iree_status_t loom_spirv_vulkan_hal_query_cooperative_matrix_properties(
 
   *out_properties = NULL;
   *out_property_count = 0;
-  iree_host_size_t property_count = 0;
+
+  const iree_hal_device_spec_t* device_spec = iree_hal_device_spec(device);
+  if (device_spec == NULL) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "HAL device does not expose immutable device facts");
+  }
+  const iree_hal_device_spec_facet_t* vulkan_facet =
+      iree_hal_vulkan_device_spec_find_facet(device_spec);
+  if (vulkan_facet == NULL) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "HAL device spec does not expose Vulkan device facts");
+  }
+  iree_hal_vulkan_device_spec_t vulkan_spec = {0};
   IREE_RETURN_IF_ERROR(
-      iree_hal_vulkan_device_query_cooperative_matrix_properties(
-          device, /*property_capacity=*/0, &property_count,
-          /*out_properties=*/NULL));
+      iree_hal_vulkan_device_spec_decode_facet(vulkan_facet, &vulkan_spec));
+
+  const iree_host_size_t property_count = vulkan_spec.cooperative_matrix.count;
   if (property_count == 0) {
     return iree_ok_status();
   }
   iree_hal_vulkan_cooperative_matrix_property_t* properties = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      allocator, property_count * sizeof(*properties), (void**)&properties));
-  iree_status_t status =
-      iree_hal_vulkan_device_query_cooperative_matrix_properties(
-          device, property_count, &property_count, properties);
-  if (iree_status_is_ok(status)) {
-    *out_properties = properties;
-    *out_property_count = property_count;
-  } else {
-    iree_allocator_free(allocator, properties);
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      allocator, property_count, sizeof(*properties), (void**)&properties));
+  for (iree_host_size_t i = 0; i < property_count; ++i) {
+    const bool property_read =
+        iree_hal_vulkan_device_spec_read_cooperative_matrix_property(
+            &vulkan_spec, i, &properties[i]);
+    IREE_ASSERT_TRUE(property_read);
+    (void)property_read;
   }
-  return status;
+  *out_properties = properties;
+  *out_property_count = property_count;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_spirv_vulkan_hal_profile_require_flag(
@@ -385,14 +409,19 @@ iree_status_t loom_spirv_vulkan_hal_target_profile_storage_initialize(
         /*vector_properties=*/NULL, /*vector_property_count=*/0, allocator,
         &out_storage->cooperative_properties);
   }
+  if (iree_status_is_ok(status)) {
+    status = loom_spirv_vulkan_hal_profile_initialize_target_bundle(
+        facts, &out_storage->target_bundle_storage);
+  }
   iree_allocator_free(allocator, matrix_rows);
   if (!iree_status_is_ok(status)) {
     loom_spirv_vulkan_hal_target_profile_storage_deinitialize(out_storage,
                                                               allocator);
     return status;
   }
-  out_storage->profile.cooperative_properties =
-      &out_storage->cooperative_properties.set;
+  loom_spirv_target_profile_initialize(
+      &out_storage->target_bundle_storage.bundle,
+      &out_storage->cooperative_properties.set, &out_storage->profile);
   return iree_ok_status();
 }
 
@@ -422,8 +451,8 @@ iree_status_t loom_spirv_vulkan_hal_profile_initialize_target_bundle(
   }
   IREE_RETURN_IF_ERROR(loom_spirv_vulkan_hal_profile_require_flag(
       facts, LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_RAW_BDA_EXECUTABLE,
-      IREE_SV("Vulkan HAL executable cache does not support "
-              "vulkan-spirv-bda")));
+      IREE_SV("Vulkan HAL device does not support the vulkan1.3+bda "
+              "SPIR-V target")));
   IREE_RETURN_IF_ERROR(loom_spirv_vulkan_hal_profile_require_flag(
       facts, LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_BUFFER_DEVICE_ADDRESS,
       IREE_SV("Vulkan device does not expose buffer device addresses")));

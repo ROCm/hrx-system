@@ -42,7 +42,7 @@ iree_runtime_cc_library(
         "wait_address.h",
     ],
     deps = [
-        "//build_tools:pthreads",
+        "//build_tools/bazel:pthreads",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/base/internal",
@@ -64,8 +64,8 @@ iree_runtime_cc_library(
     ],
     deps = [
         ":threading",
-        "//build_tools:dl",
-        "//build_tools:pthreads",
+        "//build_tools/bazel:dl",
+        "//build_tools/bazel:pthreads",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/base/internal",

@@ -31,8 +31,13 @@ LOOM_DEFINE_ISA(loom_config_decl_isa, LOOM_OP_CONFIG_DECL)
 LOOM_DEFINE_RESULT(loom_config_decl_type, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_config_decl_symbol, 0)
 LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_config_decl_predicates, 1)
+enum loom_config_decl_build_flag_bits_e {
+  LOOM_CONFIG_DECL_BUILD_FLAG_HAS_PREDICATES = 1u << 0,
+};
+typedef uint32_t loom_config_decl_build_flags_t;
 iree_status_t loom_config_decl_build(
     loom_builder_t* builder,
+    loom_config_decl_build_flags_t build_flags,
     loom_symbol_ref_t symbol,
     loom_type_t result_type,
     const loom_tied_result_t* tied_results,
@@ -45,7 +50,7 @@ iree_status_t loom_config_decl_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_CONFIG_DEF: Define a compile/link-time configuration value. The initializer is required and must match the declared result type. Scalar values seed ordinary value facts so config.get can fold through canonicalization.
+// LOOM_OP_CONFIG_DEF: Define a compile/link-time configuration value. The initializer is required and must match the declared result type. Scalar and encoding values seed typed facts so config.get can fold through canonicalization.
 // config.def @model36.model.hidden_size = 2048 : index
 LOOM_DEFINE_ISA(loom_config_def_isa, LOOM_OP_CONFIG_DEF)
 LOOM_DEFINE_RESULT(loom_config_def_type, 0)

@@ -1,0 +1,116 @@
+// RUN: emit amdgpu-assembly @gfx11_vopd_minmax_mnemonics strategy=source fixed=%lhs0:physical_register:0:1 fixed=%rhs0:physical_register:1:1 fixed=%lhs1:physical_register:2:1 fixed=%rhs1:physical_register:3:1 fixed=%min0:physical_register:4:1 fixed=%min1:physical_register:5:1 fixed=%max0:physical_register:6:1 fixed=%max1:physical_register:7:1
+amdgpu.target<gfx1100> @target
+low.func.def target<amdgpu.rdna3.core>(@target) @gfx11_vopd_minmax_mnemonics(%lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>) asm {
+  %min0 = v_min_f32 %lhs0, %rhs0
+  %min1 = v_min_f32 %lhs1, %rhs1
+  %max0 = v_max_f32 %lhs0, %rhs0
+  %max1 = v_max_f32 %lhs1, %rhs1
+  return
+}
+
+// ----
+  v_dual_min_f32 v4, v0, v1 :: v_dual_min_f32 v5, v2, v3
+  v_dual_max_f32 v6, v0, v1 :: v_dual_max_f32 v7, v2, v3
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx12_vopd_minmax_mnemonics strategy=source fixed=%lhs0:physical_register:0:1 fixed=%rhs0:physical_register:1:1 fixed=%lhs1:physical_register:2:1 fixed=%rhs1:physical_register:3:1 fixed=%min0:physical_register:4:1 fixed=%min1:physical_register:5:1 fixed=%max0:physical_register:6:1 fixed=%max1:physical_register:7:1
+amdgpu.target<gfx1200> @target
+low.func.def target<amdgpu.rdna4.core>(@target) @gfx12_vopd_minmax_mnemonics(%lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>) asm {
+  %min0 = v_min_f32 %lhs0, %rhs0
+  %min1 = v_min_f32 %lhs1, %rhs1
+  %max0 = v_max_f32 %lhs0, %rhs0
+  %max1 = v_max_f32 %lhs1, %rhs1
+  return
+}
+
+// ----
+  v_dual_min_num_f32 v4, v0, v1 :: v_dual_min_num_f32 v5, v2, v3
+  v_dual_max_num_f32 v6, v0, v1 :: v_dual_max_num_f32 v7, v2, v3
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx12_generic_vopd_minmax_mnemonics strategy=source fixed=%lhs0:physical_register:0:1 fixed=%rhs0:physical_register:1:1 fixed=%lhs1:physical_register:2:1 fixed=%rhs1:physical_register:3:1 fixed=%min0:physical_register:4:1 fixed=%min1:physical_register:5:1 fixed=%max0:physical_register:6:1 fixed=%max1:physical_register:7:1
+amdgpu.target<gfx12-generic> @target
+low.func.def target<amdgpu.gfx12.generic.core>(@target) @gfx12_generic_vopd_minmax_mnemonics(%lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>) asm {
+  %min0 = v_min_f32 %lhs0, %rhs0
+  %min1 = v_min_f32 %lhs1, %rhs1
+  %max0 = v_max_f32 %lhs0, %rhs0
+  %max1 = v_max_f32 %lhs1, %rhs1
+  return
+}
+
+// ----
+  v_dual_min_num_f32 v4, v0, v1 :: v_dual_min_num_f32 v5, v2, v3
+  v_dual_max_num_f32 v6, v0, v1 :: v_dual_max_num_f32 v7, v2, v3
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1250_a0_vopd_minmax_mnemonics strategy=source fixed=%lhs0:physical_register:0:1 fixed=%rhs0:physical_register:1:1 fixed=%lhs1:physical_register:2:1 fixed=%rhs1:physical_register:3:1 fixed=%min0:physical_register:4:1 fixed=%min1:physical_register:5:1 fixed=%max0:physical_register:6:1 fixed=%max1:physical_register:7:1
+amdgpu.target<gfx1250-a0> @target
+low.func.def target<amdgpu.rdna4.gfx1250_a0.core>(@target) @gfx1250_a0_vopd_minmax_mnemonics(%lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>) asm {
+  %min0 = v_min_f32 %lhs0, %rhs0
+  %min1 = v_min_f32 %lhs1, %rhs1
+  %max0 = v_max_f32 %lhs0, %rhs0
+  %max1 = v_max_f32 %lhs1, %rhs1
+  return
+}
+
+// ----
+  v_dual_min_num_f32 v4, v0, v1 :: v_dual_min_num_f32 v5, v2, v3
+  v_dual_max_num_f32 v6, v0, v1 :: v_dual_max_num_f32 v7, v2, v3
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1250_vopd_minmax_mnemonics strategy=source fixed=%lhs0:physical_register:0:1 fixed=%rhs0:physical_register:1:1 fixed=%lhs1:physical_register:2:1 fixed=%rhs1:physical_register:3:1 fixed=%min0:physical_register:4:1 fixed=%min1:physical_register:5:1 fixed=%max0:physical_register:6:1 fixed=%max1:physical_register:7:1
+amdgpu.target<gfx1250> @target
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_vopd_minmax_mnemonics(%lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>) asm {
+  %min0 = v_min_f32 %lhs0, %rhs0
+  %min1 = v_min_f32 %lhs1, %rhs1
+  %max0 = v_max_f32 %lhs0, %rhs0
+  %max1 = v_max_f32 %lhs1, %rhs1
+  return
+}
+
+// ----
+  v_dual_min_num_f32 v4, v0, v1 :: v_dual_min_num_f32 v5, v2, v3
+  v_dual_max_num_f32 v6, v0, v1 :: v_dual_max_num_f32 v7, v2, v3
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1251_vopd_minmax_mnemonics strategy=source fixed=%lhs0:physical_register:0:1 fixed=%rhs0:physical_register:1:1 fixed=%lhs1:physical_register:2:1 fixed=%rhs1:physical_register:3:1 fixed=%min0:physical_register:4:1 fixed=%min1:physical_register:5:1 fixed=%max0:physical_register:6:1 fixed=%max1:physical_register:7:1
+amdgpu.target<gfx1251> @target
+low.func.def target<amdgpu.rdna4.gfx1251.core>(@target) @gfx1251_vopd_minmax_mnemonics(%lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>) asm {
+  %min0 = v_min_f32 %lhs0, %rhs0
+  %min1 = v_min_f32 %lhs1, %rhs1
+  %max0 = v_max_f32 %lhs0, %rhs0
+  %max1 = v_max_f32 %lhs1, %rhs1
+  return
+}
+
+// ----
+  v_dual_min_num_f32 v4, v0, v1 :: v_dual_min_num_f32 v5, v2, v3
+  v_dual_max_num_f32 v6, v0, v1 :: v_dual_max_num_f32 v7, v2, v3
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx12_5_generic_vopd_minmax_mnemonics strategy=source fixed=%lhs0:physical_register:0:1 fixed=%rhs0:physical_register:1:1 fixed=%lhs1:physical_register:2:1 fixed=%rhs1:physical_register:3:1 fixed=%min0:physical_register:4:1 fixed=%min1:physical_register:5:1 fixed=%max0:physical_register:6:1 fixed=%max1:physical_register:7:1
+amdgpu.target<gfx12-5-generic> @target
+low.func.def target<amdgpu.gfx12_5.generic.core>(@target) @gfx12_5_generic_vopd_minmax_mnemonics(%lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>) asm {
+  %min0 = v_min_f32 %lhs0, %rhs0
+  %min1 = v_min_f32 %lhs1, %rhs1
+  %max0 = v_max_f32 %lhs0, %rhs0
+  %max1 = v_max_f32 %lhs1, %rhs1
+  return
+}
+
+// ----
+  v_dual_min_num_f32 v4, v0, v1 :: v_dual_min_num_f32 v5, v2, v3
+  v_dual_max_num_f32 v6, v0, v1 :: v_dual_max_num_f32 v7, v2, v3
+  s_endpgm

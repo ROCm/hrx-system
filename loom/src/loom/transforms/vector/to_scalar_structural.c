@@ -400,8 +400,7 @@ iree_status_t loom_vector_to_scalar_build_interleave_lane(
   loom_op_t* is_even_op = NULL;
   IREE_RETURN_IF_ERROR(loom_index_cmp_build(
       &state->rewriter->builder, LOOM_INDEX_CMP_PREDICATE_EQ, remainder_value,
-      zero, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
-      loom_type_scalar(LOOM_SCALAR_TYPE_I1), state->location, &is_even_op));
+      zero, state->location, &is_even_op));
   return loom_vector_to_scalar_build_select_lane(
       state, loom_index_cmp_result(is_even_op), even_lane, odd_lane, out_lane);
 }
@@ -616,9 +615,8 @@ loom_vector_to_scalar_build_dynamic_shape_changing_bitcast_lane(
   loom_op_t* loop = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_for_build(
       &state->rewriter->builder, /*build_flags=*/0, lower_bound, upper_bound,
-      step, &initial_accumulator, 1, &result_integer_type, 1, NULL, 0,
-      LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0, /*unroll_schedule=*/0,
-      state->location, &loop));
+      step, &initial_accumulator, 1, NULL, 0, LOOM_VALUE_ID_INVALID,
+      /*unroll_policy=*/0, /*unroll_schedule=*/0, state->location, &loop));
   loom_vector_to_scalar_record_loop_created(state);
 
   loom_builder_ip_t saved = loom_builder_enter_region(

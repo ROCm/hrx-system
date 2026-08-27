@@ -4,7 +4,11 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+# Python developer tools have no CMake target surface.
+# bazel-to-cmake: skip
+
 load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+load("//build_tools/bazel:cc.bzl", "iree_cc_binary")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -14,6 +18,7 @@ py_library(
         "__init__.py",
         "aliases.py",
         "bazel.py",
+        "bazel_launcher.py",
         "ci.py",
         "ci_config.py",
         "cli.py",
@@ -22,6 +27,7 @@ py_library(
         "cmake_fuzz.py",
         "cmake_try.py",
         "command_plan.py",
+        "ctest.py",
         "doctor.py",
         "environment.py",
         "fuzz.py",
@@ -51,10 +57,16 @@ py_binary(
     srcs = [
         "__init__.py",
         "bazel_smoke_test.py",
+        "environment.py",
         "smoke_test_lib.py",
     ],
     imports = ["build_tools/devtools"],
     main = "bazel_smoke_test.py",
+)
+
+iree_cc_binary(
+    name = "bazel_launcher_integration_fixture",
+    srcs = ["bazel_launcher_integration_fixture.c"],
 )
 
 py_binary(
@@ -62,6 +74,7 @@ py_binary(
     srcs = [
         "__init__.py",
         "cli_smoke_test.py",
+        "environment.py",
         "smoke_test_lib.py",
     ],
     imports = ["build_tools/devtools"],
@@ -73,10 +86,34 @@ py_binary(
     srcs = [
         "__init__.py",
         "cmake_smoke_test.py",
+        "environment.py",
         "smoke_test_lib.py",
     ],
     imports = ["build_tools/devtools"],
     main = "cmake_smoke_test.py",
+)
+
+py_test(
+    name = "bazel_test",
+    srcs = [
+        "bazel.py",
+        "bazel_launcher.py",
+        "bazel_test.py",
+        "command_plan.py",
+        "environment.py",
+        "fuzz.py",
+    ],
+    main = "bazel_test.py",
+    deps = ["//build_tools/bazel:compile_commands_merge_lib"],
+)
+
+py_test(
+    name = "bazel_launcher_test",
+    srcs = [
+        "bazel_launcher.py",
+        "bazel_launcher_test.py",
+    ],
+    main = "bazel_launcher_test.py",
 )
 
 py_test(
@@ -89,11 +126,18 @@ py_test(
     ],
     data = [
         "//:.github/scripts/check_vulkan_hardware_environment.sh",
+        "//:.github/scripts/fetch_rocm_toolchain.sh",
+        "//:.github/workflows/build_core_windows.yml",
         "//:.github/workflows/ci_core_linux.yml",
+        "//:.github/workflows/ci_core_windows.yml",
         "//:.github/workflows/ci_importers.yml",
         "//:.github/workflows/ci_iree_bazel.yml",
         "//:.github/workflows/ci_iree_cmake.yml",
+        "//:.github/workflows/ci_libhrx_bazel.yml",
+        "//:.github/workflows/docs.yml",
+        "//:.github/workflows/presubmit.yml",
         "//:.github/workflows/test_core_linux_gpu.yml",
+        "//:.github/workflows/test_core_linux_gpu_source.yml",
     ],
     main = "ci_test.py",
 )
@@ -103,6 +147,7 @@ py_test(
     srcs = [
         "aliases.py",
         "bazel.py",
+        "bazel_launcher.py",
         "cli.py",
         "cli_test.py",
         "cmake.py",
@@ -110,6 +155,7 @@ py_test(
         "cmake_fuzz.py",
         "cmake_try.py",
         "command_plan.py",
+        "ctest.py",
         "doctor.py",
         "environment.py",
         "fuzz.py",
@@ -142,6 +188,7 @@ py_test(
         "cmake_test.py",
         "cmake_try.py",
         "command_plan.py",
+        "ctest.py",
         "environment.py",
         "fuzz.py",
     ],
@@ -158,12 +205,41 @@ py_test(
 )
 
 py_test(
-    name = "project_presubmit_test",
+    name = "ctest_test",
     srcs = [
-        "project_presubmit.py",
-        "project_presubmit_test.py",
+        "__init__.py",
+        "command_plan.py",
+        "ctest.py",
+        "ctest_test.py",
+        "environment.py",
     ],
+    main = "ctest_test.py",
+)
+
+py_test(
+    name = "environment_test",
+    srcs = [
+        "environment.py",
+        "environment_test.py",
+    ],
+    main = "environment_test.py",
+)
+
+py_test(
+    name = "install_test",
+    srcs = [
+        "__init__.py",
+        "install.py",
+        "install_test.py",
+    ],
+    main = "install_test.py",
+)
+
+py_test(
+    name = "project_presubmit_test",
+    srcs = ["project_presubmit_test.py"],
     main = "project_presubmit_test.py",
+    deps = [":devtools"],
 )
 
 py_test(
@@ -176,12 +252,23 @@ py_test(
 )
 
 py_test(
+    name = "smoke_test_lib_test",
+    srcs = [
+        "environment.py",
+        "smoke_test_lib.py",
+        "smoke_test_lib_test.py",
+    ],
+    main = "smoke_test_lib_test.py",
+)
+
+py_test(
     name = "setup_test",
     srcs = [
         "__init__.py",
         "aliases.py",
         "command_plan.py",
         "environment.py",
+        "hooks.py",
         "setup.py",
         "setup_test.py",
     ],

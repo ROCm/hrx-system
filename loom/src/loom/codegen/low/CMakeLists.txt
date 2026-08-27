@@ -19,6 +19,7 @@ loom_cc_library(
     "descriptors_enums.c"
   DEPS
     iree::base
+    loom::ir
     loom::target::types
     loom::util::bstring
     loom::util::stable_id
@@ -41,6 +42,33 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    repr
+  HDRS
+    "repr.h"
+  SRCS
+    "repr.c"
+  DEPS
+    ::descriptor_traits
+    ::descriptors
+    iree::base
+    loom::format::low_repr
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    repr_test
+  SRCS
+    "repr_test.cc"
+  DEPS
+    ::repr
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::target::test::descriptors
+)
+
+loom_cc_library(
+  NAME
     builder
   HDRS
     "builder.h"
@@ -54,6 +82,21 @@ loom_cc_library(
     loom::ops::low
     loom::target::registers
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    builder_test
+  SRCS
+    "builder_test.cc"
+  DEPS
+    ::builder
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::target::registers
+    loom::target::test::descriptors
 )
 
 loom_cc_library(
@@ -82,6 +125,7 @@ loom_cc_library(
   DEPS
     ::builder
     ::descriptors
+    ::repr
     iree::base
     loom::analysis::symbol_facts
     loom::format::text::low_asm
@@ -104,7 +148,6 @@ loom_cc_library(
   DEPS
     ::descriptors
     iree::base
-    iree::base::internal::arena
     loom::analysis::symbol_facts
     loom::error::emitter
     loom::error::error_defs
@@ -112,10 +155,37 @@ loom_cc_library(
     loom::ops::func_symbol_facts
     loom::ops::low
     loom::ops::target
+    loom::target::facts
     loom::target::function_contract
+    loom::target::profile
     loom::target::registers
     loom::target::types
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    target_binding_test
+  SRCS
+    "target_binding_test.cc"
+  DEPS
+    ::target_binding
+    ::text_asm
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::analysis::symbol_facts
+    loom::error::error_defs
+    loom::format::text::parser
+    loom::ir
+    loom::ops::func_symbol_facts
+    loom::ops::low
+    loom::ops::target
+    loom::ops::test
+    loom::target::function_contract
+    loom::target::test::alt_descriptors
+    loom::target::test::descriptors
+    loom::testing::module_ptr
 )
 
 loom_cc_library(
@@ -134,17 +204,66 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    function_model
+  HDRS
+    "function_model.h"
+  SRCS
+    "function_model.c"
+  DEPS
+    ::descriptors
+    ::function
+    ::target_binding
+    iree::base
+    iree::base::internal::arena
+    loom::error::emitter
+    loom::ir
+    loom::util::cfg_graph
+    loom::util::cfg_loop
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     storage_layout
   HDRS
     "storage_layout.h"
   SRCS
     "storage_layout.c"
   DEPS
-    ::function
     iree::base
     iree::base::internal::arena
     loom::ir
     loom::ops::low
+    loom::ops::type_registry
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    launch_config_program
+  HDRS
+    "launch_config_program.h"
+  SRCS
+    "launch_config_program.c"
+  DEPS
+    ::storage_layout
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::ops::func
+    loom::ops::kernel
+    loom::ops::low
+    loom::ops::op_defs
+    loom::ops::special_values
+    loom::ops::type_registry
+    loom::pass::environment
+    loom::pass::types
+    loom::pass::value_facts
+    loom::rewrite::materialize
+    loom::rewrite::remap
+    loom::rewrite::rewriter
+    loom::target::facts
+    loom::transforms::cleanup::dce
   PUBLIC
 )
 
@@ -195,6 +314,55 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    memory_access_ir
+  HDRS
+    "memory_access_ir.h"
+  SRCS
+    "memory_access_ir.c"
+  DEPS
+    ::function
+    ::memory_access
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::ops::low
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    memory_access_test
+  SRCS
+    "memory_access_test.cc"
+  DEPS
+    ::memory_access
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_test(
+  NAME
+    memory_access_ir_test
+  SRCS
+    "memory_access_ir_test.cc"
+  DEPS
+    ::function
+    ::memory_access_ir
+    ::text_asm
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::error::diagnostic
+    loom::format::text::parser
+    loom::ir
+    loom::ops::low
+    loom::ops::test
+    loom::target::test::descriptors
+    loom::testing::module_ptr
+)
+
+loom_cc_library(
+  NAME
     storage_relation
   HDRS
     "storage_relation.h"
@@ -211,12 +379,23 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    placement_pair
+  HDRS
+    "placement_pair.h"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     placement
   HDRS
     "placement.h"
   SRCS
     "placement.c"
   DEPS
+    ::placement_pair
     ::storage_relation
     iree::base
     iree::base::internal::arena
@@ -247,6 +426,7 @@ loom_cc_library(
     ::descriptors
     ::diagnostics
     ::function
+    ::function_model
     ::placement
     ::storage_lease
     ::target_binding
@@ -265,6 +445,8 @@ loom_cc_library(
     loom::codegen::low::allocation::interval_assignment
     loom::codegen::low::allocation::interval_order
     loom::codegen::low::allocation::live_range
+    loom::codegen::low::allocation::loop_edge_relocation
+    loom::codegen::low::allocation::move_plan
     loom::codegen::low::allocation::move_topology
     loom::codegen::low::allocation::packet_move
     loom::codegen::low::allocation::search
@@ -276,27 +458,12 @@ loom_cc_library(
     loom::codegen::low::allocation::target_constraints
     loom::codegen::low::allocation::unit_liveness
     loom::codegen::low::allocation::unit_location
+    loom::codegen::low::schedule
     loom::error::emitter
     loom::error::error_defs
     loom::ir
     loom::ops::low
     loom::target::registers
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    move_sequence
-  HDRS
-    "move_sequence.h"
-  SRCS
-    "move_sequence.c"
-  DEPS
-    ::allocation
-    iree::base
-    iree::base::internal::arena
-    loom::codegen::low::allocation::move_topology
-    loom::ops::low
   PUBLIC
 )
 
@@ -315,31 +482,82 @@ loom_cc_library(
     ::storage_layout
     iree::base
     iree::base::internal::arena
+    loom::codegen::low::allocation::spill_plan
     loom::error::error_defs
     loom::ir
     loom::ops::low
     loom::ops::op_defs
+    loom::ops::type_registry
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    allocation_materialization_test
+  SRCS
+    "allocation_materialization_test.cc"
+  DEPS
+    ::allocation_materialization
+    ::diagnostics
+    ::text_asm
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::ir
+    loom::ops::low
+    loom::ops::test
+    loom::target::test::descriptors
+    loom::testing::module_ptr
 )
 
 loom_cc_library(
   NAME
-    allocation_rematerialization
+    rematerialization
   HDRS
-    "allocation_rematerialization.h"
+    "rematerialization.h"
   SRCS
-    "allocation_rematerialization.c"
+    "rematerialization.c"
   DEPS
     ::allocation
     ::descriptor_traits
+    ::diagnostics
     ::target_binding
     iree::base
     iree::base::internal::arena
+    loom::analysis::availability
+    loom::error::emitter
+    loom::error::error_defs
     loom::ir
     loom::ops::op_defs
     loom::rewrite::materialize
     loom::rewrite::remap
     loom::rewrite::rewriter
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    allocation_live_range_splitting
+  HDRS
+    "allocation_live_range_splitting.h"
+  SRCS
+    "allocation_live_range_splitting.c"
+  DEPS
+    ::allocation
+    ::diagnostics
+    ::target_binding
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::allocation::live_range
+    loom::codegen::low::allocation::storage
+    loom::error::emitter
+    loom::error::error_defs
+    loom::ir
+    loom::ops::low
+    loom::ops::op_defs
+    loom::rewrite::rewriter
+    loom::target::registers
   PUBLIC
 )
 
@@ -377,6 +595,7 @@ loom_cc_library(
     iree::base
     loom::codegen::low::schedule
     loom::ir
+    loom::ops::low
   PUBLIC
 )
 
@@ -476,6 +695,9 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::error::error_defs
+    loom::ops::test
+    loom::target::facts_builder
+    loom::target::test::target_record_table
 )
 
 loom_cc_library(
@@ -500,6 +722,19 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    planning_statistics
+  HDRS
+    "planning_statistics.h"
+  SRCS
+    "planning_statistics.c"
+  DEPS
+    iree::base
+    iree::base::internal
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     frame
   HDRS
     "frame.h"
@@ -508,12 +743,16 @@ loom_cc_library(
   DEPS
     ::addressability
     ::allocation
+    ::allocation_live_range_splitting
     ::allocation_materialization
-    ::allocation_rematerialization
     ::diagnostics
     ::function
+    ::function_model
     ::memory_access
+    ::memory_access_ir
     ::packet
+    ::planning_statistics
+    ::rematerialization
     ::storage_lease
     iree::base
     iree::base::internal::arena
@@ -522,6 +761,8 @@ loom_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ops::low
+    loom::target::facts
+    loom::target::residency
   PUBLIC
 )
 
@@ -556,33 +797,55 @@ loom_cc_library(
     "source_memory_plan.h"
   SRCS
     "source_memory_plan.c"
+    "source_memory_plan_summary.c"
   DEPS
     ::memory_access
     iree::base
-    loom::analysis::symbolic_expr
+    iree::base::internal
     loom::analysis::view_regions
     loom::ir
     loom::ir::facts
-    loom::ops::buffer
     loom::ops::kernel
     loom::ops::vector
     loom::ops::view
     loom::util::fact_table
-    loom::util::math
   PUBLIC
+)
+
+loom_cc_benchmark(
+  NAME
+    source_memory_plan_benchmark
+  SRCS
+    "source_memory_plan_benchmark.cc"
+  DEPS
+    ::source_memory_plan
+    iree::base::internal::arena
+    iree::testing::benchmark_main
+    loom::analysis::view_regions
+    loom::ir
+    loom::ops::buffer
+    loom::ops::encoding
+    loom::ops::index
+    loom::ops::test
+    loom::ops::vector
+    loom::util::fact_table
+  TESTONLY
 )
 
 loom_cc_test(
   NAME
     source_memory_plan_test
   SRCS
+    "source_memory_plan_index_test.cc"
     "source_memory_plan_test.cc"
+    "source_memory_plan_test_fixture.h"
   DEPS
     ::source_memory_plan
     iree::base
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::analysis::view_regions
     loom::ir
     loom::ops::buffer
     loom::ops::cfg
@@ -637,6 +900,7 @@ loom_cc_library(
   SRCS
     "verify.c"
   DEPS
+    ::packet
     ::storage_layout
     ::target_binding
     iree::base
@@ -645,6 +909,7 @@ loom_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ops::low
+    loom::target::function_version
     loom::target::registers
     loom::util::walk
   PUBLIC
@@ -661,29 +926,20 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::analysis::symbol_facts
     loom::error::error_defs
     loom::format::text::parser
     loom::ir
     loom::ops::func
+    loom::ops::func_symbol_facts
     loom::ops::low
     loom::ops::target
     loom::ops::test
+    loom::target::function_contract
+    loom::target::function_version
     loom::target::test::low_registry
-    loom::target::test::target_record_table
     loom::testing::diagnostic_matchers
     loom::testing::module_ptr
-)
-
-loom_cc_test(
-  NAME
-    move_sequence_test
-  SRCS
-    "move_sequence_test.cc"
-  DEPS
-    ::move_sequence
-    iree::base::internal::arena
-    iree::testing::gtest
-    iree::testing::gtest_main
 )
 
 loom_cc_test(
@@ -692,9 +948,11 @@ loom_cc_test(
   SRCS
     "packet_test.cc"
   DEPS
+    ::descriptors
     ::packet
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::ops::low
 )
 
 loom_cc_test(

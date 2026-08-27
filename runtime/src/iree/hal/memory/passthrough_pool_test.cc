@@ -180,15 +180,18 @@ static void iree_hal_test_opaque_slab_provider_query_stats(
 
 static void iree_hal_test_opaque_slab_provider_query_properties(
     const iree_hal_slab_provider_t* base_provider,
-    iree_hal_memory_type_t* out_memory_type,
-    iree_hal_buffer_usage_t* out_supported_usage) {
-  *out_memory_type =
+    iree_hal_slab_provider_properties_t* out_properties) {
+  out_properties->memory_type =
       IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
       IREE_HAL_MEMORY_TYPE_HOST_COHERENT | IREE_HAL_MEMORY_TYPE_HOST_CACHED;
-  *out_supported_usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
-                         IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
-                         IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED |
-                         IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT;
+  out_properties->supported_usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
+                                    IREE_HAL_BUFFER_USAGE_STORAGE |
+                                    IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED |
+                                    IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT;
+  out_properties->atomic_operations.device_scope_32 =
+      IREE_HAL_ATOMIC_OPERATION_FLAG_STORE;
+  out_properties->atomic_operations.system_scope_64 =
+      IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_OR;
 }
 
 const iree_hal_slab_provider_vtable_t
@@ -372,7 +375,7 @@ TEST_F(PassthroughPoolTest,
   EXPECT_EQ(stats.slab_count, 0u);
 }
 
-TEST(PassthroughPool, WrapReservationUsesProviderHook) {
+TEST(PassthroughPool, UsesProviderHooks) {
   iree_allocator_t allocator = iree_allocator_system();
   iree_hal_slab_provider_t* slab_provider = NULL;
   IREE_ASSERT_OK(
@@ -385,6 +388,13 @@ TEST(PassthroughPool, WrapReservationUsesProviderHook) {
   iree_hal_passthrough_pool_options_t options = {};
   IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
       options, slab_provider, notification, allocator, &pool));
+
+  iree_hal_pool_capabilities_t capabilities;
+  iree_hal_pool_query_capabilities(pool, &capabilities);
+  EXPECT_EQ(capabilities.atomic_operations.device_scope_32,
+            IREE_HAL_ATOMIC_OPERATION_FLAG_STORE);
+  EXPECT_EQ(capabilities.atomic_operations.system_scope_64,
+            IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_OR);
 
   iree_hal_pool_reservation_t reservation;
   iree_hal_pool_acquire_info_t reserve_info;

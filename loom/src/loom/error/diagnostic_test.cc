@@ -291,8 +291,8 @@ TEST(Diagnostic, RelatedLocationsFormatAsNotes) {
   EXPECT_NE(output.find("test.loom:2:1: error [DOMINANCE/002]"),
             std::string::npos)
       << "output: " << output;
-  EXPECT_NE(output.find("use of consumed value 'arg' (consumed by tied "
-                        "result of 'test.invoke')"),
+  EXPECT_NE(output.find("use of consumed value 'arg' after ownership transfer "
+                        "by 'test.invoke'"),
             std::string::npos)
       << "output: " << output;
   EXPECT_NE(output.find("  = note[consumed here]: test.loom:1:1"),

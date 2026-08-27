@@ -1,0 +1,17 @@
+config.def @configuration_dependency = 1 : index
+
+func.def @implementation_dependency() {
+  func.return
+}
+
+kernel.def @target(%count: index) {
+  %configured = config.get @configuration_dependency : index
+  kernel.launch.config workgroups(%configured, %configured, %configured) workgroup_size(%configured, %configured, %configured) : index
+} launch() {
+  func.call @implementation_dependency() : ()
+  kernel.return
+}
+
+func.def @interleaved_dependency() {
+  func.return
+}

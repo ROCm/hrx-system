@@ -4,11 +4,28 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:python.bzl", "iree_py_library")
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
+load(
+    "//build_tools/spirv:registry_sources.bzl",
+    "loom_spirv_registry_sources",
+)
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_config_compatible_with",
+)
 
 package(
     default_visibility = ["//visibility:public"],
     licenses = ["notice"],  # Apache 2.0
+)
+
+_SPIRV_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target/arch:spirv",
+])
+
+loom_spirv_registry_sources(
+    name = "registry_sources",
+    target_compatible_with = _SPIRV_COMPATIBLE_WITH,
 )
 
 iree_py_library(
@@ -20,6 +37,28 @@ iree_py_library(
     deps = [
         "//loom/py/loom:core",
         "//loom/py/loom/dialect/target",
+    ],
+)
+
+iree_py_test(
+    name = "dialect_test",
+    size = "small",
+    srcs = ["dialect_test.py"],
+    args = [
+        "$(location //loom/src/loom/target/arch/spirv:scalar_types.h)",
+        "$(location //loom/src/loom/target/arch/spirv:isa.h)",
+        "$(location @spirv_headers//:spirv_core_grammar_unified1)",
+    ],
+    data = [
+        "//loom/src/loom/target/arch/spirv:isa.h",
+        "//loom/src/loom/target/arch/spirv:scalar_types.h",
+        "@spirv_headers//:spirv_core_grammar_unified1",
+    ],
+    target_compatible_with = _SPIRV_COMPATIBLE_WITH,
+    deps = [
+        ":dialect",
+        "//build_tools/spirv/registry:spirv_core_grammar",
+        "//loom/py/loom/format/text",
     ],
 )
 
@@ -41,11 +80,43 @@ iree_py_library(
         ":builtins",
         ":cooperative_matrix",
         ":features",
+        ":ordinary_vector",
+        ":ordinary_vector_bit_layout",
+        ":ordinary_vector_integer",
+        ":ordinary_vector_integer_conversion",
         ":scalar_alu",
+        ":scalar_constant",
         ":scalar_conversion",
         ":scalar_memory",
+        "//loom/py/loom:core",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch:package",
+    ],
+)
+
+iree_py_test(
+    name = "descriptors_test",
+    size = "small",
+    srcs = [
+        "descriptors_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.spirv.descriptors_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":builtins",
+        ":cooperative_matrix",
+        ":descriptors",
+        ":ordinary_vector",
+        ":ordinary_vector_bit_layout",
+        ":ordinary_vector_integer",
+        ":ordinary_vector_integer_conversion",
+        ":scalar_alu",
+        ":scalar_constant",
+        ":scalar_conversion",
+        ":scalar_memory",
+        "//loom/py/loom:core",
+        "//loom/py/loom/target:low_descriptors",
     ],
 )
 
@@ -84,6 +155,122 @@ iree_py_library(
 )
 
 iree_py_library(
+    name = "ordinary_vector",
+    srcs = [
+        "__init__.py",
+        "ordinary_vector.py",
+    ],
+    deps = [
+        ":features",
+        ":scalar_alu",
+        ":scalar_constant",
+    ],
+)
+
+iree_py_test(
+    name = "ordinary_vector_test",
+    size = "small",
+    srcs = [
+        "ordinary_vector_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.spirv.ordinary_vector_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":ordinary_vector",
+    ],
+)
+
+iree_py_library(
+    name = "ordinary_vector_bit_layout",
+    srcs = [
+        "__init__.py",
+        "ordinary_vector_bit_layout.py",
+    ],
+    deps = [
+        ":ordinary_vector",
+        ":scalar_conversion",
+    ],
+)
+
+iree_py_test(
+    name = "ordinary_vector_bit_layout_test",
+    size = "small",
+    srcs = [
+        "ordinary_vector_bit_layout_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.spirv.ordinary_vector_bit_layout_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":ordinary_vector",
+        ":ordinary_vector_bit_layout",
+        ":ordinary_vector_integer",
+        ":ordinary_vector_integer_conversion",
+        ":scalar_conversion",
+    ],
+)
+
+iree_py_library(
+    name = "ordinary_vector_integer",
+    srcs = [
+        "__init__.py",
+        "ordinary_vector_integer.py",
+    ],
+    deps = [
+        ":ordinary_vector",
+        ":scalar_alu",
+    ],
+)
+
+iree_py_test(
+    name = "ordinary_vector_integer_test",
+    size = "small",
+    srcs = [
+        "ordinary_vector_integer_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.spirv.ordinary_vector_integer_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":features",
+        ":ordinary_vector",
+        ":ordinary_vector_integer",
+    ],
+)
+
+iree_py_library(
+    name = "ordinary_vector_integer_conversion",
+    srcs = [
+        "__init__.py",
+        "ordinary_vector_integer_conversion.py",
+    ],
+    deps = [
+        ":ordinary_vector",
+        ":ordinary_vector_integer",
+        ":scalar_alu",
+        ":scalar_conversion",
+    ],
+)
+
+iree_py_test(
+    name = "ordinary_vector_integer_conversion_test",
+    size = "small",
+    srcs = [
+        "ordinary_vector_integer_conversion_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.spirv.ordinary_vector_integer_conversion_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":ordinary_vector",
+        ":ordinary_vector_integer",
+        ":ordinary_vector_integer_conversion",
+        ":scalar_conversion",
+    ],
+)
+
+iree_py_library(
     name = "scalar_memory",
     srcs = [
         "__init__.py",
@@ -102,6 +289,32 @@ iree_py_library(
     ],
     deps = [
         ":features",
+    ],
+)
+
+iree_py_library(
+    name = "scalar_constant",
+    srcs = [
+        "__init__.py",
+        "scalar_constant.py",
+    ],
+    deps = [
+        ":features",
+        ":scalar_alu",
+    ],
+)
+
+iree_py_test(
+    name = "scalar_constant_test",
+    size = "small",
+    srcs = [
+        "scalar_constant_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.spirv.scalar_constant_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":scalar_constant",
     ],
 )
 

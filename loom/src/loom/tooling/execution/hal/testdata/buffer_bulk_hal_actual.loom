@@ -1,0 +1,120 @@
+kernel.def @buffer_copy_bytes() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%source: buffer, %source_offset: offset, %target: buffer, %target_offset: offset, %byte_length: offset) {
+  buffer.copy %source[%source_offset], %target[%target_offset], %byte_length
+  kernel.return
+}
+
+kernel.def @buffer_fill_bytes() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%target: buffer, %target_offset: offset, %byte_length: offset) {
+  %pattern = scalar.constant 67305985 : i32
+  buffer.fill %pattern, %target[%target_offset], %byte_length : i32
+  kernel.return
+}
+
+kernel.def @buffer_compare_bytes() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%lhs: buffer, %rhs: buffer, %unsigned_input: buffer, %result: buffer, %byte_length: offset) {
+  %c0 = index.constant 0 : offset
+  %c1 = index.constant 1 : offset
+  %c2 = index.constant 2 : offset
+  %result_aligned = buffer.assume.alignment %result {minimum_alignment = 4} : buffer
+  %result_view = buffer.view %result_aligned[%c0] : buffer -> view<4xi32>
+  // Make the first two bytes equal while preserving opposite ordering in the
+  // two trailing bytes. Comparison must stop at the first mismatch.
+  buffer.copy %lhs[%c0], %rhs[%c0], %c2
+  %less = buffer.compare %lhs[%c0], %rhs[%c0], %byte_length
+  %equal = buffer.compare %lhs[%c0], %lhs[%c0], %byte_length
+  %greater = buffer.compare %rhs[%c0], %lhs[%c0], %byte_length
+  %unsigned_greater = buffer.compare %unsigned_input[%c0], %unsigned_input[%c1], %c1
+  view.store %less, %result_view[0] : i32, view<4xi32>
+  view.store %equal, %result_view[1] : i32, view<4xi32>
+  view.store %greater, %result_view[2] : i32, view<4xi32>
+  view.store %unsigned_greater, %result_view[3] : i32, view<4xi32>
+  kernel.return
+}
+
+kernel.def @buffer_zero_length_ranges() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%source: buffer, %target: buffer, %result: buffer, %end_offset: offset, %zero_length: offset) {
+  %pattern = scalar.constant -1 : i32
+  buffer.copy %source[%end_offset], %target[%end_offset], %zero_length
+  buffer.fill %pattern, %target[%end_offset], %zero_length : i32
+  %order = buffer.compare %source[%end_offset], %target[%end_offset], %zero_length
+  %c0 = index.constant 0 : offset
+  %result_aligned = buffer.assume.alignment %result {minimum_alignment = 4} : buffer
+  %result_view = buffer.view %result_aligned[%c0] : buffer -> view<1xi32>
+  view.store %order, %result_view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+check.case @buffer_copy_bytes_case {
+  %source = check.generate.iota offset(-12) step(1) : tensor<24xi8>
+  %target = check.generate.fill value(99) : tensor<24xi8>
+  %source_offset = check.literal value(3) : offset
+  %target_offset = check.literal value(5) : offset
+  %byte_length = check.literal value(13) : offset
+  kernel.launch @buffer_copy_bytes(%source, %source_offset, %target, %target_offset, %byte_length) : (tensor<24xi8>, offset, tensor<24xi8>, offset, offset)
+  %prefix = check.tensor.view %target offset(0) : tensor<24xi8> -> tensor<5xi8>
+  %copied = check.tensor.view %target offset(5) : tensor<24xi8> -> tensor<13xi8>
+  %suffix = check.tensor.view %target offset(18) : tensor<24xi8> -> tensor<6xi8>
+  %expected_prefix = check.generate.fill value(99) : tensor<5xi8>
+  %expected_copied = check.generate.iota offset(-9) step(1) : tensor<13xi8>
+  %expected_suffix = check.generate.fill value(99) : tensor<6xi8>
+  check.expect.equal actual(%prefix) expected(%expected_prefix) : tensor<5xi8>
+  check.expect.equal actual(%copied) expected(%expected_copied) : tensor<13xi8>
+  check.expect.equal actual(%suffix) expected(%expected_suffix) : tensor<6xi8>
+  check.return
+}
+
+check.case @buffer_fill_bytes_case {
+  %target = check.generate.fill value(-1) : tensor<24xi8>
+  %target_offset = check.literal value(4) : offset
+  %byte_length = check.literal value(17) : offset
+  kernel.launch @buffer_fill_bytes(%target, %target_offset, %byte_length) : (tensor<24xi8>, offset, offset)
+  %prefix = check.tensor.view %target offset(0) : tensor<24xi8> -> tensor<1xi32>
+  %body = check.tensor.view %target offset(4) : tensor<24xi8> -> tensor<4xi32>
+  %tail = check.tensor.view %target offset(20) : tensor<24xi8> -> tensor<1xi32>
+  %expected_prefix = check.generate.fill value(-1) : tensor<1xi32>
+  %expected_body = check.generate.fill value(67305985) : tensor<4xi32>
+  %expected_tail = check.generate.fill value(-255) : tensor<1xi32>
+  check.expect.equal actual(%prefix) expected(%expected_prefix) : tensor<1xi32>
+  check.expect.equal actual(%body) expected(%expected_body) : tensor<4xi32>
+  check.expect.equal actual(%tail) expected(%expected_tail) : tensor<1xi32>
+  check.return
+}
+
+check.case @buffer_compare_bytes_case {
+  %lhs = check.generate.iota offset(1) step(1) : tensor<4xi8>
+  %rhs = check.generate.iota offset(10) step(-3) : tensor<4xi8>
+  %unsigned_input = check.generate.iota offset(-1) step(1) : tensor<2xi8>
+  %result = check.generate.fill value(99) : tensor<4xi32>
+  %byte_length = check.literal value(4) : offset
+  kernel.launch @buffer_compare_bytes(%lhs, %rhs, %unsigned_input, %result, %byte_length) : (tensor<4xi8>, tensor<4xi8>, tensor<2xi8>, tensor<4xi32>, offset)
+  %orders = check.tensor.view %result offset(0) : tensor<4xi32> -> tensor<3xi32>
+  %unsigned_order = check.tensor.view %result offset(12) : tensor<4xi32> -> tensor<1xi32>
+  %expected_orders = check.generate.iota offset(-1) step(1) : tensor<3xi32>
+  %expected_unsigned_order = check.generate.fill value(1) : tensor<1xi32>
+  check.expect.equal actual(%orders) expected(%expected_orders) : tensor<3xi32>
+  check.expect.equal actual(%unsigned_order) expected(%expected_unsigned_order) : tensor<1xi32>
+  check.return
+}
+
+check.case @buffer_zero_length_ranges_case {
+  %source = check.generate.iota offset(-8) step(1) : tensor<17xi8>
+  %target = check.generate.fill value(9) : tensor<17xi8>
+  %result = check.generate.fill value(99) : tensor<1xi32>
+  %end_offset = check.literal value(17) : offset
+  %zero_length = check.literal value(0) : offset
+  kernel.launch @buffer_zero_length_ranges(%source, %target, %result, %end_offset, %zero_length) : (tensor<17xi8>, tensor<17xi8>, tensor<1xi32>, offset, offset)
+  %expected_target = check.generate.fill value(9) : tensor<17xi8>
+  %expected_result = check.generate.fill value(0) : tensor<1xi32>
+  check.expect.equal actual(%target) expected(%expected_target) : tensor<17xi8>
+  check.expect.equal actual(%result) expected(%expected_result) : tensor<1xi32>
+  check.return
+}

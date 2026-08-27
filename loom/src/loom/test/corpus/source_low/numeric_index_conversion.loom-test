@@ -1,0 +1,64 @@
+// RUN: roundtrip
+
+func.def @index_constants() -> (index, index, offset) {
+  %minimum = index.constant -2147483648 : index
+  %maximum = index.constant 2147483647 : index
+  %byte_limit = index.constant 9223372036854775807 : offset
+  func.return %minimum, %maximum, %byte_limit : index, index, offset
+}
+
+// ====
+
+func.def @index_assume_ordinals(%coordinate0: index, %byte_offset0: offset) -> (index, offset) {
+  %coordinate, %byte_offset = index.assume %coordinate0, %byte_offset0 [range(%coordinate0, 0, 1024), range(%byte_offset0, 0, 4096)] : index, offset
+  func.return %coordinate, %byte_offset : index, offset
+}
+
+// ====
+
+func.def @boolean_address_cast_family(%flag: i1, %coordinate: index, %byte_offset: offset) -> (index, offset, i1, i1) {
+  %flag_index = index.cast %flag : i1 to index
+  %flag_offset = index.cast %flag : i1 to offset
+  %index_low_bit = index.cast %coordinate : index to i1
+  %offset_low_bit = index.cast %byte_offset : offset to i1
+  func.return %flag_index, %flag_offset, %index_low_bit, %offset_low_bit : index, offset, i1, i1
+}
+
+// ====
+
+func.def @index_payload_cast_family(%i8: i8, %i16: i16, %i32: i32, %i64_raw: i64, %coordinate: index) -> (index, index, index, index, i8, i16, i32, i64) {
+  %i64 = scalar.assume %i64_raw [range(%i64_raw, -2147483648, 2147483647)] : i64
+  %from_i8 = index.cast %i8 : i8 to index
+  %from_i16 = index.cast %i16 : i16 to index
+  %from_i32 = index.cast %i32 : i32 to index
+  %from_i64 = index.cast %i64 : i64 to index
+  %to_i8 = index.cast %coordinate : index to i8
+  %to_i16 = index.cast %coordinate : index to i16
+  %to_i32 = index.cast %coordinate : index to i32
+  %to_i64 = index.cast %coordinate : index to i64
+  func.return %from_i8, %from_i16, %from_i32, %from_i64, %to_i8, %to_i16, %to_i32, %to_i64 : index, index, index, index, i8, i16, i32, i64
+}
+
+// ====
+
+func.def @offset_payload_cast_family(%i8: i8, %i16: i16, %i32: i32, %i64_raw: i64, %byte_offset: offset) -> (offset, offset, offset, offset, i8, i16, i32, i64) {
+  %i64 = scalar.assume %i64_raw [range(%i64_raw, 0, 9223372036854775807)] : i64
+  %from_i8 = index.cast %i8 : i8 to offset
+  %from_i16 = index.cast %i16 : i16 to offset
+  %from_i32 = index.cast %i32 : i32 to offset
+  %from_i64 = index.cast %i64 : i64 to offset
+  %to_i8 = index.cast %byte_offset : offset to i8
+  %to_i16 = index.cast %byte_offset : offset to i16
+  %to_i32 = index.cast %byte_offset : offset to i32
+  %to_i64 = index.cast %byte_offset : offset to i64
+  func.return %from_i8, %from_i16, %from_i32, %from_i64, %to_i8, %to_i16, %to_i32, %to_i64 : offset, offset, offset, offset, i8, i16, i32, i64
+}
+
+// ====
+
+func.def @address_domain_cast_family(%coordinate0: index, %byte_offset0: offset) -> (offset, index) {
+  %coordinate, %byte_offset = index.assume %coordinate0, %byte_offset0 [range(%coordinate0, 0, 2147483647), range(%byte_offset0, 0, 2147483647)] : index, offset
+  %as_offset = index.cast %coordinate : index to offset
+  %as_index = index.cast %byte_offset : offset to index
+  func.return %as_offset, %as_index : offset, index
+}

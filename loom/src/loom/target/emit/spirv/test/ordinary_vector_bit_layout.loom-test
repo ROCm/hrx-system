@@ -1,0 +1,123 @@
+// RUN: emit spirv-dis validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @ordinary_vector_bit_layout() asm {
+  %one = OpConstant.i32 1
+  %two = OpConstant.i32 2
+  %three = OpConstant.i32 3
+  %four = OpConstant.i32 4
+
+  %lane_change_source = OpCompositeConstruct.v4i32 %one, %two, %three, %four
+  %lane_change_packed = OpBitcast.v4i32.v2i64 %lane_change_source
+  %lane_change_result = OpBitcast.v2i64.v4i32 %lane_change_packed
+  %lane_change_first = OpCompositeExtract.v4i32.i32 %lane_change_result, 0
+  %lane_change_last = OpCompositeExtract.v4i32.i32 %lane_change_result, 3
+
+  %scalar_change_source = OpCompositeConstruct.v2i32 %one, %two
+  %scalar_change_packed = OpBitcast.v2i32.i64 %scalar_change_source
+  %scalar_change_result = OpBitcast.i64.v2i32 %scalar_change_packed
+  %scalar_change_last = OpCompositeExtract.v2i32.i32 %scalar_change_result, 1
+
+  %same_lanes_source = OpCompositeConstruct.v3i32 %one, %two, %three
+  %same_lanes_float = OpBitcast.v3i32.v3f32 %same_lanes_source
+  %same_lanes_result = OpBitcast.v3f32.v3i32 %same_lanes_float
+  %same_lanes_last = OpCompositeExtract.v3i32.i32 %same_lanes_result, 2
+
+  %first_ok = OpIEqual %lane_change_first, %one
+  %last_ok = OpIEqual %lane_change_last, %four
+  %scalar_change_ok = OpIEqual %scalar_change_last, %two
+  %same_lanes_ok = OpIEqual %same_lanes_last, %three
+  %lane_change_ok = OpLogicalAnd.bool %first_ok, %last_ok
+  %shape_change_ok = OpLogicalAnd.bool %lane_change_ok, %scalar_change_ok
+  %all_ok = OpLogicalAnd.bool %shape_change_ok, %same_lanes_ok
+  low.scf.if %all_ok {
+    OpControlBarrier.workgroup.workgroup.acq_rel
+  }
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %ordinary_vector_bit_layout "ordinary_vector_bit_layout"
+               OpExecutionMode %ordinary_vector_bit_layout LocalSize 1 1 1
+               OpName %ordinary_vector_bit_layout "ordinary_vector_bit_layout"
+               OpName %one "one"
+               OpName %two "two"
+               OpName %three "three"
+               OpName %four "four"
+               OpName %lane_change_source "lane_change_source"
+               OpName %lane_change_packed "lane_change_packed"
+               OpName %lane_change_result "lane_change_result"
+               OpName %lane_change_first "lane_change_first"
+               OpName %lane_change_last "lane_change_last"
+               OpName %scalar_change_source "scalar_change_source"
+               OpName %scalar_change_packed "scalar_change_packed"
+               OpName %scalar_change_result "scalar_change_result"
+               OpName %scalar_change_last "scalar_change_last"
+               OpName %same_lanes_source "same_lanes_source"
+               OpName %same_lanes_float "same_lanes_float"
+               OpName %same_lanes_result "same_lanes_result"
+               OpName %same_lanes_last "same_lanes_last"
+               OpName %first_ok "first_ok"
+               OpName %last_ok "last_ok"
+               OpName %scalar_change_ok "scalar_change_ok"
+               OpName %same_lanes_ok "same_lanes_ok"
+               OpName %lane_change_ok "lane_change_ok"
+               OpName %shape_change_ok "shape_change_ok"
+               OpName %all_ok "all_ok"
+       %void = OpTypeVoid
+          %3 = OpTypeFunction %void
+        %int = OpTypeInt 32 1
+        %one = OpConstant %int 1
+        %two = OpConstant %int 2
+      %three = OpConstant %int 3
+       %four = OpConstant %int 4
+      %v4int = OpTypeVector %int 4
+       %long = OpTypeInt 64 1
+     %v2long = OpTypeVector %long 2
+      %v2int = OpTypeVector %int 2
+      %v3int = OpTypeVector %int 3
+      %float = OpTypeFloat 32
+    %v3float = OpTypeVector %float 3
+       %bool = OpTypeBool
+       %uint = OpTypeInt 32 0
+     %uint_2 = OpConstant %uint 2
+   %uint_264 = OpConstant %uint 264
+%ordinary_vector_bit_layout = OpFunction %void None %3
+          %4 = OpLabel
+%lane_change_source = OpCompositeConstruct %v4int %one %two %three %four
+%lane_change_packed = OpBitcast %v2long %lane_change_source
+%lane_change_result = OpBitcast %v4int %lane_change_packed
+%lane_change_first = OpCompositeExtract %int %lane_change_result 0
+%lane_change_last = OpCompositeExtract %int %lane_change_result 3
+%scalar_change_source = OpCompositeConstruct %v2int %one %two
+%scalar_change_packed = OpBitcast %long %scalar_change_source
+%scalar_change_result = OpBitcast %v2int %scalar_change_packed
+%scalar_change_last = OpCompositeExtract %int %scalar_change_result 1
+%same_lanes_source = OpCompositeConstruct %v3int %one %two %three
+%same_lanes_float = OpBitcast %v3float %same_lanes_source
+%same_lanes_result = OpBitcast %v3int %same_lanes_float
+%same_lanes_last = OpCompositeExtract %int %same_lanes_result 2
+   %first_ok = OpIEqual %bool %lane_change_first %one
+    %last_ok = OpIEqual %bool %lane_change_last %four
+%scalar_change_ok = OpIEqual %bool %scalar_change_last %two
+%same_lanes_ok = OpIEqual %bool %same_lanes_last %three
+%lane_change_ok = OpLogicalAnd %bool %first_ok %last_ok
+%shape_change_ok = OpLogicalAnd %bool %lane_change_ok %scalar_change_ok
+     %all_ok = OpLogicalAnd %bool %shape_change_ok %same_lanes_ok
+               OpSelectionMerge %39 None
+               OpBranchConditional %all_ok %38 %39
+         %38 = OpLabel
+               OpControlBarrier %uint_2 %uint_2 %uint_264
+               OpBranch %39
+         %39 = OpLabel
+               OpReturn
+               OpFunctionEnd

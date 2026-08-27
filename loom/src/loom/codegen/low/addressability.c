@@ -6,101 +6,10 @@
 
 #include "loom/codegen/low/addressability.h"
 
-#include <inttypes.h>
-
+#include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/error/error_catalog.h"
-
-typedef struct loom_low_addressability_packet_field_t {
-  // SSA value ordinal named by this descriptor operand.
-  loom_value_ordinal_t value_ordinal;
-  // Field reference for source diagnostics.
-  loom_diagnostic_field_ref_t field_ref;
-  // True when the descriptor operand maps to an explicit packet value.
-  bool has_value;
-} loom_low_addressability_packet_field_t;
-
-static bool loom_low_addressability_location_is_register_like(
-    loom_low_allocation_location_kind_t location_kind) {
-  return location_kind == LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER ||
-         location_kind == LOOM_LOW_ALLOCATION_LOCATION_TARGET_ID;
-}
-
-static bool loom_low_addressability_descriptor_operand_is_explicit_value(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor,
-    uint16_t descriptor_operand_index) {
-  const loom_low_operand_t* operand =
-      &descriptor_set
-           ->operands[descriptor->operand_start + descriptor_operand_index];
-  return loom_low_operand_role_is_packet_operand(operand->role) &&
-         !iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_IMPLICIT);
-}
-
-static iree_status_t loom_low_addressability_packet_field_for_operand(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_packet_view_t* packet, uint16_t descriptor_operand_index,
-    loom_low_addressability_packet_field_t* out_field) {
-  *out_field = (loom_low_addressability_packet_field_t){
-      .value_ordinal = LOOM_VALUE_ORDINAL_INVALID,
-  };
-  const loom_low_descriptor_t* descriptor = packet->descriptor;
-  if (descriptor_operand_index >= descriptor->operand_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "addressability descriptor operand index %" PRIu16
-                            " exceeds operand count %" PRIu16,
-                            descriptor_operand_index,
-                            descriptor->operand_count);
-  }
-  if (descriptor_operand_index < descriptor->result_count) {
-    if (descriptor_operand_index >= packet->node->result_count) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "addressability descriptor result index %" PRIu16
-                              " exceeds packet result count %" PRIu16,
-                              descriptor_operand_index,
-                              packet->node->result_count);
-    }
-    const loom_value_ordinal_t* result_ordinals =
-        loom_low_schedule_node_const_result_ordinals(packet->node);
-    *out_field = (loom_low_addressability_packet_field_t){
-        .value_ordinal = result_ordinals[descriptor_operand_index],
-        .field_ref = loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_RESULT,
-                                               descriptor_operand_index),
-        .has_value = true,
-    };
-    return iree_ok_status();
-  }
-  if (!loom_low_addressability_descriptor_operand_is_explicit_value(
-          descriptor_set, descriptor, descriptor_operand_index)) {
-    return iree_ok_status();
-  }
-  uint16_t packet_operand_index = 0;
-  for (uint16_t i = descriptor->result_count; i < descriptor_operand_index;
-       ++i) {
-    if (loom_low_addressability_descriptor_operand_is_explicit_value(
-            descriptor_set, descriptor, i)) {
-      ++packet_operand_index;
-    }
-  }
-  if (packet_operand_index >= packet->node->operand_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "addressability descriptor operand index %" PRIu16
-                            " maps to packet operand %" PRIu16
-                            " but packet has %" PRIu16 " operand(s)",
-                            descriptor_operand_index, packet_operand_index,
-                            packet->node->operand_count);
-  }
-  const loom_value_ordinal_t* operand_ordinals =
-      loom_low_schedule_node_const_operand_ordinals(packet->node);
-  *out_field = (loom_low_addressability_packet_field_t){
-      .value_ordinal = operand_ordinals[packet_operand_index],
-      .field_ref = loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND,
-                                             packet_operand_index),
-      .has_value = true,
-  };
-  return iree_ok_status();
-}
 
 static bool loom_low_addressability_assignment_exceeds_operand_range(
     const loom_low_operand_t* operand,
@@ -128,7 +37,7 @@ static iree_status_t loom_low_addressability_emit_error(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_view_t* packet, const loom_low_operand_t* operand,
-    const loom_low_addressability_packet_field_t* field,
+    loom_diagnostic_field_ref_t field_ref,
     const loom_low_allocation_assignment_t* assignment,
     iree_diagnostic_emitter_t emitter,
     loom_low_addressability_validation_result_t* result) {
@@ -151,8 +60,7 @@ static iree_status_t loom_low_addressability_emit_error(
           schedule->module, schedule->function_op)),
       loom_param_string(packet_key),
       loom_param_u32((uint32_t)packet->packet_index),
-      loom_param_with_field_ref(loom_param_string(operand_field),
-                                field->field_ref),
+      loom_param_with_field_ref(loom_param_string(operand_field), field_ref),
       loom_param_string(loom_low_diagnostic_value_name(allocation->module,
                                                        assignment->value_id)),
       loom_param_string(loom_low_diagnostic_value_class_name(
@@ -183,31 +91,14 @@ static iree_status_t loom_low_addressability_validate_operand(
   const loom_low_descriptor_t* descriptor = packet->descriptor;
   const uint32_t operand_row =
       descriptor->operand_start + descriptor_operand_index;
-  if (operand_row >= descriptor_set->operand_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "addressability descriptor operand row %" PRIu32
-                            " is out of range",
-                            operand_row);
-  }
   const loom_low_operand_t* operand = &descriptor_set->operands[operand_row];
   if (!loom_low_operand_requires_low_window_assignment(operand)) {
     return iree_ok_status();
   }
-  loom_low_addressability_packet_field_t field = {0};
-  IREE_RETURN_IF_ERROR(loom_low_addressability_packet_field_for_operand(
-      descriptor_set, packet, descriptor_operand_index, &field));
-  if (!field.has_value) {
-    return iree_ok_status();
-  }
   const loom_low_allocation_assignment_t* assignment =
-      loom_low_allocation_assignment_for_value_ordinal(
-          allocation, field.value_ordinal, /*out_assignment_index=*/NULL);
-  if (assignment == NULL) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "addressability packet operand has no allocation "
-                            "assignment");
-  }
-  if (!loom_low_addressability_location_is_register_like(
+      loom_low_packet_descriptor_operand_assignment(allocation, packet,
+                                                    descriptor_operand_index);
+  if (!loom_low_allocation_location_kind_is_register_like(
           assignment->location_kind)) {
     return iree_ok_status();
   }
@@ -215,8 +106,13 @@ static iree_status_t loom_low_addressability_validate_operand(
                                                                 assignment)) {
     return iree_ok_status();
   }
+  const loom_diagnostic_field_ref_t field_ref = loom_diagnostic_field_ref(
+      descriptor_operand_index < descriptor->result_count
+          ? LOOM_DIAGNOSTIC_FIELD_RESULT
+          : LOOM_DIAGNOSTIC_FIELD_OPERAND,
+      operand->source_value_index);
   return loom_low_addressability_emit_error(schedule, allocation, packet,
-                                            operand, &field, assignment,
+                                            operand, field_ref, assignment,
                                             emitter, result);
 }
 
@@ -241,13 +137,11 @@ iree_status_t loom_low_addressability_validate_allocated_packets(
     iree_diagnostic_emitter_t emitter,
     loom_low_addressability_validation_result_t* out_result) {
   *out_result = (loom_low_addressability_validation_result_t){0};
-  IREE_RETURN_IF_ERROR(loom_low_packet_validate_tables(schedule, allocation));
   const iree_host_size_t packet_count = loom_low_packet_count(schedule);
   for (iree_host_size_t packet_index = 0; packet_index < packet_count;
        ++packet_index) {
-    loom_low_packet_view_t packet = {0};
-    IREE_RETURN_IF_ERROR(
-        loom_low_packet_view_at(schedule, allocation, packet_index, &packet));
+    const loom_low_packet_view_t packet =
+        loom_low_packet_at(schedule, packet_index);
     IREE_RETURN_IF_ERROR(loom_low_addressability_validate_packet(
         schedule, allocation, &packet, emitter, out_result));
   }

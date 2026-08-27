@@ -628,6 +628,7 @@ hip_7.14 {
 HRX_0.1 {
   global:
     hipHALDeinit;
+    hipHRXSetDeviceEventSink;
   local:
     *;
 };

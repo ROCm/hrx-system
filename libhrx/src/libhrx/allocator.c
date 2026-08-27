@@ -212,10 +212,13 @@ hrx_status_t hrx_allocator_virtual_memory_release(hrx_allocator_t allocator,
   }
   iree_status_t status = iree_hal_allocator_virtual_memory_release(
       allocator->hal_allocator, virtual_buffer->hal_buffer);
-  // Free the hrx wrapper (hal_buffer ownership transferred).
-  virtual_buffer->hal_buffer = NULL;
-  hrx_device_release(virtual_buffer->device);
-  iree_allocator_free(iree_allocator_system(), virtual_buffer);
+  if (iree_status_is_ok(status)) {
+    // Release consumes the HAL buffer only on success. Keep the wrapper usable
+    // when active mappings prevent release so the caller can unmap and retry.
+    virtual_buffer->hal_buffer = NULL;
+    hrx_device_release(virtual_buffer->device);
+    iree_allocator_free(iree_allocator_system(), virtual_buffer);
+  }
   HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
 }
 

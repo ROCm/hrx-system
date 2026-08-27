@@ -49,6 +49,7 @@
 #define GGUF_MIN_VERSION 2
 #define GGUF_MAX_VERSION 3
 #define GGUF_DEFAULT_ALIGNMENT 32
+#define GGUF_ALIGNMENT_MULTIPLE 8u
 
 enum ggml_type_e {
   GGML_TYPE_F32 = 0,
@@ -65,10 +66,30 @@ enum ggml_type_e {
   GGML_TYPE_Q5_K = 13,
   GGML_TYPE_Q6_K = 14,
   GGML_TYPE_Q8_K = 15,
-  GGML_TYPE_I8 = 16,
-  GGML_TYPE_I16 = 17,
-  GGML_TYPE_I32 = 18,
-  GGML_TYPE_COUNT,
+  GGML_TYPE_IQ2_XXS = 16,
+  GGML_TYPE_IQ2_XS = 17,
+  GGML_TYPE_IQ3_XXS = 18,
+  GGML_TYPE_IQ1_S = 19,
+  GGML_TYPE_IQ4_NL = 20,
+  GGML_TYPE_IQ3_S = 21,
+  GGML_TYPE_IQ2_S = 22,
+  GGML_TYPE_IQ4_XS = 23,
+  GGML_TYPE_I8 = 24,
+  GGML_TYPE_I16 = 25,
+  GGML_TYPE_I32 = 26,
+  GGML_TYPE_I64 = 27,
+  GGML_TYPE_F64 = 28,
+  GGML_TYPE_IQ1_M = 29,
+  GGML_TYPE_BF16 = 30,
+  // Types 31-33 were removed from the GGUF file format.
+  GGML_TYPE_TQ1_0 = 34,
+  GGML_TYPE_TQ2_0 = 35,
+  // Types 36-38 were removed from the GGUF file format.
+  GGML_TYPE_MXFP4 = 39,
+  GGML_TYPE_NVFP4 = 40,
+  GGML_TYPE_Q1_0 = 41,
+  GGML_TYPE_Q2_0 = 42,
+  GGML_TYPE_COUNT = 43,
 };
 typedef uint32_t ggml_type_t;
 
@@ -196,12 +217,27 @@ static const ggml_type_traits_t ggml_type_traits[GGML_TYPE_COUNT] = {
             .blck_size = 1,
             .type_size = sizeof(int32_t),
         },
+    [GGML_TYPE_I64] =
+        {
+            .blck_size = 1,
+            .type_size = sizeof(int64_t),
+        },
     [GGML_TYPE_F32] =
         {
             .blck_size = 1,
             .type_size = sizeof(float),
         },
     [GGML_TYPE_F16] =
+        {
+            .blck_size = 1,
+            .type_size = sizeof(uint16_t),
+        },
+    [GGML_TYPE_F64] =
+        {
+            .blck_size = 1,
+            .type_size = sizeof(double),
+        },
+    [GGML_TYPE_BF16] =
         {
             .blck_size = 1,
             .type_size = sizeof(uint16_t),
@@ -376,10 +412,15 @@ typedef struct {
 //   uint64_t offset;
 // };
 typedef struct {
+  // Tensor name referencing the mapped file contents.
   iree_string_view_t name;
-  uint32_t n_dimensions;
-  const uint64_t* dimensions;  // n_dimensions
+  // Number of encoded uint64_t dimension values.
+  uint32_t dimension_count;
+  // Little-endian dimension values referencing byte-aligned file contents.
+  const uint8_t* dimension_data;
+  // GGML tensor element type.
   ggml_type_t type;
+  // Byte offset within the tensor data region.
   uint64_t offset;
 } gguf_tensor_info_t;
 
@@ -410,21 +451,57 @@ typedef struct iree_io_gguf_parser_t {
   uint64_t tensor_data_size;
 } iree_io_gguf_parser_t;
 
+// Aligns |value| up to an arbitrary nonzero |alignment| while checking for
+// overflow.
+static bool iree_io_gguf_checked_align_u64(uint64_t value, uint32_t alignment,
+                                           uint64_t* out_aligned_value) {
+  const uint64_t remainder = value % alignment;
+  const uint64_t padding = remainder == 0 ? 0 : alignment - remainder;
+  return iree_checked_add_u64(value, padding, out_aligned_value);
+}
+
+// Returns the strongest power-of-two alignment guaranteed by |alignment|.
+static uint64_t iree_io_gguf_power_of_two_alignment(uint32_t alignment) {
+  return alignment & (~alignment + 1u);
+}
+
 static iree_status_t iree_io_gguf_calculate_storage_size(
     const gguf_tensor_info_t* tensor_info, uint64_t* out_storage_size) {
   *out_storage_size = 0;
-  uint64_t element_count = 1;
-  for (uint32_t i = 0; i < tensor_info->n_dimensions; ++i) {
-    element_count *= tensor_info->dimensions[i];
-  }
-  if (tensor_info->type < 0 || tensor_info->type >= GGML_TYPE_COUNT) {
+  if (tensor_info->type >= GGML_TYPE_COUNT) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "GGML tensor type %d not supported",
                             (int)tensor_info->type);
   }
   const ggml_type_traits_t type_traits = ggml_type_traits[tensor_info->type];
-  *out_storage_size =
-      (element_count * type_traits.type_size) / type_traits.blck_size;
+  if (type_traits.blck_size == 0 || type_traits.type_size == 0) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "GGML tensor type %d not supported",
+                            (int)tensor_info->type);
+  }
+
+  uint64_t element_count = 1;
+  for (uint32_t i = 0; i < tensor_info->dimension_count; ++i) {
+    const uint64_t dimension = iree_unaligned_load_le_u64(
+        tensor_info->dimension_data + i * sizeof(uint64_t));
+    if (!iree_checked_mul_u64(element_count, dimension, &element_count)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "GGML tensor element count overflow");
+    }
+  }
+  if (element_count % (uint64_t)type_traits.blck_size != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "GGML tensor element count %" PRIu64
+                            " is not divisible by type %d block size %d",
+                            element_count, (int)tensor_info->type,
+                            type_traits.blck_size);
+  }
+  const uint64_t block_count = element_count / (uint64_t)type_traits.blck_size;
+  if (!iree_checked_mul_u64(block_count, (uint64_t)type_traits.type_size,
+                            out_storage_size)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "GGML tensor storage size overflow");
+  }
   return iree_ok_status();
 }
 
@@ -443,18 +520,36 @@ static iree_status_t iree_io_gguf_parse_value(iree_const_byte_span_t* contents,
 }
 static iree_status_t iree_io_gguf_parse_uint32(iree_const_byte_span_t* contents,
                                                uint32_t* out_value) {
-  return iree_io_gguf_parse_value(contents, sizeof(*out_value), out_value);
+  if (contents->data_length < sizeof(*out_value)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "file buffer underrun parsing uint32 value");
+  }
+  *out_value = iree_unaligned_load_le_u32(contents->data);
+  contents->data += sizeof(*out_value);
+  contents->data_length -= sizeof(*out_value);
+  return iree_ok_status();
 }
 static iree_status_t iree_io_gguf_parse_uint64(iree_const_byte_span_t* contents,
                                                uint64_t* out_value) {
-  return iree_io_gguf_parse_value(contents, sizeof(*out_value), out_value);
+  if (contents->data_length < sizeof(*out_value)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "file buffer underrun parsing uint64 value");
+  }
+  *out_value = iree_unaligned_load_le_u64(contents->data);
+  contents->data += sizeof(*out_value);
+  contents->data_length -= sizeof(*out_value);
+  return iree_ok_status();
 }
 
 static iree_status_t iree_io_gguf_parse_array(iree_const_byte_span_t* contents,
                                               uint64_t element_count,
                                               uint64_t element_size,
                                               const uint8_t** out_base_ptr) {
-  uint64_t total_length = element_count * element_size;
+  uint64_t total_length = 0;
+  if (!iree_checked_mul_u64(element_count, element_size, &total_length)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "GGUF array byte length overflow");
+  }
   if (total_length > IREE_HOST_SIZE_MAX) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "attempting to load a 64-bit file on a 32-bit arch "
@@ -479,9 +574,12 @@ static iree_status_t iree_io_gguf_parse_string(iree_const_byte_span_t* contents,
                             "attempting to load a 64-bit file on a 32-bit arch "
                             "(out of bounds string length)");
   }
-  out_value->size = (iree_host_size_t)length;
-  return iree_io_gguf_parse_array(contents, length, sizeof(char),
-                                  (const uint8_t**)&out_value->data);
+  const uint8_t* value_data = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_io_gguf_parse_array(contents, length, sizeof(char), &value_data));
+  *out_value =
+      iree_make_string_view((const char*)value_data, (iree_host_size_t)length);
+  return iree_ok_status();
 }
 
 static iree_status_t iree_io_gguf_skip_metadata_array(
@@ -582,10 +680,10 @@ static iree_status_t iree_io_gguf_enumerate_tensor_info(
     IREE_RETURN_IF_ERROR(
         iree_io_gguf_parse_string(contents, &tensor_info.name));
     IREE_RETURN_IF_ERROR(
-        iree_io_gguf_parse_uint32(contents, &tensor_info.n_dimensions));
+        iree_io_gguf_parse_uint32(contents, &tensor_info.dimension_count));
     IREE_RETURN_IF_ERROR(iree_io_gguf_parse_array(
-        contents, tensor_info.n_dimensions, sizeof(tensor_info.dimensions[0]),
-        (const uint8_t**)&tensor_info.dimensions));
+        contents, tensor_info.dimension_count, sizeof(uint64_t),
+        &tensor_info.dimension_data));
     IREE_RETURN_IF_ERROR(
         iree_io_gguf_parse_uint32(contents, &tensor_info.type));
     IREE_RETURN_IF_ERROR(
@@ -606,6 +704,13 @@ static iree_status_t iree_io_gguf_parse_metadata(void* user_data,
           IREE_STATUS_INVALID_ARGUMENT,
           "general.alignment metadata value must be uint32");
     }
+    if (kv->value.uint32 == 0 ||
+        kv->value.uint32 % GGUF_ALIGNMENT_MULTIPLE != 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "general.alignment must be a nonzero multiple of %u (got %u)",
+          GGUF_ALIGNMENT_MULTIPLE, kv->value.uint32);
+    }
     parser->alignment = kv->value.uint32;
   }
   return iree_ok_status();
@@ -614,6 +719,12 @@ static iree_status_t iree_io_gguf_parse_metadata(void* user_data,
 static iree_status_t iree_io_gguf_append_tensor_info(
     void* user_data, const gguf_tensor_info_t* tensor_info) {
   iree_io_gguf_parser_t* parser = (iree_io_gguf_parser_t*)user_data;
+  if (tensor_info->offset % parser->alignment != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "tensor offset %" PRIu64
+                            " is not aligned to %u bytes",
+                            tensor_info->offset, parser->alignment);
+  }
 
   // Unfortunately (I've said that a lot here?) the total size of the tensor is
   // not stored and as such we need to calculate it based on the metadata we
@@ -647,6 +758,8 @@ static iree_status_t iree_io_gguf_append_tensor_info(
                   {
                       .handle = parser->file_handle,
                       .offset = parser->tensor_data_offset + begin,
+                      .minimum_alignment = iree_io_gguf_power_of_two_alignment(
+                          parser->alignment),
                   },
           },
   };
@@ -712,9 +825,22 @@ static iree_status_t iree_io_parse_gguf_index_from_memory(
 
   // Calculate where the tensor data begins in the file. This respects the
   // default alignment or the general.alignment specified by the file.
-  parser.tensor_data_offset = iree_align_uint64(
-      (uint64_t)(tensor_info_contents.data - file_contents.data),
-      parser.alignment);
+  const uint64_t unaligned_tensor_data_offset =
+      (uint64_t)(tensor_info_contents.data - file_contents.data);
+  if (!iree_io_gguf_checked_align_u64(unaligned_tensor_data_offset,
+                                      parser.alignment,
+                                      &parser.tensor_data_offset)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "GGUF tensor data offset overflow aligning %" PRIu64
+                            " to %u bytes",
+                            unaligned_tensor_data_offset, parser.alignment);
+  }
+  if (parser.tensor_data_offset > file_contents.data_length) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "GGUF tensor data offset %" PRIu64 " exceeds file length %" PRIhsz,
+        parser.tensor_data_offset, file_contents.data_length);
+  }
   parser.tensor_data_size =
       file_contents.data_length - parser.tensor_data_offset;
 

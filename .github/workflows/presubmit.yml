@@ -14,23 +14,31 @@ on:
       - main
       - main-staging
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   presubmit:
     name: Linux / Presubmit
-    runs-on: aws-linux-scale-rocm-prod
+    runs-on: azure-linux-scale-rocm
     timeout-minutes: 45
     container:
       image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
     env:
+      AR: ${{ github.workspace }}/build/presubmit/rocm-root/lib/llvm/bin/llvm-ar
+      CC: ${{ github.workspace }}/build/presubmit/rocm-root/lib/llvm/bin/clang
+      CXX: ${{ github.workspace }}/build/presubmit/rocm-root/lib/llvm/bin/clang++
       HRX_ARTIFACT_SET: core-with-llvm-dev
       HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/presubmit/downloads
       HRX_OUTPUT_DIR: ${{ github.workspace }}/build/presubmit
       HRX_PYTHON: ${{ github.workspace }}/build/presubmit/python/bin/python3
       HRX_RELEASE_TYPE: nightly
       HRX_ROCM_ROOT: ${{ github.workspace }}/build/presubmit/rocm-root
+      IREE_CLANG_TIDY_LLVM_ROOT: ${{ github.workspace }}/build/presubmit/rocm-root/lib/llvm
       IREE_CLANG_TIDY_REQUIRED: "1"
       PIP_CACHE_DIR: ${{ github.workspace }}/build/presubmit/caches/pip
     steps:
@@ -54,9 +62,10 @@ jobs:
       - name: Check tool versions
         run: |
           python3 dev.py bazel doctor
-          clang-tidy --version
-          llvm-config --version
-          clang++ --version
+          bash .github/scripts/check_host_toolchain.sh --expect-rocm
+          "${IREE_CLANG_TIDY_LLVM_ROOT}/bin/clang-tidy" --version
+          "${IREE_CLANG_TIDY_LLVM_ROOT}/bin/llvm-config" --version
+          "${IREE_CLANG_TIDY_LLVM_ROOT}/bin/clang++" --version
           test -d "${HRX_ROCM_ROOT}/lib/llvm/include"
 
       - name: Run presubmit

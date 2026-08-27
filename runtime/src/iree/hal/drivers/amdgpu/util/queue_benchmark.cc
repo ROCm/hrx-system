@@ -29,6 +29,7 @@
 #include "iree/hal/drivers/amdgpu/registration/driver_module.h"
 #include "iree/hal/drivers/amdgpu/semaphore.h"
 #include "iree/hal/drivers/amdgpu/util/benchmark_flags.h"
+#include "iree/hal/executable/amdgpu/executable_target.h"
 #include "iree/hal/memory/tlsf_pool.h"
 #include "iree/io/file_contents.h"
 
@@ -81,8 +82,7 @@ enum class QueueAllocaTlsfGrowthMode : int64_t {
 };
 
 constexpr iree_hal_buffer_params_t kQueueAllocaBufferParams = {
-    /*usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER |
-        IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
+    /*usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE,
     /*access=*/IREE_HAL_MEMORY_ACCESS_ALL,
     /*type=*/IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE,
     /*queue_affinity=*/0,
@@ -248,18 +248,14 @@ class QueueBenchmark : public benchmark::Fixture {
   static void DeinitializeOnce() {
     if (!initialized_) return;
     iree_hal_executable_release(binding_count_executable_);
-    iree_hal_executable_cache_release(binding_count_executable_cache_);
     iree_io_file_contents_free(binding_count_executable_file_contents_);
     iree_hal_executable_release(dispatch_executable_);
-    iree_hal_executable_cache_release(dispatch_executable_cache_);
     iree_hal_device_release(device_);
     iree_hal_device_group_release(device_group_);
     iree_hal_driver_release(driver_);
     binding_count_executable_ = nullptr;
-    binding_count_executable_cache_ = nullptr;
     binding_count_executable_file_contents_ = nullptr;
     dispatch_executable_ = nullptr;
-    dispatch_executable_cache_ = nullptr;
     device_ = nullptr;
     device_group_ = nullptr;
     driver_ = nullptr;
@@ -469,20 +465,28 @@ class QueueBenchmark : public benchmark::Fixture {
 
     auto* logical_device =
         reinterpret_cast<iree_hal_amdgpu_logical_device_t*>(device_);
-    const uint8_t device_index = iree_async_axis_device_index(axis);
-    if (IREE_UNLIKELY(device_index >= logical_device->physical_device_count)) {
+    const iree_hal_amdgpu_queue_affinity_domain_t domain = {
+        /*.supported_affinity=*/logical_device->queue_affinity_mask,
+        /*.physical_device_count=*/logical_device->physical_device_count,
+        /*.queue_count_per_physical_device=*/
+        logical_device->system->topology.gpu_agent_queue_count,
+    };
+    iree_hal_amdgpu_queue_affinity_resolved_t resolved;
+    if (IREE_UNLIKELY(!iree_hal_amdgpu_queue_affinity_try_resolve_axis(
+            domain, logical_device->axis, axis, &resolved))) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "producer axis has no physical device");
+                              "producer axis is not local to this device");
     }
     iree_hal_amdgpu_physical_device_t* physical_device =
-        logical_device->physical_devices[device_index];
-    const uint8_t queue_index = iree_async_axis_queue_index(axis);
-    if (IREE_UNLIKELY(queue_index >= physical_device->host_queue_count)) {
+        logical_device->physical_devices[resolved.physical_device_ordinal];
+    if (IREE_UNLIKELY(resolved.physical_queue_ordinal >=
+                      physical_device->host_queue_count)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "producer axis has no initialized host queue");
     }
 
-    *out_host_queue = &physical_device->host_queues[queue_index];
+    *out_host_queue =
+        &physical_device->host_queues[resolved.physical_queue_ordinal];
     return iree_ok_status();
   }
 
@@ -1369,106 +1373,102 @@ class QueueBenchmark : public benchmark::Fixture {
     return AllocatePayloadBuffers(state);
   }
 
-  iree_status_t LoadExecutableFromData(
-      iree_const_byte_span_t executable_data,
-      iree_hal_executable_cache_t** out_executable_cache,
-      iree_hal_executable_t** out_executable) {
-    *out_executable_cache = nullptr;
+  iree_status_t LoadExecutableFromData(iree_const_byte_span_t executable_data,
+                                       iree_hal_executable_t** out_executable) {
     *out_executable = nullptr;
 
-    iree_hal_executable_cache_t* executable_cache = nullptr;
-    iree_hal_executable_t* executable = nullptr;
-    iree_status_t status = iree_hal_executable_cache_create(
-        device_, iree_make_cstring_view("default"), &executable_cache);
-
-    char executable_format[128] = {0};
-    iree_host_size_t inferred_size = 0;
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_executable_cache_infer_format(
-          executable_cache,
-          IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA, executable_data,
-          IREE_ARRAYSIZE(executable_format), executable_format, &inferred_size);
+    iree_hal_physical_device_affinity_t physical_device_affinity = 0;
+    const iree_hal_device_identity_spec_t* identity =
+        iree_hal_device_spec_identity(iree_hal_device_spec(device_));
+    for (iree_host_size_t i = 0; i < identity->physical_device_count; ++i) {
+      physical_device_affinity |=
+          identity->physical_devices[i].physical_device_affinity;
     }
 
-    if (iree_status_is_ok(status)) {
-      iree_hal_executable_params_t executable_params;
-      iree_hal_executable_params_initialize(&executable_params);
-      executable_params.caching_mode =
-          IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-      executable_params.executable_format =
-          iree_make_cstring_view(executable_format);
-      executable_params.executable_data = executable_data;
-      status = iree_hal_executable_cache_prepare_executable(
-          executable_cache, &executable_params, &executable);
+    iree_hal_executable_target_selection_t selection = {};
+    selection.family = IREE_SV("amdgpu");
+    selection.physical_device_affinity = physical_device_affinity;
+    const iree_hal_executable_target_selection_result_t target_result =
+        iree_hal_device_spec_select_executable_target(
+            iree_hal_device_spec(device_), &selection);
+    if (target_result.outcome ==
+        IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
+      return iree_make_status(IREE_STATUS_NOT_FOUND,
+                              "device has no AMDGPU executable target covering "
+                              "affinity 0x%016" PRIx64,
+                              physical_device_affinity);
+    }
+    if (target_result.outcome ==
+        IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "multiple AMDGPU executable targets with equal priority cover "
+          "affinity 0x%016" PRIx64,
+          physical_device_affinity);
     }
 
-    if (iree_status_is_ok(status)) {
-      *out_executable_cache = executable_cache;
-      *out_executable = executable;
-    } else {
-      iree_hal_executable_release(executable);
-      iree_hal_executable_cache_release(executable_cache);
-    }
-    return status;
+    iree_hal_executable_load_params_t load_params;
+    iree_hal_executable_load_params_initialize(&load_params);
+    load_params.executable_data = executable_data;
+    return iree_hal_device_load_executable(device_, IREE_HAL_QUEUE_AFFINITY_ANY,
+                                           target_result.target, &load_params,
+                                           out_executable);
   }
 
   iree_status_t LoadExecutableFromRegisteredData(
-      iree_string_view_t format_name_prefix, iree_string_view_t file_name,
-      iree_hal_executable_cache_t** out_executable_cache,
+      iree_string_view_t target_name_prefix, iree_string_view_t file_name,
       iree_hal_executable_t** out_executable) {
-    *out_executable_cache = nullptr;
     *out_executable = nullptr;
 
-    const auto formats =
-        iree::hal::cts::CtsRegistry::ListExecutableFormats("amdgpu");
-    iree_status_t candidate_status = iree_ok_status();
-    bool found_format = false;
+    const auto targets =
+        iree::hal::cts::CtsRegistry::ListExecutableTargets("amdgpu");
+    bool found_target = false;
     bool found_executable_data = false;
-    for (const auto& format : formats) {
-      if (format.format == nullptr || format.data_fn == nullptr) continue;
-      if (!iree_string_view_starts_with(
-              iree_make_string_view(format.name.data(), format.name.size()),
-              format_name_prefix)) {
+    for (const auto& target : targets) {
+      if (target.family == nullptr || target.target_key == nullptr ||
+          target.data_fn == nullptr) {
         continue;
       }
-      found_format = true;
-      iree_const_byte_span_t executable_data = format.data_fn(file_name);
-      if (executable_data.data_length == 0) continue;
+      if (!iree_string_view_starts_with(
+              iree_make_string_view(target.name.data(), target.name.size()),
+              target_name_prefix)) {
+        continue;
+      }
+      found_target = true;
+      const iree_const_byte_span_t executable_data = target.data_fn(file_name);
+      if (iree_const_byte_span_is_empty(executable_data)) continue;
       found_executable_data = true;
 
-      iree_hal_executable_cache_t* executable_cache = nullptr;
-      iree_hal_executable_t* executable = nullptr;
-      iree_status_t status = iree_hal_executable_cache_create(
-          device_, iree_make_cstring_view("default"), &executable_cache);
-      if (iree_status_is_ok(status)) {
-        iree_hal_executable_params_t executable_params;
-        iree_hal_executable_params_initialize(&executable_params);
-        executable_params.caching_mode =
-            IREE_HAL_EXECUTABLE_CACHING_MODE_ALIAS_PROVIDED_DATA;
-        executable_params.executable_format =
-            iree_make_cstring_view(format.format);
-        executable_params.executable_data = executable_data;
-        status = iree_hal_executable_cache_prepare_executable(
-            executable_cache, &executable_params, &executable);
+      iree_hal_executable_target_selection_result_t target_result;
+      IREE_RETURN_IF_ERROR(iree_hal_amdgpu_device_spec_select_executable_target(
+          iree_hal_device_spec(device_),
+          iree_make_cstring_view(target.target_key),
+          /*physical_device_affinity=*/0, &target_result));
+      if (target_result.outcome ==
+          IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH) {
+        continue;
       }
-      if (iree_status_is_ok(status)) {
-        *out_executable_cache = executable_cache;
-        *out_executable = executable;
-        return iree_ok_status();
+      if (target_result.outcome ==
+          IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS) {
+        return iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "AMDGPU benchmark target '%s' ambiguously matches the device",
+            target.target_key);
       }
-      iree_hal_executable_release(executable);
-      iree_hal_executable_cache_release(executable_cache);
-      candidate_status = iree_status_join(candidate_status, status);
+
+      iree_hal_executable_load_params_t load_params;
+      iree_hal_executable_load_params_initialize(&load_params);
+      load_params.executable_data = executable_data;
+      return iree_hal_device_load_executable(
+          device_, IREE_HAL_QUEUE_AFFINITY_ANY, target_result.target,
+          &load_params, out_executable);
     }
-    if (!iree_status_is_ok(candidate_status)) {
-      return candidate_status;
-    }
-    if (!found_format) {
+    if (!found_target) {
       return iree_make_status(IREE_STATUS_NOT_FOUND,
-                              "no registered AMDGPU executable formats matched "
+                              "no registered AMDGPU executable targets matched "
                               "'%.*s'",
-                              (int)format_name_prefix.size,
-                              format_name_prefix.data);
+                              (int)target_name_prefix.size,
+                              target_name_prefix.data);
     }
     if (!found_executable_data) {
       return iree_make_status(
@@ -1478,7 +1478,7 @@ class QueueBenchmark : public benchmark::Fixture {
     }
     return iree_make_status(
         IREE_STATUS_NOT_FOUND,
-        "registered AMDGPU executable data was not accepted by the device");
+        "no registered AMDGPU executable target matches the device spec");
   }
 
   bool EnsureDispatchExecutable(benchmark::State& state) {
@@ -1487,7 +1487,7 @@ class QueueBenchmark : public benchmark::Fixture {
     iree_status_t status = LoadExecutableFromRegisteredData(
         IREE_SV("amdgpu_"),
         IREE_SV("command_buffer_dispatch_constants_bindings_test.bin"),
-        &dispatch_executable_cache_, &dispatch_executable_);
+        &dispatch_executable_);
     return HandleStatus(state, status, "failed to load dispatch executable");
   }
 
@@ -1498,24 +1498,19 @@ class QueueBenchmark : public benchmark::Fixture {
         iree_make_cstring_view(FLAG_binding_count_executable_file);
     iree_io_file_contents_t* executable_file_contents = nullptr;
     iree_const_byte_span_t executable_data = iree_const_byte_span_empty();
-    iree_status_t status = iree_ok_status();
+    iree_status_t status;
     if (!iree_string_view_is_empty(executable_file)) {
       status = iree_io_file_contents_read(executable_file, host_allocator_,
                                           &executable_file_contents);
       if (iree_status_is_ok(status)) {
         executable_data = executable_file_contents->const_buffer;
+        status =
+            LoadExecutableFromData(executable_data, &binding_count_executable_);
       }
     } else {
       status = LoadExecutableFromRegisteredData(
           IREE_SV("amdgpu_queue_benchmark_"),
-          IREE_SV("queue_benchmark_testdata.bin"),
-          &binding_count_executable_cache_, &binding_count_executable_);
-    }
-    if (iree_status_is_ok(status) &&
-        !iree_string_view_is_empty(executable_file)) {
-      status = LoadExecutableFromData(executable_data,
-                                      &binding_count_executable_cache_,
-                                      &binding_count_executable_);
+          IREE_SV("queue_benchmark_testdata.bin"), &binding_count_executable_);
     }
     if (iree_status_is_ok(status)) {
       binding_count_executable_file_contents_ = executable_file_contents;
@@ -1541,7 +1536,7 @@ class QueueBenchmark : public benchmark::Fixture {
 
     iree_hal_allocator_t* allocator = iree_hal_device_allocator(device_);
     iree_hal_buffer_params_t params = {0};
-    params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+    params.usage = IREE_HAL_BUFFER_USAGE_STORAGE;
     params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
     params.min_alignment = kPayloadBufferAlignment;
     for (iree_host_size_t i = 0; i < (iree_host_size_t)binding_count; ++i) {
@@ -2109,7 +2104,7 @@ class QueueBenchmark : public benchmark::Fixture {
     iree_hal_allocator_t* allocator = iree_hal_device_allocator(device_);
     iree_hal_buffer_params_t params = {0};
     params.usage =
-        IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+        IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
     params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
     params.min_alignment = kPayloadBufferAlignment;
 
@@ -2170,12 +2165,8 @@ class QueueBenchmark : public benchmark::Fixture {
   static iree_hal_driver_t* driver_;
   static iree_hal_device_group_t* device_group_;
   static iree_hal_device_t* device_;
-  // Executable cache used for the CTS-derived tiny dispatch benchmark payload.
-  static iree_hal_executable_cache_t* dispatch_executable_cache_;
   // CTS-derived tiny dispatch executable shared by dispatch benchmark rows.
   static iree_hal_executable_t* dispatch_executable_;
-  // Executable cache used for binding-count dispatch benchmark exports.
-  static iree_hal_executable_cache_t* binding_count_executable_cache_;
   // Empty-kernel executable with exports that vary only in ABI binding count.
   static iree_hal_executable_t* binding_count_executable_;
   // Optional file contents backing an externally loaded binding-count HSACO.
@@ -2230,11 +2221,7 @@ iree_allocator_t QueueBenchmark::host_allocator_;
 iree_hal_driver_t* QueueBenchmark::driver_ = nullptr;
 iree_hal_device_group_t* QueueBenchmark::device_group_ = nullptr;
 iree_hal_device_t* QueueBenchmark::device_ = nullptr;
-iree_hal_executable_cache_t* QueueBenchmark::dispatch_executable_cache_ =
-    nullptr;
 iree_hal_executable_t* QueueBenchmark::dispatch_executable_ = nullptr;
-iree_hal_executable_cache_t* QueueBenchmark::binding_count_executable_cache_ =
-    nullptr;
 iree_hal_executable_t* QueueBenchmark::binding_count_executable_ = nullptr;
 iree_io_file_contents_t*
     QueueBenchmark::binding_count_executable_file_contents_ = nullptr;

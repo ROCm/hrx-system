@@ -7,11 +7,12 @@
 #include "iree/base/api.h"
 #include "loom/codegen/low/source_memory_plan.h"
 #include "loom/ir/context.h"
-#include "loom/ops/vector/ops.h"
-#include "loom/ops/view/ops.h"
+#include "loom/ops/op_defs.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
+#include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/lower/legality.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
+#include "loom/target/arch/amdgpu/lower/topology.h"
 
 static iree_string_view_t loom_amdgpu_cache_policy_scope_param(
     const loom_vector_memory_cache_policy_t* policy) {
@@ -62,33 +63,49 @@ iree_status_t loom_amdgpu_low_legality_verify_memory(
   if (!loom_amdgpu_low_legality_bundle_is_amdgpu(bundle)) {
     return iree_ok_status();
   }
-  *out_handled = true;
 
   const loom_module_t* module = loom_target_low_legality_module(context);
   const loom_low_descriptor_set_t* descriptor_set =
       loom_target_low_legality_descriptor_set(context);
-  if (op->kind == LOOM_OP_VIEW_PREFETCH) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_record_view_prefetch_diagnostic(
-        context, op, descriptor_set));
-    return iree_ok_status();
-  }
-  if (op->kind != LOOM_OP_VECTOR_LOAD && op->kind != LOOM_OP_VECTOR_STORE &&
-      op->kind != LOOM_OP_VIEW_LOAD && op->kind != LOOM_OP_VIEW_STORE) {
+  const loom_memory_access_t access = loom_memory_access_cast(module, op);
+  if (!loom_memory_access_isa(access)) {
     *out_handled = false;
     return iree_ok_status();
   }
 
+  const loom_memory_access_operation_kind_t operation_kind =
+      loom_memory_access_operation_kind(access);
+  if (operation_kind == LOOM_MEMORY_ACCESS_OPERATION_PREFETCH) {
+    *out_handled = true;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_record_view_prefetch_diagnostic(
+        context, op, descriptor_set));
+    return iree_ok_status();
+  }
+  if (operation_kind != LOOM_MEMORY_ACCESS_OPERATION_LOAD &&
+      operation_kind != LOOM_MEMORY_ACCESS_OPERATION_STORE) {
+    *out_handled = false;
+    return iree_ok_status();
+  }
+  *out_handled = true;
+
   loom_low_source_memory_access_plan_t source = {0};
-  loom_amdgpu_memory_access_plan_t plan = {0};
+  loom_amdgpu_memory_access_selection_t selection;
   loom_low_source_memory_access_diagnostic_t source_diagnostic = {0};
   loom_amdgpu_memory_access_diagnostic_t diagnostic = {0};
-  const loom_view_region_table_t* view_regions = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_target_low_legality_view_regions(context, &view_regions));
+  const loom_view_region_table_t* view_regions =
+      loom_target_low_legality_view_regions(context);
+  const loom_amdgpu_source_alloca_layout_t* alloca_layout = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_for_low_legality(
+      context, &alloca_layout));
+  const loom_amdgpu_target_facts_t* target_facts =
+      loom_amdgpu_target_facts_cast(
+          loom_target_low_legality_target_facts(context));
+  IREE_ASSERT(target_facts != NULL);
   if (!loom_amdgpu_memory_access_plan_select(
           module, loom_target_low_legality_fact_table(context), descriptor_set,
-          view_regions, loom_target_low_legality_function(context), bundle, op,
-          &source, &plan, &source_diagnostic, &diagnostic)) {
+          view_regions, loom_target_low_legality_function(context), bundle,
+          target_facts->properties.instruction_constraints, alloca_layout, op,
+          &source, &selection, &source_diagnostic, &diagnostic)) {
     bool handled = false;
     if (diagnostic.rejection_bits != 0) {
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_memory_access_rejection_diagnostic(
@@ -105,24 +122,25 @@ iree_status_t loom_amdgpu_low_legality_verify_memory(
                   diagnostic.rejection_bits);
     return loom_amdgpu_low_legality_reject(context, op, constraint_key);
   }
-  for (uint32_t i = 0; i < plan.packet_count; ++i) {
-    const loom_amdgpu_memory_access_t* access = &plan.packets[i].access;
-    if (!loom_amdgpu_memory_cache_policy_can_lower(descriptor_set, access)) {
+  for (uint32_t i = 0; i < selection.packet_count; ++i) {
+    const loom_amdgpu_memory_access_t* access = &selection.packets[i].access;
+    loom_amdgpu_memory_cache_policy_attrs_t cache_attrs;
+    const loom_amdgpu_memory_cache_policy_resolution_t resolution =
+        loom_amdgpu_memory_cache_policy_resolve(descriptor_set, access,
+                                                &cache_attrs);
+    if (resolution == LOOM_AMDGPU_MEMORY_CACHE_POLICY_RESOLUTION_REJECTED) {
       IREE_RETURN_IF_ERROR(
           loom_amdgpu_record_memory_cache_policy_rejection_diagnostic(
               context, op, descriptor_set, access));
       return loom_amdgpu_emit_memory_cache_policy_rejection(
           context, op, descriptor_set, access);
     }
-  }
-  for (uint32_t i = 0; i < plan.packet_count; ++i) {
-    const loom_amdgpu_memory_access_t* access = &plan.packets[i].access;
-    const loom_amdgpu_memory_operation_kind_t kind =
-        loom_amdgpu_memory_operation_kind_from_source(&access->source);
-    IREE_RETURN_IF_ERROR(loom_amdgpu_record_memory_cache_policy_diagnostic(
-        context, op, descriptor_set, access, kind));
+    if (i == 0) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_record_memory_cache_policy_diagnostic(
+          context, op, descriptor_set, access, resolution, &cache_attrs));
+    }
     IREE_RETURN_IF_ERROR(loom_amdgpu_record_memory_access_diagnostic(
-        context, op, descriptor_set, access, kind));
+        context, op, descriptor_set, access, access->source.operation_kind));
   }
   return iree_ok_status();
 }

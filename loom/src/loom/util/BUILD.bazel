@@ -31,6 +31,24 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "adaptive_sort",
+    hdrs = ["adaptive_sort.h"],
+    deps = [
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "adaptive_sort_test",
+    srcs = ["adaptive_sort_test.cc"],
+    deps = [
+        ":adaptive_sort",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "diff",
     srcs = ["diff.c"],
     hdrs = ["diff.h"],
@@ -66,33 +84,28 @@ loom_cc_test(
     deps = [
         ":json",
         ":stream",
+        "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
 loom_cc_library(
-    name = "math",
-    hdrs = ["math.h"],
+    name = "numeric_format",
+    srcs = ["numeric_format.c"],
+    hdrs = ["numeric_format.h"],
     deps = [
+        "//loom/src/loom/ir",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
     ],
 )
 
-loom_cc_library(
-    name = "numeric_format",
-    hdrs = ["numeric_format.h"],
-    deps = [
-        "//runtime/src/iree/base",
-    ],
-)
-
 loom_cc_test(
-    name = "math_test",
-    srcs = ["math_test.cc"],
+    name = "numeric_format_test",
+    srcs = ["numeric_format_test.cc"],
     deps = [
-        ":math",
+        ":numeric_format",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -104,6 +117,26 @@ loom_cc_library(
     hdrs = ["stable_id.h"],
     deps = [
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "segmented_storage",
+    srcs = ["segmented_storage.c"],
+    hdrs = ["segmented_storage.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "segmented_storage_test",
+    srcs = ["segmented_storage_test.cc"],
+    deps = [
+        ":segmented_storage",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -123,12 +156,12 @@ loom_cc_library(
     hdrs = ["fact_table.h"],
     deps = [
         ":cfg_graph",
-        ":math",
         ":numeric_format",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops:op_defs",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
@@ -138,6 +171,29 @@ loom_cc_test(
     srcs = ["fact_table_test.cc"],
     deps = [
         ":fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "predicate_facts",
+    srcs = ["predicate_facts.c"],
+    hdrs = ["predicate_facts.h"],
+    deps = [
+        ":fact_table",
+        "//loom/src/loom/ir:facts",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "predicate_facts_test",
+    srcs = ["predicate_facts_test.cc"],
+    deps = [
+        ":predicate_facts",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -196,6 +252,32 @@ loom_cc_test(
     srcs = ["cfg_graph_test.cc"],
     deps = [
         ":cfg_graph",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/ops/test",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "cfg_loop",
+    srcs = ["cfg_loop.c"],
+    hdrs = ["cfg_loop.h"],
+    deps = [
+        ":cfg_graph",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "cfg_loop_test",
+    srcs = ["cfg_loop_test.cc"],
+    deps = [
+        ":cfg_loop",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/cfg",

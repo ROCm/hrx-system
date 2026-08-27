@@ -18,11 +18,35 @@
 #include "loom/ir/facts.h"
 #include "loom/ir/ir.h"
 #include "loom/target/arch/amdgpu/lower/plan.h"
+#include "loom/target/arch/amdgpu/target_info_defs.h"
 #include "loom/target/low_legality.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+typedef struct loom_amdgpu_source_alloca_layout_t
+    loom_amdgpu_source_alloca_layout_t;
+
+// Bounded caller-owned workspace for selecting one direct memory plan. The
+// workspace lives only for one selection call and is never retained.
+typedef struct loom_amdgpu_memory_access_selection_t {
+  // Packet candidates populated in increasing source-register order.
+  loom_amdgpu_memory_packet_plan_t packets[LOOM_AMDGPU_MAX_MEMORY_PACKET_COUNT];
+  // Number of populated packet candidates.
+  uint32_t packet_count;
+} loom_amdgpu_memory_access_selection_t;
+
+typedef struct loom_amdgpu_memory_dynamic_term_sequence_t {
+  // Dynamic terms selected for emission in address-expression order.
+  const loom_low_source_memory_dynamic_term_t*
+      terms[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY];
+  // Target operand path selected for each emitted term.
+  loom_amdgpu_memory_dynamic_index_kind_t
+      kinds[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY];
+  // Number of populated term and kind entries.
+  uint8_t count;
+} loom_amdgpu_memory_dynamic_term_sequence_t;
 
 typedef uint32_t loom_amdgpu_memory_access_rejection_flags_t;
 
@@ -123,10 +147,17 @@ typedef struct loom_amdgpu_memory_cache_policy_attrs_t {
   int64_t nt;
 } loom_amdgpu_memory_cache_policy_attrs_t;
 
-// Returns the target memory operation represented by a source access plan.
-loom_amdgpu_memory_operation_kind_t
-loom_amdgpu_memory_operation_kind_from_source(
-    const loom_low_source_memory_access_plan_t* source);
+// Result of resolving an advisory source cache policy for a descriptor set.
+typedef enum loom_amdgpu_memory_cache_policy_resolution_e {
+  // The source memory operation has no cache policy.
+  LOOM_AMDGPU_MEMORY_CACHE_POLICY_RESOLUTION_ABSENT = 0,
+  // The selected descriptor set can encode the source cache policy.
+  LOOM_AMDGPU_MEMORY_CACHE_POLICY_RESOLUTION_ENCODED = 1,
+  // The policy is valid but unsupported and must be omitted from the packet.
+  LOOM_AMDGPU_MEMORY_CACHE_POLICY_RESOLUTION_DROPPED = 2,
+  // The policy is invalid for the selected memory access or descriptor set.
+  LOOM_AMDGPU_MEMORY_CACHE_POLICY_RESOLUTION_REJECTED = 3,
+} loom_amdgpu_memory_cache_policy_resolution_t;
 
 // Reads common offset-immediate limits from a descriptor.
 bool loom_amdgpu_descriptor_offset_immediate_info(
@@ -142,15 +173,18 @@ bool loom_amdgpu_source_memory_offset_fits_u32(
     const loom_low_source_memory_access_plan_t* source,
     int64_t static_byte_offset);
 
-// Selects a complete AMDGPU memory packet sequence from source IR and facts.
+// Selects a complete AMDGPU memory packet sequence from source IR and facts
+// into caller-owned bounded workspace.
 bool loom_amdgpu_memory_access_plan_select(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_view_region_table_t* view_regions,
     loom_func_like_t source_function, const loom_target_bundle_t* bundle,
+    loom_amdgpu_instruction_constraint_bits_t instruction_constraints,
+    const loom_amdgpu_source_alloca_layout_t* alloca_layout,
     const loom_op_t* source_op,
     loom_low_source_memory_access_plan_t* out_source,
-    loom_amdgpu_memory_access_plan_t* out_plan,
+    loom_amdgpu_memory_access_selection_t* out_selection,
     loom_low_source_memory_access_diagnostic_t* out_source_diagnostic,
     loom_amdgpu_memory_access_diagnostic_t* out_diagnostic);
 
@@ -173,7 +207,7 @@ bool loom_amdgpu_memory_access_select_flat_global_address(
 bool loom_amdgpu_memory_access_select_u32_vaddr_byte_offset(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,
-    loom_func_like_t source_function,
+    const loom_amdgpu_source_alloca_layout_t* alloca_layout,
     const loom_low_source_memory_access_plan_t* source,
     loom_amdgpu_memory_access_t* out_access,
     loom_amdgpu_memory_access_diagnostic_t* out_diagnostic);
@@ -182,7 +216,7 @@ bool loom_amdgpu_memory_access_select_u32_vaddr_byte_offset(
 // access so later offset materialization uses the same address domain as real
 // AMDGPU memory packets.
 bool loom_amdgpu_memory_access_include_alloca_root_byte_offset(
-    const loom_value_fact_table_t* fact_table, loom_func_like_t source_function,
+    const loom_amdgpu_source_alloca_layout_t* alloca_layout,
     loom_amdgpu_memory_access_t* access,
     loom_amdgpu_memory_access_diagnostic_t* diagnostic);
 
@@ -192,6 +226,15 @@ bool loom_amdgpu_memory_access_select_dynamic_term_kinds(
     const loom_view_region_table_t* view_regions,
     loom_amdgpu_memory_access_t* access,
     loom_amdgpu_memory_access_diagnostic_t* diagnostic);
+
+// Resolves canonical address terms to their emission sequence. An equivalent
+// source realization replaces its canonical term range only when the source
+// value is already materialized for another use.
+void loom_amdgpu_memory_access_resolve_dynamic_terms(
+    const loom_low_lower_context_t* context,
+    const loom_low_source_memory_access_plan_t* source,
+    const loom_amdgpu_memory_dynamic_index_kind_t* dynamic_term_kinds,
+    loom_amdgpu_memory_dynamic_term_sequence_t* out_sequence);
 
 // Routes all dynamic source terms through the VGPR byte-address operand.
 void loom_amdgpu_memory_access_route_dynamic_terms_through_vaddr(
@@ -232,6 +275,13 @@ iree_status_t loom_amdgpu_make_memory_attrs(
     const loom_amdgpu_memory_access_t* access, loom_named_attr_t* attrs,
     iree_host_size_t attr_capacity, iree_host_size_t* out_attr_count);
 
+// Builds only the descriptor cache-policy attrs for a memory-like packet that
+// has no address offset immediate.
+iree_status_t loom_amdgpu_make_memory_cache_attrs(
+    loom_low_lower_context_t* context,
+    const loom_amdgpu_memory_access_t* access, loom_named_attr_t* attrs,
+    iree_host_size_t attr_capacity, iree_host_size_t* out_attr_count);
+
 // Returns true when an access carries an explicit cache policy.
 bool loom_amdgpu_memory_cache_policy_is_present(
     const loom_vector_memory_cache_policy_t* policy);
@@ -241,13 +291,18 @@ bool loom_amdgpu_memory_cache_policy_is_present(
 iree_string_view_t loom_amdgpu_memory_cache_policy_encoding_key(
     const loom_low_descriptor_set_t* descriptor_set);
 
+// Returns the vector-memory cache-policy encoding for |descriptor_set|.
+loom_amdgpu_vector_memory_cache_policy_encoding_t
+loom_amdgpu_memory_cache_policy_descriptor_encoding(
+    const loom_low_descriptor_set_t* descriptor_set);
+
 // Returns the stable diagnostic decision key for a selected cache-policy
 // encoding.
 iree_string_view_t loom_amdgpu_memory_cache_policy_selected_key(
     const loom_low_descriptor_set_t* descriptor_set);
 
-// Returns true when the selected descriptor set can encode the cache policy on
-// the memory access plan.
+// Returns true when the cache policy can be encoded or safely omitted for the
+// selected descriptor set and memory access plan.
 bool loom_amdgpu_memory_cache_policy_can_lower(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_memory_access_t* access);
@@ -258,7 +313,7 @@ iree_string_view_t loom_amdgpu_memory_space_name(
 
 // Returns the stable report/diagnostic name for a memory operation kind.
 iree_string_view_t loom_amdgpu_memory_operation_name(
-    loom_amdgpu_memory_operation_kind_t kind);
+    loom_low_source_memory_operation_kind_t kind);
 
 // Returns the stable report/diagnostic name for a memory address form.
 iree_string_view_t loom_amdgpu_memory_address_form_name(
@@ -275,7 +330,7 @@ iree_string_view_t loom_amdgpu_memory_ds_addtid_reason_key(
     const loom_module_t* module, loom_func_like_t source_function,
     const loom_target_bundle_t* bundle,
     const loom_amdgpu_memory_access_t* access,
-    loom_amdgpu_memory_operation_kind_t kind);
+    loom_low_source_memory_operation_kind_t kind);
 
 // Returns the stable diagnostic name for a cache scope.
 iree_string_view_t loom_amdgpu_cache_scope_name(uint8_t scope);
@@ -283,9 +338,10 @@ iree_string_view_t loom_amdgpu_cache_scope_name(uint8_t scope);
 // Returns the stable diagnostic name for a cache temporal policy.
 iree_string_view_t loom_amdgpu_cache_temporal_name(uint8_t temporal);
 
-// Encodes the target-specific cache-policy attributes for a selected memory
-// access plan. Missing source cache policy encodes as an empty attrs struct.
-bool loom_amdgpu_memory_cache_policy_encode(
+// Resolves target-specific cache-policy attributes for a selected memory
+// access plan. Absent and dropped policies produce an empty attrs struct.
+loom_amdgpu_memory_cache_policy_resolution_t
+loom_amdgpu_memory_cache_policy_resolve(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_memory_access_t* access,
     loom_amdgpu_memory_cache_policy_attrs_t* out_attrs);
@@ -321,14 +377,15 @@ iree_status_t loom_amdgpu_record_memory_access_diagnostic(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_memory_access_t* access,
-    loom_amdgpu_memory_operation_kind_t kind);
+    loom_low_source_memory_operation_kind_t kind);
 
 // Records optional cache-policy diagnostics for a selected memory access plan.
 iree_status_t loom_amdgpu_record_memory_cache_policy_diagnostic(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_memory_access_t* access,
-    loom_amdgpu_memory_operation_kind_t kind);
+    loom_amdgpu_memory_cache_policy_resolution_t resolution,
+    const loom_amdgpu_memory_cache_policy_attrs_t* cache_attrs);
 
 // Records optional cache-policy diagnostics for a rejected memory access plan.
 iree_status_t loom_amdgpu_record_memory_cache_policy_rejection_diagnostic(
@@ -336,15 +393,21 @@ iree_status_t loom_amdgpu_record_memory_cache_policy_rejection_diagnostic(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_memory_access_t* access);
 
-// Selects an AMDGPU source memory-load packet plan.
+// Populates optional source storage-schema fields on a memory report row.
+void loom_amdgpu_memory_report_row_populate_storage_schema(
+    loom_low_lower_context_t* context,
+    const loom_low_source_memory_access_plan_t* source,
+    loom_low_lower_memory_report_row_t* row);
+
+// Selects and retains an exact-sized AMDGPU source memory-load packet plan.
 iree_status_t loom_amdgpu_select_memory_load_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_amdgpu_memory_access_plan_t* out_plan, bool* out_selected);
+    loom_low_lower_plan_t* out_plan);
 
-// Selects an AMDGPU source memory-store packet plan.
+// Selects and retains an exact-sized AMDGPU source memory-store packet plan.
 iree_status_t loom_amdgpu_select_memory_store_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_amdgpu_memory_access_plan_t* out_plan, bool* out_selected);
+    loom_low_lower_plan_t* out_plan);
 
 // Lowers a source memory-load op to an AMDGPU memory packet.
 iree_status_t loom_amdgpu_lower_memory_load(
@@ -367,10 +430,26 @@ void loom_amdgpu_mark_source_memory_plan_root_storage_demands(
     loom_low_lower_context_t* context,
     const loom_low_source_memory_access_plan_t* source);
 
+// Marks only dynamic address terms required by a source memory access plan.
+// This is used when target-assigned static layout replaces the source root.
+void loom_amdgpu_mark_source_memory_plan_dynamic_storage_demands(
+    loom_low_lower_context_t* context,
+    const loom_low_source_memory_access_plan_t* source);
+
 // Marks the physical source values needed by a selected AMDGPU memory plan.
 void loom_amdgpu_mark_memory_access_plan_storage_demands(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_memory_access_plan_t* plan);
+
+// Returns whether the selected descriptor set contains a native packet
+// candidate for the atomic semantic tuple. This queries packet availability
+// only; source address, ordering, and operand representability remain the
+// responsibility of atomic plan selection.
+bool loom_amdgpu_atomic_has_descriptor_candidate(
+    const loom_low_descriptor_set_t* descriptor_set,
+    loom_value_fact_memory_space_t memory_space,
+    loom_amdgpu_atomic_operation_kind_t operation_kind, uint8_t atomic_kind,
+    loom_type_t value_type);
 
 // Selects an AMDGPU atomic packet plan.
 iree_status_t loom_amdgpu_select_atomic_plan(

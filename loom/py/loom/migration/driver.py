@@ -418,6 +418,7 @@ def default_migration_ops() -> tuple[Any, ...]:
     from loom.dialect.buffer import ALL_BUFFER_OPS
     from loom.dialect.cfg import ALL_CFG_OPS
     from loom.dialect.check import ALL_CHECK_OPS
+    from loom.dialect.command import ALL_COMMAND_OPS
     from loom.dialect.config import ALL_CONFIG_OPS
     from loom.dialect.encoding import ALL_ENCODING_OPS
     from loom.dialect.func import ALL_FUNC_OPS
@@ -450,6 +451,7 @@ def default_migration_ops() -> tuple[Any, ...]:
         *ALL_SCF_OPS,
         *ALL_CFG_OPS,
         *ALL_CHECK_OPS,
+        *ALL_COMMAND_OPS,
         *ALL_BUFFER_OPS,
         *ALL_VIEW_OPS,
         *ALL_VECTOR_OPS,
@@ -474,11 +476,13 @@ def default_migration_types() -> tuple[Any, ...]:
     from loom.dialect.hal import ALL_HAL_TYPES
     from loom.dialect.kernel import ALL_KERNEL_TYPES
     from loom.target.arch.ireevm.dialect import ALL_IREEVM_TYPES
+    from loom.target.arch.spirv.dialect import ALL_SPIRV_TYPES
 
     return (
         *ALL_BUILTIN_TYPES,
         *ALL_HAL_TYPES,
         *ALL_KERNEL_TYPES,
+        *ALL_SPIRV_TYPES,
         *ALL_IREEVM_TYPES,
     )
 

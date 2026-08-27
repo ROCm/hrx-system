@@ -80,6 +80,29 @@ iree_hal_amdgpu_device_timestamp_emplace_dispatch_harvest(
     iree_hsa_kernel_dispatch_packet_t* IREE_AMDGPU_RESTRICT dispatch_packet,
     void* IREE_AMDGPU_RESTRICT kernarg_ptr);
 
+// Kernel arguments for the queue timestamp capture builtin.
+typedef struct iree_hal_amdgpu_queue_timestamp_capture_args_t {
+  // Device pointer receiving the captured agent-domain tick. Must be 8-byte
+  // aligned and remain live until the capture dispatch completes.
+  iree_amdgpu_device_tick_t* target;
+} iree_hal_amdgpu_queue_timestamp_capture_args_t;
+IREE_AMDGPU_STATIC_ASSERT(
+    sizeof(iree_hal_amdgpu_queue_timestamp_capture_args_t) == 8,
+    "queue timestamp capture args size is part of the kernel ABI");
+
+// Populates a builtin dispatch packet and kernargs that capture the agent
+// timestamp into |target| from a single work-item.
+//
+// |dispatch_packet| and |kernarg_ptr| must point to reserved queue storage.
+// The caller owns completion-signal assignment and header commit, and must
+// give the packet a release scope covering whoever reads |target|.
+void iree_hal_amdgpu_device_timestamp_emplace_queue_capture(
+    const iree_hal_amdgpu_device_kernel_args_t* IREE_AMDGPU_RESTRICT
+        capture_kernel_args,
+    iree_amdgpu_device_tick_t* target,
+    iree_hsa_kernel_dispatch_packet_t* IREE_AMDGPU_RESTRICT dispatch_packet,
+    void* IREE_AMDGPU_RESTRICT kernarg_ptr);
+
 #if defined(IREE_AMDGPU_TARGET_DEVICE)
 
 // Device builtin that initializes raw completion signals used for CP timestamp
@@ -95,6 +118,12 @@ iree_hal_amdgpu_device_timestamp_harvest_dispatch_records(
     const iree_hal_amdgpu_dispatch_timestamp_harvest_source_t*
         IREE_AMDGPU_RESTRICT sources,
     uint32_t source_count);
+
+// Device builtin that stores the agent timestamp into |target|. Launched as a
+// single work-item dispatch so the tick is one instant, not a per-lane spread.
+IREE_AMDGPU_ATTRIBUTE_KERNEL void
+iree_hal_amdgpu_device_timestamp_capture_queue_tick(
+    iree_amdgpu_device_tick_t* IREE_AMDGPU_RESTRICT target);
 
 #endif  // IREE_AMDGPU_TARGET_DEVICE
 

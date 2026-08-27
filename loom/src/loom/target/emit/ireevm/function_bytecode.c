@@ -1009,8 +1009,49 @@ static iree_status_t loom_ireevm_emit_low_func_call(
   return loom_ireevm_write_register_list(state, results.values, results.count);
 }
 
+static iree_status_t loom_ireevm_emit_low_transfer(
+    loom_ireevm_emit_state_t* state, const loom_op_t* op, bool source_is_move) {
+  const loom_value_id_t source_value_id = loom_op_const_operands(op)[0];
+  const loom_value_id_t result_value_id = loom_op_const_results(op)[0];
+  loom_ireevm_register_ref_t source_ref = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_ireevm_lookup_register(state, source_value_id, &source_ref));
+  loom_ireevm_register_ref_t result_ref = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_ireevm_lookup_register(state, result_value_id, &result_ref));
+  if (source_ref.bank != result_ref.bank ||
+      source_ref.unit_count != result_ref.unit_count) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "VM bytecode transfer changes register bank or width");
+  }
+  if (source_ref.base == result_ref.base) {
+    return iree_ok_status();
+  }
+  if (source_ref.bank != LOOM_IREEVM_REGISTER_BANK_REF ||
+      source_ref.unit_count != 1) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "VM bytecode scalar transfer requires coalesced registers");
+  }
+
+  IREE_RETURN_IF_ERROR(
+      loom_ireevm_bytecode_write_u8(&state->writer, LOOM_IREEVM_OP_ASSIGN_REF));
+  IREE_RETURN_IF_ERROR(loom_ireevm_write_encoded_register(
+      state, source_value_id,
+      source_is_move ? LOOM_IREEVM_REGISTER_ENCODING_MOVE_REF : 0));
+  return loom_ireevm_write_encoded_register(state, result_value_id,
+                                            /*flags=*/0);
+}
+
 static iree_status_t loom_ireevm_emit_structural_packet(
     loom_ireevm_emit_state_t* state, const loom_op_t* op) {
+  if (loom_low_copy_isa(op)) {
+    return loom_ireevm_emit_low_transfer(state, op, /*source_is_move=*/false);
+  }
+  if (loom_low_move_isa(op)) {
+    return loom_ireevm_emit_low_transfer(state, op, /*source_is_move=*/true);
+  }
   if (loom_low_return_isa(op)) {
     return loom_ireevm_emit_low_return(state, op);
   }
@@ -1029,6 +1070,9 @@ static iree_status_t loom_ireevm_emit_structural_packet(
 
 static iree_status_t loom_ireevm_emit_packet(
     loom_ireevm_emit_state_t* state, const loom_low_packet_view_t* packet) {
+  if (loom_low_packet_is_compile_time_only(packet)) {
+    return iree_ok_status();
+  }
   state->current_packet = packet;
   if (packet->descriptor) {
     return loom_ireevm_emit_descriptor_packet(state, packet);
@@ -1039,7 +1083,6 @@ static iree_status_t loom_ireevm_emit_packet(
 static iree_status_t loom_ireevm_validate_tables(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation) {
-  IREE_RETURN_IF_ERROR(loom_low_packet_validate_tables(schedule, allocation));
   if (schedule->target.descriptor_set != loom_ireevm_core_descriptor_set()) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "VM bytecode emission requires ireevm.core");
@@ -1073,9 +1116,8 @@ static iree_status_t loom_ireevm_emit_function_body(
     for (uint32_t i = 0; i < block->scheduled_node_count; ++i) {
       iree_host_size_t packet_index =
           (iree_host_size_t)block->scheduled_node_start + i;
-      loom_low_packet_view_t packet = {0};
-      IREE_RETURN_IF_ERROR(loom_low_packet_view_at(
-          state->schedule, state->allocation, packet_index, &packet));
+      const loom_low_packet_view_t packet =
+          loom_low_packet_at(state->schedule, packet_index);
       IREE_RETURN_IF_ERROR(loom_ireevm_emit_packet(state, &packet));
     }
     iree_host_size_t block_length =

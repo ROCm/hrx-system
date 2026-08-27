@@ -103,8 +103,9 @@
 //
 // Attribute aliases define shorthand for encoding attributes:
 //
-//   #enc = #q8_0<block=32>
-//   #weights_enc = #q6_k
+//   #weights = #encoding.operand<element_format=i8, payload_elements=32,
+//       payload_packing=dense_lanes>
+//   #row_major = #encoding.layout.dense
 //
 // Alias names are file-local, must be unique, and must not shadow a registered
 // encoding family name.
@@ -133,7 +134,7 @@
 //                            @model36.model.hidden_size
 //
 //   Hash attr:     '#' identifier
-//                  Examples: #q6_k, #enc, #q8_0
+//                  Examples: #encoding.operand, #enc, #encoding.layout.dense
 //
 //   Integer:       [-] digit+ | '0x' hexdigit+
 //                  Examples: 42, -1, 0xFF
@@ -231,8 +232,9 @@
 // is an SSA value of type 'encoding' and is resolved at compilation time.
 // Dynamic parameters are introduced explicitly by encoding.define:
 //
-//   %enc = encoding.define #q8_0<block=32> {group_size = %g : index}
-//       : encoding<schema>
+//   %enc = encoding.define #encoding.operand<element_format=i8,
+//       payload_elements=32, payload_packing=dense_lanes>
+//       {group_size = %g : index} : encoding<schema>
 //
 // This enables library functions generic over encoding:
 //
@@ -243,9 +245,13 @@
 //   tile<[%M]x4xf32>                   First dim dynamic, named %M.
 //   tensor<[%M]x[%K]xf32>              Both dims dynamic.
 //   vector<[%N]xf32>                   Dynamic 1-D register vector.
-//   tile<256x256xf32, #q6_k>           With static encoding (no params).
-//   tensor<[%N]xi8, #q8_0<block=32>>   Dynamic dim + parameterized encoding.
-//   view<[%N]xf32, #strided<stride=64>> Dynamic view + static layout.
+//   tensor<[%N]xi8, #encoding.operand<element_format=i8,
+//       payload_elements=32, payload_packing=dense_lanes>>
+//                                       Dynamic dim + parameterized encoding.
+//   view<[%N]xf32>
+//                                       Dynamic view + native dense layout.
+//   view<[%N]xf32, #encoding.layout.strided<strides=[64]>>
+//                                       Dynamic view + explicit strides.
 //   view<[%N]xf32, %layout>            Dynamic dim + SSA layout.
 //   tile<4xf32, %enc>                  SSA encoding (dynamic).
 //   tile<f32>                          0-d (scalar) tile.
@@ -254,9 +260,9 @@
 // attachments. Use explicit splat/broadcast/conversion ops to cross between
 // scalar and vector values.
 //
-// Static encodings are pluggable: each has a name ("q8_0", "q6_k")
-// and optional parameters. The encoding name indexes into a vtable
-// registered at context creation.
+// Static encodings are pluggable: each has a qualified family name and
+// optional parameters. The encoding name indexes into a vtable registered at
+// context creation.
 //
 // SSA encodings are created by encoding.define and propagated as
 // values. The compiler's encoding resolution pass converts SSA
@@ -296,12 +302,6 @@
 //   pool<65536>         Static 64KB blocks.
 //   pool<[%BS]>         Dynamic block size.
 //
-// --- Group types ---
-//
-// group-type ::= 'group' '<' identifier '>'
-//
-// Example: group<workgroup>
-//
 // --- Function types ---
 //
 // function-type ::= '(' type-list ')' '->' '(' type-list ')'
@@ -320,6 +320,9 @@
 //
 //   reg<amdgpu.vgpr>                   One AMDGPU VGPR.
 //   reg<amdgpu.vgpr x4>                Four contiguous VGPR-class units.
+//   reg<amdgpu.vgpr : f32>             One VGPR carrying an f32 value.
+//   reg<amdgpu.vgpr x4 : vector<4xf32>>
+//                                      Four VGPRs carrying a vector value.
 //
 // --- Dialect types ---
 //
@@ -446,8 +449,8 @@
 //                           Used for bare Keyword("(") after SymbolRef.
 //   Flags(field)          Per-op-instance flags: <nuw|nsw>.
 //                           Glued to the op name. Stored in instance_flags.
-//   OpRef(field)          Op kind reference: <tile.contract>.
-//                           Glued to the op name. For template/ukernel.
+//   KeyRef(field)         Bare symbolic key: <tile.contract>.
+//                           Glued to the preceding token.
 //   TemplateParam(field)  Required compile-time op parameter: <add>.
 //                           Glued to the op name. Parsed as an attribute.
 //   TemplateParamFlags(p, f)
@@ -455,6 +458,10 @@
 //                           <add> or <add, reassoc|nnan|nsz>.
 //                           Glued to the op name. Parameter p is parsed as an
 //                           attribute. Flags f are stored in instance_flags.
+//   AttrParams(field)     Known-family parameterized attribute payload:
+//                           <mode = fast, scopes = [workgroup]>.
+//                           The exact family is carried by the field descriptor
+//                           and omitted from text.
 //
 // --- Spacing rules ---
 //
@@ -481,10 +488,10 @@
 //                    } -> (tile<4xf32>)
 // Function def:     func.def @f(%a: f32) -> (f32) { ... func.return %r : f32 }
 // Function decl:    func.decl public @f(%a: f32) -> (f32)
-// Template:         func.template<tile.contract> device @name(...) -> (...) where [...] { ... }
-// Ukernel:          func.ukernel<tile.contract> device @name(...) -> (...)
+// Template:         template.def<@tile.contract> device @name(...) -> (...) where [...] { ... }
+// Ukernel:          template.ukernel<@tile.contract> device @name(...) -> (...)
 // Call:             %out, %count = func.call @compute(%x, %y) : (tile<4xf32>, index) -> (%x as tile<4xf32>, index)
-// Apply:            %r = func.apply<tile.contract>(%x) : (f32) -> (f32)
+// Apply:            %r = template.apply<@tile.contract>(%x) : (f32) -> (f32)
 // Return:           func.return %r : f32
 // Yield:            scf.yield %a, %b : f32, tensor<[%M]xf32>
 //
@@ -532,9 +539,9 @@
 //
 // function-def     ::= 'func.def' modifiers? function-sig '{' block+ '}'
 // function-decl    ::= 'func.decl' modifiers? function-sig
-// function-tmpl    ::= 'func.template' '<' contract-key '>' modifiers?
+// function-tmpl    ::= 'template.def' '<' contract-key '>' modifiers?
 //                        function-sig '{' block+ '}'
-// function-ukernel ::= 'func.ukernel' '<' contract-key '>' modifiers?
+// function-ukernel ::= 'template.ukernel' '<' contract-key '>' modifiers?
 //                        function-sig
 //
 // --- Body ops (inside function/template bodies) ---
@@ -542,7 +549,7 @@
 // func-call   ::= result-list '=' 'func.call' '@' identifier
 //                   '(' operand-list ')' ':' '(' type-list ')'
 //                   '->' result-type-list
-// func-apply  ::= result-list '=' 'func.apply' '<' contract-key '>'
+// func-apply  ::= result-list '=' 'template.apply' '<' contract-key '>'
 //                   '(' operand-list ')' ':' '(' type-list ')'
 //                   '->' result-type-list
 // func-return ::= 'func.return' operand-list ':' type-list
@@ -581,23 +588,23 @@
 //                func.call by symbol name. Linked at compile or load
 //                time.
 //
-// func.template: Constraint-matched visible implementation of an
+// template.def: Constraint-matched visible implementation of an
 //                implementation contract key T. Must have a body containing
 //                Loom IR. The compiler's selection pass matches templates to
-//                live func.apply contract demands. Exact compile-time calls use
+//                live template.apply contract demands. Exact compile-time calls use
 //                func.call inline @template and must be inlined before
 //                executable lowering.
 //
-// func.ukernel:  Constraint-matched opaque implementation of an
+// template.ukernel:  Constraint-matched opaque implementation of an
 //                abstract op T. No body. The compiler emits a runtime
 //                dispatch call when selecting a ukernel.
 //
 // func.call:     Function-like symbol call. Calls to func.def/func.decl
 //                survive to runtime as call instructions. Required-inline
-//                calls to func.template are exact compile-time calls consumed
+//                calls to template.def are exact compile-time calls consumed
 //                by the inliner before executable lowering.
 //
-// func.apply:    Compile-time implementation demand. The angle-bracket key
+// template.apply:    Compile-time implementation demand. The angle-bracket key
 //                names an implementation contract, not a symbol. Selection
 //                rewrites resolved applies to func.call inline @selected and
 //                unresolved applies are rejected before executable lowering.
@@ -609,7 +616,7 @@
 // value operands. The callee in func.call is stored as a symbol
 // attribute, not in the operand list. SymbolRef format elements read
 // from the attribute dict and print with @ prefix. Contract keys in
-// func.template, func.ukernel, and func.apply are string attributes printed
+// template.def, template.ukernel, and template.apply are string attributes printed
 // in angle brackets.
 //
 // --- Argument dim semantics ---
@@ -643,18 +650,18 @@
 //
 //   // Template: visible implementation of tile.contract, matched by
 //   // where-clause constraints. Compiler can inline and optimize.
-//   func.template<tile.contract> public device @vnni_q8_matvec(%weights: tensor<[%M]x[%K]xi8, #q8_0<block=32>>, %input: tensor<[%K]xf32>) -> (tensor<[%M]xf32>) where [mul(%M, 16), mul(%K, 32)] {
+//   template.def<@tile.contract> public device @vnni_q8_matvec(%weights: tensor<[%M]x[%K]xi8, #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes>>, %input: tensor<[%K]xf32>) -> (tensor<[%M]xf32>) where [mul(%M, 16), mul(%K, 32)] {
 //     ...
 //   }
 //
 //   // Ukernel: opaque implementation, matched by same constraints.
-//   func.ukernel<tile.contract> device @vnni_q8_asm(%weights: tensor<[%M]x[%K]xi8, #q8_0<block=32>>, %input: tensor<[%K]xf32>) -> (tensor<[%M]xf32>) where [mul(%M, 16), mul(%K, 32)]
+//   template.ukernel<@tile.contract> device @vnni_q8_asm(%weights: tensor<[%M]x[%K]xi8, #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes>>, %input: tensor<[%K]xf32>) -> (tensor<[%M]xf32>) where [mul(%M, 16), mul(%K, 32)]
 //
 //   // Call: runtime function call.
 //   %r = func.call @negate(%input) : (tensor<4x4xf32>) -> (tensor<4x4xf32>)
 //
 //   // Apply: compile-time contract demand.
-//   %r = func.apply<tile.contract>(%w, %x) : (tensor<16x32xi8, #q8_0<block=32>>, tensor<32xf32>) -> (tensor<16xf32>)
+//   %r = template.apply<@tile.contract>(%w, %x) : (tensor<16x32xi8, #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes>>, tensor<32xf32>) -> (tensor<16xf32>)
 //
 //   // Return: exit function body.
 //   func.return %result : tensor<[%M]xf32>
@@ -826,7 +833,7 @@
 //
 // With user-assigned names (what a human or agent writes):
 //
-//   #enc = #q8_0<block=32>
+//   #enc = #encoding.operand<element_format=i8, payload_elements=32, payload_packing=dense_lanes>
 //
 //   func.def @tiled_matvec(%weights: tensor<[%M]x4xf32>, %input: tensor<4xf32>, %output: tensor<[%M]xf32>) -> (%output as tensor<[%M]xf32>) {
 //     %c0 = index.constant 0 : index

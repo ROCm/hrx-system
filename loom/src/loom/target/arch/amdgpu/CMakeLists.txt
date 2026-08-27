@@ -6,23 +6,6 @@
 #                                                                              #
 # To disable autogeneration for this file entirely, delete this header.        #
 ################################################################################
-if(LOOM_TARGET_ARCH_AMDGPU)
-
-set(_LOOM_AMDGPU_ISA_XML_SOURCE_DIR
-  "${PROJECT_BINARY_DIR}/_deps/amdgpu_isa_xml-src"
-)
-loom_low_descriptor_data_archive(
-  NAME
-    loom_amdgpu_isa_xml
-  SOURCE_DIR
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}"
-  URLS
-    "https://gpuopen.com/download/AMD_GPU_MR_ISA_XML_2026_03_05.zip"
-  SHA256
-    "1f17587abc9d0d355cf6f65bdba7496838b4e8313922769199689615c434965c"
-)
-
-endif()
 
 iree_add_all_subdirs()
 
@@ -62,6 +45,21 @@ loom_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
+    buffer_resource
+  HDRS
+    "buffer_resource.h"
+  SRCS
+    "buffer_resource.c"
+  DEPS
+    ::target_info_defs
+    iree::base
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
 loom_generated_cc_library(
   NAME
     target_info
@@ -79,19 +77,28 @@ loom_generated_cc_library(
     "--header"
   GENERATED_HDRS
     "target_info.h"
-  ARGS
-    "--isa-xml=cdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "--isa-xml=cdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "--isa-xml=rdna3:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "--isa-xml=rdna3_5:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-  INPUTS
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna3.xml"
-    "loom_amdgpu_isa_xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_cdna4.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna3_5.xml"
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
+  EXTRA_OUTPUT_FLAGS
+    "--cache-policy-encoding-rows"
+    "--cache-policy-temporal-th"
+    "--lds-bank-service-model-rows"
+    "--matrix-coexecution-source-layouts"
+    "--low-registry-tables"
+    "--encoding-field-ids"
+    "--encoding-tables"
+    "--low-alias-source"
+    "--target-record-tables"
+    "--occupancy-model-tables"
+  EXTRA_OUTPUTS
+    "memory_cache_policy_encoding_rows.inl"
+    "memory_cache_policy_temporal_th.inl"
+    "lds_bank_service_model_rows.inl"
+    "matrix_coexecution_source_layouts.inl"
+    "low_registry_tables.inl"
+    "encoding_field_ids.inl"
+    "encoding_tables.inl"
+    "low_aliases.c"
+    "target_records_tables.inl"
+    "occupancy_model_tables.c"
   DEPS
     ::target_info_defs
     iree::base
@@ -114,6 +121,76 @@ loom_cc_test(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
+    facts
+  HDRS
+    "facts.h"
+  SRCS
+    "facts.c"
+  DEPS
+    ::target_info
+    ::target_info_defs
+    iree::base
+    loom::target::facts
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
+    profile
+  HDRS
+    "profile.h"
+  SRCS
+    "profile.c"
+  DEPS
+    ::facts
+    ::target_info
+    iree::base
+    loom::target::arch::amdgpu::records::target_records
+    loom::target::profile
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_test(
+  NAME
+    profile_test
+  SRCS
+    "profile_test.cc"
+  DEPS
+    ::profile
+    ::target_info
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::target::arch::amdgpu::records::target_records
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
+    artifact_profile
+  HDRS
+    "artifact_profile.h"
+  SRCS
+    "artifact_profile.c"
+  DEPS
+    ::profile
+    ::target_info
+    iree::base
+    iree::hal::executable::amdgpu::target_id
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_test(
   NAME
     registers_test
@@ -121,11 +198,11 @@ loom_cc_test(
     "registers_test.cc"
   DEPS
     ::target_info
+    iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
     loom::codegen::low::descriptors
     loom::target::arch::amdgpu::descriptors::low_registry
-    loom::target::arch::amdgpu::planning::occupancy_model
     loom::target::arch::amdgpu::refs::target_refs
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
@@ -138,10 +215,14 @@ loom_cc_library(
     math_policy
   HDRS
     "math_policy.h"
+  TEXTUAL_HDRS
+    "target_records_tables.inl"
   SRCS
     "math_policy.c"
   DEPS
+    ::target_info_defs
     iree::base
+    loom::target::arch::amdgpu::lower::kinds
     loom::target::math_policy
   PUBLIC
 )
@@ -182,43 +263,74 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
+    vector_packet_legalization
+  HDRS
+    "vector_packet_legalization.h"
+  SRCS
+    "vector_packet_legalization.c"
+  DEPS
+    ::target_info_defs
+    iree::base
+    loom::analysis::view_regions
+    loom::codegen::low::descriptors
+    loom::ir
+    loom::ops::buffer
+    loom::ops::index
+    loom::ops::scf
+    loom::ops::vector
+    loom::rewrite::rewriter
+    loom::target::arch::amdgpu::lower::kinds
+    loom::target::legalization
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
     legalization
   HDRS
     "legalization.h"
   SRCS
     "legalization.c"
   DEPS
+    ::facts
+    ::vector_packet_legalization
     iree::base
     loom::analysis::symbolic_expr
+    loom::codegen::low::descriptors
     loom::ir
+    loom::ops::atomic
     loom::ops::index
     loom::ops::kernel
     loom::ops::scalar
     loom::ops::scf
     loom::ops::vector
+    loom::ops::view
     loom::rewrite::rewriter
     loom::target::arch::amdgpu::lower
     loom::target::arch::amdgpu::lower::kinds
     loom::target::arch::amdgpu::matrix::contract
+    loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_info_defs
     loom::target::legalization
     loom::transforms::vector::to_scalar
+    loom::transforms::view::target_legalization
   PUBLIC
 )
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_cc_library(
+loom_cc_library(
   NAME
     low_aliases
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::low_aliases
-  SOURCE
-    "low_aliases.c"
   HDRS
     "low_aliases.h"
+  SRCS
+    "low_aliases.c"
   DEPS
     iree::base
+  PUBLIC
 )
 endif()
 
@@ -246,17 +358,25 @@ loom_cc_library(
   NAME
     low_verify
   HDRS
+    "instruction_constraints.h"
     "low_verify.h"
   SRCS
+    "instruction_constraints.c"
     "low_verify.c"
   DEPS
     ::error_defs
     ::low_aliases
+    ::target_info_defs
     iree::base
+    loom::codegen::low::descriptors
     loom::codegen::low::diagnostics
+    loom::codegen::low::packet
     loom::codegen::low::verify
     loom::error::error_defs
-    loom::target::arch::amdgpu::ops
+    loom::ops::low
+    loom::target::arch::amdgpu::encoding
+    loom::target::arch::amdgpu::facts
+    loom::target::arch::amdgpu::refs::target_refs
   PUBLIC
 )
 endif()
@@ -275,7 +395,7 @@ loom_cc_library(
     ::low_verify
     ::math_policy
     ::pass_registry
-    ::target_info
+    ::profile
     iree::base
     loom::ir
     loom::pass::builder
@@ -283,7 +403,6 @@ loom_cc_library(
     loom::target::arch::amdgpu::diagnostics::packet_diagnostics
     loom::target::arch::amdgpu::lower
     loom::target::arch::amdgpu::ops
-    loom::target::arch::amdgpu::records::target_records
     loom::target::provider
   PUBLIC
 )
@@ -296,22 +415,35 @@ loom_cc_test(
   SRCS
     "provider_test.cc"
   DEPS
+    ::profile
     ::provider
     iree::base
     iree::base::internal::arena
+    iree::io::stream
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::analysis::symbol_facts
+    loom::codegen::low::pipeline::pass_environment
+    loom::format::bytecode::reader
+    loom::format::bytecode::writer
+    loom::format::text::parser
+    loom::format::text::printer
     loom::ir
+    loom::ops::func
     loom::ops::op_registry
     loom::ops::pass
+    loom::ops::target
+    loom::ops::template
     loom::pass::builder
     loom::pass::registry
     loom::pass::testing::registry_verify
+    loom::pass::tooling
+    loom::target::arch::amdgpu::facts
     loom::target::arch::amdgpu::ops
-    loom::target::arch::amdgpu::records::target_records
     loom::target::arch::amdgpu::target_info
     loom::target::provider
     loom::testing::module_ptr
+    loom::transforms::symbol::template_selection
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
 )

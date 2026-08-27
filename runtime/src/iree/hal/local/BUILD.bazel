@@ -18,12 +18,61 @@ package(
 )
 
 iree_runtime_cc_library(
+    name = "atomic",
+    srcs = ["atomic.c"],
+    hdrs = ["atomic.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "atomic_test",
+    srcs = ["atomic_test.cc"],
+    deps = [
+        ":atomic",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "cpu_device_spec",
+    srcs = ["cpu_device_spec.c"],
+    hdrs = ["cpu_device_spec.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/base:cpu_data",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "cpu_device_spec_test",
+    srcs = ["cpu_device_spec_test.cc"],
+    deps = [
+        ":cpu_device_spec",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "device_spec_builder",
     srcs = ["device_spec_builder.c"],
     hdrs = ["device_spec_builder.h"],
     deps = [
+        ":atomic",
+        ":cpu_device_spec",
         ":executable_loader",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:cpu",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/memory:cpu_slab_provider",
         "//runtime/src/iree/hal/utils:device_spec_builder",
@@ -34,12 +83,24 @@ iree_runtime_cc_test(
     name = "device_spec_builder_test",
     srcs = ["device_spec_builder_test.cc"],
     deps = [
+        ":atomic",
+        ":cpu_device_spec",
         ":device_spec_builder",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/local/loaders:static_library_loader",
         "//runtime/src/iree/hal/memory:cpu_slab_provider",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "executable_data",
+    srcs = ["executable_data.c"],
+    hdrs = ["executable_data.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/utils:elf_format",
     ],
 )
 
@@ -56,16 +117,6 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
-    name = "executable_format",
-    srcs = ["executable_format.c"],
-    hdrs = ["executable_format.h"],
-    deps = [
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/hal/utils:elf_format",
-    ],
-)
-
-iree_runtime_cc_library(
     name = "executable_library",
     hdrs = ["executable_library.h"],
 )
@@ -74,6 +125,7 @@ iree_runtime_cc_benchmark(
     name = "executable_library_benchmark",
     srcs = ["executable_library_benchmark.c"],
     deps = [
+        ":device_spec_builder",
         ":executable_environment",
         ":executable_library",
         ":local",
@@ -135,6 +187,18 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_test(
+    name = "executable_library_util_test",
+    srcs = ["executable_library_util_test.cc"],
+    deps = [
+        ":executable_library_util",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_runtime_cc_library(
     name = "executable_plugin",
     hdrs = ["executable_plugin.h"],
@@ -151,6 +215,19 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "executable_plugin_test",
+    srcs = ["executable_plugin_test.cc"],
+    deps = [
+        ":executable_plugin",
+        ":executable_plugin_manager",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/local/plugins:static_plugin",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -194,15 +271,14 @@ iree_runtime_cc_library(
     name = "local",
     srcs = [
         "inline_command_buffer.c",
-        "local_executable_cache.c",
     ],
     hdrs = [
         "executable_loader.h",
         "inline_command_buffer.h",
         "local_executable.h",
-        "local_executable_cache.h",
     ],
     deps = [
+        ":atomic",
         ":executable_environment",
         ":executable_library",
         ":profile",

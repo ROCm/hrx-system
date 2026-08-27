@@ -418,6 +418,14 @@ loom_value_id_t loom_test_gen_values_pick_for_constraint(
       }
       return id;
     }
+    case LOOM_TYPE_CONSTRAINT_I32: {
+      loom_value_id_t id =
+          loom_test_gen_values_pick_typed(gen, values, LOOM_SCALAR_TYPE_I32);
+      if (id != LOOM_VALUE_ID_INVALID && out_type) {
+        *out_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+      }
+      return id;
+    }
     case LOOM_TYPE_CONSTRAINT_ANY: {
       loom_value_id_t id = loom_test_gen_values_pick_any(gen, values);
       if (id != LOOM_VALUE_ID_INVALID && out_type) {
@@ -431,7 +439,7 @@ loom_value_id_t loom_test_gen_values_pick_for_constraint(
       break;
   }
   // General path: scan all values for those satisfying the constraint.
-  // This handles SCALAR, VECTOR, TILE, TENSOR, POOL, GROUP, ENCODING, and any
+  // This handles SCALAR, VECTOR, TILE, TENSOR, POOL, ENCODING, and any
   // future constraints without needing per-constraint bucket infrastructure.
   uint16_t candidates[LOOM_TEST_GEN_VALUES_MAX_CAPACITY];
   uint16_t candidate_count = 0;
@@ -765,7 +773,7 @@ iree_status_t loom_test_gen_module(loom_test_gen_t* gen,
     loom_block_t* entry_block = loom_region_entry_block(body);
     for (uint16_t j = 0; j < entry_block->arg_count; ++j) {
       loom_value_id_t arg_id = loom_block_arg_id(entry_block, j);
-      loom_value_t* arg_val = &module->values.entries[arg_id];
+      loom_value_t* arg_val = loom_module_value(module, arg_id);
       loom_test_gen_values_add(&values, arg_id, arg_val->type);
     }
 

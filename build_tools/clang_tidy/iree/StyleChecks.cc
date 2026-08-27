@@ -26,6 +26,7 @@
 #include "clang/Lex/PPCallbacks.h"
 #include "clang/Lex/Preprocessor.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Path.h"
 
 namespace clang::tidy::iree {
 namespace {
@@ -59,9 +60,10 @@ bool IsTestFilename(StringRef Filename) {
   if (Filename.empty()) {
     return false;
   }
+  StringRef Basename = llvm::sys::path::filename(Filename);
   return Filename.contains("/test/") || Filename.contains("/testing/") ||
-         Filename.contains("/cts/") || Filename.contains("_test.") ||
-         Filename.contains("_test_") || Filename.ends_with("test_base.h");
+         Filename.contains("/cts/") || Basename.contains("_test.") ||
+         Basename.contains("_test_") || Basename == "test_base.h";
 }
 
 bool FirstMacroArgumentContainsIdentifier(const MacroArgs* Args,
@@ -173,10 +175,61 @@ const Expr* IgnoreExpressionNoise(const Expr* Expr) {
   return Expr->IgnoreParenImpCasts();
 }
 
+bool IsDiscardedAssertMacro(StringRef Name) {
+  return Name == "IREE_ASSERT" || Name == "IREE_ASSERT_ARGUMENT" ||
+         Name == "IREE_ASSERT_TRUE" || Name == "IREE_ASSERT_FALSE" ||
+         Name == "IREE_ASSERT_EQ" || Name == "IREE_ASSERT_NE" ||
+         Name == "IREE_ASSERT_LE" || Name == "IREE_ASSERT_LT" ||
+         Name == "IREE_ASSERT_GE" || Name == "IREE_ASSERT_GT" ||
+         Name == "IREE_ASSERT_ALIGNED" || Name == "_IREE_ASSERT_CMP";
+}
+
+std::optional<std::pair<SourceLocation, std::string>> DiscardedAssertMacro(
+    SourceLocation Location, const SourceManager& SourceManager,
+    const LangOptions& LangOptions) {
+  while (Location.isValid() && Location.isMacroID()) {
+    const StringRef MacroName =
+        Lexer::getImmediateMacroName(Location, SourceManager, LangOptions);
+    Location = SourceManager.getImmediateMacroCallerLoc(Location);
+    if (IsDiscardedAssertMacro(MacroName)) {
+      return std::make_pair(Location, MacroName.str());
+    }
+  }
+  return std::nullopt;
+}
+
 bool IsNullPointerConstant(const Expr* Expr, ASTContext& Context) {
   Expr = IgnoreExpressionNoise(Expr);
   return Expr && Expr->isNullPointerConstant(Context,
                                              Expr::NPC_ValueDependentIsNotNull);
+}
+
+bool CallHasOutputArgument(const CallExpr* Call, ASTContext& Context) {
+  const FunctionDecl* Callee = Call->getDirectCallee();
+  if (!Callee) {
+    return false;
+  }
+  const unsigned ArgumentCount =
+      std::min(Call->getNumArgs(), Callee->getNumParams());
+  for (unsigned I = 0; I < ArgumentCount; ++I) {
+    const ParmVarDecl* Parameter = Callee->getParamDecl(I);
+    if (!Parameter->getName().starts_with("out_")) {
+      continue;
+    }
+    const QualType ParameterType = Parameter->getType().getCanonicalType();
+    if (ParameterType->isPointerType()) {
+      if (ParameterType->getPointeeType().isConstQualified() ||
+          IsNullPointerConstant(Call->getArg(I), Context)) {
+        continue;
+      }
+      return true;
+    }
+    if (ParameterType->isReferenceType() &&
+        !ParameterType.getNonReferenceType().isConstQualified()) {
+      return true;
+    }
+  }
+  return false;
 }
 
 const Expr* NonNullGuardedExpression(const Expr* Condition,
@@ -547,6 +600,39 @@ std::optional<std::string> DesignatedInitializerReplacementText(
 }
 
 }  // namespace
+
+AssertOutputCallCheck::AssertOutputCallCheck(StringRef Name,
+                                             ClangTidyContext* Context)
+    : ClangTidyCheck(Name, Context) {}
+
+void AssertOutputCallCheck::registerMatchers(
+    ast_matchers::MatchFinder* Finder) {
+  using namespace ast_matchers;
+  Finder->addMatcher(
+      callExpr(unless(isExpansionInSystemHeader())).bind("assert_call"), this);
+}
+
+void AssertOutputCallCheck::check(
+    const ast_matchers::MatchFinder::MatchResult& Result) {
+  const auto* Call = Result.Nodes.getNodeAs<CallExpr>("assert_call");
+  if (!Call || !CallHasOutputArgument(Call, *Result.Context)) {
+    return;
+  }
+  const SourceManager& SourceManager = *Result.SourceManager;
+  if (IsExternalMacroBody(Call->getBeginLoc(), SourceManager)) {
+    return;
+  }
+  std::optional<std::pair<SourceLocation, std::string>> AssertMacro =
+      DiscardedAssertMacro(Call->getBeginLoc(), SourceManager,
+                           Result.Context->getLangOpts());
+  if (!AssertMacro) {
+    return;
+  }
+  diag(AssertMacro->first,
+       "call with an output parameter in %0 is discarded in release "
+       "builds; evaluate the call before the assertion")
+      << AssertMacro->second;
+}
 
 DirectGotoCheck::DirectGotoCheck(StringRef Name, ClangTidyContext* Context)
     : ClangTidyCheck(Name, Context) {}

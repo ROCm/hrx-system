@@ -11,9 +11,10 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/allocator.h"
+#include "iree/hal/atomic.h"
 #include "iree/hal/buffer.h"
-#include "iree/hal/executable_cache.h"
 #include "iree/hal/memory/asan.h"
+#include "iree/hal/queue.h"
 #include "iree/hal/semaphore.h"
 #include "iree/hal/topology.h"
 
@@ -122,8 +123,8 @@ typedef struct iree_hal_physical_device_spec_t {
   uint32_t partition_ordinal;
   // Total partition count for the physical device.
   uint32_t partition_count;
-  // Bitmask identifying the physical-device slice covered by this record.
-  uint64_t physical_device_affinity;
+  // Unique affinity bit assigned to this physical-device record.
+  iree_hal_physical_device_affinity_t physical_device_affinity;
 } iree_hal_physical_device_spec_t;
 
 // Logical HAL device identity flags.
@@ -192,8 +193,8 @@ typedef struct iree_hal_memory_heap_spec_t {
   uint64_t allocation_alignment;
   // Maximum single allocation size in bytes.
   uint64_t maximum_allocation_size;
-  // Physical device affinity for allocations in this heap.
-  uint64_t physical_device_affinity;
+  // Nonzero physical-device set supporting allocations in this heap.
+  iree_hal_physical_device_affinity_t physical_device_affinity;
   // Stable memory heap flags.
   iree_hal_memory_heap_spec_flags_t flags;
 } iree_hal_memory_heap_spec_t;
@@ -219,6 +220,9 @@ typedef struct iree_hal_memory_type_spec_t {
   uint64_t minimum_alignment;
   // Optimal transfer granularity in bytes.
   uint64_t optimal_transfer_granularity;
+  // Atomic operations supported by naturally aligned locations allocated from
+  // this memory type. Queue-family capabilities are required independently.
+  iree_hal_atomic_operation_capabilities_t atomic_operations;
   // Stable memory type flags.
   iree_hal_memory_type_spec_flags_t flags;
 } iree_hal_memory_type_spec_t;
@@ -394,6 +398,8 @@ typedef enum iree_hal_queue_family_role_flag_bits_e {
   IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_COLLECTIVE = 1u << 3,
   // Queue family can produce profiling timestamps.
   IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_PROFILING = 1u << 4,
+  // Queue family can execute atomic memory operations.
+  IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC = 1u << 5,
 } iree_hal_queue_family_role_flag_bits_t;
 
 // Queue family capability flags.
@@ -411,14 +417,24 @@ typedef struct iree_hal_queue_family_spec_t {
   uint32_t queue_count;
   // Number of priority levels in the family.
   uint32_t priority_count;
-  // Valid timestamp bit count.
+  // Number of low bits defined in a tick captured on this family's queues.
   uint32_t timestamp_valid_bits;
-  // Timestamp frequency in ticks per second.
+  // Ticks per second of the timestamp domain this family's queues capture in.
   uint64_t timestamp_frequency_hz;
-  // Physical device affinity for queues in this family.
-  uint64_t physical_device_affinity;
+  // Nonzero physical-device set serviced by queues in this family.
+  iree_hal_physical_device_affinity_t physical_device_affinity;
+  // Queue-affinity routing lanes selecting this family. One lane may route
+  // among several family queues. Atomic waits require callers to select
+  // exactly one bit from this mask.
+  iree_hal_queue_affinity_t queue_affinity;
   // Queue family role flags.
   iree_hal_queue_family_role_flags_t role_flags;
+  // Atomic operations and wait predicates supported by this queue family.
+  // These capabilities are intersected with the target memory capabilities.
+  iree_hal_atomic_capabilities_t atomic_capabilities;
+  // Subset of |atomic_capabilities| implemented without occupying dispatch
+  // resources. A zero-compute wait may still occupy its command queue.
+  iree_hal_atomic_capabilities_t zero_compute_atomic_capabilities;
   // Queue family capability flags.
   iree_hal_queue_family_spec_flags_t flags;
 } iree_hal_queue_family_spec_t;
@@ -556,7 +572,8 @@ typedef uint32_t iree_hal_device_timing_spec_flags_t;
 typedef enum iree_hal_device_timing_spec_flag_bits_e {
   // No timing or profiling capabilities are present.
   IREE_HAL_DEVICE_TIMING_SPEC_FLAG_NONE = 0u,
-  // Device timestamps are available.
+  // The timestamp_valid_bits and timestamp_frequency_hz facts below are
+  // populated for the primary device timestamp domain.
   IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS = 1u << 0,
   // Host/device clock correlation is available.
   IREE_HAL_DEVICE_TIMING_SPEC_FLAG_HOST_CORRELATION = 1u << 1,
@@ -572,9 +589,11 @@ typedef enum iree_hal_device_timing_spec_flag_bits_e {
 
 // Stable timing and profiling capability facts.
 typedef struct iree_hal_device_timing_spec_t {
-  // Valid timestamp bit count for the primary device timestamp domain.
+  // Number of low bits defined in a primary device timestamp domain tick.
+  // Meaningful only when IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS.
   uint32_t timestamp_valid_bits;
-  // Timestamp frequency in ticks per second.
+  // Primary device timestamp domain rate in ticks per second. Meaningful only
+  // when IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS.
   uint64_t timestamp_frequency_hz;
   // Stable timing and profiling capability flags.
   iree_hal_device_timing_spec_flags_t flags;
@@ -611,23 +630,6 @@ typedef struct iree_hal_device_sanitizer_spec_t {
 // Executable target facts
 //===----------------------------------------------------------------------===//
 
-// Stable executable format flags.
-typedef uint32_t iree_hal_executable_format_spec_flags_t;
-typedef enum iree_hal_executable_format_spec_flag_bits_e {
-  // No executable format flags are present.
-  IREE_HAL_EXECUTABLE_FORMAT_SPEC_FLAG_NONE = 0u,
-} iree_hal_executable_format_spec_flag_bits_t;
-
-// Stable executable artifact format accepted by a device executable cache.
-typedef struct iree_hal_executable_format_spec_t {
-  // Artifact format string.
-  iree_string_view_t format;
-  // Caching modes supported for this format.
-  iree_hal_executable_caching_mode_t caching_modes;
-  // Stable executable format flags.
-  iree_hal_executable_format_spec_flags_t flags;
-} iree_hal_executable_format_spec_t;
-
 // Executable target kind.
 typedef uint32_t iree_hal_executable_target_kind_t;
 typedef enum iree_hal_executable_target_kind_e {
@@ -643,6 +645,28 @@ typedef enum iree_hal_executable_target_kind_e {
   IREE_HAL_EXECUTABLE_TARGET_KIND_COMPOSITE = 4,
 } iree_hal_executable_target_kind_e;
 
+// Executable target kinds accepted by a selection request.
+typedef uint32_t iree_hal_executable_target_kind_flags_t;
+typedef enum iree_hal_executable_target_kind_flag_bits_e {
+  // No kind constraint is applied.
+  IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_NONE = 0u,
+  // Exact targets are accepted.
+  IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT =
+      1u << IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
+  // Generic targets are accepted.
+  IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC =
+      1u << IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC,
+  // Virtual targets are accepted.
+  IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_VIRTUAL =
+      1u << IREE_HAL_EXECUTABLE_TARGET_KIND_VIRTUAL,
+  // Simulator targets are accepted.
+  IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_SIMULATOR =
+      1u << IREE_HAL_EXECUTABLE_TARGET_KIND_SIMULATOR,
+  // Composite targets are accepted.
+  IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_COMPOSITE =
+      1u << IREE_HAL_EXECUTABLE_TARGET_KIND_COMPOSITE,
+} iree_hal_executable_target_kind_flag_bits_t;
+
 // Stable executable target flags.
 typedef uint32_t iree_hal_executable_target_flags_t;
 typedef enum iree_hal_executable_target_flag_bits_e {
@@ -650,32 +674,22 @@ typedef enum iree_hal_executable_target_flag_bits_e {
   IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE = 0u,
 } iree_hal_executable_target_flag_bits_t;
 
-// Stable executable target accepted by a device executable cache.
+// Stable executable target accepted by a device.
+//
+// |family| owns the grammar and semantics of |target_key|. Generic HAL code
+// treats the key as an opaque canonical identity and never parses family
+// features or compatibility rules from it.
 typedef struct iree_hal_executable_target_t {
-  // Target family such as amdgpu, spirv, ireevm, or local.
+  // Namespace owning the target key grammar, such as amdgpu, cpu, or spirv.
   iree_string_view_t family;
-  // Target architecture within the family.
-  iree_string_view_t architecture;
-  // Target processor within the architecture.
-  iree_string_view_t processor;
-  // Target feature string.
-  iree_string_view_t features;
-  // Artifact format accepted by the loader.
-  iree_string_view_t artifact_format;
-  // Runtime ABI expected by the artifact.
-  iree_string_view_t runtime_abi;
-  // Loader namespace that interprets the artifact.
-  iree_string_view_t loader_namespace;
-  // Canonical loader target string used for cache keys and reports.
-  iree_string_view_t loader_target;
-  // Metadata schema expected by the loader.
-  iree_string_view_t metadata_schema;
+  // Canonical family-owned target identity.
+  iree_string_view_t target_key;
   // Executable target kind.
   iree_hal_executable_target_kind_t kind;
   // Selection priority where larger values are preferred.
   uint32_t priority;
-  // Physical device affinity for this target.
-  uint64_t physical_device_affinity;
+  // Nonzero physical-device set on which this target can execute.
+  iree_hal_physical_device_affinity_t physical_device_affinity;
   // Stable executable target flags.
   iree_hal_executable_target_flags_t flags;
 } iree_hal_executable_target_t;
@@ -689,10 +703,6 @@ typedef enum iree_hal_device_executable_spec_flag_bits_e {
 
 // Stable executable facts for the device.
 typedef struct iree_hal_device_executable_spec_t {
-  // Number of executable format records.
-  iree_host_size_t format_count;
-  // Executable format records.
-  const iree_hal_executable_format_spec_t* formats;
   // Number of executable target records.
   iree_host_size_t target_count;
   // Executable target records.
@@ -701,56 +711,42 @@ typedef struct iree_hal_device_executable_spec_t {
   iree_hal_device_executable_spec_flags_t flags;
 } iree_hal_device_executable_spec_t;
 
-// Executable target selection policy.
-typedef uint32_t iree_hal_executable_target_selection_policy_t;
-typedef enum iree_hal_executable_target_selection_policy_e {
-  // Select the best exact target for the device.
-  IREE_HAL_EXECUTABLE_TARGET_SELECTION_POLICY_EXACT_DEVICE = 0,
-  // Select a target matching explicitly provided fields.
-  IREE_HAL_EXECUTABLE_TARGET_SELECTION_POLICY_MATCH_FIELDS = 1,
-  // Select a compatible generic target matching provided fields.
-  IREE_HAL_EXECUTABLE_TARGET_SELECTION_POLICY_COMPATIBLE_GENERIC = 2,
-} iree_hal_executable_target_selection_policy_e;
-
 // Executable target selection request.
 //
-// Empty string filters are wildcards. A zero physical-device affinity does not
-// constrain target affinity.
+// Empty string filters, zero kind flags, and zero physical-device affinity are
+// wildcards. Wildcards are request semantics only; advertised target facts are
+// always concrete.
 typedef struct iree_hal_executable_target_selection_t {
-  // Selection policy.
-  iree_hal_executable_target_selection_policy_t policy;
   // Optional target family filter.
   iree_string_view_t family;
-  // Optional target architecture filter.
-  iree_string_view_t architecture;
-  // Optional target processor filter.
-  iree_string_view_t processor;
-  // Optional target features filter.
-  iree_string_view_t features;
-  // Optional artifact format filter.
-  iree_string_view_t artifact_format;
-  // Optional runtime ABI filter.
-  iree_string_view_t runtime_abi;
-  // Optional loader namespace filter.
-  iree_string_view_t loader_namespace;
-  // Optional canonical loader target filter.
-  iree_string_view_t loader_target;
-  // Optional metadata schema filter.
-  iree_string_view_t metadata_schema;
-  // Optional physical-device affinity filter.
-  uint64_t physical_device_affinity;
+  // Optional exact family-owned target key filter.
+  iree_string_view_t target_key;
+  // Acceptable executable target kinds.
+  iree_hal_executable_target_kind_flags_t kind_flags;
+  // Optional physical-device set the selected target must fully cover.
+  iree_hal_physical_device_affinity_t physical_device_affinity;
 } iree_hal_executable_target_selection_t;
 
-// Executable target selection result.
-typedef uint32_t iree_hal_executable_target_selection_result_t;
-typedef enum iree_hal_executable_target_selection_result_e {
+// Executable target selection outcome.
+typedef uint32_t iree_hal_executable_target_selection_outcome_t;
+typedef enum iree_hal_executable_target_selection_outcome_e {
   // A single target was selected.
-  IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_SELECTED = 0,
+  IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED = 0,
   // No target matched the selection request.
-  IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_NO_MATCH = 1,
+  IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH = 1,
   // Multiple targets matched with the same selection rank.
-  IREE_HAL_EXECUTABLE_TARGET_SELECTION_RESULT_AMBIGUOUS = 2,
-} iree_hal_executable_target_selection_result_e;
+  IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_AMBIGUOUS = 2,
+} iree_hal_executable_target_selection_outcome_e;
+
+// Result of selecting an executable target from one immutable device spec.
+typedef struct iree_hal_executable_target_selection_result_t {
+  // Selection outcome.
+  iree_hal_executable_target_selection_outcome_t outcome;
+  // Borrowed selected target valid while the source spec is retained, or NULL.
+  const iree_hal_executable_target_t* target;
+  // Target ordinal in the spec executable target array, or IREE_HOST_SIZE_MAX.
+  iree_host_size_t target_ordinal;
+} iree_hal_executable_target_selection_result_t;
 
 //===----------------------------------------------------------------------===//
 // Driver-local extension facets
@@ -758,7 +754,7 @@ typedef enum iree_hal_executable_target_selection_result_e {
 
 // Driver-local typed facet payload preserved by core HAL.
 typedef struct iree_hal_device_spec_facet_t {
-  // Stable facet schema identifier.
+  // Non-empty stable schema identifier unique within the device spec.
   iree_string_view_t schema_id;
   // Facet schema version.
   uint32_t schema_version;
@@ -813,9 +809,14 @@ IREE_API_EXPORT void iree_hal_device_spec_retain(iree_hal_device_spec_t* spec);
 // Releases the given |spec| from the caller.
 IREE_API_EXPORT void iree_hal_device_spec_release(iree_hal_device_spec_t* spec);
 
-// Returns the stable digest of the canonical serialized spec image.
+// Returns a stable non-cryptographic fingerprint of the canonical serialized
+// spec image.
+//
+// Equal canonical images always have equal fingerprints. Fingerprints may
+// collide and must only be used to accelerate lookup or bucketing; callers
+// establishing spec identity must compare the canonical serialized images.
 IREE_API_EXPORT uint64_t
-iree_hal_device_spec_digest(const iree_hal_device_spec_t* spec);
+iree_hal_device_spec_fingerprint(const iree_hal_device_spec_t* spec);
 
 // Serializes |spec| into a canonical binary byte image.
 //
@@ -901,8 +902,16 @@ iree_hal_device_spec_find_facet(const iree_hal_device_spec_t* spec,
 IREE_API_EXPORT iree_hal_executable_target_selection_result_t
 iree_hal_device_spec_select_executable_target(
     const iree_hal_device_spec_t* spec,
-    const iree_hal_executable_target_selection_t* selection,
-    const iree_hal_executable_target_t** out_target);
+    const iree_hal_executable_target_selection_t* selection);
+
+// Returns the ordinal of |target| when it is an exact borrowed row from
+// |spec|, or IREE_HOST_SIZE_MAX when it is NULL, foreign, or a copied value.
+//
+// This provides a status-free ownership check for APIs that require target
+// identity instead of merely equivalent target contents.
+IREE_API_EXPORT iree_host_size_t iree_hal_device_spec_executable_target_ordinal(
+    const iree_hal_device_spec_t* spec,
+    const iree_hal_executable_target_t* target);
 
 #ifdef __cplusplus
 }  // extern "C"

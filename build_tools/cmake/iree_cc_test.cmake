@@ -143,6 +143,7 @@ function(iree_cc_test)
 
   string(REPLACE "::" "/" _PACKAGE_PATH ${_PACKAGE_NS})
   set(_NAME_PATH "${_PACKAGE_PATH}/${_RULE_NAME}")
+  set(_TEST_BUILD_TARGET "${_NAME}")
   set(_IREE_TEST_CAN_REGISTER OFF)
 
   set(_ENVIRONMENT_VARS)
@@ -204,6 +205,7 @@ function(iree_cc_test)
 
     # Custom target to drive the bundling.
     add_custom_target(${_NAME}_bundle ALL DEPENDS "${_OUTPUT_MJS}")
+    set(_TEST_BUILD_TARGET "${_NAME}_bundle")
 
     add_test(
       NAME
@@ -225,6 +227,10 @@ function(iree_cc_test)
     iree_configure_test(${_NAME_PATH})
     set(_IREE_TEST_CAN_REGISTER ON)
   endif()
+  iree_register_test_build_targets(
+    "${_NAME_PATH}"
+    TARGETS "${_TEST_BUILD_TARGET}"
+  )
 
   # TODO(benvanik): add an iree_runtime_cc_test that wraps this and adds the
   # runtime-specific options. Today all tests use iree_cc_test, but since this

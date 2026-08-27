@@ -14,12 +14,14 @@ loom_cc_library(
     facts
   HDRS
     "facts.h"
+    "float_facts.h"
   SRCS
     "facts.c"
+    "float_facts.c"
   DEPS
     ::ir
     iree::base
-    loom::util::math
+    iree::base::internal
   PUBLIC
 )
 
@@ -28,8 +30,10 @@ loom_cc_test(
     facts_test
   SRCS
     "facts_test.cc"
+    "float_facts_test.cc"
   DEPS
     ::facts
+    iree::base::internal::fpu_state
     iree::testing::gtest
     iree::testing::gtest_main
 )
@@ -39,29 +43,44 @@ loom_cc_library(
     ir
   HDRS
     "attribute.h"
+    "attribute_schema.h"
     "context.h"
     "encoding.h"
+    "function_version.h"
     "ir.h"
     "local_value_domain.h"
     "location.h"
     "module.h"
+    "module_record.h"
+    "parameterized_attr.h"
+    "parameterized_type.h"
     "scalar_type.h"
     "semantics.h"
+    "structural_hash.h"
+    "type_constraint.h"
+    "type_descriptor.h"
     "types.h"
+  TEXTUAL_HDRS
+    "location_tag_table.inc"
+    "scalar_type_table.inc"
   SRCS
     "attribute.c"
     "context.c"
     "encoding.c"
+    "function_version.c"
     "local_value_domain.c"
     "location.c"
     "module.c"
+    "module_record.c"
     "scalar_type.c"
+    "type_constraint.c"
     "types.c"
   DEPS
     iree::base
     iree::base::internal::arena
     loom::error::emitter
     loom::util::bstring
+    loom::util::segmented_storage
   PUBLIC
 )
 
@@ -77,6 +96,18 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    function_version_test
+  SRCS
+    "function_version_test.cc"
+  DEPS
+    ::ir
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 loom_cc_test(
@@ -125,12 +156,14 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::ops::test
+    loom::ops::type_registry
 )
 
 loom_cc_test(
   NAME
     types_test
   SRCS
+    "type_constraint_test.cc"
     "types_test.cc"
   DEPS
     ::ir
@@ -182,6 +215,19 @@ loom_cc_benchmark(
     "symbol_map_benchmark.cc"
   DEPS
     ::symbol_map
+    iree::base
+    iree::base::internal::arena
+    iree::testing::benchmark_main
+  TESTONLY
+)
+
+loom_cc_benchmark(
+  NAME
+    type_intern_benchmark
+  SRCS
+    "type_intern_benchmark.cc"
+  DEPS
+    ::ir
     iree::base
     iree::base::internal::arena
     iree::testing::benchmark_main

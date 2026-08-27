@@ -34,6 +34,16 @@
 //   iree_status_t(IREE_API_PTR* some_callback)(int value);
 #define IREE_API_PTR
 
+// Statically asserts that constants from distinct enum types have the same
+// integer value.
+#if defined(__cplusplus)
+#define IREE_STATIC_ASSERT_ENUM_EQ(lhs, rhs, message) \
+  static_assert(((lhs) + 0) == ((rhs) + 0), message)
+#else
+#define IREE_STATIC_ASSERT_ENUM_EQ(lhs, rhs, message) \
+  _Static_assert(((lhs) + 0) == ((rhs) + 0), message)
+#endif  // defined(__cplusplus)
+
 //===----------------------------------------------------------------------===//
 // IREE_HAVE_ATTRIBUTE
 //===----------------------------------------------------------------------===//
@@ -115,6 +125,19 @@
 #else
 #define IREE_RESTRICT restrict
 #endif  // _MSC_VER
+
+//===----------------------------------------------------------------------===//
+// IREE_THREAD_LOCAL
+//===----------------------------------------------------------------------===//
+
+// Declares storage with a distinct lifetime and value for each thread.
+#if defined(__cplusplus)
+#define IREE_THREAD_LOCAL thread_local
+#elif defined(IREE_COMPILER_MSVC)
+#define IREE_THREAD_LOCAL __declspec(thread)
+#else
+#define IREE_THREAD_LOCAL _Thread_local
+#endif  // __cplusplus
 
 //===----------------------------------------------------------------------===//
 // IREE_ATTRIBUTE_ALWAYS_INLINE / IREE_ATTRIBUTE_NOINLINE

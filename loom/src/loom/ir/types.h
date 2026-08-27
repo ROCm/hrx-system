@@ -16,7 +16,6 @@
 //   Register types:  reg<amdgpu.vgpr x4> (target-owned low payload)
 //   Buffer types:    buffer               (opaque storage identity)
 //   View types:      view<[%M]xf32, %layout> (typed buffer projection)
-//   Group types:     group<scope>         (barrier scoping)
 //   Storage types:   low.storage<workgroup> (function-local byte storage)
 //   Function types:  (f32, i32) -> (f64)  (callable signatures)
 //
@@ -63,9 +62,10 @@
 // slot for address layout. Vector types are pure register lane grids and do not
 // carry layout attachments.
 //
-//   tile<256x256xf32, #q6_k>
-//   tensor<[%N]x[%K]xi8, #q8_0<block=32>>
-//   view<[%N]xf32, #strided<stride=64>>
+//   tile<256x256xf32>
+//   tensor<[%N]x[%K]xi8, #encoding.operand<element_format=i8,
+//       payload_elements=32, payload_packing=dense_lanes>>
+//   view<[%N]xf32, #encoding.layout.strided<strides=[64]>>
 //
 // The encoding/layout attachment is metadata: it doesn't change the logical
 // shape or element type, but determines how bytes map to logical elements.
@@ -73,16 +73,19 @@
 // position (`tile<4xf32, %enc>`, `view<[%N]xf32, %layout>`). Encoding values
 // may use role-qualified types (`encoding<layout>`, `encoding<schema>`,
 // `encoding<storage>`, `encoding<transform>`) so op signatures can declare the
-// exact role they consume. It is parsed as a built-in keyword rather than as a
-// parameterized TypeDef registry entry.
+// exact role they consume. Its optional role parameter is declared in the
+// built-in type registry while its value remains packed into the type header.
 // Static attachments use only attribute parameters:
 //
-//   tile<256xi8, #q8_0<block=32>>
+//   tile<256xi8, #encoding.operand<element_format=i8, payload_elements=32,
+//       payload_packing=dense_lanes>>
 //
 // Dynamic parameters are named operands on encoding.define, and the resulting
 // `%enc` value is attached to shaped types:
 //
-//   %enc = encoding.define #q8_0<block=32> {group_size = %g : index}
+//   %enc = encoding.define #encoding.operand<element_format=i8,
+//       payload_elements=32, payload_packing=dense_lanes>
+//       {group_size = %g : index}
 //       : encoding<schema>
 //   tile<256xi8, %enc>
 //
@@ -115,9 +118,17 @@
 // arg/result types, so the embedded types are stored by value (24
 // bytes each), not interned.
 //
-// Register types reserve dims[0..1] as target-owned payload storage. Core IR
-// only stores and compares the payload structurally; target-low helpers
-// interpret the fields as a register-class identity plus contiguous unit count.
+// Register types without a value type reserve dims[0..1] as inline
+// target-owned payload storage. Register types with a value type use dims[0]
+// as a pointer to arena-owned loom_register_type_data_t. Core IR owns and
+// compares both forms structurally; target-low helpers interpret the carrier
+// payload fields as a register-class identity plus contiguous unit count.
+//
+// Generic parameterized types use dims[0] for an immutable array of attribute
+// parameter slots and dims[1] for their static family descriptor. Compact
+// descriptor-backed built-ins may instead carry one enum parameter in the
+// header payload byte. Their public text layout is declarative metadata and
+// does not affect storage identity.
 //
 // Type equality is structural: callers should use loom_type_equal() on the
 // by-value representation. The module type table deduplicates equal entries,
@@ -134,11 +145,16 @@
 extern "C" {
 #endif
 
+struct loom_attribute_t;
+typedef struct loom_module_t loom_module_t;
+typedef struct loom_parameterized_type_descriptor_t
+    loom_parameterized_type_descriptor_t;
+
 //===----------------------------------------------------------------------===//
 // IDs
 //===----------------------------------------------------------------------===//
 
-// Index into the module's value table (module->values.entries[]).
+// Index into the module's value table.
 // Values are 64-byte cache-line-aligned entries. Prefer passing
 // value IDs over value pointers for stability across IR mutations.
 typedef uint32_t loom_value_id_t;
@@ -233,11 +249,11 @@ typedef uint64_t loom_overflow_dim_t;
 // these constants append-only and map values explicitly in the bytecode
 // reader/writer when the wire format diverges.
 enum loom_type_kind_e {
-  LOOM_TYPE_NONE = 0,       // Absence of a type (no-result ops).
-  LOOM_TYPE_SCALAR = 1,     // f32, i8, index, etc.
-  LOOM_TYPE_TILE = 2,       // tile<[%M]x4xf32>
-  LOOM_TYPE_TENSOR = 3,     // tensor<[%M]xf32>
-  LOOM_TYPE_GROUP = 4,      // group<scope>
+  LOOM_TYPE_NONE = 0,    // Absence of a type (no-result ops).
+  LOOM_TYPE_SCALAR = 1,  // f32, i8, index, etc.
+  LOOM_TYPE_TILE = 2,    // tile<[%M]x4xf32>
+  LOOM_TYPE_TENSOR = 3,  // tensor<[%M]xf32>
+  // Value 4 is intentionally unassigned and must not be reused.
   LOOM_TYPE_FUNCTION = 5,   // (types) -> (types)
   LOOM_TYPE_DIALECT = 6,    // hal.buffer, vm.ref<T>, etc.
   LOOM_TYPE_ENCODING = 7,   // encoding<role> (first-class SSA encoding value)
@@ -247,29 +263,17 @@ enum loom_type_kind_e {
   LOOM_TYPE_BUFFER = 11,    // buffer (opaque storage identity)
   LOOM_TYPE_REGISTER = 12,  // reg<amdgpu.vgpr x4> (target-owned low payload)
   LOOM_TYPE_STORAGE = 13,   // low.storage<workgroup> (function-local storage)
+  LOOM_TYPE_PARAMETERIZED = 14,  // Generic descriptor-backed type.
   LOOM_TYPE_COUNT_,
 };
 
 typedef uint8_t loom_type_kind_t;
 
-// Returns true if |kind| names a real type kind. The LOOM_TYPE_COUNT_
-// sentinel is not a type and must not be serialized or interpreted.
+// Returns true if |kind| names a real type kind. Unassigned values and the
+// LOOM_TYPE_COUNT_ sentinel must not be serialized or interpreted.
 static inline bool loom_type_kind_is_valid(loom_type_kind_t kind) {
-  return (uint32_t)kind < LOOM_TYPE_COUNT_;
+  return (uint32_t)kind < LOOM_TYPE_COUNT_ && kind != 4;
 }
-
-// Group scope kind. Stored in the element_type byte of the type header
-// for LOOM_TYPE_GROUP (that byte is unused for non-shaped types).
-enum loom_group_scope_e {
-  LOOM_GROUP_SCOPE_WORKGROUP = 0,
-  LOOM_GROUP_SCOPE_SUBGROUP = 1,
-  LOOM_GROUP_SCOPE_COUNT_,
-};
-// Raw group-scope storage.
-typedef uint8_t loom_group_scope_t;
-
-// Returns the name string for a group scope kind, or NULL if invalid.
-const char* loom_group_scope_name(loom_group_scope_t scope);
 
 // Semantic encoding role. Stored in the element_type byte of the type header
 // for LOOM_TYPE_ENCODING.
@@ -295,13 +299,6 @@ static inline bool loom_encoding_role_is_valid(loom_encoding_role_t role) {
   return (uint32_t)role < LOOM_ENCODING_ROLE_COUNT_;
 }
 
-// Returns the short text spelling for an encoding role, or NULL if invalid.
-const char* loom_encoding_role_name(loom_encoding_role_t role);
-
-// Parses the short text spelling for an encoding role.
-bool loom_encoding_role_parse(iree_string_view_t text,
-                              loom_encoding_role_t* out_role);
-
 // Function-local storage space. Stored in the element_type byte of the type
 // header for LOOM_TYPE_STORAGE.
 enum loom_storage_space_e {
@@ -322,13 +319,6 @@ typedef uint8_t loom_storage_space_t;
 static inline bool loom_storage_space_is_valid(loom_storage_space_t space) {
   return (uint32_t)space < LOOM_STORAGE_SPACE_COUNT_;
 }
-
-// Returns the short text spelling for a storage space, or NULL if invalid.
-const char* loom_storage_space_name(loom_storage_space_t space);
-
-// Parses the short text spelling for a storage space.
-bool loom_storage_space_parse(iree_string_view_t text,
-                              loom_storage_space_t* out_space);
 
 // Type flags (packed into header bits 20-23).
 enum loom_type_flags_e {
@@ -367,9 +357,8 @@ typedef uint16_t loom_encoding_flags_t;
 typedef struct loom_type_t {
   // Packed header:
   //   [0:7]   loom_type_kind_t
-  //   [8:15]  loom_scalar_type_t (shaped types), loom_group_scope_t (group),
-  //           loom_encoding_role_t (encoding), or loom_storage_space_t
-  //           (storage)
+  //   [8:15]  loom_scalar_type_t (shaped types), loom_encoding_role_t
+  //           (encoding), or loom_storage_space_t (storage)
   //   [16:19] rank (0-LOOM_TYPE_MAX_RANK for shaped types, 0 otherwise)
   //   [20:23] loom_type_flags_e (inline_dims, all_static)
   //   [24:31] reserved
@@ -392,7 +381,23 @@ typedef struct loom_type_t {
 } loom_type_t;
 
 // Static assert: type must be exactly 24 bytes, no padding.
-_Static_assert(sizeof(loom_type_t) == 24, "loom_type_t must be 24 bytes");
+static_assert(sizeof(loom_type_t) == 24, "loom_type_t must be 24 bytes");
+
+// Arena-owned payload for a register type carrying a semantic value type.
+// Stored via pointer in dims[0] of a non-inline LOOM_TYPE_REGISTER type.
+typedef struct loom_register_type_data_t {
+  // First target-owned carrier payload word.
+  uint64_t carrier_payload0;
+
+  // Second target-owned carrier payload word.
+  uint64_t carrier_payload1;
+
+  // Semantic type of the value carried by the physical register allocation.
+  loom_type_t value_type;
+} loom_register_type_data_t;
+
+static_assert(sizeof(loom_register_type_data_t) == 40,
+              "loom_register_type_data_t must be 40 bytes");
 
 // Arena-allocated overflow data for function types. Stored via pointer
 // in dims[0] of a LOOM_TYPE_FUNCTION loom_type_t. The types array
@@ -409,8 +414,8 @@ typedef struct loom_func_type_data_t {
   loom_type_t types[];
 } loom_func_type_data_t;
 
-_Static_assert(sizeof(loom_func_type_data_t) == 8,
-               "loom_func_type_data_t header must be 8 bytes");
+static_assert(sizeof(loom_func_type_data_t) == 8,
+              "loom_func_type_data_t header must be 8 bytes");
 
 // --- Header accessors ---
 
@@ -418,8 +423,13 @@ static inline loom_type_kind_t loom_type_kind(loom_type_t type) {
   return (loom_type_kind_t)(type.header & 0xFF);
 }
 
+// Returns the kind-specific byte stored in header bits 8-15.
+static inline uint8_t loom_type_payload(loom_type_t type) {
+  return (uint8_t)((type.header >> 8) & 0xFF);
+}
+
 static inline loom_scalar_type_t loom_type_element_type(loom_type_t type) {
-  return (loom_scalar_type_t)((type.header >> 8) & 0xFF);
+  return (loom_scalar_type_t)loom_type_payload(type);
 }
 
 static inline uint8_t loom_type_rank(loom_type_t type) {
@@ -438,22 +448,16 @@ static inline bool loom_type_is_all_static(loom_type_t type) {
   return (loom_type_flags(type) & LOOM_TYPE_FLAG_ALL_STATIC) != 0;
 }
 
-// Returns the group scope for a type. Only valid when kind == LOOM_TYPE_GROUP.
-// The scope is stored in the element_type byte of the header.
-static inline loom_group_scope_t loom_type_group_scope(loom_type_t type) {
-  return (loom_group_scope_t)((type.header >> 8) & 0xFF);
-}
-
 // Returns the role for an encoding type. Only valid when
 // kind == LOOM_TYPE_ENCODING.
 static inline loom_encoding_role_t loom_type_encoding_role(loom_type_t type) {
-  return (loom_encoding_role_t)((type.header >> 8) & 0xFF);
+  return (loom_encoding_role_t)loom_type_payload(type);
 }
 
 // Returns the storage space for a storage type. Only valid when
 // kind == LOOM_TYPE_STORAGE.
 static inline loom_storage_space_t loom_type_storage_space(loom_type_t type) {
-  return (loom_storage_space_t)((type.header >> 8) & 0xFF);
+  return (loom_storage_space_t)loom_type_payload(type);
 }
 
 static inline uint32_t loom_type_make_raw_header(loom_type_kind_t kind,
@@ -595,6 +599,10 @@ static inline bool loom_type_is_pool(loom_type_t type) {
   return loom_type_kind(type) == LOOM_TYPE_POOL;
 }
 
+static inline bool loom_type_is_parameterized(loom_type_t type) {
+  return loom_type_kind(type) == LOOM_TYPE_PARAMETERIZED;
+}
+
 // Returns true if the type is shaped (has rank, dims, element type):
 // tile, tensor, vector, or view. Scalar types are NOT shaped.
 static inline bool loom_type_is_shaped(loom_type_t type) {
@@ -630,6 +638,8 @@ typedef struct loom_type_value_remap_t {
   const loom_value_id_t* target_values;
   // Number of source/target value pairs.
   iree_host_size_t count;
+  // Additional discontiguous value pairs, or NULL when this is the last span.
+  const struct loom_type_value_remap_t* next;
 } loom_type_value_remap_t;
 
 // Returns true if two types have the same element type.
@@ -663,7 +673,8 @@ bool loom_type_static_element_count(loom_type_t type,
 // Shaped/pool types compare kind, element type, rank, dimensions, and
 // encoding. Function types compare argument/result type sequences
 // recursively. Dialect types compare the dialect type name and parameter
-// list recursively.
+// list recursively. Register types compare carrier payloads and an optional
+// semantic value type recursively.
 bool loom_type_equal(loom_type_t a, loom_type_t b);
 
 // Returns true if |source_type| equals |target_type| after applying |remap| to
@@ -673,7 +684,8 @@ bool loom_type_equal(loom_type_t a, loom_type_t b);
 // reference a sibling result (`view<4xf32, %layout>`) while each region yields
 // an equivalent branch-local value (`view<4xf32, %branch_layout>`). The helper
 // is allocation-free and does not intern remapped types.
-bool loom_type_equal_after_value_remap(loom_type_t source_type,
+bool loom_type_equal_after_value_remap(const loom_module_t* module,
+                                       loom_type_t source_type,
                                        loom_type_t target_type,
                                        const loom_type_value_remap_t* remap);
 
@@ -690,15 +702,18 @@ typedef iree_status_t (*loom_type_value_ref_callback_t)(
 // Walks SSA value references embedded in |type|.
 //
 // This includes dynamic shape dimensions, dynamic pool sizes, SSA
-// encoding/layout attachments, and references in nested function or dialect
-// type parameters. References are reported in structural order and are not
-// deduplicated: a type that mentions the same value twice emits two callbacks.
-iree_status_t loom_type_walk_value_refs(loom_type_t type,
+// encoding/layout attachments, and references in nested function, dialect, or
+// register value types. References are reported in structural order and are
+// not deduplicated: a type that mentions the same value twice emits two
+// callbacks.
+iree_status_t loom_type_walk_value_refs(const loom_module_t* module,
+                                        loom_type_t type,
                                         loom_type_value_ref_callback_t callback,
                                         void* user_data);
 
 // Returns true if |type| embeds a reference to |value_id|.
-bool loom_type_references_value(loom_type_t type, loom_value_id_t value_id);
+bool loom_type_references_value(const loom_module_t* module, loom_type_t type,
+                                loom_value_id_t value_id);
 
 // Returns true if two types have the same encoding (same encoding_id
 // and encoding_flags). Both types having no encoding counts as equal.
@@ -712,21 +727,22 @@ static inline bool loom_type_encoding_equals(loom_type_t a, loom_type_t b) {
 // encoding_id == 0 (valid value_id), so we also check encoding_flags. Returns
 // false for non-shaped types.
 static inline bool loom_type_has_encoding(loom_type_t type) {
-  return loom_type_can_have_encoding(type) &&
-         (type.encoding_id != 0 || type.encoding_flags != 0);
+  return (type.encoding_id != 0 || type.encoding_flags != 0) &&
+         loom_type_can_have_encoding(type);
 }
 
 // Returns true if the encoding is an SSA value reference rather than
 // a static encoding table index. Returns false for non-shaped types.
 static inline bool loom_type_has_ssa_encoding(loom_type_t type) {
-  return loom_type_can_have_encoding(type) &&
-         (type.encoding_flags & LOOM_ENCODING_FLAG_SSA) != 0;
+  return (type.encoding_flags & LOOM_ENCODING_FLAG_SSA) != 0 &&
+         loom_type_can_have_encoding(type);
 }
 
 // Returns true if the shaped type has a static (non-SSA) encoding.
 static inline bool loom_type_has_static_encoding(loom_type_t type) {
-  return loom_type_can_have_encoding(type) && type.encoding_id != 0 &&
-         !loom_type_has_ssa_encoding(type);
+  return type.encoding_id != 0 &&
+         (type.encoding_flags & LOOM_ENCODING_FLAG_SSA) == 0 &&
+         loom_type_can_have_encoding(type);
 }
 
 // Returns the SSA value_id for a dynamic encoding. Only valid when
@@ -763,8 +779,9 @@ static inline loom_type_t loom_type_buffer(void) {
   return type;
 }
 
-// Creates a target-owned low register payload type. Target code should prefer
-// loom/target/registers.h so core IR remains only the by-value storage owner.
+// Creates a target-owned low register payload type without a semantic value
+// type. Target code should prefer loom/target/registers.h so core IR remains
+// only the storage owner.
 static inline loom_type_t loom_type_register_payload(uint64_t payload0,
                                                      uint64_t payload1) {
   loom_type_t type = {0};
@@ -773,6 +790,18 @@ static inline loom_type_t loom_type_register_payload(uint64_t payload0,
       LOOM_TYPE_FLAG_INLINE_DIMS | LOOM_TYPE_FLAG_ALL_STATIC);
   type.dims[0] = payload0;
   type.dims[1] = payload1;
+  return type;
+}
+
+// Creates a target-owned low register payload type carrying a semantic value
+// type. |data| must outlive the returned type. Module interning recursively
+// copies the payload into module-owned storage.
+static inline loom_type_t loom_type_register_payload_with_value_type(
+    const loom_register_type_data_t* data) {
+  loom_type_t type = {0};
+  type.header = loom_type_make_raw_header(LOOM_TYPE_REGISTER, 0, 0,
+                                          LOOM_TYPE_FLAG_ALL_STATIC);
+  type.dims[0] = (uint64_t)(uintptr_t)data;
   return type;
 }
 
@@ -786,14 +815,59 @@ static inline loom_type_t loom_type_storage(loom_storage_space_t space) {
   return type;
 }
 
-// Returns the first target-owned register payload field.
-static inline uint64_t loom_type_register_payload0(loom_type_t type) {
-  return type.dims[0];
+// Returns true if |type| carries a semantic register value type.
+static inline bool loom_type_register_has_value_type(loom_type_t type) {
+  return loom_type_is_register(type) && !loom_type_has_inline_dims(type);
 }
 
-// Returns the second target-owned register payload field.
+// Returns the arena-owned data for a typed register, or NULL for an untyped
+// register.
+static inline const loom_register_type_data_t* loom_type_register_data(
+    loom_type_t type) {
+  return loom_type_register_has_value_type(type)
+             ? (const loom_register_type_data_t*)(uintptr_t)type.dims[0]
+             : NULL;
+}
+
+// Returns the first target-owned register carrier payload field.
+static inline uint64_t loom_type_register_payload0(loom_type_t type) {
+  if (IREE_LIKELY(loom_type_has_inline_dims(type))) return type.dims[0];
+  const loom_register_type_data_t* data =
+      (const loom_register_type_data_t*)(uintptr_t)type.dims[0];
+  return data->carrier_payload0;
+}
+
+// Returns the second target-owned register carrier payload field.
 static inline uint64_t loom_type_register_payload1(loom_type_t type) {
-  return type.dims[1];
+  if (IREE_LIKELY(loom_type_has_inline_dims(type))) return type.dims[1];
+  const loom_register_type_data_t* data =
+      (const loom_register_type_data_t*)(uintptr_t)type.dims[0];
+  return data->carrier_payload1;
+}
+
+// Returns the semantic value type carried by |type|, or NULL if absent.
+static inline const loom_type_t* loom_type_register_value_type(
+    loom_type_t type) {
+  const loom_register_type_data_t* data = loom_type_register_data(type);
+  return data ? &data->value_type : NULL;
+}
+
+// Returns true if |type| may embed SSA value references. A false result proves
+// the type is reference-free. Compound types return true conservatively so
+// callers that need exact references can walk their nested payloads.
+static inline bool loom_type_may_reference_values(loom_type_t type) {
+  switch (loom_type_kind(type)) {
+    case LOOM_TYPE_FUNCTION:
+    case LOOM_TYPE_DIALECT:
+    case LOOM_TYPE_PARAMETERIZED:
+      return true;
+    case LOOM_TYPE_REGISTER:
+      return loom_type_register_has_value_type(type);
+    default:
+      return ((loom_type_is_shaped(type) || loom_type_is_pool(type)) &&
+              !loom_type_is_all_static(type)) ||
+             loom_type_has_ssa_encoding(type);
+  }
 }
 
 // Creates a pool type with a single block_size dimension.
@@ -934,6 +1008,42 @@ static inline uint16_t loom_type_dialect_param_count(loom_type_t type) {
 // Returns the type parameter array (may be NULL if param_count == 0).
 static inline const loom_type_t* loom_type_dialect_params(loom_type_t type) {
   return (const loom_type_t*)(uintptr_t)type.dims[0];
+}
+
+//===----------------------------------------------------------------------===//
+// Generic parameterized type construction and accessors
+//===----------------------------------------------------------------------===//
+
+// Creates a descriptor-backed generic type from immutable parameter slots.
+// The descriptor and slot array must outlive the type.
+static inline loom_type_t loom_type_parameterized(
+    const loom_parameterized_type_descriptor_t* descriptor,
+    uint8_t parameter_count, const struct loom_attribute_t* parameters) {
+  loom_type_t type = {0};
+  type.header = loom_type_make_raw_header(LOOM_TYPE_PARAMETERIZED, 0, 0,
+                                          LOOM_TYPE_FLAG_INLINE_DIMS);
+  type.encoding_flags = parameter_count;
+  type.dims[0] = (uint64_t)(uintptr_t)parameters;
+  type.dims[1] = (uint64_t)(uintptr_t)descriptor;
+  return type;
+}
+
+// Returns the static family descriptor.
+static inline const loom_parameterized_type_descriptor_t*
+loom_type_parameterized_descriptor(loom_type_t type) {
+  return (const loom_parameterized_type_descriptor_t*)(uintptr_t)type.dims[1];
+}
+
+// Returns the number of descriptor-indexed parameter slots.
+static inline uint8_t loom_type_parameterized_parameter_count(
+    loom_type_t type) {
+  return (uint8_t)type.encoding_flags;
+}
+
+// Returns the immutable parameter slot array.
+static inline const struct loom_attribute_t* loom_type_parameterized_parameters(
+    loom_type_t type) {
+  return (const struct loom_attribute_t*)(uintptr_t)type.dims[0];
 }
 
 #ifdef __cplusplus

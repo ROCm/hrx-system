@@ -1,0 +1,85 @@
+// Device-global FP32 atomic add must remain correct under contention. Targets
+// with a native instruction retain the source operation, while targets without
+// one legalize it to a bitwise compare-exchange loop.
+kernel.def @global_atomic_reduce_add_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %output_index = index.constant 0 : index
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %output_view = buffer.view %output_global[%base] : buffer -> view<1xf32>
+  %atomic_increment = scalar.constant 1.0 : f32
+  view.atomic.reduce<addf> %atomic_increment, %output_view[%output_index] {ordering = relaxed, scope = device} : f32, view<1xf32>
+  kernel.return
+}
+
+// The old values returned by four unit increments of an accumulator initialized
+// to one are a permutation of [1, 2, 3, 4], whose sum is always ten.
+kernel.def @global_atomic_rmw_add_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%accumulator: buffer, %old_sum: buffer) {
+  %base = index.constant 0 : offset
+  %result_index = index.constant 0 : index
+  %accumulator_global = buffer.assume.memory_space<global> %accumulator : buffer
+  %old_sum_global = buffer.assume.memory_space<global> %old_sum : buffer
+  %accumulator_view = buffer.view %accumulator_global[%base] : buffer -> view<1xf32>
+  %old_sum_view = buffer.view %old_sum_global[%base] : buffer -> view<1xf32>
+  %atomic_increment = scalar.constant 1.0 : f32
+  %old = view.atomic.rmw<addf> %atomic_increment, %accumulator_view[%result_index] {ordering = relaxed, scope = device} : f32, view<1xf32> -> f32
+  view.atomic.reduce<addf> %old, %old_sum_view[%result_index] {ordering = relaxed, scope = device} : f32, view<1xf32>
+  kernel.return
+}
+
+// A 64-bit compare-exchange packet packs replacement into its low half and
+// expected into its high half. Checking both memory and the returned old value
+// makes that physical operand order observable.
+kernel.def @global_atomic_cmpxchg_i64() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%value: buffer, %old_value: buffer) {
+  %base = index.constant 0 : offset
+  %value_index = index.constant 0 : index
+  %value_global = buffer.assume.memory_space<global> %value : buffer
+  %old_value_global = buffer.assume.memory_space<global> %old_value : buffer
+  %value_view = buffer.view %value_global[%base] : buffer -> view<1xi64>
+  %old_value_view = buffer.view %old_value_global[%base] : buffer -> view<1xi64>
+  %expected = scalar.constant 7 : i64
+  %replacement = scalar.constant 9 : i64
+  %old = view.atomic.cmpxchg %expected, %replacement, %value_view[%value_index] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i64, view<1xi64> -> i64
+  view.store %old, %old_value_view[%value_index] : i64, view<1xi64>
+  kernel.return
+}
+
+check.case public @global_atomic_reduce_add_f32_case {
+  %output = check.generate.fill value(1.0) : tensor<1xf32>
+  %expected = check.generate.fill value(5.0) : tensor<1xf32>
+  kernel.launch @global_atomic_reduce_add_f32(%output) : (tensor<1xf32>)
+  check.expect.bitwise actual(%output) expected(%expected) : tensor<1xf32>
+  check.return
+}
+
+check.case public @global_atomic_rmw_add_f32_case {
+  %accumulator = check.generate.fill value(1.0) : tensor<1xf32>
+  %old_sum = check.generate.fill value(0.0) : tensor<1xf32>
+  %expected_accumulator = check.generate.fill value(5.0) : tensor<1xf32>
+  %expected_old_sum = check.generate.fill value(10.0) : tensor<1xf32>
+  kernel.launch @global_atomic_rmw_add_f32(%accumulator, %old_sum) : (tensor<1xf32>, tensor<1xf32>)
+  check.expect.bitwise actual(%accumulator) expected(%expected_accumulator) : tensor<1xf32>
+  check.expect.bitwise actual(%old_sum) expected(%expected_old_sum) : tensor<1xf32>
+  check.return
+}
+
+check.case public @global_atomic_cmpxchg_i64_case {
+  %value = check.generate.fill value(7) : tensor<1xi64>
+  %old_value = check.generate.fill value(0) : tensor<1xi64>
+  %expected_value = check.generate.fill value(9) : tensor<1xi64>
+  %expected_old_value = check.generate.fill value(7) : tensor<1xi64>
+  kernel.launch @global_atomic_cmpxchg_i64(%value, %old_value) : (tensor<1xi64>, tensor<1xi64>)
+  check.expect.bitwise actual(%value) expected(%expected_value) : tensor<1xi64>
+  check.expect.bitwise actual(%old_value) expected(%expected_old_value) : tensor<1xi64>
+  check.return
+}

@@ -8,7 +8,7 @@ func.def target(@target) @dot4f8_fp8bf8(%lhs: vector<1xi32>, %rhs: vector<1xi32>
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @dot4f8_fp8bf8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.core> {
+low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @dot4f8_fp8bf8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %dot = v_dot4_f32_fp8_bf8 %lhs, %rhs, %acc
   return %dot
 }
@@ -22,7 +22,7 @@ func.def target(@target) @dot4f8_bf8fp8(%lhs: vector<1xi32>, %rhs: vector<1xi32>
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @dot4f8_bf8fp8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.core> {
+low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @dot4f8_bf8fp8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %dot = v_dot4_f32_bf8_fp8 %lhs, %rhs, %acc
   return %dot
 }
@@ -36,7 +36,7 @@ func.def target(@target) @dot4f8_fp8fp8(%lhs: vector<1xi32>, %rhs: vector<1xi32>
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @dot4f8_fp8fp8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.core> {
+low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @dot4f8_fp8fp8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %dot = v_dot4_f32_fp8_fp8 %lhs, %rhs, %acc
   return %dot
 }
@@ -50,7 +50,7 @@ func.def target(@target) @dot4f8_bf8bf8(%lhs: vector<1xi32>, %rhs: vector<1xi32>
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @dot4f8_bf8bf8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.core> {
+low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @dot4f8_bf8bf8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %dot = v_dot4_f32_bf8_bf8 %lhs, %rhs, %acc
   return %dot
 }

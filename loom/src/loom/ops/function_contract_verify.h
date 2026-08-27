@@ -11,7 +11,7 @@
 
 #include "iree/base/api.h"
 #include "loom/error/emitter.h"
-#include "loom/ir/ir.h"
+#include "loom/ops/op_defs.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,6 +22,22 @@ extern "C" {
 iree_status_t loom_function_contract_verify(const loom_module_t* module,
                                             const loom_op_t* op,
                                             iree_diagnostic_emitter_t emitter);
+
+// Verifies a function implementation provider and its target applicability
+// contract. Provider target witnesses describe identity only; target-neutral
+// execution choices and limits belong to typed provider requirements.
+iree_status_t loom_function_provider_contract_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// Verifies that an operation boundary matches the signature of |callee|.
+// Unresolved symbols are valid in partial modules and are checked after link
+// resolution. Dynamic dimensions and SSA encodings in the callee signature are
+// compared after remapping its arguments and results to the call boundary.
+iree_status_t loom_function_call_contract_verify(
+    const loom_module_t* module, const loom_op_t* op, loom_symbol_ref_t callee,
+    loom_value_slice_t operands, loom_value_slice_t results,
+    iree_diagnostic_emitter_t emitter);
 
 #ifdef __cplusplus
 }  // extern "C"

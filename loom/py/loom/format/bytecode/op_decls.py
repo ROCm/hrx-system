@@ -18,6 +18,7 @@ def default_op_decls() -> tuple[Any, ...]:
     """Return the built-in generated operation declarations."""
     from loom.dialect.buffer import ALL_BUFFER_OPS
     from loom.dialect.cfg import ALL_CFG_OPS
+    from loom.dialect.command import ALL_COMMAND_OPS
     from loom.dialect.encoding import ALL_ENCODING_OPS
     from loom.dialect.func import ALL_FUNC_OPS
     from loom.dialect.globals import ALL_GLOBAL_OPS
@@ -30,6 +31,7 @@ def default_op_decls() -> tuple[Any, ...]:
     from loom.dialect.scalar import ALL_SCALAR_OPS
     from loom.dialect.scf import ALL_SCF_OPS
     from loom.dialect.target import ALL_TARGET_OPS
+    from loom.dialect.template import ALL_TEMPLATE_OPS
     from loom.dialect.test import ALL_TEST_OPS
     from loom.dialect.vector import ALL_VECTOR_OPS
     from loom.dialect.view import ALL_VIEW_OPS
@@ -38,11 +40,13 @@ def default_op_decls() -> tuple[Any, ...]:
         *ALL_TEST_OPS,
         *ALL_SCALAR_OPS,
         *ALL_FUNC_OPS,
+        *ALL_TEMPLATE_OPS,
         *ALL_ENCODING_OPS,
         *ALL_POOL_OPS,
         *ALL_GLOBAL_OPS,
         *ALL_SCF_OPS,
         *ALL_CFG_OPS,
+        *ALL_COMMAND_OPS,
         *ALL_BUFFER_OPS,
         *ALL_VIEW_OPS,
         *ALL_VECTOR_OPS,
@@ -55,11 +59,75 @@ def default_op_decls() -> tuple[Any, ...]:
     )
 
 
+def default_parameterized_attr_defs() -> tuple[Any, ...]:
+    """Return built-in families not reachable from one exact op field."""
+    from loom.dialect.target import ALL_TARGET_PARAMETERIZED_ATTRS
+
+    return (*ALL_TARGET_PARAMETERIZED_ATTRS,)
+
+
 def build_op_decl_map(op_decls: Iterable[Any] | None = None) -> dict[str, Any]:
     """Return op declarations keyed by dotted operation name."""
     result: dict[str, Any] = {}
     for op_decl in default_op_decls() if op_decls is None else op_decls:
         result[op_decl.name] = op_decl
+    return result
+
+
+def build_parameterized_attr_def_map(
+    op_decls_by_name: Mapping[str, Any],
+    parameterized_attrs: Iterable[Any] | None = None,
+) -> dict[str, Any]:
+    """Return reachable parameterized attribute declarations by stable name."""
+    pending = list(
+        default_parameterized_attr_defs()
+        if parameterized_attrs is None
+        else parameterized_attrs
+    )
+    for op_decl in op_decls_by_name.values():
+        for attr_def in getattr(op_decl, "attrs", ()):
+            definition = getattr(attr_def, "parameterized_attr", None)
+            if definition is not None:
+                pending.append(definition)
+
+    result: dict[str, Any] = {}
+    while pending:
+        definition = pending.pop()
+        existing = result.get(definition.name)
+        if existing is not None:
+            if existing != definition:
+                raise ValueError(
+                    "parameterized attribute family "
+                    f"{definition.name!r} has conflicting declarations"
+                )
+            continue
+        result[definition.name] = definition
+        for parameter in definition.parameters:
+            nested_definition = getattr(parameter, "parameterized_attr", None)
+            if nested_definition is not None:
+                pending.append(nested_definition)
+    return result
+
+
+def build_parameterized_type_def_map(
+    type_defs: Iterable[Any] | None = None,
+) -> dict[str, Any]:
+    """Return descriptor-backed type declarations by stable family name."""
+    if type_defs is None:
+        from loom.builders import default_types
+
+        type_defs = default_types()
+    result: dict[str, Any] = {}
+    for type_def in type_defs:
+        if not getattr(type_def, "uses_attribute_parameters", False):
+            continue
+        existing = result.get(type_def.name)
+        if existing is not None and existing != type_def:
+            raise ValueError(
+                f"parameterized type family {type_def.name!r} has "
+                "conflicting declarations"
+            )
+        result[type_def.name] = type_def
     return result
 
 

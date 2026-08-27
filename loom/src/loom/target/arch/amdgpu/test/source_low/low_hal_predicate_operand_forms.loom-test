@@ -1,0 +1,27 @@
+// RUN: pass amdgpu-materialize-hal-kernel-abi,low-select-operand-forms,cse,low-dce
+
+amdgpu.target<gfx1100> @target
+
+low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) @predicate_operand_form(%position: reg<amdgpu.sgpr>, %step: reg<amdgpu.sgpr>) where [eq(%step, 3)] {
+  %output = low.resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %offset = low.const<amdgpu.v_mov_b32> {imm32 = 0} : reg<amdgpu.vgpr>
+  %result = low.op<amdgpu.s_add_u32>(%position, %step) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>
+  %stored = low.op<amdgpu.v_mov_b32_copy>(%result) : (reg<amdgpu.sgpr>) -> reg<amdgpu.vgpr>
+  low.op<amdgpu.global_store_b32_saddr>(%offset, %stored, %output) {offset = 0} : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>)
+  low.return
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "position", arg1 = "step"}, direct_arg_offsets = [8, 12], direct_arg_parameter_indices = [1, 2], direct_arg_sizes = [4, 4], parameter_count = 3, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @predicate_operand_form() {
+  %kernarg = low.live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  %7 = low.op<amdgpu.s_load_dwordx2_offset_only>(%kernarg) {offset = 8} : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>
+  %position = low.slice %7[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %output = low.op<amdgpu.s_load_dwordx2_offset_only>(%kernarg) {offset = 0} : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x2>
+  %offset = low.const<amdgpu.v_mov_b32> {imm32 = 0} : reg<amdgpu.vgpr>
+  %result = low.op<amdgpu.s_addk_i32>(%position) {imm16 = 3} : (reg<amdgpu.sgpr>) -> %position as reg<amdgpu.sgpr>
+  %stored = low.op<amdgpu.v_mov_b32_copy>(%result) : (reg<amdgpu.sgpr>) -> reg<amdgpu.vgpr>
+  low.op<amdgpu.global_store_b32_saddr>(%offset, %stored, %output) {offset = 0} : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>)
+  low.return
+}

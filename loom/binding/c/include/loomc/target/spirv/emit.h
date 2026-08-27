@@ -46,10 +46,10 @@ extern "C" {
 
 /// SPIR-V binary emission options.
 ///
-/// SPIR-V emission uses the generic artifact format, artifact identifier, and
-/// target selection settings on `loomc_emit_options_t` and shared invocation
-/// descriptors. This target-specific descriptor carries no additional stable
-/// fields today.
+/// SPIR-V emission uses the generic artifact format and artifact identifier on
+/// `loomc_emit_options_t`. Emitted functions carry their targets in prepared
+/// IR. This target-specific descriptor carries no additional stable fields
+/// today.
 typedef struct loomc_spirv_emit_options_t {
   /// Structure type. Must be `LOOMC_STRUCTURE_TYPE_SPIRV_EMIT_OPTIONS` when
   /// nonzero.

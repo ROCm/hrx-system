@@ -13,7 +13,14 @@ from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
-from loom.gen.target.contracts.lower_rule_rows import source_memory_row
+from loom.gen.target.contracts.lower_rule_rows import (
+    attr_copy_row,
+    descriptor_ref_keys,
+    diagnostic_param_row,
+    guard_row,
+    source_memory_row,
+    value_ref_row,
+)
 from loom.gen.target.contracts.lower_rules import (
     _validate_c_table_shape,
     generate_lower_rule_set,
@@ -30,6 +37,7 @@ from loom.target.contracts import (
     GuardKind,
     LowerAttrCopy,
     LowerAttrCopyKind,
+    LowerDiagnosticParam,
     LowerEmit,
     LowerEmitKind,
     LowerGuard,
@@ -40,20 +48,29 @@ from loom.target.contracts import (
     LowerValueRef,
     RecipeRule,
     Scalar,
+    SourceMemoryAddressBase,
+    SourceMemoryAddressCoordinateType,
+    SourceMemoryAddressLayout,
+    SourceMemoryAddressMaterializer,
     SourceMemoryConstraint,
     SourceMemoryDynamicIndexSource,
     SourceMemoryOperation,
+    SourceMemoryRootKind,
     SourceOpProject,
     SourceValueKind,
     ValueProject,
     ValueRef,
     Vector,
+    View,
 )
+from loom.target.contracts.diagnostics import DiagnosticParamKind
 from loom.target.low_descriptors import Immediate, ImmediateKind
 from loom.target.test.descriptors import (
     TEST_LOW_ADD_F32_DESCRIPTOR,
+    TEST_LOW_ADD_I32_DESCRIPTOR,
     TEST_LOW_CONST_I32_DESCRIPTOR,
     TEST_LOW_CORE_DESCRIPTOR_SET,
+    TEST_LOW_MUL_I32_DESCRIPTOR,
 )
 
 _TEST_PUBLIC_HEADER = "loom/target/test/contracts/generated.h"
@@ -162,6 +179,17 @@ def test_validate_c_table_shape_rejects_oversized_type_payload() -> None:
     _expect_value_error(
         lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
         "lower-rule set 'test.low.generated_c_shape' type-pattern 0 static lanes exceeds int64_t",
+    )
+
+
+def test_validate_c_table_shape_rejects_oversized_view_dimension() -> None:
+    table = _compiled_lower_rule_set(
+        type_patterns=(LowerTypePattern(View("i32", dims=(2**63, 4))),),
+    )
+
+    _expect_value_error(
+        lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
+        "lower-rule set 'test.low.generated_c_shape' type-pattern 0 static dim 0 exceeds int64_t",
     )
 
 
@@ -321,6 +349,22 @@ def test_validate_c_table_shape_rejects_value_ref_materializer_index_oob() -> No
     )
 
 
+def test_value_ref_row_emits_element_indices() -> None:
+    row = value_ref_row(
+        LowerValueRef(
+            kind=SourceValueKind.OPERAND,
+            index=1,
+            element_index=2,
+        )
+    )
+
+    assert row == [
+        ".kind = LOOM_LOW_LOWER_VALUE_REF_OPERAND",
+        ".index = 1",
+        ".element_index = 2",
+    ]
+
+
 def test_generate_lower_rule_set_emits_report_key_ordinals() -> None:
     table = ContractFragment(
         name="test.low.report_keys",
@@ -381,9 +425,9 @@ def test_validate_c_table_shape_rejects_invalid_report_key() -> None:
     )
 
 
-def test_generate_lower_rule_set_emits_value_ref_for_f64_equals_guard() -> None:
+def test_generate_lower_rule_set_emits_value_ref_for_float_equals_guard() -> None:
     table = ContractFragment(
-        name="test.low.f64_equals",
+        name="test.low.float_equals",
         descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
         public_header=_TEST_PUBLIC_HEADER,
         cases=[
@@ -392,7 +436,7 @@ def test_generate_lower_rule_set_emits_value_ref_for_f64_equals_guard() -> None:
                 descriptor=TEST_LOW_ADD_F32_DESCRIPTOR,
                 guards=(
                     Guard.value_type("lhs", Scalar("f32")),
-                    Guard.value_f64_equals("rhs", 0.0),
+                    Guard.value_float_equals("rhs", 0.0),
                     Guard.value_type("rhs", Scalar("f32")),
                     Guard.value_type("result", Scalar("f32")),
                 ),
@@ -412,7 +456,7 @@ def test_generate_lower_rule_set_emits_value_ref_for_f64_equals_guard() -> None:
 
     generated = generate_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
 
-    guard_start = generated.source.index("LOOM_LOW_LOWER_GUARD_VALUE_F64_EQUALS")
+    guard_start = generated.source.index("LOOM_LOW_LOWER_GUARD_VALUE_FLOAT_EQUALS")
     guard_end = generated.source.index("},", guard_start)
     guard_text = generated.source[guard_start:guard_end]
     assert ".value_ref_index = 1," in guard_text
@@ -489,8 +533,59 @@ def test_generate_lower_rule_set_emits_packed_integer_storage_guard() -> None:
     assert ".other_value_ref_index = 1," in guard_text
     assert ".attr_index = 0," in guard_text
     assert ".u64 = UINT64_C(16)," in guard_text
-    assert ".minimum_i64 = 32," in guard_text
-    assert ".maximum_i64 = 32," in guard_text
+    assert ".minimum_i64 = INT64_C(32)," in guard_text
+    assert ".maximum_i64 = INT64_C(32)," in guard_text
+
+
+def test_guard_row_emits_portable_signed_i64_bounds() -> None:
+    fields = guard_row(
+        {},
+        LowerGuard(
+            kind=GuardKind.I64_RANGE,
+            minimum_i64=-(1 << 31),
+            maximum_i64=(1 << 31) - 1,
+        ),
+    )
+
+    assert ".minimum_i64 = (-INT64_C(2147483648))" in fields
+    assert ".maximum_i64 = INT64_C(2147483647)" in fields
+
+
+def test_guard_row_emits_value_memory_space_mask() -> None:
+    fields = guard_row(
+        {},
+        LowerGuard(
+            kind=GuardKind.VALUE_MEMORY_SPACE,
+            memory_spaces=("unknown", "global", "descriptor"),
+        ),
+    )
+
+    assert ".value_ref_index = 0" in fields
+    assert (".u64 = LOOM_LOW_LOWER_MEMORY_SPACE_UNKNOWN | LOOM_LOW_LOWER_MEMORY_SPACE_GLOBAL | LOOM_LOW_LOWER_MEMORY_SPACE_DESCRIPTOR") in fields
+
+
+def test_attr_copy_row_emits_portable_signed_i64_literal() -> None:
+    fields = attr_copy_row(
+        LowerAttrCopy(
+            kind=LowerAttrCopyKind.I64_LITERAL,
+            target_name="value",
+            literal_i64=-(1 << 31),
+        )
+    )
+
+    assert ".literal_i64 = (-INT64_C(2147483648))" in fields
+
+
+def test_diagnostic_param_row_emits_portable_signed_i64_literal() -> None:
+    fields = diagnostic_param_row(
+        LowerDiagnosticParam(
+            name="value",
+            kind=DiagnosticParamKind.I64_LITERAL,
+            i64_value=-(1 << 31),
+        )
+    )
+
+    assert ".i64_value = (-INT64_C(2147483648))" in fields
 
 
 def test_generate_lower_rule_set_emits_static_element_count_type_pattern() -> None:
@@ -531,6 +626,30 @@ def test_generate_lower_rule_set_emits_static_element_count_type_pattern() -> No
     assert ".value_ref_index = 0," in guard_text
     assert ".other_value_ref_index = 1," in guard_text
     assert ".attr_index = 0," in guard_text
+
+
+def test_generate_lower_rule_set_emits_exact_view_shape_type_pattern() -> None:
+    table = ContractFragment(
+        name="test.low.view_shape",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        public_header=_TEST_PUBLIC_HEADER,
+        cases=[
+            RecipeRule(
+                source_op=vector.vector_load,
+                guards=(Guard.value_type("view", View("i32", dims=(4, 8))),),
+            )
+        ],
+    )
+
+    generated = generate_lower_rule_set(table, dialect_ops={"vector": ALL_VECTOR_OPS})
+
+    type_pattern_start = generated.source.index("LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_DIM1")
+    type_pattern_end = generated.source.index("},", type_pattern_start)
+    type_pattern_text = generated.source[type_pattern_start:type_pattern_end]
+    assert ".type_kind = LOOM_TYPE_VIEW," in type_pattern_text
+    assert ".rank = 2," in type_pattern_text
+    assert ".static_dim0 = 4," in type_pattern_text
+    assert ".static_dim1 = 8," in type_pattern_text
 
 
 def test_generate_lower_rule_set_emits_source_instance_flags_projection() -> None:
@@ -703,6 +822,7 @@ def test_source_memory_row_emits_dynamic_byte_stride_any_flag() -> None:
             static_byte_offset_minimum=0,
             static_byte_offset_maximum=128,
             dynamic_term_count=1,
+            dynamic_view_base_term_count=0,
             dynamic_index_source=SourceMemoryDynamicIndexSource.VALUE,
             dynamic_byte_stride=None,
         ),
@@ -714,7 +834,104 @@ def test_source_memory_row_emits_dynamic_byte_stride_any_flag() -> None:
 
     assert ".flags = LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_DYNAMIC_BYTE_STRIDE_ANY" in fields
     assert ".dynamic_term_count = 1" in fields
+    assert ".dynamic_view_base_term_count = 0" in fields
     assert ".dynamic_byte_stride = " not in "\n".join(fields)
+
+
+def test_source_memory_row_emits_compact_address_layout() -> None:
+    row = LowerSourceMemory(
+        constraint=SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            address_layout=SourceMemoryAddressLayout.COMPACT_ROW_MAJOR,
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=1,
+            vector_lane_byte_stride=4,
+            static_byte_offset=0,
+        ),
+        diagnostic_index=3,
+        dynamic_offset_diagnostic_index=4,
+        address_layout_diagnostic_index=5,
+    )
+
+    fields = source_memory_row({}, row)
+
+    assert (".address_layout = LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_LAYOUT_COMPACT_ROW_MAJOR") in fields
+    assert ".address_layout_diagnostic_index = 5" in fields
+
+
+def test_source_memory_row_emits_preserve_source_index_flag() -> None:
+    row = LowerSourceMemory(
+        constraint=SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=1,
+            vector_lane_byte_stride=4,
+            static_byte_offset_minimum=0,
+            static_byte_offset_maximum=128,
+            dynamic_term_count=None,
+            dynamic_term_count_minimum=1,
+            dynamic_view_base_term_count=0,
+            preserve_source_index=True,
+        ),
+        diagnostic_index=3,
+        dynamic_offset_diagnostic_index=4,
+    )
+
+    fields = source_memory_row({}, row)
+
+    assert ".flags = LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_PRESERVE_SOURCE_INDEX" in fields
+
+
+def test_source_memory_row_emits_any_positive_dynamic_term_count() -> None:
+    row = LowerSourceMemory(
+        constraint=SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=1,
+            vector_lane_byte_stride=4,
+            static_byte_offset_minimum=0,
+            static_byte_offset_maximum=128,
+            dynamic_term_count=None,
+            dynamic_term_count_minimum=1,
+        ),
+        diagnostic_index=3,
+        dynamic_offset_diagnostic_index=4,
+    )
+
+    fields = source_memory_row({}, row)
+
+    assert (".dynamic_term_count = LOOM_LOW_LOWER_SOURCE_MEMORY_DYNAMIC_TERM_COUNT_ANY") in fields
+    assert ".dynamic_term_count_minimum = 1" in fields
+    assert (".dynamic_view_base_term_count = LOOM_LOW_LOWER_SOURCE_MEMORY_DYNAMIC_VIEW_BASE_TERM_COUNT_ANY") in fields
+
+
+def test_source_memory_row_emits_portable_signed_i64_values() -> None:
+    row = LowerSourceMemory(
+        constraint=SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=1,
+            vector_lane_byte_stride=-(1 << 31),
+            static_byte_offset_minimum=-(1 << 63),
+            static_byte_offset_maximum=(1 << 63) - 1,
+            dynamic_term_count=1,
+            dynamic_index_source=SourceMemoryDynamicIndexSource.VALUE,
+            dynamic_byte_stride=-(1 << 31),
+        ),
+        diagnostic_index=0xFFFF,
+        dynamic_offset_diagnostic_index=0xFFFF,
+    )
+
+    fields = source_memory_row({}, row)
+
+    assert ".vector_lane_byte_stride = (-INT64_C(2147483648))" in fields
+    assert ".static_byte_offset_minimum = INT64_MIN" in fields
+    assert ".static_byte_offset_maximum = INT64_C(9223372036854775807)" in fields
+    assert ".dynamic_byte_stride = (-INT64_C(2147483648))" in fields
 
 
 def test_source_memory_row_emits_dynamic_stride_values_flag() -> None:
@@ -739,3 +956,62 @@ def test_source_memory_row_emits_dynamic_stride_values_flag() -> None:
     fields = source_memory_row({}, row)
 
     assert (".flags = LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_DYNAMIC_BYTE_STRIDE_ANY | LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_DYNAMIC_STRIDE_VALUES") in fields
+
+
+def test_source_memory_row_emits_complete_address_materializer() -> None:
+    materializer = SourceMemoryAddressMaterializer(
+        const_coordinate=TEST_LOW_CONST_I32_DESCRIPTOR,
+        add_coordinate=TEST_LOW_ADD_I32_DESCRIPTOR,
+        mul_coordinate=TEST_LOW_MUL_I32_DESCRIPTOR,
+        shl_coordinate=None,
+        address=TEST_LOW_ADD_I32_DESCRIPTOR,
+        base=SourceMemoryAddressBase.BASE_VIEW,
+        coordinate_type=SourceMemoryAddressCoordinateType.INDEX,
+        coordinate_unit_byte_count=4,
+        coordinate_minimum=0,
+        coordinate_maximum=(2**31) - 1,
+        const_coordinate_immediate="i32_value",
+    )
+    row = LowerSourceMemory(
+        constraint=SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            root_kind=SourceMemoryRootKind.ALLOCA,
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=1,
+            vector_lane_byte_stride=4,
+            static_byte_offset_minimum=0,
+            static_byte_offset_maximum=(2**31) - 1,
+            dynamic_term_count=None,
+        ),
+        diagnostic_index=3,
+        dynamic_offset_diagnostic_index=4,
+        address_diagnostic_index=5,
+        address_materializer=materializer,
+    )
+    descriptor_refs = {
+        TEST_LOW_CONST_I32_DESCRIPTOR.key: 0,
+        TEST_LOW_ADD_I32_DESCRIPTOR.key: 1,
+        TEST_LOW_MUL_I32_DESCRIPTOR.key: 2,
+    }
+
+    fields = source_memory_row(descriptor_refs, row)
+
+    assert ".address_diagnostic_index = 5" in fields
+    assert ".root_kind = LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_ALLOCA" in fields
+    assert (".address_base_kind = LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_BASE_VIEW") in fields
+    assert (".address_coordinate_type = LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_COORDINATE_INDEX") in fields
+    assert ".address_coordinate_unit_byte_count = 4" in fields
+    assert ".address_coordinate_minimum = INT64_C(0)" in fields
+    assert ".address_coordinate_maximum = INT64_C(2147483647)" in fields
+    assert ".address_const_coordinate_descriptor_ref = 0" in fields
+    assert '.address_const_coordinate_immediate = IREE_SVL("i32_value")' in fields
+    assert ".address_add_coordinate_descriptor_ref = 1" in fields
+    assert ".address_shl_coordinate_descriptor_ref = 65535" in fields
+    assert ".address_index_to_coordinate_input_descriptor_ref = 65535" in fields
+    assert ".address_index_to_coordinate_descriptor_ref = 65535" in fields
+    assert ".address_descriptor_ref = 1" in fields
+
+    table = _compiled_lower_rule_set(source_memories=(row,))
+    keys = descriptor_ref_keys(table, _c_shape_contract())
+    assert set(keys) == set(descriptor_refs)

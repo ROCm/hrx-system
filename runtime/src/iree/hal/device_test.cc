@@ -105,6 +105,31 @@ TEST(DeviceSpecTest, MockDeviceExposesCachedSpec) {
   iree_hal_device_release(device);
 }
 
+TEST(DeviceSpecTest, MockDeviceAdvertisesEnabledExecutableTarget) {
+  iree_hal_mock_device_options_t mock_options;
+  iree_hal_mock_device_options_initialize(&mock_options);
+  mock_options.executable_loading_enabled = true;
+
+  iree_hal_device_t* device = NULL;
+  IREE_ASSERT_OK(iree_hal_mock_device_create(&mock_options,
+                                             iree_allocator_system(), &device));
+
+  const iree_hal_executable_target_selection_t selection = {
+      /*.family=*/IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_FAMILY),
+      /*.target_key=*/IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_KEY),
+      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_VIRTUAL,
+  };
+  const iree_hal_executable_target_selection_result_t result =
+      iree_hal_device_spec_select_executable_target(
+          iree_hal_device_spec(device), &selection);
+  ASSERT_EQ(IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED,
+            result.outcome);
+  ASSERT_NE(nullptr, result.target);
+  EXPECT_EQ(1ull, result.target->physical_device_affinity);
+
+  iree_hal_device_release(device);
+}
+
 TEST(DeviceObservationTest, RejectsUnknownObservationFlags) {
   iree_hal_mock_device_options_t mock_options;
   iree_hal_mock_device_options_initialize(&mock_options);

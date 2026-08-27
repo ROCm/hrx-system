@@ -21,13 +21,14 @@ static bool loom_print_format_element_covers_attr(
   switch (element->kind) {
     case LOOM_FORMAT_KIND_ATTR_VALUE:
     case LOOM_FORMAT_KIND_SYMBOL_REF:
-    case LOOM_FORMAT_KIND_OP_REF:
+    case LOOM_FORMAT_KIND_KEY_REF:
+    case LOOM_FORMAT_KIND_SCOPED_ENUM_REF:
+    case LOOM_FORMAT_KIND_ATTR_PARAMS:
     case LOOM_FORMAT_KIND_TEMPLATE_PARAM:
     case LOOM_FORMAT_KIND_PREDICATE_LIST:
       return element->field_index == attr_index;
     case LOOM_FORMAT_KIND_TEMPLATE_PARAM_FLAGS:
       return element->field_index == attr_index;
-    case LOOM_FORMAT_KIND_DESCRIPTOR_REF:
     case LOOM_FORMAT_KIND_STABLE_KEY_REF:
       return element->field_index == attr_index || element->data == attr_index;
     case LOOM_FORMAT_KIND_INDEX_LIST:
@@ -37,6 +38,12 @@ static bool loom_print_format_element_covers_attr(
       return element->data == attr_index;
     case LOOM_FORMAT_KIND_ATTR_TABLE:
       return element->data == attr_index;
+    case LOOM_FORMAT_KIND_ALIGNED_REFS:
+      return element->data == attr_index;
+    case LOOM_FORMAT_KIND_FUNC_ARGS:
+      return LOOM_FORMAT_FUNC_ARGS_START_ATTR_INDEX(element->data) ==
+                 attr_index ||
+             LOOM_FORMAT_FUNC_ARGS_END_ATTR_INDEX(element->data) == attr_index;
     case LOOM_FORMAT_KIND_ATTR_DICT:
       if (iree_any_bit_set(element->data, LOOM_ATTR_DICT_FORMAT_INLINE_ATTRS)) {
         return false;
@@ -146,8 +153,8 @@ iree_status_t loom_print_inline_attr_dict(
     iree_string_view_t name = loom_attr_descriptor_name(descriptor);
     IREE_RETURN_IF_ERROR(loom_output_stream_write(ctx->stream, name));
     IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, " = "));
-    IREE_RETURN_IF_ERROR(loom_print_attr(
-        ctx->stream, &loom_op_attrs(op)[attr_index], ctx->module, descriptor));
+    IREE_RETURN_IF_ERROR(
+        loom_print_attr(ctx, &loom_op_attrs(op)[attr_index], descriptor));
     loom_print_report_field(
         ctx, loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, attr_index),
         attr_start, ctx->stream->offset);
@@ -278,8 +285,8 @@ iree_status_t loom_print_operand_dict(loom_print_context_t* ctx,
     IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, " = "));
     uint16_t operand_index = (uint16_t)(start + (uint16_t)ordinal);
     iree_host_size_t value_start = ctx->stream->offset;
-    IREE_RETURN_IF_ERROR(loom_print_value_ref(
-        ctx->stream, ctx->module, loom_op_const_operands(op)[operand_index]));
+    IREE_RETURN_IF_ERROR(
+        loom_print_value_ref(ctx, loom_op_const_operands(op)[operand_index]));
     loom_print_report_field(
         ctx, loom_print_field_ref(LOOM_PRINT_FIELD_OPERAND, operand_index),
         value_start, ctx->stream->offset);
@@ -310,8 +317,7 @@ static iree_status_t loom_print_attr_table_row_values(loom_print_context_t* ctx,
     const loom_value_id_t* operand = &values.values[operand_index];
     uint16_t flat_operand_index = (uint16_t)(operand - operand_base);
     iree_host_size_t value_start = ctx->stream->offset;
-    IREE_RETURN_IF_ERROR(
-        loom_print_value_ref(ctx->stream, ctx->module, *operand));
+    IREE_RETURN_IF_ERROR(loom_print_value_ref(ctx, *operand));
     loom_print_report_field(
         ctx, loom_print_field_ref(LOOM_PRINT_FIELD_OPERAND, flat_operand_index),
         value_start, ctx->stream->offset);
@@ -395,5 +401,38 @@ iree_status_t loom_print_attr_table(loom_print_context_t* ctx,
   loom_print_report_field(
       ctx, loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->data),
       table_start, ctx->stream->offset);
+  return iree_ok_status();
+}
+
+iree_status_t loom_print_aligned_refs(loom_print_context_t* ctx,
+                                      const loom_op_t* op,
+                                      const loom_op_vtable_t* vtable,
+                                      const loom_format_element_t* element) {
+  loom_value_slice_t refs =
+      loom_op_operand_field_span(vtable, op, element->field_index);
+  loom_attribute_t alignments = loom_op_attrs(op)[element->data];
+
+  IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
+  iree_host_size_t list_start = ctx->stream->offset;
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '['));
+  const loom_value_id_t* operand_base = loom_op_const_operands(op);
+  for (uint16_t i = 0; i < refs.count; ++i) {
+    if (i > 0) {
+      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, ", "));
+    }
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
+        ctx->stream, "align(%" PRId64 ") ", alignments.i64_array[i]));
+    iree_host_size_t value_start = ctx->stream->offset;
+    IREE_RETURN_IF_ERROR(loom_print_value_ref(ctx, refs.values[i]));
+    uint16_t operand_index = (uint16_t)(&refs.values[i] - operand_base);
+    loom_print_report_field(
+        ctx, loom_print_field_ref(LOOM_PRINT_FIELD_OPERAND, operand_index),
+        value_start, ctx->stream->offset);
+  }
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, ']'));
+  loom_print_did_write(ctx);
+  loom_print_report_field(
+      ctx, loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->data),
+      list_start, ctx->stream->offset);
   return iree_ok_status();
 }

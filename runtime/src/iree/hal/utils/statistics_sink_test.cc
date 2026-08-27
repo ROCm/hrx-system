@@ -166,6 +166,67 @@ TEST(StatisticsSinkTest, AggregatesDispatchEventsByFunction) {
   iree_hal_profile_statistics_sink_release(statistics_sink);
 }
 
+TEST(StatisticsSinkTest, UsesDeviceRateWhenClockSamplesAreUnaligned) {
+  iree_hal_profile_statistics_sink_t* statistics_sink = nullptr;
+  IREE_ASSERT_OK(iree_hal_profile_statistics_sink_create(
+      iree_allocator_system(), &statistics_sink));
+  iree_hal_profile_sink_t* sink =
+      iree_hal_profile_statistics_sink_base(statistics_sink);
+
+  iree_hal_profile_chunk_metadata_t session_metadata =
+      iree_hal_profile_chunk_metadata_default();
+  session_metadata.content_type = IREE_HAL_PROFILE_CONTENT_TYPE_SESSION;
+  IREE_ASSERT_OK(iree_hal_profile_sink_begin_session(sink, &session_metadata));
+
+  iree_hal_profile_device_record_t device =
+      iree_hal_profile_device_record_default();
+  device.flags = IREE_HAL_PROFILE_DEVICE_FLAG_TIMESTAMP_FREQUENCY;
+  device.physical_device_ordinal = 2;
+  device.timestamp_frequency_hz = 100000000;
+  WriteChunk(sink, IREE_HAL_PROFILE_CONTENT_TYPE_DEVICES,
+             /*physical_device_ordinal=*/0, /*queue_ordinal=*/0, &device,
+             sizeof(device));
+
+  iree_hal_profile_clock_correlation_record_t clock_samples[2];
+  clock_samples[0] = iree_hal_profile_clock_correlation_record_default();
+  clock_samples[0].flags =
+      IREE_HAL_PROFILE_CLOCK_CORRELATION_FLAG_DEVICE_TICK |
+      IREE_HAL_PROFILE_CLOCK_CORRELATION_FLAG_HOST_CPU_TIMESTAMP |
+      IREE_HAL_PROFILE_CLOCK_CORRELATION_FLAG_DEVICE_TICK_UNALIGNED;
+  clock_samples[0].physical_device_ordinal = 2;
+  clock_samples[0].device_tick = 10;
+  clock_samples[0].host_cpu_timestamp_ns = 1000;
+  clock_samples[1] = clock_samples[0];
+  clock_samples[1].device_tick = 110;
+  clock_samples[1].host_cpu_timestamp_ns = 2000;
+  WriteChunk(sink, IREE_HAL_PROFILE_CONTENT_TYPE_CLOCK_CORRELATIONS,
+             /*physical_device_ordinal=*/0, /*queue_ordinal=*/0, clock_samples,
+             sizeof(clock_samples));
+
+  iree_hal_profile_dispatch_event_t event =
+      iree_hal_profile_dispatch_event_default();
+  event.executable_id = 7;
+  event.function_ordinal = 3;
+  event.start_tick = 20;
+  event.end_tick = 40;
+  WriteChunk(sink, IREE_HAL_PROFILE_CONTENT_TYPE_DISPATCH_EVENTS,
+             /*physical_device_ordinal=*/2, /*queue_ordinal=*/1, &event,
+             sizeof(event));
+
+  CollectedRows rows = CollectRows(statistics_sink);
+  const iree_hal_profile_statistics_row_t* row = FindRow(
+      rows, IREE_HAL_PROFILE_STATISTICS_ROW_TYPE_DISPATCH_FUNCTION,
+      /*executable_id=*/7, /*function_ordinal=*/3, /*command_buffer_id=*/0,
+      /*command_index=*/UINT32_MAX, /*event_type=*/0);
+  ASSERT_NE(row, nullptr);
+  uint64_t duration_ns = 0;
+  ASSERT_TRUE(iree_hal_profile_statistics_sink_scale_duration_to_ns(
+      statistics_sink, row, row->total_duration, &duration_ns));
+  EXPECT_EQ(duration_ns, 200u);
+
+  iree_hal_profile_statistics_sink_release(statistics_sink);
+}
+
 TEST(StatisticsSinkTest, AggregatesHostAndQueueDeviceEvents) {
   iree_hal_profile_statistics_sink_t* statistics_sink = nullptr;
   IREE_ASSERT_OK(iree_hal_profile_statistics_sink_create(

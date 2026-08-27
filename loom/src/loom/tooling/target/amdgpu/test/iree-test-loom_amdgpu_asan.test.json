@@ -1,0 +1,138 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "keeps valid loom-authored amdgpu asan access silent",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../../test/corpus/sanitizer/amdgpu_asan_actual.loom",
+          "--case=@asan_global_store_valid_case",
+          "--device=amdgpu",
+          "--sanitizer=asan",
+          "--sanitizer-reporting=report-only",
+          "--amdgpu_asan=true",
+          "--amdgpu_asan_report_policy=report-only"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            {
+              "regex": "\"case\":\"asan_global_store_valid_case\"[^}]*\"passed\":true"
+            },
+            "\"failed_sample_count\":0"
+          ]
+        }
+      }
+    },
+    {
+      "name": "reports loom-authored amdgpu asan redzone store",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../../test/corpus/sanitizer/amdgpu_asan_actual.loom",
+          "--case=@asan_global_store_redzone_case",
+          "--device=amdgpu",
+          "--sanitizer=asan",
+          "--sanitizer-reporting=report-only",
+          "--amdgpu_asan=true",
+          "--amdgpu_asan_report_policy=report-only"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            {
+              "regex": "\"case\":\"asan_global_store_redzone_case\"[^}]*\"passed\":true"
+            },
+            "\"failed_sample_count\":0"
+          ]
+        }
+      }
+    },
+    {
+      "name": "preserves checked relational launch bounds under amdgpu asan",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../../test/corpus/sanitizer/amdgpu_asan_actual.loom",
+          "--case=@asan_relational_launch_bound_case",
+          "--device=amdgpu",
+          "--config=asan_launch_bound.tile_capacity=1",
+          "--sanitizer=asan",
+          "--sanitizer-reporting=report-only",
+          "--amdgpu_asan=true",
+          "--amdgpu_asan_report_policy=report-only"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            {
+              "regex": "\"case\":\"asan_relational_launch_bound_case\"[^}]*\"passed\":true"
+            },
+            "\"failed_sample_count\":0"
+          ]
+        }
+      }
+    },
+    {
+      "name": "preserves coupled view-base bounds under amdgpu asan",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../../test/corpus/sanitizer/amdgpu_asan_actual.loom",
+          "--case=@asan_coupled_view_base_case",
+          "--device=amdgpu",
+          "--sanitizer=asan",
+          "--sanitizer-reporting=report-only",
+          "--amdgpu_asan=true",
+          "--amdgpu_asan_report_policy=report-only"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            {
+              "regex": "\"case\":\"asan_coupled_view_base_case\"[^}]*\"passed\":true"
+            },
+            "\"failed_sample_count\":0"
+          ]
+        }
+      }
+    },
+    {
+      "name": "runs selected kernargs with access instrumentation",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/amdgpu_unused_kernargs.loom",
+          "--device=amdgpu",
+          "--sanitizer=access"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            {
+              "regex": "\"case\":\"selected_lhs_case\"[^}]*\"passed\":true"
+            },
+            {
+              "regex": "\"case\":\"selected_rhs_case\"[^}]*\"passed\":true"
+            },
+            {
+              "regex": "\"case\":\"selected_buffer_per_workgroup_case\"[^}]*\"passed\":true"
+            },
+            "\"failed_sample_count\":0"
+          ]
+        }
+      }
+    }
+  ]
+}

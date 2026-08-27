@@ -108,6 +108,7 @@ class ModuleParser:
             "module": self._ignore,
             "multiple_version_override": self._ignore,
             "override_repo": self._ignore,
+            "register_toolchains": self._ignore,
             "single_version_override": self._ignore,
             "use_extension": lambda *_args, **_kwargs: DummyModuleExtension(),
             "use_repo": self._ignore,
@@ -443,7 +444,7 @@ def main() -> int:
             return 1
         return 0
 
-    output_path.write_text(contents, encoding="utf-8")
+    output_path.write_text(contents, encoding="utf-8", newline="\n")
     return 0
 
 

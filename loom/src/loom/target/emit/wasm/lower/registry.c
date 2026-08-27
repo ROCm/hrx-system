@@ -17,9 +17,15 @@ static bool loom_wasm_type_is_i32_register(loom_type_t type) {
   }
   switch (loom_type_element_type(type)) {
     case LOOM_SCALAR_TYPE_I1:
+    case LOOM_SCALAR_TYPE_I8:
+    case LOOM_SCALAR_TYPE_I16:
     case LOOM_SCALAR_TYPE_INDEX:
     case LOOM_SCALAR_TYPE_OFFSET:
     case LOOM_SCALAR_TYPE_I32:
+    case LOOM_SCALAR_TYPE_F8E4M3:
+    case LOOM_SCALAR_TYPE_F8E5M2:
+    case LOOM_SCALAR_TYPE_F16:
+    case LOOM_SCALAR_TYPE_BF16:
       return true;
     default:
       return false;
@@ -29,6 +35,29 @@ static bool loom_wasm_type_is_i32_register(loom_type_t type) {
 static bool loom_wasm_type_is_scalar_f32(loom_type_t type) {
   return loom_type_is_scalar(type) &&
          loom_type_element_type(type) == LOOM_SCALAR_TYPE_F32;
+}
+
+static bool loom_wasm_type_is_scalar_i64(loom_type_t type) {
+  return loom_type_is_scalar(type) &&
+         loom_type_element_type(type) == LOOM_SCALAR_TYPE_I64;
+}
+
+static bool loom_wasm_type_is_scalar_f64(loom_type_t type) {
+  return loom_type_is_scalar(type) &&
+         loom_type_element_type(type) == LOOM_SCALAR_TYPE_F64;
+}
+
+static bool loom_wasm_source_type_supported(void* user_data,
+                                            const loom_module_t* module,
+                                            loom_type_t source_type) {
+  (void)user_data;
+  (void)module;
+  if (!loom_type_is_scalar(source_type)) {
+    return false;
+  }
+  const loom_scalar_type_t scalar_type = loom_type_element_type(source_type);
+  return scalar_type == LOOM_SCALAR_TYPE_F8E4M3 ||
+         scalar_type == LOOM_SCALAR_TYPE_F8E5M2;
 }
 
 static bool loom_wasm_type_is_vector_4xi32(loom_type_t type) {
@@ -64,6 +93,18 @@ static iree_status_t loom_wasm_make_f32_register_type(
       context, WASM_CORE_SIMD128_REG_CLASS_ID_F32, 1, out_type);
 }
 
+static iree_status_t loom_wasm_make_i64_register_type(
+    loom_low_lower_context_t* context, loom_type_t* out_type) {
+  return loom_low_lower_make_register_type(
+      context, WASM_CORE_SIMD128_REG_CLASS_ID_I64, 1, out_type);
+}
+
+static iree_status_t loom_wasm_make_f64_register_type(
+    loom_low_lower_context_t* context, loom_type_t* out_type) {
+  return loom_low_lower_make_register_type(
+      context, WASM_CORE_SIMD128_REG_CLASS_ID_F64, 1, out_type);
+}
+
 static iree_status_t loom_wasm_make_v128_register_type(
     loom_low_lower_context_t* context, loom_type_t* out_type) {
   return loom_low_lower_make_register_type(
@@ -81,6 +122,12 @@ static iree_status_t loom_wasm_map_type(void* user_data,
   }
   if (loom_wasm_type_is_scalar_f32(source_type)) {
     return loom_wasm_make_f32_register_type(context, out_low_type);
+  }
+  if (loom_wasm_type_is_scalar_i64(source_type)) {
+    return loom_wasm_make_i64_register_type(context, out_low_type);
+  }
+  if (loom_wasm_type_is_scalar_f64(source_type)) {
+    return loom_wasm_make_f64_register_type(context, out_low_type);
   }
   if (loom_wasm_type_is_vector_4xi32(source_type)) {
     return loom_wasm_make_v128_register_type(context, out_low_type);
@@ -137,6 +184,8 @@ static const loom_low_lower_policy_t kWasmLowLowerPolicy = {
     .error_catalog = &loom_wasm_error_catalog,
     .map_type = {.fn = loom_wasm_map_type, .user_data = NULL},
     .map_argument = {.fn = loom_wasm_map_argument, .user_data = NULL},
+    .source_type_supported = {.fn = loom_wasm_source_type_supported,
+                              .user_data = NULL},
     .rule_sets =
         {
             .count = IREE_ARRAYSIZE(kWasmRuleSets),

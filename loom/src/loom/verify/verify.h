@@ -34,10 +34,10 @@
 //     structured IR, this means: defined in the same block before the
 //     use, or defined in an ancestor block/region.
 //
-//   Linear ownership (tied results)
-//     Operands consumed by tied results are not used after the
-//     consuming op. Tied result indices are in range and refer to
-//     valid operands.
+//   Linear ownership transfers
+//     Operands consumed by tied or moved results are not used after the
+//     consuming op. Tied result indices are in range and refer to valid
+//     operands.
 //
 //   Symbol references
 //     Every symbol reference (@name) resolves to a symbol in the

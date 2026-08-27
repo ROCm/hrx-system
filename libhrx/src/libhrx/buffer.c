@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "hrx_internal.h"
+#include "mem_pool.h"
 
 static iree_status_t hrx_buffer_unmap_internal(hrx_buffer_t buffer) {
   iree_status_t status = iree_hal_buffer_unmap_range(&buffer->mapping);
@@ -125,6 +126,7 @@ void hrx_buffer_retain(hrx_buffer_t buffer) {
   iree_hal_buffer_retain(buffer->hal_buffer);
   iree_hal_pool_retain(buffer->hal_pool);
   hrx_device_retain(buffer->device);
+  hrx_mem_pool_retain(buffer->allocation_budget_pool);
   iree_atomic_ref_count_inc(&buffer->ref_count);
 }
 
@@ -135,7 +137,11 @@ void hrx_buffer_release(hrx_buffer_t buffer) {
   iree_hal_buffer_t* hal_buffer = buffer->hal_buffer;
   iree_hal_pool_t* hal_pool = buffer->hal_pool;
   hrx_device_t device = buffer->device;
-  if (iree_atomic_ref_count_dec(&buffer->ref_count) == 1) {
+  hrx_mem_pool_t allocation_budget_pool = buffer->allocation_budget_pool;
+  const size_t allocation_budget_size = buffer->allocation_budget_size;
+  const bool is_final_reference =
+      iree_atomic_ref_count_dec(&buffer->ref_count) == 1;
+  if (is_final_reference) {
     if (buffer->is_mapped) {
       iree_status_ignore(hrx_buffer_unmap_internal(buffer));
     }
@@ -144,6 +150,11 @@ void hrx_buffer_release(hrx_buffer_t buffer) {
   iree_hal_buffer_release(hal_buffer);
   iree_hal_pool_release(hal_pool);
   hrx_device_release(device);
+  if (is_final_reference) {
+    hrx_mem_pool_release_allocation_budget(allocation_budget_pool,
+                                           allocation_budget_size);
+  }
+  hrx_mem_pool_release(allocation_budget_pool);
   HRX_TRACE_ZONE_END(z0);
 }
 

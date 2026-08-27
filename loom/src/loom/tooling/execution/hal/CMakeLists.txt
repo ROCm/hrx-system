@@ -18,11 +18,14 @@ loom_cc_library(
     "artifact.c"
   DEPS
     iree::base
+    iree::hal
+    iree::io::byte_sequence
     loom::error::diagnostic
     loom::ir
-    loom::target::compile_report
     loom::target::pipeline_options
+    loom::target::profile
     loom::target::provider
+    loom::target::reporting::report
     loom::target::types
     loom::tooling::execution::compile_options
     loom::verify
@@ -58,7 +61,8 @@ loom_cc_library(
     ::artifact
     ::runtime
     iree::base
-    loom::target::compile_report
+    iree::io::byte_sequence
+    loom::target::reporting::report
     loom::tooling::execution::compile_options
     loom::tooling::execution::session
     loom::verify
@@ -77,6 +81,7 @@ loom_cc_library(
     ::runtime
     iree::base
     iree::hal
+    iree::io::byte_sequence
     iree::tooling::value_io
     loom::target::launch
     loom::target::types
@@ -98,20 +103,28 @@ loom_cc_library(
     iree::base
     iree::hal
     iree::tooling::device_util
+    loom::analysis::kernel_launch_config
+    loom::analysis::symbol_facts
     loom::error::diagnostic
     loom::ir
     loom::ir::facts
+    loom::link::linker
+    loom::ops::func_symbol_facts
     loom::ops::kernel
+    loom::ops::op_defs
     loom::ops::special_values
-    loom::pass::types
+    loom::ops::target
     loom::sanitizer::options
+    loom::target::function_version
     loom::target::provider
     loom::target::types
     loom::tooling::compile::pipeline
     loom::tooling::config
     loom::tooling::execution::compile_options
+    loom::tooling::execution::compile_report_capture
     loom::tooling::execution::session
     loom::tooling::testbench
+    loom::tooling::testbench::invocation
     loom::tooling::testbench::requirements
     loom::tooling::testbench::value_materializer
     loom::util::fact_table
@@ -151,6 +164,9 @@ loom_cc_library(
     ::runtime
     iree::base
     iree::base::core_headers
+    iree::base::internal::arena
+    iree::io::byte_sequence
+    loom::target::entry_selection
     loom::tooling::execution::compile_report_capture
     loom::tooling::execution::execution_backend
     loom::tooling::execution::one_shot
@@ -166,11 +182,14 @@ loom_cc_test(
   DEPS
     ::candidate
     iree::base
+    iree::io::byte_sequence
     iree::testing::gtest
     iree::testing::gtest_main
     loom::ops::func
     loom::target::low_descriptor_registry_core_test
+    loom::target::profile
     loom::target::types
+    loom::testing::byte_sequence
     loom::tooling::execution::session
 )
 
@@ -214,12 +233,15 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::format::text::parser
     loom::ir
+    loom::link::linker
     loom::ops::check
     loom::ops::func
     loom::ops::index
     loom::ops::kernel
     loom::ops::test
+    loom::target::facts
     loom::target::low_descriptor_registry_core_test
+    loom::target::profile
     loom::testing::module_ptr
     loom::tooling::execution::session
     loom::tooling::testbench

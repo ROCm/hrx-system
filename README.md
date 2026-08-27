@@ -97,6 +97,7 @@ Useful options:
 | `IREE_DEPENDENCY_MODE` | `pinned` | Controls dependency resolution: `pinned`, `package`, or `auto`. |
 | `LIBHRX_BUILD` | ON | Build libhrx and compatibility targets. |
 | `LIBHRX_BUILD_CTS` | `${IREE_BUILD_TESTS}` | Build libhrx CTS binaries. |
+| `LIBHRX_BUILD_HIP_BINDING` | ON | Build the HIP runtime API compatibility DLL. |
 | `LIBHRX_BUILD_PASSTHROUGH` | ON | Build HIP passthrough/interception tools. |
 | `IREE_BUILD_TESTS` | ON | Build IREE runtime tests and CTS targets. |
 | `HRX_INSTALL_TESTS` | `${IREE_BUILD_TESTS}` | Install a relocatable CTest tree. |
@@ -132,8 +133,9 @@ python dev.py cmake precommit
 `precommit` checks staged, unstaged, and untracked files. Use
 `python dev.py <lane> precommit --base <git-ref>` to check the branch diff from
 the merge base through `HEAD` plus local changes, or `--staged` for staged
-files only. Add `--profile default`, `--profile paranoid`, or `--profile ci`
-to select the check profile for a manual run. Re-run
+files only. `--amend` checks the exact amended candidate, the index relative to
+`HEAD^`, without writing files. Add `--profile default`, `--profile paranoid`,
+or `--profile ci` to select the check profile for a manual run. Re-run
 `python dev.py <lane> hook --profile <profile>` to change the default profile
 used by Git commits. Use `python dev.py <lane> presubmit` for the full-tree
 CI-shaped check.
@@ -145,10 +147,11 @@ python dev.py bazel fix
 python dev.py cmake fix
 ```
 
-Test-bearing Git commit-hook profiles apply mechanical fixups before running
-the same profile in non-mutating check mode. The hook validates commit scope,
-not the full branch: files staged for commit plus files changed by `HEAD`, so
-amended commits include the commit being replaced. See
+Test-bearing Git commit-hook profiles apply mechanical fixups only to staged
+files and declared generated outputs. When a fixer changes the index, the hook
+names those paths and stops before tests; reviewing the staged diff and retrying
+the commit runs the non-mutating validation. A candidate path with unstaged
+hunks stops before fixers run, preserving partial-staging intent. See
 `CONTRIBUTING.md` for contributor setup and `build_tools/lefthook/README.md`
 for the hook architecture.
 
@@ -203,6 +206,10 @@ helper scripts where useful:
 | `hrx-public-deps-linux-x86_64` | Runtime ROCm dependency subset needed with the public install, including HSA and AQL profile libraries. |
 | `hrx-tests-linux-x86_64` | Installed CTest tree, unit tests, CTS binaries, test data, and benchmarks. |
 | `hrx-rocm-buildenv-linux-x86_64` | ROCm build environment used by CI, including ROCm LLVM. |
+| `hrx-public-windows-x86_64` | Public HRX Windows install: `hrx.dll`, import library, public HRX headers, CMake package files, and `hrx-info`. |
+| `hrx-public-deps-windows-x86_64` | Reserved public dependency overlay for the Windows package; the initial Windows package does not bundle ROCm runtime DLLs. |
+| `hrx-tests-windows-x86_64` | Windows installed CTest tree, runtime/libhrx unit tests, and test data. |
+| `hrx-rocm-buildenv-windows-x86_64` | ROCm Windows build environment used by CI, including ROCm LLVM. |
 
 To recreate the runtime overlay used by CI, extract the public package and the
 public dependency package into the same root:
@@ -219,6 +226,8 @@ source /tmp/hrx-root/hrx-public-linux-x86_64-env.sh
 
 Extract `hrx-tests-linux-x86_64-<tag>.tar.zst` into a separate tests root and
 run its installed CTest tree against the composed runtime environment.
+Windows release artifacts use `.zip` archives and include `.ps1` and `.cmd`
+environment helper scripts next to the package archive.
 
 ## Running HIP Applications
 

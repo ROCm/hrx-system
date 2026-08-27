@@ -21,9 +21,9 @@
 /// with SPIR-V facts and diagnostics.
 ///
 /// The initial execution profile targets IREE HAL's raw Vulkan BDA SPIR-V
-/// executable format. Devices or executable caches that cannot support that
-/// execution mode return a failed result with structured diagnostics instead
-/// of forcing callers to infer support from status codes.
+/// executable target. Devices that cannot support that execution mode return a
+/// failed result with structured diagnostics instead of forcing callers to
+/// infer support from status codes.
 ///
 /// @par Example
 /// Create a SPIR-V profile directly from an IREE HAL Vulkan device:
@@ -34,7 +34,7 @@
 ///     .structure_size = sizeof(loomc_spirv_iree_hal_profile_options_t),
 ///     .identifier = loomc_make_cstring_view("jit-vulkan"),
 ///     .device = device,
-///     .executable_cache = executable_cache,
+///     .physical_device_affinity = 0,
 /// };
 /// loomc_target_profile_t* profile = NULL;
 /// loomc_result_t* result = NULL;
@@ -70,8 +70,9 @@ typedef struct loomc_spirv_iree_hal_profile_options_t {
   /// IREE HAL device borrowed for the duration of the call.
   iree_hal_device_t* device;
 
-  /// IREE HAL executable cache borrowed for the duration of the call.
-  iree_hal_executable_cache_t* executable_cache;
+  /// Optional physical-device set the selected profile must fully cover.
+  iree_hal_physical_device_affinity_t physical_device_affinity;
+
 } loomc_spirv_iree_hal_profile_options_t;
 
 /// Creates a SPIR-V target profile from an IREE HAL Vulkan device.
@@ -95,8 +96,8 @@ typedef struct loomc_spirv_iree_hal_profile_options_t {
 ///
 /// @thread_safety
 /// The adapter holds no mutable process-global state. It may be called
-/// concurrently for different invocations. The supplied HAL device and
-/// executable cache must satisfy their own thread-safety contracts.
+/// concurrently for different invocations. The supplied HAL device must
+/// satisfy its own thread-safety contract.
 LOOMC_API_EXPORT loomc_status_t loomc_target_profile_create_spirv_iree_hal(
     loomc_target_environment_t* target_environment,
     const loomc_spirv_iree_hal_profile_options_t* options,

@@ -29,6 +29,12 @@ static constexpr iree_hal_amdgpu_gfxip_version_t kGfx10 = {
     /*stepping=*/0,
 };
 
+static constexpr iree_hal_amdgpu_gfxip_version_t kGfx11 = {
+    /*major=*/11,
+    /*minor=*/0,
+    /*stepping=*/0,
+};
+
 static iree_hal_amdgpu_kernel_descriptor_t MakeDescriptor(
     uint16_t kernel_code_properties =
         IREE_HAL_AMDGPU_KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR |
@@ -133,6 +139,7 @@ TEST(PM4DispatchTest, InitializesLaunchStateFromDescriptor) {
                         sizeof(expected_start_and_threads)),
             0);
   EXPECT_EQ(state.user_data_dword_count, 2u);
+  EXPECT_EQ(state.kernarg_user_data_offset, 0u);
   EXPECT_EQ(state.kernarg_preload_dword_offset, 0u);
   EXPECT_EQ(state.kernarg_preload_dword_count, 0u);
   EXPECT_EQ(state.kernarg_preload_user_data_offset, 2u);
@@ -193,6 +200,36 @@ TEST(PM4DispatchTest, InitializesLaunchStateWithPaddedUserDataDwords) {
   EXPECT_EQ(state.user_data_dword_count, 15u);
 }
 
+TEST(PM4DispatchTest, InitializesUnusedPrivateSegmentBufferPrefix) {
+  iree_hal_amdgpu_kernel_descriptor_t descriptor = MakeDescriptor(
+      IREE_HAL_AMDGPU_KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER |
+          IREE_HAL_AMDGPU_KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR |
+          IREE_HAL_AMDGPU_KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
+      /*user_data_dword_count=*/6);
+  const uint16_t workgroup_size[3] = {64, 1, 1};
+
+  EXPECT_TRUE(iree_hal_amdgpu_pm4_dispatch_launch_state_is_supported(
+      kGfx10, &descriptor, /*kernel_object=*/0x0000123456780000ull,
+      workgroup_size, IREE_HAL_AMDGPU_PM4_DISPATCH_LAUNCH_FLAG_NONE));
+  iree_hal_amdgpu_kernel_descriptor_t gfx9_descriptor = descriptor;
+  gfx9_descriptor.kernel_code_properties &=
+      ~IREE_HAL_AMDGPU_KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32;
+  EXPECT_TRUE(iree_hal_amdgpu_pm4_dispatch_launch_state_is_supported(
+      kGfx9, &gfx9_descriptor, /*kernel_object=*/0x0000123456780000ull,
+      workgroup_size, IREE_HAL_AMDGPU_PM4_DISPATCH_LAUNCH_FLAG_NONE));
+  EXPECT_FALSE(iree_hal_amdgpu_pm4_dispatch_launch_state_is_supported(
+      kGfx11, &descriptor, /*kernel_object=*/0x0000123456780000ull,
+      workgroup_size, IREE_HAL_AMDGPU_PM4_DISPATCH_LAUNCH_FLAG_NONE));
+  iree_hal_amdgpu_pm4_dispatch_launch_state_t state = {};
+  IREE_ASSERT_OK(InitializeLaunchState(
+      &descriptor, /*kernel_object=*/0x0000123456780000ull, workgroup_size,
+      IREE_HAL_AMDGPU_PM4_DISPATCH_LAUNCH_FLAG_NONE, &state));
+
+  EXPECT_EQ(state.user_data_dword_count, 6u);
+  EXPECT_EQ(state.kernarg_user_data_offset, 4u);
+  EXPECT_EQ(state.kernarg_preload_user_data_offset, 6u);
+}
+
 TEST(PM4DispatchTest, InitializesLaunchStateWithKernargPreload) {
   iree_hal_amdgpu_kernel_descriptor_t descriptor = MakeDescriptor(
       IREE_HAL_AMDGPU_KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
@@ -208,6 +245,7 @@ TEST(PM4DispatchTest, InitializesLaunchStateWithKernargPreload) {
       IREE_HAL_AMDGPU_PM4_DISPATCH_LAUNCH_FLAG_ORDER_MODE, &state));
 
   EXPECT_EQ(state.user_data_dword_count, 8u);
+  EXPECT_EQ(state.kernarg_user_data_offset, 0u);
   EXPECT_EQ(state.kernarg_preload_dword_offset, 0u);
   EXPECT_EQ(state.kernarg_preload_dword_count, 6u);
   EXPECT_EQ(state.kernarg_preload_user_data_offset, 2u);
@@ -367,6 +405,41 @@ TEST(PM4DispatchTest, EmitsPaddedKernargUserDataDwords) {
   for (uint32_t i = 4; i < IREE_ARRAYSIZE(dwords); ++i) {
     EXPECT_EQ(dwords[i], 0u);
   }
+}
+
+TEST(PM4DispatchTest, EmitsKernargAfterUnusedPrivateSegmentBufferPrefix) {
+  iree_hal_amdgpu_kernel_descriptor_t descriptor = MakeDescriptor(
+      IREE_HAL_AMDGPU_KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER |
+          IREE_HAL_AMDGPU_KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR |
+          IREE_HAL_AMDGPU_KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
+      /*user_data_dword_count=*/6);
+  const uint16_t workgroup_size[3] = {64, 1, 1};
+  iree_hal_amdgpu_pm4_dispatch_launch_state_t state = {};
+  IREE_ASSERT_OK(InitializeLaunchState(
+      &descriptor, /*kernel_object=*/0x0000123456780000ull, workgroup_size,
+      IREE_HAL_AMDGPU_PM4_DISPATCH_LAUNCH_FLAG_NONE, &state));
+
+  uint32_t dwords[8] = {};
+  uint32_t dword_count = 0;
+  IREE_ASSERT_OK(iree_hal_amdgpu_pm4_dispatch_emit_user_data(
+      &state, /*kernarg_address=*/0x00007FFF12345678ull,
+      /*kernarg_preload_data=*/nullptr, IREE_ARRAYSIZE(dwords), dwords,
+      &dword_count));
+
+  const uint32_t expected[] = {
+      iree_hal_amdgpu_pm4_make_header(
+          IREE_HAL_AMDGPU_PM4_HDR_IT_OPCODE_SET_SH_REG, 8),
+      IREE_HAL_AMDGPU_PM4_COMPUTE_USER_DATA_0_REGISTER -
+          IREE_HAL_AMDGPU_PM4_PERSISTENT_SPACE_START,
+      0u,
+      0u,
+      0u,
+      0u,
+      0x12345678u,
+      0x00007FFFu,
+  };
+  EXPECT_EQ(dword_count, IREE_ARRAYSIZE(expected));
+  EXPECT_EQ(std::memcmp(dwords, expected, sizeof(expected)), 0);
 }
 
 TEST(PM4DispatchTest, EmitsKernargPreloadUserDataDwords) {

@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load(
     "//loom/build_tools/amdgpu:descriptor_sets.bzl",
     "loom_amdgpu_descriptor_set_compatible_with",
@@ -14,6 +15,7 @@ load(
 )
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_benchmark",
     "loom_cc_library",
     "loom_cc_test",
 )
@@ -30,7 +32,7 @@ package(
 
 _AMDGPU_CHECK_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/check:__pkg__"]
 
-_DESCRIPTOR_SET_RDNA3 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna3.core"]
+_DESCRIPTOR_SET_GFX125X = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna4.gfx125x.core"]
 
 _AMDGPU_TOOLING_VISIBILITY = [
     "//loom/binding/c/target/amdgpu:__pkg__",
@@ -44,7 +46,31 @@ _AMDGPU_TOOLING_VISIBILITY = [
 loom_cc_library(
     name = "register_class",
     hdrs = ["register_class.h"],
-    deps = ["//loom/src/loom/codegen/low:descriptors"],
+    deps = [
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+    ],
+)
+
+loom_cc_library(
+    name = "branch_layout",
+    srcs = ["branch_layout.c"],
+    hdrs = ["branch_layout.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "branch_layout_test",
+    srcs = ["branch_layout_test.cc"],
+    deps = [
+        ":branch_layout",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
 )
 
 loom_cc_library(
@@ -52,11 +78,11 @@ loom_cc_library(
     srcs = ["assembly.c"],
     hdrs = ["assembly.h"],
     deps = [
+        ":branch_layout",
         ":register_class",
         ":storage_layout",
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low:descriptors",
-        "//loom/src/loom/codegen/low:move_sequence",
         "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/ir",
@@ -80,6 +106,7 @@ loom_cc_library(
     deps = [
         ":assembly",
         ":encoding",
+        ":hal_kernel_library",
         ":spill_lowering",
         "//loom/src/loom/codegen/low:allocation_json",
         "//loom/src/loom/codegen/low:frame",
@@ -87,7 +114,6 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
-        "//loom/src/loom/target/arch/amdgpu/planning:address_state",
         "//loom/src/loom/target/arch/amdgpu/planning:descriptor_semantics",
         "//loom/src/loom/target/arch/amdgpu/planning:occupancy",
         "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
@@ -95,6 +121,8 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu/planning:vopd_plan",
         "//loom/src/loom/tools/loom-check:execute",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/io:byte_sequence",
     ],
 )
 
@@ -103,10 +131,16 @@ loom_check_test_suite(
     srcs = [
         "test/allocation_json.loom-test",
         "test/assembly.loom-test",
+        "test/assembly_allocation.loom-test",
+        "test/assembly_cluster.loom-test",
         "test/assembly_q8.loom-test",
+        "test/assembly_vopd_profiles.loom-test",
         "test/assembly_wmma.loom-test",
+        "test/gfx1201_native.loom-test",
+        "test/hal_kernel_library.loom-test",
         "test/packet.loom-test",
         "test/packet_json.loom-test",
+        "test/spill_lowering.loom-test",
         "test/vopd_plan.loom-test",
         "test/wait_plan.loom-test",
         "test/wait_states.loom-test",
@@ -119,6 +153,7 @@ loom_cc_library(
     hdrs = ["metadata.h"],
     deps = [
         "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
         "//runtime/src/iree/base",
     ],
 )
@@ -150,6 +185,7 @@ loom_cc_test(
     srcs = ["storage_layout_test.cc"],
     deps = [
         ":storage_layout",
+        "//loom/src/loom/codegen/low:storage_layout",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//runtime/src/iree/base/internal:arena",
@@ -170,6 +206,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:function",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:registers",
@@ -177,25 +214,6 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
-    ],
-)
-
-loom_cc_test(
-    name = "spill_lowering_test",
-    srcs = ["spill_lowering_test.cc"],
-    target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_RDNA3),
-    deps = [
-        ":spill_lowering",
-        "//loom/src/loom/codegen/low:builder",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/ops/low",
-        "//loom/src/loom/target/arch/amdgpu:error_defs",
-        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
-        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
-        "//loom/src/loom/testing:diagnostic_matchers",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -210,12 +228,12 @@ loom_cc_library(
     srcs = ["encoding.c"],
     hdrs = ["encoding.h"],
     deps = [
+        ":branch_layout",
         ":register_class",
         ":storage_layout",
         ":text_fixup",
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low:descriptors",
-        "//loom/src/loom/codegen/low:move_sequence",
         "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/ir",
@@ -224,33 +242,50 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu/encoding",
         "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
-        "//loom/src/loom/target/emit/native:fragment",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
 
-loom_cc_test(
-    name = "encoding_test",
-    srcs = ["encoding_test.cc"],
-    target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_RDNA3),
+iree_c_embed_data(
+    name = "packet_plan_attention_bf16",
+    testonly = True,
+    srcs = ["packet_plan_attention_bf16.loom"],
+    c_file_output = "packet_plan_attention_bf16.c",
+    flatten = True,
+    h_file_output = "packet_plan_attention_bf16.h",
+    identifier = "packet_plan_attention_bf16",
+)
+
+loom_cc_benchmark(
+    name = "packet_plan_benchmark",
+    srcs = ["packet_plan_benchmark.cc"],
+    target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_GFX125X),
     deps = [
-        ":encoding",
+        ":packet_plan_attention_bf16",
         "//loom/src/loom/codegen/low:frame",
         "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/codegen/low:verify",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:low_descriptor_registry",
-        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
-        "//loom/src/loom/target/arch/amdgpu/ops",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/amdgpu:provider",
+        "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
+        "//loom/src/loom/target/arch/amdgpu/planning:descriptor_semantics",
+        "//loom/src/loom/target/arch/amdgpu/planning:occupancy",
         "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
+        "//loom/src/loom/target/arch/amdgpu/planning:storage_lease",
+        "//loom/src/loom/target/arch/amdgpu/planning:vopd_plan",
+        "//loom/src/loom/tooling/compile:pipeline",
+        "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:benchmark_main",
     ],
 )
 
@@ -260,6 +295,7 @@ loom_cc_library(
     hdrs = ["kernel_record.h"],
     deps = [
         ":descriptor",
+        ":kernel_entry",
         ":metadata",
         ":preflight",
         ":storage_layout",
@@ -270,8 +306,10 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:launch",
+        "//loom/src/loom/target/arch/amdgpu:facts",
         "//loom/src/loom/target/arch/amdgpu:target_info",
         "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//loom/src/loom/target/arch/amdgpu/target_id",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -290,9 +328,9 @@ loom_cc_library(
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/target/arch/amdgpu:error_defs",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
-        "//loom/src/loom/target/emit/native:fragment",
         "//runtime/src/iree/base",
     ],
 )
@@ -304,14 +342,32 @@ loom_cc_test(
         ":preflight",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/codegen/low:storage_layout",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:facts_builder",
         "//loom/src/loom/target/arch/amdgpu:error_defs",
+        "//loom/src/loom/target/arch/amdgpu:facts",
+        "//loom/src/loom/target/arch/amdgpu:target_info_defs",
         "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
+        "//loom/src/loom/target/arch/amdgpu/records:target_records",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//loom/src/loom/testing:diagnostic_matchers",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "kernel_entry",
+    srcs = ["kernel_entry.c"],
+    hdrs = ["kernel_entry.h"],
+    deps = [
+        ":text_fixup",
+        "//loom/src/loom/target/arch/amdgpu:target_info_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 
@@ -321,12 +377,24 @@ loom_cc_library(
     hdrs = ["kernel_assembly.h"],
     deps = [
         ":assembly",
+        ":kernel_entry",
         ":kernel_record",
         ":metadata",
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "kernel_entry_test",
+    srcs = ["kernel_entry_test.cc"],
+    deps = [
+        ":kernel_entry",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -337,15 +405,38 @@ loom_cc_library(
     deps = [
         ":encoding",
         ":hsaco",
+        ":kernel_entry",
         ":kernel_record",
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low/schedule",
+        "//loom/src/loom/target:residency",
         "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
         "//loom/src/loom/target/arch/amdgpu/planning:occupancy",
         "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:stream",
+    ],
+)
+
+loom_cc_library(
+    name = "kernel_emission",
+    srcs = ["kernel_emission.c"],
+    hdrs = ["kernel_emission.h"],
+    deps = [
+        ":kernel_assembly",
+        ":kernel_hsaco",
+        ":preflight",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
+        "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
+        "//loom/src/loom/target/arch/amdgpu/planning:wait_counters",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//loom/src/loom/target/reporting:low",
+        "//loom/src/loom/target/reporting:report",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 
@@ -392,43 +483,44 @@ loom_cc_library(
     hdrs = ["hal_kernel_library.h"],
     visibility = _AMDGPU_TOOLING_VISIBILITY,
     deps = [
-        ":kernel_assembly",
+        ":kernel_emission",
         ":kernel_hsaco",
         ":preflight",
         ":runtime_globals",
         ":spill_lowering",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/codegen/low:allocation_materialization",
+        "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:storage_layout",
+        "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/codegen/low:verify",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
-        "//loom/src/loom/ops:func_symbol_facts",
         "//loom/src/loom/ops/global",
         "//loom/src/loom/ops/low",
-        "//loom/src/loom/ops/target",
-        "//loom/src/loom/target:artifact_manifest_collect",
-        "//loom/src/loom/target:compile_report",
-        "//loom/src/loom/target:compile_report_low",
         "//loom/src/loom/target:entry_selection",
-        "//loom/src/loom/target:function_contract",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target:types",
-        "//loom/src/loom/target/arch/amdgpu:error_defs",
+        "//loom/src/loom/target/arch/amdgpu:facts",
         "//loom/src/loom/target/arch/amdgpu:provider",
         "//loom/src/loom/target/arch/amdgpu:target_info",
         "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
-        "//loom/src/loom/target/arch/amdgpu/ops",
-        "//loom/src/loom/target/arch/amdgpu/planning:address_state",
+        "//loom/src/loom/target/arch/amdgpu/matrix:contract",
         "//loom/src/loom/target/arch/amdgpu/planning:descriptor_semantics",
         "//loom/src/loom/target/arch/amdgpu/planning:occupancy",
-        "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
         "//loom/src/loom/target/arch/amdgpu/planning:storage_lease",
         "//loom/src/loom/target/arch/amdgpu/planning:vopd_plan",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//loom/src/loom/target/arch/amdgpu/target_id",
+        "//loom/src/loom/target/reporting:artifact_manifest_collect",
+        "//loom/src/loom/target/reporting:low",
+        "//loom/src/loom/target/reporting:report",
         "//loom/src/loom/verify",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:byte_sequence",
         "//runtime/src/iree/io:stream",
     ],
 )
@@ -439,23 +531,34 @@ loom_cc_test(
     deps = [
         ":hal_kernel_library",
         ":runtime_globals",
+        "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:func_symbol_facts",
         "//loom/src/loom/ops:op_registry",
         "//loom/src/loom/ops/sanitizer",
+        "//loom/src/loom/ops/target",
         "//loom/src/loom/sanitizer:site_table",
-        "//loom/src/loom/target/arch/amdgpu:error_defs",
+        "//loom/src/loom/target:facts_builder",
+        "//loom/src/loom/target:function_contract",
+        "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target:profile",
+        "//loom/src/loom/target/arch/amdgpu:profile",
         "//loom/src/loom/target/arch/amdgpu:provider",
         "//loom/src/loom/target/arch/amdgpu:target_info",
         "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
+        "//loom/src/loom/target/arch/amdgpu/matrix:contract",
+        "//loom/src/loom/target/arch/amdgpu/planning:wait_counters",
         "//loom/src/loom/target/arch/amdgpu/records:target_records",
+        "//loom/src/loom/target/arch/amdgpu/target_id",
         "//loom/src/loom/target/emit/native:elf",
         "//loom/src/loom/testing:diagnostic_matchers",
         "//loom/src/loom/tooling/compile:pipeline",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:byte_sequence",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -495,10 +598,13 @@ loom_cc_test(
         ":descriptor",
         ":hsaco",
         ":metadata",
+        "//loom/src/loom/target/arch/amdgpu:profile",
         "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//loom/src/loom/target/arch/amdgpu/target_id",
         "//loom/src/loom/target/emit/native:elf",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal/executable/amdgpu:code_object_target",
         "//runtime/src/iree/io:stream",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -540,15 +646,17 @@ loom_cc_test(
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:function_version",
         "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target:specialization",
+        "//loom/src/loom/target/arch/amdgpu:profile",
+        "//loom/src/loom/target/arch/amdgpu:provider",
         "//loom/src/loom/target/arch/amdgpu:target_info",
-        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
         "//loom/src/loom/target/arch/amdgpu/hal:binding_materialization",
         "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
-        "//loom/src/loom/target/arch/amdgpu/ops",
         "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",
         "//loom/src/loom/target/arch/amdgpu/planning:storage_lease",
-        "//loom/src/loom/target/arch/amdgpu/records:target_records",
+        "//loom/src/loom/target/arch/amdgpu/target_id",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",

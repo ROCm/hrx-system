@@ -11,8 +11,9 @@
 // code. The printer is read-only over the IR (unless location capture
 // is enabled, which updates op locations to point at the output).
 //
-// All output goes through a loom_output_stream_t — zero heap
-// allocations in the print path.
+// All output goes through a loom_output_stream_t. Modules whose SSA values use
+// generated names require no printer-owned heap allocations. Explicit names
+// are canonicalized once into a compact value-indexed plan before emission.
 
 #ifndef LOOM_FORMAT_TEXT_PRINTER_PRINTER_H_
 #define LOOM_FORMAT_TEXT_PRINTER_PRINTER_H_
@@ -30,7 +31,9 @@ extern "C" {
 enum loom_text_print_flag_bits_e {
   // Update each op's location to point at its byte range in the output.
   LOOM_TEXT_PRINT_CAPTURE_LOCATIONS = 1u << 0,
-  // Use encoding aliases (#enc) instead of inlining (#q8_0<block=32>).
+  // Use encoding aliases (#enc) instead of inlining
+  // (#encoding.operand<element_format=i8, payload_elements=32,
+  // payload_packing=dense_lanes>).
   LOOM_TEXT_PRINT_USE_ALIASES = 1u << 1,
   // Pretty-print with 2-space indentation (default on).
   LOOM_TEXT_PRINT_INDENT = 1u << 2,
@@ -39,9 +42,16 @@ enum loom_text_print_flag_bits_e {
   LOOM_TEXT_PRINT_SKIP_REGIONS = 1u << 3,
   // Emit trailing loc() annotations on ops.
   LOOM_TEXT_PRINT_LOCATIONS = 1u << 4,
-  // Require regions declared with optional low asm syntax to print as low asm
-  // when a descriptor-set key is selected.
+  // Require requested optional low asm regions to have a lossless assembly
+  // spelling instead of falling back to canonical syntax.
   LOOM_TEXT_PRINT_REQUIRE_LOW_ASM = 1u << 5,
+  // Prefer low asm for self-describing function regions when a descriptor
+  // environment is available, with canonical syntax as a lossless fallback.
+  LOOM_TEXT_PRINT_PREFER_LOW_ASM = 1u << 6,
+  // Preserve explicit low asm markers recorded by text parsing. Marked regions
+  // must retain lossless asm syntax and unmarked root regions remain generic.
+  // This source contract takes precedence over prefer/require policy flags.
+  LOOM_TEXT_PRINT_PRESERVE_LOW_ASM = 1u << 7,
 };
 typedef uint32_t loom_text_print_flags_t;
 
@@ -53,10 +63,9 @@ typedef uint32_t loom_text_print_flags_t;
 typedef struct loom_text_print_options_t {
   // Flag bitset controlling layout and optional annotations.
   loom_text_print_flags_t flags;
-  // Optional environment used to print low asm region syntax.
+  // Representation codec and assembly interface for Low functions. Generic
+  // modules may omit it; printing a Low wrapper requires it.
   loom_text_low_asm_environment_t low_asm_environment;
-  // Descriptor-set key selected for low asm region syntax in this print.
-  iree_string_view_t low_asm_descriptor_set_key;
 } loom_text_print_options_t;
 
 // Prints a complete module to canonical text via the output stream.

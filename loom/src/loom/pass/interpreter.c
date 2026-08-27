@@ -37,6 +37,8 @@ typedef struct loom_pass_interpreter_frame_t {
   loom_symbol_t* symbol;
   // Current function when kind is LOOM_PASS_FUNCTION.
   loom_func_like_t function;
+  // Concrete compiler version of |function|, or NULL.
+  loom_function_version_t* function_version;
 } loom_pass_interpreter_frame_t;
 
 typedef struct loom_pass_interpreter_state_t {
@@ -74,6 +76,8 @@ typedef struct loom_pass_interpreter_symbol_snapshot_entry_t {
   loom_symbol_t* symbol;
   // Function-like view of symbol->defining_op.
   loom_func_like_t function;
+  // Concrete compiler version of |function|, or NULL.
+  loom_function_version_t* function_version;
 } loom_pass_interpreter_symbol_snapshot_entry_t;
 
 static const char* loom_pass_interpreter_anchor_name(loom_pass_kind_t kind) {
@@ -230,9 +234,9 @@ static iree_status_t loom_pass_interpreter_emit_failure_diagnostic(
   }
   const loom_error_def_t* error = LOOM_ERR_STRUCTURE_028;
   if (!error) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
+    IREE_ASSERT_UNREACHABLE(
         "missing structured pass interpreter failure diagnostic");
+    IREE_BUILTIN_UNREACHABLE();
   }
   const loom_pass_program_invoke_t* invoke = &instruction->invoke;
   const loom_diagnostic_param_t params[] = {
@@ -356,6 +360,7 @@ static iree_status_t loom_pass_interpreter_invoke(
   if (pass_execution_allowed) {
     status = loom_pass_interpreter_make_pass(
         state, instruction, pass_diagnostic_emitter, &instance_arena, &pass);
+    pass.function_version = frame->function_version;
   }
   diagnostic_counter.pass = &pass;
 
@@ -471,28 +476,16 @@ static iree_status_t loom_pass_interpreter_build_function_snapshot(
     iree_host_size_t* out_count) {
   *out_entries = NULL;
   *out_count = 0;
-  iree_host_size_t count = 0;
-  for (iree_host_size_t i = 0; i < state->module->symbols.count; ++i) {
-    loom_symbol_t* symbol = &state->module->symbols.entries[i];
-    if (!loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_FUNC_LIKE)) {
-      continue;
-    }
-    loom_func_like_t function =
-        loom_func_like_cast(state->module, symbol->defining_op);
-    if (!loom_func_like_body(function)) {
-      continue;
-    }
-    ++count;
-  }
-  if (count == 0) {
+  const iree_host_size_t symbol_count = state->module->symbols.count;
+  if (symbol_count == 0) {
     return iree_ok_status();
   }
 
   loom_pass_interpreter_symbol_snapshot_entry_t* entries = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, count, sizeof(*entries),
-                                                 (void**)&entries));
-  iree_host_size_t entry_index = 0;
-  for (iree_host_size_t i = 0; i < state->module->symbols.count; ++i) {
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, symbol_count, sizeof(*entries), (void**)&entries));
+  memset(entries, 0, symbol_count * sizeof(*entries));
+  for (iree_host_size_t i = 0; i < symbol_count; ++i) {
     loom_symbol_t* symbol = &state->module->symbols.entries[i];
     if (!loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_FUNC_LIKE)) {
       continue;
@@ -502,13 +495,54 @@ static iree_status_t loom_pass_interpreter_build_function_snapshot(
     if (!loom_func_like_body(function)) {
       continue;
     }
-    entries[entry_index++] = (loom_pass_interpreter_symbol_snapshot_entry_t){
+    const loom_pass_function_selector_t selector =
+        state->options->function_selector;
+    if (selector.select &&
+        !selector.select(selector.user_data, state->module, symbol, function)) {
+      continue;
+    }
+    entries[i] = (loom_pass_interpreter_symbol_snapshot_entry_t){
         .symbol = symbol,
         .function = function,
     };
   }
+
+  const loom_function_version_list_t* versions =
+      state->options->function_versions;
+  if (versions != NULL) {
+    for (iree_host_size_t i = 0; i < versions->count; ++i) {
+      loom_function_version_t* version = versions->values[i];
+      if (version == NULL) {
+        continue;
+      }
+      const loom_symbol_ref_t function_ref =
+          loom_func_like_callee(version->function);
+      if (!loom_symbol_ref_is_valid(function_ref) ||
+          function_ref.module_id != 0 ||
+          function_ref.symbol_id >= symbol_count) {
+        continue;
+      }
+      loom_pass_interpreter_symbol_snapshot_entry_t* entry =
+          &entries[function_ref.symbol_id];
+      if (entry->function.op == version->function.op &&
+          entry->function.vtable == version->function.vtable) {
+        entry->function_version = version;
+      }
+    }
+  }
+
+  iree_host_size_t entry_index = 0;
+  for (iree_host_size_t i = 0; i < symbol_count; ++i) {
+    if (!loom_func_like_isa(entries[i].function)) {
+      continue;
+    }
+    if (entry_index != i) {
+      entries[entry_index] = entries[i];
+    }
+    ++entry_index;
+  }
   *out_entries = entries;
-  *out_count = count;
+  *out_count = entry_index;
   return iree_ok_status();
 }
 
@@ -540,6 +574,7 @@ static iree_status_t loom_pass_interpreter_execute_for(
         .kind = LOOM_PASS_FUNCTION,
         .symbol = entries[i].symbol,
         .function = entries[i].function,
+        .function_version = entries[i].function_version,
     };
     bool body_changed = false;
     status = loom_pass_interpreter_execute_range(
@@ -620,12 +655,11 @@ static bool loom_pass_interpreter_attr_string_value_equal(
   if (actual_attr.kind == LOOM_ATTR_ENUM && descriptor &&
       descriptor->enum_case_names) {
     uint8_t enum_value = loom_attr_as_enum(actual_attr);
-    if (enum_value >= descriptor->enum_case_count) {
-      return false;
-    }
-    return iree_string_view_equal(
-        loom_bstring_view(descriptor->enum_case_names[enum_value]),
-        expected_string);
+    loom_bstring_t case_name =
+        loom_attr_descriptor_enum_case_name(descriptor, enum_value);
+    if (!case_name) return false;
+    return iree_string_view_equal(loom_bstring_view(case_name),
+                                  expected_string);
   }
   if (actual_attr.kind == LOOM_ATTR_SYMBOL) {
     iree_string_view_t symbol_name = loom_pass_interpreter_source_symbol_name(
@@ -780,6 +814,7 @@ static iree_status_t loom_pass_interpreter_evaluate_provider_predicate(
           .target_module = state->module,
           .symbol = frame->symbol,
           .function = frame->function,
+          .function_version = frame->function_version,
       },
       out_match);
 }
@@ -853,10 +888,30 @@ static iree_status_t loom_pass_interpreter_execute_repeat(
       repeat->max_iterations);
 }
 
+static iree_status_t loom_pass_interpreter_execute_nested_body(
+    loom_pass_interpreter_state_t* state,
+    const loom_pass_interpreter_frame_t* frame,
+    const loom_pass_program_nested_body_t* nested_body, bool* out_changed) {
+  return loom_pass_interpreter_execute_range(
+      state, frame, nested_body->body_start, nested_body->body_end,
+      out_changed);
+}
+
+static iree_status_t loom_pass_interpreter_execute_if_changed(
+    loom_pass_interpreter_state_t* state,
+    const loom_pass_interpreter_frame_t* frame,
+    const loom_pass_program_instruction_t* instruction,
+    bool preceding_instruction_changed, bool* out_changed) {
+  if (!preceding_instruction_changed) return iree_ok_status();
+  return loom_pass_interpreter_execute_nested_body(
+      state, frame, &instruction->if_changed, out_changed);
+}
+
 static iree_status_t loom_pass_interpreter_execute_range(
     loom_pass_interpreter_state_t* state,
     const loom_pass_interpreter_frame_t* frame, iree_host_size_t start,
     iree_host_size_t end, bool* out_changed) {
+  bool preceding_instruction_changed = false;
   for (iree_host_size_t pc = start;
        pc < end && !loom_pass_interpreter_has_errors(state); ++pc) {
     const loom_pass_program_instruction_t* instruction =
@@ -866,28 +921,42 @@ static iree_status_t loom_pass_interpreter_execute_range(
           IREE_STATUS_INVALID_ARGUMENT,
           "pass program anchor mismatch at instruction %" PRIhsz, pc);
     }
+    bool instruction_changed = false;
     switch (instruction->kind) {
       case LOOM_PASS_PROGRAM_INSTRUCTION_INVOKE: {
         IREE_RETURN_IF_ERROR(loom_pass_interpreter_invoke(
-            state, frame, instruction, pc, out_changed));
+            state, frame, instruction, pc, &instruction_changed));
         break;
       }
       case LOOM_PASS_PROGRAM_INSTRUCTION_FOR_EACH_SYMBOL: {
         IREE_RETURN_IF_ERROR(loom_pass_interpreter_execute_for(
-            state, frame, instruction, out_changed));
+            state, frame, instruction, &instruction_changed));
         pc = instruction->for_each_symbol.body_end - 1;
         break;
       }
       case LOOM_PASS_PROGRAM_INSTRUCTION_WHERE: {
         IREE_RETURN_IF_ERROR(loom_pass_interpreter_execute_where(
-            state, frame, instruction, out_changed));
+            state, frame, instruction, &instruction_changed));
         pc = instruction->where.body_end - 1;
         break;
       }
       case LOOM_PASS_PROGRAM_INSTRUCTION_REPEAT: {
         IREE_RETURN_IF_ERROR(loom_pass_interpreter_execute_repeat(
-            state, frame, instruction, out_changed));
+            state, frame, instruction, &instruction_changed));
         pc = instruction->repeat.body_end - 1;
+        break;
+      }
+      case LOOM_PASS_PROGRAM_INSTRUCTION_CALL: {
+        IREE_RETURN_IF_ERROR(loom_pass_interpreter_execute_nested_body(
+            state, frame, &instruction->call, &instruction_changed));
+        pc = instruction->call.body_end - 1;
+        break;
+      }
+      case LOOM_PASS_PROGRAM_INSTRUCTION_IF_CHANGED: {
+        IREE_RETURN_IF_ERROR(loom_pass_interpreter_execute_if_changed(
+            state, frame, instruction, preceding_instruction_changed,
+            &instruction_changed));
+        pc = instruction->if_changed.body_end - 1;
         break;
       }
       case LOOM_PASS_PROGRAM_INSTRUCTION_FAIL:
@@ -902,6 +971,8 @@ static iree_status_t loom_pass_interpreter_execute_range(
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "unsupported pass program instruction");
     }
+    *out_changed |= instruction_changed;
+    preceding_instruction_changed = instruction_changed;
   }
   return iree_ok_status();
 }
@@ -967,6 +1038,8 @@ iree_status_t loom_pass_interpreter_run_function(
       .kind = LOOM_PASS_FUNCTION,
       .symbol = symbol,
       .function = function,
+      .function_version =
+          loom_function_version_list_find(options->function_versions, function),
   };
   bool changed = false;
   iree_status_t status = loom_pass_interpreter_execute_range(

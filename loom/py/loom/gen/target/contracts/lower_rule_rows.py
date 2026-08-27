@@ -10,12 +10,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from loom.gen.support.c import c_i64_literal as _c_i64_literal
 from loom.gen.support.c import c_string_literal as _c_string_literal
 from loom.gen.target.contracts import lower_rule_spelling
 from loom.target.contracts import (
     LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS,
     LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN,
     LOWER_RULE_FLAG_CONTRACT_ONLY,
+    LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS,
     LOWER_SOURCE_MEMORY_NONE,
     CompiledLowerRuleSet,
     ContractFragment,
@@ -49,12 +51,13 @@ _GUARD_VALUE_REF_KINDS = frozenset(
         GuardKind.VALUE_EXACT_I64,
         GuardKind.VALUE_EXACT_POWER_OF_TWO_I64,
         GuardKind.VALUE_U32_DIVISOR_MAGIC_IS_ADD,
-        GuardKind.VALUE_EXACT_F64,
+        GuardKind.VALUE_EXACT_FLOAT,
         GuardKind.VALUE_I64_RANGE,
         GuardKind.VALUE_I64_RANGE_LE,
         GuardKind.VALUE_I64_RANGE_GE,
-        GuardKind.VALUE_F64_EQUALS,
+        GuardKind.VALUE_FLOAT_EQUALS,
         GuardKind.VALUE_STORAGE_ELEMENT_FORMAT,
+        GuardKind.VALUE_MEMORY_SPACE,
         GuardKind.VALUE_PACKED_INTEGER_PAYLOAD_FROM_LANES,
         GuardKind.VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD,
         GuardKind.VALUE_NO_USES,
@@ -82,10 +85,10 @@ _ATTR_COPY_VALUE_REF_KINDS = frozenset(
         LowerAttrCopyKind.VALUE_U32_DIVISOR_MAGIC_MULTIPLIER,
         LowerAttrCopyKind.VALUE_U32_DIVISOR_MAGIC_SHIFT,
         LowerAttrCopyKind.VALUE_I32_AS_U32_BITS,
-        LowerAttrCopyKind.VALUE_F64_AS_F16_BITS,
-        LowerAttrCopyKind.VALUE_F64_AS_BF16_BITS,
-        LowerAttrCopyKind.VALUE_F64_AS_F32_BITS,
-        LowerAttrCopyKind.VALUE_F64_AS_F64_BITS,
+        LowerAttrCopyKind.VALUE_FLOAT_AS_F16_BITS,
+        LowerAttrCopyKind.VALUE_FLOAT_AS_BF16_BITS,
+        LowerAttrCopyKind.VALUE_FLOAT_AS_F32_BITS,
+        LowerAttrCopyKind.VALUE_FLOAT_AS_F64_BITS,
     )
 )
 
@@ -126,7 +129,7 @@ def _append_field(
     always: bool = False,
     default: str = "0",
 ) -> None:
-    value_string = "INT64_MIN" if value == -(2**63) else str(value)
+    value_string = str(value)
     if always or value_string != default:
         fields.append(f".{name} = {value_string}")
 
@@ -140,6 +143,7 @@ def value_ref_row(row: LowerValueRef) -> list[str]:
         always=True,
     )
     _append_field(fields, "index", row.index, always=True)
+    _append_field(fields, "element_index", row.element_index)
     _append_field(fields, "materializer_index", row.materializer_index)
     return fields
 
@@ -155,6 +159,8 @@ def source_memory_row(
         flags.append("LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_DYNAMIC_BYTE_STRIDE_ANY")
     if constraint.allow_dynamic_stride_values:
         flags.append("LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_DYNAMIC_STRIDE_VALUES")
+    if constraint.preserve_source_index:
+        flags.append("LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_PRESERVE_SOURCE_INDEX")
     if flags:
         _append_field(fields, "flags", " | ".join(flags))
     _append_field(
@@ -171,8 +177,14 @@ def source_memory_row(
     )
     _append_field(
         fields,
+        "address_layout",
+        lower_rule_spelling.SOURCE_MEMORY_ADDRESS_LAYOUT_C_NAMES[constraint.address_layout],
+        default="LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_LAYOUT_ANY",
+    )
+    _append_field(
+        fields,
         "memory_space_mask",
-        lower_rule_spelling.source_memory_space_mask(constraint.memory_spaces),
+        lower_rule_spelling.memory_space_mask(constraint.memory_spaces),
         always=True,
     )
     _append_field(
@@ -190,19 +202,19 @@ def source_memory_row(
     _append_field(
         fields,
         "vector_lane_byte_stride",
-        constraint.vector_lane_byte_stride,
+        _c_i64_literal(constraint.vector_lane_byte_stride),
         always=True,
     )
     _append_field(
         fields,
         "static_byte_offset_minimum",
-        constraint.static_byte_offset_minimum,
+        _c_i64_literal(constraint.static_byte_offset_minimum),
         always=True,
     )
     _append_field(
         fields,
         "static_byte_offset_maximum",
-        constraint.static_byte_offset_maximum,
+        _c_i64_literal(constraint.static_byte_offset_maximum),
         always=True,
     )
     _append_field(fields, "minimum_alignment", constraint.minimum_alignment)
@@ -213,12 +225,27 @@ def source_memory_row(
     )
     _append_field(
         fields,
+        "dynamic_term_count_minimum",
+        constraint.dynamic_term_count_minimum,
+    )
+    _append_field(
+        fields,
+        "dynamic_view_base_term_count",
+        ("LOOM_LOW_LOWER_SOURCE_MEMORY_DYNAMIC_VIEW_BASE_TERM_COUNT_ANY" if constraint.dynamic_view_base_term_count is None else constraint.dynamic_view_base_term_count),
+        always=True,
+    )
+    _append_field(
+        fields,
         "dynamic_index_source",
         lower_rule_spelling.SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_C_NAMES[constraint.dynamic_index_source],
         default="LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_NONE",
     )
     if constraint.dynamic_byte_stride is not None:
-        _append_field(fields, "dynamic_byte_stride", constraint.dynamic_byte_stride)
+        _append_field(
+            fields,
+            "dynamic_byte_stride",
+            _c_i64_literal(constraint.dynamic_byte_stride),
+        )
     _append_field(
         fields,
         "dynamic_offset_unsigned_bit_count",
@@ -232,6 +259,12 @@ def source_memory_row(
     )
     _append_field(
         fields,
+        "address_layout_diagnostic_index",
+        lower_rule_spelling.diagnostic_index(row.address_layout_diagnostic_index),
+        always=True,
+    )
+    _append_field(
+        fields,
         "cache_policy_build_flags",
         constraint.cache_policy_build_flags,
     )
@@ -239,6 +272,12 @@ def source_memory_row(
         fields,
         "diagnostic_index",
         lower_rule_spelling.diagnostic_index(row.diagnostic_index),
+        always=True,
+    )
+    _append_field(
+        fields,
+        "address_diagnostic_index",
+        lower_rule_spelling.diagnostic_index(row.address_diagnostic_index),
         always=True,
     )
     if row.byte_offset_materializer is not None:
@@ -277,6 +316,96 @@ def source_memory_row(
             always=True,
             default="0xFFFF",
         )
+    if row.address_materializer is not None:
+        materializer = row.address_materializer
+        _append_field(
+            fields,
+            "address_base_kind",
+            lower_rule_spelling.SOURCE_MEMORY_ADDRESS_BASE_C_NAMES[materializer.base],
+            always=True,
+        )
+        _append_field(
+            fields,
+            "address_coordinate_type",
+            lower_rule_spelling.SOURCE_MEMORY_ADDRESS_COORDINATE_TYPE_C_NAMES[materializer.coordinate_type],
+            always=True,
+        )
+        _append_field(
+            fields,
+            "address_coordinate_unit_byte_count",
+            materializer.coordinate_unit_byte_count,
+            always=True,
+        )
+        _append_field(
+            fields,
+            "address_coordinate_minimum",
+            _c_i64_literal(materializer.coordinate_minimum),
+            always=True,
+        )
+        _append_field(
+            fields,
+            "address_coordinate_maximum",
+            _c_i64_literal(materializer.coordinate_maximum),
+            always=True,
+        )
+        _append_field(
+            fields,
+            "address_const_coordinate_descriptor_ref",
+            _descriptor_ref_index(descriptor_refs, materializer.const_coordinate),
+            always=True,
+            default="0xFFFF",
+        )
+        _append_field(
+            fields,
+            "address_const_coordinate_immediate",
+            f'IREE_SVL("{_c_string_literal(materializer.const_coordinate_immediate)}")',
+            always=True,
+        )
+        _append_field(
+            fields,
+            "address_add_coordinate_descriptor_ref",
+            _descriptor_ref_index(descriptor_refs, materializer.add_coordinate),
+            always=True,
+            default="0xFFFF",
+        )
+        _append_field(
+            fields,
+            "address_mul_coordinate_descriptor_ref",
+            _descriptor_ref_index(descriptor_refs, materializer.mul_coordinate),
+            always=True,
+            default="0xFFFF",
+        )
+        _append_field(
+            fields,
+            "address_shl_coordinate_descriptor_ref",
+            _descriptor_ref_index(descriptor_refs, materializer.shl_coordinate),
+            always=True,
+            default="0xFFFF",
+        )
+        _append_field(
+            fields,
+            "address_index_to_coordinate_input_descriptor_ref",
+            _descriptor_ref_index(
+                descriptor_refs,
+                materializer.index_to_coordinate_input,
+            ),
+            always=True,
+            default="0xFFFF",
+        )
+        _append_field(
+            fields,
+            "address_index_to_coordinate_descriptor_ref",
+            _descriptor_ref_index(descriptor_refs, materializer.index_to_coordinate),
+            always=True,
+            default="0xFFFF",
+        )
+        _append_field(
+            fields,
+            "address_descriptor_ref",
+            _descriptor_ref_index(descriptor_refs, materializer.address),
+            always=True,
+            default="0xFFFF",
+        )
     return fields
 
 
@@ -284,19 +413,33 @@ def descriptor_ref_keys(table: CompiledLowerRuleSet, source_contract: ContractFr
     used_keys = {row.descriptor.key for row in table.guards if row.kind == GuardKind.DESCRIPTOR_AVAILABLE and row.descriptor is not None}
     used_keys.update(row.descriptor.key for row in table.emits)
     for row in table.source_memories:
-        if row.byte_offset_materializer is None:
-            continue
-        materializer = row.byte_offset_materializer
-        used_keys.update(
-            descriptor.key
-            for descriptor in (
-                materializer.const_i64,
-                materializer.add_i64,
-                materializer.mul_i64,
-                materializer.shl_i64,
+        if row.byte_offset_materializer is not None:
+            materializer = row.byte_offset_materializer
+            used_keys.update(
+                descriptor.key
+                for descriptor in (
+                    materializer.const_i64,
+                    materializer.add_i64,
+                    materializer.mul_i64,
+                    materializer.shl_i64,
+                )
+                if descriptor is not None
             )
-            if descriptor is not None
-        )
+        if row.address_materializer is not None:
+            materializer = row.address_materializer
+            used_keys.update(
+                descriptor.key
+                for descriptor in (
+                    materializer.const_coordinate,
+                    materializer.add_coordinate,
+                    materializer.mul_coordinate,
+                    materializer.shl_coordinate,
+                    materializer.index_to_coordinate_input,
+                    materializer.index_to_coordinate,
+                    materializer.address,
+                )
+                if descriptor is not None
+            )
     return tuple(descriptor.key for descriptor in source_contract.descriptor_set.descriptors if descriptor.key in used_keys)
 
 
@@ -321,6 +464,10 @@ def _descriptor_ref_index(descriptor_refs: Mapping[str, int], descriptor: Descri
 def _rule_flags_c_expression(flags: int) -> str:
     if flags == LOWER_RULE_FLAG_CONTRACT_ONLY:
         return "LOOM_LOW_LOWER_RULE_FLAG_CONTRACT_ONLY"
+    if flags == LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS:
+        return "LOOM_LOW_LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS"
+    if flags == (LOWER_RULE_FLAG_CONTRACT_ONLY | LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS):
+        return "LOOM_LOW_LOWER_RULE_FLAG_CONTRACT_ONLY | LOOM_LOW_LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS"
     return f"0x{flags:X}"
 
 
@@ -373,7 +520,7 @@ def guard_row(descriptor_refs: Mapping[str, int], row: LowerGuard) -> list[str]:
         GuardKind.VALUE_SIGNED_BIT_COUNT,
         GuardKind.VALUE_UNSIGNED_BIT_COUNT,
         GuardKind.VALUE_U32_DIVISOR_MAGIC_IS_ADD,
-        GuardKind.VALUE_F64_EQUALS,
+        GuardKind.VALUE_FLOAT_EQUALS,
         GuardKind.INSTANCE_FLAGS_HAS_ALL,
         GuardKind.VALUE_PACKED_INTEGER_PAYLOAD_FROM_LANES,
         GuardKind.VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD,
@@ -383,6 +530,13 @@ def guard_row(descriptor_refs: Mapping[str, int], row: LowerGuard) -> list[str]:
         if row.u64_c_expression is None:
             raise ValueError("storage element-format guard is missing expression")
         _append_field(fields, "u64", row.u64_c_expression, always=True)
+    if row.kind == GuardKind.VALUE_MEMORY_SPACE:
+        _append_field(
+            fields,
+            "u64",
+            lower_rule_spelling.memory_space_mask(row.memory_spaces),
+            always=True,
+        )
     if row.kind == GuardKind.DESCRIPTOR_AVAILABLE:
         _append_field(
             fields,
@@ -400,7 +554,12 @@ def guard_row(descriptor_refs: Mapping[str, int], row: LowerGuard) -> list[str]:
         GuardKind.VALUE_PACKED_INTEGER_PAYLOAD_FROM_LANES,
         GuardKind.VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD,
     ):
-        _append_field(fields, "minimum_i64", row.minimum_i64, always=True)
+        _append_field(
+            fields,
+            "minimum_i64",
+            _c_i64_literal(row.minimum_i64),
+            always=True,
+        )
     if row.kind in (
         GuardKind.I64_RANGE,
         GuardKind.I64_ARRAY_ELEMENT_RANGE,
@@ -408,7 +567,12 @@ def guard_row(descriptor_refs: Mapping[str, int], row: LowerGuard) -> list[str]:
         GuardKind.VALUE_I64_RANGE,
         GuardKind.VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD,
     ):
-        _append_field(fields, "maximum_i64", row.maximum_i64, always=True)
+        _append_field(
+            fields,
+            "maximum_i64",
+            _c_i64_literal(row.maximum_i64),
+            always=True,
+        )
     return fields
 
 
@@ -489,7 +653,12 @@ def attr_copy_row(row: LowerAttrCopy) -> list[str]:
         LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_QUOTIENT,
         LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_REMAINDER,
     ):
-        _append_field(fields, "literal_i64", row.literal_i64, always=True)
+        _append_field(
+            fields,
+            "literal_i64",
+            _c_i64_literal(row.literal_i64),
+            always=True,
+        )
     if row.kind == LowerAttrCopyKind.SOURCE_MEMORY_DYNAMIC_BYTE_STRIDE:
         _append_field(
             fields,
@@ -711,7 +880,12 @@ def diagnostic_param_row(row: LowerDiagnosticParam) -> list[str]:
     if row.kind == DiagnosticParamKind.VALUE_TYPE:
         _append_field(fields, "value_ref_index", row.value_ref_index, always=True)
     if row.kind == DiagnosticParamKind.I64_LITERAL:
-        _append_field(fields, "i64_value", row.i64_value, always=True)
+        _append_field(
+            fields,
+            "i64_value",
+            _c_i64_literal(row.i64_value),
+            always=True,
+        )
     if row.kind == DiagnosticParamKind.U32_LITERAL:
         _append_field(fields, "u32_value", row.u32_value, always=True)
     if row.kind == DiagnosticParamKind.U64_LITERAL:
@@ -736,20 +910,20 @@ def type_pattern_row(type_pattern: TypePattern) -> list[str]:
         f".type_kind = {lower_rule_spelling.type_kind_c_name(type_pattern)}",
         f".element_type_mask = {lower_rule_spelling.scalar_type_mask_c_expr(type_pattern.elements)}",
     ]
-    if type_pattern.kind == "vector":
-        if type_pattern.dims:
-            row[0] += " | LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_RANK"
-            row.extend(
-                [
-                    f".rank = {len(type_pattern.dims)}",
-                    f".static_dim0 = {lower_rule_spelling.c_expression(type_pattern.dims[0])}",
-                ]
-            )
-            row[0] += " | LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_DIM0"
-            if len(type_pattern.dims) >= 2:
-                row[0] += " | LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_DIM1"
-                row.append(f".static_dim1 = {lower_rule_spelling.c_expression(type_pattern.dims[1])}")
-        elif type_pattern.lanes is not None:
+    if type_pattern.dims:
+        row[0] += " | LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_RANK"
+        row.extend(
+            [
+                f".rank = {len(type_pattern.dims)}",
+                f".static_dim0 = {lower_rule_spelling.c_expression(type_pattern.dims[0])}",
+            ]
+        )
+        row[0] += " | LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_DIM0"
+        if len(type_pattern.dims) >= 2:
+            row[0] += " | LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_DIM1"
+            row.append(f".static_dim1 = {lower_rule_spelling.c_expression(type_pattern.dims[1])}")
+    elif type_pattern.kind == "vector":
+        if type_pattern.lanes is not None:
             row.append(".rank = 1")
             row[0] += " | LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_RANK | LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_DIM0"
             row.append(f".static_dim0 = {lower_rule_spelling.c_expression(type_pattern.lanes)}")

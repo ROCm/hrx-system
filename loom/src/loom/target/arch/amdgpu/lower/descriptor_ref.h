@@ -21,20 +21,49 @@ extern "C" {
 
 typedef struct loom_builder_t loom_builder_t;
 
-// Resolves |descriptor_ref| to a descriptor row and interns its opcode spelling
-// in the builder module.
-iree_status_t loom_amdgpu_lookup_descriptor_ref(
-    loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
-    loom_amdgpu_descriptor_ref_t descriptor_ref,
-    const loom_low_descriptor_t** out_descriptor,
-    loom_string_id_t* out_opcode_id);
-
-// Builds the register type for the implicit resource operand carried by
-// |descriptor|. Descriptor rows that use M0 publish it as an implicit resource
-// operand.
-iree_status_t loom_amdgpu_make_descriptor_implicit_resource_type(
+// Returns true when |descriptor_set| contains the target-generated descriptor
+// reference.
+bool loom_amdgpu_descriptor_set_has_ref(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, loom_type_t* out_type);
+    loom_amdgpu_descriptor_ref_t descriptor_ref);
+
+// Returns a stable display key for |descriptor_set| diagnostics.
+iree_string_view_t loom_amdgpu_descriptor_set_key(
+    const loom_low_descriptor_set_t* descriptor_set);
+
+// Returns true when |descriptor_set| contains every non-NONE descriptor ref in
+// |descriptor_refs|.
+bool loom_amdgpu_descriptor_set_has_all_refs(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_descriptor_ref_t* descriptor_refs,
+    iree_host_size_t descriptor_ref_count);
+
+typedef struct loom_amdgpu_descriptor_requirement_t {
+  // Constraint key reported when this descriptor ref is missing.
+  iree_string_view_t constraint_key;
+  // Descriptor ref required by the lowering strategy.
+  loom_amdgpu_descriptor_ref_t descriptor_ref;
+} loom_amdgpu_descriptor_requirement_t;
+
+// Returns true when all descriptor requirements are available. On failure,
+// returns the first missing requirement's structured constraint key.
+bool loom_amdgpu_descriptor_requirements_present(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_descriptor_requirement_t* requirements,
+    iree_host_size_t requirement_count, iree_string_view_t* out_constraint_key);
+
+// Returns true when one descriptor requirement is available. On failure,
+// returns its structured constraint key.
+bool loom_amdgpu_descriptor_requirement_present(
+    const loom_low_descriptor_set_t* descriptor_set,
+    iree_string_view_t constraint_key,
+    loom_amdgpu_descriptor_ref_t descriptor_ref,
+    iree_string_view_t* out_constraint_key);
+
+// Returns the descriptor row for a required generated reference.
+const loom_low_descriptor_t* loom_amdgpu_lookup_descriptor_ref(
+    const loom_low_descriptor_set_t* descriptor_set,
+    loom_amdgpu_descriptor_ref_t descriptor_ref);
 
 // Returns whether |descriptor| declares an immediate named |name|.
 bool loom_amdgpu_descriptor_has_immediate(

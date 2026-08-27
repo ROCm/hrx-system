@@ -161,12 +161,12 @@ iree_status_t iree_hal_amdgpu_aql_program_builder_append_command(
     iree_hal_amdgpu_command_buffer_command_header_t** out_command,
     iree_hal_amdgpu_command_buffer_binding_source_t** out_binding_sources);
 
-// Sets the fence scopes for the pending execution barrier most recently
-// appended to |builder|. The release scope patches the previous payload command
-// while the acquire scope is carried until the next payload command. Multiple
-// adjacent barriers are coalesced by taking the maximum encoded HSA fence scope
-// for each side.
-void iree_hal_amdgpu_aql_program_builder_set_pending_barrier_scopes(
+// Adds an execution dependency between the preceding and following payload
+// commands without appending a command record. The release scope patches the
+// previous payload command while the acquire scope is carried until the next
+// payload command. Multiple adjacent dependencies are coalesced by taking the
+// maximum encoded HSA fence scope for each side.
+void iree_hal_amdgpu_aql_program_builder_add_execution_dependency(
     iree_hal_amdgpu_aql_program_builder_t* builder, uint8_t acquire_scope,
     uint8_t release_scope);
 

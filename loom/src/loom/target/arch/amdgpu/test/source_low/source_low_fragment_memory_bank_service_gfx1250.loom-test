@@ -1,0 +1,74 @@
+// RUN: emit amdgpu-bank-service
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @gfx1250_fragment_bank_service() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 128 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %fragment_origin = index.constant 0 : index
+  %tile_extent = index.constant 16 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 32 : index
+  %scratch_bytes = index.constant 4096 : offset
+  %workitem = kernel.workitem.id<x> : index
+  %subgroup = kernel.subgroup.id : index
+  %tile_origin = index.mul %subgroup, %tile_extent : index
+  %rhs_layout = encoding.layout.strided [1, 32] : encoding<layout>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<128x16xbf16>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x64xf32>
+  %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
+  %scratch_stage = buffer.view %scratch[%buffer_base] : buffer -> view<128x16xbf16>
+  %staged = vector.load %input_view[%workitem, 0] : view<128x16xbf16> -> vector<16xbf16>
+  vector.store %staged, %scratch_stage[%workitem, 0] : vector<16xbf16>, view<128x16xbf16>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %lhs_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x32xbf16>
+  %rhs_view = buffer.view %scratch[%buffer_base] : buffer -> view<32x64xbf16, %rhs_layout>
+  %lhs = vector.fragment.load<lhs> %lhs_view[%tile_origin, %fragment_origin] shape [%m, %k] : view<64x32xbf16> -> vector<16xbf16>
+  %rhs = vector.fragment.load<rhs> %rhs_view[%fragment_origin, %tile_origin] shape [%k, %n] : view<32x64xbf16, %rhs_layout> -> vector<16xbf16>
+  %zero_acc = vector.constant 0.0 : vector<8xf32>
+  %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  vector.fragment.store<result> %result, %output_view[%tile_origin, %tile_origin] shape [%m, %n] : vector<8xf32>, view<64x64xf32>
+  kernel.return
+}
+
+// ----
+bank-service function=gfx1250_fragment_bank_service source-op=vector.store root=scratch packet=amdgpu.ds_write_b128 model=amdgpu.lds.wave32.b128.quad-phases.write.count-each proof=exact lane-address=affine-workitem-x-byte-stride active-lanes=subgroup-uniform-control-full-wave base-residue=all-bank-word-residues-common-translation classification=conflict-free required-rounds=8 uncontended-rounds=8 extra-rounds=0 maximum-multiplicity=1
+bank-service function=gfx1250_fragment_bank_service source-op=vector.store root=scratch packet=amdgpu.ds_write_b128 model=amdgpu.lds.wave32.b128.quad-phases.write.count-each proof=exact lane-address=affine-workitem-x-byte-stride active-lanes=subgroup-uniform-control-full-wave base-residue=all-bank-word-residues-common-translation classification=conflict-free required-rounds=8 uncontended-rounds=8 extra-rounds=0 maximum-multiplicity=1
+bank-service function=gfx1250_fragment_bank_service source-op=vector.fragment.load root=scratch packet=amdgpu.ds_read_b128 model=amdgpu.lds.wave32.b128.quad-phases.read.count-each proof=exact lane-address=compiled-fragment-lane-register-layout active-lanes=subgroup-uniform-control-full-wave base-residue=subgroup-uniform-common-translation-all-bank-word-residues classification=conflicted required-rounds=16 uncontended-rounds=8 extra-rounds=8 maximum-multiplicity=2
+bank-service function=gfx1250_fragment_bank_service source-op=vector.fragment.load root=scratch packet=amdgpu.ds_read_b128 model=amdgpu.lds.wave32.b128.quad-phases.read.count-each proof=exact lane-address=compiled-fragment-lane-register-layout active-lanes=subgroup-uniform-control-full-wave base-residue=subgroup-uniform-common-translation-all-bank-word-residues classification=conflicted required-rounds=16 uncontended-rounds=8 extra-rounds=8 maximum-multiplicity=2
+bank-service function=gfx1250_fragment_bank_service source-op=vector.fragment.load root=scratch packet=amdgpu.ds_read_b128 model=amdgpu.lds.wave32.b128.quad-phases.read.count-each proof=exact lane-address=compiled-fragment-lane-register-layout active-lanes=subgroup-uniform-control-full-wave base-residue=subgroup-uniform-common-translation-all-bank-word-residues classification=conflicted required-rounds=16 uncontended-rounds=8 extra-rounds=8 maximum-multiplicity=2
+bank-service function=gfx1250_fragment_bank_service source-op=vector.fragment.load root=scratch packet=amdgpu.ds_read_b128 model=amdgpu.lds.wave32.b128.quad-phases.read.count-each proof=exact lane-address=compiled-fragment-lane-register-layout active-lanes=subgroup-uniform-control-full-wave base-residue=subgroup-uniform-common-translation-all-bank-word-residues classification=conflicted required-rounds=16 uncontended-rounds=8 extra-rounds=8 maximum-multiplicity=2
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @gfx1250_runtime_strided_fragment_bank_service() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%row_stride0: index, %output: buffer) {
+  %row_stride = index.assume %row_stride0 [range(%row_stride0, 32, 64), mul(%row_stride0, 32)] : index
+  %buffer_base = index.constant 0 : offset
+  %fragment_origin = index.constant 0 : index
+  %m = index.constant 16 : index
+  %k = index.constant 32 : index
+  %scratch_bytes = index.constant 4096 : offset
+  %layout = encoding.layout.strided [%row_stride, 1] : encoding<layout>
+  %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
+  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<16x32xbf16, %layout>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xbf16>
+  %lhs = vector.fragment.load<lhs> %scratch_view[%fragment_origin, %fragment_origin] shape [%m, %k] : view<16x32xbf16, %layout> -> vector<16xbf16>
+  %element = vector.extract %lhs[0] : vector<16xbf16> -> bf16
+  view.store %element, %output_view[0] : bf16, view<1xbf16>
+  kernel.return
+}
+
+// ----
+bank-service function=gfx1250_runtime_strided_fragment_bank_service source-op=vector.fragment.load root=scratch packet=amdgpu.ds_read_b128 model=amdgpu.lds.wave32.b128.quad-phases.read.count-each proof=unknown lane-address=unproven active-lanes=subgroup-uniform-control-full-wave base-residue=unproven unknown-reason=address-runtime-fragment-stride
+bank-service function=gfx1250_runtime_strided_fragment_bank_service source-op=vector.fragment.load root=scratch packet=amdgpu.ds_read_b128 model=amdgpu.lds.wave32.b128.quad-phases.read.count-each proof=unknown lane-address=unproven active-lanes=subgroup-uniform-control-full-wave base-residue=unproven unknown-reason=address-runtime-fragment-stride

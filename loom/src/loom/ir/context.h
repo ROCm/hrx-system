@@ -23,7 +23,9 @@
 
 #include "iree/base/api.h"
 #include "loom/ir/ir.h"
+#include "loom/ir/parameterized_attr.h"
 #include "loom/ir/semantics.h"
+#include "loom/ir/type_descriptor.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,10 +42,15 @@ extern "C" {
 typedef struct loom_dialect_vtables_t {
   // Number of operation slots in the dialect arrays.
   uint16_t op_count;
+  // Number of sparse condition-refinement descriptors.
+  uint8_t condition_refinement_count;
   // Dense generated vtable array, indexed by dialect-local operation index.
   const loom_op_vtable_t* const* entries;
   // Dense generated semantic metadata array, or NULL when none is registered.
   const loom_op_semantics_t* semantics;
+  // Sparse generated condition-refinement descriptors, or NULL when none of
+  // the dialect's operations refine values on control-flow edges.
+  const loom_condition_refinement_descriptor_t* condition_refinements;
 } loom_dialect_vtables_t;
 
 // Two-level op metadata registry: dialect table indexed by dialect_id, each
@@ -53,6 +60,49 @@ typedef struct loom_op_vtable_registry_t {
   // Built-in dialect metadata registrations indexed by dialect ID.
   loom_dialect_vtables_t dialects[LOOM_DIALECT_BUILTIN_COUNT_];
 } loom_op_vtable_registry_t;
+
+// One dialect's dense parameterized attribute family descriptors.
+typedef struct loom_dialect_parameterized_attrs_t {
+  // Number of family descriptors in |entries|.
+  uint8_t count;
+  // Generated descriptors indexed by the family kind's low byte.
+  const loom_parameterized_attr_descriptor_t* entries;
+} loom_dialect_parameterized_attrs_t;
+
+// Two-level parameterized attribute registry indexed by dialect and family.
+typedef struct loom_parameterized_attr_registry_t {
+  // Dialect family registrations indexed by dialect ID.
+  loom_dialect_parameterized_attrs_t dialects[LOOM_DIALECT_BUILTIN_COUNT_];
+} loom_parameterized_attr_registry_t;
+
+// Mutable descriptor list populated by dialect registration before context
+// finalization.
+typedef struct loom_registered_type_list_t {
+  // Allocated descriptor entries copied from generated static tables.
+  loom_type_registry_entry_t* entries;
+  // Number of registered entries.
+  iree_host_size_t count;
+  // Allocated entry capacity.
+  iree_host_size_t capacity;
+} loom_registered_type_list_t;
+
+// Entry in the finalized dialect-owned type name table.
+typedef struct loom_type_name_entry_t {
+  // Borrowed public type spelling from a generated descriptor table.
+  iree_string_view_t name;
+  // Borrowed generated descriptor.
+  const loom_type_descriptor_t* descriptor;
+} loom_type_name_entry_t;
+
+// Finalized type-name hash table used at text and bytecode boundaries.
+typedef struct loom_type_name_table_t {
+  // Allocated open-addressed entries.
+  loom_type_name_entry_t* entries;
+  // Power-of-two entry capacity, or zero when no dialect types are registered.
+  uint32_t capacity;
+  // Number of occupied entries.
+  uint32_t count;
+} loom_type_name_table_t;
 
 // Entry in the op name hash table. Maps a dotted op name string
 // (e.g., "test.addi") to the op kind and vtable pointer. The name
@@ -78,23 +128,91 @@ typedef struct loom_op_name_table_t {
   uint32_t count;
 } loom_op_name_table_t;
 
+// Entry in the stable family-name lookup table.
+typedef struct loom_parameterized_attr_name_entry_t {
+  // Borrowed dotted public name from the generated descriptor.
+  iree_string_view_t name;
+  // Borrowed generated family descriptor.
+  const loom_parameterized_attr_descriptor_t* descriptor;
+} loom_parameterized_attr_name_entry_t;
+
+// Finalized family-name hash table used by text and bytecode boundaries.
+typedef struct loom_parameterized_attr_name_table_t {
+  // Allocated open-addressed entries.
+  loom_parameterized_attr_name_entry_t* entries;
+  // Power-of-two entry capacity, or zero when no families are registered.
+  uint32_t capacity;
+  // Number of occupied entries.
+  uint32_t count;
+} loom_parameterized_attr_name_table_t;
+
+// Entry in the finalized encoding family-name lookup table.
+typedef struct loom_encoding_family_name_entry_t {
+  // Borrowed public family or canonical alias name.
+  iree_string_view_t name;
+  // Dense one-based identity in the context encoding registry.
+  loom_encoding_family_id_t family_id;
+  // Borrowed canonical alias descriptor, or NULL for the family name itself.
+  const loom_encoding_alias_descriptor_t* alias;
+} loom_encoding_family_name_entry_t;
+
+// Finalized encoding family-name hash table used at format and module
+// construction boundaries.
+typedef struct loom_encoding_family_name_table_t {
+  // Allocated open-addressed entries.
+  loom_encoding_family_name_entry_t* entries;
+  // Power-of-two entry capacity, or zero when no families are registered.
+  uint32_t capacity;
+  // Number of occupied entries.
+  uint32_t count;
+} loom_encoding_family_name_table_t;
+
+// Immutable encoding family registry after context finalization.
+typedef struct loom_encoding_registry_t {
+  // Dense vtable list indexed by one-based family identity.
+  loom_encoding_vtable_list_t vtables;
+  // Public family spelling to dense identity lookup table.
+  loom_encoding_family_name_table_t names;
+} loom_encoding_registry_t;
+
+// Result of resolving one public encoding family or canonical alias name.
+typedef struct loom_encoding_name_resolution_t {
+  // Dense one-based identity of the target structural family.
+  loom_encoding_family_id_t family_id;
+  // Canonical alias that contributed fixed identity and default parameters, or
+  // NULL when the authored name was the target family name itself.
+  const loom_encoding_alias_descriptor_t* alias;
+} loom_encoding_name_resolution_t;
+
 // The global context: vtables, allocator, and shared language registries.
 //
 // Created once at startup, shared across all modules and threads.
-// Dialect/op lookup state is immutable after finalization.
+// Registry and lookup state is immutable after finalization.
 //
 // Lifetime: the context must outlive all modules created from it.
 struct loom_context_t {
   iree_allocator_t allocator;
 
-  // Context-owned encoding vtables.
-  loom_encoding_vtable_list_t encoding_vtables;
+  // Context-owned encoding family registry.
+  loom_encoding_registry_t encodings;
 
   // Op vtable registry: two-level lookup by dialect_id then op_index.
   loom_op_vtable_registry_t op_vtables;
 
+  // Parameterized attribute descriptors indexed by generated family kind.
+  loom_parameterized_attr_registry_t parameterized_attrs;
+
+  // Dialect-owned type descriptors registered before finalization.
+  loom_registered_type_list_t registered_types;
+
   // Op name hash table for string → vtable resolution.
   loom_op_name_table_t op_name_table;
+
+  // Stable family-name lookup used only at public format boundaries.
+  loom_parameterized_attr_name_table_t parameterized_attr_name_table;
+
+  // Stable dialect-owned type lookup used at public format boundaries.
+  loom_type_name_table_t type_name_table;
 };
 
 // Initializes a context with the given host allocator. After initialization,
@@ -130,18 +248,48 @@ iree_status_t loom_context_register_dialect_semantics(
     loom_context_t* context, uint8_t dialect_id,
     const loom_op_semantics_t* semantics, uint16_t op_count);
 
+// Registers one dialect's sparse condition-refinement descriptors.
+//
+// Semantic rows address this table with one-based byte indexes. Descriptor
+// storage must remain valid for the context lifetime. The dialect and its
+// semantic rows must already be registered. Empty tables are omitted.
+iree_status_t loom_context_register_condition_refinements(
+    loom_context_t* context, uint8_t dialect_id,
+    const loom_condition_refinement_descriptor_t* descriptors,
+    iree_host_size_t descriptor_count);
+
+// Registers one dialect's dense parameterized attribute descriptors.
+//
+// Descriptor storage must remain valid for the context lifetime. Family kinds
+// must match their dialect and array index. Empty dialect arrays are omitted
+// instead of registered.
+iree_status_t loom_context_register_parameterized_attrs(
+    loom_context_t* context, uint8_t dialect_id,
+    const loom_parameterized_attr_descriptor_t* descriptors,
+    iree_host_size_t descriptor_count);
+
+// Registers generated dialect-owned type descriptors with the context.
+//
+// Entry and descriptor storage must remain valid for the context lifetime.
+// Entries are copied, must have matching non-empty names, and must not
+// duplicate another dialect-owned type registered in this context. Common
+// type-name collision checks are owned by the type registry facade.
+iree_status_t loom_context_register_type_descriptors(
+    loom_context_t* context, const loom_type_registry_entry_t* entries,
+    iree_host_size_t entry_count);
+
 // Registers one encoding family vtable with the context.
 //
-// `vtable->name` must be non-empty and stable for the context lifetime
-// (usually static storage). Family names are unique; duplicate registration
-// returns ALREADY_EXISTS. Runtime callbacks may be NULL if the family only
-// needs parser/verifier visibility for now.
+// `vtable->descriptor` and its family name must be non-empty and stable for the
+// context lifetime (usually static storage). Family names are unique; duplicate
+// registration returns ALREADY_EXISTS. Runtime callbacks may be NULL if the
+// family only needs parser/verifier visibility for now.
 iree_status_t loom_context_register_encoding_vtable(
     loom_context_t* context, const loom_encoding_vtable_t* vtable);
 
-// Finalizes the context after dialect registration and encoding-table setup.
-// Builds acceleration structures for fast op name lookup. Must be called
-// before creating modules or parsing.
+// Finalizes the context after dialect and encoding registration. Builds the
+// immutable name indexes used by parsing and module construction. Must be
+// called before creating modules or parsing.
 iree_status_t loom_context_finalize(loom_context_t* context);
 
 // Resolves an op kind to its vtable. Returns NULL if the dialect is
@@ -155,6 +303,12 @@ const loom_op_vtable_t* loom_context_resolve_op(const loom_context_t* context,
 loom_op_semantics_t loom_context_resolve_op_semantics(
     const loom_context_t* context, loom_op_kind_t kind);
 
+// Resolves the optional condition-refinement descriptor for an op kind.
+// Returns NULL when the op does not declare one or its dialect is absent.
+const loom_condition_refinement_descriptor_t*
+loom_context_resolve_condition_refinement(const loom_context_t* context,
+                                          loom_op_kind_t kind);
+
 // Looks up an op by its dotted name string (e.g., "test.addi").
 // Returns the vtable pointer, or NULL if not found. On success,
 // |out_kind| is set to the op kind. The context must be finalized.
@@ -162,10 +316,34 @@ const loom_op_vtable_t* loom_context_lookup_op_by_name(
     const loom_context_t* context, iree_string_view_t name,
     loom_op_kind_t* out_kind);
 
-// Looks up an encoding family by its bare name (`q8_0`, `dense`, ...).
-// Returns NULL when no matching family has been registered.
-const loom_encoding_vtable_t* loom_context_lookup_encoding_vtable(
+// Resolves a dense context-local parameterized attribute family kind.
+const loom_parameterized_attr_descriptor_t*
+loom_context_resolve_parameterized_attr(const loom_context_t* context,
+                                        loom_parameterized_attr_kind_t kind);
+
+// Looks up a parameterized attribute family by its stable dotted public name.
+// The context must be finalized.
+const loom_parameterized_attr_descriptor_t*
+loom_context_lookup_parameterized_attr_by_name(const loom_context_t* context,
+                                               iree_string_view_t name);
+
+// Looks up a registered dialect-owned type descriptor by its stable public
+// name. Returns NULL when no registered dialect contributes `name`. The context
+// must be finalized.
+const loom_type_descriptor_t* loom_context_lookup_type_by_name(
     const loom_context_t* context, iree_string_view_t name);
+
+// Resolves an encoding family or canonical alias by its bare public name.
+// Returns an invalid family identity when no matching name is registered. The
+// context must be finalized.
+loom_encoding_name_resolution_t loom_context_resolve_encoding_name(
+    const loom_context_t* context, iree_string_view_t name);
+
+// Resolves a dense context-local encoding family identity to its vtable.
+// |family_id| must be the invalid sentinel or an identity returned by this
+// context. Returns NULL for the invalid sentinel.
+const loom_encoding_vtable_t* loom_context_resolve_encoding_vtable(
+    const loom_context_t* context, loom_encoding_family_id_t family_id);
 
 //===----------------------------------------------------------------------===//
 // Op convenience accessors

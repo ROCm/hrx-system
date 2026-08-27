@@ -75,7 +75,7 @@ iree_status_t loom_view_subview_verify(
     iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_VIEW_REFINE: Refine the static type information attached to an existing view while preserving the same storage root and byte base. This is an explicit SSA assertion point for layout, shape, and encoding facts discovered or required by earlier analysis.
-// %refined = view.refine %view : view<[%M]xf32, %layout> -> view<16xf32, #dense>
+// %refined = view.refine %view : view<[%M]xf32, %layout> -> view<16xf32>
 LOOM_DEFINE_ISA(loom_view_refine_isa, LOOM_OP_VIEW_REFINE)
 LOOM_DEFINE_OPERAND(loom_view_refine_source, 0)
 LOOM_DEFINE_RESULT(loom_view_refine_result, 0)
@@ -124,6 +124,11 @@ iree_status_t loom_view_load_build(
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
+iree_status_t loom_view_load_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 iree_status_t loom_view_load_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
@@ -235,7 +240,7 @@ iree_status_t loom_view_atomic_rmw_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_VIEW_ATOMIC_CMPXCHG: Atomically compare one scalar view element with an expected value, write a replacement value when they match, and return the old observed value. Success is derived by comparing old == expected.
+// LOOM_OP_VIEW_ATOMIC_CMPXCHG: Atomically compare the bits of one scalar view element with an expected payload, write a replacement payload when they match, and return the old observed payload. Comparison is bitwise for every accepted element type.
 // %old = view.atomic.cmpxchg %expected, %replacement, %view[%row, %col] {success_ordering = acq_rel, failure_ordering = acquire, scope = workgroup} : i32, view<[%M]x[%N]xi32, %layout> -> i32
 LOOM_DEFINE_ISA(loom_view_atomic_cmpxchg_isa, LOOM_OP_VIEW_ATOMIC_CMPXCHG)
 LOOM_DEFINE_OPERAND(loom_view_atomic_cmpxchg_expected, 0)

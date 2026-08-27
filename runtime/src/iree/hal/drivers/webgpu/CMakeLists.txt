@@ -204,7 +204,7 @@ iree_cc_library(
     ::webgpu_allocator
     ::webgpu_builtins
     ::webgpu_command_buffer
-    ::webgpu_executable_cache
+    ::webgpu_executable
     ::webgpu_fd_file
     ::webgpu_imports
     ::webgpu_queue
@@ -280,23 +280,6 @@ iree_cc_library(
     iree::hal::utils::executable_header
     iree::schemas::executable_debug_info_c_fbs
     iree::schemas::webgpu_executable_def_c_fbs
-  PUBLIC
-)
-endif()
-
-if(IREE_HAL_DRIVER_WEBGPU)
-iree_cc_library(
-  NAME
-    webgpu_executable_cache
-  HDRS
-    "webgpu_executable_cache.h"
-  SRCS
-    "webgpu_executable_cache.c"
-  DEPS
-    ::handle_table
-    ::webgpu_executable
-    iree::base
-    iree::hal
   PUBLIC
 )
 endif()

@@ -8,6 +8,11 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 
 package(default_visibility = ["//visibility:public"])
 
+filegroup(
+    name = "vulkan_xml_registry",
+    srcs = ["registry/vk.xml"],
+)
+
 cc_library(
     name = "headers",
     hdrs = glob(

@@ -10,6 +10,7 @@ from dataclasses import replace
 
 import pytest
 
+from loom.dialect.scalar import analysis as scalar_analysis
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.vector import defs as vector
 from loom.target.contracts import (
@@ -18,12 +19,14 @@ from loom.target.contracts import (
     DescriptorRule,
     EmitDescriptorOp,
     Guard,
+    OrdinalValueAliasRule,
     RecipeRule,
     Scalar,
     ValueAliasRule,
     ValueElideRule,
     ValueRef,
     Vector,
+    View,
     contract_fragment_public_header,
     descriptor_by_semantic_tag,
 )
@@ -77,6 +80,23 @@ def test_vector_static_element_range_requires_ordered_bounds() -> None:
         Vector("i32", minimum_static_elements=8, maximum_static_elements=4)
 
 
+def test_view_type_pattern_accepts_exact_dimensions() -> None:
+    pattern = View("f16", dims=(16, 32))
+
+    assert pattern.kind == "view"
+    assert pattern.dims == (16, 32)
+
+
+def test_view_type_pattern_rejects_unrepresentable_dimensions() -> None:
+    with pytest.raises(
+        ValueError,
+        match="generated view type patterns support at most two dims",
+    ):
+        View("f16", dims=(2, 4, 8))
+    with pytest.raises(ValueError, match="view static dims must be non-negative"):
+        View("f16", dims=(16, -1))
+
+
 def test_alias_rule_validates_source_and_result() -> None:
     table = ContractFragment(
         name="value.alias",
@@ -91,6 +111,22 @@ def test_alias_rule_validates_source_and_result() -> None:
     )
 
     assert table.cases[0].source_op == vector.vector_fragment
+
+
+def test_ordinal_alias_rule_validates_variadic_identity_fields() -> None:
+    table = ContractFragment(
+        name="value.ordinal_alias",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            OrdinalValueAliasRule(
+                source_op=scalar_analysis.scalar_assume,
+                source=ValueRef.operand("values"),
+                result=ValueRef.result("results"),
+            )
+        ],
+    )
+
+    assert table.cases[0].source_op == scalar_analysis.scalar_assume
 
 
 def test_elide_rule_validates_source_results() -> None:
@@ -122,6 +158,19 @@ def test_elide_rule_validates_guards() -> None:
     )
 
     assert table.cases[0].source_op == vector.vector_extract
+
+
+def test_value_memory_space_guard_requires_known_unique_spaces() -> None:
+    guard = Guard.value_memory_space("result", ("global", "descriptor"))
+
+    assert guard.memory_spaces == ("global", "descriptor")
+
+    with pytest.raises(ValueError, match="needs a memory space"):
+        Guard.value_memory_space("result", ())
+    with pytest.raises(ValueError, match="unknown value memory space 'device'"):
+        Guard.value_memory_space("result", ("device",))
+    with pytest.raises(ValueError, match="repeats memory space 'global'"):
+        Guard.value_memory_space("result", ("global", "global"))
 
 
 def test_recipe_rule_validates_guards() -> None:
@@ -321,7 +370,7 @@ def test_descriptor_rule_validates_instance_flags_guard() -> None:
     assert case.guards[0].enum_keyword == "arcp"
 
 
-def test_descriptor_rule_validates_f64_equals_guard() -> None:
+def test_descriptor_rule_validates_float_equals_guard() -> None:
     table = ContractFragment(
         name="test-low.f64-equals",
         descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
@@ -330,7 +379,7 @@ def test_descriptor_rule_validates_f64_equals_guard() -> None:
                 source_op=scalar_arithmetic.scalar_mulf,
                 descriptor=TEST_LOW_ADD_F32_DESCRIPTOR,
                 guards=[
-                    Guard.value_f64_equals("lhs", 1.0),
+                    Guard.value_float_equals("lhs", 1.0),
                     Guard.value_type("lhs", Scalar("f32")),
                     Guard.value_type("rhs", Scalar("f32")),
                     Guard.value_type("result", Scalar("f32")),

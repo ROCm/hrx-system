@@ -57,6 +57,7 @@ __all__ = [
     # Element types.
     "Ref",
     "Refs",
+    "AlignedRefs",
     "TypedRefs",
     "BlockRef",
     "Attr",
@@ -83,15 +84,17 @@ __all__ = [
     "GLUE",
     # Angle-bracket elements.
     "Flags",
-    "OpRef",
-    "DescriptorRef",
+    "KeyRef",
+    "ScopedEnumRef",
     "StableKeyRef",
     "TemplateParam",
     "TemplateParamFlags",
+    "AttrParams",
     # Type-interior format elements.
     "ShapeOf",
     "ScalarOf",
     "EncodingOf",
+    "Param",
     # Union type.
     "FormatElement",
     # Convenience constructors.
@@ -151,6 +154,25 @@ class Refs:
     """
 
     field: str
+
+
+@dataclass(frozen=True, slots=True)
+class AlignedRefs:
+    """Variadic SSA references paired with static byte alignments.
+
+    Prints/parses: [align(16) %a, align(256) %b]
+
+    ``refs`` names a variadic operand field and ``alignments`` names an i64
+    array attribute with one positive power-of-two entry per operand. Each
+    adjacent record describes placement of one byte range: align the current
+    cursor, then advance it by the referenced byte length.
+
+    For builders: maps to the ordinary variadic operand and i64 array
+    parameters; the pairing exists only in textual assembly.
+    """
+
+    refs: str
+    alignments: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,10 +301,15 @@ class ResultTypeList:
 
     For builders: maps to a result_types parameter and an optional
     tied parameter for specifying ties.
+
+    ``uniform`` prints and parses one type shared by every result. The op
+    declaration must separately constrain all result fields to that type; the
+    format flag only removes redundant textual repetition.
     """
 
     field: str
     parens: bool = True
+    uniform: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -521,10 +548,24 @@ class FuncArgs:
     parameters). There is no '= %existing_value' part — the names
     and types are the definitions themselves.
 
+    A function stores one ordered argument list in its body entry block or a
+    declaration operand field. ``start_attr`` and ``end_attr`` optionally
+    project a contiguous group from that list so an authored signature can
+    distinguish arguments with different lifecycle semantics without changing
+    the generic function ABI. The referenced i64 attributes store prefix
+    boundaries; an omitted start is zero and an omitted end is the full
+    argument count.
+
+    ``group`` gives a projected group its semantic builder name. It has no IR
+    storage of its own and defaults to ``field`` for ordinary signatures.
+
     For builders: maps to a list of (name, type) pairs.
     """
 
     field: str
+    group: str | None = None
+    start_attr: str | None = None
+    end_attr: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -672,44 +713,41 @@ class Flags:
 
 
 @dataclass(frozen=True, slots=True)
-class OpRef:
-    """Symbolic operation or implementation key in angle brackets.
+class KeyRef:
+    """Bare symbolic key in angle brackets.
 
     Prints/parses: <key.name> (glued to the op name) where the value
-    is a dotted symbolic key like "tile.contract", "tile.reduce", or
-    "qwen.q4.matmul".
+    is a dotted symbolic key like "tile.contract", "llvm.memcpy", or
+    "amdgpu.rdna3_5.core".
 
-    Used by func.template<T> and func.ukernel<T> to declare which
-    implementation contract key they provide, and by func.apply<T> to
-    demand a provider for that same contract key.
+    This is the untyped textual form for a required key that only needs its
+    canonical spelling in IR. StableKeyRef adds a derived numeric identity for
+    domains that require one.
 
     The field names a string attribute storing the key.
 
     Examples:
-        func.template<tile.contract> device @name(...)
-        func.ukernel<tile.reduce> device @name(...)
-        func.apply<qwen.q4.matmul>(%weights, %input) : (...) -> (...)
+        template.def<@tile.contract> device @name(...)
+        llvmir.intrinsic<llvm.memcpy> (...)
+        low.func.def target<amdgpu.rdna3_5.core>(@gfx1151) @name(...)
+        template.apply<@qwen.q4.matmul>(%weights, %input) : (...) -> (...)
     """
 
     field: str
 
 
 @dataclass(frozen=True, slots=True)
-class DescriptorRef:
-    """Descriptor key reference resolved to a dense row ordinal by targets.
+class ScopedEnumRef:
+    """Stable symbolic spelling for a representation-scoped enum value.
 
-    Prints/parses: <target.descriptor> glued to the op name.
-
-    The ``key`` field names a string attribute used for text and diagnostics.
-    The ``ordinal`` field names an i64 attribute storing the descriptor-set
-    local row ordinal when the builder already has a selected descriptor set.
-    Text parsing has no target context, so parsed descriptor refs use the
-    unresolved ordinal sentinel and target binding resolves the key spelling at
-    that boundary.
+    Prints/parses ``<case.key>`` glued to the op name. The field names the op's
+    one required ``scoped_enum`` identity attribute. Python authoring and
+    bytecode tooling retain the stable spelling at their format boundary; the
+    C compiler parser resolves it to the active Low function contract's dense
+    ordinal and effective traits while constructing canonical IR.
     """
 
-    key: str
-    ordinal: str
+    field: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -719,7 +757,7 @@ class StableKeyRef:
     Prints/parses: <target.key> glued to the op name.
 
     Use this only for non-descriptor symbolic domains that are still keyed by
-    stable string identity. Descriptor-backed low packets use DescriptorRef and
+    stable string identity. Descriptor-backed Low packets use ScopedEnumRef and
     resolve through the active descriptor set instead.
     """
 
@@ -766,6 +804,19 @@ class TemplateParamFlags:
     flags: str
 
 
+@dataclass(frozen=True, slots=True)
+class AttrParams:
+    """Known-family parameterized attribute payload in angle brackets.
+
+    Prints/parses only the descriptor-backed parameter list, omitting the
+    redundant ``#family`` prefix: ``<mode = fast, scopes = [workgroup]>``.
+    The field must be a parameterized attribute constrained to one exact
+    family so the format table can recover the parameter descriptors.
+    """
+
+    field: str
+
+
 # ============================================================================
 # Type-interior format elements
 # ============================================================================
@@ -809,11 +860,25 @@ class ScalarOf:
 class EncodingOf:
     """Encoding reference in a shaped type interior.
 
-    Prints/parses: #q8_0 or #q8_0<block=32>
+    Prints/parses: #test.schema or
+    #encoding.operand<element_format=i8, payload_elements=32,
+    payload_packing=dense_lanes>
 
     The field names an EncodingParam on the TypeDef. The printer
     uses the module's encoding table to resolve the encoding name
     and parameters. The parser looks up or creates encoding instances.
+    """
+
+    field: str
+
+
+@dataclass(frozen=True, slots=True)
+class Param:
+    """A descriptor-backed value in a parameterized type interior.
+
+    The field names an AttrDef parameter on the TypeDef. Surrounding format
+    elements determine whether the value is positional or keyed; the stored
+    value always occupies the descriptor's stable slot.
     """
 
     field: str
@@ -831,6 +896,7 @@ BINDING_ELEMENT = "element"
 type FormatElement = (
     Ref
     | Refs
+    | AlignedRefs
     | TypedRefs
     | BlockRef
     | Attr
@@ -855,14 +921,16 @@ type FormatElement = (
     | Scope
     | Glue
     | Flags
-    | OpRef
-    | DescriptorRef
+    | KeyRef
+    | ScopedEnumRef
     | StableKeyRef
     | TemplateParam
     | TemplateParamFlags
+    | AttrParams
     | ShapeOf
     | ScalarOf
     | EncodingOf
+    | Param
 )
 
 

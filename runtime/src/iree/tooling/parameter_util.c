@@ -6,7 +6,10 @@
 
 #include "iree/tooling/parameter_util.h"
 
+#include "iree/base/internal/json.h"
+#include "iree/base/internal/path.h"
 #include "iree/base/tooling/flags.h"
+#include "iree/io/file_contents.h"
 #include "iree/io/file_handle.h"
 #include "iree/io/formats/parser_registry.h"
 #include "iree/io/parameter_index.h"
@@ -73,8 +76,8 @@ IREE_FLAG_LIST(
     "- .gguf (https://github.com/ggerganov/ggml/blob/master/docs/gguf.md)\n"
     "- .safetensors (https://github.com/huggingface/safetensors)");
 
-// Appends the parameter file located at |path| to |index|.
-static iree_status_t iree_io_append_parameter_file_to_index(
+// Appends one ordinary parameter file located at |path| to |index|.
+static iree_status_t iree_tooling_append_single_parameter_file_to_index(
     iree_string_view_t path, iree_io_parameter_index_t* index,
     iree_allocator_t host_allocator) {
   IREE_ASSERT_ARGUMENT(index);
@@ -95,6 +98,162 @@ static iree_status_t iree_io_append_parameter_file_to_index(
 
   IREE_TRACE_ZONE_END(z0);
   return status;
+}
+
+typedef struct iree_tooling_safetensors_shard_list_t {
+  // Allocator used for the list and owned path strings.
+  iree_allocator_t host_allocator;
+  // Directory containing the manifest file.
+  iree_string_view_t manifest_dirname;
+  // Number of unique shard paths in |paths|.
+  iree_host_size_t path_count;
+  // Allocated capacity of |paths|.
+  iree_host_size_t path_capacity;
+  // Unique shard paths, each owned by this list.
+  iree_string_view_t* paths;
+} iree_tooling_safetensors_shard_list_t;
+
+static void iree_tooling_safetensors_shard_list_deinitialize(
+    iree_tooling_safetensors_shard_list_t* shard_list) {
+  for (iree_host_size_t i = 0; i < shard_list->path_count; ++i) {
+    iree_allocator_free(shard_list->host_allocator,
+                        (void*)shard_list->paths[i].data);
+  }
+  iree_allocator_free(shard_list->host_allocator, shard_list->paths);
+}
+
+static iree_status_t iree_tooling_json_string_to_cstring(
+    iree_string_view_t value, iree_allocator_t host_allocator,
+    char** out_string) {
+  IREE_ASSERT_ARGUMENT(out_string);
+  *out_string = NULL;
+  iree_host_size_t string_length = 0;
+  IREE_RETURN_IF_ERROR(
+      iree_json_unescape_string(value, /*out_string_capacity=*/0,
+                                /*out_string=*/NULL, &string_length));
+  iree_host_size_t capacity = 0;
+  if (!iree_host_size_checked_add(string_length, 1, &capacity)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE, "string length overflow");
+  }
+  char* string = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(host_allocator, capacity, (void**)&string));
+  iree_status_t status =
+      iree_json_unescape_string(value, string_length, string, &string_length);
+  if (iree_status_is_ok(status)) {
+    string[string_length] = 0;
+    *out_string = string;
+  } else {
+    iree_allocator_free(host_allocator, string);
+  }
+  return status;
+}
+
+static iree_status_t iree_tooling_safetensors_shard_list_append(
+    iree_tooling_safetensors_shard_list_t* shard_list,
+    iree_string_view_t shard_filename) {
+  char* shard_path = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_file_path_join(shard_list->manifest_dirname, shard_filename,
+                          shard_list->host_allocator, &shard_path));
+  iree_string_view_t shard_path_view = iree_make_cstring_view(shard_path);
+  for (iree_host_size_t i = 0; i < shard_list->path_count; ++i) {
+    if (iree_string_view_equal(shard_list->paths[i], shard_path_view)) {
+      iree_allocator_free(shard_list->host_allocator, shard_path);
+      return iree_ok_status();
+    }
+  }
+  if (shard_list->path_count >= shard_list->path_capacity) {
+    iree_status_t status = iree_allocator_grow_array(
+        shard_list->host_allocator, /*minimum_capacity=*/4,
+        sizeof(*shard_list->paths), &shard_list->path_capacity,
+        (void**)&shard_list->paths);
+    if (!iree_status_is_ok(status)) {
+      iree_allocator_free(shard_list->host_allocator, shard_path);
+      return status;
+    }
+  }
+  shard_list->paths[shard_list->path_count++] = shard_path_view;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_tooling_collect_safetensors_shard(
+    void* user_data, iree_string_view_t key, iree_json_value_type_t type,
+    iree_string_view_t value) {
+  iree_tooling_safetensors_shard_list_t* shard_list =
+      (iree_tooling_safetensors_shard_list_t*)user_data;
+  if (type != IREE_JSON_VALUE_TYPE_STRING) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "safetensors manifest weight_map entry '%.*s' "
+                            "must name a shard file",
+                            (int)key.size, key.data);
+  }
+  char* shard_filename = NULL;
+  IREE_RETURN_IF_ERROR(iree_tooling_json_string_to_cstring(
+      value, shard_list->host_allocator, &shard_filename));
+  iree_status_t status = iree_tooling_safetensors_shard_list_append(
+      shard_list, iree_make_cstring_view(shard_filename));
+  iree_allocator_free(shard_list->host_allocator, shard_filename);
+  return status;
+}
+
+static bool iree_tooling_path_is_safetensors_index_manifest(
+    iree_string_view_t path) {
+  return iree_string_view_ends_with(path, IREE_SV(".safetensors.index.json"));
+}
+
+static iree_status_t iree_tooling_append_safetensors_index_manifest_to_index(
+    iree_string_view_t path, iree_io_parameter_index_t* index,
+    iree_allocator_t host_allocator) {
+  IREE_ASSERT_ARGUMENT(index);
+
+  iree_io_file_contents_t* file_contents = NULL;
+  iree_status_t status =
+      iree_io_file_contents_read(path, host_allocator, &file_contents);
+  iree_tooling_safetensors_shard_list_t shard_list = {
+      .host_allocator = host_allocator,
+      .manifest_dirname = iree_file_path_dirname(path),
+      .path_count = 0,
+      .path_capacity = 0,
+      .paths = NULL,
+  };
+  if (iree_status_is_ok(status)) {
+    iree_string_view_t manifest =
+        iree_make_string_view((const char*)file_contents->const_buffer.data,
+                              file_contents->const_buffer.data_length);
+    iree_string_view_t weight_map = iree_string_view_empty();
+    status = iree_json_lookup_object_value(manifest, IREE_SV("weight_map"),
+                                           &weight_map);
+    if (iree_status_is_ok(status)) {
+      status = iree_json_enumerate_object_typed(
+          weight_map, iree_tooling_collect_safetensors_shard, &shard_list);
+    }
+    if (iree_status_is_ok(status) && shard_list.path_count == 0) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "safetensors manifest '%.*s' does not "
+                                "reference any shard files",
+                                (int)path.size, path.data);
+    }
+  }
+  for (iree_host_size_t i = 0;
+       iree_status_is_ok(status) && i < shard_list.path_count; ++i) {
+    status = iree_tooling_append_single_parameter_file_to_index(
+        shard_list.paths[i], index, host_allocator);
+  }
+  iree_tooling_safetensors_shard_list_deinitialize(&shard_list);
+  iree_io_file_contents_free(file_contents);
+  return status;
+}
+
+iree_status_t iree_tooling_append_parameter_file_to_index(
+    iree_string_view_t path, iree_io_parameter_index_t* index,
+    iree_allocator_t host_allocator) {
+  if (iree_tooling_path_is_safetensors_index_manifest(path)) {
+    return iree_tooling_append_safetensors_index_manifest_to_index(
+        path, index, host_allocator);
+  }
+  return iree_tooling_append_single_parameter_file_to_index(path, index,
+                                                            host_allocator);
 }
 
 iree_status_t iree_tooling_build_parameter_indices_from_flags(
@@ -119,8 +278,8 @@ iree_status_t iree_tooling_build_parameter_indices_from_flags(
 
     // Index the file.
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_io_append_parameter_file_to_index(path, index,
-                                                   scope_map->host_allocator));
+        z0, iree_tooling_append_parameter_file_to_index(
+                path, index, scope_map->host_allocator));
   }
 
   IREE_TRACE_ZONE_END(z0);

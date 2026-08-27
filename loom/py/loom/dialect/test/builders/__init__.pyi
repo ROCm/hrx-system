@@ -9,7 +9,7 @@ from typing import Any
 
 from loom.builder import TiedResultSpec, ValueRef
 from loom.builders import DialectBuilder
-from loom.ir import Block, Predicate, Region, Type
+from loom.ir import Block, Predicate, Region, SignedEnumSetAttr, Type
 
 class TestBuilder(DialectBuilder):
     def addi(
@@ -85,7 +85,6 @@ class TestBuilder(DialectBuilder):
         predicate: str,
         lhs: ValueRef,
         rhs: ValueRef,
-        results: list[Type | TiedResultSpec],
         name: str | None = ...,
         names: Sequence[str] | None = ...,
         result_names: Sequence[str] | None = ...,
@@ -506,7 +505,17 @@ class TestBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> ValueRef: ...
-    def fact_uniform(
+    def fact_subgroup_uniform(
+        self,
+        *,
+        value: ValueRef,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def fact_workgroup_uniform(
         self,
         *,
         value: ValueRef,
@@ -587,7 +596,7 @@ class TestBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> ValueRef: ...
-    def fact_encoding_matrix_field(
+    def fact_encoding_operand_field(
         self,
         *,
         value: ValueRef,
@@ -847,12 +856,6 @@ class TestBuilder(DialectBuilder):
         body: Region | None = ...,
         location_id: int | None = ...,
     ) -> None: ...
-    def low_asm_region(
-        self,
-        *,
-        body: Region | None = ...,
-        location_id: int | None = ...,
-    ) -> None: ...
     def clause_constant(
         self,
         *,
@@ -897,6 +900,7 @@ class TestBuilder(DialectBuilder):
         max_workgroup_size_y: int | None = ...,
         max_workgroup_size_z: int | None = ...,
         max_flat_workgroup_size: int | None = ...,
+        max_workgroup_storage_bytes: int | None = ...,
         subgroup_size: int | None = ...,
         max_grid_size_x: int | None = ...,
         max_grid_size_y: int | None = ...,
@@ -915,7 +919,6 @@ class TestBuilder(DialectBuilder):
         abi: str | None = ...,
         export_symbol: str | None = ...,
         linkage: str | None = ...,
-        hal_buffer_resource_flags: int | None = ...,
         contract_set_key: str | None = ...,
         contract_feature_bits: int | None = ...,
         location_id: int | None = ...,
@@ -996,6 +999,16 @@ class TestBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> ValueRef: ...
+    def move(
+        self,
+        *,
+        source: ValueRef,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
     def segmented(
         self,
         *,
@@ -1020,5 +1033,112 @@ class TestBuilder(DialectBuilder):
         *,
         target: str,
         flags: str = ...,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def fact_finite(
+        self,
+        *,
+        value: ValueRef,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def fact_not_subnormal(
+        self,
+        *,
+        value: ValueRef,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def fact_cluster_uniform(
+        self,
+        *,
+        value: ValueRef,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def enum_array_attrs(
+        self,
+        *,
+        required_values: Sequence[str | int],
+        optional_values: Sequence[str | int] | None = ...,
+        dict: Mapping[str, Any] | None = ...,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def signed_enum_set_attrs(
+        self,
+        *,
+        required_features: SignedEnumSetAttr | Mapping[str | int, bool],
+        optional_features: SignedEnumSetAttr | Mapping[str | int, bool] | None = ...,
+        dict: Mapping[str, Any] | None = ...,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def symbol_array_attrs(
+        self,
+        *,
+        dependencies: Sequence[str],
+        available: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def symbol_set_attrs(
+        self,
+        *,
+        symbols: Sequence[str],
+        location_id: int | None = ...,
+    ) -> None: ...
+    def parameterized_attr(
+        self,
+        *,
+        options: Any,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def compact_parameterized_attr(
+        self,
+        *,
+        value: Any,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def parameterized_attr_array(
+        self,
+        *,
+        values: Any,
+        tiles: Any | None = ...,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def attr_params(
+        self,
+        *,
+        options: Any,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def condition_refines_positive(
+        self,
+        *,
+        value: ValueRef,
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def partitioned_call(
+        self,
+        *,
+        callee: str,
+        prefix: list[ValueRef] = ...,
+        specializations: list[ValueRef] = ...,
+        bindings: list[ValueRef] = ...,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def module_metadata(
+        self,
+        *,
         location_id: int | None = ...,
     ) -> None: ...

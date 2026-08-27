@@ -60,8 +60,8 @@ func.def @has_body(%x: i32) -> (i32) {
 func.def @dead_view_load(%input: buffer) {
   %offset = index.constant 0 : offset
   %index = index.constant 0 : index
-  %view = buffer.view %input[%offset] : buffer -> view<4xf32, #dense>
-  %dead = view.load %view[%index] : view<4xf32, #dense> -> f32
+  %view = buffer.view %input[%offset] : buffer -> view<4xf32>
+  %dead = view.load %view[%index] : view<4xf32> -> f32
   func.return
 }
 // ----
