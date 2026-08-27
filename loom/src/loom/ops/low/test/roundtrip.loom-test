@@ -75,9 +75,9 @@ low.func.def target<test.low.core>(@test_target) @asm_indirect_call(%target: reg
 // ----
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @asm_indirect_call(%target: reg<test.ptr : func.ref<yieldable (i32) -> (i32)>>, %value: reg<test.i32 : i32>) -> (reg<test.i32 : i32>) {
+low.func.def target<test.low.core>(@test_target) @asm_indirect_call(%target: reg<test.ptr : func.ref<yieldable (i32) -> (i32)>>, %value: reg<test.i32 : i32>) -> (reg<test.i32 : i32>) asm {
   %called = low.func.call.indirect %target(%value) : (reg<test.i32 : i32>) -> (reg<test.i32 : i32>)
-  low.return %called : reg<test.i32 : i32>
+  return %called
 }
 
 // ====
@@ -105,9 +105,9 @@ low.func.def target<test.low.core>(@test_target) @detached_copy(%value: reg<test
 // ----
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @detached_copy(%value: reg<test.i32>) {
-  %copy = low.copy %value {detached = true} : reg<test.i32> -> reg<test.i32>
-  low.return
+low.func.def target<test.low.core>(@test_target) @detached_copy(%value: reg<test.i32>) asm {
+  %copy = copy %value {detached = true} : reg<test.i32> -> reg<test.i32>
+  return
 }
 
 // ====
@@ -122,7 +122,7 @@ low.func.def target<test.low.core>(@test_target) @detached_move(%value: reg<test
 // ----
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @detached_move(%value: reg<test.i32>) -> (reg<test.i32>) {
-  %moved = low.move %value {detached = true} : reg<test.i32> -> reg<test.i32>
-  low.return %moved : reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @detached_move(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %moved = move %value {detached = true} : reg<test.i32> -> reg<test.i32>
+  return %moved
 }
