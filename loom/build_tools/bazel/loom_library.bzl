@@ -9,6 +9,11 @@
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//build_tools/bazel:cc_attrs.bzl", "cc_attrs")
 load("//build_tools/bazel:requirements.bzl", "apply_test_requirements")
+load(
+    ":loom_linking.bzl",
+    "loom_linking",
+    _LoomLibraryInfo = "LoomLibraryInfo",
+)
 
 _LOOM_BENCHMARK_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:benchmark_toolchain_type")
 _LOOM_COMPILE_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:compile_toolchain_type")
@@ -17,13 +22,7 @@ _LOOM_LINT_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:lint_toolchain_type"
 _LOOM_LINK_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:link_toolchain_type")
 _LOOM_TEST_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:test_toolchain_type")
 
-LoomLibraryInfo = provider(
-    doc = "One relocatable Loom module and its independent dependencies.",
-    fields = {
-        "module": "Relocatable Loom bytecode module owned by this library.",
-        "transitive_dependencies": "Depset of separate dependency modules, excluding module.",
-    },
-)
+LoomLibraryInfo = _LoomLibraryInfo
 
 LoomCompileTargetInfo = provider(
     doc = "A named Loom compiler backend and target qualification profile.",
@@ -167,57 +166,23 @@ def _loom_library_impl(ctx):
     if not ctx.files.srcs and not ctx.attr.deps:
         fail("%s requires at least one source across srcs and deps" % ctx.label)
     dependency_infos = [dep[LoomLibraryInfo] for dep in ctx.attr.deps]
-    libraries = [info.module for info in dependency_infos]
-    dependency_closure = depset(
-        transitive = [info.transitive_dependencies for info in dependency_infos],
-    )
-    direct_library_paths = {library.path: True for library in libraries}
-    transitive_libraries = [
-        library
-        for library in dependency_closure.to_list()
-        if library.path not in direct_library_paths
-    ]
-    transitive_dependencies = depset(
-        direct = libraries,
-        transitive = [info.transitive_dependencies for info in dependency_infos],
-    )
-    inputs = depset(direct = ctx.files.srcs + libraries + transitive_libraries)
-    output = ctx.actions.declare_file(ctx.label.name + ".loombc")
-    dependency_report = ctx.actions.declare_file(
-        ctx.label.name + ".dependencies.json",
-    )
-    args = ctx.actions.args()
-    args.add("--mode=merge")
-    args.add("--strict-deps")
-    args.add("--dependency-component=%s" % ctx.label)
-    args.add("--dependency-report=%s" % dependency_report.path)
-    args.add("--to=bc")
-    args.add("--output=%s" % output.path)
-    args.add_all(ctx.files.srcs)
-    args.add_all(libraries, format_each = "--library=%s")
-    args.add_all(
-        transitive_libraries,
-        format_each = "--transitive-library=%s",
-    )
-
-    tool = ctx.toolchains[_LOOM_LINK_TOOLCHAIN_TYPE].tool
-    ctx.actions.run(
-        arguments = [args],
-        executable = tool.files_to_run,
-        inputs = inputs,
+    artifacts = loom_linking.declare_relocatable_module(
+        ctx = ctx,
+        sources = ctx.files.srcs,
+        dependency_infos = dependency_infos,
+        output_stem = ctx.label.name,
         mnemonic = "LoomLibrary",
-        outputs = [output, dependency_report],
         progress_message = "Linking Loom library %s" % ctx.label,
     )
 
     return [
-        DefaultInfo(files = depset([output])),
+        DefaultInfo(files = depset([artifacts.module])),
         OutputGroupInfo(
-            dependency_reports = depset([dependency_report]),
+            dependency_reports = depset([artifacts.dependency_report]),
         ),
         LoomLibraryInfo(
-            module = output,
-            transitive_dependencies = transitive_dependencies,
+            module = artifacts.module,
+            transitive_dependencies = artifacts.transitive_dependencies,
         ),
     ]
 

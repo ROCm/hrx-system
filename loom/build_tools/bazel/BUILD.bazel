@@ -12,6 +12,7 @@ package(default_visibility = ["//visibility:public"])
 exports_files([
     "defs.bzl",
     "loom_library.bzl",
+    "loom_linking.bzl",
     "loom_module.bzl",
     "loom_target_profile.bzl",
     "loom_toolchain.bzl",
