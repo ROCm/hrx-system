@@ -6,6 +6,10 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
+import pytest
+
 from loom.target.native_contraction_layout import (
     ROLE_ACCUMULATOR,
     ROLE_LHS,
@@ -112,3 +116,46 @@ def test_exact_transition_compiles_destination_to_source_owner_factors() -> None
             source_owner_multiplier=1,
         ),
     )
+
+
+def test_role_facts_reject_inconsistent_ownership_multiplicity() -> None:
+    _, facts = _grouped_dot_facts()
+
+    with pytest.raises(ValueError, match="do not cover"):
+        replace(facts.lhs, physical_position_count=9)
+
+
+def test_contraction_facts_reject_shape_disagreement() -> None:
+    _, facts = _grouped_dot_facts()
+    smaller_lhs = replace(
+        facts.lhs,
+        physical_position_count=4,
+        logical_coordinate_count=4,
+    )
+
+    with pytest.raises(ValueError, match="disagrees with the contraction shape"):
+        replace(facts, lhs=smaller_lhs)
+
+
+def test_transition_owner_factor_rejects_unknown_physical_dimension() -> None:
+    with pytest.raises(ValueError, match="unknown native transition destination"):
+        NativeTransitionOwnerFactor(
+            destination_dimension="lane",
+            source_owner_dimension="value",
+            destination_divisor=1,
+            destination_modulus=0,
+            source_owner_multiplier=1,
+        )
+
+
+def test_transition_facts_reject_inconsistent_replication() -> None:
+    layout, facts = _grouped_dot_facts()
+    transition = exact_native_transition_facts(facts, layout.accumulator, layout.result)
+    assert transition is not None
+
+    with pytest.raises(ValueError, match="does not cover"):
+        replace(
+            transition,
+            destination_positions_per_source_minimum=2,
+            destination_positions_per_source_maximum=2,
+        )

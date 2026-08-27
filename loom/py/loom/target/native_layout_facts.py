@@ -31,6 +31,8 @@ from loom.target.native_contraction_layout import (
 )
 from loom.target.native_coordinate_projection import coordinate_projection_plan
 
+_PHYSICAL_DIMENSION_NAMES = frozenset(("participant", "value"))
+
 
 class NativeLayoutEvidence(StrEnum):
     """Strength of the structural layout evidence retained in one fact."""
@@ -67,20 +69,27 @@ class NativeContractionRoleFacts:
         ):
             if value <= 0:
                 raise ValueError(f"native {self.role} {name} must be positive")
-        multiplicities = (
-            self.owner_multiplicity_minimum,
-            self.owner_multiplicity_maximum,
-        )
+        minimum = self.owner_multiplicity_minimum
+        maximum = self.owner_multiplicity_maximum
         if self.evidence is NativeLayoutEvidence.EXACT:
-            if any(value is None or value <= 0 for value in multiplicities):
+            if minimum is None or maximum is None or minimum <= 0 or maximum <= 0:
                 raise ValueError(
                     f"exact native {self.role} ownership requires multiplicities"
                 )
-            if multiplicities[0] > multiplicities[1]:
+            if minimum > maximum:
                 raise ValueError(
                     f"native {self.role} ownership multiplicities are reversed"
                 )
-        elif any(value is not None for value in multiplicities):
+            if not (
+                self.logical_coordinate_count * minimum
+                <= self.physical_position_count
+                <= self.logical_coordinate_count * maximum
+            ):
+                raise ValueError(
+                    f"native {self.role} ownership multiplicities do not cover "
+                    "its physical positions"
+                )
+        elif minimum is not None or maximum is not None:
             raise ValueError(
                 f"non-exact native {self.role} ownership cannot claim multiplicity"
             )
@@ -100,6 +109,12 @@ class NativeContractionFacts:
     def __post_init__(self) -> None:
         if self.participant_count <= 0:
             raise ValueError("native contraction participant count must be positive")
+        logical_coordinate_counts = {
+            ROLE_LHS: self.shape.block_count * self.shape.m * self.shape.k,
+            ROLE_RHS: self.shape.block_count * self.shape.k * self.shape.n,
+            ROLE_ACCUMULATOR: self.shape.block_count * self.shape.m * self.shape.n,
+            ROLE_RESULT: self.shape.block_count * self.shape.m * self.shape.n,
+        }
         for expected_role, facts in zip(
             (ROLE_LHS, ROLE_RHS, ROLE_ACCUMULATOR, ROLE_RESULT),
             (self.lhs, self.rhs, self.accumulator, self.result),
@@ -108,6 +123,14 @@ class NativeContractionFacts:
             if facts.role != expected_role:
                 raise ValueError(
                     f"native {facts.role} facts occupy the {expected_role} slot"
+                )
+            if (
+                facts.logical_coordinate_count
+                != logical_coordinate_counts[expected_role]
+            ):
+                raise ValueError(
+                    f"native {facts.role} logical coordinate count disagrees "
+                    "with the contraction shape"
                 )
             if facts.physical_position_count % self.participant_count != 0:
                 raise ValueError(
@@ -135,6 +158,24 @@ class NativeTransitionOwnerFactor:
     destination_divisor: int
     destination_modulus: int
     source_owner_multiplier: int
+
+    def __post_init__(self) -> None:
+        for name, dimension in (
+            ("destination", self.destination_dimension),
+            ("source owner", self.source_owner_dimension),
+        ):
+            if dimension not in _PHYSICAL_DIMENSION_NAMES:
+                raise ValueError(
+                    f"unknown native transition {name} dimension '{dimension}'"
+                )
+        if self.destination_divisor <= 0:
+            raise ValueError("native transition destination divisor must be positive")
+        if self.destination_modulus < 0:
+            raise ValueError(
+                "native transition destination modulus must not be negative"
+            )
+        if self.source_owner_multiplier <= 0:
+            raise ValueError("native transition source multiplier must be positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,6 +215,17 @@ class NativeTransitionFacts:
             < self.destination_positions_per_source_minimum
         ):
             raise ValueError("native transition source replication is invalid")
+        if not (
+            source.logical_coordinate_count
+            * self.destination_positions_per_source_minimum
+            <= self.destination_position_count
+            <= source.logical_coordinate_count
+            * self.destination_positions_per_source_maximum
+        ):
+            raise ValueError(
+                "native transition source replication does not cover its "
+                "destination positions"
+            )
         if not self.source_owner_factors:
             raise ValueError("exact native transition requires source-owner factors")
 
