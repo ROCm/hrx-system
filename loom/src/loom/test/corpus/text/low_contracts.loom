@@ -1,9 +1,9 @@
 // Low function exactness modes and imported-code contracts.
 test.target<low_core> @test_target
 
-low.func.def allocation(assigned) schedule(constrained) target<test.low.core>(@test_target) @test_add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
-  %sum = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %sum : reg<test.i32>
+low.func.def allocation(assigned) schedule(constrained) target<test.low.core>(@test_target) @test_add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %sum = test.add.i32 %lhs, %rhs
+  return %sum
 }
 
 low.func.def target<test.low.core>(@test_target) @test_slot_roundtrip(%input: reg<test.i32>) -> (reg<test.i32>) {
