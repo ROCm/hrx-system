@@ -13,13 +13,13 @@ class TargetConverter:
         self._explicit_target_mapping = {}
         self._repo_map = repo_map
 
-        iree_repo = self._repo_alias("@iree")
+        root_repo = self._repo_alias("@hrx")
         self._update_target_mappings(
             {
                 # Internal utilities to emulate various binary/library options.
-                f"{iree_repo}//build_tools/bazel:pthreads": [],
-                f"{iree_repo}//build_tools/bazel:dl": ["${CMAKE_DL_LIBS}"],
-                f"{iree_repo}//build_tools/bazel:rt": [],
+                f"{root_repo}//build_tools/bazel:pthreads": [],
+                f"{root_repo}//build_tools/bazel:dl": ["${CMAKE_DL_LIBS}"],
+                f"{root_repo}//build_tools/bazel:rt": [],
                 # HIP
                 "@hip_api_headers//:headers": [
                     "iree::third_party::hip_api_headers",
@@ -78,15 +78,15 @@ class TargetConverter:
         pass
 
     def _repo_alias(self, repo_name: str) -> str:
-        """Returns the prefix of a repo (i.e. '@iree') given the repo map."""
+        """Returns the prefix of a repo (i.e. '@hrx') given the repo map."""
         return self._repo_map.get(repo_name, repo_name)
 
     def _normalize_target_repo_alias(self, target: str) -> str:
-        iree_repo = self._repo_alias("@iree")
-        if target.startswith("@iree//") and iree_repo != "@iree":
-            target_body = target[len("@iree//") :]
-            if iree_repo:
-                return f"{iree_repo}//{target_body}"
+        root_repo = self._repo_alias("@hrx")
+        if target.startswith("@hrx//") and root_repo != "@hrx":
+            target_body = target[len("@hrx//") :]
+            if root_repo:
+                return f"{root_repo}//{target_body}"
             return f"//{target_body}"
         return target
 
@@ -110,8 +110,8 @@ class TargetConverter:
         return cmake_path
 
     def _repo_local_package(self, target: str) -> str:
-        iree_repo = self._repo_alias("@iree")
-        repo_prefix = f"{iree_repo}//"
+        root_repo = self._repo_alias("@hrx")
+        repo_prefix = f"{root_repo}//"
         if target.startswith(repo_prefix):
             label_body = target[len(repo_prefix) :]
         elif target.startswith("//"):
@@ -132,9 +132,9 @@ class TargetConverter:
     def convert_target(self, target):
         """Converts a Bazel target to a list of CMake targets.
 
-        IREE targets are expected to follow a standard form between Bazel and CMake
-        that facilitates conversion. External targets *may* have their own patterns,
-        or they may be purely special cases.
+        Root-repository targets are expected to follow a standard form between Bazel
+        and CMake that facilitates conversion. External targets *may* have their own
+        patterns, or they may be purely special cases.
 
         Multiple target in Bazel may map to a single target in CMake and a Bazel
         target may map to multiple CMake targets.
@@ -146,7 +146,7 @@ class TargetConverter:
           KeyError: No conversion was found for the target.
         """
         target = self._normalize_target_repo_alias(target)
-        iree_repo = self._repo_alias("@iree")
+        root_repo = self._repo_alias("@hrx")
         if target in self._explicit_target_mapping:
             return self._explicit_target_mapping[target]
         if target.startswith("@iree_cuda//"):
@@ -154,8 +154,8 @@ class TargetConverter:
         # pip dependencies don't exist in CMake (system Python is used).
         if target.startswith("@pip//"):
             return []
-        if target.startswith(f"{iree_repo}//"):
-            return self._convert_iree_repo_target(target)
+        if target.startswith(f"{root_repo}//"):
+            return self._convert_root_repo_target(target)
         if target.startswith("@"):
             raise KeyError(f"No conversion found for target '{target}'")
 
@@ -172,8 +172,8 @@ class TargetConverter:
 
         return self._convert_unmatched_target(target)
 
-    def _convert_iree_repo_target(self, target):
-        iree_repo = self._repo_alias("@iree")
+    def _convert_root_repo_target(self, target):
+        root_repo = self._repo_alias("@hrx")
         if self._is_removed_compiler_package(target):
             raise ValueError(f"No target matching for removed compiler label {target}")
 
@@ -186,12 +186,12 @@ class TargetConverter:
         # (iree_package_ns function).
 
         # Map //runtime/src/iree/(.*) -> iree::\1
-        m = re.match(f"^{iree_repo}//runtime/src/iree/(.+)", target)
+        m = re.match(f"^{root_repo}//runtime/src/iree/(.+)", target)
         if m:
             return ["iree::" + self._convert_to_cmake_path(m.group(1))]
 
         # Map root tool aliases to the runtime tool namespace.
-        m = re.match(f"^{iree_repo}//tools[|:](.+)", target)
+        m = re.match(f"^{root_repo}//tools[|:](.+)", target)
         if m:
             return ["iree::tools::" + self._convert_to_cmake_path(m.group(1))]
 

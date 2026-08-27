@@ -11,7 +11,7 @@ BAZEL_TO_CMAKE_REPO_ROOT = True
 DEFAULT_ROOT_DIRS = ["runtime/src/iree", "libhrx", "loom"]
 
 REPO_MAP = {
-    "@iree": "",
+    "@hrx": "",
 }
 
 PROJECTS = bazel_to_cmake_config.include_projects(

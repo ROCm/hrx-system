@@ -165,7 +165,7 @@ def _normalize_package_prefix(prefix):
 
 def _repo_relative_target_path(target, repo_map):
     local_label_prefixes = ["//"]
-    for repo_name in ("@iree",):
+    for repo_name in ("@hrx",):
         repo_alias = repo_map.get(repo_name)
         if repo_alias:
             local_label_prefixes.append(repo_alias + "//")
