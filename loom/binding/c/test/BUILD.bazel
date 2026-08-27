@@ -137,6 +137,19 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "link_provider_roots_test",
+    srcs = ["link_provider_roots_test.cc"],
+    deps = [
+        ":test_util",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/link/testdata:provider_roots",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "link_test",
     srcs = ["link_test.cc"],
     deps = [

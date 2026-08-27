@@ -130,6 +130,12 @@ static loomc_status_t loomc_link_validate_options(
         LOOMC_STATUS_INVALID_ARGUMENT,
         "root_symbol_count is non-zero but root_symbols is NULL");
   }
+  if (options->root_provider_count != 0 &&
+      options->root_provider_ordinals == NULL) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "root_provider_count is non-zero but root_provider_ordinals is NULL");
+  }
   if ((options->flags & ~LOOMC_LINK_KNOWN_FLAGS) != 0) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "link options contain unknown flag bits");
@@ -140,7 +146,7 @@ static loomc_status_t loomc_link_validate_options(
                              "link options contain an unknown mode");
   }
   const bool has_roots =
-      options->root_symbol_count != 0 ||
+      options->root_symbol_count != 0 || options->root_provider_count != 0 ||
       loomc_link_any_flag_set(options->flags,
                               LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS);
   if (options->mode == LOOMC_LINK_MODE_MERGE && has_roots) {
@@ -359,6 +365,11 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
           },
       .include_input_exports = loomc_link_any_flag_set(
           options->flags, LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS),
+      .root_providers =
+          {
+              .count = options->root_provider_count,
+              .values = options->root_provider_ordinals,
+          },
       .unresolved_policy =
           loomc_link_any_flag_set(options->flags,
                                   LOOMC_LINK_FLAG_ALLOW_UNRESOLVED_SYMBOLS)

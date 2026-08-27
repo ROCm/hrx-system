@@ -115,6 +115,13 @@ typedef struct loom_link_plan_options_t {
   } root_facets;
   // Dependency projection policy. Zero defaults to complete source symbols.
   loom_link_plan_dependency_policy_t dependency_policy;
+  // Select exports from specific indexed providers as roots in LINK mode.
+  struct {
+    // Number of index-wide provider ordinals.
+    iree_host_size_t count;
+    // Index-wide provider ordinals in caller-defined stable order.
+    const iree_host_size_t* values;
+  } root_providers;
 } loom_link_plan_options_t;
 
 // One live symbol selection in a plan.

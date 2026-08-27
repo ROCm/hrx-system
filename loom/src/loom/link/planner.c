@@ -1384,6 +1384,28 @@ static iree_status_t loom_link_plan_select_root(
       /*out_new_symbol_plan_ordinal=*/NULL);
 }
 
+static iree_status_t loom_link_plan_select_export(
+    loom_link_plan_t* plan, const loom_link_plan_options_t* options,
+    const loom_link_module_index_symbol_t* symbol) {
+  const loom_link_plan_live_cause_t cause = {
+      .reason = LOOM_LINK_PLAN_LIVE_ROOT,
+      .symbol_plan_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
+      .facet_plan_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
+      .root_name = symbol->name,
+  };
+  iree_host_size_t root_plan_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+  IREE_RETURN_IF_ERROR(loom_link_plan_select_required_symbol(
+      plan, options, symbol, cause, &root_plan_ordinal));
+  if (root_plan_ordinal == LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL) {
+    return iree_ok_status();
+  }
+  const loom_link_plan_facet_request_t definition_request = {
+      .mode = LOOM_LINK_PLAN_FACET_REQUEST_COMPLETE,
+  };
+  return loom_link_plan_resolve_declaration(
+      plan, options, symbol, root_plan_ordinal, definition_request);
+}
+
 static iree_status_t loom_link_plan_select_input_exports(
     loom_link_plan_t* plan, const loom_link_plan_options_t* options) {
   const loom_link_module_index_symbol_ordinal_list_t input_exports =
@@ -1391,21 +1413,52 @@ static iree_status_t loom_link_plan_select_input_exports(
   for (iree_host_size_t i = 0; i < input_exports.count; ++i) {
     const loom_link_module_index_symbol_t* symbol =
         loom_link_module_index_symbol_at(plan->index, input_exports.values[i]);
-    iree_host_size_t root_plan_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
-    const loom_link_plan_live_cause_t cause = {
-        .reason = LOOM_LINK_PLAN_LIVE_ROOT,
-        .symbol_plan_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
-        .facet_plan_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
-        .root_name = symbol->name,
-    };
-    IREE_RETURN_IF_ERROR(loom_link_plan_select_required_symbol(
-        plan, options, symbol, cause, &root_plan_ordinal));
-    if (root_plan_ordinal != LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL) {
-      const loom_link_plan_facet_request_t definition_request = {
-          .mode = LOOM_LINK_PLAN_FACET_REQUEST_COMPLETE,
-      };
-      IREE_RETURN_IF_ERROR(loom_link_plan_resolve_declaration(
-          plan, options, symbol, root_plan_ordinal, definition_request));
+    IREE_RETURN_IF_ERROR(loom_link_plan_select_export(plan, options, symbol));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_link_plan_select_provider_exports(
+    loom_link_plan_t* plan, const loom_link_plan_options_t* options) {
+  const iree_host_size_t provider_count =
+      options ? options->root_providers.count : 0;
+  const iree_host_size_t* provider_ordinals =
+      options ? options->root_providers.values : NULL;
+  if (provider_count != 0 && provider_ordinals == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "root provider count is non-zero but values is NULL");
+  }
+  const iree_host_size_t index_provider_count =
+      loom_link_module_index_provider_count(plan->index);
+  for (iree_host_size_t i = 0; i < provider_count; ++i) {
+    const iree_host_size_t provider_ordinal = provider_ordinals[i];
+    if (provider_ordinal >= index_provider_count) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "root provider ordinal %" PRIhsz
+                              " is outside the %" PRIhsz "-provider index",
+                              provider_ordinal, index_provider_count);
+    }
+    const loom_link_module_index_provider_t* provider =
+        loom_link_module_index_provider_at(plan->index, provider_ordinal);
+    const iree_host_size_t module_end_ordinal =
+        provider->module_start_ordinal + provider->module_count;
+    for (iree_host_size_t module_ordinal = provider->module_start_ordinal;
+         module_ordinal < module_end_ordinal; ++module_ordinal) {
+      const loom_link_module_index_module_t* module =
+          loom_link_module_index_module_at(plan->index, module_ordinal);
+      const iree_host_size_t symbol_end_ordinal =
+          module->symbol_start_ordinal + module->symbol_count;
+      for (iree_host_size_t symbol_ordinal = module->symbol_start_ordinal;
+           symbol_ordinal < symbol_end_ordinal; ++symbol_ordinal) {
+        const loom_link_module_index_symbol_t* symbol =
+            loom_link_module_index_symbol_at(plan->index, symbol_ordinal);
+        if (!iree_any_bit_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_EXPORT)) {
+          continue;
+        }
+        IREE_RETURN_IF_ERROR(
+            loom_link_plan_select_export(plan, options, symbol));
+      }
     }
   }
   return iree_ok_status();
@@ -1458,6 +1511,7 @@ static iree_status_t loom_link_plan_select_roots(
   if (options && options->include_input_exports) {
     IREE_RETURN_IF_ERROR(loom_link_plan_select_input_exports(plan, options));
   }
+  IREE_RETURN_IF_ERROR(loom_link_plan_select_provider_exports(plan, options));
   const iree_host_size_t root_count = options ? options->root_symbols.count : 0;
   if (root_count > 0 && (!options || !options->root_symbols.values)) {
     return iree_make_status(
@@ -1545,6 +1599,7 @@ static iree_status_t loom_link_plan_validate_options(
     return iree_ok_status();
   }
   if (options->root_symbols.count != 0 || options->include_input_exports ||
+      options->root_providers.count != 0 ||
       options->selected_template_providers.count != 0 ||
       options->root_facets.count != 0) {
     return iree_make_status(

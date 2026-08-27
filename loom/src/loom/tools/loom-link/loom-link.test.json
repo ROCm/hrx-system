@@ -12,6 +12,7 @@
           "unordered": [
             "## loom-link",
             "--library=providers.loombc",
+            "--root-library=app.loombc",
             "--transitive-library=indirect.loombc",
             "--strict-deps",
             "--dependency-report=component.dependencies.json",
@@ -23,6 +24,70 @@
           ]
         }
       }
+    },
+    {
+      "name": "roots direct library exports without flattening libraries",
+      "steps": [
+        {
+          "name": "encode-direct-library",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "--to=bc",
+              "--output={tmp}/direct.loombc",
+              "{srcdir}/../../link/testdata/provider_roots/direct.loom"
+            ]
+          }
+        },
+        {
+          "name": "encode-transitive-library",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "--to=bc",
+              "--output={tmp}/transitive.loombc",
+              "{srcdir}/../../link/testdata/provider_roots/transitive.loom"
+            ]
+          }
+        },
+        {
+          "name": "encode-unused-library",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "--to=bc",
+              "--output={tmp}/unused.loombc",
+              "{srcdir}/../../link/testdata/provider_roots/unused.loom"
+            ]
+          }
+        },
+        {
+          "name": "link-root-library",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "--root-library={tmp}/direct.loombc",
+              "--transitive-library={tmp}/transitive.loombc",
+              "--transitive-library={tmp}/unused.loombc"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "func.def public retain @entry",
+                "func.def public retain pure @secondary",
+                "func.def @direct_helper",
+                "func.def pure @transitive"
+              ]
+            },
+            "not_contains": [
+              "transitive_unused",
+              "unreachable_private",
+              "unused_export"
+            ]
+          }
+        }
+      ]
     },
     {
       "name": "merges input with many symbols",

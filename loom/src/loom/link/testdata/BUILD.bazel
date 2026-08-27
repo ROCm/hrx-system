@@ -12,6 +12,26 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
+exports_files(
+    [
+        "provider_roots/direct.loom",
+        "provider_roots/transitive.loom",
+        "provider_roots/unused.loom",
+    ],
+    visibility = ["//loom/src/loom/tools/loom-link:__pkg__"],
+)
+
+iree_c_embed_data(
+    name = "provider_roots",
+    testonly = True,
+    srcs = glob(["provider_roots/*.loom"]),
+    c_file_output = "provider_roots_testdata.c",
+    flatten = True,
+    h_file_output = "provider_roots_testdata.h",
+    identifier = "loom_link_provider_roots_testdata",
+    visibility = ["//loom/binding/c/test:__pkg__"],
+)
+
 iree_c_embed_data(
     name = "func_contract",
     testonly = True,

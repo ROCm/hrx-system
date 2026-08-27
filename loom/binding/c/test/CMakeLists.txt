@@ -134,6 +134,20 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
+    link_provider_roots_test
+  SRCS
+    "link_provider_roots_test.cc"
+  DEPS
+    ::test_util
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::binding::c::loomc
+    loom::link::testdata::provider_roots
+)
+
+loom_cc_test(
+  NAME
     link_test
   SRCS
     "link_test.cc"

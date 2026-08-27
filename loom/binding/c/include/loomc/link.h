@@ -120,7 +120,9 @@ typedef enum loomc_link_mode_e {
   LOOMC_LINK_MODE_MERGE = 0,
 
   /// Retain explicit roots or exported primary-input roots and their reachable
-  /// closure through the complete supplied library universe.
+  /// closure through the complete supplied library universe. Selected root
+  /// providers contribute all of their exported symbols as roots without
+  /// changing provider visibility.
   LOOMC_LINK_MODE_LINK = 1,
 } loomc_link_mode_t;
 
@@ -130,10 +132,11 @@ typedef enum loomc_link_mode_e {
 /// module or a failed result with diagnostics. Merge mode materializes only
 /// primary INPUT providers and preserves unresolved contracts. Link mode
 /// selects a dependency closure from explicit roots or exported primary roots
-/// across the complete supplied library universe. Linking preserves every
-/// target carried by the selected symbols. Config options materialize on the
-/// linked output for this invocation; frozen indexes and reusable input/library
-/// modules are never mutated by link-time config.
+/// plus the exports of selected root providers across the complete supplied
+/// library universe. Linking preserves every target carried by the selected
+/// symbols. Config options materialize on the linked output for this
+/// invocation; frozen indexes and reusable input/library modules are never
+/// mutated by link-time config.
 typedef struct loomc_link_options_t {
   /// Structure type. Must be `LOOMC_STRUCTURE_TYPE_LINK_OPTIONS` when nonzero.
   loomc_structure_type_t type;
@@ -165,6 +168,14 @@ typedef struct loomc_link_options_t {
 
   /// Per-invocation config bindings materialized into the linked output module.
   loomc_config_options_t config;
+
+  /// Provider ordinals whose exported symbols are roots in link mode. This
+  /// selects public API surfaces without changing provider linkage roles or
+  /// making private symbols visible across provider boundaries.
+  const loomc_host_size_t* root_provider_ordinals;
+
+  /// Number of entries in `root_provider_ordinals`.
+  loomc_host_size_t root_provider_count;
 } loomc_link_options_t;
 
 /// Creates a prepared immutable linker.

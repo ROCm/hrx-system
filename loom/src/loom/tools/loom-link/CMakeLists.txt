@@ -52,6 +52,9 @@ iree_execution_test_suite(
     "loom-format=loom::tools::loom-format"
     "loom-link=::loom-link"
   DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/link/testdata/provider_roots/direct.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/link/testdata/provider_roots/transitive.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/link/testdata/provider_roots/unused.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/dependency_component.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/dependency_direct.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/dependency_transitive.loom"

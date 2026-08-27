@@ -9,6 +9,23 @@
 
 iree_add_all_subdirs()
 
+file(GLOB _GLOB_PROVIDER_ROOTS_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS provider_roots/*.loom)
+iree_c_embed_data(
+  NAME
+    provider_roots
+  SRCS
+    "${_GLOB_PROVIDER_ROOTS_X_LOOM}"
+  C_FILE_OUTPUT
+    "provider_roots_testdata.c"
+  H_FILE_OUTPUT
+    "provider_roots_testdata.h"
+  IDENTIFIER
+    "loom_link_provider_roots_testdata"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+
 file(GLOB _GLOB_FUNC_CONTRACT_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS func_contract/*.loom)
 iree_c_embed_data(
   NAME

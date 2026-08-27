@@ -1,0 +1,19 @@
+func.decl pure @transitive(%value: i32) -> (i32)
+
+func.def public @entry(%value: i32) -> (i32) {
+  %result = func.call @direct_helper(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def public pure @secondary(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def @direct_helper(%value: i32) -> (i32) {
+  %result = func.call @transitive(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def @unreachable_private(%value: i32) -> (i32) {
+  func.return %value : i32
+}
