@@ -51,6 +51,21 @@ iree_py_library(
     ],
 )
 
+iree_py_library(
+    name = "native_contraction_layout",
+    srcs = ["native_contraction_layout.py"],
+    deps = [":package_init"],
+)
+
+iree_py_library(
+    name = "native_coordinate_projection",
+    srcs = ["native_coordinate_projection.py"],
+    deps = [
+        ":native_contraction_layout",
+        ":package_init",
+    ],
+)
+
 iree_py_test(
     name = "target_test",
     srcs = [
@@ -61,6 +76,31 @@ iree_py_test(
     main = "pytest_style_runner.py",
     deps = [
         ":low_legality",
+    ],
+)
+
+iree_py_test(
+    name = "native_contraction_layout_test",
+    srcs = [
+        "native_contraction_layout_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.native_contraction_layout_test"],
+    main = "pytest_style_runner.py",
+    deps = [":native_contraction_layout"],
+)
+
+iree_py_test(
+    name = "native_coordinate_projection_test",
+    srcs = [
+        "native_coordinate_projection_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.native_coordinate_projection_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":native_contraction_layout",
+        ":native_coordinate_projection",
     ],
 )
 
