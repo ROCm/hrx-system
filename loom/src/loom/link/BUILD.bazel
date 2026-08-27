@@ -321,6 +321,7 @@ loom_cc_test(
         "//loom/src/loom/format/bytecode:writer",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
+        "//loom/src/loom/link/testdata:planner",
         "//loom/src/loom/ops/check",
         "//loom/src/loom/ops/command",
         "//loom/src/loom/ops/config",

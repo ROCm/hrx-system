@@ -1,0 +1,8 @@
+test.target<low_core> @root_target
+
+template.decl @demo.targeted(%x: i32) -> (i32)
+
+func.def public target(@root_target) @entry(%x: i32) -> (i32) {
+  %y = template.apply<@demo.targeted>(%x) : (i32) -> (i32)
+  func.return %y : i32
+}

@@ -1,0 +1,1 @@
+func.decl public @same(%x: i32) -> (i32)

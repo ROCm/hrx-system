@@ -1,0 +1,1 @@
+func.decl public @callee(%x: i32) -> (i32)

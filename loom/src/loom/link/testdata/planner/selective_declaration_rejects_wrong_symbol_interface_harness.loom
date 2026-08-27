@@ -1,0 +1,6 @@
+func.decl @callee(%x: i32) -> (i32)
+
+func.def public @entry(%x: i32) -> (i32) {
+  %y = func.call @callee(%x) : (i32) -> (i32)
+  func.return %y : i32
+}

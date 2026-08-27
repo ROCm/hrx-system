@@ -358,6 +358,7 @@ loom_cc_test(
     loom::format::bytecode::writer
     loom::format::text::parser
     loom::ir
+    loom::link::testdata::planner
     loom::ops::check
     loom::ops::command
     loom::ops::config

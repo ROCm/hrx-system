@@ -1,0 +1,12 @@
+func.def public @kernel(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+check.case public @kernel_case {
+  %input = check.literal value(1) : i32
+  %actual = func.call @kernel(%input) : (i32) -> (i32)
+  check.expect.equal actual(%actual) expected(%input) : i32
+  check.return
+}
+
+check.benchmark<@kernel_case> @kernel_bench

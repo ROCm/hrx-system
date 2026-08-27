@@ -1,0 +1,5 @@
+template.decl @demo.unused(%x: i32) -> (i32)
+
+template.def<@demo.unused> @unused_provider(%x: i32) -> (i32) {
+  template.return %x : i32
+}

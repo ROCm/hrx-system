@@ -1,0 +1,10 @@
+func.def public @entry_a(%x: i32) -> (i32) {
+  %y = func.call @helper(%x) : (i32) -> (i32)
+  func.return %y : i32
+}
+
+func.def @helper(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.decl @external(%x: i32) -> (i32)

@@ -1,0 +1,7 @@
+func.def public @callee(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.def public @unused(%x: i32) -> (i32) {
+  func.return %x : i32
+}

@@ -1,0 +1,8 @@
+func.def @entry(%x: i32) -> (i32) {
+  %y = func.call @helper(%x) : (i32) -> (i32)
+  func.return %y : i32
+}
+
+func.def @helper(%x: i32) -> (i32) {
+  func.return %x : i32
+}

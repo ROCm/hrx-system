@@ -1,0 +1,23 @@
+config.def @configuration_dependency = 1 : index
+
+config.def @dispatched_configuration_dependency = 1 : index
+
+func.def @implementation_dependency() {
+  func.return
+}
+
+kernel.def @configured(%count: index) {
+  %configured = config.get @configuration_dependency : index
+  kernel.launch.config workgroups(%count, %configured, %configured) workgroup_size(%configured, %configured, %configured) : index
+} launch() {
+  func.call @implementation_dependency() : ()
+  kernel.return
+}
+
+kernel.def @dispatched(%count: index) {
+  %configured = config.get @dispatched_configuration_dependency : index
+  kernel.launch.config workgroups(%count, %configured, %configured) workgroup_size(%configured, %configured, %configured) : index
+} launch() {
+  func.call @implementation_dependency() : ()
+  kernel.return
+}
