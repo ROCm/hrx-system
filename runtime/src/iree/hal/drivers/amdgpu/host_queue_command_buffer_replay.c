@@ -158,14 +158,19 @@ static iree_status_t iree_hal_amdgpu_command_buffer_replay_create(
   return iree_ok_status();
 }
 
+// Returns the status a replay must report instead of resuming, or OK when the
+// queue can still take packets. A recorded failure outranks closed admission so
+// a replay resumed from the terminal transition's post-drain flush reports the
+// same cause as every other operation that transition settles.
 static iree_status_t iree_hal_amdgpu_command_buffer_replay_clone_queue_error(
     iree_hal_amdgpu_command_buffer_replay_t* replay) {
+  iree_status_t error = (iree_status_t)iree_atomic_load(
+      &replay->queue->error_status, iree_memory_order_acquire);
+  if (!iree_status_is_ok(error)) return iree_status_clone(error);
   if (IREE_UNLIKELY(replay->queue->is_shutting_down)) {
     return iree_make_status(IREE_STATUS_CANCELLED, "queue shutting down");
   }
-  iree_status_t error = (iree_status_t)iree_atomic_load(
-      &replay->queue->error_status, iree_memory_order_acquire);
-  return iree_status_is_ok(error) ? iree_ok_status() : iree_status_clone(error);
+  return iree_ok_status();
 }
 
 static void iree_hal_amdgpu_command_buffer_replay_fail_signals(

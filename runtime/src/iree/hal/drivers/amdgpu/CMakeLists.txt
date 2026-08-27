@@ -324,6 +324,8 @@ iree_cc_library(
     "slab_provider.h"
     "system.c"
     "system.h"
+    "system_event.c"
+    "system_event.h"
     "transient_buffer.c"
     "transient_buffer.h"
     "tsan_state.c"
@@ -332,6 +334,7 @@ iree_cc_library(
     "virtual_memory.h"
     "virtual_queue.h"
   DEPS
+    ${CMAKE_DL_LIBS}
     ::access_policy
     ::atomic_memory
     ::buffer
@@ -451,6 +454,7 @@ iree_cc_library(
     "semaphore.h"
     "slab_provider.h"
     "system.h"
+    "system_event.h"
     "transient_buffer.h"
     "tsan_state.h"
     "virtual_memory.h"
@@ -1066,6 +1070,61 @@ iree_cc_binary_benchmark(
   TESTONLY
   LABELS
     "benchmark"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    system_event_test
+  SRCS
+    "system_event_test.cc"
+  DEPS
+    ${CMAKE_DL_LIBS}
+    ::amdgpu
+    ::headers
+    iree::base
+    iree::base::core_headers
+    iree::base::internal
+    iree::base::testing::dynamic_library_test_library
+    iree::hal
+    iree::hal::drivers::amdgpu::util::libhsa
+    iree::io::file_handle
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::testing::temp_file
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    host_queue_failure_test
+  SRCS
+    "host_queue_failure_test.cc"
+  DEPS
+    ::amdgpu
+    ::headers
+    iree::base
+    iree::base::internal
+    iree::base::threading
+    iree::hal
+    iree::hal::cts::util::test_base
+    iree::hal::drivers::amdgpu::util::packet
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
     "iree-build-requirement=runtime.hal.amdgpu"
     "iree-run-requirement=runtime.resource.amd_gpu"
     "runtime-resource=amd-gpu"

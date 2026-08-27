@@ -277,6 +277,8 @@ iree_runtime_cc_library(
         "slab_provider.h",
         "system.c",
         "system.h",
+        "system_event.c",
+        "system_event.h",
         "transient_buffer.c",
         "transient_buffer.h",
         "tsan_state.c",
@@ -300,6 +302,7 @@ iree_runtime_cc_library(
         ":profile_events",
         ":queue_affinity",
         ":source_context",
+        "//build_tools/bazel:dl",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
@@ -407,6 +410,7 @@ iree_runtime_cc_library(
         "semaphore.h",
         "slab_provider.h",
         "system.h",
+        "system_event.h",
         "transient_buffer.h",
         "tsan_state.h",
         "virtual_memory.h",
@@ -838,6 +842,43 @@ iree_runtime_cc_benchmark(
         "//runtime/src/iree/hal/drivers/amdgpu/util:benchmark_flags",
         "//runtime/src/iree/hal/drivers/amdgpu/util:benchmark_profile",
         "//runtime/src/iree/hal/executable/amdgpu:executable_target",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "system_event_test",
+    srcs = ["system_event_test.cc"],
+    deps = [
+        ":amdgpu",
+        ":headers",
+        "//build_tools/bazel:dl",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/testing:dynamic_library_test_library",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:libhsa",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "host_queue_failure_test",
+    srcs = ["host_queue_failure_test.cc"],
+    deps = [
+        ":amdgpu",
+        ":headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:packet",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

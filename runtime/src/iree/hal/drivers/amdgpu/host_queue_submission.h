@@ -191,6 +191,10 @@ iree_status_t iree_hal_amdgpu_host_queue_count_reclaim_resources(
 // |out_ready| is set to false, no queue state is mutated, and OK is returned.
 // Any non-OK status is a real structural failure rather than retry state.
 //
+// Returns CANCELLED once the queue has closed admission. Every kernel-shaped
+// submission in the driver enters here, so this is where the "no epoch is
+// published after admission closes" invariant is enforced.
+//
 // Caller must hold submission_mutex.
 iree_status_t iree_hal_amdgpu_host_queue_try_begin_kernel_submission(
     iree_hal_amdgpu_host_queue_t* queue,
@@ -226,6 +230,9 @@ iree_hal_amdgpu_host_queue_kernarg_acquire_scope(
 // ring capacity. If temporary AQL/notification capacity is unavailable then
 // |out_ready| is set to false, no queue state is mutated, and OK is returned.
 // Any non-OK status is a structural failure rather than retry state.
+//
+// Returns CANCELLED once the queue has closed admission, as the kernel-shaped
+// form does.
 //
 // Caller must hold submission_mutex.
 iree_status_t iree_hal_amdgpu_host_queue_try_begin_barrier_submission(

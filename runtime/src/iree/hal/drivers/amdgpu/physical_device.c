@@ -16,6 +16,7 @@
 #include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/slab_provider.h"
 #include "iree/hal/drivers/amdgpu/system.h"
+#include "iree/hal/drivers/amdgpu/system_event.h"
 #include "iree/hal/drivers/amdgpu/util/epoch_signal_table.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
 #include "iree/hal/drivers/amdgpu/util/vmem.h"
@@ -1220,10 +1221,12 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
     iree_hal_amdgpu_epoch_signal_table_t* epoch_signal_table,
     iree_hal_amdgpu_feedback_state_t* feedback_state,
     const iree_hal_amdgpu_host_memory_pools_t* host_memory_pools,
+    iree_hal_amdgpu_system_event_agent_target_t* system_event_target,
     iree_allocator_t host_allocator,
     iree_hal_amdgpu_physical_device_t* physical_device) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  physical_device->system_event_target = system_event_target;
   iree_hal_amdgpu_libhsa_t* libhsa = &system->libhsa;
   iree_status_t status = iree_hal_amdgpu_physical_device_create_default_pools(
       physical_device, epoch_signal_table, host_allocator);
@@ -1312,7 +1315,13 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
     }
   }
 
-  if (!iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status)) {
+    // Publishing last means the unwind below has nothing to retire and no
+    // partially assigned physical device is ever a delivery target.
+    iree_hal_amdgpu_system_event_publish_queue_targets(
+        physical_device->system_event_target, physical_device->host_queues,
+        physical_device->host_queue_count);
+  } else {
     iree_hal_amdgpu_physical_device_deassign_frontier(physical_device);
   }
 
@@ -1323,8 +1332,40 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
 void iree_hal_amdgpu_physical_device_deassign_frontier(
     iree_hal_amdgpu_physical_device_t* physical_device) {
   IREE_TRACE_ZONE_BEGIN(z0);
+
+  // Close admission across every queue before blocking on any of them so
+  // teardown latency is not serialized across the device's queues.
   for (iree_host_size_t i = 0; i < physical_device->host_queue_count; ++i) {
-    iree_hal_amdgpu_host_queue_deinitialize(&physical_device->host_queues[i]);
+    iree_hal_amdgpu_host_queue_begin_deinitialize(
+        &physical_device->host_queues[i]);
+  }
+
+  // Queue delivery is retired only after this loop, and where the targets were
+  // published that is what releases these waits when the GPU can no longer
+  // advance an epoch. Unwinding a partly assigned device reaches the same loop
+  // with nothing published, and nothing to wait for either: publication is the
+  // last step of assignment and a queue that was never assigned has never been
+  // submitted to, so every wait here returns on its own.
+  for (iree_host_size_t i = 0; i < physical_device->host_queue_count; ++i) {
+    iree_hal_amdgpu_host_queue_wait_idle_before_deinitialize(
+        &physical_device->host_queues[i]);
+  }
+
+  // Every queue has passed its idle/error boundary, so nothing left to destroy
+  // depends on a fault to release it. Retirement returns once no callback can
+  // be inside these queues, which is what makes the destruction below safe. A
+  // callback delivering to some other device may still be running; it has no
+  // way to reach these queues once the store lands.
+  iree_hal_amdgpu_system_event_retire_queue_targets(
+      physical_device->system_event_target);
+  // The registration outlives frontier assignment but not the logical device,
+  // and it is removed before the physical devices are deinitialized. Dropping
+  // the borrow here keeps a later deassignment from reaching a freed target.
+  physical_device->system_event_target = NULL;
+
+  for (iree_host_size_t i = 0; i < physical_device->host_queue_count; ++i) {
+    iree_hal_amdgpu_host_queue_finish_deinitialize(
+        &physical_device->host_queues[i]);
   }
   physical_device->host_queue_count = 0;
   if (physical_device->default_pool_set.entries) {

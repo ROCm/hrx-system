@@ -27,6 +27,7 @@ iree_c_embed_data(
     c_file_output = "dynamic_library_test_library_embed.c",
     flatten = True,
     h_file_output = "dynamic_library_test_library_embed.h",
+    visibility = ["//visibility:public"],
 )
 
 iree_runtime_cc_test(

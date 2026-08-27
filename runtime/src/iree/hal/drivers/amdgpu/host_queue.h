@@ -179,11 +179,19 @@ typedef struct iree_hal_amdgpu_host_queue_t {
   // Allocator used for host-side queue resources.
   iree_allocator_t host_allocator;
 
-  // Sticky error status from the HSA queue error callback. Non-zero indicates
-  // an unrecoverable GPU fault (page fault, invalid packet, ECC error).
-  // First-error-wins CAS from the HSA runtime thread; acquire-loaded by the
-  // completion drain path to fail pending semaphores instead of signaling.
-  // Owned by the queue (freed in deinit).
+  // Sticky terminal failure for this queue. Non-zero means the queue will never
+  // make progress again: an unrecoverable GPU error, or an HSA wait that
+  // returned a result the queue cannot act on.
+  //
+  // Written through iree_hal_amdgpu_host_queue_record_failure by any of the HSA
+  // queue error callback, the process-wide HSA system event callback, and this
+  // driver's own wait paths, so writers are not restricted to HSA runtime
+  // threads. First-error-wins CAS; acquire-loaded by the completion drain path
+  // to fail pending semaphores instead of signaling them.
+  //
+  // Owned by the queue. Deinitialization takes the status out of the slot in
+  // the same step that frees it, so a non-zero slot always names a live status
+  // and every reader may clone from it without further coordination.
   iree_atomic_intptr_t error_status;
 
   // Hardware AQL queue created via hsa_queue_create. Owned by this queue.
@@ -262,10 +270,12 @@ typedef struct iree_hal_amdgpu_host_queue_t {
   //     the serialized drain; direct host waiters do not. Never writes to
   //     submission-path fields.
   //
-  //   HSA error callback (HSA runtime thread):
-  //     Writes error_status via atomic CAS. Signals
-  //     completion.stop_signal so the completion thread wakes and fails
-  //     outstanding notifications.
+  //   Terminal failure (any thread that can prove the queue is initialized):
+  //     Writes error_status via atomic CAS and signals completion.stop_signal
+  //     so the completion thread wakes, closes admission and fails outstanding
+  //     notifications. Reached from the queue's own HSA error callback, from
+  //     the process-wide HSA system event callback, and from this driver's own
+  //     wait paths, so the writer is not always an HSA runtime thread.
   //
   // Wait-resolution fast-path contract:
   //   - Same-queue signal-before-wait is elided directly from the semaphore's
@@ -334,9 +344,15 @@ typedef struct iree_hal_amdgpu_host_queue_t {
   // arrays.
   iree_hal_amdgpu_host_queue_command_buffer_scratch_t* command_buffer_scratch;
 
-  // Set under submission_mutex when queue teardown begins. Deferred ops whose
-  // waits race to completion after this point are failed with CANCELLED instead
-  // of issuing new AQL packets.
+  // Set under submission_mutex when the queue permanently closes admission,
+  // either for teardown or after a fatal queue failure. Never cleared. Every
+  // submission entry point rejects work with CANCELLED once it is set, and
+  // deferred ops whose waits race to completion after this point are failed
+  // with CANCELLED instead of issuing new AQL packets.
+  //
+  // Because notification epochs are published under submission_mutex, closing
+  // admission under that mutex also establishes that no epoch published later
+  // can escape the failure drain that follows.
   bool is_shutting_down;
 
   // Profiling data-family state for this queue. Mutated only by device
@@ -712,13 +728,68 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize_tsan_state(
 void iree_hal_amdgpu_host_queue_deinitialize_tsan_state(
     iree_hal_amdgpu_host_queue_t* queue);
 
+// Begins queue teardown by permanently closing submission admission.
+//
+// After this returns every submission entry point rejects work and no new
+// notification epoch can be published. Deferred operations already linked on
+// the queue are not settled here.
+//
+// Callers tearing down several queues should call this on all of them before
+// waiting on any so teardown latency is not serialized across queues.
+void iree_hal_amdgpu_host_queue_begin_deinitialize(
+    iree_hal_amdgpu_host_queue_t* queue);
+
+// Waits until no queue work remains that can depend on GPU progress: either
+// hardware retires the last submitted epoch or the queue records a failure.
+// Requires that admission has already been closed.
+//
+// Returns immediately when the queue already failed or never submitted
+// anything. A failure recorded while this is waiting wakes it through the queue
+// stop signal, which is why external failure delivery is a precondition of this
+// call rather than something the caller may retire first.
+//
+// This wait is unbounded and a GPU that can no longer advance the submitted
+// epoch has only the recorded failure to release it. Delivery of that failure
+// is not guaranteed: the HSA runtime delivers a fatal event at most once per
+// runtime instance and delivers none at all when its interrupt path is off
+// (see system_event.h), so a queue stranded by a second fault in one runtime
+// instance - or by any fault at all where delivery is disabled - leaves this
+// call blocked for the life of the process.
+void iree_hal_amdgpu_host_queue_wait_idle_before_deinitialize(
+    iree_hal_amdgpu_host_queue_t* queue);
+
 // Deinitializes the queue. Destroys all owned resources and stops the
 // completion thread.
 //
-// All in-flight work must have completed and been drained before calling.
-// The caller must ensure no concurrent access to the queue during deinit.
+// All in-flight work must have completed or failed: the caller must have run
+// begin_deinitialize and wait_idle_before_deinitialize first, must ensure no
+// concurrent access to the queue, and must have retired any external failure
+// delivery that can still reach it.
+void iree_hal_amdgpu_host_queue_finish_deinitialize(
+    iree_hal_amdgpu_host_queue_t* queue);
+
+// Runs the full begin/wait/finish teardown sequence for one queue.
+// Callers tearing down several queues should drive the phases themselves.
 void iree_hal_amdgpu_host_queue_deinitialize(
     iree_hal_amdgpu_host_queue_t* queue);
+
+// Records a permanent terminal failure on the queue from an unrecoverable
+// asynchronous error and wakes the completion service so all submitted and
+// deferred operations fail promptly. Consumes |status|; the first failure wins
+// and later ones are freed.
+//
+// The completion thread then runs the queue's terminal transition and exits,
+// after which the queue rejects all further submissions and never accepts work
+// again. The only remaining valid operation on the queue is deinitialization.
+//
+// Callable from any thread, including an HSA runtime callback thread, as long
+// as the caller holds a guarantee the queue is still initialized: the whole
+// call is a first-error-wins compare-exchange on the failure slot, a free of
+// the status that loses, and a store to the queue's stop signal when the queue
+// has one. That store is the only HSA entry point it reaches, and the signal
+// behind it is what the guarantee has to cover.
+void iree_hal_amdgpu_host_queue_record_failure(
+    iree_hal_amdgpu_host_queue_t* queue, iree_status_t status);
 
 // Populates |out_scope| with immutable queue identity and AQL ring facts.
 void iree_hal_amdgpu_host_queue_query_scope(

@@ -120,8 +120,8 @@ typedef struct iree_hal_amdgpu_virtual_queue_vtable_t
 // Virtual queue interface.
 // Unlike most HAL resources this is not reference counted. Queues are allocated
 // inline and users must first query the required size, allocate space, and then
-// initialize the queue in-place. Deinitialization happens explicitly when the
-// parent is deinitializing via the `deinitialize` vtable entry.
+// initialize the queue in-place. Deinitialization happens explicitly through
+// the concrete queue type, which the owning physical device drives in phases.
 typedef struct iree_hal_amdgpu_virtual_queue_t {
   const iree_hal_amdgpu_virtual_queue_vtable_t* vtable;
 } iree_hal_amdgpu_virtual_queue_t;
@@ -131,9 +131,6 @@ typedef struct iree_hal_amdgpu_virtual_queue_t {
 #undef alloca
 
 typedef struct iree_hal_amdgpu_virtual_queue_vtable_t {
-  // Deinitializes the queue on shutdown.
-  void(IREE_API_PTR* deinitialize)(iree_hal_amdgpu_virtual_queue_t* queue);
-
   void(IREE_API_PTR* trim)(iree_hal_amdgpu_virtual_queue_t* queue);
 
   iree_status_t(IREE_API_PTR* alloca)(

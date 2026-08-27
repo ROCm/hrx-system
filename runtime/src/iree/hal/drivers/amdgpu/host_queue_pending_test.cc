@@ -233,6 +233,17 @@ TEST_F(HostQueuePendingTest, DefaultPoolServesOptimalHostLocalMappedAlloca) {
       &libhsa_, &topology_, host_allocator_, IREE_HAL_MEMORY_TYPE_OPTIMAL);
 }
 
+// Cancels the queue's deferred operations the way the queue itself does:
+// admission closed first, so no submission can be admitted alongside the
+// cancellation pass.
+static void CancelPendingWithTestStatus(iree_hal_amdgpu_host_queue_t* queue) {
+  iree_hal_amdgpu_host_queue_begin_deinitialize(queue);
+  iree_status_t cancellation_status =
+      iree_make_status(IREE_STATUS_CANCELLED, "test cancellation");
+  iree_hal_amdgpu_host_queue_cancel_pending(queue, cancellation_status);
+  iree_status_free(cancellation_status);
+}
+
 static bool HostQueueHasPendingOps(iree_hal_amdgpu_host_queue_t* queue) {
   iree_slim_mutex_lock(&queue->locks.submission_mutex);
   const bool has_pending_ops = queue->pending_head != NULL;
@@ -462,8 +473,7 @@ TEST_F(HostQueuePendingTest, CancelPendingFillFailsSignalSemaphore) {
       &pattern, sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
   ASSERT_TRUE(HostQueueHasPendingOps(queue));
 
-  iree_hal_amdgpu_host_queue_cancel_pending(queue, IREE_STATUS_CANCELLED,
-                                            "test cancellation");
+  CancelPendingWithTestStatus(queue);
   EXPECT_FALSE(HostQueueHasPendingOps(queue));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
                         iree_hal_semaphore_wait(signal_semaphore, signal_value,
@@ -825,8 +835,7 @@ TEST_F(HostQueuePendingTest, CancelPendingAllocaFrontierWait) {
   EXPECT_FALSE(iree_hal_semaphore_list_poll(alloca_signal_list));
   ASSERT_TRUE(HostQueueHasPendingOps(queue));
 
-  iree_hal_amdgpu_host_queue_cancel_pending(queue, IREE_STATUS_CANCELLED,
-                                            "test cancellation");
+  CancelPendingWithTestStatus(queue);
   EXPECT_FALSE(HostQueueHasPendingOps(queue));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_CANCELLED,
@@ -898,8 +907,7 @@ TEST_F(HostQueuePendingTest, CancelPendingAllocaPoolNotificationWait) {
   iree_hal_pool_query_stats(pool, &stats);
   EXPECT_GE(stats.exhausted_count, 1u);
 
-  iree_hal_amdgpu_host_queue_cancel_pending(queue, IREE_STATUS_CANCELLED,
-                                            "test cancellation");
+  CancelPendingWithTestStatus(queue);
   EXPECT_FALSE(HostQueueHasPendingOps(queue));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_CANCELLED,

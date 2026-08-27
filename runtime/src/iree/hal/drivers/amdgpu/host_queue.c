@@ -475,15 +475,22 @@ iree_host_size_t iree_hal_amdgpu_host_queue_drain_completions_for_waiter(
   return count;
 }
 
+// Returns the queue's recorded failure without transferring ownership. The
+// queue owns the status until it is taken by deinitialization.
+static iree_status_t iree_hal_amdgpu_host_queue_error_status(
+    iree_hal_amdgpu_host_queue_t* queue) {
+  return (iree_status_t)iree_atomic_load(&queue->error_status,
+                                         iree_memory_order_acquire);
+}
+
 static bool iree_hal_amdgpu_host_queue_has_error(
     iree_hal_amdgpu_host_queue_t* queue) {
-  return iree_atomic_load(&queue->error_status, iree_memory_order_acquire) != 0;
+  return !iree_status_is_ok(iree_hal_amdgpu_host_queue_error_status(queue));
 }
 
 static iree_status_t iree_hal_amdgpu_host_queue_clone_error_status(
     iree_hal_amdgpu_host_queue_t* queue) {
-  iree_status_t error = (iree_status_t)iree_atomic_load(
-      &queue->error_status, iree_memory_order_acquire);
+  iree_status_t error = iree_hal_amdgpu_host_queue_error_status(queue);
   return iree_status_is_ok(error) ? iree_ok_status() : iree_status_clone(error);
 }
 
@@ -504,6 +511,28 @@ static void iree_hal_amdgpu_host_queue_request_completion_thread_stop(
   if (queue->completion.stop_signal.handle) {
     iree_hsa_signal_store_screlease(IREE_LIBHSA(queue->libhsa),
                                     queue->completion.stop_signal, 1);
+  }
+}
+
+// Permanently closes the queue to further submission. Idempotent, and the only
+// writer of |is_shutting_down|.
+//
+// Every notification epoch is published under submission_mutex, so taking the
+// mutex here waits out any publisher already inside the critical section and
+// keeps any later one out. A drain that runs after this returns therefore sees
+// a published epoch that can no longer advance.
+static void iree_hal_amdgpu_host_queue_close_submission(
+    iree_hal_amdgpu_host_queue_t* queue) {
+  iree_slim_mutex_lock(&queue->locks.submission_mutex);
+  queue->is_shutting_down = true;
+  iree_slim_mutex_unlock(&queue->locks.submission_mutex);
+}
+
+void iree_hal_amdgpu_host_queue_record_failure(
+    iree_hal_amdgpu_host_queue_t* queue, iree_status_t status) {
+  IREE_ASSERT_ARGUMENT(queue);
+  if (iree_hal_amdgpu_host_queue_store_error(queue, status)) {
+    iree_hal_amdgpu_host_queue_request_completion_thread_stop(queue);
   }
 }
 
@@ -561,8 +590,8 @@ iree_status_t iree_hal_amdgpu_host_queue_wait_for_setup_epoch(
           "hsa_amd_signal_wait_any returned invalid signal index %u while "
           "waiting for AMDGPU host queue epoch %" PRIu64,
           signal_index, epoch);
-      iree_hal_amdgpu_host_queue_store_error(queue, iree_status_clone(error));
-      iree_hal_amdgpu_host_queue_request_completion_thread_stop(queue);
+      iree_hal_amdgpu_host_queue_record_failure(queue,
+                                                iree_status_clone(error));
       return error;
     } else if (signal_index == IREE_HAL_AMDGPU_EPOCH_WAIT_STOP_SIGNAL) {
       iree_status_t error =
@@ -592,8 +621,9 @@ static hsa_signal_value_t iree_hal_amdgpu_host_queue_last_drained_signal_value(
                               last_drained_epoch);
 }
 
-static void iree_hal_amdgpu_host_queue_wait_idle_before_teardown(
+void iree_hal_amdgpu_host_queue_wait_idle_before_deinitialize(
     iree_hal_amdgpu_host_queue_t* queue) {
+  IREE_ASSERT_ARGUMENT(queue);
   if (!queue->hardware_queue || !queue->notification_ring.epoch.signal.handle) {
     return;
   }
@@ -643,8 +673,7 @@ static void iree_hal_amdgpu_host_queue_wait_idle_before_teardown(
           "hsa_amd_signal_wait_any returned invalid signal index %u during "
           "AMDGPU host queue teardown",
           signal_index);
-      iree_hal_amdgpu_host_queue_store_error(queue, error);
-      iree_hal_amdgpu_host_queue_request_completion_thread_stop(queue);
+      iree_hal_amdgpu_host_queue_record_failure(queue, error);
     }
   } else {
     (void)iree_hsa_signal_wait_scacquire(
@@ -714,18 +743,35 @@ static int iree_hal_amdgpu_host_queue_completion_thread_main(void* entry_arg) {
             iree_hal_amdgpu_host_queue_last_drained_signal_value(queue);
       }
 
+      // An out-of-range index means every signal handle passed was null or
+      // invalid, so nothing can ever wake this wait again. Fail the queue and
+      // take the terminal path below rather than spinning on a dead wait.
+      if (IREE_UNLIKELY(signal_index >=
+                        IREE_HAL_AMDGPU_COMPLETION_WAIT_SIGNAL_COUNT)) {
+        iree_hal_amdgpu_host_queue_record_failure(
+            queue,
+            iree_make_status(
+                IREE_STATUS_INTERNAL,
+                "hsa_amd_signal_wait_any returned invalid signal index %u",
+                signal_index));
+      }
+
       if (signal_index == IREE_HAL_AMDGPU_COMPLETION_WAIT_STOP_SIGNAL ||
           iree_hal_amdgpu_host_queue_has_error(queue)) {
+        // Close admission before the final drain so no epoch can be published
+        // behind it. On the teardown path admission is already closed and this
+        // is a no-op; on the failure path it is what makes the drain final.
+        iree_hal_amdgpu_host_queue_close_submission(queue);
         iree_hal_amdgpu_host_queue_drain_completions(queue);
-        keep_running = false;
-      } else if (IREE_UNLIKELY(signal_index >=
-                               IREE_HAL_AMDGPU_COMPLETION_WAIT_SIGNAL_COUNT)) {
-        iree_status_t error = iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "hsa_amd_signal_wait_any returned invalid signal index %u",
-            signal_index);
-        iree_hal_amdgpu_host_queue_store_error(queue, error);
-        iree_hal_amdgpu_host_queue_drain_completions(queue);
+        if (iree_hal_amdgpu_host_queue_has_error(queue)) {
+          // Capacity-parked pending operations are retried by post-drain
+          // callbacks and the drain's own pass can enqueue more. Flush them
+          // under closed admission so they observe cancellation and run their
+          // normal failure path instead of being destroyed under the callback.
+          iree_hal_amdgpu_host_queue_run_post_drain_actions(queue);
+          iree_hal_amdgpu_host_queue_cancel_pending(
+              queue, iree_hal_amdgpu_host_queue_error_status(queue));
+        }
         keep_running = false;
       }
 
@@ -741,10 +787,22 @@ static int iree_hal_amdgpu_host_queue_completion_thread_main(void* entry_arg) {
   return 0;
 }
 
-// HSA queue error callback. Called by the HSA runtime (on an internal thread)
-// when the queue encounters an unrecoverable error (page fault, invalid AQL
-// packet, ECC error). Stores the error atomically on the queue so the
-// completion drain path can fail pending semaphores with the actual GPU error.
+// HSA queue error callback, invoked by the HSA runtime on an internal thread
+// when this queue takes an unrecoverable error: an invalid or unsupported AQL
+// packet, an illegal instruction, a wave exception, a memory aperture
+// violation, exhausted scratch or registers, or a device-level fault such as
+// ECC.
+//
+// A plain VM memory fault does not arrive here. The runtime installs one of two
+// queue handlers depending on whether the kernel driver reports support for
+// exception debugging: the one it installs with support recognizes a wave
+// memory violation, stamps the queue and hands the fault to its process-wide VM
+// fault path without calling back here, and the one it installs without support
+// carries no memory-fault code in its mapping at all. Either way the fault is
+// delivered to the process-wide system event handlers, which is where this
+// driver observes it - see system_event.c. Both callbacks can fail the same
+// queue, so both converge on the same terminal transition and handling must
+// stay idempotent.
 static void iree_hal_amdgpu_host_queue_error_callback(hsa_status_t status,
                                                       hsa_queue_t* source,
                                                       void* data) {
@@ -758,9 +816,7 @@ static void iree_hal_amdgpu_host_queue_error_callback(hsa_status_t status,
   // First-error-wins: store the error with release semantics so the status
   // payload (heap-allocated string, backtrace) is visible to any thread that
   // loads with acquire. If another error already won the race, free ours.
-  if (iree_hal_amdgpu_host_queue_store_error(queue, error)) {
-    iree_hal_amdgpu_host_queue_request_completion_thread_stop(queue);
-  }
+  iree_hal_amdgpu_host_queue_record_failure(queue, error);
 }
 
 iree_status_t iree_hal_amdgpu_host_queue_initialize(
@@ -975,16 +1031,23 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
   return status;
 }
 
+void iree_hal_amdgpu_host_queue_begin_deinitialize(
+    iree_hal_amdgpu_host_queue_t* queue) {
+  IREE_ASSERT_ARGUMENT(queue);
+  iree_hal_amdgpu_host_queue_close_submission(queue);
+}
+
 void iree_hal_amdgpu_host_queue_deinitialize(
+    iree_hal_amdgpu_host_queue_t* queue) {
+  iree_hal_amdgpu_host_queue_begin_deinitialize(queue);
+  iree_hal_amdgpu_host_queue_wait_idle_before_deinitialize(queue);
+  iree_hal_amdgpu_host_queue_finish_deinitialize(queue);
+}
+
+void iree_hal_amdgpu_host_queue_finish_deinitialize(
     iree_hal_amdgpu_host_queue_t* queue) {
   IREE_ASSERT_ARGUMENT(queue);
   IREE_TRACE_ZONE_BEGIN(z0);
-
-  iree_slim_mutex_lock(&queue->locks.submission_mutex);
-  queue->is_shutting_down = true;
-  iree_slim_mutex_unlock(&queue->locks.submission_mutex);
-
-  iree_hal_amdgpu_host_queue_wait_idle_before_teardown(queue);
 
   if (queue->completion.thread) {
     iree_hal_amdgpu_host_queue_request_completion_thread_stop(queue);
@@ -1008,17 +1071,26 @@ void iree_hal_amdgpu_host_queue_deinitialize(
   iree_hal_amdgpu_host_queue_run_post_drain_actions(queue);
 
   // Cancel all pending (deferred) operations. Their signal semaphores are
-  // failed with CANCELLED so downstream waiters don't hang.
+  // failed so downstream waiters don't hang. A queue that failed has already
+  // cancelled these on its completion thread with the recorded failure, so
+  // anything still linked here was deferred during a clean teardown.
   if (queue->pending_head) {
-    iree_hal_amdgpu_host_queue_cancel_pending(queue, IREE_STATUS_CANCELLED,
-                                              "queue shutting down");
+    iree_status_t cancellation_status =
+        iree_make_status(IREE_STATUS_CANCELLED, "queue shutting down");
+    iree_hal_amdgpu_host_queue_cancel_pending(queue, cancellation_status);
+    iree_status_free(cancellation_status);
   }
 
   // Process any remaining notification entries before destroying resources.
   // If the GPU faulted, fail all pending entries so waiters get the actual
   // error. Otherwise drain normally (entries completed but not yet processed).
-  iree_status_t error = (iree_status_t)iree_atomic_load(
-      &queue->error_status, iree_memory_order_acquire);
+  //
+  // Emptying the slot in the same step that takes ownership of the failure is
+  // what makes the free below safe: a non-zero slot names a live status, and
+  // every reader that dereferences it - including the post-drain pass this
+  // function runs after the free - only clones from it.
+  iree_status_t error = (iree_status_t)iree_atomic_exchange(
+      &queue->error_status, 0, iree_memory_order_acq_rel);
   iree_hal_amdgpu_reclaim_positions_t reclaim_positions = {0};
   if (!iree_status_is_ok(error)) {
     iree_hal_amdgpu_notification_ring_fail_all_reclaim_positions(
@@ -1990,15 +2062,8 @@ static iree_status_t iree_hal_amdgpu_host_queue_flush(
 // Virtual queue vtable
 //===----------------------------------------------------------------------===//
 
-static void iree_hal_amdgpu_host_queue_deinitialize_vtable(
-    iree_hal_amdgpu_virtual_queue_t* base_queue) {
-  iree_hal_amdgpu_host_queue_deinitialize(
-      (iree_hal_amdgpu_host_queue_t*)base_queue);
-}
-
 static const iree_hal_amdgpu_virtual_queue_vtable_t
     iree_hal_amdgpu_host_queue_vtable = {
-        .deinitialize = iree_hal_amdgpu_host_queue_deinitialize_vtable,
         .trim = iree_hal_amdgpu_host_queue_trim,
         .alloca = iree_hal_amdgpu_host_queue_alloca,
         .dealloca = iree_hal_amdgpu_host_queue_dealloca,

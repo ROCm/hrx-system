@@ -964,10 +964,14 @@ static void iree_hal_amdgpu_pending_op_issue(iree_hal_amdgpu_pending_op_t* op) {
       .ready = true,
       .memory_wait_op = NULL,
   };
-  if (queue->is_shutting_down) {
+  // A recorded failure outranks closed admission. The terminal transition
+  // closes admission and then flushes the post-drain retries that resume
+  // capacity-parked operations, so consulting the flag first would report the
+  // shutdown to an operation resumed there while every operation the same
+  // transition cancels reports the fault that caused it.
+  status = iree_hal_amdgpu_host_queue_clone_error_status(queue);
+  if (iree_status_is_ok(status) && queue->is_shutting_down) {
     status = iree_make_status(IREE_STATUS_CANCELLED, "queue shutting down");
-  } else {
-    status = iree_hal_amdgpu_host_queue_clone_error_status(queue);
   }
   if (iree_status_is_ok(status)) {
     // All waits are tier 0; emit operation packets with no dependency
@@ -1044,17 +1048,8 @@ static void iree_hal_amdgpu_pending_op_fail(iree_hal_amdgpu_pending_op_t* op,
   iree_arena_deinitialize(&op->arena);
 }
 
-// Cancels all pending operations on a queue with the given failure details.
-// Creates a status only for operations that do not already carry a wait error.
-// Called during deinitialize or on unrecoverable GPU fault.
-// Caller must ensure no concurrent submissions (shutdown path).
 void iree_hal_amdgpu_host_queue_cancel_pending(
-    iree_hal_amdgpu_host_queue_t* queue, iree_status_code_t status_code,
-    const char* status_message) {
-  iree_slim_mutex_lock(&queue->locks.submission_mutex);
-  queue->is_shutting_down = true;
-  iree_slim_mutex_unlock(&queue->locks.submission_mutex);
-
+    iree_hal_amdgpu_host_queue_t* queue, const iree_status_t failure_status) {
   for (;;) {
     iree_hal_amdgpu_pending_op_t* op = NULL;
     iree_slim_mutex_lock(&queue->locks.submission_mutex);
@@ -1095,7 +1090,7 @@ void iree_hal_amdgpu_host_queue_cancel_pending(
     iree_status_t op_status = (iree_status_t)iree_atomic_exchange(
         &op->error_status, 0, iree_memory_order_acquire);
     if (iree_status_is_ok(op_status)) {
-      op_status = iree_make_status(status_code, "%s", status_message);
+      op_status = iree_status_clone(failure_status);
     }
     iree_hal_semaphore_list_fail(op->signal_semaphore_list, op_status);
     iree_hal_amdgpu_pending_op_abort_unsubmitted_dealloca(op);
