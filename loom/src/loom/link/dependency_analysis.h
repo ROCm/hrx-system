@@ -36,32 +36,52 @@ typedef enum loom_link_dependency_candidate_origin_e {
   LOOM_LINK_DEPENDENCY_CANDIDATE_TRANSITIVE_LIBRARY = 2,
 } loom_link_dependency_candidate_origin_t;
 
-// Strict ownership result for one authored requirement.
-typedef enum loom_link_dependency_disposition_e {
+// Direct dependency ownership for one authored requirement.
+typedef enum loom_link_dependency_ownership_e {
   // One compatible INPUT definition satisfies the requirement locally.
-  LOOM_LINK_DEPENDENCY_LOCAL = 0,
+  LOOM_LINK_DEPENDENCY_OWNERSHIP_LOCAL = 0,
   // One direct library owns an exact contract, or one or more direct
   // libraries contribute providers for an open template family.
-  LOOM_LINK_DEPENDENCY_DIRECT = 1,
+  LOOM_LINK_DEPENDENCY_OWNERSHIP_DIRECT = 1,
   // No provider is currently available for an open template family. The
   // relocatable module may be specialized against providers in a later link.
-  LOOM_LINK_DEPENDENCY_OPEN = 2,
+  LOOM_LINK_DEPENDENCY_OWNERSHIP_OPEN = 2,
   // Compatible candidates exist only in transitive libraries.
-  LOOM_LINK_DEPENDENCY_TRANSITIVE_ONLY = 3,
+  LOOM_LINK_DEPENDENCY_OWNERSHIP_MISSING_DIRECT = 3,
   // No candidate exists in the indexed library universe.
-  LOOM_LINK_DEPENDENCY_UNRESOLVED = 4,
-  // Candidates exist at the nearest ownership tier but none are compatible.
-  LOOM_LINK_DEPENDENCY_INCOMPATIBLE = 5,
-  // Multiple compatible candidates exist where exact ownership must be unique.
-  LOOM_LINK_DEPENDENCY_AMBIGUOUS = 6,
-} loom_link_dependency_disposition_t;
+  LOOM_LINK_DEPENDENCY_OWNERSHIP_UNSATISFIED = 4,
+  // A compatible same-name definition exists only behind private library
+  // linkage and cannot satisfy the cross-library contract.
+  LOOM_LINK_DEPENDENCY_OWNERSHIP_INACCESSIBLE = 5,
+  // Accessible candidates exist at the nearest ownership tier but none are
+  // compatible.
+  LOOM_LINK_DEPENDENCY_OWNERSHIP_INCOMPATIBLE = 6,
+} loom_link_dependency_ownership_t;
 
-// Returns true when |disposition| is valid for a relocatable library.
-static inline bool loom_link_dependency_disposition_satisfied(
-    loom_link_dependency_disposition_t disposition) {
-  return disposition == LOOM_LINK_DEPENDENCY_LOCAL ||
-         disposition == LOOM_LINK_DEPENDENCY_DIRECT ||
-         disposition == LOOM_LINK_DEPENDENCY_OPEN;
+// Current exact-definition resolution across the supplied provider universe.
+typedef enum loom_link_dependency_resolution_e {
+  // Resolution does not apply to an open template-family requirement.
+  LOOM_LINK_DEPENDENCY_RESOLUTION_NOT_APPLICABLE = 0,
+  // One compatible INPUT definition owns the merged symbol.
+  LOOM_LINK_DEPENDENCY_RESOLUTION_LOCAL = 1,
+  // One compatible exported library definition is available.
+  LOOM_LINK_DEPENDENCY_RESOLUTION_UNIQUE = 2,
+  // Compatible exported declarations exist but no definition is available.
+  LOOM_LINK_DEPENDENCY_RESOLUTION_DEFERRED = 3,
+  // No accessible same-name contract is available.
+  LOOM_LINK_DEPENDENCY_RESOLUTION_UNRESOLVED = 4,
+  // Multiple compatible exported definitions are available.
+  LOOM_LINK_DEPENDENCY_RESOLUTION_AMBIGUOUS = 5,
+  // Accessible same-name candidates exist but none are compatible.
+  LOOM_LINK_DEPENDENCY_RESOLUTION_INCOMPATIBLE = 6,
+} loom_link_dependency_resolution_t;
+
+// Returns true when |ownership| is valid for a relocatable library.
+static inline bool loom_link_dependency_ownership_satisfied(
+    loom_link_dependency_ownership_t ownership) {
+  return ownership == LOOM_LINK_DEPENDENCY_OWNERSHIP_LOCAL ||
+         ownership == LOOM_LINK_DEPENDENCY_OWNERSHIP_DIRECT ||
+         ownership == LOOM_LINK_DEPENDENCY_OWNERSHIP_OPEN;
 }
 
 // One exact symbol or template provider considered for a requirement.
@@ -83,8 +103,10 @@ typedef struct loom_link_dependency_candidate_t {
 typedef struct loom_link_dependency_requirement_t {
   // Requirement family.
   loom_link_dependency_requirement_kind_t kind;
-  // Strict ownership result.
-  loom_link_dependency_disposition_t disposition;
+  // Direct dependency ownership result.
+  loom_link_dependency_ownership_t ownership;
+  // Current exact-definition resolution result.
+  loom_link_dependency_resolution_t resolution;
   // True when an INPUT provider exports this exact declaration as part of its
   // public library surface. Always false for template-family requirements.
   bool exported;
@@ -114,6 +136,16 @@ typedef struct loom_link_dependency_requirement_t {
     iree_host_size_t count;
   } candidates;
 } loom_link_dependency_requirement_t;
+
+// Returns true when |requirement| is valid for a relocatable library.
+// Dependency ownership and exact-definition uniqueness are independent: a
+// direct exported declaration may own a contract while the supplied audit
+// universe reveals two competing definitions.
+static inline bool loom_link_dependency_requirement_satisfied(
+    const loom_link_dependency_requirement_t* requirement) {
+  return loom_link_dependency_ownership_satisfied(requirement->ownership) &&
+         requirement->resolution != LOOM_LINK_DEPENDENCY_RESOLUTION_AMBIGUOUS;
+}
 
 // Direct-library ownership report allocated in a caller arena.
 typedef struct loom_link_dependency_analysis_t {

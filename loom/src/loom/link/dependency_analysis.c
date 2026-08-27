@@ -347,7 +347,6 @@ static bool loom_link_dependency_exact_candidate(
     const loom_link_module_index_symbol_t* requirement,
     const loom_link_module_index_symbol_t* candidate) {
   if (candidate == requirement ||
-      candidate->identity != LOOM_LINK_SYMBOL_IDENTITY_GLOBAL ||
       candidate->template_family_ordinal !=
           LOOM_LINK_TEMPLATE_FAMILY_ORDINAL_INVALID ||
       iree_any_bit_set(candidate->flags, LOOM_LINK_SYMBOL_FLAG_IMPORT |
@@ -361,10 +360,28 @@ static bool loom_link_dependency_exact_candidate(
     return iree_any_bit_set(candidate->flags,
                             LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION);
   }
-  return iree_any_bit_set(candidate->flags, LOOM_LINK_SYMBOL_FLAG_EXPORT) &&
+  if (candidate->identity == LOOM_LINK_SYMBOL_IDENTITY_PRIVATE) {
+    return iree_any_bit_set(candidate->flags,
+                            LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION);
+  }
+  return candidate->identity == LOOM_LINK_SYMBOL_IDENTITY_GLOBAL &&
+         iree_any_bit_set(candidate->flags, LOOM_LINK_SYMBOL_FLAG_EXPORT) &&
          iree_any_bit_set(candidate->flags,
                           LOOM_LINK_SYMBOL_FLAG_DECLARATION |
                               LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION);
+}
+
+static bool loom_link_dependency_exact_candidate_accessible(
+    const loom_link_module_index_symbol_t* candidate,
+    loom_link_dependency_candidate_origin_t origin) {
+  return origin == LOOM_LINK_DEPENDENCY_CANDIDATE_INPUT ||
+         candidate->identity == LOOM_LINK_SYMBOL_IDENTITY_GLOBAL;
+}
+
+static bool loom_link_dependency_exact_candidate_is_definition(
+    const loom_link_module_index_symbol_t* candidate) {
+  return iree_any_bit_set(candidate->flags,
+                          LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION);
 }
 
 static iree_host_size_t loom_link_dependency_exact_candidate_count(
@@ -439,7 +456,8 @@ static iree_status_t loom_link_dependency_initialize_requirements(
         iree_any_bit_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_EXPORT);
     requirements[requirement_ordinal++] = (loom_link_dependency_requirement_t){
         .kind = LOOM_LINK_DEPENDENCY_REQUIREMENT_EXACT_SYMBOL,
-        .disposition = LOOM_LINK_DEPENDENCY_UNRESOLVED,
+        .ownership = LOOM_LINK_DEPENDENCY_OWNERSHIP_UNSATISFIED,
+        .resolution = LOOM_LINK_DEPENDENCY_RESOLUTION_UNRESOLVED,
         .exported = exported,
         .first_source_symbol_ordinal =
             exported ? symbol_ordinal : LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
@@ -464,7 +482,8 @@ static iree_status_t loom_link_dependency_initialize_requirements(
     }
     requirements[requirement_ordinal++] = (loom_link_dependency_requirement_t){
         .kind = LOOM_LINK_DEPENDENCY_REQUIREMENT_TEMPLATE_FAMILY,
-        .disposition = LOOM_LINK_DEPENDENCY_OPEN,
+        .ownership = LOOM_LINK_DEPENDENCY_OWNERSHIP_OPEN,
+        .resolution = LOOM_LINK_DEPENDENCY_RESOLUTION_NOT_APPLICABLE,
         .occurrence_count = builder->template_demand_counts[family_ordinal],
         .first_source_symbol_ordinal =
             builder->template_first_source_symbols[family_ordinal],
@@ -650,10 +669,11 @@ static iree_status_t loom_link_dependency_check_exact_candidates(
   iree_host_size_t direct_compatible_count = 0;
   iree_host_size_t transitive_count = 0;
   iree_host_size_t transitive_compatible_count = 0;
+  iree_host_size_t external_compatible_definition_count = 0;
+  iree_host_size_t inaccessible_compatible_count = 0;
   for (iree_host_size_t i = 0; i < requirement->candidates.count; ++i) {
     loom_link_dependency_candidate_t* candidate =
         &candidates[requirement->candidates.first + i];
-    loom_link_dependency_mark_direct_candidate_used(builder, candidate);
     const loom_link_module_index_symbol_t* candidate_symbol =
         loom_link_module_index_symbol_at(builder->index,
                                          candidate->symbol_ordinal);
@@ -673,6 +693,19 @@ static iree_status_t loom_link_dependency_check_exact_candidates(
       };
     }
 
+    const bool accessible = loom_link_dependency_exact_candidate_accessible(
+        candidate_symbol, candidate->origin);
+    if (!accessible) {
+      inaccessible_compatible_count += candidate->compatible ? 1 : 0;
+      continue;
+    }
+    loom_link_dependency_mark_direct_candidate_used(builder, candidate);
+    if (candidate->origin != LOOM_LINK_DEPENDENCY_CANDIDATE_INPUT &&
+        candidate->compatible &&
+        loom_link_dependency_exact_candidate_is_definition(candidate_symbol)) {
+      ++external_compatible_definition_count;
+    }
+
     switch (candidate->origin) {
       case LOOM_LINK_DEPENDENCY_CANDIDATE_INPUT:
         ++input_count;
@@ -690,23 +723,40 @@ static iree_status_t loom_link_dependency_check_exact_candidates(
   }
 
   if (input_count != 0) {
-    requirement->disposition =
-        input_compatible_count == 1
-            ? LOOM_LINK_DEPENDENCY_LOCAL
-            : (input_compatible_count > 1 ? LOOM_LINK_DEPENDENCY_AMBIGUOUS
-                                          : LOOM_LINK_DEPENDENCY_INCOMPATIBLE);
+    requirement->ownership = input_compatible_count != 0
+                                 ? LOOM_LINK_DEPENDENCY_OWNERSHIP_LOCAL
+                                 : LOOM_LINK_DEPENDENCY_OWNERSHIP_INCOMPATIBLE;
   } else if (direct_count != 0) {
-    requirement->disposition =
-        direct_compatible_count == 1
-            ? LOOM_LINK_DEPENDENCY_DIRECT
-            : (direct_compatible_count > 1 ? LOOM_LINK_DEPENDENCY_AMBIGUOUS
-                                           : LOOM_LINK_DEPENDENCY_INCOMPATIBLE);
+    requirement->ownership = direct_compatible_count != 0
+                                 ? LOOM_LINK_DEPENDENCY_OWNERSHIP_DIRECT
+                                 : LOOM_LINK_DEPENDENCY_OWNERSHIP_INCOMPATIBLE;
   } else if (transitive_count != 0) {
-    requirement->disposition = transitive_compatible_count != 0
-                                   ? LOOM_LINK_DEPENDENCY_TRANSITIVE_ONLY
-                                   : LOOM_LINK_DEPENDENCY_INCOMPATIBLE;
+    requirement->ownership = transitive_compatible_count != 0
+                                 ? LOOM_LINK_DEPENDENCY_OWNERSHIP_MISSING_DIRECT
+                                 : LOOM_LINK_DEPENDENCY_OWNERSHIP_INCOMPATIBLE;
+  } else if (inaccessible_compatible_count != 0) {
+    requirement->ownership = LOOM_LINK_DEPENDENCY_OWNERSHIP_INACCESSIBLE;
   } else {
-    requirement->disposition = LOOM_LINK_DEPENDENCY_UNRESOLVED;
+    requirement->ownership = LOOM_LINK_DEPENDENCY_OWNERSHIP_UNSATISFIED;
+  }
+
+  if (input_count != 0) {
+    requirement->resolution =
+        input_compatible_count == 1
+            ? LOOM_LINK_DEPENDENCY_RESOLUTION_LOCAL
+            : (input_compatible_count > 1
+                   ? LOOM_LINK_DEPENDENCY_RESOLUTION_AMBIGUOUS
+                   : LOOM_LINK_DEPENDENCY_RESOLUTION_INCOMPATIBLE);
+  } else if (external_compatible_definition_count == 1) {
+    requirement->resolution = LOOM_LINK_DEPENDENCY_RESOLUTION_UNIQUE;
+  } else if (external_compatible_definition_count > 1) {
+    requirement->resolution = LOOM_LINK_DEPENDENCY_RESOLUTION_AMBIGUOUS;
+  } else if (direct_compatible_count != 0 || transitive_compatible_count != 0) {
+    requirement->resolution = LOOM_LINK_DEPENDENCY_RESOLUTION_DEFERRED;
+  } else if (direct_count != 0 || transitive_count != 0) {
+    requirement->resolution = LOOM_LINK_DEPENDENCY_RESOLUTION_INCOMPATIBLE;
+  } else {
+    requirement->resolution = LOOM_LINK_DEPENDENCY_RESOLUTION_UNRESOLVED;
   }
   return iree_ok_status();
 }
@@ -736,13 +786,13 @@ static void loom_link_dependency_classify_template_candidates(
     }
   }
   if (direct_count != 0) {
-    requirement->disposition = LOOM_LINK_DEPENDENCY_DIRECT;
+    requirement->ownership = LOOM_LINK_DEPENDENCY_OWNERSHIP_DIRECT;
   } else if (input_count != 0) {
-    requirement->disposition = LOOM_LINK_DEPENDENCY_LOCAL;
+    requirement->ownership = LOOM_LINK_DEPENDENCY_OWNERSHIP_LOCAL;
   } else if (transitive_count != 0) {
-    requirement->disposition = LOOM_LINK_DEPENDENCY_TRANSITIVE_ONLY;
+    requirement->ownership = LOOM_LINK_DEPENDENCY_OWNERSHIP_MISSING_DIRECT;
   } else {
-    requirement->disposition = LOOM_LINK_DEPENDENCY_OPEN;
+    requirement->ownership = LOOM_LINK_DEPENDENCY_OWNERSHIP_OPEN;
   }
 }
 

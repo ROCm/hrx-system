@@ -1,0 +1,1 @@
+func.decl public @interface_only(%x: i32) -> (i32)

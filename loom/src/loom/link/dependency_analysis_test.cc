@@ -52,7 +52,8 @@ enum class DirectRepresentation {
 using ProviderOrdinals = std::array<iree_host_size_t, kProviderCount>;
 using RequirementSnapshot =
     std::tuple<std::string, loom_link_dependency_requirement_kind_t,
-               loom_link_dependency_disposition_t, bool, iree_host_size_t,
+               loom_link_dependency_ownership_t,
+               loom_link_dependency_resolution_t, bool, iree_host_size_t,
                iree_host_size_t>;
 
 class LinkDependencyAnalysisTest : public ::testing::Test {
@@ -249,8 +250,8 @@ class LinkDependencyAnalysisTest : public ::testing::Test {
                    ->name;
       }
       snapshot.emplace_back(std::string(name.data, name.size), requirement.kind,
-                            requirement.disposition, requirement.exported,
-                            requirement.occurrence_count,
+                            requirement.ownership, requirement.resolution,
+                            requirement.exported, requirement.occurrence_count,
                             requirement.candidates.count);
     }
     return snapshot;
@@ -279,7 +280,8 @@ TEST_F(LinkDependencyAnalysisTest,
   const loom_link_dependency_requirement_t* direct =
       FindExactRequirement(analysis, "direct");
   ASSERT_NE(direct, nullptr);
-  EXPECT_EQ(direct->disposition, LOOM_LINK_DEPENDENCY_DIRECT);
+  EXPECT_EQ(direct->ownership, LOOM_LINK_DEPENDENCY_OWNERSHIP_DIRECT);
+  EXPECT_EQ(direct->resolution, LOOM_LINK_DEPENDENCY_RESOLUTION_AMBIGUOUS);
   EXPECT_FALSE(direct->exported);
   EXPECT_EQ(direct->occurrence_count, 1u);
   EXPECT_EQ(direct->candidates.count, 2u);
@@ -287,19 +289,25 @@ TEST_F(LinkDependencyAnalysisTest,
   const loom_link_dependency_requirement_t* transitive =
       FindExactRequirement(analysis, "transitive");
   ASSERT_NE(transitive, nullptr);
-  EXPECT_EQ(transitive->disposition, LOOM_LINK_DEPENDENCY_TRANSITIVE_ONLY);
+  EXPECT_EQ(transitive->ownership,
+            LOOM_LINK_DEPENDENCY_OWNERSHIP_MISSING_DIRECT);
+  EXPECT_EQ(transitive->resolution, LOOM_LINK_DEPENDENCY_RESOLUTION_UNIQUE);
 
   const loom_link_dependency_requirement_t* reexported =
       FindExactRequirement(analysis, "reexported");
   ASSERT_NE(reexported, nullptr);
-  EXPECT_EQ(reexported->disposition, LOOM_LINK_DEPENDENCY_DIRECT);
+  EXPECT_EQ(reexported->ownership, LOOM_LINK_DEPENDENCY_OWNERSHIP_DIRECT);
+  EXPECT_EQ(reexported->resolution, LOOM_LINK_DEPENDENCY_RESOLUTION_UNIQUE);
   EXPECT_TRUE(reexported->exported);
   EXPECT_EQ(reexported->occurrence_count, 1u);
 
   const loom_link_dependency_requirement_t* incompatible =
       FindExactRequirement(analysis, "bad");
   ASSERT_NE(incompatible, nullptr);
-  EXPECT_EQ(incompatible->disposition, LOOM_LINK_DEPENDENCY_INCOMPATIBLE);
+  EXPECT_EQ(incompatible->ownership,
+            LOOM_LINK_DEPENDENCY_OWNERSHIP_INCOMPATIBLE);
+  EXPECT_EQ(incompatible->resolution,
+            LOOM_LINK_DEPENDENCY_RESOLUTION_INCOMPATIBLE);
   ASSERT_EQ(incompatible->candidates.count, 1u);
   const loom_link_dependency_candidate_t& incompatible_candidate =
       analysis.candidates.values[incompatible->candidates.first];
@@ -310,41 +318,57 @@ TEST_F(LinkDependencyAnalysisTest,
   const loom_link_dependency_requirement_t* missing =
       FindExactRequirement(analysis, "missing");
   ASSERT_NE(missing, nullptr);
-  EXPECT_EQ(missing->disposition, LOOM_LINK_DEPENDENCY_UNRESOLVED);
+  EXPECT_EQ(missing->ownership, LOOM_LINK_DEPENDENCY_OWNERSHIP_UNSATISFIED);
+  EXPECT_EQ(missing->resolution, LOOM_LINK_DEPENDENCY_RESOLUTION_UNRESOLVED);
 
   const loom_link_dependency_requirement_t* private_only =
       FindExactRequirement(analysis, "private_only");
   ASSERT_NE(private_only, nullptr);
-  EXPECT_EQ(private_only->disposition, LOOM_LINK_DEPENDENCY_UNRESOLVED);
+  EXPECT_EQ(private_only->ownership,
+            LOOM_LINK_DEPENDENCY_OWNERSHIP_INACCESSIBLE);
+  EXPECT_EQ(private_only->resolution,
+            LOOM_LINK_DEPENDENCY_RESOLUTION_UNRESOLVED);
+  ASSERT_EQ(private_only->candidates.count, 1u);
+  EXPECT_TRUE(
+      analysis.candidates.values[private_only->candidates.first].compatible);
 
   const loom_link_dependency_requirement_t* local =
       FindExactRequirement(analysis, "local");
   ASSERT_NE(local, nullptr);
-  EXPECT_EQ(local->disposition, LOOM_LINK_DEPENDENCY_LOCAL);
+  EXPECT_EQ(local->ownership, LOOM_LINK_DEPENDENCY_OWNERSHIP_LOCAL);
+  EXPECT_EQ(local->resolution, LOOM_LINK_DEPENDENCY_RESOLUTION_LOCAL);
 
   const loom_link_dependency_requirement_t* export_only =
       FindExactRequirement(analysis, "export_only");
   ASSERT_NE(export_only, nullptr);
   EXPECT_TRUE(export_only->exported);
   EXPECT_EQ(export_only->occurrence_count, 0u);
-  EXPECT_EQ(export_only->disposition, LOOM_LINK_DEPENDENCY_TRANSITIVE_ONLY);
+  EXPECT_EQ(export_only->ownership,
+            LOOM_LINK_DEPENDENCY_OWNERSHIP_MISSING_DIRECT);
+  EXPECT_EQ(export_only->resolution, LOOM_LINK_DEPENDENCY_RESOLUTION_UNIQUE);
 
   const loom_link_dependency_requirement_t* direct_template =
       FindTemplateRequirement(analysis, "family.direct");
   ASSERT_NE(direct_template, nullptr);
-  EXPECT_EQ(direct_template->disposition, LOOM_LINK_DEPENDENCY_DIRECT);
+  EXPECT_EQ(direct_template->ownership, LOOM_LINK_DEPENDENCY_OWNERSHIP_DIRECT);
+  EXPECT_EQ(direct_template->resolution,
+            LOOM_LINK_DEPENDENCY_RESOLUTION_NOT_APPLICABLE);
   EXPECT_EQ(direct_template->candidates.count, 2u);
 
   const loom_link_dependency_requirement_t* transitive_template =
       FindTemplateRequirement(analysis, "family.transitive");
   ASSERT_NE(transitive_template, nullptr);
-  EXPECT_EQ(transitive_template->disposition,
-            LOOM_LINK_DEPENDENCY_TRANSITIVE_ONLY);
+  EXPECT_EQ(transitive_template->ownership,
+            LOOM_LINK_DEPENDENCY_OWNERSHIP_MISSING_DIRECT);
+  EXPECT_EQ(transitive_template->resolution,
+            LOOM_LINK_DEPENDENCY_RESOLUTION_NOT_APPLICABLE);
 
   const loom_link_dependency_requirement_t* open_template =
       FindTemplateRequirement(analysis, "family.open");
   ASSERT_NE(open_template, nullptr);
-  EXPECT_EQ(open_template->disposition, LOOM_LINK_DEPENDENCY_OPEN);
+  EXPECT_EQ(open_template->ownership, LOOM_LINK_DEPENDENCY_OWNERSHIP_OPEN);
+  EXPECT_EQ(open_template->resolution,
+            LOOM_LINK_DEPENDENCY_RESOLUTION_NOT_APPLICABLE);
   EXPECT_EQ(open_template->candidates.count, 0u);
 
   ASSERT_EQ(analysis.used_direct_providers.count, 1u);
@@ -367,11 +391,47 @@ TEST_F(LinkDependencyAnalysisTest, ReportsAmbiguousDirectExactDefinitions) {
   const loom_link_dependency_requirement_t* direct =
       FindExactRequirement(analysis, "direct");
   ASSERT_NE(direct, nullptr);
-  EXPECT_EQ(direct->disposition, LOOM_LINK_DEPENDENCY_AMBIGUOUS);
+  EXPECT_EQ(direct->ownership, LOOM_LINK_DEPENDENCY_OWNERSHIP_DIRECT);
+  EXPECT_EQ(direct->resolution, LOOM_LINK_DEPENDENCY_RESOLUTION_AMBIGUOUS);
+  EXPECT_FALSE(loom_link_dependency_requirement_satisfied(direct));
   ASSERT_EQ(direct->candidates.count, 2u);
   EXPECT_TRUE(analysis.candidates.values[direct->candidates.first].compatible);
   EXPECT_TRUE(
       analysis.candidates.values[direct->candidates.first + 1].compatible);
+}
+
+TEST_F(LinkDependencyAnalysisTest,
+       CompatibleInterfaceDeclarationsDoNotCompeteAsDefinitions) {
+  loom_link_module_index_t* raw_index = nullptr;
+  IREE_ASSERT_OK(loom_link_module_index_allocate(
+      &context_, &block_pool_, iree_allocator_system(), &raw_index));
+  IndexPtr index(raw_index);
+  iree_host_size_t input_provider = 0;
+  iree_host_size_t declaration_a_provider = 0;
+  iree_host_size_t declaration_b_provider = 0;
+  iree_host_size_t definition_provider = 0;
+  AddText(index.get(), "declaration_input.loom", "input",
+          LOOM_LINK_PROVIDER_ROLE_INPUT, &input_provider);
+  AddText(index.get(), "direct_declaration_a.loom", "declaration_a",
+          LOOM_LINK_PROVIDER_ROLE_LIBRARY, &declaration_a_provider);
+  AddText(index.get(), "direct_declaration_b.loom", "declaration_b",
+          LOOM_LINK_PROVIDER_ROLE_LIBRARY, &declaration_b_provider);
+  AddText(index.get(), "transitive_definition.loom", "definition",
+          LOOM_LINK_PROVIDER_ROLE_LIBRARY, &definition_provider);
+
+  const loom_link_dependency_analysis_t analysis =
+      Analyze(index.get(), {declaration_a_provider, declaration_b_provider});
+  const loom_link_dependency_requirement_t* requirement =
+      FindExactRequirement(analysis, "interface_only");
+  ASSERT_NE(requirement, nullptr);
+  EXPECT_EQ(requirement->ownership, LOOM_LINK_DEPENDENCY_OWNERSHIP_DIRECT);
+  EXPECT_EQ(requirement->resolution, LOOM_LINK_DEPENDENCY_RESOLUTION_UNIQUE);
+  EXPECT_TRUE(loom_link_dependency_requirement_satisfied(requirement));
+  ASSERT_EQ(requirement->candidates.count, 3u);
+  for (iree_host_size_t i = 0; i < requirement->candidates.count; ++i) {
+    EXPECT_TRUE(analysis.candidates.values[requirement->candidates.first + i]
+                    .compatible);
+  }
 }
 
 TEST_F(LinkDependencyAnalysisTest, TextAndBytecodeProvidersProduceSameReport) {
