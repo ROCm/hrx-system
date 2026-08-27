@@ -277,23 +277,8 @@ static iree_status_t loom_link_plan_annotate_global_collision(
                            LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION) &&
           loom_link_plan_contains_symbol(plan, previous->ordinal);
       if (is_prior_selected_definition) {
-        const loom_link_module_index_module_t* previous_module =
-            loom_link_module_index_symbol_module(index, previous);
-        const loom_link_module_index_provider_t* previous_provider =
-            loom_link_module_index_symbol_provider(index, previous);
-        const loom_link_module_index_module_t* current_module =
-            loom_link_module_index_symbol_module(index, symbol);
-        const loom_link_module_index_provider_t* current_provider =
-            loom_link_module_index_symbol_provider(index, symbol);
-        return iree_status_annotate_f(
-            status,
-            "global symbol '@%.*s' selected from provider '%.*s' module "
-            "'%.*s' conflicts with provider '%.*s' module '%.*s'",
-            (int)previous->name.size, previous->name.data,
-            (int)previous_provider->name.size, previous_provider->name.data,
-            (int)previous_module->name.size, previous_module->name.data,
-            (int)current_provider->name.size, current_provider->name.data,
-            (int)current_module->name.size, current_module->name.data);
+        return loom_link_module_index_annotate_global_collision(
+            status, index, previous, symbol);
       }
       previous = loom_link_module_index_next_same_name(index, previous);
     }

@@ -160,7 +160,7 @@ func.def public @entry(%x: i32) -> (i32) {
 }
 )"));
   loom_module_t* library = Parse(IREE_SV(R"(
-func.def @callee(%x: i32) -> (i32) {
+func.def public @callee(%x: i32) -> (i32) {
   %y = func.call @helper(%x) : (i32) -> (i32)
   func.return %y : i32
 }

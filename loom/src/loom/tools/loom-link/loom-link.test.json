@@ -110,7 +110,7 @@
           "name": "write-library",
           "write": {
             "path": "{tmp}/library.loom",
-            "text": "func.def @unused(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n\nfunc.def @identity(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n"
+            "text": "func.def @unused(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n\nfunc.def export(\"identity\") @identity(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n"
           }
         },
         {

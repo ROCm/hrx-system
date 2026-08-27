@@ -837,7 +837,7 @@ func.def public export("unrelated") @unused(%x: i32) -> (i32) {
 TEST_F(LinkIndexMaterializerTest,
        RequesterDeclarationControlsResolvedRootSurface) {
   loom_module_t* requester = Parse(IREE_SV(R"(
-func.decl public import("upstream", "identity") export("request_identity") @identity(%x: i32) -> (i32)
+func.decl public export("request_identity") @identity(%x: i32) -> (i32)
 )"),
                                    IREE_SV("requester.loom"));
   loom_module_t* library = Parse(IREE_SV(R"(
