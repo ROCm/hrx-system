@@ -38,16 +38,7 @@ loom_cc_binary(
 
 iree_native_test(
   NAME
-    "link_modules_declaration_test"
-  SRC
-    ::link_modules
-)
-
-iree_native_test(
-  NAME
-    "link_modules_provider_import_test"
-  ARGS
-    "--provider-import"
+    "link_modules_test"
   SRC
     ::link_modules
 )

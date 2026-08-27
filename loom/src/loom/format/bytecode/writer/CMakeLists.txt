@@ -106,7 +106,6 @@ loom_cc_library(
     iree::base::internal::arena
     loom::analysis::symbol_references
     loom::ir
-    loom::ops::module
     loom::ops::op_defs
   PUBLIC
 )

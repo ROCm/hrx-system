@@ -3,107 +3,84 @@
 **Example source:** [`loom/binding/c/example/link_modules.c`](https://github.com/ROCm/hrx-system/blob/main/loom/binding/c/example/link_modules.c)
 
 The public `loomc` API links source bytes already owned by an application. It
-does not require source paths, a filesystem resolver, or `module.import`.
+does not require source paths, a filesystem resolver, or process-global state.
 Applications assemble an explicit source universe, freeze its metadata in a
 reusable link index, and select roots from that universe for each invocation.
 
-`module.import` adds one optional constraint: a declaration named by the import
-can resolve only from a source bound to one of its opaque keys. This is useful
-when a large application chooses provider packages by logical identity, but it
-does not change the definition's symbol or ABI.
+## Keep labels separate from linkage
 
-## Keep the three identities separate
+An in-memory source carries two labels:
 
-An in-memory source can carry three independent names:
-
-| Identity | Example | Meaning |
+| Label | Example | Meaning |
 | --- | --- | --- |
 | Source identifier | `library.loom` | Diagnostic and source-provenance label passed to `loomc_source_create`. |
-| Provider name | `library` | Stable provider label used by the frozen link index for diagnostics and private-name determinism. |
-| Import key | `identity-library` | Opaque availability key that authored `module.import` operations may reference. |
+| Provider name | `library` | Stable source label used by the frozen index for diagnostics and private-name determinism. |
 
-None of these names opens a file. The application creates every
-`loomc_source_t` from borrowed, copied, or externally owned text or bytecode
-and explicitly adds it to a `loomc_link_index_builder_t`.
+Neither label participates in symbol resolution or opens a file. Exact linkage
+uses authored declarations and exported definitions. Template selection uses
+template family contracts, facts, requirements, and priority. The application
+chooses the available sources explicitly instead of encoding build-system or
+filesystem identity into Loom IR.
 
-The checked command-line composition example uses path-shaped keys because
-`loom-link` binds each supplied input spelling as a key:
+The application creates each `loomc_source_t` from borrowed, copied, or
+externally owned text or bytecode. The example adds its library source to the
+index as follows:
 
-```loom title="root.loom"
---8<-- "examples/module-composition/root.loom"
+```c
+--8<-- "generated/examples/integration/module-composition/link_modules.c:library-source"
 ```
 
-An embedding is free to use stable package identities instead. The C example's
-imported harness names `"identity-library"`, while the provider source retains
-the unrelated identifier `"library.loom"` and provider name `"library"`.
+An input source is part of the module currently being assembled. A library
+source contributes exported exact definitions and template implementations,
+but its public symbols do not become output roots merely because the library
+was supplied.
 
-## Link an explicit universe without imports
+## Link an explicit source universe
 
-The example's default mode creates a harness containing `func.decl @identity`
-and a library containing the compatible definition. It adds both sources to
-one builder without any import keys, freezes the index, and asks
-`loomc_link_module` for the `@caller` root.
+The example creates a harness containing `func.decl @identity` and a library
+containing the compatible public definition. It freezes both sources in one
+index and asks `loomc_link_module` for the `@caller` root.
 
-The declaration is the semantic contract. Because the application has already
-chosen the complete source universe, the linker can satisfy it from a
-compatible definition in that universe. This is the compact path for generated
-programs, tests, and embeddings whose surrounding API already determines the
-available libraries.
+The declaration is the semantic contract. The linker resolves it to the unique
+eligible definition in the supplied universe, retains the dependency closure,
+and leaves unrelated library definitions out of the product. When no input
+definition owns the name, ambiguous exported library definitions are an error;
+input order is not an overload rule.
 
 ```shell
 python dev.py bazel run //loom/binding/c/example:link_modules
 ```
 
-## Constrain one declaration to a provider key
-
-Passing `--provider-import` selects a harness with
-`module.import "identity-library" [@identity]`. The application binds the
-same logical key to the library source when adding its slot:
-
-```c
---8<-- "generated/examples/integration/module-composition/link_modules.c:provider-key"
-```
-
-The builder copies the key array and its strings. After
-`loomc_link_index_builder_finish`, the immutable index can be shared by
-independent workers while each active link uses its own `loomc_workspace_t`.
-The import affects candidate availability only; normal signature compatibility,
-reachability, and specialization rules still decide what enters the result.
-
-```shell
-python dev.py bazel run //loom/binding/c/example:link_modules -- \
-  --provider-import
-```
-
-Both modes produce the same closed program:
+The checked output is a closed program:
 
 ```loom title="linked.loom"
 --8<-- "generated/examples/integration/module-composition/linked.loom"
 ```
 
-The documentation build runs both invocations, checks each output with
-`loom-format`, and requires the resulting modules to be byte-for-byte equal.
-Separate Bazel tests run the two public executable modes directly.
+The documentation build runs the public executable, checks its output with
+`loom-format`, and stages both the example source and canonical linked module.
 
-## Preserve the link boundary
+## Reuse the index without retaining host state in products
 
-The frozen index owns source metadata and can be reused across many root and
-configuration selections. A link operation materializes only the selected
-closure into an invocation-owned module. Supplying a library therefore makes
-its definitions available; it does not make the entire library live.
+`loomc_link_index_builder_finish` produces an immutable index that can be
+shared by independent workers. Each active link uses its own
+`loomc_workspace_t` and materializes only the selected closure into an
+invocation-owned module.
 
-A satisfied import disappears from the linked module. An unresolved import may
-remain in a partial `.loombc` artifact when the link options permit unresolved
-demands, and that artifact can be reloaded without any index or host state from
-the creating process. The [linking and packaging
+When a link permits unresolved symbols, the output retains reachable
+declarations in ordinary `.loom` or `.loombc`. That relocatable artifact can be
+serialized, reloaded in another process, and linked against another explicitly
+supplied library without access to the original index or application state. The
+[linking and packaging
 workflow](../workflows/link-and-package.md#link-transitive-dependencies-incrementally)
-follows that partial lifecycle across two independent invocations.
+demonstrates that lifecycle across two independent invocations.
 
-Imports constrain exact declarations such as `func.decl`, `kernel.decl`, and
-`command.program.decl`. Template families compose from the explicitly supplied
-library universe and match through `template.decl`, facts, requirements, and
-priority instead of source keys. The [source-module
-chapter](../guide/source-modules.md#declarations-state-contracts-imports-state-availability)
-defines both contracts, and the generated [`loomc` C API
+Compile-time exact declarations such as `func.decl`, `kernel.decl`, and
+`command.program.decl` use this symbol-linkage model. Runtime function imports
+remain external ABI contracts rather than library requests. Template families
+compose from the supplied library universe and match through `template.decl`,
+facts, requirements, and priority. The [source-module
+chapter](../guide/source-modules.md#definitions-declarations-and-roots) defines
+those contracts, and the generated [`loomc` C API
 reference](../reference/c-api/index.md) defines the ownership and failure
 semantics of every handle used here.

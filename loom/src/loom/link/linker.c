@@ -15,10 +15,8 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ir/symbol_map.h"
-#include "loom/link/provider_import_sink.h"
 #include "loom/link/symbol_policy.h"
 #include "loom/ops/func/ops.h"
-#include "loom/ops/module/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/template/ops.h"
 #include "loom/rewrite/materialize.h"
@@ -101,8 +99,6 @@ struct loom_linker_t {
     // Allocated entries in |symbols|.
     iree_host_size_t capacity;
   } planned;
-  // Canonical projected and existing provider-import sink.
-  loom_link_provider_import_sink_t provider_import_sink;
   // True once finish has transferred the output module to the caller.
   bool finished;
 };
@@ -1981,69 +1977,6 @@ static iree_status_t loom_linker_validate_source_symbols(
   return iree_ok_status();
 }
 
-static iree_status_t loom_linker_validate_source_provider_imports(
-    const loom_linker_t* linker, const loom_module_t* source_module,
-    loom_linker_source_provider_import_list_t provider_imports) {
-  if (provider_imports.count != 0 && !provider_imports.values) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "provider import count is non-zero but values is NULL");
-  }
-
-  iree_host_size_t anchor_count = 0;
-  for (iree_host_size_t i = 0; i < provider_imports.count; ++i) {
-    const loom_linker_source_provider_import_t* provider_import =
-        &provider_imports.values[i];
-    if (iree_string_view_is_empty(provider_import->provider) ||
-        !provider_import->provider.data) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "provider import key must not be empty");
-    }
-    if (provider_import->anchors.count == 0 ||
-        !provider_import->anchors.ordinals) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "projected provider import must have nonempty anchors");
-    }
-    if (provider_import->comments.count != 0 &&
-        !provider_import->comments.values) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "provider import comment count is non-zero but values is NULL");
-    }
-    if (provider_import->comments.count > UINT16_MAX) {
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "provider import has more than %u comment lines",
-                              (unsigned)UINT16_MAX);
-    }
-    if (!iree_host_size_checked_add(
-            anchor_count, provider_import->anchors.count, &anchor_count)) {
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "provider import anchor count overflow");
-    }
-    for (iree_host_size_t j = 0; j < provider_import->anchors.count; ++j) {
-      const iree_host_size_t source_symbol_ordinal =
-          provider_import->anchors.ordinals[j];
-      if (source_symbol_ordinal >= source_module->symbols.count) {
-        return iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "provider import source symbol ordinal %" PRIhsz
-            " is out of range for module with %" PRIhsz " symbols",
-            source_symbol_ordinal, source_module->symbols.count);
-      }
-    }
-  }
-
-  const loom_link_provider_import_sink_t* sink = &linker->provider_import_sink;
-  if (provider_imports.count > sink->rows.capacity - sink->rows.count ||
-      anchor_count > sink->anchors.capacity - sink->anchors.count) {
-    return iree_make_status(
-        IREE_STATUS_RESOURCE_EXHAUSTED,
-        "projected provider imports exceed reserved linker capacity");
-  }
-  return iree_ok_status();
-}
-
 iree_status_t loom_linker_allocate(loom_context_t* context,
                                    const loom_linker_options_t* options,
                                    iree_arena_block_pool_t* block_pool,
@@ -2079,13 +2012,6 @@ iree_status_t loom_linker_allocate(loom_context_t* context,
       options->planned_symbol_capacity != 0) {
     status = loom_linker_ensure_planned_symbol_capacity(
         linker, options->planned_symbol_capacity);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_link_provider_import_sink_initialize(
-        linker->target_module, &linker->scratch_arena,
-        options ? options->provider_imports.count : 0,
-        options ? options->provider_imports.anchor_count : 0,
-        &linker->provider_import_sink);
   }
   if (!iree_status_is_ok(status)) {
     loom_module_free(linker->target_module);
@@ -2260,7 +2186,6 @@ static iree_status_t loom_linker_add_exact_selection(
     loom_linker_t* linker, const loom_module_t* source_module,
     loom_linker_exact_selection_t selection,
     loom_linker_source_symbol_output_list_t source_outputs,
-    loom_linker_source_provider_import_list_t provider_imports,
     loom_linker_target_symbol_list_t out_target_symbols) {
   if (source_outputs.count != 0 && (source_outputs.count != selection.count ||
                                     source_outputs.values == NULL)) {
@@ -2341,7 +2266,7 @@ static iree_status_t loom_linker_add_exact_selection(
             source.target_symbols[source_ref.symbol_id],
             source.exact.outputs ? source.exact.outputs[source_ref.symbol_id]
                                  : LOOM_LINKER_SYMBOL_OUTPUT_AUTHORED);
-      } else if (!loom_module_import_isa(source_op)) {
+      } else {
         loom_op_t* cloned_op = NULL;
         status = loom_linker_clone_source_op(&source, source_op,
                                              /*before_op=*/NULL, &cloned_op);
@@ -2351,44 +2276,6 @@ static iree_status_t loom_linker_add_exact_selection(
     status = loom_linker_clone_exact_symbol_ops(&source);
   }
 
-  iree_host_size_t max_anchor_count = 0;
-  for (iree_host_size_t i = 0; i < provider_imports.count; ++i) {
-    max_anchor_count =
-        iree_max(max_anchor_count, provider_imports.values[i].anchors.count);
-  }
-  loom_symbol_ref_t* target_anchors = NULL;
-  if (iree_status_is_ok(status) && max_anchor_count > 0) {
-    status = iree_arena_allocate_array(&source_arena, max_anchor_count,
-                                       sizeof(*target_anchors),
-                                       (void**)&target_anchors);
-  }
-  for (iree_host_size_t i = 0;
-       i < provider_imports.count && iree_status_is_ok(status); ++i) {
-    const loom_linker_source_provider_import_t* provider_import =
-        &provider_imports.values[i];
-    for (iree_host_size_t j = 0;
-         j < provider_import->anchors.count && iree_status_is_ok(status); ++j) {
-      const uint16_t source_symbol_id =
-          (uint16_t)provider_import->anchors.ordinals[j];
-      if (selection.dense) {
-        status = loom_linker_map_dense_source_symbol(&source, source_symbol_id,
-                                                     &target_anchors[j]);
-      } else if (selection.bindings.count != 0) {
-        status = loom_linker_map_bound_exact_source_symbol(
-            &source, source_symbol_id, &target_anchors[j]);
-      } else {
-        status = loom_linker_map_exact_source_symbol(&source, source_symbol_id,
-                                                     &target_anchors[j]);
-      }
-    }
-    if (iree_status_is_ok(status)) {
-      status = loom_link_provider_import_sink_append(
-          &linker->provider_import_sink, provider_import->provider,
-          loom_make_symbol_ref_array(target_anchors,
-                                     provider_import->anchors.count),
-          provider_import->comments, provider_import->leading_blank_line);
-    }
-  }
   iree_arena_deinitialize(&source_arena);
   return status;
 }
@@ -2398,14 +2285,11 @@ iree_status_t loom_linker_add_module_symbols(
     loom_linker_source_symbol_list_t source_symbols,
     loom_linker_source_symbol_binding_list_t source_bindings,
     loom_linker_source_symbol_output_list_t source_outputs,
-    loom_linker_source_provider_import_list_t provider_imports,
     loom_linker_target_symbol_list_t out_target_symbols) {
   IREE_RETURN_IF_ERROR(
       loom_linker_validate_source_module(linker, source_module));
   IREE_RETURN_IF_ERROR(
       loom_linker_validate_source_symbols(source_module, source_symbols));
-  IREE_RETURN_IF_ERROR(loom_linker_validate_source_provider_imports(
-      linker, source_module, provider_imports));
   return loom_linker_add_exact_selection(
       linker, source_module,
       (loom_linker_exact_selection_t){
@@ -2413,25 +2297,22 @@ iree_status_t loom_linker_add_module_symbols(
           .bindings = source_bindings,
           .count = source_symbols.count,
       },
-      source_outputs, provider_imports, out_target_symbols);
+      source_outputs, out_target_symbols);
 }
 
 iree_status_t loom_linker_add_exact_module(
     loom_linker_t* linker, const loom_module_t* source_module,
     loom_linker_source_symbol_output_list_t source_outputs,
-    loom_linker_source_provider_import_list_t provider_imports,
     loom_linker_target_symbol_list_t out_target_symbols) {
   IREE_RETURN_IF_ERROR(
       loom_linker_validate_source_module(linker, source_module));
-  IREE_RETURN_IF_ERROR(loom_linker_validate_source_provider_imports(
-      linker, source_module, provider_imports));
   return loom_linker_add_exact_selection(
       linker, source_module,
       (loom_linker_exact_selection_t){
           .count = source_module->symbols.count,
           .dense = true,
       },
-      source_outputs, provider_imports, out_target_symbols);
+      source_outputs, out_target_symbols);
 }
 
 iree_status_t loom_linker_finalize_roots(loom_linker_t* linker,
@@ -2496,8 +2377,6 @@ iree_status_t loom_linker_finish(loom_linker_t* linker,
                             "linker has already been finished");
   }
 
-  IREE_RETURN_IF_ERROR(
-      loom_link_provider_import_sink_finish(&linker->provider_import_sink));
   IREE_RETURN_IF_ERROR(loom_module_compute_uses(linker->target_module));
   *out_module = linker->target_module;
   linker->target_module = NULL;

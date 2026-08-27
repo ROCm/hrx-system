@@ -14,7 +14,6 @@
 #include "loom/format/bytecode/reader/string_table.h"
 #include "loom/format/bytecode/reader/symbol_materializer.h"
 #include "loom/format/bytecode/reader/type.h"
-#include "loom/ops/module/ops.h"
 
 typedef struct loom_bytecode_module_materialization_t {
   // Complete source bytecode containing retained table spans.
@@ -36,52 +35,6 @@ typedef struct loom_bytecode_module_materialization_t {
   // Stable-key codec supplied by the embedding compiler.
   loom_low_repr_environment_t low_repr_environment;
 } loom_bytecode_module_materialization_t;
-
-static iree_status_t loom_bytecode_module_materialize_provider_imports(
-    loom_bytecode_module_materialization_t* reader) {
-  loom_symbol_ref_t* anchors = NULL;
-  if (reader->view.provider_imports.anchor_count > 0) {
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(&reader->output_module->arena,
-                                  reader->view.provider_imports.anchor_count,
-                                  sizeof(*anchors), (void**)&anchors));
-    memcpy(anchors, reader->view.provider_imports.anchors,
-           reader->view.provider_imports.anchor_count * sizeof(*anchors));
-  }
-
-  loom_builder_t builder;
-  loom_builder_initialize(reader->output_module, &reader->output_module->arena,
-                          loom_module_block(reader->output_module), &builder);
-  for (iree_host_size_t provider_index = 0;
-       provider_index < reader->view.provider_imports.count; ++provider_index) {
-    const loom_bytecode_reader_provider_import_t* provider_import =
-        &reader->view.provider_imports.values[provider_index];
-    loom_op_t* op = NULL;
-    IREE_RETURN_IF_ERROR(loom_builder_allocate_op(
-        &builder, LOOM_OP_MODULE_IMPORT, /*operand_count=*/0,
-        /*result_count=*/0, /*region_count=*/0, /*tied_result_count=*/0,
-        /*attribute_count=*/2, LOOM_LOCATION_NONE, &op));
-    loom_attribute_t* attrs = loom_op_attrs(op);
-    attrs[loom_module_import_provider_ATTR_INDEX] =
-        loom_attr_string(provider_import->provider_id);
-    loom_symbol_ref_t* provider_anchors =
-        provider_import->anchor_count > 0
-            ? anchors + provider_import->first_anchor_index
-            : NULL;
-    attrs[loom_module_import_symbols_ATTR_INDEX] = loom_attr_symbol_set(
-        provider_anchors, (uint16_t)provider_import->anchor_count);
-    if (provider_import->source_trivia.leading_blank_line) {
-      op->flags |= LOOM_OP_FLAG_LEADING_BLANK_LINE;
-    }
-    IREE_RETURN_IF_ERROR(loom_builder_finalize_op(&builder, op));
-    if (provider_import->source_trivia.comment_count > 0) {
-      IREE_RETURN_IF_ERROR(loom_module_attach_op_comments(
-          reader->output_module, op, provider_import->source_trivia.comments,
-          provider_import->source_trivia.comment_count));
-    }
-  }
-  return iree_ok_status();
-}
 
 static iree_status_t loom_bytecode_module_allocate_output(
     loom_bytecode_module_materialization_t* reader) {
@@ -131,8 +84,6 @@ static iree_status_t loom_bytecode_module_materialize_tables(
   IREE_RETURN_IF_ERROR(loom_bytecode_encoding_table_materialize(
       &encoding_materializer, reader->view.sections.encodings));
   IREE_RETURN_IF_ERROR(loom_bytecode_symbols_predeclare(&symbol_materializer));
-  IREE_RETURN_IF_ERROR(
-      loom_bytecode_module_materialize_provider_imports(reader));
   loom_bytecode_type_materializer_t type_materializer = {
       .decoder = &reader->decoder,
       .bytecode = reader->bytecode,

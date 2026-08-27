@@ -9,7 +9,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/format/bytecode/format.h"
-#include "loom/ops/module/ops.h"
+#include "loom/ops/func/ops.h"
 
 namespace loom {
 namespace {
@@ -31,16 +31,16 @@ class BytecodeOperationTest : public ::testing::Test {
     loom_context_initialize(iree_allocator_system(), &context_);
     iree_host_size_t vtable_count = 0;
     const loom_op_vtable_t* const* vtables =
-        loom_module_dialect_vtables(&vtable_count);
+        loom_func_dialect_vtables(&vtable_count);
     IREE_ASSERT_OK(loom_context_register_dialect(
-        &context_, LOOM_DIALECT_MODULE, vtables, (uint16_t)vtable_count));
+        &context_, LOOM_DIALECT_FUNC, vtables, (uint16_t)vtable_count));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     loom_bytecode_reader_decoder_initialize(
         loom_diagnostic_sink_t{AcceptDiagnostic, nullptr},
         IREE_SV("operation_test.loombc"), &error_count_, &decoder_);
 
     strings_[0] = iree_string_view_empty();
-    strings_[1] = IREE_SV("module.import");
+    strings_[1] = IREE_SV("func.return");
     module_view_.strings.values = strings_;
     module_view_.strings.count = IREE_ARRAYSIZE(strings_);
   }
@@ -78,14 +78,14 @@ class BytecodeOperationTest : public ::testing::Test {
   iree_arena_allocator_t scratch_arena_;
   // Storage retaining operation names beyond validation.
   iree_arena_allocator_t retained_arena_;
-  // Finalized module-dialect registry.
+  // Finalized operation registry.
   loom_context_t context_;
 };
 
 TEST_F(BytecodeOperationTest, ValidatesAndResolvesDenseTable) {
   const uint8_t data[] = {
       0x01,  // Operation count.
-      0x01,  // module.import string ordinal.
+      0x01,  // func.return string ordinal.
   };
   const loom_bytecode_reader_section_t section =
       MakeSection(data, sizeof(data));
@@ -97,14 +97,14 @@ TEST_F(BytecodeOperationTest, ValidatesAndResolvesDenseTable) {
   ASSERT_NE(module_view_.ops.values, nullptr);
   ASSERT_NE(module_view_.ops.kinds, nullptr);
   EXPECT_NE(module_view_.ops.values[0], nullptr);
-  EXPECT_EQ(module_view_.ops.kinds[0], LOOM_OP_MODULE_IMPORT);
+  EXPECT_EQ(module_view_.ops.kinds[0], LOOM_OP_FUNC_RETURN);
   EXPECT_EQ(error_count_, 0u);
 }
 
 TEST_F(BytecodeOperationTest, RetainsRegisteredNames) {
   const uint8_t data[] = {
       0x01,  // Operation count.
-      0x01,  // module.import string ordinal.
+      0x01,  // func.return string ordinal.
   };
   const loom_bytecode_reader_section_t section =
       MakeSection(data, sizeof(data));
@@ -117,9 +117,8 @@ TEST_F(BytecodeOperationTest, RetainsRegisteredNames) {
 
   ASSERT_EQ(count, 1u);
   ASSERT_NE(entries, nullptr);
-  EXPECT_TRUE(
-      iree_string_view_equal(entries[0].name, IREE_SV("module.import")));
-  EXPECT_EQ(module_view_.ops.kinds[0], LOOM_OP_MODULE_IMPORT);
+  EXPECT_TRUE(iree_string_view_equal(entries[0].name, IREE_SV("func.return")));
+  EXPECT_EQ(module_view_.ops.kinds[0], LOOM_OP_FUNC_RETURN);
   EXPECT_EQ(error_count_, 0u);
 }
 

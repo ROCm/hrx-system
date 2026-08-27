@@ -25,28 +25,12 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
-    provider_import_sink
-  HDRS
-    "provider_import_sink.h"
-  SRCS
-    "provider_import_sink.c"
-  DEPS
-    iree::base
-    iree::base::internal::arena
-    loom::ir
-    loom::ops::module
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
     linker
   HDRS
     "linker.h"
   SRCS
     "linker.c"
   DEPS
-    ::provider_import_sink
     ::symbol_policy
     iree::base
     iree::base::internal::arena
@@ -55,7 +39,6 @@ loom_cc_library(
     loom::ir
     loom::ir::symbol_map
     loom::ops::func
-    loom::ops::module
     loom::ops::op_defs
     loom::ops::template
     loom::rewrite::materialize
@@ -80,7 +63,6 @@ loom_cc_test(
     loom::format::text::parser
     loom::format::text::printer
     loom::ir
-    loom::ops::module
     loom::ops::op_registry
     loom::ops::target
     loom::ops::template
@@ -108,7 +90,6 @@ loom_cc_library(
     loom::format::bytecode::index_reader
     loom::format::text::parser
     loom::ir
-    loom::ops::module
     loom::ops::op_defs
   PUBLIC
 )
@@ -131,7 +112,6 @@ loom_cc_test(
     loom::ops::check
     loom::ops::config
     loom::ops::func
-    loom::ops::module
     loom::ops::target
     loom::ops::template
     loom::ops::test
@@ -146,35 +126,8 @@ loom_cc_library(
     "planner.c"
   DEPS
     ::module_index
-    ::provider_resolver
     iree::base
   PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    provider_resolver
-  HDRS
-    "provider_resolver.h"
-  SRCS
-    "provider_resolver.c"
-  DEPS
-    ::module_index
-    iree::base
-  PUBLIC
-)
-
-loom_cc_test(
-  NAME
-    provider_resolver_test
-  SRCS
-    "provider_resolver_test.cc"
-  DEPS
-    ::module_index
-    ::provider_resolver
-    iree::base
-    iree::testing::gtest
-    iree::testing::gtest_main
 )
 
 loom_cc_library(
@@ -185,7 +138,6 @@ loom_cc_library(
   SRCS
     "plan_projection.c"
   DEPS
-    ::linker
     ::planner
     iree::base
     iree::base::internal::arena
@@ -355,7 +307,6 @@ loom_cc_test(
     ::index_materializer
     ::module_index
     ::planner
-    ::provider_resolver
     iree::base::internal::arena
     iree::io::stream
     iree::testing::gtest
@@ -364,7 +315,6 @@ loom_cc_test(
     loom::format::text::parser
     loom::format::text::printer
     loom::ir
-    loom::ops::module
     loom::ops::op_defs
     loom::ops::op_registry
     loom::ops::test
@@ -389,7 +339,6 @@ loom_cc_test(
     loom::format::text::parser
     loom::ir
     loom::ops::func
-    loom::ops::module
     loom::ops::test
 )
 
@@ -414,7 +363,6 @@ loom_cc_test(
     loom::ops::config
     loom::ops::func
     loom::ops::kernel
-    loom::ops::module
     loom::ops::target
     loom::ops::template
     loom::ops::test
@@ -470,8 +418,6 @@ loom_cc_benchmark(
     ::module_index
     ::plan_projection
     ::planner
-    ::provider_import_sink
-    ::provider_resolver
     iree::base
     iree::base::internal::arena
     iree::io::stream
@@ -481,7 +427,6 @@ loom_cc_benchmark(
     loom::format::bytecode::writer
     loom::ir
     loom::ops::func
-    loom::ops::module
     loom::ops::test
   TESTONLY
 )

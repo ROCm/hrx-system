@@ -35,7 +35,8 @@ def loom_link_module(
     Args:
       name: Name of the generated module target.
       srcs: Ordered primary Loom source or bytecode module labels.
-      libraries: Ordered library module labels searched after srcs.
+      libraries: Ordered library module labels contributing exported exact
+        definitions and template implementations.
       roots: Optional root symbol names used by link/selective mode.
       configs: Optional compile-time config bindings as key=value strings.
       mode: Linker planning mode: archive, link, or selective.

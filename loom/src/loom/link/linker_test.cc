@@ -18,7 +18,6 @@
 #include "loom/format/text/printer.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
-#include "loom/ops/module/ops.h"
 #include "loom/ops/op_registry.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"
@@ -122,14 +121,11 @@ class LinkerTest : public ::testing::Test {
     return linked_module;
   }
 
-  loom_linker_t* CreateIncrementalLinker(
-      iree_host_size_t provider_import_count = 0,
-      iree_host_size_t provider_import_anchor_count = 0) {
+  loom_linker_t* CreateIncrementalLinker() {
     loom_linker_t* linker = nullptr;
-    loom_linker_options_t options = {};
-    options.module_name = IREE_SV("linked");
-    options.provider_imports.count = provider_import_count;
-    options.provider_imports.anchor_count = provider_import_anchor_count;
+    const loom_linker_options_t options = {
+        /*.module_name=*/IREE_SV("linked"),
+    };
     IREE_CHECK_OK(loom_linker_allocate(&context_, &options, &block_pool_,
                                        iree_allocator_system(), &linker));
     return linker;
@@ -239,13 +235,11 @@ func.def @helper(%x: i32) -> (i32) {
   loom_symbol_ref_t declaration_targets[2] = {};
   IREE_ASSERT_OK(loom_linker_add_exact_module(
       linker, declaration, loom_linker_source_symbol_output_list_empty(),
-      loom_linker_source_provider_import_list_empty(),
       {/*.count=*/IREE_ARRAYSIZE(declaration_targets),
        /*.values=*/declaration_targets}));
   loom_symbol_ref_t definition_targets[2] = {};
   IREE_ASSERT_OK(loom_linker_add_exact_module(
       linker, definition, loom_linker_source_symbol_output_list_empty(),
-      loom_linker_source_provider_import_list_empty(),
       {/*.count=*/IREE_ARRAYSIZE(definition_targets),
        /*.values=*/definition_targets}));
 
@@ -412,8 +406,6 @@ func.def @caller(%x: i32) -> (i32) {
 }
 )"));
   loom_module_t* library = Parse(IREE_SV(R"(
-module.import "families" [@demo.apply, @demo.unused]
-
 template.decl @demo.apply(%x: i32) -> (i32)
 
 template.decl @demo.unused(%x: i32) -> (i32)
@@ -906,199 +898,6 @@ func.def @helper(%x: i32) -> (i32) {
   EXPECT_NE(text.find("func.call @helper$link0(%x)"), std::string::npos);
 }
 
-TEST_F(LinkerTest, PrivateRenameRecanonicalizesIndexedImportAnchors) {
-  loom_module_t* first = Parse(IREE_SV(R"(
-module.import "provider" [@helper, @helper$link0]
-
-func.def @helper(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-
-func.def @helper$link0(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
-  loom_module_t* second = Parse(IREE_SV(R"(
-func.def public @helper(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
-
-  loom_module_t* linked = Link({first, second});
-  Verify(linked);
-
-  std::string text = Print(linked);
-  EXPECT_NE(text.find("module.import \"provider\" "
-                      "[@helper$link0, @helper$link1]"),
-            std::string::npos);
-  EXPECT_NE(text.find("func.def @helper$link1("), std::string::npos);
-  EXPECT_NE(text.find("func.def public @helper("), std::string::npos);
-}
-
-TEST_F(LinkerTest, MergesProviderImportsAcrossModules) {
-  loom_module_t* zeta = Parse(IREE_SV(R"(
-// Zeta candidate.
-module.import "provider" [@zeta]
-
-func.def @zeta(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
-  loom_module_t* alpha = Parse(IREE_SV(R"(
-// Alpha candidate.
-module.import "provider" [@alpha]
-
-func.def @alpha(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
-
-  loom_module_t* linked = Link({zeta, alpha});
-  Verify(linked);
-
-  const std::string text = Print(linked);
-  const std::string import = "module.import \"provider\" [@alpha, @zeta]";
-  const size_t import_position = text.find(import);
-  ASSERT_NE(import_position, std::string::npos) << text;
-  EXPECT_EQ(text.find("module.import \"provider\"", import_position + 1),
-            std::string::npos);
-  const size_t alpha_comment = text.find("// Alpha candidate.");
-  const size_t zeta_comment = text.find("// Zeta candidate.");
-  ASSERT_NE(alpha_comment, std::string::npos);
-  ASSERT_NE(zeta_comment, std::string::npos);
-  EXPECT_LT(alpha_comment, zeta_comment);
-  EXPECT_LT(zeta_comment, import_position);
-}
-
-TEST_F(LinkerTest, ProjectedImportFollowsExactPrivateRename) {
-  loom_module_t* first = Parse(IREE_SV(R"(
-func.def public @helper(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
-  loom_module_t* projected = Parse(IREE_SV(R"(
-func.def @helper(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-
-func.def @zeta(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
-
-  loom_linker_t* linker = CreateIncrementalLinker(
-      /*provider_import_count=*/1, /*provider_import_anchor_count=*/2);
-  IREE_ASSERT_OK(loom_linker_add_exact_module(
-      linker, first, loom_linker_source_symbol_output_list_empty(),
-      loom_linker_source_provider_import_list_empty(),
-      loom_linker_target_symbol_list_empty()));
-  const iree_host_size_t projected_symbols[] = {0, 1};
-  const uint32_t import_anchors[] = {0, 1};
-  const iree_string_view_t import_comments[] = {
-      IREE_SV("Projected provider."),
-  };
-  const loom_linker_source_provider_import_t provider_imports[] = {{
-      /*.provider=*/IREE_SV("provider"),
-      /*.anchors=*/
-      {
-          /*.count=*/IREE_ARRAYSIZE(import_anchors),
-          /*.ordinals=*/import_anchors,
-      },
-      /*.comments=*/
-      {
-          /*.count=*/IREE_ARRAYSIZE(import_comments),
-          /*.values=*/import_comments,
-      },
-      /*.leading_blank_line=*/true,
-  }};
-  IREE_ASSERT_OK(loom_linker_add_module_symbols(
-      linker, projected,
-      (loom_linker_source_symbol_list_t){
-          /*.count=*/IREE_ARRAYSIZE(projected_symbols),
-          /*.ordinals=*/projected_symbols,
-      },
-      loom_linker_source_symbol_binding_list_empty(),
-      loom_linker_source_symbol_output_list_empty(),
-      (loom_linker_source_provider_import_list_t){
-          /*.count=*/IREE_ARRAYSIZE(provider_imports),
-          /*.values=*/provider_imports,
-      },
-      loom_linker_target_symbol_list_empty()));
-
-  loom_module_t* linked = nullptr;
-  IREE_ASSERT_OK(loom_linker_finish(linker, &linked));
-  loom_linker_free(linker);
-  modules_.push_back(linked);
-  Verify(linked);
-
-  const std::string text = Print(linked);
-  EXPECT_NE(text.find("// Projected provider.\n"
-                      "module.import \"provider\" "
-                      "[@helper$link0, @zeta]"),
-            std::string::npos);
-  const loom_op_t* import_op = nullptr;
-  const loom_op_t* candidate_op = nullptr;
-  loom_block_for_each_op(loom_region_const_entry_block(linked->body),
-                         candidate_op) {
-    if (loom_module_import_isa(candidate_op)) {
-      import_op = candidate_op;
-      break;
-    }
-  }
-  ASSERT_NE(import_op, nullptr) << text;
-  EXPECT_TRUE(
-      iree_any_bit_set(import_op->flags, LOOM_OP_FLAG_LEADING_BLANK_LINE));
-}
-
-TEST_F(LinkerTest, ProjectedImportRequiresReservedCapacity) {
-  loom_module_t* source = Parse(IREE_SV(R"(
-func.def @helper() {
-  func.return
-}
-)"));
-  const iree_host_size_t symbols[] = {0};
-  const uint32_t anchors[] = {0};
-  const loom_linker_source_provider_import_t provider_imports[] = {{
-      /*.provider=*/IREE_SV("provider"),
-      /*.anchors=*/
-      {
-          /*.count=*/IREE_ARRAYSIZE(anchors),
-          /*.ordinals=*/anchors,
-      },
-  }};
-
-  loom_linker_t* linker = CreateIncrementalLinker();
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
-                        loom_linker_add_module_symbols(
-                            linker, source,
-                            (loom_linker_source_symbol_list_t){
-                                /*.count=*/IREE_ARRAYSIZE(symbols),
-                                /*.ordinals=*/symbols,
-                            },
-                            loom_linker_source_symbol_binding_list_empty(),
-                            loom_linker_source_symbol_output_list_empty(),
-                            (loom_linker_source_provider_import_list_t){
-                                /*.count=*/IREE_ARRAYSIZE(provider_imports),
-                                /*.values=*/provider_imports,
-                            },
-                            loom_linker_target_symbol_list_empty()));
-  loom_linker_free(linker);
-
-  linker = CreateIncrementalLinker(
-      /*provider_import_count=*/1, /*provider_import_anchor_count=*/1);
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_linker_add_module_symbols(
-                            linker, source, /*source_symbols=*/{},
-                            loom_linker_source_symbol_binding_list_empty(),
-                            loom_linker_source_symbol_output_list_empty(),
-                            (loom_linker_source_provider_import_list_t){
-                                /*.count=*/IREE_ARRAYSIZE(provider_imports),
-                                /*.values=*/provider_imports,
-                            },
-                            loom_linker_target_symbol_list_empty()));
-  loom_linker_free(linker);
-}
-
 TEST_F(LinkerTest, PrivateRenameOutputIsStable) {
   loom_module_t* first = Parse(IREE_SV(R"(
 func.def public @entry_a(%x: i32) -> (i32) {
@@ -1207,7 +1006,6 @@ func.def @unused_corpus(%x: i32) -> (i32) {
       },
       loom_linker_source_symbol_binding_list_empty(),
       loom_linker_source_symbol_output_list_empty(),
-      loom_linker_source_provider_import_list_empty(),
       loom_linker_target_symbol_list_empty()));
   const iree_host_size_t corpus_symbols[] = {0};
   IREE_ASSERT_OK(loom_linker_add_module_symbols(
@@ -1218,7 +1016,6 @@ func.def @unused_corpus(%x: i32) -> (i32) {
       },
       loom_linker_source_symbol_binding_list_empty(),
       loom_linker_source_symbol_output_list_empty(),
-      loom_linker_source_provider_import_list_empty(),
       loom_linker_target_symbol_list_empty()));
   const iree_string_view_t roots[] = {IREE_SV("@caller")};
   IREE_ASSERT_OK(
@@ -1243,7 +1040,6 @@ func.def @unused_corpus(%x: i32) -> (i32) {
 TEST_F(LinkerTest, ExactModuleLinksCompleteDenseProjection) {
   loom_module_t* source = Parse(IREE_SV(R"(
 test.module_metadata
-module.import "consumed" [@helper]
 
 func.def @helper(%x: i32) -> (i32) {
   func.return %x : i32
@@ -1258,7 +1054,6 @@ func.def public @caller(%x: i32) -> (i32) {
   loom_linker_t* linker = CreateIncrementalLinker();
   IREE_ASSERT_OK(loom_linker_add_exact_module(
       linker, source, loom_linker_source_symbol_output_list_empty(),
-      loom_linker_source_provider_import_list_empty(),
       loom_linker_target_symbol_list_empty()));
   const iree_string_view_t roots[] = {IREE_SV("@caller")};
   IREE_ASSERT_OK(
@@ -1274,7 +1069,6 @@ func.def public @caller(%x: i32) -> (i32) {
 
   std::string text = Print(linked);
   EXPECT_NE(text.find("test.module_metadata"), std::string::npos);
-  EXPECT_EQ(text.find("module.import"), std::string::npos);
   EXPECT_NE(text.find("func.def @helper"), std::string::npos);
   EXPECT_NE(text.find("func.def public retain @caller"), std::string::npos);
   EXPECT_NE(text.find("func.call @helper"), std::string::npos);
@@ -1286,7 +1080,6 @@ TEST_F(LinkerTest, ExactModuleLinksMetadataWithoutSymbols) {
   loom_linker_t* linker = CreateIncrementalLinker();
   IREE_ASSERT_OK(loom_linker_add_exact_module(
       linker, source, loom_linker_source_symbol_output_list_empty(),
-      loom_linker_source_provider_import_list_empty(),
       loom_linker_target_symbol_list_empty()));
   loom_module_t* linked = nullptr;
   IREE_ASSERT_OK(loom_linker_finish(linker, &linked));
@@ -1320,7 +1113,6 @@ func.def @second() {
   loom_linker_t* dense_linker = CreateIncrementalLinker();
   IREE_ASSERT_OK(loom_linker_add_exact_module(
       dense_linker, source, loom_linker_source_symbol_output_list_empty(),
-      loom_linker_source_provider_import_list_empty(),
       loom_linker_target_symbol_list_empty()));
   loom_module_t* dense_linked = nullptr;
   IREE_ASSERT_OK(loom_linker_finish(dense_linker, &dense_linked));
@@ -1338,7 +1130,6 @@ func.def @second() {
       },
       loom_linker_source_symbol_binding_list_empty(),
       loom_linker_source_symbol_output_list_empty(),
-      loom_linker_source_provider_import_list_empty(),
       loom_linker_target_symbol_list_empty()));
   loom_module_t* sparse_linked = nullptr;
   IREE_ASSERT_OK(loom_linker_finish(sparse_linker, &sparse_linked));
@@ -1379,7 +1170,6 @@ func.def public @caller(%x: i32) -> (i32) {
                             },
                             loom_linker_source_symbol_binding_list_empty(),
                             loom_linker_source_symbol_output_list_empty(),
-                            loom_linker_source_provider_import_list_empty(),
                             loom_linker_target_symbol_list_empty()));
   loom_linker_free(linker);
 }
@@ -1403,7 +1193,6 @@ func.def public @caller(%x: i32) -> (i32) {
   loom_symbol_ref_t projected_target = loom_symbol_ref_null();
   IREE_ASSERT_OK(loom_linker_add_exact_module(
       linker, projected, loom_linker_source_symbol_output_list_empty(),
-      loom_linker_source_provider_import_list_empty(),
       (loom_linker_target_symbol_list_t){
           /*.count=*/1,
           /*.values=*/&projected_target,
@@ -1426,7 +1215,6 @@ func.def public @caller(%x: i32) -> (i32) {
           /*.values=*/source_bindings,
       },
       loom_linker_source_symbol_output_list_empty(),
-      loom_linker_source_provider_import_list_empty(),
       loom_linker_target_symbol_list_empty()));
 
   loom_module_t* linked = nullptr;
@@ -1462,7 +1250,6 @@ func.def @second() {
                             },
                             loom_linker_source_symbol_binding_list_empty(),
                             loom_linker_source_symbol_output_list_empty(),
-                            loom_linker_source_provider_import_list_empty(),
                             loom_linker_target_symbol_list_empty()));
   const iree_host_size_t duplicate_symbols[] = {0, 0};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -1474,7 +1261,6 @@ func.def @second() {
                             },
                             loom_linker_source_symbol_binding_list_empty(),
                             loom_linker_source_symbol_output_list_empty(),
-                            loom_linker_source_provider_import_list_empty(),
                             loom_linker_target_symbol_list_empty()));
   const iree_host_size_t descending_symbols[] = {1, 0};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -1486,7 +1272,6 @@ func.def @second() {
                             },
                             loom_linker_source_symbol_binding_list_empty(),
                             loom_linker_source_symbol_output_list_empty(),
-                            loom_linker_source_provider_import_list_empty(),
                             loom_linker_target_symbol_list_empty()));
   const iree_host_size_t out_of_range_symbols[] = {2};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
@@ -1498,7 +1283,6 @@ func.def @second() {
                             },
                             loom_linker_source_symbol_binding_list_empty(),
                             loom_linker_source_symbol_output_list_empty(),
-                            loom_linker_source_provider_import_list_empty(),
                             loom_linker_target_symbol_list_empty()));
   loom_linker_free(linker);
 }

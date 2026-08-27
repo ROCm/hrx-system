@@ -102,7 +102,6 @@ loom_cc_library(
     loom::link::index_materializer
     loom::link::linker
     loom::link::module_index
-    loom::link::provider_resolver
     loom::ops::func
     loom::ops::global
     loom::ops::kernel

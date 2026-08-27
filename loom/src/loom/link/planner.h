@@ -15,7 +15,6 @@
 
 #include "iree/base/api.h"
 #include "loom/link/module_index.h"
-#include "loom/link/provider_resolver.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -98,8 +97,6 @@ typedef struct loom_link_plan_options_t {
   loom_link_plan_strip_symbol_fn_t strip_symbol;
   // User data passed to strip_symbol.
   void* strip_symbol_user_data;
-  // Optional resolver prepared against this plan's module index provider set.
-  const loom_link_provider_resolver_t* provider_resolver;
   // Exact template providers already chosen by specialization. These are
   // additional selective roots whose ordinary dependencies and nested
   // template-family demands participate in the same closure.
@@ -211,12 +208,6 @@ bool loom_link_plan_contains_symbol(const loom_link_plan_t* plan,
 bool loom_link_plan_contains_facet(const loom_link_plan_t* plan,
                                    iree_host_size_t symbol_ordinal,
                                    loom_link_symbol_facet_kind_t kind);
-
-// Returns true when a concrete provider satisfied |symbol_ordinal|'s
-// compile-time provider imports. Every availability anchor for the symbol is
-// consumed when projecting the plan.
-bool loom_link_plan_symbol_imports_resolved(const loom_link_plan_t* plan,
-                                            iree_host_size_t symbol_ordinal);
 
 #ifdef __cplusplus
 }

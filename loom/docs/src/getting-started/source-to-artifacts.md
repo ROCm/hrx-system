@@ -47,9 +47,8 @@ a library does not make its entire contents live.
 ## Compose explicit modules
 
 Every `.loom` file verifies independently. An exact call into another module
-therefore needs a local declaration that states the complete contract. A
-[`module.import`](../reference/dialects/module/ops/import.md) may additionally
-name which supplied provider can satisfy that declaration:
+therefore needs a local declaration that states the complete contract. The
+link invocation or embedding supplies the libraries that may satisfy it:
 
 **Source:** [`loom/docs/examples/module-composition/root.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/module-composition/root.loom)
 
@@ -57,35 +56,29 @@ name which supplied provider can satisfy that declaration:
 --8<-- "examples/module-composition/root.loom"
 ```
 
-The string `"layer.loom"` is an opaque provider key, not a request to open a
-file. The CLI invocation below explicitly supplies `layer.loom` and binds its
-exact path spelling as that key. An in-memory embedding can bind a logical key
-to a source without involving a filesystem.
-
-The layer itself imports a function from `kernels.loom`. The checked workflow
+The layer has its own declared dependency on `@scale`. The checked workflow
 links only the available layer, writes a standalone partial `.loombc`, reloads
-it, and then supplies the kernel provider:
+it, and then supplies the kernel library:
 
 ```shell
 loom/docs/examples/module-composition/run.sh build/module-composition
 ```
 
-Imports are optional. A declaration without a corresponding `module.import`
-can resolve from a compatible definition in the explicitly supplied module
-universe. The `elementwise-transform` example below intentionally uses that
-simpler form: its build and embedding already choose the complete library set.
-The import-free path remains useful for generated in-memory programs, test
-wrappers, and small compositions where provider routing adds no information.
-
 | Source contract | Selection behavior |
 | --- | --- |
-| Exact declaration | Resolve a compatible definition from the explicitly supplied universe. |
-| `module.import` plus exact declaration | Resolve only from providers bound to one of the named keys. |
-| `template.decl` plus `template.apply` | Select an eligible family provider from the supplied universe; imports never gate templates. |
+| Exact declaration | Resolve the compatible direct definition or unique exported library definition from the explicitly supplied source universe. |
+| `template.decl` plus `template.apply` | Select an eligible family implementation from the supplied libraries using facts, requirements, and priority. |
+| Runtime import attributes on `func.decl` | Preserve an external ABI contract for runtime resolution instead of satisfying it from Loom libraries. |
+
+Library paths and insertion order do not participate in symbol identity. The
+application or build graph chooses the source universe; Loom declarations state
+what that program requires. A partial link may preserve reachable declarations
+for a later boundary, while a closed link rejects any exact requirement that
+remains unresolved.
 
 The [linking workflow](../workflows/link-and-package.md) follows partial and
 transitive composition in detail. The [source-module
-chapter](../guide/source-modules.md#declarations-state-contracts-imports-state-availability)
+chapter](../guide/source-modules.md#definitions-declarations-and-roots)
 defines the language contract.
 
 ## Exact calls and selectable implementations

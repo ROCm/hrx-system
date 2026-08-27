@@ -204,9 +204,9 @@ checks both groups against the resolved definition or declaration.
 As with function calls, the declaration is mandatory. Linking searches only
 the explicitly supplied modules and libraries for that exact symbol; it never
 discovers a kernel merely because an undeclared launch happens to name it.
-The declaration may remain import-free, or a
-[`module.import`](source-modules.md#declarations-state-contracts-imports-state-availability)
-may restrict its possible definitions to explicitly bound provider keys.
+A public compatible definition from an explicitly supplied library may satisfy
+the declaration. Missing and ambiguous definitions are link errors for a
+closed product.
 
 ## Evaluate the compiled launch contract
 

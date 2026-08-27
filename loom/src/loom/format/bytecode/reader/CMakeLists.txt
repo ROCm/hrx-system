@@ -184,7 +184,7 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::format::bytecode::format
     loom::ir
-    loom::ops::module
+    loom::ops::func
 )
 
 loom_cc_library(
@@ -207,7 +207,6 @@ loom_cc_library(
     loom::error::error_defs
     loom::format::low_repr
     loom::ir
-    loom::ops::module
   PUBLIC
 )
 

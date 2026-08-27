@@ -24,23 +24,10 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "provider_import_sink",
-    srcs = ["provider_import_sink.c"],
-    hdrs = ["provider_import_sink.h"],
-    deps = [
-        "//loom/src/loom/ir",
-        "//loom/src/loom/ops/module",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
-    ],
-)
-
-loom_cc_library(
     name = "linker",
     srcs = ["linker.c"],
     hdrs = ["linker.h"],
     deps = [
-        ":provider_import_sink",
         ":symbol_policy",
         "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/analysis:symbol_value_constraints",
@@ -48,7 +35,6 @@ loom_cc_library(
         "//loom/src/loom/ir:symbol_map",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/func",
-        "//loom/src/loom/ops/module",
         "//loom/src/loom/ops/template",
         "//loom/src/loom/rewrite:materialize",
         "//loom/src/loom/rewrite:remap",
@@ -69,7 +55,6 @@ loom_cc_test(
         "//loom/src/loom/format/text:printer",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_registry",
-        "//loom/src/loom/ops/module",
         "//loom/src/loom/ops/target",
         "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/test",
@@ -101,7 +86,6 @@ loom_cc_library(
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
-        "//loom/src/loom/ops/module",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -118,7 +102,6 @@ loom_cc_test(
         "//loom/src/loom/ops/check",
         "//loom/src/loom/ops/config",
         "//loom/src/loom/ops/func",
-        "//loom/src/loom/ops/module",
         "//loom/src/loom/ops/target",
         "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/test",
@@ -136,30 +119,7 @@ loom_cc_library(
     hdrs = ["planner.h"],
     deps = [
         ":module_index",
-        ":provider_resolver",
         "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_library(
-    name = "provider_resolver",
-    srcs = ["provider_resolver.c"],
-    hdrs = ["provider_resolver.h"],
-    deps = [
-        ":module_index",
-        "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_test(
-    name = "provider_resolver_test",
-    srcs = ["provider_resolver_test.cc"],
-    deps = [
-        ":module_index",
-        ":provider_resolver",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -168,7 +128,6 @@ loom_cc_library(
     srcs = ["plan_projection.c"],
     hdrs = ["plan_projection.h"],
     deps = [
-        ":linker",
         ":planner",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -318,14 +277,12 @@ loom_cc_test(
         ":index_materializer",
         ":module_index",
         ":planner",
-        ":provider_resolver",
         "//loom/src/loom/format/bytecode:writer",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/format/text:printer",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops:op_registry",
-        "//loom/src/loom/ops/module",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/verify",
         "//runtime/src/iree/base/internal:arena",
@@ -346,7 +303,6 @@ loom_cc_test(
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/func",
-        "//loom/src/loom/ops/module",
         "//loom/src/loom/ops/test",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -370,7 +326,6 @@ loom_cc_test(
         "//loom/src/loom/ops/config",
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/kernel",
-        "//loom/src/loom/ops/module",
         "//loom/src/loom/ops/target",
         "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/test",
@@ -426,14 +381,11 @@ loom_cc_benchmark(
         ":module_index",
         ":plan_projection",
         ":planner",
-        ":provider_import_sink",
-        ":provider_resolver",
         "//loom/src/loom/format/bytecode:reader",
         "//loom/src/loom/format/bytecode:selected_reader",
         "//loom/src/loom/format/bytecode:writer",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/func",
-        "//loom/src/loom/ops/module",
         "//loom/src/loom/ops/test",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

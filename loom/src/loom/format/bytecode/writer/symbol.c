@@ -10,7 +10,6 @@
 
 #include "loom/format/bytecode/writer/attribute.h"
 #include "loom/ir/module.h"
-#include "loom/ops/module/ops.h"
 #include "loom/ops/op_defs.h"
 
 //===----------------------------------------------------------------------===//
@@ -45,8 +44,7 @@ static iree_status_t loom_bytecode_symbol_kind_byte(loom_symbol_kind_t kind,
       *out_byte = LOOM_BYTECODE_SYMBOL_RECORD;
       return iree_ok_status();
     case LOOM_SYMBOL_NONE:
-      *out_byte = LOOM_BYTECODE_SYMBOL_ANCHOR;
-      return iree_ok_status();
+      break;
     default:
       break;
   }
@@ -678,135 +676,6 @@ iree_status_t loom_bytecode_write_symbols_section(
     }
   }
 
-  return iree_ok_status();
-}
-
-iree_status_t loom_bytecode_provider_import_plan_initialize(
-    const loom_module_t* module, const loom_module_record_plan_t* record_plan,
-    iree_arena_allocator_t* arena,
-    loom_bytecode_provider_import_plan_t* out_plan) {
-  *out_plan = (loom_bytecode_provider_import_plan_t){0};
-  uint64_t* anchor_usage_bits = NULL;
-  const loom_module_record_t* previous_import = NULL;
-  for (iree_host_size_t i = 0; i < record_plan->record_count; ++i) {
-    const loom_module_record_t* record = &record_plan->records[i];
-    if (!loom_module_import_isa(record->op)) continue;
-    if (out_plan->provider_count == 0) {
-      out_plan->first_record_index = i;
-      const iree_host_size_t usage_word_count =
-          (module->symbols.count + 63) / 64;
-      if (usage_word_count > 0) {
-        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-            arena, usage_word_count, sizeof(*anchor_usage_bits),
-            (void**)&anchor_usage_bits));
-        memset(anchor_usage_bits, 0,
-               usage_word_count * sizeof(*anchor_usage_bits));
-      }
-    }
-    if (previous_import &&
-        iree_string_view_equal(previous_import->key, record->key)) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "duplicate module.import provider %.*s",
-                              (int)record->key.size, record->key.data);
-    }
-    previous_import = record;
-
-    loom_symbol_ref_array_t anchors = loom_module_import_symbols(record->op);
-    if (anchors.count > UINT32_MAX - out_plan->anchor_count) {
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "provider anchor count exceeds UINT32_MAX");
-    }
-    out_plan->anchor_count += anchors.count;
-    for (uint16_t anchor_index = 0; anchor_index < anchors.count;
-         ++anchor_index) {
-      const loom_symbol_ref_t anchor = anchors.values[anchor_index];
-      if (anchor.module_id != 0 || anchor.symbol_id >= module->symbols.count) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "module.import provider %.*s has invalid symbol anchor %u:%u",
-            (int)record->key.size, record->key.data, anchor.module_id,
-            anchor.symbol_id);
-      }
-      anchor_usage_bits[anchor.symbol_id / 64] |= UINT64_C(1)
-                                                  << (anchor.symbol_id % 64);
-    }
-    ++out_plan->provider_count;
-  }
-
-  for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
-    const loom_symbol_t* symbol = &module->symbols.entries[i];
-    if (loom_symbol_bytecode_kind(symbol) != LOOM_SYMBOL_NONE) continue;
-    const bool has_unresolved_shape = symbol->definition == NULL &&
-                                      symbol->defining_op == NULL &&
-                                      symbol->flags == 0;
-    const bool is_provider_anchor =
-        anchor_usage_bits &&
-        iree_any_bit_set(anchor_usage_bits[i / 64], UINT64_C(1) << (i % 64));
-    if (!has_unresolved_shape || !is_provider_anchor) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "symbol %" PRIhsz
-          " with no bytecode payload is not an unresolved provider anchor",
-          i);
-    }
-  }
-  return iree_ok_status();
-}
-
-iree_status_t loom_bytecode_number_provider_imports(
-    loom_bytecode_numbering_t* numbering,
-    const loom_module_record_plan_t* record_plan,
-    loom_bytecode_provider_import_plan_t* provider_plan) {
-  if (provider_plan->provider_count == 0) return iree_ok_status();
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(numbering->arena, provider_plan->provider_count,
-                                sizeof(*provider_plan->provider_string_ids),
-                                (void**)&provider_plan->provider_string_ids));
-  for (iree_host_size_t i = 0; i < provider_plan->provider_count; ++i) {
-    const loom_module_record_t* record =
-        &record_plan->records[provider_plan->first_record_index + i];
-    IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
-        numbering, loom_module_import_provider(record->op),
-        &provider_plan->provider_string_ids[i]));
-  }
-  return iree_ok_status();
-}
-
-iree_status_t loom_bytecode_write_provider_imports_section(
-    loom_bytecode_page_writer_t* page_writer,
-    const loom_bytecode_numbering_t* numbering,
-    const loom_module_record_plan_t* record_plan,
-    const loom_bytecode_provider_import_plan_t* provider_plan) {
-  const loom_module_t* module = numbering->module;
-  IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
-      page_writer, provider_plan->provider_count));
-  IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
-      page_writer, provider_plan->anchor_count));
-  for (iree_host_size_t i = 0; i < provider_plan->provider_count; ++i) {
-    const loom_module_record_t* record =
-        &record_plan->records[provider_plan->first_record_index + i];
-
-    IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
-        page_writer, provider_plan->provider_string_ids[i]));
-
-    loom_symbol_ref_array_t anchors = loom_module_import_symbols(record->op);
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_page_writer_write_uvarint(page_writer, anchors.count));
-    for (uint16_t anchor_index = 0; anchor_index < anchors.count;
-         ++anchor_index) {
-      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
-          page_writer, loom_bytecode_wire_symbol_ordinal(
-                           numbering, anchors.values[anchor_index].symbol_id)));
-    }
-
-    iree_host_size_t comment_count = 0;
-    const iree_string_view_t* comments =
-        loom_module_op_comments(module, record->op, &comment_count);
-    IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_source_trivia(
-        page_writer,
-        iree_any_bit_set(record->op->flags, LOOM_OP_FLAG_LEADING_BLANK_LINE),
-        comments, comment_count));
-  }
   return iree_ok_status();
 }
 

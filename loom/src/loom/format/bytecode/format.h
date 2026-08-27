@@ -85,7 +85,7 @@ extern "C" {
 
 #define LOOM_BYTECODE_MAGIC "LOOM"
 #define LOOM_BYTECODE_MAGIC_LENGTH 4
-#define LOOM_BYTECODE_FORMAT_VERSION 33
+#define LOOM_BYTECODE_FORMAT_VERSION 34
 
 #define LOOM_BYTECODE_SOURCE_TRIVIA_LEADING_BLANK_LINE (1u << 0)
 #define LOOM_BYTECODE_SOURCE_TRIVIA_COMMENT_COUNT_SHIFT 1
@@ -161,8 +161,6 @@ typedef uint16_t loom_bytecode_module_flags_t;
 //   +-----------------------+
 //   | SOURCE_TRIVIA section |  File-level source presentation.
 //   +-----------------------+
-//   | PROVIDER_IMPORTS      |  Compile-time symbol availability providers.
-//   +-----------------------+
 //   | SYMBOL_REFERENCES     |  Direct dependency and provider-demand rows.
 //   +-----------------------+
 //   | RESOURCES section     |  Large blobs: weights, executables, etc.
@@ -219,13 +217,11 @@ typedef enum loom_bytecode_section_kind_e {
           // Referenced by symbols and op attributes.
   LOOM_BYTECODE_SECTION_SOURCE_TRIVIA =
       9,  // Optional module-owned source presentation.
-  LOOM_BYTECODE_SECTION_PROVIDER_IMPORTS =
-      10,  // Compile-time module.import provider metadata.
   LOOM_BYTECODE_SECTION_SYMBOL_REFERENCES =
-      11,  // Per-symbol dependency and abstract-provider demands.
+      10,  // Per-symbol dependency and abstract-provider demands.
 } loom_bytecode_section_kind_t;
 
-#define LOOM_BYTECODE_SECTION_COUNT 12
+#define LOOM_BYTECODE_SECTION_COUNT 11
 
 // ==========================================================================
 // SOURCE_TRIVIA section
@@ -542,7 +538,7 @@ typedef enum loom_bytecode_section_kind_e {
 //   [kind: byte]            (FUNC_DEF=0, FUNC_DECL=1,
 //                            TEMPLATE_DECL=2, TEMPLATE_DEF=3,
 //                            TEMPLATE_UKERNEL=4, GLOBAL=5,
-//                            EXECUTABLE=6, RECORD=7, ANCHOR=8)
+//                            EXECUTABLE=6, RECORD=7)
 //   [visibility: byte]      (PUBLIC=0, PRIVATE=1)
 //   [flags: u16]            (see loom_bytecode_symbol_flag_bits_e)
 //
@@ -689,35 +685,6 @@ typedef enum loom_bytecode_section_kind_e {
 //       [ir_length: u32]
 
 // ==========================================================================
-// PROVIDER_IMPORTS section
-// ==========================================================================
-//
-// Compile-time module.import records name source providers that may define
-// module-local symbols. They are availability metadata, not runtime imports
-// and not dependency or liveness edges. Provider records are ordered by exact
-// UTF-8 provider bytes. Each anchor list is ordered by exact symbol-name bytes.
-//
-// Anchors reference SYMBOLS ordinals directly. A resolved anchor references
-// its ordinary symbol entry. An unresolved anchor references an ANCHOR symbol
-// entry, which carries only the common symbol header and exists solely to give
-// the availability record a stable ordinal. Metadata readers can therefore
-// expose provider slices without resolving names or touching IR bodies.
-//
-// Section layout:
-//
-//   [provider_count: varint]
-//   [total_anchor_count: varint]
-//   For each provider:
-//     [provider_string_id: varint]
-//     [anchor_count: varint]
-//     For each anchor:
-//       [anchor_symbol_index: varint]
-//     [source_trivia: varint]
-//     For each leading comment attached to the module.import op:
-//       [comment_length: varint]
-//       [comment_data: comment_length bytes]
-
-// ==========================================================================
 // SYMBOL_REFERENCES section
 // ==========================================================================
 //
@@ -725,11 +692,10 @@ typedef enum loom_bytecode_section_kind_e {
 // reading IR bodies. Dependency targets and abstract provider demands are
 // direct SYMBOLS ordinals.
 //
-// Availability-only references, including module.import anchors, are excluded.
-// Those remain represented solely by PROVIDER_IMPORTS. Rows preserve every
-// dependency occurrence and contract demand in deterministic analysis order;
-// repeated targets and families are valid. Closure planners use dense selection
-// bitmaps to coalesce repeated work while traversing only reached rows.
+// Rows preserve every dependency occurrence and contract demand in
+// deterministic analysis order; repeated targets and families are valid.
+// Closure planners use dense selection bitmaps to coalesce repeated work while
+// traversing only reached rows.
 //
 // The module dependency row contains references owned by module-level records,
 // such as static encoding metadata. The following symbol rows are in SYMBOLS
@@ -1142,8 +1108,7 @@ typedef struct loom_bytecode_section_dir_entry_t {
 } loom_bytecode_section_dir_entry_t;
 
 // Symbol kind byte in the SYMBOLS section. These are dense wire values and
-// intentionally not equal to loom_symbol_kind_t. ANCHOR maps to the in-memory
-// LOOM_SYMBOL_NONE sentinel and has no defining operation or symbol payload.
+// intentionally not equal to loom_symbol_kind_t.
 typedef enum loom_bytecode_symbol_kind_e {
   LOOM_BYTECODE_SYMBOL_FUNC_DEF = 0,
   LOOM_BYTECODE_SYMBOL_FUNC_DECL = 1,
@@ -1153,7 +1118,6 @@ typedef enum loom_bytecode_symbol_kind_e {
   LOOM_BYTECODE_SYMBOL_GLOBAL = 5,
   LOOM_BYTECODE_SYMBOL_EXECUTABLE = 6,
   LOOM_BYTECODE_SYMBOL_RECORD = 7,
-  LOOM_BYTECODE_SYMBOL_ANCHOR = 8,
   LOOM_BYTECODE_SYMBOL_COUNT_,
 } loom_bytecode_symbol_kind_t;
 

@@ -35,31 +35,6 @@ typedef uint32_t loom_link_template_family_ordinal_t;
 
 typedef struct loom_link_module_index_t loom_link_module_index_t;
 
-// Borrowed view of one compile-time provider import.
-typedef struct loom_link_module_index_provider_import_t {
-  // Opaque resolver-defined provider key.
-  iree_string_view_t provider;
-  // Number of module-local symbol anchors in the import.
-  iree_host_size_t anchor_count;
-  // Authored source comments attached to the import operation.
-  struct {
-    // Borrowed normalized comment payloads without leading `//` markers.
-    const iree_string_view_t* values;
-    // Number of comment payloads.
-    iree_host_size_t count;
-  } comments;
-  // True when the import has authored leading vertical separation.
-  bool leading_blank_line;
-} loom_link_module_index_provider_import_t;
-
-// Module-local provider-import ordinals mentioning one symbol.
-typedef struct loom_link_module_index_provider_import_list_t {
-  // Provider-import ordinals in stable module order.
-  const uint32_t* values;
-  // Number of provider-import occurrences.
-  iree_host_size_t count;
-} loom_link_module_index_provider_import_list_t;
-
 // Borrowed index-wide symbol ordinal list.
 typedef struct loom_link_module_index_symbol_ordinal_list_t {
   // Index-wide symbol ordinals in stable provider order.
@@ -78,9 +53,9 @@ typedef enum loom_link_provider_kind_e {
 } loom_link_provider_kind_t;
 
 typedef enum loom_link_provider_role_e {
-  // Primary input providers selected before library providers.
+  // Direct sources jointly owned by the module being assembled.
   LOOM_LINK_PROVIDER_ROLE_INPUT = 0,
-  // Library providers searched after primary inputs.
+  // Separate libraries contributing exported exact definitions and templates.
   LOOM_LINK_PROVIDER_ROLE_LIBRARY = 1,
 } loom_link_provider_role_t;
 
@@ -94,7 +69,7 @@ typedef enum loom_link_symbol_identity_e {
 enum loom_link_symbol_flag_bits_e {
   // Symbol is publicly visible in its source module.
   LOOM_LINK_SYMBOL_FLAG_PUBLIC = 1u << 0,
-  // Symbol is an import declaration supplied by another provider/module.
+  // Symbol is an external runtime import declaration.
   LOOM_LINK_SYMBOL_FLAG_IMPORT = 1u << 1,
   // Symbol is exported from its provider/module.
   LOOM_LINK_SYMBOL_FLAG_EXPORT = 1u << 2,
@@ -113,7 +88,7 @@ typedef uint32_t loom_link_symbol_flags_t;
 typedef struct loom_link_module_index_add_options_t {
   // Stable provider label for diagnostics and deterministic private naming.
   iree_string_view_t provider_name;
-  // Provider precedence role. Zero defaults to INPUT.
+  // Provider linkage role. Zero defaults to INPUT.
   loom_link_provider_role_t role;
 } loom_link_module_index_add_options_t;
 
@@ -123,7 +98,7 @@ typedef struct loom_link_module_index_provider_t {
   iree_host_size_t ordinal;
   // Source representation kind.
   loom_link_provider_kind_t kind;
-  // Search precedence role.
+  // Linkage ownership role.
   loom_link_provider_role_t role;
   // Arena-owned provider label.
   iree_string_view_t name;
@@ -186,20 +161,6 @@ typedef struct loom_link_module_index_module_t {
     // Source root region indices plus one parallel to values.
     const uint8_t* source_root_region_indices_plus_one;
   } template_demands;
-  // Compile-time provider imports and their symbol-to-import projection.
-  struct {
-    // Number of source provider-import records.
-    uint32_t count;
-    // Number of source provider-import anchor occurrences.
-    uint32_t anchor_count;
-    // Borrowed materialized module.import operations in source order. NULL for
-    // bytecode modules, which borrow their existing metadata records.
-    const loom_op_t* const* materialized_ops;
-    // Arena-owned CSR offsets with symbol_count + 1 entries.
-    const uint32_t* symbol_offsets;
-    // Arena-owned module-local import ordinals grouped by source symbol.
-    const uint32_t* symbol_import_ordinals;
-  } provider_imports;
 } loom_link_module_index_module_t;
 
 // Indexed module-local symbol record.
@@ -375,44 +336,12 @@ const loom_link_module_index_module_t* loom_link_module_index_symbol_module(
     const loom_link_module_index_t* index,
     const loom_link_module_index_symbol_t* symbol);
 
-// Returns provider import |ordinal| from |module|.
+// Looks up the first global-identity symbol named |name| in canonical
+// enumeration order.
 //
-// The returned view borrows canonical semantics and source trivia directly
-// from the materialized module or retained bytecode metadata. The index,
-// module, and ordinal are trusted outputs of this index.
-loom_link_module_index_provider_import_t
-loom_link_module_index_provider_import_at(
-    const loom_link_module_index_t* index,
-    const loom_link_module_index_module_t* module, iree_host_size_t ordinal);
-
-// Returns the opaque resolver key for provider import |ordinal| from |module|.
-iree_string_view_t loom_link_module_index_provider_import_key_at(
-    const loom_link_module_index_t* index,
-    const loom_link_module_index_module_t* module, iree_host_size_t ordinal);
-
-// Returns module-local symbol ordinal |anchor_ordinal| from provider import
-// |import_ordinal| in |module|.
-//
-// The index, module, import ordinal, and anchor ordinal are trusted outputs of
-// this index. The query performs no allocation or name lookup.
-uint32_t loom_link_module_index_provider_import_anchor_at(
-    const loom_link_module_index_t* index,
-    const loom_link_module_index_module_t* module,
-    iree_host_size_t import_ordinal, iree_host_size_t anchor_ordinal);
-
-// Returns provider imports that mention |symbol| as an availability anchor.
-//
-// Construction work is paid once while indexing. This query performs no
-// allocation, hashing, search, or IR traversal.
-loom_link_module_index_provider_import_list_t
-loom_link_module_index_symbol_provider_imports(
-    const loom_link_module_index_t* index,
-    const loom_link_module_index_symbol_t* symbol);
-
-// Looks up the selected global-identity symbol named |name|.
-//
-// Names may be passed with or without a leading '@'. INPUT providers shadow
-// LIBRARY providers; ties are resolved by provider insertion order.
+// Names may be passed with or without a leading '@'. INPUT providers enumerate
+// before LIBRARY providers and ties use provider insertion order. This order
+// does not resolve duplicate definitions; linkage validates uniqueness.
 const loom_link_module_index_symbol_t* loom_link_module_index_lookup_global(
     const loom_link_module_index_t* index, iree_string_view_t name);
 
@@ -425,8 +354,8 @@ const loom_link_module_index_symbol_t* loom_link_module_index_next_same_name(
     const loom_link_module_index_t* index,
     const loom_link_module_index_symbol_t* symbol);
 
-// Returns the next global duplicate for |symbol| in selected-first order, or
-// NULL if none exists. Begin enumeration with the result of
+// Returns the next global duplicate for |symbol| in canonical order, or NULL
+// if none exists. Begin enumeration with the result of
 // loom_link_module_index_lookup_global and pass each returned duplicate back to
 // continue until NULL.
 const loom_link_module_index_symbol_t*

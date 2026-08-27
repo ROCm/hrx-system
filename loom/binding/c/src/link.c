@@ -356,8 +356,6 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
                                   LOOMC_LINK_FLAG_STRIP_TEST_SYMBOLS)
               ? LOOM_LINK_PLAN_TEST_SYMBOL_STRIP
               : LOOM_LINK_PLAN_TEST_SYMBOL_KEEP,
-      .provider_resolver =
-          loomc_link_index_provider_resolver(options->link_index),
   };
 
   loom_low_repr_environment_t low_repr_environment = {0};

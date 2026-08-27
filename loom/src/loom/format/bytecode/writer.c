@@ -157,12 +157,6 @@ iree_status_t loom_bytecode_write_module(
     status = loom_module_record_plan_initialize(module, &record_plan);
     record_plan_initialized = iree_status_is_ok(status);
   }
-  loom_bytecode_provider_import_plan_t provider_import_plan = {0};
-  if (iree_status_is_ok(status)) {
-    status = loom_bytecode_provider_import_plan_initialize(
-        module, &record_plan, &arena, &provider_import_plan);
-  }
-
   // Pass 1: Number module metadata. Function signatures and bodies are numbered
   // during IR section writing.
   if (iree_status_is_ok(status)) {
@@ -181,10 +175,6 @@ iree_status_t loom_bytecode_write_module(
           &numbering, module->symbols.entries[module_symbol_id].name_id,
           &unused_id);
     }
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_bytecode_number_provider_imports(&numbering, &record_plan,
-                                                   &provider_import_plan);
   }
   if (iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0;
@@ -275,7 +265,6 @@ iree_status_t loom_bytecode_write_module(
   iree_host_size_t section_count = 0;
   section_write_order[section_count++] = LOOM_BYTECODE_SECTION_IR;
   section_write_order[section_count++] = LOOM_BYTECODE_SECTION_SYMBOLS;
-  section_write_order[section_count++] = LOOM_BYTECODE_SECTION_PROVIDER_IMPORTS;
   section_write_order[section_count++] =
       LOOM_BYTECODE_SECTION_SYMBOL_REFERENCES;
   section_write_order[section_count++] = LOOM_BYTECODE_SECTION_STRINGS;
@@ -374,20 +363,6 @@ iree_status_t loom_bytecode_write_module(
         iree_string_builder_size(&symbols_builder);
   }
   iree_string_builder_deinitialize(&symbols_builder);
-
-  // Provider imports use direct SYMBOLS ordinals and the canonical
-  // keyed-module-record projection.
-  if (iree_status_is_ok(status)) {
-    section_offsets[LOOM_BYTECODE_SECTION_PROVIDER_IMPORTS] =
-        page_writer.total_written - module_start;
-    status = loom_bytecode_write_provider_imports_section(
-        &page_writer, &numbering, &record_plan, &provider_import_plan);
-    if (iree_status_is_ok(status)) {
-      section_lengths[LOOM_BYTECODE_SECTION_PROVIDER_IMPORTS] =
-          page_writer.total_written - module_start -
-          section_offsets[LOOM_BYTECODE_SECTION_PROVIDER_IMPORTS];
-    }
-  }
 
   // Symbol references preserve the direct metadata-only dependency graph.
   if (iree_status_is_ok(status)) {

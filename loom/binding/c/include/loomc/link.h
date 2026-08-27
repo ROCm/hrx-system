@@ -101,8 +101,8 @@ typedef enum loomc_link_flag_bits_e {
   /// Select exported INPUT-provider symbols as roots and compute their closure.
   LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS = 1u << 0,
 
-  /// Preserve reachable unresolved references and `module.import` demands for
-  /// a later link or specialization step.
+  /// Preserve reachable unresolved references for a later link or
+  /// specialization step.
   LOOMC_LINK_FLAG_ALLOW_UNRESOLVED_SYMBOLS = 1u << 1,
 
   /// Strip symbols used only by test or benchmark tooling.

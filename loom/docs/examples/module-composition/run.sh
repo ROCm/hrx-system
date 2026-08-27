@@ -49,12 +49,11 @@ loom_example_run_tool loom-format "${loom_format}" \
   --to=text \
   --output="${output_dir}/partial.loom"
 
-if grep -Fq 'module.import "layer.loom"' "${output_dir}/partial.loom"; then
-  printf 'satisfied layer import survived the partial link\n' >&2
+if grep -Fq 'func.decl @project_layer' "${output_dir}/partial.loom"; then
+  printf 'satisfied layer declaration survived the partial link\n' >&2
   exit 1
 fi
-grep -Fq 'module.import "kernels.loom" [@scale]' \
-  "${output_dir}/partial.loom"
+grep -Fq 'func.decl pure @scale' "${output_dir}/partial.loom"
 grep -Fq 'func.def @project_layer' "${output_dir}/partial.loom"
 
 loom_example_section "Reload the partial artifact and complete the program"
@@ -68,8 +67,8 @@ loom_example_run_tool loom-link "${loom_link}" \
 loom_example_run_tool loom-format "${loom_format}" --check \
   "${output_dir}/linked.loom"
 
-if grep -Eq '^(module\.import|func\.decl)' "${output_dir}/linked.loom"; then
-  printf 'completed link retained an import or declaration\n' >&2
+if grep -Eq '^func\.decl' "${output_dir}/linked.loom"; then
+  printf 'completed link retained a declaration\n' >&2
   exit 1
 fi
 grep -Fq 'func.def public retain @entry' "${output_dir}/linked.loom"

@@ -583,7 +583,7 @@ typedef enum loom_dialect_id_e {
   LOOM_DIALECT_CONFIG = 0x1C,
   LOOM_DIALECT_SANITIZER = 0x1D,
   LOOM_DIALECT_COMMAND = 0x1E,
-  LOOM_DIALECT_MODULE = 0x1F,
+  // 0x1F was the removed module dialect and remains reserved.
   LOOM_DIALECT_TEMPLATE = 0x20,
   LOOM_DIALECT_RESERVED = 0xFF,
 } loom_dialect_id_t;

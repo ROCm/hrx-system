@@ -23,7 +23,6 @@
 
 // Keep reader allocation guards aligned with the bytecode format comment.
 #define LOOM_BYTECODE_MAX_SECTION_COUNT 256
-#define LOOM_BYTECODE_MAX_PROVIDER_IMPORT_COUNT (UINT64_C(1) << 24)
 
 // State required to validate exactly one module.
 typedef struct loom_bytecode_module_reader_t {
@@ -63,8 +62,6 @@ static const char* loom_bytecode_section_name(uint16_t kind) {
       return "IR";
     case LOOM_BYTECODE_SECTION_RESOURCES:
       return "RESOURCES";
-    case LOOM_BYTECODE_SECTION_PROVIDER_IMPORTS:
-      return "PROVIDER_IMPORTS";
     case LOOM_BYTECODE_SECTION_SYMBOL_REFERENCES:
       return "SYMBOL_REFERENCES";
     default:
@@ -92,245 +89,6 @@ static iree_status_t loom_bytecode_reader_read_file_header(
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_expect_empty(
       &reader->decoder, &cursor, IREE_SV("file_header")));
   *out_file_header = source_trivia;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_bytecode_reader_validate_string_ref(
-    loom_bytecode_module_reader_t* reader, uint64_t string_id,
-    iree_string_view_t field_name, uint64_t offset,
-    iree_string_view_t* out_string) {
-  if (string_id >= reader->view.strings.count) {
-    loom_diagnostic_param_t params[] = {
-        loom_param_string(field_name),
-        loom_param_u64(string_id),
-        loom_param_u64(reader->view.strings.count),
-    };
-    return loom_bytecode_reader_emit_error(&reader->decoder,
-                                           LOOM_ERR_BYTECODE_010, params,
-                                           IREE_ARRAYSIZE(params), offset, 0);
-  }
-  *out_string = reader->view.strings.values[string_id];
-  return iree_ok_status();
-}
-
-static iree_status_t loom_bytecode_reader_read_provider_imports(
-    loom_bytecode_module_reader_t* reader,
-    const loom_bytecode_reader_section_t* provider_imports_section) {
-  loom_bytecode_reader_cursor_t cursor;
-  loom_bytecode_reader_cursor_initialize(
-      provider_imports_section->bytes.data,
-      provider_imports_section->bytes.data_length,
-      provider_imports_section->absolute_offset, IREE_SV("PROVIDER_IMPORTS"),
-      &cursor);
-
-  uint64_t provider_count_offset =
-      loom_bytecode_reader_cursor_absolute_position(&cursor);
-  uint64_t provider_count = 0;
-  uint64_t total_anchor_count = 0;
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-      &reader->decoder, &cursor, &provider_count));
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-      &reader->decoder, &cursor, &total_anchor_count));
-  if (provider_count > LOOM_BYTECODE_MAX_PROVIDER_IMPORT_COUNT ||
-      provider_count > IREE_HOST_SIZE_MAX) {
-    return loom_bytecode_reader_emit_count_exceeds(
-        &reader->decoder, IREE_SV("PROVIDER_IMPORTS"), provider_count,
-        LOOM_BYTECODE_MAX_PROVIDER_IMPORT_COUNT, provider_count_offset);
-  }
-  if (total_anchor_count > UINT32_MAX ||
-      total_anchor_count > IREE_HOST_SIZE_MAX) {
-    return loom_bytecode_reader_emit_invalid_field(
-        &reader->decoder, IREE_SV("PROVIDER_IMPORTS"), IREE_SV("header"), 0,
-        IREE_SV("total_anchor_count"), provider_count_offset,
-        IREE_SV("provider_anchor_count_exceeds_index_width"));
-  }
-
-  reader->view.provider_imports.count = (iree_host_size_t)provider_count;
-  reader->view.provider_imports.anchor_count =
-      (iree_host_size_t)total_anchor_count;
-  if (provider_count > 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        reader->arena, (iree_host_size_t)provider_count,
-        sizeof(*reader->view.provider_imports.values),
-        (void**)&reader->view.provider_imports.values));
-  }
-  if (total_anchor_count > 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        reader->arena, (iree_host_size_t)total_anchor_count,
-        sizeof(*reader->view.provider_imports.anchors),
-        (void**)&reader->view.provider_imports.anchors));
-  }
-
-  iree_host_size_t anchor_index = 0;
-  iree_string_view_t previous_provider = iree_string_view_empty();
-  const iree_host_size_t anchor_usage_word_count =
-      reader->view.symbols.unresolved_anchor_count > 0
-          ? (reader->view.symbols.count + 63) / 64
-          : 0;
-  uint64_t* anchor_usage_bits = NULL;
-  if (anchor_usage_word_count > 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        reader->arena, anchor_usage_word_count, sizeof(*anchor_usage_bits),
-        (void**)&anchor_usage_bits));
-    memset(anchor_usage_bits, 0,
-           anchor_usage_word_count * sizeof(*anchor_usage_bits));
-  }
-  for (iree_host_size_t provider_index = 0;
-       provider_index < (iree_host_size_t)provider_count; ++provider_index) {
-    uint64_t provider_id_offset =
-        loom_bytecode_reader_cursor_absolute_position(&cursor);
-    uint64_t provider_id = 0;
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-        &reader->decoder, &cursor, &provider_id));
-    iree_string_view_t provider = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_string_ref(
-        reader, provider_id, IREE_SV("provider_string_id"), provider_id_offset,
-        &provider));
-    if (provider_index > 0 &&
-        iree_string_view_compare(previous_provider, provider) >= 0) {
-      return loom_bytecode_reader_emit_invalid_field(
-          &reader->decoder, IREE_SV("PROVIDER_IMPORTS"), IREE_SV("provider"),
-          provider_index, IREE_SV("provider_string_id"), provider_id_offset,
-          IREE_SV("providers_must_be_strictly_sorted_by_exact_key"));
-    }
-    previous_provider = provider;
-
-    uint64_t anchor_count_offset =
-        loom_bytecode_reader_cursor_absolute_position(&cursor);
-    uint64_t anchor_count = 0;
-    IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-        &reader->decoder, &cursor, &anchor_count));
-    if (anchor_count > UINT16_MAX ||
-        anchor_count > total_anchor_count - anchor_index) {
-      return loom_bytecode_reader_emit_invalid_field(
-          &reader->decoder, IREE_SV("PROVIDER_IMPORTS"), IREE_SV("provider"),
-          provider_index, IREE_SV("anchor_count"), anchor_count_offset,
-          IREE_SV("provider_anchor_count_exceeds_declared_total"));
-    }
-
-    loom_bytecode_reader_provider_import_t* provider_import =
-        &reader->view.provider_imports.values[provider_index];
-    provider_import->provider_id = (loom_string_id_t)provider_id;
-    provider_import->first_anchor_index = (uint32_t)anchor_index;
-    provider_import->anchor_count = (uint32_t)anchor_count;
-
-    iree_string_view_t previous_anchor = iree_string_view_empty();
-    for (iree_host_size_t local_anchor_index = 0;
-         local_anchor_index < (iree_host_size_t)anchor_count;
-         ++local_anchor_index, ++anchor_index) {
-      uint64_t symbol_index_offset =
-          loom_bytecode_reader_cursor_absolute_position(&cursor);
-      uint64_t symbol_index = 0;
-      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
-          &reader->decoder, &cursor, &symbol_index));
-      if (symbol_index >= reader->view.symbols.count) {
-        return loom_bytecode_reader_emit_invalid_field(
-            &reader->decoder, IREE_SV("PROVIDER_IMPORTS"), IREE_SV("anchor"),
-            anchor_index, IREE_SV("symbol_index"), symbol_index_offset,
-            IREE_SV("provider_anchor_symbol_index_is_out_of_range"));
-      }
-      iree_string_view_t anchor_name =
-          reader->view.strings
-              .values[reader->view.symbols.name_ids[symbol_index]];
-      if (local_anchor_index > 0 &&
-          iree_string_view_compare(previous_anchor, anchor_name) >= 0) {
-        return loom_bytecode_reader_emit_invalid_field(
-            &reader->decoder, IREE_SV("PROVIDER_IMPORTS"), IREE_SV("anchor"),
-            anchor_index, IREE_SV("symbol_index"), symbol_index_offset,
-            IREE_SV("provider_anchors_must_be_strictly_sorted_by_name"));
-      }
-      previous_anchor = anchor_name;
-      reader->view.provider_imports.anchors[anchor_index] = (loom_symbol_ref_t){
-          .module_id = 0, .symbol_id = (uint16_t)symbol_index};
-      if (reader->view.symbols.kinds[symbol_index] ==
-          LOOM_BYTECODE_SYMBOL_ANCHOR) {
-        anchor_usage_bits[symbol_index / 64] |= UINT64_C(1)
-                                                << (symbol_index % 64);
-      }
-    }
-
-    IREE_RETURN_IF_ERROR(loom_bytecode_source_trivia_materialize(
-        &reader->decoder, &cursor, reader->arena,
-        &provider_import->source_trivia));
-  }
-
-  if (anchor_index != (iree_host_size_t)total_anchor_count) {
-    return loom_bytecode_reader_emit_invalid_field(
-        &reader->decoder, IREE_SV("PROVIDER_IMPORTS"), IREE_SV("header"), 0,
-        IREE_SV("total_anchor_count"), provider_count_offset,
-        IREE_SV("provider_anchor_records_do_not_match_declared_total"));
-  }
-  for (iree_host_size_t symbol_index = 0;
-       symbol_index < reader->view.symbols.count; ++symbol_index) {
-    if (reader->view.symbols.kinds[symbol_index] !=
-        LOOM_BYTECODE_SYMBOL_ANCHOR) {
-      continue;
-    }
-    if ((anchor_usage_bits[symbol_index / 64] &
-         (UINT64_C(1) << (symbol_index % 64))) == 0) {
-      return loom_bytecode_reader_emit_invalid_field(
-          &reader->decoder, IREE_SV("PROVIDER_IMPORTS"), IREE_SV("anchor"),
-          symbol_index, IREE_SV("symbol_index"),
-          provider_imports_section->absolute_offset,
-          IREE_SV("provider_anchor_symbol_is_not_used_by_any_provider"));
-    }
-  }
-
-  return loom_bytecode_reader_expect_empty(&reader->decoder, &cursor,
-                                           IREE_SV("PROVIDER_IMPORTS"));
-}
-
-// Keep index-only retained allocation out of shared module validation so full
-// reads do not pay its instruction-cache cost.
-IREE_ATTRIBUTE_NOINLINE static iree_status_t
-loom_bytecode_reader_project_provider_imports(
-    const loom_bytecode_reader_module_view_t* view,
-    loom_bytecode_module_metadata_t* metadata,
-    iree_arena_allocator_t* retained_arena) {
-  metadata->provider_import_count = view->provider_imports.count;
-  if (view->provider_imports.count > 0) {
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(retained_arena, view->provider_imports.count,
-                                  sizeof(*metadata->provider_imports),
-                                  (void**)&metadata->provider_imports));
-  }
-  metadata->provider_import_anchor_count = view->provider_imports.anchor_count;
-  if (view->provider_imports.anchor_count > 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        retained_arena, view->provider_imports.anchor_count,
-        sizeof(*metadata->provider_import_anchor_symbol_indices),
-        (void**)&metadata->provider_import_anchor_symbol_indices));
-  }
-
-  for (iree_host_size_t provider_index = 0;
-       provider_index < view->provider_imports.count; ++provider_index) {
-    const loom_bytecode_reader_provider_import_t* provider_import =
-        &view->provider_imports.values[provider_index];
-    iree_string_view_t* retained_comments = NULL;
-    if (provider_import->source_trivia.comment_count > 0) {
-      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          retained_arena, provider_import->source_trivia.comment_count,
-          sizeof(*retained_comments), (void**)&retained_comments));
-      memcpy(retained_comments, provider_import->source_trivia.comments,
-             provider_import->source_trivia.comment_count *
-                 sizeof(*retained_comments));
-    }
-    metadata->provider_imports[provider_index] =
-        (loom_bytecode_provider_import_metadata_t){
-            .provider = view->strings.values[provider_import->provider_id],
-            .first_anchor_index = provider_import->first_anchor_index,
-            .anchor_count = provider_import->anchor_count,
-            .leading_blank_line =
-                provider_import->source_trivia.leading_blank_line,
-            .comments = retained_comments,
-            .comment_count = provider_import->source_trivia.comment_count,
-        };
-  }
-  for (iree_host_size_t anchor_index = 0;
-       anchor_index < view->provider_imports.anchor_count; ++anchor_index) {
-    metadata->provider_import_anchor_symbol_indices[anchor_index] =
-        view->provider_imports.anchors[anchor_index].symbol_id;
-  }
   return iree_ok_status();
 }
 
@@ -1012,10 +770,6 @@ static iree_status_t loom_bytecode_reader_prepare_module(
       LOOM_BYTECODE_SECTION_SYMBOLS, &reader->view.sections.symbols));
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_require_section(
       reader, reader->view.sections.values, reader->view.sections.count,
-      LOOM_BYTECODE_SECTION_PROVIDER_IMPORTS,
-      &reader->view.sections.provider_imports));
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_require_section(
-      reader, reader->view.sections.values, reader->view.sections.count,
       LOOM_BYTECODE_SECTION_SYMBOL_REFERENCES,
       &reader->view.sections.symbol_references));
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_require_section(
@@ -1084,8 +838,6 @@ static iree_status_t loom_bytecode_reader_validate_module(
   IREE_RETURN_IF_ERROR(loom_bytecode_symbols_validate(
       &symbol_validator, reader->view.sections.symbols,
       reader->view.sections.ir));
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_provider_imports(
-      reader, reader->view.sections.provider_imports));
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_symbol_references(
       reader, reader->view.sections.symbol_references));
 
@@ -1096,10 +848,6 @@ static iree_status_t loom_bytecode_reader_validate_module(
   reader->view.summary.op_name_count = reader->view.ops.count;
   reader->view.summary.location_count = reader->view.locations.count;
   reader->view.summary.symbol_count = reader->view.symbols.count;
-  reader->view.summary.provider_import_count =
-      reader->view.provider_imports.count;
-  reader->view.summary.provider_import_anchor_count =
-      reader->view.provider_imports.anchor_count;
   return iree_ok_status();
 }
 
@@ -1302,8 +1050,6 @@ static iree_status_t loom_bytecode_reader_index_module(
   IREE_RETURN_IF_ERROR(loom_bytecode_symbols_index(
       &symbol_validator, reader->view.sections.symbols,
       reader->view.sections.ir, retained_arena, metadata));
-  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_provider_imports(
-      reader, reader->view.sections.provider_imports));
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_index_symbol_references(
       reader, reader->view.sections.symbol_references, retained_arena,
       metadata));
@@ -1315,13 +1061,8 @@ static iree_status_t loom_bytecode_reader_index_module(
   reader->view.summary.op_name_count = reader->view.ops.count;
   reader->view.summary.location_count = reader->view.locations.count;
   reader->view.summary.symbol_count = reader->view.symbols.count;
-  reader->view.summary.provider_import_count =
-      reader->view.provider_imports.count;
-  reader->view.summary.provider_import_anchor_count =
-      reader->view.provider_imports.anchor_count;
   metadata->summary = reader->view.summary;
-  return loom_bytecode_reader_project_provider_imports(&reader->view, metadata,
-                                                       retained_arena);
+  return iree_ok_status();
 }
 
 static void loom_bytecode_reader_initialize_module(

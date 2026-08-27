@@ -39,10 +39,6 @@ typedef struct loom_bytecode_module_metadata_summary_t {
   uint64_t location_count;
   // SYMBOLS table entry count.
   uint64_t symbol_count;
-  // PROVIDER_IMPORTS record count.
-  uint64_t provider_import_count;
-  // Total provider anchor count.
-  uint64_t provider_import_anchor_count;
   // Dependency occurrence count across module and symbol rows.
   uint64_t dependency_count;
   // Abstract provider demand occurrence count across symbol rows.

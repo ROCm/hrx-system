@@ -62,14 +62,8 @@ loom_cc_binary(
 )
 
 iree_executable_test(
-    name = "link_modules_declaration_test",
+    name = "link_modules_test",
     src = ":link_modules",
-)
-
-iree_executable_test(
-    name = "link_modules_provider_import_test",
-    src = ":link_modules",
-    args = ["--provider-import"],
 )
 
 loom_cc_binary(

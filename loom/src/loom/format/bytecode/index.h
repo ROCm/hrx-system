@@ -172,22 +172,6 @@ typedef struct loom_bytecode_symbol_metadata_t {
   uint8_t region_payload_count;
 } loom_bytecode_symbol_metadata_t;
 
-// One compile-time provider import and its slice in the module anchor array.
-typedef struct loom_bytecode_provider_import_metadata_t {
-  // Borrowed provider key view from the module STRINGS table.
-  iree_string_view_t provider;
-  // First entry in provider_import_anchor_symbol_indices.
-  uint32_t first_anchor_index;
-  // Number of symbol ordinals in this provider's contiguous slice.
-  uint32_t anchor_count;
-  // True when the import has authored leading vertical separation.
-  bool leading_blank_line;
-  // Arena-owned array of views borrowing authored comment payloads.
-  const iree_string_view_t* comments;
-  // Number of authored comments.
-  uint16_t comment_count;
-} loom_bytecode_provider_import_metadata_t;
-
 // Dependency and abstract-provider slices owned by one SYMBOLS ordinal.
 typedef struct loom_bytecode_symbol_reference_metadata_t {
   // First entry in dependency_symbol_indices.
@@ -277,14 +261,6 @@ typedef struct loom_bytecode_module_metadata_t {
   iree_host_size_t export_count;
   // Arena-owned symbol indices in export offset table order.
   uint32_t* export_symbol_indices;
-  // Number of compile-time provider import records.
-  iree_host_size_t provider_import_count;
-  // Arena-owned provider records in canonical provider order.
-  loom_bytecode_provider_import_metadata_t* provider_imports;
-  // Number of entries in the flat provider anchor ordinal array.
-  iree_host_size_t provider_import_anchor_count;
-  // Arena-owned SYMBOLS ordinals sliced by provider_imports.
-  uint32_t* provider_import_anchor_symbol_indices;
   // Number of module-root dependency ordinals at the start of
   // dependency_symbol_indices.
   uint32_t module_dependency_count;

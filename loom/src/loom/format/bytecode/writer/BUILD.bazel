@@ -96,7 +96,6 @@ loom_cc_library(
         "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
-        "//loom/src/loom/ops/module",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],

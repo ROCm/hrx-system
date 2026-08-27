@@ -30,14 +30,7 @@ typedef struct loomc_link_index_builder_source_t {
   loomc_source_t* source;
   // Copied provider label.
   loomc_string_view_t provider_name;
-  // Copied compile-time provider key aliases.
-  struct {
-    // Copied key strings.
-    loomc_string_view_t* values;
-    // Number of key strings.
-    loomc_host_size_t count;
-  } import_keys;
-  // Provider search role.
+  // Provider linkage role.
   loomc_link_provider_role_t role;
 } loomc_link_index_builder_source_t;
 
@@ -84,13 +77,6 @@ struct loomc_link_index_t {
     // Number of retained source records.
     loomc_host_size_t count;
   } sources;
-  // Compile-time provider key bindings.
-  struct {
-    // Owned key-to-provider rows sorted by the resolver.
-    loom_link_provider_binding_t* values;
-    // Immutable resolver borrowing values.
-    loom_link_provider_resolver_t resolver;
-  } provider_bindings;
 };
 
 static iree_allocator_t loomc_link_index_iree_allocator(
@@ -142,18 +128,6 @@ static loomc_status_t loomc_link_index_validate_source_options(
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "unknown link provider role");
   }
-  if (options->import_key_count != 0 && options->import_keys == NULL) {
-    return loomc_make_status(
-        LOOMC_STATUS_INVALID_ARGUMENT,
-        "link provider import key count is nonzero but import_keys is NULL");
-  }
-  for (loomc_host_size_t i = 0; i < options->import_key_count; ++i) {
-    const loomc_string_view_t key = options->import_keys[i];
-    if (loomc_string_view_is_empty(key) || key.data == NULL) {
-      return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
-                               "link provider import keys must not be empty");
-    }
-  }
   return loomc_ok_status();
 }
 
@@ -183,10 +157,6 @@ static void loomc_link_index_builder_source_deinitialize(
     loomc_allocator_t allocator, loomc_link_index_builder_source_t* source) {
   loomc_source_release(source->source);
   loomc_allocator_free(allocator, (void*)source->provider_name.data);
-  for (loomc_host_size_t i = 0; i < source->import_keys.count; ++i) {
-    loomc_allocator_free(allocator, (void*)source->import_keys.values[i].data);
-  }
-  loomc_allocator_free(allocator, source->import_keys.values);
   *source = (loomc_link_index_builder_source_t){0};
 }
 
@@ -201,22 +171,6 @@ static loomc_status_t loomc_link_index_builder_source_initialize(
   if (options != NULL) {
     status = loomc_string_view_clone(options->provider_name, allocator,
                                      &source.provider_name);
-  }
-  if (loomc_status_is_ok(status) && options != NULL &&
-      options->import_key_count > 0) {
-    status = loomc_status_from_iree(iree_allocator_malloc_array(
-        loomc_link_index_iree_allocator(allocator), options->import_key_count,
-        sizeof(*source.import_keys.values),
-        (void**)&source.import_keys.values));
-  }
-  for (loomc_host_size_t i = 0; loomc_status_is_ok(status) && options != NULL &&
-                                i < options->import_key_count;
-       ++i) {
-    status = loomc_string_view_clone(options->import_keys[i], allocator,
-                                     &source.import_keys.values[i]);
-    if (loomc_status_is_ok(status)) {
-      ++source.import_keys.count;
-    }
   }
   if (loomc_status_is_ok(status)) {
     *out_source = source;
@@ -458,63 +412,9 @@ static loomc_status_t loomc_link_index_add_source_to_index(
   return loomc_link_index_mark_failed(builder->result);
 }
 
-static loomc_status_t loomc_link_index_prepare_provider_bindings(
-    loomc_link_index_builder_t* builder,
-    loom_link_provider_binding_t** out_bindings,
-    loom_link_provider_resolver_t* out_resolver) {
-  *out_bindings = NULL;
-  *out_resolver = (loom_link_provider_resolver_t){0};
-
-  loomc_host_size_t binding_count = 0;
-  for (loomc_host_size_t i = 0; i < builder->sources.count; ++i) {
-    if (!iree_host_size_checked_add(
-            binding_count, builder->sources.values[i].import_keys.count,
-            &binding_count)) {
-      return loomc_make_status(LOOMC_STATUS_RESOURCE_EXHAUSTED,
-                               "link provider binding count overflow");
-    }
-  }
-  if (binding_count == 0) {
-    return loomc_ok_status();
-  }
-
-  loom_link_provider_binding_t* bindings = NULL;
-  LOOMC_RETURN_IF_ERROR(loomc_status_from_iree(iree_allocator_malloc_array(
-      loomc_link_index_iree_allocator(builder->allocator), binding_count,
-      sizeof(*bindings), (void**)&bindings)));
-  loomc_host_size_t binding_ordinal = 0;
-  for (loomc_host_size_t provider_ordinal = 0;
-       provider_ordinal < builder->sources.count; ++provider_ordinal) {
-    const loomc_link_index_builder_source_t* source =
-        &builder->sources.values[provider_ordinal];
-    for (loomc_host_size_t i = 0; i < source->import_keys.count; ++i) {
-      bindings[binding_ordinal++] = (loom_link_provider_binding_t){
-          .key = iree_string_view_from_loomc(source->import_keys.values[i]),
-          .provider_ordinal = provider_ordinal,
-      };
-    }
-  }
-
-  iree_status_t prepare_status = loom_link_provider_resolver_prepare(
-      loom_link_module_index_provider_count(builder->index), bindings,
-      binding_count, out_resolver);
-  if (!iree_status_is_ok(prepare_status)) {
-    loomc_status_t status = loomc_result_fail_status_diagnostic_consume(
-        builder->result, /*source=*/NULL, LOOMC_DIAGNOSTIC_SEVERITY_ERROR,
-        loomc_make_cstring_view("LINK_INDEX/PROVIDER_BINDINGS"),
-        loomc_status_from_iree(prepare_status));
-    loomc_allocator_free(builder->allocator, bindings);
-    return status;
-  }
-
-  *out_bindings = bindings;
-  return loomc_ok_status();
-}
-
 static void loomc_link_index_destroy(loomc_link_index_t* link_index) {
   loomc_allocator_t allocator = link_index->allocator;
   loom_link_module_index_free(link_index->index);
-  loomc_allocator_free(allocator, link_index->provider_bindings.values);
   for (loomc_host_size_t i = 0; i < link_index->sources.count; ++i) {
     loomc_link_index_builder_source_deinitialize(
         allocator, &link_index->sources.values[i]);
@@ -758,21 +658,10 @@ loomc_status_t loomc_link_index_builder_finish(
     return loomc_ok_status();
   }
 
-  loom_link_provider_binding_t* provider_bindings = NULL;
-  loom_link_provider_resolver_t provider_resolver = {0};
-  LOOMC_RETURN_IF_ERROR(loomc_link_index_prepare_provider_bindings(
-      builder, &provider_bindings, &provider_resolver));
-  if (!loomc_result_succeeded(builder->result)) {
-    *out_result = builder->result;
-    builder->result = NULL;
-    return loomc_ok_status();
-  }
-
   loomc_link_index_t* link_index = NULL;
   loomc_status_t status = loomc_allocator_malloc(
       builder->allocator, sizeof(*link_index), (void**)&link_index);
   if (!loomc_status_is_ok(status)) {
-    loomc_allocator_free(builder->allocator, provider_bindings);
     return status;
   }
   memset(link_index, 0, sizeof(*link_index));
@@ -783,8 +672,6 @@ loomc_status_t loomc_link_index_builder_finish(
   link_index->index = builder->index;
   link_index->sources.values = builder->sources.values;
   link_index->sources.count = builder->sources.count;
-  link_index->provider_bindings.values = provider_bindings;
-  link_index->provider_bindings.resolver = provider_resolver;
 
   builder->context = NULL;
   builder->block_pool = NULL;
@@ -921,11 +808,6 @@ loomc_context_t* loomc_link_index_context(
 const loom_link_module_index_t* loomc_link_index_module_index(
     const loomc_link_index_t* link_index) {
   return link_index ? link_index->index : NULL;
-}
-
-const loom_link_provider_resolver_t* loomc_link_index_provider_resolver(
-    const loomc_link_index_t* link_index) {
-  return link_index ? &link_index->provider_bindings.resolver : NULL;
 }
 
 const loomc_source_t* loomc_link_index_source_for_provider(

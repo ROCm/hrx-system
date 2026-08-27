@@ -1,7 +1,4 @@
-// The declaration states the exact callable contract while the import limits
-// its possible definitions to the provider bound as "layer.loom".
-module.import "layer.loom" [@project_layer]
-
+// The declaration states the exact callable contract required from a library.
 func.decl @project_layer(%value: i32) -> (i32)
 
 func.def public @entry(%value: i32) -> (i32) {

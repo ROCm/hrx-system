@@ -216,10 +216,9 @@ which undeclared symbol a call intended. Linking the `model` archive against
 the `layer` archive resolves the exact declaration; omitting that dependency
 leaves an unresolved program symbol.
 
-This example deliberately uses the import-free form because its Bazel target
-already supplies the complete layer archive. Larger separately packaged
-programs may constrain exact program definitions with
-[`module.import`](source-modules.md#declarations-state-contracts-imports-state-availability).
+Its Bazel target supplies the complete layer archive. The exact declaration is
+resolved from the unique exported program definition in that explicit library
+universe.
 The [linking workflow](../workflows/link-and-package.md#link-transitive-dependencies-incrementally)
 shows the same model-to-layer-to-kernel shape across a standalone partial
 artifact.

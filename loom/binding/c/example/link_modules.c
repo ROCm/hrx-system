@@ -19,29 +19,10 @@ static const char kHarnessText[] =
     "  func.return %y : index\n"
     "}\n";
 
-static const char kProviderImportHarnessText[] =
-    "module.import \"identity-library\" [@identity]\n"
-    "config.decl @model.hidden_size : %value: index where [range(%value, 0, "
-    "8192), mul(%value, 16)]\n"
-    "func.decl @identity(%x: index) -> (index)\n"
-    "func.def public @caller() -> (index) {\n"
-    "  %hidden = config.get @model.hidden_size : index\n"
-    "  %y = func.call @identity(%hidden) : (index) -> (index)\n"
-    "  func.return %y : index\n"
-    "}\n";
-
 static const char kLibraryText[] =
     "func.def public @identity(%x: index) -> (index) {\n"
     "  func.return %x : index\n"
     "}\n";
-
-typedef enum link_modules_mode_e {
-  // Resolves declarations from the explicitly supplied provider universe.
-  LINK_MODULES_MODE_DECLARATION_ONLY = 0,
-
-  // Constrains declaration resolution to a logical provider import key.
-  LINK_MODULES_MODE_PROVIDER_IMPORT = 1,
-} link_modules_mode_t;
 
 typedef struct link_modules_state_t {
   // Shared API context retained by sources, indexes, and prepared tools.
@@ -178,8 +159,7 @@ static loomc_status_t write_module_artifact_to_stdout(
   return status;
 }
 
-static loomc_status_t create_resources(link_modules_state_t* state,
-                                       link_modules_mode_t mode) {
+static loomc_status_t create_resources(link_modules_state_t* state) {
   loomc_status_t status =
       loomc_context_create(NULL, loomc_allocator_system(), &state->context);
   if (loomc_status_is_ok(status)) {
@@ -187,10 +167,7 @@ static loomc_status_t create_resources(link_modules_state_t* state,
                                     &state->workspace);
   }
   if (loomc_status_is_ok(status)) {
-    const char* harness_text = mode == LINK_MODULES_MODE_PROVIDER_IMPORT
-                                   ? kProviderImportHarnessText
-                                   : kHarnessText;
-    status = create_text_source("harness.loom", harness_text,
+    status = create_text_source("harness.loom", kHarnessText,
                                 &state->harness_source);
   }
   if (loomc_status_is_ok(status)) {
@@ -224,8 +201,7 @@ static loomc_status_t create_resources(link_modules_state_t* state,
   return status;
 }
 
-static loomc_status_t build_link_index(link_modules_state_t* state,
-                                       link_modules_mode_t mode) {
+static loomc_status_t build_link_index(link_modules_state_t* state) {
   const loomc_link_index_source_options_t harness_options = {
       .provider_name = loomc_make_cstring_view("harness"),
       .role = LOOMC_LINK_PROVIDER_ROLE_INPUT,
@@ -233,20 +209,14 @@ static loomc_status_t build_link_index(link_modules_state_t* state,
   loomc_status_t status = loomc_link_index_builder_add_source(
       state->index_builder, state->harness_source, &harness_options, NULL);
   if (loomc_status_is_ok(status)) {
-    // --8<-- [start:provider-key]
-    const loomc_string_view_t import_keys[] = {
-        loomc_make_cstring_view("identity-library"),
-    };
+    // --8<-- [start:library-source]
     const loomc_link_index_source_options_t library_options = {
         .provider_name = loomc_make_cstring_view("library"),
         .role = LOOMC_LINK_PROVIDER_ROLE_LIBRARY,
-        .import_keys =
-            mode == LINK_MODULES_MODE_PROVIDER_IMPORT ? import_keys : NULL,
-        .import_key_count = mode == LINK_MODULES_MODE_PROVIDER_IMPORT ? 1 : 0,
     };
     status = loomc_link_index_builder_add_source(
         state->index_builder, state->library_source, &library_options, NULL);
-    // --8<-- [end:provider-key]
+    // --8<-- [end:library-source]
   }
   if (loomc_status_is_ok(status)) {
     status = loomc_link_index_builder_finish(
@@ -319,13 +289,13 @@ static loomc_status_t compile_linked_module(link_modules_state_t* state) {
   return status;
 }
 
-static loomc_status_t run_link_modules_example(link_modules_mode_t mode) {
+static loomc_status_t run_link_modules_example(void) {
   link_modules_state_t state;
   link_modules_state_initialize(&state);
 
-  loomc_status_t status = create_resources(&state, mode);
+  loomc_status_t status = create_resources(&state);
   if (loomc_status_is_ok(status)) {
-    status = build_link_index(&state, mode);
+    status = build_link_index(&state);
   }
   if (loomc_status_is_ok(status)) {
     status = link_module(&state);
@@ -342,15 +312,12 @@ static loomc_status_t run_link_modules_example(link_modules_mode_t mode) {
 }
 
 int main(int argc, char** argv) {
-  link_modules_mode_t mode = LINK_MODULES_MODE_DECLARATION_ONLY;
-  if (argc == 2 && strcmp(argv[1], "--provider-import") == 0) {
-    mode = LINK_MODULES_MODE_PROVIDER_IMPORT;
-  } else if (argc != 1) {
-    fprintf(stderr, "usage: %s [--provider-import]\n", argv[0]);
+  if (argc != 1) {
+    fprintf(stderr, "usage: %s\n", argv[0]);
     return 64;
   }
 
-  loomc_status_t status = run_link_modules_example(mode);
+  loomc_status_t status = run_link_modules_example();
   if (loomc_status_is_ok(status)) {
     return 0;
   }

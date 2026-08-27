@@ -72,12 +72,12 @@ def test_builders_pyi_omits_exact_result_type_parameter() -> None:
 
 def test_builders_pyi_disambiguates_dialect_from_facade_member() -> None:
     module_dialect = Dialect("module", dialect_id=0x7F)
-    generated = generate_builder_stub_files([Op("module.import", group=module_dialect, format=[])])
+    generated = generate_builder_stub_files([Op("module.compose", group=module_dialect, format=[])])
 
     root = generated["loom/py/loom/builders.pyi"]
     module_stub = generated["loom/py/loom/dialect/module/builders/__init__.pyi"]
     assert "def module_(self) -> ModuleBuilder: ..." in root
-    assert "def import_(" in module_stub
+    assert "def compose(" in module_stub
 
 
 def test_builders_pyi_shards_category_grouped_dialects() -> None:

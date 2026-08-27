@@ -193,8 +193,6 @@ class LinkCatalogFixture {
     const loomc_link_index_source_options_t source_options = {
         /*.provider_name=*/loomc_make_cstring_view("catalog"),
         /*.role=*/LOOMC_LINK_PROVIDER_ROLE_INPUT,
-        /*.import_keys=*/nullptr,
-        /*.import_key_count=*/0,
     };
     IREE_RETURN_IF_ERROR(to_iree_status(loomc_link_index_builder_add_source(
         builder_ptr.get(), source_.get(), &source_options,

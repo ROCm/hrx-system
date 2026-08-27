@@ -88,10 +88,7 @@
               "%y = func.call @identity(%x) : (i32) -> (i32)",
               "func.return %y : i32"
             ],
-            "not_contains": [
-              "module.import",
-              "func.decl @identity"
-            ]
+            "not_contains": ["func.decl @identity"]
           }
         }
       ]
@@ -233,34 +230,34 @@
       ]
     },
     {
-      "name": "relinks partial provider bytecode",
+      "name": "relinks partial library bytecode",
       "steps": [
         {
           "name": "write-root",
           "write": {
             "path": "{tmp}/root.loom",
-            "text": "module.import \"provider-a.loom\" [@a]\nmodule.import \"provider-b.loom\" [@b]\n\nfunc.decl @a(%x: i32) -> (i32)\nfunc.decl @b(%x: i32) -> (i32)\n\nfunc.def public @entry(%x: i32) -> (i32) {\n  %a = func.call @a(%x) : (i32) -> (i32)\n  %b = func.call @b(%a) : (i32) -> (i32)\n  func.return %b : i32\n}\n"
+            "text": "func.decl @a(%x: i32) -> (i32)\nfunc.decl @b(%x: i32) -> (i32)\n\nfunc.def public @entry(%x: i32) -> (i32) {\n  %a = func.call @a(%x) : (i32) -> (i32)\n  %b = func.call @b(%a) : (i32) -> (i32)\n  func.return %b : i32\n}\n"
           }
         },
         {
           "name": "write-provider-a",
           "write": {
             "path": "{tmp}/provider-a.loom",
-            "text": "module.import \"provider-c.loom\" [@c]\n\nfunc.decl @c(%x: i32) -> (i32)\n\nfunc.def @a(%x: i32) -> (i32) {\n  %helper = func.call @a_helper(%x) : (i32) -> (i32)\n  %c = func.call @c(%helper) : (i32) -> (i32)\n  func.return %c : i32\n}\n\nfunc.def @a_helper(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n"
+            "text": "func.decl @c(%x: i32) -> (i32)\n\nfunc.def public @a(%x: i32) -> (i32) {\n  %helper = func.call @a_helper(%x) : (i32) -> (i32)\n  %c = func.call @c(%helper) : (i32) -> (i32)\n  func.return %c : i32\n}\n\nfunc.def @a_helper(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n"
           }
         },
         {
           "name": "write-provider-b",
           "write": {
             "path": "{tmp}/provider-b.loom",
-            "text": "func.def @b(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n"
+            "text": "func.def public @b(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n"
           }
         },
         {
           "name": "write-provider-c",
           "write": {
             "path": "{tmp}/provider-c.loom",
-            "text": "func.def @c(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n"
+            "text": "func.def public @c(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n"
           }
         },
         {
@@ -269,7 +266,7 @@
             "tool": "loom-link",
             "args": [
               "root.loom",
-              "provider-a.loom",
+              "--library=provider-a.loom",
               "--root=@entry",
               "--allow-unresolved",
               "--to=bc",
@@ -292,13 +289,12 @@
           "stdout": {
             "contains": {
               "unordered": [
-                "module.import \"provider-b.loom\" [@b]",
-                "module.import \"provider-c.loom\" [@c]",
                 "func.def @a(",
-                "func.def @a_helper("
+                "func.def @a_helper(",
+                "func.decl @b(",
+                "func.decl @c("
               ]
-            },
-            "not_contains": ["provider-a.loom\" [@a]"]
+            }
           }
         },
         {
@@ -311,7 +307,7 @@
             "nonzero": true
           },
           "stderr": {
-            "contains": ["has no available concrete definition"]
+            "contains": ["unresolved exact declaration '@b'"]
           }
         },
         {
@@ -320,7 +316,7 @@
             "tool": "loom-link",
             "args": [
               "partial.loombc",
-              "provider-b.loom",
+              "--library=provider-b.loom",
               "--library=provider-c.loom",
               "--root=@entry"
             ]
@@ -335,7 +331,7 @@
                 "func.def @c("
               ]
             },
-            "not_contains": ["module.import", "func.decl"]
+            "not_contains": ["func.decl"]
           }
         }
       ]

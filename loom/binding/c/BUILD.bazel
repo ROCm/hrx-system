@@ -177,7 +177,6 @@ loom_cc_library(
         "//loom/src/loom/link:index_materializer",
         "//loom/src/loom/link:linker",
         "//loom/src/loom/link:module_index",
-        "//loom/src/loom/link:provider_resolver",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops:op_registry",
         "//loom/src/loom/ops/func",

@@ -43,7 +43,6 @@ from loom.format.bytecode.writer import (
     SECTION_IR,
     SECTION_LOCATIONS,
     SECTION_OPS,
-    SECTION_PROVIDER_IMPORTS,
     SECTION_SOURCE_TRIVIA,
     SECTION_SOURCES,
     SECTION_STRINGS,
@@ -54,7 +53,6 @@ from loom.format.bytecode.writer import (
     SOURCE_TRIVIA_LEADING_BLANK_LINE,
     SYMBOL_FLAG_EXPORT,
     SYMBOL_INTERFACE_FLAG_MASK,
-    SYMBOL_KIND_ANCHOR,
 )
 from loom.ir import (
     ATTR_AGGREGATE_MAX_NESTING_DEPTH,
@@ -252,10 +250,6 @@ class BytecodeReader:
         if symbol_references_data is None:
             raise BytecodeError("bytecode must have a SYMBOL_REFERENCES section")
         self._read_symbol_references_section(symbol_references_data)
-        provider_imports_data = sections.get(SECTION_PROVIDER_IMPORTS)
-        if provider_imports_data is None:
-            raise BytecodeError("bytecode must have a PROVIDER_IMPORTS section")
-        self._read_provider_imports_section(provider_imports_data, module)
 
         allocation_counts = self._module_allocation_counts(module)
         if allocation_counts != (
@@ -1328,9 +1322,6 @@ class BytecodeReader:
                     )
                 )
                 decoded_region_payload_count += region_payload_count
-            elif kind == SYMBOL_KIND_ANCHOR:
-                if flags != 0 or visibility != 1:
-                    raise BytecodeError("provider anchor must be private and unflagged")
             else:
                 raise BytecodeError(f"unsupported symbol kind: {kind}")
             self._wire_symbol_root_region_counts.append(root_region_count)
@@ -1358,73 +1349,6 @@ class BytecodeReader:
             )
         if offset != len(sym_data):
             raise BytecodeError("SYMBOLS section has trailing bytes")
-
-    def _read_provider_imports_section(
-        self, section: tuple[int, bytes], module: Module
-    ) -> None:
-        """Read compile-time provider records using direct wire symbol ordinals."""
-        _, data = section
-        offset = 0
-        provider_count, offset = decode_varint(data, offset)
-        total_anchor_count, offset = decode_varint(data, offset)
-        anchor_count = 0
-        previous_provider: bytes | None = None
-        used_wire_anchors = bytearray(len(self._wire_symbol_names))
-        for _ in range(provider_count):
-            provider_id, offset = decode_varint(data, offset)
-            if provider_id >= len(self._strings):
-                raise BytecodeError("provider string id is out of range")
-            provider = self._strings[provider_id]
-            provider_bytes = provider.encode("utf-8")
-            if previous_provider is not None and previous_provider >= provider_bytes:
-                raise BytecodeError("providers must be strictly sorted by exact key")
-            previous_provider = provider_bytes
-
-            provider_anchor_count, offset = decode_varint(data, offset)
-            if provider_anchor_count > 0xFFFF:
-                raise BytecodeError("provider anchor count exceeds UINT16_MAX")
-            names: list[SymbolName] = []
-            previous_anchor: bytes | None = None
-            for _ in range(provider_anchor_count):
-                symbol_index, offset = decode_varint(data, offset)
-                if symbol_index >= len(self._wire_symbol_names):
-                    raise BytecodeError("provider anchor symbol index is out of range")
-                name = self._wire_symbol_names[symbol_index]
-                name_bytes = name.encode("utf-8")
-                if previous_anchor is not None and previous_anchor >= name_bytes:
-                    raise BytecodeError(
-                        "provider anchors must be strictly sorted by name"
-                    )
-                previous_anchor = name_bytes
-                names.append(SymbolName(name))
-                if self._wire_symbol_kinds[symbol_index] == SYMBOL_KIND_ANCHOR:
-                    used_wire_anchors[symbol_index] = 1
-            anchor_count += provider_anchor_count
-
-            leading_blank_line, comments, offset = self._read_source_trivia(
-                data, offset
-            )
-            module.add_top_level_operation(
-                Operation(
-                    name="module.import",
-                    attributes={
-                        "provider": provider,
-                        "symbols": SymbolNameSet._from_canonical_values(tuple(names)),
-                    },
-                    comments=comments,
-                    leading_blank_line=leading_blank_line,
-                )
-            )
-
-        if anchor_count != total_anchor_count:
-            raise BytecodeError("provider anchor records do not match declared total")
-        for symbol_index, kind in enumerate(self._wire_symbol_kinds):
-            if kind == SYMBOL_KIND_ANCHOR and not used_wire_anchors[symbol_index]:
-                raise BytecodeError(
-                    "provider anchor symbol is not used by any provider"
-                )
-        if offset != len(data):
-            raise BytecodeError("PROVIDER_IMPORTS section has trailing bytes")
 
     def _read_symbol_references_section(self, section: tuple[int, bytes]) -> None:
         """Validate metadata-only dependency and abstract-provider rows."""
@@ -1573,7 +1497,7 @@ class BytecodeReader:
 
     def _validate_symbol_header(self, flags: int, kind: int, visibility: int) -> None:
         """Validate the common symbol record header."""
-        if kind > SYMBOL_KIND_ANCHOR:
+        if kind > SymbolKind.RECORD.value:
             raise BytecodeError(f"unsupported symbol kind: {kind}")
         if visibility not in (0, 1):
             raise BytecodeError(f"unsupported symbol visibility byte: {visibility}")

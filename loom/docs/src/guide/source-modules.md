@@ -50,16 +50,15 @@ and [`func.decl`](../reference/dialects/func/ops/decl.md) pairs. Contract-based
 [`template.apply`](../reference/dialects/template/ops/apply.md) is different:
 the using module carries a [`template.decl`](../reference/dialects/template/ops/decl.md)
 for the stable family signature, then asks the explicitly supplied library set
-for an implementation. Template families are not `module.import` anchors:
-callers do not know which target libraries may eventually contribute
-implementations, and provider paths never participate in matching.
+for an implementation. Callers do not know which target libraries may
+eventually contribute implementations, and source paths never participate in
+matching.
 
-## Declarations state contracts; imports state availability
+## Declarations state contracts; link invocations state availability
 
-A declaration is sufficient when the caller or build system intentionally
-constructs the complete provider universe. Add
-[`module.import`](../reference/dialects/module/ops/import.md) when the source
-should constrain an exact declaration to one or more provider keys:
+A declaration records what one independently verifiable module requires. The
+link invocation or embedding separately chooses the sources and libraries
+available to satisfy that contract:
 
 **Source:** [`loom/docs/examples/module-composition/root.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/module-composition/root.loom)
 
@@ -67,31 +66,33 @@ should constrain an exact declaration to one or more provider keys:
 --8<-- "examples/module-composition/root.loom"
 ```
 
-The declaration owns the function type and modifiers. The import separately
-states that a provider bound as `"layer.loom"` may define
-`@project_layer`. Parsing and verification never open that string as a path.
-`loom-link` binds the exact spelling of each supplied input path as a convenient
-CLI key; the LoomC API lets an embedding bind arbitrary logical keys to
-in-memory or bytecode sources.
+The declaration owns the function type and modifiers. It does not name a file,
+package, build target, or loading policy. `loom-link` receives paths because it
+is a command-line frontend; the LoomC API can receive the same text and
+bytecode entirely from memory.
 
-An import is availability metadata, not a use or a liveness root. If
-`@project_layer` is unreachable, the declaration, import anchor, and provider
-body can all disappear. Several imports may list the same declaration under
-alternative provider keys, and one import may list several exact declarations.
-The symbol list is a canonical set, so `loom-format` gives it deterministic
-ordering independent of how an author inserted the names.
+Exact compile-time declarations such as `func.decl`, `kernel.decl`, and
+`command.program.decl` use C-like global linkage. A definition in the module's
+direct input sources may satisfy the declaration regardless of visibility. A
+definition contributed by a library must be exported. At most one direct
+definition may own a global name. When no direct definition exists, exactly one
+compatible exported library definition may satisfy it. A supplied library does
+not replace a direct definition with the same name, and competing definitions
+within the applicable ownership class are errors rather than input-order
+choices.
 
-When no import names a declaration, ordinary symbol identity selects a
-compatible definition from the explicit input universe. When imports do name
-it, only definitions from providers bound to those keys are candidates. A
-strict final link rejects a reachable imported declaration that none of those
-providers satisfies; an unresolved partial link retains the declaration and
-remaining import for another link boundary.
+Reachability remains independent of availability. Supplying a library does not
+make all of its definitions live. If `@project_layer` is unreachable, neither
+its declaration nor its implementation enters a selective product. A strict
+final link rejects a reachable exact declaration with no definition. A link
+that allows unresolved symbols retains the declaration in a standalone
+relocatable module for another explicit link boundary.
 
-This provider constraint applies to exact `func.decl`, `kernel.decl`, and
-`command.program.decl` symbols. Template families remain open to providers from
-the explicitly supplied universe and are filtered by their contracts,
-signatures, facts, requirements, and priorities instead.
+A `func.decl` carrying runtime import attributes is different: it describes an
+external ABI symbol and is never satisfied from a Loom library. Template
+families also use their own model. The supplied libraries contribute
+`template.def` implementations, which are filtered by family contract,
+signature, facts, requirements, and priority during specialization.
 
 ## Definitions, declarations, and roots
 
@@ -113,9 +114,7 @@ This has two important consequences:
 - Passing one module does not authorize the linker to discover or pull in the
   transitive world. A declaration that no supplied module satisfies remains a
   declaration in an unresolved partial link and must be satisfied before a
-  consumer that requires a closed program can use it. A matching
-  `module.import` records the providers that may satisfy it without causing the
-  linker to open them.
+  consumer that requires a closed program can use it.
 
 The path or input order of a provider module does not give its templates
 priority. Template matching uses contracts, signatures, facts, requirements,

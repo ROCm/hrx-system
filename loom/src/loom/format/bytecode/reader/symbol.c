@@ -802,19 +802,9 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
         IREE_SV("flags"), kind_offset + 2,
         IREE_SV("public_definition_requires_export_flag"));
   }
-  if (kind == LOOM_BYTECODE_SYMBOL_ANCHOR &&
-      (visibility != LOOM_BYTECODE_SYMBOL_VISIBILITY_PRIVATE || flags != 0)) {
-    return loom_bytecode_reader_emit_invalid_field(
-        &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
-        IREE_SV("anchor_header"), kind_offset,
-        IREE_SV("provider_anchor_must_be_private_and_unflagged"));
-  }
   reader->view.symbols.flags[symbol_index] = flags;
   reader->view.symbols.kinds[symbol_index] = kind;
   reader->view.symbols.defining_op_ordinals[symbol_index] = UINT32_MAX;
-  if (kind == LOOM_BYTECODE_SYMBOL_ANCHOR) {
-    ++reader->view.symbols.unresolved_anchor_count;
-  }
   symbol_metadata->kind = (loom_bytecode_symbol_kind_t)kind;
   symbol_metadata->visibility = (loom_bytecode_symbol_visibility_t)visibility;
   symbol_metadata->flags = flags;

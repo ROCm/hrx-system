@@ -30,7 +30,6 @@ loom_cc_binary(
     loom::link::index_materializer
     loom::link::module_index
     loom::link::planner
-    loom::link::provider_resolver
     loom::target::configured::provider
     loom::target::provider
     loom::tooling::cli::help

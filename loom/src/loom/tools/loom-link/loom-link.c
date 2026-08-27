@@ -26,7 +26,6 @@
 #include "loom/link/index_materializer.h"
 #include "loom/link/module_index.h"
 #include "loom/link/planner.h"
-#include "loom/link/provider_resolver.h"
 #include "loom/target/configured/provider.h"
 #include "loom/target/provider.h"
 #include "loom/tooling/cli/help.h"
@@ -49,8 +48,8 @@ IREE_FLAG_LIST(string, root,
                "Root symbol to materialize in link/selective mode. Repeat for "
                "multiple roots.");
 IREE_FLAG_LIST(string, library,
-               "Library input searched after primary inputs. Repeat for "
-               "multiple libraries.");
+               "Library contributing exported exact definitions and template "
+               "implementations. Repeat for multiple libraries.");
 IREE_FLAG_LIST(string, config,
                "Compile/link-time config binding. Repeat as "
                "--config=key=value. Bindings specialize each linked analysis "
@@ -68,8 +67,8 @@ IREE_FLAG_NAMED(
     bool, require_resolved_config, "require-resolved-config", false,
     "Require all config.decl symbols to be materialized before output.");
 IREE_FLAG_NAMED(bool, allow_unresolved, "allow-unresolved", false,
-                "Preserve unresolved symbols and module.import entries for a "
-                "later link instead of rejecting them.");
+                "Preserve unresolved symbols for a later link instead of "
+                "rejecting them.");
 IREE_FLAG_NAMED(bool, print_config_schema, "print-config-schema", false,
                 "Print config schema JSON instead of linked Loom IR.");
 IREE_FLAG_NAMED(bool, print_plan, "print-plan", false,
@@ -106,13 +105,6 @@ typedef struct loom_link_cli_input_t {
 typedef struct loom_link_cli_index_t {
   // Provider-backed module index.
   loom_link_module_index_t* module_index;
-  // Exact input-path bindings borrowed by the prepared resolver.
-  struct {
-    // Owned mutable bindings sorted during resolver preparation.
-    loom_link_provider_binding_t* values;
-    // Immutable resolver view borrowing values.
-    loom_link_provider_resolver_t resolver;
-  } provider_bindings;
 } loom_link_cli_index_t;
 
 typedef struct loom_link_cli_prepare_state_t {
@@ -283,7 +275,6 @@ static void loom_link_cli_index_deinitialize(loom_link_cli_index_t* index,
   if (!index) {
     return;
   }
-  iree_allocator_free(allocator, index->provider_bindings.values);
   loom_link_module_index_free(index->module_index);
   *index = (loom_link_cli_index_t){0};
 }
@@ -423,17 +414,7 @@ static iree_status_t loom_link_cli_build_index(
   IREE_RETURN_IF_ERROR(
       loom_link_module_index_allocate(context, block_pool, allocator, &index));
 
-  const iree_host_size_t provider_binding_count = input_count;
-  loom_link_provider_binding_t* provider_bindings = NULL;
-  loom_link_provider_resolver_t provider_resolver = {0};
   iree_status_t status = iree_ok_status();
-  if (provider_binding_count != 0) {
-    status = iree_allocator_malloc_array(allocator, provider_binding_count,
-                                         sizeof(*provider_bindings),
-                                         (void**)&provider_bindings);
-  }
-
-  iree_host_size_t provider_binding_ordinal = 0;
   for (iree_host_size_t i = 0; i < input_count && iree_status_is_ok(status);
        ++i) {
     loom_link_cli_input_t* input = &inputs[i];
@@ -441,39 +422,24 @@ static iree_status_t loom_link_cli_build_index(
         .provider_name = input->filename,
         .role = input->role,
     };
-    iree_host_size_t provider_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
     if (input->materialized_module != NULL) {
       status = loom_link_module_index_add_materialized(
-          index, input->materialized_module, &options, &provider_ordinal);
+          index, input->materialized_module, &options,
+          /*out_provider_ordinal=*/NULL);
     } else {
       loom_bytecode_index_options_t index_options = {
           .diagnostic_sink = {.fn = loom_diagnostic_stderr_sink},
       };
       status = loom_link_module_index_add_bytecode(
           index, input->contents->const_buffer, input->filename, &index_options,
-          &options, &provider_ordinal);
+          &options, /*out_provider_ordinal=*/NULL);
     }
-    if (iree_status_is_ok(status)) {
-      provider_bindings[provider_binding_ordinal++] =
-          (loom_link_provider_binding_t){
-              .key = input->filename,
-              .provider_ordinal = provider_ordinal,
-          };
-    }
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_link_provider_resolver_prepare(
-        loom_link_module_index_provider_count(index), provider_bindings,
-        provider_binding_count, &provider_resolver);
   }
 
   if (!iree_status_is_ok(status)) {
-    iree_allocator_free(allocator, provider_bindings);
     loom_link_module_index_free(index);
   } else {
     out_index->module_index = index;
-    out_index->provider_bindings.values = provider_bindings;
-    out_index->provider_bindings.resolver = provider_resolver;
   }
   return status;
 }
@@ -831,10 +797,9 @@ static void loom_link_cli_print_agents_markdown(FILE* stream) {
       "\n"
       "### Inputs and libraries\n"
       "\n"
-      "Positional inputs are primary modules. `--library=path` adds provider\n"
-      "modules searched after primary inputs. Every supplied path publishes\n"
-      "its exact string as an opaque `module.import` provider key.\n"
-      "`--from=auto|text|bc` controls\n"
+      "Positional inputs jointly form the direct source module. A\n"
+      "`--library=path` contributes exported exact definitions and template\n"
+      "implementations. `--from=auto|text|bc` controls\n"
       "input decoding and `--to=text|bc` controls output encoding.\n"
       "\n"
       "### Archive and selective linking\n"
@@ -865,8 +830,8 @@ static void loom_link_cli_print_agents_markdown(FILE* stream) {
       "and template-selection step,\n"
       "so target and shape predicates can prune unreachable provider "
       "templates.\n"
-      "`--allow-unresolved` preserves imports whose libraries were not\n"
-      "supplied so the output can be linked again.\n");
+      "`--allow-unresolved` preserves unresolved declarations whose libraries\n"
+      "were not supplied so the output can be linked again.\n");
 }
 
 int main(int argc, char** argv) {
@@ -882,8 +847,8 @@ int main(int argc, char** argv) {
       "  loom-link --agents_md\n"
       "\n"
       "Input defaults to stdin only when no primary inputs or libraries are "
-      "provided. Positional inputs are searched before --library inputs.\n"
-      "Every supplied path is also its exact module.import provider key.\n"
+      "provided. Positional inputs jointly own private definitions; "
+      "--library inputs contribute exported definitions.\n"
       "Archive mode keeps every non-stripped symbol in stable input order. "
       "Link "
       "mode keeps explicit roots or exported input symbols and their reachable "
@@ -990,7 +955,6 @@ int main(int argc, char** argv) {
                                : LOOM_LINK_PLAN_UNRESOLVED_ERROR,
       .test_symbol_policy = FLAG_strip_check ? LOOM_LINK_PLAN_TEST_SYMBOL_STRIP
                                              : LOOM_LINK_PLAN_TEST_SYMBOL_KEEP,
-      .provider_resolver = &link_index.provider_bindings.resolver,
   };
   if (iree_status_is_ok(status) && !FLAG_list_symbols) {
     loom_target_low_descriptor_registry_t low_registry = {0};

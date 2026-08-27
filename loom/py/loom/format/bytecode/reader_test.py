@@ -1033,52 +1033,6 @@ class TestModuleStructure:
         loaded = _roundtrip(Module(name="empty"))
         assert len(loaded.symbols) == 0
 
-    def test_provider_imports_roundtrip(self) -> None:
-        module = Module(name="providers")
-        _make_func(module, "resolved", [])
-        module.add_top_level_operation(
-            Operation(
-                name="module.import",
-                attributes={
-                    "provider": "zeta.loom",
-                    "symbols": SymbolNameSet([SymbolName("missing_zeta")]),
-                },
-            )
-        )
-        module.add_top_level_operation(
-            Operation(
-                name="module.import",
-                attributes={
-                    "provider": "alpha.loom",
-                    "symbols": SymbolNameSet(
-                        [SymbolName("resolved"), SymbolName("missing_alpha")]
-                    ),
-                },
-                comments=(" Alpha provider.",),
-                leading_blank_line=True,
-            )
-        )
-
-        original_bytes = write_module(module)
-        loaded = read_module(original_bytes)
-
-        assert [symbol.name for symbol in loaded.symbols] == ["resolved"]
-        provider_imports = [op for op in loaded.body.ops if op.name == "module.import"]
-        assert [op.attributes["provider"] for op in provider_imports] == [
-            "alpha.loom",
-            "zeta.loom",
-        ]
-        assert provider_imports[0].attributes["symbols"] == SymbolNameSet(
-            [SymbolName("missing_alpha"), SymbolName("resolved")]
-        )
-        assert provider_imports[0].comments == (" Alpha provider.",)
-        assert provider_imports[0].leading_blank_line
-        assert provider_imports[1].attributes["symbols"] == SymbolNameSet(
-            [SymbolName("missing_zeta")]
-        )
-        loaded_bytes = write_module(loaded)
-        assert write_module(read_module(loaded_bytes)) == loaded_bytes
-
     def test_module_with_one_function(self) -> None:
         module = Module(name="test")
         _make_func(module, "f", [F32])

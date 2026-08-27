@@ -63,7 +63,6 @@ loom_cc_test(
     loom::format::text::parser
     loom::ir
     loom::ops::low
-    loom::ops::module
     loom::ops::op_defs
     loom::ops::template
     loom::ops::test

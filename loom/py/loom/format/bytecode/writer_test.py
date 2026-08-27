@@ -2129,11 +2129,11 @@ class TestCrossFormatRoundTrip:
         with pytest.raises(TypeError, match="uint8 ordinal"):
             write_module(module)
 
-    def test_unresolved_symbol_without_provider_anchor_fails_loud(self) -> None:
+    def test_symbol_without_serializable_kind_fails_loud(self) -> None:
         module = Module()
         module.add_symbol(Symbol(name="opaque", kind=SymbolKind.NONE))
 
-        with pytest.raises(ValueError, match="not a provider anchor"):
+        with pytest.raises(ValueError, match="has no serializable symbol kind"):
             write_module(module)
 
     def test_operand_dict_survives_bytecode(self) -> None:
