@@ -545,6 +545,52 @@ iree_string_view_t loom_target_compile_report_scalar_type_name(
   return iree_make_cstring_view(name);
 }
 
+iree_string_view_t loom_target_compile_report_native_layout_evidence_name(
+    loom_native_layout_evidence_t evidence) {
+  switch (evidence) {
+    case LOOM_NATIVE_LAYOUT_EVIDENCE_EXACT:
+      return IREE_SV("exact");
+    case LOOM_NATIVE_LAYOUT_EVIDENCE_METADATA_DEPENDENT:
+      return IREE_SV("metadata-dependent");
+    case LOOM_NATIVE_LAYOUT_EVIDENCE_PARAMETRIC:
+      return IREE_SV("parametric");
+    case LOOM_NATIVE_LAYOUT_EVIDENCE_OPAQUE:
+      return IREE_SV("opaque");
+    case LOOM_NATIVE_LAYOUT_EVIDENCE_NONE:
+    default:
+      return IREE_SV("none");
+  }
+}
+
+iree_string_view_t loom_target_compile_report_native_contraction_role_name(
+    loom_contract_operand_role_t role) {
+  switch (role) {
+    case LOOM_CONTRACT_OPERAND_ROLE_LHS:
+      return IREE_SV("lhs");
+    case LOOM_CONTRACT_OPERAND_ROLE_RHS:
+      return IREE_SV("rhs");
+    case LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR:
+      return IREE_SV("accumulator");
+    case LOOM_CONTRACT_OPERAND_ROLE_RESULT:
+      return IREE_SV("result");
+    default:
+      return IREE_SV("unknown");
+  }
+}
+
+iree_string_view_t loom_target_compile_report_native_physical_dimension_name(
+    loom_native_physical_dimension_t dimension) {
+  switch (dimension) {
+    case LOOM_NATIVE_PHYSICAL_DIMENSION_PARTICIPANT:
+      return IREE_SV("participant");
+    case LOOM_NATIVE_PHYSICAL_DIMENSION_POSITION:
+      return IREE_SV("position");
+    case LOOM_NATIVE_PHYSICAL_DIMENSION_NONE:
+    default:
+      return IREE_SV("none");
+  }
+}
+
 static void loom_target_compile_report_accumulate_move_cause(
     const loom_target_compile_report_move_cause_counts_t* counts,
     uint64_t* kind_count, uint64_t* packet_count, uint64_t* unit_count) {

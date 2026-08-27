@@ -20,18 +20,12 @@ from loom.reporting.compile_report import (
     IncomparableCompileReportsError,
     load_compile_report,
 )
-from loom.reporting.compile_report_suggestions import (
-    CompileReportSuggestionOptions,
-    build_compile_report_suggestions,
-    format_compile_report_suggestions_text,
-)
 from loom.reporting.compile_report_view import (
     build_compile_report_diff,
     build_compile_report_show,
     format_compile_report_diff_text,
     format_compile_report_show_text,
 )
-from loom.target.arch.compile_report_suggestions import suggest_compile_report
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -62,6 +56,13 @@ def run(args: argparse.Namespace, *, stdout: TextIO) -> int:
         )
         text = format_compile_report_diff_text(view)
     elif args.command == "suggest":
+        from loom.reporting.compile_report_suggestions import (
+            CompileReportSuggestionOptions,
+            build_compile_report_suggestions,
+            format_compile_report_suggestions_text,
+        )
+        from loom.target.arch.compile_report_suggestions import suggest_compile_report
+
         document = load_compile_report(args.report)
         result = suggest_compile_report(
             document,

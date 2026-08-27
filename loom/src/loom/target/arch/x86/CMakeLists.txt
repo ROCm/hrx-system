@@ -155,6 +155,7 @@ loom_generated_cc_library(
   DEPS
     ::feature_bits
     iree::base
+    loom::analysis::native_layout
     loom::codegen::low::descriptors
 )
 endif()

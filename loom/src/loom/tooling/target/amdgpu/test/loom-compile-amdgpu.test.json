@@ -143,6 +143,37 @@
       ]
     },
     {
+      "name": "retains lane preamble inputs selected by fragment repacks",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/fragment_repack_lane_preamble.loom",
+          "--backend=amdgpu-hal",
+          "--target=gfx1100",
+          "--output={tmp}/fragment_repack_lane_preamble.hal",
+          "--emit-target-artifact={tmp}/fragment_repack_lane_preamble.hsaco",
+          "--compile-report=details",
+          "--compile-report-output={tmp}/fragment_repack_lane_preamble_report.json"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/fragment_repack_lane_preamble.hal",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/fragment_repack_lane_preamble.hsaco",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/fragment_repack_lane_preamble_report.json",
+          "contains": [
+            "amdgpu.fragment_repack.strategy.result_to_lhs_bf16_transpose_bpermute"
+          ]
+        }
+      ]
+    },
+    {
       "name": "preserves HAL binding identity without authored export names",
       "run": {
         "tool": "loom-compile",

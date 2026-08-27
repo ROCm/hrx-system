@@ -493,6 +493,12 @@ iree_status_t loom_target_compile_report_record_low_lowering(
               loom_target_compile_report_source_low_selection_kind(
                   source_row->selection_kind),
           .plan_key = source_row->plan_key,
+          .native_contraction_facts = source_row->native_contraction_facts,
+          .native_transition_facts = source_row->native_transition_facts,
+          .native_transition_source_type =
+              source_row->native_transition_source_type,
+          .native_transition_destination_type =
+              source_row->native_transition_destination_type,
           .descriptor_key = source_row->descriptor_key,
           .descriptor_semantic_tag = source_row->descriptor_semantic_tag,
           .emitted_low_op_count = source_row->emitted_low_op_count,

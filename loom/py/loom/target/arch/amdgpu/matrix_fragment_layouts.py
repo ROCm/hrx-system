@@ -38,6 +38,14 @@ from loom.target.native_coordinate_projection import (
     CoordinateProjectionTerm,
     coordinate_projection_plan,
 )
+from loom.target.native_layout_facts import (
+    NativeContractionFacts,
+    NativeContractionRoleFacts,
+    NativeLayoutEvidence,
+    NativeTransitionFacts,
+    exact_native_contraction_role_facts,
+    exact_native_transition_facts,
+)
 
 _AXIS_NAMES = ("block", "row", "column", "reduction")
 _MAX_FRAGMENT_REGISTER_COUNT = 32
@@ -947,6 +955,92 @@ def matrix_fragment_native_layout(
         rhs=rhs,
         accumulator=accumulator,
         result=result,
+    )
+
+
+def _matrix_fragment_role_logical_coordinate_count(
+    layout: AmdgpuMatrixFragmentLayout, role: MatrixFragmentRoleLayout
+) -> int:
+    block_count, row_count, column_count, reduction_count = layout.tile_shape
+    if role.role == ROLE_LHS:
+        return block_count * row_count * reduction_count
+    if role.role == ROLE_RHS:
+        return block_count * reduction_count * column_count
+    return block_count * row_count * column_count
+
+
+@cache
+def matrix_fragment_native_contraction_facts(
+    layout: AmdgpuMatrixFragmentLayout,
+) -> NativeContractionFacts:
+    """Summarizes one AMDGPU fragment layout for shipping consumers."""
+
+    role_facts: list[NativeContractionRoleFacts] = []
+    for role in layout_roles(layout):
+        if role.reduction_group is None:
+            role_facts.append(
+                exact_native_contraction_role_facts(
+                    role.role,
+                    matrix_fragment_role_storage_coordinate_map(layout, role),
+                    element_bit_count=role.element_bit_count,
+                    register_count=role.register_count,
+                    payload_element_count=role.payload_element_count,
+                )
+            )
+            continue
+        role_facts.append(
+            NativeContractionRoleFacts(
+                role=role.role,
+                evidence=NativeLayoutEvidence.METADATA_DEPENDENT,
+                element_bit_count=role.element_bit_count,
+                register_count=role.register_count,
+                payload_element_count=role.payload_element_count,
+                physical_position_count=(
+                    layout.wave_size * role.coordinate_element_count
+                ),
+                logical_coordinate_count=(
+                    _matrix_fragment_role_logical_coordinate_count(layout, role)
+                ),
+                owner_multiplicity_minimum=None,
+                owner_multiplicity_maximum=None,
+            )
+        )
+
+    block_count, row_count, column_count, reduction_count = layout.tile_shape
+    return NativeContractionFacts(
+        shape=ContractionShape(
+            block_count=block_count,
+            m=row_count,
+            n=column_count,
+            k=reduction_count,
+        ),
+        participant_count=layout.wave_size,
+        lhs=role_facts[0],
+        rhs=role_facts[1],
+        accumulator=role_facts[2],
+        result=role_facts[3],
+    )
+
+
+@cache
+def matrix_fragment_native_transition_facts(
+    layout: AmdgpuMatrixFragmentLayout,
+    source_role: str,
+    destination_role: str,
+) -> NativeTransitionFacts | None:
+    """Compiles an exact AMDGPU role transition into source-owner facts."""
+
+    source = matrix_fragment_native_role_layout(
+        layout, next(role for role in layout_roles(layout) if role.role == source_role)
+    )
+    destination = matrix_fragment_native_role_layout(
+        layout,
+        next(role for role in layout_roles(layout) if role.role == destination_role),
+    )
+    if source is None or destination is None:
+        return None
+    return exact_native_transition_facts(
+        matrix_fragment_native_contraction_facts(layout), source, destination
     )
 
 

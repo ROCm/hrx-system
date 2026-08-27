@@ -232,6 +232,17 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    native_layout
+  HDRS
+    "native_layout.h"
+  DEPS
+    ::contract_roles
+    iree::base
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     matrix_fragment_layout
   HDRS
     "matrix_fragment_layout.h"
@@ -239,6 +250,7 @@ loom_cc_library(
     "matrix_fragment_layout.c"
   DEPS
     ::contract_roles
+    ::native_layout
     iree::base
   PUBLIC
 )

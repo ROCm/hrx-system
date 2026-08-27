@@ -18,6 +18,89 @@ namespace {
 
 constexpr uint32_t kTestSourceRejectionDetail = 4;
 
+static loom_native_contraction_role_facts_t MakeNativeContractionRoleFacts(
+    loom_contract_operand_role_t role, uint16_t element_bit_count,
+    uint16_t payload_element_count, uint32_t physical_position_count,
+    uint16_t owner_multiplicity) {
+  loom_native_contraction_role_facts_t facts = {};
+  facts.role = role;
+  facts.evidence = LOOM_NATIVE_LAYOUT_EVIDENCE_EXACT;
+  facts.element_bit_count = element_bit_count;
+  facts.register_count = 8;
+  facts.payload_element_count = payload_element_count;
+  facts.physical_position_count = physical_position_count;
+  facts.logical_coordinate_count = 256;
+  facts.owner_multiplicity_minimum = owner_multiplicity;
+  facts.owner_multiplicity_maximum = owner_multiplicity;
+  return facts;
+}
+
+static loom_native_contraction_facts_t MakeNativeContractionFacts() {
+  loom_native_contraction_facts_t facts = {};
+  facts.shape.block_count = 1;
+  facts.shape.result_row_count = 16;
+  facts.shape.result_column_count = 16;
+  facts.shape.reduction_count = 16;
+  facts.participant_count = 32;
+  facts.lhs = MakeNativeContractionRoleFacts(LOOM_CONTRACT_OPERAND_ROLE_LHS, 16,
+                                             16, 512, 2);
+  facts.rhs = MakeNativeContractionRoleFacts(LOOM_CONTRACT_OPERAND_ROLE_RHS, 16,
+                                             16, 512, 2);
+  facts.accumulator = MakeNativeContractionRoleFacts(
+      LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 32, 8, 256, 1);
+  facts.result = MakeNativeContractionRoleFacts(
+      LOOM_CONTRACT_OPERAND_ROLE_RESULT, 32, 8, 256, 1);
+  return facts;
+}
+
+static loom_native_transition_owner_factor_t MakeNativeTransitionOwnerFactor(
+    loom_native_physical_dimension_t destination_dimension,
+    loom_native_physical_dimension_t source_owner_dimension,
+    uint32_t destination_divisor, uint32_t destination_modulus,
+    uint32_t source_owner_multiplier) {
+  loom_native_transition_owner_factor_t factor = {};
+  factor.destination_dimension = destination_dimension;
+  factor.source_owner_dimension = source_owner_dimension;
+  factor.destination_divisor = destination_divisor;
+  factor.destination_modulus = destination_modulus;
+  factor.source_owner_multiplier = source_owner_multiplier;
+  return factor;
+}
+
+static const loom_native_contraction_facts_t kNativeContractionFacts =
+    MakeNativeContractionFacts();
+
+static const loom_native_transition_owner_factor_t
+    kNativeTransitionOwnerFactors[] = {
+        MakeNativeTransitionOwnerFactor(
+            LOOM_NATIVE_PHYSICAL_DIMENSION_PARTICIPANT,
+            LOOM_NATIVE_PHYSICAL_DIMENSION_PARTICIPANT, 1, 16, 1),
+        MakeNativeTransitionOwnerFactor(
+            LOOM_NATIVE_PHYSICAL_DIMENSION_POSITION,
+            LOOM_NATIVE_PHYSICAL_DIMENSION_PARTICIPANT, 1, 2, 16),
+        MakeNativeTransitionOwnerFactor(LOOM_NATIVE_PHYSICAL_DIMENSION_POSITION,
+                                        LOOM_NATIVE_PHYSICAL_DIMENSION_POSITION,
+                                        2, 0, 1),
+};
+
+static loom_native_transition_facts_t MakeNativeTransitionFacts() {
+  loom_native_transition_facts_t facts = {};
+  facts.source_role = LOOM_CONTRACT_OPERAND_ROLE_RESULT;
+  facts.destination_role = LOOM_CONTRACT_OPERAND_ROLE_RHS;
+  facts.destination_position_count = 512;
+  facts.participant_change_count = 256;
+  facts.local_position_change_count = 480;
+  facts.destination_positions_per_source_minimum = 2;
+  facts.destination_positions_per_source_maximum = 2;
+  facts.source_owner_factors = kNativeTransitionOwnerFactors;
+  facts.source_owner_factor_count =
+      IREE_ARRAYSIZE(kNativeTransitionOwnerFactors);
+  return facts;
+}
+
+static const loom_native_transition_facts_t kNativeTransitionFacts =
+    MakeNativeTransitionFacts();
+
 static iree_string_view_t ParseJsonDocument(iree_string_view_t json) {
   iree_string_view_t cursor = json;
   iree_string_view_t value = iree_string_view_empty();
@@ -70,6 +153,10 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
   selection.selection_kind =
       LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_SELECTION_RULE;
   selection.plan_key = IREE_SVL("test.scalar_addi.strategy.native");
+  selection.native_contraction_facts = &kNativeContractionFacts;
+  selection.native_transition_facts = &kNativeTransitionFacts;
+  selection.native_transition_source_type = LOOM_SCALAR_TYPE_F32;
+  selection.native_transition_destination_type = LOOM_SCALAR_TYPE_F16;
   selection.descriptor_key = IREE_SVL("test.add.i32");
   selection.descriptor_semantic_tag = IREE_SVL("integer.add.i32");
   selection.emitted_low_op_count = 1;
@@ -166,6 +253,18 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
   EXPECT_NE(iree_string_view_find(
                 text, IREE_SV("plan_key=test.scalar_addi.strategy.native"), 0),
             IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                text, IREE_SV("native_contraction={tile:1x16x16x16"), 0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(
+      iree_string_view_find(text,
+                            IREE_SV("native_transition={result:f32->rhs:f16,"
+                                    "positions:512,participant_changes:256"),
+                            0),
+      IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                text, IREE_SV("participant+=(participant/1%16)*1"), 0),
+            IREE_STRING_VIEW_NPOS);
   EXPECT_NE(
       iree_string_view_find(text,
                             IREE_SV("source_low_memory[0] function=branchy "
@@ -252,6 +351,30 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
                           IREE_SV("test.scalar_addi.strategy.native"));
   ExpectObjectValueEquals(selection_row, IREE_SV("descriptor_semantic_tag"),
                           IREE_SV("integer.add.i32"));
+  const iree_string_view_t native_contraction =
+      LookupObject(selection_row, IREE_SV("native_contraction"));
+  ExpectObjectUint64Equals(native_contraction, IREE_SV("participants"), 32);
+  const iree_string_view_t native_tile =
+      LookupObject(native_contraction, IREE_SV("tile"));
+  ExpectObjectUint64Equals(native_tile, IREE_SV("m"), 16);
+  const iree_string_view_t native_lhs =
+      LookupObject(native_contraction, IREE_SV("lhs"));
+  ExpectObjectValueEquals(native_lhs, IREE_SV("evidence"), IREE_SV("exact"));
+  ExpectObjectUint64Equals(native_lhs, IREE_SV("physical_positions"), 512);
+  const iree_string_view_t native_transition =
+      LookupObject(selection_row, IREE_SV("native_transition"));
+  ExpectObjectValueEquals(native_transition, IREE_SV("source_role"),
+                          IREE_SV("result"));
+  ExpectObjectValueEquals(native_transition, IREE_SV("destination_type"),
+                          IREE_SV("f16"));
+  ExpectObjectUint64Equals(native_transition, IREE_SV("participant_changes"),
+                           256);
+  const iree_string_view_t native_factor = LookupArrayElement(
+      LookupObject(native_transition, IREE_SV("source_owner_factors")),
+      /*index=*/1);
+  ExpectObjectValueEquals(native_factor, IREE_SV("destination_dimension"),
+                          IREE_SV("position"));
+  ExpectObjectUint64Equals(native_factor, IREE_SV("multiplier"), 16);
   const iree_string_view_t memory_row = LookupArrayElement(
       LookupObject(source_low, IREE_SV("memory_rows")), /*index=*/0);
   ExpectObjectValueEquals(memory_row, IREE_SV("packet"),

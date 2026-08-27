@@ -34,6 +34,13 @@ iree_py_library(
     ],
 )
 
+iree_py_library(
+    name = "native_layout",
+    srcs = ["native_layout.py"],
+    visibility = GENERATED_FILE_VISIBILITY,
+    deps = ["//loom/py/loom/target:native_layout_facts"],
+)
+
 iree_py_test(
     name = "support_test",
     srcs = [

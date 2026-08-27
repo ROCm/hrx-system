@@ -33,8 +33,12 @@ from loom.gen.support.generated_file import (  # noqa: E402
     line_comment_header,
     maintain_generated_file_set,
 )
+from loom.gen.support.native_layout import (  # noqa: E402
+    NativeContractionFactTable,
+)
 from loom.target.arch.x86.packed_dot_data import (  # noqa: E402
     X86_PACKED_DOT_DESCRIPTORS,
+    packed_dot_native_contraction_facts,
     packed_dot_native_layout,
 )
 from loom.target.arch.x86.target_info import sorted_descriptor_set_infos  # noqa: E402
@@ -107,23 +111,12 @@ def _emit_header() -> str:
 
 
 def _emit_source() -> str:
-    lines = [
-        "// Copyright 2026 The IREE Authors",
-        "//",
-        "// Licensed under the Apache License v2.0 with LLVM Exceptions.",
-        "// See https://llvm.org/LICENSE.txt for license information.",
-        "// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception",
-        "",
-        *line_comment_header("//", generator="loom.gen.target.arch.x86.x86_packed_dot_contract"),
-        "",
-        '#include "loom/target/arch/x86/packed_dot_contract_data.h"',
-        "",
-        "const loom_x86_packed_dot_descriptor_t",
-        "    loom_x86_packed_dot_builtin_descriptors[] = {",
-    ]
+    native_facts = NativeContractionFactTable("kLoomX86PackedDotNativeContractionFacts")
+    descriptor_lines: list[str] = []
     for descriptor_ref, descriptor in enumerate(X86_PACKED_DOT_DESCRIPTORS):
         native_shape = packed_dot_native_layout(descriptor).shape
-        lines.extend(
+        native_facts_reference = native_facts.reference(packed_dot_native_contraction_facts(descriptor))
+        descriptor_lines.extend(
             [
                 "    {",
                 f'        .name = IREE_SVL("{_c_string_literal(descriptor.key)}"),',
@@ -144,10 +137,28 @@ def _emit_source() -> str:
                 f"        .rhs_numeric_type = {descriptor.rhs_numeric_type},",
                 f"        .accumulator_numeric_type = {descriptor.accumulator_numeric_type},",
                 f"        .result_numeric_type = {descriptor.result_numeric_type},",
+                f"        .native_contraction_facts = {native_facts_reference},",
                 f"        .low_descriptor_ref = UINT16_C({descriptor_ref}),",
                 "    },",
             ]
         )
+
+    lines = [
+        "// Copyright 2026 The IREE Authors",
+        "//",
+        "// Licensed under the Apache License v2.0 with LLVM Exceptions.",
+        "// See https://llvm.org/LICENSE.txt for license information.",
+        "// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception",
+        "",
+        *line_comment_header("//", generator="loom.gen.target.arch.x86.x86_packed_dot_contract"),
+        "",
+        '#include "loom/target/arch/x86/packed_dot_contract_data.h"',
+        "",
+        *native_facts.definition_lines(),
+        "const loom_x86_packed_dot_descriptor_t",
+        "    loom_x86_packed_dot_builtin_descriptors[] = {",
+        *descriptor_lines,
+    ]
     lines.extend(
         [
             "};",

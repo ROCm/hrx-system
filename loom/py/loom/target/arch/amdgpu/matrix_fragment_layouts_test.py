@@ -24,8 +24,10 @@ from loom.target.arch.amdgpu.matrix_fragment_layouts import (
     MatrixFragmentResultToLhsBf16Projection,
     MatrixFragmentResultToRhsPackedB16Projection,
     layout_roles,
+    matrix_fragment_native_contraction_facts,
     matrix_fragment_native_layout,
     matrix_fragment_native_role_layout,
+    matrix_fragment_native_transition_facts,
     matrix_fragment_packed_element_axis,
     matrix_fragment_result_to_lhs_bf16_projection,
     matrix_fragment_result_to_rhs_packed_b16_projection,
@@ -43,6 +45,7 @@ from loom.target.native_coordinate_projection import (
     CoordinateProjectionTerm,
     coordinate_projection_plan,
 )
+from loom.target.native_layout_facts import NativeLayoutEvidence
 
 
 def test_dense_layouts_have_exact_native_contraction_maps() -> None:
@@ -57,6 +60,54 @@ def test_dense_layouts_have_exact_native_contraction_maps() -> None:
         assert (matrix_fragment_native_layout(layout) is None) == any(
             role_layout is None for role_layout in role_layouts
         )
+
+
+def test_native_contraction_facts_retain_exact_and_metadata_placements() -> None:
+    metadata_role_count = 0
+    for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS:
+        facts = matrix_fragment_native_contraction_facts(layout)
+        assert facts.participant_count == layout.wave_size
+        for role, role_facts in zip(
+            layout_roles(layout),
+            (facts.lhs, facts.rhs, facts.accumulator, facts.result),
+            strict=True,
+        ):
+            if role.reduction_group is None:
+                assert role_facts.evidence is NativeLayoutEvidence.EXACT
+                assert role_facts.owner_multiplicity_minimum is not None
+            else:
+                metadata_role_count += 1
+                assert role_facts.evidence is NativeLayoutEvidence.METADATA_DEPENDENT
+                assert role_facts.owner_multiplicity_minimum is None
+
+    assert metadata_role_count > 0
+
+
+def test_gfx11_packed_b16_transition_facts_retain_owner_algebra() -> None:
+    layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY["rdna3_wmmar3_f16_16x16x16_f16"]
+
+    transition = matrix_fragment_native_transition_facts(layout, "result", "rhs")
+
+    assert transition is not None
+    assert transition.destination_position_count == 512
+    assert transition.participant_change_count == 256
+    assert transition.local_position_change_count == 480
+    assert transition.destination_positions_per_source_minimum == 2
+    assert transition.destination_positions_per_source_maximum == 2
+    assert tuple(
+        (
+            factor.destination_dimension,
+            factor.source_owner_dimension,
+            factor.destination_divisor,
+            factor.destination_modulus,
+            factor.source_owner_multiplier,
+        )
+        for factor in transition.source_owner_factors
+    ) == (
+        ("participant", "participant", 1, 16, 1),
+        ("value", "participant", 1, 2, 16),
+        ("value", "value", 2, 0, 1),
+    )
 
 
 def test_roles_compile_to_bounded_storage_coordinate_projections() -> None:

@@ -27,6 +27,7 @@ iree_py_library(
   DEPS
     loom::py::loom::target::arch::x86::package_init
     loom::py::loom::target::native_contraction_layout
+    loom::py::loom::target::native_layout_facts
 )
 
 iree_py_library(
@@ -90,6 +91,7 @@ iree_py_test(
     loom::py::loom::target::arch::x86::target_info
     loom::py::loom::target::native_contraction_layout
     loom::py::loom::target::native_coordinate_projection
+    loom::py::loom::target::native_layout_facts
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"

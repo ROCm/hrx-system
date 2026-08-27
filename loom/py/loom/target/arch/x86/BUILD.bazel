@@ -26,6 +26,7 @@ iree_py_library(
     deps = [
         ":package_init",
         "//loom/py/loom/target:native_contraction_layout",
+        "//loom/py/loom/target:native_layout_facts",
     ],
 )
 
@@ -83,5 +84,6 @@ iree_py_test(
         ":target_info",
         "//loom/py/loom/target:native_contraction_layout",
         "//loom/py/loom/target:native_coordinate_projection",
+        "//loom/py/loom/target:native_layout_facts",
     ],
 )

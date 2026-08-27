@@ -133,6 +133,24 @@ iree_string_view_t loom_amdgpu_fragment_repack_plan_key(
   }
 }
 
+bool loom_amdgpu_fragment_repack_plan_requires_lane_id(
+    const loom_amdgpu_fragment_repack_plan_t* plan) {
+  switch (plan->strategy) {
+    case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_LHS_BF16_PACKED_BPERMUTE:
+    case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_LHS_BF16_BPERMUTE:
+    case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_LHS_BF16_TRANSPOSE_BPERMUTE:
+      return true;
+    case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_NONE:
+    case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_ALIAS:
+    case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_DIAGNOSTIC:
+    case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_RHS_PACKED_B16_XOR_PERMUTE:
+      return false;
+    default:
+      IREE_ASSERT_UNREACHABLE("unknown AMDGPU fragment repack strategy");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+}
+
 static loom_amdgpu_fragment_repack_reason_t
 loom_amdgpu_fragment_repack_transition_reason(
     loom_vector_fragment_role_flags_t source_role_flags,
@@ -191,6 +209,8 @@ typedef struct loom_amdgpu_result_to_lhs_bf16_projection_t {
   uint8_t source_lane_group_right_shift;
   // Number of low source-value bits exchanged with lane bits.
   uint8_t transpose_bit_count;
+  // Generated native source-owner movement implemented by this projection.
+  const loom_native_transition_facts_t* native_transition_facts;
 } loom_amdgpu_result_to_lhs_bf16_projection_t;
 
 #include "loom/target/arch/amdgpu/matrix/matrix_fragment_repack_result_to_lhs_projections.inl"
@@ -527,7 +547,8 @@ loom_amdgpu_fragment_repack_select_result_to_lhs_bf16_bpermute_strategy(
   plan->strategy =
       LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_LHS_BF16_BPERMUTE;
   plan->reason = LOOM_AMDGPU_FRAGMENT_REPACK_REASON_NONE;
-  plan->layout_kind = (loom_amdgpu_matrix_fragment_layout_kind_t)layout->kind;
+  plan->native_contraction_facts = layout->native_contraction_facts;
+  plan->native_transition_facts = projection->native_transition_facts;
   plan->source_register_count = layout->result.register_count;
   plan->result_register_count = layout->lhs.register_count;
   plan->lane_divisor = layout->tile_shape.result_row_count;

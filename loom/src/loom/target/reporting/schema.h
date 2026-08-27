@@ -127,6 +127,12 @@ iree_string_view_t loom_target_compile_report_type_kind_name(
     uint32_t type_kind);
 iree_string_view_t loom_target_compile_report_scalar_type_name(
     uint32_t element_type);
+iree_string_view_t loom_target_compile_report_native_layout_evidence_name(
+    loom_native_layout_evidence_t evidence);
+iree_string_view_t loom_target_compile_report_native_contraction_role_name(
+    loom_contract_operand_role_t role);
+iree_string_view_t loom_target_compile_report_native_physical_dimension_name(
+    loom_native_physical_dimension_t dimension);
 
 void loom_target_compile_report_move_cause_counts_totals(
     const loom_target_compile_report_move_cause_counts_t* counts,

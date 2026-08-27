@@ -38,6 +38,7 @@ extern "C" {
 
 typedef struct loom_view_region_table_t loom_view_region_table_t;
 typedef struct loom_matrix_fragment_layout_t loom_matrix_fragment_layout_t;
+typedef struct loom_native_contraction_facts_t loom_native_contraction_facts_t;
 typedef struct loom_local_value_domain_t loom_local_value_domain_t;
 
 typedef enum loom_target_contract_query_outcome_e {
@@ -81,6 +82,9 @@ typedef struct loom_target_contract_query_result_t {
   // Matrix-fragment lane/register layout selected with the source contract, or
   // NULL when the queried op is not a matrix-fragment contract.
   const loom_matrix_fragment_layout_t* selected_matrix_fragment_layout;
+  // Compact native contraction placement selected with the source contract,
+  // or NULL when the selected target primitive has no modeled native layout.
+  const loom_native_contraction_facts_t* selected_native_contraction_facts;
   // Compact target-independent rejection flags.
   uint32_t source_rejection_bits;
   // Optional target-independent rejection detail enum.
@@ -322,6 +326,7 @@ loom_target_contract_query_result_empty(void) {
       /*.matched_guard_count=*/0,
       /*.selected_descriptor=*/NULL,
       /*.selected_matrix_fragment_layout=*/NULL,
+      /*.selected_native_contraction_facts=*/NULL,
       /*.source_rejection_bits=*/0,
       /*.source_rejection_detail=*/0,
       /*.target_rejection_bits=*/0,

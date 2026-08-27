@@ -74,6 +74,17 @@ iree_py_library(
     loom::py::loom::target::package_init
 )
 
+iree_py_library(
+  NAME
+    native_layout_facts
+  SRCS
+    "native_layout_facts.py"
+  DEPS
+    loom::py::loom::target::native_contraction_layout
+    loom::py::loom::target::native_coordinate_projection
+    loom::py::loom::target::package_init
+)
+
 iree_py_test(
   NAME
     target_test
@@ -123,6 +134,25 @@ iree_py_test(
   DEPS
     loom::py::loom::target::native_contraction_layout
     loom::py::loom::target::native_coordinate_projection
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+)
+
+iree_py_test(
+  NAME
+    native_layout_facts_test
+  MAIN
+    "../tools/pytest_style_runner.py"
+  SRCS
+    "native_layout_facts_test.py"
+    "../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.native_layout_facts_test"
+  DEPS
+    loom::py::loom::target::native_contraction_layout
+    loom::py::loom::target::native_layout_facts
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"

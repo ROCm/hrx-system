@@ -208,11 +208,21 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "native_layout",
+    hdrs = ["native_layout.h"],
+    deps = [
+        ":contract_roles",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "matrix_fragment_layout",
     srcs = ["matrix_fragment_layout.c"],
     hdrs = ["matrix_fragment_layout.h"],
     deps = [
         ":contract_roles",
+        ":native_layout",
         "//runtime/src/iree/base",
     ],
 )

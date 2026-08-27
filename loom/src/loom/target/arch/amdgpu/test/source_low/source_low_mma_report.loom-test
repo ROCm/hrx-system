@@ -33,6 +33,7 @@ COMPILE-REPORT: source_low[4] function=report_fixed_trip_matrix_loop source_op=i
 COMPILE-REPORT: source_low[5] function=report_fixed_trip_matrix_loop source_op=index.constant selection=plan emitted_ops=0
 COMPILE-REPORT: source_low[6] function=report_fixed_trip_matrix_loop source_op=index.cmp selection=rule descriptor_key=amdgpu.s_cmp_lt_i32 descriptor_semantic_tag=integer.compare.slt.i32 emitted_ops=1 execution_count=3
 COMPILE-REPORT: source_low[7] function=report_fixed_trip_matrix_loop source_op=vector.mma selection=plan descriptor_key=amdgpu.v_wmma_f32_16x16x16_bf16 descriptor_semantic_tag=matrix.wmma.f32.16x16x16.bf16 emitted_ops=2 execution_count=2
+COMPILE-REPORT: source_low_native[7] function=report_fixed_trip_matrix_loop source_op=vector.mma native_contraction={tile:1x16x16x16,participants:32,lhs:{evidence:exact,bits:16,registers:8,payload:16,positions:512,coordinates:256,owners:2},rhs:{evidence:exact,bits:16,registers:8,payload:16,positions:512,coordinates:256,owners:2},accumulator:{evidence:exact,bits:32,registers:8,payload:8,positions:256,coordinates:256,owners:1},result:{evidence:exact,bits:32,registers:8,payload:8,positions:256,coordinates:256,owners:1}}
 COMPILE-REPORT: source_low[8] function=report_fixed_trip_matrix_loop source_op=index.add selection=rule descriptor_key=amdgpu.s_add_u32 descriptor_semantic_tag=integer.add.u32 emitted_ops=1 execution_count=2
 
 // ====

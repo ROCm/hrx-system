@@ -10,7 +10,9 @@
 #define LOOM_TARGET_REPORTING_REPORT_H_
 
 #include "iree/base/api.h"
+#include "loom/analysis/native_layout.h"
 #include "loom/codegen/low/planning_statistics.h"
+#include "loom/ir/scalar_type.h"
 #include "loom/target/reporting/target_insertion.h"
 #include "loom/target/residency.h"
 #include "loom/target/types.h"
@@ -1130,6 +1132,14 @@ typedef struct loom_target_compile_report_source_low_row_t {
   loom_target_compile_report_source_low_selection_kind_t selection_kind;
   // Stable target-owned key identifying the selected plan variant, if any.
   iree_string_view_t plan_key;
+  // Generated native contraction placement selected for this source op.
+  const loom_native_contraction_facts_t* native_contraction_facts;
+  // Generated native source-owner movement selected for this source op.
+  const loom_native_transition_facts_t* native_transition_facts;
+  // Source scalar type for |native_transition_facts| when present.
+  loom_scalar_type_t native_transition_source_type;
+  // Destination scalar type for |native_transition_facts| when present.
+  loom_scalar_type_t native_transition_destination_type;
   // First low descriptor key emitted by this source op, if any.
   iree_string_view_t descriptor_key;
   // First low descriptor semantic tag emitted by this source op, if any.

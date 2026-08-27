@@ -60,7 +60,9 @@ loom_cc_library(
         "target_insertion.h",
     ],
     deps = [
+        "//loom/src/loom/analysis:native_layout",
         "//loom/src/loom/codegen/low:planning_statistics",
+        "//loom/src/loom/ir",
         "//loom/src/loom/target:residency",
         "//loom/src/loom/target:types",
         "//runtime/src/iree/base",
@@ -87,6 +89,7 @@ loom_cc_library(
     deps = [
         ":format_planning",
         ":report",
+        "//loom/src/loom/analysis:native_layout",
         "//loom/src/loom/ir",
         "//loom/src/loom/target:math_policy",
         "//loom/src/loom/util:json",

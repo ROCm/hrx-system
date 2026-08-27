@@ -1613,8 +1613,10 @@ typedef struct loom_amdgpu_fragment_repack_plan_t {
   loom_contract_operand_role_t source_role;
   // Contract role selected for the result fragment layout.
   loom_contract_operand_role_t result_role;
-  // Target-owned lane/register layout selected for the fragment transition.
-  loom_amdgpu_matrix_fragment_layout_kind_t layout_kind;
+  // Generated native contraction placement selected for this transition.
+  const loom_native_contraction_facts_t* native_contraction_facts;
+  // Generated source-owner movement selected with the target strategy.
+  const loom_native_transition_facts_t* native_transition_facts;
   // Number of 32-bit source registers consumed by the selected strategy.
   uint16_t source_register_count;
   // Number of 32-bit result registers produced by the selected strategy.

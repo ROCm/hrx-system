@@ -46,6 +46,12 @@ from loom.reporting.compile_report_move_causes import (
     build_move_cause_show,
     move_cause_diff_has_changes,
 )
+from loom.reporting.compile_report_native_layout import (
+    append_native_layout_diff_text,
+    append_native_layout_show_text,
+    build_native_layout_diff,
+    build_native_layout_show,
+)
 from loom.reporting.compile_report_subgroup_access import (
     append_subgroup_access_diff_text,
     append_subgroup_access_show_text,
@@ -389,6 +395,9 @@ def build_compile_report_show(
     subgroup_access = build_subgroup_access_show(document)
     if subgroup_access is not None:
         view["subgroup_access"] = subgroup_access
+    native_layout = build_native_layout_show(document)
+    if native_layout is not None:
+        view["native_layout"] = native_layout
     if document.envelope_context:
         view["envelope_context"] = dict(document.envelope_context)
     return view
@@ -556,6 +565,23 @@ def build_compile_report_diff(
     )
     if subgroup_access is not None:
         view["subgroup_access"] = subgroup_access
+    native_layout = build_native_layout_diff(
+        baseline,
+        candidate,
+        entry_function_pairs=(
+            tuple(
+                (
+                    pair.baseline_identity.function,
+                    pair.candidate_identity.function,
+                )
+                for pair in match.pairs
+            )
+            if force
+            else ()
+        ),
+    )
+    if native_layout is not None:
+        view["native_layout"] = native_layout
     if comparison_mode is CompileReportComparisonMode.TARGET and not force:
         target_capabilities = build_target_capability_diff(baseline, candidate)
         if target_capabilities is not None:
@@ -620,6 +646,9 @@ def format_compile_report_show_text(view: dict[str, object]) -> str:
         move_causes = entry.get("move_causes")
         if isinstance(move_causes, dict):
             append_move_cause_show_text(lines, move_causes)
+    native_layout = view.get("native_layout")
+    if isinstance(native_layout, dict):
+        append_native_layout_show_text(lines, native_layout)
     subgroup_access = view.get("subgroup_access")
     if isinstance(subgroup_access, dict):
         append_subgroup_access_show_text(lines, subgroup_access)
@@ -752,6 +781,9 @@ def format_compile_report_diff_text(view: dict[str, object]) -> str:
         move_causes = entry.get("move_causes")
         if isinstance(move_causes, dict):
             append_move_cause_diff_text(lines, move_causes)
+    native_layout = view.get("native_layout")
+    if isinstance(native_layout, dict):
+        append_native_layout_diff_text(lines, native_layout)
     subgroup_access = view.get("subgroup_access")
     if isinstance(subgroup_access, dict):
         append_subgroup_access_diff_text(lines, subgroup_access)

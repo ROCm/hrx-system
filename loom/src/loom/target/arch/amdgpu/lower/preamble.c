@@ -18,6 +18,7 @@
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/legality.h"
+#include "loom/target/arch/amdgpu/lower/matrix_fragment_repack.h"
 #include "loom/target/arch/amdgpu/lower/sanitizer_race.h"
 #include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
@@ -1218,6 +1219,15 @@ iree_status_t loom_amdgpu_emit_preamble(void* user_data,
       case LOOM_OP_VECTOR_FRAGMENT_STORE: {
         loom_amdgpu_mark_lane_query_workitem_id_live_ins(
             context, source_op, LOOM_VALUE_ID_INVALID, first_workitem_id_ops);
+        break;
+      }
+      case LOOM_OP_VECTOR_FRAGMENT_REPACK: {
+        const loom_amdgpu_fragment_repack_plan_t* repack_plan =
+            (const loom_amdgpu_fragment_repack_plan_t*)plan.target_data;
+        if (loom_amdgpu_fragment_repack_plan_requires_lane_id(repack_plan)) {
+          loom_amdgpu_mark_lane_query_workitem_id_live_ins(
+              context, source_op, LOOM_VALUE_ID_INVALID, first_workitem_id_ops);
+        }
         break;
       }
       case LOOM_OP_KERNEL_SUBGROUP_SHUFFLE:
