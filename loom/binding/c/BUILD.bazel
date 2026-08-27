@@ -198,6 +198,7 @@ loom_cc_library(
         "//loom/src/loom/sanitizer:options",
         "//loom/src/loom/target:function_version",
         "//loom/src/loom/target:function_version_projection",
+        "//loom/src/loom/target:module_specialization",
         "//loom/src/loom/target:pipeline",
         "//loom/src/loom/target:predicate",
         "//loom/src/loom/target:profile",

@@ -21,3 +21,13 @@ iree_c_embed_data(
     h_file_output = "link_dependency_testdata.h",
     identifier = "loomc_link_dependency_testdata",
 )
+
+iree_c_embed_data(
+    name = "link_target_specialization",
+    testonly = True,
+    srcs = glob(["link_target_specialization/*.loom"]),
+    c_file_output = "link_target_specialization_testdata.c",
+    flatten = True,
+    h_file_output = "link_target_specialization_testdata.h",
+    identifier = "loomc_link_target_specialization_testdata",
+)

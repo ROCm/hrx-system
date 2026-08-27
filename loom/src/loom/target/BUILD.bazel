@@ -160,6 +160,20 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "module_specialization",
+    srcs = ["module_specialization.c"],
+    hdrs = ["module_specialization.h"],
+    deps = [
+        ":function_version_projection",
+        ":specialization",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
 loom_cc_test(
     name = "function_version_projection_test",
     srcs = ["function_version_projection_test.cc"],

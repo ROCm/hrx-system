@@ -26,4 +26,21 @@ iree_c_embed_data(
   PUBLIC
 )
 
+file(GLOB _GLOB_LINK_TARGET_SPECIALIZATION_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS link_target_specialization/*.loom)
+iree_c_embed_data(
+  NAME
+    link_target_specialization
+  SRCS
+    "${_GLOB_LINK_TARGET_SPECIALIZATION_X_LOOM}"
+  C_FILE_OUTPUT
+    "link_target_specialization_testdata.c"
+  H_FILE_OUTPUT
+    "link_target_specialization_testdata.h"
+  IDENTIFIER
+    "loomc_link_target_specialization_testdata"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

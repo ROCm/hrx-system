@@ -134,9 +134,11 @@ typedef enum loomc_link_mode_e {
 /// selects a dependency closure from explicit roots or exported primary roots
 /// plus the exports of selected root providers across the complete supplied
 /// library universe. Linking preserves every target carried by the selected
-/// symbols. Config options materialize on the linked output for this
-/// invocation; frozen indexes and reusable input/library modules are never
-/// mutated by link-time config.
+/// symbols. Target-specialization extensions participate in template-provider
+/// selection and project exact target facts into the standalone linked output.
+/// Config options materialize on the linked output for this invocation; frozen
+/// indexes and reusable input/library modules are never mutated by link-time
+/// specialization.
 typedef struct loomc_link_options_t {
   /// Structure type. Must be `LOOMC_STRUCTURE_TYPE_LINK_OPTIONS` when nonzero.
   loomc_structure_type_t type;
@@ -144,7 +146,8 @@ typedef struct loomc_link_options_t {
   /// Size of this structure in bytes.
   loomc_host_size_t structure_size;
 
-  /// Extension chain for future link invocation options.
+  /// Optional invocation extensions such as
+  /// `loomc_target_specialization_options_t`.
   const void* next;
 
   /// Frozen provider index to link.

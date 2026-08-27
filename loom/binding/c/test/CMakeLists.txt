@@ -160,6 +160,7 @@ loom_cc_test(
     iree::testing::gtest_main
     iree::testing::temp_file
     loom::binding::c::loomc
+    loom::binding::c::test::testdata::link_target_specialization
     loom::format::bytecode::writer
     loom::format::text::parser
     loom::format::text::printer

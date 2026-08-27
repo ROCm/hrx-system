@@ -20,6 +20,7 @@
 #include "iree/io/vec_stream.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/temp_file.h"
+#include "loom/binding/c/test/testdata/link_target_specialization_testdata.h"
 #include "loom/format/bytecode/writer.h"
 #include "loom/format/text/parser.h"
 #include "loom/format/text/printer.h"
@@ -305,6 +306,20 @@ SourcePtr CreateSource(loomc_source_format_t format, const char* identifier,
 SourcePtr CreateTextSource(const char* identifier, const char* source_text) {
   return CreateSource(LOOMC_SOURCE_FORMAT_TEXT, identifier, source_text,
                       strlen(source_text));
+}
+
+SourcePtr CreateEmbeddedTargetLinkSource(const char* filename) {
+  const iree_file_toc_t* files =
+      loomc_link_target_specialization_testdata_create();
+  for (iree_host_size_t i = 0;
+       i < loomc_link_target_specialization_testdata_size(); ++i) {
+    if (strcmp(files[i].name, filename) == 0) {
+      return CreateSource(LOOMC_SOURCE_FORMAT_TEXT, filename, files[i].data,
+                          files[i].size);
+    }
+  }
+  ADD_FAILURE() << "missing embedded target-link source " << filename;
+  return SourcePtr();
 }
 
 BuilderPtr CreateBuilder(loomc_context_t* context) {
@@ -1071,6 +1086,163 @@ func.def public @targetless() {
   EXPECT_NE(linked_text.find("func.def public target(@second_target) @second"),
             std::string::npos);
   EXPECT_NE(linked_text.find("func.def public @targetless"), std::string::npos);
+}
+
+TEST(LinkTest, TargetSpecializationParticipatesInProviderSelection) {
+  TargetEnvironmentPtr target_environment = CreateFakeTargetEnvironment();
+  TargetProfilePtr profile = CreateFakeTargetProfile(target_environment.get());
+  ContextPtr context = CreateContext(target_environment.get());
+  SourcePtr root_source = CreateEmbeddedTargetLinkSource("root.loom");
+  SourcePtr provider_source = CreateEmbeddedTargetLinkSource("providers.loom");
+  ASSERT_NE(root_source.get(), nullptr);
+  ASSERT_NE(provider_source.get(), nullptr);
+
+  BuilderPtr builder = CreateBuilder(context.get());
+  AddSource(builder.get(), root_source.get(), "root",
+            LOOMC_LINK_PROVIDER_ROLE_INPUT);
+  AddSource(builder.get(), provider_source.get(), "providers",
+            LOOMC_LINK_PROVIDER_ROLE_LIBRARY);
+  LinkIndexPtr link_index;
+  FinishIndex(builder.get(), &link_index);
+  LinkerPtr linker = CreateLinker(context.get());
+
+  const loomc_string_view_t roots[] = {
+      loomc_make_cstring_view("@entry"),
+  };
+  loomc_link_options_t link_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_NONE,
+      /*.structure_size=*/0,
+      /*.next=*/nullptr,
+      /*.link_index=*/nullptr,
+      /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_LINK,
+      /*.root_symbols=*/roots,
+      /*.root_symbol_count=*/IREE_ARRAYSIZE(roots),
+  };
+
+  WorkspacePtr portable_workspace = CreateWorkspace();
+  ResultPtr portable_result;
+  ModulePtr portable_module =
+      LinkIndex(linker.get(), portable_workspace.get(), link_index.get(),
+                &link_options, &portable_result);
+  ASSERT_TRUE(loomc_result_succeeded(portable_result.get()));
+  const loom_module_t* portable_internal =
+      loomc_module_const_loom_module(portable_module.get());
+  ASSERT_NE(portable_internal, nullptr);
+  VerifyModule(portable_internal);
+  EXPECT_TRUE(ModuleHasSymbol(portable_internal, "fallback_provider"));
+  EXPECT_FALSE(ModuleHasSymbol(portable_internal, "profile_provider"));
+  EXPECT_FALSE(ModuleHasSymbol(portable_internal, "incompatible_provider"));
+
+  const loomc_target_specialization_t specialization = {
+      /*.function_symbol=*/loomc_make_cstring_view("entry"),
+      /*.target_profile=*/profile.get(),
+  };
+  const loomc_target_specialization_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      /*.structure_size=*/sizeof(target_options),
+      /*.next=*/nullptr,
+      /*.specializations=*/&specialization,
+      /*.specialization_count=*/1,
+  };
+  link_options.next = &target_options;
+  WorkspacePtr specialized_workspace = CreateWorkspace();
+  ResultPtr specialized_result;
+  ModulePtr specialized_module =
+      LinkIndex(linker.get(), specialized_workspace.get(), link_index.get(),
+                &link_options, &specialized_result);
+  ASSERT_TRUE(loomc_result_succeeded(specialized_result.get()));
+  const loom_module_t* specialized_internal =
+      loomc_module_const_loom_module(specialized_module.get());
+  ASSERT_NE(specialized_internal, nullptr);
+  VerifyModule(specialized_internal);
+  EXPECT_TRUE(ModuleHasSymbol(specialized_internal, "profile_provider"));
+  EXPECT_FALSE(ModuleHasSymbol(specialized_internal, "fallback_provider"));
+  EXPECT_FALSE(ModuleHasSymbol(specialized_internal, "incompatible_provider"));
+
+  const std::string specialized_text =
+      SerializeModuleToText(specialized_module.get());
+  EXPECT_NE(
+      specialized_text.find("test.target<low_core> @__loom_target_context_0_0"),
+      std::string::npos)
+      << specialized_text;
+  EXPECT_NE(specialized_text.find("func.def public retain "
+                                  "target(@__loom_target_context_0_0) @entry"),
+            std::string::npos)
+      << specialized_text;
+
+  SourcePtr bytecode = SerializeModuleToSource(specialized_module.get(),
+                                               LOOMC_SOURCE_FORMAT_BYTECODE,
+                                               "target-specialized.loombc");
+  specialized_module.reset();
+  profile.reset();
+
+  TargetEnvironmentPtr replay_target_environment =
+      CreateFakeTargetEnvironment();
+  ContextPtr replay_context = CreateContext(replay_target_environment.get());
+  WorkspacePtr replay_workspace = CreateWorkspace();
+  ModulePtr replay_module = DeserializeModuleFromSource(
+      replay_context.get(), replay_workspace.get(), bytecode.get());
+  const loom_module_t* replay_internal =
+      loomc_module_const_loom_module(replay_module.get());
+  ASSERT_NE(replay_internal, nullptr);
+  VerifyModule(replay_internal);
+  EXPECT_TRUE(ModuleHasSymbol(replay_internal, "profile_provider"));
+  EXPECT_FALSE(ModuleHasSymbol(replay_internal, "fallback_provider"));
+  EXPECT_NE(SerializeModuleToText(replay_module.get())
+                .find("test.target<low_core> @__loom_target_context_0_0"),
+            std::string::npos);
+}
+
+TEST(LinkTest, TargetSpecializationRejectsIncompatibleAuthoredTarget) {
+  TargetEnvironmentPtr target_environment = CreateFakeTargetEnvironment();
+  TargetProfilePtr profile = CreateFakeTargetProfile(target_environment.get());
+  ContextPtr context = CreateContext(target_environment.get());
+  SourcePtr source = CreateEmbeddedTargetLinkSource("incompatible.loom");
+  ASSERT_NE(source.get(), nullptr);
+
+  BuilderPtr builder = CreateBuilder(context.get());
+  AddSource(builder.get(), source.get(), "incompatible",
+            LOOMC_LINK_PROVIDER_ROLE_INPUT);
+  LinkIndexPtr link_index;
+  FinishIndex(builder.get(), &link_index);
+  LinkerPtr linker = CreateLinker(context.get());
+  WorkspacePtr workspace = CreateWorkspace();
+
+  const loomc_string_view_t roots[] = {
+      loomc_make_cstring_view("@incompatible_entry"),
+  };
+  const loomc_target_specialization_t specialization = {
+      /*.function_symbol=*/loomc_make_cstring_view("incompatible_entry"),
+      /*.target_profile=*/profile.get(),
+  };
+  const loomc_target_specialization_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      /*.structure_size=*/sizeof(target_options),
+      /*.next=*/nullptr,
+      /*.specializations=*/&specialization,
+      /*.specialization_count=*/1,
+  };
+  const loomc_link_options_t link_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_NONE,
+      /*.structure_size=*/0,
+      /*.next=*/&target_options,
+      /*.link_index=*/nullptr,
+      /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_LINK,
+      /*.root_symbols=*/roots,
+      /*.root_symbol_count=*/IREE_ARRAYSIZE(roots),
+  };
+  ResultPtr result;
+  ModulePtr module = LinkIndex(linker.get(), workspace.get(), link_index.get(),
+                               &link_options, &result);
+  EXPECT_EQ(module.get(), nullptr);
+  ASSERT_FALSE(loomc_result_succeeded(result.get()));
+  ASSERT_EQ(loomc_result_diagnostic_count(result.get()), 1u);
+  const loomc_diagnostic_t* diagnostic =
+      loomc_result_diagnostic_at(result.get(), 0);
+  ASSERT_NE(diagnostic, nullptr);
+  EXPECT_EQ(ToString(diagnostic->code), "TARGET/052");
 }
 
 TEST(LinkTest, LinkThenCompileSpecializesEntryForTemplateSelection) {

@@ -1608,23 +1608,18 @@ TEST(TargetTest, RejectsSpecializationOptionsOnPassProgramCreation) {
   EXPECT_EQ(pass_program, nullptr);
 }
 
-TEST(TargetTest, RejectsSpecializationOptionsDuringLink) {
+TEST(TargetTest, AcceptsEmptySpecializationOptionsDuringLink) {
   TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
-  TargetProfilePtr profile = CreateTestTargetProfile(target_environment.get());
   ContextPtr context = CreateTargetContext(target_environment.get());
   LinkerPtr linker = CreateLinker(context.get());
   LinkIndexPtr link_index = CreateSingleSourceLinkIndex(context.get());
 
-  const loomc_target_specialization_t specialization = {
-      /*.function_symbol=*/loomc_make_cstring_view("entry"),
-      /*.target_profile=*/profile.get(),
-  };
   loomc_target_specialization_options_t target_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
       /*.structure_size=*/sizeof(target_options),
       /*.next=*/nullptr,
-      /*.specializations=*/&specialization,
-      /*.specialization_count=*/1,
+      /*.specializations=*/nullptr,
+      /*.specialization_count=*/0,
   };
   loomc_link_options_t link_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
@@ -1641,11 +1636,12 @@ TEST(TargetTest, RejectsSpecializationOptionsDuringLink) {
   WorkspacePtr workspace = CreateWorkspace();
   loomc_module_t* module = nullptr;
   loomc_result_t* result = nullptr;
-  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_UNIMPLEMENTED,
-                         loomc_link_module(linker.get(), workspace.get(),
-                                           &link_options, &module, &result));
-  EXPECT_EQ(module, nullptr);
-  EXPECT_EQ(result, nullptr);
+  LOOMC_EXPECT_OK(loomc_link_module(linker.get(), workspace.get(),
+                                    &link_options, &module, &result));
+  ModulePtr module_ptr(module);
+  ResultPtr result_ptr(result);
+  ASSERT_NE(module_ptr, nullptr);
+  ExpectSucceededResult(result_ptr.get());
 }
 
 TEST(TargetTest, RejectsSpecializationOptionsDuringEmission) {

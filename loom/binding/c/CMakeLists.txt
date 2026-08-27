@@ -123,6 +123,7 @@ loom_cc_library(
     loom::sanitizer::options
     loom::target::function_version
     loom::target::function_version_projection
+    loom::target::module_specialization
     loom::target::pipeline
     loom::target::predicate
     loom::target::profile

@@ -155,6 +155,7 @@ loom_cc_test(
     deps = [
         ":test_util",
         "//loom/binding/c:loomc",
+        "//loom/binding/c/test/testdata:link_target_specialization",
         "//loom/src/loom/format/bytecode:writer",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/format/text:printer",

@@ -177,6 +177,23 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    module_specialization
+  HDRS
+    "module_specialization.h"
+  SRCS
+    "module_specialization.c"
+  DEPS
+    ::function_version_projection
+    ::specialization
+    iree::base
+    iree::base::internal::arena
+    loom::error::emitter
+    loom::ir
+  PUBLIC
+)
+
 loom_cc_test(
   NAME
     function_version_projection_test
