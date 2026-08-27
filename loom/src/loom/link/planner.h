@@ -7,8 +7,8 @@
 // Metadata-first link planner.
 //
 // The planner consumes a provider-backed module index and produces an ordered
-// live-symbol selection. Materialization and cloning remain the responsibility
-// of the incremental linker sink.
+// live-symbol selection. Materialization, cloning, and definition contract
+// merging remain the responsibility of the incremental linker sink.
 
 #ifndef LOOM_LINK_PLANNER_H_
 #define LOOM_LINK_PLANNER_H_

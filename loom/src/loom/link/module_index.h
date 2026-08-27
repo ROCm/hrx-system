@@ -452,13 +452,6 @@ loom_link_module_index_template_family_at(
     const loom_link_module_index_t* index,
     loom_link_template_family_ordinal_t ordinal);
 
-// Returns a status that names the two provider locations for a duplicate
-// global symbol. This is a diagnostic helper for planner conflict reporting.
-iree_status_t loom_link_module_index_duplicate_global_status(
-    const loom_link_module_index_t* index,
-    const loom_link_module_index_symbol_t* selected,
-    const loom_link_module_index_symbol_t* duplicate);
-
 #ifdef __cplusplus
 }
 #endif

@@ -246,6 +246,61 @@ static iree_status_t loom_link_plan_materialize_module(
   return status;
 }
 
+// Recovers provider-level context after the canonical linker rejects two
+// selected concrete definitions. Collision recovery is deliberately confined
+// to the failing path: valid plans rely only on the target module's symbol map
+// and never maintain a second per-plan name-membership structure.
+static iree_status_t loom_link_plan_annotate_global_collision(
+    iree_status_t status, const loom_link_plan_t* plan,
+    const loom_link_module_index_t* index,
+    const loom_link_plan_module_selection_t* selection) {
+  if (iree_status_code(status) != IREE_STATUS_ALREADY_EXISTS) {
+    return status;
+  }
+
+  for (iree_host_size_t i = 0; i < selection->symbols.count; ++i) {
+    const loom_link_module_index_symbol_t* symbol =
+        selection->symbols.values[i].source_symbol;
+    if (symbol->identity != LOOM_LINK_SYMBOL_IDENTITY_GLOBAL ||
+        !iree_any_bit_set(symbol->flags,
+                          LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION)) {
+      continue;
+    }
+
+    const loom_link_module_index_symbol_t* previous =
+        loom_link_module_index_lookup_name(index, symbol->name);
+    while (previous) {
+      const bool is_prior_selected_definition =
+          previous->module_ordinal < symbol->module_ordinal &&
+          previous->identity == LOOM_LINK_SYMBOL_IDENTITY_GLOBAL &&
+          iree_any_bit_set(previous->flags,
+                           LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION) &&
+          loom_link_plan_contains_symbol(plan, previous->ordinal);
+      if (is_prior_selected_definition) {
+        const loom_link_module_index_module_t* previous_module =
+            loom_link_module_index_symbol_module(index, previous);
+        const loom_link_module_index_provider_t* previous_provider =
+            loom_link_module_index_symbol_provider(index, previous);
+        const loom_link_module_index_module_t* current_module =
+            loom_link_module_index_symbol_module(index, symbol);
+        const loom_link_module_index_provider_t* current_provider =
+            loom_link_module_index_symbol_provider(index, symbol);
+        return iree_status_annotate_f(
+            status,
+            "global symbol '@%.*s' selected from provider '%.*s' module "
+            "'%.*s' conflicts with provider '%.*s' module '%.*s'",
+            (int)previous->name.size, previous->name.data,
+            (int)previous_provider->name.size, previous_provider->name.data,
+            (int)previous_module->name.size, previous_module->name.data,
+            (int)current_provider->name.size, current_provider->name.data,
+            (int)current_module->name.size, current_module->name.data);
+      }
+      previous = loom_link_module_index_next_same_name(index, previous);
+    }
+  }
+  return status;
+}
+
 static iree_status_t loom_link_plan_materialize_modules(
     const loom_link_plan_t* plan, const loom_link_module_index_t* index,
     const loom_link_plan_module_projection_t* projection,
@@ -283,6 +338,10 @@ static iree_status_t loom_link_plan_materialize_modules(
         source_symbol_ordinals, source_symbol_outputs, module_target_symbols,
         target_symbols, target_template_families, target_kernel_configurations,
         linker);
+    if (!iree_status_is_ok(status)) {
+      status = loom_link_plan_annotate_global_collision(
+          status, plan, index, &projection->modules.values[i]);
+    }
   }
   return status;
 }
