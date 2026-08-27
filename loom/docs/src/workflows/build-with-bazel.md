@@ -6,6 +6,41 @@ The public Bazel rules name the artifact being built. A
 roots into deployment products. The same source graph can therefore stop at a
 linkable library or continue into the product required by one application.
 
+## Depend on HRX
+
+HRX publishes Loom as the `loom/` subproject of its root Bzlmod module. An
+independent authoring repository using a local HRX checkout declares that
+dependency in its root module:
+
+```starlark title="MODULE.bazel"
+module(name = "hrx_loom_kernels")
+
+bazel_dep(name = "hrx", version = "0.0.0")
+
+local_path_override(
+    module_name = "hrx",
+    path = "../hrx-system",
+)
+```
+
+The dependency's default apparent repository name is `@hrx`, so BUILD files
+load the public authoring API from
+`@hrx//loom/build_tools/bazel:defs.bzl` and select built-in profiles from
+`@hrx//loom/target/...`. The local override changes where Bazel obtains the HRX
+module without changing those labels. It also preserves the compiler
+co-development loop: editing Loom in the referenced checkout makes the next
+kernel build rebuild the affected source tools before consuming them.
+
+The HRX module registers source-built toolchains for each Loom authoring role.
+A root module may register a higher-priority implementation of the same public
+toolchain types when it consumes released executables instead. The library and
+binary rules remain unchanged because they resolve tools by role rather than by
+an executable label.
+
+Inside the HRX source tree, `@hrx//loom/...` and `//loom/...` reach the same
+packages. The checked examples use the external spelling so their BUILD
+declarations can move unchanged into a standalone kernel repository.
+
 The declaration below is exercised by the documentation test suite:
 
 ```starlark title="BUILD.bazel"

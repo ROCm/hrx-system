@@ -6,16 +6,15 @@
 #
 # bazel-to-cmake: skip
 
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
-
 # --8<-- [start:products]
 load(
-    "//loom/build_tools/bazel:defs.bzl",
+    "@hrx//loom/build_tools/bazel:defs.bzl",
     "loom_command_binary",
     "loom_kernel_binary",
     "loom_library",
     "loom_vm_binary",
 )
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -41,14 +40,14 @@ loom_library(
 
 loom_kernel_binary(
     name = "elementwise_kernel",
-    target = "//loom/target/amdgpu:gfx11-generic",
+    target = "@hrx//loom/target/amdgpu:gfx11-generic",
     deps = [":kernel"],
 )
 
 loom_command_binary(
     name = "elementwise_command",
     roots = ["@elementwise_transform"],
-    target = "//loom/target/amdgpu:gfx11-generic",
+    target = "@hrx//loom/target/amdgpu:gfx11-generic",
     deps = [":model"],
 )
 
