@@ -137,6 +137,7 @@ py_test(
         "//:.github/workflows/docs.yml",
         "//:.github/workflows/presubmit.yml",
         "//:.github/workflows/test_core_linux_gpu.yml",
+        "//:.github/workflows/test_core_linux_gpu_source.yml",
     ],
     main = "ci_test.py",
 )

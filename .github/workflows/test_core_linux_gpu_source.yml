@@ -1,0 +1,197 @@
+# Copyright 2026 The HRX Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+name: Test CMake Linux GPU From Source
+
+on:
+  workflow_call:
+    inputs:
+      name:
+        type: string
+        default: Linux / CMake / GPU gfx942
+      runner_labels:
+        type: string
+        description: "JSON array of labels that must all match the GPU runner."
+        required: true
+      release_type:
+        type: string
+        default: nightly
+      run_id:
+        type: string
+        default: ""
+      artifact_set:
+        type: string
+        default: core
+      amdgpu_targets:
+        type: string
+        description: "IREE_HAL_AMDGPU_TARGETS selectors this runner can execute."
+        required: true
+      device:
+        type: string
+        default: gpu:0
+      ctest_regex:
+        type: string
+        default: ""
+      ctest_exclude_regex:
+        type: string
+        default: ""
+      ctest_label_regex:
+        type: string
+        default: runtime-resource=amd-gpu
+      ctest_label_exclude_regex:
+        type: string
+        default: ""
+      ctest_parallelism:
+        type: number
+        default: 1
+      experimental:
+        type: boolean
+        default: false
+  # GitHub accepts at most ten workflow_dispatch inputs, which this list fills,
+  # so three of the thirteen above are dropped. The job name already falls back
+  # to a literal when `name` is absent, and the env block below falls back for
+  # release_type and artifact_set, so a dispatched run behaves like a call that
+  # takes their defaults. A dispatch cannot reach the other release channels
+  # and artifact sets `ci_core_linux.yml` can pass.
+  workflow_dispatch:
+    inputs:
+      runner_labels:
+        type: string
+        description: "JSON array of labels that must all match the GPU runner."
+        required: true
+      amdgpu_targets:
+        type: string
+        description: "IREE_HAL_AMDGPU_TARGETS selectors this runner can execute."
+        required: true
+      run_id:
+        type: string
+        description: "TheRock artifact run id. Empty means latest complete Linux run."
+        default: ""
+      device:
+        type: string
+        description: "libhrx CTS device spec."
+        default: gpu:0
+      ctest_regex:
+        type: string
+        description: "Optional CTest name regex for installed GPU tests."
+        default: ""
+      ctest_exclude_regex:
+        type: string
+        description: "Optional CTest name exclusion regex for installed GPU tests."
+        default: ""
+      ctest_label_regex:
+        type: string
+        description: "CTest label regex for GPU installed tests."
+        default: runtime-resource=amd-gpu
+      ctest_label_exclude_regex:
+        type: string
+        description: "CTest label exclusion regex."
+        default: ""
+      ctest_parallelism:
+        type: number
+        description: "CTest parallelism on the GPU runner."
+        default: 1
+      experimental:
+        type: boolean
+        description: >-
+          Report success even if the ROCm environment check or the installed
+          GPU tests fail. A failed environment check also skips the build and
+          the tests.
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  test_core_linux_gpu_source:
+    name: ${{ inputs.name || 'Linux / CMake / GPU gfx942' }}
+    runs-on: ${{ fromJSON(inputs.runner_labels) }}
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: >-
+        --ipc host
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --group-add 993
+        --group-add 992
+        --group-add 110
+        --ulimit memlock=-1:-1
+        --security-opt seccomp=unconfined
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+        --user 0:0
+    timeout-minutes: 60
+    env:
+      HRX_OUTPUT_DIR: ${{ github.workspace }}/build/linux-gpu
+      HRX_RELEASE_TYPE: ${{ inputs.release_type || 'nightly' }}
+      HRX_RUN_ID: ${{ inputs.run_id }}
+      HRX_ARTIFACT_SET: ${{ inputs.artifact_set || 'core' }}
+      HRX_ROCM_ROOT: ${{ github.workspace }}/build/linux-gpu/rocm-root
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/linux-gpu/downloads
+      HRX_BUILD_DIR: ${{ github.workspace }}/build/linux-gpu/build/hrx-core
+      HRX_PUBLIC_INSTALL_DIR: ${{ github.workspace }}/build/linux-gpu/install/public
+      HRX_PUBLIC_DEPS_DIR: ${{ github.workspace }}/build/linux-gpu/install/public-deps
+      HRX_TESTS_INSTALL_DIR: ${{ github.workspace }}/build/linux-gpu/install/tests
+      HRX_COMPOSED_INSTALL_DIR: ${{ github.workspace }}/build/linux-gpu/install/composed
+      HRX_CMAKE_OPTIONS: "-DIREE_HAL_AMDGPU_TARGETS=${{ inputs.amdgpu_targets }}"
+      HRX_PREPARE_PUBLIC_DEPS: "true"
+      HRX_PACKAGE_SMOKE: "false"
+      HRX_TEST_GPU: "true"
+      HRX_CTS_DEVICE: ${{ inputs.device || 'gpu:0' }}
+      HRX_CTEST_REGEX: ${{ inputs.ctest_regex }}
+      HRX_CTEST_EXCLUDE_REGEX: ${{ inputs.ctest_exclude_regex }}
+      HRX_CTEST_LABEL_REGEX: ${{ inputs.ctest_label_regex }}
+      HRX_CTEST_LABEL_EXCLUDE_REGEX: ${{ inputs.ctest_label_exclude_regex }}
+      HRX_CTEST_PARALLELISM: ${{ inputs.ctest_parallelism || 1 }}
+      HRX_TEST_TMPDIR: ${{ github.workspace }}/build/linux-gpu/test-tmp
+      HRX_PYTHON: ${{ github.workspace }}/build/linux-gpu/python/bin/python3
+      PIP_CACHE_DIR: ${{ github.workspace }}/build/linux-gpu/caches/pip
+      ROCR_VISIBLE_DEVICES: "0"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Adjust git config
+        run: |
+          mkdir -p "$HOME"
+          git config --global --add safe.directory "$PWD"
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Fetch ROCm toolchain
+        run: bash .github/scripts/fetch_rocm_toolchain.sh
+
+      - name: Install CMake host tools
+        run: |
+          "${HRX_PYTHON}" -m pip install --upgrade cmake==3.31.6 ninja
+          echo "${HRX_OUTPUT_DIR}/python/bin" >> "${GITHUB_PATH}"
+
+      - name: Check tool versions
+        run: |
+          cmake --version
+          ctest --version
+          ninja --version
+          bash .github/scripts/check_rocm_device_toolchain.sh
+          test -d "${HRX_ROCM_ROOT}/include"
+
+      - name: Report ROCm environment
+        id: rocm_environment
+        continue-on-error: ${{ inputs.experimental }}
+        run: bash .github/scripts/check_rocm_environment.sh
+
+      - name: Build and install HRX
+        if: ${{ steps.rocm_environment.outcome == 'success' }}
+        run: |
+          "${HRX_PYTHON}" build_tools/ci/ci_core_linux.py build
+
+      - name: Run installed GPU tests
+        if: ${{ steps.rocm_environment.outcome == 'success' }}
+        continue-on-error: ${{ inputs.experimental }}
+        run: |
+          "${HRX_PYTHON}" build_tools/ci/ci_core_linux.py test

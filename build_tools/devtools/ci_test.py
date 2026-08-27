@@ -40,9 +40,19 @@ class CiTest(unittest.TestCase):
         ]
 
     def workflow_job_block(self, path: str, job_name: str) -> str:
+        """Returns the body of ``job_name`` in the workflow at ``path``.
+
+        A job body is blank lines and lines indented at least four spaces, so
+        the first line that is neither ends it: the next job's key, a comment
+        introducing that job, or anything after ``jobs:``. Letting a comment
+        run on into the preceding body would make assertions over that body
+        report the wrong thing in both directions -- ``assertIn`` could pass on
+        text belonging to the next job, and ``assertNotIn`` could fail on it.
+        """
         text = Path(path).read_text()
         match = re.search(
-            rf"^  {re.escape(job_name)}:\n(?P<body>.*?)(?=^  [A-Za-z0-9_]+:\n|\Z)",
+            rf"^  {re.escape(job_name)}:\n"
+            r"(?P<body>.*?)(?=^(?![ \t]*\n)(?! {4})|\Z)",
             text,
             re.MULTILINE | re.DOTALL,
         )
@@ -995,6 +1005,10 @@ class CiTest(unittest.TestCase):
         for path, job_name in (
             (".github/workflows/ci_iree_bazel.yml", "linux_bazel_amdgpu"),
             (".github/workflows/ci_iree_cmake.yml", "linux_cmake_amdgpu"),
+            (
+                ".github/workflows/test_core_linux_gpu_source.yml",
+                "test_core_linux_gpu_source",
+            ),
         ):
             with self.subTest(path=path):
                 block = self.workflow_job_block(path, job_name)
@@ -1157,33 +1171,92 @@ fi
             )
 
     def test_core_gpu_workflow_routes_exact_gpu_labels(self):
-        block = self.workflow_job_block(
-            ".github/workflows/ci_core_linux.yml", "gpu_linux"
+        gfx942_block = self.workflow_job_block(
+            ".github/workflows/ci_core_linux.yml", "gpu_linux_gfx942"
+        )
+        self.assertIn("name: Linux / CMake / GPU gfx942", gfx942_block)
+        self.assertIn(
+            "uses: ./.github/workflows/test_core_linux_gpu_source.yml",
+            gfx942_block,
         )
         self.assertIn(
             "runner_labels: '[\"linux-gfx942-1gpu-ccs-csp-ossci-rocm\"]'",
-            block,
+            gfx942_block,
+        )
+        self.assertIn("amdgpu_targets: gfx942", gfx942_block)
+        self.assertNotIn("artifact_run_id", gfx942_block)
+        self.assertNotIn("gfx1201", gfx942_block)
+
+        gfx1201_block = self.workflow_job_block(
+            ".github/workflows/ci_core_linux.yml", "gpu_linux_gfx1201"
+        )
+        self.assertIn("name: Linux / CMake / GPU gfx1201", gfx1201_block)
+        self.assertIn(
+            "uses: ./.github/workflows/test_core_linux_gpu.yml", gfx1201_block
         )
         self.assertIn(
             'runner_labels: \'["self-hosted", "Linux", "X64", "gpu_navi4x"]\'',
-            block,
+            gfx1201_block,
+        )
+        self.assertIn("artifact_run_id: ${{ github.run_id }}", gfx1201_block)
+
+        summary_block = self.workflow_job_block(
+            ".github/workflows/ci_core_linux.yml", "summary"
+        )
+        for job in ("cmake_linux", "gpu_linux_gfx942", "gpu_linux_gfx1201"):
+            self.assertIn(f"- {job}", summary_block)
+            self.assertIn("needs." + job + ".result", summary_block)
+
+        for path, job_name in (
+            (".github/workflows/test_core_linux_gpu.yml", "test_core_linux_gpu"),
+            (
+                ".github/workflows/test_core_linux_gpu_source.yml",
+                "test_core_linux_gpu_source",
+            ),
+        ):
+            with self.subTest(path=path):
+                reusable_workflow = Path(path).read_text()
+                # Both workflows declare runner_labels once per trigger, so
+                # asserting one match would let either declaration satisfy the
+                # test for the other.
+                declarations = re.findall(
+                    r"^ +runner_labels:$", reusable_workflow, re.MULTILINE
+                )
+                required_declarations = re.findall(
+                    r"runner_labels:\n\s+type: string\n\s+description: "
+                    r'"JSON array of labels that must all match the GPU runner\."\n'
+                    r"\s+required: true",
+                    reusable_workflow,
+                )
+                self.assertEqual(len(declarations), 2)
+                self.assertEqual(len(required_declarations), len(declarations))
+                reusable_block = self.workflow_job_block(path, job_name)
+                self.assertRegex(
+                    reusable_block,
+                    r"(?m)^\s+runs-on: \$\{\{ fromJSON\(inputs\.runner_labels\) \}\}$",
+                )
+
+    def test_core_gpu_source_workflow_builds_instead_of_downloading(self):
+        block = self.workflow_job_block(
+            ".github/workflows/test_core_linux_gpu_source.yml",
+            "test_core_linux_gpu_source",
         )
 
-        reusable_workflow = Path(
-            ".github/workflows/test_core_linux_gpu.yml"
-        ).read_text()
-        self.assertRegex(
-            reusable_workflow,
-            r"runner_labels:\n\s+type: string\n\s+description: "
-            r'"JSON array of labels that must all match the GPU runner\."\n'
-            r"\s+required: true",
-        )
-        reusable_block = self.workflow_job_block(
-            ".github/workflows/test_core_linux_gpu.yml", "test_core_linux_gpu"
-        )
-        self.assertRegex(
-            reusable_block,
-            r"(?m)^\s+runs-on: \$\{\{ fromJSON\(inputs\.runner_labels\) \}\}$",
+        self.assertNotIn("actions/download-artifact", block)
+        self.assertNotIn("ci_core_linux.py extract-packages", block)
+        self.assertIn("bash .github/scripts/fetch_rocm_toolchain.sh", block)
+        self.assertIn('"${HRX_PYTHON}" build_tools/ci/ci_core_linux.py build', block)
+        self.assertIn('"${HRX_PYTHON}" build_tools/ci/ci_core_linux.py test', block)
+
+        # prepare_public_deps_root() synthesizes the runtime dependency overlay
+        # from the fetched ROCm root because no dependency package is unpacked.
+        self.assertIn('HRX_PREPARE_PUBLIC_DEPS: "true"', block)
+        self.assertIn('HRX_PACKAGE_SMOKE: "false"', block)
+        self.assertIn('HRX_TEST_GPU: "true"', block)
+        self.assertIn(
+            "HRX_CMAKE_OPTIONS: "
+            '"-DIREE_HAL_AMDGPU_TARGETS=${{ inputs.amdgpu_targets }}"',
+            block,
         )
 
     def test_core_windows_workflow_uses_generic_windows_runner(self):

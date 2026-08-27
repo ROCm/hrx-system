@@ -97,44 +97,59 @@ jobs:
         -DIREE_HAL_AMDGPU_TARGETS=gfx942;gfx1151;gfx1201
       package: ${{ matrix.package }}
 
-  gpu_linux:
-    name: ${{ matrix.name }}
+  # gfx942 builds the tests it runs, because downloading the multi-gigabyte test
+  # package on this runner pool does not reliably finish inside a job timeout.
+  # The cmake_linux gate stays even though no artifact is consumed: GPU runners
+  # are scarce, so a compile failure should surface on the build pool first.
+  gpu_linux_gfx942:
+    name: Linux / CMake / GPU gfx942
     needs: cmake_linux
     if: ${{ needs.cmake_linux.result == 'success' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Linux / CMake / GPU gfx942
-            chip: gfx942
-            runner_labels: '["linux-gfx942-1gpu-ccs-csp-ossci-rocm"]'
-            ctest_exclude_regex: ""
-            experimental: false
-          - name: Linux / CMake / GPU gfx1201
-            chip: gfx1201
-            runner_labels: '["self-hosted", "Linux", "X64", "gpu_navi4x"]'
-            ctest_exclude_regex: ""
-            experimental: false
+    uses: ./.github/workflows/test_core_linux_gpu_source.yml
+    permissions:
+      contents: read
+    with:
+      name: Linux / CMake / GPU gfx942
+      runner_labels: '["linux-gfx942-1gpu-ccs-csp-ossci-rocm"]'
+      release_type: ${{ inputs.release_type || 'nightly' }}
+      run_id: ${{ inputs.run_id || '' }}
+      artifact_set: ${{ inputs.artifact_set || 'core' }}
+      amdgpu_targets: gfx942
+      device: gpu:0
+      ctest_exclude_regex: ""
+      ctest_label_regex: runtime-resource=amd-gpu
+      ctest_label_exclude_regex: manual
+      ctest_parallelism: 1
+      experimental: false
+
+  # gfx1201 downloads and runs the packages built by cmake_linux, so every pull
+  # request still answers whether the shipped packages extract and run on a
+  # machine that did not build them. It is the only job that asks that question.
+  gpu_linux_gfx1201:
+    name: Linux / CMake / GPU gfx1201
+    needs: cmake_linux
+    if: ${{ needs.cmake_linux.result == 'success' }}
     uses: ./.github/workflows/test_core_linux_gpu.yml
     permissions:
       actions: read
       contents: read
     with:
-      name: ${{ matrix.name }}
-      runner_labels: ${{ matrix.runner_labels }}
+      name: Linux / CMake / GPU gfx1201
+      runner_labels: '["self-hosted", "Linux", "X64", "gpu_navi4x"]'
       artifact_run_id: ${{ github.run_id }}
       device: gpu:0
-      ctest_exclude_regex: ${{ matrix.ctest_exclude_regex }}
+      ctest_exclude_regex: ""
       ctest_label_regex: runtime-resource=amd-gpu
       ctest_label_exclude_regex: manual
       ctest_parallelism: 1
-      experimental: ${{ matrix.experimental }}
+      experimental: false
 
   summary:
     name: Linux / CMake / CI / Summary
     needs:
       - cmake_linux
-      - gpu_linux
+      - gpu_linux_gfx942
+      - gpu_linux_gfx1201
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     steps:
@@ -145,8 +160,13 @@ jobs:
           if [[ "${result}" != "success" ]]; then
             exit 1
           fi
-          result="${{ needs.gpu_linux.result }}"
-          echo "gpu_linux result: ${result}"
+          result="${{ needs.gpu_linux_gfx942.result }}"
+          echo "gpu_linux_gfx942 result: ${result}"
+          if [[ "${result}" != "success" ]]; then
+            exit 1
+          fi
+          result="${{ needs.gpu_linux_gfx1201.result }}"
+          echo "gpu_linux_gfx1201 result: ${result}"
           if [[ "${result}" != "success" ]]; then
             exit 1
           fi
