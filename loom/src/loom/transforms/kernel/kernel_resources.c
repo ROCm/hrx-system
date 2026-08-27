@@ -10,14 +10,13 @@
 #include "loom/ir/scalar_type.h"
 #include "loom/ir/types.h"
 #include "loom/ops/buffer/ops.h"
-#include "loom/ops/func/ops.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/op_defs.h"
 
-#define LOOM_KERNEL_RESOURCES_STATISTICS(V, statistics_type)       \
-  V(statistics_type, functions_normalized, "functions-normalized", \
-    "Number of exported device functions changed.")                \
-  V(statistics_type, view_args_normalized, "view-args-normalized", \
+#define LOOM_KERNEL_RESOURCES_STATISTICS(V, statistics_type)                 \
+  V(statistics_type, kernel_entries_normalized, "kernel-entries-normalized", \
+    "Number of kernel entry definitions changed.")                           \
+  V(statistics_type, view_args_normalized, "view-args-normalized",           \
     "Number of view-typed ABI arguments rewritten to buffer roots.")
 
 LOOM_PASS_STATISTICS_DEFINE(loom_kernel_resources_statistics,
@@ -27,7 +26,7 @@ LOOM_PASS_STATISTICS_DEFINE(loom_kernel_resources_statistics,
 static const loom_pass_info_t loom_kernel_resources_pass_info_storage = {
     .name = IREE_SVL("normalize-kernel-resources"),
     .description =
-        IREE_SVL("Normalize exported device resource args to buffer roots."),
+        IREE_SVL("Normalize kernel entry resource args to buffer roots."),
     .kind = LOOM_PASS_FUNCTION,
     .statistic_layout = &loom_kernel_resources_statistics_layout,
 };
@@ -39,14 +38,6 @@ const loom_pass_info_t* loom_normalize_kernel_resources_pass_info(void) {
 //===----------------------------------------------------------------------===//
 // Implementation
 //===----------------------------------------------------------------------===//
-
-static bool loom_kernel_resources_is_exported_device_function(
-    loom_func_like_t function) {
-  return loom_func_like_isa(function) &&
-         loom_func_like_visibility(function) == LOOM_FUNC_VISIBILITY_PUBLIC &&
-         loom_func_like_cc(function) == LOOM_FUNC_CC_DEVICE &&
-         loom_func_like_body(function) != NULL;
-}
 
 static iree_status_t loom_kernel_resources_build_zero_offset(
     loom_builder_t* builder, loom_location_id_t location,
@@ -81,15 +72,16 @@ static iree_status_t loom_kernel_resources_normalize_view_arg(
 iree_status_t loom_normalize_kernel_resources_run(loom_pass_t* pass,
                                                   loom_module_t* module,
                                                   loom_func_like_t function) {
-  if (!loom_kernel_resources_is_exported_device_function(function)) {
+  if (!loom_func_like_is_kernel_entry(function)) {
     return iree_ok_status();
   }
+  loom_region_t* body = loom_func_like_body(function);
+  if (!body) return iree_ok_status();
 
   uint16_t arg_count = 0;
   const loom_value_id_t* arg_ids = loom_func_like_arg_ids(function, &arg_count);
   if (arg_count == 0 || !arg_ids) return iree_ok_status();
 
-  loom_region_t* body = loom_func_like_body(function);
   loom_block_t* entry_block = loom_region_entry_block(body);
   loom_builder_t builder;
   loom_builder_initialize(module, &module->arena, entry_block, &builder);
@@ -118,9 +110,7 @@ iree_status_t loom_normalize_kernel_resources_run(loom_pass_t* pass,
   if (changed_function) {
     loom_kernel_resources_statistics_t* statistics =
         loom_kernel_resources_statistics(pass);
-    ++statistics->functions_normalized;
-  }
-  if (changed_function) {
+    ++statistics->kernel_entries_normalized;
     loom_pass_mark_changed(pass);
   }
   return iree_ok_status();
