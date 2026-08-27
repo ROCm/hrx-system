@@ -1,0 +1,21 @@
+// RUN: roundtrip
+
+func.def @scalar_i32_add_multiply(%lhs: i32, %rhs: i32) -> (i32) {
+  %sum = scalar.addi %lhs, %rhs : i32
+  %result = scalar.muli %sum, %rhs : i32
+  func.return %result : i32
+}
+
+// ====
+
+func.def @scalar_bf16_extend(%source: bf16) -> (f32) {
+  %result = scalar.extf %source : bf16 to f32
+  func.return %result : f32
+}
+
+// ====
+
+func.def @index_i32_cast(%source: i32) -> (index) {
+  %result = index.cast %source : i32 to index
+  func.return %result : index
+}

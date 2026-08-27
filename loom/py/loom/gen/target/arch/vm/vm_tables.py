@@ -50,8 +50,6 @@ def generate_lowering_rows() -> str:
         arguments = [
             c_enum_name(row.source_op),
             descriptor_name,
-            str(len(row.operand_types)),
-            str(len(row.result_types)),
             *operand_types,
             *result_types,
         ]

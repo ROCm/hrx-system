@@ -9,6 +9,7 @@
 
 iree_add_all_subdirs()
 
+if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
     target_records
@@ -21,7 +22,9 @@ loom_cc_library(
     loom::target::types
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_VM)
 loom_generated_cc_library(
   NAME
     ops
@@ -49,7 +52,9 @@ loom_generated_cc_library(
     loom::ops::target
     loom::target::types
 )
+endif()
 
+if(LOOM_TARGET_ARCH_VM)
 loom_generated_cc_library(
   NAME
     descriptors
@@ -70,5 +75,78 @@ loom_generated_cc_library(
   DEPS
     loom::codegen::low::descriptors
 )
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    lower
+  HDRS
+    "lower/lower.h"
+  SRCS
+    "lower/lower.c"
+  DEPS
+    ::descriptors
+    iree::base
+    iree::base::internal
+    loom::codegen::low::lower
+    loom::error::error_defs
+    loom::ir
+    loom::ops::index
+    loom::ops::scalar
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    provider
+  HDRS
+    "provider.h"
+  SRCS
+    "provider.c"
+  DEPS
+    ::descriptors
+    ::lower
+    ::ops
+    iree::base
+    loom::target::low_descriptor_registry
+    loom::target::provider
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    check_provider
+  HDRS
+    "check/provider.h"
+  SRCS
+    "check/provider.c"
+  DEPS
+    ::provider
+    iree::base
+    loom::tools::loom-check::provider
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_check_test_suite(
+  NAME
+    loom_check_file_test
+  SRCS
+    "test/source_low/corpus/numeric_scalar_baseline.loom-test"
+    "test/source_low/corpus/numeric_scalar_literals.loom-test"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_baseline.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_literals.loom-test"
+  TEST_NAME_PREFIX_TO_STRIP
+    "test/source_low/"
+)
+endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

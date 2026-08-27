@@ -54,3 +54,4 @@ def test_lowering_rows_are_data_only() -> None:
     assert "LOOM_VM_SOURCE_LOWERING_LIMITS(\n    2, 1)" in rows
     assert "LOOM_OP_INDEX_MUL" in rows
     assert "VM_CORE_DESCRIPTOR_REF_INTEGER_MUL_I64" in rows
+    assert "LOOM_OP_SCALAR_ADDI, VM_CORE_DESCRIPTOR_REF_INTEGER_ADD_I32, 2, 1" not in rows

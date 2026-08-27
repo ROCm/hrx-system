@@ -28,6 +28,9 @@
 #ifndef LOOM_CHECK_HAVE_TARGET_SPIRV
 #define LOOM_CHECK_HAVE_TARGET_SPIRV 0
 #endif  // LOOM_CHECK_HAVE_TARGET_SPIRV
+#ifndef LOOM_CHECK_HAVE_TARGET_VM
+#define LOOM_CHECK_HAVE_TARGET_VM 0
+#endif  // LOOM_CHECK_HAVE_TARGET_VM
 #ifndef LOOM_CHECK_HAVE_EMIT_SPIRV
 #define LOOM_CHECK_HAVE_EMIT_SPIRV 0
 #endif  // LOOM_CHECK_HAVE_EMIT_SPIRV
@@ -53,6 +56,9 @@
 #if LOOM_CHECK_HAVE_TARGET_SPIRV
 #include "loom/target/arch/spirv/check/provider.h"
 #endif  // LOOM_CHECK_HAVE_TARGET_SPIRV
+#if LOOM_CHECK_HAVE_TARGET_VM
+#include "loom/target/arch/vm/check/provider.h"
+#endif  // LOOM_CHECK_HAVE_TARGET_VM
 #if LOOM_CHECK_HAVE_EMIT_SPIRV
 #include "loom/target/emit/spirv/check/provider.h"
 #endif  // LOOM_CHECK_HAVE_EMIT_SPIRV
@@ -83,6 +89,9 @@ static const loom_check_provider_t* const kLoomCheckProviders[] = {
 #if LOOM_CHECK_HAVE_TARGET_SPIRV
     &loom_spirv_check_provider,
 #endif  // LOOM_CHECK_HAVE_TARGET_SPIRV
+#if LOOM_CHECK_HAVE_TARGET_VM
+    &loom_vm_check_provider,
+#endif  // LOOM_CHECK_HAVE_TARGET_VM
 #if LOOM_CHECK_HAVE_EMIT_SPIRV
     &loom_spirv_emit_check_provider,
 #endif  // LOOM_CHECK_HAVE_EMIT_SPIRV

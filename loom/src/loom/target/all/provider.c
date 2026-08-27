@@ -10,13 +10,14 @@
 #include "loom/target/arch/amdgpu/provider.h"
 #include "loom/target/arch/cmd/provider.h"
 #include "loom/target/arch/spirv/provider.h"
+#include "loom/target/arch/vm/provider.h"
 #include "loom/target/arch/wasm/provider.h"
 #include "loom/target/arch/x86/provider.h"
 
 static const loom_target_provider_t* const kAllTargetProviders[] = {
-    &loom_cmd_target_provider,    &loom_spirv_target_provider,
-    &loom_wasm_target_provider,   &loom_x86_target_provider,
-    &loom_amdgpu_target_provider,
+    &loom_cmd_target_provider, &loom_spirv_target_provider,
+    &loom_vm_target_provider,  &loom_wasm_target_provider,
+    &loom_x86_target_provider, &loom_amdgpu_target_provider,
 };
 
 static const loom_target_provider_set_t kAllTargetProviderSet = {

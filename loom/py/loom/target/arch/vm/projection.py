@@ -375,6 +375,21 @@ def _require_descriptor_shape(
             f"{descriptor_result_count} results; expected {operand_count} and "
             f"{result_count}"
         )
+    if descriptor.op_kind is not DescriptorOpKind.OP:
+        raise ValueError(
+            f"{descriptor_key}: source operation projection requires a low.op "
+            "descriptor"
+        )
+    missing_default_immediates = tuple(
+        immediate.field_name
+        for immediate in descriptor.immediates
+        if ImmediateFlag.DEFAULT_VALUE not in immediate.flags
+    )
+    if missing_default_immediates:
+        raise ValueError(
+            f"{descriptor_key}: source operation projection cannot synthesize "
+            "required immediates " + ", ".join(missing_default_immediates)
+        )
 
 
 def _require_concrete_source_types(

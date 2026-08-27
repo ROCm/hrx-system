@@ -12,12 +12,13 @@ package(default_visibility = ["//visibility:public"])
 # Advanced target-architecture slices. Public //loom/config/target values imply
 # these effective settings; this flag is only for source embedders that want
 # target metadata/providers without the corresponding production emitters.
-DEFAULT_ENABLED = []
+DEFAULT_ENABLED = ["vm"]
 
 SUPPORTED_VALUES = [
     "amdgpu",
     "llvmir",
     "spirv",
+    "vm",
     "wasm",
     "x86",
 ]
@@ -53,3 +54,8 @@ string_list_flag(
         "x86",
     ]
 ]
+
+selects.config_setting_group(
+    name = "vm",
+    match_any = [":explicit_vm"],
+)

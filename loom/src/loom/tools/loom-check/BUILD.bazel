@@ -96,6 +96,20 @@ _TARGET_SPIRV_CHECK_DEPS = iree_select({
     "//conditions:default": [],
 })
 
+_TARGET_VM_CHECK_COPTS = iree_select({
+    "//loom/config/target/arch:vm": [
+        "-DLOOM_CHECK_HAVE_TARGET_VM=1",
+    ],
+    "//conditions:default": [],
+})
+
+_TARGET_VM_CHECK_DEPS = iree_select({
+    "//loom/config/target/arch:vm": [
+        "//loom/src/loom/target/arch/vm:check_provider",
+    ],
+    "//conditions:default": [],
+})
+
 _EMIT_SPIRV_CHECK_COPTS = iree_select({
     "//loom/config/emit:spirv": [
         "-DLOOM_CHECK_HAVE_EMIT_SPIRV=1",
@@ -157,6 +171,7 @@ _LOOM_CHECK_PROVIDER_COPTS = (
     _TARGET_LLVMIR_CHECK_COPTS +
     _EMIT_LLVMIR_CHECK_COPTS +
     _TARGET_SPIRV_CHECK_COPTS +
+    _TARGET_VM_CHECK_COPTS +
     _EMIT_SPIRV_CHECK_COPTS +
     _TARGET_WASM_CHECK_COPTS +
     _EMIT_WASM_CHECK_COPTS +
@@ -168,6 +183,7 @@ _LOOM_CHECK_PROVIDER_DEPS = (
     _TARGET_LLVMIR_CHECK_DEPS +
     _EMIT_LLVMIR_CHECK_DEPS +
     _TARGET_SPIRV_CHECK_DEPS +
+    _TARGET_VM_CHECK_DEPS +
     _EMIT_SPIRV_CHECK_DEPS +
     _TARGET_WASM_CHECK_DEPS +
     _EMIT_WASM_CHECK_DEPS +

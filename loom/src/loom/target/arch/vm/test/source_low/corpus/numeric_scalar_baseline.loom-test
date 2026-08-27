@@ -1,0 +1,44 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_baseline.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+func.def target(@target) @scalar_i32_add_multiply(%lhs: i32, %rhs: i32) -> (i32) {
+  %sum = scalar.addi %lhs, %rhs : i32
+  %result = scalar.muli %sum, %rhs : i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @scalar_i32_add_multiply(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %sum = integer.add.i32 %lhs, %rhs : reg<vm.value : i32>
+  %result = integer.mul.i32 %sum, %rhs : reg<vm.value : i32>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_bf16_extend(%source: bf16) -> (f32) {
+  %result = scalar.extf %source : bf16 to f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @scalar_bf16_extend(%source: reg<vm.value : bf16>) -> (reg<vm.value : f32>) asm {
+  %result = conversion.float.extend.bf16_to_f32 %source : reg<vm.value : f32>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @index_i32_cast(%source: i32) -> (index) {
+  %result = index.cast %source : i32 to index
+  func.return %result : index
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @index_i32_cast(%source: reg<vm.value : i32>) -> (reg<vm.value : index>) asm {
+  %result = conversion.integer.s32_to_i64 %source : reg<vm.value : index>
+  return %result
+}

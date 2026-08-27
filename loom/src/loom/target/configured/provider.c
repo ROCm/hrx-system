@@ -17,6 +17,9 @@
 #ifndef LOOM_CONFIG_TARGET_HAVE_SPIRV
 #define LOOM_CONFIG_TARGET_HAVE_SPIRV 0
 #endif  // LOOM_CONFIG_TARGET_HAVE_SPIRV
+#ifndef LOOM_CONFIG_TARGET_HAVE_VM
+#define LOOM_CONFIG_TARGET_HAVE_VM 0
+#endif  // LOOM_CONFIG_TARGET_HAVE_VM
 #ifndef LOOM_CONFIG_TARGET_HAVE_WASM
 #define LOOM_CONFIG_TARGET_HAVE_WASM 0
 #endif  // LOOM_CONFIG_TARGET_HAVE_WASM
@@ -26,8 +29,8 @@
 
 #define LOOM_CONFIG_TARGET_HAVE_ANY_PROVIDER                           \
   (LOOM_CONFIG_TARGET_HAVE_AMDGPU || LOOM_CONFIG_TARGET_HAVE_LLVMIR || \
-   LOOM_CONFIG_TARGET_HAVE_SPIRV || LOOM_CONFIG_TARGET_HAVE_WASM ||    \
-   LOOM_CONFIG_TARGET_HAVE_X86)
+   LOOM_CONFIG_TARGET_HAVE_SPIRV || LOOM_CONFIG_TARGET_HAVE_VM ||      \
+   LOOM_CONFIG_TARGET_HAVE_WASM || LOOM_CONFIG_TARGET_HAVE_X86)
 
 #if LOOM_CONFIG_TARGET_HAVE_AMDGPU
 #include "loom/target/arch/amdgpu/provider.h"
@@ -38,6 +41,9 @@
 #if LOOM_CONFIG_TARGET_HAVE_SPIRV
 #include "loom/target/arch/spirv/provider.h"
 #endif  // LOOM_CONFIG_TARGET_HAVE_SPIRV
+#if LOOM_CONFIG_TARGET_HAVE_VM
+#include "loom/target/arch/vm/provider.h"
+#endif  // LOOM_CONFIG_TARGET_HAVE_VM
 #if LOOM_CONFIG_TARGET_HAVE_WASM
 #include "loom/target/arch/wasm/provider.h"
 #endif  // LOOM_CONFIG_TARGET_HAVE_WASM
@@ -56,6 +62,9 @@ static const loom_target_provider_t* const kConfiguredTargetProviders[] = {
 #if LOOM_CONFIG_TARGET_HAVE_SPIRV
     &loom_spirv_target_provider,
 #endif  // LOOM_CONFIG_TARGET_HAVE_SPIRV
+#if LOOM_CONFIG_TARGET_HAVE_VM
+    &loom_vm_target_provider,
+#endif  // LOOM_CONFIG_TARGET_HAVE_VM
 #if LOOM_CONFIG_TARGET_HAVE_WASM
     &loom_wasm_target_provider,
 #endif  // LOOM_CONFIG_TARGET_HAVE_WASM

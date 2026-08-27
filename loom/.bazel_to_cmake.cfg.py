@@ -69,6 +69,7 @@ _LOOM_CONFIG_CMAKE_OPTIONS = {
     "//loom/config/target/arch:amdgpu": "LOOM_TARGET_ARCH_AMDGPU",
     "//loom/config/target/arch:llvmir": "LOOM_TARGET_ARCH_LLVMIR",
     "//loom/config/target/arch:spirv": "LOOM_TARGET_ARCH_SPIRV",
+    "//loom/config/target/arch:vm": "LOOM_TARGET_ARCH_VM",
     "//loom/config/target/arch:wasm": "LOOM_TARGET_ARCH_WASM",
     "//loom/config/target/arch:x86": "LOOM_TARGET_ARCH_X86",
 }
