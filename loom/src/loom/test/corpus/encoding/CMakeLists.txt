@@ -10,7 +10,7 @@
 iree_add_all_subdirs()
 
 file(GLOB _GLOB_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
-loom_link_module(
+loom_module(
   NAME
     numeric_conversion_cases
   SRCS
@@ -23,7 +23,7 @@ loom_link_module(
     "fp8_bidirectional_encode.row_capacity=65536"
     "fp8_encode.row_capacity=65536"
   MODE
-    "archive"
+    "merge"
   OUTPUT
     "numeric_conversion_cases.loombc"
   OUTPUT_FORMAT

@@ -123,7 +123,6 @@ static iree_status_t loom_bytecode_selected_module_prepare(
         }
         break;
       case LOOM_BYTECODE_SYMBOL_EXECUTABLE:
-      case LOOM_BYTECODE_SYMBOL_ANCHOR:
         break;
       case LOOM_BYTECODE_SYMBOL_COUNT_:
         IREE_ASSERT_UNREACHABLE("validated bytecode symbol kind");

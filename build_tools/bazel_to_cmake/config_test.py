@@ -75,7 +75,7 @@ class ConfigTest(unittest.TestCase):
         )
 
         converter = bazel_to_cmake_config.ProjectTargetConverter(
-            repo_map={"@iree": ""},
+            repo_map={"@hrx": ""},
             projects=[runtime, libhrx],
             convert_unmatched_target=convert_root_target,
         )
@@ -85,7 +85,7 @@ class ConfigTest(unittest.TestCase):
             ["runtime:runtime::other::thing"],
         )
         self.assertEqual(
-            converter.convert_target("@iree//runtime/other:thing"),
+            converter.convert_target("@hrx//runtime/other:thing"),
             ["runtime:runtime::other::thing"],
         )
         self.assertEqual(
@@ -93,7 +93,7 @@ class ConfigTest(unittest.TestCase):
             ["libhrx:libhrx::src::libhrx::hrx"],
         )
         self.assertEqual(
-            converter.convert_target("@iree//libhrx/src/libhrx:hrx"),
+            converter.convert_target("@hrx//libhrx/src/libhrx:hrx"),
             ["libhrx:libhrx::src::libhrx::hrx"],
         )
         self.assertEqual(
@@ -101,7 +101,7 @@ class ConfigTest(unittest.TestCase):
             ["libhrx_defs"],
         )
         self.assertEqual(
-            converter.convert_target("@iree//third_party:catch2"),
+            converter.convert_target("@hrx//third_party:catch2"),
             ["iree::third_party::catch2"],
         )
         self.assertEqual(
@@ -117,7 +117,7 @@ class ConfigTest(unittest.TestCase):
         )
 
         converter = bazel_to_cmake_config.ProjectTargetConverter(
-            repo_map={"@iree": ""},
+            repo_map={"@hrx": ""},
             projects=[loom],
         )
 
@@ -126,7 +126,7 @@ class ConfigTest(unittest.TestCase):
             ["loom::ir"],
         )
         self.assertEqual(
-            converter.convert_target("@iree//loom/src/loom/tools/loom-check"),
+            converter.convert_target("@hrx//loom/src/loom/tools/loom-check"),
             ["loom::tools::loom-check"],
         )
         self.assertEqual(
@@ -144,7 +144,7 @@ class ConfigTest(unittest.TestCase):
             str(repo_root / ".bazel_to_cmake.cfg.py"),
             "loom/.bazel_to_cmake.cfg.py",
         )
-        repo_cfg = SimpleNamespace(PROJECTS=[loom], REPO_MAP={"@iree": ""})
+        repo_cfg = SimpleNamespace(PROJECTS=[loom], REPO_MAP={"@hrx": ""})
 
         cmake = bazel_to_cmake_converter.convert_build_file(
             """
@@ -194,7 +194,7 @@ loom_check_test_suite(
             str(repo_root / ".bazel_to_cmake.cfg.py"),
             "loom/.bazel_to_cmake.cfg.py",
         )
-        repo_cfg = SimpleNamespace(PROJECTS=[loom], REPO_MAP={"@iree": ""})
+        repo_cfg = SimpleNamespace(PROJECTS=[loom], REPO_MAP={"@hrx": ""})
 
         cmake = bazel_to_cmake_converter.convert_build_file(
             """
@@ -231,18 +231,18 @@ loom_check_test_suite(
             str(repo_root / ".bazel_to_cmake.cfg.py"),
             "loom/.bazel_to_cmake.cfg.py",
         )
-        repo_cfg = SimpleNamespace(PROJECTS=[loom], REPO_MAP={"@iree": ""})
+        repo_cfg = SimpleNamespace(PROJECTS=[loom], REPO_MAP={"@hrx": ""})
 
         cmake = bazel_to_cmake_converter.convert_build_file(
             """
-load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
+load("//loom/build_tools/bazel:defs.bzl", "loom_module")
 
-loom_link_module(
+loom_module(
     name = "filtered",
     srcs = glob(["*.loom"], exclude = ["negative.loom"]),
 )
 
-loom_link_module(
+loom_module(
     name = "complete",
     srcs = glob(["*.loom"]),
 )
@@ -261,26 +261,26 @@ loom_link_module(
         self.assertIn(f'    "${{{filtered_var}}}"', cmake)
         self.assertIn('    "${_GLOB_X_LOOM}"', cmake)
 
-    def test_loom_link_module_registers_generated_location(self):
+    def test_loom_module_registers_generated_location(self):
         repo_root = Path(__file__).resolve().parents[2]
         loom = bazel_to_cmake_config.include_project(
             str(repo_root / ".bazel_to_cmake.cfg.py"),
             "loom/.bazel_to_cmake.cfg.py",
         )
-        repo_cfg = SimpleNamespace(PROJECTS=[loom], REPO_MAP={"@iree": ""})
+        repo_cfg = SimpleNamespace(PROJECTS=[loom], REPO_MAP={"@hrx": ""})
 
         cmake = bazel_to_cmake_converter.convert_build_file(
             """
 load("//build_tools/bazel:executable.bzl", "iree_executable_test")
-load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
+load("//loom/build_tools/bazel:defs.bzl", "loom_module")
 
-loom_link_module(
+loom_module(
     name = "linked_checks",
     srcs = ["testdata/checks.loom"],
     libraries = ["kernels.loom"],
     roots = ["@case"],
     configs = ["model.width=16"],
-    mode = "selective",
+    mode = "link",
     output = "linked.loombc",
     output_format = "bc",
     include_input_exports = True,
@@ -300,12 +300,12 @@ iree_executable_test(
             repo_root=str(repo_root),
         )
 
-        self.assertIn("loom_link_module(", cmake)
+        self.assertIn("loom_module(", cmake)
         self.assertIn('    "testdata/checks.loom"', cmake)
         self.assertIn('    "kernels.loom"', cmake)
         self.assertIn('    "@case"', cmake)
         self.assertIn('    "model.width=16"', cmake)
-        self.assertIn('    "selective"', cmake)
+        self.assertIn('    "link"', cmake)
         self.assertIn('    "linked.loombc"', cmake)
         self.assertIn('    "bc"', cmake)
         self.assertIn("  INCLUDE_INPUT_EXPORTS", cmake)
@@ -317,19 +317,19 @@ iree_executable_test(
             cmake,
         )
 
-    def test_loom_link_module_preserves_cross_package_module_targets(self):
+    def test_loom_module_preserves_cross_package_module_targets(self):
         repo_root = Path(__file__).resolve().parents[2]
         loom = bazel_to_cmake_config.include_project(
             str(repo_root / ".bazel_to_cmake.cfg.py"),
             "loom/.bazel_to_cmake.cfg.py",
         )
-        repo_cfg = SimpleNamespace(PROJECTS=[loom], REPO_MAP={"@iree": ""})
+        repo_cfg = SimpleNamespace(PROJECTS=[loom], REPO_MAP={"@hrx": ""})
 
         cmake = bazel_to_cmake_converter.convert_build_file(
             """
-load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
+load("//loom/build_tools/bazel:defs.bzl", "loom_module")
 
-loom_link_module(
+loom_module(
     name = "provider_suite",
     srcs = ["provider_checks.loom"],
     libraries = [
@@ -354,7 +354,7 @@ loom_link_module(
         )
 
     def test_rejects_compiler_monorepo_external_targets(self):
-        converter = bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""})
+        converter = bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""})
 
         for target in (
             "@llvm-project//llvm:Core",
@@ -371,14 +371,14 @@ loom_link_module(
             return ["root:" + converter._convert_to_cmake_path(target)]
 
         converter = bazel_to_cmake_config.ProjectTargetConverter(
-            repo_map={"@iree": ""},
+            repo_map={"@hrx": ""},
             projects=[],
             convert_unmatched_target=convert_root_target,
         )
 
         for target in (
-            "@iree//compiler/src/iree/compiler/API:CAPI",
-            "@iree//llvm-external-projects/iree-dialects:CAPI",
+            "@hrx//compiler/src/iree/compiler/API:CAPI",
+            "@hrx//llvm-external-projects/iree-dialects:CAPI",
         ):
             with self.subTest(target=target):
                 with self.assertRaises(ValueError):
@@ -387,7 +387,7 @@ loom_link_module(
     def test_rejects_compiler_monorepo_select_conditions(self):
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=SimpleNamespace(body=""),
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="",
         )
 
@@ -456,7 +456,7 @@ loom_link_module(
     def test_target_compatible_with_composes_selects_and_requirements(self):
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=SimpleNamespace(body=""),
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="",
         )
 
@@ -479,7 +479,7 @@ loom_link_module(
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="runtime/src/iree/hal/local/elf/testdata",
         )
 
@@ -501,7 +501,7 @@ loom_link_module(
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="libhrx/src/binding/hip",
         )
 
@@ -531,7 +531,7 @@ loom_link_module(
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="runtime/src/iree/hal/local/elf/testdata",
             repo_root=str(repo_root),
         )
@@ -565,7 +565,7 @@ loom_link_module(
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="runtime/src/iree/vm/test",
             repo_root=str(repo_root),
         )
@@ -586,7 +586,7 @@ loom_link_module(
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="runtime/src/iree/hal/local/elf/testdata",
             repo_root=str(repo_root),
         )
@@ -611,7 +611,7 @@ loom_link_module(
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="runtime/src/example",
             repo_root="/repo",
         )
@@ -631,7 +631,7 @@ loom_link_module(
         converter = SimpleNamespace(body="")
         functions = _PythonBuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="build_tools/bazel_to_cmake",
             repo_root=str(repo_root),
         )
@@ -652,7 +652,7 @@ loom_link_module(
         converter = SimpleNamespace(body="")
         functions = _PythonBuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="build_tools/bazel_to_cmake",
             repo_root=str(repo_root),
         )
@@ -683,7 +683,7 @@ loom_link_module(
                 functions = _PythonBuildFileFunctions(
                     converter=converter,
                     targets=bazel_to_cmake_targets.TargetConverter(
-                        repo_map={"@iree": ""}
+                        repo_map={"@hrx": ""}
                     ),
                     build_dir="build_tools/bazel_to_cmake",
                     repo_root=str(repo_root),
@@ -703,7 +703,7 @@ loom_link_module(
         converter = SimpleNamespace(body="")
         functions = _PythonBuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="build_tools/bazel_to_cmake",
             repo_root=str(repo_root),
         )
@@ -724,7 +724,7 @@ loom_link_module(
         converter = SimpleNamespace(body="")
         functions = _PythonBuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="loom/py/loom/example",
             repo_root=str(repo_root),
         )
@@ -745,7 +745,7 @@ loom_link_module(
         converter = SimpleNamespace(body="")
         functions = _PythonBuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="build_tools/bazel_to_cmake",
             repo_root=str(repo_root),
         )
@@ -769,7 +769,7 @@ loom_link_module(
         converter = SimpleNamespace(body="")
         functions = runtime.build_file_functions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir=str(repo_root / "runtime/src/iree/vm/bytecode/isa"),
             repo_root=str(repo_root),
         )
@@ -825,7 +825,7 @@ loom_link_module(
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="",
         )
 
@@ -848,7 +848,7 @@ loom_link_module(
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="/repo/pkg",
             repo_root="/repo",
         )
@@ -873,7 +873,7 @@ loom_link_module(
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir=str(repo_root / "build_tools/testing/test"),
             repo_root=str(repo_root),
         )
@@ -897,7 +897,7 @@ loom_link_module(
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="/repo/pkg",
             repo_root="/repo",
         )
@@ -923,7 +923,7 @@ loom_link_module(
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="/repo/pkg",
             repo_root="/repo",
         )
@@ -947,7 +947,7 @@ loom_link_module(
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="/repo/pkg",
             repo_root="/repo",
         )
@@ -973,7 +973,7 @@ loom_link_module(
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir=str(repo_root / "build_tools/testing/test"),
             repo_root=str(repo_root),
         )
@@ -996,7 +996,7 @@ loom_link_module(
 
     def test_execution_test_suite_preserves_glob_data(self):
         repo_root = Path(__file__).resolve().parents[2]
-        repo_cfg = SimpleNamespace(PROJECTS=[], REPO_MAP={"@iree": ""})
+        repo_cfg = SimpleNamespace(PROJECTS=[], REPO_MAP={"@hrx": ""})
 
         cmake = bazel_to_cmake_converter.convert_build_file(
             """
@@ -1022,7 +1022,7 @@ iree_execution_test_suite(
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="/repo/pkg",
             repo_root="/repo",
         )
@@ -1050,7 +1050,7 @@ iree_execution_test_suite(
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="/repo/pkg",
             repo_root="/repo",
         )
@@ -1073,7 +1073,7 @@ iree_execution_test_suite(
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="",
         )
 
@@ -1093,7 +1093,7 @@ iree_execution_test_suite(
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="/repo/pkg",
             repo_root="/repo",
         )
@@ -1127,7 +1127,7 @@ iree_execution_test_suite(
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="/repo/pkg",
             repo_root="/repo",
         )
@@ -1153,7 +1153,7 @@ iree_execution_test_suite(
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="/repo/pkg",
             repo_root="/repo",
         )
@@ -1178,7 +1178,7 @@ iree_execution_test_suite(
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="/repo/pkg",
             repo_root="/repo",
         )
@@ -1200,7 +1200,7 @@ iree_execution_test_suite(
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
-            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
             build_dir="/repo/pkg",
             repo_root="/repo",
         )

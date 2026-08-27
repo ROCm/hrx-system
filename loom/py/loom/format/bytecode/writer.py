@@ -104,13 +104,11 @@ SECTION_SYMBOLS = 6
 SECTION_IR = 7
 SECTION_RESOURCES = 8
 SECTION_SOURCE_TRIVIA = 9
-SECTION_PROVIDER_IMPORTS = 10
-SECTION_SYMBOL_REFERENCES = 11
+SECTION_SYMBOL_REFERENCES = 10
 
 SECTION_WRITE_ORDER = (
     SECTION_IR,
     SECTION_SYMBOLS,
-    SECTION_PROVIDER_IMPORTS,
     SECTION_SYMBOL_REFERENCES,
     SECTION_STRINGS,
     SECTION_SOURCES,
@@ -181,7 +179,7 @@ BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
 
 # File magic and version.
 MAGIC = b"LOOM"
-FORMAT_VERSION = 32
+FORMAT_VERSION = 34
 PRODUCER = "loom-py"
 
 SYMBOL_INTERFACE_BITS = {
@@ -212,7 +210,7 @@ SYMBOL_FLAG_RETAIN = 0x0008
 SYMBOL_FLAG_DECLARATION = 0x0010
 SYMBOL_FLAG_TEST_ONLY = 0x0020
 _SYMBOL_FLAG_PREDICATES = 0x0040
-SYMBOL_KIND_ANCHOR = 8
+SYMBOL_FLAG_EXPORT = 0x0080
 
 
 # ============================================================================
@@ -565,11 +563,9 @@ class BytecodeWriter:
         self._location_mode = location_mode
         self._op_decls_by_name = build_op_decl_map(op_decls)
         self._ctx = NumberingContext()
-        (
-            self._provider_imports,
-            self._wire_symbols,
-            self._wire_symbol_indices,
-        ) = self._build_provider_import_projection()
+        self._wire_symbols, self._wire_symbol_indices = (
+            self._build_wire_symbol_projection()
+        )
         self._number_module()
         (
             self._module_dependencies,
@@ -583,45 +579,19 @@ class BytecodeWriter:
 
     # --- Pass 1: Numbering ---
 
-    def _build_provider_import_projection(
-        self,
-    ) -> tuple[tuple[Operation, ...], list[Symbol], dict[str, int]]:
-        """Build canonical providers and the complete wire symbol projection."""
-        providers = sorted(
-            (op for op in self._module.body.ops if op.name == "module.import"),
-            key=lambda op: str(op.attributes.get("provider", "")).encode("utf-8"),
-        )
-        previous_provider: str | None = None
-        anchor_names: set[str] = set()
-        for op in providers:
-            provider = op.attributes.get("provider")
-            symbols = op.attributes.get("symbols")
-            if not isinstance(provider, str):
-                raise ValueError("module.import provider must be a string")
-            if not isinstance(symbols, SymbolNameSet):
-                raise ValueError("module.import symbols must be a SymbolNameSet")
-            if previous_provider == provider:
-                raise ValueError(f"duplicate module.import provider {provider!r}")
-            previous_provider = provider
-            anchor_names.update(symbols)
-
+    def _build_wire_symbol_projection(self) -> tuple[list[Symbol], dict[str, int]]:
+        """Build the complete wire symbol projection."""
         wire_symbols = list(self._module.symbols)
         symbol_indices: dict[str, int] = {}
         for symbol_index, symbol in enumerate(wire_symbols):
             if symbol.name in symbol_indices:
                 raise ValueError(f"duplicate symbol name {symbol.name!r}")
             symbol_indices[symbol.name] = symbol_index
-        for name in sorted(anchor_names, key=lambda value: value.encode("utf-8")):
-            if name in symbol_indices:
-                continue
-            symbol_indices[name] = len(wire_symbols)
-            wire_symbols.append(Symbol(name=name, kind=SymbolKind.NONE))
-        for symbol in wire_symbols:
-            if symbol.kind == SymbolKind.NONE and symbol.name not in anchor_names:
+            if symbol.kind == SymbolKind.NONE:
                 raise ValueError(
-                    f"unresolved symbol {symbol.name!r} is not a provider anchor"
+                    f"symbol {symbol.name!r} has no serializable symbol kind"
                 )
-        return tuple(providers), wire_symbols, symbol_indices
+        return wire_symbols, symbol_indices
 
     def _number_module(self) -> None:
         """Walk the module and assign IDs to all entities."""
@@ -653,9 +623,6 @@ class BytecodeWriter:
                         f"symbol {symbol.name!r} of kind {symbol.kind.name} "
                         "has no supported defining op"
                     )
-
-        for provider_import in self._provider_imports:
-            self._ctx.intern_string(provider_import.attributes["provider"])
 
         # Encodings: recursively number child encoding params before parents so
         # the ENCODINGS section has no forward references.
@@ -783,6 +750,21 @@ class BytecodeWriter:
         if symbol_def.is_test_only:
             flags |= SYMBOL_FLAG_TEST_ONLY
         return flags
+
+    def _symbol_is_exported(self, symbol: Symbol) -> bool:
+        """Return whether a symbol is available for static linkage."""
+        if symbol.flags & SYMBOL_FLAG_IMPORT:
+            return False
+        if symbol.flags & SYMBOL_FLAG_PUBLIC:
+            return True
+        if symbol.op is None:
+            return False
+        func_like = func_like_interface_for_op(self._op_decls_by_name, symbol.op.name)
+        return (
+            func_like is not None
+            and func_like.export_symbol is not None
+            and func_like.export_symbol in symbol.op.attributes
+        )
 
     def _number_global_op(self, op: Operation) -> None:
         """Number all entities in a global symbol-defining op."""
@@ -1066,7 +1048,6 @@ class BytecodeWriter:
         ir_bytes, ir_regions = self._write_ir()
         sections[SECTION_IR] = ir_bytes
         sections[SECTION_SYMBOLS] = self._write_symbols(ir_regions)
-        sections[SECTION_PROVIDER_IMPORTS] = self._write_provider_imports()
         sections[SECTION_SYMBOL_REFERENCES] = self._write_symbol_references()
         return self._assemble(sections, self._module_allocation_counts())
 
@@ -2096,12 +2077,12 @@ class BytecodeWriter:
         # Classify symbols into imports and exports.
         import_indices: list[int] = []
         export_indices: list[int] = []
+        exported_symbols = [self._symbol_is_exported(symbol) for symbol in symbols]
         for i, symbol in enumerate(symbols):
             is_import = (symbol.flags & SYMBOL_FLAG_IMPORT) != 0
-            is_public = (symbol.flags & SYMBOL_FLAG_PUBLIC) != 0
             if is_import:
                 import_indices.append(i)
-            elif is_public:
+            elif exported_symbols[i]:
                 export_indices.append(i)
 
         buf.write_varint(len(symbols))
@@ -2126,11 +2107,6 @@ class BytecodeWriter:
         for symbol_index, symbol in enumerate(symbols):
             entry_offsets[symbol_index] = buf.position - entries_start
             buf.write_varint(self._ctx.strings[symbol.name])
-            if symbol.kind == SymbolKind.NONE:
-                buf.write_u8(SYMBOL_KIND_ANCHOR)
-                buf.write_u8(1)
-                buf.write_u16_le(0)
-                continue
             buf.write_u8(symbol.kind.value)
             buf.write_u8(0 if (symbol.flags & SYMBOL_FLAG_PUBLIC) else 1)
             if symbol.op is None:
@@ -2138,6 +2114,8 @@ class BytecodeWriter:
             bytecode_flags = (
                 symbol.flags & ~(SYMBOL_FLAG_DECLARATION | SYMBOL_FLAG_TEST_ONLY)
             ) | self._symbol_definition_flags(symbol.op)
+            if exported_symbols[symbol_index]:
+                bytecode_flags |= SYMBOL_FLAG_EXPORT
             if symbol.source_symbol and symbol.source_symbol != symbol.name:
                 bytecode_flags |= SYMBOL_FLAG_IMPORT_SYMBOL
             predicates_attr_name: str | None = None
@@ -2352,25 +2330,6 @@ class BytecodeWriter:
                 entry_offsets[symbol_idx],
             )
 
-        return buf.get_bytes()
-
-    def _write_provider_imports(self) -> bytes:
-        """Write canonical compile-time provider availability records."""
-        buf = ByteBuffer()
-        total_anchor_count = sum(
-            len(cast(SymbolNameSet, op.attributes["symbols"]))
-            for op in self._provider_imports
-        )
-        buf.write_varint(len(self._provider_imports))
-        buf.write_varint(total_anchor_count)
-        for op in self._provider_imports:
-            provider = cast(str, op.attributes["provider"])
-            symbols = cast(SymbolNameSet, op.attributes["symbols"])
-            buf.write_varint(self._ctx.strings[provider])
-            buf.write_varint(len(symbols))
-            for name in symbols:
-                buf.write_varint(self._wire_symbol_indices[name])
-            self._write_source_trivia(buf, op.leading_blank_line, op.comments)
         return buf.get_bytes()
 
     def _write_symbol_references(self) -> bytes:

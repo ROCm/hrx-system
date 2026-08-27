@@ -117,7 +117,10 @@ loom_cc_test(
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/command",
         "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/target",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/target/test:target_record_table",
@@ -152,6 +155,21 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/rewrite:module_projection",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "module_specialization",
+    srcs = ["module_specialization.c"],
+    hdrs = ["module_specialization.h"],
+    deps = [
+        ":function_version_projection",
+        ":specialization",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],

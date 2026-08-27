@@ -1,8 +1,8 @@
-// The targetless kernel owns portable physical launch geometry and applies the
-// transform contract without naming one provider.
+// This reusable source kernel owns portable physical launch geometry and
+// applies the transform contract without naming one provider.
 template.decl @guide.elementwise_transform(%value: f32) -> (f32)
 
-kernel.def @elementwise_transform_f32(%element_count: index) {
+kernel.def export("elementwise_transform_f32") @elementwise_transform_f32(%element_count: index) {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   %rounding = index.sub %workgroup_size, %unit : index

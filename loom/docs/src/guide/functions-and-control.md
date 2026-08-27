@@ -61,11 +61,10 @@ an explicitly supplied source or bytecode library. A missing declaration is a
 source verification error; a library search is never allowed to invent the
 dependency after seeing an unresolved call.
 
-This declaration-only form is intentionally sufficient when the linker or an
-embedding already constructs the complete provider universe. A
-[`module.import`](source-modules.md#declarations-state-contracts-imports-state-availability)
-can additionally constrain the exact definition to one or more opaque provider
-keys without causing source-time file loading.
+The linker or embedding constructs the explicit library universe. A library
+definition must be exported to satisfy another module's declaration, and two
+eligible definitions with the same symbol are an error rather than an
+input-order choice.
 
 Exact calls are appropriate when identity is part of the algorithm: one bit
 decoder, one reference function, or one helper whose precise implementation the

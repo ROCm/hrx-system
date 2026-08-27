@@ -18,6 +18,16 @@ Compiler contributors can build the tools from the
 tracks the source-build prerequisites and Bazel targets while release packaging
 is being established.
 
-Source builds are a contributor workflow. The rest of this guide deliberately
-uses the installed tools exactly as a kernel or application author will see
-them.
+Direct source builds are a compiler-contributor workflow. The command-line
+pages deliberately use installed tools exactly as a kernel or application
+author sees them; Bazel authoring repositories consume those tool roles through
+the module boundary below.
+
+## Consuming Loom from Bazel
+
+An independent kernel or model repository can depend on the HRX Bzlmod module
+and load Loom's public authoring rules through `@hrx//loom/...`. The module
+registers source-built toolchains automatically, while a local module override
+keeps compiler and kernel edits in one live Bazel graph. [Build libraries and
+binaries with Bazel](../workflows/build-with-bazel.md#depend-on-hrx) defines the
+module declaration, public loads, target profiles, and deployment products.

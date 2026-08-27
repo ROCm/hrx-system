@@ -1,0 +1,3 @@
+check.case public @kernel_case {
+  check.return
+}

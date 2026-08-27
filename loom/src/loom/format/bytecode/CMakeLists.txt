@@ -198,7 +198,6 @@ loom_cc_test(
     loom::ops::func
     loom::ops::global
     loom::ops::kernel
-    loom::ops::module
     loom::ops::template
     loom::ops::test
     loom::ops::type_registry
@@ -267,7 +266,6 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::ir
     loom::ops::global
-    loom::ops::module
     loom::ops::test
 )
 
@@ -303,25 +301,6 @@ loom_cc_fuzz(
     loom::ir
     loom::ops::test
     loom::testing::gen
-)
-
-loom_cc_benchmark(
-  NAME
-    provider_import_benchmark
-  SRCS
-    "provider_import_benchmark.cc"
-  DEPS
-    ::index
-    ::reader
-    ::writer
-    iree::base
-    iree::base::internal::arena
-    iree::io::stream
-    iree::testing::benchmark_main
-    loom::ir
-    loom::ops::module
-    loom::ops::test
-  TESTONLY
 )
 
 loom_cc_benchmark(

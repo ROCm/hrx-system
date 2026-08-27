@@ -32,6 +32,9 @@ _AMDGPU_TARGET_CONFIG_MODULE_NAME = "loom_build_tools_amdgpu_target_config"
 # Source checkouts and declared build trees preserve paths below top-level loom.
 _AMDGPU_TARGET_CONFIG_PATH = Path(__file__).resolve().parents[3] / "build_tools/amdgpu/target_config.py"
 
+_PYTHON_GENERATOR_SUPPORT_ROOT = "loom/py/loom/gen/support"
+_PYTHON_MODEL_ROOT = "loom/py/loom"
+
 
 def _load_amdgpu_target_config() -> ModuleType:
     existing_module = sys.modules.get(_AMDGPU_TARGET_CONFIG_MODULE_NAME)
@@ -57,36 +60,60 @@ def checked_in_artifact_families(*, repository_root: Path | None = None) -> tupl
             description=package_inits.DESCRIPTION,
             regenerate_command=package_inits.REGENERATE_COMMAND,
             file_set=package_inits.checked_in_file_set(),
+            input_roots=(
+                "loom/py/loom/gen/python/package_inits.py",
+                _PYTHON_GENERATOR_SUPPORT_ROOT,
+            ),
         ),
         GeneratedFileFamily(
             description=builders_pyi.DESCRIPTION,
             regenerate_command=builders_pyi.REGENERATE_COMMAND,
             file_set=builders_pyi.checked_in_file_set(repository_root),
+            input_roots=(_PYTHON_MODEL_ROOT,),
         ),
         GeneratedFileFamily(
             description=c_tables.DESCRIPTION,
             regenerate_command=c_tables.REGENERATE_COMMAND,
             file_set=c_tables.checked_in_file_set(),
+            input_roots=(_PYTHON_MODEL_ROOT,),
         ),
         GeneratedFileFamily(
             description=amdgpu_target_config.DESCRIPTION,
             regenerate_command=amdgpu_target_config.REGENERATE_COMMAND,
             file_set=amdgpu_target_config.checked_in_file_set(),
+            input_roots=(
+                "build_tools/amdgpu/target_map.py",
+                "loom/build_tools/amdgpu/target_config.py",
+                "loom/py/loom/target/arch/amdgpu",
+            ),
         ),
         GeneratedFileFamily(
             description=textmate.DESCRIPTION,
             regenerate_command=textmate.REGENERATE_COMMAND,
             file_set=textmate.checked_in_file_set(repository_root),
+            input_roots=(_PYTHON_MODEL_ROOT,),
         ),
         GeneratedFileFamily(
             description=x86_packed_dot_contract.DESCRIPTION,
             regenerate_command=x86_packed_dot_contract.REGENERATE_COMMAND,
             file_set=x86_packed_dot_contract.checked_in_file_set(),
+            input_roots=(
+                _PYTHON_GENERATOR_SUPPORT_ROOT,
+                "loom/py/loom/gen/target/arch/x86/x86_packed_dot_contract.py",
+                "loom/py/loom/target/arch/x86",
+                "loom/py/loom/target/low_descriptors.py",
+            ),
         ),
         GeneratedFileFamily(
             description=numeric_conversion_matrix.DESCRIPTION,
             regenerate_command=numeric_conversion_matrix.REGENERATE_COMMAND,
             file_set=numeric_conversion_matrix.checked_in_file_set(),
+            input_roots=(
+                "loom/py/loom/dialect/encoding/numeric_formats.py",
+                _PYTHON_GENERATOR_SUPPORT_ROOT,
+                "loom/py/loom/gen/test/numeric_conversion_matrix.py",
+                "loom/py/loom/ir.py",
+            ),
         ),
     )
 
@@ -94,14 +121,13 @@ def checked_in_artifact_families(*, repository_root: Path | None = None) -> tupl
 def maintain_checked_in_artifacts(
     mode: GeneratedFileMaintenanceMode,
     *,
-    writable_paths: Sequence[str] | None = None,
+    selected_paths: Sequence[str] | None = None,
 ) -> GeneratedFileMaintenanceResult:
-    """Checks all families or updates only families owning writable paths."""
+    """Checks all families or updates families affected by selected paths."""
     repository_root = _bootstrap.find_repo_root()
     families = checked_in_artifact_families(repository_root=repository_root)
-    if mode == "update" and writable_paths is not None:
-        writable_path_set = set(writable_paths)
-        families = tuple(family for family in families if writable_path_set.intersection((*family.file_set.output_paths, *family.file_set.obsolete_paths)))
+    if mode == "update" and selected_paths is not None:
+        families = tuple(family for family in families if family.is_affected_by(selected_paths))
     return maintain_generated_file_families(
         repository_root,
         families,

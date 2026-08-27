@@ -63,7 +63,7 @@ class ProgramPlanFixture {
         /*.kind=*/LOOM_LINK_SYMBOL_FACET_COMMAND_IMPLEMENTATION,
     };
     loom_link_plan_options_t options = {};
-    options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    options.mode = LOOM_LINK_PLAN_LINK;
     options.root_facets = {1, &root_facet};
     options.dependency_policy = LOOM_LINK_PLAN_DEPENDENCY_REQUESTED_FACETS;
     CheckStatus(loom_link_plan_build(index_, &options, iree_allocator_system(),
@@ -208,7 +208,7 @@ static void RunProgramPlanBenchmark(benchmark::State& state,
 
     bool valid = false;
     loom_cmd_program_plan_t program_plan = {};
-    CheckStatus(loom_cmd_program_plan_prepare(
+    CheckStatus(loom_cmd_program_plan_prepare_materialization(
         &materialization, &root_ref, /*program_count=*/1,
         loom_pass_builtin_registry(), /*diagnostic_emitter=*/{},
         fixture.block_pool(), &valid, &program_plan, iree_allocator_system()));

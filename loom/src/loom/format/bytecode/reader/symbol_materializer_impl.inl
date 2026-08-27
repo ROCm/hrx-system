@@ -849,8 +849,6 @@ static iree_status_t loom_bytecode_symbol_materialize_entry(
     return loom_bytecode_reader_materialize_record_symbol(
         reader, cursor, body_source, header.name_string_ordinal, symbol_ordinal,
         builder);
-  } else if (header.kind == LOOM_BYTECODE_SYMBOL_ANCHOR) {
-    return iree_ok_status();
   } else {
     return loom_bytecode_reader_emit_invalid_field(
         &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_ordinal,

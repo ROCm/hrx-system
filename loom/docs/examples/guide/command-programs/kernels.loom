@@ -1,7 +1,7 @@
 // Multiplies up to eight activation elements by layer-specific weights. The
 // parameter view is already typed and placed when the kernel is derived for a
 // command program.
-kernel.def @project_block(%element_count: index) {
+kernel.def export("project_block") @project_block(%element_count: index) {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%element_count, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%weights: view<8xf32>, %input: buffer, %output: buffer) {

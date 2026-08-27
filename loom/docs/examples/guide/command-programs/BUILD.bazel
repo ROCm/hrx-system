@@ -6,7 +6,7 @@
 #
 # bazel-to-cmake: skip
 
-load("//loom/build_tools/bazel:defs.bzl", "loom_library")
+load("@hrx//loom/build_tools/bazel:defs.bzl", "loom_library")
 
 package(
     default_visibility = ["//visibility:private"],

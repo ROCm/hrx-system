@@ -1,0 +1,5 @@
+func.def public pure @dependency(%value: i32) -> (i32) {
+  %factor = scalar.constant 2 : i32
+  %result = scalar.muli %value, %factor : i32
+  func.return %result : i32
+}

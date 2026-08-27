@@ -738,6 +738,7 @@ class LowKernelEmitter {
             /*.values=*/&specialization_request,
             /*.count=*/1,
         },
+        /*.bindings=*/{},
         {
             /*.fn=*/PrintCompilerDiagnostic,
             /*.user_data=*/nullptr,

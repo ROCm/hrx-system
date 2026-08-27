@@ -1,0 +1,5 @@
+template.decl @demo.bytecode(%x: i32) -> (i32)
+
+template.def<@demo.bytecode> @bytecode_provider(%x: i32) -> (i32) {
+  template.return %x : i32
+}

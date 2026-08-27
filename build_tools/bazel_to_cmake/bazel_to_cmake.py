@@ -50,7 +50,7 @@ The file is evaluated as a module and can have the following customizations:
 
 * DEFAULT_ROOT_DIRS: A list of root directory names that should be recursively
   processed (relative to the repository root) when invoked without arguments.
-* REPO_MAP: Mapping of canonical Bazel repo name (i.e. "@iree") to what it
+* REPO_MAP: Mapping of canonical Bazel repo name (i.e. "@hrx") to what it
   is known as locally (most commonly the empty string). This is used in global
   target rules to make sure that they work either in the defining or referencing
   repository.

@@ -7,7 +7,7 @@
 # bazel-to-cmake: skip
 
 load(
-    "//loom/build_tools/bazel:defs.bzl",
+    "@hrx//loom/build_tools/bazel:defs.bzl",
     "loom_library",
     "loom_test_library",
 )

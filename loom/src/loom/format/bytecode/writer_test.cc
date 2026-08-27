@@ -19,7 +19,6 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/global/ops.h"
-#include "loom/ops/module/ops.h"
 #include "loom/ops/test/ops.h"
 
 namespace loom {
@@ -43,13 +42,6 @@ class WriterTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_context_register_dialect(&context_, LOOM_DIALECT_GLOBAL,
                                                  global_vtables,
                                                  (uint16_t)global_op_count));
-
-    iree_host_size_t module_op_count = 0;
-    const loom_op_vtable_t* const* module_vtables =
-        loom_module_dialect_vtables(&module_op_count);
-    IREE_ASSERT_OK(loom_context_register_dialect(&context_, LOOM_DIALECT_MODULE,
-                                                 module_vtables,
-                                                 (uint16_t)module_op_count));
 
     iree_host_size_t op_count = 0;
     const loom_op_vtable_t* const* vtables =
@@ -511,7 +503,7 @@ TEST_F(WriterTest, SectionDirectoryHasWrittenSections) {
   uint64_t module_offset = ReadU64LE(bytes, dir_offset + 8);
 
   auto entries = ReadSectionDirectory(bytes, module_offset);
-  ASSERT_EQ(entries.size(), 10u);
+  ASSERT_EQ(entries.size(), 9u);
 
   bool found_kinds[LOOM_BYTECODE_SECTION_COUNT] = {false};
   uint64_t previous_end = 0;
@@ -530,7 +522,6 @@ TEST_F(WriterTest, SectionDirectoryHasWrittenSections) {
   }
   EXPECT_FALSE(found_kinds[LOOM_BYTECODE_SECTION_RESOURCES]);
   EXPECT_FALSE(found_kinds[LOOM_BYTECODE_SECTION_SOURCE_TRIVIA]);
-  EXPECT_TRUE(found_kinds[LOOM_BYTECODE_SECTION_PROVIDER_IMPORTS]);
   EXPECT_TRUE(found_kinds[LOOM_BYTECODE_SECTION_SYMBOL_REFERENCES]);
 
   loom_module_free(module);
@@ -553,138 +544,13 @@ TEST_F(WriterTest, SectionOffsetsAreWithinModule) {
   loom_module_free(module);
 }
 
-TEST_F(WriterTest, ProviderImportsUseCanonicalDirectSymbolOrdinals) {
-  loom_module_t* module = CreateModule("providers");
-  loom_builder_t builder;
-  loom_builder_initialize(module, &module->arena, loom_module_block(module),
-                          &builder);
-
-  loom_string_id_t alpha_name_id = LOOM_STRING_ID_INVALID;
-  loom_string_id_t zeta_name_id = LOOM_STRING_ID_INVALID;
-  IREE_ASSERT_OK(
-      loom_module_intern_string(module, IREE_SV("alpha"), &alpha_name_id));
-  IREE_ASSERT_OK(
-      loom_module_intern_string(module, IREE_SV("zeta"), &zeta_name_id));
-  uint16_t alpha_symbol_id = LOOM_SYMBOL_ID_INVALID;
-  uint16_t zeta_symbol_id = LOOM_SYMBOL_ID_INVALID;
-  IREE_ASSERT_OK(
-      loom_module_add_symbol(module, alpha_name_id, &alpha_symbol_id));
-  IREE_ASSERT_OK(loom_module_add_symbol(module, zeta_name_id, &zeta_symbol_id));
-
-  loom_string_id_t zeta_provider_id = LOOM_STRING_ID_INVALID;
-  loom_string_id_t alpha_provider_id = LOOM_STRING_ID_INVALID;
-  IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("providers/zeta"),
-                                           &zeta_provider_id));
-  IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("providers/alpha"),
-                                           &alpha_provider_id));
-
-  loom_symbol_ref_t zeta_refs[] = {{0, zeta_symbol_id}};
-  loom_op_t* zeta_import = nullptr;
-  IREE_ASSERT_OK(loom_module_import_build(
-      &builder, zeta_provider_id,
-      loom_make_symbol_ref_array(zeta_refs, IREE_ARRAYSIZE(zeta_refs)),
-      LOOM_LOCATION_NONE, &zeta_import));
-
-  loom_symbol_ref_t alpha_refs[] = {
-      {0, zeta_symbol_id},
-      {0, alpha_symbol_id},
-  };
-  loom_op_t* alpha_import = nullptr;
-  IREE_ASSERT_OK(loom_module_import_build(
-      &builder, alpha_provider_id,
-      loom_make_symbol_ref_array(alpha_refs, IREE_ARRAYSIZE(alpha_refs)),
-      LOOM_LOCATION_NONE, &alpha_import));
-  alpha_import->flags |= LOOM_OP_FLAG_LEADING_BLANK_LINE;
-  const iree_string_view_t comments[] = {IREE_SV("alpha provider")};
-  IREE_ASSERT_OK(loom_module_attach_op_comments(module, alpha_import, comments,
-                                                IREE_ARRAYSIZE(comments)));
-
-  auto bytes = WriteModule(module);
-  size_t offset =
-      SectionPayloadOffset(bytes, LOOM_BYTECODE_SECTION_PROVIDER_IMPORTS);
-  const size_t section_start = offset;
-  EXPECT_EQ(ReadUVarint(bytes, &offset), 2u);
-  EXPECT_EQ(ReadUVarint(bytes, &offset), 3u);
-
-  uint64_t alpha_provider_wire_id = ReadUVarint(bytes, &offset);
-  EXPECT_EQ(ReadUVarint(bytes, &offset), 2u);
-  EXPECT_EQ(ReadUVarint(bytes, &offset), alpha_symbol_id);
-  EXPECT_EQ(ReadUVarint(bytes, &offset), zeta_symbol_id);
-  EXPECT_EQ(ReadUVarint(bytes, &offset), 3u);
-  uint64_t comment_length = ReadUVarint(bytes, &offset);
-  ASSERT_EQ(comment_length, strlen(" alpha provider"));
-  EXPECT_EQ(std::string(reinterpret_cast<const char*>(bytes.data() + offset),
-                        (size_t)comment_length),
-            " alpha provider");
-  offset += (size_t)comment_length;
-
-  uint64_t zeta_provider_wire_id = ReadUVarint(bytes, &offset);
-  EXPECT_EQ(ReadUVarint(bytes, &offset), 1u);
-  EXPECT_EQ(ReadUVarint(bytes, &offset), zeta_symbol_id);
-  EXPECT_EQ(ReadUVarint(bytes, &offset), 0u);
-
-  size_t directory_offset = 24;
-  uint64_t module_offset = ReadU64LE(bytes, directory_offset + 8);
-  auto entries = ReadSectionDirectory(bytes, module_offset);
-  SectionEntry provider_entry = {};
-  ASSERT_TRUE(FindSection(entries, LOOM_BYTECODE_SECTION_PROVIDER_IMPORTS,
-                          &provider_entry));
-  EXPECT_EQ(offset, section_start + provider_entry.length);
-
-  size_t strings_offset =
-      SectionPayloadOffset(bytes, LOOM_BYTECODE_SECTION_STRINGS);
-  uint64_t string_count = ReadUVarint(bytes, &strings_offset);
-  std::vector<std::string> strings;
-  strings.reserve((size_t)string_count);
-  for (uint64_t i = 0; i < string_count; ++i) {
-    uint64_t string_length = ReadUVarint(bytes, &strings_offset);
-    strings.emplace_back(
-        reinterpret_cast<const char*>(bytes.data() + strings_offset),
-        (size_t)string_length);
-    strings_offset += (size_t)string_length;
-  }
-  ASSERT_LT(alpha_provider_wire_id, strings.size());
-  ASSERT_LT(zeta_provider_wire_id, strings.size());
-  EXPECT_EQ(strings[alpha_provider_wire_id], "providers/alpha");
-  EXPECT_EQ(strings[zeta_provider_wire_id], "providers/zeta");
-
-  loom_module_free(module);
-}
-
-TEST_F(WriterTest, UnresolvedSymbolRequiresProviderAnchor) {
+TEST_F(WriterTest, SymbolWithoutSerializableKindFails) {
   loom_module_t* module = CreateModule("unresolved");
   loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
   IREE_ASSERT_OK(
       loom_module_intern_string(module, IREE_SV("missing"), &name_id));
   uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-
-  ExpectWriteModuleStatus(IREE_STATUS_INVALID_ARGUMENT, module);
-
-  loom_module_free(module);
-}
-
-TEST_F(WriterTest, DuplicateProviderImportFailsLoudly) {
-  loom_module_t* module = CreateModule("duplicate_provider");
-  loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
-  IREE_ASSERT_OK(
-      loom_module_intern_string(module, IREE_SV("missing"), &name_id));
-  uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
-  IREE_ASSERT_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-  loom_string_id_t provider_id = LOOM_STRING_ID_INVALID;
-  IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("provider.loom"),
-                                           &provider_id));
-  loom_symbol_ref_t anchor = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
-
-  loom_builder_t builder;
-  loom_builder_initialize(module, &module->arena, loom_module_block(module),
-                          &builder);
-  for (int i = 0; i < 2; ++i) {
-    loom_op_t* import_op = nullptr;
-    IREE_ASSERT_OK(loom_module_import_build(
-        &builder, provider_id, loom_make_symbol_ref_array(&anchor, 1),
-        LOOM_LOCATION_NONE, &import_op));
-  }
 
   ExpectWriteModuleStatus(IREE_STATUS_INVALID_ARGUMENT, module);
 

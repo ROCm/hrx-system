@@ -219,6 +219,7 @@ iree_status_t loom_compile_run_pipeline(
   if (options->target_specializations.count != 0) {
     status = loom_target_specialize_functions(
         options->target_environment, module, options->target_specializations,
+        /*bindings=*/(loom_target_declaration_binding_list_t){0},
         loom_target_entry_emitter(&pass_emitter), &out_result->version_arena,
         &specialization_result);
     out_result->function_versions = specialization_result.function_versions;

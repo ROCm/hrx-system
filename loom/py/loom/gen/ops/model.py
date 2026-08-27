@@ -177,12 +177,6 @@ def _load_low_generation() -> DialectGeneration:
     return DialectGeneration(low_ops, list(ALL_LOW_OPS), None)
 
 
-def _load_module_generation() -> DialectGeneration:
-    from loom.dialect.module import ALL_MODULE_OPS, module_ops
-
-    return DialectGeneration(module_ops, list(ALL_MODULE_OPS), None)
-
-
 def _load_template_generation() -> DialectGeneration:
     from loom.dialect.template import ALL_TEMPLATE_OPS, template_ops
 
@@ -256,7 +250,6 @@ _DIALECT_GENERATION_LOADERS: tuple[tuple[str, DialectGenerationLoader], ...] = (
     ("llvmir", _load_llvmir_generation),
     ("target", _load_target_generation),
     ("low", _load_low_generation),
-    ("module", _load_module_generation),
     ("template", _load_template_generation),
     ("pass", _load_pass_generation),
     ("config", _load_config_generation),

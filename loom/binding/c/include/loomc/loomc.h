@@ -25,6 +25,7 @@
 #include "loomc/emit.h"
 #include "loomc/launch_config.h"
 #include "loomc/link.h"
+#include "loomc/link_dependency.h"
 #include "loomc/link_index.h"
 #include "loomc/module.h"
 #include "loomc/pass.h"

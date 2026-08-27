@@ -24,7 +24,6 @@
 #include "loom/ops/func/ops.h"
 #include "loom/ops/global/ops.h"
 #include "loom/ops/kernel/ops.h"
-#include "loom/ops/module/ops.h"
 #include "loom/ops/template/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"
@@ -123,15 +122,6 @@ class ReaderTest : public ::testing::Test {
     size_t value_type = 0;
   };
 
-  struct ProviderImportLayout {
-    // Byte offset of the declared total anchor count.
-    size_t total_anchor_count = 0;
-    // Byte offsets of provider string IDs in canonical record order.
-    std::vector<size_t> provider_ids;
-    // Byte offsets of each provider's anchor symbol ordinals.
-    std::vector<std::vector<size_t>> anchors;
-  };
-
   struct SymbolReferenceLayout {
     // Byte offset of the declared total dependency occurrence count.
     size_t total_dependency_count = 0;
@@ -179,8 +169,6 @@ class ReaderTest : public ::testing::Test {
                     loom_global_dialect_op_semantics);
     RegisterDialect(context, LOOM_DIALECT_KERNEL, loom_kernel_dialect_vtables,
                     loom_kernel_dialect_op_semantics);
-    RegisterDialect(context, LOOM_DIALECT_MODULE, loom_module_dialect_vtables,
-                    loom_module_dialect_op_semantics);
     RegisterDialect(context, LOOM_DIALECT_TEMPLATE,
                     loom_template_dialect_vtables,
                     loom_template_dialect_op_semantics);
@@ -982,40 +970,6 @@ class ReaderTest : public ::testing::Test {
     loom_module_t* module = CreateModule("reader_two_funcs");
     AddSimpleFunction(module, "f0");
     AddSimpleFunction(module, "f1");
-    return module;
-  }
-
-  loom_module_t* CreateProviderImportModule() {
-    loom_module_t* module = CreateModule("reader_provider_import");
-    AddSimpleFunction(module, "resolved");
-    const uint16_t resolved_symbol_id = (uint16_t)(module->symbols.count - 1);
-
-    loom_string_id_t missing_name_id = LOOM_STRING_ID_INVALID;
-    IREE_CHECK_OK(loom_module_intern_string(module, IREE_SV("missing"),
-                                            &missing_name_id));
-    uint16_t missing_symbol_id = LOOM_SYMBOL_ID_INVALID;
-    IREE_CHECK_OK(
-        loom_module_add_symbol(module, missing_name_id, &missing_symbol_id));
-
-    loom_builder_t builder;
-    loom_builder_initialize(module, &module->arena, loom_module_block(module),
-                            &builder);
-    loom_string_id_t provider_id = LOOM_STRING_ID_INVALID;
-    IREE_CHECK_OK(loom_module_intern_string(
-        module, IREE_SV("motif/provider.loom"), &provider_id));
-    loom_symbol_ref_t anchors[] = {
-        {/*.module_id=*/0, /*.symbol_id=*/resolved_symbol_id},
-        {/*.module_id=*/0, /*.symbol_id=*/missing_symbol_id},
-    };
-    loom_op_t* import_op = nullptr;
-    IREE_CHECK_OK(loom_module_import_build(
-        &builder, provider_id,
-        loom_make_symbol_ref_array(anchors, IREE_ARRAYSIZE(anchors)),
-        LOOM_LOCATION_NONE, &import_op));
-    import_op->flags |= LOOM_OP_FLAG_LEADING_BLANK_LINE;
-    const iree_string_view_t comments[] = {IREE_SV("provider comment")};
-    IREE_CHECK_OK(loom_module_attach_op_comments(module, import_op, comments,
-                                                 IREE_ARRAYSIZE(comments)));
     return module;
   }
 
@@ -2095,34 +2049,6 @@ class ReaderTest : public ::testing::Test {
                               uint16_t kind) {
     SectionEntry entry = FindSection(bytes, kind);
     return (size_t)ModuleOffset(bytes) + (size_t)entry.offset;
-  }
-
-  ProviderImportLayout ReadProviderImportLayout(
-      const std::vector<uint8_t>& bytes) {
-    SectionEntry section =
-        FindSection(bytes, LOOM_BYTECODE_SECTION_PROVIDER_IMPORTS);
-    size_t offset = (size_t)ModuleOffset(bytes) + (size_t)section.offset;
-    const size_t end_offset = offset + (size_t)section.length;
-    const uint64_t provider_count = ReadUVarint(bytes, &offset);
-    ProviderImportLayout layout;
-    layout.total_anchor_count = offset;
-    ReadUVarint(bytes, &offset);
-    layout.provider_ids.reserve((size_t)provider_count);
-    layout.anchors.reserve((size_t)provider_count);
-    for (uint64_t i = 0; i < provider_count; ++i) {
-      layout.provider_ids.push_back(offset);
-      ReadUVarint(bytes, &offset);
-      const uint64_t anchor_count = ReadUVarint(bytes, &offset);
-      std::vector<size_t>& anchor_offsets = layout.anchors.emplace_back();
-      anchor_offsets.reserve((size_t)anchor_count);
-      for (uint64_t j = 0; j < anchor_count; ++j) {
-        anchor_offsets.push_back(offset);
-        ReadUVarint(bytes, &offset);
-      }
-      SkipSourceTrivia(bytes, &offset);
-    }
-    EXPECT_EQ(offset, end_offset);
-    return layout;
   }
 
   SymbolReferenceLayout ReadSymbolReferenceLayout(
@@ -3225,6 +3151,8 @@ TEST_F(ReaderTest, ReadsFunctionModuleIndex) {
   EXPECT_EQ(symbol.visibility, LOOM_BYTECODE_SYMBOL_VISIBILITY_PUBLIC);
   EXPECT_TRUE(
       iree_all_bits_set(symbol.flags, LOOM_BYTECODE_SYMBOL_FLAG_PUBLIC));
+  EXPECT_TRUE(
+      iree_all_bits_set(symbol.flags, LOOM_BYTECODE_SYMBOL_FLAG_EXPORT));
   ASSERT_LT(symbol.defining_op_ordinal, module_metadata.ops.count);
   EXPECT_TRUE(iree_string_view_equal(
       module_metadata.ops.entries[symbol.defining_op_ordinal].name,
@@ -3376,79 +3304,6 @@ TEST_F(ReaderTest, IndexesEveryAbstractProviderDemand) {
   loom_module_free(module);
 }
 
-TEST_F(ReaderTest, IndexesAndMaterializesProviderImports) {
-  loom_module_t* module = CreateProviderImportModule();
-  auto bytes = WriteModule(module);
-
-  iree_arena_allocator_t metadata_arena;
-  iree_arena_initialize(&block_pool_, &metadata_arena);
-  loom_bytecode_file_metadata_t metadata = {0};
-  std::vector<std::string> error_ids;
-  loom_bytecode_read_result_t result =
-      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
-
-  ASSERT_EQ(result.error_count, 0u);
-  ASSERT_TRUE(error_ids.empty());
-  ASSERT_EQ(metadata.module_count, 1u);
-  const loom_bytecode_module_metadata_t& module_metadata = metadata.modules[0];
-  EXPECT_EQ(module_metadata.summary.symbol_count, 2u);
-  EXPECT_EQ(module_metadata.summary.provider_import_count, 1u);
-  EXPECT_EQ(module_metadata.summary.provider_import_anchor_count, 2u);
-  ASSERT_EQ(module_metadata.provider_import_count, 1u);
-  ASSERT_EQ(module_metadata.provider_import_anchor_count, 2u);
-  ASSERT_NE(module_metadata.provider_imports, nullptr);
-  ASSERT_NE(module_metadata.provider_import_anchor_symbol_indices, nullptr);
-  EXPECT_TRUE(
-      iree_string_view_equal(module_metadata.provider_imports[0].provider,
-                             IREE_SV("motif/provider.loom")));
-  EXPECT_EQ(module_metadata.provider_imports[0].first_anchor_index, 0u);
-  EXPECT_EQ(module_metadata.provider_imports[0].anchor_count, 2u);
-  EXPECT_TRUE(module_metadata.provider_imports[0].leading_blank_line);
-  ASSERT_EQ(module_metadata.provider_imports[0].comment_count, 1u);
-  ASSERT_NE(module_metadata.provider_imports[0].comments, nullptr);
-  EXPECT_TRUE(
-      iree_string_view_equal(module_metadata.provider_imports[0].comments[0],
-                             IREE_SV("provider comment")));
-  EXPECT_EQ(module_metadata.provider_import_anchor_symbol_indices[0], 1u);
-  EXPECT_EQ(module_metadata.provider_import_anchor_symbol_indices[1], 0u);
-  ASSERT_NE(module_metadata.symbols, nullptr);
-  EXPECT_EQ(module_metadata.symbols[0].kind, LOOM_BYTECODE_SYMBOL_FUNC_DEF);
-  EXPECT_EQ(module_metadata.symbols[1].kind, LOOM_BYTECODE_SYMBOL_ANCHOR);
-  iree_arena_deinitialize(&metadata_arena);
-
-  loom_module_t* read_module = nullptr;
-  error_ids.clear();
-  result = ReadModule(bytes, &read_module, &error_ids,
-                      /*verify_module=*/true);
-  ASSERT_EQ(result.error_count, 0u);
-  ASSERT_TRUE(error_ids.empty());
-  ASSERT_NE(read_module, nullptr);
-  ASSERT_EQ(read_module->symbols.count, 2u);
-  EXPECT_EQ(read_module->symbols.entries[1].kind, LOOM_SYMBOL_NONE);
-  EXPECT_EQ(read_module->symbols.entries[1].defining_op, nullptr);
-
-  const loom_op_t* import_op = loom_module_block(read_module)->first_op;
-  ASSERT_NE(import_op, nullptr);
-  ASSERT_TRUE(loom_module_import_isa(import_op));
-  EXPECT_TRUE(iree_string_view_equal(
-      read_module->strings.entries[loom_module_import_provider(import_op)],
-      IREE_SV("motif/provider.loom")));
-  loom_symbol_ref_array_t anchors = loom_module_import_symbols(import_op);
-  ASSERT_EQ(anchors.count, 2u);
-  EXPECT_EQ(anchors.values[0].symbol_id, 1u);
-  EXPECT_EQ(anchors.values[1].symbol_id, 0u);
-  EXPECT_TRUE(
-      iree_all_bits_set(import_op->flags, LOOM_OP_FLAG_LEADING_BLANK_LINE));
-  iree_host_size_t comment_count = 0;
-  const iree_string_view_t* comments =
-      loom_module_op_comments(read_module, import_op, &comment_count);
-  ASSERT_EQ(comment_count, 1u);
-  EXPECT_TRUE(iree_string_view_equal(comments[0], IREE_SV("provider comment")));
-
-  loom_module_free(read_module);
-  loom_module_free(module);
-}
-
 TEST_F(ReaderTest, PreservesPhysicalSymbolDefinitionOrder) {
   loom_module_t* module = CreateSymbolArrayModule();
   ASSERT_EQ(module->symbols.count, 3u);
@@ -3477,22 +3332,6 @@ TEST_F(ReaderTest, PreservesPhysicalSymbolDefinitionOrder) {
   IREE_ASSERT_OK(loom_block_insert_before_op(module, module_block, a_op, b_op));
   loom_module_record_op_summaries(module, b_op);
 
-  loom_builder_t builder;
-  loom_builder_initialize(module, &module->arena, module_block, &builder);
-  loom_string_id_t provider_id = LOOM_STRING_ID_INVALID;
-  IREE_ASSERT_OK(loom_module_intern_string(
-      module, IREE_SV("motif/provider.loom"), &provider_id));
-  const loom_symbol_ref_t provider_anchors[] = {
-      {/*.module_id=*/0, /*.symbol_id=*/a_symbol_id},
-      {/*.module_id=*/0, /*.symbol_id=*/b_symbol_id},
-  };
-  loom_op_t* import_op = nullptr;
-  IREE_ASSERT_OK(loom_module_import_build(
-      &builder, provider_id,
-      loom_make_symbol_ref_array(provider_anchors,
-                                 IREE_ARRAYSIZE(provider_anchors)),
-      LOOM_LOCATION_NONE, &import_op));
-
   auto bytes = WriteModule(module);
   iree_arena_allocator_t metadata_arena;
   iree_arena_initialize(&block_pool_, &metadata_arena);
@@ -3511,11 +3350,6 @@ TEST_F(ReaderTest, PreservesPhysicalSymbolDefinitionOrder) {
       iree_string_view_equal(module_metadata.symbols[1].name, IREE_SV("b")));
   EXPECT_TRUE(
       iree_string_view_equal(module_metadata.symbols[2].name, IREE_SV("a")));
-
-  ASSERT_EQ(module_metadata.provider_import_count, 1u);
-  ASSERT_EQ(module_metadata.provider_import_anchor_count, 2u);
-  EXPECT_EQ(module_metadata.provider_import_anchor_symbol_indices[0], 2u);
-  EXPECT_EQ(module_metadata.provider_import_anchor_symbol_indices[1], 1u);
 
   ASSERT_NE(module_metadata.symbol_references, nullptr);
   const loom_bytecode_symbol_reference_metadata_t& function_references =
@@ -3567,131 +3401,6 @@ TEST_F(ReaderTest, PreservesPhysicalSymbolDefinitionOrder) {
   EXPECT_EQ(bytes, WriteModule(read_module));
 
   loom_module_free(read_module);
-  loom_module_free(module);
-}
-
-TEST_F(ReaderTest, RejectsProviderImportAnchorCountMismatch) {
-  loom_module_t* module = CreateProviderImportModule();
-  auto bytes = WriteModule(module);
-  ProviderImportLayout layout = ReadProviderImportLayout(bytes);
-
-  size_t offset = layout.total_anchor_count;
-  ASSERT_EQ(ReadUVarint(bytes, &offset), 2u);
-  bytes[layout.total_anchor_count] = 3;
-
-  ExpectReadError(bytes, "ERR_BYTECODE_006");
-  loom_module_free(module);
-}
-
-TEST_F(ReaderTest, RejectsOutOfRangeProviderImportAnchor) {
-  loom_module_t* module = CreateProviderImportModule();
-  auto bytes = WriteModule(module);
-  ProviderImportLayout layout = ReadProviderImportLayout(bytes);
-  ASSERT_EQ(layout.anchors.size(), 1u);
-  ASSERT_EQ(layout.anchors[0].size(), 2u);
-
-  bytes[layout.anchors[0][0]] = 127;
-
-  ExpectReadError(bytes, "ERR_BYTECODE_006");
-  loom_module_free(module);
-}
-
-TEST_F(ReaderTest, RejectsProviderImportWithUncoveredAnchor) {
-  loom_module_t* module = CreateModule("reader_uncovered_anchor");
-  loom_builder_t builder;
-  loom_builder_initialize(module, &module->arena, loom_module_block(module),
-                          &builder);
-
-  const iree_string_view_t symbol_names[] = {
-      IREE_SV("missing_0"),
-      IREE_SV("missing_1"),
-  };
-  const iree_string_view_t provider_names[] = {
-      IREE_SV("provider_0"),
-      IREE_SV("provider_1"),
-  };
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(symbol_names); ++i) {
-    loom_string_id_t symbol_name_id = LOOM_STRING_ID_INVALID;
-    IREE_ASSERT_OK(
-        loom_module_intern_string(module, symbol_names[i], &symbol_name_id));
-    uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
-    IREE_ASSERT_OK(loom_module_add_symbol(module, symbol_name_id, &symbol_id));
-    loom_symbol_ref_t anchor = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
-
-    loom_string_id_t provider_id = LOOM_STRING_ID_INVALID;
-    IREE_ASSERT_OK(
-        loom_module_intern_string(module, provider_names[i], &provider_id));
-    loom_op_t* import_op = nullptr;
-    IREE_ASSERT_OK(loom_module_import_build(
-        &builder, provider_id, loom_make_symbol_ref_array(&anchor, 1),
-        LOOM_LOCATION_NONE, &import_op));
-  }
-  auto bytes = WriteModule(module);
-  ProviderImportLayout layout = ReadProviderImportLayout(bytes);
-  ASSERT_EQ(layout.anchors.size(), 2u);
-  ASSERT_EQ(layout.anchors[0].size(), 1u);
-  ASSERT_EQ(layout.anchors[1].size(), 1u);
-
-  size_t first_end = layout.anchors[0][0];
-  const uint64_t first_anchor = ReadUVarint(bytes, &first_end);
-  ASSERT_EQ(first_end, layout.anchors[0][0] + 1);
-  size_t second_end = layout.anchors[1][0];
-  const uint64_t second_anchor = ReadUVarint(bytes, &second_end);
-  ASSERT_EQ(second_end, layout.anchors[1][0] + 1);
-  ASSERT_NE(first_anchor, second_anchor);
-  bytes[layout.anchors[1][0]] = (uint8_t)first_anchor;
-
-  ExpectInvalidFieldFailureCode(
-      bytes, "provider_anchor_symbol_is_not_used_by_any_provider");
-  loom_module_free(module);
-}
-
-TEST_F(ReaderTest, RejectsNoncanonicalProviderImportAnchorOrder) {
-  loom_module_t* module = CreateProviderImportModule();
-  auto bytes = WriteModule(module);
-  ProviderImportLayout layout = ReadProviderImportLayout(bytes);
-  ASSERT_EQ(layout.anchors.size(), 1u);
-  ASSERT_EQ(layout.anchors[0].size(), 2u);
-  const size_t first_offset = layout.anchors[0][0];
-  const size_t second_offset = layout.anchors[0][1];
-  size_t next_offset = first_offset;
-  const uint64_t first_ordinal = ReadUVarint(bytes, &next_offset);
-  ASSERT_EQ(next_offset, first_offset + 1);
-  next_offset = second_offset;
-  const uint64_t second_ordinal = ReadUVarint(bytes, &next_offset);
-  ASSERT_EQ(next_offset, second_offset + 1);
-  bytes[first_offset] = (uint8_t)second_ordinal;
-  bytes[second_offset] = (uint8_t)first_ordinal;
-
-  ExpectReadError(bytes, "ERR_BYTECODE_006");
-  loom_module_free(module);
-}
-
-TEST_F(ReaderTest, RejectsNoncanonicalProviderImportOrder) {
-  loom_module_t* module = CreateProviderImportModule();
-  loom_builder_t builder;
-  loom_builder_initialize(module, &module->arena, loom_module_block(module),
-                          &builder);
-  loom_string_id_t provider_id = LOOM_STRING_ID_INVALID;
-  IREE_ASSERT_OK(loom_module_intern_string(
-      module, IREE_SV("zeta/provider.loom"), &provider_id));
-  loom_symbol_ref_t anchor = {/*.module_id=*/0, /*.symbol_id=*/0};
-  loom_op_t* import_op = nullptr;
-  IREE_ASSERT_OK(loom_module_import_build(
-      &builder, provider_id, loom_make_symbol_ref_array(&anchor, 1),
-      LOOM_LOCATION_NONE, &import_op));
-  auto bytes = WriteModule(module);
-  ProviderImportLayout layout = ReadProviderImportLayout(bytes);
-  ASSERT_EQ(layout.provider_ids.size(), 2u);
-  size_t first_end = layout.provider_ids[0];
-  const uint64_t first_provider_id = ReadUVarint(bytes, &first_end);
-  ASSERT_EQ(first_end, layout.provider_ids[0] + 1);
-  size_t second_end = layout.provider_ids[1];
-  ReadUVarint(bytes, &second_end);
-  ASSERT_EQ(second_end, layout.provider_ids[1] + 1);
-  bytes[layout.provider_ids[1]] = (uint8_t)first_provider_id;
-
-  ExpectReadError(bytes, "ERR_BYTECODE_006");
   loom_module_free(module);
 }
 
@@ -3753,6 +3462,30 @@ TEST_F(ReaderTest, RejectsPredicatesFlagOnNonFunctionSymbol) {
   uint16_t flags = ReadU16LE(bytes, flags_offset);
   WriteU16LE(&bytes, flags_offset,
              flags | LOOM_BYTECODE_SYMBOL_FLAG_PREDICATES);
+
+  ExpectReadError(bytes, "ERR_BYTECODE_006");
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsPublicDefinitionWithoutExportFlag) {
+  loom_module_t* module = CreateFunctionModule();
+  auto bytes = WriteModule(module);
+  size_t flags_offset = FirstSymbolFlagsOffset(bytes);
+  uint16_t flags = ReadU16LE(bytes, flags_offset);
+  ASSERT_TRUE(iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_EXPORT));
+  WriteU16LE(&bytes, flags_offset, flags & ~LOOM_BYTECODE_SYMBOL_FLAG_EXPORT);
+
+  ExpectReadError(bytes, "ERR_BYTECODE_006");
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsImportedSymbolWithExportFlag) {
+  loom_module_t* module = CreateImportedFunctionModule();
+  auto bytes = WriteModule(module);
+  size_t flags_offset = FirstSymbolFlagsOffset(bytes);
+  uint16_t flags = ReadU16LE(bytes, flags_offset);
+  ASSERT_FALSE(iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_EXPORT));
+  WriteU16LE(&bytes, flags_offset, flags | LOOM_BYTECODE_SYMBOL_FLAG_EXPORT);
 
   ExpectReadError(bytes, "ERR_BYTECODE_006");
   loom_module_free(module);

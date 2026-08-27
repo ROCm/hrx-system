@@ -1,0 +1,5 @@
+test.target<quirky> @quirky_requirement
+
+func.def public target(@quirky_requirement) @incompatible_entry(%arg: i32) -> (i32) {
+  func.return %arg : i32
+}

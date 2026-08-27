@@ -1,0 +1,6 @@
+ireevm.target<core> @vm_target
+
+func.def public target(@vm_target) @standalone(%value: i32) -> (i32) {
+  %result = scalar.addi %value, %value : i32
+  func.return %result : i32
+}

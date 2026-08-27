@@ -25,17 +25,148 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
-    provider_import_sink
+    func_contract
   HDRS
-    "provider_import_sink.h"
+    "func_contract.h"
   SRCS
-    "provider_import_sink.c"
+    "func_contract.c"
   DEPS
     iree::base
     iree::base::internal::arena
     loom::ir
-    loom::ops::module
+    loom::ops::op_defs
+    loom::rewrite::remap
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    func_contract_test
+  SRCS
+    "func_contract_test.cc"
+  DEPS
+    ::func_contract
+    iree::base
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::ir
+    loom::link::testdata::func_contract
+    loom::ops::op_registry
+    loom::rewrite::remap
+)
+
+loom_cc_library(
+  NAME
+    func_contract_projection
+  HDRS
+    "func_contract_projection.h"
+  SRCS
+    "func_contract_projection.c"
+  DEPS
+    ::func_contract
+    ::module_index
+    iree::base
+    iree::base::internal::arena
+    loom::format::bytecode::function_projection_reader
+    loom::ir
+    loom::ops::op_defs
+    loom::rewrite::remap
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    func_contract_projection_test
+  SRCS
+    "func_contract_projection_test.cc"
+  DEPS
+    ::func_contract_projection
+    ::module_index
+    iree::base
+    iree::base::internal::arena
+    iree::io::stream
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::bytecode::writer
+    loom::format::text::parser
+    loom::ir
+    loom::link::testdata::func_contract_projection
+    loom::ops::op_registry
+    loom::rewrite::remap
+)
+
+loom_cc_library(
+  NAME
+    dependency_analysis
+  HDRS
+    "dependency_analysis.h"
+  SRCS
+    "dependency_analysis.c"
+  DEPS
+    ::func_contract
+    ::func_contract_projection
+    ::module_index
+    iree::base
+    iree::base::internal::arena
+    loom::rewrite::remap
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    dependency_analysis_test
+  SRCS
+    "dependency_analysis_test.cc"
+  DEPS
+    ::dependency_analysis
+    ::module_index
+    iree::base
+    iree::base::internal::arena
+    iree::io::stream
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::bytecode::writer
+    loom::format::text::parser
+    loom::ir
+    loom::link::testdata::dependency_analysis
+    loom::ops::op_registry
+)
+
+loom_cc_library(
+  NAME
+    dependency_report
+  HDRS
+    "dependency_report.h"
+  SRCS
+    "dependency_report.c"
+  DEPS
+    ::dependency_analysis
+    ::module_index
+    iree::base
+    loom::util::json
+    loom::util::stream
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    dependency_report_test
+  SRCS
+    "dependency_report_test.cc"
+  DEPS
+    ::dependency_analysis
+    ::dependency_report
+    ::module_index
+    iree::base
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::link::testdata::dependency_analysis
+    loom::ops::op_registry
+    loom::util::stream
 )
 
 loom_cc_library(
@@ -46,7 +177,7 @@ loom_cc_library(
   SRCS
     "linker.c"
   DEPS
-    ::provider_import_sink
+    ::func_contract
     ::symbol_policy
     iree::base
     iree::base::internal::arena
@@ -55,7 +186,6 @@ loom_cc_library(
     loom::ir
     loom::ir::symbol_map
     loom::ops::func
-    loom::ops::module
     loom::ops::op_defs
     loom::ops::template
     loom::rewrite::materialize
@@ -80,7 +210,6 @@ loom_cc_test(
     loom::format::text::parser
     loom::format::text::printer
     loom::ir
-    loom::ops::module
     loom::ops::op_registry
     loom::ops::target
     loom::ops::template
@@ -108,7 +237,6 @@ loom_cc_library(
     loom::format::bytecode::index_reader
     loom::format::text::parser
     loom::ir
-    loom::ops::module
     loom::ops::op_defs
   PUBLIC
 )
@@ -131,7 +259,6 @@ loom_cc_test(
     loom::ops::check
     loom::ops::config
     loom::ops::func
-    loom::ops::module
     loom::ops::target
     loom::ops::template
     loom::ops::test
@@ -146,35 +273,8 @@ loom_cc_library(
     "planner.c"
   DEPS
     ::module_index
-    ::provider_resolver
     iree::base
   PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    provider_resolver
-  HDRS
-    "provider_resolver.h"
-  SRCS
-    "provider_resolver.c"
-  DEPS
-    ::module_index
-    iree::base
-  PUBLIC
-)
-
-loom_cc_test(
-  NAME
-    provider_resolver_test
-  SRCS
-    "provider_resolver_test.cc"
-  DEPS
-    ::module_index
-    ::provider_resolver
-    iree::base
-    iree::testing::gtest
-    iree::testing::gtest_main
 )
 
 loom_cc_library(
@@ -185,7 +285,6 @@ loom_cc_library(
   SRCS
     "plan_projection.c"
   DEPS
-    ::linker
     ::planner
     iree::base
     iree::base::internal::arena
@@ -355,7 +454,6 @@ loom_cc_test(
     ::index_materializer
     ::module_index
     ::planner
-    ::provider_resolver
     iree::base::internal::arena
     iree::io::stream
     iree::testing::gtest
@@ -364,7 +462,6 @@ loom_cc_test(
     loom::format::text::parser
     loom::format::text::printer
     loom::ir
-    loom::ops::module
     loom::ops::op_defs
     loom::ops::op_registry
     loom::ops::test
@@ -389,7 +486,6 @@ loom_cc_test(
     loom::format::text::parser
     loom::ir
     loom::ops::func
-    loom::ops::module
     loom::ops::test
 )
 
@@ -409,12 +505,12 @@ loom_cc_test(
     loom::format::bytecode::writer
     loom::format::text::parser
     loom::ir
+    loom::link::testdata::planner
     loom::ops::check
     loom::ops::command
     loom::ops::config
     loom::ops::func
     loom::ops::kernel
-    loom::ops::module
     loom::ops::target
     loom::ops::template
     loom::ops::test
@@ -470,8 +566,6 @@ loom_cc_benchmark(
     ::module_index
     ::plan_projection
     ::planner
-    ::provider_import_sink
-    ::provider_resolver
     iree::base
     iree::base::internal::arena
     iree::io::stream
@@ -481,7 +575,6 @@ loom_cc_benchmark(
     loom::format::bytecode::writer
     loom::ir
     loom::ops::func
-    loom::ops::module
     loom::ops::test
   TESTONLY
 )

@@ -5,8 +5,8 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-# Runs both public in-memory composition modes, proves that their linked
-# programs agree, and stages the compiled source and output for MkDocs.
+# Runs the public in-memory composition example and stages its source and
+# verified output for MkDocs.
 
 set -euo pipefail
 
@@ -50,20 +50,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-declaration_output="${temporary_root}/declaration-only.loom"
-provider_import_output="${temporary_root}/provider-import.loom"
-"${link_modules}" >"${declaration_output}"
-"${link_modules}" --provider-import >"${provider_import_output}"
+linked_output="${temporary_root}/linked.loom"
+"${link_modules}" >"${linked_output}"
+"${loom_format}" --check "${linked_output}"
 
-"${loom_format}" --check \
-  "${declaration_output}" \
-  "${provider_import_output}"
-if ! cmp -s "${declaration_output}" "${provider_import_output}"; then
-  printf 'declaration-only and provider-import links produced different programs\n' >&2
-  exit 1
-fi
-
-cp -- "${provider_import_output}" "${output_dir}/linked.loom"
+cp -- "${linked_output}" "${output_dir}/linked.loom"
 cp -- "${source_file}" "${output_dir}/link_modules.c"
 
 printf 'Generated documentation snippets:\n'

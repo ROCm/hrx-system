@@ -45,6 +45,24 @@ typedef struct loom_target_specialization_request_list_t {
   iree_host_size_t count;
 } loom_target_specialization_request_list_t;
 
+// One authored target declaration to bind to one structured target profile.
+typedef struct loom_target_declaration_binding_t {
+  // Target declaration symbol name, with an optional leading '@'.
+  iree_string_view_t target_name;
+
+  // Structured target profile borrowed for the specialization lifetime.
+  const loom_target_profile_t* target_profile;
+} loom_target_declaration_binding_t;
+
+// Borrowed list of target declaration bindings.
+typedef struct loom_target_declaration_binding_list_t {
+  // Binding rows, or NULL when |count| is zero.
+  const loom_target_declaration_binding_t* values;
+
+  // Number of binding rows in |values|.
+  iree_host_size_t count;
+} loom_target_declaration_binding_list_t;
+
 // Result of resolving a specialization request list.
 typedef struct loom_target_specialization_result_t {
   // Concrete target-refined function versions participating in compilation.
@@ -55,14 +73,18 @@ typedef struct loom_target_specialization_result_t {
   uint32_t error_count;
 } loom_target_specialization_result_t;
 
-// Resolves every target specialization request into a function version.
+// Resolves target specialization requests and declaration bindings into
+// function versions.
 //
 // The input module must be verified for this compiler invocation. All function
-// names, profiles, authored target requirements, and function-local contracts
-// are resolved before any versions are published. The module and its authored
-// target witnesses remain unchanged. Source incompatibilities emit structured
-// diagnostics and return OK with a nonzero |error_count|; malformed external
-// requests and infrastructure failures return a status.
+// names, target declaration names, profiles, authored target requirements, and
+// function-local contracts are resolved before any versions are published. A
+// declaration binding seeds every target-assignable function authored against
+// that declaration. Direct function requests and declaration-derived requests
+// must be disjoint. The module and its authored target witnesses remain
+// unchanged. Source incompatibilities emit structured diagnostics and return
+// OK with a nonzero |error_count|; malformed external requests and
+// infrastructure failures return a status.
 //
 // |arena| storage must outlive every pass and output consumer that uses the
 // returned function versions. Target profiles need only remain live for this
@@ -70,6 +92,7 @@ typedef struct loom_target_specialization_result_t {
 iree_status_t loom_target_specialize_functions(
     const loom_target_environment_t* environment, loom_module_t* module,
     loom_target_specialization_request_list_t requests,
+    loom_target_declaration_binding_list_t bindings,
     iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
     loom_target_specialization_result_t* out_result);
 

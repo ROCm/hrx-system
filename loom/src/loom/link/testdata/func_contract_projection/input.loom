@@ -1,0 +1,3 @@
+target.decl @gpu
+
+func.decl public target(@gpu) @identity(%x: i32) -> (i32)

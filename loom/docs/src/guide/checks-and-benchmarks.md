@@ -84,13 +84,13 @@ sweep, launches the kernel, and compares the mutated output tensor:
 ```
 
 The [`kernel.decl`](kernels-and-launch.md#declare-and-launch-the-complete-contract)
-is part of the test module's source contract. Supplying the production archive
+is part of the test module's source contract. Supplying the production library
 can satisfy that declaration; it cannot make an undeclared launch valid. The
-test archive therefore verifies and plans independently while the production
-archive remains free of check records and private wrapper entries.
+test module therefore verifies and plans independently while the production
+module remains free of check records and private wrapper entries.
 
 This is a scalable library shape: `motif/` and `kernel/` packages publish
-reusable archives, while their sibling `test/` packages own private wrappers,
+reusable modules, while their sibling `test/` packages own private wrappers,
 cases, and benchmark records. The public Bazel `loom_test_library` rule formats
 the authored source, plans its benchmarks, and expands target execution
 profiles without changing the Loom program.

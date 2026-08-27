@@ -1,0 +1,12 @@
+template.decl @test.scale_i32(%value: i32) -> (i32)
+
+template.def<@test.scale_i32> requires [#target.subgroup.size<32>] priority(20) @scale_i32_wave32(%value: i32) -> (i32) {
+  %scaled = scalar.addi %value, %value : i32
+  template.return %scaled : i32
+}
+
+template.def<@test.scale_i32> priority(1) @scale_i32_portable(%value: i32) -> (i32) {
+  %c2 = scalar.constant 2 : i32
+  %scaled = scalar.muli %value, %c2 : i32
+  template.return %scaled : i32
+}

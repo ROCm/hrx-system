@@ -1,0 +1,102 @@
+// Template applications are command-source composition until selection and
+// inlining expose the selected provider's explicit commands.
+// RUN: emit command-program @selected_schedule
+
+kernel.def @one_group() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%storage: buffer) {
+  kernel.return
+}
+
+kernel.def @eight_groups() {
+  %unit = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  kernel.launch.config workgroups(%c8, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%storage: buffer) {
+  kernel.return
+}
+
+template.decl @test.decode_schedule(%token_count: index, %storage: buffer)
+
+template.def<@test.decode_schedule> @decode_one(%token_count: index, %storage: buffer) where [eq(%token_count, 1)] {
+  kernel.launch @one_group(%storage) : (buffer)
+  template.return
+}
+
+template.def<@test.decode_schedule> @decode_many(%token_count: index, %storage: buffer) where [range(%token_count, 2, 8)] {
+  kernel.launch @eight_groups(%storage) : (buffer)
+  template.return
+}
+
+command.program.def public @selected_schedule() launch(%storage: buffer) {
+  %token_count = index.constant 1 : index
+  template.apply<@test.decode_schedule>(%token_count, %storage) : (index, buffer)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 1}) @selected_schedule() asm {
+  %11 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %12 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %13 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %14 = cmd.constant.u64 0
+  %15 = cmd.constant.u64 -1
+  %16 = cmd.constant.u32 1
+  cmd.dispatch.direct<%12, %13>[%16, %16, %16](%11, %14, %15)
+  return
+}
+
+// ====
+
+// Exact template calls use the same source-composition boundary while
+// bypassing provider ranking.
+// RUN: emit command-program @exact_schedule
+
+kernel.def @eight_groups() {
+  %unit = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  kernel.launch.config workgroups(%c8, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%storage: buffer) {
+  kernel.return
+}
+
+template.decl @test.decode_schedule(%token_count: index, %storage: buffer)
+
+template.def<@test.decode_schedule> @decode_many(%token_count: index, %storage: buffer) where [range(%token_count, 2, 8)] {
+  kernel.launch @eight_groups(%storage) : (buffer)
+  template.return
+}
+
+command.program.def public @exact_schedule() launch(%storage: buffer) {
+  %token_count = index.constant 8 : index
+  template.call @decode_many(%token_count, %storage) : (index, buffer)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 1}) @exact_schedule() asm {
+  %12 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %13 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %14 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %15 = cmd.constant.u64 0
+  %16 = cmd.constant.u64 -1
+  %17 = cmd.constant.u32 8
+  %18 = cmd.constant.u32 1
+  cmd.dispatch.direct<%13, %14>[%17, %18, %18](%12, %15, %16)
+  return
+}
+
+// ====
+
+// An unresolved family is accepted as command source composition but cannot
+// cross the final specialization boundary.
+// RUN: emit command-program @unresolved_schedule
+
+template.decl @test.missing_schedule(%storage: buffer)
+
+command.program.def public @unresolved_schedule() launch(%storage: buffer) {
+  // ERROR@+1: LOWERING/045 {op_name="template.apply", phase_name="select-templates", contract_key="test.missing_schedule", failure_code="no_provider"}
+  template.apply<@test.missing_schedule>(%storage) : (buffer)
+  command.return
+}

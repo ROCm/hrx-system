@@ -1,0 +1,11 @@
+kernel.def @standalone_scale() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%storage: buffer) {
+  kernel.return
+}
+
+command.program.def public @standalone() launch(%storage: buffer) {
+  kernel.launch @standalone_scale(%storage) : (buffer)
+  command.return
+}

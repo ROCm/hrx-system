@@ -1,0 +1,1 @@
+kernel.decl export("scale") @scale() launch(%input: buffer, %output: buffer)

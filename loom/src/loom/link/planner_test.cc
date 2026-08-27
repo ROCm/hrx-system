@@ -19,12 +19,12 @@
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/link/testdata/planner_testdata.h"
 #include "loom/ops/check/ops.h"
 #include "loom/ops/command/ops.h"
 #include "loom/ops/config/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/kernel/ops.h"
-#include "loom/ops/module/ops.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/template/ops.h"
 #include "loom/ops/test/ops.h"
@@ -65,8 +65,6 @@ class LinkPlannerTest : public ::testing::Test {
                     loom_func_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_KERNEL, loom_kernel_dialect_vtables,
                     loom_kernel_dialect_op_semantics);
-    RegisterDialect(LOOM_DIALECT_MODULE, loom_module_dialect_vtables,
-                    loom_module_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables,
                     loom_target_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_TEMPLATE, loom_template_dialect_vtables,
@@ -114,6 +112,20 @@ class LinkPlannerTest : public ::testing::Test {
       modules_.push_back(module);
     }
     return module;
+  }
+
+  iree_string_view_t Fixture(iree_string_view_t name) {
+    const iree_file_toc_t* files = loom_link_planner_testdata_create();
+    for (iree_host_size_t i = 0; i < loom_link_planner_testdata_size(); ++i) {
+      const iree_string_view_t file_name =
+          iree_make_cstring_view(files[i].name);
+      if (iree_string_view_equal(file_name, name)) {
+        return iree_make_string_view(files[i].data, files[i].size);
+      }
+    }
+    ADD_FAILURE() << "planner fixture '" << std::string(name.data, name.size)
+                  << "' was not embedded";
+    return iree_string_view_empty();
   }
 
   IndexPtr CreateIndex() {
@@ -211,7 +223,9 @@ class LinkPlannerTest : public ::testing::Test {
   const loom_link_plan_symbol_t* FindPlannedSymbol(
       const loom_link_plan_t* plan,
       const loom_link_module_index_symbol_t* symbol) {
-    if (!symbol) return nullptr;
+    if (!symbol) {
+      return nullptr;
+    }
     for (iree_host_size_t i = 0; i < loom_link_plan_symbol_count(plan); ++i) {
       const loom_link_plan_symbol_t* planned =
           loom_link_plan_symbol_at(plan, i);
@@ -256,76 +270,46 @@ class LinkPlannerTest : public ::testing::Test {
   std::vector<loom_module_t*> modules_;
 };
 
-TEST_F(LinkPlannerTest, ArchiveSelectsAllSymbolsInStableIndexOrder) {
-  loom_module_t* first = Parse(IREE_SV(R"(
-func.def public @entry_a(%x: i32) -> (i32) {
-  %y = func.call @helper(%x) : (i32) -> (i32)
-  func.return %y : i32
-}
-
-func.def @helper(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
-  loom_module_t* second = Parse(IREE_SV(R"(
-func.def public @entry_b(%x: i32) -> (i32) {
-  %y = func.call @helper(%x) : (i32) -> (i32)
-  func.return %y : i32
-}
-
-func.def @helper(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
+TEST_F(LinkPlannerTest, MergeSelectsInputSymbolsInStableIndexOrder) {
+  loom_module_t* first = Parse(Fixture(
+      IREE_SV("merge_selects_all_symbols_in_stable_index_order_first.loom")));
+  loom_module_t* second = Parse(Fixture(
+      IREE_SV("merge_selects_all_symbols_in_stable_index_order_second.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), first, IREE_SV("first"),
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   AddMaterialized(index.get(), second, IREE_SV("second"),
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddMaterialized(index.get(), second, IREE_SV("library"),
+                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
 
   PlanPtr plan = BuildPlan(index.get(), /*options=*/nullptr);
 
-  EXPECT_EQ(loom_link_plan_symbol_count(plan.get()), 4u);
-  EXPECT_EQ(
-      PlannedNames(plan.get()),
-      (std::vector<std::string>{"entry_a", "helper", "entry_b", "helper"}));
+  EXPECT_EQ(loom_link_plan_symbol_count(plan.get()), 5u);
+  EXPECT_EQ(PlannedNames(plan.get()),
+            (std::vector<std::string>{"entry_a", "helper", "external",
+                                      "entry_b", "helper"}));
   for (iree_host_size_t i = 0; i < loom_link_plan_symbol_count(plan.get());
        ++i) {
     const loom_link_plan_symbol_t* symbol =
         loom_link_plan_symbol_at(plan.get(), i);
     ASSERT_NE(symbol, nullptr);
-    EXPECT_EQ(symbol->reason, LOOM_LINK_PLAN_LIVE_ARCHIVE);
+    EXPECT_EQ(symbol->reason, LOOM_LINK_PLAN_LIVE_MERGE);
     EXPECT_EQ(symbol->cause_ordinal, LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
   }
 }
 
-TEST_F(LinkPlannerTest, SelectiveRootClosureSelectsPrivateDependencyOnly) {
-  loom_module_t* module = Parse(IREE_SV(R"(
-func.def public @entry(%x: i32) -> (i32) {
-  %y = func.call @helper(%x) : (i32) -> (i32)
-  func.return %y : i32
-}
-
-func.def @helper(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-
-func.def public @unused(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-
-func.def @unused_private(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
+TEST_F(LinkPlannerTest, LinkRootClosureSelectsPrivateDependencyOnly) {
+  loom_module_t* module = Parse(Fixture(IREE_SV(
+      "link_root_closure_selects_private_dependency_only_module.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), module, IREE_SV("input"),
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
@@ -362,18 +346,9 @@ func.def @unused_private(%x: i32) -> (i32) {
 
 TEST_F(LinkPlannerTest,
        OrdinaryDefinitionFacetCombinesEveryRootAcrossProviderForms) {
-  const iree_string_view_t source = IREE_SV(R"(
-test.record @config_dependency
-test.record @implementation_dependency
-
-test.split_func @split_root() {
-  test.symbol_array_attrs [@config_dependency] using []
-  test.yield
-} launch {
-  test.symbol_array_attrs [@implementation_dependency] using []
-  test.yield
-}
-)");
+  const iree_string_view_t source =
+      Fixture(IREE_SV("ordinary_definition_facet_combines_every_root_across_"
+                      "provider_forms_source.loom"));
   loom_module_t* module = Parse(source);
   const std::vector<uint8_t> bytecode = WriteModule(module);
 
@@ -410,7 +385,7 @@ test.split_func @split_root() {
         /*.kind=*/LOOM_LINK_SYMBOL_FACET_DEFINITION,
     };
     loom_link_plan_options_t options = {};
-    options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    options.mode = LOOM_LINK_PLAN_LINK;
     options.root_facets = {1, &definition_root};
     PlanPtr plan = BuildPlan(index, &options);
     EXPECT_TRUE(ContainsSymbol(plan.get(), root));
@@ -439,16 +414,9 @@ test.split_func @split_root() {
 
 TEST_F(LinkPlannerTest,
        CommandFacetsSeparateContractAndImplementationAcrossProviderForms) {
-  const iree_string_view_t source = IREE_SV(R"(
-command.program.def @leaf() launch() {
-  command.return
-}
-
-command.program.def @root() launch() {
-  command.program.launch @leaf() : ()
-  command.return
-}
-)");
+  const iree_string_view_t source =
+      Fixture(IREE_SV("command_facets_separate_contract_and_implementation_"
+                      "across_provider_forms_source.loom"));
   loom_module_t* module = Parse(source);
   const std::vector<uint8_t> bytecode = WriteModule(module);
 
@@ -470,7 +438,7 @@ command.program.def @root() launch() {
         /*.kind=*/LOOM_LINK_SYMBOL_FACET_COMMAND_CONTRACT,
     };
     loom_link_plan_options_t contract_options = {};
-    contract_options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    contract_options.mode = LOOM_LINK_PLAN_LINK;
     contract_options.root_facets = {1, &contract_root};
     PlanPtr contract_plan = BuildPlan(index, &contract_options);
     EXPECT_TRUE(ContainsSymbol(contract_plan.get(), root));
@@ -487,7 +455,7 @@ command.program.def @root() launch() {
         /*.kind=*/LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION,
     };
     loom_link_plan_options_t invalid_options = {};
-    invalid_options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    invalid_options.mode = LOOM_LINK_PLAN_LINK;
     invalid_options.root_facets = {1, &invalid_root};
     PlanPtr invalid_plan;
     IREE_EXPECT_STATUS_IS(
@@ -499,7 +467,7 @@ command.program.def @root() launch() {
         /*.kind=*/LOOM_LINK_SYMBOL_FACET_COMMAND_IMPLEMENTATION,
     };
     loom_link_plan_options_t implementation_options = {};
-    implementation_options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    implementation_options.mode = LOOM_LINK_PLAN_LINK;
     implementation_options.root_facets = {1, &implementation_root};
     PlanPtr implementation_plan = BuildPlan(index, &implementation_options);
     EXPECT_TRUE(ContainsSymbol(implementation_plan.get(), root));
@@ -529,27 +497,9 @@ command.program.def @root() launch() {
 }
 
 TEST_F(LinkPlannerTest, InterleavedKernelFacetUpgradesPreservePerSymbolChains) {
-  const iree_string_view_t source = IREE_SV(R"(
-func.def @configuration_dependency(%value: index) -> (index) {
-  func.return %value : index
-}
-
-func.def @implementation_dependency() {
-  func.return
-}
-
-kernel.def @target(%count: index) {
-  %configured = func.call @configuration_dependency(%count) : (index) -> (index)
-  kernel.launch.config workgroups(%configured, %configured, %configured) workgroup_size(%configured, %configured, %configured) : index
-} launch() {
-  func.call @implementation_dependency() : () -> ()
-  kernel.return
-}
-
-func.def @interleaved_dependency() {
-  func.return
-}
-)");
+  const iree_string_view_t source =
+      Fixture(IREE_SV("interleaved_kernel_facet_upgrades_preserve_per_symbol_"
+                      "chains_source.loom"));
   loom_module_t* module = Parse(source);
   const std::vector<uint8_t> bytecode = WriteModule(module);
 
@@ -561,8 +511,8 @@ func.def @interleaved_dependency() {
         loom_link_module_index_lookup_private(index, indexed_module,
                                               IREE_SV("target"));
     const loom_link_module_index_symbol_t* configuration_dependency =
-        loom_link_module_index_lookup_private(
-            index, indexed_module, IREE_SV("configuration_dependency"));
+        loom_link_module_index_lookup_global(
+            index, IREE_SV("configuration_dependency"));
     const loom_link_module_index_symbol_t* implementation_dependency =
         loom_link_module_index_lookup_private(
             index, indexed_module, IREE_SV("implementation_dependency"));
@@ -589,7 +539,7 @@ func.def @interleaved_dependency() {
         },
     };
     loom_link_plan_options_t options = {};
-    options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    options.mode = LOOM_LINK_PLAN_LINK;
     options.root_facets.count = IREE_ARRAYSIZE(roots);
     options.root_facets.values = roots;
     PlanPtr plan = BuildPlan(index, &options);
@@ -625,66 +575,15 @@ func.def @interleaved_dependency() {
 }
 
 TEST_F(LinkPlannerTest, KernelReferencesSelectOnlyTheirRequiredFacets) {
-  const iree_string_view_t harness_source = IREE_SV(R"(
-kernel.decl @configured(%count: index) launch()
-kernel.entry.decl @dispatched()
-
-func.def @interleaved_dependency() {
-  func.return
-}
-
-config.def @local_configuration_dependency = 1 : index
-
-func.def @local_implementation_dependency() {
-  func.return
-}
-
-kernel.def @local(%count: index) {
-  %configured = config.get @local_configuration_dependency : index
-  kernel.launch.config workgroups(%count, %configured, %configured) workgroup_size(%configured, %configured, %configured) : index
-} launch() {
-  func.call @local_implementation_dependency() : () -> ()
-  kernel.return
-}
-
-func.def public @entry(%count: index) {
-  kernel.launch @configured[%count]() : [index]()
-  func.call @interleaved_dependency() : () -> ()
-  kernel.launch @configured[%count]() : [index]()
-  kernel.launch @local[%count]() : [index]()
-  kernel.dispatch @dispatched[%count]() : [index]()
-  func.return
-}
-)");
-  const iree_string_view_t wrong_library_source = IREE_SV(R"(
-func.def @configured(%count: index) {
-  func.return
-}
-)");
-  const iree_string_view_t library_source = IREE_SV(R"(
-config.def @configuration_dependency = 1 : index
-config.def @dispatched_configuration_dependency = 1 : index
-
-func.def @implementation_dependency() {
-  func.return
-}
-
-kernel.def @configured(%count: index) {
-  %configured = config.get @configuration_dependency : index
-  kernel.launch.config workgroups(%count, %configured, %configured) workgroup_size(%configured, %configured, %configured) : index
-} launch() {
-  func.call @implementation_dependency() : () -> ()
-  kernel.return
-}
-
-kernel.def @dispatched(%count: index) {
-  %configured = config.get @dispatched_configuration_dependency : index
-  kernel.launch.config workgroups(%count, %configured, %configured) workgroup_size(%configured, %configured, %configured) : index
-} launch() {
-  func.call @implementation_dependency() : () -> ()
-  kernel.return
-}
-)");
+  const iree_string_view_t harness_source =
+      Fixture(IREE_SV("kernel_references_select_only_their_required_facets_"
+                      "harness_source.loom"));
+  const iree_string_view_t wrong_library_source =
+      Fixture(IREE_SV("kernel_references_select_only_their_required_facets_"
+                      "wrong_library_source.loom"));
+  const iree_string_view_t library_source =
+      Fixture(IREE_SV("kernel_references_select_only_their_required_facets_"
+                      "library_source.loom"));
   loom_module_t* harness = Parse(harness_source);
   ASSERT_NE(harness, nullptr);
   loom_module_t* wrong_library = Parse(wrong_library_source);
@@ -699,14 +598,13 @@ kernel.def @dispatched(%count: index) {
   auto verify_index = [&](const loom_link_module_index_t* index) {
     iree_string_view_t roots[] = {IREE_SV("@entry")};
     loom_link_plan_options_t options = {
-        /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+        /*.mode=*/LOOM_LINK_PLAN_LINK,
         /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
         /*.include_input_exports=*/false,
         /*.unresolved_policy=*/LOOM_LINK_PLAN_UNRESOLVED_ERROR,
         /*.test_symbol_policy=*/LOOM_LINK_PLAN_TEST_SYMBOL_KEEP,
         /*.strip_symbol=*/nullptr,
         /*.strip_symbol_user_data=*/nullptr,
-        /*.provider_resolver=*/nullptr,
         /*.selected_template_providers=*/{},
         /*.root_facets=*/{},
         /*.dependency_policy=*/LOOM_LINK_PLAN_DEPENDENCY_REQUESTED_FACETS,
@@ -807,7 +705,7 @@ kernel.def @dispatched(%count: index) {
   AddMaterialized(materialized_index.get(), wrong_library,
                   IREE_SV("wrong-library"), LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   AddMaterialized(materialized_index.get(), library, IREE_SV("library"),
-                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
   verify_index(materialized_index.get());
 
   IndexPtr text_index = CreateIndex();
@@ -816,7 +714,7 @@ kernel.def @dispatched(%count: index) {
   AddText(text_index.get(), wrong_library_source, IREE_SV("wrong-library.loom"),
           LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   AddText(text_index.get(), library_source, IREE_SV("library.loom"),
-          LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+          LOOM_LINK_PROVIDER_ROLE_INPUT);
   verify_index(text_index.get());
 
   IndexPtr bytecode_index = CreateIndex();
@@ -825,26 +723,20 @@ kernel.def @dispatched(%count: index) {
   AddBytecode(bytecode_index.get(), wrong_library_bytecode,
               IREE_SV("wrong-library.loombc"), LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   AddBytecode(bytecode_index.get(), library_bytecode, IREE_SV("library.loombc"),
-              LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+              LOOM_LINK_PROVIDER_ROLE_INPUT);
   verify_index(bytecode_index.get());
 }
 
-TEST_F(LinkPlannerTest, SelectiveRootIgnoresModuleAvailabilityReferences) {
-  loom_module_t* module = Parse(IREE_SV(R"(
-test.record @available
-test.template_param_symbol<@available>
-
-func.def public @entry() {
-  func.return
-}
-)"));
+TEST_F(LinkPlannerTest, LinkRootIgnoresAvailabilityReferences) {
+  loom_module_t* module = Parse(Fixture(
+      IREE_SV("link_root_ignores_availability_references_module.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), module, IREE_SV("input"),
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
@@ -861,22 +753,11 @@ func.def public @entry() {
   EXPECT_FALSE(ContainsSymbol(plan.get(), available));
 }
 
-TEST_F(LinkPlannerTest, SelectiveBytecodePlanningUsesSerializedDependencies) {
-  loom_module_t* used = Parse(IREE_SV(R"(
-func.def public @entry(%x: i32) -> (i32) {
-  %y = func.call @helper(%x) : (i32) -> (i32)
-  func.return %y : i32
-}
-
-func.def @helper(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
-  loom_module_t* unused = Parse(IREE_SV(R"(
-func.def public @unused(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
+TEST_F(LinkPlannerTest, LinkBytecodePlanningUsesSerializedDependencies) {
+  loom_module_t* used = Parse(Fixture(IREE_SV(
+      "link_bytecode_planning_uses_serialized_dependencies_used.loom")));
+  loom_module_t* unused = Parse(Fixture(IREE_SV(
+      "link_bytecode_planning_uses_serialized_dependencies_unused.loom")));
   std::vector<uint8_t> used_bytes = WriteModule(used);
   std::vector<uint8_t> unused_bytes = WriteModule(unused);
 
@@ -911,7 +792,7 @@ func.def public @unused(%x: i32) -> (i32) {
 
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
@@ -930,29 +811,13 @@ func.def public @unused(%x: i32) -> (i32) {
   EXPECT_EQ(unused_module->materialized_module, nullptr);
 }
 
-TEST_F(LinkPlannerTest, SelectiveApplyReportsBytecodeFamilyDemand) {
-  loom_module_t* harness = Parse(IREE_SV(R"(
-template.decl @demo.bytecode(%x: i32) -> (i32)
-
-func.def public @entry(%x: i32) -> (i32) {
-  %y = template.apply<@demo.bytecode>(%x) : (i32) -> (i32)
-  func.return %y : i32
-}
-)"));
-  loom_module_t* used = Parse(IREE_SV(R"(
-template.decl @demo.bytecode(%x: i32) -> (i32)
-
-template.def<@demo.bytecode> @bytecode_provider(%x: i32) -> (i32) {
-  template.return %x : i32
-}
-)"));
-  loom_module_t* unused = Parse(IREE_SV(R"(
-template.decl @demo.unused(%x: i32) -> (i32)
-
-template.def<@demo.unused> @unused_provider(%x: i32) -> (i32) {
-  template.return %x : i32
-}
-)"));
+TEST_F(LinkPlannerTest, LinkApplyReportsBytecodeFamilyDemand) {
+  loom_module_t* harness = Parse(Fixture(
+      IREE_SV("link_apply_reports_bytecode_family_demand_harness.loom")));
+  loom_module_t* used = Parse(
+      Fixture(IREE_SV("link_apply_reports_bytecode_family_demand_used.loom")));
+  loom_module_t* unused = Parse(Fixture(
+      IREE_SV("link_apply_reports_bytecode_family_demand_unused.loom")));
   std::vector<uint8_t> used_bytes = WriteModule(used);
   std::vector<uint8_t> unused_bytes = WriteModule(unused);
 
@@ -980,7 +845,7 @@ template.def<@demo.unused> @unused_provider(%x: i32) -> (i32) {
 
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/
       {
           /*.count=*/IREE_ARRAYSIZE(roots),
@@ -1016,24 +881,16 @@ template.def<@demo.unused> @unused_provider(%x: i32) -> (i32) {
   EXPECT_EQ(unused_module->materialized_module, nullptr);
 }
 
-TEST_F(LinkPlannerTest, SelectiveRootMayNameUniquePrivateSymbol) {
-  loom_module_t* module = Parse(IREE_SV(R"(
-func.def @entry(%x: i32) -> (i32) {
-  %y = func.call @helper(%x) : (i32) -> (i32)
-  func.return %y : i32
-}
-
-func.def @helper(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
+TEST_F(LinkPlannerTest, LinkRootMayNameUniquePrivateSymbol) {
+  loom_module_t* module = Parse(
+      Fixture(IREE_SV("link_root_may_name_unique_private_symbol_module.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), module, IREE_SV("input"),
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
@@ -1051,24 +908,92 @@ func.def @helper(%x: i32) -> (i32) {
   EXPECT_TRUE(ContainsSymbol(plan.get(), helper));
 }
 
-TEST_F(LinkPlannerTest, SelectiveImportFreeDeclarationPullsConcreteDefinition) {
-  loom_module_t* harness = Parse(IREE_SV(R"(
-func.decl public @callee(%x: i32) -> (i32)
+TEST_F(LinkPlannerTest, LinkImportFreeDeclarationPullsConcreteDefinition) {
+  const iree_string_view_t harness_source =
+      Fixture(IREE_SV("link_import_free_declaration_pulls_concrete_"
+                      "definition_harness_source.loom"));
+  const iree_string_view_t library_source =
+      Fixture(IREE_SV("link_import_free_declaration_pulls_concrete_"
+                      "definition_library_source.loom"));
+  loom_module_t* harness = Parse(harness_source);
+  loom_module_t* library = Parse(library_source);
+  const std::vector<uint8_t> harness_bytecode = WriteModule(harness);
+  const std::vector<uint8_t> library_bytecode = WriteModule(library);
 
-func.def public @entry(%x: i32) -> (i32) {
-  %y = func.call @callee(%x) : (i32) -> (i32)
-  func.return %y : i32
-}
-)"));
-  loom_module_t* library = Parse(IREE_SV(R"(
-func.def public @callee(%x: i32) -> (i32) {
-  func.return %x : i32
+  auto verify_index = [&](const loom_link_module_index_t* index) {
+    iree_string_view_t roots[] = {IREE_SV("@entry")};
+    loom_link_plan_options_t options = {
+        /*.mode=*/LOOM_LINK_PLAN_LINK,
+        /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
+    };
+    PlanPtr plan = BuildPlan(index, &options);
+
+    const loom_link_module_index_symbol_t* entry =
+        loom_link_module_index_lookup_global(index, IREE_SV("entry"));
+    const loom_link_module_index_symbol_t* callee_decl =
+        loom_link_module_index_lookup_global(index, IREE_SV("callee"));
+    ASSERT_NE(callee_decl, nullptr);
+    const loom_link_module_index_symbol_t* callee_def =
+        loom_link_module_index_next_global_duplicate(index, callee_decl);
+    ASSERT_NE(callee_def, nullptr);
+    const loom_link_module_index_symbol_t* unused =
+        loom_link_module_index_lookup_global(index, IREE_SV("unused"));
+
+    EXPECT_TRUE(ContainsSymbol(plan.get(), entry));
+    EXPECT_TRUE(ContainsSymbol(plan.get(), callee_decl));
+    EXPECT_TRUE(ContainsSymbol(plan.get(), callee_def));
+    EXPECT_FALSE(ContainsSymbol(plan.get(), unused));
+
+    const loom_link_module_index_provider_t* def_provider =
+        loom_link_module_index_symbol_provider(index, callee_def);
+    ASSERT_NE(def_provider, nullptr);
+    EXPECT_EQ(StringViewToString(def_provider->name), "library");
+
+    const loom_link_plan_symbol_t* planned_decl =
+        FindPlannedSymbol(plan.get(), callee_decl);
+    const loom_link_plan_symbol_t* planned_def =
+        FindPlannedSymbol(plan.get(), callee_def);
+    ASSERT_NE(planned_decl, nullptr);
+    ASSERT_NE(planned_def, nullptr);
+    EXPECT_EQ(planned_decl->reason, LOOM_LINK_PLAN_LIVE_DEPENDENCY);
+    EXPECT_EQ(planned_def->reason, LOOM_LINK_PLAN_LIVE_DEPENDENCY);
+    EXPECT_EQ(planned_def->cause_ordinal, planned_decl->ordinal);
+  };
+
+  IndexPtr materialized_index = CreateIndex();
+  AddMaterialized(materialized_index.get(), harness, IREE_SV("harness"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddMaterialized(materialized_index.get(), library, IREE_SV("library"),
+                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+  verify_index(materialized_index.get());
+
+  IndexPtr reversed_index = CreateIndex();
+  AddMaterialized(reversed_index.get(), library, IREE_SV("library"),
+                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+  AddMaterialized(reversed_index.get(), harness, IREE_SV("harness"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  verify_index(reversed_index.get());
+
+  IndexPtr text_index = CreateIndex();
+  AddText(text_index.get(), harness_source, IREE_SV("harness"),
+          LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddText(text_index.get(), library_source, IREE_SV("library"),
+          LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+  verify_index(text_index.get());
+
+  IndexPtr bytecode_index = CreateIndex();
+  AddBytecode(bytecode_index.get(), harness_bytecode, IREE_SV("harness"),
+              LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddBytecode(bytecode_index.get(), library_bytecode, IREE_SV("library"),
+              LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+  verify_index(bytecode_index.get());
 }
 
-func.def public @unused(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
+TEST_F(LinkPlannerTest, LinkTargetRequirementUsesConcreteEnvironment) {
+  loom_module_t* harness = Parse(Fixture(IREE_SV(
+      "link_target_requirement_uses_concrete_environment_harness.loom")));
+  loom_module_t* library = Parse(Fixture(IREE_SV(
+      "link_target_requirement_uses_concrete_environment_library.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), harness, IREE_SV("harness"),
@@ -1077,324 +1002,7 @@ func.def public @unused(%x: i32) -> (i32) {
                   LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
-      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
-  };
-  PlanPtr plan = BuildPlan(index.get(), &options);
-
-  const loom_link_module_index_symbol_t* entry =
-      loom_link_module_index_lookup_global(index.get(), IREE_SV("entry"));
-  const loom_link_module_index_symbol_t* callee_decl =
-      loom_link_module_index_lookup_global(index.get(), IREE_SV("callee"));
-  ASSERT_NE(callee_decl, nullptr);
-  const loom_link_module_index_symbol_t* callee_def =
-      loom_link_module_index_next_same_name(index.get(), callee_decl);
-  ASSERT_NE(callee_def, nullptr);
-  const loom_link_module_index_symbol_t* unused =
-      loom_link_module_index_lookup_global(index.get(), IREE_SV("unused"));
-
-  EXPECT_TRUE(ContainsSymbol(plan.get(), entry));
-  EXPECT_TRUE(ContainsSymbol(plan.get(), callee_decl));
-  EXPECT_TRUE(ContainsSymbol(plan.get(), callee_def));
-  EXPECT_FALSE(ContainsSymbol(plan.get(), unused));
-
-  const loom_link_module_index_provider_t* def_provider =
-      loom_link_module_index_symbol_provider(index.get(), callee_def);
-  ASSERT_NE(def_provider, nullptr);
-  EXPECT_EQ(StringViewToString(def_provider->name), "library");
-
-  const loom_link_plan_symbol_t* planned_decl =
-      FindPlannedSymbol(plan.get(), callee_decl);
-  const loom_link_plan_symbol_t* planned_def =
-      FindPlannedSymbol(plan.get(), callee_def);
-  ASSERT_NE(planned_decl, nullptr);
-  ASSERT_NE(planned_def, nullptr);
-  EXPECT_EQ(planned_decl->reason, LOOM_LINK_PLAN_LIVE_DEPENDENCY);
-  EXPECT_EQ(planned_def->reason, LOOM_LINK_PLAN_LIVE_DEPENDENCY);
-  EXPECT_EQ(planned_def->cause_ordinal, planned_decl->ordinal);
-}
-
-TEST_F(LinkPlannerTest, ProviderImportsConstrainExactDeclarationResolution) {
-  loom_module_t* harness = Parse(IREE_SV(R"(
-module.import "chosen" [@callee]
-module.import "chosen-alias" [@callee]
-
-func.decl @callee(%x: i32) -> (i32)
-
-func.def public @entry(%x: i32) -> (i32) {
-  %y = func.call @callee(%x) : (i32) -> (i32)
-  func.return %y : i32
-}
-)"));
-  loom_module_t* wrong_library = Parse(IREE_SV(R"(
-func.def public @callee(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
-  loom_module_t* chosen_library = Parse(IREE_SV(R"(
-func.def @callee(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
-  const std::vector<uint8_t> wrong_bytes = WriteModule(wrong_library);
-  const std::vector<uint8_t> harness_bytes = WriteModule(harness);
-  const std::vector<uint8_t> chosen_bytes = WriteModule(chosen_library);
-
-  IndexPtr index = CreateIndex();
-  AddBytecode(index.get(), wrong_bytes, IREE_SV("wrong.loombc"),
-              LOOM_LINK_PROVIDER_ROLE_INPUT);
-  AddBytecode(index.get(), harness_bytes, IREE_SV("harness.loombc"),
-              LOOM_LINK_PROVIDER_ROLE_INPUT);
-  const iree_host_size_t chosen_provider =
-      AddBytecode(index.get(), chosen_bytes, IREE_SV("chosen.loombc"),
-                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
-  loom_link_provider_binding_t bindings[] = {
-      {IREE_SV("chosen-alias"), chosen_provider},
-      {IREE_SV("chosen"), chosen_provider},
-  };
-  loom_link_provider_resolver_t resolver = {0};
-  IREE_ASSERT_OK(loom_link_provider_resolver_prepare(
-      loom_link_module_index_provider_count(index.get()), bindings,
-      IREE_ARRAYSIZE(bindings), &resolver));
-  iree_string_view_t roots[] = {IREE_SV("@entry")};
-  loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
-      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
-  };
-  options.provider_resolver = &resolver;
-  PlanPtr plan = BuildPlan(index.get(), &options);
-
-  const loom_link_module_index_module_t* wrong_module =
-      loom_link_module_index_module_at(index.get(), 0);
-  const loom_link_module_index_module_t* harness_module =
-      loom_link_module_index_module_at(index.get(), 1);
-  const loom_link_module_index_module_t* chosen_module =
-      loom_link_module_index_module_at(index.get(), 2);
-  ASSERT_NE(wrong_module, nullptr);
-  ASSERT_NE(harness_module, nullptr);
-  ASSERT_NE(chosen_module, nullptr);
-  EXPECT_EQ(wrong_module->materialized_module, nullptr);
-  EXPECT_EQ(harness_module->materialized_module, nullptr);
-  EXPECT_EQ(chosen_module->materialized_module, nullptr);
-  const loom_link_module_index_symbol_t* declaration =
-      loom_link_module_index_symbol_at(index.get(),
-                                       harness_module->symbol_start_ordinal);
-  const loom_link_module_index_symbol_t* wrong =
-      loom_link_module_index_symbol_at(index.get(),
-                                       wrong_module->symbol_start_ordinal);
-  const loom_link_module_index_symbol_t* chosen =
-      loom_link_module_index_lookup_private(index.get(), chosen_module,
-                                            IREE_SV("callee"));
-  ASSERT_NE(declaration, nullptr);
-  EXPECT_EQ(StringViewToString(declaration->name), "callee");
-  ASSERT_NE(wrong, nullptr);
-  ASSERT_NE(chosen, nullptr);
-  EXPECT_TRUE(ContainsSymbol(plan.get(), declaration));
-  EXPECT_FALSE(ContainsSymbol(plan.get(), wrong));
-  EXPECT_TRUE(ContainsSymbol(plan.get(), chosen));
-  EXPECT_TRUE(
-      loom_link_plan_symbol_imports_resolved(plan.get(), declaration->ordinal));
-}
-
-TEST_F(LinkPlannerTest, ProviderImportDoesNotBindTemplateFamily) {
-  loom_module_t* harness = Parse(IREE_SV(R"(
-module.import "family-library" [@demo.apply]
-
-template.decl @demo.apply(%x: i32) -> (i32)
-
-func.def public @entry(%x: i32) -> (i32) {
-  %y = template.apply<@demo.apply>(%x) : (i32) -> (i32)
-  func.return %y : i32
-}
-)"));
-  loom_module_t* library = Parse(IREE_SV(R"(
-template.decl @demo.apply(%x: i32) -> (i32)
-
-template.def<@demo.apply> @provider(%x: i32) -> (i32) {
-  template.return %x : i32
-}
-
-template.decl @demo.unused(%x: i32) -> (i32)
-
-template.def<@demo.unused> @unused_provider(%x: i32) -> (i32) {
-  template.return %x : i32
-}
-)"));
-
-  IndexPtr index = CreateIndex();
-  AddMaterialized(index.get(), harness, IREE_SV("harness"),
-                  LOOM_LINK_PROVIDER_ROLE_INPUT);
-  const iree_host_size_t library_provider =
-      AddMaterialized(index.get(), library, IREE_SV("library"),
-                      LOOM_LINK_PROVIDER_ROLE_LIBRARY);
-  loom_link_provider_binding_t bindings[] = {
-      {IREE_SV("family-library"), library_provider},
-  };
-  loom_link_provider_resolver_t resolver = {0};
-  IREE_ASSERT_OK(loom_link_provider_resolver_prepare(
-      loom_link_module_index_provider_count(index.get()), bindings,
-      IREE_ARRAYSIZE(bindings), &resolver));
-  iree_string_view_t roots[] = {IREE_SV("@entry")};
-  loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
-      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
-  };
-  options.provider_resolver = &resolver;
-  PlanPtr plan = BuildPlan(index.get(), &options);
-
-  const loom_link_module_index_symbol_t* local_family =
-      loom_link_module_index_lookup_global(index.get(), IREE_SV("demo.apply"));
-  ASSERT_NE(local_family, nullptr);
-  const loom_link_module_index_symbol_t* family_declaration =
-      loom_link_module_index_next_same_name(index.get(), local_family);
-  ASSERT_NE(family_declaration, nullptr);
-  EXPECT_EQ(family_declaration->kind, LOOM_SYMBOL_TEMPLATE_DECL);
-  const loom_link_module_index_symbol_t* provider =
-      loom_link_module_index_lookup_private(
-          index.get(), loom_link_module_index_module_at(index.get(), 1),
-          IREE_SV("provider"));
-  const loom_link_module_index_symbol_t* unused_provider =
-      loom_link_module_index_lookup_private(
-          index.get(), loom_link_module_index_module_at(index.get(), 1),
-          IREE_SV("unused_provider"));
-  ASSERT_NE(provider, nullptr);
-  ASSERT_NE(unused_provider, nullptr);
-
-  EXPECT_TRUE(ContainsSymbol(plan.get(), local_family));
-  EXPECT_FALSE(ContainsSymbol(plan.get(), family_declaration));
-  EXPECT_FALSE(ContainsSymbol(plan.get(), provider));
-  EXPECT_FALSE(ContainsSymbol(plan.get(), unused_provider));
-  ASSERT_EQ(loom_link_plan_demanded_template_family_count(plan.get()), 1u);
-  const loom_link_module_index_template_family_t* demanded_family =
-      DemandedTemplateFamily(plan.get(), 0);
-  ASSERT_NE(demanded_family, nullptr);
-  EXPECT_EQ(StringViewToString(demanded_family->name), "demo.apply");
-  EXPECT_FALSE(loom_link_plan_symbol_imports_resolved(plan.get(),
-                                                      local_family->ordinal));
-}
-
-TEST_F(LinkPlannerTest, UnboundProviderImportNeverFallsBackByInputOrder) {
-  loom_module_t* harness = Parse(IREE_SV(R"(
-module.import "missing" [@callee]
-
-func.decl @callee(%x: i32) -> (i32)
-
-func.def public @entry(%x: i32) -> (i32) {
-  %y = func.call @callee(%x) : (i32) -> (i32)
-  func.return %y : i32
-}
-)"));
-  loom_module_t* unrelated_library = Parse(IREE_SV(R"(
-func.def @callee(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
-
-  IndexPtr index = CreateIndex();
-  AddMaterialized(index.get(), harness, IREE_SV("harness"),
-                  LOOM_LINK_PROVIDER_ROLE_INPUT);
-  AddMaterialized(index.get(), unrelated_library, IREE_SV("unrelated"),
-                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
-  iree_string_view_t roots[] = {IREE_SV("@entry")};
-  loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
-      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
-  };
-
-  PlanPtr failed_plan;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
-                        BuildPlanStatus(index.get(), &options, &failed_plan));
-
-  options.unresolved_policy = LOOM_LINK_PLAN_UNRESOLVED_ALLOW;
-  PlanPtr plan = BuildPlan(index.get(), &options);
-  const loom_link_module_index_symbol_t* declaration =
-      loom_link_module_index_lookup_global(index.get(), IREE_SV("callee"));
-  const loom_link_module_index_module_t* unrelated_module =
-      loom_link_module_index_module_at(index.get(), 1);
-  ASSERT_NE(declaration, nullptr);
-  ASSERT_NE(unrelated_module, nullptr);
-  const loom_link_module_index_symbol_t* unrelated =
-      loom_link_module_index_lookup_private(index.get(), unrelated_module,
-                                            IREE_SV("callee"));
-  ASSERT_NE(unrelated, nullptr);
-  EXPECT_TRUE(ContainsSymbol(plan.get(), declaration));
-  EXPECT_FALSE(ContainsSymbol(plan.get(), unrelated));
-  EXPECT_FALSE(
-      loom_link_plan_symbol_imports_resolved(plan.get(), declaration->ordinal));
-}
-
-TEST_F(LinkPlannerTest, DistinctBoundDefinitionsAreAmbiguous) {
-  loom_module_t* harness = Parse(IREE_SV(R"(
-module.import "alpha" [@callee]
-module.import "beta" [@callee]
-
-func.decl @callee(%x: i32) -> (i32)
-
-func.def public @entry(%x: i32) -> (i32) {
-  %y = func.call @callee(%x) : (i32) -> (i32)
-  func.return %y : i32
-}
-)"));
-  loom_module_t* alpha_library = Parse(IREE_SV(R"(
-func.def @callee(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
-  loom_module_t* beta_library = Parse(IREE_SV(R"(
-func.def @callee(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
-
-  IndexPtr index = CreateIndex();
-  AddMaterialized(index.get(), harness, IREE_SV("harness"),
-                  LOOM_LINK_PROVIDER_ROLE_INPUT);
-  const iree_host_size_t beta_provider =
-      AddMaterialized(index.get(), beta_library, IREE_SV("beta-library"),
-                      LOOM_LINK_PROVIDER_ROLE_LIBRARY);
-  const iree_host_size_t alpha_provider =
-      AddMaterialized(index.get(), alpha_library, IREE_SV("alpha-library"),
-                      LOOM_LINK_PROVIDER_ROLE_LIBRARY);
-  loom_link_provider_binding_t bindings[] = {
-      {IREE_SV("beta"), beta_provider},
-      {IREE_SV("alpha"), alpha_provider},
-  };
-  loom_link_provider_resolver_t resolver = {0};
-  IREE_ASSERT_OK(loom_link_provider_resolver_prepare(
-      loom_link_module_index_provider_count(index.get()), bindings,
-      IREE_ARRAYSIZE(bindings), &resolver));
-  iree_string_view_t roots[] = {IREE_SV("@entry")};
-  loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
-      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
-  };
-  options.provider_resolver = &resolver;
-
-  PlanPtr plan;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
-                        BuildPlanStatus(index.get(), &options, &plan));
-}
-
-TEST_F(LinkPlannerTest, SelectiveTargetDeclarationPullsConcreteRecord) {
-  loom_module_t* harness = Parse(IREE_SV(R"(
-target.decl @gpu
-
-func.def public target(@gpu) @entry() {
-  func.return
-}
-)"));
-  loom_module_t* library = Parse(IREE_SV(R"(
-test.target<low_core> @gpu
-)"));
-
-  IndexPtr index = CreateIndex();
-  AddMaterialized(index.get(), harness, IREE_SV("harness"),
-                  LOOM_LINK_PROVIDER_ROLE_INPUT);
-  AddMaterialized(index.get(), library, IREE_SV("library"),
-                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
-  iree_string_view_t roots[] = {IREE_SV("@entry")};
-  loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
@@ -1417,20 +1025,33 @@ test.target<low_core> @gpu
   EXPECT_TRUE(ContainsSymbol(plan.get(), target_def));
 }
 
-TEST_F(LinkPlannerTest, SelectiveDeclarationMayPullPrivateConcreteDefinition) {
-  loom_module_t* harness = Parse(IREE_SV(R"(
-func.decl @callee(%x: i32) -> (i32)
+TEST_F(LinkPlannerTest, LinkTargetRequirementMayRemainUnbound) {
+  loom_module_t* harness = Parse(Fixture(
+      IREE_SV("link_target_requirement_may_remain_unbound_harness.loom")));
 
-func.def @entry(%x: i32) -> (i32) {
-  %y = func.call @callee(%x) : (i32) -> (i32)
-  func.return %y : i32
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), harness, IREE_SV("harness"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  iree_string_view_t roots[] = {IREE_SV("@entry")};
+  loom_link_plan_options_t options = {
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
+      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
+  };
+  PlanPtr plan = BuildPlan(index.get(), &options);
+
+  const loom_link_module_index_symbol_t* target_decl =
+      loom_link_module_index_lookup_global(index.get(), IREE_SV("gpu"));
+  EXPECT_TRUE(ContainsSymbol(plan.get(), target_decl));
+  EXPECT_EQ(loom_link_plan_symbol_count(plan.get()), 2u);
 }
-)"));
-  loom_module_t* library = Parse(IREE_SV(R"(
-func.def @callee(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
+
+TEST_F(LinkPlannerTest, LinkDeclarationRejectsPrivateLibraryDefinition) {
+  loom_module_t* harness =
+      Parse(Fixture(IREE_SV("link_declaration_rejects_private_library_"
+                            "definition_harness.loom")));
+  loom_module_t* library =
+      Parse(Fixture(IREE_SV("link_declaration_rejects_private_library_"
+                            "definition_library.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), harness, IREE_SV("harness"),
@@ -1439,44 +1060,73 @@ func.def @callee(%x: i32) -> (i32) {
                   LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
+      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
+  };
+  PlanPtr plan;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
+                        BuildPlanStatus(index.get(), &options, &plan));
+}
+
+TEST_F(LinkPlannerTest, LinkDeclarationRejectsWrongSymbolInterface) {
+  loom_module_t* harness = Parse(Fixture(
+      IREE_SV("link_declaration_rejects_wrong_symbol_interface_harness.loom")));
+  loom_module_t* library = Parse(Fixture(
+      IREE_SV("link_declaration_rejects_wrong_symbol_interface_library.loom")));
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), harness, IREE_SV("harness"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddMaterialized(index.get(), library, IREE_SV("library"),
+                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+  iree_string_view_t roots[] = {IREE_SV("@entry")};
+  loom_link_plan_options_t options = {
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
+      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
+  };
+  PlanPtr plan;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
+                        BuildPlanStatus(index.get(), &options, &plan));
+}
+
+TEST_F(LinkPlannerTest, LinkDeclarationMayUsePrivateOwnerDefinition) {
+  loom_module_t* harness = Parse(Fixture(IREE_SV(
+      "link_declaration_may_use_private_owner_definition_harness.loom")));
+  loom_module_t* sibling_source =
+      Parse(Fixture(IREE_SV("link_declaration_may_use_private_owner_"
+                            "definition_sibling_source.loom")));
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), harness, IREE_SV("harness"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddMaterialized(index.get(), sibling_source, IREE_SV("sibling-source"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  iree_string_view_t roots[] = {IREE_SV("@entry")};
+  loom_link_plan_options_t options = {
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
 
-  const loom_link_module_index_module_t* harness_module =
-      loom_link_module_index_module_at(index.get(), 0);
-  const loom_link_module_index_module_t* library_module =
+  const loom_link_module_index_module_t* sibling_module =
       loom_link_module_index_module_at(index.get(), 1);
-  ASSERT_NE(harness_module, nullptr);
-  ASSERT_NE(library_module, nullptr);
-  const loom_link_module_index_symbol_t* entry =
-      loom_link_module_index_lookup_private(index.get(), harness_module,
-                                            IREE_SV("entry"));
+  ASSERT_NE(sibling_module, nullptr);
   const loom_link_module_index_symbol_t* callee_decl =
       loom_link_module_index_lookup_global(index.get(), IREE_SV("callee"));
   const loom_link_module_index_symbol_t* callee_def =
-      loom_link_module_index_lookup_private(index.get(), library_module,
+      loom_link_module_index_lookup_private(index.get(), sibling_module,
                                             IREE_SV("callee"));
-  EXPECT_TRUE(ContainsSymbol(plan.get(), entry));
   EXPECT_TRUE(ContainsSymbol(plan.get(), callee_decl));
   EXPECT_TRUE(ContainsSymbol(plan.get(), callee_def));
 }
 
-TEST_F(LinkPlannerTest, ExportedDeclarationPullsPrivateConcreteDefinition) {
-  loom_module_t* harness = Parse(IREE_SV(R"(
-func.decl public @callee(%x: i32) -> (i32)
-)"));
-  loom_module_t* library = Parse(IREE_SV(R"(
-func.def @callee(%x: i32) -> (i32) {
-  %y = func.call @helper(%x) : (i32) -> (i32)
-  func.return %y : i32
-}
-
-func.def @helper(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
+TEST_F(LinkPlannerTest, UnresolvedDeclarationIgnoresPrivateLibraryDefinition) {
+  loom_module_t* harness =
+      Parse(Fixture(IREE_SV("unresolved_declaration_ignores_private_library_"
+                            "definition_harness.loom")));
+  loom_module_t* library =
+      Parse(Fixture(IREE_SV("unresolved_declaration_ignores_private_library_"
+                            "definition_library.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), harness, IREE_SV("harness"),
@@ -1484,9 +1134,10 @@ func.def @helper(%x: i32) -> (i32) {
   AddMaterialized(index.get(), library, IREE_SV("library"),
                   LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{},
       /*.include_input_exports=*/true,
+      /*.unresolved_policy=*/LOOM_LINK_PLAN_UNRESOLVED_ALLOW,
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
 
@@ -1502,45 +1153,15 @@ func.def @helper(%x: i32) -> (i32) {
       loom_link_module_index_lookup_private(index.get(), library_module,
                                             IREE_SV("helper"));
   EXPECT_TRUE(ContainsSymbol(plan.get(), callee_decl));
-  EXPECT_TRUE(ContainsSymbol(plan.get(), callee_def));
-  EXPECT_TRUE(ContainsSymbol(plan.get(), helper));
+  EXPECT_FALSE(ContainsSymbol(plan.get(), callee_def));
+  EXPECT_FALSE(ContainsSymbol(plan.get(), helper));
 }
 
-TEST_F(LinkPlannerTest, SelectiveApplyRequiresExplicitProviderSelection) {
-  loom_module_t* harness = Parse(IREE_SV(R"(
-test.target<low_core> @root_target
-
-template.decl @demo.targeted(%x: i32) -> (i32)
-
-func.def public target(@root_target) @entry(%x: i32) -> (i32) {
-  %y = template.apply<@demo.targeted>(%x) : (i32) -> (i32)
-  func.return %y : i32
-}
-)"));
-  loom_module_t* library = Parse(IREE_SV(R"(
-template.decl @demo.targeted(%x: i32) -> (i32)
-
-template.decl @demo.unused(%x: i32) -> (i32)
-
-test.target<low_core> @gfx11
-test.target<low_core> @gfx12
-
-template.def<@demo.targeted> target(@gfx11) priority(20) @gfx11_provider(%x: i32) -> (i32) {
-  template.return %x : i32
-}
-
-template.def<@demo.targeted> target(@gfx12) priority(20) @gfx12_provider(%x: i32) -> (i32) {
-  template.return %x : i32
-}
-
-template.def<@demo.targeted> priority(1) @fallback_provider(%x: i32) -> (i32) {
-  template.return %x : i32
-}
-
-template.def<@demo.unused> @unused_provider(%x: i32) -> (i32) {
-  template.return %x : i32
-}
-)"));
+TEST_F(LinkPlannerTest, RuntimeImportDoesNotResolveFromLoomLibrary) {
+  loom_module_t* harness = Parse(Fixture(IREE_SV(
+      "runtime_import_does_not_resolve_from_loom_library_harness.loom")));
+  loom_module_t* library = Parse(Fixture(IREE_SV(
+      "runtime_import_does_not_resolve_from_loom_library_library.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), harness, IREE_SV("harness"),
@@ -1549,7 +1170,35 @@ template.def<@demo.unused> @unused_provider(%x: i32) -> (i32) {
                   LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
+      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
+  };
+  PlanPtr plan = BuildPlan(index.get(), &options);
+
+  const loom_link_module_index_symbol_t* import_decl =
+      loom_link_module_index_lookup_global(index.get(), IREE_SV("callee"));
+  ASSERT_NE(import_decl, nullptr);
+  const loom_link_module_index_symbol_t* library_def =
+      loom_link_module_index_next_global_duplicate(index.get(), import_decl);
+  ASSERT_NE(library_def, nullptr);
+  EXPECT_TRUE(ContainsSymbol(plan.get(), import_decl));
+  EXPECT_FALSE(ContainsSymbol(plan.get(), library_def));
+}
+
+TEST_F(LinkPlannerTest, LinkApplyRequiresExplicitProviderSelection) {
+  loom_module_t* harness = Parse(Fixture(
+      IREE_SV("link_apply_requires_explicit_provider_selection_harness.loom")));
+  loom_module_t* library = Parse(Fixture(
+      IREE_SV("link_apply_requires_explicit_provider_selection_library.loom")));
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), harness, IREE_SV("harness"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddMaterialized(index.get(), library, IREE_SV("library"),
+                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+  iree_string_view_t roots[] = {IREE_SV("@entry")};
+  loom_link_plan_options_t options = {
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/
       {
           /*.count=*/IREE_ARRAYSIZE(roots),
@@ -1623,40 +1272,10 @@ template.def<@demo.unused> @unused_provider(%x: i32) -> (i32) {
 }
 
 TEST_F(LinkPlannerTest, SelectedProvidersExposeTransitiveDiamondDemands) {
-  loom_module_t* harness = Parse(IREE_SV(R"(
-template.decl @demo.left(%x: i32) -> (i32)
-template.decl @demo.right(%x: i32) -> (i32)
-
-func.def public @entry(%x: i32) -> (i32) {
-  %left = template.apply<@demo.left>(%x) : (i32) -> (i32)
-  %right = template.apply<@demo.right>(%left) : (i32) -> (i32)
-  func.return %right : i32
-}
-)"));
-  loom_module_t* library = Parse(IREE_SV(R"(
-template.decl @demo.left(%x: i32) -> (i32)
-template.decl @demo.right(%x: i32) -> (i32)
-template.decl @demo.shared(%x: i32) -> (i32)
-
-template.def<@demo.left> @left_provider(%x: i32) -> (i32) {
-  %y = template.apply<@demo.shared>(%x) : (i32) -> (i32)
-  template.return %y : i32
-}
-
-template.def<@demo.right> @right_provider(%x: i32) -> (i32) {
-  %y = template.apply<@demo.shared>(%x) : (i32) -> (i32)
-  template.return %y : i32
-}
-
-template.def<@demo.shared> @shared_provider(%x: i32) -> (i32) {
-  %y = func.call @helper(%x) : (i32) -> (i32)
-  template.return %y : i32
-}
-
-func.def @helper(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
+  loom_module_t* harness = Parse(Fixture(IREE_SV(
+      "selected_providers_expose_transitive_diamond_demands_harness.loom")));
+  loom_module_t* library = Parse(Fixture(IREE_SV(
+      "selected_providers_expose_transitive_diamond_demands_library.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), harness, IREE_SV("harness"),
@@ -1689,7 +1308,7 @@ func.def @helper(%x: i32) -> (i32) {
       right_provider->ordinal,
   };
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   options.selected_template_providers = {
@@ -1740,11 +1359,8 @@ func.def @helper(%x: i32) -> (i32) {
 }
 
 TEST_F(LinkPlannerTest, SelectedProviderOrdinalsAreValidated) {
-  loom_module_t* module = Parse(IREE_SV(R"(
-func.def public @entry(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
+  loom_module_t* module = Parse(
+      Fixture(IREE_SV("selected_provider_ordinals_are_validated_module.loom")));
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), module, IREE_SV("input"),
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
@@ -1754,7 +1370,7 @@ func.def public @entry(%x: i32) -> (i32) {
 
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   options.selected_template_providers = {
@@ -1776,22 +1392,13 @@ func.def public @entry(%x: i32) -> (i32) {
                         BuildPlanStatus(index.get(), &options, &plan));
 }
 
-TEST_F(LinkPlannerTest, SelectiveRootIgnoresUnreachableDuplicateDefinition) {
-  loom_module_t* harness = Parse(IREE_SV(R"(
-func.def public @entry(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
-  loom_module_t* first = Parse(IREE_SV(R"(
-func.def public @unused(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
-  loom_module_t* second = Parse(IREE_SV(R"(
-func.def public @unused(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
+TEST_F(LinkPlannerTest, LinkRootIgnoresUnreachableDuplicateDefinition) {
+  loom_module_t* harness = Parse(Fixture(IREE_SV(
+      "link_root_ignores_unreachable_duplicate_definition_harness.loom")));
+  loom_module_t* first = Parse(Fixture(IREE_SV(
+      "link_root_ignores_unreachable_duplicate_definition_first.loom")));
+  loom_module_t* second = Parse(Fixture(IREE_SV(
+      "link_root_ignores_unreachable_duplicate_definition_second.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), harness, IREE_SV("harness"),
@@ -1802,7 +1409,7 @@ func.def public @unused(%x: i32) -> (i32) {
                   LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
@@ -1816,67 +1423,109 @@ func.def public @unused(%x: i32) -> (i32) {
   EXPECT_EQ(loom_link_plan_symbol_count(plan.get()), 1u);
 }
 
-TEST_F(LinkPlannerTest, InputExportsDoNotRootLibraryAlternatives) {
-  loom_module_t* harness = Parse(IREE_SV(R"(
-func.decl public @same(%x: i32) -> (i32)
-)"));
-  loom_module_t* first = Parse(IREE_SV(R"(
-func.def public @same(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
-  loom_module_t* second = Parse(IREE_SV(R"(
-func.def public @same(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
+TEST_F(LinkPlannerTest, InputExportRejectsAmbiguousLibraryDefinitions) {
+  loom_module_t* harness = Parse(Fixture(IREE_SV(
+      "input_export_rejects_ambiguous_library_definitions_harness.loom")));
+  loom_module_t* first = Parse(Fixture(IREE_SV(
+      "input_export_rejects_ambiguous_library_definitions_first.loom")));
+  loom_module_t* second = Parse(Fixture(IREE_SV(
+      "input_export_rejects_ambiguous_library_definitions_second.loom")));
 
-  IndexPtr index = CreateIndex();
-  AddMaterialized(index.get(), harness, IREE_SV("harness"),
-                  LOOM_LINK_PROVIDER_ROLE_INPUT);
-  AddMaterialized(index.get(), first, IREE_SV("first"),
-                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
-  AddMaterialized(index.get(), second, IREE_SV("second"),
-                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{},
       /*.include_input_exports=*/true,
   };
+  for (bool reverse_libraries : {false, true}) {
+    IndexPtr index = CreateIndex();
+    AddMaterialized(index.get(), harness, IREE_SV("harness"),
+                    LOOM_LINK_PROVIDER_ROLE_INPUT);
+    AddMaterialized(index.get(), reverse_libraries ? second : first,
+                    reverse_libraries ? IREE_SV("second") : IREE_SV("first"),
+                    LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+    AddMaterialized(index.get(), reverse_libraries ? first : second,
+                    reverse_libraries ? IREE_SV("first") : IREE_SV("second"),
+                    LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+    PlanPtr plan;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
+                          BuildPlanStatus(index.get(), &options, &plan));
+  }
+}
 
+TEST_F(LinkPlannerTest, ExplicitLibraryRootRejectsAmbiguousDefinitions) {
+  loom_module_t* first = Parse(Fixture(IREE_SV(
+      "explicit_library_root_rejects_ambiguous_definitions_first.loom")));
+  loom_module_t* second = Parse(Fixture(IREE_SV(
+      "explicit_library_root_rejects_ambiguous_definitions_second.loom")));
+  iree_string_view_t roots[] = {IREE_SV("@same")};
+  loom_link_plan_options_t options = {
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
+      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
+  };
+
+  for (bool reverse_libraries : {false, true}) {
+    IndexPtr index = CreateIndex();
+    AddMaterialized(index.get(), reverse_libraries ? second : first,
+                    reverse_libraries ? IREE_SV("second") : IREE_SV("first"),
+                    LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+    AddMaterialized(index.get(), reverse_libraries ? first : second,
+                    reverse_libraries ? IREE_SV("first") : IREE_SV("second"),
+                    LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+    PlanPtr plan;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
+                          BuildPlanStatus(index.get(), &options, &plan));
+  }
+}
+
+TEST_F(LinkPlannerTest, OwnerDefinitionDoesNotExtractLibraryAlternatives) {
+  loom_module_t* harness = Parse(Fixture(IREE_SV(
+      "owner_definition_does_not_extract_library_alternatives_harness.loom")));
+  loom_module_t* sibling_source =
+      Parse(Fixture(IREE_SV("owner_definition_does_not_extract_library_"
+                            "alternatives_sibling_source.loom")));
+  loom_module_t* first_library =
+      Parse(Fixture(IREE_SV("owner_definition_does_not_extract_library_"
+                            "alternatives_first_library.loom")));
+  loom_module_t* second_library =
+      Parse(Fixture(IREE_SV("owner_definition_does_not_extract_library_"
+                            "alternatives_second_library.loom")));
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), first_library, IREE_SV("first-library"),
+                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+  AddMaterialized(index.get(), second_library, IREE_SV("second-library"),
+                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+  AddMaterialized(index.get(), harness, IREE_SV("harness"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddMaterialized(index.get(), sibling_source, IREE_SV("sibling-source"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  iree_string_view_t roots[] = {IREE_SV("@entry")};
+  loom_link_plan_options_t options = {
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
+      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
+  };
   PlanPtr plan = BuildPlan(index.get(), &options);
 
-  const loom_link_module_index_symbol_t* declaration =
-      loom_link_module_index_lookup_global(index.get(), IREE_SV("same"));
-  const loom_link_module_index_symbol_t* first_definition =
-      loom_link_module_index_next_global_duplicate(index.get(), declaration);
-  const loom_link_module_index_symbol_t* second_definition =
-      loom_link_module_index_next_global_duplicate(index.get(),
-                                                   first_definition);
-  const loom_link_plan_symbol_t* planned_declaration =
-      FindPlannedSymbol(plan.get(), declaration);
-  const loom_link_plan_symbol_t* planned_definition =
-      FindPlannedSymbol(plan.get(), first_definition);
-  ASSERT_NE(planned_declaration, nullptr);
-  ASSERT_NE(planned_definition, nullptr);
-  EXPECT_EQ(planned_declaration->reason, LOOM_LINK_PLAN_LIVE_ROOT);
-  EXPECT_EQ(planned_definition->reason, LOOM_LINK_PLAN_LIVE_DEPENDENCY);
-  EXPECT_FALSE(ContainsSymbol(plan.get(), second_definition));
+  const loom_link_module_index_module_t* sibling_module =
+      loom_link_module_index_module_at(index.get(), 3);
+  ASSERT_NE(sibling_module, nullptr);
+  const loom_link_module_index_symbol_t* owner_definition =
+      loom_link_module_index_lookup_private(index.get(), sibling_module,
+                                            IREE_SV("same"));
+  EXPECT_TRUE(ContainsSymbol(plan.get(), owner_definition));
+  EXPECT_EQ(loom_link_plan_symbol_count(plan.get()), 3u);
 }
 
-TEST_F(LinkPlannerTest, SelectiveReportsMissingRoot) {
-  loom_module_t* module = Parse(IREE_SV(R"(
-func.def public @entry(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
+TEST_F(LinkPlannerTest, LinkReportsMissingRoot) {
+  loom_module_t* module =
+      Parse(Fixture(IREE_SV("link_reports_missing_root_module.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), module, IREE_SV("input"),
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   iree_string_view_t roots[] = {IREE_SV("@missing")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
 
@@ -1894,16 +1543,8 @@ static bool StripNamedSymbol(void* user_data,
 }
 
 TEST_F(LinkPlannerTest, StripPolicyControlsRequiredDependencies) {
-  loom_module_t* module = Parse(IREE_SV(R"(
-func.def public @entry(%x: i32) -> (i32) {
-  %y = func.call @helper(%x) : (i32) -> (i32)
-  func.return %y : i32
-}
-
-func.def @helper(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
+  loom_module_t* module = Parse(Fixture(
+      IREE_SV("strip_policy_controls_required_dependencies_module.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), module, IREE_SV("input"),
@@ -1911,7 +1552,7 @@ func.def @helper(%x: i32) -> (i32) {
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   iree_string_view_t stripped_name = IREE_SV("helper");
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
       /*.include_input_exports=*/{},
       /*.unresolved_policy=*/{},
@@ -1938,21 +1579,9 @@ func.def @helper(%x: i32) -> (i32) {
   EXPECT_FALSE(ContainsSymbol(plan.get(), helper));
 }
 
-TEST_F(LinkPlannerTest, TestSymbolStripPolicyRemovesBytecodeSymbols) {
-  loom_module_t* module = Parse(IREE_SV(R"(
-func.def public @kernel(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-
-check.case public @kernel_case {
-  %input = check.literal value(1) : i32
-  %actual = func.call @kernel(%input) : (i32) -> (i32)
-  check.expect.equal actual(%actual) expected(%input) : i32
-  check.return
-}
-
-check.benchmark<@kernel_case> @kernel_bench
-)"));
+TEST_F(LinkPlannerTest, TestSymbolStripPolicyFiltersImplicitExports) {
+  loom_module_t* module = Parse(Fixture(IREE_SV(
+      "test_symbol_strip_policy_removes_bytecode_symbols_module.loom")));
   ASSERT_NE(module, nullptr);
   std::vector<uint8_t> bytes = WriteModule(module);
 
@@ -1961,18 +1590,18 @@ check.benchmark<@kernel_case> @kernel_bench
       /*.provider_name=*/IREE_SV("kernel-lib"),
       /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
   };
+  iree_host_size_t provider_ordinal = 0;
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index.get(), iree_make_const_byte_span(bytes.data(), bytes.size()),
       IREE_SV("kernel-lib.loombc"), /*index_options=*/nullptr,
-      &provider_options,
-      /*out_provider_ordinal=*/nullptr));
+      &provider_options, &provider_ordinal));
   const loom_link_module_index_module_t* indexed_module =
       loom_link_module_index_module_at(index.get(), 0);
   ASSERT_NE(indexed_module, nullptr);
   EXPECT_EQ(indexed_module->materialized_module, nullptr);
 
   loom_link_plan_options_t strip_options = {
-      /*.mode=*/LOOM_LINK_PLAN_ARCHIVE,
+      /*.mode=*/LOOM_LINK_PLAN_MERGE,
       /*.root_symbols=*/{},
       /*.include_input_exports=*/{},
       /*.unresolved_policy=*/{},
@@ -1990,28 +1619,26 @@ check.benchmark<@kernel_case> @kernel_bench
   EXPECT_TRUE(ContainsSymbol(plan.get(), kernel));
   EXPECT_FALSE(ContainsSymbol(plan.get(), check_case));
   EXPECT_FALSE(ContainsSymbol(plan.get(), benchmark));
+
+  strip_options.mode = LOOM_LINK_PLAN_LINK;
+  strip_options.root_providers.count = 1;
+  strip_options.root_providers.values = &provider_ordinal;
+  plan = BuildPlan(index.get(), &strip_options);
+  EXPECT_TRUE(ContainsSymbol(plan.get(), kernel));
+  EXPECT_FALSE(ContainsSymbol(plan.get(), check_case));
+  EXPECT_FALSE(ContainsSymbol(plan.get(), benchmark));
 }
 
 TEST_F(LinkPlannerTest, KeepTestSymbolPolicyPreservesDependencies) {
-  loom_module_t* module = Parse(IREE_SV(R"(
-func.def public @kernel(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-
-check.case public @kernel_case {
-  %input = check.literal value(1) : i32
-  %actual = func.call @kernel(%input) : (i32) -> (i32)
-  check.expect.equal actual(%actual) expected(%input) : i32
-  check.return
-}
-)"));
+  loom_module_t* module = Parse(Fixture(
+      IREE_SV("keep_test_symbol_policy_preserves_dependencies_module.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), module, IREE_SV("input"),
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   iree_string_view_t roots[] = {IREE_SV("@kernel_case")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
@@ -2025,18 +1652,15 @@ check.case public @kernel_case {
 }
 
 TEST_F(LinkPlannerTest, TestSymbolStripPolicyRejectsStrippedRoots) {
-  loom_module_t* module = Parse(IREE_SV(R"(
-check.case public @kernel_case {
-  check.return
-}
-)"));
+  loom_module_t* module = Parse(Fixture(
+      IREE_SV("test_symbol_strip_policy_rejects_stripped_roots_module.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), module, IREE_SV("input"),
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   iree_string_view_t roots[] = {IREE_SV("@kernel_case")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
       /*.include_input_exports=*/{},
       /*.unresolved_policy=*/{},
@@ -2049,26 +1673,14 @@ check.case public @kernel_case {
 }
 
 TEST_F(LinkPlannerTest, ExportedRootPolicySelectsExportsAndDependencies) {
-  loom_module_t* module = Parse(IREE_SV(R"(
-func.def public @entry(%x: i32) -> (i32) {
-  %y = func.call @helper(%x) : (i32) -> (i32)
-  func.return %y : i32
-}
-
-func.def @helper(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-
-func.def public @second(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
+  loom_module_t* module = Parse(Fixture(IREE_SV(
+      "exported_root_policy_selects_exports_and_dependencies_module.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), module, IREE_SV("input"),
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{},
       /*.include_input_exports=*/true,
   };

@@ -42,18 +42,6 @@ typedef struct loom_bytecode_reader_module_t {
 // and a retained public index. Its allocation arena alone determines lifetime.
 typedef loom_bytecode_section_metadata_t loom_bytecode_reader_section_t;
 
-// One validated compile-time provider import.
-typedef struct loom_bytecode_reader_provider_import_t {
-  // Validated STRINGS provider key.
-  loom_string_id_t provider_id;
-  // First entry in provider_import_anchors.
-  uint32_t first_anchor_index;
-  // Number of anchors in the contiguous slice.
-  uint32_t anchor_count;
-  // Validated source comments and authored vertical separation.
-  loom_bytecode_source_trivia_t source_trivia;
-} loom_bytecode_reader_provider_import_t;
-
 // Immutable facts established while validating one module. All pointers
 // borrow either input bytecode or storage from the reader arenas.
 typedef struct loom_bytecode_reader_module_view_t {
@@ -86,8 +74,6 @@ typedef struct loom_bytecode_reader_module_view_t {
     const loom_bytecode_reader_section_t* source_trivia;
     // Required SYMBOLS section.
     const loom_bytecode_reader_section_t* symbols;
-    // Required PROVIDER_IMPORTS section.
-    const loom_bytecode_reader_section_t* provider_imports;
     // Required SYMBOL_REFERENCES section.
     const loom_bytecode_reader_section_t* symbol_references;
     // Required IR section.
@@ -158,23 +144,9 @@ typedef struct loom_bytecode_reader_module_view_t {
     loom_bytecode_symbol_flags_t* flags;
     // Symbol ordinal to validated wire kind.
     uint8_t* kinds;
-    // Number of unresolved wire-only provider anchors.
-    iree_host_size_t unresolved_anchor_count;
     // Name ID to symbol ordinal index.
     loom_symbol_map_t map;
   } symbols;
-
-  // Validated compile-time provider imports.
-  struct {
-    // Canonically ordered provider records.
-    loom_bytecode_reader_provider_import_t* values;
-    // Number of provider records.
-    iree_host_size_t count;
-    // Flat module-local symbol references sliced by provider records.
-    loom_symbol_ref_t* anchors;
-    // Number of provider anchors.
-    iree_host_size_t anchor_count;
-  } provider_imports;
 } loom_bytecode_reader_module_view_t;
 
 #ifdef __cplusplus

@@ -20,6 +20,7 @@
 #include "iree/io/vec_stream.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/temp_file.h"
+#include "loom/binding/c/test/testdata/link_target_specialization_testdata.h"
 #include "loom/format/bytecode/writer.h"
 #include "loom/format/text/parser.h"
 #include "loom/format/text/printer.h"
@@ -307,6 +308,20 @@ SourcePtr CreateTextSource(const char* identifier, const char* source_text) {
                       strlen(source_text));
 }
 
+SourcePtr CreateEmbeddedTargetLinkSource(const char* filename) {
+  const iree_file_toc_t* files =
+      loomc_link_target_specialization_testdata_create();
+  for (iree_host_size_t i = 0;
+       i < loomc_link_target_specialization_testdata_size(); ++i) {
+    if (strcmp(files[i].name, filename) == 0) {
+      return CreateSource(LOOMC_SOURCE_FORMAT_TEXT, filename, files[i].data,
+                          files[i].size);
+    }
+  }
+  ADD_FAILURE() << "missing embedded target-link source " << filename;
+  return SourcePtr();
+}
+
 BuilderPtr CreateBuilder(loomc_context_t* context) {
   loomc_link_index_builder_t* builder = nullptr;
   loomc_status_t status = loomc_link_index_builder_create(
@@ -372,18 +387,10 @@ void FinishIndex(loomc_link_index_builder_t* builder,
 
 void AddSource(loomc_link_index_builder_t* builder, loomc_source_t* source,
                const char* provider_name,
-               loomc_link_provider_role_t provider_role,
-               std::initializer_list<const char*> import_keys = {}) {
-  std::vector<loomc_string_view_t> import_key_views;
-  import_key_views.reserve(import_keys.size());
-  for (const char* import_key : import_keys) {
-    import_key_views.push_back(loomc_make_cstring_view(import_key));
-  }
+               loomc_link_provider_role_t provider_role) {
   loomc_link_index_source_options_t options = {
       /*.provider_name=*/loomc_make_cstring_view(provider_name),
       /*.role=*/provider_role,
-      /*.import_keys=*/import_key_views.data(),
-      /*.import_key_count=*/import_key_views.size(),
   };
   LOOMC_ASSERT_OK(
       loomc_link_index_builder_add_source(builder, source, &options, nullptr));
@@ -408,14 +415,14 @@ ModulePtr LinkIndex(loomc_linker_t* linker, loomc_workspace_t* workspace,
   return ModulePtr(module);
 }
 
-struct ProviderSourceSpec {
-  // Opaque module.import key supplied by this provider.
-  const char* import_key;
+struct LibrarySourceSpec {
+  // Source name used for diagnostics.
+  const char* source_name;
   // Authored Loom source text.
   const char* source_text;
 };
 
-struct ProviderLinkArtifact {
+struct LinkArtifact {
   // Link result carrying diagnostics and success state.
   ResultPtr result;
   // Standalone bytecode output when linking succeeded.
@@ -424,22 +431,22 @@ struct ProviderLinkArtifact {
   std::string text;
 };
 
-ProviderLinkArtifact LinkProviderSourcesToBytecode(
+LinkArtifact LinkLibrarySourcesToBytecode(
     loomc_source_t* input_source,
-    std::initializer_list<ProviderSourceSpec> providers,
+    std::initializer_list<LibrarySourceSpec> libraries,
     loomc_link_flags_t flags) {
   ContextPtr context = CreateContext();
   BuilderPtr builder = CreateBuilder(context.get());
   AddSource(builder.get(), input_source, "input-diagnostics",
             LOOMC_LINK_PROVIDER_ROLE_INPUT);
 
-  std::vector<SourcePtr> provider_sources;
-  provider_sources.reserve(providers.size());
-  for (const ProviderSourceSpec& provider : providers) {
-    provider_sources.push_back(
-        CreateTextSource(provider.import_key, provider.source_text));
-    AddSource(builder.get(), provider_sources.back().get(), provider.import_key,
-              LOOMC_LINK_PROVIDER_ROLE_LIBRARY, {provider.import_key});
+  std::vector<SourcePtr> library_sources;
+  library_sources.reserve(libraries.size());
+  for (const LibrarySourceSpec& library : libraries) {
+    library_sources.push_back(
+        CreateTextSource(library.source_name, library.source_text));
+    AddSource(builder.get(), library_sources.back().get(), library.source_name,
+              LOOMC_LINK_PROVIDER_ROLE_LIBRARY);
   }
 
   LinkIndexPtr link_index;
@@ -455,11 +462,12 @@ ProviderLinkArtifact LinkProviderSourcesToBytecode(
       /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_LINK,
       /*.root_symbols=*/roots,
       /*.root_symbol_count=*/IREE_ARRAYSIZE(roots),
       /*.flags=*/flags,
   };
-  ProviderLinkArtifact artifact;
+  LinkArtifact artifact;
   ModulePtr module = LinkIndex(linker.get(), workspace.get(), link_index.get(),
                                &options, &artifact.result);
   if (module) {
@@ -594,7 +602,7 @@ std::vector<uint8_t> WriteBytecodeModule(const char* source_text) {
   return bytes;
 }
 
-TEST(LinkTest, LinksSelectiveTextRoots) {
+TEST(LinkTest, LinksLinkTextRoots) {
   ContextPtr context = CreateContext();
   BuilderPtr builder = CreateBuilder(context.get());
   SourcePtr harness = CreateTextSource("harness.loom", R"(
@@ -636,6 +644,7 @@ func.def public @unused_library(%x: i32) -> (i32) {
       /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_LINK,
       /*.root_symbols=*/roots,
       /*.root_symbol_count=*/1,
   };
@@ -748,11 +757,8 @@ func.def public @unused_library(%x: i32) -> (i32) {
   EXPECT_TRUE(bytecode_path.Remove());
 }
 
-TEST(LinkTest, PartialProviderImportsAreReusableAndOrderInvariant) {
+TEST(LinkTest, PartialLinksAreReusableAndOrderInvariant) {
   static constexpr char kRootSource[] = R"(
-module.import "provider-a" [@a]
-module.import "provider-b" [@b]
-
 func.decl @a(%x: i32) -> (i32)
 func.decl @b(%x: i32) -> (i32)
 
@@ -763,11 +769,9 @@ func.def public @entry(%x: i32) -> (i32) {
 }
 )";
   static constexpr char kProviderASource[] = R"(
-module.import "provider-c" [@c]
-
 func.decl @c(%x: i32) -> (i32)
 
-func.def @a(%x: i32) -> (i32) {
+func.def public @a(%x: i32) -> (i32) {
   %helper = func.call @a_helper(%x) : (i32) -> (i32)
   %c = func.call @c(%helper) : (i32) -> (i32)
   func.return %c : i32
@@ -778,69 +782,61 @@ func.def @a_helper(%x: i32) -> (i32) {
 }
 )";
   static constexpr char kProviderBSource[] = R"(
-func.def @b(%x: i32) -> (i32) {
+func.def public @b(%x: i32) -> (i32) {
   func.return %x : i32
 }
 )";
   static constexpr char kProviderCSource[] = R"(
-func.def @c(%x: i32) -> (i32) {
+func.def public @c(%x: i32) -> (i32) {
   func.return %x : i32
 }
 )";
 
   SourcePtr root = CreateTextSource("root.loom", kRootSource);
-  ProviderLinkArtifact partial_a = LinkProviderSourcesToBytecode(
+  LinkArtifact partial_a = LinkLibrarySourcesToBytecode(
       root.get(), {{"provider-a", kProviderASource}},
       LOOMC_LINK_FLAG_ALLOW_UNRESOLVED_SYMBOLS);
   ASSERT_TRUE(loomc_result_succeeded(partial_a.result.get()));
   ASSERT_NE(partial_a.bytecode.get(), nullptr);
-  EXPECT_EQ(partial_a.text.find("provider-a"), std::string::npos);
-  EXPECT_NE(partial_a.text.find("module.import \"provider-b\" [@b]"),
-            std::string::npos);
-  EXPECT_NE(partial_a.text.find("module.import \"provider-c\" [@c]"),
-            std::string::npos);
   EXPECT_NE(partial_a.text.find("func.def @a"), std::string::npos);
   EXPECT_NE(partial_a.text.find("func.def @a_helper"), std::string::npos);
   EXPECT_NE(partial_a.text.find("func.decl @b"), std::string::npos);
   EXPECT_NE(partial_a.text.find("func.decl @c"), std::string::npos);
 
-  ProviderLinkArtifact unresolved = LinkProviderSourcesToBytecode(
-      partial_a.bytecode.get(), /*providers=*/{}, /*flags=*/0);
+  LinkArtifact unresolved = LinkLibrarySourcesToBytecode(
+      partial_a.bytecode.get(), /*libraries=*/{}, /*flags=*/0);
   EXPECT_EQ(unresolved.bytecode.get(), nullptr);
   ExpectFailedResultCode(unresolved.result.get(), "LINK/MATERIALIZE");
 
-  ProviderLinkArtifact final_ab =
-      LinkProviderSourcesToBytecode(partial_a.bytecode.get(),
-                                    {
-                                        {"provider-b", kProviderBSource},
-                                        {"provider-c", kProviderCSource},
-                                    },
-                                    /*flags=*/0);
+  LinkArtifact final_ab =
+      LinkLibrarySourcesToBytecode(partial_a.bytecode.get(),
+                                   {
+                                       {"provider-b", kProviderBSource},
+                                       {"provider-c", kProviderCSource},
+                                   },
+                                   /*flags=*/0);
   ASSERT_TRUE(loomc_result_succeeded(final_ab.result.get()));
   ASSERT_NE(final_ab.bytecode.get(), nullptr);
-  EXPECT_EQ(final_ab.text.find("module.import"), std::string::npos)
-      << final_ab.text;
   EXPECT_EQ(final_ab.text.find("func.decl @a"), std::string::npos);
   EXPECT_EQ(final_ab.text.find("func.decl @b"), std::string::npos);
   EXPECT_EQ(final_ab.text.find("func.decl @c"), std::string::npos);
 
-  ProviderLinkArtifact partial_b = LinkProviderSourcesToBytecode(
+  LinkArtifact partial_b = LinkLibrarySourcesToBytecode(
       root.get(), {{"provider-b", kProviderBSource}},
       LOOMC_LINK_FLAG_ALLOW_UNRESOLVED_SYMBOLS);
   ASSERT_TRUE(loomc_result_succeeded(partial_b.result.get()));
   ASSERT_NE(partial_b.bytecode.get(), nullptr);
-  EXPECT_NE(partial_b.text.find("module.import \"provider-a\" [@a]"),
-            std::string::npos);
-  EXPECT_EQ(partial_b.text.find("provider-b"), std::string::npos);
-  EXPECT_EQ(partial_b.text.find("provider-c"), std::string::npos);
+  EXPECT_NE(partial_b.text.find("func.decl @a"), std::string::npos);
+  EXPECT_EQ(partial_b.text.find("func.decl @b"), std::string::npos);
+  EXPECT_EQ(partial_b.text.find("func.decl @c"), std::string::npos);
 
-  ProviderLinkArtifact final_ba =
-      LinkProviderSourcesToBytecode(partial_b.bytecode.get(),
-                                    {
-                                        {"provider-a", kProviderASource},
-                                        {"provider-c", kProviderCSource},
-                                    },
-                                    /*flags=*/0);
+  LinkArtifact final_ba =
+      LinkLibrarySourcesToBytecode(partial_b.bytecode.get(),
+                                   {
+                                       {"provider-a", kProviderASource},
+                                       {"provider-c", kProviderCSource},
+                                   },
+                                   /*flags=*/0);
   ASSERT_TRUE(loomc_result_succeeded(final_ba.result.get()));
   ASSERT_NE(final_ba.bytecode.get(), nullptr);
   EXPECT_EQ(final_ba.text, final_ab.text);
@@ -866,7 +862,7 @@ func.def @c(%x: i32) -> (i32) {
   EXPECT_TRUE(ModuleHasSymbol(final_ab_internal, "c"));
 }
 
-TEST(LinkTest, SelectiveRootPullsBytecodeApplyProviders) {
+TEST(LinkTest, LinkRootPullsBytecodeApplyProviders) {
   ContextPtr context = CreateContext();
   BuilderPtr builder = CreateBuilder(context.get());
   SourcePtr harness = CreateTextSource("harness.loom", R"(
@@ -918,6 +914,7 @@ template.def<@demo.unused> @unused_provider(%x: i32) -> (i32) {
       /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_LINK,
       /*.root_symbols=*/roots,
       /*.root_symbol_count=*/1,
   };
@@ -971,6 +968,7 @@ func.def public @entry() -> (index) {
       /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_LINK,
       /*.root_symbols=*/roots,
       /*.root_symbol_count=*/1,
       /*.flags=*/0,
@@ -1058,6 +1056,7 @@ func.def public @targetless() {
       /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_MERGE,
       /*.root_symbols=*/nullptr,
       /*.root_symbol_count=*/0,
   };
@@ -1087,6 +1086,163 @@ func.def public @targetless() {
   EXPECT_NE(linked_text.find("func.def public target(@second_target) @second"),
             std::string::npos);
   EXPECT_NE(linked_text.find("func.def public @targetless"), std::string::npos);
+}
+
+TEST(LinkTest, TargetSpecializationParticipatesInProviderSelection) {
+  TargetEnvironmentPtr target_environment = CreateFakeTargetEnvironment();
+  TargetProfilePtr profile = CreateFakeTargetProfile(target_environment.get());
+  ContextPtr context = CreateContext(target_environment.get());
+  SourcePtr root_source = CreateEmbeddedTargetLinkSource("root.loom");
+  SourcePtr provider_source = CreateEmbeddedTargetLinkSource("providers.loom");
+  ASSERT_NE(root_source.get(), nullptr);
+  ASSERT_NE(provider_source.get(), nullptr);
+
+  BuilderPtr builder = CreateBuilder(context.get());
+  AddSource(builder.get(), root_source.get(), "root",
+            LOOMC_LINK_PROVIDER_ROLE_INPUT);
+  AddSource(builder.get(), provider_source.get(), "providers",
+            LOOMC_LINK_PROVIDER_ROLE_LIBRARY);
+  LinkIndexPtr link_index;
+  FinishIndex(builder.get(), &link_index);
+  LinkerPtr linker = CreateLinker(context.get());
+
+  const loomc_string_view_t roots[] = {
+      loomc_make_cstring_view("@entry"),
+  };
+  loomc_link_options_t link_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_NONE,
+      /*.structure_size=*/0,
+      /*.next=*/nullptr,
+      /*.link_index=*/nullptr,
+      /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_LINK,
+      /*.root_symbols=*/roots,
+      /*.root_symbol_count=*/IREE_ARRAYSIZE(roots),
+  };
+
+  WorkspacePtr portable_workspace = CreateWorkspace();
+  ResultPtr portable_result;
+  ModulePtr portable_module =
+      LinkIndex(linker.get(), portable_workspace.get(), link_index.get(),
+                &link_options, &portable_result);
+  ASSERT_TRUE(loomc_result_succeeded(portable_result.get()));
+  const loom_module_t* portable_internal =
+      loomc_module_const_loom_module(portable_module.get());
+  ASSERT_NE(portable_internal, nullptr);
+  VerifyModule(portable_internal);
+  EXPECT_TRUE(ModuleHasSymbol(portable_internal, "fallback_provider"));
+  EXPECT_FALSE(ModuleHasSymbol(portable_internal, "profile_provider"));
+  EXPECT_FALSE(ModuleHasSymbol(portable_internal, "incompatible_provider"));
+
+  const loomc_target_specialization_t specialization = {
+      /*.function_symbol=*/loomc_make_cstring_view("entry"),
+      /*.target_profile=*/profile.get(),
+  };
+  const loomc_target_specialization_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      /*.structure_size=*/sizeof(target_options),
+      /*.next=*/nullptr,
+      /*.specializations=*/&specialization,
+      /*.specialization_count=*/1,
+  };
+  link_options.next = &target_options;
+  WorkspacePtr specialized_workspace = CreateWorkspace();
+  ResultPtr specialized_result;
+  ModulePtr specialized_module =
+      LinkIndex(linker.get(), specialized_workspace.get(), link_index.get(),
+                &link_options, &specialized_result);
+  ASSERT_TRUE(loomc_result_succeeded(specialized_result.get()));
+  const loom_module_t* specialized_internal =
+      loomc_module_const_loom_module(specialized_module.get());
+  ASSERT_NE(specialized_internal, nullptr);
+  VerifyModule(specialized_internal);
+  EXPECT_TRUE(ModuleHasSymbol(specialized_internal, "profile_provider"));
+  EXPECT_FALSE(ModuleHasSymbol(specialized_internal, "fallback_provider"));
+  EXPECT_FALSE(ModuleHasSymbol(specialized_internal, "incompatible_provider"));
+
+  const std::string specialized_text =
+      SerializeModuleToText(specialized_module.get());
+  EXPECT_NE(
+      specialized_text.find("test.target<low_core> @__loom_target_context_0_0"),
+      std::string::npos)
+      << specialized_text;
+  EXPECT_NE(specialized_text.find("func.def public retain "
+                                  "target(@__loom_target_context_0_0) @entry"),
+            std::string::npos)
+      << specialized_text;
+
+  SourcePtr bytecode = SerializeModuleToSource(specialized_module.get(),
+                                               LOOMC_SOURCE_FORMAT_BYTECODE,
+                                               "target-specialized.loombc");
+  specialized_module.reset();
+  profile.reset();
+
+  TargetEnvironmentPtr replay_target_environment =
+      CreateFakeTargetEnvironment();
+  ContextPtr replay_context = CreateContext(replay_target_environment.get());
+  WorkspacePtr replay_workspace = CreateWorkspace();
+  ModulePtr replay_module = DeserializeModuleFromSource(
+      replay_context.get(), replay_workspace.get(), bytecode.get());
+  const loom_module_t* replay_internal =
+      loomc_module_const_loom_module(replay_module.get());
+  ASSERT_NE(replay_internal, nullptr);
+  VerifyModule(replay_internal);
+  EXPECT_TRUE(ModuleHasSymbol(replay_internal, "profile_provider"));
+  EXPECT_FALSE(ModuleHasSymbol(replay_internal, "fallback_provider"));
+  EXPECT_NE(SerializeModuleToText(replay_module.get())
+                .find("test.target<low_core> @__loom_target_context_0_0"),
+            std::string::npos);
+}
+
+TEST(LinkTest, TargetSpecializationRejectsIncompatibleAuthoredTarget) {
+  TargetEnvironmentPtr target_environment = CreateFakeTargetEnvironment();
+  TargetProfilePtr profile = CreateFakeTargetProfile(target_environment.get());
+  ContextPtr context = CreateContext(target_environment.get());
+  SourcePtr source = CreateEmbeddedTargetLinkSource("incompatible.loom");
+  ASSERT_NE(source.get(), nullptr);
+
+  BuilderPtr builder = CreateBuilder(context.get());
+  AddSource(builder.get(), source.get(), "incompatible",
+            LOOMC_LINK_PROVIDER_ROLE_INPUT);
+  LinkIndexPtr link_index;
+  FinishIndex(builder.get(), &link_index);
+  LinkerPtr linker = CreateLinker(context.get());
+  WorkspacePtr workspace = CreateWorkspace();
+
+  const loomc_string_view_t roots[] = {
+      loomc_make_cstring_view("@incompatible_entry"),
+  };
+  const loomc_target_specialization_t specialization = {
+      /*.function_symbol=*/loomc_make_cstring_view("incompatible_entry"),
+      /*.target_profile=*/profile.get(),
+  };
+  const loomc_target_specialization_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      /*.structure_size=*/sizeof(target_options),
+      /*.next=*/nullptr,
+      /*.specializations=*/&specialization,
+      /*.specialization_count=*/1,
+  };
+  const loomc_link_options_t link_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_NONE,
+      /*.structure_size=*/0,
+      /*.next=*/&target_options,
+      /*.link_index=*/nullptr,
+      /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_LINK,
+      /*.root_symbols=*/roots,
+      /*.root_symbol_count=*/IREE_ARRAYSIZE(roots),
+  };
+  ResultPtr result;
+  ModulePtr module = LinkIndex(linker.get(), workspace.get(), link_index.get(),
+                               &link_options, &result);
+  EXPECT_EQ(module.get(), nullptr);
+  ASSERT_FALSE(loomc_result_succeeded(result.get()));
+  ASSERT_EQ(loomc_result_diagnostic_count(result.get()), 1u);
+  const loomc_diagnostic_t* diagnostic =
+      loomc_result_diagnostic_at(result.get(), 0);
+  ASSERT_NE(diagnostic, nullptr);
+  EXPECT_EQ(ToString(diagnostic->code), "TARGET/052");
 }
 
 TEST(LinkTest, LinkThenCompileSpecializesEntryForTemplateSelection) {
@@ -1141,6 +1297,7 @@ template.def<@demo.capi_selected> priority(1) @fallback_provider(%value: i32) ->
       /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_LINK,
       /*.root_symbols=*/roots,
       /*.root_symbol_count=*/1,
   };
@@ -1284,7 +1441,7 @@ func.def public @from_bytecode(%x: i32) -> (i32) {
   SourcePtr source = CreateSource(LOOMC_SOURCE_FORMAT_BYTECODE, "module.loombc",
                                   bytecode.data(), bytecode.size());
   AddSource(builder.get(), source.get(), "bytecode",
-            LOOMC_LINK_PROVIDER_ROLE_LIBRARY);
+            LOOMC_LINK_PROVIDER_ROLE_INPUT);
 
   LinkIndexPtr link_index;
   FinishIndex(builder.get(), &link_index);
@@ -1306,7 +1463,7 @@ func.def public @from_bytecode(%x: i32) -> (i32) {
   EXPECT_TRUE(ModuleHasSymbol(linked_module, "from_bytecode"));
 }
 
-TEST(LinkTest, ArchiveStripRemovesBytecodeTestSymbols) {
+TEST(LinkTest, MergeStripRemovesBytecodeTestSymbols) {
   std::vector<uint8_t> bytecode = WriteBytecodeModule(R"(
 func.def public @kernel(%x: i32) -> (i32) {
   func.return %x : i32
@@ -1338,6 +1495,7 @@ check.benchmark<@kernel_case> @kernel_bench
       /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_MERGE,
       /*.root_symbols=*/nullptr,
       /*.root_symbol_count=*/0,
       /*.flags=*/LOOMC_LINK_FLAG_STRIP_TEST_SYMBOLS,
@@ -1371,7 +1529,7 @@ func.def public @from_bytecode() -> (index) {
   SourcePtr source = CreateSource(LOOMC_SOURCE_FORMAT_BYTECODE, "module.loombc",
                                   bytecode.data(), bytecode.size());
   AddSource(builder.get(), source.get(), "bytecode",
-            LOOMC_LINK_PROVIDER_ROLE_LIBRARY);
+            LOOMC_LINK_PROVIDER_ROLE_INPUT);
 
   LinkIndexPtr link_index;
   FinishIndex(builder.get(), &link_index);
@@ -1392,6 +1550,7 @@ func.def public @from_bytecode() -> (index) {
       /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_MERGE,
       /*.root_symbols=*/nullptr,
       /*.root_symbol_count=*/0,
       /*.flags=*/0,
@@ -1460,6 +1619,7 @@ func.def public @specialized_rgb() -> (index) {
       /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_LINK,
       /*.root_symbols=*/roots,
       /*.root_symbol_count=*/1,
       /*.flags=*/0,
@@ -1526,6 +1686,7 @@ func.def public @unused() -> (index) {
       /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_LINK,
       /*.root_symbols=*/roots,
       /*.root_symbol_count=*/1,
       /*.flags=*/0,
@@ -1576,6 +1737,7 @@ func.def public @entry(%x: i32) -> (i32) {
       /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_MERGE,
       /*.root_symbols=*/nullptr,
       /*.root_symbol_count=*/0,
       /*.flags=*/0,
@@ -1621,6 +1783,7 @@ func.def public @entry() -> (index) {
       /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_MERGE,
       /*.root_symbols=*/nullptr,
       /*.root_symbol_count=*/0,
       /*.flags=*/0,

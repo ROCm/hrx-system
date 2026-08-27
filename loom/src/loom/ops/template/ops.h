@@ -224,7 +224,7 @@ iree_status_t loom_template_ukernel_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_TEMPLATE_APPLY: Compile-time family application. A specializing link selects one applicable implementation before executable lowering.
+// LOOM_OP_TEMPLATE_APPLY: Compile-time family application. A specializing link selects one applicable implementation before executable lowering. In a command program this is source composition whose selected implementation is inlined before portable command preparation.
 // %result = template.apply<@vector_transform>(%value) : (vector<32xf32>) -> (vector<32xf32>)
 LOOM_DEFINE_ISA(loom_template_apply_isa, LOOM_OP_TEMPLATE_APPLY)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_template_apply_operands, 0)
@@ -257,7 +257,7 @@ iree_status_t loom_template_apply_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_TEMPLATE_CALL: Exact compile-time implementation call. This bypasses candidate ranking but still checks the implementation contract.
+// LOOM_OP_TEMPLATE_CALL: Exact compile-time implementation call. This bypasses candidate ranking but still checks the implementation contract. In a command program the implementation is inlined before portable command preparation.
 // %result = template.call @vector_transform_fast(%value) : (vector<32xf32>) -> (vector<32xf32>)
 LOOM_DEFINE_ISA(loom_template_call_isa, LOOM_OP_TEMPLATE_CALL)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_template_call_operands, 0)

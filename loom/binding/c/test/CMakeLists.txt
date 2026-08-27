@@ -120,6 +120,34 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
+    link_dependency_test
+  SRCS
+    "link_dependency_test.cc"
+  DEPS
+    ::test_util
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::binding::c::loomc
+    loom::binding::c::test::testdata::link_dependency
+)
+
+loom_cc_test(
+  NAME
+    link_provider_roots_test
+  SRCS
+    "link_provider_roots_test.cc"
+  DEPS
+    ::test_util
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::binding::c::loomc
+    loom::link::testdata::provider_roots
+)
+
+loom_cc_test(
+  NAME
     link_test
   SRCS
     "link_test.cc"
@@ -132,6 +160,7 @@ loom_cc_test(
     iree::testing::gtest_main
     iree::testing::temp_file
     loom::binding::c::loomc
+    loom::binding::c::test::testdata::link_target_specialization
     loom::format::bytecode::writer
     loom::format::text::parser
     loom::format::text::printer
@@ -232,7 +261,9 @@ loom_cc_test(
     iree::testing::gtest_main
     iree::testing::temp_file
     loom::binding::c::loomc
+    loom::ops::op_defs
     loom::ops::test
+    loom::target::function_version
     loom::target::profile
     loom::target::provider
     loom::target::test::target_record_table

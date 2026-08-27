@@ -15,7 +15,6 @@ from pathlib import Path
 
 from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.dialect.low import ALL_LOW_OPS
-from loom.dialect.module import ALL_MODULE_OPS
 from loom.dialect.test import (
     ALL_TEST_OPS,
     ALL_TEST_PARAMETERIZED_ATTRS,
@@ -62,7 +61,6 @@ def _run_loom_format(arguments: list[object]) -> subprocess.CompletedProcess[str
 def _interop_module() -> tuple[Module, RegisterType]:
     parser = Parser()
     parser.register_ops(ALL_LOW_OPS)
-    parser.register_ops(ALL_MODULE_OPS)
     parser.register_ops(ALL_TEST_OPS)
     parser.register_types(ALL_BUILTIN_TYPES)
     parser.register_types(ALL_TEST_TYPES)
@@ -70,9 +68,6 @@ def _interop_module() -> tuple[Module, RegisterType]:
     module = parser.parse(
         "// Bytecode interoperability coverage.\n"
         "\n"
-        "// Compile-time provider metadata coverage.\n"
-        'module.import "providers/base.loom" '
-        "[@external_helper, @parameterized_record]\n"
         "low.func.decl target<test.low.core> "
         "@typed_identity(%arg: reg<test.ptr : vector<4xi16>>) -> "
         "(reg<test.ptr : vector<4xi16>>)\n"
@@ -129,18 +124,6 @@ def _interop_module() -> tuple[Module, RegisterType]:
     return module, register_types[0]
 
 
-def _assert_provider_import(module: Module) -> None:
-    provider_import = next(op for op in module.body.ops if op.name == "module.import")
-    if provider_import.attributes["provider"] != "providers/base.loom":
-        raise AssertionError("provider key did not survive C bytecode")
-    if provider_import.attributes["symbols"] != SymbolNameSet(
-        [SymbolName("external_helper"), SymbolName("parameterized_record")]
-    ):
-        raise AssertionError("provider anchors did not survive C bytecode")
-    if provider_import.comments != ("Compile-time provider metadata coverage.",):
-        raise AssertionError("provider source trivia did not survive C bytecode")
-
-
 def _roundtrip_through_c(loom_format: Path, module: Module) -> Module:
     with tempfile.TemporaryDirectory(prefix="loom-bytecode-interop-") as temp_dir:
         temp_path = Path(temp_dir)
@@ -167,7 +150,6 @@ def _roundtrip_through_c(loom_format: Path, module: Module) -> Module:
 def _assert_module_structure(module: Module, register_type: RegisterType) -> Block:
     if module.file_header != ("Bytecode interoperability coverage.",):
         raise AssertionError("file header did not survive C bytecode")
-    _assert_provider_import(module)
     if not any(value.type == register_type for value in module.values):
         raise AssertionError(
             "Python reader did not recover the C-written structural register type"

@@ -246,8 +246,6 @@ static loom_symbol_kind_t loom_bytecode_selected_symbol_kind(
       return LOOM_SYMBOL_EXECUTABLE;
     case LOOM_BYTECODE_SYMBOL_RECORD:
       return LOOM_SYMBOL_RECORD;
-    case LOOM_BYTECODE_SYMBOL_ANCHOR:
-      return LOOM_SYMBOL_NONE;
     case LOOM_BYTECODE_SYMBOL_COUNT_:
       break;
   }

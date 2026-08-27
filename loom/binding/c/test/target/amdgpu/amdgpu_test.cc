@@ -229,6 +229,8 @@ ModulePtr LinkModule(loomc_linker_t* linker, loomc_workspace_t* workspace,
       /*.next=*/nullptr,
       /*.link_index=*/index,
       /*.module_name=*/loomc_make_cstring_view("sealed_replay"),
+      /*.mode=*/root_symbol_count == 0 ? LOOMC_LINK_MODE_MERGE
+                                       : LOOMC_LINK_MODE_LINK,
       /*.root_symbols=*/root_symbols,
       /*.root_symbol_count=*/root_symbol_count,
   };

@@ -15,6 +15,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_registry.h"
 #include "loom/pass/builtin_registry.h"
+#include "loom/target/arch/cmd/artifact_set.h"
 #include "loom/target/arch/cmd/descriptors/descriptors.h"
 #include "loom/target/arch/cmd/lower/serialize.h"
 #include "loom/target/arch/cmd/program.h"
@@ -141,7 +142,7 @@ command.program.def public @increment_twice() launch(%source: buffer, %scratch: 
 
   loom_cmd_program_plan_t plan = {};
   bool valid = false;
-  IREE_ASSERT_OK(loom_cmd_program_plan_prepare(
+  IREE_ASSERT_OK(loom_cmd_program_plan_prepare_materialization(
       &materialization, program_refs, IREE_ARRAYSIZE(program_refs),
       loom_pass_builtin_registry(),
       /*diagnostic_emitter=*/{}, &block_pool_, &valid, &plan,
@@ -177,6 +178,26 @@ command.program.def public @increment_twice() launch(%source: buffer, %scratch: 
   EXPECT_EQ(mixed.entry_requirement_indices[0], 0u);
   EXPECT_EQ(mixed.entry_requirement_indices[1], 1u);
 
+  loom_cmd_program_artifact_set_t artifact_set = {};
+  IREE_ASSERT_OK(loom_cmd_program_artifact_set_build(&plan, &artifact_set,
+                                                     iree_allocator_system()));
+  ASSERT_EQ(artifact_set.programs.count, 2u);
+  EXPECT_TRUE(iree_string_view_equal(artifact_set.programs.values[0].symbol,
+                                     IREE_SV("increment_twice")));
+  EXPECT_TRUE(iree_string_view_equal(artifact_set.programs.values[1].symbol,
+                                     IREE_SV("increment_then_double")));
+  ASSERT_EQ(artifact_set.entries.count, 2u);
+  EXPECT_TRUE(iree_string_view_equal(artifact_set.entries.values[0].symbol,
+                                     IREE_SV("increment")));
+  EXPECT_TRUE(iree_string_view_equal(artifact_set.entries.values[1].symbol,
+                                     IREE_SV("double")));
+  ASSERT_EQ(artifact_set.programs.values[0].entry_requirement_count, 1u);
+  EXPECT_EQ(artifact_set.programs.values[0].entry_requirement_indices[0], 0u);
+  ASSERT_EQ(artifact_set.programs.values[1].entry_requirement_count, 2u);
+  EXPECT_EQ(artifact_set.programs.values[1].entry_requirement_indices[0], 0u);
+  EXPECT_EQ(artifact_set.programs.values[1].entry_requirement_indices[1], 1u);
+  loom_cmd_program_artifact_set_deinitialize(&artifact_set);
+
   loom_cmd_program_plan_deinitialize(&plan);
   EXPECT_EQ(plan.root_module, nullptr);
   EXPECT_EQ(plan.roots, nullptr);
@@ -205,7 +226,7 @@ command.program.def public @parameterized() launch(%parameters: buffer, %target:
 
   loom_cmd_program_plan_t plan = {};
   bool valid = false;
-  IREE_ASSERT_OK(loom_cmd_program_plan_prepare(
+  IREE_ASSERT_OK(loom_cmd_program_plan_prepare_materialization(
       &materialization, program_refs, IREE_ARRAYSIZE(program_refs),
       loom_pass_builtin_registry(),
       /*diagnostic_emitter=*/{}, &block_pool_, &valid, &plan,
@@ -271,7 +292,7 @@ command.program.def public @bodyless() launch(%output: buffer) {
 
   loom_cmd_program_plan_t plan = {};
   bool valid = false;
-  IREE_ASSERT_OK(loom_cmd_program_plan_prepare(
+  IREE_ASSERT_OK(loom_cmd_program_plan_prepare_materialization(
       &materialization, program_refs, IREE_ARRAYSIZE(program_refs),
       loom_pass_builtin_registry(),
       /*diagnostic_emitter=*/{}, &block_pool_, &valid, &plan,
@@ -364,7 +385,7 @@ command.program.def public @dynamic_root() launch() {
 
   loom_cmd_program_plan_t plan = {};
   bool valid = false;
-  IREE_ASSERT_OK(loom_cmd_program_plan_prepare(
+  IREE_ASSERT_OK(loom_cmd_program_plan_prepare_materialization(
       &materialization, program_refs, IREE_ARRAYSIZE(program_refs),
       loom_pass_builtin_registry(),
       /*diagnostic_emitter=*/{}, &block_pool_, &valid, &plan,

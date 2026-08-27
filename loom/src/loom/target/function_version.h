@@ -35,7 +35,8 @@ typedef struct loom_target_function_version_t {
   // the function had no authored target.
   iree_string_view_t authored_target_name;
 
-  // Optional target requirement projected from the authored target witness.
+  // Optional fact requirement projected from a concrete authored target.
+  // NULL when targetless or authored against a target.decl context.
   const loom_target_facts_t* target_requirement_facts;
 
   // Exact invocation context inherited by retained semantic callees.

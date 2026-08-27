@@ -124,11 +124,38 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "link_dependency_test",
+    srcs = ["link_dependency_test.cc"],
+    deps = [
+        ":test_util",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/test/testdata:link_dependency",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "link_provider_roots_test",
+    srcs = ["link_provider_roots_test.cc"],
+    deps = [
+        ":test_util",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/link/testdata:provider_roots",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "link_test",
     srcs = ["link_test.cc"],
     deps = [
         ":test_util",
         "//loom/binding/c:loomc",
+        "//loom/binding/c/test/testdata:link_target_specialization",
         "//loom/src/loom/format/bytecode:writer",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/format/text:printer",
@@ -223,7 +250,9 @@ loom_cc_test(
     deps = [
         ":test_util",
         "//loom/binding/c:loomc",
+        "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:function_version",
         "//loom/src/loom/target:profile",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/test:target_record_table",

@@ -4,10 +4,10 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Bazel module identity and dependency fragment order for the IREE repository."""
+"""Bazel module identity and dependency fragment order for the HRX repository."""
 
 module(
-    name = "iree",
+    name = "hrx",
     version = "0.0.0",
     bazel_compatibility = [">=9.1.0"],
 )

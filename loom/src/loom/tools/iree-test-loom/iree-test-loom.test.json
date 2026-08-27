@@ -53,12 +53,12 @@
       "name": "links explicit bytecode library into authored input",
       "steps": [
         {
-          "name": "archive-library",
+          "name": "merge-library",
           "run": {
             "tool": "loom-link",
             "args": [
               "{srcdir}/testdata/library_cases.loom",
-              "--mode=archive",
+              "--mode=merge",
               "--to=bc",
               "--output={tmp}/library_cases.loombc"
             ]

@@ -1,0 +1,8 @@
+command.program.def @leaf() launch() {
+  command.return
+}
+
+command.program.def @root() launch() {
+  command.program.launch @leaf() : ()
+  command.return
+}

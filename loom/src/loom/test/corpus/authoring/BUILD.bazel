@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
+load("//loom/build_tools/bazel:defs.bzl", "loom_module")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -16,7 +16,7 @@ _CASES = glob(["*.loom"])
 
 exports_files(_CASES)
 
-loom_link_module(
+loom_module(
     name = "authoring_cases",
     srcs = _CASES,
     configs = [

@@ -158,6 +158,15 @@ iree_status_t loom_run_hal_artifact_provider_select_compatible_device_target(
     const loom_target_facts_t* target_requirement, iree_allocator_t allocator,
     loom_run_hal_device_target_t* out_target);
 
+// Asks |provider| to select one concrete offline target by family-owned key.
+//
+// The key must be non-empty. Providers that do not support offline target
+// selection return UNIMPLEMENTED. On failure |out_target| remains empty.
+iree_status_t loom_run_hal_artifact_provider_select_target_key(
+    const loom_run_hal_artifact_provider_t* provider,
+    iree_string_view_t target_key, iree_allocator_t allocator,
+    loom_run_hal_device_target_t* out_target);
+
 // A registry of HAL artifact providers linked into a runner binary.
 typedef struct loom_run_hal_artifact_provider_registry_t {
   // Linked artifact provider table; entries are non-NULL when count is nonzero.

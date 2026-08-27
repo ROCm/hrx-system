@@ -44,6 +44,7 @@ from loom.format.bytecode.writer import (
     SECTION_SYMBOL_REFERENCES,
     SECTION_SYMBOLS,
     SOURCE_TRIVIA_LEADING_BLANK_LINE,
+    SYMBOL_FLAG_EXPORT,
     write_module,
 )
 from loom.ir import (
@@ -639,6 +640,44 @@ class TestMalformedSymbolSection:
         with pytest.raises(BytecodeError, match="requires a function symbol"):
             read_module(bytes(data))
 
+    def test_public_definition_without_export_flag_is_rejected(self) -> None:
+        module = Module(name="test")
+        _make_func(module, "f", [F32], is_public=True)
+        data = bytearray(write_module(module))
+        flags_offset = _first_symbol_flags_offset(data)
+        flags = struct.unpack_from("<H", data, flags_offset)[0]
+        assert flags & SYMBOL_FLAG_EXPORT
+        struct.pack_into("<H", data, flags_offset, flags & ~SYMBOL_FLAG_EXPORT)
+
+        with pytest.raises(BytecodeError, match="requires export flag"):
+            read_module(bytes(data))
+
+    def test_imported_symbol_with_export_flag_is_rejected(self) -> None:
+        module = Module(name="test")
+        argument_id = module.add_value(Value(name="", type=F32))
+        function_op = Operation(
+            name="func.decl",
+            operands=[argument_id],
+            attributes={"callee": "f"},
+        )
+        module.add_symbol(
+            Symbol(
+                name="f",
+                kind=SymbolKind.FUNC_DECL,
+                flags=SYMBOL_FLAG_IMPORT,
+                op=function_op,
+                source_module="upstream",
+            )
+        )
+        data = bytearray(write_module(module))
+        flags_offset = _first_symbol_flags_offset(data)
+        flags = struct.unpack_from("<H", data, flags_offset)[0]
+        assert not flags & SYMBOL_FLAG_EXPORT
+        struct.pack_into("<H", data, flags_offset, flags | SYMBOL_FLAG_EXPORT)
+
+        with pytest.raises(BytecodeError, match="both imported and exported"):
+            read_module(bytes(data))
+
     def test_nonempty_predicates_without_flag_are_rejected(self) -> None:
         data = bytearray(write_module(_make_predicate_function_module()))
         flags_offset = _first_symbol_flags_offset(data)
@@ -993,52 +1032,6 @@ class TestModuleStructure:
     def test_empty_module(self) -> None:
         loaded = _roundtrip(Module(name="empty"))
         assert len(loaded.symbols) == 0
-
-    def test_provider_imports_roundtrip(self) -> None:
-        module = Module(name="providers")
-        _make_func(module, "resolved", [])
-        module.add_top_level_operation(
-            Operation(
-                name="module.import",
-                attributes={
-                    "provider": "zeta.loom",
-                    "symbols": SymbolNameSet([SymbolName("missing_zeta")]),
-                },
-            )
-        )
-        module.add_top_level_operation(
-            Operation(
-                name="module.import",
-                attributes={
-                    "provider": "alpha.loom",
-                    "symbols": SymbolNameSet(
-                        [SymbolName("resolved"), SymbolName("missing_alpha")]
-                    ),
-                },
-                comments=(" Alpha provider.",),
-                leading_blank_line=True,
-            )
-        )
-
-        original_bytes = write_module(module)
-        loaded = read_module(original_bytes)
-
-        assert [symbol.name for symbol in loaded.symbols] == ["resolved"]
-        provider_imports = [op for op in loaded.body.ops if op.name == "module.import"]
-        assert [op.attributes["provider"] for op in provider_imports] == [
-            "alpha.loom",
-            "zeta.loom",
-        ]
-        assert provider_imports[0].attributes["symbols"] == SymbolNameSet(
-            [SymbolName("missing_alpha"), SymbolName("resolved")]
-        )
-        assert provider_imports[0].comments == (" Alpha provider.",)
-        assert provider_imports[0].leading_blank_line
-        assert provider_imports[1].attributes["symbols"] == SymbolNameSet(
-            [SymbolName("missing_zeta")]
-        )
-        loaded_bytes = write_module(loaded)
-        assert write_module(read_module(loaded_bytes)) == loaded_bytes
 
     def test_module_with_one_function(self) -> None:
         module = Module(name="test")

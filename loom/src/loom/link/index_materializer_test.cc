@@ -23,8 +23,6 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/link/module_index.h"
-#include "loom/link/provider_resolver.h"
-#include "loom/ops/module/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/op_registry.h"
 #include "loom/ops/test/ops.h"
@@ -192,11 +190,20 @@ class LinkIndexMaterializerTest : public ::testing::Test {
     return TryMaterializeWithOptions(index, &plan_options, out_materialization);
   }
 
+  iree_status_t TryMerge(
+      const loom_link_module_index_t* index,
+      loom_link_index_materialization_t* out_materialization) {
+    const loom_link_plan_options_t plan_options = {
+        /*.mode=*/LOOM_LINK_PLAN_MERGE,
+    };
+    return TryMaterializeWithOptions(index, &plan_options, out_materialization);
+  }
+
   loom_link_index_materialization_t MaterializeWithPolicy(
       const loom_link_module_index_t* index, iree_string_view_t root,
       loom_link_plan_unresolved_policy_t unresolved_policy) {
     loom_link_index_materialization_t materialization = {};
-    IREE_CHECK_OK(TryMaterialize(index, root, LOOM_LINK_PLAN_SELECTIVE,
+    IREE_CHECK_OK(TryMaterialize(index, root, LOOM_LINK_PLAN_LINK,
                                  unresolved_policy, &materialization));
     return materialization;
   }
@@ -278,15 +285,6 @@ class LinkIndexMaterializerTest : public ::testing::Test {
     }
     std::sort(shapes.begin(), shapes.end());
     return shapes;
-  }
-
-  iree_host_size_t CountProviderImports(const loom_module_t* module) {
-    iree_host_size_t count = 0;
-    const loom_op_t* op = nullptr;
-    loom_block_for_each_op(loom_region_const_entry_block(module->body), op) {
-      if (loom_module_import_isa(op)) ++count;
-    }
-    return count;
   }
 
   void Verify(const loom_module_t* module) {
@@ -602,13 +600,13 @@ func.def public @entry(%x: i32) -> (i32) {
   loom_link_index_materialization_t materialization = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
-      TryMaterialize(index.get(), IREE_SV("@entry"), LOOM_LINK_PLAN_SELECTIVE,
+      TryMaterialize(index.get(), IREE_SV("@entry"), LOOM_LINK_PLAN_LINK,
                      LOOM_LINK_PLAN_UNRESOLVED_ERROR, &materialization));
   EXPECT_EQ(materialization.plan, nullptr);
   EXPECT_EQ(materialization.module, nullptr);
 }
 
-TEST_F(LinkIndexMaterializerTest, ArchiveRetainsEveryProvider) {
+TEST_F(LinkIndexMaterializerTest, MergeRetainsOnlyInputProviders) {
   loom_module_t* root = Parse(IREE_SV(R"(
 template.decl @demo.choose(%x: i32) -> (i32)
 
@@ -639,17 +637,18 @@ template.def<@demo.choose> priority(1) @slow(%x: i32) -> (i32) {
               LOOM_LINK_PROVIDER_ROLE_LIBRARY);
 
   loom_link_index_materialization_t materialization = {};
-  IREE_ASSERT_OK(
-      TryMaterialize(index.get(), IREE_SV("@entry"), LOOM_LINK_PLAN_ARCHIVE,
-                     LOOM_LINK_PLAN_UNRESOLVED_ERROR, &materialization));
+  IREE_ASSERT_OK(TryMerge(index.get(), &materialization));
   Verify(materialization.module);
-  EXPECT_NE(FindSymbol(materialization.module, IREE_SV("fast")), nullptr);
-  EXPECT_NE(FindSymbol(materialization.module, IREE_SV("slow")), nullptr);
+  EXPECT_NE(FindSymbol(materialization.module, IREE_SV("entry")), nullptr);
+  EXPECT_NE(FindSymbol(materialization.module, IREE_SV("demo.choose")),
+            nullptr);
+  EXPECT_EQ(FindSymbol(materialization.module, IREE_SV("fast")), nullptr);
+  EXPECT_EQ(FindSymbol(materialization.module, IREE_SV("slow")), nullptr);
   loom_link_index_materialization_deinitialize(&materialization);
 }
 
 TEST_F(LinkIndexMaterializerTest,
-       ArchiveRejectsDuplicatePublicConcreteDefinitions) {
+       MergeRejectsDuplicatePublicConcreteDefinitions) {
   loom_module_t* first = Parse(IREE_SV(R"(
 func.def public @same(%x: i32) -> (i32) {
   func.return %x : i32
@@ -671,10 +670,8 @@ func.def public @same(%x: i32) -> (i32) {
               LOOM_LINK_PROVIDER_ROLE_INPUT);
 
   loom_link_index_materialization_t materialization = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_ALREADY_EXISTS,
-      TryMaterialize(index.get(), IREE_SV("@same"), LOOM_LINK_PLAN_ARCHIVE,
-                     LOOM_LINK_PLAN_UNRESOLVED_ERROR, &materialization));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
+                        TryMerge(index.get(), &materialization));
   EXPECT_EQ(materialization.plan, nullptr);
   EXPECT_EQ(materialization.module, nullptr);
 }
@@ -773,8 +770,7 @@ template.def<@demo.leaf> @leaf_impl(%x: i32) -> (i32) {
   loom_link_index_materialization_deinitialize(&materialization);
 }
 
-TEST_F(LinkIndexMaterializerTest,
-       SelectiveLinkInternalizesLibraryDependencies) {
+TEST_F(LinkIndexMaterializerTest, LinkLinkInternalizesLibraryDependencies) {
   loom_module_t* requester = Parse(IREE_SV(R"(
 func.decl @helper(%x: i32) -> (i32)
 
@@ -837,7 +833,7 @@ func.def public export("unrelated") @unused(%x: i32) -> (i32) {
 TEST_F(LinkIndexMaterializerTest,
        RequesterDeclarationControlsResolvedRootSurface) {
   loom_module_t* requester = Parse(IREE_SV(R"(
-func.decl public import("upstream", "identity") export("request_identity") @identity(%x: i32) -> (i32)
+func.decl public export("request_identity") @identity(%x: i32) -> (i32)
 )"),
                                    IREE_SV("requester.loom"));
   loom_module_t* library = Parse(IREE_SV(R"(
@@ -946,10 +942,47 @@ func.def @entry(%x: i32) -> (i32) {
   loom_link_index_materialization_deinitialize(&materialization);
 }
 
-TEST_F(LinkIndexMaterializerTest, ArchivePreservesLibraryOutputSurface) {
-  loom_module_t* requester = Parse(IREE_SV(R"(
-func.def public export("request_entry") @entry(%x: i32) -> (i32) {
+TEST_F(LinkIndexMaterializerTest, ExplicitPrivateBytecodeExportRemainsPrivate) {
+  loom_module_t* source = Parse(IREE_SV(R"(
+func.def export("entry") @entry(%x: i32) -> (i32) {
   func.return %x : i32
+}
+)"),
+                                IREE_SV("library.loom"));
+  std::vector<uint8_t> bytecode = WriteModule(source);
+
+  IndexPtr index = CreateIndex();
+  AddBytecode(index.get(), bytecode, IREE_SV("library.loombc"),
+              LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+
+  loom_link_index_materialization_t materialization =
+      Materialize(index.get(), IREE_SV("@entry"));
+  Verify(materialization.module);
+
+  const loom_symbol_t* entry =
+      FindSymbol(materialization.module, IREE_SV("entry"));
+  ASSERT_NE(entry, nullptr);
+  EXPECT_TRUE(iree_any_bit_set(entry->flags, LOOM_SYMBOL_FLAG_RETAIN));
+  EXPECT_FALSE(iree_any_bit_set(entry->flags, LOOM_SYMBOL_FLAG_PUBLIC));
+  loom_func_like_t function =
+      loom_func_like_cast(materialization.module, entry->defining_op);
+  ASSERT_TRUE(loom_func_like_isa(function));
+  const loom_string_id_t export_symbol = loom_func_like_export_symbol(function);
+  ASSERT_NE(export_symbol, LOOM_STRING_ID_INVALID);
+  EXPECT_TRUE(iree_string_view_equal(
+      materialization.module->strings.entries[export_symbol],
+      IREE_SV("entry")));
+
+  loom_link_index_materialization_deinitialize(&materialization);
+}
+
+TEST_F(LinkIndexMaterializerTest, MergePreservesUnresolvedLibraryContract) {
+  loom_module_t* requester = Parse(IREE_SV(R"(
+func.decl @helper(%x: i32) -> (i32)
+
+func.def public export("request_entry") @entry(%x: i32) -> (i32) {
+  %result = func.call @helper(%x) : (i32) -> (i32)
+  func.return %result : i32
 }
 )"),
                                    IREE_SV("requester.loom"));
@@ -967,30 +1000,25 @@ func.def public export("library_helper") @helper(%x: i32) -> (i32) {
                   LOOM_LINK_PROVIDER_ROLE_LIBRARY);
 
   loom_link_index_materialization_t materialization = {};
-  IREE_ASSERT_OK(
-      TryMaterialize(index.get(), IREE_SV("@entry"), LOOM_LINK_PLAN_ARCHIVE,
-                     LOOM_LINK_PLAN_UNRESOLVED_ERROR, &materialization));
+  IREE_ASSERT_OK(TryMerge(index.get(), &materialization));
   Verify(materialization.module);
 
   const loom_symbol_t* helper =
       FindSymbol(materialization.module, IREE_SV("helper"));
   ASSERT_NE(helper, nullptr);
-  EXPECT_TRUE(iree_any_bit_set(helper->flags, LOOM_SYMBOL_FLAG_PUBLIC));
-  loom_func_like_t helper_func =
-      loom_func_like_cast(materialization.module, helper->defining_op);
-  ASSERT_TRUE(loom_func_like_isa(helper_func));
-  const loom_string_id_t export_symbol =
-      loom_func_like_export_symbol(helper_func);
-  ASSERT_NE(export_symbol, LOOM_STRING_ID_INVALID);
-  EXPECT_TRUE(iree_string_view_equal(
-      materialization.module->strings.entries[export_symbol],
-      IREE_SV("library_helper")));
+  EXPECT_TRUE(loom_symbol_definition_is_declaration(helper->definition));
+  EXPECT_FALSE(iree_any_bit_set(helper->flags, LOOM_SYMBOL_FLAG_PUBLIC));
+
+  const loom_symbol_t* entry =
+      FindSymbol(materialization.module, IREE_SV("entry"));
+  ASSERT_NE(entry, nullptr);
+  EXPECT_TRUE(iree_any_bit_set(entry->flags, LOOM_SYMBOL_FLAG_PUBLIC));
 
   loom_link_index_materialization_deinitialize(&materialization);
 }
 
 TEST_F(LinkIndexMaterializerTest,
-       SelectiveLinkInternalizesGenericSymbolDependencies) {
+       LinkLinkInternalizesGenericSymbolDependencies) {
   loom_module_t* requester = Parse(IREE_SV(R"(
 check.case public @case {
   check.return
@@ -1019,8 +1047,6 @@ check.benchmark<@case> @benchmark
 TEST_F(LinkIndexMaterializerTest,
        SealedProductsAreEquivalentAcrossProviderRepresentations) {
   const iree_string_view_t requester_source = IREE_SV(R"(
-module.import "chosen" [@api, @provided]
-
 func.decl public export("request_api") @api(%x: i32) -> (i32)
 func.decl @provided(%x: i32) -> (i32)
 func.decl @partial(%x: i32) -> (i32)
@@ -1054,22 +1080,7 @@ func.def public export("provider_unused") @unused(%x: i32) -> (i32) {
   func.return %x : i32
 }
 )");
-  const iree_string_view_t wrong_source = IREE_SV(R"(
-func.def public export("wrong_api") @api(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-
-func.def public export("wrong_selected") @provided(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-
-func.def public export("wrong_only") @wrong_only(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)");
   const iree_string_view_t partial_source = IREE_SV(R"(
-module.import "external-runtime" [@external]
-
 func.decl @external(%x: i32) -> (i32)
 
 func.def public export("partial_api") @partial(%x: i32) -> (i32) {
@@ -1084,11 +1095,9 @@ func.def public export("partial_unused") @partial_unused(%x: i32) -> (i32) {
 
   loom_module_t* requester = Parse(requester_source, IREE_SV("requester.loom"));
   loom_module_t* chosen = Parse(chosen_source, IREE_SV("chosen.loom"));
-  loom_module_t* wrong = Parse(wrong_source, IREE_SV("wrong.loom"));
   loom_module_t* partial = Parse(partial_source, IREE_SV("partial.loom"));
   const std::vector<uint8_t> requester_bytecode = WriteModule(requester);
   const std::vector<uint8_t> chosen_bytecode = WriteModule(chosen);
-  const std::vector<uint8_t> wrong_bytecode = WriteModule(wrong);
 
   IndexPtr partial_index = CreateIndex();
   AddMaterialized(partial_index.get(), partial, IREE_SV("partial-source"),
@@ -1099,7 +1108,6 @@ func.def public export("partial_unused") @partial_unused(%x: i32) -> (i32) {
   Verify(partial_materialization.module);
   ASSERT_EQ(loom_link_plan_symbol_count(partial_materialization.plan), 2u);
   ASSERT_EQ(partial_materialization.module->symbols.count, 2u);
-  ASSERT_EQ(CountProviderImports(partial_materialization.module), 1u);
   const std::vector<uint8_t> partial_bytecode =
       WriteModule(partial_materialization.module);
   loom_link_index_materialization_deinitialize(&partial_materialization);
@@ -1107,37 +1115,32 @@ func.def public export("partial_unused") @partial_unused(%x: i32) -> (i32) {
   enum ProviderId {
     kRequester,
     kChosen,
-    kWrong,
     kPartial,
   };
   struct Variant {
     const char* name;
     ProviderForm requester_form;
     ProviderForm chosen_form;
-    ProviderForm wrong_form;
-    std::array<ProviderId, 4> insertion_order;
+    std::array<ProviderId, 3> insertion_order;
   };
   const Variant variants[] = {
       {
           "materialized-requester",
           ProviderForm::kMaterialized,
           ProviderForm::kText,
-          ProviderForm::kBytecode,
-          {kRequester, kWrong, kChosen, kPartial},
+          {kRequester, kChosen, kPartial},
       },
       {
           "text-requester",
           ProviderForm::kText,
           ProviderForm::kBytecode,
-          ProviderForm::kMaterialized,
-          {kChosen, kPartial, kRequester, kWrong},
+          {kChosen, kPartial, kRequester},
       },
       {
           "bytecode-requester",
           ProviderForm::kBytecode,
           ProviderForm::kMaterialized,
-          ProviderForm::kText,
-          {kPartial, kWrong, kChosen, kRequester},
+          {kPartial, kChosen, kRequester},
       },
   };
 
@@ -1148,7 +1151,6 @@ func.def public export("partial_unused") @partial_unused(%x: i32) -> (i32) {
     iree_host_size_t requester_provider =
         LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
     iree_host_size_t chosen_provider = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
-    iree_host_size_t wrong_provider = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
     iree_host_size_t partial_provider = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
     for (ProviderId provider : variant.insertion_order) {
       switch (provider) {
@@ -1164,12 +1166,6 @@ func.def public export("partial_unused") @partial_unused(%x: i32) -> (i32) {
                           chosen, chosen_bytecode, IREE_SV("chosen"),
                           LOOM_LINK_PROVIDER_ROLE_LIBRARY);
           break;
-        case kWrong:
-          wrong_provider =
-              AddProvider(index.get(), variant.wrong_form, wrong_source, wrong,
-                          wrong_bytecode, IREE_SV("wrong"),
-                          LOOM_LINK_PROVIDER_ROLE_LIBRARY);
-          break;
         case kPartial:
           partial_provider = AddBytecode(index.get(), partial_bytecode,
                                          IREE_SV("partial.loombc"),
@@ -1179,21 +1175,13 @@ func.def public export("partial_unused") @partial_unused(%x: i32) -> (i32) {
     }
     ASSERT_NE(requester_provider, LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
     ASSERT_NE(chosen_provider, LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
-    ASSERT_NE(wrong_provider, LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
     ASSERT_NE(partial_provider, LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
 
-    loom_link_provider_binding_t bindings[] = {
-        {IREE_SV("chosen"), chosen_provider},
-    };
-    loom_link_provider_resolver_t resolver = {};
-    IREE_ASSERT_OK(loom_link_provider_resolver_prepare(
-        loom_link_module_index_provider_count(index.get()), bindings,
-        IREE_ARRAYSIZE(bindings), &resolver));
     const iree_string_view_t explicit_roots[] = {
         IREE_SV("@private_root"),
     };
     loom_link_plan_options_t options = {
-        /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+        /*.mode=*/LOOM_LINK_PLAN_LINK,
         /*.root_symbols=*/
         {
             /*.count=*/IREE_ARRAYSIZE(explicit_roots),
@@ -1202,7 +1190,6 @@ func.def public export("partial_unused") @partial_unused(%x: i32) -> (i32) {
         /*.include_input_exports=*/true,
         /*.unresolved_policy=*/LOOM_LINK_PLAN_UNRESOLVED_ALLOW,
     };
-    options.provider_resolver = &resolver;
     loom_link_index_materialization_t materialization = {};
     IREE_ASSERT_OK(
         TryMaterializeWithOptions(index.get(), &options, &materialization));
@@ -1222,9 +1209,6 @@ func.def public export("partial_unused") @partial_unused(%x: i32) -> (i32) {
     expect_selected(chosen_provider, IREE_SV("api"), true);
     expect_selected(chosen_provider, IREE_SV("provided"), true);
     expect_selected(chosen_provider, IREE_SV("unused"), false);
-    expect_selected(wrong_provider, IREE_SV("api"), false);
-    expect_selected(wrong_provider, IREE_SV("provided"), false);
-    expect_selected(wrong_provider, IREE_SV("wrong_only"), false);
     expect_selected(partial_provider, IREE_SV("partial"), true);
     expect_selected(partial_provider, IREE_SV("external"), true);
     EXPECT_EQ(FindIndexedProviderSymbol(index.get(), partial_provider,
@@ -1266,8 +1250,6 @@ func.def public export("partial_unused") @partial_unused(%x: i32) -> (i32) {
     EXPECT_FALSE(iree_any_bit_set(
         external->flags, LOOM_SYMBOL_FLAG_PUBLIC | LOOM_SYMBOL_FLAG_RETAIN));
     EXPECT_EQ(FindSymbol(materialization.module, IREE_SV("unused")), nullptr);
-    EXPECT_EQ(FindSymbol(materialization.module, IREE_SV("wrong_only")),
-              nullptr);
     EXPECT_EQ(FindSymbol(materialization.module, IREE_SV("partial_unused")),
               nullptr);
 
@@ -1283,25 +1265,6 @@ func.def public export("partial_unused") @partial_unused(%x: i32) -> (i32) {
     EXPECT_EQ(OptionalString(materialization.module,
                              loom_func_like_export_symbol(api_function)),
               "request_api");
-
-    const loom_op_t* retained_import = nullptr;
-    const loom_op_t* op = nullptr;
-    loom_block_for_each_op(
-        loom_region_const_entry_block(materialization.module->body), op) {
-      if (!loom_module_import_isa(op)) continue;
-      ASSERT_EQ(retained_import, nullptr);
-      retained_import = op;
-    }
-    ASSERT_NE(retained_import, nullptr);
-    EXPECT_EQ(OptionalString(materialization.module,
-                             loom_module_import_provider(retained_import)),
-              "external-runtime");
-    const loom_symbol_ref_array_t import_symbols =
-        loom_module_import_symbols(retained_import);
-    ASSERT_EQ(import_symbols.count, 1u);
-    EXPECT_EQ(
-        import_symbols.values[0].symbol_id,
-        (loom_symbol_id_t)(external - materialization.module->symbols.entries));
 
     const std::vector<LinkedSymbolShape> product_symbols =
         CaptureSymbolShapes(materialization.module);

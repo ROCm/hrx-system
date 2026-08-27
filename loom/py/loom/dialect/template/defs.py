@@ -37,6 +37,7 @@ from loom.dialect.func.defs import CallingConv, Purity, Retain, Temperature, Vis
 from loom.dsl import (
     ANY,
     ATTR_TYPE_PARAMETERIZED_ARRAY,
+    COMMAND_EFFECT,
     ISOLATED_FROM_ABOVE,
     POISON_BOUNDARY,
     SYMBOL_DEFINE,
@@ -306,7 +307,12 @@ template_ukernel = Op(
 template_apply = Op(
     "template.apply",
     group=template_ops,
-    doc=("Compile-time family application. A specializing link selects one applicable implementation before executable lowering."),
+    doc=(
+        "Compile-time family application. A specializing link selects one "
+        "applicable implementation before executable lowering. In a command "
+        "program this is source composition whose selected implementation is "
+        "inlined before portable command preparation."
+    ),
     operands=[Operand("operands", ANY, variadic=True)],
     attrs=[
         AttrDef(
@@ -318,7 +324,7 @@ template_apply = Op(
         AttrDef("temperature", "enum", enum_def=Temperature, optional=True),
     ],
     results=[Result("results", ANY, variadic=True)],
-    traits=[UNKNOWN_EFFECTS],
+    traits=[UNKNOWN_EFFECTS, COMMAND_EFFECT],
     verify="loom_template_apply_verify",
     canonicalize="loom_template_apply_canonicalize",
     effective_traits="loom_template_apply_effective_traits",
@@ -351,7 +357,12 @@ template_apply = Op(
 template_call = Op(
     "template.call",
     group=template_ops,
-    doc=("Exact compile-time implementation call. This bypasses candidate ranking but still checks the implementation contract."),
+    doc=(
+        "Exact compile-time implementation call. This bypasses candidate "
+        "ranking but still checks the implementation contract. In a command "
+        "program the implementation is inlined before portable command "
+        "preparation."
+    ),
     operands=[Operand("operands", ANY, variadic=True)],
     attrs=[
         AttrDef(
@@ -363,7 +374,7 @@ template_call = Op(
         AttrDef("temperature", "enum", enum_def=Temperature, optional=True),
     ],
     results=[Result("results", ANY, variadic=True)],
-    traits=[UNKNOWN_EFFECTS],
+    traits=[UNKNOWN_EFFECTS, COMMAND_EFFECT],
     interfaces=[
         CallLikeInterface(
             callee="callee",

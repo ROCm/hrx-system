@@ -17,18 +17,6 @@
 extern "C" {
 #endif
 
-// Canonical module.import projection prepared for provider-facet emission.
-typedef struct loom_bytecode_provider_import_plan_t {
-  // First module.import row in the canonical module record plan.
-  iree_host_size_t first_record_index;
-  // Number of contiguous module.import rows.
-  iree_host_size_t provider_count;
-  // Total anchors across all providers.
-  uint32_t anchor_count;
-  // Writer string ordinals in canonical provider order.
-  uint32_t* provider_string_ids;
-} loom_bytecode_provider_import_plan_t;
-
 // Prepared reference analysis and counts for dependency-facet emission.
 typedef struct loom_bytecode_symbol_reference_plan_t {
   // Canonical reference analysis whose linked rows are emitted directly.
@@ -43,25 +31,6 @@ typedef struct loom_bytecode_symbol_reference_plan_t {
 iree_status_t loom_bytecode_write_symbols_section(
     iree_string_builder_t* builder, loom_bytecode_numbering_t* numbering,
     const loom_bytecode_ir_region_list_t* ir_regions);
-
-// Projects canonical module records into provider import rows.
-iree_status_t loom_bytecode_provider_import_plan_initialize(
-    const loom_module_t* module, const loom_module_record_plan_t* record_plan,
-    iree_arena_allocator_t* arena,
-    loom_bytecode_provider_import_plan_t* out_plan);
-
-// Interns the provider strings referenced by |plan|.
-iree_status_t loom_bytecode_number_provider_imports(
-    loom_bytecode_numbering_t* numbering,
-    const loom_module_record_plan_t* record_plan,
-    loom_bytecode_provider_import_plan_t* plan);
-
-// Streams the canonical provider import section.
-iree_status_t loom_bytecode_write_provider_imports_section(
-    loom_bytecode_page_writer_t* page_writer,
-    const loom_bytecode_numbering_t* numbering,
-    const loom_module_record_plan_t* record_plan,
-    const loom_bytecode_provider_import_plan_t* plan);
 
 // Builds the canonical dependency-facet analysis and aggregate counts.
 iree_status_t loom_bytecode_symbol_reference_plan_initialize(

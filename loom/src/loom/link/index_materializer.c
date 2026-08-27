@@ -176,7 +176,7 @@ static iree_status_t loom_link_index_build_plan(
   return loom_link_plan_build(index, &options, allocator, out_plan);
 }
 
-static iree_status_t loom_link_index_materialize_selective(
+static iree_status_t loom_link_index_materialize_link(
     const loom_link_module_index_t* index,
     const loom_link_plan_options_t* plan_options,
     const loom_link_plan_materialization_environment_t* environment,
@@ -278,7 +278,7 @@ static iree_status_t loom_link_index_materialize_selective(
   return status;
 }
 
-static iree_status_t loom_link_index_materialize_archive(
+static iree_status_t loom_link_index_materialize_merge(
     const loom_link_module_index_t* index,
     const loom_link_plan_options_t* plan_options,
     const loom_link_plan_materialization_environment_t* environment,
@@ -333,12 +333,12 @@ iree_status_t loom_link_index_materialize(
         "index materialization owns template provider selection roots");
   }
   switch (plan_options->mode) {
-    case LOOM_LINK_PLAN_ARCHIVE:
-      return loom_link_index_materialize_archive(
+    case LOOM_LINK_PLAN_MERGE:
+      return loom_link_index_materialize_merge(
           index, plan_options, environment, module_name, out_materialization);
-    case LOOM_LINK_PLAN_SELECTIVE:
-      return loom_link_index_materialize_selective(
-          index, plan_options, environment, module_name, out_materialization);
+    case LOOM_LINK_PLAN_LINK:
+      return loom_link_index_materialize_link(index, plan_options, environment,
+                                              module_name, out_materialization);
   }
   IREE_ASSERT_UNREACHABLE("unknown link plan mode");
   IREE_BUILTIN_UNREACHABLE();

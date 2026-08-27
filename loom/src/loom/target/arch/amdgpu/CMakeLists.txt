@@ -174,6 +174,23 @@ loom_cc_test(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
+    artifact_profile
+  HDRS
+    "artifact_profile.h"
+  SRCS
+    "artifact_profile.c"
+  DEPS
+    ::profile
+    ::target_info
+    iree::base
+    iree::hal::executable::amdgpu::target_id
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_test(
   NAME
     registers_test

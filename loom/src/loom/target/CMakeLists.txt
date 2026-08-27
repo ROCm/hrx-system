@@ -132,7 +132,10 @@ loom_cc_test(
     loom::error::error_defs
     loom::format::text::parser
     loom::ir
+    loom::ops::command
     loom::ops::func
+    loom::ops::index
+    loom::ops::kernel
     loom::ops::target
     loom::ops::test
     loom::target::test::target_record_table
@@ -171,6 +174,24 @@ loom_cc_library(
     loom::ir
     loom::ops::op_defs
     loom::rewrite::module_projection
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    module_specialization
+  HDRS
+    "module_specialization.h"
+  SRCS
+    "module_specialization.c"
+  DEPS
+    ::function_version_projection
+    ::specialization
+    iree::base
+    iree::base::internal::arena
+    loom::error::emitter
+    loom::ir
+    loom::ops::op_defs
   PUBLIC
 )
 

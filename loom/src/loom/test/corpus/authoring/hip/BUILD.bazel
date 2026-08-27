@@ -6,7 +6,7 @@
 
 load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
-load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
+load("//loom/build_tools/bazel:defs.bzl", "loom_module")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -40,25 +40,25 @@ _PORTABLE_CASES = glob(
 
 exports_files(glob(["*.loom"]))
 
-loom_link_module(
+loom_module(
     name = "portable_cases",
     srcs = _PORTABLE_CASES,
     output_format = "bc",
 )
 
-loom_link_module(
+loom_module(
     name = "amdgpu_selection_cases",
     srcs = _AMDGPU_SELECTION_CASES,
     output_format = "bc",
 )
 
-loom_link_module(
+loom_module(
     name = "gfx11_cases",
     srcs = _GFX11_CASES,
     output_format = "bc",
 )
 
-loom_link_module(
+loom_module(
     name = "gfx1250_cases",
     srcs = _GFX1250_CASES,
     output_format = "bc",

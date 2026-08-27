@@ -61,12 +61,12 @@ typedef struct loomc_link_index_builder_t loomc_link_index_builder_t;
 /// across many threads.
 typedef struct loomc_link_index_t loomc_link_index_t;
 
-/// Search role assigned to a source provider in a link index.
+/// Linkage role assigned to a source provider in a link index.
 typedef enum loomc_link_provider_role_e {
-  /// Primary input providers are selected before libraries.
+  /// Direct sources jointly owned by the module being assembled.
   LOOMC_LINK_PROVIDER_ROLE_INPUT = 0,
 
-  /// Library providers are searched after primary inputs.
+  /// Separate libraries contributing exported exact definitions and templates.
   LOOMC_LINK_PROVIDER_ROLE_LIBRARY = 1,
 } loomc_link_provider_role_t;
 
@@ -184,22 +184,12 @@ typedef struct loomc_link_index_source_slot_t {
 /// String views are borrowed for the duration of the builder call that consumes
 /// this descriptor unless that call explicitly documents a copy.
 typedef struct loomc_link_index_source_options_t {
-  /// Stable provider label for diagnostics and private-name determinism. This
-  /// label is not implicitly available as a `module.import` provider key.
+  /// Stable provider label for diagnostics and private-name determinism.
   loomc_string_view_t provider_name;
 
-  /// Provider search precedence role.
+  /// Provider linkage role.
   loomc_link_provider_role_t role;
 
-  /// Opaque `module.import` provider keys bound to this source slot.
-  ///
-  /// A source may publish several aliases. Each key may be bound by exactly
-  /// one source in the finished index. The builder copies this array and every
-  /// key when the source slot is reserved.
-  const loomc_string_view_t* import_keys;
-
-  /// Number of entries in `import_keys`.
-  loomc_host_size_t import_key_count;
 } loomc_link_index_source_options_t;
 
 /// Indexed provider metadata.
@@ -214,7 +204,7 @@ typedef struct loomc_link_index_provider_t {
   /// Source representation kind.
   loomc_link_provider_kind_t kind;
 
-  /// Provider search precedence role.
+  /// Provider linkage role.
   loomc_link_provider_role_t role;
 
   /// Provider label used for diagnostics.
@@ -444,17 +434,21 @@ LOOMC_API_EXPORT bool loomc_link_index_symbol_at(
     const loomc_link_index_t* link_index, loomc_host_size_t ordinal,
     loomc_link_index_symbol_t* out_symbol);
 
-/// Looks up the selected global symbol by name.
+/// Looks up the first global symbol by name in canonical enumeration order.
+///
+/// INPUT providers enumerate before LIBRARY providers and ties use source-slot
+/// order. This order does not resolve duplicate definitions; linkage validates
+/// uniqueness.
 ///
 /// @param link_index Index to inspect.
 /// @param name Symbol name with or without a leading `@`.
-/// @param out_symbol Receives selected symbol metadata.
+/// @param out_symbol Receives symbol metadata.
 /// @return True when a global symbol named `name` was found.
 LOOMC_API_EXPORT bool loomc_link_index_lookup_global(
     const loomc_link_index_t* link_index, loomc_string_view_t name,
     loomc_link_index_symbol_t* out_symbol);
 
-/// Returns the next duplicate global symbol in selected-first order.
+/// Returns the next duplicate global symbol in canonical order.
 ///
 /// Begin enumeration with a symbol returned by
 /// `loomc_link_index_lookup_global` and pass each returned duplicate back to

@@ -183,14 +183,14 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
     def loom_config_compatible_with(self, config_labels):
         return list(config_labels)
 
-    def loom_link_module(
+    def loom_module(
         self,
         name,
         srcs,
         libraries=None,
         roots=None,
         configs=None,
-        mode="archive",
+        mode="merge",
         output=None,
         output_format="text",
         include_input_exports=False,
@@ -228,7 +228,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         )
         self._emit_platform_guard_begin(target_compatible_with)
         self._converter.body += (
-            f"loom_link_module(\n"
+            f"loom_module(\n"
             f"{name_block}"
             f"{srcs_block}"
             f"{libraries_block}"

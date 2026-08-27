@@ -16,7 +16,10 @@
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/command/ops.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/index/ops.h"
+#include "loom/ops/kernel/ops.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/target/pass_environment.h"
@@ -112,7 +115,10 @@ class TargetCallgraphSpecializationTest : public ::testing::Test {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(),
                                      &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
+    RegisterDialect(LOOM_DIALECT_COMMAND, loom_command_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_INDEX, loom_index_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_KERNEL, loom_kernel_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
@@ -211,6 +217,7 @@ class TargetCallgraphSpecializationTest : public ::testing::Test {
                                                        /*.values=*/requests,
                                                        /*.count=*/request_count,
                                                    },
+                                                   /*.bindings=*/{},
                                                    /*.diagnostic_emitter=*/{},
                                                    &version_arena_, &result));
     EXPECT_EQ(result.error_count, 0u);
@@ -567,6 +574,82 @@ func.def public @root() {
   ASSERT_NE(rerun_helper_version, nullptr);
   EXPECT_EQ(rerun_helper_version->target_context_ordinal,
             helper_context_ordinal);
+}
+
+TEST_F(TargetCallgraphSpecializationTest,
+       PropagatesProfilesThroughTargetDeclarationsAndCallBoundaries) {
+  ModulePtr module = Parse(R"(
+target.decl @device
+
+kernel.def @device_kernel() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch() {
+  kernel.return
+}
+
+command.program.def public target(@device) @device_program() launch() {
+  kernel.launch @device_kernel() : ()
+  command.return
+}
+
+func.def public @host() {
+  command.program.launch @device_program() : ()
+  func.return
+}
+)");
+  const TestTargetProfile host_profile = MakeTestProfile(64);
+  const TestTargetProfile device_profile = MakeTestProfile(32);
+  const loom_target_specialization_request_t requests[] = {
+      {/*.function_name=*/IREE_SV("host"),
+       /*.target_profile=*/&host_profile.base},
+      {/*.function_name=*/IREE_SV("device_program"),
+       /*.target_profile=*/&device_profile.base},
+  };
+  loom_target_specialization_result_t specialization =
+      Specialize(module.get(), requests, IREE_ARRAYSIZE(requests));
+  ASSERT_EQ(specialization.function_versions.list.count, 2u);
+  const loom_symbol_ref_t authored_target_ref =
+      loom_func_like_target(Function(module.get(), IREE_SV("device_program")));
+
+  EXPECT_TRUE(Run(module.get(), &specialization.function_versions));
+
+  ASSERT_EQ(specialization.function_versions.list.count, 3u);
+  const loom_target_function_version_t* host_version =
+      Version(specialization.function_versions,
+              Function(module.get(), IREE_SV("host")));
+  const loom_target_function_version_t* program_version =
+      Version(specialization.function_versions,
+              Function(module.get(), IREE_SV("device_program")));
+  const loom_target_function_version_t* kernel_version =
+      Version(specialization.function_versions,
+              Function(module.get(), IREE_SV("device_kernel")));
+  ASSERT_NE(host_version, nullptr);
+  ASSERT_NE(program_version, nullptr);
+  ASSERT_NE(kernel_version, nullptr);
+  EXPECT_EQ(host_version->resolved_target.facts->storage.snapshot.subgroup_size,
+            64u);
+  EXPECT_EQ(
+      program_version->resolved_target.facts->storage.snapshot.subgroup_size,
+      32u);
+  EXPECT_EQ(
+      kernel_version->resolved_target.facts->storage.snapshot.subgroup_size,
+      32u);
+  EXPECT_NE(host_version->target_context_ordinal,
+            program_version->target_context_ordinal);
+  EXPECT_EQ(program_version->target_context_ordinal,
+            kernel_version->target_context_ordinal);
+  EXPECT_TRUE(iree_string_view_equal(program_version->authored_target_name,
+                                     IREE_SV("device")));
+  EXPECT_EQ(program_version->target_requirement_facts, nullptr);
+  EXPECT_FALSE(program_version->authored_target_is_exact);
+  const loom_symbol_ref_t retained_target_ref =
+      loom_func_like_target(Function(module.get(), IREE_SV("device_program")));
+  EXPECT_EQ(retained_target_ref.module_id, authored_target_ref.module_id);
+  EXPECT_EQ(retained_target_ref.symbol_id, authored_target_ref.symbol_id);
+
+  EXPECT_FALSE(Run(module.get(), &specialization.function_versions));
+  EXPECT_EQ(specialization.function_versions.list.count, 3u);
 }
 
 TEST_F(TargetCallgraphSpecializationTest,

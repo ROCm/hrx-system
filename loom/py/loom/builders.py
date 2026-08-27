@@ -807,7 +807,6 @@ def default_ops() -> tuple[Op, ...]:
     from loom.dialect.kernel import ALL_KERNEL_OPS
     from loom.dialect.llvmir import ALL_LLVMIR_OPS
     from loom.dialect.low import ALL_LOW_OPS
-    from loom.dialect.module import ALL_MODULE_OPS
     from loom.dialect.pass_ import ALL_PASS_OPS
     from loom.dialect.pool import ALL_POOL_OPS
     from loom.dialect.sanitizer import ALL_SANITIZER_OPS
@@ -830,7 +829,6 @@ def default_ops() -> tuple[Op, ...]:
         *ALL_KERNEL_OPS,
         *ALL_LLVMIR_OPS,
         *ALL_LOW_OPS,
-        *ALL_MODULE_OPS,
         *ALL_PASS_OPS,
         *ALL_POOL_OPS,
         *ALL_SANITIZER_OPS,

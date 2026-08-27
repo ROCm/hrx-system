@@ -13,7 +13,6 @@
 #include "loom/ops/func/ops.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
-#include "loom/ops/module/ops.h"
 #include "loom/ops/op_registry.h"
 #include "loom/ops/type_registry.h"
 #include "loom/ops/vector/ops.h"
@@ -42,11 +41,6 @@ TEST(OpRegistry, RegistersProductionContextSurface) {
       &context, iree_make_cstring_view("index.constant"), &kind);
   ASSERT_NE(vtable, nullptr);
   EXPECT_EQ(kind, LOOM_OP_INDEX_CONSTANT);
-
-  vtable = loom_context_lookup_op_by_name(
-      &context, iree_make_cstring_view("module.import"), &kind);
-  ASSERT_NE(vtable, nullptr);
-  EXPECT_EQ(kind, LOOM_OP_MODULE_IMPORT);
 
   kind = 0xFFFF;
   EXPECT_EQ(loom_context_lookup_op_by_name(

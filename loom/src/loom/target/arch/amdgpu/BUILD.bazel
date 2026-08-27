@@ -235,6 +235,21 @@ loom_cc_test(
     ],
 )
 
+loom_cc_library(
+    name = "artifact_profile",
+    srcs = ["artifact_profile.c"],
+    hdrs = ["artifact_profile.h"],
+    visibility = _AMDGPU_TOOLING_VISIBILITY + [
+        "//loom/src/loom/tools/loom-link:__pkg__",
+    ],
+    deps = [
+        ":profile",
+        ":target_info",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/executable/amdgpu:target_id",
+    ],
+)
+
 loom_cc_test(
     name = "registers_test",
     srcs = ["registers_test.cc"],

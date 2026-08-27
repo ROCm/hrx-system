@@ -6,7 +6,7 @@
 
 load("//build_tools/bazel:executable.bzl", "iree_executable_test")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
-load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
+load("//loom/build_tools/bazel:defs.bzl", "loom_module")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -33,7 +33,7 @@ _GFX11_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/target/amdgpu:iree_hal_descriptor_set_gfx11_generic_core",
 ])
 
-loom_link_module(
+loom_module(
     name = "generic_test_module",
     srcs = [
         "//loom/src/loom/test/corpus/authoring:authoring_cases",
@@ -57,7 +57,7 @@ iree_executable_test(
     target_compatible_with = _GENERIC_COMPATIBLE_WITH,
 )
 
-loom_link_module(
+loom_module(
     name = "gfx11_test_module",
     srcs = [
         "//loom/src/loom/test/corpus/authoring/hip:gfx11_cases",
@@ -78,7 +78,7 @@ iree_executable_test(
     target_compatible_with = _GFX11_COMPATIBLE_WITH,
 )
 
-loom_link_module(
+loom_module(
     name = "gfx1100_test_module",
     srcs = glob(["gfx1100/*.loom"]),
     output_format = "bc",
@@ -96,7 +96,7 @@ iree_executable_test(
     target_compatible_with = _GENERIC_COMPATIBLE_WITH,
 )
 
-loom_link_module(
+loom_module(
     name = "gfx9_4_test_module",
     srcs = glob(["gfx9_4/*.loom"]),
     output_format = "bc",
@@ -114,7 +114,7 @@ iree_executable_test(
     target_compatible_with = _GENERIC_COMPATIBLE_WITH,
 )
 
-loom_link_module(
+loom_module(
     name = "gfx1250_test_module",
     srcs = [
         "//loom/src/loom/test/corpus/authoring/hip:gfx1250_cases",

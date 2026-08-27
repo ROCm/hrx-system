@@ -9,6 +9,29 @@
 
 iree_add_all_subdirs()
 
+loom_cc_library(
+  NAME
+    command_backend
+  HDRS
+    "command_backend.h"
+  SRCS
+    "command_backend.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::error::diagnostic
+    loom::link::module_index
+    loom::ops::command
+    loom::ops::op_defs
+    loom::pass::builtin_registry
+    loom::target::arch::cmd::artifact_set
+    loom::target::arch::cmd::lower::program_plan_index
+    loom::target::entry_selection
+    loom::tooling::execution::session
+    loom::tooling::io::file
+  PUBLIC
+)
+
 set(_loom_compile_platform_copts "")
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
   list(APPEND _loom_compile_platform_copts "-DLOOM_COMPILE_HAVE_AMDGPU=1")
@@ -59,6 +82,7 @@ loom_cc_binary(
   COPTS
     ${_loom_compile_platform_copts}
   DEPS
+    ::command_backend
     iree::base
     iree::base::tooling::flags
     iree::io::byte_sequence
@@ -71,8 +95,11 @@ loom_cc_binary(
     loom::ops::kernel
     loom::ops::op_defs
     loom::sanitizer::options
+    loom::target::arch::cmd::artifact_set
+    loom::target::arch::cmd::provider
     loom::target::entry_selection
     loom::target::low_descriptor_registry
+    loom::target::module_specialization
     loom::target::reporting::artifact_manifest
     loom::tooling::cli::help
     loom::tooling::compile::pipeline
@@ -99,7 +126,9 @@ iree_execution_test_suite(
     "loom-compile=::loom-compile"
     "loom-format=loom::tools::loom-format"
   DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/command_artifacts.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/rooted_template_provider.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/target_profile_template_selection.loom"
   LABELS
     "hostonly"
 )

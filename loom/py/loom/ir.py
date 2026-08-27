@@ -1817,8 +1817,8 @@ class SymbolKind(IntEnum):
 
 
 # Symbol flags.
-# These bits are bytecode-stable. Bit 2 is reserved by the bytecode-only
-# explicit import-symbol marker.
+# These bits are bytecode-stable. Bits 2, 6, and 7 are reserved by bytecode-only
+# metadata flags.
 SYMBOL_FLAG_PUBLIC = 1 << 0
 SYMBOL_FLAG_IMPORT = 1 << 1
 SYMBOL_FLAG_RETAIN = 1 << 3

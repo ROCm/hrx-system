@@ -10,13 +10,13 @@
 iree_add_all_subdirs()
 
 file(GLOB _GLOB_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
-loom_link_module(
+loom_module(
   NAME
     conformance_cases
   SRCS
     "${_GLOB_X_LOOM}"
   MODE
-    "archive"
+    "merge"
   OUTPUT
     "conformance_cases.loombc"
   OUTPUT_FORMAT

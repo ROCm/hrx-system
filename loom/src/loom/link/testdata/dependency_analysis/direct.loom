@@ -1,0 +1,23 @@
+func.def public @direct(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.decl public @reexported(%x: i32) -> (i32)
+
+func.def public @bad(%x: f32) -> (f32) {
+  func.return %x : f32
+}
+
+func.def @private_only(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+template.decl @family.direct(%x: i32) -> (i32)
+
+template.def<@family.direct> priority(10) @direct_fast(%x: i32) -> (i32) {
+  template.return %x : i32
+}
+
+template.def<@family.direct> priority(1) @direct_fallback(%x: i32) -> (i32) {
+  template.return %x : i32
+}

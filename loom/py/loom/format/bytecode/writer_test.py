@@ -64,6 +64,8 @@ from loom.format.bytecode.writer import (
     LOCATION_MODE_SOURCE_LOCATIONS,
     SECTION_LOCATIONS,
     SECTION_SYMBOL_REFERENCES,
+    SECTION_SYMBOLS,
+    SYMBOL_FLAG_EXPORT,
     SYMBOL_INTERFACE_BITS,
     write_module,
 )
@@ -2127,11 +2129,11 @@ class TestCrossFormatRoundTrip:
         with pytest.raises(TypeError, match="uint8 ordinal"):
             write_module(module)
 
-    def test_unresolved_symbol_without_provider_anchor_fails_loud(self) -> None:
+    def test_symbol_without_serializable_kind_fails_loud(self) -> None:
         module = Module()
         module.add_symbol(Symbol(name="opaque", kind=SymbolKind.NONE))
 
-        with pytest.raises(ValueError, match="not a provider anchor"):
+        with pytest.raises(ValueError, match="has no serializable symbol kind"):
             write_module(module)
 
     def test_operand_dict_survives_bytecode(self) -> None:
@@ -2741,6 +2743,58 @@ class TestImportExportBytecodeRoundTrip:
         names = {s.name: s for s in loaded.symbols}
         assert not names["helper"].is_public
         assert names["entry"].is_public
+
+    def test_explicit_export_is_indexed_without_public_visibility(self) -> None:
+        """Explicit exports are indexed independently of source visibility."""
+        module = Module(name="test")
+        argument_id = module.add_value(Value(name="x", type=F32))
+        function_op = Operation(
+            name="func.def",
+            attributes={"callee": "entry", "export_symbol": "entry"},
+            regions=[
+                Region(
+                    blocks=[
+                        Block(
+                            arg_ids=[argument_id],
+                            ops=[Operation(name="test.yield", operands=[argument_id])],
+                        )
+                    ]
+                )
+            ],
+        )
+        module.add_symbol(
+            Symbol(
+                name="entry",
+                kind=SymbolKind.FUNC_DEF,
+                flags=0,
+                op=function_op,
+            )
+        )
+
+        data = write_module(module)
+        symbols = _section_payload(data, SECTION_SYMBOLS)
+        offset = 0
+        symbol_count, offset = decode_varint(symbols, offset)
+        import_count, offset = decode_varint(symbols, offset)
+        export_count, offset = decode_varint(symbols, offset)
+        _root_region_payload_count, offset = decode_varint(symbols, offset)
+        assert symbol_count == 1
+        assert import_count == 0
+        assert export_count == 1
+        assert struct.unpack_from("<Q", symbols, offset)[0] == 0
+        offset += 8
+        _name_id, offset = decode_varint(symbols, offset)
+        _kind = symbols[offset]
+        visibility = symbols[offset + 1]
+        flags = struct.unpack_from("<H", symbols, offset + 2)[0]
+        assert visibility == 1
+        assert flags & SYMBOL_FLAG_EXPORT
+
+        loaded = read_module(data)
+        loaded_symbol = loaded.symbols[0]
+        assert not loaded_symbol.is_public
+        assert loaded_symbol.op is not None
+        assert loaded_symbol.op.attributes["export_symbol"] == "entry"
 
     def test_mixed_import_export_private(self) -> None:
         """Module with imports, exports, and private symbols."""

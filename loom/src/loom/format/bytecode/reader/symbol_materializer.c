@@ -232,8 +232,6 @@ static loom_symbol_kind_t loom_bytecode_reader_decode_symbol_kind(
       return LOOM_SYMBOL_EXECUTABLE;
     case LOOM_BYTECODE_SYMBOL_RECORD:
       return LOOM_SYMBOL_RECORD;
-    case LOOM_BYTECODE_SYMBOL_ANCHOR:
-      return LOOM_SYMBOL_NONE;
     default:
       return LOOM_SYMBOL_NONE;
   }

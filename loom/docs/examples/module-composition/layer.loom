@@ -1,10 +1,8 @@
-// A selected provider may introduce its own unresolved dependency. Partial
-// linking preserves this import without opening or searching for its key.
-module.import "kernels.loom" [@scale]
-
+// A selected library definition may introduce its own unresolved dependency.
+// Partial linking preserves the declaration in the relocatable output.
 func.decl pure @scale(%value: i32) -> (i32)
 
-func.def @project_layer(%value: i32) -> (i32) {
+func.def public @project_layer(%value: i32) -> (i32) {
   %result = func.call @scale(%value) : (i32) -> (i32)
   func.return %result : i32
 }

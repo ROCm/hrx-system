@@ -114,85 +114,6 @@ TEST(LinkIndexTest, RejectsInvalidBlockSizes) {
   EXPECT_EQ(builder, nullptr);
 }
 
-TEST(LinkIndexTest, RejectsInvalidProviderImportKeys) {
-  ContextPtr context = CreateContext();
-  BuilderPtr builder = CreateBuilder(context.get());
-  loomc_link_index_source_slot_t slot = {};
-  loomc_link_index_source_options_t options = {
-      /*.provider_name=*/loomc_make_cstring_view("provider"),
-      /*.role=*/LOOMC_LINK_PROVIDER_ROLE_LIBRARY,
-      /*.import_keys=*/nullptr,
-      /*.import_key_count=*/1,
-  };
-  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT,
-                         loomc_link_index_builder_reserve_source_slot(
-                             builder.get(), &options, &slot));
-
-  const loomc_string_view_t empty_key = loomc_string_view_empty();
-  options.import_keys = &empty_key;
-  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT,
-                         loomc_link_index_builder_reserve_source_slot(
-                             builder.get(), &options, &slot));
-}
-
-TEST(LinkIndexTest, DuplicateCopiedProviderImportKeysFailFinish) {
-  ContextPtr context = CreateContext();
-  BuilderPtr builder = CreateBuilder(context.get());
-  SourcePtr first = CreateTextSource("first.loom", R"(
-func.def @first() {
-  func.return
-}
-)");
-  SourcePtr second = CreateTextSource("second.loom", R"(
-func.def @second() {
-  func.return
-}
-)");
-
-  std::string first_key = "shared-provider";
-  std::string second_key = "shared-provider";
-  const loomc_string_view_t first_keys[] = {
-      loomc_make_string_view(first_key.data(), first_key.size()),
-  };
-  const loomc_string_view_t second_keys[] = {
-      loomc_make_string_view(second_key.data(), second_key.size()),
-  };
-  const loomc_link_index_source_options_t first_options = {
-      /*.provider_name=*/loomc_make_cstring_view("first"),
-      /*.role=*/LOOMC_LINK_PROVIDER_ROLE_LIBRARY,
-      /*.import_keys=*/first_keys,
-      /*.import_key_count=*/IREE_ARRAYSIZE(first_keys),
-  };
-  const loomc_link_index_source_options_t second_options = {
-      /*.provider_name=*/loomc_make_cstring_view("second"),
-      /*.role=*/LOOMC_LINK_PROVIDER_ROLE_LIBRARY,
-      /*.import_keys=*/second_keys,
-      /*.import_key_count=*/IREE_ARRAYSIZE(second_keys),
-  };
-  LOOMC_ASSERT_OK(loomc_link_index_builder_add_source(
-      builder.get(), first.get(), &first_options, nullptr));
-  LOOMC_ASSERT_OK(loomc_link_index_builder_add_source(
-      builder.get(), second.get(), &second_options, nullptr));
-  first_key.assign(first_key.size(), 'a');
-  second_key.assign(second_key.size(), 'z');
-
-  loomc_link_index_t* link_index = nullptr;
-  loomc_result_t* result = nullptr;
-  LOOMC_ASSERT_OK(
-      loomc_link_index_builder_finish(builder.get(), &link_index, &result));
-  LinkIndexPtr link_index_ptr(link_index);
-  ResultPtr result_ptr(result);
-  EXPECT_EQ(link_index_ptr.get(), nullptr);
-  ASSERT_FALSE(loomc_result_succeeded(result_ptr.get()));
-  ASSERT_EQ(loomc_result_diagnostic_count(result_ptr.get()), 1u);
-  const loomc_diagnostic_t* diagnostic =
-      loomc_result_diagnostic_at(result_ptr.get(), 0);
-  ASSERT_NE(diagnostic, nullptr);
-  EXPECT_EQ(ToString(diagnostic->code), "LINK_INDEX/PROVIDER_BINDINGS");
-  EXPECT_NE(ToString(diagnostic->message).find("shared-provider"),
-            std::string::npos);
-}
-
 std::vector<uint8_t> WriteBytecodeModule(const char* source_text) {
   iree_allocator_t allocator = iree_allocator_system();
   iree_arena_block_pool_t block_pool;
@@ -310,7 +231,7 @@ check.case public @kernel_case {
   EXPECT_TRUE((symbol.flags & LOOMC_LINK_SYMBOL_FLAG_TEST_ONLY) != 0);
 }
 
-TEST(LinkIndexTest, InputProviderPrecedesLibraryProvider) {
+TEST(LinkIndexTest, CanonicalGlobalOrderPlacesInputBeforeLibrary) {
   ContextPtr context = CreateContext();
   BuilderPtr builder = CreateBuilder(context.get());
   SourcePtr library = CreateTextSource("library.loom", R"(

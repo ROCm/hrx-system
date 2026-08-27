@@ -113,6 +113,43 @@ pipeline. Specialization can therefore select providers and remove unreachable
 paths before later compilation work. Nested JSON keys flatten with `.`
 separators; explicit bindings not referenced by the module are ignored.
 
+## Emit portable command programs
+
+The command backend prepares selected command-program roots and emits one
+portable artifact per root:
+
+```shell
+loom-compile model.loombc \
+  --root=@elementwise_transform \
+  --backend=command \
+  --output=commands.json \
+  --emit-command-artifacts=commands/
+```
+
+`commands.json` maps each command symbol to a `.loomcmd` file and records the
+logical kernel entries that artifact requires. The files under `commands/`
+contain target-neutral resource bindings, schedule waves, dispatches, and
+executable slots. They do not embed a device executable.
+
+Compile the reachable kernels through a HAL backend for the deployment target:
+
+```shell
+loom-compile model.loombc \
+  --root=@elementwise_transform_f32 \
+  --backend=amdgpu-hal \
+  --target=gfx11-generic \
+  --output=commands-kernels.hsaco
+```
+
+Use the same closed, root-selected module for both invocations so the command
+manifest and executable are derived from one dependency closure. For a
+multi-library input, close that module with the
+[same target profile during selective linking](link-and-package.md#link-one-program)
+so target-constrained kernel providers are chosen before pruning. The public
+[`loom_command_binary`](build-with-bazel.md#command-binaries-package-schedules-with-their-kernels)
+rule owns that pairing in Bazel and exposes the manifest, portable artifacts,
+and kernel executable as one product target.
+
 ## Compile a VM-targeted module
 
 The VM backend emits a VM bytecode archive from functions authored for an

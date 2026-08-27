@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Benchmarks repeated selective links through the public LoomC API. The
+// Benchmarks repeated link operations through the public LoomC API. The
 // reusable linker and frozen index own catalog-wide work while one worker-local
 // workspace supplies invocation storage and each link materializes one root
 // closure.
@@ -193,8 +193,6 @@ class LinkCatalogFixture {
     const loomc_link_index_source_options_t source_options = {
         /*.provider_name=*/loomc_make_cstring_view("catalog"),
         /*.role=*/LOOMC_LINK_PROVIDER_ROLE_INPUT,
-        /*.import_keys=*/nullptr,
-        /*.import_key_count=*/0,
     };
     IREE_RETURN_IF_ERROR(to_iree_status(loomc_link_index_builder_add_source(
         builder_ptr.get(), source_.get(), &source_options,
@@ -245,6 +243,7 @@ class LinkCatalogFixture {
         /*.next=*/nullptr,
         /*.link_index=*/index,
         /*.module_name=*/loomc_make_cstring_view("selected_kernel"),
+        /*.mode=*/LOOMC_LINK_MODE_LINK,
         /*.root_symbols=*/&root_symbol,
         /*.root_symbol_count=*/1,
         /*.flags=*/0,
@@ -257,11 +256,10 @@ class LinkCatalogFixture {
     ModulePtr module_ptr(module);
     ResultPtr result_ptr(result);
     IREE_RETURN_IF_ERROR(status);
-    IREE_RETURN_IF_ERROR(
-        RequireSucceededResult(result_ptr.get(), "selective linking"));
+    IREE_RETURN_IF_ERROR(RequireSucceededResult(result_ptr.get(), "linking"));
     if (!module_ptr) {
       return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "selective linking produced no module");
+                              "linking produced no module");
     }
     out_module->reset(module_ptr.release());
     out_result->reset(result_ptr.release());
@@ -281,7 +279,7 @@ class LinkCatalogFixture {
         RequireSucceededResult(result_ptr.get(), "linked module query"));
     if (function_count != 2) {
       return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "selective link retained %" PRIhsz
+                              "link retained %" PRIhsz
                               " functions; expected one root and one helper",
                               function_count);
     }
@@ -293,9 +291,8 @@ class LinkCatalogFixture {
             &function) ||
         !loomc_module_try_lookup_function(
             module, loomc_make_cstring_view("@shared_identity"), &function)) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "selective link did not retain its root and shared helper");
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "link did not retain its root and shared helper");
     }
     return iree_ok_status();
   }
@@ -439,8 +436,8 @@ static void BM_LinkIndexBuildBytecode(benchmark::State& state) {
   BM_LinkIndexBuildForFormat(state, LOOMC_SOURCE_FORMAT_BYTECODE);
 }
 
-static void BM_SelectiveLinkBatchForFormat(
-    benchmark::State& state, loomc_source_format_t source_format) {
+static void BM_LinkBatchForFormat(benchmark::State& state,
+                                  loomc_source_format_t source_format) {
   LinkCatalogFixture fixture((uint32_t)state.range(0), (uint32_t)state.range(1),
                              source_format);
   if (SkipOnError(state, fixture.Initialize())) {
@@ -493,15 +490,15 @@ static void BM_SelectiveLinkBatchForFormat(
       benchmark::Counter(total_links, benchmark::Counter::kIsRate);
 }
 
-static void BM_SelectiveLinkBatch(benchmark::State& state) {
-  BM_SelectiveLinkBatchForFormat(state, LOOMC_SOURCE_FORMAT_TEXT);
+static void BM_LinkBatch(benchmark::State& state) {
+  BM_LinkBatchForFormat(state, LOOMC_SOURCE_FORMAT_TEXT);
 }
 
-static void BM_SelectiveLinkBatchBytecode(benchmark::State& state) {
-  BM_SelectiveLinkBatchForFormat(state, LOOMC_SOURCE_FORMAT_BYTECODE);
+static void BM_LinkBatchBytecode(benchmark::State& state) {
+  BM_LinkBatchForFormat(state, LOOMC_SOURCE_FORMAT_BYTECODE);
 }
 
-static void BM_IndexOnceAndSelectiveLinkBatchForFormat(
+static void BM_IndexOnceAndLinkBatchForFormat(
     benchmark::State& state, loomc_source_format_t source_format) {
   LinkCatalogFixture fixture((uint32_t)state.range(0), (uint32_t)state.range(1),
                              source_format);
@@ -544,13 +541,12 @@ static void BM_IndexOnceAndSelectiveLinkBatchForFormat(
       benchmark::Counter(total_links, benchmark::Counter::kIsRate);
 }
 
-static void BM_IndexOnceAndSelectiveLinkBatch(benchmark::State& state) {
-  BM_IndexOnceAndSelectiveLinkBatchForFormat(state, LOOMC_SOURCE_FORMAT_TEXT);
+static void BM_IndexOnceAndLinkBatch(benchmark::State& state) {
+  BM_IndexOnceAndLinkBatchForFormat(state, LOOMC_SOURCE_FORMAT_TEXT);
 }
 
-static void BM_IndexOnceAndSelectiveLinkBatchBytecode(benchmark::State& state) {
-  BM_IndexOnceAndSelectiveLinkBatchForFormat(state,
-                                             LOOMC_SOURCE_FORMAT_BYTECODE);
+static void BM_IndexOnceAndLinkBatchBytecode(benchmark::State& state) {
+  BM_IndexOnceAndLinkBatchForFormat(state, LOOMC_SOURCE_FORMAT_BYTECODE);
 }
 
 static void CatalogScales(benchmark::Benchmark* benchmark) {
@@ -560,7 +556,7 @@ static void CatalogScales(benchmark::Benchmark* benchmark) {
   benchmark->Args({4096, 512});
 }
 
-static void SelectiveLinkScales(benchmark::Benchmark* benchmark) {
+static void LinkScales(benchmark::Benchmark* benchmark) {
   for (int64_t root_count : {1, 16, 64, 512}) {
     for (int64_t links_per_batch : {1, 16, 64, 512}) {
       benchmark->Args({root_count, 256, links_per_batch});
@@ -578,12 +574,10 @@ static void BM_LinkIndexBuildBytecode_Smoke(benchmark::State& state) {
   BM_LinkIndexBuildBytecode(state);
 }
 
-static void BM_SelectiveLinkBatch_Smoke(benchmark::State& state) {
-  BM_SelectiveLinkBatch(state);
-}
+static void BM_LinkBatch_Smoke(benchmark::State& state) { BM_LinkBatch(state); }
 
-static void BM_SelectiveLinkBatchBytecode_Smoke(benchmark::State& state) {
-  BM_SelectiveLinkBatchBytecode(state);
+static void BM_LinkBatchBytecode_Smoke(benchmark::State& state) {
+  BM_LinkBatchBytecode(state);
 }
 
 BENCHMARK(BM_LinkIndexBuild)
@@ -592,18 +586,18 @@ BENCHMARK(BM_LinkIndexBuild)
 BENCHMARK(BM_LinkIndexBuildBytecode)
     ->Apply(CatalogScales)
     ->ArgNames({"catalog_roots", "values_per_root"});
-BENCHMARK(BM_SelectiveLinkBatch)
-    ->Apply(SelectiveLinkScales)
+BENCHMARK(BM_LinkBatch)
+    ->Apply(LinkScales)
     ->ArgNames({"catalog_roots", "values_per_root", "links_per_batch"});
-BENCHMARK(BM_SelectiveLinkBatchBytecode)
-    ->Apply(SelectiveLinkScales)
+BENCHMARK(BM_LinkBatchBytecode)
+    ->Apply(LinkScales)
     ->ArgNames({"catalog_roots", "values_per_root", "links_per_batch"});
-BENCHMARK(BM_IndexOnceAndSelectiveLinkBatch)
+BENCHMARK(BM_IndexOnceAndLinkBatch)
     ->Args({512, 256, 388})
     ->Args({4096, 512, 80})
     ->Args({4096, 512, 388})
     ->ArgNames({"catalog_roots", "values_per_root", "links_per_batch"});
-BENCHMARK(BM_IndexOnceAndSelectiveLinkBatchBytecode)
+BENCHMARK(BM_IndexOnceAndLinkBatchBytecode)
     ->Args({512, 256, 388})
     ->Args({4096, 512, 80})
     ->Args({4096, 512, 388})
@@ -615,10 +609,10 @@ BENCHMARK(BM_LinkIndexBuild_Smoke)
 BENCHMARK(BM_LinkIndexBuildBytecode_Smoke)
     ->Args({16, 16})
     ->ArgNames({"catalog_roots", "values_per_root"});
-BENCHMARK(BM_SelectiveLinkBatch_Smoke)
+BENCHMARK(BM_LinkBatch_Smoke)
     ->Args({16, 16, 4})
     ->ArgNames({"catalog_roots", "values_per_root", "links_per_batch"});
-BENCHMARK(BM_SelectiveLinkBatchBytecode_Smoke)
+BENCHMARK(BM_LinkBatchBytecode_Smoke)
     ->Args({16, 16, 4})
     ->ArgNames({"catalog_roots", "values_per_root", "links_per_batch"});
 

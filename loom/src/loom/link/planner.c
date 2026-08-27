@@ -49,11 +49,11 @@ typedef struct loom_link_plan_facet_request_t {
   loom_link_symbol_facet_kind_t kind;
 } loom_link_plan_facet_request_t;
 
-// Provider resolution has not been attempted for this selected symbol.
-#define LOOM_LINK_PLAN_PROVIDER_UNCHECKED_ORDINAL \
+// Definition resolution has not been attempted for this selected symbol.
+#define LOOM_LINK_PLAN_DEFINITION_UNCHECKED_ORDINAL \
   LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL
-// Provider resolution completed without selecting a concrete definition.
-#define LOOM_LINK_PLAN_PROVIDER_ABSENT_ORDINAL \
+// Definition resolution completed without selecting a concrete definition.
+#define LOOM_LINK_PLAN_DEFINITION_ABSENT_ORDINAL \
   (LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL - 1)
 
 typedef struct loom_link_plan_symbol_work_item_t {
@@ -61,8 +61,8 @@ typedef struct loom_link_plan_symbol_work_item_t {
   loom_link_plan_symbol_t selection;
   // Last selected facet for O(1) append to this symbol's facet chain.
   iree_host_size_t last_facet_plan_ordinal;
-  // Index-wide concrete provider symbol ordinal, UNCHECKED, or ABSENT.
-  iree_host_size_t resolved_provider_symbol_ordinal;
+  // Index-wide concrete definition symbol ordinal, UNCHECKED, or ABSENT.
+  iree_host_size_t resolved_definition_symbol_ordinal;
 } loom_link_plan_symbol_work_item_t;
 
 typedef enum loom_link_plan_facet_expansion_mode_e {
@@ -88,7 +88,7 @@ struct loom_link_plan_t {
   const loom_link_module_index_t* index;
   // Host allocator for plan storage.
   iree_allocator_t allocator;
-  // Planning mode determining module-level archive ownership.
+  // Planning mode determining module-level merge ownership.
   loom_link_plan_mode_t mode;
   // Live symbol selections in stable worklist order.
   struct {
@@ -125,8 +125,6 @@ struct loom_link_plan_t {
     uint64_t* storage;
     // Selected module-index symbols.
     loom_link_plan_bitmap_t symbols;
-    // Declarations whose compile-time provider imports were satisfied.
-    loom_link_plan_bitmap_t resolved_declarations;
     // Modules whose root dependency row has been expanded.
     loom_link_plan_bitmap_t modules;
     // Template families already recorded as demanded.
@@ -139,8 +137,6 @@ struct loom_link_plan_t {
     // Power-of-two slot capacity.
     iree_host_size_t capacity;
   } symbol_ordinals;
-  // Reused while filtering one declaration's candidates by bound provider.
-  loom_link_plan_bitmap_t candidate_providers;
 };
 
 //===----------------------------------------------------------------------===//
@@ -202,38 +198,26 @@ static iree_status_t loom_link_plan_bitmap_word_count(
 }
 
 static iree_status_t loom_link_plan_initialize_reachability(
-    loom_link_plan_t* plan, const loom_link_plan_options_t* options) {
+    loom_link_plan_t* plan) {
   plan->reachability.symbols.bit_count =
       loom_link_module_index_symbol_count(plan->index);
-  if (options && options->provider_resolver &&
-      options->provider_resolver->binding_count != 0) {
-    plan->reachability.resolved_declarations.bit_count =
-        plan->reachability.symbols.bit_count;
-  }
   plan->reachability.modules.bit_count =
       loom_link_module_index_module_count(plan->index);
   plan->reachability.template_families.bit_count =
       loom_link_module_index_template_family_count(plan->index);
 
   iree_host_size_t symbol_word_count = 0;
-  iree_host_size_t resolved_declaration_word_count = 0;
   iree_host_size_t module_word_count = 0;
   iree_host_size_t family_word_count = 0;
   IREE_RETURN_IF_ERROR(loom_link_plan_bitmap_word_count(
       plan->reachability.symbols.bit_count, &symbol_word_count));
-  IREE_RETURN_IF_ERROR(loom_link_plan_bitmap_word_count(
-      plan->reachability.resolved_declarations.bit_count,
-      &resolved_declaration_word_count));
   IREE_RETURN_IF_ERROR(loom_link_plan_bitmap_word_count(
       plan->reachability.modules.bit_count, &module_word_count));
   IREE_RETURN_IF_ERROR(loom_link_plan_bitmap_word_count(
       plan->reachability.template_families.bit_count, &family_word_count));
 
   iree_host_size_t total_word_count = 0;
-  if (!iree_host_size_checked_add(symbol_word_count,
-                                  resolved_declaration_word_count,
-                                  &total_word_count) ||
-      !iree_host_size_checked_add(total_word_count, module_word_count,
+  if (!iree_host_size_checked_add(symbol_word_count, module_word_count,
                                   &total_word_count) ||
       !iree_host_size_checked_add(total_word_count, family_word_count,
                                   &total_word_count)) {
@@ -255,33 +239,10 @@ static iree_status_t loom_link_plan_initialize_reachability(
       plan->allocator, storage_size, (void**)&plan->reachability.storage));
   memset(plan->reachability.storage, 0, storage_size);
   plan->reachability.symbols.values = plan->reachability.storage;
-  plan->reachability.resolved_declarations.values =
-      plan->reachability.symbols.values + symbol_word_count;
   plan->reachability.modules.values =
-      plan->reachability.resolved_declarations.values +
-      resolved_declaration_word_count;
+      plan->reachability.symbols.values + symbol_word_count;
   plan->reachability.template_families.values =
       plan->reachability.modules.values + module_word_count;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_link_plan_initialize_candidate_providers(
-    loom_link_plan_t* plan, const loom_link_plan_options_t* options) {
-  if (!options || !options->provider_resolver ||
-      options->provider_resolver->binding_count == 0) {
-    return iree_ok_status();
-  }
-  plan->candidate_providers.bit_count =
-      loom_link_module_index_provider_count(plan->index);
-  iree_host_size_t word_count = 0;
-  IREE_RETURN_IF_ERROR(loom_link_plan_bitmap_word_count(
-      plan->candidate_providers.bit_count, &word_count));
-  if (word_count == 0) {
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      plan->allocator, word_count, sizeof(*plan->candidate_providers.values),
-      (void**)&plan->candidate_providers.values));
   return iree_ok_status();
 }
 
@@ -300,11 +261,6 @@ static bool loom_link_plan_bitmap_test_and_set(loom_link_plan_bitmap_t* bitmap,
   const bool was_set = (*word & mask) != 0;
   *word |= mask;
   return was_set;
-}
-
-static void loom_link_plan_bitmap_clear(loom_link_plan_bitmap_t* bitmap,
-                                        iree_host_size_t ordinal) {
-  bitmap->values[ordinal / 64] &= ~(UINT64_C(1) << (ordinal % 64));
 }
 
 static iree_host_size_t loom_link_plan_hash_symbol_ordinal(
@@ -421,151 +377,260 @@ static bool loom_link_plan_symbol_is_stripped(
                                symbol);
 }
 
+// Returns true when the selected product may retain an unresolved contract.
+// Merge plans form relocatable modules and therefore always preserve
+// declarations. Link plans are closed unless their caller explicitly
+// requests another relocatable output.
+static bool loom_link_plan_allows_unresolved(
+    const loom_link_plan_t* plan, const loom_link_plan_options_t* options) {
+  return plan->mode == LOOM_LINK_PLAN_MERGE ||
+         (options &&
+          options->unresolved_policy == LOOM_LINK_PLAN_UNRESOLVED_ALLOW);
+}
+
+static bool loom_link_plan_symbol_is_concrete_global(
+    const loom_link_module_index_symbol_t* symbol) {
+  if (symbol->identity != LOOM_LINK_SYMBOL_IDENTITY_GLOBAL) {
+    return false;
+  }
+  if (iree_any_bit_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_DECLARATION |
+                                          LOOM_LINK_SYMBOL_FLAG_IMPORT |
+                                          LOOM_LINK_SYMBOL_FLAG_CONFIG)) {
+    return false;
+  }
+  return iree_any_bit_set(symbol->flags,
+                          LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION);
+}
+
+static iree_status_t loom_link_plan_global_collision_status(
+    const loom_link_plan_t* plan,
+    const loom_link_module_index_symbol_t* selected,
+    const loom_link_module_index_symbol_t* duplicate) {
+  return loom_link_module_index_annotate_global_collision(
+      iree_status_from_code(IREE_STATUS_ALREADY_EXISTS), plan->index, selected,
+      duplicate);
+}
+
 static bool loom_link_plan_symbol_is_declaration_like(
     const loom_link_module_index_symbol_t* symbol) {
   return iree_any_bit_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_DECLARATION |
                                              LOOM_LINK_SYMBOL_FLAG_IMPORT);
 }
 
-static bool loom_link_plan_symbol_satisfies_declaration(
+// Returns true when |declaration| is an ordinary compile-time symbol contract.
+// Other declaration families have dedicated owners: runtime imports remain
+// external, templates use provider selection, and config/target/artifact
+// requirements are supplied by later compilation and emission stages.
+static bool loom_link_plan_symbol_is_exact_declaration(
+    const loom_link_module_index_symbol_t* declaration) {
+  return loom_link_plan_symbol_is_declaration_like(declaration) &&
+         !iree_any_bit_set(declaration->flags, LOOM_LINK_SYMBOL_FLAG_IMPORT) &&
+         iree_any_bit_set(declaration->facets.schema.interfaces,
+                          LOOM_SYMBOL_INTERFACE_FUNC_LIKE) &&
+         declaration->template_family_ordinal ==
+             LOOM_LINK_TEMPLATE_FAMILY_ORDINAL_INVALID;
+}
+
+// Returns true when |candidate| can structurally provide |declaration|. This
+// broad index-level filter avoids materializing unrelated same-name symbol
+// families; full contract compatibility is checked while merging the selected
+// definition.
+static bool loom_link_plan_symbol_satisfies_declaration_interface(
     const loom_link_module_index_symbol_t* declaration,
     const loom_link_module_index_symbol_t* candidate) {
-  if (candidate == declaration) {
-    return false;
-  }
-  return !loom_link_plan_symbol_is_declaration_like(candidate) &&
+  return candidate != declaration &&
+         !loom_link_plan_symbol_is_declaration_like(candidate) &&
          iree_any_bit_set(candidate->flags,
                           LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION) &&
          iree_all_bits_set(candidate->facets.schema.interfaces,
                            declaration->facets.schema.interfaces);
 }
 
-static const loom_link_module_index_symbol_t*
-loom_link_plan_find_unconstrained_definition_for_declaration(
-    const loom_link_plan_t* plan, const loom_link_plan_options_t* options,
+// Returns true when |declaration| names a target context that may be supplied
+// either by an explicit target record in the link environment or by a later
+// target-profile binding. Target requirements are not ordinary library edges.
+static bool loom_link_plan_symbol_is_target_declaration(
     const loom_link_module_index_symbol_t* declaration) {
-  const loom_link_module_index_symbol_t* symbol =
-      loom_link_module_index_lookup_name(plan->index, declaration->name);
-  while (symbol) {
-    if (loom_link_plan_symbol_satisfies_declaration(declaration, symbol) &&
-        !loom_link_plan_symbol_is_stripped(options, plan, symbol)) {
-      return symbol;
-    }
-    symbol = loom_link_module_index_next_same_name(plan->index, symbol);
-  }
-  return NULL;
+  return loom_link_plan_symbol_is_declaration_like(declaration) &&
+         iree_any_bit_set(declaration->facets.schema.interfaces,
+                          LOOM_SYMBOL_INTERFACE_TARGET);
 }
 
-static iree_status_t loom_link_plan_ambiguous_import_status(
+// Returns true when |candidate| is owned by the same source merge as
+// |declaration|. Each provider is one ownership unit and all INPUT providers
+// jointly represent the direct sources of the module being assembled.
+static bool loom_link_plan_symbols_share_merge_ownership(
     const loom_link_plan_t* plan,
     const loom_link_module_index_symbol_t* declaration,
-    const loom_link_module_index_symbol_t* first,
-    const loom_link_module_index_symbol_t* second) {
-  const loom_link_module_index_module_t* first_module =
-      loom_link_module_index_symbol_module(plan->index, first);
-  const loom_link_module_index_module_t* second_module =
-      loom_link_module_index_symbol_module(plan->index, second);
-  const loom_link_module_index_provider_t* first_provider =
-      loom_link_module_index_symbol_provider(plan->index, first);
-  const loom_link_module_index_provider_t* second_provider =
-      loom_link_module_index_symbol_provider(plan->index, second);
-  return iree_make_status(
-      IREE_STATUS_ALREADY_EXISTS,
-      "provider imports for declaration '@%.*s' resolve to both provider "
-      "'%.*s' module '%.*s' and provider '%.*s' module '%.*s'",
-      (int)declaration->name.size, declaration->name.data,
-      (int)first_provider->name.size, first_provider->name.data,
-      (int)first_module->name.size, first_module->name.data,
-      (int)second_provider->name.size, second_provider->name.data,
-      (int)second_module->name.size, second_module->name.data);
+    const loom_link_module_index_symbol_t* candidate) {
+  const loom_link_module_index_provider_t* declaration_provider =
+      loom_link_module_index_symbol_provider(plan->index, declaration);
+  const loom_link_module_index_provider_t* candidate_provider =
+      loom_link_module_index_symbol_provider(plan->index, candidate);
+  IREE_ASSERT(declaration_provider);
+  IREE_ASSERT(candidate_provider);
+  return declaration_provider == candidate_provider ||
+         (declaration_provider->role == LOOM_LINK_PROVIDER_ROLE_INPUT &&
+          candidate_provider->role == LOOM_LINK_PROVIDER_ROLE_INPUT);
 }
 
-static iree_host_size_t loom_link_plan_resolve_provider_import(
-    const loom_link_plan_t* plan, const loom_link_plan_options_t* options,
-    const loom_link_module_index_module_t* module,
-    uint32_t provider_import_ordinal) {
-  if (!options || !options->provider_resolver) {
-    return LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
-  }
-  const iree_string_view_t key = loom_link_module_index_provider_import_key_at(
-      plan->index, module, provider_import_ordinal);
-  return loom_link_provider_resolver_lookup(options->provider_resolver, key);
-}
-
-static iree_status_t loom_link_plan_find_imported_symbol_for_declaration(
-    loom_link_plan_t* plan, const loom_link_plan_options_t* options,
+// Returns true when |request| consumes an implementation-bearing facet. A
+// kernel or command contract can remain as a declaration in a closed portable
+// product; configuration, implementation, and ordinary definition facets
+// require a concrete provider.
+static bool loom_link_plan_facet_request_requires_definition(
     const loom_link_module_index_symbol_t* declaration,
-    loom_link_module_index_provider_import_list_t imports,
+    loom_link_plan_facet_request_t request) {
+  if (request.mode == LOOM_LINK_PLAN_FACET_REQUEST_COMPLETE) {
+    return true;
+  }
+  if (request.mode == LOOM_LINK_PLAN_FACET_REQUEST_PRIMARY) {
+    return false;
+  }
+  return request.kind != LOOM_LINK_SYMBOL_FACET_KERNEL_CONTRACT &&
+         request.kind != LOOM_LINK_SYMBOL_FACET_COMMAND_CONTRACT;
+}
+
+static iree_status_t loom_link_plan_unresolved_exact_declaration_status(
+    const loom_link_module_index_symbol_t* declaration) {
+  return iree_make_status(IREE_STATUS_NOT_FOUND,
+                          "unresolved exact declaration '@%.*s'",
+                          (int)declaration->name.size, declaration->name.data);
+}
+
+static iree_status_t loom_link_plan_find_exact_definition_for_declaration(
+    const loom_link_plan_t* plan, const loom_link_plan_options_t* options,
+    const loom_link_module_index_symbol_t* declaration,
+    loom_link_plan_facet_request_t definition_request,
     const loom_link_module_index_symbol_t** out_selected_symbol) {
   *out_selected_symbol = NULL;
-  const loom_link_module_index_module_t* declaration_module =
-      loom_link_module_index_symbol_module(plan->index, declaration);
-
-  bool has_bound_provider = false;
-  for (iree_host_size_t i = 0; i < imports.count; ++i) {
-    const iree_host_size_t provider_ordinal =
-        loom_link_plan_resolve_provider_import(
-            plan, options, declaration_module, imports.values[i]);
-    if (provider_ordinal == LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL) {
-      continue;
+  const loom_link_module_index_symbol_t* owner_definition = NULL;
+  const loom_link_module_index_symbol_t* duplicate_owner_definition = NULL;
+  const loom_link_module_index_symbol_t* external_definition = NULL;
+  const loom_link_module_index_symbol_t* duplicate_external_definition = NULL;
+  const loom_link_module_index_symbol_t* candidate =
+      loom_link_module_index_lookup_name(plan->index, declaration->name);
+  while (candidate) {
+    if (plan->mode == LOOM_LINK_PLAN_MERGE) {
+      const loom_link_module_index_provider_t* candidate_provider =
+          loom_link_module_index_symbol_provider(plan->index, candidate);
+      IREE_ASSERT(candidate_provider);
+      if (candidate_provider->role == LOOM_LINK_PROVIDER_ROLE_LIBRARY) {
+        break;
+      }
     }
-    loom_link_plan_bitmap_test_and_set(&plan->candidate_providers,
-                                       provider_ordinal);
-    has_bound_provider = true;
-  }
-
-  const loom_link_module_index_symbol_t* selected_symbol = NULL;
-  const loom_link_module_index_symbol_t* ambiguous_symbol = NULL;
-  if (has_bound_provider) {
-    const loom_link_module_index_symbol_t* candidate =
-        loom_link_module_index_lookup_name(plan->index, declaration->name);
-    while (candidate) {
-      const loom_link_module_index_module_t* candidate_module =
-          loom_link_module_index_symbol_module(plan->index, candidate);
-      const bool provider_is_bound = loom_link_plan_bitmap_contains(
-          &plan->candidate_providers, candidate_module->provider_ordinal);
-      const bool candidate_satisfies_declaration =
-          loom_link_plan_symbol_satisfies_declaration(declaration, candidate) &&
-          !loom_link_plan_symbol_is_stripped(options, plan, candidate);
-      if (provider_is_bound && candidate_satisfies_declaration) {
-        if (selected_symbol) {
-          ambiguous_symbol = candidate;
-          break;
+    const bool is_concrete_definition =
+        loom_link_plan_symbol_satisfies_declaration_interface(declaration,
+                                                              candidate);
+    if (is_concrete_definition &&
+        !loom_link_plan_symbol_is_stripped(options, plan, candidate)) {
+      if (loom_link_plan_symbols_share_merge_ownership(plan, declaration,
+                                                       candidate)) {
+        if (owner_definition) {
+          duplicate_owner_definition = candidate;
         } else {
-          selected_symbol = candidate;
+          owner_definition = candidate;
+        }
+      } else if (plan->mode == LOOM_LINK_PLAN_LINK &&
+                 iree_any_bit_set(candidate->flags,
+                                  LOOM_LINK_SYMBOL_FLAG_EXPORT)) {
+        if (external_definition) {
+          duplicate_external_definition = candidate;
+        } else {
+          external_definition = candidate;
         }
       }
-      candidate = loom_link_module_index_next_same_name(plan->index, candidate);
     }
+    candidate = loom_link_module_index_next_same_name(plan->index, candidate);
   }
 
-  for (iree_host_size_t i = 0; i < imports.count; ++i) {
-    const iree_host_size_t provider_ordinal =
-        loom_link_plan_resolve_provider_import(
-            plan, options, declaration_module, imports.values[i]);
-    if (provider_ordinal != LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL) {
-      loom_link_plan_bitmap_clear(&plan->candidate_providers, provider_ordinal);
+  if (duplicate_owner_definition) {
+    return loom_link_plan_global_collision_status(plan, owner_definition,
+                                                  duplicate_owner_definition);
+  }
+  if (owner_definition) {
+    *out_selected_symbol = owner_definition;
+  } else if (duplicate_external_definition) {
+    return loom_link_plan_global_collision_status(
+        plan, external_definition, duplicate_external_definition);
+  } else {
+    *out_selected_symbol = external_definition;
+  }
+  if (*out_selected_symbol ||
+      !loom_link_plan_facet_request_requires_definition(declaration,
+                                                        definition_request) ||
+      loom_link_plan_allows_unresolved(plan, options)) {
+    return iree_ok_status();
+  }
+  return loom_link_plan_unresolved_exact_declaration_status(declaration);
+}
+
+static iree_status_t loom_link_plan_find_target_definition_for_declaration(
+    const loom_link_plan_t* plan, const loom_link_plan_options_t* options,
+    const loom_link_module_index_symbol_t* declaration,
+    const loom_link_module_index_symbol_t** out_selected_symbol) {
+  *out_selected_symbol = NULL;
+  const loom_link_module_index_symbol_t* candidate =
+      loom_link_module_index_lookup_name(plan->index, declaration->name);
+  while (candidate) {
+    if (plan->mode == LOOM_LINK_PLAN_MERGE) {
+      const loom_link_module_index_provider_t* candidate_provider =
+          loom_link_module_index_symbol_provider(plan->index, candidate);
+      IREE_ASSERT(candidate_provider);
+      if (candidate_provider->role == LOOM_LINK_PROVIDER_ROLE_LIBRARY) {
+        break;
+      }
     }
+    if (loom_link_plan_symbol_satisfies_declaration_interface(declaration,
+                                                              candidate) &&
+        !loom_link_plan_symbol_is_stripped(options, plan, candidate) &&
+        (plan->mode == LOOM_LINK_PLAN_LINK ||
+         loom_link_plan_symbols_share_merge_ownership(plan, declaration,
+                                                      candidate))) {
+      if (*out_selected_symbol) {
+        return loom_link_plan_global_collision_status(
+            plan, *out_selected_symbol, candidate);
+      }
+      *out_selected_symbol = candidate;
+    }
+    candidate = loom_link_module_index_next_same_name(plan->index, candidate);
   }
-  if (ambiguous_symbol) {
-    return loom_link_plan_ambiguous_import_status(
-        plan, declaration, selected_symbol, ambiguous_symbol);
-  }
+  return iree_ok_status();
+}
 
-  if (!selected_symbol && (!options || options->unresolved_policy ==
-                                           LOOM_LINK_PLAN_UNRESOLVED_ERROR)) {
-    const iree_string_view_t first_key =
-        loom_link_module_index_provider_import_key_at(
-            plan->index, declaration_module, imports.values[0]);
-    return iree_make_status(
-        IREE_STATUS_NOT_FOUND,
-        "provider import '%.*s' for declaration '@%.*s' has no available "
-        "concrete definition across %" PRIhsz " source alternatives",
-        (int)first_key.size, first_key.data, (int)declaration->name.size,
-        declaration->name.data, imports.count);
+// Rejects an explicit global root whose candidate class is not unique. INPUT
+// definitions own the module being assembled and do not extract same-name
+// library alternatives. Without an INPUT definition, the explicit library
+// universe must expose exactly one concrete root definition.
+static iree_status_t loom_link_plan_check_root_definition_ambiguity(
+    const loom_link_plan_t* plan, const loom_link_module_index_symbol_t* root) {
+  if (!loom_link_plan_symbol_is_concrete_global(root)) {
+    return iree_ok_status();
   }
-
-  *out_selected_symbol = selected_symbol;
+  const loom_link_module_index_provider_t* root_provider =
+      loom_link_module_index_symbol_provider(plan->index, root);
+  IREE_ASSERT(root_provider);
+  const loom_link_module_index_symbol_t* candidate =
+      loom_link_module_index_lookup_name(plan->index, root->name);
+  while (candidate) {
+    if (candidate != root &&
+        loom_link_plan_symbol_is_concrete_global(candidate)) {
+      const loom_link_module_index_provider_t* candidate_provider =
+          loom_link_module_index_symbol_provider(plan->index, candidate);
+      IREE_ASSERT(candidate_provider);
+      const bool competing_input =
+          root_provider->role == LOOM_LINK_PROVIDER_ROLE_INPUT &&
+          candidate_provider->role == LOOM_LINK_PROVIDER_ROLE_INPUT;
+      const bool competing_library =
+          root_provider->role == LOOM_LINK_PROVIDER_ROLE_LIBRARY &&
+          candidate_provider->role == LOOM_LINK_PROVIDER_ROLE_LIBRARY &&
+          iree_any_bit_set(candidate->flags, LOOM_LINK_SYMBOL_FLAG_EXPORT);
+      if (competing_input || competing_library) {
+        return loom_link_plan_global_collision_status(plan, root, candidate);
+      }
+    }
+    candidate = loom_link_module_index_next_same_name(plan->index, candidate);
+  }
   return iree_ok_status();
 }
 
@@ -598,8 +663,8 @@ static iree_status_t loom_link_plan_append_symbol(
               .root_name = cause.root_name,
           },
       .last_facet_plan_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
-      .resolved_provider_symbol_ordinal =
-          LOOM_LINK_PLAN_PROVIDER_UNCHECKED_ORDINAL,
+      .resolved_definition_symbol_ordinal =
+          LOOM_LINK_PLAN_DEFINITION_UNCHECKED_ORDINAL,
   };
   loom_link_plan_bitmap_test_and_set(&plan->reachability.symbols,
                                      symbol->ordinal);
@@ -732,8 +797,7 @@ static iree_status_t loom_link_plan_select_required_symbol_facets(
     return iree_ok_status();
   }
   if (loom_link_plan_symbol_is_stripped(options, plan, symbol)) {
-    if (options &&
-        options->unresolved_policy == LOOM_LINK_PLAN_UNRESOLVED_ALLOW) {
+    if (loom_link_plan_allows_unresolved(plan, options)) {
       return iree_ok_status();
     }
     return iree_make_status(IREE_STATUS_NOT_FOUND,
@@ -824,44 +888,52 @@ static iree_status_t loom_link_plan_resolve_declaration(
     loom_link_plan_t* plan, const loom_link_plan_options_t* options,
     const loom_link_module_index_symbol_t* declaration,
     iree_host_size_t declaration_plan_ordinal,
-    loom_link_plan_facet_request_t provider_request) {
+    loom_link_plan_facet_request_t definition_request) {
   if (!loom_link_plan_symbol_is_declaration_like(declaration)) {
     return iree_ok_status();
   }
   // Template families are authored contracts carried by every using module.
-  // Provider imports resolve concrete symbol declarations only; the active
-  // library universe contributes template providers independently.
+  // The active library universe contributes template providers independently.
   if (declaration->template_family_ordinal !=
       LOOM_LINK_TEMPLATE_FAMILY_ORDINAL_INVALID) {
     return iree_ok_status();
   }
+  const bool exact_declaration =
+      loom_link_plan_symbol_is_exact_declaration(declaration);
+  const bool target_declaration =
+      loom_link_plan_symbol_is_target_declaration(declaration);
+  if (!exact_declaration && !target_declaration) {
+    return iree_ok_status();
+  }
   loom_link_plan_symbol_work_item_t* declaration_work_item =
       &plan->symbols.values[declaration_plan_ordinal];
-  const loom_link_module_index_provider_import_list_t imports =
-      loom_link_module_index_symbol_provider_imports(plan->index, declaration);
   const loom_link_module_index_symbol_t* selected_symbol = NULL;
-  if (declaration_work_item->resolved_provider_symbol_ordinal ==
-      LOOM_LINK_PLAN_PROVIDER_ABSENT_ORDINAL) {
+  if (declaration_work_item->resolved_definition_symbol_ordinal ==
+      LOOM_LINK_PLAN_DEFINITION_ABSENT_ORDINAL) {
+    if (exact_declaration &&
+        loom_link_plan_facet_request_requires_definition(declaration,
+                                                         definition_request) &&
+        !loom_link_plan_allows_unresolved(plan, options)) {
+      return loom_link_plan_unresolved_exact_declaration_status(declaration);
+    }
     return iree_ok_status();
-  } else if (declaration_work_item->resolved_provider_symbol_ordinal !=
-             LOOM_LINK_PLAN_PROVIDER_UNCHECKED_ORDINAL) {
+  } else if (declaration_work_item->resolved_definition_symbol_ordinal !=
+             LOOM_LINK_PLAN_DEFINITION_UNCHECKED_ORDINAL) {
     selected_symbol = loom_link_module_index_symbol_at(
-        plan->index, declaration_work_item->resolved_provider_symbol_ordinal);
+        plan->index, declaration_work_item->resolved_definition_symbol_ordinal);
     IREE_ASSERT(selected_symbol);
   } else {
-    if (imports.count != 0) {
-      IREE_RETURN_IF_ERROR(loom_link_plan_find_imported_symbol_for_declaration(
-          plan, options, declaration, imports, &selected_symbol));
+    if (exact_declaration) {
+      IREE_RETURN_IF_ERROR(loom_link_plan_find_exact_definition_for_declaration(
+          plan, options, declaration, definition_request, &selected_symbol));
     } else {
-      // Declarations without provider constraints resolve by ordinary global
-      // symbol identity across the explicitly supplied module universe.
-      selected_symbol =
-          loom_link_plan_find_unconstrained_definition_for_declaration(
-              plan, options, declaration);
+      IREE_RETURN_IF_ERROR(
+          loom_link_plan_find_target_definition_for_declaration(
+              plan, options, declaration, &selected_symbol));
     }
-    declaration_work_item->resolved_provider_symbol_ordinal =
+    declaration_work_item->resolved_definition_symbol_ordinal =
         selected_symbol ? selected_symbol->ordinal
-                        : LOOM_LINK_PLAN_PROVIDER_ABSENT_ORDINAL;
+                        : LOOM_LINK_PLAN_DEFINITION_ABSENT_ORDINAL;
   }
   if (!selected_symbol) {
     return iree_ok_status();
@@ -875,12 +947,8 @@ static iree_status_t loom_link_plan_resolve_declaration(
       .root_name = iree_string_view_empty(),
   };
   IREE_RETURN_IF_ERROR(loom_link_plan_select_required_symbol_facets(
-      plan, options, selected_symbol, provider_request, cause,
+      plan, options, selected_symbol, definition_request, cause,
       /*out_new_symbol_plan_ordinal=*/NULL));
-  if (imports.count != 0) {
-    loom_link_plan_bitmap_test_and_set(
-        &plan->reachability.resolved_declarations, declaration->ordinal);
-  }
   return iree_ok_status();
 }
 
@@ -895,8 +963,7 @@ static iree_status_t loom_link_plan_select_global_reference(
                                    : loom_link_module_index_lookup_global(
                                          plan->index, referenced_symbol->name);
   if (!selected_symbol) {
-    if (options &&
-        options->unresolved_policy == LOOM_LINK_PLAN_UNRESOLVED_ALLOW) {
+    if (loom_link_plan_allows_unresolved(plan, options)) {
       return iree_ok_status();
     }
     return iree_make_status(
@@ -1010,7 +1077,9 @@ static iree_status_t loom_link_plan_expand_symbol_facet_dependencies(
     const loom_link_module_index_symbol_t* symbol,
     const loom_link_module_index_module_t* module,
     loom_link_symbol_facet_kind_t kind, loom_link_plan_live_cause_t cause) {
-  if (symbol->dependencies.count == 0) return iree_ok_status();
+  if (symbol->dependencies.count == 0) {
+    return iree_ok_status();
+  }
   const uint32_t first = symbol->dependencies.first;
   const uint32_t* dependencies = module->dependencies.values + first;
   const loom_symbol_interface_flags_t* target_interfaces =
@@ -1022,7 +1091,9 @@ static iree_status_t loom_link_plan_expand_symbol_facet_dependencies(
         loom_link_module_index_symbol_source_root_facet_kind(
             symbol, source_root_region_index_plus_one);
     IREE_ASSERT_NE(source_kind, LOOM_LINK_SYMBOL_FACET_INVALID);
-    if (source_kind != kind) continue;
+    if (source_kind != kind) {
+      continue;
+    }
     IREE_RETURN_IF_ERROR(loom_link_plan_select_dependency_target(
         plan, options, module, dependencies[i], target_interfaces[i], cause));
   }
@@ -1055,7 +1126,9 @@ static iree_status_t loom_link_plan_record_symbol_facet_template_demands(
     loom_link_plan_t* plan, const loom_link_module_index_symbol_t* symbol,
     const loom_link_module_index_module_t* module,
     loom_link_symbol_facet_kind_t kind) {
-  if (symbol->template_demands.count == 0) return iree_ok_status();
+  if (symbol->template_demands.count == 0) {
+    return iree_ok_status();
+  }
   const uint32_t first = symbol->template_demands.first;
   const loom_link_template_family_ordinal_t* template_families =
       module->template_demands.values + first;
@@ -1066,7 +1139,9 @@ static iree_status_t loom_link_plan_record_symbol_facet_template_demands(
         loom_link_module_index_symbol_source_root_facet_kind(
             symbol, source_root_region_index_plus_one);
     IREE_ASSERT_NE(source_kind, LOOM_LINK_SYMBOL_FACET_INVALID);
-    if (source_kind != kind) continue;
+    if (source_kind != kind) {
+      continue;
+    }
     IREE_RETURN_IF_ERROR(loom_link_plan_record_template_family_demand(
         plan, template_families[i]));
   }
@@ -1205,36 +1280,54 @@ static iree_status_t loom_link_plan_expand_facet(
 // Selection modes
 //===----------------------------------------------------------------------===//
 
-static iree_status_t loom_link_plan_select_archive(
+static iree_status_t loom_link_plan_select_merge(
     loom_link_plan_t* plan, const loom_link_plan_options_t* options) {
-  const iree_host_size_t symbol_count =
-      loom_link_module_index_symbol_count(plan->index);
-  for (iree_host_size_t i = 0; i < symbol_count; ++i) {
-    const loom_link_module_index_symbol_t* symbol =
-        loom_link_module_index_symbol_at(plan->index, i);
-    if (loom_link_plan_symbol_is_stripped(options, plan, symbol)) {
+  const iree_host_size_t provider_count =
+      loom_link_module_index_provider_count(plan->index);
+  for (iree_host_size_t provider_ordinal = 0; provider_ordinal < provider_count;
+       ++provider_ordinal) {
+    const loom_link_module_index_provider_t* provider =
+        loom_link_module_index_provider_at(plan->index, provider_ordinal);
+    if (provider->role != LOOM_LINK_PROVIDER_ROLE_INPUT) {
       continue;
     }
-    const loom_link_plan_live_cause_t cause = {
-        .reason = LOOM_LINK_PLAN_LIVE_ARCHIVE,
-        .symbol_plan_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
-        .facet_plan_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
-        .root_name = iree_string_view_empty(),
-    };
-    iree_host_size_t symbol_plan_ordinal =
-        LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
-    IREE_RETURN_IF_ERROR(loom_link_plan_append_symbol(plan, symbol, cause,
-                                                      &symbol_plan_ordinal));
+    const iree_host_size_t module_end_ordinal =
+        provider->module_start_ordinal + provider->module_count;
+    for (iree_host_size_t module_ordinal = provider->module_start_ordinal;
+         module_ordinal < module_end_ordinal; ++module_ordinal) {
+      const loom_link_module_index_module_t* module =
+          loom_link_module_index_module_at(plan->index, module_ordinal);
+      const iree_host_size_t symbol_end_ordinal =
+          module->symbol_start_ordinal + module->symbol_count;
+      for (iree_host_size_t symbol_ordinal = module->symbol_start_ordinal;
+           symbol_ordinal < symbol_end_ordinal; ++symbol_ordinal) {
+        const loom_link_module_index_symbol_t* symbol =
+            loom_link_module_index_symbol_at(plan->index, symbol_ordinal);
+        if (loom_link_plan_symbol_is_stripped(options, plan, symbol)) {
+          continue;
+        }
+        const loom_link_plan_live_cause_t cause = {
+            .reason = LOOM_LINK_PLAN_LIVE_MERGE,
+            .symbol_plan_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
+            .facet_plan_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
+            .root_name = iree_string_view_empty(),
+        };
+        iree_host_size_t symbol_plan_ordinal =
+            LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+        IREE_RETURN_IF_ERROR(loom_link_plan_append_symbol(
+            plan, symbol, cause, &symbol_plan_ordinal));
+      }
+    }
   }
   for (iree_host_size_t i = 0; i < plan->symbols.count; ++i) {
     const loom_link_module_index_symbol_t* symbol =
         loom_link_module_index_symbol_at(
             plan->index, plan->symbols.values[i].selection.symbol_ordinal);
-    const loom_link_plan_facet_request_t provider_request = {
+    const loom_link_plan_facet_request_t definition_request = {
         .mode = LOOM_LINK_PLAN_FACET_REQUEST_COMPLETE,
     };
     IREE_RETURN_IF_ERROR(loom_link_plan_resolve_declaration(
-        plan, options, symbol, i, provider_request));
+        plan, options, symbol, i, definition_request));
   }
   return iree_ok_status();
 }
@@ -1257,6 +1350,8 @@ static iree_status_t loom_link_plan_select_root(
       .root_name = root_name,
   };
   if (root) {
+    IREE_RETURN_IF_ERROR(
+        loom_link_plan_check_root_definition_ambiguity(plan, root));
     const loom_link_plan_facet_request_t request = {
         .mode = LOOM_LINK_PLAN_FACET_REQUEST_COMPLETE,
     };
@@ -1289,6 +1384,33 @@ static iree_status_t loom_link_plan_select_root(
       /*out_new_symbol_plan_ordinal=*/NULL);
 }
 
+static iree_status_t loom_link_plan_select_export(
+    loom_link_plan_t* plan, const loom_link_plan_options_t* options,
+    const loom_link_module_index_symbol_t* symbol) {
+  // Strip policies filter implicit export sets. Explicit roots still pass
+  // through required-symbol selection and diagnose a stripped symbol.
+  if (loom_link_plan_symbol_is_stripped(options, plan, symbol)) {
+    return iree_ok_status();
+  }
+  const loom_link_plan_live_cause_t cause = {
+      .reason = LOOM_LINK_PLAN_LIVE_ROOT,
+      .symbol_plan_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
+      .facet_plan_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
+      .root_name = symbol->name,
+  };
+  iree_host_size_t root_plan_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+  IREE_RETURN_IF_ERROR(loom_link_plan_select_required_symbol(
+      plan, options, symbol, cause, &root_plan_ordinal));
+  if (root_plan_ordinal == LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL) {
+    return iree_ok_status();
+  }
+  const loom_link_plan_facet_request_t definition_request = {
+      .mode = LOOM_LINK_PLAN_FACET_REQUEST_COMPLETE,
+  };
+  return loom_link_plan_resolve_declaration(
+      plan, options, symbol, root_plan_ordinal, definition_request);
+}
+
 static iree_status_t loom_link_plan_select_input_exports(
     loom_link_plan_t* plan, const loom_link_plan_options_t* options) {
   const loom_link_module_index_symbol_ordinal_list_t input_exports =
@@ -1296,21 +1418,52 @@ static iree_status_t loom_link_plan_select_input_exports(
   for (iree_host_size_t i = 0; i < input_exports.count; ++i) {
     const loom_link_module_index_symbol_t* symbol =
         loom_link_module_index_symbol_at(plan->index, input_exports.values[i]);
-    iree_host_size_t root_plan_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
-    const loom_link_plan_live_cause_t cause = {
-        .reason = LOOM_LINK_PLAN_LIVE_ROOT,
-        .symbol_plan_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
-        .facet_plan_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
-        .root_name = symbol->name,
-    };
-    IREE_RETURN_IF_ERROR(loom_link_plan_select_required_symbol(
-        plan, options, symbol, cause, &root_plan_ordinal));
-    if (root_plan_ordinal != LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL) {
-      const loom_link_plan_facet_request_t provider_request = {
-          .mode = LOOM_LINK_PLAN_FACET_REQUEST_COMPLETE,
-      };
-      IREE_RETURN_IF_ERROR(loom_link_plan_resolve_declaration(
-          plan, options, symbol, root_plan_ordinal, provider_request));
+    IREE_RETURN_IF_ERROR(loom_link_plan_select_export(plan, options, symbol));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_link_plan_select_provider_exports(
+    loom_link_plan_t* plan, const loom_link_plan_options_t* options) {
+  const iree_host_size_t provider_count =
+      options ? options->root_providers.count : 0;
+  const iree_host_size_t* provider_ordinals =
+      options ? options->root_providers.values : NULL;
+  if (provider_count != 0 && provider_ordinals == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "root provider count is non-zero but values is NULL");
+  }
+  const iree_host_size_t index_provider_count =
+      loom_link_module_index_provider_count(plan->index);
+  for (iree_host_size_t i = 0; i < provider_count; ++i) {
+    const iree_host_size_t provider_ordinal = provider_ordinals[i];
+    if (provider_ordinal >= index_provider_count) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "root provider ordinal %" PRIhsz
+                              " is outside the %" PRIhsz "-provider index",
+                              provider_ordinal, index_provider_count);
+    }
+    const loom_link_module_index_provider_t* provider =
+        loom_link_module_index_provider_at(plan->index, provider_ordinal);
+    const iree_host_size_t module_end_ordinal =
+        provider->module_start_ordinal + provider->module_count;
+    for (iree_host_size_t module_ordinal = provider->module_start_ordinal;
+         module_ordinal < module_end_ordinal; ++module_ordinal) {
+      const loom_link_module_index_module_t* module =
+          loom_link_module_index_module_at(plan->index, module_ordinal);
+      const iree_host_size_t symbol_end_ordinal =
+          module->symbol_start_ordinal + module->symbol_count;
+      for (iree_host_size_t symbol_ordinal = module->symbol_start_ordinal;
+           symbol_ordinal < symbol_end_ordinal; ++symbol_ordinal) {
+        const loom_link_module_index_symbol_t* symbol =
+            loom_link_module_index_symbol_at(plan->index, symbol_ordinal);
+        if (!iree_any_bit_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_EXPORT)) {
+          continue;
+        }
+        IREE_RETURN_IF_ERROR(
+            loom_link_plan_select_export(plan, options, symbol));
+      }
     }
   }
   return iree_ok_status();
@@ -1363,6 +1516,7 @@ static iree_status_t loom_link_plan_select_roots(
   if (options && options->include_input_exports) {
     IREE_RETURN_IF_ERROR(loom_link_plan_select_input_exports(plan, options));
   }
+  IREE_RETURN_IF_ERROR(loom_link_plan_select_provider_exports(plan, options));
   const iree_host_size_t root_count = options ? options->root_symbols.count : 0;
   if (root_count > 0 && (!options || !options->root_symbols.values)) {
     return iree_make_status(
@@ -1375,9 +1529,8 @@ static iree_status_t loom_link_plan_select_roots(
   }
   IREE_RETURN_IF_ERROR(loom_link_plan_select_root_facets(plan, options));
   if (plan->symbols.count == 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "selective link planning requires at least one root");
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "link planning requires at least one root");
   }
   return iree_ok_status();
 }
@@ -1431,7 +1584,7 @@ static iree_status_t loom_link_plan_select_template_providers(
   return iree_ok_status();
 }
 
-static iree_status_t loom_link_plan_select_selective(
+static iree_status_t loom_link_plan_select_link(
     loom_link_plan_t* plan, const loom_link_plan_options_t* options) {
   IREE_RETURN_IF_ERROR(loom_link_plan_select_roots(plan, options));
   IREE_RETURN_IF_ERROR(loom_link_plan_select_template_providers(plan, options));
@@ -1445,6 +1598,22 @@ static iree_status_t loom_link_plan_select_selective(
 // Public API
 //===----------------------------------------------------------------------===//
 
+static iree_status_t loom_link_plan_validate_options(
+    const loom_link_plan_options_t* options) {
+  if (!options || options->mode != LOOM_LINK_PLAN_MERGE) {
+    return iree_ok_status();
+  }
+  if (options->root_symbols.count != 0 || options->include_input_exports ||
+      options->root_providers.count != 0 ||
+      options->selected_template_providers.count != 0 ||
+      options->root_facets.count != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "merge plans do not accept roots or selected template providers");
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_link_plan_build(const loom_link_module_index_t* index,
                                    const loom_link_plan_options_t* options,
                                    iree_allocator_t allocator,
@@ -1452,6 +1621,7 @@ iree_status_t loom_link_plan_build(const loom_link_module_index_t* index,
   IREE_ASSERT_ARGUMENT(index);
   IREE_ASSERT_ARGUMENT(out_plan);
   *out_plan = NULL;
+  IREE_RETURN_IF_ERROR(loom_link_plan_validate_options(options));
 
   loom_link_plan_t* plan = NULL;
   IREE_RETURN_IF_ERROR(
@@ -1459,19 +1629,16 @@ iree_status_t loom_link_plan_build(const loom_link_module_index_t* index,
   memset(plan, 0, sizeof(*plan));
   plan->index = index;
   plan->allocator = allocator;
-  plan->mode = options ? options->mode : LOOM_LINK_PLAN_ARCHIVE;
+  plan->mode = options ? options->mode : LOOM_LINK_PLAN_MERGE;
 
-  iree_status_t status = loom_link_plan_initialize_reachability(plan, options);
-  if (iree_status_is_ok(status)) {
-    status = loom_link_plan_initialize_candidate_providers(plan, options);
-  }
+  iree_status_t status = loom_link_plan_initialize_reachability(plan);
   if (iree_status_is_ok(status)) {
     switch (plan->mode) {
-      case LOOM_LINK_PLAN_ARCHIVE:
-        status = loom_link_plan_select_archive(plan, options);
+      case LOOM_LINK_PLAN_MERGE:
+        status = loom_link_plan_select_merge(plan, options);
         break;
-      case LOOM_LINK_PLAN_SELECTIVE:
-        status = loom_link_plan_select_selective(plan, options);
+      case LOOM_LINK_PLAN_LINK:
+        status = loom_link_plan_select_link(plan, options);
         break;
       default:
         status =
@@ -1480,9 +1647,6 @@ iree_status_t loom_link_plan_build(const loom_link_module_index_t* index,
         break;
     }
   }
-
-  iree_allocator_free(plan->allocator, plan->candidate_providers.values);
-  plan->candidate_providers = (loom_link_plan_bitmap_t){0};
 
   if (!iree_status_is_ok(status)) {
     loom_link_plan_free(plan);
@@ -1496,7 +1660,6 @@ void loom_link_plan_free(loom_link_plan_t* plan) {
   if (!plan) {
     return;
   }
-  iree_allocator_free(plan->allocator, plan->candidate_providers.values);
   iree_allocator_free(plan->allocator, plan->symbol_ordinals.values);
   iree_allocator_free(plan->allocator, plan->reachability.storage);
   iree_allocator_free(plan->allocator, plan->demanded_template_families.values);
@@ -1511,7 +1674,7 @@ const loom_link_module_index_t* loom_link_plan_index(
 }
 
 loom_link_plan_mode_t loom_link_plan_mode(const loom_link_plan_t* plan) {
-  return plan ? plan->mode : LOOM_LINK_PLAN_ARCHIVE;
+  return plan ? plan->mode : LOOM_LINK_PLAN_MERGE;
 }
 
 iree_host_size_t loom_link_plan_symbol_count(const loom_link_plan_t* plan) {
@@ -1578,7 +1741,7 @@ bool loom_link_plan_contains_facet(const loom_link_plan_t* plan,
                                       symbol_ordinal)) {
     return false;
   }
-  if (plan->mode == LOOM_LINK_PLAN_ARCHIVE ||
+  if (plan->mode == LOOM_LINK_PLAN_MERGE ||
       plan->symbol_ordinals.values == NULL) {
     return true;
   }
@@ -1588,10 +1751,4 @@ bool loom_link_plan_contains_facet(const loom_link_plan_t* plan,
   IREE_ASSERT(found);
   return found &&
          loom_link_plan_facet_is_selected(plan, symbol_plan_ordinal, kind);
-}
-
-bool loom_link_plan_symbol_imports_resolved(const loom_link_plan_t* plan,
-                                            iree_host_size_t symbol_ordinal) {
-  return plan && loom_link_plan_bitmap_contains(
-                     &plan->reachability.resolved_declarations, symbol_ordinal);
 }

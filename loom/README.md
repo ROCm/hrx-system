@@ -173,8 +173,6 @@ Run the host-only examples:
 python dev.py bazel run //loom/binding/c/example:source_info
 python dev.py bazel run //loom/binding/c/example:compile_text
 python dev.py bazel run //loom/binding/c/example:link_modules
-python dev.py bazel run //loom/binding/c/example:link_modules -- \
-  --provider-import
 ```
 
 These examples are deliberately small, but they show the intended embedding
@@ -185,8 +183,8 @@ source -> module -> link/index -> compile -> result diagnostics/artifacts
 ```
 
 The [in-memory composition guide](docs/src/integration/module-composition.md)
-uses `link_modules` to compare import-free declaration linking with logical
-provider-key selection over the same caller-owned sources.
+uses `link_modules` to show a caller-owned root input resolving declarations
+against explicitly supplied libraries.
 
 The API is staged instead of one file-oriented entry point because embedders
 need different compositions:

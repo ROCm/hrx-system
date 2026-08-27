@@ -1,0 +1,17 @@
+func.def public @transitive(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.def public @reexported(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.def public @export_only(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+template.decl @family.transitive(%x: i32) -> (i32)
+
+template.def<@family.transitive> @transitive_provider(%x: i32) -> (i32) {
+  template.return %x : i32
+}

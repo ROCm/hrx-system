@@ -16,6 +16,7 @@
 #include "link_index.h"
 #include "loom/link/index_materializer.h"
 #include "loom/link/module_index.h"
+#include "loom/target/module_specialization.h"
 #include "loomc/iree.h"
 #include "module.h"
 #include "result.h"
@@ -54,6 +55,8 @@ typedef struct loomc_link_materialization_context_t {
   loomc_link_index_t* link_index;
   // Per-invocation link options controlling config specialization.
   const loomc_link_options_t* options;
+  // Target specialization applied before each template-selection query.
+  const loomc_target_specialization_options_t* target_specialization;
   // Result receiving materialization diagnostics.
   loomc_result_t* result;
   // Workspace block pool backing transient and output modules.
@@ -97,7 +100,9 @@ static loomc_status_t loomc_link_validate_linker_options(
 
 static loomc_status_t loomc_link_validate_options(
     const loomc_linker_t* linker, loomc_workspace_t* workspace,
-    const loomc_link_options_t* options) {
+    const loomc_link_options_t* options,
+    const loomc_target_specialization_options_t** out_target_specialization) {
+  *out_target_specialization = NULL;
   if (linker == NULL || workspace == NULL || options == NULL) {
     return loomc_make_status(
         LOOMC_STATUS_INVALID_ARGUMENT,
@@ -113,10 +118,8 @@ static loomc_status_t loomc_link_validate_options(
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "link options structure_size is too small");
   }
-  if (options->next != NULL) {
-    return loomc_make_status(LOOMC_STATUS_UNIMPLEMENTED,
-                             "link option extensions are not supported");
-  }
+  LOOMC_RETURN_IF_ERROR(loomc_target_specialization_options_resolve(
+      options->next, out_target_specialization));
   if (options->link_index == NULL) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "link_index must not be NULL");
@@ -130,10 +133,39 @@ static loomc_status_t loomc_link_validate_options(
         LOOMC_STATUS_INVALID_ARGUMENT,
         "root_symbol_count is non-zero but root_symbols is NULL");
   }
+  if (options->root_provider_count != 0 &&
+      options->root_provider_ordinals == NULL) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "root_provider_count is non-zero but root_provider_ordinals is NULL");
+  }
   if ((options->flags & ~LOOMC_LINK_KNOWN_FLAGS) != 0) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "link options contain unknown flag bits");
   }
+  if (options->mode != LOOMC_LINK_MODE_MERGE &&
+      options->mode != LOOMC_LINK_MODE_LINK) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "link options contain an unknown mode");
+  }
+  const bool has_roots =
+      options->root_symbol_count != 0 || options->root_provider_count != 0 ||
+      loomc_link_any_flag_set(options->flags,
+                              LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS);
+  if (options->mode == LOOMC_LINK_MODE_MERGE && has_roots) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "merge mode does not accept roots or include input exports");
+  }
+  if (options->mode == LOOMC_LINK_MODE_LINK && !has_roots) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "link mode requires roots or include input exports");
+  }
+  LOOMC_RETURN_IF_ERROR(
+      loomc_target_specialization_options_validate_environment(
+          *out_target_specialization,
+          loomc_context_target_environment(linker->context)));
   return loomc_config_validate_options(&options->config);
 }
 
@@ -167,6 +199,14 @@ static iree_status_t loomc_link_capture_diagnostic(
       capture->result, capture->source, diagnostic));
 }
 
+static iree_status_t loomc_link_capture_diagnostic_emission(
+    void* user_data, const loom_diagnostic_emission_t* emission) {
+  loomc_link_materialization_context_t* context =
+      (loomc_link_materialization_context_t*)user_data;
+  return iree_status_from_loomc(loomc_result_add_loom_diagnostic_emission(
+      context->result, /*source=*/NULL, LOOM_EMITTER_PASS, emission));
+}
+
 static loom_diagnostic_sink_t loomc_link_materialization_diagnostic_sink(
     void* user_data, const loom_link_module_index_provider_t* provider) {
   loomc_link_materialization_context_t* context =
@@ -180,12 +220,12 @@ static loom_diagnostic_sink_t loomc_link_materialization_diagnostic_sink(
 }
 
 static iree_status_t loomc_link_prepare_module(void* user_data,
-                                               loom_module_t* module) {
+                                               loom_module_t** inout_module) {
   loomc_link_materialization_context_t* context =
       (loomc_link_materialization_context_t*)user_data;
   const loomc_config_apply_to_module_options_t apply_options = {
       .config = &context->options->config,
-      .module = module,
+      .module = *inout_module,
       .result = context->result,
       .diagnostic_code = loomc_make_cstring_view("CONFIG/INVALID"),
       .block_pool = context->block_pool,
@@ -198,28 +238,60 @@ static iree_status_t loomc_link_prepare_module(void* user_data,
   if (!loomc_result_succeeded(context->result)) {
     return iree_status_from_code(IREE_STATUS_INVALID_ARGUMENT);
   }
+  if (context->target_specialization == NULL ||
+      (context->target_specialization->specialization_count == 0 &&
+       context->target_specialization->target_binding_count == 0)) {
+    return iree_ok_status();
+  }
+
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(context->block_pool, &arena);
+  loom_target_specialization_request_list_t requests = {0};
+  loom_target_declaration_binding_list_t bindings = {0};
+  status = loomc_target_specialization_options_make_lists(
+      context->target_specialization, &arena, &requests, &bindings);
+  uint32_t error_count = 0;
+  if (loomc_status_is_ok(status)) {
+    status = loomc_status_from_iree(loom_target_specialize_module(
+        loomc_target_environment_loom_target_environment(
+            loomc_context_target_environment(context->linker->context)),
+        requests, bindings,
+        (iree_diagnostic_emitter_t){
+            .fn = loomc_link_capture_diagnostic_emission,
+            .user_data = context,
+        },
+        context->block_pool, loomc_link_iree_allocator(context->allocator),
+        inout_module, &error_count));
+  }
+  iree_arena_deinitialize(&arena);
+  if (!loomc_status_is_ok(status)) {
+    return iree_status_from_loomc(status);
+  }
+  if (error_count != 0) {
+    status = loomc_link_result_set_failed(context->result);
+    if (!loomc_status_is_ok(status)) {
+      return iree_status_from_loomc(status);
+    }
+    return iree_status_from_code(IREE_STATUS_INVALID_ARGUMENT);
+  }
   return iree_ok_status();
 }
 
 static void loomc_link_materialization_context_initialize(
     loomc_linker_t* linker, loomc_workspace_t* workspace,
-    const loomc_link_options_t* options, loomc_result_t* result,
-    loomc_link_materialization_context_t* out_context) {
+    const loomc_link_options_t* options,
+    const loomc_target_specialization_options_t* target_specialization,
+    loomc_result_t* result, loomc_link_materialization_context_t* out_context) {
   *out_context = (loomc_link_materialization_context_t){
       .linker = linker,
       .link_index = options->link_index,
       .options = options,
+      .target_specialization = target_specialization,
       .result = result,
       .block_pool = loomc_workspace_block_pool(workspace),
       .allocator = linker->allocator,
       .capture = {.result = result},
   };
-}
-
-static bool loomc_link_options_selective(const loomc_link_options_t* options) {
-  return options->root_symbol_count != 0 ||
-         loomc_link_any_flag_set(options->flags,
-                                 LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS);
 }
 
 static iree_string_view_t loomc_link_module_name(
@@ -309,8 +381,9 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
   }
   *out_module = NULL;
   *out_result = NULL;
-  LOOMC_RETURN_IF_ERROR(
-      loomc_link_validate_options(linker, workspace, options));
+  const loomc_target_specialization_options_t* target_specialization = NULL;
+  LOOMC_RETURN_IF_ERROR(loomc_link_validate_options(linker, workspace, options,
+                                                    &target_specialization));
 
   loomc_result_t* result = NULL;
   LOOMC_RETURN_IF_ERROR(loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED,
@@ -321,8 +394,9 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
   loomc_link_materialization_context_t materialization_context = {0};
   loom_link_index_materialization_t index_materialization = {0};
   loomc_module_t* module = NULL;
-  loomc_link_materialization_context_initialize(
-      linker, workspace, options, result, &materialization_context);
+  loomc_link_materialization_context_initialize(linker, workspace, options,
+                                                target_specialization, result,
+                                                &materialization_context);
   loomc_status_t status = loomc_ok_status();
 
   iree_string_view_t* root_symbols = NULL;
@@ -336,9 +410,9 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
     }
   }
 
-  const bool selective = loomc_link_options_selective(options);
   loom_link_plan_options_t plan_options = {
-      .mode = selective ? LOOM_LINK_PLAN_SELECTIVE : LOOM_LINK_PLAN_ARCHIVE,
+      .mode = options->mode == LOOMC_LINK_MODE_LINK ? LOOM_LINK_PLAN_LINK
+                                                    : LOOM_LINK_PLAN_MERGE,
       .root_symbols =
           {
               .count = options->root_symbol_count,
@@ -346,6 +420,11 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
           },
       .include_input_exports = loomc_link_any_flag_set(
           options->flags, LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS),
+      .root_providers =
+          {
+              .count = options->root_provider_count,
+              .values = options->root_provider_ordinals,
+          },
       .unresolved_policy =
           loomc_link_any_flag_set(options->flags,
                                   LOOMC_LINK_FLAG_ALLOW_UNRESOLVED_SYMBOLS)
@@ -356,8 +435,6 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
                                   LOOMC_LINK_FLAG_STRIP_TEST_SYMBOLS)
               ? LOOM_LINK_PLAN_TEST_SYMBOL_STRIP
               : LOOM_LINK_PLAN_TEST_SYMBOL_KEEP,
-      .provider_resolver =
-          loomc_link_index_provider_resolver(options->link_index),
   };
 
   loom_low_repr_environment_t low_repr_environment = {0};
