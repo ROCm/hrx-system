@@ -194,10 +194,12 @@ VM_INSTRUCTION_PROJECTIONS = (
         "integer.add.i64",
         "integer.mul.i32",
         "integer.mul.i64",
+        "integer.div.u64",
         "integer.sub.i32",
         "integer.sub.i64",
         "integer.rem.s32",
         "integer.rem.s64",
+        "integer.rem.u64",
         "integer.and.i32",
         "integer.and.i64",
     ),
@@ -589,6 +591,14 @@ VM_SOURCE_LOWERINGS = (
     *_same_type_binary(
         index_defs.index_mul,
         {ScalarTypeKind.INDEX: "vm.integer.mul.i64"},
+    ),
+    *_same_type_binary(
+        index_defs.index_div,
+        {ScalarTypeKind.INDEX: "vm.integer.div.u64"},
+    ),
+    *_same_type_binary(
+        index_defs.index_rem,
+        {ScalarTypeKind.INDEX: "vm.integer.rem.u64"},
     ),
     *_same_type_binary(
         scalar_arithmetic.scalar_addi,

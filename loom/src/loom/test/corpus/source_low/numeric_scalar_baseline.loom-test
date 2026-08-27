@@ -19,3 +19,11 @@ func.def @index_i32_cast(%source: i32) -> (index) {
   %result = index.cast %source : i32 to index
   func.return %result : index
 }
+
+// ====
+
+func.def @index_divide_remainder(%lhs: index, %rhs: index) -> (index, index) where [range(%rhs, 1, 65535)] {
+  %quotient = index.div %lhs, %rhs : index
+  %remainder = index.rem %lhs, %rhs : index
+  func.return %quotient, %remainder : index, index
+}

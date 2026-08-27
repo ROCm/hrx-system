@@ -42,3 +42,19 @@ low.func.def target<vm.core>(@target) abi(vm_function) @index_i32_cast(%source: 
   %result = conversion.integer.s32_to_i64 %source : reg<vm.value : index>
   return %result
 }
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @index_divide_remainder(%lhs: index, %rhs: index) -> (index, index) where [range(%rhs, 1, 65535)] {
+  %quotient = index.div %lhs, %rhs : index
+  %remainder = index.rem %lhs, %rhs : index
+  func.return %quotient, %remainder : index, index
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @index_divide_remainder(%lhs: reg<vm.value : index>, %rhs: reg<vm.value : index>) -> (reg<vm.value : index>, reg<vm.value : index>) where [range(%rhs, 1, 65535)] asm {
+  %quotient = integer.div.u64 %lhs, %rhs : reg<vm.value : index>
+  %remainder = integer.rem.u64 %lhs, %rhs : reg<vm.value : index>
+  return %quotient, %remainder
+}
