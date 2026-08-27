@@ -132,7 +132,10 @@ loom_cc_test(
     loom::error::error_defs
     loom::format::text::parser
     loom::ir
+    loom::ops::command
     loom::ops::func
+    loom::ops::index
+    loom::ops::kernel
     loom::ops::target
     loom::ops::test
     loom::target::test::target_record_table

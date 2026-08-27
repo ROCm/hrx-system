@@ -77,8 +77,7 @@ struct loom_target_callgraph_context_t {
   // Compilation-local identity retained by every version in this context.
   loom_target_context_ordinal_t target_context_ordinal;
 
-  // Requirement applied to construct this context, or NULL for a targetless
-  // root context.
+  // Requirement applied to construct this context, or NULL when unconstrained.
   const loom_target_facts_t* applied_requirement;
 
   // Parent construction context, or NULL for an explicit root version.
@@ -101,7 +100,8 @@ typedef struct loom_target_callgraph_symbol_t {
   // Function facts projected once before the module mutates.
   const loom_func_symbol_facts_t* function_facts;
 
-  // Stable authored target requirement, or NULL for a targetless callable.
+  // Stable authored target requirement, or NULL when unconstrained. A
+  // target.decl witness names a context without adding a fact requirement.
   const loom_target_facts_t* authored_target_requirement;
 
   // Borrowed authored target witness name, or empty when targetless.
@@ -277,26 +277,26 @@ static iree_status_t loom_target_callgraph_prepare_symbol(
     const loom_symbol_facts_base_t* target_base_facts = NULL;
     IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup_ref(
         &state->fact_table, state->module, target_ref, &target_base_facts));
+    const loom_symbol_t* target_symbol =
+        &state->module->symbols.entries[target_ref.symbol_id];
+    info->authored_target_name =
+        state->module->strings.entries[target_symbol->name_id];
     const loom_target_symbol_facts_t* target_facts =
         loom_target_symbol_facts_cast(target_base_facts);
-    if (target_facts == NULL) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "verified function target has no target fact projection");
+    if (target_facts != NULL) {
+      const loom_target_facts_t* stable_requirement =
+          state->requirements_by_target_symbol[target_ref.symbol_id];
+      if (stable_requirement == NULL) {
+        loom_target_facts_t* cloned_requirement = NULL;
+        IREE_RETURN_IF_ERROR(loom_target_facts_builder_clone(
+            target_facts->projection, state->version_owner->arena,
+            &cloned_requirement));
+        stable_requirement = cloned_requirement;
+        state->requirements_by_target_symbol[target_ref.symbol_id] =
+            stable_requirement;
+      }
+      info->authored_target_requirement = stable_requirement;
     }
-    const loom_target_facts_t* stable_requirement =
-        state->requirements_by_target_symbol[target_ref.symbol_id];
-    if (stable_requirement == NULL) {
-      loom_target_facts_t* cloned_requirement = NULL;
-      IREE_RETURN_IF_ERROR(loom_target_facts_builder_clone(
-          target_facts->projection, state->version_owner->arena,
-          &cloned_requirement));
-      stable_requirement = cloned_requirement;
-      state->requirements_by_target_symbol[target_ref.symbol_id] =
-          stable_requirement;
-    }
-    info->authored_target_requirement = stable_requirement;
-    info->authored_target_name = target_facts->name;
   }
 
   info->module_internal = loom_func_like_is_module_internal(info->function);
