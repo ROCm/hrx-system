@@ -9,6 +9,23 @@
 
 iree_add_all_subdirs()
 
+file(GLOB _GLOB_FUNC_CONTRACT_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS func_contract/*.loom)
+iree_c_embed_data(
+  NAME
+    func_contract
+  SRCS
+    "${_GLOB_FUNC_CONTRACT_X_LOOM}"
+  C_FILE_OUTPUT
+    "func_contract_testdata.c"
+  H_FILE_OUTPUT
+    "func_contract_testdata.h"
+  IDENTIFIER
+    "loom_link_func_contract_testdata"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+
 file(GLOB _GLOB_PLANNER_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS planner/*.loom)
 iree_c_embed_data(
   NAME

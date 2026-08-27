@@ -13,6 +13,16 @@ package(
 )
 
 iree_c_embed_data(
+    name = "func_contract",
+    testonly = True,
+    srcs = glob(["func_contract/*.loom"]),
+    c_file_output = "func_contract_testdata.c",
+    flatten = True,
+    h_file_output = "func_contract_testdata.h",
+    identifier = "loom_link_func_contract_testdata",
+)
+
+iree_c_embed_data(
     name = "planner",
     testonly = True,
     srcs = glob(["planner/*.loom"]),

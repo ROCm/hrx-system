@@ -15,6 +15,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ir/symbol_map.h"
+#include "loom/link/func_contract.h"
 #include "loom/link/symbol_policy.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/op_defs.h"
@@ -23,15 +24,6 @@
 #include "loom/rewrite/remap.h"
 #include "loom/util/adaptive_sort.h"
 #include "loom/util/walk.h"
-
-typedef struct loom_link_func_contract_attr_t {
-  // Source declaration attribute index.
-  uint8_t source_attr_index;
-  // Target materialization attribute index.
-  uint8_t target_attr_index;
-  // Diagnostic field name for conflicts.
-  iree_string_view_t field_name;
-} loom_link_func_contract_attr_t;
 
 typedef uint32_t loom_linker_symbol_set_attr_id_t;
 
@@ -816,178 +808,27 @@ static iree_status_t loom_link_signature_type_status(
                           (int)field_name.size, field_name.data, ordinal);
 }
 
-static iree_status_t loom_link_map_func_signature_values(
-    loom_ir_remap_t* remap, loom_func_like_t source_func,
-    loom_func_like_t target_func, const loom_linker_t* linker,
-    loom_symbol_ref_t target_ref) {
-  uint16_t source_arg_count = 0;
-  const loom_value_id_t* source_args =
-      loom_func_like_arg_ids(source_func, &source_arg_count);
-  uint16_t target_arg_count = 0;
-  const loom_value_id_t* target_args =
-      loom_func_like_arg_ids(target_func, &target_arg_count);
-  if (source_arg_count != target_arg_count) {
-    return loom_link_signature_count_status(linker, target_ref, IREE_SV("args"),
-                                            source_arg_count, target_arg_count);
-  }
-  IREE_RETURN_IF_ERROR(loom_ir_remap_map_values(remap, source_args, target_args,
-                                                source_arg_count));
-
-  const uint16_t source_result_count = source_func.op->result_count;
-  const uint16_t target_result_count = target_func.op->result_count;
-  if (source_result_count != target_result_count) {
-    return loom_link_signature_count_status(
-        linker, target_ref, IREE_SV("results"), source_result_count,
-        target_result_count);
-  }
-  return loom_ir_remap_map_values(remap, loom_op_const_results(source_func.op),
-                                  loom_op_const_results(target_func.op),
-                                  source_result_count);
-}
-
-static iree_status_t loom_link_map_and_check_kernel_signature(
-    loom_ir_remap_t* remap, const loom_module_t* source_module,
-    const loom_op_t* source_op, const loom_module_t* target_module,
-    const loom_op_t* target_op, const loom_linker_t* linker,
-    loom_symbol_ref_t target_ref) {
-  loom_value_slice_t source_args =
-      loom_kernel_workload_arg_ids(source_module, source_op);
-  loom_value_slice_t target_args =
-      loom_kernel_workload_arg_ids(target_module, target_op);
-  if (source_args.count != target_args.count) {
-    return loom_link_signature_count_status(
-        linker, target_ref, IREE_SV("kernel workload args"), source_args.count,
-        target_args.count);
-  }
-  IREE_RETURN_IF_ERROR(loom_ir_remap_map_values(
-      remap, source_args.values, target_args.values, source_args.count));
-  for (uint16_t i = 0; i < source_args.count; ++i) {
-    loom_type_t source_type =
-        loom_module_value_type(source_module, source_args.values[i]);
-    loom_type_t remapped_type = {0};
-    IREE_RETURN_IF_ERROR(
-        loom_ir_remap_type(remap, source_type, &remapped_type));
-    loom_type_t target_type =
-        loom_module_value_type(target_module, target_args.values[i]);
-    if (!loom_type_equal(remapped_type, target_type)) {
-      return loom_link_signature_type_status(linker, target_ref,
-                                             IREE_SV("kernel workload arg"), i);
-    }
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_link_check_func_signature_types(
-    loom_ir_remap_t* remap, const loom_module_t* source_module,
-    loom_func_like_t source_func, loom_func_like_t target_func,
-    const loom_linker_t* linker, loom_symbol_ref_t target_ref) {
-  uint16_t source_arg_count = 0;
-  const loom_value_id_t* source_args =
-      loom_func_like_arg_ids(source_func, &source_arg_count);
-  uint16_t target_arg_count = 0;
-  const loom_value_id_t* target_args =
-      loom_func_like_arg_ids(target_func, &target_arg_count);
-  if (source_arg_count != target_arg_count) {
-    return loom_link_signature_count_status(linker, target_ref, IREE_SV("args"),
-                                            source_arg_count, target_arg_count);
-  }
-  for (uint16_t i = 0; i < source_arg_count; ++i) {
-    loom_type_t source_type =
-        loom_module_value_type(source_module, source_args[i]);
-    loom_type_t remapped_type = {0};
-    IREE_RETURN_IF_ERROR(
-        loom_ir_remap_type(remap, source_type, &remapped_type));
-    loom_type_t target_type =
-        loom_module_value_type(linker->target_module, target_args[i]);
-    if (!loom_type_equal(remapped_type, target_type)) {
-      return loom_link_signature_type_status(linker, target_ref, IREE_SV("arg"),
-                                             i);
-    }
-  }
-
-  const loom_value_id_t* source_results = loom_op_const_results(source_func.op);
-  const loom_value_id_t* target_results = loom_op_const_results(target_func.op);
-  if (source_func.op->result_count != target_func.op->result_count) {
-    return loom_link_signature_count_status(
-        linker, target_ref, IREE_SV("results"), source_func.op->result_count,
-        target_func.op->result_count);
-  }
-  for (uint16_t i = 0; i < source_func.op->result_count; ++i) {
-    loom_type_t source_type =
-        loom_module_value_type(source_module, source_results[i]);
-    loom_type_t remapped_type = {0};
-    IREE_RETURN_IF_ERROR(
-        loom_ir_remap_type(remap, source_type, &remapped_type));
-    loom_type_t target_type =
-        loom_module_value_type(linker->target_module, target_results[i]);
-    if (!loom_type_equal(remapped_type, target_type)) {
-      return loom_link_signature_type_status(linker, target_ref,
-                                             IREE_SV("result"), i);
-    }
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_link_check_func_tied_results(
+static iree_status_t loom_link_func_contract_status(
     const loom_linker_t* linker, loom_symbol_ref_t target_ref,
-    loom_func_like_t source_func, loom_func_like_t target_func) {
-  if (source_func.op->tied_result_count != target_func.op->tied_result_count) {
-    return loom_link_signature_count_status(
-        linker, target_ref, IREE_SV("tied results"),
-        source_func.op->tied_result_count, target_func.op->tied_result_count);
+    const loom_link_func_contract_mismatch_t* mismatch) {
+  switch (mismatch->kind) {
+    case LOOM_LINK_FUNC_CONTRACT_MISMATCH_NONE:
+      return iree_ok_status();
+    case LOOM_LINK_FUNC_CONTRACT_MISMATCH_FIELD:
+      return loom_link_incompatible_contract_status(linker, target_ref,
+                                                    mismatch->field_name);
+    case LOOM_LINK_FUNC_CONTRACT_MISMATCH_COUNT:
+      return loom_link_signature_count_status(
+          linker, target_ref, mismatch->field_name,
+          mismatch->detail.counts.source, mismatch->detail.counts.selected);
+    case LOOM_LINK_FUNC_CONTRACT_MISMATCH_TYPE:
+      return loom_link_signature_type_status(linker, target_ref,
+                                             mismatch->field_name,
+                                             mismatch->detail.type_ordinal);
+    default:
+      IREE_ASSERT_UNREACHABLE("unknown function contract mismatch");
+      IREE_BUILTIN_UNREACHABLE();
   }
-  if (source_func.op->tied_result_count == 0) {
-    return iree_ok_status();
-  }
-  const iree_host_size_t byte_count =
-      (iree_host_size_t)source_func.op->tied_result_count *
-      sizeof(loom_tied_result_t);
-  if (memcmp(loom_op_tied_results(source_func.op),
-             loom_op_tied_results(target_func.op), byte_count) != 0) {
-    return loom_link_incompatible_contract_status(linker, target_ref,
-                                                  IREE_SV("tied_results"));
-  }
-  return iree_ok_status();
-}
-
-static bool loom_link_func_attr_present(loom_func_like_t func,
-                                        uint8_t attr_index) {
-  if (attr_index == LOOM_ATTR_INDEX_NONE) {
-    return false;
-  }
-  return !loom_attr_is_absent(loom_op_attrs(func.op)[attr_index]);
-}
-
-static iree_status_t loom_link_merge_func_attr(
-    loom_ir_remap_t* remap, const loom_linker_t* linker,
-    loom_symbol_ref_t target_ref, loom_func_like_t source_func,
-    uint8_t source_attr_index, loom_func_like_t target_func,
-    uint8_t target_attr_index, iree_string_view_t field_name) {
-  if (!loom_link_func_attr_present(source_func, source_attr_index)) {
-    return iree_ok_status();
-  }
-  if (target_attr_index == LOOM_ATTR_INDEX_NONE) {
-    return loom_link_incompatible_contract_status(linker, target_ref,
-                                                  field_name);
-  }
-
-  loom_attribute_t source_attr =
-      loom_op_attrs(source_func.op)[source_attr_index];
-  loom_attribute_t remapped_attr = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_ir_remap_attribute(remap, source_attr, &remapped_attr));
-
-  loom_attribute_t* target_attr =
-      &loom_op_attrs(target_func.op)[target_attr_index];
-  if (loom_attr_is_absent(*target_attr)) {
-    *target_attr = remapped_attr;
-    return iree_ok_status();
-  }
-  if (!loom_attribute_equal(target_attr, &remapped_attr)) {
-    return loom_link_incompatible_contract_status(linker, target_ref,
-                                                  field_name);
-  }
-  return iree_ok_status();
 }
 
 static iree_status_t loom_link_merge_func_contract(
@@ -995,14 +836,8 @@ static iree_status_t loom_link_merge_func_contract(
     const loom_module_t* source_module, loom_op_t* source_op,
     iree_arena_allocator_t* arena, loom_symbol_ref_t target_ref,
     loom_op_t* target_op, bool merge_output_contract) {
-  if (source_op == target_op) return iree_ok_status();
-
-  loom_func_like_t source_func = loom_func_like_cast(source_module, source_op);
-  loom_func_like_t target_func =
-      loom_func_like_cast(linker->target_module, target_op);
-  if (!loom_func_like_isa(source_func) || !loom_func_like_isa(target_func)) {
-    return loom_link_incompatible_contract_status(linker, target_ref,
-                                                  IREE_SV("func_like"));
+  if (source_op == target_op) {
+    return iree_ok_status();
   }
 
   loom_ir_remap_symbol_callback_t symbol_callback =
@@ -1023,133 +858,17 @@ static iree_status_t loom_link_merge_func_contract(
                                    .remap_symbol = symbol_callback,
                                },
                                &contract_remap));
-  const loom_symbol_definition_descriptor_t* source_definition =
-      loom_link_op_symbol_definition(source_module, source_op);
-  if (loom_symbol_definition_implements(source_definition,
-                                        LOOM_SYMBOL_INTERFACE_KERNEL)) {
-    IREE_RETURN_IF_ERROR(loom_link_map_and_check_kernel_signature(
-        &contract_remap, source_module, source_op, linker->target_module,
-        target_op, linker, target_ref));
-  }
-  IREE_RETURN_IF_ERROR(loom_link_map_func_signature_values(
-      &contract_remap, source_func, target_func, linker, target_ref));
-  IREE_RETURN_IF_ERROR(loom_link_check_func_signature_types(
-      &contract_remap, source_module, source_func, target_func, linker,
-      target_ref));
-  IREE_RETURN_IF_ERROR(loom_link_check_func_tied_results(
-      linker, target_ref, source_func, target_func));
 
-  const loom_link_func_contract_attr_t attrs[] = {
-      {
-          .source_attr_index = source_func.vtable->cc_attr_index,
-          .target_attr_index = target_func.vtable->cc_attr_index,
-          .field_name = IREE_SV("cc"),
-      },
-      {
-          .source_attr_index = source_func.vtable->purity_attr_index,
-          .target_attr_index = target_func.vtable->purity_attr_index,
-          .field_name = IREE_SV("purity"),
-      },
-      {
-          .source_attr_index = source_func.vtable->temperature_attr_index,
-          .target_attr_index = target_func.vtable->temperature_attr_index,
-          .field_name = IREE_SV("temperature"),
-      },
-      {
-          .source_attr_index = source_func.vtable->inline_policy_attr_index,
-          .target_attr_index = target_func.vtable->inline_policy_attr_index,
-          .field_name = IREE_SV("inline_policy"),
-      },
-      {
-          .source_attr_index = source_func.vtable->target_attr_index,
-          .target_attr_index = target_func.vtable->target_attr_index,
-          .field_name = IREE_SV("target"),
-      },
-      {
-          .source_attr_index = source_func.vtable->requires_attr_index,
-          .target_attr_index = target_func.vtable->requires_attr_index,
-          .field_name = IREE_SV("requires"),
-      },
-      {
-          .source_attr_index = source_func.vtable->repr_contract_attr_index,
-          .target_attr_index = target_func.vtable->repr_contract_attr_index,
-          .field_name = IREE_SV("repr_contract"),
-      },
-      {
-          .source_attr_index = source_func.vtable->abi_attr_index,
-          .target_attr_index = target_func.vtable->abi_attr_index,
-          .field_name = IREE_SV("abi"),
-      },
-      {
-          .source_attr_index = source_func.vtable->abi_attrs_attr_index,
-          .target_attr_index = target_func.vtable->abi_attrs_attr_index,
-          .field_name = IREE_SV("abi_attrs"),
-      },
-      {
-          .source_attr_index = source_func.vtable->predicates_attr_index,
-          .target_attr_index = target_func.vtable->predicates_attr_index,
-          .field_name = IREE_SV("predicates"),
-      },
-      {
-          .source_attr_index = source_func.vtable->template_family_attr_index,
-          .target_attr_index = target_func.vtable->template_family_attr_index,
-          .field_name = IREE_SV("implements"),
-      },
-      {
-          .source_attr_index =
-              source_func.vtable->specialization_count_attr_index,
-          .target_attr_index =
-              target_func.vtable->specialization_count_attr_index,
-          .field_name = IREE_SV("specialization_count"),
-      },
-  };
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(attrs); ++i) {
-    IREE_RETURN_IF_ERROR(loom_link_merge_func_attr(
-        &contract_remap, linker, target_ref, source_func,
-        attrs[i].source_attr_index, target_func, attrs[i].target_attr_index,
-        attrs[i].field_name));
-  }
-  if (merge_output_contract) {
-    const loom_link_func_contract_attr_t output_attrs[] = {
-        {
-            .source_attr_index = source_func.vtable->visibility_attr_index,
-            .target_attr_index = target_func.vtable->visibility_attr_index,
-            .field_name = IREE_SV("visibility"),
-        },
-        {
-            .source_attr_index = source_func.vtable->import_module_attr_index,
-            .target_attr_index = target_func.vtable->import_module_attr_index,
-            .field_name = IREE_SV("import_module"),
-        },
-        {
-            .source_attr_index = source_func.vtable->import_symbol_attr_index,
-            .target_attr_index = target_func.vtable->import_symbol_attr_index,
-            .field_name = IREE_SV("import_symbol"),
-        },
-        {
-            .source_attr_index = source_func.vtable->export_symbol_attr_index,
-            .target_attr_index = target_func.vtable->export_symbol_attr_index,
-            .field_name = IREE_SV("export_symbol"),
-        },
-        {
-            .source_attr_index = source_func.vtable->export_attrs_attr_index,
-            .target_attr_index = target_func.vtable->export_attrs_attr_index,
-            .field_name = IREE_SV("export_attrs"),
-        },
-        {
-            .source_attr_index = source_func.vtable->export_linkage_attr_index,
-            .target_attr_index = target_func.vtable->export_linkage_attr_index,
-            .field_name = IREE_SV("export_linkage"),
-        },
-    };
-    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(output_attrs); ++i) {
-      IREE_RETURN_IF_ERROR(loom_link_merge_func_attr(
-          &contract_remap, linker, target_ref, source_func,
-          output_attrs[i].source_attr_index, target_func,
-          output_attrs[i].target_attr_index, output_attrs[i].field_name));
-    }
-  }
-  return iree_ok_status();
+  loom_link_func_contract_t source_contract =
+      loom_link_func_contract_from_op(source_module, source_op);
+  loom_link_func_contract_t selected_contract =
+      loom_link_func_contract_from_op(linker->target_module, target_op);
+  loom_link_func_contract_mismatch_t mismatch = {0};
+  const loom_link_func_contract_merge_flags_t flags =
+      merge_output_contract ? LOOM_LINK_FUNC_CONTRACT_MERGE_FLAG_OUTPUT : 0;
+  IREE_RETURN_IF_ERROR(loom_link_func_contract_merge(
+      &source_contract, &selected_contract, &contract_remap, flags, &mismatch));
+  return loom_link_func_contract_status(linker, target_ref, &mismatch);
 }
 
 static iree_status_t loom_link_incompatible_value_contract_status(
@@ -1407,6 +1126,15 @@ static loom_linker_symbol_output_t loom_linker_combine_symbol_output(
   return LOOM_LINKER_SYMBOL_OUTPUT_AUTHORED;
 }
 
+typedef struct loom_link_func_output_attr_t {
+  // Root operation attribute index.
+  uint8_t source_attr_index;
+  // Selected operation attribute index.
+  uint8_t target_attr_index;
+  // Stable field name used in diagnostics.
+  iree_string_view_t field_name;
+} loom_link_func_output_attr_t;
+
 static iree_status_t loom_linker_replace_output_attr(
     loom_linker_t* linker, loom_symbol_ref_t target_ref, loom_ir_remap_t* remap,
     const loom_op_t* source_op, uint8_t source_attr_index, loom_op_t* target_op,
@@ -1470,7 +1198,7 @@ static iree_status_t loom_linker_apply_root_symbol_output(
     }
     const bool target_declaration =
         loom_symbol_definition_is_declaration(target_definition);
-    const loom_link_func_contract_attr_t export_attrs[] = {
+    const loom_link_func_output_attr_t export_attrs[] = {
         {
             .source_attr_index = root_func.vtable->export_symbol_attr_index,
             .target_attr_index = target_func.vtable->export_symbol_attr_index,
@@ -1493,7 +1221,7 @@ static iree_status_t loom_linker_apply_root_symbol_output(
           target_op, export_attrs[i].target_attr_index,
           export_attrs[i].field_name));
     }
-    const loom_link_func_contract_attr_t import_attrs[] = {
+    const loom_link_func_output_attr_t import_attrs[] = {
         {
             .source_attr_index = root_func.vtable->import_module_attr_index,
             .target_attr_index = target_func.vtable->import_module_attr_index,

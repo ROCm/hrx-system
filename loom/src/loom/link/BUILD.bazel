@@ -24,10 +24,41 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "func_contract",
+    srcs = ["func_contract.c"],
+    hdrs = ["func_contract.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/rewrite:remap",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "func_contract_test",
+    srcs = ["func_contract_test.cc"],
+    deps = [
+        ":func_contract",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/link/testdata:func_contract",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/rewrite:remap",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "linker",
     srcs = ["linker.c"],
     hdrs = ["linker.h"],
     deps = [
+        ":func_contract",
         ":symbol_policy",
         "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/analysis:symbol_value_constraints",

@@ -25,12 +25,47 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    func_contract
+  HDRS
+    "func_contract.h"
+  SRCS
+    "func_contract.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::ops::op_defs
+    loom::rewrite::remap
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    func_contract_test
+  SRCS
+    "func_contract_test.cc"
+  DEPS
+    ::func_contract
+    iree::base
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::ir
+    loom::link::testdata::func_contract
+    loom::ops::op_registry
+    loom::rewrite::remap
+)
+
+loom_cc_library(
+  NAME
     linker
   HDRS
     "linker.h"
   SRCS
     "linker.c"
   DEPS
+    ::func_contract
     ::symbol_policy
     iree::base
     iree::base::internal::arena
