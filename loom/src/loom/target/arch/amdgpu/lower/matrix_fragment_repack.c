@@ -133,6 +133,24 @@ iree_string_view_t loom_amdgpu_fragment_repack_plan_key(
   }
 }
 
+bool loom_amdgpu_fragment_repack_plan_requires_lane_id(
+    const loom_amdgpu_fragment_repack_plan_t* plan) {
+  switch (plan->strategy) {
+    case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_LHS_BF16_PACKED_BPERMUTE:
+    case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_LHS_BF16_BPERMUTE:
+    case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_LHS_BF16_TRANSPOSE_BPERMUTE:
+      return true;
+    case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_NONE:
+    case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_ALIAS:
+    case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_DIAGNOSTIC:
+    case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_RHS_PACKED_B16_XOR_PERMUTE:
+      return false;
+    default:
+      IREE_ASSERT_UNREACHABLE("unknown AMDGPU fragment repack strategy");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+}
+
 static loom_amdgpu_fragment_repack_reason_t
 loom_amdgpu_fragment_repack_transition_reason(
     loom_vector_fragment_role_flags_t source_role_flags,

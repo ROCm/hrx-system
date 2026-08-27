@@ -29,6 +29,11 @@ iree_status_t loom_amdgpu_lower_vector_fragment_repack(
 iree_string_view_t loom_amdgpu_fragment_repack_plan_key(
     const loom_amdgpu_fragment_repack_plan_t* plan);
 
+// Returns true when lowering the selected plan derives fragment coordinates
+// from the current subgroup lane ID.
+bool loom_amdgpu_fragment_repack_plan_requires_lane_id(
+    const loom_amdgpu_fragment_repack_plan_t* plan);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

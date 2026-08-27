@@ -33,6 +33,7 @@ iree_execution_test_suite(
         "amdgpu_bad_return.loom",
         "amdgpu_unused_kernargs.loom",
         "complete_authoring_module.loom",
+        "fragment_repack_lane_preamble.loom",
         "gfx1250_configured_fragment_bank.loom",
         "long_sopp_branch.loom",
         "selected_root_amdgpu.loom",
