@@ -473,6 +473,127 @@ loom_target_compile_report_format_source_low_selection_summary_rows(
   return iree_ok_status();
 }
 
+static iree_status_t
+loom_target_compile_report_append_native_contraction_role_text(
+    iree_string_view_t role_name,
+    const loom_native_contraction_role_facts_t* facts,
+    iree_string_builder_t* builder) {
+  const iree_string_view_t evidence =
+      loom_target_compile_report_native_layout_evidence_name(facts->evidence);
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      "%.*s:{evidence:%.*s,bits:%u,registers:%u,payload:%u,positions:%u,"
+      "coordinates:%u",
+      (int)role_name.size, role_name.data, (int)evidence.size, evidence.data,
+      facts->element_bit_count, facts->register_count,
+      facts->payload_element_count, facts->physical_position_count,
+      facts->logical_coordinate_count));
+  if (facts->evidence == LOOM_NATIVE_LAYOUT_EVIDENCE_EXACT) {
+    if (facts->owner_multiplicity_minimum ==
+        facts->owner_multiplicity_maximum) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder, ",owners:%u", facts->owner_multiplicity_minimum));
+    } else {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder, ",owners:%u..%u", facts->owner_multiplicity_minimum,
+          facts->owner_multiplicity_maximum));
+    }
+  }
+  return iree_string_builder_append_cstring(builder, "}");
+}
+
+static iree_status_t loom_target_compile_report_append_native_contraction_text(
+    const loom_native_contraction_facts_t* facts,
+    iree_string_builder_t* builder) {
+  if (facts == NULL) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder, " native_contraction={tile:%ux%ux%ux%u,participants:%u,",
+      facts->shape.block_count, facts->shape.result_row_count,
+      facts->shape.result_column_count, facts->shape.reduction_count,
+      facts->participant_count));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_append_native_contraction_role_text(
+          IREE_SV("lhs"), &facts->lhs, builder));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_append_native_contraction_role_text(
+          IREE_SV("rhs"), &facts->rhs, builder));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_append_native_contraction_role_text(
+          IREE_SV("accumulator"), &facts->accumulator, builder));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_append_native_contraction_role_text(
+          IREE_SV("result"), &facts->result, builder));
+  return iree_string_builder_append_cstring(builder, "}");
+}
+
+static iree_status_t loom_target_compile_report_append_native_transition_text(
+    const loom_target_compile_report_source_low_row_t* row,
+    iree_string_builder_t* builder) {
+  const loom_native_transition_facts_t* facts = row->native_transition_facts;
+  if (facts == NULL) {
+    return iree_ok_status();
+  }
+  const iree_string_view_t source_role =
+      loom_target_compile_report_native_contraction_role_name(
+          facts->source_role);
+  const iree_string_view_t destination_role =
+      loom_target_compile_report_native_contraction_role_name(
+          facts->destination_role);
+  const iree_string_view_t source_type =
+      loom_target_compile_report_scalar_type_name(
+          row->native_transition_source_type);
+  const iree_string_view_t destination_type =
+      loom_target_compile_report_scalar_type_name(
+          row->native_transition_destination_type);
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      " native_transition={%.*s:%.*s->%.*s:%.*s,positions:%u,"
+      "participant_changes:%u,local_position_changes:%u,replication:",
+      (int)source_role.size, source_role.data, (int)source_type.size,
+      source_type.data, (int)destination_role.size, destination_role.data,
+      (int)destination_type.size, destination_type.data,
+      facts->destination_position_count, facts->participant_change_count,
+      facts->local_position_change_count));
+  if (facts->destination_positions_per_source_minimum ==
+      facts->destination_positions_per_source_maximum) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, "%u", facts->destination_positions_per_source_minimum));
+  } else {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, "%u..%u", facts->destination_positions_per_source_minimum,
+        facts->destination_positions_per_source_maximum));
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, ",source_owner:["));
+  for (uint8_t i = 0; i < facts->source_owner_factor_count; ++i) {
+    const loom_native_transition_owner_factor_t* factor =
+        &facts->source_owner_factors[i];
+    const iree_string_view_t destination_dimension =
+        loom_target_compile_report_native_physical_dimension_name(
+            factor->destination_dimension);
+    const iree_string_view_t source_owner_dimension =
+        loom_target_compile_report_native_physical_dimension_name(
+            factor->source_owner_dimension);
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, "%s%.*s+=(%.*s/%u", i == 0 ? "" : ",",
+        (int)source_owner_dimension.size, source_owner_dimension.data,
+        (int)destination_dimension.size, destination_dimension.data,
+        factor->destination_divisor));
+    if (factor->destination_modulus != 0) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder, "%%%u", factor->destination_modulus));
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, ")*%u", factor->source_owner_multiplier));
+  }
+  return iree_string_builder_append_cstring(builder, "]}");
+}
+
 static iree_status_t loom_target_compile_report_format_source_low_rows(
     const loom_target_compile_report_t* report,
     iree_string_builder_t* builder) {
@@ -517,6 +638,22 @@ static iree_status_t loom_target_compile_report_format_source_low_rows(
             row->execution_count_plus_one - 1));
       }
       IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
+      if (row->native_contraction_facts != NULL ||
+          row->native_transition_facts != NULL) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder,
+            "COMPILE-REPORT: source_low_native[%" PRIhsz
+            "] function=%.*s source_op=%.*s",
+            row_index, (int)function_name.size, function_name.data,
+            (int)source_op_name.size, source_op_name.data));
+        IREE_RETURN_IF_ERROR(
+            loom_target_compile_report_append_native_contraction_text(
+                row->native_contraction_facts, builder));
+        IREE_RETURN_IF_ERROR(
+            loom_target_compile_report_append_native_transition_text(row,
+                                                                     builder));
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
+      }
     }
   }
   return iree_ok_status();

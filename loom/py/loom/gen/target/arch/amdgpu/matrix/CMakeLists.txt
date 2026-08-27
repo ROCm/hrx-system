@@ -19,6 +19,7 @@ iree_py_library(
     "amdgpu_matrix_contract_tables.py"
   DEPS
     loom::py::loom::gen::support::support
+    loom::py::loom::gen::support::native_layout
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::native_coordinate_projection
     loom::py::loom::target::arch::amdgpu::descriptors

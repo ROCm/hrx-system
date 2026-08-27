@@ -17,6 +17,7 @@
 
 #include "iree/base/api.h"
 #include "loom/analysis/contract_roles.h"
+#include "loom/analysis/native_layout.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -160,6 +161,8 @@ typedef struct loom_matrix_fragment_layout_t {
   loom_matrix_fragment_role_layout_t accumulator;
   // Matrix D result role layout.
   loom_matrix_fragment_role_layout_t result;
+  // Generated compact placement facts for this native contraction layout.
+  const loom_native_contraction_facts_t* native_contraction_facts;
 } loom_matrix_fragment_layout_t;
 
 typedef struct loom_matrix_fragment_coordinate_t {

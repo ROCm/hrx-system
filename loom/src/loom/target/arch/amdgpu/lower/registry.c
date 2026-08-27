@@ -1561,6 +1561,32 @@ static iree_string_view_t loom_amdgpu_plan_key(
   }
 }
 
+static void loom_amdgpu_describe_plan(
+    void* user_data, loom_low_lower_context_t* context,
+    const loom_op_t* source_op, loom_low_lower_plan_t plan,
+    loom_low_lower_plan_report_t* out_report) {
+  *out_report = (loom_low_lower_plan_report_t){
+      .plan_key = loom_amdgpu_plan_key(user_data, context, source_op, plan),
+  };
+  const loom_amdgpu_lower_dispatch_row_t* row =
+      loom_amdgpu_find_lower_dispatch_row(plan.id);
+  if (loom_amdgpu_dispatch_row_report_key_kind(row) !=
+          LOOM_AMDGPU_REPORT_KEY_FRAGMENT_REPACK_STRATEGY ||
+      plan.target_data == NULL) {
+    return;
+  }
+  const loom_amdgpu_fragment_repack_plan_t* repack_plan =
+      (const loom_amdgpu_fragment_repack_plan_t*)plan.target_data;
+  out_report->native_contraction_facts = repack_plan->native_contraction_facts;
+  out_report->native_transition_facts = repack_plan->native_transition_facts;
+  if (repack_plan->native_transition_facts != NULL) {
+    out_report->native_transition_source_type =
+        loom_type_element_type(repack_plan->source_type);
+    out_report->native_transition_destination_type =
+        loom_type_element_type(repack_plan->result_type);
+  }
+}
+
 static iree_status_t loom_amdgpu_emit_op(void* user_data,
                                          loom_low_lower_context_t* context,
                                          const loom_op_t* source_op,
@@ -1684,7 +1710,7 @@ static const loom_low_lower_policy_t kAmdgpuLowLowerPolicy = {
     .select_op = {.fn = loom_amdgpu_select_op, .user_data = NULL},
     .mark_plan_storage_demands = {.fn = loom_amdgpu_mark_plan_storage_demands,
                                   .user_data = NULL},
-    .plan_key = {.fn = loom_amdgpu_plan_key, .user_data = NULL},
+    .describe_plan = {.fn = loom_amdgpu_describe_plan, .user_data = NULL},
     .emit_op = {.fn = loom_amdgpu_emit_op, .user_data = NULL},
     .finalize_function = {.fn = loom_amdgpu_finalize_function,
                           .user_data = NULL},

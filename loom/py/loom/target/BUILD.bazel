@@ -66,6 +66,16 @@ iree_py_library(
     ],
 )
 
+iree_py_library(
+    name = "native_layout_facts",
+    srcs = ["native_layout_facts.py"],
+    deps = [
+        ":native_contraction_layout",
+        ":native_coordinate_projection",
+        ":package_init",
+    ],
+)
+
 iree_py_test(
     name = "target_test",
     srcs = [
@@ -101,6 +111,20 @@ iree_py_test(
     deps = [
         ":native_contraction_layout",
         ":native_coordinate_projection",
+    ],
+)
+
+iree_py_test(
+    name = "native_layout_facts_test",
+    srcs = [
+        "native_layout_facts_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.native_layout_facts_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":native_contraction_layout",
+        ":native_layout_facts",
     ],
 )
 

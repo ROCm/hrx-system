@@ -60,7 +60,9 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::internal
+    loom::analysis::native_layout
     loom::codegen::low::planning_statistics
+    loom::ir
     loom::target::residency
     loom::target::types
   PUBLIC
@@ -88,6 +90,7 @@ loom_cc_library(
     ::report
     iree::base
     iree::base::internal
+    loom::analysis::native_layout
     loom::ir
     loom::target::math_policy
     loom::util::json

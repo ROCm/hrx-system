@@ -82,3 +82,24 @@ low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @bf16_result_to_
   %rhs = concat(%61, %62, %63, %64, %65, %66, %67, %68) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
   return %rhs
 }
+
+// ====
+
+// RUN: pass-report source-to-low,low-dce
+
+amdgpu.target<gfx1100> @target
+
+func.def target(@target) @report_result_to_rhs_packed_b16(
+    %values: vector<16xf16>) -> (vector<16xf16>) {
+  %c16 = index.constant 16 : index
+  %result = vector.fragment<result> %values shape [%c16, %c16] : vector<16xf16>
+  %rhs = vector.fragment.repack<rhs> %result shape [%c16, %c16] : vector<16xf16> -> vector<16xf16>
+  func.return %rhs : vector<16xf16>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=2 emitted_ops=28 rows=2
+COMPILE-REPORT: source_low[0] function=report_result_to_rhs_packed_b16 source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_result_to_rhs_packed_b16 source_op=vector.fragment.repack selection=plan plan_key=amdgpu.fragment_repack.strategy.result_to_rhs_packed_b16_xor_permute emitted_ops=28
+COMPILE-REPORT: source_low_native[1] function=report_result_to_rhs_packed_b16 source_op=vector.fragment.repack native_contraction={tile:1x16x16x16,participants:32,lhs:{evidence:exact,bits:16,registers:8,payload:16,positions:512,coordinates:256,owners:2},rhs:{evidence:exact,bits:16,registers:8,payload:16,positions:512,coordinates:256,owners:2},accumulator:{evidence:exact,bits:16,registers:8,payload:16,positions:256,coordinates:256,owners:1},result:{evidence:exact,bits:16,registers:8,payload:16,positions:256,coordinates:256,owners:1}} native_transition={result:f16->rhs:f16,positions:512,participant_changes:256,local_position_changes:480,replication:2,source_owner:[participant+=(participant/1%16)*1,participant+=(position/1%2)*16,position+=(position/2)*1]}

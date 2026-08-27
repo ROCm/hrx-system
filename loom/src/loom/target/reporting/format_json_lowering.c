@@ -182,6 +182,162 @@ loom_target_compile_report_format_source_low_selection_summaries_json(
   return loom_json_object_end(&object);
 }
 
+static iree_status_t
+loom_target_compile_report_format_native_contraction_role_json(
+    iree_string_view_t field_name,
+    const loom_native_contraction_role_facts_t* facts,
+    loom_json_object_writer_t* contraction) {
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(contraction, field_name));
+  loom_json_object_writer_t role;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(contraction->stream, &role));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &role, IREE_SV("evidence"),
+      loom_target_compile_report_native_layout_evidence_name(facts->evidence)));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &role, IREE_SV("element_bits"), facts->element_bit_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &role, IREE_SV("registers_per_participant"), facts->register_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &role, IREE_SV("payload_elements_per_participant"),
+      facts->payload_element_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &role, IREE_SV("physical_positions"), facts->physical_position_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &role, IREE_SV("logical_coordinates"), facts->logical_coordinate_count));
+  if (facts->evidence == LOOM_NATIVE_LAYOUT_EVIDENCE_EXACT) {
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin_field(&role, IREE_SV("owners_per_coordinate")));
+    loom_json_object_writer_t owners;
+    IREE_RETURN_IF_ERROR(loom_json_object_begin(role.stream, &owners));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &owners, IREE_SV("minimum"), facts->owner_multiplicity_minimum));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &owners, IREE_SV("maximum"), facts->owner_multiplicity_maximum));
+    IREE_RETURN_IF_ERROR(loom_json_object_end(&owners));
+  }
+  return loom_json_object_end(&role);
+}
+
+static iree_status_t loom_target_compile_report_format_native_contraction_json(
+    const loom_native_contraction_facts_t* facts,
+    loom_json_object_writer_t* row_object) {
+  if (facts == NULL) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_begin_field(row_object, IREE_SV("native_contraction")));
+  loom_json_object_writer_t contraction;
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_begin(row_object->stream, &contraction));
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_begin_field(&contraction, IREE_SV("tile")));
+  loom_json_object_writer_t tile;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(contraction.stream, &tile));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &tile, IREE_SV("blocks"), facts->shape.block_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &tile, IREE_SV("m"), facts->shape.result_row_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &tile, IREE_SV("n"), facts->shape.result_column_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &tile, IREE_SV("k"), facts->shape.reduction_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_end(&tile));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &contraction, IREE_SV("participants"), facts->participant_count));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_native_contraction_role_json(
+          IREE_SV("lhs"), &facts->lhs, &contraction));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_native_contraction_role_json(
+          IREE_SV("rhs"), &facts->rhs, &contraction));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_native_contraction_role_json(
+          IREE_SV("accumulator"), &facts->accumulator, &contraction));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_native_contraction_role_json(
+          IREE_SV("result"), &facts->result, &contraction));
+  return loom_json_object_end(&contraction);
+}
+
+static iree_status_t loom_target_compile_report_format_native_transition_json(
+    const loom_target_compile_report_source_low_row_t* row,
+    loom_json_object_writer_t* row_object) {
+  const loom_native_transition_facts_t* facts = row->native_transition_facts;
+  if (facts == NULL) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_json_object_begin_field(row_object, IREE_SV("native_transition")));
+  loom_json_object_writer_t transition;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(row_object->stream, &transition));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &transition, IREE_SV("source_role"),
+      loom_target_compile_report_native_contraction_role_name(
+          facts->source_role)));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &transition, IREE_SV("destination_role"),
+      loom_target_compile_report_native_contraction_role_name(
+          facts->destination_role)));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &transition, IREE_SV("source_type"),
+      loom_target_compile_report_scalar_type_name(
+          row->native_transition_source_type)));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &transition, IREE_SV("destination_type"),
+      loom_target_compile_report_scalar_type_name(
+          row->native_transition_destination_type)));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &transition, IREE_SV("destination_positions"),
+      facts->destination_position_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &transition, IREE_SV("participant_changes"),
+      facts->participant_change_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &transition, IREE_SV("local_position_changes"),
+      facts->local_position_change_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(
+      &transition, IREE_SV("destination_positions_per_source")));
+  loom_json_object_writer_t replication;
+  IREE_RETURN_IF_ERROR(loom_json_object_begin(transition.stream, &replication));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &replication, IREE_SV("minimum"),
+      facts->destination_positions_per_source_minimum));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &replication, IREE_SV("maximum"),
+      facts->destination_positions_per_source_maximum));
+  IREE_RETURN_IF_ERROR(loom_json_object_end(&replication));
+  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(
+      &transition, IREE_SV("source_owner_factors")));
+  loom_json_array_writer_t factors;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(transition.stream, &factors));
+  for (uint8_t i = 0; i < facts->source_owner_factor_count; ++i) {
+    const loom_native_transition_owner_factor_t* factor =
+        &facts->source_owner_factors[i];
+    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&factors));
+    loom_json_object_writer_t factor_object;
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin(transition.stream, &factor_object));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &factor_object, IREE_SV("destination_dimension"),
+        loom_target_compile_report_native_physical_dimension_name(
+            factor->destination_dimension)));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+        &factor_object, IREE_SV("source_owner_dimension"),
+        loom_target_compile_report_native_physical_dimension_name(
+            factor->source_owner_dimension)));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &factor_object, IREE_SV("divisor"), factor->destination_divisor));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &factor_object, IREE_SV("modulus"), factor->destination_modulus));
+    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+        &factor_object, IREE_SV("multiplier"),
+        factor->source_owner_multiplier));
+    IREE_RETURN_IF_ERROR(loom_json_object_end(&factor_object));
+  }
+  IREE_RETURN_IF_ERROR(loom_json_array_end(&factors));
+  return loom_json_object_end(&transition);
+}
+
 static iree_status_t loom_target_compile_report_format_source_low_row_json(
     const loom_target_compile_report_source_low_row_t* row,
     iree_host_size_t row_index, loom_output_stream_t* stream) {
@@ -204,6 +360,11 @@ static iree_status_t loom_target_compile_report_format_source_low_row_json(
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_json_write_optional_string_field(
           &object, IREE_SV("plan_key"), row->plan_key));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_native_contraction_json(
+          row->native_contraction_facts, &object));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_native_transition_json(row, &object));
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_json_write_optional_string_field(
           &object, IREE_SV("descriptor_key"), row->descriptor_key));

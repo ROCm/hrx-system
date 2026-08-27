@@ -19,6 +19,7 @@
 #include "iree/base/api.h"
 #include "loom/analysis/condition_facts.h"
 #include "loom/analysis/contract_vector.h"
+#include "loom/analysis/native_layout.h"
 #include "loom/analysis/symbolic_expr.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/memory_access.h"
@@ -395,6 +396,14 @@ typedef struct loom_low_lower_report_row_t {
   loom_low_lower_plan_id_t plan_id;
   // Stable target-owned key identifying the selected plan variant, if any.
   iree_string_view_t plan_key;
+  // Generated native contraction placement selected for this source op.
+  const loom_native_contraction_facts_t* native_contraction_facts;
+  // Generated native source-owner movement selected for this source op.
+  const loom_native_transition_facts_t* native_transition_facts;
+  // Source scalar type for |native_transition_facts| when present.
+  loom_scalar_type_t native_transition_source_type;
+  // Destination scalar type for |native_transition_facts| when present.
+  loom_scalar_type_t native_transition_destination_type;
   // First low descriptor key emitted by this source op, if any.
   iree_string_view_t descriptor_key;
   // First low descriptor semantic tag emitted by this source op, if any.
@@ -673,18 +682,31 @@ typedef struct loom_low_lower_mark_plan_storage_demands_callback_t {
   void* user_data;
 } loom_low_lower_mark_plan_storage_demands_callback_t;
 
-typedef iree_string_view_t (*loom_low_lower_plan_key_fn_t)(
-    void* user_data, loom_low_lower_context_t* context,
-    const loom_op_t* source_op, loom_low_lower_plan_t plan);
+typedef struct loom_low_lower_plan_report_t {
+  // Stable target-owned key identifying the selected plan variant, if any.
+  iree_string_view_t plan_key;
+  // Generated native contraction placement selected with the plan.
+  const loom_native_contraction_facts_t* native_contraction_facts;
+  // Generated native source-owner movement selected with the plan.
+  const loom_native_transition_facts_t* native_transition_facts;
+  // Source scalar type for |native_transition_facts| when present.
+  loom_scalar_type_t native_transition_source_type;
+  // Destination scalar type for |native_transition_facts| when present.
+  loom_scalar_type_t native_transition_destination_type;
+} loom_low_lower_plan_report_t;
 
-typedef struct loom_low_lower_plan_key_callback_t {
-  // Optional callback returning a stable target-owned key for one selected
-  // callback plan. The string is used only for production compile reports and
-  // must remain borrowed/static.
-  loom_low_lower_plan_key_fn_t fn;
+typedef void (*loom_low_lower_describe_plan_fn_t)(
+    void* user_data, loom_low_lower_context_t* context,
+    const loom_op_t* source_op, loom_low_lower_plan_t plan,
+    loom_low_lower_plan_report_t* out_report);
+
+typedef struct loom_low_lower_describe_plan_callback_t {
+  // Optional callback describing one target-owned plan for production compile
+  // reports. All returned data must remain borrowed/static.
+  loom_low_lower_describe_plan_fn_t fn;
   // Caller-owned payload passed to |fn|.
   void* user_data;
-} loom_low_lower_plan_key_callback_t;
+} loom_low_lower_describe_plan_callback_t;
 
 typedef iree_status_t (*loom_low_lower_finalize_function_fn_t)(
     void* user_data, loom_low_lower_context_t* context);
@@ -775,8 +797,8 @@ typedef struct loom_low_lower_policy_t {
   // Optional target-owned source storage demand marker for callback-selected
   // plans. Missing preserves the conservative all-operands behavior.
   loom_low_lower_mark_plan_storage_demands_callback_t mark_plan_storage_demands;
-  // Optional target-owned callback plan key provider for compile reports.
-  loom_low_lower_plan_key_callback_t plan_key;
+  // Optional target-owned callback plan description for compile reports.
+  loom_low_lower_describe_plan_callback_t describe_plan;
   // Optional target-owned emitter for plans selected by |select_op|.
   loom_low_lower_emit_op_callback_t emit_op;
   // Optional target-owned function finalizer.

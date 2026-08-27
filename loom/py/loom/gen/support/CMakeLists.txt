@@ -24,6 +24,15 @@ iree_py_library(
     loom::py::loom::gen::package
 )
 
+iree_py_library(
+  NAME
+    native_layout
+  SRCS
+    "native_layout.py"
+  DEPS
+    loom::py::loom::target::native_layout_facts
+)
+
 iree_py_test(
   NAME
     support_test

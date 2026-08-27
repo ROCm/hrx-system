@@ -292,6 +292,9 @@ static iree_status_t loom_amdgpu_matrix_contract_query_reject_descriptor(
   *out_result = loom_target_contract_query_result_empty();
   out_result->outcome = outcome;
   out_result->selected_matrix_fragment_layout = fragment_layout;
+  out_result->selected_native_contraction_facts =
+      fragment_layout != NULL ? fragment_layout->native_contraction_facts
+                              : NULL;
   out_result->rejection = rejection;
   return iree_ok_status();
 }
@@ -473,6 +476,9 @@ iree_status_t loom_amdgpu_descriptor_matrix_query(
   out_result->outcome = LOOM_TARGET_CONTRACT_QUERY_LEGAL;
   out_result->selected_descriptor = descriptor;
   out_result->selected_matrix_fragment_layout = fragment_layout;
+  out_result->selected_native_contraction_facts =
+      fragment_layout != NULL ? fragment_layout->native_contraction_facts
+                              : NULL;
   out_result->source_rejection_bits = contract_diagnostic.rejection_bits;
   out_result->target_rejection_bits = match_diagnostic.rejection_bits;
   return iree_ok_status();

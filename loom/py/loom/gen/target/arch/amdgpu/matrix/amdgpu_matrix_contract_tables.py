@@ -27,6 +27,10 @@ _ensure_runtime_py_on_path()
 
 from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
+from loom.gen.support.native_layout import (  # noqa: E402
+    NativeContractionFactTable,
+    NativeTransitionFactTable,
+)
 from loom.target.arch.amdgpu.descriptor_overlay import (  # noqa: E402
     AmdgpuDescriptorOverlay,
 )
@@ -49,6 +53,8 @@ from loom.target.arch.amdgpu.matrix_fragment_layouts import (  # noqa: E402
     MatrixFragmentResultToRhsPackedB16Projection,
     MatrixFragmentRoleLayout,
     layout_roles,
+    matrix_fragment_native_contraction_facts,
+    matrix_fragment_native_transition_facts,
     matrix_fragment_packed_element_axis,
     matrix_fragment_result_to_lhs_bf16_projection,
     matrix_fragment_result_to_rhs_packed_b16_projection,
@@ -978,22 +984,29 @@ def _emit_header() -> str:
 
 def _deduplicate_repack_projections[ProjectionT: Hashable](
     project: Callable[[AmdgpuMatrixFragmentLayout], ProjectionT | None],
-) -> tuple[tuple[int, ...], tuple[ProjectionT, ...]]:
-    rows: list[ProjectionT] = []
-    row_ordinals: dict[ProjectionT, int] = {}
+    source_role: str,
+    destination_role: str,
+    native_transitions: NativeTransitionFactTable,
+) -> tuple[tuple[int, ...], tuple[tuple[ProjectionT, str], ...]]:
+    rows: list[tuple[ProjectionT, str]] = []
+    row_ordinals: dict[tuple[ProjectionT, str], int] = {}
     layout_ordinals: list[int] = []
     for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS:
         projection = project(layout)
         if projection is None:
             layout_ordinals.append(0)
             continue
-        ordinal = row_ordinals.get(projection)
+        transition = matrix_fragment_native_transition_facts(layout, source_role, destination_role)
+        if transition is None:
+            raise ValueError(f"AMDGPU matrix fragment layout '{layout.key}' has a repack projection without exact native transition facts")
+        row = (projection, native_transitions.reference(transition))
+        ordinal = row_ordinals.get(row)
         if ordinal is None:
-            rows.append(projection)
+            rows.append(row)
             ordinal = len(rows)
             if ordinal > 0xFF:
                 raise ValueError("fragment repack projection ordinal exceeds uint8_t")
-            row_ordinals[projection] = ordinal
+            row_ordinals[row] = ordinal
         layout_ordinals.append(ordinal)
     return tuple(layout_ordinals), tuple(rows)
 
@@ -1027,8 +1040,15 @@ def _fragment_repack_header() -> list[str]:
 
 
 def _emit_result_to_lhs_repack_projections() -> str:
-    layout_ordinals, projections = _deduplicate_repack_projections(matrix_fragment_result_to_lhs_bf16_projection)
+    native_transitions = NativeTransitionFactTable("kResultToLhsBf16NativeTransitions")
+    layout_ordinals, projection_rows = _deduplicate_repack_projections(
+        matrix_fragment_result_to_lhs_bf16_projection,
+        "result",
+        "lhs",
+        native_transitions,
+    )
     lines = _fragment_repack_header()
+    lines.extend(native_transitions.definition_lines())
     lines.extend(_fragment_repack_ordinal_table_lines("kResultToLhsBf16ProjectionOrdinals", layout_ordinals))
     lines.extend(
         [
@@ -1037,7 +1057,7 @@ def _emit_result_to_lhs_repack_projections() -> str:
             "    [0] = {0},",
         ]
     )
-    for ordinal, projection in enumerate(projections, start=1):
+    for ordinal, (projection, native_transition_reference) in enumerate(projection_rows, start=1):
         if not isinstance(projection, MatrixFragmentResultToLhsBf16Projection):
             raise TypeError("unexpected result-to-LHS projection type")
         lines.extend(
@@ -1050,6 +1070,7 @@ def _emit_result_to_lhs_repack_projections() -> str:
                 f"        .source_register_selector_right_shift = UINT8_C({projection.source_register_selector.right_shift}),",
                 f"        .source_lane_group_right_shift = UINT8_C({projection.source_lane_group.right_shift}),",
                 f"        .transpose_bit_count = UINT8_C({projection.transpose_bit_count}),",
+                f"        .native_transition_facts = {native_transition_reference},",
                 "    },",
             ]
         )
@@ -1058,8 +1079,15 @@ def _emit_result_to_lhs_repack_projections() -> str:
 
 
 def _emit_result_to_rhs_repack_projections() -> str:
-    layout_ordinals, projections = _deduplicate_repack_projections(matrix_fragment_result_to_rhs_packed_b16_projection)
+    native_transitions = NativeTransitionFactTable("kResultToRhsPackedB16NativeTransitions")
+    layout_ordinals, projection_rows = _deduplicate_repack_projections(
+        matrix_fragment_result_to_rhs_packed_b16_projection,
+        "result",
+        "rhs",
+        native_transitions,
+    )
     lines = _fragment_repack_header()
+    lines.extend(native_transitions.definition_lines())
     lines.extend(_fragment_repack_ordinal_table_lines("kResultToRhsPackedB16ProjectionOrdinals", layout_ordinals))
     lines.extend(
         [
@@ -1068,7 +1096,7 @@ def _emit_result_to_rhs_repack_projections() -> str:
             "    [0] = {0},",
         ]
     )
-    for ordinal, projection in enumerate(projections, start=1):
+    for ordinal, (projection, native_transition_reference) in enumerate(projection_rows, start=1):
         if not isinstance(projection, MatrixFragmentResultToRhsPackedB16Projection):
             raise TypeError("unexpected result-to-RHS projection type")
         lines.extend(
@@ -1076,6 +1104,7 @@ def _emit_result_to_rhs_repack_projections() -> str:
                 f"    [{ordinal}] = {{",
                 f"        .exchange_lane_mask = UINT16_C(0x{projection.exchange_participant_xor_mask:x}),",
                 f"        .reverse_lane_mask = UINT32_C(0x{projection.reverse_participant_mask:x}),",
+                f"        .native_transition_facts = {native_transition_reference},",
                 "    },",
             ]
         )
@@ -1243,6 +1272,7 @@ def _fragment_role_initializer(
 def _fragment_layout_initializer(
     layout: AmdgpuMatrixFragmentLayout,
     role_plan_indices: Mapping[tuple[str, str], int],
+    native_contractions: NativeContractionFactTable,
 ) -> list[str]:
     block_count, row_count, column_count, reduction_count = layout.tile_shape
     lines = [
@@ -1265,6 +1295,7 @@ def _fragment_layout_initializer(
         role_lines = _fragment_role_initializer(layout, role, role_plan_indices[(layout.key, role.role)])
         lines.append(f"    .{field_name} = {role_lines[0]}")
         lines.extend(f"    {line}" for line in role_lines[1:])
+    lines.append(f"    .native_contraction_facts = {native_contractions.reference(matrix_fragment_native_contraction_facts(layout))},")
     lines.append("},")
     return lines
 
@@ -1281,6 +1312,10 @@ def _emit_source(*, public_header: str) -> str:
     )
     _validate_matrix_profile_descriptor_sets(global_descriptor_keys=descriptor_keys)
     coordinate_plans, role_plan_indices = _fragment_coordinate_plan_catalog()
+    native_contractions = NativeContractionFactTable("kLoomAmdgpuNativeContractionFacts")
+    fragment_layout_lines: list[str] = []
+    for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS:
+        fragment_layout_lines.extend(_fragment_layout_initializer(layout, role_plan_indices, native_contractions))
     lines = [
         "// Copyright 2026 The IREE Authors",
         "//",
@@ -1294,12 +1329,12 @@ def _emit_source(*, public_header: str) -> str:
         "",
         *_matrix_feature_profile_table_lines(),
         *_fragment_coordinate_plan_table_lines(coordinate_plans),
+        *native_contractions.definition_lines(),
         "const loom_amdgpu_matrix_fragment_layout_t",
         "    kLoomAmdgpuMatrixFragmentLayouts[",
         "        LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_COUNT] = {",
+        *fragment_layout_lines,
     ]
-    for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS:
-        lines.extend(_fragment_layout_initializer(layout, role_plan_indices))
     lines.extend(
         [
             "};",

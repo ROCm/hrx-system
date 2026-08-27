@@ -16,6 +16,7 @@
 #define LOOM_TARGET_ARCH_X86_PACKED_DOT_CONTRACT_H_
 
 #include "iree/base/api.h"
+#include "loom/analysis/native_layout.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/target/arch/x86/feature_bits.h"
 
@@ -120,6 +121,8 @@ typedef struct loom_x86_packed_dot_descriptor_t {
   loom_x86_packed_dot_numeric_type_t accumulator_numeric_type;
   // Result lane numeric type.
   loom_x86_packed_dot_numeric_type_t result_numeric_type;
+  // Generated native contraction placement selected with this descriptor.
+  const loom_native_contraction_facts_t* native_contraction_facts;
   // Stable generated reference used for direct low-descriptor projection.
   loom_x86_packed_dot_descriptor_ref_t low_descriptor_ref;
 } loom_x86_packed_dot_descriptor_t;

@@ -28,6 +28,8 @@ typedef struct loom_amdgpu_result_to_rhs_packed_b16_projection_t {
   uint16_t exchange_lane_mask;
   // Wave32 predicate selecting lanes that reverse the packed pair.
   uint32_t reverse_lane_mask;
+  // Generated native source-owner movement implemented by this projection.
+  const loom_native_transition_facts_t* native_transition_facts;
 } loom_amdgpu_result_to_rhs_packed_b16_projection_t;
 
 #include "loom/target/arch/amdgpu/matrix/matrix_fragment_repack_result_to_rhs_projections.inl"
@@ -69,7 +71,8 @@ bool loom_amdgpu_select_result_to_rhs_packed_b16_fragment_repack_plan(
   plan->strategy =
       LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_RHS_PACKED_B16_XOR_PERMUTE;
   plan->reason = LOOM_AMDGPU_FRAGMENT_REPACK_REASON_NONE;
-  plan->layout_kind = (loom_amdgpu_matrix_fragment_layout_kind_t)layout->kind;
+  plan->native_contraction_facts = layout->native_contraction_facts;
+  plan->native_transition_facts = projection->native_transition_facts;
   plan->source_register_count = layout->result.register_count;
   plan->result_register_count = layout->rhs.register_count;
   plan->strategy_payload.result_to_rhs.exchange = exchange;

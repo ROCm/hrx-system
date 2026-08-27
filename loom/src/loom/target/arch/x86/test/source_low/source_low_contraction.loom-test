@@ -191,3 +191,34 @@ func.def target(@target) @non_scalar_fragment_mma(
   %result = vector.mma %lhs, %rhs, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   func.return %result : vector<8xf32>
 }
+
+// ====
+
+// RUN: pass-report source-to-low,low-dce
+
+x86.target<avx512_packed_dot> @target
+
+func.def target(@target) @report_i8_blocked_mma(
+    %lhs_data: vector<32xi8>,
+    %rhs_data: vector<32xi8>,
+    %init_data: vector<8xi32>) -> (vector<8xi32>) {
+  %blocks = index.constant 8 : index
+  %m = index.constant 1 : index
+  %n = index.constant 1 : index
+  %k = index.constant 4 : index
+  %lhs = vector.fragment<lhs> %lhs_data shape [blocks(%blocks), %m, %k] : vector<32xi8>
+  %rhs = vector.fragment<rhs> %rhs_data shape [blocks(%blocks), %k, %n] : vector<32xi8>
+  %init = vector.fragment<init> %init_data shape [blocks(%blocks), %m, %n] : vector<8xi32>
+  %result = vector.mma %lhs, %rhs, %init : vector<32xi8>, vector<32xi8>, vector<8xi32>
+  func.return %result : vector<8xi32>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=5 emitted_ops=2 rows=5
+COMPILE-REPORT: source_low[0] function=report_i8_blocked_mma source_op=index.constant selection=rule descriptor_key=x86.scalar.movimm.gpr64 descriptor_semantic_tag=integer.const.i64 emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_i8_blocked_mma source_op=index.constant selection=rule descriptor_key=x86.scalar.movimm.gpr64 descriptor_semantic_tag=integer.const.i64 emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_i8_blocked_mma source_op=index.constant selection=rule descriptor_key=x86.scalar.movimm.gpr64 descriptor_semantic_tag=integer.const.i64 emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_i8_blocked_mma source_op=index.constant selection=rule descriptor_key=x86.scalar.movimm.gpr64 descriptor_semantic_tag=integer.const.i64 emitted_ops=0
+COMPILE-REPORT: source_low[4] function=report_i8_blocked_mma source_op=vector.mma selection=plan descriptor_key=x86.avx_vnni_int8.vpdpbssd.ymm descriptor_semantic_tag=dot.s8s8.i32x8 emitted_ops=2
+COMPILE-REPORT: source_low_native[4] function=report_i8_blocked_mma source_op=vector.mma native_contraction={tile:8x1x1x4,participants:1,lhs:{evidence:exact,bits:8,registers:1,payload:32,positions:32,coordinates:32,owners:1},rhs:{evidence:exact,bits:8,registers:1,payload:32,positions:32,coordinates:32,owners:1},accumulator:{evidence:exact,bits:32,registers:1,payload:8,positions:8,coordinates:8,owners:1},result:{evidence:exact,bits:32,registers:1,payload:8,positions:8,coordinates:8,owners:1}}

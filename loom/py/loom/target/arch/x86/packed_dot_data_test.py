@@ -9,6 +9,7 @@ from __future__ import annotations
 from loom.target.arch.x86.packed_dot_data import (
     X86_PACKED_DOT_DESCRIPTORS,
     PackedDotDescriptor,
+    packed_dot_native_contraction_facts,
     packed_dot_native_layout,
 )
 from loom.target.native_contraction_layout import ContractionShape
@@ -92,6 +93,20 @@ def test_i8_ymm_layout_maps_packed_quads_to_independent_dots() -> None:
         23,
         31,
     )
+
+
+def test_i8_ymm_facts_retain_native_placement_counts() -> None:
+    facts = packed_dot_native_contraction_facts(
+        _descriptor("x86.avx_vnni_int8.vpdpbssd.ymm")
+    )
+
+    assert facts.participant_count == 1
+    assert facts.shape == ContractionShape(block_count=8, m=1, n=1, k=4)
+    assert facts.lhs.physical_position_count == 32
+    assert facts.lhs.logical_coordinate_count == 32
+    assert facts.lhs.owner_multiplicity_minimum == 1
+    assert facts.result.physical_position_count == 8
+    assert facts.result.logical_coordinate_count == 8
 
 
 def test_every_packed_dot_role_has_a_compact_coordinate_projection() -> None:

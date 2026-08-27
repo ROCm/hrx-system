@@ -117,5 +117,7 @@ iree_status_t loom_x86_descriptor_matrix_query(
 
   out_result->outcome = LOOM_TARGET_CONTRACT_QUERY_LEGAL;
   out_result->selected_descriptor = low_descriptor;
+  out_result->selected_native_contraction_facts =
+      semantic_descriptor->native_contraction_facts;
   return iree_ok_status();
 }

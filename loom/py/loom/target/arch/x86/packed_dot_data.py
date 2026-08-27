@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cache
 
 from loom.target.native_contraction_layout import (
     ROLE_ACCUMULATOR,
@@ -16,8 +17,14 @@ from loom.target.native_contraction_layout import (
     ROLE_RESULT,
     ROLE_RHS,
     ExactContractionLayout,
+    ExactContractionRoleLayout,
     contiguous_element_layout,
     grouped_dot_contraction_layout,
+)
+from loom.target.native_layout_facts import (
+    NativeContractionFacts,
+    NativeContractionRoleFacts,
+    exact_native_contraction_role_facts,
 )
 
 FEATURE_AVX512_VNNI = 1 << 0
@@ -109,6 +116,7 @@ def pd(
     )
 
 
+@cache
 def packed_dot_native_layout(
     descriptor: PackedDotDescriptor,
 ) -> ExactContractionLayout:
@@ -160,6 +168,42 @@ def packed_dot_native_layout(
         rhs=element_layouts[ROLE_RHS],
         accumulator=element_layouts[ROLE_ACCUMULATOR],
         result=element_layouts[ROLE_RESULT],
+    )
+
+
+@cache
+def packed_dot_native_contraction_facts(
+    descriptor: PackedDotDescriptor,
+) -> NativeContractionFacts:
+    """Summarizes one x86 packed dot for shipping compiler consumers."""
+
+    layout = packed_dot_native_layout(descriptor)
+    element_bit_counts = {
+        ROLE_LHS: _NUMERIC_TYPE_BIT_COUNTS[descriptor.lhs_numeric_type],
+        ROLE_RHS: _NUMERIC_TYPE_BIT_COUNTS[descriptor.rhs_numeric_type],
+        ROLE_ACCUMULATOR: _NUMERIC_TYPE_BIT_COUNTS[descriptor.accumulator_numeric_type],
+        ROLE_RESULT: _NUMERIC_TYPE_BIT_COUNTS[descriptor.result_numeric_type],
+    }
+
+    def role_facts(
+        role_layout: ExactContractionRoleLayout,
+    ) -> NativeContractionRoleFacts:
+        element_bit_count = element_bit_counts[role_layout.role]
+        return exact_native_contraction_role_facts(
+            role_layout.role,
+            role_layout.coordinate_map,
+            element_bit_count=element_bit_count,
+            register_count=1,
+            payload_element_count=descriptor.vector_bit_width // element_bit_count,
+        )
+
+    return NativeContractionFacts(
+        shape=layout.shape,
+        participant_count=1,
+        lhs=role_facts(layout.lhs),
+        rhs=role_facts(layout.rhs),
+        accumulator=role_facts(layout.accumulator),
+        result=role_facts(layout.result),
     )
 
 

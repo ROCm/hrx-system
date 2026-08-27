@@ -158,6 +158,7 @@ loom_generated_cc_library(
     visibility = _X86_LOWER_VISIBILITY,
     deps = [
         ":feature_bits",
+        "//loom/src/loom/analysis:native_layout",
         "//loom/src/loom/codegen/low:descriptors",
         "//runtime/src/iree/base",
     ],

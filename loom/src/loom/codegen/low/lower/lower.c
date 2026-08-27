@@ -53,6 +53,8 @@ typedef struct loom_low_lower_descriptor_matrix_plan_t {
   loom_contract_request_t contract_request;
   // Target-owned immediate attributes materialized from request facts.
   loom_named_attr_slice_t attrs;
+  // Native contraction placement selected by the target query.
+  const loom_native_contraction_facts_t* native_contraction_facts;
 } loom_low_lower_descriptor_matrix_plan_t;
 
 static bool loom_low_lower_type_is_none(loom_type_t type) {
@@ -1179,6 +1181,8 @@ static iree_status_t loom_low_lower_record_descriptor_matrix_plan(
   plan_data->descriptor.descriptor = query_result->selected_descriptor;
   plan_data->contract_request = *contract_request;
   plan_data->attrs = loom_named_attr_slice_empty();
+  plan_data->native_contraction_facts =
+      query_result->selected_native_contraction_facts;
   if (plan_data->descriptor.descriptor->immediate_count != 0) {
     if (context->policy->descriptor_matrix.attrs == NULL) {
       IREE_ASSERT_UNREACHABLE("descriptor-matrix policy has no attrs callback");
@@ -1601,6 +1605,8 @@ static iree_status_t loom_low_lower_record_report_row(
       .rule_index = UINT16_MAX,
       .plan_id = selected_plan->plan.id,
       .plan_key = iree_string_view_empty(),
+      .native_contraction_facts = NULL,
+      .native_transition_facts = NULL,
       .descriptor_key = iree_string_view_empty(),
       .descriptor_semantic_tag = iree_string_view_empty(),
       .emitted_low_op_count = emitted_low_op_count,
@@ -1633,11 +1639,23 @@ static iree_status_t loom_low_lower_record_report_row(
             selected_plan->plan.target_data;
     loom_low_lower_populate_report_descriptor(
         context, plan->descriptor.descriptor, &row);
+    row.native_contraction_facts = plan->native_contraction_facts;
   }
-  if (selected_plan->rule == NULL && context->policy->plan_key.fn != NULL) {
-    row.plan_key = context->policy->plan_key.fn(
-        context->policy->plan_key.user_data, context, selected_plan->source_op,
-        selected_plan->plan);
+  if (selected_plan->rule == NULL &&
+      context->policy->describe_plan.fn != NULL) {
+    loom_low_lower_plan_report_t plan_report = {0};
+    context->policy->describe_plan.fn(context->policy->describe_plan.user_data,
+                                      context, selected_plan->source_op,
+                                      selected_plan->plan, &plan_report);
+    row.plan_key = plan_report.plan_key;
+    if (plan_report.native_contraction_facts != NULL) {
+      row.native_contraction_facts = plan_report.native_contraction_facts;
+    }
+    row.native_transition_facts = plan_report.native_transition_facts;
+    row.native_transition_source_type =
+        plan_report.native_transition_source_type;
+    row.native_transition_destination_type =
+        plan_report.native_transition_destination_type;
   }
   IREE_RETURN_IF_ERROR(loom_low_lower_source_op_execution_count_plus_one(
       context, selected_plan->source_op, &row.execution_count_plus_one));

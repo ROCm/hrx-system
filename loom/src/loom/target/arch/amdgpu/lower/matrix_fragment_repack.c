@@ -191,6 +191,8 @@ typedef struct loom_amdgpu_result_to_lhs_bf16_projection_t {
   uint8_t source_lane_group_right_shift;
   // Number of low source-value bits exchanged with lane bits.
   uint8_t transpose_bit_count;
+  // Generated native source-owner movement implemented by this projection.
+  const loom_native_transition_facts_t* native_transition_facts;
 } loom_amdgpu_result_to_lhs_bf16_projection_t;
 
 #include "loom/target/arch/amdgpu/matrix/matrix_fragment_repack_result_to_lhs_projections.inl"
@@ -527,7 +529,8 @@ loom_amdgpu_fragment_repack_select_result_to_lhs_bf16_bpermute_strategy(
   plan->strategy =
       LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_LHS_BF16_BPERMUTE;
   plan->reason = LOOM_AMDGPU_FRAGMENT_REPACK_REASON_NONE;
-  plan->layout_kind = (loom_amdgpu_matrix_fragment_layout_kind_t)layout->kind;
+  plan->native_contraction_facts = layout->native_contraction_facts;
+  plan->native_transition_facts = projection->native_transition_facts;
   plan->source_register_count = layout->result.register_count;
   plan->result_register_count = layout->lhs.register_count;
   plan->lane_divisor = layout->tile_shape.result_row_count;
