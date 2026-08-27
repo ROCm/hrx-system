@@ -15,6 +15,9 @@ package(
 _MLIR_IMPORTER_COMPATIBLE = iree_select({
     "//loom/config/import:mlir": [],
     "//conditions:default": ["@platforms//:incompatible"],
+}) + iree_select({
+    "@platforms//os:windows": ["@platforms//:incompatible"],
+    "//conditions:default": [],
 })
 
 iree_py_library(
