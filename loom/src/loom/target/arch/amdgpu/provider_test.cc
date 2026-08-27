@@ -121,7 +121,8 @@ static iree_status_t BuildMaterializationPipeline(loom_builder_t* builder,
   const PipelineBuildData* data =
       static_cast<const PipelineBuildData*>(user_data);
   return loom_target_environment_contribute_pipeline(
-      data->environment, LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_MATERIALIZATION,
+      data->environment,
+      LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_FUNCTION_MATERIALIZATION,
       loom_pass_environment_empty(), builder);
 }
 

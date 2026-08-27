@@ -24,10 +24,9 @@ extern "C" {
 // Returns static pass metadata for vm-materialize-call-abi.
 const loom_pass_info_t* loom_vm_materialize_call_abi_pass_info(void);
 
-// Materializes fixed-prefix staging values for one VM function.
+// Materializes fixed-prefix staging values for all VM functions in |module|.
 iree_status_t loom_vm_materialize_call_abi_run(loom_pass_t* pass,
-                                               loom_module_t* module,
-                                               loom_func_like_t function);
+                                               loom_module_t* module);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -10,6 +10,7 @@
 
 #include "iree/vm/module.h"
 #include "loom/codegen/low/function.h"
+#include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/rewrite/rewriter.h"
@@ -21,7 +22,7 @@
 static const loom_pass_info_t loom_vm_materialize_call_abi_pass_info_storage = {
     .name = IREE_SVL("vm-materialize-call-abi"),
     .description = IREE_SVL("Materialize VM call ABI register boundaries."),
-    .kind = LOOM_PASS_FUNCTION,
+    .kind = LOOM_PASS_MODULE,
 };
 
 const loom_pass_info_t* loom_vm_materialize_call_abi_pass_info(void) {
@@ -261,25 +262,30 @@ static iree_status_t loom_vm_call_abi_preserve_logical_signature(
 }
 
 iree_status_t loom_vm_materialize_call_abi_run(loom_pass_t* pass,
-                                               loom_module_t* module,
-                                               loom_func_like_t function) {
-  if (!loom_low_func_def_isa(function.op) ||
-      loom_func_like_abi(function) != LOOM_TARGET_ABI_VM_FUNCTION) {
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(
-      loom_vm_call_abi_validate_function(module, function, pass->arena));
-
+                                               loom_module_t* module) {
   loom_rewriter_t rewriter = {0};
   IREE_RETURN_IF_ERROR(
       loom_rewriter_initialize(&rewriter, module, pass->arena));
   loom_vm_call_abi_materialize_walk_t walk = {
       .rewriter = &rewriter,
   };
-  iree_status_t status =
-      loom_vm_call_abi_preserve_logical_signature(&rewriter, function);
-  if (iree_status_is_ok(status)) {
-    status = loom_vm_call_abi_materialize_function(module, function, &walk);
+  iree_status_t status = iree_ok_status();
+  loom_block_t* module_block = loom_module_block(module);
+  loom_op_t* op = NULL;
+  loom_block_for_each_op(module_block, op) {
+    loom_func_like_t function = loom_func_like_cast(module, op);
+    if (!loom_low_func_def_isa(op) ||
+        loom_func_like_abi(function) != LOOM_TARGET_ABI_VM_FUNCTION) {
+      continue;
+    }
+    status = loom_vm_call_abi_validate_function(module, function, pass->arena);
+    if (iree_status_is_ok(status)) {
+      status = loom_vm_call_abi_preserve_logical_signature(&rewriter, function);
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_vm_call_abi_materialize_function(module, function, &walk);
+    }
+    if (!iree_status_is_ok(status)) break;
   }
   if (iree_status_is_ok(status) &&
       iree_any_bit_set(rewriter.flags, LOOM_REWRITER_FLAG_CHANGED)) {

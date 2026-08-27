@@ -381,12 +381,19 @@ static iree_status_t loom_target_pipeline_build_source_low_artifact_preparation(
       LOOM_TARGET_PIPELINE_PHASE_SOURCE_LOW_ARTIFACT_PREPARATION);
 }
 
+static iree_status_t loom_target_pipeline_build_low_materialization(
+    loom_builder_t* builder, void* user_data) {
+  const loom_target_pipeline_build_context_t* context =
+      (const loom_target_pipeline_build_context_t*)user_data;
+  return loom_target_pipeline_contribute_phase(
+      builder, context,
+      LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_FUNCTION_MATERIALIZATION);
+}
+
 static iree_status_t loom_target_pipeline_build_low_preparation(
     loom_builder_t* builder, void* user_data) {
   const loom_target_pipeline_build_context_t* context =
       (const loom_target_pipeline_build_context_t*)user_data;
-  IREE_RETURN_IF_ERROR(loom_target_pipeline_contribute_phase(
-      builder, context, LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_MATERIALIZATION));
   if (loom_target_pipeline_sanitizer_has_checks(
           context, LOOM_SANITIZER_CHECK_ACCESS | LOOM_SANITIZER_CHECK_VALUE |
                        LOOM_SANITIZER_CHECK_OPERATION)) {
@@ -394,7 +401,8 @@ static iree_status_t loom_target_pipeline_build_low_preparation(
         builder, IREE_SV("sanitizer-materialize-assertions")));
   }
   IREE_RETURN_IF_ERROR(loom_target_pipeline_contribute_phase(
-      builder, context, LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_PREPARATION));
+      builder, context,
+      LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_FUNCTION_PREPARATION));
   return loom_low_pipeline_build_packetization_preparation(builder);
 }
 
@@ -506,9 +514,17 @@ loom_target_pipeline_build_source_low_diagnostic_artifacts_body(
 
 static iree_status_t loom_target_pipeline_build_prepared_low_body(
     loom_builder_t* builder, void* user_data) {
+  const loom_target_pipeline_build_context_t* context =
+      (const loom_target_pipeline_build_context_t*)user_data;
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_source_low_body(builder, user_data));
   loom_op_t* for_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
+      builder, loom_target_pipeline_build_low_materialization, user_data,
+      &for_op));
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_contribute_phase(
+      builder, context,
+      LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_MODULE_MATERIALIZATION));
   return loom_target_pipeline_build_for_target_functions(
       builder, loom_target_pipeline_build_low_preparation, user_data, &for_op);
 }

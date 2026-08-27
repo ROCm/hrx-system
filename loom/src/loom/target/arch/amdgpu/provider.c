@@ -88,7 +88,7 @@ static iree_status_t loom_amdgpu_provider_contribute_pipeline(
       LOOM_TARGET_PIPELINE_PHASE_SOURCE_LOW_ARTIFACT_PREPARATION) {
     build_body = loom_amdgpu_provider_build_hal_buffer_descriptors_pass;
   } else if (contribution->phase ==
-             LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_MATERIALIZATION) {
+             LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_FUNCTION_MATERIALIZATION) {
     build_body = loom_amdgpu_provider_build_hal_kernel_abi_pass;
   } else {
     return iree_ok_status();

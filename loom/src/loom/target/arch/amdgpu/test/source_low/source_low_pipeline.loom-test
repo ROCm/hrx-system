@@ -347,8 +347,12 @@ pass.pipeline<module> @__loom_check_prepared_low pipeline {
       }
       where target(abi = "vm_function", codegen = "vm") {
         vm-materialize-function-contracts
-        vm-materialize-call-abi
       }
+    }
+  }
+  vm-materialize-call-abi
+  for func {
+    where target {
       canonicalize
       cse
       low-select-operand-forms

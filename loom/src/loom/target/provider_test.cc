@@ -55,7 +55,7 @@ static loom_pass_descriptor_t MakeFunctionPassDescriptor(
 static iree_status_t ContributeMaterialization(
     const loom_target_pipeline_contribution_t* contribution) {
   if (contribution->phase !=
-      LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_MATERIALIZATION) {
+      LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_FUNCTION_MATERIALIZATION) {
     return iree_ok_status();
   }
   loom_op_t* run_op = nullptr;
@@ -67,7 +67,7 @@ static iree_status_t ContributeMaterialization(
 static iree_status_t ContributePreparation(
     const loom_target_pipeline_contribution_t* contribution) {
   if (contribution->phase !=
-      LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_PREPARATION) {
+      LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_FUNCTION_PREPARATION) {
     return iree_ok_status();
   }
   loom_op_t* run_op = nullptr;
@@ -85,14 +85,16 @@ static iree_status_t BuildContributedPipeline(loom_builder_t* builder,
   const PipelineBuildData* data =
       static_cast<const PipelineBuildData*>(user_data);
   IREE_RETURN_IF_ERROR(loom_target_environment_contribute_pipeline(
-      data->environment, LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_MATERIALIZATION,
+      data->environment,
+      LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_FUNCTION_MATERIALIZATION,
       loom_pass_environment_empty(), builder));
   loom_op_t* run_op = nullptr;
   IREE_RETURN_IF_ERROR(
       loom_pass_ir_build_run(builder, 0, IREE_SV("driver-cleanup"),
                              loom_named_attr_slice_empty(), &run_op));
   return loom_target_environment_contribute_pipeline(
-      data->environment, LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_PREPARATION,
+      data->environment,
+      LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_FUNCTION_PREPARATION,
       loom_pass_environment_empty(), builder);
 }
 

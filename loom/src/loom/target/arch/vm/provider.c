@@ -56,16 +56,19 @@ static iree_status_t loom_vm_provider_build_materialization_passes(
     loom_builder_t* builder, void* user_data) {
   (void)user_data;
   loom_op_t* run_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_pass_ir_build_run(
-      builder, 0, IREE_SV("vm-materialize-function-contracts"),
-      loom_named_attr_slice_empty(), &run_op));
-  return loom_vm_provider_build_call_abi_pass(builder, NULL);
+  return loom_pass_ir_build_run(builder, 0,
+                                IREE_SV("vm-materialize-function-contracts"),
+                                loom_named_attr_slice_empty(), &run_op);
 }
 
 static iree_status_t loom_vm_provider_contribute_pipeline(
     const loom_target_pipeline_contribution_t* contribution) {
+  if (contribution->phase ==
+      LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_MODULE_MATERIALIZATION) {
+    return loom_vm_provider_build_call_abi_pass(contribution->builder, NULL);
+  }
   if (contribution->phase !=
-      LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_MATERIALIZATION) {
+      LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_FUNCTION_MATERIALIZATION) {
     return iree_ok_status();
   }
 
