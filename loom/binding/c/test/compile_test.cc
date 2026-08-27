@@ -868,6 +868,30 @@ TEST(CompileTest, CompileModuleRejectsUnknownConfigPolicy) {
   EXPECT_EQ(result, nullptr);
 }
 
+TEST(CompileTest, CompileModuleRejectsArtifactIdentifierLengthOverflow) {
+  ContextPtr context = CreateContext();
+  WorkspacePtr workspace = CreateWorkspace();
+  CompilerPtr compiler = CreateCompiler(context.get());
+  PassProgramPtr pass_program = CreateEmptyPassProgram(context.get());
+  ModulePtr module = CreateValidModule(context.get(), workspace.get());
+
+  const char module_name_storage = 'x';
+  loomc_compile_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.module_name=*/
+      loomc_make_string_view(&module_name_storage, LOOMC_HOST_SIZE_MAX),
+      /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
+  };
+  loomc_result_t* result = nullptr;
+  loomc_status_t status = loomc_compile_module(
+      compiler.get(), workspace.get(), pass_program.get(), module.get(),
+      &options, loomc_allocator_system(), &result);
+  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_RESOURCE_EXHAUSTED, status);
+  EXPECT_EQ(result, nullptr);
+}
+
 TEST(CompileTest, CompileModuleRejectsUnknownOptionStructure) {
   ContextPtr context = CreateContext();
   WorkspacePtr workspace = CreateWorkspace();

@@ -529,9 +529,9 @@ void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
                                 module.get(), &result));
   ASSERT_TRUE(ResultSucceeded(result.get(), "module compilation"));
 
-  const loomc_artifact_t* launch_config_artifact = FindArtifact(
-      result.get(), LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
-      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE));
+  const loomc_artifact_t* launch_config_artifact =
+      FindArtifact(result.get(), LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
+                   loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_VM_BYTECODE));
   ASSERT_NE(launch_config_artifact, nullptr);
   loomc_launch_config_program_t* launch_program = nullptr;
   LOOMC_ASSERT_OK(loomc_launch_config_program_load(

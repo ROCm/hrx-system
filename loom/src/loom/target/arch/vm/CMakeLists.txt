@@ -32,6 +32,7 @@ loom_generated_cc_library(
     loom::py::loom::gen::ops::c_tables_vm_generator
   SRCS
     "ops/registry.c"
+    "ops/target.c"
   GENERATED_SRC_FLAGS
     "--builders"
     "--tables"
@@ -41,6 +42,7 @@ loom_generated_cc_library(
   HDRS
     "ops/ops.h"
     "ops/registry.h"
+    "ops/target.h"
   ARGS
     "--dialect=vm"
   DEPS

@@ -9,6 +9,7 @@
 #include <inttypes.h>
 #include <string.h>
 
+#include "loom/codegen/low/launch_config_abi.h"
 #include "loom/codegen/low/storage_layout.h"
 #include "loom/ir/context.h"
 #include "loom/ops/func/ops.h"
@@ -22,21 +23,6 @@
 #include "loom/rewrite/remap.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/transforms/cleanup/dce.h"
-
-enum {
-  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_COUNT_X = 0,
-  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_COUNT_Y = 1,
-  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_COUNT_Z = 2,
-  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_SIZE_X = 3,
-  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_SIZE_Y = 4,
-  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_SIZE_Z = 5,
-  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_CLUSTER_SIZE_X = 6,
-  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_CLUSTER_SIZE_Y = 7,
-  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_CLUSTER_SIZE_Z = 8,
-  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_SUBGROUP_SIZE = 9,
-  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_STORAGE_BYTES = 10,
-  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_COUNT = 11,
-};
 
 struct loom_kernel_launch_config_program_entry_t {
   // Next entry in capture order.
@@ -98,50 +84,23 @@ static iree_status_t loom_kernel_launch_config_copy_value_name(
   return loom_module_set_value_name(target_module, target_value, target_name);
 }
 
-static bool loom_kernel_launch_config_predicate_uses_only_workload_values(
-    const loom_ir_remap_t* remap, const loom_predicate_t* predicate) {
-  for (uint8_t i = 0; i < predicate->arg_count; ++i) {
-    if (predicate->arg_tags[i] != LOOM_PRED_ARG_VALUE) continue;
-    loom_value_id_t ignored = LOOM_VALUE_ID_INVALID;
-    if (!loom_ir_remap_try_lookup_value(
-            remap, (loom_value_id_t)predicate->args[i], &ignored)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 static iree_status_t loom_kernel_launch_config_copy_workload_predicates(
-    const loom_func_like_t source_function, loom_ir_remap_t* remap,
+    const loom_op_t* source_kernel, loom_ir_remap_t* remap,
     iree_arena_allocator_t* scratch_arena, loom_op_t* target_function_op) {
-  uint16_t source_predicate_count = 0;
-  const loom_predicate_t* source_predicates =
-      loom_func_like_predicates(source_function, &source_predicate_count);
-  if (source_predicate_count == 0) return iree_ok_status();
-
-  loom_predicate_t* workload_predicates = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      scratch_arena, source_predicate_count, sizeof(*workload_predicates),
-      (void**)&workload_predicates));
-  uint16_t workload_predicate_count = 0;
-  for (uint16_t i = 0; i < source_predicate_count; ++i) {
-    if (loom_kernel_launch_config_predicate_uses_only_workload_values(
-            remap, &source_predicates[i])) {
-      workload_predicates[workload_predicate_count++] = source_predicates[i];
-    }
-  }
-  if (workload_predicate_count == 0) return iree_ok_status();
+  const loom_attribute_t source_predicates =
+      loom_kernel_def_workload_predicates(source_kernel);
+  if (loom_attr_is_absent(source_predicates)) return iree_ok_status();
 
   loom_predicate_t* target_predicates = NULL;
-  IREE_RETURN_IF_ERROR(loom_ir_remap_predicate_list(remap, workload_predicates,
-                                                    workload_predicate_count,
-                                                    &target_predicates));
+  IREE_RETURN_IF_ERROR(loom_ir_remap_predicate_list(
+      remap, source_predicates.predicate_list, source_predicates.count,
+      &target_predicates));
   loom_rewriter_t rewriter;
   IREE_RETURN_IF_ERROR(
       loom_rewriter_initialize(&rewriter, remap->target_module, scratch_arena));
   const iree_status_t status = loom_rewriter_set_attr(
       &rewriter, target_function_op, loom_func_def_predicates_ATTR_INDEX,
-      loom_attr_predicate_list(target_predicates, workload_predicate_count));
+      loom_attr_predicate_list(target_predicates, source_predicates.count));
   loom_rewriter_deinitialize(&rewriter);
   return status;
 }
@@ -152,6 +111,27 @@ static iree_status_t loom_kernel_launch_config_build_constant(
   return loom_constant_build(builder, loom_value_facts_exact_i64(value),
                              loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), location,
                              out_value);
+}
+
+static iree_status_t loom_kernel_launch_config_intern_export_name(
+    loom_module_t* module, iree_arena_allocator_t* scratch_arena,
+    iree_string_view_t public_name, loom_string_id_t* out_string_id) {
+  iree_host_size_t private_name_length = 0;
+  if (!iree_host_size_checked_add(
+          public_name.size, LOOM_KERNEL_LAUNCH_CONFIG_EXPORT_PREFIX_LENGTH,
+          &private_name_length)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "launch config export name is too large");
+  }
+  char* private_name_data = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(scratch_arena, private_name_length,
+                                           (void**)&private_name_data));
+  private_name_data[0] = LOOM_KERNEL_LAUNCH_CONFIG_EXPORT_PREFIX;
+  memcpy(private_name_data + LOOM_KERNEL_LAUNCH_CONFIG_EXPORT_PREFIX_LENGTH,
+         public_name.data, public_name.size);
+  return loom_module_intern_string(
+      module, iree_make_string_view(private_name_data, private_name_length),
+      out_string_id);
 }
 
 static iree_status_t loom_kernel_launch_config_program_build_function(
@@ -181,18 +161,18 @@ static iree_status_t loom_kernel_launch_config_program_build_function(
           : target_bundle->export_plan->export_symbol;
 
   loom_module_t* target_module = program->module;
-  loom_string_id_t target_name = LOOM_STRING_ID_INVALID;
-  IREE_RETURN_IF_ERROR(
-      loom_module_intern_string(target_module, export_name, &target_name));
-  if (loom_module_find_symbol(target_module, target_name) !=
+  loom_string_id_t private_export_name = LOOM_STRING_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_kernel_launch_config_intern_export_name(
+      target_module, scratch_arena, export_name, &private_export_name));
+  if (loom_module_find_symbol(target_module, private_export_name) !=
       LOOM_SYMBOL_ID_INVALID) {
     return iree_make_status(IREE_STATUS_ALREADY_EXISTS,
                             "duplicate launch config export '%.*s'",
                             (int)export_name.size, export_name.data);
   }
-  loom_symbol_id_t target_symbol_id = LOOM_SYMBOL_ID_INVALID;
-  IREE_RETURN_IF_ERROR(
-      loom_module_add_symbol(target_module, target_name, &target_symbol_id));
+  loom_symbol_id_t function_symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_module_add_symbol(
+      target_module, private_export_name, &function_symbol_id));
 
   loom_string_id_t source_name_id = LOOM_STRING_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_module_intern_string(
@@ -237,12 +217,13 @@ static iree_status_t loom_kernel_launch_config_program_build_function(
   IREE_RETURN_IF_ERROR(loom_func_def_build(
       &builder,
       LOOM_FUNC_DEF_BUILD_FLAG_HAS_VISIBILITY |
-          LOOM_FUNC_DEF_BUILD_FLAG_HAS_PURITY,
+          LOOM_FUNC_DEF_BUILD_FLAG_HAS_PURITY |
+          LOOM_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_SYMBOL,
       LOOM_FUNC_VISIBILITY_PUBLIC, /*retain=*/0, /*cc=*/0,
       LOOM_FUNC_PURITY_PURE, /*temperature=*/0, /*inline_policy=*/0,
       loom_symbol_ref_null(), /*abi=*/0, loom_named_attr_slice_empty(),
-      LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(),
-      (loom_symbol_ref_t){.module_id = 0, .symbol_id = target_symbol_id},
+      private_export_name, loom_named_attr_slice_empty(),
+      (loom_symbol_ref_t){.module_id = 0, .symbol_id = function_symbol_id},
       argument_types, source_arguments.count, result_types,
       IREE_ARRAYSIZE(result_types), /*tied_results=*/NULL,
       /*tied_result_count=*/0, /*predicates=*/NULL,
@@ -262,7 +243,7 @@ static iree_status_t loom_kernel_launch_config_program_build_function(
         target_arguments[i]));
   }
   IREE_RETURN_IF_ERROR(loom_kernel_launch_config_copy_workload_predicates(
-      source_function, &remap, scratch_arena, function_op));
+      source_kernel, &remap, scratch_arena, function_op));
 
   loom_builder_enter_region(&builder, function_op,
                             loom_func_like_body(launch_function));
@@ -353,13 +334,13 @@ static iree_status_t loom_kernel_launch_config_program_build_function(
       &builder, target_bundle->snapshot->subgroup_size, target_location,
       &entry->result_values[LOOM_KERNEL_LAUNCH_CONFIG_RESULT_SUBGROUP_SIZE]));
 
-  if (program->entry_tail != NULL) {
-    program->entry_tail->next = entry;
+  if (program->entries.tail != NULL) {
+    program->entries.tail->next = entry;
   } else {
-    program->entry_head = entry;
+    program->entries.head = entry;
   }
-  program->entry_tail = entry;
-  ++program->entry_count;
+  program->entries.tail = entry;
+  ++program->entries.count;
   return iree_ok_status();
 }
 
@@ -449,10 +430,9 @@ static iree_status_t loom_kernel_launch_config_workgroup_storage_bytes(
 iree_status_t loom_kernel_launch_config_program_finalize(
     loom_kernel_launch_config_program_t* program,
     const loom_module_t* lowered_module,
-    iree_arena_block_pool_t* scratch_block_pool,
-    const loom_module_t** out_module) {
+    iree_arena_block_pool_t* scratch_block_pool, loom_module_t** out_module) {
   *out_module = NULL;
-  if (program->entry_count == 0) {
+  if (program->entries.count == 0) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "pass program produced no kernel launch configurations");
@@ -461,7 +441,7 @@ iree_status_t loom_kernel_launch_config_program_finalize(
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(scratch_block_pool, &scratch_arena);
   iree_status_t status = iree_ok_status();
-  for (loom_kernel_launch_config_program_entry_t* entry = program->entry_head;
+  for (loom_kernel_launch_config_program_entry_t* entry = program->entries.head;
        entry != NULL && iree_status_is_ok(status); entry = entry->next) {
     loom_func_like_t low_function = {0};
     status = loom_kernel_launch_config_resolve_low_function(

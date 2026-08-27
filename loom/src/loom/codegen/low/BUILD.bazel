@@ -260,7 +260,10 @@ loom_cc_library(
 loom_cc_library(
     name = "launch_config_program",
     srcs = ["launch_config_program.c"],
-    hdrs = ["launch_config_program.h"],
+    hdrs = [
+        "launch_config_abi.h",
+        "launch_config_program.h",
+    ],
     deps = [
         ":storage_layout",
         "//loom/src/loom/ir",

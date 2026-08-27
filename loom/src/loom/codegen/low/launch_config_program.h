@@ -27,10 +27,11 @@ typedef struct loom_kernel_launch_config_program_entry_t
 
 // Compiler-owned launch-config product accumulated while source kernels lower.
 //
-// The product owns a separate pure host module. Source-to-low captures each
+// The product owns a separate host module. Source-to-low captures each
 // selected kernel's residual launch computation while exact specialization and
-// target facts are available. Finalization joins the completed low kernel's
-// workgroup-storage requirement and terminates each host function.
+// target facts are available. Authored workload predicates become observable
+// entry checks. Finalization joins the completed low kernel's workgroup-storage
+// requirement and terminates each host function.
 typedef struct loom_kernel_launch_config_program_t {
   // Pass capability embedded for source-to-low observation.
   loom_pass_environment_capability_t capability;
@@ -38,14 +39,17 @@ typedef struct loom_kernel_launch_config_program_t {
   // Host launch-config module under construction.
   loom_module_t* module;
 
-  // Entries in capture order.
-  loom_kernel_launch_config_program_entry_t* entry_head;
+  // Captured kernel entries.
+  struct {
+    // First entry in capture order.
+    loom_kernel_launch_config_program_entry_t* head;
 
-  // Last entry in capture order.
-  loom_kernel_launch_config_program_entry_t* entry_tail;
+    // Last entry in capture order.
+    loom_kernel_launch_config_program_entry_t* tail;
 
-  // Number of captured kernel entries.
-  iree_host_size_t entry_count;
+    // Number of captured entries.
+    iree_host_size_t count;
+  } entries;
 } loom_kernel_launch_config_program_t;
 
 // Initializes an empty product using |block_pool| for host-module storage.
@@ -88,8 +92,7 @@ iree_status_t loom_kernel_launch_config_program_capture(
 iree_status_t loom_kernel_launch_config_program_finalize(
     loom_kernel_launch_config_program_t* program,
     const loom_module_t* lowered_module,
-    iree_arena_block_pool_t* scratch_block_pool,
-    const loom_module_t** out_module);
+    iree_arena_block_pool_t* scratch_block_pool, loom_module_t** out_module);
 
 #ifdef __cplusplus
 }  // extern "C"

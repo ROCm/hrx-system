@@ -98,6 +98,8 @@ loom_cc_library(
     iree::base::internal::arena
     iree::io::file_handle
     iree::io::stream
+    iree::vm
+    iree::vm::bytecode
     loom::analysis::symbol_value_constraints
     loom::codegen::low::launch_config_program
     loom::codegen::low::pipeline::pass_environment
@@ -137,6 +139,9 @@ loom_cc_library(
     loom::pass::tooling
     loom::pass::value_facts
     loom::sanitizer::options
+    loom::target::arch::vm::ops
+    loom::target::arch::vm::provider
+    loom::target::emit::vm
     loom::target::function_version
     loom::target::function_version_projection
     loom::target::module_specialization

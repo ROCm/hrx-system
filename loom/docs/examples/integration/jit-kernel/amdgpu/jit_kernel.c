@@ -248,7 +248,7 @@ static loomc_status_t prepare_and_evaluate_launch(
     jit_kernel_state_t* state, loomc_launch_config_t* out_launch_config) {
   const loomc_artifact_t* artifact = find_result_artifact(
       state->result, LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
-      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE));
+      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_VM_BYTECODE));
   if (artifact == NULL) {
     return loomc_make_status(LOOMC_STATUS_NOT_FOUND,
                              "launch-config artifact was not produced");

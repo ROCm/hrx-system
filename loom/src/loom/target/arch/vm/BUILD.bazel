@@ -21,6 +21,7 @@ package(
 )
 
 _VM_PROVIDER_VISIBILITY = [
+    "//loom/binding/c:__pkg__",
     "//loom/src/loom/target/all:__pkg__",
     "//loom/src/loom/target/configured:__pkg__",
     "//loom/src/loom/tools/loom-compile:__pkg__",
@@ -42,10 +43,14 @@ loom_cc_library(
 
 loom_generated_cc_library(
     name = "ops",
-    srcs = ["ops/registry.c"],
+    srcs = [
+        "ops/registry.c",
+        "ops/target.c",
+    ],
     hdrs = [
         "ops/ops.h",
         "ops/registry.h",
+        "ops/target.h",
     ],
     args = ["--dialect=vm"],
     generated_src_flags = [
@@ -57,6 +62,7 @@ loom_generated_cc_library(
         "ops/tables.c",
     ],
     generator = "//loom/py/loom/gen/ops:c_tables_vm_generator",
+    visibility = ["//loom/binding/c:__pkg__"],
     deps = [
         ":target_records",
         "//loom/src/loom/error:error_defs",

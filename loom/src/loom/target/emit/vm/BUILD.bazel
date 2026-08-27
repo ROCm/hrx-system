@@ -28,6 +28,7 @@ loom_cc_library(
         "module_layout.h",
     ],
     visibility = [
+        "//loom/binding/c:__pkg__",
         "//loom/src/loom/target/arch/vm:__pkg__",
         "//loom/src/loom/tools/loom-compile:__pkg__",
     ],

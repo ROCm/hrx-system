@@ -293,11 +293,11 @@ ModulePtr CreatePreparedArithmeticModule(loomc_context_t* context,
   SourcePtr source = CreateTextSource("amdgpu_prepared_arithmetic.loom", R"(
 amdgpu.target<gfx11-generic> @gfx_target
 
-low.kernel.def target<amdgpu.gfx11.generic.core>(@gfx_target) workgroup_size(64, 1, 1) @loom_kernel() {
-  %zero = low.const<amdgpu.v_mov_b32> {imm32 = 0} : reg<amdgpu.vgpr>
-  %one = low.const<amdgpu.v_mov_b32> {imm32 = 1} : reg<amdgpu.vgpr>
-  %sum = low.op<amdgpu.v_add_u32>(%zero, %one) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  low.return
+low.kernel.def target<amdgpu.gfx11.generic.core>(@gfx_target) workgroup_size(64, 1, 1) @loom_kernel() asm {
+  %zero = v_mov_b32 0
+  %one = v_mov_b32 1
+  %sum = v_add_u32 %zero, %one
+  return
 }
 )");
   return DeserializeModule(context, workspace, source.get());
@@ -720,7 +720,7 @@ kernel.def target(@gfx11_wave64) @target_specialized_launch(%expert_count: index
     ExpectSucceededResult(result_ptr.get());
     const loomc_artifact_t* artifact =
         FindArtifact(result_ptr.get(), LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
-                     LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE);
+                     LOOMC_ARTIFACT_FORMAT_VM_BYTECODE);
     ASSERT_NE(artifact, nullptr);
 
     loomc_launch_config_program_t* launch_program = nullptr;
@@ -760,7 +760,7 @@ kernel.def target(@gfx11_wave64) @target_specialized_launch(%expert_count: index
   }
 }
 
-TEST(AmdgpuTargetTest, LaunchConfigArtifactContainsAllKernelExports) {
+TEST(AmdgpuTargetTest, LaunchConfigArtifactInvokesPublicKernelExports) {
   TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
   ContextPtr context = CreateAmdgpuContext(target_environment.get());
   WorkspacePtr workspace = CreateWorkspace();
@@ -769,7 +769,7 @@ TEST(AmdgpuTargetTest, LaunchConfigArtifactContainsAllKernelExports) {
   SourcePtr source = CreateTextSource("multi_launch_config.loom", R"(
 amdgpu.target<gfx1151> @gfx1151
 
-kernel.def target(@gfx1151) @prefill(%token_count: index) {
+kernel.def target(@gfx1151) @initialize(%token_count: index) where [range(%token_count, 1, 512)] {
   %one = index.constant 1 : index
   %workgroup_count = index.add %token_count, %one : index
   kernel.launch.config workgroups(%workgroup_count, %one, %one) workgroup_size(%one, %one, %one) : index
@@ -788,6 +788,7 @@ kernel.def target(@gfx1151) @decode(%row_count: i32, %scale: bf16) {
 } launch() {
   kernel.return
 }
+
 )");
   ModulePtr module =
       DeserializeModule(context.get(), workspace.get(), source.get());
@@ -808,7 +809,7 @@ kernel.def target(@gfx1151) @decode(%row_count: i32, %scale: bf16) {
   ExpectSucceededResult(result_ptr.get());
   const loomc_artifact_t* artifact =
       FindArtifact(result_ptr.get(), LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
-                   LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE);
+                   LOOMC_ARTIFACT_FORMAT_VM_BYTECODE);
   ASSERT_NE(artifact, nullptr);
 
   loomc_launch_config_program_t* launch_program = nullptr;
@@ -816,20 +817,37 @@ kernel.def target(@gfx1151) @decode(%row_count: i32, %scale: bf16) {
       artifact, loomc_allocator_system(), &launch_program));
   LaunchConfigProgramPtr launch_program_ptr(launch_program);
 
-  loomc_launch_config_function_t prefill_function =
+  loomc_launch_config_function_t initialize_function =
       loomc_launch_config_function_invalid();
   LOOMC_EXPECT_OK(loomc_launch_config_program_lookup_function(
-      launch_program_ptr.get(), loomc_make_cstring_view("prefill"),
-      &prefill_function));
-  const uint64_t prefill_arguments[] = {128};
-  loomc_launch_config_t prefill_config = {
+      launch_program_ptr.get(), loomc_make_cstring_view("initialize"),
+      &initialize_function));
+  const uint64_t initialize_arguments[] = {128};
+  loomc_launch_config_t initialize_config = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
-      /*.structure_size=*/sizeof(prefill_config),
+      /*.structure_size=*/sizeof(initialize_config),
   };
   LOOMC_EXPECT_OK(loomc_launch_config_program_invoke(
-      launch_program_ptr.get(), prefill_function, prefill_arguments,
-      IREE_ARRAYSIZE(prefill_arguments), &prefill_config));
-  EXPECT_EQ(prefill_config.workgroup_count.x, 129u);
+      launch_program_ptr.get(), initialize_function, initialize_arguments,
+      IREE_ARRAYSIZE(initialize_arguments), &initialize_config));
+  EXPECT_EQ(initialize_config.workgroup_count.x, 129u);
+
+  const uint64_t rejected_initialize_arguments[] = {0};
+  loomc_launch_config_t rejected_initialize_config = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
+      /*.structure_size=*/sizeof(rejected_initialize_config),
+      /*.next=*/nullptr,
+      /*.workgroup_count=*/{777, 778, 779},
+  };
+  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_FAILED_PRECONDITION,
+                         loomc_launch_config_program_invoke(
+                             launch_program_ptr.get(), initialize_function,
+                             rejected_initialize_arguments,
+                             IREE_ARRAYSIZE(rejected_initialize_arguments),
+                             &rejected_initialize_config));
+  EXPECT_EQ(rejected_initialize_config.workgroup_count.x, 777u);
+  EXPECT_EQ(rejected_initialize_config.workgroup_count.y, 778u);
+  EXPECT_EQ(rejected_initialize_config.workgroup_count.z, 779u);
 
   loomc_launch_config_function_t decode_function =
       loomc_launch_config_function_invalid();

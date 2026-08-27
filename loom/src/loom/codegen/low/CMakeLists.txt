@@ -253,6 +253,7 @@ loom_cc_library(
   NAME
     launch_config_program
   HDRS
+    "launch_config_abi.h"
     "launch_config_program.h"
   SRCS
     "launch_config_program.c"

@@ -203,21 +203,20 @@ LOOMC_API_EXPORT loomc_status_t loomc_launch_config_program_lookup_function(
 /// Invokes one compiled launch-config function for one kernel workload.
 ///
 /// Workload arguments map positionally to the selected kernel entry's authored
-/// launch workload. Each slot contains the raw bits of one scalar argument in
-/// its least-significant N bits, where N is the scalar bit width; higher bits
-/// are ignored. Signed integers and index values use two's-complement
+/// launch workload. Each slot contains the canonical raw bits of one authored
+/// scalar argument. Signed integers and index values use two's-complement
 /// representation, offsets use unsigned representation, and floating-point
-/// values use their declared FP8, IEEE, or bfloat representation. Index and
-/// offset arguments consume all 64 bits. An offset greater than `INT64_MAX`
-/// cannot be represented by the current exact-fact domain and is rejected.
+/// values use their declared FP8, IEEE, or bfloat representation. Bits above a
+/// scalar's storage width are ignored. Authored `i1` values must be exactly 0
+/// or 1. Index and offset arguments consume all 64 bits.
 ///
 /// The function token must have been returned by `program`. Invocation
-/// validates argument count, scalar values, and authored value predicates
-/// before writing `out_config`. A successful return provides every launch
-/// property required by the compiled kernel entry. The operation performs no
-/// source compilation or string lookup. The program caches invocation scratch;
-/// an invocation may acquire allocator storage when the selected function
-/// requires more scratch than previous invocations.
+/// validates the exact argument count and executes authored value predicates.
+/// `out_config` is touched only when the function returns OK, at which point it
+/// contains every launch property required by the compiled kernel entry. The
+/// operation performs no source compilation, allocation, locking, or string
+/// lookup. All reusable invocation storage is allocated while loading the
+/// program.
 ///
 /// @param program Loaded launch-config program.
 /// @param function Program-local function to invoke.

@@ -27,4 +27,23 @@ loom_cc_benchmark(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+loom_cc_benchmark(
+  NAME
+    launch_config_benchmark
+  SRCS
+    "launch_config_benchmark.cc"
+  DEPS
+    iree::base
+    iree::testing::benchmark_main
+    loom::binding::c::benchmark::benchmark_support
+    loom::binding::c::benchmark::compile_throughput_benchmark_harness
+    loom::binding::c::loomc
+    loom::binding::c::target::amdgpu
+  ARGS
+    "--benchmark_filter=Smoke"
+  TESTONLY
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

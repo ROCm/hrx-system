@@ -108,8 +108,8 @@ typedef enum loomc_compile_artifact_flag_bits_e {
   /// Return the compiled host launch-config program for all kernel entries.
   ///
   /// The selected pass program must lower source kernel entries through the
-  /// normal source-to-low boundary. The artifact contains one pure function
-  /// per exported kernel and is loaded with
+  /// normal source-to-low boundary. The artifact contains one non-yielding
+  /// function per exported kernel and is loaded with
   /// `loomc_launch_config_program_load`.
   LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG = 1u << 3,
 } loomc_compile_artifact_flag_bits_t;
