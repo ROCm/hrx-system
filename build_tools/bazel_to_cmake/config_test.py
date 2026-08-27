@@ -235,14 +235,14 @@ loom_check_test_suite(
 
         cmake = bazel_to_cmake_converter.convert_build_file(
             """
-load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
+load("//loom/build_tools/bazel:defs.bzl", "loom_module")
 
-loom_link_module(
+loom_module(
     name = "filtered",
     srcs = glob(["*.loom"], exclude = ["negative.loom"]),
 )
 
-loom_link_module(
+loom_module(
     name = "complete",
     srcs = glob(["*.loom"]),
 )
@@ -261,7 +261,7 @@ loom_link_module(
         self.assertIn(f'    "${{{filtered_var}}}"', cmake)
         self.assertIn('    "${_GLOB_X_LOOM}"', cmake)
 
-    def test_loom_link_module_registers_generated_location(self):
+    def test_loom_module_registers_generated_location(self):
         repo_root = Path(__file__).resolve().parents[2]
         loom = bazel_to_cmake_config.include_project(
             str(repo_root / ".bazel_to_cmake.cfg.py"),
@@ -272,15 +272,15 @@ loom_link_module(
         cmake = bazel_to_cmake_converter.convert_build_file(
             """
 load("//build_tools/bazel:executable.bzl", "iree_executable_test")
-load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
+load("//loom/build_tools/bazel:defs.bzl", "loom_module")
 
-loom_link_module(
+loom_module(
     name = "linked_checks",
     srcs = ["testdata/checks.loom"],
     libraries = ["kernels.loom"],
     roots = ["@case"],
     configs = ["model.width=16"],
-    mode = "selective",
+    mode = "link",
     output = "linked.loombc",
     output_format = "bc",
     include_input_exports = True,
@@ -300,12 +300,12 @@ iree_executable_test(
             repo_root=str(repo_root),
         )
 
-        self.assertIn("loom_link_module(", cmake)
+        self.assertIn("loom_module(", cmake)
         self.assertIn('    "testdata/checks.loom"', cmake)
         self.assertIn('    "kernels.loom"', cmake)
         self.assertIn('    "@case"', cmake)
         self.assertIn('    "model.width=16"', cmake)
-        self.assertIn('    "selective"', cmake)
+        self.assertIn('    "link"', cmake)
         self.assertIn('    "linked.loombc"', cmake)
         self.assertIn('    "bc"', cmake)
         self.assertIn("  INCLUDE_INPUT_EXPORTS", cmake)
@@ -317,7 +317,7 @@ iree_executable_test(
             cmake,
         )
 
-    def test_loom_link_module_preserves_cross_package_module_targets(self):
+    def test_loom_module_preserves_cross_package_module_targets(self):
         repo_root = Path(__file__).resolve().parents[2]
         loom = bazel_to_cmake_config.include_project(
             str(repo_root / ".bazel_to_cmake.cfg.py"),
@@ -327,9 +327,9 @@ iree_executable_test(
 
         cmake = bazel_to_cmake_converter.convert_build_file(
             """
-load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
+load("//loom/build_tools/bazel:defs.bzl", "loom_module")
 
-loom_link_module(
+loom_module(
     name = "provider_suite",
     srcs = ["provider_checks.loom"],
     libraries = [

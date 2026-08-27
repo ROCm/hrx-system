@@ -42,8 +42,8 @@ typedef struct loom_linker_t loom_linker_t;
 typedef struct loom_linker_options_t {
   // Name assigned to the linked output module. Defaults to "linked".
   iree_string_view_t module_name;
-  // Maximum number of target symbols carrying selective-plan state.
-  // Zero keeps archive/direct links allocation-free for this state.
+  // Maximum number of target symbols carrying sparse-plan state.
+  // Zero keeps merge/dense links allocation-free for this state.
   iree_host_size_t planned_symbol_capacity;
 } loom_linker_options_t;
 
@@ -181,7 +181,7 @@ iree_status_t loom_linker_add_module_symbols(
 // Adds every symbol from an exact dependency-closed source module.
 //
 // This is the dense counterpart to loom_linker_add_module_symbols for compact
-// modules produced by selective materialization. Every source symbol is cloned
+// modules produced by sparse materialization. Every source symbol is cloned
 // without reachability discovery, and source symbol IDs map directly into the
 // exact target-symbol projection. Non-symbol module metadata is also cloned.
 // |source_outputs| follows the same contract as

@@ -58,8 +58,8 @@ typedef struct loom_link_plan_module_projection_t {
   iree_host_size_t maximum_materialized_symbol_count;
   // Number of synthetic helper symbols added by semantic facet projection.
   iree_host_size_t synthetic_symbol_count;
-  // Source modules in increasing index ordinal order. Archive projections
-  // include symbol-empty modules so their module-level metadata is retained.
+  // Source modules in increasing index ordinal order. Merge projections include
+  // symbol-empty INPUT modules so their module-level metadata is retained.
   struct {
     // Arena-owned module selection array.
     loom_link_plan_module_selection_t* values;
@@ -77,10 +77,10 @@ typedef struct loom_link_plan_module_projection_t {
 
 // Partitions |plan| into deterministic module-local source-symbol slices.
 //
-// Construction performs no name lookup or reachability analysis. Archive
-// projections own every indexed module, including modules without symbols;
-// selective projections contain only modules with selected symbols. Work and
-// storage scale with selected symbols. Arrays borrow the plan's index and
+// Construction performs no name lookup or reachability analysis. Merge
+// projections own every INPUT module, including modules without symbols; link
+// projections contain only modules with selected symbols. Work and storage
+// scale with selected symbols. Arrays borrow the plan's index and
 // remain valid until |arena| is reset or deinitialized.
 iree_status_t loom_link_plan_project_modules(
     const loom_link_plan_t* plan, iree_arena_allocator_t* arena,

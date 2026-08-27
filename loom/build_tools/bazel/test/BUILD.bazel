@@ -13,10 +13,10 @@ load(
     "loom_compile_target",
     "loom_kernel_library",
     "loom_library",
+    "loom_module",
     "loom_test_library",
 )
 load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test")
-load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
 load(":loom_check_rules_test.bzl", "loom_check_rules_test_suite")
 load(
     ":loom_library_rules_test.bzl",
@@ -45,22 +45,22 @@ loom_kernel_library(
 )
 
 loom_library(
-    name = "archive_dependency",
+    name = "library_dependency",
     srcs = ["link_kernels.loom"],
     tags = ["manual"],
 )
 
 loom_library(
-    name = "archive_consumer",
+    name = "library_consumer",
     srcs = ["link_checks.loom"],
     tags = ["manual"],
-    deps = [":archive_dependency"],
+    deps = [":library_dependency"],
 )
 
 loom_library(
-    name = "archive_aggregate",
+    name = "library_aggregate",
     tags = ["manual"],
-    deps = [":archive_consumer"],
+    deps = [":library_consumer"],
 )
 
 loom_test_library(
@@ -72,7 +72,7 @@ loom_test_library(
         SERIALIZED_REFERENCE_PROFILE,
     ],
     tags = ["manual"],
-    deps = [":archive_dependency"],
+    deps = [":library_dependency"],
 )
 
 loom_check_test(
@@ -86,31 +86,31 @@ loom_check_rules_test_suite(name = "loom_check_rules_tests")
 
 loom_library_rules_test_suite(name = "loom_library_rules_tests")
 
-loom_link_module(
+loom_module(
     name = "linked_module",
     srcs = ["link_checks.loom"],
     libraries = ["link_kernels.loom"],
 )
 
 iree_executable_test(
-    name = "loom_link_module_direct_test",
+    name = "loom_module_direct_test",
     src = "//loom/src/loom/tools/loom-format",
     args = ["$(rootpath :linked_module)"],
     data = [":linked_module"],
 )
 
 iree_executable_test(
-    name = "loom_library_archive_direct_test",
+    name = "loom_library_module_direct_test",
     src = "//loom/src/loom/tools/loom-format",
-    args = ["$(rootpath :archive_consumer)"],
-    data = [":archive_consumer"],
+    args = ["$(rootpath :library_consumer)"],
+    data = [":library_consumer"],
 )
 
 iree_executable_test(
     name = "loom_library_aggregate_direct_test",
     src = "//loom/src/loom/tools/loom-format",
-    args = ["$(rootpath :archive_aggregate)"],
-    data = [":archive_aggregate"],
+    args = ["$(rootpath :library_aggregate)"],
+    data = [":library_aggregate"],
 )
 
 sh_test(
@@ -130,9 +130,9 @@ test_suite(
         ":loom_check_rules_tests",
         ":loom_check_wrapper_direct_test",
         ":loom_library_aggregate_direct_test",
-        ":loom_library_archive_direct_test",
+        ":loom_library_module_direct_test",
         ":loom_library_rules_tests",
-        ":loom_link_module_direct_test",
+        ":loom_module_direct_test",
         ":profiled_library_execute_reference_test",
         ":profiled_library_plan_test",
         ":public_kernel_library_test",

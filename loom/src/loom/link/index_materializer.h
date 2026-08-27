@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// End-to-end selective materialization from a provider-backed module index.
+// End-to-end materialization from a provider-backed module index.
 
 #ifndef LOOM_LINK_INDEX_MATERIALIZER_H_
 #define LOOM_LINK_INDEX_MATERIALIZER_H_
@@ -30,7 +30,7 @@ void loom_link_index_materialization_deinitialize(
 
 // Plans, specializes, and materializes one provider-backed index.
 //
-// Archive plans materialize directly. Selective plans repeatedly materialize
+// Merge plans materialize directly. Link plans repeatedly materialize
 // ordinary reachability, evaluate headers for providers in reachable template
 // families, and add each exact selected provider as an ordinary root. Nested
 // applications therefore enter the next ordinary closure, while duplicate

@@ -43,12 +43,12 @@ loom_example_run_tool loom-format "${loom_format}" --check \
 loom_example_section "Inspect the private motif providers"
 loom_example_run_tool loom-link "${loom_link}" motif.loom --list-symbols
 
-loom_example_section "Archive the explicit program and provider universe"
+loom_example_section "Merge the explicit program and provider universe"
 loom_example_run_tool loom-link "${loom_link}" \
   model.loom \
-  --library=kernel.loom \
-  --library=motif.loom \
-  --mode=archive \
+  kernel.loom \
+  motif.loom \
+  --mode=merge \
   --to=text \
   --output="${output_dir}/elementwise-transform.loom"
 

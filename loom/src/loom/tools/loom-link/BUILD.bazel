@@ -47,8 +47,8 @@ loom_cc_binary(
 iree_execution_test_suite(
     name = "execution_test",
     data = [
-        "testdata/archive_inline_kernel_helper.loom",
-        "testdata/archive_many_symbols.loom",
+        "testdata/merge_inline_kernel_helper.loom",
+        "testdata/merge_many_symbols.loom",
     ],
     manifests = ["loom-link.test.json"],
     tags = ["hostonly"],

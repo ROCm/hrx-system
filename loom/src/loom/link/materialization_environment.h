@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Shared environment for provider-backed selective materialization.
+// Shared environment for provider-backed link materialization.
 
 #ifndef LOOM_LINK_MATERIALIZATION_ENVIRONMENT_H_
 #define LOOM_LINK_MATERIALIZATION_ENVIRONMENT_H_

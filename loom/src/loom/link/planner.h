@@ -24,10 +24,10 @@ typedef struct loom_link_plan_t loom_link_plan_t;
 
 // Planning mode.
 typedef enum loom_link_plan_mode_e {
-  // Select every non-stripped symbol in stable provider order.
-  LOOM_LINK_PLAN_ARCHIVE = 0,
+  // Merge every non-stripped INPUT symbol in stable provider order.
+  LOOM_LINK_PLAN_MERGE = 0,
   // Select explicit roots or exported input roots and their reachable closure.
-  LOOM_LINK_PLAN_SELECTIVE = 1,
+  LOOM_LINK_PLAN_LINK = 1,
 } loom_link_plan_mode_t;
 
 // Policy for references that cannot be selected by the current index.
@@ -56,8 +56,8 @@ typedef enum loom_link_plan_dependency_policy_e {
 
 // Reason a planned symbol is live.
 typedef enum loom_link_plan_live_reason_e {
-  // Selected because archive mode includes every linkable symbol.
-  LOOM_LINK_PLAN_LIVE_ARCHIVE = 0,
+  // Selected because merge mode includes every linkable INPUT symbol.
+  LOOM_LINK_PLAN_LIVE_MERGE = 0,
   // Selected because the user or exported-root policy named it as a root.
   LOOM_LINK_PLAN_LIVE_ROOT = 1,
   // Selected because another live symbol references it.
@@ -66,28 +66,28 @@ typedef enum loom_link_plan_live_reason_e {
   LOOM_LINK_PLAN_LIVE_PROVIDER = 3,
 } loom_link_plan_live_reason_t;
 
-// Optional strip filter. Returning true removes |symbol| from archive mode and
-// rejects selective references to it unless unresolved references are allowed.
+// Optional strip filter. Returning true removes |symbol| from merge mode and
+// rejects link references to it unless unresolved references are allowed.
 typedef bool (*loom_link_plan_strip_symbol_fn_t)(
     void* user_data, const loom_link_module_index_t* index,
     const loom_link_module_index_symbol_t* symbol);
 
-// One identity-resolved selective root facet. The symbol's primary
+// One identity-resolved link root facet. The symbol's primary
 // contract/definition facet is always selected with the requested facet.
 typedef struct loom_link_plan_root_facet_t {
   // Index-wide symbol ordinal resolved by the requesting subsystem.
   iree_host_size_t symbol_ordinal;
-  // Semantic facet requested by the selective link product.
+  // Semantic facet requested by the linked product.
   loom_link_symbol_facet_kind_t kind;
 } loom_link_plan_root_facet_t;
 
 // Options controlling one planning operation.
 typedef struct loom_link_plan_options_t {
-  // Planning mode. Zero defaults to ARCHIVE.
+  // Planning mode. Zero defaults to MERGE.
   loom_link_plan_mode_t mode;
-  // Explicit roots for SELECTIVE mode. Names may include a leading '@'.
+  // Explicit roots for LINK mode. Names may include a leading '@'.
   iree_string_view_list_t root_symbols;
-  // Select exported INPUT-provider symbols as roots in SELECTIVE mode.
+  // Select exported INPUT-provider symbols as roots in LINK mode.
   bool include_input_exports;
   // Unresolved reference handling. Zero defaults to ERROR.
   loom_link_plan_unresolved_policy_t unresolved_policy;
@@ -98,7 +98,7 @@ typedef struct loom_link_plan_options_t {
   // User data passed to strip_symbol.
   void* strip_symbol_user_data;
   // Exact template providers already chosen by specialization. These are
-  // additional selective roots whose ordinary dependencies and nested
+  // additional link roots whose ordinary dependencies and nested
   // template-family demands participate in the same closure.
   struct {
     // Number of index-wide symbol ordinals.
@@ -106,7 +106,7 @@ typedef struct loom_link_plan_options_t {
     // Index-wide template.def/template.ukernel symbol ordinals.
     const iree_host_size_t* values;
   } selected_template_providers;
-  // Identity-resolved facet roots for SELECTIVE mode.
+  // Identity-resolved facet roots for LINK mode.
   struct {
     // Number of root facet requests.
     iree_host_size_t count;
@@ -135,7 +135,7 @@ typedef struct loom_link_plan_symbol_t {
   iree_string_view_t root_name;
 } loom_link_plan_symbol_t;
 
-// One live structural symbol facet in a selective plan.
+// One live structural symbol facet in a link plan.
 typedef struct loom_link_plan_facet_t {
   // Plan-local facet ordinal.
   iree_host_size_t ordinal;
@@ -177,8 +177,8 @@ iree_host_size_t loom_link_plan_symbol_count(const loom_link_plan_t* plan);
 const loom_link_plan_symbol_t* loom_link_plan_symbol_at(
     const loom_link_plan_t* plan, iree_host_size_t ordinal);
 
-// Returns the number of explicit structural facet selections in a selective
-// plan. Archive plans retain complete symbols without enumerating facets.
+// Returns the number of explicit structural facet selections in a link plan.
+// Merge plans retain complete symbols without enumerating facets.
 iree_host_size_t loom_link_plan_facet_count(const loom_link_plan_t* plan);
 
 // Returns live facet selection |ordinal|, or NULL if out of range.
@@ -204,7 +204,7 @@ bool loom_link_plan_contains_symbol(const loom_link_plan_t* plan,
                                     iree_host_size_t symbol_ordinal);
 
 // Returns true when semantic |kind| of |symbol_ordinal| is live in |plan|.
-// Every valid facet of an archive-selected symbol is live.
+// Every valid facet of a merge-selected symbol is live.
 bool loom_link_plan_contains_facet(const loom_link_plan_t* plan,
                                    iree_host_size_t symbol_ordinal,
                                    loom_link_symbol_facet_kind_t kind);

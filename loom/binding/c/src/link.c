@@ -134,6 +134,25 @@ static loomc_status_t loomc_link_validate_options(
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "link options contain unknown flag bits");
   }
+  if (options->mode != LOOMC_LINK_MODE_MERGE &&
+      options->mode != LOOMC_LINK_MODE_LINK) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "link options contain an unknown mode");
+  }
+  const bool has_roots =
+      options->root_symbol_count != 0 ||
+      loomc_link_any_flag_set(options->flags,
+                              LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS);
+  if (options->mode == LOOMC_LINK_MODE_MERGE && has_roots) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "merge mode does not accept roots or include input exports");
+  }
+  if (options->mode == LOOMC_LINK_MODE_LINK && !has_roots) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "link mode requires roots or include input exports");
+  }
   return loomc_config_validate_options(&options->config);
 }
 
@@ -214,12 +233,6 @@ static void loomc_link_materialization_context_initialize(
       .allocator = linker->allocator,
       .capture = {.result = result},
   };
-}
-
-static bool loomc_link_options_selective(const loomc_link_options_t* options) {
-  return options->root_symbol_count != 0 ||
-         loomc_link_any_flag_set(options->flags,
-                                 LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS);
 }
 
 static iree_string_view_t loomc_link_module_name(
@@ -336,9 +349,9 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
     }
   }
 
-  const bool selective = loomc_link_options_selective(options);
   loom_link_plan_options_t plan_options = {
-      .mode = selective ? LOOM_LINK_PLAN_SELECTIVE : LOOM_LINK_PLAN_ARCHIVE,
+      .mode = options->mode == LOOMC_LINK_MODE_LINK ? LOOM_LINK_PLAN_LINK
+                                                    : LOOM_LINK_PLAN_MERGE,
       .root_symbols =
           {
               .count = options->root_symbol_count,

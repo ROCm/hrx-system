@@ -136,7 +136,7 @@ func.def @helper(%x: i32) -> (i32) {
             LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   const iree_string_view_t roots[] = {IREE_SV("@entry")};
   const loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   LinkPlanPtr plan = BuildPlan(index.get(), &options);
@@ -180,7 +180,7 @@ func.def @helper(%x: i32) -> (i32) {
             0u);
 }
 
-TEST_F(LinkPlanProjectionTest, EmptyArchiveHasNoProjectionStorage) {
+TEST_F(LinkPlanProjectionTest, EmptyMergeHasNoProjectionStorage) {
   ModuleIndexPtr index = CreateIndex();
   LinkPlanPtr plan = BuildPlan(index.get(), /*options=*/nullptr);
 
@@ -193,11 +193,13 @@ TEST_F(LinkPlanProjectionTest, EmptyArchiveHasNoProjectionStorage) {
   EXPECT_EQ(projection.symbols.values, nullptr);
 }
 
-TEST_F(LinkPlanProjectionTest, ArchiveProjectsSymbolEmptyModules) {
+TEST_F(LinkPlanProjectionTest, MergeProjectsSymbolEmptyInputModules) {
   loom_module_t* metadata = Parse(IREE_SV("test.module_metadata\n"));
   ModuleIndexPtr index = CreateIndex();
   AddModule(index.get(), metadata, IREE_SV("metadata"),
             LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddModule(index.get(), metadata, IREE_SV("library-metadata"),
+            LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   LinkPlanPtr plan = BuildPlan(index.get(), /*options=*/nullptr);
 
   loom_link_plan_module_projection_t projection;

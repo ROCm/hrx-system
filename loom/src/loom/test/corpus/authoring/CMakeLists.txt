@@ -10,7 +10,7 @@
 iree_add_all_subdirs()
 
 file(GLOB _GLOB_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
-loom_link_module(
+loom_module(
   NAME
     authoring_cases
   SRCS
@@ -22,7 +22,7 @@ loom_link_module(
     "memset_i8.element_capacity=1009"
     "mlp_down_projection_residual_bf16.row_capacity=3584"
   MODE
-    "archive"
+    "merge"
   OUTPUT
     "authoring_cases.loombc"
   OUTPUT_FORMAT

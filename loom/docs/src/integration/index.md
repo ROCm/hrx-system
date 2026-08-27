@@ -1,6 +1,6 @@
 # Integrate Loom
 
-Loom can stop at a checked source library, a selectively linked bytecode
+Loom can stop at a checked source library, a root-selected bytecode
 module, a target-native executable, or an in-process JIT. The application
 chooses that boundary according to when it learns the model, shape,
 configuration, and physical device facts that matter.
@@ -45,7 +45,7 @@ created them only after the application loads or copies them.
   specialization, launch evaluation, native artifact emission, and the runtime
   handoff using the public `loomc` API.
 - [Link and package modules](../workflows/link-and-package.md) covers the
-  installed-tool workflow for reusable `.loombc` catalogs and selective roots.
+  installed-tool workflow for reusable `.loombc` catalogs and selected roots.
 - [Compile artifacts](../workflows/compile-artifacts.md) covers ahead-of-time
   executable, manifest, and report products.
 - The generated [`loomc` reference](../reference/c-api/index.md) defines the

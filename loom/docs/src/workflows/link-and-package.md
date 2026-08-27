@@ -1,9 +1,9 @@
 # Link and package modules
 
 `loom-link` combines text and bytecode modules, applies configuration bindings,
-and retains either an archive or the dependency closure of selected roots. Its
-inputs are explicit: it never searches a directory or pulls in modules that the
-invocation did not provide.
+and either merges primary inputs or retains the dependency closure of selected
+roots. Its inputs are explicit: it never searches a directory or pulls in
+modules that the invocation did not provide.
 
 ## Inputs and libraries
 
@@ -30,6 +30,13 @@ Inputs may mix `.loom` text and `.loombc` bytecode. `--from=auto`, the default,
 detects their encoding independently. `--to=text|bc` controls the one linked
 module written to `--output` or standard output.
 
+The mode determines whether library bodies enter that output. `--mode=merge`
+copies every non-stripped symbol from the positional inputs and leaves every
+`--library` module separate. Pass several modules positionally when they are
+deliberately being flattened into one reusable module. `--mode=link` starts
+from roots in the positional inputs and may pull reachable providers from the
+explicit library universe.
+
 Paths are frontend inputs and diagnostic identifiers, not symbol namespaces.
 `loom-link` does not canonicalize a path into program identity or search for
 undeclared files. The LoomC API can construct the same source universe entirely
@@ -55,7 +62,7 @@ List indexed symbols without materializing an output module:
 loom-link root.loom --library=providers.loom --list-symbols
 ```
 
-Print the selective link plan for one root:
+Print the link plan for one root:
 
 ```shell
 loom-link root.loom \
@@ -79,9 +86,9 @@ loom-link root.loom --print-config-schema
 This exposes the declared keys, types, and constraints an application or build
 must bind without scraping source text.
 
-## Select one program
+## Link one program
 
-Selective mode starts from explicit roots and retains their reachable program:
+Link mode starts from explicit roots and retains their reachable program:
 
 ```shell
 loom-link model.loom \
@@ -98,14 +105,14 @@ the targetless `elementwise-transform` example it selects the portable provider
 and discards the unresolved wave32 alternative. When target facts arrive only
 at compilation, the [source-to-artifacts
 walkthrough](../getting-started/source-to-artifacts.md#follow-one-composition-to-low)
-uses archive mode instead and lets `loom-compile` perform the target-aware
-selection. In either mode, unrelated private symbols can disappear as soon as
-the chosen boundary no longer needs them.
+merges the requester and provider modules instead and lets `loom-compile`
+perform the target-aware selection. In either mode, unrelated private symbols
+can disappear as soon as the chosen boundary no longer needs them.
 
 Repeated `--root=@symbol` options select several roots from one catalog. Add
 `--include-input-exports` when exported symbols from the requester inputs
 should join the explicit root set. Library exports remain resolution candidates
-and never become roots merely because they are public in their source archive.
+and never become roots merely because they are public in their source module.
 
 Configuration bindings are applied to the composed analysis module before each
 reachability and template-selection step. This lets newly reachable code expose
@@ -125,14 +132,14 @@ loom-link root.loom \
 into a link failure. Without it, a partial module may retain unresolved config
 for a later composition or JIT boundary.
 
-## Package a full merged catalog
+## Merge a reusable catalog
 
-The currently named archive mode preserves every non-stripped symbol in
-deterministic input order and merges the inputs into one flat module:
+Merge mode preserves every non-stripped symbol from the positional inputs in
+deterministic input order and produces one flat module:
 
 ```shell
 loom-link motif.loom kernel.loom \
-  --mode=archive \
+  --mode=merge \
   --to=bc \
   --output=kernel-library.loombc
 ```
@@ -143,12 +150,12 @@ still one Loom bytecode module, not a container of separately named modules and
 not target-native code. Later link or compile invocations can select a much
 smaller reachable program from it.
 
-Remove test- and benchmark-only symbols from a deployment archive with
+Remove test- and benchmark-only symbols from a deployment module with
 `--strip-check`:
 
 ```shell
 loom-link library.loom \
-  --mode=archive \
+  --mode=merge \
   --strip-check \
   --to=bc \
   --output=runtime-library.loombc
@@ -166,8 +173,8 @@ that module contains the compatible definition or declaration. Libraries may
 satisfy those declared dependencies when linked. They may not retroactively
 make an undeclared call valid.
 
-Selective linking considers compatible definitions from the explicitly
-supplied universe. A strict link rejects a reachable exact declaration that
+Link mode considers compatible definitions from the explicitly supplied
+universe. A closed link rejects a reachable exact declaration that
 remains unresolved. Add `--allow-unresolved` to produce a reusable partial
 artifact instead.
 
@@ -243,10 +250,10 @@ order never stand in for matching rules.
 | --- | --- |
 | Linked `.loom` | Review the selected source, inspect provider reachability, or feed a text-oriented tool. |
 | Linked `.loombc` | Cache or distribute a compact linkable program for later specialization and compilation. |
-| Full merged `.loombc` | Package a reusable catalog whose roots will be selected later. |
+| Merged `.loombc` | Package a reusable catalog whose roots will be selected later. |
 | Stripped full merge | Package production symbols without executable checks. |
 
 The next boundary decides when remaining facts become known. A build may invoke
 `loom-compile` immediately. A model loader may combine the bytecode with more
-libraries and configuration. A JIT embedding may keep one indexed archive and
-select different roots and targets per workload.
+libraries and configuration. A JIT embedding may keep one indexed library
+universe and select different roots and targets per workload.

@@ -110,7 +110,7 @@ class KernelConfigFixture {
         /*.kind=*/LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION,
     };
     loom_link_plan_options_t options = {};
-    options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    options.mode = LOOM_LINK_PLAN_LINK;
     options.root_facets = {1, &root};
     loom_link_plan_t* plan = nullptr;
     CheckStatus(

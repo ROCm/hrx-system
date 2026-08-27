@@ -1,5 +1,5 @@
 // Required-inline helpers may contain operations whose final placement is
-// supplied by their caller. Archive linking preserves the helper for later
+// supplied by their caller. Merge mode preserves the helper for later
 // root selection and inlining.
 func.def inline @subgroup_broadcast_helper(%value: i32, %lane: i32) -> (i32) {
   %broadcast = kernel.subgroup.broadcast %value from %lane : i32, i32

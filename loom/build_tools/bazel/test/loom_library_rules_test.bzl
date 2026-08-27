@@ -57,28 +57,35 @@ def _expect_arg_with_prefix_and_suffix(env, args, prefix, suffix):
             return
     env.fail("expected argument with prefix %r and suffix %r in %r" % (prefix, suffix, args))
 
-def _test_library_consumes_dependency_archive(name, **kwargs):
+def _test_library_keeps_dependency_module_separate(name, **kwargs):
     analysis_test(
         name = name,
         attr_values = {
             "timeout": "short",
         },
-        impl = _test_library_consumes_dependency_archive_impl,
-        target = ":archive_consumer",
+        impl = _test_library_keeps_dependency_module_separate_impl,
+        target = ":library_consumer",
         **kwargs
     )
 
-def _test_library_consumes_dependency_archive_impl(env, target):
-    env.expect.that_str(target[LoomLibraryInfo].module.basename).equals(
-        "archive_consumer.loombc",
+def _test_library_keeps_dependency_module_separate_impl(env, target):
+    info = target[LoomLibraryInfo]
+    env.expect.that_str(info.module.basename).equals(
+        "library_consumer.loombc",
     )
+    dependencies = info.transitive_dependencies.to_list()
+    if len(dependencies) != 1:
+        env.fail("expected one propagated dependency, got %r" % dependencies)
+    _expect_basename(env, dependencies, "library_dependency.loombc")
 
     action = _find_action(env, target[TestingAspectInfo].actions, "LoomLibrary")
+    if "--mode=merge" not in action.argv:
+        env.fail("expected merge mode in %r" % action.argv)
     _expect_arg_with_prefix_and_suffix(
         env,
         action.argv,
         "--library=",
-        "archive_dependency.loombc",
+        "library_dependency.loombc",
     )
     _expect_arg_with_prefix_and_suffix(
         env,
@@ -88,52 +95,61 @@ def _test_library_consumes_dependency_archive_impl(env, target):
     )
 
     inputs = action.inputs.to_list()
-    _expect_basename(env, inputs, "archive_dependency.loombc")
+    _expect_basename(env, inputs, "library_dependency.loombc")
     _expect_basename(env, inputs, "link_checks.loom")
     _expect_no_basename(env, inputs, "link_kernels.loom")
 
-def _test_deps_only_library_consumes_archive(name, **kwargs):
+def _test_deps_only_library_propagates_dependencies(name, **kwargs):
     analysis_test(
         name = name,
         attr_values = {
             "timeout": "short",
         },
-        impl = _test_deps_only_library_consumes_archive_impl,
-        target = ":archive_aggregate",
+        impl = _test_deps_only_library_propagates_dependencies_impl,
+        target = ":library_aggregate",
         **kwargs
     )
 
-def _test_deps_only_library_consumes_archive_impl(env, target):
+def _test_deps_only_library_propagates_dependencies_impl(env, target):
+    info = target[LoomLibraryInfo]
+    dependencies = info.transitive_dependencies.to_list()
+    if len(dependencies) != 2:
+        env.fail("expected two propagated dependencies, got %r" % dependencies)
+    _expect_basename(env, dependencies, "library_consumer.loombc")
+    _expect_basename(env, dependencies, "library_dependency.loombc")
+
     action = _find_action(env, target[TestingAspectInfo].actions, "LoomLibrary")
+    if "--mode=merge" not in action.argv:
+        env.fail("expected merge mode in %r" % action.argv)
     _expect_arg_with_prefix_and_suffix(
         env,
         action.argv,
         "--library=",
-        "archive_consumer.loombc",
+        "library_consumer.loombc",
     )
 
     inputs = action.inputs.to_list()
-    _expect_basename(env, inputs, "archive_consumer.loombc")
+    _expect_basename(env, inputs, "library_consumer.loombc")
     _expect_no_basename(env, inputs, "link_checks.loom")
     _expect_no_basename(env, inputs, "link_kernels.loom")
 
-def _test_wrapper_library_archive_is_testonly(name, **kwargs):
+def _test_wrapper_library_module_is_testonly(name, **kwargs):
     analysis_test(
         name = name,
         attr_values = {
             "timeout": "short",
         },
-        impl = _test_wrapper_library_archive_is_testonly_impl,
+        impl = _test_wrapper_library_module_is_testonly_impl,
         target = ":profiled_library",
         **kwargs
     )
 
-def _test_wrapper_library_archive_is_testonly_impl(env, target):
+def _test_wrapper_library_module_is_testonly_impl(env, target):
     env.expect.that_str(target[LoomLibraryInfo].module.basename).equals(
         "profiled_library.loombc",
     )
     if not target[TestingAspectInfo].attrs.testonly:
-        env.fail("expected wrapper library archive to be testonly")
+        env.fail("expected wrapper library module to be testonly")
 
 def _test_wrapper_compilation_is_testonly(name, **kwargs):
     analysis_test(
@@ -166,24 +182,24 @@ def _test_wrapper_compilation_is_testonly_impl(env, target):
         if expected_arg not in action.argv:
             env.fail("expected %r in compilation arguments %r" % (expected_arg, action.argv))
 
-def _test_execution_profile_consumes_source_and_dependency_archive(name, **kwargs):
+def _test_execution_profile_consumes_source_and_dependency_module(name, **kwargs):
     analysis_test(
         name = name,
         attr_values = {
             "timeout": "short",
         },
-        impl = _test_execution_profile_consumes_source_and_dependency_archive_impl,
+        impl = _test_execution_profile_consumes_source_and_dependency_module_impl,
         target = ":profiled_library_execute_reference_test_launcher",
         **kwargs
     )
 
-def _test_execution_profile_consumes_source_and_dependency_archive_impl(env, target):
+def _test_execution_profile_consumes_source_and_dependency_module_impl(env, target):
     info = target[LoomExecutionTestInfo]
     env.expect.that_str(info.source.basename).equals("profile_cases.loom")
     if len(info.libraries) != 1:
         env.fail("expected one execution library, got %r" % info.libraries)
     env.expect.that_str(info.libraries[0].module.basename).equals(
-        "archive_dependency.loombc",
+        "library_dependency.loombc",
     )
     env.expect.that_str(info.profile_name).equals("reference")
     if info.runner_args != ["--case=@scalar_case"]:
@@ -191,7 +207,7 @@ def _test_execution_profile_consumes_source_and_dependency_archive_impl(env, tar
 
     runfiles = target[DefaultInfo].default_runfiles.files.to_list()
     _expect_basename(env, runfiles, "profile_cases.loom")
-    _expect_basename(env, runfiles, "archive_dependency.loombc")
+    _expect_basename(env, runfiles, "library_dependency.loombc")
     _expect_no_basename(env, runfiles, "profiled_library.loombc")
 
     tags = target[TestingAspectInfo].attrs.tags
@@ -221,7 +237,7 @@ def _test_resource_profile_preserves_direct_execution_impl(env, target):
     if len(info.libraries) != 1:
         env.fail("expected one execution library, got %r" % info.libraries)
     env.expect.that_str(info.libraries[0].module.basename).equals(
-        "archive_dependency.loombc",
+        "library_dependency.loombc",
     )
     env.expect.that_str(info.profile_name).equals("serialized_reference")
 
@@ -238,11 +254,11 @@ def loom_library_rules_test_suite(name):
     test_suite(
         name = name,
         tests = [
-            _test_deps_only_library_consumes_archive,
-            _test_execution_profile_consumes_source_and_dependency_archive,
-            _test_library_consumes_dependency_archive,
+            _test_deps_only_library_propagates_dependencies,
+            _test_execution_profile_consumes_source_and_dependency_module,
+            _test_library_keeps_dependency_module_separate,
             _test_resource_profile_preserves_direct_execution,
             _test_wrapper_compilation_is_testonly,
-            _test_wrapper_library_archive_is_testonly,
+            _test_wrapper_library_module_is_testonly,
         ],
     )

@@ -2,7 +2,7 @@
   "version": 1,
   "cases": [
     {
-      "name": "prints selective link plan for source providers",
+      "name": "prints link plan for source providers",
       "cwd": "{srcdir}",
       "run": {
         "tool": "loom-link",
@@ -122,7 +122,7 @@
       ]
     },
     {
-      "name": "compiles linked bytecode for selected amdgpu target",
+      "name": "compiles merged bytecode for selected amdgpu target",
       "steps": [
         {
           "name": "encode-providers",
@@ -149,8 +149,8 @@
             "tool": "loom-link",
             "args": [
               "{srcdir}/root.loom",
-              "--library=providers.loom",
-              "--mode=archive",
+              "providers.loom",
+              "--mode=merge",
               "--strip-check",
               "--to=bc",
               "--output={tmp}/linked.loombc"

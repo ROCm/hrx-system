@@ -194,6 +194,7 @@ class ModelFlowScenario final : public CompileScenario {
         /*.next=*/nullptr,
         /*.link_index=*/link_index_.get(),
         /*.module_name=*/loomc_make_cstring_view("model_kernel"),
+        /*.mode=*/LOOMC_LINK_MODE_LINK,
         /*.root_symbols=*/&root_symbol,
         /*.root_symbol_count=*/1,
         /*.flags=*/0,

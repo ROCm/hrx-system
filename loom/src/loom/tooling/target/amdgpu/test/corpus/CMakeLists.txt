@@ -11,7 +11,7 @@ iree_add_all_subdirs()
 
 file(GLOB _GLOB_GENERIC_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS generic/*.loom)
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_link_module(
+loom_module(
   NAME
     generic_test_module
   SRCS
@@ -22,7 +22,7 @@ loom_link_module(
     "loom::test::corpus::encoding::numeric_conversion_cases"
     "${_GLOB_GENERIC_X_LOOM}"
   MODE
-    "archive"
+    "merge"
   OUTPUT
     "generic_test_module.loombc"
   OUTPUT_FORMAT
@@ -50,14 +50,14 @@ endif()
 
 file(GLOB _GLOB_GFX11_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS gfx11/*.loom)
 if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_link_module(
+loom_module(
   NAME
     gfx11_test_module
   SRCS
     "loom::test::corpus::authoring::hip::gfx11_cases"
     "${_GLOB_GFX11_X_LOOM}"
   MODE
-    "archive"
+    "merge"
   OUTPUT
     "gfx11_test_module.loombc"
   OUTPUT_FORMAT
@@ -85,13 +85,13 @@ endif()
 
 file(GLOB _GLOB_GFX1100_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS gfx1100/*.loom)
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_link_module(
+loom_module(
   NAME
     gfx1100_test_module
   SRCS
     "${_GLOB_GFX1100_X_LOOM}"
   MODE
-    "archive"
+    "merge"
   OUTPUT
     "gfx1100_test_module.loombc"
   OUTPUT_FORMAT
@@ -120,13 +120,13 @@ endif()
 
 file(GLOB _GLOB_GFX9_4_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS gfx9_4/*.loom)
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_link_module(
+loom_module(
   NAME
     gfx9_4_test_module
   SRCS
     "${_GLOB_GFX9_4_X_LOOM}"
   MODE
-    "archive"
+    "merge"
   OUTPUT
     "gfx9_4_test_module.loombc"
   OUTPUT_FORMAT
@@ -154,13 +154,13 @@ iree_native_test(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_link_module(
+loom_module(
   NAME
     gfx1250_test_module
   SRCS
     "loom::test::corpus::authoring::hip::gfx1250_cases"
   MODE
-    "archive"
+    "merge"
   OUTPUT
     "gfx1250_test_module.loombc"
   OUTPUT_FORMAT

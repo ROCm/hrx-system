@@ -191,7 +191,7 @@ static iree_status_t loom_cmd_program_plan_check_materialize_roots(
     status = loom_link_plan_build(
         index,
         &(loom_link_plan_options_t){
-            .mode = LOOM_LINK_PLAN_SELECTIVE,
+            .mode = LOOM_LINK_PLAN_LINK,
             .unresolved_policy = LOOM_LINK_PLAN_UNRESOLVED_ALLOW,
             .root_facets =
                 {

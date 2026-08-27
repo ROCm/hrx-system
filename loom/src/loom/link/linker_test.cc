@@ -328,7 +328,7 @@ global.rodata.def @metadata = align(4) bytes("4c4f4f4d")
       std::string::npos);
 }
 
-TEST_F(LinkerTest, SelectiveRootMaterializesReachableSymbols) {
+TEST_F(LinkerTest, LinkRootMaterializesReachableSymbols) {
   loom_module_t* harness = Parse(IREE_SV(R"(
 test.target<low_core> @test_target
 
@@ -364,7 +364,7 @@ func.def @unused(%x: i32) -> (i32) {
   EXPECT_EQ(text.find("func.def @unused"), std::string::npos);
 }
 
-TEST_F(LinkerTest, SelectiveRootMaterializesApplyContractProviders) {
+TEST_F(LinkerTest, LinkRootMaterializesApplyContractProviders) {
   loom_module_t* module = Parse(IREE_SV(R"(
 template.decl @demo.apply(%x: i32) -> (i32)
 
@@ -396,7 +396,7 @@ func.def @caller(%x: i32) -> (i32) {
   EXPECT_EQ(text.find("template.def<@demo.unused>"), std::string::npos);
 }
 
-TEST_F(LinkerTest, SelectiveRootMaterializesLibraryApplyContractProviders) {
+TEST_F(LinkerTest, LinkRootMaterializesLibraryApplyContractProviders) {
   loom_module_t* harness = Parse(IREE_SV(R"(
 template.decl @demo.apply(%x: i32) -> (i32)
 
@@ -429,7 +429,7 @@ template.def<@demo.unused> @unused_provider(%x: i32) -> (i32) {
   EXPECT_EQ(text.find("template.def<@demo.unused>"), std::string::npos);
 }
 
-TEST_F(LinkerTest, SelectiveRootReplacesDeclarationAtStructuralPosition) {
+TEST_F(LinkerTest, LinkRootReplacesDeclarationAtStructuralPosition) {
   loom_module_t* harness = Parse(IREE_SV(R"(
 func.def @before(%x: i32) -> (i32) {
   func.return %x : i32
@@ -461,7 +461,7 @@ func.def @identity(%x: i32) -> (i32) {
   EXPECT_EQ(before, std::string::npos);
 }
 
-TEST_F(LinkerTest, SelectiveRootCanResolveProviderBeforeRootModule) {
+TEST_F(LinkerTest, LinkRootCanResolveProviderBeforeRootModule) {
   loom_module_t* corpus = Parse(IREE_SV(R"(
 func.def @identity(%x: i32) -> (i32) {
   func.return %x : i32
@@ -486,7 +486,7 @@ func.def @caller(%x: i32) -> (i32) {
   EXPECT_NE(text.find("func.call @identity"), std::string::npos);
 }
 
-TEST_F(LinkerTest, SelectiveRootIgnoresUnreachableDuplicateDefinition) {
+TEST_F(LinkerTest, LinkRootIgnoresUnreachableDuplicateDefinition) {
   loom_module_t* harness = Parse(IREE_SV(R"(
 func.def @caller(%x: i32) -> (i32) {
   func.return %x : i32
@@ -512,7 +512,7 @@ func.def @unused(%x: i32) -> (i32) {
   EXPECT_EQ(text.find("func.def @unused"), std::string::npos);
 }
 
-TEST_F(LinkerTest, SelectiveRootRejectsMissingRoot) {
+TEST_F(LinkerTest, LinkRootRejectsMissingRoot) {
   loom_module_t* harness = Parse(IREE_SV(R"(
 func.def @caller(%x: i32) -> (i32) {
   func.return %x : i32
@@ -525,7 +525,7 @@ func.def @caller(%x: i32) -> (i32) {
   EXPECT_EQ(linked, nullptr);
 }
 
-TEST_F(LinkerTest, SelectiveRootOutputIgnoresUnrelatedFunctionOrder) {
+TEST_F(LinkerTest, LinkRootOutputIgnoresUnrelatedFunctionOrder) {
   loom_module_t* harness = Parse(IREE_SV(R"(
 func.decl @identity(%x: i32) -> (i32)
 )"));
@@ -553,7 +553,7 @@ func.def @identity(%x: i32) -> (i32) {
   EXPECT_EQ(Print(linked), Print(linked_with_unrelated));
 }
 
-TEST_F(LinkerTest, SelectiveRootMaterializesConfigDependency) {
+TEST_F(LinkerTest, LinkRootMaterializesConfigDependency) {
   loom_module_t* module = Parse(IREE_SV(R"(
 config.decl @model36.model.hidden_size : index
 

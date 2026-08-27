@@ -348,7 +348,7 @@ iree_status_t loom_link_plan_materialize(
   loom_symbol_ref_t* target_symbols = NULL;
   loom_symbol_ref_t* target_kernel_configurations = NULL;
   iree_host_size_t planned_symbol_capacity = 0;
-  if (loom_link_plan_mode(plan) == LOOM_LINK_PLAN_SELECTIVE &&
+  if (loom_link_plan_mode(plan) == LOOM_LINK_PLAN_LINK &&
       !iree_host_size_checked_add(loom_link_plan_symbol_count(plan),
                                   module_projection.synthetic_symbol_count,
                                   &planned_symbol_capacity)) {
@@ -395,9 +395,8 @@ iree_status_t loom_link_plan_materialize(
   loom_module_t* output_module = NULL;
   iree_status_t status = loom_link_plan_materialize_modules(
       plan, index, &module_projection, environment,
-      loom_link_plan_mode(plan) == LOOM_LINK_PLAN_SELECTIVE, arena,
-      target_symbols, target_template_families, target_kernel_configurations,
-      linker);
+      loom_link_plan_mode(plan) == LOOM_LINK_PLAN_LINK, arena, target_symbols,
+      target_template_families, target_kernel_configurations, linker);
   if (iree_status_is_ok(status)) {
     status = loom_linker_finish(linker, &output_module);
   }

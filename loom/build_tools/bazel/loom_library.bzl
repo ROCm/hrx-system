@@ -18,9 +18,10 @@ _LOOM_LINK_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:link_toolchain_type"
 _LOOM_TEST_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:test_toolchain_type")
 
 LoomLibraryInfo = provider(
-    doc = "A verified reusable Loom bytecode archive.",
+    doc = "One relocatable Loom module and its independent dependencies.",
     fields = {
-        "module": "Linked Loom bytecode archive.",
+        "module": "Relocatable Loom bytecode module owned by this library.",
+        "transitive_dependencies": "Depset of separate dependency modules, excluding module.",
     },
 )
 
@@ -165,11 +166,16 @@ loom_compile_target = rule(
 def _loom_library_impl(ctx):
     if not ctx.files.srcs and not ctx.attr.deps:
         fail("%s requires at least one source across srcs and deps" % ctx.label)
-    libraries = [dep[LoomLibraryInfo].module for dep in ctx.attr.deps]
+    dependency_infos = [dep[LoomLibraryInfo] for dep in ctx.attr.deps]
+    libraries = [info.module for info in dependency_infos]
+    transitive_dependencies = depset(
+        direct = libraries,
+        transitive = [info.transitive_dependencies for info in dependency_infos],
+    )
     inputs = depset(direct = ctx.files.srcs + libraries)
     output = ctx.actions.declare_file(ctx.label.name + ".loombc")
     args = ctx.actions.args()
-    args.add("--mode=archive")
+    args.add("--mode=merge")
     args.add("--to=bc")
     args.add("--output=%s" % output.path)
     args.add_all(ctx.files.srcs)
@@ -189,6 +195,7 @@ def _loom_library_impl(ctx):
         DefaultInfo(files = depset([output])),
         LoomLibraryInfo(
             module = output,
+            transitive_dependencies = transitive_dependencies,
         ),
     ]
 
@@ -197,14 +204,14 @@ _loom_library = rule(
     attrs = {
         "deps": attr.label_list(
             providers = [LoomLibraryInfo],
-            doc = "Loom bytecode archives supplying library providers.",
+            doc = "Direct Loom library dependencies kept as separate modules.",
         ),
         "srcs": attr.label_list(
             allow_files = [".loom", ".loombc"],
             doc = "Ordered Loom text or bytecode source modules.",
         ),
     },
-    doc = "Links one reusable Loom source closure into a bytecode archive.",
+    doc = "Merges direct sources into one relocatable Loom bytecode module.",
     toolchains = [_LOOM_LINK_TOOLCHAIN_TYPE],
 )
 
@@ -580,8 +587,8 @@ def _declare_library(
         compile_targets,
         execution_profiles,
         plan_benchmarks,
-        archive_testonly,
-        archive_visibility,
+        module_testonly,
+        module_visibility,
         tags,
         visibility):
     _loom_library(
@@ -589,8 +596,8 @@ def _declare_library(
         srcs = srcs,
         deps = deps,
         tags = tags,
-        testonly = archive_testonly,
-        visibility = archive_visibility,
+        testonly = module_testonly,
+        visibility = module_visibility,
     )
 
     tests = []
@@ -681,7 +688,7 @@ def _declare_library(
             library = ":" + name,
             tags = tags,
             target = target,
-            testonly = archive_testonly,
+            testonly = module_testonly,
             visibility = ["//visibility:private"],
         )
         compile_test_name = compile_name + "_test"
@@ -719,8 +726,8 @@ def loom_library(
         compile_targets = [],
         execution_profiles = [],
         plan_benchmarks = False,
-        archive_testonly = False,
-        archive_visibility = visibility,
+        module_testonly = False,
+        module_visibility = visibility,
         tags = tags,
         visibility = visibility,
     )
@@ -735,7 +742,7 @@ def loom_test_library(
         visibility = None):
     """Declares test-only Loom wrappers and their generated test suite.
 
-    The wrapper archive is private and test-only. Its ``<name>_test`` suite
+    The wrapper module is private and test-only. Its ``<name>_test`` suite
     formats every source, plans declared benchmarks, compiles requested target
     qualifications, and executes each authored source through every requested
     profile with ``deps`` supplied as explicit libraries.
@@ -749,8 +756,8 @@ def loom_test_library(
         compile_targets = compile_targets,
         execution_profiles = execution_profiles,
         plan_benchmarks = True,
-        archive_testonly = True,
-        archive_visibility = ["//visibility:private"],
+        module_testonly = True,
+        module_visibility = ["//visibility:private"],
         tags = tags,
         visibility = visibility,
     )
@@ -771,8 +778,8 @@ def loom_kernel_library(
         compile_targets = compile_targets,
         execution_profiles = execution_profiles,
         plan_benchmarks = True,
-        archive_testonly = False,
-        archive_visibility = visibility,
+        module_testonly = False,
+        module_visibility = visibility,
         tags = tags,
         visibility = visibility,
     )

@@ -22,12 +22,12 @@
       }
     },
     {
-      "name": "links archive with many symbols",
+      "name": "merges input with many symbols",
       "run": {
         "tool": "loom-link",
         "args": [
-          "{srcdir}/testdata/archive_many_symbols.loom",
-          "--mode=archive"
+          "{srcdir}/testdata/merge_many_symbols.loom",
+          "--mode=merge"
         ]
       },
       "stdout": {
@@ -38,12 +38,12 @@
       }
     },
     {
-      "name": "preserves required-inline kernel helper in archive",
+      "name": "preserves required-inline kernel helper in merge",
       "run": {
         "tool": "loom-link",
         "args": [
-          "{srcdir}/testdata/archive_inline_kernel_helper.loom",
-          "--mode=archive"
+          "{srcdir}/testdata/merge_inline_kernel_helper.loom",
+          "--mode=merge"
         ]
       },
       "stdout": {
@@ -55,7 +55,7 @@
       }
     },
     {
-      "name": "links import-free declarations in archive mode",
+      "name": "links import-free declarations in merge mode",
       "steps": [
         {
           "name": "write-harness",
@@ -78,7 +78,7 @@
             "args": [
               "{tmp}/harness.loom",
               "{tmp}/corpus.loom",
-              "--mode=archive"
+              "--mode=merge"
             ]
           },
           "stdout": {
@@ -94,7 +94,7 @@
       ]
     },
     {
-      "name": "selectively links import-free bytecode declaration",
+      "name": "links import-free bytecode declaration",
       "steps": [
         {
           "name": "write-harness",
@@ -207,12 +207,12 @@
           }
         },
         {
-          "name": "archive-library",
+          "name": "merge-library",
           "run": {
             "tool": "loom-link",
             "args": [
               "{tmp}/template-library.loombc",
-              "--mode=archive"
+              "--mode=merge"
             ]
           },
           "stdout": {

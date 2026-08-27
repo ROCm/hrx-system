@@ -157,7 +157,7 @@ class KernelConfigMaterializerTest : public ::testing::Test {
                     iree_string_view_t root_name) {
     const iree_string_view_t roots[] = {root_name};
     loom_link_plan_options_t options = {};
-    options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    options.mode = LOOM_LINK_PLAN_LINK;
     options.root_symbols = {IREE_ARRAYSIZE(roots), roots};
     loom_link_plan_t* plan = nullptr;
     IREE_CHECK_OK(
@@ -172,7 +172,7 @@ class KernelConfigMaterializerTest : public ::testing::Test {
         /*.kind=*/LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION,
     };
     loom_link_plan_options_t options = {};
-    options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    options.mode = LOOM_LINK_PLAN_LINK;
     options.root_facets = {1, &root};
     loom_link_plan_t* plan = nullptr;
     IREE_CHECK_OK(
@@ -537,7 +537,7 @@ kernel.def @dispatch_columns(%count: index) {
         },
     };
     loom_link_plan_options_t plan_options = {};
-    plan_options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    plan_options.mode = LOOM_LINK_PLAN_LINK;
     plan_options.root_facets = {IREE_ARRAYSIZE(roots), roots};
     loom_link_plan_t* plan_storage = nullptr;
     IREE_ASSERT_OK(loom_link_plan_build(

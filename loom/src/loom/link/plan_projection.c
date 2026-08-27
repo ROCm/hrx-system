@@ -64,7 +64,7 @@ static void loom_link_plan_projection_assign_complete_symbol_ordinals(
 // chosen.
 static void loom_link_plan_projection_assign_materialized_symbol_ordinals(
     const loom_link_plan_t* plan, loom_link_plan_module_selection_t* module) {
-  if (loom_link_plan_mode(plan) != LOOM_LINK_PLAN_SELECTIVE) {
+  if (loom_link_plan_mode(plan) != LOOM_LINK_PLAN_LINK) {
     module->projected_symbol_count = 0;
     loom_link_plan_projection_assign_complete_symbol_ordinals(module);
     return;
@@ -104,8 +104,8 @@ iree_status_t loom_link_plan_project_modules(
   *out_projection = (loom_link_plan_module_projection_t){0};
   const iree_host_size_t symbol_count = loom_link_plan_symbol_count(plan);
   const loom_link_module_index_t* index = loom_link_plan_index(plan);
-  const bool projects_archive_modules =
-      loom_link_plan_mode(plan) == LOOM_LINK_PLAN_ARCHIVE;
+  const bool projects_merged_modules =
+      loom_link_plan_mode(plan) == LOOM_LINK_PLAN_MERGE;
 
   loom_link_plan_module_symbol_t* symbols = NULL;
   if (symbol_count > 0) {
@@ -128,8 +128,21 @@ iree_status_t loom_link_plan_project_modules(
   }
 
   iree_host_size_t module_count = 0;
-  if (projects_archive_modules) {
-    module_count = loom_link_module_index_module_count(index);
+  if (projects_merged_modules) {
+    const iree_host_size_t provider_count =
+        loom_link_module_index_provider_count(index);
+    for (iree_host_size_t i = 0; i < provider_count; ++i) {
+      const loom_link_module_index_provider_t* provider =
+          loom_link_module_index_provider_at(index, i);
+      if (provider->role != LOOM_LINK_PROVIDER_ROLE_INPUT) {
+        continue;
+      }
+      if (!iree_host_size_checked_add(module_count, provider->module_count,
+                                      &module_count)) {
+        return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "projected module count overflow");
+      }
+    }
   } else if (symbol_count > 0) {
     module_count = 1;
     for (iree_host_size_t i = 1; i < symbol_count; ++i) {
@@ -147,32 +160,48 @@ iree_status_t loom_link_plan_project_modules(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, module_count, sizeof(*modules), (void**)&modules));
 
-  if (projects_archive_modules) {
-    iree_host_size_t symbol_ordinal = 0;
-    for (iree_host_size_t module_ordinal = 0; module_ordinal < module_count;
-         ++module_ordinal) {
-      const iree_host_size_t first_symbol_ordinal = symbol_ordinal;
-      while (symbol_ordinal < symbol_count &&
-             symbols[symbol_ordinal].source_symbol->module_ordinal ==
-                 module_ordinal) {
-        ++symbol_ordinal;
+  if (projects_merged_modules) {
+    iree_host_size_t symbol_index = 0;
+    iree_host_size_t module_index = 0;
+    const iree_host_size_t provider_count =
+        loom_link_module_index_provider_count(index);
+    for (iree_host_size_t provider_ordinal = 0;
+         provider_ordinal < provider_count; ++provider_ordinal) {
+      const loom_link_module_index_provider_t* provider =
+          loom_link_module_index_provider_at(index, provider_ordinal);
+      if (provider->role != LOOM_LINK_PROVIDER_ROLE_INPUT) {
+        continue;
       }
-      const iree_host_size_t module_symbol_count =
-          symbol_ordinal - first_symbol_ordinal;
-      modules[module_ordinal] = (loom_link_plan_module_selection_t){
-          .source_module =
-              loom_link_module_index_module_at(index, module_ordinal),
-          .symbols =
-              {
-                  .values = module_symbol_count > 0
-                                ? symbols + first_symbol_ordinal
-                                : NULL,
-                  .count = module_symbol_count,
-              },
-          .projected_symbol_count = 0,
-      };
+      const iree_host_size_t module_end_ordinal =
+          provider->module_start_ordinal + provider->module_count;
+      for (iree_host_size_t source_module_ordinal =
+               provider->module_start_ordinal;
+           source_module_ordinal < module_end_ordinal;
+           ++source_module_ordinal) {
+        const iree_host_size_t first_symbol_index = symbol_index;
+        while (symbol_index < symbol_count &&
+               symbols[symbol_index].source_symbol->module_ordinal ==
+                   source_module_ordinal) {
+          ++symbol_index;
+        }
+        const iree_host_size_t module_symbol_count =
+            symbol_index - first_symbol_index;
+        modules[module_index++] = (loom_link_plan_module_selection_t){
+            .source_module =
+                loom_link_module_index_module_at(index, source_module_ordinal),
+            .symbols =
+                {
+                    .values = module_symbol_count > 0
+                                  ? symbols + first_symbol_index
+                                  : NULL,
+                    .count = module_symbol_count,
+                },
+            .projected_symbol_count = 0,
+        };
+      }
     }
-    IREE_ASSERT_EQ(symbol_ordinal, symbol_count);
+    IREE_ASSERT_EQ(module_index, module_count);
+    IREE_ASSERT_EQ(symbol_index, symbol_count);
   } else {
     iree_host_size_t module_ordinal = 0;
     iree_host_size_t first_symbol_index = 0;

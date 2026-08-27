@@ -12,16 +12,16 @@ load(
     "apply_loom_target_policy",
 )
 
-_LOOM_LINK_MODES = ["archive", "link", "selective"]
+_LOOM_LINK_MODES = ["merge", "link"]
 _LOOM_LINK_OUTPUT_FORMATS = ["text", "bc"]
 
-def loom_link_module(
+def loom_module(
         name,
         srcs,
         libraries = [],
         roots = [],
         configs = [],
-        mode = "archive",
+        mode = "merge",
         output = None,
         output_format = "text",
         include_input_exports = False,
@@ -30,16 +30,16 @@ def loom_link_module(
         tags = [],
         target_compatible_with = [],
         visibility = None):
-    """Links Loom modules into one text or bytecode module.
+    """Builds one Loom text or bytecode module.
 
     Args:
       name: Name of the generated module target.
       srcs: Ordered primary Loom source or bytecode module labels.
-      libraries: Ordered library module labels contributing exported exact
-        definitions and template implementations.
-      roots: Optional root symbol names used by link/selective mode.
+      libraries: Ordered separate library modules. Merge mode leaves their
+        symbols out of the product; link mode may select reachable providers.
+      roots: Optional root symbol names used by link mode.
       configs: Optional compile-time config bindings as key=value strings.
-      mode: Linker planning mode: archive, link, or selective.
+      mode: Module construction mode: merge or link.
       output: Generated module filename. Defaults to <name>.loom or .loombc.
       output_format: Generated representation: text or bc.
       include_input_exports: Whether exported input symbols are implicit roots.
@@ -51,11 +51,15 @@ def loom_link_module(
       visibility: Visibility of the generated module target.
     """
     if not srcs:
-        fail("loom_link_module %s requires at least one primary source" % name)
+        fail("loom_module %s requires at least one primary source" % name)
     if mode not in _LOOM_LINK_MODES:
-        fail("loom_link_module %s has unsupported mode %r" % (name, mode))
+        fail("loom_module %s has unsupported mode %r" % (name, mode))
+    if mode == "merge" and (roots or include_input_exports):
+        fail("loom_module %s merge mode does not accept roots" % name)
+    if mode == "link" and not roots and not include_input_exports:
+        fail("loom_module %s link mode requires roots or include_input_exports" % name)
     if output_format not in _LOOM_LINK_OUTPUT_FORMATS:
-        fail("loom_link_module %s has unsupported output format %r" %
+        fail("loom_module %s has unsupported output format %r" %
              (name, output_format))
 
     output = output or (name + (".loombc" if output_format == "bc" else ".loom"))

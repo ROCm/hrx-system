@@ -25,53 +25,53 @@ list(REMOVE_ITEM _GLOB_X_LOOM_52CB0DDF ${_GLOB_PACKED_FIELD_CONTRACTS_LOOM_52CB0
 file(GLOB _GLOB_Q8_HIP_SHAPED_UNROLL_UNRESOLVED_LOOM_52CB0DDF LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS q8_hip_shaped_unroll_unresolved.loom)
 list(REMOVE_ITEM _GLOB_X_LOOM_52CB0DDF ${_GLOB_Q8_HIP_SHAPED_UNROLL_UNRESOLVED_LOOM_52CB0DDF})
 file(GLOB _GLOB_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
-loom_link_module(
+loom_module(
   NAME
     portable_cases
   SRCS
     "${_GLOB_X_LOOM_52CB0DDF}"
   MODE
-    "archive"
+    "merge"
   OUTPUT
     "portable_cases.loombc"
   OUTPUT_FORMAT
     "bc"
 )
 
-loom_link_module(
+loom_module(
   NAME
     amdgpu_selection_cases
   SRCS
     "target_provider_selection.loom"
   MODE
-    "archive"
+    "merge"
   OUTPUT
     "amdgpu_selection_cases.loombc"
   OUTPUT_FORMAT
     "bc"
 )
 
-loom_link_module(
+loom_module(
   NAME
     gfx11_cases
   SRCS
     "template_math_legalization.loom"
     "wave64_reductions.loom"
   MODE
-    "archive"
+    "merge"
   OUTPUT
     "gfx11_cases.loombc"
   OUTPUT_FORMAT
     "bc"
 )
 
-loom_link_module(
+loom_module(
   NAME
     gfx1250_cases
   SRCS
     "cluster_b128_multicast.loom"
   MODE
-    "archive"
+    "merge"
   OUTPUT
     "gfx1250_cases.loombc"
   OUTPUT_FORMAT

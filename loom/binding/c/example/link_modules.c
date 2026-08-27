@@ -240,6 +240,7 @@ static loomc_status_t link_module(link_modules_state_t* state) {
       .type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
       .structure_size = sizeof(link_options),
       .link_index = state->link_index,
+      .mode = LOOMC_LINK_MODE_LINK,
       .root_symbols = roots,
       .root_symbol_count = 1,
   };

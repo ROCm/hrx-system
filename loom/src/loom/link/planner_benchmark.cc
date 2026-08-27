@@ -73,13 +73,13 @@ class PlannerCatalogFixture {
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
 
-  loom_link_module_index_t* BuildIndex() {
+  loom_link_module_index_t* BuildIndex(loom_link_provider_role_t role) {
     loom_link_module_index_t* index = nullptr;
     CheckStatus(loom_link_module_index_allocate(
         &context_, &block_pool_, iree_allocator_system(), &index));
     const loom_link_module_index_add_options_t options = {
         /*.provider_name=*/IREE_SV("catalog"),
-        /*.role=*/LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+        /*.role=*/role,
     };
     CheckStatus(loom_link_module_index_add_bytecode(
         index, iree_make_const_byte_span(bytes_.data(), bytes_.size()),
@@ -297,7 +297,8 @@ static void SetCounters(benchmark::State& state,
 static void BM_ModuleIndex_Catalog(benchmark::State& state) {
   PlannerCatalogFixture fixture((uint32_t)state.range(0));
   for (auto _ : state) {
-    loom_link_module_index_t* index = fixture.BuildIndex();
+    loom_link_module_index_t* index =
+        fixture.BuildIndex(LOOM_LINK_PROVIDER_ROLE_LIBRARY);
     benchmark::DoNotOptimize(index);
     state.PauseTiming();
     loom_link_module_index_free(index);
@@ -310,12 +311,14 @@ static void BenchmarkPlan(benchmark::State& state, loom_link_plan_mode_t mode,
                           uint32_t root_ordinal,
                           iree_host_size_t expected_symbol_count) {
   PlannerCatalogFixture fixture((uint32_t)state.range(0));
-  loom_link_module_index_t* index = fixture.BuildIndex();
+  loom_link_module_index_t* index = fixture.BuildIndex(
+      mode == LOOM_LINK_PLAN_MERGE ? LOOM_LINK_PROVIDER_ROLE_INPUT
+                                   : LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   const std::string root_name = fixture.SymbolName(root_ordinal);
   const iree_string_view_t root =
       iree_make_string_view(root_name.data(), root_name.size());
   iree_string_view_list_t root_symbols = iree_string_view_list_empty();
-  if (mode == LOOM_LINK_PLAN_SELECTIVE) {
+  if (mode == LOOM_LINK_PLAN_LINK) {
     root_symbols = (iree_string_view_list_t){
         /*.count=*/1,
         /*.values=*/&root,
@@ -345,23 +348,21 @@ static void BenchmarkPlan(benchmark::State& state, loom_link_plan_mode_t mode,
   loom_link_module_index_free(index);
 }
 
-static void BM_Plan_Archive_Catalog(benchmark::State& state) {
+static void BM_Plan_Merge_Catalog(benchmark::State& state) {
   const uint32_t symbol_count = (uint32_t)state.range(0);
-  BenchmarkPlan(state, LOOM_LINK_PLAN_ARCHIVE, /*root_ordinal=*/0,
-                symbol_count);
+  BenchmarkPlan(state, LOOM_LINK_PLAN_MERGE, /*root_ordinal=*/0, symbol_count);
 }
 
-static void BM_Plan_SelectiveLeaf_Catalog(benchmark::State& state) {
+static void BM_Plan_LinkLeaf_Catalog(benchmark::State& state) {
   const uint32_t symbol_count = (uint32_t)state.range(0);
-  BenchmarkPlan(state, LOOM_LINK_PLAN_SELECTIVE,
+  BenchmarkPlan(state, LOOM_LINK_PLAN_LINK,
                 /*root_ordinal=*/symbol_count - 1,
                 /*expected_symbol_count=*/1);
 }
 
-static void BM_Plan_SelectiveChain_Catalog(benchmark::State& state) {
+static void BM_Plan_LinkChain_Catalog(benchmark::State& state) {
   const uint32_t symbol_count = (uint32_t)state.range(0);
-  BenchmarkPlan(state, LOOM_LINK_PLAN_SELECTIVE, /*root_ordinal=*/0,
-                symbol_count);
+  BenchmarkPlan(state, LOOM_LINK_PLAN_LINK, /*root_ordinal=*/0, symbol_count);
 }
 
 static void BM_Plan_InputExport_UnrelatedLibraryProviders(
@@ -371,7 +372,7 @@ static void BM_Plan_InputExport_UnrelatedLibraryProviders(
   loom_link_module_index_t* index =
       fixture.BuildUnrelatedProviderIndex(library_provider_count);
   const loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/iree_string_view_list_empty(),
       /*.include_input_exports=*/true,
   };
@@ -430,12 +431,13 @@ static loom_module_t* MaterializeIndexedBytecodeModule(
 static void BenchmarkProjection(benchmark::State& state, uint32_t root_ordinal,
                                 iree_host_size_t expected_symbol_count) {
   PlannerCatalogFixture fixture((uint32_t)state.range(0));
-  loom_link_module_index_t* index = fixture.BuildIndex();
+  loom_link_module_index_t* index =
+      fixture.BuildIndex(LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   const std::string root_name = fixture.SymbolName(root_ordinal);
   const iree_string_view_t root =
       iree_make_string_view(root_name.data(), root_name.size());
   const loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/1, /*.values=*/&root},
   };
   loom_link_plan_t* plan = nullptr;
@@ -468,13 +470,13 @@ static void BenchmarkProjection(benchmark::State& state, uint32_t root_ordinal,
   loom_link_module_index_free(index);
 }
 
-static void BM_Project_SelectiveLeaf_Catalog(benchmark::State& state) {
+static void BM_Project_LinkLeaf_Catalog(benchmark::State& state) {
   const uint32_t symbol_count = (uint32_t)state.range(0);
   BenchmarkProjection(state, /*root_ordinal=*/symbol_count - 1,
                       /*expected_symbol_count=*/1);
 }
 
-static void BM_Project_SelectiveChain_Catalog(benchmark::State& state) {
+static void BM_Project_LinkChain_Catalog(benchmark::State& state) {
   const uint32_t symbol_count = (uint32_t)state.range(0);
   BenchmarkProjection(state, /*root_ordinal=*/0, symbol_count);
 }
@@ -518,11 +520,11 @@ static void BenchmarkExactLink(benchmark::State& state,
   SetCounters(state, fixture, selected_symbol_count);
 }
 
-static void BM_LinkExact_SelectiveLeaf_Catalog(benchmark::State& state) {
+static void BM_LinkExact_LinkLeaf_Catalog(benchmark::State& state) {
   BenchmarkExactLink(state, /*selected_symbol_count=*/1);
 }
 
-static void BM_LinkExact_SelectiveChain_Catalog(benchmark::State& state) {
+static void BM_LinkExact_LinkChain_Catalog(benchmark::State& state) {
   BenchmarkExactLink(state, /*selected_symbol_count=*/state.range(0));
 }
 
@@ -550,16 +552,17 @@ static void BM_LinkExactDense_Catalog(benchmark::State& state) {
   SetCounters(state, fixture, fixture.symbol_count());
 }
 
-static void BenchmarkSelectiveMaterializeAndLink(
+static void BenchmarkLinkMaterializeAndLink(
     benchmark::State& state, uint32_t root_ordinal,
     iree_host_size_t expected_symbol_count) {
   PlannerCatalogFixture fixture((uint32_t)state.range(0));
-  loom_link_module_index_t* index = fixture.BuildIndex();
+  loom_link_module_index_t* index =
+      fixture.BuildIndex(LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   const std::string root_name = fixture.SymbolName(root_ordinal);
   const iree_string_view_t root =
       iree_make_string_view(root_name.data(), root_name.size());
   const loom_link_plan_options_t plan_options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/1, /*.values=*/&root},
   };
   loom_link_plan_t* plan = nullptr;
@@ -633,18 +636,16 @@ static void BenchmarkSelectiveMaterializeAndLink(
   loom_link_module_index_free(index);
 }
 
-static void BM_MaterializeAndLink_SelectiveLeaf_Catalog(
-    benchmark::State& state) {
+static void BM_MaterializeAndLink_LinkLeaf_Catalog(benchmark::State& state) {
   const uint32_t symbol_count = (uint32_t)state.range(0);
-  BenchmarkSelectiveMaterializeAndLink(state, /*root_ordinal=*/symbol_count - 1,
-                                       /*expected_symbol_count=*/1);
+  BenchmarkLinkMaterializeAndLink(state, /*root_ordinal=*/symbol_count - 1,
+                                  /*expected_symbol_count=*/1);
 }
 
-static void BM_MaterializeAndLink_SelectiveChain_Catalog(
-    benchmark::State& state) {
+static void BM_MaterializeAndLink_LinkChain_Catalog(benchmark::State& state) {
   const uint32_t symbol_count = (uint32_t)state.range(0);
-  BenchmarkSelectiveMaterializeAndLink(state, /*root_ordinal=*/0,
-                                       /*expected_symbol_count=*/symbol_count);
+  BenchmarkLinkMaterializeAndLink(state, /*root_ordinal=*/0,
+                                  /*expected_symbol_count=*/symbol_count);
 }
 
 static void BM_GlobalDuplicateEnumeration(benchmark::State& state) {
@@ -679,27 +680,21 @@ static void CatalogScales(benchmark::Benchmark* benchmark) {
 }
 
 BENCHMARK(BM_ModuleIndex_Catalog)->Apply(CatalogScales)->Complexity();
-BENCHMARK(BM_Plan_Archive_Catalog)->Apply(CatalogScales)->Complexity();
-BENCHMARK(BM_Plan_SelectiveLeaf_Catalog)->Apply(CatalogScales)->Complexity();
-BENCHMARK(BM_Plan_SelectiveChain_Catalog)->Apply(CatalogScales)->Complexity();
+BENCHMARK(BM_Plan_Merge_Catalog)->Apply(CatalogScales)->Complexity();
+BENCHMARK(BM_Plan_LinkLeaf_Catalog)->Apply(CatalogScales)->Complexity();
+BENCHMARK(BM_Plan_LinkChain_Catalog)->Apply(CatalogScales)->Complexity();
 BENCHMARK(BM_Plan_InputExport_UnrelatedLibraryProviders)
     ->Apply(CatalogScales)
     ->Complexity(benchmark::o1);
-BENCHMARK(BM_Project_SelectiveLeaf_Catalog)->Apply(CatalogScales)->Complexity();
-BENCHMARK(BM_Project_SelectiveChain_Catalog)
-    ->Apply(CatalogScales)
-    ->Complexity();
-BENCHMARK(BM_LinkExact_SelectiveLeaf_Catalog)
-    ->Apply(CatalogScales)
-    ->Complexity();
-BENCHMARK(BM_LinkExact_SelectiveChain_Catalog)
-    ->Apply(CatalogScales)
-    ->Complexity();
+BENCHMARK(BM_Project_LinkLeaf_Catalog)->Apply(CatalogScales)->Complexity();
+BENCHMARK(BM_Project_LinkChain_Catalog)->Apply(CatalogScales)->Complexity();
+BENCHMARK(BM_LinkExact_LinkLeaf_Catalog)->Apply(CatalogScales)->Complexity();
+BENCHMARK(BM_LinkExact_LinkChain_Catalog)->Apply(CatalogScales)->Complexity();
 BENCHMARK(BM_LinkExactDense_Catalog)->Apply(CatalogScales)->Complexity();
-BENCHMARK(BM_MaterializeAndLink_SelectiveLeaf_Catalog)
+BENCHMARK(BM_MaterializeAndLink_LinkLeaf_Catalog)
     ->Apply(CatalogScales)
     ->Complexity();
-BENCHMARK(BM_MaterializeAndLink_SelectiveChain_Catalog)
+BENCHMARK(BM_MaterializeAndLink_LinkChain_Catalog)
     ->Apply(CatalogScales)
     ->Complexity();
 BENCHMARK(BM_GlobalDuplicateEnumeration)->Apply(CatalogScales)->Complexity();

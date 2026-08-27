@@ -103,7 +103,7 @@ class TemplateCatalogFixture {
   loom_link_index_materialization_t Materialize() {
     const iree_string_view_t root = IREE_SV("@entry");
     loom_link_plan_options_t options = {};
-    options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    options.mode = LOOM_LINK_PLAN_LINK;
     options.root_symbols = {/*.count=*/1, /*.values=*/&root};
     options.unresolved_policy = LOOM_LINK_PLAN_UNRESOLVED_ERROR;
     loom_link_plan_materialization_environment_t environment = {};

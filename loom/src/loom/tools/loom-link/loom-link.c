@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// loom-link: links Loom text and bytecode modules through metadata-first
-// selective planning and materialization.
+// loom-link: merges or links Loom text and bytecode modules through
+// metadata-first planning and materialization.
 
 #include <stdio.h>
 #include <string.h>
@@ -37,7 +37,7 @@
 #include "loom/verify/verify.h"
 
 IREE_FLAG(string, mode, "auto",
-          "Planning mode: auto, archive, link, or selective. Auto selects "
+          "Planning mode: auto, merge, or link. Auto selects "
           "link mode when roots or exported input symbols are requested.");
 IREE_FLAG(string, from, "auto",
           "Input format for every input: auto, text, bc, or bytecode.");
@@ -45,7 +45,7 @@ IREE_FLAG(string, to, "text", "Output format: text, bc, or bytecode.");
 IREE_FLAG(string, output, "-",
           "Output path. Use '-' or the empty string for stdout.");
 IREE_FLAG_LIST(string, root,
-               "Root symbol to materialize in link/selective mode. Repeat for "
+               "Root symbol to materialize in link mode. Repeat for "
                "multiple roots.");
 IREE_FLAG_LIST(string, library,
                "Library contributing exported exact definitions and template "
@@ -60,7 +60,7 @@ IREE_FLAG_LIST_NAMED(
     "JSON/JSONC config object file. Repeat for multiple files. Nested object "
     "keys are flattened with '.' separators.");
 IREE_FLAG_NAMED(bool, include_input_exports, "include-input-exports", false,
-                "In link/selective mode, add exported input symbols as roots.");
+                "In link mode, add exported input symbols as roots.");
 IREE_FLAG_NAMED(bool, strip_check, "strip-check", false,
                 "Strip test/benchmark-only symbols before output.");
 IREE_FLAG_NAMED(
@@ -81,8 +81,8 @@ IREE_FLAG(bool, verify, true,
 
 typedef enum loom_link_cli_mode_e {
   LOOM_LINK_CLI_MODE_AUTO = 0,
-  LOOM_LINK_CLI_MODE_ARCHIVE = 1,
-  LOOM_LINK_CLI_MODE_SELECTIVE = 2,
+  LOOM_LINK_CLI_MODE_MERGE = 1,
+  LOOM_LINK_CLI_MODE_LINK = 2,
 } loom_link_cli_mode_t;
 
 typedef struct loom_link_cli_input_t {
@@ -116,9 +116,9 @@ typedef struct loom_link_cli_prepare_state_t {
 
 static const char* loom_link_cli_mode_name(loom_link_plan_mode_t mode) {
   switch (mode) {
-    case LOOM_LINK_PLAN_ARCHIVE:
-      return "archive";
-    case LOOM_LINK_PLAN_SELECTIVE:
+    case LOOM_LINK_PLAN_MERGE:
+      return "merge";
+    case LOOM_LINK_PLAN_LINK:
       return "link";
   }
   return "unknown";
@@ -148,8 +148,8 @@ static const char* loom_link_cli_identity_name(
 static const char* loom_link_cli_reason_name(
     loom_link_plan_live_reason_t reason) {
   switch (reason) {
-    case LOOM_LINK_PLAN_LIVE_ARCHIVE:
-      return "archive";
+    case LOOM_LINK_PLAN_LIVE_MERGE:
+      return "merge";
     case LOOM_LINK_PLAN_LIVE_ROOT:
       return "root";
     case LOOM_LINK_PLAN_LIVE_DEPENDENCY:
@@ -166,19 +166,17 @@ static iree_status_t loom_link_cli_parse_mode(iree_string_view_t value,
     *out_mode = LOOM_LINK_CLI_MODE_AUTO;
     return iree_ok_status();
   }
-  if (iree_string_view_equal(value, IREE_SV("archive"))) {
-    *out_mode = LOOM_LINK_CLI_MODE_ARCHIVE;
+  if (iree_string_view_equal(value, IREE_SV("merge"))) {
+    *out_mode = LOOM_LINK_CLI_MODE_MERGE;
     return iree_ok_status();
   }
-  if (iree_string_view_equal(value, IREE_SV("link")) ||
-      iree_string_view_equal(value, IREE_SV("selective"))) {
-    *out_mode = LOOM_LINK_CLI_MODE_SELECTIVE;
+  if (iree_string_view_equal(value, IREE_SV("link"))) {
+    *out_mode = LOOM_LINK_CLI_MODE_LINK;
     return iree_ok_status();
   }
   return iree_make_status(
       IREE_STATUS_INVALID_ARGUMENT,
-      "unsupported link mode '%.*s'; expected auto, archive, link, or "
-      "selective",
+      "unsupported link mode '%.*s'; expected auto, merge, or link",
       (int)value.size, value.data);
 }
 
@@ -187,20 +185,20 @@ static iree_status_t loom_link_cli_resolve_plan_mode(
     bool include_input_exports, loom_link_plan_mode_t* out_mode) {
   if (cli_mode == LOOM_LINK_CLI_MODE_AUTO) {
     *out_mode = (roots.count > 0 || include_input_exports)
-                    ? LOOM_LINK_PLAN_SELECTIVE
-                    : LOOM_LINK_PLAN_ARCHIVE;
+                    ? LOOM_LINK_PLAN_LINK
+                    : LOOM_LINK_PLAN_MERGE;
     return iree_ok_status();
   }
-  if (cli_mode == LOOM_LINK_CLI_MODE_ARCHIVE) {
+  if (cli_mode == LOOM_LINK_CLI_MODE_MERGE) {
     if (roots.count > 0 || include_input_exports) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "archive mode does not accept --root or --include-input-exports");
+          "merge mode does not accept --root or --include-input-exports");
     }
-    *out_mode = LOOM_LINK_PLAN_ARCHIVE;
+    *out_mode = LOOM_LINK_PLAN_MERGE;
     return iree_ok_status();
   }
-  *out_mode = LOOM_LINK_PLAN_SELECTIVE;
+  *out_mode = LOOM_LINK_PLAN_LINK;
   return iree_ok_status();
 }
 
@@ -780,7 +778,7 @@ static void loom_link_cli_print_agents_markdown(FILE* stream) {
       "`loom-link` combines Loom text and bytecode modules, applies config\n"
       "bindings to materialized modules, and selects the symbols that should "
       "be\n"
-      "kept for an archive or selective runtime artifact.\n"
+      "kept in a merged library or reachable runtime artifact.\n"
       "\n"
       "### Common flows\n"
       "\n"
@@ -790,7 +788,7 @@ static void loom_link_cli_print_agents_markdown(FILE* stream) {
       "  --to=bc --output=entry.loombc\n"
       "loom-link root.loom --library=providers.loom --root=@entry "
       "--print-plan\n"
-      "loom-link library.loom --mode=archive --strip-check --to=bc \\\n"
+      "loom-link library.loom --mode=merge --strip-check --to=bc \\\n"
       "  --output=runtime-library.loombc\n"
       "loom-link root.loom --print-config-schema\n"
       "```\n"
@@ -798,16 +796,17 @@ static void loom_link_cli_print_agents_markdown(FILE* stream) {
       "### Inputs and libraries\n"
       "\n"
       "Positional inputs jointly form the direct source module. A\n"
-      "`--library=path` contributes exported exact definitions and template\n"
-      "implementations. `--from=auto|text|bc` controls\n"
+      "`--library=path` names a separate library. Merge mode leaves library\n"
+      "symbols out of the result; link mode may select their exported exact\n"
+      "definitions and template implementations. `--from=auto|text|bc` "
+      "controls\n"
       "input decoding and `--to=text|bc` controls output encoding.\n"
       "\n"
-      "### Archive and selective linking\n"
+      "### Merge and link\n"
       "\n"
-      "`--mode=archive` preserves every non-stripped symbol in input order.\n"
-      "`--mode=link` or `--mode=selective` keeps explicit `--root=@symbol`\n"
-      "values, optional `--include-input-exports`, and reachable "
-      "dependencies.\n"
+      "`--mode=merge` preserves every non-stripped primary-input symbol in\n"
+      "input order. `--mode=link` keeps explicit `--root=@symbol` values,\n"
+      "optional `--include-input-exports`, and reachable dependencies.\n"
       "`--strip-check` removes symbols marked as test/benchmark-only from\n"
       "runtime artifacts.\n"
       "\n"
@@ -840,7 +839,7 @@ int main(int argc, char** argv) {
       "Links Loom text and bytecode modules into one module.\n"
       "\n"
       "Usage:\n"
-      "  loom-link [--mode=archive|link] [--from=auto|text|bc] "
+      "  loom-link [--mode=merge|link] [--from=auto|text|bc] "
       "[--to=text|bc] [--output=file] [file...]\n"
       "  loom-link model.loom --library=kernels.loombc --root=@entry "
       "--to=bc --output=model.loombc\n"
@@ -848,9 +847,10 @@ int main(int argc, char** argv) {
       "\n"
       "Input defaults to stdin only when no primary inputs or libraries are "
       "provided. Positional inputs jointly own private definitions; "
-      "--library inputs contribute exported definitions.\n"
-      "Archive mode keeps every non-stripped symbol in stable input order. "
-      "Link "
+      "--library inputs remain separate in merge mode and contribute exported "
+      "definitions in link mode.\n"
+      "Merge mode keeps every non-stripped primary-input symbol in stable "
+      "input order. Link "
       "mode keeps explicit roots or exported input symbols and their reachable "
       "dependencies.\n"
       "Use --strip-check to remove symbols marked as test/benchmark-only from "
@@ -886,7 +886,7 @@ int main(int argc, char** argv) {
   loom_module_format_t input_format = LOOM_MODULE_FORMAT_AUTO;
   loom_module_format_t output_format = LOOM_MODULE_FORMAT_TEXT;
   loom_link_cli_mode_t cli_mode = LOOM_LINK_CLI_MODE_AUTO;
-  loom_link_plan_mode_t plan_mode = LOOM_LINK_PLAN_ARCHIVE;
+  loom_link_plan_mode_t plan_mode = LOOM_LINK_PLAN_MERGE;
   const iree_flag_string_list_t roots = FLAG_root_list();
 
   iree_status_t status = loom_module_format_parse(

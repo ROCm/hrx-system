@@ -270,7 +270,7 @@ constructs that exist today.
 ## Follow one composition to Low
 
 The three source listings above are repository `.loom` files, not prose copies.
-With the Loom tools on `PATH`, this command formats them, archives the explicit
+With the Loom tools on `PATH`, this command formats them, merges the explicit
 program and provider universe, then specializes and compiles the kernel for the
 generic GFX11 profile. It prints every Loom command it runs:
 
@@ -280,9 +280,9 @@ loom/docs/examples/elementwise-transform/run.sh \
 ```
 
 The resulting directory contains the linkable `elementwise-transform.loom`
-archive, a VMFB, an HSACO, and the captured target Low IR. Archive mode matters
+module, a VMFB, an HSACO, and the captured target Low IR. Merge mode matters
 here because target facts arrive at the following `loom-compile` boundary: a
-closed targetless selective link would correctly choose the portable fallback
+closed targetless link would correctly choose the portable fallback
 and discard the wave32 alternative before those facts exist. The documentation
 build invokes the same script and regenerates the views below; neither output
 is checked-in source.
@@ -301,7 +301,7 @@ is checked-in source.
 
 The GFX11 tab comes directly from the installed-tool workflow above. The
 command-program tab shows body-blind compiler-owned materialization from the
-same archived program: launch configuration is projected as pure caller IR,
+same merged program: launch configuration is projected as pure caller IR,
 folded to an exact direct count, and lowered while the device implementation
 remains unopened. Until command-program materialization has a published
 installed-tool surface, treat that tab as verified compiler output rather than

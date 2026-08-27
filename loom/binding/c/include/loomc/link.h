@@ -45,6 +45,7 @@
 ///     .type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
 ///     .structure_size = sizeof(loomc_link_options_t),
 ///     .link_index = library_index,
+///     .mode = LOOMC_LINK_MODE_LINK,
 ///     .root_symbols = roots,
 ///     .root_symbol_count = 1,
 /// };
@@ -112,15 +113,26 @@ typedef enum loomc_link_flag_bits_e {
 /// Bitmask of `loomc_link_flag_bits_t` values.
 typedef uint32_t loomc_link_flags_t;
 
+/// Link product selection mode.
+typedef enum loomc_link_mode_e {
+  /// Merge every primary-input symbol into one relocatable module. Library
+  /// providers are not materialized.
+  LOOMC_LINK_MODE_MERGE = 0,
+
+  /// Retain explicit roots or exported primary-input roots and their reachable
+  /// closure through the complete supplied library universe.
+  LOOMC_LINK_MODE_LINK = 1,
+} loomc_link_mode_t;
+
 /// Link invocation options.
 ///
 /// A link invocation consumes a frozen index and returns either a retained
-/// module or a failed result with diagnostics. Supplying roots or
-/// `LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS` selects a dependency closure.
-/// Supplying neither performs archive-style linking and materializes all
-/// linkable symbols in stable index order. Linking preserves every target
-/// carried by the selected symbols. Config options materialize on the linked
-/// output for this invocation; frozen indexes and reusable input/library
+/// module or a failed result with diagnostics. Merge mode materializes only
+/// primary INPUT providers and preserves unresolved contracts. Link mode
+/// selects a dependency closure from explicit roots or exported primary roots
+/// across the complete supplied library universe. Linking preserves every
+/// target carried by the selected symbols. Config options materialize on the
+/// linked output for this invocation; frozen indexes and reusable input/library
 /// modules are never mutated by link-time config.
 typedef struct loomc_link_options_t {
   /// Structure type. Must be `LOOMC_STRUCTURE_TYPE_LINK_OPTIONS` when nonzero.
@@ -138,8 +150,11 @@ typedef struct loomc_link_options_t {
   /// Output module name for this invocation. Empty uses the linker's default.
   loomc_string_view_t module_name;
 
-  /// Root symbol names for selective linking. Function-like roots are retained
-  /// as module-boundary entries in the linked output.
+  /// Product selection mode. Zero defaults to `LOOMC_LINK_MODE_MERGE`.
+  loomc_link_mode_t mode;
+
+  /// Root symbol names for link mode. Function-like roots are retained as
+  /// module-boundary entries in the linked output.
   const loomc_string_view_t* root_symbols;
 
   /// Number of entries in `root_symbols`.

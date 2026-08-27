@@ -270,17 +270,19 @@ class LinkPlannerTest : public ::testing::Test {
   std::vector<loom_module_t*> modules_;
 };
 
-TEST_F(LinkPlannerTest, ArchiveSelectsAllSymbolsInStableIndexOrder) {
+TEST_F(LinkPlannerTest, MergeSelectsInputSymbolsInStableIndexOrder) {
   loom_module_t* first = Parse(Fixture(
-      IREE_SV("archive_selects_all_symbols_in_stable_index_order_first.loom")));
-  loom_module_t* second = Parse(Fixture(IREE_SV(
-      "archive_selects_all_symbols_in_stable_index_order_second.loom")));
+      IREE_SV("merge_selects_all_symbols_in_stable_index_order_first.loom")));
+  loom_module_t* second = Parse(Fixture(
+      IREE_SV("merge_selects_all_symbols_in_stable_index_order_second.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), first, IREE_SV("first"),
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   AddMaterialized(index.get(), second, IREE_SV("second"),
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddMaterialized(index.get(), second, IREE_SV("library"),
+                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
 
   PlanPtr plan = BuildPlan(index.get(), /*options=*/nullptr);
 
@@ -293,21 +295,21 @@ TEST_F(LinkPlannerTest, ArchiveSelectsAllSymbolsInStableIndexOrder) {
     const loom_link_plan_symbol_t* symbol =
         loom_link_plan_symbol_at(plan.get(), i);
     ASSERT_NE(symbol, nullptr);
-    EXPECT_EQ(symbol->reason, LOOM_LINK_PLAN_LIVE_ARCHIVE);
+    EXPECT_EQ(symbol->reason, LOOM_LINK_PLAN_LIVE_MERGE);
     EXPECT_EQ(symbol->cause_ordinal, LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
   }
 }
 
-TEST_F(LinkPlannerTest, SelectiveRootClosureSelectsPrivateDependencyOnly) {
+TEST_F(LinkPlannerTest, LinkRootClosureSelectsPrivateDependencyOnly) {
   loom_module_t* module = Parse(Fixture(IREE_SV(
-      "selective_root_closure_selects_private_dependency_only_module.loom")));
+      "link_root_closure_selects_private_dependency_only_module.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), module, IREE_SV("input"),
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
@@ -383,7 +385,7 @@ TEST_F(LinkPlannerTest,
         /*.kind=*/LOOM_LINK_SYMBOL_FACET_DEFINITION,
     };
     loom_link_plan_options_t options = {};
-    options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    options.mode = LOOM_LINK_PLAN_LINK;
     options.root_facets = {1, &definition_root};
     PlanPtr plan = BuildPlan(index, &options);
     EXPECT_TRUE(ContainsSymbol(plan.get(), root));
@@ -436,7 +438,7 @@ TEST_F(LinkPlannerTest,
         /*.kind=*/LOOM_LINK_SYMBOL_FACET_COMMAND_CONTRACT,
     };
     loom_link_plan_options_t contract_options = {};
-    contract_options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    contract_options.mode = LOOM_LINK_PLAN_LINK;
     contract_options.root_facets = {1, &contract_root};
     PlanPtr contract_plan = BuildPlan(index, &contract_options);
     EXPECT_TRUE(ContainsSymbol(contract_plan.get(), root));
@@ -453,7 +455,7 @@ TEST_F(LinkPlannerTest,
         /*.kind=*/LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION,
     };
     loom_link_plan_options_t invalid_options = {};
-    invalid_options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    invalid_options.mode = LOOM_LINK_PLAN_LINK;
     invalid_options.root_facets = {1, &invalid_root};
     PlanPtr invalid_plan;
     IREE_EXPECT_STATUS_IS(
@@ -465,7 +467,7 @@ TEST_F(LinkPlannerTest,
         /*.kind=*/LOOM_LINK_SYMBOL_FACET_COMMAND_IMPLEMENTATION,
     };
     loom_link_plan_options_t implementation_options = {};
-    implementation_options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    implementation_options.mode = LOOM_LINK_PLAN_LINK;
     implementation_options.root_facets = {1, &implementation_root};
     PlanPtr implementation_plan = BuildPlan(index, &implementation_options);
     EXPECT_TRUE(ContainsSymbol(implementation_plan.get(), root));
@@ -537,7 +539,7 @@ TEST_F(LinkPlannerTest, InterleavedKernelFacetUpgradesPreservePerSymbolChains) {
         },
     };
     loom_link_plan_options_t options = {};
-    options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    options.mode = LOOM_LINK_PLAN_LINK;
     options.root_facets.count = IREE_ARRAYSIZE(roots);
     options.root_facets.values = roots;
     PlanPtr plan = BuildPlan(index, &options);
@@ -596,7 +598,7 @@ TEST_F(LinkPlannerTest, KernelReferencesSelectOnlyTheirRequiredFacets) {
   auto verify_index = [&](const loom_link_module_index_t* index) {
     iree_string_view_t roots[] = {IREE_SV("@entry")};
     loom_link_plan_options_t options = {
-        /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+        /*.mode=*/LOOM_LINK_PLAN_LINK,
         /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
         /*.include_input_exports=*/false,
         /*.unresolved_policy=*/LOOM_LINK_PLAN_UNRESOLVED_ERROR,
@@ -725,16 +727,16 @@ TEST_F(LinkPlannerTest, KernelReferencesSelectOnlyTheirRequiredFacets) {
   verify_index(bytecode_index.get());
 }
 
-TEST_F(LinkPlannerTest, SelectiveRootIgnoresAvailabilityReferences) {
+TEST_F(LinkPlannerTest, LinkRootIgnoresAvailabilityReferences) {
   loom_module_t* module = Parse(Fixture(
-      IREE_SV("selective_root_ignores_availability_references_module.loom")));
+      IREE_SV("link_root_ignores_availability_references_module.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), module, IREE_SV("input"),
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
@@ -751,11 +753,11 @@ TEST_F(LinkPlannerTest, SelectiveRootIgnoresAvailabilityReferences) {
   EXPECT_FALSE(ContainsSymbol(plan.get(), available));
 }
 
-TEST_F(LinkPlannerTest, SelectiveBytecodePlanningUsesSerializedDependencies) {
+TEST_F(LinkPlannerTest, LinkBytecodePlanningUsesSerializedDependencies) {
   loom_module_t* used = Parse(Fixture(IREE_SV(
-      "selective_bytecode_planning_uses_serialized_dependencies_used.loom")));
+      "link_bytecode_planning_uses_serialized_dependencies_used.loom")));
   loom_module_t* unused = Parse(Fixture(IREE_SV(
-      "selective_bytecode_planning_uses_serialized_dependencies_unused.loom")));
+      "link_bytecode_planning_uses_serialized_dependencies_unused.loom")));
   std::vector<uint8_t> used_bytes = WriteModule(used);
   std::vector<uint8_t> unused_bytes = WriteModule(unused);
 
@@ -790,7 +792,7 @@ TEST_F(LinkPlannerTest, SelectiveBytecodePlanningUsesSerializedDependencies) {
 
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
@@ -809,13 +811,13 @@ TEST_F(LinkPlannerTest, SelectiveBytecodePlanningUsesSerializedDependencies) {
   EXPECT_EQ(unused_module->materialized_module, nullptr);
 }
 
-TEST_F(LinkPlannerTest, SelectiveApplyReportsBytecodeFamilyDemand) {
+TEST_F(LinkPlannerTest, LinkApplyReportsBytecodeFamilyDemand) {
   loom_module_t* harness = Parse(Fixture(
-      IREE_SV("selective_apply_reports_bytecode_family_demand_harness.loom")));
-  loom_module_t* used = Parse(Fixture(
-      IREE_SV("selective_apply_reports_bytecode_family_demand_used.loom")));
+      IREE_SV("link_apply_reports_bytecode_family_demand_harness.loom")));
+  loom_module_t* used = Parse(
+      Fixture(IREE_SV("link_apply_reports_bytecode_family_demand_used.loom")));
   loom_module_t* unused = Parse(Fixture(
-      IREE_SV("selective_apply_reports_bytecode_family_demand_unused.loom")));
+      IREE_SV("link_apply_reports_bytecode_family_demand_unused.loom")));
   std::vector<uint8_t> used_bytes = WriteModule(used);
   std::vector<uint8_t> unused_bytes = WriteModule(unused);
 
@@ -843,7 +845,7 @@ TEST_F(LinkPlannerTest, SelectiveApplyReportsBytecodeFamilyDemand) {
 
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/
       {
           /*.count=*/IREE_ARRAYSIZE(roots),
@@ -879,16 +881,16 @@ TEST_F(LinkPlannerTest, SelectiveApplyReportsBytecodeFamilyDemand) {
   EXPECT_EQ(unused_module->materialized_module, nullptr);
 }
 
-TEST_F(LinkPlannerTest, SelectiveRootMayNameUniquePrivateSymbol) {
-  loom_module_t* module = Parse(Fixture(
-      IREE_SV("selective_root_may_name_unique_private_symbol_module.loom")));
+TEST_F(LinkPlannerTest, LinkRootMayNameUniquePrivateSymbol) {
+  loom_module_t* module = Parse(
+      Fixture(IREE_SV("link_root_may_name_unique_private_symbol_module.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), module, IREE_SV("input"),
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
@@ -906,12 +908,12 @@ TEST_F(LinkPlannerTest, SelectiveRootMayNameUniquePrivateSymbol) {
   EXPECT_TRUE(ContainsSymbol(plan.get(), helper));
 }
 
-TEST_F(LinkPlannerTest, SelectiveImportFreeDeclarationPullsConcreteDefinition) {
+TEST_F(LinkPlannerTest, LinkImportFreeDeclarationPullsConcreteDefinition) {
   const iree_string_view_t harness_source =
-      Fixture(IREE_SV("selective_import_free_declaration_pulls_concrete_"
+      Fixture(IREE_SV("link_import_free_declaration_pulls_concrete_"
                       "definition_harness_source.loom"));
   const iree_string_view_t library_source =
-      Fixture(IREE_SV("selective_import_free_declaration_pulls_concrete_"
+      Fixture(IREE_SV("link_import_free_declaration_pulls_concrete_"
                       "definition_library_source.loom"));
   loom_module_t* harness = Parse(harness_source);
   loom_module_t* library = Parse(library_source);
@@ -921,7 +923,7 @@ TEST_F(LinkPlannerTest, SelectiveImportFreeDeclarationPullsConcreteDefinition) {
   auto verify_index = [&](const loom_link_module_index_t* index) {
     iree_string_view_t roots[] = {IREE_SV("@entry")};
     loom_link_plan_options_t options = {
-        /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+        /*.mode=*/LOOM_LINK_PLAN_LINK,
         /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
     };
     PlanPtr plan = BuildPlan(index, &options);
@@ -987,11 +989,11 @@ TEST_F(LinkPlannerTest, SelectiveImportFreeDeclarationPullsConcreteDefinition) {
   verify_index(bytecode_index.get());
 }
 
-TEST_F(LinkPlannerTest, SelectiveTargetRequirementUsesConcreteEnvironment) {
+TEST_F(LinkPlannerTest, LinkTargetRequirementUsesConcreteEnvironment) {
   loom_module_t* harness = Parse(Fixture(IREE_SV(
-      "selective_target_requirement_uses_concrete_environment_harness.loom")));
+      "link_target_requirement_uses_concrete_environment_harness.loom")));
   loom_module_t* library = Parse(Fixture(IREE_SV(
-      "selective_target_requirement_uses_concrete_environment_library.loom")));
+      "link_target_requirement_uses_concrete_environment_library.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), harness, IREE_SV("harness"),
@@ -1000,7 +1002,7 @@ TEST_F(LinkPlannerTest, SelectiveTargetRequirementUsesConcreteEnvironment) {
                   LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
@@ -1023,16 +1025,16 @@ TEST_F(LinkPlannerTest, SelectiveTargetRequirementUsesConcreteEnvironment) {
   EXPECT_TRUE(ContainsSymbol(plan.get(), target_def));
 }
 
-TEST_F(LinkPlannerTest, SelectiveTargetRequirementMayRemainUnbound) {
+TEST_F(LinkPlannerTest, LinkTargetRequirementMayRemainUnbound) {
   loom_module_t* harness = Parse(Fixture(
-      IREE_SV("selective_target_requirement_may_remain_unbound_harness.loom")));
+      IREE_SV("link_target_requirement_may_remain_unbound_harness.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), harness, IREE_SV("harness"),
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
@@ -1043,12 +1045,12 @@ TEST_F(LinkPlannerTest, SelectiveTargetRequirementMayRemainUnbound) {
   EXPECT_EQ(loom_link_plan_symbol_count(plan.get()), 2u);
 }
 
-TEST_F(LinkPlannerTest, SelectiveDeclarationRejectsPrivateLibraryDefinition) {
+TEST_F(LinkPlannerTest, LinkDeclarationRejectsPrivateLibraryDefinition) {
   loom_module_t* harness =
-      Parse(Fixture(IREE_SV("selective_declaration_rejects_private_library_"
+      Parse(Fixture(IREE_SV("link_declaration_rejects_private_library_"
                             "definition_harness.loom")));
   loom_module_t* library =
-      Parse(Fixture(IREE_SV("selective_declaration_rejects_private_library_"
+      Parse(Fixture(IREE_SV("link_declaration_rejects_private_library_"
                             "definition_library.loom")));
 
   IndexPtr index = CreateIndex();
@@ -1058,7 +1060,7 @@ TEST_F(LinkPlannerTest, SelectiveDeclarationRejectsPrivateLibraryDefinition) {
                   LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan;
@@ -1066,11 +1068,11 @@ TEST_F(LinkPlannerTest, SelectiveDeclarationRejectsPrivateLibraryDefinition) {
                         BuildPlanStatus(index.get(), &options, &plan));
 }
 
-TEST_F(LinkPlannerTest, SelectiveDeclarationRejectsWrongSymbolInterface) {
-  loom_module_t* harness = Parse(Fixture(IREE_SV(
-      "selective_declaration_rejects_wrong_symbol_interface_harness.loom")));
-  loom_module_t* library = Parse(Fixture(IREE_SV(
-      "selective_declaration_rejects_wrong_symbol_interface_library.loom")));
+TEST_F(LinkPlannerTest, LinkDeclarationRejectsWrongSymbolInterface) {
+  loom_module_t* harness = Parse(Fixture(
+      IREE_SV("link_declaration_rejects_wrong_symbol_interface_harness.loom")));
+  loom_module_t* library = Parse(Fixture(
+      IREE_SV("link_declaration_rejects_wrong_symbol_interface_library.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), harness, IREE_SV("harness"),
@@ -1079,7 +1081,7 @@ TEST_F(LinkPlannerTest, SelectiveDeclarationRejectsWrongSymbolInterface) {
                   LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan;
@@ -1087,11 +1089,11 @@ TEST_F(LinkPlannerTest, SelectiveDeclarationRejectsWrongSymbolInterface) {
                         BuildPlanStatus(index.get(), &options, &plan));
 }
 
-TEST_F(LinkPlannerTest, SelectiveDeclarationMayUsePrivateOwnerDefinition) {
+TEST_F(LinkPlannerTest, LinkDeclarationMayUsePrivateOwnerDefinition) {
   loom_module_t* harness = Parse(Fixture(IREE_SV(
-      "selective_declaration_may_use_private_owner_definition_harness.loom")));
+      "link_declaration_may_use_private_owner_definition_harness.loom")));
   loom_module_t* sibling_source =
-      Parse(Fixture(IREE_SV("selective_declaration_may_use_private_owner_"
+      Parse(Fixture(IREE_SV("link_declaration_may_use_private_owner_"
                             "definition_sibling_source.loom")));
 
   IndexPtr index = CreateIndex();
@@ -1101,7 +1103,7 @@ TEST_F(LinkPlannerTest, SelectiveDeclarationMayUsePrivateOwnerDefinition) {
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
@@ -1132,7 +1134,7 @@ TEST_F(LinkPlannerTest, UnresolvedDeclarationIgnoresPrivateLibraryDefinition) {
   AddMaterialized(index.get(), library, IREE_SV("library"),
                   LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{},
       /*.include_input_exports=*/true,
       /*.unresolved_policy=*/LOOM_LINK_PLAN_UNRESOLVED_ALLOW,
@@ -1168,7 +1170,7 @@ TEST_F(LinkPlannerTest, RuntimeImportDoesNotResolveFromLoomLibrary) {
                   LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
@@ -1183,11 +1185,11 @@ TEST_F(LinkPlannerTest, RuntimeImportDoesNotResolveFromLoomLibrary) {
   EXPECT_FALSE(ContainsSymbol(plan.get(), library_def));
 }
 
-TEST_F(LinkPlannerTest, SelectiveApplyRequiresExplicitProviderSelection) {
-  loom_module_t* harness = Parse(Fixture(IREE_SV(
-      "selective_apply_requires_explicit_provider_selection_harness.loom")));
-  loom_module_t* library = Parse(Fixture(IREE_SV(
-      "selective_apply_requires_explicit_provider_selection_library.loom")));
+TEST_F(LinkPlannerTest, LinkApplyRequiresExplicitProviderSelection) {
+  loom_module_t* harness = Parse(Fixture(
+      IREE_SV("link_apply_requires_explicit_provider_selection_harness.loom")));
+  loom_module_t* library = Parse(Fixture(
+      IREE_SV("link_apply_requires_explicit_provider_selection_library.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), harness, IREE_SV("harness"),
@@ -1196,7 +1198,7 @@ TEST_F(LinkPlannerTest, SelectiveApplyRequiresExplicitProviderSelection) {
                   LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/
       {
           /*.count=*/IREE_ARRAYSIZE(roots),
@@ -1306,7 +1308,7 @@ TEST_F(LinkPlannerTest, SelectedProvidersExposeTransitiveDiamondDemands) {
       right_provider->ordinal,
   };
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   options.selected_template_providers = {
@@ -1368,7 +1370,7 @@ TEST_F(LinkPlannerTest, SelectedProviderOrdinalsAreValidated) {
 
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   options.selected_template_providers = {
@@ -1390,13 +1392,13 @@ TEST_F(LinkPlannerTest, SelectedProviderOrdinalsAreValidated) {
                         BuildPlanStatus(index.get(), &options, &plan));
 }
 
-TEST_F(LinkPlannerTest, SelectiveRootIgnoresUnreachableDuplicateDefinition) {
+TEST_F(LinkPlannerTest, LinkRootIgnoresUnreachableDuplicateDefinition) {
   loom_module_t* harness = Parse(Fixture(IREE_SV(
-      "selective_root_ignores_unreachable_duplicate_definition_harness.loom")));
+      "link_root_ignores_unreachable_duplicate_definition_harness.loom")));
   loom_module_t* first = Parse(Fixture(IREE_SV(
-      "selective_root_ignores_unreachable_duplicate_definition_first.loom")));
+      "link_root_ignores_unreachable_duplicate_definition_first.loom")));
   loom_module_t* second = Parse(Fixture(IREE_SV(
-      "selective_root_ignores_unreachable_duplicate_definition_second.loom")));
+      "link_root_ignores_unreachable_duplicate_definition_second.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), harness, IREE_SV("harness"),
@@ -1407,7 +1409,7 @@ TEST_F(LinkPlannerTest, SelectiveRootIgnoresUnreachableDuplicateDefinition) {
                   LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
@@ -1430,7 +1432,7 @@ TEST_F(LinkPlannerTest, InputExportRejectsAmbiguousLibraryDefinitions) {
       "input_export_rejects_ambiguous_library_definitions_second.loom")));
 
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{},
       /*.include_input_exports=*/true,
   };
@@ -1457,7 +1459,7 @@ TEST_F(LinkPlannerTest, ExplicitLibraryRootRejectsAmbiguousDefinitions) {
       "explicit_library_root_rejects_ambiguous_definitions_second.loom")));
   iree_string_view_t roots[] = {IREE_SV("@same")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
 
@@ -1499,7 +1501,7 @@ TEST_F(LinkPlannerTest, OwnerDefinitionDoesNotExtractLibraryAlternatives) {
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
@@ -1514,16 +1516,16 @@ TEST_F(LinkPlannerTest, OwnerDefinitionDoesNotExtractLibraryAlternatives) {
   EXPECT_EQ(loom_link_plan_symbol_count(plan.get()), 3u);
 }
 
-TEST_F(LinkPlannerTest, SelectiveReportsMissingRoot) {
+TEST_F(LinkPlannerTest, LinkReportsMissingRoot) {
   loom_module_t* module =
-      Parse(Fixture(IREE_SV("selective_reports_missing_root_module.loom")));
+      Parse(Fixture(IREE_SV("link_reports_missing_root_module.loom")));
 
   IndexPtr index = CreateIndex();
   AddMaterialized(index.get(), module, IREE_SV("input"),
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   iree_string_view_t roots[] = {IREE_SV("@missing")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
 
@@ -1550,7 +1552,7 @@ TEST_F(LinkPlannerTest, StripPolicyControlsRequiredDependencies) {
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   iree_string_view_t stripped_name = IREE_SV("helper");
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
       /*.include_input_exports=*/{},
       /*.unresolved_policy=*/{},
@@ -1599,7 +1601,7 @@ TEST_F(LinkPlannerTest, TestSymbolStripPolicyRemovesBytecodeSymbols) {
   EXPECT_EQ(indexed_module->materialized_module, nullptr);
 
   loom_link_plan_options_t strip_options = {
-      /*.mode=*/LOOM_LINK_PLAN_ARCHIVE,
+      /*.mode=*/LOOM_LINK_PLAN_MERGE,
       /*.root_symbols=*/{},
       /*.include_input_exports=*/{},
       /*.unresolved_policy=*/{},
@@ -1628,7 +1630,7 @@ TEST_F(LinkPlannerTest, KeepTestSymbolPolicyPreservesDependencies) {
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   iree_string_view_t roots[] = {IREE_SV("@kernel_case")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
   PlanPtr plan = BuildPlan(index.get(), &options);
@@ -1650,7 +1652,7 @@ TEST_F(LinkPlannerTest, TestSymbolStripPolicyRejectsStrippedRoots) {
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   iree_string_view_t roots[] = {IREE_SV("@kernel_case")};
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
       /*.include_input_exports=*/{},
       /*.unresolved_policy=*/{},
@@ -1670,7 +1672,7 @@ TEST_F(LinkPlannerTest, ExportedRootPolicySelectsExportsAndDependencies) {
   AddMaterialized(index.get(), module, IREE_SV("input"),
                   LOOM_LINK_PROVIDER_ROLE_INPUT);
   loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{},
       /*.include_input_exports=*/true,
   };

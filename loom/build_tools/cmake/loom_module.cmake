@@ -24,7 +24,7 @@ function(_loom_link_input_paths OUTPUT_PATHS OUTPUT_TARGETS)
   set(${OUTPUT_TARGETS} ${_TARGETS} PARENT_SCOPE)
 endfunction()
 
-function(loom_link_module)
+function(loom_module)
   cmake_parse_arguments(
     _RULE
     "INCLUDE_INPUT_EXPORTS;STRIP_CHECK;REQUIRE_RESOLVED_CONFIG"
@@ -34,16 +34,39 @@ function(loom_link_module)
   )
 
   if(NOT _RULE_NAME)
-    message(FATAL_ERROR "loom_link_module requires NAME")
+    message(FATAL_ERROR "loom_module requires NAME")
   endif()
   if(NOT _RULE_SRCS)
-    message(FATAL_ERROR "loom_link_module requires SRCS")
+    message(FATAL_ERROR "loom_module requires SRCS")
   endif()
   if(NOT _RULE_MODE)
-    set(_RULE_MODE "archive")
+    set(_RULE_MODE "merge")
+  endif()
+  if(NOT _RULE_MODE STREQUAL "merge" AND NOT _RULE_MODE STREQUAL "link")
+    message(FATAL_ERROR
+      "loom_module ${_RULE_NAME} has unsupported MODE ${_RULE_MODE}"
+    )
+  endif()
+  if(_RULE_MODE STREQUAL "merge" AND
+     (_RULE_ROOTS OR _RULE_INCLUDE_INPUT_EXPORTS))
+    message(FATAL_ERROR
+      "loom_module ${_RULE_NAME} merge mode does not accept roots"
+    )
+  endif()
+  if(_RULE_MODE STREQUAL "link" AND
+     NOT _RULE_ROOTS AND NOT _RULE_INCLUDE_INPUT_EXPORTS)
+    message(FATAL_ERROR
+      "loom_module ${_RULE_NAME} link mode requires ROOTS or INCLUDE_INPUT_EXPORTS"
+    )
   endif()
   if(NOT _RULE_OUTPUT_FORMAT)
     set(_RULE_OUTPUT_FORMAT "text")
+  endif()
+  if(NOT _RULE_OUTPUT_FORMAT STREQUAL "text" AND
+     NOT _RULE_OUTPUT_FORMAT STREQUAL "bc")
+    message(FATAL_ERROR
+      "loom_module ${_RULE_NAME} has unsupported OUTPUT_FORMAT ${_RULE_OUTPUT_FORMAT}"
+    )
   endif()
   if(NOT _RULE_OUTPUT)
     if(_RULE_OUTPUT_FORMAT STREQUAL "bc")

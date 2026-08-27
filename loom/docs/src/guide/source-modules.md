@@ -83,7 +83,7 @@ choices.
 
 Reachability remains independent of availability. Supplying a library does not
 make all of its definitions live. If `@project_layer` is unreachable, neither
-its declaration nor its implementation enters a selective product. A strict
+its declaration nor its implementation enters a linked product. A strict
 final link rejects a reachable exact declaration with no definition. A link
 that allows unresolved symbols retains the declaration in a standalone
 relocatable module for another explicit link boundary.
@@ -238,7 +238,7 @@ build regenerates the displayed Low products from that same path.
 
 Use [Format and verify source](../workflows/format-and-verify.md) for the complete
 `loom-format` task contract and [Link and package
-modules](../workflows/link-and-package.md) for archive, selective-link, config,
+modules](../workflows/link-and-package.md) for merge, link, config,
 and plan commands.
 
 Continue with [Values, types, and shapes](values-types-shapes.md), then follow

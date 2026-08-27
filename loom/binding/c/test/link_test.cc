@@ -447,6 +447,7 @@ LinkArtifact LinkLibrarySourcesToBytecode(
       /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_LINK,
       /*.root_symbols=*/roots,
       /*.root_symbol_count=*/IREE_ARRAYSIZE(roots),
       /*.flags=*/flags,
@@ -586,7 +587,7 @@ std::vector<uint8_t> WriteBytecodeModule(const char* source_text) {
   return bytes;
 }
 
-TEST(LinkTest, LinksSelectiveTextRoots) {
+TEST(LinkTest, LinksLinkTextRoots) {
   ContextPtr context = CreateContext();
   BuilderPtr builder = CreateBuilder(context.get());
   SourcePtr harness = CreateTextSource("harness.loom", R"(
@@ -628,6 +629,7 @@ func.def public @unused_library(%x: i32) -> (i32) {
       /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_LINK,
       /*.root_symbols=*/roots,
       /*.root_symbol_count=*/1,
   };
@@ -845,7 +847,7 @@ func.def public @c(%x: i32) -> (i32) {
   EXPECT_TRUE(ModuleHasSymbol(final_ab_internal, "c"));
 }
 
-TEST(LinkTest, SelectiveRootPullsBytecodeApplyProviders) {
+TEST(LinkTest, LinkRootPullsBytecodeApplyProviders) {
   ContextPtr context = CreateContext();
   BuilderPtr builder = CreateBuilder(context.get());
   SourcePtr harness = CreateTextSource("harness.loom", R"(
@@ -897,6 +899,7 @@ template.def<@demo.unused> @unused_provider(%x: i32) -> (i32) {
       /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_LINK,
       /*.root_symbols=*/roots,
       /*.root_symbol_count=*/1,
   };
@@ -950,6 +953,7 @@ func.def public @entry() -> (index) {
       /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_LINK,
       /*.root_symbols=*/roots,
       /*.root_symbol_count=*/1,
       /*.flags=*/0,
@@ -1037,6 +1041,7 @@ func.def public @targetless() {
       /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_MERGE,
       /*.root_symbols=*/nullptr,
       /*.root_symbol_count=*/0,
   };
@@ -1120,6 +1125,7 @@ template.def<@demo.capi_selected> priority(1) @fallback_provider(%value: i32) ->
       /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_LINK,
       /*.root_symbols=*/roots,
       /*.root_symbol_count=*/1,
   };
@@ -1263,7 +1269,7 @@ func.def public @from_bytecode(%x: i32) -> (i32) {
   SourcePtr source = CreateSource(LOOMC_SOURCE_FORMAT_BYTECODE, "module.loombc",
                                   bytecode.data(), bytecode.size());
   AddSource(builder.get(), source.get(), "bytecode",
-            LOOMC_LINK_PROVIDER_ROLE_LIBRARY);
+            LOOMC_LINK_PROVIDER_ROLE_INPUT);
 
   LinkIndexPtr link_index;
   FinishIndex(builder.get(), &link_index);
@@ -1285,7 +1291,7 @@ func.def public @from_bytecode(%x: i32) -> (i32) {
   EXPECT_TRUE(ModuleHasSymbol(linked_module, "from_bytecode"));
 }
 
-TEST(LinkTest, ArchiveStripRemovesBytecodeTestSymbols) {
+TEST(LinkTest, MergeStripRemovesBytecodeTestSymbols) {
   std::vector<uint8_t> bytecode = WriteBytecodeModule(R"(
 func.def public @kernel(%x: i32) -> (i32) {
   func.return %x : i32
@@ -1317,6 +1323,7 @@ check.benchmark<@kernel_case> @kernel_bench
       /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_MERGE,
       /*.root_symbols=*/nullptr,
       /*.root_symbol_count=*/0,
       /*.flags=*/LOOMC_LINK_FLAG_STRIP_TEST_SYMBOLS,
@@ -1350,7 +1357,7 @@ func.def public @from_bytecode() -> (index) {
   SourcePtr source = CreateSource(LOOMC_SOURCE_FORMAT_BYTECODE, "module.loombc",
                                   bytecode.data(), bytecode.size());
   AddSource(builder.get(), source.get(), "bytecode",
-            LOOMC_LINK_PROVIDER_ROLE_LIBRARY);
+            LOOMC_LINK_PROVIDER_ROLE_INPUT);
 
   LinkIndexPtr link_index;
   FinishIndex(builder.get(), &link_index);
@@ -1371,6 +1378,7 @@ func.def public @from_bytecode() -> (index) {
       /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_MERGE,
       /*.root_symbols=*/nullptr,
       /*.root_symbol_count=*/0,
       /*.flags=*/0,
@@ -1439,6 +1447,7 @@ func.def public @specialized_rgb() -> (index) {
       /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_LINK,
       /*.root_symbols=*/roots,
       /*.root_symbol_count=*/1,
       /*.flags=*/0,
@@ -1505,6 +1514,7 @@ func.def public @unused() -> (index) {
       /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_LINK,
       /*.root_symbols=*/roots,
       /*.root_symbol_count=*/1,
       /*.flags=*/0,
@@ -1555,6 +1565,7 @@ func.def public @entry(%x: i32) -> (i32) {
       /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_MERGE,
       /*.root_symbols=*/nullptr,
       /*.root_symbol_count=*/0,
       /*.flags=*/0,
@@ -1600,6 +1611,7 @@ func.def public @entry() -> (index) {
       /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
+      /*.mode=*/LOOMC_LINK_MODE_MERGE,
       /*.root_symbols=*/nullptr,
       /*.root_symbol_count=*/0,
       /*.flags=*/0,

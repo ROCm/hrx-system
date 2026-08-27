@@ -96,8 +96,8 @@ disagree about which ABI carries a value.
 
 ## Launch configuration stays with its caller
 
-Command preparation does not open a selected kernel implementation. Selective
-linking projects only its logical contract and pure launch-configuration
+Command preparation does not open a selected kernel implementation. Linking
+projects only its logical contract and pure launch-configuration
 facet, then rewrites each workload-level launch at the same caller-owned CFG
 site:
 
@@ -191,7 +191,7 @@ and then sees parameter keys such as `blk.0.projection.weight` and
 `blk.1.projection.weight`. The `%element_count` specialization remains a
 separate value that controls each kernel workload; it is not promoted to
 configuration merely because every layer consumes it. A host may keep the
-program parameterized in a source archive, but it fixes that value before
+program parameterized in a source module, but it fixes that value before
 preparing a direct portable command artifact.
 
 ## Compose programs through exact contracts
@@ -202,7 +202,7 @@ records the exact specialization and binding contract required by one source
 module. [`command.program.launch`](../reference/dialects/command/ops/program-launch.md)
 provides both groups explicitly at each call site.
 
-The model module depends on the layer archive and composes it in two
+The model module depends on the layer library and composes it in two
 different ways:
 
 **Source:** [`loom/docs/examples/guide/command-programs/model.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/guide/command-programs/model.loom)
@@ -212,11 +212,11 @@ different ways:
 ```
 
 The declaration does not keep a definition live and the linker does not guess
-which undeclared symbol a call intended. Linking the `model` archive against
-the `layer` archive resolves the exact declaration; omitting that dependency
+which undeclared symbol a call intended. Linking the `model` module against
+the `layer` library resolves the exact declaration; omitting that dependency
 leaves an unresolved program symbol.
 
-Its Bazel target supplies the complete layer archive. The exact declaration is
+Its Bazel target supplies the complete layer module. The exact declaration is
 resolved from the unique exported program definition in that explicit library
 universe.
 The [linking workflow](../workflows/link-and-package.md#link-transitive-dependencies-incrementally)
@@ -271,7 +271,7 @@ opaque device ABIs.
 Preparing one or more public command roots performs a bounded sequence of
 compiler operations:
 
-1. Selectively link the dependency closure of the requested roots.
+1. Link the dependency closure of the requested roots.
 2. Flatten reachable command-program composition.
 3. Project each referenced kernel's logical contract and pure launch
    configuration without opening its implementation.
@@ -304,7 +304,7 @@ The prepared command plan owns three complementary products:
 
 ## Keep the deployment boundary honest
 
-The examples in this chapter format, verify, link, and archive as Loom
+The examples in this chapter format, verify, link, and package Loom
 libraries. The compiler also has the target-neutral command preparation and
 lowering path described above. The installed tools do not yet expose one
 complete public command that prepares, materializes, binds, and issues a
@@ -326,12 +326,12 @@ defined.
 | A launch binding is rejected | The command ABI accepts buffer roots only. |
 | A parameter key cannot be prepared | A `{}` substitution did not become an exact nonnegative index. |
 | A parameter view has unknown storage size | Its type does not provide an exact byte footprint. |
-| A child program remains unresolved | Its module omitted the exact declaration or archive dependency. |
+| A child program remains unresolved | Its module omitted the exact declaration or library dependency. |
 | Two supposedly parallel commands race | The source placed a hazard inside `command.concurrent`. |
 | Composition preparation reports a cycle | Reachable command programs recursively launch one another. |
 
 [Source modules and canonical text](source-modules.md) explains declaration
-and archive ownership. [Facts and specialization](facts-and-specialization.md)
+and library ownership. [Facts and specialization](facts-and-specialization.md)
 shows how configuration, assumptions, and target facts constrain the values
 used here. [Compile artifacts](../workflows/compile-artifacts.md) covers the
 public per-kernel compilation workflow available today.

@@ -63,7 +63,7 @@ class ProgramPlanFixture {
         /*.kind=*/LOOM_LINK_SYMBOL_FACET_COMMAND_IMPLEMENTATION,
     };
     loom_link_plan_options_t options = {};
-    options.mode = LOOM_LINK_PLAN_SELECTIVE;
+    options.mode = LOOM_LINK_PLAN_LINK;
     options.root_facets = {1, &root_facet};
     options.dependency_policy = LOOM_LINK_PLAN_DEPENDENCY_REQUESTED_FACETS;
     CheckStatus(loom_link_plan_build(index_, &options, iree_allocator_system(),

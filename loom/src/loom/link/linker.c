@@ -59,7 +59,7 @@ typedef struct loom_linker_symbol_set_index_t {
   iree_host_size_t use_capacity;
 } loom_linker_symbol_set_index_t;
 
-// Transient selective-link state for one target symbol.
+// Transient sparse-link state for one target symbol.
 typedef struct loom_linker_planned_symbol_t {
   // Requested outward disposition accumulated across selected sources.
   loom_linker_symbol_output_t output;
@@ -84,7 +84,7 @@ struct loom_linker_t {
   iree_host_size_t private_name_ordinal;
   // Symbol-set attributes indexed by referenced target symbol.
   loom_linker_symbol_set_index_t symbol_set_index;
-  // Selective-plan state indexed by target symbol.
+  // Sparse-plan state indexed by target symbol.
   struct {
     // Per-target-symbol construction identity and outward disposition.
     loom_linker_planned_symbol_t* symbols;
@@ -143,7 +143,7 @@ typedef struct loom_linker_source_t {
   uint8_t* live_symbols;
   // Source symbols whose outgoing dependency edges have been scanned.
   uint8_t* scanned_symbols;
-  // Source-module dependency graph. Built only for selective adds.
+  // Source-module dependency graph. Built only for root-filtered adds.
   loom_symbol_reference_table_t reference_table;
   // Lazily initialized source-to-target remap table.
   loom_ir_remap_t remap;
@@ -152,7 +152,7 @@ typedef struct loom_linker_source_t {
   // Exact source-symbol selection state.
   loom_linker_exact_selection_t exact;
   // True when root filtering is active for this add operation.
-  bool selective;
+  bool root_filtered;
 } loom_linker_source_t;
 
 static iree_string_view_t loom_link_target_symbol_name(
@@ -593,10 +593,10 @@ static iree_status_t loom_linker_remap_symbol(
   loom_linker_source_t* source = (loom_linker_source_t*)user_data;
   IREE_RETURN_IF_ERROR(loom_linker_validate_symbol_remap(
       source, source_module, target_module, source_ref));
-  if (source->selective && !source->live_symbols[source_ref.symbol_id]) {
+  if (source->root_filtered && !source->live_symbols[source_ref.symbol_id]) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "selective link missed reachable source symbol ref {module=0, "
+        "root-filtered link missed reachable source symbol ref {module=0, "
         "symbol=%u}",
         (unsigned)source_ref.symbol_id);
   }
@@ -1429,7 +1429,7 @@ static iree_status_t loom_linker_mark_template_providers_live(
 }
 
 typedef struct loom_linker_apply_dependency_walk_t {
-  // Source module currently being selectively linked.
+  // Source module currently being linked through a root filter.
   loom_linker_source_t* source;
 
   // Module containing the template.apply operations being scanned.
@@ -1629,14 +1629,14 @@ static iree_status_t loom_linker_clone_module_body(
     const bool has_symbol_ref =
         loom_link_op_symbol_ref(source->module, source_op, &source_ref);
     if (!has_symbol_ref) {
-      if (source->selective) continue;
+      if (source->root_filtered) continue;
       loom_op_t* cloned_op = NULL;
       IREE_RETURN_IF_ERROR(loom_linker_clone_source_op(
           source, source_op, /*before_op=*/NULL, &cloned_op));
       continue;
     }
 
-    if (source->selective && !source->live_symbols[source_ref.symbol_id]) {
+    if (source->root_filtered && !source->live_symbols[source_ref.symbol_id]) {
       continue;
     }
     loom_symbol_ref_t target_ref = loom_symbol_ref_null();
@@ -1784,7 +1784,7 @@ iree_status_t loom_linker_add_module(loom_linker_t* linker,
       .module = source_module,
       .arena = &source_arena,
       .source_symbol_count = source_module->symbols.count,
-      .selective = options && options->root_symbols.count != 0,
+      .root_filtered = options && options->root_symbols.count != 0,
   };
   source.symbol_remap =
       loom_ir_remap_symbol_callback_make(loom_linker_remap_symbol, &source);
@@ -1800,30 +1800,30 @@ iree_status_t loom_linker_add_module(loom_linker_t* linker,
       source.target_symbols[i] = loom_symbol_ref_null();
     }
   }
-  if (iree_status_is_ok(status) && source.selective) {
+  if (iree_status_is_ok(status) && source.root_filtered) {
     status = iree_arena_allocate_array(
         &source_arena, source.source_symbol_count, sizeof(*source.live_symbols),
         (void**)&source.live_symbols);
   }
-  if (iree_status_is_ok(status) && source.selective) {
+  if (iree_status_is_ok(status) && source.root_filtered) {
     status = iree_arena_allocate_array(
         &source_arena, source.source_symbol_count,
         sizeof(*source.scanned_symbols), (void**)&source.scanned_symbols);
   }
-  if (iree_status_is_ok(status) && source.selective) {
+  if (iree_status_is_ok(status) && source.root_filtered) {
     memset(source.live_symbols, 0,
            source.source_symbol_count * sizeof(*source.live_symbols));
     memset(source.scanned_symbols, 0,
            source.source_symbol_count * sizeof(*source.scanned_symbols));
     status = loom_linker_mark_root_symbols_live(&source, options);
   }
-  if (iree_status_is_ok(status) && source.selective) {
+  if (iree_status_is_ok(status) && source.root_filtered) {
     status = loom_linker_mark_existing_target_anchors_live(&source);
   }
-  if (iree_status_is_ok(status) && source.selective) {
+  if (iree_status_is_ok(status) && source.root_filtered) {
     status = loom_linker_mark_existing_target_apply_dependencies_live(&source);
   }
-  if (iree_status_is_ok(status) && source.selective) {
+  if (iree_status_is_ok(status) && source.root_filtered) {
     status = loom_linker_resolve_live_symbols(&source);
   }
   if (iree_status_is_ok(status)) {

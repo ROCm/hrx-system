@@ -34,10 +34,11 @@ and never uses a provider path as a matching rule. The provider library carries
 `amdgpu.target<gfx1100> @gfx1100` and `amdgpu.target<gfx1200> @gfx1200` records
 so target-specialized definitions can state their exact applicability.
 
-A closed selective link uses the facts available at that link boundary. With
+A closed link uses the facts available at that link boundary. With
 this targetless root, it chooses `@scale_i32_fallback` and omits the target
-records and target-specific alternatives. An archive preserves the full
-explicit provider universe. Compiling that archive with `--target=gfx1100`
+records and target-specific alternatives. A merge of the root and provider
+modules preserves the full explicit universe. Compiling that module with
+`--target=gfx1100`
 then specializes the requested kernel to a materialized or reused `@gfx1100`
 target record and resolves `template.apply<@authoring.link.scale_i32>` against
 that durable target.
@@ -50,7 +51,7 @@ List the indexed symbols before deciding what to link:
 loom-link root.loom --library=providers.loom --list-symbols
 ```
 
-Print the selective link plan for one root:
+Print the link plan for one root:
 
 ```bash
 loom-link root.loom --library=providers.loom \
@@ -122,19 +123,19 @@ loom-link root.loom \
   --output=linked.loombc
 ```
 
-That selective link is closed for the facts currently available and therefore
+That link is closed for the facts currently available and therefore
 contains the portable fallback. It is the shape an embedding API mirrors when
 the current boundary has enough information to choose implementations: add
 root sources, add prebuilt `.loombc` libraries, name the roots, and link to text
 or bytecode depending on the next stage.
 
-When target facts arrive only at compilation, archive the explicit input
-universe instead of prematurely selecting a targetless fallback:
+When target facts arrive only at compilation, merge the explicit input universe
+instead of prematurely selecting a targetless fallback. Both modules are
+positional because both should become part of the output:
 
 ```bash
-loom-link root.loom \
-  --library=providers.loombc \
-  --mode=archive \
+loom-link root.loom providers.loombc \
+  --mode=merge \
   --strip-check \
   --to=bc \
   --output=portable.loombc
@@ -142,7 +143,7 @@ loom-link root.loom \
 
 ## Compiling an AMDGPU Artifact
 
-Compile the archived bytecode with a function specialization target:
+Compile the merged bytecode with a function specialization target:
 
 ```bash
 loom-compile portable.loombc \

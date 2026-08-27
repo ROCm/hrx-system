@@ -1632,6 +1632,7 @@ TEST(TargetTest, RejectsSpecializationOptionsDuringLink) {
       /*.next=*/&target_options,
       /*.link_index=*/link_index.get(),
       /*.module_name=*/loomc_make_cstring_view("linked_jit_module"),
+      /*.mode=*/LOOMC_LINK_MODE_LINK,
       /*.root_symbols=*/nullptr,
       /*.root_symbol_count=*/0,
       /*.flags=*/LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS,
