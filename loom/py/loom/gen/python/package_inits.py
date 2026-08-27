@@ -54,6 +54,10 @@ PACKAGE_INITS = (
         "SPIR-V target-family descriptor and dialect inputs.",
     ),
     PackageInit(
+        "loom/py/loom/target/arch/vm/__init__.py",
+        "VM target-family descriptor and dialect inputs.",
+    ),
+    PackageInit(
         "loom/py/loom/target/arch/wasm/__init__.py",
         "Wasm target descriptor inputs.",
     ),

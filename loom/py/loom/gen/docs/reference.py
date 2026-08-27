@@ -104,6 +104,7 @@ DIALECT_REFERENCE_SPECS = (
     DialectReferenceSpec("spirv", "target"),
     DialectReferenceSpec("x86", "target"),
     DialectReferenceSpec("wasm", "target"),
+    DialectReferenceSpec("vm", "target"),
     DialectReferenceSpec("test", None),
 )
 
