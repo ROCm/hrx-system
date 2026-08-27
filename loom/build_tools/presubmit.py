@@ -174,7 +174,7 @@ def run_generated_artifact_maintenance(
     print("loom presubmit: Checked-in generated artifacts")
     if fix and files_from is not None:
         result = checked_in_artifacts.maintain_checked_in_artifacts(
-            "update", writable_paths=selected_files(files_from)
+            "update", selected_paths=selected_files(files_from)
         )
     else:
         result = checked_in_artifacts.maintain_checked_in_artifacts(

@@ -104,7 +104,7 @@ class LoomPresubmitTest(unittest.TestCase):
             changed_paths,
         )
 
-    def test_generated_artifact_fix_passes_only_selected_paths_as_writable(self):
+    def test_generated_artifact_fix_passes_selected_paths(self):
         selected_paths = ["loom/py/loom/dialect/__init__.py"]
         result = types.SimpleNamespace(ok=True, changed_paths=())
         with (
@@ -127,7 +127,7 @@ class LoomPresubmitTest(unittest.TestCase):
             )
 
         maintain_checked_in_artifacts.assert_called_once_with(
-            "update", writable_paths=selected_paths
+            "update", selected_paths=selected_paths
         )
         stage_changed_paths.assert_called_once_with(
             self.presubmit.PROJECT_NAME,

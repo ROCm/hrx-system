@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -73,6 +74,13 @@ def test_checked_in_artifact_families_register_expected_families() -> None:
         "FP8 numeric conversion witnesses",
     )
     amdgpu_target_config.checked_in_file_set.assert_called_once_with()
+    assert all(family.input_roots for family in families)
+    removed_dialect_path = "loom/py/loom/dialect/module/__init__.py"
+    assert tuple(family.description for family in families if family.is_affected_by((removed_dialect_path,))) == (
+        "Python builder stubs",
+        "C op table artifacts",
+        "TextMate grammars",
+    )
 
 
 def test_registered_artifact_ownership_is_disjoint() -> None:
@@ -86,7 +94,7 @@ def test_registered_artifact_ownership_is_disjoint() -> None:
     assert owners
 
 
-def test_update_selects_only_families_owning_writable_paths() -> None:
+def test_update_selects_family_owning_selected_output() -> None:
     first_family = GeneratedFileFamily(
         description="first",
         regenerate_command="generate first",
@@ -114,7 +122,7 @@ def test_update_selects_only_families_owning_writable_paths() -> None:
             return_value=GeneratedFileMaintenanceResult(True),
         ) as maintain_generated_file_families,
     ):
-        result = checked_in_artifacts.maintain_checked_in_artifacts("update", writable_paths=["generated/second.txt"])
+        result = checked_in_artifacts.maintain_checked_in_artifacts("update", selected_paths=["generated/second.txt"])
 
     assert result.ok
     checked_in_artifact_families.assert_called_once_with(repository_root=mock.sentinel.repository_root)
@@ -123,6 +131,46 @@ def test_update_selects_only_families_owning_writable_paths() -> None:
         (second_family,),
         mode="update",
     )
+
+
+def test_update_regenerates_family_affected_by_deleted_input(
+    tmp_path: Path,
+) -> None:
+    affected_family = GeneratedFileFamily(
+        description="affected",
+        regenerate_command="generate affected",
+        file_set=GeneratedFileSet.from_mapping({"generated/affected.txt": "new affected\n"}),
+        input_roots=("schema/affected",),
+    )
+    unrelated_family = GeneratedFileFamily(
+        description="unrelated",
+        regenerate_command="generate unrelated",
+        file_set=GeneratedFileSet.from_mapping({"generated/unrelated.txt": "new unrelated\n"}),
+        input_roots=("schema/unrelated",),
+    )
+    affected_output = tmp_path / "generated/affected.txt"
+    unrelated_output = tmp_path / "generated/unrelated.txt"
+    affected_output.parent.mkdir(parents=True)
+    affected_output.write_text("old affected\n", encoding="utf-8")
+    unrelated_output.write_text("old unrelated\n", encoding="utf-8")
+    with (
+        mock.patch.object(
+            checked_in_artifacts,
+            "checked_in_artifact_families",
+            return_value=(affected_family, unrelated_family),
+        ),
+        mock.patch.object(
+            checked_in_artifacts._bootstrap,
+            "find_repo_root",
+            return_value=tmp_path,
+        ),
+    ):
+        result = checked_in_artifacts.maintain_checked_in_artifacts("update", selected_paths=["schema/affected/deleted.py"])
+
+    assert result.ok
+    assert result.changed_paths == ("generated/affected.txt",)
+    assert affected_output.read_text(encoding="utf-8") == "new affected\n"
+    assert unrelated_output.read_text(encoding="utf-8") == "old unrelated\n"
 
 
 def test_main_selects_check_and_update_modes() -> None:

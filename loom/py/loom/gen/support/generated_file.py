@@ -85,12 +85,26 @@ class GeneratedFileFamily:
     description: str
     regenerate_command: str
     file_set: GeneratedFileSet
+    input_roots: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.description:
             raise ValueError("generated file family description must not be empty")
         if not self.regenerate_command:
             raise ValueError("generated file family regenerate command must not be empty")
+        validated_input_roots = tuple(_validate_repo_relative_path(path) for path in self.input_roots)
+        if validated_input_roots != tuple(sorted(set(validated_input_roots))):
+            raise ValueError("generated file family input roots must be unique and sorted")
+
+    def is_affected_by(self, paths: Sequence[str]) -> bool:
+        """Returns whether selected paths may change this family's outputs."""
+        owned_paths = set((*self.file_set.output_paths, *self.file_set.obsolete_paths))
+        for path in paths:
+            if path in owned_paths:
+                return True
+            if any(path == root or path.startswith(root + "/") for root in self.input_roots):
+                return True
+        return False
 
 
 def _validate_repo_relative_path(path: str) -> str:

@@ -85,6 +85,35 @@ def test_generated_file_set_rejects_noncanonical_direct_construction() -> None:
         )
 
 
+def test_generated_file_family_matches_owned_outputs_and_input_roots() -> None:
+    family = GeneratedFileFamily(
+        description="example artifacts",
+        regenerate_command="python generate.py --in-place",
+        file_set=GeneratedFileSet.from_mapping(
+            {"generated/current.txt": "current\n"},
+            obsolete_paths=("generated/obsolete.txt",),
+        ),
+        input_roots=("generator/model.py", "generator/schema"),
+    )
+
+    assert family.is_affected_by(("generated/current.txt",))
+    assert family.is_affected_by(("generated/obsolete.txt",))
+    assert family.is_affected_by(("generator/model.py",))
+    assert family.is_affected_by(("generator/schema/deleted.py",))
+    assert not family.is_affected_by(("generator/model.pyc",))
+    assert not family.is_affected_by(("unrelated/source.py",))
+
+
+def test_generated_file_family_rejects_unsorted_input_roots() -> None:
+    with pytest.raises(ValueError, match="input roots must be unique and sorted"):
+        GeneratedFileFamily(
+            description="example artifacts",
+            regenerate_command="python generate.py --in-place",
+            file_set=GeneratedFileSet.from_mapping({}),
+            input_roots=("generator/z", "generator/a"),
+        )
+
+
 def test_inspect_and_update_generated_file_set(tmp_path: Path) -> None:
     stale_path = tmp_path / "generated/stale.txt"
     stale_path.parent.mkdir(parents=True)
