@@ -19,7 +19,10 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-AMD_GPU_CTS_TAGS = ["runtime-resource=amd-gpu"]
+AMD_GPU_CTS_TAGS = [
+    "iree-run-requirement=runtime.resource.amd_gpu",
+    "runtime-resource=amd-gpu",
+]
 
 _LINUX_COMPATIBILITY = ["@platforms//os:linux"]
 

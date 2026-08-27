@@ -244,6 +244,16 @@ TEST(ToolProcessTest, DoesNotInheritUnrelatedWin32Handles) {
   loom_tool_process_result_deinitialize(&result, iree_allocator_system());
 }
 
+TEST(ToolProcessTest, MapsMissingPathExecutableToNotFound) {
+  loom_tool_process_result_t result = {0};
+  iree_status_t status = loom_tool_process_run(
+      IREE_SV("loom_process_missing_executable_7d56240f.exe"),
+      /*search_path=*/true, /*arguments=*/NULL, /*argument_count=*/0,
+      iree_allocator_system(), &result);
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND, status);
+}
+
 #endif  // IREE_PLATFORM_WINDOWS
 
 #if defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_MACOS) || \

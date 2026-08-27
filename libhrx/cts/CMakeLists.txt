@@ -107,6 +107,7 @@ hrx_cc_test(
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
   LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
     "runtime-resource=amd-gpu"
 )
 
@@ -125,6 +126,7 @@ hrx_cc_test(
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
   LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
     "runtime-resource=amd-gpu"
 )
 
@@ -143,6 +145,7 @@ hrx_cc_test(
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
   LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
     "runtime-resource=amd-gpu"
 )
 
@@ -161,6 +164,7 @@ hrx_cc_test(
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
   LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
     "runtime-resource=amd-gpu"
 )
 
@@ -179,6 +183,7 @@ hrx_cc_test(
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
   LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
     "runtime-resource=amd-gpu"
 )
 
@@ -197,6 +202,7 @@ hrx_cc_test(
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
   LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
     "runtime-resource=amd-gpu"
 )
 
@@ -215,6 +221,7 @@ hrx_cc_test(
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
   LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
     "runtime-resource=amd-gpu"
 )
 
@@ -233,6 +240,7 @@ hrx_cc_test(
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
   LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
     "runtime-resource=amd-gpu"
 )
 
@@ -254,6 +262,7 @@ hrx_cc_test(
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
   LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
     "runtime-resource=amd-gpu"
 )
 
@@ -274,6 +283,7 @@ iree_cc_test(
   ENV
     "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
   LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
     "runtime-resource=amd-gpu"
   SANITIZER_SUPPRESSIONS
     lsan
@@ -303,6 +313,7 @@ iree_cc_test(
   ENV
     "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
   LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
     "runtime-resource=amd-gpu"
   SANITIZER_SUPPRESSIONS
     lsan
@@ -334,6 +345,7 @@ iree_cc_test(
   ENV
     "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
   LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
     "runtime-resource=amd-gpu"
   SANITIZER_SUPPRESSIONS
     lsan
@@ -363,6 +375,7 @@ iree_cc_test(
   ENV
     "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
   LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
     "runtime-resource=amd-gpu"
   SANITIZER_SUPPRESSIONS
     lsan
@@ -392,6 +405,7 @@ iree_cc_test(
   ENV
     "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
   LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
     "runtime-resource=amd-gpu"
     "manual"
   SANITIZER_SUPPRESSIONS
@@ -415,6 +429,7 @@ hrx_cc_test(
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
   LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
     "runtime-resource=amd-gpu"
 )
 
@@ -449,6 +464,7 @@ hrx_cc_test(
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
   LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
     "runtime-resource=amd-gpu"
 )
 
@@ -467,6 +483,7 @@ hrx_cc_test(
     "--hrx-library"
     "$<TARGET_FILE:libhrx::src::libhrx::hrx>"
   LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
     "runtime-resource=amd-gpu"
 )
 
