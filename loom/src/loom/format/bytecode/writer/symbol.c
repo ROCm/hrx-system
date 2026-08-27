@@ -431,8 +431,10 @@ static iree_status_t loom_bytecode_find_string_attr_by_name(
 }
 
 typedef struct loom_bytecode_symbol_linkage_t {
-  // True when the symbol is externally visible.
+  // True when the symbol has public source visibility.
   bool is_public;
+  // True when the symbol is available for cross-module static linkage.
+  bool is_export;
   // True when the symbol resolves to another module.
   bool is_import;
   // True when the source symbol name was explicitly authored.
@@ -470,15 +472,20 @@ static iree_status_t loom_bytecode_symbol_linkage(
   *out_linkage = (loom_bytecode_symbol_linkage_t){
       .is_public = iree_any_bit_set(symbol->flags, LOOM_SYMBOL_FLAG_PUBLIC) ||
                    loom_bytecode_symbol_has_visibility_attr(module, symbol),
+      .is_export = false,
       .is_import = false,
       .has_import_symbol = false,
       .import_module_id = LOOM_STRING_ID_INVALID,
       .import_symbol_id = LOOM_STRING_ID_INVALID,
   };
+  out_linkage->is_export = out_linkage->is_public;
   if (!symbol->defining_op) return iree_ok_status();
 
   loom_func_like_t func_like = loom_func_like_cast(module, symbol->defining_op);
   if (!loom_func_like_isa(func_like)) return iree_ok_status();
+  if (loom_func_like_export_symbol(func_like) != LOOM_STRING_ID_INVALID) {
+    out_linkage->is_export = true;
+  }
 
   const loom_op_vtable_t* op_vtable = loom_op_vtable(module, func_like.op);
   IREE_RETURN_IF_ERROR(loom_bytecode_find_string_attr_by_name(
@@ -500,6 +507,7 @@ static iree_status_t loom_bytecode_symbol_linkage(
   }
 
   out_linkage->is_import = true;
+  out_linkage->is_export = false;
   if (out_linkage->import_symbol_id == LOOM_STRING_ID_INVALID) {
     out_linkage->import_symbol_id = symbol->name_id;
   }
@@ -522,7 +530,7 @@ iree_status_t loom_bytecode_write_symbols_section(
         module, &module->symbols.entries[i], &linkage));
     if (linkage.is_import) {
       ++import_count;
-    } else if (linkage.is_public) {
+    } else if (linkage.is_export) {
       ++export_count;
     }
     root_region_payload_count += ir_regions[i].count;
@@ -575,7 +583,7 @@ iree_status_t loom_bytecode_write_symbols_section(
           builder, import_table_offset + (iree_host_size_t)import_index * 8,
           entry_offset);
       ++import_index;
-    } else if (linkage.is_public) {
+    } else if (linkage.is_export) {
       loom_bytecode_patch_u64_le(
           builder, export_table_offset + (iree_host_size_t)export_index * 8,
           entry_offset);
@@ -602,6 +610,9 @@ iree_status_t loom_bytecode_write_symbols_section(
     // Flags.
     uint16_t bytecode_flags =
         linkage.is_public ? LOOM_BYTECODE_SYMBOL_FLAG_PUBLIC : 0;
+    if (linkage.is_export) {
+      bytecode_flags |= LOOM_BYTECODE_SYMBOL_FLAG_EXPORT;
+    }
     if (iree_any_bit_set(symbol->flags, LOOM_SYMBOL_FLAG_RETAIN)) {
       bytecode_flags |= LOOM_BYTECODE_SYMBOL_FLAG_RETAIN;
     }

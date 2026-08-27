@@ -181,7 +181,7 @@ BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
 
 # File magic and version.
 MAGIC = b"LOOM"
-FORMAT_VERSION = 32
+FORMAT_VERSION = 33
 PRODUCER = "loom-py"
 
 SYMBOL_INTERFACE_BITS = {
@@ -212,6 +212,7 @@ SYMBOL_FLAG_RETAIN = 0x0008
 SYMBOL_FLAG_DECLARATION = 0x0010
 SYMBOL_FLAG_TEST_ONLY = 0x0020
 _SYMBOL_FLAG_PREDICATES = 0x0040
+SYMBOL_FLAG_EXPORT = 0x0080
 SYMBOL_KIND_ANCHOR = 8
 
 
@@ -783,6 +784,21 @@ class BytecodeWriter:
         if symbol_def.is_test_only:
             flags |= SYMBOL_FLAG_TEST_ONLY
         return flags
+
+    def _symbol_is_exported(self, symbol: Symbol) -> bool:
+        """Return whether a symbol is available for static linkage."""
+        if symbol.flags & SYMBOL_FLAG_IMPORT:
+            return False
+        if symbol.flags & SYMBOL_FLAG_PUBLIC:
+            return True
+        if symbol.op is None:
+            return False
+        func_like = func_like_interface_for_op(self._op_decls_by_name, symbol.op.name)
+        return (
+            func_like is not None
+            and func_like.export_symbol is not None
+            and func_like.export_symbol in symbol.op.attributes
+        )
 
     def _number_global_op(self, op: Operation) -> None:
         """Number all entities in a global symbol-defining op."""
@@ -2096,12 +2112,12 @@ class BytecodeWriter:
         # Classify symbols into imports and exports.
         import_indices: list[int] = []
         export_indices: list[int] = []
+        exported_symbols = [self._symbol_is_exported(symbol) for symbol in symbols]
         for i, symbol in enumerate(symbols):
             is_import = (symbol.flags & SYMBOL_FLAG_IMPORT) != 0
-            is_public = (symbol.flags & SYMBOL_FLAG_PUBLIC) != 0
             if is_import:
                 import_indices.append(i)
-            elif is_public:
+            elif exported_symbols[i]:
                 export_indices.append(i)
 
         buf.write_varint(len(symbols))
@@ -2138,6 +2154,8 @@ class BytecodeWriter:
             bytecode_flags = (
                 symbol.flags & ~(SYMBOL_FLAG_DECLARATION | SYMBOL_FLAG_TEST_ONLY)
             ) | self._symbol_definition_flags(symbol.op)
+            if exported_symbols[symbol_index]:
+                bytecode_flags |= SYMBOL_FLAG_EXPORT
             if symbol.source_symbol and symbol.source_symbol != symbol.name:
                 bytecode_flags |= SYMBOL_FLAG_IMPORT_SYMBOL
             predicates_attr_name: str | None = None

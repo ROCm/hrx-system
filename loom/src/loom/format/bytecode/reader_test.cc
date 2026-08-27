@@ -3225,6 +3225,8 @@ TEST_F(ReaderTest, ReadsFunctionModuleIndex) {
   EXPECT_EQ(symbol.visibility, LOOM_BYTECODE_SYMBOL_VISIBILITY_PUBLIC);
   EXPECT_TRUE(
       iree_all_bits_set(symbol.flags, LOOM_BYTECODE_SYMBOL_FLAG_PUBLIC));
+  EXPECT_TRUE(
+      iree_all_bits_set(symbol.flags, LOOM_BYTECODE_SYMBOL_FLAG_EXPORT));
   ASSERT_LT(symbol.defining_op_ordinal, module_metadata.ops.count);
   EXPECT_TRUE(iree_string_view_equal(
       module_metadata.ops.entries[symbol.defining_op_ordinal].name,
@@ -3753,6 +3755,30 @@ TEST_F(ReaderTest, RejectsPredicatesFlagOnNonFunctionSymbol) {
   uint16_t flags = ReadU16LE(bytes, flags_offset);
   WriteU16LE(&bytes, flags_offset,
              flags | LOOM_BYTECODE_SYMBOL_FLAG_PREDICATES);
+
+  ExpectReadError(bytes, "ERR_BYTECODE_006");
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsPublicDefinitionWithoutExportFlag) {
+  loom_module_t* module = CreateFunctionModule();
+  auto bytes = WriteModule(module);
+  size_t flags_offset = FirstSymbolFlagsOffset(bytes);
+  uint16_t flags = ReadU16LE(bytes, flags_offset);
+  ASSERT_TRUE(iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_EXPORT));
+  WriteU16LE(&bytes, flags_offset, flags & ~LOOM_BYTECODE_SYMBOL_FLAG_EXPORT);
+
+  ExpectReadError(bytes, "ERR_BYTECODE_006");
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsImportedSymbolWithExportFlag) {
+  loom_module_t* module = CreateImportedFunctionModule();
+  auto bytes = WriteModule(module);
+  size_t flags_offset = FirstSymbolFlagsOffset(bytes);
+  uint16_t flags = ReadU16LE(bytes, flags_offset);
+  ASSERT_FALSE(iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_EXPORT));
+  WriteU16LE(&bytes, flags_offset, flags | LOOM_BYTECODE_SYMBOL_FLAG_EXPORT);
 
   ExpectReadError(bytes, "ERR_BYTECODE_006");
   loom_module_free(module);

@@ -85,7 +85,7 @@ extern "C" {
 
 #define LOOM_BYTECODE_MAGIC "LOOM"
 #define LOOM_BYTECODE_MAGIC_LENGTH 4
-#define LOOM_BYTECODE_FORMAT_VERSION 32
+#define LOOM_BYTECODE_FORMAT_VERSION 33
 
 #define LOOM_BYTECODE_SOURCE_TRIVIA_LEADING_BLANK_LINE (1u << 0)
 #define LOOM_BYTECODE_SOURCE_TRIVIA_COMMENT_COUNT_SHIFT 1
@@ -522,9 +522,10 @@ typedef enum loom_bytecode_section_kind_e {
 // exports from other modules. The import carries full signature
 // metadata for verification during linking.
 //
-// Exports: A symbol with PUBLIC visibility and no IMPORT flag.
-// The export offset table lets the linker enumerate available
-// symbols without scanning private internals.
+// Exports: A symbol with LOOM_BYTECODE_SYMBOL_FLAG_EXPORT set. Public
+// definitions are exports, as are private func-like definitions with an
+// explicit export contract. The export offset table lets the linker enumerate
+// available symbols without scanning private internals or decoding attributes.
 //
 // Source trivia: every [source_trivia: varint] scalar packs the following
 // leading-comment count in bits 1 and above and a leading-blank-line bit in
@@ -1188,6 +1189,10 @@ enum loom_bytecode_symbol_flag_bits_e {
   // Function metadata contains an explicitly present predicate list. This
   // distinguishes an authored empty list from an absent optional attribute.
   LOOM_BYTECODE_SYMBOL_FLAG_PREDICATES = 1u << 6,
+  // Symbol is available for cross-module static linkage. This is independent
+  // of source visibility so an explicit export contract can export a private
+  // func-like definition without making it a public source symbol.
+  LOOM_BYTECODE_SYMBOL_FLAG_EXPORT = 1u << 7,
 };
 typedef uint16_t loom_bytecode_symbol_flags_t;
 

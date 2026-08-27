@@ -52,6 +52,7 @@ from loom.format.bytecode.writer import (
     SECTION_TYPES,
     SOURCE_TRIVIA_COMMENT_COUNT_SHIFT,
     SOURCE_TRIVIA_LEADING_BLANK_LINE,
+    SYMBOL_FLAG_EXPORT,
     SYMBOL_INTERFACE_FLAG_MASK,
     SYMBOL_KIND_ANCHOR,
 )
@@ -141,7 +142,10 @@ _SYMBOL_IR_FLAGS = (
     | SYMBOL_FLAG_TEST_ONLY
 )
 _SYMBOL_SUPPORTED_FLAGS = (
-    _SYMBOL_IR_FLAGS | _SYMBOL_FLAG_IMPORT_SYMBOL | _SYMBOL_FLAG_PREDICATES
+    _SYMBOL_IR_FLAGS
+    | _SYMBOL_FLAG_IMPORT_SYMBOL
+    | _SYMBOL_FLAG_PREDICATES
+    | SYMBOL_FLAG_EXPORT
 )
 _SYMBOL_DEFINITION_FLAGS = SYMBOL_FLAG_DECLARATION | SYMBOL_FLAG_TEST_ONLY
 
@@ -1579,6 +1583,12 @@ class BytecodeReader:
             raise BytecodeError(
                 "symbol predicates flag requires a function symbol kind"
             )
+        is_import = bool(flags & SYMBOL_FLAG_IMPORT)
+        is_export = bool(flags & SYMBOL_FLAG_EXPORT)
+        if is_import and is_export:
+            raise BytecodeError("symbol cannot be both imported and exported")
+        if not is_import and flags & SYMBOL_FLAG_PUBLIC and not is_export:
+            raise BytecodeError("public definition requires export flag")
         if (visibility == 0) != ((flags & SYMBOL_FLAG_PUBLIC) != 0):
             raise BytecodeError("symbol visibility byte does not match flags")
 

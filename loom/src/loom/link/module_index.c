@@ -743,7 +743,7 @@ static loom_link_symbol_flags_t loom_link_bytecode_symbol_flags(
   if (is_import) {
     flags |= LOOM_LINK_SYMBOL_FLAG_IMPORT;
   }
-  if (is_public && !is_import) {
+  if (iree_any_bit_set(symbol->flags, LOOM_BYTECODE_SYMBOL_FLAG_EXPORT)) {
     flags |= LOOM_LINK_SYMBOL_FLAG_EXPORT;
   }
   const bool is_declaration =
@@ -769,6 +769,7 @@ static loom_link_symbol_identity_t loom_link_bytecode_symbol_identity(
     loom_link_symbol_flags_t flags) {
   if (symbol->kind == LOOM_BYTECODE_SYMBOL_ANCHOR ||
       iree_any_bit_set(flags, LOOM_LINK_SYMBOL_FLAG_PUBLIC |
+                                  LOOM_LINK_SYMBOL_FLAG_EXPORT |
                                   LOOM_LINK_SYMBOL_FLAG_IMPORT |
                                   LOOM_LINK_SYMBOL_FLAG_DECLARATION |
                                   LOOM_LINK_SYMBOL_FLAG_CONFIG)) {

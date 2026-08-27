@@ -946,6 +946,40 @@ func.def @entry(%x: i32) -> (i32) {
   loom_link_index_materialization_deinitialize(&materialization);
 }
 
+TEST_F(LinkIndexMaterializerTest, ExplicitPrivateBytecodeExportRemainsPrivate) {
+  loom_module_t* source = Parse(IREE_SV(R"(
+func.def export("entry") @entry(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"),
+                                IREE_SV("library.loom"));
+  std::vector<uint8_t> bytecode = WriteModule(source);
+
+  IndexPtr index = CreateIndex();
+  AddBytecode(index.get(), bytecode, IREE_SV("library.loombc"),
+              LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+
+  loom_link_index_materialization_t materialization =
+      Materialize(index.get(), IREE_SV("@entry"));
+  Verify(materialization.module);
+
+  const loom_symbol_t* entry =
+      FindSymbol(materialization.module, IREE_SV("entry"));
+  ASSERT_NE(entry, nullptr);
+  EXPECT_TRUE(iree_any_bit_set(entry->flags, LOOM_SYMBOL_FLAG_RETAIN));
+  EXPECT_FALSE(iree_any_bit_set(entry->flags, LOOM_SYMBOL_FLAG_PUBLIC));
+  loom_func_like_t function =
+      loom_func_like_cast(materialization.module, entry->defining_op);
+  ASSERT_TRUE(loom_func_like_isa(function));
+  const loom_string_id_t export_symbol = loom_func_like_export_symbol(function);
+  ASSERT_NE(export_symbol, LOOM_STRING_ID_INVALID);
+  EXPECT_TRUE(iree_string_view_equal(
+      materialization.module->strings.entries[export_symbol],
+      IREE_SV("entry")));
+
+  loom_link_index_materialization_deinitialize(&materialization);
+}
+
 TEST_F(LinkIndexMaterializerTest, ArchivePreservesLibraryOutputSurface) {
   loom_module_t* requester = Parse(IREE_SV(R"(
 func.def public export("request_entry") @entry(%x: i32) -> (i32) {

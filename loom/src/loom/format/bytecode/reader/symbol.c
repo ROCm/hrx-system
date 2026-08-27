@@ -764,7 +764,8 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
         LOOM_BYTECODE_SYMBOL_FLAG_RETAIN |
         LOOM_BYTECODE_SYMBOL_FLAG_DECLARATION |
         LOOM_BYTECODE_SYMBOL_FLAG_TEST_ONLY |
-        LOOM_BYTECODE_SYMBOL_FLAG_PREDICATES)) {
+        LOOM_BYTECODE_SYMBOL_FLAG_PREDICATES |
+        LOOM_BYTECODE_SYMBOL_FLAG_EXPORT)) {
     return loom_bytecode_reader_emit_invalid_field(
         &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
         IREE_SV("flags"), kind_offset + 2,
@@ -784,6 +785,23 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
         IREE_SV("flags"), kind_offset + 2,
         IREE_SV("predicates_flag_requires_function_symbol_kind"));
   }
+  const bool is_import =
+      iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_IMPORT);
+  const bool is_export =
+      iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_EXPORT);
+  if (is_import && is_export) {
+    return loom_bytecode_reader_emit_invalid_field(
+        &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
+        IREE_SV("flags"), kind_offset + 2,
+        IREE_SV("symbol_cannot_be_both_imported_and_exported"));
+  }
+  if (!is_import && iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_PUBLIC) &&
+      !is_export) {
+    return loom_bytecode_reader_emit_invalid_field(
+        &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
+        IREE_SV("flags"), kind_offset + 2,
+        IREE_SV("public_definition_requires_export_flag"));
+  }
   if (kind == LOOM_BYTECODE_SYMBOL_ANCHOR &&
       (visibility != LOOM_BYTECODE_SYMBOL_VISIBILITY_PRIVATE || flags != 0)) {
     return loom_bytecode_reader_emit_invalid_field(
@@ -800,10 +818,6 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
   symbol_metadata->kind = (loom_bytecode_symbol_kind_t)kind;
   symbol_metadata->visibility = (loom_bytecode_symbol_visibility_t)visibility;
   symbol_metadata->flags = flags;
-  const bool is_import =
-      iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_IMPORT);
-  const bool is_export =
-      !is_import && iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_PUBLIC);
   if (is_import) {
     if (table->imports.index >= table->imports.count ||
         table->imports.offsets[table->imports.index] != entry_relative_offset) {
@@ -1176,7 +1190,7 @@ iree_status_t loom_bytecode_symbols_index(
     if (iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_IMPORT)) {
       out_metadata->import_symbol_indices[table.imports.index - 1] =
           (uint32_t)symbol_index;
-    } else if (iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_PUBLIC)) {
+    } else if (iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_EXPORT)) {
       out_metadata->export_symbol_indices[table.exports.index - 1] =
           (uint32_t)symbol_index;
     }

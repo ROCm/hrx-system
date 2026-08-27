@@ -363,6 +363,32 @@ func.def public @exported(%x: i32) -> (i32) {
   EXPECT_TRUE(iree_all_bits_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_EXPORT));
 }
 
+TEST_F(ModuleIndexTest, IndexesExplicitBytecodeExportWithoutPublicVisibility) {
+  loom_module_t* module = Parse(IREE_SV(R"(
+func.def export("entry") @entry(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"));
+  std::vector<uint8_t> bytes = WriteModule(module);
+
+  IndexPtr index = CreateIndex();
+  loom_link_module_index_add_options_t options = {
+      /*.provider_name=*/IREE_SV("bytecode-provider"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+  };
+  IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
+      index.get(), iree_make_const_byte_span(bytes.data(), bytes.size()),
+      IREE_SV("functions.loombc"), /*index_options=*/nullptr, &options,
+      /*out_provider_ordinal=*/nullptr));
+
+  const loom_link_module_index_symbol_t* symbol =
+      loom_link_module_index_lookup_global(index.get(), IREE_SV("@entry"));
+  ASSERT_NE(symbol, nullptr);
+  EXPECT_EQ(symbol->identity, LOOM_LINK_SYMBOL_IDENTITY_GLOBAL);
+  EXPECT_TRUE(iree_all_bits_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_EXPORT));
+  EXPECT_FALSE(iree_all_bits_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_PUBLIC));
+}
+
 TEST_F(ModuleIndexTest, ProjectsMaterializedAndBytecodeReferenceMetadata) {
   const iree_string_view_t source = IREE_SV(R"(
 func.def public @entry(%x: i32) -> (i32) {
