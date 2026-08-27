@@ -42,16 +42,7 @@ CMAKE_REPOSITORY_SMOKE_CTEST_REGEXES = (
 BAZEL_REPOSITORY_INTEGRATION_DEVICE_TARGETS = (
     "//runtime/src/iree/hal/drivers/amdgpu/util:pm4_dispatch_test_kernels",
 )
-BAZEL_REPOSITORY_INTEGRATION_TEST_TARGETS = (
-    "//build_tools/bazel/test:dynamic_library_environment_execution_test",
-    "//build_tools/bazel/test:dynamic_library_environment_wrapper_test",
-    "//build_tools/bazel_to_cmake:bazel_to_cmake_test",
-    "//build_tools/devtools:bazel_launcher_test",
-    "//build_tools/devtools:bazel_test",
-    "//build_tools/devtools:ci_test",
-    "//build_tools/devtools:cli_test",
-    "//build_tools/devtools:smoke_test_lib_test",
-)
+BAZEL_REPOSITORY_TEST_TARGETS = ("//...",)
 BAZEL_REPOSITORY_INTEGRATION_DYNAMIC_LIBRARY_TARGET = (
     "//build_tools/bazel/test:dynamic_library_environment_binary_fixture"
 )
