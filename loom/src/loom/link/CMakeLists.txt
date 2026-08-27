@@ -59,6 +59,46 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    func_contract_projection
+  HDRS
+    "func_contract_projection.h"
+  SRCS
+    "func_contract_projection.c"
+  DEPS
+    ::func_contract
+    ::module_index
+    iree::base
+    iree::base::internal::arena
+    loom::format::bytecode::function_projection_reader
+    loom::ir
+    loom::ops::op_defs
+    loom::rewrite::remap
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    func_contract_projection_test
+  SRCS
+    "func_contract_projection_test.cc"
+  DEPS
+    ::func_contract_projection
+    ::module_index
+    iree::base
+    iree::base::internal::arena
+    iree::io::stream
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::bytecode::writer
+    loom::format::text::parser
+    loom::ir
+    loom::link::testdata::func_contract_projection
+    loom::ops::op_registry
+    loom::rewrite::remap
+)
+
+loom_cc_library(
+  NAME
     linker
   HDRS
     "linker.h"

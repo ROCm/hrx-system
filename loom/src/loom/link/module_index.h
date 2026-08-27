@@ -244,6 +244,12 @@ iree_status_t loom_link_module_index_allocate(
 // Frees |index| and any text-provider modules it owns.
 void loom_link_module_index_free(loom_link_module_index_t* index);
 
+// Returns the context shared by every provider in |index|.
+//
+// The returned context is borrowed and remains valid for the index lifetime.
+loom_context_t* loom_link_module_index_context(
+    const loom_link_module_index_t* index);
+
 // Adds one caller-owned materialized module to |index|.
 iree_status_t loom_link_module_index_add_materialized(
     loom_link_module_index_t* index, const loom_module_t* module,

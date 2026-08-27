@@ -1,0 +1,9 @@
+target.decl @gpu
+
+func.def public target(@gpu) @identity(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.def public target(@gpu) @wrong_type(%x: f32) -> (f32) {
+  func.return %x : f32
+}

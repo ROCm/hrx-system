@@ -23,6 +23,16 @@ iree_c_embed_data(
 )
 
 iree_c_embed_data(
+    name = "func_contract_projection",
+    testonly = True,
+    srcs = glob(["func_contract_projection/*.loom"]),
+    c_file_output = "func_contract_projection_testdata.c",
+    flatten = True,
+    h_file_output = "func_contract_projection_testdata.h",
+    identifier = "loom_link_func_contract_projection_testdata",
+)
+
+iree_c_embed_data(
     name = "planner",
     testonly = True,
     srcs = glob(["planner/*.loom"]),

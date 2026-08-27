@@ -1149,6 +1149,11 @@ void loom_link_module_index_free(loom_link_module_index_t* index) {
   iree_allocator_free(index->allocator, index);
 }
 
+loom_context_t* loom_link_module_index_context(
+    const loom_link_module_index_t* index) {
+  return index ? index->context : NULL;
+}
+
 iree_status_t loom_link_module_index_add_materialized(
     loom_link_module_index_t* index, const loom_module_t* module,
     const loom_link_module_index_add_options_t* options,

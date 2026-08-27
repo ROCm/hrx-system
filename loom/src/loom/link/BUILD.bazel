@@ -54,6 +54,42 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "func_contract_projection",
+    srcs = ["func_contract_projection.c"],
+    hdrs = ["func_contract_projection.h"],
+    deps = [
+        ":func_contract",
+        ":module_index",
+        "//loom/src/loom/format/bytecode:function_projection_reader",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/rewrite:remap",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "func_contract_projection_test",
+    srcs = ["func_contract_projection_test.cc"],
+    deps = [
+        ":func_contract_projection",
+        ":module_index",
+        "//loom/src/loom/format/bytecode:writer",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/link/testdata:func_contract_projection",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/rewrite:remap",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "linker",
     srcs = ["linker.c"],
     hdrs = ["linker.h"],
