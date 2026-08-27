@@ -22,6 +22,8 @@ iree_py_library(
     loom::py::loom::gen::support::support
     loom::py::loom::gen::target::low::low_descriptors
     loom::py::loom::target::arch::vm::projection
+    iree::vm::bytecode::spec::model::model
+    iree::vm::bytecode::spec::model::isa::isa
 )
 
 iree_py_test(

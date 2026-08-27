@@ -24,6 +24,8 @@ iree_py_binary(
         "//loom/py/loom/gen/support",
         "//loom/py/loom/gen/target/low:low_descriptors",
         "//loom/py/loom/target/arch/vm:projection",
+        "//runtime/src/iree/vm/bytecode/spec/model",
+        "//runtime/src/iree/vm/bytecode/spec/model/isa",
     ],
 )
 

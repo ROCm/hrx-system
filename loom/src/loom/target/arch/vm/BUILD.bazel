@@ -69,13 +69,22 @@ loom_generated_cc_library(
 
 loom_generated_cc_library(
     name = "descriptors",
-    extra_output_flags = ["--lowering-rows"],
-    extra_outputs = ["lowering_rows.inl"],
+    extra_output_flags = [
+        "--encoding-rows",
+        "--lowering-rows",
+    ],
+    extra_outputs = [
+        "encoding_rows.inl",
+        "lowering_rows.inl",
+    ],
     generated_hdr_flags = ["--header"],
     generated_hdrs = ["descriptors.h"],
     generator = "//loom/py/loom/gen/target/arch/vm:tables",
     source = "descriptors.c",
-    textual_hdrs = [":lowering_rows.inl"],
+    textual_hdrs = [
+        ":encoding_rows.inl",
+        ":lowering_rows.inl",
+    ],
     deps = ["//loom/src/loom/codegen/low:descriptors"],
 )
 

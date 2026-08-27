@@ -63,14 +63,17 @@ loom_generated_cc_library(
   SOURCE
     "descriptors.c"
   TEXTUAL_HDRS
+    "encoding_rows.inl"
     "lowering_rows.inl"
   GENERATED_HDR_FLAGS
     "--header"
   GENERATED_HDRS
     "descriptors.h"
   EXTRA_OUTPUT_FLAGS
+    "--encoding-rows"
     "--lowering-rows"
   EXTRA_OUTPUTS
+    "encoding_rows.inl"
     "lowering_rows.inl"
   DEPS
     loom::codegen::low::descriptors

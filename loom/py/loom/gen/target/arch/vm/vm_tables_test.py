@@ -7,7 +7,10 @@
 """Tests for the Loom-facing Core VM table projection."""
 
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
-from loom.gen.target.arch.vm.vm_tables import generate_lowering_rows
+from loom.gen.target.arch.vm.vm_tables import (
+    generate_encoding_rows,
+    generate_lowering_rows,
+)
 from loom.scalar_type import ScalarTypeKind
 from loom.target.arch.vm.projection import (
     VM_CORE_DESCRIPTOR_SET,
@@ -55,3 +58,11 @@ def test_lowering_rows_are_data_only() -> None:
     assert "LOOM_OP_INDEX_MUL" in rows
     assert "VM_CORE_DESCRIPTOR_REF_INTEGER_MUL_I64" in rows
     assert "LOOM_OP_SCALAR_ADDI, VM_CORE_DESCRIPTOR_REF_INTEGER_ADD_I32, 2, 1" not in rows
+
+
+def test_encoding_rows_are_data_only() -> None:
+    rows = generate_encoding_rows()
+    assert "LOOM_VM_INSTRUCTION_ENCODING_LIMITS(12)" in rows
+    assert "LOOM_VM_INSTRUCTION_ENCODING_ROW(0, VM_CORE_DESCRIPTOR_REF_CONSTANT_ZERO, 4)" in rows
+    assert "LOOM_VM_INSTRUCTION_ENCODING_ROW(3, VM_CORE_DESCRIPTOR_REF_CONSTANT_I64, 12)" in rows
+    assert rows.count("LOOM_VM_INSTRUCTION_ENCODING_ROW(") == len(VM_INSTRUCTION_PROJECTIONS)
