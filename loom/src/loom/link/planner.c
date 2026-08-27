@@ -1057,7 +1057,9 @@ static iree_status_t loom_link_plan_expand_symbol_facet_dependencies(
     const loom_link_module_index_symbol_t* symbol,
     const loom_link_module_index_module_t* module,
     loom_link_symbol_facet_kind_t kind, loom_link_plan_live_cause_t cause) {
-  if (symbol->dependencies.count == 0) return iree_ok_status();
+  if (symbol->dependencies.count == 0) {
+    return iree_ok_status();
+  }
   const uint32_t first = symbol->dependencies.first;
   const uint32_t* dependencies = module->dependencies.values + first;
   const loom_symbol_interface_flags_t* target_interfaces =
@@ -1069,7 +1071,9 @@ static iree_status_t loom_link_plan_expand_symbol_facet_dependencies(
         loom_link_module_index_symbol_source_root_facet_kind(
             symbol, source_root_region_index_plus_one);
     IREE_ASSERT_NE(source_kind, LOOM_LINK_SYMBOL_FACET_INVALID);
-    if (source_kind != kind) continue;
+    if (source_kind != kind) {
+      continue;
+    }
     IREE_RETURN_IF_ERROR(loom_link_plan_select_dependency_target(
         plan, options, module, dependencies[i], target_interfaces[i], cause));
   }
@@ -1102,7 +1106,9 @@ static iree_status_t loom_link_plan_record_symbol_facet_template_demands(
     loom_link_plan_t* plan, const loom_link_module_index_symbol_t* symbol,
     const loom_link_module_index_module_t* module,
     loom_link_symbol_facet_kind_t kind) {
-  if (symbol->template_demands.count == 0) return iree_ok_status();
+  if (symbol->template_demands.count == 0) {
+    return iree_ok_status();
+  }
   const uint32_t first = symbol->template_demands.first;
   const loom_link_template_family_ordinal_t* template_families =
       module->template_demands.values + first;
@@ -1113,7 +1119,9 @@ static iree_status_t loom_link_plan_record_symbol_facet_template_demands(
         loom_link_module_index_symbol_source_root_facet_kind(
             symbol, source_root_region_index_plus_one);
     IREE_ASSERT_NE(source_kind, LOOM_LINK_SYMBOL_FACET_INVALID);
-    if (source_kind != kind) continue;
+    if (source_kind != kind) {
+      continue;
+    }
     IREE_RETURN_IF_ERROR(loom_link_plan_record_template_family_demand(
         plan, template_families[i]));
   }
