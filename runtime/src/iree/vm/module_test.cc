@@ -411,28 +411,37 @@ TEST(VMModuleTest, PhysicalCallPacketAddressesDirectAndOverflowBanks) {
       iree_vm_environment_lookup_ref_type_table(environment, IREE_SV("vm")),
       &vm_types));
 
-  std::array<uint64_t, 16> direct_value_arguments = {};
+  std::array<uint64_t, IREE_VM_CALL_DIRECT_REGISTER_COUNT>
+      direct_value_arguments = {};
   std::array<uint64_t, 1> overflow_value_arguments = {};
-  std::array<uint64_t, 16> direct_value_results = {};
+  std::array<uint64_t, IREE_VM_CALL_DIRECT_REGISTER_COUNT>
+      direct_value_results = {};
   std::array<uint64_t, 1> overflow_value_results = {};
-  direct_value_arguments[15] = 15;
-  overflow_value_arguments[0] = 16;
+  constexpr uint16_t kLastDirectOrdinal =
+      IREE_VM_CALL_DIRECT_REGISTER_COUNT - 1;
+  constexpr uint16_t kFirstOverflowOrdinal = IREE_VM_CALL_DIRECT_REGISTER_COUNT;
+  direct_value_arguments[kLastDirectOrdinal] = kLastDirectOrdinal;
+  overflow_value_arguments[0] = kFirstOverflowOrdinal;
 
   iree_vm_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_vm_buffer_create(0, 0, iree_allocator_system(), &buffer));
-  std::array<iree_vm_ref_t, 16> direct_ref_arguments = {};
+  std::array<iree_vm_ref_t, IREE_VM_CALL_DIRECT_REGISTER_COUNT>
+      direct_ref_arguments = {};
   std::array<iree_vm_ref_t, 1> overflow_ref_arguments = {
       iree_vm_buffer_ref_from_ptr_move(&vm_types, &buffer),
   };
-  std::array<iree_vm_ref_t, 16> direct_ref_results = {};
+  std::array<iree_vm_ref_t, IREE_VM_CALL_DIRECT_REGISTER_COUNT>
+      direct_ref_results = {};
   std::array<iree_vm_ref_t, 1> overflow_ref_results = {};
   ASSERT_EQ(buffer, nullptr);
 
-  std::array<iree_vm_function_ref_t, 16> direct_function_arguments = {};
+  std::array<iree_vm_function_ref_t, IREE_VM_CALL_DIRECT_REGISTER_COUNT>
+      direct_function_arguments = {};
   std::array<iree_vm_function_ref_t, 1> overflow_function_arguments = {
       iree_vm_function_ref_t{UINT64_C(0x3000), UINT64_C(0x4000)},
   };
-  std::array<iree_vm_function_ref_t, 16> direct_function_results = {};
+  std::array<iree_vm_function_ref_t, IREE_VM_CALL_DIRECT_REGISTER_COUNT>
+      direct_function_results = {};
   std::array<iree_vm_function_ref_t, 1> overflow_function_results = {};
 
   const iree_vm_call_packet_t call = {
@@ -443,24 +452,27 @@ TEST(VMModuleTest, PhysicalCallPacketAddressesDirectAndOverflowBanks) {
       {direct_function_arguments.data(), overflow_function_arguments.data()},
       {direct_function_results.data(), overflow_function_results.data()},
   };
-  EXPECT_EQ(iree_vm_call_value_argument_load(&call, 15), 15u);
-  EXPECT_EQ(iree_vm_call_value_argument_load(&call, 16), 16u);
-  iree_vm_call_value_result_store(&call, 15, 115);
-  iree_vm_call_value_result_store(&call, 16, 116);
-  EXPECT_EQ(direct_value_results[15], 115u);
+  EXPECT_EQ(iree_vm_call_value_argument_load(&call, kLastDirectOrdinal),
+            kLastDirectOrdinal);
+  EXPECT_EQ(iree_vm_call_value_argument_load(&call, kFirstOverflowOrdinal),
+            kFirstOverflowOrdinal);
+  iree_vm_call_value_result_store(&call, kLastDirectOrdinal, 115);
+  iree_vm_call_value_result_store(&call, kFirstOverflowOrdinal, 116);
+  EXPECT_EQ(direct_value_results[kLastDirectOrdinal], 115u);
   EXPECT_EQ(overflow_value_results[0], 116u);
 
   iree_vm_ref_t moved_ref = iree_vm_ref_null();
-  iree_vm_call_ref_argument_load_move(&call, 16, &moved_ref);
+  iree_vm_call_ref_argument_load_move(&call, kFirstOverflowOrdinal, &moved_ref);
   EXPECT_TRUE(iree_vm_ref_is_null(overflow_ref_arguments[0]));
   EXPECT_FALSE(iree_vm_ref_is_null(moved_ref));
-  iree_vm_call_ref_result_store_move(&call, 16, &moved_ref);
+  iree_vm_call_ref_result_store_move(&call, kFirstOverflowOrdinal, &moved_ref);
   EXPECT_TRUE(iree_vm_ref_is_null(moved_ref));
   EXPECT_FALSE(iree_vm_ref_is_null(overflow_ref_results[0]));
 
   const iree_vm_function_ref_t function_ref =
-      iree_vm_call_function_argument_load(&call, 16);
-  iree_vm_call_function_result_store(&call, 16, function_ref);
+      iree_vm_call_function_argument_load(&call, kFirstOverflowOrdinal);
+  iree_vm_call_function_result_store(&call, kFirstOverflowOrdinal,
+                                     function_ref);
   EXPECT_EQ(overflow_function_results[0].program_bits,
             overflow_function_arguments[0].program_bits);
   EXPECT_EQ(overflow_function_results[0].target_bits,

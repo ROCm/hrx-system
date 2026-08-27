@@ -451,45 +451,49 @@ typedef struct iree_vm_module_local_function_t {
 static_assert(sizeof(iree_vm_module_local_function_t) == 8,
               "local function descriptors must remain eight bytes");
 
+// Number of directly addressed registers in each physical call-packet bank.
+// Higher logical ordinals use the corresponding overflow bank.
+enum { IREE_VM_CALL_DIRECT_REGISTER_COUNT = 16 };
+
 typedef struct iree_vm_call_value_arguments_t {
-  // Read-only direct value arguments, at most 16 cells.
+  // Read-only value arguments below IREE_VM_CALL_DIRECT_REGISTER_COUNT.
   const uint64_t* direct;
-  // Read-only overflow value arguments.
+  // Read-only value arguments at or above the direct-register count.
   const uint64_t* overflow;
 } iree_vm_call_value_arguments_t;
 
 typedef struct iree_vm_call_ref_arguments_t {
-  // Direct ref arguments, mutable only for explicit moves.
+  // Ref arguments below the direct-register count, mutable for explicit moves.
   iree_vm_ref_t* direct;
-  // Overflow ref arguments, mutable only for explicit moves.
+  // Remaining ref arguments, mutable only for explicit moves.
   iree_vm_ref_t* overflow;
 } iree_vm_call_ref_arguments_t;
 
 typedef struct iree_vm_call_value_results_t {
-  // Write-only direct value results, at most 16 cells.
+  // Write-only value results below the direct-register count.
   uint64_t* direct;
-  // Write-only overflow value results.
+  // Write-only value results at or above the direct-register count.
   uint64_t* overflow;
 } iree_vm_call_value_results_t;
 
 typedef struct iree_vm_call_ref_results_t {
-  // Direct ref results, at most 16 slots.
+  // Ref results below the direct-register count.
   iree_vm_ref_t* direct;
-  // Overflow ref results.
+  // Ref results at or above the direct-register count.
   iree_vm_ref_t* overflow;
 } iree_vm_call_ref_results_t;
 
 typedef struct iree_vm_call_function_arguments_t {
-  // Read-only direct function arguments, at most 16 cells.
+  // Read-only function arguments below the direct-register count.
   const iree_vm_function_ref_t* direct;
-  // Read-only overflow function arguments.
+  // Read-only function arguments at or above the direct-register count.
   const iree_vm_function_ref_t* overflow;
 } iree_vm_call_function_arguments_t;
 
 typedef struct iree_vm_call_function_results_t {
-  // Write-only direct function results, at most 16 cells.
+  // Write-only function results below the direct-register count.
   iree_vm_function_ref_t* direct;
-  // Write-only overflow function results.
+  // Write-only function results at or above the direct-register count.
   iree_vm_function_ref_t* overflow;
 } iree_vm_call_function_results_t;
 
@@ -520,26 +524,32 @@ typedef struct iree_vm_call_packet_t {
 // Loads exact bits from one valid physical value-argument ordinal.
 static inline uint64_t iree_vm_call_value_argument_load(
     const iree_vm_call_packet_t* call, uint16_t value_ordinal) {
-  return value_ordinal < 16
+  return value_ordinal < IREE_VM_CALL_DIRECT_REGISTER_COUNT
              ? call->value_arguments.direct[value_ordinal]
-             : call->value_arguments.overflow[value_ordinal - 16];
+             : call->value_arguments
+                   .overflow[value_ordinal -
+                             IREE_VM_CALL_DIRECT_REGISTER_COUNT];
 }
 
 // Stores exact bits to one valid physical value-result ordinal.
 static inline void iree_vm_call_value_result_store(
     const iree_vm_call_packet_t* call, uint16_t value_ordinal, uint64_t value) {
-  uint64_t* slot = value_ordinal < 16
-                       ? &call->value_results.direct[value_ordinal]
-                       : &call->value_results.overflow[value_ordinal - 16];
+  uint64_t* slot =
+      value_ordinal < IREE_VM_CALL_DIRECT_REGISTER_COUNT
+          ? &call->value_results.direct[value_ordinal]
+          : &call->value_results
+                 .overflow[value_ordinal - IREE_VM_CALL_DIRECT_REGISTER_COUNT];
   *slot = value;
 }
 
 // Loads one complete valid function argument.
 static inline iree_vm_function_ref_t iree_vm_call_function_argument_load(
     const iree_vm_call_packet_t* call, uint16_t function_ordinal) {
-  return function_ordinal < 16
+  return function_ordinal < IREE_VM_CALL_DIRECT_REGISTER_COUNT
              ? call->function_arguments.direct[function_ordinal]
-             : call->function_arguments.overflow[function_ordinal - 16];
+             : call->function_arguments
+                   .overflow[function_ordinal -
+                             IREE_VM_CALL_DIRECT_REGISTER_COUNT];
 }
 
 // Stores one complete valid function result.
@@ -547,9 +557,11 @@ static inline void iree_vm_call_function_result_store(
     const iree_vm_call_packet_t* call, uint16_t function_ordinal,
     iree_vm_function_ref_t function_ref) {
   iree_vm_function_ref_t* slot =
-      function_ordinal < 16
+      function_ordinal < IREE_VM_CALL_DIRECT_REGISTER_COUNT
           ? &call->function_results.direct[function_ordinal]
-          : &call->function_results.overflow[function_ordinal - 16];
+          : &call->function_results
+                 .overflow[function_ordinal -
+                           IREE_VM_CALL_DIRECT_REGISTER_COUNT];
   *slot = function_ref;
 }
 

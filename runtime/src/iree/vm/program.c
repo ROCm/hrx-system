@@ -250,7 +250,11 @@ static void iree_vm_program_append_root_bank_layout(
   const uint32_t direct_offset = *inout_storage_size;
   *out_layout = (iree_vm_program_root_bank_layout_t){
       .direct_offset = count ? direct_offset : 0,
-      .overflow_offset = count > 16 ? direct_offset + 16 * element_size : 0,
+      .overflow_offset =
+          count > IREE_VM_CALL_DIRECT_REGISTER_COUNT
+              ? direct_offset +
+                    IREE_VM_CALL_DIRECT_REGISTER_COUNT * element_size
+              : 0,
   };
   *inout_storage_size += count * element_size;
 }

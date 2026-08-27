@@ -8,6 +8,7 @@
 
 #include <inttypes.h>
 
+#include "iree/vm/module.h"
 #include "loom/codegen/low/function.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
@@ -16,10 +17,6 @@
 #include "loom/target/registers.h"
 #include "loom/target/types.h"
 #include "loom/util/walk.h"
-
-enum {
-  LOOM_VM_DIRECT_ABI_VALUE_COUNT = 16,
-};
 
 static const loom_pass_info_t loom_vm_materialize_call_abi_pass_info_storage = {
     .name = IREE_SVL("vm-materialize-call-abi"),
@@ -46,11 +43,12 @@ static bool loom_vm_call_abi_type_is_direct_value(loom_type_t type) {
 static iree_status_t loom_vm_call_abi_validate_values(
     const loom_module_t* module, const loom_value_id_t* values,
     iree_host_size_t value_count, const char* boundary_name) {
-  if (value_count > LOOM_VM_DIRECT_ABI_VALUE_COUNT) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "VM %s has %" PRIhsz " values but the direct ABI supports %u",
-        boundary_name, value_count, (unsigned)LOOM_VM_DIRECT_ABI_VALUE_COUNT);
+  if (value_count > IREE_VM_CALL_DIRECT_REGISTER_COUNT) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "VM %s has %" PRIhsz
+                            " values but the direct ABI supports %u",
+                            boundary_name, value_count,
+                            (unsigned)IREE_VM_CALL_DIRECT_REGISTER_COUNT);
   }
   for (iree_host_size_t i = 0; i < value_count; ++i) {
     const loom_type_t type = loom_module_value_type(module, values[i]);

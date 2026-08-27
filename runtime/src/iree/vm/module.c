@@ -499,14 +499,18 @@ static iree_status_t iree_vm_module_validate_semantics(
 
 static inline iree_vm_ref_t* iree_vm_call_ref_argument_slot(
     const iree_vm_call_packet_t* call, uint16_t ref_ordinal) {
-  return ref_ordinal < 16 ? &call->ref_arguments.direct[ref_ordinal]
-                          : &call->ref_arguments.overflow[ref_ordinal - 16];
+  return ref_ordinal < IREE_VM_CALL_DIRECT_REGISTER_COUNT
+             ? &call->ref_arguments.direct[ref_ordinal]
+             : &call->ref_arguments
+                    .overflow[ref_ordinal - IREE_VM_CALL_DIRECT_REGISTER_COUNT];
 }
 
 static inline iree_vm_ref_t* iree_vm_call_ref_result_slot(
     const iree_vm_call_packet_t* call, uint16_t ref_ordinal) {
-  return ref_ordinal < 16 ? &call->ref_results.direct[ref_ordinal]
-                          : &call->ref_results.overflow[ref_ordinal - 16];
+  return ref_ordinal < IREE_VM_CALL_DIRECT_REGISTER_COUNT
+             ? &call->ref_results.direct[ref_ordinal]
+             : &call->ref_results
+                    .overflow[ref_ordinal - IREE_VM_CALL_DIRECT_REGISTER_COUNT];
 }
 
 IREE_API_EXPORT void iree_vm_call_ref_argument_load_borrow(

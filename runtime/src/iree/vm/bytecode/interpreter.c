@@ -233,8 +233,8 @@ static void iree_vm_bytecode_frame_reset(iree_vm_ref_t* refs,
 }
 
 // Copies one direct physical value bank in fixed native-vector-sized chunks.
-// Direct banks are capped at 16 cells, so this remains a bounded sequence with
-// no variable-length memcpy call or per-cell bounds branch.
+// Direct banks have a fixed small bound, so this remains a bounded sequence
+// with no variable-length memcpy call or per-cell bounds branch.
 static inline void iree_vm_bytecode_copy_direct_values(uint64_t* target,
                                                        const uint64_t* source,
                                                        uint16_t count) {
@@ -272,21 +272,18 @@ static void iree_vm_bytecode_initialize_state(
     memset(state->functions, 0, function_count * sizeof(*state->functions));
   }
 
-  const uint16_t direct_value_count = signature->argument_value_count_u16 < 16
-                                          ? signature->argument_value_count_u16
-                                          : 16;
+  const uint16_t direct_value_count = iree_min(
+      IREE_VM_CALL_DIRECT_REGISTER_COUNT, signature->argument_value_count_u16);
   iree_vm_bytecode_copy_direct_values(
       state->values, call->value_arguments.direct, direct_value_count);
-  const uint16_t direct_ref_count = signature->argument_ref_count_u16 < 16
-                                        ? signature->argument_ref_count_u16
-                                        : 16;
+  const uint16_t direct_ref_count = iree_min(IREE_VM_CALL_DIRECT_REGISTER_COUNT,
+                                             signature->argument_ref_count_u16);
   for (uint16_t i = 0; i < direct_ref_count; ++i) {
     iree_vm_call_ref_argument_load_move(call, i, &state->refs[i]);
   }
   const uint16_t direct_function_count =
-      signature->argument_function_count_u16 < 16
-          ? signature->argument_function_count_u16
-          : 16;
+      iree_min(IREE_VM_CALL_DIRECT_REGISTER_COUNT,
+               signature->argument_function_count_u16);
   if (direct_function_count != 0) {
     memcpy(state->functions, call->function_arguments.direct,
            direct_function_count * sizeof(*state->functions));
@@ -319,8 +316,11 @@ static iree_status_t iree_vm_bytecode_publish_results(
           &result_descriptors[i];
       if (descriptor->kind_u16 == IREE_VM_BYTECODE_SIGNATURE_KIND_REF) {
         const iree_vm_ref_t result_ref =
-            ref_ordinal < 16 ? refs[ref_ordinal]
-                             : call->ref_results.overflow[ref_ordinal - 16];
+            ref_ordinal < IREE_VM_CALL_DIRECT_REGISTER_COUNT
+                ? refs[ref_ordinal]
+                : call->ref_results
+                      .overflow[ref_ordinal -
+                                IREE_VM_CALL_DIRECT_REGISTER_COUNT];
         if (result_ref.object &&
             iree_vm_ref_type(result_ref) !=
                 module->resolved_ref_types[descriptor->type_ordinal_u16]) {
@@ -332,9 +332,11 @@ static iree_status_t iree_vm_bytecode_publish_results(
       } else if (descriptor->kind_u16 ==
                  IREE_VM_BYTECODE_SIGNATURE_KIND_FUNCTION) {
         const iree_vm_function_ref_t result_function =
-            function_ordinal < 16
+            function_ordinal < IREE_VM_CALL_DIRECT_REGISTER_COUNT
                 ? functions[function_ordinal]
-                : call->function_results.overflow[function_ordinal - 16];
+                : call->function_results
+                      .overflow[function_ordinal -
+                                IREE_VM_CALL_DIRECT_REGISTER_COUNT];
         if (!iree_vm_program_function_ref_matches(
                 execution->invocation->process->program, result_function,
                 execution->linked_module, descriptor->type_ordinal_u16)) {
@@ -347,23 +349,19 @@ static iree_status_t iree_vm_bytecode_publish_results(
     }
   }
 
-  const uint16_t direct_value_count = signature->result_value_count_u16 < 16
-                                          ? signature->result_value_count_u16
-                                          : 16;
+  const uint16_t direct_value_count = iree_min(
+      IREE_VM_CALL_DIRECT_REGISTER_COUNT, signature->result_value_count_u16);
   if (call->value_results.direct != values) {
     iree_vm_bytecode_copy_direct_values(call->value_results.direct, values,
                                         direct_value_count);
   }
-  const uint16_t direct_ref_count = signature->result_ref_count_u16 < 16
-                                        ? signature->result_ref_count_u16
-                                        : 16;
+  const uint16_t direct_ref_count = iree_min(IREE_VM_CALL_DIRECT_REGISTER_COUNT,
+                                             signature->result_ref_count_u16);
   for (uint16_t i = 0; i < direct_ref_count; ++i) {
     iree_vm_call_ref_result_store_move(call, i, &refs[i]);
   }
-  const uint16_t direct_function_count =
-      signature->result_function_count_u16 < 16
-          ? signature->result_function_count_u16
-          : 16;
+  const uint16_t direct_function_count = iree_min(
+      IREE_VM_CALL_DIRECT_REGISTER_COUNT, signature->result_function_count_u16);
   if (direct_function_count != 0 &&
       call->function_results.direct != functions) {
     memcpy(call->function_results.direct, functions,
@@ -1877,7 +1875,8 @@ static bool iree_vm_bytecode_function_is_scalar_leaf(
          function->local_ref_count_u32 == 0 &&
          function->function_register_count_u16 == 0 &&
          function->local_function_count_u32 == 0 &&
-         function->value_register_count_u16 <= 16 &&
+         function->value_register_count_u16 <=
+             IREE_VM_CALL_DIRECT_REGISTER_COUNT &&
          function->value_register_count_u16 <=
              signature->result_value_count_u16;
 }
@@ -1903,9 +1902,8 @@ static iree_status_t iree_vm_bytecode_function_start_transient(
     // prefix can execute in place without reserving or copying a frame.
     state.values = params->call.value_results.direct;
     const uint16_t direct_value_count =
-        signature->argument_value_count_u16 < 16
-            ? signature->argument_value_count_u16
-            : 16;
+        iree_min(IREE_VM_CALL_DIRECT_REGISTER_COUNT,
+                 signature->argument_value_count_u16);
     iree_vm_bytecode_copy_direct_values(
         state.values, params->call.value_arguments.direct, direct_value_count);
   } else {

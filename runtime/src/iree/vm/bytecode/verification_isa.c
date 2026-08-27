@@ -322,14 +322,17 @@ static iree_status_t iree_vm_bytecode_verify_call_packet(
     const iree_vm_bytecode_v0_signature_row_t* signature,
     uint16_t direct_ref_move_mask) {
   const uint16_t direct_value_count =
-      iree_min(16u, iree_max(signature->argument_value_count_u16,
-                             signature->result_value_count_u16));
+      iree_min(IREE_VM_CALL_DIRECT_REGISTER_COUNT,
+               iree_max(signature->argument_value_count_u16,
+                        signature->result_value_count_u16));
   const uint16_t direct_ref_count =
-      iree_min(16u, iree_max(signature->argument_ref_count_u16,
-                             signature->result_ref_count_u16));
+      iree_min(IREE_VM_CALL_DIRECT_REGISTER_COUNT,
+               iree_max(signature->argument_ref_count_u16,
+                        signature->result_ref_count_u16));
   const uint16_t direct_function_count =
-      iree_min(16u, iree_max(signature->argument_function_count_u16,
-                             signature->result_function_count_u16));
+      iree_min(IREE_VM_CALL_DIRECT_REGISTER_COUNT,
+               iree_max(signature->argument_function_count_u16,
+                        signature->result_function_count_u16));
   if (caller->value_register_count_u16 < direct_value_count ||
       caller->ref_register_count_u16 < direct_ref_count ||
       caller->function_register_count_u16 < direct_function_count) {
@@ -338,10 +341,10 @@ static iree_status_t iree_vm_bytecode_verify_call_packet(
         "call register banks do not cover the direct packet prefixes");
   }
 
-  const uint16_t direct_ref_argument_count =
-      iree_min(16u, signature->argument_ref_count_u16);
+  const uint16_t direct_ref_argument_count = iree_min(
+      IREE_VM_CALL_DIRECT_REGISTER_COUNT, signature->argument_ref_count_u16);
   const uint16_t valid_ref_move_mask =
-      direct_ref_argument_count == 16
+      direct_ref_argument_count == IREE_VM_CALL_DIRECT_REGISTER_COUNT
           ? UINT16_MAX
           : (uint16_t)((1u << direct_ref_argument_count) - 1u);
   if ((direct_ref_move_mask & ~valid_ref_move_mask) != 0) {
@@ -350,12 +353,14 @@ static iree_status_t iree_vm_bytecode_verify_call_packet(
   }
 
   const uint32_t argument_value_overflow =
-      signature->argument_value_count_u16 > 16
-          ? (uint32_t)signature->argument_value_count_u16 - 16u
+      signature->argument_value_count_u16 > IREE_VM_CALL_DIRECT_REGISTER_COUNT
+          ? (uint32_t)signature->argument_value_count_u16 -
+                IREE_VM_CALL_DIRECT_REGISTER_COUNT
           : 0;
   const uint32_t result_value_overflow =
-      signature->result_value_count_u16 > 16
-          ? (uint32_t)signature->result_value_count_u16 - 16u
+      signature->result_value_count_u16 > IREE_VM_CALL_DIRECT_REGISTER_COUNT
+          ? (uint32_t)signature->result_value_count_u16 -
+                IREE_VM_CALL_DIRECT_REGISTER_COUNT
           : 0;
   const uint32_t required_local_bytes =
       (argument_value_overflow + result_value_overflow) * sizeof(uint64_t);
@@ -366,12 +371,14 @@ static iree_status_t iree_vm_bytecode_verify_call_packet(
   }
 
   const uint32_t argument_ref_overflow =
-      signature->argument_ref_count_u16 > 16
-          ? (uint32_t)signature->argument_ref_count_u16 - 16u
+      signature->argument_ref_count_u16 > IREE_VM_CALL_DIRECT_REGISTER_COUNT
+          ? (uint32_t)signature->argument_ref_count_u16 -
+                IREE_VM_CALL_DIRECT_REGISTER_COUNT
           : 0;
   const uint32_t result_ref_overflow =
-      signature->result_ref_count_u16 > 16
-          ? (uint32_t)signature->result_ref_count_u16 - 16u
+      signature->result_ref_count_u16 > IREE_VM_CALL_DIRECT_REGISTER_COUNT
+          ? (uint32_t)signature->result_ref_count_u16 -
+                IREE_VM_CALL_DIRECT_REGISTER_COUNT
           : 0;
   uint32_t required_local_refs = argument_ref_overflow + result_ref_overflow;
   if (direct_ref_move_mask != valid_ref_move_mask) {
@@ -384,12 +391,15 @@ static iree_status_t iree_vm_bytecode_verify_call_packet(
   }
 
   const uint32_t argument_function_overflow =
-      signature->argument_function_count_u16 > 16
-          ? (uint32_t)signature->argument_function_count_u16 - 16u
+      signature->argument_function_count_u16 >
+              IREE_VM_CALL_DIRECT_REGISTER_COUNT
+          ? (uint32_t)signature->argument_function_count_u16 -
+                IREE_VM_CALL_DIRECT_REGISTER_COUNT
           : 0;
   const uint32_t result_function_overflow =
-      signature->result_function_count_u16 > 16
-          ? (uint32_t)signature->result_function_count_u16 - 16u
+      signature->result_function_count_u16 > IREE_VM_CALL_DIRECT_REGISTER_COUNT
+          ? (uint32_t)signature->result_function_count_u16 -
+                IREE_VM_CALL_DIRECT_REGISTER_COUNT
           : 0;
   if (argument_function_overflow + result_function_overflow >
       caller->local_function_count_u32) {
@@ -798,8 +808,10 @@ static iree_status_t iree_vm_bytecode_function_verify(
         const iree_vm_isa_value_abi_argument_load_record_t* record =
             (const iree_vm_isa_value_abi_argument_load_record_t*)record_data;
         const uint16_t overflow_count =
-            signature->argument_value_count_u16 > 16
-                ? signature->argument_value_count_u16 - 16
+            signature->argument_value_count_u16 >
+                    IREE_VM_CALL_DIRECT_REGISTER_COUNT
+                ? signature->argument_value_count_u16 -
+                      IREE_VM_CALL_DIRECT_REGISTER_COUNT
                 : 0;
         if (record->slot_u16 >= overflow_count) {
           return iree_make_status(
@@ -814,8 +826,10 @@ static iree_status_t iree_vm_bytecode_function_verify(
         const iree_vm_isa_value_abi_result_store_record_t* record =
             (const iree_vm_isa_value_abi_result_store_record_t*)record_data;
         const uint16_t overflow_count =
-            signature->result_value_count_u16 > 16
-                ? signature->result_value_count_u16 - 16
+            signature->result_value_count_u16 >
+                    IREE_VM_CALL_DIRECT_REGISTER_COUNT
+                ? signature->result_value_count_u16 -
+                      IREE_VM_CALL_DIRECT_REGISTER_COUNT
                 : 0;
         if (record->slot_u16 >= overflow_count) {
           return iree_make_status(
@@ -831,8 +845,10 @@ static iree_status_t iree_vm_bytecode_function_verify(
             (const iree_vm_isa_ref_abi_argument_load_borrow_record_t*)
                 record_data;
         const uint16_t overflow_count =
-            signature->argument_ref_count_u16 > 16
-                ? signature->argument_ref_count_u16 - 16
+            signature->argument_ref_count_u16 >
+                    IREE_VM_CALL_DIRECT_REGISTER_COUNT
+                ? signature->argument_ref_count_u16 -
+                      IREE_VM_CALL_DIRECT_REGISTER_COUNT
                 : 0;
         if (record->slot_u16 >= overflow_count) {
           return iree_make_status(
@@ -847,8 +863,9 @@ static iree_status_t iree_vm_bytecode_function_verify(
         const iree_vm_isa_ref_abi_result_store_move_record_t* record =
             (const iree_vm_isa_ref_abi_result_store_move_record_t*)record_data;
         const uint16_t overflow_count =
-            signature->result_ref_count_u16 > 16
-                ? signature->result_ref_count_u16 - 16
+            signature->result_ref_count_u16 > IREE_VM_CALL_DIRECT_REGISTER_COUNT
+                ? signature->result_ref_count_u16 -
+                      IREE_VM_CALL_DIRECT_REGISTER_COUNT
                 : 0;
         if (record->slot_u16 >= overflow_count) {
           return iree_make_status(
@@ -863,8 +880,10 @@ static iree_status_t iree_vm_bytecode_function_verify(
         const iree_vm_isa_func_abi_argument_load_record_t* record =
             (const iree_vm_isa_func_abi_argument_load_record_t*)record_data;
         const uint16_t overflow_count =
-            signature->argument_function_count_u16 > 16
-                ? signature->argument_function_count_u16 - 16
+            signature->argument_function_count_u16 >
+                    IREE_VM_CALL_DIRECT_REGISTER_COUNT
+                ? signature->argument_function_count_u16 -
+                      IREE_VM_CALL_DIRECT_REGISTER_COUNT
                 : 0;
         if (record->slot_u16 >= overflow_count) {
           return iree_make_status(
@@ -879,8 +898,10 @@ static iree_status_t iree_vm_bytecode_function_verify(
         const iree_vm_isa_func_abi_result_store_record_t* record =
             (const iree_vm_isa_func_abi_result_store_record_t*)record_data;
         const uint16_t overflow_count =
-            signature->result_function_count_u16 > 16
-                ? signature->result_function_count_u16 - 16
+            signature->result_function_count_u16 >
+                    IREE_VM_CALL_DIRECT_REGISTER_COUNT
+                ? signature->result_function_count_u16 -
+                      IREE_VM_CALL_DIRECT_REGISTER_COUNT
                 : 0;
         if (record->slot_u16 >= overflow_count) {
           return iree_make_status(

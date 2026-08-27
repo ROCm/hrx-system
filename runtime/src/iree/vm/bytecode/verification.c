@@ -899,14 +899,17 @@ static iree_status_t iree_vm_bytecode_verify_function_signature_structure(
   const iree_vm_bytecode_v0_signature_row_t* signature =
       iree_vm_bytecode_function_signature(layout, row);
   const uint16_t required_value_registers =
-      iree_min(16u, iree_max(signature->argument_value_count_u16,
-                             signature->result_value_count_u16));
+      iree_min(IREE_VM_CALL_DIRECT_REGISTER_COUNT,
+               iree_max(signature->argument_value_count_u16,
+                        signature->result_value_count_u16));
   const uint16_t required_ref_registers =
-      iree_min(16u, iree_max(signature->argument_ref_count_u16,
-                             signature->result_ref_count_u16));
+      iree_min(IREE_VM_CALL_DIRECT_REGISTER_COUNT,
+               iree_max(signature->argument_ref_count_u16,
+                        signature->result_ref_count_u16));
   const uint16_t required_function_registers =
-      iree_min(16u, iree_max(signature->argument_function_count_u16,
-                             signature->result_function_count_u16));
+      iree_min(IREE_VM_CALL_DIRECT_REGISTER_COUNT,
+               iree_max(signature->argument_function_count_u16,
+                        signature->result_function_count_u16));
   if (row->value_register_count_u16 < required_value_registers ||
       row->ref_register_count_u16 < required_ref_registers ||
       row->function_register_count_u16 < required_function_registers) {

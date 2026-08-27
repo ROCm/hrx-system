@@ -135,6 +135,7 @@ loom_cc_library(
         "//loom/src/loom/target:types",
         "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/vm",
     ],
 )
 

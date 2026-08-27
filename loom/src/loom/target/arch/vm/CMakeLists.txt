@@ -118,6 +118,7 @@ loom_cc_library(
     ::lower
     ::ops
     iree::base
+    iree::vm
     loom::codegen::low::function
     loom::ir
     loom::ops::low

@@ -67,9 +67,11 @@ static iree_status_t iree_vm_bytecode_call_validate_arguments(
     const iree_vm_bytecode_v0_signature_descriptor_row_t* descriptor =
         &descriptors[i];
     if (descriptor->kind_u16 == IREE_VM_BYTECODE_SIGNATURE_KIND_REF) {
-      const iree_vm_ref_t argument = ref_ordinal < 16
-                                         ? state->refs[ref_ordinal]
-                                         : state->local_refs[ref_ordinal - 16];
+      const iree_vm_ref_t argument =
+          ref_ordinal < IREE_VM_CALL_DIRECT_REGISTER_COUNT
+              ? state->refs[ref_ordinal]
+              : state->local_refs[ref_ordinal -
+                                  IREE_VM_CALL_DIRECT_REGISTER_COUNT];
       if (argument.object &&
           iree_vm_ref_type(argument) !=
               module->resolved_ref_types[descriptor->type_ordinal_u16]) {
@@ -80,8 +82,10 @@ static iree_status_t iree_vm_bytecode_call_validate_arguments(
     } else if (descriptor->kind_u16 ==
                IREE_VM_BYTECODE_SIGNATURE_KIND_FUNCTION) {
       const iree_vm_function_ref_t argument =
-          function_ordinal < 16 ? state->functions[function_ordinal]
-                                : state->local_functions[function_ordinal - 16];
+          function_ordinal < IREE_VM_CALL_DIRECT_REGISTER_COUNT
+              ? state->functions[function_ordinal]
+              : state->local_functions[function_ordinal -
+                                       IREE_VM_CALL_DIRECT_REGISTER_COUNT];
       if (!iree_vm_program_function_ref_matches(
               execution->invocation->process->program, argument,
               execution->linked_module, descriptor->type_ordinal_u16)) {
@@ -207,12 +211,12 @@ static iree_status_t iree_vm_bytecode_call_start_preflighted(
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_call_validate_arguments(
       module, execution, target->callable_type, signature, state));
 
-  const uint16_t direct_ref_argument_count =
-      iree_min(16u, signature->argument_ref_count_u16);
-  const uint16_t direct_ref_result_count =
-      iree_min(16u, signature->result_ref_count_u16);
+  const uint16_t direct_ref_argument_count = iree_min(
+      IREE_VM_CALL_DIRECT_REGISTER_COUNT, signature->argument_ref_count_u16);
+  const uint16_t direct_ref_result_count = iree_min(
+      IREE_VM_CALL_DIRECT_REGISTER_COUNT, signature->result_ref_count_u16);
   const uint16_t valid_ref_move_mask =
-      direct_ref_argument_count == 16
+      direct_ref_argument_count == IREE_VM_CALL_DIRECT_REGISTER_COUNT
           ? UINT16_MAX
           : (uint16_t)((1u << direct_ref_argument_count) - 1u);
   const bool uses_direct_ref_scratch =
@@ -237,12 +241,15 @@ static iree_status_t iree_vm_bytecode_call_start_preflighted(
   }
 
   const uint16_t argument_value_overflow =
-      signature->argument_value_count_u16 > 16
-          ? signature->argument_value_count_u16 - 16
+      signature->argument_value_count_u16 > IREE_VM_CALL_DIRECT_REGISTER_COUNT
+          ? signature->argument_value_count_u16 -
+                IREE_VM_CALL_DIRECT_REGISTER_COUNT
           : 0;
   const uint16_t argument_function_overflow =
-      signature->argument_function_count_u16 > 16
-          ? signature->argument_function_count_u16 - 16
+      signature->argument_function_count_u16 >
+              IREE_VM_CALL_DIRECT_REGISTER_COUNT
+          ? signature->argument_function_count_u16 -
+                IREE_VM_CALL_DIRECT_REGISTER_COUNT
           : 0;
   const iree_vm_call_packet_t call = {
       .value_arguments =
@@ -261,7 +268,8 @@ static iree_status_t iree_vm_bytecode_call_start_preflighted(
           {
               .direct = state->values,
               .overflow =
-                  signature->result_value_count_u16 > 16
+                  signature->result_value_count_u16 >
+                          IREE_VM_CALL_DIRECT_REGISTER_COUNT
                       ? (uint64_t*)state->local_bytes + argument_value_overflow
                       : NULL,
           },
@@ -282,7 +290,8 @@ static iree_status_t iree_vm_bytecode_call_start_preflighted(
           {
               .direct = state->functions,
               .overflow =
-                  signature->result_function_count_u16 > 16
+                  signature->result_function_count_u16 >
+                          IREE_VM_CALL_DIRECT_REGISTER_COUNT
                       ? state->local_functions + argument_function_overflow
                       : NULL,
           },
