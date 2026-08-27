@@ -16,6 +16,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/type_registry.h"
+#include "loom/target/arch/vm/abi/layout.h"
 #include "loom/target/arch/vm/descriptors.h"
 #include "loom/target/arch/vm/lower/constants.h"
 #include "loom/target/arch/vm/lower/control.h"
@@ -203,6 +204,25 @@ static bool loom_vm_source_type_supported(void* user_data,
          LOOM_LOW_REGISTER_CLASS_ID_INVALID;
 }
 
+static iree_status_t loom_vm_map_abi_layout(
+    void* user_data, loom_low_lower_context_t* context,
+    loom_low_lower_abi_layout_kind_t layout_kind,
+    const loom_type_t* argument_types, iree_host_size_t argument_count,
+    const loom_type_t* result_types, iree_host_size_t result_count,
+    loom_named_attr_slice_t* out_abi_layout) {
+  (void)user_data;
+  *out_abi_layout = loom_named_attr_slice_empty();
+  if (layout_kind != LOOM_LOW_LOWER_ABI_LAYOUT_KIND_FUNC) {
+    return iree_ok_status();
+  }
+  loom_attribute_t layout_attr = loom_attr_absent();
+  IREE_RETURN_IF_ERROR(loom_vm_call_abi_layout_make_attr(
+      loom_low_lower_context_module(context), argument_types, argument_count,
+      result_types, result_count, &layout_attr));
+  *out_abi_layout = loom_attr_as_dict(layout_attr);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_vm_select_op(void* user_data,
                                        loom_low_lower_context_t* context,
                                        const loom_op_t* source_op,
@@ -316,6 +336,7 @@ static const loom_low_lower_policy_t kVmCoreLowLowerPolicy = {
     .map_type = {.fn = loom_vm_map_type, .user_data = NULL},
     .source_type_supported = {.fn = loom_vm_source_type_supported,
                               .user_data = NULL},
+    .map_abi_layout = {.fn = loom_vm_map_abi_layout, .user_data = NULL},
     .switch_lowering =
         {
             .can_emit = loom_vm_switch_lowering_can_emit,

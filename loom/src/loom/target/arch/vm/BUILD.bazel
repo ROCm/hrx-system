@@ -112,6 +112,17 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "abi_layout",
+    srcs = ["abi/layout.c"],
+    hdrs = ["abi/layout.h"],
+    visibility = ["//loom/src/loom/target/emit/vm:__pkg__"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "lower",
     srcs = [
         "lower/constants.c",
@@ -125,6 +136,7 @@ loom_cc_library(
         "lower/types.h",
     ],
     deps = [
+        ":abi_layout",
         ":descriptors",
         "//loom/src/loom/codegen/low:builder",
         "//loom/src/loom/codegen/low/lower",
@@ -176,6 +188,7 @@ loom_cc_library(
     ],
     visibility = _VM_PROVIDER_VISIBILITY,
     deps = [
+        ":abi_layout",
         ":descriptors",
         ":low_verify",
         ":lower",

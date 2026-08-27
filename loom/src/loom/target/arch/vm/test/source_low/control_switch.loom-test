@@ -13,7 +13,7 @@ func.def target(@target) @direct_dense_switch(%selector: index, %case0: i32, %ca
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @direct_dense_switch(%selector: reg<vm.value : index>, %case0: reg<vm.value : i32>, %case1: reg<vm.value : i32>, %fallback: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = (reg<vm.value : index>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)}) @direct_dense_switch(%selector: reg<vm.value : index>, %case0: reg<vm.value : i32>, %case1: reg<vm.value : i32>, %fallback: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
   control.switch %selector targets [^case0, ^case1] default ^default
 ^case0:
   return %case0
@@ -40,7 +40,7 @@ func.def target(@target) @direct_switch_with_hole(%selector: index, %case0: i32,
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @direct_switch_with_hole(%selector: reg<vm.value : index>, %case0: reg<vm.value : i32>, %case1: reg<vm.value : i32>, %case3: reg<vm.value : i32>, %fallback: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = (reg<vm.value : index>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)}) @direct_switch_with_hole(%selector: reg<vm.value : index>, %case0: reg<vm.value : i32>, %case1: reg<vm.value : i32>, %case3: reg<vm.value : i32>, %fallback: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
   control.switch %selector targets [^case0, ^case1, ^default, ^case3] default ^default
 ^case0:
   return %case0
@@ -69,7 +69,7 @@ func.def target(@target) @direct_negative_switch(%selector: index, %negative2: i
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @direct_negative_switch(%selector: reg<vm.value : index>, %negative2: reg<vm.value : i32>, %negative1: reg<vm.value : i32>, %zero: reg<vm.value : i32>, %fallback: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = (reg<vm.value : index>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)}) @direct_negative_switch(%selector: reg<vm.value : index>, %negative2: reg<vm.value : i32>, %negative1: reg<vm.value : i32>, %zero: reg<vm.value : i32>, %fallback: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
   %12 = constant.s16 -2 : reg<vm.value : index>
   %13 = integer.sub.i64 %selector, %12 : reg<vm.value : index>
   control.switch %13 targets [^negative2, ^negative1, ^zero] default ^default
@@ -98,7 +98,7 @@ func.def target(@target) @sparse_scalar_switch(%selector: index, %case0: i32, %c
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @sparse_scalar_switch(%selector: reg<vm.value : index>, %case0: reg<vm.value : i32>, %case8: reg<vm.value : i32>, %fallback: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = (reg<vm.value : index>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)}) @sparse_scalar_switch(%selector: reg<vm.value : index>, %case0: reg<vm.value : i32>, %case8: reg<vm.value : i32>, %fallback: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
   low.cond_br %selector, ^_bb1, ^case0 : reg<vm.value : index>
 ^_bb1:
   %10 = constant.s16 8 : reg<vm.value : index>
@@ -125,7 +125,7 @@ func.def target(@target) @single_case_switch(%selector: index, %case0: i32, %fal
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @single_case_switch(%selector: reg<vm.value : index>, %case0: reg<vm.value : i32>, %fallback: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = (reg<vm.value : index>, reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)}) @single_case_switch(%selector: reg<vm.value : index>, %case0: reg<vm.value : i32>, %fallback: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
   low.cond_br %selector, ^default, ^case0 : reg<vm.value : index>
 ^case0:
   return %case0

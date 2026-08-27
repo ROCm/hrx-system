@@ -104,6 +104,21 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    abi_layout
+  HDRS
+    "abi/layout.h"
+  SRCS
+    "abi/layout.c"
+  DEPS
+    iree::base
+    loom::ir
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     lower
   HDRS
     "lower/constants.h"
@@ -115,6 +130,7 @@ loom_cc_library(
     "lower/control.c"
     "lower/lower.c"
   DEPS
+    ::abi_layout
     ::descriptors
     iree::base
     iree::base::internal
@@ -171,6 +187,7 @@ loom_cc_library(
     "pass_registry.c"
     "provider.c"
   DEPS
+    ::abi_layout
     ::descriptors
     ::low_verify
     ::lower

@@ -9,7 +9,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @return_input(%input: reg
 // ----
 vm.target<core> @target
 
-low.func.def target<vm.core>(@target) abi(vm_function) @return_input(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = (reg<vm.value : i32>) -> (reg<vm.value : i32>)}) @return_input(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
   %2 = copy %input : reg<vm.value : i32> -> reg<vm.value : i32>
   %3 = copy %2 : reg<vm.value : i32> -> reg<vm.value : i32>
   return %3
@@ -36,7 +36,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @caller(%input: reg<vm.va
 // ----
 vm.target<core> @target
 
-low.func.def target<vm.core>(@target) abi(vm_function) @callee(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = (reg<vm.value : i32>) -> (reg<vm.value : i32>)}) @callee(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
   %8 = copy %input : reg<vm.value : i32> -> reg<vm.value : i32>
   %one = constant.s16 1 : reg<vm.value : i32>
   %result = integer.add.i32 %8, %one : reg<vm.value : i32>
@@ -44,7 +44,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @callee(%input: reg<vm.va
   return %9
 }
 
-low.func.def target<vm.core>(@target) abi(vm_function) @caller(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = (reg<vm.value : i32>) -> (reg<vm.value : i32>)}) @caller(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
   %10 = copy %input : reg<vm.value : i32> -> reg<vm.value : i32>
   %11 = copy %10 : reg<vm.value : i32> -> reg<vm.value : i32>
   %result = low.func.call @callee(%11) : (reg<vm.value : i32>) -> (reg<vm.value : i32>)
@@ -52,4 +52,21 @@ low.func.def target<vm.core>(@target) abi(vm_function) @caller(%input: reg<vm.va
   %sum = integer.add.i32 %12, %10 : reg<vm.value : i32>
   %13 = copy %sum : reg<vm.value : i32> -> reg<vm.value : i32>
   return %13
+}
+
+// ====
+
+// RUN: pass vm-materialize-call-abi
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @empty() asm {
+  return
+}
+
+// ----
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = () -> ()}) @empty() asm {
+  return
 }

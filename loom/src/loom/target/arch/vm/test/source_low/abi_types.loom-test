@@ -7,6 +7,6 @@ func.def target(@target) @typed_boundaries(%value: i32, %buffer: hal.buffer, %ca
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @typed_boundaries(%value: reg<vm.value : i32>, %buffer: reg<vm.ref : hal.buffer>, %callback: reg<vm.function : func.ref<(i32) -> (i32)>>) -> (reg<vm.ref : hal.buffer>, reg<vm.function : func.ref<(i32) -> (i32)>>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = (reg<vm.value : i32>, reg<vm.ref : hal.buffer>, reg<vm.function : func.ref<(i32) -> (i32)>>) -> (reg<vm.ref : hal.buffer>, reg<vm.function : func.ref<(i32) -> (i32)>>)}) @typed_boundaries(%value: reg<vm.value : i32>, %buffer: reg<vm.ref : hal.buffer>, %callback: reg<vm.function : func.ref<(i32) -> (i32)>>) -> (reg<vm.ref : hal.buffer>, reg<vm.function : func.ref<(i32) -> (i32)>>) asm {
   return %buffer, %callback
 }

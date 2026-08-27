@@ -182,7 +182,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @contract_precedes_call_a
 // ----
 vm.target<core> @target
 
-low.func.def target<vm.core>(@target) abi(vm_function) @contract_precedes_call_abi(%value: reg<vm.value : index>) -> (reg<vm.value : index>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = (reg<vm.value : index>) -> (reg<vm.value : index>)}) @contract_precedes_call_abi(%value: reg<vm.value : index>) -> (reg<vm.value : index>) asm {
   %6 = copy %value : reg<vm.value : index> -> reg<vm.value : index>
   %2 = constant.s16 1 : reg<vm.value : i64>
   %3 = constant.s16 64 : reg<vm.value : i64>
