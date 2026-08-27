@@ -1377,6 +1377,8 @@ typedef enum loom_amdgpu_fragment_memory_payload_form_e {
   LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16 = 3,
   // A f16 low-subword result fragment is widened to f32 lanes before store.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_EXTEND_F16_TO_F32 = 4,
+  // A f32 result fragment is rounded to F16 lanes before a 16-bit store.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_F16 = 6,
 } loom_amdgpu_fragment_memory_payload_form_t;
 
 typedef enum loom_amdgpu_fragment_memory_packetization_e {
@@ -1508,11 +1510,13 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
   // Result-fragment store epilogue strategy selected from layout and packet
   // facts.
   loom_amdgpu_fragment_memory_epilogue_strategy_t epilogue_strategy;
+  // Exact cross-lane packed-B16 publication selected for the memory axis.
+  const loom_matrix_fragment_packed_b16_publication_t* packed_b16_publication;
   // Optional f32 fragment source to round directly for narrowed stores.
   loom_value_id_t narrowed_result_round_source;
-  // Optional scalar scale applied before narrowed f32-to-bf16 stores.
+  // Optional scalar scale applied before narrowed f32-to-16-bit stores.
   loom_value_id_t narrowed_result_scale_source;
-  // Optional packed bf16 fragment source copied directly for narrowed stores.
+  // Optional packed 16-bit fragment source copied directly for narrowed stores.
   loom_value_id_t narrowed_result_packed_source;
 } loom_amdgpu_fragment_memory_plan_t;
 

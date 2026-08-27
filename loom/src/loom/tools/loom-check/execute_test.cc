@@ -1280,6 +1280,22 @@ TEST_F(ExecuteTest, EmitSourceLowRejectsFunctionSelector) {
   loom_check_result_deinitialize(&result);
 }
 
+TEST_F(ExecuteTest, EmitSourceLowCanSuppressSuccessfulOutput) {
+  loom_check_result_t result;
+  IREE_ASSERT_OK(
+      ExecuteFirst("// RUN: emit source-low output=none\n"
+                   "test.target<low_core> @test_target\n"
+                   "\n"
+                   "func.def target(@test_target) @f() {\n"
+                   "  func.return\n"
+                   "}\n",
+                   &result));
+  EXPECT_EQ(result.raw_outcome, LOOM_CHECK_PASS);
+  EXPECT_EQ(result.final_outcome, LOOM_CHECK_PASS);
+  EXPECT_TRUE(ActualOutputString(result).empty());
+  loom_check_result_deinitialize(&result);
+}
+
 TEST_F(ExecuteTest, EmitSourceLowParsesSanitizerOptions) {
   loom_check_result_t result;
   IREE_ASSERT_OK(

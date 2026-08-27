@@ -20,7 +20,7 @@ extern "C" {
 iree_status_t loom_amdgpu_emit_fragment_memory_packed_16bit_packet(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fragment_memory_plan_t* plan, loom_value_id_t low_payload,
-    const loom_amdgpu_bf16_pack_descriptors_t* bf16_pack_descriptors,
+    const loom_amdgpu_float16_pack_descriptors_t* float16_pack_descriptors,
     uint16_t register_index, uint16_t result_register_count,
     uint16_t packet_register_count, loom_value_id_t low_scale,
     loom_type_t vgpr_type, loom_value_id_t* out_packet);

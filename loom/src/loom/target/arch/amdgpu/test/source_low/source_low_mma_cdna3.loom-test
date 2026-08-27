@@ -239,7 +239,7 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workg
   %48 = v_lshlrev_b32_src0_inline %25, 1
   %49 = v_lshlrev_b32_src0_inline %27, 7
   %50 = v_add_u32 %48, %49
-  %51 = v_and_b32_src0_inline %25, 1
+  %51 = v_and_b32_src0_inline %20, 1
   %52 = v_cmp_eq_i32_src1_inline %51 {rhs = 0}
   %53 = slice %result[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %54 = v_lshrrev_b32_src0_inline %53, 16

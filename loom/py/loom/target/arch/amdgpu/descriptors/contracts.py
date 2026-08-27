@@ -141,6 +141,7 @@ _AMDGPU_CONTRACT_DESCRIPTOR_OVERLAY_BUILDERS: dict[
     "amdgpu.v_div_fixup_f32": _v_div_fixup_f32_overlay,
     "amdgpu.v_cvt_f32_f16": _v_cvt_f32_f16_overlay,
     "amdgpu.v_cvt_f16_f32": _v_cvt_f16_f32_overlay,
+    "amdgpu.v_pack_b32_f16": _v_pack_b32_f16_overlay,
     "amdgpu.v_cvt_f32_i32": _v_cvt_f32_i32_overlay,
     "amdgpu.v_cvt_i32_f32": _v_cvt_i32_f32_overlay,
     "amdgpu.v_cvt_f32_u32": _v_cvt_f32_u32_overlay,

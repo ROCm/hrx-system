@@ -336,11 +336,14 @@ static iree_status_t loom_check_emit_parse_source_low_option(
   } else if (iree_string_view_equal(value, IREE_SV("prepared-pipeline"))) {
     request->source_low_output =
         LOOM_CHECK_EMIT_SOURCE_LOW_OUTPUT_PREPARED_PIPELINE;
+  } else if (iree_string_view_equal(value, IREE_SV("none"))) {
+    request->source_low_output = LOOM_CHECK_EMIT_SOURCE_LOW_OUTPUT_MODULE;
+    request->suppress_actual_output = true;
   } else {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "source-low option 'output' expected 'module', 'low', 'pipeline', or "
-        "'prepared-pipeline', got '%.*s'",
+        "'prepared-pipeline', or 'none', got '%.*s'",
         (int)value.size, value.data);
   }
   request->has_source_low_output_option = true;
@@ -1944,6 +1947,7 @@ iree_status_t loom_check_execute_emit(
   if (request.format == LOOM_CHECK_EMIT_SOURCE_LOW_TEXT) {
     loom_source_entry_t source_entry = {0};
     loom_source_table_resolver_t resolver_data = {0};
+    iree_host_size_t actual_output_size = result->actual_output.size;
     status = loom_check_source_resolver_for_case(
         module, filename, stripped_view, &source_entry, &resolver_data);
     if (iree_status_is_ok(status)) {
@@ -1952,6 +1956,17 @@ iree_status_t loom_check_execute_emit(
           (loom_source_resolver_t){.fn = loom_source_table_resolve,
                                    .user_data = &resolver_data},
           &diagnostic_collector, block_pool, result);
+    }
+    if (iree_status_is_ok(status)) {
+      if (request.suppress_actual_output) {
+        result->actual_output.size = actual_output_size;
+        if (result->actual_output.buffer &&
+            result->actual_output.capacity > actual_output_size) {
+          result->actual_output.buffer[actual_output_size] = 0;
+        }
+      } else if (result->actual_output.size != actual_output_size) {
+        result->has_actual_output = true;
+      }
     }
     loom_module_free(module);
     diagnostic_collector.module = NULL;
@@ -1970,7 +1985,12 @@ iree_status_t loom_check_execute_emit(
       iree_arena_deinitialize(&diagnostic_arena);
       return status;
     }
-    status = loom_check_emit_compare_output(test_case, allocator, result);
+    if (request.suppress_actual_output) {
+      result->raw_outcome = LOOM_CHECK_PASS;
+      status = iree_ok_status();
+    } else {
+      status = loom_check_emit_compare_output(test_case, allocator, result);
+    }
     iree_string_builder_deinitialize(&stripped_input);
     iree_arena_deinitialize(&diagnostic_arena);
     return status;

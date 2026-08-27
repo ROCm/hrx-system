@@ -432,6 +432,7 @@ static bool loom_amdgpu_fragment_epilogue_plan_needs_physical_loop(
   }
   switch (plan->payload_form) {
     case LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16:
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_F16:
       if (plan->epilogue_strategy !=
               LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_SCALAR_B16_STORE &&
           plan->epilogue_strategy !=
@@ -470,7 +471,9 @@ static bool loom_amdgpu_fragment_epilogue_group_wants_physical_loop(
   const iree_host_size_t register_iterations =
       plan->register_count * group_count;
   if (plan->payload_form ==
-      LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16) {
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16 ||
+      plan->payload_form ==
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_F16) {
     switch (plan->epilogue_strategy) {
       case LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_SCALAR_B16_STORE:
         return register_iterations >=

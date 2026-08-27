@@ -19,6 +19,14 @@ extern "C" {
 bool loom_amdgpu_fragment_memory_payload_form_is_load_fp8_to_16bit(
     loom_amdgpu_fragment_memory_payload_form_t payload_form);
 
+// Returns true when |payload_form| narrows f32 result lanes for a 16-bit store.
+bool loom_amdgpu_fragment_memory_payload_form_is_store_narrow_f32_to_16bit(
+    loom_amdgpu_fragment_memory_payload_form_t payload_form);
+
+// Returns the physical 16-bit store element type for a narrowed f32 form.
+loom_scalar_type_t loom_amdgpu_fragment_memory_store_narrow_result_element_type(
+    loom_amdgpu_fragment_memory_payload_form_t payload_form);
+
 // Returns the physical 16-bit result element type for an FP8 load form.
 loom_scalar_type_t loom_amdgpu_fragment_memory_load_fp8_result_element_type(
     loom_amdgpu_fragment_memory_payload_form_t payload_form);

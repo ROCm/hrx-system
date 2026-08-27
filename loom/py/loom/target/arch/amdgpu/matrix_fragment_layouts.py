@@ -152,6 +152,15 @@ class MatrixFragmentResultToRhsPackedB16Projection:
 
 
 @dataclass(frozen=True, slots=True)
+class MatrixFragmentPackedB16PublicationProjection:
+    """Exact result-owner projection for one packed-B16 memory packet."""
+
+    publishing_participant_and_mask: int
+    publishing_participant_equal_value: int
+    paired_participant_xor_mask: int
+
+
+@dataclass(frozen=True, slots=True)
 class MatrixFragmentLaneBitProjection:
     """Contiguous lane bits projected by an AND followed by a right shift."""
 
@@ -1367,43 +1376,135 @@ def matrix_fragment_result_to_rhs_packed_b16_projection(
 
 
 @cache
-def _role_has_contiguous_lane_xor1_columns(
-    wave_size: int,
+def matrix_fragment_packed_b16_publication_projection(
+    layout: AmdgpuMatrixFragmentLayout,
     role: MatrixFragmentRoleLayout,
-) -> bool:
-    column_axis = _AXIS_NAMES.index("column")
+    packed_axis: str,
+) -> MatrixFragmentPackedB16PublicationProjection | None:
+    """Compiles exact adjacent-axis owners into a packed publication recipe.
+
+    The supported executable projection lets one participant bit predicate
+    publish pairs. The publisher owns the low coordinate and the paired
+    participant owns the adjacent high coordinate at the same local payload
+    position. Exhaustive exact-map evaluation proves that the pairs cover the
+    role's complete logical domain exactly once.
+    """
+
+    if packed_axis not in ("row", "column"):
+        raise ValueError(f"unsupported packed-B16 publication axis '{packed_axis}'")
+    packed_axis_index = _AXIS_NAMES.index(packed_axis)
     if (
-        wave_size % 2 != 0
+        layout.wave_size <= 0
+        or (layout.wave_size & (layout.wave_size - 1)) != 0
+        or layout.tile_shape[0] != 1
+        or layout.tile_shape[packed_axis_index] % 2 != 0
+        or role.element_bit_count != 32
         or role.coordinate_element_offset != 0
         or role.coordinate_element_stride != 1
         or role.payload_element_count != role.coordinate_element_count
+        or role.payload_element_count != role.register_count
+        or role.reduction_group is not None
     ):
-        return False
-    evaluate_coordinate = _role_storage_coordinate_evaluator(role.axes)
-    for participant in range(0, wave_size, 2):
-        for value in range(role.coordinate_element_count):
-            coordinate = evaluate_coordinate(participant, value)
-            paired_coordinate = evaluate_coordinate(participant ^ 1, value)
+        return None
+
+    native_role_layout = matrix_fragment_native_role_layout(layout, role)
+    if native_role_layout is None:
+        return None
+    coordinate_map = operation_local_coordinate_map(native_role_layout)
+    if (
+        coordinate_map.source_dimensions
+        != (
+            CoordinateDimension("participant", layout.wave_size),
+            CoordinateDimension("value", role.coordinate_element_count),
+        )
+        or coordinate_map.destination_dimensions
+        != (
+            CoordinateDimension("block", 1),
+            CoordinateDimension("row", layout.tile_shape[1]),
+            CoordinateDimension("column", layout.tile_shape[2]),
+        )
+        or not coordinate_map.is_bijective
+    ):
+        return None
+
+    paired_participant_xor_mask: int | None = None
+    publishing_positions: dict[int, set[int]] = {}
+    paired_positions: dict[int, set[int]] = {}
+    for row in range(layout.tile_shape[1]):
+        for column in range(layout.tile_shape[2]):
+            packed_coordinate = row if packed_axis == "row" else column
+            if packed_coordinate % 2 != 0:
+                continue
+            paired_row = row + 1 if packed_axis == "row" else row
+            paired_column = column + 1 if packed_axis == "column" else column
+            publishing_participant, publishing_position = (
+                coordinate_map.evaluate_canonical_inverse((0, row, column))
+            )
+            paired_participant, paired_position = (
+                coordinate_map.evaluate_canonical_inverse(
+                    (0, paired_row, paired_column)
+                )
+            )
+            participant_xor_mask = publishing_participant ^ paired_participant
             if (
-                coordinate[column_axis] is None
-                or paired_coordinate[column_axis] != coordinate[column_axis] + 1
-                or any(
-                    coordinate[axis] != paired_coordinate[axis]
-                    for axis in range(len(_AXIS_NAMES))
-                    if axis != column_axis
+                participant_xor_mask == 0
+                or paired_position != publishing_position
+                or (
+                    paired_participant_xor_mask is not None
+                    and participant_xor_mask != paired_participant_xor_mask
                 )
             ):
-                return False
-    return True
+                return None
+            paired_participant_xor_mask = participant_xor_mask
+            publishing_positions.setdefault(publishing_participant, set()).add(
+                publishing_position
+            )
+            paired_positions.setdefault(paired_participant, set()).add(paired_position)
 
+    if paired_participant_xor_mask is None:
+        return None
+    expected_positions = set(range(role.coordinate_element_count))
+    publishing_participants = frozenset(publishing_positions)
+    paired_participants = frozenset(paired_positions)
+    if (
+        any(
+            positions != expected_positions
+            for positions in publishing_positions.values()
+        )
+        or any(
+            positions != expected_positions for positions in paired_positions.values()
+        )
+        or publishing_participants & paired_participants
+        or publishing_participants | paired_participants
+        != frozenset(range(layout.wave_size))
+        or any(
+            participant ^ paired_participant_xor_mask not in paired_participants
+            for participant in publishing_participants
+        )
+    ):
+        return None
 
-def role_has_contiguous_lane_xor1_columns(
-    layout: AmdgpuMatrixFragmentLayout,
-    role: MatrixFragmentRoleLayout,
-) -> bool:
-    """Returns whether lane xor 1 advances only the role's column axis."""
-
-    return _role_has_contiguous_lane_xor1_columns(layout.wave_size, role)
+    first_publisher = min(publishing_participants)
+    participant_bit_mask = layout.wave_size - 1
+    publishing_participant_and_mask = participant_bit_mask
+    for participant in publishing_participants:
+        publishing_participant_and_mask &= ~(participant ^ first_publisher)
+    publishing_participant_equal_value = (
+        first_publisher & publishing_participant_and_mask
+    )
+    selected = frozenset(
+        participant
+        for participant in range(layout.wave_size)
+        if (participant & publishing_participant_and_mask)
+        == publishing_participant_equal_value
+    )
+    if publishing_participant_and_mask == 0 or selected != publishing_participants:
+        return None
+    return MatrixFragmentPackedB16PublicationProjection(
+        publishing_participant_and_mask=publishing_participant_and_mask,
+        publishing_participant_equal_value=publishing_participant_equal_value,
+        paired_participant_xor_mask=paired_participant_xor_mask,
+    )
 
 
 AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (

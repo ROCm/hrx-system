@@ -185,17 +185,6 @@ const loom_matrix_fragment_role_layout_t* loom_matrix_fragment_role_layout(
   }
 }
 
-bool loom_matrix_fragment_role_has_contiguous_lane_xor1_columns(
-    const loom_matrix_fragment_layout_t* layout,
-    loom_contract_operand_role_t role) {
-  const loom_matrix_fragment_role_layout_t* role_layout =
-      loom_matrix_fragment_role_layout(layout, role);
-  return role_layout != NULL &&
-         iree_all_bits_set(
-             role_layout->flags,
-             LOOM_MATRIX_FRAGMENT_ROLE_LAYOUT_FLAG_CONTIGUOUS_LANE_XOR1_COLUMNS);
-}
-
 bool loom_matrix_fragment_physical_element_count(
     const loom_matrix_fragment_layout_t* layout,
     loom_contract_operand_role_t role,

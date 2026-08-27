@@ -1,0 +1,81 @@
+// RUN: emit source-low output=none
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @gfx942_f32_result_to_f16_memory() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xbf16>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x16xbf16, %rhs_layout>
+  %output_view = buffer.view %output_buffer[%base] : buffer -> view<16x16xf16>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xbf16> -> vector<4xbf16>
+  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xbf16, %rhs_layout> -> vector<4xbf16>
+  %initial_values = vector.constant 0.0 : vector<4xf32>
+  %initial = vector.fragment<init> %initial_values shape [%m, %n] : vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %initial : vector<4xbf16>, vector<4xbf16>, vector<4xf32>
+  vector.fragment.store<result> %result, %output_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf16>
+  kernel.return
+}
+
+// ====
+
+// RUN: emit source-low output=none
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @gfx1100_f32_result_to_f16_memory() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xf16>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x16xf16, %rhs_layout>
+  %output_view = buffer.view %output_buffer[%base] : buffer -> view<16x16xf16>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16> -> vector<16xf16>
+  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xf16, %rhs_layout> -> vector<16xf16>
+  %initial_values = vector.constant 0.0 : vector<8xf32>
+  %initial = vector.fragment<init> %initial_values shape [%m, %n] : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %initial : vector<16xf16>, vector<16xf16>, vector<8xf32>
+  vector.fragment.store<result> %result, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf16>
+  kernel.return
+}
+
+// ====
+
+// RUN: emit source-low output=none
+
+amdgpu.target<gfx1151> @target
+
+kernel.def target(@target) @gfx1151_f32_result_to_f16_memory() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xf16>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x16xf16, %rhs_layout>
+  %output_view = buffer.view %output_buffer[%base] : buffer -> view<16x16xf16>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16> -> vector<16xf16>
+  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xf16, %rhs_layout> -> vector<16xf16>
+  %initial_values = vector.constant 0.0 : vector<8xf32>
+  %initial = vector.fragment<init> %initial_values shape [%m, %n] : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %initial : vector<16xf16>, vector<16xf16>, vector<8xf32>
+  vector.fragment.store<result> %result, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf16>
+  kernel.return
+}

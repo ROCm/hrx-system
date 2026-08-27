@@ -879,7 +879,7 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workg
   %69 = v_lshlrev_b32_src0_inline %25, 1
   %70 = v_lshlrev_b32_src0_inline %27, 7
   %71 = v_add_u32 %69, %70
-  %72 = v_and_b32_src0_inline %25, 1
+  %72 = v_and_b32_src0_inline %21, 1
   %73 = v_cmp_eq_i32_src1_inline %72 {rhs = 0}
   %74 = slice %result[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %75 = v_lshrrev_b32_src0_inline %74, 16
@@ -988,7 +988,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
   %54 = v_lshlrev_b32_src0_inline %23, 1
   %55 = v_lshlrev_b32_src0_inline %25, 7
   %56 = v_add_u32 %54, %55
-  %57 = v_and_b32_src0_inline %23, 1
+  %57 = v_and_b32_src0_inline %19, 1
   %58 = v_cmp_eq_i32_src1_inline %57 {rhs = 0}
   %59 = slice %result[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %60 = v_mov_b32_dpp %59 {dpp_ctrl = 177}
@@ -1100,7 +1100,7 @@ low.kernel.def target<amdgpu.rdna4.core>(@target) workgroup_size(32, 1, 1) workg
   %79 = v_lshlrev_b32_src0_inline %25, 1
   %80 = v_lshlrev_b32_src0_inline %27, 8
   %81 = v_add_u32 %79, %80
-  %82 = v_and_b32_src0_inline %25, 1
+  %82 = v_and_b32_src0_inline %21, 1
   %83 = v_cmp_eq_i32_src1_inline %82 {rhs = 0}
   %84 = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %85 = v_lshrrev_b32_src0_inline %84, 16
@@ -1243,7 +1243,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(32, 1, 
   %66 = v_lshlrev_b32_src0_inline %25, 1
   %67 = v_lshlrev_b32_src0_inline %27, 8
   %68 = v_add_u32 %66, %67
-  %69 = v_and_b32_src0_inline %25, 1
+  %69 = v_and_b32_src0_inline %21, 1
   %70 = v_cmp_eq_i32_src1_inline %69 {rhs = 0}
   %71 = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %72 = v_mov_b32_dpp16 %71 {dpp_ctrl = 177}

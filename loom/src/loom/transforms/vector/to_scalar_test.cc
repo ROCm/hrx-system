@@ -170,7 +170,7 @@ static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
         /*.coordinate_element_count=*/2,
         /*.coordinate_element_offset=*/0,
         /*.coordinate_element_stride=*/1,
-        /*.flags=*/0,
+        /*.packed_b16_publications=*/{},
         /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
             LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
         /*.packed_element_coordinate_flag=*/
@@ -187,7 +187,7 @@ static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
         /*.coordinate_element_count=*/2,
         /*.coordinate_element_offset=*/0,
         /*.coordinate_element_stride=*/1,
-        /*.flags=*/0,
+        /*.packed_b16_publications=*/{},
         /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN |
             LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
         /*.packed_element_coordinate_flag=*/
@@ -204,7 +204,7 @@ static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
         /*.coordinate_element_count=*/2,
         /*.coordinate_element_offset=*/0,
         /*.coordinate_element_stride=*/1,
-        /*.flags=*/0,
+        /*.packed_b16_publications=*/{},
         /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
             LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN,
         /*.packed_element_coordinate_flag=*/0,
@@ -220,7 +220,7 @@ static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
         /*.coordinate_element_count=*/2,
         /*.coordinate_element_offset=*/0,
         /*.coordinate_element_stride=*/1,
-        /*.flags=*/0,
+        /*.packed_b16_publications=*/{},
         /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
             LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN,
         /*.packed_element_coordinate_flag=*/0,
