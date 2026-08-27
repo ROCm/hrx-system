@@ -702,6 +702,25 @@ void iree_hal_amdxdna_device_destroy_chain_command_cache(
   device->chain_command_cache = NULL;
 }
 
+void iree_hal_amdxdna_chain_command_cache_invalidate_queue(
+    iree_hal_amdxdna_device_chain_command_cache_t* cache,
+    iree_hal_amdxdna_native_queue_t* queue) {
+  if (!cache || !queue) return;
+  iree_slim_mutex_lock(&cache->mutex);
+  for (iree_host_size_t i = 0; i < cache->entry_count; ++i) {
+    iree_hal_amdxdna_chain_command_cache_entry_t* entry = &cache->entries[i];
+    if (entry->group.queue != queue) continue;
+    if (entry->in_flight_count != 0) {
+      entry->invalidated = true;
+    } else {
+      iree_hal_amdxdna_chain_command_cache_entry_deinitialize(
+          cache->host_allocator, entry);
+      iree_hal_amdxdna_chain_command_cache_entry_prepare_empty(entry);
+    }
+  }
+  iree_slim_mutex_unlock(&cache->mutex);
+}
+
 bool iree_hal_amdxdna_direct_command_buffer_control_words_changed(
     const uint32_t* cached_words, iree_host_size_t cached_word_count,
     const uint32_t* fresh_words, iree_host_size_t fresh_word_count) {
@@ -1032,5 +1051,10 @@ void iree_hal_amdxdna_chain_command_cache_entry_release_in_flight(
   IREE_ASSERT(entry->in_flight_count > 0,
               "amdxdna chain command cache in-flight underflow");
   --entry->in_flight_count;
+  if (entry->in_flight_count == 0 && entry->invalidated) {
+    iree_hal_amdxdna_chain_command_cache_entry_deinitialize(
+        cache->host_allocator, entry);
+    iree_hal_amdxdna_chain_command_cache_entry_prepare_empty(entry);
+  }
   iree_slim_mutex_unlock(&cache->mutex);
 }

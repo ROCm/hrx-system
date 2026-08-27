@@ -107,14 +107,6 @@ static iree_status_t iree_hal_amdxdna_nop_executable_cache_prepare_executable(
   iree_status_t status = iree_hal_amdxdna_native_executable_create(
       executable_cache->native_device, executable_params,
       executable_cache->host_allocator, out_executable);
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_amdxdna_executable_preload_contexts(
-        executable_cache->device, *out_executable);
-    if (!iree_status_is_ok(status)) {
-      iree_hal_executable_release(*out_executable);
-      *out_executable = NULL;
-    }
-  }
   IREE_TRACE_ZONE_END(z0);
   return status;
 }

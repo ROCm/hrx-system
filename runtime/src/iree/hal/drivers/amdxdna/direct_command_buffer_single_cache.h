@@ -59,6 +59,10 @@ typedef struct iree_hal_amdxdna_single_command_cache_entry_t {
   // command BO has been issued and must not be rewritten, reused, or evicted
   // until the completion queue releases it.
   uint32_t in_flight_count;
+  // Set when this entry's native queue/context is evicted while the command is
+  // still in flight. The completion release discards the entry once
+  // in_flight_count reaches zero.
+  bool invalidated;
 } iree_hal_amdxdna_single_command_cache_entry_t;
 
 typedef struct iree_hal_amdxdna_device_single_command_cache_t {
@@ -74,6 +78,10 @@ typedef struct iree_hal_amdxdna_device iree_hal_amdxdna_device;
 
 iree_hal_amdxdna_device_single_command_cache_t*
 iree_hal_amdxdna_get_single_command_cache(iree_hal_amdxdna_device* device);
+
+void iree_hal_amdxdna_single_command_cache_invalidate_queue(
+    iree_hal_amdxdna_device_single_command_cache_t* cache,
+    iree_hal_amdxdna_native_queue_t* queue);
 
 iree_status_t iree_hal_amdxdna_find_single_command_cache_entry(
     iree_hal_amdxdna_device_single_command_cache_t* cache,

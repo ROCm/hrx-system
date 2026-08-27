@@ -321,6 +321,69 @@ TEST(SingleCommandCacheTest, InFlightEntryIsNotMatchedUntilReleased) {
   iree_slim_mutex_deinitialize(&cache.mutex);
 }
 
+TEST(SingleCommandCacheTest, InvalidateQueueDropsIdleAndDefersInFlight) {
+  iree_hal_amdxdna_device_single_command_cache_t cache = {};
+  cache.host_allocator = TestAllocator();
+  iree_slim_mutex_initialize(&cache.mutex);
+  const uint32_t ctrl_words[] = {20, 21};
+  iree_hal_amdxdna_native_buffer_t* binding_buffers[] = {FakeBuffer(0x170)};
+  const uint64_t binding_device_addrs[] = {0x87000000};
+  const iree_device_size_t binding_offsets[] = {112};
+  const iree_device_size_t binding_lengths[] = {4096};
+  iree_hal_amdxdna_native_queue_t* target_queue = FakeQueue(0x280);
+  iree_hal_amdxdna_native_queue_t* other_queue = FakeQueue(0x281);
+
+  auto* idle = iree_hal_amdxdna_store_single_command_cache_entry(
+      &cache, target_queue, /*cu_index=*/10, ctrl_words,
+      IREE_ARRAYSIZE(ctrl_words), binding_buffers, binding_device_addrs,
+      binding_offsets, binding_lengths, IREE_ARRAYSIZE(binding_buffers),
+      /*ctrl_code_buffer=*/nullptr, /*command=*/nullptr);
+  ASSERT_NE(idle, nullptr);
+  auto* in_flight = iree_hal_amdxdna_store_single_command_cache_entry(
+      &cache, target_queue, /*cu_index=*/11, ctrl_words,
+      IREE_ARRAYSIZE(ctrl_words), binding_buffers, binding_device_addrs,
+      binding_offsets, binding_lengths, IREE_ARRAYSIZE(binding_buffers),
+      /*ctrl_code_buffer=*/nullptr, /*command=*/nullptr);
+  ASSERT_NE(in_flight, nullptr);
+  iree_hal_amdxdna_single_command_cache_entry_acquire_in_flight(in_flight);
+  auto* other = iree_hal_amdxdna_store_single_command_cache_entry(
+      &cache, other_queue, /*cu_index=*/12, ctrl_words,
+      IREE_ARRAYSIZE(ctrl_words), binding_buffers, binding_device_addrs,
+      binding_offsets, binding_lengths, IREE_ARRAYSIZE(binding_buffers),
+      /*ctrl_code_buffer=*/nullptr, FakeCommand(0x480));
+  ASSERT_NE(other, nullptr);
+
+  iree_hal_amdxdna_single_command_cache_invalidate_queue(&cache, target_queue);
+
+  EXPECT_EQ(idle->queue, nullptr);
+  EXPECT_EQ(in_flight->queue, target_queue);
+  EXPECT_TRUE(in_flight->invalidated);
+  EXPECT_EQ(other->queue, other_queue);
+
+  iree_hal_amdxdna_single_command_cache_entry_t* found = nullptr;
+  IREE_CHECK_OK(iree_hal_amdxdna_find_single_command_cache_entry(
+      &cache, target_queue, /*cu_index=*/10, ctrl_words,
+      IREE_ARRAYSIZE(ctrl_words), binding_buffers, binding_device_addrs,
+      binding_offsets, binding_lengths, IREE_ARRAYSIZE(binding_buffers),
+      &found));
+  EXPECT_EQ(found, nullptr);
+
+  IREE_CHECK_OK(iree_hal_amdxdna_find_single_command_cache_entry(
+      &cache, other_queue, /*cu_index=*/12, ctrl_words,
+      IREE_ARRAYSIZE(ctrl_words), binding_buffers, binding_device_addrs,
+      binding_offsets, binding_lengths, IREE_ARRAYSIZE(binding_buffers),
+      &found));
+  EXPECT_EQ(found, other);
+
+  iree_hal_amdxdna_single_command_cache_entry_release_in_flight(&cache,
+                                                                in_flight);
+  EXPECT_EQ(in_flight->queue, nullptr);
+  EXPECT_FALSE(in_flight->invalidated);
+
+  FreeSignature(&cache, other);
+  iree_slim_mutex_deinitialize(&cache.mutex);
+}
+
 TEST(SingleCommandCacheTest, StoreReturnsNullWhenAllEntriesAreInFlight) {
   iree_hal_amdxdna_device_single_command_cache_t cache = {};
   cache.host_allocator = TestAllocator();

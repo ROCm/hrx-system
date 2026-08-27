@@ -62,6 +62,14 @@ static void iree_hal_amdxdna_device_initialize(
   IREE_TRACE_ZONE_END(z0);
 }
 
+static void iree_hal_amdxdna_device_before_release_context(
+    void* user_data, iree_hal_amdxdna_native_context_ref_t* context_ref) {
+  iree_hal_amdxdna_device* device = (iree_hal_amdxdna_device*)user_data;
+  iree_hal_amdxdna_native_queue_t* queue =
+      iree_hal_amdxdna_native_context_ref_queue(context_ref);
+  iree_hal_amdxdna_device_invalidate_command_caches_for_queue(device, queue);
+}
+
 static void iree_hal_amdxdna_device_deinitialize(
     iree_hal_amdxdna_device* device) {
   iree_hal_amdxdna_device_destroy_single_command_cache(device);
@@ -1784,8 +1792,14 @@ iree_status_t iree_hal_amdxdna_device_create(
     // Now that caps are known, size the context cache to the device's
     // hardware-context budget (adaptive per architecture; falls back to a
     // conservative default when the budget is unknown).
-    device->context_cache = iree_hal_amdxdna_device_context_cache_create(
-        device->host_allocator, device->native_caps.max_hardware_contexts);
+    const iree_hal_amdxdna_context_cache_ops_t context_cache_ops = {
+        .before_release_context =
+            iree_hal_amdxdna_device_before_release_context,
+    };
+    device->context_cache =
+        iree_hal_amdxdna_device_context_cache_create_with_ops(
+            device->host_allocator, device->native_caps.max_hardware_contexts,
+            &context_cache_ops, device);
     if (!device->context_cache) {
       status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                                 "failed to allocate amdxdna context cache");

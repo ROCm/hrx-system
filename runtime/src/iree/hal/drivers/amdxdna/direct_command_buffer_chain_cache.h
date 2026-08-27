@@ -130,6 +130,10 @@ typedef struct iree_hal_amdxdna_chain_command_cache_entry_t {
   // native child/parent command BOs have been issued and cannot be reused,
   // rewritten, or evicted until native completion.
   uint32_t in_flight_count;
+  // Set when this entry's native queue/context is evicted while the chain is
+  // still in flight. The completion release discards the entry once
+  // in_flight_count reaches zero.
+  bool invalidated;
 } iree_hal_amdxdna_chain_command_cache_entry_t;
 
 typedef struct iree_hal_amdxdna_device_chain_command_cache_t {
@@ -210,6 +214,10 @@ iree_status_t iree_hal_amdxdna_chain_accum_append_group(
 
 iree_hal_amdxdna_device_chain_command_cache_t*
 iree_hal_amdxdna_get_chain_command_cache(iree_hal_amdxdna_device* device);
+
+void iree_hal_amdxdna_chain_command_cache_invalidate_queue(
+    iree_hal_amdxdna_device_chain_command_cache_t* cache,
+    iree_hal_amdxdna_native_queue_t* queue);
 
 bool iree_hal_amdxdna_chain_cmd_descriptor_matches(
     const iree_hal_amdxdna_chain_cmd_t* lhs,

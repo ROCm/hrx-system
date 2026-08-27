@@ -98,6 +98,20 @@ static void iree_hal_amdxdna_completion_release_chain_cache_entry(
   iree_allocator_free(release->cache->host_allocator, release);
 }
 
+static void iree_hal_amdxdna_completion_release_context_ref(void* user_data) {
+  iree_hal_amdxdna_native_context_ref_release(
+      (iree_hal_amdxdna_native_context_ref_t*)user_data);
+}
+
+void iree_hal_amdxdna_device_invalidate_command_caches_for_queue(
+    iree_hal_amdxdna_device* device, iree_hal_amdxdna_native_queue_t* queue) {
+  if (!device || !queue) return;
+  iree_hal_amdxdna_single_command_cache_invalidate_queue(
+      device->single_command_cache, queue);
+  iree_hal_amdxdna_chain_command_cache_invalidate_queue(
+      device->chain_command_cache, queue);
+}
+
 static iree_status_t
 iree_hal_amdxdna_direct_command_buffer_defer_single_cache_release(
     iree_hal_amdxdna_direct_command_buffer* command_buffer,
@@ -2801,8 +2815,12 @@ iree_status_t iree_hal_amdxdna_direct_command_buffer_dispatch_plan(
   //
   //   1. data_payload_count == 0 -- self-contained dispatch. The entry point
   //      carries its own context image (PDI or xclbin). The context is
-  //      content-keyed, created once, and memoized on the entry point so every
-  //      later dispatch reuses the same hwctx.
+  //      keyed by the native context-image inputs (PDI+CU or xclbin) and
+  //      borrowed for this dispatch. Dispatch control code is command identity
+  //      and must not split hwctx objects. Do not retain the borrowed context
+  //      on the executable: FLM and similar direct-XADX users may cache many
+  //      executable handles, and executable-owned native contexts would bypass
+  //      the device LRU and exhaust the small driver hwctx pool.
   //
   //   2. data_payload_count != 0 with a PDI/xclbin on this entry point --
   //      context-loading control-packet entry point. It (re)loads the array and
@@ -2813,36 +2831,18 @@ iree_status_t iree_hal_amdxdna_direct_command_buffer_dispatch_plan(
   //      point. It has no image of its own and runs on the executable->context
   //      that a sibling loader (branch 2) published; it fails if none has.
   if (iree_status_is_ok(status) && plan->data_payload_count == 0) {
-    iree_slim_mutex_lock(&executable->context_mutex);
-    if (kernel_params->cached_context_valid) {
-      context_ref = iree_hal_amdxdna_native_context_ref_retain(
-          kernel_params->cached_context);
-      cu_idx = kernel_params->cached_cu_index;
-    } else {
-      iree_hal_amdxdna_native_context_ref_t* raw_context_ref = NULL;
-      status = iree_hal_amdxdna_device_get_or_create_context(
-          command_buffer->device, plan->pdi_span, plan->xclbin_span,
-          plan->kernel_name, plan->control_codes, plan->control_code_count,
-          &raw_context_ref);
-      if (iree_status_is_ok(status)) {
-        context_ref = raw_context_ref;
-        status = iree_hal_amdxdna_native_context_ref_open_cu(
-            context_ref, plan->kernel_name, &cu_idx);
-      }
-      if (iree_status_is_ok(status)) {
-        kernel_params->cached_context =
-            iree_hal_amdxdna_native_context_ref_retain(context_ref);
-        kernel_params->cached_cu_index = cu_idx;
-        kernel_params->cached_context_valid = true;
-      }
+    status = iree_hal_amdxdna_device_get_or_create_context(
+        command_buffer->device, plan->pdi_span, plan->xclbin_span,
+        plan->kernel_name, &context_ref);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_amdxdna_native_context_ref_open_cu(
+          context_ref, plan->kernel_name, &cu_idx);
     }
-    iree_slim_mutex_unlock(&executable->context_mutex);
   } else if (iree_status_is_ok(status) && (kernel_params->pdi.count != 0 ||
                                            kernel_params->xclbin.count != 0)) {
     status = iree_hal_amdxdna_device_get_or_create_context(
         command_buffer->device, plan->pdi_span, plan->xclbin_span,
-        plan->kernel_name, plan->control_codes, plan->control_code_count,
-        &context_ref);
+        plan->kernel_name, &context_ref);
     if (iree_status_is_ok(status)) {
       status = iree_hal_amdxdna_native_context_ref_open_cu(
           context_ref, plan->kernel_name, &cu_idx);
@@ -2870,6 +2870,19 @@ iree_status_t iree_hal_amdxdna_direct_command_buffer_dispatch_plan(
         IREE_STATUS_FAILED_PRECONDITION,
         "amdxdna: control-packet dispatch with no context image ran before "
         "its PDI/xclbin-carrying entry point loaded the array");
+  }
+  if (iree_status_is_ok(status) &&
+      iree_hal_amdxdna_direct_command_buffer_uses_async_completion(
+          command_buffer)) {
+    iree_hal_amdxdna_native_context_ref_t* completion_context_ref =
+        iree_hal_amdxdna_native_context_ref_retain(context_ref);
+    status = iree_hal_amdxdna_completion_batch_add_cleanup(
+        command_buffer->completion_batch,
+        iree_hal_amdxdna_completion_release_context_ref,
+        completion_context_ref);
+    if (!iree_status_is_ok(status)) {
+      iree_hal_amdxdna_native_context_ref_release(completion_context_ref);
+    }
   }
 
   iree_hal_amdxdna_native_queue_t* queue = NULL;

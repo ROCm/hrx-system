@@ -78,6 +78,13 @@ void iree_hal_amdxdna_device_destroy_single_command_cache(
 void iree_hal_amdxdna_device_destroy_chain_command_cache(
     iree_hal_amdxdna_device* device);
 
+// Invalidates non-in-flight cached native commands tied to |queue| and marks
+// in-flight entries for discard once native completion releases them. The queue
+// belongs to a native context that is about to be released by the context
+// cache, so cache entries keyed by it must not outlive that context identity.
+void iree_hal_amdxdna_device_invalidate_command_caches_for_queue(
+    iree_hal_amdxdna_device* device, iree_hal_amdxdna_native_queue_t* queue);
+
 // Returns true when a cached chain command's already staged control-code words
 // must be rewritten to match a freshly recorded command. Generic allocator
 // caching may legally change HAL buffer wrapper/native BO identity between

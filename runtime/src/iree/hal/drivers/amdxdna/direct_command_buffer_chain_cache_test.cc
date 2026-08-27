@@ -518,6 +518,41 @@ TEST(ChainCommandCacheTest, InFlightEntryIsNotMatchedUntilReleased) {
   iree_slim_mutex_deinitialize(&cache.mutex);
 }
 
+TEST(ChainCommandCacheTest, InvalidateQueueDropsIdleAndDefersInFlight) {
+  iree_hal_amdxdna_device_chain_command_cache_t cache = {};
+  cache.host_allocator = TestAllocator();
+  cache.entry_count = 3;
+  iree_slim_mutex_initialize(&cache.mutex);
+  iree_hal_amdxdna_native_queue_t* target_queue = FakeQueue(0x3100);
+  iree_hal_amdxdna_native_queue_t* other_queue = FakeQueue(0x3101);
+  for (iree_host_size_t i = 0; i < cache.entry_count; ++i) {
+    iree_hal_amdxdna_chain_group_initialize(&cache.entries[i].group);
+    cache.entries[i].last_use = i + 1;
+  }
+  cache.entries[0].group.queue = target_queue;
+  cache.entries[1].group.queue = target_queue;
+  cache.entries[1].in_flight_count = 1;
+  cache.entries[2].group.queue = other_queue;
+
+  iree_hal_amdxdna_chain_command_cache_invalidate_queue(&cache, target_queue);
+
+  EXPECT_EQ(cache.entries[0].group.queue, nullptr);
+  EXPECT_EQ(cache.entries[1].group.queue, target_queue);
+  EXPECT_TRUE(cache.entries[1].invalidated);
+  EXPECT_EQ(cache.entries[2].group.queue, other_queue);
+
+  iree_hal_amdxdna_chain_command_cache_entry_release_in_flight(
+      &cache, &cache.entries[1]);
+  EXPECT_EQ(cache.entries[1].group.queue, nullptr);
+  EXPECT_FALSE(cache.entries[1].invalidated);
+
+  for (iree_host_size_t i = 0; i < cache.entry_count; ++i) {
+    iree_hal_amdxdna_chain_group_deinitialize(TestAllocator(),
+                                              &cache.entries[i].group);
+  }
+  iree_slim_mutex_deinitialize(&cache.mutex);
+}
+
 TEST(ChainCommandCacheTest, AllocateEntryReturnsNullWhenAllEntriesAreInFlight) {
   iree_hal_amdxdna_device_chain_command_cache_t cache = {};
   cache.host_allocator = TestAllocator();

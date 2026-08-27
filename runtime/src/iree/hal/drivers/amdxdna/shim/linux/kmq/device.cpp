@@ -360,7 +360,11 @@ int device::create_hw_context(const std::vector<uint8_t>& pdi,
   int err = new_context->init_errno();
   if (err) {
     const int create_err = new_context->context_create_errno();
-    *out_context_pool_exhausted = create_err == ENOENT || create_err == ENOSPC;
+    // Linux KMQ driver stacks differ in the errno returned when the small
+    // process-wide hwctx pool is exhausted. Treat only the create-hwctx ioctl's
+    // errno as a pool signal; later setup EINVALs remain ordinary failures.
+    *out_context_pool_exhausted =
+        create_err == ENOENT || create_err == ENOSPC || create_err == EINVAL;
     return err;
   }
   *out_context = std::move(new_context);

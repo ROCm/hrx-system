@@ -48,12 +48,6 @@ typedef struct iree_hal_amdxdna_kernel_params_t {
   iree_string_view_t kernel_name;
   uint32_t n_reconfigure_runs;
   uint32_t n_pdi_loads;
-  // Memoized native context + CU index resolved from this entry point's
-  // PDI/xclbin. Written under the owning executable's context_mutex; explicit
-  // refs keep the native context alive for reuse across command buffers.
-  iree_hal_amdxdna_native_context_ref_t* cached_context;
-  iree_hal_amdxdna_native_c_cu_index_t cached_cu_index;
-  bool cached_context_valid;
   IREE_TRACE(iree_string_view_t source_filename;)
   IREE_TRACE(uint32_t source_line;)
 } iree_hal_amdxdna_kernel_params_t;
@@ -73,9 +67,7 @@ typedef struct iree_hal_amdxdna_executable {
   // may be recorded against one executable concurrently.
   iree_slim_mutex_t context_mutex;
   // Shared control-packet context and CU index resolved by the PDI-carrying
-  // entry point. Empty-PDI control-packet entry points reuse both. Non-control-
-  // packet entry points use a fresh local context per dispatch and do not
-  // mutate these fields.
+  // entry point. Empty-PDI control-packet entry points reuse both.
   iree_hal_amdxdna_native_context_ref_t* context;
   iree_hal_amdxdna_native_c_cu_index_t context_cu_index;
   bool context_cu_index_valid;
