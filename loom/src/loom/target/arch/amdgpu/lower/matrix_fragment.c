@@ -95,30 +95,26 @@ bool loom_amdgpu_matrix_fragment_role_layout_packed_element_axis(
     const loom_matrix_fragment_role_layout_t* role_layout,
     loom_matrix_fragment_axis_t* out_axis) {
   *out_axis = LOOM_MATRIX_FRAGMENT_AXIS_COUNT;
-  const uint16_t payload_elements_per_register =
-      loom_amdgpu_matrix_fragment_payload_elements_per_register(role_layout);
-  if (payload_elements_per_register <= 1 ||
-      role_layout->coordinate_element_offset != 0 ||
-      role_layout->coordinate_element_stride != 1) {
+  if (role_layout == NULL || role_layout->packed_element_coordinate_flag == 0) {
     return false;
   }
-  for (iree_host_size_t reverse_index = 0;
-       reverse_index < LOOM_MATRIX_FRAGMENT_AXIS_COUNT; ++reverse_index) {
-    const loom_matrix_fragment_axis_t axis =
-        (loom_matrix_fragment_axis_t)(LOOM_MATRIX_FRAGMENT_AXIS_COUNT -
-                                      reverse_index - 1);
-    if (!iree_any_bit_set(role_layout->coordinate_flags, 1u << axis) ||
-        role_layout->axes[axis].element_count <= 1) {
-      continue;
-    }
-    if ((role_layout->axes[axis].element_count %
-         payload_elements_per_register) != 0) {
-      return false;
-    }
-    *out_axis = axis;
-    return true;
+  switch (role_layout->packed_element_coordinate_flag) {
+    case LOOM_MATRIX_FRAGMENT_COORDINATE_BLOCK:
+      *out_axis = LOOM_MATRIX_FRAGMENT_AXIS_BLOCK;
+      return true;
+    case LOOM_MATRIX_FRAGMENT_COORDINATE_ROW:
+      *out_axis = LOOM_MATRIX_FRAGMENT_AXIS_ROW;
+      return true;
+    case LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN:
+      *out_axis = LOOM_MATRIX_FRAGMENT_AXIS_COLUMN;
+      return true;
+    case LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION:
+      *out_axis = LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION;
+      return true;
+    default:
+      IREE_ASSERT_UNREACHABLE("invalid packed matrix fragment coordinate");
+      IREE_BUILTIN_UNREACHABLE();
   }
-  return false;
 }
 
 bool loom_amdgpu_matrix_fragment_role_layout_uses_packed_b16_elements(

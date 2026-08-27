@@ -7,7 +7,6 @@
 #include "loom/transforms/vector/to_scalar_mma.h"
 
 #include <stdint.h>
-#include <string.h>
 
 #include "loom/analysis/contract.h"
 #include "loom/analysis/matrix_fragment_layout.h"
@@ -1201,10 +1200,11 @@ static bool loom_vector_to_scalar_mma_role_layouts_match(
   return lhs->register_count == rhs->register_count &&
          lhs->element_bit_count == rhs->element_bit_count &&
          lhs->payload_element_count == rhs->payload_element_count &&
+         lhs->coordinate_element_count == rhs->coordinate_element_count &&
          lhs->coordinate_element_offset == rhs->coordinate_element_offset &&
          lhs->coordinate_element_stride == rhs->coordinate_element_stride &&
          lhs->coordinate_flags == rhs->coordinate_flags &&
-         memcmp(lhs->axes, rhs->axes, sizeof(lhs->axes)) == 0;
+         lhs->coordinate_projection_plan == rhs->coordinate_projection_plan;
 }
 
 bool loom_vector_to_scalar_result_fragment_layout_is_supported(
@@ -1223,7 +1223,8 @@ bool loom_vector_to_scalar_result_fragment_layout_is_supported(
          result->coordinate_flags == expected_flags &&
          result->payload_element_count != 0 &&
          result->coordinate_element_offset == 0 &&
-         result->coordinate_element_stride == 1;
+         result->coordinate_element_stride == 1 &&
+         result->coordinate_projection_plan != NULL;
 }
 
 static bool loom_vector_to_scalar_mma_reduction_role_layout_is_supported(
@@ -1241,6 +1242,7 @@ static bool loom_vector_to_scalar_mma_reduction_role_layout_is_supported(
       (shared_flags | LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN);
   return layout->tile_shape.block_count > 0 &&
          role_layout->payload_element_count != 0 &&
+         role_layout->coordinate_projection_plan != NULL &&
          (carries_row || carries_column);
 }
 
@@ -1301,94 +1303,6 @@ static bool loom_vector_to_scalar_mma_distributed_static_is_supported(
   return true;
 }
 
-static uint32_t loom_vector_to_scalar_mma_axis_suffix_count(
-    const loom_matrix_fragment_role_layout_t* role_layout,
-    loom_matrix_fragment_axis_t axis, bool outer) {
-  uint32_t count = 1;
-  for (iree_host_size_t i = (iree_host_size_t)axis + 1;
-       i < LOOM_MATRIX_FRAGMENT_AXIS_COUNT; ++i) {
-    if (!iree_any_bit_set(role_layout->coordinate_flags, 1u << i)) {
-      continue;
-    }
-    const loom_matrix_fragment_axis_layout_t* axis_layout =
-        &role_layout->axes[i];
-    count *= outer ? axis_layout->outer_count : axis_layout->element_count;
-  }
-  return count;
-}
-
-static uint32_t loom_vector_to_scalar_mma_inner_element_count(
-    const loom_matrix_fragment_role_layout_t* role_layout) {
-  uint32_t count = 1;
-  for (iree_host_size_t i = 0; i < LOOM_MATRIX_FRAGMENT_AXIS_COUNT; ++i) {
-    if (iree_any_bit_set(role_layout->coordinate_flags, 1u << i)) {
-      count *= role_layout->axes[i].element_count;
-    }
-  }
-  return count;
-}
-
-static uint32_t loom_vector_to_scalar_mma_outer_element_count(
-    const loom_matrix_fragment_role_layout_t* role_layout) {
-  uint32_t count = 1;
-  for (iree_host_size_t i = 0; i < LOOM_MATRIX_FRAGMENT_AXIS_COUNT; ++i) {
-    if (iree_any_bit_set(role_layout->coordinate_flags, 1u << i)) {
-      count *= role_layout->axes[i].outer_count;
-    }
-  }
-  return count;
-}
-
-static uint32_t loom_vector_to_scalar_mma_ceil_div_u32(uint32_t value,
-                                                       uint32_t divisor) {
-  IREE_ASSERT_GT(divisor, 0u);
-  return value / divisor + (value % divisor != 0);
-}
-
-static iree_status_t loom_vector_to_scalar_mma_build_bounded_quotient(
-    loom_vector_to_scalar_state_t* state,
-    loom_vector_to_scalar_index_term_t linear, uint32_t source_extent,
-    uint32_t divisor, loom_vector_to_scalar_index_term_t* out_quotient,
-    uint32_t* out_quotient_extent) {
-  IREE_ASSERT_GT(source_extent, 0u);
-  IREE_ASSERT_GT(divisor, 0u);
-  *out_quotient_extent =
-      loom_vector_to_scalar_mma_ceil_div_u32(source_extent, divisor);
-  if (source_extent <= divisor) {
-    *out_quotient = loom_vector_to_scalar_static_term(0);
-    return iree_ok_status();
-  }
-  if (divisor == 1) {
-    *out_quotient = linear;
-    return iree_ok_status();
-  }
-  return loom_vector_to_scalar_build_term_binary(
-      state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_DIV, linear,
-      loom_vector_to_scalar_static_term(divisor), out_quotient);
-}
-
-static iree_status_t loom_vector_to_scalar_mma_build_term_digit(
-    loom_vector_to_scalar_state_t* state,
-    loom_vector_to_scalar_index_term_t linear, uint32_t source_extent,
-    uint32_t stride, uint32_t count,
-    loom_vector_to_scalar_index_term_t* out_digit) {
-  IREE_ASSERT_GT(count, 0u);
-  if (count == 1) {
-    *out_digit = loom_vector_to_scalar_static_term(0);
-    return iree_ok_status();
-  }
-  uint32_t quotient_extent = 0;
-  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_bounded_quotient(
-      state, linear, source_extent, stride, out_digit, &quotient_extent));
-  if (quotient_extent <= count) {
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
-      state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_REM, *out_digit,
-      loom_vector_to_scalar_static_term(count), out_digit));
-  return iree_ok_status();
-}
-
 static iree_status_t loom_vector_to_scalar_mma_build_scaled_add(
     loom_vector_to_scalar_state_t* state,
     loom_vector_to_scalar_index_term_t base,
@@ -1412,15 +1326,54 @@ static iree_status_t loom_vector_to_scalar_mma_build_scaled_add(
       state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_ADD, base, scaled, out_term);
 }
 
-static iree_status_t loom_vector_to_scalar_mma_build_axis_coordinate_term(
+static iree_status_t loom_vector_to_scalar_mma_build_coordinate_projection(
     loom_vector_to_scalar_state_t* state,
-    const loom_matrix_fragment_layout_t* layout,
+    const loom_matrix_fragment_coordinate_projection_term_t* terms,
+    uint8_t term_count,
+    const loom_vector_to_scalar_index_term_t
+        source_terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT],
+    loom_vector_to_scalar_index_term_t
+        out_terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT]) {
+  for (uint8_t i = 0; i < LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT;
+       ++i) {
+    out_terms[i] = loom_vector_to_scalar_static_term(0);
+  }
+  for (uint8_t i = 0; i < term_count; ++i) {
+    const loom_matrix_fragment_coordinate_projection_term_t* term = &terms[i];
+    const loom_matrix_fragment_coordinate_dimension_t source_dimension =
+        (loom_matrix_fragment_coordinate_dimension_t)term->source_dimension;
+    const loom_matrix_fragment_coordinate_dimension_t destination_dimension =
+        (loom_matrix_fragment_coordinate_dimension_t)
+            term->destination_dimension;
+    loom_vector_to_scalar_index_term_t digit = source_terms[source_dimension];
+    if (term->source_divisor > 1) {
+      IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
+          state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_DIV, digit,
+          loom_vector_to_scalar_static_term(term->source_divisor), &digit));
+    }
+    if (term->source_modulus > 0) {
+      IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
+          state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_REM, digit,
+          loom_vector_to_scalar_static_term(term->source_modulus), &digit));
+    }
+    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_scaled_add(
+        state, out_terms[destination_dimension], digit,
+        term->destination_multiplier, &out_terms[destination_dimension]));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_vector_to_scalar_mma_build_forward_coordinate_terms(
+    loom_vector_to_scalar_state_t* state,
     const loom_matrix_fragment_role_layout_t* role_layout,
-    loom_vector_to_scalar_index_term_t lane_id,
-    loom_vector_to_scalar_index_term_t payload_element_index,
-    loom_matrix_fragment_axis_t axis,
-    loom_vector_to_scalar_index_term_t* out_coordinate) {
-  loom_vector_to_scalar_index_term_t coordinate_element = payload_element_index;
+    loom_vector_to_scalar_index_term_t participant,
+    loom_vector_to_scalar_index_term_t payload_element,
+    loom_vector_to_scalar_index_term_t
+        out_terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT]) {
+  const loom_matrix_fragment_coordinate_projection_plan_t* plan =
+      role_layout->coordinate_projection_plan;
+  IREE_ASSERT_TRUE(plan != NULL);
+  loom_vector_to_scalar_index_term_t coordinate_element = payload_element;
   if (role_layout->coordinate_element_offset != 0) {
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
         state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_SUB, coordinate_element,
@@ -1435,120 +1388,40 @@ static iree_status_t loom_vector_to_scalar_mma_build_axis_coordinate_term(
             role_layout->coordinate_element_stride),
         &coordinate_element));
   }
-
-  const uint32_t inner_element_count =
-      loom_vector_to_scalar_mma_inner_element_count(role_layout);
-  const uint32_t coordinate_element_extent =
-      inner_element_count *
-      loom_vector_to_scalar_mma_outer_element_count(role_layout);
-  loom_vector_to_scalar_index_term_t inner_linear = {0};
-  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_term_digit(
-      state, coordinate_element, coordinate_element_extent, 1,
-      inner_element_count, &inner_linear));
-  loom_vector_to_scalar_index_term_t outer_linear = {0};
-  uint32_t outer_element_count = 0;
-  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_bounded_quotient(
-      state, coordinate_element, coordinate_element_extent, inner_element_count,
-      &outer_linear, &outer_element_count));
-
-  const loom_matrix_fragment_axis_layout_t* axis_layout =
-      &role_layout->axes[axis];
-  loom_vector_to_scalar_index_term_t element_coordinate = {0};
-  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_term_digit(
-      state, inner_linear, inner_element_count,
-      loom_vector_to_scalar_mma_axis_suffix_count(role_layout, axis, false),
-      axis_layout->element_count, &element_coordinate));
-  loom_vector_to_scalar_index_term_t thread_coordinate = {0};
-  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_term_digit(
-      state, lane_id, layout->wave_size, axis_layout->thread_stride,
-      axis_layout->thread_count, &thread_coordinate));
-  loom_vector_to_scalar_index_term_t outer_coordinate = {0};
-  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_term_digit(
-      state, outer_linear, outer_element_count,
-      loom_vector_to_scalar_mma_axis_suffix_count(role_layout, axis, true),
-      axis_layout->outer_count, &outer_coordinate));
-
-  loom_vector_to_scalar_index_term_t thread_and_outer = {0};
-  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_scaled_add(
-      state, thread_coordinate, outer_coordinate, axis_layout->thread_count,
-      &thread_and_outer));
-  return loom_vector_to_scalar_mma_build_scaled_add(
-      state, element_coordinate, thread_and_outer, axis_layout->element_count,
-      out_coordinate);
+  loom_vector_to_scalar_index_term_t
+      source_terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT] = {
+          [LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT] = participant,
+          [LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE] =
+              coordinate_element,
+      };
+  return loom_vector_to_scalar_mma_build_coordinate_projection(
+      state, plan->terms, plan->forward_term_count, source_terms, out_terms);
 }
 
-static iree_status_t loom_vector_to_scalar_mma_build_physical_element_terms(
+static iree_status_t loom_vector_to_scalar_mma_build_inverse_coordinate_terms(
     loom_vector_to_scalar_state_t* state,
     const loom_matrix_fragment_role_layout_t* role_layout,
     const loom_vector_to_scalar_index_term_t
-        coordinates[LOOM_MATRIX_FRAGMENT_AXIS_COUNT],
-    loom_vector_to_scalar_index_term_t* out_lane,
-    loom_vector_to_scalar_index_term_t* out_payload_element_index) {
-  loom_vector_to_scalar_index_term_t lane =
-      loom_vector_to_scalar_static_term(0);
-  loom_vector_to_scalar_index_term_t inner_linear =
-      loom_vector_to_scalar_static_term(0);
-  loom_vector_to_scalar_index_term_t outer_linear =
-      loom_vector_to_scalar_static_term(0);
-  for (iree_host_size_t i = 0; i < LOOM_MATRIX_FRAGMENT_AXIS_COUNT; ++i) {
-    if (!iree_any_bit_set(role_layout->coordinate_flags, 1u << i)) {
-      continue;
-    }
-    const loom_matrix_fragment_axis_t axis = (loom_matrix_fragment_axis_t)i;
-    const loom_matrix_fragment_axis_layout_t* axis_layout =
-        &role_layout->axes[axis];
-    const uint32_t coordinate_extent = (uint32_t)axis_layout->element_count *
-                                       axis_layout->thread_count *
-                                       axis_layout->outer_count;
-    loom_vector_to_scalar_index_term_t element_coordinate = {0};
-    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_term_digit(
-        state, coordinates[axis], coordinate_extent, 1,
-        axis_layout->element_count, &element_coordinate));
-    loom_vector_to_scalar_index_term_t coordinate_quotient = coordinates[axis];
-    if (axis_layout->element_count > 1) {
-      IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
-          state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_DIV, coordinate_quotient,
-          loom_vector_to_scalar_static_term(axis_layout->element_count),
-          &coordinate_quotient));
-    }
-    loom_vector_to_scalar_index_term_t thread_coordinate = {0};
-    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_term_digit(
-        state, coordinate_quotient,
-        loom_vector_to_scalar_mma_ceil_div_u32(coordinate_extent,
-                                               axis_layout->element_count),
-        1, axis_layout->thread_count, &thread_coordinate));
-    loom_vector_to_scalar_index_term_t outer_coordinate = coordinate_quotient;
-    if (axis_layout->thread_count > 1) {
-      IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
-          state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_DIV, outer_coordinate,
-          loom_vector_to_scalar_static_term(axis_layout->thread_count),
-          &outer_coordinate));
-    }
-
-    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_scaled_add(
-        state, inner_linear, element_coordinate,
-        loom_vector_to_scalar_mma_axis_suffix_count(role_layout, axis, false),
-        &inner_linear));
-    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_scaled_add(
-        state, outer_linear, outer_coordinate,
-        loom_vector_to_scalar_mma_axis_suffix_count(role_layout, axis, true),
-        &outer_linear));
-    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_scaled_add(
-        state, lane, thread_coordinate, axis_layout->thread_stride, &lane));
-  }
-
-  loom_vector_to_scalar_index_term_t coordinate_element = inner_linear;
-  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_scaled_add(
-      state, coordinate_element, outer_linear,
-      loom_vector_to_scalar_mma_inner_element_count(role_layout),
-      &coordinate_element));
+        source_terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT],
+    loom_vector_to_scalar_index_term_t* out_participant,
+    loom_vector_to_scalar_index_term_t* out_payload_element) {
+  const loom_matrix_fragment_coordinate_projection_plan_t* plan =
+      role_layout->coordinate_projection_plan;
+  IREE_ASSERT_TRUE(plan != NULL);
+  loom_vector_to_scalar_index_term_t
+      physical_terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT] = {0};
+  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_coordinate_projection(
+      state, plan->terms + plan->forward_term_count, plan->inverse_term_count,
+      source_terms, physical_terms));
   loom_vector_to_scalar_index_term_t payload_element =
       loom_vector_to_scalar_static_term(role_layout->coordinate_element_offset);
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_scaled_add(
-      state, payload_element, coordinate_element,
+      state, payload_element,
+      physical_terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE],
       role_layout->coordinate_element_stride, &payload_element));
-  *out_lane = lane;
-  *out_payload_element_index = payload_element;
+  *out_participant =
+      physical_terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT];
+  *out_payload_element = payload_element;
   return iree_ok_status();
 }
 
@@ -1561,20 +1434,14 @@ iree_status_t loom_vector_to_scalar_build_result_fragment_coordinate_terms(
     loom_vector_to_scalar_index_term_t* out_column) {
   const loom_matrix_fragment_role_layout_t* result_layout =
       &state->matrix_fragment_layout->result;
-  if (iree_any_bit_set(result_layout->coordinate_flags,
-                       LOOM_MATRIX_FRAGMENT_COORDINATE_BLOCK)) {
-    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_axis_coordinate_term(
-        state, state->matrix_fragment_layout, result_layout, lane_id,
-        payload_element_index, LOOM_MATRIX_FRAGMENT_AXIS_BLOCK, out_block));
-  } else {
-    *out_block = loom_vector_to_scalar_static_term(0);
-  }
-  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_axis_coordinate_term(
-      state, state->matrix_fragment_layout, result_layout, lane_id,
-      payload_element_index, LOOM_MATRIX_FRAGMENT_AXIS_ROW, out_row));
-  return loom_vector_to_scalar_mma_build_axis_coordinate_term(
-      state, state->matrix_fragment_layout, result_layout, lane_id,
-      payload_element_index, LOOM_MATRIX_FRAGMENT_AXIS_COLUMN, out_column);
+  loom_vector_to_scalar_index_term_t
+      terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT] = {0};
+  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_forward_coordinate_terms(
+      state, result_layout, lane_id, payload_element_index, terms));
+  *out_block = terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_BLOCK];
+  *out_row = terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW];
+  *out_column = terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN];
+  return iree_ok_status();
 }
 
 static iree_status_t loom_vector_to_scalar_mma_build_reduction_source_element(
@@ -1585,14 +1452,15 @@ static iree_status_t loom_vector_to_scalar_mma_build_reduction_source_element(
     loom_vector_to_scalar_index_term_t column, uint16_t reduction,
     loom_vector_to_scalar_index_term_t* out_source_lane,
     loom_vector_to_scalar_index_term_t* out_payload_element_index) {
-  const loom_vector_to_scalar_index_term_t coordinates[] = {
-      [LOOM_MATRIX_FRAGMENT_AXIS_BLOCK] = block,
-      [LOOM_MATRIX_FRAGMENT_AXIS_ROW] = row,
-      [LOOM_MATRIX_FRAGMENT_AXIS_COLUMN] = column,
-      [LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION] =
-          loom_vector_to_scalar_static_term(reduction),
-  };
-  return loom_vector_to_scalar_mma_build_physical_element_terms(
+  const loom_vector_to_scalar_index_term_t
+      coordinates[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT] = {
+          [LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_BLOCK] = block,
+          [LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW] = row,
+          [LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN] = column,
+          [LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_REDUCTION] =
+              loom_vector_to_scalar_static_term(reduction),
+      };
+  return loom_vector_to_scalar_mma_build_inverse_coordinate_terms(
       state, role_layout, coordinates, out_source_lane,
       out_payload_element_index);
 }

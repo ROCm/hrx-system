@@ -1136,7 +1136,7 @@ static void loom_amdgpu_fragment_memory_register_coordinates(
     const loom_matrix_fragment_role_layout_t* role_layout,
     uint16_t payload_elements_per_register,
     uint16_t payload_registers_per_element, uint16_t register_index,
-    uint32_t* out_intra_element_byte_offset, uint32_t* out_axis_coordinates) {
+    uint32_t* out_intra_element_byte_offset, uint32_t* out_coordinates) {
   const uint32_t element_register_index =
       register_index / payload_registers_per_element;
   const uint32_t payload_element_index =
@@ -1144,8 +1144,6 @@ static void loom_amdgpu_fragment_memory_register_coordinates(
   *out_intra_element_byte_offset =
       (register_index % payload_registers_per_element) *
       LOOM_AMDGPU_FRAGMENT_REGISTER_BYTE_COUNT;
-  memset(out_axis_coordinates, 0,
-         LOOM_MATRIX_FRAGMENT_AXIS_COUNT * sizeof(out_axis_coordinates[0]));
   IREE_ASSERT_GE(payload_element_index, role_layout->coordinate_element_offset);
   const uint32_t relative_payload_element =
       payload_element_index - role_layout->coordinate_element_offset;
@@ -1153,42 +1151,19 @@ static void loom_amdgpu_fragment_memory_register_coordinates(
       relative_payload_element % role_layout->coordinate_element_stride, 0);
   const uint32_t coordinate_element_index =
       relative_payload_element / role_layout->coordinate_element_stride;
-
-  uint32_t inner_element_count = 1;
-  uint32_t outer_element_count = 1;
-  for (iree_host_size_t i = 0; i < LOOM_MATRIX_FRAGMENT_AXIS_COUNT; ++i) {
-    if (!iree_any_bit_set(role_layout->coordinate_flags, 1u << i)) {
-      continue;
-    }
-    const loom_matrix_fragment_axis_layout_t* axis_layout =
-        &role_layout->axes[i];
-    inner_element_count *= axis_layout->element_count;
-    outer_element_count *= axis_layout->outer_count;
-  }
   IREE_ASSERT_LT(coordinate_element_index,
-                 inner_element_count * outer_element_count);
-  const uint32_t inner_linear = coordinate_element_index % inner_element_count;
-  const uint32_t outer_linear = coordinate_element_index / inner_element_count;
-
-  uint32_t inner_stride = inner_element_count;
-  uint32_t outer_stride = outer_element_count;
-  for (iree_host_size_t i = 0; i < LOOM_MATRIX_FRAGMENT_AXIS_COUNT; ++i) {
-    if (!iree_any_bit_set(role_layout->coordinate_flags, 1u << i)) {
-      continue;
-    }
-    const loom_matrix_fragment_axis_layout_t* axis_layout =
-        &role_layout->axes[i];
-    inner_stride /= axis_layout->element_count;
-    outer_stride /= axis_layout->outer_count;
-    const uint32_t element_coordinate =
-        (inner_linear / inner_stride) % axis_layout->element_count;
-    const uint32_t outer_coordinate =
-        (outer_linear / outer_stride) % axis_layout->outer_count;
-    const uint32_t coordinate =
-        element_coordinate + (uint32_t)axis_layout->element_count *
-                                 axis_layout->thread_count * outer_coordinate;
-    out_axis_coordinates[i] = coordinate;
-  }
+                 role_layout->coordinate_element_count);
+  const loom_matrix_fragment_coordinate_projection_plan_t* projection =
+      role_layout->coordinate_projection_plan;
+  IREE_ASSERT_TRUE(projection != NULL);
+  const uint32_t source_terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT] =
+      {
+          [LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE] =
+              coordinate_element_index,
+      };
+  loom_matrix_fragment_apply_coordinate_projection(
+      projection->terms, projection->forward_term_count, source_terms,
+      out_coordinates);
 }
 
 static uint16_t loom_amdgpu_fragment_memory_primary_lane_divisor(
@@ -1255,7 +1230,6 @@ static uint32_t loom_amdgpu_fragment_memory_linear_lane_byte_stride(
 }
 
 static bool loom_amdgpu_fragment_memory_compile_address_layout(
-    const loom_amdgpu_matrix_fragment_layout_t* layout,
     const loom_matrix_fragment_role_layout_t* role_layout, uint8_t view_rank,
     const loom_low_source_memory_axis_byte_stride_t* axis_byte_strides,
     loom_amdgpu_fragment_memory_address_layout_t* out_address_layout,
@@ -1285,11 +1259,17 @@ static bool loom_amdgpu_fragment_memory_compile_address_layout(
   IREE_ASSERT_EQ(
       role_layout->payload_element_count * payload_registers_per_element,
       role_layout->register_count * address_payload_elements_per_register);
+  const loom_matrix_fragment_coordinate_projection_plan_t* projection =
+      role_layout->coordinate_projection_plan;
+  IREE_ASSERT_TRUE(projection != NULL);
 
   out_address_layout->payload_elements_per_register =
       address_payload_elements_per_register;
   out_address_layout->payload_registers_per_element =
       payload_registers_per_element;
+  // Dynamic source strides retain one runtime record per stored coordinate
+  // axis. Participant-derived terms are attached below, while register-derived
+  // coordinates are filled after the lane address is compiled.
   for (iree_host_size_t i = 0; i < LOOM_MATRIX_FRAGMENT_AXIS_COUNT; ++i) {
     if (!iree_any_bit_set(role_layout->coordinate_flags, 1u << i)) {
       continue;
@@ -1299,44 +1279,62 @@ static bool loom_amdgpu_fragment_memory_compile_address_layout(
         loom_amdgpu_fragment_memory_role_view_axis(role_layout, axis);
     IREE_ASSERT_NE(view_axis, UINT8_MAX);
     IREE_ASSERT_LT(view_axis, view_rank);
-    const loom_matrix_fragment_axis_layout_t* axis_layout =
-        &role_layout->axes[axis];
     const loom_low_source_memory_axis_byte_stride_t* axis_stride =
         &axis_byte_strides[view_axis];
-    loom_amdgpu_fragment_memory_runtime_axis_t* runtime_axis = NULL;
     if (axis_stride->kind == LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_DYNAMIC) {
       for (uint8_t i = 0; i < *out_runtime_axis_count; ++i) {
         IREE_ASSERT_NE(out_runtime_axes[i].view_axis, view_axis);
       }
       IREE_ASSERT_LT(*out_runtime_axis_count, LOOM_MATRIX_FRAGMENT_AXIS_COUNT);
-      runtime_axis = &out_runtime_axes[(*out_runtime_axis_count)++];
+      loom_amdgpu_fragment_memory_runtime_axis_t* runtime_axis =
+          &out_runtime_axes[(*out_runtime_axis_count)++];
       runtime_axis->view_axis = view_axis;
       runtime_axis->byte_stride = *axis_stride;
     }
-    if (axis_layout->thread_count > 1) {
-      const uint16_t lane_divisor = axis_layout->thread_stride;
-      const uint16_t lane_modulus =
-          (uint32_t)lane_divisor * axis_layout->thread_count ==
-                  layout->wave_size
-              ? 0
-              : axis_layout->thread_count;
-      if (runtime_axis != NULL) {
-        runtime_axis->lane_divisor = lane_divisor;
-        runtime_axis->lane_modulus = lane_modulus;
-        runtime_axis->lane_coordinate_scale = axis_layout->element_count;
-      } else {
-        uint32_t lane_byte_stride = 0;
-        if (!loom_amdgpu_fragment_memory_add_scaled_stride(
-                axis_layout->element_count,
-                (uint32_t)axis_stride->static_byte_coefficient,
-                &lane_byte_stride) ||
-            !loom_amdgpu_fragment_memory_append_lane_term(
-                lane_divisor, lane_modulus, lane_byte_stride,
-                out_address_layout)) {
-          return loom_amdgpu_fragment_memory_reject(
-              diagnostic, IREE_SV("fragment_memory.address_layout"));
+  }
+  for (uint8_t i = 0; i < projection->forward_term_count; ++i) {
+    const loom_matrix_fragment_coordinate_projection_term_t* term =
+        &projection->terms[i];
+    if (term->source_dimension !=
+        LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT) {
+      continue;
+    }
+    const loom_matrix_fragment_axis_t axis =
+        loom_matrix_fragment_coordinate_dimension_axis(
+            (loom_matrix_fragment_coordinate_dimension_t)
+                term->destination_dimension);
+    IREE_ASSERT_NE(axis, LOOM_MATRIX_FRAGMENT_AXIS_COUNT);
+    const uint8_t view_axis =
+        loom_amdgpu_fragment_memory_role_view_axis(role_layout, axis);
+    IREE_ASSERT_NE(view_axis, UINT8_MAX);
+    const loom_low_source_memory_axis_byte_stride_t* axis_stride =
+        &axis_byte_strides[view_axis];
+    if (axis_stride->kind == LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_DYNAMIC) {
+      loom_amdgpu_fragment_memory_runtime_axis_t* runtime_axis = NULL;
+      for (uint8_t runtime_ordinal = 0;
+           runtime_ordinal < *out_runtime_axis_count; ++runtime_ordinal) {
+        if (out_runtime_axes[runtime_ordinal].view_axis == view_axis) {
+          runtime_axis = &out_runtime_axes[runtime_ordinal];
+          break;
         }
       }
+      IREE_ASSERT_TRUE(runtime_axis != NULL);
+      IREE_ASSERT_EQ(runtime_axis->lane_coordinate_scale, 0u);
+      runtime_axis->lane_divisor = term->source_divisor;
+      runtime_axis->lane_modulus = term->source_modulus;
+      runtime_axis->lane_coordinate_scale = term->destination_multiplier;
+      continue;
+    }
+    uint32_t lane_byte_stride = 0;
+    if (!loom_amdgpu_fragment_memory_add_scaled_stride(
+            term->destination_multiplier,
+            (uint32_t)axis_stride->static_byte_coefficient,
+            &lane_byte_stride) ||
+        !loom_amdgpu_fragment_memory_append_lane_term(
+            term->source_divisor, term->source_modulus, lane_byte_stride,
+            out_address_layout)) {
+      return loom_amdgpu_fragment_memory_reject(
+          diagnostic, IREE_SV("fragment_memory.address_layout"));
     }
   }
   out_address_layout->primary_lane_divisor =
@@ -1347,12 +1345,12 @@ static bool loom_amdgpu_fragment_memory_compile_address_layout(
 
   for (uint16_t register_index = 0;
        register_index < role_layout->register_count; ++register_index) {
-    uint32_t axis_coordinates[LOOM_MATRIX_FRAGMENT_AXIS_COUNT] = {0};
+    uint32_t coordinates[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT] = {0};
     uint32_t static_byte_offset = 0;
     loom_amdgpu_fragment_memory_register_coordinates(
         role_layout, address_payload_elements_per_register,
         payload_registers_per_element, register_index, &static_byte_offset,
-        axis_coordinates);
+        coordinates);
     for (iree_host_size_t i = 0; i < LOOM_MATRIX_FRAGMENT_AXIS_COUNT; ++i) {
       if (!iree_any_bit_set(role_layout->coordinate_flags, 1u << i)) {
         continue;
@@ -1361,10 +1359,13 @@ static bool loom_amdgpu_fragment_memory_compile_address_layout(
           role_layout, (loom_matrix_fragment_axis_t)i);
       const loom_low_source_memory_axis_byte_stride_t* axis_stride =
           &axis_byte_strides[view_axis];
+      const loom_matrix_fragment_coordinate_dimension_t dimension =
+          loom_matrix_fragment_axis_coordinate_dimension(
+              (loom_matrix_fragment_axis_t)i);
+      const uint32_t coordinate = coordinates[dimension];
       if (axis_stride->kind == LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_STATIC) {
         if (!loom_amdgpu_fragment_memory_add_scaled_stride(
-                axis_coordinates[i],
-                (uint32_t)axis_stride->static_byte_coefficient,
+                coordinate, (uint32_t)axis_stride->static_byte_coefficient,
                 &static_byte_offset)) {
           return loom_amdgpu_fragment_memory_reject(
               diagnostic, IREE_SV("fragment_memory.address_layout"));
@@ -1380,7 +1381,7 @@ static bool loom_amdgpu_fragment_memory_compile_address_layout(
         }
       }
       IREE_ASSERT_TRUE(runtime_axis != NULL);
-      runtime_axis->register_coordinates[register_index] = axis_coordinates[i];
+      runtime_axis->register_coordinates[register_index] = coordinate;
     }
     out_address_layout->register_byte_offsets[register_index] =
         static_byte_offset;
@@ -1816,8 +1817,8 @@ static bool loom_amdgpu_fragment_memory_analyze(
       runtime_axes[LOOM_MATRIX_FRAGMENT_AXIS_COUNT] = {0};
   uint8_t runtime_axis_count = 0;
   if (!loom_amdgpu_fragment_memory_compile_address_layout(
-          layout, role_layout, access.view_rank, axis_byte_strides,
-          &address_layout, runtime_axes, &runtime_axis_count, diagnostic)) {
+          role_layout, access.view_rank, axis_byte_strides, &address_layout,
+          runtime_axes, &runtime_axis_count, diagnostic)) {
     return false;
   }
   loom_amdgpu_fragment_memory_packetization_t packetization =

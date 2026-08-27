@@ -82,6 +82,8 @@ void ExpectFragmentRoleLayout(
   EXPECT_EQ(role_layout->payload_element_count, payload_element_count);
   EXPECT_EQ(role_layout->element_bit_count, element_bit_count);
   EXPECT_EQ(role_layout->coordinate_flags, coordinate_flags);
+  EXPECT_GT(role_layout->coordinate_element_count, 0u);
+  EXPECT_NE(role_layout->coordinate_projection_plan, nullptr);
 }
 
 void ExpectFragmentCoordinate(
@@ -1509,6 +1511,11 @@ TEST(MatrixContractTest, Rdna3Wmmar3F16F16LayoutMapsLowSubwordFragments) {
                            16, 16, kAccumulatorCoordinates);
   ExpectFragmentRoleLayout(layout, LOOM_CONTRACT_OPERAND_ROLE_RESULT, 8, 16, 16,
                            kAccumulatorCoordinates);
+  EXPECT_EQ(layout->lhs.packed_element_coordinate_flag,
+            LOOM_AMDGPU_MATRIX_FRAGMENT_COORDINATE_REDUCTION);
+  EXPECT_EQ(layout->rhs.packed_element_coordinate_flag,
+            LOOM_AMDGPU_MATRIX_FRAGMENT_COORDINATE_REDUCTION);
+  EXPECT_EQ(layout->result.packed_element_coordinate_flag, 0u);
 
   ExpectFragmentCoordinate(layout, LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR, 0, 0,
                            0, kAccumulatorCoordinates, 0, 0, 0);

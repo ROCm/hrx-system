@@ -19,11 +19,194 @@ from loom.target.arch.amdgpu.matrix_fragment_layouts import (
     AMDGPU_MATRIX_FRAGMENT_LAYOUTS,
     AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY,
     MatrixFragmentAxisLayout,
+    MatrixFragmentLaneBitProjection,
     MatrixFragmentReductionGroup,
+    MatrixFragmentResultToLhsBf16Projection,
+    MatrixFragmentResultToRhsPackedB16Projection,
+    layout_roles,
+    matrix_fragment_native_layout,
+    matrix_fragment_native_role_layout,
+    matrix_fragment_packed_element_axis,
+    matrix_fragment_result_to_lhs_bf16_projection,
+    matrix_fragment_result_to_rhs_packed_b16_projection,
+    matrix_fragment_role_storage_projection_plan,
     role_coordinate,
     role_has_contiguous_lane_xor1_columns,
     validate_matrix_fragment_layout,
 )
+from loom.target.native_contraction_layout import (
+    operation_local_coordinate_map,
+    ownership_relation,
+    unique_ownership_coordinate_map,
+)
+from loom.target.native_coordinate_projection import (
+    CoordinateProjectionTerm,
+    coordinate_projection_plan,
+)
+
+
+def test_dense_layouts_have_exact_native_contraction_maps() -> None:
+    for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS:
+        roles = layout_roles(layout)
+        role_layouts = tuple(
+            matrix_fragment_native_role_layout(layout, role) for role in roles
+        )
+        assert tuple(role_layout is None for role_layout in role_layouts) == tuple(
+            role.reduction_group is not None for role in roles
+        )
+        assert (matrix_fragment_native_layout(layout) is None) == any(
+            role_layout is None for role_layout in role_layouts
+        )
+
+
+def test_roles_compile_to_bounded_storage_coordinate_projections() -> None:
+    maximum_forward_term_count = 0
+    maximum_inverse_term_count = 0
+    for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS:
+        for role in layout_roles(layout):
+            plan = matrix_fragment_role_storage_projection_plan(layout, role)
+            maximum_forward_term_count = max(
+                maximum_forward_term_count, len(plan.forward_terms)
+            )
+            maximum_inverse_term_count = max(
+                maximum_inverse_term_count, len(plan.inverse_terms)
+            )
+
+    assert maximum_forward_term_count == 5
+    assert maximum_inverse_term_count == 5
+
+
+def test_storage_projections_have_one_participant_digit_per_axis() -> None:
+    for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS:
+        for role in layout_roles(layout):
+            plan = matrix_fragment_role_storage_projection_plan(layout, role)
+            participant_destinations = [
+                term.destination_dimension
+                for term in plan.forward_terms
+                if term.source_dimension == "participant"
+            ]
+            assert len(participant_destinations) == len(set(participant_destinations))
+
+
+def test_packed_element_axes_are_proven_during_generation() -> None:
+    packed_axes = {
+        (layout.key, role.role): packed_axis
+        for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS
+        for role in layout_roles(layout)
+        if (packed_axis := matrix_fragment_packed_element_axis(layout, role))
+        is not None
+    }
+
+    assert packed_axes
+    assert set(packed_axes.values()) <= {"row", "column", "reduction"}
+    assert packed_axes[("rdna3_wmmar3_f16_16x16x16_f16", "lhs")] == "reduction"
+    assert packed_axes[("rdna3_wmmar3_f16_16x16x16_f16", "rhs")] == "reduction"
+    assert ("rdna3_wmmar3_f16_16x16x16_f16", "result") not in packed_axes
+
+
+def test_packed_b16_result_to_rhs_ownership_is_generated_from_role_maps() -> None:
+    layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY["rdna3_wmmar3_f16_16x16x16_f16"]
+    native_layout = matrix_fragment_native_layout(layout)
+    assert native_layout is not None
+
+    relation = ownership_relation(
+        operation_local_coordinate_map(native_layout.result),
+        operation_local_coordinate_map(native_layout.rhs),
+    )
+
+    assert relation.edge_count == relation.destination.source_point_count
+    assert set(relation.source_owners_by_destination) == {
+        (source_ordinal,)
+        for source_ordinal in range(relation.source.source_point_count)
+    }
+    owner_map = unique_ownership_coordinate_map(relation)
+    assert owner_map is not None
+    projection = coordinate_projection_plan(owner_map)
+    assert projection is not None
+    assert projection.forward_terms == (
+        CoordinateProjectionTerm("participant", "participant", 1, 16, 1),
+        CoordinateProjectionTerm("value", "participant", 1, 2, 16),
+        CoordinateProjectionTerm("value", "value", 2, 0, 1),
+    )
+
+
+def test_packed_b16_result_to_rhs_projection_matches_shipping_layouts() -> None:
+    projections = {
+        layout.key: projection
+        for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS
+        if (projection := matrix_fragment_result_to_rhs_packed_b16_projection(layout))
+        is not None
+    }
+
+    assert projections == {
+        "rdna3_wmmar3_bf16_16x16x16_bf16": (
+            MatrixFragmentResultToRhsPackedB16Projection(
+                exchange_participant_xor_mask=16,
+                reverse_participant_mask=0xFFFF0000,
+            )
+        ),
+        "rdna3_wmmar3_f16_16x16x16_f16": (
+            MatrixFragmentResultToRhsPackedB16Projection(
+                exchange_participant_xor_mask=16,
+                reverse_participant_mask=0xFFFF0000,
+            )
+        ),
+    }
+
+
+def test_result_to_lhs_projection_matches_shipping_layouts() -> None:
+    layouts_by_projection: dict[MatrixFragmentResultToLhsBf16Projection, set[str]] = (
+        defaultdict(set)
+    )
+    for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS:
+        projection = matrix_fragment_result_to_lhs_bf16_projection(layout)
+        if projection is not None:
+            layouts_by_projection[projection].add(layout.key)
+
+    assert layouts_by_projection == {
+        MatrixFragmentResultToLhsBf16Projection(
+            source_lane_group_byte_shift=6,
+            result_lane_div_byte_shift=0,
+            source_register_selector=MatrixFragmentLaneBitProjection(0xFFFF, 1),
+            source_lane_group=MatrixFragmentLaneBitProjection(1, 0),
+            transpose_bit_count=3,
+        ): {
+            "rdna3_wmmar3_f32_16x16x16_bf16",
+            "rdna3_wmmar3_f32_16x16x16_f16",
+        },
+        MatrixFragmentResultToLhsBf16Projection(
+            source_lane_group_byte_shift=6,
+            result_lane_div_byte_shift=4,
+            source_register_selector=MatrixFragmentLaneBitProjection(3, 0),
+            source_lane_group=MatrixFragmentLaneBitProjection(0xFFFF, 2),
+            transpose_bit_count=1,
+        ): {
+            "cdna_mfma_f32_16x16x16_bf16",
+            "cdna_mfma_f32_16x16x16_f16",
+            "rdna4_wmma_f32_16x16x16_bf16_w64",
+            "rdna4_wmma_f32_16x16x16_f16_w64",
+        },
+        MatrixFragmentResultToLhsBf16Projection(
+            source_lane_group_byte_shift=6,
+            result_lane_div_byte_shift=0,
+            source_register_selector=MatrixFragmentLaneBitProjection(0xFFFF, 2),
+            source_lane_group=MatrixFragmentLaneBitProjection(3, 0),
+            transpose_bit_count=2,
+        ): {
+            "rdna3_wmmar3_f32_16x16x16_bf16_w64",
+            "rdna3_wmmar3_f32_16x16x16_f16_w64",
+        },
+        MatrixFragmentResultToLhsBf16Projection(
+            source_lane_group_byte_shift=6,
+            result_lane_div_byte_shift=5,
+            source_register_selector=MatrixFragmentLaneBitProjection(7, 0),
+            source_lane_group=MatrixFragmentLaneBitProjection(0xFFFF, 3),
+            transpose_bit_count=2,
+        ): {
+            "rdna4_wmma_f32_16x16x16_bf16",
+            "rdna4_wmma_f32_16x16x16_f16",
+        },
+    }
 
 
 def test_lane_xor1_column_property_accounts_for_payload_padding() -> None:

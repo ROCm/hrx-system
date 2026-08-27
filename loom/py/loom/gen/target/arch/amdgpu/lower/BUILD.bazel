@@ -17,6 +17,22 @@ iree_py_library(
 )
 
 iree_py_binary(
+    name = "fragment_repack_tables",
+    srcs = [
+        "__init__.py",
+        "amdgpu_fragment_repack_tables.py",
+    ],
+    main = "amdgpu_fragment_repack_tables.py",
+    visibility = [
+        "//loom/src/loom/target/arch/amdgpu/lower:__pkg__",
+    ],
+    deps = [
+        "//loom/py/loom/gen/support",
+        "//loom/py/loom/target/arch/amdgpu:matrix_fragment_layouts",
+    ],
+)
+
+iree_py_binary(
     name = "narrow_float_tables",
     srcs = [
         "__init__.py",

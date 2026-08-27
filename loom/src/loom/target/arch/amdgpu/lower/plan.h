@@ -1623,8 +1623,6 @@ typedef struct loom_amdgpu_fragment_repack_plan_t {
   uint16_t transpose_bit_count;
   // Number of source-register candidates remaining after the transpose.
   uint16_t transposed_source_register_candidate_count;
-  // Number of lanes that share one logical result-fragment register row group.
-  uint16_t lane_group_count;
   // Tile row divisor used to derive target-row and target-reduction lane ids.
   uint16_t lane_divisor;
   // Log2 byte spacing between source result-fragment lane groups.
@@ -1642,8 +1640,13 @@ typedef struct loom_amdgpu_fragment_repack_plan_t {
     // Cross-lane exchange recipes in increasing transposed-bit order.
     loom_amdgpu_fragment_repack_transpose_stage_t
         transpose_stages[LOOM_AMDGPU_FRAGMENT_REPACK_TRANSPOSE_STAGE_CAPACITY];
-    // Cross-lane exchange pairing low-subword result rows for RHS packing.
-    loom_amdgpu_direct_xor_lane_recipe_t result_to_rhs_exchange;
+    // Result-to-RHS packed-B16 exchange and lane-local packing projection.
+    struct {
+      // Cross-lane exchange pairing low-subword result rows.
+      loom_amdgpu_direct_xor_lane_recipe_t exchange;
+      // Wave32 predicate selecting lanes that reverse the packed pair.
+      uint32_t reverse_lane_mask;
+    } result_to_rhs;
   } strategy_payload;
   // Physical VCC predicates enabling fused conditional transpose stages.
   struct {

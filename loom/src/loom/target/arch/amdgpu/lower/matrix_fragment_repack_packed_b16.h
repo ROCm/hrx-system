@@ -21,8 +21,6 @@ extern "C" {
 bool loom_amdgpu_select_result_to_rhs_packed_b16_fragment_repack_plan(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_matrix_fragment_layout_t* layout,
-    const loom_matrix_fragment_role_layout_t* source_role_layout,
-    const loom_matrix_fragment_role_layout_t* result_role_layout,
     loom_amdgpu_fragment_repack_plan_t* plan);
 
 // Lowers a packed-B16 result-to-RHS fragment transition.

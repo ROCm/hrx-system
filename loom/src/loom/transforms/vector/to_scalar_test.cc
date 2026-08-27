@@ -93,6 +93,63 @@ class VectorToScalarTest : public ::testing::Test {
   std::vector<loom_module_t*> modules_;
 };
 
+static const loom_matrix_fragment_coordinate_projection_term_t
+    kTinyDistributedMmaLhsTerms[] = {
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW, 1, 0, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_REDUCTION, 1, 0, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT, 1, 0, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_REDUCTION,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE, 1, 0, 1},
+};
+
+static const loom_matrix_fragment_coordinate_projection_plan_t
+    kTinyDistributedMmaLhsPlan = {
+        /*.terms=*/kTinyDistributedMmaLhsTerms,
+        /*.forward_term_count=*/2,
+        /*.inverse_term_count=*/2,
+};
+
+static const loom_matrix_fragment_coordinate_projection_term_t
+    kTinyDistributedMmaRhsTerms[] = {
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN, 1, 0, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_REDUCTION, 1, 0, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT, 1, 0, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_REDUCTION,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE, 1, 0, 1},
+};
+
+static const loom_matrix_fragment_coordinate_projection_plan_t
+    kTinyDistributedMmaRhsPlan = {
+        /*.terms=*/kTinyDistributedMmaRhsTerms,
+        /*.forward_term_count=*/2,
+        /*.inverse_term_count=*/2,
+};
+
+static const loom_matrix_fragment_coordinate_projection_term_t
+    kTinyDistributedMmaResultTerms[] = {
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN, 1, 0, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW, 1, 0, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE, 1, 0, 1},
+        {LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN,
+         LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT, 1, 0, 1},
+};
+
+static const loom_matrix_fragment_coordinate_projection_plan_t
+    kTinyDistributedMmaResultPlan = {
+        /*.terms=*/kTinyDistributedMmaResultTerms,
+        /*.forward_term_count=*/2,
+        /*.inverse_term_count=*/2,
+};
+
 static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
     /*.kind=*/1,
     /*.name=*/IREE_SVL("test.tiny.distributed.mma"),
@@ -110,19 +167,16 @@ static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
         /*.register_count=*/1,
         /*.element_bit_count=*/16,
         /*.payload_element_count=*/2,
+        /*.coordinate_element_count=*/2,
         /*.coordinate_element_offset=*/0,
         /*.coordinate_element_stride=*/1,
         /*.flags=*/0,
         /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
             LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
+        /*.packed_element_coordinate_flag=*/
+        LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
         /*.reduction_group=*/{},
-        /*.axes=*/
-        {
-            /*block=*/{},
-            /*row=*/{1, 2, 1, 1},
-            /*column=*/{},
-            /*reduction=*/{1, 1, 1, 2},
-        },
+        /*.coordinate_projection_plan=*/&kTinyDistributedMmaLhsPlan,
     },
     /*.rhs=*/
     {
@@ -130,19 +184,16 @@ static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
         /*.register_count=*/1,
         /*.element_bit_count=*/16,
         /*.payload_element_count=*/2,
+        /*.coordinate_element_count=*/2,
         /*.coordinate_element_offset=*/0,
         /*.coordinate_element_stride=*/1,
         /*.flags=*/0,
         /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN |
             LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
+        /*.packed_element_coordinate_flag=*/
+        LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
         /*.reduction_group=*/{},
-        /*.axes=*/
-        {
-            /*block=*/{},
-            /*row=*/{},
-            /*column=*/{1, 2, 1, 1},
-            /*reduction=*/{1, 1, 1, 2},
-        },
+        /*.coordinate_projection_plan=*/&kTinyDistributedMmaRhsPlan,
     },
     /*.accumulator=*/
     {
@@ -150,19 +201,15 @@ static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
         /*.register_count=*/2,
         /*.element_bit_count=*/32,
         /*.payload_element_count=*/2,
+        /*.coordinate_element_count=*/2,
         /*.coordinate_element_offset=*/0,
         /*.coordinate_element_stride=*/1,
         /*.flags=*/0,
         /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
             LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN,
+        /*.packed_element_coordinate_flag=*/0,
         /*.reduction_group=*/{},
-        /*.axes=*/
-        {
-            /*block=*/{},
-            /*row=*/{1, 1, 1, 2},
-            /*column=*/{1, 2, 1, 1},
-            /*reduction=*/{},
-        },
+        /*.coordinate_projection_plan=*/&kTinyDistributedMmaResultPlan,
     },
     /*.result=*/
     {
@@ -170,19 +217,15 @@ static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
         /*.register_count=*/2,
         /*.element_bit_count=*/32,
         /*.payload_element_count=*/2,
+        /*.coordinate_element_count=*/2,
         /*.coordinate_element_offset=*/0,
         /*.coordinate_element_stride=*/1,
         /*.flags=*/0,
         /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
             LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN,
+        /*.packed_element_coordinate_flag=*/0,
         /*.reduction_group=*/{},
-        /*.axes=*/
-        {
-            /*block=*/{},
-            /*row=*/{1, 1, 1, 2},
-            /*column=*/{1, 2, 1, 1},
-            /*reduction=*/{},
-        },
+        /*.coordinate_projection_plan=*/&kTinyDistributedMmaResultPlan,
     },
 };
 

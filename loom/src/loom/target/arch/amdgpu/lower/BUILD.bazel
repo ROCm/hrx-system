@@ -35,6 +35,8 @@ _AMDGPU_MEMORY_CANDIDATE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/lowe
 
 _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/lower:narrow_float_tables"
 
+_AMDGPU_FRAGMENT_REPACK_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/lower:fragment_repack_tables"
+
 loom_cc_library(
     name = "kinds",
     hdrs = ["kinds.h"],
@@ -69,6 +71,19 @@ loom_generated_file_family(
     outputs = [
         "memory_descriptor_candidate_ranges.inl",
         "memory_descriptor_candidates.inl",
+    ],
+)
+
+loom_generated_file_family(
+    name = "matrix_fragment_repack_tables_gen",
+    generator = _AMDGPU_FRAGMENT_REPACK_TABLE_GENERATOR,
+    output_flags = [
+        "--result-to-lhs",
+        "--result-to-rhs",
+    ],
+    outputs = [
+        "matrix_fragment_repack_result_to_lhs_projections.inl",
+        "matrix_fragment_repack_result_to_rhs_projections.inl",
     ],
 )
 
@@ -244,6 +259,8 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu:memory_cache_policy_temporal_th.inl",
         ":memory_descriptor_candidate_ranges.inl",
         ":memory_descriptor_candidates.inl",
+        ":matrix_fragment_repack_result_to_lhs_projections.inl",
+        ":matrix_fragment_repack_result_to_rhs_projections.inl",
         "registry_tables.inl",
     ],
     visibility = _AMDGPU_ROOT_VISIBILITY,

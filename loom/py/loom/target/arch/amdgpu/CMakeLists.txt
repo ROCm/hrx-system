@@ -151,6 +151,8 @@ iree_py_library(
     "matrix_fragment_layouts.py"
   DEPS
     loom::py::loom::target::arch::amdgpu::matrix_formats
+    loom::py::loom::target::native_contraction_layout
+    loom::py::loom::target::native_coordinate_projection
     loom::py::loom::target::arch::package
 )
 
@@ -166,6 +168,8 @@ iree_py_test(
     "loom.target.arch.amdgpu.matrix_fragment_layouts_test"
   DEPS
     loom::py::loom::target::arch::amdgpu::matrix_fragment_layouts
+    loom::py::loom::target::native_contraction_layout
+    loom::py::loom::target::native_coordinate_projection
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"

@@ -18,6 +18,19 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    fragment_repack_tables
+  MAIN
+    "amdgpu_fragment_repack_tables.py"
+  SRCS
+    "__init__.py"
+    "amdgpu_fragment_repack_tables.py"
+  DEPS
+    loom::py::loom::gen::support::support
+    loom::py::loom::target::arch::amdgpu::matrix_fragment_layouts
+)
+
+iree_py_library(
+  NAME
     narrow_float_tables
   MAIN
     "amdgpu_narrow_float_tables.py"
