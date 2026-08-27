@@ -210,23 +210,6 @@ hrx_status_t hrx_buffer_map_with_mode(hrx_buffer_t buffer,
   *mapped_ptr = buffer->mapping.contents.data;
   HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
 }
-hrx_status_t hrx_buffer_map_persistent(hrx_buffer_t buffer,
-                                       hrx_map_flags_t flags,
-                                       void** mapped_ptr) {
-  HRX_TRACE_ZONE_BEGIN(z0, "hrx_buffer_map_persistent");
-  if (!buffer || !mapped_ptr) {
-    HRX_RETURN_AND_END_ZONE(z0,
-                            hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
-                                            "buffer or mapped_ptr is NULL"));
-  }
-  if (buffer->is_mapped) {
-    *mapped_ptr = buffer->mapped_ptr;
-    HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
-  }
-  HRX_RETURN_AND_END_ZONE(
-      z0, hrx_buffer_map_with_mode(buffer, HRX_MAPPING_MODE_PERSISTENT, flags,
-                                   0, buffer->size, mapped_ptr));
-}
 
 hrx_status_t hrx_buffer_unmap(hrx_buffer_t buffer) {
   HRX_TRACE_ZONE_BEGIN(z0, "hrx_buffer_unmap");

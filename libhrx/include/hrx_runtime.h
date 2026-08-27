@@ -636,11 +636,6 @@ HRX_API hrx_status_t hrx_buffer_map_with_mode(hrx_buffer_t buffer,
                                               hrx_map_flags_t flags,
                                               size_t offset, size_t size,
                                               void** mapped_ptr);
-// Compatibility wrapper for older libhrx clients. Maps the entire buffer
-// persistently; callers should use hrx_buffer_map_with_mode for new code.
-HRX_API hrx_status_t hrx_buffer_map_persistent(hrx_buffer_t buffer,
-                                               hrx_map_flags_t flags,
-                                               void** mapped_ptr);
 
 HRX_API hrx_status_t hrx_buffer_unmap(hrx_buffer_t buffer);
 
