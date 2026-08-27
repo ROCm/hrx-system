@@ -1128,13 +1128,21 @@ static iree_status_t loom_print_attr_impl(
       }
       return loom_output_stream_write_cstring(stream, "\")");
     }
-    case LOOM_ATTR_TYPE:
+    case LOOM_ATTR_TYPE: {
       if (module && attr->type_id < module->types.count) {
-        return loom_text_print_type_impl(module->types.entries[attr->type_id],
-                                         module, stream, type_context);
+        if (descriptor) {
+          return loom_text_print_type_impl(module->types.entries[attr->type_id],
+                                           module, stream, type_context);
+        }
+        IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "type<"));
+        IREE_RETURN_IF_ERROR(
+            loom_text_print_type_impl(module->types.entries[attr->type_id],
+                                      module, stream, type_context));
+        return loom_output_stream_write_char(stream, '>');
       }
       return loom_output_stream_write_format(stream, "type<%" PRIu32 ">",
                                              attr->type_id);
+    }
     case LOOM_ATTR_ENCODING:
       return loom_print_static_encoding(
           stream, module, loom_attr_as_encoding_id(*attr), type_context);

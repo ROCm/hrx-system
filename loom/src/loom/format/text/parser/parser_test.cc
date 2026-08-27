@@ -1428,6 +1428,14 @@ TEST_F(ParserTest, AttrDictSymbolRefRoundTrip) {
       << text;
 }
 
+TEST_F(ParserTest, AttrDictTypeRoundTrip) {
+  std::string text = RoundTrip(
+      "%c = test.constant 0 : f32\n"
+      "%s = test.attrs %c {signature = type<(i32) -> (i64)>} : f32\n");
+  EXPECT_NE(text.find("{signature = type<(i32) -> (i64)>}"), std::string::npos)
+      << "type references in generic dictionaries should round-trip: " << text;
+}
+
 TEST_F(ParserTest, AttrDictQualifiedIdentifierParsesAsString) {
   std::string text = RoundTrip(
       "%c = test.constant 0 : f32\n"

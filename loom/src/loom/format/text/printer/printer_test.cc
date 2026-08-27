@@ -1332,7 +1332,7 @@ TEST_F(PrintOpTest, AttrsOpTypeAttrUsesNamedDynamicDimension) {
       LOOM_LOCATION_UNKNOWN, &op));
 
   EXPECT_EQ(print_op(op, LOOM_TEXT_PRINT_DEFAULT),
-            "%2 = test.attrs %1 {shape = tensor<[%M]xf32>} : f32\n");
+            "%2 = test.attrs %1 {shape = type<tensor<[%M]xf32>>} : f32\n");
 }
 
 TEST_F(PrintOpTest, AttrsOpStringAttrsUseCanonicalEscapes) {

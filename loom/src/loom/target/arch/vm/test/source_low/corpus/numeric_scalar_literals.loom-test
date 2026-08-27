@@ -9,7 +9,7 @@ func.def target(@target) @scalar_i1_literals() -> (i1, i1) {
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = () -> (reg<vm.value : i1>, reg<vm.value : i1>)}) @scalar_i1_literals() -> (reg<vm.value : i1>, reg<vm.value : i1>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<() -> (reg<vm.value : i1>, reg<vm.value : i1>)>}) @scalar_i1_literals() -> (reg<vm.value : i1>, reg<vm.value : i1>) asm {
   %true = constant.s16 1 : reg<vm.value : i1>
   %false = constant.zero : reg<vm.value : i1>
   return %true, %false
@@ -24,7 +24,7 @@ func.def target(@target) @scalar_i8_literals() -> (i8) {
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = () -> (reg<vm.value : i8>)}) @scalar_i8_literals() -> (reg<vm.value : i8>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<() -> (reg<vm.value : i8>)>}) @scalar_i8_literals() -> (reg<vm.value : i8>) asm {
   %negative = constant.s16 128 : reg<vm.value : i8>
   return %negative
 }
@@ -38,7 +38,7 @@ func.def target(@target) @scalar_i16_literals() -> (i16) {
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = () -> (reg<vm.value : i16>)}) @scalar_i16_literals() -> (reg<vm.value : i16>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<() -> (reg<vm.value : i16>)>}) @scalar_i16_literals() -> (reg<vm.value : i16>) asm {
   %negative = constant.i32 65535 : reg<vm.value : i16>
   return %negative
 }
@@ -52,7 +52,7 @@ func.def target(@target) @scalar_i32_literals() -> (i32) {
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = () -> (reg<vm.value : i32>)}) @scalar_i32_literals() -> (reg<vm.value : i32>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<() -> (reg<vm.value : i32>)>}) @scalar_i32_literals() -> (reg<vm.value : i32>) asm {
   %value = constant.zero : reg<vm.value : i32>
   return %value
 }
@@ -67,7 +67,7 @@ func.def target(@target) @scalar_i64_literals() -> (i64, i64) {
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = () -> (reg<vm.value : i64>, reg<vm.value : i64>)}) @scalar_i64_literals() -> (reg<vm.value : i64>, reg<vm.value : i64>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<() -> (reg<vm.value : i64>, reg<vm.value : i64>)>}) @scalar_i64_literals() -> (reg<vm.value : i64>, reg<vm.value : i64>) asm {
   %s16_min = constant.s16 -32768 : reg<vm.value : i64>
   %below_s16 = constant.i64 4294934527, 4294967295 : reg<vm.value : i64>
   return %s16_min, %below_s16
@@ -84,7 +84,7 @@ func.def target(@target) @index_literals() -> (index, index, index) {
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = () -> (reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>)}) @index_literals() -> (reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<() -> (reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>)>}) @index_literals() -> (reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) asm {
   %negative = constant.s16 -1 : reg<vm.value : index>
   %u32_max = constant.i32 4294967295 : reg<vm.value : index>
   %above_u32 = constant.i64 0, 1 : reg<vm.value : index>
@@ -100,7 +100,7 @@ func.def target(@target) @scalar_f8e4m3_literals() -> (f8E4M3) {
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = () -> (reg<vm.value : f8E4M3>)}) @scalar_f8e4m3_literals() -> (reg<vm.value : f8E4M3>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<() -> (reg<vm.value : f8E4M3>)>}) @scalar_f8e4m3_literals() -> (reg<vm.value : f8E4M3>) asm {
   %value = constant.s16 184 : reg<vm.value : f8E4M3>
   return %value
 }
@@ -114,7 +114,7 @@ func.def target(@target) @scalar_f8e5m2_literals() -> (f8E5M2) {
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = () -> (reg<vm.value : f8E5M2>)}) @scalar_f8e5m2_literals() -> (reg<vm.value : f8E5M2>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<() -> (reg<vm.value : f8E5M2>)>}) @scalar_f8e5m2_literals() -> (reg<vm.value : f8E5M2>) asm {
   %value = constant.s16 188 : reg<vm.value : f8E5M2>
   return %value
 }
@@ -129,7 +129,7 @@ func.def target(@target) @scalar_f16_literals() -> (f16, f16) {
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = () -> (reg<vm.value : f16>, reg<vm.value : f16>)}) @scalar_f16_literals() -> (reg<vm.value : f16>, reg<vm.value : f16>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<() -> (reg<vm.value : f16>, reg<vm.value : f16>)>}) @scalar_f16_literals() -> (reg<vm.value : f16>, reg<vm.value : f16>) asm {
   %positive_value = constant.s16 15360 : reg<vm.value : f16>
   %signed_value = constant.i32 32768 : reg<vm.value : f16>
   return %positive_value, %signed_value
@@ -144,7 +144,7 @@ func.def target(@target) @scalar_bf16_literals() -> (bf16) {
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = () -> (reg<vm.value : bf16>)}) @scalar_bf16_literals() -> (reg<vm.value : bf16>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<() -> (reg<vm.value : bf16>)>}) @scalar_bf16_literals() -> (reg<vm.value : bf16>) asm {
   %value = constant.i32 49024 : reg<vm.value : bf16>
   return %value
 }
@@ -159,7 +159,7 @@ func.def target(@target) @scalar_f32_literals() -> (f32, f32) {
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = () -> (reg<vm.value : f32>, reg<vm.value : f32>)}) @scalar_f32_literals() -> (reg<vm.value : f32>, reg<vm.value : f32>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<() -> (reg<vm.value : f32>, reg<vm.value : f32>)>}) @scalar_f32_literals() -> (reg<vm.value : f32>, reg<vm.value : f32>) asm {
   %positive_value = constant.i32 1065353216 : reg<vm.value : f32>
   %signed_value = constant.i32 2147483648 : reg<vm.value : f32>
   return %positive_value, %signed_value
@@ -175,7 +175,7 @@ func.def target(@target) @scalar_f64_literals() -> (f64, f64) {
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = () -> (reg<vm.value : f64>, reg<vm.value : f64>)}) @scalar_f64_literals() -> (reg<vm.value : f64>, reg<vm.value : f64>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<() -> (reg<vm.value : f64>, reg<vm.value : f64>)>}) @scalar_f64_literals() -> (reg<vm.value : f64>, reg<vm.value : f64>) asm {
   %positive_value = constant.i64 0, 1072693248 : reg<vm.value : f64>
   %signed_value = constant.i64 0, 2147483648 : reg<vm.value : f64>
   return %positive_value, %signed_value

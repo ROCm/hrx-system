@@ -9,7 +9,7 @@ func.def target(@target) @scalar_i32_add_multiply(%lhs: i32, %rhs: i32) -> (i32)
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = (reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)}) @scalar_i32_add_multiply(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @scalar_i32_add_multiply(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
   %sum = integer.add.i32 %lhs, %rhs : reg<vm.value : i32>
   %result = integer.mul.i32 %sum, %rhs : reg<vm.value : i32>
   return %result
@@ -24,7 +24,7 @@ func.def target(@target) @scalar_bf16_extend(%source: bf16) -> (f32) {
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = (reg<vm.value : bf16>) -> (reg<vm.value : f32>)}) @scalar_bf16_extend(%source: reg<vm.value : bf16>) -> (reg<vm.value : f32>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : bf16>) -> (reg<vm.value : f32>)>}) @scalar_bf16_extend(%source: reg<vm.value : bf16>) -> (reg<vm.value : f32>) asm {
   %result = conversion.float.extend %source, bf16.to.f32 : reg<vm.value : f32>
   return %result
 }
@@ -38,7 +38,7 @@ func.def target(@target) @index_i32_cast(%source: i32) -> (index) {
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = (reg<vm.value : i32>) -> (reg<vm.value : index>)}) @index_i32_cast(%source: reg<vm.value : i32>) -> (reg<vm.value : index>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : index>)>}) @index_i32_cast(%source: reg<vm.value : i32>) -> (reg<vm.value : index>) asm {
   %result = conversion.integer %source, s32.to.i64 : reg<vm.value : index>
   return %result
 }
@@ -53,7 +53,7 @@ func.def target(@target) @index_divide_remainder(%lhs: index, %rhs: index) -> (i
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = (reg<vm.value : index>, reg<vm.value : index>) -> (reg<vm.value : index>, reg<vm.value : index>)}) @index_divide_remainder(%lhs: reg<vm.value : index>, %rhs: reg<vm.value : index>) -> (reg<vm.value : index>, reg<vm.value : index>) where [range(%rhs, 1, 65535)] asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : index>, reg<vm.value : index>) -> (reg<vm.value : index>, reg<vm.value : index>)>}) @index_divide_remainder(%lhs: reg<vm.value : index>, %rhs: reg<vm.value : index>) -> (reg<vm.value : index>, reg<vm.value : index>) where [range(%rhs, 1, 65535)] asm {
   %quotient = integer.div.u64 %lhs, %rhs : reg<vm.value : index>
   %remainder = integer.rem.u64 %lhs, %rhs : reg<vm.value : index>
   return %quotient, %remainder
@@ -70,7 +70,7 @@ func.def target(@target) @index_shifts(%value: index, %amount: index) -> (index,
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = (reg<vm.value : index>, reg<vm.value : index>) -> (reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>)}) @index_shifts(%value: reg<vm.value : index>, %amount: reg<vm.value : index>) -> (reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : index>, reg<vm.value : index>) -> (reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>)>}) @index_shifts(%value: reg<vm.value : index>, %amount: reg<vm.value : index>) -> (reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) asm {
   %left = integer.shift.left.i64 %value, %amount : reg<vm.value : index>
   %signed_right = integer.shift.right.s64 %value, %amount : reg<vm.value : index>
   %unsigned_right = integer.shift.right.u64 %value, %amount : reg<vm.value : index>

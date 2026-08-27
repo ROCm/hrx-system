@@ -428,6 +428,29 @@ static bool loom_parse_next_generic_attr_is_bytes(loom_parser_t* parser) {
   return loom_tokenizer_at(&lookahead, LOOM_TOKEN_LPAREN);
 }
 
+static bool loom_parse_next_generic_attr_is_type(loom_parser_t* parser) {
+  loom_tokenizer_t lookahead = parser->tokenizer;
+  if (!loom_tokenizer_try_consume_keyword(&lookahead, IREE_SV("type"))) {
+    return false;
+  }
+  return loom_tokenizer_at(&lookahead, LOOM_TOKEN_LANGLE);
+}
+
+static iree_status_t loom_parse_generic_type_attr(
+    loom_parser_t* parser, loom_type_parse_mode_t type_mode,
+    loom_attribute_t* out_attr) {
+  LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_BARE_IDENT, NULL);
+  LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_LANGLE, NULL);
+  loom_type_t type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_parse_type(parser, type_mode, &type));
+  LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_RANGLE, NULL);
+  loom_type_id_t type_id = LOOM_TYPE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_module_intern_type_id(parser->module, type, &type_id));
+  *out_attr = loom_attr_type(type_id);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_parse_present_attr_dict(
     loom_parser_t* parser, uint16_t nesting_depth,
     loom_type_parse_mode_t type_mode, loom_attribute_t* out_attr);
@@ -1087,6 +1110,9 @@ static iree_status_t loom_parse_generic_attr_value_with_type_mode(
     case LOOM_TOKEN_BARE_IDENT: {
       if (loom_parse_next_generic_attr_is_bytes(parser)) {
         return loom_parse_bytes_attr(parser, out_attr);
+      }
+      if (loom_parse_next_generic_attr_is_type(parser)) {
+        return loom_parse_generic_type_attr(parser, type_mode, out_attr);
       }
       double special_value = 0.0;
       if (loom_parse_special_f64_spelling(value_token.text, &special_value)) {

@@ -9,7 +9,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @return_input(%input: reg
 // ----
 vm.target<core> @target
 
-low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = (reg<vm.value : i32>) -> (reg<vm.value : i32>)}) @return_input(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @return_input(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
   %2 = copy %input : reg<vm.value : i32> -> reg<vm.value : i32>
   %3 = copy %2 : reg<vm.value : i32> -> reg<vm.value : i32>
   return %3
@@ -36,7 +36,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @caller(%input: reg<vm.va
 // ----
 vm.target<core> @target
 
-low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = (reg<vm.value : i32>) -> (reg<vm.value : i32>)}) @callee(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @callee(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
   %8 = copy %input : reg<vm.value : i32> -> reg<vm.value : i32>
   %one = constant.s16 1 : reg<vm.value : i32>
   %result = integer.add.i32 %8, %one : reg<vm.value : i32>
@@ -44,7 +44,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = (
   return %9
 }
 
-low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = (reg<vm.value : i32>) -> (reg<vm.value : i32>)}) @caller(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @caller(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
   %10 = copy %input : reg<vm.value : i32> -> reg<vm.value : i32>
   %11 = copy %10 : reg<vm.value : i32> -> reg<vm.value : i32>
   %result = low.func.call @callee(%11) : (reg<vm.value : i32>) -> (reg<vm.value : i32>)
@@ -67,7 +67,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @empty() asm {
 // ----
 vm.target<core> @target
 
-low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = () -> ()}) @empty() asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<() -> ()>}) @empty() asm {
   return
 }
 
@@ -84,7 +84,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @mixed_banks(%value: reg<
 // ----
 vm.target<core> @target
 
-low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = (reg<vm.value : i32>, reg<vm.ref : hal.buffer>, reg<vm.function : func.ref<(i32) -> (i32)>>) -> (reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.value : i32>, reg<vm.ref : hal.buffer>)}) @mixed_banks(%value: reg<vm.value : i32>, %buffer: reg<vm.ref : hal.buffer>, %callback: reg<vm.function : func.ref<(i32) -> (i32)>>) -> (reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.value : i32>, reg<vm.ref : hal.buffer>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.ref : hal.buffer>, reg<vm.function : func.ref<(i32) -> (i32)>>) -> (reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.value : i32>, reg<vm.ref : hal.buffer>)>}) @mixed_banks(%value: reg<vm.value : i32>, %buffer: reg<vm.ref : hal.buffer>, %callback: reg<vm.function : func.ref<(i32) -> (i32)>>) -> (reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.value : i32>, reg<vm.ref : hal.buffer>) asm {
   %6 = copy %value : reg<vm.value : i32> -> reg<vm.value : i32>
   %7 = move %buffer : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
   %8 = copy %callback : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
