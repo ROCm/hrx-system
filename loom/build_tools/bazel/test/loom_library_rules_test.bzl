@@ -10,7 +10,7 @@ load("@rules_testing//lib:analysis_test.bzl", "analysis_test", "test_suite")
 load("@rules_testing//lib:util.bzl", "TestingAspectInfo")
 load(
     "//loom/build_tools/bazel:defs.bzl",
-    "LoomCompilationInfo",
+    "LoomBinaryInfo",
     "LoomExecutionTestInfo",
     "LoomLibraryInfo",
     "loom_execution_profile",
@@ -250,36 +250,38 @@ def _test_wrapper_library_module_is_testonly_impl(env, target):
     if not target[TestingAspectInfo].attrs.testonly:
         env.fail("expected wrapper library module to be testonly")
 
-def _test_wrapper_compilation_is_testonly(name, **kwargs):
+def _test_generated_kernel_binary_is_testonly(name, **kwargs):
     analysis_test(
         name = name,
         attr_values = {
             "timeout": "short",
         },
-        impl = _test_wrapper_compilation_is_testonly_impl,
-        target = ":profiled_library_compile_test_compile",
+        impl = _test_generated_kernel_binary_is_testonly_impl,
+        target = ":public_kernel_library_kernel_binary_gfx11_generic",
         **kwargs
     )
 
-def _test_wrapper_compilation_is_testonly_impl(env, target):
+def _test_generated_kernel_binary_is_testonly_impl(env, target):
     if not target[TestingAspectInfo].attrs.testonly:
-        env.fail("expected wrapper library compilation to be testonly")
+        env.fail("expected generated kernel binary to be testonly")
 
-    compilation = target[LoomCompilationInfo]
-    env.expect.that_str(compilation.artifact.basename).equals(
-        "profiled_library_compile_test_compile.testbin",
+    binary = target[LoomBinaryInfo]
+    env.expect.that_str(binary.primary_artifact.basename).equals(
+        "public_kernel_library_kernel_binary_gfx11_generic.hsaco",
     )
-    env.expect.that_str(compilation.report.basename).equals(
-        "profiled_library_compile_test_compile.compile.json",
+    _expect_basename(
+        env,
+        binary.reports.to_list(),
+        "public_kernel_library_kernel_binary_gfx11_generic.compile.json",
     )
 
-    action = _find_action(env, target[TestingAspectInfo].actions, "LoomCompile")
+    action = _find_action(env, target[TestingAspectInfo].actions, "LoomKernelBinary")
     for expected_arg in [
-        "--backend=test",
-        "--target=test-target",
+        "--backend=amdgpu-hal",
+        "--target=gfx11-generic",
     ]:
         if expected_arg not in action.argv:
-            env.fail("expected %r in compilation arguments %r" % (expected_arg, action.argv))
+            env.fail("expected %r in kernel binary arguments %r" % (expected_arg, action.argv))
 
 def _test_execution_profile_consumes_source_and_dependency_module(name, **kwargs):
     analysis_test(
@@ -355,11 +357,11 @@ def loom_library_rules_test_suite(name):
         tests = [
             _test_deps_only_library_propagates_dependencies,
             _test_execution_profile_consumes_source_and_dependency_module,
+            _test_generated_kernel_binary_is_testonly,
             _test_library_keeps_dependency_module_separate,
             _test_redundant_direct_dependency_is_not_transitive,
             _test_resource_profile_preserves_direct_execution,
             _test_transitive_audit_universe_is_separate,
-            _test_wrapper_compilation_is_testonly,
             _test_wrapper_library_module_is_testonly,
         ],
     )

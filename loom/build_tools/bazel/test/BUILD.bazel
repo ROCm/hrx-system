@@ -11,7 +11,6 @@ load("//build_tools/bazel:executable.bzl", "iree_executable_test")
 load(
     "//loom/build_tools/bazel:defs.bzl",
     "loom_amdgpu_target_profile",
-    "loom_compile_target",
     "loom_kernel_binary",
     "loom_kernel_library",
     "loom_library",
@@ -38,15 +37,6 @@ load(
 
 package(default_visibility = ["//visibility:public"])
 
-# Analysis-only compiler profile for exercising action construction without
-# coupling common rule tests to any production target implementation.
-loom_compile_target(
-    name = "test_compile",
-    artifact_extension = "testbin",
-    backend = "test",
-    target = "test-target",
-)
-
 loom_amdgpu_target_profile(
     name = "test_amdgpu_profile",
     target = "gfx942",
@@ -63,6 +53,7 @@ loom_kernel_library(
         "link_checks.loom",
         "link_kernels.loom",
     ],
+    targets = ["//loom/target/amdgpu:gfx11-generic"],
 )
 
 loom_library(
@@ -138,7 +129,6 @@ loom_library(
 loom_test_library(
     name = "profiled_library",
     srcs = ["profile_cases.loom"],
-    compile_targets = [":test_compile"],
     execution_profiles = [
         REFERENCE_PROFILE,
         SERIALIZED_REFERENCE_PROFILE,

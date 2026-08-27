@@ -13,12 +13,8 @@ load(
 )
 load(
     ":loom_library.bzl",
-    _LoomCompilationInfo = "LoomCompilationInfo",
-    _LoomCompileTargetInfo = "LoomCompileTargetInfo",
     _LoomExecutionTestInfo = "LoomExecutionTestInfo",
     _LoomLibraryInfo = "LoomLibraryInfo",
-    _loom_compile = "loom_compile",
-    _loom_compile_target = "loom_compile_target",
     _loom_execution_profile = "loom_execution_profile",
     _loom_kernel_library = "loom_kernel_library",
     _loom_library = "loom_library",
@@ -40,14 +36,10 @@ load(
 )
 
 LoomBinaryInfo = _LoomBinaryInfo
-LoomCompilationInfo = _LoomCompilationInfo
-LoomCompileTargetInfo = _LoomCompileTargetInfo
 LoomExecutionTestInfo = _LoomExecutionTestInfo
 LoomLibraryInfo = _LoomLibraryInfo
 LoomAmdgpuTargetProfileInfo = _LoomAmdgpuTargetProfileInfo
 LoomTargetProfileInfo = _LoomTargetProfileInfo
-loom_compile = _loom_compile
-loom_compile_target = _loom_compile_target
 loom_amdgpu_target_profile = _loom_amdgpu_target_profile
 loom_execution_profile = _loom_execution_profile
 loom_kernel_binary = _loom_kernel_binary
