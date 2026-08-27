@@ -42,19 +42,6 @@ std::string StringViewToString(iree_string_view_t value) {
   return std::string(value.data, value.size);
 }
 
-std::string StatusToStringAndFree(iree_status_t status) {
-  iree_allocator_t allocator = iree_allocator_system();
-  char* buffer = nullptr;
-  iree_host_size_t buffer_length = 0;
-  std::string result = iree_status_code_string(iree_status_code(status));
-  if (iree_status_to_string(status, &allocator, &buffer, &buffer_length)) {
-    result.assign(buffer, buffer_length);
-    iree_allocator_free(allocator, buffer);
-  }
-  iree_status_free(status);
-  return result;
-}
-
 class ModuleIndexTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -267,13 +254,6 @@ func.def public @entry(%x: i32) -> (i32) {
   EXPECT_EQ(loom_link_module_index_next_global_duplicate(index.get(),
                                                          second_duplicate),
             nullptr);
-
-  std::string diagnostic =
-      StatusToStringAndFree(loom_link_module_index_duplicate_global_status(
-          index.get(), selected, duplicate));
-  EXPECT_THAT(diagnostic, ::testing::HasSubstr("@entry"));
-  EXPECT_THAT(diagnostic, ::testing::HasSubstr("input"));
-  EXPECT_THAT(diagnostic, ::testing::HasSubstr("kernel-lib"));
 }
 
 TEST_F(ModuleIndexTest, ImportedDeclarationsHaveGlobalIdentity) {

@@ -1816,30 +1816,6 @@ func.def public @unused(%x: i32) -> (i32) {
   EXPECT_EQ(loom_link_plan_symbol_count(plan.get()), 1u);
 }
 
-TEST_F(LinkPlannerTest, ArchiveRejectsDuplicatePublicConcreteDefinitions) {
-  loom_module_t* first = Parse(IREE_SV(R"(
-func.def public @same(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
-  loom_module_t* second = Parse(IREE_SV(R"(
-func.def public @same(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
-
-  IndexPtr index = CreateIndex();
-  AddMaterialized(index.get(), first, IREE_SV("first"),
-                  LOOM_LINK_PROVIDER_ROLE_INPUT);
-  AddMaterialized(index.get(), second, IREE_SV("second"),
-                  LOOM_LINK_PROVIDER_ROLE_INPUT);
-
-  PlanPtr plan;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_ALREADY_EXISTS,
-      BuildPlanStatus(index.get(), /*options=*/nullptr, &plan));
-}
-
 TEST_F(LinkPlannerTest, InputExportsDoNotRootLibraryAlternatives) {
   loom_module_t* harness = Parse(IREE_SV(R"(
 func.decl public @same(%x: i32) -> (i32)

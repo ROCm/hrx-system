@@ -421,20 +421,6 @@ static bool loom_link_plan_symbol_is_stripped(
                                symbol);
 }
 
-static bool loom_link_plan_symbol_is_concrete_global(
-    const loom_link_module_index_symbol_t* symbol) {
-  if (symbol->identity != LOOM_LINK_SYMBOL_IDENTITY_GLOBAL) {
-    return false;
-  }
-  if (iree_any_bit_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_DECLARATION |
-                                          LOOM_LINK_SYMBOL_FLAG_IMPORT |
-                                          LOOM_LINK_SYMBOL_FLAG_CONFIG)) {
-    return false;
-  }
-  return iree_any_bit_set(symbol->flags,
-                          LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION);
-}
-
 static bool loom_link_plan_symbol_is_declaration_like(
     const loom_link_module_index_symbol_t* symbol) {
   return iree_any_bit_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_DECLARATION |
@@ -583,36 +569,12 @@ static iree_status_t loom_link_plan_find_imported_symbol_for_declaration(
   return iree_ok_status();
 }
 
-static iree_status_t loom_link_plan_check_concrete_global_collision(
-    const loom_link_plan_t* plan,
-    const loom_link_module_index_symbol_t* symbol) {
-  if (!loom_link_plan_symbol_is_concrete_global(symbol)) {
-    return iree_ok_status();
-  }
-  const loom_link_module_index_symbol_t* candidate =
-      loom_link_module_index_lookup_name(plan->index, symbol->name);
-  while (candidate) {
-    if (candidate != symbol &&
-        loom_link_plan_symbol_is_concrete_global(candidate) &&
-        loom_link_plan_bitmap_contains(&plan->reachability.symbols,
-                                       candidate->ordinal)) {
-      return loom_link_module_index_duplicate_global_status(plan->index,
-                                                            candidate, symbol);
-    }
-    candidate = loom_link_module_index_next_same_name(plan->index, candidate);
-  }
-  return iree_ok_status();
-}
-
 // Appends one newly selected symbol.
 static iree_status_t loom_link_plan_append_symbol(
     loom_link_plan_t* plan, const loom_link_module_index_symbol_t* symbol,
     loom_link_plan_live_cause_t cause, iree_host_size_t* out_plan_ordinal) {
   IREE_ASSERT(!loom_link_plan_bitmap_contains(&plan->reachability.symbols,
                                               symbol->ordinal));
-  IREE_RETURN_IF_ERROR(
-      loom_link_plan_check_concrete_global_collision(plan, symbol));
-
   const iree_host_size_t plan_ordinal = plan->symbols.count;
   iree_host_size_t symbol_count = 0;
   if (!iree_host_size_checked_add(plan_ordinal, 1, &symbol_count)) {

@@ -732,6 +732,48 @@ static void BM_Plan_InputExport_UnrelatedLibraryProviders(
   loom_link_module_index_free(index);
 }
 
+static void BM_Plan_InputExport_SameNameLibraryAlternatives(
+    benchmark::State& state) {
+  const uint32_t library_alternative_count = (uint32_t)state.range(0);
+  PlannerCatalogFixture fixture(/*symbol_count=*/1);
+  loom_link_module_index_t* index =
+      fixture.BuildDuplicateIndex(library_alternative_count + 1);
+  const loom_link_plan_options_t options = {
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/iree_string_view_list_empty(),
+      /*.include_input_exports=*/true,
+  };
+
+  for (auto _ : state) {
+    loom_link_plan_t* plan = nullptr;
+    CheckStatus(
+        loom_link_plan_build(index, &options, iree_allocator_system(), &plan));
+    if (loom_link_plan_symbol_count(plan) != 1) {
+      std::abort();
+    }
+    const loom_link_plan_symbol_t* root = loom_link_plan_symbol_at(plan, 0);
+    const loom_link_module_index_symbol_t* symbol =
+        loom_link_module_index_symbol_at(index, root->symbol_ordinal);
+    const loom_link_module_index_provider_t* provider =
+        loom_link_module_index_symbol_provider(index, symbol);
+    if (!provider || provider->role != LOOM_LINK_PROVIDER_ROLE_INPUT) {
+      std::abort();
+    }
+    benchmark::DoNotOptimize(plan);
+    state.PauseTiming();
+    loom_link_plan_free(plan);
+    state.ResumeTiming();
+  }
+  state.counters["library_alternatives"] =
+      static_cast<double>(library_alternative_count);
+  state.counters["providers"] =
+      static_cast<double>(library_alternative_count + 1);
+  state.counters["requester_exports"] = 1.0;
+  state.counters["selected_symbols"] = 1.0;
+  state.SetComplexityN(library_alternative_count);
+  loom_link_module_index_free(index);
+}
+
 static void BM_Plan_ImportedCandidateResolution(benchmark::State& state) {
   const uint32_t candidate_count = (uint32_t)state.range(0);
   ImportedCandidateFixture fixture(candidate_count);
@@ -1366,6 +1408,9 @@ BENCHMARK(BM_Plan_Archive_Catalog)->Apply(CatalogScales)->Complexity();
 BENCHMARK(BM_Plan_SelectiveLeaf_Catalog)->Apply(CatalogScales)->Complexity();
 BENCHMARK(BM_Plan_SelectiveChain_Catalog)->Apply(CatalogScales)->Complexity();
 BENCHMARK(BM_Plan_InputExport_UnrelatedLibraryProviders)
+    ->Apply(CatalogScales)
+    ->Complexity(benchmark::o1);
+BENCHMARK(BM_Plan_InputExport_SameNameLibraryAlternatives)
     ->Apply(CatalogScales)
     ->Complexity(benchmark::o1);
 BENCHMARK(BM_Plan_ImportedCandidateResolution)

@@ -649,6 +649,37 @@ template.def<@demo.choose> priority(1) @slow(%x: i32) -> (i32) {
 }
 
 TEST_F(LinkIndexMaterializerTest,
+       ArchiveRejectsDuplicatePublicConcreteDefinitions) {
+  loom_module_t* first = Parse(IREE_SV(R"(
+func.def public @same(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"),
+                               IREE_SV("first.loom"));
+  loom_module_t* second = Parse(IREE_SV(R"(
+func.def public @same(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"),
+                                IREE_SV("second.loom"));
+  const std::vector<uint8_t> second_bytecode = WriteModule(second);
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), first, IREE_SV("first"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddBytecode(index.get(), second_bytecode, IREE_SV("second"),
+              LOOM_LINK_PROVIDER_ROLE_INPUT);
+
+  loom_link_index_materialization_t materialization = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_ALREADY_EXISTS,
+      TryMaterialize(index.get(), IREE_SV("@same"), LOOM_LINK_PLAN_ARCHIVE,
+                     LOOM_LINK_PLAN_UNRESOLVED_ERROR, &materialization));
+  EXPECT_EQ(materialization.plan, nullptr);
+  EXPECT_EQ(materialization.module, nullptr);
+}
+
+TEST_F(LinkIndexMaterializerTest,
        SelectsTransitiveDiamondOnceAcrossBytecodeLibraries) {
   loom_module_t* root = Parse(IREE_SV(R"(
 template.decl @demo.left(%x: i32) -> (i32)
