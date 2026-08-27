@@ -32,16 +32,18 @@ LoomBinaryInfo = provider(
     },
 )
 
-def _loom_kernel_binary_impl(ctx):
+def _require_binary_inputs(ctx):
     if not ctx.files.srcs and not ctx.attr.deps:
         fail("%s requires at least one source across srcs and deps" % ctx.label)
 
+def _amdgpu_target_profile(ctx, product_kind):
     target_profile = ctx.attr.target[LoomTargetProfileInfo]
     if target_profile.family != "amdgpu":
         fail(
-            ("%s cannot emit a kernel binary for target profile family %r; " +
+            ("%s cannot emit a %s binary for target profile family %r; " +
              "only amdgpu kernel products are available") % (
                 ctx.label,
+                product_kind,
                 target_profile.family,
             ),
         )
@@ -50,8 +52,9 @@ def _loom_kernel_binary_impl(ctx):
             "%s target profile claims family amdgpu without an AMDGPU identity" %
             ctx.label,
         )
-    amdgpu_profile = ctx.attr.target[LoomAmdgpuTargetProfileInfo]
+    return ctx.attr.target[LoomAmdgpuTargetProfileInfo]
 
+def _declare_binary_linked_module(ctx, product_kind):
     dependency_infos = [dep[LoomLibraryInfo] for dep in ctx.attr.deps]
     dependencies = loom_linking.collect_dependency_modules(dependency_infos)
     direct_modules = list(dependencies.direct)
@@ -76,11 +79,22 @@ def _loom_kernel_binary_impl(ctx):
         configs = ctx.attr.configs,
         output_stem = ctx.label.name + ".linked",
         mnemonic = "LoomBinaryLink",
-        progress_message = "Linking kernel binary %s" % ctx.label,
+        progress_message = "Linking %s binary %s" % (product_kind, ctx.label),
+    )
+    return struct(
+        dependency_reports = dependency_reports,
+        linked_module = linked_module,
     )
 
-    artifact = ctx.actions.declare_file(ctx.label.name + ".hsaco")
-    compile_report = ctx.actions.declare_file(ctx.label.name + ".compile.json")
+def _declare_amdgpu_kernel_product(
+        ctx,
+        linked_module,
+        amdgpu_profile,
+        output_stem,
+        mnemonic,
+        progress_message):
+    artifact = ctx.actions.declare_file(output_stem + ".hsaco")
+    compile_report = ctx.actions.declare_file(output_stem + ".compile.json")
     args = ctx.actions.args()
     args.add(linked_module)
     args.add("--backend=amdgpu-hal")
@@ -94,8 +108,25 @@ def _loom_kernel_binary_impl(ctx):
         arguments = [args],
         executable = tool.files_to_run,
         inputs = depset(direct = [linked_module]),
-        mnemonic = "LoomKernelBinary",
+        mnemonic = mnemonic,
         outputs = [artifact, compile_report],
+        progress_message = progress_message,
+    )
+    return struct(
+        artifact = artifact,
+        compile_report = compile_report,
+    )
+
+def _loom_kernel_binary_impl(ctx):
+    _require_binary_inputs(ctx)
+    amdgpu_profile = _amdgpu_target_profile(ctx, "kernel")
+    linked = _declare_binary_linked_module(ctx, "kernel")
+    product = _declare_amdgpu_kernel_product(
+        ctx = ctx,
+        linked_module = linked.linked_module,
+        amdgpu_profile = amdgpu_profile,
+        output_stem = ctx.label.name,
+        mnemonic = "LoomKernelBinary",
         progress_message = "Compiling kernel binary %s for %s" % (
             ctx.label,
             ctx.attr.target.label,
@@ -103,18 +134,18 @@ def _loom_kernel_binary_impl(ctx):
     )
 
     return [
-        DefaultInfo(files = depset([artifact])),
+        DefaultInfo(files = depset([product.artifact])),
         OutputGroupInfo(
-            compile_reports = depset([compile_report]),
-            dependency_reports = depset(dependency_reports),
-            linked_modules = depset([linked_module]),
+            compile_reports = depset([product.compile_report]),
+            dependency_reports = depset(linked.dependency_reports),
+            linked_modules = depset([linked.linked_module]),
         ),
         LoomBinaryInfo(
-            artifacts = depset([artifact]),
+            artifacts = depset([product.artifact]),
             kind = "kernel",
-            linked_module = linked_module,
-            primary_artifact = artifact,
-            reports = depset([compile_report]),
+            linked_module = linked.linked_module,
+            primary_artifact = product.artifact,
+            reports = depset([product.compile_report]),
             target_profiles = [ctx.attr.target],
         ),
     ]
