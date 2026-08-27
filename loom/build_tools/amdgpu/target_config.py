@@ -357,6 +357,20 @@ class TargetConfig:
         return [info.processor for info in self._supported_processor_infos]
 
     @property
+    def supported_targets(self) -> list[str]:
+        return [info.target for info in self._targets]
+
+    @property
+    def descriptor_set_capabilities_by_target(self) -> list[tuple[str, str]]:
+        return [
+            (
+                target.target,
+                descriptor_set_capability(self._target_descriptor_set_key(target)),
+            )
+            for target in self._targets
+        ]
+
+    @property
     def supported_exact_processors(self) -> list[str]:
         return [info.processor for info in self._supported_exact_processor_infos]
 
@@ -535,6 +549,14 @@ def render_bzl(config: TargetConfig) -> str:
                     config.supported_processors,
                 ),
                 bzl_list(
+                    "LOOM_AMDGPU_SUPPORTED_TARGETS",
+                    config.supported_targets,
+                ),
+                bzl_string_dict(
+                    "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET",
+                    config.descriptor_set_capabilities_by_target,
+                ),
+                bzl_list(
                     "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES",
                     config.descriptor_set_capabilities,
                 ),
@@ -620,6 +642,11 @@ def render_cmake(config: TargetConfig) -> str:
         cmake_list(
             "_LOOM_AMDGPU_SUPPORTED_DESCRIPTOR_BACKED_PROCESSORS",
             config.supported_processors,
+        ),
+        "",
+        cmake_list(
+            "_LOOM_AMDGPU_SUPPORTED_TARGETS",
+            config.supported_targets,
         ),
         "",
         cmake_list(

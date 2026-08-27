@@ -10,6 +10,7 @@ load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//build_tools/bazel:executable.bzl", "iree_executable_test")
 load(
     "//loom/build_tools/bazel:defs.bzl",
+    "loom_amdgpu_target_profile",
     "loom_compile_target",
     "loom_kernel_library",
     "loom_library",
@@ -24,6 +25,10 @@ load(
     "SERIALIZED_REFERENCE_PROFILE",
     "loom_library_rules_test_suite",
 )
+load(
+    ":loom_target_profile_rules_test.bzl",
+    "loom_target_profile_rules_test_suite",
+)
 
 package(default_visibility = ["//visibility:public"])
 
@@ -34,6 +39,11 @@ loom_compile_target(
     artifact_extension = "testbin",
     backend = "test",
     target = "test-target",
+)
+
+loom_amdgpu_target_profile(
+    name = "test_amdgpu_profile",
+    target = "gfx942",
 )
 
 loom_kernel_library(
@@ -103,6 +113,8 @@ loom_check_rules_test_suite(name = "loom_check_rules_tests")
 
 loom_library_rules_test_suite(name = "loom_library_rules_tests")
 
+loom_target_profile_rules_test_suite(name = "loom_target_profile_rules_tests")
+
 loom_module(
     name = "linked_module",
     srcs = ["link_checks.loom"],
@@ -171,6 +183,7 @@ test_suite(
         ":loom_library_module_direct_test",
         ":loom_library_rules_tests",
         ":loom_module_direct_test",
+        ":loom_target_profile_rules_tests",
         ":profiled_library_execute_reference_test",
         ":profiled_library_plan_test",
         ":public_kernel_library_test",

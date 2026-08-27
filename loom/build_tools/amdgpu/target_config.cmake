@@ -69,6 +69,33 @@ set(_LOOM_AMDGPU_SUPPORTED_DESCRIPTOR_BACKED_PROCESSORS
   "gfx12-5-generic"
 )
 
+set(_LOOM_AMDGPU_SUPPORTED_TARGETS
+  "gfx942"
+  "gfx950"
+  "gfx1100"
+  "gfx1200"
+  "gfx1250"
+  "gfx1150"
+  "gfx11-generic"
+  "gfx12-generic"
+  "gfx12-5-generic"
+  "gfx940"
+  "gfx941"
+  "gfx1101"
+  "gfx1102"
+  "gfx1103"
+  "gfx1151"
+  "gfx1152"
+  "gfx1153"
+  "gfx1170"
+  "gfx1171"
+  "gfx1172"
+  "gfx1201"
+  "gfx1251"
+  "gfx9-4-generic"
+  "gfx1250-a0"
+)
+
 set(_LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES
   "descriptor_set_cdna3_core"
   "descriptor_set_cdna4_core"
