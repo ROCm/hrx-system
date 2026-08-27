@@ -426,6 +426,7 @@ def _cdna_core_overlays(
         _v_div_fixup_f32_overlay(),
         _v_cvt_f32_f16_overlay(),
         _v_cvt_f16_f32_overlay(),
+        _v_pack_b32_f16_overlay(),
         *_v_cvt_f32_packed8_overlays(packed8_source_semantics),
         *_v_cvt_pk_packed8_from_f32_overlays(
             packed8_source_semantics,
@@ -1063,6 +1064,7 @@ def _gfx11_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         _v_div_fixup_f32_overlay(),
         _v_cvt_f32_f16_overlay(encoding_name="ENC_VOP3"),
         _v_cvt_f16_f32_overlay(),
+        _v_pack_b32_f16_overlay(),
         _v_cvt_pk_u16_u32_overlay(),
         _v_cvt_pk_u16_u32_dpp16_overlay(),
         _v_cvt_f32_i32_overlay(),
@@ -1891,6 +1893,7 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         _v_div_fixup_f32_overlay(),
         _v_cvt_f32_f16_overlay(encoding_name="ENC_VOP3"),
         _v_cvt_f16_f32_overlay(),
+        _v_pack_b32_f16_overlay(),
         *_v_cvt_f32_packed8_selection_overlays("ocp", op_sel_field="OPSEL"),
         *_v_cvt_pk_packed8_from_f32_overlays(
             "ocp",

@@ -1232,7 +1232,13 @@ def _fragment_role_initializer(
     coordinate_plan_index: int,
 ) -> list[str]:
     coordinate_flags = " | ".join(flag_name for flag_name, axis in zip(_COORDINATE_FLAG_C_NAMES, role.axes, strict=True) if axis is not None)
-    packed_publication = matrix_fragment_packed_b16_publication_projection(layout, role)
+    packed_publications = tuple(
+        (
+            packed_axis,
+            matrix_fragment_packed_b16_publication_projection(layout, role, packed_axis),
+        )
+        for packed_axis in ("row", "column")
+    )
     packed_element_axis = matrix_fragment_packed_element_axis(layout, role)
     packed_element_axis_c_name = "0" if packed_element_axis is None else _PACKED_ELEMENT_AXIS_C_NAMES[packed_element_axis]
     lines = [
@@ -1245,14 +1251,16 @@ def _fragment_role_initializer(
         f"    .coordinate_element_offset = {role.coordinate_element_offset},",
         f"    .coordinate_element_stride = {role.coordinate_element_stride},",
     ]
-    if packed_publication is not None:
+    for packed_axis, packed_publication in packed_publications:
+        if packed_publication is None:
+            continue
         if not isinstance(packed_publication, MatrixFragmentPackedB16PublicationProjection):
             raise TypeError("unexpected packed-B16 publication projection type")
         lines.extend(
             [
-                "    .packed_b16_publication = {",
-                f"        .publishing_participant_modulus = UINT16_C({packed_publication.publishing_participant_modulus}),",
-                f"        .publishing_participant_remainder = UINT16_C({packed_publication.publishing_participant_remainder}),",
+                f"    .packed_b16_publications.{packed_axis} = {{",
+                f"        .publishing_participant_and_mask = UINT16_C(0x{packed_publication.publishing_participant_and_mask:x}),",
+                f"        .publishing_participant_equal_value = UINT16_C(0x{packed_publication.publishing_participant_equal_value:x}),",
                 f"        .paired_participant_xor_mask = UINT16_C(0x{packed_publication.paired_participant_xor_mask:x}),",
                 "    },",
             ]

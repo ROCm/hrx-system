@@ -101,17 +101,16 @@ typedef struct loom_matrix_fragment_tile_shape_t {
 } loom_matrix_fragment_tile_shape_t;
 
 // Exact executable source-owner projection for one packed B16 publication.
-// Participants congruent to |publishing_participant_remainder| modulo
-// |publishing_participant_modulus| own the low-column elements and publish one
-// 32-bit packet. The participant selected by xor owns the adjacent high-column
-// element at the same participant-local payload position. A zero modulus means
-// that this packed publication is unavailable.
+// Participants matching the AND/equality predicate own the low-axis elements
+// and publish one 32-bit packet. The participant selected by xor owns the
+// adjacent high-axis element at the same participant-local payload position. A
+// zero AND mask means that this packed publication is unavailable.
 typedef struct loom_matrix_fragment_packed_b16_publication_t {
-  // Participant modulus selecting the packet publishers.
-  uint16_t publishing_participant_modulus;
-  // Participant remainder selecting the packet publishers.
-  uint16_t publishing_participant_remainder;
-  // XOR mask selecting the adjacent high-column source participant.
+  // Participant bit mask selecting the packet publishers.
+  uint16_t publishing_participant_and_mask;
+  // Participant value selected after applying the publisher bit mask.
+  uint16_t publishing_participant_equal_value;
+  // XOR mask selecting the adjacent high-axis source participant.
   uint16_t paired_participant_xor_mask;
 } loom_matrix_fragment_packed_b16_publication_t;
 
@@ -131,8 +130,13 @@ typedef struct loom_matrix_fragment_role_layout_t {
   uint16_t coordinate_element_offset;
   // Payload element stride between distinct logical coordinates.
   uint16_t coordinate_element_stride;
-  // Exact packed-B16 publication projection derived for this role.
-  loom_matrix_fragment_packed_b16_publication_t packed_b16_publication;
+  // Exact packed-B16 publication projections derived for this role.
+  struct {
+    // Projection pairing adjacent result rows.
+    loom_matrix_fragment_packed_b16_publication_t row;
+    // Projection pairing adjacent result columns.
+    loom_matrix_fragment_packed_b16_publication_t column;
+  } packed_b16_publications;
   // Coordinate axes produced by this role layout.
   loom_matrix_fragment_coordinate_flags_t coordinate_flags;
   // Single coordinate flag for the axis densely packed within each register,

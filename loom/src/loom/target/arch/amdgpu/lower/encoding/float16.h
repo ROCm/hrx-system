@@ -21,35 +21,43 @@
 extern "C" {
 #endif
 
-typedef enum loom_amdgpu_bf16_pack_descriptor_flag_bits_e {
+typedef enum loom_amdgpu_float16_pack_descriptor_flag_bits_e {
   // No optional packet helpers are available.
-  LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_NONE = 0u,
+  LOOM_AMDGPU_FLOAT16_PACK_DESCRIPTOR_FLAG_NONE = 0u,
   // Native F32-pair-to-BF16-pair conversion descriptor is available.
-  LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_HAS_NATIVE = 1u << 0,
+  LOOM_AMDGPU_FLOAT16_PACK_DESCRIPTOR_FLAG_HAS_NATIVE_BF16 = 1u << 0,
   // Integer low-16-bit pair packing descriptor is available.
-  LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_HAS_PACK_U16 = 1u << 1,
+  LOOM_AMDGPU_FLOAT16_PACK_DESCRIPTOR_FLAG_HAS_PACK_U16 = 1u << 1,
   // Integer three-input add descriptor with a source-2 literal is available.
-  LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_HAS_ADD3_SRC2_LITERAL = 1u << 2,
-} loom_amdgpu_bf16_pack_descriptor_flag_bits_t;
-typedef uint32_t loom_amdgpu_bf16_pack_descriptor_flags_t;
+  LOOM_AMDGPU_FLOAT16_PACK_DESCRIPTOR_FLAG_HAS_ADD3_SRC2_LITERAL = 1u << 2,
+  // Native F32-to-F16 conversion descriptor is available.
+  LOOM_AMDGPU_FLOAT16_PACK_DESCRIPTOR_FLAG_HAS_F16_CONVERT = 1u << 3,
+  // Native F16-pair-to-packed-B32 descriptor is available.
+  LOOM_AMDGPU_FLOAT16_PACK_DESCRIPTOR_FLAG_HAS_NATIVE_F16_PACK = 1u << 4,
+} loom_amdgpu_float16_pack_descriptor_flag_bits_t;
+typedef uint32_t loom_amdgpu_float16_pack_descriptor_flags_t;
 
-typedef struct loom_amdgpu_bf16_pack_descriptors_t {
+typedef struct loom_amdgpu_float16_pack_descriptors_t {
   // Availability bits for optional descriptor fields in this plan.
-  loom_amdgpu_bf16_pack_descriptor_flags_t flags;
+  loom_amdgpu_float16_pack_descriptor_flags_t flags;
   // Native F32-pair-to-BF16-pair conversion descriptor.
-  loom_low_lower_resolved_descriptor_t native_descriptor;
+  loom_low_lower_resolved_descriptor_t native_bf16_descriptor;
+  // Native F32-to-F16 conversion descriptor.
+  loom_low_lower_resolved_descriptor_t f16_convert_descriptor;
+  // Native F16-pair-to-packed-B32 descriptor.
+  loom_low_lower_resolved_descriptor_t native_f16_pack_descriptor;
   // Integer low-16-bit pair packing descriptor.
   loom_low_lower_resolved_descriptor_t pack_u16_descriptor;
   // Integer three-input add descriptor with a source-2 literal.
   loom_low_lower_resolved_descriptor_t add3_src2_literal_descriptor;
-} loom_amdgpu_bf16_pack_descriptors_t;
+} loom_amdgpu_float16_pack_descriptors_t;
 
-// Returns optional BF16 pack packet helpers for the active descriptor set. The
-// returned descriptor set is function-local target lowering state and remains
-// valid until the current loom_low_lower_function call returns.
-iree_status_t loom_amdgpu_get_bf16_pack_descriptors(
+// Returns optional F16 and BF16 pack packet helpers for the active descriptor
+// set. The returned descriptors are function-local target lowering state and
+// remain valid until the current loom_low_lower_function call returns.
+iree_status_t loom_amdgpu_get_float16_pack_descriptors(
     loom_low_lower_context_t* context,
-    const loom_amdgpu_bf16_pack_descriptors_t** out_descriptors);
+    const loom_amdgpu_float16_pack_descriptors_t** out_descriptors);
 
 // Returns true when |descriptor_set| can emit one f32-to-BF16 lane conversion.
 bool loom_amdgpu_bf16_descriptor_set_can_emit_f32_to_bf16_lane(
@@ -64,6 +72,15 @@ bool loom_amdgpu_descriptor_set_can_emit_packed_u16_lane_pair(
 bool loom_amdgpu_bf16_descriptor_set_can_emit_f32_pair_to_packed_bf16(
     const loom_low_descriptor_set_t* descriptor_set);
 
+// Returns true when |descriptor_set| can emit one f32-to-F16 lane conversion.
+bool loom_amdgpu_f16_descriptor_set_can_emit_f32_to_f16_lane(
+    const loom_low_descriptor_set_t* descriptor_set);
+
+// Returns true when |descriptor_set| can convert and pack two f32 lanes into
+// one packed F16 register with round-to-nearest-even semantics.
+bool loom_amdgpu_f16_descriptor_set_can_emit_f32_pair_to_packed_f16(
+    const loom_low_descriptor_set_t* descriptor_set);
+
 // Emits round-to-nearest-even conversion from one f32 lane to one BF16 lane.
 // The result is held in the low 16 bits of a one-unit VGPR.
 iree_status_t loom_amdgpu_emit_f32_to_bf16_lane(
@@ -75,7 +92,7 @@ iree_status_t loom_amdgpu_emit_f32_to_bf16_lane(
 // using already-resolved optional integer pack descriptors.
 iree_status_t loom_amdgpu_emit_f32_to_bf16_lane_with_descriptors(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_amdgpu_bf16_pack_descriptors_t* descriptors,
+    const loom_amdgpu_float16_pack_descriptors_t* descriptors,
     loom_value_id_t source_lane, loom_type_t lane_type,
     loom_value_id_t* out_lane);
 
@@ -90,7 +107,23 @@ iree_status_t loom_amdgpu_emit_f32_pair_to_packed_bf16(
 // register using already-resolved optional native and integer pack descriptors.
 iree_status_t loom_amdgpu_emit_f32_pair_to_packed_bf16_with_descriptors(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_amdgpu_bf16_pack_descriptors_t* descriptors,
+    const loom_amdgpu_float16_pack_descriptors_t* descriptors,
+    loom_value_id_t low_source_lane, loom_value_id_t high_source_lane,
+    loom_type_t lane_type, loom_value_id_t* out_packed);
+
+// Emits round-to-nearest-even conversion from one f32 lane to one F16 lane.
+// The result is held in the low 16 bits of a one-unit VGPR.
+iree_status_t loom_amdgpu_emit_f32_to_f16_lane_with_descriptors(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_float16_pack_descriptors_t* descriptors,
+    loom_value_id_t source_lane, loom_type_t lane_type,
+    loom_value_id_t* out_lane);
+
+// Converts two f32 lanes to F16 with round-to-nearest-even semantics and packs
+// them into one register. The low source becomes the low 16-bit lane.
+iree_status_t loom_amdgpu_emit_f32_pair_to_packed_f16_with_descriptors(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_float16_pack_descriptors_t* descriptors,
     loom_value_id_t low_source_lane, loom_value_id_t high_source_lane,
     loom_type_t lane_type, loom_value_id_t* out_packed);
 

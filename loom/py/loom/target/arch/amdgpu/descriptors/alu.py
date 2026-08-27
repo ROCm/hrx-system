@@ -5189,6 +5189,23 @@ def _v_cvt_f16_f32_overlay() -> AmdgpuDescriptorOverlay:
     )
 
 
+def _v_pack_b32_f16_overlay() -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.v_pack_b32_f16",
+        instruction_name="V_PACK_B32_F16",
+        mnemonic="v_pack_b32_f16",
+        encoding_name="ENC_VOP3",
+        semantic_tag="pack.float.f16x2.b32",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay("SRC0", _f16_vgpr_operand("low")),
+            AmdgpuOperandOverlay("SRC1", _f16_vgpr_operand("high")),
+        ),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 _PACKED8_SOURCE_SIZE_REASON = "packed8-conversion-reads-byte-lanes-of-b32-source"
 
 
@@ -6982,6 +6999,7 @@ __all__ = (
     "_v_cvt_scale_pk8_overlays",
     "_v_cvt_scalef32_pk_packed8_overlays",
     "_v_cvt_u32_f32_overlay",
+    "_v_pack_b32_f16_overlay",
     "_v_ceil_f32_overlay",
     "_v_div_fixup_f32_overlay",
     "_v_div_fmas_f32_overlay",

@@ -602,7 +602,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(32, 1, 1) workg
   %result = v_wmma_f32_16x16x16_bf16 %lhs, %rhs, %45
   %scale = global_load_b32_saddr %36, %scale_view
   %49 = v_lshlrev_b32_src0_inline %23, 1
-  %50 = v_and_b32_src0_inline %28, 1
+  %50 = v_and_b32_src0_inline %23, 1
   %51 = v_cmp_eq_i32_src1_inline %50 {rhs = 0}
   %52 = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %53 = v_mul_f32 %52, %scale
@@ -807,39 +807,38 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(32, 1, 1) workg
   %36 = v_bfe_u32_offset_0_width_16_low16 %35
   %37 = v_lshlrev_b32_src0_inline %36, 16
   %38 = v_or_b32 %34, %37
-  %40 = v_and_b32_src0_inline %11, 15
-  %41 = v_and_b32_src0_inline %40, 1
-  %42 = v_cmp_eq_i32_src1_inline %41 {rhs = 0}
-  %44 = v_mov_b32_dpp16 %20 {dpp_ctrl = 177}
-  %46 = v_lshrrev_b32_src0_inline %20, 16
-  %47 = v_mov_b32_dpp16 %46 {dpp_ctrl = 177}
-  %49 = v_mov_b32_dpp16 %26 {dpp_ctrl = 177}
-  %51 = v_lshrrev_b32_src0_inline %26, 16
-  %52 = v_mov_b32_dpp16 %51 {dpp_ctrl = 177}
-  %54 = v_mov_b32_dpp16 %32 {dpp_ctrl = 177}
-  %56 = v_lshrrev_b32_src0_inline %32, 16
-  %57 = v_mov_b32_dpp16 %56 {dpp_ctrl = 177}
-  %59 = v_mov_b32_dpp16 %38 {dpp_ctrl = 177}
-  %61 = v_lshrrev_b32_src0_inline %38, 16
-  %62 = v_mov_b32_dpp16 %61 {dpp_ctrl = 177}
-  %63, %64 = s_and_saveexec_b64 %42
-  %65 = v_cvt_pk_u16_u32 %20, %44
-  global_store_b32_saddr %14, %65, %out_view
-  %66 = v_cvt_pk_u16_u32 %46, %47
-  global_store_b32_saddr %14, %66, %out_view {offset = 64}
-  %67 = v_cvt_pk_u16_u32 %26, %49
-  global_store_b32_saddr %14, %67, %out_view {offset = 128}
-  %68 = v_cvt_pk_u16_u32 %51, %52
-  global_store_b32_saddr %14, %68, %out_view {offset = 192}
-  %69 = v_cvt_pk_u16_u32 %32, %54
-  global_store_b32_saddr %14, %69, %out_view {offset = 256}
-  %70 = v_cvt_pk_u16_u32 %56, %57
-  global_store_b32_saddr %14, %70, %out_view {offset = 320}
-  %71 = v_cvt_pk_u16_u32 %38, %59
-  global_store_b32_saddr %14, %71, %out_view {offset = 384}
-  %72 = v_cvt_pk_u16_u32 %61, %62
-  global_store_b32_saddr %14, %72, %out_view {offset = 448}
-  s_mov_b64_exec %63
+  %40 = v_and_b32_src0_inline %11, 1
+  %41 = v_cmp_eq_i32_src1_inline %40 {rhs = 0}
+  %43 = v_mov_b32_dpp16 %20 {dpp_ctrl = 177}
+  %45 = v_lshrrev_b32_src0_inline %20, 16
+  %46 = v_mov_b32_dpp16 %45 {dpp_ctrl = 177}
+  %48 = v_mov_b32_dpp16 %26 {dpp_ctrl = 177}
+  %50 = v_lshrrev_b32_src0_inline %26, 16
+  %51 = v_mov_b32_dpp16 %50 {dpp_ctrl = 177}
+  %53 = v_mov_b32_dpp16 %32 {dpp_ctrl = 177}
+  %55 = v_lshrrev_b32_src0_inline %32, 16
+  %56 = v_mov_b32_dpp16 %55 {dpp_ctrl = 177}
+  %58 = v_mov_b32_dpp16 %38 {dpp_ctrl = 177}
+  %60 = v_lshrrev_b32_src0_inline %38, 16
+  %61 = v_mov_b32_dpp16 %60 {dpp_ctrl = 177}
+  %62, %63 = s_and_saveexec_b64 %41
+  %64 = v_cvt_pk_u16_u32 %20, %43
+  global_store_b32_saddr %14, %64, %out_view
+  %65 = v_cvt_pk_u16_u32 %45, %46
+  global_store_b32_saddr %14, %65, %out_view {offset = 64}
+  %66 = v_cvt_pk_u16_u32 %26, %48
+  global_store_b32_saddr %14, %66, %out_view {offset = 128}
+  %67 = v_cvt_pk_u16_u32 %50, %51
+  global_store_b32_saddr %14, %67, %out_view {offset = 192}
+  %68 = v_cvt_pk_u16_u32 %32, %53
+  global_store_b32_saddr %14, %68, %out_view {offset = 256}
+  %69 = v_cvt_pk_u16_u32 %55, %56
+  global_store_b32_saddr %14, %69, %out_view {offset = 320}
+  %70 = v_cvt_pk_u16_u32 %38, %58
+  global_store_b32_saddr %14, %70, %out_view {offset = 384}
+  %71 = v_cvt_pk_u16_u32 %60, %61
+  global_store_b32_saddr %14, %71, %out_view {offset = 448}
+  s_mov_b64_exec %62
   return
 }
 
@@ -4196,7 +4195,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(32, 1, 
   %40 = v_bfe_u32_offset_0_width_16_low16 %39
   %41 = v_lshlrev_b32_src0_inline %40, 16
   %42 = v_or_b32 %38, %41
-  %44 = v_and_b32_src0_inline %14, 1
+  %44 = v_and_b32_src0_inline %11, 1
   %45 = v_cmp_eq_i32_src1_inline %44 {rhs = 0}
   %47 = v_mov_b32_dpp16 %24 {dpp_ctrl = 177}
   %49 = v_lshrrev_b32_src0_inline %24, 16

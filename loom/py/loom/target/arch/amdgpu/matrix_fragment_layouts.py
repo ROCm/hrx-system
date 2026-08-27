@@ -155,8 +155,8 @@ class MatrixFragmentResultToRhsPackedB16Projection:
 class MatrixFragmentPackedB16PublicationProjection:
     """Exact result-owner projection for one packed-B16 memory packet."""
 
-    publishing_participant_modulus: int
-    publishing_participant_remainder: int
+    publishing_participant_and_mask: int
+    publishing_participant_equal_value: int
     paired_participant_xor_mask: int
 
 
@@ -1379,20 +1379,25 @@ def matrix_fragment_result_to_rhs_packed_b16_projection(
 def matrix_fragment_packed_b16_publication_projection(
     layout: AmdgpuMatrixFragmentLayout,
     role: MatrixFragmentRoleLayout,
+    packed_axis: str,
 ) -> MatrixFragmentPackedB16PublicationProjection | None:
-    """Compiles exact adjacent-column owners into a packed publication recipe.
+    """Compiles exact adjacent-axis owners into a packed publication recipe.
 
-    The supported executable projection lets one congruence class of source
-    participants publish pairs. The publisher owns the low column and the
-    paired participant owns the adjacent high column at the same local payload
+    The supported executable projection lets one participant bit predicate
+    publish pairs. The publisher owns the low coordinate and the paired
+    participant owns the adjacent high coordinate at the same local payload
     position. Exhaustive exact-map evaluation proves that the pairs cover the
     role's complete logical domain exactly once.
     """
 
+    if packed_axis not in ("row", "column"):
+        raise ValueError(f"unsupported packed-B16 publication axis '{packed_axis}'")
+    packed_axis_index = _AXIS_NAMES.index(packed_axis)
     if (
-        layout.wave_size % 2 != 0
+        layout.wave_size <= 0
+        or (layout.wave_size & (layout.wave_size - 1)) != 0
         or layout.tile_shape[0] != 1
-        or layout.tile_shape[2] % 2 != 0
+        or layout.tile_shape[packed_axis_index] % 2 != 0
         or role.element_bit_count != 32
         or role.coordinate_element_offset != 0
         or role.coordinate_element_stride != 1
@@ -1426,12 +1431,19 @@ def matrix_fragment_packed_b16_publication_projection(
     publishing_positions: dict[int, set[int]] = {}
     paired_positions: dict[int, set[int]] = {}
     for row in range(layout.tile_shape[1]):
-        for column in range(0, layout.tile_shape[2], 2):
+        for column in range(layout.tile_shape[2]):
+            packed_coordinate = row if packed_axis == "row" else column
+            if packed_coordinate % 2 != 0:
+                continue
+            paired_row = row + 1 if packed_axis == "row" else row
+            paired_column = column + 1 if packed_axis == "column" else column
             publishing_participant, publishing_position = (
                 coordinate_map.evaluate_canonical_inverse((0, row, column))
             )
             paired_participant, paired_position = (
-                coordinate_map.evaluate_canonical_inverse((0, row, column + 1))
+                coordinate_map.evaluate_canonical_inverse(
+                    (0, paired_row, paired_column)
+                )
             )
             participant_xor_mask = publishing_participant ^ paired_participant
             if (
@@ -1472,22 +1484,27 @@ def matrix_fragment_packed_b16_publication_projection(
     ):
         return None
 
-    for modulus in (1 << bit for bit in range(1, layout.wave_size.bit_length())):
-        if layout.wave_size % modulus != 0:
-            continue
-        for remainder in range(modulus):
-            selected = frozenset(
-                participant
-                for participant in range(layout.wave_size)
-                if participant % modulus == remainder
-            )
-            if selected == publishing_participants:
-                return MatrixFragmentPackedB16PublicationProjection(
-                    publishing_participant_modulus=modulus,
-                    publishing_participant_remainder=remainder,
-                    paired_participant_xor_mask=paired_participant_xor_mask,
-                )
-    return None
+    first_publisher = min(publishing_participants)
+    participant_bit_mask = layout.wave_size - 1
+    publishing_participant_and_mask = participant_bit_mask
+    for participant in publishing_participants:
+        publishing_participant_and_mask &= ~(participant ^ first_publisher)
+    publishing_participant_equal_value = (
+        first_publisher & publishing_participant_and_mask
+    )
+    selected = frozenset(
+        participant
+        for participant in range(layout.wave_size)
+        if (participant & publishing_participant_and_mask)
+        == publishing_participant_equal_value
+    )
+    if publishing_participant_and_mask == 0 or selected != publishing_participants:
+        return None
+    return MatrixFragmentPackedB16PublicationProjection(
+        publishing_participant_and_mask=publishing_participant_and_mask,
+        publishing_participant_equal_value=publishing_participant_equal_value,
+        paired_participant_xor_mask=paired_participant_xor_mask,
+    )
 
 
 AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (

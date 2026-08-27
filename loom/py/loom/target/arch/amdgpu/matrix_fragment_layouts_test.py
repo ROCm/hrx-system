@@ -266,14 +266,23 @@ def test_packed_b16_publication_accounts_for_payload_padding() -> None:
     f16_layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY["rdna3_wmmar3_f16_16x16x16_f16"]
 
     assert matrix_fragment_packed_b16_publication_projection(
-        f32_layout, f32_layout.result
+        f32_layout, f32_layout.result, "column"
     ) == MatrixFragmentPackedB16PublicationProjection(
-        publishing_participant_modulus=2,
-        publishing_participant_remainder=0,
+        publishing_participant_and_mask=1,
+        publishing_participant_equal_value=0,
         paired_participant_xor_mask=1,
     )
+    assert matrix_fragment_packed_b16_publication_projection(
+        f32_layout, f32_layout.result, "row"
+    ) == MatrixFragmentPackedB16PublicationProjection(
+        publishing_participant_and_mask=16,
+        publishing_participant_equal_value=0,
+        paired_participant_xor_mask=16,
+    )
     assert (
-        matrix_fragment_packed_b16_publication_projection(f16_layout, f16_layout.result)
+        matrix_fragment_packed_b16_publication_projection(
+            f16_layout, f16_layout.result, "column"
+        )
         is None
     )
 
@@ -291,52 +300,22 @@ def test_packed_b16_publication_accounts_for_payload_padding() -> None:
 def test_packed_b16_publication_spans_matrix_families(layout_key: str) -> None:
     layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY[layout_key]
     expected = MatrixFragmentPackedB16PublicationProjection(
-        publishing_participant_modulus=2,
-        publishing_participant_remainder=0,
+        publishing_participant_and_mask=1,
+        publishing_participant_equal_value=0,
         paired_participant_xor_mask=1,
     )
 
     assert (
-        matrix_fragment_packed_b16_publication_projection(layout, layout.accumulator)
+        matrix_fragment_packed_b16_publication_projection(
+            layout, layout.accumulator, "column"
+        )
         == expected
-    )
-    assert (
-        matrix_fragment_packed_b16_publication_projection(layout, layout.result)
-        == expected
-    )
-
-
-def test_packed_b16_publication_requires_adjacent_column_owners() -> None:
-    layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY["rdna3_wmmar3_f32_16x16x16_f16"]
-    row_paired_role = replace(
-        layout.result,
-        axes=(
-            None,
-            MatrixFragmentAxisLayout(1, 16, 1, 1),
-            MatrixFragmentAxisLayout(8, 2, 16, 1),
-            None,
-        ),
-    )
-    row_paired_layout = replace(layout, result=row_paired_role)
-    validate_matrix_fragment_layout(row_paired_layout)
-
-    assert role_coordinate(row_paired_layout, row_paired_role, 0, 0) == (
-        None,
-        0,
-        0,
-        None,
-    )
-    assert role_coordinate(row_paired_layout, row_paired_role, 1, 0) == (
-        None,
-        1,
-        0,
-        None,
     )
     assert (
         matrix_fragment_packed_b16_publication_projection(
-            row_paired_layout, row_paired_role
+            layout, layout.result, "column"
         )
-        is None
+        == expected
     )
 
 
@@ -713,7 +692,9 @@ def test_result_to_lhs_partial_transpose_preserves_coordinates() -> None:
             or destination_role.element_bit_count != 16
             or destination_role.reduction_group is not None
             or layout.tile_shape[2] != layout.tile_shape[3]
-            or matrix_fragment_packed_b16_publication_projection(layout, source_role)
+            or matrix_fragment_packed_b16_publication_projection(
+                layout, source_role, "column"
+            )
             is None
         ):
             continue

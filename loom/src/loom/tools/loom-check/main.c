@@ -214,7 +214,7 @@ int loom_check_main(int argc, char** argv,
       "              target-low-registry-manifest, and source-low.\n"
       "              source-low emits target-lowering\n"
       "              artifacts or pipeline text and accepts\n"
-      "              output=module|low|pipeline|prepared-pipeline,\n"
+      "              output=module|low|pipeline|prepared-pipeline|none,\n"
       "              control-flow=cfg|structured-low,\n"
       "              sanitizer=none|access|value|operation|race|all,\n"
       "              sanitizer-reporting=default|trap|report-only, and\n"

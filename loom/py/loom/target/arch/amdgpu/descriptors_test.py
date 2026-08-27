@@ -1563,6 +1563,21 @@ def test_f32_to_f16_convert_results_use_d16_low_window() -> None:
         )
 
 
+def test_f16_pair_pack_is_available_on_all_targets() -> None:
+    for target, builder in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS.items():
+        descriptors = {
+            descriptor.descriptor_key: descriptor
+            for descriptor in builder.overlay_rows()
+        }
+        descriptor = descriptors.get("amdgpu.v_pack_b32_f16")
+        assert descriptor is not None, target
+        assert descriptor.encoding_name == "ENC_VOP3"
+        assert tuple(
+            operand.descriptor_operand.register_part
+            for operand in descriptor.operands[1:]
+        ) == (_REG_PART_VGPR_LOW16, _REG_PART_VGPR_LOW16)
+
+
 def test_gfx11_wmma_wave64_asm_forms_keep_native_mnemonics_unsuffixed() -> None:
     descriptors = {
         descriptor.descriptor_key: descriptor for descriptor in _gfx11_core_overlays()

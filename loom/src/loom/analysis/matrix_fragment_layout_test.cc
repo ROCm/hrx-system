@@ -119,7 +119,7 @@ loom_matrix_fragment_role_layout_t RoleLayout(
       /*.coordinate_element_count=*/coordinate_element_count,
       /*.coordinate_element_offset=*/coordinate_element_offset,
       /*.coordinate_element_stride=*/coordinate_element_stride,
-      /*.packed_b16_publication=*/{},
+      /*.packed_b16_publications=*/{},
       /*.coordinate_flags=*/coordinate_flags,
       /*.packed_element_coordinate_flag=*/packed_element_coordinate_flag,
       /*.reduction_group=*/{},

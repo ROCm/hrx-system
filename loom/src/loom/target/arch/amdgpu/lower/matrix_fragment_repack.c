@@ -804,7 +804,7 @@ static iree_status_t
 loom_amdgpu_emit_fragment_repack_narrow_source_registers_to_bf16(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fragment_repack_plan_t* plan,
-    const loom_amdgpu_bf16_pack_descriptors_t* bf16_pack_descriptors,
+    const loom_amdgpu_float16_pack_descriptors_t* bf16_pack_descriptors,
     loom_type_t vgpr_type, loom_value_id_t* inout_source_registers) {
   for (uint16_t i = 0; i < plan->source_register_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_f32_to_bf16_lane_with_descriptors(
@@ -973,7 +973,7 @@ static bool loom_amdgpu_fragment_repack_packed_pair_is_fused(
 
 static bool loom_amdgpu_fragment_repack_must_pre_narrow_source_registers(
     const loom_amdgpu_fragment_repack_plan_t* plan,
-    const loom_amdgpu_bf16_pack_descriptors_t* bf16_pack_descriptors) {
+    const loom_amdgpu_float16_pack_descriptors_t* bf16_pack_descriptors) {
   switch (plan->packed_pair.kind) {
     case LOOM_AMDGPU_FRAGMENT_REPACK_PACKED_PAIR_DPP_PACK_U16:
       return true;
@@ -982,7 +982,7 @@ static bool loom_amdgpu_fragment_repack_must_pre_narrow_source_registers(
     default:
       return !iree_any_bit_set(
           bf16_pack_descriptors->flags,
-          LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_HAS_NATIVE);
+          LOOM_AMDGPU_FLOAT16_PACK_DESCRIPTOR_FLAG_HAS_NATIVE_BF16);
   }
 }
 
@@ -1012,7 +1012,7 @@ static iree_status_t loom_amdgpu_emit_fragment_repack_packed_source_registers(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fragment_repack_plan_t* plan,
     const loom_low_lower_resolved_descriptor_t* packed_pair_descriptor,
-    const loom_amdgpu_bf16_pack_descriptors_t* bf16_pack_descriptors,
+    const loom_amdgpu_float16_pack_descriptors_t* bf16_pack_descriptors,
     const loom_value_id_t* source_registers, bool pre_narrow_source_registers,
     loom_type_t vgpr_type, loom_value_id_t* out_packed_source_registers) {
   if (loom_amdgpu_fragment_repack_packed_pair_is_fused(plan)) {
@@ -1029,7 +1029,7 @@ static iree_status_t loom_amdgpu_emit_fragment_repack_packed_source_registers(
                  LOOM_AMDGPU_FRAGMENT_REPACK_PACKED_PAIR_EXCHANGE_THEN_PACK);
   const loom_low_lower_resolved_descriptor_t* pack_u16_descriptor =
       iree_any_bit_set(bf16_pack_descriptors->flags,
-                       LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_HAS_PACK_U16)
+                       LOOM_AMDGPU_FLOAT16_PACK_DESCRIPTOR_FLAG_HAS_PACK_U16)
           ? &bf16_pack_descriptors->pack_u16_descriptor
           : NULL;
   loom_value_id_t
@@ -1475,9 +1475,9 @@ loom_amdgpu_emit_fragment_repack_result_to_lhs_bf16_bpermute(
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_repack_source_registers(
       context, source_op, plan, low_source, vgpr_type, source_registers));
 
-  const loom_amdgpu_bf16_pack_descriptors_t* bf16_pack_descriptors = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_get_bf16_pack_descriptors(context, &bf16_pack_descriptors));
+  const loom_amdgpu_float16_pack_descriptors_t* bf16_pack_descriptors = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_get_float16_pack_descriptors(
+      context, &bf16_pack_descriptors));
   const bool pre_narrow_source_registers =
       loom_amdgpu_fragment_repack_must_pre_narrow_source_registers(
           plan, bf16_pack_descriptors);
@@ -1548,7 +1548,7 @@ loom_amdgpu_emit_fragment_repack_result_to_lhs_bf16_bpermute(
       &bpermute_descriptor));
   const loom_low_lower_resolved_descriptor_t* pack_u16_descriptor =
       iree_any_bit_set(bf16_pack_descriptors->flags,
-                       LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_HAS_PACK_U16)
+                       LOOM_AMDGPU_FLOAT16_PACK_DESCRIPTOR_FLAG_HAS_PACK_U16)
           ? &bf16_pack_descriptors->pack_u16_descriptor
           : NULL;
 
