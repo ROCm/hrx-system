@@ -193,7 +193,7 @@ typedef struct loom_amdgpu_result_to_lhs_bf16_projection_t {
   uint8_t transpose_bit_count;
 } loom_amdgpu_result_to_lhs_bf16_projection_t;
 
-#include "loom/target/arch/amdgpu/lower/matrix_fragment_repack_result_to_lhs_projections.inl"
+#include "loom/target/arch/amdgpu/matrix/matrix_fragment_repack_result_to_lhs_projections.inl"
 
 static bool loom_amdgpu_fragment_repack_uses_source_register_bit_tree(
     uint16_t source_register_count) {

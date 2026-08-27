@@ -14,10 +14,8 @@ source fact; quotient/remainder terms are its compact executable form.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cache
-from itertools import product
 
 from loom.target.native_contraction_layout import (
     CoordinateDimension,
@@ -140,38 +138,54 @@ def _compile_separable_projection(
     *,
     source_dimensions: tuple[CoordinateDimension, ...],
     destination_dimensions: tuple[CoordinateDimension, ...],
-    evaluate: Callable[[tuple[int, ...]], tuple[int, ...]],
+    destination_by_source: tuple[int, ...],
 ) -> tuple[CoordinateProjectionTerm, ...] | None:
-    zero_source = tuple(0 for _ in source_dimensions)
-    if evaluate(zero_source) != tuple(0 for _ in destination_dimensions):
+    source_strides = []
+    source_stride = 1
+    for dimension in source_dimensions:
+        source_strides.append(source_stride)
+        source_stride *= dimension.extent
+
+    destination_coordinates = []
+    for destination_ordinal in destination_by_source:
+        coordinate = []
+        for dimension in destination_dimensions:
+            coordinate.append(destination_ordinal % dimension.extent)
+            destination_ordinal //= dimension.extent
+        destination_coordinates.append(tuple(coordinate))
+
+    if destination_coordinates[0] != tuple(0 for _ in destination_dimensions):
         return None
 
-    contributions: dict[tuple[int, int], tuple[int, ...]] = {}
+    contributions = []
     for source_index, source_dimension in enumerate(source_dimensions):
-        for destination_index in range(len(destination_dimensions)):
-            values = []
-            for source_value in range(source_dimension.extent):
-                source = list(zero_source)
-                source[source_index] = source_value
-                values.append(evaluate(tuple(source))[destination_index])
-            contributions[(source_index, destination_index)] = tuple(values)
+        contributions.append(
+            tuple(
+                destination_coordinates[source_value * source_strides[source_index]]
+                for source_value in range(source_dimension.extent)
+            )
+        )
 
-    for source in product(
-        *(range(dimension.extent) for dimension in source_dimensions)
-    ):
+    for source_ordinal, destination_coordinate in enumerate(destination_coordinates):
         expected = [0] * len(destination_dimensions)
-        for source_index, source_value in enumerate(source):
-            for destination_index in range(len(destination_dimensions)):
-                expected[destination_index] += contributions[
-                    (source_index, destination_index)
-                ][source_value]
-        if tuple(expected) != evaluate(source):
+        for source_index, (source_dimension, source_stride) in enumerate(
+            zip(source_dimensions, source_strides, strict=True)
+        ):
+            source_value = (source_ordinal // source_stride) % source_dimension.extent
+            for destination_index, contribution in enumerate(
+                contributions[source_index][source_value]
+            ):
+                expected[destination_index] += contribution
+        if tuple(expected) != destination_coordinate:
             return None
 
     terms = []
     for destination_index, destination_dimension in enumerate(destination_dimensions):
         for source_index, source_dimension in enumerate(source_dimensions):
-            values = contributions[(source_index, destination_index)]
+            values = tuple(
+                contribution[destination_index]
+                for contribution in contributions[source_index]
+            )
             if not any(values):
                 continue
             digits = _recognize_digit_sum(values)
@@ -190,6 +204,7 @@ def _compile_separable_projection(
     return tuple(terms)
 
 
+@cache
 def coordinate_projection_plan(
     coordinate_map: ExactCoordinateMap,
 ) -> CoordinateProjectionPlan | None:
@@ -203,12 +218,14 @@ def coordinate_projection_plan(
     forward_terms = _compile_separable_projection(
         source_dimensions=coordinate_map.source_dimensions,
         destination_dimensions=coordinate_map.destination_dimensions,
-        evaluate=coordinate_map.evaluate,
+        destination_by_source=coordinate_map.destination_by_source,
     )
     inverse_terms = _compile_separable_projection(
         source_dimensions=coordinate_map.destination_dimensions,
         destination_dimensions=coordinate_map.source_dimensions,
-        evaluate=coordinate_map.evaluate_canonical_inverse,
+        destination_by_source=tuple(
+            sources[0] for sources in coordinate_map.sources_by_destination
+        ),
     )
     if forward_terms is None or inverse_terms is None:
         return None

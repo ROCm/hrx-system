@@ -52,21 +52,6 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_generated_file_family(
   NAME
-    matrix_fragment_repack_tables_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::lower::fragment_repack_tables
-  OUTPUTS
-    "matrix_fragment_repack_result_to_lhs_projections.inl"
-    "matrix_fragment_repack_result_to_rhs_projections.inl"
-  OUTPUT_FLAGS
-    "--result-to-lhs"
-    "--result-to-rhs"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_file_family(
-  NAME
     fp8_tables_gen
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
@@ -149,11 +134,11 @@ loom_cc_library(
     "value/vector_transform.h"
     "workgroup.h"
   TEXTUAL_HDRS
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/matrix/matrix_fragment_repack_result_to_lhs_projections.inl"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/matrix/matrix_fragment_repack_result_to_rhs_projections.inl"
     "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/memory_cache_policy_encoding_rows.inl"
     "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/memory_cache_policy_temporal_th.inl"
     "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/target_records_tables.inl"
-    "matrix_fragment_repack_result_to_lhs_projections.inl"
-    "matrix_fragment_repack_result_to_rhs_projections.inl"
     "memory_descriptor_candidate_ranges.inl"
     "memory_descriptor_candidates.inl"
     "registry_tables.inl"

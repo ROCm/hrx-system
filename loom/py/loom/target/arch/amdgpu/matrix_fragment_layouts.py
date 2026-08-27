@@ -8,7 +8,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from functools import cache
 from itertools import product
 from math import prod
 
@@ -687,6 +689,51 @@ def layout_roles(
     return (layout.lhs, layout.rhs, layout.accumulator, layout.result)
 
 
+@cache
+def _role_storage_coordinate_evaluator(
+    axes: tuple[MatrixFragmentAxisLayout | None, ...],
+) -> Callable[[int, int], tuple[int | None, ...]]:
+    """Precomputes one validated role's coordinate strides."""
+
+    inner_element_count = prod(axis.element_count for axis in axes if axis is not None)
+    outer_element_count = prod(axis.outer_count for axis in axes if axis is not None)
+    axis_factors: list[tuple[MatrixFragmentAxisLayout, int, int] | None] = []
+    inner_stride = inner_element_count
+    outer_stride = outer_element_count
+    for axis in axes:
+        if axis is None:
+            axis_factors.append(None)
+            continue
+        inner_stride //= axis.element_count
+        outer_stride //= axis.outer_count
+        axis_factors.append((axis, inner_stride, outer_stride))
+
+    def evaluate(lane: int, coordinate_element_index: int) -> tuple[int | None, ...]:
+        inner_linear_index = coordinate_element_index % inner_element_count
+        outer_linear_index = coordinate_element_index // inner_element_count
+        coordinates: list[int | None] = []
+        for factor in axis_factors:
+            if factor is None:
+                coordinates.append(None)
+                continue
+            axis, axis_inner_stride, axis_outer_stride = factor
+            element_coordinate = (
+                inner_linear_index // axis_inner_stride
+            ) % axis.element_count
+            thread_coordinate = (lane // axis.thread_stride) % axis.thread_count
+            outer_coordinate = (
+                outer_linear_index // axis_outer_stride
+            ) % axis.outer_count
+            coordinates.append(
+                axis.element_count
+                * (thread_coordinate + axis.thread_count * outer_coordinate)
+                + element_coordinate
+            )
+        return tuple(coordinates)
+
+    return evaluate
+
+
 def role_storage_coordinate(
     layout: AmdgpuMatrixFragmentLayout,
     role: MatrixFragmentRoleLayout,
@@ -715,45 +762,7 @@ def role_storage_coordinate(
     )
     if coordinate_element_index >= role.coordinate_element_count:
         return None
-
-    inner_element_count = prod(
-        axis.element_count for axis in role.axes if axis is not None
-    )
-    outer_element_count = prod(
-        axis.outer_count for axis in role.axes if axis is not None
-    )
-    inner_linear_index = coordinate_element_index % inner_element_count
-    outer_linear_index = coordinate_element_index // inner_element_count
-    inner_stride = inner_element_count
-    outer_stride = outer_element_count
-    coordinates: list[int | None] = []
-    for axis_index, axis in enumerate(role.axes):
-        if axis is None:
-            coordinates.append(None)
-            continue
-        inner_stride //= axis.element_count
-        outer_stride //= axis.outer_count
-        element_coordinate = (inner_linear_index // inner_stride) % axis.element_count
-        thread_coordinate = (lane // axis.thread_stride) % axis.thread_count
-        outer_coordinate = (outer_linear_index // outer_stride) % axis.outer_count
-        coordinate = (
-            axis.element_count
-            * (thread_coordinate + axis.thread_count * outer_coordinate)
-            + element_coordinate
-        )
-        coordinate_extent = layout.tile_shape[axis_index]
-        if axis_index == _AXIS_NAMES.index("reduction"):
-            reduction_group = role.reduction_group
-            if reduction_group is not None:
-                coordinate_extent = (
-                    coordinate_extent
-                    // reduction_group.logical_element_count
-                    * reduction_group.storage_element_count
-                )
-        if coordinate >= coordinate_extent:
-            return None
-        coordinates.append(coordinate)
-    return tuple(coordinates)
+    return _role_storage_coordinate_evaluator(role.axes)(lane, coordinate_element_index)
 
 
 def role_coordinate(
@@ -769,12 +778,11 @@ def role_coordinate(
     return role_storage_coordinate(layout, role, lane, payload_element_index)
 
 
-def matrix_fragment_packed_element_axis(
-    layout: AmdgpuMatrixFragmentLayout,
+@cache
+def _matrix_fragment_packed_element_axis(
+    wave_size: int,
     role: MatrixFragmentRoleLayout,
 ) -> str | None:
-    """Returns the semantic axis densely packed within each register."""
-
     if role.element_bit_count <= 0 or 32 % role.element_bit_count != 0:
         return None
     elements_per_register = 32 // role.element_bit_count
@@ -787,22 +795,15 @@ def matrix_fragment_packed_element_axis(
     ):
         return None
 
+    evaluate_coordinate = _role_storage_coordinate_evaluator(role.axes)
     packed_axis_index: int | None = None
-    for participant in range(layout.wave_size):
+    for participant in range(wave_size):
         for base_value in range(
             0, role.coordinate_element_count, elements_per_register
         ):
-            base_coordinate = role_storage_coordinate(
-                layout, role, participant, base_value
-            )
-            if base_coordinate is None:
-                return None
+            base_coordinate = evaluate_coordinate(participant, base_value)
             for element in range(1, elements_per_register):
-                coordinate = role_storage_coordinate(
-                    layout, role, participant, base_value + element
-                )
-                if coordinate is None:
-                    return None
+                coordinate = evaluate_coordinate(participant, base_value + element)
                 changed_axes = tuple(
                     axis_index
                     for axis_index, (base, value) in enumerate(
@@ -825,25 +826,30 @@ def matrix_fragment_packed_element_axis(
     return None if packed_axis_index is None else _AXIS_NAMES[packed_axis_index]
 
 
-def matrix_fragment_role_storage_coordinate_map(
+def matrix_fragment_packed_element_axis(
     layout: AmdgpuMatrixFragmentLayout,
     role: MatrixFragmentRoleLayout,
-) -> ExactCoordinateMap:
-    """Returns the exact participant/value-to-storage map for one role."""
+) -> str | None:
+    """Returns the semantic axis densely packed within each register."""
 
-    logical_axis_indices = _ROLE_LOGICAL_AXIS_INDICES[role.role]
+    return _matrix_fragment_packed_element_axis(layout.wave_size, role)
+
+
+@cache
+def _matrix_fragment_role_storage_coordinate_map(
+    wave_size: int,
+    logical_axis_indices: tuple[int, ...],
+    destination_dimension_names: tuple[str, ...],
+    axes: tuple[MatrixFragmentAxisLayout | None, ...],
+) -> ExactCoordinateMap:
+    evaluate_coordinate = _role_storage_coordinate_evaluator(axes)
+    coordinate_element_count = prod(
+        axis.outer_count * axis.element_count for axis in axes if axis is not None
+    )
 
     def evaluate(physical_coordinate: tuple[int, ...]) -> tuple[int, ...]:
         participant, value = physical_coordinate
-        payload_element = (
-            role.coordinate_element_offset + value * role.coordinate_element_stride
-        )
-        coordinate = role_storage_coordinate(layout, role, participant, payload_element)
-        if coordinate is None:
-            raise ValueError(
-                f"matrix fragment layout '{layout.key}' role '{role.role}' "
-                f"rejected participant={participant}, value={value}"
-            )
+        coordinate = evaluate_coordinate(participant, value)
         return tuple(
             0 if coordinate[index] is None else coordinate[index]
             for index in logical_axis_indices
@@ -851,11 +857,11 @@ def matrix_fragment_role_storage_coordinate_map(
 
     destination_dimensions = []
     for dimension_name, axis_index in zip(
-        _ROLE_STORAGE_DIMENSION_NAMES[role.role],
+        destination_dimension_names,
         logical_axis_indices,
         strict=True,
     ):
-        axis = role.axes[axis_index]
+        axis = axes[axis_index]
         extent = (
             1
             if axis is None
@@ -864,11 +870,25 @@ def matrix_fragment_role_storage_coordinate_map(
         destination_dimensions.append(CoordinateDimension(dimension_name, extent))
     return exact_coordinate_map(
         source_dimensions=(
-            CoordinateDimension("participant", layout.wave_size),
-            CoordinateDimension("value", role.coordinate_element_count),
+            CoordinateDimension("participant", wave_size),
+            CoordinateDimension("value", coordinate_element_count),
         ),
         destination_dimensions=tuple(destination_dimensions),
         evaluate=evaluate,
+    )
+
+
+def matrix_fragment_role_storage_coordinate_map(
+    layout: AmdgpuMatrixFragmentLayout,
+    role: MatrixFragmentRoleLayout,
+) -> ExactCoordinateMap:
+    """Returns the exact participant/value-to-storage map for one role."""
+
+    return _matrix_fragment_role_storage_coordinate_map(
+        layout.wave_size,
+        _ROLE_LOGICAL_AXIS_INDICES[role.role],
+        _ROLE_STORAGE_DIMENSION_NAMES[role.role],
+        role.axes,
     )
 
 
@@ -1252,25 +1272,26 @@ def matrix_fragment_result_to_rhs_packed_b16_projection(
     )
 
 
-def role_has_contiguous_lane_xor1_columns(
-    layout: AmdgpuMatrixFragmentLayout,
+@cache
+def _role_has_contiguous_lane_xor1_columns(
+    wave_size: int,
     role: MatrixFragmentRoleLayout,
 ) -> bool:
-    """Returns whether lane xor 1 advances only the role's column axis."""
-
     column_axis = _AXIS_NAMES.index("column")
-    if layout.wave_size % 2 != 0:
+    if (
+        wave_size % 2 != 0
+        or role.coordinate_element_offset != 0
+        or role.coordinate_element_stride != 1
+        or role.payload_element_count != role.coordinate_element_count
+    ):
         return False
-    for participant in range(0, layout.wave_size, 2):
-        for value in range(role.payload_element_count):
-            coordinate = role_storage_coordinate(layout, role, participant, value)
-            paired_coordinate = role_storage_coordinate(
-                layout, role, participant ^ 1, value
-            )
+    evaluate_coordinate = _role_storage_coordinate_evaluator(role.axes)
+    for participant in range(0, wave_size, 2):
+        for value in range(role.coordinate_element_count):
+            coordinate = evaluate_coordinate(participant, value)
+            paired_coordinate = evaluate_coordinate(participant ^ 1, value)
             if (
-                coordinate is None
-                or paired_coordinate is None
-                or coordinate[column_axis] is None
+                coordinate[column_axis] is None
                 or paired_coordinate[column_axis] != coordinate[column_axis] + 1
                 or any(
                     coordinate[axis] != paired_coordinate[axis]
@@ -1280,6 +1301,15 @@ def role_has_contiguous_lane_xor1_columns(
             ):
                 return False
     return True
+
+
+def role_has_contiguous_lane_xor1_columns(
+    layout: AmdgpuMatrixFragmentLayout,
+    role: MatrixFragmentRoleLayout,
+) -> bool:
+    """Returns whether lane xor 1 advances only the role's column axis."""
+
+    return _role_has_contiguous_lane_xor1_columns(layout.wave_size, role)
 
 
 AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (

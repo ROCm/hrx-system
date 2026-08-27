@@ -99,6 +99,12 @@ def _unpack_coordinate(
     point_count = _point_count(dimensions)
     if ordinal < 0 or ordinal >= point_count:
         raise ValueError(f"point ordinal {ordinal} is outside extent {point_count}")
+    return _unpack_coordinate_unchecked(dimensions, ordinal)
+
+
+def _unpack_coordinate_unchecked(
+    dimensions: tuple[CoordinateDimension, ...], ordinal: int
+) -> tuple[int, ...]:
     coordinate: list[int] = []
     for dimension in dimensions:
         coordinate.append(ordinal % dimension.extent)
@@ -106,7 +112,7 @@ def _unpack_coordinate(
     return tuple(coordinate)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class ExactCoordinateMap:
     """Exact total and surjective map between named coordinate spaces."""
 
@@ -115,31 +121,39 @@ class ExactCoordinateMap:
     destination_by_source: tuple[int, ...]
     sources_by_destination: tuple[tuple[int, ...], ...]
 
-    def __post_init__(self) -> None:
-        _validate_unique_dimensions(self.source_dimensions, space="source")
-        _validate_unique_dimensions(self.destination_dimensions, space="destination")
-        if len(self.destination_by_source) != self.source_point_count:
+    def __init__(
+        self,
+        *,
+        source_dimensions: tuple[CoordinateDimension, ...],
+        destination_dimensions: tuple[CoordinateDimension, ...],
+        destination_by_source: tuple[int, ...],
+    ) -> None:
+        _validate_unique_dimensions(source_dimensions, space="source")
+        _validate_unique_dimensions(destination_dimensions, space="destination")
+        source_point_count = _point_count(source_dimensions)
+        destination_point_count = _point_count(destination_dimensions)
+        if len(destination_by_source) != source_point_count:
             raise ValueError("coordinate map does not cover every source point")
-        if len(self.sources_by_destination) != self.destination_point_count:
-            raise ValueError("coordinate map inverse has the wrong destination extent")
-        expected_inverse: list[list[int]] = [
-            [] for _ in range(self.destination_point_count)
+        sources_by_destination: list[list[int]] = [
+            [] for _ in range(destination_point_count)
         ]
-        for source_ordinal, destination_ordinal in enumerate(
-            self.destination_by_source
-        ):
+        for source_ordinal, destination_ordinal in enumerate(destination_by_source):
             if (
                 destination_ordinal < 0
-                or destination_ordinal >= self.destination_point_count
+                or destination_ordinal >= destination_point_count
             ):
                 raise ValueError("coordinate map contains an invalid destination point")
-            expected_inverse[destination_ordinal].append(source_ordinal)
-        if any(not owners for owners in expected_inverse):
+            sources_by_destination[destination_ordinal].append(source_ordinal)
+        if any(not sources for sources in sources_by_destination):
             raise ValueError("coordinate map does not cover its destination domain")
-        if self.sources_by_destination != tuple(
-            tuple(owners) for owners in expected_inverse
-        ):
-            raise ValueError("coordinate map inverse does not match its forward map")
+        object.__setattr__(self, "source_dimensions", source_dimensions)
+        object.__setattr__(self, "destination_dimensions", destination_dimensions)
+        object.__setattr__(self, "destination_by_source", destination_by_source)
+        object.__setattr__(
+            self,
+            "sources_by_destination",
+            tuple(tuple(sources) for sources in sources_by_destination),
+        )
 
     @property
     def source_point_count(self) -> int:
@@ -187,7 +201,6 @@ class ExactCoordinateMap:
                 )
             ),
             destination_by_source=self.destination_by_source,
-            sources_by_destination=self.sources_by_destination,
         )
 
 
@@ -199,27 +212,17 @@ def exact_coordinate_map(
 ) -> ExactCoordinateMap:
     """Builds and exhaustively validates an exact finite coordinate map."""
 
-    _validate_unique_dimensions(source_dimensions, space="source")
-    _validate_unique_dimensions(destination_dimensions, space="destination")
-    destination_point_count = _point_count(destination_dimensions)
     destination_by_source: list[int] = []
-    sources_by_destination: list[list[int]] = [
-        [] for _ in range(destination_point_count)
-    ]
     for source_ordinal in range(_point_count(source_dimensions)):
         destination_ordinal = _pack_coordinate(
             destination_dimensions,
-            evaluate(_unpack_coordinate(source_dimensions, source_ordinal)),
+            evaluate(_unpack_coordinate_unchecked(source_dimensions, source_ordinal)),
         )
         destination_by_source.append(destination_ordinal)
-        sources_by_destination[destination_ordinal].append(source_ordinal)
     return ExactCoordinateMap(
         source_dimensions=source_dimensions,
         destination_dimensions=destination_dimensions,
         destination_by_source=tuple(destination_by_source),
-        sources_by_destination=tuple(
-            tuple(sources) for sources in sources_by_destination
-        ),
     )
 
 
@@ -518,16 +521,8 @@ def unique_ownership_coordinate_map(
     destination_by_source = tuple(
         owners[0] for owners in relation.source_owners_by_destination
     )
-    sources_by_destination: list[list[int]] = [
-        [] for _ in range(relation.source.source_point_count)
-    ]
-    for destination_ordinal, source_ordinal in enumerate(destination_by_source):
-        sources_by_destination[source_ordinal].append(destination_ordinal)
     return ExactCoordinateMap(
         source_dimensions=relation.destination.source_dimensions,
         destination_dimensions=relation.source.source_dimensions,
         destination_by_source=destination_by_source,
-        sources_by_destination=tuple(
-            tuple(destinations) for destinations in sources_by_destination
-        ),
     )

@@ -30,7 +30,7 @@ typedef struct loom_amdgpu_result_to_rhs_packed_b16_projection_t {
   uint32_t reverse_lane_mask;
 } loom_amdgpu_result_to_rhs_packed_b16_projection_t;
 
-#include "loom/target/arch/amdgpu/lower/matrix_fragment_repack_result_to_rhs_projections.inl"
+#include "loom/target/arch/amdgpu/matrix/matrix_fragment_repack_result_to_rhs_projections.inl"
 
 bool loom_amdgpu_select_result_to_rhs_packed_b16_fragment_repack_plan(
     const loom_low_descriptor_set_t* descriptor_set,
