@@ -1,0 +1,600 @@
+
+// RUN: emit spirv-dis validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @hal_target_coop_f16 {abi = hal_kernel, contract_feature_bits = 2318}
+
+low.kernel.def target<spirv.logical.core>(@hal_target_coop_f16) workgroup_size(32, 1, 1) @spirv_raw_bda_cooperative_matrix_f16(%byte_offset: reg<spirv.offset64>) asm {
+  %lhs_buffer = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %rhs_buffer = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %init_buffer = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %out_buffer = resource<hal_binding> {index = 3, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %lhs_view = OpPtrAccessChain.storage_buffer.f16.byte_offset %lhs_buffer, %byte_offset
+  %rhs_view = OpPtrAccessChain.storage_buffer.f16.byte_offset %rhs_buffer, %byte_offset
+  %init_view = OpPtrAccessChain.storage_buffer.f32.byte_offset %init_buffer, %byte_offset
+  %out_view = OpPtrAccessChain.storage_buffer.f32.byte_offset %out_buffer, %byte_offset
+  %lhs = OpCooperativeMatrixLoadKHR.lhs.f16.16x16x16.f32.subgroup.row_major %lhs_view
+  %rhs = OpCooperativeMatrixLoadKHR.rhs.f16.16x16x16.f32.subgroup.row_major %rhs_view
+  %init = OpCooperativeMatrixLoadKHR.init.f16.16x16x16.f32.subgroup.row_major %init_view
+  %result = OpCooperativeMatrixMulAddKHR.f16.16x16x16.f32.subgroup %lhs, %rhs, %init
+  OpCooperativeMatrixStoreKHR.result.f16.16x16x16.f32.subgroup.row_major %out_view, %result
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability Float16
+               OpCapability StorageBuffer16BitAccess
+               OpCapability CooperativeMatrixKHR
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpExtension "SPV_KHR_16bit_storage"
+               OpExtension "SPV_KHR_cooperative_matrix"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %spirv_raw_bda_cooperative_matrix_f16 "spirv_raw_bda_cooperative_matrix_f16"
+               OpExecutionMode %spirv_raw_bda_cooperative_matrix_f16 LocalSize 32 1 1
+               OpName %spirv_raw_bda_cooperative_matrix_f16 "spirv_raw_bda_cooperative_matrix_f16"
+               OpName %byte_offset "byte_offset"
+               OpName %lhs_buffer "lhs_buffer"
+               OpName %rhs_buffer "rhs_buffer"
+               OpName %init_buffer "init_buffer"
+               OpName %out_buffer "out_buffer"
+               OpName %lhs_view "lhs_view"
+               OpName %rhs_view "rhs_view"
+               OpName %init_view "init_view"
+               OpName %out_view "out_view"
+               OpName %lhs "lhs"
+               OpName %rhs "rhs"
+               OpName %init "init"
+               OpName %result "result"
+               OpModuleProcessed "iree.vulkan.bda.v1"
+               OpModuleProcessed "iree.vulkan.bda.v1.root=0,32"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_offset=32"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=8"
+               OpModuleProcessed "iree.vulkan.bda.v1.bindings=4"
+               OpDecorate %_arr_uint_uint_2 ArrayStride 4
+               OpDecorate %_struct_6 Block
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpMemberDecorate %_struct_6 1 Offset 8
+               OpMemberDecorate %_struct_6 2 Offset 16
+               OpMemberDecorate %_struct_6 3 Offset 20
+               OpMemberDecorate %_struct_6 4 Offset 24
+               OpMemberDecorate %_struct_6 5 Offset 28
+               OpMemberDecorate %_struct_6 6 Offset 32
+               OpDecorate %_runtimearr_ulong ArrayStride 8
+               OpDecorate %_struct_28 Block
+               OpMemberDecorate %_struct_28 0 Offset 0
+               OpDecorate %_ptr_PhysicalStorageBuffer_half ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_float ArrayStride 1
+      %ulong = OpTypeInt 64 0
+       %uint = OpTypeInt 32 0
+     %uint_2 = OpConstant %uint 2
+%_arr_uint_uint_2 = OpTypeArray %uint %uint_2
+  %_struct_6 = OpTypeStruct %ulong %ulong %uint %uint %uint %uint %_arr_uint_uint_2
+%_ptr_PushConstant__struct_6 = OpTypePointer PushConstant %_struct_6
+          %8 = OpVariable %_ptr_PushConstant__struct_6 PushConstant
+       %void = OpTypeVoid
+         %10 = OpTypeFunction %void
+%_ptr_PushConstant_uint = OpTypePointer PushConstant %uint
+        %int = OpTypeInt 32 1
+      %int_6 = OpConstant %int 6
+      %int_0 = OpConstant %int 0
+      %int_1 = OpConstant %int 1
+   %ulong_32 = OpConstant %ulong 32
+%_ptr_PushConstant_ulong = OpTypePointer PushConstant %ulong
+%_runtimearr_ulong = OpTypeRuntimeArray %ulong
+ %_struct_28 = OpTypeStruct %_runtimearr_ulong
+%_ptr_PhysicalStorageBuffer__struct_28 = OpTypePointer PhysicalStorageBuffer %_struct_28
+      %int_2 = OpConstant %int 2
+%_ptr_PhysicalStorageBuffer_ulong = OpTypePointer PhysicalStorageBuffer %ulong
+     %uint_1 = OpConstant %uint 1
+   %uint_2_0 = OpConstant %uint 2
+     %uint_3 = OpConstant %uint 3
+       %half = OpTypeFloat 16
+%_ptr_PhysicalStorageBuffer_half = OpTypePointer PhysicalStorageBuffer %half
+      %float = OpTypeFloat 32
+%_ptr_PhysicalStorageBuffer_float = OpTypePointer PhysicalStorageBuffer %float
+    %uint_16 = OpConstant %uint 16
+     %uint_0 = OpConstant %uint 0
+         %65 = OpTypeCooperativeMatrixKHR %half %uint_3 %uint_16 %uint_16 %uint_0
+    %uint_32 = OpConstant %uint 32
+         %68 = OpTypeCooperativeMatrixKHR %half %uint_3 %uint_16 %uint_16 %uint_1
+         %70 = OpTypeCooperativeMatrixKHR %float %uint_3 %uint_16 %uint_16 %uint_2_0
+    %uint_64 = OpConstant %uint 64
+%spirv_raw_bda_cooperative_matrix_f16 = OpFunction %void None %10
+         %11 = OpLabel
+         %16 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_0
+         %17 = OpLoad %uint %16 Aligned 4
+         %19 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_1
+         %20 = OpLoad %uint %19 Aligned 4
+         %21 = OpUConvert %ulong %17
+         %22 = OpUConvert %ulong %20
+         %24 = OpShiftLeftLogical %ulong %22 %ulong_32
+%byte_offset = OpBitwiseOr %ulong %24 %21
+         %31 = OpAccessChain %_ptr_PushConstant_ulong %8 %int_0
+         %32 = OpLoad %ulong %31 Aligned 8
+         %33 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer__struct_28 %32
+         %34 = OpAccessChain %_ptr_PushConstant_uint %8 %int_2
+         %35 = OpLoad %uint %34 Aligned 4
+         %37 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %35
+ %lhs_buffer = OpLoad %ulong %37 Aligned 8
+         %40 = OpIAdd %uint %35 %uint_1
+         %41 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %40
+ %rhs_buffer = OpLoad %ulong %41 Aligned 8
+         %44 = OpIAdd %uint %35 %uint_2_0
+         %45 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %44
+%init_buffer = OpLoad %ulong %45 Aligned 8
+         %48 = OpIAdd %uint %35 %uint_3
+         %49 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %48
+ %out_buffer = OpLoad %ulong %49 Aligned 8
+         %53 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %lhs_buffer
+   %lhs_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_half %53 %byte_offset
+         %55 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %rhs_buffer
+   %rhs_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_half %55 %byte_offset
+         %59 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %init_buffer
+  %init_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_float %59 %byte_offset
+         %61 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %out_buffer
+   %out_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_float %61 %byte_offset
+        %lhs = OpCooperativeMatrixLoadKHR %65 %lhs_view %uint_0 %uint_32 Aligned 16
+        %rhs = OpCooperativeMatrixLoadKHR %68 %rhs_view %uint_0 %uint_32 Aligned 16
+       %init = OpCooperativeMatrixLoadKHR %70 %init_view %uint_0 %uint_64 Aligned 16
+     %result = OpCooperativeMatrixMulAddKHR %70 %lhs %rhs %init
+               OpCooperativeMatrixStoreKHR %out_view %result %uint_0 %uint_64 Aligned 16
+               OpReturn
+               OpFunctionEnd
+
+
+// ====
+
+
+// RUN: emit spirv-dis validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @hal_target_coop_s8 {abi = hal_kernel, contract_feature_bits = 2214}
+
+low.kernel.def target<spirv.logical.core>(@hal_target_coop_s8) workgroup_size(32, 1, 1) @spirv_raw_bda_cooperative_matrix_s8_signed_saturating(%byte_offset: reg<spirv.offset64>) asm {
+  %lhs_buffer = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %rhs_buffer = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %init_buffer = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %out_buffer = resource<hal_binding> {index = 3, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %lhs_view = OpPtrAccessChain.storage_buffer.i8.byte_offset %lhs_buffer, %byte_offset
+  %rhs_view = OpPtrAccessChain.storage_buffer.i8.byte_offset %rhs_buffer, %byte_offset
+  %init_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %init_buffer, %byte_offset
+  %out_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %out_buffer, %byte_offset
+  %lhs = OpCooperativeMatrixLoadKHR.lhs.s8.16x16x32.s32.subgroup.row_major %lhs_view
+  %rhs = OpCooperativeMatrixLoadKHR.rhs.s8.16x16x32.s32.subgroup.row_major %rhs_view
+  %init = OpCooperativeMatrixLoadKHR.init.s8.16x16x32.s32.subgroup.row_major %init_view
+  %result = OpCooperativeMatrixMulAddKHR.s8.16x16x32.s32.subgroup.signed_saturating %lhs, %rhs, %init
+  OpCooperativeMatrixStoreKHR.result.s8.16x16x32.s32.subgroup.row_major %out_view, %result
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability Int8
+               OpCapability StorageBuffer8BitAccess
+               OpCapability CooperativeMatrixKHR
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpExtension "SPV_KHR_8bit_storage"
+               OpExtension "SPV_KHR_cooperative_matrix"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %spirv_raw_bda_cooperative_matrix_s8_signed_saturating "spirv_raw_bda_cooperative_matrix_s8_signed_saturating"
+               OpExecutionMode %spirv_raw_bda_cooperative_matrix_s8_signed_saturating LocalSize 32 1 1
+               OpName %spirv_raw_bda_cooperative_matrix_s8_signed_saturating "spirv_raw_bda_cooperative_matrix_s8_signed_saturating"
+               OpName %byte_offset "byte_offset"
+               OpName %lhs_buffer "lhs_buffer"
+               OpName %rhs_buffer "rhs_buffer"
+               OpName %init_buffer "init_buffer"
+               OpName %out_buffer "out_buffer"
+               OpName %lhs_view "lhs_view"
+               OpName %rhs_view "rhs_view"
+               OpName %init_view "init_view"
+               OpName %out_view "out_view"
+               OpName %lhs "lhs"
+               OpName %rhs "rhs"
+               OpName %init "init"
+               OpName %result "result"
+               OpModuleProcessed "iree.vulkan.bda.v1"
+               OpModuleProcessed "iree.vulkan.bda.v1.root=0,32"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_offset=32"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=8"
+               OpModuleProcessed "iree.vulkan.bda.v1.bindings=4"
+               OpDecorate %_arr_uint_uint_2 ArrayStride 4
+               OpDecorate %_struct_6 Block
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpMemberDecorate %_struct_6 1 Offset 8
+               OpMemberDecorate %_struct_6 2 Offset 16
+               OpMemberDecorate %_struct_6 3 Offset 20
+               OpMemberDecorate %_struct_6 4 Offset 24
+               OpMemberDecorate %_struct_6 5 Offset 28
+               OpMemberDecorate %_struct_6 6 Offset 32
+               OpDecorate %_runtimearr_ulong ArrayStride 8
+               OpDecorate %_struct_28 Block
+               OpMemberDecorate %_struct_28 0 Offset 0
+               OpDecorate %_ptr_PhysicalStorageBuffer_char ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+      %ulong = OpTypeInt 64 0
+       %uint = OpTypeInt 32 0
+     %uint_2 = OpConstant %uint 2
+%_arr_uint_uint_2 = OpTypeArray %uint %uint_2
+  %_struct_6 = OpTypeStruct %ulong %ulong %uint %uint %uint %uint %_arr_uint_uint_2
+%_ptr_PushConstant__struct_6 = OpTypePointer PushConstant %_struct_6
+          %8 = OpVariable %_ptr_PushConstant__struct_6 PushConstant
+       %void = OpTypeVoid
+         %10 = OpTypeFunction %void
+%_ptr_PushConstant_uint = OpTypePointer PushConstant %uint
+        %int = OpTypeInt 32 1
+      %int_6 = OpConstant %int 6
+      %int_0 = OpConstant %int 0
+      %int_1 = OpConstant %int 1
+   %ulong_32 = OpConstant %ulong 32
+%_ptr_PushConstant_ulong = OpTypePointer PushConstant %ulong
+%_runtimearr_ulong = OpTypeRuntimeArray %ulong
+ %_struct_28 = OpTypeStruct %_runtimearr_ulong
+%_ptr_PhysicalStorageBuffer__struct_28 = OpTypePointer PhysicalStorageBuffer %_struct_28
+      %int_2 = OpConstant %int 2
+%_ptr_PhysicalStorageBuffer_ulong = OpTypePointer PhysicalStorageBuffer %ulong
+     %uint_1 = OpConstant %uint 1
+   %uint_2_0 = OpConstant %uint 2
+     %uint_3 = OpConstant %uint 3
+       %char = OpTypeInt 8 1
+%_ptr_PhysicalStorageBuffer_char = OpTypePointer PhysicalStorageBuffer %char
+%_ptr_PhysicalStorageBuffer_int = OpTypePointer PhysicalStorageBuffer %int
+    %uint_16 = OpConstant %uint 16
+    %uint_32 = OpConstant %uint 32
+     %uint_0 = OpConstant %uint 0
+         %65 = OpTypeCooperativeMatrixKHR %char %uint_3 %uint_16 %uint_32 %uint_0
+         %67 = OpTypeCooperativeMatrixKHR %char %uint_3 %uint_32 %uint_16 %uint_1
+         %69 = OpTypeCooperativeMatrixKHR %int %uint_3 %uint_16 %uint_16 %uint_2_0
+    %uint_64 = OpConstant %uint 64
+%spirv_raw_bda_cooperative_matrix_s8_signed_saturating = OpFunction %void None %10
+         %11 = OpLabel
+         %16 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_0
+         %17 = OpLoad %uint %16 Aligned 4
+         %19 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_1
+         %20 = OpLoad %uint %19 Aligned 4
+         %21 = OpUConvert %ulong %17
+         %22 = OpUConvert %ulong %20
+         %24 = OpShiftLeftLogical %ulong %22 %ulong_32
+%byte_offset = OpBitwiseOr %ulong %24 %21
+         %31 = OpAccessChain %_ptr_PushConstant_ulong %8 %int_0
+         %32 = OpLoad %ulong %31 Aligned 8
+         %33 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer__struct_28 %32
+         %34 = OpAccessChain %_ptr_PushConstant_uint %8 %int_2
+         %35 = OpLoad %uint %34 Aligned 4
+         %37 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %35
+ %lhs_buffer = OpLoad %ulong %37 Aligned 8
+         %40 = OpIAdd %uint %35 %uint_1
+         %41 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %40
+ %rhs_buffer = OpLoad %ulong %41 Aligned 8
+         %44 = OpIAdd %uint %35 %uint_2_0
+         %45 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %44
+%init_buffer = OpLoad %ulong %45 Aligned 8
+         %48 = OpIAdd %uint %35 %uint_3
+         %49 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %48
+ %out_buffer = OpLoad %ulong %49 Aligned 8
+         %53 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_char %lhs_buffer
+   %lhs_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_char %53 %byte_offset
+         %55 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_char %rhs_buffer
+   %rhs_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_char %55 %byte_offset
+         %58 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %init_buffer
+  %init_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %58 %byte_offset
+         %60 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %out_buffer
+   %out_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %60 %byte_offset
+        %lhs = OpCooperativeMatrixLoadKHR %65 %lhs_view %uint_0 %uint_32 Aligned 16
+        %rhs = OpCooperativeMatrixLoadKHR %67 %rhs_view %uint_0 %uint_16 Aligned 16
+       %init = OpCooperativeMatrixLoadKHR %69 %init_view %uint_0 %uint_64 Aligned 16
+     %result = OpCooperativeMatrixMulAddKHR %69 %lhs %rhs %init MatrixASignedComponentsKHR|MatrixBSignedComponentsKHR|MatrixCSignedComponentsKHR|MatrixResultSignedComponentsKHR|SaturatingAccumulationKHR
+               OpCooperativeMatrixStoreKHR %out_view %result %uint_0 %uint_64 Aligned 16
+               OpReturn
+               OpFunctionEnd
+
+
+// ====
+
+
+// RUN: emit spirv-dis validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @hal_target_coop_u8 {abi = hal_kernel, contract_feature_bits = 2214}
+
+low.kernel.def target<spirv.logical.core>(@hal_target_coop_u8) workgroup_size(32, 1, 1) @spirv_raw_bda_cooperative_matrix_u8(%byte_offset: reg<spirv.offset64>) asm {
+  %lhs_buffer = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %rhs_buffer = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %init_buffer = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %out_buffer = resource<hal_binding> {index = 3, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %lhs_view = OpPtrAccessChain.storage_buffer.u8.byte_offset %lhs_buffer, %byte_offset
+  %rhs_view = OpPtrAccessChain.storage_buffer.u8.byte_offset %rhs_buffer, %byte_offset
+  %init_view = OpPtrAccessChain.storage_buffer.u32.byte_offset %init_buffer, %byte_offset
+  %out_view = OpPtrAccessChain.storage_buffer.u32.byte_offset %out_buffer, %byte_offset
+  %lhs = OpCooperativeMatrixLoadKHR.lhs.u8.16x16x32.u32.subgroup.row_major %lhs_view
+  %rhs = OpCooperativeMatrixLoadKHR.rhs.u8.16x16x32.u32.subgroup.row_major %rhs_view
+  %init = OpCooperativeMatrixLoadKHR.init.u8.16x16x32.u32.subgroup.row_major %init_view
+  %result = OpCooperativeMatrixMulAddKHR.u8.16x16x32.u32.subgroup %lhs, %rhs, %init
+  OpCooperativeMatrixStoreKHR.result.u8.16x16x32.u32.subgroup.row_major %out_view, %result
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability Int8
+               OpCapability StorageBuffer8BitAccess
+               OpCapability CooperativeMatrixKHR
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpExtension "SPV_KHR_8bit_storage"
+               OpExtension "SPV_KHR_cooperative_matrix"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %spirv_raw_bda_cooperative_matrix_u8 "spirv_raw_bda_cooperative_matrix_u8"
+               OpExecutionMode %spirv_raw_bda_cooperative_matrix_u8 LocalSize 32 1 1
+               OpName %spirv_raw_bda_cooperative_matrix_u8 "spirv_raw_bda_cooperative_matrix_u8"
+               OpName %byte_offset "byte_offset"
+               OpName %lhs_buffer "lhs_buffer"
+               OpName %rhs_buffer "rhs_buffer"
+               OpName %init_buffer "init_buffer"
+               OpName %out_buffer "out_buffer"
+               OpName %lhs_view "lhs_view"
+               OpName %rhs_view "rhs_view"
+               OpName %init_view "init_view"
+               OpName %out_view "out_view"
+               OpName %lhs "lhs"
+               OpName %rhs "rhs"
+               OpName %init "init"
+               OpName %result "result"
+               OpModuleProcessed "iree.vulkan.bda.v1"
+               OpModuleProcessed "iree.vulkan.bda.v1.root=0,32"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_offset=32"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=8"
+               OpModuleProcessed "iree.vulkan.bda.v1.bindings=4"
+               OpDecorate %_arr_uint_uint_2 ArrayStride 4
+               OpDecorate %_struct_6 Block
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpMemberDecorate %_struct_6 1 Offset 8
+               OpMemberDecorate %_struct_6 2 Offset 16
+               OpMemberDecorate %_struct_6 3 Offset 20
+               OpMemberDecorate %_struct_6 4 Offset 24
+               OpMemberDecorate %_struct_6 5 Offset 28
+               OpMemberDecorate %_struct_6 6 Offset 32
+               OpDecorate %_runtimearr_ulong ArrayStride 8
+               OpDecorate %_struct_28 Block
+               OpMemberDecorate %_struct_28 0 Offset 0
+               OpDecorate %_ptr_PhysicalStorageBuffer_uchar ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_uint ArrayStride 1
+      %ulong = OpTypeInt 64 0
+       %uint = OpTypeInt 32 0
+     %uint_2 = OpConstant %uint 2
+%_arr_uint_uint_2 = OpTypeArray %uint %uint_2
+  %_struct_6 = OpTypeStruct %ulong %ulong %uint %uint %uint %uint %_arr_uint_uint_2
+%_ptr_PushConstant__struct_6 = OpTypePointer PushConstant %_struct_6
+          %8 = OpVariable %_ptr_PushConstant__struct_6 PushConstant
+       %void = OpTypeVoid
+         %10 = OpTypeFunction %void
+%_ptr_PushConstant_uint = OpTypePointer PushConstant %uint
+        %int = OpTypeInt 32 1
+      %int_6 = OpConstant %int 6
+      %int_0 = OpConstant %int 0
+      %int_1 = OpConstant %int 1
+   %ulong_32 = OpConstant %ulong 32
+%_ptr_PushConstant_ulong = OpTypePointer PushConstant %ulong
+%_runtimearr_ulong = OpTypeRuntimeArray %ulong
+ %_struct_28 = OpTypeStruct %_runtimearr_ulong
+%_ptr_PhysicalStorageBuffer__struct_28 = OpTypePointer PhysicalStorageBuffer %_struct_28
+      %int_2 = OpConstant %int 2
+%_ptr_PhysicalStorageBuffer_ulong = OpTypePointer PhysicalStorageBuffer %ulong
+     %uint_1 = OpConstant %uint 1
+   %uint_2_0 = OpConstant %uint 2
+     %uint_3 = OpConstant %uint 3
+      %uchar = OpTypeInt 8 0
+%_ptr_PhysicalStorageBuffer_uchar = OpTypePointer PhysicalStorageBuffer %uchar
+%_ptr_PhysicalStorageBuffer_uint = OpTypePointer PhysicalStorageBuffer %uint
+    %uint_16 = OpConstant %uint 16
+    %uint_32 = OpConstant %uint 32
+     %uint_0 = OpConstant %uint 0
+         %65 = OpTypeCooperativeMatrixKHR %uchar %uint_3 %uint_16 %uint_32 %uint_0
+         %67 = OpTypeCooperativeMatrixKHR %uchar %uint_3 %uint_32 %uint_16 %uint_1
+         %69 = OpTypeCooperativeMatrixKHR %uint %uint_3 %uint_16 %uint_16 %uint_2_0
+    %uint_64 = OpConstant %uint 64
+%spirv_raw_bda_cooperative_matrix_u8 = OpFunction %void None %10
+         %11 = OpLabel
+         %16 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_0
+         %17 = OpLoad %uint %16 Aligned 4
+         %19 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_1
+         %20 = OpLoad %uint %19 Aligned 4
+         %21 = OpUConvert %ulong %17
+         %22 = OpUConvert %ulong %20
+         %24 = OpShiftLeftLogical %ulong %22 %ulong_32
+%byte_offset = OpBitwiseOr %ulong %24 %21
+         %31 = OpAccessChain %_ptr_PushConstant_ulong %8 %int_0
+         %32 = OpLoad %ulong %31 Aligned 8
+         %33 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer__struct_28 %32
+         %34 = OpAccessChain %_ptr_PushConstant_uint %8 %int_2
+         %35 = OpLoad %uint %34 Aligned 4
+         %37 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %35
+ %lhs_buffer = OpLoad %ulong %37 Aligned 8
+         %40 = OpIAdd %uint %35 %uint_1
+         %41 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %40
+ %rhs_buffer = OpLoad %ulong %41 Aligned 8
+         %44 = OpIAdd %uint %35 %uint_2_0
+         %45 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %44
+%init_buffer = OpLoad %ulong %45 Aligned 8
+         %48 = OpIAdd %uint %35 %uint_3
+         %49 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %48
+ %out_buffer = OpLoad %ulong %49 Aligned 8
+         %53 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %lhs_buffer
+   %lhs_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_uchar %53 %byte_offset
+         %55 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %rhs_buffer
+   %rhs_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_uchar %55 %byte_offset
+         %58 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uint %init_buffer
+  %init_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_uint %58 %byte_offset
+         %60 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uint %out_buffer
+   %out_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_uint %60 %byte_offset
+        %lhs = OpCooperativeMatrixLoadKHR %65 %lhs_view %uint_0 %uint_32 Aligned 16
+        %rhs = OpCooperativeMatrixLoadKHR %67 %rhs_view %uint_0 %uint_16 Aligned 16
+       %init = OpCooperativeMatrixLoadKHR %69 %init_view %uint_0 %uint_64 Aligned 16
+     %result = OpCooperativeMatrixMulAddKHR %69 %lhs %rhs %init
+               OpCooperativeMatrixStoreKHR %out_view %result %uint_0 %uint_64 Aligned 16
+               OpReturn
+               OpFunctionEnd
+
+
+// ====
+
+
+// RUN: emit spirv-dis validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @hal_target_coop_bf16 {abi = hal_kernel, contract_feature_bits = 22790}
+
+low.kernel.def target<spirv.logical.core>(@hal_target_coop_bf16) workgroup_size(32, 1, 1) @spirv_raw_bda_cooperative_matrix_bf16(%byte_offset: reg<spirv.offset64>) asm {
+  %lhs_buffer = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %rhs_buffer = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %init_buffer = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %out_buffer = resource<hal_binding> {index = 3, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %lhs_view = OpPtrAccessChain.storage_buffer.bf16.byte_offset %lhs_buffer, %byte_offset
+  %rhs_view = OpPtrAccessChain.storage_buffer.bf16.byte_offset %rhs_buffer, %byte_offset
+  %init_view = OpPtrAccessChain.storage_buffer.f32.byte_offset %init_buffer, %byte_offset
+  %out_view = OpPtrAccessChain.storage_buffer.f32.byte_offset %out_buffer, %byte_offset
+  %lhs = OpCooperativeMatrixLoadKHR.lhs.bf16.16x16x16.f32.subgroup.row_major %lhs_view
+  %rhs = OpCooperativeMatrixLoadKHR.rhs.bf16.16x16x16.f32.subgroup.row_major %rhs_view
+  %init = OpCooperativeMatrixLoadKHR.init.bf16.16x16x16.f32.subgroup.row_major %init_view
+  %result = OpCooperativeMatrixMulAddKHR.bf16.16x16x16.f32.subgroup %lhs, %rhs, %init
+  OpCooperativeMatrixStoreKHR.result.bf16.16x16x16.f32.subgroup.row_major %out_view, %result
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability StorageBuffer16BitAccess
+               OpCapability CooperativeMatrixKHR
+               OpCapability BFloat16TypeKHR
+               OpCapability BFloat16CooperativeMatrixKHR
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpExtension "SPV_KHR_16bit_storage"
+               OpExtension "SPV_KHR_cooperative_matrix"
+               OpExtension "SPV_KHR_bfloat16"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %spirv_raw_bda_cooperative_matrix_bf16 "spirv_raw_bda_cooperative_matrix_bf16"
+               OpExecutionMode %spirv_raw_bda_cooperative_matrix_bf16 LocalSize 32 1 1
+               OpName %spirv_raw_bda_cooperative_matrix_bf16 "spirv_raw_bda_cooperative_matrix_bf16"
+               OpName %byte_offset "byte_offset"
+               OpName %lhs_buffer "lhs_buffer"
+               OpName %rhs_buffer "rhs_buffer"
+               OpName %init_buffer "init_buffer"
+               OpName %out_buffer "out_buffer"
+               OpName %lhs_view "lhs_view"
+               OpName %rhs_view "rhs_view"
+               OpName %init_view "init_view"
+               OpName %out_view "out_view"
+               OpName %lhs "lhs"
+               OpName %rhs "rhs"
+               OpName %init "init"
+               OpName %result "result"
+               OpModuleProcessed "iree.vulkan.bda.v1"
+               OpModuleProcessed "iree.vulkan.bda.v1.root=0,32"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_offset=32"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=8"
+               OpModuleProcessed "iree.vulkan.bda.v1.bindings=4"
+               OpDecorate %_arr_uint_uint_2 ArrayStride 4
+               OpDecorate %_struct_6 Block
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpMemberDecorate %_struct_6 1 Offset 8
+               OpMemberDecorate %_struct_6 2 Offset 16
+               OpMemberDecorate %_struct_6 3 Offset 20
+               OpMemberDecorate %_struct_6 4 Offset 24
+               OpMemberDecorate %_struct_6 5 Offset 28
+               OpMemberDecorate %_struct_6 6 Offset 32
+               OpDecorate %_runtimearr_ulong ArrayStride 8
+               OpDecorate %_struct_28 Block
+               OpMemberDecorate %_struct_28 0 Offset 0
+               OpDecorate %_ptr_PhysicalStorageBuffer_bfloat16 ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_float ArrayStride 1
+      %ulong = OpTypeInt 64 0
+       %uint = OpTypeInt 32 0
+     %uint_2 = OpConstant %uint 2
+%_arr_uint_uint_2 = OpTypeArray %uint %uint_2
+  %_struct_6 = OpTypeStruct %ulong %ulong %uint %uint %uint %uint %_arr_uint_uint_2
+%_ptr_PushConstant__struct_6 = OpTypePointer PushConstant %_struct_6
+          %8 = OpVariable %_ptr_PushConstant__struct_6 PushConstant
+       %void = OpTypeVoid
+         %10 = OpTypeFunction %void
+%_ptr_PushConstant_uint = OpTypePointer PushConstant %uint
+        %int = OpTypeInt 32 1
+      %int_6 = OpConstant %int 6
+      %int_0 = OpConstant %int 0
+      %int_1 = OpConstant %int 1
+   %ulong_32 = OpConstant %ulong 32
+%_ptr_PushConstant_ulong = OpTypePointer PushConstant %ulong
+%_runtimearr_ulong = OpTypeRuntimeArray %ulong
+ %_struct_28 = OpTypeStruct %_runtimearr_ulong
+%_ptr_PhysicalStorageBuffer__struct_28 = OpTypePointer PhysicalStorageBuffer %_struct_28
+      %int_2 = OpConstant %int 2
+%_ptr_PhysicalStorageBuffer_ulong = OpTypePointer PhysicalStorageBuffer %ulong
+     %uint_1 = OpConstant %uint 1
+   %uint_2_0 = OpConstant %uint 2
+     %uint_3 = OpConstant %uint 3
+   %bfloat16 = OpTypeFloat 16 BFloat16KHR
+%_ptr_PhysicalStorageBuffer_bfloat16 = OpTypePointer PhysicalStorageBuffer %bfloat16
+      %float = OpTypeFloat 32
+%_ptr_PhysicalStorageBuffer_float = OpTypePointer PhysicalStorageBuffer %float
+    %uint_16 = OpConstant %uint 16
+     %uint_0 = OpConstant %uint 0
+         %65 = OpTypeCooperativeMatrixKHR %bfloat16 %uint_3 %uint_16 %uint_16 %uint_0
+    %uint_32 = OpConstant %uint 32
+         %68 = OpTypeCooperativeMatrixKHR %bfloat16 %uint_3 %uint_16 %uint_16 %uint_1
+         %70 = OpTypeCooperativeMatrixKHR %float %uint_3 %uint_16 %uint_16 %uint_2_0
+    %uint_64 = OpConstant %uint 64
+%spirv_raw_bda_cooperative_matrix_bf16 = OpFunction %void None %10
+         %11 = OpLabel
+         %16 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_0
+         %17 = OpLoad %uint %16 Aligned 4
+         %19 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_1
+         %20 = OpLoad %uint %19 Aligned 4
+         %21 = OpUConvert %ulong %17
+         %22 = OpUConvert %ulong %20
+         %24 = OpShiftLeftLogical %ulong %22 %ulong_32
+%byte_offset = OpBitwiseOr %ulong %24 %21
+         %31 = OpAccessChain %_ptr_PushConstant_ulong %8 %int_0
+         %32 = OpLoad %ulong %31 Aligned 8
+         %33 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer__struct_28 %32
+         %34 = OpAccessChain %_ptr_PushConstant_uint %8 %int_2
+         %35 = OpLoad %uint %34 Aligned 4
+         %37 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %35
+ %lhs_buffer = OpLoad %ulong %37 Aligned 8
+         %40 = OpIAdd %uint %35 %uint_1
+         %41 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %40
+ %rhs_buffer = OpLoad %ulong %41 Aligned 8
+         %44 = OpIAdd %uint %35 %uint_2_0
+         %45 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %44
+%init_buffer = OpLoad %ulong %45 Aligned 8
+         %48 = OpIAdd %uint %35 %uint_3
+         %49 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %48
+ %out_buffer = OpLoad %ulong %49 Aligned 8
+         %53 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_bfloat16 %lhs_buffer
+   %lhs_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_bfloat16 %53 %byte_offset
+         %55 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_bfloat16 %rhs_buffer
+   %rhs_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_bfloat16 %55 %byte_offset
+         %59 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %init_buffer
+  %init_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_float %59 %byte_offset
+         %61 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %out_buffer
+   %out_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_float %61 %byte_offset
+        %lhs = OpCooperativeMatrixLoadKHR %65 %lhs_view %uint_0 %uint_32 Aligned 16
+        %rhs = OpCooperativeMatrixLoadKHR %68 %rhs_view %uint_0 %uint_32 Aligned 16
+       %init = OpCooperativeMatrixLoadKHR %70 %init_view %uint_0 %uint_64 Aligned 16
+     %result = OpCooperativeMatrixMulAddKHR %70 %lhs %rhs %init
+               OpCooperativeMatrixStoreKHR %out_view %result %uint_0 %uint_64 Aligned 16
+               OpReturn
+               OpFunctionEnd

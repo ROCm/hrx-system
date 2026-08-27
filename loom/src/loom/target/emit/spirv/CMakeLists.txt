@@ -287,7 +287,8 @@ loom_check_test_suite(
   SRCS
     "test/barrier.loom-test"
     "test/buffer_raw.loom-test"
-    "test/emit.loom-test"
+    "test/cooperative_matrix.loom-test"
+    "test/entry_point.loom-test"
     "test/index_conversion.loom-test"
     "test/index_numeric.loom-test"
     "test/integer_boolean.loom-test"
@@ -297,8 +298,12 @@ loom_check_test_suite(
     "test/ordinary_vector_integer.loom-test"
     "test/ordinary_vector_integer_conversion.loom-test"
     "test/ordinary_vector_structure.loom-test"
+    "test/scalar_abi.loom-test"
+    "test/scalar_operations.loom-test"
     "test/source_ordinary_vector_structure.loom-test"
     "test/source_structured_control.loom-test"
+    "test/storage_buffer_abi.loom-test"
+    "test/structured_control.loom-test"
     "test/workgroup_storage.loom-test"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/memory_scalar_addressing.loom-test"

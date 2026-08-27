@@ -1,0 +1,290 @@
+
+// RUN: emit spirv-dis validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_i32_structured_if_else(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>, %a: reg<spirv.id : i32>, %b: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) {
+  %less = low.op<spirv.op_s_less_than.i32>(%lhs, %rhs) : (reg<spirv.id : i32>, reg<spirv.id : i32>) -> reg<spirv.id : i1>
+  %selected = low.scf.if %less -> (reg<spirv.id : i32>) {
+    %sum = low.op<spirv.op_iadd.i32>(%a, %b) : (reg<spirv.id : i32>, reg<spirv.id : i32>) -> reg<spirv.id : i32>
+    low.scf.yield %sum : reg<spirv.id : i32>
+  } else {
+    %difference = low.op<spirv.op_isub.i32>(%a, %b) : (reg<spirv.id : i32>, reg<spirv.id : i32>) -> reg<spirv.id : i32>
+    low.scf.yield %difference : reg<spirv.id : i32>
+  }
+  %bounded_selected = low.assume %selected [range(%selected, -2147483648, 2147483647)] : reg<spirv.id : i32>
+  low.return %bounded_selected : reg<spirv.id : i32>
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %spirv_i32_structured_if_else "spirv_i32_structured_if_else"
+               OpExecutionMode %spirv_i32_structured_if_else LocalSize 1 1 1
+               OpName %spirv_i32_structured_if_else "spirv_i32_structured_if_else"
+               OpName %lhs "lhs"
+               OpName %rhs "rhs"
+               OpName %a "a"
+               OpName %b "b"
+               OpName %less "less"
+               OpName %sum "sum"
+               OpName %difference "difference"
+               OpName %selected "selected"
+               OpMemberDecorate %_struct_5 0 Offset 0
+               OpDecorate %_struct_5 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %8 DescriptorSet 0
+               OpDecorate %8 Binding 1
+               OpDecorate %9 DescriptorSet 0
+               OpDecorate %9 Binding 2
+               OpDecorate %10 DescriptorSet 0
+               OpDecorate %10 Binding 3
+               OpDecorate %11 DescriptorSet 0
+               OpDecorate %11 Binding 4
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+  %_struct_5 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_5 = OpTypePointer StorageBuffer %_struct_5
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+          %4 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+          %8 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+          %9 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+         %10 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+         %11 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+       %void = OpTypeVoid
+         %13 = OpTypeFunction %void
+       %bool = OpTypeBool
+%spirv_i32_structured_if_else = OpFunction %void None %13
+         %14 = OpLabel
+         %15 = OpAccessChain %_ptr_StorageBuffer_int %4 %int_0
+        %lhs = OpLoad %int %15 Aligned 4
+         %17 = OpAccessChain %_ptr_StorageBuffer_int %8 %int_0
+        %rhs = OpLoad %int %17 Aligned 4
+         %19 = OpAccessChain %_ptr_StorageBuffer_int %9 %int_0
+          %a = OpLoad %int %19 Aligned 4
+         %21 = OpAccessChain %_ptr_StorageBuffer_int %10 %int_0
+          %b = OpLoad %int %21 Aligned 4
+       %less = OpSLessThan %bool %lhs %rhs
+               OpSelectionMerge %26 None
+               OpBranchConditional %less %25 %27
+         %25 = OpLabel
+        %sum = OpIAdd %int %a %b
+               OpBranch %26
+         %27 = OpLabel
+ %difference = OpISub %int %a %b
+               OpBranch %26
+         %26 = OpLabel
+   %selected = OpPhi %int %sum %25 %difference %27
+         %31 = OpAccessChain %_ptr_StorageBuffer_int %11 %int_0
+               OpStore %31 %selected Aligned 4
+               OpReturn
+               OpFunctionEnd
+
+
+// ====
+
+
+// RUN: emit spirv-dis validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_i32_structured_counted_loop(%start: reg<spirv.id : i32>, %limit: reg<spirv.id : i32>, %step: reg<spirv.id : i32>, %seed: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) {
+  %result = low.scf.for [%start to %limit step %step] iter_args(%seed: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) unroll do(%i: reg<spirv.id : i32>, %acc: reg<spirv.id : i32>) {
+    %next_acc = low.op<spirv.op_iadd.i32>(%acc, %i) : (reg<spirv.id : i32>, reg<spirv.id : i32>) -> reg<spirv.id : i32>
+    low.scf.yield %next_acc : reg<spirv.id : i32>
+  }
+  low.return %result : reg<spirv.id : i32>
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %spirv_i32_structured_counted_loop "spirv_i32_structured_counted_loop"
+               OpExecutionMode %spirv_i32_structured_counted_loop LocalSize 1 1 1
+               OpName %spirv_i32_structured_counted_loop "spirv_i32_structured_counted_loop"
+               OpName %start "start"
+               OpName %limit "limit"
+               OpName %step "step"
+               OpName %seed "seed"
+               OpName %i "i"
+               OpName %acc "acc"
+               OpName %next_acc "next_acc"
+               OpName %result "result"
+               OpMemberDecorate %_struct_5 0 Offset 0
+               OpDecorate %_struct_5 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %8 DescriptorSet 0
+               OpDecorate %8 Binding 1
+               OpDecorate %9 DescriptorSet 0
+               OpDecorate %9 Binding 2
+               OpDecorate %10 DescriptorSet 0
+               OpDecorate %10 Binding 3
+               OpDecorate %11 DescriptorSet 0
+               OpDecorate %11 Binding 4
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+  %_struct_5 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_5 = OpTypePointer StorageBuffer %_struct_5
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+          %4 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+          %8 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+          %9 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+         %10 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+         %11 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+       %void = OpTypeVoid
+         %13 = OpTypeFunction %void
+       %bool = OpTypeBool
+%spirv_i32_structured_counted_loop = OpFunction %void None %13
+         %14 = OpLabel
+         %15 = OpAccessChain %_ptr_StorageBuffer_int %4 %int_0
+      %start = OpLoad %int %15 Aligned 4
+         %17 = OpAccessChain %_ptr_StorageBuffer_int %8 %int_0
+      %limit = OpLoad %int %17 Aligned 4
+         %19 = OpAccessChain %_ptr_StorageBuffer_int %9 %int_0
+       %step = OpLoad %int %19 Aligned 4
+         %21 = OpAccessChain %_ptr_StorageBuffer_int %10 %int_0
+       %seed = OpLoad %int %21 Aligned 4
+               OpBranch %23
+         %23 = OpLabel
+          %i = OpPhi %int %start %14 %27 %26
+        %acc = OpPhi %int %seed %14 %next_acc %26
+         %32 = OpSLessThan %bool %i %limit
+               OpLoopMerge %25 %26 Unroll
+               OpBranchConditional %32 %24 %25
+         %24 = OpLabel
+   %next_acc = OpIAdd %int %acc %i
+               OpBranch %26
+         %26 = OpLabel
+         %27 = OpIAdd %int %i %step
+               OpBranch %23
+         %25 = OpLabel
+     %result = OpPhi %int %acc %23
+         %34 = OpAccessChain %_ptr_StorageBuffer_int %11 %int_0
+               OpStore %34 %result Aligned 4
+               OpReturn
+               OpFunctionEnd
+
+
+// ====
+
+
+// RUN: emit spirv-dis validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_i32_structured_nested_loop_result(%start: reg<spirv.id : i32>, %limit: reg<spirv.id : i32>, %step: reg<spirv.id : i32>, %seed: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) {
+  %result = low.scf.for [%start to %limit step %step] iter_args(%seed: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) do(%i: reg<spirv.id : i32>, %acc: reg<spirv.id : i32>) {
+    %inner = low.scf.for [%start to %limit step %step] iter_args(%acc: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) do(%j: reg<spirv.id : i32>, %inner_acc: reg<spirv.id : i32>) {
+      %next_inner = low.op<spirv.op_iadd.i32>(%inner_acc, %j) : (reg<spirv.id : i32>, reg<spirv.id : i32>) -> reg<spirv.id : i32>
+      low.scf.yield %next_inner : reg<spirv.id : i32>
+    }
+    low.scf.yield %inner : reg<spirv.id : i32>
+  }
+  low.return %result : reg<spirv.id : i32>
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %spirv_i32_structured_nested_loop_result "spirv_i32_structured_nested_loop_result"
+               OpExecutionMode %spirv_i32_structured_nested_loop_result LocalSize 1 1 1
+               OpName %spirv_i32_structured_nested_loop_result "spirv_i32_structured_nested_loop_result"
+               OpName %start "start"
+               OpName %limit "limit"
+               OpName %step "step"
+               OpName %seed "seed"
+               OpName %i "i"
+               OpName %acc "acc"
+               OpName %j "j"
+               OpName %inner_acc "inner_acc"
+               OpName %next_inner "next_inner"
+               OpName %inner "inner"
+               OpName %result "result"
+               OpMemberDecorate %_struct_5 0 Offset 0
+               OpDecorate %_struct_5 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %8 DescriptorSet 0
+               OpDecorate %8 Binding 1
+               OpDecorate %9 DescriptorSet 0
+               OpDecorate %9 Binding 2
+               OpDecorate %10 DescriptorSet 0
+               OpDecorate %10 Binding 3
+               OpDecorate %11 DescriptorSet 0
+               OpDecorate %11 Binding 4
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+  %_struct_5 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_5 = OpTypePointer StorageBuffer %_struct_5
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+          %4 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+          %8 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+          %9 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+         %10 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+         %11 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+       %void = OpTypeVoid
+         %13 = OpTypeFunction %void
+       %bool = OpTypeBool
+%spirv_i32_structured_nested_loop_result = OpFunction %void None %13
+         %14 = OpLabel
+         %15 = OpAccessChain %_ptr_StorageBuffer_int %4 %int_0
+      %start = OpLoad %int %15 Aligned 4
+         %17 = OpAccessChain %_ptr_StorageBuffer_int %8 %int_0
+      %limit = OpLoad %int %17 Aligned 4
+         %19 = OpAccessChain %_ptr_StorageBuffer_int %9 %int_0
+       %step = OpLoad %int %19 Aligned 4
+         %21 = OpAccessChain %_ptr_StorageBuffer_int %10 %int_0
+       %seed = OpLoad %int %21 Aligned 4
+               OpBranch %23
+         %23 = OpLabel
+          %i = OpPhi %int %start %14 %27 %26
+        %acc = OpPhi %int %seed %14 %inner %26
+         %32 = OpSLessThan %bool %i %limit
+               OpLoopMerge %25 %26 None
+               OpBranchConditional %32 %24 %25
+         %24 = OpLabel
+               OpBranch %33
+         %33 = OpLabel
+          %j = OpPhi %int %start %24 %37 %36
+  %inner_acc = OpPhi %int %acc %24 %next_inner %36
+         %41 = OpSLessThan %bool %j %limit
+               OpLoopMerge %35 %36 None
+               OpBranchConditional %41 %34 %35
+         %34 = OpLabel
+ %next_inner = OpIAdd %int %inner_acc %j
+               OpBranch %36
+         %36 = OpLabel
+         %37 = OpIAdd %int %j %step
+               OpBranch %33
+         %35 = OpLabel
+      %inner = OpPhi %int %inner_acc %33
+               OpBranch %26
+         %26 = OpLabel
+         %27 = OpIAdd %int %i %step
+               OpBranch %23
+         %25 = OpLabel
+     %result = OpPhi %int %acc %23
+         %43 = OpAccessChain %_ptr_StorageBuffer_int %11 %int_0
+               OpStore %43 %result Aligned 4
+               OpReturn
+               OpFunctionEnd

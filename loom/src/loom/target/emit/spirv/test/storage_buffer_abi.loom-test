@@ -1,0 +1,823 @@
+
+// RUN: emit spirv-dis validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @hal_target {abi = hal_kernel}
+
+low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @spirv_raw_bda_storage_buffer_i32_roundtrip(%byte_offset: reg<spirv.offset64>) asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %input_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %byte_offset
+  %loaded = OpLoad.storage_buffer.i32 %input_view
+  %incremented = OpIAdd %loaded, %loaded
+  %output_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %byte_offset
+  OpStore.storage_buffer.i32 %output_view, %incremented
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 GLSL450
+               OpEntryPoint GLCompute %spirv_raw_bda_storage_buffer_i32_roundtrip "spirv_raw_bda_storage_buffer_i32_roundtrip"
+               OpExecutionMode %spirv_raw_bda_storage_buffer_i32_roundtrip LocalSize 1 1 1
+               OpName %spirv_raw_bda_storage_buffer_i32_roundtrip "spirv_raw_bda_storage_buffer_i32_roundtrip"
+               OpName %byte_offset "byte_offset"
+               OpName %input "input"
+               OpName %output "output"
+               OpName %input_view "input_view"
+               OpName %loaded "loaded"
+               OpName %incremented "incremented"
+               OpName %output_view "output_view"
+               OpModuleProcessed "iree.vulkan.bda.v1"
+               OpModuleProcessed "iree.vulkan.bda.v1.root=0,32"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_offset=32"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=8"
+               OpModuleProcessed "iree.vulkan.bda.v1.bindings=2"
+               OpDecorate %_arr_uint_uint_2 ArrayStride 4
+               OpDecorate %_struct_6 Block
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpMemberDecorate %_struct_6 1 Offset 8
+               OpMemberDecorate %_struct_6 2 Offset 16
+               OpMemberDecorate %_struct_6 3 Offset 20
+               OpMemberDecorate %_struct_6 4 Offset 24
+               OpMemberDecorate %_struct_6 5 Offset 28
+               OpMemberDecorate %_struct_6 6 Offset 32
+               OpDecorate %_runtimearr_ulong ArrayStride 8
+               OpDecorate %_struct_28 Block
+               OpMemberDecorate %_struct_28 0 Offset 0
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+      %ulong = OpTypeInt 64 0
+       %uint = OpTypeInt 32 0
+     %uint_2 = OpConstant %uint 2
+%_arr_uint_uint_2 = OpTypeArray %uint %uint_2
+  %_struct_6 = OpTypeStruct %ulong %ulong %uint %uint %uint %uint %_arr_uint_uint_2
+%_ptr_PushConstant__struct_6 = OpTypePointer PushConstant %_struct_6
+          %8 = OpVariable %_ptr_PushConstant__struct_6 PushConstant
+       %void = OpTypeVoid
+         %10 = OpTypeFunction %void
+%_ptr_PushConstant_uint = OpTypePointer PushConstant %uint
+        %int = OpTypeInt 32 1
+      %int_6 = OpConstant %int 6
+      %int_0 = OpConstant %int 0
+      %int_1 = OpConstant %int 1
+   %ulong_32 = OpConstant %ulong 32
+%_ptr_PushConstant_ulong = OpTypePointer PushConstant %ulong
+%_runtimearr_ulong = OpTypeRuntimeArray %ulong
+ %_struct_28 = OpTypeStruct %_runtimearr_ulong
+%_ptr_PhysicalStorageBuffer__struct_28 = OpTypePointer PhysicalStorageBuffer %_struct_28
+      %int_2 = OpConstant %int 2
+%_ptr_PhysicalStorageBuffer_ulong = OpTypePointer PhysicalStorageBuffer %ulong
+     %uint_1 = OpConstant %uint 1
+%_ptr_PhysicalStorageBuffer_int = OpTypePointer PhysicalStorageBuffer %int
+%spirv_raw_bda_storage_buffer_i32_roundtrip = OpFunction %void None %10
+         %11 = OpLabel
+         %16 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_0
+         %17 = OpLoad %uint %16 Aligned 4
+         %19 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_1
+         %20 = OpLoad %uint %19 Aligned 4
+         %21 = OpUConvert %ulong %17
+         %22 = OpUConvert %ulong %20
+         %24 = OpShiftLeftLogical %ulong %22 %ulong_32
+%byte_offset = OpBitwiseOr %ulong %24 %21
+         %31 = OpAccessChain %_ptr_PushConstant_ulong %8 %int_0
+         %32 = OpLoad %ulong %31 Aligned 8
+         %33 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer__struct_28 %32
+         %34 = OpAccessChain %_ptr_PushConstant_uint %8 %int_2
+         %35 = OpLoad %uint %34 Aligned 4
+         %37 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %35
+      %input = OpLoad %ulong %37 Aligned 8
+         %40 = OpIAdd %uint %35 %uint_1
+         %41 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %40
+     %output = OpLoad %ulong %41 Aligned 8
+         %44 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input
+ %input_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %44 %byte_offset
+     %loaded = OpLoad %int %input_view Aligned 4
+%incremented = OpIAdd %int %loaded %loaded
+         %48 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output
+%output_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %48 %byte_offset
+               OpStore %output_view %incremented Aligned 4
+               OpReturn
+               OpFunctionEnd
+
+
+// ====
+
+
+// RUN: emit spirv-dis validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @hal_target {abi = hal_kernel}
+
+low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 2, 1) @spirv_raw_bda_builtin_storage_buffer_i32() asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %workgroup_x = OpLoadBuiltin.workgroup_id.x
+  %local_y = OpLoadBuiltin.local_invocation_id.y
+  %global_z = OpLoadBuiltin.global_invocation_id.z
+  %sum = OpIAdd %workgroup_x, %local_y
+  %linear = OpIAdd %sum, %global_z
+  %shift = OpConstant.i32 2
+  %byte_index = OpShiftLeftLogical %linear, %shift
+  %unsigned_byte_index = OpBitcast.i32.u32 %byte_index
+  %byte_offset = OpUConvert.u32.offset64 %unsigned_byte_index
+  %input_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %byte_offset
+  %loaded = OpLoad.storage_buffer.i32 %input_view
+  %output_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %byte_offset
+  OpStore.storage_buffer.i32 %output_view, %loaded
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 GLSL450
+               OpEntryPoint GLCompute %spirv_raw_bda_builtin_storage_buffer_i32 "spirv_raw_bda_builtin_storage_buffer_i32" %workgroup_id %local_invocation_id %global_invocation_id
+               OpExecutionMode %spirv_raw_bda_builtin_storage_buffer_i32 LocalSize 1 2 1
+               OpName %spirv_raw_bda_builtin_storage_buffer_i32 "spirv_raw_bda_builtin_storage_buffer_i32"
+               OpName %input "input"
+               OpName %output "output"
+               OpName %workgroup_id "workgroup_id"
+               OpName %workgroup_x "workgroup_x"
+               OpName %local_invocation_id "local_invocation_id"
+               OpName %local_y "local_y"
+               OpName %global_invocation_id "global_invocation_id"
+               OpName %global_z "global_z"
+               OpName %sum "sum"
+               OpName %linear "linear"
+               OpName %shift "shift"
+               OpName %byte_index "byte_index"
+               OpName %unsigned_byte_index "unsigned_byte_index"
+               OpName %byte_offset "byte_offset"
+               OpName %input_view "input_view"
+               OpName %loaded "loaded"
+               OpName %output_view "output_view"
+               OpModuleProcessed "iree.vulkan.bda.v1"
+               OpModuleProcessed "iree.vulkan.bda.v1.root=0,32"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_offset=32"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=0"
+               OpModuleProcessed "iree.vulkan.bda.v1.bindings=2"
+               OpDecorate %_struct_4 Block
+               OpMemberDecorate %_struct_4 0 Offset 0
+               OpMemberDecorate %_struct_4 1 Offset 8
+               OpMemberDecorate %_struct_4 2 Offset 16
+               OpMemberDecorate %_struct_4 3 Offset 20
+               OpMemberDecorate %_struct_4 4 Offset 24
+               OpMemberDecorate %_struct_4 5 Offset 28
+               OpDecorate %_runtimearr_ulong ArrayStride 8
+               OpDecorate %_struct_13 Block
+               OpMemberDecorate %_struct_13 0 Offset 0
+               OpDecorate %workgroup_id BuiltIn WorkgroupId
+               OpDecorate %local_invocation_id BuiltIn LocalInvocationId
+               OpDecorate %global_invocation_id BuiltIn GlobalInvocationId
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+      %ulong = OpTypeInt 64 0
+       %uint = OpTypeInt 32 0
+  %_struct_4 = OpTypeStruct %ulong %ulong %uint %uint %uint %uint
+%_ptr_PushConstant__struct_4 = OpTypePointer PushConstant %_struct_4
+          %6 = OpVariable %_ptr_PushConstant__struct_4 PushConstant
+       %void = OpTypeVoid
+          %8 = OpTypeFunction %void
+%_ptr_PushConstant_ulong = OpTypePointer PushConstant %ulong
+%_ptr_PushConstant_uint = OpTypePointer PushConstant %uint
+%_runtimearr_ulong = OpTypeRuntimeArray %ulong
+ %_struct_13 = OpTypeStruct %_runtimearr_ulong
+%_ptr_PhysicalStorageBuffer__struct_13 = OpTypePointer PhysicalStorageBuffer %_struct_13
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+      %int_2 = OpConstant %int 2
+%_ptr_PhysicalStorageBuffer_ulong = OpTypePointer PhysicalStorageBuffer %ulong
+     %uint_1 = OpConstant %uint 1
+     %v3uint = OpTypeVector %uint 3
+%_ptr_Input_v3uint = OpTypePointer Input %v3uint
+%workgroup_id = OpVariable %_ptr_Input_v3uint Input
+%local_invocation_id = OpVariable %_ptr_Input_v3uint Input
+%global_invocation_id = OpVariable %_ptr_Input_v3uint Input
+      %shift = OpConstant %int 2
+%_ptr_PhysicalStorageBuffer_int = OpTypePointer PhysicalStorageBuffer %int
+%spirv_raw_bda_builtin_storage_buffer_i32 = OpFunction %void None %8
+          %9 = OpLabel
+         %18 = OpAccessChain %_ptr_PushConstant_ulong %6 %int_0
+         %19 = OpLoad %ulong %18 Aligned 8
+         %20 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer__struct_13 %19
+         %21 = OpAccessChain %_ptr_PushConstant_uint %6 %int_2
+         %22 = OpLoad %uint %21 Aligned 4
+         %24 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %20 %int_0 %22
+      %input = OpLoad %ulong %24 Aligned 8
+         %27 = OpIAdd %uint %22 %uint_1
+         %28 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %20 %int_0 %27
+     %output = OpLoad %ulong %28 Aligned 8
+         %33 = OpLoad %v3uint %workgroup_id
+         %34 = OpCompositeExtract %uint %33 0
+%workgroup_x = OpBitcast %int %34
+         %37 = OpLoad %v3uint %local_invocation_id
+         %38 = OpCompositeExtract %uint %37 1
+    %local_y = OpBitcast %int %38
+         %41 = OpLoad %v3uint %global_invocation_id
+         %42 = OpCompositeExtract %uint %41 2
+   %global_z = OpBitcast %int %42
+        %sum = OpIAdd %int %workgroup_x %local_y
+     %linear = OpIAdd %int %sum %global_z
+ %byte_index = OpShiftLeftLogical %int %linear %shift
+%unsigned_byte_index = OpBitcast %uint %byte_index
+%byte_offset = OpUConvert %ulong %unsigned_byte_index
+         %51 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input
+ %input_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %51 %byte_offset
+     %loaded = OpLoad %int %input_view Aligned 4
+         %54 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output
+%output_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %54 %byte_offset
+               OpStore %output_view %loaded Aligned 4
+               OpReturn
+               OpFunctionEnd
+
+
+// ====
+
+
+// RUN: emit spirv-dis validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @hal_target {abi = hal_kernel}
+
+low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @spirv_raw_bda_storage_buffer_i32_select(%byte_offset: reg<spirv.offset64>, %limit: reg<spirv.offset64>) asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %zero_offset = OpConstant.offset64 0
+  %inside = OpULessThanEqual.offset64 %byte_offset, %limit
+  %selected_offset = OpSelect.offset64 %inside, %byte_offset, %zero_offset
+  %input_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %selected_offset
+  %loaded = OpLoad.storage_buffer.i32 %input_view
+  %zero = OpConstant.i32 0
+  %one = OpConstant.i32 1
+  %positive = OpSGreaterThan %loaded, %zero
+  %selected = OpSelect %positive, %loaded, %zero
+  %quotient = OpSDiv %selected, %one
+  %remainder = OpSRem %quotient, %one
+  %output_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %selected_offset
+  OpStore.storage_buffer.i32 %output_view, %remainder
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 GLSL450
+               OpEntryPoint GLCompute %spirv_raw_bda_storage_buffer_i32_select "spirv_raw_bda_storage_buffer_i32_select"
+               OpExecutionMode %spirv_raw_bda_storage_buffer_i32_select LocalSize 1 1 1
+               OpName %spirv_raw_bda_storage_buffer_i32_select "spirv_raw_bda_storage_buffer_i32_select"
+               OpName %byte_offset "byte_offset"
+               OpName %limit "limit"
+               OpName %input "input"
+               OpName %output "output"
+               OpName %zero_offset "zero_offset"
+               OpName %inside "inside"
+               OpName %selected_offset "selected_offset"
+               OpName %input_view "input_view"
+               OpName %loaded "loaded"
+               OpName %zero "zero"
+               OpName %one "one"
+               OpName %positive "positive"
+               OpName %selected "selected"
+               OpName %quotient "quotient"
+               OpName %remainder "remainder"
+               OpName %output_view "output_view"
+               OpModuleProcessed "iree.vulkan.bda.v1"
+               OpModuleProcessed "iree.vulkan.bda.v1.root=0,32"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_offset=32"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=16"
+               OpModuleProcessed "iree.vulkan.bda.v1.bindings=2"
+               OpDecorate %_arr_uint_uint_4 ArrayStride 4
+               OpDecorate %_struct_6 Block
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpMemberDecorate %_struct_6 1 Offset 8
+               OpMemberDecorate %_struct_6 2 Offset 16
+               OpMemberDecorate %_struct_6 3 Offset 20
+               OpMemberDecorate %_struct_6 4 Offset 24
+               OpMemberDecorate %_struct_6 5 Offset 28
+               OpMemberDecorate %_struct_6 6 Offset 32
+               OpDecorate %_runtimearr_ulong ArrayStride 8
+               OpDecorate %_struct_38 Block
+               OpMemberDecorate %_struct_38 0 Offset 0
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+      %ulong = OpTypeInt 64 0
+       %uint = OpTypeInt 32 0
+     %uint_4 = OpConstant %uint 4
+%_arr_uint_uint_4 = OpTypeArray %uint %uint_4
+  %_struct_6 = OpTypeStruct %ulong %ulong %uint %uint %uint %uint %_arr_uint_uint_4
+%_ptr_PushConstant__struct_6 = OpTypePointer PushConstant %_struct_6
+          %8 = OpVariable %_ptr_PushConstant__struct_6 PushConstant
+       %void = OpTypeVoid
+         %10 = OpTypeFunction %void
+%_ptr_PushConstant_uint = OpTypePointer PushConstant %uint
+        %int = OpTypeInt 32 1
+      %int_6 = OpConstant %int 6
+      %int_0 = OpConstant %int 0
+      %int_1 = OpConstant %int 1
+   %ulong_32 = OpConstant %ulong 32
+      %int_2 = OpConstant %int 2
+      %int_3 = OpConstant %int 3
+%_ptr_PushConstant_ulong = OpTypePointer PushConstant %ulong
+%_runtimearr_ulong = OpTypeRuntimeArray %ulong
+ %_struct_38 = OpTypeStruct %_runtimearr_ulong
+%_ptr_PhysicalStorageBuffer__struct_38 = OpTypePointer PhysicalStorageBuffer %_struct_38
+%_ptr_PhysicalStorageBuffer_ulong = OpTypePointer PhysicalStorageBuffer %ulong
+     %uint_1 = OpConstant %uint 1
+%zero_offset = OpConstant %ulong 0
+       %bool = OpTypeBool
+%_ptr_PhysicalStorageBuffer_int = OpTypePointer PhysicalStorageBuffer %int
+       %zero = OpConstant %int 0
+        %one = OpConstant %int 1
+%spirv_raw_bda_storage_buffer_i32_select = OpFunction %void None %10
+         %11 = OpLabel
+         %16 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_0
+         %17 = OpLoad %uint %16 Aligned 4
+         %19 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_1
+         %20 = OpLoad %uint %19 Aligned 4
+         %21 = OpUConvert %ulong %17
+         %22 = OpUConvert %ulong %20
+         %24 = OpShiftLeftLogical %ulong %22 %ulong_32
+%byte_offset = OpBitwiseOr %ulong %24 %21
+         %27 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_2
+         %28 = OpLoad %uint %27 Aligned 4
+         %30 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_3
+         %31 = OpLoad %uint %30 Aligned 4
+         %32 = OpUConvert %ulong %28
+         %33 = OpUConvert %ulong %31
+         %34 = OpShiftLeftLogical %ulong %33 %ulong_32
+      %limit = OpBitwiseOr %ulong %34 %32
+         %40 = OpAccessChain %_ptr_PushConstant_ulong %8 %int_0
+         %41 = OpLoad %ulong %40 Aligned 8
+         %42 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer__struct_38 %41
+         %43 = OpAccessChain %_ptr_PushConstant_uint %8 %int_2
+         %44 = OpLoad %uint %43 Aligned 4
+         %46 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %42 %int_0 %44
+      %input = OpLoad %ulong %46 Aligned 8
+         %49 = OpIAdd %uint %44 %uint_1
+         %50 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %42 %int_0 %49
+     %output = OpLoad %ulong %50 Aligned 8
+     %inside = OpULessThanEqual %bool %byte_offset %limit
+%selected_offset = OpSelect %ulong %inside %byte_offset %zero_offset
+         %57 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input
+ %input_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %57 %selected_offset
+     %loaded = OpLoad %int %input_view Aligned 4
+   %positive = OpSGreaterThan %bool %loaded %zero
+   %selected = OpSelect %int %positive %loaded %zero
+   %quotient = OpSDiv %int %selected %one
+  %remainder = OpSRem %int %quotient %one
+         %66 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output
+%output_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %66 %selected_offset
+               OpStore %output_view %remainder Aligned 4
+               OpReturn
+               OpFunctionEnd
+
+
+// ====
+
+
+// RUN: emit spirv-dis validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @hal_target {abi = hal_kernel}
+
+low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @spirv_raw_bda_storage_buffer_i32_guard(%byte_offset: reg<spirv.offset64>, %limit: reg<spirv.offset64>) {
+  %input = low.resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = low.resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %inside = low.op<spirv.op_u_less_than.offset64>(%byte_offset, %limit) : (reg<spirv.offset64>, reg<spirv.offset64>) -> reg<spirv.id : i1>
+  low.scf.if %inside {
+    %input_view = low.op<spirv.op_ptr_access_chain.storage_buffer.i32.byte_offset>(%input, %byte_offset) : (reg<spirv.ptr.storage_buffer>, reg<spirv.offset64>) -> reg<spirv.ptr.storage_buffer>
+    %loaded = low.op<spirv.op_load.storage_buffer.i32>(%input_view) : (reg<spirv.ptr.storage_buffer>) -> reg<spirv.id : i32>
+    %incremented = low.op<spirv.op_iadd.i32>(%loaded, %loaded) : (reg<spirv.id : i32>, reg<spirv.id : i32>) -> reg<spirv.id : i32>
+    %output_view = low.op<spirv.op_ptr_access_chain.storage_buffer.i32.byte_offset>(%output, %byte_offset) : (reg<spirv.ptr.storage_buffer>, reg<spirv.offset64>) -> reg<spirv.ptr.storage_buffer>
+    low.op<spirv.op_store.storage_buffer.i32>(%output_view, %incremented) : (reg<spirv.ptr.storage_buffer>, reg<spirv.id : i32>)
+    low.scf.yield
+  }
+  low.return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 GLSL450
+               OpEntryPoint GLCompute %spirv_raw_bda_storage_buffer_i32_guard "spirv_raw_bda_storage_buffer_i32_guard"
+               OpExecutionMode %spirv_raw_bda_storage_buffer_i32_guard LocalSize 1 1 1
+               OpName %spirv_raw_bda_storage_buffer_i32_guard "spirv_raw_bda_storage_buffer_i32_guard"
+               OpName %byte_offset "byte_offset"
+               OpName %limit "limit"
+               OpName %input "input"
+               OpName %output "output"
+               OpName %inside "inside"
+               OpName %input_view "input_view"
+               OpName %loaded "loaded"
+               OpName %incremented "incremented"
+               OpName %output_view "output_view"
+               OpModuleProcessed "iree.vulkan.bda.v1"
+               OpModuleProcessed "iree.vulkan.bda.v1.root=0,32"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_offset=32"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=16"
+               OpModuleProcessed "iree.vulkan.bda.v1.bindings=2"
+               OpDecorate %_arr_uint_uint_4 ArrayStride 4
+               OpDecorate %_struct_6 Block
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpMemberDecorate %_struct_6 1 Offset 8
+               OpMemberDecorate %_struct_6 2 Offset 16
+               OpMemberDecorate %_struct_6 3 Offset 20
+               OpMemberDecorate %_struct_6 4 Offset 24
+               OpMemberDecorate %_struct_6 5 Offset 28
+               OpMemberDecorate %_struct_6 6 Offset 32
+               OpDecorate %_runtimearr_ulong ArrayStride 8
+               OpDecorate %_struct_38 Block
+               OpMemberDecorate %_struct_38 0 Offset 0
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+      %ulong = OpTypeInt 64 0
+       %uint = OpTypeInt 32 0
+     %uint_4 = OpConstant %uint 4
+%_arr_uint_uint_4 = OpTypeArray %uint %uint_4
+  %_struct_6 = OpTypeStruct %ulong %ulong %uint %uint %uint %uint %_arr_uint_uint_4
+%_ptr_PushConstant__struct_6 = OpTypePointer PushConstant %_struct_6
+          %8 = OpVariable %_ptr_PushConstant__struct_6 PushConstant
+       %void = OpTypeVoid
+         %10 = OpTypeFunction %void
+%_ptr_PushConstant_uint = OpTypePointer PushConstant %uint
+        %int = OpTypeInt 32 1
+      %int_6 = OpConstant %int 6
+      %int_0 = OpConstant %int 0
+      %int_1 = OpConstant %int 1
+   %ulong_32 = OpConstant %ulong 32
+      %int_2 = OpConstant %int 2
+      %int_3 = OpConstant %int 3
+%_ptr_PushConstant_ulong = OpTypePointer PushConstant %ulong
+%_runtimearr_ulong = OpTypeRuntimeArray %ulong
+ %_struct_38 = OpTypeStruct %_runtimearr_ulong
+%_ptr_PhysicalStorageBuffer__struct_38 = OpTypePointer PhysicalStorageBuffer %_struct_38
+%_ptr_PhysicalStorageBuffer_ulong = OpTypePointer PhysicalStorageBuffer %ulong
+     %uint_1 = OpConstant %uint 1
+       %bool = OpTypeBool
+%_ptr_PhysicalStorageBuffer_int = OpTypePointer PhysicalStorageBuffer %int
+%spirv_raw_bda_storage_buffer_i32_guard = OpFunction %void None %10
+         %11 = OpLabel
+         %16 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_0
+         %17 = OpLoad %uint %16 Aligned 4
+         %19 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_1
+         %20 = OpLoad %uint %19 Aligned 4
+         %21 = OpUConvert %ulong %17
+         %22 = OpUConvert %ulong %20
+         %24 = OpShiftLeftLogical %ulong %22 %ulong_32
+%byte_offset = OpBitwiseOr %ulong %24 %21
+         %27 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_2
+         %28 = OpLoad %uint %27 Aligned 4
+         %30 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_3
+         %31 = OpLoad %uint %30 Aligned 4
+         %32 = OpUConvert %ulong %28
+         %33 = OpUConvert %ulong %31
+         %34 = OpShiftLeftLogical %ulong %33 %ulong_32
+      %limit = OpBitwiseOr %ulong %34 %32
+         %40 = OpAccessChain %_ptr_PushConstant_ulong %8 %int_0
+         %41 = OpLoad %ulong %40 Aligned 8
+         %42 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer__struct_38 %41
+         %43 = OpAccessChain %_ptr_PushConstant_uint %8 %int_2
+         %44 = OpLoad %uint %43 Aligned 4
+         %46 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %42 %int_0 %44
+      %input = OpLoad %ulong %46 Aligned 8
+         %49 = OpIAdd %uint %44 %uint_1
+         %50 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %42 %int_0 %49
+     %output = OpLoad %ulong %50 Aligned 8
+     %inside = OpULessThan %bool %byte_offset %limit
+               OpSelectionMerge %55 None
+               OpBranchConditional %inside %54 %55
+         %54 = OpLabel
+         %57 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input
+ %input_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %57 %byte_offset
+     %loaded = OpLoad %int %input_view Aligned 4
+%incremented = OpIAdd %int %loaded %loaded
+         %61 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output
+%output_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %61 %byte_offset
+               OpStore %output_view %incremented Aligned 4
+               OpBranch %55
+         %55 = OpLabel
+               OpReturn
+               OpFunctionEnd
+
+
+// ====
+
+
+// RUN: emit spirv-dis validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @hal_target {abi = hal_kernel}
+
+low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @spirv_raw_bda_storage_buffer_f32_copy(%byte_offset: reg<spirv.offset64>) asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %input_view = OpPtrAccessChain.storage_buffer.f32.byte_offset %input, %byte_offset
+  %loaded = OpLoad.storage_buffer.f32 %input_view
+  %sum = OpFAdd.f32 %loaded, %loaded
+  %product = OpFMul.f32 %sum, %loaded
+  %quotient = OpFDiv.f32 %product, %loaded
+  %remainder = OpFRem.f32 %quotient, %loaded
+  %output_view = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %byte_offset
+  OpStore.storage_buffer.f32 %output_view, %remainder
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 GLSL450
+               OpEntryPoint GLCompute %spirv_raw_bda_storage_buffer_f32_copy "spirv_raw_bda_storage_buffer_f32_copy"
+               OpExecutionMode %spirv_raw_bda_storage_buffer_f32_copy LocalSize 1 1 1
+               OpName %spirv_raw_bda_storage_buffer_f32_copy "spirv_raw_bda_storage_buffer_f32_copy"
+               OpName %byte_offset "byte_offset"
+               OpName %input "input"
+               OpName %output "output"
+               OpName %input_view "input_view"
+               OpName %loaded "loaded"
+               OpName %sum "sum"
+               OpName %product "product"
+               OpName %quotient "quotient"
+               OpName %remainder "remainder"
+               OpName %output_view "output_view"
+               OpModuleProcessed "iree.vulkan.bda.v1"
+               OpModuleProcessed "iree.vulkan.bda.v1.root=0,32"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_offset=32"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=8"
+               OpModuleProcessed "iree.vulkan.bda.v1.bindings=2"
+               OpDecorate %_arr_uint_uint_2 ArrayStride 4
+               OpDecorate %_struct_6 Block
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpMemberDecorate %_struct_6 1 Offset 8
+               OpMemberDecorate %_struct_6 2 Offset 16
+               OpMemberDecorate %_struct_6 3 Offset 20
+               OpMemberDecorate %_struct_6 4 Offset 24
+               OpMemberDecorate %_struct_6 5 Offset 28
+               OpMemberDecorate %_struct_6 6 Offset 32
+               OpDecorate %_runtimearr_ulong ArrayStride 8
+               OpDecorate %_struct_28 Block
+               OpMemberDecorate %_struct_28 0 Offset 0
+               OpDecorate %_ptr_PhysicalStorageBuffer_float ArrayStride 1
+      %ulong = OpTypeInt 64 0
+       %uint = OpTypeInt 32 0
+     %uint_2 = OpConstant %uint 2
+%_arr_uint_uint_2 = OpTypeArray %uint %uint_2
+  %_struct_6 = OpTypeStruct %ulong %ulong %uint %uint %uint %uint %_arr_uint_uint_2
+%_ptr_PushConstant__struct_6 = OpTypePointer PushConstant %_struct_6
+          %8 = OpVariable %_ptr_PushConstant__struct_6 PushConstant
+       %void = OpTypeVoid
+         %10 = OpTypeFunction %void
+%_ptr_PushConstant_uint = OpTypePointer PushConstant %uint
+        %int = OpTypeInt 32 1
+      %int_6 = OpConstant %int 6
+      %int_0 = OpConstant %int 0
+      %int_1 = OpConstant %int 1
+   %ulong_32 = OpConstant %ulong 32
+%_ptr_PushConstant_ulong = OpTypePointer PushConstant %ulong
+%_runtimearr_ulong = OpTypeRuntimeArray %ulong
+ %_struct_28 = OpTypeStruct %_runtimearr_ulong
+%_ptr_PhysicalStorageBuffer__struct_28 = OpTypePointer PhysicalStorageBuffer %_struct_28
+      %int_2 = OpConstant %int 2
+%_ptr_PhysicalStorageBuffer_ulong = OpTypePointer PhysicalStorageBuffer %ulong
+     %uint_1 = OpConstant %uint 1
+      %float = OpTypeFloat 32
+%_ptr_PhysicalStorageBuffer_float = OpTypePointer PhysicalStorageBuffer %float
+%spirv_raw_bda_storage_buffer_f32_copy = OpFunction %void None %10
+         %11 = OpLabel
+         %16 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_0
+         %17 = OpLoad %uint %16 Aligned 4
+         %19 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_1
+         %20 = OpLoad %uint %19 Aligned 4
+         %21 = OpUConvert %ulong %17
+         %22 = OpUConvert %ulong %20
+         %24 = OpShiftLeftLogical %ulong %22 %ulong_32
+%byte_offset = OpBitwiseOr %ulong %24 %21
+         %31 = OpAccessChain %_ptr_PushConstant_ulong %8 %int_0
+         %32 = OpLoad %ulong %31 Aligned 8
+         %33 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer__struct_28 %32
+         %34 = OpAccessChain %_ptr_PushConstant_uint %8 %int_2
+         %35 = OpLoad %uint %34 Aligned 4
+         %37 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %35
+      %input = OpLoad %ulong %37 Aligned 8
+         %40 = OpIAdd %uint %35 %uint_1
+         %41 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %40
+     %output = OpLoad %ulong %41 Aligned 8
+         %45 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %input
+ %input_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_float %45 %byte_offset
+     %loaded = OpLoad %float %input_view Aligned 4
+        %sum = OpFAdd %float %loaded %loaded
+    %product = OpFMul %float %sum %loaded
+   %quotient = OpFDiv %float %product %loaded
+  %remainder = OpFRem %float %quotient %loaded
+         %52 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %output
+%output_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_float %52 %byte_offset
+               OpStore %output_view %remainder Aligned 4
+               OpReturn
+               OpFunctionEnd
+
+
+// ====
+
+
+// RUN: emit spirv-dis validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @hal_target {abi = hal_kernel}
+
+low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @spirv_raw_bda_storage_buffer_i64_copy(%byte_offset: reg<spirv.offset64>) asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %input_view = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %byte_offset
+  %loaded = OpLoad.storage_buffer.i64 %input_view
+  %sum = OpIAdd.i64 %loaded, %loaded
+  %larger = OpSGreaterThan.i64 %sum, %loaded
+  %selected = OpSelect.i64 %larger, %sum, %loaded
+  %output_view = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %byte_offset
+  OpStore.storage_buffer.i64 %output_view, %selected
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 GLSL450
+               OpEntryPoint GLCompute %spirv_raw_bda_storage_buffer_i64_copy "spirv_raw_bda_storage_buffer_i64_copy"
+               OpExecutionMode %spirv_raw_bda_storage_buffer_i64_copy LocalSize 1 1 1
+               OpName %spirv_raw_bda_storage_buffer_i64_copy "spirv_raw_bda_storage_buffer_i64_copy"
+               OpName %byte_offset "byte_offset"
+               OpName %input "input"
+               OpName %output "output"
+               OpName %input_view "input_view"
+               OpName %loaded "loaded"
+               OpName %sum "sum"
+               OpName %larger "larger"
+               OpName %selected "selected"
+               OpName %output_view "output_view"
+               OpModuleProcessed "iree.vulkan.bda.v1"
+               OpModuleProcessed "iree.vulkan.bda.v1.root=0,32"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_offset=32"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=8"
+               OpModuleProcessed "iree.vulkan.bda.v1.bindings=2"
+               OpDecorate %_arr_uint_uint_2 ArrayStride 4
+               OpDecorate %_struct_6 Block
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpMemberDecorate %_struct_6 1 Offset 8
+               OpMemberDecorate %_struct_6 2 Offset 16
+               OpMemberDecorate %_struct_6 3 Offset 20
+               OpMemberDecorate %_struct_6 4 Offset 24
+               OpMemberDecorate %_struct_6 5 Offset 28
+               OpMemberDecorate %_struct_6 6 Offset 32
+               OpDecorate %_runtimearr_ulong ArrayStride 8
+               OpDecorate %_struct_28 Block
+               OpMemberDecorate %_struct_28 0 Offset 0
+               OpDecorate %_ptr_PhysicalStorageBuffer_long ArrayStride 1
+      %ulong = OpTypeInt 64 0
+       %uint = OpTypeInt 32 0
+     %uint_2 = OpConstant %uint 2
+%_arr_uint_uint_2 = OpTypeArray %uint %uint_2
+  %_struct_6 = OpTypeStruct %ulong %ulong %uint %uint %uint %uint %_arr_uint_uint_2
+%_ptr_PushConstant__struct_6 = OpTypePointer PushConstant %_struct_6
+          %8 = OpVariable %_ptr_PushConstant__struct_6 PushConstant
+       %void = OpTypeVoid
+         %10 = OpTypeFunction %void
+%_ptr_PushConstant_uint = OpTypePointer PushConstant %uint
+        %int = OpTypeInt 32 1
+      %int_6 = OpConstant %int 6
+      %int_0 = OpConstant %int 0
+      %int_1 = OpConstant %int 1
+   %ulong_32 = OpConstant %ulong 32
+%_ptr_PushConstant_ulong = OpTypePointer PushConstant %ulong
+%_runtimearr_ulong = OpTypeRuntimeArray %ulong
+ %_struct_28 = OpTypeStruct %_runtimearr_ulong
+%_ptr_PhysicalStorageBuffer__struct_28 = OpTypePointer PhysicalStorageBuffer %_struct_28
+      %int_2 = OpConstant %int 2
+%_ptr_PhysicalStorageBuffer_ulong = OpTypePointer PhysicalStorageBuffer %ulong
+     %uint_1 = OpConstant %uint 1
+       %long = OpTypeInt 64 1
+%_ptr_PhysicalStorageBuffer_long = OpTypePointer PhysicalStorageBuffer %long
+       %bool = OpTypeBool
+%spirv_raw_bda_storage_buffer_i64_copy = OpFunction %void None %10
+         %11 = OpLabel
+         %16 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_0
+         %17 = OpLoad %uint %16 Aligned 4
+         %19 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_1
+         %20 = OpLoad %uint %19 Aligned 4
+         %21 = OpUConvert %ulong %17
+         %22 = OpUConvert %ulong %20
+         %24 = OpShiftLeftLogical %ulong %22 %ulong_32
+%byte_offset = OpBitwiseOr %ulong %24 %21
+         %31 = OpAccessChain %_ptr_PushConstant_ulong %8 %int_0
+         %32 = OpLoad %ulong %31 Aligned 8
+         %33 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer__struct_28 %32
+         %34 = OpAccessChain %_ptr_PushConstant_uint %8 %int_2
+         %35 = OpLoad %uint %34 Aligned 4
+         %37 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %35
+      %input = OpLoad %ulong %37 Aligned 8
+         %40 = OpIAdd %uint %35 %uint_1
+         %41 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %40
+     %output = OpLoad %ulong %41 Aligned 8
+         %45 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_long %input
+ %input_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_long %45 %byte_offset
+     %loaded = OpLoad %long %input_view Aligned 8
+        %sum = OpIAdd %long %loaded %loaded
+     %larger = OpSGreaterThan %bool %sum %loaded
+   %selected = OpSelect %long %larger %sum %loaded
+         %52 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_long %output
+%output_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_long %52 %byte_offset
+               OpStore %output_view %selected Aligned 8
+               OpReturn
+               OpFunctionEnd
+
+
+// ====
+
+
+// RUN: emit spirv-dis validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_storage_buffer_i32_roundtrip(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
+  %input_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %byte_offset
+  %loaded = OpLoad.storage_buffer.i32 %input_view
+  %incremented = OpIAdd %loaded, %loaded
+  %output_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %byte_offset
+  OpStore.storage_buffer.i32 %output_view, %incremented
+  return %loaded
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %spirv_storage_buffer_i32_roundtrip "spirv_storage_buffer_i32_roundtrip"
+               OpExecutionMode %spirv_storage_buffer_i32_roundtrip LocalSize 1 1 1
+               OpName %spirv_storage_buffer_i32_roundtrip "spirv_storage_buffer_i32_roundtrip"
+               OpName %input "input"
+               OpName %output "output"
+               OpName %byte_offset "byte_offset"
+               OpName %input_view "input_view"
+               OpName %loaded "loaded"
+               OpName %incremented "incremented"
+               OpName %output_view "output_view"
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpDecorate %_struct_6 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %9 DescriptorSet 0
+               OpDecorate %9 Binding 1
+               OpDecorate %10 DescriptorSet 0
+               OpDecorate %10 Binding 2
+               OpMemberDecorate %_struct_12 0 Offset 0
+               OpDecorate %_struct_12 Block
+               OpDecorate %11 DescriptorSet 0
+               OpDecorate %11 Binding 3
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+      %ulong = OpTypeInt 64 0
+  %_struct_6 = OpTypeStruct %ulong
+%_ptr_StorageBuffer__struct_6 = OpTypePointer StorageBuffer %_struct_6
+%_ptr_StorageBuffer_ulong = OpTypePointer StorageBuffer %ulong
+          %4 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+          %9 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+         %10 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+ %_struct_12 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_12 = OpTypePointer StorageBuffer %_struct_12
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+         %11 = OpVariable %_ptr_StorageBuffer__struct_12 StorageBuffer
+       %void = OpTypeVoid
+         %16 = OpTypeFunction %void
+%_ptr_PhysicalStorageBuffer_int = OpTypePointer PhysicalStorageBuffer %int
+%spirv_storage_buffer_i32_roundtrip = OpFunction %void None %16
+         %17 = OpLabel
+         %18 = OpAccessChain %_ptr_StorageBuffer_ulong %4 %int_0
+      %input = OpLoad %ulong %18 Aligned 8
+         %20 = OpAccessChain %_ptr_StorageBuffer_ulong %9 %int_0
+     %output = OpLoad %ulong %20 Aligned 8
+         %22 = OpAccessChain %_ptr_StorageBuffer_ulong %10 %int_0
+%byte_offset = OpLoad %ulong %22 Aligned 8
+         %25 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input
+ %input_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %25 %byte_offset
+     %loaded = OpLoad %int %input_view Aligned 4
+%incremented = OpIAdd %int %loaded %loaded
+         %29 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output
+%output_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %29 %byte_offset
+               OpStore %output_view %incremented Aligned 4
+         %31 = OpAccessChain %_ptr_StorageBuffer_int %11 %int_0
+               OpStore %31 %loaded Aligned 4
+               OpReturn
+               OpFunctionEnd
