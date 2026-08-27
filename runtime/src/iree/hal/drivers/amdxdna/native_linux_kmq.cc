@@ -39,6 +39,10 @@ struct iree_hal_amdxdna_native_device_t {
   iree_hal_amdxdna_native_c_command_chain_status_t command_chain_status =
       IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_BY_DEFAULT;
   bool supports_command_chain = true;
+  // Concurrent hardware-context budget for this part, resolved once at device
+  // creation from the NPU architecture (the KMD has no query for it). 0 when
+  // the architecture is unrecognized. See query_caps.
+  uint32_t hardware_context_budget = 0;
   std::mutex command_pool_mutex;
   std::vector<std::unique_ptr<shim_xdna::kernel>> start_npu_command_pool;
 
@@ -114,8 +118,7 @@ constexpr size_t kMaxExecBoSize = 4096;
 // split.
 constexpr uint32_t kKmqDefaultChainSlots = 24;
 
-constexpr const char* kKnownBadUbuntu617Srcversion =
-    "2DBDA75956CAFA9D029EA89";
+constexpr const char* kKnownBadUbuntu617Srcversion = "2DBDA75956CAFA9D029EA89";
 
 constexpr uint32_t kCommandChainFirmwareMinMajor = 1;
 constexpr uint32_t kCommandChainFirmwareMinMinor = 1;
@@ -233,15 +236,12 @@ driver_stack_info_t query_driver_stack_info(
   const std::filesystem::path sysfs_device_path =
       sysfs_device_path_for_accel_node(device->device_path);
   if (!sysfs_device_path.empty()) {
-    info.has_vendor =
-        parse_sysfs_u32(read_first_line(sysfs_device_path / "vendor"),
-                        &info.vendor);
-    info.has_device =
-        parse_sysfs_u32(read_first_line(sysfs_device_path / "device"),
-                        &info.device);
-    info.has_revision =
-        parse_sysfs_u32(read_first_line(sysfs_device_path / "revision"),
-                        &info.revision);
+    info.has_vendor = parse_sysfs_u32(
+        read_first_line(sysfs_device_path / "vendor"), &info.vendor);
+    info.has_device = parse_sysfs_u32(
+        read_first_line(sysfs_device_path / "device"), &info.device);
+    info.has_revision = parse_sysfs_u32(
+        read_first_line(sysfs_device_path / "revision"), &info.revision);
   }
   return info;
 }
@@ -516,10 +516,10 @@ iree_status_t iree_hal_amdxdna_native_device_create(
       device_path.empty() ? shim_xdna::find_default_accel_device_path()
                           : device_path;
   std::unique_ptr<shim_xdna::device> shim_device;
-  const int err = shim_xdna::device::create(
-      static_cast<uint32_t>(options->n_core_rows),
-      static_cast<uint32_t>(options->n_core_cols), resolved_device_path,
-      &shim_device);
+  const int err =
+      shim_xdna::device::create(static_cast<uint32_t>(options->n_core_rows),
+                                static_cast<uint32_t>(options->n_core_cols),
+                                resolved_device_path, &shim_device);
   if (err != 0) {
     return iree_make_status(
         iree_status_code_from_errno(err),
@@ -532,15 +532,19 @@ iree_status_t iree_hal_amdxdna_native_device_create(
   iree_hal_amdxdna_native_device_t* device = nullptr;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       host_allocator, sizeof(*device), reinterpret_cast<void**>(&device)));
-  device = new (device)
-      iree_hal_amdxdna_native_device_t(host_allocator, std::move(shim_device),
-                                       resolved_device_path);
+  device = new (device) iree_hal_amdxdna_native_device_t(
+      host_allocator, std::move(shim_device), resolved_device_path);
   const driver_stack_info_t driver_stack_info = query_driver_stack_info(device);
   record_driver_stack_info(device, driver_stack_info);
-  device->command_chain_status =
-      select_command_chain_status(driver_stack_info);
+  device->command_chain_status = select_command_chain_status(driver_stack_info);
   device->supports_command_chain =
       command_chain_enabled(device->command_chain_status);
+  // Resolve the per-architecture hardware-context budget once. query_npu_arch()
+  // reads sysfs, so cache it here rather than on every query_caps() call.
+  const std::string npu_arch = shim_xdna::query_npu_arch();
+  device->hardware_context_budget =
+      iree_hal_amdxdna_hardware_context_budget_for_arch(
+          iree_make_string_view(npu_arch.data(), npu_arch.size()));
   *out_device = device;
   return iree_ok_status();
 }
@@ -604,11 +608,11 @@ iree_status_t iree_hal_amdxdna_native_device_query_caps(
   caps.max_effective_queues = 1;
   caps.max_command_chain_slots =
       device->supports_command_chain
-          ? std::min(chain_slot_capacity(kMaxExecBoSize),
-                     kKmqDefaultChainSlots)
+          ? std::min(chain_slot_capacity(kMaxExecBoSize), kKmqDefaultChainSlots)
           : 0;
   // Zero selects the common conservative chain-cache retention budget.
   caps.max_cached_chain_child_commands = 0;
+  caps.max_hardware_contexts = device->hardware_context_budget;
   caps.context_image_models = IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_MODEL_PDI;
   // START_NPU is used for command-chain children and is correct on Linux KMQ.
   // Do not advertise PARTIAL_ELF here: its resident-instruction path currently
@@ -666,10 +670,13 @@ iree_status_t iree_hal_amdxdna_native_device_alloc_buffer(
 iree_status_t iree_hal_amdxdna_native_device_create_context(
     iree_hal_amdxdna_native_device_t* device,
     const iree_hal_amdxdna_native_c_context_image_t* image,
+    bool* out_context_pool_exhausted,
     iree_hal_amdxdna_native_context_t** out_context) {
   IREE_ASSERT_ARGUMENT(device);
   IREE_ASSERT_ARGUMENT(image);
+  IREE_ASSERT_ARGUMENT(out_context_pool_exhausted);
   IREE_ASSERT_ARGUMENT(out_context);
+  *out_context_pool_exhausted = false;
   *out_context = nullptr;
   if (IREE_UNLIKELY(image->type !=
                     IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_TYPE_PDI)) {
@@ -694,7 +701,8 @@ iree_status_t iree_hal_amdxdna_native_device_create_context(
 
   std::unique_ptr<shim_xdna::hw_ctx> shim_context;
   const int err = device->shim_device->create_hw_context(
-      pdi_vector, kernel_name_string, &shim_context);
+      pdi_vector, kernel_name_string, out_context_pool_exhausted,
+      &shim_context);
   if (err != 0) {
     return iree_hal_amdxdna_status_from_errno(
         err, "amdxdna hardware context creation failed");
@@ -1423,11 +1431,13 @@ extern "C" iree_device_size_t iree_hal_amdxdna_native_buffer_c_size(
 extern "C" iree_status_t iree_hal_amdxdna_native_device_c_create_context_ref(
     iree_hal_amdxdna_native_device_t* device,
     const iree_hal_amdxdna_native_c_context_image_t* image,
+    bool* out_context_pool_exhausted,
     iree_hal_amdxdna_native_context_ref_t** out_context_ref) {
+  *out_context_pool_exhausted = false;
   *out_context_ref = nullptr;
   iree_hal_amdxdna_native_context_t* raw_context = nullptr;
   IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_device_create_context(
-      device, image, &raw_context));
+      device, image, out_context_pool_exhausted, &raw_context));
   auto* context_ref = new iree_hal_amdxdna_native_context_ref_t();
   iree_atomic_ref_count_init(&context_ref->ref_count);
   context_ref->context = raw_context;

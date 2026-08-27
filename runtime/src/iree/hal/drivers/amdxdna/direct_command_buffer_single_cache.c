@@ -49,6 +49,8 @@ static void iree_hal_amdxdna_single_command_cache_entry_deinitialize(
   iree_allocator_free(cache->host_allocator, entry->binding_device_addrs);
   iree_allocator_free(cache->host_allocator, entry->binding_offsets);
   iree_allocator_free(cache->host_allocator, entry->binding_lengths);
+  iree_allocator_free(cache->host_allocator, entry->owned_src_asm_inst.data);
+  iree_allocator_free(cache->host_allocator, entry->owned_src_patches.data);
   memset(entry, 0, sizeof(*entry));
 }
 
@@ -59,6 +61,20 @@ void iree_hal_amdxdna_single_command_cache_entry_discard(
   IREE_ASSERT_ARGUMENT(entry);
   IREE_ASSERT(entry->in_flight_count == 0);
   iree_hal_amdxdna_single_command_cache_entry_deinitialize(cache, entry);
+}
+
+// Clones |src| into cache-owned storage. On failure |dst| is left empty.
+static iree_status_t iree_hal_amdxdna_single_command_cache_clone_u32_list(
+    iree_allocator_t host_allocator, const iree_hal_amdxdna_u32_list_t* src,
+    iree_hal_amdxdna_u32_list_t* dst) {
+  dst->data = NULL;
+  dst->count = 0;
+  if (!src || src->count == 0) return iree_ok_status();
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+      host_allocator, src->count * sizeof(*dst->data), (void**)&dst->data));
+  memcpy(dst->data, src->data, src->count * sizeof(*dst->data));
+  dst->count = src->count;
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amdxdna_single_command_cache_copy_signature(
@@ -190,13 +206,23 @@ static bool iree_hal_amdxdna_single_command_cache_descriptor_template_matches(
     const iree_hal_amdxdna_u32_list_t* asm_inst,
     const iree_hal_amdxdna_u32_list_t* patches, iree_host_size_t constant_count,
     bool use_native_partial_elf, iree_host_size_t binding_count) {
+  // Match by template *content* (against the cache-owned clones), never by the
+  // executable-owned pointer identity: those pointers are freed when the
+  // recording executable is destroyed and can be reallocated at the same
+  // address (ABA), which would otherwise let a different same-shaped kernel
+  // falsely reuse this command's on-device control code.
   return cache->command && cache->queue == queue &&
          cache->in_flight_count == 0 && cache->cu_index == cu_index &&
-         cache->src_asm_inst == asm_inst && cache->src_patches == patches &&
          cache->src_constant_count == constant_count &&
          cache->src_use_native_partial_elf == use_native_partial_elf &&
          cache->ctrl_word_count == (asm_inst ? asm_inst->count : 0) &&
-         cache->binding_count == binding_count;
+         cache->binding_count == binding_count &&
+         iree_hal_amdxdna_u32_span_equal(
+             cache->owned_src_asm_inst.data, cache->owned_src_asm_inst.count,
+             asm_inst ? asm_inst->data : NULL, asm_inst ? asm_inst->count : 0) &&
+         iree_hal_amdxdna_u32_span_equal(
+             cache->owned_src_patches.data, cache->owned_src_patches.count,
+             patches ? patches->data : NULL, patches ? patches->count : 0);
 }
 
 iree_status_t iree_hal_amdxdna_update_single_command_cache_entry(
@@ -355,13 +381,42 @@ iree_hal_amdxdna_store_single_command_cache_entry(
 }
 
 void iree_hal_amdxdna_single_command_cache_entry_set_descriptor_template(
+    iree_hal_amdxdna_device_single_command_cache_t* cache,
     iree_hal_amdxdna_single_command_cache_entry_t* entry,
     const iree_hal_amdxdna_u32_list_t* asm_inst,
     const iree_hal_amdxdna_u32_list_t* patches, iree_host_size_t constant_count,
     bool use_native_partial_elf, void* ctrl_code_mapped_ptr) {
+  IREE_ASSERT_ARGUMENT(cache);
   IREE_ASSERT_ARGUMENT(entry);
-  entry->src_asm_inst = asm_inst;
-  entry->src_patches = patches;
+  // Clone the executable-owned template lists into cache-owned storage so reuse
+  // is matched by content and stays valid after the recording executable dies.
+  // Best-effort: if a clone fails the owned list is left empty, so the matcher's
+  // content compare simply never hits for this entry (correctness preserved).
+  iree_allocator_free(cache->host_allocator, entry->owned_src_asm_inst.data);
+  iree_allocator_free(cache->host_allocator, entry->owned_src_patches.data);
+  entry->owned_src_asm_inst.data = NULL;
+  entry->owned_src_asm_inst.count = 0;
+  entry->owned_src_patches.data = NULL;
+  entry->owned_src_patches.count = 0;
+  iree_status_t clone_status = iree_hal_amdxdna_single_command_cache_clone_u32_list(
+      cache->host_allocator, asm_inst, &entry->owned_src_asm_inst);
+  if (iree_status_is_ok(clone_status)) {
+    clone_status = iree_hal_amdxdna_single_command_cache_clone_u32_list(
+        cache->host_allocator, patches, &entry->owned_src_patches);
+  }
+  if (!iree_status_is_ok(clone_status)) {
+    iree_status_ignore(clone_status);
+    iree_allocator_free(cache->host_allocator, entry->owned_src_asm_inst.data);
+    iree_allocator_free(cache->host_allocator, entry->owned_src_patches.data);
+    entry->owned_src_asm_inst.data = NULL;
+    entry->owned_src_asm_inst.count = 0;
+    entry->owned_src_patches.data = NULL;
+    entry->owned_src_patches.count = 0;
+  }
+  entry->src_asm_inst =
+      entry->owned_src_asm_inst.data ? &entry->owned_src_asm_inst : NULL;
+  entry->src_patches =
+      entry->owned_src_patches.data ? &entry->owned_src_patches : NULL;
   entry->src_constant_count = constant_count;
   entry->src_use_native_partial_elf = use_native_partial_elf;
   entry->ctrl_code_mapped_ptr = ctrl_code_mapped_ptr;

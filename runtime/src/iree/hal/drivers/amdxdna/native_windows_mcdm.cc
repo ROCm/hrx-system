@@ -9,6 +9,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <mutex>
@@ -140,6 +141,16 @@ iree_status_t status_from_mcdm_error(const char* label,
                                       const mcdm::Error& error) {
   return iree_make_status(IREE_STATUS_INTERNAL, "%s: %s", label,
                            mcdm::ErrorMessage(&error));
+}
+
+bool mcdm_error_is_context_pool_exhausted(const mcdm::Error& error) {
+  if (!error.has_nt_status) return false;
+  // Generic memory/resource statuses can originate from context-private data,
+  // context creation, or hardware-queue allocation and do not prove that the
+  // hardware-context pool is full. Retry only the unambiguous context-ID limit
+  // until specific operation/status pairs are characterized on real drivers.
+  return static_cast<uint32_t>(error.nt_status) ==
+         0xC000015A;  // STATUS_TOO_MANY_CONTEXT_IDS
 }
 
 iree_status_t validate_device_size_fits_u64(iree_device_size_t size) {
@@ -376,6 +387,10 @@ struct iree_hal_amdxdna_native_device_t {
   std::condition_variable pathb_context_cv;
   size_t pathb_active_submission_count = 0;
   iree_hal_amdxdna_native_context_t* pathb_active_context = nullptr;
+  // Concurrent hardware-context budget resolved once at device creation from
+  // PCI IDs (Windows MCDM has no sysfs arch query). 0 when unrecognized.
+  uint32_t hardware_context_budget = 0;
+  iree_hal_amdxdna_native_c_driver_stack_t driver_stack = {};
 };
 
 struct iree_hal_amdxdna_native_buffer_t {
@@ -2403,6 +2418,42 @@ iree_status_t iree_hal_amdxdna_native_device_create(
     return status;
   }
 
+  device->driver_stack = {};
+  device->driver_stack.has_pci_ids = device->device.has_pci_ids;
+  device->driver_stack.pci_vendor_id = device->device.pci_vendor_id;
+  device->driver_stack.pci_device_id = device->device.pci_device_id;
+  device->driver_stack.pci_revision_id = device->device.pci_revision_id;
+  if (!device->driver_stack.has_pci_ids) {
+    uint32_t vendor_id = 0;
+    uint32_t device_id = 0;
+    uint32_t revision_id = 0;
+    if (mcdm::QueryNpuPciIdsFromPnP(&vendor_id, &device_id, &revision_id)) {
+      device->driver_stack.has_pci_ids = true;
+      device->driver_stack.pci_vendor_id = vendor_id;
+      device->driver_stack.pci_device_id = device_id;
+      device->driver_stack.pci_revision_id = revision_id;
+    }
+  }
+  if (device->driver_stack.has_pci_ids) {
+    device->hardware_context_budget =
+        iree_hal_amdxdna_hardware_context_budget_for_pci(
+            device->driver_stack.pci_vendor_id,
+            device->driver_stack.pci_device_id,
+            device->driver_stack.pci_revision_id);
+  }
+
+  const char* debug_caps = getenv("HRX_AMDXDNA_DEBUG_CAPS");
+  if (debug_caps && debug_caps[0] && debug_caps[0] != '0') {
+    std::fprintf(
+        stderr,
+        "[hrx][caps] has_pci=%d vendor=0x%04x device=0x%04x revision=0x%02x "
+        "budget=%u\n",
+        device->driver_stack.has_pci_ids ? 1 : 0,
+        device->driver_stack.pci_vendor_id, device->driver_stack.pci_device_id,
+        device->driver_stack.pci_revision_id, device->hardware_context_budget);
+    std::fflush(stderr);
+  }
+
   *out_device = device;
   return iree_ok_status();
 }
@@ -2475,6 +2526,7 @@ iree_status_t iree_hal_amdxdna_native_device_query_caps(
   caps.max_command_chain_slots = chain_slot_capacity(chain_exec_bo_size);
   caps.max_cached_chain_child_commands =
       kWindowsChainCacheChildCommandBudget;
+  caps.max_hardware_contexts = device->hardware_context_budget;
   caps.context_image_models =
       IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_MODEL_XCLBIN;
   caps.dispatch_models = IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_START_CU |
@@ -2500,6 +2552,7 @@ iree_status_t iree_hal_amdxdna_native_device_query_caps(
       IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_NPU;
   caps.command_chain_status =
       IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_BY_DEFAULT;
+  caps.driver_stack = device->driver_stack;
   *out_caps = caps;
   if (!submission_policy.supports_command_chaining) {
     out_caps->max_command_chain_slots = 0;
@@ -2541,10 +2594,13 @@ iree_status_t iree_hal_amdxdna_native_device_alloc_buffer(
 iree_status_t iree_hal_amdxdna_native_device_create_context(
     iree_hal_amdxdna_native_device_t* device,
     const iree_hal_amdxdna_native_c_context_image_t* image,
+    bool* out_context_pool_exhausted,
     iree_hal_amdxdna_native_context_t** out_context) {
   IREE_ASSERT_ARGUMENT(device);
   IREE_ASSERT_ARGUMENT(image);
+  IREE_ASSERT_ARGUMENT(out_context_pool_exhausted);
   IREE_ASSERT_ARGUMENT(out_context);
+  *out_context_pool_exhausted = false;
   *out_context = nullptr;
   if (IREE_UNLIKELY(image->type !=
                     IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_TYPE_XCLBIN)) {
@@ -2592,6 +2648,8 @@ iree_status_t iree_hal_amdxdna_native_device_create_context(
   mcdm::Context context = {};
   if (!mcdm::CreateContext(device->api, device->device, private_data.data,
                            private_data.data_length, &context, &error)) {
+    *out_context_pool_exhausted =
+        mcdm_error_is_context_pool_exhausted(error);
     release_context_private_data();
     return status_from_mcdm_error(
         "amdxdna Windows MCDM context creation failed", error);
@@ -4476,7 +4534,9 @@ extern "C" iree_device_size_t iree_hal_amdxdna_native_buffer_c_size(
 extern "C" iree_status_t iree_hal_amdxdna_native_device_c_create_context_ref(
     iree_hal_amdxdna_native_device_t* device,
     const iree_hal_amdxdna_native_c_context_image_t* image,
+    bool* out_context_pool_exhausted,
     iree_hal_amdxdna_native_context_ref_t** out_context_ref) {
+  *out_context_pool_exhausted = false;
   *out_context_ref = nullptr;
   iree_hal_amdxdna_native_c_context_image_t native_image;
   IREE_RETURN_IF_ERROR(
@@ -4486,7 +4546,7 @@ extern "C" iree_status_t iree_hal_amdxdna_native_device_c_create_context_ref(
   native_image.kernel_name = image->kernel_name;
   iree_hal_amdxdna_native_context_t* raw_context = nullptr;
   IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_device_create_context(
-      device, &native_image, &raw_context));
+      device, &native_image, out_context_pool_exhausted, &raw_context));
   iree_hal_amdxdna_native_context_ref_t* context_ref = nullptr;
   iree_status_t status =
       iree_allocator_malloc(device->host_allocator, sizeof(*context_ref),

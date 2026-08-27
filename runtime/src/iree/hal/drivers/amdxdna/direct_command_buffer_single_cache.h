@@ -40,9 +40,18 @@ typedef struct iree_hal_amdxdna_single_command_cache_entry_t {
   iree_hal_amdxdna_native_command_t* command;
   // Static descriptor identity for late-bound START_NPU template reuse. The
   // cached command owns the mutable control-code BO/native command, while these
-  // fields identify which immutable executable-owned run template it came from.
+  // fields identify which run template it came from. They point into the owned
+  // clones below (never at executable memory) so a match compares by content and
+  // stays valid after the recording executable is destroyed.
   const iree_hal_amdxdna_u32_list_t* src_asm_inst;
   const iree_hal_amdxdna_u32_list_t* src_patches;
+  // Owned clones of the executable's template lists. The device cache outlives
+  // the executable (and one-shot command buffer) that recorded it, so it must
+  // not key reuse on the executable-owned pointers: those get freed and can be
+  // reallocated at the same address (ABA), which would let a different
+  // same-shaped kernel falsely reuse this command's on-device control code.
+  iree_hal_amdxdna_u32_list_t owned_src_asm_inst;
+  iree_hal_amdxdna_u32_list_t owned_src_patches;
   iree_host_size_t src_constant_count;
   bool src_use_native_partial_elf;
   uint64_t last_use;
@@ -106,7 +115,13 @@ iree_hal_amdxdna_store_single_command_cache_entry(
     iree_hal_amdxdna_native_buffer_t* ctrl_code_buffer,
     iree_hal_amdxdna_native_command_t* command);
 
+// Records the descriptor template that produced this cached command, cloning the
+// executable-owned |asm_inst|/|patches| lists into cache-owned storage so later
+// reuse is matched by content rather than by (potentially dangling) pointer
+// identity. Cloning is best-effort: on allocation failure the owned lists are
+// left empty and the entry simply never produces a template-cache hit.
 void iree_hal_amdxdna_single_command_cache_entry_set_descriptor_template(
+    iree_hal_amdxdna_device_single_command_cache_t* cache,
     iree_hal_amdxdna_single_command_cache_entry_t* entry,
     const iree_hal_amdxdna_u32_list_t* asm_inst,
     const iree_hal_amdxdna_u32_list_t* patches, iree_host_size_t constant_count,

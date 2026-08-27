@@ -351,20 +351,28 @@ const pdev& device::get_pdev() const { return m_pdev; }
 int device::create_hw_context(const std::vector<uint8_t>& pdi,
                               const std::string& cu_name,
                               const std::map<std::string, uint32_t>& qos,
+                              bool* out_context_pool_exhausted,
                               std::unique_ptr<hw_ctx>* out_context) {
+  *out_context_pool_exhausted = false;
   out_context->reset();
   std::unique_ptr<hw_ctx> new_context =
       std::make_unique<hw_ctx>(*this, pdi, cu_name, n_rows, n_cols, qos);
   int err = new_context->init_errno();
-  if (err) return err;
+  if (err) {
+    const int create_err = new_context->context_create_errno();
+    *out_context_pool_exhausted = create_err == ENOENT || create_err == ENOSPC;
+    return err;
+  }
   *out_context = std::move(new_context);
   return 0;
 }
 
 int device::create_hw_context(const std::vector<uint8_t>& pdi,
                               const std::string& cu_name,
+                              bool* out_context_pool_exhausted,
                               std::unique_ptr<hw_ctx>* out_context) {
-  return create_hw_context(pdi, cu_name, {}, out_context);
+  return create_hw_context(pdi, cu_name, {}, out_context_pool_exhausted,
+                           out_context);
 }
 
 int device::alloc_bo(uint32_t ctx_id, size_t size, shim_amdxdna_bo_flags flags,

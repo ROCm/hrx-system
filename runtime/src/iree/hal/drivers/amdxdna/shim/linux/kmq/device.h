@@ -79,9 +79,11 @@ struct device {
   int create_hw_context(const std::vector<uint8_t>& pdi,
                         const std::string& cu_name,
                         const std::map<std::string, uint32_t>& qos,
+                        bool* out_context_pool_exhausted,
                         std::unique_ptr<hw_ctx>* out_context);
   int create_hw_context(const std::vector<uint8_t>& pdi,
                         const std::string& cu_name,
+                        bool* out_context_pool_exhausted,
                         std::unique_ptr<hw_ctx>* out_context);
 
   int read_aie_mem(uint16_t col, uint16_t row, uint32_t offset, uint32_t size,

@@ -6,7 +6,10 @@
 
 #include "kmt_api.h"
 
+#include <cfgmgr32.h>
+#include <initguid.h>
 #include <intrin.h>
+#include <setupapi.h>
 
 #include <algorithm>
 #include <array>
@@ -22,6 +25,10 @@
 
 namespace iree::hal::amdxdna::mcdm {
 namespace {
+
+// {99709210-1CC7-4F11-A7A4-5A065B4D5F0E}
+DEFINE_GUID(GUID_DEVCLASS_COMPUTEACCELERATOR, 0x99709210, 0x1cc7, 0x4f11,
+            0xa7, 0xa4, 0x5a, 0x06, 0x5b, 0x4d, 0x5f, 0x0e);
 
 constexpr NTSTATUS kStatusPending = static_cast<NTSTATUS>(0x00000103);
 constexpr NTSTATUS kStatusBufferTooSmall =
@@ -62,12 +69,16 @@ Fn ResolveKmtProc(const char* name) {
 
 void SetError(Error* out_error, const char* message) {
   if (!out_error) return;
+  out_error->has_nt_status = false;
+  out_error->nt_status = 0;
   std::snprintf(out_error->message, sizeof(out_error->message), "%s",
                 message ? message : "unknown MCDM error");
 }
 
 void SetErrorFormat(Error* out_error, const char* fmt, ...) {
   if (!out_error) return;
+  out_error->has_nt_status = false;
+  out_error->nt_status = 0;
   va_list args;
   va_start(args, fmt);
   std::vsnprintf(out_error->message, sizeof(out_error->message), fmt, args);
@@ -182,6 +193,10 @@ bool CheckStatus(const char* call_name, NTSTATUS status, Error* out_error) {
   if (status == 0) return true;
   SetErrorFormat(out_error, "%s failed with 0x%08x%s", call_name,
                  static_cast<uint32_t>(status), NtStatusSuffix(status));
+  if (out_error) {
+    out_error->has_nt_status = true;
+    out_error->nt_status = status;
+  }
   return false;
 }
 
@@ -435,6 +450,112 @@ bool AppendRetainedAdapterHandle(Adapter* adapter, D3DKMT_HANDLE handle,
   return true;
 }
 
+bool ParsePciInstanceId(const wchar_t* instance_id, uint32_t* out_vendor_id,
+                        uint32_t* out_device_id, uint32_t* out_revision_id) {
+  if (!instance_id || !out_vendor_id || !out_device_id || !out_revision_id) {
+    return false;
+  }
+  const wchar_t* ven = wcsstr(instance_id, L"VEN_");
+  const wchar_t* dev = wcsstr(instance_id, L"DEV_");
+  if (!ven || !dev) return false;
+  unsigned vendor_id = 0;
+  unsigned device_id = 0;
+  unsigned revision_id = 0;
+  if (swscanf(ven + 4, L"%x", &vendor_id) != 1) return false;
+  if (swscanf(dev + 4, L"%x", &device_id) != 1) return false;
+  const wchar_t* rev = wcsstr(instance_id, L"REV_");
+  if (rev) {
+    swscanf(rev + 4, L"%x", &revision_id);
+  }
+  *out_vendor_id = static_cast<uint32_t>(vendor_id);
+  *out_device_id = static_cast<uint32_t>(device_id);
+  *out_revision_id = static_cast<uint32_t>(revision_id);
+  return true;
+}
+
+bool DeviceUsesIpuMcdmDriver(const wchar_t* instance_id) {
+  if (!instance_id) return false;
+  DEVINST dev_inst = 0;
+  if (CM_Locate_DevNodeW(&dev_inst, const_cast<DEVINSTID_W>(instance_id),
+                         CM_LOCATE_DEVNODE_NORMAL) != CR_SUCCESS) {
+    return false;
+  }
+  wchar_t service[256] = {};
+  ULONG service_size = sizeof(service);
+  if (CM_Get_DevNode_Registry_PropertyW(
+          dev_inst, CM_DRP_SERVICE, NULL, service, &service_size, 0) !=
+      CR_SUCCESS) {
+    return false;
+  }
+  return _wcsicmp(service, L"IpuMcdmDriver") == 0;
+}
+
+bool QueryNpuPciIdsFromPnPImpl(uint32_t* out_vendor_id, uint32_t* out_device_id,
+                               uint32_t* out_revision_id) {
+  if (!out_vendor_id || !out_device_id || !out_revision_id) return false;
+  HDEVINFO device_info = SetupDiGetClassDevsW(
+      &GUID_DEVCLASS_COMPUTEACCELERATOR, NULL, NULL, DIGCF_PRESENT);
+  if (device_info == INVALID_HANDLE_VALUE) return false;
+
+  SP_DEVINFO_DATA device_data = {};
+  device_data.cbSize = sizeof(device_data);
+  for (DWORD index = 0; SetupDiEnumDeviceInfo(device_info, index, &device_data);
+       ++index) {
+    wchar_t instance_id[512] = {};
+    if (!SetupDiGetDeviceInstanceIdW(device_info, &device_data, instance_id,
+                                     sizeof(instance_id) / sizeof(wchar_t),
+                                     NULL)) {
+      continue;
+    }
+    if (wcsncmp(instance_id, L"PCI\\VEN_1022", 12) != 0) continue;
+    if (!DeviceUsesIpuMcdmDriver(instance_id)) continue;
+    if (!ParsePciInstanceId(instance_id, out_vendor_id, out_device_id,
+                            out_revision_id)) {
+      continue;
+    }
+    SetupDiDestroyDeviceInfoList(device_info);
+    return true;
+  }
+
+  SetupDiDestroyDeviceInfoList(device_info);
+  return false;
+}
+
+bool QueryAdapterPciIds(const KmtApi& api, D3DKMT_HANDLE adapter,
+                        Adapter* out_adapter) {
+  if (!adapter || !out_adapter) return false;
+  if (api.query_adapter_info) {
+    D3DKMT_QUERY_DEVICE_IDS device_ids = {};
+    device_ids.PhysicalAdapterIndex = 0;
+    D3DKMT_QUERYADAPTERINFO query = {};
+    query.hAdapter = adapter;
+    query.Type = KMTQAITYPE_PHYSICALADAPTERDEVICEIDS;
+    query.pPrivateDriverData = &device_ids;
+    query.PrivateDriverDataSize = sizeof(device_ids);
+    if (api.query_adapter_info(&query) == 0 &&
+        (device_ids.DeviceIds.VendorID != 0 ||
+         device_ids.DeviceIds.DeviceID != 0)) {
+      out_adapter->has_pci_ids = true;
+      out_adapter->pci_vendor_id = device_ids.DeviceIds.VendorID;
+      out_adapter->pci_device_id = device_ids.DeviceIds.DeviceID;
+      out_adapter->pci_revision_id = device_ids.DeviceIds.RevisionID;
+      return true;
+    }
+  }
+
+  uint32_t vendor_id = 0;
+  uint32_t device_id = 0;
+  uint32_t revision_id = 0;
+  if (!QueryNpuPciIdsFromPnPImpl(&vendor_id, &device_id, &revision_id)) {
+    return false;
+  }
+  out_adapter->has_pci_ids = true;
+  out_adapter->pci_vendor_id = vendor_id;
+  out_adapter->pci_device_id = device_id;
+  out_adapter->pci_revision_id = revision_id;
+  return true;
+}
+
 bool SelectNpuAdapterFromOpenHandles(const KmtApi& api,
                                      const D3DKMT_ADAPTERINFO* adapters,
                                      UINT adapter_count, Adapter* out_adapter,
@@ -475,6 +596,7 @@ bool SelectNpuAdapterFromOpenHandles(const KmtApi& api,
   Adapter selected =
       exact.handle ? exact : (fallback.handle ? fallback : loose);
   if (!selected.handle) return false;
+  QueryAdapterPciIds(api, selected.handle, &selected);
   *out_adapter = selected;
   return true;
 }
@@ -793,6 +915,12 @@ void RecordAdapterInfo(McdmAbiDiagnostics* diagnostics, uint32_t kmd_version,
 }
 
 }  // namespace
+
+bool QueryNpuPciIdsFromPnP(uint32_t* out_vendor_id, uint32_t* out_device_id,
+                           uint32_t* out_revision_id) {
+  return QueryNpuPciIdsFromPnPImpl(out_vendor_id, out_device_id,
+                                   out_revision_id);
+}
 
 const char* HardwareTypeName(uint32_t hw_type) {
   switch (static_cast<HardwareType>(hw_type)) {
@@ -1266,6 +1394,19 @@ bool CreateDevice(const KmtApi& api, const Adapter& adapter, Device* out_device,
   device.retained_adapter_handle_count = adapter.retained_handle_count;
   std::memcpy(device.retained_adapter_handles, adapter.retained_handles,
               adapter.retained_handle_count * sizeof(D3DKMT_HANDLE));
+  device.has_pci_ids = adapter.has_pci_ids;
+  device.pci_vendor_id = adapter.pci_vendor_id;
+  device.pci_device_id = adapter.pci_device_id;
+  device.pci_revision_id = adapter.pci_revision_id;
+  if (!device.has_pci_ids) {
+    Adapter pci_adapter = adapter;
+    if (QueryAdapterPciIds(api, adapter.handle, &pci_adapter)) {
+      device.has_pci_ids = pci_adapter.has_pci_ids;
+      device.pci_vendor_id = pci_adapter.pci_vendor_id;
+      device.pci_device_id = pci_adapter.pci_device_id;
+      device.pci_revision_id = pci_adapter.pci_revision_id;
+    }
+  }
 
   D3DKMT_CREATEDEVICE create_device = {};
   create_device.hAdapter = adapter.handle;

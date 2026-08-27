@@ -77,9 +77,11 @@ iree_status_t iree_hal_amdxdna_executable_preload_contexts(
 
     iree_hal_amdxdna_native_context_ref_t* context_ref = NULL;
     iree_status_t status = iree_hal_amdxdna_device_get_or_create_context(
-        device, iree_make_const_byte_span(params->pdi.data, params->pdi.count),
+        device,
+        iree_make_const_byte_span(params->pdi.data, params->pdi.count),
         iree_make_const_byte_span(params->xclbin.data, params->xclbin.count),
-        params->kernel_name, &context_ref);
+        params->kernel_name, params->asm_inst_runlist,
+        params->asm_inst_runlist_count, &context_ref);
     iree_hal_amdxdna_native_c_cu_index_t cu_idx;
     memset(&cu_idx, 0, sizeof(cu_idx));
     if (iree_status_is_ok(status)) {

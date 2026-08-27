@@ -202,6 +202,18 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "context_cache_test",
+    srcs = ["context_cache_test.cc"],
+    tags = _AMDXDNA_UNIT_TEST_TAGS,
+    target_compatible_with = _AMDXDNA_COMPATIBLE_WITH,
+    deps = [
+        ":amdxdna",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "direct_command_buffer_planning_test",
     srcs = ["direct_command_buffer_planning_test.cc"],
     tags = _AMDXDNA_UNIT_TEST_TAGS,
@@ -371,6 +383,18 @@ iree_runtime_cc_test(
         "//runtime/src/iree/base/internal/flatcc:building",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/schemas:pdi_executable_def_c_fbs",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "context_cache_capacity_test",
+    srcs = ["context_cache_capacity_test.cc"],
+    tags = _AMDXDNA_UNIT_TEST_TAGS,
+    target_compatible_with = _AMDXDNA_COMPATIBLE_WITH,
+    deps = [
+        ":amdxdna",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

@@ -67,6 +67,7 @@ struct hw_ctx {
   uint32_t m_doorbell;
   uint32_t m_syncobj;
   int m_init_errno = 0;
+  int m_context_create_errno = 0;
   std::unique_ptr<bo> m_log_bo;
   void* m_log_buf;
   std::vector<std::unique_ptr<bo>> m_pdi_bos;
@@ -83,6 +84,7 @@ struct hw_ctx {
   hw_ctx& operator=(const hw_ctx&) = delete;
 
   int init_errno() const;
+  int context_create_errno() const;
   int alloc_bo(size_t size, shim_amdxdna_bo_flags flags,
                std::unique_ptr<bo>* out_bo);
 

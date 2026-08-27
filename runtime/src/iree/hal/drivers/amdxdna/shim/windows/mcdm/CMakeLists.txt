@@ -56,3 +56,8 @@ iree_cc_test(
 endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND IREE_HAL_DRIVER_AMDXDNA)
+  target_link_libraries(iree_hal_drivers_amdxdna_shim_windows_mcdm_kmt_api
+                        PRIVATE setupapi cfgmgr32)
+endif()

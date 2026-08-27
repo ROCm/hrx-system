@@ -74,6 +74,8 @@ static_assert(sizeof(CompactPathBChainHandleV1) ==
 
 struct Error {
   char message[512] = {};
+  bool has_nt_status = false;
+  NTSTATUS nt_status = 0;
 };
 
 const char* ErrorMessage(const Error* error);
@@ -236,12 +238,20 @@ bool QueryProbedMcdmAbi(const KmtApi& api, D3DKMT_HANDLE adapter,
 bool QueryMcdmAbiDiagnostics(const KmtApi& api, D3DKMT_HANDLE adapter,
                              McdmAbiDiagnostics* out_diagnostics,
                              Error* out_error);
+// Resolves AMD NPU PCI IDs from the present IpuMcdmDriver ComputeAccelerator
+// device when KMTQAITYPE_PHYSICALADAPTERDEVICEIDS is unavailable.
+bool QueryNpuPciIdsFromPnP(uint32_t* out_vendor_id, uint32_t* out_device_id,
+                           uint32_t* out_revision_id);
 
 struct Adapter {
   D3DKMT_HANDLE handle = 0;
   LUID luid = {};
   D3DKMT_HANDLE retained_handles[kMaxComputeAdapterHandles] = {};
   size_t retained_handle_count = 0;
+  bool has_pci_ids = false;
+  uint32_t pci_vendor_id = 0;
+  uint32_t pci_device_id = 0;
+  uint32_t pci_revision_id = 0;
 };
 
 struct Device {
@@ -259,6 +269,10 @@ struct Device {
   McdmAbiDiagnostics mcdm_abi_diagnostics = {};
   DriverVersion driver_version = {};
   bool has_driver_version = false;
+  bool has_pci_ids = false;
+  uint32_t pci_vendor_id = 0;
+  uint32_t pci_device_id = 0;
+  uint32_t pci_revision_id = 0;
 };
 
 struct Buffer {

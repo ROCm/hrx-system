@@ -92,7 +92,8 @@ typedef enum iree_hal_amdxdna_native_c_command_chain_status_t {
   IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_ENABLED_BY_DEFAULT = 1,
   IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_KNOWN_BAD_STACK = 4,
   IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_OLD_FIRMWARE = 5,
-  IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_UNIDENTIFIED_STACK = 6,
+  IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_CHAIN_STATUS_DISABLED_UNIDENTIFIED_STACK =
+      6,
 } iree_hal_amdxdna_native_c_command_chain_status_t;
 
 typedef struct iree_hal_amdxdna_native_c_driver_stack_t {
@@ -115,6 +116,13 @@ typedef struct iree_hal_amdxdna_native_c_device_caps_t {
   // Maximum number of native child commands that the device-level chain cache
   // may retain. Zero selects the common conservative default.
   uint32_t max_cached_chain_child_commands;
+  // Concurrent hardware-context budget for this NPU, i.e. how many native
+  // hardware contexts may be kept alive at once before the driver refuses to
+  // create more. The amdxdna KMD exposes no query for this ceiling, so backends
+  // derive it from the device architecture (see
+  // iree_hal_amdxdna_hardware_context_budget_for_arch). 0 means "unknown"; the
+  // context cache then falls back to a conservative default.
+  uint32_t max_hardware_contexts;
   uint32_t context_image_models;
   uint32_t dispatch_models;
   uint32_t completion_models;
@@ -135,6 +143,51 @@ typedef struct iree_hal_amdxdna_native_c_device_caps_t {
   iree_hal_amdxdna_native_c_command_chain_status_t command_chain_status;
   iree_hal_amdxdna_native_c_driver_stack_t driver_stack;
 } iree_hal_amdxdna_native_c_device_caps_t;
+
+// Maps an NPU architecture name (e.g. "Phoenix", "Strix", "Strix Halo",
+// "Krackan") to a soft concurrent hardware-context budget: how many native
+// contexts the cache aims to keep alive. The KMD exposes no query for the true
+// ceiling, which also varies with the part and its array partitioning, so this
+// is a target, not a hard limit -- the context cache evicts and retries on
+// creation failure to back off to whatever the driver accepts. The budget is
+// architecture-keyed (identical on Linux and Windows for a given part). Returns
+// 0 for an unknown architecture, signaling the caller to use a default.
+static inline uint32_t iree_hal_amdxdna_hardware_context_budget_for_arch(
+    iree_string_view_t arch) {
+  // Phoenix (npu1).
+  if (iree_string_view_starts_with(arch, IREE_SV("Phoenix"))) {
+    return 6;
+  }
+  // Strix / Strix Halo / Krackan (npu2 family).
+  if (iree_string_view_starts_with(arch, IREE_SV("Strix")) ||
+      iree_string_view_starts_with(arch, IREE_SV("Krackan"))) {
+    return 32;
+  }
+  return 0;  // unknown architecture -> caller falls back to a default
+}
+
+// Maps AMD PCI IDs to the same architecture names Linux derives from sysfs.
+// revision_id is reserved for future disambiguation; device_id is sufficient
+// today for Phoenix (0x1502) vs Strix/Krackan-family (0x17f0) parts.
+static inline iree_string_view_t iree_hal_amdxdna_npu_arch_for_pci(
+    uint32_t vendor_id, uint32_t device_id, uint32_t revision_id) {
+  (void)revision_id;
+  if (vendor_id != 0x1022u) return iree_string_view_empty();
+  switch (device_id) {
+    case 0x1502u:
+      return IREE_SV("Phoenix");
+    case 0x17f0u:
+      return IREE_SV("Strix");
+    default:
+      return iree_string_view_empty();
+  }
+}
+
+static inline uint32_t iree_hal_amdxdna_hardware_context_budget_for_pci(
+    uint32_t vendor_id, uint32_t device_id, uint32_t revision_id) {
+  return iree_hal_amdxdna_hardware_context_budget_for_arch(
+      iree_hal_amdxdna_npu_arch_for_pci(vendor_id, device_id, revision_id));
+}
 
 typedef struct iree_hal_amdxdna_native_c_context_image_t {
   iree_hal_amdxdna_native_c_context_image_type_t type;
@@ -199,6 +252,7 @@ iree_device_size_t iree_hal_amdxdna_native_buffer_c_size(
 iree_status_t iree_hal_amdxdna_native_device_c_create_context_ref(
     iree_hal_amdxdna_native_device_t* device,
     const iree_hal_amdxdna_native_c_context_image_t* image,
+    bool* out_context_pool_exhausted,
     iree_hal_amdxdna_native_context_ref_t** out_context_ref);
 
 iree_hal_amdxdna_native_context_ref_t*

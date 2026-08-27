@@ -33,6 +33,8 @@ void FreeSignature(iree_hal_amdxdna_device_single_command_cache_t* cache,
   iree_allocator_free(cache->host_allocator, entry->binding_device_addrs);
   iree_allocator_free(cache->host_allocator, entry->binding_offsets);
   iree_allocator_free(cache->host_allocator, entry->binding_lengths);
+  iree_allocator_free(cache->host_allocator, entry->owned_src_asm_inst.data);
+  iree_allocator_free(cache->host_allocator, entry->owned_src_patches.data);
   *entry = {};
 }
 
@@ -113,7 +115,7 @@ TEST(SingleCommandCacheTest, DescriptorTemplateHitIgnoresDynamicBindings) {
       FakeBuffer(0x350), FakeCommand(0x450));
   ASSERT_NE(stored, nullptr);
   iree_hal_amdxdna_single_command_cache_entry_set_descriptor_template(
-      stored, &asm_inst, &patches, /*constant_count=*/16,
+      &cache, stored, &asm_inst, &patches, /*constant_count=*/16,
       /*use_native_partial_elf=*/false, /*ctrl_code_mapped_ptr=*/nullptr);
 
   iree_hal_amdxdna_single_command_cache_entry_t* found = nullptr;
@@ -160,7 +162,7 @@ TEST(SingleCommandCacheTest, DescriptorTemplateMissesDifferentBindingCount) {
       FakeBuffer(0x351), FakeCommand(0x451));
   ASSERT_NE(stored, nullptr);
   iree_hal_amdxdna_single_command_cache_entry_set_descriptor_template(
-      stored, &asm_inst, &patches, /*constant_count=*/16,
+      &cache, stored, &asm_inst, &patches, /*constant_count=*/16,
       /*use_native_partial_elf=*/false, /*ctrl_code_mapped_ptr=*/nullptr);
 
   iree_hal_amdxdna_single_command_cache_entry_t* found = nullptr;
@@ -185,7 +187,8 @@ TEST(SingleCommandCacheTest, DescriptorTemplateMissesDifferentTemplate) {
   const iree_device_size_t binding_lengths[] = {2048};
   iree_hal_amdxdna_u32_list_t asm_inst = {ctrl_words,
                                           IREE_ARRAYSIZE(ctrl_words)};
-  uint32_t other_ctrl_words[] = {12, 13};
+  // Same shape/count as the stored template but different content: must miss.
+  uint32_t other_ctrl_words[] = {12, 99};
   iree_hal_amdxdna_u32_list_t other_asm_inst = {
       other_ctrl_words, IREE_ARRAYSIZE(other_ctrl_words)};
   uint32_t patch_words[] = {0, 0, 0};
@@ -199,7 +202,7 @@ TEST(SingleCommandCacheTest, DescriptorTemplateMissesDifferentTemplate) {
       FakeBuffer(0x360), FakeCommand(0x460));
   ASSERT_NE(stored, nullptr);
   iree_hal_amdxdna_single_command_cache_entry_set_descriptor_template(
-      stored, &asm_inst, &patches, /*constant_count=*/0,
+      &cache, stored, &asm_inst, &patches, /*constant_count=*/0,
       /*use_native_partial_elf=*/false, /*ctrl_code_mapped_ptr=*/nullptr);
 
   iree_hal_amdxdna_single_command_cache_entry_t* found = nullptr;
@@ -211,6 +214,73 @@ TEST(SingleCommandCacheTest, DescriptorTemplateMissesDifferentTemplate) {
   EXPECT_EQ(found, nullptr);
 
   FreeSignature(&cache, stored);
+}
+
+// Regression test for the ABA collision: a cached descriptor template must be
+// matched by content, never by the executable-owned pointer identity. A freed
+// template's storage can be reallocated at the *same* address for a different
+// same-shaped kernel (different content) -> that must MISS. Conversely an
+// identical template presented through a *different* pointer must still HIT.
+TEST(SingleCommandCacheTest, DescriptorTemplateMatchesByContentNotPointer) {
+  iree_hal_amdxdna_device_single_command_cache_t cache = {};
+  cache.host_allocator = TestAllocator();
+  iree_slim_mutex_initialize(&cache.mutex);
+  iree_hal_amdxdna_native_buffer_t* binding_buffers[] = {FakeBuffer(0x160)};
+  const uint64_t binding_device_addrs[] = {0x86000000};
+  const iree_device_size_t binding_offsets[] = {0};
+  const iree_device_size_t binding_lengths[] = {4096};
+
+  // Original template (e.g. the "PRED" gemm) recorded into the cache.
+  uint32_t pred_words[] = {100, 101, 102, 103};
+  iree_hal_amdxdna_u32_list_t pred_asm = {pred_words,
+                                          IREE_ARRAYSIZE(pred_words)};
+  uint32_t patch_words[] = {0, 0};
+  iree_hal_amdxdna_u32_list_t patches = {patch_words,
+                                         IREE_ARRAYSIZE(patch_words)};
+
+  auto* stored = iree_hal_amdxdna_store_single_command_cache_entry(
+      &cache, FakeQueue(0x270), /*cu_index=*/5, pred_words,
+      IREE_ARRAYSIZE(pred_words), binding_buffers, binding_device_addrs,
+      binding_offsets, binding_lengths, IREE_ARRAYSIZE(binding_buffers),
+      FakeBuffer(0x370), FakeCommand(0x470));
+  ASSERT_NE(stored, nullptr);
+  iree_hal_amdxdna_single_command_cache_entry_set_descriptor_template(
+      &cache, stored, &pred_asm, &patches, /*constant_count=*/0,
+      /*use_native_partial_elf=*/false, /*ctrl_code_mapped_ptr=*/nullptr);
+
+  // The cache must clone the template, so overwriting the caller's original
+  // storage (simulating the executable being freed) must not affect matching.
+  for (uint32_t& w : pred_words) w = 0xDEADBEEF;
+
+  // ABA: a *different* kernel ("FAIL") whose same-shaped template happens to be
+  // reallocated at an address indistinguishable from pointer identity. Emulate
+  // the worst case by reusing the very same list struct/backing array the cache
+  // recorded from, but with different content. This MUST miss.
+  uint32_t fail_words[] = {200, 201, 202, 203};
+  iree_hal_amdxdna_u32_list_t fail_asm = {fail_words,
+                                          IREE_ARRAYSIZE(fail_words)};
+  iree_hal_amdxdna_single_command_cache_entry_t* found = stored;
+  IREE_CHECK_OK(
+      iree_hal_amdxdna_find_single_command_cache_descriptor_template_entry(
+          &cache, FakeQueue(0x270), /*cu_index=*/5, &fail_asm, &patches,
+          /*constant_count=*/0, /*use_native_partial_elf=*/false,
+          IREE_ARRAYSIZE(binding_buffers), &found));
+  EXPECT_EQ(found, nullptr) << "different content must not reuse cached command";
+
+  // An identical template presented through a brand-new pointer must still hit.
+  uint32_t pred_words_copy[] = {100, 101, 102, 103};
+  iree_hal_amdxdna_u32_list_t pred_asm_copy = {pred_words_copy,
+                                               IREE_ARRAYSIZE(pred_words_copy)};
+  found = nullptr;
+  IREE_CHECK_OK(
+      iree_hal_amdxdna_find_single_command_cache_descriptor_template_entry(
+          &cache, FakeQueue(0x270), /*cu_index=*/5, &pred_asm_copy, &patches,
+          /*constant_count=*/0, /*use_native_partial_elf=*/false,
+          IREE_ARRAYSIZE(binding_buffers), &found));
+  EXPECT_EQ(found, stored) << "identical content must reuse cached command";
+
+  FreeSignature(&cache, stored);
+  iree_slim_mutex_deinitialize(&cache.mutex);
 }
 
 TEST(SingleCommandCacheTest, InFlightEntryIsNotMatchedUntilReleased) {

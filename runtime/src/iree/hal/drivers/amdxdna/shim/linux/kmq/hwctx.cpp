@@ -58,7 +58,8 @@ hw_ctx::hw_ctx(device& device, const std::vector<uint8_t>& pdi,
                const std::map<std::string, uint32_t>& qos)
     : hw_ctx(device, qos, std::make_unique<hw_q>(device), pdi, cu_name, n_rows,
              n_cols) {
-  m_init_errno = create_ctx_on_device();
+  m_context_create_errno = create_ctx_on_device();
+  m_init_errno = m_context_create_errno;
   if (m_init_errno) return;
   std::vector<char> cu_conf_param_buf(sizeof(amdxdna_hwctx_param_config_cu) +
                                       m_cu_info.size() *
@@ -116,6 +117,8 @@ hw_ctx::~hw_ctx() {
 }
 
 int hw_ctx::init_errno() const { return m_init_errno; }
+
+int hw_ctx::context_create_errno() const { return m_context_create_errno; }
 
 int hw_ctx::open_cu_context(const std::string& cu_name, cuidx_t* out_cu_idx) {
   for (uint32_t i = 0; i < m_cu_info.size(); i++) {

@@ -45,8 +45,8 @@ static void iree_hal_amdxdna_device_initialize(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   memset(device, 0, sizeof(*device));
-  device->context_cache =
-      iree_hal_amdxdna_device_context_cache_create(host_allocator);
+  // The context cache is created later, once device caps (and thus the
+  // hardware-context budget) are known; see the caps query in device_create.
   iree_slim_mutex_initialize(&device->command_cache_mutex);
   iree_atomic_store(&device->chain_max_slots, 0, iree_memory_order_relaxed);
   iree_atomic_store(&device->queue_epoch, 0, iree_memory_order_relaxed);
@@ -1779,6 +1779,17 @@ iree_status_t iree_hal_amdxdna_device_create(
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdxdna_native_device_c_query_caps(device->native_device,
                                                          &device->native_caps);
+  }
+  if (iree_status_is_ok(status)) {
+    // Now that caps are known, size the context cache to the device's
+    // hardware-context budget (adaptive per architecture; falls back to a
+    // conservative default when the budget is unknown).
+    device->context_cache = iree_hal_amdxdna_device_context_cache_create(
+        device->host_allocator, device->native_caps.max_hardware_contexts);
+    if (!device->context_cache) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "failed to allocate amdxdna context cache");
+    }
   }
   if (iree_status_is_ok(status) && should_set_power_mode) {
     status = iree_hal_amdxdna_native_device_c_set_power_mode(
