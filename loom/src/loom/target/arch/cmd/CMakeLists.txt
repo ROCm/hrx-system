@@ -75,6 +75,7 @@ loom_check_test_suite(
     "test/roundtrip.loom-test"
     "test/scheduling.loom-test"
     "test/storage.loom-test"
+    "test/template_composition.loom-test"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

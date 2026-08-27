@@ -85,5 +85,6 @@ loom_check_test_suite(
         "test/roundtrip.loom-test",
         "test/scheduling.loom-test",
         "test/storage.loom-test",
+        "test/template_composition.loom-test",
     ],
 )
