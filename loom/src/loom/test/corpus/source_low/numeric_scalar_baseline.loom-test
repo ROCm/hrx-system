@@ -27,3 +27,12 @@ func.def @index_divide_remainder(%lhs: index, %rhs: index) -> (index, index) whe
   %remainder = index.rem %lhs, %rhs : index
   func.return %quotient, %remainder : index, index
 }
+
+// ====
+
+func.def @index_shifts(%value: index, %amount: index) -> (index, index, index) {
+  %left = index.shli %value, %amount : index
+  %signed_right = index.shrsi %value, %amount : index
+  %unsigned_right = index.shrui %value, %amount : index
+  func.return %left, %signed_right, %unsigned_right : index, index, index
+}
