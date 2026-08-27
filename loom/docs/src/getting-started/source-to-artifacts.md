@@ -169,7 +169,7 @@ binding stage.
 | Value category | Binding stage | Role |
 | --- | --- | --- |
 | Configuration values | Link or compile time | Resolve [`config.decl`](../reference/dialects/config/ops/decl.md) through a matching definition and seed facts used by specialization. |
-| Target facts | Compile invocation | Describe capabilities such as subgroup size, supported types, and resource limits for the selected executable root. |
+| Target facts | Link or compile product boundary | Describe capabilities such as subgroup size, supported types, and resource limits for the selected executable root. |
 | Kernel workload values | Launch-configuration evaluation | Compute the physical launch for one workload without pretending the values were compile-time constants. |
 | Kernel launch arguments | Device issue | Carry scalars and buffers through the selected target ABI into the kernel body. |
 | Command specialization arguments | Command-program specialization | Shape source control flow and launch computation; direct counts and scalar command data must become exact before portable preparation. |
@@ -256,12 +256,12 @@ can be launched with other counts by other roots:
 --8<-- "examples/elementwise-transform/model.loom"
 ```
 
-!!! info "Current command-program surface"
+!!! info "Command deployment products"
 
-    Command-program source, preparation, target-neutral lowering, and immutable
-    artifact infrastructure are present. A general installed-tool
-    materialization path is not yet a published user surface, so the guide does
-    not present an executable command-program tutorial yet.
+    `loom-compile --backend=command` materializes each selected command root as
+    a portable `.loomcmd` and writes the shared executable-entry manifest. The
+    target-specific kernel executable remains a separate artifact so an
+    embedding can cache, replace, or prebuild it independently.
 
 The generated [`command` dialect
 reference](../reference/dialects/command/index.md) documents the source
@@ -270,22 +270,24 @@ constructs that exist today.
 ## Follow one composition to Low
 
 The three source listings above are repository `.loom` files, not prose copies.
-With the Loom tools on `PATH`, this command formats them, merges the explicit
-program and provider universe, then specializes and compiles the kernel for the
-generic GFX11 profile. It prints every Loom command it runs:
+With the Loom tools on `PATH`, this command formats them, links the selected
+program against the explicit provider universe, specializes that closure for
+the generic GFX11 profile, and emits both kernel and command products. It
+prints every Loom command it runs:
 
 ```shell
 loom/docs/examples/elementwise-transform/run.sh \
   gfx11-generic build/elementwise-transform/gfx11-generic
 ```
 
-The resulting directory contains the linkable `elementwise-transform.loom`
-module, a VMFB, an HSACO, and the captured target Low IR. Merge mode matters
-here because target facts arrive at the following `loom-compile` boundary: a
-closed targetless link would correctly choose the portable fallback
-and discard the wave32 alternative before those facts exist. The documentation
-build invokes the same script and regenerates the views below; neither output
-is checked-in source.
+The resulting directory contains the closed target-specialized
+`elementwise-transform.loom` module, the GFX11 HSACO, a command manifest, one
+portable `.loomcmd`, and the captured target Low IR. The
+`--target-profile=amdgpu:gfx11-generic` link argument makes subgroup facts
+available before template-provider pruning, so the wave32 implementation is
+selected without pulling the portable alternative into the product. The
+documentation build invokes the same script and regenerates the views below;
+neither output is checked-in source.
 
 === "GFX11 kernel Low"
 
@@ -300,12 +302,11 @@ is checked-in source.
     ```
 
 The GFX11 tab comes directly from the installed-tool workflow above. The
-command-program tab shows body-blind compiler-owned materialization from the
-same merged program: launch configuration is projected as pure caller IR,
+command-program tab is the readable Low view of the `.loomcmd` produced from
+the same closed program: launch configuration is projected as pure caller IR,
 folded to an exact direct count, and lowered while the device implementation
-remains unopened. Until command-program materialization has a published
-installed-tool surface, treat that tab as verified compiler output rather than
-a CLI recipe.
+remains unopened. The deployment artifact is binary and target-neutral; the
+HSACO independently supplies its logical kernel entry.
 
 ## Embedding chooses the deployment policy
 

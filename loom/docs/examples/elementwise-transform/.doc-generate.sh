@@ -56,6 +56,14 @@ trap cleanup EXIT
 artifact_root="${temporary_root}/artifacts"
 "${script_dir}/run.sh" gfx11-generic "${artifact_root}"
 
+linked_program="${artifact_root}/elementwise-transform.loom"
+grep -Fq '@wave32_elementwise_transform' "${linked_program}"
+grep -Fq 'amdgpu.target<gfx11-generic>' "${linked_program}"
+if grep -Fq '@portable_elementwise_transform' "${linked_program}"; then
+  printf 'portable provider survived the target-aware product link\n' >&2
+  exit 1
+fi
+
 kernel_dump="${artifact_root}/elementwise-transform-gfx11.loom"
 kernel_output="${output_dir}/elementwise-transform-gfx11.loom"
 kernel_unformatted="${temporary_root}/elementwise-transform-gfx11.loom"
@@ -65,8 +73,8 @@ awk '!found && /^low\.kernel\.def / { found = 1 } found { print }' \
   --to=text --output="${kernel_output}"
 "${LOOM_FORMAT}" --check "${kernel_output}"
 
-# Command-program materialization is not an installed-tool surface yet. Keep
-# this target-owned check provider behind the documentation build boundary.
+# The public workflow above emits the deployment artifacts. Generate the
+# readable target-neutral Low view separately for the walkthrough.
 command_fixture="${temporary_root}/elementwise-transform-program.loom-test"
 {
   printf '// RUN: emit command-program @elementwise_transform\n\n'
@@ -96,6 +104,11 @@ grep -Fq '@elementwise_transform_f32' "${kernel_output}"
 grep -Fq 'amdgpu.global_load_b32_saddr' "${kernel_output}"
 grep -Fq 'amdgpu.v_add_f32' "${kernel_output}"
 grep -Fq 'amdgpu.global_store_b32_saddr' "${kernel_output}"
+grep -Fq '"format":"loom-command-set"' \
+  "${artifact_root}/elementwise-transform.commands.json"
+grep -Fq '"symbol":"elementwise_transform"' \
+  "${artifact_root}/elementwise-transform.commands.json"
+test -s "${artifact_root}/elementwise-transform.commands/program-0.loomcmd"
 grep -Fq '@elementwise_transform() asm' "${command_output}"
 grep -Fq 'cmd.dispatch.' "${command_output}"
 

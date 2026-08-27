@@ -100,14 +100,35 @@ loom-link model.loom \
   --output=elementwise-transform.loom
 ```
 
-This produces a closed program for the facts known at the link boundary. In
-the targetless `elementwise-transform` example it selects the portable provider
-and discards the unresolved wave32 alternative. When target facts arrive only
-at compilation, the [source-to-artifacts
+This produces a closed program for the facts known at the link boundary. In a
+targetless link it selects the portable provider and discards the unresolved
+wave32 alternative. A deployment-product link can make its target facts
+available before provider selection:
+
+```shell
+loom-link model.loom \
+  --library=kernel.loom \
+  --library=motif.loom \
+  --mode=link \
+  --root=@elementwise_transform \
+  --target-profile=amdgpu:gfx11-generic \
+  --to=bc \
+  --output=elementwise-gfx11.loombc
+```
+
+The profile uses `family:selector` syntax. It specializes every reachable
+kernel entry in each selective-link analysis module, allowing target
+requirements to prune providers before their bodies enter the output. The
+result is still ordinary standalone Loom bytecode, now closed for that target
+profile. Use the same selector when emitting the device artifact. Omitting the
+profile remains the correct path for portable libraries, partial links, and
+JIT boundaries that will receive target facts later.
+
+The [source-to-artifacts
 walkthrough](../getting-started/source-to-artifacts.md#follow-one-composition-to-low)
-merges the requester and provider modules instead and lets `loom-compile`
-perform the target-aware selection. In either mode, unrelated private symbols
-can disappear as soon as the chosen boundary no longer needs them.
+runs this target-aware link as a checked example. In either mode, unrelated
+private symbols can disappear as soon as the chosen boundary no longer needs
+them.
 
 Repeated `--root=@symbol` options select several roots from one catalog. Add
 `--include-input-exports` when exported symbols from the requester inputs
@@ -249,7 +270,7 @@ order never stand in for matching rules.
 | Output | Use |
 | --- | --- |
 | Linked `.loom` | Review the selected source, inspect provider reachability, or feed a text-oriented tool. |
-| Linked `.loombc` | Cache or distribute a compact linkable program for later specialization and compilation. |
+| Linked `.loombc` | Cache or distribute a compact closed program, optionally specialized for a deployment target. |
 | Merged `.loombc` | Package a reusable catalog whose roots will be selected later. |
 | Stripped full merge | Package production symbols without executable checks. |
 

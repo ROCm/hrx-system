@@ -6,7 +6,16 @@
 #
 # bazel-to-cmake: skip
 
-load("//loom/build_tools/bazel:defs.bzl", "loom_library")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+# --8<-- [start:products]
+load(
+    "//loom/build_tools/bazel:defs.bzl",
+    "loom_command_binary",
+    "loom_kernel_binary",
+    "loom_library",
+    "loom_vm_binary",
+)
 
 package(
     default_visibility = ["//visibility:private"],
@@ -30,11 +39,50 @@ loom_library(
     deps = [":kernel"],
 )
 
+loom_kernel_binary(
+    name = "elementwise_kernel",
+    target = "//loom/target/amdgpu:gfx11-generic",
+    deps = [":kernel"],
+)
+
+loom_command_binary(
+    name = "elementwise_command",
+    roots = ["@elementwise_transform"],
+    target = "//loom/target/amdgpu:gfx11-generic",
+    deps = [":model"],
+)
+
+loom_library(
+    name = "vm",
+    srcs = ["vm.loom"],
+)
+
+loom_vm_binary(
+    name = "elementwise_vm",
+    module_name = "elementwise_support",
+    deps = [":vm"],
+)
+# --8<-- [end:products]
+
+sh_test(
+    name = "product_test",
+    srcs = ["product_test.sh"],
+    args = ["$(rootpath //tools:iree-run-module)"],
+    data = [
+        ":elementwise_command",
+        ":elementwise_kernel",
+        ":elementwise_vm",
+        "//tools:iree-run-module",
+    ],
+)
+
 test_suite(
     name = "test",
     tests = [
         ":kernel_test",
         ":model_test",
         ":motif_test",
+        ":product_test",
+        ":vm_test",
     ],
 )

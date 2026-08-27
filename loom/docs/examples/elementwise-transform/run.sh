@@ -43,12 +43,14 @@ loom_example_run_tool loom-format "${loom_format}" --check \
 loom_example_section "Inspect the private motif providers"
 loom_example_run_tool loom-link "${loom_link}" motif.loom --list-symbols
 
-loom_example_section "Merge the explicit program and provider universe"
+loom_example_section "Link and specialize the selected program for ${target}"
 loom_example_run_tool loom-link "${loom_link}" \
   model.loom \
-  kernel.loom \
-  motif.loom \
-  --mode=merge \
+  --library=kernel.loom \
+  --library=motif.loom \
+  --mode=link \
+  --root=@elementwise_transform \
+  --target-profile="amdgpu:${LOOM_EXAMPLE_TARGET}" \
   --to=text \
   --output="${output_dir}/elementwise-transform.loom"
 
@@ -58,14 +60,22 @@ loom_example_run_tool loom-compile "${loom_compile}" \
   --backend="${LOOM_EXAMPLE_BACKEND}" \
   --target="${LOOM_EXAMPLE_TARGET}" \
   --root=@elementwise_transform_f32 \
-  --output="${output_dir}/elementwise-transform.vmfb" \
-  --emit-target-artifact="${output_dir}/elementwise-transform.hsaco" \
+  --output="${output_dir}/elementwise-transform.hsaco" \
   --dump-ir-after=low-select-operand-forms \
   --dump-ir-output="${output_dir}/elementwise-transform-gfx11.loom"
+
+loom_example_section "Materialize the portable command program"
+loom_example_run_tool loom-compile "${loom_compile}" \
+  "${output_dir}/elementwise-transform.loom" \
+  --backend=command \
+  --root=@elementwise_transform \
+  --output="${output_dir}/elementwise-transform.commands.json" \
+  --emit-command-artifacts="${output_dir}/elementwise-transform.commands"
 
 loom_example_section "Artifacts"
 printf '  %s\n' \
   "${output_dir}/elementwise-transform.loom" \
   "${output_dir}/elementwise-transform-gfx11.loom" \
-  "${output_dir}/elementwise-transform.vmfb" \
-  "${output_dir}/elementwise-transform.hsaco"
+  "${output_dir}/elementwise-transform.hsaco" \
+  "${output_dir}/elementwise-transform.commands.json" \
+  "${output_dir}/elementwise-transform.commands/program-0.loomcmd"

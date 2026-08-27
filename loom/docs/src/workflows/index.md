@@ -38,6 +38,8 @@ at `.loombc`. A JIT embedding can perform the same operations in memory through
 | Inspect symbols and dependency closure | [Link and package modules](link-and-package.md#inspect-before-linking) |
 | Build a root-selected artifact input | [Link and package modules](link-and-package.md#link-one-program) |
 | Merge a reusable bytecode catalog | [Link and package modules](link-and-package.md#merge-a-reusable-catalog) |
+| Declare relocatable libraries in Bazel | [Build libraries and binaries with Bazel](build-with-bazel.md#libraries-stay-relocatable) |
+| Build kernel, command, or VM products | [Build libraries and binaries with Bazel](build-with-bazel.md#binary-roots-close-one-product) |
 
 ## Development loops
 

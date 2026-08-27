@@ -302,20 +302,31 @@ The prepared command plan owns three complementary products:
 | Entry requirements | Atomic executable and entry bindings required by one or more command roots. |
 | Parameter and storage requirements | Fixed parameter placements, rebindable bindings, transients, and any explicit indirect-count storage. |
 
-## Keep the deployment boundary honest
+## Emit the portable deployment artifacts
 
-The examples in this chapter format, verify, link, and package Loom
-libraries. The compiler also has the target-neutral command preparation and
-lowering path described above. The installed tools do not yet expose one
-complete public command that prepares, materializes, binds, and issues a
-command root, so this guide does not disguise a private runtime integration as
-an end-user recipe.
+`loom-compile` prepares and serializes selected command roots without binding
+them to one device runtime:
 
-That missing command is an ergonomics gap at the deployment boundary, not a
-gap in the source representation. Kernel-only applications can continue to
-compile and launch individual entries. Embedders can use command preparation
-through the compiler integration while the stable installed workflow is being
-defined.
+```shell
+loom-compile model.loombc \
+  --root=@two_layer \
+  --backend=command \
+  --output=commands.json \
+  --emit-command-artifacts=commands/
+```
+
+The manifest maps `@two_layer` to its `.loomcmd` artifact and lists the logical
+kernel entries required by that schedule. The portable artifact contains the
+closed command topology, resource bindings, dispatch counts, and executable
+slots. Kernel implementations remain a separate target product and can be
+compiled from the same linked module or supplied by an embedding that already
+owns compatible executable entries.
+
+In Bazel, [`loom_command_binary`](../workflows/build-with-bazel.md#command-binaries-package-schedules-with-their-kernels)
+performs one selective link and emits the command manifest, `.loomcmd` files,
+and target-specific kernel executable together. Emission stops at the portable
+artifact boundary: loading buffers, binding executables, and issuing the
+schedule remain runtime responsibilities.
 
 ## Keep failures in their owning contract
 
@@ -333,5 +344,5 @@ defined.
 [Source modules and canonical text](source-modules.md) explains declaration
 and library ownership. [Facts and specialization](facts-and-specialization.md)
 shows how configuration, assumptions, and target facts constrain the values
-used here. [Compile artifacts](../workflows/compile-artifacts.md) covers the
-public per-kernel compilation workflow available today.
+used here. [Compile artifacts](../workflows/compile-artifacts.md#emit-portable-command-programs)
+covers the public command-line artifact workflow.
