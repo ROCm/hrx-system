@@ -10,12 +10,11 @@
 #include "loom/format/text/printer.h"
 #include "loom/ir/module.h"
 #include "loom/link/module_index.h"
-#include "loom/link/plan_materializer.h"
-#include "loom/link/planner.h"
 #include "loom/ops/command/ops.h"
 #include "loom/pass/builtin_registry.h"
+#include "loom/target/arch/cmd/artifact_set.h"
 #include "loom/target/arch/cmd/lower/program_plan.h"
-#include "loom/target/arch/cmd/lower/serialize.h"
+#include "loom/target/arch/cmd/lower/program_plan_index.h"
 #include "loom/target/arch/cmd/program.h"
 #include "loom/tooling/compile/pipeline.h"
 #include "loom/tools/loom-check/diagnostics.h"
@@ -136,18 +135,16 @@ static iree_status_t loom_cmd_program_plan_check_resolve_roots(
   return iree_ok_status();
 }
 
-// Selectively materializes only the command implementation and the exact
-// kernel facets requested by its references. Kernel bodies are intentionally
-// absent: command planning consumes logical contracts and launch
-// configurations, never device implementation IR.
-static iree_status_t loom_cmd_program_plan_check_materialize_roots(
+// Indexes the check module and prepares only the command implementation and
+// exact kernel facets requested by its roots. Kernel bodies remain unopened.
+static iree_status_t loom_cmd_program_plan_check_prepare_roots(
     loom_module_t* source_module, const loom_symbol_ref_t* source_root_refs,
     iree_host_size_t root_count, iree_arena_allocator_t* arena,
     iree_arena_block_pool_t* block_pool, iree_allocator_t host_allocator,
-    loom_link_plan_materialization_t* out_materialization,
-    loom_symbol_ref_t** out_target_root_refs) {
-  *out_materialization = (loom_link_plan_materialization_t){0};
-  *out_target_root_refs = NULL;
+    iree_diagnostic_emitter_t diagnostic_emitter, bool* out_valid,
+    loom_cmd_program_plan_t* out_plan) {
+  *out_valid = false;
+  *out_plan = (loom_cmd_program_plan_t){0};
 
   loom_link_module_index_t* index = NULL;
   IREE_RETURN_IF_ERROR(loom_link_module_index_allocate(
@@ -171,71 +168,26 @@ static iree_status_t loom_cmd_program_plan_check_materialize_roots(
     IREE_ASSERT(indexed_module != NULL);
   }
 
-  loom_link_plan_root_facet_t* root_facets = NULL;
+  iree_host_size_t* root_symbol_ordinals = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_arena_allocate_array(arena, root_count, sizeof(*root_facets),
-                                       (void**)&root_facets);
+    status = iree_arena_allocate_array(arena, root_count,
+                                       sizeof(*root_symbol_ordinals),
+                                       (void**)&root_symbol_ordinals);
   }
   for (iree_host_size_t i = 0; i < root_count && iree_status_is_ok(status);
        ++i) {
     IREE_ASSERT_EQ(source_root_refs[i].module_id, 0u);
-    root_facets[i] = (loom_link_plan_root_facet_t){
-        .symbol_ordinal = indexed_module->symbol_start_ordinal +
-                          source_root_refs[i].symbol_id,
-        .kind = LOOM_LINK_SYMBOL_FACET_COMMAND_IMPLEMENTATION,
-    };
-  }
-
-  loom_link_plan_t* plan = NULL;
-  if (iree_status_is_ok(status)) {
-    status = loom_link_plan_build(
-        index,
-        &(loom_link_plan_options_t){
-            .mode = LOOM_LINK_PLAN_LINK,
-            .unresolved_policy = LOOM_LINK_PLAN_UNRESOLVED_ALLOW,
-            .root_facets =
-                {
-                    .count = root_count,
-                    .values = root_facets,
-                },
-            .dependency_policy = LOOM_LINK_PLAN_DEPENDENCY_REQUESTED_FACETS,
-        },
-        host_allocator, &plan);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_link_plan_materialize(
-        plan,
-        &(loom_link_plan_materialization_environment_t){
-            .context = source_module->context,
-            .block_pool = block_pool,
-            .allocator = host_allocator,
-        },
-        IREE_SV("command_program_roots"), arena, out_materialization);
-  }
-
-  loom_symbol_ref_t* target_root_refs = NULL;
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_arena_allocate_array(arena, root_count, sizeof(*target_root_refs),
-                                  (void**)&target_root_refs);
-  }
-  for (iree_host_size_t i = 0; i < root_count && iree_status_is_ok(status);
-       ++i) {
-    const iree_host_size_t source_ordinal =
+    root_symbol_ordinals[i] =
         indexed_module->symbol_start_ordinal + source_root_refs[i].symbol_id;
-    IREE_ASSERT_LT(source_ordinal, out_materialization->target_symbols.count);
-    target_root_refs[i] =
-        out_materialization->target_symbols.values[source_ordinal];
-    IREE_ASSERT(loom_symbol_ref_is_valid(target_root_refs[i]));
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_cmd_program_plan_prepare_index(
+        index, root_symbol_ordinals, root_count, loom_pass_builtin_registry(),
+        diagnostic_emitter, block_pool, arena, out_valid, out_plan,
+        host_allocator);
   }
 
-  loom_link_plan_free(plan);
   loom_link_module_index_free(index);
-  if (!iree_status_is_ok(status) && out_materialization->module) {
-    loom_module_free(out_materialization->module);
-    *out_materialization = (loom_link_plan_materialization_t){0};
-  }
-  if (iree_status_is_ok(status)) *out_target_root_refs = target_root_refs;
   return status;
 }
 
@@ -267,19 +219,23 @@ static iree_status_t loom_cmd_program_plan_check_print_roots(
 // accepted by the artifact's untrusted-byte parser.
 static iree_status_t loom_cmd_program_plan_check_roundtrip_artifacts(
     const loom_cmd_program_plan_t* plan, iree_allocator_t host_allocator) {
+  loom_cmd_program_artifact_set_t artifact_set = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_cmd_program_artifact_set_build(plan, &artifact_set, host_allocator));
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
-       i < plan->root_count && iree_status_is_ok(status); ++i) {
-    iree_byte_span_t data = iree_byte_span_empty();
-    status =
-        loom_cmd_program_plan_serialize_root(plan, i, &data, host_allocator);
+       i < artifact_set.programs.count && iree_status_is_ok(status); ++i) {
+    const loom_cmd_program_artifact_t* artifact =
+        &artifact_set.programs.values[i];
     if (iree_status_is_ok(status)) {
       loom_cmd_program_t program = {0};
       status = loom_cmd_program_parse(
-          iree_make_const_byte_span(data.data, data.data_length), &program);
+          iree_make_const_byte_span(artifact->data.data,
+                                    artifact->data.data_length),
+          &program);
     }
-    iree_allocator_free(host_allocator, data.data);
   }
+  loom_cmd_program_artifact_set_deinitialize(&artifact_set);
   return status;
 }
 
@@ -315,29 +271,20 @@ static iree_status_t loom_cmd_program_plan_check_emit_provider_execute(
     status = loom_cmd_program_plan_check_resolve_roots(
         request->module, &options, request->case_arena, &source_root_refs);
     if (iree_status_is_ok(status)) {
-      loom_link_plan_materialization_t materialization = {0};
-      loom_symbol_ref_t* target_root_refs = NULL;
-      status = loom_cmd_program_plan_check_materialize_roots(
-          request->module, source_root_refs, options.root_count,
-          request->case_arena, request->block_pool, request->host_allocator,
-          &materialization, &target_root_refs);
       loom_check_diagnostic_emitter_capture_t capture = {
           .diagnostic_collector = request->diagnostic_collector,
-          .module = materialization.module,
+          .module = request->module,
           .source_resolver = request->source_resolver,
           .emitter = LOOM_EMITTER_PASS,
       };
-      if (iree_status_is_ok(status)) {
-        status = loom_cmd_program_plan_prepare(
-            &materialization, target_root_refs, options.root_count,
-            loom_pass_builtin_registry(),
-            (iree_diagnostic_emitter_t){
-                .fn = loom_check_diagnostic_emitter_capture_emit,
-                .user_data = &capture,
-            },
-            request->block_pool, &plan_valid, &plan, request->host_allocator);
-      }
-      if (materialization.module) loom_module_free(materialization.module);
+      status = loom_cmd_program_plan_check_prepare_roots(
+          request->module, source_root_refs, options.root_count,
+          request->case_arena, request->block_pool, request->host_allocator,
+          (iree_diagnostic_emitter_t){
+              .fn = loom_check_diagnostic_emitter_capture_emit,
+              .user_data = &capture,
+          },
+          &plan_valid, &plan);
       if (iree_status_is_ok(status) && !plan_valid &&
           capture.emission_count == 0) {
         status = iree_make_status(

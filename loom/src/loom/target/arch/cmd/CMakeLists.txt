@@ -37,6 +37,25 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    artifact_set
+  HDRS
+    "artifact_set.h"
+  SRCS
+    "artifact_set.c"
+  DEPS
+    iree::base
+    loom::ir
+    loom::ops::kernel
+    loom::ops::op_defs
+    loom::target::arch::cmd::lower::program_plan
+    loom::target::arch::cmd::lower::serialize
+    loom::util::json
+    loom::util::stream
+  PUBLIC
+)
+
 loom_cc_test(
   NAME
     program_test

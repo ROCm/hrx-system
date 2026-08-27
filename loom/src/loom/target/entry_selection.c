@@ -90,13 +90,16 @@ void loom_target_entry_diagnostic_emitter_initialize(
 }
 
 static bool loom_target_entry_resolve_emission_location(
-    const loom_target_entry_diagnostic_emitter_t* emitter, const loom_op_t* op,
+    const loom_target_entry_diagnostic_emitter_t* emitter,
+    const loom_module_t* module, const loom_op_t* op,
     loom_source_range_t* out_source_location) {
-  if (!emitter || !emitter->module || !op) {
+  if (!emitter || !op) {
     return false;
   }
-  if (!loom_source_resolve(emitter->source_resolver, emitter->module,
-                           op->location, out_source_location)) {
+  module = module != NULL ? module : emitter->module;
+  if (module == NULL ||
+      !loom_source_resolve(emitter->source_resolver, module, op->location,
+                           out_source_location)) {
     return false;
   }
   if (out_source_location->provenance ==
@@ -122,8 +125,9 @@ static iree_host_size_t loom_target_entry_collect_related_locations(
     loom_source_range_t source_location = {
         .provenance = LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE,
     };
-    if (!loom_target_entry_resolve_emission_location(emitter, related_ops[i].op,
-                                                     &source_location)) {
+    if (!loom_target_entry_resolve_emission_location(
+            emitter, related_ops[i].module, related_ops[i].op,
+            &source_location)) {
       continue;
     }
     if (related_location_count >= LOOM_DIAGNOSTIC_MAX_RELATED_LOCATIONS) {
@@ -182,7 +186,8 @@ static iree_status_t loom_target_entry_emit_diagnostic(
   }
 
   if (loom_target_entry_resolve_emission_location(
-          emitter, emission->op, &diagnostic.source_location)) {
+          emitter, emission->module, emission->op,
+          &diagnostic.source_location)) {
     diagnostic.origin = diagnostic.source_location;
   }
   return loom_diagnostic_emit(&emitter->diagnostic_sink, &diagnostic);

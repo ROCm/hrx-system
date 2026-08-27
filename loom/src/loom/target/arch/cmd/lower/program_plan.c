@@ -539,7 +539,7 @@ static iree_status_t loom_cmd_program_plan_build_lower_plan(
   return iree_ok_status();
 }
 
-iree_status_t loom_cmd_program_plan_prepare(
+iree_status_t loom_cmd_program_plan_prepare_materialization(
     loom_link_plan_materialization_t* materialization,
     const loom_symbol_ref_t* program_refs, iree_host_size_t program_count,
     const loom_pass_registry_t* pass_registry,

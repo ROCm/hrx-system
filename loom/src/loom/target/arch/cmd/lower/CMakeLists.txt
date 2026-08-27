@@ -174,6 +174,26 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    program_plan_index
+  HDRS
+    "program_plan_index.h"
+  SRCS
+    "program_plan_index.c"
+  DEPS
+    ::program_plan
+    iree::base
+    iree::base::internal::arena
+    loom::error::emitter
+    loom::ir
+    loom::link::module_index
+    loom::link::plan_materializer
+    loom::link::planner
+    loom::pass::registry
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     serialize
   HDRS
     "serialize.h"
@@ -213,6 +233,7 @@ loom_cc_test(
     loom::ops::low
     loom::ops::op_registry
     loom::pass::builtin_registry
+    loom::target::arch::cmd::artifact_set
     loom::target::arch::cmd::descriptors
     loom::target::arch::cmd::program
     loom::testing::diagnostic_matchers

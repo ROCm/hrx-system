@@ -23,12 +23,11 @@ loom_cc_library(
     loom::format::text::printer
     loom::ir
     loom::link::module_index
-    loom::link::plan_materializer
-    loom::link::planner
     loom::ops::command
     loom::pass::builtin_registry
+    loom::target::arch::cmd::artifact_set
     loom::target::arch::cmd::lower::program_plan
-    loom::target::arch::cmd::lower::serialize
+    loom::target::arch::cmd::lower::program_plan_index
     loom::target::arch::cmd::program
     loom::tooling::compile::pipeline
     loom::tools::loom-check::execute
