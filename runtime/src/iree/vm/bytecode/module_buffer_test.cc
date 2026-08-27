@@ -657,6 +657,16 @@ TEST(VMBytecodeModuleBufferTest, AllocatesViewsAndTransfersEveryLaneFormat) {
   IREE_ASSERT_OK(iree_vm_i64_from_variant(length_results[0], &length));
   EXPECT_EQ(length, 256);
 
+  iree_vm_variant_t null_length_arguments[] = {iree_vm_variant_null()};
+  iree_vm_variant_t null_length_results[1] = {};
+  IREE_ASSERT_OK(harness.Invoke(
+      IREE_SV("length"), iree_vm_variant_span_from_array(null_length_arguments),
+      iree_vm_variant_span_from_array(null_length_results)));
+  int64_t null_length = -1;
+  IREE_ASSERT_OK(
+      iree_vm_i64_from_variant(null_length_results[0], &null_length));
+  EXPECT_EQ(null_length, 0);
+
   iree_vm_variant_t subspan_arguments[] = {
       iree_vm_buffer_variant_from_ptr_borrowed(&harness.vm_types, root),
       iree_vm_variant_from_i64(33),
@@ -936,16 +946,6 @@ TEST(VMBytecodeModuleBufferTest, FailsBeforePublishingOrMutating) {
                      iree_vm_variant_span_from_array(excessive_arguments),
                      iree_vm_variant_span_from_array(excessive_results)));
   ExpectVariantEqual(excessive_results[0], sentinel);
-
-  iree_vm_variant_t null_arguments[] = {
-      iree_vm_variant_from_ptr_borrowed(nullptr, harness.vm_types.buffer)};
-  iree_vm_variant_t null_results[] = {sentinel};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_FAILED_PRECONDITION,
-      harness.Invoke(IREE_SV("length"),
-                     iree_vm_variant_span_from_array(null_arguments),
-                     iree_vm_variant_span_from_array(null_results)));
-  ExpectVariantEqual(null_results[0], sentinel);
 
   BufferTestObject wrong_object = {};
   iree_vm_ref_object_initialize(&wrong_object.ref_object);

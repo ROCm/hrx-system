@@ -1299,13 +1299,18 @@ static iree_status_t iree_vm_bytecode_execute(
   IREE_VM_BYTECODE_DISPATCH_CASE(BUFFER_LENGTH, buffer_length) {
     const iree_vm_isa_buffer_length_record_t* record =
         (const iree_vm_isa_buffer_length_record_t*)record_data;
-    iree_vm_buffer_t* buffer = NULL;
-    status = iree_vm_bytecode_buffer_check_deref(refs[record->buffer_r8],
-                                                 module->buffer_type, &buffer);
-    if (!iree_status_is_ok(status)) {
-      IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+    const iree_vm_ref_t buffer_ref = refs[record->buffer_r8];
+    if (buffer_ref.object) {
+      iree_vm_buffer_t* buffer = NULL;
+      status = iree_vm_bytecode_buffer_check_deref(
+          buffer_ref, module->buffer_type, &buffer);
+      if (!iree_status_is_ok(status)) {
+        IREE_VM_BYTECODE_DISPATCH_TERMINATE();
+      }
+      values[record->dst_v8] = buffer->length;
+    } else {
+      values[record->dst_v8] = 0;
     }
-    values[record->dst_v8] = buffer->length;
     IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_isa_buffer_length_record_t);
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(BUFFER_SUBSPAN, buffer_subspan) {

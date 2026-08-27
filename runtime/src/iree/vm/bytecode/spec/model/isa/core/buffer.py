@@ -318,28 +318,49 @@ BUFFER_LENGTH = core_instruction(
             InstructionFieldRole.RESULT,
             "Unsigned 64-bit byte-length result.",
         ),
-        _buffer_ref("buffer_r8", 2),
+        ref_register(
+            "buffer_r8",
+            2,
+            InstructionFieldRole.OPERAND,
+            "Nullable exact vm.buffer ref borrowed for this instruction.",
+            RuntimeRefPolicy(
+                "vm.buffer",
+                RefNullPolicy.NULLABLE,
+                RefOwnership.BORROW,
+            ),
+        ),
         zero_padding("zero_padding_u8", 3, 1),
     ),
     state_effects=(),
     semantics=_semantics(
         description=(
             "Returns the exact immutable logical byte length without inspecting "
-            "payload bytes or requiring access rights. A closed tombstone keeps "
-            "its length."
+            "payload bytes or requiring access rights. Canonical null returns "
+            "zero, while a closed tombstone keeps its length."
         ),
         verification=(
             "dst_v8 and buffer_r8 must be valid register ordinals and padding "
             "must equal zero.",
         ),
-        preconditions=("buffer_r8 must contain a non-null exact vm.buffer.",),
-        success=("dst_v8 receives buffer.length as a complete unsigned u64 cell.",),
-        failures=_required_buffer_failures("dst_v8 remains unchanged."),
-        ownership=("buffer_r8 is inspected without a retain or ownership change.",),
+        preconditions=("A non-null buffer_r8 must contain an exact vm.buffer.",),
+        success=(
+            "dst_v8 receives zero for canonical null or buffer.length for a "
+            "non-null buffer as a complete unsigned u64 cell.",
+        ),
+        failures=(
+            FailureCase(
+                "invalid_argument",
+                "A non-null buffer_r8 has a descriptor other than vm.buffer.",
+                "dst_v8 remains unchanged.",
+            ),
+        ),
+        ownership=(
+            "A non-null buffer_r8 is inspected without a retain or ownership change.",
+        ),
         assembly=("%v<dst> = buffer.length %r<buffer>",),
         pseudocode=(
-            "buffer = check_deref(refs[buffer_r8], vm_buffer_type);\n"
-            "values[dst_v8] = u64(buffer.length);\n"
+            "buffer = check_optional_deref(refs[buffer_r8], vm_buffer_type);\n"
+            "values[dst_v8] = buffer == NULL ? 0 : u64(buffer.length);\n"
             "pc = pc + 4;"
         ),
         byte_length=4,
