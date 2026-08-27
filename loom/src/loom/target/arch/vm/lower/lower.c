@@ -14,6 +14,7 @@
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/target/arch/vm/descriptors.h"
+#include "loom/target/arch/vm/lower/constants.h"
 
 #define LOOM_VM_SOURCE_LOWERING_LIMITS(max_operand_count, max_result_count) \
   enum {                                                                    \
@@ -145,18 +146,6 @@ static bool loom_vm_try_get_source_constant(
   return true;
 }
 
-static uint16_t loom_vm_constant_descriptor_ordinal(uint64_t bits) {
-  if (bits == 0) return VM_CORE_DESCRIPTOR_REF_CONSTANT_ZERO;
-  const uint64_t sign_extension = iree_any_bit_set(bits, UINT64_C(0x8000))
-                                      ? UINT64_C(0xFFFFFFFFFFFF0000)
-                                      : 0;
-  if (bits == ((bits & UINT64_C(0xFFFF)) | sign_extension)) {
-    return VM_CORE_DESCRIPTOR_REF_CONSTANT_S16;
-  }
-  if (bits <= UINT32_MAX) return VM_CORE_DESCRIPTOR_REF_CONSTANT_I32;
-  return VM_CORE_DESCRIPTOR_REF_CONSTANT_I64;
-}
-
 static iree_status_t loom_vm_map_type(void* user_data,
                                       loom_low_lower_context_t* context,
                                       const loom_op_t* source_op,
@@ -203,70 +192,24 @@ static iree_status_t loom_vm_select_op(void* user_data,
   return iree_ok_status();
 }
 
-static int64_t loom_vm_s16_immediate(uint64_t bits) {
-  const uint16_t low_bits = (uint16_t)bits;
-  return iree_any_bit_set(low_bits, UINT16_C(0x8000))
-             ? (int64_t)(low_bits & UINT16_C(0x7FFF)) - INT64_C(32768)
-             : (int64_t)low_bits;
-}
-
-static iree_status_t loom_vm_emit_constant(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_low_lower_plan_t plan, const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_lower_resolved_descriptor_t* resolved_descriptor) {
+static iree_status_t loom_vm_emit_constant(loom_low_lower_context_t* context,
+                                           const loom_op_t* source_op,
+                                           loom_low_lower_plan_t plan) {
   loom_vm_source_constant_t constant = {0};
   const bool is_constant = loom_vm_try_get_source_constant(
       loom_low_lower_context_module(context), source_op, &constant);
   IREE_ASSERT(is_constant);
   (void)is_constant;
-
-  int64_t immediate_values[2] = {0};
-  iree_host_size_t immediate_count = 0;
-  switch (plan.id) {
-    case VM_CORE_DESCRIPTOR_REF_CONSTANT_ZERO:
-      break;
-    case VM_CORE_DESCRIPTOR_REF_CONSTANT_S16:
-      immediate_values[0] = loom_vm_s16_immediate(constant.bits);
-      immediate_count = 1;
-      break;
-    case VM_CORE_DESCRIPTOR_REF_CONSTANT_I32:
-      immediate_values[0] = (int64_t)(uint32_t)constant.bits;
-      immediate_count = 1;
-      break;
-    case VM_CORE_DESCRIPTOR_REF_CONSTANT_I64:
-      immediate_values[0] = (int64_t)(uint32_t)constant.bits;
-      immediate_values[1] = (int64_t)(uint32_t)(constant.bits >> 32);
-      immediate_count = 2;
-      break;
-    default:
-      IREE_ASSERT_UNREACHABLE("selected VM constant descriptor");
-      return iree_ok_status();
-  }
-
-  const loom_low_descriptor_t* descriptor = resolved_descriptor->descriptor;
-  IREE_ASSERT_EQ(immediate_count, descriptor->immediate_count);
-  loom_named_attr_t attrs[2] = {0};
-  for (iree_host_size_t i = 0; i < immediate_count; ++i) {
-    const loom_low_immediate_t* immediate =
-        &descriptor_set->immediates[descriptor->immediate_start + i];
-    const iree_string_view_t immediate_name = loom_low_descriptor_set_string(
-        descriptor_set, immediate->field_name_string_offset);
-    IREE_RETURN_IF_ERROR(
-        loom_module_intern_string(loom_low_lower_context_module(context),
-                                  immediate_name, &attrs[i].name_id));
-    attrs[i].value = loom_attr_i64(immediate_values[i]);
-  }
+  IREE_ASSERT_EQ(plan.id, loom_vm_constant_descriptor_ordinal(constant.bits));
 
   loom_type_t low_result_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_low_lower_map_value(
       context, source_op, constant.result, &low_result_type));
-  loom_op_t* low_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_const(
-      context, resolved_descriptor,
-      loom_make_named_attr_slice(attrs, immediate_count), low_result_type,
-      source_op->location, &low_op));
-  return loom_low_lower_bind_value(context, constant.result,
-                                   loom_low_const_result(low_op));
+  loom_value_id_t low_value = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vm_constant_build(
+      loom_low_lower_context_builder(context), constant.bits, low_result_type,
+      source_op->location, &low_value));
+  return loom_low_lower_bind_value(context, constant.result, low_value);
 }
 
 static iree_status_t loom_vm_emit_op(void* user_data,
@@ -283,8 +226,7 @@ static iree_status_t loom_vm_emit_op(void* user_data,
       .descriptor = descriptor,
   };
   if (descriptor->op_kind == LOOM_LOW_DESCRIPTOR_OP_KIND_CONST) {
-    return loom_vm_emit_constant(context, source_op, plan, descriptor_set,
-                                 &resolved_descriptor);
+    return loom_vm_emit_constant(context, source_op, plan);
   }
 
   loom_value_id_t low_operands[LOOM_VM_SOURCE_LOWERING_MAX_OPERAND_COUNT];

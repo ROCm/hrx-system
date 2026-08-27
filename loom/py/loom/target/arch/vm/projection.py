@@ -12,9 +12,17 @@ import dataclasses
 import re
 from pathlib import Path
 
-from model.isa import ControlFlow, Instruction, InstructionFieldRole, Suspension
+from model.isa import (
+    ControlFlow,
+    Instruction,
+    InstructionField,
+    InstructionFieldRole,
+    Suspension,
+)
 from model.isa.core.constant import INSTRUCTIONS as CONSTANT_INSTRUCTIONS
+from model.isa.core.control import INSTRUCTIONS as CONTROL_INSTRUCTIONS
 from model.isa.core.conversion import INSTRUCTIONS as CONVERSION_INSTRUCTIONS
+from model.isa.core.float import INSTRUCTIONS as FLOAT_INSTRUCTIONS
 from model.isa.core.integer import INSTRUCTIONS as INTEGER_INSTRUCTIONS
 from model.isa.selectors import SELECTOR_TABLES_BY_NAME, SELECTOR_VALUES
 from model.schema import SCALAR_ENCODINGS
@@ -62,7 +70,9 @@ _INSTRUCTIONS_BY_MNEMONIC = {
     instruction.mnemonic: instruction
     for instruction in (
         *CONSTANT_INSTRUCTIONS,
+        *CONTROL_INSTRUCTIONS,
         *CONVERSION_INSTRUCTIONS,
+        *FLOAT_INSTRUCTIONS,
         *INTEGER_INSTRUCTIONS,
     )
 }
@@ -85,10 +95,8 @@ class VmInstructionProjection:
         has_selector = self.selector_table is not None or self.selector_name is not None
         if has_selector and (self.selector_table is None or self.selector_name is None):
             raise ValueError("VM selector table and value must be specified together")
-        selector_fields = tuple(
-            field for field in self.instruction.fields if field.name == "selector_u8"
-        )
-        if bool(selector_fields) != has_selector:
+        selector_fields = self._selector_fields()
+        if len(selector_fields) != (1 if has_selector else 0):
             raise ValueError(
                 f"{self.instruction.mnemonic}: selector projection does not match "
                 "fields"
@@ -127,6 +135,22 @@ class VmInstructionProjection:
         table = SELECTOR_TABLES_BY_NAME[self.selector_table]
         return _SELECTOR_VALUES_BY_KEY[(table.entity_id, self.selector_name)]
 
+    @property
+    def selector_field_name(self) -> str | None:
+        fields = self._selector_fields()
+        return fields[0].name if fields else None
+
+    def _selector_fields(self) -> tuple[InstructionField, ...]:
+        if self.selector_table is None:
+            return ()
+        table = SELECTOR_TABLES_BY_NAME[self.selector_table]
+        return tuple(
+            field
+            for field in self.instruction.fields
+            if field.role is InstructionFieldRole.IMMEDIATE
+            and table.entity_id in field.referenced_entity_ids()
+        )
+
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class VmSourceLowering:
@@ -142,35 +166,97 @@ def _instruction(mnemonic: str) -> Instruction:
     return _INSTRUCTIONS_BY_MNEMONIC[mnemonic]
 
 
+def _plain_instruction_projections(
+    *mnemonics: str,
+) -> tuple[VmInstructionProjection, ...]:
+    return tuple(VmInstructionProjection(_instruction(name)) for name in mnemonics)
+
+
+def _selected_instruction_projections(
+    mnemonic: str,
+    selector_table: str,
+    *selector_names: str,
+) -> tuple[VmInstructionProjection, ...]:
+    instruction = _instruction(mnemonic)
+    return tuple(
+        VmInstructionProjection(instruction, selector_table, selector_name)
+        for selector_name in selector_names
+    )
+
+
 VM_INSTRUCTION_PROJECTIONS = (
-    VmInstructionProjection(_instruction("constant.zero")),
-    VmInstructionProjection(_instruction("constant.s16")),
-    VmInstructionProjection(_instruction("constant.i32")),
-    VmInstructionProjection(_instruction("constant.i64")),
-    VmInstructionProjection(_instruction("integer.add.i32")),
-    VmInstructionProjection(_instruction("integer.add.i64")),
-    VmInstructionProjection(_instruction("integer.mul.i32")),
-    VmInstructionProjection(_instruction("integer.mul.i64")),
-    VmInstructionProjection(
-        _instruction("conversion.integer"),
-        "integer.convert",
-        "s32.to.i64",
+    *_plain_instruction_projections(
+        "constant.zero",
+        "constant.s16",
+        "constant.i32",
+        "constant.i64",
+        "integer.add.i32",
+        "integer.add.i64",
+        "integer.mul.i32",
+        "integer.mul.i64",
+        "integer.sub.i32",
+        "integer.sub.i64",
+        "integer.rem.s32",
+        "integer.rem.s64",
+        "integer.and.i32",
+        "integer.and.i64",
     ),
-    VmInstructionProjection(
-        _instruction("conversion.integer"),
+    *_selected_instruction_projections(
+        "integer.compare.i32",
+        "integer.compare",
+        "eq",
+        "ne",
+        "slt",
+        "sle",
+        "sgt",
+        "sge",
+    ),
+    *_selected_instruction_projections(
+        "integer.compare.i64",
+        "integer.compare",
+        "eq",
+        "ne",
+        "slt",
+        "sle",
+        "sgt",
+        "sge",
+    ),
+    *_selected_instruction_projections(
+        "conversion.integer",
         "integer.convert",
+        "s8.to.i32",
+        "s16.to.i32",
+        "s32.to.i64",
         "u32.to.i64",
     ),
-    VmInstructionProjection(
-        _instruction("conversion.float.extend"),
+    *_selected_instruction_projections(
+        "conversion.float.extend",
         "float.extend",
+        "f8e4m3.to.f32",
+        "f8e5m2.to.f32",
+        "f16.to.f32",
         "bf16.to.f32",
     ),
-    VmInstructionProjection(
-        _instruction("conversion.float.to.integer"),
+    *_selected_instruction_projections(
+        "conversion.float.to.integer",
         "float.to.integer",
         "f32.to.u32",
     ),
+    *_selected_instruction_projections(
+        "float.classify.f32",
+        "float.classify",
+        "isnan",
+        "isinf",
+        "isfinite",
+    ),
+    *_selected_instruction_projections(
+        "float.classify.f64",
+        "float.classify",
+        "isnan",
+        "isinf",
+        "isfinite",
+    ),
+    *_plain_instruction_projections("control.assert"),
 )
 
 
@@ -227,7 +313,9 @@ def _descriptor(projection: VmInstructionProjection) -> Descriptor:
             asm_operands.append(name)
         elif field.role is InstructionFieldRole.IMMEDIATE:
             default_value = (
-                projection.selector_value if field.name == "selector_u8" else None
+                projection.selector_value
+                if field.name == projection.selector_field_name
+                else None
             )
             immediate = _immediate(field, default_value=default_value)
             immediates.append(immediate)
@@ -243,11 +331,14 @@ def _descriptor(projection: VmInstructionProjection) -> Descriptor:
 
     is_constant = instruction.mnemonic.startswith("constant.")
     is_conversion = instruction.mnemonic.startswith("conversion.")
+    is_control_assert = instruction.mnemonic == "control.assert"
     instruction_class = (
         InstructionClass.OTHER
         if is_constant
         else InstructionClass.CONVERSION
         if is_conversion
+        else InstructionClass.CONTROL
+        if is_control_assert
         else InstructionClass.SCALAR_ALU
     )
     return Descriptor(
@@ -269,7 +360,11 @@ def _descriptor(projection: VmInstructionProjection) -> Descriptor:
             ),
         ),
         encoding_id=instruction.opcode,
-        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        flags=(
+            (DescriptorFlag.SIDE_EFFECTING,)
+            if is_control_assert
+            else (DescriptorFlag.DEAD_REMOVABLE,)
+        ),
         instruction_classes=(instruction_class,),
     )
 
@@ -377,8 +472,8 @@ def _require_descriptor_shape(
         )
     if descriptor.op_kind is not DescriptorOpKind.OP:
         raise ValueError(
-            f"{descriptor_key}: source operation projection requires a low.op "
-            "descriptor"
+            f"{descriptor_key}: source operation projection requires an "
+            "instruction descriptor"
         )
     missing_default_immediates = tuple(
         immediate.field_name

@@ -13,8 +13,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/rewrite/rewriter.h"
-#include "loom/target/arch/vm/descriptors.h"
-#include "loom/target/registers.h"
+#include "loom/target/arch/vm/lower/types.h"
 #include "loom/target/types.h"
 #include "loom/util/walk.h"
 
@@ -29,15 +28,8 @@ const loom_pass_info_t* loom_vm_materialize_call_abi_pass_info(void) {
 }
 
 static bool loom_vm_call_abi_type_is_direct_value(loom_type_t type) {
-  if (!loom_low_type_is_register(type) ||
-      loom_low_register_type_descriptor_set_stable_id(type) !=
-          VM_CORE_DESCRIPTOR_SET_ID ||
-      loom_low_register_type_class_id(type) != VM_CORE_REG_CLASS_ID_VALUE ||
-      loom_low_register_type_unit_count(type) != 1) {
-    return false;
-  }
-  const loom_type_t* value_type = loom_type_register_value_type(type);
-  return value_type != NULL && loom_type_is_scalar(*value_type);
+  loom_scalar_type_t scalar_type = 0;
+  return loom_vm_value_register_scalar_type(type, &scalar_type);
 }
 
 static iree_status_t loom_vm_call_abi_validate_values(

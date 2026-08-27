@@ -85,18 +85,25 @@ loom_cc_library(
   NAME
     lower
   HDRS
+    "lower/constants.h"
     "lower/lower.h"
+    "lower/types.h"
   SRCS
+    "lower/constants.c"
     "lower/lower.c"
   DEPS
     ::descriptors
     iree::base
     iree::base::internal
+    loom::codegen::low::builder
     loom::codegen::low::lower
     loom::error::error_defs
     loom::ir
     loom::ops::index
+    loom::ops::low
+    loom::ops::op_defs
     loom::ops::scalar
+    loom::target::registers
   PUBLIC
 )
 endif()
@@ -107,10 +114,12 @@ loom_cc_library(
     provider
   HDRS
     "abi/materialization.h"
+    "contracts/materialization.h"
     "pass_registry.h"
     "provider.h"
   SRCS
     "abi/materialization.c"
+    "contracts/materialization.c"
     "pass_registry.c"
     "provider.c"
   DEPS
@@ -119,6 +128,7 @@ loom_cc_library(
     ::ops
     iree::base
     iree::vm
+    loom::codegen::low::builder
     loom::codegen::low::function
     loom::ir
     loom::ops::low
@@ -129,7 +139,6 @@ loom_cc_library(
     loom::rewrite::rewriter
     loom::target::low_descriptor_registry
     loom::target::provider
-    loom::target::registers
     loom::target::types
     loom::util::walk
   PUBLIC
@@ -162,6 +171,7 @@ loom_check_test_suite(
     "test/source_low/abi_materialization.loom-test"
     "test/source_low/corpus/numeric_scalar_baseline.loom-test"
     "test/source_low/corpus/numeric_scalar_literals.loom-test"
+    "test/source_low/function_contracts.loom-test"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_baseline.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_literals.loom-test"

@@ -798,10 +798,7 @@ CONTROL_ASSERT = core_instruction(
             "sequential successor must follow this record.",
         ),
         preconditions=(),
-        success=(
-            "A nonzero condition advances the program counter by four bytes "
-            "without inspecting the message ref.",
-        ),
+        success=("A nonzero condition advances the program counter by four bytes.",),
         failures=(
             FailureCase(
                 "failed_precondition",

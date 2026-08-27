@@ -28,6 +28,8 @@ def test_descriptors_preserve_instruction_identity() -> None:
     ):
         assert descriptor.encoding_id == projection.instruction.opcode
         assert descriptor.key == projection.key
+        assert descriptor.mnemonic == projection.mnemonic
+        assert descriptor.asm_forms
 
 
 def test_source_rows_reference_projected_descriptors() -> None:

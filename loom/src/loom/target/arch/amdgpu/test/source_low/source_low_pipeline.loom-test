@@ -346,6 +346,7 @@ pass.pipeline<module> @__loom_check_prepared_low pipeline {
         amdgpu-materialize-hal-kernel-abi
       }
       where target(abi = "vm_function", codegen = "vm") {
+        vm-materialize-function-contracts
         vm-materialize-call-abi
       }
       canonicalize
