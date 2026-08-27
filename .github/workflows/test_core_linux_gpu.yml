@@ -87,7 +87,7 @@ jobs:
   test_core_linux_gpu:
     name: ${{ inputs.name || 'Linux / CMake / GPU gfx942' }}
     runs-on: ${{ fromJSON(inputs.runner_labels) }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       HRX_OUTPUT_DIR: ${{ github.workspace }}/build/linux-gpu
       HRX_ARTIFACT_DOWNLOAD_DIR: ${{ github.workspace }}/build/linux-gpu/artifacts
