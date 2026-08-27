@@ -27,6 +27,7 @@ loom_cc_library(
     loom::analysis::symbol_liveness
     loom::analysis::symbol_references
     loom::analysis::template_provider_catalog
+    loom::decision::predicate
     loom::error::error_defs
     loom::ir
     loom::ir::facts

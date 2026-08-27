@@ -29,6 +29,7 @@ loom_cc_library(
         "//loom/src/loom/analysis:symbol_liveness",
         "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/analysis:template_provider_catalog",
+        "//loom/src/loom/decision:predicate",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",

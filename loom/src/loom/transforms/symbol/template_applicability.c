@@ -8,28 +8,9 @@
 
 #include <stdint.h>
 
+#include "loom/decision/predicate.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/template/ops.h"
-
-typedef enum loom_template_predicate_arg_kind_e {
-  LOOM_TEMPLATE_PREDICATE_ARG_INVALID = 0,
-  LOOM_TEMPLATE_PREDICATE_ARG_CONST = 1,
-  LOOM_TEMPLATE_PREDICATE_ARG_VALUE = 2,
-} loom_template_predicate_arg_kind_t;
-
-typedef struct loom_template_predicate_arg_t {
-  // Resolved argument category.
-  loom_template_predicate_arg_kind_t kind;
-
-  // Application-site SSA value when kind is VALUE.
-  loom_value_id_t value_id;
-
-  // Integer literal when kind is CONST.
-  int64_t constant;
-
-  // Scalar facts for the literal or application-site SSA value.
-  loom_value_facts_t facts;
-} loom_template_predicate_arg_t;
 
 static loom_value_slice_t loom_template_applicability_application_operands(
     const loom_op_t* application_op) {
@@ -168,23 +149,21 @@ static bool loom_template_applicability_remap_contract_value(
 }
 
 static void loom_template_predicate_arg_initialize(
-    loom_template_predicate_arg_t* out_arg) {
-  *out_arg = (loom_template_predicate_arg_t){
-      .kind = LOOM_TEMPLATE_PREDICATE_ARG_INVALID,
-      .value_id = LOOM_VALUE_ID_INVALID,
+    loom_decision_predicate_operand_t* out_arg) {
+  *out_arg = (loom_decision_predicate_operand_t){
       .facts = loom_value_facts_unknown(),
+      .identity = LOOM_DECISION_OPERAND_IDENTITY_NONE,
   };
 }
 
 static bool loom_template_applicability_resolve_application_value_arg(
     const loom_module_t* application_module,
     const loom_template_applicability_facts_t* application_facts,
-    loom_value_id_t value_id, loom_template_predicate_arg_t* out_arg) {
+    loom_value_id_t value_id, loom_decision_predicate_operand_t* out_arg) {
   if (value_id >= application_module->values.count) {
     return false;
   }
-  out_arg->kind = LOOM_TEMPLATE_PREDICATE_ARG_VALUE;
-  out_arg->value_id = value_id;
+  out_arg->identity = value_id;
   if (application_facts->values) {
     out_arg->facts =
         loom_value_fact_table_lookup(application_facts->values, value_id);
@@ -200,7 +179,7 @@ static bool loom_template_applicability_resolve_contract_predicate_arg(
     const loom_template_applicability_contract_t* contract,
     const loom_template_applicability_facts_t* application_facts,
     const loom_predicate_t* predicate, uint8_t argument_index,
-    loom_template_predicate_arg_t* out_arg) {
+    loom_decision_predicate_operand_t* out_arg) {
   loom_template_predicate_arg_initialize(out_arg);
   if (argument_index >= predicate->arg_count) {
     return false;
@@ -208,9 +187,8 @@ static bool loom_template_applicability_resolve_contract_predicate_arg(
 
   switch ((loom_predicate_arg_tag_t)predicate->arg_tags[argument_index]) {
     case LOOM_PRED_ARG_CONST:
-      out_arg->kind = LOOM_TEMPLATE_PREDICATE_ARG_CONST;
-      out_arg->constant = predicate->args[argument_index];
-      out_arg->facts = loom_value_facts_exact_i64(out_arg->constant);
+      out_arg->facts =
+          loom_value_facts_exact_i64(predicate->args[argument_index]);
       return true;
     case LOOM_PRED_ARG_VALUE: {
       int64_t raw_value_id = predicate->args[argument_index];
@@ -237,7 +215,7 @@ static bool loom_template_applicability_resolve_application_predicate_arg(
     const loom_module_t* application_module,
     const loom_template_applicability_facts_t* application_facts,
     const loom_predicate_t* predicate, uint8_t argument_index,
-    loom_template_predicate_arg_t* out_arg) {
+    loom_decision_predicate_operand_t* out_arg) {
   loom_template_predicate_arg_initialize(out_arg);
   if (argument_index >= predicate->arg_count) {
     return false;
@@ -245,9 +223,8 @@ static bool loom_template_applicability_resolve_application_predicate_arg(
 
   switch ((loom_predicate_arg_tag_t)predicate->arg_tags[argument_index]) {
     case LOOM_PRED_ARG_CONST:
-      out_arg->kind = LOOM_TEMPLATE_PREDICATE_ARG_CONST;
-      out_arg->constant = predicate->args[argument_index];
-      out_arg->facts = loom_value_facts_exact_i64(out_arg->constant);
+      out_arg->facts =
+          loom_value_facts_exact_i64(predicate->args[argument_index]);
       return true;
     case LOOM_PRED_ARG_VALUE: {
       const int64_t raw_value_id = predicate->args[argument_index];
@@ -265,17 +242,18 @@ static bool loom_template_applicability_resolve_application_predicate_arg(
 }
 
 static loom_template_provider_feasibility_t
-loom_template_applicability_feasibility_from_bool(bool value) {
-  return value ? LOOM_TEMPLATE_PROVIDER_MATCH : LOOM_TEMPLATE_PROVIDER_REJECT;
-}
-
-static bool loom_template_predicate_arg_exact_i64(
-    const loom_template_predicate_arg_t* arg, int64_t* out_value) {
-  if (arg->kind == LOOM_TEMPLATE_PREDICATE_ARG_CONST) {
-    *out_value = arg->constant;
-    return true;
+loom_template_applicability_feasibility_from_truth(
+    loom_decision_truth_t truth) {
+  switch (truth) {
+    case LOOM_DECISION_TRUTH_FALSE:
+      return LOOM_TEMPLATE_PROVIDER_REJECT;
+    case LOOM_DECISION_TRUTH_TRUE:
+      return LOOM_TEMPLATE_PROVIDER_MATCH;
+    case LOOM_DECISION_TRUTH_UNKNOWN:
+      return LOOM_TEMPLATE_PROVIDER_MAYBE;
   }
-  return loom_value_facts_as_exact_i64(arg->facts, out_value);
+  IREE_ASSERT_UNREACHABLE("invalid decision truth value");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
 static bool loom_template_predicate_relation_kind(
@@ -305,27 +283,27 @@ static bool loom_template_predicate_relation_kind(
 }
 
 static bool loom_template_predicate_arg_as_condition_operand(
-    const loom_template_predicate_arg_t* arg,
+    const loom_decision_predicate_operand_t* arg,
     loom_condition_integer_operand_t* out_operand) {
   *out_operand = (loom_condition_integer_operand_t){0};
-  switch (arg->kind) {
-    case LOOM_TEMPLATE_PREDICATE_ARG_CONST:
-      out_operand->kind = LOOM_CONDITION_INTEGER_OPERAND_CONSTANT;
-      out_operand->constant = arg->constant;
-      return true;
-    case LOOM_TEMPLATE_PREDICATE_ARG_VALUE:
-      out_operand->kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE;
-      out_operand->value_id = arg->value_id;
-      return true;
-    default:
-      return false;
+  if (arg->identity != LOOM_DECISION_OPERAND_IDENTITY_NONE) {
+    out_operand->kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE;
+    out_operand->value_id = arg->identity;
+    return true;
   }
+  int64_t constant = 0;
+  if (!loom_value_facts_as_exact_i64(arg->facts, &constant)) {
+    return false;
+  }
+  out_operand->kind = LOOM_CONDITION_INTEGER_OPERAND_CONSTANT;
+  out_operand->constant = constant;
+  return true;
 }
 
 static loom_template_provider_feasibility_t
 loom_template_applicability_evaluate_relation(
-    const loom_template_predicate_arg_t* lhs,
-    const loom_template_predicate_arg_t* rhs, uint8_t predicate_kind,
+    const loom_decision_predicate_operand_t* lhs,
+    const loom_decision_predicate_operand_t* rhs, uint8_t predicate_kind,
     const loom_template_applicability_facts_t* application_facts) {
   loom_condition_integer_relation_t queried_relation = {0};
   if (loom_template_predicate_relation_kind(predicate_kind,
@@ -338,177 +316,21 @@ loom_template_applicability_evaluate_relation(
     if (loom_condition_fact_set_proves_integer_relation(
             &application_facts->path, application_facts->values,
             &queried_relation, &relation_result)) {
-      return loom_template_applicability_feasibility_from_bool(relation_result);
+      return relation_result ? LOOM_TEMPLATE_PROVIDER_MATCH
+                             : LOOM_TEMPLATE_PROVIDER_REJECT;
     }
   }
 
-  if (lhs->kind == LOOM_TEMPLATE_PREDICATE_ARG_VALUE &&
-      rhs->kind == LOOM_TEMPLATE_PREDICATE_ARG_VALUE &&
-      lhs->value_id == rhs->value_id) {
-    switch ((loom_predicate_kind_t)predicate_kind) {
-      case LOOM_PREDICATE_EQ:
-      case LOOM_PREDICATE_LE:
-      case LOOM_PREDICATE_GE:
-        return LOOM_TEMPLATE_PROVIDER_MATCH;
-      case LOOM_PREDICATE_NE:
-      case LOOM_PREDICATE_LT:
-      case LOOM_PREDICATE_GT:
-        return LOOM_TEMPLATE_PROVIDER_REJECT;
-      default:
-        return LOOM_TEMPLATE_PROVIDER_MAYBE;
-    }
-  }
-
-  int64_t lhs_exact = 0;
-  int64_t rhs_exact = 0;
-  if (loom_template_predicate_arg_exact_i64(lhs, &lhs_exact) &&
-      loom_template_predicate_arg_exact_i64(rhs, &rhs_exact)) {
-    switch ((loom_predicate_kind_t)predicate_kind) {
-      case LOOM_PREDICATE_EQ:
-        return loom_template_applicability_feasibility_from_bool(lhs_exact ==
-                                                                 rhs_exact);
-      case LOOM_PREDICATE_NE:
-        return loom_template_applicability_feasibility_from_bool(lhs_exact !=
-                                                                 rhs_exact);
-      case LOOM_PREDICATE_LT:
-        return loom_template_applicability_feasibility_from_bool(lhs_exact <
-                                                                 rhs_exact);
-      case LOOM_PREDICATE_LE:
-        return loom_template_applicability_feasibility_from_bool(lhs_exact <=
-                                                                 rhs_exact);
-      case LOOM_PREDICATE_GT:
-        return loom_template_applicability_feasibility_from_bool(lhs_exact >
-                                                                 rhs_exact);
-      case LOOM_PREDICATE_GE:
-        return loom_template_applicability_feasibility_from_bool(lhs_exact >=
-                                                                 rhs_exact);
-      default:
-        return LOOM_TEMPLATE_PROVIDER_MAYBE;
-    }
-  }
-
-  if (loom_value_facts_is_float(lhs->facts) ||
-      loom_value_facts_is_float(rhs->facts)) {
-    return LOOM_TEMPLATE_PROVIDER_MAYBE;
-  }
-
-  switch ((loom_predicate_kind_t)predicate_kind) {
-    case LOOM_PREDICATE_EQ:
-      if (lhs->facts.range_hi < rhs->facts.range_lo ||
-          rhs->facts.range_hi < lhs->facts.range_lo) {
-        return LOOM_TEMPLATE_PROVIDER_REJECT;
-      }
-      return LOOM_TEMPLATE_PROVIDER_MAYBE;
-    case LOOM_PREDICATE_NE:
-      if (lhs->facts.range_hi < rhs->facts.range_lo ||
-          rhs->facts.range_hi < lhs->facts.range_lo) {
-        return LOOM_TEMPLATE_PROVIDER_MATCH;
-      }
-      return LOOM_TEMPLATE_PROVIDER_MAYBE;
-    case LOOM_PREDICATE_LT:
-      if (lhs->facts.range_hi < rhs->facts.range_lo) {
-        return LOOM_TEMPLATE_PROVIDER_MATCH;
-      }
-      if (lhs->facts.range_lo >= rhs->facts.range_hi) {
-        return LOOM_TEMPLATE_PROVIDER_REJECT;
-      }
-      return LOOM_TEMPLATE_PROVIDER_MAYBE;
-    case LOOM_PREDICATE_LE:
-      if (lhs->facts.range_hi <= rhs->facts.range_lo) {
-        return LOOM_TEMPLATE_PROVIDER_MATCH;
-      }
-      if (lhs->facts.range_lo > rhs->facts.range_hi) {
-        return LOOM_TEMPLATE_PROVIDER_REJECT;
-      }
-      return LOOM_TEMPLATE_PROVIDER_MAYBE;
-    case LOOM_PREDICATE_GT:
-      if (lhs->facts.range_lo > rhs->facts.range_hi) {
-        return LOOM_TEMPLATE_PROVIDER_MATCH;
-      }
-      if (lhs->facts.range_hi <= rhs->facts.range_lo) {
-        return LOOM_TEMPLATE_PROVIDER_REJECT;
-      }
-      return LOOM_TEMPLATE_PROVIDER_MAYBE;
-    case LOOM_PREDICATE_GE:
-      if (lhs->facts.range_lo >= rhs->facts.range_hi) {
-        return LOOM_TEMPLATE_PROVIDER_MATCH;
-      }
-      if (lhs->facts.range_hi < rhs->facts.range_lo) {
-        return LOOM_TEMPLATE_PROVIDER_REJECT;
-      }
-      return LOOM_TEMPLATE_PROVIDER_MAYBE;
-    default:
-      return LOOM_TEMPLATE_PROVIDER_MAYBE;
-  }
-}
-
-static loom_template_provider_feasibility_t
-loom_template_applicability_evaluate_multiple(
-    const loom_template_predicate_arg_t* value_arg, int64_t divisor) {
-  if (divisor <= 0 || loom_value_facts_is_float(value_arg->facts)) {
-    return LOOM_TEMPLATE_PROVIDER_MAYBE;
-  }
-  int64_t exact_value = 0;
-  if (loom_template_predicate_arg_exact_i64(value_arg, &exact_value)) {
-    return loom_template_applicability_feasibility_from_bool(
-        exact_value % divisor == 0);
-  }
-  if (loom_value_facts_divisible_by(value_arg->facts, divisor)) {
-    return LOOM_TEMPLATE_PROVIDER_MATCH;
-  }
-  if (value_arg->facts.range_lo > 0 && value_arg->facts.range_hi < divisor) {
-    return LOOM_TEMPLATE_PROVIDER_REJECT;
-  }
-  if (value_arg->facts.range_hi < 0 && value_arg->facts.range_lo > -divisor) {
-    return LOOM_TEMPLATE_PROVIDER_REJECT;
-  }
-  return LOOM_TEMPLATE_PROVIDER_MAYBE;
-}
-
-static loom_template_provider_feasibility_t
-loom_template_applicability_evaluate_pow2(
-    const loom_template_predicate_arg_t* value_arg) {
-  if (loom_value_facts_is_float(value_arg->facts)) {
-    return LOOM_TEMPLATE_PROVIDER_MAYBE;
-  }
-  if (loom_value_facts_is_power_of_two(value_arg->facts)) {
-    return LOOM_TEMPLATE_PROVIDER_MATCH;
-  }
-  int64_t exact_value = 0;
-  if (loom_template_predicate_arg_exact_i64(value_arg, &exact_value)) {
-    return LOOM_TEMPLATE_PROVIDER_REJECT;
-  }
-  if (value_arg->facts.range_hi < 1) {
-    return LOOM_TEMPLATE_PROVIDER_REJECT;
-  }
-  return LOOM_TEMPLATE_PROVIDER_MAYBE;
-}
-
-static loom_template_provider_feasibility_t
-loom_template_applicability_evaluate_range(
-    const loom_template_predicate_arg_t* value_arg, int64_t lower_bound,
-    int64_t upper_bound) {
-  if (lower_bound > upper_bound) {
-    return LOOM_TEMPLATE_PROVIDER_REJECT;
-  }
-  if (loom_value_facts_is_float(value_arg->facts)) {
-    return LOOM_TEMPLATE_PROVIDER_MAYBE;
-  }
-  if (value_arg->facts.range_lo >= lower_bound &&
-      value_arg->facts.range_hi <= upper_bound) {
-    return LOOM_TEMPLATE_PROVIDER_MATCH;
-  }
-  if (value_arg->facts.range_hi < lower_bound ||
-      value_arg->facts.range_lo > upper_bound) {
-    return LOOM_TEMPLATE_PROVIDER_REJECT;
-  }
-  return LOOM_TEMPLATE_PROVIDER_MAYBE;
+  const loom_decision_predicate_operand_t operands[3] = {*lhs, *rhs};
+  return loom_template_applicability_feasibility_from_truth(
+      loom_decision_predicate_evaluate(predicate_kind, operands));
 }
 
 static loom_template_provider_feasibility_t
 loom_template_applicability_evaluate_resolved_predicate(
     const loom_template_applicability_facts_t* application_facts,
-    const loom_predicate_t* predicate, loom_template_predicate_arg_t* args) {
+    const loom_predicate_t* predicate,
+    loom_decision_predicate_operand_t args[3]) {
   switch ((loom_predicate_kind_t)predicate->kind) {
     case LOOM_PREDICATE_EQ:
     case LOOM_PREDICATE_NE:
@@ -518,34 +340,26 @@ loom_template_applicability_evaluate_resolved_predicate(
     case LOOM_PREDICATE_GE:
       return loom_template_applicability_evaluate_relation(
           &args[0], &args[1], predicate->kind, application_facts);
-    case LOOM_PREDICATE_MUL: {
-      int64_t divisor = 0;
-      if (!loom_template_predicate_arg_exact_i64(&args[1], &divisor)) {
-        return LOOM_TEMPLATE_PROVIDER_MAYBE;
-      }
-      return loom_template_applicability_evaluate_multiple(&args[0], divisor);
-    }
     case LOOM_PREDICATE_MIN:
       return loom_template_applicability_evaluate_relation(
           &args[0], &args[1], LOOM_PREDICATE_GE, application_facts);
     case LOOM_PREDICATE_MAX:
       return loom_template_applicability_evaluate_relation(
           &args[0], &args[1], LOOM_PREDICATE_LE, application_facts);
+    case LOOM_PREDICATE_MUL:
     case LOOM_PREDICATE_POW2:
-      return loom_template_applicability_evaluate_pow2(&args[0]);
-    case LOOM_PREDICATE_RANGE: {
-      int64_t lower_bound = 0;
-      int64_t upper_bound = 0;
-      if (!loom_template_predicate_arg_exact_i64(&args[1], &lower_bound) ||
-          !loom_template_predicate_arg_exact_i64(&args[2], &upper_bound)) {
-        return LOOM_TEMPLATE_PROVIDER_MAYBE;
-      }
-      return loom_template_applicability_evaluate_range(&args[0], lower_bound,
-                                                        upper_bound);
-    }
-    default:
-      return LOOM_TEMPLATE_PROVIDER_MAYBE;
+    case LOOM_PREDICATE_RANGE:
+    case LOOM_PREDICATE_NOT_NAN:
+    case LOOM_PREDICATE_NOT_INF:
+    case LOOM_PREDICATE_FINITE:
+      return loom_template_applicability_feasibility_from_truth(
+          loom_decision_predicate_evaluate(predicate->kind, args));
+    case LOOM_PREDICATE_COUNT_:
+      IREE_ASSERT_UNREACHABLE("invalid template predicate kind");
+      IREE_BUILTIN_UNREACHABLE();
   }
+  IREE_ASSERT_UNREACHABLE("invalid template predicate kind");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
 static bool loom_template_applicability_predicate_arity_is_valid(
@@ -567,7 +381,7 @@ loom_template_applicability_evaluate_contract_predicate(
     return LOOM_TEMPLATE_PROVIDER_MAYBE;
   }
 
-  loom_template_predicate_arg_t args[3];
+  loom_decision_predicate_operand_t args[3];
   for (uint8_t i = 0; i < predicate->arg_count; ++i) {
     if (!loom_template_applicability_resolve_contract_predicate_arg(
             application_module, application_op, contract, application_facts,
@@ -588,7 +402,7 @@ loom_template_applicability_evaluate_application_predicate(
     return LOOM_TEMPLATE_PROVIDER_MAYBE;
   }
 
-  loom_template_predicate_arg_t args[3];
+  loom_decision_predicate_operand_t args[3];
   for (uint8_t i = 0; i < predicate->arg_count; ++i) {
     if (!loom_template_applicability_resolve_application_predicate_arg(
             application_module, application_facts, predicate, i, &args[i])) {
