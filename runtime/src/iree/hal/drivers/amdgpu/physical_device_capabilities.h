@@ -10,6 +10,7 @@
 #include "iree/base/api.h"
 #include "iree/hal/device.h"
 #include "iree/hal/drivers/amdgpu/aql_prepublished_kernarg_storage.h"
+#include "iree/hal/drivers/amdgpu/util/aql_ring.h"
 #include "iree/hal/drivers/amdgpu/util/kernarg_ring.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_capabilities.h"
@@ -340,6 +341,15 @@ bool iree_hal_amdgpu_memory_system_requires_svm_access_attributes(
 iree_hal_amdgpu_aql_prepublished_kernarg_storage_t
 iree_hal_amdgpu_select_prepublished_kernarg_storage(
     hsa_amd_memory_pool_t fine_block_memory_pool, bool direct_host_access);
+
+// Selects storage for raw dispatch-profiling completion signals.
+// PM4-emulated queues may retire completion signals from a ROCr host worker and
+// therefore use the shared host pool. Native queues use the device-local pool.
+hsa_amd_memory_pool_t
+iree_hal_amdgpu_select_profiling_completion_signal_memory_pool(
+    hsa_amd_memory_pool_t device_memory_pool,
+    hsa_amd_memory_pool_t host_memory_pool,
+    iree_hal_amdgpu_aql_queue_execution_mode_t execution_mode);
 
 // Selects AMD vendor AQL packet and PM4 packet-family capabilities from the
 // parsed gfx IP version.

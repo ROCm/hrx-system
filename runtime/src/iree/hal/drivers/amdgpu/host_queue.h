@@ -84,7 +84,7 @@ typedef struct iree_hal_amdgpu_host_queue_post_drain_action_t
 
 // Memory policy used for queue profiling records.
 typedef struct iree_hal_amdgpu_host_queue_profiling_memory_t {
-  // HSA memory pool used for device-owned raw completion-signal records.
+  // HSA memory pool used for raw completion-signal timestamp records.
   hsa_amd_memory_pool_t signal_memory_pool;
   // HSA memory pool used for host-readable, device-writable event records.
   hsa_amd_memory_pool_t event_memory_pool;
@@ -649,6 +649,9 @@ void iree_hal_amdgpu_host_queue_enqueue_post_drain_action(
 // ring used for queue-ordered submission metadata. Zero disables the optional
 // upload ring; non-zero values must be powers of two.
 //
+// |aql_queue_execution_mode| identifies whether the GPU or a ROCr host worker
+// consumes AQL packets and selects the matching doorbell notification path.
+//
 // |vendor_packet_capabilities| describes the AQL/PM4 vendor-packet support
 // selected from the physical device ISA. Queues allocate dynamic PM4 IB slots
 // when AQL_PM4_IB is available so BARRIER_VALUE-based CDNA queues can still use
@@ -675,6 +678,7 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
     iree_hal_queue_affinity_t queue_affinity, iree_host_size_t queue_ordinal,
     iree_host_size_t physical_queue_ordinal,
     iree_thread_affinity_t completion_thread_affinity,
+    iree_hal_amdgpu_aql_queue_execution_mode_t aql_queue_execution_mode,
     iree_hal_amdgpu_wait_barrier_strategy_t wait_barrier_strategy,
     iree_hal_amdgpu_vendor_packet_capability_flags_t vendor_packet_capabilities,
     iree_hal_amdgpu_pm4_timestamp_strategy_t pm4_timestamp_strategy,

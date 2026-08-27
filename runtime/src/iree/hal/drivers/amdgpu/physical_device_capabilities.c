@@ -775,6 +775,16 @@ iree_hal_amdgpu_select_prepublished_kernarg_storage(
   return iree_hal_amdgpu_aql_prepublished_kernarg_storage_device_fine_host_coherent();
 }
 
+hsa_amd_memory_pool_t
+iree_hal_amdgpu_select_profiling_completion_signal_memory_pool(
+    hsa_amd_memory_pool_t device_memory_pool,
+    hsa_amd_memory_pool_t host_memory_pool,
+    iree_hal_amdgpu_aql_queue_execution_mode_t execution_mode) {
+  return execution_mode == IREE_HAL_AMDGPU_AQL_QUEUE_EXECUTION_MODE_PM4_EMULATED
+             ? host_memory_pool
+             : device_memory_pool;
+}
+
 iree_hal_amdgpu_vendor_packet_capability_flags_t
 iree_hal_amdgpu_select_vendor_packet_capabilities(
     iree_hal_amdgpu_gfxip_version_t version) {

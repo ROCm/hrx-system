@@ -44,7 +44,7 @@ iree_hal_amdgpu_host_queue_require_profiling_signal_memory_pool(
   }
   return iree_make_status(
       IREE_STATUS_UNAVAILABLE,
-      "AMDGPU HSA timestamp profiling requires device-local signal memory");
+      "AMDGPU HSA timestamp profiling requires completion-signal memory");
 }
 
 static iree_status_t
@@ -72,12 +72,12 @@ iree_hal_amdgpu_host_queue_initialize_profiling_completion_signals(
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, signal_count);
 
-  // Raw profiling signals are command-processor timestamp scratch records that
-  // intentionally live in device-local memory. They are not ROCR-created host
-  // HSA signal objects, but the packet completion_signal field still carries a
-  // signal ABI pointer; initialize and arm the ABI-visible user-signal fields
-  // on-device so stricter CP implementations treat each dispatch completion as
-  // a normal signal transition while populating start/end timestamps.
+  // Raw profiling signals are command-processor timestamp scratch records.
+  // They are not ROCR-created host HSA signal objects, but the packet
+  // completion_signal field still carries a signal ABI pointer; initialize and
+  // arm the ABI-visible user-signal fields on-device so both hardware queues
+  // and host-translated queues treat each dispatch completion as a normal
+  // signal transition while populating start/end timestamps.
   iree_hsa_kernel_dispatch_packet_t dispatch_packet;
   memset(&dispatch_packet, 0, sizeof(dispatch_packet));
   iree_hal_amdgpu_dispatch_timestamp_signal_initialize_args_t kernargs;

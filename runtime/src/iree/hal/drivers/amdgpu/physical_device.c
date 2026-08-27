@@ -892,7 +892,7 @@ iree_hal_amdgpu_physical_device_initialize_device_library_and_blit_context(
 }
 
 static iree_status_t
-iree_hal_amdgpu_physical_device_initialize_vendor_packet_strategy(
+iree_hal_amdgpu_physical_device_initialize_queue_execution_strategy(
     const iree_hal_amdgpu_system_t* system,
     const iree_hal_amdgpu_physical_device_options_t* options,
     hsa_agent_t device_agent,
@@ -908,10 +908,24 @@ iree_hal_amdgpu_physical_device_initialize_vendor_packet_strategy(
   const iree_hal_amdgpu_gfxip_version_t gfxip_version =
       agent_target->primary_isa.identity.version;
 
+  iree_hal_amdgpu_aql_queue_execution_mode_t aql_queue_execution_mode;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_query_aql_queue_execution_mode(
+      &system->libhsa, device_agent, &aql_queue_execution_mode));
   iree_hal_amdgpu_vendor_packet_capability_flags_t vendor_packet_capabilities =
-      iree_hal_amdgpu_select_vendor_packet_capabilities(gfxip_version);
+      0;
   iree_hal_amdgpu_pm4_timestamp_strategy_t pm4_timestamp_strategy =
-      iree_hal_amdgpu_select_pm4_timestamp_strategy(gfxip_version);
+      IREE_HAL_AMDGPU_PM4_TIMESTAMP_STRATEGY_NONE;
+  // ROCr's PM4-emulated queues only promise the core AQL packet families. Its
+  // host translator does not expose vendor PM4 IB execution as a public
+  // contract. Native queues are consumed by the GPU and can use packet
+  // families supported by the agent's gfx IP.
+  if (aql_queue_execution_mode ==
+      IREE_HAL_AMDGPU_AQL_QUEUE_EXECUTION_MODE_NATIVE) {
+    vendor_packet_capabilities =
+        iree_hal_amdgpu_select_vendor_packet_capabilities(gfxip_version);
+    pm4_timestamp_strategy =
+        iree_hal_amdgpu_select_pm4_timestamp_strategy(gfxip_version);
+  }
   iree_hal_amdgpu_wait_barrier_strategy_t wait_barrier_strategy =
       IREE_HAL_AMDGPU_WAIT_BARRIER_STRATEGY_DEFER;
   if (!options->force_wait_barrier_defer) {
@@ -919,6 +933,7 @@ iree_hal_amdgpu_physical_device_initialize_vendor_packet_strategy(
         vendor_packet_capabilities);
   }
   out_physical_device->agent_target = agent_target;
+  out_physical_device->aql_queue_execution_mode = aql_queue_execution_mode;
   out_physical_device->vendor_packet_capabilities = vendor_packet_capabilities;
   out_physical_device->wait_barrier_strategy = wait_barrier_strategy;
   out_physical_device->pm4_timestamp_strategy = pm4_timestamp_strategy;
@@ -1052,8 +1067,9 @@ iree_status_t iree_hal_amdgpu_physical_device_initialize(
             system, device_agent, device_ordinal, out_physical_device);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_amdgpu_physical_device_initialize_vendor_packet_strategy(
-        system, options, device_agent, out_physical_device);
+    status =
+        iree_hal_amdgpu_physical_device_initialize_queue_execution_strategy(
+            system, options, device_agent, out_physical_device);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_physical_device_initialize_atomic_pm4_context(
@@ -1220,13 +1236,19 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
   iree_hal_amdgpu_physical_device_select_kernarg_ring_memory(
       physical_device, host_memory_pools, &kernarg_ring_memory);
   iree_hal_amdgpu_host_queue_profiling_memory_t profiling_memory = {0};
-  // Raw profiling completion signals are user-signal-shaped CP timestamp
-  // targets initialized by a device dispatch, so they can live in coarse
-  // device memory.
+  hsa_amd_memory_pool_t device_signal_memory_pool = {0};
   if (physical_device->coarse_block_pools.small.is_initialized) {
-    profiling_memory.signal_memory_pool =
+    device_signal_memory_pool =
         physical_device->coarse_block_pools.small.memory_pool;
   }
+  // Raw profiling completion signals are user-signal-shaped CP timestamp
+  // targets. Native AQL queues retire them on the device. ROCr's PM4-emulated
+  // queues may retire them from the host translation worker when the device
+  // lacks platform atomics, so they require shared fine memory.
+  profiling_memory.signal_memory_pool =
+      iree_hal_amdgpu_select_profiling_completion_signal_memory_pool(
+          device_signal_memory_pool, host_memory_pools->fine_pool,
+          physical_device->aql_queue_execution_mode);
   // Event records are serialized by the CPU after the GPU writes timestamp
   // fields. Prefer CPU-visible device-coarse memory when available so devices
   // without fine-grained memory can still profile. Otherwise fall back to
@@ -1271,6 +1293,7 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
         &kernarg_ring_memory.descriptor, host_memory_pools->fine_pool,
         frontier_tracker, queue_axis, resolved.queue_affinity,
         logical_queue_ordinal, queue_ordinal, completion_thread_affinity,
+        physical_device->aql_queue_execution_mode,
         physical_device->wait_barrier_strategy,
         physical_device->vendor_packet_capabilities,
         physical_device->pm4_timestamp_strategy, epoch_signal_table,

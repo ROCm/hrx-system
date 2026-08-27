@@ -426,6 +426,7 @@ iree_cc_library(
     "queue_upload_ring.h"
     "signal_pool.h"
   SRCS
+    "aql_ring.c"
     "kernarg_ring.c"
     "notification_ring.c"
     "queue_upload_ring.c"
@@ -438,6 +439,7 @@ iree_cc_library(
     iree::base::internal::arena
     iree::base::threading
     iree::hal
+    iree::hal::drivers::amdgpu::abi
     iree::hal::utils::resource_set
   PUBLIC
 )

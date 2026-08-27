@@ -311,6 +311,8 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   // Per-host-queue device-visible control upload ring capacity in bytes. Zero
   // disables the optional upload ring.
   uint32_t host_queue_upload_capacity;
+  // Component that consumes this GPU agent's AQL queue packets.
+  iree_hal_amdgpu_aql_queue_execution_mode_t aql_queue_execution_mode;
   // AMD vendor-packet capabilities selected from this GPU agent's ISA.
   iree_hal_amdgpu_vendor_packet_capability_flags_t vendor_packet_capabilities;
   // Hardware strategy selected for cross-queue epoch waits on this GPU agent.
