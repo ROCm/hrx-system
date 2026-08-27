@@ -1,0 +1,14 @@
+ireevm.target<core> @vm_target
+
+template.decl @vm.double(%value: i32) -> (i32)
+
+func.def public target(@vm_target) @double_once(%value: i32) -> (i32) {
+  %result = template.apply<@vm.double>(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def public target(@vm_target) @double_twice(%value: i32) -> (i32) {
+  %once = template.apply<@vm.double>(%value) : (i32) -> (i32)
+  %twice = template.apply<@vm.double>(%once) : (i32) -> (i32)
+  func.return %twice : i32
+}

@@ -147,6 +147,32 @@ def _declare_command_product(ctx, linked_module):
         manifest = manifest,
     )
 
+def _declare_vm_product(ctx, linked_module):
+    artifact = ctx.actions.declare_file(ctx.label.name + ".vmfb")
+    compile_report = ctx.actions.declare_file(ctx.label.name + ".compile.json")
+    module_name = ctx.attr.module_name or ctx.label.name
+    args = ctx.actions.args()
+    args.add(linked_module)
+    args.add("--backend=vm")
+    args.add("--module-name=%s" % module_name)
+    args.add("--output=%s" % artifact.path)
+    args.add("--compile-report=details")
+    args.add("--compile-report-output=%s" % compile_report.path)
+
+    tool = ctx.toolchains[_LOOM_COMPILE_TOOLCHAIN_TYPE].tool
+    ctx.actions.run(
+        arguments = [args],
+        executable = tool.files_to_run,
+        inputs = depset(direct = [linked_module]),
+        mnemonic = "LoomVmBinary",
+        outputs = [artifact, compile_report],
+        progress_message = "Compiling VM binary %s" % ctx.label,
+    )
+    return struct(
+        artifact = artifact,
+        compile_report = compile_report,
+    )
+
 def _loom_kernel_binary_impl(ctx):
     _require_binary_inputs(ctx)
     amdgpu_profile = _amdgpu_target_profile(ctx, "kernel")
@@ -180,7 +206,7 @@ def _loom_kernel_binary_impl(ctx):
         ),
     ]
 
-def _binary_attrs(target_doc):
+def _binary_link_attrs():
     return {
         "configs": attr.string_dict(
             doc = "Compile-time config symbol values keyed by declaration name.",
@@ -196,16 +222,20 @@ def _binary_attrs(target_doc):
             allow_files = [".loom", ".loombc"],
             doc = "Direct sources assembled as an implicit relocatable library.",
         ),
-        "target": attr.label(
-            mandatory = True,
-            providers = [LoomTargetProfileInfo],
-            doc = target_doc,
-        ),
     }
+
+def _target_binary_attrs(target_doc):
+    attrs = _binary_link_attrs()
+    attrs["target"] = attr.label(
+        mandatory = True,
+        providers = [LoomTargetProfileInfo],
+        doc = target_doc,
+    )
+    return attrs
 
 loom_kernel_binary = rule(
     implementation = _loom_kernel_binary_impl,
-    attrs = _binary_attrs(
+    attrs = _target_binary_attrs(
         "Immutable target profile used for every emitted kernel.",
     ),
     doc = "Links and emits one closed loader-ready kernel product.",
@@ -267,10 +297,47 @@ def _loom_command_binary_impl(ctx):
 
 loom_command_binary = rule(
     implementation = _loom_command_binary_impl,
-    attrs = _binary_attrs(
+    attrs = _target_binary_attrs(
         "Immutable target profile used for every emitted kernel entry.",
     ),
     doc = "Links and emits portable command programs with their kernel executable.",
+    toolchains = [
+        _LOOM_COMPILE_TOOLCHAIN_TYPE,
+        _LOOM_LINK_TOOLCHAIN_TYPE,
+    ],
+)
+
+def _loom_vm_binary_impl(ctx):
+    _require_binary_inputs(ctx)
+    linked = _declare_binary_linked_module(ctx, "VM")
+    product = _declare_vm_product(ctx, linked.linked_module)
+
+    return [
+        DefaultInfo(files = depset([product.artifact])),
+        OutputGroupInfo(
+            compile_reports = depset([product.compile_report]),
+            dependency_reports = depset(linked.dependency_reports),
+            linked_modules = depset([linked.linked_module]),
+        ),
+        LoomBinaryInfo(
+            artifacts = depset([product.artifact]),
+            kind = "vm",
+            linked_module = linked.linked_module,
+            primary_artifact = product.artifact,
+            reports = depset([product.compile_report]),
+            target_profiles = [],
+        ),
+    ]
+
+_vm_binary_attrs = _binary_link_attrs()
+_vm_binary_attrs["module_name"] = attr.string(
+    doc = "Runtime VM module name; defaults to the Bazel target name.",
+)
+
+loom_vm_binary = rule(
+    implementation = _loom_vm_binary_impl,
+    attrs = _vm_binary_attrs,
+    doc = "Links and emits one IREE VM bytecode module from authored VM targets.",
     toolchains = [
         _LOOM_COMPILE_TOOLCHAIN_TYPE,
         _LOOM_LINK_TOOLCHAIN_TYPE,
