@@ -9,11 +9,21 @@
 
 iree_add_all_subdirs()
 
+set(_loom_link_platform_copts "")
+if(LOOM_TARGET_ARCH_AMDGPU)
+  list(APPEND _loom_link_platform_copts "-DLOOM_LINK_HAVE_AMDGPU=1")
+endif()
+set(_loom_link_platform_deps "")
+if(LOOM_TARGET_ARCH_AMDGPU)
+  list(APPEND _loom_link_platform_deps loom::target::arch::amdgpu::artifact_profile)
+endif()
 loom_cc_binary(
   NAME
     loom-link
   SRCS
     "loom-link.c"
+  COPTS
+    ${_loom_link_platform_copts}
   DEPS
     iree::base
     iree::base::internal::arena
@@ -33,6 +43,8 @@ loom_cc_binary(
     loom::link::module_index
     loom::link::planner
     loom::target::configured::provider
+    loom::target::entry_selection
+    loom::target::module_specialization
     loom::target::provider
     loom::tooling::cli::help
     loom::tooling::config
@@ -41,6 +53,7 @@ loom_cc_binary(
     loom::tools::loom-format::convert
     loom::util::stream
     loom::verify
+    ${_loom_link_platform_deps}
 )
 
 iree_execution_test_suite(
@@ -60,6 +73,7 @@ iree_execution_test_suite(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/dependency_transitive.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/merge_inline_kernel_helper.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/merge_many_symbols.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/target_profile_template_selection.loom"
   LABELS
     "hostonly"
 )

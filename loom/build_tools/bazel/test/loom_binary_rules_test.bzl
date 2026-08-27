@@ -57,6 +57,14 @@ def _expect_no_arg_with_suffix(env, args, prefix, suffix):
                 (prefix, suffix, args),
             )
 
+def _expect_no_arg_with_prefix(env, args, prefix):
+    for arg in args:
+        if arg.startswith(prefix):
+            env.fail(
+                "unexpected argument with prefix %r in %r" %
+                (prefix, args),
+            )
+
 def _test_kernel_binary_roots_direct_library_exports(name, **kwargs):
     analysis_test(
         name = name,
@@ -91,6 +99,7 @@ def _test_kernel_binary_roots_direct_library_exports_impl(env, target):
         "--mode=link",
         "--strip-check",
         "--require-resolved-config",
+        "--target-profile=amdgpu:gfx11-generic",
         "--to=bc",
     ]:
         if expected_arg not in link_action.argv:
@@ -150,6 +159,11 @@ def _test_kernel_binary_sources_are_an_implicit_library_impl(env, target):
     )
 
     link_action = _find_action(env, actions, "LoomBinaryLink")
+    if "--target-profile=amdgpu:gfx11-generic" not in link_action.argv:
+        env.fail(
+            "expected target profile in link arguments %r" %
+            link_action.argv,
+        )
     _expect_arg_with_suffix(
         env,
         link_action.argv,
@@ -261,6 +275,11 @@ def _test_command_binary_emits_composite_product_impl(env, target):
 
     actions = target[TestingAspectInfo].actions
     link_action = _find_action(env, actions, "LoomBinaryLink")
+    if "--target-profile=amdgpu:gfx11-generic" not in link_action.argv:
+        env.fail(
+            "expected target profile in link arguments %r" %
+            link_action.argv,
+        )
     _expect_arg_with_suffix(
         env,
         link_action.argv,
@@ -440,6 +459,7 @@ def _test_vm_binary_emits_vmfb_product_impl(env, target):
 
     actions = target[TestingAspectInfo].actions
     link_action = _find_action(env, actions, "LoomBinaryLink")
+    _expect_no_arg_with_prefix(env, link_action.argv, "--target-profile=")
     _expect_arg_with_suffix(
         env,
         link_action.argv,

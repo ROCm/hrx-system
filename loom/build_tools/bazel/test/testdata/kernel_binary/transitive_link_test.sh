@@ -22,6 +22,12 @@ grep -q '"schema_version"' "${report_path}"
 linked_text="${TEST_TMPDIR}/linked.loom"
 "${loom_format}" "${linked_module_path}" --to=text --output="${linked_text}"
 grep -q '@scale' "${linked_text}"
+grep -q '@scale_i32_wave32' "${linked_text}"
+grep -q 'amdgpu.target<gfx11-generic>' "${linked_text}"
+if grep -q '@scale_i32_portable' "${linked_text}"; then
+  echo "portable template provider displaced the target-specific provider" >&2
+  exit 1
+fi
 if grep -q '@unused' "${linked_text}"; then
   echo "unused transitive kernel reached the linked product" >&2
   exit 1

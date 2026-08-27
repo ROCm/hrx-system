@@ -85,6 +85,7 @@ def _declare_linked_module(
         transitive_modules,
         roots,
         configs,
+        target_profile,
         output_stem,
         mnemonic,
         progress_message):
@@ -106,6 +107,13 @@ def _declare_linked_module(
     )
     for key in sorted(configs.keys()):
         args.add("--config=%s=%s" % (key, configs[key]))
+    if target_profile:
+        args.add(
+            "--target-profile=%s:%s" % (
+                target_profile.family,
+                target_profile.selector,
+            ),
+        )
 
     tool = ctx.toolchains[_LOOM_LINK_TOOLCHAIN_TYPE].tool
     ctx.actions.run(

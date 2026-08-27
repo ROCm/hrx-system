@@ -1,3 +1,5 @@
+template.decl @test.scale_i32(%value: i32) -> (i32)
+
 kernel.def export("scale") @scale() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 4 : index
@@ -8,7 +10,7 @@ kernel.def export("scale") @scale() {
   %input_view = buffer.view %input[%base] : buffer -> view<4xi32>
   %output_view = buffer.view %output[%base] : buffer -> view<4xi32>
   %value = view.load %input_view[%lane] : view<4xi32> -> i32
-  %scaled = scalar.addi %value, %value : i32
+  %scaled = template.apply<@test.scale_i32>(%value) : (i32) -> (i32)
   view.store %scaled, %output_view[%lane] : i32, view<4xi32>
   kernel.return
 }

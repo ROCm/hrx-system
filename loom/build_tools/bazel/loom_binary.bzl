@@ -55,7 +55,7 @@ def _amdgpu_target_profile(ctx, product_kind):
         )
     return ctx.attr.target[LoomAmdgpuTargetProfileInfo]
 
-def _declare_binary_linked_module(ctx, product_kind):
+def _declare_binary_linked_module(ctx, product_kind, target_profile = None):
     dependency_infos = [dep[LoomLibraryInfo] for dep in ctx.attr.deps]
     dependencies = loom_linking.collect_dependency_modules(dependency_infos)
     direct_modules = list(dependencies.direct)
@@ -78,6 +78,7 @@ def _declare_binary_linked_module(ctx, product_kind):
         transitive_modules = dependencies.transitive,
         roots = ctx.attr.roots,
         configs = ctx.attr.configs,
+        target_profile = target_profile,
         output_stem = ctx.label.name + ".linked",
         mnemonic = "LoomBinaryLink",
         progress_message = "Linking %s binary %s" % (product_kind, ctx.label),
@@ -176,7 +177,14 @@ def _declare_vm_product(ctx, linked_module):
 def _loom_kernel_binary_impl(ctx):
     _require_binary_inputs(ctx)
     amdgpu_profile = _amdgpu_target_profile(ctx, "kernel")
-    linked = _declare_binary_linked_module(ctx, "kernel")
+    linked = _declare_binary_linked_module(
+        ctx,
+        "kernel",
+        target_profile = struct(
+            family = "amdgpu",
+            selector = amdgpu_profile.target,
+        ),
+    )
     product = _declare_amdgpu_kernel_product(
         ctx = ctx,
         linked_module = linked.linked_module,
@@ -248,7 +256,14 @@ loom_kernel_binary = rule(
 def _loom_command_binary_impl(ctx):
     _require_binary_inputs(ctx)
     amdgpu_profile = _amdgpu_target_profile(ctx, "command")
-    linked = _declare_binary_linked_module(ctx, "command")
+    linked = _declare_binary_linked_module(
+        ctx,
+        "command",
+        target_profile = struct(
+            family = "amdgpu",
+            selector = amdgpu_profile.target,
+        ),
+    )
     command_product = _declare_command_product(ctx, linked.linked_module)
     kernel_product = _declare_amdgpu_kernel_product(
         ctx = ctx,

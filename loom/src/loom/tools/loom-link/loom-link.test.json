@@ -20,9 +20,46 @@
             "--print-plan",
             "--list-symbols",
             "--strip-check",
+            "--target-profile=amdgpu:gfx11-generic",
             "--allow-unresolved"
           ]
         }
+      }
+    },
+    {
+      "name": "selects target-constrained provider with target profile",
+      "run": {
+        "tool": "loom-link",
+        "args": [
+          "{srcdir}/testdata/target_profile_template_selection.loom",
+          "--root=@target_profile_entry",
+          "--target-profile=amdgpu:gfx11-generic"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "@wave32_target_profile_transform",
+          "target(@__loom_target_context_0_0)",
+          "amdgpu.target<gfx11-generic> @__loom_target_context_0_0"
+        ],
+        "not_contains": ["@portable_target_profile_transform"]
+      }
+    },
+    {
+      "name": "keeps targetless linking portable without target profile",
+      "run": {
+        "tool": "loom-link",
+        "args": [
+          "{srcdir}/testdata/target_profile_template_selection.loom",
+          "--root=@target_profile_entry"
+        ]
+      },
+      "stdout": {
+        "contains": ["@portable_target_profile_transform"],
+        "not_contains": [
+          "@wave32_target_profile_transform",
+          "amdgpu.target<"
+        ]
       }
     },
     {

@@ -16,9 +16,16 @@ load(
 package(default_visibility = ["//loom/build_tools/bazel/test:__pkg__"])
 
 loom_library(
+    name = "motif",
+    srcs = ["motif.loom"],
+    tags = ["manual"],
+)
+
+loom_library(
     name = "implementation",
     srcs = ["implementation.loom"],
     tags = ["manual"],
+    deps = [":motif"],
 )
 
 loom_library(
