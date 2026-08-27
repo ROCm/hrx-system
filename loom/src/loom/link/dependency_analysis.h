@@ -76,6 +76,18 @@ typedef enum loom_link_dependency_resolution_e {
   LOOM_LINK_DEPENDENCY_RESOLUTION_INCOMPATIBLE = 6,
 } loom_link_dependency_resolution_t;
 
+enum loom_link_dependency_usage_flag_bits_e {
+  // The direct library exposes a same-name exact symbol contract used by the
+  // component.
+  LOOM_LINK_DEPENDENCY_USAGE_FLAG_EXACT = 1u << 0,
+  // The component exports an exact contract also exposed by the direct
+  // library, deliberately forwarding that interface to its consumers.
+  LOOM_LINK_DEPENDENCY_USAGE_FLAG_INTERFACE = 1u << 1,
+  // The direct library contributes a provider for an applied template family.
+  LOOM_LINK_DEPENDENCY_USAGE_FLAG_TEMPLATE = 1u << 2,
+};
+typedef uint32_t loom_link_dependency_usage_flags_t;
+
 // Returns true when |ownership| is valid for a relocatable library.
 static inline bool loom_link_dependency_ownership_satisfied(
     loom_link_dependency_ownership_t ownership) {
@@ -98,6 +110,14 @@ typedef struct loom_link_dependency_candidate_t {
   // identity or are rejected while the index is built.
   loom_link_func_contract_mismatch_t mismatch;
 } loom_link_dependency_candidate_t;
+
+// One declared direct library and how the component uses it.
+typedef struct loom_link_dependency_direct_provider_t {
+  // Index-wide provider ordinal.
+  iree_host_size_t provider_ordinal;
+  // Semantic uses attributed to this provider, or zero when unused.
+  loom_link_dependency_usage_flags_t usage_flags;
+} loom_link_dependency_direct_provider_t;
 
 // One unique authored requirement and its strict ownership result.
 typedef struct loom_link_dependency_requirement_t {
@@ -165,27 +185,13 @@ typedef struct loom_link_dependency_analysis_t {
     // Number of candidate entries.
     iree_host_size_t count;
   } candidates;
-  // Declared direct library providers.
+  // Declared direct library providers and their semantic uses.
   struct {
-    // Caller-order provider ordinals copied into the analysis arena.
-    const iree_host_size_t* values;
-    // Number of direct providers.
+    // Arena-owned entries in caller order.
+    const loom_link_dependency_direct_provider_t* values;
+    // Number of entries.
     iree_host_size_t count;
   } direct_providers;
-  // Direct providers participating in at least one requirement.
-  struct {
-    // Provider ordinals in direct-provider order.
-    const iree_host_size_t* values;
-    // Number of used direct providers.
-    iree_host_size_t count;
-  } used_direct_providers;
-  // Direct providers with no authored exact or template-family use.
-  struct {
-    // Provider ordinals in direct-provider order.
-    const iree_host_size_t* values;
-    // Number of unused direct providers.
-    iree_host_size_t count;
-  } unused_direct_providers;
   // Total exact dependency occurrences scanned in INPUT providers. Exported
   // declarations without internal uses do not contribute to this count.
   iree_host_size_t exact_occurrence_count;

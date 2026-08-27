@@ -20,8 +20,8 @@ typedef struct loom_link_dependency_builder_t {
   iree_arena_allocator_t* scratch_arena;
   // Bitset indexed by provider ordinal for declared direct libraries.
   uint64_t* direct_provider_bits;
-  // Bitset indexed by provider ordinal for direct libraries with a use.
-  uint64_t* used_provider_bits;
+  // Semantic usage flags indexed by provider ordinal.
+  loom_link_dependency_usage_flags_t* direct_provider_usage_flags;
   // Bitset indexed by symbol ordinal for unique exact requirements.
   uint64_t* exact_requirement_bits;
   // Requirement ordinal indexed by exact target symbol ordinal.
@@ -288,8 +288,14 @@ static iree_status_t loom_link_dependency_prepare_direct_providers(
       loom_link_module_index_provider_count(builder->index);
   IREE_RETURN_IF_ERROR(loom_link_dependency_allocate_bits(
       builder->scratch_arena, provider_count, &builder->direct_provider_bits));
-  IREE_RETURN_IF_ERROR(loom_link_dependency_allocate_bits(
-      builder->scratch_arena, provider_count, &builder->used_provider_bits));
+  if (provider_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        builder->scratch_arena, provider_count,
+        sizeof(*builder->direct_provider_usage_flags),
+        (void**)&builder->direct_provider_usage_flags));
+    memset(builder->direct_provider_usage_flags, 0,
+           provider_count * sizeof(*builder->direct_provider_usage_flags));
+  }
   const iree_host_size_t direct_count =
       options ? options->direct_provider_count : 0;
   const iree_host_size_t* direct_ordinals =
@@ -299,11 +305,11 @@ static iree_status_t loom_link_dependency_prepare_direct_providers(
         IREE_STATUS_INVALID_ARGUMENT,
         "direct provider count is non-zero but ordinals are NULL");
   }
-  iree_host_size_t* copied_ordinals = NULL;
+  loom_link_dependency_direct_provider_t* copied_providers = NULL;
   if (direct_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        builder->output_arena, direct_count, sizeof(*copied_ordinals),
-        (void**)&copied_ordinals));
+        builder->output_arena, direct_count, sizeof(*copied_providers),
+        (void**)&copied_providers));
   }
   for (iree_host_size_t i = 0; i < direct_count; ++i) {
     const iree_host_size_t provider_ordinal = direct_ordinals[i];
@@ -322,9 +328,10 @@ static iree_status_t loom_link_dependency_prepare_direct_providers(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "direct provider ordinal is duplicated");
     }
-    copied_ordinals[i] = provider_ordinal;
+    copied_providers[i].provider_ordinal = provider_ordinal;
+    copied_providers[i].usage_flags = 0;
   }
-  builder->analysis.direct_providers.values = copied_ordinals;
+  builder->analysis.direct_providers.values = copied_providers;
   builder->analysis.direct_providers.count = direct_count;
   return iree_ok_status();
 }
@@ -641,12 +648,13 @@ static iree_status_t loom_link_dependency_project_exact_contracts(
   return iree_ok_status();
 }
 
-static void loom_link_dependency_mark_direct_candidate_used(
+static void loom_link_dependency_mark_direct_candidate_usage(
     loom_link_dependency_builder_t* builder,
-    const loom_link_dependency_candidate_t* candidate) {
+    const loom_link_dependency_candidate_t* candidate,
+    loom_link_dependency_usage_flags_t usage_flags) {
   if (candidate->origin == LOOM_LINK_DEPENDENCY_CANDIDATE_DIRECT_LIBRARY) {
-    loom_link_dependency_bit_test_and_set(builder->used_provider_bits,
-                                          candidate->provider_ordinal);
+    builder->direct_provider_usage_flags[candidate->provider_ordinal] |=
+        usage_flags;
   }
 }
 
@@ -699,7 +707,13 @@ static iree_status_t loom_link_dependency_check_exact_candidates(
       inaccessible_compatible_count += candidate->compatible ? 1 : 0;
       continue;
     }
-    loom_link_dependency_mark_direct_candidate_used(builder, candidate);
+    loom_link_dependency_usage_flags_t usage_flags =
+        LOOM_LINK_DEPENDENCY_USAGE_FLAG_EXACT;
+    if (requirement->exported) {
+      usage_flags |= LOOM_LINK_DEPENDENCY_USAGE_FLAG_INTERFACE;
+    }
+    loom_link_dependency_mark_direct_candidate_usage(builder, candidate,
+                                                     usage_flags);
     if (candidate->origin != LOOM_LINK_DEPENDENCY_CANDIDATE_INPUT &&
         candidate->compatible &&
         loom_link_dependency_exact_candidate_is_definition(candidate_symbol)) {
@@ -772,7 +786,8 @@ static void loom_link_dependency_classify_template_candidates(
   for (iree_host_size_t i = 0; i < requirement->candidates.count; ++i) {
     const loom_link_dependency_candidate_t* candidate =
         &candidates[requirement->candidates.first + i];
-    loom_link_dependency_mark_direct_candidate_used(builder, candidate);
+    loom_link_dependency_mark_direct_candidate_usage(
+        builder, candidate, LOOM_LINK_DEPENDENCY_USAGE_FLAG_TEMPLATE);
     switch (candidate->origin) {
       case LOOM_LINK_DEPENDENCY_CANDIDATE_INPUT:
         ++input_count;
@@ -841,48 +856,17 @@ static iree_status_t loom_link_dependency_classify_requirements(
   return status;
 }
 
-static iree_status_t loom_link_dependency_finish_provider_sets(
+static void loom_link_dependency_finish_provider_usage(
     loom_link_dependency_builder_t* builder) {
-  const iree_host_size_t direct_count =
-      builder->analysis.direct_providers.count;
-  iree_host_size_t used_count = 0;
-  for (iree_host_size_t i = 0; i < direct_count; ++i) {
-    if (loom_link_dependency_bit_test(
-            builder->used_provider_bits,
-            builder->analysis.direct_providers.values[i])) {
-      ++used_count;
-    }
+  loom_link_dependency_direct_provider_t* direct_providers =
+      (loom_link_dependency_direct_provider_t*)
+          builder->analysis.direct_providers.values;
+  for (iree_host_size_t i = 0; i < builder->analysis.direct_providers.count;
+       ++i) {
+    direct_providers[i].usage_flags =
+        builder
+            ->direct_provider_usage_flags[direct_providers[i].provider_ordinal];
   }
-  const iree_host_size_t unused_count = direct_count - used_count;
-  iree_host_size_t* used = NULL;
-  iree_host_size_t* unused = NULL;
-  if (used_count != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        builder->output_arena, used_count, sizeof(*used), (void**)&used));
-  }
-  if (unused_count != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        builder->output_arena, unused_count, sizeof(*unused), (void**)&unused));
-  }
-  iree_host_size_t used_position = 0;
-  iree_host_size_t unused_position = 0;
-  for (iree_host_size_t i = 0; i < direct_count; ++i) {
-    const iree_host_size_t provider_ordinal =
-        builder->analysis.direct_providers.values[i];
-    if (loom_link_dependency_bit_test(builder->used_provider_bits,
-                                      provider_ordinal)) {
-      used[used_position++] = provider_ordinal;
-    } else {
-      unused[unused_position++] = provider_ordinal;
-    }
-  }
-  IREE_ASSERT_EQ(used_position, used_count);
-  IREE_ASSERT_EQ(unused_position, unused_count);
-  builder->analysis.used_direct_providers.values = used;
-  builder->analysis.used_direct_providers.count = used_count;
-  builder->analysis.unused_direct_providers.values = unused;
-  builder->analysis.unused_direct_providers.count = unused_count;
-  return iree_ok_status();
 }
 
 iree_status_t loom_link_dependency_analyze(
@@ -937,7 +921,7 @@ iree_status_t loom_link_dependency_analyze(
                                                         allocator);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_link_dependency_finish_provider_sets(&builder);
+    loom_link_dependency_finish_provider_usage(&builder);
   }
   if (iree_status_is_ok(status)) {
     *out_analysis = builder.analysis;

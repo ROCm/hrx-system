@@ -136,6 +136,41 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    dependency_report
+  HDRS
+    "dependency_report.h"
+  SRCS
+    "dependency_report.c"
+  DEPS
+    ::dependency_analysis
+    ::module_index
+    iree::base
+    loom::util::json
+    loom::util::stream
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    dependency_report_test
+  SRCS
+    "dependency_report_test.cc"
+  DEPS
+    ::dependency_analysis
+    ::dependency_report
+    ::module_index
+    iree::base
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::link::testdata::dependency_analysis
+    loom::ops::op_registry
+    loom::util::stream
+)
+
+loom_cc_library(
+  NAME
     linker
   HDRS
     "linker.h"

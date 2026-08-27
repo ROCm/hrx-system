@@ -123,6 +123,37 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "dependency_report",
+    srcs = ["dependency_report.c"],
+    hdrs = ["dependency_report.h"],
+    deps = [
+        ":dependency_analysis",
+        ":module_index",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "dependency_report_test",
+    srcs = ["dependency_report_test.cc"],
+    deps = [
+        ":dependency_analysis",
+        ":dependency_report",
+        ":module_index",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/link/testdata:dependency_analysis",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "linker",
     srcs = ["linker.c"],
     hdrs = ["linker.h"],

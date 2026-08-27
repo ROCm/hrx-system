@@ -371,12 +371,16 @@ TEST_F(LinkDependencyAnalysisTest,
             LOOM_LINK_DEPENDENCY_RESOLUTION_NOT_APPLICABLE);
   EXPECT_EQ(open_template->candidates.count, 0u);
 
-  ASSERT_EQ(analysis.used_direct_providers.count, 1u);
-  EXPECT_EQ(analysis.used_direct_providers.values[0],
+  ASSERT_EQ(analysis.direct_providers.count, 2u);
+  EXPECT_EQ(analysis.direct_providers.values[0].provider_ordinal,
             provider_ordinals[kDirectProvider]);
-  ASSERT_EQ(analysis.unused_direct_providers.count, 1u);
-  EXPECT_EQ(analysis.unused_direct_providers.values[0],
+  EXPECT_EQ(analysis.direct_providers.values[0].usage_flags,
+            LOOM_LINK_DEPENDENCY_USAGE_FLAG_EXACT |
+                LOOM_LINK_DEPENDENCY_USAGE_FLAG_INTERFACE |
+                LOOM_LINK_DEPENDENCY_USAGE_FLAG_TEMPLATE);
+  EXPECT_EQ(analysis.direct_providers.values[1].provider_ordinal,
             provider_ordinals[kUnusedProvider]);
+  EXPECT_EQ(analysis.direct_providers.values[1].usage_flags, 0u);
 }
 
 TEST_F(LinkDependencyAnalysisTest, ReportsAmbiguousDirectExactDefinitions) {
