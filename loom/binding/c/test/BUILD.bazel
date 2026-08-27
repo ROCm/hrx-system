@@ -124,6 +124,19 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "link_dependency_test",
+    srcs = ["link_dependency_test.cc"],
+    deps = [
+        ":test_util",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/test/testdata:link_dependency",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "link_test",
     srcs = ["link_test.cc"],
     deps = [

@@ -1,0 +1,9 @@
+func.decl @direct(%value: i32) -> (i32)
+
+func.decl @transitive(%value: i32) -> (i32)
+
+func.def public @entry(%value: i32) -> (i32) {
+  %direct = func.call @direct(%value) : (i32) -> (i32)
+  %transitive = func.call @transitive(%direct) : (i32) -> (i32)
+  func.return %transitive : i32
+}

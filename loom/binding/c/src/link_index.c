@@ -805,6 +805,12 @@ loomc_context_t* loomc_link_index_context(
   return link_index ? link_index->context : NULL;
 }
 
+loomc_allocator_t loomc_link_index_allocator(
+    const loomc_link_index_t* link_index) {
+  IREE_ASSERT_ARGUMENT(link_index);
+  return link_index->allocator;
+}
+
 const loom_link_module_index_t* loomc_link_index_module_index(
     const loomc_link_index_t* link_index) {
   return link_index ? link_index->index : NULL;

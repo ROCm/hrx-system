@@ -28,6 +28,7 @@ loom_cc_library(
     "include/loomc/iree.h"
     "include/loomc/launch_config.h"
     "include/loomc/link.h"
+    "include/loomc/link_dependency.h"
     "include/loomc/link_index.h"
     "include/loomc/loomc.h"
     "include/loomc/module.h"
@@ -63,6 +64,7 @@ loom_cc_library(
     "src/emit.c"
     "src/launch_config.c"
     "src/link.c"
+    "src/link_dependency.c"
     "src/link_index.c"
     "src/module.c"
     "src/module_function.c"
@@ -99,6 +101,8 @@ loom_cc_library(
     loom::format::text::printer
     loom::ir
     loom::ir::facts
+    loom::link::dependency_analysis
+    loom::link::dependency_report
     loom::link::index_materializer
     loom::link::linker
     loom::link::module_index
@@ -160,6 +164,7 @@ loom_cc_library(
     "include/loomc/iree.h"
     "include/loomc/launch_config.h"
     "include/loomc/link.h"
+    "include/loomc/link_dependency.h"
     "include/loomc/link_index.h"
     "include/loomc/loomc.h"
     "include/loomc/module.h"
