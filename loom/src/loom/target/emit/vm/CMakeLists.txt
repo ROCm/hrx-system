@@ -41,6 +41,7 @@ loom_cc_library(
     loom::ir
     loom::ops::low
     loom::ops::op_defs
+    loom::target::arch::vm::abi_layout
     loom::target::arch::vm::descriptors
     loom::target::low_descriptor_registry
     loom::target::provider

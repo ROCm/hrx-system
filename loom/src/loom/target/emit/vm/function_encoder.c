@@ -9,7 +9,9 @@
 #include <string.h>
 
 #include "iree/vm/bytecode/wire/core/control.h"
+#include "iree/vm/bytecode/wire/core/function.h"
 #include "iree/vm/bytecode/wire/core/opcodes.h"
+#include "iree/vm/bytecode/wire/core/ref.h"
 #include "iree/vm/bytecode/wire/core/value.h"
 #include "iree/vm/module.h"
 #include "loom/codegen/low/frame.h"
@@ -17,6 +19,7 @@
 #include "loom/codegen/low/packet.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/target/arch/vm/abi/layout.h"
 #include "loom/target/arch/vm/descriptors.h"
 #include "loom/target/emit/vm/function_layout.h"
 
@@ -129,9 +132,19 @@ static iree_status_t loom_vm_function_encode_descriptor_packet(
   return loom_bytecode_page_writer_write(writer, record, record_byte_length);
 }
 
+typedef uint8_t loom_vm_function_ref_transfer_t;
+enum loom_vm_function_ref_transfer_e {
+  // Transfer ref state and clear the source register.
+  LOOM_VM_FUNCTION_REF_TRANSFER_MOVE = 0,
+  // Retain the source ref into a distinct owned destination.
+  LOOM_VM_FUNCTION_REF_TRANSFER_RETAIN = 1,
+};
+
 static iree_status_t loom_vm_function_encode_move_group(
     const loom_low_allocation_table_t* allocation,
-    const loom_low_move_group_t* group, loom_bytecode_page_writer_t* writer) {
+    const loom_low_move_group_t* group,
+    loom_vm_function_ref_transfer_t ref_transfer,
+    loom_bytecode_page_writer_t* writer) {
   if (group == NULL) return iree_ok_status();
   const iree_host_size_t move_end = group->moves.start + group->moves.count;
   for (iree_host_size_t i = group->moves.start; i < move_end; ++i) {
@@ -141,19 +154,58 @@ static iree_status_t loom_vm_function_encode_move_group(
     IREE_ASSERT(move->destination.location_kind ==
                 LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER);
     IREE_ASSERT_EQ(move->source.descriptor_reg_class_id,
-                   VM_CORE_REG_CLASS_ID_VALUE);
-    IREE_ASSERT_EQ(move->destination.descriptor_reg_class_id,
-                   VM_CORE_REG_CLASS_ID_VALUE);
+                   move->destination.descriptor_reg_class_id);
     IREE_ASSERT_LT(move->source.location, 256u);
     IREE_ASSERT_LT(move->destination.location, 256u);
-    const iree_vm_isa_value_copy_record_t record = {
-        .opcode_u8 = IREE_VM_ISA_CORE_OPCODE_VALUE_COPY,
-        .dst_v8 = (uint8_t)move->destination.location,
-        .src_v8 = (uint8_t)move->source.location,
-        .zero_padding_u8 = 0,
-    };
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_page_writer_write(writer, &record, sizeof(record)));
+    switch (move->source.descriptor_reg_class_id) {
+      case VM_CORE_REG_CLASS_ID_VALUE: {
+        const iree_vm_isa_value_copy_record_t record = {
+            .opcode_u8 = IREE_VM_ISA_CORE_OPCODE_VALUE_COPY,
+            .dst_v8 = (uint8_t)move->destination.location,
+            .src_v8 = (uint8_t)move->source.location,
+            .zero_padding_u8 = 0,
+        };
+        IREE_RETURN_IF_ERROR(
+            loom_bytecode_page_writer_write(writer, &record, sizeof(record)));
+        break;
+      }
+      case VM_CORE_REG_CLASS_ID_REF: {
+        if (ref_transfer == LOOM_VM_FUNCTION_REF_TRANSFER_RETAIN) {
+          const iree_vm_isa_ref_retain_record_t record = {
+              .opcode_u8 = IREE_VM_ISA_CORE_OPCODE_REF_RETAIN,
+              .dst_r8 = (uint8_t)move->destination.location,
+              .src_r8 = (uint8_t)move->source.location,
+              .zero_padding_u8 = 0,
+          };
+          IREE_RETURN_IF_ERROR(
+              loom_bytecode_page_writer_write(writer, &record, sizeof(record)));
+        } else {
+          const iree_vm_isa_ref_move_record_t record = {
+              .opcode_u8 = IREE_VM_ISA_CORE_OPCODE_REF_MOVE,
+              .dst_r8 = (uint8_t)move->destination.location,
+              .src_r8 = (uint8_t)move->source.location,
+              .zero_padding_u8 = 0,
+          };
+          IREE_RETURN_IF_ERROR(
+              loom_bytecode_page_writer_write(writer, &record, sizeof(record)));
+        }
+        break;
+      }
+      case VM_CORE_REG_CLASS_ID_FUNCTION: {
+        const iree_vm_isa_func_copy_record_t record = {
+            .opcode_u8 = IREE_VM_ISA_CORE_OPCODE_FUNC_COPY,
+            .dst_f8 = (uint8_t)move->destination.location,
+            .src_f8 = (uint8_t)move->source.location,
+            .zero_padding_u8 = 0,
+        };
+        IREE_RETURN_IF_ERROR(
+            loom_bytecode_page_writer_write(writer, &record, sizeof(record)));
+        break;
+      }
+      default:
+        IREE_ASSERT_UNREACHABLE("verified VM physical register class");
+        IREE_BUILTIN_UNREACHABLE();
+    }
   }
   return iree_ok_status();
 }
@@ -226,7 +278,8 @@ static iree_status_t loom_vm_function_encode_control_packet(
             &frame->allocation, packet->node->source_ordinal);
     if (group != NULL) {
       IREE_RETURN_IF_ERROR(loom_vm_function_encode_move_group(
-          &frame->allocation, &group->move_group, writer));
+          &frame->allocation, &group->move_group,
+          LOOM_VM_FUNCTION_REF_TRANSFER_MOVE, writer));
       first_record_offset += (uint32_t)group->move_group.moves.count * 4u;
     }
     if (control_layout->first_byte_length == 0) return iree_ok_status();
@@ -336,8 +389,13 @@ static iree_status_t loom_vm_function_encode_structural_packet(
     const loom_low_allocation_packet_move_group_t* group =
         loom_low_allocation_find_packet_move_group_by_source_ordinal(
             &frame->allocation, packet->node->source_ordinal);
+    const loom_vm_function_ref_transfer_t ref_transfer =
+        loom_low_copy_isa(packet->node->op)
+            ? LOOM_VM_FUNCTION_REF_TRANSFER_RETAIN
+            : LOOM_VM_FUNCTION_REF_TRANSFER_MOVE;
     return loom_vm_function_encode_move_group(
-        &frame->allocation, group != NULL ? &group->move_group : NULL, writer);
+        &frame->allocation, group != NULL ? &group->move_group : NULL,
+        ref_transfer, writer);
   }
   if (loom_low_br_isa(packet->node->op) ||
       loom_low_cond_br_isa(packet->node->op)) {
@@ -350,6 +408,37 @@ static iree_status_t loom_vm_function_encode_structural_packet(
   }
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                           "VM structural operation is not implemented");
+}
+
+static iree_status_t loom_vm_function_claim_direct_abi_location(
+    const loom_module_t* module, loom_value_id_t value_id,
+    loom_vm_call_abi_bank_counts_t* bank_counts, uint32_t* out_location) {
+  *out_location = 0;
+  loom_vm_call_abi_bank_t bank = LOOM_VM_CALL_ABI_BANK_NONE;
+  IREE_RETURN_IF_ERROR(loom_vm_call_abi_classify_type(
+      module, loom_module_value_type(module, value_id), &bank));
+  uint16_t* bank_count = NULL;
+  switch (bank) {
+    case LOOM_VM_CALL_ABI_BANK_VALUE:
+      bank_count = &bank_counts->value;
+      break;
+    case LOOM_VM_CALL_ABI_BANK_REF:
+      bank_count = &bank_counts->ref;
+      break;
+    case LOOM_VM_CALL_ABI_BANK_FUNCTION:
+      bank_count = &bank_counts->function;
+      break;
+    default:
+      IREE_ASSERT_UNREACHABLE("classified VM call ABI bank");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+  if (*bank_count == IREE_VM_CALL_DIRECT_REGISTER_COUNT) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "VM call ABI overflow was not materialized");
+  }
+  *out_location = *bank_count;
+  ++*bank_count;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_vm_function_collect_fixed_values(
@@ -365,10 +454,6 @@ static iree_status_t loom_vm_function_collect_fixed_values(
   uint16_t argument_count = 0;
   const loom_value_id_t* arguments =
       loom_func_like_arg_ids(function_like, &argument_count);
-  if (argument_count > IREE_VM_CALL_DIRECT_REGISTER_COUNT) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "VM call ABI was not materialized before emission");
-  }
 
   const loom_region_t* body =
       loom_low_function_const_body(function->function_op);
@@ -381,12 +466,12 @@ static iree_status_t loom_vm_function_collect_fixed_values(
     const loom_op_t* terminator = body->blocks[i]->last_op;
     if (terminator == NULL || !loom_low_return_isa(terminator)) continue;
     const loom_value_slice_t results = loom_low_return_values(terminator);
-    if (results.count > IREE_VM_CALL_DIRECT_REGISTER_COUNT) {
+    if (!iree_host_size_checked_add(fixed_value_capacity, results.count,
+                                    &fixed_value_capacity)) {
       return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "VM call ABI was not materialized before emission");
+          IREE_STATUS_OUT_OF_RANGE,
+          "VM fixed call-boundary value count exceeds host size");
     }
-    fixed_value_capacity += results.count;
   }
 
   loom_low_allocation_fixed_value_t* fixed_values = NULL;
@@ -396,11 +481,15 @@ static iree_status_t loom_vm_function_collect_fixed_values(
                                                    (void**)&fixed_values));
   }
   iree_host_size_t fixed_value_count = 0;
+  loom_vm_call_abi_bank_counts_t argument_bank_counts = {0};
   for (uint16_t i = 0; i < argument_count; ++i) {
+    uint32_t location = 0;
+    IREE_RETURN_IF_ERROR(loom_vm_function_claim_direct_abi_location(
+        module, arguments[i], &argument_bank_counts, &location));
     fixed_values[fixed_value_count++] = (loom_low_allocation_fixed_value_t){
         .value_id = arguments[i],
         .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-        .location_base = i,
+        .location_base = location,
         .location_count = 1,
     };
   }
@@ -409,11 +498,15 @@ static iree_status_t loom_vm_function_collect_fixed_values(
     const loom_op_t* terminator = body->blocks[block_index]->last_op;
     if (terminator == NULL || !loom_low_return_isa(terminator)) continue;
     const loom_value_slice_t results = loom_low_return_values(terminator);
+    loom_vm_call_abi_bank_counts_t result_bank_counts = {0};
     for (iree_host_size_t i = 0; i < results.count; ++i) {
+      uint32_t location = 0;
+      IREE_RETURN_IF_ERROR(loom_vm_function_claim_direct_abi_location(
+          module, results.values[i], &result_bank_counts, &location));
       fixed_values[fixed_value_count++] = (loom_low_allocation_fixed_value_t){
           .value_id = results.values[i],
           .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-          .location_base = (uint32_t)i,
+          .location_base = location,
           .location_count = 1,
       };
     }

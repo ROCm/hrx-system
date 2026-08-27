@@ -15,7 +15,6 @@
 #include "loom/ops/op_defs.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/target/arch/vm/abi/layout.h"
-#include "loom/target/arch/vm/lower/types.h"
 #include "loom/target/types.h"
 #include "loom/util/walk.h"
 
@@ -29,32 +28,57 @@ const loom_pass_info_t* loom_vm_materialize_call_abi_pass_info(void) {
   return &loom_vm_materialize_call_abi_pass_info_storage;
 }
 
-static bool loom_vm_call_abi_type_is_direct_value(loom_type_t type) {
-  loom_scalar_type_t scalar_type = 0;
-  return loom_vm_value_register_scalar_type(type, &scalar_type);
+static uint16_t* loom_vm_call_abi_validation_bank_count(
+    loom_vm_call_abi_bank_counts_t* counts, loom_vm_call_abi_bank_t bank) {
+  switch (bank) {
+    case LOOM_VM_CALL_ABI_BANK_VALUE:
+      return &counts->value;
+    case LOOM_VM_CALL_ABI_BANK_REF:
+      return &counts->ref;
+    case LOOM_VM_CALL_ABI_BANK_FUNCTION:
+      return &counts->function;
+    default:
+      IREE_ASSERT_UNREACHABLE("validated VM call ABI bank");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+}
+
+static iree_status_t loom_vm_call_abi_validate_direct_counts(
+    const loom_vm_call_abi_bank_counts_t* counts, const char* boundary_name) {
+  if (counts->value > IREE_VM_CALL_DIRECT_REGISTER_COUNT) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "VM %s has %" PRIu16
+                            " value fields but overflow is not materialized",
+                            boundary_name, counts->value);
+  }
+  if (counts->ref > IREE_VM_CALL_DIRECT_REGISTER_COUNT) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "VM %s has %" PRIu16
+                            " ref fields but overflow is not materialized",
+                            boundary_name, counts->ref);
+  }
+  if (counts->function > IREE_VM_CALL_DIRECT_REGISTER_COUNT) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "VM %s has %" PRIu16
+                            " function fields but overflow is not materialized",
+                            boundary_name, counts->function);
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_vm_call_abi_validate_values(
     const loom_module_t* module, const loom_value_id_t* values,
     iree_host_size_t value_count, const char* boundary_name) {
-  if (value_count > IREE_VM_CALL_DIRECT_REGISTER_COUNT) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "VM %s has %" PRIhsz
-                            " values but the direct ABI supports %u",
-                            boundary_name, value_count,
-                            (unsigned)IREE_VM_CALL_DIRECT_REGISTER_COUNT);
-  }
+  loom_vm_call_abi_bank_counts_t counts = {0};
   for (iree_host_size_t i = 0; i < value_count; ++i) {
     const loom_type_t type = loom_module_value_type(module, values[i]);
-    if (!loom_vm_call_abi_type_is_direct_value(type)) {
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "VM %s value %" PRIhsz
-          " must be one scalar vm.value in the direct-only ABI",
-          boundary_name, i);
-    }
+    loom_vm_call_abi_bank_t bank = LOOM_VM_CALL_ABI_BANK_NONE;
+    IREE_RETURN_IF_ERROR(loom_vm_call_abi_classify_type(module, type, &bank));
+    uint16_t* bank_count =
+        loom_vm_call_abi_validation_bank_count(&counts, bank);
+    ++*bank_count;
   }
-  return iree_ok_status();
+  return loom_vm_call_abi_validate_direct_counts(&counts, boundary_name);
 }
 
 typedef struct loom_vm_call_abi_validate_walk_t {
@@ -97,8 +121,47 @@ static iree_status_t loom_vm_call_abi_validate_op(
 }
 
 static iree_status_t loom_vm_call_abi_validate_function(
-    const loom_module_t* module, loom_func_like_t function,
+    loom_module_t* module, loom_func_like_t function,
     iree_arena_allocator_t* arena) {
+  loom_type_t logical_signature = loom_type_none();
+  const loom_named_attr_slice_t abi_layout =
+      loom_low_func_def_abi_layout(function.op);
+  if (abi_layout.count != 0) {
+    IREE_RETURN_IF_ERROR(loom_vm_call_abi_layout_resolve_signature(
+        module, abi_layout, &logical_signature));
+  } else {
+    uint16_t argument_count = 0;
+    const loom_value_id_t* arguments =
+        loom_func_like_arg_ids(function, &argument_count);
+    const loom_value_slice_t results = loom_low_func_def_results(function.op);
+    const iree_host_size_t type_count =
+        (iree_host_size_t)argument_count + results.count;
+    loom_type_t* types = NULL;
+    if (type_count != 0) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          arena, type_count, sizeof(*types), (void**)&types));
+    }
+    for (uint16_t i = 0; i < argument_count; ++i) {
+      types[i] = loom_module_value_type(module, arguments[i]);
+    }
+    for (iree_host_size_t i = 0; i < results.count; ++i) {
+      types[argument_count + i] =
+          loom_module_value_type(module, results.values[i]);
+    }
+    IREE_RETURN_IF_ERROR(loom_module_intern_function_type(
+        module, types, argument_count,
+        results.count != 0 ? types + argument_count : NULL, results.count,
+        &logical_signature));
+  }
+
+  loom_vm_call_abi_layout_t logical_layout = {0};
+  IREE_RETURN_IF_ERROR(loom_vm_call_abi_layout_build(module, logical_signature,
+                                                     arena, &logical_layout));
+  IREE_RETURN_IF_ERROR(loom_vm_call_abi_validate_direct_counts(
+      &logical_layout.arguments.bank_counts, "logical argument list"));
+  IREE_RETURN_IF_ERROR(loom_vm_call_abi_validate_direct_counts(
+      &logical_layout.results.bank_counts, "logical result list"));
+
   uint16_t argument_count = 0;
   const loom_value_id_t* arguments =
       loom_func_like_arg_ids(function, &argument_count);
@@ -118,13 +181,28 @@ static iree_status_t loom_vm_call_abi_validate_function(
       &walk_result);
 }
 
-static iree_status_t loom_vm_call_abi_build_copy(loom_rewriter_t* rewriter,
-                                                 loom_value_id_t source,
-                                                 loom_location_id_t location,
-                                                 loom_op_t** out_copy_op) {
-  return loom_low_copy_build(&rewriter->builder, source, /*detached=*/false,
-                             loom_module_value_type(rewriter->module, source),
-                             location, out_copy_op);
+static iree_status_t loom_vm_call_abi_build_transfer(
+    loom_rewriter_t* rewriter, loom_value_id_t source, bool consume_ref,
+    loom_location_id_t location, loom_op_t** out_transfer_op,
+    loom_value_id_t* out_result) {
+  *out_transfer_op = NULL;
+  *out_result = LOOM_VALUE_ID_INVALID;
+  const loom_type_t type = loom_module_value_type(rewriter->module, source);
+  loom_vm_call_abi_bank_t bank = LOOM_VM_CALL_ABI_BANK_NONE;
+  IREE_RETURN_IF_ERROR(
+      loom_vm_call_abi_classify_type(rewriter->module, type, &bank));
+  if (bank == LOOM_VM_CALL_ABI_BANK_REF && consume_ref) {
+    IREE_RETURN_IF_ERROR(loom_low_move_build(&rewriter->builder, source,
+                                             /*detached=*/false, type, location,
+                                             out_transfer_op));
+    *out_result = loom_low_move_result(*out_transfer_op);
+  } else {
+    IREE_RETURN_IF_ERROR(loom_low_copy_build(&rewriter->builder, source,
+                                             /*detached=*/false, type, location,
+                                             out_transfer_op));
+    *out_result = loom_low_copy_result(*out_transfer_op);
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_vm_call_abi_materialize_entry(
@@ -138,27 +216,30 @@ static iree_status_t loom_vm_call_abi_materialize_entry(
   loom_block_t* entry_block = loom_region_entry_block(body);
   loom_builder_set_before(&rewriter->builder, entry_block->first_op);
   for (uint16_t i = 0; i < argument_count; ++i) {
-    loom_op_t* copy_op = NULL;
-    IREE_RETURN_IF_ERROR(loom_vm_call_abi_build_copy(
-        rewriter, arguments[i], function.op->location, &copy_op));
+    loom_op_t* transfer_op = NULL;
+    loom_value_id_t transferred = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_vm_call_abi_build_transfer(
+        rewriter, arguments[i], /*consume_ref=*/true, function.op->location,
+        &transfer_op, &transferred));
     IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_except(
-        rewriter, arguments[i], loom_low_copy_result(copy_op), copy_op));
+        rewriter, arguments[i], transferred, transfer_op));
   }
   return iree_ok_status();
 }
 
 static iree_status_t loom_vm_call_abi_materialize_operands(
     loom_rewriter_t* rewriter, loom_op_t* op, uint16_t operand_base,
-    loom_value_slice_t operands) {
+    loom_value_slice_t operands, bool consume_refs) {
   if (operands.count == 0) return iree_ok_status();
   loom_builder_set_before(&rewriter->builder, op);
   for (uint16_t i = 0; i < operands.count; ++i) {
-    loom_op_t* copy_op = NULL;
-    IREE_RETURN_IF_ERROR(loom_vm_call_abi_build_copy(
-        rewriter, operands.values[i], op->location, &copy_op));
-    IREE_RETURN_IF_ERROR(
-        loom_rewriter_set_operand(rewriter, op, (uint16_t)(operand_base + i),
-                                  loom_low_copy_result(copy_op)));
+    loom_op_t* transfer_op = NULL;
+    loom_value_id_t transferred = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_vm_call_abi_build_transfer(
+        rewriter, operands.values[i], consume_refs, op->location, &transfer_op,
+        &transferred));
+    IREE_RETURN_IF_ERROR(loom_rewriter_set_operand(
+        rewriter, op, (uint16_t)(operand_base + i), transferred));
   }
   return iree_ok_status();
 }
@@ -168,11 +249,13 @@ static iree_status_t loom_vm_call_abi_materialize_results(
   if (results.count == 0) return iree_ok_status();
   loom_builder_set_after(&rewriter->builder, op);
   for (uint16_t i = 0; i < results.count; ++i) {
-    loom_op_t* copy_op = NULL;
-    IREE_RETURN_IF_ERROR(loom_vm_call_abi_build_copy(
-        rewriter, results.values[i], op->location, &copy_op));
+    loom_op_t* transfer_op = NULL;
+    loom_value_id_t transferred = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_vm_call_abi_build_transfer(
+        rewriter, results.values[i], /*consume_ref=*/true, op->location,
+        &transfer_op, &transferred));
     IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_except(
-        rewriter, results.values[i], loom_low_copy_result(copy_op), copy_op));
+        rewriter, results.values[i], transferred, transfer_op));
   }
   return iree_ok_status();
 }
@@ -191,21 +274,22 @@ static iree_status_t loom_vm_call_abi_materialize_op(
       (loom_vm_call_abi_materialize_walk_t*)user_data;
   if (loom_low_func_call_isa(op)) {
     IREE_RETURN_IF_ERROR(loom_vm_call_abi_materialize_operands(
-        walk->rewriter, op, /*operand_base=*/0,
-        loom_low_func_call_operands(op)));
+        walk->rewriter, op, /*operand_base=*/0, loom_low_func_call_operands(op),
+        /*consume_refs=*/false));
     return loom_vm_call_abi_materialize_results(walk->rewriter, op,
                                                 loom_low_func_call_results(op));
   }
   if (loom_low_func_call_indirect_isa(op)) {
     IREE_RETURN_IF_ERROR(loom_vm_call_abi_materialize_operands(
         walk->rewriter, op, /*operand_base=*/1,
-        loom_low_func_call_indirect_operands(op)));
+        loom_low_func_call_indirect_operands(op), /*consume_refs=*/false));
     return loom_vm_call_abi_materialize_results(
         walk->rewriter, op, loom_low_func_call_indirect_results(op));
   }
   if (loom_low_return_isa(op)) {
     return loom_vm_call_abi_materialize_operands(
-        walk->rewriter, op, /*operand_base=*/0, loom_low_return_values(op));
+        walk->rewriter, op, /*operand_base=*/0, loom_low_return_values(op),
+        /*consume_refs=*/true);
   }
   return iree_ok_status();
 }

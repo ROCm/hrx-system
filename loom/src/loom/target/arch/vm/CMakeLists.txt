@@ -110,8 +110,13 @@ loom_cc_library(
   SRCS
     "abi/layout.c"
   DEPS
+    ::descriptors
     iree::base
+    iree::base::internal::arena
     loom::ir
+    loom::ops::func
+    loom::ops::type_registry
+    loom::target::registers
   PUBLIC
 )
 endif()

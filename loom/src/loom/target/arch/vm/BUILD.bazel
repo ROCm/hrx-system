@@ -117,8 +117,13 @@ loom_cc_library(
     hdrs = ["abi/layout.h"],
     visibility = ["//loom/src/loom/target/emit/vm:__pkg__"],
     deps = [
+        ":descriptors",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/target:registers",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 
