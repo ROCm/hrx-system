@@ -567,7 +567,7 @@ static iree_status_t iree_vm_bytecode_execute(
     }
     status = iree_vm_bytecode_make_program_status(
         IREE_STATUS_FAILED_PRECONDITION, module->buffer_type,
-        refs[record->message_r8_nullable]);
+        iree_vm_ref_null());
     IREE_VM_BYTECODE_DISPATCH_TERMINATE();
   }
   IREE_VM_BYTECODE_DISPATCH_CASE(CONTROL_FAIL, control_fail) {

@@ -359,8 +359,7 @@ def _validate_verification_form(
         if instruction.byte_length != 4:
             raise ValueError(f"{instruction.mnemonic}: assertion record is not 4 bytes")
         require_value(1)
-        require_ref(2)
-        require_zero(3, 1)
+        require_zero(2, 1, array_length=2)
     elif verification_form == "CONTROL_FAIL":
         if instruction.byte_length != 4:
             raise ValueError(f"{instruction.mnemonic}: failure record is not 4 bytes")

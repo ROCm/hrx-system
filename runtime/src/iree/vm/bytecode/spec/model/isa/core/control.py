@@ -784,20 +784,18 @@ CONTROL_ASSERT = core_instruction(
             InstructionFieldRole.OPERAND,
             "Complete 64-bit assertion condition.",
         ),
-        _diagnostic_message(),
-        zero_padding("zero_padding_u8", 3, 1),
+        zero_padding("zero_padding_u8", 2, 2),
     ),
-    state_effects=(state_read(StateResource.BUFFER, "message_r8_nullable"),),
+    state_effects=(),
     semantics=InstructionSemantics(
         description=(
             "Continues when the complete condition cell is nonzero and otherwise "
-            "terminates the invocation with failed_precondition and optional "
-            "best-effort diagnostic bytes."
+            "terminates the invocation with failed_precondition."
         ),
         verification=(
-            "condition_v8 and message_r8_nullable must be valid register ordinals.",
-            "zero_padding_u8 must equal zero and a decoded sequential successor "
-            "must follow this record.",
+            "condition_v8 must be a valid value-register ordinal.",
+            "Both zero_padding_u8 bytes must equal zero and a decoded "
+            "sequential successor must follow this record.",
         ),
         preconditions=(),
         success=(
@@ -808,21 +806,16 @@ CONTROL_ASSERT = core_instruction(
             FailureCase(
                 "failed_precondition",
                 "condition_v8 contains the complete 64-bit zero value.",
-                "Optional diagnostics are captured before ordinary unwind; "
-                "public result storage remains untouched.",
+                "Public result storage remains untouched.",
             ),
         ),
-        ownership=(
-            "The message is borrowed only while copying optional diagnostic "
-            "bytes. Wrong-type, unreadable, uncopyable, or allocation-failed "
-            "diagnostics are omitted without changing the status.",
-        ),
-        assembly=("control.assert %v4, %r2",),
+        ownership=(),
+        assembly=("control.assert %v4",),
         pseudocode=(
             "if (values[condition_v8] != 0) {\n"
             "  pc = record_pc + 4;\n"
             "} else {\n"
-            "  fail(failed_precondition, optional_message(message_r8_nullable));\n"
+            "  fail(failed_precondition);\n"
             "}"
         ),
     ),

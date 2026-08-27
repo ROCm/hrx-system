@@ -770,14 +770,13 @@ static iree_status_t iree_vm_bytecode_function_verify(
               IREE_STATUS_INVALID_ARGUMENT,
               "control.assert requires a sequential record");
         }
-        if (record->zero_padding_u8 != 0) {
+        if (record->zero_padding_u8[0] != 0 ||
+            record->zero_padding_u8[1] != 0) {
           return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                   "control.assert padding is nonzero");
         }
         IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_value_register(
             record->condition_v8, function->value_register_count_u16));
-        IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
-            record->message_r8_nullable, function->ref_register_count_u16));
         break;
       }
       case IREE_VM_BYTECODE_VERIFICATION_FORM_CONTROL_FAIL: {

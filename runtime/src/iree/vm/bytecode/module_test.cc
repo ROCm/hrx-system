@@ -583,9 +583,8 @@ TEST(VMBytecodeModuleTest, RejectsMalformedProgramFailure) {
   const auto build_assert_image = [&]() {
     std::vector<uint8_t> image = BuildSwitchInspectionModuleImage();
     MutableFunctionImage function = FindFunctionImage(&image, 0);
-    function.row->ref_register_count_u16 = 1;
     const iree_vm_isa_control_assert_record_t assert_record = {
-        IREE_VM_ISA_CORE_OPCODE_CONTROL_ASSERT, 0, 0, 0};
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_ASSERT, 0, {0, 0}};
     std::memcpy(function.bytecode + kAssertOffset, &assert_record,
                 sizeof(assert_record));
     const iree_vm_isa_control_branch_s16_record_t branch_record = {
@@ -645,16 +644,16 @@ TEST(VMBytecodeModuleTest, RejectsMalformedProgramFailure) {
   expect_rejected(build_assert_image(), [&](MutableFunctionImage function) {
     auto* record = reinterpret_cast<iree_vm_isa_control_assert_record_t*>(
         function.bytecode + kAssertOffset);
-    record->message_r8_nullable = 1;
+    record->zero_padding_u8[0] = 1;
   });
   expect_rejected(build_assert_image(), [&](MutableFunctionImage function) {
     auto* record = reinterpret_cast<iree_vm_isa_control_assert_record_t*>(
         function.bytecode + kAssertOffset);
-    record->zero_padding_u8 = 1;
+    record->zero_padding_u8[1] = 1;
   });
   expect_rejected(build_assert_image(), [&](MutableFunctionImage function) {
     const iree_vm_isa_control_assert_record_t record = {
-        IREE_VM_ISA_CORE_OPCODE_CONTROL_ASSERT, 0, 0, 0};
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_ASSERT, 0, {0, 0}};
     std::memcpy(function.bytecode + kFinalOffset, &record, sizeof(record));
   });
 
