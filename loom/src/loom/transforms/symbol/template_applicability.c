@@ -78,49 +78,6 @@ loom_template_applicability_target_feasibility(
              : LOOM_TEMPLATE_PROVIDER_REJECT;
 }
 
-static bool loom_template_applicability_types_match(
-    const loom_module_t* application_module, const loom_op_t* application_op,
-    const loom_template_provider_summary_t* provider) {
-  IREE_ASSERT(provider->module == application_module);
-  const loom_value_slice_t operands =
-      loom_template_applicability_application_operands(application_op);
-  const loom_value_slice_t results =
-      loom_template_applicability_application_results(application_op);
-  if (operands.count != provider->argument_count ||
-      results.count != provider->result_count) {
-    return false;
-  }
-  loom_type_value_remap_t signature_remap = {
-      .source_values = provider->argument_ids,
-      .target_values = operands.values,
-      .count = operands.count,
-  };
-
-  for (uint16_t i = 0; i < operands.count; ++i) {
-    const loom_type_t operand_type =
-        loom_module_value_type(application_module, operands.values[i]);
-    const loom_type_t provider_type =
-        loom_module_value_type(application_module, provider->argument_ids[i]);
-    if (!loom_type_equal_after_value_remap(application_module, provider_type,
-                                           operand_type, &signature_remap)) {
-      return false;
-    }
-  }
-
-  for (uint16_t i = 0; i < results.count; ++i) {
-    const loom_type_t result_type =
-        loom_module_value_type(application_module, results.values[i]);
-    const loom_type_t provider_type =
-        loom_module_value_type(application_module, provider->result_ids[i]);
-    if (!loom_type_equal_after_value_remap(application_module, provider_type,
-                                           result_type, &signature_remap)) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
 static bool loom_template_applicability_remap_contract_value(
     const loom_op_t* application_op,
     const loom_template_applicability_contract_t* contract,
@@ -613,11 +570,6 @@ void loom_template_applicability_classify_provider(
       loom_template_applicability_target_feasibility(
           application_module, application_target, &contract);
   if (out_classification->target_feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) {
-    return;
-  }
-
-  if (!loom_template_applicability_types_match(application_module,
-                                               application_op, provider)) {
     return;
   }
 

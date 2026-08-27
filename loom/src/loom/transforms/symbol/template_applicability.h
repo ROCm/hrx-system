@@ -118,7 +118,12 @@ void loom_template_applicability_classify_contract(
     const loom_template_applicability_facts_t* application_facts,
     loom_template_provider_classification_t* out_classification);
 
-// Classifies one provider, including its signature, at |application_op|.
+// Classifies one provider at |application_op|.
+//
+// Function-contract verification must have established that the provider and
+// application signatures both match the provider's template family. Selection
+// consumes that trusted contract and does not repeat type comparison at every
+// application site.
 void loom_template_applicability_classify_provider(
     const loom_module_t* application_module, const loom_op_t* application_op,
     const loom_template_provider_summary_t* provider,
